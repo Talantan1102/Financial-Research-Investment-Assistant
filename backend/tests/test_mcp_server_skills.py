@@ -79,11 +79,11 @@ def test_skill_registration():
     print(f"   ✅ 注册成功的 Skill 数量: {len(skills)}")
     print(f"   ✅ 总工具数量: {total_tools}")
     
-    # 验证工具总数是否为 9
-    if total_tools == 9:
-        print(f"   ✅ 工具总数验证通过 (期望: 9, 实际: {total_tools})")
+    # 验证工具总数是否为 10
+    if total_tools == 10:
+        print(f"   ✅ 工具总数验证通过 (期望: 10, 实际: {total_tools})")
     else:
-        print(f"   ⚠️  工具总数不匹配 (期望: 9, 实际: {total_tools})")
+        print(f"   ⚠️  工具总数不匹配 (期望: 10, 实际: {total_tools})")
     
     # 列出所有工具
     print("\n📜 完整工具列表:")
