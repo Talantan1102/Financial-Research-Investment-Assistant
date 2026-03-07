@@ -171,7 +171,8 @@ URL: {url}
         llm_api_key: str,
         llm_base_url: str,
         search_api_key: str,
-        model: str = "qwen-plus"
+        model: str = "qwen-plus",
+        tool_adapter=None  # 新增：可选的 ToolAdapter（用于 MCP 集成）
     ):
         super().__init__(
             name="DeepScout",
@@ -183,6 +184,7 @@ URL: {url}
         self.search_api_key = search_api_key
         self.search_cache: Dict[str, List] = {}
         self.fact_fingerprints: Dict[str, str] = {}  # 事实指纹用于去重
+        self.tool_adapter = tool_adapter  # MCP ToolAdapter（可选）
 
         # 初始化本地知识库搜索服务
         self.milvus_service = None
@@ -377,15 +379,15 @@ URL: {url}
         """
         自动识别查询中的上市公司，获取实时股票数据
 
-        当用户查询涉及上市公司时（如"茅台怎么样"），自动获取股票行情并添加到数据点
+        当用户查询涉及上市公司时（如"茅台怎么样"），自动获取股票行情并添加到数据点。
+        优先使用 ToolAdapter（MCP），失败时降级到原有 StockService。
         """
         try:
+            # 导入 find_company_in_query
             try:
                 from config.stock_mapping import find_company_in_query
-                from service.stock_service import get_stock_service
             except ImportError:
                 from app.config.stock_mapping import find_company_in_query
-                from app.service.stock_service import get_stock_service
 
             query = state.get("query", "")
             found_companies = find_company_in_query(query)
@@ -393,7 +395,18 @@ URL: {url}
             if not found_companies:
                 return
 
-            stock_service = get_stock_service()
+            # 优先使用 ToolAdapter，否则使用原有 StockService
+            if self.tool_adapter:
+                stock_service = self.tool_adapter
+                self.logger.info("使用 ToolAdapter (MCP) 获取股票数据")
+            else:
+                # 降级到原有实现
+                try:
+                    from service.stock_service import get_stock_service
+                except ImportError:
+                    from app.service.stock_service import get_stock_service
+                stock_service = get_stock_service()
+                self.logger.info("使用 StockService 获取股票数据")
 
             for company_name, stock_code in found_companies[:2]:  # 最多查询2只股票
                 self.logger.info(f"检测到上市公司: {company_name} ({stock_code})")

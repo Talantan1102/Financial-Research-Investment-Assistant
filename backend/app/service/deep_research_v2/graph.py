@@ -39,6 +39,20 @@ except ImportError:
 from .state import ResearchState, ResearchPhase, create_initial_state
 from .agents import ChiefArchitect, DeepScout, CodeWizard, CriticMaster, LeadWriter, DataAnalyst
 
+# 导入 MCP Client 相关组件（可选）
+try:
+    from mcp_client import MCPClient, ToolAdapter
+    MCP_AVAILABLE = True
+except ImportError:
+    try:
+        from app.mcp_client import MCPClient, ToolAdapter
+        MCP_AVAILABLE = True
+    except ImportError:
+        MCP_AVAILABLE = False
+        MCPClient = None
+        ToolAdapter = None
+        logging.warning("MCP Client not available. MCP integration will be disabled.")
+
 # 导入检查点服务
 try:
     from service.checkpoint_service import get_checkpoint_service
@@ -86,12 +100,23 @@ class DeepResearchGraph:
         llm_base_url: str = None,
         search_api_key: str = None,
         model: str = None,
-        max_iterations: int = None
+        max_iterations: int = None,
+        mcp_client_path: str = "backend/app/mcp_server/server.py",
+        enable_mcp: bool = True
     ):
         """
         初始化工作流
 
         所有参数都可从配置文件读取，传入的参数会覆盖配置
+
+        Args:
+            llm_api_key: LLM API 密钥
+            llm_base_url: LLM API 基础 URL
+            search_api_key: 搜索 API 密钥
+            model: 默认模型名称
+            max_iterations: 最大迭代次数
+            mcp_client_path: MCP Server 脚本路径（默认 "backend/app/mcp_server/server.py"）
+            enable_mcp: 是否启用 MCP（默认 True，向后兼容）
         """
         # 获取配置
         config = get_config()
@@ -103,14 +128,47 @@ class DeepResearchGraph:
         self.model = model or config.default_model
         self.max_iterations = max_iterations or config.research.max_iterations
 
+        # MCP 相关配置
+        self.mcp_client_path = mcp_client_path
+        self.enable_mcp = enable_mcp and MCP_AVAILABLE
+        self.mcp_client = None
+        self.tool_adapter = None
+
+        # 如果启用 MCP，初始化客户端（延迟连接）
+        if self.enable_mcp:
+            try:
+                self.mcp_client = MCPClient(
+                    server_script_path=mcp_client_path,
+                    connect_timeout=30.0,
+                    call_timeout=30.0
+                )
+                # 创建 ToolAdapter（支持自动降级）
+                self.tool_adapter = ToolAdapter(
+                    mcp_client=self.mcp_client,
+                    fallback_enabled=True
+                )
+                logger.info(f"MCP Client 已初始化: {mcp_client_path}")
+            except Exception as e:
+                logger.warning(f"MCP Client 初始化失败: {e}，将使用原有功能")
+                self.enable_mcp = False
+                self.mcp_client = None
+                self.tool_adapter = None
+        else:
+            if not MCP_AVAILABLE:
+                logger.info("MCP Client 不可用（未安装或导入失败）")
+            else:
+                logger.info("MCP Client 已禁用（enable_mcp=False）")
+
         # 初始化各个 Agent（使用各自配置的模型）
         self.architect = ChiefArchitect(
             self.llm_api_key, self.llm_base_url,
             config.agents.architect.model
         )
+        # 如果启用 MCP，将 ToolAdapter 传递给 DeepScout
         self.scout = DeepScout(
             self.llm_api_key, self.llm_base_url, self.search_api_key,
-            config.agents.scout.model
+            config.agents.scout.model,
+            tool_adapter=self.tool_adapter  # 传递 ToolAdapter
         )
         self.data_analyst = DataAnalyst(
             self.llm_api_key, self.llm_base_url,
@@ -136,6 +194,7 @@ class DeepResearchGraph:
         logger.info(f"  - Wizard: {config.agents.wizard.model}")
         logger.info(f"  - Critic: {config.agents.critic.model}")
         logger.info(f"  - Writer: {config.agents.writer.model}")
+        logger.info(f"  - MCP Enabled: {self.enable_mcp}")
 
         # 检查点服务
         self.checkpoint_service = get_checkpoint_service()
@@ -393,6 +452,20 @@ class DeepResearchGraph:
         # 清除之前的取消标志
         if session_id:
             clear_cancel_flag(session_id)
+
+        # 连接 MCP Client（如果启用）
+        mcp_connected = False
+        if self.enable_mcp and self.mcp_client:
+            try:
+                logger.info("正在连接 MCP Server...")
+                mcp_connected = await self.mcp_client.connect()
+                if mcp_connected:
+                    logger.info("MCP Server 连接成功")
+                else:
+                    logger.warning("MCP Server 连接失败，将使用原有功能")
+            except Exception as e:
+                logger.error(f"MCP Server 连接异常: {e}，将使用原有功能")
+                mcp_connected = False
 
         async def check_cancelled():
             """检查是否已取消"""
@@ -739,6 +812,15 @@ class DeepResearchGraph:
         finally:
             # 清理队列
             state["_message_queue"] = None
+
+            # 断开 MCP Client（如果已连接）
+            if self.enable_mcp and self.mcp_client and mcp_connected:
+                try:
+                    logger.info("正在断开 MCP Server 连接...")
+                    await self.mcp_client.disconnect()
+                    logger.info("MCP Server 已断开连接")
+                except Exception as e:
+                    logger.error(f"断开 MCP Server 连接时出错: {e}")
 
     async def run_sync(self, query: str, session_id: str) -> ResearchState:
         """
