@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from threading import Lock
 import tushare as ts
+import pandas as pd
 
 
 class TushareRateLimitError(Exception):
@@ -505,6 +506,633 @@ class TushareClient:
                 "total_cached": len(self._cache),
                 "valid_cached": valid_count,
                 "cache_ttl": self.CACHE_TTL
+            }
+
+    def get_history(self, symbol: str, period: str = "daily", 
+                    start_date: str = None, end_date: str = None, 
+                    limit: int = 100) -> Dict[str, Any]:
+        """
+        获取股票历史K线数据
+
+        Args:
+            symbol: 股票代码，如 "600519" 或 "600519.SH"
+            period: 周期类型，可选 daily(日线)、weekly(周线)、monthly(月线)
+            start_date: 开始日期，格式 "YYYYMMDD"
+            end_date: 结束日期，格式 "YYYYMMDD"
+            limit: 返回数据条数限制（默认100条）
+
+        Returns:
+            格式化的K线数据字典：
+            {
+                "success": True/False,
+                "data": [
+                    {
+                        "trade_date": "20260307",
+                        "open": 1800.00,
+                        "high": 1850.00,
+                        "low": 1790.00,
+                        "close": 1825.00,
+                        "pre_close": 1800.00,
+                        "change": 25.00,
+                        "pct_chg": 1.39,
+                        "vol": 125000,
+                        "amount": 231250.00
+                    },
+                    ...
+                ],
+                "error": None
+            }
+        """
+        if not self.api:
+            return {
+                "success": False,
+                "data": None,
+                "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+            }
+
+        try:
+            # 标准化股票代码
+            ts_code = self._normalize_stock_code(symbol)
+
+            # 构建缓存键
+            cache_key = f"history_{ts_code}_{period}_{start_date}_{end_date}"
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data:
+                return {
+                    "success": True,
+                    "data": cached_data,
+                    "error": None
+                }
+
+            # 设置默认日期范围
+            if not end_date:
+                end_date = datetime.now().strftime('%Y%m%d')
+            if not start_date:
+                start_dt = datetime.strptime(end_date, '%Y%m%d') - timedelta(days=limit)
+                start_date = start_dt.strftime('%Y%m%d')
+
+            # 根据周期选择API
+            api_func_map = {
+                "daily": self.api.daily,
+                "weekly": self.api.weekly,
+                "monthly": self.api.monthly
+            }
+
+            if period not in api_func_map:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": f"不支持的周期类型: {period}，可选: daily, weekly, monthly"
+                }
+
+            api_func = api_func_map[period]
+
+            # 调用API
+            df = api_func(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            if df is None or df.empty:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": f"未找到历史数据: {symbol}"
+                }
+
+            # 转换为列表格式
+            records = []
+            for _, row in df.iterrows():
+                records.append({
+                    "trade_date": row['trade_date'],
+                    "open": float(row['open']),
+                    "high": float(row['high']),
+                    "low": float(row['low']),
+                    "close": float(row['close']),
+                    "pre_close": float(row['pre_close']),
+                    "change": float(row['change']),
+                    "pct_chg": float(row['pct_chg']),
+                    "vol": float(row['vol']),
+                    "amount": float(row['amount'])
+                })
+
+            # 限制返回数量
+            records = records[:limit]
+
+            # 缓存数据
+            self._set_cache(cache_key, records)
+
+            return {
+                "success": True,
+                "data": records,
+                "meta": {
+                    "symbol": ts_code,
+                    "period": period,
+                    "count": len(records),
+                    "start_date": records[-1]['trade_date'] if records else None,
+                    "end_date": records[0]['trade_date'] if records else None
+                },
+                "error": None
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"获取历史数据失败: {str(e)}"
+            }
+
+    def get_top_list(self, trade_date: str = None, limit: int = 50) -> Dict[str, Any]:
+        """
+        获取龙虎榜每日明细
+
+        Args:
+            trade_date: 交易日期，格式 "YYYYMMDD"，默认最近交易日
+            limit: 返回条数限制
+
+        Returns:
+            龙虎榜数据字典：
+            {
+                "success": True/False,
+                "data": [
+                    {
+                        "trade_date": "20260307",
+                        "ts_code": "000001.SZ",
+                        "name": "平安银行",
+                        "close": 10.50,
+                        "pct_chg": 10.02,
+                        "turnover_rate": 5.23,
+                        "amount": 1250000000.00,
+                        "l_buy": 85000000.00,
+                        "l_sell": 32000000.00,
+                        "net_amount": 53000000.00,
+                        "reason": "日涨幅偏离值达到7%的前5只证券"
+                    },
+                    ...
+                ],
+                "error": None
+            }
+        """
+        if not self.api:
+            return {
+                "success": False,
+                "data": None,
+                "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+            }
+
+        try:
+            # 设置默认日期为最近交易日
+            if not trade_date:
+                trade_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+
+            # 构建缓存键
+            cache_key = f"top_list_{trade_date}"
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data:
+                return {
+                    "success": True,
+                    "data": cached_data,
+                    "error": None
+                }
+
+            # 调用top_list接口
+            df = self.api.top_list(trade_date=trade_date)
+
+            if df is None or df.empty:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": f"未找到龙虎榜数据: {trade_date}"
+                }
+
+            # 获取股票名称映射
+            stock_names = {}
+            try:
+                basic_df = self.api.stock_basic(fields='ts_code,name')
+                if basic_df is not None and not basic_df.empty:
+                    stock_names = dict(zip(basic_df['ts_code'], basic_df['name']))
+            except:
+                pass
+
+            # 转换为列表格式
+            records = []
+            for _, row in df.head(limit).iterrows():
+                ts_code = row['ts_code']
+                records.append({
+                    "trade_date": row['trade_date'],
+                    "ts_code": ts_code,
+                    "name": stock_names.get(ts_code, ""),
+                    "close": float(row.get('close', 0)),
+                    "pct_chg": float(row.get('pct_chg', 0)),
+                    "turnover_rate": float(row.get('turnover_rate', 0)),
+                    "amount": float(row.get('amount', 0)),
+                    "l_buy": float(row.get('l_buy', 0)),
+                    "l_sell": float(row.get('l_sell', 0)),
+                    "net_amount": float(row.get('l_buy', 0)) - float(row.get('l_sell', 0)),
+                    "reason": row.get('reason', '')
+                })
+
+            # 缓存数据
+            self._set_cache(cache_key, records)
+
+            return {
+                "success": True,
+                "data": records,
+                "meta": {
+                    "trade_date": trade_date,
+                    "count": len(records)
+                },
+                "error": None
+            }
+
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "points" in error_msg or "积分" in error_msg:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "积分不足，龙虎榜数据需要至少5000积分"
+                }
+            return {
+                "success": False,
+                "data": None,
+                "error": f"获取龙虎榜数据失败: {str(e)}"
+            }
+
+    def get_money_flow(self, symbol: str, trade_date: str = None, 
+                       start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """
+        获取个股资金流向数据
+
+        Args:
+            symbol: 股票代码
+            trade_date: 交易日期，格式 "YYYYMMDD"
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            资金流向数据字典：
+            {
+                "success": True/False,
+                "data": [
+                    {
+                        "trade_date": "20260307",
+                        "ts_code": "600519.SH",
+                        "name": "贵州茅台",
+                        "buy_sm_amount": 1000000.00,    # 小单买入金额
+                        "sell_sm_amount": 800000.00,    # 小单卖出金额
+                        "buy_md_amount": 2000000.00,    # 中单买入金额
+                        "sell_md_amount": 1500000.00,   # 中单卖出金额
+                        "buy_lg_amount": 3000000.00,    # 大单买入金额
+                        "sell_lg_amount": 2000000.00,   # 大单卖出金额
+                        "buy_elg_amount": 5000000.00,   # 特大单买入金额
+                        "sell_elg_amount": 3000000.00,  # 特大单卖出金额
+                        "net_mf_amount": 3700000.00,    # 净流入金额
+                        "trade_count": 12500            # 交易笔数
+                    },
+                    ...
+                ],
+                "error": None
+            }
+        """
+        if not self.api:
+            return {
+                "success": False,
+                "data": None,
+                "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+            }
+
+        try:
+            # 标准化股票代码
+            ts_code = self._normalize_stock_code(symbol)
+
+            # 构建缓存键
+            date_key = trade_date or f"{start_date}_{end_date}"
+            cache_key = f"money_flow_{ts_code}_{date_key}"
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data:
+                return {
+                    "success": True,
+                    "data": cached_data,
+                    "error": None
+                }
+
+            # 构建参数
+            params = {"ts_code": ts_code}
+            if trade_date:
+                params["trade_date"] = trade_date
+            if start_date:
+                params["start_date"] = start_date
+            if end_date:
+                params["end_date"] = end_date
+
+            # 调用moneyflow接口
+            df = self.api.moneyflow(**params)
+
+            if df is None or df.empty:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": f"未找到资金流向数据: {symbol}"
+                }
+
+            # 获取股票名称
+            stock_name = ""
+            try:
+                basic_df = self.api.stock_basic(ts_code=ts_code, fields='name')
+                if basic_df is not None and not basic_df.empty:
+                    stock_name = basic_df.iloc[0]['name']
+            except:
+                pass
+
+            # 转换为列表格式
+            records = []
+            for _, row in df.iterrows():
+                records.append({
+                    "trade_date": row['trade_date'],
+                    "ts_code": ts_code,
+                    "name": stock_name,
+                    "buy_sm_amount": float(row.get('buy_sm_amount', 0)),
+                    "sell_sm_amount": float(row.get('sell_sm_amount', 0)),
+                    "buy_md_amount": float(row.get('buy_md_amount', 0)),
+                    "sell_md_amount": float(row.get('sell_md_amount', 0)),
+                    "buy_lg_amount": float(row.get('buy_lg_amount', 0)),
+                    "sell_lg_amount": float(row.get('sell_lg_amount', 0)),
+                    "buy_elg_amount": float(row.get('buy_elg_amount', 0)),
+                    "sell_elg_amount": float(row.get('sell_elg_amount', 0)),
+                    "net_mf_amount": float(row.get('net_mf_amount', 0)),
+                    "trade_count": int(row.get('trade_count', 0))
+                })
+
+            # 缓存数据
+            self._set_cache(cache_key, records)
+
+            return {
+                "success": True,
+                "data": records,
+                "meta": {
+                    "symbol": ts_code,
+                    "count": len(records)
+                },
+                "error": None
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"获取资金流向数据失败: {str(e)}"
+            }
+
+    def get_limit_list(self, trade_date: str = None, limit_type: str = None) -> Dict[str, Any]:
+        """
+        获取每日涨跌停统计
+
+        Args:
+            trade_date: 交易日期，格式 "YYYYMMDD"
+            limit_type: 涨跌停类型，可选 "U"(涨停)、"D"(跌停)，默认全部
+
+        Returns:
+            涨跌停统计字典：
+            {
+                "success": True/False,
+                "data": [
+                    {
+                        "trade_date": "20260307",
+                        "ts_code": "600519.SH",
+                        "name": "贵州茅台",
+                        "name": "贵州茅台",
+                        "close": 1850.50,
+                        "pre_close": 1682.27,
+                        "pct_chg": 10.00,
+                        "amount": 1250000000.00,
+                        "limit_amount": 85000000.00,
+                        "float_mv": 2325000000000.00,
+                        "total_mv": 2325000000000.00,
+                        "turnover_ratio": 0.53,
+                        "fd_amount": 32000000.00,       # 封单金额
+                        "first_time": "09:30:00",       # 首次涨停时间
+                        "last_time": "15:00:00",        # 最后涨停时间
+                        "open_times": 0,                # 打开次数
+                        "up_stat": "U",                 # 涨跌停状态
+                        "limit_type": "T"               # 涨停类型
+                    },
+                    ...
+                ],
+                "error": None
+            }
+        """
+        if not self.api:
+            return {
+                "success": False,
+                "data": None,
+                "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+            }
+
+        try:
+            # 设置默认日期
+            if not trade_date:
+                trade_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+
+            # 构建缓存键
+            cache_key = f"limit_list_{trade_date}_{limit_type or 'all'}"
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data:
+                return {
+                    "success": True,
+                    "data": cached_data,
+                    "error": None
+                }
+
+            # 构建参数
+            params = {"trade_date": trade_date}
+            if limit_type:
+                params["limit_type"] = limit_type
+
+            # 调用limit_list接口
+            df = self.api.limit_list(**params)
+
+            if df is None or df.empty:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": f"未找到涨跌停数据: {trade_date}"
+                }
+
+            # 获取股票名称映射
+            stock_names = {}
+            try:
+                ts_codes = df['ts_code'].tolist()
+                basic_df = self.api.stock_basic(fields='ts_code,name')
+                if basic_df is not None and not basic_df.empty:
+                    stock_names = dict(zip(basic_df['ts_code'], basic_df['name']))
+            except:
+                pass
+
+            # 转换为列表格式
+            records = []
+            for _, row in df.iterrows():
+                ts_code = row['ts_code']
+                record = {
+                    "trade_date": row['trade_date'],
+                    "ts_code": ts_code,
+                    "name": stock_names.get(ts_code, ""),
+                    "close": float(row.get('close', 0)),
+                    "pre_close": float(row.get('pre_close', 0)),
+                    "pct_chg": float(row.get('pct_chg', 0)),
+                    "amount": float(row.get('amount', 0)),
+                    "limit_amount": float(row.get('limit_amount', 0)),
+                    "float_mv": float(row.get('float_mv', 0)),
+                    "total_mv": float(row.get('total_mv', 0)),
+                    "turnover_ratio": float(row.get('turnover_ratio', 0)),
+                    "fd_amount": float(row.get('fd_amount', 0)),
+                    "first_time": row.get('first_time', ''),
+                    "last_time": row.get('last_time', ''),
+                    "open_times": int(row.get('open_times', 0)),
+                    "up_stat": row.get('up_stat', ''),
+                    "limit_type": row.get('limit_type', '')
+                }
+                records.append(record)
+
+            # 缓存数据
+            self._set_cache(cache_key, records)
+
+            return {
+                "success": True,
+                "data": records,
+                "meta": {
+                    "trade_date": trade_date,
+                    "limit_type": limit_type or "all",
+                    "count": len(records),
+                    "limit_up_count": sum(1 for r in records if r['up_stat'] == 'U'),
+                    "limit_down_count": sum(1 for r in records if r['up_stat'] == 'D')
+                },
+                "error": None
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"获取涨跌停数据失败: {str(e)}"
+            }
+
+    def get_stock_company_info(self, symbol: str) -> Dict[str, Any]:
+        """
+        获取上市公司详细信息
+
+        Args:
+            symbol: 股票代码
+
+        Returns:
+            公司详细信息字典：
+            {
+                "success": True/False,
+                "data": {
+                    "ts_code": "600519.SH",
+                    "symbol": "600519",
+                    "name": "贵州茅台",
+                    "fullname": "贵州茅台酒股份有限公司",
+                    "enname": "Kweichow Moutai Co., Ltd.",
+                    "exchange": "SSE",
+                    "curr_type": "CNY",
+                    "list_status": "L",
+                    "list_date": "20010827",
+                    "delist_date": null,
+                    "is_hs": "N",
+                    "area": "贵州",
+                    "industry": "白酒",
+                    "province": "贵州",
+                    "city": "遵义",
+                    "introduction": "公司是国内白酒行业的标志性企业...",
+                    "website": "www.moutaichina.com",
+                    "email": "moutai@moutaichina.com",
+                    "office": "贵州省仁怀市茅台镇"
+                },
+                "error": None
+            }
+        """
+        if not self.api:
+            return {
+                "success": False,
+                "data": None,
+                "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+            }
+
+        try:
+            # 标准化股票代码
+            ts_code = self._normalize_stock_code(symbol)
+
+            # 构建缓存键
+            cache_key = f"company_info_{ts_code}"
+            cached_data = self._get_from_cache(cache_key)
+            if cached_data:
+                return {
+                    "success": True,
+                    "data": cached_data,
+                    "error": None
+                }
+
+            # 调用stock_company接口获取详细信息
+            df = self.api.stock_company(ts_code=ts_code)
+
+            if df is None or df.empty:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": f"未找到公司信息: {symbol}"
+                }
+
+            # 获取基础信息补充
+            basic_df = self.api.stock_basic(ts_code=ts_code)
+            basic_info = {}
+            if basic_df is not None and not basic_df.empty:
+                basic_row = basic_df.iloc[0]
+                basic_info = {
+                    "area": basic_row.get('area', ''),
+                    "industry": basic_row.get('industry', ''),
+                    "list_date": basic_row.get('list_date', '')
+                }
+
+            # 构造返回数据
+            row = df.iloc[0]
+            company_data = {
+                "ts_code": ts_code,
+                "symbol": row.get('symbol', ''),
+                "name": row.get('name', ''),
+                "fullname": row.get('fullname', ''),
+                "enname": row.get('enname', ''),
+                "exchange": row.get('exchange', ''),
+                "curr_type": row.get('curr_type', ''),
+                "list_status": row.get('list_status', ''),
+                "list_date": basic_info.get('list_date', row.get('list_date', '')),
+                "delist_date": row.get('delist_date') if pd.notna(row.get('delist_date')) else None,
+                "is_hs": row.get('is_hs', ''),
+                "area": basic_info.get('area', row.get('area', '')),
+                "industry": basic_info.get('industry', row.get('industry', '')),
+                "province": row.get('province', ''),
+                "city": row.get('city', ''),
+                "introduction": row.get('introduction', ''),
+                "website": row.get('website', ''),
+                "email": row.get('email', ''),
+                "office": row.get('office', '')
+            }
+
+            # 缓存数据
+            self._set_cache(cache_key, company_data)
+
+            return {
+                "success": True,
+                "data": company_data,
+                "error": None
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"获取公司信息失败: {str(e)}"
             }
 
 
