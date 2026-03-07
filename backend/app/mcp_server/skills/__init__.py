@@ -5,6 +5,8 @@
 
 from app.mcp_server.skills.base import BaseSkill, ToolDefinition, ToolParameter, ToolResult
 from app.mcp_server.skills.market_data import MarketDataSkill
+from app.mcp_server.skills.financial_analysis import FinancialAnalysisSkill
+from app.mcp_server.skills.risk_assessment import RiskAssessmentSkill
 
 __all__ = [
     "BaseSkill",
@@ -12,4 +14,6 @@ __all__ = [
     "ToolParameter",
     "ToolResult",
     "MarketDataSkill",
+    "FinancialAnalysisSkill",
+    "RiskAssessmentSkill",
 ]

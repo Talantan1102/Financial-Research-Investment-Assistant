@@ -27,7 +27,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 # 本地导入
-from app.mcp_server.skills import MarketDataSkill, BaseSkill
+from app.mcp_server.skills import MarketDataSkill, BaseSkill, FinancialAnalysisSkill, RiskAssessmentSkill
 from app.mcp_server.config import get_config
 
 
@@ -166,6 +166,20 @@ def create_server() -> FinancialMCPServer:
         server.register_skill(market_data_skill)
     except Exception as e:
         logger.warning(f"MarketData Skill 注册失败: {e}")
+    
+    # 注册 FinancialAnalysis Skill
+    try:
+        financial_analysis_skill = FinancialAnalysisSkill()
+        server.register_skill(financial_analysis_skill)
+    except Exception as e:
+        logger.warning(f"FinancialAnalysis Skill 注册失败: {e}")
+    
+    # 注册 RiskAssessment Skill
+    try:
+        risk_assessment_skill = RiskAssessmentSkill()
+        server.register_skill(risk_assessment_skill)
+    except Exception as e:
+        logger.warning(f"RiskAssessment Skill 注册失败: {e}")
     
     return server
 
