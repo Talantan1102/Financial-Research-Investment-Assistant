@@ -1,28 +1,31 @@
-"""
-MCP Skill 基类模块
+# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
+# 未经授权，禁止转售或仿制。
 
-提供所有Financial Skills的统一接口规范
+"""Skill 基类 - MCP Server 工具抽象基类
+
+参考 ToolExecutor 设计，提供统一的工具注册、发现和执行接口。
 """
 
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List, Callable, Optional, Type
+from dataclasses import dataclass, field
+from pydantic import BaseModel, Field
 import asyncio
 import traceback
-from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Type, get_type_hints
-from dataclasses import dataclass, field
-from functools import wraps
-import inspect
-import time
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 
 @dataclass
 class ToolParameter:
     """工具参数定义"""
     name: str
-    type: str
+    type: str  # string, number, integer, boolean, array, object
     description: str
     required: bool = True
     default: Any = None
-    enum: Optional[List[str]] = None
+    enum: Optional[List[Any]] = None
 
 
 @dataclass
@@ -31,260 +34,241 @@ class ToolDefinition:
     name: str
     description: str
     parameters: List[ToolParameter]
-    func: Callable
-    return_type: str = "any"
-    timeout: int = 30  # 默认超时30秒
+    
+    def to_json_schema(self) -> Dict[str, Any]:
+        """转换为 JSON Schema 格式"""
+        properties = {}
+        required = []
+        
+        for param in self.parameters:
+            prop = {
+                "type": param.type,
+                "description": param.description
+            }
+            if param.enum:
+                prop["enum"] = param.enum
+            if param.default is not None:
+                prop["default"] = param.default
+            
+            properties[param.name] = prop
+            
+            if param.required:
+                required.append(param.name)
+        
+        return {
+            "name": self.name,
+            "description": self.description,
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": required
+            }
+        }
 
 
 @dataclass
 class ToolResult:
     """工具执行结果"""
     success: bool
-    data: Any = None
+    data: Optional[Any] = None
     error: Optional[str] = None
-    execution_time_ms: float = 0
     
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式"""
+        """转换为字典"""
         return {
             "success": self.success,
             "data": self.data,
-            "error": self.error,
-            "execution_time_ms": self.execution_time_ms
+            "error": self.error
         }
 
 
-class SkillError(Exception):
-    """Skill基础异常"""
-    def __init__(self, message: str, code: str = "SKILL_ERROR"):
-        self.message = message
-        self.code = code
-        super().__init__(self.message)
-
-
-class ToolExecutionError(SkillError):
-    """工具执行异常"""
-    def __init__(self, message: str, tool_name: str = ""):
-        super().__init__(message, code="TOOL_EXECUTION_ERROR")
-        self.tool_name = tool_name
-
-
-class ToolNotFoundError(SkillError):
-    """工具未找到异常"""
-    def __init__(self, tool_name: str):
-        super().__init__(f"Tool '{tool_name}' not found", code="TOOL_NOT_FOUND")
-        self.tool_name = tool_name
-
-
-class ToolTimeoutError(SkillError):
-    """工具执行超时异常"""
-    def __init__(self, tool_name: str, timeout: int):
-        super().__init__(
-            f"Tool '{tool_name}' execution timeout after {timeout}s",
-            code="TOOL_TIMEOUT"
-        )
-        self.tool_name = tool_name
-        self.timeout = timeout
-
-
-class ToolValidationError(SkillError):
-    """工具参数验证异常"""
-    def __init__(self, message: str, param_name: str = ""):
-        super().__init__(message, code="TOOL_VALIDATION_ERROR")
-        self.param_name = param_name
-
-
-def tool(
-    name: Optional[str] = None,
-    description: Optional[str] = None,
-    timeout: int = 30
-):
+class BaseSkill(ABC):
     """
-    工具装饰器，用于标记类方法为MCP工具
+    Skill 基类
     
-    使用示例：
-        class MySkill(Skill):
-            @tool(name="get_stock", description="获取股票行情")
-            async def get_stock(self, symbol: str) -> dict:
-                return {"price": 100}
-    """
-    def decorator(func: Callable) -> Callable:
-        # 设置工具元数据
-        func._is_tool = True
-        func._tool_name = name or func.__name__
-        func._tool_description = description or func.__doc__ or ""
-        func._tool_timeout = timeout
-        
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            return await func(*args, **kwargs)
-        
-        # 复制元数据
-        wrapper._is_tool = True
-        wrapper._tool_name = func._tool_name
-        wrapper._tool_description = func._tool_description
-        wrapper._tool_timeout = func._tool_timeout
-        
-        return wrapper
-    return decorator
-
-
-class Skill(ABC):
-    """
-    MCP Skill 抽象基类
+    所有 MCP Skill 必须继承此类，实现 _register_tools 方法注册工具。
     
-    所有Financial Skills都必须继承此类
+    示例：
+        class MySkill(BaseSkill):
+            name = "my_skill"
+            description = "My skill description"
+            
+            def _register_tools(self):
+                self.register_tool(
+                    name="my_tool",
+                    handler=self.my_tool_handler,
+                    description="Tool description",
+                    parameters=[
+                        ToolParameter(name="param1", type="string", description="Param1 description")
+                    ]
+                )
     """
     
-    def __init__(self, name: str, description: str = ""):
-        """
-        初始化Skill
-        
-        Args:
-            name: Skill名称
-            description: Skill描述
-        """
-        self.name = name
-        self.description = description
-        self._tools: Dict[str, ToolDefinition] = {}
+    name: str = ""
+    description: str = ""
+    
+    def __init__(self, name: str = None, description: str = None):
+        self.name = name or self.__class__.name or self.__class__.__name__
+        self.description = description or self.__class__.description or ""
+        self._tools: Dict[str, Callable] = {}
+        self._tool_definitions: Dict[str, ToolDefinition] = {}
+        self._logger = logging.getLogger(self.name)
         self._initialized = False
+        self._register_tools()
+    
+    @abstractmethod
+    def _register_tools(self):
+        """
+        注册工具，子类必须实现
         
-        # 自动发现并注册工具
-        self._discover_tools()
+        在此方法中调用 self.register_tool() 注册该 Skill 提供的所有工具。
+        """
+        pass
     
-    def _discover_tools(self) -> None:
+    def register_tool(
+        self, 
+        name: str, 
+        handler: Callable, 
+        description: str, 
+        parameters: List[ToolParameter]
+    ):
         """
-        自动发现类中标记为工具的方法
-        """
-        for attr_name in dir(self):
-            attr = getattr(self, attr_name)
-            if callable(attr) and hasattr(attr, '_is_tool'):
-                self._register_tool_from_method(attr)
-    
-    def _register_tool_from_method(self, method: Callable) -> None:
-        """
-        从方法注册工具
+        注册工具
         
         Args:
-            method: 标记为工具的方法
+            name: 工具名称（唯一标识）
+            handler: 工具处理函数（同步或异步）
+            description: 工具描述
+            parameters: 参数定义列表
         """
-        tool_name = getattr(method, '_tool_name', method.__name__)
-        tool_description = getattr(method, '_tool_description', method.__doc__ or "")
-        tool_timeout = getattr(method, '_tool_timeout', 30)
+        if name in self._tools:
+            self._logger.warning(f"工具 '{name}' 已存在，将被覆盖")
         
-        # 解析参数
-        sig = inspect.signature(method)
-        type_hints = get_type_hints(method)
-        
-        parameters = []
-        for param_name, param in sig.parameters.items():
-            # 跳过self参数
-            if param_name == 'self':
-                continue
-            
-            # 获取参数类型
-            param_type = type_hints.get(param_name, str)
-            type_str = self._python_type_to_json_type(param_type)
-            
-            # 判断是否为必填参数
-            is_required = param.default is inspect.Parameter.empty
-            default_value = None if is_required else param.default
-            
-            parameters.append(ToolParameter(
-                name=param_name,
-                type=type_str,
-                description=f"Parameter: {param_name}",
-                required=is_required,
-                default=default_value
-            ))
-        
-        # 创建工具定义
-        tool_def = ToolDefinition(
-            name=tool_name,
-            description=tool_description,
-            parameters=parameters,
-            func=method,
-            timeout=tool_timeout
+        self._tools[name] = handler
+        self._tool_definitions[name] = ToolDefinition(
+            name=name,
+            description=description,
+            parameters=parameters
         )
-        
-        self._tools[tool_name] = tool_def
+        self._logger.info(f"已注册工具: {name}")
     
-    def _python_type_to_json_type(self, py_type: Type) -> str:
+    def discover_tools(self) -> List[ToolDefinition]:
         """
-        将Python类型转换为JSON Schema类型
+        发现所有可用的工具
+        
+        Returns:
+            工具定义列表
+        """
+        return list(self._tool_definitions.values())
+    
+    def discover_tools_json(self) -> List[Dict[str, Any]]:
+        """
+        发现所有可用的工具（JSON Schema 格式）
+        
+        Returns:
+            工具定义列表（JSON Schema）
+        """
+        return [tool.to_json_schema() for tool in self.discover_tools()]
+    
+    async def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
+        """
+        执行指定工具
         
         Args:
-            py_type: Python类型
+            tool_name: 工具名称
+            params: 工具参数
+        
+        Returns:
+            ToolResult 执行结果
+        """
+        if tool_name not in self._tools:
+            return ToolResult(
+                success=False,
+                error=f"工具 '{tool_name}' 不存在于 Skill '{self.name}'"
+            )
+        
+        handler = self._tools[tool_name]
+        tool_def = self._tool_definitions[tool_name]
+        
+        # 参数校验
+        validation_error = self._validate_params(params, tool_def)
+        if validation_error:
+            return ToolResult(success=False, error=validation_error)
+        
+        try:
+            # 执行工具（支持同步和异步）
+            if asyncio.iscoroutinefunction(handler):
+                result = await handler(**params)
+            else:
+                result = handler(**params)
             
-        Returns:
-            JSON Schema类型字符串
-        """
-        type_mapping = {
-            str: "string",
-            int: "integer",
-            float: "number",
-            bool: "boolean",
-            list: "array",
-            dict: "object",
-            Any: "any"
-        }
-        
-        # 处理Optional类型
-        origin = getattr(py_type, '__origin__', None)
-        if origin is not None:
-            args = getattr(py_type, '__args__', ())
-            if origin is not None and type(None) in args:
-                # Optional[T] 的情况，取非None的类型
-                for arg in args:
-                    if arg is not type(None):
-                        return self._python_type_to_json_type(arg)
-        
-        return type_mapping.get(py_type, "string")
+            # 标准化返回结果
+            if isinstance(result, ToolResult):
+                return result
+            elif isinstance(result, dict):
+                success = result.get("success", True)
+                data = result.get("data") if success else None
+                error = result.get("error") if not success else None
+                return ToolResult(success=success, data=data, error=error)
+            else:
+                return ToolResult(success=True, data=result)
+                
+        except Exception as e:
+            self._logger.error(f"工具 '{tool_name}' 执行失败: {e}")
+            self._logger.debug(traceback.format_exc())
+            return ToolResult(
+                success=False,
+                error=f"工具执行失败: {str(e)}"
+            )
     
-    def get_tools(self) -> List[Dict[str, Any]]:
+    def _validate_params(self, params: Dict[str, Any], tool_def: ToolDefinition) -> Optional[str]:
         """
-        获取所有工具的定义列表（用于MCP工具发现）
+        参数校验
+        
+        Args:
+            params: 传入的参数
+            tool_def: 工具定义
         
         Returns:
-            工具定义列表，格式符合MCP协议
+            错误信息，校验通过返回 None
         """
-        tools = []
-        for tool_def in self._tools.values():
-            tool_schema = {
-                "name": tool_def.name,
-                "description": tool_def.description,
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {},
-                    "required": []
-                }
+        # 检查必填参数
+        for param in tool_def.parameters:
+            if param.required and param.name not in params:
+                return f"缺少必填参数: {param.name}"
+        
+        # 类型检查（简化版，可扩展）
+        for param_name, value in params.items():
+            param_def = next((p for p in tool_def.parameters if p.name == param_name), None)
+            if not param_def:
+                continue  # 允许额外参数
+            
+            type_map = {
+                "string": str,
+                "number": (int, float),
+                "integer": int,
+                "boolean": bool,
+                "array": list,
+                "object": dict
             }
             
-            for param in tool_def.parameters:
-                tool_schema["inputSchema"]["properties"][param.name] = {
-                    "type": param.type,
-                    "description": param.description
-                }
-                if param.enum:
-                    tool_schema["inputSchema"]["properties"][param.name]["enum"] = param.enum
-                if param.default is not None:
-                    tool_schema["inputSchema"]["properties"][param.name]["default"] = param.default
-                
-                if param.required:
-                    tool_schema["inputSchema"]["required"].append(param.name)
-            
-            tools.append(tool_schema)
+            expected_type = type_map.get(param_def.type)
+            if expected_type and not isinstance(value, expected_type):
+                return f"参数 '{param_name}' 类型错误，期望 {param_def.type}"
         
-        return tools
+        return None
     
-    def get_tool_names(self) -> List[str]:
+    def get_tool_handler(self, tool_name: str) -> Optional[Callable]:
         """
-        获取所有工具名称
+        获取工具处理器
+        
+        Args:
+            tool_name: 工具名称
         
         Returns:
-            工具名称列表
+            工具处理器函数，不存在返回 None
         """
-        return list(self._tools.keys())
+        return self._tools.get(tool_name)
     
     def has_tool(self, tool_name: str) -> bool:
         """
@@ -292,148 +276,43 @@ class Skill(ABC):
         
         Args:
             tool_name: 工具名称
-            
+        
         Returns:
             是否存在
         """
         return tool_name in self._tools
     
-    def _validate_params(
-        self,
-        tool_def: ToolDefinition,
-        params: Dict[str, Any]
-    ) -> None:
-        """
-        验证工具参数
-        
-        Args:
-            tool_def: 工具定义
-            params: 传入的参数
-            
-        Raises:
-            ToolValidationError: 验证失败
-        """
-        # 检查必填参数
-        for param in tool_def.parameters:
-            if param.required and param.name not in params:
-                raise ToolValidationError(
-                    f"Missing required parameter: {param.name}",
-                    param_name=param.name
-                )
-            
-            # 类型验证（可选）
-            if param.name in params:
-                value = params[param.name]
-                if param.type == "integer" and not isinstance(value, int):
-                    if not isinstance(value, float) or not value.is_integer():
-                        raise ToolValidationError(
-                            f"Parameter '{param.name}' should be integer",
-                            param_name=param.name
-                        )
-                elif param.type == "number" and not isinstance(value, (int, float)):
-                    raise ToolValidationError(
-                        f"Parameter '{param.name}' should be number",
-                        param_name=param.name
-                    )
-                elif param.type == "string" and not isinstance(value, str):
-                    raise ToolValidationError(
-                        f"Parameter '{param.name}' should be string",
-                        param_name=param.name
-                    )
-                elif param.type == "boolean" and not isinstance(value, bool):
-                    raise ToolValidationError(
-                        f"Parameter '{param.name}' should be boolean",
-                        param_name=param.name
-                    )
+    @property
+    def tool_count(self) -> int:
+        """工具数量"""
+        return len(self._tools)
+
+
+# 向后兼容别名
+Skill = BaseSkill
+
+
+def tool(name: str = None, description: str = "", timeout: int = 30):
+    """
+    工具装饰器，用于注册工具
     
-    async def execute_tool(
-        self,
-        tool_name: str,
-        params: Dict[str, Any]
-    ) -> ToolResult:
-        """
-        执行指定工具
-        
-        Args:
-            tool_name: 工具名称
-            params: 工具参数
-            
-        Returns:
-            工具执行结果
-        """
-        start_time = time.time()
-        
-        try:
-            # 查找工具
-            if tool_name not in self._tools:
-                raise ToolNotFoundError(tool_name)
-            
-            tool_def = self._tools[tool_name]
-            
-            # 验证参数
-            self._validate_params(tool_def, params)
-            
-            # 执行工具（带超时）
-            try:
-                result = await asyncio.wait_for(
-                    tool_def.func(self, **params),
-                    timeout=tool_def.timeout
-                )
-                
-                execution_time = (time.time() - start_time) * 1000
-                
-                return ToolResult(
-                    success=True,
-                    data=result,
-                    execution_time_ms=execution_time
-                )
-                
-            except asyncio.TimeoutError:
-                raise ToolTimeoutError(tool_name, tool_def.timeout)
-                
-        except SkillError as e:
-            execution_time = (time.time() - start_time) * 1000
-            return ToolResult(
-                success=False,
-                error=f"[{e.code}] {e.message}",
-                execution_time_ms=execution_time
-            )
-        except Exception as e:
-            execution_time = (time.time() - start_time) * 1000
-            error_msg = f"{str(e)}\n{traceback.format_exc()}"
-            return ToolResult(
-                success=False,
-                error=error_msg,
-                execution_time_ms=execution_time
-            )
+    示例：
+        @tool(name="get_quote", description="获取股票行情")
+        async def get_quote(self, symbol: str):
+            ...
     
-    @abstractmethod
-    async def initialize(self) -> bool:
-        """
-        初始化Skill
-        
-        Returns:
-            是否初始化成功
-        """
-        pass
+    Args:
+        name: 工具名称（默认使用函数名）
+        description: 工具描述
+        timeout: 超时时间（秒）
     
-    @abstractmethod
-    async def cleanup(self) -> None:
-        """
-        清理Skill资源
-        """
-        pass
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """
-        转换为字典表示
-        
-        Returns:
-            Skill信息字典
-        """
-        return {
-            "name": self.name,
-            "description": self.description,
-            "tools": self.get_tool_names(),
-            "tool_count": len(self._tools)
-        }
+    Returns:
+        装饰器函数
+    """
+    def decorator(func):
+        # 在Skill类中使用时，通过元数据标记
+        func._tool_name = name or func.__name__
+        func._tool_description = description
+        func._tool_timeout = timeout
+        return func
+    return decorator

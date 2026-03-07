@@ -1,140 +1,73 @@
-"""
-MCP Server 配置模块
+# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
+# 未经授权，禁止转售或仿制。
 
-管理MCP Server和Tushare数据源的配置
-"""
+"""MCP Server 配置管理"""
 
 import os
-import logging
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Optional
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class TushareConfig:
-    """Tushare数据源配置"""
-    api_token: str
-    cache_ttl_seconds: int = 300  # 默认5分钟缓存
-    max_retries: int = 3
-    retry_delay_seconds: float = 1.0
-    timeout_seconds: int = 30
+class MCPServerConfig(BaseSettings):
+    """
+    MCP Server 配置类
     
-    @classmethod
-    def from_env(cls) -> "TushareConfig":
-        """从环境变量加载配置"""
-        api_token = os.getenv("TUSHARE_API_TOKEN", "")
-        
-        if not api_token:
-            logger.warning("TUSHARE_API_TOKEN not set in environment variables")
-        
-        return cls(
-            api_token=api_token,
-            cache_ttl_seconds=int(os.getenv("TUSHARE_CACHE_TTL", "300")),
-            max_retries=int(os.getenv("TUSHARE_MAX_RETRIES", "3")),
-            retry_delay_seconds=float(os.getenv("TUSHARE_RETRY_DELAY", "1.0")),
-            timeout_seconds=int(os.getenv("TUSHARE_TIMEOUT", "30"))
-        )
+    支持从环境变量读取配置，环境变量前缀为 MCP_
+    """
     
-    def is_valid(self) -> bool:
-        """检查配置是否有效"""
-        return bool(self.api_token)
-
-
-@dataclass
-class MCPServerConfig:
-    """MCP Server配置"""
-    name: str = "financial-research-assistant"
-    version: str = "1.0.0"
-    transport: str = "stdio"  # 支持 stdio, sse, websocket
-    host: str = "0.0.0.0"
-    port: int = 8000
-    log_level: str = "INFO"
-    enable_cors: bool = True
+    # Server 基础配置
+    server_name: str = Field(default="financial-research-mcp-server", description="MCP Server 名称")
+    server_version: str = Field(default="1.0.0", description="MCP Server 版本")
     
-    @classmethod
-    def from_env(cls) -> "MCPServerConfig":
-        """从环境变量加载配置"""
-        return cls(
-            name=os.getenv("MCP_SERVER_NAME", "financial-research-assistant"),
-            version=os.getenv("MCP_SERVER_VERSION", "1.0.0"),
-            transport=os.getenv("MCP_TRANSPORT", "stdio"),
-            host=os.getenv("MCP_HOST", "0.0.0.0"),
-            port=int(os.getenv("MCP_PORT", "8000")),
-            log_level=os.getenv("MCP_LOG_LEVEL", "INFO"),
-            enable_cors=os.getenv("MCP_ENABLE_CORS", "true").lower() == "true"
-        )
-
-
-@dataclass
-class Config:
-    """全局配置"""
-    tushare: TushareConfig = field(default_factory=TushareConfig.from_env)
-    mcp_server: MCPServerConfig = field(default_factory=MCPServerConfig.from_env)
+    # Tushare API 配置
+    tushare_api_token: Optional[str] = Field(default=None, description="Tushare API Token")
     
-    # 其他数据源配置（可扩展）
-    redis_url: str = field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379"))
-    database_url: str = field(default_factory=lambda: os.getenv("DATABASE_URL", ""))
+    # 缓存配置
+    cache_ttl: int = Field(default=300, description="缓存过期时间（秒）")
     
-    @classmethod
-    def from_env(cls) -> "Config":
-        """从环境变量加载完整配置"""
-        return cls(
-            tushare=TushareConfig.from_env(),
-            mcp_server=MCPServerConfig.from_env(),
-            redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
-            database_url=os.getenv("DATABASE_URL", "")
-        )
+    # 日志配置
+    log_level: str = Field(default="INFO", description="日志级别")
     
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {
-            "tushare": {
-                "api_token_configured": bool(self.tushare.api_token),
-                "cache_ttl_seconds": self.tushare.cache_ttl_seconds,
-                "max_retries": self.tushare.max_retries,
-                "timeout_seconds": self.tushare.timeout_seconds
-            },
-            "mcp_server": {
-                "name": self.mcp_server.name,
-                "version": self.mcp_server.version,
-                "transport": self.mcp_server.transport,
-                "host": self.mcp_server.host,
-                "port": self.mcp_server.port,
-                "log_level": self.mcp_server.log_level
-            },
-            "redis_url_configured": bool(self.redis_url),
-            "database_url_configured": bool(self.database_url)
-        }
+    class Config:
+        env_prefix = "MCP_"
+        case_sensitive = False
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # 如果环境变量存在，优先使用环境变量
+        if not self.tushare_api_token:
+            self.tushare_api_token = os.getenv("TUSHARE_API_TOKEN")
 
 
 # 全局配置实例
-_config: Optional[Config] = None
+_config: Optional[MCPServerConfig] = None
 
 
-def get_config() -> Config:
+def get_config() -> MCPServerConfig:
     """
-    获取全局配置实例（单例）
+    获取 MCP Server 配置（单例）
     
     Returns:
-        全局配置
+        MCPServerConfig 配置实例
     """
     global _config
     if _config is None:
-        _config = Config.from_env()
+        _config = MCPServerConfig()
     return _config
 
 
-def reload_config() -> Config:
+# 向后兼容别名
+Config = MCPServerConfig
+
+
+def reload_config() -> MCPServerConfig:
     """
     重新加载配置
     
     Returns:
-        新的配置实例
+        新的 MCPServerConfig 实例
     """
     global _config
-    _config = Config.from_env()
-    logger.info("Configuration reloaded")
+    _config = MCPServerConfig()
     return _config

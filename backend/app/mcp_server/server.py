@@ -1,35 +1,30 @@
-#!/usr/bin/env python3
-"""
-MCP Server 主入口
+# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
+# 未经授权，禁止转售或仿制。
 
-Financial Research Assistant 的 MCP Server 实现
-支持 STDIO 传输协议
+"""MCP Server 主入口
+
+使用 MCP Python SDK 实现，支持 STDIO 传输。
+注册 MarketData Skill 提供股票行情查询能力。
 """
 
-import asyncio
-import json
-import logging
 import sys
-from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Dict, List, Optional
+import os
+import json
+import asyncio
+import logging
+from typing import Dict, Any, List, Optional
 
-# MCP SDK 导入
-try:
-    from mcp.server import Server
-    from mcp.server.stdio import stdio_server
-    from mcp.types import (
-        TextContent,
-        Tool,
-        EmptyResult,
-        CallToolRequestParams,
-    )
-except ImportError:
-    print("Error: mcp package not installed. Run: pip install mcp", file=sys.stderr)
-    sys.exit(1)
+# 添加项目根目录到路径
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-# 项目导入
-from app.mcp_server.config import get_config, Config
-from app.mcp_server.skills import MarketDataSkill, Skill
+# MCP SDK
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent
+
+# 本地导入
+from app.mcp_server.skills import MarketDataSkill, BaseSkill
+from app.mcp_server.config import get_config
 
 
 # 配置日志
@@ -37,221 +32,145 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
+        logging.FileHandler(os.path.join(os.path.dirname(__file__), 'mcp_server.log')),
         logging.StreamHandler(sys.stderr)
     ]
 )
-logger = logging.getLogger("mcp-server")
+logger = logging.getLogger("MCP Server")
 
 
 class FinancialMCPServer:
     """
-    Financial Research Assistant MCP Server
+    金融研投助手 MCP Server
     
-    管理所有Financial Skills的注册和调用
+    管理多个 Skill，提供统一的工具发现和调用接口。
     """
     
-    def __init__(self, config: Config):
-        """
-        初始化MCP Server
-        
-        Args:
-            config: 服务器配置
-        """
-        self.config = config
-        self.server = Server(config.mcp_server.name)
-        self.skills: Dict[str, Skill] = {}
-        self._initialized = False
-        
-        # 注册MCP协议处理器
+    def __init__(self):
+        self.config = get_config()
+        self.skills: Dict[str, BaseSkill] = {}
+        self.server = Server(self.config.server_name)
         self._register_handlers()
     
-    def _register_handlers(self) -> None:
-        """注册MCP协议处理器"""
+    def register_skill(self, skill: BaseSkill):
+        """
+        注册 Skill
+        
+        Args:
+            skill: Skill 实例
+        """
+        self.skills[skill.name] = skill
+        logger.info(f"已注册 Skill: {skill.name} ({skill.tool_count} 个工具)")
+    
+    def _register_handlers(self):
+        """注册 MCP Server 处理器"""
         
         @self.server.list_tools()
         async def list_tools() -> List[Tool]:
-            """列出所有可用工具"""
+            """列出所有可用的工具"""
             tools = []
             for skill in self.skills.values():
-                for tool_def in skill.get_tools():
+                for tool_def in skill.discover_tools():
                     tools.append(Tool(
-                        name=tool_def["name"],
-                        description=tool_def["description"],
-                        inputSchema=tool_def["inputSchema"]
+                        name=f"{skill.name}.{tool_def.name}",
+                        description=tool_def.description,
+                        inputSchema=tool_def.to_json_schema()["parameters"]
                     ))
+            logger.info(f"返回工具列表: {len(tools)} 个工具")
             return tools
         
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             """调用指定工具"""
-            logger.info(f"Calling tool: {name} with args: {arguments}")
+            logger.info(f"调用工具: {name}, 参数: {arguments}")
             
-            # 查找工具所属Skill
-            skill = self._find_skill_for_tool(name)
+            # 解析 tool name（格式: skill_name.tool_name）
+            if "." not in name:
+                return [TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "success": False,
+                        "error": f"无效的工具名称格式: {name}，期望格式: skill_name.tool_name"
+                    }, ensure_ascii=False)
+                )]
+            
+            skill_name, tool_name = name.split(".", 1)
+            
+            # 查找 Skill
+            skill = self.skills.get(skill_name)
             if not skill:
                 return [TextContent(
                     type="text",
                     text=json.dumps({
                         "success": False,
-                        "error": f"Tool '{name}' not found"
+                        "error": f"Skill '{skill_name}' 不存在"
+                    }, ensure_ascii=False)
+                )]
+            
+            # 检查工具是否存在
+            if not skill.has_tool(tool_name):
+                return [TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "success": False,
+                        "error": f"工具 '{tool_name}' 不存在于 Skill '{skill_name}'"
                     }, ensure_ascii=False)
                 )]
             
             # 执行工具
-            result = await skill.execute_tool(name, arguments)
-            
-            return [TextContent(
-                type="text",
-                text=json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
-            )]
-    
-    def _find_skill_for_tool(self, tool_name: str) -> Optional[Skill]:
-        """
-        查找工具所属的Skill
-        
-        Args:
-            tool_name: 工具名称
-            
-        Returns:
-            Skill实例或None
-        """
-        for skill in self.skills.values():
-            if skill.has_tool(tool_name):
-                return skill
-        return None
-    
-    def register_skill(self, skill: Skill) -> None:
-        """
-        注册Skill
-        
-        Args:
-            skill: Skill实例
-        """
-        self.skills[skill.name] = skill
-        logger.info(f"Registered skill: {skill.name} with tools: {skill.get_tool_names()}")
-    
-    async def initialize(self) -> bool:
-        """
-        初始化Server和所有Skills
-        
-        Returns:
-            是否初始化成功
-        """
-        try:
-            logger.info(f"Initializing {self.config.mcp_server.name} v{self.config.mcp_server.version}")
-            logger.info(f"Transport: {self.config.mcp_server.transport}")
-            
-            # 注册所有Skills
-            await self._register_skills()
-            
-            # 初始化所有Skills
-            for name, skill in self.skills.items():
-                success = await skill.initialize()
-                if not success:
-                    logger.error(f"Failed to initialize skill: {name}")
-                    return False
-            
-            self._initialized = True
-            logger.info(f"Server initialized successfully with {len(self.skills)} skills")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize server: {e}")
-            return False
-    
-    async def _register_skills(self) -> None:
-        """注册所有内置Skills"""
-        # 注册MarketData Skill
-        market_data_skill = MarketDataSkill()
-        self.register_skill(market_data_skill)
-        
-        # 可以在这里注册更多Skills
-        # e.g., self.register_skill(DeepResearchSkill())
-        
-        logger.info(f"Total skills registered: {len(self.skills)}")
-    
-    async def cleanup(self) -> None:
-        """清理资源"""
-        logger.info("Cleaning up server...")
-        for name, skill in self.skills.items():
             try:
-                await skill.cleanup()
-                logger.info(f"Cleaned up skill: {name}")
+                result = await skill.execute_tool(tool_name, arguments)
+                return [TextContent(
+                    type="text",
+                    text=json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+                )]
             except Exception as e:
-                logger.error(f"Error cleaning up skill {name}: {e}")
-        
-        self._initialized = False
-        logger.info("Server cleanup completed")
+                logger.error(f"工具执行异常: {e}")
+                return [TextContent(
+                    type="text",
+                    text=json.dumps({
+                        "success": False,
+                        "error": f"工具执行异常: {str(e)}"
+                    }, ensure_ascii=False)
+                )]
     
-    async def run_stdio(self) -> None:
-        """
-        运行STDIO传输模式的Server
-        """
-        if not self._initialized:
-            success = await self.initialize()
-            if not success:
-                logger.error("Server initialization failed")
-                sys.exit(1)
+    async def run(self):
+        """运行 MCP Server"""
+        logger.info(f"启动 MCP Server: {self.config.server_name} v{self.config.server_version}")
+        logger.info(f"已注册 {len(self.skills)} 个 Skill")
         
-        logger.info("Starting STDIO server...")
-        
-        try:
-            async with stdio_server(server=self.server) as (read_stream, write_stream):
-                logger.info("STDIO server started, waiting for connections...")
-                # Server 会自动处理连接，这里保持运行
-                await asyncio.Future()  # 永远等待
-        except Exception as e:
-            logger.error(f"Server error: {e}")
-        finally:
-            await self.cleanup()
+        async with stdio_server() as (read_stream, write_stream):
+            await self.server.run(
+                read_stream,
+                write_stream,
+                self.server.create_initialization_options()
+            )
+
+
+def create_server() -> FinancialMCPServer:
+    """
+    创建并配置 MCP Server
     
-    def get_server_info(self) -> Dict[str, Any]:
-        """
-        获取Server信息
-        
-        Returns:
-            Server信息字典
-        """
-        return {
-            "name": self.config.mcp_server.name,
-            "version": self.config.mcp_server.version,
-            "initialized": self._initialized,
-            "skills": {name: skill.to_dict() for name, skill in self.skills.items()},
-            "total_tools": sum(len(skill.get_tool_names()) for skill in self.skills.values())
-        }
+    Returns:
+        配置好的 FinancialMCP Server 实例
+    """
+    server = FinancialMCPServer()
+    
+    # 注册 MarketData Skill
+    try:
+        market_data_skill = MarketDataSkill()
+        server.register_skill(market_data_skill)
+    except Exception as e:
+        logger.warning(f"MarketData Skill 注册失败: {e}")
+    
+    return server
 
 
 async def main():
-    """
-    MCP Server 入口函数
-    """
-    # 加载配置
-    config = get_config()
-    
-    # 检查Tushare配置
-    if not config.tushare.is_valid():
-        logger.warning("Tushare API token not configured. Market data features will not work.")
-        logger.warning("Set TUSHARE_API_TOKEN environment variable.")
-    
-    # 创建并启动Server
-    server = FinancialMCPServer(config)
-    
-    # 根据配置选择传输模式
-    transport = config.mcp_server.transport.lower()
-    
-    if transport == "stdio":
-        await server.run_stdio()
-    else:
-        logger.error(f"Unsupported transport: {transport}")
-        logger.error("Currently only 'stdio' transport is supported")
-        sys.exit(1)
+    """主入口"""
+    server = create_server()
+    await server.run()
 
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Server stopped by user")
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
-        sys.exit(1)
+    asyncio.run(main())
