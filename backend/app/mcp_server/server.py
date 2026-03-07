@@ -14,9 +14,6 @@ import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 
-# 添加项目根目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 # MCP SDK
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -152,7 +149,7 @@ def create_server() -> FinancialMCPServer:
     创建并配置 MCP Server
     
     Returns:
-        配置好的 FinancialMCP Server 实例
+        配置好的 FinancialMCPServer 实例
     """
     server = FinancialMCPServer()
     

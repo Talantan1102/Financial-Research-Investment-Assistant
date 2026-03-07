@@ -6,14 +6,8 @@
 基于 stock_service.py 和 tushare_client.py 改造，提供股票行情查询能力。
 """
 
-import sys
-import os
-
-# 添加项目根目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-
 from typing import Dict, Any, Optional
-from .base import BaseSkill, ToolParameter, ToolResult, Skill, tool
+from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
 from app.data.tushare_client import get_tushare_client, TushareClient
 
 

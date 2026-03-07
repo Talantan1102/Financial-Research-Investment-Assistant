@@ -3,13 +3,11 @@
 
 """MCP Server Skills 包"""
 
-from .base import BaseSkill, ToolDefinition, ToolParameter, ToolResult, Skill, tool
-from .market_data import MarketDataSkill
+from app.mcp_server.skills.base import BaseSkill, ToolDefinition, ToolParameter, ToolResult
+from app.mcp_server.skills.market_data import MarketDataSkill
 
 __all__ = [
     "BaseSkill",
-    "Skill",  # 别名
-    "tool",
     "ToolDefinition", 
     "ToolParameter",
     "ToolResult",
