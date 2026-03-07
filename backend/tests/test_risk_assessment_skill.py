@@ -44,12 +44,13 @@ def risk_skill(mock_tushare_client):
 def sample_price_data():
     """生成样本价格数据"""
     # 生成100个交易日的模拟价格数据
-    dates = pd.date_range(end=datetime.now(), periods=100, freq='B')
-    prices = 100 + np.cumsum(np.random.randn(100) * 2)  # 随机游走
+    n_days = 100
+    dates = pd.date_range(end=datetime.now(), periods=n_days, freq='D')  # 使用日历日而非工作日
+    prices = 100 + np.cumsum(np.random.randn(n_days) * 2)  # 随机游走
     prices = np.maximum(prices, 50)  # 确保价格为正
 
     df = pd.DataFrame({
-        'trade_date': dates.strftime('%Y%m%d').tolist(),
+        'trade_date': [d.strftime('%Y%m%d') for d in dates],
         'close': prices
     })
     return df
@@ -162,10 +163,11 @@ class TestCalculateRiskMetrics:
     async def test_insufficient_data(self, risk_skill, mock_tushare_client):
         """测试数据不足的情况"""
         # 返回少于30天的数据
-        dates = pd.date_range(end=datetime.now(), periods=20, freq='B')
+        n_days = 20
+        dates = pd.date_range(end=datetime.now(), periods=n_days, freq='D')
         small_df = pd.DataFrame({
-            'trade_date': dates.strftime('%Y%m%d').tolist(),
-            'close': np.random.randn(20) * 10 + 100
+            'trade_date': [d.strftime('%Y%m%d') for d in dates],
+            'close': np.random.randn(n_days) * 10 + 100
         })
 
         mock_tushare_client.api.daily = Mock(return_value=small_df)

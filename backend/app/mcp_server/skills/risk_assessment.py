@@ -692,8 +692,9 @@ class RiskAssessmentSkill(BaseSkill):
         if len(returns) < 2:
             return 0.0
 
-        var = self._calculate_var(returns, confidence)
-        cvar = np.mean(returns[returns <= var])
+        returns_array = np.array(returns)
+        var = self._calculate_var(returns_array, confidence)
+        cvar = np.mean(returns_array[returns_array <= var])
         return float(cvar) if not np.isnan(cvar) else 0.0
 
     def _calculate_downside_deviation(self, returns: np.ndarray) -> float:
@@ -701,8 +702,9 @@ class RiskAssessmentSkill(BaseSkill):
         if len(returns) < 2:
             return 0.0
 
+        returns_array = np.array(returns)
         # 只考虑负收益
-        negative_returns = returns[returns < 0]
+        negative_returns = returns_array[returns_array < 0]
 
         if len(negative_returns) == 0:
             return 0.0
