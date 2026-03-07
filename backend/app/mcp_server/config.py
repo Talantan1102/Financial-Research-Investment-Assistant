@@ -22,6 +22,7 @@ class MCPServerConfig(BaseSettings):
     
     # Tushare API 配置
     tushare_api_token: Optional[str] = Field(default=None, description="Tushare API Token")
+    tushare_api_url: str = Field(default="https://api.tushare.pro", description="Tushare API URL")
     
     # 缓存配置
     cache_ttl: int = Field(default=300, description="缓存过期时间（秒）")
@@ -38,6 +39,10 @@ class MCPServerConfig(BaseSettings):
         # 如果环境变量存在，优先使用环境变量
         if not self.tushare_api_token:
             self.tushare_api_token = os.getenv("TUSHARE_API_TOKEN")
+        # 从环境变量读取 API URL（如果存在）
+        api_url_env = os.getenv("TUSHARE_API_URL")
+        if api_url_env:
+            self.tushare_api_url = api_url_env
 
 
 # 全局配置实例

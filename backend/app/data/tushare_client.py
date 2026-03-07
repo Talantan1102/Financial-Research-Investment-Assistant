@@ -59,13 +59,22 @@ class TushareClient:
 
         # 从环境变量读取 Token
         self.token = os.getenv("TUSHARE_API_TOKEN", "")
+        # 从环境变量读取自定义 API URL
+        self.api_url = os.getenv("TUSHARE_API_URL", "https://api.tushare.pro")
+
         if not self.token:
             print("警告: TUSHARE_API_TOKEN 环境变量未设置")
             self.api = None
         else:
             try:
                 ts.set_token(self.token)
+                # 创建 pro_api 实例
                 self.api = ts.pro_api()
+                # 设置自定义 API URL（如果指定了非默认 URL）
+                if self.api_url and self.api_url != "https://api.tushare.pro":
+                    self.api._DataApi__token = self.token
+                    self.api._DataApi__http_url = self.api_url
+                    print(f"使用自定义 Tushare API URL: {self.api_url}")
             except Exception as e:
                 print(f"警告: Tushare API 初始化失败: {e}")
                 self.api = None
