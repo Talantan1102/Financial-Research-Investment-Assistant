@@ -14,6 +14,13 @@ import asyncio
 import logging
 from typing import Dict, Any, List, Optional
 
+# 添加项目根目录到 Python 路径
+# 这样可以在作为独立进程启动时正确导入 app 模块
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_backend_dir = os.path.dirname(os.path.dirname(_current_dir))
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
+
 # MCP SDK
 from mcp.server import Server
 from mcp.server.stdio import stdio_server

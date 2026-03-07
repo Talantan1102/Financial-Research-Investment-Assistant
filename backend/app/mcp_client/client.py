@@ -41,7 +41,7 @@ class MCPClient:
     def __init__(
         self,
         server_script_path: str,
-        python_executable: str = "python",
+        python_executable: str = "python3",
         connect_timeout: float = 30.0,
         call_timeout: float = 30.0
     ):
@@ -50,7 +50,7 @@ class MCPClient:
 
         Args:
             server_script_path: MCP Server 脚本路径（server.py）
-            python_executable: Python 解释器路径（默认 "python"）
+            python_executable: Python 解释器路径（默认 "python3"）
             connect_timeout: 连接超时时间（秒，默认 30.0）
             call_timeout: 工具调用超时时间（秒，默认 30.0）
         """
