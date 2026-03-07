@@ -107,8 +107,32 @@ async def test_tushare_client():
         else:
             result.add_pass("TUSHARE_API_TOKEN 已配置")
 
+            # 检测用户积分
+            print("\n  用户积分检测:")
+            user_points = client.get_user_points()
+            if user_points is not None:
+                result.add_pass(f"获取用户积分: {user_points}")
+                print(f"     积分: {user_points}")
+                if user_points < 200:
+                    print(f"     ⚠️  积分不足 200，将跳过需要 daily 接口的测试")
+            else:
+                result.add_skip("积分检测", "无法获取积分信息")
+
+            # 测试 get_stock_basic（低积分可用）
+            print("\n  股票基本信息查询测试 (get_stock_basic):")
+            basic_result = client.get_stock_basic("600519")
+            if basic_result.get('success'):
+                result.add_pass("查询 600519 基本信息")
+                data = basic_result['data']
+                print(f"     名称: {data.get('name')}")
+                print(f"     代码: {data.get('ts_code')}")
+                print(f"     行业: {data.get('industry')}")
+                print(f"     地区: {data.get('area')}")
+            else:
+                result.add_fail("查询基本信息", basic_result.get('error'))
+
             # 测试查询股票数据
-            print("\n  股票数据查询测试:")
+            print("\n  股票数据查询测试 (get_quote):")
             query_result = client.get_quote("600519")
 
             if query_result.get('success'):
@@ -116,17 +140,33 @@ async def test_tushare_client():
                 data = query_result['data']
                 print(f"     名称: {data.get('name')}")
                 print(f"     代码: {data.get('ts_code')}")
-                print(f"     当前价: {data.get('nowPri')}")
-                print(f"     涨跌幅: {data.get('increPer')}%")
 
-                # 验证数据完整性
-                required_fields = ['name', 'nowPri', 'ts_code', 'increase', 'increPer',
-                                  'todayStartPri', 'yestodEndPri', 'todayMax', 'todayMin']
-                missing_fields = [f for f in required_fields if f not in data]
-                if not missing_fields:
-                    result.add_pass("数据字段完整")
+                # 检查是否为低积分模式
+                if data.get('_low_points_mode'):
+                    print(f"     模式: 低积分模式（仅基本信息）")
+                    print(f"     行业: {data.get('industry', 'N/A')}")
+                    print(f"     地区: {data.get('area', 'N/A')}")
+                    result.add_pass("低积分模式数据获取")
+
+                    # 验证低积分模式的字段
+                    required_fields = ['name', 'ts_code']
+                    missing_fields = [f for f in required_fields if f not in data]
+                    if not missing_fields:
+                        result.add_pass("低积分模式数据字段完整")
+                    else:
+                        result.add_fail("数据完整性", f"缺少字段: {missing_fields}")
                 else:
-                    result.add_fail("数据完整性", f"缺少字段: {missing_fields}")
+                    print(f"     当前价: {data.get('nowPri')}")
+                    print(f"     涨跌幅: {data.get('increPer')}%")
+
+                    # 验证完整数据的字段
+                    required_fields = ['name', 'nowPri', 'ts_code', 'increase', 'increPer',
+                                      'todayStartPri', 'yestodEndPri', 'todayMax', 'todayMin']
+                    missing_fields = [f for f in required_fields if f not in data or data[f] == 'N/A']
+                    if not missing_fields:
+                        result.add_pass("完整模式数据字段完整")
+                    else:
+                        result.add_fail("数据完整性", f"缺少字段: {missing_fields}")
 
                 # 测试缓存
                 print("\n  缓存机制测试:")
@@ -288,6 +328,7 @@ async def test_market_data_skill():
     try:
         from app.mcp_server.skills.market_data import MarketDataSkill
         from app.mcp_server.skills.base import ToolResult
+        from app.data.tushare_client import get_tushare_client
 
         # 创建 Skill
         skill = MarketDataSkill()
@@ -321,11 +362,18 @@ async def test_market_data_skill():
         else:
             result.add_fail("工具列表", "缺少 search_stock")
 
+        # 检查 Token 和积分
+        token = os.getenv("TUSHARE_API_TOKEN")
+        user_points = None
+        if token:
+            client = get_tushare_client()
+            user_points = client.get_user_points()
+            if user_points is not None:
+                print(f"\n  用户积分: {user_points}")
+
         # 测试 get_quote 工具
         print("\n  get_quote 工具测试:")
 
-        # 检查 Token
-        token = os.getenv("TUSHARE_API_TOKEN")
         if not token:
             result.add_skip("get_quote 数据测试", "TUSHARE_API_TOKEN 未设置")
         else:
@@ -335,18 +383,28 @@ async def test_market_data_skill():
                 result.add_pass("查询 600519 成功")
                 data = exec_result.data
                 print(f"     {data.get('name')} ({data.get('ts_code')})")
-                print(f"     价格: {data.get('nowPri')} | 涨跌: {data.get('increPer')}%")
+
+                # 检查是否为低积分模式
+                if data.get('_low_points_mode'):
+                    print(f"     模式: 低积分模式")
+                    print(f"     行业: {data.get('industry', 'N/A')}")
+                    result.add_pass("低积分模式适配")
+                else:
+                    print(f"     价格: {data.get('nowPri')} | 涨跌: {data.get('increPer')}%")
             else:
                 result.add_fail("查询 600519", exec_result.error)
 
-            # 测试不同格式
-            test_codes = [("000001", "平安银行"), ("sh600519", "带前缀")]
-            for code, desc in test_codes:
-                exec_result = await skill.execute_tool("get_quote", {"symbol": code})
-                if exec_result.success:
-                    result.add_pass(f"查询 {code} ({desc})")
-                else:
-                    result.add_fail(f"查询 {code}", exec_result.error)
+            # 测试不同格式（仅在有积分时测试多个）
+            if user_points is None or user_points >= 200:
+                test_codes = [("000001", "平安银行"), ("sh600519", "带前缀")]
+                for code, desc in test_codes:
+                    exec_result = await skill.execute_tool("get_quote", {"symbol": code})
+                    if exec_result.success:
+                        result.add_pass(f"查询 {code} ({desc})")
+                    else:
+                        result.add_fail(f"查询 {code}", exec_result.error)
+            else:
+                result.add_skip("多股票查询测试", f"积分不足 ({user_points} < 200)")
 
         # 测试错误处理
         print("\n  错误处理测试:")

@@ -74,6 +74,10 @@ class TushareClient:
         self._cache: Dict[str, tuple[Dict[str, Any], float]] = {}
         self._cache_lock = Lock()
 
+        # 用户积分（延迟加载）
+        self._user_points: Optional[int] = None
+        self._points_checked = False
+
         self._initialized = True
 
     def _normalize_stock_code(self, symbol: str) -> str:
@@ -164,6 +168,99 @@ class TushareClient:
             for key in expired_keys:
                 del self._cache[key]
 
+    def get_user_points(self) -> Optional[int]:
+        """
+        获取用户积分
+
+        Returns:
+            用户积分，如果无法获取返回 None
+        """
+        if self._points_checked:
+            return self._user_points
+
+        if not self.api:
+            self._points_checked = True
+            return None
+
+        try:
+            # 调用 user 接口获取用户信息
+            user_info = self.api.user()
+            if user_info is not None and not user_info.empty:
+                # user() 返回 DataFrame，取第一行的 points 字段
+                self._user_points = int(user_info.iloc[0].get('points', 0))
+                print(f"Tushare 账号积分: {self._user_points}")
+            else:
+                print("警告: 无法获取 Tushare 用户积分信息")
+                self._user_points = None
+        except Exception as e:
+            print(f"警告: 获取 Tushare 用户积分失败: {e}")
+            self._user_points = None
+
+        self._points_checked = True
+        return self._user_points
+
+    def get_stock_basic(self, symbol: str) -> Dict[str, Any]:
+        """
+        获取股票基本信息（低积分可用接口）
+
+        Args:
+            symbol: 股票代码
+
+        Returns:
+            格式化的股票基本信息字典
+        """
+        if not self.api:
+            return {
+                "success": False,
+                "data": None,
+                "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+            }
+
+        try:
+            # 标准化股票代码
+            ts_code = self._normalize_stock_code(symbol)
+
+            # 调用 stock_basic 接口获取基本信息
+            df = self.api.stock_basic(
+                ts_code=ts_code,
+                fields='ts_code,symbol,name,area,industry,list_date'
+            )
+
+            if df is None or df.empty:
+                raise TushareInvalidCodeError(f"未找到股票: {symbol}")
+
+            # 获取第一条记录
+            stock_info = df.iloc[0]
+
+            # 构造返回数据
+            stock_data = {
+                "ts_code": stock_info['ts_code'],
+                "symbol": stock_info['symbol'],
+                "name": stock_info['name'],
+                "area": stock_info.get('area', ''),
+                "industry": stock_info.get('industry', ''),
+                "list_date": stock_info.get('list_date', '')
+            }
+
+            return {
+                "success": True,
+                "data": stock_data,
+                "error": None
+            }
+
+        except TushareInvalidCodeError as e:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"无效股票代码: {str(e)}"
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"获取股票基本信息失败: {str(e)}"
+            }
+
     def get_quote(self, symbol: str) -> Dict[str, Any]:
         """
         获取股票实时行情数据
@@ -196,6 +293,10 @@ class TushareClient:
                 "error": None  # 错误信息（成功时为None）
             }
 
+        注意:
+            - 积分 >= 200: 使用 daily 接口获取完整行情数据
+            - 积分 < 200: 仅返回股票基本信息（不含价格数据）
+
         Raises:
             TushareInvalidCodeError: 无效股票代码
             TushareRateLimitError: API 限流
@@ -221,6 +322,53 @@ class TushareClient:
                     "error": None
                 }
 
+            # 检查用户积分
+            points = self.get_user_points()
+
+            # 积分 < 200 时使用低积分替代方案
+            if points is not None and points < 200:
+                print(f"积分不足 ({points} < 200)，使用 stock_basic 接口获取基本信息")
+
+                # 获取股票基本信息
+                basic_result = self.get_stock_basic(symbol)
+                if not basic_result['success']:
+                    return basic_result
+
+                basic_data = basic_result['data']
+
+                # 构造简化数据（仅基本信息，无价格数据）
+                stock_data = {
+                    "gid": self._to_legacy_code(ts_code),
+                    "ts_code": basic_data['ts_code'],
+                    "name": basic_data['name'],
+                    "area": basic_data.get('area', ''),
+                    "industry": basic_data.get('industry', ''),
+                    "list_date": basic_data.get('list_date', ''),
+                    # 价格数据标记为不可用
+                    "nowPri": "N/A",
+                    "increase": "N/A",
+                    "increPer": "N/A",
+                    "todayStartPri": "N/A",
+                    "yestodEndPri": "N/A",
+                    "todayMax": "N/A",
+                    "todayMin": "N/A",
+                    "traAmount": "N/A",
+                    "traNumber": "N/A",
+                    "update_time": datetime.now().strftime('%Y-%m-%d'),
+                    "_low_points_mode": True  # 标记为低积分模式
+                }
+
+                # 缓存数据
+                self._set_cache(ts_code, stock_data)
+
+                return {
+                    "success": True,
+                    "data": stock_data,
+                    "error": None,
+                    "warning": f"账号积分 {points} < 200，仅返回基本信息"
+                }
+
+            # 积分 >= 200 或无法获取积分时，使用 daily 接口获取完整数据
             # 调用 Tushare API 获取实时行情
             # 使用 daily 接口获取最新交易日数据
             df = self.api.daily(

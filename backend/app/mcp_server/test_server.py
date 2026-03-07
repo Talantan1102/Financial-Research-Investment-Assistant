@@ -99,31 +99,67 @@ async def test_tushare_only():
     print("=" * 60)
     print("Tushare Client 独立测试")
     print("=" * 60)
-    
+
     from app.data.tushare_client import get_tushare_client
-    
+
     print("\n🔧 创建Tushare客户端...")
     client = get_tushare_client()
-    
+
     print("\n📊 缓存信息:")
     print(json.dumps(client.get_cache_info(), indent=2))
-    
-    print("\n🧪 测试获取股票行情 (600519 - 贵州茅台)...")
+
+    # 检测用户积分
+    print("\n🔍 检测用户积分...")
+    user_points = client.get_user_points()
+    if user_points is not None:
+        print(f"✅ 用户积分: {user_points}")
+        if user_points < 200:
+            print(f"⚠️  积分不足 200，将使用低积分模式")
+    else:
+        print("⚠️  无法获取用户积分")
+
+    print("\n🧪 测试获取股票基本信息 (600519 - 贵州茅台)...")
+    basic_result = client.get_stock_basic("600519")
+    if basic_result["success"]:
+        data = basic_result["data"]
+        print("✅ 获取基本信息成功!")
+        print(f"\n  股票基本信息:")
+        print(f"    名称: {data.get('name')}")
+        print(f"    代码: {data.get('ts_code')}")
+        print(f"    行业: {data.get('industry')}")
+        print(f"    地区: {data.get('area')}")
+    else:
+        print(f"❌ 获取失败: {basic_result.get('error')}")
+
+    print("\n🧪 测试获取股票行情 (600519)...")
     result = client.get_quote("600519")
-    
+
     if result["success"]:
         data = result["data"]
         print("✅ 获取成功!")
         print(f"\n  股票信息:")
         print(f"    名称: {data.get('name')}")
         print(f"    代码: {data.get('ts_code')}")
-        print(f"    当前价: {data.get('nowPri')}")
-        print(f"    涨跌额: {data.get('increase')}")
-        print(f"    涨跌幅: {data.get('increPer')}%")
-        print(f"    开盘价: {data.get('todayStartPri')}")
-        print(f"    最高价: {data.get('todayMax')}")
-        print(f"    最低价: {data.get('todayMin')}")
-        print(f"    成交量: {data.get('traAmount')} 手")
+
+        # 检查是否为低积分模式
+        if data.get('_low_points_mode'):
+            print(f"    模式: 低积分模式（仅基本信息）")
+            print(f"    行业: {data.get('industry', 'N/A')}")
+            print(f"    地区: {data.get('area', 'N/A')}")
+            print(f"    上市日期: {data.get('list_date', 'N/A')}")
+        else:
+            print(f"    当前价: {data.get('nowPri')}")
+            print(f"    涨跌额: {data.get('increase')}")
+            print(f"    涨跌幅: {data.get('increPer')}%")
+            print(f"    开盘价: {data.get('todayStartPri')}")
+            print(f"    最高价: {data.get('todayMax')}")
+            print(f"    最低价: {data.get('todayMin')}")
+            print(f"    成交量: {data.get('traAmount')} 手")
+
+        # 显示警告信息
+        if 'warning' in result:
+            print(f"\n  ⚠️  {result['warning']}")
+
         return True
     else:
         print(f"⚠️ 获取失败: {result.get('error')}")
