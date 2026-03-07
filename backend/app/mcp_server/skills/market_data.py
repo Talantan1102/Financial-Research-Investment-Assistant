@@ -57,6 +57,161 @@ class MarketDataSkill(BaseSkill):
                 )
             ]
         )
+
+        # 3. 获取历史K线数据
+        self.register_tool(
+            name="get_history",
+            handler=self.get_history,
+            description="获取股票历史K线数据，支持日线、周线、月线",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码，如'600519'或'600519.SH'",
+                    required=True
+                ),
+                ToolParameter(
+                    name="period",
+                    type="string",
+                    description="周期类型：daily(日线)、weekly(周线)、monthly(月线)",
+                    required=False,
+                    default="daily"
+                ),
+                ToolParameter(
+                    name="start_date",
+                    type="string",
+                    description="开始日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="end_date",
+                    type="string",
+                    description="结束日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="limit",
+                    type="integer",
+                    description="返回数据条数限制",
+                    required=False,
+                    default=100
+                )
+            ]
+        )
+
+        # 4. 获取股票基础信息
+        self.register_tool(
+            name="get_stock_basic_info",
+            handler=self.get_stock_basic_info,
+            description="获取股票基础信息（行业、地区、上市日期等）",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码",
+                    required=True
+                )
+            ]
+        )
+
+        # 5. 获取龙虎榜数据
+        self.register_tool(
+            name="get_top_list",
+            handler=self.get_top_list,
+            description="获取龙虎榜每日明细，包含机构买卖数据",
+            parameters=[
+                ToolParameter(
+                    name="trade_date",
+                    type="string",
+                    description="交易日期，格式YYYYMMDD，默认最近交易日",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="limit",
+                    type="integer",
+                    description="返回条数限制",
+                    required=False,
+                    default=50
+                )
+            ]
+        )
+
+        # 6. 获取资金流向
+        self.register_tool(
+            name="get_money_flow",
+            handler=self.get_money_flow,
+            description="获取个股资金流向数据（主力、散户净流入等）",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码",
+                    required=True
+                ),
+                ToolParameter(
+                    name="trade_date",
+                    type="string",
+                    description="交易日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="start_date",
+                    type="string",
+                    description="开始日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="end_date",
+                    type="string",
+                    description="结束日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
+
+        # 7. 获取涨跌停统计
+        self.register_tool(
+            name="get_limit_list",
+            handler=self.get_limit_list,
+            description="获取每日涨跌停统计",
+            parameters=[
+                ToolParameter(
+                    name="trade_date",
+                    type="string",
+                    description="交易日期，格式YYYYMMDD，默认最近交易日",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="limit_type",
+                    type="string",
+                    description="涨跌停类型：U(涨停)、D(跌停)，默认全部",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
+
+        # 8. 获取公司详细信息
+        self.register_tool(
+            name="get_company_info",
+            handler=self.get_company_info,
+            description="获取上市公司详细信息（公司简介、联系方式、办公地址等）",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码",
+                    required=True
+                )
+            ]
+        )
     
     async def get_quote(self, symbol: str) -> ToolResult:
         """
@@ -163,6 +318,250 @@ class MarketDataSkill(BaseSkill):
             return ToolResult(
                 success=False,
                 error=f"搜索股票失败: {str(e)}"
+            )
+
+    async def get_history(self, symbol: str, period: str = "daily", 
+                          start_date: str = None, end_date: str = None,
+                          limit: int = 100) -> ToolResult:
+        """
+        获取股票历史K线数据
+        
+        Args:
+            symbol: 股票代码
+            period: 周期类型
+            start_date: 开始日期
+            end_date: 结束日期
+            limit: 返回条数限制
+        
+        Returns:
+            ToolResult 包含K线数据
+        """
+        if not symbol:
+            return ToolResult(
+                success=False,
+                error="股票代码不能为空"
+            )
+        
+        try:
+            result = self.tushare_client.get_history(
+                symbol=symbol,
+                period=period,
+                start_date=start_date,
+                end_date=end_date,
+                limit=limit
+            )
+            
+            if result.get("success"):
+                # 将数据和meta合并返回
+                response_data = {
+                    "records": result.get("data"),
+                    "meta": result.get("meta")
+                }
+                return ToolResult(
+                    success=True,
+                    data=response_data
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取历史数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取历史数据失败: {str(e)}"
+            )
+
+    async def get_stock_basic_info(self, symbol: str) -> ToolResult:
+        """
+        获取股票基础信息
+        
+        Args:
+            symbol: 股票代码
+        
+        Returns:
+            ToolResult 包含股票基础信息
+        """
+        if not symbol:
+            return ToolResult(
+                success=False,
+                error="股票代码不能为空"
+            )
+        
+        try:
+            result = self.tushare_client.get_stock_basic(symbol)
+            
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取股票基础信息失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取股票基础信息失败: {str(e)}"
+            )
+
+    async def get_top_list(self, trade_date: str = None, limit: int = 50) -> ToolResult:
+        """
+        获取龙虎榜数据
+        
+        Args:
+            trade_date: 交易日期
+            limit: 返回条数限制
+        
+        Returns:
+            ToolResult 包含龙虎榜数据
+        """
+        try:
+            result = self.tushare_client.get_top_list(
+                trade_date=trade_date,
+                limit=limit
+            )
+            
+            if result.get("success"):
+                response_data = {
+                    "records": result.get("data"),
+                    "meta": result.get("meta")
+                }
+                return ToolResult(
+                    success=True,
+                    data=response_data
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取龙虎榜数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取龙虎榜数据失败: {str(e)}"
+            )
+
+    async def get_money_flow(self, symbol: str, trade_date: str = None,
+                             start_date: str = None, end_date: str = None) -> ToolResult:
+        """
+        获取个股资金流向
+        
+        Args:
+            symbol: 股票代码
+            trade_date: 交易日期
+            start_date: 开始日期
+            end_date: 结束日期
+        
+        Returns:
+            ToolResult 包含资金流向数据
+        """
+        if not symbol:
+            return ToolResult(
+                success=False,
+                error="股票代码不能为空"
+            )
+        
+        try:
+            result = self.tushare_client.get_money_flow(
+                symbol=symbol,
+                trade_date=trade_date,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if result.get("success"):
+                response_data = {
+                    "records": result.get("data"),
+                    "meta": result.get("meta")
+                }
+                return ToolResult(
+                    success=True,
+                    data=response_data
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取资金流向数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取资金流向数据失败: {str(e)}"
+            )
+
+    async def get_limit_list(self, trade_date: str = None, limit_type: str = None) -> ToolResult:
+        """
+        获取涨跌停统计
+        
+        Args:
+            trade_date: 交易日期
+            limit_type: 涨跌停类型
+        
+        Returns:
+            ToolResult 包含涨跌停统计
+        """
+        try:
+            result = self.tushare_client.get_limit_list(
+                trade_date=trade_date,
+                limit_type=limit_type
+            )
+            
+            if result.get("success"):
+                response_data = {
+                    "records": result.get("data"),
+                    "meta": result.get("meta")
+                }
+                return ToolResult(
+                    success=True,
+                    data=response_data
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取涨跌停数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取涨跌停数据失败: {str(e)}"
+            )
+
+    async def get_company_info(self, symbol: str) -> ToolResult:
+        """
+        获取公司详细信息
+        
+        Args:
+            symbol: 股票代码
+        
+        Returns:
+            ToolResult 包含公司详细信息
+        """
+        if not symbol:
+            return ToolResult(
+                success=False,
+                error="股票代码不能为空"
+            )
+        
+        try:
+            result = self.tushare_client.get_stock_company_info(symbol)
+            
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取公司信息失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取公司信息失败: {str(e)}"
             )
     
     def get_cache_info(self) -> Dict[str, Any]:
