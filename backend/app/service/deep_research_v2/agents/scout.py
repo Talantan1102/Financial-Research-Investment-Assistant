@@ -14,7 +14,8 @@ DeepResearch V2.0 - 深度侦探 Agent (DeepScout)
 import uuid
 import asyncio
 import hashlib
-import requests
+import json
+import aiohttp
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -1071,7 +1072,7 @@ URL: {url}
             return []
 
     async def _execute_search(self, query: str, count: int = 10) -> List[Dict]:
-        """执行网络搜索 - 使用 Bocha Web Search API"""
+        """执行网络搜索 - 使用博查 Web Search API"""
         # 检查缓存
         cache_key = hashlib.md5(query.encode()).hexdigest()
         if cache_key in self.search_cache:
@@ -1079,62 +1080,68 @@ URL: {url}
             return self.search_cache[cache_key]
 
         try:
-            url = "https://api.bocha.cn/v1/web-search"
+            self.logger.info(f"Executing Bocha search: {query[:50]}...")
+
+            # 博查 API 配置
+            url = "https://api.bochaai.com/v1/web-search"
+            headers = {
+                'Authorization': self.search_api_key,
+                'Content-Type': 'application/json'
+            }
             payload = {
                 "query": query,
                 "summary": True,
-                "count": count,
-                "freshness": "noLimit"
-            }
-            headers = {
-                'Authorization': f'Bearer {self.search_api_key}',
-                'Content-Type': 'application/json'
+                "count": min(count, 20),
+                "page": 1
             }
 
-            self.logger.info(f"Executing Bocha search: {query[:50]}...")
+            # 执行异步请求
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        self.logger.error(f"Bocha API error {response.status}: {error_text[:200]}")
+                        return []
 
-            response = await asyncio.to_thread(
-                requests.post,
-                url,
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
+                    data = await response.json()
 
-            if response.status_code != 200:
-                self.logger.error(f"Bocha API error: {response.status_code} - {response.text[:200]}")
-                return []
-
-            data = response.json()
-
-            if data.get('code') != 200:
-                self.logger.error(f"Bocha API returned error: {data.get('msg', 'Unknown error')}")
-                return []
-
-            webpages = data.get('data', {}).get('webPages', {}).get('value', [])
-            self.logger.info(f"Bocha search returned {len(webpages)} results for: {query[:30]}...")
-
+            # 解析结果
             results = []
-            for item in webpages:
-                if item.get('url') and (item.get('snippet') or item.get('summary')):
-                    results.append({
-                        'url': item.get('url'),
-                        'title': item.get('name', 'N/A'),
-                        'summary': item.get('summary', '') or item.get('snippet', ''),
-                        'snippet': item.get('snippet', ''),
-                        'site_name': item.get('siteName', 'N/A'),
-                        'date': item.get('datePublished', '') or item.get('dateLastCrawled', '')
-                    })
+            webpages_data = data.get('data', {}).get('webPages', {})
+            value_list = webpages_data.get('value', [])
+
+            if value_list and isinstance(value_list, list):
+                self.logger.info(f"Bocha search returned {len(value_list)} results for: {query[:30]}...")
+
+                for item in value_list:
+                    if item.get('url') and (item.get('snippet') or item.get('summary')):
+                        results.append({
+                            'url': item['url'],
+                            'title': item.get('name', 'N/A'),
+                            'summary': item.get('summary', item.get('snippet', '')),
+                            'snippet': item.get('snippet', ''),
+                            'site_name': item.get('siteName', 'N/A'),
+                            'date': item.get('datePublished', '')
+                        })
+            else:
+                self.logger.warning(f"No results returned for: {query[:30]}...")
 
             # 缓存结果
             self.search_cache[cache_key] = results
             return results
 
-        except requests.exceptions.Timeout:
-            self.logger.error(f"Bocha search timeout for: {query[:30]}...")
+        except asyncio.TimeoutError:
+            self.logger.error(f"Bocha search timeout for '{query}'")
             return []
         except Exception as e:
             self.logger.error(f"Bocha search error for '{query}': {e}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
             return []
 
     async def _analyze_search_results(
