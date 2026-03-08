@@ -13,8 +13,17 @@ from pydantic import BaseModel, Field
 import asyncio
 import traceback
 import logging
+import os
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# 配置日志只输出到文件，避免干扰 MCP STDIO 通信
+_log_file = os.path.join(os.path.dirname(__file__), 'skills.log')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(_log_file)
+    ]
+)
 
 
 @dataclass

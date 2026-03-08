@@ -4,11 +4,23 @@
 """Tushare API 封装客户端"""
 import os
 import time
+import logging
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from threading import Lock
 import tushare as ts
 import pandas as pd
+
+# 配置日志只输出到文件，避免干扰 MCP STDIO 通信
+_log_file = os.path.join(os.path.dirname(__file__), 'tushare.log')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(_log_file)
+    ]
+)
+logger = logging.getLogger(__name__)
 
 
 class TushareRateLimitError(Exception):
@@ -53,7 +65,7 @@ class TushareClient:
         return cls._instance
 
     def __init__(self):
-        """初始化客户端"""
+        """初始化客户端（延迟初始化模式）"""
         # 避免重复初始化
         if hasattr(self, '_initialized'):
             return
@@ -63,22 +75,9 @@ class TushareClient:
         # 从环境变量读取自定义 API URL
         self.api_url = os.getenv("TUSHARE_API_URL", "https://api.tushare.pro")
 
-        if not self.token:
-            print("警告: TUSHARE_API_TOKEN 环境变量未设置")
-            self.api = None
-        else:
-            try:
-                ts.set_token(self.token)
-                # 创建 pro_api 实例
-                self.api = ts.pro_api()
-                # 设置自定义 API URL（如果指定了非默认 URL）
-                if self.api_url and self.api_url != "https://api.tushare.pro":
-                    self.api._DataApi__token = self.token
-                    self.api._DataApi__http_url = self.api_url
-                    print(f"使用自定义 Tushare API URL: {self.api_url}")
-            except Exception as e:
-                print(f"警告: Tushare API 初始化失败: {e}")
-                self.api = None
+        # 延迟初始化：不立即创建 api 实例
+        self.api = None
+        self._api_initialized = False
 
         # 缓存存储: {ts_code: (data, timestamp)}
         self._cache: Dict[str, tuple[Dict[str, Any], float]] = {}
@@ -89,6 +88,41 @@ class TushareClient:
         self._points_checked = False
 
         self._initialized = True
+
+    def get_api(self):
+        """
+        获取 Tushare API 实例（延迟初始化）
+
+        Returns:
+            Tushare pro_api 实例，如果初始化失败返回 None
+        """
+        # 如果已经初始化过，直接返回
+        if self._api_initialized:
+            return self.api
+
+        # 首次调用时初始化
+        if not self.token:
+            logger.warning("TUSHARE_API_TOKEN 环境变量未设置")
+            self.api = None
+            self._api_initialized = True
+            return None
+
+        try:
+            ts.set_token(self.token)
+            # 创建 pro_api 实例
+            self.api = ts.pro_api()
+            # 设置自定义 API URL（如果指定了非默认 URL）
+            if self.api_url and self.api_url != "https://api.tushare.pro":
+                self.api._DataApi__token = self.token
+                self.api._DataApi__http_url = self.api_url
+                logger.info(f"使用自定义 Tushare API URL: {self.api_url}")
+            self._api_initialized = True
+            return self.api
+        except Exception as e:
+            logger.warning(f"Tushare API 初始化失败: {e}")
+            self.api = None
+            self._api_initialized = True
+            return None
 
     def _normalize_stock_code(self, symbol: str) -> str:
         """
@@ -188,22 +222,23 @@ class TushareClient:
         if self._points_checked:
             return self._user_points
 
-        if not self.api:
+        api = self.get_api()
+        if not api:
             self._points_checked = True
             return None
 
         try:
             # 调用 user 接口获取用户信息
-            user_info = self.api.user()
+            user_info = api.user()
             if user_info is not None and not user_info.empty:
                 # user() 返回 DataFrame，取第一行的 points 字段
                 self._user_points = int(user_info.iloc[0].get('points', 0))
-                print(f"Tushare 账号积分: {self._user_points}")
+                logger.info(f"Tushare 账号积分: {self._user_points}")
             else:
-                print("警告: 无法获取 Tushare 用户积分信息")
+                logger.warning("无法获取 Tushare 用户积分信息")
                 self._user_points = None
         except Exception as e:
-            print(f"警告: 获取 Tushare 用户积分失败: {e}")
+            logger.warning(f"获取 Tushare 用户积分失败: {e}")
             self._user_points = None
 
         self._points_checked = True
@@ -219,7 +254,8 @@ class TushareClient:
         Returns:
             格式化的股票基本信息字典
         """
-        if not self.api:
+        api = self.get_api()
+        if not api:
             return {
                 "success": False,
                 "data": None,
@@ -231,7 +267,7 @@ class TushareClient:
             ts_code = self._normalize_stock_code(symbol)
 
             # 调用 stock_basic 接口获取基本信息
-            df = self.api.stock_basic(
+            df = api.stock_basic(
                 ts_code=ts_code,
                 fields='ts_code,symbol,name,area,industry,list_date'
             )
@@ -312,7 +348,8 @@ class TushareClient:
             TushareRateLimitError: API 限流
             TushareNetworkError: 网络异常
         """
-        if not self.api:
+        api = self.get_api()
+        if not api:
             return {
                 "success": False,
                 "data": None,
@@ -337,7 +374,7 @@ class TushareClient:
 
             # 积分 < 200 时使用低积分替代方案
             if points is not None and points < 200:
-                print(f"积分不足 ({points} < 200)，使用 stock_basic 接口获取基本信息")
+                logger.info(f"积分不足 ({points} < 200)，使用 stock_basic 接口获取基本信息")
 
                 # 获取股票基本信息
                 basic_result = self.get_stock_basic(symbol)
@@ -381,7 +418,7 @@ class TushareClient:
             # 积分 >= 200 或无法获取积分时，使用 daily 接口获取完整数据
             # 调用 Tushare API 获取实时行情
             # 使用 daily 接口获取最新交易日数据
-            df = self.api.daily(
+            df = api.daily(
                 ts_code=ts_code,
                 start_date=(datetime.now() - timedelta(days=7)).strftime('%Y%m%d'),
                 end_date=datetime.now().strftime('%Y%m%d')
@@ -394,7 +431,7 @@ class TushareClient:
             latest = df.iloc[0]
 
             # 获取股票基本信息（股票名称）
-            stock_basic = self.api.stock_basic(
+            stock_basic = api.stock_basic(
                 ts_code=ts_code,
                 fields='ts_code,symbol,name'
             )
@@ -543,7 +580,8 @@ class TushareClient:
                 "error": None
             }
         """
-        if not self.api:
+        api = self.get_api()
+        if not api:
             return {
                 "success": False,
                 "data": None,
@@ -573,9 +611,9 @@ class TushareClient:
 
             # 根据周期选择API
             api_func_map = {
-                "daily": self.api.daily,
-                "weekly": self.api.weekly,
-                "monthly": self.api.monthly
+                "daily": api.daily,
+                "weekly": api.weekly,
+                "monthly": api.monthly
             }
 
             if period not in api_func_map:
@@ -674,7 +712,8 @@ class TushareClient:
                 "error": None
             }
         """
-        if not self.api:
+        api = self.get_api()
+        if not api:
             return {
                 "success": False,
                 "data": None,
@@ -697,7 +736,7 @@ class TushareClient:
                 }
 
             # 调用top_list接口
-            df = self.api.top_list(trade_date=trade_date)
+            df = api.top_list(trade_date=trade_date)
 
             if df is None or df.empty:
                 return {
@@ -709,7 +748,7 @@ class TushareClient:
             # 获取股票名称映射
             stock_names = {}
             try:
-                basic_df = self.api.stock_basic(fields='ts_code,name')
+                basic_df = api.stock_basic(fields='ts_code,name')
                 if basic_df is not None and not basic_df.empty:
                     stock_names = dict(zip(basic_df['ts_code'], basic_df['name']))
             except:
@@ -796,7 +835,8 @@ class TushareClient:
                 "error": None
             }
         """
-        if not self.api:
+        api = self.get_api()
+        if not api:
             return {
                 "success": False,
                 "data": None,
@@ -828,7 +868,7 @@ class TushareClient:
                 params["end_date"] = end_date
 
             # 调用moneyflow接口
-            df = self.api.moneyflow(**params)
+            df = api.moneyflow(**params)
 
             if df is None or df.empty:
                 return {
@@ -840,7 +880,7 @@ class TushareClient:
             # 获取股票名称
             stock_name = ""
             try:
-                basic_df = self.api.stock_basic(ts_code=ts_code, fields='name')
+                basic_df = api.stock_basic(ts_code=ts_code, fields='name')
                 if basic_df is not None and not basic_df.empty:
                     stock_name = basic_df.iloc[0]['name']
             except:
@@ -923,7 +963,8 @@ class TushareClient:
                 "error": None
             }
         """
-        if not self.api:
+        api = self.get_api()
+        if not api:
             return {
                 "success": False,
                 "data": None,
@@ -951,7 +992,7 @@ class TushareClient:
                 params["limit_type"] = limit_type
 
             # 调用limit_list接口
-            df = self.api.limit_list(**params)
+            df = api.limit_list(**params)
 
             if df is None or df.empty:
                 return {
@@ -964,7 +1005,7 @@ class TushareClient:
             stock_names = {}
             try:
                 ts_codes = df['ts_code'].tolist()
-                basic_df = self.api.stock_basic(fields='ts_code,name')
+                basic_df = api.stock_basic(fields='ts_code,name')
                 if basic_df is not None and not basic_df.empty:
                     stock_names = dict(zip(basic_df['ts_code'], basic_df['name']))
             except:
@@ -1053,7 +1094,8 @@ class TushareClient:
                 "error": None
             }
         """
-        if not self.api:
+        api = self.get_api()
+        if not api:
             return {
                 "success": False,
                 "data": None,
@@ -1075,7 +1117,7 @@ class TushareClient:
                 }
 
             # 调用stock_company接口获取详细信息
-            df = self.api.stock_company(ts_code=ts_code)
+            df = api.stock_company(ts_code=ts_code)
 
             if df is None or df.empty:
                 return {
@@ -1085,7 +1127,7 @@ class TushareClient:
                 }
 
             # 获取基础信息补充
-            basic_df = self.api.stock_basic(ts_code=ts_code)
+            basic_df = api.stock_basic(ts_code=ts_code)
             basic_info = {}
             if basic_df is not None and not basic_df.empty:
                 basic_row = basic_df.iloc[0]

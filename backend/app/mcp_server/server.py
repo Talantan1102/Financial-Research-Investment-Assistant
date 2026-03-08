@@ -27,17 +27,23 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 # 本地导入
-from app.mcp_server.skills import MarketDataSkill, BaseSkill, FinancialAnalysisSkill, RiskAssessmentSkill
+from app.mcp_server.skills import (
+    MarketDataSkill,
+    BaseSkill,
+    FinancialAnalysisSkill,
+    RiskAssessmentSkill,
+    DeepResearchSkill
+)
 from app.mcp_server.config import get_config
 
 
-# 配置日志
+# 配置日志 - 只输出到文件，避免干扰 STDIO 通信
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(os.path.dirname(__file__), 'mcp_server.log')),
-        logging.StreamHandler(sys.stderr)
+        logging.FileHandler(os.path.join(os.path.dirname(__file__), 'mcp_server.log'))
+        # 移除 StreamHandler(sys.stderr) 以避免干扰 MCP STDIO 通信
     ]
 )
 logger = logging.getLogger("MCP Server")
@@ -180,7 +186,14 @@ def create_server() -> FinancialMCPServer:
         server.register_skill(risk_assessment_skill)
     except Exception as e:
         logger.warning(f"RiskAssessment Skill 注册失败: {e}")
-    
+
+    # 注册 DeepResearch Skill
+    try:
+        deep_research_skill = DeepResearchSkill()
+        server.register_skill(deep_research_skill)
+    except Exception as e:
+        logger.warning(f"DeepResearch Skill 注册失败: {e}")
+
     return server
 
 

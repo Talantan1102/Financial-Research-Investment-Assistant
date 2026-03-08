@@ -23,8 +23,20 @@ class FinancialAnalysisSkill(BaseSkill):
     description = "A股上市公司财务分析，支持财报查询、财务指标计算、财报对比分析"
 
     def __init__(self):
-        self.tushare_client: TushareClient = get_tushare_client()
+        # 延迟初始化：不立即获取 TushareClient 实例
+        self._tushare_client: Optional[TushareClient] = None
         super().__init__()
+
+    def get_tushare_client(self) -> TushareClient:
+        """
+        获取 TushareClient 实例（延迟初始化）
+
+        Returns:
+            TushareClient 实例
+        """
+        if self._tushare_client is None:
+            self._tushare_client = get_tushare_client()
+        return self._tushare_client
 
     def _register_tools(self):
         """注册财务分析相关工具"""
@@ -147,18 +159,19 @@ class FinancialAnalysisSkill(BaseSkill):
 
         try:
             # 标准化股票代码
-            ts_code = self.tushare_client._normalize_stock_code(symbol)
+            ts_code = self.get_tushare_client()._normalize_stock_code(symbol)
 
             # 检查 API 是否初始化
-            if not self.tushare_client.api:
+            if not self.get_tushare_client().get_api():
                 return ToolResult(
                     success=False,
                     error="Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
                 )
 
             # 根据报表类型选择 API 接口
+            api = self.get_tushare_client().get_api()
             if report_type == "income":
-                df = self.tushare_client.api.income(
+                df = api.income(
                     ts_code=ts_code,
                     period=period,
                     fields='ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,'
@@ -167,7 +180,7 @@ class FinancialAnalysisSkill(BaseSkill):
                 )
                 report_name = "利润表"
             elif report_type == "balance":
-                df = self.tushare_client.api.balancesheet(
+                df = api.balancesheet(
                     ts_code=ts_code,
                     period=period,
                     fields='ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,'
@@ -177,7 +190,7 @@ class FinancialAnalysisSkill(BaseSkill):
                 )
                 report_name = "资产负债表"
             else:  # cashflow
-                df = self.tushare_client.api.cashflow(
+                df = api.cashflow(
                     ts_code=ts_code,
                     period=period,
                     fields='ts_code,ann_date,f_ann_date,end_date,report_type,comp_type,'
@@ -277,17 +290,18 @@ class FinancialAnalysisSkill(BaseSkill):
 
         try:
             # 标准化股票代码
-            ts_code = self.tushare_client._normalize_stock_code(symbol)
+            ts_code = self.get_tushare_client()._normalize_stock_code(symbol)
 
             # 检查 API 是否初始化
-            if not self.tushare_client.api:
+            if not self.get_tushare_client().get_api():
                 return ToolResult(
                     success=False,
                     error="Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
                 )
 
             # 获取财务指标数据
-            df = self.tushare_client.api.fina_indicator(
+            api = self.get_tushare_client().get_api()
+            df = api.fina_indicator(
                 ts_code=ts_code,
                 period=period,
                 fields='ts_code,ann_date,end_date,eps,roe,roe_waa,roe_dt,roa,'
@@ -381,19 +395,20 @@ class FinancialAnalysisSkill(BaseSkill):
 
         try:
             # 标准化股票代码
-            ts_code = self.tushare_client._normalize_stock_code(symbol)
+            ts_code = self.get_tushare_client()._normalize_stock_code(symbol)
 
             # 检查 API 是否初始化
-            if not self.tushare_client.api:
+            if not self.get_tushare_client().get_api():
                 return ToolResult(
                     success=False,
                     error="Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
                 )
 
             # 根据指标类型选择数据源
+            api = self.get_tushare_client().get_api()
             if indicator in ["revenue", "net_profit"]:
                 # 从利润表获取数据
-                df = self.tushare_client.api.income(
+                df = api.income(
                     ts_code=ts_code,
                     fields='ts_code,end_date,total_revenue,n_income_attr_p'
                 )
@@ -419,7 +434,7 @@ class FinancialAnalysisSkill(BaseSkill):
 
             else:  # roe, roa
                 # 从财务指标获取数据
-                df = self.tushare_client.api.fina_indicator(
+                df = api.fina_indicator(
                     ts_code=ts_code,
                     fields='ts_code,end_date,roe,roa'
                 )
@@ -625,8 +640,8 @@ class FinancialAnalysisSkill(BaseSkill):
 
     def get_cache_info(self) -> Dict[str, Any]:
         """获取缓存信息"""
-        return self.tushare_client.get_cache_info()
+        return self.get_tushare_client().get_cache_info()
 
     def clear_cache(self):
         """清空缓存"""
-        self.tushare_client.clear_cache()
+        self.get_tushare_client().clear_cache()

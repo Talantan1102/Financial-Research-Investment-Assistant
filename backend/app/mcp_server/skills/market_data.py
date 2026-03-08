@@ -14,16 +14,28 @@ from app.data.tushare_client import get_tushare_client, TushareClient
 class MarketDataSkill(BaseSkill):
     """
     市场行情数据 Skill
-    
+
     提供股票行情查询功能，基于 Tushare 数据源。
     """
-    
+
     name = "market_data"
     description = "股票市场行情数据查询，支持A股实时行情获取"
-    
+
     def __init__(self):
-        self.tushare_client: TushareClient = get_tushare_client()
+        # 延迟初始化：不立即获取 TushareClient 实例
+        self._tushare_client: Optional[TushareClient] = None
         super().__init__()
+
+    def get_tushare_client(self) -> TushareClient:
+        """
+        获取 TushareClient 实例（延迟初始化）
+
+        Returns:
+            TushareClient 实例
+        """
+        if self._tushare_client is None:
+            self._tushare_client = get_tushare_client()
+        return self._tushare_client
     
     def _register_tools(self):
         """注册 MarketData 相关工具"""
@@ -248,7 +260,7 @@ class MarketDataSkill(BaseSkill):
         
         try:
             # 使用 Tushare 客户端获取行情
-            result = self.tushare_client.get_quote(symbol)
+            result = self.get_tushare_client().get_quote(symbol)
             
             if result.get("success"):
                 return ToolResult(
@@ -286,7 +298,7 @@ class MarketDataSkill(BaseSkill):
         try:
             # 如果看起来像股票代码，直接查询
             if keyword.isdigit() or keyword.startswith(("sh", "sz", "SH", "SZ")):
-                result = self.tushare_client.get_quote(keyword)
+                result = self.get_tushare_client().get_quote(keyword)
                 if result.get("success"):
                     return ToolResult(
                         success=True,
@@ -295,11 +307,11 @@ class MarketDataSkill(BaseSkill):
                             "count": 1
                         }
                     )
-            
+
             # 纯数字代码，尝试上证和深证
             if keyword.isdigit():
                 for prefix in ["sh", "sz"]:
-                    result = self.tushare_client.get_quote(f"{prefix}{keyword}")
+                    result = self.get_tushare_client().get_quote(f"{prefix}{keyword}")
                     if result.get("success"):
                         return ToolResult(
                             success=True,
@@ -343,7 +355,7 @@ class MarketDataSkill(BaseSkill):
             )
         
         try:
-            result = self.tushare_client.get_history(
+            result = self.get_tushare_client().get_history(
                 symbol=symbol,
                 period=period,
                 start_date=start_date,
@@ -389,7 +401,7 @@ class MarketDataSkill(BaseSkill):
             )
         
         try:
-            result = self.tushare_client.get_stock_basic(symbol)
+            result = self.get_tushare_client().get_stock_basic(symbol)
             
             if result.get("success"):
                 return ToolResult(
@@ -419,7 +431,7 @@ class MarketDataSkill(BaseSkill):
             ToolResult 包含龙虎榜数据
         """
         try:
-            result = self.tushare_client.get_top_list(
+            result = self.get_tushare_client().get_top_list(
                 trade_date=trade_date,
                 limit=limit
             )
@@ -465,7 +477,7 @@ class MarketDataSkill(BaseSkill):
             )
         
         try:
-            result = self.tushare_client.get_money_flow(
+            result = self.get_tushare_client().get_money_flow(
                 symbol=symbol,
                 trade_date=trade_date,
                 start_date=start_date,
@@ -504,7 +516,7 @@ class MarketDataSkill(BaseSkill):
             ToolResult 包含涨跌停统计
         """
         try:
-            result = self.tushare_client.get_limit_list(
+            result = self.get_tushare_client().get_limit_list(
                 trade_date=trade_date,
                 limit_type=limit_type
             )
@@ -546,7 +558,7 @@ class MarketDataSkill(BaseSkill):
             )
         
         try:
-            result = self.tushare_client.get_stock_company_info(symbol)
+            result = self.get_tushare_client().get_stock_company_info(symbol)
             
             if result.get("success"):
                 return ToolResult(
@@ -566,8 +578,8 @@ class MarketDataSkill(BaseSkill):
     
     def get_cache_info(self) -> Dict[str, Any]:
         """获取缓存信息"""
-        return self.tushare_client.get_cache_info()
-    
+        return self.get_tushare_client().get_cache_info()
+
     def clear_cache(self):
         """清空缓存"""
-        self.tushare_client.clear_cache()
+        self.get_tushare_client().clear_cache()

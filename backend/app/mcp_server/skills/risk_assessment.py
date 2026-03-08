@@ -25,10 +25,22 @@ class RiskAssessmentSkill(BaseSkill):
     description = "投资组合风险评估,支持风险指标计算、投资组合分析、风险报告生成"
 
     def __init__(self):
-        self.tushare_client: TushareClient = get_tushare_client()
+        # 延迟初始化：不立即获取 TushareClient 实例
+        self._tushare_client: Optional[TushareClient] = None
         # 无风险收益率(年化),默认3%(中国国债收益率)
         self.risk_free_rate = 0.03
         super().__init__()
+
+    def get_tushare_client(self) -> TushareClient:
+        """
+        获取 TushareClient 实例（延迟初始化）
+
+        Returns:
+            TushareClient 实例
+        """
+        if self._tushare_client is None:
+            self._tushare_client = get_tushare_client()
+        return self._tushare_client
 
     def _register_tools(self):
         """注册风险评估相关工具"""
@@ -464,10 +476,13 @@ class RiskAssessmentSkill(BaseSkill):
             包含价格、收益率等数据的字典
         """
         try:
-            # 标准化代码
-            ts_code = self.tushare_client._normalize_stock_code(symbol)
+            # 获取 TushareClient 实例
+            client = self.get_tushare_client()
 
-            if not self.tushare_client.api:
+            # 标准化代码
+            ts_code = client._normalize_stock_code(symbol)
+
+            if not client.get_api():
                 return {
                     "success": False,
                     "error": "Tushare API 未初始化"
@@ -478,7 +493,7 @@ class RiskAssessmentSkill(BaseSkill):
             start_date = end_date - timedelta(days=int(days * 1.5))
 
             # 获取日线数据
-            df = self.tushare_client.api.daily(
+            df = client.get_api().daily(
                 ts_code=ts_code,
                 start_date=start_date.strftime('%Y%m%d'),
                 end_date=end_date.strftime('%Y%m%d')
@@ -512,7 +527,7 @@ class RiskAssessmentSkill(BaseSkill):
                 returns.append(ret)
 
             # 获取股票名称
-            stock_basic = self.tushare_client.api.stock_basic(
+            stock_basic = client.get_api().stock_basic(
                 ts_code=ts_code,
                 fields='ts_code,name'
             )
@@ -844,8 +859,8 @@ class RiskAssessmentSkill(BaseSkill):
 
     def get_cache_info(self) -> Dict[str, Any]:
         """获取缓存信息"""
-        return self.tushare_client.get_cache_info()
+        return self.get_tushare_client().get_cache_info()
 
     def clear_cache(self):
         """清空缓存"""
-        self.tushare_client.clear_cache()
+        self.get_tushare_client().clear_cache()

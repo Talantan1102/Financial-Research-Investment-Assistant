@@ -7,12 +7,24 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.status import HTTP_200_OK, HTTP_500_INTERNAL_SERVER_ERROR
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from core.database import get_db
 from models.chat import ChatAttachment
 from service import DocumentService, WebSearchService, ChatService, SessionService, ServiceConfig
 from service.retrieval_service import retrieve_content
+from service.mcp_chat_service import MCPChatService
 from schemas import ChatRequest, LegacySessionResponse, ChatWithAttachmentsRequest
+
+
+# MCP Chat Request Schema
+class MCPChatRequest(BaseModel):
+    """MCP 聊天请求"""
+    question: str
+    session_id: Optional[str] = None
+    system_prompt: Optional[str] = None
+    model: str = "qwen-max"
+
 
 # Create router instance
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -312,3 +324,56 @@ async def chat_completion_with_attachments(
         generate_response(),
         media_type="text/event-stream"
     )
+
+
+@router.post("/mcp", status_code=HTTP_200_OK)
+async def mcp_chat_completion(request: MCPChatRequest):
+    """
+    MCP 聊天补全接口 - 使用 MCP Tools + qwen LLM
+
+    这个接口会：
+    1. 连接 MCP Server，获取所有可用工具（市场数据、财务分析、风险评估等）
+    2. 调用 qwen 模型，让它自主决定调用哪些工具
+    3. 基于真实的 Tushare 数据生成投资分析报告
+
+    Args:
+        request: MCP 聊天请求（包含问题、会话ID、系统提示词等）
+
+    Returns:
+        qwen 基于 MCP Tools 生成的回答
+
+    Example:
+        POST /chat/mcp
+        {
+            "question": "查一下茅台近期的股市表现，值不值得买",
+            "model": "qwen-max"
+        }
+    """
+    try:
+        # 创建 MCP Chat Service
+        async with MCPChatService(model=request.model) as mcp_service:
+            # 调用 chat 方法
+            answer = await mcp_service.chat(
+                user_question=request.question,
+                system_prompt=request.system_prompt
+            )
+
+            return {
+                "code": 0,
+                "message": "success",
+                "data": {
+                    "answer": answer,
+                    "session_id": request.session_id,
+                    "model": request.model,
+                    "tools_available": len(mcp_service.tools_list),
+                    "tools_used": "由 qwen 自主决定"
+                }
+            }
+
+    except Exception as e:
+        return {
+            "code": -1,
+            "message": f"MCP 聊天失败: {str(e)}",
+            "data": None
+        }
+
