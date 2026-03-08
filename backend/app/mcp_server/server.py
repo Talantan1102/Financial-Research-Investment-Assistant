@@ -31,9 +31,10 @@ from app.mcp_server.skills import (
     MarketDataSkill,
     BaseSkill,
     FinancialAnalysisSkill,
-    RiskAssessmentSkill,
-    DeepResearchSkill
+    RiskAssessmentSkill
 )
+# 使用完全拆分版 DeepResearch Skill（6个独立工具）
+from app.mcp_server.skills.deep_research_split import DeepResearchSkillSplit
 from app.mcp_server.config import get_config
 
 
@@ -187,10 +188,11 @@ def create_server() -> FinancialMCPServer:
     except Exception as e:
         logger.warning(f"RiskAssessment Skill 注册失败: {e}")
 
-    # 注册 DeepResearch Skill
+    # 注册 DeepResearch Skill (完全拆分版，6个独立工具)
     try:
-        deep_research_skill = DeepResearchSkill()
+        deep_research_skill = DeepResearchSkillSplit()
         server.register_skill(deep_research_skill)
+        logger.info("DeepResearch Skill Split registered successfully")
     except Exception as e:
         logger.warning(f"DeepResearch Skill 注册失败: {e}")
 
