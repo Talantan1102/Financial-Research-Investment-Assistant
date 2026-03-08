@@ -1,0 +1,153 @@
+# DeepResearch 双模式架构设计
+
+## 📋 架构概览
+
+### 模式 1: HTTP Router + SSE ✅ (已实现)
+**用途**: 前端展示实时进度
+
+```
+前端 → POST /api/research/stream → StreamingResponse (SSE)
+     ↓
+  实时接收:
+  - phase_start (Architect 开始规划...)
+  - section_start (正在研究第1章...)
+  - search_start (正在搜索: 小米汽车销量)
+  - agent_result (Scout 找到 5 条信息)
+  - final_report (完整报告生成)
+```
+
+**已有端点**:
+- `POST /api/research/stream` - V2 流式研究
+- 返回 `text/event-stream`
+- 事件类型: phase_start, section_start, search_result, agent_result, final_report
+
+---
+
+### 模式 2: 拆分 MCP Tools 🆕 (待实现)
+**用途**: LLM 逐步调用，控制研究流程
+
+```
+LLM 调用序列:
+1. deep_research.plan_outline(query)        → 返回研究大纲
+2. deep_research.search_section(section_id) → 搜索某章节信息
+3. deep_research.analyze_data(section_id)   → 分析数据
+4. deep_research.write_section(section_id)  → 撰写章节
+5. deep_research.review_quality(report)     → 质量评审
+6. deep_research.get_full_report()          → 获取完整报告
+```
+
+---
+
+## 🔧 实现方案
+
+### 方案 A: 在 DeepResearchSkill 中新增工具
+
+**优点**:
+- 代码集中，易维护
+- 复用现有服务
+
+**新增工具**:
+```python
+# 1. 规划大纲
+deep_research.plan_outline(query: str) -> Outline
+  → 调用 Architect Agent
+  → 返回: {sections: [...], hypotheses: [...]}
+
+# 2. 研究单个章节
+deep_research.research_section(
+    outline: dict,
+    section_id: str,
+    previous_findings: Optional[dict]
+) -> SectionResult
+  → 调用 Scout + Wizard
+  → 返回: {facts: [...], insights: [...], sources: [...]}
+
+# 3. 撰写章节
+deep_research.write_section(
+    outline: dict,
+    section_id: str,
+    research_data: dict
+) -> SectionDraft
+  → 调用 Writer Agent
+  → 返回: {content: "...", word_count: 500}
+
+# 4. 质量评审
+deep_research.review_report(report: dict) -> ReviewResult
+  → 调用 Critic Agent
+  → 返回: {score: 8.5, suggestions: [...], approved: true}
+
+# 5. 获取状态
+deep_research.get_state(session_id: str) -> ResearchState
+  → 返回当前研究状态
+```
+
+---
+
+### 方案 B: Session 状态管理
+
+为了支持多步骤调用，需要维护研究状态：
+
+```python
+# 状态存储 (Redis)
+research_state[session_id] = {
+    "query": "...",
+    "outline": {...},
+    "sections": {
+        "section_1": {
+            "research_data": {...},
+            "draft": "...",
+            "status": "completed"
+        },
+        "section_2": {
+            "status": "in_progress"
+        }
+    },
+    "current_phase": "writing",
+    "created_at": "...",
+    "updated_at": "..."
+}
+```
+
+---
+
+## 🎯 推荐实现路径
+
+### 阶段 1: 最小可用版本 (MVP)
+新增 3 个核心工具：
+
+1. **`plan_research`** - 规划大纲
+   - 输入: query
+   - 输出: outline (章节列表 + 假设)
+
+2. **`execute_research`** - 执行完整研究（保留现有）
+   - 输入: query, session_id
+   - 输出: full_report
+
+3. **`get_research_status`** - 获取进度
+   - 输入: session_id
+   - 输出: current_phase, progress, partial_results
+
+### 阶段 2: 细粒度控制
+拆分为 5-6 个独立工具，对应每个 Agent
+
+---
+
+## 📝 使用场景对比
+
+| 场景 | 使用模式 | 工具选择 |
+|------|---------|---------|
+| 前端用户直接使用 | HTTP SSE | `/api/research/stream` |
+| LLM 自主研究 | MCP Full | `deep_research.execute_research` |
+| LLM 分步控制 | MCP Split | `plan_research` → `research_section` → ... |
+| 查看研究进度 | MCP Status | `get_research_status` |
+
+---
+
+## 🚀 下一步行动
+
+你希望我：
+1. **实现方案 A - MVP**（3个核心工具：plan, execute, status）
+2. **实现方案 B - 完整拆分**（5-6个工具，对应每个Agent）
+3. **先看看现有的 deep_research_v2 代码结构**，确认如何最好地暴露内部状态
+
+我建议先选 **选项 3**，查看代码结构后再决定最佳实现方式。你觉得呢？
