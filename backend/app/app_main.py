@@ -15,14 +15,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from router import document_router, search_router, chat_router, research_router
-from router.auth_router import router as auth_router
-from router.session_router import router as session_router
-from router.knowledge_router import router as knowledge_router
-from router.attachment_router import router as attachment_router
-from router.memory_router import router as memory_router
-from router.database_router import router as database_router
-from router.news_router import router as news_router
-from core.database import engine, Base
+from app.router.auth_router import router as auth_router
+from app.router.session_router import router as session_router
+from app.router.knowledge_router import router as knowledge_router
+from app.router.attachment_router import router as attachment_router
+from app.router.memory_router import router as memory_router
+from app.router.database_router import router as database_router
+from app.router.news_router import router as news_router
+from app.core.database import engine, Base
 # 导入所有模型以确保它们被注册
 from models import (
     User, ChatSession, ChatMessage, ChatAttachment, LongTermMemory,
