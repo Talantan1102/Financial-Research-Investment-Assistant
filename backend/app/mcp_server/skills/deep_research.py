@@ -205,13 +205,15 @@ class DeepResearchSkill(BaseSkill):
 
             return {
                 "success": True,
-                "session_id": session_id,
-                "query": query,
-                "final_report": final_report,
-                "quality_score": quality_score,
-                "phase": phase,
-                "total_events": len(events),
-                "events": events[:10]  # 只返回前10个事件作为示例
+                "data": {
+                    "session_id": session_id,
+                    "query": query,
+                    "final_report": final_report,
+                    "quality_score": quality_score,
+                    "phase": phase,
+                    "total_events": len(events),
+                    "events": events[:10]  # 只返回前10个事件作为示例
+                }
             }
 
         except Exception as e:
@@ -248,18 +250,20 @@ class DeepResearchSkill(BaseSkill):
 
             return {
                 "success": True,
-                "session_id": result["session_id"],
-                "query": result["query"],
-                "final_report": result["final_report"],
-                "quality_score": result["quality_score"],
-                "outline": result.get("outline", []),
-                "facts": result.get("facts", []),
-                "data_points": result.get("data_points", []),
-                "charts": result.get("charts", []),
-                "references": result.get("references", []),
-                "insights": result.get("insights", []),
-                "iterations": result.get("iterations", 0),
-                "phase": result.get("phase", "")
+                "data": {
+                    "session_id": result["session_id"],
+                    "query": result["query"],
+                    "final_report": result["final_report"],
+                    "quality_score": result["quality_score"],
+                    "outline": result.get("outline", []),
+                    "facts": result.get("facts", []),
+                    "data_points": result.get("data_points", []),
+                    "charts": result.get("charts", []),
+                    "references": result.get("references", []),
+                    "insights": result.get("insights", []),
+                    "iterations": result.get("iterations", 0),
+                    "phase": result.get("phase", "")
+                }
             }
 
         except Exception as e:
@@ -295,12 +299,14 @@ class DeepResearchSkill(BaseSkill):
             # 提取核心信息
             return {
                 "success": True,
-                "query": query,
-                "summary": result["final_report"][:500] + "..." if len(result["final_report"]) > 500 else result["final_report"],
-                "key_facts": result.get("facts", [])[:5],  # 前5个关键事实
-                "key_insights": result.get("insights", [])[:3],  # 前3个洞察
-                "quality_score": result["quality_score"],
-                "iterations": result.get("iterations", 0)
+                "data": {
+                    "query": query,
+                    "summary": result["final_report"][:500] + "..." if len(result["final_report"]) > 500 else result["final_report"],
+                    "key_facts": result.get("facts", [])[:5],  # 前5个关键事实
+                    "key_insights": result.get("insights", [])[:3],  # 前3个洞察
+                    "quality_score": result["quality_score"],
+                    "iterations": result.get("iterations", 0)
+                }
             }
 
         except Exception as e:
