@@ -2,10 +2,21 @@
 # 未经授权，禁止转售或仿制。
 
 """
-MCP Chat Service - 基于 MCP Tools 的聊天服务
+MCP Chat Service - 三轮编排架构
 
-提供 qwen LLM + MCP Tools 的完整 function calling 集成。
-参考 test_real_e2e.py 的实现，封装为可重用的服务。
+三轮流程:
+  Round 1（Skill 选择）: LLM 从 skill 元工具选择 skill，编排层获取 SKILL.md + 工具定义
+  Round 2（工具调用）: LLM 使用 skill 的工具列表进行 function calling（可循环）
+  Round 3（最终回答）: LLM 基于工具返回数据生成最终回答
+
+消息流示例:
+  [system] 你是金融研究助手...
+  [user] 茅台股价多少？
+  [assistant] tool_call: skill(name="market_data")              ← Round 1
+  [tool] {SKILL.md 完整内容}                                     ← Round 1 结果
+  [assistant] tool_call: market_data.get_quote(symbol="600519") ← Round 2
+  [tool] {"success": true, "data": {"nowPri": "1850.50", ...}}  ← Round 2 结果
+  [assistant] 贵州茅台(600519) 当前价格 ¥1,850.50...             ← Round 3
 """
 
 import os
@@ -42,14 +53,11 @@ logger = logging.getLogger("MCPChatService")
 
 class MCPChatService:
     """
-    MCP Chat Service - 基于 MCP Tools 的对话服务
+    MCP Chat Service - 三轮编排架构
 
-    功能：
-    1. 连接 MCP Server，获取所有可用工具
-    2. 将 MCP 工具转换为 qwen function calling 格式
-    3. 调用 qwen 模型，支持完整的 function calling 流程
-    4. 自动处理工具调用和结果返回
-    5. 支持流式输出
+    Round 1: Skill 选择 — LLM 选择 skill，编排层获取 SKILL.md + 工具定义
+    Round 2: 工具调用 — LLM 使用 skill 的工具列表进行 function calling（最多 5 次循环）
+    Round 3: 最终回答 — LLM 基于工具返回数据生成最终回答
     """
 
     def __init__(
@@ -61,17 +69,6 @@ class MCPChatService:
         call_timeout: float = 30.0,
         max_iterations: int = 10
     ):
-        """
-        初始化 MCP Chat Service
-
-        Args:
-            mcp_server_path: MCP Server 脚本路径（默认自动推断）
-            model: qwen 模型名称（默认 qwen-max）
-            api_key: DashScope API Key（默认从环境变量读取）
-            connect_timeout: MCP 连接超时时间（秒）
-            call_timeout: MCP 工具调用超时时间（秒）
-            max_iterations: 最大 function calling 迭代次数
-        """
         if not DASHSCOPE_AVAILABLE:
             raise RuntimeError("dashscope 未安装。安装: pip install dashscope")
 
@@ -87,7 +84,6 @@ class MCPChatService:
 
         # 配置 MCP
         if mcp_server_path is None:
-            # 自动推断 MCP Server 路径
             current_dir = os.path.dirname(os.path.abspath(__file__))
             backend_dir = os.path.dirname(current_dir)
             mcp_server_path = os.path.join(backend_dir, "app/mcp_server/server.py")
@@ -99,18 +95,13 @@ class MCPChatService:
 
         # 运行时状态
         self.mcp_client: Optional[MCPClient] = None
-        self.tools_list: List[Dict] = []
+        self.tools_list: List[Dict] = []  # 元工具列表
         self.is_connected = False
 
         logger.info(f"MCP Chat Service 初始化: model={model}, server={mcp_server_path}")
 
     async def connect(self) -> bool:
-        """
-        连接到 MCP Server 并获取工具列表
-
-        Returns:
-            bool: 连接是否成功
-        """
+        """连接到 MCP Server 并获取元工具列表"""
         if self.is_connected:
             logger.info("MCP Client 已连接")
             return True
@@ -128,7 +119,7 @@ class MCPChatService:
                 logger.error("MCP Client 连接失败")
                 return False
 
-            # 获取工具列表
+            # 获取元工具列表（skill, get_skill_tools, execute_skill_tool）
             tools_result = await self.mcp_client.list_tools()
             if not tools_result.get("success"):
                 logger.error(f"获取工具列表失败: {tools_result.get('error')}")
@@ -137,9 +128,9 @@ class MCPChatService:
             self.tools_list = tools_result.get("tools", [])
             self.is_connected = True
 
-            logger.info(f"✅ MCP Client 连接成功，发现 {len(self.tools_list)} 个工具")
+            logger.info(f"MCP Client 连接成功，发现 {len(self.tools_list)} 个元工具")
             for tool in self.tools_list:
-                logger.debug(f"  - {tool['name']}: {tool['description'][:60]}...")
+                logger.debug(f"  - {tool['name']}: {tool.get('description', '')[:60]}...")
 
             return True
 
@@ -154,45 +145,26 @@ class MCPChatService:
             self.is_connected = False
             logger.info("MCP Client 已断开连接")
 
-    def mcp_tool_to_qwen_function(self, mcp_tool: Dict) -> Dict:
-        """
-        将 MCP 工具格式转换为 qwen function calling 格式
-
-        Args:
-            mcp_tool: MCP 工具定义
-
-        Returns:
-            qwen function 格式
-        """
+    def _mcp_tool_to_qwen(self, mcp_tool: Dict) -> Dict:
+        """将 MCP 工具格式转换为 qwen function calling 格式"""
         # qwen 的 function name 不能有 "."，用 "__" 替代
         qwen_name = mcp_tool["name"].replace(".", "__")
-
         return {
             "type": "function",
             "function": {
                 "name": qwen_name,
-                "description": mcp_tool["description"],
-                "parameters": mcp_tool["inputSchema"]
+                "description": mcp_tool.get("description", ""),
+                "parameters": mcp_tool.get("inputSchema", mcp_tool.get("parameters", {}))
             }
         }
 
-    def qwen_function_to_mcp_tool(self, qwen_name: str) -> str:
+    def _qwen_name_to_mcp(self, qwen_name: str) -> str:
         """将 qwen function name 转回 MCP tool name"""
         return qwen_name.replace("__", ".")
 
-    async def call_mcp_tool(self, tool_name: str, arguments: Dict) -> Any:
-        """
-        调用 MCP 工具
-
-        Args:
-            tool_name: MCP 工具名称
-            arguments: 工具参数
-
-        Returns:
-            工具执行结果
-        """
+    async def _call_mcp_tool(self, tool_name: str, arguments: Dict) -> Any:
+        """调用 MCP 工具，返回原始结果"""
         if not self.is_connected:
-            logger.error("MCP Client 未连接")
             return {"error": "MCP Client 未连接"}
 
         logger.info(f"调用 MCP 工具: {tool_name}")
@@ -200,41 +172,54 @@ class MCPChatService:
 
         result = await self.mcp_client.call_tool(tool_name, arguments)
 
-        if result.get("success"):
-            logger.info(f"  ✅ 成功")
-            return result["data"]
+        if result.get("success") is not None:
+            if result.get("success"):
+                logger.info(f"  工具调用成功")
+                return result.get("data", result)
+            else:
+                error = result.get("error", "未知错误")
+                logger.error(f"  工具调用失败: {error}")
+                return {"error": error}
         else:
-            error = result.get("error", "未知错误")
-            logger.error(f"  ❌ 失败: {error}")
-            return {"error": error}
+            # call_tool 返回的可能是直接的数据（非标准格式）
+            return result
 
-    async def chat(
+    async def _call_mcp_tool_raw(self, tool_name: str, arguments: Dict) -> str:
+        """
+        调用 MCP 工具，返回原始文本（不做 JSON 解析）。
+
+        用于 skill 工具返回 SKILL.md 等非 JSON 内容。
+        """
+        if not self.is_connected or not self.mcp_client._session:
+            return json.dumps({"error": "MCP Client 未连接"})
+
+        try:
+            result = await asyncio.wait_for(
+                self.mcp_client._session.call_tool(tool_name, arguments),
+                timeout=self.call_timeout
+            )
+
+            if result.content and len(result.content) > 0:
+                first_content = result.content[0]
+                if hasattr(first_content, 'text'):
+                    return first_content.text
+
+            return json.dumps({"error": "工具返回为空"})
+
+        except asyncio.TimeoutError:
+            return json.dumps({"error": f"工具调用超时 ({self.call_timeout}s)"})
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _build_messages(
         self,
         user_question: str,
         system_prompt: Optional[str] = None,
         conversation_history: Optional[List[Dict]] = None
-    ) -> str:
-        """
-        发送问题给 qwen，使用 MCP Tools
-
-        Args:
-            user_question: 用户问题
-            system_prompt: 系统提示词（可选）
-            conversation_history: 对话历史（可选）
-
-        Returns:
-            qwen 的最终回答
-        """
-        if not self.is_connected:
-            await self.connect()
-
-        # 准备工具列表
-        qwen_tools = [self.mcp_tool_to_qwen_function(tool) for tool in self.tools_list]
-
-        # 准备消息
+    ) -> List[Dict]:
+        """构建消息列表"""
         messages = []
 
-        # 添加系统提示词
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         else:
@@ -243,94 +228,281 @@ class MCPChatService:
                 "content": "你是一个专业的金融投资分析师。你可以使用提供的工具来查询股票数据、分析财务指标和评估风险。请基于真实数据给出专业、客观的投资建议。"
             })
 
-        # 添加对话历史
         if conversation_history:
             messages.extend(conversation_history)
 
-        # 添加用户问题
         messages.append({"role": "user", "content": user_question})
+        return messages
 
-        # 开始 function calling 循环
-        iteration = 0
-        while iteration < self.max_iterations:
-            iteration += 1
-            logger.info(f"迭代 {iteration}: 调用 qwen-{self.model}...")
-
+    def _extract_tool_calls(self, assistant_message) -> Optional[List]:
+        """从 assistant 消息中提取 tool_calls"""
+        tool_calls = None
+        if hasattr(assistant_message, 'get'):
+            tool_calls = assistant_message.get('tool_calls')
+        elif hasattr(assistant_message, 'tool_calls'):
             try:
-                response = Generation.call(
-                    model=self.model,
-                    messages=messages,
-                    tools=qwen_tools,
-                    result_format='message'
-                )
-
-                if response.status_code != 200:
-                    raise RuntimeError(f"qwen API 调用失败: {response.code} - {response.message}")
-
-                assistant_message = response.output.choices[0].message
-
-                # 检查是否有 tool_calls
+                tool_calls = assistant_message.tool_calls
+            except (AttributeError, KeyError):
                 tool_calls = None
-                if hasattr(assistant_message, 'get'):
-                    tool_calls = assistant_message.get('tool_calls')
-                elif hasattr(assistant_message, 'tool_calls'):
-                    try:
-                        tool_calls = assistant_message.tool_calls
-                    except (AttributeError, KeyError):
-                        tool_calls = None
+        return tool_calls
 
-                # 将 assistant 消息加入对话历史
-                messages.append({
-                    "role": assistant_message.get('role', 'assistant') if hasattr(assistant_message, 'get') else assistant_message.role,
-                    "content": assistant_message.get('content', '') if hasattr(assistant_message, 'get') else (assistant_message.content or ''),
-                    "tool_calls": tool_calls
+    def _get_assistant_content(self, assistant_message) -> str:
+        """从 assistant 消息中提取 content"""
+        if hasattr(assistant_message, 'get'):
+            return assistant_message.get('content', '') or ''
+        return (assistant_message.content or '') if hasattr(assistant_message, 'content') else ''
+
+    def _get_assistant_role(self, assistant_message) -> str:
+        """从 assistant 消息中提取 role"""
+        if hasattr(assistant_message, 'get'):
+            return assistant_message.get('role', 'assistant')
+        return assistant_message.role if hasattr(assistant_message, 'role') else 'assistant'
+
+    def _parse_tool_call(self, tool_call) -> tuple:
+        """解析单个 tool_call，返回 (function_name, function_args)"""
+        if isinstance(tool_call, dict):
+            function_name = tool_call['function']['name']
+            function_args = json.loads(tool_call['function']['arguments'])
+        else:
+            function_name = tool_call.function.name
+            function_args = json.loads(tool_call.function.arguments)
+        return function_name, function_args
+
+    def _call_llm(self, messages: List[Dict], tools: List[Dict]):
+        """调用 LLM"""
+        response = Generation.call(
+            model=self.model,
+            messages=messages,
+            tools=tools if tools else None,
+            result_format='message'
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"qwen API 调用失败: {response.code} - {response.message}")
+        return response.output.choices[0].message
+
+    async def _round1_select_skill(self, messages: List[Dict]) -> tuple:
+        """
+        Round 1: Skill 选择
+
+        只给 LLM 提供 skill 元工具，让 LLM 决定是否需要调用 skill。
+
+        Returns:
+            (skill_name, skill_md, skill_tools) 或 (None, None, None) 如果 LLM 直接回答
+        """
+        logger.info("=== Round 1: Skill 选择 ===")
+
+        # 只保留 skill 元工具
+        skill_tool = None
+        for t in self.tools_list:
+            if t["name"] == "skill":
+                skill_tool = t
+                break
+
+        if not skill_tool:
+            logger.error("未找到 skill 元工具")
+            return None, None, None
+
+        qwen_tools = [self._mcp_tool_to_qwen(skill_tool)]
+
+        # 调用 LLM
+        assistant_msg = self._call_llm(messages, qwen_tools)
+        tool_calls = self._extract_tool_calls(assistant_msg)
+
+        # 将 assistant 消息追加到 messages
+        messages.append({
+            "role": self._get_assistant_role(assistant_msg),
+            "content": self._get_assistant_content(assistant_msg),
+            "tool_calls": tool_calls
+        })
+
+        if not tool_calls:
+            # LLM 直接回答，不需要 skill
+            logger.info("Round 1: LLM 直接回答，无需 skill")
+            return None, None, None
+
+        # 解析 LLM 选择的 skill
+        function_name, function_args = self._parse_tool_call(tool_calls[0])
+        mcp_tool_name = self._qwen_name_to_mcp(function_name)
+
+        logger.info(f"Round 1: LLM tool_call: name={function_name}, args={function_args}")
+
+        if mcp_tool_name != "skill":
+            logger.warning(f"Round 1: LLM 调用了非 skill 工具: {mcp_tool_name}，尝试作为 skill name 处理")
+            # qwen 有时会把 skill name 直接作为 function name 返回
+            # 将其视为对该 skill 的选择
+            skill_name = mcp_tool_name
+        else:
+            skill_name = function_args.get("name")
+        logger.info(f"Round 1: LLM 选择了 skill: {skill_name}")
+
+        # 通过 MCP 获取 SKILL.md（原始文本）
+        skill_md = await self._call_mcp_tool_raw("skill", {"name": skill_name})
+
+        # 将 SKILL.md 内容作为 tool result 追加到 messages
+        messages.append({
+            "role": "tool",
+            "name": function_name,
+            "content": skill_md
+        })
+
+        # 通过 MCP 获取工具定义
+        tools_result = await self._call_mcp_tool("get_skill_tools", {"name": skill_name})
+
+        # get_skill_tools 返回 JSON，需要解析
+        if isinstance(tools_result, str):
+            try:
+                tools_result = json.loads(tools_result)
+            except json.JSONDecodeError:
+                logger.error(f"解析 get_skill_tools 结果失败")
+                return skill_name, skill_md, []
+
+        # 从返回结果中提取工具定义
+        if isinstance(tools_result, dict):
+            skill_tools = tools_result.get("tools", [])
+        else:
+            skill_tools = []
+
+        logger.info(f"Round 1 完成: skill={skill_name}, 获取 {len(skill_tools)} 个工具定义")
+        return skill_name, skill_md, skill_tools
+
+    async def _round2_execute_tools(
+        self,
+        messages: List[Dict],
+        skill_name: str,
+        skill_tools: List[Dict],
+        max_rounds: int = 5
+    ):
+        """
+        Round 2: 工具调用（可循环）
+
+        给 LLM 提供 skill 的工具列表，让 LLM 进行 function calling。
+        通过 execute_skill_tool 元工具执行。
+        """
+        logger.info(f"=== Round 2: 工具调用 (skill={skill_name}, {len(skill_tools)} 个工具) ===")
+
+        # 将 skill 工具定义转为 qwen function calling 格式
+        qwen_tools = []
+        for tool_def in skill_tools:
+            qwen_tools.append({
+                "type": "function",
+                "function": {
+                    "name": tool_def["name"].replace(".", "__"),
+                    "description": tool_def.get("description", ""),
+                    "parameters": tool_def.get("parameters", {})
+                }
+            })
+
+        # function calling 循环
+        for round_num in range(max_rounds):
+            logger.info(f"Round 2 - 迭代 {round_num + 1}/{max_rounds}")
+
+            assistant_msg = self._call_llm(messages, qwen_tools)
+            tool_calls = self._extract_tool_calls(assistant_msg)
+
+            messages.append({
+                "role": self._get_assistant_role(assistant_msg),
+                "content": self._get_assistant_content(assistant_msg),
+                "tool_calls": tool_calls
+            })
+
+            if not tool_calls:
+                # 没有 tool_call，LLM 已生成回答
+                logger.info(f"Round 2 完成: LLM 生成回答 (迭代 {round_num + 1} 次)")
+                return
+
+            # 处理所有 tool_calls
+            for tool_call in tool_calls:
+                function_name, function_args = self._parse_tool_call(tool_call)
+                # 转回 MCP 格式: market_data__get_quote -> market_data.get_quote
+                mcp_tool_name = self._qwen_name_to_mcp(function_name)
+
+                logger.info(f"  工具调用: {mcp_tool_name}, 参数: {function_args}")
+
+                # 解析 skill_name.tool_name
+                parts = mcp_tool_name.split(".", 1)
+                if len(parts) == 2:
+                    call_skill_name, call_tool_name = parts
+                else:
+                    call_skill_name = skill_name
+                    call_tool_name = mcp_tool_name
+
+                # 通过 execute_skill_tool 执行
+                tool_result = await self._call_mcp_tool("execute_skill_tool", {
+                    "skill_name": call_skill_name,
+                    "tool_name": call_tool_name,
+                    "arguments": function_args
                 })
 
-                # 处理 tool_calls
-                if tool_calls:
-                    logger.info(f"qwen 请求调用 {len(tool_calls)} 个工具")
+                # 将工具结果追加到 messages
+                result_str = json.dumps(tool_result, ensure_ascii=False) if not isinstance(tool_result, str) else tool_result
+                messages.append({
+                    "role": "tool",
+                    "name": function_name,
+                    "content": result_str
+                })
 
-                    for tool_call in tool_calls:
-                        # 解析 tool_call
-                        if isinstance(tool_call, dict):
-                            function_name = tool_call['function']['name']
-                            function_args = json.loads(tool_call['function']['arguments'])
-                        else:
-                            function_name = tool_call.function.name
-                            function_args = json.loads(tool_call.function.arguments)
+        logger.warning(f"Round 2: 达到最大迭代次数 {max_rounds}")
 
-                        # 转换为 MCP tool name
-                        mcp_tool_name = self.qwen_function_to_mcp_tool(function_name)
+    def _get_last_assistant_content(self, messages: List[Dict]) -> str:
+        """获取 messages 中最后一条 assistant 消息的 content"""
+        for msg in reversed(messages):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                return msg["content"]
+        return ""
 
-                        logger.info(f"  工具: {mcp_tool_name}")
-                        logger.debug(f"  参数: {json.dumps(function_args, ensure_ascii=False)}")
+    async def chat(
+        self,
+        user_question: str,
+        system_prompt: Optional[str] = None,
+        conversation_history: Optional[List[Dict]] = None
+    ) -> str:
+        """
+        三轮编排对话
 
-                        # 调用 MCP 工具
-                        tool_result = await self.call_mcp_tool(mcp_tool_name, function_args)
+        Args:
+            user_question: 用户问题
+            system_prompt: 系统提示词（可选）
+            conversation_history: 对话历史（可选）
 
-                        # 将工具结果加入消息历史
-                        messages.append({
-                            "role": "tool",
-                            "name": function_name,
-                            "content": json.dumps(tool_result, ensure_ascii=False)
-                        })
+        Returns:
+            LLM 的最终回答
+        """
+        if not self.is_connected:
+            await self.connect()
 
-                    # 继续下一轮迭代
-                    continue
+        messages = self._build_messages(user_question, system_prompt, conversation_history)
 
-                else:
-                    # 没有 tool_calls，生成了最终回答
-                    final_content = assistant_message.get('content', '') if hasattr(assistant_message, 'get') else (assistant_message.content or '')
-                    logger.info(f"✅ qwen 生成最终回答 (迭代 {iteration} 次)")
-                    return final_content
+        try:
+            # Round 1: Skill 选择
+            skill_name, skill_md, skill_tools = await self._round1_select_skill(messages)
 
-            except Exception as e:
-                logger.error(f"调用 qwen 时出错: {e}")
-                raise
+            if skill_name is None:
+                # LLM 直接回答，无需 skill
+                return self._get_last_assistant_content(messages)
 
-        # 达到最大迭代次数
-        logger.warning(f"达到最大迭代次数 {self.max_iterations}")
-        return "抱歉，分析过程超时，请稍后重试。"
+            # Round 2: 工具调用（可循环）
+            await self._round2_execute_tools(messages, skill_name, skill_tools)
+
+            # Round 3: 最终回答
+            # Round 2 退出时 messages 中最后一条 assistant 消息就是最终回答
+            final_answer = self._get_last_assistant_content(messages)
+            if final_answer:
+                logger.info("Round 3: 返回最终回答")
+                return final_answer
+
+            # 如果 Round 2 结束后 messages 最后是 tool 结果，再调一次 LLM 生成回答
+            logger.info("=== Round 3: 生成最终回答 ===")
+            assistant_msg = self._call_llm(messages, [])
+            content = self._get_assistant_content(assistant_msg)
+            messages.append({
+                "role": "assistant",
+                "content": content
+            })
+            return content
+
+        except Exception as e:
+            logger.error(f"chat 流程出错: {e}")
+            raise
 
     async def chat_stream(
         self,
@@ -339,18 +511,8 @@ class MCPChatService:
         conversation_history: Optional[List[Dict]] = None
     ) -> AsyncGenerator[str, None]:
         """
-        流式对话（暂不支持 function calling 流式）
-
-        Args:
-            user_question: 用户问题
-            system_prompt: 系统提示词
-            conversation_history: 对话历史
-
-        Yields:
-            流式输出的文本片段
+        流式对话（暂不支持 function calling 流式，先返回完整结果）
         """
-        # 注意：qwen 的 function calling 暂不支持流式输出
-        # 这里先返回完整结果
         result = await self.chat(user_question, system_prompt, conversation_history)
         yield result
 
@@ -364,7 +526,7 @@ class MCPChatService:
         await self.disconnect()
 
 
-# 便捷函数：快速调用
+# 便捷函数
 async def mcp_chat(
     question: str,
     model: str = "qwen-max",
@@ -373,17 +535,8 @@ async def mcp_chat(
     """
     便捷函数：快速调用 MCP Chat Service
 
-    Args:
-        question: 用户问题
-        model: qwen 模型名称
-        system_prompt: 系统提示词
-
-    Returns:
-        qwen 的回答
-
     Example:
         >>> answer = await mcp_chat("查一下茅台近期的股市表现，值不值得买")
-        >>> print(answer)
     """
     async with MCPChatService(model=model) as service:
         return await service.chat(question, system_prompt=system_prompt)
