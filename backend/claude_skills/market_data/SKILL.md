@@ -1,12 +1,13 @@
 ---
 name: market_data
 description: 股票市场行情数据查询，支持A股实时行情、历史数据、龙虎榜等
-allowed_tools: [Bash, Read]
+version: "1.0"
+tool_count: 8
 ---
 
 # MarketData Skill
 
-## 📊 概述
+## 概述
 
 提供全面的股票市场行情数据查询能力，基于 Tushare API。支持实时行情、历史K线、龙虎榜、资金流向、涨跌停统计等数据。
 
@@ -16,23 +17,13 @@ allowed_tools: [Bash, Read]
 
 ---
 
-## 🛠️ 可用工具
+## 可用工具
 
 ### 1. get_quote - 获取实时行情
 
 **功能**: 查询指定股票的实时行情数据（当前价格、涨跌幅、成交量等）
 
-**使用方法**:
-```bash
-cd /Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend
-python -c "
-from app.data.tushare_client import get_tushare_client
-client = get_tushare_client()
-result = client.get_quote('600519')
-import json
-print(json.dumps(result, ensure_ascii=False, indent=2))
-"
-```
+**调用方式**: `market_data.get_quote(symbol)`
 
 **参数**:
 - `symbol` (必需): 股票代码
@@ -73,18 +64,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 **功能**: 根据股票代码或名称关键词搜索股票信息
 
-**使用方法**:
-```bash
-cd /Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend
-python -c "
-from app.data.tushare_client import get_tushare_client
-client = get_tushare_client()
-# 按代码搜索
-result = client.get_quote('600519')
-import json
-print(json.dumps(result, ensure_ascii=False, indent=2))
-"
-```
+**调用方式**: `market_data.search_stock(keyword)`
 
 **参数**:
 - `keyword` (必需): 搜索关键词
@@ -101,23 +81,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 **功能**: 获取股票历史K线数据，支持日线、周线、月线
 
-**使用方法**:
-```bash
-cd /Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend
-python -c "
-from app.data.tushare_client import get_tushare_client
-client = get_tushare_client()
-result = client.get_history(
-    symbol='600519',
-    period='daily',
-    start_date='20260101',
-    end_date='20260308',
-    limit=100
-)
-import json
-print(json.dumps(result, ensure_ascii=False, indent=2))
-"
-```
+**调用方式**: `market_data.get_history(symbol, period, start_date, end_date, limit)`
 
 **参数**:
 - `symbol` (必需): 股票代码
@@ -157,17 +121,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 **功能**: 获取股票基础信息（行业、地区、上市日期等）
 
-**使用方法**:
-```bash
-cd /Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend
-python -c "
-from app.data.tushare_client import get_tushare_client
-client = get_tushare_client()
-result = client.get_stock_basic('600519')
-import json
-print(json.dumps(result, ensure_ascii=False, indent=2))
-"
-```
+**调用方式**: `market_data.get_stock_basic_info(symbol)`
 
 **参数**:
 - `symbol` (必需): 股票代码
@@ -194,20 +148,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 **功能**: 获取龙虎榜每日明细，包含机构买卖数据
 
-**使用方法**:
-```bash
-cd /Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend
-python -c "
-from app.data.tushare_client import get_tushare_client
-client = get_tushare_client()
-result = client.get_top_list(
-    trade_date='20260308',
-    limit=50
-)
-import json
-print(json.dumps(result, ensure_ascii=False, indent=2))
-"
-```
+**调用方式**: `market_data.get_top_list(trade_date, limit)`
 
 **参数**:
 - `trade_date` (可选): 交易日期，格式 `YYYYMMDD`，默认最近交易日
@@ -241,21 +182,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 **功能**: 获取个股资金流向数据（主力、散户净流入等）
 
-**使用方法**:
-```bash
-cd /Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend
-python -c "
-from app.data.tushare_client import get_tushare_client
-client = get_tushare_client()
-result = client.get_money_flow(
-    symbol='600519',
-    start_date='20260301',
-    end_date='20260308'
-)
-import json
-print(json.dumps(result, ensure_ascii=False, indent=2))
-"
-```
+**调用方式**: `market_data.get_money_flow(symbol, trade_date, start_date, end_date)`
 
 **参数**:
 - `symbol` (必需): 股票代码
@@ -294,20 +221,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 **功能**: 获取每日涨跌停统计
 
-**使用方法**:
-```bash
-cd /Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend
-python -c "
-from app.data.tushare_client import get_tushare_client
-client = get_tushare_client()
-result = client.get_limit_list(
-    trade_date='20260308',
-    limit_type='U'
-)
-import json
-print(json.dumps(result, ensure_ascii=False, indent=2))
-"
-```
+**调用方式**: `market_data.get_limit_list(trade_date, limit_type)`
 
 **参数**:
 - `trade_date` (可选): 交易日期，格式 `YYYYMMDD`，默认最近交易日
@@ -343,17 +257,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 **功能**: 获取上市公司详细信息（公司简介、联系方式、办公地址等）
 
-**使用方法**:
-```bash
-cd /Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend
-python -c "
-from app.data.tushare_client import get_tushare_client
-client = get_tushare_client()
-result = client.get_stock_company_info('600519')
-import json
-print(json.dumps(result, ensure_ascii=False, indent=2))
-"
-```
+**调用方式**: `market_data.get_company_info(symbol)`
 
 **参数**:
 - `symbol` (必需): 股票代码
@@ -377,7 +281,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 ---
 
-## 📋 工作流指导
+## 工作流指导
 
 ### 典型查询流程
 
@@ -386,7 +290,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 用户: "小米股价多少？"
 
 步骤:
-1. 使用 get_quote('1810.HK')
+1. 调用 market_data.get_quote(symbol='1810.HK')
 2. 提取关键数据：nowPri, increPer
 3. 格式化输出：
    "小米集团 (1810.HK) 当前价格 XX 港元，今日上涨 XX%"
@@ -397,8 +301,8 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 用户: "贵州茅台今天涨了多少？"
 
 步骤:
-1. 如果记得代码是 600519，直接用 get_quote('600519')
-2. 如果不确定，先用 search_stock('茅台')
+1. 如果记得代码是 600519，直接用 market_data.get_quote(symbol='600519')
+2. 如果不确定，先用 market_data.search_stock(keyword='茅台')
 3. 然后用 get_quote 获取行情
 ```
 
@@ -408,7 +312,7 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 步骤:
 1. 计算日期范围（当前日期往前推30天）
-2. 使用 get_history(symbol='600519', period='daily', start_date='20260208', end_date='20260308')
+2. 调用 market_data.get_history(symbol='600519', period='daily', start_date='20260208', end_date='20260308')
 3. 分析数据：
    - 计算涨跌幅
    - 识别趋势（上涨/下跌/震荡）
@@ -420,14 +324,14 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 用户: "茅台今天上龙虎榜了吗？资金流向如何？"
 
 步骤:
-1. 使用 get_top_list(trade_date='20260308') 查看是否上榜
-2. 使用 get_money_flow(symbol='600519', trade_date='20260308') 查看资金流向
+1. 调用 market_data.get_top_list(trade_date='20260308') 查看是否上榜
+2. 调用 market_data.get_money_flow(symbol='600519', trade_date='20260308') 查看资金流向
 3. 综合分析并输出
 ```
 
 ---
 
-## ⚠️ 注意事项
+## 注意事项
 
 ### 1. 股票代码格式
 - **推荐格式**: 纯数字（如 `'600519'`）
@@ -445,83 +349,22 @@ print(json.dumps(result, ensure_ascii=False, indent=2))
 
 ### 4. API 调用限制
 - Tushare API 有频率限制（具体取决于账户级别）
-- 建议添加缓存机制（已在 TushareClient 中实现）
+- 已有缓存机制
 - 避免短时间内重复查询相同数据
 
 ### 5. 错误处理
 所有工具调用都应检查返回的 `success` 字段：
-```python
-if result.get("success"):
-    # 处理数据
-    data = result.get("data")
-else:
-    # 处理错误
-    error = result.get("error")
+```json
+{"success": true, "data": {...}}   // 成功
+{"success": false, "error": "..."}  // 失败
 ```
 
----
-
-## 📚 参考资源
-
-### Tushare API 文档
-详细的 API 接口说明请参考：
-- `backend/app/data/tushare_client.py` - Python 客户端实现
-- Tushare Pro 官方文档: https://tushare.pro/document/2
-
-### 相关代码
-- **MCP Skill**: `backend/app/mcp_server/skills/market_data.py`
-- **数据客户端**: `backend/app/data/tushare_client.py`
-- **配置文件**: `backend/.env` (包含 API Token)
-
----
-
-## 🎯 最佳实践
-
-### 1. 优先使用简单工具
-- 查询单只股票行情 → `get_quote`
-- 查询历史数据 → `get_history`
-- 避免过度使用复杂查询
-
-### 2. 合理设置返回条数
-- 使用 `limit` 参数控制返回数据量
-- 默认 100 条通常足够，避免超大数据集
-
-### 3. 缓存友好的调用
-- 相同查询间隔应 > 15 秒（已有缓存机制）
-- 优先复用已查询的数据
-
-### 4. 友好的输出格式
+### 6. 友好的输出格式
 - 提取关键指标（价格、涨跌幅）
 - 使用百分比、千分位等友好格式
 - 示例: "贵州茅台 (600519) ¥1,850.50 (+1.39%)"
 
 ---
 
-## 🔧 故障排查
-
-### 常见问题
-
-**1. "未找到股票数据"**
-- 检查股票代码格式是否正确
-- 确认股票代码是否存在（尝试其他代码验证）
-
-**2. "API调用失败"**
-- 检查 `TUSHARE_API_TOKEN` 环境变量是否设置
-- 检查 `TUSHARE_API_URL` 是否可访问
-- 确认 API Token 是否过期
-
-**3. "日期范围无数据"**
-- 检查日期格式（必须是 `YYYYMMDD`）
-- 确认查询的是交易日（非周末/节假日）
-- 缩小日期范围重试
-
-**4. "返回数据为空"**
-- 确认股票在该时间段内有交易
-- 检查 `limit` 参数是否过小
-- 尝试扩大查询范围
-
----
-
 **Skill 版本**: v1.0
 **最后更新**: 2026-03-08
-**维护者**: Financial Research Team
