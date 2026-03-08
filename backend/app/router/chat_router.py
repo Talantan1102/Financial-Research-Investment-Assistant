@@ -9,11 +9,11 @@ from starlette.status import HTTP_200_OK, HTTP_500_INTERNAL_SERVER_ERROR
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from core.database import get_db
-from models.chat import ChatAttachment
+from app.core.database import get_db
+from app.models.chat import ChatAttachment
 from service import DocumentService, WebSearchService, ChatService, SessionService, ServiceConfig
-from service.retrieval_service import retrieve_content
-from service.mcp_chat_service import MCPChatService
+from app.service.retrieval_service import retrieve_content
+from app.service.mcp_chat_service import MCPChatService
 from schemas import ChatRequest, LegacySessionResponse, ChatWithAttachmentsRequest
 
 

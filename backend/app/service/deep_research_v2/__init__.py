@@ -13,7 +13,7 @@ DeepResearch V2.0 - 生成式多智能体协作网络
 
 使用方式：
 ```python
-from service.deep_research_v2 import DeepResearchService
+from app.service.deep_research_v2 import DeepResearchService
 
 service = DeepResearchService(
     llm_api_key="your-api-key",
@@ -47,6 +47,8 @@ from .agents import (
     LeadWriter
 )
 
+from .service import DeepResearchV2Service
+
 __all__ = [
     # State
     'ResearchState',
@@ -68,4 +70,7 @@ __all__ = [
     'CodeWizard',
     'CriticMaster',
     'LeadWriter',
+
+    # Service
+    'DeepResearchV2Service',
 ]

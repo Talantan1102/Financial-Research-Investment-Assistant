@@ -13,8 +13,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 
-from core.database import SessionLocal
-from service.news_collection_service import NewsCollectionService
+from app.core.database import SessionLocal
+from app.service.news_collection_service import NewsCollectionService
 
 logger = logging.getLogger(__name__)
 
