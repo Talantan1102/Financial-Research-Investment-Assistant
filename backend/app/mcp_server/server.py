@@ -1,13 +1,17 @@
 # Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
 # 未经授权，禁止转售或仿制。
 
-"""MCP Server 主入口（Claude Skills 架构）
+"""MCP Server 主入口（渐进式披露 + MCP 执行架构）
 
-基于Claude Skills架构重构：
-- 工具定义在 SKILL.md 文件中
-- MCP Server 仅暴露单一的 `skill` 工具用于加载 Skills
-- Python Skill类仅作为后端工具实现的容器
-- Token消耗从 ~17,000 降低到 ~200 (启动) + ~2,000 (调用时)
+三轮架构：
+- Round 1: Skill 选择 — LLM 通过 `skill` 工具选择 skill，获取 SKILL.md
+- Round 2: 工具调用 — 编排层通过 `get_skill_tools` 获取工具定义，LLM 调用具体工具
+- Round 3: 最终回答 — LLM 基于工具返回数据生成回答
+
+MCP Server 暴露 3 个元工具：
+1. `skill` — 返回 SKILL.md 内容（业务指导）
+2. `get_skill_tools` — 返回该 skill 下的工具 JSON Schema
+3. `execute_skill_tool` — 执行具体工具
 """
 
 import sys
@@ -29,7 +33,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-# 本地导入（Skills仅用于后端实现，不再用于MCP工具注册）
+# 本地导入
 from app.mcp_server.skills import (
     MarketDataSkill,
     BaseSkill,
@@ -46,7 +50,6 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(os.path.join(os.path.dirname(__file__), 'mcp_server.log'))
-        # 移除 StreamHandler(sys.stderr) 以避免干扰 MCP STDIO 通信
     ]
 )
 logger = logging.getLogger("MCP Server")
@@ -54,41 +57,33 @@ logger = logging.getLogger("MCP Server")
 
 class FinancialMCPServer:
     """
-    金融研投助手 MCP Server（Claude Skills 架构）
+    金融研投助手 MCP Server（渐进式披露 + MCP 执行架构）
 
-    改造要点：
-    1. Skills目录: backend/claude_skills/
-    2. 启动时加载所有SKILL.md的frontmatter (~200 tokens)
-    3. 调用时按需加载完整的SKILL.md (~2,000 tokens)
-    4. Python Skill类仅用于后端工具实现，不再注册MCP工具
+    三个元工具:
+    1. skill — 返回 SKILL.md 内容
+    2. get_skill_tools — 返回 skill 的工具 JSON Schema
+    3. execute_skill_tool — 执行具体工具
     """
 
     def __init__(self):
         self.config = get_config()
-        self.skills: Dict[str, BaseSkill] = {}  # Python Skills (后端实现)
-        self.skill_metadata: Dict[str, Dict] = {}  # SKILL.md frontmatter
+        self.skills: Dict[str, BaseSkill] = {}
+        self.skill_metadata: Dict[str, Dict] = {}
         self.skills_dir = Path(_backend_dir) / "claude_skills"
         self.server = Server(self.config.server_name)
         self._register_handlers()
 
     def register_skill(self, skill: BaseSkill):
-        """
-        注册 Skill (保留用于后端实现)
-
-        Args:
-            skill: Skill 实例
-        """
+        """注册 Skill 实例"""
         self.skills[skill.name] = skill
-        logger.info(f"已注册后端 Skill: {skill.name} ({skill.tool_count} 个工具实现)")
+        logger.info(f"已注册 Skill: {skill.name} ({skill.tool_count} 个工具)")
 
     def _load_skill_metadata(self) -> Dict[str, Dict]:
         """
-        加载所有 Skills 的 frontmatter (Level 1加载)
-
-        遍历 claude_skills/ 目录，读取每个 SKILL.md 的 YAML frontmatter
+        加载所有 Skills 的 frontmatter
 
         Returns:
-            {skill_name: {name, description, allowed_tools}}
+            {skill_name: {name, description, ...}}
         """
         metadata = {}
 
@@ -107,13 +102,11 @@ class FinancialMCPServer:
             try:
                 content = skill_md.read_text(encoding='utf-8')
 
-                # 解析 YAML frontmatter
                 if content.startswith("---"):
                     yaml_end = content.find("---", 3)
                     if yaml_end > 0:
                         yaml_content = content[3:yaml_end].strip()
 
-                        # 简单解析YAML (生产环境应使用yaml库)
                         yaml_data = {}
                         for line in yaml_content.split('\n'):
                             if ':' in line:
@@ -121,9 +114,11 @@ class FinancialMCPServer:
                                 key = key.strip()
                                 value = value.strip()
 
-                                # 处理数组
                                 if value.startswith('[') and value.endswith(']'):
                                     value = [v.strip() for v in value[1:-1].split(',')]
+                                # 去掉引号
+                                elif value.startswith('"') and value.endswith('"'):
+                                    value = value[1:-1]
 
                                 yaml_data[key] = value
 
@@ -134,110 +129,244 @@ class FinancialMCPServer:
                 logger.error(f"加载 {skill_dir.name}/SKILL.md 失败: {e}")
 
         return metadata
-    
+
     def _register_handlers(self):
         """注册 MCP Server 处理器"""
 
         @self.server.list_tools()
         async def list_tools() -> List[Tool]:
             """
-            列出所有可用的工具（Claude Skills 架构）
-
-            仅返回单一的 `skill` 工具，用于加载 Skills
+            返回 3 个元工具: skill, get_skill_tools, execute_skill_tool
             """
-            # 加载 Skill metadata
             self.skill_metadata = self._load_skill_metadata()
 
-            # 构建可用 skills 列表描述
             available_skills = list(self.skill_metadata.keys())
             skills_desc = ", ".join(available_skills) if available_skills else "无"
 
-            # 返回单一的 skill 工具
+            # 构建 skill 描述信息（包含每个 skill 的摘要）
+            skill_descriptions = []
+            for name, meta in self.skill_metadata.items():
+                desc = meta.get('description', '无描述')
+                skill_descriptions.append(f"- {name}: {desc}")
+            skills_detail = "\n".join(skill_descriptions) if skill_descriptions else "无可用 skill"
+
             tools = [
+                # 1. skill — 加载 SKILL.md 内容
                 Tool(
                     name="skill",
-                    description=f"Load and execute a Claude Skill. Available skills: {skills_desc}",
+                    description=f"加载指定 Skill 的详细说明文档（SKILL.md）。可用 skills:\n{skills_detail}",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "name": {
                                 "type": "string",
                                 "enum": available_skills,
-                                "description": f"Skill name to load. Available: {skills_desc}"
+                                "description": f"Skill 名称。可用: {skills_desc}"
                             }
                         },
                         "required": ["name"]
                     }
+                ),
+                # 2. get_skill_tools — 获取 skill 的工具 JSON Schema
+                Tool(
+                    name="get_skill_tools",
+                    description=f"获取指定 Skill 下所有工具的 JSON Schema 定义，用于构建 function calling 工具列表。可用 skills: {skills_desc}",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "enum": available_skills,
+                                "description": f"Skill 名称。可用: {skills_desc}"
+                            }
+                        },
+                        "required": ["name"]
+                    }
+                ),
+                # 3. execute_skill_tool — 执行具体工具
+                Tool(
+                    name="execute_skill_tool",
+                    description="执行指定 Skill 下的具体工具。工具名格式为 skill_name.tool_name",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "skill_name": {
+                                "type": "string",
+                                "description": "Skill 名称"
+                            },
+                            "tool_name": {
+                                "type": "string",
+                                "description": "工具名称（不含 skill 前缀）"
+                            },
+                            "arguments": {
+                                "type": "object",
+                                "description": "工具参数",
+                                "default": {}
+                            }
+                        },
+                        "required": ["skill_name", "tool_name"]
+                    }
                 )
             ]
 
-            logger.info(f"返回 skill 工具，可用 Skills: {available_skills}")
+            logger.info(f"返回 3 个元工具，可用 Skills: {available_skills}")
             return tools
 
         @self.server.call_tool()
         async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-            """调用指定工具（Claude Skills 架构）"""
+            """调用工具"""
             logger.info(f"调用工具: {name}, 参数: {arguments}")
 
-            # 仅处理 skill 工具
             if name == "skill":
-                skill_name = arguments.get("name")
-
-                if not skill_name:
-                    return [TextContent(
-                        type="text",
-                        text=json.dumps({
-                            "success": False,
-                            "error": "缺少必需参数: name"
-                        }, ensure_ascii=False)
-                    )]
-
-                # 检查 Skill 是否存在
-                skill_path = self.skills_dir / skill_name / "SKILL.md"
-                if not skill_path.exists():
-                    return [TextContent(
-                        type="text",
-                        text=json.dumps({
-                            "success": False,
-                            "error": f"Skill '{skill_name}' 不存在"
-                        }, ensure_ascii=False)
-                    )]
-
-                # 读取并返回完整的 SKILL.md 内容 (Level 2 加载)
-                try:
-                    skill_content = skill_path.read_text(encoding='utf-8')
-
-                    # 返回 SKILL.md 内容（这会被 Claude 解析为指令）
-                    return [TextContent(
-                        type="text",
-                        text=skill_content
-                    )]
-
-                except Exception as e:
-                    logger.error(f"加载 Skill '{skill_name}' 失败: {e}")
-                    return [TextContent(
-                        type="text",
-                        text=json.dumps({
-                            "success": False,
-                            "error": f"加载 Skill 失败: {str(e)}"
-                        }, ensure_ascii=False)
-                    )]
-
+                return await self._handle_skill(arguments)
+            elif name == "get_skill_tools":
+                return await self._handle_get_skill_tools(arguments)
+            elif name == "execute_skill_tool":
+                return await self._handle_execute_skill_tool(arguments)
             else:
-                # 不再支持旧的 skill_name.tool_name 格式
                 return [TextContent(
                     type="text",
                     text=json.dumps({
                         "success": False,
-                        "error": f"未知工具: {name}。请使用 'skill' 工具加载 Skills。"
+                        "error": f"未知工具: {name}。可用工具: skill, get_skill_tools, execute_skill_tool"
                     }, ensure_ascii=False)
                 )]
-    
+
+    async def _handle_skill(self, arguments: Dict[str, Any]) -> List[TextContent]:
+        """处理 skill 工具调用 — 返回 SKILL.md 内容"""
+        skill_name = arguments.get("name")
+
+        if not skill_name:
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": "缺少必需参数: name"
+                }, ensure_ascii=False)
+            )]
+
+        skill_path = self.skills_dir / skill_name / "SKILL.md"
+        if not skill_path.exists():
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"Skill '{skill_name}' 不存在"
+                }, ensure_ascii=False)
+            )]
+
+        try:
+            skill_content = skill_path.read_text(encoding='utf-8')
+            return [TextContent(
+                type="text",
+                text=skill_content
+            )]
+        except Exception as e:
+            logger.error(f"加载 Skill '{skill_name}' 失败: {e}")
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"加载 Skill 失败: {str(e)}"
+                }, ensure_ascii=False)
+            )]
+
+    async def _handle_get_skill_tools(self, arguments: Dict[str, Any]) -> List[TextContent]:
+        """处理 get_skill_tools 调用 — 返回工具 JSON Schema 列表"""
+        skill_name = arguments.get("name")
+
+        if not skill_name:
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": "缺少必需参数: name"
+                }, ensure_ascii=False)
+            )]
+
+        if skill_name not in self.skills:
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"Skill '{skill_name}' 未注册（后端实现不存在）"
+                }, ensure_ascii=False)
+            )]
+
+        skill = self.skills[skill_name]
+        tools_json = skill.discover_tools_json()
+
+        # 给每个工具名添加 skill 前缀: {skill_name}.{tool_name}
+        for tool in tools_json:
+            tool["name"] = f"{skill_name}.{tool['name']}"
+
+        return [TextContent(
+            type="text",
+            text=json.dumps({
+                "success": True,
+                "skill_name": skill_name,
+                "tool_count": len(tools_json),
+                "tools": tools_json
+            }, ensure_ascii=False)
+        )]
+
+    async def _handle_execute_skill_tool(self, arguments: Dict[str, Any]) -> List[TextContent]:
+        """处理 execute_skill_tool 调用 — 执行具体工具"""
+        skill_name = arguments.get("skill_name")
+        tool_name = arguments.get("tool_name")
+        tool_arguments = arguments.get("arguments", {})
+
+        if not skill_name or not tool_name:
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": "缺少必需参数: skill_name 和 tool_name"
+                }, ensure_ascii=False)
+            )]
+
+        if skill_name not in self.skills:
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"Skill '{skill_name}' 未注册"
+                }, ensure_ascii=False)
+            )]
+
+        skill = self.skills[skill_name]
+
+        if not skill.has_tool(tool_name):
+            available = [t.name for t in skill.discover_tools()]
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"工具 '{tool_name}' 不存在于 Skill '{skill_name}'。可用工具: {available}"
+                }, ensure_ascii=False)
+            )]
+
+        try:
+            result = await skill.execute_tool(tool_name, tool_arguments)
+            return [TextContent(
+                type="text",
+                text=json.dumps(result.to_dict(), ensure_ascii=False)
+            )]
+        except Exception as e:
+            logger.error(f"执行工具 {skill_name}.{tool_name} 失败: {e}")
+            return [TextContent(
+                type="text",
+                text=json.dumps({
+                    "success": False,
+                    "error": f"工具执行失败: {str(e)}"
+                }, ensure_ascii=False)
+            )]
+
     async def run(self):
         """运行 MCP Server"""
         logger.info(f"启动 MCP Server: {self.config.server_name} v{self.config.server_version}")
-        logger.info(f"Claude Skills 架构 - Skills目录: {self.skills_dir}")
-        logger.info(f"已注册 {len(self.skills)} 个后端 Skill 实现")
+        logger.info(f"渐进式披露架构 - Skills目录: {self.skills_dir}")
+        logger.info(f"已注册 {len(self.skills)} 个 Skill 实现")
 
         async with stdio_server() as (read_stream, write_stream):
             await self.server.run(
@@ -249,17 +378,14 @@ class FinancialMCPServer:
 
 def create_server() -> FinancialMCPServer:
     """
-    创建并配置 MCP Server（Claude Skills 架构）
-
-    注意：Skills 现在通过 SKILL.md 定义，这里注册的 Python Skill
-    仅用于后端工具实现，不再用于 MCP 工具注册。
+    创建并配置 MCP Server
 
     Returns:
         配置好的 FinancialMCPServer 实例
     """
     server = FinancialMCPServer()
 
-    # 注册后端 Skills（用于工具实现，不暴露为MCP工具）
+    # 注册 Skills
     try:
         market_data_skill = MarketDataSkill()
         server.register_skill(market_data_skill)
@@ -285,8 +411,8 @@ def create_server() -> FinancialMCPServer:
     except Exception as e:
         logger.warning(f"DeepResearch Skill 注册失败: {e}")
 
-    logger.info(f"✅ MCP Server 创建完成 (Claude Skills 架构)")
-    logger.info(f"📊 Token 优化: ~17,000 → ~200 (启动) + ~2,000 (调用时)")
+    logger.info(f"MCP Server 创建完成（渐进式披露架构）")
+    logger.info(f"元工具: skill, get_skill_tools, execute_skill_tool")
 
     return server
 
