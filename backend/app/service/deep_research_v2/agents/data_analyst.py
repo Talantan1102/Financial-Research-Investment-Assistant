@@ -244,7 +244,7 @@ class DataAnalyst(BaseAgent):
 }}
 ```"""
 
-    def __init__(self, llm_api_key: str, llm_base_url: str, model: str = "qwen-max"):
+    def __init__(self, llm_api_key: str, llm_base_url: str, model: str = "qwen-max", tool_adapter=None):
         super().__init__(
             name="DataAnalyst",
             role="数据分析师",
@@ -252,6 +252,7 @@ class DataAnalyst(BaseAgent):
             llm_base_url=llm_base_url,
             model=model
         )
+        self.tool_adapter = tool_adapter  # MCP ToolAdapter（可选）
 
     async def process(self, state: ResearchState) -> ResearchState:
         """处理入口"""

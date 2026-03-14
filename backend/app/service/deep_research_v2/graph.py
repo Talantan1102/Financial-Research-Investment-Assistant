@@ -134,30 +134,26 @@ class DeepResearchGraph:
         self.mcp_client = None
         self.tool_adapter = None
 
-        # 如果启用 MCP，初始化客户端（延迟连接）
-        if self.enable_mcp:
-            try:
-                self.mcp_client = MCPClient(
-                    server_script_path=mcp_client_path,
-                    connect_timeout=30.0,
-                    call_timeout=30.0
-                )
-                # 创建 ToolAdapter（支持自动降级）
-                self.tool_adapter = ToolAdapter(
-                    mcp_client=self.mcp_client,
-                    fallback_enabled=True
-                )
-                logger.info(f"MCP Client 已初始化: {mcp_client_path}")
-            except Exception as e:
-                logger.warning(f"MCP Client 初始化失败: {e}，将使用原有功能")
-                self.enable_mcp = False
-                self.mcp_client = None
-                self.tool_adapter = None
-        else:
-            if not MCP_AVAILABLE:
-                logger.info("MCP Client 不可用（未安装或导入失败）")
-            else:
-                logger.info("MCP Client 已禁用（enable_mcp=False）")
+        # MCP Client 是必需的
+        if not MCP_AVAILABLE:
+            raise RuntimeError("MCP Client 不可用，请检查 mcp 包是否已安装")
+
+        if not self.enable_mcp:
+            raise RuntimeError("MCP 必须启用，enable_mcp 不能为 False")
+
+        # 初始化 MCP Client（延迟连接）
+        try:
+            self.mcp_client = MCPClient(
+                server_script_path=mcp_client_path,
+                connect_timeout=30.0,
+                call_timeout=30.0
+            )
+            # 创建 ToolAdapter（纯净版，无降级）
+            self.tool_adapter = ToolAdapter(mcp_client=self.mcp_client)
+            logger.info(f"MCP Client 已初始化: {mcp_client_path}")
+        except Exception as e:
+            logger.error(f"MCP Client 初始化失败: {e}")
+            raise RuntimeError(f"MCP Client 初始化失败: {e}")
 
         # 初始化各个 Agent（使用各自配置的模型）
         self.architect = ChiefArchitect(
@@ -172,11 +168,13 @@ class DeepResearchGraph:
         )
         self.data_analyst = DataAnalyst(
             self.llm_api_key, self.llm_base_url,
-            config.agents.data_analyst.model
+            config.agents.data_analyst.model,
+            tool_adapter=self.tool_adapter  # 传递 ToolAdapter
         )
         self.wizard = CodeWizard(
             self.llm_api_key, self.llm_base_url,
-            config.agents.wizard.model
+            config.agents.wizard.model,
+            tool_adapter=self.tool_adapter  # 传递 ToolAdapter
         )
         self.critic = CriticMaster(
             self.llm_api_key, self.llm_base_url,

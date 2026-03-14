@@ -1,317 +1,305 @@
 """
-Tool Adapter - MCP Client 到 StockService 的适配器
+Tool Adapter - MCP Client 统一封装
 
-提供与 StockService 兼容的接口，优先使用 MCP Client，
-失败时自动降级到原有的 StockService 实现。
+纯粹的 MCP 工具调用封装，无降级逻辑。
+通过 MCP Client 统一调用所有 Skills 的工具。
 """
 
-import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 class ToolAdapter:
     """
-    MCP Tool 适配器
+    MCP Tool 适配器（纯净版）
 
-    封装 MCPClient，提供与 StockService 完全兼容的接口。
-    MCP 调用失败时自动降级到原有 StockService。
-
-    特性：
-    - 透明的接口兼容（与 StockService 相同）
-    - 自动降级机制（MCP 失败时使用 StockService）
-    - 延迟加载 StockService（避免循环依赖）
-    - 降级状态缓存（异常时永久切换到降级模式）
+    纯粹的 MCP Client 封装，提供统一的工具调用接口。
+    所有工具调用都通过 MCP Server 执行，无降级逻辑。
 
     使用示例：
-        adapter = ToolAdapter(mcp_client=mcp_client, fallback_enabled=True)
+        adapter = ToolAdapter(mcp_client=mcp_client)
+        # 股票查询
         result = await adapter.get_stock_by_code("600519")
+        # 网络搜索
+        result = await adapter.web_search("新能源汽车市场")
+        # 数据分析
+        result = await adapter.analyze_data(data_list)
     """
 
-    def __init__(
-        self,
-        mcp_client=None,
-        fallback_enabled: bool = True
-    ):
+    def __init__(self, mcp_client):
         """
         初始化 ToolAdapter
 
         Args:
-            mcp_client: MCPClient 实例（可选，为 None 时直接使用降级）
-            fallback_enabled: 是否启用降级到 StockService（默认 True）
+            mcp_client: MCPClient 实例（必需）
         """
+        if mcp_client is None:
+            raise ValueError("MCP Client 是必需的，不能为 None")
+
         self.mcp_client = mcp_client
-        self.fallback_enabled = fallback_enabled
 
-        # 延迟加载的降级服务
-        self._fallback_service = None
-
-        # 降级标志（异常时永久切换到降级模式）
-        self._degraded = False
-
-        # 日志
-        self.logger = logging.getLogger("ToolAdapter")
-
-    def _get_fallback_service(self):
+    async def _call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
-        延迟加载 StockService（避免循环依赖）
+        调用 MCP 工具
 
-        Returns:
-            StockService 实例或 None（加载失败时）
-        """
-        if self._fallback_service is None:
-            try:
-                # 尝试相对导入
-                try:
-                    from service.stock_service import get_stock_service
-                except ImportError:
-                    # 回退到绝对导入
-                    from app.service.stock_service import get_stock_service
-
-                self._fallback_service = get_stock_service()
-                self.logger.info("已加载 StockService 作为降级方案")
-
-            except ImportError as e:
-                self.logger.warning(f"无法导入 StockService: {e}")
-                self._fallback_service = None
-
-        return self._fallback_service
-
-    async def get_stock_by_code(self, stock_code: str) -> Dict[str, Any]:
-        """
-        获取股票行情数据（兼容 StockService 接口）
-
-        优先使用 MCP Client，失败时降级到 StockService。
+        通过渐进式披露机制调用：
+        1. 解析 skill_name 和 tool_name
+        2. 调用 execute_skill_tool 执行具体工具
 
         Args:
-            stock_code: 股票代码（如 "600519", "sh600519", "sz000858" 等）
+            tool_name: MCP 工具名（格式：skill_name.tool_name）
+            arguments: 工具参数
 
         Returns:
-            Dict[str, Any]: 标准返回格式
+            Dict[str, Any]: 调用结果
+        """
+        if not self.mcp_client or not self.mcp_client.is_connected:
+            raise RuntimeError(f"MCP Client 未连接，无法调用工具: {tool_name}")
+
+        # 解析 skill_name 和 tool_name
+        if "." not in tool_name:
+            raise ValueError(f"工具名格式错误，应为 'skill_name.tool_name': {tool_name}")
+
+        parts = tool_name.split(".", 1)
+        skill_name = parts[0]
+        actual_tool_name = parts[1]
+
+        # 通过 execute_skill_tool 调用
+        return await self.mcp_client.call_tool(
+            "execute_skill_tool",
             {
-                "success": bool,
-                "data": {
-                    "gid": str,
-                    "name": str,
-                    "nowPri": str,
-                    "increase": str,
-                    "increPer": str,
-                    "todayStartPri": str,
-                    "yestodEndPri": str,
-                    "todayMax": str,
-                    "todayMin": str,
-                    "traAmount": str,
-                    "traNumber": str
-                },
-                "error": str
+                "skill_name": skill_name,
+                "tool_name": actual_tool_name,
+                "arguments": arguments
             }
-        """
-        # 1. 尝试使用 MCP Client
-        if self.mcp_client and self.mcp_client.is_connected and not self._degraded:
-            try:
-                self.logger.debug(f"尝试使用 MCP 获取股票数据: {stock_code}")
-
-                result = await self.mcp_client.call_tool(
-                    "market_data.get_quote",
-                    {"symbol": stock_code}
-                )
-
-                if result.get("success"):
-                    self.logger.info(f"MCP 获取股票数据成功: {stock_code}")
-                    return result
-                else:
-                    self.logger.warning(
-                        f"MCP 获取股票数据失败: {stock_code} - {result.get('error')}"
-                    )
-                    # 单次失败不触发降级，继续尝试降级方案
-
-            except Exception as e:
-                self.logger.error(f"MCP 调用异常: {type(e).__name__}: {e}")
-                # 异常时触发降级模式
-                if self.fallback_enabled:
-                    self._degraded = True
-                    self.logger.warning("MCP 调用异常，永久切换到降级模式")
-
-        # 2. 降级到 StockService
-        if self.fallback_enabled:
-            fallback_service = self._get_fallback_service()
-            if fallback_service:
-                self.logger.info(f"使用 StockService 获取股票数据: {stock_code}")
-                try:
-                    return await fallback_service.get_stock_by_code(stock_code)
-                except Exception as e:
-                    self.logger.error(f"StockService 调用失败: {e}")
-                    return {
-                        "success": False,
-                        "data": None,
-                        "error": f"StockService 调用失败: {e}"
-                    }
-
-        # 3. 都不可用
-        self.logger.error(f"无法获取股票数据: {stock_code} - MCP 和 StockService 都不可用")
-        return {
-            "success": False,
-            "data": None,
-            "error": "MCP 和 StockService 都不可用"
-        }
-
-    async def search_stock(self, keyword: str) -> Dict[str, Any]:
-        """
-        搜索股票（兼容 StockService 接口）
-
-        Args:
-            keyword: 搜索关键词
-
-        Returns:
-            Dict[str, Any]: 标准返回格式
-            {
-                "success": bool,
-                "data": [...],  # 股票列表
-                "error": str
-            }
-        """
-        # 1. 尝试使用 MCP Client
-        if self.mcp_client and self.mcp_client.is_connected and not self._degraded:
-            try:
-                self.logger.debug(f"尝试使用 MCP 搜索股票: {keyword}")
-
-                result = await self.mcp_client.call_tool(
-                    "market_data.search_stock",
-                    {"keyword": keyword}
-                )
-
-                if result.get("success"):
-                    self.logger.info(f"MCP 搜索股票成功: {keyword}")
-                    return result
-                else:
-                    self.logger.warning(
-                        f"MCP 搜索股票失败: {keyword} - {result.get('error')}"
-                    )
-
-            except Exception as e:
-                self.logger.error(f"MCP 搜索异常: {type(e).__name__}: {e}")
-                if self.fallback_enabled:
-                    self._degraded = True
-                    self.logger.warning("MCP 调用异常，永久切换到降级模式")
-
-        # 2. 降级到 StockService
-        if self.fallback_enabled:
-            fallback_service = self._get_fallback_service()
-            if fallback_service:
-                self.logger.info(f"使用 StockService 搜索股票: {keyword}")
-                try:
-                    return await fallback_service.search_stock(keyword)
-                except Exception as e:
-                    self.logger.error(f"StockService 搜索失败: {e}")
-                    return {
-                        "success": False,
-                        "data": None,
-                        "error": f"StockService 搜索失败: {e}"
-                    }
-
-        # 3. 都不可用
-        self.logger.error(f"无法搜索股票: {keyword} - 搜索服务不可用")
-        return {
-            "success": False,
-            "data": None,
-            "error": "搜索服务不可用"
-        }
-
-    async def get_market_stocks(
-        self,
-        market: str = "shanghai",
-        page: int = 1
-    ) -> Dict[str, Any]:
-        """
-        获取市场股票列表（兼容 StockService 接口）
-
-        Args:
-            market: 市场名称（"shanghai" 或 "shenzhen"）
-            page: 页码
-
-        Returns:
-            Dict[str, Any]: 标准返回格式
-            {
-                "success": bool,
-                "data": [...],  # 股票列表
-                "error": str
-            }
-        """
-        # 1. 尝试使用 MCP Client
-        if self.mcp_client and self.mcp_client.is_connected and not self._degraded:
-            try:
-                self.logger.debug(f"尝试使用 MCP 获取市场股票: {market}, page {page}")
-
-                result = await self.mcp_client.call_tool(
-                    "market_data.get_market_list",
-                    {"market": market, "page": page}
-                )
-
-                if result.get("success"):
-                    self.logger.info(f"MCP 获取市场股票成功: {market}")
-                    return result
-                else:
-                    self.logger.warning(
-                        f"MCP 获取市场股票失败: {market} - {result.get('error')}"
-                    )
-
-            except Exception as e:
-                self.logger.error(f"MCP 获取市场股票异常: {type(e).__name__}: {e}")
-                if self.fallback_enabled:
-                    self._degraded = True
-                    self.logger.warning("MCP 调用异常，永久切换到降级模式")
-
-        # 2. 降级到 StockService
-        if self.fallback_enabled:
-            fallback_service = self._get_fallback_service()
-            if fallback_service:
-                self.logger.info(f"使用 StockService 获取市场股票: {market}")
-                try:
-                    return await fallback_service.get_market_stocks(market, page)
-                except Exception as e:
-                    self.logger.error(f"StockService 获取市场股票失败: {e}")
-                    return {
-                        "success": False,
-                        "data": None,
-                        "error": f"StockService 获取市场股票失败: {e}"
-                    }
-
-        # 3. 都不可用
-        self.logger.error(f"无法获取市场股票: {market} - 服务不可用")
-        return {
-            "success": False,
-            "data": None,
-            "error": "市场股票服务不可用"
-        }
-
-    @property
-    def is_using_mcp(self) -> bool:
-        """
-        检查是否正在使用 MCP（未降级）
-
-        Returns:
-            bool: True 表示正在使用 MCP，False 表示已降级或 MCP 不可用
-        """
-        return (
-            self.mcp_client is not None
-            and self.mcp_client.is_connected
-            and not self._degraded
         )
 
+    # ========== Market Data 工具 ==========
+
+    async def get_stock_by_code(self, stock_code: str) -> Dict[str, Any]:
+        """获取股票行情数据"""
+        return await self._call_tool(
+            "market_data.get_quote",
+            {"symbol": stock_code}
+        )
+
+    async def search_stock(self, keyword: str) -> Dict[str, Any]:
+        """搜索股票"""
+        return await self._call_tool(
+            "market_data.search_stock",
+            {"keyword": keyword}
+        )
+
+    # ========== Web Research 工具 ==========
+
+    async def web_search(
+        self,
+        query: str,
+        count: int = 5,
+        freshness: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """网络搜索"""
+        arguments = {"query": query, "count": count}
+        if freshness:
+            arguments["freshness"] = freshness
+
+        return await self._call_tool("web_research.web_search", arguments)
+
+    async def knowledge_search(
+        self,
+        query: str,
+        kb_name: str = "",
+        top_k: int = 5
+    ) -> Dict[str, Any]:
+        """知识库搜索"""
+        arguments = {"query": query, "top_k": top_k}
+        if kb_name:
+            arguments["kb_name"] = kb_name
+
+        return await self._call_tool("web_research.knowledge_search", arguments)
+
+    async def deep_search(
+        self,
+        query: str,
+        sub_queries: Optional[List[str]] = None,
+        max_depth: int = 2,
+        cross_verify: bool = True
+    ) -> Dict[str, Any]:
+        """深度搜索"""
+        arguments = {
+            "query": query,
+            "max_depth": max_depth,
+            "cross_verify": cross_verify
+        }
+        if sub_queries:
+            arguments["sub_queries"] = sub_queries
+
+        return await self._call_tool("web_research.deep_search", arguments)
+
+    async def batch_search(
+        self,
+        queries: List[Dict],
+        search_type: str = "web"
+    ) -> Dict[str, Any]:
+        """批量搜索"""
+        return await self._call_tool(
+            "web_research.batch_search",
+            {"queries": queries, "search_type": search_type}
+        )
+
+    async def extract_webpage(
+        self,
+        url: str,
+        extract_type: str = "article"
+    ) -> Dict[str, Any]:
+        """提取网页内容"""
+        return await self._call_tool(
+            "web_research.extract_webpage",
+            {"url": url, "extract_type": extract_type}
+        )
+
+    # ========== Data Analysis 工具 ==========
+
+    async def analyze_data(
+        self,
+        data: List[Dict],
+        analysis_type: str = "auto",
+        context: str = ""
+    ) -> Dict[str, Any]:
+        """智能数据分析"""
+        arguments = {"data": data, "analysis_type": analysis_type}
+        if context:
+            arguments["context"] = context
+
+        return await self._call_tool("data_analysis.analyze_data", arguments)
+
+    async def generate_chart(
+        self,
+        data: Dict,
+        chart_type: str = "bar",
+        title: str = "数据图表",
+        options: Optional[Dict] = None
+    ) -> Dict[str, Any]:
+        """生成图表配置"""
+        arguments = {"data": data, "chart_type": chart_type, "title": title}
+        if options:
+            arguments["options"] = options
+
+        return await self._call_tool("data_analysis.generate_chart", arguments)
+
+    async def text_to_sql(
+        self,
+        question: str,
+        intent: str = "stats",
+        table_hints: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """自然语言转 SQL"""
+        arguments = {"question": question, "intent": intent}
+        if table_hints:
+            arguments["table_hints"] = table_hints
+
+        return await self._call_tool("data_analysis.text_to_sql", arguments)
+
+    async def calculate_metrics(
+        self,
+        data: List[Dict],
+        metrics: List[str],
+        value_field: str = "value",
+        time_field: str = "time"
+    ) -> Dict[str, Any]:
+        """计算金融指标"""
+        return await self._call_tool(
+            "data_analysis.calculate_metrics",
+            {
+                "data": data,
+                "metrics": metrics,
+                "value_field": value_field,
+                "time_field": time_field
+            }
+        )
+
+    # ========== Financial Analysis 工具 ==========
+
+    async def analyze_financial_report(
+        self,
+        symbol: str,
+        report_type: str = "income"
+    ) -> Dict[str, Any]:
+        """分析财务报表"""
+        return await self._call_tool(
+            "financial_analysis.analyze_report",
+            {"symbol": symbol, "report_type": report_type}
+        )
+
+    async def calculate_financial_ratios(self, symbol: str) -> Dict[str, Any]:
+        """计算财务比率"""
+        return await self._call_tool(
+            "financial_analysis.calculate_ratios",
+            {"symbol": symbol}
+        )
+
+    async def analyze_business(self, symbol: str) -> Dict[str, Any]:
+        """分析经营情况"""
+        return await self._call_tool(
+            "financial_analysis.analyze_business",
+            {"symbol": symbol}
+        )
+
+    # ========== Risk Assessment 工具 ==========
+
+    async def assess_risk(self, symbol: str) -> Dict[str, Any]:
+        """风险评估"""
+        return await self._call_tool(
+            "risk_assessment.assess",
+            {"symbol": symbol}
+        )
+
+    async def predict_risk(self, symbol: str, days: int = 30) -> Dict[str, Any]:
+        """风险预测"""
+        return await self._call_tool(
+            "risk_assessment.predict",
+            {"symbol": symbol, "days": days}
+        )
+
+    async def monitor_risk(self, symbol: str) -> Dict[str, Any]:
+        """风险监控"""
+        return await self._call_tool(
+            "risk_assessment.monitor",
+            {"symbol": symbol}
+        )
+
+    # ========== Deep Research 工具 ==========
+
+    async def research_plan(self, query: str) -> Dict[str, Any]:
+        """研究规划"""
+        return await self._call_tool(
+            "deep_research.plan",
+            {"query": query}
+        )
+
+    async def research_search(self, session_id: str) -> Dict[str, Any]:
+        """研究搜索"""
+        return await self._call_tool(
+            "deep_research.search",
+            {"session_id": session_id}
+        )
+
+    async def research_analyze(self, session_id: str) -> Dict[str, Any]:
+        """研究分析"""
+        return await self._call_tool(
+            "deep_research.analyze",
+            {"session_id": session_id}
+        )
+
+    async def research_write(self, session_id: str) -> Dict[str, Any]:
+        """研究报告撰写"""
+        return await self._call_tool(
+            "deep_research.write",
+            {"session_id": session_id}
+        )
+
+    # ========== 状态检查 ==========
+
     @property
-    def is_degraded(self) -> bool:
-        """
-        检查是否已降级
-
-        Returns:
-            bool: True 表示已降级到 StockService
-        """
-        return self._degraded
-
-    def reset_degraded_state(self):
-        """
-        重置降级状态（用于恢复尝试 MCP）
-
-        注意：仅在确认 MCP 已修复后调用
-        """
-        self._degraded = False
-        self.logger.info("已重置降级状态，将重新尝试使用 MCP")
+    def is_connected(self) -> bool:
+        """检查 MCP Client 是否已连接"""
+        return self.mcp_client is not None and self.mcp_client.is_connected

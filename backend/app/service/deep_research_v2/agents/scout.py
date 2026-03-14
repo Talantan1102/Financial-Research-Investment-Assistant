@@ -9,44 +9,19 @@ DeepResearch V2.0 - 深度侦探 Agent (DeepScout)
 2. 递归搜索 - 发现新线索时自动追踪
 3. 信源评级 - 评估来源可信度
 4. 交叉验证 - 多源验证关键信息
+
+(MCP 专用版 - 所有搜索通过 MCP ToolAdapter 执行)
 """
 
 import uuid
 import asyncio
 import hashlib
 import json
-import aiohttp
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from .base import BaseAgent
 from ..state import ResearchState, ResearchPhase
-
-# 网页文本提取库（可选依赖）
-try:
-    import trafilatura
-    TRAFILATURA_AVAILABLE = True
-except ImportError:
-    TRAFILATURA_AVAILABLE = False
-
-try:
-    from bs4 import BeautifulSoup
-    BS4_AVAILABLE = True
-except ImportError:
-    BS4_AVAILABLE = False
-
-# 本地知识库搜索依赖
-try:
-    from service.milvus_service import MilvusService
-    from service.embedding_service import generate_embedding
-    MILVUS_AVAILABLE = True
-except ImportError:
-    try:
-        from app.service.milvus_service import MilvusService
-        from app.service.embedding_service import generate_embedding
-        MILVUS_AVAILABLE = True
-    except ImportError:
-        MILVUS_AVAILABLE = False
 
 
 class DeepScout(BaseAgent):
@@ -185,16 +160,7 @@ URL: {url}
         self.search_api_key = search_api_key
         self.search_cache: Dict[str, List] = {}
         self.fact_fingerprints: Dict[str, str] = {}  # 事实指纹用于去重
-        self.tool_adapter = tool_adapter  # MCP ToolAdapter（可选）
-
-        # 初始化本地知识库搜索服务
-        self.milvus_service = None
-        if MILVUS_AVAILABLE:
-            try:
-                self.milvus_service = MilvusService()
-                self.logger.info("Milvus service initialized for local knowledge base search")
-            except Exception as e:
-                self.logger.warning(f"Failed to initialize Milvus service: {e}")
+        self.tool_adapter = tool_adapter  # MCP ToolAdapter（必需）
 
     async def process(self, state: ResearchState) -> ResearchState:
         """处理入口"""
@@ -1018,7 +984,9 @@ URL: {url}
 
     async def _execute_local_search(self, query: str, top_k: int = 10) -> List[Dict]:
         """
-        执行本地知识库搜索 - 使用 Milvus 向量检索
+        执行本地知识库搜索
+
+        通过 MCP ToolAdapter 调用 web_research Skill。
 
         Args:
             query: 搜索查询
@@ -1027,122 +995,73 @@ URL: {url}
         Returns:
             搜索结果列表
         """
-        if not self.milvus_service or not MILVUS_AVAILABLE:
-            self.logger.warning("Milvus service not available for local search")
-            return []
+        if not self.tool_adapter:
+            raise RuntimeError("ToolAdapter 未初始化，无法执行本地搜索")
 
-        try:
-            # 生成查询向量
-            query_vector = generate_embedding(query)
-            if not query_vector:
-                self.logger.error("Failed to generate embedding for query")
-                return []
+        result = await self.tool_adapter.knowledge_search(
+            query=query,
+            kb_name="knowledge_base",
+            top_k=top_k
+        )
 
-            self.logger.info(f"Executing local knowledge base search: {query[:50]}...")
+        data = result.get("data", {})
+        results = data.get("results", [])
 
-            # 搜索所有知识库（collection_name = "knowledge_base"）
-            results = self.milvus_service.search(
-                collection_name="knowledge_base",
-                query_vector=query_vector,
-                top_k=top_k
-            )
+        # 格式化为统一格式
+        formatted_results = []
+        for r in results:
+            formatted_results.append({
+                'url': r.get('url', ''),
+                'title': r.get('name', 'N/A'),
+                'summary': r.get('summary', '')[:500],
+                'snippet': r.get('snippet', ''),
+                'site_name': r.get('siteName', '本地知识库'),
+                'date': '',
+                'score': r.get('score', 0),
+                'is_local': True
+            })
 
-            # 格式化结果为与网络搜索一致的格式
-            formatted_results = []
-            for r in results:
-                formatted_results.append({
-                    'url': f"local://kb/{r.get('kb_id', 'unknown')}/{r.get('doc_id', 'unknown')}",
-                    'title': r.get('filename', 'N/A'),
-                    'summary': r.get('content', '')[:500],
-                    'snippet': r.get('content', '')[:200],
-                    'site_name': f"本地知识库",
-                    'date': '',
-                    'score': r.get('score', 0),
-                    'is_local': True,
-                    'kb_id': r.get('kb_id'),
-                    'doc_id': r.get('doc_id'),
-                    'chunk_index': r.get('chunk_index')
-                })
-
-            self.logger.info(f"Local search returned {len(formatted_results)} results for: {query[:30]}...")
-            return formatted_results
-
-        except Exception as e:
-            self.logger.error(f"Local search error for '{query}': {e}")
-            return []
+        self.logger.info(f"Local search returned {len(formatted_results)} results")
+        return formatted_results
 
     async def _execute_search(self, query: str, count: int = 10) -> List[Dict]:
-        """执行网络搜索 - 使用博查 Web Search API"""
+        """
+        执行网络搜索
+
+        通过 MCP ToolAdapter 调用 web_research Skill。
+        """
         # 检查缓存
         cache_key = hashlib.md5(query.encode()).hexdigest()
         if cache_key in self.search_cache:
             self.logger.debug(f"Cache hit for query: {query[:30]}...")
             return self.search_cache[cache_key]
 
-        try:
-            self.logger.info(f"Executing Bocha search: {query[:50]}...")
+        if not self.tool_adapter:
+            raise RuntimeError("ToolAdapter 未初始化，无法执行搜索")
 
-            # 博查 API 配置
-            url = "https://api.bochaai.com/v1/web-search"
-            headers = {
-                'Authorization': self.search_api_key,
-                'Content-Type': 'application/json'
-            }
-            payload = {
-                "query": query,
-                "summary": True,
-                "count": min(count, 20),
-                "page": 1
-            }
+        result = await self.tool_adapter.web_search(query=query, count=count)
 
-            # 执行异步请求
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status != 200:
-                        error_text = await response.text()
-                        self.logger.error(f"Bocha API error {response.status}: {error_text[:200]}")
-                        return []
+        data = result.get("data", {})
+        results = data.get("results", [])
 
-                    data = await response.json()
+        # 格式化为统一格式
+        formatted_results = []
+        for item in results:
+            if item.get('url') and (item.get('snippet') or item.get('summary')):
+                formatted_results.append({
+                    'url': item['url'],
+                    'title': item.get('name', 'N/A'),
+                    'summary': item.get('summary', item.get('snippet', '')),
+                    'snippet': item.get('snippet', ''),
+                    'site_name': item.get('siteName', 'N/A'),
+                    'date': item.get('datePublished', '')
+                })
 
-            # 解析结果
-            results = []
-            webpages_data = data.get('data', {}).get('webPages', {})
-            value_list = webpages_data.get('value', [])
+        self.logger.info(f"Web search returned {len(formatted_results)} results")
 
-            if value_list and isinstance(value_list, list):
-                self.logger.info(f"Bocha search returned {len(value_list)} results for: {query[:30]}...")
-
-                for item in value_list:
-                    if item.get('url') and (item.get('snippet') or item.get('summary')):
-                        results.append({
-                            'url': item['url'],
-                            'title': item.get('name', 'N/A'),
-                            'summary': item.get('summary', item.get('snippet', '')),
-                            'snippet': item.get('snippet', ''),
-                            'site_name': item.get('siteName', 'N/A'),
-                            'date': item.get('datePublished', '')
-                        })
-            else:
-                self.logger.warning(f"No results returned for: {query[:30]}...")
-
-            # 缓存结果
-            self.search_cache[cache_key] = results
-            return results
-
-        except asyncio.TimeoutError:
-            self.logger.error(f"Bocha search timeout for '{query}'")
-            return []
-        except Exception as e:
-            self.logger.error(f"Bocha search error for '{query}': {e}")
-            import traceback
-            self.logger.debug(traceback.format_exc())
-            return []
+        # 缓存结果
+        self.search_cache[cache_key] = formatted_results
+        return formatted_results
 
     async def _analyze_search_results(
         self,
@@ -1196,23 +1115,21 @@ URL: {r.get('url', '')}
         """
         深度阅读网页内容
 
-        TODO: 集成 Headless Browser（如 Playwright）实现真正的网页抓取
-        目前使用简化版本
+        通过 MCP ToolAdapter 调用 web_research.extract_webpage 获取内容。
         """
+        if not self.tool_adapter:
+            raise RuntimeError("ToolAdapter 未初始化，无法深度阅读网页")
+
         try:
-            # 简化版：直接获取网页内容
-            response = await asyncio.to_thread(
-                requests.get,
-                url,
-                timeout=15,
-                headers={'User-Agent': 'Mozilla/5.0'}
+            # 通过 MCP 调用网页提取工具
+            result = await self.tool_adapter.extract_webpage(
+                url=url,
+                extract_type="article"
             )
 
-            if response.status_code != 200:
-                return None
+            data = result.get("data", {})
+            content = data.get("content", "")
 
-            # 提取网页正文（去除 HTML 标签和噪音）
-            content = self._extract_text_from_html(response.text, url)
             if not content or len(content) < 100:
                 self.logger.warning(f"Extracted content too short for {url}")
                 return None

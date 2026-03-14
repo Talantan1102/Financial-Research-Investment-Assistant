@@ -341,7 +341,7 @@ df = df.dropna()
         r'\b__code__\b',              # __code__
     ]
 
-    def __init__(self, llm_api_key: str, llm_base_url: str, model: str = "qwen-max"):
+    def __init__(self, llm_api_key: str, llm_base_url: str, model: str = "qwen-max", tool_adapter=None):
         super().__init__(
             name="CodeWizard",
             role="数据极客",
@@ -349,6 +349,7 @@ df = df.dropna()
             llm_base_url=llm_base_url,
             model=model
         )
+        self.tool_adapter = tool_adapter  # MCP ToolAdapter（可选）
 
     async def process(self, state: ResearchState) -> ResearchState:
         """处理入口"""

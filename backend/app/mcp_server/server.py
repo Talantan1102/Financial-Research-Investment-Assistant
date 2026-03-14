@@ -38,9 +38,11 @@ from app.mcp_server.skills import (
     MarketDataSkill,
     BaseSkill,
     FinancialAnalysisSkill,
-    RiskAssessmentSkill
+    RiskAssessmentSkill,
+    DeepResearchSkillSplit,
+    WebResearchSkill,
+    DataAnalysisSkill
 )
-from app.mcp_server.skills.deep_research_split import DeepResearchSkillSplit
 from app.mcp_server.config import get_config
 
 
@@ -410,6 +412,22 @@ def create_server() -> FinancialMCPServer:
         logger.info("DeepResearch Skill registered successfully")
     except Exception as e:
         logger.warning(f"DeepResearch Skill 注册失败: {e}")
+
+    # 注册 WebResearch Skill
+    try:
+        web_research_skill = WebResearchSkill()
+        server.register_skill(web_research_skill)
+        logger.info("WebResearch Skill registered successfully")
+    except Exception as e:
+        logger.warning(f"WebResearch Skill 注册失败: {e}")
+
+    # 注册 DataAnalysis Skill
+    try:
+        data_analysis_skill = DataAnalysisSkill()
+        server.register_skill(data_analysis_skill)
+        logger.info("DataAnalysis Skill registered successfully")
+    except Exception as e:
+        logger.warning(f"DataAnalysis Skill 注册失败: {e}")
 
     logger.info(f"MCP Server 创建完成（渐进式披露架构）")
     logger.info(f"元工具: skill, get_skill_tools, execute_skill_tool")
