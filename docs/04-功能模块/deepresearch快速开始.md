@@ -308,10 +308,7 @@ else:
 
 ## 📚 相关文档
 
-- [完整文档](skills/deep-research-skill/SKILL.md)
-- [集成报告](DEEPRESEARCH_SKILL_INTEGRATION.md)
-- [测试报告](tests/TEST_REPORT_DEEP_RESEARCH.md)
-- [使用示例](examples/deep_research_example.py)
+- [使用示例](../../../backend/examples/deep_research_example.py)
 
 ---
 

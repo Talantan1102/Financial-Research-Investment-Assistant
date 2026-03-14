@@ -376,8 +376,8 @@ USE_MCP=true python test_mcp_mode.py
 
 ## 相关文档
 
-- [MCP Client 架构文档](../backend/app/mcp_client/README.md)
-- [MCP Client API 文档](../backend/app/mcp_client/API.md)
+- [MCP Client 架构文档](../07-后端模块/mcp客户端架构.md)
+- [MCP Client API 文档](../03-API文档/mcp客户端接口.md)
 - [MCP 协议规范](https://modelcontextprotocol.io/)
 
 ## 变更记录

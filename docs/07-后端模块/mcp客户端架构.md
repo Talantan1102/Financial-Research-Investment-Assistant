@@ -191,5 +191,5 @@ python -m pytest backend/app/mcp_client/test_*.py -v
 
 ## 相关文档
 
-- [API 文档](API.md) - 详细接口说明
-- [MCP 集成记录](../../docs/MCP_INTEGRATION.md) - 改造方案
+- [API 文档](../03-API文档/mcp客户端接口.md) - 详细接口说明
+- [MCP 集成记录](../01-架构设计/mcp集成改造记录.md) - 改造方案
