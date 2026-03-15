@@ -11,6 +11,7 @@ from app.mcp_server.skills.deep_research import DeepResearchSkill
 from app.mcp_server.skills.deep_research_split import DeepResearchSkillSplit
 from app.mcp_server.skills.web_research import WebResearchSkill
 from app.mcp_server.skills.data_analysis import DataAnalysisSkill
+from app.mcp_server.skills.sector_analysis import SectorAnalysisSkill
 
 __all__ = [
     "BaseSkill",
@@ -24,4 +25,5 @@ __all__ = [
     "DeepResearchSkillSplit",
     "WebResearchSkill",
     "DataAnalysisSkill",
+    "SectorAnalysisSkill",
 ]
