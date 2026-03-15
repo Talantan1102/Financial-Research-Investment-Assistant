@@ -1,0 +1,88 @@
+{
+  "model_name": "openai/gpt-4o",
+  "api_key": "${OPENROUTER_API_KEY}",
+  "base_url": "https://openrouter.ai/api/v1",
+
+  "max_depth": 15,
+  "branching_factor": 3,
+  "depth_threshold": 2,
+
+  "min_depth": 3,
+  "max_selected_traj": 3,
+  "path_similarity_threshold": 0.7,
+
+  "number_of_seed": null,
+
+  "resource_types": ["unified_finance"],
+  "resource_init_configs": {
+    "unified_finance": {
+      "content": {}
+    }
+  },
+
+  "sandbox_server_url": "http://127.0.0.1:18890",
+  "sandbox_auto_start": true,
+  "sandbox_config_path": "configs/sandbox-server/unified_finance_config.json",
+  "sandbox_timeout": 120,
+
+  "available_tools": [
+    "unified_finance:execute_skill_tool"
+  ],
+
+  "skill_tools_mapping": {
+    "market_data": [
+      "get_quote", "search_stock", "get_history", "get_stock_basic_info",
+      "get_top_list", "get_money_flow", "get_limit_list", "get_company_info",
+      "get_daily_basic", "get_north_money", "get_margin"
+    ],
+    "financial_analysis": [
+      "get_financial_report", "calculate_financial_ratios", "compare_financials",
+      "get_income_statement", "get_balance_sheet", "get_cash_flow_statement", "compare_companies"
+    ],
+    "sector_analysis": [
+      "get_industry_list", "get_concept_list", "get_concept_stocks",
+      "compare_industry_metrics", "compare_industry_valuation", "get_industry_performance", "get_industry_leaders"
+    ],
+    "risk_assessment": [
+      "assess_portfolio_risk", "calculate_risk_metrics", "generate_risk_report"
+    ],
+    "data_analysis": [
+      "analyze_data", "generate_chart", "text_to_sql", "calculate_metrics"
+    ],
+    "web_research": [
+      "web_search", "knowledge_search", "deep_search", "extract_webpage", "batch_search"
+    ],
+    "deep_research": [
+      "plan", "search", "analyze", "write", "review", "revise", "get_state"
+    ]
+  },
+
+  "seed_description": "金融研究主题或问题",
+
+  "sampling_tips": [
+    "使用 execute_skill_tool 统一接口调用所有工具",
+    "参数格式: {skill_name: 'market_data', tool_name: 'get_quote', arguments: {symbol: '600519'}}",
+    "可用 Skills: market_data(11个工具), financial_analysis(7个), sector_analysis(7个)",
+    "可用 Skills: risk_assessment(3个), data_analysis(4个), web_research(5个), deep_research(7个)",
+    "根据研究需求选择合适的 Skill 和 Tool",
+    "多轮调用不同工具，逐步深入分析",
+    "可以组合多个 Skill 进行综合分析"
+  ],
+
+  "synthesis_tips": [
+    "生成与金融研究相关的问题",
+    "问题应该需要多工具、多Skill协作才能回答",
+    "答案要有具体数据支撑",
+    "包含明确的分析结论和建议"
+  ],
+
+  "qa_examples": [
+    {
+      "question": "分析贵州茅台(600519)的投资价值",
+      "answer": "综合分析了茅台的股价走势、财务状况、行业地位和风险因素..."
+    }
+  ],
+
+  "seeds_file": "seeds/finance_research/seeds.jsonl",
+  "output_dir": "results/unified_finance"
+}

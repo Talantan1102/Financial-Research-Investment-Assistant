@@ -1,0 +1,6 @@
+{
+  "backend": "sandbox.server.backends.resources.unified_finance.AgentFlowUnifiedFinanceBackend",
+  "config": {},
+  "name": "unified_finance",
+  "description": "统一版金融研投助手 Backend - 支持所有7个Skill共40个工具，通过execute_skill_tool统一调用"
+}
