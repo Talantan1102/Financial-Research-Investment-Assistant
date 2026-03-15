@@ -91,3 +91,10 @@ fordiff/
 
 # Local SQL workspace
 sql/
+# Archive directories
+archive/
+tests/archive/
+
+# Large result files
+results/ds_synthesized_qa/*.jsonl
+results/ds_synthesized_qa/*.json
