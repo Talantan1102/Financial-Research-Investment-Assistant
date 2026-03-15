@@ -7,7 +7,7 @@ import sys
 import logging
 
 # 添加 backend 到 path
-backend_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, backend_dir)
 
 # 加载 .env 文件到环境变量

@@ -7,7 +7,7 @@ import sys
 import os
 
 # 添加 backend 到 path
-backend_dir = os.path.dirname(os.path.abspath(__file__))
+backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, backend_dir)
 
 # 加载 .env 文件到环境变量（MCP Server 子进程会继承）
@@ -24,7 +24,7 @@ if os.path.exists(env_path):
 from app.mcp_client.client import mcp_client_context
 
 SERVER_PATH = os.path.join(backend_dir, "app/mcp_server/server.py")
-PYTHON = os.path.join(backend_dir, "venv/bin/python3")
+PYTHON = os.environ.get("PYTHON", "/Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/venv/bin/python3")
 
 
 async def test_list_tools(session):
@@ -190,7 +190,7 @@ async def test_all_skills(session):
     print("TEST 5: 遍历所有 Skills")
     print("=" * 60)
 
-    skills = ["market_data", "financial_analysis", "risk_assessment", "deep_research"]
+    skills = ["data_analysis", "market_data", "web_research", "sector_analysis", "risk_assessment", "financial_analysis", "deep_research"]
 
     for skill_name in skills:
         # 测试 skill
