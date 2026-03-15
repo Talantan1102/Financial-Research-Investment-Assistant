@@ -1,18 +1,20 @@
 ---
 name: deep_research
-description: 深度研究服务，基于多智能体协作生成高质量研究报告
+description: 深度研究服务（分步执行版），提供6个独立工具对应5个Agent，支持LLM完全控制研究流程，并集成行业分析能力
 version: "1.0"
-tool_count: 3
+tool_count: 7
 ---
 
 # DeepResearch Skill
 
 ## 概述
 
-提供基于多智能体协作的深度研究能力，通过5个专业Agent协同工作，生成高质量的研究报告。适用于复杂主题的深度分析、市场研究、投资分析等场景。
+提供基于多智能体协作的深度研究能力，通过5个专业Agent协同工作，生成高质量的研究报告。
+
+**新特性**: 深度集成 `sector_analysis` 行业分析能力，支持行业对比、估值分析、龙头股识别等。
 
 **架构**: 5-Agent协作系统（Architect → Scout → Wizard → Writer → Critic）
-**数据源**: 网络搜索 + 本地知识库（可选）
+**数据源**: 网络搜索 + 本地知识库（可选）+ 金融数据API
 **输出**: 结构化研究报告
 
 ---
@@ -28,145 +30,215 @@ tool_count: 3
 ### Agent角色说明
 
 1. **Architect（架构师）**: 分析研究问题，规划研究大纲和子问题
-2. **Scout（侦探）**: 根据大纲搜索信息，收集事实和数据（博查API + 本地知识库）
+2. **Scout（侦探）**: 根据大纲搜索信息，收集事实和数据
+   - 网络搜索（博查API）
+   - 本地知识库
+   - **金融数据**: 股票行情、财务报表、行业数据
+   - **行业分析**: 行业对比、估值分析、龙头股
 3. **Wizard（极客）**: 数据分析、趋势识别、可视化建议
 4. **Writer（笔杆）**: 基于收集的信息撰写结构化markdown报告
-5. **Critic（评论家）**: 评审报告质量（完整性、准确性、逻辑性、可读性），输出评分和改进建议
+5. **Critic（评论家）**: 评审报告质量，输出评分和改进建议
 
 ---
 
 ## 可用工具
 
-### 1. research_stream - 执行深度研究（流式）
+### 1. plan - 规划研究大纲
 
-**功能**: 执行深度研究任务，返回流式事件。适用于需要实时反馈的场景。
+**功能**: 【步骤1】Architect Agent 分析问题，生成结构化研究计划
 
-**调用方式**: `deep_research.research_stream(query, session_id, search_web, search_local, resume)`
+**调用方式**: `deep_research.plan(query, session_id)`
 
-**参数**:
-- `query` (必需): 研究问题或主题
-  - 示例: `'中国AI芯片市场分析'`, `'茅台近期投资价值分析'`
-- `session_id` (可选): 会话ID，用于标识和恢复研究任务
-- `search_web` (可选): 是否启用网络搜索，默认 `True`
-- `search_local` (可选): 是否启用本地知识库，默认 `False`
-- `resume` (可选): 是否从检查点恢复，默认 `False`
+**返回**: session_id, sections[], hypotheses[]
 
-**流式事件类型**:
-```json
-{"type": "phase", "content": "Architect: 规划研究大纲..."}
-{"type": "outline", "content": ["市场规模", "竞争格局", "发展趋势"]}
-{"type": "fact", "content": "2023年中国AI芯片市场规模达到XXX亿元", "source": "..."}
-{"type": "progress", "content": "已完成3/5个Agent", "percentage": 60}
-{"type": "final_report", "content": "# 研究报告\n\n...", "quality_score": 85.5}
+---
+
+### 2. search - 搜索信息
+
+**功能**: 【步骤2】Scout Agent 搜索网络/知识库/金融数据
+
+**调用方式**: `deep_research.search(session_id, section_id, search_web, search_local)`
+
+**数据源**:
+- 网络搜索（博查API）
+- 本地知识库
+- **股票数据**: market_data 工具
+- **行业数据**: sector_analysis 工具
+
+---
+
+### 3. analyze - 分析数据
+
+**功能**: 【步骤3】Wizard Agent 深度分析，生成洞察
+
+**调用方式**: `deep_research.analyze(session_id, section_id)`
+
+---
+
+### 4. write - 撰写报告
+
+**功能**: 【步骤4】Writer Agent 撰写完整报告
+
+**调用方式**: `deep_research.write(session_id, section_id)`
+
+---
+
+### 5. review - 质量评审
+
+**功能**: 【步骤5】Critic Agent 评审报告质量
+
+**调用方式**: `deep_research.review(session_id)`
+
+**返回**: score, approved, strengths[], weaknesses[], suggestions[]
+
+---
+
+### 6. revise - 修订改进
+
+**功能**: 【步骤6】Writer Agent 根据反馈修订报告
+
+**调用方式**: `deep_research.revise(session_id)`
+
+---
+
+### 7. get_state - 获取研究状态
+
+**功能**: 查看当前进度、已完成步骤、中间结果
+
+**调用方式**: `deep_research.get_state(session_id)`
+
+---
+
+## 行业分析集成 ⭐
+
+### 在研究中使用行业分析
+
+Deep Research 现已深度集成 `sector_analysis` 行业分析能力。
+
+#### 研究步骤中的行业分析
+
+**Step 1: 规划阶段 (plan)**
+```
+Architect 识别研究涉及的行业 → 自动规划行业分析章节
 ```
 
-**返回示例**:
-```json
-{
-  "success": true,
-  "data": {
-    "session_id": "research_20260308_143000",
-    "query": "中国AI芯片市场分析",
-    "final_report": "# 中国AI芯片市场分析\n\n## 摘要\n...",
-    "quality_score": 85.5,
-    "phase": "completed"
-  }
-}
+**Step 2: 搜索阶段 (search)**
+```
+Scout 根据章节需要调用 sector_analysis 工具:
+- 行业财务对比: compare_industry_metrics
+- 行业估值对比: compare_industry_valuation  
+- 行业涨跌幅: get_industry_performance
+- 行业龙头: get_industry_leaders
+```
+
+**Step 3: 分析阶段 (analyze)**
+```
+Wizard 基于行业数据进行交叉分析:
+- 行业排名 vs 个股表现
+- 估值水平 vs 财务质量
+- 资金流向 vs 行业趋势
+```
+
+#### 典型行业研究场景
+
+**场景1: 寻找被低估的优质行业**
+```
+研究流程:
+1. plan: "寻找当前被低估的优质行业"
+2. search: 调用 compare_industry_metrics(metric="roe")
+   → 发现白酒、医药ROE最高
+3. search: 调用 compare_industry_valuation
+   → 发现银行PE最低(5倍)
+4. analyze: 对比分析盈利能力 vs 估值水平
+5. write: 输出"银行行业被低估"结论
+```
+
+**场景2: 行业龙头股研究**
+```
+研究流程:
+1. plan: "白酒行业龙头投资价值分析"
+2. search: 调用 get_industry_leaders(industry="白酒", by="market_cap")
+   → 茅台、五粮液、泸州老窖
+3. search: 调用 market_data.get_daily_basic(symbol="600519")
+   → 茅台PE/PB数据
+4. search: 调用 financial_analysis.get_fina_indicator(symbol="600519")
+   → 茅台财务指标
+5. analyze: 综合评估龙头地位、估值、财务质量
+6. write: 输出茅台龙头投资价值报告
+```
+
+**场景3: 热点行业追踪**
+```
+研究流程:
+1. plan: "当前市场热点行业分析"
+2. search: 调用 get_industry_performance(period="5d")
+   → 发现半导体、AI涨幅最大
+3. search: 调用 get_concept_stocks(concept_name="人工智能")
+   → 获取AI概念股列表
+4. search: 调用 compare_industry_valuation
+   → 评估AI行业当前估值
+5. analyze: 判断是趋势还是泡沫
+6. write: 输出热点行业投资提示
 ```
 
 ---
 
-### 2. research_sync - 执行深度研究（同步）
+## 完整研究示例
 
-**功能**: 执行深度研究任务，返回完整结果（非流式）。适用于批处理场景。
+### 示例: 银行行业投资价值深度研究
 
-**调用方式**: `deep_research.research_sync(query, session_id, search_web, search_local)`
+```python
+# Step 1: 规划
+plan_result = deep_research.plan(query="银行行业投资价值深度分析")
+session_id = plan_result["data"]["session_id"]
+# 返回大纲: ["行业概况", "财务对比", "估值分析", "龙头股", "投资建议"]
 
-**参数**:
-- `query` (必需): 研究问题
-- `session_id` (可选): 会话ID
-- `search_web` (可选): 是否启用网络搜索，默认 `True`
-- `search_local` (可选): 是否启用本地知识库，默认 `False`
+# Step 2: 搜索 - 行业财务对比
+search_result = deep_research.search(session_id=session_id, section_id="财务对比")
+# Scout 自动调用: sector_analysis.compare_industry_metrics(industries=["银行", "白酒", "保险"], metric="roe")
 
-**返回示例**:
-```json
-{
-  "success": true,
-  "data": {
-    "session_id": "research_maotai_001",
-    "query": "茅台近期投资价值分析",
-    "final_report": "# 贵州茅台投资价值分析\n\n## 一、基本面分析\n...",
-    "quality_score": 88.5,
-    "outline": ["基本面分析", "估值水平评估", "风险因素", "投资建议"],
-    "facts": ["2023年营收1517.3亿元", "ROE达到32.58%"],
-    "insights": ["茅台品牌价值持续增强", "直销渠道占比提升"],
-    "references": ["https://..."],
-    "iterations": 2,
-    "phase": "completed"
-  }
-}
+# Step 2: 搜索 - 估值对比  
+search_result = deep_research.search(session_id=session_id, section_id="估值分析")
+# Scout 自动调用: sector_analysis.compare_industry_valuation(industries=["银行", "保险"])
+
+# Step 2: 搜索 - 龙头股
+search_result = deep_research.search(session_id=session_id, section_id="龙头股")
+# Scout 自动调用: sector_analysis.get_industry_leaders(industry="银行", by="market_cap")
+
+# Step 3: 分析
+analyze_result = deep_research.analyze(session_id=session_id)
+# Wizard 交叉分析: ROE vs PE → 发现银行被低估
+
+# Step 4: 撰写
+write_result = deep_research.write(session_id=session_id)
+# Writer 生成完整报告
+
+# Step 5: 评审
+review_result = deep_research.review(session_id=session_id)
+# Critic 评分和建议
+
+# Step 6: 修订 (如有需要)
+revise_result = deep_research.revise(session_id=session_id)
 ```
 
 ---
 
-### 3. quick_research - 快速研究（简化版）
+## 工具调用指南
 
-**功能**: 执行快速研究，返回核心发现和简要报告。适用于快速了解某个主题。
+### Scout Agent 自动调用的工具
 
-**调用方式**: `deep_research.quick_research(query, max_iterations)`
+Scout 在搜索阶段会根据研究内容自动选择工具:
 
-**参数**:
-- `query` (必需): 研究问题
-- `max_iterations` (可选): 最大迭代次数，默认 `3`（快速模式）
-
-**返回示例**:
-```json
-{
-  "success": true,
-  "data": {
-    "query": "小米汽车市场前景",
-    "summary": "小米汽车作为新能源汽车市场的新进入者...",
-    "key_facts": ["小米汽车预计2024年Q1交付", "定价区间21-30万元"],
-    "key_insights": ["小米生态优势明显", "面临激烈竞争"],
-    "quality_score": 72.3,
-    "iterations": 3
-  }
-}
-```
-
----
-
-## 工作流指导
-
-### 典型使用场景
-
-#### 1. 市场研究
-```
-用户: "帮我深度分析一下中国新能源汽车市场"
-
-步骤:
-1. 调用 deep_research.research_sync(query='中国新能源汽车市场深度分析', search_web=True)
-2. 等待Agent协作完成
-3. 获取完整报告并格式化输出
-```
-
-#### 2. 投资分析
-```
-用户: "给我一份茅台的深度投资分析报告"
-
-步骤:
-1. 调用 deep_research.research_sync(query='贵州茅台投资价值深度分析')
-2. 获取报告: 基本面分析、估值水平、风险因素、投资建议
-```
-
-#### 3. 快速了解
-```
-用户: "AI大模型的最新发展趋势是什么？"
-
-步骤:
-1. 调用 deep_research.quick_research(query='AI大模型最新发展趋势')
-2. 获取核心事实和洞察
-```
+| 研究内容 | 自动调用的工具 |
+|---------|--------------|
+| 个股数据 | market_data.get_quote, market_data.get_history |
+| 财务分析 | financial_analysis.get_financial_report |
+| 行业对比 | sector_analysis.compare_industry_metrics |
+| 行业估值 | sector_analysis.compare_industry_valuation |
+| 行业龙头 | sector_analysis.get_industry_leaders |
+| 概念板块 | sector_analysis.get_concept_stocks |
+| 市场热点 | sector_analysis.get_industry_performance |
+| 网络信息 | web_research.web_search |
 
 ---
 
@@ -175,18 +247,10 @@ tool_count: 3
 ### 1. 查询质量建议
 **好的查询**:
 - "中国AI芯片市场规模、竞争格局和发展趋势分析"
-- "贵州茅台2023年财务分析和投资价值评估"
+- "银行 vs 保险，哪个行业现在更值得投资？"
+- "白酒行业龙头股估值对比分析"
 
-**不好的查询**:
-- "AI"（太宽泛）
-- "茅台怎么样？"（不明确）
-
-### 2. 模式选择
-- **快速了解**: `quick_research` (3次迭代)
-- **标准分析**: `research_sync` (默认配置)
-- **实时反馈**: `research_stream` (需要进度监控)
-
-### 3. 质量评分解读
+### 2. 质量评分解读
 ```
 90-100: 优秀 - 完整、准确、逻辑清晰
 80-90:  良好 - 基本完整，逻辑通顺
@@ -195,26 +259,38 @@ tool_count: 3
 <60:    需改进
 ```
 
-### 4. 数据来源
-- **网络搜索**: 博查API（已配置）
-- **本地知识库**: 需手动配置知识库路径
-- 仅在有相关内部资料时启用 `search_local=True`
+### 3. 行业分析数据依赖
+行业分析工具需要:
+- Tushare API Token（已配置）
+- 足够的API积分（财务指标需要800+积分）
 
-### 5. 友好的输出格式
-将markdown报告转换为结构化输出:
+### 4. 友好的输出格式
 ```
-【深度研究报告】中国AI芯片市场分析
+【深度研究报告】银行行业投资价值分析
 
-研究摘要: ...
-市场规模: 2023年 XXX亿元，增长率 XX%
-竞争格局: 1.华为海思 2.寒武纪 ...
-核心洞察: ...
-参考文献: [1] https://...
+研究摘要: 银行行业当前PE仅5倍，处于历史低位...
 
-质量评分: 85.5 | 数据点: 23 | 参考来源: 15
+一、行业财务对比
+┌─────────┬────────┬──────────┐
+│ 行业    │ ROE(%) │ 股票数   │
+├─────────┼────────┼──────────┤
+│ 白酒    │ 25.5   │ 18       │
+│ 医药    │ 18.2   │ 156      │
+│ 银行    │ 12.1   │ 42       │
+└─────────┴────────┴──────────┘
+
+二、估值对比
+银行PE(5.2x) < 保险(12.5x) < 医药(28.5x) < 白酒(35.8x)
+
+三、龙头股
+1. 招商银行 - 市值第一(8500亿)
+2. 平安银行 - 增速最快(15%)
+...
+
+质量评分: 88.5 | 数据点: 45 | 参考来源: 12
 ```
 
 ---
 
 **Skill 版本**: v1.0
-**最后更新**: 2026-03-08
+**最后更新**: 2026-03-15 (集成行业分析)

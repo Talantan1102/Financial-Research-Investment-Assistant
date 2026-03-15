@@ -41,7 +41,8 @@ from app.mcp_server.skills import (
     RiskAssessmentSkill,
     DeepResearchSkillSplit,
     WebResearchSkill,
-    DataAnalysisSkill
+    DataAnalysisSkill,
+    SectorAnalysisSkill
 )
 from app.mcp_server.config import get_config
 
@@ -428,6 +429,14 @@ def create_server() -> FinancialMCPServer:
         logger.info("DataAnalysis Skill registered successfully")
     except Exception as e:
         logger.warning(f"DataAnalysis Skill 注册失败: {e}")
+
+    # 注册 SectorAnalysis Skill
+    try:
+        sector_analysis_skill = SectorAnalysisSkill()
+        server.register_skill(sector_analysis_skill)
+        logger.info("SectorAnalysis Skill registered successfully")
+    except Exception as e:
+        logger.warning(f"SectorAnalysis Skill 注册失败: {e}")
 
     logger.info(f"MCP Server 创建完成（渐进式披露架构）")
     logger.info(f"元工具: skill, get_skill_tools, execute_skill_tool")
