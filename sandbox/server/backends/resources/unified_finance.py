@@ -63,7 +63,7 @@ class UnifiedSkillClient:
             
             # 预加载所有工具定义到缓存
             for skill_name, skill in self.skills.items():
-                self._skill_tools_cache[skill_name] = list(skill.tools.keys())
+                self._skill_tools_cache[skill_name] = list(skill._tools.keys())
             
             self._initialized = True
             logger.info(f"✅ 统一 Skill 客户端初始化完成: {list(self.skills.keys())}")
@@ -97,9 +97,9 @@ class UnifiedSkillClient:
             }
         
         # 检查工具是否存在
-        tool = skill.tools.get(tool_name)
-        if not tool:
-            available_tools = list(skill.tools.keys())
+        tool_handler = skill._tools.get(tool_name)
+        if not tool_handler:
+            available_tools = list(skill._tools.keys())
             return {
                 "success": False,
                 "error": f"工具 '{tool_name}' 在 Skill '{skill_name}' 中不存在。可用工具: {available_tools}",
@@ -109,7 +109,7 @@ class UnifiedSkillClient:
         # 执行工具
         try:
             logger.info(f"🛠️  执行工具: {skill_name}:{tool_name}, 参数: {arguments}")
-            result = await tool.handler(**arguments)
+            result = await tool_handler(**arguments)
             
             # 统一返回格式
             return {
@@ -148,10 +148,10 @@ class UnifiedSkillClient:
             return []
         
         tools = []
-        for tool_name, tool in skill.tools.items():
+        for tool_name, tool_def in skill._tool_definitions.items():
             tools.append({
                 "name": tool_name,
-                "description": tool.description,
+                "description": tool_def.description,
                 "parameters": [
                     {
                         "name": param.name,
@@ -161,7 +161,7 @@ class UnifiedSkillClient:
                         "default": param.default,
                         "enum": param.enum
                     }
-                    for param in tool.parameters
+                    for param in tool_def.parameters
                 ]
             })
         
@@ -183,12 +183,12 @@ class UnifiedSkillClient:
         
         all_tools = []
         for skill_name, skill in self.skills.items():
-            for tool_name, tool in skill.tools.items():
+            for tool_name, tool_def in skill._tool_definitions.items():
                 all_tools.append({
                     "name": f"{skill_name}:{tool_name}",
                     "skill": skill_name,
                     "tool": tool_name,
-                    "description": tool.description,
+                    "description": tool_def.description,
                     "parameters": [
                         {
                             "name": param.name,
@@ -198,7 +198,7 @@ class UnifiedSkillClient:
                             "default": param.default,
                             "enum": param.enum
                         }
-                        for param in tool.parameters
+                        for param in tool_def.parameters
                     ]
                 })
         
@@ -270,17 +270,6 @@ class UnifiedFinanceBackend:
             arguments = {}
         
         return await self.skill_client.execute_skill_tool(skill_name, tool_name, arguments)
-    
-    # ============ 辅助方法（可选） ============
-    
-    async def action_market_data_get_quote(self, symbol: str) -> Dict[str, Any]:
-        """获取股票实时行情（快捷方法）"""
-        return await self.execute_skill_tool('market_data', 'get_quote', {'symbol': symbol})
-    
-    async def action_financial_analysis_get_financial_report(self, symbol: str, report_type: str, **kwargs) -> Dict[str, Any]:
-        """获取财务报表（快捷方法）"""
-        arguments = {'symbol': symbol, 'report_type': report_type, **kwargs}
-        return await self.execute_skill_tool('financial_analysis', 'get_financial_report', arguments)
     
     # ============ 工具定义导出 ============
     
