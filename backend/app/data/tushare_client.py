@@ -5,7 +5,7 @@
 import os
 import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from threading import Lock
 import tushare as ts
@@ -1193,3 +1193,1438 @@ def get_tushare_client() -> TushareClient:
     if _client_instance is None:
         _client_instance = TushareClient()
     return _client_instance
+
+
+# ==================== Tier 2 API 实现 ====================
+
+def get_daily_basic(self, symbol: str = None, trade_date: str = None) -> Dict[str, Any]:
+    """
+    获取每日指标数据（PE、PB、换手率、市值等）
+
+    Args:
+        symbol: 股票代码，可选，不提供则返回全市场
+        trade_date: 交易日期，格式 "YYYYMMDD"，默认最近交易日
+
+    Returns:
+        每日指标数据字典：
+        {
+            "success": True/False,
+            "data": [
+                {
+                    "ts_code": "600519.SH",
+                    "trade_date": "20250314",
+                    "close": 1850.50,
+                    "turnover_rate": 0.53,
+                    "turnover_rate_f": 0.48,
+                    "volume_ratio": 1.25,
+                    "pe": 35.5,
+                    "pe_ttm": 32.8,
+                    "pb": 12.3,
+                    "ps": 15.2,
+                    "ps_ttm": 14.8,
+                    "dv_ratio": 1.2,
+                    "dv_ttm": 1.3,
+                    "total_share": 1256000000,
+                    "float_share": 1256000000,
+                    "free_share": 1256000000,
+                    "total_mv": 2325000000000.00,
+                    "circ_mv": 2325000000000.00
+                }
+            ],
+            "error": None
+        }
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 设置默认日期
+        if not trade_date:
+            trade_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+
+        # 构建参数
+        params = {"trade_date": trade_date}
+        if symbol:
+            params["ts_code"] = self._normalize_stock_code(symbol)
+
+        # 构建缓存键
+        cache_key = f"daily_basic_{params.get('ts_code', 'all')}_{trade_date}"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 daily_basic 接口
+        df = api.daily_basic(**params)
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"未找到每日指标数据: {symbol or '全市场'}"
+            }
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "ts_code": row.get('ts_code', ''),
+                "trade_date": row.get('trade_date', ''),
+                "close": float(row.get('close', 0)),
+                "turnover_rate": float(row.get('turnover_rate', 0)),
+                "turnover_rate_f": float(row.get('turnover_rate_f', 0)),
+                "volume_ratio": float(row.get('volume_ratio', 0)),
+                "pe": float(row.get('pe', 0)),
+                "pe_ttm": float(row.get('pe_ttm', 0)),
+                "pb": float(row.get('pb', 0)),
+                "ps": float(row.get('ps', 0)),
+                "ps_ttm": float(row.get('ps_ttm', 0)),
+                "dv_ratio": float(row.get('dv_ratio', 0)),
+                "dv_ttm": float(row.get('dv_ttm', 0)),
+                "total_share": float(row.get('total_share', 0)),
+                "float_share": float(row.get('float_share', 0)),
+                "free_share": float(row.get('free_share', 0)),
+                "total_mv": float(row.get('total_mv', 0)),
+                "circ_mv": float(row.get('circ_mv', 0))
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "trade_date": trade_date,
+                "symbol": symbol,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "points" in error_msg or "积分" in error_msg:
+            return {
+                "success": False,
+                "data": None,
+                "error": "积分不足，daily_basic 需要至少600积分"
+            }
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取每日指标数据失败: {str(e)}"
+        }
+
+
+def get_north_money(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    """
+    获取沪深港通资金流向（北向资金）
+
+    Args:
+        start_date: 开始日期，格式 "YYYYMMDD"
+        end_date: 结束日期，格式 "YYYYMMDD"
+
+    Returns:
+        北向资金数据字典：
+        {
+            "success": True/False,
+            "data": [
+                {
+                    "trade_date": "20250314",
+                    "ggt_ss": 250000000.00,      # 港股通（上海）
+                    "ggt_sz": 180000000.00,      # 港股通（深圳）
+                    "hgt": 420000000.00,         # 沪股通
+                    "sgt": 380000000.00,         # 深股通
+                    "north_money": 800000000.00, # 北向资金合计
+                    "south_money": 430000000.00  # 南向资金合计
+                }
+            ],
+            "error": None
+        }
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 设置默认日期范围
+        if not end_date:
+            end_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+        if not start_date:
+            start_dt = datetime.strptime(end_date, '%Y%m%d') - timedelta(days=30)
+            start_date = start_dt.strftime('%Y%m%d')
+
+        # 构建缓存键
+        cache_key = f"north_money_{start_date}_{end_date}"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 moneyflow_hsgt 接口
+        df = api.moneyflow_hsgt(start_date=start_date, end_date=end_date)
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": "未找到北向资金数据"
+            }
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "trade_date": row.get('trade_date', ''),
+                "ggt_ss": float(row.get('ggt_ss', 0)),
+                "ggt_sz": float(row.get('ggt_sz', 0)),
+                "hgt": float(row.get('hgt', 0)),
+                "sgt": float(row.get('sgt', 0)),
+                "north_money": float(row.get('north_money', 0)),
+                "south_money": float(row.get('south_money', 0))
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "start_date": start_date,
+                "end_date": end_date,
+                "count": len(records),
+                "total_north": sum(r["north_money"] for r in records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取北向资金数据失败: {str(e)}"
+        }
+
+
+def get_margin(self, symbol: str = None, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    """
+    获取融资融券数据
+
+    Args:
+        symbol: 股票代码，可选
+        start_date: 开始日期，格式 "YYYYMMDD"
+        end_date: 结束日期，格式 "YYYYMMDD"
+
+    Returns:
+        融资融券数据字典：
+        {
+            "success": True/False,
+            "data": [
+                {
+                    "trade_date": "20250314",
+                    "ts_code": "600519.SH",
+                    "rzye": 1200000000.00,      # 融资余额
+                    "rqye": 80000000.00,        # 融券余额
+                    "rzrqye": 1280000000.00,    # 融资融券余额
+                    "rzmre": 50000000.00,       # 融资买入额
+                    "rqyl": 100000.00           # 融券余量
+                }
+            ],
+            "error": None
+        }
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 设置默认日期范围
+        if not end_date:
+            end_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+        if not start_date:
+            start_dt = datetime.strptime(end_date, '%Y%m%d') - timedelta(days=30)
+            start_date = start_dt.strftime('%Y%m%d')
+
+        # 构建参数
+        params = {"start_date": start_date, "end_date": end_date}
+        if symbol:
+            params["ts_code"] = self._normalize_stock_code(symbol)
+
+        # 构建缓存键
+        cache_key = f"margin_{params.get('ts_code', 'all')}_{start_date}_{end_date}"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 margin 接口
+        df = api.margin(**params)
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"未找到融资融券数据: {symbol or '全市场'}"
+            }
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "trade_date": row.get('trade_date', ''),
+                "ts_code": row.get('ts_code', ''),
+                "rzye": float(row.get('rzye', 0)),
+                "rqye": float(row.get('rqye', 0)),
+                "rzrqye": float(row.get('rzrqye', 0)),
+                "rzmre": float(row.get('rzmre', 0)),
+                "rqyl": float(row.get('rqyl', 0))
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "symbol": symbol,
+                "start_date": start_date,
+                "end_date": end_date,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "points" in error_msg or "积分" in error_msg:
+            return {
+                "success": False,
+                "data": None,
+                "error": "积分不足，margin 需要至少800积分"
+            }
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取融资融券数据失败: {str(e)}"
+        }
+
+
+# 将新方法绑定到类
+TushareClient.get_daily_basic = get_daily_basic
+TushareClient.get_north_money = get_north_money
+TushareClient.get_margin = get_margin
+
+
+# ==================== 财务数据 API ====================
+
+def get_income_statement(self, symbol: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    """
+    获取利润表数据
+
+    Args:
+        symbol: 股票代码
+        start_date: 开始日期，格式 "YYYYMMDD"
+        end_date: 结束日期，格式 "YYYYMMDD"
+
+    Returns:
+        利润表数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        ts_code = self._normalize_stock_code(symbol)
+
+        # 设置默认日期范围
+        if not end_date:
+            end_date = datetime.now().strftime('%Y%m%d')
+        if not start_date:
+            start_dt = datetime.strptime(end_date, '%Y%m%d') - timedelta(days=365 * 3)
+            start_date = start_dt.strftime('%Y%m%d')
+
+        # 构建缓存键
+        cache_key = f"income_{ts_code}_{start_date}_{end_date}"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 income 接口
+        df = api.income(ts_code=ts_code, start_date=start_date, end_date=end_date)
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"未找到利润表数据: {symbol}"
+            }
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "ts_code": row.get('ts_code', ''),
+                "ann_date": row.get('ann_date', ''),
+                "f_ann_date": row.get('f_ann_date', ''),
+                "end_date": row.get('end_date', ''),
+                "comp_type": row.get('comp_type', ''),
+                "basic_eps": float(row.get('basic_eps', 0)),
+                "diluted_eps": float(row.get('diluted_eps', 0)),
+                "total_revenue": float(row.get('total_revenue', 0)),
+                "revenue": float(row.get('revenue', 0)),
+                "total_cogs": float(row.get('total_cogs', 0)),
+                "oper_cost": float(row.get('oper_cost', 0)),
+                "sell_exp": float(row.get('sell_exp', 0)),
+                "admin_exp": float(row.get('admin_exp', 0)),
+                "fin_exp": float(row.get('fin_exp', 0)),
+                "operate_profit": float(row.get('operate_profit', 0)),
+                "total_profit": float(row.get('total_profit', 0)),
+                "income_tax": float(row.get('income_tax', 0)),
+                "n_income": float(row.get('n_income', 0)),
+                "n_income_attr_p": float(row.get('n_income_attr_p', 0))
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "symbol": ts_code,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "points" in error_msg or "积分" in error_msg:
+            return {
+                "success": False,
+                "data": None,
+                "error": "积分不足，income 需要至少800积分"
+            }
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取利润表数据失败: {str(e)}"
+        }
+
+
+def get_balance_sheet(self, symbol: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    """
+    获取资产负债表数据
+
+    Args:
+        symbol: 股票代码
+        start_date: 开始日期，格式 "YYYYMMDD"
+        end_date: 结束日期，格式 "YYYYMMDD"
+
+    Returns:
+        资产负债表数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        ts_code = self._normalize_stock_code(symbol)
+
+        # 设置默认日期范围
+        if not end_date:
+            end_date = datetime.now().strftime('%Y%m%d')
+        if not start_date:
+            start_dt = datetime.strptime(end_date, '%Y%m%d') - timedelta(days=365 * 3)
+            start_date = start_dt.strftime('%Y%m%d')
+
+        # 构建缓存键
+        cache_key = f"balance_sheet_{ts_code}_{start_date}_{end_date}"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 balance_sheet 接口
+        df = api.balance_sheet(ts_code=ts_code, start_date=start_date, end_date=end_date)
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"未找到资产负债表数据: {symbol}"
+            }
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "ts_code": row.get('ts_code', ''),
+                "ann_date": row.get('ann_date', ''),
+                "f_ann_date": row.get('f_ann_date', ''),
+                "end_date": row.get('end_date', ''),
+                "comp_type": row.get('comp_type', ''),
+                "total_assets": float(row.get('total_assets', 0)),
+                "total_liab": float(row.get('total_liab', 0)),
+                "total_hldr_eqy_exc_min_int": float(row.get('total_hldr_eqy_exc_min_int', 0)),
+                "total_hldr_eqy_inc_min_int": float(row.get('total_hldr_eqy_inc_min_int', 0)),
+                "total_cur_assets": float(row.get('total_cur_assets', 0)),
+                "total_cur_liab": float(row.get('total_cur_liab', 0)),
+                "total_nca": float(row.get('total_nca', 0)),
+                "total_ncl": float(row.get('total_ncl', 0)),
+                "fix_assets": float(row.get('fix_assets', 0)),
+                "intan_assets": float(row.get('intan_assets', 0)),
+                "inventories": float(row.get('inventories', 0)),
+                "accounts_receiv": float(row.get('accounts_receiv', 0)),
+                "notes_receiv": float(row.get('notes_receiv', 0)),
+                "prepayment": float(row.get('prepayment', 0)),
+                "acct_payable": float(row.get('acct_payable', 0))
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "symbol": ts_code,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "points" in error_msg or "积分" in error_msg:
+            return {
+                "success": False,
+                "data": None,
+                "error": "积分不足，balance_sheet 需要至少800积分"
+            }
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取资产负债表数据失败: {str(e)}"
+        }
+
+
+def get_cash_flow(self, symbol: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    """
+    获取现金流量表数据
+
+    Args:
+        symbol: 股票代码
+        start_date: 开始日期，格式 "YYYYMMDD"
+        end_date: 结束日期，格式 "YYYYMMDD"
+
+    Returns:
+        现金流量表数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        ts_code = self._normalize_stock_code(symbol)
+
+        # 设置默认日期范围
+        if not end_date:
+            end_date = datetime.now().strftime('%Y%m%d')
+        if not start_date:
+            start_dt = datetime.strptime(end_date, '%Y%m%d') - timedelta(days=365 * 3)
+            start_date = start_dt.strftime('%Y%m%d')
+
+        # 构建缓存键
+        cache_key = f"cash_flow_{ts_code}_{start_date}_{end_date}"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 cashflow 接口
+        df = api.cashflow(ts_code=ts_code, start_date=start_date, end_date=end_date)
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"未找到现金流量表数据: {symbol}"
+            }
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "ts_code": row.get('ts_code', ''),
+                "ann_date": row.get('ann_date', ''),
+                "f_ann_date": row.get('f_ann_date', ''),
+                "end_date": row.get('end_date', ''),
+                "comp_type": row.get('comp_type', ''),
+                "n_cashflow_act": float(row.get('n_cashflow_act', 0)),
+                "c_inf_fr_operate_a": float(row.get('c_inf_fr_operate_a', 0)),
+                "c_paid_to_for_empl_a": float(row.get('c_paid_to_for_empl_a', 0)),
+                "c_paid_for_taxes": float(row.get('c_paid_for_taxes', 0)),
+                "n_cashflows_inv_act": float(row.get('n_cashflows_inv_act', 0)),
+                "c_recp_return_invest": float(row.get('c_recp_return_invest', 0)),
+                "c_invest_paid": float(row.get('c_invest_paid', 0)),
+                "n_cashflows_fnc_act": float(row.get('n_cashflows_fnc_act', 0)),
+                "c_recp_borrow": float(row.get('c_recp_borrow', 0)),
+                "c_prepay_amt_borr": float(row.get('c_prepay_amt_borr', 0)),
+                "c_pay_dist_dpcp_int_exp": float(row.get('c_pay_dist_dpcp_int_exp', 0)),
+                "free_cash_flow": float(row.get('free_cash_flow', 0))
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "symbol": ts_code,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "points" in error_msg or "积分" in error_msg:
+            return {
+                "success": False,
+                "data": None,
+                "error": "积分不足，cashflow 需要至少800积分"
+            }
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取现金流量表数据失败: {str(e)}"
+        }
+
+
+def get_fina_indicator(self, symbol: str, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+    """
+    获取财务指标数据（一站式财务指标）
+
+    Args:
+        symbol: 股票代码
+        start_date: 开始日期，格式 "YYYYMMDD"
+        end_date: 结束日期，格式 "YYYYMMDD"
+
+    Returns:
+        财务指标数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        ts_code = self._normalize_stock_code(symbol)
+
+        # 设置默认日期范围
+        if not end_date:
+            end_date = datetime.now().strftime('%Y%m%d')
+        if not start_date:
+            start_dt = datetime.strptime(end_date, '%Y%m%d') - timedelta(days=365 * 3)
+            start_date = start_dt.strftime('%Y%m%d')
+
+        # 构建缓存键
+        cache_key = f"fina_indicator_{ts_code}_{start_date}_{end_date}"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 fina_indicator 接口
+        df = api.fina_indicator(ts_code=ts_code, start_date=start_date, end_date=end_date)
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"未找到财务指标数据: {symbol}"
+            }
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "ts_code": row.get('ts_code', ''),
+                "ann_date": row.get('ann_date', ''),
+                "end_date": row.get('end_date', ''),
+                "eps": float(row.get('eps', 0)),
+                "dt_eps": float(row.get('dt_eps', 0)),
+                "total_revenue_ps": float(row.get('total_revenue_ps', 0)),
+                "revenue_ps": float(row.get('revenue_ps', 0)),
+                "capital_rese_ps": float(row.get('capital_rese_ps', 0)),
+                "surplus_rese_ps": float(row.get('surplus_rese_ps', 0)),
+                "undist_profit_ps": float(row.get('undist_profit_ps', 0)),
+                "extra_item": float(row.get('extra_item', 0)),
+                "profit_dedt": float(row.get('profit_dedt', 0)),
+                "gross_margin": float(row.get('gross_margin', 0)),
+                "current_ratio": float(row.get('current_ratio', 0)),
+                "quick_ratio": float(row.get('quick_ratio', 0)),
+                "cash_ratio": float(row.get('cash_ratio', 0)),
+                "invturn_days": float(row.get('invturn_days', 0)),
+                "arturn_days": float(row.get('arturn_days', 0)),
+                "inv_turn": float(row.get('inv_turn', 0)),
+                "ar_turn": float(row.get('ar_turn', 0)),
+                "assets_turn": float(row.get('assets_turn', 0)),
+                "roe": float(row.get('roe', 0)),
+                "roe_waa": float(row.get('roe_waa', 0)),
+                "roe_dt": float(row.get('roe_dt', 0)),
+                "roa": float(row.get('roa', 0)),
+                "npta": float(row.get('npta', 0)),
+                "roic": float(row.get('roic', 0)),
+                "roe_yearly": float(row.get('roe_yearly', 0)),
+                "roa2_yearly": float(row.get('roa2_yearly', 0)),
+                "debt_to_assets": float(row.get('debt_to_assets', 0)),
+                "assets_to_eqt": float(row.get('assets_to_eqt', 0)),
+                "dp_assets_to_eqt": float(row.get('dp_assets_to_eqt', 0)),
+                "ca_to_assets": float(row.get('ca_to_assets', 0)),
+                "nca_to_assets": float(row.get('nca_to_assets', 0)),
+                "tbassets_to_totalassets": float(row.get('tbassets_to_totalassets', 0)),
+                "int_to_talcap": float(row.get('int_to_talcap', 0)),
+                "eqt_to_talcapital": float(row.get('eqt_to_talcapital', 0)),
+                "currentdebt_to_debt": float(row.get('currentdebt_to_debt', 0)),
+                "longdeb_to_debt": float(row.get('longdeb_to_debt', 0)),
+                "ocf_to_shortdebt": float(row.get('ocf_to_shortdebt', 0)),
+                "debt_to_eqt": float(row.get('debt_to_eqt', 0)),
+                "eqt_to_debt": float(row.get('eqt_to_debt', 0)),
+                "eqt_to_interestdebt": float(row.get('eqt_to_interestdebt', 0)),
+                "tangibleasset_to_debt": float(row.get('tangibleasset_to_debt', 0)),
+                "tangasset_to_intdebt": float(row.get('tangasset_to_intdebt', 0)),
+                "tangibleasset_to_netdebt": float(row.get('tangibleasset_to_netdebt', 0)),
+                "ocf_to_debt": float(row.get('ocf_to_debt', 0)),
+                "ocf_to_interestdebt": float(row.get('ocf_to_interestdebt', 0)),
+                "ocf_to_netdebt": float(row.get('ocf_to_netdebt', 0)),
+                "ebit_to_interest": float(row.get('ebit_to_interest', 0)),
+                "longdebt_to_workingcapital": float(row.get('longdebt_to_workingcapital', 0)),
+                "ebitda_to_debt": float(row.get('ebitda_to_debt', 0)),
+                "turn_days": float(row.get('turn_days', 0)),
+                "roa_yearly": float(row.get('roa_yearly', 0)),
+                "roa_dp": float(row.get('roa_dp', 0)),
+                "fixed_assets": float(row.get('fixed_assets', 0)),
+                "profit_prefin_exp": float(row.get('profit_prefin_exp', 0)),
+                "non_op_profit": float(row.get('non_op_profit', 0)),
+                "op_to_ebt": float(row.get('op_to_ebt', 0)),
+                "nop_to_ebt": float(row.get('nop_to_ebt', 0)),
+                "ocf_to_profit": float(row.get('ocf_to_profit', 0)),
+                "cash_to_liqdebt": float(row.get('cash_to_liqdebt', 0)),
+                "cash_to_liqdebt_withinterest": float(row.get('cash_to_liqdebt_withinterest', 0)),
+                "op_to_liqdebt": float(row.get('op_to_liqdebt', 0)),
+                "op_to_debt": float(row.get('op_to_debt', 0)),
+                "roe_to_eqt": float(row.get('roe_to_eqt', 0)),
+                "saleexp_to_gr": float(row.get('saleexp_to_gr', 0)),
+                "adminexp_of_gr": float(row.get('adminexp_of_gr', 0)),
+                "finaexp_of_gr": float(row.get('finaexp_of_gr', 0)),
+                "impai_ttm": float(row.get('impai_ttm', 0)),
+                "op_of_gr": float(row.get('op_of_gr', 0)),
+                "ebit_of_gr": float(row.get('ebit_of_gr', 0)),
+                "roe_yoy": float(row.get('roe_yoy', 0)),
+                "dt_roe_yoy": float(row.get('dt_roe_yoy', 0)),
+                "op_yoy": float(row.get('op_yoy', 0)),
+                "ebt_yoy": float(row.get('ebt_yoy', 0)),
+                "netprofit_yoy": float(row.get('netprofit_yoy', 0)),
+                "dt_netprofit_yoy": float(row.get('dt_netprofit_yoy', 0)),
+                "ocf_yoy": float(row.get('ocf_yoy', 0)),
+                "roe_avg": float(row.get('roe_avg', 0)),
+                "q_sales_yoy": float(row.get('q_sales_yoy', 0)),
+                "q_sales_qoq": float(row.get('q_sales_qoq', 0)),
+                "q_op_yoy": float(row.get('q_op_yoy', 0)),
+                "q_op_qoq": float(row.get('q_op_qoq', 0)),
+                "q_profit_yoy": float(row.get('q_profit_yoy', 0)),
+                "q_profit_qoq": float(row.get('q_profit_qoq', 0)),
+                "q_netprofit_yoy": float(row.get('q_netprofit_yoy', 0)),
+                "q_netprofit_qoq": float(row.get('q_netprofit_qoq', 0)),
+                "equity_yoy": float(row.get('equity_yoy', 0)),
+                "rd_exp": float(row.get('rd_exp', 0))
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "symbol": ts_code,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "points" in error_msg or "积分" in error_msg:
+            return {
+                "success": False,
+                "data": None,
+                "error": "积分不足，fina_indicator 需要至少1200积分"
+            }
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取财务指标数据失败: {str(e)}"
+        }
+
+
+# 绑定财务数据方法
+TushareClient.get_income_statement = get_income_statement
+TushareClient.get_balance_sheet = get_balance_sheet
+TushareClient.get_cash_flow = get_cash_flow
+TushareClient.get_fina_indicator = get_fina_indicator
+
+
+# ==================== 行业概念 API ====================
+
+def get_industry_list(self) -> Dict[str, Any]:
+    """
+    获取行业分类列表
+
+    Returns:
+        行业分类数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 构建缓存键
+        cache_key = "industry_list"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 stock_basic 接口获取行业信息
+        df = api.stock_basic(fields='ts_code,name,industry')
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": "未找到行业数据"
+            }
+
+        # 提取唯一行业列表
+        industries = df['industry'].dropna().unique().tolist()
+        industries = [ind for ind in industries if ind]
+        industries.sort()
+
+        # 构建行业数据
+        industry_data = []
+        for ind in industries:
+            count = len(df[df['industry'] == ind])
+            industry_data.append({
+                "name": ind,
+                "stock_count": count
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, industry_data)
+
+        return {
+            "success": True,
+            "data": industry_data,
+            "meta": {
+                "count": len(industry_data)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取行业列表失败: {str(e)}"
+        }
+
+
+def get_concept_list(self) -> Dict[str, Any]:
+    """
+    获取概念分类列表
+
+    Returns:
+        概念分类数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 构建缓存键
+        cache_key = "concept_list"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 concept 接口
+        df = api.concept()
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": "未找到概念数据"
+            }
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            records.append({
+                "code": row.get('code', ''),
+                "name": row.get('name', ''),
+                "src": row.get('src', '')
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取概念列表失败: {str(e)}"
+        }
+
+
+def get_concept_stocks(self, concept_code: str = None, concept_name: str = None) -> Dict[str, Any]:
+    """
+    获取概念成分股
+
+    Args:
+        concept_code: 概念代码
+        concept_name: 概念名称（可选，用于搜索）
+
+    Returns:
+        概念成分股数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        if not concept_code:
+            # 如果提供了概念名称，先查找对应的代码
+            if concept_name:
+                concepts_df = api.concept()
+                if concepts_df is not None and not concepts_df.empty:
+                    match = concepts_df[concepts_df['name'].str.contains(concept_name, na=False)]
+                    if not match.empty:
+                        concept_code = match.iloc[0]['code']
+                    else:
+                        return {
+                            "success": False,
+                            "data": None,
+                            "error": f"未找到概念: {concept_name}"
+                        }
+            else:
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "请提供概念代码或概念名称"
+                }
+
+        # 构建缓存键
+        cache_key = f"concept_stocks_{concept_code}"
+        cached_data = self._get_from_cache(cache_key)
+        if cached_data:
+            return {
+                "success": True,
+                "data": cached_data,
+                "error": None
+            }
+
+        # 调用 concept_detail 接口
+        df = api.concept_detail(id=concept_code)
+
+        if df is None or df.empty:
+            return {
+                "success": False,
+                "data": None,
+                "error": f"未找到概念成分股: {concept_code}"
+            }
+
+        # 获取股票名称
+        stock_names = {}
+        try:
+            ts_codes = df['ts_code'].tolist()
+            basic_df = api.stock_basic(fields='ts_code,name')
+            if basic_df is not None and not basic_df.empty:
+                stock_names = dict(zip(basic_df['ts_code'], basic_df['name']))
+        except:
+            pass
+
+        # 转换为列表格式
+        records = []
+        for _, row in df.iterrows():
+            ts_code = row.get('ts_code', '')
+            records.append({
+                "id": row.get('id', ''),
+                "concept_name": row.get('concept_name', ''),
+                "ts_code": ts_code,
+                "name": stock_names.get(ts_code, ''),
+                "in_date": row.get('in_date', ''),
+                "out_date": row.get('out_date', '')
+            })
+
+        # 缓存数据
+        self._set_cache(cache_key, records)
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "concept_code": concept_code,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取概念成分股失败: {str(e)}"
+        }
+
+
+# 绑定行业概念方法
+TushareClient.get_industry_list = get_industry_list
+TushareClient.get_concept_list = get_concept_list
+TushareClient.get_concept_stocks = get_concept_stocks
+
+
+# ==================== 行业深度分析 API ====================
+
+def compare_industry_metrics(self, industries: List[str] = None, metric: str = "roe") -> Dict[str, Any]:
+    """
+    对比不同行业的财务指标
+
+    Args:
+        industries: 行业列表，如 ['白酒', '银行', '医药']，不传则对比所有行业
+        metric: 对比指标，可选 roe, gross_margin, net_margin, debt_ratio
+
+    Returns:
+        行业对比数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 获取所有股票基本信息
+        df = api.stock_basic(fields='ts_code,name,industry')
+        if df is None or df.empty:
+            return {"success": False, "data": None, "error": "无法获取股票基本信息"}
+
+        # 过滤指定行业
+        if industries:
+            df = df[df['industry'].isin(industries)]
+
+        # 获取财务指标数据
+        fina_df = api.fina_indicator(fields='ts_code,roe,grossprofit_margin,netprofit_margin,debt_to_assets')
+        if fina_df is None or fina_df.empty:
+            return {"success": False, "data": None, "error": "无法获取财务指标数据"}
+
+        # 合并数据
+        merged = df.merge(fina_df, on='ts_code', how='inner')
+
+        # 按行业聚合计算平均值
+        metric_map = {
+            "roe": "roe",
+            "gross_margin": "grossprofit_margin",
+            "net_margin": "netprofit_margin",
+            "debt_ratio": "debt_to_assets"
+        }
+        metric_col = metric_map.get(metric, "roe")
+
+        industry_stats = merged.groupby('industry').agg({
+            metric_col: 'mean',
+            'ts_code': 'count'
+        }).reset_index()
+
+        industry_stats.columns = ['industry', 'avg_value', 'stock_count']
+        industry_stats = industry_stats.sort_values('avg_value', ascending=False)
+
+        # 转换为列表
+        records = []
+        for _, row in industry_stats.iterrows():
+            records.append({
+                "industry": row['industry'],
+                "avg_value": round(float(row['avg_value']), 2),
+                "stock_count": int(row['stock_count'])
+            })
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "metric": metric,
+                "metric_name": {
+                    "roe": "净资产收益率",
+                    "gross_margin": "毛利率",
+                    "net_margin": "净利率",
+                    "debt_ratio": "资产负债率"
+                }.get(metric, metric),
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"行业指标对比失败: {str(e)}"
+        }
+
+
+def compare_industry_valuation(self, industries: List[str] = None) -> Dict[str, Any]:
+    """
+    对比不同行业的估值水平
+
+    Args:
+        industries: 行业列表，不传则对比所有行业
+
+    Returns:
+        行业估值对比数据字典
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 获取最近交易日
+        trade_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+
+        # 获取每日指标数据
+        daily_df = api.daily_basic(trade_date=trade_date, fields='ts_code,pe_ttm,pb,ps_ttm')
+        if daily_df is None or daily_df.empty:
+            return {"success": False, "data": None, "error": "无法获取估值数据"}
+
+        # 获取股票行业信息
+        stock_df = api.stock_basic(fields='ts_code,industry')
+        if stock_df is None or stock_df.empty:
+            return {"success": False, "data": None, "error": "无法获取股票信息"}
+
+        # 合并数据
+        merged = daily_df.merge(stock_df, on='ts_code', how='inner')
+
+        # 过滤指定行业
+        if industries:
+            merged = merged[merged['industry'].isin(industries)]
+
+        # 过滤有效数据
+        merged = merged[(merged['pe_ttm'] > 0) & (merged['pe_ttm'] < 1000)]  # 排除异常值
+        merged = merged[(merged['pb'] > 0) & (merged['pb'] < 100)]
+
+        # 按行业聚合
+        industry_stats = merged.groupby('industry').agg({
+            'pe_ttm': 'median',
+            'pb': 'median',
+            'ps_ttm': 'median',
+            'ts_code': 'count'
+        }).reset_index()
+
+        industry_stats.columns = ['industry', 'pe_ttm', 'pb', 'ps_ttm', 'stock_count']
+        industry_stats = industry_stats.sort_values('pe_ttm')
+
+        # 转换为列表
+        records = []
+        for _, row in industry_stats.iterrows():
+            records.append({
+                "industry": row['industry'],
+                "pe_ttm": round(float(row['pe_ttm']), 2) if pd.notna(row['pe_ttm']) else None,
+                "pb": round(float(row['pb']), 2) if pd.notna(row['pb']) else None,
+                "ps_ttm": round(float(row['ps_ttm']), 2) if pd.notna(row['ps_ttm']) else None,
+                "stock_count": int(row['stock_count'])
+            })
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "trade_date": trade_date,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"行业估值对比失败: {str(e)}"
+        }
+
+
+def get_industry_performance(self, period: str = "1d") -> Dict[str, Any]:
+    """
+    获取行业涨跌幅排名
+
+    Args:
+        period: 周期，可选 1d(日), 5d(周), 20d(月)
+
+    Returns:
+        行业涨跌幅排名数据
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 计算日期范围
+        end_date = datetime.now()
+        if period == "1d":
+            start_date = end_date - timedelta(days=3)  # 最近1个交易日
+        elif period == "5d":
+            start_date = end_date - timedelta(days=7)
+        elif period == "20d":
+            start_date = end_date - timedelta(days=30)
+        else:
+            start_date = end_date - timedelta(days=3)
+
+        # 获取股票行情数据
+        df = api.daily(
+            start_date=start_date.strftime('%Y%m%d'),
+            end_date=end_date.strftime('%Y%m%d'),
+            fields='ts_code,close,pct_chg'
+        )
+
+        if df is None or df.empty:
+            return {"success": False, "data": None, "error": "无法获取行情数据"}
+
+        # 获取股票行业信息
+        stock_df = api.stock_basic(fields='ts_code,industry')
+        if stock_df is None or stock_df.empty:
+            return {"success": False, "data": None, "error": "无法获取股票信息"}
+
+        # 合并数据
+        merged = df.merge(stock_df, on='ts_code', how='inner')
+
+        # 按行业计算平均涨跌幅
+        industry_perf = merged.groupby('industry').agg({
+            'pct_chg': 'mean',
+            'ts_code': 'count'
+        }).reset_index()
+
+        industry_perf.columns = ['industry', 'avg_change', 'stock_count']
+        industry_perf = industry_perf.sort_values('avg_change', ascending=False)
+
+        # 转换为列表
+        records = []
+        for _, row in industry_perf.iterrows():
+            records.append({
+                "industry": row['industry'],
+                "avg_change": round(float(row['avg_change']), 2),
+                "stock_count": int(row['stock_count'])
+            })
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "period": period,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取行业涨跌幅失败: {str(e)}"
+        }
+
+
+def get_industry_leaders(self, industry: str, by: str = "market_cap") -> Dict[str, Any]:
+    """
+    获取行业龙头股
+
+    Args:
+        industry: 行业名称
+        by: 排序依据，可选 market_cap(市值), revenue(营收), profit(利润)
+
+    Returns:
+        行业龙头股数据
+    """
+    api = self.get_api()
+    if not api:
+        return {
+            "success": False,
+            "data": None,
+            "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量"
+        }
+
+    try:
+        # 获取行业内的股票
+        stock_df = api.stock_basic(fields='ts_code,name,industry')
+        if stock_df is None or stock_df.empty:
+            return {"success": False, "data": None, "error": "无法获取股票信息"}
+
+        industry_stocks = stock_df[stock_df['industry'] == industry]
+        if industry_stocks.empty:
+            return {"success": False, "data": None, "error": f"未找到行业: {industry}"}
+
+        ts_codes = industry_stocks['ts_code'].tolist()
+
+        # 获取市值数据
+        daily_df = api.daily_basic(fields='ts_code,total_mv')
+        if daily_df is not None and not daily_df.empty:
+            industry_stocks = industry_stocks.merge(daily_df, on='ts_code', how='left')
+
+        # 获取财务数据
+        fina_df = api.fina_indicator(fields='ts_code,total_revenue,n_income')
+        if fina_df is not None and not fina_df.empty:
+            # 取最新一期
+            fina_df = fina_df.sort_values(['ts_code', 'end_date'], ascending=[True, False])
+            fina_df = fina_df.drop_duplicates(subset=['ts_code'], keep='first')
+            industry_stocks = industry_stocks.merge(fina_df, on='ts_code', how='left')
+
+        # 按指定指标排序
+        sort_map = {
+            "market_cap": "total_mv",
+            "revenue": "total_revenue",
+            "profit": "n_income"
+        }
+        sort_col = sort_map.get(by, "total_mv")
+
+        if sort_col in industry_stocks.columns:
+            industry_stocks = industry_stocks.sort_values(sort_col, ascending=False)
+
+        # 取前10名
+        top_stocks = industry_stocks.head(10)
+
+        # 转换为列表
+        records = []
+        for _, row in top_stocks.iterrows():
+            records.append({
+                "ts_code": row['ts_code'],
+                "name": row['name'],
+                "total_mv": float(row['total_mv']) if pd.notna(row.get('total_mv')) else None,
+                "total_revenue": float(row['total_revenue']) if pd.notna(row.get('total_revenue')) else None,
+                "n_income": float(row['n_income']) if pd.notna(row.get('n_income')) else None
+            })
+
+        return {
+            "success": True,
+            "data": records,
+            "meta": {
+                "industry": industry,
+                "sort_by": by,
+                "count": len(records)
+            },
+            "error": None
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "data": None,
+            "error": f"获取行业龙头股失败: {str(e)}"
+        }
+
+
+# 绑定行业深度分析方法
+TushareClient.compare_industry_metrics = compare_industry_metrics
+TushareClient.compare_industry_valuation = compare_industry_valuation
+TushareClient.get_industry_performance = get_industry_performance
+TushareClient.get_industry_leaders = get_industry_leaders
