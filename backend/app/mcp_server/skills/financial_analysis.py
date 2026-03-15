@@ -126,6 +126,124 @@ class FinancialAnalysisSkill(BaseSkill):
             ]
         )
 
+        # ==================== Tier 2 新增 Tools ====================
+
+        # 4. 获取利润表
+        self.register_tool(
+            name="get_income_statement",
+            handler=self.get_income_statement,
+            description="获取上市公司利润表（损益表）数据，包括营业收入、营业成本、净利润等",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码",
+                    required=True
+                ),
+                ToolParameter(
+                    name="start_date",
+                    type="string",
+                    description="开始日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="end_date",
+                    type="string",
+                    description="结束日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
+
+        # 5. 获取资产负债表
+        self.register_tool(
+            name="get_balance_sheet",
+            handler=self.get_balance_sheet,
+            description="获取上市公司资产负债表数据，包括资产、负债、股东权益等",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码",
+                    required=True
+                ),
+                ToolParameter(
+                    name="start_date",
+                    type="string",
+                    description="开始日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="end_date",
+                    type="string",
+                    description="结束日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
+
+        # 6. 获取现金流量表
+        self.register_tool(
+            name="get_cash_flow",
+            handler=self.get_cash_flow,
+            description="获取上市公司现金流量表数据，包括经营、投资、筹资活动现金流",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码",
+                    required=True
+                ),
+                ToolParameter(
+                    name="start_date",
+                    type="string",
+                    description="开始日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="end_date",
+                    type="string",
+                    description="结束日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
+
+        # 7. 获取财务指标（一站式）
+        self.register_tool(
+            name="get_fina_indicator",
+            handler=self.get_fina_indicator,
+            description="获取财务指标数据（一站式），包括ROE、ROA、毛利率、净利率、资产负债率等核心指标",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码",
+                    required=True
+                ),
+                ToolParameter(
+                    name="start_date",
+                    type="string",
+                    description="开始日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="end_date",
+                    type="string",
+                    description="结束日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
+
     async def get_financial_report(
         self,
         symbol: str,
@@ -645,3 +763,145 @@ class FinancialAnalysisSkill(BaseSkill):
     def clear_cache(self):
         """清空缓存"""
         self.get_tushare_client().clear_cache()
+
+    # ==================== Tier 2 新增方法 ====================
+
+    async def get_income_statement(self, symbol: str, start_date: str = None, end_date: str = None) -> ToolResult:
+        """
+        获取利润表数据
+
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期，格式YYYYMMDD
+            end_date: 结束日期，格式YYYYMMDD
+
+        Returns:
+            ToolResult 包含利润表数据
+        """
+        if not symbol:
+            return ToolResult(success=False, error="股票代码不能为空")
+
+        try:
+            result = self.get_tushare_client().get_income_statement(symbol, start_date, end_date)
+
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data"),
+                    meta=result.get("meta")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取利润表数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取利润表数据失败: {str(e)}"
+            )
+
+    async def get_balance_sheet(self, symbol: str, start_date: str = None, end_date: str = None) -> ToolResult:
+        """
+        获取资产负债表数据
+
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期，格式YYYYMMDD
+            end_date: 结束日期，格式YYYYMMDD
+
+        Returns:
+            ToolResult 包含资产负债表数据
+        """
+        if not symbol:
+            return ToolResult(success=False, error="股票代码不能为空")
+
+        try:
+            result = self.get_tushare_client().get_balance_sheet(symbol, start_date, end_date)
+
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data"),
+                    meta=result.get("meta")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取资产负债表数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取资产负债表数据失败: {str(e)}"
+            )
+
+    async def get_cash_flow(self, symbol: str, start_date: str = None, end_date: str = None) -> ToolResult:
+        """
+        获取现金流量表数据
+
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期，格式YYYYMMDD
+            end_date: 结束日期，格式YYYYMMDD
+
+        Returns:
+            ToolResult 包含现金流量表数据
+        """
+        if not symbol:
+            return ToolResult(success=False, error="股票代码不能为空")
+
+        try:
+            result = self.get_tushare_client().get_cash_flow(symbol, start_date, end_date)
+
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data"),
+                    meta=result.get("meta")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取现金流量表数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取现金流量表数据失败: {str(e)}"
+            )
+
+    async def get_fina_indicator(self, symbol: str, start_date: str = None, end_date: str = None) -> ToolResult:
+        """
+        获取财务指标数据（一站式）
+
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期，格式YYYYMMDD
+            end_date: 结束日期，格式YYYYMMDD
+
+        Returns:
+            ToolResult 包含财务指标数据
+        """
+        if not symbol:
+            return ToolResult(success=False, error="股票代码不能为空")
+
+        try:
+            result = self.get_tushare_client().get_fina_indicator(symbol, start_date, end_date)
+
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data"),
+                    meta=result.get("meta")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取财务指标数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取财务指标数据失败: {str(e)}"
+            )

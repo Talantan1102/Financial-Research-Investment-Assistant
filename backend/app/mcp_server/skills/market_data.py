@@ -224,6 +224,84 @@ class MarketDataSkill(BaseSkill):
                 )
             ]
         )
+
+        # ==================== Tier 2 新增 Tools ====================
+
+        # 9. 获取每日指标（PE/PB/市值/换手率）
+        self.register_tool(
+            name="get_daily_basic",
+            handler=self.get_daily_basic,
+            description="获取每日指标数据，包括PE、PB、PS、换手率、总市值、流通市值等估值指标",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码，不填写则返回全市场数据",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="trade_date",
+                    type="string",
+                    description="交易日期，格式YYYYMMDD，默认最近交易日",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
+
+        # 10. 获取北向资金
+        self.register_tool(
+            name="get_north_money",
+            handler=self.get_north_money,
+            description="获取沪深港通资金流向（北向资金），追踪外资流入流出情况",
+            parameters=[
+                ToolParameter(
+                    name="start_date",
+                    type="string",
+                    description="开始日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="end_date",
+                    type="string",
+                    description="结束日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
+
+        # 11. 获取融资融券
+        self.register_tool(
+            name="get_margin",
+            handler=self.get_margin,
+            description="获取融资融券数据，包括融资余额、融券余额、融资买入额等",
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="股票代码，不填写则返回全市场数据",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="start_date",
+                    type="string",
+                    description="开始日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                ),
+                ToolParameter(
+                    name="end_date",
+                    type="string",
+                    description="结束日期，格式YYYYMMDD",
+                    required=False,
+                    default=None
+                )
+            ]
+        )
     
     async def get_quote(self, symbol: str) -> ToolResult:
         """
@@ -583,3 +661,99 @@ class MarketDataSkill(BaseSkill):
     def clear_cache(self):
         """清空缓存"""
         self.get_tushare_client().clear_cache()
+
+    # ==================== Tier 2 新增方法 ====================
+
+    async def get_daily_basic(self, symbol: str = None, trade_date: str = None) -> ToolResult:
+        """
+        获取每日指标数据（PE、PB、市值等）
+
+        Args:
+            symbol: 股票代码，可选
+            trade_date: 交易日期，格式YYYYMMDD
+
+        Returns:
+            ToolResult 包含每日指标数据
+        """
+        try:
+            result = self.get_tushare_client().get_daily_basic(symbol, trade_date)
+
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data"),
+                    meta=result.get("meta")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取每日指标数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取每日指标数据失败: {str(e)}"
+            )
+
+    async def get_north_money(self, start_date: str = None, end_date: str = None) -> ToolResult:
+        """
+        获取北向资金数据
+
+        Args:
+            start_date: 开始日期，格式YYYYMMDD
+            end_date: 结束日期，格式YYYYMMDD
+
+        Returns:
+            ToolResult 包含北向资金数据
+        """
+        try:
+            result = self.get_tushare_client().get_north_money(start_date, end_date)
+
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data"),
+                    meta=result.get("meta")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取北向资金数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取北向资金数据失败: {str(e)}"
+            )
+
+    async def get_margin(self, symbol: str = None, start_date: str = None, end_date: str = None) -> ToolResult:
+        """
+        获取融资融券数据
+
+        Args:
+            symbol: 股票代码，可选
+            start_date: 开始日期，格式YYYYMMDD
+            end_date: 结束日期，格式YYYYMMDD
+
+        Returns:
+            ToolResult 包含融资融券数据
+        """
+        try:
+            result = self.get_tushare_client().get_margin(symbol, start_date, end_date)
+
+            if result.get("success"):
+                return ToolResult(
+                    success=True,
+                    data=result.get("data"),
+                    meta=result.get("meta")
+                )
+            else:
+                return ToolResult(
+                    success=False,
+                    error=result.get("error", "获取融资融券数据失败")
+                )
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                error=f"获取融资融券数据失败: {str(e)}"
+            )
