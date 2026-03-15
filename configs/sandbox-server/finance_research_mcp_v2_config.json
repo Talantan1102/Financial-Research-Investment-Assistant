@@ -1,0 +1,22 @@
+{
+  "server": {
+    "url": "http://127.0.0.1:18890",
+    "port": 18890,
+    "session_ttl": 600
+  },
+  "resources": {
+    "finance_research_mcp_v2": {
+      "enabled": true,
+      "backend_class": "sandbox.server.backends.resources.finance_research_mcp_v2.FinanceResearchMCPBackend",
+      "description": "金融研投助手 MCP Backend v2 - 支持调整后架构的所有 Skills",
+      "config": {
+        "mcp_server_url": "${MCP_SERVER_URL:-http://localhost:3000}",
+        "mcp_timeout": 30
+      }
+    }
+  },
+  "warmup": {
+    "enabled": true,
+    "resources": ["finance_research_mcp_v2"]
+  }
+}
