@@ -251,6 +251,17 @@ class TrajectorySampler:
         """Execute an action via worker (async)"""
         tool_name = action.get("tool_name", "")
         parameters = action.get("parameters", {})
+        
+        # 检查是否是合法的元工具调用
+        allowed_tools = ["unified_finance:skill", "unified_finance:get_skill_tools", "unified_finance:execute_skill_tool"]
+        if tool_name not in allowed_tools:
+            error_msg = f"❌ ERROR: Tool '{tool_name}' is not available. " \
+                       f"You can ONLY use these tools: {allowed_tools}. " \
+                       f"To execute a specific skill tool, use unified_finance:execute_skill_tool " \
+                       f"with skill_name, tool_name, and arguments parameters."
+            print(f"  {error_msg}")
+            return error_msg
+        
         try:
             # Execute tool asynchronously using worker's async method
             # Pass seed_kwargs to worker
@@ -368,6 +379,18 @@ You MUST propose a NEW action that is NOT in this list or similar to them to inc
 [Available Tools]:
 {tool_descriptions_str}
 
+⚠️  CRITICAL INSTRUCTIONS - FOLLOW EXACTLY:
+
+1. ONLY the 3 tools listed above are available. DO NOT use any other tool names.
+2. To execute a specific skill tool (like get_quote, get_history), you MUST use:
+   unified_finance:execute_skill_tool
+   with parameters: {{"skill_name": "market_data", "tool_name": "get_quote", "arguments": {{...}}}}
+3. NEVER call tool names directly like "get_quote" or "market_data:get_quote" - these will FAIL.
+4. The correct flow is:
+   - Step 1: unified_finance:skill(name="market_data") -> Get skill documentation
+   - Step 2: unified_finance:get_skill_tools(name="market_data") -> Get available tools
+   - Step 3: unified_finance:execute_skill_tool(skill_name="market_data", tool_name="get_quote", arguments={{...}}) -> Execute tool
+
 """
 
         prompt += """
@@ -378,6 +401,27 @@ Format:
 <intent>...</intent>
 <tool_name>tool name</tool_name>
 <parameters>{"param": "value"}</parameters>
+
+EXAMPLES OF CORRECT USAGE:
+
+Example 1 - Load skill documentation:
+<intent>Load market_data skill documentation to understand available capabilities</intent>
+<tool_name>unified_finance:skill</tool_name>
+<parameters>{"name": "market_data"}</parameters>
+
+Example 2 - Get skill tools:
+<intent>Get the list of available tools in market_data skill</intent>
+<tool_name>unified_finance:get_skill_tools</tool_name>
+<parameters>{"name": "market_data"}</parameters>
+
+Example 3 - Execute a specific tool (CORRECT WAY):
+<intent>Get real-time quote for stock 600519</intent>
+<tool_name>unified_finance:execute_skill_tool</tool_name>
+<parameters>{{"skill_name": "market_data", "tool_name": "get_quote", "arguments": {{"symbol": "600519"}}}}</parameters>
+
+INCORRECT USAGE (DO NOT DO THIS):
+❌ <tool_name>get_quote</tool_name>
+❌ <tool_name>market_data:get_quote</tool_name>
 """
         return prompt
 
