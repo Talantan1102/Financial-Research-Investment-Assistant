@@ -861,6 +861,63 @@ class ResultFormatter:
 
 
 # ============================================================================
+# Unified Finance Result (渐进式披露架构)
+# ============================================================================
+
+class UnifiedFinanceResult(ToolResult):
+    """
+    Unified Finance tool result formatter.
+    
+    处理 unified_finance:skill, unified_finance:get_skill_tools, 
+    unified_finance:execute_skill_tool 的结果格式化。
+    """
+    
+    def to_str(self, verbose: bool = False) -> str:
+        """Format unified finance result."""
+        if not self.success:
+            return f"[Error] {self.metadata.get('message', 'Unknown error')}"
+        
+        tool_name = self.metadata.get('tool', '')
+        
+        # 根据工具类型格式化输出
+        if 'skill' in tool_name and 'get_skill_tools' not in tool_name:
+            # Round 1: skill - 返回 SKILL.md 内容
+            content = self.raw_data.get('content', '')
+            return content[:2000] + ('...' if len(content) > 2000 else '')
+        
+        elif 'get_skill_tools' in tool_name:
+            # Round 2: get_skill_tools - 返回工具列表
+            tools = self.raw_data.get('tools', [])
+            count = self.raw_data.get('count', len(tools))
+            lines = [f"Available tools ({count}):"]
+            for tool in tools[:20]:  # 最多显示20个
+                tool_name = tool.get('name', 'unknown')
+                desc = tool.get('description', '')[:60]
+                lines.append(f"  - {tool_name}: {desc}...")
+            if len(tools) > 20:
+                lines.append(f"  ... and {len(tools) - 20} more tools")
+            return '\n'.join(lines)
+        
+        elif 'execute' in tool_name:
+            # Round 3: execute_skill_tool - 返回执行结果
+            result = self.raw_data.get('result', {})
+            if isinstance(result, dict):
+                # 尝试提取关键信息
+                if 'data' in result:
+                    result = result['data']
+                return json.dumps(result, ensure_ascii=False, indent=2)[:2000]
+            else:
+                return str(result)[:2000]
+        
+        # 默认返回
+        return json.dumps(self.raw_data, ensure_ascii=False, indent=2)[:2000]
+
+
+# 注册 unified_finance formatter
+ResultFormatter.register_formatter("unified_finance", UnifiedFinanceResult)
+
+
+# ============================================================================
 # Convenience function.
 # ============================================================================
 

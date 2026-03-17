@@ -67,11 +67,55 @@ class TrajectorySampler:
         # Store kwargs for use in action execution
         self.seed_kwargs = seed_kwargs
 
+        # ========== Server 健康检查和工具验证 ==========
+        print("🔍 Checking server health and available tools...")
+        try:
+            # 从 Server 获取实际注册的工具列表
+            server_tools = await self.worker.sandbox.client.list_tools(include_hidden=False)
+            print(f"   Server returned {len(server_tools)} tools")
+            
+            if not server_tools:
+                raise RuntimeError("Server 工具列表为空，请检查 Backend 是否加载成功")
+            
+            # 打印 Server 工具列表用于调试
+            server_tool_names = []
+            for t in server_tools:
+                if isinstance(t, dict):
+                    name = t.get('full_name') or t.get('name') or 'unknown'
+                    server_tool_names.append(name)
+            print(f"   Server tools: {server_tool_names[:10]}...")  # 只打印前10个
+            
+        except Exception as e:
+            print(f"   ⚠️ Warning: Failed to get tools from server: {e}")
+            print("   Continuing with local tool schemas...")
+            server_tools = []
+        
         # Load tool schemas from local tools module
+        # 优先使用配置中指定的工具过滤，如果没有则使用所有工具
         self.available_tools = get_tool_schemas(
             self.config.available_tools if self.config.available_tools else None
         )
-        print(f"Available tools: {[t.get('name', 'unknown') for t in self.available_tools]}")
+        
+        # 如果本地工具为空但 Server 有工具，使用 Server 的工具 schema
+        if not self.available_tools and server_tools:
+            print("   Using server tool schemas...")
+            self.available_tools = server_tools
+        
+        # 最终验证
+        if not self.available_tools:
+            raise RuntimeError("❌ 没有可用的工具！请检查：\n" +
+                             "1. Server 是否正常运行\n" +
+                             "2. Backend 是否已加载\n" +
+                             "3. tool_schemas 配置是否正确")
+        
+        # 支持 OpenAI 格式的工具 schema: {"type": "function", "function": {"name": ...}}
+        def _get_tool_name(t):
+            if 'function' in t:
+                return t['function'].get('name', 'unknown')
+            return t.get('name', 'unknown')
+        
+        tool_names = [_get_tool_name(t) for t in self.available_tools]
+        print(f"✅ Final available tools ({len(self.available_tools)}): {tool_names}")
 
         # Create root node
         root_id = self._generate_node_id()
@@ -247,16 +291,40 @@ class TrajectorySampler:
     def _build_exploration_prompt(self, context: str, seed_data: str, used_actions_block: str = "") -> str:
         """Build prompt for exploration"""
         # Generate detailed tool descriptions with parameters
+        # 支持 OpenAI 格式的工具 schema
         tool_descriptions = []
         for tool in self.available_tools:
-            desc = f"\n{len(tool_descriptions) + 1}. {tool['name']}: {tool['description']}\n"
+            # 处理 OpenAI 格式: {"type": "function", "function": {...}}
+            if 'function' in tool:
+                func = tool['function']
+                tool_name = func.get('name', 'unknown')
+                tool_desc = func.get('description', '')
+                params = func.get('parameters', {}).get('properties', {})
+            else:
+                tool_name = tool.get('name', 'unknown')
+                tool_desc = tool.get('description', '')
+                params = tool.get('parameters', [])
+            
+            desc = f"\n{len(tool_descriptions) + 1}. {tool_name}: {tool_desc}\n"
             desc += "   Parameters:\n"
-            for param in tool.get("parameters", []):
-                param_type = param.get("type", "string")
-                if param_type == "array":
-                    param_type = f"array of {param.get('array_type', 'string')}"
-                required_str = " (required)" if param.get("required", False) else " (optional)"
-                desc += f"   - {param['name']} ({param_type}){required_str}: {param.get('description', '')}\n"
+            
+            if isinstance(params, dict):
+                # OpenAI format: properties dict
+                for param_name, param_info in params.items():
+                    param_type = param_info.get('type', 'string')
+                    param_desc = param_info.get('description', '')
+                    required = param_name in func.get('parameters', {}).get('required', [])
+                    required_str = " (required)" if required else " (optional)"
+                    desc += f"   - {param_name} ({param_type}){required_str}: {param_desc}\n"
+            else:
+                # Old format: list of params
+                for param in params:
+                    param_type = param.get('type', 'string')
+                    if param_type == 'array':
+                        param_type = f"array of {param.get('array_type', 'string')}"
+                    required_str = " (required)" if param.get('required', False) else " (optional)"
+                    desc += f"   - {param['name']} ({param_type}){required_str}: {param.get('description', '')}\n"
+            
             tool_descriptions.append(desc)
 
         tool_descriptions_str = "\n".join(tool_descriptions)

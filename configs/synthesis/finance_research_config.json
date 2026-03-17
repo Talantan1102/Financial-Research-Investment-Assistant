@@ -1,7 +1,7 @@
 {
-  "model_name": "openai/gpt-4o",
-  "api_key": "${OPENROUTER_API_KEY}",
-  "base_url": "https://openrouter.ai/api/v1",
+  "model_name": "qwen-turbo",
+  "api_key": "sk-946dc6cdc78b40829f826a0ca3fb7382",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
 
   "max_depth": 15,
   "branching_factor": 3,
@@ -11,63 +11,70 @@
   "max_selected_traj": 3,
   "path_similarity_threshold": 0.7,
 
-  "number_of_seed": null,
+  "number_of_seed": 3,
 
-  "resource_types": ["finance_research"],
+  "resource_types": ["unified_finance"],
   "resource_init_configs": {
-    "finance_research": {
-      "content": {
-        "kb_name": "${RAG_KB_NAME:-default}"
-      }
+    "unified_finance": {
+      "content": {}
     }
   },
 
-  "sandbox_server_url": "http://127.0.0.1:18890",
+  "sandbox_server_url": "http://127.0.0.1:8080",
   "sandbox_auto_start": true,
   "sandbox_config_path": "configs/sandbox-server/finance_research_config.json",
   "sandbox_timeout": 120,
 
   "available_tools": [
-    "finance_research:web_search",
-    "finance_research:knowledge_search",
-    "finance_research:text2sql",
-    "finance_research:data_analyzer",
-    "finance_research:chart_generator",
-    "finance_research:stock_query",
-    "finance_research:bidding_search",
-    "finance_research:finish"
+    "unified_finance:*"
   ],
 
-  "seed_description": "研究主题或问题",
+  "seed_description": "金融研究主题或问题",
 
   "sampling_tips": [
-    "使用 web_search 获取最新行业新闻和市场动态",
-    "使用 knowledge_search 查询研报和公告等历史资料",
-    "使用 stock_query 查询相关公司股价和基本面信息",
-    "使用 bidding_search 搜索招投标信息了解市场机会",
-    "使用 text2sql 查询结构化财务数据",
-    "使用 data_analyzer 分析收集的数据提取洞察",
-    "使用 chart_generator 生成可视化图表",
-    "多轮搜索，逐步深入，直到信息充分",
-    "结合网络搜索和知识库搜索，交叉验证信息",
-    "关注数据的时效性和来源可靠性"
+    "【重要】渐进式披露三轮流程 - 必须严格遵守：",
+    "",
+    "Round 1 - 了解业务:",
+    "  调用 unified_finance:skill(name='market_data') 获取 SKILL.md 文档",
+    "  可用 skills: market_data, financial_analysis, sector_analysis, risk_assessment, web_research",
+    "",
+    "Round 2 - 发现工具:",
+    "  调用 unified_finance:get_skill_tools(name='market_data') 获取该 skill 下的工具列表",
+    "  返回值会显示可用工具，如: get_quote, search_stock, get_stock_basic_info 等",
+    "",
+    "Round 3 - 执行工具 (⚠️ 关键步骤):",
+    "  【必须】使用 unified_finance:execute_skill_tool 来执行具体工具",
+    "  【错误】直接调用 get_quote 或 market_data:get_quote",
+    "  【正确】 unified_finance:execute_skill_tool(skill_name='market_data', tool_name='get_quote', arguments={'symbol': '600519'})",
+    "",
+    "完整示例:",
+    "  1. unified_finance:skill(name='market_data')",
+    "  2. unified_finance:get_skill_tools(name='market_data') → 返回 ['get_quote', 'search_stock']",
+    "  3. unified_finance:execute_skill_tool(skill_name='market_data', tool_name='get_quote', arguments={'symbol': '600519'})",
+    "",
+    "常见错误:",
+    "  ❌ get_quote(symbol='600519') - 没有这样的工具",
+    "  ❌ market_data:get_quote - 没有这样的工具",
+    "  ✅ unified_finance:execute_skill_tool(skill_name='market_data', tool_name='get_quote', arguments={'symbol': '600519'})",
+    "",
+    "多轮查询，逐步深入，直到信息充分",
+    "如果某个工具执行失败，尝试使用同 skill 下的其他工具"
   ],
 
   "synthesis_tips": [
     "生成与金融研究相关的问题",
-    "问题应该需要多工具协作才能回答",
+    "问题应该需要多轮工具调用才能回答（渐进式披露）",
     "答案要有具体数据支撑",
-    "包含明确的分析结论和建议",
-    "问题难度适中，需要3-5个工具调用"
+    "包含明确的分析结论和建议"
   ],
 
   "qa_examples": [
     {
-      "question": "分析平安银行2024年的业绩表现，包括营收、净利润增长情况，并与同行业对比",
-      "answer": "根据查询，平安银行2024年营收同比增长3.5%，净利润增长2.1%，低于行业平均的5.2%和4.8%。主要受净息差收窄影响..."
+      "question": "分析贵州茅台(600519)的投资价值，包括当前股价、基本面和财务状况",
+      "answer": "贵州茅台当前股价1413.64元，属于白酒行业。公司ROE 26.37%，毛利率91.29%，净利率52.08%，资产负债率12.81%，财务状况优秀。"
     }
   ],
 
-  "seeds_file": "seeds/finance_research/seeds.jsonl",
+  "seeds_file": "seeds/finance_research/test_seeds.jsonl",
   "output_dir": "results/finance_research"
 }
