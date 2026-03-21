@@ -1,0 +1,173 @@
+{
+  "timestamp": "2026-03-21T11:07:17.780890",
+  "total": 5,
+  "passed": 5,
+  "failed": 0,
+  "results": [
+    {
+      "test_id": "T1",
+      "test_name": "单一工具调用",
+      "flow_type": "single",
+      "success": true,
+      "latency_ms": 322,
+      "error": null,
+      "details": {
+        "success": true,
+        "data": {
+          "gid": "sh600519",
+          "ts_code": "600519.SH",
+          "name": "贵州茅台",
+          "nowPri": "1445.00",
+          "increase": "-7.87",
+          "increPer": "-0.54",
+          "todayStartPri": "1452.96",
+          "yestodEndPri": "1452.87",
+          "todayMax": "1462.50",
+          "todayMin": "1439.00",
+          "traAmount": "26132",
+          "traNumber": "3782818260.00",
+          "update_time": "20260320"
+        },
+        "error": null,
+        "meta": null
+      }
+    },
+    {
+      "test_id": "T2",
+      "test_name": "顺序执行",
+      "flow_type": "sequential",
+      "success": true,
+      "latency_ms": 366,
+      "error": null,
+      "details": {
+        "steps": [
+          [
+            "get_quote",
+            true
+          ],
+          [
+            "get_daily_basic",
+            true
+          ],
+          [
+            "calculate_financial_ratios",
+            true
+          ]
+        ]
+      }
+    },
+    {
+      "test_id": "T3",
+      "test_name": "并行执行",
+      "flow_type": "parallel",
+      "success": true,
+      "latency_ms": 590,
+      "error": null,
+      "details": {
+        "stocks": [
+          "600519.SH",
+          "000858.SZ",
+          "600809.SH"
+        ],
+        "success_count": 3
+      }
+    },
+    {
+      "test_id": "T4",
+      "test_name": "Control Flow Engine",
+      "flow_type": "control_flow",
+      "success": true,
+      "latency_ms": 278,
+      "error": null,
+      "details": {
+        "success": true,
+        "flow_id": "8b67e884",
+        "flow_type": "sequential",
+        "results": [
+          {
+            "success": true,
+            "data": {
+              "gid": "sh600519",
+              "ts_code": "600519.SH",
+              "name": "贵州茅台",
+              "nowPri": "1445.00",
+              "increase": "-7.87",
+              "increPer": "-0.54",
+              "todayStartPri": "1452.96",
+              "yestodEndPri": "1452.87",
+              "todayMax": "1462.50",
+              "todayMin": "1439.00",
+              "traAmount": "26132",
+              "traNumber": "3782818260.00",
+              "update_time": "20260320"
+            },
+            "error": null,
+            "call_id": "ce8a3728",
+            "execution_time_ms": 201
+          },
+          {
+            "success": true,
+            "data": [
+              {
+                "ts_code": "600519.SH",
+                "trade_date": "20260320",
+                "close": 1445.0,
+                "turnover_rate": 0.2087,
+                "turnover_rate_f": 0.4811,
+                "volume_ratio": 0.63,
+                "pe": 20.9854,
+                "pe_ttm": 20.0998,
+                "pb": 7.9691,
+                "ps": 10.5883,
+                "ps_ttm": 10.1331,
+                "dv_ratio": 3.574,
+                "dv_ttm": 3.574,
+                "total_share": 125227.0215,
+                "float_share": 125227.0215,
+                "free_share": 54313.7592,
+                "total_mv": 180953046.0675,
+                "circ_mv": 180953046.0675
+              }
+            ],
+            "error": null,
+            "call_id": "f8cf5564",
+            "execution_time_ms": 69
+          }
+        ],
+        "summary": {
+          "total": 2,
+          "success": 2,
+          "failure": 0
+        }
+      }
+    },
+    {
+      "test_id": "T5",
+      "test_name": "跨 Skill 综合分析",
+      "flow_type": "cross_skill",
+      "success": true,
+      "latency_ms": 374,
+      "error": null,
+      "details": {
+        "steps": [
+          [
+            "market_data.get_quote",
+            true
+          ],
+          [
+            "market_data.get_daily_basic",
+            true
+          ],
+          [
+            "financial_analysis.get_fina_indicator",
+            true
+          ],
+          [
+            "risk_assessment.assess_stock_risk",
+            true
+          ]
+        ]
+      }
+    }
+  ]
+}

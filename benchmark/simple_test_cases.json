@@ -1,0 +1,324 @@
+[
+  {
+    "id": "MD-001",
+    "query": "茅台现在股价多少？",
+    "expected_skill": "market_data",
+    "expected_tool": "get_quote",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "MD-002",
+    "query": "600519的实时行情",
+    "expected_skill": "market_data",
+    "expected_tool": "get_quote",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "MD-003",
+    "query": "贵州茅台的PE和PB是多少？",
+    "expected_skill": "market_data",
+    "expected_tool": "get_daily_basic",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "MD-004",
+    "query": "查一下000858的基本信息",
+    "expected_skill": "market_data",
+    "expected_tool": "get_stock_basic_info",
+    "expected_params": {"ts_code": "000858.SZ"}
+  },
+  {
+    "id": "MD-005",
+    "query": "茅台最近30天的K线数据",
+    "expected_skill": "market_data",
+    "expected_tool": "get_history",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "MD-006",
+    "query": "五粮液今天的资金流向",
+    "expected_skill": "market_data",
+    "expected_tool": "get_money_flow",
+    "expected_params": {"ts_code": "000858.SZ"}
+  },
+  {
+    "id": "MD-007",
+    "query": "今天的龙虎榜数据",
+    "expected_skill": "market_data",
+    "expected_tool": "get_top_list",
+    "expected_params": {}
+  },
+  {
+    "id": "MD-008",
+    "query": "今天有多少只股票涨停？",
+    "expected_skill": "market_data",
+    "expected_tool": "get_limit_list",
+    "expected_params": {"limit_type": "U"}
+  },
+  {
+    "id": "MD-009",
+    "query": "贵州茅台的公司简介",
+    "expected_skill": "market_data",
+    "expected_tool": "get_company_info",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "MD-010",
+    "query": "最近一周的北向资金流向",
+    "expected_skill": "market_data",
+    "expected_tool": "get_north_money",
+    "expected_params": {}
+  },
+  {
+    "id": "MD-011",
+    "query": "茅台的融资融券数据",
+    "expected_skill": "market_data",
+    "expected_tool": "get_margin",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+
+  {
+    "id": "FA-001",
+    "query": "茅台的ROE是多少？",
+    "expected_skill": "financial_analysis",
+    "expected_tool": "calculate_financial_ratios",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "FA-002",
+    "query": "计算600519的财务指标",
+    "expected_skill": "financial_analysis",
+    "expected_tool": "calculate_financial_ratios",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "FA-003",
+    "query": "五粮液的利润表",
+    "expected_skill": "financial_analysis",
+    "expected_tool": "get_income_statement",
+    "expected_params": {"ts_code": "000858.SZ"}
+  },
+  {
+    "id": "FA-004",
+    "query": "茅台2023年的资产负债表",
+    "expected_skill": "financial_analysis",
+    "expected_tool": "get_balance_sheet",
+    "expected_params": {"ts_code": "600519.SH", "start_date": "20230101", "end_date": "20231231"}
+  },
+  {
+    "id": "FA-005",
+    "query": "查一下000858的现金流量表",
+    "expected_skill": "financial_analysis",
+    "expected_tool": "get_cash_flow",
+    "expected_params": {"ts_code": "000858.SZ"}
+  },
+  {
+    "id": "FA-006",
+    "query": "茅台最新的财务指标数据",
+    "expected_skill": "financial_analysis",
+    "expected_tool": "get_fina_indicator",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "FA-007",
+    "query": "分析一下茅台的盈利能力",
+    "expected_skill": "financial_analysis",
+    "expected_tool": "analyze_profitability",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+
+  {
+    "id": "SA-001",
+    "query": "有哪些行业分类？",
+    "expected_skill": "sector_analysis",
+    "expected_tool": "get_industry_list",
+    "expected_params": {}
+  },
+  {
+    "id": "SA-002",
+    "query": "今天各行业涨跌幅排名",
+    "expected_skill": "sector_analysis",
+    "expected_tool": "get_industry_performance",
+    "expected_params": {"period": "1d"}
+  },
+  {
+    "id": "SA-003",
+    "query": "白酒行业的龙头股",
+    "expected_skill": "sector_analysis",
+    "expected_tool": "get_industry_leaders",
+    "expected_params": {"industry": "白酒"}
+  },
+  {
+    "id": "SA-004",
+    "query": "银行行业的龙头股有哪些？",
+    "expected_skill": "sector_analysis",
+    "expected_tool": "get_industry_leaders",
+    "expected_params": {"industry": "银行"}
+  },
+  {
+    "id": "SA-005",
+    "query": "对比一下白酒和医药行业的估值",
+    "expected_skill": "sector_analysis",
+    "expected_tool": "compare_industry_valuation",
+    "expected_params": {"industries": ["白酒", "医药"]}
+  },
+  {
+    "id": "SA-006",
+    "query": "有哪些概念板块？",
+    "expected_skill": "sector_analysis",
+    "expected_tool": "get_concept_list",
+    "expected_params": {}
+  },
+  {
+    "id": "SA-007",
+    "query": "AI芯片概念板块有哪些股票？",
+    "expected_skill": "sector_analysis",
+    "expected_tool": "get_concept_stocks",
+    "expected_params": {"concept_name": "AI芯片"}
+  },
+
+  {
+    "id": "RA-001",
+    "query": "茅台的投资风险如何？",
+    "expected_skill": "risk_assessment",
+    "expected_tool": "assess_stock_risk",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "RA-002",
+    "query": "评估一下600519的风险",
+    "expected_skill": "risk_assessment",
+    "expected_tool": "assess_stock_risk",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "RA-003",
+    "query": "茅台的估值风险高吗？",
+    "expected_skill": "risk_assessment",
+    "expected_tool": "assess_valuation_risk",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "RA-004",
+    "query": "分析一下五粮液的财务风险",
+    "expected_skill": "risk_assessment",
+    "expected_tool": "assess_financial_risk",
+    "expected_params": {"ts_code": "000858.SZ"}
+  },
+  {
+    "id": "RA-005",
+    "query": "茅台股价的波动率怎么样？",
+    "expected_skill": "risk_assessment",
+    "expected_tool": "assess_volatility_risk",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+
+  {
+    "id": "WR-001",
+    "query": "最近茅台有什么新闻？",
+    "expected_skill": "web_research",
+    "expected_tool": "search_stock_news",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "WR-002",
+    "query": "搜索600519的最新新闻",
+    "expected_skill": "web_research",
+    "expected_tool": "search_stock_news",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "WR-003",
+    "query": "茅台最新发布的公告",
+    "expected_skill": "web_research",
+    "expected_tool": "search_company_announcements",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "WR-004",
+    "query": "最近白酒行业有什么新闻？",
+    "expected_skill": "web_research",
+    "expected_tool": "search_industry_news",
+    "expected_params": {"industry": "白酒"}
+  },
+
+  {
+    "id": "DA-001",
+    "query": "计算以下数据的均值和标准差",
+    "expected_skill": "data_analysis",
+    "expected_tool": "calculate_statistics",
+    "expected_params": {"data": [1800.5, 1825.3, 1810.2, 1850.7, 1835.4]}
+  },
+  {
+    "id": "DA-002",
+    "query": "分析一下以下价格数据的趋势",
+    "expected_skill": "data_analysis",
+    "expected_tool": "analyze_price_trend",
+    "expected_params": {"data": [{"close": 1800.5, "date": "20260101"}, {"close": 1825.3, "date": "20260102"}, {"close": 1810.2, "date": "20260103"}, {"close": 1850.7, "date": "20260104"}, {"close": 1835.4, "date": "20260105"}]}
+  },
+  {
+    "id": "DA-003",
+    "query": "计算这两组数据的相关性",
+    "expected_skill": "data_analysis",
+    "expected_tool": "calculate_correlation",
+    "expected_params": {"data1": [1800.5, 1825.3, 1810.2, 1850.7, 1835.4], "data2": [150.2, 152.5, 151.0, 154.3, 153.1]}
+  },
+  {
+    "id": "DA-004",
+    "query": "计算以下数据的MACD指标",
+    "expected_skill": "data_analysis",
+    "expected_tool": "calculate_technical_indicators",
+    "expected_params": {"data": [{"close": 1800.5, "high": 1810.0, "low": 1795.0}, {"close": 1825.3, "high": 1830.0, "low": 1815.0}, {"close": 1810.2, "high": 1820.0, "low": 1805.0}, {"close": 1850.7, "high": 1860.0, "low": 1840.0}, {"close": 1835.4, "high": 1845.0, "low": 1825.0}, {"close": 1845.0, "high": 1855.0, "low": 1835.0}, {"close": 1820.0, "high": 1830.0, "low": 1810.0}, {"close": 1860.0, "high": 1870.0, "low": 1850.0}, {"close": 1855.0, "high": 1865.0, "low": 1845.0}, {"close": 1870.0, "high": 1880.0, "low": 1860.0}, {"close": 1865.0, "high": 1875.0, "low": 1855.0}, {"close": 1880.0, "high": 1890.0, "low": 1870.0}, {"close": 1875.0, "high": 1885.0, "low": 1865.0}, {"close": 1890.0, "high": 1900.0, "low": 1880.0}, {"close": 1885.0, "high": 1895.0, "low": 1875.0}, {"close": 1900.0, "high": 1910.0, "low": 1890.0}, {"close": 1895.0, "high": 1905.0, "low": 1885.0}, {"close": 1910.0, "high": 1920.0, "low": 1900.0}, {"close": 1905.0, "high": 1915.0, "low": 1895.0}, {"close": 1920.0, "high": 1930.0, "low": 1910.0}, {"close": 1915.0, "high": 1925.0, "low": 1905.0}, {"close": 1930.0, "high": 1940.0, "low": 1920.0}, {"close": 1925.0, "high": 1935.0, "low": 1915.0}, {"close": 1940.0, "high": 1950.0, "low": 1930.0}, {"close": 1935.0, "high": 1945.0, "low": 1925.0}, {"close": 1950.0, "high": 1960.0, "low": 1940.0}, {"close": 1945.0, "high": 1955.0, "low": 1935.0}, {"close": 1960.0, "high": 1970.0, "low": 1950.0}, {"close": 1955.0, "high": 1965.0, "low": 1945.0}, {"close": 1970.0, "high": 1980.0, "low": 1960.0}], "indicators": ["MACD"]}
+  },
+  {
+    "id": "DA-005",
+    "query": "标准化以下数据",
+    "expected_skill": "data_analysis",
+    "expected_tool": "normalize_data",
+    "expected_params": {"data": [1800.5, 1825.3, 1810.2, 1850.7, 1835.4]}
+  },
+  {
+    "id": "DA-006",
+    "query": "将以下数据转换为K线图格式",
+    "expected_skill": "data_analysis",
+    "expected_tool": "generate_chart_data",
+    "expected_params": {"data": [{"trade_date": "20260101", "open": 1800.0, "high": 1810.0, "low": 1795.0, "close": 1800.5, "vol": 10000}], "chart_type": "candlestick"}
+  },
+
+  {
+    "id": "DR-001",
+    "query": "生成茅台的深度研究报告",
+    "expected_skill": "deep_research",
+    "expected_tool": "generate_stock_report",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "DR-002",
+    "query": "写一份600519的研报",
+    "expected_skill": "deep_research",
+    "expected_tool": "generate_stock_report",
+    "expected_params": {"ts_code": "600519.SH"}
+  },
+  {
+    "id": "DR-003",
+    "query": "分析一下白酒行业",
+    "expected_skill": "deep_research",
+    "expected_tool": "generate_industry_report",
+    "expected_params": {"industry": "白酒"}
+  },
+
+  {
+    "id": "NO-SKILL-001",
+    "query": "今天天气怎么样？",
+    "expected_skill": null,
+    "expected_tool": null,
+    "expected_params": null
+  },
+  {
+    "id": "NO-SKILL-002",
+    "query": "你好",
+    "expected_skill": null,
+    "expected_tool": null,
+    "expected_params": null
+  }
+]

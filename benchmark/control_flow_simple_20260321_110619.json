@@ -1,0 +1,117 @@
+{
+  "timestamp": "2026-03-21T11:06:19.442435",
+  "total": 5,
+  "passed": 0,
+  "failed": 5,
+  "results": [
+    {
+      "test_id": "T1",
+      "test_name": "单一工具调用",
+      "flow_type": "single",
+      "success": false,
+      "latency_ms": 2,
+      "error": "缺少必填参数: ts_code",
+      "details": {
+        "success": false,
+        "data": null,
+        "error": "缺少必填参数: ts_code",
+        "meta": null
+      }
+    },
+    {
+      "test_id": "T2",
+      "test_name": "顺序执行",
+      "flow_type": "sequential",
+      "success": false,
+      "latency_ms": 7,
+      "error": null,
+      "details": {
+        "steps": [
+          [
+            "get_quote",
+            false
+          ],
+          [
+            "get_daily_basic",
+            false
+          ],
+          [
+            "calculate_financial_ratios",
+            false
+          ]
+        ]
+      }
+    },
+    {
+      "test_id": "T3",
+      "test_name": "并行执行",
+      "flow_type": "parallel",
+      "success": false,
+      "latency_ms": 4,
+      "error": null,
+      "details": {
+        "stocks": [
+          "600519",
+          "000858",
+          "600809"
+        ],
+        "success_count": 0
+      }
+    },
+    {
+      "test_id": "T4",
+      "test_name": "Control Flow Engine",
+      "flow_type": "control_flow",
+      "success": false,
+      "latency_ms": 2,
+      "error": null,
+      "details": {
+        "success": false,
+        "flow_id": "81c35062",
+        "flow_type": "sequential",
+        "results": [
+          {
+            "success": false,
+            "data": null,
+            "error": "缺少必填参数: ts_code",
+            "call_id": "cb1f55ac",
+            "execution_time_ms": 0
+          }
+        ],
+        "summary": {
+          "total": 1,
+          "success": 0,
+          "failure": 1
+        }
+      }
+    },
+    {
+      "test_id": "T5",
+      "test_name": "跨 Skill 综合分析",
+      "flow_type": "cross_skill",
+      "success": false,
+      "latency_ms": 6,
+      "error": null,
+      "details": {
+        "steps": [
+          [
+            "market_data.get_quote",
+            false
+          ],
+          [
+            "market_data.get_daily_basic",
+            false
+          ],
+          [
+            "financial_analysis.get_fina_indicator",
+            false
+          ],
+          [
+            "risk_assessment.assess_stock_risk",
+            false
+          ]
+        ]
+      }
+    }
+  ]
+}

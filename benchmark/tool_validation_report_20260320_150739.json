@@ -1,0 +1,1075 @@
+{
+  "timestamp": "2026-03-20T15:07:39.904817",
+  "total_tests": 45,
+  "summary": {
+    "success": 40,
+    "failed": 3,
+    "tool_not_found": 0,
+    "skill_not_found": 0,
+    "skipped": 2,
+    "success_rate": 0.9302325581395349
+  },
+  "skill_breakdown": {
+    "market_data": {
+      "total": 11,
+      "success": 9,
+      "failed": 2
+    },
+    "financial_analysis": {
+      "total": 7,
+      "success": 7,
+      "failed": 0
+    },
+    "sector_analysis": {
+      "total": 7,
+      "success": 6,
+      "failed": 1
+    },
+    "risk_assessment": {
+      "total": 5,
+      "success": 5,
+      "failed": 0
+    },
+    "web_research": {
+      "total": 4,
+      "success": 4,
+      "failed": 0
+    },
+    "data_analysis": {
+      "total": 6,
+      "success": 6,
+      "failed": 0
+    },
+    "deep_research": {
+      "total": 3,
+      "success": 3,
+      "failed": 0
+    },
+    "NO_SKILL": {
+      "total": 2,
+      "success": 0,
+      "failed": 0
+    }
+  },
+  "failed_tests": [
+    {
+      "test_id": "MD-006",
+      "query": "五粮液今天的资金流向",
+      "expected_skill": "market_data",
+      "expected_tool": "get_money_flow",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_money_flow",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "获取资金流向数据失败: ('Connection broken: IncompleteRead(42155 bytes read, 228613 more expected)', IncompleteRead(42155 bytes read, 228613 more expected))",
+      "response_preview": null,
+      "timestamp": "2026-03-20T15:02:31.207695",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-008",
+      "query": "今天有多少只股票涨停？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_limit_list",
+      "expected_params": {
+        "limit_type": "U"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_limit_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "未找到涨跌停数据: 20260319",
+      "response_preview": null,
+      "timestamp": "2026-03-20T15:03:23.015475",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-006",
+      "query": "有哪些概念板块？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_concept_list",
+      "expected_params": {},
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_concept_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "获取概念列表失败: HTTPConnectionPool(host='127.0.0.1', port=7897): Read timed out.",
+      "response_preview": null,
+      "timestamp": "2026-03-20T15:05:26.418235",
+      "status": "EXECUTION_FAILED"
+    }
+  ],
+  "all_results": [
+    {
+      "test_id": "MD-001",
+      "query": "茅台现在股价多少？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_quote",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_quote",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'gid': 'sh600519', 'ts_code': '600519.SH', 'name': '贵州茅台', 'nowPri': '1452.87', 'increase': '-15.93', 'increPer': '-1.08', 'todayStartPri': '1472.96', 'yestodEndPri': '1468.80', 'todayMax': '1473.00'",
+      "timestamp": "2026-03-20T15:02:21.751178",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "MD-002",
+      "query": "600519的实时行情",
+      "expected_skill": "market_data",
+      "expected_tool": "get_quote",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_quote",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'gid': 'sh600519', 'ts_code': '600519.SH', 'name': '贵州茅台', 'nowPri': '1452.87', 'increase': '-15.93', 'increPer': '-1.08', 'todayStartPri': '1472.96', 'yestodEndPri': '1468.80', 'todayMax': '1473.00'",
+      "timestamp": "2026-03-20T15:02:26.679030",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "MD-003",
+      "query": "贵州茅台的PE和PB是多少？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_daily_basic",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_daily_basic",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'ts_code': '600519.SH', 'trade_date': '20260319', 'close': 1452.87, 'turnover_rate': 0.2421, 'turnover_rate_f': 0.5582, 'volume_ratio': 0.73, 'pe': 21.0997, 'pe_ttm': 20.2093, 'pb': 8.0125, 'ps': 10",
+      "timestamp": "2026-03-20T15:02:26.679184",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "MD-004",
+      "query": "查一下000858的基本信息",
+      "expected_skill": "market_data",
+      "expected_tool": "get_stock_basic_info",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_stock_basic_info",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '000858.SZ', 'symbol': '000858', 'name': '五粮液', 'area': '四川', 'industry': '白酒', 'list_date': '19980427'}",
+      "timestamp": "2026-03-20T15:02:28.522432",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "MD-005",
+      "query": "茅台最近30天的K线数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_history",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_history",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'records': [{'trade_date': '20260319', 'open': 1472.96, 'high': 1473.0, 'low': 1446.0, 'close': 1452.87, 'pre_close': 1468.8, 'change': -15.93, 'pct_chg': -1.0846, 'vol': 30318.59, 'amount': 4404953.",
+      "timestamp": "2026-03-20T15:02:30.367942",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "MD-006",
+      "query": "五粮液今天的资金流向",
+      "expected_skill": "market_data",
+      "expected_tool": "get_money_flow",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_money_flow",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "获取资金流向数据失败: ('Connection broken: IncompleteRead(42155 bytes read, 228613 more expected)', IncompleteRead(42155 bytes read, 228613 more expected))",
+      "response_preview": null,
+      "timestamp": "2026-03-20T15:02:31.207695",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-007",
+      "query": "今天的龙虎榜数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_top_list",
+      "expected_params": {},
+      "actual_skill": "market_data",
+      "actual_tool": "get_top_list",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'records': [{'trade_date': '20260319', 'ts_code': '000020.SZ', 'name': '深华发Ａ', 'close': 21.21, 'pct_chg': '数据缺失', 'turnover_rate': 1.8, 'amount': 124735962.0, 'l_buy': 51816545.22, 'l_sell': 17100365",
+      "timestamp": "2026-03-20T15:03:13.095680",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "MD-008",
+      "query": "今天有多少只股票涨停？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_limit_list",
+      "expected_params": {
+        "limit_type": "U"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_limit_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "未找到涨跌停数据: 20260319",
+      "response_preview": null,
+      "timestamp": "2026-03-20T15:03:23.015475",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-009",
+      "query": "贵州茅台的公司简介",
+      "expected_skill": "market_data",
+      "expected_tool": "get_company_info",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_company_info",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'symbol': '', 'name': '', 'fullname': '', 'enname': '', 'exchange': 'SSE', 'curr_type': '', 'list_status': '', 'list_date': '20010827', 'delist_date': None, 'is_hs': '', 'area",
+      "timestamp": "2026-03-20T15:03:24.951173",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "MD-010",
+      "query": "最近一周的北向资金流向",
+      "expected_skill": "market_data",
+      "expected_tool": "get_north_money",
+      "expected_params": {},
+      "actual_skill": "market_data",
+      "actual_tool": "get_north_money",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'trade_date': '20260319', 'ggt_ss': 29398.37, 'ggt_sz': 23813.65, 'hgt': 130186.14, 'sgt': 144445.89, 'north_money': 274632.03, 'south_money': 53212.02}, {'trade_date': '20260318', 'ggt_ss': 29228.2",
+      "timestamp": "2026-03-20T15:03:26.955790",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "MD-011",
+      "query": "茅台的融资融券数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_margin",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_margin",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'trade_date': '20260319', 'ts_code': '', 'rzye': 1287026111343.0, 'rqye': 5869074505.0, 'rzrqye': 1292895185848.0, 'rzmre': 99712528027.0, 'rqyl': 720893058.0}, {'trade_date': '20260319', 'ts_code':",
+      "timestamp": "2026-03-20T15:03:27.788282",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "FA-001",
+      "query": "茅台的ROE是多少？",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "calculate_financial_ratios",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "calculate_financial_ratios",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'period': '20250930', 'roe': 26.3688, 'roe_dt': 26.3908, 'roa': 29.4079, 'gross_margin': 117269735582.09, 'net_profit_margin': 22.1636, 'debt_to_assets': 12.8088, 'current_rat",
+      "timestamp": "2026-03-20T15:03:29.741434",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "FA-002",
+      "query": "计算600519的财务指标",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "calculate_financial_ratios",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "calculate_financial_ratios",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'period': '20250930', 'roe': 26.3688, 'roe_dt': 26.3908, 'roa': 29.4079, 'gross_margin': 117269735582.09, 'net_profit_margin': 22.1636, 'debt_to_assets': 12.8088, 'current_rat",
+      "timestamp": "2026-03-20T15:03:34.229415",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "FA-003",
+      "query": "五粮液的利润表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_income_statement",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_income_statement",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'ts_code': '000858.SZ', 'ann_date': '20251031', 'f_ann_date': '20251031', 'end_date': '20250930', 'comp_type': '1', 'basic_eps': 5.542, 'diluted_eps': 5.542, 'total_revenue': 60945321083.57, 'revenu",
+      "timestamp": "2026-03-20T15:03:34.229622",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "FA-004",
+      "query": "茅台2023年的资产负债表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_balance_sheet",
+      "expected_params": {
+        "ts_code": "600519.SH",
+        "start_date": "20230101",
+        "end_date": "20231231"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_balance_sheet",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'ts_code': '600519.SH', 'ann_date': '20231021', 'f_ann_date': '20231021', 'end_date': '20230930', 'comp_type': '1', 'total_assets': 262076424771.47, 'total_liab': 37057625012.06, 'total_hldr_eqy_exc",
+      "timestamp": "2026-03-20T15:03:35.193447",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "FA-005",
+      "query": "查一下000858的现金流量表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_cash_flow",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_cash_flow",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'ts_code': '000858.SZ', 'ann_date': '20251031', 'f_ann_date': '20251031', 'end_date': '20250930', 'comp_type': '1', 'n_cashflow_act': 28247488416.94, 'c_inf_fr_operate_a': 78430953024.66, 'c_paid_to",
+      "timestamp": "2026-03-20T15:03:35.984894",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "FA-006",
+      "query": "茅台最新的财务指标数据",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_fina_indicator",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_fina_indicator",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'ts_code': '600519.SH', 'ann_date': '20251030', 'end_date': '20250930', 'eps': 51.53, 'dt_eps': 51.53, 'total_revenue_ps': 104.5333, 'revenue_ps': 102.5767, 'capital_rese_ps': 1.098, 'surplus_rese_p",
+      "timestamp": "2026-03-20T15:03:37.450070",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "FA-007",
+      "query": "分析一下茅台的盈利能力",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "analyze_profitability",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "analyze_profitability",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'avg_roe': 22.35, 'avg_gross_margin': 93168316358.92, 'roe_trend': 'up', 'trends': [{'period': '20250930', 'roe': 26.3688, 'gross_margin': 117269735582.09, 'operating_margin':",
+      "timestamp": "2026-03-20T15:03:37.451003",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "SA-001",
+      "query": "有哪些行业分类？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_list",
+      "expected_params": {},
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_list",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'name': 'IT设备', 'stock_count': 80}, {'name': '专用机械', 'stock_count': 284}, {'name': '中成药', 'stock_count': 69}, {'name': '乳制品', 'stock_count': 21}, {'name': '互联网', 'stock_count': 80}, {'name': '仓储物流',",
+      "timestamp": "2026-03-20T15:03:37.451166",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "SA-002",
+      "query": "今天各行业涨跌幅排名",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_performance",
+      "expected_params": {
+        "period": "1d"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_performance",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'industry': '石油开采', 'avg_change': 3.61, 'stock_count': 22}, {'industry': '焦炭加工', 'avg_change': 1.89, 'stock_count': 7}, {'industry': '供气供热', 'avg_change': 1.55, 'stock_count': 46}, {'industry': '小金属",
+      "timestamp": "2026-03-20T15:04:05.035802",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "SA-003",
+      "query": "白酒行业的龙头股",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_leaders",
+      "expected_params": {
+        "industry": "白酒"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_leaders",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'ts_code': '600519.SH', 'name': '贵州茅台', 'total_mv': 181938582.7267, 'total_revenue': '数据缺失', 'n_income': '数据缺失'}, {'ts_code': '000858.SZ', 'name': '五粮液', 'total_mv': 39798126.8753, 'total_revenue': ",
+      "timestamp": "2026-03-20T15:04:11.920426",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "SA-004",
+      "query": "银行行业的龙头股有哪些？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_leaders",
+      "expected_params": {
+        "industry": "银行"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_leaders",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'ts_code': '601398.SH', 'name': '工商银行', 'total_mv': 268373911.588, 'total_revenue': '数据缺失', 'n_income': '数据缺失'}, {'ts_code': '601398.SH', 'name': '工商银行', 'total_mv': 263384223.9888, 'total_revenue':",
+      "timestamp": "2026-03-20T15:04:30.758806",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "SA-005",
+      "query": "对比一下白酒和医药行业的估值",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "compare_industry_valuation",
+      "expected_params": {
+        "industries": [
+          "白酒",
+          "医药"
+        ]
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "compare_industry_valuation",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'industry': '白酒', 'pe_ttm': 20.21, 'pb': 2.51, 'ps_ttm': 3.5, 'stock_count': 15}]",
+      "timestamp": "2026-03-20T15:05:18.318285",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "SA-006",
+      "query": "有哪些概念板块？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_concept_list",
+      "expected_params": {},
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_concept_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "获取概念列表失败: HTTPConnectionPool(host='127.0.0.1', port=7897): Read timed out.",
+      "response_preview": null,
+      "timestamp": "2026-03-20T15:05:26.418235",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-007",
+      "query": "AI芯片概念板块有哪些股票？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_concept_stocks",
+      "expected_params": {
+        "concept_name": "AI芯片"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_concept_stocks",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "[{'id': 'TS876', 'concept_name': 'AI芯片', 'ts_code': '000936.SZ', 'name': '华西股份', 'in_date': '', 'out_date': ''}, {'id': 'TS876', 'concept_name': 'AI芯片', 'ts_code': '000938.SZ', 'name': '紫光股份', 'in_dat",
+      "timestamp": "2026-03-20T15:05:57.227417",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "RA-001",
+      "query": "茅台的投资风险如何？",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_stock_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_stock_risk",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'risk_score': 18.5, 'risk_level': '低风险', 'risk_factors': ['资产负债率超过80%，偿债压力极大', 'PB超过5，市净率偏高'], 'components': {'valuation': {'ts_code': '600519.SH', 'pe': 21.0997, 'pe_ttm': 20",
+      "timestamp": "2026-03-20T15:06:15.596038",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "RA-002",
+      "query": "评估一下600519的风险",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_stock_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_stock_risk",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'risk_score': 18.5, 'risk_level': '低风险', 'risk_factors': ['资产负债率超过80%，偿债压力极大', 'PB超过5，市净率偏高'], 'components': {'valuation': {'ts_code': '600519.SH', 'pe': 21.0997, 'pe_ttm': 20",
+      "timestamp": "2026-03-20T15:06:15.596716",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "RA-003",
+      "query": "茅台的估值风险高吗？",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_valuation_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_valuation_risk",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'pe': 21.0997, 'pe_ttm': 20.2093, 'pb': 8.0125, 'risk_score': 15, 'risk_factors': ['PB超过5，市净率偏高'], 'assessment': '估值合理'}",
+      "timestamp": "2026-03-20T15:06:15.597113",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "RA-004",
+      "query": "分析一下五粮液的财务风险",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_financial_risk",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_financial_risk",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '000858.SZ', 'debt_to_assets': 19.259, 'current_ratio': 4.5886, 'quick_ratio': 4.0783, 'risk_score': 35, 'risk_factors': ['资产负债率超过80%，偿债压力极大'], 'assessment': '存在一定财务风险'}",
+      "timestamp": "2026-03-20T15:06:15.597151",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "RA-005",
+      "query": "茅台股价的波动率怎么样？",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_volatility_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_volatility_risk",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'annual_volatility': 27.01, 'max_drawdown': 14.88, 'risk_score': 0, 'risk_factors': [], 'assessment': '波动适中'}",
+      "timestamp": "2026-03-20T15:06:18.756239",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "WR-001",
+      "query": "最近茅台有什么新闻？",
+      "expected_skill": "web_research",
+      "expected_tool": "search_stock_news",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "web_research",
+      "actual_tool": "search_stock_news",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'news': [{'title': '600519.SH发布最新财报，业绩稳健增长', 'source': '证券时报', 'date': '2026-03-18', 'url': 'https://example.com/news/600519.SH/1', 'summary': '公司发布2025年年报，营收同比增长15%，净利润增长12%.",
+      "timestamp": "2026-03-20T15:06:18.756826",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "WR-002",
+      "query": "搜索600519的最新新闻",
+      "expected_skill": "web_research",
+      "expected_tool": "search_stock_news",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "web_research",
+      "actual_tool": "search_stock_news",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'news': [{'title': '600519.SH发布最新财报，业绩稳健增长', 'source': '证券时报', 'date': '2026-03-18', 'url': 'https://example.com/news/600519.SH/1', 'summary': '公司发布2025年年报，营收同比增长15%，净利润增长12%.",
+      "timestamp": "2026-03-20T15:06:18.756886",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "WR-003",
+      "query": "茅台最新发布的公告",
+      "expected_skill": "web_research",
+      "expected_tool": "search_company_announcements",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "web_research",
+      "actual_tool": "search_company_announcements",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'category': 'all', 'announcements': [{'title': '2025年年度报告', 'category': 'report', 'date': '2026-03-20', 'url': 'https://example.com/announcement/600519.SH/1'}, {'title': '关于召开",
+      "timestamp": "2026-03-20T15:06:18.756924",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "WR-004",
+      "query": "最近白酒行业有什么新闻？",
+      "expected_skill": "web_research",
+      "expected_tool": "search_industry_news",
+      "expected_params": {
+        "industry": "白酒"
+      },
+      "actual_skill": "web_research",
+      "actual_tool": "search_industry_news",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'industry': '白酒', 'news': [{'title': '白酒行业迎来政策利好', 'source': '经济日报', 'date': '2026-03-19', 'url': 'https://example.com/industry/白酒/1', 'summary': '国家发改委发布白酒行业支持政策，预计将带动行业发展...'}, {'title': '白酒行业景气度持续",
+      "timestamp": "2026-03-20T15:06:18.756967",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-001",
+      "query": "计算以下数据的均值和标准差",
+      "expected_skill": "data_analysis",
+      "expected_tool": "calculate_statistics",
+      "expected_params": {
+        "data": [
+          1800.5,
+          1825.3,
+          1810.2,
+          1850.7,
+          1835.4
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "calculate_statistics",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'mean': 1824.42, 'std': 19.914492210448167, 'min': 1800.5, 'max': 1850.7, 'median': 1825.3, 'count': 5}",
+      "timestamp": "2026-03-20T15:06:18.757012",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-002",
+      "query": "分析一下以下价格数据的趋势",
+      "expected_skill": "data_analysis",
+      "expected_tool": "analyze_price_trend",
+      "expected_params": {
+        "data": [
+          {
+            "close": 1800.5,
+            "date": "20260101"
+          },
+          {
+            "close": 1825.3,
+            "date": "20260102"
+          },
+          {
+            "close": 1810.2,
+            "date": "20260103"
+          },
+          {
+            "close": 1850.7,
+            "date": "20260104"
+          },
+          {
+            "close": 1835.4,
+            "date": "20260105"
+          }
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "analyze_price_trend",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'data_points': 5, 'date_range': {'from': '20260105', 'to': '20260101'}, 'current_price': 1800.5, 'period_high': 1850.7, 'period_low': 1800.5, 'price_change': -34.90000000000009, 'price_change_percent",
+      "timestamp": "2026-03-20T15:06:18.757160",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-003",
+      "query": "计算这两组数据的相关性",
+      "expected_skill": "data_analysis",
+      "expected_tool": "calculate_correlation",
+      "expected_params": {
+        "data1": [
+          1800.5,
+          1825.3,
+          1810.2,
+          1850.7,
+          1835.4
+        ],
+        "data2": [
+          150.2,
+          152.5,
+          151.0,
+          154.3,
+          153.1
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "calculate_correlation",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'data_points': 5, 'correlation': 0.9974, 'interpretation': '强相关'}",
+      "timestamp": "2026-03-20T15:06:18.757307",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-004",
+      "query": "计算以下数据的MACD指标",
+      "expected_skill": "data_analysis",
+      "expected_tool": "calculate_technical_indicators",
+      "expected_params": {
+        "data": [
+          {
+            "close": 1800.5,
+            "high": 1810.0,
+            "low": 1795.0
+          },
+          {
+            "close": 1825.3,
+            "high": 1830.0,
+            "low": 1815.0
+          },
+          {
+            "close": 1810.2,
+            "high": 1820.0,
+            "low": 1805.0
+          },
+          {
+            "close": 1850.7,
+            "high": 1860.0,
+            "low": 1840.0
+          },
+          {
+            "close": 1835.4,
+            "high": 1845.0,
+            "low": 1825.0
+          },
+          {
+            "close": 1845.0,
+            "high": 1855.0,
+            "low": 1835.0
+          },
+          {
+            "close": 1820.0,
+            "high": 1830.0,
+            "low": 1810.0
+          },
+          {
+            "close": 1860.0,
+            "high": 1870.0,
+            "low": 1850.0
+          },
+          {
+            "close": 1855.0,
+            "high": 1865.0,
+            "low": 1845.0
+          },
+          {
+            "close": 1870.0,
+            "high": 1880.0,
+            "low": 1860.0
+          },
+          {
+            "close": 1865.0,
+            "high": 1875.0,
+            "low": 1855.0
+          },
+          {
+            "close": 1880.0,
+            "high": 1890.0,
+            "low": 1870.0
+          },
+          {
+            "close": 1875.0,
+            "high": 1885.0,
+            "low": 1865.0
+          },
+          {
+            "close": 1890.0,
+            "high": 1900.0,
+            "low": 1880.0
+          },
+          {
+            "close": 1885.0,
+            "high": 1895.0,
+            "low": 1875.0
+          },
+          {
+            "close": 1900.0,
+            "high": 1910.0,
+            "low": 1890.0
+          },
+          {
+            "close": 1895.0,
+            "high": 1905.0,
+            "low": 1885.0
+          },
+          {
+            "close": 1910.0,
+            "high": 1920.0,
+            "low": 1900.0
+          },
+          {
+            "close": 1905.0,
+            "high": 1915.0,
+            "low": 1895.0
+          },
+          {
+            "close": 1920.0,
+            "high": 1930.0,
+            "low": 1910.0
+          },
+          {
+            "close": 1915.0,
+            "high": 1925.0,
+            "low": 1905.0
+          },
+          {
+            "close": 1930.0,
+            "high": 1940.0,
+            "low": 1920.0
+          },
+          {
+            "close": 1925.0,
+            "high": 1935.0,
+            "low": 1915.0
+          },
+          {
+            "close": 1940.0,
+            "high": 1950.0,
+            "low": 1930.0
+          },
+          {
+            "close": 1935.0,
+            "high": 1945.0,
+            "low": 1925.0
+          },
+          {
+            "close": 1950.0,
+            "high": 1960.0,
+            "low": 1940.0
+          },
+          {
+            "close": 1945.0,
+            "high": 1955.0,
+            "low": 1935.0
+          },
+          {
+            "close": 1960.0,
+            "high": 1970.0,
+            "low": 1950.0
+          },
+          {
+            "close": 1955.0,
+            "high": 1965.0,
+            "low": 1945.0
+          },
+          {
+            "close": 1970.0,
+            "high": 1980.0,
+            "low": 1960.0
+          }
+        ],
+        "indicators": [
+          "MACD"
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "calculate_technical_indicators",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "None",
+      "timestamp": "2026-03-20T15:06:18.757431",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-005",
+      "query": "标准化以下数据",
+      "expected_skill": "data_analysis",
+      "expected_tool": "normalize_data",
+      "expected_params": {
+        "data": [
+          1800.5,
+          1825.3,
+          1810.2,
+          1850.7,
+          1835.4
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "normalize_data",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'method': 'minmax', 'original_range': {'min': 1800.5, 'max': 1850.7}, 'normalized': [0.0, 0.4940239043824688, 0.19322709163346688, 1.0, 0.6952191235059773]}",
+      "timestamp": "2026-03-20T15:06:18.757485",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-006",
+      "query": "将以下数据转换为K线图格式",
+      "expected_skill": "data_analysis",
+      "expected_tool": "generate_chart_data",
+      "expected_params": {
+        "data": [
+          {
+            "trade_date": "20260101",
+            "open": 1800.0,
+            "high": 1810.0,
+            "low": 1795.0,
+            "close": 1800.5,
+            "vol": 10000
+          }
+        ],
+        "chart_type": "candlestick"
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "generate_chart_data",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'chart_type': 'candlestick', 'data_points': 1, 'data': [{'date': '20260101', 'open': 1800.0, 'high': 1810.0, 'low': 1795.0, 'close': 1800.5, 'volume': 10000}]}",
+      "timestamp": "2026-03-20T15:06:18.757529",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DR-001",
+      "query": "生成茅台的深度研究报告",
+      "expected_skill": "deep_research",
+      "expected_tool": "generate_stock_report",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "deep_research",
+      "actual_tool": "generate_stock_report",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'report_type': 'comprehensive', 'generated_at': '2026-03-20', 'sections': {'company_overview': {'name': '', 'fullname': '', 'industry': '白酒', 'area': '贵州', 'list_date': '20010",
+      "timestamp": "2026-03-20T15:06:18.757566",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DR-002",
+      "query": "写一份600519的研报",
+      "expected_skill": "deep_research",
+      "expected_tool": "generate_stock_report",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "deep_research",
+      "actual_tool": "generate_stock_report",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'report_type': 'comprehensive', 'generated_at': '2026-03-20', 'sections': {'company_overview': {'name': '', 'fullname': '', 'industry': '白酒', 'area': '贵州', 'list_date': '20010",
+      "timestamp": "2026-03-20T15:06:20.363988",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DR-003",
+      "query": "分析一下白酒行业",
+      "expected_skill": "deep_research",
+      "expected_tool": "generate_industry_report",
+      "expected_params": {
+        "industry": "白酒"
+      },
+      "actual_skill": "deep_research",
+      "actual_tool": "generate_industry_report",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'industry': '白酒', 'focus': 'overview', 'generated_at': '2026-03-20', 'sections': {'valuation': {'industry': '白酒', 'pe_ttm': 20.21, 'pb': 2.51, 'ps_ttm': 3.5, 'stock_count': 15}, 'performance': {'indu",
+      "timestamp": "2026-03-20T15:06:22.320953",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "NO-SKILL-001",
+      "query": "今天天气怎么样？",
+      "expected_skill": null,
+      "expected_tool": null,
+      "expected_params": null,
+      "actual_skill": null,
+      "actual_tool": null,
+      "tool_exists": false,
+      "execution_success": false,
+      "error": null,
+      "response_preview": null,
+      "timestamp": "2026-03-20T15:07:39.904713",
+      "status": "SKIPPED"
+    },
+    {
+      "test_id": "NO-SKILL-002",
+      "query": "你好",
+      "expected_skill": null,
+      "expected_tool": null,
+      "expected_params": null,
+      "actual_skill": null,
+      "actual_tool": null,
+      "tool_exists": false,
+      "execution_success": false,
+      "error": null,
+      "response_preview": null,
+      "timestamp": "2026-03-20T15:07:39.904736",
+      "status": "SKIPPED"
+    }
+  ]
+}

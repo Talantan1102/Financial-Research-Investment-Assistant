@@ -1,0 +1,1390 @@
+{
+  "timestamp": "2026-03-20T14:21:46.895700",
+  "total_tests": 45,
+  "summary": {
+    "success": 14,
+    "failed": 29,
+    "tool_not_found": 0,
+    "skill_not_found": 0,
+    "skipped": 2,
+    "success_rate": 0.32558139534883723
+  },
+  "skill_breakdown": {
+    "market_data": {
+      "total": 11,
+      "success": 0,
+      "failed": 11
+    },
+    "financial_analysis": {
+      "total": 7,
+      "success": 0,
+      "failed": 7
+    },
+    "sector_analysis": {
+      "total": 7,
+      "success": 0,
+      "failed": 7
+    },
+    "risk_assessment": {
+      "total": 5,
+      "success": 2,
+      "failed": 3
+    },
+    "web_research": {
+      "total": 4,
+      "success": 4,
+      "failed": 0
+    },
+    "data_analysis": {
+      "total": 6,
+      "success": 5,
+      "failed": 1
+    },
+    "deep_research": {
+      "total": 3,
+      "success": 3,
+      "failed": 0
+    },
+    "NO_SKILL": {
+      "total": 2,
+      "success": 0,
+      "failed": 0
+    }
+  },
+  "failed_tests": [
+    {
+      "test_id": "MD-001",
+      "query": "茅台现在股价多少？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_quote",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_quote",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895118",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-002",
+      "query": "600519的实时行情",
+      "expected_skill": "market_data",
+      "expected_tool": "get_quote",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_quote",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895311",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-003",
+      "query": "贵州茅台的PE和PB是多少？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_daily_basic",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_daily_basic",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895320",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-004",
+      "query": "查一下000858的基本信息",
+      "expected_skill": "market_data",
+      "expected_tool": "get_stock_basic_info",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_stock_basic_info",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895326",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-005",
+      "query": "茅台最近30天的K线数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_history",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_history",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895331",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-006",
+      "query": "五粮液今天的资金流向",
+      "expected_skill": "market_data",
+      "expected_tool": "get_money_flow",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_money_flow",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895336",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-007",
+      "query": "今天的龙虎榜数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_top_list",
+      "expected_params": {},
+      "actual_skill": "market_data",
+      "actual_tool": "get_top_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895342",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-008",
+      "query": "今天有多少只股票涨停？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_limit_list",
+      "expected_params": {
+        "limit_type": "U"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_limit_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895346",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-009",
+      "query": "贵州茅台的公司简介",
+      "expected_skill": "market_data",
+      "expected_tool": "get_company_info",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_company_info",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895351",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-010",
+      "query": "最近一周的北向资金流向",
+      "expected_skill": "market_data",
+      "expected_tool": "get_north_money",
+      "expected_params": {},
+      "actual_skill": "market_data",
+      "actual_tool": "get_north_money",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895356",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-011",
+      "query": "茅台的融资融券数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_margin",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_margin",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895360",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-001",
+      "query": "茅台的ROE是多少？",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "calculate_financial_ratios",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "calculate_financial_ratios",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895364",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-002",
+      "query": "计算600519的财务指标",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "calculate_financial_ratios",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "calculate_financial_ratios",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895371",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-003",
+      "query": "五粮液的利润表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_income_statement",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_income_statement",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895375",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-004",
+      "query": "茅台2023年的资产负债表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_balance_sheet",
+      "expected_params": {
+        "ts_code": "600519.SH",
+        "start_date": "20230101",
+        "end_date": "20231231"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_balance_sheet",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895381",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-005",
+      "query": "查一下000858的现金流量表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_cash_flow",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_cash_flow",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895386",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-006",
+      "query": "茅台最新的财务指标数据",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_fina_indicator",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_fina_indicator",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895391",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-007",
+      "query": "分析一下茅台的盈利能力",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "analyze_profitability",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "analyze_profitability",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895401",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-001",
+      "query": "有哪些行业分类？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_list",
+      "expected_params": {},
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895406",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-002",
+      "query": "今天各行业涨跌幅排名",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_performance",
+      "expected_params": {
+        "period": "1d"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_performance",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895412",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-003",
+      "query": "白酒行业的龙头股",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_leaders",
+      "expected_params": {
+        "industry": "白酒"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_leaders",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895417",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-004",
+      "query": "银行行业的龙头股有哪些？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_leaders",
+      "expected_params": {
+        "industry": "银行"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_leaders",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895422",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-005",
+      "query": "对比一下白酒和医药行业的估值",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "compare_industry_valuation",
+      "expected_params": {
+        "industries": [
+          "白酒",
+          "医药"
+        ]
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "compare_industry_valuation",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895427",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-006",
+      "query": "有哪些概念板块？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_concept_list",
+      "expected_params": {},
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_concept_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895432",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-007",
+      "query": "AI芯片概念板块有哪些股票？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_concept_stocks",
+      "expected_params": {
+        "concept_name": "AI芯片"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_concept_stocks",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895436",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "RA-003",
+      "query": "茅台的估值风险高吗？",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_valuation_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_valuation_risk",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895460",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "RA-004",
+      "query": "分析一下五粮液的财务风险",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_financial_risk",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_financial_risk",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895464",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "RA-005",
+      "query": "茅台股价的波动率怎么样？",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_volatility_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_volatility_risk",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895468",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "DA-004",
+      "query": "计算以下数据的MACD指标",
+      "expected_skill": "data_analysis",
+      "expected_tool": "calculate_technical_indicators",
+      "expected_params": {
+        "data": [
+          {
+            "close": 1800.5,
+            "high": 1810.0,
+            "low": 1795.0
+          },
+          {
+            "close": 1825.3,
+            "high": 1830.0,
+            "low": 1815.0
+          }
+        ],
+        "indicators": [
+          "MACD"
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "calculate_technical_indicators",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "历史数据不足，至少需要30条数据",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895645",
+      "status": "EXECUTION_FAILED"
+    }
+  ],
+  "all_results": [
+    {
+      "test_id": "MD-001",
+      "query": "茅台现在股价多少？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_quote",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_quote",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895118",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-002",
+      "query": "600519的实时行情",
+      "expected_skill": "market_data",
+      "expected_tool": "get_quote",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_quote",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895311",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-003",
+      "query": "贵州茅台的PE和PB是多少？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_daily_basic",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_daily_basic",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895320",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-004",
+      "query": "查一下000858的基本信息",
+      "expected_skill": "market_data",
+      "expected_tool": "get_stock_basic_info",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_stock_basic_info",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895326",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-005",
+      "query": "茅台最近30天的K线数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_history",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_history",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895331",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-006",
+      "query": "五粮液今天的资金流向",
+      "expected_skill": "market_data",
+      "expected_tool": "get_money_flow",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_money_flow",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895336",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-007",
+      "query": "今天的龙虎榜数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_top_list",
+      "expected_params": {},
+      "actual_skill": "market_data",
+      "actual_tool": "get_top_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895342",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-008",
+      "query": "今天有多少只股票涨停？",
+      "expected_skill": "market_data",
+      "expected_tool": "get_limit_list",
+      "expected_params": {
+        "limit_type": "U"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_limit_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895346",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-009",
+      "query": "贵州茅台的公司简介",
+      "expected_skill": "market_data",
+      "expected_tool": "get_company_info",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_company_info",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895351",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-010",
+      "query": "最近一周的北向资金流向",
+      "expected_skill": "market_data",
+      "expected_tool": "get_north_money",
+      "expected_params": {},
+      "actual_skill": "market_data",
+      "actual_tool": "get_north_money",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895356",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "MD-011",
+      "query": "茅台的融资融券数据",
+      "expected_skill": "market_data",
+      "expected_tool": "get_margin",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "market_data",
+      "actual_tool": "get_margin",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895360",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-001",
+      "query": "茅台的ROE是多少？",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "calculate_financial_ratios",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "calculate_financial_ratios",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895364",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-002",
+      "query": "计算600519的财务指标",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "calculate_financial_ratios",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "calculate_financial_ratios",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895371",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-003",
+      "query": "五粮液的利润表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_income_statement",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_income_statement",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895375",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-004",
+      "query": "茅台2023年的资产负债表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_balance_sheet",
+      "expected_params": {
+        "ts_code": "600519.SH",
+        "start_date": "20230101",
+        "end_date": "20231231"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_balance_sheet",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895381",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-005",
+      "query": "查一下000858的现金流量表",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_cash_flow",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_cash_flow",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895386",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-006",
+      "query": "茅台最新的财务指标数据",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "get_fina_indicator",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "get_fina_indicator",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895391",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "FA-007",
+      "query": "分析一下茅台的盈利能力",
+      "expected_skill": "financial_analysis",
+      "expected_tool": "analyze_profitability",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "financial_analysis",
+      "actual_tool": "analyze_profitability",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895401",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-001",
+      "query": "有哪些行业分类？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_list",
+      "expected_params": {},
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895406",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-002",
+      "query": "今天各行业涨跌幅排名",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_performance",
+      "expected_params": {
+        "period": "1d"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_performance",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895412",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-003",
+      "query": "白酒行业的龙头股",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_leaders",
+      "expected_params": {
+        "industry": "白酒"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_leaders",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895417",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-004",
+      "query": "银行行业的龙头股有哪些？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_industry_leaders",
+      "expected_params": {
+        "industry": "银行"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_industry_leaders",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895422",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-005",
+      "query": "对比一下白酒和医药行业的估值",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "compare_industry_valuation",
+      "expected_params": {
+        "industries": [
+          "白酒",
+          "医药"
+        ]
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "compare_industry_valuation",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895427",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-006",
+      "query": "有哪些概念板块？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_concept_list",
+      "expected_params": {},
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_concept_list",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895432",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "SA-007",
+      "query": "AI芯片概念板块有哪些股票？",
+      "expected_skill": "sector_analysis",
+      "expected_tool": "get_concept_stocks",
+      "expected_params": {
+        "concept_name": "AI芯片"
+      },
+      "actual_skill": "sector_analysis",
+      "actual_tool": "get_concept_stocks",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895436",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "RA-001",
+      "query": "茅台的投资风险如何？",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_stock_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_stock_risk",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'risk_score': 0, 'risk_level': '低风险', 'risk_factors': [], 'components': {'valuation': None, 'financial': None, 'volatility': None}}",
+      "timestamp": "2026-03-20T14:21:46.895442",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "RA-002",
+      "query": "评估一下600519的风险",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_stock_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_stock_risk",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'risk_score': 0, 'risk_level': '低风险', 'risk_factors': [], 'components': {'valuation': None, 'financial': None, 'volatility': None}}",
+      "timestamp": "2026-03-20T14:21:46.895453",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "RA-003",
+      "query": "茅台的估值风险高吗？",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_valuation_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_valuation_risk",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895460",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "RA-004",
+      "query": "分析一下五粮液的财务风险",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_financial_risk",
+      "expected_params": {
+        "ts_code": "000858.SZ"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_financial_risk",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895464",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "RA-005",
+      "query": "茅台股价的波动率怎么样？",
+      "expected_skill": "risk_assessment",
+      "expected_tool": "assess_volatility_risk",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "risk_assessment",
+      "actual_tool": "assess_volatility_risk",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "Tushare API 未初始化，请检查 TUSHARE_API_TOKEN 环境变量",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895468",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "WR-001",
+      "query": "最近茅台有什么新闻？",
+      "expected_skill": "web_research",
+      "expected_tool": "search_stock_news",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "web_research",
+      "actual_tool": "search_stock_news",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'news': [{'title': '600519.SH发布最新财报，业绩稳健增长', 'source': '证券时报', 'date': '2026-03-18', 'url': 'https://example.com/news/600519.SH/1', 'summary': '公司发布2025年年报，营收同比增长15%，净利润增长12%.",
+      "timestamp": "2026-03-20T14:21:46.895472",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "WR-002",
+      "query": "搜索600519的最新新闻",
+      "expected_skill": "web_research",
+      "expected_tool": "search_stock_news",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "web_research",
+      "actual_tool": "search_stock_news",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'news': [{'title': '600519.SH发布最新财报，业绩稳健增长', 'source': '证券时报', 'date': '2026-03-18', 'url': 'https://example.com/news/600519.SH/1', 'summary': '公司发布2025年年报，营收同比增长15%，净利润增长12%.",
+      "timestamp": "2026-03-20T14:21:46.895484",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "WR-003",
+      "query": "茅台最新发布的公告",
+      "expected_skill": "web_research",
+      "expected_tool": "search_company_announcements",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "web_research",
+      "actual_tool": "search_company_announcements",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'category': 'all', 'announcements': [{'title': '2025年年度报告', 'category': 'report', 'date': '2026-03-20', 'url': 'https://example.com/announcement/600519.SH/1'}, {'title': '关于召开",
+      "timestamp": "2026-03-20T14:21:46.895492",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "WR-004",
+      "query": "最近白酒行业有什么新闻？",
+      "expected_skill": "web_research",
+      "expected_tool": "search_industry_news",
+      "expected_params": {
+        "industry": "白酒"
+      },
+      "actual_skill": "web_research",
+      "actual_tool": "search_industry_news",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'industry': '白酒', 'news': [{'title': '白酒行业迎来政策利好', 'source': '经济日报', 'date': '2026-03-19', 'url': 'https://example.com/industry/白酒/1', 'summary': '国家发改委发布白酒行业支持政策，预计将带动行业发展...'}, {'title': '白酒行业景气度持续",
+      "timestamp": "2026-03-20T14:21:46.895506",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-001",
+      "query": "计算以下数据的均值和标准差",
+      "expected_skill": "data_analysis",
+      "expected_tool": "calculate_statistics",
+      "expected_params": {
+        "data": [
+          1800.5,
+          1825.3,
+          1810.2,
+          1850.7,
+          1835.4
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "calculate_statistics",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'mean': 1824.42, 'std': 19.914492210448167, 'min': 1800.5, 'max': 1850.7, 'median': 1825.3, 'count': 5}",
+      "timestamp": "2026-03-20T14:21:46.895518",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-002",
+      "query": "分析一下以下价格数据的趋势",
+      "expected_skill": "data_analysis",
+      "expected_tool": "analyze_price_trend",
+      "expected_params": {
+        "data": [
+          {
+            "close": 1800.5,
+            "date": "20260101"
+          },
+          {
+            "close": 1825.3,
+            "date": "20260102"
+          },
+          {
+            "close": 1810.2,
+            "date": "20260103"
+          },
+          {
+            "close": 1850.7,
+            "date": "20260104"
+          },
+          {
+            "close": 1835.4,
+            "date": "20260105"
+          }
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "analyze_price_trend",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'data_points': 5, 'date_range': {'from': '20260105', 'to': '20260101'}, 'current_price': 1800.5, 'period_high': 1850.7, 'period_low': 1800.5, 'price_change': -34.90000000000009, 'price_change_percent",
+      "timestamp": "2026-03-20T14:21:46.895591",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-003",
+      "query": "计算这两组数据的相关性",
+      "expected_skill": "data_analysis",
+      "expected_tool": "calculate_correlation",
+      "expected_params": {
+        "data1": [
+          1800.5,
+          1825.3,
+          1810.2,
+          1850.7,
+          1835.4
+        ],
+        "data2": [
+          150.2,
+          152.5,
+          151.0,
+          154.3,
+          153.1
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "calculate_correlation",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'data_points': 5, 'correlation': 0.9974, 'interpretation': '强相关'}",
+      "timestamp": "2026-03-20T14:21:46.895631",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-004",
+      "query": "计算以下数据的MACD指标",
+      "expected_skill": "data_analysis",
+      "expected_tool": "calculate_technical_indicators",
+      "expected_params": {
+        "data": [
+          {
+            "close": 1800.5,
+            "high": 1810.0,
+            "low": 1795.0
+          },
+          {
+            "close": 1825.3,
+            "high": 1830.0,
+            "low": 1815.0
+          }
+        ],
+        "indicators": [
+          "MACD"
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "calculate_technical_indicators",
+      "tool_exists": true,
+      "execution_success": false,
+      "error": "历史数据不足，至少需要30条数据",
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895645",
+      "status": "EXECUTION_FAILED"
+    },
+    {
+      "test_id": "DA-005",
+      "query": "标准化以下数据",
+      "expected_skill": "data_analysis",
+      "expected_tool": "normalize_data",
+      "expected_params": {
+        "data": [
+          1800.5,
+          1825.3,
+          1810.2,
+          1850.7,
+          1835.4
+        ]
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "normalize_data",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'method': 'minmax', 'original_range': {'min': 1800.5, 'max': 1850.7}, 'normalized': [0.0, 0.4940239043824688, 0.19322709163346688, 1.0, 0.6952191235059773]}",
+      "timestamp": "2026-03-20T14:21:46.895651",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DA-006",
+      "query": "将以下数据转换为K线图格式",
+      "expected_skill": "data_analysis",
+      "expected_tool": "generate_chart_data",
+      "expected_params": {
+        "data": [
+          {
+            "trade_date": "20260101",
+            "open": 1800.0,
+            "high": 1810.0,
+            "low": 1795.0,
+            "close": 1800.5,
+            "vol": 10000
+          }
+        ],
+        "chart_type": "candlestick"
+      },
+      "actual_skill": "data_analysis",
+      "actual_tool": "generate_chart_data",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'chart_type': 'candlestick', 'data_points': 1, 'data': [{'date': '20260101', 'open': 1800.0, 'high': 1810.0, 'low': 1795.0, 'close': 1800.5, 'volume': 10000}]}",
+      "timestamp": "2026-03-20T14:21:46.895660",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DR-001",
+      "query": "生成茅台的深度研究报告",
+      "expected_skill": "deep_research",
+      "expected_tool": "generate_stock_report",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "deep_research",
+      "actual_tool": "generate_stock_report",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'report_type': 'comprehensive', 'generated_at': '2026-03-20', 'sections': {}}",
+      "timestamp": "2026-03-20T14:21:46.895667",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DR-002",
+      "query": "写一份600519的研报",
+      "expected_skill": "deep_research",
+      "expected_tool": "generate_stock_report",
+      "expected_params": {
+        "ts_code": "600519.SH"
+      },
+      "actual_skill": "deep_research",
+      "actual_tool": "generate_stock_report",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'ts_code': '600519.SH', 'report_type': 'comprehensive', 'generated_at': '2026-03-20', 'sections': {}}",
+      "timestamp": "2026-03-20T14:21:46.895674",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "DR-003",
+      "query": "分析一下白酒行业",
+      "expected_skill": "deep_research",
+      "expected_tool": "generate_industry_report",
+      "expected_params": {
+        "industry": "白酒"
+      },
+      "actual_skill": "deep_research",
+      "actual_tool": "generate_industry_report",
+      "tool_exists": true,
+      "execution_success": true,
+      "error": null,
+      "response_preview": "{'industry': '白酒', 'focus': 'overview', 'generated_at': '2026-03-20', 'sections': {}}",
+      "timestamp": "2026-03-20T14:21:46.895680",
+      "status": "SUCCESS"
+    },
+    {
+      "test_id": "NO-SKILL-001",
+      "query": "今天天气怎么样？",
+      "expected_skill": null,
+      "expected_tool": null,
+      "expected_params": null,
+      "actual_skill": null,
+      "actual_tool": null,
+      "tool_exists": false,
+      "execution_success": false,
+      "error": null,
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895685",
+      "status": "SKIPPED"
+    },
+    {
+      "test_id": "NO-SKILL-002",
+      "query": "你好",
+      "expected_skill": null,
+      "expected_tool": null,
+      "expected_params": null,
+      "actual_skill": null,
+      "actual_tool": null,
+      "tool_exists": false,
+      "execution_success": false,
+      "error": null,
+      "response_preview": null,
+      "timestamp": "2026-03-20T14:21:46.895687",
+      "status": "SKIPPED"
+    }
+  ]
+}

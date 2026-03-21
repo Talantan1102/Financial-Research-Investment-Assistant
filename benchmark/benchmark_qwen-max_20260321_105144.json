@@ -1,0 +1,91 @@
+{
+  "timestamp": "2026-03-21T10:51:44.816320",
+  "model": "qwen-max",
+  "total_tests": 3,
+  "summary": {
+    "skill_selection_accuracy": 0.6666666666666666,
+    "tool_selection_accuracy": 0.6666666666666666,
+    "execution_success_rate": 1.0,
+    "error_rate": 0.0,
+    "average_output_quality": 8.666666666666666,
+    "average_latency_ms": 27221.0,
+    "total_tool_calls": 3
+  },
+  "metrics": {
+    "skill_correct": 2,
+    "tools_correct": 2,
+    "execution_success": 3,
+    "errors": 0
+  },
+  "results": [
+    {
+      "test_id": "MD-001",
+      "query": "茅台现在股价多少？",
+      "expected_skill": "market_data",
+      "predicted_skill": "market_data",
+      "skill_correct": true,
+      "expected_tools": [
+        "get_quote"
+      ],
+      "predicted_tools": [
+        "get_quote"
+      ],
+      "tools_correct": true,
+      "execution_success": true,
+      "output_quality_score": 8.4,
+      "latency_ms": 16094,
+      "tool_call_count": 1,
+      "error_occurred": false,
+      "error_type": null,
+      "reasoning_quality": "medium",
+      "raw_response": "贵州茅台（股票代码：600519.SH）当前的股价为1445.00元人民币。相较于上一个交易日收盘价1452.87元，今天的价格下降了7.87元，跌幅约为0.54%。今日开盘价为1452.96元，最高达到1462.50元，最低跌至1439.00元。请注意，股市投资存在风险，以上信息仅供参考，请谨慎决策。",
+      "timestamp": "2026-03-21T10:50:39.161014"
+    },
+    {
+      "test_id": "MD-002",
+      "query": "帮我查一下股票代码600519的基本信息",
+      "expected_skill": "market_data",
+      "predicted_skill": "market_data",
+      "skill_correct": true,
+      "expected_tools": [
+        "get_stock_basic_info"
+      ],
+      "predicted_tools": [
+        "get_stock_basic_info"
+      ],
+      "tools_correct": true,
+      "execution_success": true,
+      "output_quality_score": 8.4,
+      "latency_ms": 18378,
+      "tool_call_count": 1,
+      "error_occurred": false,
+      "error_type": null,
+      "reasoning_quality": "medium",
+      "raw_response": "股票代码600519对应的是贵州茅台，这是一家位于中国贵州省的公司，主营行业为白酒。该公司于2001年8月27日在上海证券交易所上市。\n\n如果您还需要更多关于贵州茅台的信息，比如最新的股价、财务状况或者是市场表现等，请告诉我，我将为您提供进一步的帮助。",
+      "timestamp": "2026-03-21T10:50:57.539610"
+    },
+    {
+      "test_id": "MD-003",
+      "query": "贵州茅台的PE和PB估值是多少？",
+      "expected_skill": "market_data",
+      "predicted_skill": "financial_analysis",
+      "skill_correct": false,
+      "expected_tools": [
+        "get_daily_basic"
+      ],
+      "predicted_tools": [
+        "get_fina_indicator"
+      ],
+      "tools_correct": false,
+      "execution_success": true,
+      "output_quality_score": 9.200000000000001,
+      "latency_ms": 47191,
+      "tool_call_count": 1,
+      "error_occurred": false,
+      "error_type": null,
+      "reasoning_quality": "good",
+      "raw_response": "根据提供的财务指标数据，我们可以计算出贵州茅台（股票代码：600519.SH）的市盈率（PE）和市净率（PB）。但是，直接从上述数据中我们无法直接获取到PE和PB的具体数值，因为这些比率还需要结合当前的股价信息来计算。不过，我可以基于给出的信息进行一些初步分析，并提供一个大致的方法论来估算这两个指标。\n\n### 市盈率（PE）\n- **定义**：市盈率是指每股市价与每股收益之比。\n- **公式**：\\[ PE = \\frac{P}{EPS} \\]，其中 \\( P \\) 是最新收盘价，\\( EPS \\) 是每股收益。\n- 根据提供的数据，最新的每股收益（EPS）为 51.53 元/股。\n\n为了得到准确的PE值，我们需要知道贵州茅台最近的股价。假设我们知道该价格为 \\( X \\) 元，则其PE值可以通过将 \\( X \\) 除以 51.53 来计算得出。\n\n### 市净率（PB）\n- **定义**：市净率是每股市价与每股净资产的比例。\n- **公式**：\\[ PB = \\frac{P}{BVPS} \\]，其中 \\( P \\) 同样代表最新收盘价，而 \\( BVPS \\) 则指每股账面价值。\n- 每股账面价值可通过公司总资产减去总负债后除以总股本数获得，但这里没有直接给出这个具体数值。通常情况下，可以通过资产负债表中的股东权益总额除以发行在外普通股总数来近似计算。遗憾的是，在提供的数据中并未明确列出每股账面价值或相关可以直接用于计算的数据点。\n\n### 结论\n要精确地计算贵州茅台的PE和PB值，我们需要额外获取公司的最新股价以及每股账面价值的信息。如果您能提供这些额外信息，我将能够帮助您完成更详细的计算。另外，考虑到市场状况经常变化，建议查看最新的市场价格和财务报表以确保准确性。如果需要进一步的帮助，请告知我更多细节或允许我调用其他工具如`market_data`来获取最新股价等信息。",
+      "timestamp": "2026-03-21T10:51:44.731197"
+    }
+  ]
+}
