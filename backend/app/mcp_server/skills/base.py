@@ -81,13 +81,15 @@ class ToolResult:
     success: bool
     data: Optional[Any] = None
     error: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
         return {
             "success": self.success,
             "data": self.data,
-            "error": self.error
+            "error": self.error,
+            "meta": self.meta
         }
 
 
@@ -296,6 +298,68 @@ class BaseSkill(ABC):
             是否存在
         """
         return tool_name in self._tools
+
+    def get_skill_md(self) -> str:
+        """
+        获取 Skill 的 SKILL.md 文档内容
+
+        Returns:
+            SKILL.md 文件内容，如果不存在返回默认描述
+        """
+        # 获取 skill 文件路径
+        skill_file = os.path.join(
+            os.path.dirname(__file__),
+            f"{self.name}.py"
+        )
+
+        # 检查对应的 SKILL.md 文件
+        skill_md_path = os.path.join(
+            os.path.dirname(__file__),
+            f"{self.name}",
+            "SKILL.md"
+        )
+
+        # 如果 SKILL.md 存在，读取内容
+        if os.path.exists(skill_md_path):
+            try:
+                with open(skill_md_path, 'r', encoding='utf-8') as f:
+                    return f.read()
+            except Exception as e:
+                self._logger.error(f"读取 SKILL.md 失败: {e}")
+
+        # 如果不存在，生成默认的 SKILL.md 内容
+        return self._generate_default_skill_md()
+
+    def _generate_default_skill_md(self) -> str:
+        """生成默认的 SKILL.md 内容"""
+        tools_md = []
+        for name, tool_def in self._tool_definitions.items():
+            params_str = ", ".join([
+                f"{p.name}: {p.type}" + (" (required)" if p.required else "")
+                for p in tool_def.parameters
+            ])
+            tools_md.append(f"### {name}")
+            tools_md.append(f"- 描述: {tool_def.description}")
+            tools_md.append(f"- 参数: {params_str}")
+            tools_md.append("")
+
+        return f"""---
+title: {self.name}
+description: {self.description}
+---
+
+# {self.name}
+
+{self.description}
+
+## 可用工具
+
+{chr(10).join(tools_md)}
+
+## 使用示例
+
+待补充...
+"""
 
     @property
     def tool_count(self) -> int:

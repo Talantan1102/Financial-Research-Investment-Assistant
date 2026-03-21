@@ -1,26 +1,64 @@
-# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
-# 未经授权，禁止转售或仿制。
+"""MCP Server 初始化模块"""
 
-"""MCP Server 包
+from app.mcp_server.server import FinancialResearchMCPServer, get_mcp_server
+from app.mcp_server.control_flow.engine import (
+    ControlFlowEngine,
+    ControlFlowContext,
+    ControlFlowType,
+    ToolCall,
+    ExecutionResult
+)
+from app.mcp_server.error_handler import (
+    ErrorHandler,
+    ErrorInfo,
+    ErrorType,
+    ErrorSeverity,
+    get_error_handler,
+    handle_error
+)
 
-金融研投助手 MCP Server 实现，基于 Model Context Protocol。
-"""
-
-from .server import FinancialMCPServer, create_server, main
-from .config import get_config, MCPServerConfig
-from .skills import BaseSkill, MarketDataSkill, ToolDefinition, ToolParameter, ToolResult
-
-__version__ = "1.0.0"
+# Skills
+from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult, ToolDefinition
+from app.mcp_server.skills.market_data import MarketDataSkill
+from app.mcp_server.skills.financial_analysis import FinancialAnalysisSkill
+from app.mcp_server.skills.sector_analysis import SectorAnalysisSkill
+from app.mcp_server.skills.risk_assessment import RiskAssessmentSkill
+from app.mcp_server.skills.deep_research import DeepResearchSkill
+from app.mcp_server.skills.web_research import WebResearchSkill
+from app.mcp_server.skills.data_analysis import DataAnalysisSkill
 
 __all__ = [
-    "FinancialMCPServer",
-    "create_server",
-    "main",
-    "get_config",
-    "MCPServerConfig",
+    # Server
+    "FinancialResearchMCPServer",
+    "get_mcp_server",
+    
+    # Control Flow
+    "ControlFlowEngine",
+    "ControlFlowContext",
+    "ControlFlowType",
+    "ToolCall",
+    "ExecutionResult",
+    
+    # Error Handler
+    "ErrorHandler",
+    "ErrorInfo",
+    "ErrorType",
+    "ErrorSeverity",
+    "get_error_handler",
+    "handle_error",
+    
+    # Skills
     "BaseSkill",
-    "MarketDataSkill",
-    "ToolDefinition",
-    "ToolParameter", 
+    "ToolParameter",
     "ToolResult",
+    "ToolDefinition",
+    "MarketDataSkill",
+    "FinancialAnalysisSkill",
+    "SectorAnalysisSkill",
+    "RiskAssessmentSkill",
+    "DeepResearchSkill",
+    "WebResearchSkill",
+    "DataAnalysisSkill",
 ]
+
+__version__ = "2.0.0"

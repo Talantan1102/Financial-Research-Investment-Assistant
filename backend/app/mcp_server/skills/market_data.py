@@ -47,9 +47,9 @@ class MarketDataSkill(BaseSkill):
             description="获取指定股票的实时行情数据，包括当前价格、涨跌幅、成交量等信息",
             parameters=[
                 ToolParameter(
-                    name="symbol",
+                    name="ts_code",
                     type="string",
-                    description="股票代码，支持多种格式：'600519'(纯数字)、'sh600519'(带市场前缀)、'600519.SH'(Tushare格式)",
+                    description="TS股票代码，如 600519.SH",
                     required=True
                 )
             ]
@@ -77,17 +77,10 @@ class MarketDataSkill(BaseSkill):
             description="获取股票历史K线数据，支持日线、周线、月线",
             parameters=[
                 ToolParameter(
-                    name="symbol",
+                    name="ts_code",
                     type="string",
-                    description="股票代码，如'600519'或'600519.SH'",
+                    description="TS股票代码，如 600519.SH",
                     required=True
-                ),
-                ToolParameter(
-                    name="period",
-                    type="string",
-                    description="周期类型：daily(日线)、weekly(周线)、monthly(月线)",
-                    required=False,
-                    default="daily"
                 ),
                 ToolParameter(
                     name="start_date",
@@ -102,13 +95,6 @@ class MarketDataSkill(BaseSkill):
                     description="结束日期，格式YYYYMMDD",
                     required=False,
                     default=None
-                ),
-                ToolParameter(
-                    name="limit",
-                    type="integer",
-                    description="返回数据条数限制",
-                    required=False,
-                    default=100
                 )
             ]
         )
@@ -120,9 +106,9 @@ class MarketDataSkill(BaseSkill):
             description="获取股票基础信息（行业、地区、上市日期等）",
             parameters=[
                 ToolParameter(
-                    name="symbol",
+                    name="ts_code",
                     type="string",
-                    description="股票代码",
+                    description="TS股票代码，如 600519.SH",
                     required=True
                 )
             ]
@@ -140,13 +126,6 @@ class MarketDataSkill(BaseSkill):
                     description="交易日期，格式YYYYMMDD，默认最近交易日",
                     required=False,
                     default=None
-                ),
-                ToolParameter(
-                    name="limit",
-                    type="integer",
-                    description="返回条数限制",
-                    required=False,
-                    default=50
                 )
             ]
         )
@@ -158,9 +137,9 @@ class MarketDataSkill(BaseSkill):
             description="获取个股资金流向数据（主力、散户净流入等）",
             parameters=[
                 ToolParameter(
-                    name="symbol",
+                    name="ts_code",
                     type="string",
-                    description="股票代码",
+                    description="TS股票代码，如 600519.SH",
                     required=True
                 ),
                 ToolParameter(
@@ -217,9 +196,9 @@ class MarketDataSkill(BaseSkill):
             description="获取上市公司详细信息（公司简介、联系方式、办公地址等）",
             parameters=[
                 ToolParameter(
-                    name="symbol",
+                    name="ts_code",
                     type="string",
-                    description="股票代码",
+                    description="TS股票代码，如 600519.SH",
                     required=True
                 )
             ]
@@ -234,9 +213,9 @@ class MarketDataSkill(BaseSkill):
             description="获取每日指标数据，包括PE、PB、PS、换手率、总市值、流通市值等估值指标",
             parameters=[
                 ToolParameter(
-                    name="symbol",
+                    name="ts_code",
                     type="string",
-                    description="股票代码，不填写则返回全市场数据",
+                    description="TS股票代码，如 600519.SH，不填写则返回全市场数据",
                     required=False,
                     default=None
                 ),
@@ -280,9 +259,9 @@ class MarketDataSkill(BaseSkill):
             description="获取融资融券数据，包括融资余额、融券余额、融资买入额等",
             parameters=[
                 ToolParameter(
-                    name="symbol",
+                    name="ts_code",
                     type="string",
-                    description="股票代码，不填写则返回全市场数据",
+                    description="TS股票代码，如 600519.SH，不填写则返回全市场数据",
                     required=False,
                     default=None
                 ),
@@ -303,12 +282,12 @@ class MarketDataSkill(BaseSkill):
             ]
         )
     
-    async def get_quote(self, symbol: str) -> ToolResult:
+    async def get_quote(self, ts_code: str) -> ToolResult:
         """
         获取股票实时行情
         
         Args:
-            symbol: 股票代码
+            ts_code: TS股票代码，如 600519.SH
         
         Returns:
             ToolResult 包含股票行情数据
@@ -330,7 +309,7 @@ class MarketDataSkill(BaseSkill):
                 "update_time": "20260308"
             }
         """
-        if not symbol:
+        if not ts_code:
             return ToolResult(
                 success=False,
                 error="股票代码不能为空"
@@ -338,7 +317,7 @@ class MarketDataSkill(BaseSkill):
         
         try:
             # 使用 Tushare 客户端获取行情
-            result = self.get_tushare_client().get_quote(symbol)
+            result = self.get_tushare_client().get_quote(ts_code)
             
             if result.get("success"):
                 return ToolResult(
@@ -410,23 +389,20 @@ class MarketDataSkill(BaseSkill):
                 error=f"搜索股票失败: {str(e)}"
             )
 
-    async def get_history(self, symbol: str, period: str = "daily", 
-                          start_date: str = None, end_date: str = None,
-                          limit: int = 100) -> ToolResult:
+    async def get_history(self, ts_code: str, 
+                          start_date: str = None, end_date: str = None) -> ToolResult:
         """
         获取股票历史K线数据
         
         Args:
-            symbol: 股票代码
-            period: 周期类型
+            ts_code: TS股票代码，如 600519.SH
             start_date: 开始日期
             end_date: 结束日期
-            limit: 返回条数限制
         
         Returns:
             ToolResult 包含K线数据
         """
-        if not symbol:
+        if not ts_code:
             return ToolResult(
                 success=False,
                 error="股票代码不能为空"
@@ -434,11 +410,9 @@ class MarketDataSkill(BaseSkill):
         
         try:
             result = self.get_tushare_client().get_history(
-                symbol=symbol,
-                period=period,
+                symbol=ts_code,
                 start_date=start_date,
-                end_date=end_date,
-                limit=limit
+                end_date=end_date
             )
             
             if result.get("success"):
@@ -462,24 +436,24 @@ class MarketDataSkill(BaseSkill):
                 error=f"获取历史数据失败: {str(e)}"
             )
 
-    async def get_stock_basic_info(self, symbol: str) -> ToolResult:
+    async def get_stock_basic_info(self, ts_code: str) -> ToolResult:
         """
         获取股票基础信息
         
         Args:
-            symbol: 股票代码
+            ts_code: TS股票代码，如 600519.SH
         
         Returns:
             ToolResult 包含股票基础信息
         """
-        if not symbol:
+        if not ts_code:
             return ToolResult(
                 success=False,
                 error="股票代码不能为空"
             )
         
         try:
-            result = self.get_tushare_client().get_stock_basic(symbol)
+            result = self.get_tushare_client().get_stock_basic(ts_code)
             
             if result.get("success"):
                 return ToolResult(
@@ -497,21 +471,19 @@ class MarketDataSkill(BaseSkill):
                 error=f"获取股票基础信息失败: {str(e)}"
             )
 
-    async def get_top_list(self, trade_date: str = None, limit: int = 50) -> ToolResult:
+    async def get_top_list(self, trade_date: str = None) -> ToolResult:
         """
         获取龙虎榜数据
         
         Args:
             trade_date: 交易日期
-            limit: 返回条数限制
         
         Returns:
             ToolResult 包含龙虎榜数据
         """
         try:
             result = self.get_tushare_client().get_top_list(
-                trade_date=trade_date,
-                limit=limit
+                trade_date=trade_date
             )
             
             if result.get("success"):
@@ -534,13 +506,13 @@ class MarketDataSkill(BaseSkill):
                 error=f"获取龙虎榜数据失败: {str(e)}"
             )
 
-    async def get_money_flow(self, symbol: str, trade_date: str = None,
+    async def get_money_flow(self, ts_code: str, trade_date: str = None,
                              start_date: str = None, end_date: str = None) -> ToolResult:
         """
         获取个股资金流向
         
         Args:
-            symbol: 股票代码
+            ts_code: TS股票代码，如 600519.SH
             trade_date: 交易日期
             start_date: 开始日期
             end_date: 结束日期
@@ -548,7 +520,7 @@ class MarketDataSkill(BaseSkill):
         Returns:
             ToolResult 包含资金流向数据
         """
-        if not symbol:
+        if not ts_code:
             return ToolResult(
                 success=False,
                 error="股票代码不能为空"
@@ -556,7 +528,7 @@ class MarketDataSkill(BaseSkill):
         
         try:
             result = self.get_tushare_client().get_money_flow(
-                symbol=symbol,
+                symbol=ts_code,
                 trade_date=trade_date,
                 start_date=start_date,
                 end_date=end_date
@@ -619,24 +591,24 @@ class MarketDataSkill(BaseSkill):
                 error=f"获取涨跌停数据失败: {str(e)}"
             )
 
-    async def get_company_info(self, symbol: str) -> ToolResult:
+    async def get_company_info(self, ts_code: str) -> ToolResult:
         """
         获取公司详细信息
         
         Args:
-            symbol: 股票代码
+            ts_code: TS股票代码，如 600519.SH
         
         Returns:
             ToolResult 包含公司详细信息
         """
-        if not symbol:
+        if not ts_code:
             return ToolResult(
                 success=False,
                 error="股票代码不能为空"
             )
         
         try:
-            result = self.get_tushare_client().get_stock_company_info(symbol)
+            result = self.get_tushare_client().get_stock_company_info(ts_code)
             
             if result.get("success"):
                 return ToolResult(
@@ -664,19 +636,19 @@ class MarketDataSkill(BaseSkill):
 
     # ==================== Tier 2 新增方法 ====================
 
-    async def get_daily_basic(self, symbol: str = None, trade_date: str = None) -> ToolResult:
+    async def get_daily_basic(self, ts_code: str = None, trade_date: str = None) -> ToolResult:
         """
         获取每日指标数据（PE、PB、市值等）
 
         Args:
-            symbol: 股票代码，可选
+            ts_code: TS股票代码，如 600519.SH，可选
             trade_date: 交易日期，格式YYYYMMDD
 
         Returns:
             ToolResult 包含每日指标数据
         """
         try:
-            result = self.get_tushare_client().get_daily_basic(symbol, trade_date)
+            result = self.get_tushare_client().get_daily_basic(ts_code, trade_date)
 
             if result.get("success"):
                 return ToolResult(
@@ -726,12 +698,12 @@ class MarketDataSkill(BaseSkill):
                 error=f"获取北向资金数据失败: {str(e)}"
             )
 
-    async def get_margin(self, symbol: str = None, start_date: str = None, end_date: str = None) -> ToolResult:
+    async def get_margin(self, ts_code: str = None, start_date: str = None, end_date: str = None) -> ToolResult:
         """
         获取融资融券数据
 
         Args:
-            symbol: 股票代码，可选
+            ts_code: TS股票代码，如 600519.SH，可选
             start_date: 开始日期，格式YYYYMMDD
             end_date: 结束日期，格式YYYYMMDD
 
@@ -739,7 +711,7 @@ class MarketDataSkill(BaseSkill):
             ToolResult 包含融资融券数据
         """
         try:
-            result = self.get_tushare_client().get_margin(symbol, start_date, end_date)
+            result = self.get_tushare_client().get_margin(ts_code, start_date, end_date)
 
             if result.get("success"):
                 return ToolResult(
