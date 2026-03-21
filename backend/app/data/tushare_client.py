@@ -124,6 +124,15 @@ class TushareClient:
             self._api_initialized = True
             return None
 
+    def _safe_float(self, value, default="数据缺失"):
+        """安全转换数值，None 时返回文字说明，让大模型感知数据缺失"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
     def _normalize_stock_code(self, symbol: str) -> str:
         """
         标准化股票代码为 Tushare 格式
@@ -758,17 +767,20 @@ class TushareClient:
             records = []
             for _, row in df.head(limit).iterrows():
                 ts_code = row['ts_code']
+                l_buy = self._safe_float(row.get('l_buy'))
+                l_sell = self._safe_float(row.get('l_sell'))
+                net_amount = (l_buy - l_sell) if not isinstance(l_buy, str) and not isinstance(l_sell, str) else "数据缺失"
                 records.append({
                     "trade_date": row['trade_date'],
                     "ts_code": ts_code,
                     "name": stock_names.get(ts_code, ""),
-                    "close": float(row.get('close', 0)),
-                    "pct_chg": float(row.get('pct_chg', 0)),
-                    "turnover_rate": float(row.get('turnover_rate', 0)),
-                    "amount": float(row.get('amount', 0)),
-                    "l_buy": float(row.get('l_buy', 0)),
-                    "l_sell": float(row.get('l_sell', 0)),
-                    "net_amount": float(row.get('l_buy', 0)) - float(row.get('l_sell', 0)),
+                    "close": self._safe_float(row.get('close')),
+                    "pct_chg": self._safe_float(row.get('pct_chg')),
+                    "turnover_rate": self._safe_float(row.get('turnover_rate')),
+                    "amount": self._safe_float(row.get('amount')),
+                    "l_buy": l_buy,
+                    "l_sell": l_sell,
+                    "net_amount": net_amount,
                     "reason": row.get('reason', '')
                 })
 
@@ -893,16 +905,16 @@ class TushareClient:
                     "trade_date": row['trade_date'],
                     "ts_code": ts_code,
                     "name": stock_name,
-                    "buy_sm_amount": float(row.get('buy_sm_amount', 0)),
-                    "sell_sm_amount": float(row.get('sell_sm_amount', 0)),
-                    "buy_md_amount": float(row.get('buy_md_amount', 0)),
-                    "sell_md_amount": float(row.get('sell_md_amount', 0)),
-                    "buy_lg_amount": float(row.get('buy_lg_amount', 0)),
-                    "sell_lg_amount": float(row.get('sell_lg_amount', 0)),
-                    "buy_elg_amount": float(row.get('buy_elg_amount', 0)),
-                    "sell_elg_amount": float(row.get('sell_elg_amount', 0)),
-                    "net_mf_amount": float(row.get('net_mf_amount', 0)),
-                    "trade_count": int(row.get('trade_count', 0))
+                    "buy_sm_amount": self._safe_float(row.get('buy_sm_amount')),
+                    "sell_sm_amount": self._safe_float(row.get('sell_sm_amount')),
+                    "buy_md_amount": self._safe_float(row.get('buy_md_amount')),
+                    "sell_md_amount": self._safe_float(row.get('sell_md_amount')),
+                    "buy_lg_amount": self._safe_float(row.get('buy_lg_amount')),
+                    "sell_lg_amount": self._safe_float(row.get('sell_lg_amount')),
+                    "buy_elg_amount": self._safe_float(row.get('buy_elg_amount')),
+                    "sell_elg_amount": self._safe_float(row.get('sell_elg_amount')),
+                    "net_mf_amount": self._safe_float(row.get('net_mf_amount')),
+                    "trade_count": int(row.get('trade_count', 0)) if row.get('trade_count') is not None else "数据缺失"
                 })
 
             # 缓存数据
@@ -972,12 +984,8 @@ class TushareClient:
             }
 
         try:
-            # 设置默认日期
-            if not trade_date:
-                trade_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
-
             # 构建缓存键
-            cache_key = f"limit_list_{trade_date}_{limit_type or 'all'}"
+            cache_key = f"limit_list_{trade_date or 'latest'}_{limit_type or 'all'}"
             cached_data = self._get_from_cache(cache_key)
             if cached_data:
                 return {
@@ -986,8 +994,10 @@ class TushareClient:
                     "error": None
                 }
 
-            # 构建参数
-            params = {"trade_date": trade_date}
+            # 构建参数 - 第三方代理只支持最新一天数据，不传trade_date
+            params = {}
+            if trade_date:
+                params["trade_date"] = trade_date
             if limit_type:
                 params["limit_type"] = limit_type
 
@@ -1019,15 +1029,15 @@ class TushareClient:
                     "trade_date": row['trade_date'],
                     "ts_code": ts_code,
                     "name": stock_names.get(ts_code, ""),
-                    "close": float(row.get('close', 0)),
-                    "pre_close": float(row.get('pre_close', 0)),
-                    "pct_chg": float(row.get('pct_chg', 0)),
-                    "amount": float(row.get('amount', 0)),
-                    "limit_amount": float(row.get('limit_amount', 0)),
-                    "float_mv": float(row.get('float_mv', 0)),
-                    "total_mv": float(row.get('total_mv', 0)),
-                    "turnover_ratio": float(row.get('turnover_ratio', 0)),
-                    "fd_amount": float(row.get('fd_amount', 0)),
+                    "close": self._safe_float(row.get('close')),
+                    "pre_close": self._safe_float(row.get('pre_close')),
+                    "pct_chg": self._safe_float(row.get('pct_chg')),
+                    "amount": self._safe_float(row.get('amount')),
+                    "limit_amount": self._safe_float(row.get('limit_amount')),
+                    "float_mv": self._safe_float(row.get('float_mv')),
+                    "total_mv": self._safe_float(row.get('total_mv')),
+                    "turnover_ratio": self._safe_float(row.get('turnover_ratio')),
+                    "fd_amount": self._safe_float(row.get('fd_amount')),
                     "first_time": row.get('first_time', ''),
                     "last_time": row.get('last_time', ''),
                     "open_times": int(row.get('open_times', 0)),
@@ -1278,22 +1288,22 @@ def get_daily_basic(self, symbol: str = None, trade_date: str = None) -> Dict[st
             records.append({
                 "ts_code": row.get('ts_code', ''),
                 "trade_date": row.get('trade_date', ''),
-                "close": float(row.get('close', 0)),
-                "turnover_rate": float(row.get('turnover_rate', 0)),
-                "turnover_rate_f": float(row.get('turnover_rate_f', 0)),
-                "volume_ratio": float(row.get('volume_ratio', 0)),
-                "pe": float(row.get('pe', 0)),
-                "pe_ttm": float(row.get('pe_ttm', 0)),
-                "pb": float(row.get('pb', 0)),
-                "ps": float(row.get('ps', 0)),
-                "ps_ttm": float(row.get('ps_ttm', 0)),
-                "dv_ratio": float(row.get('dv_ratio', 0)),
-                "dv_ttm": float(row.get('dv_ttm', 0)),
-                "total_share": float(row.get('total_share', 0)),
-                "float_share": float(row.get('float_share', 0)),
-                "free_share": float(row.get('free_share', 0)),
-                "total_mv": float(row.get('total_mv', 0)),
-                "circ_mv": float(row.get('circ_mv', 0))
+                "close": self._safe_float(row.get('close')),
+                "turnover_rate": self._safe_float(row.get('turnover_rate')),
+                "turnover_rate_f": self._safe_float(row.get('turnover_rate_f')),
+                "volume_ratio": self._safe_float(row.get('volume_ratio')),
+                "pe": self._safe_float(row.get('pe')),
+                "pe_ttm": self._safe_float(row.get('pe_ttm')),
+                "pb": self._safe_float(row.get('pb')),
+                "ps": self._safe_float(row.get('ps')),
+                "ps_ttm": self._safe_float(row.get('ps_ttm')),
+                "dv_ratio": self._safe_float(row.get('dv_ratio')),
+                "dv_ttm": self._safe_float(row.get('dv_ttm')),
+                "total_share": self._safe_float(row.get('total_share')),
+                "float_share": self._safe_float(row.get('float_share')),
+                "free_share": self._safe_float(row.get('free_share')),
+                "total_mv": self._safe_float(row.get('total_mv')),
+                "circ_mv": self._safe_float(row.get('circ_mv'))
             })
 
         # 缓存数据
@@ -1392,12 +1402,12 @@ def get_north_money(self, start_date: str = None, end_date: str = None) -> Dict[
         for _, row in df.iterrows():
             records.append({
                 "trade_date": row.get('trade_date', ''),
-                "ggt_ss": float(row.get('ggt_ss', 0)),
-                "ggt_sz": float(row.get('ggt_sz', 0)),
-                "hgt": float(row.get('hgt', 0)),
-                "sgt": float(row.get('sgt', 0)),
-                "north_money": float(row.get('north_money', 0)),
-                "south_money": float(row.get('south_money', 0))
+                "ggt_ss": self._safe_float(row.get('ggt_ss')),
+                "ggt_sz": self._safe_float(row.get('ggt_sz')),
+                "hgt": self._safe_float(row.get('hgt')),
+                "sgt": self._safe_float(row.get('sgt')),
+                "north_money": self._safe_float(row.get('north_money')),
+                "south_money": self._safe_float(row.get('south_money'))
             })
 
         # 缓存数据
@@ -1497,11 +1507,11 @@ def get_margin(self, symbol: str = None, start_date: str = None, end_date: str =
             records.append({
                 "trade_date": row.get('trade_date', ''),
                 "ts_code": row.get('ts_code', ''),
-                "rzye": float(row.get('rzye', 0)),
-                "rqye": float(row.get('rqye', 0)),
-                "rzrqye": float(row.get('rzrqye', 0)),
-                "rzmre": float(row.get('rzmre', 0)),
-                "rqyl": float(row.get('rqyl', 0))
+                "rzye": self._safe_float(row.get('rzye')),
+                "rqye": self._safe_float(row.get('rqye')),
+                "rzrqye": self._safe_float(row.get('rzrqye')),
+                "rzmre": self._safe_float(row.get('rzmre')),
+                "rqyl": self._safe_float(row.get('rqyl'))
             })
 
         # 缓存数据
@@ -1601,20 +1611,20 @@ def get_income_statement(self, symbol: str, start_date: str = None, end_date: st
                 "f_ann_date": row.get('f_ann_date', ''),
                 "end_date": row.get('end_date', ''),
                 "comp_type": row.get('comp_type', ''),
-                "basic_eps": float(row.get('basic_eps', 0)),
-                "diluted_eps": float(row.get('diluted_eps', 0)),
-                "total_revenue": float(row.get('total_revenue', 0)),
-                "revenue": float(row.get('revenue', 0)),
-                "total_cogs": float(row.get('total_cogs', 0)),
-                "oper_cost": float(row.get('oper_cost', 0)),
-                "sell_exp": float(row.get('sell_exp', 0)),
-                "admin_exp": float(row.get('admin_exp', 0)),
-                "fin_exp": float(row.get('fin_exp', 0)),
-                "operate_profit": float(row.get('operate_profit', 0)),
-                "total_profit": float(row.get('total_profit', 0)),
-                "income_tax": float(row.get('income_tax', 0)),
-                "n_income": float(row.get('n_income', 0)),
-                "n_income_attr_p": float(row.get('n_income_attr_p', 0))
+                "basic_eps": self._safe_float(row.get('basic_eps')),
+                "diluted_eps": self._safe_float(row.get('diluted_eps')),
+                "total_revenue": self._safe_float(row.get('total_revenue')),
+                "revenue": self._safe_float(row.get('revenue')),
+                "total_cogs": self._safe_float(row.get('total_cogs')),
+                "oper_cost": self._safe_float(row.get('oper_cost')),
+                "sell_exp": self._safe_float(row.get('sell_exp')),
+                "admin_exp": self._safe_float(row.get('admin_exp')),
+                "fin_exp": self._safe_float(row.get('fin_exp')),
+                "operate_profit": self._safe_float(row.get('operate_profit')),
+                "total_profit": self._safe_float(row.get('total_profit')),
+                "income_tax": self._safe_float(row.get('income_tax')),
+                "n_income": self._safe_float(row.get('n_income')),
+                "n_income_attr_p": self._safe_float(row.get('n_income_attr_p'))
             })
 
         # 缓存数据
@@ -1685,8 +1695,8 @@ def get_balance_sheet(self, symbol: str, start_date: str = None, end_date: str =
                 "error": None
             }
 
-        # 调用 balance_sheet 接口
-        df = api.balance_sheet(ts_code=ts_code, start_date=start_date, end_date=end_date)
+        # 调用 balancesheet 接口
+        df = api.balancesheet(ts_code=ts_code, start_date=start_date, end_date=end_date)
 
         if df is None or df.empty:
             return {
@@ -1704,21 +1714,21 @@ def get_balance_sheet(self, symbol: str, start_date: str = None, end_date: str =
                 "f_ann_date": row.get('f_ann_date', ''),
                 "end_date": row.get('end_date', ''),
                 "comp_type": row.get('comp_type', ''),
-                "total_assets": float(row.get('total_assets', 0)),
-                "total_liab": float(row.get('total_liab', 0)),
-                "total_hldr_eqy_exc_min_int": float(row.get('total_hldr_eqy_exc_min_int', 0)),
-                "total_hldr_eqy_inc_min_int": float(row.get('total_hldr_eqy_inc_min_int', 0)),
-                "total_cur_assets": float(row.get('total_cur_assets', 0)),
-                "total_cur_liab": float(row.get('total_cur_liab', 0)),
-                "total_nca": float(row.get('total_nca', 0)),
-                "total_ncl": float(row.get('total_ncl', 0)),
-                "fix_assets": float(row.get('fix_assets', 0)),
-                "intan_assets": float(row.get('intan_assets', 0)),
-                "inventories": float(row.get('inventories', 0)),
-                "accounts_receiv": float(row.get('accounts_receiv', 0)),
-                "notes_receiv": float(row.get('notes_receiv', 0)),
-                "prepayment": float(row.get('prepayment', 0)),
-                "acct_payable": float(row.get('acct_payable', 0))
+                "total_assets": self._safe_float(row.get('total_assets')),
+                "total_liab": self._safe_float(row.get('total_liab')),
+                "total_hldr_eqy_exc_min_int": self._safe_float(row.get('total_hldr_eqy_exc_min_int')),
+                "total_hldr_eqy_inc_min_int": self._safe_float(row.get('total_hldr_eqy_inc_min_int')),
+                "total_cur_assets": self._safe_float(row.get('total_cur_assets')),
+                "total_cur_liab": self._safe_float(row.get('total_cur_liab')),
+                "total_nca": self._safe_float(row.get('total_nca')),
+                "total_ncl": self._safe_float(row.get('total_ncl')),
+                "fix_assets": self._safe_float(row.get('fix_assets')),
+                "intan_assets": self._safe_float(row.get('intan_assets')),
+                "inventories": self._safe_float(row.get('inventories')),
+                "accounts_receiv": self._safe_float(row.get('accounts_receiv')),
+                "notes_receiv": self._safe_float(row.get('notes_receiv')),
+                "prepayment": self._safe_float(row.get('prepayment')),
+                "acct_payable": self._safe_float(row.get('acct_payable'))
             })
 
         # 缓存数据
@@ -1808,18 +1818,18 @@ def get_cash_flow(self, symbol: str, start_date: str = None, end_date: str = Non
                 "f_ann_date": row.get('f_ann_date', ''),
                 "end_date": row.get('end_date', ''),
                 "comp_type": row.get('comp_type', ''),
-                "n_cashflow_act": float(row.get('n_cashflow_act', 0)),
-                "c_inf_fr_operate_a": float(row.get('c_inf_fr_operate_a', 0)),
-                "c_paid_to_for_empl_a": float(row.get('c_paid_to_for_empl_a', 0)),
-                "c_paid_for_taxes": float(row.get('c_paid_for_taxes', 0)),
-                "n_cashflows_inv_act": float(row.get('n_cashflows_inv_act', 0)),
-                "c_recp_return_invest": float(row.get('c_recp_return_invest', 0)),
-                "c_invest_paid": float(row.get('c_invest_paid', 0)),
-                "n_cashflows_fnc_act": float(row.get('n_cashflows_fnc_act', 0)),
-                "c_recp_borrow": float(row.get('c_recp_borrow', 0)),
-                "c_prepay_amt_borr": float(row.get('c_prepay_amt_borr', 0)),
-                "c_pay_dist_dpcp_int_exp": float(row.get('c_pay_dist_dpcp_int_exp', 0)),
-                "free_cash_flow": float(row.get('free_cash_flow', 0))
+                "n_cashflow_act": self._safe_float(row.get('n_cashflow_act')),
+                "c_inf_fr_operate_a": self._safe_float(row.get('c_inf_fr_operate_a')),
+                "c_paid_to_for_empl_a": self._safe_float(row.get('c_paid_to_for_empl_a')),
+                "c_paid_for_taxes": self._safe_float(row.get('c_paid_for_taxes')),
+                "n_cashflows_inv_act": self._safe_float(row.get('n_cashflows_inv_act')),
+                "c_recp_return_invest": self._safe_float(row.get('c_recp_return_invest')),
+                "c_invest_paid": self._safe_float(row.get('c_invest_paid')),
+                "n_cashflows_fnc_act": self._safe_float(row.get('n_cashflows_fnc_act')),
+                "c_recp_borrow": self._safe_float(row.get('c_recp_borrow')),
+                "c_prepay_amt_borr": self._safe_float(row.get('c_prepay_amt_borr')),
+                "c_pay_dist_dpcp_int_exp": self._safe_float(row.get('c_pay_dist_dpcp_int_exp')),
+                "free_cash_flow": self._safe_float(row.get('free_cash_flow'))
             })
 
         # 缓存数据
@@ -1907,93 +1917,93 @@ def get_fina_indicator(self, symbol: str, start_date: str = None, end_date: str 
                 "ts_code": row.get('ts_code', ''),
                 "ann_date": row.get('ann_date', ''),
                 "end_date": row.get('end_date', ''),
-                "eps": float(row.get('eps', 0)),
-                "dt_eps": float(row.get('dt_eps', 0)),
-                "total_revenue_ps": float(row.get('total_revenue_ps', 0)),
-                "revenue_ps": float(row.get('revenue_ps', 0)),
-                "capital_rese_ps": float(row.get('capital_rese_ps', 0)),
-                "surplus_rese_ps": float(row.get('surplus_rese_ps', 0)),
-                "undist_profit_ps": float(row.get('undist_profit_ps', 0)),
-                "extra_item": float(row.get('extra_item', 0)),
-                "profit_dedt": float(row.get('profit_dedt', 0)),
-                "gross_margin": float(row.get('gross_margin', 0)),
-                "current_ratio": float(row.get('current_ratio', 0)),
-                "quick_ratio": float(row.get('quick_ratio', 0)),
-                "cash_ratio": float(row.get('cash_ratio', 0)),
-                "invturn_days": float(row.get('invturn_days', 0)),
-                "arturn_days": float(row.get('arturn_days', 0)),
-                "inv_turn": float(row.get('inv_turn', 0)),
-                "ar_turn": float(row.get('ar_turn', 0)),
-                "assets_turn": float(row.get('assets_turn', 0)),
-                "roe": float(row.get('roe', 0)),
-                "roe_waa": float(row.get('roe_waa', 0)),
-                "roe_dt": float(row.get('roe_dt', 0)),
-                "roa": float(row.get('roa', 0)),
-                "npta": float(row.get('npta', 0)),
-                "roic": float(row.get('roic', 0)),
-                "roe_yearly": float(row.get('roe_yearly', 0)),
-                "roa2_yearly": float(row.get('roa2_yearly', 0)),
-                "debt_to_assets": float(row.get('debt_to_assets', 0)),
-                "assets_to_eqt": float(row.get('assets_to_eqt', 0)),
-                "dp_assets_to_eqt": float(row.get('dp_assets_to_eqt', 0)),
-                "ca_to_assets": float(row.get('ca_to_assets', 0)),
-                "nca_to_assets": float(row.get('nca_to_assets', 0)),
-                "tbassets_to_totalassets": float(row.get('tbassets_to_totalassets', 0)),
-                "int_to_talcap": float(row.get('int_to_talcap', 0)),
-                "eqt_to_talcapital": float(row.get('eqt_to_talcapital', 0)),
-                "currentdebt_to_debt": float(row.get('currentdebt_to_debt', 0)),
-                "longdeb_to_debt": float(row.get('longdeb_to_debt', 0)),
-                "ocf_to_shortdebt": float(row.get('ocf_to_shortdebt', 0)),
-                "debt_to_eqt": float(row.get('debt_to_eqt', 0)),
-                "eqt_to_debt": float(row.get('eqt_to_debt', 0)),
-                "eqt_to_interestdebt": float(row.get('eqt_to_interestdebt', 0)),
-                "tangibleasset_to_debt": float(row.get('tangibleasset_to_debt', 0)),
-                "tangasset_to_intdebt": float(row.get('tangasset_to_intdebt', 0)),
-                "tangibleasset_to_netdebt": float(row.get('tangibleasset_to_netdebt', 0)),
-                "ocf_to_debt": float(row.get('ocf_to_debt', 0)),
-                "ocf_to_interestdebt": float(row.get('ocf_to_interestdebt', 0)),
-                "ocf_to_netdebt": float(row.get('ocf_to_netdebt', 0)),
-                "ebit_to_interest": float(row.get('ebit_to_interest', 0)),
-                "longdebt_to_workingcapital": float(row.get('longdebt_to_workingcapital', 0)),
-                "ebitda_to_debt": float(row.get('ebitda_to_debt', 0)),
-                "turn_days": float(row.get('turn_days', 0)),
-                "roa_yearly": float(row.get('roa_yearly', 0)),
-                "roa_dp": float(row.get('roa_dp', 0)),
-                "fixed_assets": float(row.get('fixed_assets', 0)),
-                "profit_prefin_exp": float(row.get('profit_prefin_exp', 0)),
-                "non_op_profit": float(row.get('non_op_profit', 0)),
-                "op_to_ebt": float(row.get('op_to_ebt', 0)),
-                "nop_to_ebt": float(row.get('nop_to_ebt', 0)),
-                "ocf_to_profit": float(row.get('ocf_to_profit', 0)),
-                "cash_to_liqdebt": float(row.get('cash_to_liqdebt', 0)),
-                "cash_to_liqdebt_withinterest": float(row.get('cash_to_liqdebt_withinterest', 0)),
-                "op_to_liqdebt": float(row.get('op_to_liqdebt', 0)),
-                "op_to_debt": float(row.get('op_to_debt', 0)),
-                "roe_to_eqt": float(row.get('roe_to_eqt', 0)),
-                "saleexp_to_gr": float(row.get('saleexp_to_gr', 0)),
-                "adminexp_of_gr": float(row.get('adminexp_of_gr', 0)),
-                "finaexp_of_gr": float(row.get('finaexp_of_gr', 0)),
-                "impai_ttm": float(row.get('impai_ttm', 0)),
-                "op_of_gr": float(row.get('op_of_gr', 0)),
-                "ebit_of_gr": float(row.get('ebit_of_gr', 0)),
-                "roe_yoy": float(row.get('roe_yoy', 0)),
-                "dt_roe_yoy": float(row.get('dt_roe_yoy', 0)),
-                "op_yoy": float(row.get('op_yoy', 0)),
-                "ebt_yoy": float(row.get('ebt_yoy', 0)),
-                "netprofit_yoy": float(row.get('netprofit_yoy', 0)),
-                "dt_netprofit_yoy": float(row.get('dt_netprofit_yoy', 0)),
-                "ocf_yoy": float(row.get('ocf_yoy', 0)),
-                "roe_avg": float(row.get('roe_avg', 0)),
-                "q_sales_yoy": float(row.get('q_sales_yoy', 0)),
-                "q_sales_qoq": float(row.get('q_sales_qoq', 0)),
-                "q_op_yoy": float(row.get('q_op_yoy', 0)),
-                "q_op_qoq": float(row.get('q_op_qoq', 0)),
-                "q_profit_yoy": float(row.get('q_profit_yoy', 0)),
-                "q_profit_qoq": float(row.get('q_profit_qoq', 0)),
-                "q_netprofit_yoy": float(row.get('q_netprofit_yoy', 0)),
-                "q_netprofit_qoq": float(row.get('q_netprofit_qoq', 0)),
-                "equity_yoy": float(row.get('equity_yoy', 0)),
-                "rd_exp": float(row.get('rd_exp', 0))
+                "eps": self._safe_float(row.get('eps')),
+                "dt_eps": self._safe_float(row.get('dt_eps')),
+                "total_revenue_ps": self._safe_float(row.get('total_revenue_ps')),
+                "revenue_ps": self._safe_float(row.get('revenue_ps')),
+                "capital_rese_ps": self._safe_float(row.get('capital_rese_ps')),
+                "surplus_rese_ps": self._safe_float(row.get('surplus_rese_ps')),
+                "undist_profit_ps": self._safe_float(row.get('undist_profit_ps')),
+                "extra_item": self._safe_float(row.get('extra_item')),
+                "profit_dedt": self._safe_float(row.get('profit_dedt')),
+                "gross_margin": self._safe_float(row.get('gross_margin')),
+                "current_ratio": self._safe_float(row.get('current_ratio')),
+                "quick_ratio": self._safe_float(row.get('quick_ratio')),
+                "cash_ratio": self._safe_float(row.get('cash_ratio')),
+                "invturn_days": self._safe_float(row.get('invturn_days')),
+                "arturn_days": self._safe_float(row.get('arturn_days')),
+                "inv_turn": self._safe_float(row.get('inv_turn')),
+                "ar_turn": self._safe_float(row.get('ar_turn')),
+                "assets_turn": self._safe_float(row.get('assets_turn')),
+                "roe": self._safe_float(row.get('roe')),
+                "roe_waa": self._safe_float(row.get('roe_waa')),
+                "roe_dt": self._safe_float(row.get('roe_dt')),
+                "roa": self._safe_float(row.get('roa')),
+                "npta": self._safe_float(row.get('npta')),
+                "roic": self._safe_float(row.get('roic')),
+                "roe_yearly": self._safe_float(row.get('roe_yearly')),
+                "roa2_yearly": self._safe_float(row.get('roa2_yearly')),
+                "debt_to_assets": self._safe_float(row.get('debt_to_assets')),
+                "assets_to_eqt": self._safe_float(row.get('assets_to_eqt')),
+                "dp_assets_to_eqt": self._safe_float(row.get('dp_assets_to_eqt')),
+                "ca_to_assets": self._safe_float(row.get('ca_to_assets')),
+                "nca_to_assets": self._safe_float(row.get('nca_to_assets')),
+                "tbassets_to_totalassets": self._safe_float(row.get('tbassets_to_totalassets')),
+                "int_to_talcap": self._safe_float(row.get('int_to_talcap')),
+                "eqt_to_talcapital": self._safe_float(row.get('eqt_to_talcapital')),
+                "currentdebt_to_debt": self._safe_float(row.get('currentdebt_to_debt')),
+                "longdeb_to_debt": self._safe_float(row.get('longdeb_to_debt')),
+                "ocf_to_shortdebt": self._safe_float(row.get('ocf_to_shortdebt')),
+                "debt_to_eqt": self._safe_float(row.get('debt_to_eqt')),
+                "eqt_to_debt": self._safe_float(row.get('eqt_to_debt')),
+                "eqt_to_interestdebt": self._safe_float(row.get('eqt_to_interestdebt')),
+                "tangibleasset_to_debt": self._safe_float(row.get('tangibleasset_to_debt')),
+                "tangasset_to_intdebt": self._safe_float(row.get('tangasset_to_intdebt')),
+                "tangibleasset_to_netdebt": self._safe_float(row.get('tangibleasset_to_netdebt')),
+                "ocf_to_debt": self._safe_float(row.get('ocf_to_debt')),
+                "ocf_to_interestdebt": self._safe_float(row.get('ocf_to_interestdebt')),
+                "ocf_to_netdebt": self._safe_float(row.get('ocf_to_netdebt')),
+                "ebit_to_interest": self._safe_float(row.get('ebit_to_interest')),
+                "longdebt_to_workingcapital": self._safe_float(row.get('longdebt_to_workingcapital')),
+                "ebitda_to_debt": self._safe_float(row.get('ebitda_to_debt')),
+                "turn_days": self._safe_float(row.get('turn_days')),
+                "roa_yearly": self._safe_float(row.get('roa_yearly')),
+                "roa_dp": self._safe_float(row.get('roa_dp')),
+                "fixed_assets": self._safe_float(row.get('fixed_assets')),
+                "profit_prefin_exp": self._safe_float(row.get('profit_prefin_exp')),
+                "non_op_profit": self._safe_float(row.get('non_op_profit')),
+                "op_to_ebt": self._safe_float(row.get('op_to_ebt')),
+                "nop_to_ebt": self._safe_float(row.get('nop_to_ebt')),
+                "ocf_to_profit": self._safe_float(row.get('ocf_to_profit')),
+                "cash_to_liqdebt": self._safe_float(row.get('cash_to_liqdebt')),
+                "cash_to_liqdebt_withinterest": self._safe_float(row.get('cash_to_liqdebt_withinterest')),
+                "op_to_liqdebt": self._safe_float(row.get('op_to_liqdebt')),
+                "op_to_debt": self._safe_float(row.get('op_to_debt')),
+                "roe_to_eqt": self._safe_float(row.get('roe_to_eqt')),
+                "saleexp_to_gr": self._safe_float(row.get('saleexp_to_gr')),
+                "adminexp_of_gr": self._safe_float(row.get('adminexp_of_gr')),
+                "finaexp_of_gr": self._safe_float(row.get('finaexp_of_gr')),
+                "impai_ttm": self._safe_float(row.get('impai_ttm')),
+                "op_of_gr": self._safe_float(row.get('op_of_gr')),
+                "ebit_of_gr": self._safe_float(row.get('ebit_of_gr')),
+                "roe_yoy": self._safe_float(row.get('roe_yoy')),
+                "dt_roe_yoy": self._safe_float(row.get('dt_roe_yoy')),
+                "op_yoy": self._safe_float(row.get('op_yoy')),
+                "ebt_yoy": self._safe_float(row.get('ebt_yoy')),
+                "netprofit_yoy": self._safe_float(row.get('netprofit_yoy')),
+                "dt_netprofit_yoy": self._safe_float(row.get('dt_netprofit_yoy')),
+                "ocf_yoy": self._safe_float(row.get('ocf_yoy')),
+                "roe_avg": self._safe_float(row.get('roe_avg')),
+                "q_sales_yoy": self._safe_float(row.get('q_sales_yoy')),
+                "q_sales_qoq": self._safe_float(row.get('q_sales_qoq')),
+                "q_op_yoy": self._safe_float(row.get('q_op_yoy')),
+                "q_op_qoq": self._safe_float(row.get('q_op_qoq')),
+                "q_profit_yoy": self._safe_float(row.get('q_profit_yoy')),
+                "q_profit_qoq": self._safe_float(row.get('q_profit_qoq')),
+                "q_netprofit_yoy": self._safe_float(row.get('q_netprofit_yoy')),
+                "q_netprofit_qoq": self._safe_float(row.get('q_netprofit_qoq')),
+                "equity_yoy": self._safe_float(row.get('equity_yoy')),
+                "rd_exp": self._safe_float(row.get('rd_exp'))
             })
 
         # 缓存数据
@@ -2571,13 +2581,21 @@ def get_industry_leaders(self, industry: str, by: str = "market_cap") -> Dict[st
         if daily_df is not None and not daily_df.empty:
             industry_stocks = industry_stocks.merge(daily_df, on='ts_code', how='left')
 
-        # 获取财务数据
-        fina_df = api.fina_indicator(fields='ts_code,total_revenue,n_income')
-        if fina_df is not None and not fina_df.empty:
-            # 取最新一期
-            fina_df = fina_df.sort_values(['ts_code', 'end_date'], ascending=[True, False])
-            fina_df = fina_df.drop_duplicates(subset=['ts_code'], keep='first')
-            industry_stocks = industry_stocks.merge(fina_df, on='ts_code', how='left')
+        # 获取财务数据 - 使用income接口批量获取最近一期营收数据
+        try:
+            income_df = api.income(ts_code=','.join(ts_codes[:100]), fields='ts_code,total_revenue,n_income,end_date')
+            if income_df is not None and not income_df.empty:
+                # 取最新一期
+                income_df = income_df.sort_values(['ts_code', 'end_date'], ascending=[True, False])
+                income_df = income_df.drop_duplicates(subset=['ts_code'], keep='first')
+                industry_stocks = industry_stocks.merge(
+                    income_df[['ts_code', 'total_revenue', 'n_income']], 
+                    on='ts_code', 
+                    how='left'
+                )
+        except Exception as e:
+            # 如果批量获取失败，继续执行（部分数据缺失不影响整体结果）
+            pass
 
         # 按指定指标排序
         sort_map = {
@@ -2599,9 +2617,9 @@ def get_industry_leaders(self, industry: str, by: str = "market_cap") -> Dict[st
             records.append({
                 "ts_code": row['ts_code'],
                 "name": row['name'],
-                "total_mv": float(row['total_mv']) if pd.notna(row.get('total_mv')) else None,
-                "total_revenue": float(row['total_revenue']) if pd.notna(row.get('total_revenue')) else None,
-                "n_income": float(row['n_income']) if pd.notna(row.get('n_income')) else None
+                "total_mv": self._safe_float(row.get('total_mv')),
+                "total_revenue": self._safe_float(row.get('total_revenue')),
+                "n_income": self._safe_float(row.get('n_income'))
             })
 
         return {
