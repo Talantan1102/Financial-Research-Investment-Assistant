@@ -1,276 +1,469 @@
 ---
 name: financial_analysis
-description: A股上市公司财务分析，支持财报查询、财务指标计算、财报对比分析
+description: |
+  财务报表分析，计算ROE、ROA、毛利率、净利率等财务指标。
+  
+  Use this skill when:
+  - User asks about company financial reports or statements
+  - User wants to calculate financial ratios (ROE, ROA, margins, debt ratios)
+  - User asks about profitability, solvency, or growth analysis
+  - User wants income statement, balance sheet, or cash flow data
+  - User needs financial indicator time series
+  
+  Data Source: Tushare Pro API
 version: "1.0"
-tool_count: 3
+tool_count: 7
 ---
 
 # FinancialAnalysis Skill
 
-## 概述
+## Overview
 
-提供A股上市公司全面的财务分析能力，基于Tushare API。支持三张财务报表查询、关键财务指标计算、多期财务数据对比分析。
+提供A股上市公司财务报表分析能力，支持三张报表查询、核心财务指标计算、盈利能力和偿债能力分析。
 
-**数据源**: Tushare Pro API
-**支持市场**: A股（上海、深圳）
-**报表类型**: 利润表、资产负债表、现金流量表
+**Data Source**: Tushare Pro API  
+**Markets**: A-shares (Shanghai, Shenzhen)  
+**Report Types**: Income Statement, Balance Sheet, Cash Flow Statement  
+**Update Frequency**: Quarterly (Q1, Q2/Q3, Annual)  
+**Total Tools**: 7
 
 ---
 
-## 可用工具
+## Available Tools
 
-### 1. get_financial_report - 获取财务报表
+### 1. calculate_financial_ratios - 计算财务比率
 
-**功能**: 获取指定公司的财务报表数据（利润表、资产负债表、现金流量表）
+**Purpose**: 计算ROE、ROA、毛利率、净利率、资产负债率等核心财务指标。
 
-**调用方式**: `financial_analysis.get_financial_report(symbol, report_type, period, report_count)`
+**When to use**:
+- User asks "What's the ROE of this company?"
+- User wants quick financial health overview
+- Need key ratios in one call
 
-**参数**:
-- `symbol` (必需): 股票代码
-- `report_type` (必需): 报表类型
-  - `'income'`: 利润表
-  - `'balance'`: 资产负债表
-  - `'cashflow'`: 现金流量表
-- `period` (可选): 报告期，格式 `YYYYMMDD`（如 `'20231231'`），不填返回最新
-- `report_count` (可选): 返回报告期数量，默认 `1`，最多 `10`
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码，如'600519'或'600519.SH' |
+| period | string | No | null | 报告期，如'20231231'，不填则取最新 |
 
-**返回示例（利润表）**:
+**Returns**:
 ```json
 {
   "success": true,
   "data": {
-    "symbol": "600519.SH",
-    "report_type": "利润表",
-    "report_count": 1,
-    "reports": [
-      {
-        "ts_code": "600519.SH",
-        "end_date": "20231231",
-        "ann_date": "20240328",
-        "report_type": "年报",
-        "total_revenue": "15173000.00",
-        "revenue": "15173000.00",
-        "operate_profit": "9521000.00",
-        "total_profit": "9628000.00",
-        "net_income": "8127000.00",
-        "net_income_parent": "8127000.00",
-        "basic_eps": "6.4700",
-        "diluted_eps": "6.4700"
-      }
-    ]
+    "symbol": "600519",
+    "period": "20231231",
+    "roe": 32.58,
+    "roe_dt": 31.2,
+    "roa": 22.45,
+    "gross_margin": 91.23,
+    "net_profit_margin": 53.56,
+    "debt_to_assets": 25.34,
+    "current_ratio": 4.52,
+    "quick_ratio": 4.21,
+    "inventory_turnover": 0.32,
+    "receivables_turnover": 85.5,
+    "assets_turnover": 0.42
   }
 }
 ```
 
-**关键字段（利润表）**:
-- `total_revenue`: 营业总收入（万元）
-- `operate_profit`: 营业利润（万元）
-- `net_income_parent`: 归母净利润（万元）
-- `basic_eps`: 基本每股收益（元）
-
-**关键字段（资产负债表）**:
-- `total_assets`: 总资产（万元）
-- `total_liabilities`: 总负债（万元）
-- `total_equity`: 股东权益合计（万元）
-
-**关键字段（现金流量表）**:
-- `operating_cashflow`: 经营活动现金流（万元）
-- `investing_cashflow`: 投资活动现金流（万元）
-- `financing_cashflow`: 筹资活动现金流（万元）
+**Examples**:
+- Latest ratios: `calculate_financial_ratios(symbol="600519")`
+- Specific period: `calculate_financial_ratios(symbol="600519", period="20231231")`
 
 ---
 
-### 2. calculate_financial_ratios - 计算财务指标
+### 2. get_income_statement - 获取利润表
 
-**功能**: 计算关键财务指标和比率（ROE、ROA、毛利率、净利率、资产负债率等）
+**Purpose**: 获取利润表数据，包括营收、成本、利润等。
 
-**调用方式**: `financial_analysis.calculate_financial_ratios(symbol, period)`
+**When to use**:
+- User asks for income statement data
+- User wants revenue and profit details
+- Analyzing cost structure
 
-**参数**:
-- `symbol` (必需): 股票代码
-- `period` (可选): 报告期，格式 `YYYYMMDD`，不填返回最新
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| start_date | string | No | null | 开始日期，格式YYYYMMDD |
+| end_date | string | No | null | 结束日期，格式YYYYMMDD |
 
-**返回示例**:
+**Returns**:
 ```json
 {
   "success": true,
-  "data": {
-    "symbol": "600519.SH",
-    "ratios": {
+  "data": [
+    {
       "ts_code": "600519.SH",
       "end_date": "20231231",
-      "eps": "6.4700",
-      "roe": "32.58%",
-      "roe_weighted": "32.85%",
-      "roa": "22.45%",
-      "gross_profit_margin": "91.23%",
-      "net_profit_margin": "53.56%",
-      "debt_to_assets": "25.34%",
-      "current_ratio": "4.52",
-      "quick_ratio": "4.21",
-      "revenue_yoy": "18.20%",
-      "net_profit_yoy": "15.89%",
-      "ocf_to_revenue": "85.23%"
-    },
-    "summary": "ROE 32.58%（优秀）；毛利率 91.23%；净利率 53.56%；资产负债率 25.34%（低风险）"
-  }
+      "total_revenue": 15173000.0,
+      "revenue": 15173000.0,
+      "operate_profit": 9521000.0,
+      "total_profit": 9628000.0,
+      "n_income": 8127000.0,
+      "n_income_attr_p": 8127000.0,
+      "basic_eps": 6.47,
+      "diluted_eps": 6.47
+    }
+  ],
+  "meta": {"count": 1}
 }
 ```
 
-**指标分类**:
-
-1. **盈利能力指标**:
-   - `eps`: 每股收益
-   - `roe`: 净资产收益率（>15%为优秀）
-   - `roa`: 总资产收益率
-   - `gross_profit_margin`: 毛利率
-   - `net_profit_margin`: 净利率
-
-2. **偿债能力指标**:
-   - `debt_to_assets`: 资产负债率（<40%为低风险）
-   - `current_ratio`: 流动比率（>2为良好）
-   - `quick_ratio`: 速动比率
-
-3. **增长能力指标**:
-   - `revenue_yoy`: 营收同比增长率
-   - `net_profit_yoy`: 净利润同比增长率
-
-4. **现金流指标**:
-   - `ocf_to_revenue`: 经营现金流/营收比率
+**Examples**:
+- Latest: `get_income_statement(symbol="600519")`
+- Date range: `get_income_statement(symbol="600519", start_date="20230101", end_date="20231231")`
 
 ---
 
-### 3. compare_financial_data - 对比财务数据
+### 3. get_balance_sheet - 获取资产负债表
 
-**功能**: 对比分析财务数据的同比/环比变化（营收、净利润、ROE、ROA）
+**Purpose**: 获取资产负债表数据，包括资产、负债、股东权益等。
 
-**调用方式**: `financial_analysis.compare_financial_data(symbol, indicator, periods)`
+**When to use**:
+- User asks for balance sheet data
+- User wants assets and liabilities breakdown
+- Analyzing financial structure
 
-**参数**:
-- `symbol` (必需): 股票代码
-- `indicator` (必需): 对比指标
-  - `'revenue'`: 营业总收入
-  - `'net_profit'`: 归母净利润
-  - `'roe'`: 净资产收益率
-  - `'roa'`: 总资产收益率
-- `periods` (可选): 对比期数，默认 `4`（最近4个报告期），范围 `2-20`
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| start_date | string | No | null | 开始日期，格式YYYYMMDD |
+| end_date | string | No | null | 结束日期，格式YYYYMMDD |
 
-**返回示例**:
+**Returns**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "ts_code": "600519.SH",
+      "end_date": "20231231",
+      "total_assets": 28000000.0,
+      "total_cur_assets": 20000000.0,
+      "total_nca": 8000000.0,
+      "total_liab": 7000000.0,
+      "total_cur_liab": 4500000.0,
+      "total_ncl": 2500000.0,
+      "total_hldr_eqy_exc_min_int": 21000000.0
+    }
+  ],
+  "meta": {"count": 1}
+}
+```
+
+**Examples**:
+- Latest: `get_balance_sheet(symbol="600519")`
+- Date range: `get_balance_sheet(symbol="600519", start_date="20230101", end_date="20231231")`
+
+---
+
+### 4. get_cash_flow - 获取现金流量表
+
+**Purpose**: 获取现金流量表数据，包括经营、投资、筹资活动现金流。
+
+**When to use**:
+- User asks for cash flow statement
+- User wants to analyze cash generation ability
+- Checking operating cash flow health
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| start_date | string | No | null | 开始日期，格式YYYYMMDD |
+| end_date | string | No | null | 结束日期，格式YYYYMMDD |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "ts_code": "600519.SH",
+      "end_date": "20231231",
+      "n_cashflow_act": 6500000.0,
+      "n_cashflow_inv_act": -500000.0,
+      "n_cashflow_fnc_act": -2000000.0,
+      "c_cash_equ_end_period": 60000000.0,
+      "c_cash_equ_beg_period": 55500000.0
+    }
+  ],
+  "meta": {"count": 1}
+}
+```
+
+**Key Fields**:
+| Field | Description | Unit |
+|-------|-------------|------|
+| n_cashflow_act | 经营活动现金流净额 | 10k CNY |
+| n_cashflow_inv_act | 投资活动现金流净额 | 10k CNY |
+| n_cashflow_fnc_act | 筹资活动现金流净额 | 10k CNY |
+
+**Examples**:
+- Latest: `get_cash_flow(symbol="600519")`
+- Date range: `get_cash_flow(symbol="600519", start_date="20230101", end_date="20231231")`
+
+---
+
+### 5. get_fina_indicator - 获取财务指标
+
+**Purpose**: 获取一站式财务指标数据，包含ROE、ROA、毛利率等100+指标。
+
+**When to use**:
+- User wants comprehensive financial indicators
+- User needs time series of financial metrics
+- Quick access to all key ratios
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| start_date | string | No | null | 开始日期，格式YYYYMMDD |
+| end_date | string | No | null | 结束日期，格式YYYYMMDD |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "ts_code": "600519.SH",
+      "end_date": "20231231",
+      "roe": 32.58,
+      "roa": 22.45,
+      "gross_margin": 91.23,
+      "netprofit_margin": 53.56,
+      "debt_to_assets": 25.34,
+      "current_ratio": 4.52,
+      "quick_ratio": 4.21,
+      "cash_ratio": 3.85,
+      "ar_turn": 85.5,
+      "inv_turn": 0.32,
+      "assets_turn": 0.42
+    }
+  ],
+  "meta": {"count": 1}
+}
+```
+
+**Examples**:
+- Latest: `get_fina_indicator(symbol="600519")`
+- Time series: `get_fina_indicator(symbol="600519", start_date="20200101", end_date="20231231")`
+
+---
+
+### 6. analyze_profitability - 分析盈利能力
+
+**Purpose**: 分析公司盈利能力，包括毛利率、净利率、ROE趋势等。
+
+**When to use**:
+- User asks about profitability trends
+- User wants multi-period profit analysis
+- Analyzing earnings quality
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| periods | integer | No | 8 | 分析期数（季度），默认8个季度 |
+
+**Returns**:
 ```json
 {
   "success": true,
   "data": {
-    "symbol": "600519.SH",
-    "indicator": "营业总收入",
-    "unit": "万元",
-    "data_points": [
-      {"end_date": "20231231", "value": 15173000.0},
-      {"end_date": "20230930", "value": 11245000.0},
-      {"end_date": "20230630", "value": 7568000.0},
-      {"end_date": "20230331", "value": 3856000.0}
+    "symbol": "600519",
+    "avg_roe": 31.2,
+    "avg_gross_margin": 90.8,
+    "roe_trend": "up",
+    "trends": [
+      {"period": "20231231", "roe": 32.58, "gross_margin": 91.23},
+      {"period": "20230930", "roe": 31.8, "gross_margin": 91.1}
     ],
-    "qoq_comparisons": [
-      {
-        "current_period": "20231231",
-        "previous_period": "20230930",
-        "change_rate": "34.93%",
-        "trend": "上升"
-      }
-    ],
-    "summary": "营业总收入最新值为 15173000.00，环比上升 34.93%。近3期平均增长率为 28.54%"
+    "assessment": "优秀"
   }
 }
 ```
 
----
+**Assessment Levels**:
+| Level | Criteria |
+|-------|----------|
+| 优秀 | ROE > 20% |
+| 良好 | ROE 15-20% |
+| 一般 | ROE 10-15% |
+| 较弱 | ROE < 10% |
 
-## 工作流指导
-
-### 典型分析流程
-
-#### 1. 查看公司最新财务状况
-```
-用户: "茅台最新的财报怎么样？"
-
-步骤:
-1. 调用 financial_analysis.calculate_financial_ratios(symbol='600519')
-2. 提取关键指标: ROE, 毛利率, 净利率, 资产负债率
-3. 格式化输出
-```
-
-#### 2. 深度财报分析
-```
-用户: "帮我分析一下茅台的利润表"
-
-步骤:
-1. 调用 financial_analysis.get_financial_report(symbol='600519', report_type='income')
-2. 提取关键数据
-3. 结合 calculate_financial_ratios 分析盈利能力
-4. 输出综合分析
-```
-
-#### 3. 财务趋势分析
-```
-用户: "茅台近一年营收增长趋势如何？"
-
-步骤:
-1. 调用 financial_analysis.compare_financial_data(symbol='600519', indicator='revenue', periods=4)
-2. 分析环比和同比变化
-3. 评估增长趋势
-```
-
-#### 4. 对比两家公司财务
-```
-用户: "对比茅台和五粮液的盈利能力"
-
-步骤:
-1. 分别调用 calculate_financial_ratios('600519') 和 calculate_financial_ratios('000858')
-2. 对比关键指标: ROE, 毛利率, 净利率
-3. 分析优劣势
-```
+**Examples**:
+- Default 8 quarters: `analyze_profitability(symbol="600519")`
+- More periods: `analyze_profitability(symbol="600519", periods=12)`
 
 ---
 
-## 注意事项
+### 7. analyze_solvency - 分析偿债能力
 
-### 1. 报告期格式
-- **格式**: `YYYYMMDD`（如 `'20231231'`）
-- **季报时间**: Q1=0331, Q2=0630, Q3=0930, Q4=1231
-- 不指定 `period` 时自动返回最新报告期
+**Purpose**: 分析公司偿债能力，包括流动比率、速动比率、资产负债率等。
 
-### 2. 指标解读
-- **ROE > 15%**: 优秀
-- **ROE 10-15%**: 良好
-- **ROE < 10%**: 一般
-- **资产负债率 < 40%**: 低风险
-- **资产负债率 40-60%**: 中等风险
-- **资产负债率 > 60%**: 高风险
+**When to use**:
+- User asks about financial health and debt levels
+- User wants solvency analysis
+- Checking debt repayment ability
 
-### 3. 同比/环比计算
-- **环比**: 需至少2期数据
-- **同比**: 需至少5期数据（4个季度+1）
-- 数据不足时仅返回环比
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| period | string | No | null | 报告期，如'20231231'，不填则取最新 |
 
-### 4. 友好的输出格式
-示例:
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "symbol": "600519",
+    "period": "20231231",
+    "current_ratio": 4.52,
+    "quick_ratio": 4.21,
+    "cash_ratio": 3.85,
+    "debt_to_assets": 25.34,
+    "debt_to_equity": 0.34,
+    "equity_to_debt": 2.94,
+    "interest_coverage": 85.5,
+    "assessment": "优秀"
+  }
+}
 ```
-贵州茅台 (600519) 2023年度财务分析
 
-【盈利能力】优秀
-- ROE: 32.58% (行业领先)
-- 毛利率: 91.23% (极高)
-- 净利率: 53.56% (优秀)
+**Assessment Levels**:
+| Level | Criteria |
+|-------|----------|
+| 优秀 | Current ratio > 2 AND debt ratio < 0.5 |
+| 良好 | Current ratio > 1.5 AND debt ratio < 0.6 |
+| 一般 | Current ratio > 1 AND debt ratio < 0.7 |
+| 较弱 | Current ratio < 1 OR debt ratio > 0.7 |
 
-【财务稳健性】极佳
-- 资产负债率: 25.34% (低)
-- 流动比率: 4.52 (充足)
+**Examples**:
+- Latest: `analyze_solvency(symbol="600519")`
+- Specific period: `analyze_solvency(symbol="600519", period="20231231")`
 
-【成长性】良好
-- 营收同比: +18.20%
-- 净利润同比: +15.89%
+---
+
+## Common Workflows
+
+### Workflow 1: Quick Financial Health Check
+```
+User: "茅台的财务状况怎么样？"
+
+→ Step 1: calculate_financial_ratios(symbol="600519")
+   → Get key ratios
+
+→ Step 2: analyze_profitability(symbol="600519", periods=4)
+   → Get profitability assessment
+
+→ Step 3: analyze_solvency(symbol="600519")
+   → Get solvency assessment
+
+→ Response: "贵州茅台财务状况：
+   【盈利能力】ROE 32.58%，优秀水平
+   【偿债能力】资产负债率25.34%，财务状况稳健
+   【综合评估】财务健康，盈利能力强"
+```
+
+### Workflow 2: Detailed Financial Statement Analysis
+```
+User: "给我看看茅台最新的三张报表"
+
+→ Step 1: get_income_statement(symbol="600519")
+   → Profit/Loss data
+
+→ Step 2: get_balance_sheet(symbol="600519")
+   → Assets/Liabilities
+
+→ Step 3: get_cash_flow(symbol="600519")
+   → Cash flows
+
+→ Response: Present summarized financial statements
+```
+
+### Workflow 3: Trend Analysis
+```
+User: "茅台近两年的ROE趋势如何？"
+
+→ Step 1: get_fina_indicator(symbol="600519", start_date="20220101")
+   → Get historical indicators
+
+→ Step 2: analyze_profitability(symbol="600519", periods=8)
+   → Analyze trends
+
+→ Response: "ROE趋势分析：
+   - 近两年平均ROE: 31.2%
+   - 趋势方向: 上升
+   - 最新季度: 32.58%"
+```
+
+### Workflow 4: Compare Two Companies
+```
+User: "对比茅台和五粮液的盈利能力"
+
+→ Step 1: calculate_financial_ratios(symbol="600519")
+→ Step 2: calculate_financial_ratios(symbol="000858")
+→ Step 3: analyze_profitability(symbol="600519")
+→ Step 4: analyze_profitability(symbol="000858")
+
+→ Response: "盈利能力对比：
+   茅台ROE 32.58% vs 五粮液25.8%
+   茅台毛利率91.23% vs 五粮液75.42%"
 ```
 
 ---
 
-**Skill 版本**: v1.0
-**最后更新**: 2026-03-08
+## Important Notes
+
+### 1. Financial Ratio Benchmarks
+
+| Indicator | Excellent | Good | Average | Poor |
+|-----------|-----------|------|---------|------|
+| ROE | > 20% | 15-20% | 10-15% | < 10% |
+| Gross Margin | > 50% | 30-50% | 15-30% | < 15% |
+| Net Margin | > 20% | 10-20% | 5-10% | < 5% |
+| Debt-to-Assets | < 40% | 40-60% | 60-80% | > 80% |
+| Current Ratio | > 2 | 1.5-2 | 1-1.5 | < 1 |
+
+### 2. Report Period Format
+- **Standard**: `YYYYMMDD` (e.g., `'20231231'`)
+- **Quarter mapping**:
+  - Q1: `0331`
+  - Q2 (中报): `0630`
+  - Q3: `0930`
+  - Q4 (年报): `1231`
+
+### 3. Data Units
+- Income statement: 10k CNY (万元)
+- Balance sheet: 10k CNY (万元)
+- Cash flow: 10k CNY (万元)
+- Ratios: Percentage or decimal as indicated
+
+### 4. Error Handling
+All tools return standardized response:
+```json
+{"success": true, "data": {...}}    // Success
+{"success": false, "error": "股票代码不能为空"}   // Missing symbol
+{"success": false, "error": "未找到财务指标数据"}   // No data available
+```
+
+### 5. Best Practices
+- Use `calculate_financial_ratios` for quick ratio overview
+- Use `get_fina_indicator` for comprehensive metrics
+- Use `analyze_profitability` for earnings trends
+- Use `analyze_solvency` for debt health check
+- Use individual statement tools for detailed line items
+- Always check `success` field before using data
+
+---
+
+**Skill Version**: v1.0  
+**Last Updated**: 2026-03-20  
+**Compatible with**: AgentFlow v1.0, MCP Protocol

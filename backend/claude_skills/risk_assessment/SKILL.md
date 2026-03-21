@@ -1,244 +1,327 @@
 ---
 name: risk_assessment
-description: 投资组合风险评估，支持风险指标计算、投资组合分析、风险报告生成
+description: |
+  投资风险评估，评估个股风险等级、提供预警。
+  
+  Use this skill when:
+  - User asks about investment risk of a specific stock
+  - User wants to assess valuation risk (PE/PB too high)
+  - User asks about financial risk (debt, cash flow)
+  - User wants to analyze price volatility
+  - User needs risk warnings and alerts
+  
+  Data Source: Tushare Pro API
 version: "1.0"
-tool_count: 3
+tool_count: 5
 ---
 
 # RiskAssessment Skill
 
-## 概述
+## Overview
 
-提供专业的投资组合风险评估能力，基于历史数据计算各类风险指标。支持单一资产和投资组合的风险分析、风险等级评定、投资建议生成。
+提供专业的投资风险评估能力，从估值、财务、波动率等多维度评估个股风险等级。
 
-**数据源**: Tushare API 历史行情数据
-**支持市场**: A股（上海、深圳）
-**分析方法**: 现代投资组合理论（MPT）、VaR、CVaR等
+**Data Source**: Tushare Pro API  
+**Coverage**: A-shares (Shanghai, Shenzhen)  
+**Risk Assessment Dimensions**: Valuation, Financial, Volatility  
+**Risk Score Range**: 0-100 (0=lowest risk, 100=highest risk)  
+**Total Tools**: 5
 
 ---
 
-## 可用工具
+## Available Tools
 
-### 1. calculate_risk_metrics - 计算单项资产风险指标
+### 1. assess_stock_risk - 综合风险评估
 
-**功能**: 计算单项资产的风险指标（波动率、Beta、最大回撤、VaR、CVaR等）
+**Purpose**: 综合评估股票风险等级，包括市场风险、财务风险、估值风险等。
 
-**调用方式**: `risk_assessment.calculate_risk_metrics(symbol, days, benchmark)`
+**When to use**:
+- User asks "How risky is this stock?"
+- User wants a comprehensive risk assessment
+- Need overall risk score and risk factors
 
-**参数**:
-- `symbol` (必需): 股票代码
-- `days` (可选): 历史数据天数，默认 `252`（一个交易年）
-- `benchmark` (可选): 基准指数代码（如 `'000001'` 上证指数），用于计算Beta
+**Parameters**:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| symbol | string | Yes | 股票代码 (e.g., '600519') |
 
-**返回示例**:
+**Returns**:
 ```json
 {
   "success": true,
   "data": {
     "symbol": "600519",
-    "name": "贵州茅台",
-    "data_period": "252天",
-    "metrics": {
-      "expected_return": 0.1523,
-      "volatility": 0.2845,
-      "sharpe_ratio": 0.4298,
-      "max_drawdown": -0.1856,
-      "var_95": -0.0234,
-      "cvar_95": -0.0312,
-      "beta": 0.87,
-      "alpha": 0.0234
-    },
-    "risk_assessment": {
-      "level": "中等风险",
-      "score": 45.23
+    "risk_score": 45.2,
+    "risk_level": "中风险",
+    "risk_factors": ["PE超过30，估值略高", "资产负债率超过40%"],
+    "components": {
+      "valuation": {...},
+      "financial": {...},
+      "volatility": {...}
     }
   }
 }
 ```
 
-**关键指标说明**:
-1. **预期年化收益率 (expected_return)**: 基于历史数据预测的年化收益
-2. **波动率 (volatility)**: 年化标准差，衡量价格波动程度
-3. **夏普比率 (sharpe_ratio)**: 风险调整后收益（>1优秀, 0.5-1良好, <0.5一般）
-4. **最大回撤 (max_drawdown)**: 历史最大亏损幅度
-5. **VaR (95%)**: 95%置信度下的单日最大损失
-6. **CVaR (95%)**: 超过VaR的平均损失（尾部风险）
-7. **Beta**: 相对于基准的系统性风险（>1高于市场, <1低于市场）
-8. **Alpha**: 超额收益（相对CAPM模型）
+**Risk Level Classification**:
+| Score Range | Level | Description |
+|-------------|-------|-------------|
+| 0-30 | 低风险 | Conservative, suitable for risk-averse investors |
+| 30-50 | 中低风险 | Moderate-low, balanced risk-return |
+| 50-70 | 中风险 | Moderate, suitable for most investors |
+| 70-85 | 中高风险 | Moderate-high, requires risk tolerance |
+| 85-100 | 高风险 | Aggressive, suitable for risk-seekers |
+
+**Examples**:
+- Basic: `assess_stock_risk(symbol="600519")`
 
 ---
 
-### 2. assess_portfolio_risk - 评估投资组合风险
+### 2. assess_valuation_risk - 估值风险评估
 
-**功能**: 评估投资组合的整体风险，基于历史数据计算预期收益、波动率、夏普比率等
+**Purpose**: 评估估值风险，分析PE/PB是否过高。
 
-**调用方式**: `risk_assessment.assess_portfolio_risk(portfolio, days, benchmark)`
+**When to use**:
+- User asks "Is this stock overvalued?"
+- User wants to know PE/PB risk
+- Comparing valuation against industry average
 
-**参数**:
-- `portfolio` (必需): 投资组合描述，格式: `'代码1:权重1,代码2:权重2,...'`
-  - 示例: `'600519:0.4,000001:0.3,600036:0.3'`
-  - 权重和必须为 `1.0`
-- `days` (可选): 历史数据天数，默认 `252`
-- `benchmark` (可选): 基准指数代码，用于计算组合Beta
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| industry_pe_avg | number | No | null | 行业平均PE，用于对比 |
 
-**返回示例**:
+**Returns**:
 ```json
 {
   "success": true,
   "data": {
-    "portfolio": {
-      "holdings": [
-        {"symbol": "600519", "name": "贵州茅台", "weight": "40.00%"},
-        {"symbol": "000001", "name": "平安银行", "weight": "30.00%"},
-        {"symbol": "600036", "name": "招商银行", "weight": "30.00%"}
-      ]
-    },
-    "metrics": {
-      "expected_return": 0.1234,
-      "volatility": 0.2156,
-      "sharpe_ratio": 0.4321,
-      "max_drawdown": -0.1523,
-      "var_95": -0.0189,
-      "beta": 0.95
-    },
-    "risk_assessment": {
-      "level": "中低风险",
-      "score": 38.56
-    }
+    "symbol": "600519",
+    "pe": 28.74,
+    "pe_ttm": 27.5,
+    "pb": 8.56,
+    "risk_score": 25,
+    "risk_factors": ["PE超过30，估值略高"],
+    "assessment": "估值合理"
   }
 }
 ```
 
+**Examples**:
+- Basic: `assess_valuation_risk(symbol="600519")`
+- With industry comparison: `assess_valuation_risk(symbol="600519", industry_pe_avg=25.0)`
+
 ---
 
-### 3. generate_risk_report - 生成风险报告
+### 3. assess_financial_risk - 财务风险评估
 
-**功能**: 生成详细的风险评估报告，包括风险等级、投资建议、风险提示
+**Purpose**: 评估财务风险，分析资产负债率、现金流等。
 
-**调用方式**: `risk_assessment.generate_risk_report(symbol, days, is_portfolio)`
+**When to use**:
+- User asks about financial health risks
+- User wants to analyze debt levels
+- Checking solvency risks
 
-**参数**:
-- `symbol` (必需): 股票代码或投资组合描述
-- `days` (可选): 历史数据天数，默认 `252`
-- `is_portfolio` (可选): 是否为投资组合，默认 `False`
+**Parameters**:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| symbol | string | Yes | 股票代码 |
 
-**返回示例**:
+**Returns**:
 ```json
 {
   "success": true,
   "data": {
-    "title": "资产风险评估报告",
-    "risk_rating": {
-      "level": "中等风险",
-      "score": 45.23
-    },
-    "key_metrics": {
-      "预期年化收益率": "15.23%",
-      "波动率(年化)": "28.45%",
-      "夏普比率": "0.43",
-      "最大回撤": "-18.56%",
-      "95% VaR": "-2.34%"
-    },
-    "recommendations": [
-      "建议控制仓位，不宜重仓投资",
-      "最大回撤达18.6%，需要较强的心理承受能力"
+    "symbol": "600519",
+    "debt_to_assets": 0.25,
+    "current_ratio": 4.52,
+    "quick_ratio": 4.21,
+    "risk_score": 15,
+    "risk_factors": [],
+    "assessment": "财务状况良好"
+  }
+}
+```
+
+**Examples**:
+- Basic: `assess_financial_risk(symbol="600519")`
+
+---
+
+### 4. assess_volatility_risk - 波动率风险评估
+
+**Purpose**: 评估股价波动风险，分析历史波动率。
+
+**When to use**:
+- User asks about price volatility
+- User wants to know maximum drawdown
+- Analyzing price stability
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| period | string | No | 60d | 计算周期：20d(20日), 60d(60日), 120d(120日) |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "symbol": "600519",
+    "annual_volatility": 28.45,
+    "max_drawdown": 18.56,
+    "risk_score": 35,
+    "risk_factors": ["年化波动率超过30%"],
+    "assessment": "波动适中"
+  }
+}
+```
+
+**Examples**:
+- Default 60 days: `assess_volatility_risk(symbol="600519")`
+- 120 days: `assess_volatility_risk(symbol="600519", period="120d")`
+
+---
+
+### 5. check_risk_warnings - 风险预警检查
+
+**Purpose**: 检查股票的风险预警信号。
+
+**When to use**:
+- User wants risk alerts and warnings
+- Checking multiple risk factors at once
+- Getting high-level risk overview
+
+**Parameters**:
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| symbol | string | Yes | 股票代码 |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "symbol": "600519",
+    "warning_count": 2,
+    "warnings": [
+      {
+        "level": "medium",
+        "type": "估值风险",
+        "message": "PE(28.74)偏高"
+      },
+      {
+        "level": "medium",
+        "type": "财务风险",
+        "message": "资产负债率(25.34%)需关注"
+      }
     ],
-    "risk_warnings": [
-      "95%置信度下单日最大损失可能达2.34%",
-      "历史数据不代表未来表现，投资有风险"
-    ]
+    "has_critical_warning": false
   }
 }
 ```
 
----
-
-## 工作流指导
-
-### 典型分析流程
-
-#### 1. 单一股票风险评估
-```
-用户: "评估一下茅台的投资风险"
-
-步骤:
-1. 调用 risk_assessment.calculate_risk_metrics(symbol='600519', days=252)
-2. 分析关键指标: 波动率, 夏普比率, 最大回撤
-3. 判断风险等级并输出
-```
-
-#### 2. 投资组合风险分析
-```
-用户: "我想配置一个投资组合：茅台40%，平安银行30%，招商银行30%"
-
-步骤:
-1. 调用 risk_assessment.assess_portfolio_risk(portfolio='600519:0.4,000001:0.3,600036:0.3')
-2. 分析组合风险 vs 单一资产风险
-3. 评估分散效应
-```
-
-#### 3. 生成完整风险报告
-```
-用户: "给我一份茅台的完整风险报告"
-
-步骤:
-1. 调用 risk_assessment.generate_risk_report(symbol='600519')
-2. 格式化输出报告: 风险等级、关键指标、投资建议、风险提示
-```
+**Examples**:
+- Basic: `check_risk_warnings(symbol="600519")`
 
 ---
 
-## 注意事项
+## Common Workflows
 
-### 1. 数据要求
-- **最少天数**: 30个交易日（约1.5个月）
-- **推荐天数**: 252个交易日（1年）
-- **长期分析**: 504个交易日（2年）
-
-### 2. 投资组合格式
-- **格式**: `'代码1:权重1,代码2:权重2,...'`
-- **要求**: 权重和必须为 `1.0`（允许±0.01误差）
-
-### 3. 风险等级划分
+### Workflow 1: Quick Risk Check
 ```
-风险分数 (0-100):
-- 0-20: 低风险
-- 20-40: 中低风险
-- 40-60: 中等风险
-- 60-80: 中高风险
-- 80-100: 高风险
+User: "茅台风险如何？"
+
+→ assess_stock_risk(symbol="600519")
+   → Risk score: 45.2 (中等风险)
+   → Risk factors identified
+
+→ Response: "贵州茅台风险评级为中等(45.2分)，
+   主要风险因素：PE估值略高。建议仓位控制在合理范围。"
 ```
 
-### 4. 指标解读标准
-
-**夏普比率**: >1优秀, 0.5-1良好, 0-0.5一般, <0差
-**最大回撤**: <10%低, 10-20%中等, 20-30%较高, >30%极高
-**波动率**: <20%低波动, 20-40%中等波动, >40%高波动
-**Beta**: >1.2高系统性风险, 0.8-1.2与市场同步, <0.8低系统性风险
-
-### 5. 友好的输出格式
-示例:
+### Workflow 2: Comprehensive Risk Analysis
 ```
-【风险评估报告】贵州茅台 (600519)
+User: "全面评估一下比亚迪的风险"
 
-风险等级: 中等风险 (评分: 45.2)
+→ assess_stock_risk(symbol="002594")       // Overall assessment
+→ assess_valuation_risk(symbol="002594")   // Valuation focus
+→ assess_volatility_risk(symbol="002594")  // Volatility analysis
+→ check_risk_warnings(symbol="002594")     // Risk alerts
 
-【关键指标】
-- 预期年化收益: 15.23%
-- 年化波动率: 28.45%
-- 夏普比率: 0.43 (一般)
-- 最大回撤: -18.56%
-- 95% VaR: -2.34% (单日)
+→ Synthesize complete risk report
+```
 
-【投资建议】
-1. 建议控制仓位在20-30%
-2. 建议设置止损点在-15%附近
+### Workflow 3: Compare Risk Between Stocks
+```
+User: "茅台和宁德时代哪个风险更高？"
 
-【风险提示】
-- 历史数据不代表未来，投资需谨慎
+→ assess_stock_risk(symbol="600519")
+   → Risk score: 45.2
+
+→ assess_stock_risk(symbol="300750")
+   → Risk score: 62.5
+
+→ Compare and present:
+   "茅台风险评分45.2(中等)，宁德时代62.5(中高风险)。"
 ```
 
 ---
 
-**Skill 版本**: v1.0
-**最后更新**: 2026-03-08
+## Important Notes
+
+### 1. Risk Score Interpretation
+| Score Range | Level | Investment Suitability |
+|-------------|-------|------------------------|
+| 0-30 | 低风险 | Conservative investors |
+| 30-50 | 中低风险 | Balanced investors |
+| 50-70 | 中风险 | Moderate risk tolerance |
+| 70-85 | 中高风险 | Higher risk tolerance |
+| 85-100 | 高风险 | Risk-seeking investors |
+
+### 2. Valuation Risk Factors
+| PE Range | Risk Assessment |
+|----------|-----------------|
+| < 15 | Low risk, potentially undervalued |
+| 15-30 | Fair valuation |
+| 30-50 | High valuation risk |
+| > 50 | Very high valuation risk |
+
+### 3. Financial Risk Factors
+| Debt-to-Assets | Risk Assessment |
+|----------------|-----------------|
+| < 40% | Low financial risk |
+| 40-60% | Moderate risk |
+| 60-80% | High risk |
+| > 80% | Very high risk |
+
+### 4. Volatility Risk Factors
+| Annual Volatility | Risk Assessment |
+|-------------------|-----------------|
+| < 20% | Low volatility |
+| 20-30% | Moderate volatility |
+| 30-50% | High volatility |
+| > 50% | Very high volatility |
+
+### 5. Error Handling
+All tools return standardized response:
+```json
+{"success": true, "data": {...}}    // Success
+{"success": false, "error": "股票代码不能为空"}   // Missing symbol
+{"success": false, "error": "未找到估值数据"}   // Data not available
+```
+
+### 6. Best Practices
+- Use `assess_stock_risk` for quick overall assessment
+- Use specific tools (`assess_valuation_risk`, `assess_financial_risk`, `assess_volatility_risk`) for detailed analysis
+- Use `check_risk_warnings` for quick alerts
+- Always check `success` field before using data
+- Combine with other skills for comprehensive analysis
+
+---
+
+**Skill Version**: v1.0  
+**Last Updated**: 2026-03-20  
+**Compatible with**: AgentFlow v1.0, MCP Protocol

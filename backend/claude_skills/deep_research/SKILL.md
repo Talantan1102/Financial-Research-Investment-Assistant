@@ -1,296 +1,329 @@
 ---
 name: deep_research
-description: 深度研究服务（分步执行版），提供6个独立工具对应5个Agent，支持LLM完全控制研究流程，并集成行业分析能力
+description: |
+  深度研报生成，综合多维度数据生成研究报告。
+  
+  Use this skill when:
+  - User asks for comprehensive research report on a stock
+  - User wants industry analysis report
+  - User needs comparison report between multiple stocks
+  - User wants in-depth analysis combining market, financial, and valuation data
+  
+  Data Source: Tushare Pro API
 version: "1.0"
-tool_count: 7
+tool_count: 3
 ---
 
 # DeepResearch Skill
 
-## 概述
+## Overview
 
-提供基于多智能体协作的深度研究能力，通过5个专业Agent协同工作，生成高质量的研究报告。
+提供深度研究报告生成能力，综合股票基础信息、行情数据、财务指标、行业数据等多维度信息，生成专业的研究报告。
 
-**新特性**: 深度集成 `sector_analysis` 行业分析能力，支持行业对比、估值分析、龙头股识别等。
-
-**架构**: 5-Agent协作系统（Architect → Scout → Wizard → Writer → Critic）
-**数据源**: 网络搜索 + 本地知识库（可选）+ 金融数据API
-**输出**: 结构化研究报告
-
----
-
-## 多智能体系统
-
-### Agent协作流程
-
-```
-用户提问 → Architect(规划大纲) → Scout(搜索收集) → Wizard(数据分析) → Writer(撰写报告) → Critic(质量评审) → 最终报告
-```
-
-### Agent角色说明
-
-1. **Architect（架构师）**: 分析研究问题，规划研究大纲和子问题
-2. **Scout（侦探）**: 根据大纲搜索信息，收集事实和数据
-   - 网络搜索（博查API）
-   - 本地知识库
-   - **金融数据**: 股票行情、财务报表、行业数据
-   - **行业分析**: 行业对比、估值分析、龙头股
-3. **Wizard（极客）**: 数据分析、趋势识别、可视化建议
-4. **Writer（笔杆）**: 基于收集的信息撰写结构化markdown报告
-5. **Critic（评论家）**: 评审报告质量，输出评分和改进建议
+**Data Source**: Tushare Pro API  
+**Coverage**: A-shares (Shanghai, Shenzhen)  
+**Report Types**: Stock research, industry analysis, comparison reports  
+**Total Tools**: 3
 
 ---
 
-## 可用工具
+## Available Tools
 
-### 1. plan - 规划研究大纲
+### 1. generate_stock_report - 生成个股深度研报
 
-**功能**: 【步骤1】Architect Agent 分析问题，生成结构化研究计划
+**Purpose**: 生成个股深度研究报告，综合财务、估值、行业等多维度数据。
 
-**调用方式**: `deep_research.plan(query, session_id)`
+**When to use**:
+- User asks "分析一下茅台"
+- User wants comprehensive stock research report
+- Need valuation, financial, and market data synthesis
 
-**返回**: session_id, sections[], hypotheses[]
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| report_type | string | No | comprehensive | 报告类型：comprehensive(综合), valuation(估值), financial(财务) |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "symbol": "600519",
+    "report_type": "comprehensive",
+    "generated_at": "2026-03-20",
+    "sections": {
+      "company_overview": {
+        "name": "贵州茅台",
+        "fullname": "贵州茅台酒股份有限公司",
+        "industry": "白酒",
+        "area": "贵州",
+        "list_date": "20010827",
+        "introduction": "公司是国内白酒行业的龙头企业..."
+      },
+      "valuation": {
+        "pe": 28.74,
+        "pe_ttm": 27.5,
+        "pb": 8.56,
+        "ps": 12.34,
+        "total_mv": 2325000000000,
+        "assessment": "合理"
+      },
+      "financial": {
+        "roe": 32.58,
+        "roa": 22.45,
+        "gross_margin": 91.23,
+        "debt_to_assets": 25.34,
+        "trend_roe": [32.58, 31.2, 30.5, 29.8]
+      },
+      "market": {
+        "current_price": "1850.50",
+        "change_percent": "1.39",
+        "volume": "125000"
+      }
+    }
+  }
+}
+```
+
+**Examples**:
+- Comprehensive report: `generate_stock_report(symbol="600519")`
+- Valuation focus: `generate_stock_report(symbol="600519", report_type="valuation")`
+- Financial focus: `generate_stock_report(symbol="000858", report_type="financial")`
 
 ---
 
-### 2. search - 搜索信息
+### 2. generate_industry_report - 生成行业深度研报
 
-**功能**: 【步骤2】Scout Agent 搜索网络/知识库/金融数据
+**Purpose**: 生成行业深度研究报告。
 
-**调用方式**: `deep_research.search(session_id, section_id, search_web, search_local)`
+**When to use**:
+- User asks "分析一下白酒行业"
+- User wants industry investment research
+- Need industry leaders and valuation comparison
 
-**数据源**:
-- 网络搜索（博查API）
-- 本地知识库
-- **股票数据**: market_data 工具
-- **行业数据**: sector_analysis 工具
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| industry | string | Yes | - | 行业名称 (e.g., '白酒', '银行') |
+| focus | string | No | overview | 分析重点：overview(全景), leaders(龙头), valuation(估值), trend(趋势) |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "industry": "白酒",
+    "focus": "overview",
+    "generated_at": "2026-03-20",
+    "sections": {
+      "leaders": {
+        "top_companies": [
+          {"ts_code": "600519.SH", "name": "贵州茅台"},
+          {"ts_code": "000858.SZ", "name": "五粮液"}
+        ],
+        "leader_count": 18
+      },
+      "valuation": {
+        "industry": "白酒",
+        "pe_ttm": 35.8,
+        "pb": 8.5,
+        "ps": 12.3,
+        "stock_count": 18
+      },
+      "performance": {
+        "industry": "白酒",
+        "avg_change": -1.2,
+        "rank": 45
+      }
+    }
+  }
+}
+```
+
+**Examples**:
+- Industry overview: `generate_industry_report(industry="白酒")`
+- Focus on leaders: `generate_industry_report(industry="银行", focus="leaders")`
+- Valuation analysis: `generate_industry_report(industry="半导体", focus="valuation")`
 
 ---
 
-### 3. analyze - 分析数据
+### 3. generate_comparison_report - 生成对比分析报告
 
-**功能**: 【步骤3】Wizard Agent 深度分析，生成洞察
+**Purpose**: 生成股票对比分析报告。
 
-**调用方式**: `deep_research.analyze(session_id, section_id)`
+**When to use**:
+- User asks "茅台和五粮液哪个更好？"
+- User wants to compare multiple stocks
+- Need side-by-side valuation and profitability analysis
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbols | array | Yes | - | 股票代码列表，如['600519', '000858'] |
+| dimensions | array | No | null | 对比维度：valuation(估值), profitability(盈利), growth(成长), risk(风险) |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "symbols": ["600519", "000858"],
+    "dimensions": ["valuation", "profitability", "risk"],
+    "generated_at": "2026-03-20",
+    "data": {
+      "600519": {
+        "name": "贵州茅台",
+        "industry": "白酒",
+        "valuation": {
+          "pe": 28.74,
+          "pb": 8.56,
+          "total_mv": 2325000000000
+        },
+        "profitability": {
+          "roe": 32.58,
+          "gross_margin": 91.23,
+          "net_margin": 53.56
+        }
+      },
+      "000858": {
+        "name": "五粮液",
+        "industry": "白酒",
+        "valuation": {
+          "pe": 22.5,
+          "pb": 6.2,
+          "total_mv": 850000000000
+        },
+        "profitability": {
+          "roe": 25.8,
+          "gross_margin": 75.42,
+          "net_margin": 38.5
+        }
+      }
+    },
+    "summary": {
+      "lowest_pe": ["000858", 22.5],
+      "highest_roe": ["600519", 32.58]
+    }
+  }
+}
+```
+
+**Examples**:
+- Two stocks: `generate_comparison_report(symbols=["600519", "000858"])`
+- With dimensions: `generate_comparison_report(symbols=["600519", "000858", "000568"], dimensions=["valuation", "profitability"])`
+- Multiple stocks: `generate_comparison_report(symbols=["300750", "002594", "601012"])`
 
 ---
 
-### 4. write - 撰写报告
+## Common Workflows
 
-**功能**: 【步骤4】Writer Agent 撰写完整报告
-
-**调用方式**: `deep_research.write(session_id, section_id)`
-
----
-
-### 5. review - 质量评审
-
-**功能**: 【步骤5】Critic Agent 评审报告质量
-
-**调用方式**: `deep_research.review(session_id)`
-
-**返回**: score, approved, strengths[], weaknesses[], suggestions[]
-
----
-
-### 6. revise - 修订改进
-
-**功能**: 【步骤6】Writer Agent 根据反馈修订报告
-
-**调用方式**: `deep_research.revise(session_id)`
-
----
-
-### 7. get_state - 获取研究状态
-
-**功能**: 查看当前进度、已完成步骤、中间结果
-
-**调用方式**: `deep_research.get_state(session_id)`
-
----
-
-## 行业分析集成 ⭐
-
-### 在研究中使用行业分析
-
-Deep Research 现已深度集成 `sector_analysis` 行业分析能力。
-
-#### 研究步骤中的行业分析
-
-**Step 1: 规划阶段 (plan)**
+### Workflow 1: Single Stock Research
 ```
-Architect 识别研究涉及的行业 → 自动规划行业分析章节
+User: "深度分析一下贵州茅台"
+
+→ generate_stock_report(symbol="600519", report_type="comprehensive")
+   → Get company overview, valuation, financial, market data
+
+→ Response: "贵州茅台深度分析报告
+   【公司概况】国内白酒行业龙头...
+   【估值分析】当前PE 28.74倍，处于合理区间...
+   【财务状况】ROE 32.58%，盈利能力优秀..."
 ```
 
-**Step 2: 搜索阶段 (search)**
+### Workflow 2: Industry Analysis
 ```
-Scout 根据章节需要调用 sector_analysis 工具:
-- 行业财务对比: compare_industry_metrics
-- 行业估值对比: compare_industry_valuation  
-- 行业涨跌幅: get_industry_performance
-- 行业龙头: get_industry_leaders
-```
+User: "分析一下银行行业的投资机会"
 
-**Step 3: 分析阶段 (analyze)**
-```
-Wizard 基于行业数据进行交叉分析:
-- 行业排名 vs 个股表现
-- 估值水平 vs 财务质量
-- 资金流向 vs 行业趋势
+→ generate_industry_report(industry="银行", focus="overview")
+   → Get industry leaders, valuation, performance
+
+→ Response: "银行行业分析报告
+   【行业概况】A股上市银行42家...
+   【估值水平】行业平均PE 5.2倍，处于历史低位...
+   【龙头股】招商银行、平安银行..."
 ```
 
-#### 典型行业研究场景
+### Workflow 3: Stock Comparison
+```
+User: "对比一下茅台和五粮液"
 
-**场景1: 寻找被低估的优质行业**
-```
-研究流程:
-1. plan: "寻找当前被低估的优质行业"
-2. search: 调用 compare_industry_metrics(metric="roe")
-   → 发现白酒、医药ROE最高
-3. search: 调用 compare_industry_valuation
-   → 发现银行PE最低(5倍)
-4. analyze: 对比分析盈利能力 vs 估值水平
-5. write: 输出"银行行业被低估"结论
-```
+→ generate_comparison_report(symbols=["600519", "000858"], dimensions=["valuation", "profitability"])
+   → Side-by-side comparison
 
-**场景2: 行业龙头股研究**
-```
-研究流程:
-1. plan: "白酒行业龙头投资价值分析"
-2. search: 调用 get_industry_leaders(industry="白酒", by="market_cap")
-   → 茅台、五粮液、泸州老窖
-3. search: 调用 market_data.get_daily_basic(symbol="600519")
-   → 茅台PE/PB数据
-4. search: 调用 financial_analysis.get_fina_indicator(symbol="600519")
-   → 茅台财务指标
-5. analyze: 综合评估龙头地位、估值、财务质量
-6. write: 输出茅台龙头投资价值报告
+→ Response: "茅台 vs 五粮液 对比分析
+   【估值】茅台PE 28.74倍 vs 五粮液22.5倍
+   【盈利】茅台ROE 32.58% vs 五粮液25.8%
+   【结论】茅台盈利能力更强，五粮液估值更低..."
 ```
 
-**场景3: 热点行业追踪**
+### Workflow 4: Portfolio Research
 ```
-研究流程:
-1. plan: "当前市场热点行业分析"
-2. search: 调用 get_industry_performance(period="5d")
-   → 发现半导体、AI涨幅最大
-3. search: 调用 get_concept_stocks(concept_name="人工智能")
-   → 获取AI概念股列表
-4. search: 调用 compare_industry_valuation
-   → 评估AI行业当前估值
-5. analyze: 判断是趋势还是泡沫
-6. write: 输出热点行业投资提示
-```
+User: "我想投资新能源赛道，分析一下"
 
----
+→ Step 1: generate_industry_report(industry="新能源", focus="overview")
+   → Understand industry landscape
 
-## 完整研究示例
+→ Step 2: generate_comparison_report(symbols=["300750", "002594", "601012"])
+   → Compare top stocks
 
-### 示例: 银行行业投资价值深度研究
+→ Step 3: For selected stocks, call generate_stock_report()
+   → Deep dive on finalists
 
-```python
-# Step 1: 规划
-plan_result = deep_research.plan(query="银行行业投资价值深度分析")
-session_id = plan_result["data"]["session_id"]
-# 返回大纲: ["行业概况", "财务对比", "估值分析", "龙头股", "投资建议"]
-
-# Step 2: 搜索 - 行业财务对比
-search_result = deep_research.search(session_id=session_id, section_id="财务对比")
-# Scout 自动调用: sector_analysis.compare_industry_metrics(industries=["银行", "白酒", "保险"], metric="roe")
-
-# Step 2: 搜索 - 估值对比  
-search_result = deep_research.search(session_id=session_id, section_id="估值分析")
-# Scout 自动调用: sector_analysis.compare_industry_valuation(industries=["银行", "保险"])
-
-# Step 2: 搜索 - 龙头股
-search_result = deep_research.search(session_id=session_id, section_id="龙头股")
-# Scout 自动调用: sector_analysis.get_industry_leaders(industry="银行", by="market_cap")
-
-# Step 3: 分析
-analyze_result = deep_research.analyze(session_id=session_id)
-# Wizard 交叉分析: ROE vs PE → 发现银行被低估
-
-# Step 4: 撰写
-write_result = deep_research.write(session_id=session_id)
-# Writer 生成完整报告
-
-# Step 5: 评审
-review_result = deep_research.review(session_id=session_id)
-# Critic 评分和建议
-
-# Step 6: 修订 (如有需要)
-revise_result = deep_research.revise(session_id=session_id)
-```
-
----
-
-## 工具调用指南
-
-### Scout Agent 自动调用的工具
-
-Scout 在搜索阶段会根据研究内容自动选择工具:
-
-| 研究内容 | 自动调用的工具 |
-|---------|--------------|
-| 个股数据 | market_data.get_quote, market_data.get_history |
-| 财务分析 | financial_analysis.get_financial_report |
-| 行业对比 | sector_analysis.compare_industry_metrics |
-| 行业估值 | sector_analysis.compare_industry_valuation |
-| 行业龙头 | sector_analysis.get_industry_leaders |
-| 概念板块 | sector_analysis.get_concept_stocks |
-| 市场热点 | sector_analysis.get_industry_performance |
-| 网络信息 | web_research.web_search |
-
----
-
-## 注意事项
-
-### 1. 查询质量建议
-**好的查询**:
-- "中国AI芯片市场规模、竞争格局和发展趋势分析"
-- "银行 vs 保险，哪个行业现在更值得投资？"
-- "白酒行业龙头股估值对比分析"
-
-### 2. 质量评分解读
-```
-90-100: 优秀 - 完整、准确、逻辑清晰
-80-90:  良好 - 基本完整，逻辑通顺
-70-80:  合格 - 覆盖主要内容
-60-70:  一般 - 内容不够完整
-<60:    需改进
-```
-
-### 3. 行业分析数据依赖
-行业分析工具需要:
-- Tushare API Token（已配置）
-- 足够的API积分（财务指标需要800+积分）
-
-### 4. 友好的输出格式
-```
-【深度研究报告】银行行业投资价值分析
-
-研究摘要: 银行行业当前PE仅5倍，处于历史低位...
-
-一、行业财务对比
-┌─────────┬────────┬──────────┐
-│ 行业    │ ROE(%) │ 股票数   │
-├─────────┼────────┼──────────┤
-│ 白酒    │ 25.5   │ 18       │
-│ 医药    │ 18.2   │ 156      │
-│ 银行    │ 12.1   │ 42       │
-└─────────┴────────┴──────────┘
-
-二、估值对比
-银行PE(5.2x) < 保险(12.5x) < 医药(28.5x) < 白酒(35.8x)
-
-三、龙头股
-1. 招商银行 - 市值第一(8500亿)
-2. 平安银行 - 增速最快(15%)
-...
-
-质量评分: 88.5 | 数据点: 45 | 参考来源: 12
+→ Response: Comprehensive investment research report
 ```
 
 ---
 
-**Skill 版本**: v1.0
-**最后更新**: 2026-03-15 (集成行业分析)
+## Important Notes
+
+### 1. Report Types
+| Type | Description | Best For |
+|------|-------------|----------|
+| comprehensive | 综合报告 | Complete overview |
+| valuation | 估值分析 | Focus on PE/PB/PS |
+| financial | 财务分析 | Focus on ROE, margins |
+
+### 2. Focus Options
+| Focus | Description |
+|-------|-------------|
+| overview | 全景分析 | Complete industry picture |
+| leaders | 龙头股 | Focus on top companies |
+| valuation | 估值分析 | Industry valuation metrics |
+| trend | 趋势分析 | Performance trends |
+
+### 3. Comparison Dimensions
+| Dimension | Metrics Included |
+|-----------|------------------|
+| valuation | PE, PB, PS, market cap |
+| profitability | ROE, gross margin, net margin |
+| growth | Revenue growth, profit growth |
+| risk | Volatility, debt ratio |
+
+### 4. Data Completeness
+- Reports may have null values if data is unavailable
+- Some sections may be omitted if no data exists
+- Financial data based on latest quarterly/annual reports
+- Market data reflects most recent trading day
+
+### 5. Error Handling
+All tools return standardized response:
+```json
+{"success": true, "data": {...}}    // Success
+{"success": false, "error": "股票代码不能为空"}   // Missing symbol
+{"success": false, "error": "行业名称不能为空"}   // Missing industry
+{"success": false, "error": "请提供至少2只股票进行对比"}   // Need 2+ stocks for comparison
+```
+
+### 6. Best Practices
+- Use `generate_stock_report` for comprehensive single-stock analysis
+- Use `generate_industry_report` to understand sector landscape
+- Use `generate_comparison_report` for investment decision between options
+- Combine with other skills (market_data, financial_analysis) for additional details
+- Always check `success` field before using data
+
+---
+
+**Skill Version**: v1.0  
+**Last Updated**: 2026-03-20  
+**Compatible with**: AgentFlow v1.0, MCP Protocol

@@ -1,221 +1,363 @@
 ---
 name: sector_analysis
-description: A股行业与概念板块分析，支持行业分类、概念板块、成分股查询、行业深度分析
+description: |
+  行业与概念板块分析，支持行业对比、龙头识别、估值对比。
+  
+  Use this skill when:
+  - User asks about industry analysis or sector performance
+  - User wants to compare different industries (e.g., banking vs healthcare)
+  - User asks about concept stocks or thematic investing (e.g., AI, EV, chips)
+  - User wants to identify leading stocks in an industry
+  - User asks about industry valuation (PE, PB comparison)
+  - User wants to track market hotspots or sector rotation
+  
+  Data Source: Tushare Pro API
 version: "1.0"
 tool_count: 7
 ---
 
 # SectorAnalysis Skill
 
-## 概述
+## Overview
 
-提供 A 股市场行业分类和概念板块的深度分析能力，包括：
-- 基础查询：行业列表、概念板块、成分股
-- 深度分析：行业财务对比、估值对比、涨跌幅排名、龙头股识别
+提供 A 股市场行业分类和概念板块的深度分析能力，包括行业列表、概念板块、成分股查询、行业对比、龙头股识别等。
 
-**适用场景**:
-- 热点概念追踪（如AI、新能源、芯片等）
-- 行业轮动分析
-- 行业估值比较（找低估行业）
-- 龙头股筛选
+**Data Source**: Tushare Pro API  
+**Coverage**: A-shares industries and concept sectors  
+**Update Frequency**: Daily after market close  
+**Total Tools**: 7
 
 ---
 
-## 基础工具
+## Available Tools
 
 ### 1. get_industry_list - 获取行业列表
 
-**功能**: 获取A股行业分类列表
+**Purpose**: 获取所有行业分类列表。
 
-**调用方式**: `sector_analysis.get_industry_list()`
+**When to use**:
+- User asks "A股有哪些行业？"
+- User wants to see all industry categories
+- Starting a research project
 
----
+**Parameters**: None (no parameters required)
 
-### 2. get_concept_list - 获取概念列表
-
-**功能**: 获取A股概念板块列表
-
-**调用方式**: `sector_analysis.get_concept_list()`
-
----
-
-### 3. get_concept_stocks - 获取概念成分股
-
-**功能**: 获取指定概念板块的成分股列表
-
-**调用方式**: 
-- `sector_analysis.get_concept_stocks(concept_code="TS0")`
-- `sector_analysis.get_concept_stocks(concept_name="国产芯片")`
-
----
-
-## 深度分析工具 ⭐
-
-### 4. compare_industry_metrics - 行业财务指标对比
-
-**功能**: 对比不同行业的财务指标（ROE、毛利率、净利率等），识别盈利能力强的行业
-
-**调用方式**: 
-```python
-sector_analysis.compare_industry_metrics(
-    industries=["白酒", "银行", "医药", "新能源"],
-    metric="roe"  # 可选: roe, gross_margin, net_margin, debt_ratio
-)
-```
-
-**返回示例**:
+**Returns**:
 ```json
 {
+  "success": true,
   "data": [
-    {"industry": "白酒", "avg_value": 25.5, "stock_count": 18},
-    {"industry": "医药", "avg_value": 18.2, "stock_count": 156},
-    {"industry": "新能源", "avg_value": 15.3, "stock_count": 89},
-    {"industry": "银行", "avg_value": 12.1, "stock_count": 42}
+    {"code": "L72", "name": "白酒"},
+    {"code": "J66", "name": "银行"},
+    {"code": "C27", "name": "医药制造"}
+  ],
+  "meta": {"count": 109}
+}
+```
+
+**Examples**:
+- Get all industries: `get_industry_list()`
+
+---
+
+### 2. get_industry_performance - 获取行业表现
+
+**Purpose**: 获取各行业涨跌幅排名。
+
+**When to use**:
+- User asks "今天哪个行业表现最好？"
+- User wants to track recent sector performance
+- Identifying market trends and capital flows
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| period | string | No | 1d | 周期：1d(日), 5d(周), 20d(月) |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": [
+    {"industry": "半导体", "avg_change": 5.2, "stock_count": 67, "rank": 1},
+    {"industry": "人工智能", "avg_change": 3.8, "stock_count": 45, "rank": 2},
+    {"industry": "白酒", "avg_change": -1.2, "stock_count": 18, "rank": 45}
+  ],
+  "meta": {"period": "1d", "date": "20260308"}
+}
+```
+
+**Examples**:
+- Daily: `get_industry_performance(period="1d")`
+- Weekly: `get_industry_performance(period="5d")`
+- Monthly: `get_industry_performance(period="20d")`
+
+---
+
+### 3. get_industry_leaders - 获取行业龙头股
+
+**Purpose**: 获取指定行业的龙头股。
+
+**When to use**:
+- User asks "白酒行业龙头股有哪些？"
+- User wants to find the biggest players in a sector
+- Building a portfolio of industry leaders
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| industry | string | Yes | - | 行业名称，如'白酒'、'银行' |
+| by | string | No | market_cap | 排序依据：market_cap(市值), revenue(营收), profit(利润) |
+| limit | integer | No | 10 | 返回数量 |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": [
+    {"ts_code": "600519.SH", "name": "贵州茅台", "total_mv": 2325000000000, "rank": 1},
+    {"ts_code": "000858.SZ", "name": "五粮液", "total_mv": 850000000000, "rank": 2},
+    {"ts_code": "000568.SZ", "name": "泸州老窖", "total_mv": 420000000000, "rank": 3}
+  ],
+  "meta": {"industry": "白酒", "sort_by": "market_cap", "count": 3}
+}
+```
+
+**Examples**:
+- By market cap: `get_industry_leaders(industry="白酒", by="market_cap")`
+- By profit: `get_industry_leaders(industry="银行", by="profit")`
+- Top 5: `get_industry_leaders(industry="半导体", limit=5)`
+
+---
+
+### 4. compare_industry_metrics - 对比行业财务指标
+
+**Purpose**: 对比不同行业的财务指标。
+
+**When to use**:
+- User asks "银行和保险哪个ROE更高？"
+- User wants to find industries with strongest profitability
+- Comparing operational efficiency
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| industries | array | No | null | 行业列表，如['白酒', '银行', '医药']，null对比所有行业 |
+| metric | string | No | roe | 对比指标：roe, gross_margin, net_margin, debt_ratio |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": [
+    {"industry": "白酒", "avg_value": 25.5, "stock_count": 18, "rank": 1},
+    {"industry": "医药", "avg_value": 18.2, "stock_count": 156, "rank": 2},
+    {"industry": "新能源", "avg_value": 15.3, "stock_count": 89, "rank": 3},
+    {"industry": "银行", "avg_value": 12.1, "stock_count": 42, "rank": 4}
   ],
   "meta": {"metric": "roe", "metric_name": "净资产收益率"}
 }
 ```
 
-**应用场景**:
-- "银行 vs 白酒，哪个行业ROE更高？"
-- "哪些行业的盈利能力最强？"
+**Examples**:
+- Compare ROE: `compare_industry_metrics(industries=["白酒", "银行", "医药"], metric="roe")`
+- Compare margins: `compare_industry_metrics(metric="gross_margin")`
+- All industries: `compare_industry_metrics()`
 
 ---
 
-### 5. compare_industry_valuation - 行业估值对比
+### 5. compare_industry_valuation - 对比行业估值
 
-**功能**: 对比不同行业的估值水平（PE、PB、PS），识别高估/低估行业
+**Purpose**: 对比不同行业的估值水平(PE、PB、PS)。
 
-**调用方式**: 
-```python
-sector_analysis.compare_industry_valuation(
-    industries=["白酒", "银行", "医药", "半导体"]
-)
-```
+**When to use**:
+- User asks "哪些行业目前估值较低？"
+- User wants to know if a sector is expensive
+- Comparing valuation multiples
 
-**返回示例**:
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| industries | array | No | null | 行业列表，null对比所有行业 |
+
+**Returns**:
 ```json
 {
+  "success": true,
   "data": [
-    {"industry": "银行", "pe_ttm": 5.2, "pb": 0.8, "stock_count": 42},
-    {"industry": "医药", "pe_ttm": 28.5, "pb": 3.2, "stock_count": 156},
-    {"industry": "白酒", "pe_ttm": 35.8, "pb": 8.5, "stock_count": 18},
-    {"industry": "半导体", "pe_ttm": 68.2, "pb": 5.8, "stock_count": 67}
-  ]
-}
-```
-
-**应用场景**:
-- "当前哪些行业估值处于低位？"
-- "半导体行业现在贵不贵？"
-
----
-
-### 6. get_industry_performance - 行业涨跌幅排名
-
-**功能**: 获取行业涨跌幅排名，追踪市场热点和冷门行业
-
-**调用方式**: 
-```python
-sector_analysis.get_industry_performance(period="1d")  # 可选: 1d, 5d, 20d
-```
-
-**返回示例**:
-```json
-{
-  "data": [
-    {"industry": "半导体", "avg_change": 5.2, "stock_count": 67},
-    {"industry": "人工智能", "avg_change": 3.8, "stock_count": 45},
-    {"industry": "白酒", "avg_change": -1.2, "stock_count": 18},
-    {"industry": "银行", "avg_change": -0.5, "stock_count": 42}
-  ]
-}
-```
-
-**应用场景**:
-- "今天哪个行业涨得最好？"
-- "最近一周资金在追捧哪些行业？"
-
----
-
-### 7. get_industry_leaders - 行业龙头股
-
-**功能**: 获取指定行业的龙头股（按市值、营收、利润排序）
-
-**调用方式**: 
-```python
-sector_analysis.get_industry_leaders(
-    industry="白酒",
-    by="market_cap"  # 可选: market_cap, revenue, profit
-)
-```
-
-**返回示例**:
-```json
-{
-  "data": [
-    {"ts_code": "600519.SH", "name": "贵州茅台", "total_mv": 2325000000000},
-    {"ts_code": "000858.SZ", "name": "五粮液", "total_mv": 850000000000},
-    {"ts_code": "000568.SZ", "name": "泸州老窖", "total_mv": 420000000000}
+    {"industry": "银行", "pe_ttm": 5.2, "pb": 0.8, "ps": 2.1, "stock_count": 42},
+    {"industry": "医药", "pe_ttm": 28.5, "pb": 3.2, "ps": 4.5, "stock_count": 156},
+    {"industry": "白酒", "pe_ttm": 35.8, "pb": 8.5, "ps": 12.3, "stock_count": 18}
   ],
-  "meta": {"industry": "白酒", "sort_by": "market_cap"}
+  "meta": {"count": 3, "date": "20260308"}
 }
 ```
 
-**应用场景**:
-- "白酒行业的龙头是谁？"
-- "半导体行业里谁增长最快？"
+**Examples**:
+- Specific industries: `compare_industry_valuation(industries=["银行", "保险", "白酒"])`
+- All industries: `compare_industry_valuation()`
 
 ---
 
-## 深度研究集成建议
+### 6. get_concept_list - 获取概念列表
 
-### 在 Deep Research 中使用行业分析
+**Purpose**: 获取所有概念分类列表。
 
-**研究步骤建议**:
-1. **选题阶段**: 使用 `get_concept_list` 发现热点概念
-2. **行业筛选**: 使用 `compare_industry_metrics` 筛选优质行业
-3. **估值判断**: 使用 `compare_industry_valuation` 判断估值水平
-4. **趋势确认**: 使用 `get_industry_performance` 确认资金趋势
-5. **个股选择**: 使用 `get_industry_leaders` 选择行业龙头
+**When to use**:
+- User asks about concept sectors
+- User wants to find hot themes like "AI", "new energy"
+- Researching market hotspots
 
-**示例研究流程**:
-```
-研究主题: 寻找当前被低估的优质行业
+**Parameters**: None (no parameters required)
 
-Step 1: compare_industry_metrics(metric="roe") 
-        → 发现白酒、医药ROE最高
-
-Step 2: compare_industry_valuation(industries=["白酒", "医药", "银行"])
-        → 发现银行PE最低(5倍)，白酒PE最高(35倍)
-
-Step 3: get_industry_performance(period="20d")
-        → 发现银行最近涨幅落后，可能被低估
-
-Step 4: get_industry_leaders(industry="银行", by="market_cap")
-        → 选择招商银行、平安银行等龙头
-
-结论: 银行行业当前估值低(PE 5倍)，股息率高，适合价值投资
+**Returns**:
+```json
+{
+  "success": true,
+  "data": [
+    {"code": "TS0", "name": "国产芯片"},
+    {"code": "TS1", "name": "人工智能"},
+    {"code": "TS2", "name": "新能源汽车"}
+  ],
+  "meta": {"count": 385}
+}
 ```
 
----
-
-## 使用场景
-
-| 场景 | 推荐工具 | 示例 |
-|------|---------|------|
-| 发现热点概念 | get_concept_list | 无参数 |
-| 查询概念股 | get_concept_stocks | concept_name: "人工智能" |
-| 对比行业盈利 | compare_industry_metrics | metric: "roe" |
-| 找低估行业 | compare_industry_valuation | industries: ["银行", "保险"] |
-| 追踪市场热点 | get_industry_performance | period: "5d" |
-| 选行业龙头 | get_industry_leaders | industry: "白酒", by: "profit" |
+**Examples**:
+- Get all concepts: `get_concept_list()`
 
 ---
 
-## 注意事项
+### 7. get_concept_stocks - 获取概念成分股
 
-1. **数据更新**: 财务指标数据基于最新财报，估值数据基于最近交易日
-2. **行业分类**: 行业分类基于Tushare标准，可能与实际业务有差异
-3. **龙头股识别**: 默认按市值排序，也可按营收、利润排序
-4. **对比范围**: 不指定industries时对比所有行业，数据量较大可能较慢
+**Purpose**: 获取指定概念的成分股。
+
+**When to use**:
+- User asks "人工智能板块有哪些股票？"
+- User wants to find all stocks related to a theme
+- Building a thematic portfolio
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| concept_code | string | No | null | 概念代码 |
+| concept_name | string | No | null | 概念名称，如'人工智能'、'新能源汽车' |
+
+**Note**: Provide either `concept_code` or `concept_name`, not both.
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": [
+    {"ts_code": "603986.SH", "name": "兆易创新"},
+    {"ts_code": "688981.SH", "name": "中芯国际"}
+  ],
+  "meta": {"concept": "国产芯片", "code": "TS0", "count": 67}
+}
+```
+
+**Examples**:
+- By code: `get_concept_stocks(concept_code="TS0")`
+- By name: `get_concept_stocks(concept_name="国产芯片")`
+- By name: `get_concept_stocks(concept_name="人工智能")`
+
+---
+
+## Common Workflows
+
+### Workflow 1: Find Undervalued Quality Industries
+```
+User: "哪些行业目前估值较低？"
+
+→ Step 1: compare_industry_metrics(metric="roe")
+   → Identify industries with highest ROE
+
+→ Step 2: compare_industry_valuation(industries=["白酒", "医药", "银行"])
+   → Compare PE/PB ratios
+
+→ Conclusion: "银行PE 5.2倍（最低），白酒PE 35.8倍（最高）"
+```
+
+### Workflow 2: Track Market Hotspots
+```
+User: "最近市场热点是什么？"
+
+→ get_industry_performance(period="5d")
+   → Find: 半导体 +8.5%, 人工智能 +6.2%
+
+→ get_concept_stocks(concept_name="半导体")
+   → Get constituent stocks
+
+→ Response: Report on trending sectors
+```
+
+### Workflow 3: Industry Comparison Analysis
+```
+User: "对比银行和保险行业"
+
+→ Step 1: compare_industry_metrics(industries=["银行", "保险"], metric="roe")
+→ Step 2: compare_industry_valuation(industries=["银行", "保险"])
+→ Step 3: get_industry_leaders(industry="银行")
+→ Step 4: get_industry_leaders(industry="保险")
+
+→ Synthesize comparison
+```
+
+### Workflow 4: Concept Stock Research
+```
+User: "人工智能板块有哪些股票？"
+
+→ get_concept_list()
+   → Find concept code
+
+→ get_concept_stocks(concept_name="人工智能")
+   → Get full list
+
+→ Response: List AI concept stocks
+```
+
+---
+
+## Important Notes
+
+### 1. Metric Definitions
+| Metric | Full Name | Description |
+|--------|-----------|-------------|
+| ROE | 净资产收益率 | Return on Equity |
+| Gross Margin | 毛利率 | (Revenue - COGS) / Revenue |
+| Net Margin | 净利率 | Net Income / Revenue |
+| PE | 市盈率 | Price / Earnings |
+| PB | 市净率 | Price / Book Value |
+
+### 2. Valuation Interpretation
+- **PE < 10**: Typically undervalued (e.g., banking)
+- **PE 10-25**: Fair valuation
+- **PE 25-40**: Premium valuation
+- **PE > 40**: Expensive valuation
+
+### 3. Sort Options for Leaders
+| Sort By | Description |
+|---------|-------------|
+| market_cap | 市值 |
+| revenue | 营收 |
+| profit | 利润 |
+
+### 4. Error Handling
+All tools return standardized response:
+```json
+{"success": true, "data": {...}}    // Success
+{"success": false, "error": "行业名称不能为空"}   // Missing industry
+{"success": false, "error": "请提供概念代码或概念名称"}   // Missing concept
+```
+
+### 5. Best Practices
+- Start with `get_industry_list()` or `get_concept_list()` if unsure of names
+- Use specific industry lists for faster results
+- Combine with `market_data` skill for detailed analysis
+
+---
+
+**Skill Version**: v1.0  
+**Last Updated**: 2026-03-20  
+**Compatible with**: AgentFlow v1.0, MCP Protocol

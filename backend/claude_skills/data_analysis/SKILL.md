@@ -1,185 +1,420 @@
 ---
 name: data_analysis
-description: 数据分析与可视化，支持智能分析、图表生成和 Text2SQL
+description: |
+  数据分析与可视化，支持统计分析、趋势预测、图表生成。
+  
+  Use this skill when:
+  - User wants to calculate statistics on data
+  - User wants to analyze price trends
+  - User needs to calculate correlation between stocks
+  - User wants technical indicators (MA, RSI, MACD, Bollinger)
+  - User needs data normalization
+  - User wants to generate chart data
+  
+  Data Source: Tushare Pro API (for stock data)
 version: "1.0"
-tool_count: 4
+tool_count: 6
 ---
 
 # DataAnalysis Skill
 
-## 概述
+## Overview
 
-提供数据分析和可视化能力，包括智能数据分析、图表生成、自然语言转 SQL 等功能。
+提供数据分析与可视化能力，支持统计分析、价格趋势分析、相关性分析、技术指标计算、数据标准化和图表数据生成。
 
-**功能**: 数据分析、图表生成、Text2SQL、金融指标计算
-**适用数据**: JSON、CSV、表格数据
-**输出**: 分析报告、可视化图表、SQL 查询
+**Capabilities**: Statistical analysis, trend analysis, correlation analysis, technical indicators, data normalization  
+**Supported Data**: Stock price data, time series data  
+**Output Formats**: Analysis reports, chart data  
+**Total Tools**: 6
 
 ---
 
-## 可用工具
+## Available Tools
 
-### 1. analyze_data - 智能数据分析
+### 1. calculate_statistics - 计算统计指标
 
-**功能**: 智能数据分析，识别模式、趋势、异常，自动推荐可视化方式
+**Purpose**: 计算数据的统计指标（均值、标准差、最大值、最小值等）。
 
-**调用方式**: `data_analysis.analyze_data(data, analysis_type, context)`
+**When to use**:
+- User wants statistical summary of data
+- Need mean, std dev, min, max, median calculations
+- Analyzing data distribution
 
-**参数**:
-- `data` (必需): 待分析的数据列表，每个元素是一个字典
-  - 示例: `[{"month": "1月", "sales": 100}, {"month": "2月", "sales": 150}]`
-- `analysis_type` (可选): 分析类型，默认 "auto"
-  - 可选值: `"auto"` (自动), `"trend"` (趋势), `"distribution"` (分布), `"comparison"` (对比), `"correlation"` (相关性)
-- `context` (可选): 分析上下文/问题，帮助理解数据背景
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| data | array | Yes | - | 数值数组 |
+| metrics | array | No | null | 需要计算的指标：mean(均值), std(标准差), min(最小值), max(最大值), median(中位数) |
 
-**返回示例**:
+**Returns**:
 ```json
 {
   "success": true,
   "data": {
-    "summary": "数据分析摘要...",
-    "insights": [
-      "发现 1: 销售额呈上升趋势",
-      "发现 2: 2月份增长最为显著"
-    ],
-    "recommendations": ["建议关注..."],
-    "visualization_type": "line_chart",
-    "statistics": {
-      "count": 12,
-      "mean": 125.5,
-      "max": 200,
-      "min": 80
+    "mean": 125.5,
+    "std": 45.2,
+    "min": 80,
+    "max": 200,
+    "median": 122,
+    "count": 12
+  }
+}
+```
+
+**Examples**:
+- All metrics: `calculate_statistics(data=[100, 120, 130, 110, 140])`
+- Specific metrics: `calculate_statistics(data=prices, metrics=["mean", "std"])`
+
+---
+
+### 2. analyze_price_trend - 价格趋势分析
+
+**Purpose**: 分析股票价格趋势。
+
+**When to use**:
+- User asks "这个股票走势如何？"
+- User wants trend direction and strength
+- Need price change analysis
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| period | string | No | 60d | 分析周期：20d(20日), 60d(60日), 120d(120日) |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "symbol": "600519",
+    "period": "60d",
+    "current_price": 1850.50,
+    "period_high": 1920.00,
+    "period_low": 1680.00,
+    "price_change": 120.50,
+    "price_change_percent": 6.97,
+    "trend_direction": "up",
+    "trend_strength": 78.5,
+    "volatility": 28.45,
+    "avg_volume": 125000
+  }
+}
+```
+
+**Trend Directions**:
+| Direction | Description |
+|-----------|-------------|
+| up | 上升趋势 |
+| down | 下降趋势 |
+| sideways | 横盘整理 |
+
+**Examples**:
+- Default 60 days: `analyze_price_trend(symbol="600519")`
+- Short term: `analyze_price_trend(symbol="600519", period="20d")`
+- Long term: `analyze_price_trend(symbol="600519", period="120d")`
+
+---
+
+### 3. calculate_correlation - 相关性分析
+
+**Purpose**: 计算两只股票的相关性。
+
+**When to use**:
+- User asks "茅台和五粮液走势相关吗？"
+- User wants to analyze portfolio diversification
+- Checking how two stocks move together
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol1 | string | Yes | - | 第一只股票代码 |
+| symbol2 | string | Yes | - | 第二只股票代码 |
+| period | string | No | 60d | 分析周期 |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "symbol1": "600519",
+    "symbol2": "000858",
+    "period": "60d",
+    "correlation": 0.85,
+    "interpretation": "强相关"
+  }
+}
+```
+
+**Correlation Interpretation**:
+| Correlation | Description |
+|-------------|-------------|
+| >= 0.8 | 强相关 |
+| 0.5 - 0.8 | 中等相关 |
+| 0.3 - 0.5 | 弱相关 |
+| < 0.3 | 几乎无关 |
+| Negative | 负相关 (反向走势) |
+
+**Examples**:
+- Default: `calculate_correlation(symbol1="600519", symbol2="000858")`
+- Longer period: `calculate_correlation(symbol1="300750", symbol2="002594", period="120d")`
+
+---
+
+### 4. calculate_technical_indicators - 技术指标计算
+
+**Purpose**: 计算技术指标（MA、RSI、MACD等）。
+
+**When to use**:
+- User asks for technical analysis
+- Need moving averages, RSI, MACD, Bollinger Bands
+- Technical trading signals
+
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| indicators | array | No | null | 指标列表：ma(移动平均线), rsi(相对强弱指标), macd, boll(布林带) |
+
+**Returns**:
+```json
+{
+  "success": true,
+  "data": {
+    "ma": {
+      "ma5": 1840.50,
+      "ma10": 1830.20,
+      "ma20": 1810.80,
+      "ma60": 1750.30
+    },
+    "rsi": {
+      "rsi": 62.5
+    },
+    "macd": {
+      "macd": 2.35,
+      "signal": 1.80,
+      "histogram": 0.55
+    },
+    "boll": {
+      "upper": 1920.50,
+      "middle": 1810.80,
+      "lower": 1701.10
     }
   }
 }
 ```
 
+**Technical Indicators**:
+| Indicator | Description | Use Case |
+|-----------|-------------|----------|
+| ma | 移动平均线 | Trend direction |
+| rsi | 相对强弱指标 | Overbought/oversold (70+, 30-) |
+| macd | MACD指标 | Trend changes |
+| boll | 布林带 | Volatility, support/resistance |
+
+**Examples**:
+- All indicators: `calculate_technical_indicators(symbol="600519")`
+- MA only: `calculate_technical_indicators(symbol="600519", indicators=["ma"])`
+- RSI + MACD: `calculate_technical_indicators(symbol="600519", indicators=["rsi", "macd"])`
+
 ---
 
-### 2. generate_chart - 图表生成
+### 5. normalize_data - 数据标准化
 
-**功能**: 根据数据生成可视化图表
+**Purpose**: 对数据进行标准化处理（Min-Max或Z-Score）。
 
-**调用方式**: `data_analysis.generate_chart(data, chart_type, title, x_key, y_key)`
+**When to use**:
+- User wants to normalize data for comparison
+- Preparing data for machine learning
+- Comparing metrics on different scales
 
-**参数**:
-- `data` (必需): 图表数据
-- `chart_type` (必需): 图表类型
-  - 可选值: `"line"` (折线), `"bar"` (柱状), `"pie"` (饼图), `"scatter"` (散点)
-- `title` (可选): 图表标题
-- `x_key` (可选): X轴数据字段名
-- `y_key` (可选): Y轴数据字段名
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| data | array | Yes | - | 数值数组 |
+| method | string | No | minmax | 标准化方法：minmax(最小-最大), zscore(Z-Score) |
 
-**返回示例**:
+**Returns**:
 ```json
 {
   "success": true,
   "data": {
-    "chart_url": "/charts/chart_abc123.png",
-    "chart_type": "bar",
-    "title": "月度销售数据"
+    "method": "minmax",
+    "original_range": {
+      "min": 80,
+      "max": 200
+    },
+    "normalized": [0.0, 0.25, 0.5, 0.75, 1.0]
   }
 }
 ```
 
+**Normalization Methods**:
+| Method | Description | Output Range |
+|--------|-------------|--------------|
+| minmax | Min-Max标准化 | [0, 1] |
+| zscore | Z-Score标准化 | Mean=0, Std=1 |
+
+**Examples**:
+- Min-Max: `normalize_data(data=[100, 120, 130, 110, 140], method="minmax")`
+- Z-Score: `normalize_data(data=prices, method="zscore")`
+
 ---
 
-### 3. text_to_sql - 自然语言转 SQL
+### 6. generate_chart_data - 生成图表数据
 
-**功能**: 将自然语言问题转换为 SQL 查询语句
+**Purpose**: 生成图表数据（K线、折线图、柱状图等）。
 
-**调用方式**: `data_analysis.text_to_sql(question, table_schema, dialect)`
+**When to use**:
+- User wants chart data for visualization
+- Need formatted data for front-end charts
+- Generating K-line, line, bar, or area chart data
 
-**参数**:
-- `question` (必需): 自然语言问题
-  - 示例: `"查询2024年每个季度的总销售额"`
-- `table_schema` (必需): 表结构信息
-  - 示例: `"sales(id, product_name, amount, sale_date, region)"`
-- `dialect` (可选): SQL 方言，默认 "postgresql"
-  - 可选值: `"postgresql"`, `"mysql"`, `"sqlite"`
+**Parameters**:
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| symbol | string | Yes | - | 股票代码 |
+| chart_type | string | No | line | 图表类型：candlestick(K线), line(折线), bar(柱状), area(面积) |
+| period | string | No | 60d | 数据周期 |
 
-**返回示例**:
+**Returns**:
 ```json
 {
   "success": true,
   "data": {
-    "sql": "SELECT EXTRACT(QUARTER FROM sale_date) as quarter, SUM(amount) as total FROM sales WHERE EXTRACT(YEAR FROM sale_date) = 2024 GROUP BY quarter ORDER BY quarter",
-    "explanation": "按季度分组计算2024年销售总额"
+    "symbol": "600519",
+    "chart_type": "line",
+    "period": "60d",
+    "data": [
+      {"date": "20260301", "value": 1820.50},
+      {"date": "20260302", "value": 1830.20},
+      {"date": "20260303", "value": 1840.80}
+    ]
   }
 }
 ```
 
+**Chart Types**:
+| Type | Description | Data Format |
+|------|-------------|-------------|
+| candlestick | K线图 | open, high, low, close, volume |
+| line | 折线图 | date, value |
+| bar | 柱状图 | date, value |
+| area | 面积图 | date, value, volume |
+
+**Examples**:
+- Line chart: `generate_chart_data(symbol="600519", chart_type="line")`
+- K-line: `generate_chart_data(symbol="600519", chart_type="candlestick", period="120d")`
+- Volume bar: `generate_chart_data(symbol="600519", chart_type="bar")`
+
 ---
 
-### 4. calculate_metrics - 计算金融指标
+## Common Workflows
 
-**功能**: 计算常用金融分析指标
+### Workflow 1: Technical Analysis
+```
+User: "分析一下茅台的技术面"
 
-**调用方式**: `data_analysis.calculate_metrics(data, metrics)`
+→ Step 1: calculate_technical_indicators(symbol="600519", indicators=["ma", "rsi", "macd"])
+   → Get technical signals
 
-**参数**:
-- `data` (必需): 财务数据
-  - 示例: `{"revenue": 1000, "cost": 600, "assets": 5000, "liabilities": 2000}`
-- `metrics` (必需): 要计算的指标列表
-  - 可选值: `["roe", "roa", "gross_margin", "net_margin", "current_ratio", "debt_ratio"]`
+→ Step 2: analyze_price_trend(symbol="600519", period="60d")
+   → Get trend direction
 
-**返回示例**:
+→ Response: "技术面分析：
+   - 趋势：上升，强度78.5%
+   - MA：股价位于MA5/MA10之上
+   - RSI：62.5（中性偏强）
+   - MACD：金叉信号"
+```
+
+### Workflow 2: Stock Correlation Analysis
+```
+User: "茅台和五粮液走势相关吗？"
+
+→ calculate_correlation(symbol1="600519", symbol2="000858", period="120d")
+   → Correlation: 0.85
+
+→ Response: "茅台和五粮液相关性0.85，属于强相关，
+   两只股票走势高度一致，分散投资效果有限。"
+```
+
+### Workflow 3: Portfolio Analysis
+```
+User: "帮我分析一下这个股票组合的相关性"
+
+→ Step 1: calculate_correlation(symbol1="600519", symbol2="300750")
+   → Check liquor vs new energy
+
+→ Step 2: calculate_correlation(symbol1="600519", symbol2="000001")
+   → Check liquor vs banking
+
+→ Step 3: calculate_correlation(symbol1="300750", symbol2="002594")
+   → Check new energy correlation
+
+→ Response: "组合相关性分析：
+   白酒与新能源相关性低(0.2)，分散效果好
+   白酒与银行相关性中等(0.4)"
+```
+
+### Workflow 4: Chart Data Generation
+```
+User: "给我生成茅台的K线数据"
+
+→ generate_chart_data(symbol="600519", chart_type="candlestick", period="120d")
+   → Get formatted K-line data
+
+→ Response: Provide chart data for frontend rendering
+```
+
+---
+
+## Important Notes
+
+### 1. Technical Indicator Signals
+| Indicator | Buy Signal | Sell Signal |
+|-----------|------------|-------------|
+| MA | Price > MA20 | Price < MA20 |
+| RSI | RSI < 30 (oversold) | RSI > 70 (overbought) |
+| MACD | MACD > Signal (golden cross) | MACD < Signal (death cross) |
+| Bollinger | Price < Lower (oversold) | Price > Upper (overbought) |
+
+### 2. Data Requirements
+- Minimum data points required for each indicator
+- MA: 60 days for MA60
+- RSI: 14+ days
+- MACD: 26+ days
+- Bollinger: 20+ days
+
+### 3. Correlation Notes
+- Correlation ranges from -1 to +1
+- +1 = perfect positive correlation
+- -1 = perfect negative correlation
+- 0 = no correlation
+- High correlation doesn't imply causation
+
+### 4. Normalization Use Cases
+- **Min-Max**: When you need bounded [0,1] values
+- **Z-Score**: When you need to handle outliers
+
+### 5. Error Handling
+All tools return standardized response:
 ```json
-{
-  "success": true,
-  "data": {
-    "roe": 0.133,
-    "roa": 0.08,
-    "gross_margin": 0.4,
-    "net_margin": 0.25,
-    "current_ratio": 1.5,
-    "debt_ratio": 0.4,
-    "interpretation": "ROE 为 13.3%，处于行业平均水平..."
-  }
-}
+{"success": true, "data": {...}}    // Success
+{"success": false, "error": "数据不能为空"}   // Empty data
+{"success": false, "error": "股票代码不能为空"}   // Missing symbol
+{"success": false, "error": "历史数据不足"}   // Insufficient data
 ```
 
----
-
-## 指标说明
-
-| 指标 | 全称 | 计算公式 | 含义 |
-|------|------|---------|------|
-| ROE | 净资产收益率 | 净利润 / 净资产 | 衡量股东投资回报率 |
-| ROA | 总资产收益率 | 净利润 / 总资产 | 衡量资产利用效率 |
-| Gross Margin | 毛利率 | (收入-成本) / 收入 | 衡量产品盈利能力 |
-| Net Margin | 净利率 | 净利润 / 收入 | 衡量整体盈利能力 |
-| Current Ratio | 流动比率 | 流动资产 / 流动负债 | 衡量短期偿债能力 |
-| Debt Ratio | 资产负债率 | 总负债 / 总资产 | 衡量财务杠杆水平 |
+### 6. Best Practices
+- Use `calculate_technical_indicators` for technical analysis
+- Use `calculate_correlation` for portfolio diversification analysis
+- Use `normalize_data` before comparing metrics on different scales
+- Use `generate_chart_data` for visualization preparation
+- Always check `success` field before using data
 
 ---
 
-## 使用场景
-
-| 场景 | 推荐工具 | 示例 |
-|------|---------|------|
-| 数据探索 | analyze_data | `analysis_type: "auto"` |
-| 制作报表 | generate_chart | `chart_type: "bar"` |
-| 数据库查询 | text_to_sql | `question: "查询Top10产品"` |
-| 财务分析 | calculate_metrics | `metrics: ["roe", "roa"]` |
-
----
-
-## 注意事项
-
-1. **数据格式**: 数据应为列表格式，每个元素是字典
-2. **字段命名**: 建议使用英文或拼音字段名，避免特殊字符
-3. **数据量**: 大数据集建议先采样再分析
-4. **Text2SQL**: 表结构描述越详细，生成的 SQL 越准确
-
----
-
-## 错误处理
-
-常见错误及解决方法:
-
-| 错误 | 原因 | 解决方法 |
-|------|------|---------|
-| 数据格式错误 | data 不是列表 | 检查数据格式 |
-| 缺少必要字段 | 未提供 x_key/y_key | 提供字段映射 |
-| SQL 生成失败 | 表结构描述不清 | 补充字段类型信息 |
+**Skill Version**: v1.0  
+**Last Updated**: 2026-03-20  
+**Compatible with**: AgentFlow v1.0, MCP Protocol
