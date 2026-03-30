@@ -215,7 +215,17 @@ def format_tool_result_for_message(result: Any, max_length: int = 4000) -> str:
 
 
 def convert_tool_schema_to_openai(tool_schema: Dict[str, Any]) -> Dict[str, Any]:
-    """Convert tool schema to OpenAI function calling format"""
+    """Convert tool schema to OpenAI function calling format
+    
+    Supports both formats:
+    1. Already OpenAI format: {"type": "function", "function": {...}}
+    2. Legacy format: {"name": ..., "description": ..., "parameters": [...]}
+    """
+    # If already in OpenAI format, return as-is
+    if tool_schema.get("type") == "function" and "function" in tool_schema:
+        return tool_schema
+    
+    # Convert from legacy format
     properties = {}
     required = []
     
