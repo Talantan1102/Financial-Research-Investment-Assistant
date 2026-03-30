@@ -125,11 +125,16 @@ class TushareClient:
             return None
 
     def _safe_float(self, value, default="数据缺失"):
-        """安全转换数值，None 时返回文字说明，让大模型感知数据缺失"""
+        """安全转换数值，处理 None/NaN/Infinity，返回文字说明让大模型感知数据缺失"""
         if value is None:
             return default
         try:
-            return float(value)
+            f = float(value)
+            # 检查 NaN 和 Infinity
+            import math
+            if math.isnan(f) or math.isinf(f):
+                return default
+            return f
         except (TypeError, ValueError):
             return default
 

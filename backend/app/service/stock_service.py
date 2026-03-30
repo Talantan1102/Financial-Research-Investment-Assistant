@@ -8,6 +8,11 @@ from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from enum import Enum
 
+# 添加 Tushare 支持用于股票列表查询
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from app.data.tushare_client import get_tushare_client, TushareClient
+
 
 class StockMarket(Enum):
     """股票市场"""
@@ -145,15 +150,15 @@ class StockService:
 
     async def search_stock(self, keyword: str) -> Dict[str, Any]:
         """
-        搜索股票（暂时通过遍历方式，后续可接入搜索API）
+        搜索股票 - 支持代码和名称模糊搜索
 
         Args:
-            keyword: 股票名称或代码关键词
+            keyword: 股票代码或名称关键词（如'600519'、'贵州茅台'、'茅台'）
 
         Returns:
             匹配的股票列表
         """
-        # 如果看起来像股票代码，直接查询
+        # ========== 1. 按股票代码搜索 ==========
         if keyword.isdigit() or keyword.startswith(("sh", "sz", "SH", "SZ")):
             result = await self.get_stock_by_code(keyword)
             if result["success"]:
@@ -163,9 +168,9 @@ class StockService:
                     "count": 1
                 }
 
-        # 否则尝试按代码查询（兼容纯数字代码）
-        for prefix in ["sh", "sz"]:
-            if keyword.isdigit():
+        # 纯数字代码，尝试上证和深证
+        if keyword.isdigit():
+            for prefix in ["sh", "sz"]:
                 result = await self.get_stock_by_code(f"{prefix}{keyword}")
                 if result["success"]:
                     return {
@@ -174,9 +179,85 @@ class StockService:
                         "count": 1
                     }
 
+        # ========== 2. 按名称模糊搜索（使用 Tushare） ==========
+        try:
+            tushare_client = get_tushare_client()
+            api = tushare_client.get_api()
+
+            if not api:
+                return {
+                    "success": False,
+                    "error": "股票名称搜索需要 Tushare API，请检查 TUSHARE_API_TOKEN 环境变量",
+                    "results": []
+                }
+
+            # 获取所有股票基本信息（使用缓存）
+            cache_result = tushare_client._get_from_cache("__all_stocks_basic__")
+            if cache_result is None:
+                df = api.stock_basic(
+                    exchange='',
+                    list_status='L',
+                    fields='ts_code,symbol,name,area,industry,list_date'
+                )
+                if df is not None and not df.empty:
+                    all_stocks = df.to_dict('records')
+                    tushare_client._set_cache("__all_stocks_basic__", all_stocks)
+                else:
+                    all_stocks = []
+            else:
+                # _get_from_cache 返回的是 (data, timestamp) 元组
+                all_stocks = cache_result[0] if isinstance(cache_result, tuple) else cache_result
+
+            if not all_stocks:
+                return {
+                    "success": False,
+                    "error": "无法获取股票列表进行模糊搜索",
+                    "results": []
+                }
+
+            # 模糊匹配名称
+            keyword_lower = keyword.lower()
+            matches = []
+
+            for stock in all_stocks:
+                name = stock.get('name', '')
+                symbol = stock.get('symbol', '')
+                ts_code = stock.get('ts_code', '')
+
+                # 匹配规则：
+                # 1. 名称包含关键词（如"茅台"匹配"贵州茅台"）
+                # 2. 名称以关键词开头
+                # 3. 完全匹配
+                if (keyword_lower in name.lower() or
+                    name.lower().startswith(keyword_lower) or
+                    keyword_lower == name.lower()):
+                    matches.append({
+                        "ts_code": ts_code,
+                        "symbol": symbol,
+                        "name": name,
+                        "area": stock.get('area', ''),
+                        "industry": stock.get('industry', ''),
+                        "list_date": stock.get('list_date', '')
+                    })
+
+            if matches:
+                return {
+                    "success": True,
+                    "results": matches,
+                    "count": len(matches),
+                    "keyword": keyword
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"名称搜索失败: {str(e)}",
+                "results": []
+            }
+
         return {
             "success": False,
-            "error": "未找到匹配的股票，请提供准确的股票代码（如 sh601009 或 sz000001）",
+            "error": f"未找到匹配的股票: {keyword}",
             "results": []
         }
 

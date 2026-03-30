@@ -59,12 +59,12 @@ class MarketDataSkill(BaseSkill):
         self.register_tool(
             name="search_stock",
             handler=self.search_stock,
-            description="根据股票代码或名称关键词搜索股票信息",
+            description="根据股票代码或名称关键词搜索股票信息，支持模糊搜索（如'茅台'可匹配'贵州茅台'）",
             parameters=[
                 ToolParameter(
                     name="keyword",
                     type="string",
-                    description="搜索关键词，可以是股票代码（如'600519'）或股票名称（如'贵州茅台'）",
+                    description="搜索关键词，可以是股票代码（如'600519'）或股票名称关键词（如'茅台'、'贵州'）",
                     required=True
                 )
             ]
@@ -338,11 +338,11 @@ class MarketDataSkill(BaseSkill):
     
     async def search_stock(self, keyword: str) -> ToolResult:
         """
-        搜索股票
-        
+        搜索股票 - 支持代码和名称模糊搜索
+
         Args:
-            keyword: 搜索关键词（股票代码或名称）
-        
+            keyword: 搜索关键词（股票代码或名称，如'600519'、'贵州茅台'、'茅台'）
+
         Returns:
             ToolResult 包含搜索结果
         """
@@ -351,11 +351,13 @@ class MarketDataSkill(BaseSkill):
                 success=False,
                 error="搜索关键词不能为空"
             )
-        
+
         try:
-            # 如果看起来像股票代码，直接查询
+            client = self.get_tushare_client()
+
+            # ========== 1. 按股票代码搜索 ==========
             if keyword.isdigit() or keyword.startswith(("sh", "sz", "SH", "SZ")):
-                result = self.get_tushare_client().get_quote(keyword)
+                result = client.get_quote(keyword)
                 if result.get("success"):
                     return ToolResult(
                         success=True,
@@ -368,7 +370,7 @@ class MarketDataSkill(BaseSkill):
             # 纯数字代码，尝试上证和深证
             if keyword.isdigit():
                 for prefix in ["sh", "sz"]:
-                    result = self.get_tushare_client().get_quote(f"{prefix}{keyword}")
+                    result = client.get_quote(f"{prefix}{keyword}")
                     if result.get("success"):
                         return ToolResult(
                             success=True,
@@ -377,12 +379,78 @@ class MarketDataSkill(BaseSkill):
                                 "count": 1
                             }
                         )
-            
+
+            # ========== 2. 按名称模糊搜索 ==========
+            api = client.get_api()
+            if not api:
+                return ToolResult(
+                    success=False,
+                    error="Tushare API 未初始化，无法进行名称搜索"
+                )
+
+            # 获取所有股票基本信息（使用缓存）
+            cache_result = client._get_from_cache("__all_stocks_basic__")
+            if cache_result is None:
+                df = api.stock_basic(
+                    exchange='',
+                    list_status='L',
+                    fields='ts_code,symbol,name,area,industry,list_date'
+                )
+                if df is not None and not df.empty:
+                    all_stocks = df.to_dict('records')
+                    client._set_cache("__all_stocks_basic__", all_stocks)
+                else:
+                    all_stocks = []
+            else:
+                # _get_from_cache 返回的是 (data, timestamp) 元组
+                all_stocks = cache_result[0] if isinstance(cache_result, tuple) else cache_result
+
+            if not all_stocks:
+                return ToolResult(
+                    success=False,
+                    error="无法获取股票列表进行模糊搜索"
+                )
+
+            # 模糊匹配名称
+            keyword_lower = keyword.lower()
+            matches = []
+
+            for stock in all_stocks:
+                name = stock.get('name', '')
+                symbol = stock.get('symbol', '')
+                ts_code = stock.get('ts_code', '')
+
+                # 匹配规则：
+                # 1. 名称包含关键词（如"茅台"匹配"贵州茅台"）
+                # 2. 名称以关键词开头
+                # 3. 完全匹配
+                if (keyword_lower in name.lower() or
+                    name.lower().startswith(keyword_lower) or
+                    keyword_lower == name.lower()):
+                    matches.append({
+                        "ts_code": ts_code,
+                        "symbol": symbol,
+                        "name": name,
+                        "area": stock.get('area', ''),
+                        "industry": stock.get('industry', ''),
+                        "list_date": stock.get('list_date', '')
+                    })
+
+            if matches:
+                return ToolResult(
+                    success=True,
+                    data={
+                        "results": matches,
+                        "count": len(matches),
+                        "keyword": keyword
+                    }
+                )
+
             return ToolResult(
                 success=False,
                 error=f"未找到匹配的股票: {keyword}"
             )
-            
+
         except Exception as e:
             return ToolResult(
                 success=False,
