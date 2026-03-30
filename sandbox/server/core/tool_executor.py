@@ -329,6 +329,28 @@ class ToolExecutor:
                     meta["temporary_session"] = True
                 result["meta"] = meta
                 return result
+            
+            # Legacy format (如 FinanceResearchBackend 返回的格式): 自动包装成新格式
+            if isinstance(result, dict) and "code" not in result:
+                # 判断成功/失败
+                if result.get("success", True):
+                    return build_success_response(
+                        data=result.get("data") or result,
+                        tool=full_name or tool_name,
+                        execution_time_ms=execution_time,
+                        resource_type=resource_type,
+                        session_id=session_info.get("session_id") if session_info else None
+                    )
+                else:
+                    return build_error_response(
+                        code=ErrorCode.EXECUTION_ERROR,
+                        message=result.get("error", "Tool execution failed"),
+                        tool=full_name or tool_name,
+                        data=result,
+                        execution_time_ms=execution_time,
+                        resource_type=resource_type,
+                        session_id=session_info.get("session_id") if session_info else None
+                    )
 
             return build_error_response(
                 code=ErrorCode.UNEXPECTED_ERROR,

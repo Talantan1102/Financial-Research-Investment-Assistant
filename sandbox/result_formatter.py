@@ -918,6 +918,125 @@ ResultFormatter.register_formatter("unified_finance", UnifiedFinanceResult)
 
 
 # ============================================================================
+# MCP Skill Tool Result Formatters (无前缀版本)
+# ============================================================================
+
+class SelectSkillResult(ToolResult):
+    """Round 1: select_skill 结果格式化"""
+    
+    def to_str(self, verbose: bool = False) -> str:
+        if not self.success:
+            return f"[Error] {self.metadata.get('message', 'Skill selection failed')}"
+        
+        skill_name = self.raw_data.get('skill_name', 'unknown')
+        description = self.raw_data.get('description', '')
+        use_when = self.raw_data.get('use_when', '')
+        reason = self.raw_data.get('reason', '')
+        
+        lines = [
+            f"Selected Skill: {skill_name}",
+            f"Description: {description}",
+        ]
+        if use_when:
+            lines.append(f"Use When: {use_when}")
+        if reason:
+            lines.append(f"Reason: {reason}")
+        
+        return '\n'.join(lines)
+
+
+class SkillResult(ToolResult):
+    """Round 1: skill 结果格式化（与金融研投助手一致）"""
+    
+    def to_str(self, verbose: bool = False) -> str:
+        if not self.success:
+            return f"[Error] {self.metadata.get('message', 'Skill selection failed')}"
+        
+        skill_name = self.raw_data.get('skill_name', 'unknown')
+        description = self.raw_data.get('description', '')
+        use_when = self.raw_data.get('use_when', '')
+        tools_count = self.raw_data.get('tools_count', 0)
+        tools = self.raw_data.get('tools', [])
+        
+        lines = [
+            f"Selected Skill: {skill_name}",
+            f"Description: {description}",
+        ]
+        if use_when:
+            lines.append(f"Use When: {use_when}")
+        
+        lines.append(f"\nAvailable Tools ({tools_count}):")
+        for tool in tools[:10]:  # 最多显示10个
+            tool_name = tool.get('name', 'unknown')
+            desc = tool.get('description', '')[:60]
+            lines.append(f"  - {tool_name}: {desc}...")
+        
+        if len(tools) > 10:
+            lines.append(f"  ... and {len(tools) - 10} more tools")
+        
+        return '\n'.join(lines)
+
+
+class GetSkillToolsResult(ToolResult):
+    """Round 2: get_skill_tools 结果格式化"""
+    
+    def to_str(self, verbose: bool = False) -> str:
+        if not self.success:
+            return f"[Error] {self.metadata.get('message', 'Failed to get tools')}"
+        
+        skill_name = self.raw_data.get('skill_name', 'unknown')
+        tools = self.raw_data.get('tools', [])
+        count = self.raw_data.get('tools_count', len(tools))
+        
+        lines = [f"Skill '{skill_name}' has {count} available tools:"]
+        for tool in tools[:15]:  # 最多显示15个
+            tool_name = tool.get('name', 'unknown')
+            desc = tool.get('description', '')[:80]
+            lines.append(f"  - {tool_name}: {desc}...")
+        
+        if len(tools) > 15:
+            lines.append(f"  ... and {len(tools) - 15} more tools")
+        
+        return '\n'.join(lines)
+
+
+class ExecuteSkillToolResult(ToolResult):
+    """Round 3: execute_skill_tool 结果格式化"""
+    
+    def to_str(self, verbose: bool = False) -> str:
+        if not self.success:
+            return f"[Error] {self.metadata.get('message', 'Tool execution failed')}"
+        
+        skill_name = self.raw_data.get('skill_name', 'unknown')
+        tool_name = self.raw_data.get('tool_name', 'unknown')
+        
+        # 提取实际数据内容
+        result_data = self.raw_data
+        
+        # 如果 data 字段存在，使用它
+        if 'data' in result_data:
+            result_data = result_data['data']
+        
+        # 格式化输出
+        result_str = json.dumps(result_data, ensure_ascii=False, indent=2)
+        
+        if verbose:
+            return f"[{skill_name}.{tool_name}]\n{result_str}"
+        else:
+            # 截断长输出
+            if len(result_str) > 2000:
+                result_str = result_str[:2000] + "\n... (truncated)"
+            return result_str
+
+
+# 注册 MCP Skill formatters
+ResultFormatter.register_formatter("skill", SkillResult)
+ResultFormatter.register_formatter("select_skill", SelectSkillResult)
+ResultFormatter.register_formatter("get_skill_tools", GetSkillToolsResult)
+ResultFormatter.register_formatter("execute_skill_tool", ExecuteSkillToolResult)
+
+
+# ============================================================================
 # Convenience function.
 # ============================================================================
 

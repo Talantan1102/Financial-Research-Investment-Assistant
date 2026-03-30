@@ -1,16 +1,23 @@
-# sandbox/server/app.py
 """
-HTTP Service Server - FastAPI Application
+HTTP Service Server - FastAPI Application with MCP Native Support
 
-Server is the core container and scheduler, responsible for:
-- Holding Backend instances and stateless tool containers
-- Holding tool data structures (_tools, _tool_name_index, _tool_resource_types)
-- Reflecting and scanning @tool marked methods and registering them
-- Dispatching requests to corresponding tool functions
+Server 核心容器，支持两种后端：
+1. 传统 Backend（使用 @tool 装饰器）
+2. MCP Native Backend（直接暴露原生 MCP 方法）
 
 Usage examples:
 
-1. Load stateful backend:
+1. Load MCP Native Backend（推荐）:
+```python
+from sandbox.server import HTTPServiceServer
+from sandbox.server.backends.resources import UnifiedFinanceMCPBackend
+
+server = HTTPServiceServer(host="0.0.0.0", port=8080)
+server.load_mcp_backend(UnifiedFinanceMCPBackend())
+server.run()
+```
+
+2. Load traditional Backend:
 ```python
 from sandbox.server import HTTPServiceServer
 from sandbox.server.backends.resources import VMBackend
@@ -19,59 +26,31 @@ server = HTTPServiceServer(host="0.0.0.0", port=8080)
 server.load_backend(VMBackend())
 server.run()
 ```
-
-2. Register stateless API tools (via config loading):
-```python
-from sandbox.server.config_loader import create_server_from_config
-
-server = create_server_from_config("configs/profiles/dev.json")
-server.run()
-# API tools will be automatically loaded and registered from config file
-```
-
-3. Manually register a single API tool:
-```python
-server.register_api_tool(
-    name="search",
-    func=my_search_func,
-    config={"api_key": "xxx"},
-    description="Search web pages"
-)
-```
 """
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional, Callable, List, TYPE_CHECKING
+from typing import Dict, Any, Optional, Callable, List, TYPE_CHECKING, Union
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .core import ResourceRouter, ToolExecutor, scan_tools
 from .backends.base import Backend, BackendConfig
+from .backends.mcp_native_base import MCPNativeBackend, MCPBackendConfig
 from .routes import register_routes
 
-# Import protocol for endpoints
+if TYPE_CHECKING:
+    from .backends.mcp_native_base import MCPResource, MCPTool
 
 logger = logging.getLogger("HTTPServiceServer")
 
 
 class HTTPServiceServer:
     """
-    HTTP Service Server - Core server (holder + scheduler)
-    
-    Server is responsible for:
-    1. Holding Backend instances and stateless tool containers
-    2. Holding tool data structures (three-layer mapping)
-    3. Calling Backend lifecycle interfaces
-    4. Reflecting and scanning @tool marked methods and registering them
-    5. Automatic resource management and Session routing
-    
-    Tool data structures:
-    - _tools: Dict[str, Callable] - Full name -> function mapping
-    - _tool_name_index: Dict[str, List[str]] - Simple name -> full name list
-    - _tool_resource_types: Dict[str, str] - Full name -> resource type
+    HTTP Service Server - 支持传统 Backend 和 MCP Native Backend
     """
     
     def __init__(
@@ -85,54 +64,36 @@ class HTTPServiceServer:
         session_ttl: int = 300,
         warmup_resources: Optional[List[str]] = None
     ):
-        """
-        Initialize HTTP server
-
-        Args:
-            host: Bind address
-            port: Port
-            title: API title
-            description: API description
-            version: API version
-            enable_cors: Whether to enable CORS
-            session_ttl: Session TTL (seconds)
-            warmup_resources: List of resources to warmup on startup
-        """
         self.host = host
         self.port = port
         self.title = title
         self.description = description
         self.version = version
         self.enable_cors = enable_cors
-
-        # Warmup configuration
         self.warmup_resources = warmup_resources or []
+        self.session_ttl = session_ttl
 
         # ====================================================================
-        # Tool data structures (three-layer mapping, held by Server)
+        # 传统 Backend 数据 structures
         # ====================================================================
-        
-        # Layer 1: Full name -> function mapping
-        # Example: {"vm:screenshot": func, "search": func}
         self._tools: Dict[str, Callable] = {}
-        
-        # Layer 2: Simple name -> full name list (index)
-        # Example: {"screenshot": ["vm:screenshot"], "search": ["search", "rag:search"]}
         self._tool_name_index: Dict[str, List[str]] = {}
-        
-        # Layer 3: Full name -> resource type mapping
-        # Example: {"vm:screenshot": "vm", "rag:search": "rag"}
         self._tool_resource_types: Dict[str, str] = {}
         
         # ====================================================================
-        # Core components
+        # MCP Native Backend 存储
         # ====================================================================
+        self._mcp_backends: Dict[str, MCPNativeBackend] = {}
         
-        self.session_ttl = session_ttl
+        # ====================================================================
+        # 传统 Backend 存储
+        # ====================================================================
+        self._backends: Dict[str, Backend] = {}
+        
+        # ====================================================================
+        # 核心组件
+        # ====================================================================
         self.resource_router = ResourceRouter(session_ttl=session_ttl)
-        
-        # ToolExecutor uses Server's data structure references
-        # Use lambda to delay binding of ensure_backend_warmed_up method
         self._executor = ToolExecutor(
             tools=self._tools,
             tool_name_index=self._tool_name_index,
@@ -141,201 +102,213 @@ class HTTPServiceServer:
             warmup_callback=lambda backend_name: self.ensure_backend_warmed_up(backend_name)
         )
         
-        # Backend holder
-        self._backends: Dict[str, Backend] = {}
-        
-        # Warmup status tracking
+        # Warmup 状态
         self._warmed_up_backends: Dict[str, bool] = {}
+        self._warmed_up_mcp_backends: Dict[str, bool] = {}
         self._warmup_lock = asyncio.Lock()
         
-        # FastAPI application
+        # FastAPI
         self._app: Optional[FastAPI] = None
         self._cleanup_task: Optional[asyncio.Task] = None
     
     # ========================================================================
-    # Tool registration (data structure operations)
+    # MCP Native Backend 加载
     # ========================================================================
     
-    def register_tool(
-        self, 
-        name: str, 
-        func: Callable, 
-        resource_type: Optional[str] = None
-    ):
+    def load_mcp_backend(self, backend) -> str:
         """
-        Register tool function
+        加载 MCP Native Backend（支持金融研投助手模式的 FinanceResearchBackend）
         
         Args:
-            name: Tool name (can include resource type prefix like "vm:screenshot")
-            func: Tool function
-            resource_type: Resource type
-        """
-        # Parse name and resource type
-        simple_name = name
-        actual_resource_type = resource_type
-        
-        if ":" in name:
-            parts = name.split(":", 1)
-            actual_resource_type = parts[0]
-            simple_name = parts[1]
-        
-        # Build full name
-        if actual_resource_type:
-            full_name = f"{actual_resource_type}:{simple_name}"
-        else:
-            full_name = simple_name
-        
-        # Layer 1: Store tool function mapping
-        self._tools[full_name] = func
-        
-        # Layer 2: Update simple name index
-        if simple_name not in self._tool_name_index:
-            self._tool_name_index[simple_name] = []
-        if full_name not in self._tool_name_index[simple_name]:
-            self._tool_name_index[simple_name].append(full_name)
-        
-        # Layer 3: Store resource type mapping
-        if actual_resource_type:
-            self._tool_resource_types[full_name] = actual_resource_type
-        
-        logger.info(f"Registered tool: {full_name}" + 
-                   (" (stateless)" if not actual_resource_type else ""))
-    
-    def _resolve_tool(self, action: str):
-        """Resolve tool name"""
-        if action in self._tools:
-            resource_type = self._tool_resource_types.get(action)
-            simple_name = action.split(":")[-1] if ":" in action else action
-            return action, simple_name, resource_type
-        
-        if ":" in action:
-            return None, None, None
-        
-        if action in self._tool_name_index:
-            candidates = self._tool_name_index[action]
-            if len(candidates) == 1:
-                full_name = candidates[0]
-                resource_type = self._tool_resource_types.get(full_name)
-                return full_name, action, resource_type
-        
-        return None, None, None
-    
-    def list_tools(self, include_hidden: bool = False) -> List[Dict[str, Any]]:
-        """List all registered tools"""
-        tools = []
-        for full_name, func in self._tools.items():
-            resource_type = self._tool_resource_types.get(full_name)
-            simple_name = full_name.split(":")[-1] if ":" in full_name else full_name
-            
-            doc = func.__doc__ or ""
-            if not include_hidden and doc.startswith("[HIDDEN]"):
-                continue
-            
-            tools.append({
-                "name": simple_name,
-                "full_name": full_name,
-                "resource_type": resource_type,
-                "stateless": resource_type is None,
-                "description": doc.strip() if doc else ""
-            })
-        return tools
-    
-    def get_tool_info(self, name: str) -> Optional[Dict[str, Any]]:
-        """Get tool information"""
-        full_name, simple_name, resource_type = self._resolve_tool(name)
-        
-        if not full_name or full_name not in self._tools:
-            return None
-        
-        func = self._tools[full_name]
-        
-        return {
-            "name": simple_name,
-            "full_name": full_name,
-            "resource_type": resource_type,
-            "stateless": resource_type is None,
-            "description": (func.__doc__ or "").strip()
-        }
-    
-    # ========================================================================
-    # Tool execution (delegated to ToolExecutor)
-    # ========================================================================
-    
-    async def execute(
-        self, 
-        action: str, 
-        params: Dict[str, Any],
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Execute tool
-        
-        Args:
-            action: Action name
-            params: Parameters
-            **kwargs: Runtime parameters (worker_id, timeout, trace_id, etc.)
-        """
-        return await self._executor.execute(action, params, **kwargs)
-    
-    async def execute_batch(
-        self,
-        actions: List[Dict[str, Any]],
-        **kwargs
-    ) -> Dict[str, Any]:
-        """
-        Execute tools in batch
-        
-        Args:
-            actions: Action list
-            **kwargs: Runtime parameters (worker_id, parallel, stop_on_error, trace_id, etc.)
-        """
-        return await self._executor.execute_batch(actions, **kwargs)
-    
-    # ========================================================================
-    # Reflection scanning and registration
-    # ========================================================================
-    
-    def scan_and_register(self, obj: Any, prefix: Optional[str] = None) -> List[str]:
-        """
-        Reflectively scan tools in object and register them
-        
-        Args:
-            obj: Object to scan
-            prefix: Optional name prefix
+            backend: MCP Backend 实例（FinanceResearchBackend 或 MCPNativeBackend）
             
         Returns:
-            List of registered tool names
+            Backend 名称
         """
-        registered = []
-        tools = scan_tools(obj, prefix)
+        # 获取 backend 名称
+        backend_name = getattr(backend, 'name', backend.__class__.__name__)
         
-        for tool_info in tools:
-            name = tool_info["name"]
-            func = tool_info["func"]
-            resource_type = tool_info.get("resource_type")
+        # 绑定 server（如果支持）
+        if hasattr(backend, 'bind_server'):
+            backend.bind_server(self)
+        
+        self._mcp_backends[backend_name] = backend
+        
+        # 注册 MCP 工具（与金融研投助手对齐）
+        # Round 1: Skill 选择
+        self.register_tool("skill", backend.skill)
+        self.register_tool("select_skill", backend.select_skill)  # 向后兼容
+        
+        # Round 2: 获取工具列表
+        self.register_tool("get_skill_tools", backend.get_skill_tools)
+        
+        # Round 3: 执行具体工具
+        self.register_tool("execute_skill_tool", backend.execute_skill_tool)
+        
+        # 尝试同步 warmup（如果 warmup 是同步的或已经执行过）
+        if hasattr(backend, 'skills') and backend.skills:
+            # skills 已存在，直接注册具体工具
+            registered_count = 0
+            for skill_name, skill in backend.skills.items():
+                if hasattr(skill, 'discover_tools_json'):
+                    tools = skill.discover_tools_json()
+                    for tool in tools:
+                        tool_name = tool.get('name')
+                        if tool_name:
+                            full_name = f"{skill_name}.{tool_name}"
+                            # 创建一个闭包来捕获 skill_name 和 tool_name
+                            def make_tool_executor(sn, tn, be=backend):
+                                async def tool_executor(*args, worker_id=None, timeout=None, trace_id=None, session_id=None, session_info=None, **kwargs):
+                                    # 过滤掉执行器注入的参数，只保留原始工具参数
+                                    clean_args = {k: v for k, v in kwargs.items() if k not in ['worker_id', 'timeout', 'trace_id', 'session_id', 'session_info']}
+                                    return await be.execute_skill_tool(sn, tn, clean_args)
+                                return tool_executor
+                            self.register_tool(full_name, make_tool_executor(skill_name, tool_name))
+                            registered_count += 1
+            logger.info(f"✅ MCP Backend loaded: {backend_name} (registered: skill + {registered_count} specific tools)")
+        else:
+            # skills 不存在，标记为需要延迟注册
+            logger.info(f"✅ MCP Backend loaded: {backend_name} (registered: 4 core tools, specific tools will be registered after warmup)")
+        
+        return backend_name
+    
+    def get_mcp_backend(self, name: str) -> Optional[MCPNativeBackend]:
+        """获取 MCP Backend"""
+        return self._mcp_backends.get(name)
+    
+    def list_mcp_backends(self) -> List[str]:
+        """列出所有 MCP Backend"""
+        return list(self._mcp_backends.keys())
+    
+    async def warmup_mcp_backend(self, backend_name: str) -> bool:
+        """Warmup MCP Backend - 注册具体工具"""
+        async with self._warmup_lock:
+            if self._warmed_up_mcp_backends.get(backend_name):
+                return True
             
-            self.register_tool(name, func, resource_type=resource_type)
-            registered.append(name)
-        
-        if registered:
-            logger.info(f"Scanned and registered {len(registered)} tools: {registered}")
-        
-        return registered
+            backend = self._mcp_backends.get(backend_name)
+            if not backend:
+                logger.warning(f"MCP Backend not found: {backend_name}")
+                return False
+            
+            try:
+                logger.info(f"🔥 Warming up MCP backend: {backend_name}")
+                await backend.warmup()
+                self._warmed_up_mcp_backends[backend_name] = True
+                logger.info(f"✅ MCP Backend warmed up: {backend_name}")
+                
+                # warmup 后注册所有具体工具
+                if hasattr(backend, 'skills') and backend.skills:
+                    registered_count = 0
+                    for skill_name, skill in backend.skills.items():
+                        if hasattr(skill, 'discover_tools_json'):
+                            tools = skill.discover_tools_json()
+                            for tool in tools:
+                                tool_name = tool.get('name')
+                                if tool_name:
+                                    full_name = f"{skill_name}.{tool_name}"
+                                    # 检查是否已注册
+                                    if full_name not in self._tools:
+                                        def make_tool_executor(sn, tn):
+                                            async def tool_executor(*args, worker_id=None, timeout=None, trace_id=None, session_id=None, session_info=None, **kwargs):
+                                                # 过滤掉执行器注入的参数
+                                                clean_args = {k: v for k, v in kwargs.items() if k not in ['worker_id', 'timeout', 'trace_id', 'session_id', 'session_info']}
+                                                return await backend.execute_skill_tool(sn, tn, clean_args)
+                                            return tool_executor
+                                        self.register_tool(full_name, make_tool_executor(skill_name, tool_name))
+                                        registered_count += 1
+                    logger.info(f"✅ Registered {registered_count} specific tools from {backend_name}")
+                
+                return True
+            except Exception as e:
+                logger.error(f"❌ MCP Backend warmup failed: {backend_name}: {e}")
+                return False
     
     # ========================================================================
-    # Backend and tool loading
+    # MCP 端点处理 - 金融研投助手模式（3个工具）
+    # ========================================================================
+    
+    async def _handle_mcp_select_skill(
+        self, 
+        backend_name: str,
+        skill_name: str,
+        reason: str
+    ) -> Dict[str, Any]:
+        """处理 select_skill 请求 - 金融研投助手模式"""
+        backend = self._mcp_backends.get(backend_name)
+        if not backend:
+            return {"error": f"MCP Backend '{backend_name}' not found"}
+        
+        await self.warmup_mcp_backend(backend_name)
+        
+        try:
+            result = await backend.select_skill(skill_name, reason)
+            return result
+        except Exception as e:
+            logger.error(f"select_skill error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def _handle_mcp_get_skill_tools(
+        self, 
+        backend_name: str,
+        name: str
+    ) -> Dict[str, Any]:
+        """处理 get_skill_tools 请求 - 金融研投助手模式"""
+        backend = self._mcp_backends.get(backend_name)
+        if not backend:
+            return {"error": f"MCP Backend '{backend_name}' not found"}
+        
+        await self.warmup_mcp_backend(backend_name)
+        
+        try:
+            result = await backend.get_skill_tools(name)
+            return result
+        except Exception as e:
+            logger.error(f"get_skill_tools error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def _handle_mcp_execute_skill_tool(
+        self, 
+        backend_name: str,
+        skill_name: str,
+        tool_name: str,
+        arguments: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """处理 execute_skill_tool 请求 - 金融研投助手模式"""
+        backend = self._mcp_backends.get(backend_name)
+        if not backend:
+            return {"error": f"MCP Backend '{backend_name}' not found"}
+        
+        await self.warmup_mcp_backend(backend_name)
+        
+        try:
+            result = await backend.execute_skill_tool(skill_name, tool_name, arguments)
+            return result
+        except Exception as e:
+            logger.error(f"execute_skill_tool error: {e}")
+            return {"success": False, "error": str(e)}
+            return {"success": False, "error": str(e)}
+    
+    # ========================================================================
+    # 传统 Backend 方法（保留）
     # ========================================================================
     
     def load_backend(self, backend: Backend) -> List[str]:
-        """
-        Load stateful backend
+        """加载 Backend（自动检测是否是 MCP-style Backend）"""
+        # 检测是否是 MCP-style Backend（有 select_skill, get_skill_tools, execute_skill_tool 方法）
+        is_mcp_backend = (
+            hasattr(backend, 'select_skill') and
+            hasattr(backend, 'get_skill_tools') and
+            hasattr(backend, 'execute_skill_tool')
+        )
         
-        Args:
-            backend: Backend instance
-            
-        Returns:
-            List of registered tool names
-        """
+        if is_mcp_backend:
+            # 使用 MCP Backend 加载逻辑
+            self.load_mcp_backend(backend)
+            # 返回空列表（MCP tools 通过不同方式统计）
+            return []
+        
+        # 传统 Backend 加载逻辑
         backend.bind_server(self)
         self._backends[backend.name] = backend
         
@@ -347,264 +320,166 @@ class HTTPServiceServer:
         )
         
         registered = self.scan_and_register(backend, prefix=backend.name)
-
         logger.info(f"✅ Backend loaded: {backend.name} ({len(registered)} tools)")
         return registered
+    
+    def register_tool(self, name: str, func: Callable, resource_type: Optional[str] = None):
+        """注册工具"""
+        simple_name = name
+        actual_resource_type = resource_type
+        
+        if ":" in name:
+            parts = name.split(":", 1)
+            actual_resource_type = parts[0]
+            simple_name = parts[1]
+        
+        if actual_resource_type:
+            full_name = f"{actual_resource_type}:{simple_name}"
+        else:
+            full_name = simple_name
+        
+        self._tools[full_name] = func
+        
+        if simple_name not in self._tool_name_index:
+            self._tool_name_index[simple_name] = []
+        if full_name not in self._tool_name_index[simple_name]:
+            self._tool_name_index[simple_name].append(full_name)
+        
+        if actual_resource_type:
+            self._tool_resource_types[full_name] = actual_resource_type
+    
+    def scan_and_register(self, obj: Any, prefix: Optional[str] = None) -> List[str]:
+        """扫描并注册工具"""
+        registered = []
+        tools = scan_tools(obj, prefix)
+        
+        for tool_info in tools:
+            name = tool_info["name"]
+            func = tool_info["func"]
+            resource_type = tool_info.get("resource_type")
+            self.register_tool(name, func, resource_type=resource_type)
+            registered.append(name)
+        
+        return registered
 
-    def register_api_tool(
-        self,
-        name: str,
-        func: Callable,
-        config: Dict[str, Any],
-        description: Optional[str] = None,
-        hidden: bool = False
-    ):
-        """
-        Register a single API tool (stateless)
-        
-        Configuration has been injected into BaseApiTool instance via set_config in register_all_tools,
-        execute method gets configuration through self.get_config().
-        
-        Args:
-            name: Tool name
-            func: Tool function/instance (BaseApiTool instance or regular function)
-            config: Tool configuration (already injected via set_config, this parameter kept for compatibility)
-            description: Tool description
-            hidden: Whether to hide
-            
-        Example:
-            ```python
-            class MyTool(BaseApiTool):
-                async def execute(self, query: str, **kwargs) -> dict:
-                    api_key = self.get_config("api_key")  # Get from instance internally
-                    return {"results": [...]}
-            
-            # Configuration injected via set_config in register_all_tools
-            server.register_api_tool(
-                name="search",
-                func=MyTool(),
-                config={"api_key": "xxx"},  # Already injected into instance
-                description="Search web pages"
-            )
-            ```
-        """
-        # Set description (directly on func, since BaseApiTool instance is callable)
-        if description:
-            func.__doc__ = ("[HIDDEN] " if hidden else "") + description
-        elif func.__doc__:
-            func.__doc__ = ("[HIDDEN] " if hidden else "") + func.__doc__
-        
-        # Directly register func (no wrapper needed, config already injected into instance via set_config)
-        self.register_tool(name, func, resource_type=None)
-        
-        logger.debug(f"Registered API tool: {name}")
+    def list_tools(self, include_hidden: bool = False) -> List[Dict[str, Any]]:
+        """列出所有可用工具（包含 MCP 工具）"""
+        tools = []
+        print(f"[DEBUG] list_tools called, _tools has {len(self._tools)} items")
+        print(f"[DEBUG] _tools keys: {list(self._tools.keys())}")
+
+        # 系统内部工具，不应暴露给 LLM
+        # 这些工具由编排层自动调用，LLM 不应直接调用
+        INTERNAL_TOOLS = {"get_skill_tools", "execute_skill_tool", "select_skill"}
+
+        for full_name, func in self._tools.items():
+            if not include_hidden and full_name.startswith("_"):
+                continue
+
+            # 过滤系统内部工具（LLM 不应直接调用）
+            tool_base_name = full_name.split(":")[-1]  # 处理 "resource:tool_name" 格式
+            if tool_base_name in INTERNAL_TOOLS:
+                print(f"[DEBUG] Filtering out internal tool: {full_name}")
+                continue
+
+            # 获取工具描述
+            doc = getattr(func, "__doc__", "") or ""
+            # 提取第一行作为简短描述
+            short_desc = doc.strip().split("\n")[0] if doc else ""
+
+            tools.append({
+                "name": full_name,
+                "full_name": full_name,
+                "description": short_desc,
+            })
+        return tools
     
-    def get_backend(self, name: str) -> Optional[Backend]:
-        """Get loaded backend"""
-        return self._backends.get(name)
-    
-    def list_backends(self) -> List[str]:
-        """List all loaded backend names"""
-        return list(self._backends.keys())
-    
-    # ========================================================================
-    # Warmup management
-    # ========================================================================
-    
-    async def warmup_backend(self, backend_name: str) -> bool:
-        """
-        Warmup a single backend
+    async def execute(self, action: str, params: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+        """执行工具 - 支持与金融研投助手一致的直接工具调用"""
+        # 支持直接工具调用格式: skill_name.tool_name
+        if "." in action and action not in self._tools:
+            # 尝试解析为 execute_skill_tool 调用
+            parts = action.split(".", 1)
+            if len(parts) == 2:
+                skill_name, tool_name = parts
+                # 转换为 execute_skill_tool 调用
+                converted_params = {
+                    "skill_name": skill_name,
+                    "tool_name": tool_name,
+                    "arguments": params
+                }
+                return await self._executor.execute("execute_skill_tool", converted_params, **kwargs)
         
-        Args:
-            backend_name: Backend name
-            
-        Returns:
-            Whether warmup succeeded
-        """
-        result = await self.warmup_backend_with_error(backend_name)
-        return result["success"]
-    
-    async def warmup_backend_with_error(self, backend_name: str) -> Dict[str, Any]:
-        """
-        Warmup a single backend, return detailed error information
-        
-        Args:
-            backend_name: Backend name
-            
-        Returns:
-            Warmup result dictionary {"success": bool, "error": str | None}
-        """
-        async with self._warmup_lock:
-            # Skip if already warmed up
-            if self._warmed_up_backends.get(backend_name):
-                return {"success": True, "error": None}
-            
-            backend = self._backends.get(backend_name)
-            if not backend:
-                error_msg = f"Backend not found: {backend_name}. Available backends: {list(self._backends.keys())}"
-                logger.warning(error_msg)
-                return {"success": False, "error": error_msg}
-            
-            try:
-                logger.info(f"🔥 Warming up backend: {backend_name}")
-                await backend.warmup()
-                self._warmed_up_backends[backend_name] = True
-                logger.info(f"✅ Backend warmed up: {backend_name}")
-                return {"success": True, "error": None}
-            except Exception as e:
-                import traceback
-                error_msg = f"Warmup exception: {str(e)}\n{traceback.format_exc()}"
-                logger.error(f"❌ Warmup failed for {backend_name}: {error_msg}")
-                return {"success": False, "error": error_msg}
-    
-    async def warmup_backends_with_errors(self, backend_names: Optional[List[str]] = None) -> Dict[str, Dict[str, Any]]:
-        """
-        Warmup multiple backends, return detailed error information
-        
-        Args:
-            backend_names: List of backend names to warmup, None means warmup all loaded backends
-            
-        Returns:
-            Warmup result dictionary {backend_name: {"success": bool, "error": str | None}}
-        """
-        targets = backend_names or list(self._backends.keys())
-        results = {}
-        
-        for name in targets:
-            results[name] = await self.warmup_backend_with_error(name)
-        
-        return results
+        # 标准工具调用
+        return await self._executor.execute(action, params, **kwargs)
     
     async def ensure_backend_warmed_up(self, backend_name: str) -> bool:
-        """
-        Ensure backend is warmed up (for automatic warmup)
-        
-        Called when executing tools, automatically warms up backend if not already warmed up.
-        This is an internal method, users don't need to call it.
-        
-        Args:
-            backend_name: Backend name
-            
-        Returns:
-            Whether warmup succeeded
-        """
+        """确保 Backend 已 warmup"""
         if self._warmed_up_backends.get(backend_name):
             return True
-        return await self.warmup_backend(backend_name)
+        
+        backend = self._backends.get(backend_name)
+        if not backend:
+            return False
+        
+        async with self._warmup_lock:
+            if self._warmed_up_backends.get(backend_name):
+                return True
+            
+            try:
+                await backend.warmup()
+                self._warmed_up_backends[backend_name] = True
+                return True
+            except Exception as e:
+                logger.error(f"Warmup failed: {backend_name}: {e}")
+                return False
     
-    def get_warmup_status(self) -> Dict[str, Any]:
-        """Get warmup status"""
-        return {
-            "backends": {
-                name: {
-                    "loaded": True,
-                    "warmed_up": self._warmed_up_backends.get(name, False)
-                }
-                for name in self._backends.keys()
-            },
-            "summary": {
-                "total": len(self._backends),
-                "warmed_up": sum(1 for v in self._warmed_up_backends.values() if v),
-                "pending": len(self._backends) - sum(1 for v in self._warmed_up_backends.values() if v)
-            }
-        }
-    
-    # ========================================================================
-    # Resource type registration
-    # ========================================================================
-    
-    def register_resource_type(
-        self,
-        resource_type: str,
-        initializer: Optional[Callable] = None,
-        cleaner: Optional[Callable] = None,
-        default_config: Optional[Dict[str, Any]] = None
-    ):
-        """Register resource type"""
-        self.resource_router.register_resource_type(
-            resource_type, initializer, cleaner, default_config
-        )
+    def register_resource_type(self, resource_type: str, **kwargs):
+        """注册资源类型"""
+        self.resource_router.register_resource_type(resource_type, **kwargs)
     
     # ========================================================================
-    # FastAPI application
+    # FastAPI Application
     # ========================================================================
     
     def create_app(self) -> FastAPI:
-        """Create FastAPI application"""
+        """创建 FastAPI 应用"""
         
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             logger.info("HTTP Service Server starting...")
-            logger.info("Session TTL configured: %ss", self.session_ttl)
-
-            # Execute warmup
-            if self.warmup_resources:
-                logger.info(f"🔥 Starting warmup for resources: {self.warmup_resources}")
-                warmup_results = await self.warmup_backends_with_errors(self.warmup_resources)
-
-                # Record warmup results
-                for backend_name, result in warmup_results.items():
-                    if result["success"]:
-                        logger.info(f"✅ Warmup successful: {backend_name}")
-                    else:
-                        logger.error(f"❌ Warmup failed: {backend_name} - {result['error']}")
-
-                # Count warmup results
-                success_count = sum(1 for r in warmup_results.values() if r["success"])
-                total_count = len(warmup_results)
-                logger.info(f"🔥 Warmup completed: {success_count}/{total_count} backends ready")
-                failed = {name: info for name, info in warmup_results.items() if not info["success"]}
-                if failed:
-                    details = "; ".join(
-                        f"{name} -> {info.get('error') or 'unknown error'}" for name, info in failed.items()
-                    )
-                    raise RuntimeError(f"Warmup failed for backends: {details}")
             
-            # After warmup completes (regardless of whether there are warmup resources), print server ready message
+            # Warmup MCP Backends
+            for name in self._mcp_backends.keys():
+                await self.warmup_mcp_backend(name)
+            
+            # Warmup 传统 Backends
+            for name in self.warmup_resources or []:
+                if name in self._backends:
+                    await self.ensure_backend_warmed_up(name)
+            
             print("=" * 80)
             print("✅ Server ready!")
             print(f"🌐 Access URL: http://{self.host}:{self.port}")
             print(f"📖 API Docs: http://{self.host}:{self.port}/docs")
-            print(f"🔍 Health Check: http://{self.host}:{self.port}/health")
             print("=" * 80)
-            print("\nPress Ctrl+C to stop the server\n")
-
-            async def cleanup_task():
-                while True:
-                    await asyncio.sleep(300)
-                    cleaned = await self.resource_router.cleanup_expired()
-                    if cleaned > 0:
-                        logger.info(f"Cleaned {cleaned} expired sessions")
-
-            self._cleanup_task = asyncio.create_task(cleanup_task())
-
+            
             yield
-
-            logger.info("HTTP Service Server shutting down...")
-            if self._cleanup_task:
-                self._cleanup_task.cancel()
-
-            # Cleanup all sessions before shutdown to ensure VM/container resources are released
-            try:
-                all_sessions = await self.resource_router.list_all_sessions()
-                cleaned_count = 0
-                for worker_id in list(all_sessions.keys()):
-                    cleaned_count += await self.resource_router.destroy_worker_sessions(worker_id)
-                logger.info("Cleaned %s sessions before shutdown", cleaned_count)
-            except Exception as exc:
-                logger.error("Failed to cleanup sessions before shutdown: %s", exc)
-
-            # Shutdown all Backends
-            logger.info("Shutting down all backends...")
-            for backend_name in list(self._backends.keys()):
-                backend = self._backends.get(backend_name)
-                if backend:
-                    try:
-                        logger.info(f"Shutting down backend: {backend_name}")
-                        await backend.shutdown()
-                        logger.info(f"Backend {backend_name} shutdown complete")
-                    except Exception as e:
-                        logger.error(f"Failed to shutdown {backend_name}: {e}")
+            
+            logger.info("Server shutting down...")
+            # Shutdown MCP Backends
+            for backend in self._mcp_backends.values():
+                try:
+                    await backend.shutdown()
+                except Exception as e:
+                    logger.error(f"Shutdown error: {e}")
+            
+            # Shutdown 传统 Backends
+            for backend in self._backends.values():
+                try:
+                    await backend.shutdown()
+                except Exception as e:
+                    logger.error(f"Shutdown error: {e}")
         
         app = FastAPI(
             title=self.title,
@@ -622,17 +497,95 @@ class HTTPServiceServer:
                 allow_headers=["*"],
             )
         
-        # 使用独立的路由模块
+        # 注册传统路由
         register_routes(app, self)
+        
+        # 注册 MCP 路由
+        self._register_mcp_routes(app)
         
         self._app = app
         return app
     
-    def run(self, **kwargs):
-        """Start server"""
-        import uvicorn
+    def _register_mcp_routes(self, app: FastAPI):
+        """注册 MCP 端点"""
         
+        # MCP 元信息端点
+        @app.get("/mcp/backends")
+        async def list_mcp_backends():
+            """列出所有 MCP Backends"""
+            return {
+                "backends": [
+                    {
+                        "name": name,
+                        "description": backend.description,
+                        "version": backend.version
+                    }
+                    for name, backend in self._mcp_backends.items()
+                ]
+            }
+        
+        # ==================== 金融研投助手模式端点 ====================
+        
+        # select_skill 端点
+        @app.post("/mcp/{backend_name}/skills/select")
+        async def mcp_select_skill(
+            backend_name: str,
+            request: Dict[str, Any]
+        ):
+            """MCP: select_skill - 金融研投助手模式"""
+            skill_name = request.get("skill_name")
+            reason = request.get("reason", "")
+            
+            if not skill_name:
+                return JSONResponse(
+                    status_code=400, 
+                    content={"success": False, "error": "Missing 'skill_name' field"}
+                )
+            
+            result = await self._handle_mcp_select_skill(backend_name, skill_name, reason)
+            return result
+        
+        # get_skill_tools 端点
+        @app.get("/mcp/{backend_name}/skills/{skill_name}/tools")
+        async def mcp_get_skill_tools(
+            backend_name: str,
+            skill_name: str
+        ):
+            """MCP: get_skill_tools - 金融研投助手模式"""
+            result = await self._handle_mcp_get_skill_tools(backend_name, skill_name)
+            return result
+        
+        # execute_skill_tool 端点
+        @app.post("/mcp/{backend_name}/tools/execute")
+        async def mcp_execute_skill_tool(
+            backend_name: str,
+            request: Dict[str, Any]
+        ):
+            """MCP: execute_skill_tool - 金融研投助手模式"""
+            skill_name = request.get("skill_name")
+            tool_name = request.get("tool_name")
+            arguments = request.get("arguments", {})
+            
+            if not skill_name or not tool_name:
+                return JSONResponse(
+                    status_code=400, 
+                    content={"success": False, "error": "Missing 'skill_name' or 'tool_name' field"}
+                )
+            
+            result = await self._handle_mcp_execute_skill_tool(
+                backend_name, skill_name, tool_name, arguments
+            )
+            return result
+            
+            if not name:
+                return JSONResponse(
+                    status_code=400, 
+                    content={"error": "Missing 'name' field"}
+                )
+            
+    def run(self, **kwargs):
+        """启动服务器"""
+        import uvicorn
         app = self.create_app()
-        logger.info(f"Starting HTTP Service Server on {self.host}:{self.port}")
+        logger.info(f"Starting server on {self.host}:{self.port}")
         uvicorn.run(app, host=self.host, port=self.port, **kwargs)
-
