@@ -6,7 +6,7 @@ import os
 sys.path.insert(0, '/Users/talantan/.openclaw/workspace-dev/external/AgentFlow')
 sys.path.insert(0, '/Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/backend')
 
-os.environ['DASHSCOPE_API_KEY'] = 'sk-946dc6cdc78b40829f826a0ca3fb7382'
+os.environ['DASHSCOPE_API_KEY'] = 'sk-f5ad885285a44c339968325bdebc5658'
 os.environ['TUSHARE_API_TOKEN'] = '9e4123cf56aaa553b06556e64b05e9d8d004340d82897eb1704ccd91c088'
 os.environ['TUSHARE_API_URL'] = 'http://lianghua.nanyangqiankun.top'
 

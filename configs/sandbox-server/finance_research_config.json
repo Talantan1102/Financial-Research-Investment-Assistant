@@ -1,19 +1,19 @@
 {
   "server": {
-    "url": "http://127.0.0.1:18890",
-    "port": 18890,
+    "url": "http://127.0.0.1:8080",
+    "port": 8080,
     "session_ttl": 600
   },
   "resources": {
-    "unified_finance": {
+    "finance_research": {
       "enabled": true,
-      "backend_class": "sandbox.server.backends.resources.unified_finance.UnifiedFinanceBackend",
+      "backend_class": "sandbox.server.backends.resources.finance_research.FinanceResearchBackend",
       "description": "金融研投助手统一 Backend - 通过 execute_skill_tool 调用所有工具",
       "config": {}
     }
   },
   "warmup": {
     "enabled": true,
-    "resources": ["unified_finance"]
+    "resources": ["finance_research"]
   }
 }

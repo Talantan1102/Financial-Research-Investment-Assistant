@@ -1,0 +1,14 @@
+{
+  "model_name": "qwen-max",
+  "api_key": "${OPENAI_API_KEY}",
+  "base_url": "${OPENAI_BASE_URL}",
+  "max_depth": 3,
+  "branching_factor": 1,
+  "min_depth": 2,
+  "max_workers": 1,
+  "seed_description": "金融研投助手数据生成",
+  "sampling_tips": "",
+  "sandbox_server_url": "http://127.0.0.1:8080",
+  "sandbox_auto_start": false,
+  "sandbox_timeout": 120
+}
