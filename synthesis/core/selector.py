@@ -2,7 +2,7 @@
 Trajectory selector - selects high-quality trajectories from the tree
 """
 
-from typing import Dict, List
+from typing import Dict, List, Any
 
 from .models import TrajectoryNode, Trajectory
 from .config import SynthesisConfig
@@ -27,6 +27,7 @@ class TrajectorySelector:
                            root_id: str,
                            seed_data: str,
                            source_id: str,
+                           tags: Dict[str, Any] = None,
                            max_selected_traj: int = None) -> List[Trajectory]:
         """Select high-quality trajectories from tree"""
         if max_selected_traj is None:
@@ -34,6 +35,8 @@ class TrajectorySelector:
 
         print(f"\n{'='*60}")
         print(f"Selecting Trajectories (max: {max_selected_traj})")
+        if tags:
+            print(f"Tags: {tags}")
         print(f"{'='*60}\n")
 
         # 1. Find all leaf nodes
@@ -58,7 +61,7 @@ class TrajectorySelector:
         print(f"Built {len(candidate_paths)} candidate paths")
 
         # 4. Score and select
-        selected = self._score_and_select(candidate_paths, seed_data, source_id, max_selected_traj)
+        selected = self._score_and_select(candidate_paths, seed_data, source_id, tags, max_selected_traj)
 
         print(f"\n✅ Selected {len(selected)} trajectories")
 
@@ -85,6 +88,7 @@ class TrajectorySelector:
                         paths: List[List[TrajectoryNode]],
                         seed_data: str,
                         source_id: str,
+                        tags: Dict[str, Any],
                         max_selected: int) -> List[Trajectory]:
         """Score and select best paths, avoiding highly similar paths"""
         # Calculate average observation lengths
@@ -137,7 +141,8 @@ class TrajectorySelector:
                     nodes=path,
                     seed_data=seed_data,
                     source_id=source_id,
-                    total_depth=len(path)
+                    total_depth=len(path),
+                    tags=tags or {}  # 传递标签
                 )
                 selected_trajectories.append(trajectory)
                 selected_path_sets.append(current_path_set)

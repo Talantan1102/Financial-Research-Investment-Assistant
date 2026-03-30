@@ -3,6 +3,7 @@ Configuration management for RAG synthesis pipeline
 """
 
 import json
+import os
 import yaml
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field, fields
@@ -64,6 +65,18 @@ class SynthesisConfig:
         """Create configuration from dictionary"""
         if not isinstance(config_dict, dict):
             raise TypeError(f"config_dict must be dict, got: {type(config_dict).__name__}")
+
+        # Resolve environment variables in string values
+        def _resolve_env_vars(value: Any) -> Any:
+            if isinstance(value, str) and value.startswith('${') and value.endswith('}'):
+                env_var = value[2:-1]
+                default_val = None
+                if ':' in env_var:
+                    env_var, default_val = env_var.split(':', 1)
+                return os.environ.get(env_var, default_val or value)
+            return value
+
+        config_dict = {k: _resolve_env_vars(v) for k, v in config_dict.items()}
 
         valid_fields = {f.name for f in fields(cls)}
         filtered = {k: v for k, v in config_dict.items() if k in valid_fields}

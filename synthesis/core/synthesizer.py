@@ -24,7 +24,7 @@ class QASynthesizer:
             base_url=self.config.base_url,
         )
 
-    def synthesize_qa(self, trajectory: Trajectory, qa_index: int = 0) -> Optional[SynthesizedQA]:
+    def synthesize_qa(self, trajectory: Trajectory, qa_index: int = 0, tags: Optional[Dict[str, Any]] = None) -> Optional[SynthesizedQA]:
         """Synthesize Q&A pair from trajectory"""
         print(f"\n🔧 Synthesizing QA pair - Trajectory: {trajectory.trajectory_id}")
 
@@ -48,7 +48,7 @@ class QASynthesizer:
                 last_failure_reason = f"Synthesis exception: {str(e)}"
                 continue
 
-            qa_obj, failure_reason = self._build_qa_from_result(result, trajectory, qa_index, attempt)
+            qa_obj, failure_reason = self._build_qa_from_result(result, trajectory, qa_index, attempt, tags)
             if failure_reason or qa_obj is None:
                 last_failure_reason = failure_reason or "Unknown validation failure."
                 continue
@@ -57,6 +57,8 @@ class QASynthesizer:
             print(f"    QA ID: {qa_obj.qa_id}")
             print(f"    Question: {qa_obj.question}...")
             print(f"    Answer: {qa_obj.answer}...")
+            if qa_obj.tags:
+                print(f"    Tags: {qa_obj.tags}")
             return qa_obj
 
         print(f"  ✗ Synthesis failed after {max_attempts} attempts. Last reason: {last_failure_reason}")
@@ -66,7 +68,8 @@ class QASynthesizer:
                              result: Dict[str, Any],
                              trajectory: Trajectory,
                              qa_index: int,
-                             attempt: int) -> Tuple[Optional[SynthesizedQA], Optional[str]]:
+                             attempt: int,
+                             tags: Optional[Dict[str, Any]] = None) -> Tuple[Optional[SynthesizedQA], Optional[str]]:
         """Validate response and build QA object"""
         if not isinstance(result, dict):
             return None, "Invalid response format."
@@ -102,7 +105,8 @@ class QASynthesizer:
                 "seed_description": self.config.seed_description,
                 "trajectory_depth": trajectory.total_depth,
                 "synthesis_date": datetime.now().isoformat()
-            }
+            },
+            tags=tags or {}  # 传递标签
         )
         return qa, None
 

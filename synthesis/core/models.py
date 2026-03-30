@@ -30,6 +30,7 @@ class Trajectory:
     seed_data: str
     total_depth: int
     source_id: str = ""
+    tags: Dict[str, Any] = field(default_factory=dict)  # 从 seed kwargs 传递的标签
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
@@ -38,6 +39,7 @@ class Trajectory:
             "source_id": self.source_id,
             "seed_data": self.seed_data,
             "total_depth": self.total_depth,
+            "tags": self.tags,
             "nodes": [node.to_dict() for node in self.nodes]
         }
 
@@ -52,6 +54,7 @@ class SynthesizedQA:
     source_id: str = ""
     qa_id: str = ""
     metadata: Dict[str, Any] = field(default_factory=dict)
+    tags: Dict[str, Any] = field(default_factory=dict)  # 从 seed kwargs 传递的标签
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format"""
@@ -62,4 +65,7 @@ class SynthesizedQA:
         """Create instance from dictionary"""
         data = dict(data or {})
         data.pop("negative_aspect", None)
+        # 确保 tags 字段存在（向后兼容）
+        if "tags" not in data:
+            data["tags"] = {}
         return cls(**data)

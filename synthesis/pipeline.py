@@ -152,11 +152,14 @@ class SynthesisPipeline:
 
                     # 2. Select best trajectories
                     print("\n📊 Step 2: Selecting trajectories...")
+                    # 从 kwargs 中提取 tags
+                    tags = seed_kwargs.get("tags", {}) if seed_kwargs else {}
                     selected_trajectories = selector.select_trajectories(
                         nodes=trajectory_tree,
                         root_id=sampler.root_id,
                         seed_data=seed_content,
                         source_id=source_id,
+                        tags=tags,
                         max_selected_traj=self.config.max_selected_traj
                     )
 
@@ -169,7 +172,7 @@ class SynthesisPipeline:
                     qa_pairs = []
                     for qa_idx, trajectory in enumerate(selected_trajectories):
                         try:
-                            qa = synthesizer.synthesize_qa(trajectory, qa_idx)
+                            qa = synthesizer.synthesize_qa(trajectory, qa_idx, tags=trajectory.tags)
                             if qa:
                                 qa_pairs.append(qa.to_dict())
                         except Exception as e:
