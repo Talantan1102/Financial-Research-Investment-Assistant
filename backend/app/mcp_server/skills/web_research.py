@@ -3,9 +3,13 @@
 
 """WebResearch Skill - 网络搜索工具
 
-提供网络信息搜索功能，获取新闻、公告、研报等外部信息。
+基于博查AI开放平台 API，提供真实的网络信息搜索功能。
+博查API文档: https://open.bochaai.com/
 """
 
+import os
+import aiohttp
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
 
@@ -14,14 +18,17 @@ class WebResearchSkill(BaseSkill):
     """
     网络搜索 Skill
 
-    提供网络信息搜索，获取新闻、公告、研报等外部信息。
+    基于博查AI开放平台 API，提供真实的网络信息搜索，
+    获取新闻、公告、研报等外部信息。
     """
 
     name = "web_research"
-    description = "网络信息搜索，获取新闻、公告、研报等外部信息"
+    description = "网络信息搜索，基于博查AI开放平台获取真实新闻、公告、研报等外部信息"
 
     def __init__(self):
         super().__init__()
+        self.api_key = os.getenv("BOCHA_API_KEY", "")
+        self.base_url = "https://api.bochaai.com/v1/web-search"
 
     def _register_tools(self):
         """注册 WebResearch 相关工具"""
@@ -142,181 +149,331 @@ class WebResearchSkill(BaseSkill):
             ]
         )
 
+    def _extract_stock_name(self, ts_code: str) -> str:
+        """从股票代码提取股票名称（简化版，实际应从数据库查询）"""
+        stock_names = {
+            "600519.SH": "贵州茅台",
+            "000858.SZ": "五粮液",
+            "600809.SH": "山西汾酒",
+            "300750.SZ": "宁德时代",
+            "688981.SH": "中芯国际",
+            "600036.SH": "招商银行",
+            "000001.SZ": "平安银行",
+        }
+        return stock_names.get(ts_code, ts_code)
+
+    async def _call_bocha_api(self, query: str, freshness: str = "Month", count: int = 10) -> Dict[str, Any]:
+        """
+        调用博查AI搜索API
+
+        Args:
+            query: 搜索查询
+            freshness: 时间范围 (Day, Week, Month, Year)
+            count: 返回结果数量
+
+        Returns:
+            API响应数据
+        """
+        if not self.api_key:
+            return {
+                "success": False,
+                "error": "BOCHA_API_KEY 未配置，请在环境变量中设置"
+            }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "query": query,
+            "freshness": freshness,
+            "count": min(count, 10),  # API限制最大10条
+            "summary": True  # 启用AI摘要
+        }
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.base_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        return {"success": True, "data": data}
+                    else:
+                        error_text = await response.text()
+                        return {
+                            "success": False,
+                            "error": f"API请求失败 (状态码: {response.status}): {error_text}"
+                        }
+        except aiohttp.ClientTimeout:
+            return {"success": False, "error": "请求超时"}
+        except Exception as e:
+            return {"success": False, "error": f"请求异常: {str(e)}"}
+
+    def _parse_bocha_results(self, api_response: Dict, limit: int) -> List[Dict]:
+        """解析博查API返回结果"""
+        results = []
+
+        if not api_response.get("success"):
+            return results
+
+        # 处理嵌套结构: response -> data -> webPages -> value
+        outer_data = api_response.get("data", {})
+        # 可能是直接的 SearchResponse 或嵌套在 data 中
+        if "webPages" in outer_data:
+            search_response = outer_data
+        else:
+            search_response = outer_data.get("data", {})
+        
+        web_pages = search_response.get("webPages", {})
+        items = web_pages.get("value", [])
+
+        for item in items[:limit]:
+            results.append({
+                "title": item.get("name", ""),
+                "url": item.get("url", ""),
+                "source": item.get("siteName", ""),
+                "date": item.get("datePublished", ""),
+                "summary": item.get("summary", item.get("snippet", ""))
+            })
+
+        return results
+
     async def search_stock_news(self, ts_code: str, days: int = 7, limit: int = 10) -> ToolResult:
-        """搜索股票新闻"""
+        """
+        搜索股票新闻 - 使用博查AI API
+
+        Args:
+            ts_code: 股票代码
+            days: 搜索最近几天
+            limit: 返回数量
+
+        Returns:
+            ToolResult: 搜索结果
+        """
         if not ts_code:
             return ToolResult(success=False, error="股票代码不能为空")
 
         try:
-            # 模拟新闻数据（实际实现需要接入新闻API）
-            # 这里返回模拟数据作为示例
-            mock_news = [
-                {
-                    "title": f"{ts_code}发布最新财报，业绩稳健增长",
-                    "source": "证券时报",
-                    "date": "2026-03-18",
-                    "url": f"https://example.com/news/{ts_code}/1",
-                    "summary": "公司发布2025年年报，营收同比增长15%，净利润增长12%..."
-                },
-                {
-                    "title": f"{ts_code}获多家机构增持，看好长期发展",
-                    "source": "中国证券报",
-                    "date": "2026-03-15",
-                    "url": f"https://example.com/news/{ts_code}/2",
-                    "summary": "北向资金连续5日净流入，机构看好公司长期发展前景..."
-                },
-                {
-                    "title": f"{ts_code}新品发布会成功举办",
-                    "source": "新浪财经",
-                    "date": "2026-03-12",
-                    "url": f"https://example.com/news/{ts_code}/3",
-                    "summary": "公司发布新一代产品，市场反响热烈..."
-                }
-            ]
+            stock_name = self._extract_stock_name(ts_code)
+
+            # 构建搜索查询
+            query = f"{stock_name} {ts_code.split('.')[0]} 新闻"
+
+            # 根据days设置freshness
+            if days <= 1:
+                freshness = "Day"
+            elif days <= 7:
+                freshness = "Week"
+            elif days <= 30:
+                freshness = "Month"
+            else:
+                freshness = "Year"
+
+            # 调用博查API
+            api_result = await self._call_bocha_api(query, freshness, limit)
+
+            if not api_result["success"]:
+                return ToolResult(
+                    success=False,
+                    error=f"搜索失败: {api_result.get('error', '未知错误')}"
+                )
+
+            # 解析结果
+            news_list = self._parse_bocha_results(api_result, limit)
 
             return ToolResult(success=True, data={
                 "ts_code": ts_code,
-                "news": mock_news[:limit],
-                "count": len(mock_news[:limit]),
-                "search_period": f"最近{days}天"
+                "news": news_list,
+                "count": len(news_list),
+                "search_period": f"最近{days}天",
+                "data_source": "博查AI开放平台"
             })
 
         except Exception as e:
             return ToolResult(success=False, error=f"搜索股票新闻失败: {str(e)}")
 
     async def search_company_announcements(self, ts_code: str, category: str = "all", limit: int = 10) -> ToolResult:
-        """搜索公司公告"""
+        """
+        搜索公司公告 - 使用博查AI API
+
+        Args:
+            ts_code: 股票代码
+            category: 公告类型
+            limit: 返回数量
+
+        Returns:
+            ToolResult: 搜索结果
+        """
         if not ts_code:
             return ToolResult(success=False, error="股票代码不能为空")
 
         try:
-            # 模拟公告数据
-            mock_announcements = [
-                {
-                    "title": "2025年年度报告",
-                    "category": "report",
-                    "date": "2026-03-20",
-                    "url": f"https://example.com/announcement/{ts_code}/1"
-                },
-                {
-                    "title": "关于召开2025年度股东大会的通知",
-                    "category": "disclosure",
-                    "date": "2026-03-18",
-                    "url": f"https://example.com/announcement/{ts_code}/2"
-                },
-                {
-                    "title": "关于重大合同的公告",
-                    "category": "major",
-                    "date": "2026-03-15",
-                    "url": f"https://example.com/announcement/{ts_code}/3"
-                },
-                {
-                    "title": "2025年第三季度报告",
-                    "category": "report",
-                    "date": "2025-10-30",
-                    "url": f"https://example.com/announcement/{ts_code}/4"
-                }
-            ]
+            stock_name = self._extract_stock_name(ts_code)
 
-            # 按类别筛选
-            if category != "all":
-                filtered = [a for a in mock_announcements if a["category"] == category]
-            else:
-                filtered = mock_announcements
+            # 根据类别构建查询
+            category_keywords = {
+                "report": "年报 季报 定期报告",
+                "major": "重大事项 重大合同",
+                "disclosure": "信息披露 公告",
+                "all": "公告"
+            }
+            keyword = category_keywords.get(category, "公告")
+
+            query = f"{stock_name} {ts_code.split('.')[0]} {keyword} site:cninfo.com.cn OR site:szse.cn OR site:sse.com.cn"
+
+            # 调用博查API
+            api_result = await self._call_bocha_api(query, "Month", limit)
+
+            if not api_result["success"]:
+                return ToolResult(
+                    success=False,
+                    error=f"搜索失败: {api_result.get('error', '未知错误')}"
+                )
+
+            # 解析结果
+            announcements = self._parse_bocha_results(api_result, limit)
+
+            # 标记类别（简化处理）
+            for item in announcements:
+                title = item.get("title", "")
+                if "年报" in title or "季报" in title:
+                    item["category"] = "report"
+                elif "重大" in title:
+                    item["category"] = "major"
+                else:
+                    item["category"] = "disclosure"
 
             return ToolResult(success=True, data={
                 "ts_code": ts_code,
                 "category": category,
-                "announcements": filtered[:limit],
-                "count": len(filtered[:limit])
+                "announcements": announcements,
+                "count": len(announcements),
+                "data_source": "博查AI开放平台"
             })
 
         except Exception as e:
             return ToolResult(success=False, error=f"搜索公司公告失败: {str(e)}")
 
     async def search_industry_news(self, industry: str, days: int = 7, limit: int = 10) -> ToolResult:
-        """搜索行业新闻"""
+        """
+        搜索行业新闻 - 使用博查AI API
+
+        Args:
+            industry: 行业名称
+            days: 搜索最近几天
+            limit: 返回数量
+
+        Returns:
+            ToolResult: 搜索结果
+        """
         if not industry:
             return ToolResult(success=False, error="行业名称不能为空")
 
         try:
-            # 模拟行业新闻数据
-            mock_news = [
-                {
-                    "title": f"{industry}行业迎来政策利好",
-                    "source": "经济日报",
-                    "date": "2026-03-19",
-                    "url": f"https://example.com/industry/{industry}/1",
-                    "summary": f"国家发改委发布{industry}行业支持政策，预计将带动行业发展..."
-                },
-                {
-                    "title": f"{industry}行业景气度持续提升",
-                    "source": "财新网",
-                    "date": "2026-03-16",
-                    "url": f"https://example.com/industry/{industry}/2",
-                    "summary": f"最新数据显示，{industry}行业景气指数连续三月上升..."
-                },
-                {
-                    "title": f"{industry}行业龙头企业扩产",
-                    "source": "21世纪经济报道",
-                    "date": "2026-03-14",
-                    "url": f"https://example.com/industry/{industry}/3",
-                    "summary": f"多家{industry}龙头企业宣布扩产计划，行业前景看好..."
-                }
-            ]
+            # 构建搜索查询
+            query = f"{industry}行业 新闻 动态"
+
+            # 根据days设置freshness
+            if days <= 1:
+                freshness = "Day"
+            elif days <= 7:
+                freshness = "Week"
+            elif days <= 30:
+                freshness = "Month"
+            else:
+                freshness = "Year"
+
+            # 调用博查API
+            api_result = await self._call_bocha_api(query, freshness, limit)
+
+            if not api_result["success"]:
+                return ToolResult(
+                    success=False,
+                    error=f"搜索失败: {api_result.get('error', '未知错误')}"
+                )
+
+            # 解析结果
+            news_list = self._parse_bocha_results(api_result, limit)
 
             return ToolResult(success=True, data={
                 "industry": industry,
-                "news": mock_news[:limit],
-                "count": len(mock_news[:limit]),
-                "search_period": f"最近{days}天"
+                "news": news_list,
+                "count": len(news_list),
+                "search_period": f"最近{days}天",
+                "data_source": "博查AI开放平台"
             })
 
         except Exception as e:
             return ToolResult(success=False, error=f"搜索行业新闻失败: {str(e)}")
 
     async def search_research_reports(self, keyword: str, report_type: str = "all", limit: int = 5) -> ToolResult:
-        """搜索研报"""
+        """
+        搜索研报 - 使用博查AI API
+
+        Args:
+            keyword: 搜索关键词
+            report_type: 研报类型
+            limit: 返回数量
+
+        Returns:
+            ToolResult: 搜索结果
+        """
         if not keyword:
             return ToolResult(success=False, error="搜索关键词不能为空")
 
         try:
-            # 模拟研报数据
-            mock_reports = [
-                {
-                    "title": f"{keyword}深度研究：业绩稳健，估值合理",
-                    "institution": "中信证券",
-                    "author": "张三",
-                    "date": "2026-03-18",
-                    "rating": "买入",
-                    "target_price": "185.00",
-                    "summary": "公司基本面稳健，盈利能力持续提升，维持买入评级..."
-                },
-                {
-                    "title": f"{keyword}行业分析报告",
-                    "institution": "国泰君安",
-                    "author": "李四",
-                    "date": "2026-03-15",
-                    "rating": "增持",
-                    "target_price": "178.00",
-                    "summary": "行业景气度回升，公司作为龙头将充分受益..."
-                },
-                {
-                    "title": f"{keyword}2025年年报点评",
-                    "institution": "海通证券",
-                    "author": "王五",
-                    "date": "2026-03-12",
-                    "rating": "买入",
-                    "target_price": "190.00",
-                    "summary": "业绩超预期，分红比例提升，长期价值凸显..."
-                }
-            ]
+            # 根据类型构建查询
+            type_keywords = {
+                "rating": "研报 评级 买入 增持",
+                "earnings": "研报 盈利预测 业绩",
+                "industry": "研报 行业分析",
+                "all": "研报 研究报告"
+            }
+            type_keyword = type_keywords.get(report_type, "研报")
+
+            query = f"{keyword} {type_keyword}"
+
+            # 调用博查API
+            api_result = await self._call_bocha_api(query, "Month", limit)
+
+            if not api_result["success"]:
+                return ToolResult(
+                    success=False,
+                    error=f"搜索失败: {api_result.get('error', '未知错误')}"
+                )
+
+            # 解析结果
+            reports = self._parse_bocha_results(api_result, limit)
+
+            # 尝试提取评级和目标价（从标题和摘要中）
+            for item in reports:
+                title = item.get("title", "")
+                summary = item.get("summary", "")
+                combined = title + " " + summary
+
+                # 简单提取评级
+                if "买入" in combined:
+                    item["rating"] = "买入"
+                elif "增持" in combined:
+                    item["rating"] = "增持"
+                elif "中性" in combined:
+                    item["rating"] = "中性"
+                elif "卖出" in combined:
+                    item["rating"] = "卖出"
+                else:
+                    item["rating"] = "未评级"
 
             return ToolResult(success=True, data={
                 "keyword": keyword,
                 "report_type": report_type,
-                "reports": mock_reports[:limit],
-                "count": len(mock_reports[:limit])
+                "reports": reports,
+                "count": len(reports),
+                "data_source": "博查AI开放平台"
             })
 
         except Exception as e:
