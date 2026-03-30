@@ -1,0 +1,49 @@
+{
+  "model_name": "qwen-max",
+  "api_key": "sk-f5ad885285a44c339968325bdebc5658",
+  "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+
+  "max_depth": 10,
+  "branching_factor": 3,
+  "depth_threshold": 2,
+  "min_depth": 2,
+  "max_selected_traj": 3,
+  "path_similarity_threshold": 0.7,
+  "number_of_seed": null,
+
+  "resource_types": ["unified_finance"],
+  "resource_init_configs": {
+    "unified_finance": {
+      "content": {}
+    }
+  },
+
+  "sandbox_server_url": "http://127.0.0.1:8080",
+  "sandbox_auto_start": true,
+  "sandbox_config_path": "configs/sandbox-server/finance_research_config.json",
+  "sandbox_timeout": 120,
+
+  "available_tools": [
+    "unified_finance:*"
+  ],
+
+  "seed_description": "金融投资咨询问题",
+
+  "sampling_tips": [
+    "【重要】系统编排两轮流程:",
+    "Round 1: 调用 skill(name='market_data') 选择合适的 Skill",
+    "Round 2: 直接调用具体工具 (如 market_data.get_quote, market_data.search_stock)",
+    "注意: 参数必须使用 ts_code 格式，如 '600519.SH'",
+    "每轮调用后根据返回结果决定下一步操作"
+  ],
+
+  "synthesis_tips": [
+    "生成与金融投资相关的问题",
+    "问题应该需要多轮工具调用才能回答",
+    "答案要有具体数据支撑",
+    "包含明确的分析结论"
+  ],
+
+  "seeds_file": "data/seeds/seeds_100k_all.jsonl",
+  "output_dir": "results/grpo_100k_synthesis"
+}
