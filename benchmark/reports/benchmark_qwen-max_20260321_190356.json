@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-03-21T19:03:56.732577",
+  "model": "qwen-max",
+  "total_tests": 1,
+  "summary": {
+    "skill_selection_accuracy": 1.0,
+    "tool_selection_accuracy": 0.0,
+    "execution_success_rate": 1.0,
+    "error_rate": 0.0,
+    "average_output_quality": 10.0,
+    "average_latency_ms": 1610.0,
+    "total_tool_calls": 0
+  },
+  "metrics": {
+    "skill_correct": 1,
+    "tools_correct": 0,
+    "execution_success": 1,
+    "errors": 0
+  },
+  "results": [
+    {
+      "test_id": "NO-SKILL-TEST",
+      "query": "你好",
+      "expected_skill": null,
+      "predicted_skill": "market_data",
+      "skill_correct": true,
+      "expected_tools": [],
+      "predicted_tools": [],
+      "tools_correct": false,
+      "execution_success": true,
+      "output_quality_score": 10.0,
+      "latency_ms": 1610,
+      "tool_call_count": 0,
+      "error_occurred": false,
+      "error_type": null,
+      "reasoning_quality": "good",
+      "raw_response": "[]",
+      "timestamp": "2026-03-21T19:03:56.592459",
+      "tool_calls_detail": [],
+      "evaluation_mode": "exact",
+      "evaluation_notes": []
+    }
+  ]
+}

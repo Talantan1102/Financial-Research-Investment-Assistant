@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-03-21T10:45:15.709089",
-  "model": "glm-4-plus",
+  "timestamp": "2026-03-21T19:03:11.641368",
+  "model": "qwen-max",
   "total_tests": 1,
   "summary": {
     "skill_selection_accuracy": 0.0,
@@ -8,7 +8,7 @@
     "execution_success_rate": 0.0,
     "error_rate": 1.0,
     "average_output_quality": 0.0,
-    "average_latency_ms": 163.0,
+    "average_latency_ms": 3244.0,
     "total_tool_calls": 0
   },
   "metrics": {
@@ -19,25 +19,28 @@
   },
   "results": [
     {
-      "test_id": "MD-001",
-      "query": "茅台现在股价多少？",
-      "expected_skill": "market_data",
+      "test_id": "NO-SKILL-TEST",
+      "query": "你好",
+      "expected_skill": null,
       "predicted_skill": "",
       "skill_correct": false,
-      "expected_tools": [
-        "get_quote"
-      ],
+      "expected_tools": [],
       "predicted_tools": [],
       "tools_correct": false,
       "execution_success": false,
       "output_quality_score": 0.0,
-      "latency_ms": 163,
+      "latency_ms": 3244,
       "tool_call_count": 0,
       "error_occurred": true,
-      "error_type": "Exception",
+      "error_type": "KeyError",
       "reasoning_quality": "poor",
-      "raw_response": "LLM 调用失败: API 调用失败: InvalidParameter - Model not exist.",
-      "timestamp": "2026-03-21T10:45:15.633928"
+      "raw_response": "'tool_calls'",
+      "timestamp": "2026-03-21T19:03:11.516851",
+      "tool_calls_detail": [],
+      "evaluation_mode": "error",
+      "evaluation_notes": [
+        "'tool_calls'"
+      ]
     }
   ]
 }

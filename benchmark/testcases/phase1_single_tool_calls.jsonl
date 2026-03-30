@@ -1,0 +1,1196 @@
+# Phase 1 扩展测试用例 - 优化版
+# 每种工具 3 种场景，共 43 工具 × 3 = 129 个用例
+# 优化原则：每个 query 只涉及一个明确的数据点，避免歧义
+
+# ============================================
+# Market Data Skill (11 工具 × 3 = 33 个用例)
+# ============================================
+
+## get_quote (3个场景) - 查询实时股价
+{
+  "id": "MD-001",
+  "query": "茅台现在股价多少？",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_quote"],
+  "complexity": "simple",
+  "evaluation_criteria": "正确返回600519当前价格"
+}
+{
+  "id": "MD-001-A",
+  "query": "000858今天多少钱一股？",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_quote"],
+  "complexity": "simple",
+  "evaluation_criteria": "正确识别代码并返回价格"
+}
+{
+  "id": "MD-001-B",
+  "query": "贵州茅台的实时行情",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_quote"],
+  "complexity": "simple",
+  "evaluation_criteria": "通过名称识别返回实时行情"
+}
+
+## search_stock (3个场景) - 搜索股票代码
+{
+  "id": "MD-002",
+  "query": "搜索一下贵州茅台的股票代码",
+  "expected_skill": "market_data",
+  "expected_tools": ["search_stock"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回茅台的股票代码600519.SH"
+}
+{
+  "id": "MD-002-A",
+  "query": "五粮液的股票代码是什么",
+  "expected_skill": "market_data",
+  "expected_tools": ["search_stock"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回000858.SZ"
+}
+{
+  "id": "MD-002-B",
+  "query": "招商银行代码",
+  "expected_skill": "market_data",
+  "expected_tools": ["search_stock"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回600036.SH"
+}
+
+## get_history (3个场景) - 查询历史行情
+{
+  "id": "MD-003",
+  "query": "茅台最近30天的股价走势",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_history"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回30条日K线数据"
+}
+{
+  "id": "MD-003-A",
+  "query": "查看五粮液2024年1月的K线",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_history"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回指定月份历史数据"
+}
+{
+  "id": "MD-003-B",
+  "query": "600519过去一年的股价变化",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_history"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回年线数据"
+}
+
+## get_stock_basic_info (3个场景) - 股票基本信息
+{
+  "id": "MD-004",
+  "query": "帮我查一下股票代码600519的基本信息",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_stock_basic_info"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回茅台行业、地区、上市日期"
+}
+{
+  "id": "MD-004-A",
+  "query": "茅台是什么时候上市的？",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_stock_basic_info"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回上市日期"
+}
+{
+  "id": "MD-004-B",
+  "query": "查一下000858的行业分类",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_stock_basic_info"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业信息"
+}
+
+## get_daily_basic (3个场景) - 每日指标
+{
+  "id": "MD-005",
+  "query": "贵州茅台今天的市盈率",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_daily_basic"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回PE数值"
+}
+{
+  "id": "MD-005-A",
+  "query": "茅台今天的换手率多少",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_daily_basic"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回换手率数据"
+}
+{
+  "id": "MD-005-B",
+  "query": "五粮液的市值",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_daily_basic"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回市值"
+}
+
+## get_money_flow (3个场景) - 资金流向
+{
+  "id": "MD-006",
+  "query": "今天主力资金流入茅台的情况",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_money_flow"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回资金流向数据"
+}
+{
+  "id": "MD-006-A",
+  "query": "五粮液最近5日的主力资金动向",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_money_flow"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回5日资金流向"
+}
+{
+  "id": "MD-006-B",
+  "query": "超大单资金在流入还是流出茅台",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_money_flow"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回超大单资金流向"
+}
+
+## get_top_list (3个场景) - 龙虎榜
+{
+  "id": "MD-007",
+  "query": "今天龙虎榜有哪些股票？",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_top_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回今日龙虎榜数据"
+}
+{
+  "id": "MD-007-A",
+  "query": "昨天的龙虎榜",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_top_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回昨日龙虎榜"
+}
+{
+  "id": "MD-007-B",
+  "query": "看看今天有哪些机构上榜",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_top_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回机构上榜数据"
+}
+
+## get_limit_list (3个场景) - 涨跌停
+{
+  "id": "MD-008",
+  "query": "今天有多少只股票涨停？",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_limit_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回涨跌停统计"
+}
+{
+  "id": "MD-008-A",
+  "query": "今天跌停的股票有哪些",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_limit_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回跌停股票列表"
+}
+{
+  "id": "MD-008-B",
+  "query": "近一周涨停次数最多的股票",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_limit_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回近期涨停统计"
+}
+
+## get_company_info (3个场景) - 公司详细信息
+{
+  "id": "MD-009",
+  "query": "获取茅台公司的详细信息",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_company_info"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回公司详细资料"
+}
+{
+  "id": "MD-009-A",
+  "query": "查询贵州茅台的公司资料",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_company_info"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回主营业务"
+}
+{
+  "id": "MD-009-B",
+  "query": "获取五粮液的公司信息",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_company_info"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回经营范围"
+}
+
+## get_north_money (3个场景) - 北向资金
+{
+  "id": "MD-010",
+  "query": "最近北向资金流入情况",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_north_money"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回北向资金流向"
+}
+{
+  "id": "MD-010-A",
+  "query": "沪股通今天买了哪些股票",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_north_money"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回沪股通买入数据"
+}
+{
+  "id": "MD-010-B",
+  "query": "深股通最近一周的净流入",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_north_money"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回深股通资金流向"
+}
+
+## get_margin (3个场景) - 融资融券
+{
+  "id": "MD-011",
+  "query": "茅台的融资融券余额是多少？",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_margin"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回融资融券数据"
+}
+{
+  "id": "MD-011-A",
+  "query": "五粮液的融资买入额",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_margin"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回融资买入数据"
+}
+{
+  "id": "MD-011-B",
+  "query": "600519的融券余量",
+  "expected_skill": "market_data",
+  "expected_tools": ["get_margin"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回融券余量"
+}
+
+# ============================================
+# Financial Analysis Skill (7 工具 × 3 = 21 个用例)
+# ============================================
+
+## calculate_financial_ratios (3个场景) - 计算财务比率
+{
+  "id": "FA-001",
+  "query": "计算一下茅台的ROE",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["calculate_financial_ratios"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回ROE及财务评估"
+}
+{
+  "id": "FA-001-A",
+  "query": "用财务数据计算五粮液的毛利率",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["calculate_financial_ratios"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回毛利率"
+}
+{
+  "id": "FA-001-B",
+  "query": "计算贵州茅台的资产周转率",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["calculate_financial_ratios"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回运营效率比率"
+}
+
+## get_income_statement (3个场景) - 利润表
+{
+  "id": "FA-002",
+  "query": "茅台2023年的利润表",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_income_statement"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回2023年报利润数据"
+}
+{
+  "id": "FA-002-A",
+  "query": "五粮液最近一个季度的营业收入",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_income_statement"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回季度营收"
+}
+{
+  "id": "FA-002-B",
+  "query": "查看000858的归母净利润",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_income_statement"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回净利润数据"
+}
+
+## get_balance_sheet (3个场景) - 资产负债表
+{
+  "id": "FA-003",
+  "query": "茅台的资产负债率是多少？",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_balance_sheet"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回资产负债率"
+}
+{
+  "id": "FA-003-A",
+  "query": "五粮液的资产总额",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_balance_sheet"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回资产总额"
+}
+{
+  "id": "FA-003-B",
+  "query": "查看600519的流动资产",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_balance_sheet"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回流动资产"
+}
+
+## get_cash_flow (3个场景) - 现金流量表
+{
+  "id": "FA-004",
+  "query": "茅台的现金流量表",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_cash_flow"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回现金流量表数据"
+}
+{
+  "id": "FA-004-A",
+  "query": "五粮液的经营活动现金流净额",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_cash_flow"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回经营现金流"
+}
+{
+  "id": "FA-004-B",
+  "query": "查看000858的投资活动现金流",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_cash_flow"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回投资现金流"
+}
+
+## get_fina_indicator (3个场景) - 财务指标
+{
+  "id": "FA-005",
+  "query": "茅台最新的财务指标",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_fina_indicator"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回财务指标"
+}
+{
+  "id": "FA-005-A",
+  "query": "五粮液的每股收益",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_fina_indicator"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回每股收益"
+}
+{
+  "id": "FA-005-B",
+  "query": "查看600519的每股净资产",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["get_fina_indicator"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回每股净资产"
+}
+
+## analyze_profitability (3个场景) - 盈利能力分析
+{
+  "id": "FA-006",
+  "query": "茅台最近一年的盈利能力趋势",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["analyze_profitability"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回8个季度的ROE、毛利率趋势"
+}
+{
+  "id": "FA-006-A",
+  "query": "分析一下五粮液的赚钱能力",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["analyze_profitability"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回盈利能力分析"
+}
+{
+  "id": "FA-006-B",
+  "query": "000858的利润增长趋势如何",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["analyze_profitability"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回利润趋势分析"
+}
+
+## analyze_solvency (3个场景) - 偿债能力分析
+{
+  "id": "FA-007",
+  "query": "分析一下五粮液的偿债能力",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["analyze_solvency"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回资产负债率、流动比率等"
+}
+{
+  "id": "FA-007-A",
+  "query": "茅台的短期偿债能力怎么样",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["analyze_solvency"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回短期偿债指标"
+}
+{
+  "id": "FA-007-B",
+  "query": "查看600519的长期负债风险",
+  "expected_skill": "financial_analysis",
+  "expected_tools": ["analyze_solvency"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回长期偿债分析"
+}
+
+# ============================================
+# Sector Analysis Skill (7 工具 × 3 = 21 个用例)
+# ============================================
+
+## get_industry_list (3个场景) - 行业列表
+{
+  "id": "SA-001",
+  "query": "有哪些行业分类？",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业分类列表"
+}
+{
+  "id": "SA-001-A",
+  "query": "A股市场有多少个行业板块",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业数量"
+}
+{
+  "id": "SA-001-B",
+  "query": "列出所有的申万行业分类",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回申万行业列表"
+}
+
+## get_industry_performance (3个场景) - 行业表现
+{
+  "id": "SA-002",
+  "query": "最近哪些行业涨幅最大？",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_performance"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业涨跌幅排名"
+}
+{
+  "id": "SA-002-A",
+  "query": "今天领跌的行业有哪些",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_performance"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回跌幅行业"
+}
+{
+  "id": "SA-002-B",
+  "query": "近一周各行业的表现排行",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_performance"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回周行业表现"
+}
+
+## get_industry_leaders (3个场景) - 行业龙头
+{
+  "id": "SA-003",
+  "query": "白酒行业的龙头股有哪些？",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_leaders"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回白酒行业前10龙头股"
+}
+{
+  "id": "SA-003-A",
+  "query": "银行板块的龙头股",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_leaders"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回银行龙头股"
+}
+{
+  "id": "SA-003-B",
+  "query": "医药行业市值最大的公司",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_industry_leaders"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回医药龙头"
+}
+
+## compare_industry_metrics (3个场景) - 行业指标对比
+{
+  "id": "SA-004",
+  "query": "对比一下白酒和银行业的营收规模",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["compare_industry_metrics"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业营收对比"
+}
+{
+  "id": "SA-004-A",
+  "query": "比较一下科技和消费的利润水平",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["compare_industry_metrics"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业利润对比"
+}
+{
+  "id": "SA-004-B",
+  "query": "医药和白酒的资产规模对比",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["compare_industry_metrics"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回资产规模对比"
+}
+
+## compare_industry_valuation (3个场景) - 行业估值对比
+{
+  "id": "SA-005",
+  "query": "对比医药和科技行业的整体估值水平",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["compare_industry_valuation"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业PE/PB对比"
+}
+{
+  "id": "SA-005-A",
+  "query": "金融和消费行业的市盈率对比",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["compare_industry_valuation"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回PE对比"
+}
+{
+  "id": "SA-005-B",
+  "query": "哪个行业的整体估值最低",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["compare_industry_valuation"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回估值对比结果"
+}
+
+## get_concept_list (3个场景) - 概念板块列表
+{
+  "id": "SA-006",
+  "query": "有哪些概念板块？",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_concept_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回概念板块列表"
+}
+{
+  "id": "SA-006-A",
+  "query": "列出所有的概念板块分类",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_concept_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回概念板块"
+}
+{
+  "id": "SA-006-B",
+  "query": "A股有多少个概念板块",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_concept_list"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回概念板块数量"
+}
+
+## get_concept_stocks (3个场景) - 概念成分股
+{
+  "id": "SA-007",
+  "query": "人工智能概念板块有哪些股票？",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_concept_stocks"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回人工智能概念股列表"
+}
+{
+  "id": "SA-007-A",
+  "query": "新能源板块的成分股",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_concept_stocks"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回新能源概念股"
+}
+{
+  "id": "SA-007-B",
+  "query": "芯片概念有哪些成分股",
+  "expected_skill": "sector_analysis",
+  "expected_tools": ["get_concept_stocks"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回芯片概念股"
+}
+
+# ============================================
+# Risk Assessment Skill (5 工具 × 3 = 15 个用例)
+# ============================================
+
+## assess_stock_risk (3个场景) - 综合风险评估
+{
+  "id": "RA-001",
+  "query": "茅台的投资风险高吗？",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_stock_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回综合风险评估等级"
+}
+{
+  "id": "RA-001-A",
+  "query": "分析一下五粮液的投资安全性",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_stock_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回投资风险评估"
+}
+{
+  "id": "RA-001-B",
+  "query": "000858的综合风险评级",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_stock_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回风险评级"
+}
+
+## assess_valuation_risk (3个场景) - 估值风险
+{
+  "id": "RA-002",
+  "query": "茅台现在的估值风险如何？",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_valuation_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回估值风险评估"
+}
+{
+  "id": "RA-002-A",
+  "query": "五粮液的PE是不是太高了",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_valuation_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回PE估值风险"
+}
+{
+  "id": "RA-002-B",
+  "query": "查看600519的估值泡沫风险",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_valuation_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回估值泡沫分析"
+}
+
+## assess_financial_risk (3个场景) - 财务风险
+{
+  "id": "RA-003",
+  "query": "分析一下五粮液的财务风险",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_financial_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回财务风险评级"
+}
+{
+  "id": "RA-003-A",
+  "query": "茅台的资产负债有风险吗",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_financial_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回资产负债风险"
+}
+{
+  "id": "RA-003-B",
+  "query": "000858的现金流风险如何",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_financial_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回现金流风险"
+}
+
+## assess_volatility_risk (3个场景) - 波动率风险
+{
+  "id": "RA-004",
+  "query": "茅台股价波动大吗？",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_volatility_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回波动率分析"
+}
+{
+  "id": "RA-004-A",
+  "query": "五粮液的股价最近稳不稳定",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_volatility_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回稳定性分析"
+}
+{
+  "id": "RA-004-B",
+  "query": "查看600519的历史波动率",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["assess_volatility_risk"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回历史波动率"
+}
+
+## check_risk_warnings (3个场景) - 风险预警
+{
+  "id": "RA-005",
+  "query": "茅台有什么风险预警吗？",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["check_risk_warnings"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回风险预警信息"
+}
+{
+  "id": "RA-005-A",
+  "query": "五粮液最近有没有风险提示",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["check_risk_warnings"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回风险提示"
+}
+{
+  "id": "RA-005-B",
+  "query": "查看000858的异常风险信号",
+  "expected_skill": "risk_assessment",
+  "expected_tools": ["check_risk_warnings"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回异常信号"
+}
+
+# ============================================
+# Web Research Skill (4 工具 × 3 = 12 个用例)
+# ============================================
+
+## search_stock_news (3个场景) - 股票新闻
+{
+  "id": "WR-001",
+  "query": "最近茅台有什么重要新闻？",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_stock_news"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回茅台相关新闻"
+}
+{
+  "id": "WR-001-A",
+  "query": "五粮液最近有什么利好消息",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_stock_news"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回新闻列表"
+}
+{
+  "id": "WR-001-B",
+  "query": "查看600519的负面新闻",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_stock_news"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回负面新闻"
+}
+
+## search_company_announcements (3个场景) - 公司公告
+{
+  "id": "WR-002",
+  "query": "茅台最新发布的公告",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_company_announcements"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回公司公告列表"
+}
+{
+  "id": "WR-002-A",
+  "query": "五粮液的业绩预告",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_company_announcements"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回业绩预告"
+}
+{
+  "id": "WR-002-B",
+  "query": "查看000858的分红公告",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_company_announcements"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回分红公告"
+}
+
+## search_industry_news (3个场景) - 行业新闻
+{
+  "id": "WR-003",
+  "query": "最近白酒行业有什么新闻？",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_industry_news"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业新闻"
+}
+{
+  "id": "WR-003-A",
+  "query": "银行业的最新政策动态",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_industry_news"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业政策"
+}
+{
+  "id": "WR-003-B",
+  "query": "新能源行业的市场新闻",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_industry_news"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业动态"
+}
+
+## search_research_reports (3个场景) - 研究报告
+{
+  "id": "WR-004",
+  "query": "找一下茅台的券商研报",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_research_reports"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回研究报告列表"
+}
+{
+  "id": "WR-004-A",
+  "query": "五粮液的目标价研报",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_research_reports"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回目标价报告"
+}
+{
+  "id": "WR-004-B",
+  "query": "查看600519的评级研报",
+  "expected_skill": "web_research",
+  "expected_tools": ["search_research_reports"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回评级报告"
+}
+
+# ============================================
+# Data Analysis Skill (6 工具 × 3 = 18 个用例)
+# ============================================
+
+## calculate_statistics (3个场景) - 统计计算
+{
+  "id": "DA-001",
+  "query": "计算以下数据的均值和标准差：数据为 [1500.2, 1523.5, 1489.3, 1512.8, 1498.5, 1535.0, 1520.3]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_statistics"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回均值、标准差等统计指标"
+}
+{
+  "id": "DA-001-A",
+  "query": "分析这组股价数据的波动范围：价格为 [102.4, 103.8, 101.5, 104.2, 100.9, 105.3, 103.1]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_statistics"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回最大值、最小值、波动范围"
+}
+{
+  "id": "DA-001-B",
+  "query": "计算这组日收益率数据的方差：收益率为 [0.012, -0.008, 0.025, -0.003, 0.018, -0.012, 0.006]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_statistics"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回方差、标准差"
+}
+
+## analyze_price_trend (3个场景) - 价格趋势
+{
+  "id": "DA-002",
+  "query": "分析以下一周股价的趋势：周一1450元、周二1468元、周三1455元、周四1472元、周五1485元",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["analyze_price_trend"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回趋势方向(上涨/下跌/震荡)和涨跌幅"
+}
+{
+  "id": "DA-002-A",
+  "query": "判断股价是上涨还是下跌：昨日收盘价102.4元，今日收盘价105.8元",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["analyze_price_trend"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回明确的趋势方向"
+}
+{
+  "id": "DA-002-B",
+  "query": "分析近10天的价格走势：价格序列为 [1500, 1520, 1485, 1510, 1535, 1498, 1550, 1525, 1548, 1560]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["analyze_price_trend"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回趋势分析和关键变化点"
+}
+
+## calculate_correlation (3个场景) - 相关性计算
+{
+  "id": "DA-003",
+  "query": "计算这两组股价数据的相关性：股票A价格 [100, 102, 105, 103, 108, 110, 112]；股票B价格 [50, 51, 53, 52, 55, 56, 57]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_correlation"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回相关系数值"
+}
+{
+  "id": "DA-003-A",
+  "query": "分析以下两组收益率数据的相关性：白酒板块日收益 [0.012, 0.008, -0.005, 0.015, 0.003]；银行板块日收益 [0.003, 0.005, 0.008, 0.002, 0.006]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_correlation"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回相关性强度和方向"
+}
+{
+  "id": "DA-003-B",
+  "query": "计算个股与大盘的相关程度：个股收益 [0.015, -0.008, 0.022, 0.005, -0.012, 0.018, 0.003]；大盘收益 [0.008, -0.005, 0.012, 0.003, -0.008, 0.010, 0.002]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_correlation"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回贝塔系数和相关系数"
+}
+
+## calculate_technical_indicators (3个场景) - 技术指标
+{
+  "id": "DA-004",
+  "query": "计算这组K线数据的MACD指标：收盘价序列为 [1450, 1468, 1455, 1472, 1485, 1478, 1492, 1505, 1498, 1512]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_technical_indicators"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回MACD值(DIF/DEA/柱状图)"
+}
+{
+  "id": "DA-004-A",
+  "query": "计算以下价格的KDJ指标：最高价 [105, 108, 106, 110, 108]，最低价 [100, 102, 101, 104, 103]，收盘价 [102, 106, 104, 108, 105]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_technical_indicators"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回K值、D值、J值"
+}
+{
+  "id": "DA-004-B",
+  "query": "计算这组收盘价的RSI指标：价格为 [100, 102, 101, 105, 103, 108, 106, 110, 108, 112]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["calculate_technical_indicators"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回RSI值"
+}
+
+## normalize_data (3个场景) - 数据标准化
+{
+  "id": "DA-005",
+  "query": "将以下收盘价数据进行Z-score标准化：[1500, 1520, 1480, 1550, 1490, 1530, 1510]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["normalize_data"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回标准化后的数据"
+}
+{
+  "id": "DA-005-A",
+  "query": "对这组股价进行Min-Max归一化处理：价格为 [100.5, 102.3, 98.7, 105.2, 101.8, 99.5, 104.0]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["normalize_data"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回0-1之间的归一化数据"
+}
+{
+  "id": "DA-005-B",
+  "query": "将以下成交量数据标准化：成交量为 [50000, 65000, 48000, 72000, 55000, 60000, 58000]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["normalize_data"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回标准化后的成交量"
+}
+
+## generate_chart_data (3个场景) - 图表数据
+{
+  "id": "DA-006",
+  "query": "将以下K线数据生成图表格式：日期 2024-01-01 到 2024-01-05，开盘价 [100, 102, 101, 105, 103]，最高价 [105, 107, 106, 110, 108]，最低价 [98, 100, 99, 102, 101]，收盘价 [102, 106, 104, 108, 105]，成交量 [10000, 12000, 9500, 15000, 11000]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["generate_chart_data"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回格式化的K线图表数据"
+}
+{
+  "id": "DA-006-A",
+  "query": "生成这组价格数据的折线图格式：时间戳 [1,2,3,4,5,6,7]，价格 [100, 102, 101, 105, 103, 108, 106]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["generate_chart_data"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回折线图所需的数据格式"
+}
+{
+  "id": "DA-006-B",
+  "query": "将以下数据转换为柱状图格式：类别 ['涨', '跌', '平', '涨', '涨']，数值 [5, -3, 0, 8, 12]，成交量 [10000, 8000, 5000, 12000, 15000]",
+  "expected_skill": "data_analysis",
+  "expected_tools": ["generate_chart_data"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回柱状图所需的数据格式"
+  "complexity": "simple",
+  "evaluation_criteria": "返回柱状图数据"
+}
+
+# ============================================
+# Deep Research Skill (3 工具 × 3 = 9 个用例)
+# ============================================
+
+## generate_stock_report (3个场景) - 个股研报
+{
+  "id": "DR-001",
+  "query": "生成一份茅台的深度研究报告",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_stock_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回完整个股研报"
+}
+{
+  "id": "DR-001-A",
+  "query": "深度分析一下五粮液的投资价值",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_stock_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回个股分析报告"
+}
+{
+  "id": "DR-001-B",
+  "query": "写一份000858的研究报告",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_stock_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回研究报告"
+}
+
+## generate_industry_report (3个场景) - 行业研报
+{
+  "id": "DR-002",
+  "query": "生成一份白酒行业的深度研报",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_industry_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业分析报告"
+}
+{
+  "id": "DR-002-A",
+  "query": "生成银行业深度研报",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_industry_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业研报"
+}
+{
+  "id": "DR-002-B",
+  "query": "分析一下医药行业的发展前景",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_industry_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业分析"
+}
+
+## generate_comparison_report (3个场景) - 对比研报
+{
+  "id": "DR-003",
+  "query": "对比一下茅台和五粮液的财务情况",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_comparison_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回两只股票的对比分析报告"
+}
+{
+  "id": "DR-003-A",
+  "query": "比较一下白酒和银行的估值水平",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_comparison_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回行业对比报告"
+}
+{
+  "id": "DR-003-B",
+  "query": "600519和000858哪个更值得投资",
+  "expected_skill": "deep_research",
+  "expected_tools": ["generate_comparison_report"],
+  "complexity": "simple",
+  "evaluation_criteria": "返回投资对比"
+}
+
+# ============================================
+# NO-SKILL 场景 (5 个用例)
+# ============================================
+
+{
+  "id": "NO-SKILL-001",
+  "query": "你好",
+  "expected_skill": null,
+  "expected_tools": [],
+  "complexity": "simple",
+  "evaluation_criteria": "礼貌问候，不调用工具"
+}
+{
+  "id": "NO-SKILL-002",
+  "query": "你能做什么",
+  "expected_skill": null,
+  "expected_tools": [],
+  "complexity": "simple",
+  "evaluation_criteria": "返回帮助信息，不调用工具"
+}
+{
+  "id": "NO-SKILL-003",
+  "query": "今天天气怎么样",
+  "expected_skill": null,
+  "expected_tools": [],
+  "complexity": "simple",
+  "evaluation_criteria": "识别为无关问题，不调用工具"
+}
+{
+  "id": "NO-SKILL-004",
+  "query": "谢谢",
+  "expected_skill": null,
+  "expected_tools": [],
+  "complexity": "simple",
+  "evaluation_criteria": "礼貌回复，不调用工具"
+}
+{
+  "id": "NO-SKILL-005",
+  "query": "再见",
+  "expected_skill": null,
+  "expected_tools": [],
+  "complexity": "simple",
+  "evaluation_criteria": "礼貌告别，不调用工具"
+}

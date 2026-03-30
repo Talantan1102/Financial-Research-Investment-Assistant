@@ -1,0 +1,291 @@
+{
+  "timestamp": "2026-03-21T19:23:37.180655",
+  "model": "qwen-max",
+  "total_tests": 3,
+  "summary": {
+    "skill_selection_accuracy": 0.3333333333333333,
+    "tool_selection_accuracy": 0.3333333333333333,
+    "execution_success_rate": 1.0,
+    "error_rate": 0.0
+  },
+  "metrics": {
+    "skill_correct": 1,
+    "tools_correct": 1,
+    "execution_success": 3,
+    "errors": 0
+  },
+  "results": [
+    {
+      "test_id": "DR-001",
+      "query": "生成一份茅台的深度研究报告",
+      "expected_skill": "deep_research",
+      "predicted_skill": "deep_research",
+      "skill_correct": true,
+      "expected_tools": [
+        "generate_stock_report"
+      ],
+      "predicted_tools": [
+        "generate_stock_report"
+      ],
+      "tools_correct": true,
+      "execution_success": true,
+      "output_quality_score": 10.0,
+      "latency_ms": 52088,
+      "tool_call_count": 1,
+      "error_occurred": false,
+      "error_type": null,
+      "reasoning_quality": "good",
+      "raw_response": "[{\"tool\": \"generate_stock_report\", \"arguments\": {\"ts_code\": \"600519.SH\", \"report_type\": \"comprehensive\"}}]",
+      "timestamp": "2026-03-21T19:22:10.824597",
+      "tool_calls_detail": [
+        {
+          "tool": "generate_stock_report",
+          "full_tool": "deep_research.generate_stock_report",
+          "arguments": {
+            "ts_code": "600519.SH",
+            "report_type": "comprehensive"
+          },
+          "result": {
+            "success": true,
+            "data": {
+              "ts_code": "600519.SH",
+              "report_type": "comprehensive",
+              "generated_at": "2026-03-20",
+              "sections": {
+                "company_overview": {
+                  "name": "",
+                  "fullname": "",
+                  "industry": "白酒",
+                  "area": "贵州",
+                  "list_date": "20010827",
+                  "introduction": "公司成立于1999年11月，2001年在上海证券交易所上市。总部位于贵州省北部风光旖旎的赤水河畔茅台镇，主营茅台酒及系列酒的生产与销售，核心产品贵州茅台酒是我国大曲酱香型白酒的鼻祖和典型代表，集国家地理标志产品、中欧地理标志产品、有机食品和国家级非物质文化遗产于一身，营销网络覆盖国内市场及五大洲64个国家和地区，是香飘世界的中国名片。公司秉持“酿造高品质生活”的公司使命，从提供美酒到更多元使命愿景的生活体验，从赤水河谷到更广阔的国内外市场，始终把创造高品质、高效率的价值作为矢志不渝的追求，将高品质贯穿于生产经营管理的各环节，实现顾客高品质体验、员工高品质成长、股东高品质回报、伙伴高品质共赢、社会高品质进步，争当现代化产业体系建设的引领者，在社会高质量发展中发挥重要牵爱我茅台引作用。致力于让世界爱上茅台，让茅台香飘世界，打造一流产品质量、企业精神企业风格酒香风正人和为国争光一流品牌形象、一流产业体系、一流治理体系、一流创新能力，推动茅台成为产品卓越、品牌卓著、创新领先、治理现代的世界一流企业，成为影响力广泛、竞争力领先的世界级品牌；让世界认同茅台、喜爱茅台、青睐茅台，使承载着中华千年文化"
+                },
+                "valuation": {
+                  "pe": 20.9854,
+                  "pe_ttm": 20.0998,
+                  "pb": 7.9691,
+                  "ps": 10.5883,
+                  "total_mv": 180953046.0675,
+                  "assessment": "合理"
+                },
+                "financial": {
+                  "roe": 26.3688,
+                  "roa": 29.4079,
+                  "gross_margin": 117269735582.09,
+                  "debt_to_assets": 12.8088,
+                  "trend_roe": [
+                    26.3688,
+                    19.2486,
+                    10.9255,
+                    10.9255
+                  ]
+                },
+                "market": {
+                  "current_price": "1445.00",
+                  "change_percent": "-0.54",
+                  "volume": "26132"
+                }
+              }
+            },
+            "error": null,
+            "meta": null
+          }
+        }
+      ],
+      "evaluation_mode": "simple",
+      "evaluation_notes": []
+    },
+    {
+      "test_id": "DR-002",
+      "query": "对比一下白酒行业的竞争格局",
+      "expected_skill": "deep_research",
+      "predicted_skill": "sector_analysis",
+      "skill_correct": false,
+      "expected_tools": [
+        "generate_industry_report"
+      ],
+      "predicted_tools": [
+        "get_industry_leaders"
+      ],
+      "tools_correct": false,
+      "execution_success": true,
+      "output_quality_score": 0.0,
+      "latency_ms": 30514,
+      "tool_call_count": 1,
+      "error_occurred": false,
+      "error_type": null,
+      "reasoning_quality": "poor",
+      "raw_response": "[{\"tool\": \"get_industry_leaders\", \"arguments\": {\"industry\": \"白酒\", \"by\": \"market_cap\", \"limit\": 5}}]",
+      "timestamp": "2026-03-21T19:22:41.883064",
+      "tool_calls_detail": [
+        {
+          "tool": "get_industry_leaders",
+          "full_tool": "sector_analysis.get_industry_leaders",
+          "arguments": {
+            "industry": "白酒",
+            "by": "market_cap",
+            "limit": 5
+          },
+          "result": {
+            "success": true,
+            "data": [
+              {
+                "ts_code": "600519.SH",
+                "name": "贵州茅台",
+                "total_mv": 181938582.7267,
+                "total_revenue": "数据缺失",
+                "n_income": "数据缺失"
+              },
+              {
+                "ts_code": "600519.SH",
+                "name": "贵州茅台",
+                "total_mv": 180953046.0675,
+                "total_revenue": "数据缺失",
+                "n_income": "数据缺失"
+              },
+              {
+                "ts_code": "000858.SZ",
+                "name": "五粮液",
+                "total_mv": 39747665.9712,
+                "total_revenue": "数据缺失",
+                "n_income": "数据缺失"
+              },
+              {
+                "ts_code": "600809.SH",
+                "name": "山西汾酒",
+                "total_mv": 18770369.5197,
+                "total_revenue": "数据缺失",
+                "n_income": "数据缺失"
+              },
+              {
+                "ts_code": "000568.SZ",
+                "name": "泸州老窖",
+                "total_mv": 15484829.4508,
+                "total_revenue": "数据缺失",
+                "n_income": "数据缺失"
+              }
+            ],
+            "error": null,
+            "meta": {
+              "industry": "白酒",
+              "sort_by": "market_cap",
+              "count": 5
+            }
+          }
+        }
+      ],
+      "evaluation_mode": "simple",
+      "evaluation_notes": []
+    },
+    {
+      "test_id": "MULTI-001",
+      "query": "分别获取茅台的行情、估值、财务和风险数据",
+      "expected_skill": "",
+      "predicted_skill": "market_data",
+      "skill_correct": false,
+      "expected_tools": [
+        "get_quote",
+        "get_daily_basic",
+        "calculate_financial_ratios",
+        "assess_stock_risk"
+      ],
+      "predicted_tools": [
+        "get_quote",
+        "get_daily_basic",
+        "search_stock"
+      ],
+      "tools_correct": false,
+      "execution_success": true,
+      "output_quality_score": 0.0,
+      "latency_ms": 54466,
+      "tool_call_count": 3,
+      "error_occurred": false,
+      "error_type": null,
+      "reasoning_quality": "poor",
+      "raw_response": "[{\"tool\": \"get_quote\", \"arguments\": {\"ts_code\": \"600519.SH\"}}, {\"tool\": \"get_daily_basic\", \"arguments\": {\"ts_code\": \"600519.SH\"}}, {\"tool\": \"search_stock\", \"arguments\": {\"keyword\": \"贵州茅台\"}}]",
+      "timestamp": "2026-03-21T19:23:37.064223",
+      "tool_calls_detail": [
+        {
+          "tool": "get_quote",
+          "full_tool": "market_data.get_quote",
+          "arguments": {
+            "ts_code": "600519.SH"
+          },
+          "result": {
+            "success": true,
+            "data": {
+              "gid": "sh600519",
+              "ts_code": "600519.SH",
+              "name": "贵州茅台",
+              "nowPri": "1445.00",
+              "increase": "-7.87",
+              "increPer": "-0.54",
+              "todayStartPri": "1452.96",
+              "yestodEndPri": "1452.87",
+              "todayMax": "1462.50",
+              "todayMin": "1439.00",
+              "traAmount": "26132",
+              "traNumber": "3782818260.00",
+              "update_time": "20260320"
+            },
+            "error": null,
+            "meta": null
+          }
+        },
+        {
+          "tool": "get_daily_basic",
+          "full_tool": "market_data.get_daily_basic",
+          "arguments": {
+            "ts_code": "600519.SH"
+          },
+          "result": {
+            "success": true,
+            "data": [
+              {
+                "ts_code": "600519.SH",
+                "trade_date": "20260320",
+                "close": 1445.0,
+                "turnover_rate": 0.2087,
+                "turnover_rate_f": 0.4811,
+                "volume_ratio": 0.63,
+                "pe": 20.9854,
+                "pe_ttm": 20.0998,
+                "pb": 7.9691,
+                "ps": 10.5883,
+                "ps_ttm": 10.1331,
+                "dv_ratio": 3.574,
+                "dv_ttm": 3.574,
+                "total_share": 125227.0215,
+                "float_share": 125227.0215,
+                "free_share": 54313.7592,
+                "total_mv": 180953046.0675,
+                "circ_mv": 180953046.0675
+              }
+            ],
+            "error": null,
+            "meta": {
+              "trade_date": "20260320",
+              "symbol": "600519.SH",
+              "count": 1
+            }
+          }
+        },
+        {
+          "tool": "search_stock",
+          "full_tool": "market_data.search_stock",
+          "arguments": {
+            "keyword": "贵州茅台"
+          },
+          "result": {
+            "success": false,
+            "data": null,
+            "error": "未找到匹配的股票: 贵州茅台",
+            "meta": null
+          }
+        }
+      ],
+      "evaluation_mode": "simple",
+      "evaluation_notes": []
+    }
+  ]
+}
