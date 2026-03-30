@@ -1,17 +1,23 @@
-# sandbox/server/backends/__init__.py
 """
-后端模块
+后端模块 - 金融研投助手模式
 
-提供两种资源类型：
+提供金融研投助手风格的 MCP 后端：
 
-1. Resource Backend（有状态后端，重量级）
+1. MCP Native Backend（金融研投助手模式）
+   - 直接作为 MCP Server 运行
+   - 暴露 3 个工具：select_skill / get_skill_tools / execute_skill_tool
+   - 与金融研投助手 MCP Server 完全一致的交互流程
+   - 位置：backends/resources/
+   - 示例：FinanceResearchBackend
+
+2. Resource Backend（有状态后端，重量级 - 旧架构）
    - 需要初始化的资源
+   - 使用 @tool 装饰器注册工具
    - 提供完整生命周期：warmup → initialize → cleanup → shutdown
-   - 由开发者决定使用哪些接口
    - 位置：backends/resources/
    - 示例：VM、RAG
 
-2. API Tools（无状态工具，轻量级）
+3. API Tools（无状态工具，轻量级）
    - 不需要初始化和 session
    - 使用 @register_api_tool 装饰器注册
    - 位置：backends/tools/
@@ -22,72 +28,62 @@
 backends/
 ├── __init__.py          # 导出基类
 ├── base.py              # Backend 基类定义
+├── mcp_native_base.py   # MCP Native Backend 基类（金融研投助手模式）
 │
 ├── resources/           # 有状态后端（重量级，需要 session）
 │   ├── __init__.py      #   导出所有后端类
+│   ├── finance_research.py     #   金融研投助手 Backend
 │   ├── vm.py            #   VM 后端（桌面自动化）
 │   └── rag.py           #   RAG 后端（文档检索）
 │
 └── tools/               # 无状态工具（轻量级，无需 session）
     ├── __init__.py      #   @register_api_tool 装饰器
-    └── websearch.py     #   WebSearch 工具（search、visit、image_search）
+    └── websearch.py     #   WebSearch 工具
 ```
 
-使用示例:
+使用示例 - MCP Native Backend（金融研投助手模式）:
 
 ```python
 from sandbox.server import HTTPServiceServer
-from sandbox.server.backends import Backend, BackendConfig
-from sandbox.server.core import tool
+from sandbox.server.backends import MCPNativeBackend, MCPBackendConfig
 
-
-# 示例1: 有状态后端（VM）
-class VMBackend(Backend):
-    name = "vm"
+# 示例: 金融研投助手模式 Backend
+class MyBackend(MCPNativeBackend):
+    name = "my_backend"
     
-    async def initialize(self, worker_id: str, config: dict) -> dict:
-        controller = await create_vm(config)
-        return {"controller": controller}
+    async def select_skill(self, skill_name: str, reason: str) -> dict:
+        # 选择合适的 Skill
+        return {"success": True, "skill_name": skill_name}
     
-    async def cleanup(self, worker_id: str, session_info: dict):
-        await session_info["data"]["controller"].close()
+    async def get_skill_tools(self, name: str) -> dict:
+        # 获取 Skill 的工具列表
+        return {"tools": [...]}
     
-    @tool("vm:screenshot")
-    async def screenshot(self, session_info: dict) -> dict:
-        controller = session_info["data"]["controller"]
-        return {"image": await controller.screenshot()}
-
-
-# 示例2: 无状态工具（不需要 Backend 类）
-from sandbox.server.backends.tools import register_api_tool
-
-@register_api_tool("search", config_key="websearch")
-async def search(query: str, **config) -> dict:
-    '''配置从 apis.websearch 自动注入到 **config'''
-    return {"results": [...]}
-```
-
-加载后端的两种方式:
-
-```python
-# 方式1: 代码中直接加载
-from sandbox.server.backends.resources import VMBackend, RAGBackend
+    async def execute_skill_tool(self, skill_name: str, tool_name: str, arguments: dict) -> dict:
+        # 执行具体工具
+        return {"result": "..."}
 
 server = HTTPServiceServer()
-server.load_backend(VMBackend())
-server.load_backend(RAGBackend())
-
-# 方式2: 通过配置文件加载（推荐）
-from sandbox.server.config_loader import create_server_from_config
-
-server = create_server_from_config("configs/profiles/dev.json")
-# 后端会根据 resources 配置自动加载
+server.load_mcp_backend(MyBackend())
+server.run()
 ```
 """
 
 from .base import Backend, BackendConfig
+from .mcp_native_base import (
+    MCPNativeBackend,
+    MCPBackendConfig,
+    MCPResource,
+    MCPTool
+)
 
 __all__ = [
-    "Backend",        # 后端基类
-    "BackendConfig",  # 后端配置
+    # 旧 Backend 基类
+    "Backend",
+    "BackendConfig",
+    # MCP Native Backend 基类 ⭐
+    "MCPNativeBackend",
+    "MCPBackendConfig",
+    "MCPResource",
+    "MCPTool",
 ]
