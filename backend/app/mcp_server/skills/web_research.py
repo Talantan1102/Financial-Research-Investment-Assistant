@@ -10,7 +10,7 @@
 import os
 import aiohttp
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Literal
 from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
 
 
@@ -29,6 +29,7 @@ class WebResearchSkill(BaseSkill):
         super().__init__()
         self.api_key = os.getenv("BOCHA_API_KEY", "")
         self.base_url = "https://api.bochaai.com/v1/web-search"
+        self.use_mock = os.getenv("USE_MOCK_BOCHA", "false").lower() == "true"
 
     def _register_tools(self):
         """注册 WebResearch 相关工具"""
@@ -164,7 +165,7 @@ class WebResearchSkill(BaseSkill):
 
     async def _call_bocha_api(self, query: str, freshness: str = "Month", count: int = 10) -> Dict[str, Any]:
         """
-        调用博查AI搜索API
+        调用博查AI搜索API或使用Mock服务
 
         Args:
             query: 搜索查询
@@ -174,6 +175,10 @@ class WebResearchSkill(BaseSkill):
         Returns:
             API响应数据
         """
+        # 如果启用mock，调用mock服务
+        if self.use_mock:
+            return await self._call_mock_bocha(query, freshness, count)
+
         if not self.api_key:
             return {
                 "success": False,
@@ -214,6 +219,62 @@ class WebResearchSkill(BaseSkill):
         except Exception as e:
             return {"success": False, "error": f"请求异常: {str(e)}"}
 
+    def _infer_search_type(self, query: str) -> Literal["news", "announcement", "industry", "report"]:
+        """
+        从查询字符串推断搜索类型
+
+        Args:
+            query: 搜索查询
+
+        Returns:
+            搜索类型
+        """
+        query_lower = query.lower()
+
+        # 检查公告特征
+        if any(kw in query_lower for kw in ["公告", "年报", "季报", "site:cninfo.com.cn", "site:szse.cn", "site:sse.com.cn"]):
+            return "announcement"
+
+        # 检查研报特征
+        if any(kw in query_lower for kw in ["研报", "研究报告", "评级", "买入", "增持"]):
+            return "report"
+
+        # 检查行业特征（行业+新闻，且没有具体股票代码格式）
+        if "行业" in query and "新闻" in query and "." not in query:
+            return "industry"
+
+        # 默认为新闻
+        return "news"
+
+    async def _call_mock_bocha(self, query: str, freshness: str, count: int) -> Dict[str, Any]:
+        """
+        调用mock服务生成搜索结果
+
+        Args:
+            query: 搜索查询
+            freshness: 时间范围
+            count: 返回结果数量
+
+        Returns:
+            Mock API响应数据
+
+        Raises:
+            Exception: 异常直接抛出，不做降级处理
+        """
+        from app.service.mock_bocha_service import MockBochaService
+
+        mock_service = MockBochaService()
+        search_type = self._infer_search_type(query)
+
+        results = await mock_service.generate_search_results(
+            query=query,
+            search_type=search_type,
+            count=min(count, 10),
+            freshness=freshness
+        )
+
+        return {"success": True, "data": results}
+
     def _parse_bocha_results(self, api_response: Dict, limit: int) -> List[Dict]:
         """解析博查API返回结果"""
         results = []
@@ -245,7 +306,7 @@ class WebResearchSkill(BaseSkill):
 
     async def search_stock_news(self, ts_code: str, days: int = 7, limit: int = 10) -> ToolResult:
         """
-        搜索股票新闻 - 使用博查AI API
+        搜索股票新闻 - 使用博查AI API或Mock服务
 
         Args:
             ts_code: 股票代码
@@ -274,7 +335,7 @@ class WebResearchSkill(BaseSkill):
             else:
                 freshness = "Year"
 
-            # 调用博查API
+            # 调用博查API或Mock服务
             api_result = await self._call_bocha_api(query, freshness, limit)
 
             if not api_result["success"]:
@@ -286,12 +347,14 @@ class WebResearchSkill(BaseSkill):
             # 解析结果
             news_list = self._parse_bocha_results(api_result, limit)
 
+            data_source = "Mock博查服务" if self.use_mock else "博查AI开放平台"
+
             return ToolResult(success=True, data={
                 "ts_code": ts_code,
                 "news": news_list,
                 "count": len(news_list),
                 "search_period": f"最近{days}天",
-                "data_source": "博查AI开放平台"
+                "data_source": data_source
             })
 
         except Exception as e:
@@ -348,12 +411,14 @@ class WebResearchSkill(BaseSkill):
                 else:
                     item["category"] = "disclosure"
 
+            data_source = "Mock博查服务" if self.use_mock else "博查AI开放平台"
+
             return ToolResult(success=True, data={
                 "ts_code": ts_code,
                 "category": category,
                 "announcements": announcements,
                 "count": len(announcements),
-                "data_source": "博查AI开放平台"
+                "data_source": data_source
             })
 
         except Exception as e:
@@ -400,12 +465,14 @@ class WebResearchSkill(BaseSkill):
             # 解析结果
             news_list = self._parse_bocha_results(api_result, limit)
 
+            data_source = "Mock博查服务" if self.use_mock else "博查AI开放平台"
+
             return ToolResult(success=True, data={
                 "industry": industry,
                 "news": news_list,
                 "count": len(news_list),
                 "search_period": f"最近{days}天",
-                "data_source": "博查AI开放平台"
+                "data_source": data_source
             })
 
         except Exception as e:
@@ -468,12 +535,14 @@ class WebResearchSkill(BaseSkill):
                 else:
                     item["rating"] = "未评级"
 
+            data_source = "Mock博查服务" if self.use_mock else "博查AI开放平台"
+
             return ToolResult(success=True, data={
                 "keyword": keyword,
                 "report_type": report_type,
                 "reports": reports,
                 "count": len(reports),
-                "data_source": "博查AI开放平台"
+                "data_source": data_source
             })
 
         except Exception as e:
