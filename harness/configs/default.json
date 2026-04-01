@@ -1,0 +1,9 @@
+{
+  "test_suite": "default",
+  "sandbox_url": "http://127.0.0.1:8080",
+  "synthesis_config": "configs/synthesis/grpo_100k_config.json",
+  "sandbox_config": "configs/sandbox-server/finance_research_config.json",
+  "max_workers": 4,
+  "timeout": 300,
+  "save_trajectories": true
+}

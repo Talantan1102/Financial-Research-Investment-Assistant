@@ -1,0 +1,33 @@
+# GRPO Qwen3-30B-A3B Smoke Test Config (1 GPU)
+# For quick validation of data pipeline, reward module, and verl integration.
+
+training:
+  data_path: results/verl_training_data.jsonl
+  max_steps: 2
+  batch_size: 1
+  learning_rate: 1.0e-6
+  warmup_steps: 1
+
+model:
+  model_name: Qwen/Qwen3-30B-A3B
+  actor_device_map: auto
+  fsdp_size: 1
+
+rollout:
+  n: 2
+  tp_size: 1
+  ep_size: 1
+  sglang_url: http://127.0.0.1:30000
+  max_new_tokens: 1024
+  temperature: 1.0
+
+reward:
+  sandbox_server_url: http://127.0.0.1:18890
+  sandbox_config_path: configs/sandbox-server/finance_research_config.json
+  resource_types:
+    - unified_finance
+  resource_init_configs: {}
+  llm_model: gpt-4.1-2025-04-14
+  llm_api_key: ""
+  llm_base_url: ""
+  max_turns: 10

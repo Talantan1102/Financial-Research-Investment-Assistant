@@ -172,6 +172,7 @@ class HTTPServiceClient:
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
                 timeout=self.config.timeout,
+                trust_env=False,
                 headers={
                     "Content-Type": "application/json",
                     "X-Worker-ID": self.worker_id

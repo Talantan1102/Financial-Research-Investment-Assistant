@@ -941,17 +941,17 @@ class Sandbox:
         """Check whether server is online"""
         import httpx  # pyright: ignore[reportMissingImports]
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, trust_env=False) as client:
                 response = await client.get(f"{self.server_url}/health")
                 return response.status_code == 200
         except Exception:
             return False
-    
+
     def _check_server_online(self) -> bool:
         """Check whether server is online (sync)"""
         import httpx  # pyright: ignore[reportMissingImports]
         try:
-            with httpx.Client(timeout=5.0) as client:
+            with httpx.Client(timeout=5.0, trust_env=False) as client:
                 response = client.get(f"{self.server_url}/health")
                 return response.status_code == 200
         except Exception:

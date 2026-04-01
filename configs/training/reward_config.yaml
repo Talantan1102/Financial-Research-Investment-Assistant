@@ -1,0 +1,35 @@
+# Reward module global configuration
+
+reward:
+  # Default weights for rule-based rewards
+  default_weights:
+    accuracy: 0.6
+    efficiency: 0.3
+    format: 0.1
+
+  # Ground truth cache settings
+  cache:
+    dir: ".cache/ground_truth"
+    ttl:
+      current_price: 60      # minutes
+      pe_ratio: 1440
+      pb_ratio: 1440
+      roe: 10080
+
+  # LLM judge configuration
+  llm_judge:
+    model: "gpt-4.1-2025-04-14"
+    temperature: 0.0
+    max_tokens: 2000
+
+  # Field tolerance defaults
+  tolerance:
+    price: 0.01
+    ratio: 0.1
+    percentage: 0.5
+
+  # Sandbox connection
+  sandbox:
+    server_url: http://127.0.0.1:18890
+    config_path: configs/sandbox-server/finance_research_config.json
+    timeout: 120

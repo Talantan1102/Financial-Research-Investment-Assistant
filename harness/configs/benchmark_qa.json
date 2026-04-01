@@ -1,0 +1,12 @@
+{
+  "benchmark_name": "finance_qa",
+  "type": "qa",
+  "data_path": "results/ds_synthesized_qa/synthesized_qa.jsonl",
+  "max_samples": 100,
+  "metrics": ["exact_match", "f1_score", "contains_answer"],
+  "thresholds": {
+    "exact_match": 0.6,
+    "f1_score": 0.7,
+    "contains_answer": 0.8
+  }
+}

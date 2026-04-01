@@ -42,18 +42,18 @@ class SynthesisPipeline:
     def __init__(self, config: SynthesisConfig, output_dir: str = "synthesis_results"):
         """Initialize pipeline"""
         self.config = config
-        agg_output_dir = Path(__file__).resolve().parents[1] / "results" / "ds_synthesized_qa"
-        agg_output_dir.mkdir(parents=True, exist_ok=True)
-        output_dir = str(agg_output_dir)
-        self.output_dir = output_dir
 
         # Validate config
         errors = config.validate()
         if errors:
             raise ValueError(f"Configuration errors: {', '.join(errors)}")
 
+        # Determine output directory (from config, argument, or default)
+        final_output_dir = config.output_dir or output_dir
+        self.output_dir = final_output_dir
+
         # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(final_output_dir, exist_ok=True)
 
         # Initialize output files
         self.qa_file_path = os.path.join(output_dir, "synthesized_qa.jsonl")

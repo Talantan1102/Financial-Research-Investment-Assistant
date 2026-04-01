@@ -29,6 +29,12 @@ class QASynthesizer:
         print(f"\n🔧 Synthesizing QA pair - Trajectory: {trajectory.trajectory_id}")
 
         traj_description = self._format_trajectory(trajectory)
+
+        # Check if trajectory has valid content after filtering errors
+        if not traj_description.strip():
+            print(f"  ⚠️ Skipping trajectory {trajectory.trajectory_id}: no valid observations after error filtering")
+            return None
+
         max_attempts = 3
         last_failure_reason = ""
 
@@ -202,10 +208,35 @@ You MUST regenerate a NEW question/answer that fully satisfies the guidance.
         return prompt
 
     def _format_trajectory(self, trajectory: Trajectory) -> str:
-        """Format trajectory into readable text"""
+        """Format trajectory into readable text, filtering out error observations"""
         formatted = ""
 
+        # Error indicators to filter out
+        error_indicators = [
+            "error",
+            "failed",
+            "失败",
+            "错误",
+            "未找到",
+            "not found",
+            "exception",
+            "timeout",
+            "unavailable"
+        ]
+
         for i, node in enumerate(trajectory.nodes, 1):
+            # Skip nodes with error observations
+            obs = str(node.observation or "")
+            obs_lower = obs.lower()
+
+            # Check if observation contains error indicators
+            is_error = any(indicator in obs_lower for indicator in error_indicators)
+
+            # Skip formatting this node if it's an error observation
+            if is_error:
+                print(f"  [Filter] Skipping error observation at step {i}: {obs[:100]}...")
+                continue
+
             formatted += f"\nStep {i}:\n"
             formatted += f"  Intent: {node.intent}\n"
 
@@ -225,7 +256,6 @@ You MUST regenerate a NEW question/answer that fully satisfies the guidance.
             elif tool_name == "query_knowledge_base_dense":
                 max_chars = 1600
 
-            obs = str(node.observation or "")
             obs_preview = obs[:max_chars] + "..." if len(obs) > max_chars else obs
             formatted += f"  Observation: {obs_preview}\n"
 
