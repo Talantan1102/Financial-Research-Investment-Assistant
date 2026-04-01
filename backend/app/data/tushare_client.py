@@ -75,6 +75,14 @@ class TushareClient:
         # 从环境变量读取自定义 API URL
         self.api_url = os.getenv("TUSHARE_API_URL", "https://api.tushare.pro")
 
+        # 是否使用 Mock 模式
+        self.use_mock = os.getenv("USE_MOCK_TUSHARE", "false").lower() == "true"
+        self._mock_service = None
+        if self.use_mock:
+            from app.service.mock_tushare_service import MockTushareService
+            self._mock_service = MockTushareService()
+            logger.info("TushareClient 已启用 Mock 模式")
+
         # 延迟初始化：不立即创建 api 实例
         self.api = None
         self._api_initialized = False
@@ -95,9 +103,17 @@ class TushareClient:
 
         Returns:
             Tushare pro_api 实例，如果初始化失败返回 None
+            如果启用了 Mock 模式，返回 MockTushareAPI 实例
         """
         # 如果已经初始化过，直接返回
         if self._api_initialized:
+            return self.api
+
+        # Mock 模式下返回 Mock API
+        if self.use_mock and self._mock_service:
+            self.api = MockTushareAPI(self._mock_service)
+            self._api_initialized = True
+            logger.info("使用 Mock Tushare API")
             return self.api
 
         # 首次调用时初始化
@@ -2651,3 +2667,609 @@ TushareClient.compare_industry_metrics = compare_industry_metrics
 TushareClient.compare_industry_valuation = compare_industry_valuation
 TushareClient.get_industry_performance = get_industry_performance
 TushareClient.get_industry_leaders = get_industry_leaders
+
+
+class MockTushareAPI:
+    """
+    Mock Tushare Pro API 接口
+
+    模拟 ts.pro_api() 返回的对象，拦截所有 API 调用并路由到 MockTushareService。
+    返回的 DataFrame 格式与真实 Tushare API 完全一致。
+    """
+
+    def __init__(self, mock_service):
+        """
+        初始化 Mock API
+
+        Args:
+            mock_service: MockTushareService 实例
+        """
+        self._service = mock_service
+        self._logger = logging.getLogger(__name__)
+
+    def daily(self, ts_code: str = None, trade_date: str = None,
+              start_date: str = None, end_date: str = None, **kwargs):
+        """
+        获取日K线数据（模拟 daily 接口）
+
+        Args:
+            ts_code: 股票代码，如 "600519.SH"
+            trade_date: 交易日期（与 start_date/end_date 互斥）
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            DataFrame，格式与 Tushare daily 接口一致
+        """
+        try:
+            import asyncio
+
+            # 处理参数逻辑
+            if trade_date:
+                # 指定单日
+                start_date = trade_date
+                end_date = trade_date
+            elif not start_date or not end_date:
+                # 默认返回最近30天
+                if not end_date:
+                    end_date = datetime.now().strftime('%Y%m%d')
+                if not start_date:
+                    start_dt = datetime.strptime(end_date, '%Y%m%d') - timedelta(days=30)
+                    start_date = start_dt.strftime('%Y%m%d')
+
+            # 标准化股票代码
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+            else:
+                # 默认返回茅台数据
+                ts_code = "600519.SH"
+
+            # 调用 Mock 服务
+            self._logger.info(f"[Mock] daily({ts_code}, {start_date}, {end_date})")
+            df = asyncio.run(self._service.generate_daily_data(ts_code, start_date, end_date))
+
+            # 如果指定了 trade_date，只返回该日期的数据
+            if trade_date and not df.empty:
+                df = df[df['trade_date'] == trade_date]
+
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] daily 调用失败: {e}")
+            # 返回空 DataFrame
+            return pd.DataFrame(columns=['ts_code', 'trade_date', 'open', 'high', 'low', 'close',
+                                         'pre_close', 'change', 'pct_chg', 'vol', 'amount'])
+
+    def daily_basic(self, ts_code: str = None, trade_date: str = None, **kwargs):
+        """
+        获取每日指标数据（模拟 daily_basic 接口）
+
+        Args:
+            ts_code: 股票代码
+            trade_date: 交易日期
+
+        Returns:
+            DataFrame，格式与 Tushare daily_basic 接口一致
+        """
+        try:
+            import asyncio
+
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+
+            self._logger.info(f"[Mock] daily_basic({ts_code}, {trade_date})")
+            df = asyncio.run(self._service.generate_daily_basic(ts_code, trade_date))
+
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] daily_basic 调用失败: {e}")
+            return pd.DataFrame(columns=['ts_code', 'trade_date', 'close', 'turnover_rate',
+                                         'pe', 'pe_ttm', 'pb', 'total_mv', 'circ_mv'])
+
+    def stock_basic(self, exchange: str = None, list_status: str = 'L',
+                    fields: str = None, **kwargs):
+        """
+        获取股票基础信息（模拟 stock_basic 接口）
+
+        Args:
+            exchange: 交易所，SSE/SZE/BSE
+            list_status: 上市状态 L/D/P
+            fields: 返回字段列表
+
+        Returns:
+            DataFrame，格式与 Tushare stock_basic 接口一致
+        """
+        try:
+            import asyncio
+
+            self._logger.info(f"[Mock] stock_basic({exchange}, {list_status})")
+            df = asyncio.run(self._service.generate_stock_basic(exchange, list_status))
+
+            # 如果指定了 fields，只返回指定字段
+            if fields and not df.empty:
+                field_list = [f.strip() for f in fields.split(',')]
+                available_fields = [f for f in field_list if f in df.columns]
+                if available_fields:
+                    df = df[available_fields]
+
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] stock_basic 调用失败: {e}")
+            return pd.DataFrame(columns=['ts_code', 'symbol', 'name', 'area', 'industry',
+                                         'market', 'exchange', 'list_status', 'list_date'])
+
+    def fina_indicator(self, ts_code: str = None, period: str = None,
+                       start_date: str = None, end_date: str = None, **kwargs):
+        """
+        获取财务指标数据（模拟 fina_indicator 接口）
+
+        Args:
+            ts_code: 股票代码
+            period: 报告期，如 "20241231"
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            DataFrame，格式与 Tushare fina_indicator 接口一致
+        """
+        try:
+            import asyncio
+
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+
+            self._logger.info(f"[Mock] fina_indicator({ts_code}, {period})")
+            df = asyncio.run(self._service.generate_fina_indicator(ts_code, period))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] fina_indicator 调用失败: {e}")
+            return pd.DataFrame(columns=['ts_code', 'ann_date', 'end_date', 'eps', 'dt_eps',
+                                         'revenue_ps', 'gross_margin', 'current_ratio', 'quick_ratio',
+                                         'cash_ratio', 'invturn_days', 'arturn_days', 'inv_turn',
+                                         'ar_turn', 'ca_turn', 'fa_turn', 'assets_turn', 'op_income',
+                                         'profit_dedt', 'netprofit_margin', 'bps', 'ocfps', 'roe', 'rd_exp'])
+
+    def income(self, ts_code: str = None, start_date: str = None,
+               end_date: str = None, period: str = None, **kwargs):
+        """
+        获取利润表数据（模拟 income 接口）
+
+        Args:
+            ts_code: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 报告期
+
+        Returns:
+            DataFrame，格式与 Tushare income 接口一致
+        """
+        try:
+            import asyncio
+
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+
+            self._logger.info(f"[Mock] income({ts_code}, {period})")
+            df = asyncio.run(self._service.generate_income(ts_code, period))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] income 调用失败: {e}")
+            return pd.DataFrame(columns=['ts_code', 'ann_date', 'f_ann_date', 'end_date',
+                                         'report_type', 'comp_type', 'basic_eps', 'diluted_eps',
+                                         'total_revenue', 'revenue', 'total_cogs', 'oper_cost',
+                                         'operate_profit', 'non_oper_income', 'non_oper_exp',
+                                         'total_profit', 'income_tax', 'n_income', 'ebit', 'ebitda'])
+
+    def balancesheet(self, ts_code: str = None, start_date: str = None,
+                     end_date: str = None, period: str = None, **kwargs):
+        """
+        获取资产负债表数据（模拟 balancesheet 接口）
+
+        Args:
+            ts_code: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 报告期
+
+        Returns:
+            DataFrame，格式与 Tushare balancesheet 接口一致
+        """
+        try:
+            import asyncio
+
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+
+            self._logger.info(f"[Mock] balancesheet({ts_code}, {period})")
+            df = asyncio.run(self._service.generate_balance_sheet(ts_code, period))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] balancesheet 调用失败: {e}")
+            return pd.DataFrame(columns=['ts_code', 'ann_date', 'f_ann_date', 'end_date',
+                                         'report_type', 'comp_type', 'total_share', 'cap_rese',
+                                         'undistr_porfit', 'surplus_rese', 'special_rese', 'money_cap',
+                                         'trad_asset', 'notes_receiv', 'accounts_receiv', 'oth_receiv',
+                                         'prepayment', 'inventories', 'total_cur_assets', 'fa_avail_for_sale',
+                                         'lt_eqt_invest', 'fix_assets', 'intan_assets', 'rd', 'goodwill',
+                                         'total_nca', 'total_assets', 'lt_borr', 'st_borr', 'notes_payable',
+                                         'acct_payable', 'adv_receipts', 'taxes_payable', 'total_cur_liab',
+                                         'lt_payable', 'total_ncl', 'total_liab_eqt'])
+
+    def cashflow(self, ts_code: str = None, start_date: str = None,
+                 end_date: str = None, period: str = None, **kwargs):
+        """
+        获取现金流量表数据（模拟 cashflow 接口）
+
+        Args:
+            ts_code: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 报告期
+
+        Returns:
+            DataFrame，格式与 Tushare cashflow 接口一致
+        """
+        try:
+            import asyncio
+
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+
+            self._logger.info(f"[Mock] cashflow({ts_code}, {period})")
+            df = asyncio.run(self._service.generate_cash_flow(ts_code, period))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] cashflow 调用失败: {e}")
+            return pd.DataFrame(columns=['ts_code', 'ann_date', 'f_ann_date', 'end_date',
+                                         'comp_type', 'report_type', 'net_profit', 'finan_exp',
+                                         'c_fr_sale_sg', 'recp_tax_rends', 'c_inf_fr_operate_a',
+                                         'c_paid_goods_s', 'c_paid_to_for_empl', 'c_paid_for_taxes',
+                                         'st_cash_out_act', 'n_cashflow_act', 'c_disp_withdrwl_invest',
+                                         'stot_cash_inflow_inv_act', 'c_pay_acq_const_fiolta',
+                                         'stot_cash_outflow_inv_act', 'n_cashflow_inv_act',
+                                         'c_recp_borrow', 'stot_cash_inflow_fnc_act', 'c_prepay_debt',
+                                         'stot_cash_outflow_fnc_act', 'n_cashflow_fnc_act',
+                                         'eff_fx_flu_cash', 'c_cash_equ_beg_period', 'c_cash_equ_end_period'])
+
+    def moneyflow(self, ts_code: str = None, trade_date: str = None,
+                  start_date: str = None, end_date: str = None, **kwargs):
+        """
+        获取个股资金流向数据（模拟 moneyflow 接口）
+
+        Args:
+            ts_code: 股票代码
+            trade_date: 交易日期
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            DataFrame，格式与 Tushare moneyflow 接口一致
+        """
+        try:
+            import asyncio
+
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+            else:
+                ts_code = "600519.SH"
+
+            self._logger.info(f"[Mock] moneyflow({ts_code}, {trade_date})")
+            df = asyncio.run(self._service.generate_money_flow(ts_code, trade_date))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] moneyflow 调用失败: {e}")
+            return pd.DataFrame(columns=['ts_code', 'trade_date', 'buy_sm_vol', 'buy_sm_amount',
+                                         'sell_sm_vol', 'sell_sm_amount', 'buy_md_vol', 'buy_md_amount',
+                                         'sell_md_vol', 'sell_md_amount', 'buy_lg_vol', 'buy_lg_amount',
+                                         'sell_lg_vol', 'sell_lg_amount', 'buy_elg_vol', 'buy_elg_amount',
+                                         'sell_elg_vol', 'sell_elg_amount', 'net_mf_vol', 'net_mf_amount',
+                                         'trade_count'])
+
+    def top_list(self, trade_date: str = None, **kwargs):
+        """
+        获取龙虎榜每日明细（模拟 top_list 接口）
+
+        Args:
+            trade_date: 交易日期
+
+        Returns:
+            DataFrame，格式与 Tushare top_list 接口一致
+        """
+        try:
+            import asyncio
+
+            self._logger.info(f"[Mock] top_list({trade_date})")
+            df = asyncio.run(self._service.generate_top_list(trade_date))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] top_list 调用失败: {e}")
+            return pd.DataFrame(columns=['trade_date', 'ts_code', 'name', 'close', 'pct_chg',
+                                         'turnover_rate', 'amount', 'l_buy', 'l_sell',
+                                         'net_amount', 'net_rate', 'amount_rate', 'reason'])
+
+    def limit_list(self, trade_date: str = None, limit_type: str = None, **kwargs):
+        """
+        获取每日涨跌停名单（模拟 limit_list 接口）
+
+        Args:
+            trade_date: 交易日期
+            limit_type: 涨停/跌停类型
+
+        Returns:
+            DataFrame，格式与 Tushare limit_list 接口一致
+        """
+        try:
+            import asyncio
+
+            self._logger.info(f"[Mock] limit_list({trade_date}, {limit_type})")
+            df = asyncio.run(self._service.generate_limit_list(trade_date, limit_type))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] limit_list 调用失败: {e}")
+            return pd.DataFrame(columns=['trade_date', 'ts_code', 'name', 'industry', 'close',
+                                         'pct_chg', 'amount', 'limit_amount', 'float_mv', 'total_mv',
+                                         'turnover_ratio', 'fd_amount', 'first_time', 'last_time',
+                                         'open_times', 'up_stat', 'limit_type'])
+
+    def margin(self, ts_code: str = None, trade_date: str = None,
+               start_date: str = None, end_date: str = None, **kwargs):
+        """
+        获取融资融券数据（模拟 margin 接口）
+
+        Args:
+            ts_code: 股票代码
+            trade_date: 交易日期
+            start_date: 开始日期
+            end_date: 结束日期
+
+        Returns:
+            DataFrame，格式与 Tushare margin 接口一致
+        """
+        try:
+            import asyncio
+
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+            else:
+                ts_code = "600519.SH"
+
+            self._logger.info(f"[Mock] margin({ts_code}, {trade_date})")
+            df = asyncio.run(self._service.generate_margin(ts_code, trade_date))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] margin 调用失败: {e}")
+            return pd.DataFrame(columns=['trade_date', 'ts_code', 'rzye', 'rqyl', 'rzmre',
+                                         'rqylc', 'rzche', 'rqchl', 'rqmcl', 'szrje',
+                                         'xzrje', 'szrkje', 'xzrkje', 'rzrqye', 'rzrqylc'])
+
+    def moneyflow_hsgt(self, start_date: str = None, end_date: str = None,
+                       trade_date: str = None, **kwargs):
+        """
+        获取沪深港通资金流向数据（模拟 moneyflow_hsgt 接口）
+
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+            trade_date: 交易日期
+
+        Returns:
+            DataFrame，格式与 Tushare moneyflow_hsgt 接口一致
+        """
+        try:
+            import asyncio
+
+            if trade_date:
+                start_date = trade_date
+                end_date = trade_date
+
+            self._logger.info(f"[Mock] moneyflow_hsgt({start_date}, {end_date})")
+            df = asyncio.run(self._service.generate_money_flow_hsgt(start_date, end_date))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] moneyflow_hsgt 调用失败: {e}")
+            return pd.DataFrame(columns=['trade_date', 'ggt_ss', 'ggt_sz', 'hgt_ltg',
+                                         'hgt_cgtes', 'hgt_cgtes_l', 'sgt_ltg', 'sgt_cgtes',
+                                         'sgt_cgtes_l', 'north_money', 'south_money'])
+
+    def concept(self, src: str = None, **kwargs):
+        """
+        获取概念分类列表（模拟 concept 接口）
+
+        Args:
+            src: 来源
+
+        Returns:
+            DataFrame，格式与 Tushare concept 接口一致
+        """
+        try:
+            import asyncio
+
+            self._logger.info(f"[Mock] concept({src})")
+            df = asyncio.run(self._service.generate_concept())
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] concept 调用失败: {e}")
+            return pd.DataFrame(columns=['code', 'name', 'src'])
+
+    def concept_detail(self, id: str = None, concept_name: str = None, **kwargs):
+        """
+        获取概念成分明细（模拟 concept_detail 接口）
+
+        Args:
+            id: 概念ID
+            concept_name: 概念名称
+
+        Returns:
+            DataFrame，格式与 Tushare concept_detail 接口一致
+        """
+        try:
+            import asyncio
+
+            concept_code = id or concept_name
+            self._logger.info(f"[Mock] concept_detail({concept_code})")
+            df = asyncio.run(self._service.generate_concept_detail(concept_code))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] concept_detail 调用失败: {e}")
+            return pd.DataFrame(columns=['id', 'concept_name', 'ts_code', 'name',
+                                         'in_date', 'out_date'])
+
+    def stock_company(self, ts_code: str = None, exchange: str = None, **kwargs):
+        """
+        获取上市公司基本信息（模拟 stock_company 接口）
+
+        Args:
+            ts_code: 股票代码
+            exchange: 交易所代码
+
+        Returns:
+            DataFrame，格式与 Tushare stock_company 接口一致
+        """
+        try:
+            import asyncio
+
+            if ts_code:
+                ts_code = self._normalize_code(ts_code)
+            else:
+                ts_code = "600519.SH"
+
+            self._logger.info(f"[Mock] stock_company({ts_code})")
+            df = asyncio.run(self._service.generate_stock_company(ts_code))
+            return df
+
+        except Exception as e:
+            self._logger.error(f"[Mock] stock_company 调用失败: {e}")
+            return pd.DataFrame(columns=['ts_code', 'exchange', 'chairman', 'manager',
+                                         'secretary', 'reg_capital', 'setup_date', 'province',
+                                         'city', 'introduction', 'website', 'email', 'office',
+                                         'employees', 'main_business', 'business_scope'])
+
+    def weekly(self, ts_code: str = None, start_date: str = None,
+               end_date: str = None, **kwargs):
+        """获取周K线数据（模拟 weekly 接口）"""
+        self._logger.info(f"[Mock] weekly({ts_code}) - 使用 daily 数据聚合")
+        # 复用 daily 数据，简单模拟
+        df = self.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+        if not df.empty:
+            # 按周聚合（简化处理，直接返回日数据）
+            df = df.head(10)  # 只返回前10条模拟周数据
+        return df
+
+    def monthly(self, ts_code: str = None, start_date: str = None,
+                end_date: str = None, **kwargs):
+        """获取月K线数据（模拟 monthly 接口）"""
+        self._logger.info(f"[Mock] monthly({ts_code}) - 使用 daily 数据聚合")
+        df = self.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+        if not df.empty:
+            df = df.head(5)  # 只返回前5条模拟月数据
+        return df
+
+    def user(self, **kwargs):
+        """
+        获取用户信息（模拟 user 接口）
+
+        Returns:
+            DataFrame，包含 mock 用户信息
+        """
+        self._logger.info("[Mock] user()")
+        # 返回 mock 用户信息，模拟无限积分
+        data = {
+            'points': [999999],
+            'vip_level': ['mock'],
+            'valid_until': ['2099-12-31']
+        }
+        return pd.DataFrame(data)
+
+    def query(self, api_name: str, params: dict = None, fields: str = ''):
+        """
+        通用查询接口（模拟 query 方法）
+
+        Args:
+            api_name: API 名称
+            params: 查询参数
+            fields: 返回字段
+
+        Returns:
+            DataFrame
+        """
+        self._logger.info(f"[Mock] query({api_name}, {params})")
+
+        # 路由到对应的 mock 方法
+        if params is None:
+            params = {}
+
+        if api_name == 'daily':
+            return self.daily(**params)
+        elif api_name == 'daily_basic':
+            return self.daily_basic(**params)
+        elif api_name == 'stock_basic':
+            return self.stock_basic(**params)
+        elif api_name == 'fina_indicator':
+            return self.fina_indicator(**params)
+        elif api_name == 'income':
+            return self.income(**params)
+        elif api_name == 'balancesheet':
+            return self.balancesheet(**params)
+        elif api_name == 'cashflow':
+            return self.cashflow(**params)
+        elif api_name == 'moneyflow':
+            return self.moneyflow(**params)
+        elif api_name == 'top_list':
+            return self.top_list(**params)
+        elif api_name == 'limit_list':
+            return self.limit_list(**params)
+        elif api_name == 'margin':
+            return self.margin(**params)
+        elif api_name == 'moneyflow_hsgt':
+            return self.moneyflow_hsgt(**params)
+        elif api_name == 'concept':
+            return self.concept(**params)
+        elif api_name == 'concept_detail':
+            return self.concept_detail(**params)
+        elif api_name == 'stock_company':
+            return self.stock_company(**params)
+        elif api_name == 'weekly':
+            return self.weekly(**params)
+        elif api_name == 'monthly':
+            return self.monthly(**params)
+        else:
+            self._logger.warning(f"[Mock] 未实现的 API: {api_name}")
+            return pd.DataFrame()
+
+    def _normalize_code(self, symbol: str) -> str:
+        """标准化股票代码为 Tushare 格式"""
+        symbol = symbol.strip().upper()
+
+        # 如果已经是 Tushare 格式，直接返回
+        if "." in symbol:
+            return symbol
+
+        # 去除市场前缀（如 sh600519 -> 600519）
+        if symbol.startswith("SH") or symbol.startswith("SZ") or symbol.startswith("BJ"):
+            code = symbol[2:]
+            market = symbol[:2]
+            return f"{code}.{market}"
+
+        # 纯数字，根据规则判断市场
+        if len(symbol) == 6:
+            if symbol.startswith("6") or symbol.startswith("9"):
+                return f"{symbol}.SH"
+            elif symbol.startswith("0") or symbol.startswith("3") or symbol.startswith("2"):
+                return f"{symbol}.SZ"
+            elif symbol.startswith("4") or symbol.startswith("8"):
+                return f"{symbol}.BJ"
+
+        return symbol
