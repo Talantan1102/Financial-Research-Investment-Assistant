@@ -1,0 +1,87 @@
+# GRPO + LoRA, Qwen2.5-7B-Instruct, 2x A100 40GB
+#
+# GPU layout:
+#   GPU 0: FSDP Actor (training)
+#   GPU 1: sglang rollout (inference)
+#
+# 启动前先跑 sglang:
+#   CUDA_VISIBLE_DEVICES=1 python -m sglang.launch_server \
+#     --model Qwen/Qwen2.5-7B-Instruct --port 30000 --tp 1
+#
+# 然后启动训练:
+#   bash training/scripts/launch_grpo_lora_2gpu.sh
+
+data:
+  train_files: ["results/verl_training_data.parquet"]
+  val_files: ["results/verl_eval_data.parquet"]
+  prompt_key: prompt
+  max_prompt_length: 1024
+  max_response_length: 1024
+  train_batch_size: 64      # 每步从 rollout buffer 里取 64 条
+  val_batch_size: 32
+
+actor_rollout_ref:
+  model:
+    path: Qwen/Qwen2.5-7B-Instruct
+    use_remove_padding: true
+
+  actor:
+    optim:
+      lr: 1.0e-5
+    ppo_mini_batch_size: 16
+    ppo_micro_batch_size_per_gpu: 4
+    fsdp_config:
+      fsdp_size: 1            # 单 GPU 训练
+    lora:
+      enabled: true
+      r: 16                   # rank，面试常见值
+      lora_alpha: 32          # alpha = 2*r 是常见设定
+      target_modules:
+        - q_proj
+        - k_proj
+        - v_proj
+        - o_proj
+        - gate_proj
+        - up_proj
+        - down_proj
+      lora_dropout: 0.05
+
+  rollout:
+    name: sglang
+    temperature: 1.0
+    n: 4                      # 每个 prompt 生成 4 条，GRPO 组内对比
+    max_new_tokens: 512
+    tp_size: 1
+    sglang:
+      url: http://127.0.0.1:30000
+
+  ref:
+    fsdp_config:
+      fsdp_size: 1
+
+algorithm:
+  adv_estimator: grpo
+  kl_ctrl:
+    type: fixed
+    kl_coef: 0.001            # KL 惩罚系数，防止模型跑偏
+  gamma: 1.0
+  lam: 1.0
+
+reward_model:
+  enable: false               # 使用自定义 reward fn，不用独立 reward model
+
+custom_reward_function:
+  path: training/reward/__init__.py
+  cls_name: AgentFlowReward
+
+trainer:
+  total_epochs: 2
+  save_freq: 50               # 每 50 步保存一次 checkpoint
+  test_freq: 20               # 每 20 步跑一次 eval
+  project_name: finance-agent-grpo
+  experiment_name: qwen2-5-7b-lora-run1
+  logger:
+    - console
+    - wandb                   # 同时输出到终端和 wandb
+  default_hdfs_dir: null
+  default_local_dir: results/checkpoints

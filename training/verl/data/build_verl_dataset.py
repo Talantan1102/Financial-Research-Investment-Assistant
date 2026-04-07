@@ -75,11 +75,16 @@ def build_verl_items(
     return verl_items
 
 
-def save_verl_data(verl_items: List[Dict[str, Any]], output_path: str) -> None:
+def save_verl_data(verl_items: List[Dict[str, Any]], output_path: str, as_parquet: bool = False) -> None:
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        for item in verl_items:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+    if as_parquet:
+        import pandas as pd
+        df = pd.DataFrame(verl_items)
+        df.to_parquet(output_path, index=False)
+    else:
+        with open(output_path, "w", encoding="utf-8") as f:
+            for item in verl_items:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
 def main():
@@ -109,6 +114,17 @@ def main():
         action="store_true",
         default=True,
         help="Add generation prompt to the end of prompt string",
+    )
+    parser.add_argument(
+        "--to-parquet",
+        action="store_true",
+        help="输出 parquet 格式（verl 要求），默认输出 jsonl",
+    )
+    parser.add_argument(
+        "--eval-split",
+        type=float,
+        default=0.1,
+        help="切出多少比例作为 eval set（默认 0.1，0 表示不切）",
     )
 
     args = parser.parse_args()
@@ -149,8 +165,24 @@ def main():
         add_generation_prompt=args.add_generation_prompt,
     )
 
-    save_verl_data(verl_items, args.output)
-    print(f"\n✅ Saved {len(verl_items)} items to {args.output}")
+    # 切分 train / eval
+    if args.eval_split > 0:
+        import random
+        random.shuffle(verl_items)
+        split = int(len(verl_items) * (1 - args.eval_split))
+        train_items, eval_items = verl_items[:split], verl_items[split:]
+    else:
+        train_items, eval_items = verl_items, []
+
+    ext = ".parquet" if args.to_parquet else ".jsonl"
+    train_out = args.output if args.output.endswith(ext) else args.output.replace(".jsonl", ext).replace(".parquet", ext)
+    save_verl_data(train_items, train_out, as_parquet=args.to_parquet)
+    print(f"\n✅ Train: {len(train_items)} items → {train_out}")
+
+    if eval_items:
+        eval_out = train_out.replace("training_data", "eval_data")
+        save_verl_data(eval_items, eval_out, as_parquet=args.to_parquet)
+        print(f"✅ Eval:  {len(eval_items)} items → {eval_out}")
 
 
 if __name__ == "__main__":
