@@ -41,8 +41,26 @@ fi
 # Launch with ray if available
 if command -v ray &> /dev/null; then
     echo "Detected ray. Starting training with Ray..."
-    python training/verl/train_grpo.py --config "$CONFIG" "$@"
-else
-    echo "Ray not found. Launching standalone..."
-    python training/verl/train_grpo.py --config "$CONFIG" "$@"
+DATA_PATH="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['training']['data_path'])")"
+MODEL="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['model']['model_name'])")"
+LR="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['training']['learning_rate'])")"
+ROLLOUT_N="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['rollout']['n'])")"
+MAX_NEW_TOKENS="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['rollout']['max_new_tokens'])")"
+
+python -m verl.trainer.main_ppo \
+    algorithm.adv_estimator=grpo \
+    data.train_files="[\"${DATA_PATH}\"]" \
+    data.val_files="[\"${DATA_PATH}\"]" \
+    actor_rollout_ref.model.path="${MODEL}" \
+    actor_rollout_ref.actor.optim.lr="${LR}" \
+    actor_rollout_ref.actor.fsdp_config.fsdp_size=4 \
+    actor_rollout_ref.rollout.name=sglang \
+    actor_rollout_ref.rollout.tp_size="${SGLANG_TP_SIZE}" \
+    actor_rollout_ref.rollout.ep_size="${SGLANG_EP_SIZE}" \
+    actor_rollout_ref.rollout.n="${ROLLOUT_N}" \
+    actor_rollout_ref.rollout.max_new_tokens="${MAX_NEW_TOKENS}" \
+    actor_rollout_ref.rollout.sglang.url="${SGLANG_URL}" \
+    custom_reward_function.path=training/reward/__init__.py \
+    custom_reward_function.cls_name=AgentFlowReward \
+    "$@"
 fi

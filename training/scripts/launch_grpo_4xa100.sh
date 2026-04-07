@@ -38,4 +38,24 @@ if ! curl -s "http://${SGLANG_HOST}:${SGLANG_PORT}/health" > /dev/null 2>&1; the
     echo "Example: python -m sglang.launch_server --model Qwen/Qwen3-30B-A3B --tp $SGLANG_TP_SIZE --ep $SGLANG_EP_SIZE"
 fi
 
-python training/verl/train_grpo.py --config "$CONFIG" "$@"
+DATA_PATH="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['training']['data_path'])")"
+MODEL="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['model']['model_name'])")"
+LR="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['training']['learning_rate'])")"
+ROLLOUT_N="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['rollout']['n'])")"
+MAX_NEW_TOKENS="$(python -c "import yaml; print(yaml.safe_load(open('$CONFIG'))['rollout']['max_new_tokens'])")"
+
+python -m verl.trainer.main_ppo \
+    algorithm.adv_estimator=grpo \
+    data.train_files="[\"${DATA_PATH}\"]" \
+    data.val_files="[\"${DATA_PATH}\"]" \
+    actor_rollout_ref.model.path="${MODEL}" \
+    actor_rollout_ref.actor.optim.lr="${LR}" \
+    actor_rollout_ref.actor.fsdp_config.fsdp_size=2 \
+    actor_rollout_ref.rollout.name=sglang \
+    actor_rollout_ref.rollout.tp_size="${SGLANG_TP_SIZE}" \
+    actor_rollout_ref.rollout.n="${ROLLOUT_N}" \
+    actor_rollout_ref.rollout.max_new_tokens="${MAX_NEW_TOKENS}" \
+    actor_rollout_ref.rollout.sglang.url="${SGLANG_URL}" \
+    custom_reward_function.path=training/reward/__init__.py \
+    custom_reward_function.cls_name=AgentFlowReward \
+    "$@"
