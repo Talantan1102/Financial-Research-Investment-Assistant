@@ -39,9 +39,10 @@ def generate_source_id(seed_content: str, seed_idx: int) -> str:
 class SynthesisPipeline:
     """Main RAG synthesis pipeline"""
 
-    def __init__(self, config: SynthesisConfig, output_dir: str = "synthesis_results"):
+    def __init__(self, config: SynthesisConfig, output_dir: str = "synthesis_results", resume: bool = False):
         """Initialize pipeline"""
         self.config = config
+        self.resume = resume
 
         # Validate config
         errors = config.validate()
@@ -56,17 +57,24 @@ class SynthesisPipeline:
         os.makedirs(final_output_dir, exist_ok=True)
 
         # Initialize output files
-        self.qa_file_path = os.path.join(output_dir, "synthesized_qa.jsonl")
-        self.traj_file_path = os.path.join(output_dir, "trajectories.jsonl")
+        self.qa_file_path = os.path.join(final_output_dir, "synthesized_qa.jsonl")
+        self.traj_file_path = os.path.join(final_output_dir, "trajectories.jsonl")
 
         print(f"💾 Output files:")
         print(f"   QA: {self.qa_file_path}")
         print(f"   Trajectories: {self.traj_file_path}")
+        if self.resume:
+            print(f"   Resume mode: ON")
 
     async def run_async(self, seeds: List[Dict[str, Any]]):
         """Run synthesis pipeline asynchronously"""
         if self.config.number_of_seed is not None:
             seeds = seeds[:self.config.number_of_seed]
+
+        processed_source_ids = set()
+        if self.resume:
+            processed_source_ids = self._load_processed_source_ids()
+            print(f"⏭️ Resume mode: found {len(processed_source_ids)} already processed seeds, will skip them")
 
         print(f"\n{'='*80}")
         print(f"🚀 RAG Data Synthesis Pipeline")
@@ -97,6 +105,10 @@ class SynthesisPipeline:
                 seed_content = seed.get("content", "")
                 seed_kwargs = seed.get("kwargs", {})
                 source_id = generate_source_id(seed_content, seed_idx)
+
+                if self.resume and source_id in processed_source_ids:
+                    print(f"⏭️ Resume: skipping Seed {seed_idx} ({source_id})")
+                    continue
 
                 print(f"\n{'#'*60}")
                 print(f"Processing Seed {seed_idx}/{len(seeds)}")
@@ -209,6 +221,29 @@ class SynthesisPipeline:
         """Run synthesis pipeline (sync wrapper)"""
         asyncio.run(self.run_async(seeds))
 
+    def _load_processed_source_ids(self) -> set:
+        """Load source_ids from existing output files for resume"""
+        source_ids = set()
+        for file_path in (self.qa_file_path, self.traj_file_path):
+            if not os.path.exists(file_path):
+                continue
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            data = json.loads(line)
+                            sid = data.get("source_id")
+                            if sid:
+                                source_ids.add(sid)
+                        except Exception:
+                            continue
+            except Exception as e:
+                print(f"⚠️ Failed to read {file_path} for resume: {e}")
+        return source_ids
+
     def _save_qa_pairs(self, qa_pairs: List[Dict[str, Any]]):
         """Save QA pairs to file"""
         with open(self.qa_file_path, "a", encoding="utf-8") as f:
@@ -232,6 +267,8 @@ def main():
                        help="Seed data JSON file path")
     parser.add_argument("--output-dir", type=str, default=None,
                        help="Output directory")
+    parser.add_argument("--resume", action="store_true",
+                       help="Resume from existing output files, skipping already processed seeds")
 
     args = parser.parse_args()
 
@@ -275,7 +312,7 @@ def main():
     print(f"Loaded {len(seeds)} seeds")
 
     # Run pipeline
-    pipeline = SynthesisPipeline(config=config, output_dir=output_dir)
+    pipeline = SynthesisPipeline(config=config, output_dir=output_dir, resume=args.resume)
     pipeline.run(seeds)
 
     print("\n✅ All done!")

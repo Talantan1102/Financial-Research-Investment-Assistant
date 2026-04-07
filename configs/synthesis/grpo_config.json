@@ -1,6 +1,6 @@
 {
   "model_name": "deepseek-v3.2",
-  "api_key": "${DASHSCOPE_API_KEY}",
+  "api_key": "sk-f5ad885285a44c339968325bdebc5658",
   "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "max_depth": 10,
   "branching_factor": 2,
@@ -8,7 +8,7 @@
   "min_depth": 1,
   "max_selected_traj": 3,
   "path_similarity_threshold": 0.8,
-  "number_of_seed": 100000,
+  "number_of_seed": 10,
   "resource_types": [
     "unified_finance"
   ],
@@ -57,6 +57,6 @@
     "reasoning_steps 必须包含 >=3 个 hops，每一步都要有 fact / evidence / output。",
     "问题必须与金融投资相关，答案必须基于 traj_description 中的具体数据和分析结论，不能是泛泛而谈。"
   ],
-  "seeds_file": "data/seeds/seeds_100k_all.jsonl",
-  "output_dir": "results/grpo_100k_synthesis"
+  "seeds_file": "data/seeds_10000_production/seeds_10000_all.jsonl",
+  "output_dir": "results/grpo_synthesis"
 }
