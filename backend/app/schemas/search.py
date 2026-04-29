@@ -1,12 +1,14 @@
 # Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
 # 未经授权，禁止转售或仿制。
 
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
 class WebSearchRequest(BaseModel):
     """Web搜索请求模型"""
+
     query: str = Field(..., description="搜索查询文本")
     gl: str = Field("us", description="Google国家代码（例如：us, cn, jp等）")
     hl: str = Field("en", description="语言代码（例如：en, zh-cn, ja等）")
@@ -17,22 +19,24 @@ class WebSearchRequest(BaseModel):
 
 class SearchResultItem(BaseModel):
     """搜索结果项模型"""
+
     type: str
-    title: Optional[str] = None
-    link: Optional[str] = None
-    snippet: Optional[str] = None
-    position: Optional[int] = None
-    description: Optional[str] = None
-    source: Optional[str] = None
-    attributes: Optional[Dict[str, Any]] = None
-    question: Optional[str] = None
-    queries: Optional[List[str]] = None
+    title: str | None = None
+    link: str | None = None
+    snippet: str | None = None
+    position: int | None = None
+    description: str | None = None
+    source: str | None = None
+    attributes: dict[str, Any] | None = None
+    question: str | None = None
+    queries: list[str] | None = None
 
 
 class WebSearchResponse(BaseModel):
     """Web搜索响应模型"""
+
     success: bool
-    message: Optional[str] = None
+    message: str | None = None
     query: str
-    results: List[SearchResultItem] = []
-    raw_results: Optional[Dict[str, Any]] = None 
+    results: list[SearchResultItem] = []
+    raw_results: dict[str, Any] | None = None

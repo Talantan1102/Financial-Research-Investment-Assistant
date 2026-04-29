@@ -6,9 +6,8 @@
 提供投资风险评估功能。
 """
 
-from typing import Dict, Any, Optional, List
+from app.data.tushare_client import TushareClient, get_tushare_client
 from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
-from app.data.tushare_client import get_tushare_client, TushareClient
 
 
 class RiskAssessmentSkill(BaseSkill):
@@ -22,7 +21,7 @@ class RiskAssessmentSkill(BaseSkill):
     description = "投资风险评估，评估个股风险等级、提供预警"
 
     def __init__(self):
-        self._tushare_client: Optional[TushareClient] = None
+        self._tushare_client: TushareClient | None = None
         super().__init__()
 
     def get_tushare_client(self) -> TushareClient:
@@ -44,9 +43,9 @@ class RiskAssessmentSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 )
-            ]
+            ],
         )
 
         # 2. 估值风险评估
@@ -59,16 +58,16 @@ class RiskAssessmentSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="industry_pe_avg",
                     type="number",
                     description="行业平均PE，用于对比",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 3. 财务风险评估
@@ -81,9 +80,9 @@ class RiskAssessmentSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 )
-            ]
+            ],
         )
 
         # 4. 波动率风险评估
@@ -96,16 +95,16 @@ class RiskAssessmentSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="period",
                     type="string",
                     description="计算周期：20d(20日), 60d(60日), 120d(120日)",
                     required=False,
-                    default="60d"
-                )
-            ]
+                    default="60d",
+                ),
+            ],
         )
 
         # 5. 风险预警检查
@@ -118,9 +117,9 @@ class RiskAssessmentSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 )
-            ]
+            ],
         )
 
     async def assess_stock_risk(self, ts_code: str) -> ToolResult:
@@ -164,8 +163,8 @@ class RiskAssessmentSkill(BaseSkill):
                 "components": {
                     "valuation": valuation_result.data if valuation_result.success else None,
                     "financial": financial_result.data if financial_result.success else None,
-                    "volatility": volatility_result.data if volatility_result.success else None
-                }
+                    "volatility": volatility_result.data if volatility_result.success else None,
+                },
             }
 
             return ToolResult(success=True, data=assessment)
@@ -186,7 +185,9 @@ class RiskAssessmentSkill(BaseSkill):
         else:
             return "高风险"
 
-    async def assess_valuation_risk(self, ts_code: str, industry_pe_avg: float = None) -> ToolResult:
+    async def assess_valuation_risk(
+        self, ts_code: str, industry_pe_avg: float = None
+    ) -> ToolResult:
         """估值风险评估"""
         if not ts_code:
             return ToolResult(success=False, error="股票代码不能为空")
@@ -242,7 +243,11 @@ class RiskAssessmentSkill(BaseSkill):
                 "pb": pb,
                 "risk_score": min(risk_score, 100),
                 "risk_factors": risk_factors,
-                "assessment": "估值合理" if risk_score < 20 else "估值偏高" if risk_score < 50 else "估值过高"
+                "assessment": "估值合理"
+                if risk_score < 20
+                else "估值偏高"
+                if risk_score < 50
+                else "估值过高",
             }
 
             return ToolResult(success=True, data=assessment)
@@ -307,7 +312,11 @@ class RiskAssessmentSkill(BaseSkill):
                 "quick_ratio": quick_ratio,
                 "risk_score": min(risk_score, 100),
                 "risk_factors": risk_factors,
-                "assessment": "财务状况良好" if risk_score < 20 else "存在一定财务风险" if risk_score < 50 else "财务风险较高"
+                "assessment": "财务状况良好"
+                if risk_score < 20
+                else "存在一定财务风险"
+                if risk_score < 50
+                else "财务风险较高",
             }
 
             return ToolResult(success=True, data=assessment)
@@ -344,7 +353,8 @@ class RiskAssessmentSkill(BaseSkill):
 
             # 计算波动率（标准差）
             import statistics
-            volatility = statistics.stdev(returns) * (252 ** 0.5)  # 年化波动率
+
+            volatility = statistics.stdev(returns) * (252**0.5)  # 年化波动率
 
             # 计算风险分数
             risk_score = 0
@@ -372,7 +382,11 @@ class RiskAssessmentSkill(BaseSkill):
                 "max_drawdown": round(max_drawdown * 100, 2),
                 "risk_score": min(risk_score, 100),
                 "risk_factors": risk_factors,
-                "assessment": "波动适中" if risk_score < 30 else "波动较大" if risk_score < 60 else "波动极大"
+                "assessment": "波动适中"
+                if risk_score < 30
+                else "波动较大"
+                if risk_score < 60
+                else "波动极大",
             }
 
             return ToolResult(success=True, data=assessment)
@@ -380,7 +394,7 @@ class RiskAssessmentSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"波动率风险评估失败: {str(e)}")
 
-    def _calculate_max_drawdown(self, data: List[Dict]) -> float:
+    def _calculate_max_drawdown(self, data: list[dict]) -> float:
         """计算最大回撤"""
         if not data:
             return 0
@@ -412,40 +426,49 @@ class RiskAssessmentSkill(BaseSkill):
             if risk_result.success:
                 risk_data = risk_result.data
                 if risk_data.get("risk_level") in ["中高风险", "高风险"]:
-                    warnings.append({
-                        "level": "high",
-                        "type": "综合风险",
-                        "message": f"综合风险等级：{risk_data.get('risk_level')}"
-                    })
+                    warnings.append(
+                        {
+                            "level": "high",
+                            "type": "综合风险",
+                            "message": f"综合风险等级：{risk_data.get('risk_level')}",
+                        }
+                    )
 
             # 获取估值风险
             valuation_result = await self.assess_valuation_risk(ts_code)
             if valuation_result.success:
                 v_data = valuation_result.data
                 if v_data.get("pe", 0) > 50:
-                    warnings.append({
-                        "level": "medium",
-                        "type": "估值风险",
-                        "message": f"PE({v_data.get('pe'):.2f})偏高"
-                    })
+                    warnings.append(
+                        {
+                            "level": "medium",
+                            "type": "估值风险",
+                            "message": f"PE({v_data.get('pe'):.2f})偏高",
+                        }
+                    )
 
             # 获取财务风险
             financial_result = await self.assess_financial_risk(ts_code)
             if financial_result.success:
                 f_data = financial_result.data
                 if f_data.get("debt_to_assets", 0) > 0.6:
-                    warnings.append({
-                        "level": "medium",
-                        "type": "财务风险",
-                        "message": f"资产负债率({f_data.get('debt_to_assets'):.2%})较高"
-                    })
+                    warnings.append(
+                        {
+                            "level": "medium",
+                            "type": "财务风险",
+                            "message": f"资产负债率({f_data.get('debt_to_assets'):.2%})较高",
+                        }
+                    )
 
-            return ToolResult(success=True, data={
-                "ts_code": ts_code,
-                "warning_count": len(warnings),
-                "warnings": warnings,
-                "has_critical_warning": any(w["level"] == "high" for w in warnings)
-            })
+            return ToolResult(
+                success=True,
+                data={
+                    "ts_code": ts_code,
+                    "warning_count": len(warnings),
+                    "warnings": warnings,
+                    "has_critical_warning": any(w["level"] == "high" for w in warnings),
+                },
+            )
 
         except Exception as e:
             return ToolResult(success=False, error=f"风险预警检查失败: {str(e)}")

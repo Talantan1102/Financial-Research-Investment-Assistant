@@ -6,9 +6,10 @@
 提供财务报表分析功能，包括ROE、ROA、毛利率、净利率等指标计算。
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Any
+
+from app.data.tushare_client import TushareClient, get_tushare_client
 from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
-from app.data.tushare_client import get_tushare_client, TushareClient
 
 
 class FinancialAnalysisSkill(BaseSkill):
@@ -22,7 +23,7 @@ class FinancialAnalysisSkill(BaseSkill):
     description = "财务报表分析，计算ROE、ROA、毛利率、净利率等财务指标"
 
     def __init__(self):
-        self._tushare_client: Optional[TushareClient] = None
+        self._tushare_client: TushareClient | None = None
         super().__init__()
 
     def get_tushare_client(self) -> TushareClient:
@@ -44,16 +45,16 @@ class FinancialAnalysisSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="period",
                     type="string",
                     description="报告期，如'20231231'，不填则取最新",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 2. 获取利润表
@@ -66,30 +67,30 @@ class FinancialAnalysisSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="start_date",
                     type="string",
                     description="开始日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="end_date",
                     type="string",
                     description="结束日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="period",
                     type="string",
                     description="报告期类型，如'2023Q4'，可选",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 3. 获取资产负债表
@@ -102,30 +103,30 @@ class FinancialAnalysisSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="start_date",
                     type="string",
                     description="开始日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="end_date",
                     type="string",
                     description="结束日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="period",
                     type="string",
                     description="报告期类型，如'2023Q4'，可选",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 4. 获取现金流量表
@@ -138,30 +139,30 @@ class FinancialAnalysisSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="start_date",
                     type="string",
                     description="开始日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="end_date",
                     type="string",
                     description="结束日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="period",
                     type="string",
                     description="报告期类型，如'2023Q4'，可选",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 5. 获取财务指标
@@ -174,30 +175,30 @@ class FinancialAnalysisSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="start_date",
                     type="string",
                     description="开始日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="end_date",
                     type="string",
                     description="结束日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="period",
                     type="string",
                     description="报告期类型，如'2023Q4'，可选",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 6. 分析盈利能力
@@ -210,16 +211,16 @@ class FinancialAnalysisSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="periods",
                     type="integer",
                     description="分析期数（季度），默认8个季度",
                     required=False,
-                    default=8
-                )
-            ]
+                    default=8,
+                ),
+            ],
         )
 
         # 7. 分析偿债能力
@@ -232,16 +233,16 @@ class FinancialAnalysisSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="period",
                     type="string",
                     description="报告期，如'20231231'，不填则取最新",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
     async def calculate_financial_ratios(self, ts_code: str, period: str = None) -> ToolResult:
@@ -263,8 +264,10 @@ class FinancialAnalysisSkill(BaseSkill):
                 return ToolResult(success=False, error="未找到财务指标数据")
 
             # 取最新一期数据
-            latest = data[0] if not period else next(
-                (d for d in data if d.get("end_date") == period), data[0]
+            latest = (
+                data[0]
+                if not period
+                else next((d for d in data if d.get("end_date") == period), data[0])
             )
 
             # 提取核心财务比率
@@ -289,12 +292,14 @@ class FinancialAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"计算财务比率失败: {str(e)}")
 
-    def _calculate_net_margin(self, data: Dict[str, Any]) -> Optional[float]:
+    def _calculate_net_margin(self, data: dict[str, Any]) -> float | None:
         """计算净利率"""
         # 简化计算，实际应从利润表获取
         return data.get("netprofit_margin") or data.get("npta")
 
-    async def get_income_statement(self, ts_code: str, start_date: str = None, end_date: str = None, period: str = None) -> ToolResult:
+    async def get_income_statement(
+        self, ts_code: str, start_date: str = None, end_date: str = None, period: str = None
+    ) -> ToolResult:
         """
         获取利润表
         """
@@ -308,17 +313,23 @@ class FinancialAnalysisSkill(BaseSkill):
                 return ToolResult(success=False, error=result.get("error"))
 
             data = result.get("data", [])
-            
+
             # 如果指定了period，过滤数据
             if period and data:
-                data = [d for d in data if period in str(d.get("end_date", "")) or period in str(d.get("period", ""))]
+                data = [
+                    d
+                    for d in data
+                    if period in str(d.get("end_date", "")) or period in str(d.get("period", ""))
+                ]
 
             return ToolResult(success=True, data=data, meta=result.get("meta"))
 
         except Exception as e:
             return ToolResult(success=False, error=f"获取利润表失败: {str(e)}")
 
-    async def get_balance_sheet(self, ts_code: str, start_date: str = None, end_date: str = None, period: str = None) -> ToolResult:
+    async def get_balance_sheet(
+        self, ts_code: str, start_date: str = None, end_date: str = None, period: str = None
+    ) -> ToolResult:
         """
         获取资产负债表
         """
@@ -332,17 +343,23 @@ class FinancialAnalysisSkill(BaseSkill):
                 return ToolResult(success=False, error=result.get("error"))
 
             data = result.get("data", [])
-            
+
             # 如果指定了period，过滤数据
             if period and data:
-                data = [d for d in data if period in str(d.get("end_date", "")) or period in str(d.get("period", ""))]
+                data = [
+                    d
+                    for d in data
+                    if period in str(d.get("end_date", "")) or period in str(d.get("period", ""))
+                ]
 
             return ToolResult(success=True, data=data, meta=result.get("meta"))
 
         except Exception as e:
             return ToolResult(success=False, error=f"获取资产负债表失败: {str(e)}")
 
-    async def get_cash_flow(self, ts_code: str, start_date: str = None, end_date: str = None, period: str = None) -> ToolResult:
+    async def get_cash_flow(
+        self, ts_code: str, start_date: str = None, end_date: str = None, period: str = None
+    ) -> ToolResult:
         """
         获取现金流量表
         """
@@ -356,17 +373,23 @@ class FinancialAnalysisSkill(BaseSkill):
                 return ToolResult(success=False, error=result.get("error"))
 
             data = result.get("data", [])
-            
+
             # 如果指定了period，过滤数据
             if period and data:
-                data = [d for d in data if period in str(d.get("end_date", "")) or period in str(d.get("period", ""))]
+                data = [
+                    d
+                    for d in data
+                    if period in str(d.get("end_date", "")) or period in str(d.get("period", ""))
+                ]
 
             return ToolResult(success=True, data=data, meta=result.get("meta"))
 
         except Exception as e:
             return ToolResult(success=False, error=f"获取现金流量表失败: {str(e)}")
 
-    async def get_fina_indicator(self, ts_code: str, start_date: str = None, end_date: str = None, period: str = None) -> ToolResult:
+    async def get_fina_indicator(
+        self, ts_code: str, start_date: str = None, end_date: str = None, period: str = None
+    ) -> ToolResult:
         """
         获取财务指标
         """
@@ -380,10 +403,14 @@ class FinancialAnalysisSkill(BaseSkill):
                 return ToolResult(success=False, error=result.get("error"))
 
             data = result.get("data", [])
-            
+
             # 如果指定了period，过滤数据
             if period and data:
-                data = [d for d in data if period in str(d.get("end_date", "")) or period in str(d.get("period", ""))]
+                data = [
+                    d
+                    for d in data
+                    if period in str(d.get("end_date", "")) or period in str(d.get("period", ""))
+                ]
 
             return ToolResult(success=True, data=data, meta=result.get("meta"))
 
@@ -410,21 +437,27 @@ class FinancialAnalysisSkill(BaseSkill):
             # 计算趋势
             trends = []
             for d in data:
-                trends.append({
-                    "period": d.get("end_date"),
-                    "roe": d.get("roe"),
-                    "gross_margin": d.get("gross_margin"),
-                    "operating_margin": d.get("op_of_gr"),
-                    "net_margin": d.get("netprofit_margin"),
-                    "roa": d.get("roa"),
-                })
+                trends.append(
+                    {
+                        "period": d.get("end_date"),
+                        "roe": d.get("roe"),
+                        "gross_margin": d.get("gross_margin"),
+                        "operating_margin": d.get("op_of_gr"),
+                        "net_margin": d.get("netprofit_margin"),
+                        "roa": d.get("roa"),
+                    }
+                )
 
             # 计算平均值
             avg_roe = sum(d.get("roe", 0) or 0 for d in data) / len(data) if data else 0
-            avg_gross_margin = sum(d.get("gross_margin", 0) or 0 for d in data) / len(data) if data else 0
+            avg_gross_margin = (
+                sum(d.get("gross_margin", 0) or 0 for d in data) / len(data) if data else 0
+            )
 
             # 判断趋势
-            roe_trend = "up" if len(data) > 1 and data[0].get("roe", 0) > data[-1].get("roe", 0) else "down"
+            roe_trend = (
+                "up" if len(data) > 1 and data[0].get("roe", 0) > data[-1].get("roe", 0) else "down"
+            )
 
             analysis = {
                 "ts_code": ts_code,
@@ -432,7 +465,7 @@ class FinancialAnalysisSkill(BaseSkill):
                 "avg_gross_margin": round(avg_gross_margin, 2),
                 "roe_trend": roe_trend,
                 "trends": trends,
-                "assessment": self._assess_profitability(avg_roe, avg_gross_margin)
+                "assessment": self._assess_profitability(avg_roe, avg_gross_margin),
             }
 
             return ToolResult(success=True, data=analysis)
@@ -468,8 +501,10 @@ class FinancialAnalysisSkill(BaseSkill):
             if not data:
                 return ToolResult(success=False, error="未找到财务指标数据")
 
-            latest = data[0] if not period else next(
-                (d for d in data if d.get("end_date") == period), data[0]
+            latest = (
+                data[0]
+                if not period
+                else next((d for d in data if d.get("end_date") == period), data[0])
             )
 
             solvency = {
@@ -492,7 +527,7 @@ class FinancialAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"分析偿债能力失败: {str(e)}")
 
-    def _assess_solvency(self, ratios: Dict[str, Any]) -> str:
+    def _assess_solvency(self, ratios: dict[str, Any]) -> str:
         """评估偿债能力"""
         current_ratio = ratios.get("current_ratio") or 0
         debt_ratio = ratios.get("debt_to_assets") or 0

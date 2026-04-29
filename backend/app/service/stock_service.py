@@ -2,20 +2,24 @@
 # 未经授权，禁止转售或仿制。
 
 """股票资讯服务 - 聚合数据股票API"""
+
 import os
-import httpx
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
-from enum import Enum
 
 # 添加 Tushare 支持用于股票列表查询
 import sys
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any
+
+import httpx
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from app.data.tushare_client import get_tushare_client, TushareClient
+from app.data.tushare_client import get_tushare_client
 
 
 class StockMarket(Enum):
     """股票市场"""
+
     SHANGHAI = "sh"  # 上海证券交易所
     SHENZHEN = "sz"  # 深圳证券交易所
 
@@ -23,6 +27,7 @@ class StockMarket(Enum):
 @dataclass
 class StockInfo:
     """股票信息"""
+
     gid: str  # 股票编号
     name: str  # 股票名称
     nowPri: str  # 当前价格
@@ -36,7 +41,7 @@ class StockInfo:
     traNumber: str  # 成交额
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "StockInfo":
+    def from_dict(cls, data: dict) -> "StockInfo":
         return cls(
             gid=data.get("gid", ""),
             name=data.get("name", ""),
@@ -51,7 +56,7 @@ class StockInfo:
             traNumber=data.get("traNumber", ""),
         )
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
             "gid": self.gid,
             "name": self.name,
@@ -92,7 +97,7 @@ class StockService:
         if not self.api_key:
             print("警告: JUHE_STOCK_API_KEY 环境变量未设置")
 
-    async def get_stock_by_code(self, stock_code: str) -> Dict[str, Any]:
+    async def get_stock_by_code(self, stock_code: str) -> dict[str, Any]:
         """
         根据股票代码查询股票信息
 
@@ -108,13 +113,7 @@ class StockService:
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    self.BASE_URL,
-                    params={
-                        "gid": gid,
-                        "key": self.api_key
-                    }
-                )
+                response = await client.get(self.BASE_URL, params={"gid": gid, "key": self.api_key})
                 response.raise_for_status()
                 data = response.json()
 
@@ -126,29 +125,17 @@ class StockService:
                         return {
                             "success": True,
                             "data": stock_info.to_dict(),
-                            "display": stock_info.format_display()
+                            "display": stock_info.format_display(),
                         }
 
-                return {
-                    "success": False,
-                    "error": data.get("reason", "查询失败"),
-                    "data": None
-                }
+                return {"success": False, "error": data.get("reason", "查询失败"), "data": None}
 
         except httpx.TimeoutException:
-            return {
-                "success": False,
-                "error": "请求超时",
-                "data": None
-            }
+            return {"success": False, "error": "请求超时", "data": None}
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "data": None
-            }
+            return {"success": False, "error": str(e), "data": None}
 
-    async def search_stock(self, keyword: str) -> Dict[str, Any]:
+    async def search_stock(self, keyword: str) -> dict[str, Any]:
         """
         搜索股票 - 支持代码和名称模糊搜索
 
@@ -162,22 +149,14 @@ class StockService:
         if keyword.isdigit() or keyword.startswith(("sh", "sz", "SH", "SZ")):
             result = await self.get_stock_by_code(keyword)
             if result["success"]:
-                return {
-                    "success": True,
-                    "results": [result["data"]],
-                    "count": 1
-                }
+                return {"success": True, "results": [result["data"]], "count": 1}
 
         # 纯数字代码，尝试上证和深证
         if keyword.isdigit():
             for prefix in ["sh", "sz"]:
                 result = await self.get_stock_by_code(f"{prefix}{keyword}")
                 if result["success"]:
-                    return {
-                        "success": True,
-                        "results": [result["data"]],
-                        "count": 1
-                    }
+                    return {"success": True, "results": [result["data"]], "count": 1}
 
         # ========== 2. 按名称模糊搜索（使用 Tushare） ==========
         try:
@@ -188,19 +167,19 @@ class StockService:
                 return {
                     "success": False,
                     "error": "股票名称搜索需要 Tushare API，请检查 TUSHARE_API_TOKEN 环境变量",
-                    "results": []
+                    "results": [],
                 }
 
             # 获取所有股票基本信息（使用缓存）
             cache_result = tushare_client._get_from_cache("__all_stocks_basic__")
             if cache_result is None:
                 df = api.stock_basic(
-                    exchange='',
-                    list_status='L',
-                    fields='ts_code,symbol,name,area,industry,list_date'
+                    exchange="",
+                    list_status="L",
+                    fields="ts_code,symbol,name,area,industry,list_date",
                 )
                 if df is not None and not df.empty:
-                    all_stocks = df.to_dict('records')
+                    all_stocks = df.to_dict("records")
                     tushare_client._set_cache("__all_stocks_basic__", all_stocks)
                 else:
                     all_stocks = []
@@ -209,59 +188,51 @@ class StockService:
                 all_stocks = cache_result[0] if isinstance(cache_result, tuple) else cache_result
 
             if not all_stocks:
-                return {
-                    "success": False,
-                    "error": "无法获取股票列表进行模糊搜索",
-                    "results": []
-                }
+                return {"success": False, "error": "无法获取股票列表进行模糊搜索", "results": []}
 
             # 模糊匹配名称
             keyword_lower = keyword.lower()
             matches = []
 
             for stock in all_stocks:
-                name = stock.get('name', '')
-                symbol = stock.get('symbol', '')
-                ts_code = stock.get('ts_code', '')
+                name = stock.get("name", "")
+                symbol = stock.get("symbol", "")
+                ts_code = stock.get("ts_code", "")
 
                 # 匹配规则：
                 # 1. 名称包含关键词（如"茅台"匹配"贵州茅台"）
                 # 2. 名称以关键词开头
                 # 3. 完全匹配
-                if (keyword_lower in name.lower() or
-                    name.lower().startswith(keyword_lower) or
-                    keyword_lower == name.lower()):
-                    matches.append({
-                        "ts_code": ts_code,
-                        "symbol": symbol,
-                        "name": name,
-                        "area": stock.get('area', ''),
-                        "industry": stock.get('industry', ''),
-                        "list_date": stock.get('list_date', '')
-                    })
+                if (
+                    keyword_lower in name.lower()
+                    or name.lower().startswith(keyword_lower)
+                    or keyword_lower == name.lower()
+                ):
+                    matches.append(
+                        {
+                            "ts_code": ts_code,
+                            "symbol": symbol,
+                            "name": name,
+                            "area": stock.get("area", ""),
+                            "industry": stock.get("industry", ""),
+                            "list_date": stock.get("list_date", ""),
+                        }
+                    )
 
             if matches:
                 return {
                     "success": True,
                     "results": matches,
                     "count": len(matches),
-                    "keyword": keyword
+                    "keyword": keyword,
                 }
 
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"名称搜索失败: {str(e)}",
-                "results": []
-            }
+            return {"success": False, "error": f"名称搜索失败: {str(e)}", "results": []}
 
-        return {
-            "success": False,
-            "error": f"未找到匹配的股票: {keyword}",
-            "results": []
-        }
+        return {"success": False, "error": f"未找到匹配的股票: {keyword}", "results": []}
 
-    async def get_market_stocks(self, market: str = "shanghai", page: int = 1) -> Dict[str, Any]:
+    async def get_market_stocks(self, market: str = "shanghai", page: int = 1) -> dict[str, Any]:
         """
         获取市场股票列表
 
@@ -276,13 +247,7 @@ class StockService:
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
-                response = await client.get(
-                    url,
-                    params={
-                        "key": self.api_key,
-                        "page": page
-                    }
-                )
+                response = await client.get(url, params={"key": self.api_key, "page": page})
                 response.raise_for_status()
                 data = response.json()
 
@@ -295,21 +260,15 @@ class StockService:
                         "market": market,
                         "page": page,
                         "total_count": result.get("totalCount", 0),
-                        "stocks": [StockInfo.from_dict(s.get("data", {})).to_dict() for s in stocks[:20]]  # 限制返回数量
+                        "stocks": [
+                            StockInfo.from_dict(s.get("data", {})).to_dict() for s in stocks[:20]
+                        ],  # 限制返回数量
                     }
 
-                return {
-                    "success": False,
-                    "error": data.get("reason", "查询失败"),
-                    "stocks": []
-                }
+                return {"success": False, "error": data.get("reason", "查询失败"), "stocks": []}
 
         except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "stocks": []
-            }
+            return {"success": False, "error": str(e), "stocks": []}
 
     def _normalize_stock_code(self, code: str) -> str:
         """
@@ -340,7 +299,7 @@ class StockService:
 
 
 # 单例
-_stock_service: Optional[StockService] = None
+_stock_service: StockService | None = None
 
 
 def get_stock_service() -> StockService:

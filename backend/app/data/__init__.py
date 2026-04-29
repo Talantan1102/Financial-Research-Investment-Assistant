@@ -6,10 +6,10 @@
 
 from app.data.tushare_client import (
     TushareClient,
-    get_tushare_client,
-    TushareRateLimitError,
     TushareInvalidCodeError,
-    TushareNetworkError
+    TushareNetworkError,
+    TushareRateLimitError,
+    get_tushare_client,
 )
 
 __all__ = [

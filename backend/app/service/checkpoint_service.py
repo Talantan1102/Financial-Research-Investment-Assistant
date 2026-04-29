@@ -2,15 +2,17 @@
 # 未经授权，禁止转售或仿制。
 
 """检查点服务 - 用于保存和恢复深度研究状态"""
+
 import json
 import logging
-from typing import Dict, Any, Optional, List
-from uuid import UUID
 from datetime import datetime
+from typing import Any
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
-from app.models.research import ResearchCheckpoint
 from app.core.database import SessionLocal
+from app.models.research import ResearchCheckpoint
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +30,11 @@ class CheckpointService:
     def save_checkpoint(
         self,
         session_id: str,
-        state: Dict[str, Any],
-        user_id: Optional[str] = None,
-        ui_state: Optional[Dict[str, Any]] = None,
-        final_report: Optional[str] = None,
-    ) -> Optional[str]:
+        state: dict[str, Any],
+        user_id: str | None = None,
+        ui_state: dict[str, Any] | None = None,
+        final_report: str | None = None,
+    ) -> str | None:
         """
         保存检查点
 
@@ -58,9 +60,11 @@ class CheckpointService:
             clean_ui_state = self._clean_state_for_storage(ui_state) if ui_state else None
 
             # 查找现有检查点
-            existing = db.query(ResearchCheckpoint).filter(
-                ResearchCheckpoint.session_id == session_id
-            ).first()
+            existing = (
+                db.query(ResearchCheckpoint)
+                .filter(ResearchCheckpoint.session_id == session_id)
+                .first()
+            )
 
             if existing:
                 # 更新现有检查点
@@ -97,9 +101,11 @@ class CheckpointService:
             ui_search = clean_ui_state.get("search_results", []) if clean_ui_state else []
             ui_charts = clean_ui_state.get("charts", []) if clean_ui_state else []
             ui_kg = clean_ui_state.get("knowledge_graph", {}) if clean_ui_state else {}
-            logger.info(f"[CheckpointService] 保存成功: session={session_id}, phase={phase}, "
-                       f"ui_state=[steps={len(ui_steps)}, search_results={len(ui_search)}, "
-                       f"charts={len(ui_charts)}, kg_nodes={len(ui_kg.get('nodes', []) if ui_kg else [])}]")
+            logger.info(
+                f"[CheckpointService] 保存成功: session={session_id}, phase={phase}, "
+                f"ui_state=[steps={len(ui_steps)}, search_results={len(ui_search)}, "
+                f"charts={len(ui_charts)}, kg_nodes={len(ui_kg.get('nodes', []) if ui_kg else [])}]"
+            )
             return checkpoint_id
 
         except Exception as e:
@@ -109,7 +115,7 @@ class CheckpointService:
         finally:
             db.close()
 
-    def load_checkpoint(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def load_checkpoint(self, session_id: str) -> dict[str, Any] | None:
         """
         加载最新的检查点（仅后端状态）
 
@@ -121,9 +127,12 @@ class CheckpointService:
         """
         db = self._get_db()
         try:
-            checkpoint = db.query(ResearchCheckpoint).filter(
-                ResearchCheckpoint.session_id == session_id
-            ).order_by(ResearchCheckpoint.updated_at.desc()).first()
+            checkpoint = (
+                db.query(ResearchCheckpoint)
+                .filter(ResearchCheckpoint.session_id == session_id)
+                .order_by(ResearchCheckpoint.updated_at.desc())
+                .first()
+            )
 
             if not checkpoint:
                 return None
@@ -136,7 +145,7 @@ class CheckpointService:
         finally:
             db.close()
 
-    def load_full_checkpoint(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def load_full_checkpoint(self, session_id: str) -> dict[str, Any] | None:
         """
         加载完整的检查点（包含后端状态、UI状态和报告）
 
@@ -148,9 +157,12 @@ class CheckpointService:
         """
         db = self._get_db()
         try:
-            checkpoint = db.query(ResearchCheckpoint).filter(
-                ResearchCheckpoint.session_id == session_id
-            ).order_by(ResearchCheckpoint.updated_at.desc()).first()
+            checkpoint = (
+                db.query(ResearchCheckpoint)
+                .filter(ResearchCheckpoint.session_id == session_id)
+                .order_by(ResearchCheckpoint.updated_at.desc())
+                .first()
+            )
 
             if not checkpoint:
                 logger.info(f"[CheckpointService] 未找到检查点: session={session_id}")
@@ -160,13 +172,17 @@ class CheckpointService:
             # 详细日志
             ui_state = result.get("ui_state_json", {})
             if ui_state:
-                logger.info(f"[CheckpointService] 加载成功: session={session_id}, phase={result.get('phase')}, "
-                           f"ui_state=[steps={len(ui_state.get('research_steps', []))}, "
-                           f"search_results={len(ui_state.get('search_results', []))}, "
-                           f"charts={len(ui_state.get('charts', []))}, "
-                           f"kg_nodes={len((ui_state.get('knowledge_graph') or {}).get('nodes', []))}]")
+                logger.info(
+                    f"[CheckpointService] 加载成功: session={session_id}, phase={result.get('phase')}, "
+                    f"ui_state=[steps={len(ui_state.get('research_steps', []))}, "
+                    f"search_results={len(ui_state.get('search_results', []))}, "
+                    f"charts={len(ui_state.get('charts', []))}, "
+                    f"kg_nodes={len((ui_state.get('knowledge_graph') or {}).get('nodes', []))}]"
+                )
             else:
-                logger.info(f"[CheckpointService] 加载成功但无ui_state: session={session_id}, phase={result.get('phase')}")
+                logger.info(
+                    f"[CheckpointService] 加载成功但无ui_state: session={session_id}, phase={result.get('phase')}"
+                )
             return result
 
         except Exception as e:
@@ -175,7 +191,7 @@ class CheckpointService:
         finally:
             db.close()
 
-    def get_checkpoint_info(self, session_id: str) -> Optional[Dict[str, Any]]:
+    def get_checkpoint_info(self, session_id: str) -> dict[str, Any] | None:
         """
         获取检查点信息（不包含完整状态）
 
@@ -187,9 +203,12 @@ class CheckpointService:
         """
         db = self._get_db()
         try:
-            checkpoint = db.query(ResearchCheckpoint).filter(
-                ResearchCheckpoint.session_id == session_id
-            ).order_by(ResearchCheckpoint.updated_at.desc()).first()
+            checkpoint = (
+                db.query(ResearchCheckpoint)
+                .filter(ResearchCheckpoint.session_id == session_id)
+                .order_by(ResearchCheckpoint.updated_at.desc())
+                .first()
+            )
 
             if not checkpoint:
                 return None
@@ -204,10 +223,10 @@ class CheckpointService:
 
     def list_checkpoints(
         self,
-        user_id: Optional[str] = None,
-        status: Optional[str] = None,
+        user_id: str | None = None,
+        status: str | None = None,
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         列出检查点
 
@@ -228,9 +247,7 @@ class CheckpointService:
             if status:
                 query = query.filter(ResearchCheckpoint.status == status)
 
-            checkpoints = query.order_by(
-                ResearchCheckpoint.updated_at.desc()
-            ).limit(limit).all()
+            checkpoints = query.order_by(ResearchCheckpoint.updated_at.desc()).limit(limit).all()
 
             return [cp.to_dict() for cp in checkpoints]
 
@@ -244,7 +261,7 @@ class CheckpointService:
         self,
         session_id: str,
         status: str,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> bool:
         """
         更新检查点状态
@@ -259,9 +276,11 @@ class CheckpointService:
         """
         db = self._get_db()
         try:
-            checkpoint = db.query(ResearchCheckpoint).filter(
-                ResearchCheckpoint.session_id == session_id
-            ).first()
+            checkpoint = (
+                db.query(ResearchCheckpoint)
+                .filter(ResearchCheckpoint.session_id == session_id)
+                .first()
+            )
 
             if not checkpoint:
                 return False
@@ -293,9 +312,11 @@ class CheckpointService:
         """
         db = self._get_db()
         try:
-            deleted = db.query(ResearchCheckpoint).filter(
-                ResearchCheckpoint.session_id == session_id
-            ).delete()
+            deleted = (
+                db.query(ResearchCheckpoint)
+                .filter(ResearchCheckpoint.session_id == session_id)
+                .delete()
+            )
 
             db.commit()
             return deleted > 0
@@ -307,7 +328,7 @@ class CheckpointService:
         finally:
             db.close()
 
-    def _clean_state_for_storage(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    def _clean_state_for_storage(self, state: dict[str, Any]) -> dict[str, Any]:
         """
         清理状态以便存储
 
@@ -321,7 +342,7 @@ class CheckpointService:
                 clean[key] = value
             except (TypeError, ValueError):
                 # 跳过不可序列化的值，或转换为字符串
-                if isinstance(value, (list, tuple)):
+                if isinstance(value, list | tuple):
                     clean[key] = [str(v) for v in value]
                 elif isinstance(value, dict):
                     clean[key] = self._clean_state_for_storage(value)

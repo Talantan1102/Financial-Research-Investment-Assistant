@@ -4,9 +4,11 @@
 """
 行业资讯和招投标信息模型
 """
+
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, Integer, Boolean
+
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.database import Base
@@ -14,6 +16,7 @@ from app.core.database import Base
 
 class IndustryNews(Base):
     """行业资讯表"""
+
     __tablename__ = "industry_news"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -51,6 +54,7 @@ class IndustryNews(Base):
 
 class BiddingInfo(Base):
     """招投标信息表"""
+
     __tablename__ = "bidding_info"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -88,6 +92,7 @@ class BiddingInfo(Base):
 
 class NewsCollectionTask(Base):
     """资讯采集任务记录表"""
+
     __tablename__ = "news_collection_tasks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -3,81 +3,74 @@
 
 # Document schemas package
 
-from .document import (
-    DeleteDocumentsRequest,
-    RetrieveDocumentsRequest,
-    DocumentResponse,
-    UploadDocumentResponse,
-    DocumentListResponse,
-    DeleteDocumentsResponse
-)
-
-from .search import (
-    WebSearchRequest,
-    SearchResultItem,
-    WebSearchResponse
-)
-
 from .chat import (
+    AttachmentListResponse,
+    AttachmentResponse,
     ChatRequest,
-    RetrievedDocument,
     ChatResponse,
-    SessionCreate,
-    SessionUpdate,
-    SessionResponse,
-    SessionWithMessagesResponse,
+    ChatWithAttachmentsRequest,
+    LegacySessionResponse,
     MessageCreate,
     MessageResponse,
-    LegacySessionResponse,
-    AttachmentResponse,
-    AttachmentListResponse,
-    ChatWithAttachmentsRequest,
+    RetrievedDocument,
+    SessionCreate,
+    SessionResponse,
+    SessionUpdate,
+    SessionWithMessagesResponse,
 )
-
+from .document import (
+    DeleteDocumentsRequest,
+    DeleteDocumentsResponse,
+    DocumentListResponse,
+    DocumentResponse,
+    RetrieveDocumentsRequest,
+    UploadDocumentResponse,
+)
 from .knowledge import (
-    KnowledgeBaseCreate,
-    KnowledgeBaseUpdate,
-    KnowledgeBaseResponse,
-    KnowledgeBaseWithDocuments,
     DocumentResponse as KBDocumentResponse,
+)
+from .knowledge import (
     DocumentUploadResponse as KBDocumentUploadResponse,
 )
-
+from .knowledge import (
+    KnowledgeBaseCreate,
+    KnowledgeBaseResponse,
+    KnowledgeBaseUpdate,
+    KnowledgeBaseWithDocuments,
+)
+from .search import SearchResultItem, WebSearchRequest, WebSearchResponse
 
 __all__ = [
     # Document schemas
-    'DeleteDocumentsRequest',
-    'RetrieveDocumentsRequest',
-    'DocumentResponse',
-    'UploadDocumentResponse',
-    'DocumentListResponse',
-    'DeleteDocumentsResponse',
-
+    "DeleteDocumentsRequest",
+    "RetrieveDocumentsRequest",
+    "DocumentResponse",
+    "UploadDocumentResponse",
+    "DocumentListResponse",
+    "DeleteDocumentsResponse",
     # Search schemas
-    'WebSearchRequest',
-    'SearchResultItem',
-    'WebSearchResponse',
-
+    "WebSearchRequest",
+    "SearchResultItem",
+    "WebSearchResponse",
     # Chat schemas
-    'ChatRequest',
-    'RetrievedDocument',
-    'ChatResponse',
-    'SessionCreate',
-    'SessionUpdate',
-    'SessionResponse',
-    'SessionWithMessagesResponse',
-    'MessageCreate',
-    'MessageResponse',
-    'LegacySessionResponse',
-    'AttachmentResponse',
-    'AttachmentListResponse',
-    'ChatWithAttachmentsRequest',
-
+    "ChatRequest",
+    "RetrievedDocument",
+    "ChatResponse",
+    "SessionCreate",
+    "SessionUpdate",
+    "SessionResponse",
+    "SessionWithMessagesResponse",
+    "MessageCreate",
+    "MessageResponse",
+    "LegacySessionResponse",
+    "AttachmentResponse",
+    "AttachmentListResponse",
+    "ChatWithAttachmentsRequest",
     # Knowledge Base schemas
-    'KnowledgeBaseCreate',
-    'KnowledgeBaseUpdate',
-    'KnowledgeBaseResponse',
-    'KnowledgeBaseWithDocuments',
-    'KBDocumentResponse',
-    'KBDocumentUploadResponse',
-] 
+    "KnowledgeBaseCreate",
+    "KnowledgeBaseUpdate",
+    "KnowledgeBaseResponse",
+    "KnowledgeBaseWithDocuments",
+    "KBDocumentResponse",
+    "KBDocumentUploadResponse",
+]

@@ -16,21 +16,23 @@ ReAct Controller - Reasoning + Acting 循环决策框架
 - 迭代式深入，直到信息充足
 """
 
+import asyncio
 import json
 import logging
-import asyncio
 import re
-from typing import Dict, Any, List, Optional, AsyncGenerator, Callable, Tuple
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from abc import ABC, abstractmethod
+from typing import Any
+
 from openai import OpenAI
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
 class ToolType(Enum):
     """工具类型枚举"""
+
     WEB_SEARCH = "web_search"
     KNOWLEDGE_SEARCH = "knowledge_search"
     TEXT2SQL = "text2sql"
@@ -44,55 +46,53 @@ class ToolType(Enum):
 @dataclass
 class Tool:
     """工具定义"""
+
     name: str
     description: str
-    parameters: Dict[str, str]
-    handler: Optional[Callable] = None
+    parameters: dict[str, str]
+    handler: Callable | None = None
 
-    def to_dict(self) -> Dict:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "parameters": self.parameters
-        }
+    def to_dict(self) -> dict:
+        return {"name": self.name, "description": self.description, "parameters": self.parameters}
 
 
 @dataclass
 class Action:
     """动作定义"""
+
     tool: str
-    params: Dict[str, Any]
+    params: dict[str, Any]
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'Action':
-        return cls(
-            tool=data.get('tool', ''),
-            params=data.get('params', {})
-        )
+    def from_dict(cls, data: dict) -> "Action":
+        return cls(tool=data.get("tool", ""), params=data.get("params", {}))
 
 
 @dataclass
 class Thought:
     """思考结果"""
+
     reasoning: str  # 推理过程
     should_finish: bool  # 是否应该结束
-    next_action: Optional[Action] = None  # 下一步动作
+    next_action: Action | None = None  # 下一步动作
     confidence: float = 0.0  # 置信度
 
 
 @dataclass
 class Observation:
     """观察结果"""
+
     tool: str
     success: bool
     result: Any
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class SubQuery:
     """子查询定义"""
+
     query: str  # 搜索关键词
     purpose: str  # 查询目的
     tool: str  # 使用的工具 (web_search / knowledge_search)
@@ -102,19 +102,21 @@ class SubQuery:
 @dataclass
 class ResearchPlan:
     """研究计划"""
+
     understanding: str  # 对问题的理解
-    sub_queries: List[SubQuery]  # 子查询列表
+    sub_queries: list[SubQuery]  # 子查询列表
     strategy: str  # 研究策略说明
-    expected_aspects: List[str]  # 预期覆盖的方面
+    expected_aspects: list[str]  # 预期覆盖的方面
 
 
 @dataclass
 class ReActStep:
     """ReAct 单步记录"""
+
     step: int
     thought: Thought
-    action: Optional[Action]
-    observation: Optional[Observation]
+    action: Action | None
+    observation: Observation | None
 
 
 class ReActContext:
@@ -122,14 +124,14 @@ class ReActContext:
 
     def __init__(self, query: str):
         self.query = query
-        self.steps: List[ReActStep] = []
-        self.observations: List[Observation] = []
-        self.collected_data: List[Dict] = []  # 收集的数据
-        self.insights: List[str] = []  # 发现的洞察
-        self.charts: List[Dict] = []  # 生成的图表
-        self.metadata: Dict[str, Any] = {}
-        self.plan: Optional[ResearchPlan] = None  # 研究计划
-        self.executed_queries: List[str] = []  # 已执行的查询
+        self.steps: list[ReActStep] = []
+        self.observations: list[Observation] = []
+        self.collected_data: list[dict] = []  # 收集的数据
+        self.insights: list[str] = []  # 发现的洞察
+        self.charts: list[dict] = []  # 生成的图表
+        self.metadata: dict[str, Any] = {}
+        self.plan: ResearchPlan | None = None  # 研究计划
+        self.executed_queries: list[str] = []  # 已执行的查询
         self.iteration: int = 0  # 当前迭代轮次
 
     def add_step(self, step: ReActStep):
@@ -145,8 +147,8 @@ class ReActContext:
 
         # 如果是数据分析结果，记录洞察
         if obs.tool == ToolType.DATA_ANALYZER.value and obs.success:
-            if isinstance(obs.result, dict) and 'insights' in obs.result:
-                self.insights.extend(obs.result['insights'])
+            if isinstance(obs.result, dict) and "insights" in obs.result:
+                self.insights.extend(obs.result["insights"])
 
         # 如果是图表，记录
         if obs.tool == ToolType.CHART_GENERATOR.value and obs.success:
@@ -164,8 +166,12 @@ class ReActContext:
             if step.action:
                 step_summary += f"  动作: {step.action.tool}({json.dumps(step.action.params, ensure_ascii=False)[:100]})\n"
             if step.observation:
-                result_str = str(step.observation.result)[:200] if step.observation.result else "无结果"
-                step_summary += f"  观察: {'成功' if step.observation.success else '失败'} - {result_str}\n"
+                result_str = (
+                    str(step.observation.result)[:200] if step.observation.result else "无结果"
+                )
+                step_summary += (
+                    f"  观察: {'成功' if step.observation.success else '失败'} - {result_str}\n"
+                )
             summary_parts.append(step_summary)
 
         return "\n".join(summary_parts)
@@ -178,12 +184,12 @@ class ReActContext:
         summaries = []
         for i, item in enumerate(self.collected_data[:max_items]):
             if isinstance(item, dict):
-                title = item.get('name', item.get('title', 'N/A'))
-                content = item.get('summary', item.get('content', ''))[:150]
-                source = item.get('source', 'unknown')
-                summaries.append(f"[{i+1}] ({source}) {title}: {content}...")
+                title = item.get("name", item.get("title", "N/A"))
+                content = item.get("summary", item.get("content", ""))[:150]
+                source = item.get("source", "unknown")
+                summaries.append(f"[{i + 1}] ({source}) {title}: {content}...")
             else:
-                summaries.append(f"[{i+1}] {str(item)[:200]}...")
+                summaries.append(f"[{i + 1}] {str(item)[:200]}...")
 
         return "\n".join(summaries)
 
@@ -343,11 +349,11 @@ class ReActController:
 
     def __init__(
         self,
-        tools: List[Tool],
+        tools: list[Tool],
         llm_api_key: str,
         llm_base_url: str,
         max_steps: int = 10,
-        model: str = "qwen-max"
+        model: str = "qwen-max",
     ):
         """
         初始化 ReAct 控制器
@@ -373,9 +379,7 @@ class ReActController:
             params_str = ", ".join([f"{k}({v})" for k, v in tool.parameters.items()])
             tools_list.append(f"- {name}: {tool.description}\n  参数: {params_str}")
 
-        return self.TOOLS_DESCRIPTION_TEMPLATE.format(
-            tools_list="\n".join(tools_list)
-        )
+        return self.TOOLS_DESCRIPTION_TEMPLATE.format(tools_list="\n".join(tools_list))
 
     def _build_prompt(self, context: ReActContext) -> str:
         """构建 ReAct 提示词"""
@@ -383,7 +387,7 @@ class ReActController:
             query=context.query,
             tools_description=self._format_tools_description(),
             history=context.get_history_summary(),
-            data_summary=context.get_collected_data_summary()
+            data_summary=context.get_collected_data_summary(),
         )
 
     async def _think(self, context: ReActContext) -> Thought:
@@ -403,11 +407,14 @@ class ReActController:
                 self.client.chat.completions.create,
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "你是一个专业的行业研究助手，擅长使用各种工具进行深度研究。请严格按照 JSON 格式响应，所有工具调用必须提供完整的params参数。"},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的行业研究助手，擅长使用各种工具进行深度研究。请严格按照 JSON 格式响应，所有工具调用必须提供完整的params参数。",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.2  # 降低温度以获得更稳定的输出
+                temperature=0.2,  # 降低温度以获得更稳定的输出
             )
 
             content = response.choices[0].message.content
@@ -417,74 +424,67 @@ class ReActController:
             result = json.loads(content)
 
             action = None
-            if result.get('action'):
-                tool_name = result['action'].get('tool', '')
-                params = result['action'].get('params', {})
+            if result.get("action"):
+                tool_name = result["action"].get("tool", "")
+                params = result["action"].get("params", {})
 
                 # 验证和修复 params
-                params = self._validate_and_fix_params(tool_name, params, result.get('thought', ''), context)
-
-                action = Action(
-                    tool=tool_name,
-                    params=params
+                params = self._validate_and_fix_params(
+                    tool_name, params, result.get("thought", ""), context
                 )
 
+                action = Action(tool=tool_name, params=params)
+
             return Thought(
-                reasoning=result.get('thought', ''),
-                should_finish=result.get('should_finish', False),
+                reasoning=result.get("thought", ""),
+                should_finish=result.get("should_finish", False),
                 next_action=action,
-                confidence=result.get('confidence', 0.5)
+                confidence=result.get("confidence", 0.5),
             )
 
         except json.JSONDecodeError as e:
             logging.error(f"Failed to parse LLM response as JSON: {e}")
-            return Thought(
-                reasoning=f"解析响应失败: {e}",
-                should_finish=False,
-                confidence=0.0
-            )
+            return Thought(reasoning=f"解析响应失败: {e}", should_finish=False, confidence=0.0)
         except Exception as e:
             logging.error(f"Error during thinking: {e}")
-            return Thought(
-                reasoning=f"思考过程出错: {e}",
-                should_finish=True,
-                confidence=0.0
-            )
+            return Thought(reasoning=f"思考过程出错: {e}", should_finish=True, confidence=0.0)
 
-    def _validate_and_fix_params(self, tool_name: str, params: Dict, thought: str, context: ReActContext) -> Dict:
+    def _validate_and_fix_params(
+        self, tool_name: str, params: dict, thought: str, context: ReActContext
+    ) -> dict:
         """
         验证并修复工具参数
 
         如果 LLM 生成了空的 params，尝试从 thought 或 context 中提取参数
         """
         if tool_name == ToolType.WEB_SEARCH.value:
-            if not params.get('query'):
+            if not params.get("query"):
                 # 尝试从 thought 中提取搜索关键词
                 extracted_query = self._extract_search_query_from_thought(thought, context)
                 if extracted_query:
-                    params['query'] = extracted_query
+                    params["query"] = extracted_query
                     logging.info(f"Extracted query from thought: {extracted_query}")
                 else:
                     # 使用原始问题作为备选
-                    params['query'] = context.query
+                    params["query"] = context.query
                     logging.warning(f"Using context query as fallback: {context.query}")
-            if not params.get('count'):
-                params['count'] = 5
+            if not params.get("count"):
+                params["count"] = 5
 
         elif tool_name == ToolType.KNOWLEDGE_SEARCH.value:
-            if not params.get('query'):
-                params['query'] = context.query
+            if not params.get("query"):
+                params["query"] = context.query
                 logging.warning(f"Using context query for knowledge_search: {context.query}")
-            if not params.get('top_k'):
-                params['top_k'] = 5
+            if not params.get("top_k"):
+                params["top_k"] = 5
 
         elif tool_name == ToolType.FINISH.value:
-            if not params.get('summary'):
-                params['summary'] = f"完成对 '{context.query}' 的研究"
+            if not params.get("summary"):
+                params["summary"] = f"完成对 '{context.query}' 的研究"
 
         return params
 
-    def _extract_search_query_from_thought(self, thought: str, context: ReActContext) -> Optional[str]:
+    def _extract_search_query_from_thought(self, thought: str, context: ReActContext) -> str | None:
         """
         从思考内容中提取搜索关键词
 
@@ -494,10 +494,10 @@ class ReActController:
         patterns = [
             r'搜索[「"\'【](.+?)[」"\'】]',
             r'查找[「"\'【](.+?)[」"\'】]',
-            r'搜索关于(.+?)的',
-            r'查询(.+?)的信息',
-            r'了解(.+?)的',
-            r'获取(.+?)的',
+            r"搜索关于(.+?)的",
+            r"查询(.+?)的信息",
+            r"了解(.+?)的",
+            r"获取(.+?)的",
         ]
 
         for pattern in patterns:
@@ -523,10 +523,7 @@ class ReActController:
 
         if not tool:
             return Observation(
-                tool=action.tool,
-                success=False,
-                result=None,
-                error=f"未知工具: {action.tool}"
+                tool=action.tool, success=False, result=None, error=f"未知工具: {action.tool}"
             )
 
         if not tool.handler:
@@ -534,7 +531,7 @@ class ReActController:
                 tool=action.tool,
                 success=False,
                 result=None,
-                error=f"工具 {action.tool} 未配置处理器"
+                error=f"工具 {action.tool} 未配置处理器",
             )
 
         try:
@@ -542,20 +539,12 @@ class ReActController:
             result = await tool.handler(action.params, context)
 
             return Observation(
-                tool=action.tool,
-                success=True,
-                result=result,
-                metadata={"params": action.params}
+                tool=action.tool, success=True, result=result, metadata={"params": action.params}
             )
 
         except Exception as e:
             logging.error(f"Error executing tool {action.tool}: {e}")
-            return Observation(
-                tool=action.tool,
-                success=False,
-                result=None,
-                error=str(e)
-            )
+            return Observation(tool=action.tool, success=False, result=None, error=str(e))
 
     # ========== Plan 阶段：生成研究计划和子查询 ==========
     async def _generate_plan(self, context: ReActContext) -> ResearchPlan:
@@ -575,11 +564,14 @@ class ReActController:
                 self.client.chat.completions.create,
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "你是一个专业的研究规划师，擅长将复杂问题分解为可执行的搜索任务。请严格按照 JSON 格式响应。"},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的研究规划师，擅长将复杂问题分解为可执行的搜索任务。请严格按照 JSON 格式响应。",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.3
+                temperature=0.3,
             )
 
             content = response.choices[0].message.content
@@ -589,27 +581,41 @@ class ReActController:
 
             # 解析子查询
             sub_queries = []
-            for sq in result.get('sub_queries', []):
-                sub_queries.append(SubQuery(
-                    query=sq.get('query', ''),
-                    purpose=sq.get('purpose', ''),
-                    tool=sq.get('tool', 'web_search'),
-                    priority=sq.get('priority', 1)
-                ))
+            for sq in result.get("sub_queries", []):
+                sub_queries.append(
+                    SubQuery(
+                        query=sq.get("query", ""),
+                        purpose=sq.get("purpose", ""),
+                        tool=sq.get("tool", "web_search"),
+                        priority=sq.get("priority", 1),
+                    )
+                )
 
             # 如果没有生成子查询，使用原始问题创建默认子查询
             if not sub_queries:
                 sub_queries = [
-                    SubQuery(query=context.query, purpose="原始问题搜索", tool="web_search", priority=1),
-                    SubQuery(query=f"{context.query} 最新动态", purpose="获取最新信息", tool="web_search", priority=1),
-                    SubQuery(query=f"{context.query} 分析报告", purpose="获取分析报告", tool="web_search", priority=2),
+                    SubQuery(
+                        query=context.query, purpose="原始问题搜索", tool="web_search", priority=1
+                    ),
+                    SubQuery(
+                        query=f"{context.query} 最新动态",
+                        purpose="获取最新信息",
+                        tool="web_search",
+                        priority=1,
+                    ),
+                    SubQuery(
+                        query=f"{context.query} 分析报告",
+                        purpose="获取分析报告",
+                        tool="web_search",
+                        priority=2,
+                    ),
                 ]
 
             return ResearchPlan(
-                understanding=result.get('understanding', ''),
+                understanding=result.get("understanding", ""),
                 sub_queries=sub_queries,
-                strategy=result.get('strategy', ''),
-                expected_aspects=result.get('expected_aspects', [])
+                strategy=result.get("strategy", ""),
+                expected_aspects=result.get("expected_aspects", []),
             )
 
         except Exception as e:
@@ -618,18 +624,18 @@ class ReActController:
             return ResearchPlan(
                 understanding=f"研究问题: {context.query}",
                 sub_queries=[
-                    SubQuery(query=context.query, purpose="主要搜索", tool="web_search", priority=1),
+                    SubQuery(
+                        query=context.query, purpose="主要搜索", tool="web_search", priority=1
+                    ),
                 ],
                 strategy="直接搜索",
-                expected_aspects=["基本信息"]
+                expected_aspects=["基本信息"],
             )
 
     # ========== Execute 阶段：并行执行多个搜索 ==========
     async def _execute_queries_parallel(
-        self,
-        queries: List[SubQuery],
-        context: ReActContext
-    ) -> List[Tuple[SubQuery, Observation]]:
+        self, queries: list[SubQuery], context: ReActContext
+    ) -> list[tuple[SubQuery, Observation]]:
         """
         并行执行多个搜索查询
 
@@ -640,11 +646,9 @@ class ReActController:
         Returns:
             (SubQuery, Observation) 元组列表
         """
-        async def execute_single_query(sq: SubQuery) -> Tuple[SubQuery, Observation]:
-            action = Action(
-                tool=sq.tool,
-                params={"query": sq.query, "count": 5}
-            )
+
+        async def execute_single_query(sq: SubQuery) -> tuple[SubQuery, Observation]:
+            action = Action(tool=sq.tool, params={"query": sq.query, "count": 5})
             observation = await self._execute_action(action, context)
             return (sq, observation)
 
@@ -663,7 +667,7 @@ class ReActController:
         return valid_results
 
     # ========== Reflect 阶段：评估信息是否充足 ==========
-    async def _reflect(self, context: ReActContext) -> Dict[str, Any]:
+    async def _reflect(self, context: ReActContext) -> dict[str, Any]:
         """
         反思阶段：评估收集的信息是否足够
 
@@ -679,7 +683,9 @@ class ReActController:
             query=context.query,
             expected_aspects=", ".join(expected_aspects) if expected_aspects else "未指定",
             collected_summary=context.get_collected_data_summary(),
-            executed_queries=", ".join(context.executed_queries) if context.executed_queries else "无"
+            executed_queries=", ".join(context.executed_queries)
+            if context.executed_queries
+            else "无",
         )
 
         try:
@@ -687,11 +693,14 @@ class ReActController:
                 self.client.chat.completions.create,
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "你是一个专业的研究评估师，擅长评估信息完整性。请严格按照 JSON 格式响应。"},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的研究评估师，擅长评估信息完整性。请严格按照 JSON 格式响应。",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.2
+                temperature=0.2,
             )
 
             content = response.choices[0].message.content
@@ -701,20 +710,22 @@ class ReActController:
 
             # 解析补充查询
             additional_queries = []
-            for aq in result.get('additional_queries', []):
-                additional_queries.append(SubQuery(
-                    query=aq.get('query', ''),
-                    purpose=aq.get('purpose', ''),
-                    tool=aq.get('tool', 'web_search'),
-                    priority=2
-                ))
+            for aq in result.get("additional_queries", []):
+                additional_queries.append(
+                    SubQuery(
+                        query=aq.get("query", ""),
+                        purpose=aq.get("purpose", ""),
+                        tool=aq.get("tool", "web_search"),
+                        priority=2,
+                    )
+                )
 
             return {
-                "coverage_analysis": result.get('coverage_analysis', ''),
-                "missing_aspects": result.get('missing_aspects', []),
-                "is_sufficient": result.get('is_sufficient', True),
+                "coverage_analysis": result.get("coverage_analysis", ""),
+                "missing_aspects": result.get("missing_aspects", []),
+                "is_sufficient": result.get("is_sufficient", True),
                 "additional_queries": additional_queries,
-                "confidence": result.get('confidence', 0.5)
+                "confidence": result.get("confidence", 0.5),
             }
 
         except Exception as e:
@@ -724,15 +735,13 @@ class ReActController:
                 "missing_aspects": [],
                 "is_sufficient": True,  # 出错时默认结束
                 "additional_queries": [],
-                "confidence": 0.0
+                "confidence": 0.0,
             }
 
     # ========== 主运行循环：优化版 ==========
     async def run(
-        self,
-        query: str,
-        initial_context: Optional[Dict] = None
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        self, query: str, initial_context: dict | None = None
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
         执行优化版 ReAct 循环: Plan -> Execute (并行) -> Reflect -> Synthesize
 
@@ -762,15 +771,18 @@ class ReActController:
             "type": "thought",
             "step": 1,
             "content": f"**问题理解**: {plan.understanding}\n\n**研究策略**: {plan.strategy}",
-            "confidence": 0.9
+            "confidence": 0.9,
         }
 
         yield {
             "type": "plan",
             "understanding": plan.understanding,
             "strategy": plan.strategy,
-            "sub_queries": [{"query": sq.query, "purpose": sq.purpose, "tool": sq.tool} for sq in plan.sub_queries],
-            "expected_aspects": plan.expected_aspects
+            "sub_queries": [
+                {"query": sq.query, "purpose": sq.purpose, "tool": sq.tool}
+                for sq in plan.sub_queries
+            ],
+            "expected_aspects": plan.expected_aspects,
         }
 
         # ========== Phase 2 & 3: Execute & Reflect Loop ==========
@@ -784,7 +796,7 @@ class ReActController:
                 queries_to_execute = [sq for sq in plan.sub_queries if sq.priority <= 2]
             else:
                 # 后续轮次：执行反思阶段生成的补充查询
-                queries_to_execute = context.metadata.get('additional_queries', [])
+                queries_to_execute = context.metadata.get("additional_queries", [])
 
             if not queries_to_execute:
                 break
@@ -794,7 +806,7 @@ class ReActController:
                 "type": "action",
                 "step": step,
                 "tool": "parallel_search",
-                "params": {"queries": [sq.query for sq in queries_to_execute]}
+                "params": {"queries": [sq.query for sq in queries_to_execute]},
             }
 
             yield {"type": "status", "content": f"正在并行执行 {len(queries_to_execute)} 个搜索..."}
@@ -820,7 +832,7 @@ class ReActController:
                 "tool": "parallel_search",
                 "success": True,
                 "result": f"并行搜索完成，共获取 {total_results} 条结果",
-                "queries_executed": [sq.query for sq, _ in results]
+                "queries_executed": [sq.query for sq, _ in results],
             }
 
             # 如果是最后一轮或没有收集到数据，跳过反思
@@ -837,20 +849,20 @@ class ReActController:
                 "type": "thought",
                 "step": step,
                 "content": f"**信息评估**: {reflect_result['coverage_analysis']}",
-                "confidence": reflect_result['confidence']
+                "confidence": reflect_result["confidence"],
             }
 
             # 如果信息充足，结束循环
-            if reflect_result['is_sufficient']:
+            if reflect_result["is_sufficient"]:
                 yield {"type": "status", "content": "信息收集完成"}
                 break
 
             # 如果有缺失方面，准备补充搜索
-            if reflect_result['additional_queries']:
-                context.metadata['additional_queries'] = reflect_result['additional_queries']
+            if reflect_result["additional_queries"]:
+                context.metadata["additional_queries"] = reflect_result["additional_queries"]
                 yield {
                     "type": "status",
-                    "content": f"发现信息缺口，将补充搜索: {', '.join([q.query for q in reflect_result['additional_queries']])}"
+                    "content": f"发现信息缺口，将补充搜索: {', '.join([q.query for q in reflect_result['additional_queries']])}",
                 }
             else:
                 break
@@ -865,7 +877,7 @@ class ReActController:
             "collected_data": context.collected_data,
             "executed_queries": context.executed_queries,
             "insights": context.insights,
-            "charts": context.charts
+            "charts": context.charts,
         }
 
     def register_tool(self, tool: Tool):
@@ -878,41 +890,34 @@ class ReActController:
             self.tools[tool_name].handler = handler
 
 
-def create_default_tools() -> List[Tool]:
+def create_default_tools() -> list[Tool]:
     """创建默认工具集"""
     return [
         Tool(
             name=ToolType.WEB_SEARCH.value,
             description="搜索互联网获取最新信息，适用于查找实时数据、新闻、市场信息等",
-            parameters={
-                "query": "搜索关键词",
-                "count": "返回结果数量(默认5)"
-            }
+            parameters={"query": "搜索关键词", "count": "返回结果数量(默认5)"},
         ),
         Tool(
             name=ToolType.KNOWLEDGE_SEARCH.value,
             description="搜索本地知识库获取专业文档，适用于查找内部资料、专业报告等",
-            parameters={
-                "query": "搜索问题",
-                "kb_name": "知识库名称",
-                "top_k": "返回结果数量"
-            }
+            parameters={"query": "搜索问题", "kb_name": "知识库名称", "top_k": "返回结果数量"},
         ),
         Tool(
             name=ToolType.TEXT2SQL.value,
             description="将自然语言转换为SQL查询数据库，获取结构化数据",
             parameters={
                 "question": "自然语言问题",
-                "intent": "查询意图(stats/trend/comparison/detail)"
-            }
+                "intent": "查询意图(stats/trend/comparison/detail)",
+            },
         ),
         Tool(
             name=ToolType.DATA_ANALYZER.value,
             description="分析数据并识别模式、趋势、异常等，自动推荐可视化方式",
             parameters={
                 "data": "待分析数据(可选，默认使用已收集数据)",
-                "analysis_type": "分析类型(auto/trend/distribution/comparison)"
-            }
+                "analysis_type": "分析类型(auto/trend/distribution/comparison)",
+            },
         ),
         Tool(
             name=ToolType.CHART_GENERATOR.value,
@@ -920,16 +925,16 @@ def create_default_tools() -> List[Tool]:
             parameters={
                 "data": "图表数据",
                 "chart_type": "图表类型(line/bar/pie/scatter)",
-                "title": "图表标题"
-            }
+                "title": "图表标题",
+            },
         ),
         Tool(
             name=ToolType.STOCK_QUERY.value,
             description="查询股票实时行情信息，获取股票价格、涨跌幅、成交量等数据",
             parameters={
                 "stock_code": "股票代码(如sh601009/sz000001，6开头为上证，0/3开头为深证)",
-                "keyword": "股票名称或代码关键词(当不确定完整代码时使用)"
-            }
+                "keyword": "股票名称或代码关键词(当不确定完整代码时使用)",
+            },
         ),
         Tool(
             name=ToolType.BIDDING_SEARCH.value,
@@ -938,14 +943,12 @@ def create_default_tools() -> List[Tool]:
                 "keyword": "搜索关键词(必填)",
                 "category": "项目类别(招标/中标/采购)",
                 "region": "地区筛选",
-                "page": "页码(默认1)"
-            }
+                "page": "页码(默认1)",
+            },
         ),
         Tool(
             name=ToolType.FINISH.value,
             description="完成研究任务，开始生成最终研究报告",
-            parameters={
-                "summary": "研究总结"
-            }
-        )
+            parameters={"summary": "研究总结"},
+        ),
     ]

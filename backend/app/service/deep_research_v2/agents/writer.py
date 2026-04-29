@@ -12,11 +12,9 @@ DeepResearch V2.0 - 首席笔杆 Agent (LeadWriter)
 """
 
 import uuid
-from typing import Dict, Any, List
-from datetime import datetime
 
+from ..state import ResearchPhase, ResearchState
 from .base import BaseAgent
-from ..state import ResearchState, ResearchPhase
 
 
 class LeadWriter(BaseAgent):
@@ -217,7 +215,7 @@ class LeadWriter(BaseAgent):
             role="首席笔杆",
             llm_api_key=llm_api_key,
             llm_base_url=llm_base_url,
-            model=model
+            model=model,
         )
 
     async def process(self, state: ResearchState) -> ResearchState:
@@ -233,19 +231,22 @@ class LeadWriter(BaseAgent):
         """撰写报告"""
         # 发送 research_step 开始事件
         # 注意: step_type 必须是 "writing" 以匹配 graph.py 发送的 phase 事件
-        self.add_message(state, "research_step", {
-            "step_id": f"step_writing_{uuid.uuid4().hex[:8]}",
-            "step_type": "writing",
-            "title": "内容生成",
-            "subtitle": "撰写研究报告",
-            "status": "running",
-            "stats": {"sections_count": len(state["outline"]), "word_count": 0}
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_id": f"step_writing_{uuid.uuid4().hex[:8]}",
+                "step_type": "writing",
+                "title": "内容生成",
+                "subtitle": "撰写研究报告",
+                "status": "running",
+                "stats": {"sections_count": len(state["outline"]), "word_count": 0},
+            },
+        )
 
-        self.add_message(state, "thought", {
-            "agent": self.name,
-            "content": "开始撰写深度研究报告..."
-        })
+        self.add_message(
+            state, "thought", {"agent": self.name, "content": "开始撰写深度研究报告..."}
+        )
 
         # 逐章节撰写
         for section in state["outline"]:
@@ -257,33 +258,37 @@ class LeadWriter(BaseAgent):
 
         # 发送 research_step 完成事件
         word_count = len(state.get("final_report", ""))
-        self.add_message(state, "research_step", {
-            "step_type": "writing",
-            "title": "内容生成",
-            "subtitle": "撰写研究报告",
-            "status": "completed",
-            "stats": {
-                "sections_count": len(state["outline"]),
-                "word_count": word_count,
-                "references_count": len(state.get("references", []))
-            }
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_type": "writing",
+                "title": "内容生成",
+                "subtitle": "撰写研究报告",
+                "status": "completed",
+                "stats": {
+                    "sections_count": len(state["outline"]),
+                    "word_count": word_count,
+                    "references_count": len(state.get("references", [])),
+                },
+            },
+        )
 
         # 更新阶段
         state["phase"] = ResearchPhase.REVIEWING.value
 
         return state
 
-    async def _write_section(self, state: ResearchState, section: Dict) -> None:
+    async def _write_section(self, state: ResearchState, section: dict) -> None:
         """撰写单个章节"""
         section_id = section["id"]
         self.logger.info(f"Writing section: {section.get('title')}")
 
-        self.add_message(state, "action", {
-            "agent": self.name,
-            "tool": "writing_section",
-            "section": section.get("title")
-        })
+        self.add_message(
+            state,
+            "action",
+            {"agent": self.name, "tool": "writing_section", "section": section.get("title")},
+        )
 
         # 收集相关素材
         related_facts = [f for f in state["facts"] if section_id in f.get("related_sections", [])]
@@ -294,12 +299,16 @@ class LeadWriter(BaseAgent):
         # 格式化事实
         facts_text = []
         for fact in related_facts:
-            facts_text.append(f"- {fact.get('content')} (来源: {fact.get('source_name')}, 可信度: {fact.get('credibility_score')})")
+            facts_text.append(
+                f"- {fact.get('content')} (来源: {fact.get('source_name')}, 可信度: {fact.get('credibility_score')})"
+            )
 
         # 格式化数据点
         data_text = []
         for dp in state["data_points"][:10]:
-            data_text.append(f"- {dp.get('name')}: {dp.get('value')} {dp.get('unit', '')} ({dp.get('year', 'N/A')})")
+            data_text.append(
+                f"- {dp.get('name')}: {dp.get('value')} {dp.get('unit', '')} ({dp.get('year', 'N/A')})"
+            )
 
         # 格式化图表信息
         charts_info = []
@@ -314,8 +323,10 @@ class LeadWriter(BaseAgent):
             section_type=section.get("section_type", "mixed"),
             facts="\n".join(facts_text) if facts_text else "（暂无相关事实）",
             data_points="\n".join(data_text) if data_text else "（暂无数据点）",
-            insights="\n".join([f"- {i}" for i in state["insights"][:5]]) if state["insights"] else "（暂无洞察）",
-            charts_info="\n".join(charts_info) if charts_info else "（暂无图表）"
+            insights="\n".join([f"- {i}" for i in state["insights"][:5]])
+            if state["insights"]
+            else "（暂无洞察）",
+            charts_info="\n".join(charts_info) if charts_info else "（暂无图表）",
         )
 
         response = await self.call_llm(
@@ -323,7 +334,7 @@ class LeadWriter(BaseAgent):
             user_prompt=prompt,
             json_mode=True,
             temperature=0.4,
-            max_tokens=16000  # 拉满到最大值
+            max_tokens=16000,  # 拉满到最大值
         )
 
         result = self.parse_json_response(response)
@@ -335,35 +346,44 @@ class LeadWriter(BaseAgent):
 
             # 收集引用
             for citation in result.get("citations", []):
-                state["references"].append({
-                    "id": len(state["references"]) + 1,
-                    "marker": citation.get("marker"),
-                    "source": citation.get("source"),
-                    "url": citation.get("url", "")
-                })
+                state["references"].append(
+                    {
+                        "id": len(state["references"]) + 1,
+                        "marker": citation.get("marker"),
+                        "source": citation.get("source"),
+                        "url": citation.get("url", ""),
+                    }
+                )
 
             # 发送章节内容到"过程报告" - 包含完整内容用于流式显示
-            self.add_message(state, "section_content", {
-                "agent": self.name,
-                "section_id": section_id,
-                "section_title": section.get("title"),
-                "content": section_content,  # 完整章节内容
-                "word_count": len(section_content),
-                "key_points": result.get("key_points", [])
-            })
+            self.add_message(
+                state,
+                "section_content",
+                {
+                    "agent": self.name,
+                    "section_id": section_id,
+                    "section_title": section.get("title"),
+                    "content": section_content,  # 完整章节内容
+                    "word_count": len(section_content),
+                    "key_points": result.get("key_points", []),
+                },
+            )
 
             # 发送观察消息（显示在左侧步骤流程）
-            self.add_message(state, "observation", {
-                "agent": self.name,
-                "content": f"章节「{section.get('title')}」撰写完成\n字数: {len(section_content)}\n要点: {', '.join(result.get('key_points', [])[:2]) if result.get('key_points') else '无'}"
-            })
+            self.add_message(
+                state,
+                "observation",
+                {
+                    "agent": self.name,
+                    "content": f"章节「{section.get('title')}」撰写完成\n字数: {len(section_content)}\n要点: {', '.join(result.get('key_points', [])[:2]) if result.get('key_points') else '无'}",
+                },
+            )
 
     async def _synthesize_report(self, state: ResearchState) -> None:
         """整合完整报告"""
-        self.add_message(state, "thought", {
-            "agent": self.name,
-            "content": "正在整合各章节，生成完整研究报告..."
-        })
+        self.add_message(
+            state, "thought", {"agent": self.name, "content": "正在整合各章节，生成完整研究报告..."}
+        )
 
         # 准备各章节内容
         sections_content = []
@@ -385,21 +405,25 @@ class LeadWriter(BaseAgent):
 
         prompt = self.SYNTHESIS_PROMPT.format(
             query=state["query"],
-            sections_content="\n\n".join(sections_content) if sections_content else "（暂无章节内容）",
-            all_sources="\n".join(all_sources[:30]) if all_sources else "（暂无来源）"
+            sections_content="\n\n".join(sections_content)
+            if sections_content
+            else "（暂无章节内容）",
+            all_sources="\n".join(all_sources[:30]) if all_sources else "（暂无来源）",
         )
 
-        self.logger.info(f"[LeadWriter] 调用 LLM 整合报告...")
+        self.logger.info("[LeadWriter] 调用 LLM 整合报告...")
         response = await self.call_llm(
             system_prompt="你是资深的研究报告主编，擅长整合和打磨最终报告。",
             user_prompt=prompt,
             json_mode=True,
             temperature=0.3,
-            max_tokens=16000  # 拉满到最大值
+            max_tokens=16000,  # 拉满到最大值
         )
 
         result = self.parse_json_response(response)
-        self.logger.info(f"[LeadWriter] JSON 解析结果: {bool(result)}, keys: {result.keys() if result else 'N/A'}")
+        self.logger.info(
+            f"[LeadWriter] JSON 解析结果: {bool(result)}, keys: {result.keys() if result else 'N/A'}"
+        )
 
         executive_summary = ""
         conclusions = []
@@ -416,7 +440,7 @@ class LeadWriter(BaseAgent):
                     state["references"].append(ref)
         else:
             # JSON 解析失败时的备选方案：使用已有章节内容组装报告
-            self.logger.warning(f"[LeadWriter] ⚠️ JSON 解析失败，使用章节内容作为备选")
+            self.logger.warning("[LeadWriter] ⚠️ JSON 解析失败，使用章节内容作为备选")
             fallback_report = f"# {state['query']} 研究报告\n\n"
             for section in state["outline"]:
                 section_id = section["id"]
@@ -427,27 +451,32 @@ class LeadWriter(BaseAgent):
             self.logger.info(f"[LeadWriter] 使用备选报告，长度: {len(state['final_report'])}")
 
         # 发送报告完成事件 - 包含完整报告内容用于前端流式显示
-        self.add_message(state, "report_draft", {
-            "agent": self.name,
-            "content": state["final_report"],  # 完整报告内容
-            "executive_summary": executive_summary,
-            "conclusions": conclusions,
-            "word_count": len(state["final_report"]),
-            "references_count": len(state["references"])
-        })
+        self.add_message(
+            state,
+            "report_draft",
+            {
+                "agent": self.name,
+                "content": state["final_report"],  # 完整报告内容
+                "executive_summary": executive_summary,
+                "conclusions": conclusions,
+                "word_count": len(state["final_report"]),
+                "references_count": len(state["references"]),
+            },
+        )
 
     async def _revise_report(self, state: ResearchState) -> ResearchState:
         """根据反馈修订报告"""
-        self.add_message(state, "thought", {
-            "agent": self.name,
-            "content": "根据审核反馈修订报告..."
-        })
+        self.add_message(
+            state, "thought", {"agent": self.name, "content": "根据审核反馈修订报告..."}
+        )
 
         # 收集未解决的问题
         unresolved = [f for f in state["critic_feedback"] if not f.get("resolved")]
         feedback_text = []
         for issue in unresolved:
-            feedback_text.append(f"- [{issue.get('severity')}] {issue.get('description')}\n  建议: {issue.get('suggestion')}")
+            feedback_text.append(
+                f"- [{issue.get('severity')}] {issue.get('description')}\n  建议: {issue.get('suggestion')}"
+            )
 
         # 收集新信息（如果有补充搜索）
         new_facts = state["facts"][-5:] if state["facts"] else []
@@ -456,7 +485,7 @@ class LeadWriter(BaseAgent):
         prompt = self.REVISION_PROMPT.format(
             original_content=state.get("final_report", "")[:6000],
             feedback="\n".join(feedback_text) if feedback_text else "无具体反馈",
-            new_info=new_info if new_info else "无补充信息"
+            new_info=new_info if new_info else "无补充信息",
         )
 
         response = await self.call_llm(
@@ -464,7 +493,7 @@ class LeadWriter(BaseAgent):
             user_prompt=prompt,
             json_mode=True,
             temperature=0.3,
-            max_tokens=16000  # 拉满到最大值
+            max_tokens=16000,  # 拉满到最大值
         )
 
         result = self.parse_json_response(response)
@@ -478,12 +507,16 @@ class LeadWriter(BaseAgent):
                     if feedback.get("id") == issue_id:
                         feedback["resolved"] = True
 
-            self.add_message(state, "revision_complete", {
-                "agent": self.name,
-                "changes_count": len(result.get("changes_made", [])),
-                "addressed_issues": result.get("addressed_issues", []),
-                "unable_to_address": result.get("unable_to_address", [])
-            })
+            self.add_message(
+                state,
+                "revision_complete",
+                {
+                    "agent": self.name,
+                    "changes_count": len(result.get("changes_made", [])),
+                    "addressed_issues": result.get("addressed_issues", []),
+                    "unable_to_address": result.get("unable_to_address", []),
+                },
+            )
 
         # 回到审核阶段
         state["phase"] = ResearchPhase.REVIEWING.value

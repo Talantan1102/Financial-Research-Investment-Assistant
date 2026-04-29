@@ -26,51 +26,39 @@ async for event in service.research("中国AI芯片市场分析"):
 ```
 """
 
+from .agents import ChiefArchitect, CodeWizard, CriticMaster, DeepScout, LeadWriter
+from .graph import DeepResearchGraph, create_research_graph
+from .service import DeepResearchV2Service
 from .state import (
-    ResearchState,
-    ResearchPhase,
-    Section,
-    Fact,
-    DataPoint,
     Chart,
     CriticFeedback,
-    create_initial_state
+    DataPoint,
+    Fact,
+    ResearchPhase,
+    ResearchState,
+    Section,
+    create_initial_state,
 )
-
-from .graph import DeepResearchGraph, create_research_graph
-
-from .agents import (
-    ChiefArchitect,
-    DeepScout,
-    CodeWizard,
-    CriticMaster,
-    LeadWriter
-)
-
-from .service import DeepResearchV2Service
 
 __all__ = [
     # State
-    'ResearchState',
-    'ResearchPhase',
-    'Section',
-    'Fact',
-    'DataPoint',
-    'Chart',
-    'CriticFeedback',
-    'create_initial_state',
-
+    "ResearchState",
+    "ResearchPhase",
+    "Section",
+    "Fact",
+    "DataPoint",
+    "Chart",
+    "CriticFeedback",
+    "create_initial_state",
     # Graph
-    'DeepResearchGraph',
-    'create_research_graph',
-
+    "DeepResearchGraph",
+    "create_research_graph",
     # Agents
-    'ChiefArchitect',
-    'DeepScout',
-    'CodeWizard',
-    'CriticMaster',
-    'LeadWriter',
-
+    "ChiefArchitect",
+    "DeepScout",
+    "CodeWizard",
+    "CriticMaster",
+    "LeadWriter",
     # Service
-    'DeepResearchV2Service',
+    "DeepResearchV2Service",
 ]

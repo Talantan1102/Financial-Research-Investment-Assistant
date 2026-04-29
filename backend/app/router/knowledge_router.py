@@ -2,25 +2,26 @@
 # 未经授权，禁止转售或仿制。
 
 """知识库管理路由"""
+
 import os
 import shutil
-from typing import List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
+from schemas.knowledge import (
+    DocumentResponse,
+    DocumentUploadResponse,
+    KnowledgeBaseCreate,
+    KnowledgeBaseResponse,
+    KnowledgeBaseUpdate,
+    KnowledgeBaseWithDocuments,
+)
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.knowledge import KnowledgeBase, Document
+from app.models.knowledge import Document, KnowledgeBase
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
-from schemas.knowledge import (
-    KnowledgeBaseCreate,
-    KnowledgeBaseUpdate,
-    KnowledgeBaseResponse,
-    KnowledgeBaseWithDocuments,
-    DocumentResponse,
-    DocumentUploadResponse,
-)
 
 router = APIRouter(prefix="/knowledge-bases", tags=["知识库管理"])
 
@@ -31,11 +32,32 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # 支持的文件类型
 ALLOWED_EXTENSIONS = {
     # 文档类型
-    '.pdf', '.docx', '.doc', '.txt', '.md', '.html', '.xlsx', '.xls', '.pptx', '.ppt',
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".txt",
+    ".md",
+    ".html",
+    ".xlsx",
+    ".xls",
+    ".pptx",
+    ".ppt",
     # 图片类型
-    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".bmp",
     # 代码/数据类型
-    '.py', '.js', '.ts', '.json', '.yaml', '.yml', '.xml', '.csv',
+    ".py",
+    ".js",
+    ".ts",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".csv",
 }
 
 
@@ -120,15 +142,18 @@ async def process_document(document_id: str, file_path: str, kb_name: str, db_se
             os.remove(file_path)
 
 
-@router.get("", response_model=List[KnowledgeBaseResponse])
+@router.get("", response_model=list[KnowledgeBaseResponse])
 async def get_knowledge_bases(
     current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db),
 ):
     """获取用户的知识库列表"""
-    kbs = db.query(KnowledgeBase).filter(
-        KnowledgeBase.user_id == current_user.id
-    ).order_by(KnowledgeBase.updated_at.desc()).all()
+    kbs = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.user_id == current_user.id)
+        .order_by(KnowledgeBase.updated_at.desc())
+        .all()
+    )
 
     return [kb_to_response(kb) for kb in kbs]
 
@@ -141,16 +166,14 @@ async def create_knowledge_base(
 ):
     """创建知识库"""
     # 检查是否已存在同名知识库
-    existing = db.query(KnowledgeBase).filter(
-        KnowledgeBase.user_id == current_user.id,
-        KnowledgeBase.name == kb_data.name
-    ).first()
+    existing = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.user_id == current_user.id, KnowledgeBase.name == kb_data.name)
+        .first()
+    )
 
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="已存在同名知识库"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="已存在同名知识库")
 
     kb = KnowledgeBase(
         user_id=current_user.id,
@@ -174,25 +197,23 @@ async def get_knowledge_base(
     try:
         kb_uuid = UUID(kb_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的知识库ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的知识库ID格式")
 
-    kb = db.query(KnowledgeBase).filter(
-        KnowledgeBase.id == kb_uuid,
-        KnowledgeBase.user_id == current_user.id
-    ).first()
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_uuid, KnowledgeBase.user_id == current_user.id)
+        .first()
+    )
 
     if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="知识库不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
 
-    documents = db.query(Document).filter(
-        Document.knowledge_base_id == kb.id
-    ).order_by(Document.created_at.desc()).all()
+    documents = (
+        db.query(Document)
+        .filter(Document.knowledge_base_id == kb.id)
+        .order_by(Document.created_at.desc())
+        .all()
+    )
 
     return KnowledgeBaseWithDocuments(
         id=str(kb.id),
@@ -216,34 +237,30 @@ async def update_knowledge_base(
     try:
         kb_uuid = UUID(kb_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的知识库ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的知识库ID格式")
 
-    kb = db.query(KnowledgeBase).filter(
-        KnowledgeBase.id == kb_uuid,
-        KnowledgeBase.user_id == current_user.id
-    ).first()
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_uuid, KnowledgeBase.user_id == current_user.id)
+        .first()
+    )
 
     if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="知识库不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
 
     if kb_data.name is not None:
         # 检查是否与其他知识库重名
-        existing = db.query(KnowledgeBase).filter(
-            KnowledgeBase.user_id == current_user.id,
-            KnowledgeBase.name == kb_data.name,
-            KnowledgeBase.id != kb_uuid
-        ).first()
-        if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="已存在同名知识库"
+        existing = (
+            db.query(KnowledgeBase)
+            .filter(
+                KnowledgeBase.user_id == current_user.id,
+                KnowledgeBase.name == kb_data.name,
+                KnowledgeBase.id != kb_uuid,
             )
+            .first()
+        )
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="已存在同名知识库")
         kb.name = kb_data.name
 
     if kb_data.description is not None:
@@ -265,21 +282,16 @@ async def delete_knowledge_base(
     try:
         kb_uuid = UUID(kb_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的知识库ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的知识库ID格式")
 
-    kb = db.query(KnowledgeBase).filter(
-        KnowledgeBase.id == kb_uuid,
-        KnowledgeBase.user_id == current_user.id
-    ).first()
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_uuid, KnowledgeBase.user_id == current_user.id)
+        .first()
+    )
 
     if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="知识库不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
 
     db.delete(kb)
     db.commit()
@@ -298,29 +310,24 @@ async def upload_document(
     try:
         kb_uuid = UUID(kb_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的知识库ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的知识库ID格式")
 
     # 验证知识库存在
-    kb = db.query(KnowledgeBase).filter(
-        KnowledgeBase.id == kb_uuid,
-        KnowledgeBase.user_id == current_user.id
-    ).first()
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_uuid, KnowledgeBase.user_id == current_user.id)
+        .first()
+    )
 
     if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="知识库不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
 
     # 验证文件类型
     ext = get_file_extension(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件类型: {ext}，支持的类型: {', '.join(ALLOWED_EXTENSIONS)}"
+            detail=f"不支持的文件类型: {ext}，支持的类型: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
     # 保存文件到临时目录
@@ -330,8 +337,7 @@ async def upload_document(
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"文件保存失败: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"文件保存失败: {str(e)}"
         )
 
     # 获取文件大小
@@ -359,23 +365,17 @@ async def upload_document(
     from core.database import SessionLocal
 
     # 在后台处理文档
-    background_tasks.add_task(
-        process_document,
-        str(doc.id),
-        file_path,
-        kb.name,
-        SessionLocal
-    )
+    background_tasks.add_task(process_document, str(doc.id), file_path, kb.name, SessionLocal)
 
     return DocumentUploadResponse(
         id=str(doc.id),
         filename=doc.filename,
         process_status="pending",
-        message="文档已上传，正在后台处理中"
+        message="文档已上传，正在后台处理中",
     )
 
 
-@router.get("/{kb_id}/documents", response_model=List[DocumentResponse])
+@router.get("/{kb_id}/documents", response_model=list[DocumentResponse])
 async def get_documents(
     kb_id: str,
     current_user: User = Depends(get_current_user_required),
@@ -385,26 +385,24 @@ async def get_documents(
     try:
         kb_uuid = UUID(kb_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的知识库ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的知识库ID格式")
 
     # 验证知识库存在
-    kb = db.query(KnowledgeBase).filter(
-        KnowledgeBase.id == kb_uuid,
-        KnowledgeBase.user_id == current_user.id
-    ).first()
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_uuid, KnowledgeBase.user_id == current_user.id)
+        .first()
+    )
 
     if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="知识库不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
 
-    documents = db.query(Document).filter(
-        Document.knowledge_base_id == kb_uuid
-    ).order_by(Document.created_at.desc()).all()
+    documents = (
+        db.query(Document)
+        .filter(Document.knowledge_base_id == kb_uuid)
+        .order_by(Document.created_at.desc())
+        .all()
+    )
 
     return [doc_to_response(doc) for doc in documents]
 
@@ -423,40 +421,30 @@ async def get_document_chunks(
         kb_uuid = UUID(kb_id)
         doc_uuid = UUID(doc_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的ID格式")
 
     # 验证知识库存在
-    kb = db.query(KnowledgeBase).filter(
-        KnowledgeBase.id == kb_uuid,
-        KnowledgeBase.user_id == current_user.id
-    ).first()
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_uuid, KnowledgeBase.user_id == current_user.id)
+        .first()
+    )
 
     if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="知识库不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
 
     # 获取文档
-    doc = db.query(Document).filter(
-        Document.id == doc_uuid,
-        Document.knowledge_base_id == kb_uuid
-    ).first()
+    doc = (
+        db.query(Document)
+        .filter(Document.id == doc_uuid, Document.knowledge_base_id == kb_uuid)
+        .first()
+    )
 
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="文档不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
 
     if doc.status != "completed":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="文档尚未处理完成"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文档尚未处理完成")
 
     # 从 Milvus 获取切片
     collection_name = f"kb_{kb.name}".lower().replace(" ", "_")
@@ -481,7 +469,7 @@ async def get_document_chunks(
                 "content": chunk.get("content", ""),
             }
             for i, chunk in enumerate(chunks)
-        ]
+        ],
     }
 
 
@@ -497,34 +485,27 @@ async def delete_document(
         kb_uuid = UUID(kb_id)
         doc_uuid = UUID(doc_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的ID格式")
 
     # 验证知识库存在
-    kb = db.query(KnowledgeBase).filter(
-        KnowledgeBase.id == kb_uuid,
-        KnowledgeBase.user_id == current_user.id
-    ).first()
+    kb = (
+        db.query(KnowledgeBase)
+        .filter(KnowledgeBase.id == kb_uuid, KnowledgeBase.user_id == current_user.id)
+        .first()
+    )
 
     if not kb:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="知识库不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在")
 
     # 获取文档
-    doc = db.query(Document).filter(
-        Document.id == doc_uuid,
-        Document.knowledge_base_id == kb_uuid
-    ).first()
+    doc = (
+        db.query(Document)
+        .filter(Document.id == doc_uuid, Document.knowledge_base_id == kb_uuid)
+        .first()
+    )
 
     if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="文档不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在")
 
     # 删除文件（如果存在）
     if doc.file_path and os.path.exists(doc.file_path):

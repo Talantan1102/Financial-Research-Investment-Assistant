@@ -4,8 +4,8 @@
 """
 行业配置 - 定义各行业的搜索关键词
 """
+
 import logging
-from typing import Dict, List, Optional
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -14,16 +14,17 @@ logger = logging.getLogger(__name__)
 @dataclass
 class IndustryConfig:
     """行业配置"""
+
     id: str
     name: str
     description: str
-    news_keywords: List[str]
-    bidding_keywords: List[str]
-    research_keywords: List[str]
+    news_keywords: list[str]
+    bidding_keywords: list[str]
+    research_keywords: list[str]
 
 
 # 预定义的行业配置
-INDUSTRY_CONFIGS: Dict[str, IndustryConfig] = {
+INDUSTRY_CONFIGS: dict[str, IndustryConfig] = {
     "smart_transportation": IndustryConfig(
         id="smart_transportation",
         name="智慧交通",
@@ -128,7 +129,7 @@ INDUSTRY_CONFIGS: Dict[str, IndustryConfig] = {
 DEFAULT_INDUSTRY_ID = "smart_transportation"
 
 
-def get_industry_config(industry_id: Optional[str] = None) -> IndustryConfig:
+def get_industry_config(industry_id: str | None = None) -> IndustryConfig:
     """
     获取行业配置
 
@@ -150,7 +151,7 @@ def get_industry_config(industry_id: Optional[str] = None) -> IndustryConfig:
     return config
 
 
-def get_all_industries() -> List[Dict]:
+def get_all_industries() -> list[dict]:
     """
     获取所有行业列表
 

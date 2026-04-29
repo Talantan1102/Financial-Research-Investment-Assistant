@@ -5,7 +5,7 @@
 
 from pathlib import Path
 
-FINANCIAL_ANALYSIS_SKILL = '''---
+FINANCIAL_ANALYSIS_SKILL = """---
 name: financial_analysis
 description: |
   A股上市公司财务分析 Skill，提供财务报表查询、财务指标计算、财务数据对比分析能力。
@@ -352,25 +352,29 @@ User: "对比茅台和五粮液的盈利能力"
 **Skill Version**: v1.0  
 **Last Updated**: 2026-03-18  
 **Compatible with**: AgentFlow v1.0, MCP Protocol
-'''
+"""
+
 
 # 保存优化后的 Financial Analysis SKILL.md
 def save_skill(skill_name, content):
-    skill_dir = Path(f"~/.openclaw/workspace-dev/external/financial-research-assistant/backend/claude_skills/{skill_name}").expanduser()
+    skill_dir = Path(
+        f"~/.openclaw/workspace-dev/external/financial-research-assistant/backend/claude_skills/{skill_name}"
+    ).expanduser()
     skill_dir.mkdir(parents=True, exist_ok=True)
     skill_file = skill_dir / "SKILL.md"
-    
+
     # 备份
     if skill_file.exists() and not (skill_dir / "SKILL.md.backup").exists():
         skill_file.rename(skill_dir / "SKILL.md.backup")
         print(f"✅ Backed up {skill_name}/SKILL.md")
-    
-    skill_file.write_text(content, encoding='utf-8')
+
+    skill_file.write_text(content, encoding="utf-8")
     print(f"✅ Saved optimized {skill_name}/SKILL.md")
 
+
 if __name__ == "__main__":
-    print("="*80)
+    print("=" * 80)
     print("优化 Financial Analysis Skill")
-    print("="*80)
+    print("=" * 80)
     save_skill("financial_analysis", FINANCIAL_ANALYSIS_SKILL)
     print("\n优化完成！")

@@ -1,56 +1,53 @@
 # Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
 # 未经授权，禁止转售或仿制。
 
-from typing import Dict, Any, List, Optional
+from typing import Any
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from starlette.status import HTTP_200_OK, HTTP_500_INTERNAL_SERVER_ERROR
-from sqlalchemy.orm import Session
 from pydantic import BaseModel
+from schemas import ChatRequest, ChatWithAttachmentsRequest, LegacySessionResponse
+from service import ChatService, DocumentService, ServiceConfig, SessionService, WebSearchService
+from sqlalchemy.orm import Session
+from starlette.status import HTTP_200_OK, HTTP_500_INTERNAL_SERVER_ERROR
 
 from app.core.database import get_db
 from app.models.chat import ChatAttachment
-from service import DocumentService, WebSearchService, ChatService, SessionService, ServiceConfig
-from app.service.retrieval_service import retrieve_content
 from app.service.mcp_chat_service import MCPChatService
-from schemas import ChatRequest, LegacySessionResponse, ChatWithAttachmentsRequest
+from app.service.retrieval_service import retrieve_content
 
 
 # MCP Chat Request Schema
 class MCPChatRequest(BaseModel):
     """MCP 聊天请求"""
+
     question: str
-    session_id: Optional[str] = None
-    system_prompt: Optional[str] = None
+    session_id: str | None = None
+    system_prompt: str | None = None
     model: str = "qwen-max"
 
 
 # Create router instance
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+
 # Get service instances
 def get_services():
     config = ServiceConfig.get_api_config()
-    doc_service = DocumentService(
-        base_url=config['base_url'],
-        api_key=config['api_key']
-    )
-    web_service = WebSearchService(api_key=config.get('serper_api_key'))
+    doc_service = DocumentService(base_url=config["base_url"], api_key=config["api_key"])
+    web_service = WebSearchService(api_key=config.get("serper_api_key"))
     session_service = SessionService()
     chat_service = ChatService(doc_service, web_service, session_service)
     return {
         "chat_service": chat_service,
         "session_service": session_service,
-        "default_dataset_id": config['default_dataset_id']
+        "default_dataset_id": config["default_dataset_id"],
     }
 
 
-
 @router.post("/session", response_model=LegacySessionResponse, status_code=HTTP_200_OK)
-async def create_session(
-    services: Dict[str, Any] = Depends(get_services)
-):
+async def create_session(services: dict[str, Any] = Depends(get_services)):
     """
     创建新的聊天会话
 
@@ -64,15 +61,12 @@ async def create_session(
         return LegacySessionResponse(**session_data)
     except Exception as e:
         raise HTTPException(
-            status_code=HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建会话失败: {str(e)}"
+            status_code=HTTP_500_INTERNAL_SERVER_ERROR, detail=f"创建会话失败: {str(e)}"
         )
 
+
 @router.post("/completion/v1", status_code=HTTP_200_OK)
-async def chat_completion(
-    request: ChatRequest,
-    services: Dict[str, Any] = Depends(get_services)
-):
+async def chat_completion(request: ChatRequest, services: dict[str, Any] = Depends(get_services)):
     """
     聊天补全接口，结合知识库检索和Web搜索，进行问答
 
@@ -101,29 +95,25 @@ async def chat_completion(
             knowledge_docs = []
             if request.search_knowledge:
                 knowledge_docs = chat_service.retrieve_from_knowledge_base(
-                    question=request.question,
-                    dataset_id=default_dataset_id
+                    question=request.question, dataset_id=default_dataset_id
                 )
 
             # 从Web搜索检索信息
             web_docs = []
             if request.search_web:
-                web_docs = chat_service.retrieve_from_web(
-                    question=request.question
-                )
+                web_docs = chat_service.retrieve_from_web(question=request.question)
 
             # 合并文档并重排
             all_docs = knowledge_docs + web_docs
             reranked_docs = chat_service.rerank_documents(
-                question=request.question,
-                documents=all_docs
+                question=request.question, documents=all_docs
             )
 
             # 生成流式回答
             for message_chunk in chat_service.get_chat_completion(
                 session_id=request.session_id,
                 question=request.question,
-                retrieved_content=reranked_docs
+                retrieved_content=reranked_docs,
             ):
                 yield message_chunk
 
@@ -133,15 +123,12 @@ async def chat_completion(
             yield error_message
 
     # 返回流式响应
-    return StreamingResponse(
-        generate_response(),
-        media_type="text/event-stream"
-    )
+    return StreamingResponse(generate_response(), media_type="text/event-stream")
+
 
 @router.post("/completion", status_code=HTTP_200_OK)
 async def chat_completion_v2(
-    request: ChatRequest,
-    services: Dict[str, Any] = Depends(get_services)
+    request: ChatRequest, services: dict[str, Any] = Depends(get_services)
 ):
     """
     聊天补全接口v2版本，使用policy_documents索引进行检索，采用Dealer检索引擎，结合Web搜索进行问答
@@ -172,40 +159,38 @@ async def chat_completion_v2(
             if request.search_knowledge:
                 # 使用 retrieve_content 函数进行检索，默认索引为 policy_documents
                 retrieved_data = retrieve_content(
-                    indexNames="policy_documents",
-                    question=request.question
+                    indexNames="policy_documents", question=request.question
                 )
 
                 # 转换数据格式以适配现有系统
                 policy_docs = []
                 for item in retrieved_data:
-                    policy_docs.append({
-                        "id": item["id"],
-                        "content": item["content_with_weight"],
-                        "source": f"{item['document_name']} (ID: {item['document_id']})",
-                        "document_id": item["document_id"],
-                        "document_name": item["document_name"]
-                    })
+                    policy_docs.append(
+                        {
+                            "id": item["id"],
+                            "content": item["content_with_weight"],
+                            "source": f"{item['document_name']} (ID: {item['document_id']})",
+                            "document_id": item["document_id"],
+                            "document_name": item["document_name"],
+                        }
+                    )
 
             # 从Web搜索检索信息
             web_docs = []
             if request.search_web:
-                web_docs = chat_service.retrieve_from_web(
-                    question=request.question
-                )
+                web_docs = chat_service.retrieve_from_web(question=request.question)
 
             # 合并文档并重排
             all_docs = policy_docs + web_docs
             reranked_docs = chat_service.rerank_documents(
-                question=request.question,
-                documents=all_docs
+                question=request.question, documents=all_docs
             )
 
             # 生成流式回答
             for message_chunk in chat_service.get_chat_completion(
                 session_id=request.session_id,
                 question=request.question,
-                retrieved_content=reranked_docs
+                retrieved_content=reranked_docs,
             ):
                 yield message_chunk
 
@@ -215,17 +200,14 @@ async def chat_completion_v2(
             yield error_message
 
     # 返回流式响应
-    return StreamingResponse(
-        generate_response(),
-        media_type="text/event-stream"
-    )
+    return StreamingResponse(generate_response(), media_type="text/event-stream")
 
 
 @router.post("/completion/v3", status_code=HTTP_200_OK)
 async def chat_completion_with_attachments(
     request: ChatWithAttachmentsRequest,
     db: Session = Depends(get_db),
-    services: Dict[str, Any] = Depends(get_services)
+    services: dict[str, Any] = Depends(get_services),
 ):
     """
     聊天补全接口v3版本，支持附件的问答
@@ -256,10 +238,12 @@ async def chat_completion_with_attachments(
                 att_uuid = UUID(att_id)
                 att = db.query(ChatAttachment).filter(ChatAttachment.id == att_uuid).first()
                 if att and att.content_text and att.status == "completed":
-                    attachment_contents.append({
-                        "filename": att.filename,
-                        "content": att.content_text[:10000],  # 限制每个附件内容长度
-                    })
+                    attachment_contents.append(
+                        {
+                            "filename": att.filename,
+                            "content": att.content_text[:10000],  # 限制每个附件内容长度
+                        }
+                    )
             except ValueError:
                 continue
 
@@ -269,30 +253,28 @@ async def chat_completion_with_attachments(
             policy_docs = []
             if request.search_knowledge:
                 retrieved_data = retrieve_content(
-                    indexNames="policy_documents",
-                    question=request.question
+                    indexNames="policy_documents", question=request.question
                 )
                 for item in retrieved_data:
-                    policy_docs.append({
-                        "id": item["id"],
-                        "content": item["content_with_weight"],
-                        "source": f"{item['document_name']} (ID: {item['document_id']})",
-                        "document_id": item["document_id"],
-                        "document_name": item["document_name"]
-                    })
+                    policy_docs.append(
+                        {
+                            "id": item["id"],
+                            "content": item["content_with_weight"],
+                            "source": f"{item['document_name']} (ID: {item['document_id']})",
+                            "document_id": item["document_id"],
+                            "document_name": item["document_name"],
+                        }
+                    )
 
             # 从Web搜索检索信息
             web_docs = []
             if request.search_web:
-                web_docs = chat_service.retrieve_from_web(
-                    question=request.question
-                )
+                web_docs = chat_service.retrieve_from_web(question=request.question)
 
             # 合并文档并重排
             all_docs = policy_docs + web_docs
             reranked_docs = chat_service.rerank_documents(
-                question=request.question,
-                documents=all_docs
+                question=request.question, documents=all_docs
             )
 
             # 构建附件上下文
@@ -312,7 +294,7 @@ async def chat_completion_with_attachments(
             for message_chunk in chat_service.get_chat_completion(
                 session_id=request.session_id,
                 question=enhanced_question,
-                retrieved_content=reranked_docs
+                retrieved_content=reranked_docs,
             ):
                 yield message_chunk
 
@@ -320,10 +302,7 @@ async def chat_completion_with_attachments(
             error_message = f"event: error\ndata: {str(e)}\n\n"
             yield error_message
 
-    return StreamingResponse(
-        generate_response(),
-        media_type="text/event-stream"
-    )
+    return StreamingResponse(generate_response(), media_type="text/event-stream")
 
 
 @router.post("/mcp", status_code=HTTP_200_OK)
@@ -354,8 +333,7 @@ async def mcp_chat_completion(request: MCPChatRequest):
         async with MCPChatService(model=request.model) as mcp_service:
             # 调用 chat 方法
             answer = await mcp_service.chat(
-                user_question=request.question,
-                system_prompt=request.system_prompt
+                user_question=request.question, system_prompt=request.system_prompt
             )
 
             return {
@@ -366,14 +344,9 @@ async def mcp_chat_completion(request: MCPChatRequest):
                     "session_id": request.session_id,
                     "model": request.model,
                     "tools_available": len(mcp_service.tools_list),
-                    "tools_used": "由 qwen 自主决定"
-                }
+                    "tools_used": "由 qwen 自主决定",
+                },
             }
 
     except Exception as e:
-        return {
-            "code": -1,
-            "message": f"MCP 聊天失败: {str(e)}",
-            "data": None
-        }
-
+        return {"code": -1, "message": f"MCP 聊天失败: {str(e)}", "data": None}

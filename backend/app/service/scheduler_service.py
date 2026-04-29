@@ -5,10 +5,11 @@
 定时任务调度服务
 - 每天12点自动采集行业资讯和招投标信息
 """
-import asyncio
+
 import logging
-from datetime import datetime, time
+from datetime import datetime
 from typing import Optional
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
@@ -22,8 +23,8 @@ logger = logging.getLogger(__name__)
 class SchedulerService:
     """定时任务调度服务"""
 
-    _instance: Optional['SchedulerService'] = None
-    _scheduler: Optional[AsyncIOScheduler] = None
+    _instance: Optional["SchedulerService"] = None
+    _scheduler: AsyncIOScheduler | None = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -43,7 +44,7 @@ class SchedulerService:
                 CronTrigger(hour=12, minute=0),
                 id="daily_news_collection",
                 name="每日资讯采集",
-                replace_existing=True
+                replace_existing=True,
             )
 
             self._scheduler.start()
@@ -89,17 +90,19 @@ class SchedulerService:
         jobs = []
         if self._scheduler:
             for job in self._scheduler.get_jobs():
-                jobs.append({
-                    "id": job.id,
-                    "name": job.name,
-                    "next_run_time": str(job.next_run_time) if job.next_run_time else None,
-                    "trigger": str(job.trigger)
-                })
+                jobs.append(
+                    {
+                        "id": job.id,
+                        "name": job.name,
+                        "next_run_time": str(job.next_run_time) if job.next_run_time else None,
+                        "trigger": str(job.trigger),
+                    }
+                )
         return jobs
 
 
 # 全局调度器实例
-_scheduler_service: Optional[SchedulerService] = None
+_scheduler_service: SchedulerService | None = None
 
 
 def get_scheduler_service() -> SchedulerService:

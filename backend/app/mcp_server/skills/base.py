@@ -6,54 +6,51 @@
 参考 ToolExecutor 设计，提供统一的工具注册、发现和执行接口。
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, List, Callable, Optional, Type
-from dataclasses import dataclass, field
-from pydantic import BaseModel, Field
 import asyncio
-import traceback
 import logging
 import os
+import traceback
+from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 # 配置日志只输出到文件，避免干扰 MCP STDIO 通信
-_log_file = os.path.join(os.path.dirname(__file__), 'skills.log')
+_log_file = os.path.join(os.path.dirname(__file__), "skills.log")
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(_log_file)
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(_log_file)],
 )
 
 
 @dataclass
 class ToolParameter:
     """工具参数定义（保留用于向后兼容，但不再用于MCP工具注册）"""
+
     name: str
     type: str  # string, number, integer, boolean, array, object
     description: str
     required: bool = True
     default: Any = None
-    enum: Optional[List[Any]] = None
+    enum: list[Any] | None = None
 
 
 @dataclass
 class ToolDefinition:
     """工具定义（保留用于向后兼容，但不再用于MCP工具注册）"""
+
     name: str
     description: str
-    parameters: List[ToolParameter]
+    parameters: list[ToolParameter]
 
-    def to_json_schema(self) -> Dict[str, Any]:
+    def to_json_schema(self) -> dict[str, Any]:
         """转换为 JSON Schema 格式（保留用于向后兼容）"""
         properties = {}
         required = []
 
         for param in self.parameters:
-            prop = {
-                "type": param.type,
-                "description": param.description
-            }
+            prop = {"type": param.type, "description": param.description}
             if param.enum:
                 prop["enum"] = param.enum
             if param.default is not None:
@@ -67,30 +64,22 @@ class ToolDefinition:
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required
-            }
+            "parameters": {"type": "object", "properties": properties, "required": required},
         }
 
 
 @dataclass
 class ToolResult:
     """工具执行结果"""
+
     success: bool
-    data: Optional[Any] = None
-    error: Optional[str] = None
-    meta: Optional[Dict[str, Any]] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
+    data: Any | None = None
+    error: str | None = None
+    meta: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
-        return {
-            "success": self.success,
-            "data": self.data,
-            "error": self.error,
-            "meta": self.meta
-        }
+        return {"success": self.success, "data": self.data, "error": self.error, "meta": self.meta}
 
 
 class BaseSkill(ABC):
@@ -125,8 +114,8 @@ class BaseSkill(ABC):
     def __init__(self, name: str = None, description: str = None):
         self.name = name or self.__class__.name or self.__class__.__name__
         self.description = description or self.__class__.description or ""
-        self._tools: Dict[str, Callable] = {}
-        self._tool_definitions: Dict[str, ToolDefinition] = {}
+        self._tools: dict[str, Callable] = {}
+        self._tool_definitions: dict[str, ToolDefinition] = {}
         self._logger = logging.getLogger(self.name)
         self._initialized = False
         # 保留注册逻辑用于向后兼容
@@ -143,11 +132,7 @@ class BaseSkill(ABC):
         pass
 
     def register_tool(
-        self,
-        name: str,
-        handler: Callable,
-        description: str,
-        parameters: List[ToolParameter]
+        self, name: str, handler: Callable, description: str, parameters: list[ToolParameter]
     ):
         """
         注册工具（保留用于向后兼容和内部调用）
@@ -163,13 +148,11 @@ class BaseSkill(ABC):
 
         self._tools[name] = handler
         self._tool_definitions[name] = ToolDefinition(
-            name=name,
-            description=description,
-            parameters=parameters
+            name=name, description=description, parameters=parameters
         )
         self._logger.debug(f"已注册工具: {name}")
 
-    def discover_tools(self) -> List[ToolDefinition]:
+    def discover_tools(self) -> list[ToolDefinition]:
         """
         发现所有可用的工具（保留用于向后兼容）
 
@@ -178,7 +161,7 @@ class BaseSkill(ABC):
         """
         return list(self._tool_definitions.values())
 
-    def discover_tools_json(self) -> List[Dict[str, Any]]:
+    def discover_tools_json(self) -> list[dict[str, Any]]:
         """
         发现所有可用的工具（JSON Schema 格式）（保留用于向后兼容）
 
@@ -187,7 +170,7 @@ class BaseSkill(ABC):
         """
         return [tool.to_json_schema() for tool in self.discover_tools()]
 
-    async def execute_tool(self, tool_name: str, params: Dict[str, Any]) -> ToolResult:
+    async def execute_tool(self, tool_name: str, params: dict[str, Any]) -> ToolResult:
         """
         执行指定工具（保留用于内部调用）
 
@@ -200,8 +183,7 @@ class BaseSkill(ABC):
         """
         if tool_name not in self._tools:
             return ToolResult(
-                success=False,
-                error=f"工具 '{tool_name}' 不存在于 Skill '{self.name}'"
+                success=False, error=f"工具 '{tool_name}' 不存在于 Skill '{self.name}'"
             )
 
         handler = self._tools[tool_name]
@@ -233,12 +215,9 @@ class BaseSkill(ABC):
         except Exception as e:
             self._logger.error(f"工具 '{tool_name}' 执行失败: {e}")
             self._logger.debug(traceback.format_exc())
-            return ToolResult(
-                success=False,
-                error=f"工具执行失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"工具执行失败: {str(e)}")
 
-    def _validate_params(self, params: Dict[str, Any], tool_def: ToolDefinition) -> Optional[str]:
+    def _validate_params(self, params: dict[str, Any], tool_def: ToolDefinition) -> str | None:
         """
         参数校验（保留用于内部调用）
 
@@ -266,7 +245,7 @@ class BaseSkill(ABC):
                 "integer": int,
                 "boolean": bool,
                 "array": list,
-                "object": dict
+                "object": dict,
             }
 
             expected_type = type_map.get(param_def.type)
@@ -275,7 +254,7 @@ class BaseSkill(ABC):
 
         return None
 
-    def get_tool_handler(self, tool_name: str) -> Optional[Callable]:
+    def get_tool_handler(self, tool_name: str) -> Callable | None:
         """
         获取工具处理器（保留用于向后兼容）
 
@@ -307,22 +286,15 @@ class BaseSkill(ABC):
             SKILL.md 文件内容，如果不存在返回默认描述
         """
         # 获取 skill 文件路径
-        skill_file = os.path.join(
-            os.path.dirname(__file__),
-            f"{self.name}.py"
-        )
+        skill_file = os.path.join(os.path.dirname(__file__), f"{self.name}.py")
 
         # 检查对应的 SKILL.md 文件
-        skill_md_path = os.path.join(
-            os.path.dirname(__file__),
-            f"{self.name}",
-            "SKILL.md"
-        )
+        skill_md_path = os.path.join(os.path.dirname(__file__), f"{self.name}", "SKILL.md")
 
         # 如果 SKILL.md 存在，读取内容
         if os.path.exists(skill_md_path):
             try:
-                with open(skill_md_path, 'r', encoding='utf-8') as f:
+                with open(skill_md_path, encoding="utf-8") as f:
                     return f.read()
             except Exception as e:
                 self._logger.error(f"读取 SKILL.md 失败: {e}")
@@ -334,10 +306,12 @@ class BaseSkill(ABC):
         """生成默认的 SKILL.md 内容"""
         tools_md = []
         for name, tool_def in self._tool_definitions.items():
-            params_str = ", ".join([
-                f"{p.name}: {p.type}" + (" (required)" if p.required else "")
-                for p in tool_def.parameters
-            ])
+            params_str = ", ".join(
+                [
+                    f"{p.name}: {p.type}" + (" (required)" if p.required else "")
+                    for p in tool_def.parameters
+                ]
+            )
             tools_md.append(f"### {name}")
             tools_md.append(f"- 描述: {tool_def.description}")
             tools_md.append(f"- 参数: {params_str}")
@@ -374,24 +348,26 @@ Skill = BaseSkill
 def tool(name: str = None, description: str = "", timeout: int = 30):
     """
     工具装饰器，用于注册工具
-    
+
     示例：
         @tool(name="get_quote", description="获取股票行情")
         async def get_quote(self, symbol: str):
             ...
-    
+
     Args:
         name: 工具名称（默认使用函数名）
         description: 工具描述
         timeout: 超时时间（秒）
-    
+
     Returns:
         装饰器函数
     """
+
     def decorator(func):
         # 在Skill类中使用时，通过元数据标记
         func._tool_name = name or func.__name__
         func._tool_description = description
         func._tool_timeout = timeout
         return func
+
     return decorator

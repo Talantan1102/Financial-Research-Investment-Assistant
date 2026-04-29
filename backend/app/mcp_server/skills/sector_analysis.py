@@ -6,9 +6,8 @@
 提供行业与概念板块分析功能。
 """
 
-from typing import Dict, Any, Optional, List
+from app.data.tushare_client import TushareClient, get_tushare_client
 from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
-from app.data.tushare_client import get_tushare_client, TushareClient
 
 
 class SectorAnalysisSkill(BaseSkill):
@@ -22,7 +21,7 @@ class SectorAnalysisSkill(BaseSkill):
     description = "行业与概念板块分析，支持行业对比、龙头识别、估值对比"
 
     def __init__(self):
-        self._tushare_client: Optional[TushareClient] = None
+        self._tushare_client: TushareClient | None = None
         super().__init__()
 
     def get_tushare_client(self) -> TushareClient:
@@ -39,7 +38,7 @@ class SectorAnalysisSkill(BaseSkill):
             name="get_industry_list",
             handler=self.get_industry_list,
             description="获取所有行业分类列表",
-            parameters=[]
+            parameters=[],
         )
 
         # 2. 获取行业表现
@@ -53,9 +52,9 @@ class SectorAnalysisSkill(BaseSkill):
                     type="string",
                     description="周期：1d(日), 5d(周), 20d(月)",
                     required=False,
-                    default="1d"
+                    default="1d",
                 )
-            ]
+            ],
         )
 
         # 3. 获取行业龙头股
@@ -68,23 +67,19 @@ class SectorAnalysisSkill(BaseSkill):
                     name="industry",
                     type="string",
                     description="行业名称，如'白酒'、'银行'",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="by",
                     type="string",
                     description="排序依据：market_cap(市值), revenue(营收), profit(利润)",
                     required=False,
-                    default="market_cap"
+                    default="market_cap",
                 ),
                 ToolParameter(
-                    name="limit",
-                    type="integer",
-                    description="返回数量",
-                    required=False,
-                    default=10
-                )
-            ]
+                    name="limit", type="integer", description="返回数量", required=False, default=10
+                ),
+            ],
         )
 
         # 4. 对比行业财务指标
@@ -98,16 +93,16 @@ class SectorAnalysisSkill(BaseSkill):
                     type="array",
                     description="行业列表，如['白酒', '银行', '医药']",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="metric",
                     type="string",
                     description="对比指标：roe, gross_margin, net_margin, debt_ratio",
                     required=False,
-                    default="roe"
-                )
-            ]
+                    default="roe",
+                ),
+            ],
         )
 
         # 5. 对比行业估值
@@ -121,9 +116,9 @@ class SectorAnalysisSkill(BaseSkill):
                     type="array",
                     description="行业列表",
                     required=False,
-                    default=None
+                    default=None,
                 )
-            ]
+            ],
         )
 
         # 6. 获取概念列表
@@ -131,7 +126,7 @@ class SectorAnalysisSkill(BaseSkill):
             name="get_concept_list",
             handler=self.get_concept_list,
             description="获取所有概念分类列表",
-            parameters=[]
+            parameters=[],
         )
 
         # 7. 获取概念成分股
@@ -145,16 +140,16 @@ class SectorAnalysisSkill(BaseSkill):
                     type="string",
                     description="概念代码",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="concept_name",
                     type="string",
                     description="概念名称，如'AI芯片'、'新能源汽车'",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
     async def get_industry_list(self) -> ToolResult:
@@ -183,7 +178,9 @@ class SectorAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"获取行业表现失败: {str(e)}")
 
-    async def get_industry_leaders(self, industry: str, by: str = "market_cap", limit: int = 10) -> ToolResult:
+    async def get_industry_leaders(
+        self, industry: str, by: str = "market_cap", limit: int = 10
+    ) -> ToolResult:
         """获取行业龙头股"""
         if not industry:
             return ToolResult(success=False, error="行业名称不能为空")
@@ -196,12 +193,18 @@ class SectorAnalysisSkill(BaseSkill):
 
             data = result.get("data", [])[:limit]
 
-            return ToolResult(success=True, data=data, meta={"industry": industry, "sort_by": by, "count": len(data)})
+            return ToolResult(
+                success=True,
+                data=data,
+                meta={"industry": industry, "sort_by": by, "count": len(data)},
+            )
 
         except Exception as e:
             return ToolResult(success=False, error=f"获取行业龙头股失败: {str(e)}")
 
-    async def compare_industry_metrics(self, industries: List[str] = None, metric: str = "roe") -> ToolResult:
+    async def compare_industry_metrics(
+        self, industries: list[str] = None, metric: str = "roe"
+    ) -> ToolResult:
         """对比行业财务指标"""
         try:
             result = self.get_tushare_client().compare_industry_metrics(industries, metric)
@@ -214,7 +217,7 @@ class SectorAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"对比行业指标失败: {str(e)}")
 
-    async def compare_industry_valuation(self, industries: List[str] = None) -> ToolResult:
+    async def compare_industry_valuation(self, industries: list[str] = None) -> ToolResult:
         """对比行业估值"""
         try:
             result = self.get_tushare_client().compare_industry_valuation(industries)
@@ -240,7 +243,9 @@ class SectorAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"获取概念列表失败: {str(e)}")
 
-    async def get_concept_stocks(self, concept_code: str = None, concept_name: str = None) -> ToolResult:
+    async def get_concept_stocks(
+        self, concept_code: str = None, concept_name: str = None
+    ) -> ToolResult:
         """获取概念成分股"""
         if not concept_code and not concept_name:
             return ToolResult(success=False, error="请提供概念代码或概念名称")

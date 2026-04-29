@@ -2,9 +2,11 @@
 # 未经授权，禁止转售或仿制。
 
 """Redis 客户端"""
-import os
+
 import json
-from typing import Optional, Any
+import os
+from typing import Any
+
 import redis
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
@@ -17,7 +19,7 @@ redis_pool = redis.ConnectionPool(
     port=REDIS_PORT,
     password=REDIS_PASSWORD,
     decode_responses=True,
-    max_connections=20
+    max_connections=20,
 )
 
 
@@ -32,7 +34,7 @@ class RedisCache:
     def __init__(self):
         self.client = get_redis_client()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """获取缓存"""
         try:
             value = self.client.get(key)
@@ -74,7 +76,7 @@ class RedisCache:
         key = f"session:{session_id}"
         return self.set(key, data, expire)
 
-    def get_session(self, session_id: str) -> Optional[dict]:
+    def get_session(self, session_id: str) -> dict | None:
         """获取会话数据"""
         key = f"session:{session_id}"
         return self.get(key)

@@ -8,36 +8,38 @@ DeepResearch V2.0 - 状态管理模块
 使用 TypedDict 确保类型安全，与 LangGraph 完美兼容。
 """
 
-from typing import TypedDict, List, Dict, Any, Optional, Literal
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import Any, Literal, TypedDict
 
 
 class ResearchPhase(str, Enum):
     """研究阶段状态机"""
-    INIT = "init"                    # 初始化
-    PLANNING = "planning"            # 规划阶段
-    RESEARCHING = "researching"      # 深度探索阶段
-    ANALYZING = "analyzing"          # 数据分析阶段
-    WRITING = "writing"              # 撰写阶段
-    REVIEWING = "reviewing"          # 对抗审核阶段
+
+    INIT = "init"  # 初始化
+    PLANNING = "planning"  # 规划阶段
+    RESEARCHING = "researching"  # 深度探索阶段
+    ANALYZING = "analyzing"  # 数据分析阶段
+    WRITING = "writing"  # 撰写阶段
+    REVIEWING = "reviewing"  # 对抗审核阶段
     RE_RESEARCHING = "re_researching"  # 补充搜索阶段（审核发现缺失信息后）
-    REVISING = "revising"            # 修订阶段（仅文字修改）
-    COMPLETED = "completed"          # 完成
+    REVISING = "revising"  # 修订阶段（仅文字修改）
+    COMPLETED = "completed"  # 完成
 
 
 @dataclass
 class Section:
     """报告章节"""
+
     id: str
     title: str
     description: str
     section_type: Literal["qualitative", "quantitative", "mixed"]  # 定性/定量/混合
     status: Literal["pending", "researching", "drafted", "reviewed", "final"]
     content: str = ""
-    sources: List[str] = field(default_factory=list)
-    subsections: List['Section'] = field(default_factory=list)
+    sources: list[str] = field(default_factory=list)
+    subsections: list["Section"] = field(default_factory=list)
     requires_data: bool = False
     requires_chart: bool = False
 
@@ -45,6 +47,7 @@ class Section:
 @dataclass
 class Fact:
     """结构化事实"""
+
     id: str
     content: str
     source_url: str
@@ -52,19 +55,20 @@ class Fact:
     source_type: Literal["official", "academic", "news", "report", "self_media"]  # 来源类型
     credibility_score: float  # 可信度评分 0-1
     extracted_at: datetime
-    related_sections: List[str] = field(default_factory=list)  # 关联章节ID
+    related_sections: list[str] = field(default_factory=list)  # 关联章节ID
     verified: bool = False
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class DataPoint:
     """数据点"""
+
     id: str
     name: str
     value: Any
     unit: str
-    year: Optional[int]
+    year: int | None
     source: str
     confidence: float
 
@@ -72,21 +76,25 @@ class DataPoint:
 @dataclass
 class Chart:
     """图表配置"""
+
     id: str
     title: str
     chart_type: Literal["line", "bar", "pie", "scatter", "table", "heatmap"]
-    data: Dict[str, Any]
+    data: dict[str, Any]
     code: str  # 生成图表的Python代码
-    image_path: Optional[str] = None
-    section_id: Optional[str] = None
+    image_path: str | None = None
+    section_id: str | None = None
 
 
 @dataclass
 class CriticFeedback:
     """评论家反馈"""
+
     id: str
     target_section: str
-    issue_type: Literal["missing_source", "logic_error", "bias", "hallucination", "outdated", "incomplete"]
+    issue_type: Literal[
+        "missing_source", "logic_error", "bias", "hallucination", "outdated", "incomplete"
+    ]
     severity: Literal["critical", "major", "minor"]
     description: str
     suggestion: str
@@ -96,6 +104,7 @@ class CriticFeedback:
 @dataclass
 class AgentLog:
     """Agent执行日志"""
+
     timestamp: datetime
     agent: str
     action: str
@@ -112,57 +121,55 @@ class ResearchState(TypedDict):
     这是整个研究过程的全局状态，所有Agent都在读写这个状态。
     使用 TypedDict 以获得类型提示和 LangGraph 兼容性。
     """
+
     # 基础信息
-    query: str                              # 用户原始问题
-    session_id: str                         # 会话ID
-    phase: str                              # 当前阶段
-    iteration: int                          # 当前迭代轮次
-    max_iterations: int                     # 最大迭代次数
+    query: str  # 用户原始问题
+    session_id: str  # 会话ID
+    phase: str  # 当前阶段
+    iteration: int  # 当前迭代轮次
+    max_iterations: int  # 最大迭代次数
 
     # 搜索模式配置
-    search_web: bool                        # 是否启用网络搜索
-    search_local: bool                      # 是否启用本地知识库搜索
+    search_web: bool  # 是否启用网络搜索
+    search_local: bool  # 是否启用本地知识库搜索
 
     # 规划输出
-    outline: List[Dict[str, Any]]           # 动态大纲 (Section序列化)
-    mind_map: Dict[str, Any]                # 知识图谱/思维导图
-    key_entities: List[str]                 # 关键实体
-    research_questions: List[str]           # 待研究的子问题
-    hypotheses: List[Dict[str, Any]]        # 研究假设（假设驱动研究）
-    knowledge_graph: Dict[str, Any]         # 知识图谱 {nodes: [], edges: []}
+    outline: list[dict[str, Any]]  # 动态大纲 (Section序列化)
+    mind_map: dict[str, Any]  # 知识图谱/思维导图
+    key_entities: list[str]  # 关键实体
+    research_questions: list[str]  # 待研究的子问题
+    hypotheses: list[dict[str, Any]]  # 研究假设（假设驱动研究）
+    knowledge_graph: dict[str, Any]  # 知识图谱 {nodes: [], edges: []}
 
     # 知识库
-    facts: List[Dict[str, Any]]             # 结构化事实库
-    data_points: List[Dict[str, Any]]       # 数据点
-    raw_sources: List[Dict[str, Any]]       # 原始来源（网页内容）
+    facts: list[dict[str, Any]]  # 结构化事实库
+    data_points: list[dict[str, Any]]  # 数据点
+    raw_sources: list[dict[str, Any]]  # 原始来源（网页内容）
 
     # 分析输出
-    charts: List[Dict[str, Any]]            # 生成的图表
-    code_executions: List[Dict[str, Any]]   # 代码执行记录
-    insights: List[str]                     # 数据洞察
+    charts: list[dict[str, Any]]  # 生成的图表
+    code_executions: list[dict[str, Any]]  # 代码执行记录
+    insights: list[str]  # 数据洞察
 
     # 写作输出
-    draft_sections: Dict[str, str]          # 章节草稿 {section_id: content}
-    final_report: str                       # 最终报告
-    references: List[Dict[str, Any]]        # 参考文献
+    draft_sections: dict[str, str]  # 章节草稿 {section_id: content}
+    final_report: str  # 最终报告
+    references: list[dict[str, Any]]  # 参考文献
 
     # 审核反馈
-    critic_feedback: List[Dict[str, Any]]   # 评论家反馈
-    unresolved_issues: int                  # 未解决问题数
-    quality_score: float                    # 质量评分
-    pending_search_queries: List[str]       # 待执行的补充搜索查询（审核后需要补充的）
+    critic_feedback: list[dict[str, Any]]  # 评论家反馈
+    unresolved_issues: int  # 未解决问题数
+    quality_score: float  # 质量评分
+    pending_search_queries: list[str]  # 待执行的补充搜索查询（审核后需要补充的）
 
     # 元数据
-    logs: List[Dict[str, Any]]              # 执行日志
-    errors: List[str]                       # 错误记录
-    messages: List[Dict[str, Any]]          # Agent间消息（用于流式输出）
+    logs: list[dict[str, Any]]  # 执行日志
+    errors: list[str]  # 错误记录
+    messages: list[dict[str, Any]]  # Agent间消息（用于流式输出）
 
 
 def create_initial_state(
-    query: str,
-    session_id: str,
-    search_web: bool = True,
-    search_local: bool = False
+    query: str, session_id: str, search_web: bool = True, search_local: bool = False
 ) -> ResearchState:
     """创建初始状态
 
@@ -201,11 +208,11 @@ def create_initial_state(
         pending_search_queries=[],
         logs=[],
         errors=[],
-        messages=[]
+        messages=[],
     )
 
 
-def section_to_dict(section: Section) -> Dict[str, Any]:
+def section_to_dict(section: Section) -> dict[str, Any]:
     """Section 序列化"""
     return {
         "id": section.id,
@@ -217,11 +224,11 @@ def section_to_dict(section: Section) -> Dict[str, Any]:
         "sources": section.sources,
         "subsections": [section_to_dict(s) for s in section.subsections],
         "requires_data": section.requires_data,
-        "requires_chart": section.requires_chart
+        "requires_chart": section.requires_chart,
     }
 
 
-def fact_to_dict(fact: Fact) -> Dict[str, Any]:
+def fact_to_dict(fact: Fact) -> dict[str, Any]:
     """Fact 序列化"""
     return {
         "id": fact.id,
@@ -233,5 +240,5 @@ def fact_to_dict(fact: Fact) -> Dict[str, Any]:
         "extracted_at": fact.extracted_at.isoformat(),
         "related_sections": fact.related_sections,
         "verified": fact.verified,
-        "metadata": fact.metadata
+        "metadata": fact.metadata,
     }

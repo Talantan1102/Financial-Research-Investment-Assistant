@@ -12,10 +12,10 @@
 6. revise - LeadWriter（修订改进）
 """
 
-from typing import Dict, Any, Optional, List
-from app.mcp_server.skills.base import BaseSkill, ToolParameter
 import uuid
-import json
+from typing import Any
+
+from app.mcp_server.skills.base import BaseSkill, ToolParameter
 
 
 class DeepResearchSkillSplit(BaseSkill):
@@ -43,6 +43,7 @@ class DeepResearchSkillSplit(BaseSkill):
         """获取 DeepResearch 服务实例"""
         if self._service is None:
             from app.service.deep_research_v2 import DeepResearchV2Service
+
             self._service = DeepResearchV2Service()
             self._logger.info("DeepResearch V2 Service initialized")
         return self._service
@@ -60,15 +61,15 @@ class DeepResearchSkillSplit(BaseSkill):
                     name="query",
                     type="string",
                     description="研究问题，例如：'小米汽车2024年市场竞争力分析'",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="session_id",
                     type="string",
                     description="会话ID（可选，不提供则自动生成新会话）",
-                    required=False
-                )
-            ]
+                    required=False,
+                ),
+            ],
         )
 
         # 2. 搜索信息 - Scout Agent
@@ -81,29 +82,29 @@ class DeepResearchSkillSplit(BaseSkill):
                     name="session_id",
                     type="string",
                     description="会话ID（必需，由 plan 返回）",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="section_id",
                     type="string",
                     description="章节ID，例如：'section_1'。不提供则搜索所有章节",
-                    required=False
+                    required=False,
                 ),
                 ToolParameter(
                     name="search_web",
                     type="boolean",
                     description="是否启用网络搜索（默认True）",
                     required=False,
-                    default=True
+                    default=True,
                 ),
                 ToolParameter(
                     name="search_local",
                     type="boolean",
                     description="是否启用本地知识库搜索（默认False）",
                     required=False,
-                    default=False
-                )
-            ]
+                    default=False,
+                ),
+            ],
         )
 
         # 3. 分析数据 - Wizard Agent
@@ -113,18 +114,15 @@ class DeepResearchSkillSplit(BaseSkill):
             description="【步骤3】分析数据。Wizard Agent 对搜索结果进行深度分析，生成洞察和可视化。返回：insights[], charts[], statistics{}",
             parameters=[
                 ToolParameter(
-                    name="session_id",
-                    type="string",
-                    description="会话ID",
-                    required=True
+                    name="session_id", type="string", description="会话ID", required=True
                 ),
                 ToolParameter(
                     name="section_id",
                     type="string",
                     description="章节ID。不提供则分析所有章节",
-                    required=False
-                )
-            ]
+                    required=False,
+                ),
+            ],
         )
 
         # 4. 撰写报告 - Writer Agent
@@ -134,18 +132,15 @@ class DeepResearchSkillSplit(BaseSkill):
             description="【步骤4】撰写报告。Writer Agent 基于研究数据撰写完整报告（含摘要、正文、结论、参考文献）。返回：report, word_count",
             parameters=[
                 ToolParameter(
-                    name="session_id",
-                    type="string",
-                    description="会话ID",
-                    required=True
+                    name="session_id", type="string", description="会话ID", required=True
                 ),
                 ToolParameter(
                     name="section_id",
                     type="string",
                     description="章节ID。不提供则撰写完整报告",
-                    required=False
-                )
-            ]
+                    required=False,
+                ),
+            ],
         )
 
         # 5. 质量评审 - Critic Agent
@@ -154,13 +149,8 @@ class DeepResearchSkillSplit(BaseSkill):
             handler=self.review,
             description="【步骤5】质量评审。Critic Agent 评审报告质量，指出问题并给出改进建议。返回：score, approved, strengths[], weaknesses[], suggestions[]",
             parameters=[
-                ToolParameter(
-                    name="session_id",
-                    type="string",
-                    description="会话ID",
-                    required=True
-                )
-            ]
+                ToolParameter(name="session_id", type="string", description="会话ID", required=True)
+            ],
         )
 
         # 6. 修订改进 - Writer Agent (基于 Critic 反馈)
@@ -169,13 +159,8 @@ class DeepResearchSkillSplit(BaseSkill):
             handler=self.revise,
             description="【步骤6】修订改进。Writer Agent 根据 Critic 的反馈修订报告。返回：revised_report, improvements[]",
             parameters=[
-                ToolParameter(
-                    name="session_id",
-                    type="string",
-                    description="会话ID",
-                    required=True
-                )
-            ]
+                ToolParameter(name="session_id", type="string", description="会话ID", required=True)
+            ],
         )
 
         # 7. 获取状态（辅助工具）
@@ -184,29 +169,20 @@ class DeepResearchSkillSplit(BaseSkill):
             handler=self.get_state,
             description="【辅助】获取研究状态。返回当前进度、已完成步骤、大纲、中间结果等。用于查看研究进展。",
             parameters=[
-                ToolParameter(
-                    name="session_id",
-                    type="string",
-                    description="会话ID",
-                    required=True
-                )
-            ]
+                ToolParameter(name="session_id", type="string", description="会话ID", required=True)
+            ],
         )
 
     # ========== 工具实现 ==========
 
-    async def plan(
-        self,
-        query: str,
-        session_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def plan(self, query: str, session_id: str | None = None) -> dict[str, Any]:
         """
         步骤1：规划大纲
         调用 Architect Agent
         """
         try:
-            from app.service.deep_research_v2.state import create_initial_state
             from app.service.checkpoint_service import get_checkpoint_service
+            from app.service.deep_research_v2.state import create_initial_state
 
             service = self.get_service()
 
@@ -240,23 +216,24 @@ class DeepResearchSkillSplit(BaseSkill):
                     "sections": sections,
                     "hypotheses": hypotheses,
                     "next_step": "调用 search 搜索信息",
-                    "usage": f"deep_research.search(session_id='{session_id}', search_web=True)"
-                }
+                    "usage": f"deep_research.search(session_id='{session_id}', search_web=True)",
+                },
             }
 
         except Exception as e:
             self._logger.error(f"Plan error: {e}")
             import traceback
+
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
     async def search(
         self,
         session_id: str,
-        section_id: Optional[str] = None,
+        section_id: str | None = None,
         search_web: bool = True,
-        search_local: bool = False
-    ) -> Dict[str, Any]:
+        search_local: bool = False,
+    ) -> dict[str, Any]:
         """
         步骤2：搜索信息
         调用 Scout Agent
@@ -317,21 +294,18 @@ class DeepResearchSkillSplit(BaseSkill):
                     "facts": facts[:20],  # 最多返回20条
                     "sources": sources[:20],
                     "next_step": "调用 analyze 分析数据",
-                    "usage": f"deep_research.analyze(session_id='{session_id}')"
-                }
+                    "usage": f"deep_research.analyze(session_id='{session_id}')",
+                },
             }
 
         except Exception as e:
             self._logger.error(f"Search error: {e}")
             import traceback
+
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
-    async def analyze(
-        self,
-        session_id: str,
-        section_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def analyze(self, session_id: str, section_id: str | None = None) -> dict[str, Any]:
         """
         步骤3：分析数据
         调用 Wizard Agent
@@ -383,21 +357,18 @@ class DeepResearchSkillSplit(BaseSkill):
                     "insights": insights,
                     "analysis": analysis,
                     "next_step": "调用 write 撰写报告",
-                    "usage": f"deep_research.write(session_id='{session_id}')"
-                }
+                    "usage": f"deep_research.write(session_id='{session_id}')",
+                },
             }
 
         except Exception as e:
             self._logger.error(f"Analyze error: {e}")
             import traceback
+
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
-    async def write(
-        self,
-        session_id: str,
-        section_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def write(self, session_id: str, section_id: str | None = None) -> dict[str, Any]:
         """
         步骤4：撰写报告
         调用 Writer Agent
@@ -443,20 +414,18 @@ class DeepResearchSkillSplit(BaseSkill):
                     "content": content,
                     "word_count": len(content),
                     "next_step": "调用 review 评审质量",
-                    "usage": f"deep_research.review(session_id='{session_id}')"
-                }
+                    "usage": f"deep_research.review(session_id='{session_id}')",
+                },
             }
 
         except Exception as e:
             self._logger.error(f"Write error: {e}")
             import traceback
+
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
-    async def review(
-        self,
-        session_id: str
-    ) -> Dict[str, Any]:
+    async def review(self, session_id: str) -> dict[str, Any]:
         """
         步骤5：质量评审
         调用 Critic Agent
@@ -495,20 +464,18 @@ class DeepResearchSkillSplit(BaseSkill):
                     "weaknesses": review.get("weaknesses", []),
                     "suggestions": review.get("suggestions", []),
                     "next_step": "如需修订，调用 revise；否则研究完成",
-                    "usage": f"deep_research.revise(session_id='{session_id}') if not approved else '完成'"
-                }
+                    "usage": f"deep_research.revise(session_id='{session_id}') if not approved else '完成'",
+                },
             }
 
         except Exception as e:
             self._logger.error(f"Review error: {e}")
             import traceback
+
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
-    async def revise(
-        self,
-        session_id: str
-    ) -> Dict[str, Any]:
+    async def revise(self, session_id: str) -> dict[str, Any]:
         """
         步骤6：修订改进
         调用 Writer Agent（基于 Critic 反馈）
@@ -543,20 +510,18 @@ class DeepResearchSkillSplit(BaseSkill):
                     "revised_report": revised_report,
                     "word_count": len(revised_report),
                     "improvements": result_state.get("improvements", []),
-                    "next_step": "可再次调用 review 确认质量"
-                }
+                    "next_step": "可再次调用 review 确认质量",
+                },
             }
 
         except Exception as e:
             self._logger.error(f"Revise error: {e}")
             import traceback
+
             traceback.print_exc()
             return {"success": False, "error": str(e)}
 
-    async def get_state(
-        self,
-        session_id: str
-    ) -> Dict[str, Any]:
+    async def get_state(self, session_id: str) -> dict[str, Any]:
         """
         获取研究状态
         """
@@ -593,14 +558,11 @@ class DeepResearchSkillSplit(BaseSkill):
                     "current_phase": state.get("phase", ""),
                     "completed_steps": completed_steps,
                     "progress": f"{len(completed_steps)}/5",
-                    "outline": {
-                        "sections_count": len(sections),
-                        "sections": sections
-                    },
+                    "outline": {"sections_count": len(sections), "sections": sections},
                     "has_report": bool(state.get("final_report")),
                     "has_review": bool(state.get("review")),
-                    "review_approved": state.get("review", {}).get("approved", False)
-                }
+                    "review_approved": state.get("review", {}).get("approved", False),
+                },
             }
 
         except Exception as e:

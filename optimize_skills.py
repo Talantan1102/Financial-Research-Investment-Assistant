@@ -4,12 +4,10 @@
 基于 Anthropic MCP 最佳实践
 """
 
-import os
-import re
 from pathlib import Path
 
 # 优化后的 MarketData SKILL.md
-MARKET_DATA_SKILL = '''---
+MARKET_DATA_SKILL = """---
 name: market_data
 description: |
   股票市场行情数据查询 Skill，提供A股实时行情、历史K线、资金流向等数据查询能力。
@@ -410,37 +408,41 @@ All tools return standardized response:
 **Skill Version**: v1.0  
 **Last Updated**: 2026-03-18  
 **Compatible with**: AgentFlow v1.0, MCP Protocol
-'''
+"""
+
 
 # 保存优化后的 MarketData SKILL.md
 def save_optimized_skill(skill_name, content):
-    skill_dir = Path(f"~/.openclaw/workspace-dev/external/financial-research-assistant/backend/claude_skills/{skill_name}").expanduser()
+    skill_dir = Path(
+        f"~/.openclaw/workspace-dev/external/financial-research-assistant/backend/claude_skills/{skill_name}"
+    ).expanduser()
     skill_dir.mkdir(parents=True, exist_ok=True)
-    
+
     skill_file = skill_dir / "SKILL.md"
-    
+
     # 备份原文件
     if skill_file.exists():
         backup_file = skill_dir / "SKILL.md.backup"
         skill_file.rename(backup_file)
         print(f"✅ Backed up original {skill_name}/SKILL.md")
-    
+
     # 写入新文件
-    skill_file.write_text(content, encoding='utf-8')
+    skill_file.write_text(content, encoding="utf-8")
     print(f"✅ Saved optimized {skill_name}/SKILL.md")
 
+
 if __name__ == "__main__":
-    print("="*80)
+    print("=" * 80)
     print("开始优化 7 个 Skill 的 SKILL.md")
-    print("="*80)
-    
+    print("=" * 80)
+
     # 先优化 MarketData 作为示例
     print("\n1. 优化 MarketData Skill...")
     save_optimized_skill("market_data", MARKET_DATA_SKILL)
-    
-    print("\n" + "="*80)
+
+    print("\n" + "=" * 80)
     print("MarketData Skill 优化完成！")
-    print("="*80)
+    print("=" * 80)
     print("\n优化要点：")
     print("1. 添加了 'Use this skill when' 部分，帮助LLM判断何时使用")
     print("2. 参数表格包含 Type、Required、Description，更清晰")

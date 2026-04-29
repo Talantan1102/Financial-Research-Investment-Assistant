@@ -6,9 +6,10 @@
 基于 stock_service.py 和 tushare_client.py 改造，提供股票行情查询能力。
 """
 
-from typing import Dict, Any, Optional
+from typing import Any
+
+from app.data.tushare_client import TushareClient, get_tushare_client
 from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
-from app.data.tushare_client import get_tushare_client, TushareClient
 
 
 class MarketDataSkill(BaseSkill):
@@ -23,7 +24,7 @@ class MarketDataSkill(BaseSkill):
 
     def __init__(self):
         # 延迟初始化：不立即获取 TushareClient 实例
-        self._tushare_client: Optional[TushareClient] = None
+        self._tushare_client: TushareClient | None = None
         super().__init__()
 
     def get_tushare_client(self) -> TushareClient:
@@ -36,10 +37,10 @@ class MarketDataSkill(BaseSkill):
         if self._tushare_client is None:
             self._tushare_client = get_tushare_client()
         return self._tushare_client
-    
+
     def _register_tools(self):
         """注册 MarketData 相关工具"""
-        
+
         # 1. 获取股票行情
         self.register_tool(
             name="get_quote",
@@ -50,11 +51,11 @@ class MarketDataSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 )
-            ]
+            ],
         )
-        
+
         # 2. 搜索股票
         self.register_tool(
             name="search_stock",
@@ -65,9 +66,9 @@ class MarketDataSkill(BaseSkill):
                     name="keyword",
                     type="string",
                     description="搜索关键词，可以是股票代码（如'600519'）或股票名称关键词（如'茅台'、'贵州'）",
-                    required=True
+                    required=True,
                 )
-            ]
+            ],
         )
 
         # 3. 获取历史K线数据
@@ -80,23 +81,23 @@ class MarketDataSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="start_date",
                     type="string",
                     description="开始日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="end_date",
                     type="string",
                     description="结束日期，格式YYYYMMDD",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 4. 获取股票基础信息
@@ -109,9 +110,9 @@ class MarketDataSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 )
-            ]
+            ],
         )
 
         # 5. 获取龙虎榜数据
@@ -125,9 +126,9 @@ class MarketDataSkill(BaseSkill):
                     type="string",
                     description="交易日期，格式YYYYMMDD，默认最近交易日",
                     required=False,
-                    default=None
+                    default=None,
                 )
-            ]
+            ],
         )
 
         # 6. 获取资金流向
@@ -140,30 +141,30 @@ class MarketDataSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="trade_date",
                     type="string",
                     description="交易日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="start_date",
                     type="string",
                     description="开始日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="end_date",
                     type="string",
                     description="结束日期，格式YYYYMMDD",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 7. 获取涨跌停统计
@@ -177,16 +178,16 @@ class MarketDataSkill(BaseSkill):
                     type="string",
                     description="交易日期，格式YYYYMMDD，默认最近交易日",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="limit_type",
                     type="string",
                     description="涨跌停类型：U(涨停)、D(跌停)，默认全部",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 8. 获取公司详细信息
@@ -199,9 +200,9 @@ class MarketDataSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 )
-            ]
+            ],
         )
 
         # ==================== Tier 2 新增 Tools ====================
@@ -217,16 +218,16 @@ class MarketDataSkill(BaseSkill):
                     type="string",
                     description="TS股票代码，如 600519.SH，不填写则返回全市场数据",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="trade_date",
                     type="string",
                     description="交易日期，格式YYYYMMDD，默认最近交易日",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 10. 获取北向资金
@@ -240,16 +241,16 @@ class MarketDataSkill(BaseSkill):
                     type="string",
                     description="开始日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="end_date",
                     type="string",
                     description="结束日期，格式YYYYMMDD",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 11. 获取融资融券
@@ -263,35 +264,35 @@ class MarketDataSkill(BaseSkill):
                     type="string",
                     description="TS股票代码，如 600519.SH，不填写则返回全市场数据",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="start_date",
                     type="string",
                     description="开始日期，格式YYYYMMDD",
                     required=False,
-                    default=None
+                    default=None,
                 ),
                 ToolParameter(
                     name="end_date",
                     type="string",
                     description="结束日期，格式YYYYMMDD",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
-    
+
     async def get_quote(self, ts_code: str) -> ToolResult:
         """
         获取股票实时行情
-        
+
         Args:
             ts_code: TS股票代码，如 600519.SH
-        
+
         Returns:
             ToolResult 包含股票行情数据
-            
+
         示例返回数据：
             {
                 "gid": "sh600519",
@@ -310,32 +311,20 @@ class MarketDataSkill(BaseSkill):
             }
         """
         if not ts_code:
-            return ToolResult(
-                success=False,
-                error="股票代码不能为空"
-            )
-        
+            return ToolResult(success=False, error="股票代码不能为空")
+
         try:
             # 使用 Tushare 客户端获取行情
             result = self.get_tushare_client().get_quote(ts_code)
-            
+
             if result.get("success"):
-                return ToolResult(
-                    success=True,
-                    data=result.get("data")
-                )
+                return ToolResult(success=True, data=result.get("data"))
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取股票数据失败")
-                )
-                
+                return ToolResult(success=False, error=result.get("error", "获取股票数据失败"))
+
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取股票行情失败: {str(e)}"
-            )
-    
+            return ToolResult(success=False, error=f"获取股票行情失败: {str(e)}")
+
     async def search_stock(self, keyword: str) -> ToolResult:
         """
         搜索股票 - 支持代码和名称模糊搜索
@@ -347,10 +336,7 @@ class MarketDataSkill(BaseSkill):
             ToolResult 包含搜索结果
         """
         if not keyword:
-            return ToolResult(
-                success=False,
-                error="搜索关键词不能为空"
-            )
+            return ToolResult(success=False, error="搜索关键词不能为空")
 
         try:
             client = self.get_tushare_client()
@@ -360,11 +346,7 @@ class MarketDataSkill(BaseSkill):
                 result = client.get_quote(keyword)
                 if result.get("success"):
                     return ToolResult(
-                        success=True,
-                        data={
-                            "results": [result.get("data")],
-                            "count": 1
-                        }
+                        success=True, data={"results": [result.get("data")], "count": 1}
                     )
 
             # 纯数字代码，尝试上证和深证
@@ -373,31 +355,24 @@ class MarketDataSkill(BaseSkill):
                     result = client.get_quote(f"{prefix}{keyword}")
                     if result.get("success"):
                         return ToolResult(
-                            success=True,
-                            data={
-                                "results": [result.get("data")],
-                                "count": 1
-                            }
+                            success=True, data={"results": [result.get("data")], "count": 1}
                         )
 
             # ========== 2. 按名称模糊搜索 ==========
             api = client.get_api()
             if not api:
-                return ToolResult(
-                    success=False,
-                    error="Tushare API 未初始化，无法进行名称搜索"
-                )
+                return ToolResult(success=False, error="Tushare API 未初始化，无法进行名称搜索")
 
             # 获取所有股票基本信息（使用缓存）
             cache_result = client._get_from_cache("__all_stocks_basic__")
             if cache_result is None:
                 df = api.stock_basic(
-                    exchange='',
-                    list_status='L',
-                    fields='ts_code,symbol,name,area,industry,list_date'
+                    exchange="",
+                    list_status="L",
+                    fields="ts_code,symbol,name,area,industry,list_date",
                 )
                 if df is not None and not df.empty:
-                    all_stocks = df.to_dict('records')
+                    all_stocks = df.to_dict("records")
                     client._set_cache("__all_stocks_basic__", all_stocks)
                 else:
                     all_stocks = []
@@ -406,295 +381,202 @@ class MarketDataSkill(BaseSkill):
                 all_stocks = cache_result[0] if isinstance(cache_result, tuple) else cache_result
 
             if not all_stocks:
-                return ToolResult(
-                    success=False,
-                    error="无法获取股票列表进行模糊搜索"
-                )
+                return ToolResult(success=False, error="无法获取股票列表进行模糊搜索")
 
             # 模糊匹配名称
             keyword_lower = keyword.lower()
             matches = []
 
             for stock in all_stocks:
-                name = stock.get('name', '')
-                symbol = stock.get('symbol', '')
-                ts_code = stock.get('ts_code', '')
+                name = stock.get("name", "")
+                symbol = stock.get("symbol", "")
+                ts_code = stock.get("ts_code", "")
 
                 # 匹配规则：
                 # 1. 名称包含关键词（如"茅台"匹配"贵州茅台"）
                 # 2. 名称以关键词开头
                 # 3. 完全匹配
-                if (keyword_lower in name.lower() or
-                    name.lower().startswith(keyword_lower) or
-                    keyword_lower == name.lower()):
-                    matches.append({
-                        "ts_code": ts_code,
-                        "symbol": symbol,
-                        "name": name,
-                        "area": stock.get('area', ''),
-                        "industry": stock.get('industry', ''),
-                        "list_date": stock.get('list_date', '')
-                    })
+                if (
+                    keyword_lower in name.lower()
+                    or name.lower().startswith(keyword_lower)
+                    or keyword_lower == name.lower()
+                ):
+                    matches.append(
+                        {
+                            "ts_code": ts_code,
+                            "symbol": symbol,
+                            "name": name,
+                            "area": stock.get("area", ""),
+                            "industry": stock.get("industry", ""),
+                            "list_date": stock.get("list_date", ""),
+                        }
+                    )
 
             if matches:
                 return ToolResult(
                     success=True,
-                    data={
-                        "results": matches,
-                        "count": len(matches),
-                        "keyword": keyword
-                    }
+                    data={"results": matches, "count": len(matches), "keyword": keyword},
                 )
 
-            return ToolResult(
-                success=False,
-                error=f"未找到匹配的股票: {keyword}"
-            )
+            return ToolResult(success=False, error=f"未找到匹配的股票: {keyword}")
 
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"搜索股票失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"搜索股票失败: {str(e)}")
 
-    async def get_history(self, ts_code: str, 
-                          start_date: str = None, end_date: str = None) -> ToolResult:
+    async def get_history(
+        self, ts_code: str, start_date: str = None, end_date: str = None
+    ) -> ToolResult:
         """
         获取股票历史K线数据
-        
+
         Args:
             ts_code: TS股票代码，如 600519.SH
             start_date: 开始日期
             end_date: 结束日期
-        
+
         Returns:
             ToolResult 包含K线数据
         """
         if not ts_code:
-            return ToolResult(
-                success=False,
-                error="股票代码不能为空"
-            )
-        
+            return ToolResult(success=False, error="股票代码不能为空")
+
         try:
             result = self.get_tushare_client().get_history(
-                symbol=ts_code,
-                start_date=start_date,
-                end_date=end_date
+                symbol=ts_code, start_date=start_date, end_date=end_date
             )
-            
+
             if result.get("success"):
                 # 将数据和meta合并返回
-                response_data = {
-                    "records": result.get("data"),
-                    "meta": result.get("meta")
-                }
-                return ToolResult(
-                    success=True,
-                    data=response_data
-                )
+                response_data = {"records": result.get("data"), "meta": result.get("meta")}
+                return ToolResult(success=True, data=response_data)
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取历史数据失败")
-                )
+                return ToolResult(success=False, error=result.get("error", "获取历史数据失败"))
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取历史数据失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"获取历史数据失败: {str(e)}")
 
     async def get_stock_basic_info(self, ts_code: str) -> ToolResult:
         """
         获取股票基础信息
-        
+
         Args:
             ts_code: TS股票代码，如 600519.SH
-        
+
         Returns:
             ToolResult 包含股票基础信息
         """
         if not ts_code:
-            return ToolResult(
-                success=False,
-                error="股票代码不能为空"
-            )
-        
+            return ToolResult(success=False, error="股票代码不能为空")
+
         try:
             result = self.get_tushare_client().get_stock_basic(ts_code)
-            
+
             if result.get("success"):
-                return ToolResult(
-                    success=True,
-                    data=result.get("data")
-                )
+                return ToolResult(success=True, data=result.get("data"))
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取股票基础信息失败")
-                )
+                return ToolResult(success=False, error=result.get("error", "获取股票基础信息失败"))
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取股票基础信息失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"获取股票基础信息失败: {str(e)}")
 
     async def get_top_list(self, trade_date: str = None) -> ToolResult:
         """
         获取龙虎榜数据
-        
+
         Args:
             trade_date: 交易日期
-        
+
         Returns:
             ToolResult 包含龙虎榜数据
         """
         try:
-            result = self.get_tushare_client().get_top_list(
-                trade_date=trade_date
-            )
-            
-            if result.get("success"):
-                response_data = {
-                    "records": result.get("data"),
-                    "meta": result.get("meta")
-                }
-                return ToolResult(
-                    success=True,
-                    data=response_data
-                )
-            else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取龙虎榜数据失败")
-                )
-        except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取龙虎榜数据失败: {str(e)}"
-            )
+            result = self.get_tushare_client().get_top_list(trade_date=trade_date)
 
-    async def get_money_flow(self, ts_code: str, trade_date: str = None,
-                             start_date: str = None, end_date: str = None) -> ToolResult:
+            if result.get("success"):
+                response_data = {"records": result.get("data"), "meta": result.get("meta")}
+                return ToolResult(success=True, data=response_data)
+            else:
+                return ToolResult(success=False, error=result.get("error", "获取龙虎榜数据失败"))
+        except Exception as e:
+            return ToolResult(success=False, error=f"获取龙虎榜数据失败: {str(e)}")
+
+    async def get_money_flow(
+        self, ts_code: str, trade_date: str = None, start_date: str = None, end_date: str = None
+    ) -> ToolResult:
         """
         获取个股资金流向
-        
+
         Args:
             ts_code: TS股票代码，如 600519.SH
             trade_date: 交易日期
             start_date: 开始日期
             end_date: 结束日期
-        
+
         Returns:
             ToolResult 包含资金流向数据
         """
         if not ts_code:
-            return ToolResult(
-                success=False,
-                error="股票代码不能为空"
-            )
-        
+            return ToolResult(success=False, error="股票代码不能为空")
+
         try:
             result = self.get_tushare_client().get_money_flow(
-                symbol=ts_code,
-                trade_date=trade_date,
-                start_date=start_date,
-                end_date=end_date
+                symbol=ts_code, trade_date=trade_date, start_date=start_date, end_date=end_date
             )
-            
+
             if result.get("success"):
-                response_data = {
-                    "records": result.get("data"),
-                    "meta": result.get("meta")
-                }
-                return ToolResult(
-                    success=True,
-                    data=response_data
-                )
+                response_data = {"records": result.get("data"), "meta": result.get("meta")}
+                return ToolResult(success=True, data=response_data)
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取资金流向数据失败")
-                )
+                return ToolResult(success=False, error=result.get("error", "获取资金流向数据失败"))
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取资金流向数据失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"获取资金流向数据失败: {str(e)}")
 
     async def get_limit_list(self, trade_date: str = None, limit_type: str = None) -> ToolResult:
         """
         获取涨跌停统计
-        
+
         Args:
             trade_date: 交易日期
             limit_type: 涨跌停类型
-        
+
         Returns:
             ToolResult 包含涨跌停统计
         """
         try:
             result = self.get_tushare_client().get_limit_list(
-                trade_date=trade_date,
-                limit_type=limit_type
+                trade_date=trade_date, limit_type=limit_type
             )
-            
+
             if result.get("success"):
-                response_data = {
-                    "records": result.get("data"),
-                    "meta": result.get("meta")
-                }
-                return ToolResult(
-                    success=True,
-                    data=response_data
-                )
+                response_data = {"records": result.get("data"), "meta": result.get("meta")}
+                return ToolResult(success=True, data=response_data)
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取涨跌停数据失败")
-                )
+                return ToolResult(success=False, error=result.get("error", "获取涨跌停数据失败"))
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取涨跌停数据失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"获取涨跌停数据失败: {str(e)}")
 
     async def get_company_info(self, ts_code: str) -> ToolResult:
         """
         获取公司详细信息
-        
+
         Args:
             ts_code: TS股票代码，如 600519.SH
-        
+
         Returns:
             ToolResult 包含公司详细信息
         """
         if not ts_code:
-            return ToolResult(
-                success=False,
-                error="股票代码不能为空"
-            )
-        
+            return ToolResult(success=False, error="股票代码不能为空")
+
         try:
             result = self.get_tushare_client().get_stock_company_info(ts_code)
-            
+
             if result.get("success"):
-                return ToolResult(
-                    success=True,
-                    data=result.get("data")
-                )
+                return ToolResult(success=True, data=result.get("data"))
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取公司信息失败")
-                )
+                return ToolResult(success=False, error=result.get("error", "获取公司信息失败"))
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取公司信息失败: {str(e)}"
-            )
-    
-    def get_cache_info(self) -> Dict[str, Any]:
+            return ToolResult(success=False, error=f"获取公司信息失败: {str(e)}")
+
+    def get_cache_info(self) -> dict[str, Any]:
         """获取缓存信息"""
         return self.get_tushare_client().get_cache_info()
 
@@ -719,21 +601,11 @@ class MarketDataSkill(BaseSkill):
             result = self.get_tushare_client().get_daily_basic(ts_code, trade_date)
 
             if result.get("success"):
-                return ToolResult(
-                    success=True,
-                    data=result.get("data"),
-                    meta=result.get("meta")
-                )
+                return ToolResult(success=True, data=result.get("data"), meta=result.get("meta"))
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取每日指标数据失败")
-                )
+                return ToolResult(success=False, error=result.get("error", "获取每日指标数据失败"))
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取每日指标数据失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"获取每日指标数据失败: {str(e)}")
 
     async def get_north_money(self, start_date: str = None, end_date: str = None) -> ToolResult:
         """
@@ -750,23 +622,15 @@ class MarketDataSkill(BaseSkill):
             result = self.get_tushare_client().get_north_money(start_date, end_date)
 
             if result.get("success"):
-                return ToolResult(
-                    success=True,
-                    data=result.get("data"),
-                    meta=result.get("meta")
-                )
+                return ToolResult(success=True, data=result.get("data"), meta=result.get("meta"))
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取北向资金数据失败")
-                )
+                return ToolResult(success=False, error=result.get("error", "获取北向资金数据失败"))
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取北向资金数据失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"获取北向资金数据失败: {str(e)}")
 
-    async def get_margin(self, ts_code: str = None, start_date: str = None, end_date: str = None) -> ToolResult:
+    async def get_margin(
+        self, ts_code: str = None, start_date: str = None, end_date: str = None
+    ) -> ToolResult:
         """
         获取融资融券数据
 
@@ -782,18 +646,8 @@ class MarketDataSkill(BaseSkill):
             result = self.get_tushare_client().get_margin(ts_code, start_date, end_date)
 
             if result.get("success"):
-                return ToolResult(
-                    success=True,
-                    data=result.get("data"),
-                    meta=result.get("meta")
-                )
+                return ToolResult(success=True, data=result.get("data"), meta=result.get("meta"))
             else:
-                return ToolResult(
-                    success=False,
-                    error=result.get("error", "获取融资融券数据失败")
-                )
+                return ToolResult(success=False, error=result.get("error", "获取融资融券数据失败"))
         except Exception as e:
-            return ToolResult(
-                success=False,
-                error=f"获取融资融券数据失败: {str(e)}"
-            )
+            return ToolResult(success=False, error=f"获取融资融券数据失败: {str(e)}")
