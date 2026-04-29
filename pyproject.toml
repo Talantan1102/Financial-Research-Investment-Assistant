@@ -211,3 +211,17 @@ module = [
     "test_mock_extended",
 ]
 ignore_errors = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["backend/tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: L0 — pure functions / Pydantic / no LLM",
+    "integration: L1 — agent + cross-cutting, LLM in mock mode",
+    "e2e: L2 — HTTP → graph, LLM in cassette mode",
+    "eval: L3 — golden set + LLM-as-judge, LLM in live mode",
+    "live_only: requires real LLM API (excluded from PR job)",
+    "slow: takes > 5s (excluded from default `poe test`)",
+]
