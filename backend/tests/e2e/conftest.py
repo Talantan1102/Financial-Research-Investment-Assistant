@@ -1,7 +1,5 @@
 """L2 — e2e tests: HTTP → graph → Responder, LLM via cassette (pytest-recording)."""
 
-import os
-
 import pytest
 
 

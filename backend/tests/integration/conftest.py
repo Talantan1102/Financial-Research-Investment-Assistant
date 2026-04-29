@@ -1,7 +1,5 @@
 """L1 — integration tests: agent + cross-cutting, LLM via deterministic mock."""
 
-import os
-
 import pytest
 
 

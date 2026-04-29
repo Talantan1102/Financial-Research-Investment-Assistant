@@ -4,8 +4,6 @@ WARNING: These tests cost real money. They are excluded from default `poe test`.
 Run via: `poe eval` (Plan C) or `pytest backend/tests/eval -m live_only`.
 """
 
-import os
-
 import pytest
 
 

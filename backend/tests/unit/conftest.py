@@ -1,7 +1,5 @@
 """L0 — unit tests: pure functions / Pydantic / no LLM calls."""
 
-import os
-
 import pytest
 
 
