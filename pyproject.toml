@@ -118,14 +118,20 @@ ignore = [
     "B008",  # function-call-in-default-argument (FastAPI Depends idiom)
     "N803",  # function args lowercase (we have ts_code, etc.)
     "N806",  # variable in function should be lowercase (we have DataFrames)
-    # v0 baseline: deferred — re-enable after legacy services are deleted in Plan B
+    # v0 baseline — legitimate project-wide patterns
+    "E402",  # module-level import not at top (app_main loads .env before imports)
+    "N815",  # mixed-case attrs (Tushare API field names use camelCase)
     "B904",  # raise-from in except (cleanup pass scheduled post-v0)
     "B905",  # zip-without-explicit-strict (re-enable after py311 sweep)
-    "E402",  # module-level import not at top (FastAPI app_main has env-load ordering)
-    "E722",  # bare except (legacy try/except cleanup scheduled post-v0)
-    "F841",  # unused-local-variable (legacy code paths)
-    "N815",  # mixed-case attrs (Tushare API field names use camelCase)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "backend/tests/**/*.py" = ["B011"]  # assert in tests is fine
+# E722/F841 in active code, scoped per-file with TODO markers for v0 cleanup
+"backend/app/data/tushare_client.py" = ["E722", "F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"benchmark/validate_tools.py" = ["E722"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/mcp_server/control_flow/engine.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/mcp_server/skills/base.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/mcp_server/skills/data_analysis.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/mcp_server/skills/deep_research.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/router/chat_router.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
