@@ -1,0 +1,12 @@
+entries:
+  - exact: "What is the price of 600519.SH?"
+    response:
+      content: "The current price of 600519.SH (Kweichow Moutai) is 1680.00 CNY."
+      prompt_tokens: 15
+      completion_tokens: 20
+
+  - pattern: ".*?(\\d{6}\\.(SH|SZ)).*"
+    response:
+      content: "The quote for {group_1} has been retrieved successfully."
+      prompt_tokens: 18
+      completion_tokens: 15

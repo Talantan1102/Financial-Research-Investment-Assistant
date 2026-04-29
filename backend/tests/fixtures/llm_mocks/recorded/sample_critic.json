@@ -1,0 +1,8 @@
+{
+  "id": "sample_critic",
+  "response": {
+    "content": "{\"factuality_score\": 4, \"factuality_evidence\": \"All cited prices match exchange data within 1% tolerance.\", \"tool_correctness_score\": 5, \"tool_correctness_evidence\": \"Correct tool selected and parameters well-formed.\", \"reasoning_score\": 4, \"reasoning_evidence\": \"Chain-of-thought steps are coherent and grounded in retrieved data.\", \"format_score\": 3, \"format_evidence\": \"Output structure matches schema but section headers are missing.\"}",
+    "prompt_tokens": 200,
+    "completion_tokens": 80
+  }
+}
