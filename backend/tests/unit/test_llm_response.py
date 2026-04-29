@@ -58,5 +58,35 @@ def test_roundtrip_json() -> None:
         total_tokens=2,
         cost_cny=0.0,
         latency_ms=1,
+        cache_hit=True,
+    )
+    assert LLMResponse.model_validate_json(r.model_dump_json()) == r
+
+
+def test_inconsistent_total_tokens_rejected() -> None:
+    with pytest.raises(ValidationError):
+        LLMResponse(
+            content="x",
+            model="m",
+            tier="fast",
+            prompt_tokens=2,
+            completion_tokens=3,
+            total_tokens=99,
+            cost_cny=0.0,
+            latency_ms=0,
+        )
+
+
+def test_roundtrip_json_with_parsed_dict() -> None:
+    r = LLMResponse(
+        content="ok",
+        model="m",
+        tier="deep",
+        prompt_tokens=5,
+        completion_tokens=3,
+        total_tokens=8,
+        cost_cny=0.0,
+        latency_ms=10,
+        parsed={"score": 8, "reason": "ok", "nested": {"k": 1}},
     )
     assert LLMResponse.model_validate_json(r.model_dump_json()) == r
