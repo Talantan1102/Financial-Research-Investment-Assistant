@@ -60,6 +60,7 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-recording>=0.13",
+    "pytest-repeat>=0.9",
     "pytest-cov>=5.0",
     "poethepoet>=0.27",
     "pip-audit>=2.7",
@@ -238,6 +239,12 @@ dev          = "uvicorn app.app_main:app --reload --port 8000 --app-dir backend"
 trace-view    = "echo 'trace viewer comes in Plan C (eval-trace-infra). See spec §9.'"
 eval          = "echo 'eval runner comes in Plan C (eval-trace-infra). See spec §8.'"
 eval-validate = "echo 'eval validate comes in Plan C (eval-trace-infra). See spec §8.'"
+
+# Plan B scaffolds for spec § 4 quantification; full impl in Plan C/D.
+# Today: just runs the L1 suite under LLM_MODE=mock to surface obvious determinism breaks.
+test-fidelity    = "pytest backend/tests/integration -v"
+# Re-runs L1 ten times to spot flakes — full mock-vs-live comparison comes in Plan C.
+test-flake-check = "pytest backend/tests/integration --count=10"
 
 # `lint` runs three checks in sequence; using a sequence of cmd items so each
 # entry is a shell command, not a reference to another poe task.

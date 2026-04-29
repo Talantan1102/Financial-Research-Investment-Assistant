@@ -1146,33 +1146,70 @@ git commit -m "docs(plan): Plan B retrospective + poe scaffold tasks
 
 ## Plan B retrospective — Task 9 spike result
 
-> Filled in by implementer at Task 9 step 3.
-
-- **Date probed**:
-- **Confirmed model id**:
-- **Endpoint**:
-- **Sample response**:
-- **Action taken** (none / sync spec / abort):
+- **Date probed**: 2026-04-30
+- **Confirmed model id**: `deepseek-v4-flash` (the spec-canonical name resolves on DashScope without `model_not_exist`).
+- **Endpoint**: `https://dashscope.aliyuncs.com/compatible-mode/v1` (OpenAI-compatible, default in `.env.example`).
+- **Sample response**: prompt `"Say hi in one word."` (max_tokens=10) → content `"Hi"`. Usage: `prompt_tokens=10, completion_tokens=25, total_tokens=35`. Note `completion_tokens_details.reasoning_tokens=22` — `deepseek-v4-flash` is a reasoning model on DashScope, so completion-token cost includes hidden reasoning. The `total_tokens == prompt + completion` invariant from Task 1 still holds (35 == 10 + 25), but eval / cost dashboards downstream should be aware that a 1-word user-visible answer can be billed for ~25 completion tokens.
+- **Action taken**: none — model id matches spec, no spec sync needed.
+- **Dev-environment note**: `all_proxy=socks5://127.0.0.1:7897` was set in the shell and tripped httpx's missing-`socksio` import. Workaround: `unset all_proxy https_proxy http_proxy` before any DashScope call. DashScope is a mainland-China endpoint and shouldn't be proxied. **Task 11 must `unset` these proxy env vars before recording the cassette**, otherwise pytest-recording will hit the same `ImportError`.
 
 ---
 
 ## Retrospective
 
-> Filled in by implementer at Task 12 step 3.
-
-**Implementation completion date**:
-**Branch**:
-**Total commits**:
-**Total time**:
+**Implementation completion date**: 2026-04-30
+**Branch**: `feat/dev-test-loop-B` (from `3ca069d`, ahead of `main` by 13 commits including Task 12)
+**Total commits**: 13 (10 task commits + 3 fix commits)
+**Total time**: ~3 hours (vs Plan A's ~5h — Plan B is smaller because the test layer scaffolding was done in Plan A)
 
 ### 对的设计(3 条)
 
+1. **Mode dispatch via dependency injection at construction time, not LLM_MODE branching inside `LLMService`.** `LLMService.chat` is mode-agnostic — Tasks 8/11 swap between `MockLLMClient` and `_OpenAIClientAdapter` without `LLMService` knowing the difference. Cassette interception happens at the HTTP layer below the adapter. This kept `LLMService` at 81 lines and made the L2 demo test trivially mirror the L1 demo. **The single-`LLM_MODE=none` runtime guard at `__init__`** is the only mode-aware code in the whole service — fail-loud on misuse, zero branches in the hot path. Will replicate this pattern in Plan C's `TraceService` (one chokepoint, no mode flags inside).
+
+2. **Plan A 沉淀的"intent + 约束"风格让 implementer 有判断空间.** Tasks 4/5/7/12 deliberately wrote constraints, not literal config. The Task 5 yaml schema design ended up cleaner than what I would have prescribed (flat `entries:` list, two-deep nesting). Tasks 1-3/8/11 still got verbatim code from the plan because their contracts are stability promises (`LLMResponse` schema, `ChatClient` protocol). Mixing prescription where it's load-bearing with intent where it isn't kept the plan honest.
+
+3. **Pre-commit `check_cassette_sanitize.py` doubled as a debugging tool.** When Task 11 fix subagent moved the cassette to `fixtures/cassettes/`, the hook immediately surfaced a `dashscope-` substring in the response header that the original cassette path had silently bypassed. The sanitize check found a real (low-severity, vendor-name) leak that the loose initial path layout hid. Fail-loud sanitize at PR time > "we'll audit cassettes later".
+
 ### 错的设计 / plan 漏了什么(3 条)
+
+1. **Plan didn't anticipate pytest-recording's default `cassette_library_dir` location.** The plan File Structure section put cassettes at `backend/tests/fixtures/cassettes/...`, the Task 7 sanitize hook regex assumed the same, but pytest-recording 0.13 defaults to `<test-file-dir>/cassettes/`. Task 11 implementer recorded under `backend/tests/e2e/cassettes/` and the hook didn't notice. **The path divergence created an actual security hole** — the `x-dashscope-call-gateway: true` response header would have shipped with the cassette unsanitized if Task 11 reviewer hadn't caught the path mismatch. **Lesson**: any spec that depends on a third-party plugin's default path must include a 30-second spike at plan-write time to verify the default matches the spec, or specify the override fixture (`vcr_cassette_dir`) explicitly. (Same family of bug as Plan A's `pytest_configure` hook lesson — third-party pytest plugin defaults bite when the plan assumes them.)
+
+2. **Plan didn't anticipate the dev shell's proxy env vars contaminating CI.** Task 9 spike worked only after `unset all_proxy https_proxy http_proxy` in the shell. Task 11 hit the same wall during recording (worked around in shell). **`poe ci` then failed at the very end of Task 12** because pytest spawned a subprocess that inherited the proxy vars. Required adding an autouse `_unset_proxy_env` fixture in `backend/tests/e2e/conftest.py`. **Lesson**: shell-level env workarounds during a spike are a tell that the test infra needs the same workaround. Don't ship a Plan that says "unset proxy before running" — bake it into the layer conftest. Add this to the Plan-template checklist: "any env var the spike touched must have a permanent fixture-level handler before the plan ships."
+
+3. **Plan didn't say how the test process loads `.env`.** Task 11 implementer hit a 401 on the first record because pytest doesn't auto-load dotenv. They worked around with `export DASHSCOPE_API_KEY=...` in the shell. Plan should have either (a) added a session-scoped fixture in `conftest.py` calling `load_dotenv("backend/.env")`, or (b) explicitly told implementer to invoke pytest with `set -a; . backend/.env; set +a; pytest ...`. Currently the cassette is recorded but the path is brittle for future re-records. **Plan C must specify .env loading for tests.**
 
 ### 下个 spec / plan 要避免(3 条)
 
+1. **任何依赖第三方 pytest plugin 默认路径的 plan,先跑 30 秒 spike** verify default 行为(已在 Plan A retrospective 提到过 pytest 多 layer 协同的 spike 教训;Plan B 再次撞同型 bug,这条规则需要升级为 plan-template 默认 checklist)。
+2. **任何 spike 阶段需要 shell 级 env workaround 的事项,plan 必须把 workaround 编进 fixture/conftest 而不是写"实施时手动 unset"。**否则 CI 在生产环境复现 spike 环境时必定 fail。
+3. **测试 infra 项目里"测试自身需要的环境"必须显式建模.** `.env` loading、proxy unset、cassette dir override —— 这三个在 Plan B 里都是事后补丁,Plan C 的 spec 必须用一节明确"测试 process 看到的 env 长什么样"。
+
 ### 沉淀到 memory
+
+- [feedback_third_party_plugin_defaults.md](memory/feedback_third_party_plugin_defaults.md) — 任何 plan 引用第三方 pytest 插件默认行为时,必须先 30 秒 spike 验证,否则建立显式 override fixture
+- [feedback_test_env_modeling.md](memory/feedback_test_env_modeling.md) — 测试 infra 项目里 .env loading / proxy 处理 / 第三方插件路径必须 plan 阶段就建模到 fixture,不能依赖实施时 shell 级 workaround
+- [project_llm_service_contract.md](memory/project_llm_service_contract.md) — `LLMService.chat(prompt, tier, schema=None) -> LLMResponse` 是 v0~v3 稳定契约;mode dispatch 通过 DI(`ChatClient` Protocol)而非 LLM_MODE 分支;`LLMResponse.total_tokens == prompt_tokens + completion_tokens` invariant 由 model_validator 强制
 
 ### Subagent-driven-development 节奏复盘
 
+- 总 subagent 调用:~19 次(12 implementer + 2 spec reviewer + 1 code quality reviewer + 4 fix subagent)— 比 Plan A 的 ~30 减少 37%
+- 减少来自:简单 paste-from-plan task(Task 2/3/8/10)inline review,跳过 reviewer 派单
+- 全 review 投入回报最高的两个点:
+  - Task 5(logic-heavy MockLLMClient)spec reviewer 抓到 fullmatch+search 偏差(Critical)
+  - Task 11(cassette 录制)我自己 read implementer report 抓到 cassette path 偏差 → fix subagent 又顺手发现真 leak
+- 主对话 context 消耗:中等(比 Plan A 略低,但写 plan + retrospective 占 ~30%)
+- Plan B 的 fix 路径都是单轮(implementer fix → inline verify);没像 Plan A Task 2 那样走 5 commit ping-pong。原因:plan 写"intent + 约束"减少了 spec ↔ impl 来回澄清
+
 ### Plan C 启动条件
+
+Plan B 完成后,Plan C(eval-trace-infra)的依赖已就位:
+
+- ✅ `LLMService` 接口稳定,可被 eval runner 通过 DI 调用
+- ✅ `MockLLMClient` 可被注入,L1 eval-runner unit test 不走 LLM
+- ✅ Cassette 闭环可用,L2 eval-runner integration test 可用 cassette 跑
+- ✅ `mypy strict on app.services.*` 已扩展;Plan C 的 `app.tracing.*` / `app.eval.*` 应纳入 strict tier
+- ✅ Pre-commit cassette sanitize 已就位,nightly cassette validation(spec § 5)可在 Plan D 加 GH Actions step
+
+Plan C 范围:`TraceService` Pydantic 契约 + spans 表 + Eval golden set(70 用例新写)+ judge + cross-judge sanity + nightly job 编排。具体 task 拆分按 spec § 8 + § 9。
+
+**未解风险**:`deepseek-v4-flash` 在 DashScope 是 reasoning model(Task 9 spike 发现),completion_tokens 含隐藏 reasoning。Plan C eval cost 估算时要按 ~3K total tokens / 用例算(spec § 7 已按这个量级假设),实际跑下来如果偏差大,触发 Plan C 的 cost guardrail re-tune。
