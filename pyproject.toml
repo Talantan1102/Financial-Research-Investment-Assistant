@@ -225,3 +225,33 @@ markers = [
     "live_only: requires real LLM API (excluded from PR job)",
     "slow: takes > 5s (excluded from default `poe test`)",
 ]
+
+[tool.poe.tasks]
+# Active in Plan A
+format       = "ruff format ."
+test         = "pytest backend/tests/unit backend/tests/integration backend/tests/e2e -m 'not slow and not live_only'"
+test-all     = "pytest backend/tests"
+# TODO(I-1): canonical naming — uvicorn currently uses `app.app_main:app` because
+# `backend/__init__.py` doesn't exist. To be unified before Plan A PR.
+dev          = "uvicorn app.app_main:app --reload --port 8000 --app-dir backend"
+
+# Stubbed — implemented in later plans
+trace-view    = "echo 'trace viewer comes in Plan C (eval-trace-infra). See spec §9.'"
+eval          = "echo 'eval runner comes in Plan C (eval-trace-infra). See spec §8.'"
+eval-validate = "echo 'eval validate comes in Plan C (eval-trace-infra). See spec §8.'"
+
+# `lint` runs three checks in sequence; using a sequence of cmd items so each
+# entry is a shell command, not a reference to another poe task.
+[tool.poe.tasks.lint]
+sequence = [
+    { cmd = "ruff format --check ." },
+    { cmd = "ruff check ." },
+    { cmd = "mypy backend" },
+]
+
+# `ci` chains `lint` then `test`; sequence of `ref` items references other tasks.
+[tool.poe.tasks.ci]
+sequence = [
+    { ref = "lint" },
+    { ref = "test" },
+]
