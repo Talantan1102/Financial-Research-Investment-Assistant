@@ -185,7 +185,18 @@ EOF
 
 - [ ] **Step 1: Add ruff config to `pyproject.toml`**
 
-**Note (revised during execution):** The original plan listed 4 ignored rules. During implementation, 4 additional rules were added with rationale (E402, N815, B904, B905) and 2 rules (E722, F841) were scoped to per-file-ignores instead of global. See commit `46ef108`.
+**Note (revised during execution):** The original plan listed 4 ignored rules. After execution found 137 lint issues across active core files, the config was widened with explicit rationale per rule. The final state in this Step reflects the post-revision plan. Reconciliation followed WORKING_AGREEMENT rule 3 ("plan over-specified → update plan with rationale"). See commits `46ef108` (impl fix) + `bd2bd7d` (this plan update).
+
+**Rationale for the 4 added globally-ignored rules:**
+
+- `E402` (module-level import not at top) — `backend/app/app_main.py` loads `.env` via `python-dotenv` BEFORE imports that depend on env vars (e.g., `DASHSCOPE_API_KEY` for openai client init). This ordering is intentional and globally legitimate.
+- `N815` (mixed-case attrs) — Tushare API returns DataFrames with column names in camelCase (`tradeDate`, `tsCode`, etc.). Our adapters preserve these names through Pydantic schemas. Renaming would diverge from upstream API contract.
+- `B904` (raise-from in except) — too widespread for per-file scoping (occurs in ~30 except handlers across the codebase). Cleanup pass deferred to v0 implementation.
+- `B905` (zip without strict=) — Python 3.10+ feature; codebase pre-dates the strictness requirement. Cleanup deferred to v0 sweep.
+
+**Why E722 / F841 are per-file-ignored (not global):**
+
+Both are real code smells, not project-wide patterns. They occur in only 7 specific files (mostly slated for v0 deletion or rewrite). Per-file-ignore with TODO markers makes the cleanup actionable — when each file is deleted/rewritten, its ignore entry goes with it.
 
 Append the following to `pyproject.toml`:
 
