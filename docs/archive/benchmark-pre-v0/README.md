@@ -1,3 +1,17 @@
+> **⚠️ DEPRECATED — archived 2026-04-30**
+>
+> This benchmark suite (162 cases: phase1 single-tool 134 + phase2 complex 28)
+> was the pre-v0 evaluation system, used to test the legacy `mcp_server/skills/`
+> architecture. The v0 chat main path supersedes this.
+>
+> **Active eval system is at:** [`backend/tests/eval/`](../../../backend/tests/eval/)
+> **Eval design spec:** [`docs/superpowers/specs/2026-04-29-dev-test-loop-design.md` § 8](../../superpowers/specs/2026-04-29-dev-test-loop-design.md)
+>
+> This archive is kept as historical reference and may inform new eval cases,
+> but its `run_benchmark.py` and `evaluator.py` scripts are not maintained.
+
+---
+
 # Benchmark 测试用例集
 
 金融研投助手 MCP Server 的端到端测试用例集，用于评估 LLM 的工具调用能力。

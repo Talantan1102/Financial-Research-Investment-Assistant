@@ -129,7 +129,6 @@ ignore = [
 "backend/tests/**/*.py" = ["B011"]  # assert in tests is fine
 # E722/F841 in active code, scoped per-file with TODO markers tracing each entry to its v0 disposition
 "backend/app/data/tushare_client.py" = ["E722", "F841"]  # TODO(v0): fix during data-adapter refactor in v0 spec
-"benchmark/validate_tools.py" = ["E722"]  # TODO(v0): file moves to docs/archive/benchmark-pre-v0/ in Plan A Task 7 — drop this entry afterward
 "backend/app/mcp_server/control_flow/engine.py" = ["F841"]  # TODO(v0): file deleted in v0 spec (mcp_server replaced by orchestration/) — drop this entry then
 "backend/app/mcp_server/skills/base.py" = ["F841"]  # TODO(v0): file deleted in v0 spec (skills/ replaced by tools/) — drop this entry then
 "backend/app/mcp_server/skills/data_analysis.py" = ["F841"]  # TODO(v1): file migrated to tools/ in v1 工具迁移 spec — drop this entry then
