@@ -1,12 +1,12 @@
 # Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
 # 未经授权，禁止转售或仿制。
 
-from .user import User
-from .chat import ChatSession, ChatMessage, ChatAttachment, LongTermMemory
-from .knowledge import KnowledgeBase, Document
-from .industry_data import IndustryStats, CompanyData, PolicyData
+from .chat import ChatAttachment, ChatMessage, ChatSession, LongTermMemory
+from .industry_data import CompanyData, IndustryStats, PolicyData
+from .knowledge import Document, KnowledgeBase
+from .news import BiddingInfo, IndustryNews, NewsCollectionTask
 from .research import ResearchCheckpoint
-from .news import IndustryNews, BiddingInfo, NewsCollectionTask
+from .user import User
 
 __all__ = [
     "User",

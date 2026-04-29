@@ -2,26 +2,29 @@
 # 未经授权，禁止转售或仿制。
 
 """数据库探索路由 - PostgreSQL 可视化 + Text2SQL"""
-import os
-from typing import List, Optional, Any
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
 
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.config.llm_config import get_config
 from app.core.database import get_db
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.service.database_explorer import DatabaseExplorer
 from app.service.text2sql_service import Text2SQLService
-from app.config.llm_config import get_config
 
 router = APIRouter(prefix="/database", tags=["数据库探索"])
 
 
 # ========== Schemas ==========
 
+
 class TableInfo(BaseModel):
     """表信息"""
+
     name: str
     size: str
     column_count: int
@@ -30,32 +33,36 @@ class TableInfo(BaseModel):
 
 class ColumnInfo(BaseModel):
     """列信息"""
+
     name: str
     type: str
-    max_length: Optional[int] = None
+    max_length: int | None = None
     nullable: bool
-    default: Optional[str] = None
+    default: str | None = None
 
 
 class IndexInfo(BaseModel):
     """索引信息"""
+
     name: str
     definition: str
 
 
 class TableSchema(BaseModel):
     """表结构"""
+
     table_name: str
-    columns: List[ColumnInfo]
-    primary_keys: List[str]
-    indexes: List[IndexInfo]
+    columns: list[ColumnInfo]
+    primary_keys: list[str]
+    indexes: list[IndexInfo]
 
 
 class TableDataResponse(BaseModel):
     """表数据响应"""
+
     table_name: str
-    columns: List[str]
-    rows: List[dict]
+    columns: list[str]
+    rows: list[dict]
     total: int
     limit: int
     offset: int
@@ -63,39 +70,44 @@ class TableDataResponse(BaseModel):
 
 class QueryRequest(BaseModel):
     """查询请求"""
+
     sql: str = Field(..., description="SQL 查询语句（仅支持 SELECT）")
     limit: int = Field(100, ge=1, le=1000, description="结果限制")
 
 
 class QueryResponse(BaseModel):
     """查询响应"""
-    columns: List[str]
-    rows: List[dict]
+
+    columns: list[str]
+    rows: list[dict]
     row_count: int
 
 
 class Text2SQLRequest(BaseModel):
     """Text2SQL 请求"""
+
     question: str = Field(..., description="自然语言问题")
     intent: str = Field("stats", description="查询意图: stats/trend/comparison/detail")
 
 
 class Text2SQLResponse(BaseModel):
     """Text2SQL 响应"""
+
     success: bool
     sql: str = ""
     explanation: str = ""
-    data: List[dict] = []
-    columns: List[str] = []
+    data: list[dict] = []
+    columns: list[str] = []
     visualization_hint: str = "table"
-    confidence: Optional[float] = None
+    confidence: float | None = None
     row_count: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ========== Routes ==========
 
-@router.get("/tables", response_model=List[TableInfo])
+
+@router.get("/tables", response_model=list[TableInfo])
 async def get_tables(
     current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db),
@@ -108,8 +120,7 @@ async def get_tables(
     except Exception as e:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取表列表失败: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取表列表失败: {str(e)}"
         )
 
 
@@ -131,15 +142,11 @@ async def get_table_schema(
         )
     except ValueError as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取表结构失败: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取表结构失败: {str(e)}"
         )
 
 
@@ -148,7 +155,7 @@ async def get_table_data(
     table_name: str,
     limit: int = 100,
     offset: int = 0,
-    order_by: Optional[str] = None,
+    order_by: str | None = None,
     order_dir: str = "asc",
     current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db),
@@ -163,15 +170,11 @@ async def get_table_data(
         return TableDataResponse(**data)
     except ValueError as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取表数据失败: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"获取表数据失败: {str(e)}"
         )
 
 
@@ -188,15 +191,11 @@ async def execute_query(
         return QueryResponse(**result)
     except ValueError as e:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"查询执行失败: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"查询执行失败: {str(e)}"
         )
 
 
@@ -232,7 +231,7 @@ async def text2sql_query(
             llm_api_key=config.api_key,
             llm_base_url=config.base_url,
             db_connection_string=db_url if db_url else None,
-            model="qwen-plus"  # 使用 qwen-plus 替代 deepseek，更稳定的 JSON 输出
+            model="qwen-plus",  # 使用 qwen-plus 替代 deepseek，更稳定的 JSON 输出
         )
 
         # 执行查询
@@ -247,11 +246,8 @@ async def text2sql_query(
             visualization_hint=result.get("visualization_hint", "table"),
             confidence=result.get("confidence"),
             row_count=result.get("row_count", 0),
-            error=result.get("error")
+            error=result.get("error"),
         )
 
     except Exception as e:
-        return Text2SQLResponse(
-            success=False,
-            error=f"Text2SQL 服务异常: {str(e)}"
-        )
+        return Text2SQLResponse(success=False, error=f"Text2SQL 服务异常: {str(e)}")

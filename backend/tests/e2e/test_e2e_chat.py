@@ -2,9 +2,9 @@
 """端到端测试: 用户问题 → Skill 选择 → 工具调用 → LLM 回答"""
 
 import asyncio
+import logging
 import os
 import sys
-import logging
 
 # 添加 backend 到 path
 backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,7 +39,7 @@ async def test_question(service, question: str):
     answer = await service.chat(question)
 
     print(f"\n{'=' * 60}")
-    print(f"LLM 回答:")
+    print("LLM 回答:")
     print(f"{'=' * 60}")
     print(answer)
     print(f"{'=' * 60}\n")
@@ -48,21 +48,18 @@ async def test_question(service, question: str):
 
 async def main():
     print(f"\n{'=' * 60}")
-    print(f"端到端测试: 三轮编排架构")
+    print("端到端测试: 三轮编排架构")
     print(f"Server: {SERVER_PATH}")
     print(f"Model: {MODEL}")
     print(f"{'=' * 60}\n")
 
     try:
         service = MCPChatService(
-            mcp_server_path=SERVER_PATH,
-            model=MODEL,
-            connect_timeout=30.0,
-            call_timeout=30.0
+            mcp_server_path=SERVER_PATH, model=MODEL, connect_timeout=30.0, call_timeout=30.0
         )
 
         await service.connect()
-        print(f"[OK] MCP Client 连接成功\n")
+        print("[OK] MCP Client 连接成功\n")
 
         # 测试 1: 股票行情查询 → 应选择 market_data skill → 调用 get_quote
         answer1 = await test_question(service, "今天茅台的行情如何？")
@@ -87,6 +84,7 @@ async def main():
     except Exception as e:
         print(f"\n[FATAL] 测试失败: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

@@ -9,16 +9,19 @@
 2. company_data - 企业数据
 3. policy_data - 政策数据
 """
+
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, Float, Integer, Date
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+
+from sqlalchemy import Column, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.core.database import Base
 
 
 class IndustryStats(Base):
     """行业统计数据表"""
+
     __tablename__ = "industry_stats"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -46,12 +49,13 @@ class IndustryStats(Base):
             "year": self.year,
             "quarter": self.quarter,
             "region": self.region,
-            "source": self.source
+            "source": self.source,
         }
 
 
 class CompanyData(Base):
     """企业数据表"""
+
     __tablename__ = "company_data"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -89,12 +93,13 @@ class CompanyData(Base):
             "revenue": self.revenue,
             "net_profit": self.net_profit,
             "market_share": self.market_share,
-            "year": self.year
+            "year": self.year,
         }
 
 
 class PolicyData(Base):
     """政策数据表"""
+
     __tablename__ = "policy_data"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -130,5 +135,5 @@ class PolicyData(Base):
             "publish_date": str(self.publish_date) if self.publish_date else None,
             "category": self.category,
             "industry": self.industry,
-            "summary": self.summary
+            "summary": self.summary,
         }

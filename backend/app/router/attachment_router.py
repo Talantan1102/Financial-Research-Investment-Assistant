@@ -2,18 +2,28 @@
 # 未经授权，禁止转售或仿制。
 
 """聊天附件路由"""
+
 import os
 import shutil
-from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks, Form
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
+from schemas.chat import AttachmentListResponse, AttachmentResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.chat import ChatAttachment, ChatSession
 from app.models.user import User
 from app.router.auth_router import get_current_user
-from schemas.chat import AttachmentResponse, AttachmentListResponse
 
 router = APIRouter(prefix="/attachments", tags=["聊天附件"])
 
@@ -24,11 +34,32 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 # 支持的文件类型
 ALLOWED_EXTENSIONS = {
     # 文档类型
-    '.pdf', '.docx', '.doc', '.txt', '.md', '.html', '.xlsx', '.xls', '.pptx', '.ppt',
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".txt",
+    ".md",
+    ".html",
+    ".xlsx",
+    ".xls",
+    ".pptx",
+    ".ppt",
     # 图片类型
-    '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp',
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".bmp",
     # 代码类型
-    '.py', '.js', '.ts', '.json', '.yaml', '.yml', '.xml', '.csv',
+    ".py",
+    ".js",
+    ".ts",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".csv",
 }
 
 
@@ -55,6 +86,7 @@ def attachment_to_response(att: ChatAttachment) -> AttachmentResponse:
 async def process_attachment(attachment_id: str, file_path: str, db_session_factory):
     """后台处理附件（提取文本内容）"""
     import logging
+
     logger = logging.getLogger("AttachmentProcessor")
 
     db = db_session_factory()
@@ -71,18 +103,30 @@ async def process_attachment(attachment_id: str, file_path: str, db_session_fact
             ext = get_file_extension(att.filename)
 
             # 简单的文本提取（可以扩展为使用 DocMind）
-            if ext in {'.txt', '.md', '.py', '.js', '.ts', '.json', '.yaml', '.yml', '.xml', '.csv', '.html'}:
+            if ext in {
+                ".txt",
+                ".md",
+                ".py",
+                ".js",
+                ".ts",
+                ".json",
+                ".yaml",
+                ".yml",
+                ".xml",
+                ".csv",
+                ".html",
+            }:
                 # 直接读取文本文件
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                with open(file_path, encoding="utf-8", errors="ignore") as f:
                     content_text = f.read()
-            elif ext == '.pdf':
+            elif ext == ".pdf":
                 # PDF 需要特殊处理，这里暂时跳过
                 # 可以后续集成 DocMind 或 PyPDF2
                 content_text = f"[PDF 文件: {att.filename}]"
-            elif ext in {'.docx', '.doc'}:
+            elif ext in {".docx", ".doc"}:
                 # Word 文档需要特殊处理
                 content_text = f"[Word 文档: {att.filename}]"
-            elif ext in {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'}:
+            elif ext in {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}:
                 # 图片文件
                 content_text = f"[图片: {att.filename}]"
             else:
@@ -114,7 +158,7 @@ async def upload_attachment(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session_id: str = Form(...),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """上传聊天附件"""
@@ -122,29 +166,24 @@ async def upload_attachment(
     try:
         session_uuid = UUID(session_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的会话ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
     # 验证会话存在
     session = db.query(ChatSession).filter(ChatSession.id == session_uuid).first()
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="会话不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     # 验证文件类型
     ext = get_file_extension(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件类型: {ext}，支持的类型: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            detail=f"不支持的文件类型: {ext}，支持的类型: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
     # 生成唯一文件名
     import uuid
+
     unique_filename = f"{uuid.uuid4()}_{file.filename}"
     file_path = os.path.join(UPLOAD_DIR, unique_filename)
 
@@ -154,8 +193,7 @@ async def upload_attachment(
             shutil.copyfileobj(file.file, buffer)
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"文件保存失败: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"文件保存失败: {str(e)}"
         )
 
     # 获取文件大小
@@ -177,12 +215,8 @@ async def upload_attachment(
 
     # 后台处理附件
     from core.database import SessionLocal
-    background_tasks.add_task(
-        process_attachment,
-        str(att.id),
-        file_path,
-        SessionLocal
-    )
+
+    background_tasks.add_task(process_attachment, str(att.id), file_path, SessionLocal)
 
     return attachment_to_response(att)
 
@@ -190,24 +224,18 @@ async def upload_attachment(
 @router.get("/{attachment_id}", response_model=AttachmentResponse)
 async def get_attachment(
     attachment_id: str,
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """获取附件详情"""
     try:
         att_uuid = UUID(attachment_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的附件ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的附件ID格式")
 
     att = db.query(ChatAttachment).filter(ChatAttachment.id == att_uuid).first()
     if not att:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="附件不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在")
 
     return attachment_to_response(att)
 
@@ -215,29 +243,26 @@ async def get_attachment(
 @router.get("/session/{session_id}", response_model=AttachmentListResponse)
 async def get_session_attachments(
     session_id: str,
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """获取会话的所有附件"""
     try:
         session_uuid = UUID(session_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的会话ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
     # 验证会话存在
     session = db.query(ChatSession).filter(ChatSession.id == session_uuid).first()
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="会话不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
-    attachments = db.query(ChatAttachment).filter(
-        ChatAttachment.session_id == session_uuid
-    ).order_by(ChatAttachment.created_at.desc()).all()
+    attachments = (
+        db.query(ChatAttachment)
+        .filter(ChatAttachment.session_id == session_uuid)
+        .order_by(ChatAttachment.created_at.desc())
+        .all()
+    )
 
     return AttachmentListResponse(
         attachments=[attachment_to_response(att) for att in attachments],
@@ -248,28 +273,22 @@ async def get_session_attachments(
 @router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_attachment(
     attachment_id: str,
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """删除附件"""
     try:
         att_uuid = UUID(attachment_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的附件ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的附件ID格式")
 
     att = db.query(ChatAttachment).filter(ChatAttachment.id == att_uuid).first()
     if not att:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="附件不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在")
 
     # 删除文件
     if att.file_path and os.path.exists(att.file_path):
-        try:
+        try:  # noqa: SIM105 — explicit pass with comment is clearer here
             os.remove(att.file_path)
         except Exception:
             pass  # 忽略文件删除错误

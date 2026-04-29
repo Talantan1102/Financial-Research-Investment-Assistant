@@ -2,12 +2,14 @@
 # 未经授权，禁止转售或仿制。
 
 """DocMind 文档智能解析服务"""
+
+import hashlib
 import os
 import time
-import hashlib
-from typing import List, Dict, Any, Optional
-from alibabacloud_docmind_api20220711.client import Client as DocMindClient
+from typing import Any
+
 from alibabacloud_docmind_api20220711 import models as docmind_models
+from alibabacloud_docmind_api20220711.client import Client as DocMindClient
 from alibabacloud_tea_openapi import models as open_api_models
 from alibabacloud_tea_util import models as util_models
 
@@ -33,7 +35,7 @@ class DocMindService:
         config.endpoint = self.endpoint
         return DocMindClient(config)
 
-    def submit_job(self, file_path: str, file_name: str) -> Optional[str]:
+    def submit_job(self, file_path: str, file_name: str) -> str | None:
         """
         提交文档解析任务
 
@@ -48,7 +50,7 @@ class DocMindService:
             request = docmind_models.SubmitDocParserJobAdvanceRequest(
                 file_url_object=open(file_path, "rb"),
                 file_name=file_name,
-                file_name_extension=file_name.split('.')[-1] if '.' in file_name else None,
+                file_name_extension=file_name.split(".")[-1] if "." in file_name else None,
             )
 
             runtime = util_models.RuntimeOptions()
@@ -63,10 +65,11 @@ class DocMindService:
         except Exception as e:
             print(f"提交任务失败: {e}")
             import traceback
+
             traceback.print_exc()
             return None
 
-    def query_status(self, task_id: str) -> Optional[Dict]:
+    def query_status(self, task_id: str) -> dict | None:
         """
         查询任务状态
 
@@ -86,7 +89,9 @@ class DocMindService:
             print(f"查询状态失败: {e}")
             return None
 
-    def wait_for_completion(self, task_id: str, poll_interval: int = 5, max_wait: int = 300) -> bool:
+    def wait_for_completion(
+        self, task_id: str, poll_interval: int = 5, max_wait: int = 300
+    ) -> bool:
         """
         等待任务完成
 
@@ -107,13 +112,13 @@ class DocMindService:
                 print("查询状态失败")
                 return False
 
-            status = status_data.get('Status', '').lower()
+            status = status_data.get("Status", "").lower()
             print(f"当前状态: {status}")
 
-            if status == 'success':
+            if status == "success":
                 print("任务已成功完成")
                 return True
-            elif status == 'failed':
+            elif status == "failed":
                 print("任务执行失败")
                 return False
             else:
@@ -123,7 +128,9 @@ class DocMindService:
         print("等待超时")
         return False
 
-    def get_result(self, task_id: str, layout_num: int = 0, layout_step_size: int = 10) -> Optional[Any]:
+    def get_result(
+        self, task_id: str, layout_num: int = 0, layout_step_size: int = 10
+    ) -> Any | None:
         """
         获取文档解析结果（支持增量获取）
 
@@ -137,9 +144,7 @@ class DocMindService:
         """
         try:
             request = docmind_models.GetDocParserResultRequest(
-                id=task_id,
-                layout_step_size=layout_step_size,
-                layout_num=layout_num
+                id=task_id, layout_step_size=layout_step_size, layout_num=layout_num
             )
             response = self.client.get_doc_parser_result(request)
             return response.body.data if response.body.data else None
@@ -168,10 +173,10 @@ class DocMindService:
 
             # 尝试获取 layouts
             layouts = None
-            if hasattr(result_data, 'layouts'):
+            if hasattr(result_data, "layouts"):
                 layouts = result_data.layouts
             elif isinstance(result_data, dict):
-                layouts = result_data.get('layouts', [])
+                layouts = result_data.get("layouts", [])
 
             if not layouts:
                 break
@@ -181,17 +186,17 @@ class DocMindService:
             # 提取文本
             for layout in layouts:
                 # 优先使用 markdownContent
-                if hasattr(layout, 'markdown_content') and layout.markdown_content:
+                if hasattr(layout, "markdown_content") and layout.markdown_content:
                     all_text += layout.markdown_content + "\n"
-                elif hasattr(layout, 'markdownContent') and layout.markdownContent:
+                elif hasattr(layout, "markdownContent") and layout.markdownContent:
                     all_text += layout.markdownContent + "\n"
                 elif isinstance(layout, dict):
-                    if layout.get('markdownContent'):
-                        all_text += layout['markdownContent'] + "\n"
-                    elif layout.get('text'):
-                        all_text += layout['text'] + "\n"
+                    if layout.get("markdownContent"):
+                        all_text += layout["markdownContent"] + "\n"
+                    elif layout.get("text"):
+                        all_text += layout["text"] + "\n"
                 # 尝试 text 属性
-                elif hasattr(layout, 'text') and layout.text:
+                elif hasattr(layout, "text") and layout.text:
                     all_text += layout.text + "\n"
 
             # 更新下次获取的起始位置
@@ -204,7 +209,7 @@ class DocMindService:
         return all_text
 
 
-def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> list[str]:
     """
     将文本切分成块
 
@@ -228,10 +233,10 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]
 
         # 尝试在句子边界切分
         if end < len(text):
-            for sep in ['。', '！', '？', '.', '!', '?', '\n']:
+            for sep in ["。", "！", "？", ".", "!", "?", "\n"]:
                 last_sep = chunk.rfind(sep)
                 if last_sep > chunk_size // 2:
-                    chunk = chunk[:last_sep + 1]
+                    chunk = chunk[: last_sep + 1]
                     end = start + last_sep + 1
                     break
 
@@ -244,11 +249,8 @@ def chunk_text(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]
 
 
 def process_document_with_docmind(
-    file_path: str,
-    file_name: str,
-    index_name: str,
-    chunk_size: int = 500
-) -> Dict[str, Any]:
+    file_path: str, file_name: str, index_name: str, chunk_size: int = 500
+) -> dict[str, Any]:
     """
     使用 DocMind 处理文档
 
@@ -355,6 +357,7 @@ def process_document_with_docmind(
         result["message"] = f"处理失败: {str(e)}"
         print(f"文档处理异常: {e}")
         import traceback
+
         traceback.print_exc()
 
     return result

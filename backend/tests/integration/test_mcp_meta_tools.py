@@ -12,8 +12,8 @@
 
 import asyncio
 import json
-import sys
 import os
+import sys
 
 # 添加 backend 到 path
 backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -33,7 +33,10 @@ if os.path.exists(env_path):
 from app.mcp_client.client import mcp_client_context
 
 SERVER_PATH = os.path.join(backend_dir, "app/mcp_server/server.py")
-PYTHON = os.environ.get("PYTHON", "/Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/venv/bin/python3")
+PYTHON = os.environ.get(
+    "PYTHON",
+    "/Users/talantan/.openclaw/workspace-dev/external/financial-research-assistant/venv/bin/python3",
+)
 
 
 async def test_list_resources(session):
@@ -52,15 +55,15 @@ async def test_list_resources(session):
 
     # 验证数量
     assert len(resources) == 7, f"期望 7 个 Resource，实际 {len(resources)}"
-    
+
     # 验证所有 resource 都以 skill:// 开头
     for r in resources:
         uri_str = str(r.uri)
         assert uri_str.startswith("skill://"), f"Resource URI 应以 skill:// 开头: {uri_str}"
-    
+
     # 验证包含 market_data
     uris = {str(r.uri) for r in resources}
-    assert "skill://market_data" in uris, f"应包含 skill://market_data"
+    assert "skill://market_data" in uris, "应包含 skill://market_data"
 
     print("\n[PASS] list_resources 返回 7 个 Skill Resource")
     print("=" * 60 + "\n")
@@ -74,17 +77,17 @@ async def test_read_resource(session):
     print("=" * 60)
 
     result = await session.read_resource("skill://market_data")
-    
+
     # 获取文本内容
     content = result.contents[0]
-    text = content.text if hasattr(content, 'text') else str(content)
+    text = content.text if hasattr(content, "text") else str(content)
 
     print(f"返回内容长度: {len(text)} 字符")
     print(f"前 300 字符:\n{text[:300]}...")
 
     # 验证是 SKILL.md 内容（以 --- 开头的 frontmatter）
     assert text.startswith("---"), "SKILL.md 应以 --- 开头"
-    
+
     # 验证包含关键内容
     assert "market_data" in text, "应包含 market_data"
     assert "描述" in text or "description" in text.lower(), "应包含描述信息"
@@ -135,7 +138,7 @@ async def test_list_tools_after_read_resource(session):
     assert "market_data.get_quote" in tool_names, "应包含 market_data.get_quote"
     assert "market_data.get_history" in tool_names, "应包含 market_data.get_history"
 
-    print(f"\n[PASS] list_tools 返回 11 个 market_data 工具")
+    print("\n[PASS] list_tools 返回 11 个 market_data 工具")
     print("=" * 60 + "\n")
     return tools_after
 
@@ -152,7 +155,7 @@ async def test_call_tool(session):
     # 调用工具
     print("\n--- 调用 market_data.get_quote ---")
     result = await session.call_tool("market_data.get_quote", {"symbol": "600519"})
-    
+
     # 获取结果文本
     text = result.content[0].text
     print(f"返回结果:\n{text[:500]}...")
@@ -161,22 +164,22 @@ async def test_call_tool(session):
     try:
         data = json.loads(text)
         if isinstance(data, dict):
-            print(f"\n解析结果:")
+            print("\n解析结果:")
             if "name" in data:
                 print(f"  股票名称: {data.get('name')}")
             if "nowPri" in data:
                 print(f"  当前价格: {data.get('nowPri')}")
             if "code" in data:
                 print(f"  股票代码: {data.get('code')}")
-            print(f"\n[PASS] call_tool 执行成功并返回数据")
+            print("\n[PASS] call_tool 执行成功并返回数据")
         else:
-            print(f"\n[PASS] call_tool 执行成功 (返回非对象数据)")
+            print("\n[PASS] call_tool 执行成功 (返回非对象数据)")
     except json.JSONDecodeError:
         # 可能返回的是文本格式
         if "600519" in text or "贵州茅台" in text or "error" in text.lower():
-            print(f"\n[PASS] call_tool 执行成功 (返回文本)")
+            print("\n[PASS] call_tool 执行成功 (返回文本)")
         else:
-            print(f"\n[WARN] 返回非 JSON 格式，但工具调用链路正确")
+            print("\n[WARN] 返回非 JSON 格式，但工具调用链路正确")
 
     print("=" * 60 + "\n")
 
@@ -196,7 +199,7 @@ async def test_tool_not_found(session):
         result = await session.call_tool("market_data.nonexistent_tool", {"symbol": "600519"})
         text = result.content[0].text
         print(f"返回: {text[:200]}")
-        
+
         # 检查是否包含错误信息
         if "error" in text.lower() or "不存在" in text or "not found" in text.lower():
             print("[PASS] 不存在的工具返回正确错误")
@@ -221,7 +224,7 @@ async def test_full_workflow(session):
     response = await session.list_resources()
     resources = response.resources
     print(f"发现 {len(resources)} 个 Skill Resource")
-    
+
     # 找到 market_data
     market_data_resource = None
     for r in resources:
@@ -235,7 +238,7 @@ async def test_full_workflow(session):
     print("\n--- Step 2: read_resource ---")
     result = await session.read_resource("skill://market_data")
     content = result.contents[0]
-    text = content.text if hasattr(content, 'text') else str(content)
+    text = content.text if hasattr(content, "text") else str(content)
     print(f"[OK] 读取 SKILL.md ({len(text)} 字符)")
 
     # Step 3: list_tools
@@ -243,7 +246,7 @@ async def test_full_workflow(session):
     response = await session.list_tools()
     tools = response.tools
     print(f"[OK] 获取 {len(tools)} 个工具")
-    
+
     # 找到 get_quote 工具
     get_quote_tool = None
     for t in tools:
@@ -257,7 +260,7 @@ async def test_full_workflow(session):
     print("\n--- Step 4: call_tool ---")
     result = await session.call_tool("market_data.get_quote", {"symbol": "600519"})
     text = result.content[0].text
-    print(f"[OK] 工具执行成功")
+    print("[OK] 工具执行成功")
     print(f"返回前 300 字符:\n{text[:300]}...")
 
     print("\n" + "=" * 60)
@@ -274,7 +277,7 @@ async def test_multiple_skills(session):
     # 读取第一个 Resource
     print("\n--- 读取 market_data ---")
     await session.read_resource("skill://market_data")
-    
+
     # 读取第二个 Resource
     print("\n--- 读取 financial_analysis ---")
     try:
@@ -287,14 +290,14 @@ async def test_multiple_skills(session):
     print("\n--- 检查工具列表 ---")
     response = await session.list_tools()
     tools = response.tools
-    
+
     print(f"共有 {len(tools)} 个工具:")
     market_data_tools = [t for t in tools if t.name.startswith("market_data.")]
     financial_analysis_tools = [t for t in tools if t.name.startswith("financial_analysis.")]
-    
+
     print(f"  - market_data 工具: {len(market_data_tools)} 个")
     print(f"  - financial_analysis 工具: {len(financial_analysis_tools)} 个")
-    
+
     for t in tools[:10]:  # 只显示前 10 个
         print(f"    - {t.name}")
     if len(tools) > 10:
@@ -350,6 +353,7 @@ async def main():
     except Exception as e:
         print(f"\n[FATAL] 测试失败: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

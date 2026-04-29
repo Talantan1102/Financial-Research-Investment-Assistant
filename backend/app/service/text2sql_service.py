@@ -14,16 +14,18 @@ Text2SQL Service - 自然语言转 SQL 查询服务
 import json
 import logging
 import re
-from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
 from openai import OpenAI
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 class QueryIntent(Enum):
     """查询意图类型"""
+
     STATS = "stats"  # 统计查询
     TREND = "trend"  # 趋势分析
     COMPARISON = "comparison"  # 对比分析
@@ -33,13 +35,14 @@ class QueryIntent(Enum):
 @dataclass
 class SQLResult:
     """SQL 查询结果"""
+
     success: bool
     sql: str
     explanation: str
-    data: List[Dict]
-    columns: List[str]
+    data: list[dict]
+    columns: list[str]
     visualization_hint: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class Text2SQLService:
@@ -55,24 +58,79 @@ class Text2SQLService:
 
     # 安全配置
     ALLOWED_KEYWORDS = [
-        'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'LIMIT',
-        'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'ON',
-        'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN',
-        'AS', 'DISTINCT', 'HAVING', 'UNION',
-        'COUNT', 'SUM', 'AVG', 'MAX', 'MIN',
-        'YEAR', 'MONTH', 'DATE', 'CAST', 'COALESCE',
-        'ASC', 'DESC', 'NULLS', 'FIRST', 'LAST',
-        'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
-        'IS', 'NULL', 'TRUE', 'FALSE'
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "GROUP BY",
+        "ORDER BY",
+        "LIMIT",
+        "JOIN",
+        "LEFT JOIN",
+        "RIGHT JOIN",
+        "INNER JOIN",
+        "ON",
+        "AND",
+        "OR",
+        "NOT",
+        "IN",
+        "LIKE",
+        "BETWEEN",
+        "AS",
+        "DISTINCT",
+        "HAVING",
+        "UNION",
+        "COUNT",
+        "SUM",
+        "AVG",
+        "MAX",
+        "MIN",
+        "YEAR",
+        "MONTH",
+        "DATE",
+        "CAST",
+        "COALESCE",
+        "ASC",
+        "DESC",
+        "NULLS",
+        "FIRST",
+        "LAST",
+        "CASE",
+        "WHEN",
+        "THEN",
+        "ELSE",
+        "END",
+        "IS",
+        "NULL",
+        "TRUE",
+        "FALSE",
     ]
 
     FORBIDDEN_KEYWORDS = [
-        'DROP', 'DELETE', 'UPDATE', 'INSERT', 'TRUNCATE',
-        'ALTER', 'CREATE', 'GRANT', 'REVOKE',
-        'EXEC', 'EXECUTE', 'XP_', 'SP_',
-        '--', '/*', '*/', ';--', 'UNION ALL SELECT',
-        'INFORMATION_SCHEMA', 'SYS.', 'SYSOBJECTS',
-        'WAITFOR', 'DELAY', 'BENCHMARK', 'SLEEP'
+        "DROP",
+        "DELETE",
+        "UPDATE",
+        "INSERT",
+        "TRUNCATE",
+        "ALTER",
+        "CREATE",
+        "GRANT",
+        "REVOKE",
+        "EXEC",
+        "EXECUTE",
+        "XP_",
+        "SP_",
+        "--",
+        "/*",
+        "*/",
+        ";--",
+        "UNION ALL SELECT",
+        "INFORMATION_SCHEMA",
+        "SYS.",
+        "SYSOBJECTS",
+        "WAITFOR",
+        "DELAY",
+        "BENCHMARK",
+        "SLEEP",
     ]
 
     # 数据库 Schema 定义
@@ -169,8 +227,8 @@ class Text2SQLService:
         self,
         llm_api_key: str,
         llm_base_url: str,
-        db_connection_string: Optional[str] = None,
-        model: str = "qwen-max"
+        db_connection_string: str | None = None,
+        model: str = "qwen-max",
     ):
         """
         初始化 Text2SQL 服务
@@ -196,18 +254,16 @@ class Text2SQLService:
         """初始化数据库连接"""
         try:
             from sqlalchemy import create_engine
+
             self.db_engine = create_engine(
-                self.db_connection_string,
-                pool_size=5,
-                max_overflow=10,
-                pool_pre_ping=True
+                self.db_connection_string, pool_size=5, max_overflow=10, pool_pre_ping=True
             )
             logging.info("Database connection initialized")
         except Exception as e:
             logging.error(f"Failed to initialize database connection: {e}")
             self.db_engine = None
 
-    def validate_sql(self, sql: str) -> Tuple[bool, str]:
+    def validate_sql(self, sql: str) -> tuple[bool, str]:
         """
         验证 SQL 安全性
 
@@ -228,20 +284,20 @@ class Text2SQLService:
                 return False, f"SQL 包含禁止的关键词: {keyword}"
 
         # 检查是否以 SELECT 开头
-        if not sql_upper.startswith('SELECT'):
+        if not sql_upper.startswith("SELECT"):
             return False, "SQL 必须以 SELECT 开头"
 
         # 检查是否包含多条语句
-        if ';' in sql[:-1]:  # 允许末尾的分号
+        if ";" in sql[:-1]:  # 允许末尾的分号
             return False, "不允许多条 SQL 语句"
 
         # 检查注释
-        if '--' in sql or '/*' in sql:
+        if "--" in sql or "/*" in sql:
             return False, "SQL 中不允许注释"
 
         return True, ""
 
-    def _extract_json_from_response(self, content: str) -> Dict[str, Any]:
+    def _extract_json_from_response(self, content: str) -> dict[str, Any]:
         """
         从 LLM 响应中提取 JSON
 
@@ -268,7 +324,7 @@ class Text2SQLService:
             pass
 
         # 尝试从 markdown 代码块中提取
-        code_block_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', content)
+        code_block_match = re.search(r"```(?:json)?\s*\n?([\s\S]*?)\n?```", content)
         if code_block_match:
             try:
                 return json.loads(code_block_match.group(1).strip())
@@ -276,7 +332,7 @@ class Text2SQLService:
                 pass
 
         # 尝试找到 JSON 对象
-        json_match = re.search(r'\{[\s\S]*\}', content)
+        json_match = re.search(r"\{[\s\S]*\}", content)
         if json_match:
             try:
                 return json.loads(json_match.group(0))
@@ -285,7 +341,7 @@ class Text2SQLService:
 
         raise ValueError(f"无法从响应中提取有效的 JSON: {content[:200]}...")
 
-    async def generate_sql(self, question: str, intent: str = "stats") -> Dict[str, Any]:
+    async def generate_sql(self, question: str, intent: str = "stats") -> dict[str, Any]:
         """
         使用 LLM 生成 SQL
 
@@ -297,19 +353,20 @@ class Text2SQLService:
             生成结果
         """
         prompt = self.TEXT2SQL_PROMPT.format(
-            schema=self.SCHEMA_DEFINITION,
-            question=question,
-            intent=intent
+            schema=self.SCHEMA_DEFINITION, question=question, intent=intent
         )
 
         try:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "你是一个专业的 SQL 专家，擅长将自然语言转换为安全的 SQL 查询。请只返回 JSON 格式的响应，不要添加任何额外文字。"},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的 SQL 专家，擅长将自然语言转换为安全的 SQL 查询。请只返回 JSON 格式的响应，不要添加任何额外文字。",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
-                temperature=0.1
+                temperature=0.1,
             )
 
             content = response.choices[0].message.content
@@ -321,7 +378,7 @@ class Text2SQLService:
                     "explanation": "LLM 返回空响应",
                     "expected_columns": [],
                     "visualization_hint": "none",
-                    "confidence": 0.0
+                    "confidence": 0.0,
                 }
 
             result = self._extract_json_from_response(content)
@@ -331,7 +388,7 @@ class Text2SQLService:
                 "explanation": result.get("explanation", ""),
                 "expected_columns": result.get("expected_columns", []),
                 "visualization_hint": result.get("visualization_hint", "table"),
-                "confidence": result.get("confidence", 0.5)
+                "confidence": result.get("confidence", 0.5),
             }
 
         except ValueError as e:
@@ -341,7 +398,7 @@ class Text2SQLService:
                 "explanation": str(e),
                 "expected_columns": [],
                 "visualization_hint": "none",
-                "confidence": 0.0
+                "confidence": 0.0,
             }
         except json.JSONDecodeError as e:
             logging.error(f"Failed to parse LLM response: {e}")
@@ -350,7 +407,7 @@ class Text2SQLService:
                 "explanation": f"解析响应失败: {e}",
                 "expected_columns": [],
                 "visualization_hint": "none",
-                "confidence": 0.0
+                "confidence": 0.0,
             }
         except Exception as e:
             logging.error(f"Error generating SQL: {e}")
@@ -359,10 +416,10 @@ class Text2SQLService:
                 "explanation": f"生成 SQL 失败: {e}",
                 "expected_columns": [],
                 "visualization_hint": "none",
-                "confidence": 0.0
+                "confidence": 0.0,
             }
 
-    def execute_sql(self, sql: str) -> Tuple[List[Dict], List[str], Optional[str]]:
+    def execute_sql(self, sql: str) -> tuple[list[dict], list[str], str | None]:
         """
         安全执行 SQL 查询
 
@@ -383,6 +440,7 @@ class Text2SQLService:
 
         try:
             from sqlalchemy import text
+
             with self.db_engine.connect() as conn:
                 result = conn.execute(text(sql))
                 columns = list(result.keys())
@@ -392,7 +450,7 @@ class Text2SQLService:
             logging.error(f"SQL execution error: {e}")
             return [], [], str(e)
 
-    def _get_mock_data(self, sql: str) -> Tuple[List[Dict], List[str], Optional[str]]:
+    def _get_mock_data(self, sql: str) -> tuple[list[dict], list[str], str | None]:
         """
         返回模拟数据（用于演示和测试）
 
@@ -405,42 +463,149 @@ class Text2SQLService:
         sql_lower = sql.lower()
 
         # 根据 SQL 内容返回不同的模拟数据
-        if 'industry_stats' in sql_lower:
-            if 'year' in sql_lower and ('group by' in sql_lower or 'order by' in sql_lower):
+        if "industry_stats" in sql_lower:
+            if "year" in sql_lower and ("group by" in sql_lower or "order by" in sql_lower):
                 # 时间序列数据
                 data = [
-                    {"year": 2020, "metric_value": 136.7, "industry_name": "新能源汽车", "unit": "万辆"},
-                    {"year": 2021, "metric_value": 352.1, "industry_name": "新能源汽车", "unit": "万辆"},
-                    {"year": 2022, "metric_value": 688.7, "industry_name": "新能源汽车", "unit": "万辆"},
-                    {"year": 2023, "metric_value": 949.5, "industry_name": "新能源汽车", "unit": "万辆"},
-                    {"year": 2024, "metric_value": 1200.0, "industry_name": "新能源汽车", "unit": "万辆"},
+                    {
+                        "year": 2020,
+                        "metric_value": 136.7,
+                        "industry_name": "新能源汽车",
+                        "unit": "万辆",
+                    },
+                    {
+                        "year": 2021,
+                        "metric_value": 352.1,
+                        "industry_name": "新能源汽车",
+                        "unit": "万辆",
+                    },
+                    {
+                        "year": 2022,
+                        "metric_value": 688.7,
+                        "industry_name": "新能源汽车",
+                        "unit": "万辆",
+                    },
+                    {
+                        "year": 2023,
+                        "metric_value": 949.5,
+                        "industry_name": "新能源汽车",
+                        "unit": "万辆",
+                    },
+                    {
+                        "year": 2024,
+                        "metric_value": 1200.0,
+                        "industry_name": "新能源汽车",
+                        "unit": "万辆",
+                    },
                 ]
                 columns = ["year", "metric_value", "industry_name", "unit"]
             else:
                 data = [
-                    {"industry_name": "新能源汽车", "metric_name": "销量", "metric_value": 949.5, "unit": "万辆", "year": 2023},
-                    {"industry_name": "新能源汽车", "metric_name": "市场渗透率", "metric_value": 35.8, "unit": "%", "year": 2023},
-                    {"industry_name": "新能源汽车", "metric_name": "出口量", "metric_value": 120.3, "unit": "万辆", "year": 2023},
-                    {"industry_name": "动力电池", "metric_name": "装车量", "metric_value": 387.7, "unit": "GWh", "year": 2023},
-                    {"industry_name": "充电桩", "metric_name": "保有量", "metric_value": 859.6, "unit": "万台", "year": 2023},
+                    {
+                        "industry_name": "新能源汽车",
+                        "metric_name": "销量",
+                        "metric_value": 949.5,
+                        "unit": "万辆",
+                        "year": 2023,
+                    },
+                    {
+                        "industry_name": "新能源汽车",
+                        "metric_name": "市场渗透率",
+                        "metric_value": 35.8,
+                        "unit": "%",
+                        "year": 2023,
+                    },
+                    {
+                        "industry_name": "新能源汽车",
+                        "metric_name": "出口量",
+                        "metric_value": 120.3,
+                        "unit": "万辆",
+                        "year": 2023,
+                    },
+                    {
+                        "industry_name": "动力电池",
+                        "metric_name": "装车量",
+                        "metric_value": 387.7,
+                        "unit": "GWh",
+                        "year": 2023,
+                    },
+                    {
+                        "industry_name": "充电桩",
+                        "metric_name": "保有量",
+                        "metric_value": 859.6,
+                        "unit": "万台",
+                        "year": 2023,
+                    },
                 ]
                 columns = ["industry_name", "metric_name", "metric_value", "unit", "year"]
 
-        elif 'company_data' in sql_lower:
+        elif "company_data" in sql_lower:
             data = [
-                {"company_name": "比亚迪", "industry": "新能源汽车", "revenue": 6023.15, "net_profit": 300.41, "market_share": 35.0, "year": 2023},
-                {"company_name": "特斯拉中国", "industry": "新能源汽车", "revenue": 2100.0, "market_share": 15.5, "year": 2023},
-                {"company_name": "理想汽车", "industry": "新能源汽车", "revenue": 1238.5, "net_profit": 118.1, "market_share": 5.0, "year": 2023},
-                {"company_name": "蔚来汽车", "industry": "新能源汽车", "revenue": 556.18, "net_profit": -207.2, "market_share": 3.5, "year": 2023},
-                {"company_name": "宁德时代", "industry": "动力电池", "revenue": 4009.17, "net_profit": 441.21, "market_share": 43.11, "year": 2023},
+                {
+                    "company_name": "比亚迪",
+                    "industry": "新能源汽车",
+                    "revenue": 6023.15,
+                    "net_profit": 300.41,
+                    "market_share": 35.0,
+                    "year": 2023,
+                },
+                {
+                    "company_name": "特斯拉中国",
+                    "industry": "新能源汽车",
+                    "revenue": 2100.0,
+                    "market_share": 15.5,
+                    "year": 2023,
+                },
+                {
+                    "company_name": "理想汽车",
+                    "industry": "新能源汽车",
+                    "revenue": 1238.5,
+                    "net_profit": 118.1,
+                    "market_share": 5.0,
+                    "year": 2023,
+                },
+                {
+                    "company_name": "蔚来汽车",
+                    "industry": "新能源汽车",
+                    "revenue": 556.18,
+                    "net_profit": -207.2,
+                    "market_share": 3.5,
+                    "year": 2023,
+                },
+                {
+                    "company_name": "宁德时代",
+                    "industry": "动力电池",
+                    "revenue": 4009.17,
+                    "net_profit": 441.21,
+                    "market_share": 43.11,
+                    "year": 2023,
+                },
             ]
             columns = ["company_name", "industry", "revenue", "net_profit", "market_share", "year"]
 
-        elif 'policy_data' in sql_lower:
+        elif "policy_data" in sql_lower:
             data = [
-                {"policy_name": "关于延续和优化新能源汽车车辆购置税减免政策的公告", "department": "财政部", "publish_date": "2023-06-21", "industry": "新能源汽车", "impact_level": "重大"},
-                {"policy_name": "新能源汽车产业发展规划(2021-2035年)", "department": "国务院办公厅", "publish_date": "2020-11-02", "industry": "新能源汽车", "impact_level": "重大"},
-                {"policy_name": "关于进一步构建高质量充电基础设施体系的指导意见", "department": "国务院办公厅", "publish_date": "2023-06-19", "industry": "充电桩", "impact_level": "重大"},
+                {
+                    "policy_name": "关于延续和优化新能源汽车车辆购置税减免政策的公告",
+                    "department": "财政部",
+                    "publish_date": "2023-06-21",
+                    "industry": "新能源汽车",
+                    "impact_level": "重大",
+                },
+                {
+                    "policy_name": "新能源汽车产业发展规划(2021-2035年)",
+                    "department": "国务院办公厅",
+                    "publish_date": "2020-11-02",
+                    "industry": "新能源汽车",
+                    "impact_level": "重大",
+                },
+                {
+                    "policy_name": "关于进一步构建高质量充电基础设施体系的指导意见",
+                    "department": "国务院办公厅",
+                    "publish_date": "2023-06-19",
+                    "industry": "充电桩",
+                    "impact_level": "重大",
+                },
             ]
             columns = ["policy_name", "department", "publish_date", "industry", "impact_level"]
 
@@ -450,7 +615,7 @@ class Text2SQLService:
 
         return data, columns, None
 
-    async def query(self, question: str, intent: str = "stats") -> Dict[str, Any]:
+    async def query(self, question: str, intent: str = "stats") -> dict[str, Any]:
         """
         执行 Text2SQL 查询的主入口
 
@@ -472,7 +637,7 @@ class Text2SQLService:
                 "sql": "",
                 "data": [],
                 "columns": [],
-                "visualization_hint": "none"
+                "visualization_hint": "none",
             }
 
         # 2. 验证 SQL
@@ -484,7 +649,7 @@ class Text2SQLService:
                 "sql": sql,
                 "data": [],
                 "columns": [],
-                "visualization_hint": "none"
+                "visualization_hint": "none",
             }
 
         # 3. 执行查询
@@ -496,7 +661,7 @@ class Text2SQLService:
                 "sql": sql,
                 "data": [],
                 "columns": columns,
-                "visualization_hint": "none"
+                "visualization_hint": "none",
             }
 
         # 4. 返回结果
@@ -508,19 +673,17 @@ class Text2SQLService:
             "columns": columns,
             "visualization_hint": generation_result.get("visualization_hint", "table"),
             "confidence": generation_result.get("confidence", 0.5),
-            "row_count": len(data)
+            "row_count": len(data),
         }
 
 
 # 工厂函数
 def create_text2sql_service(
-    llm_api_key: str,
-    llm_base_url: str,
-    db_connection_string: Optional[str] = None
+    llm_api_key: str, llm_base_url: str, db_connection_string: str | None = None
 ) -> Text2SQLService:
     """创建 Text2SQL 服务实例"""
     return Text2SQLService(
         llm_api_key=llm_api_key,
         llm_base_url=llm_base_url,
-        db_connection_string=db_connection_string
+        db_connection_string=db_connection_string,
     )

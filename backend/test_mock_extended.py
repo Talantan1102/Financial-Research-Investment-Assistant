@@ -23,10 +23,9 @@ Mock Tushare 扩展功能测试脚本
     cd backend && python test_mock_extended.py
 """
 
+import math
 import os
 import sys
-import math
-import time
 
 # 强制启用 Mock 模式
 os.environ["USE_MOCK_TUSHARE"] = "true"
@@ -84,7 +83,9 @@ def assert_types(df: pd.DataFrame, checks: dict, name: str) -> bool:
         if expected_type == "str" and not isinstance(val, str):
             log_fail(f"{name}.{col} 应为字符串, 实际 {type(val)}")
             ok = False
-        elif expected_type == "float" and not (isinstance(val, (int, float)) or (isinstance(val, str) and val == "")):
+        elif expected_type == "float" and not (
+            isinstance(val, (int, float)) or (isinstance(val, str) and val == "")
+        ):
             log_fail(f"{name}.{col} 应为数值, 实际 {type(val)}")
             ok = False
     if ok:
@@ -99,7 +100,9 @@ def assert_range(df: pd.DataFrame, col: str, low: float, high: float, name: str)
     if series.empty:
         return True
     if series.min() < low or series.max() > high:
-        log_fail(f"{name}.{col} 超出范围 [{low}, {high}], 实际 [{series.min():.4f}, {series.max():.4f}]")
+        log_fail(
+            f"{name}.{col} 超出范围 [{low}, {high}], 实际 [{series.min():.4f}, {series.max():.4f}]"
+        )
         return False
     log_pass(f"{name}.{col} 数值范围合理 [{series.min():.4f}, {series.max():.4f}]")
     return True
@@ -141,8 +144,14 @@ def assert_income_reconcile(df: pd.DataFrame, name: str) -> bool:
 
 def assert_cashflow_reconcile(df: pd.DataFrame, name: str) -> bool:
     """现金流量表：期末现金 ≈ 期初现金 + 经营活动 + 投资活动 + 筹资活动 + 汇率影响"""
-    cols = ["c_cash_equ_beg_period", "c_cash_equ_end_period", "n_cashflow_act",
-            "n_cashflow_inv_act", "n_cashflow_fnc_act", "eff_fx_flu_cash"]
+    cols = [
+        "c_cash_equ_beg_period",
+        "c_cash_equ_end_period",
+        "n_cashflow_act",
+        "n_cashflow_inv_act",
+        "n_cashflow_fnc_act",
+        "eff_fx_flu_cash",
+    ]
     if not all(c in df.columns for c in cols):
         return True
     beg = pd.to_numeric(df["c_cash_equ_beg_period"], errors="coerce").fillna(0).iloc[0]
@@ -176,101 +185,274 @@ def run_tests():
     log_info("\n--- 测试 fina_indicator ---")
     df = api.fina_indicator(ts_code="600519.SH", period="20241231")
     all_ok &= assert_not_empty(df, "fina_indicator")
-    expected = ["ts_code", "ann_date", "end_date", "eps", "dt_eps", "revenue_ps",
-                "gross_margin", "current_ratio", "quick_ratio", "cash_ratio", "invturn_days",
-                "arturn_days", "inv_turn", "ar_turn", "ca_turn", "fa_turn", "assets_turn",
-                "op_income", "profit_dedt", "netprofit_margin", "bps", "ocfps", "rd_exp"]
+    expected = [
+        "ts_code",
+        "ann_date",
+        "end_date",
+        "eps",
+        "dt_eps",
+        "revenue_ps",
+        "gross_margin",
+        "current_ratio",
+        "quick_ratio",
+        "cash_ratio",
+        "invturn_days",
+        "arturn_days",
+        "inv_turn",
+        "ar_turn",
+        "ca_turn",
+        "fa_turn",
+        "assets_turn",
+        "op_income",
+        "profit_dedt",
+        "netprofit_margin",
+        "bps",
+        "ocfps",
+        "rd_exp",
+    ]
     all_ok &= assert_columns(df, expected, "fina_indicator")
     if not df.empty:
-        all_ok &= assert_types(df, {"ts_code": "str", "eps": "float", "gross_margin": "float"}, "fina_indicator")
+        all_ok &= assert_types(
+            df, {"ts_code": "str", "eps": "float", "gross_margin": "float"}, "fina_indicator"
+        )
 
     # ==================== 2. income ====================
     log_info("\n--- 测试 income ---")
     df = api.income(ts_code="000001.SZ", period="20241231")
     all_ok &= assert_not_empty(df, "income")
-    expected = ["ts_code", "ann_date", "f_ann_date", "end_date", "report_type", "comp_type",
-                "basic_eps", "diluted_eps", "total_revenue", "revenue", "total_cogs",
-                "oper_cost", "operate_profit", "non_oper_income", "non_oper_exp",
-                "total_profit", "income_tax", "n_income", "ebit", "ebitda"]
+    expected = [
+        "ts_code",
+        "ann_date",
+        "f_ann_date",
+        "end_date",
+        "report_type",
+        "comp_type",
+        "basic_eps",
+        "diluted_eps",
+        "total_revenue",
+        "revenue",
+        "total_cogs",
+        "oper_cost",
+        "operate_profit",
+        "non_oper_income",
+        "non_oper_exp",
+        "total_profit",
+        "income_tax",
+        "n_income",
+        "ebit",
+        "ebitda",
+    ]
     all_ok &= assert_columns(df, expected, "income")
     if not df.empty:
-        all_ok &= assert_types(df, {"ts_code": "str", "total_revenue": "float", "n_income": "float"}, "income")
+        all_ok &= assert_types(
+            df, {"ts_code": "str", "total_revenue": "float", "n_income": "float"}, "income"
+        )
         all_ok &= assert_income_reconcile(df, "income")
 
     # ==================== 3. balancesheet ====================
     log_info("\n--- 测试 balancesheet ---")
     df = api.balancesheet(ts_code="600519.SH", period="20241231")
     all_ok &= assert_not_empty(df, "balancesheet")
-    expected = ["ts_code", "ann_date", "f_ann_date", "end_date", "report_type", "comp_type",
-                "total_share", "cap_rese", "undistr_porfit", "surplus_rese", "special_rese",
-                "money_cap", "trad_asset", "notes_receiv", "accounts_receiv", "oth_receiv",
-                "prepayment", "inventories", "total_cur_assets", "fa_avail_for_sale",
-                "lt_eqt_invest", "fix_assets", "intan_assets", "rd", "goodwill", "total_nca",
-                "total_assets", "lt_borr", "st_borr", "notes_payable", "acct_payable",
-                "adv_receipts", "taxes_payable", "total_cur_liab", "lt_payable", "total_ncl",
-                "total_liab_eqt"]
+    expected = [
+        "ts_code",
+        "ann_date",
+        "f_ann_date",
+        "end_date",
+        "report_type",
+        "comp_type",
+        "total_share",
+        "cap_rese",
+        "undistr_porfit",
+        "surplus_rese",
+        "special_rese",
+        "money_cap",
+        "trad_asset",
+        "notes_receiv",
+        "accounts_receiv",
+        "oth_receiv",
+        "prepayment",
+        "inventories",
+        "total_cur_assets",
+        "fa_avail_for_sale",
+        "lt_eqt_invest",
+        "fix_assets",
+        "intan_assets",
+        "rd",
+        "goodwill",
+        "total_nca",
+        "total_assets",
+        "lt_borr",
+        "st_borr",
+        "notes_payable",
+        "acct_payable",
+        "adv_receipts",
+        "taxes_payable",
+        "total_cur_liab",
+        "lt_payable",
+        "total_ncl",
+        "total_liab_eqt",
+    ]
     all_ok &= assert_columns(df, expected, "balancesheet")
     if not df.empty:
-        all_ok &= assert_types(df, {"ts_code": "str", "total_assets": "float", "total_liab_eqt": "float"}, "balancesheet")
+        all_ok &= assert_types(
+            df,
+            {"ts_code": "str", "total_assets": "float", "total_liab_eqt": "float"},
+            "balancesheet",
+        )
         all_ok &= assert_accounting_equation(df, "balancesheet")
 
     # ==================== 4. cashflow ====================
     log_info("\n--- 测试 cashflow ---")
     df = api.cashflow(ts_code="000001.SZ", period="20241231")
     all_ok &= assert_not_empty(df, "cashflow")
-    expected = ["ts_code", "ann_date", "f_ann_date", "end_date", "comp_type", "report_type",
-                "net_profit", "finan_exp", "c_fr_sale_sg", "recp_tax_rends",
-                "c_inf_fr_operate_a", "c_paid_goods_s", "c_paid_to_for_empl",
-                "c_paid_for_taxes", "st_cash_out_act", "n_cashflow_act",
-                "c_disp_withdrwl_invest", "stot_cash_inflow_inv_act", "c_pay_acq_const_fiolta",
-                "stot_cash_outflow_inv_act", "n_cashflow_inv_act", "c_recp_borrow",
-                "stot_cash_inflow_fnc_act", "c_prepay_debt", "stot_cash_outflow_fnc_act",
-                "n_cashflow_fnc_act", "eff_fx_flu_cash", "c_cash_equ_beg_period", "c_cash_equ_end_period"]
+    expected = [
+        "ts_code",
+        "ann_date",
+        "f_ann_date",
+        "end_date",
+        "comp_type",
+        "report_type",
+        "net_profit",
+        "finan_exp",
+        "c_fr_sale_sg",
+        "recp_tax_rends",
+        "c_inf_fr_operate_a",
+        "c_paid_goods_s",
+        "c_paid_to_for_empl",
+        "c_paid_for_taxes",
+        "st_cash_out_act",
+        "n_cashflow_act",
+        "c_disp_withdrwl_invest",
+        "stot_cash_inflow_inv_act",
+        "c_pay_acq_const_fiolta",
+        "stot_cash_outflow_inv_act",
+        "n_cashflow_inv_act",
+        "c_recp_borrow",
+        "stot_cash_inflow_fnc_act",
+        "c_prepay_debt",
+        "stot_cash_outflow_fnc_act",
+        "n_cashflow_fnc_act",
+        "eff_fx_flu_cash",
+        "c_cash_equ_beg_period",
+        "c_cash_equ_end_period",
+    ]
     all_ok &= assert_columns(df, expected, "cashflow")
     if not df.empty:
-        all_ok &= assert_types(df, {"ts_code": "str", "n_cashflow_act": "float", "c_cash_equ_end_period": "float"}, "cashflow")
+        all_ok &= assert_types(
+            df,
+            {"ts_code": "str", "n_cashflow_act": "float", "c_cash_equ_end_period": "float"},
+            "cashflow",
+        )
         all_ok &= assert_cashflow_reconcile(df, "cashflow")
 
     # ==================== 5. moneyflow ====================
     log_info("\n--- 测试 moneyflow ---")
     df = api.moneyflow(ts_code="600519.SH", trade_date="20241231")
     all_ok &= assert_not_empty(df, "moneyflow")
-    expected = ["ts_code", "trade_date", "buy_sm_vol", "buy_sm_amount", "sell_sm_vol",
-                "sell_sm_amount", "buy_md_vol", "buy_md_amount", "sell_md_vol",
-                "sell_md_amount", "buy_lg_vol", "buy_lg_amount", "sell_lg_vol",
-                "sell_lg_amount", "buy_elg_vol", "buy_elg_amount", "sell_elg_vol",
-                "sell_elg_amount", "net_mf_vol", "net_mf_amount", "trade_count"]
+    expected = [
+        "ts_code",
+        "trade_date",
+        "buy_sm_vol",
+        "buy_sm_amount",
+        "sell_sm_vol",
+        "sell_sm_amount",
+        "buy_md_vol",
+        "buy_md_amount",
+        "sell_md_vol",
+        "sell_md_amount",
+        "buy_lg_vol",
+        "buy_lg_amount",
+        "sell_lg_vol",
+        "sell_lg_amount",
+        "buy_elg_vol",
+        "buy_elg_amount",
+        "sell_elg_vol",
+        "sell_elg_amount",
+        "net_mf_vol",
+        "net_mf_amount",
+        "trade_count",
+    ]
     all_ok &= assert_columns(df, expected, "moneyflow")
     if not df.empty:
-        all_ok &= assert_types(df, {"ts_code": "str", "net_mf_amount": "float", "trade_count": "float"}, "moneyflow")
+        all_ok &= assert_types(
+            df, {"ts_code": "str", "net_mf_amount": "float", "trade_count": "float"}, "moneyflow"
+        )
 
     # ==================== 6. top_list ====================
     log_info("\n--- 测试 top_list ---")
     df = api.top_list(trade_date="20241231")
     all_ok &= assert_not_empty(df, "top_list")
-    expected = ["trade_date", "ts_code", "name", "close", "pct_chg", "turnover_rate",
-                "amount", "l_buy", "l_sell", "net_amount", "net_rate", "amount_rate", "reason"]
+    expected = [
+        "trade_date",
+        "ts_code",
+        "name",
+        "close",
+        "pct_chg",
+        "turnover_rate",
+        "amount",
+        "l_buy",
+        "l_sell",
+        "net_amount",
+        "net_rate",
+        "amount_rate",
+        "reason",
+    ]
     all_ok &= assert_columns(df, expected, "top_list")
     if not df.empty:
-        all_ok &= assert_types(df, {"ts_code": "str", "close": "float", "net_amount": "float"}, "top_list")
+        all_ok &= assert_types(
+            df, {"ts_code": "str", "close": "float", "net_amount": "float"}, "top_list"
+        )
 
     # ==================== 7. limit_list ====================
     log_info("\n--- 测试 limit_list ---")
     df = api.limit_list(trade_date="20241231")
     all_ok &= assert_not_empty(df, "limit_list")
-    expected = ["trade_date", "ts_code", "name", "industry", "close", "pct_chg", "amount",
-                "limit_amount", "float_mv", "total_mv", "turnover_ratio", "fd_amount",
-                "first_time", "last_time", "open_times", "up_stat", "limit_type"]
+    expected = [
+        "trade_date",
+        "ts_code",
+        "name",
+        "industry",
+        "close",
+        "pct_chg",
+        "amount",
+        "limit_amount",
+        "float_mv",
+        "total_mv",
+        "turnover_ratio",
+        "fd_amount",
+        "first_time",
+        "last_time",
+        "open_times",
+        "up_stat",
+        "limit_type",
+    ]
     all_ok &= assert_columns(df, expected, "limit_list")
     if not df.empty:
-        all_ok &= assert_types(df, {"ts_code": "str", "close": "float", "open_times": "float"}, "limit_list")
+        all_ok &= assert_types(
+            df, {"ts_code": "str", "close": "float", "open_times": "float"}, "limit_list"
+        )
 
     # ==================== 8. margin ====================
     log_info("\n--- 测试 margin ---")
     df = api.margin(ts_code="600519.SH", trade_date="20241231")
     all_ok &= assert_not_empty(df, "margin")
-    expected = ["trade_date", "ts_code", "rzye", "rqyl", "rzmre", "rqylc", "rzche",
-                "rqchl", "rqmcl", "szrje", "xzrje", "szrkje", "xzrkje", "rzrqye", "rzrqylc"]
+    expected = [
+        "trade_date",
+        "ts_code",
+        "rzye",
+        "rqyl",
+        "rzmre",
+        "rqylc",
+        "rzche",
+        "rqchl",
+        "rqmcl",
+        "szrje",
+        "xzrje",
+        "szrkje",
+        "xzrkje",
+        "rzrqye",
+        "rzrqylc",
+    ]
     all_ok &= assert_columns(df, expected, "margin")
     if not df.empty:
         all_ok &= assert_types(df, {"ts_code": "str", "rzye": "float", "rzrqye": "float"}, "margin")
@@ -279,11 +461,26 @@ def run_tests():
     log_info("\n--- 测试 moneyflow_hsgt ---")
     df = api.moneyflow_hsgt(trade_date="20241231")
     all_ok &= assert_not_empty(df, "moneyflow_hsgt")
-    expected = ["trade_date", "ggt_ss", "ggt_sz", "hgt_ltg", "hgt_cgtes", "hgt_cgtes_l",
-                "sgt_ltg", "sgt_cgtes", "sgt_cgtes_l", "north_money", "south_money"]
+    expected = [
+        "trade_date",
+        "ggt_ss",
+        "ggt_sz",
+        "hgt_ltg",
+        "hgt_cgtes",
+        "hgt_cgtes_l",
+        "sgt_ltg",
+        "sgt_cgtes",
+        "sgt_cgtes_l",
+        "north_money",
+        "south_money",
+    ]
     all_ok &= assert_columns(df, expected, "moneyflow_hsgt")
     if not df.empty:
-        all_ok &= assert_types(df, {"trade_date": "str", "north_money": "float", "south_money": "float"}, "moneyflow_hsgt")
+        all_ok &= assert_types(
+            df,
+            {"trade_date": "str", "north_money": "float", "south_money": "float"},
+            "moneyflow_hsgt",
+        )
 
     # ==================== 10. concept ====================
     log_info("\n--- 测试 concept ---")
@@ -307,12 +504,29 @@ def run_tests():
     log_info("\n--- 测试 stock_company ---")
     df = api.stock_company(ts_code="600519.SH")
     all_ok &= assert_not_empty(df, "stock_company")
-    expected = ["ts_code", "exchange", "chairman", "manager", "secretary",
-                "reg_capital", "setup_date", "province", "city", "introduction",
-                "website", "email", "office", "employees", "main_business", "business_scope"]
+    expected = [
+        "ts_code",
+        "exchange",
+        "chairman",
+        "manager",
+        "secretary",
+        "reg_capital",
+        "setup_date",
+        "province",
+        "city",
+        "introduction",
+        "website",
+        "email",
+        "office",
+        "employees",
+        "main_business",
+        "business_scope",
+    ]
     all_ok &= assert_columns(df, expected, "stock_company")
     if not df.empty:
-        all_ok &= assert_types(df, {"ts_code": "str", "exchange": "str", "reg_capital": "float"}, "stock_company")
+        all_ok &= assert_types(
+            df, {"ts_code": "str", "exchange": "str", "reg_capital": "float"}, "stock_company"
+        )
 
     log_info("\n========================================")
     if all_ok:

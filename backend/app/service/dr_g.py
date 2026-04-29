@@ -12,18 +12,17 @@ DeepResearch Service - 深度研究服务 (ReAct 版本)
 5. 图文混排输出 - 支持文字、图表、表格混合展示
 """
 
-import requests
-import json
-from openai import OpenAI
-import os
-import time
-import re
 import asyncio
 import hashlib
-from typing import Dict, Any, AsyncGenerator, List, Optional, Tuple
-from urllib.parse import urlparse
-from collections import Counter
+import json
 import logging
+import os
+import time
+from collections.abc import AsyncGenerator
+from typing import Any
+
+import requests
+from openai import OpenAI
 
 # --- Configuration ---
 SEARCH_API_KEY = os.getenv("BOCHA_API_KEY", "Bearer sk-392ef5953eaa4c43be43e6daab4e82a4")
@@ -35,10 +34,10 @@ MAX_CONCURRENT_SEARCHES = 3
 SEARCH_CACHE_TTL = 3600
 CONTENT_SIMILARITY_THRESHOLD = 0.8
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # --- 搜索缓存 ---
-_search_cache: Dict[str, Tuple[List, float]] = {}
+_search_cache: dict[str, tuple[list, float]] = {}
 
 
 def get_query_hash(query: str) -> str:
@@ -46,7 +45,7 @@ def get_query_hash(query: str) -> str:
     return hashlib.md5(query.strip().lower().encode()).hexdigest()
 
 
-def get_cached_search(query: str) -> Optional[List]:
+def get_cached_search(query: str) -> list | None:
     """获取缓存的搜索结果"""
     query_hash = get_query_hash(query)
     if query_hash in _search_cache:
@@ -59,7 +58,7 @@ def get_cached_search(query: str) -> Optional[List]:
     return None
 
 
-def set_cached_search(query: str, results: List):
+def set_cached_search(query: str, results: list):
     """缓存搜索结果"""
     query_hash = get_query_hash(query)
     _search_cache[query_hash] = (results, time.time())
@@ -82,7 +81,9 @@ def compute_content_similarity(text1: str, text2: str) -> float:
     return intersection / union if union > 0 else 0.0
 
 
-def is_content_duplicate(new_content: str, existing_contents: List[str], threshold: float = CONTENT_SIMILARITY_THRESHOLD) -> bool:
+def is_content_duplicate(
+    new_content: str, existing_contents: list[str], threshold: float = CONTENT_SIMILARITY_THRESHOLD
+) -> bool:
     """检查内容是否与已有内容重复"""
     for existing in existing_contents:
         if compute_content_similarity(new_content, existing) >= threshold:
@@ -90,8 +91,9 @@ def is_content_duplicate(new_content: str, existing_contents: List[str], thresho
     return False
 
 
-def serialize_event(event_data: Dict[str, Any]) -> str:
+def serialize_event(event_data: dict[str, Any]) -> str:
     """将事件数据序列化为JSON字符串"""
+
     def json_serializer(obj):
         if isinstance(obj, set):
             return list(obj)
@@ -120,11 +122,11 @@ class ResearchService:
 
     def __init__(
         self,
-        search_api_key: Optional[str] = None,
-        llm_api_key: Optional[str] = None,
-        llm_base_url: Optional[str] = None,
-        db_connection_string: Optional[str] = None,
-        use_react: bool = True
+        search_api_key: str | None = None,
+        llm_api_key: str | None = None,
+        llm_base_url: str | None = None,
+        db_connection_string: str | None = None,
+        use_react: bool = True,
     ):
         """
         初始化研究服务
@@ -161,7 +163,7 @@ class ResearchService:
                 llm_api_key=self.llm_api_key,
                 llm_base_url=self.llm_base_url,
                 max_steps=10,
-                model="qwen-max"
+                model="qwen-max",
             )
 
             # 创建工具执行器
@@ -169,7 +171,7 @@ class ResearchService:
                 search_api_key=self.search_api_key,
                 llm_api_key=self.llm_api_key,
                 llm_base_url=self.llm_base_url,
-                db_connection_string=self.db_connection_string
+                db_connection_string=self.db_connection_string,
             )
 
             # 绑定工具处理器
@@ -184,9 +186,9 @@ class ResearchService:
         self,
         query: str,
         max_iterations: int = 3,
-        kb_name: Optional[str] = None,
+        kb_name: str | None = None,
         search_web: bool = True,
-        search_local: bool = True
+        search_local: bool = True,
     ) -> AsyncGenerator[str, None]:
         """
         执行研究流程并以流式方式返回结果
@@ -216,23 +218,21 @@ class ResearchService:
         self,
         query: str,
         max_iterations: int,
-        kb_name: Optional[str],
+        kb_name: str | None,
         search_web: bool,
-        search_local: bool
+        search_local: bool,
     ) -> AsyncGenerator[str, None]:
         """使用 ReAct 架构执行研究"""
-        yield serialize_event({
-            "type": "status",
-            "content": "启动 ReAct 智能研究引擎",
-            "mode": "react"
-        })
+        yield serialize_event(
+            {"type": "status", "content": "启动 ReAct 智能研究引擎", "mode": "react"}
+        )
 
         # 准备初始上下文
         initial_context = {
             "kb_name": kb_name,
             "search_web": search_web,
             "search_local": search_local,
-            "max_iterations": max_iterations
+            "max_iterations": max_iterations,
         }
 
         memory = []
@@ -245,7 +245,13 @@ class ResearchService:
                 event_type = event.get("type", "")
 
                 # 转发大部分事件到前端
-                if event_type in ["react_start", "thinking_step", "thought", "action", "observation"]:
+                if event_type in [
+                    "react_start",
+                    "thinking_step",
+                    "thought",
+                    "action",
+                    "observation",
+                ]:
                     yield serialize_event(event)
 
                 # 处理搜索结果
@@ -277,32 +283,26 @@ class ResearchService:
                 ):
                     yield report_event
             else:
-                yield serialize_event({
-                    "type": "error",
-                    "content": "未能收集到足够的研究信息"
-                })
+                yield serialize_event({"type": "error", "content": "未能收集到足够的研究信息"})
 
         except Exception as e:
             logging.error(f"ReAct research error: {e}")
-            yield serialize_event({
-                "type": "error",
-                "content": f"研究过程出错: {str(e)}"
-            })
+            yield serialize_event({"type": "error", "content": f"研究过程出错: {str(e)}"})
 
     async def _research_classic(
         self,
         query: str,
         max_iterations: int,
-        kb_name: Optional[str],
+        kb_name: str | None,
         search_web: bool,
-        search_local: bool
+        search_local: bool,
     ) -> AsyncGenerator[str, None]:
         """经典研究模式 (保持向后兼容)"""
         memory = []
         processed_urls = set()
         current_subqueries = []
         all_subqueries_history = set()
-        llm_system_prompt = f"你是一位专门的行业的资深研究助理。"
+        llm_system_prompt = "你是一位专门的行业的资深研究助理。"
 
         sources = []
         if search_web:
@@ -310,11 +310,13 @@ class ResearchService:
         if search_local and kb_name:
             sources.append(f"知识库({kb_name})")
 
-        yield serialize_event({
-            "type": "status",
-            "content": f"开始研究，数据源: {', '.join(sources) or '网络'}",
-            "query": query
-        })
+        yield serialize_event(
+            {
+                "type": "status",
+                "content": f"开始研究，数据源: {', '.join(sources) or '网络'}",
+                "query": query,
+            }
+        )
 
         for iteration in range(max_iterations):
             yield serialize_event({"type": "status", "content": f"开始第 {iteration + 1} 次迭代"})
@@ -354,7 +356,7 @@ class ResearchService:
                     qwen_llm,
                     plan_prompt,
                     response_format={"type": "json_object"},
-                    system_message_content=llm_system_prompt
+                    system_message_content=llm_system_prompt,
                 )
 
                 if not llm_response:
@@ -362,11 +364,13 @@ class ResearchService:
                 else:
                     try:
                         plan_result = json.loads(llm_response)
-                        current_subqueries = plan_result.get('subqueries', [])
+                        current_subqueries = plan_result.get("subqueries", [])
                         if not current_subqueries:
                             current_subqueries = [query]
                         else:
-                            yield serialize_event({"type": "subqueries", "content": current_subqueries})
+                            yield serialize_event(
+                                {"type": "subqueries", "content": current_subqueries}
+                            )
                     except:
                         current_subqueries = [query]
 
@@ -374,14 +378,18 @@ class ResearchService:
                 break
 
             # 过滤已搜索的子问题
-            subqueries_to_search = [q for q in current_subqueries if q and q not in all_subqueries_history]
+            subqueries_to_search = [
+                q for q in current_subqueries if q and q not in all_subqueries_history
+            ]
 
             # 执行搜索
             if subqueries_to_search:
-                yield serialize_event({
-                    "type": "status",
-                    "content": f"并行搜索 {len(subqueries_to_search)} 个子问题..."
-                })
+                yield serialize_event(
+                    {
+                        "type": "status",
+                        "content": f"并行搜索 {len(subqueries_to_search)} 个子问题...",
+                    }
+                )
 
                 for sq in subqueries_to_search:
                     all_subqueries_history.add(sq)
@@ -392,10 +400,10 @@ class ResearchService:
                     semaphore,
                     kb_name=kb_name,
                     search_web=search_web,
-                    search_local=search_local
+                    search_local=search_local,
                 )
 
-                existing_contents = [item['summary'] for item in memory]
+                existing_contents = [item["summary"] for item in memory]
                 new_results_count = 0
 
                 for item in search_results_list:
@@ -403,11 +411,11 @@ class ResearchService:
                         subquery, search_results, source = item
                     else:
                         subquery, search_results = item
-                        source = 'web'
+                        source = "web"
 
                     for result in search_results:
-                        url = result.get('url')
-                        summary = result.get('summary', '') or result.get('snippet', '')
+                        url = result.get("url")
+                        summary = result.get("summary", "") or result.get("snippet", "")
 
                         if not url or not summary or url in processed_urls:
                             continue
@@ -418,27 +426,25 @@ class ResearchService:
                         processed_urls.add(url)
                         existing_contents.append(summary)
 
-                        memory.append({
-                            "subquery": subquery,
-                            "url": url,
-                            "name": result.get('name', 'N/A'),
-                            "summary": summary,
-                            "snippet": result.get('snippet', ''),
-                            "siteName": result.get('siteName', 'N/A'),
-                            "siteIcon": result.get('siteIcon', 'N/A'),
-                            "source": source
-                        })
+                        memory.append(
+                            {
+                                "subquery": subquery,
+                                "url": url,
+                                "name": result.get("name", "N/A"),
+                                "summary": summary,
+                                "snippet": result.get("snippet", ""),
+                                "siteName": result.get("siteName", "N/A"),
+                                "siteIcon": result.get("siteIcon", "N/A"),
+                                "source": source,
+                            }
+                        )
                         new_results_count += 1
 
-                        yield serialize_event({
-                            "type": "search_result_item",
-                            "result": memory[-1]
-                        })
+                        yield serialize_event({"type": "search_result_item", "result": memory[-1]})
 
-                yield serialize_event({
-                    "type": "status",
-                    "content": f"本轮获取 {new_results_count} 条结果"
-                })
+                yield serialize_event(
+                    {"type": "status", "content": f"本轮获取 {new_results_count} 条结果"}
+                )
 
             # 反思
             yield serialize_event({"type": "status", "content": "反思收集的信息..."})
@@ -472,7 +478,7 @@ class ResearchService:
                 qwen_llm,
                 reflection_prompt,
                 response_format={"type": "json_object"},
-                system_message_content=llm_system_prompt
+                system_message_content=llm_system_prompt,
             )
 
             can_answer = False
@@ -481,80 +487,66 @@ class ResearchService:
             if llm_response:
                 try:
                     reflection_result = json.loads(llm_response)
-                    can_answer = reflection_result.get('can_answer', False)
-                    current_subqueries = reflection_result.get('new_subqueries', [])
+                    can_answer = reflection_result.get("can_answer", False)
+                    current_subqueries = reflection_result.get("new_subqueries", [])
 
-                    yield serialize_event({
-                        "type": "reflection",
-                        "can_answer": can_answer,
-                        "new_subqueries_count": len(current_subqueries)
-                    })
+                    yield serialize_event(
+                        {
+                            "type": "reflection",
+                            "can_answer": can_answer,
+                            "new_subqueries_count": len(current_subqueries),
+                        }
+                    )
 
                     if can_answer:
-                        yield serialize_event({
-                            "type": "status",
-                            "content": "信息足够，结束迭代"
-                        })
+                        yield serialize_event({"type": "status", "content": "信息足够，结束迭代"})
                         break
 
                     if current_subqueries:
-                        yield serialize_event({
-                            "type": "new_subqueries",
-                            "content": current_subqueries
-                        })
+                        yield serialize_event(
+                            {"type": "new_subqueries", "content": current_subqueries}
+                        )
                 except Exception as e:
                     logging.error(f"Reflection error: {e}")
 
             if iteration == max_iterations - 1:
-                yield serialize_event({
-                    "type": "status",
-                    "content": "达到最大迭代次数"
-                })
+                yield serialize_event({"type": "status", "content": "达到最大迭代次数"})
 
         # 生成最终报告
         if memory:
             async for report_event in self._generate_final_report(query, memory, [], []):
                 yield report_event
         else:
-            yield serialize_event({
-                "type": "error",
-                "content": "未能收集到任何信息"
-            })
-            yield serialize_event({
-                "type": "final_answer",
-                "content": "未能生成报告，因为没有收集到相关信息。"
-            })
+            yield serialize_event({"type": "error", "content": "未能收集到任何信息"})
+            yield serialize_event(
+                {"type": "final_answer", "content": "未能生成报告，因为没有收集到相关信息。"}
+            )
 
     async def _generate_final_report(
-        self,
-        query: str,
-        memory: List[Dict],
-        charts: List[Dict],
-        insights: List[str]
+        self, query: str, memory: list[dict], charts: list[dict], insights: list[str]
     ) -> AsyncGenerator[str, None]:
         """生成最终研究报告"""
         yield serialize_event({"type": "status", "content": "开始生成最终报告..."})
 
         # 为每个内存项添加编号
         for index, item in enumerate(memory):
-            item['reference_id'] = index + 1
+            item["reference_id"] = index + 1
 
         # 返回参考资料
-        yield serialize_event({
-            "type": "reference_materials",
-            "content": memory
-        })
+        yield serialize_event({"type": "reference_materials", "content": memory})
 
         # 构建上下文
-        final_memory_context = "\n\n".join([
-            f"引用编号 {item['reference_id']}\n来源 URL: {item['url']}\n标题: {item.get('name', 'N/A')}\n内容摘要: {item['summary']}"
-            for item in memory
-        ])
+        final_memory_context = "\n\n".join(
+            [
+                f"引用编号 {item['reference_id']}\n来源 URL: {item['url']}\n标题: {item.get('name', 'N/A')}\n内容摘要: {item['summary']}"
+                for item in memory
+            ]
+        )
 
         # 洞察摘要
         insights_section = ""
         if insights:
-            insights_section = f"\n\n数据分析洞察:\n" + "\n".join([f"- {i}" for i in insights])
+            insights_section = "\n\n数据分析洞察:\n" + "\n".join([f"- {i}" for i in insights])
 
         # 图表说明
         charts_section = ""
@@ -602,34 +594,36 @@ class ResearchService:
                 lambda: client.chat.completions.create(
                     model="deepseek-r1",
                     messages=[
-                        {'role': 'system', 'content': 'You are an expert research assistant.'},
-                        {'role': 'user', 'content': synthesis_prompt}
+                        {"role": "system", "content": "You are an expert research assistant."},
+                        {"role": "user", "content": synthesis_prompt},
                     ],
-                    stream=True
+                    stream=True,
                 )
             )
 
             async for chunk in self._process_stream(stream):
-                if not getattr(chunk, 'choices', None):
+                if not getattr(chunk, "choices", None):
                     continue
 
                 delta = chunk.choices[0].delta
 
-                if not hasattr(delta, 'reasoning_content'):
+                if not hasattr(delta, "reasoning_content"):
                     continue
 
-                if not getattr(delta, 'reasoning_content', None) and not getattr(delta, 'content', None):
+                if not getattr(delta, "reasoning_content", None) and not getattr(
+                    delta, "content", None
+                ):
                     continue
 
-                if not getattr(delta, 'reasoning_content', None) and not is_answering:
+                if not getattr(delta, "reasoning_content", None) and not is_answering:
                     is_answering = True
                     yield serialize_event({"type": "thinking_end"})
                     yield serialize_event({"type": "answer_start"})
 
-                if getattr(delta, 'reasoning_content', None):
+                if getattr(delta, "reasoning_content", None):
                     reasoning_content += delta.reasoning_content
                     yield serialize_event({"type": "thinking", "content": delta.reasoning_content})
-                elif getattr(delta, 'content', None):
+                elif getattr(delta, "content", None):
                     answer_content += delta.content
                     yield serialize_event({"type": "answer", "content": delta.content})
 
@@ -660,30 +654,31 @@ class ResearchService:
 
 # --- Helper Functions ---
 
+
 async def parallel_search_all(
-    subqueries: List[str],
+    subqueries: list[str],
     semaphore: asyncio.Semaphore,
-    kb_name: Optional[str] = None,
+    kb_name: str | None = None,
     search_web: bool = True,
-    search_local: bool = True
-) -> List[Tuple[str, List, str]]:
+    search_local: bool = True,
+) -> list[tuple[str, list, str]]:
     """并行搜索网络和本地知识库"""
     all_results = []
 
-    async def search_web_with_semaphore(query: str) -> Tuple[str, List, str]:
+    async def search_web_with_semaphore(query: str) -> tuple[str, list, str]:
         async with semaphore:
             cached = get_cached_search(query)
             if cached is not None:
-                return (query, cached, 'web')
+                return (query, cached, "web")
             results = await asyncio.to_thread(websearch, query)
             set_cached_search(query, results)
             await asyncio.sleep(0.5)
-            return (query, results, 'web')
+            return (query, results, "web")
 
-    async def search_local_with_semaphore(query: str) -> Tuple[str, List, str]:
+    async def search_local_with_semaphore(query: str) -> tuple[str, list, str]:
         async with semaphore:
             results = await search_local_knowledge(query, kb_name, top_k=3)
-            return (query, results, 'local')
+            return (query, results, "local")
 
     tasks = []
     for q in subqueries:
@@ -705,28 +700,30 @@ async def parallel_search_all(
     return all_results
 
 
-async def search_local_knowledge(query: str, kb_name: str, top_k: int = 5) -> List[Dict]:
+async def search_local_knowledge(query: str, kb_name: str, top_k: int = 5) -> list[dict]:
     """搜索本地知识库"""
     try:
         from service.retrieval_service import retrieve_from_knowledge_base
+
         results = await asyncio.to_thread(
-            retrieve_from_knowledge_base,
-            kb_name=kb_name,
-            question=query,
-            top_k=top_k
+            retrieve_from_knowledge_base, kb_name=kb_name, question=query, top_k=top_k
         )
 
         formatted_results = []
         for r in results:
-            formatted_results.append({
-                'url': f"local://{kb_name}/{r.get('document_id', 'unknown')}",
-                'name': r.get('document_name', 'N/A'),
-                'summary': r.get('content_with_weight', ''),
-                'snippet': r.get('content_with_weight', '')[:200] if r.get('content_with_weight') else '',
-                'siteName': f"知识库: {kb_name}",
-                'siteIcon': '',
-                'source': 'local'
-            })
+            formatted_results.append(
+                {
+                    "url": f"local://{kb_name}/{r.get('document_id', 'unknown')}",
+                    "name": r.get("document_name", "N/A"),
+                    "summary": r.get("content_with_weight", ""),
+                    "snippet": r.get("content_with_weight", "")[:200]
+                    if r.get("content_with_weight")
+                    else "",
+                    "siteName": f"知识库: {kb_name}",
+                    "siteIcon": "",
+                    "source": "local",
+                }
+            )
         return formatted_results
     except Exception as e:
         logging.error(f"Local knowledge search error: {e}")
@@ -736,16 +733,8 @@ async def search_local_knowledge(query: str, kb_name: str, top_k: int = 5) -> Li
 def websearch(query, count=5):
     """执行网络搜索"""
     url = "https://api.bochaai.com/v1/web-search"
-    payload = json.dumps({
-        "query": query,
-        "summary": True,
-        "count": count,
-        "page": 1
-    })
-    headers = {
-        'Authorization': SEARCH_API_KEY,
-        'Content-Type': 'application/json'
-    }
+    payload = json.dumps({"query": query, "summary": True, "count": count, "page": 1})
+    headers = {"Authorization": SEARCH_API_KEY, "Content-Type": "application/json"}
 
     try:
         response = requests.post(url, headers=headers, data=payload, timeout=25)
@@ -755,19 +744,25 @@ def websearch(query, count=5):
         logging.error(f"Web search error for '{query}': {e}")
         return []
 
-    webpages_data = data.get('data', {}).get('webPages', {})
-    value_list = webpages_data.get('value')
+    webpages_data = data.get("data", {}).get("webPages", {})
+    value_list = webpages_data.get("value")
 
     if value_list is None or not isinstance(value_list, list):
         return []
 
     return [
-        item for item in value_list
-        if item.get('url') and (item.get('snippet') or item.get('summary'))
+        item
+        for item in value_list
+        if item.get("url") and (item.get("snippet") or item.get("summary"))
     ]
 
 
-def qwen_llm(prompt, model="qwen-max", response_format=None, system_message_content="You are a helpful assistant."):
+def qwen_llm(
+    prompt,
+    model="qwen-max",
+    response_format=None,
+    system_message_content="You are a helpful assistant.",
+):
     """调用 Qwen LLM"""
     logging.info(f"Calling Qwen LLM: {prompt[:100]}...")
     try:
@@ -776,8 +771,8 @@ def qwen_llm(prompt, model="qwen-max", response_format=None, system_message_cont
         completion_args = {
             "model": model,
             "messages": [
-                {'role': 'system', 'content': system_message_content},
-                {'role': 'user', 'content': prompt}
+                {"role": "system", "content": system_message_content},
+                {"role": "user", "content": prompt},
             ],
             "temperature": 0.2,
         }

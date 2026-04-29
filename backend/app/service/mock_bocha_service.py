@@ -7,36 +7,39 @@
 用于降低API调用成本，同时保留切换到真实API的能力。
 """
 
-import os
 import asyncio
-from datetime import datetime, timedelta
-from typing import Dict, Any, Literal, List
-from pydantic import BaseModel, Field, field_validator
+from typing import Any, Literal
+
 from openai import OpenAI
+from pydantic import BaseModel, Field, field_validator
 
 from app.config.llm_config import LLMConfig
 
 
 class BochaWebPage(BaseModel):
     """博查API webPages.value 单项格式"""
+
     name: str = Field(..., min_length=5, max_length=80, description="文章标题")
     url: str = Field(..., pattern=r"^https?://", description="文章URL")
     siteName: str = Field(..., min_length=2, max_length=30, description="网站名称")
-    datePublished: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", description="发布日期")
+    datePublished: str = Field(
+        ..., pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$", description="发布日期"
+    )
     summary: str = Field(..., min_length=20, max_length=300, description="AI生成的内容摘要")
     snippet: str = Field(..., min_length=10, max_length=200, description="原文片段")
 
-    @field_validator('url')
+    @field_validator("url")
     @classmethod
     def validate_url_starts_with_https(cls, v: str) -> str:
-        if not v.startswith('https://'):
-            raise ValueError('URL必须以https://开头')
+        if not v.startswith("https://"):
+            raise ValueError("URL必须以https://开头")
         return v
 
 
 class BochaSearchResponse(BaseModel):
     """博查API响应格式"""
-    webPages: Dict[str, Any]
+
+    webPages: dict[str, Any]
 
 
 class MockBochaService:
@@ -52,7 +55,7 @@ class MockBochaService:
         "news": "股票新闻",
         "announcement": "公司公告",
         "industry": "行业新闻",
-        "report": "研究报告"
+        "report": "研究报告",
     }
 
     # 模拟网站来源配置
@@ -86,15 +89,12 @@ class MockBochaService:
             ("海通证券", "htsec.com"),
             ("华泰证券", "htsc.com.cn"),
             ("招商证券", "cmschina.com"),
-        ]
+        ],
     }
 
     def __init__(self):
         config = LLMConfig()
-        self.client = OpenAI(
-            api_key=config.api_key,
-            base_url=config.base_url
-        )
+        self.client = OpenAI(api_key=config.api_key, base_url=config.base_url)
         self.model = "deepseek-v3.2"
 
     async def generate_search_results(
@@ -102,8 +102,8 @@ class MockBochaService:
         query: str,
         search_type: Literal["news", "announcement", "industry", "report"],
         count: int = 10,
-        freshness: str = "Month"
-    ) -> Dict[str, Any]:
+        freshness: str = "Month",
+    ) -> dict[str, Any]:
         """
         生成mock搜索结果，返回与博查API相同格式。
 
@@ -130,16 +130,13 @@ class MockBochaService:
             messages=[
                 {
                     "role": "system",
-                    "content": "你是一个专业的财经信息生成助手。请严格按照用户要求的JSON格式返回数据，不要包含任何markdown代码块标记或其他说明文字。"
+                    "content": "你是一个专业的财经信息生成助手。请严格按照用户要求的JSON格式返回数据，不要包含任何markdown代码块标记或其他说明文字。",
                 },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
             temperature=0.7,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
         )
 
         content = response.choices[0].message.content
@@ -147,6 +144,7 @@ class MockBochaService:
             raise ValueError("LLM返回内容为空")
 
         import json
+
         try:
             raw_data = json.loads(content)
         except json.JSONDecodeError as e:
@@ -161,7 +159,7 @@ class MockBochaService:
         query: str,
         search_type: Literal["news", "announcement", "industry", "report"],
         count: int,
-        freshness: str
+        freshness: str,
     ) -> str:
         """构建针对搜索类型的prompt"""
 
@@ -173,7 +171,7 @@ class MockBochaService:
             "Day": "最近1天内",
             "Week": "最近1周内",
             "Month": "最近1个月内",
-            "Year": "最近1年内"
+            "Year": "最近1年内",
         }.get(freshness, "最近1个月内")
 
         # 构建来源列表文本
@@ -253,7 +251,7 @@ class MockBochaService:
 
         return prompt
 
-    def _validate_response(self, raw_data: Dict[str, Any], expected_count: int) -> Dict[str, Any]:
+    def _validate_response(self, raw_data: dict[str, Any], expected_count: int) -> dict[str, Any]:
         """
         使用Pydantic逐条校验webPages.value，确保格式完全正确
 
@@ -293,6 +291,6 @@ class MockBochaService:
                 validated_item = BochaWebPage(**item)
                 validated_items.append(validated_item.model_dump())
             except Exception as e:
-                raise ValueError(f"第{idx+1}条结果校验失败: {str(e)}")
+                raise ValueError(f"第{idx + 1}条结果校验失败: {str(e)}")
 
         return {"webPages": {"value": validated_items}}

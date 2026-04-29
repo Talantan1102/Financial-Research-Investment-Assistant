@@ -2,10 +2,12 @@
 # 未经授权，禁止转售或仿制。
 
 """研究检查点模型"""
+
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -13,13 +15,16 @@ from app.core.database import Base
 
 class ResearchCheckpoint(Base):
     """研究检查点模型 - 用于保存和恢复深度研究状态"""
+
     __tablename__ = "research_checkpoints"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(String(64), index=True, nullable=False)  # 研究会话 ID
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     query = Column(Text, nullable=False)  # 原始查询
-    phase = Column(String(32), nullable=False)  # planning/researching/analyzing/writing/reviewing/completed
+    phase = Column(
+        String(32), nullable=False
+    )  # planning/researching/analyzing/writing/reviewing/completed
     iteration = Column(Integer, default=0)  # 当前迭代次数
     state_json = Column(JSONB, nullable=False)  # 完整的 ResearchState（后端状态）
     ui_state_json = Column(JSONB)  # 前端 UI 状态（研究步骤、搜索结果、图表等）

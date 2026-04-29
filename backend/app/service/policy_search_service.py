@@ -2,16 +2,19 @@
 # 未经授权，禁止转售或仿制。
 
 """基于 Milvus 的政策文档搜索服务"""
+
 import os
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from pymilvus import (
-    connections,
     Collection,
     CollectionSchema,
-    FieldSchema,
     DataType,
+    FieldSchema,
+    connections,
     utility,
 )
+
 from app.service.embedding_service import generate_embedding
 
 
@@ -38,7 +41,7 @@ class PolicySearchService:
         except Exception as e:
             print(f"连接 Milvus 失败: {e}")
 
-    def _ensure_collection(self) -> Optional[Collection]:
+    def _ensure_collection(self) -> Collection | None:
         """确保集合存在"""
         try:
             if utility.has_collection(self.collection_name):
@@ -77,36 +80,21 @@ class PolicySearchService:
             print(f"创建集合失败: {e}")
             return None
 
-    def check_connection(self) -> Dict[str, Any]:
+    def check_connection(self) -> dict[str, Any]:
         """检查连接状态"""
         try:
             connected = connections.has_connection("default")
             if connected:
-                return {
-                    "success": True,
-                    "status": "green",
-                    "message": "Milvus 连接正常"
-                }
-            return {
-                "success": False,
-                "status": "red",
-                "message": "Milvus 未连接"
-            }
+                return {"success": True, "status": "green", "message": "Milvus 连接正常"}
+            return {"success": False, "status": "red", "message": "Milvus 未连接"}
         except Exception as e:
-            return {
-                "success": False,
-                "status": "error",
-                "message": f"检查连接出错: {str(e)}"
-            }
+            return {"success": False, "status": "error", "message": f"检查连接出错: {str(e)}"}
 
-    def get_index_info(self) -> Dict[str, Any]:
+    def get_index_info(self) -> dict[str, Any]:
         """获取索引信息"""
         try:
             if not utility.has_collection(self.collection_name):
-                return {
-                    "success": False,
-                    "message": f"集合 '{self.collection_name}' 不存在"
-                }
+                return {"success": False, "message": f"集合 '{self.collection_name}' 不存在"}
 
             collection = Collection(self.collection_name)
             return {
@@ -115,26 +103,17 @@ class PolicySearchService:
                 "doc_count": collection.num_entities,
             }
         except Exception as e:
-            return {
-                "success": False,
-                "message": f"获取索引信息出错: {str(e)}"
-            }
+            return {"success": False, "message": f"获取索引信息出错: {str(e)}"}
 
-    def list_indices(self) -> Dict[str, Any]:
+    def list_indices(self) -> dict[str, Any]:
         """列出所有集合"""
         try:
             collections = utility.list_collections()
-            return {
-                "success": True,
-                "indices": [{"index": c} for c in collections]
-            }
+            return {"success": True, "indices": [{"index": c} for c in collections]}
         except Exception as e:
-            return {
-                "success": False,
-                "message": f"获取集合列表出错: {str(e)}"
-            }
+            return {"success": False, "message": f"获取集合列表出错: {str(e)}"}
 
-    def get_document(self, doc_id: str) -> Dict[str, Any]:
+    def get_document(self, doc_id: str) -> dict[str, Any]:
         """获取指定文档"""
         try:
             collection = self._ensure_collection()
@@ -143,34 +122,32 @@ class PolicySearchService:
 
             results = collection.query(
                 expr=f'id == "{doc_id}"',
-                output_fields=["id", "title", "website", "entry_url", "detail_url", "date", "content"]
+                output_fields=[
+                    "id",
+                    "title",
+                    "website",
+                    "entry_url",
+                    "detail_url",
+                    "date",
+                    "content",
+                ],
             )
 
             if results:
-                return {
-                    "success": True,
-                    "document": results[0],
-                    "id": doc_id
-                }
-            return {
-                "success": False,
-                "message": "文档不存在"
-            }
+                return {"success": True, "document": results[0], "id": doc_id}
+            return {"success": False, "message": "文档不存在"}
         except Exception as e:
-            return {
-                "success": False,
-                "message": f"获取文档出错: {str(e)}"
-            }
+            return {"success": False, "message": f"获取文档出错: {str(e)}"}
 
-    def hybrid_search(self, query: str, top_n: int = 3) -> Dict[str, Any]:
+    def hybrid_search(self, query: str, top_n: int = 3) -> dict[str, Any]:
         """向量搜索（Milvus 不支持关键词搜索，使用纯向量搜索）"""
         return self.vector_search(query, top_n)
 
-    def keyword_search(self, query: str, top_n: int = 10) -> Dict[str, Any]:
+    def keyword_search(self, query: str, top_n: int = 10) -> dict[str, Any]:
         """关键词搜索（Milvus 不直接支持，降级为向量搜索）"""
         return self.vector_search(query, top_n)
 
-    def vector_search(self, query: str, top_n: int = 10) -> Dict[str, Any]:
+    def vector_search(self, query: str, top_n: int = 10) -> dict[str, Any]:
         """向量搜索"""
         try:
             collection = self._ensure_collection()
@@ -180,10 +157,7 @@ class PolicySearchService:
             # 生成查询向量
             query_vectors = generate_embedding([query])
             if not query_vectors:
-                return {
-                    "success": False,
-                    "message": "无法生成查询向量"
-                }
+                return {"success": False, "message": "无法生成查询向量"}
 
             query_vector = query_vectors[0]
 
@@ -198,7 +172,15 @@ class PolicySearchService:
                 anns_field="vector",
                 param=search_params,
                 limit=top_n,
-                output_fields=["id", "title", "website", "entry_url", "detail_url", "date", "content"],
+                output_fields=[
+                    "id",
+                    "title",
+                    "website",
+                    "entry_url",
+                    "detail_url",
+                    "date",
+                    "content",
+                ],
             )
 
             # 格式化结果
@@ -229,13 +211,11 @@ class PolicySearchService:
 
         except Exception as e:
             import traceback
-            traceback.print_exc()
-            return {
-                "success": False,
-                "message": f"搜索出错: {str(e)}"
-            }
 
-    def search(self, query: str, method: str = "hybrid", top_n: int = 10) -> Dict[str, Any]:
+            traceback.print_exc()
+            return {"success": False, "message": f"搜索出错: {str(e)}"}
+
+    def search(self, query: str, method: str = "hybrid", top_n: int = 10) -> dict[str, Any]:
         """统一搜索接口"""
         if method == "hybrid":
             return self.hybrid_search(query, top_n)
@@ -244,12 +224,9 @@ class PolicySearchService:
         elif method == "vector":
             return self.vector_search(query, top_n)
         else:
-            return {
-                "success": False,
-                "message": f"不支持的搜索方法: {method}"
-            }
+            return {"success": False, "message": f"不支持的搜索方法: {method}"}
 
-    def insert_document(self, doc: Dict[str, Any]) -> bool:
+    def insert_document(self, doc: dict[str, Any]) -> bool:
         """插入单个文档"""
         try:
             collection = self._ensure_collection()

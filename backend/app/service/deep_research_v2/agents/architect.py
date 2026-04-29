@@ -12,11 +12,9 @@ DeepResearch V2.0 - 总架构师 Agent (ChiefArchitect)
 """
 
 import uuid
-from typing import Dict, Any, List
-from datetime import datetime
 
+from ..state import ResearchPhase, ResearchState
 from .base import BaseAgent
-from ..state import ResearchState, ResearchPhase
 
 
 class ChiefArchitect(BaseAgent):
@@ -104,10 +102,10 @@ class ChiefArchitect(BaseAgent):
             role="总架构师",
             llm_api_key=llm_api_key,
             llm_base_url=llm_base_url,
-            model=model
+            model=model,
         )
 
-    def _convert_flat_to_outline(self, flat_result: Dict) -> Dict:
+    def _convert_flat_to_outline(self, flat_result: dict) -> dict:
         """将扁平JSON格式转换为标准outline格式"""
         outline = []
         for i in range(1, 10):  # 最多支持9个章节
@@ -125,7 +123,7 @@ class ChiefArchitect(BaseAgent):
                 "section_type": "mixed",
                 "requires_data": i <= 2,  # 前两章需要数据
                 "requires_chart": i <= 2,
-                "search_queries": [flat_result.get(query_key, flat_result.get(title_key, ""))]
+                "search_queries": [flat_result.get(query_key, flat_result.get(title_key, ""))],
             }
             outline.append(section)
 
@@ -141,19 +139,21 @@ class ChiefArchitect(BaseAgent):
         for i in range(1, 6):  # 最多5个假设
             h_key = f"hypothesis_{i}"
             if h_key in flat_result and flat_result[h_key]:
-                hypotheses.append({
-                    "id": f"h_{i}",
-                    "content": flat_result[h_key],
-                    "status": "unverified",  # unverified, supported, refuted, partially_supported
-                    "evidence_for": [],
-                    "evidence_against": []
-                })
+                hypotheses.append(
+                    {
+                        "id": f"h_{i}",
+                        "content": flat_result[h_key],
+                        "status": "unverified",  # unverified, supported, refuted, partially_supported
+                        "evidence_for": [],
+                        "evidence_against": [],
+                    }
+                )
 
         return {
             "outline": outline,
             "research_questions": research_questions,
             "hypotheses": hypotheses,
-            "key_entities": []
+            "key_entities": [],
         }
 
     async def process(self, state: ResearchState) -> ResearchState:
@@ -174,20 +174,25 @@ class ChiefArchitect(BaseAgent):
         self.logger.info(f"Starting initial planning for: {state['query'][:50]}...")
 
         # 发送 research_step 开始事件
-        self.add_message(state, "research_step", {
-            "step_id": f"step_planning_{uuid.uuid4().hex[:8]}",
-            "step_type": "planning",
-            "title": "研究计划",
-            "subtitle": "分析问题，制定大纲",
-            "status": "running",
-            "stats": {}
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_id": f"step_planning_{uuid.uuid4().hex[:8]}",
+                "step_type": "planning",
+                "title": "研究计划",
+                "subtitle": "分析问题，制定大纲",
+                "status": "running",
+                "stats": {},
+            },
+        )
 
         # 发送状态消息
-        self.add_message(state, "thought", {
-            "agent": self.name,
-            "content": "正在分析研究问题，构建知识图谱和研究大纲..."
-        })
+        self.add_message(
+            state,
+            "thought",
+            {"agent": self.name, "content": "正在分析研究问题，构建知识图谱和研究大纲..."},
+        )
 
         # 调用LLM生成规划 - 带重试机制
         prompt = self.PLANNING_PROMPT.format(query=state["query"])
@@ -200,7 +205,7 @@ class ChiefArchitect(BaseAgent):
                 user_prompt=prompt,
                 json_mode=True,
                 temperature=0.3,
-                max_tokens=16000  # 拉满到最大值
+                max_tokens=16000,  # 拉满到最大值
             )
 
             # Debug: 记录原始响应
@@ -214,21 +219,29 @@ class ChiefArchitect(BaseAgent):
                 result = self._convert_flat_to_outline(result)
 
             if result and result.get("outline") and len(result.get("outline", [])) >= 3:
-                self.logger.info(f"Successfully parsed outline with {len(result['outline'])} sections")
+                self.logger.info(
+                    f"Successfully parsed outline with {len(result['outline'])} sections"
+                )
                 break
 
             # 诊断失败原因
             if not result:
                 self.logger.warning(f"Attempt {attempt + 1}: JSON parsing failed completely")
             elif not result.get("outline"):
-                self.logger.warning(f"Attempt {attempt + 1}: No 'outline' key in result. Keys: {list(result.keys())}")
+                self.logger.warning(
+                    f"Attempt {attempt + 1}: No 'outline' key in result. Keys: {list(result.keys())}"
+                )
             elif len(result.get("outline", [])) < 3:
-                self.logger.warning(f"Attempt {attempt + 1}: Outline too short: {len(result.get('outline', []))} sections")
+                self.logger.warning(
+                    f"Attempt {attempt + 1}: Outline too short: {len(result.get('outline', []))} sections"
+                )
 
             if attempt < max_retries:
-                self.logger.warning(f"Outline generation failed or incomplete, retrying... (attempt {attempt + 1})")
+                self.logger.warning(
+                    f"Outline generation failed or incomplete, retrying... (attempt {attempt + 1})"
+                )
                 # 简化提示词重试
-                prompt = f"""请为"{state['query']}"生成研究大纲。
+                prompt = f"""请为"{state["query"]}"生成研究大纲。
 
 输出JSON格式：
 {{"outline": [
@@ -251,7 +264,9 @@ class ChiefArchitect(BaseAgent):
             self.logger.warning(f"No outline found! Full parsed result: {str(result)[:500]}")
 
         # 更新状态
-        state["key_entities"] = [e.get("name", "") for e in result.get("key_entities", []) if isinstance(e, dict)]
+        state["key_entities"] = [
+            e.get("name", "") for e in result.get("key_entities", []) if isinstance(e, dict)
+        ]
         state["mind_map"] = result.get("mind_map", {})
         state["research_questions"] = result.get("research_questions", [])
         state["hypotheses"] = result.get("hypotheses", [])  # 假设驱动研究
@@ -263,21 +278,23 @@ class ChiefArchitect(BaseAgent):
             if not isinstance(section, dict):
                 continue
             processed_section = {
-                "id": section.get("id", f"sec_{i+1}"),
-                "title": section.get("title", f"章节{i+1}"),
+                "id": section.get("id", f"sec_{i + 1}"),
+                "title": section.get("title", f"章节{i + 1}"),
                 "description": section.get("description", ""),
                 "section_type": section.get("section_type", "mixed"),
                 "requires_data": section.get("requires_data", False),
                 "requires_chart": section.get("requires_chart", False),
-                "priority": section.get("priority", i+1),
+                "priority": section.get("priority", i + 1),
                 "search_queries": section.get("search_queries", [section.get("title", "")]),
-                "status": "pending"
+                "status": "pending",
             }
             # 确保 search_queries 是列表且非空
             if not isinstance(processed_section["search_queries"], list):
                 processed_section["search_queries"] = [str(processed_section["search_queries"])]
             # 过滤空字符串，如果结果为空则使用章节标题
-            processed_section["search_queries"] = [q for q in processed_section["search_queries"] if q and q.strip()]
+            processed_section["search_queries"] = [
+                q for q in processed_section["search_queries"] if q and q.strip()
+            ]
             if not processed_section["search_queries"]:
                 processed_section["search_queries"] = [processed_section["title"]]
             processed_outline.append(processed_section)
@@ -286,27 +303,35 @@ class ChiefArchitect(BaseAgent):
         self.logger.info(f"Processed outline: {len(processed_outline)} sections")
 
         # 发送大纲事件
-        self.add_message(state, "outline", {
-            "understanding": result.get("understanding", {}),
-            "key_entities": result.get("key_entities", []),
-            "outline": outline,
-            "research_questions": state["research_questions"]
-        })
+        self.add_message(
+            state,
+            "outline",
+            {
+                "understanding": result.get("understanding", {}),
+                "key_entities": result.get("key_entities", []),
+                "outline": outline,
+                "research_questions": state["research_questions"],
+            },
+        )
 
         # 更新阶段
         state["phase"] = ResearchPhase.PLANNING.value
 
         # 发送 research_step 完成事件
-        self.add_message(state, "research_step", {
-            "step_type": "planning",
-            "title": "研究计划",
-            "subtitle": "分析问题，制定大纲",
-            "status": "completed",
-            "stats": {
-                "sections_count": len(processed_outline),
-                "questions_count": len(state["research_questions"])
-            }
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_type": "planning",
+                "title": "研究计划",
+                "subtitle": "分析问题，制定大纲",
+                "status": "completed",
+                "stats": {
+                    "sections_count": len(processed_outline),
+                    "questions_count": len(state["research_questions"]),
+                },
+            },
+        )
 
         self.logger.info(f"Planning completed. Generated {len(outline)} sections.")
 
@@ -331,23 +356,24 @@ class ChiefArchitect(BaseAgent):
             new_findings="\n".join(new_findings),
             completed_sections=len(completed),
             facts_count=len(state["facts"]),
-            data_points_count=len(state["data_points"])
+            data_points_count=len(state["data_points"]),
         )
 
         response = await self.call_llm(
             system_prompt="你是总架构师，需要判断是否需要调整研究计划。",
             user_prompt=prompt,
-            json_mode=True
+            json_mode=True,
         )
 
         result = self.parse_json_response(response)
 
         if result.get("needs_revision") and result.get("revised_outline"):
             state["outline"] = result["revised_outline"]
-            self.add_message(state, "outline_revision", {
-                "reason": result.get("revision_reason"),
-                "new_outline": result["revised_outline"]
-            })
+            self.add_message(
+                state,
+                "outline_revision",
+                {"reason": result.get("revision_reason"), "new_outline": result["revised_outline"]},
+            )
             self.logger.info(f"Outline revised: {result.get('revision_reason')}")
 
         return state

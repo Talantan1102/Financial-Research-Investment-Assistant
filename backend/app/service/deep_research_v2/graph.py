@@ -10,42 +10,48 @@ Plan -> Research -> Analyze -> Write -> Review -> (Revise) -> Complete
 使用 LangGraph 实现循环和条件分支。
 """
 
-import logging
 import asyncio
-from typing import Dict, Any, List, Literal, AsyncGenerator
+import logging
+from collections.abc import AsyncGenerator
 from datetime import datetime
+from typing import Any, Literal
 
 # 导入取消检查函数
 try:
-    from router.research_router import is_research_cancelled, clear_cancel_flag
+    from router.research_router import clear_cancel_flag, is_research_cancelled
 except ImportError:
     try:
-        from app.router.research_router import is_research_cancelled, clear_cancel_flag
+        from app.router.research_router import clear_cancel_flag, is_research_cancelled
     except ImportError:
         # 兼容直接运行脚本的情况
         def is_research_cancelled(session_id: str) -> bool:
             return False
+
         def clear_cancel_flag(session_id: str):
             pass
 
+
 # LangGraph 导入 - 如果没有安装则使用简化版本
 try:
-    from langgraph.graph import StateGraph, END
+    from langgraph.graph import END, StateGraph
+
     LANGGRAPH_AVAILABLE = True
 except ImportError:
     LANGGRAPH_AVAILABLE = False
     logging.warning("LangGraph not installed. Using simplified workflow.")
 
-from .state import ResearchState, ResearchPhase, create_initial_state
-from .agents import ChiefArchitect, DeepScout, CodeWizard, CriticMaster, LeadWriter, DataAnalyst
+from .agents import ChiefArchitect, CodeWizard, CriticMaster, DataAnalyst, DeepScout, LeadWriter
+from .state import ResearchPhase, ResearchState, create_initial_state
 
 # 导入 MCP Client 相关组件（可选）
 try:
     from mcp_client import MCPClient, ToolAdapter
+
     MCP_AVAILABLE = True
 except ImportError:
     try:
         from app.mcp_client import MCPClient, ToolAdapter
+
         MCP_AVAILABLE = True
     except ImportError:
         MCP_AVAILABLE = False
@@ -64,6 +70,7 @@ except ImportError:
         def get_checkpoint_service():
             return None
 
+
 # 导入配置
 try:
     from config.llm_config import get_config
@@ -72,12 +79,15 @@ except ImportError:
         from app.config.llm_config import get_config
     except ImportError:
         # 兼容直接运行脚本的情况
-        import sys
         import os
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        import sys
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
         from config.llm_config import get_config
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("DeepResearchGraph")
 
 
@@ -102,7 +112,7 @@ class DeepResearchGraph:
         model: str = None,
         max_iterations: int = None,
         mcp_client_path: str = "backend/app/mcp_server/server.py",
-        enable_mcp: bool = True
+        enable_mcp: bool = True,
     ):
         """
         初始化工作流
@@ -144,9 +154,7 @@ class DeepResearchGraph:
         # 初始化 MCP Client（延迟连接）
         try:
             self.mcp_client = MCPClient(
-                server_script_path=mcp_client_path,
-                connect_timeout=30.0,
-                call_timeout=30.0
+                server_script_path=mcp_client_path, connect_timeout=30.0, call_timeout=30.0
             )
             # 创建 ToolAdapter（纯净版，无降级）
             self.tool_adapter = ToolAdapter(mcp_client=self.mcp_client)
@@ -157,35 +165,32 @@ class DeepResearchGraph:
 
         # 初始化各个 Agent（使用各自配置的模型）
         self.architect = ChiefArchitect(
-            self.llm_api_key, self.llm_base_url,
-            config.agents.architect.model
+            self.llm_api_key, self.llm_base_url, config.agents.architect.model
         )
         # 如果启用 MCP，将 ToolAdapter 传递给 DeepScout
         self.scout = DeepScout(
-            self.llm_api_key, self.llm_base_url, self.search_api_key,
+            self.llm_api_key,
+            self.llm_base_url,
+            self.search_api_key,
             config.agents.scout.model,
-            tool_adapter=self.tool_adapter  # 传递 ToolAdapter
+            tool_adapter=self.tool_adapter,  # 传递 ToolAdapter
         )
         self.data_analyst = DataAnalyst(
-            self.llm_api_key, self.llm_base_url,
+            self.llm_api_key,
+            self.llm_base_url,
             config.agents.data_analyst.model,
-            tool_adapter=self.tool_adapter  # 传递 ToolAdapter
+            tool_adapter=self.tool_adapter,  # 传递 ToolAdapter
         )
         self.wizard = CodeWizard(
-            self.llm_api_key, self.llm_base_url,
+            self.llm_api_key,
+            self.llm_base_url,
             config.agents.wizard.model,
-            tool_adapter=self.tool_adapter  # 传递 ToolAdapter
+            tool_adapter=self.tool_adapter,  # 传递 ToolAdapter
         )
-        self.critic = CriticMaster(
-            self.llm_api_key, self.llm_base_url,
-            config.agents.critic.model
-        )
-        self.writer = LeadWriter(
-            self.llm_api_key, self.llm_base_url,
-            config.agents.writer.model
-        )
+        self.critic = CriticMaster(self.llm_api_key, self.llm_base_url, config.agents.critic.model)
+        self.writer = LeadWriter(self.llm_api_key, self.llm_base_url, config.agents.writer.model)
 
-        logger.info(f"DeepResearchGraph initialized with models:")
+        logger.info("DeepResearchGraph initialized with models:")
         logger.info(f"  - Architect: {config.agents.architect.model}")
         logger.info(f"  - Scout: {config.agents.scout.model}")
         logger.info(f"  - DataAnalyst: {config.agents.data_analyst.model}")
@@ -204,10 +209,7 @@ class DeepResearchGraph:
             self.graph = None
 
     def _save_checkpoint(
-        self,
-        state: Dict[str, Any],
-        user_id: str = None,
-        ui_state: Dict[str, Any] = None
+        self, state: dict[str, Any], user_id: str = None, ui_state: dict[str, Any] = None
     ) -> bool:
         """保存检查点（包含后端状态和 UI 状态）"""
         if not self.checkpoint_service:
@@ -223,7 +225,7 @@ class DeepResearchGraph:
                 state=state,
                 user_id=user_id,
                 ui_state=ui_state,
-                final_report=state.get("final_report")
+                final_report=state.get("final_report"),
             )
             if checkpoint_id:
                 logger.info(f"Checkpoint saved: {checkpoint_id}")
@@ -233,7 +235,7 @@ class DeepResearchGraph:
 
         return False
 
-    def _load_checkpoint(self, session_id: str) -> Dict[str, Any]:
+    def _load_checkpoint(self, session_id: str) -> dict[str, Any]:
         """加载检查点"""
         if not self.checkpoint_service:
             return None
@@ -248,7 +250,7 @@ class DeepResearchGraph:
 
         return None
 
-    def get_checkpoint_info(self, session_id: str) -> Dict[str, Any]:
+    def get_checkpoint_info(self, session_id: str) -> dict[str, Any]:
         """获取检查点信息"""
         if not self.checkpoint_service:
             return None
@@ -278,12 +280,7 @@ class DeepResearchGraph:
 
         # 条件边：审核后决定下一步
         workflow.add_conditional_edges(
-            "review",
-            self._should_revise,
-            {
-                "revise": "revise",
-                "complete": END
-            }
+            "review", self._should_revise, {"revise": "revise", "complete": END}
         )
 
         # 修订后回到审核
@@ -291,7 +288,7 @@ class DeepResearchGraph:
 
         return workflow.compile()
 
-    async def _plan_node(self, state: ResearchState) -> Dict[str, Any]:
+    async def _plan_node(self, state: ResearchState) -> dict[str, Any]:
         """规划节点"""
         logger.info("Executing Plan node...")
         # 创建状态副本以避免直接修改
@@ -300,7 +297,7 @@ class DeepResearchGraph:
         result = await self.architect.process(state)
         return dict(result)
 
-    async def _research_node(self, state: ResearchState) -> Dict[str, Any]:
+    async def _research_node(self, state: ResearchState) -> dict[str, Any]:
         """研究节点"""
         logger.info("Executing Research node...")
         state = dict(state)
@@ -308,7 +305,7 @@ class DeepResearchGraph:
         result = await self.scout.process(state)
         return dict(result)
 
-    async def _analyze_node(self, state: ResearchState) -> Dict[str, Any]:
+    async def _analyze_node(self, state: ResearchState) -> dict[str, Any]:
         """分析节点"""
         logger.info("Executing Analyze node...")
         state = dict(state)
@@ -316,7 +313,7 @@ class DeepResearchGraph:
         result = await self.wizard.process(state)
         return dict(result)
 
-    async def _write_node(self, state: ResearchState) -> Dict[str, Any]:
+    async def _write_node(self, state: ResearchState) -> dict[str, Any]:
         """写作节点"""
         logger.info("Executing Write node...")
         state = dict(state)
@@ -324,7 +321,7 @@ class DeepResearchGraph:
         result = await self.writer.process(state)
         return dict(result)
 
-    async def _review_node(self, state: ResearchState) -> Dict[str, Any]:
+    async def _review_node(self, state: ResearchState) -> dict[str, Any]:
         """审核节点"""
         logger.info("Executing Review node...")
         state = dict(state)
@@ -332,7 +329,7 @@ class DeepResearchGraph:
         result = await self.critic.process(state)
         return dict(result)
 
-    async def _revise_node(self, state: ResearchState) -> Dict[str, Any]:
+    async def _revise_node(self, state: ResearchState) -> dict[str, Any]:
         """修订节点"""
         logger.info("Executing Revise node...")
         state = dict(state)
@@ -354,8 +351,8 @@ class DeepResearchGraph:
         resume: bool = False,
         user_id: str = None,
         search_web: bool = True,
-        search_local: bool = False
-    ) -> AsyncGenerator[Dict[str, Any], None]:
+        search_local: bool = False,
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """
         执行研究流程（流式输出）
 
@@ -379,15 +376,13 @@ class DeepResearchGraph:
                     "type": "research_resumed",
                     "phase": state.get("phase", ""),
                     "session_id": session_id,
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
                 }
 
         # 如果没有检查点，创建初始状态
         if not state:
             state = create_initial_state(
-                query, session_id,
-                search_web=search_web,
-                search_local=search_local
+                query, session_id, search_web=search_web, search_local=search_local
             )
             state["max_iterations"] = self.max_iterations
 
@@ -397,7 +392,7 @@ class DeepResearchGraph:
                 "session_id": session_id,
                 "search_web": search_web,
                 "search_local": search_local,
-                "timestamp": datetime.now().isoformat()
+                "timestamp": datetime.now().isoformat(),
             }
 
         # 存储 user_id 用于检查点
@@ -412,7 +407,9 @@ class DeepResearchGraph:
         async for event in self._run_simplified(state):
             yield event
 
-    async def _run_with_langgraph(self, state: ResearchState) -> AsyncGenerator[Dict[str, Any], None]:
+    async def _run_with_langgraph(
+        self, state: ResearchState
+    ) -> AsyncGenerator[dict[str, Any], None]:
         """使用 LangGraph 执行"""
         # 追踪已输出的消息数量，避免重复
         yielded_count = 0
@@ -434,7 +431,7 @@ class DeepResearchGraph:
             logger.error(f"LangGraph execution error: {e}")
             yield {"type": "error", "content": str(e)}
 
-    async def _run_simplified(self, state: ResearchState) -> AsyncGenerator[Dict[str, Any], None]:
+    async def _run_simplified(self, state: ResearchState) -> AsyncGenerator[dict[str, Any], None]:
         """
         简化版执行流程（不依赖 LangGraph）
 
@@ -499,10 +496,10 @@ class DeepResearchGraph:
                 try:
                     msg = await asyncio.wait_for(message_queue.get(), timeout=0.5)
                     msg_count += 1
-                    msg_type = msg.get('type', 'unknown')
+                    msg_type = msg.get("type", "unknown")
                     logger.info(f"[SSE YIELD] [{agent.name}] #{msg_count}: {msg_type}")
                     yield msg
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # 继续等待，不发送心跳（SSE连接由前端保持）
                     continue
                 except Exception as e:
@@ -525,7 +522,9 @@ class DeepResearchGraph:
                 except:
                     break
 
-            logger.info(f"Agent {agent.name} completed. Messages: {msg_count} during, {remaining} remaining")
+            logger.info(
+                f"Agent {agent.name} completed. Messages: {msg_count} during, {remaining} remaining"
+            )
 
         # 获取 user_id 用于检查点
         user_id = state.get("_user_id")
@@ -566,15 +565,21 @@ class DeepResearchGraph:
                     source_name = fact.get("source_name", "")
                     content = fact.get("content", "")
                     # 如果没有 source_name，用 content 的前50个字符作为标题
-                    title = source_name if source_name else (content[:50] + "..." if len(content) > 50 else content)
-                    search_results_for_ui.append({
-                        "id": fact.get("id", ""),
-                        "title": title,
-                        "source": fact.get("source_type", "web"),
-                        "url": fact.get("source_url", ""),
-                        "snippet": content[:200] if content else "",
-                        "date": fact.get("timestamp", ""),
-                    })
+                    title = (
+                        source_name
+                        if source_name
+                        else (content[:50] + "..." if len(content) > 50 else content)
+                    )
+                    search_results_for_ui.append(
+                        {
+                            "id": fact.get("id", ""),
+                            "title": title,
+                            "source": fact.get("source_type", "web"),
+                            "url": fact.get("source_url", ""),
+                            "snippet": content[:200] if content else "",
+                            "date": fact.get("timestamp", ""),
+                        }
+                    )
                 ui_state["search_results"] = search_results_for_ui
 
             # 构建前端友好的 references - 确保有 title 和 link 字段
@@ -591,23 +596,27 @@ class DeepResearchGraph:
                 if not title:
                     title = f"来源 {idx + 1}"
 
-                ui_references.append({
-                    "id": ref.get("id", idx + 1),
-                    "title": title,
-                    "link": ref.get("url", ""),
-                    "content": fact.get("content", "")[:200] if fact else "",
-                    "source": "web"
-                })
+                ui_references.append(
+                    {
+                        "id": ref.get("id", idx + 1),
+                        "title": title,
+                        "link": ref.get("url", ""),
+                        "content": fact.get("content", "")[:200] if fact else "",
+                        "source": "web",
+                    }
+                )
             ui_state["references"] = ui_references
 
             # 打印详细日志
             kg = ui_state.get("knowledge_graph", {})
-            logger.info(f"[UI状态更新] charts={len(ui_state.get('charts', []))}, "
-                       f"search_results={len(ui_state.get('search_results', []))}, "
-                       f"knowledge_graph nodes={len(kg.get('nodes', []) if kg else [])}, "
-                       f"knowledge_graph edges={len(kg.get('edges', []) if kg else [])}, "
-                       f"references={len(ui_state.get('references', []))}, "
-                       f"report_len={len(ui_state.get('streaming_report', ''))}")
+            logger.info(
+                f"[UI状态更新] charts={len(ui_state.get('charts', []))}, "
+                f"search_results={len(ui_state.get('search_results', []))}, "
+                f"knowledge_graph nodes={len(kg.get('nodes', []) if kg else [])}, "
+                f"knowledge_graph edges={len(kg.get('edges', []) if kg else [])}, "
+                f"references={len(ui_state.get('references', []))}, "
+                f"report_len={len(ui_state.get('streaming_report', ''))}"
+            )
 
         async def save_checkpoint_async(step_info: dict = None):
             """异步保存检查点"""
@@ -617,23 +626,37 @@ class DeepResearchGraph:
             if step_info:
                 # 检查是否已有该步骤，更新状态
                 existing = next(
-                    (s for s in ui_state["research_steps"] if s.get("type") == step_info.get("type")),
-                    None
+                    (
+                        s
+                        for s in ui_state["research_steps"]
+                        if s.get("type") == step_info.get("type")
+                    ),
+                    None,
                 )
                 if existing:
                     existing.update(step_info)
-                    logger.info(f"[检查点] 更新步骤: {step_info.get('type')}, status={step_info.get('status')}")
+                    logger.info(
+                        f"[检查点] 更新步骤: {step_info.get('type')}, status={step_info.get('status')}"
+                    )
                 else:
                     ui_state["research_steps"].append(step_info)
-                    logger.info(f"[检查点] 添加步骤: {step_info.get('type')}, status={step_info.get('status')}")
+                    logger.info(
+                        f"[检查点] 添加步骤: {step_info.get('type')}, status={step_info.get('status')}"
+                    )
 
             # 打印保存前的完整状态
-            logger.info(f"[检查点保存] session_id={session_id}, phase={state.get('phase', '')}, "
-                       f"steps={[s.get('type') for s in ui_state['research_steps']]}")
+            logger.info(
+                f"[检查点保存] session_id={session_id}, phase={state.get('phase', '')}, "
+                f"steps={[s.get('type') for s in ui_state['research_steps']]}"
+            )
 
             if self._save_checkpoint(state, user_id, ui_state):
                 logger.info(f"[检查点保存成功] session_id={session_id}")
-                return {"type": "checkpoint_saved", "phase": state.get("phase", ""), "session_id": session_id}
+                return {
+                    "type": "checkpoint_saved",
+                    "phase": state.get("phase", ""),
+                    "session_id": session_id,
+                }
             else:
                 logger.error(f"[检查点保存失败] session_id={session_id}")
             return None
@@ -649,11 +672,13 @@ class DeepResearchGraph:
                 yield msg
             state["messages"] = []
             # 保存检查点（含步骤信息）
-            cp_event = await save_checkpoint_async({
-                "type": "planning",
-                "status": "completed",
-                "stats": {"sections": len(state.get("outline", []))}
-            })
+            cp_event = await save_checkpoint_async(
+                {
+                    "type": "planning",
+                    "status": "completed",
+                    "stats": {"sections": len(state.get("outline", []))},
+                }
+            )
             if cp_event:
                 yield cp_event
 
@@ -667,14 +692,16 @@ class DeepResearchGraph:
                 yield msg
             state["messages"] = []
             # 保存检查点（含步骤信息）
-            cp_event = await save_checkpoint_async({
-                "type": "researching",
-                "status": "completed",
-                "stats": {
-                    "facts": len(state.get("facts", [])),
-                    "sources": len(state.get("references", []))
+            cp_event = await save_checkpoint_async(
+                {
+                    "type": "researching",
+                    "status": "completed",
+                    "stats": {
+                        "facts": len(state.get("facts", [])),
+                        "sources": len(state.get("references", [])),
+                    },
                 }
-            })
+            )
             if cp_event:
                 yield cp_event
 
@@ -691,11 +718,13 @@ class DeepResearchGraph:
                 yield msg
             state["messages"] = []
             # 保存检查点（含步骤信息）
-            cp_event = await save_checkpoint_async({
-                "type": "analyzing",
-                "status": "completed",
-                "stats": {"charts": len(state.get("charts", []))}
-            })
+            cp_event = await save_checkpoint_async(
+                {
+                    "type": "analyzing",
+                    "status": "completed",
+                    "stats": {"charts": len(state.get("charts", []))},
+                }
+            )
             if cp_event:
                 yield cp_event
 
@@ -709,11 +738,13 @@ class DeepResearchGraph:
                 yield msg
             state["messages"] = []
             # 保存检查点（含步骤信息）
-            cp_event = await save_checkpoint_async({
-                "type": "writing",
-                "status": "completed",
-                "stats": {"report_length": len(state.get("final_report", ""))}
-            })
+            cp_event = await save_checkpoint_async(
+                {
+                    "type": "writing",
+                    "status": "completed",
+                    "stats": {"report_length": len(state.get("final_report", ""))},
+                }
+            )
             if cp_event:
                 yield cp_event
 
@@ -722,7 +753,11 @@ class DeepResearchGraph:
                 if await check_cancelled():
                     yield {"type": "research_cancelled", "message": "研究已取消"}
                     return
-                yield {"type": "phase", "phase": "reviewing", "content": f"审核中（第 {state['iteration'] + 1} 轮）..."}
+                yield {
+                    "type": "phase",
+                    "phase": "reviewing",
+                    "content": f"审核中（第 {state['iteration'] + 1} 轮）...",
+                }
                 state["phase"] = ResearchPhase.REVIEWING.value
                 async for msg in run_agent_with_streaming(self.critic):
                     yield msg
@@ -735,12 +770,20 @@ class DeepResearchGraph:
                     if await check_cancelled():
                         yield {"type": "research_cancelled", "message": "研究已取消"}
                         return
-                    yield {"type": "phase", "phase": "re_researching", "content": "根据审核反馈补充搜索..."}
+                    yield {
+                        "type": "phase",
+                        "phase": "re_researching",
+                        "content": "根据审核反馈补充搜索...",
+                    }
                     async for msg in run_agent_with_streaming(self.scout):
                         yield msg
                     state["messages"] = []
 
-                    yield {"type": "phase", "phase": "rewriting", "content": "基于新信息重新撰写..."}
+                    yield {
+                        "type": "phase",
+                        "phase": "rewriting",
+                        "content": "基于新信息重新撰写...",
+                    }
                     state["phase"] = ResearchPhase.WRITING.value
                     async for msg in run_agent_with_streaming(self.writer):
                         yield msg
@@ -758,13 +801,17 @@ class DeepResearchGraph:
                     break
 
             # 完成
-            logger.info(f"[Graph] ========== 研究完成 ==========")
-            logger.info(f"[Graph] 最终统计: facts={len(state.get('facts', []))}, charts={len(state.get('charts', []))}, iterations={state.get('iteration', 0)}")
+            logger.info("[Graph] ========== 研究完成 ==========")
+            logger.info(
+                f"[Graph] 最终统计: facts={len(state.get('facts', []))}, charts={len(state.get('charts', []))}, iterations={state.get('iteration', 0)}"
+            )
             logger.info(f"[Graph] 报告长度: {len(state.get('final_report', ''))}")
 
             # 打印每个图表的详情
-            for i, chart in enumerate(state.get('charts', [])):
-                logger.info(f"[Graph] 图表 {i+1}: id={chart.get('id')}, title={chart.get('title')}, has_echarts={bool(chart.get('echarts_option'))}, has_image={bool(chart.get('image_base64'))}")
+            for i, chart in enumerate(state.get("charts", [])):
+                logger.info(
+                    f"[Graph] 图表 {i + 1}: id={chart.get('id')}, title={chart.get('title')}, has_echarts={bool(chart.get('echarts_option'))}, has_image={bool(chart.get('image_base64'))}"
+                )
 
             # 更新检查点状态为已完成
             state["phase"] = ResearchPhase.COMPLETED.value
@@ -783,13 +830,15 @@ class DeepResearchGraph:
                     title = content[:50] + "..." if len(content) > 50 else content
                 if not title:
                     title = f"来源 {idx + 1}"
-                final_ui_refs.append({
-                    "id": ref.get("id", idx + 1),
-                    "title": title,
-                    "link": ref.get("url", ""),
-                    "content": fact.get("content", "")[:200] if fact else "",
-                    "source": "web"
-                })
+                final_ui_refs.append(
+                    {
+                        "id": ref.get("id", idx + 1),
+                        "title": title,
+                        "link": ref.get("url", ""),
+                        "content": fact.get("content", "")[:200] if fact else "",
+                        "source": "web",
+                    }
+                )
 
             yield {
                 "type": "research_complete",
@@ -798,7 +847,7 @@ class DeepResearchGraph:
                 "facts_count": len(state.get("facts", [])),
                 "charts_count": len(state.get("charts", [])),
                 "iterations": state.get("iteration", 0),
-                "references": final_ui_refs
+                "references": final_ui_refs,
             }
 
         except Exception as e:
@@ -859,10 +908,7 @@ class DeepResearchGraph:
 
 
 def create_research_graph(
-    llm_api_key: str = None,
-    llm_base_url: str = None,
-    search_api_key: str = None,
-    model: str = None
+    llm_api_key: str = None, llm_base_url: str = None, search_api_key: str = None, model: str = None
 ) -> DeepResearchGraph:
     """
     工厂函数：创建 DeepResearch 工作流图
@@ -882,5 +928,5 @@ def create_research_graph(
         llm_api_key=llm_api_key,
         llm_base_url=llm_base_url,
         search_api_key=search_api_key,
-        model=model
+        model=model,
     )

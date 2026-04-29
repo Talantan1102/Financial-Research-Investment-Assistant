@@ -7,12 +7,12 @@ DeepResearch V2.0 - 服务入口
 提供与现有路由兼容的接口，支持 SSE 流式输出。
 """
 
-import os
 import json
-import uuid
 import logging
-from typing import AsyncGenerator, Dict, Any, Optional
-from datetime import datetime
+import os
+import uuid
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from .graph import DeepResearchGraph
 
@@ -24,10 +24,13 @@ except ImportError:
         from app.config.llm_config import get_config
     except ImportError:
         import sys
-        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+        sys.path.insert(
+            0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
         from config.llm_config import get_config
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("DeepResearchV2Service")
 
 
@@ -44,11 +47,11 @@ class DeepResearchV2Service:
 
     def __init__(
         self,
-        llm_api_key: Optional[str] = None,
-        llm_base_url: Optional[str] = None,
-        search_api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        max_iterations: Optional[int] = None
+        llm_api_key: str | None = None,
+        llm_base_url: str | None = None,
+        search_api_key: str | None = None,
+        model: str | None = None,
+        max_iterations: int | None = None,
     ):
         """
         初始化服务
@@ -77,7 +80,7 @@ class DeepResearchV2Service:
             llm_base_url=self.llm_base_url,
             search_api_key=self.search_api_key,
             model=self.model,
-            max_iterations=self.max_iterations
+            max_iterations=self.max_iterations,
         )
 
         logger.info(f"DeepResearch V2 Service initialized with default model: {self.model}")
@@ -85,12 +88,12 @@ class DeepResearchV2Service:
     async def research(
         self,
         query: str,
-        session_id: Optional[str] = None,
-        kb_name: Optional[str] = None,
+        session_id: str | None = None,
+        kb_name: str | None = None,
         resume: bool = False,
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         search_web: bool = True,
-        search_local: bool = False
+        search_local: bool = False,
     ) -> AsyncGenerator[str, None]:
         """
         执行深度研究（SSE 流式输出）
@@ -118,34 +121,28 @@ class DeepResearchV2Service:
 
         try:
             async for event in self.graph.run(
-                query, session_id,
+                query,
+                session_id,
                 resume=resume,
                 user_id=user_id,
                 search_web=search_web,
-                search_local=search_local
+                search_local=search_local,
             ):
                 # 转换为 SSE 格式
                 yield self._format_sse(event)
 
         except Exception as e:
             logger.error(f"Research error: {e}")
-            yield self._format_sse({
-                "type": "error",
-                "content": str(e)
-            })
+            yield self._format_sse({"type": "error", "content": str(e)})
 
         # 发送结束标记
         yield "data: [DONE]\n\n"
 
-    def _format_sse(self, event: Dict[str, Any]) -> str:
+    def _format_sse(self, event: dict[str, Any]) -> str:
         """格式化为 SSE 事件"""
         return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-    async def research_sync(
-        self,
-        query: str,
-        session_id: Optional[str] = None
-    ) -> Dict[str, Any]:
+    async def research_sync(self, query: str, session_id: str | None = None) -> dict[str, Any]:
         """
         同步执行研究（返回完整结果）
 
@@ -174,15 +171,15 @@ class DeepResearchV2Service:
             "insights": state.get("insights", []),
             "iterations": state.get("iteration", 0),
             "phase": state.get("phase", ""),
-            "logs": state.get("logs", [])
+            "logs": state.get("logs", []),
         }
 
 
 def create_service(
-    llm_api_key: Optional[str] = None,
-    llm_base_url: Optional[str] = None,
-    search_api_key: Optional[str] = None,
-    model: Optional[str] = None
+    llm_api_key: str | None = None,
+    llm_base_url: str | None = None,
+    search_api_key: str | None = None,
+    model: str | None = None,
 ) -> DeepResearchV2Service:
     """
     工厂函数：创建 DeepResearch V2 服务
@@ -202,5 +199,5 @@ def create_service(
         llm_api_key=llm_api_key,
         llm_base_url=llm_base_url,
         search_api_key=search_api_key,
-        model=model
+        model=model,
     )

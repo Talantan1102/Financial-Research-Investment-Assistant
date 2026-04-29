@@ -1,12 +1,12 @@
 """MCP Server 单元测试"""
 
-import pytest
-import asyncio
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
-from app.mcp_server.server import FinancialResearchMCPServer, get_mcp_server
-from app.mcp_server.control_flow.engine import ControlFlowEngine, ControlFlowType, ToolCall
-from app.mcp_server.error_handler import ErrorHandler, ErrorType, get_error_handler
+import pytest
+
+from app.mcp_server.control_flow.engine import ControlFlowEngine, ControlFlowType
+from app.mcp_server.error_handler import ErrorHandler, ErrorType
+from app.mcp_server.server import FinancialResearchMCPServer
 from app.mcp_server.skills.base import ToolResult
 
 
@@ -35,7 +35,7 @@ class TestFinancialResearchMCPServer:
         """测试获取可用Skills"""
         skills = server.get_available_skills()
         assert len(skills) == 7
-        
+
         skill_names = [s["name"] for s in skills]
         assert "market_data" in skill_names
         assert "financial_analysis" in skill_names
@@ -52,16 +52,26 @@ class TestFinancialResearchMCPServer:
     async def test_execute_tools_parallel(self, server):
         """测试并行执行工具"""
         tool_calls = [
-            {"skill": "market_data", "tool": "get_quote", "arguments": {"symbol": "600519"}, "call_id": "call_001"},
-            {"skill": "market_data", "tool": "get_daily_basic", "arguments": {"symbol": "600519"}, "call_id": "call_002"},
+            {
+                "skill": "market_data",
+                "tool": "get_quote",
+                "arguments": {"symbol": "600519"},
+                "call_id": "call_001",
+            },
+            {
+                "skill": "market_data",
+                "tool": "get_daily_basic",
+                "arguments": {"symbol": "600519"},
+                "call_id": "call_002",
+            },
         ]
 
         # Mock execute_tools以避免实际API调用
-        with patch.object(server, '_execute_skill_tool', new_callable=AsyncMock) as mock_execute:
+        with patch.object(server, "_execute_skill_tool", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = {"success": True, "data": {"test": "data"}}
-            
+
             result = await server.execute_tools(tool_calls, execution_mode="parallel")
-            
+
             assert "success" in result
             assert "results" in result
             assert len(result["results"]) == 2
@@ -70,14 +80,19 @@ class TestFinancialResearchMCPServer:
     async def test_execute_tools_sequential(self, server):
         """测试顺序执行工具"""
         tool_calls = [
-            {"skill": "market_data", "tool": "get_quote", "arguments": {"symbol": "600519"}, "call_id": "call_001"},
+            {
+                "skill": "market_data",
+                "tool": "get_quote",
+                "arguments": {"symbol": "600519"},
+                "call_id": "call_001",
+            },
         ]
 
-        with patch.object(server, '_execute_skill_tool', new_callable=AsyncMock) as mock_execute:
+        with patch.object(server, "_execute_skill_tool", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = {"success": True, "data": {"test": "data"}}
-            
+
             result = await server.execute_tools(tool_calls, execution_mode="sequential")
-            
+
             assert result["success"] is True
 
     def test_get_server_info(self, server):
@@ -91,11 +106,11 @@ class TestFinancialResearchMCPServer:
     @pytest.mark.asyncio
     async def test_analyze_stock(self, server):
         """测试分析股票便捷方法"""
-        with patch.object(server, 'execute_tools', new_callable=AsyncMock) as mock_execute:
+        with patch.object(server, "execute_tools", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = {"success": True, "results": []}
-            
+
             result = await server.analyze_stock("600519", "comprehensive")
-            
+
             assert result is not None
             mock_execute.assert_called_once()
 
@@ -109,9 +124,7 @@ class TestFinancialResearchMCPServer:
     def test_tool_execution_prompt(self, server):
         """测试工具执行Prompt生成"""
         prompt = server.get_tool_execution_prompt(
-            "分析茅台",
-            ["market_data", "financial_analysis"],
-            {"name": "茅台", "symbol": "600519"}
+            "分析茅台", ["market_data", "financial_analysis"], {"name": "茅台", "symbol": "600519"}
         )
         assert "market_data" in prompt
         assert "600519" in prompt
@@ -119,9 +132,7 @@ class TestFinancialResearchMCPServer:
     def test_response_generation_prompt(self, server):
         """测试回复生成Prompt"""
         prompt = server.get_response_generation_prompt(
-            "分析茅台",
-            {"market_data": {"quote": {}}},
-            {"total_api_calls": 3, "success_count": 3}
+            "分析茅台", {"market_data": {"quote": {}}}, {"total_api_calls": 3, "success_count": 3}
         )
         assert "分析茅台" in prompt
         assert "行情概况" in prompt
@@ -133,8 +144,10 @@ class TestControlFlowEngine:
     @pytest.fixture
     def mock_executor(self):
         """创建Mock执行器"""
+
         async def mock_skill_executor(skill, tool, arguments):
             return {"success": True, "data": {"test": "data"}}
+
         return mock_skill_executor
 
     @pytest.fixture
@@ -150,9 +163,9 @@ class TestControlFlowEngine:
                 {"skill": "market_data", "tool": "get_quote", "arguments": {"symbol": "600519"}},
             ]
         }
-        
+
         result = await engine.execute(ControlFlowType.SEQUENTIAL, config)
-        
+
         assert result["success"] is True
         assert result["flow_type"] == "sequential"
 
@@ -164,14 +177,14 @@ class TestControlFlowEngine:
             "template": {
                 "skill": "market_data",
                 "tool": "get_quote",
-                "arguments": {"symbol": "{item}"}
+                "arguments": {"symbol": "{item}"},
             },
             "parallel": True,
-            "max_concurrent": 3
+            "max_concurrent": 3,
         }
-        
+
         result = await engine.execute(ControlFlowType.FOR_EACH, config)
-        
+
         assert result["success"] is True
         assert result["flow_type"] == "for_each"
         assert result["summary"]["total"] == 3
@@ -180,7 +193,7 @@ class TestControlFlowEngine:
     async def test_unknown_flow_type(self, engine):
         """测试未知控制流类型"""
         result = await engine.execute("unknown_type", {})
-        
+
         assert result["success"] is False
         assert "Unknown control flow type" in result["error"]
 
@@ -202,7 +215,7 @@ class TestErrorHandler:
         """测试限流错误分类"""
         error = Exception("API rate limit exceeded. Please try again later.")
         error_info = handler.handle_error(error, "market_data.get_quote")
-        
+
         assert error_info.error_type == ErrorType.RATE_LIMIT
         assert error_info.error_code == "TUSHARE_RATE_LIMIT"
         assert error_info.retry_after_seconds == 60
@@ -212,7 +225,7 @@ class TestErrorHandler:
         """测试网络错误分类"""
         error = Exception("Network timeout while connecting to API")
         error_info = handler.handle_error(error, "market_data.get_quote")
-        
+
         assert error_info.error_type == ErrorType.NETWORK_ERROR
         assert error_info.is_critical is True
 
@@ -220,7 +233,7 @@ class TestErrorHandler:
         """测试参数错误分类"""
         error = Exception("Invalid parameter: symbol is required")
         error_info = handler.handle_error(error, "market_data.get_quote")
-        
+
         assert error_info.error_type == ErrorType.VALIDATION_ERROR
         assert error_info.error_code == "INVALID_PARAMETER"
 
@@ -235,7 +248,7 @@ class TestErrorHandler:
         error = Exception("rate limit")
         error_info = handler.handle_error(error, "market_data.get_quote")
         options = handler.generate_user_options(error_info)
-        
+
         assert len(options) > 0
         option_actions = [opt.action for opt in options]
         assert "retry" in option_actions
@@ -246,7 +259,7 @@ class TestErrorHandler:
         error = Exception("rate limit")
         error_info = handler.handle_error(error, "market_data.get_quote")
         response = handler.format_error_response(error_info)
-        
+
         assert response["status"] == "ERROR"
         assert "error" in response
         assert "user_options" in response
@@ -264,6 +277,7 @@ class TestSkills:
     def test_market_data_skill_tools(self):
         """测试MarketDataSkill工具数量"""
         from app.mcp_server.skills.market_data import MarketDataSkill
+
         skill = MarketDataSkill()
         assert skill.tool_count == 11
         assert skill.has_tool("get_quote")
@@ -272,6 +286,7 @@ class TestSkills:
     def test_financial_analysis_skill_tools(self):
         """测试FinancialAnalysisSkill工具数量"""
         from app.mcp_server.skills.financial_analysis import FinancialAnalysisSkill
+
         skill = FinancialAnalysisSkill()
         assert skill.tool_count == 7
         assert skill.has_tool("calculate_financial_ratios")
@@ -280,6 +295,7 @@ class TestSkills:
     def test_sector_analysis_skill_tools(self):
         """测试SectorAnalysisSkill工具数量"""
         from app.mcp_server.skills.sector_analysis import SectorAnalysisSkill
+
         skill = SectorAnalysisSkill()
         assert skill.tool_count == 7
         assert skill.has_tool("get_industry_list")
@@ -288,6 +304,7 @@ class TestSkills:
     def test_risk_assessment_skill_tools(self):
         """测试RiskAssessmentSkill工具数量"""
         from app.mcp_server.skills.risk_assessment import RiskAssessmentSkill
+
         skill = RiskAssessmentSkill()
         assert skill.tool_count == 5
         assert skill.has_tool("assess_stock_risk")
@@ -296,6 +313,7 @@ class TestSkills:
     def test_deep_research_skill_tools(self):
         """测试DeepResearchSkill工具数量"""
         from app.mcp_server.skills.deep_research import DeepResearchSkill
+
         skill = DeepResearchSkill()
         assert skill.tool_count == 3
         assert skill.has_tool("generate_stock_report")
@@ -303,6 +321,7 @@ class TestSkills:
     def test_web_research_skill_tools(self):
         """测试WebResearchSkill工具数量"""
         from app.mcp_server.skills.web_research import WebResearchSkill
+
         skill = WebResearchSkill()
         assert skill.tool_count == 4
         assert skill.has_tool("search_stock_news")
@@ -310,6 +329,7 @@ class TestSkills:
     def test_data_analysis_skill_tools(self):
         """测试DataAnalysisSkill工具数量"""
         from app.mcp_server.skills.data_analysis import DataAnalysisSkill
+
         skill = DataAnalysisSkill()
         assert skill.tool_count == 6
         assert skill.has_tool("calculate_statistics")

@@ -2,14 +2,16 @@
 # 未经授权，禁止转售或仿制。
 
 """Milvus 向量存储服务"""
+
 import os
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from pymilvus import (
-    connections,
     Collection,
     CollectionSchema,
-    FieldSchema,
     DataType,
+    FieldSchema,
+    connections,
     utility,
 )
 
@@ -84,7 +86,7 @@ class MilvusService:
     def insert_documents(
         self,
         collection_name: str,
-        documents: List[Dict[str, Any]],
+        documents: list[dict[str, Any]],
     ) -> int:
         """
         插入文档
@@ -125,10 +127,10 @@ class MilvusService:
     def search(
         self,
         collection_name: str,
-        query_vector: List[float],
+        query_vector: list[float],
         top_k: int = 5,
-        kb_id: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        kb_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         向量搜索
 
@@ -170,15 +172,17 @@ class MilvusService:
         formatted_results = []
         for hits in results:
             for hit in hits:
-                formatted_results.append({
-                    "id": hit.entity.get("id"),
-                    "doc_id": hit.entity.get("doc_id"),
-                    "kb_id": hit.entity.get("kb_id"),
-                    "filename": hit.entity.get("filename"),
-                    "content": hit.entity.get("content"),
-                    "chunk_index": hit.entity.get("chunk_index"),
-                    "score": hit.score,
-                })
+                formatted_results.append(
+                    {
+                        "id": hit.entity.get("id"),
+                        "doc_id": hit.entity.get("doc_id"),
+                        "kb_id": hit.entity.get("kb_id"),
+                        "filename": hit.entity.get("filename"),
+                        "content": hit.entity.get("content"),
+                        "chunk_index": hit.entity.get("chunk_index"),
+                        "score": hit.score,
+                    }
+                )
 
         return formatted_results
 
@@ -225,7 +229,7 @@ class MilvusService:
             print(f"删除集合失败: {e}")
             return False
 
-    def get_collection_stats(self, collection_name: str) -> Dict[str, Any]:
+    def get_collection_stats(self, collection_name: str) -> dict[str, Any]:
         """
         获取集合统计信息
 
@@ -250,7 +254,7 @@ class MilvusService:
         collection_name: str,
         filename: str,
         limit: int = 1000,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         根据文件名获取所有切片
 
@@ -289,7 +293,7 @@ class MilvusService:
 
 
 # 单例实例
-_milvus_service: Optional[MilvusService] = None
+_milvus_service: MilvusService | None = None
 
 
 def get_milvus_service() -> MilvusService:

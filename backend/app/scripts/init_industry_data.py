@@ -7,18 +7,20 @@
 使用方法：
     python -m scripts.init_industry_data
 """
-import sys
+
 import os
+import sys
 from datetime import date
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy.orm import Session
-from app.core.database import engine, Base
+from app.core.database import Base, engine
+
 # 导入所有模型以确保表被创建
 from models import (
-    User, ChatSession, ChatMessage, ChatAttachment, LongTermMemory,
-    KnowledgeBase, Document, IndustryStats, CompanyData, PolicyData
+    CompanyData,
+    IndustryStats,
+    PolicyData,
 )
 
 
@@ -32,6 +34,7 @@ def create_tables():
 def insert_sample_data():
     """插入示例数据"""
     from sqlalchemy.orm import sessionmaker
+
     SessionLocal = sessionmaker(bind=engine)
     db = SessionLocal()
 
@@ -53,7 +56,7 @@ def insert_sample_data():
                 unit="万辆",
                 year=2023,
                 region="全国",
-                source="中国汽车工业协会"
+                source="中国汽车工业协会",
             ),
             IndustryStats(
                 industry_name="新能源汽车",
@@ -63,7 +66,7 @@ def insert_sample_data():
                 year=2024,
                 region="全国",
                 source="中国汽车工业协会",
-                notes="预测数据"
+                notes="预测数据",
             ),
             IndustryStats(
                 industry_name="新能源汽车",
@@ -72,7 +75,7 @@ def insert_sample_data():
                 unit="%",
                 year=2023,
                 region="全国",
-                source="乘联会"
+                source="乘联会",
             ),
             IndustryStats(
                 industry_name="新能源汽车",
@@ -82,7 +85,7 @@ def insert_sample_data():
                 year=2024,
                 region="全国",
                 source="乘联会",
-                notes="预测数据"
+                notes="预测数据",
             ),
             IndustryStats(
                 industry_name="新能源汽车",
@@ -91,7 +94,7 @@ def insert_sample_data():
                 unit="万辆",
                 year=2023,
                 region="全国",
-                source="海关总署"
+                source="海关总署",
             ),
             IndustryStats(
                 industry_name="动力电池",
@@ -100,7 +103,7 @@ def insert_sample_data():
                 unit="GWh",
                 year=2023,
                 region="全国",
-                source="中国汽车动力电池产业创新联盟"
+                source="中国汽车动力电池产业创新联盟",
             ),
             IndustryStats(
                 industry_name="充电桩",
@@ -109,7 +112,7 @@ def insert_sample_data():
                 unit="万台",
                 year=2023,
                 region="全国",
-                source="中国充电联盟"
+                source="中国充电联盟",
             ),
         ]
         db.add_all(ev_stats)
@@ -128,7 +131,7 @@ def insert_sample_data():
                 market_share=35.0,
                 employees=703000,
                 year=2023,
-                data_source="年报"
+                data_source="年报",
             ),
             CompanyData(
                 company_name="特斯拉中国",
@@ -138,7 +141,7 @@ def insert_sample_data():
                 revenue=2100,
                 market_share=15.5,
                 year=2023,
-                data_source="财报估算"
+                data_source="财报估算",
             ),
             CompanyData(
                 company_name="蔚来汽车",
@@ -150,7 +153,7 @@ def insert_sample_data():
                 market_share=3.5,
                 employees=32000,
                 year=2023,
-                data_source="年报"
+                data_source="年报",
             ),
             CompanyData(
                 company_name="理想汽车",
@@ -162,7 +165,7 @@ def insert_sample_data():
                 market_share=5.0,
                 employees=31591,
                 year=2023,
-                data_source="年报"
+                data_source="年报",
             ),
             CompanyData(
                 company_name="宁德时代",
@@ -174,7 +177,7 @@ def insert_sample_data():
                 market_share=43.11,
                 employees=124000,
                 year=2023,
-                data_source="年报"
+                data_source="年报",
             ),
         ]
         db.add_all(companies)
@@ -193,7 +196,7 @@ def insert_sample_data():
                 category="财税政策",
                 industry="新能源汽车",
                 summary="延续新能源汽车购置税减免政策至2027年底，对购置日期在2024年1月1日至2025年12月31日期间的新能源汽车免征车辆购置税",
-                impact_level="重大"
+                impact_level="重大",
             ),
             PolicyData(
                 policy_name="新能源汽车产业发展规划(2021-2035年)",
@@ -203,7 +206,7 @@ def insert_sample_data():
                 category="产业规划",
                 industry="新能源汽车",
                 summary="到2025年新能源汽车新车销售量达到汽车新车销售总量的20%左右，到2035年纯电动汽车成为新销售车辆的主流",
-                impact_level="重大"
+                impact_level="重大",
             ),
             PolicyData(
                 policy_name="关于进一步构建高质量充电基础设施体系的指导意见",
@@ -213,7 +216,7 @@ def insert_sample_data():
                 category="基础设施",
                 industry="充电桩",
                 summary="到2030年基本建成覆盖广泛、规模适度、结构合理、功能完善的高质量充电基础设施体系",
-                impact_level="重大"
+                impact_level="重大",
             ),
         ]
         db.add_all(policies)

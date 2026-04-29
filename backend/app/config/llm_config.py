@@ -19,73 +19,74 @@ LLM 和 Agent 配置文件
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Any
 
 
 @dataclass
 class AgentModelConfig:
     """单个 Agent 的模型配置"""
+
     model: str
     temperature: float = 0.7
     max_tokens: int = 8000
 
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "model": self.model,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens
-        }
+    def to_dict(self) -> dict[str, Any]:
+        return {"model": self.model, "temperature": self.temperature, "max_tokens": self.max_tokens}
 
 
 @dataclass
 class AgentsConfig:
     """所有 Agent 的配置"""
+
     # 规划师 - 分析问题，生成研究大纲
-    architect: AgentModelConfig = field(default_factory=lambda: AgentModelConfig(
-        model="deepseek-v3.2",
-        temperature=0.7,
-        max_tokens=4000
-    ))
+    architect: AgentModelConfig = field(
+        default_factory=lambda: AgentModelConfig(
+            model="deepseek-v3.2", temperature=0.7, max_tokens=4000
+        )
+    )
 
     # 侦察员 - 深度搜索（使用较快的模型）
-    scout: AgentModelConfig = field(default_factory=lambda: AgentModelConfig(
-        model="qwen-plus",  # 搜索阶段用快速模型
-        temperature=0.5,
-        max_tokens=4000
-    ))
+    scout: AgentModelConfig = field(
+        default_factory=lambda: AgentModelConfig(
+            model="qwen-plus",  # 搜索阶段用快速模型
+            temperature=0.5,
+            max_tokens=4000,
+        )
+    )
 
     # 数据分析师 - 数据提取和分析
-    data_analyst: AgentModelConfig = field(default_factory=lambda: AgentModelConfig(
-        model="deepseek-v3.2",
-        temperature=0.3,
-        max_tokens=8000
-    ))
+    data_analyst: AgentModelConfig = field(
+        default_factory=lambda: AgentModelConfig(
+            model="deepseek-v3.2", temperature=0.3, max_tokens=8000
+        )
+    )
 
     # 代码极客 - 代码生成和图表绘制
-    wizard: AgentModelConfig = field(default_factory=lambda: AgentModelConfig(
-        model="deepseek-v3.2",
-        temperature=0.3,
-        max_tokens=8000
-    ))
+    wizard: AgentModelConfig = field(
+        default_factory=lambda: AgentModelConfig(
+            model="deepseek-v3.2", temperature=0.3, max_tokens=8000
+        )
+    )
 
     # 审核大师 - 对抗式审核
-    critic: AgentModelConfig = field(default_factory=lambda: AgentModelConfig(
-        model="deepseek-v3.2",
-        temperature=0.5,
-        max_tokens=4000
-    ))
+    critic: AgentModelConfig = field(
+        default_factory=lambda: AgentModelConfig(
+            model="deepseek-v3.2", temperature=0.5, max_tokens=4000
+        )
+    )
 
     # 首席写手 - 报告撰写
-    writer: AgentModelConfig = field(default_factory=lambda: AgentModelConfig(
-        model="deepseek-v3.2",
-        temperature=0.7,
-        max_tokens=16000
-    ))
+    writer: AgentModelConfig = field(
+        default_factory=lambda: AgentModelConfig(
+            model="deepseek-v3.2", temperature=0.7, max_tokens=16000
+        )
+    )
 
 
 @dataclass
 class ResearchConfig:
     """研究流程配置"""
+
     # 最大迭代次数（审核-修订循环）
     max_iterations: int = 1
 
@@ -109,12 +110,14 @@ class LLMConfig:
 
     集中管理所有配置，支持从环境变量读取
     """
+
     # API 配置
     api_key: str = field(default_factory=lambda: os.getenv("DASHSCOPE_API_KEY", ""))
-    base_url: str = field(default_factory=lambda: os.getenv(
-        "LLM_BASE_URL",
-        "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    ))
+    base_url: str = field(
+        default_factory=lambda: os.getenv(
+            "LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+    )
 
     # 搜索 API
     search_api_key: str = field(default_factory=lambda: os.getenv("BOCHA_API_KEY", ""))
@@ -140,7 +143,7 @@ class LLMConfig:
         }
         return agent_configs.get(agent_name, AgentModelConfig(model=self.default_model))
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典格式"""
         return {
             "api_key": self.api_key[:8] + "..." if self.api_key else "",
@@ -161,12 +164,12 @@ class LLMConfig:
                 "max_charts": self.research.max_charts,
                 "enable_code_execution": self.research.enable_code_execution,
                 "quality_threshold": self.research.quality_threshold,
-            }
+            },
         }
 
 
 # 全局配置实例（单例模式）
-_config_instance: Optional[LLMConfig] = None
+_config_instance: LLMConfig | None = None
 
 
 def get_config() -> LLMConfig:
@@ -199,6 +202,7 @@ def get_default_model() -> str:
 def print_config():
     """打印当前配置（用于调试）"""
     import json
+
     config = get_config()
     print("=" * 60)
     print("LLM Configuration")

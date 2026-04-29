@@ -8,9 +8,10 @@
 """
 
 import os
+from typing import Any, Literal
+
 import aiohttp
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List, Literal
+
 from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
 
 
@@ -44,23 +45,23 @@ class WebResearchSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="days",
                     type="integer",
                     description="搜索最近几天的新闻",
                     required=False,
-                    default=7
+                    default=7,
                 ),
                 ToolParameter(
                     name="limit",
                     type="integer",
                     description="返回新闻数量",
                     required=False,
-                    default=10
-                )
-            ]
+                    default=10,
+                ),
+            ],
         )
 
         # 2. 搜索公司公告
@@ -73,23 +74,23 @@ class WebResearchSkill(BaseSkill):
                     name="ts_code",
                     type="string",
                     description="TS股票代码，如 600519.SH",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="category",
                     type="string",
                     description="公告类型：all(全部), report(定期报告), major(重大事项), disclosure(信息披露)",
                     required=False,
-                    default="all"
+                    default="all",
                 ),
                 ToolParameter(
                     name="limit",
                     type="integer",
                     description="返回公告数量",
                     required=False,
-                    default=10
-                )
-            ]
+                    default=10,
+                ),
+            ],
         )
 
         # 3. 搜索行业新闻
@@ -102,23 +103,23 @@ class WebResearchSkill(BaseSkill):
                     name="industry",
                     type="string",
                     description="行业名称，如'白酒'、'新能源'",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="days",
                     type="integer",
                     description="搜索最近几天的新闻",
                     required=False,
-                    default=7
+                    default=7,
                 ),
                 ToolParameter(
                     name="limit",
                     type="integer",
                     description="返回新闻数量",
                     required=False,
-                    default=10
-                )
-            ]
+                    default=10,
+                ),
+            ],
         )
 
         # 4. 搜索研报
@@ -131,23 +132,23 @@ class WebResearchSkill(BaseSkill):
                     name="keyword",
                     type="string",
                     description="搜索关键词，可以是股票名称或行业名称",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="report_type",
                     type="string",
                     description="研报类型：all(全部), rating(评级), earnings(盈利预测), industry(行业)",
                     required=False,
-                    default="all"
+                    default="all",
                 ),
                 ToolParameter(
                     name="limit",
                     type="integer",
                     description="返回研报数量",
                     required=False,
-                    default=5
-                )
-            ]
+                    default=5,
+                ),
+            ],
         )
 
     def _extract_stock_name(self, ts_code: str) -> str:
@@ -163,7 +164,9 @@ class WebResearchSkill(BaseSkill):
         }
         return stock_names.get(ts_code, ts_code)
 
-    async def _call_bocha_api(self, query: str, freshness: str = "Month", count: int = 10) -> Dict[str, Any]:
+    async def _call_bocha_api(
+        self, query: str, freshness: str = "Month", count: int = 10
+    ) -> dict[str, Any]:
         """
         调用博查AI搜索API或使用Mock服务
 
@@ -180,46 +183,44 @@ class WebResearchSkill(BaseSkill):
             return await self._call_mock_bocha(query, freshness, count)
 
         if not self.api_key:
-            return {
-                "success": False,
-                "error": "BOCHA_API_KEY 未配置，请在环境变量中设置"
-            }
+            return {"success": False, "error": "BOCHA_API_KEY 未配置，请在环境变量中设置"}
 
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
         payload = {
             "query": query,
             "freshness": freshness,
             "count": min(count, 10),  # API限制最大10条
-            "summary": True  # 启用AI摘要
+            "summary": True,  # 启用AI摘要
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
                     self.base_url,
                     headers=headers,
                     json=payload,
-                    timeout=aiohttp.ClientTimeout(total=30)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return {"success": True, "data": data}
-                    else:
-                        error_text = await response.text()
-                        return {
-                            "success": False,
-                            "error": f"API请求失败 (状态码: {response.status}): {error_text}"
-                        }
+                    timeout=aiohttp.ClientTimeout(total=30),
+                ) as response,
+            ):
+                if response.status == 200:
+                    data = await response.json()
+                    return {"success": True, "data": data}
+                else:
+                    error_text = await response.text()
+                    return {
+                        "success": False,
+                        "error": f"API请求失败 (状态码: {response.status}): {error_text}",
+                    }
         except aiohttp.ClientTimeout:
             return {"success": False, "error": "请求超时"}
         except Exception as e:
             return {"success": False, "error": f"请求异常: {str(e)}"}
 
-    def _infer_search_type(self, query: str) -> Literal["news", "announcement", "industry", "report"]:
+    def _infer_search_type(
+        self, query: str
+    ) -> Literal["news", "announcement", "industry", "report"]:
         """
         从查询字符串推断搜索类型
 
@@ -232,7 +233,17 @@ class WebResearchSkill(BaseSkill):
         query_lower = query.lower()
 
         # 检查公告特征
-        if any(kw in query_lower for kw in ["公告", "年报", "季报", "site:cninfo.com.cn", "site:szse.cn", "site:sse.com.cn"]):
+        if any(
+            kw in query_lower
+            for kw in [
+                "公告",
+                "年报",
+                "季报",
+                "site:cninfo.com.cn",
+                "site:szse.cn",
+                "site:sse.com.cn",
+            ]
+        ):
             return "announcement"
 
         # 检查研报特征
@@ -246,7 +257,7 @@ class WebResearchSkill(BaseSkill):
         # 默认为新闻
         return "news"
 
-    async def _call_mock_bocha(self, query: str, freshness: str, count: int) -> Dict[str, Any]:
+    async def _call_mock_bocha(self, query: str, freshness: str, count: int) -> dict[str, Any]:
         """
         调用mock服务生成搜索结果
 
@@ -267,15 +278,12 @@ class WebResearchSkill(BaseSkill):
         search_type = self._infer_search_type(query)
 
         results = await mock_service.generate_search_results(
-            query=query,
-            search_type=search_type,
-            count=min(count, 10),
-            freshness=freshness
+            query=query, search_type=search_type, count=min(count, 10), freshness=freshness
         )
 
         return {"success": True, "data": results}
 
-    def _parse_bocha_results(self, api_response: Dict, limit: int) -> List[Dict]:
+    def _parse_bocha_results(self, api_response: dict, limit: int) -> list[dict]:
         """解析博查API返回结果"""
         results = []
 
@@ -285,22 +293,21 @@ class WebResearchSkill(BaseSkill):
         # 处理嵌套结构: response -> data -> webPages -> value
         outer_data = api_response.get("data", {})
         # 可能是直接的 SearchResponse 或嵌套在 data 中
-        if "webPages" in outer_data:
-            search_response = outer_data
-        else:
-            search_response = outer_data.get("data", {})
-        
+        search_response = outer_data if "webPages" in outer_data else outer_data.get("data", {})
+
         web_pages = search_response.get("webPages", {})
         items = web_pages.get("value", [])
 
         for item in items[:limit]:
-            results.append({
-                "title": item.get("name", ""),
-                "url": item.get("url", ""),
-                "source": item.get("siteName", ""),
-                "date": item.get("datePublished", ""),
-                "summary": item.get("summary", item.get("snippet", ""))
-            })
+            results.append(
+                {
+                    "title": item.get("name", ""),
+                    "url": item.get("url", ""),
+                    "source": item.get("siteName", ""),
+                    "date": item.get("datePublished", ""),
+                    "summary": item.get("summary", item.get("snippet", "")),
+                }
+            )
 
         return results
 
@@ -340,8 +347,7 @@ class WebResearchSkill(BaseSkill):
 
             if not api_result["success"]:
                 return ToolResult(
-                    success=False,
-                    error=f"搜索失败: {api_result.get('error', '未知错误')}"
+                    success=False, error=f"搜索失败: {api_result.get('error', '未知错误')}"
                 )
 
             # 解析结果
@@ -349,18 +355,23 @@ class WebResearchSkill(BaseSkill):
 
             data_source = "Mock博查服务" if self.use_mock else "博查AI开放平台"
 
-            return ToolResult(success=True, data={
-                "ts_code": ts_code,
-                "news": news_list,
-                "count": len(news_list),
-                "search_period": f"最近{days}天",
-                "data_source": data_source
-            })
+            return ToolResult(
+                success=True,
+                data={
+                    "ts_code": ts_code,
+                    "news": news_list,
+                    "count": len(news_list),
+                    "search_period": f"最近{days}天",
+                    "data_source": data_source,
+                },
+            )
 
         except Exception as e:
             return ToolResult(success=False, error=f"搜索股票新闻失败: {str(e)}")
 
-    async def search_company_announcements(self, ts_code: str, category: str = "all", limit: int = 10) -> ToolResult:
+    async def search_company_announcements(
+        self, ts_code: str, category: str = "all", limit: int = 10
+    ) -> ToolResult:
         """
         搜索公司公告 - 使用博查AI API
 
@@ -383,7 +394,7 @@ class WebResearchSkill(BaseSkill):
                 "report": "年报 季报 定期报告",
                 "major": "重大事项 重大合同",
                 "disclosure": "信息披露 公告",
-                "all": "公告"
+                "all": "公告",
             }
             keyword = category_keywords.get(category, "公告")
 
@@ -394,8 +405,7 @@ class WebResearchSkill(BaseSkill):
 
             if not api_result["success"]:
                 return ToolResult(
-                    success=False,
-                    error=f"搜索失败: {api_result.get('error', '未知错误')}"
+                    success=False, error=f"搜索失败: {api_result.get('error', '未知错误')}"
                 )
 
             # 解析结果
@@ -413,18 +423,23 @@ class WebResearchSkill(BaseSkill):
 
             data_source = "Mock博查服务" if self.use_mock else "博查AI开放平台"
 
-            return ToolResult(success=True, data={
-                "ts_code": ts_code,
-                "category": category,
-                "announcements": announcements,
-                "count": len(announcements),
-                "data_source": data_source
-            })
+            return ToolResult(
+                success=True,
+                data={
+                    "ts_code": ts_code,
+                    "category": category,
+                    "announcements": announcements,
+                    "count": len(announcements),
+                    "data_source": data_source,
+                },
+            )
 
         except Exception as e:
             return ToolResult(success=False, error=f"搜索公司公告失败: {str(e)}")
 
-    async def search_industry_news(self, industry: str, days: int = 7, limit: int = 10) -> ToolResult:
+    async def search_industry_news(
+        self, industry: str, days: int = 7, limit: int = 10
+    ) -> ToolResult:
         """
         搜索行业新闻 - 使用博查AI API
 
@@ -458,8 +473,7 @@ class WebResearchSkill(BaseSkill):
 
             if not api_result["success"]:
                 return ToolResult(
-                    success=False,
-                    error=f"搜索失败: {api_result.get('error', '未知错误')}"
+                    success=False, error=f"搜索失败: {api_result.get('error', '未知错误')}"
                 )
 
             # 解析结果
@@ -467,18 +481,23 @@ class WebResearchSkill(BaseSkill):
 
             data_source = "Mock博查服务" if self.use_mock else "博查AI开放平台"
 
-            return ToolResult(success=True, data={
-                "industry": industry,
-                "news": news_list,
-                "count": len(news_list),
-                "search_period": f"最近{days}天",
-                "data_source": data_source
-            })
+            return ToolResult(
+                success=True,
+                data={
+                    "industry": industry,
+                    "news": news_list,
+                    "count": len(news_list),
+                    "search_period": f"最近{days}天",
+                    "data_source": data_source,
+                },
+            )
 
         except Exception as e:
             return ToolResult(success=False, error=f"搜索行业新闻失败: {str(e)}")
 
-    async def search_research_reports(self, keyword: str, report_type: str = "all", limit: int = 5) -> ToolResult:
+    async def search_research_reports(
+        self, keyword: str, report_type: str = "all", limit: int = 5
+    ) -> ToolResult:
         """
         搜索研报 - 使用博查AI API
 
@@ -499,7 +518,7 @@ class WebResearchSkill(BaseSkill):
                 "rating": "研报 评级 买入 增持",
                 "earnings": "研报 盈利预测 业绩",
                 "industry": "研报 行业分析",
-                "all": "研报 研究报告"
+                "all": "研报 研究报告",
             }
             type_keyword = type_keywords.get(report_type, "研报")
 
@@ -510,8 +529,7 @@ class WebResearchSkill(BaseSkill):
 
             if not api_result["success"]:
                 return ToolResult(
-                    success=False,
-                    error=f"搜索失败: {api_result.get('error', '未知错误')}"
+                    success=False, error=f"搜索失败: {api_result.get('error', '未知错误')}"
                 )
 
             # 解析结果
@@ -537,13 +555,16 @@ class WebResearchSkill(BaseSkill):
 
             data_source = "Mock博查服务" if self.use_mock else "博查AI开放平台"
 
-            return ToolResult(success=True, data={
-                "keyword": keyword,
-                "report_type": report_type,
-                "reports": reports,
-                "count": len(reports),
-                "data_source": data_source
-            })
+            return ToolResult(
+                success=True,
+                data={
+                    "keyword": keyword,
+                    "report_type": report_type,
+                    "reports": reports,
+                    "count": len(reports),
+                    "data_source": data_source,
+                },
+            )
 
         except Exception as e:
             return ToolResult(success=False, error=f"搜索研报失败: {str(e)}")

@@ -11,20 +11,19 @@
 4. 用户偏好学习
 """
 
-import os
 import json
-import uuid
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime
-from sqlalchemy.orm import Session
-from openai import OpenAI
+import os
+from typing import Any
 
 from dotenv import load_dotenv
+from openai import OpenAI
+from sqlalchemy.orm import Session
+
 load_dotenv()
 
-from app.models.chat import ChatSession, ChatMessage, LongTermMemory
+from app.models.chat import ChatMessage, LongTermMemory
 from app.service.embedding_service import generate_embedding
-from app.service.milvus_service import get_milvus_service, MilvusService
+from app.service.milvus_service import MilvusService, get_milvus_service
 
 # 记忆触发阈值
 MEMORY_TOKEN_THRESHOLD = 10000  # 超过此 token 数触发记忆压缩
@@ -36,10 +35,12 @@ class MemoryService:
 
     def __init__(self):
         self.api_key = os.getenv("DASHSCOPE_API_KEY")
-        self.base_url = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        self.base_url = os.getenv(
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
         self.model = os.getenv("DASHSCOPE_MODEL", "qwen-plus")
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
-        self._milvus: Optional[MilvusService] = None
+        self._milvus: MilvusService | None = None
 
     @property
     def milvus(self) -> MilvusService:
@@ -51,7 +52,13 @@ class MemoryService:
 
     def _ensure_memory_collection(self):
         """确保记忆集合存在（使用专门的 schema）"""
-        from pymilvus import connections, Collection, CollectionSchema, FieldSchema, DataType, utility
+        from pymilvus import (
+            Collection,
+            CollectionSchema,
+            DataType,
+            FieldSchema,
+            utility,
+        )
 
         collection_name = MEMORY_COLLECTION_NAME
 
@@ -63,9 +70,13 @@ class MemoryService:
             FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=64),
             FieldSchema(name="user_id", dtype=DataType.VARCHAR, max_length=64),
             FieldSchema(name="session_id", dtype=DataType.VARCHAR, max_length=64),
-            FieldSchema(name="memory_type", dtype=DataType.VARCHAR, max_length=32),  # summary/insight/preference
+            FieldSchema(
+                name="memory_type", dtype=DataType.VARCHAR, max_length=32
+            ),  # summary/insight/preference
             FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=65535),
-            FieldSchema(name="metadata", dtype=DataType.VARCHAR, max_length=8192),  # JSON 格式的额外信息
+            FieldSchema(
+                name="metadata", dtype=DataType.VARCHAR, max_length=8192
+            ),  # JSON 格式的额外信息
             FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=1024),
         ]
 
@@ -88,12 +99,12 @@ class MemoryService:
         # 简单估算：假设平均每3个字符为1个 token
         return len(text) // 3
 
-    def should_compress(self, messages: List[ChatMessage]) -> bool:
+    def should_compress(self, messages: list[ChatMessage]) -> bool:
         """判断是否需要压缩记忆"""
         total_tokens = sum(self.estimate_tokens(msg.content) for msg in messages)
         return total_tokens > MEMORY_TOKEN_THRESHOLD
 
-    def summarize_conversation(self, messages: List[ChatMessage]) -> Dict[str, Any]:
+    def summarize_conversation(self, messages: list[ChatMessage]) -> dict[str, Any]:
         """
         使用 LLM 总结对话并提取关键洞察
 
@@ -106,10 +117,9 @@ class MemoryService:
             }
         """
         # 构建对话文本
-        conversation_text = "\n".join([
-            f"{'用户' if msg.role == 'user' else '助手'}: {msg.content}"
-            for msg in messages
-        ])
+        conversation_text = "\n".join(
+            [f"{'用户' if msg.role == 'user' else '助手'}: {msg.content}" for msg in messages]
+        )
 
         # 限制长度避免超过上下文
         if len(conversation_text) > 30000:
@@ -136,8 +146,11 @@ class MemoryService:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "你是一个专业的对话分析助手，擅长总结对话内容并提取关键信息。"},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的对话分析助手，擅长总结对话内容并提取关键信息。",
+                    },
+                    {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
             )
@@ -161,16 +174,12 @@ class MemoryService:
                 "summary": f"对话包含 {len(messages)} 条消息",
                 "key_insights": [],
                 "user_preferences": {},
-                "topics": []
+                "topics": [],
             }
 
     def create_memory(
-        self,
-        db: Session,
-        user_id: str,
-        session_id: str,
-        messages: List[ChatMessage]
-    ) -> Optional[LongTermMemory]:
+        self, db: Session, user_id: str, session_id: str, messages: list[ChatMessage]
+    ) -> LongTermMemory | None:
         """
         创建长期记忆
 
@@ -210,7 +219,7 @@ class MemoryService:
             memory_id=str(memory.id),
             user_id=user_id,
             session_id=session_id,
-            summary_data=summary_data
+            summary_data=summary_data,
         )
 
         # 更新 Milvus IDs
@@ -221,12 +230,8 @@ class MemoryService:
         return memory
 
     def _store_memory_vectors(
-        self,
-        memory_id: str,
-        user_id: str,
-        session_id: str,
-        summary_data: Dict[str, Any]
-    ) -> List[str]:
+        self, memory_id: str, user_id: str, session_id: str, summary_data: dict[str, Any]
+    ) -> list[str]:
         """将记忆内容向量化并存储到 Milvus"""
         from pymilvus import Collection
 
@@ -239,15 +244,17 @@ class MemoryService:
             summary_vector = generate_embedding(summary)
             if summary_vector:
                 doc_id = f"{memory_id}_summary"
-                documents_to_insert.append({
-                    "id": doc_id,
-                    "user_id": user_id,
-                    "session_id": session_id,
-                    "memory_type": "summary",
-                    "content": summary,
-                    "metadata": json.dumps({"memory_id": memory_id}),
-                    "vector": summary_vector
-                })
+                documents_to_insert.append(
+                    {
+                        "id": doc_id,
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "memory_type": "summary",
+                        "content": summary,
+                        "metadata": json.dumps({"memory_id": memory_id}),
+                        "vector": summary_vector,
+                    }
+                )
                 milvus_ids.append(doc_id)
 
         # 2. 存储关键洞察向量
@@ -257,15 +264,17 @@ class MemoryService:
                 insight_vector = generate_embedding(insight)
                 if insight_vector:
                     doc_id = f"{memory_id}_insight_{i}"
-                    documents_to_insert.append({
-                        "id": doc_id,
-                        "user_id": user_id,
-                        "session_id": session_id,
-                        "memory_type": "insight",
-                        "content": insight,
-                        "metadata": json.dumps({"memory_id": memory_id, "index": i}),
-                        "vector": insight_vector
-                    })
+                    documents_to_insert.append(
+                        {
+                            "id": doc_id,
+                            "user_id": user_id,
+                            "session_id": session_id,
+                            "memory_type": "insight",
+                            "content": insight,
+                            "metadata": json.dumps({"memory_id": memory_id, "index": i}),
+                            "vector": insight_vector,
+                        }
+                    )
                     milvus_ids.append(doc_id)
 
         # 3. 存储主题向量
@@ -275,15 +284,17 @@ class MemoryService:
             topics_vector = generate_embedding(topics_text)
             if topics_vector:
                 doc_id = f"{memory_id}_topics"
-                documents_to_insert.append({
-                    "id": doc_id,
-                    "user_id": user_id,
-                    "session_id": session_id,
-                    "memory_type": "topics",
-                    "content": topics_text,
-                    "metadata": json.dumps({"memory_id": memory_id, "topics": topics}),
-                    "vector": topics_vector
-                })
+                documents_to_insert.append(
+                    {
+                        "id": doc_id,
+                        "user_id": user_id,
+                        "session_id": session_id,
+                        "memory_type": "topics",
+                        "content": topics_text,
+                        "metadata": json.dumps({"memory_id": memory_id, "topics": topics}),
+                        "vector": topics_vector,
+                    }
+                )
                 milvus_ids.append(doc_id)
 
         # 批量插入 Milvus
@@ -310,12 +321,7 @@ class MemoryService:
 
         return milvus_ids
 
-    def retrieve_memories(
-        self,
-        user_id: str,
-        query: str,
-        top_k: int = 5
-    ) -> List[Dict[str, Any]]:
+    def retrieve_memories(self, user_id: str, query: str, top_k: int = 5) -> list[dict[str, Any]]:
         """
         检索与查询相关的记忆
 
@@ -361,14 +367,16 @@ class MemoryService:
             formatted_results = []
             for hits in results:
                 for hit in hits:
-                    formatted_results.append({
-                        "id": hit.entity.get("id"),
-                        "session_id": hit.entity.get("session_id"),
-                        "memory_type": hit.entity.get("memory_type"),
-                        "content": hit.entity.get("content"),
-                        "metadata": hit.entity.get("metadata"),
-                        "score": hit.score,
-                    })
+                    formatted_results.append(
+                        {
+                            "id": hit.entity.get("id"),
+                            "session_id": hit.entity.get("session_id"),
+                            "memory_type": hit.entity.get("memory_type"),
+                            "content": hit.entity.get("content"),
+                            "metadata": hit.entity.get("metadata"),
+                            "score": hit.score,
+                        }
+                    )
 
             return formatted_results
 
@@ -376,30 +384,25 @@ class MemoryService:
             print(f"检索记忆失败: {e}")
             return []
 
-    def get_user_memories(
-        self,
-        db: Session,
-        user_id: str,
-        limit: int = 10
-    ) -> List[LongTermMemory]:
+    def get_user_memories(self, db: Session, user_id: str, limit: int = 10) -> list[LongTermMemory]:
         """获取用户的所有长期记忆"""
-        return db.query(LongTermMemory).filter(
-            LongTermMemory.user_id == user_id
-        ).order_by(LongTermMemory.created_at.desc()).limit(limit).all()
+        return (
+            db.query(LongTermMemory)
+            .filter(LongTermMemory.user_id == user_id)
+            .order_by(LongTermMemory.created_at.desc())
+            .limit(limit)
+            .all()
+        )
 
-    def delete_memory(
-        self,
-        db: Session,
-        memory_id: str,
-        user_id: str
-    ) -> bool:
+    def delete_memory(self, db: Session, memory_id: str, user_id: str) -> bool:
         """删除指定的长期记忆"""
         from pymilvus import Collection, utility
 
-        memory = db.query(LongTermMemory).filter(
-            LongTermMemory.id == memory_id,
-            LongTermMemory.user_id == user_id
-        ).first()
+        memory = (
+            db.query(LongTermMemory)
+            .filter(LongTermMemory.id == memory_id, LongTermMemory.user_id == user_id)
+            .first()
+        )
 
         if not memory:
             return False
@@ -420,12 +423,7 @@ class MemoryService:
 
         return True
 
-    def build_memory_context(
-        self,
-        user_id: str,
-        current_query: str,
-        max_memories: int = 3
-    ) -> str:
+    def build_memory_context(self, user_id: str, current_query: str, max_memories: int = 3) -> str:
         """
         构建记忆上下文，用于增强当前对话
 
@@ -473,7 +471,7 @@ class MemoryService:
 
 
 # 单例实例
-_memory_service: Optional[MemoryService] = None
+_memory_service: MemoryService | None = None
 
 
 def get_memory_service() -> MemoryService:

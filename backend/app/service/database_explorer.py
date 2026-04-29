@@ -2,10 +2,12 @@
 # 未经授权，禁止转售或仿制。
 
 """数据库探索服务 - 仅支持 PostgreSQL"""
-from typing import List, Dict, Any, Optional
+
+import logging
+from typing import Any
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +18,7 @@ class DatabaseExplorer:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_tables(self) -> List[Dict[str, Any]]:
+    def get_tables(self) -> list[dict[str, Any]]:
         """获取当前数据库的所有表"""
         query = text("""
             SELECT
@@ -41,15 +43,17 @@ class DatabaseExplorer:
                 self.db.rollback()
                 row_count = 0
 
-            tables.append({
-                "name": row.table_name,
-                "size": row.size,
-                "column_count": row.column_count,
-                "row_count": row_count,
-            })
+            tables.append(
+                {
+                    "name": row.table_name,
+                    "size": row.size,
+                    "column_count": row.column_count,
+                    "row_count": row_count,
+                }
+            )
         return tables
 
-    def get_table_schema(self, table_name: str) -> Dict[str, Any]:
+    def get_table_schema(self, table_name: str) -> dict[str, Any]:
         """获取表结构"""
         # 验证表名安全性
         if not self._is_valid_identifier(table_name):
@@ -70,13 +74,15 @@ class DatabaseExplorer:
         columns_result = self.db.execute(columns_query, {"table_name": table_name})
         columns = []
         for row in columns_result:
-            columns.append({
-                "name": row.column_name,
-                "type": row.data_type,
-                "max_length": row.character_maximum_length,
-                "nullable": row.is_nullable == "YES",
-                "default": row.column_default,
-            })
+            columns.append(
+                {
+                    "name": row.column_name,
+                    "type": row.data_type,
+                    "max_length": row.character_maximum_length,
+                    "nullable": row.is_nullable == "YES",
+                    "default": row.column_default,
+                }
+            )
 
         # 获取主键信息
         pk_query = text("""
@@ -102,10 +108,12 @@ class DatabaseExplorer:
             idx_result = self.db.execute(idx_query, {"table_name": table_name})
             indexes = []
             for row in idx_result:
-                indexes.append({
-                    "name": row.indexname,
-                    "definition": row.indexdef,
-                })
+                indexes.append(
+                    {
+                        "name": row.indexname,
+                        "definition": row.indexdef,
+                    }
+                )
         except Exception:
             self.db.rollback()
             indexes = []
@@ -122,9 +130,9 @@ class DatabaseExplorer:
         table_name: str,
         limit: int = 100,
         offset: int = 0,
-        order_by: Optional[str] = None,
-        order_dir: str = "asc"
-    ) -> Dict[str, Any]:
+        order_by: str | None = None,
+        order_dir: str = "asc",
+    ) -> dict[str, Any]:
         """获取表数据（分页）"""
         # 验证表名安全性
         if not self._is_valid_identifier(table_name):
@@ -141,7 +149,9 @@ class DatabaseExplorer:
 
         # 构建查询（使用安全的参数化）
         if order_by and self._is_valid_identifier(order_by):
-            data_query = text(f'SELECT * FROM "{table_name}" ORDER BY "{order_by}" {order_dir} LIMIT :limit OFFSET :offset')
+            data_query = text(
+                f'SELECT * FROM "{table_name}" ORDER BY "{order_by}" {order_dir} LIMIT :limit OFFSET :offset'
+            )
         else:
             data_query = text(f'SELECT * FROM "{table_name}" LIMIT :limit OFFSET :offset')
 
@@ -157,7 +167,7 @@ class DatabaseExplorer:
             for i, col in enumerate(columns):
                 value = row[i]
                 # 处理特殊类型
-                if hasattr(value, 'isoformat'):
+                if hasattr(value, "isoformat"):
                     value = value.isoformat()
                 elif isinstance(value, bytes):
                     value = f"<binary {len(value)} bytes>"
@@ -173,7 +183,7 @@ class DatabaseExplorer:
             "offset": offset,
         }
 
-    def execute_query(self, sql: str, limit: int = 100) -> Dict[str, Any]:
+    def execute_query(self, sql: str, limit: int = 100) -> dict[str, Any]:
         """执行只读 SQL 查询"""
         # 安全检查：只允许 SELECT 语句
         sql_clean = sql.strip().upper()
@@ -181,7 +191,17 @@ class DatabaseExplorer:
             raise ValueError("Only SELECT queries are allowed")
 
         # 禁止危险关键字
-        dangerous_keywords = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE", "GRANT", "REVOKE"]
+        dangerous_keywords = [
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "DROP",
+            "ALTER",
+            "CREATE",
+            "TRUNCATE",
+            "GRANT",
+            "REVOKE",
+        ]
         for keyword in dangerous_keywords:
             if keyword in sql_clean:
                 raise ValueError(f"Query contains forbidden keyword: {keyword}")
@@ -199,7 +219,7 @@ class DatabaseExplorer:
                 row_dict = {}
                 for i, col in enumerate(columns):
                     value = row[i]
-                    if hasattr(value, 'isoformat'):
+                    if hasattr(value, "isoformat"):
                         value = value.isoformat()
                     elif isinstance(value, bytes):
                         value = f"<binary {len(value)} bytes>"
@@ -222,4 +242,5 @@ class DatabaseExplorer:
             return False
         # 只允许字母、数字、下划线
         import re
-        return bool(re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', name))
+
+        return bool(re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", name))

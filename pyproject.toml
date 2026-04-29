@@ -75,3 +75,57 @@ packages = ["backend"]
 
 [tool.uv]
 managed = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    "docs/archive",
+    ".venv",
+    "venv",
+    "__pycache__",
+    # Legacy services scheduled for deletion in v0 — excluded from lint until removed.
+    # See spec 附录 B (deletion list) in docs/superpowers/specs/2026-04-29-dev-test-loop-design.md.
+    "backend/app/service/chat_service*.py",
+    "backend/app/service/mcp_chat_service.py",
+    "backend/app/service/react_controller.py",
+    "backend/app/service/smart_analyzer.py",
+    "backend/app/service/dr_g.py",
+    "backend/app/service/bidding_service.py",
+    "backend/app/service/database_explorer.py",
+    "backend/app/service/text2sql_service.py",
+    "backend/app/service/deep_research_v2/",
+    "backend/app/service/docmind_service.py",
+    "backend/app/service/news_collection_service.py",
+    # Legacy test files scheduled for deletion (replaced by tests/{unit,integration,e2e,eval}/)
+    "backend/test_mock_tushare.py",
+    "backend/test_mock_integration.py",
+    "backend/test_mock_extended.py",
+    "backend/app/mcp_server/tests/test_mcp_server.py",
+    "backend/tests/integration/test_mcp_meta_tools.py",
+    "backend/tests/integration/test_mcp_resource_tool_arch.py",
+    "backend/tests/e2e/test_e2e_chat.py",
+]
+
+[tool.ruff.lint]
+# Enable: pycodestyle errors (E), pyflakes (F), isort (I),
+#         pep8-naming (N), pyupgrade (UP), bugbear (B),
+#         comprehensions (C4), simplify (SIM)
+select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM"]
+# v0 baseline: don't enforce the strict ones until later
+ignore = [
+    "E501",  # line too long (formatter handles most cases)
+    "B008",  # function-call-in-default-argument (FastAPI Depends idiom)
+    "N803",  # function args lowercase (we have ts_code, etc.)
+    "N806",  # variable in function should be lowercase (we have DataFrames)
+    # v0 baseline: deferred — re-enable after legacy services are deleted in Plan B
+    "B904",  # raise-from in except (cleanup pass scheduled post-v0)
+    "B905",  # zip-without-explicit-strict (re-enable after py311 sweep)
+    "E402",  # module-level import not at top (FastAPI app_main has env-load ordering)
+    "E722",  # bare except (legacy try/except cleanup scheduled post-v0)
+    "F841",  # unused-local-variable (legacy code paths)
+    "N815",  # mixed-case attrs (Tushare API field names use camelCase)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**/*.py" = ["B011"]  # assert in tests is fine

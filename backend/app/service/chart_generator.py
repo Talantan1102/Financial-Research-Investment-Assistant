@@ -12,17 +12,17 @@ Chart Generator - 图表配置生成器
 5. 数据表格 (Table)
 """
 
-import json
 import logging
-from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 class ChartType(Enum):
     """图表类型"""
+
     LINE = "line"
     BAR = "bar"
     PIE = "pie"
@@ -33,10 +33,11 @@ class ChartType(Enum):
 @dataclass
 class ChartConfig:
     """图表配置"""
+
     chart_type: str
     title: str
-    data: Dict[str, Any]
-    options: Dict[str, Any]
+    data: dict[str, Any]
+    options: dict[str, Any]
     width: str = "100%"
     height: str = "400px"
 
@@ -51,18 +52,23 @@ class ChartGenerator:
 
     # 默认颜色方案
     DEFAULT_COLORS = [
-        '#5470c6', '#91cc75', '#fac858', '#ee6666',
-        '#73c0de', '#3ba272', '#fc8452', '#9a60b4',
-        '#ea7ccc', '#48b8d0'
+        "#5470c6",
+        "#91cc75",
+        "#fac858",
+        "#ee6666",
+        "#73c0de",
+        "#3ba272",
+        "#fc8452",
+        "#9a60b4",
+        "#ea7ccc",
+        "#48b8d0",
     ]
 
     # 主题配置
     THEME_CONFIG = {
-        'textStyle': {
-            'fontFamily': 'PingFang SC, Microsoft YaHei, sans-serif'
-        },
-        'animation': True,
-        'animationDuration': 500
+        "textStyle": {"fontFamily": "PingFang SC, Microsoft YaHei, sans-serif"},
+        "animation": True,
+        "animationDuration": 500,
     }
 
     def __init__(self, theme: str = "default"):
@@ -75,13 +81,7 @@ class ChartGenerator:
         self.theme = theme
         self.colors = self.DEFAULT_COLORS
 
-    def generate(
-        self,
-        data: Union[Dict, List],
-        chart_type: str,
-        title: str,
-        **kwargs
-    ) -> Dict[str, Any]:
+    def generate(self, data: dict | list, chart_type: str, title: str, **kwargs) -> dict[str, Any]:
         """
         生成图表配置
 
@@ -112,13 +112,13 @@ class ChartGenerator:
 
     def generate_line_chart(
         self,
-        data: Union[Dict, List],
+        data: dict | list,
         title: str,
         subtitle: str = "",
         smooth: bool = True,
         area: bool = False,
-        **kwargs
-    ) -> Dict[str, Any]:
+        **kwargs,
+    ) -> dict[str, Any]:
         """
         生成折线图配置
 
@@ -138,13 +138,11 @@ class ChartGenerator:
         series = []
         for i, s in enumerate(series_data):
             series_config = {
-                "name": s.get("name", f"系列{i+1}"),
+                "name": s.get("name", f"系列{i + 1}"),
                 "type": "line",
                 "data": s.get("data", []),
                 "smooth": smooth,
-                "emphasis": {
-                    "focus": "series"
-                }
+                "emphasis": {"focus": "series"},
             }
             if area:
                 series_config["areaStyle"] = {"opacity": 0.3}
@@ -155,51 +153,28 @@ class ChartGenerator:
             "type": "line",
             "title": title,
             "echarts_option": {
-                "title": {
-                    "text": title,
-                    "subtext": subtitle,
-                    "left": "center"
-                },
-                "tooltip": {
-                    "trigger": "axis",
-                    "axisPointer": {
-                        "type": "cross"
-                    }
-                },
-                "legend": {
-                    "data": [s["name"] for s in series],
-                    "bottom": 0
-                },
-                "grid": {
-                    "left": "3%",
-                    "right": "4%",
-                    "bottom": "10%",
-                    "containLabel": True
-                },
-                "xAxis": {
-                    "type": "category",
-                    "boundaryGap": False,
-                    "data": x_data
-                },
-                "yAxis": {
-                    "type": "value"
-                },
+                "title": {"text": title, "subtext": subtitle, "left": "center"},
+                "tooltip": {"trigger": "axis", "axisPointer": {"type": "cross"}},
+                "legend": {"data": [s["name"] for s in series], "bottom": 0},
+                "grid": {"left": "3%", "right": "4%", "bottom": "10%", "containLabel": True},
+                "xAxis": {"type": "category", "boundaryGap": False, "data": x_data},
+                "yAxis": {"type": "value"},
                 "series": series,
-                "color": self.colors
-            }
+                "color": self.colors,
+            },
         }
 
         return config
 
     def generate_bar_chart(
         self,
-        data: Union[Dict, List],
+        data: dict | list,
         title: str,
         subtitle: str = "",
         horizontal: bool = False,
         stacked: bool = False,
-        **kwargs
-    ) -> Dict[str, Any]:
+        **kwargs,
+    ) -> dict[str, Any]:
         """
         生成柱状图配置
 
@@ -219,15 +194,11 @@ class ChartGenerator:
         series = []
         for i, s in enumerate(series_data):
             series_config = {
-                "name": s.get("name", f"系列{i+1}"),
+                "name": s.get("name", f"系列{i + 1}"),
                 "type": "bar",
                 "data": s.get("data", []),
-                "emphasis": {
-                    "focus": "series"
-                },
-                "itemStyle": {
-                    "borderRadius": [4, 4, 0, 0] if not horizontal else [0, 4, 4, 0]
-                }
+                "emphasis": {"focus": "series"},
+                "itemStyle": {"borderRadius": [4, 4, 0, 0] if not horizontal else [0, 4, 4, 0]},
             }
             if stacked:
                 series_config["stack"] = "total"
@@ -235,57 +206,35 @@ class ChartGenerator:
             series.append(series_config)
 
         # 构建轴配置
-        category_axis = {
-            "type": "category",
-            "data": x_data
-        }
-        value_axis = {
-            "type": "value"
-        }
+        category_axis = {"type": "category", "data": x_data}
+        value_axis = {"type": "value"}
 
         config = {
             "type": "bar",
             "title": title,
             "echarts_option": {
-                "title": {
-                    "text": title,
-                    "subtext": subtitle,
-                    "left": "center"
-                },
-                "tooltip": {
-                    "trigger": "axis",
-                    "axisPointer": {
-                        "type": "shadow"
-                    }
-                },
-                "legend": {
-                    "data": [s["name"] for s in series],
-                    "bottom": 0
-                },
-                "grid": {
-                    "left": "3%",
-                    "right": "4%",
-                    "bottom": "10%",
-                    "containLabel": True
-                },
+                "title": {"text": title, "subtext": subtitle, "left": "center"},
+                "tooltip": {"trigger": "axis", "axisPointer": {"type": "shadow"}},
+                "legend": {"data": [s["name"] for s in series], "bottom": 0},
+                "grid": {"left": "3%", "right": "4%", "bottom": "10%", "containLabel": True},
                 "xAxis": value_axis if horizontal else category_axis,
                 "yAxis": category_axis if horizontal else value_axis,
                 "series": series,
-                "color": self.colors
-            }
+                "color": self.colors,
+            },
         }
 
         return config
 
     def generate_pie_chart(
         self,
-        data: Union[Dict, List],
+        data: dict | list,
         title: str,
         subtitle: str = "",
         radius: str = "60%",
         rose: bool = False,
-        **kwargs
-    ) -> Dict[str, Any]:
+        **kwargs,
+    ) -> dict[str, Any]:
         """
         生成饼图配置
 
@@ -310,12 +259,10 @@ class ChartGenerator:
                 "itemStyle": {
                     "shadowBlur": 10,
                     "shadowOffsetX": 0,
-                    "shadowColor": "rgba(0, 0, 0, 0.5)"
+                    "shadowColor": "rgba(0, 0, 0, 0.5)",
                 }
             },
-            "label": {
-                "formatter": "{b}: {d}%"
-            }
+            "label": {"formatter": "{b}: {d}%"},
         }
 
         if rose:
@@ -326,36 +273,25 @@ class ChartGenerator:
             "type": "pie",
             "title": title,
             "echarts_option": {
-                "title": {
-                    "text": title,
-                    "subtext": subtitle,
-                    "left": "center"
-                },
-                "tooltip": {
-                    "trigger": "item",
-                    "formatter": "{b}: {c} ({d}%)"
-                },
-                "legend": {
-                    "orient": "vertical",
-                    "left": "left",
-                    "top": "middle"
-                },
+                "title": {"text": title, "subtext": subtitle, "left": "center"},
+                "tooltip": {"trigger": "item", "formatter": "{b}: {c} ({d}%)"},
+                "legend": {"orient": "vertical", "left": "left", "top": "middle"},
                 "series": [series_config],
-                "color": self.colors
-            }
+                "color": self.colors,
+            },
         }
 
         return config
 
     def generate_scatter_chart(
         self,
-        data: Union[Dict, List],
+        data: dict | list,
         title: str,
         subtitle: str = "",
         x_name: str = "X",
         y_name: str = "Y",
-        **kwargs
-    ) -> Dict[str, Any]:
+        **kwargs,
+    ) -> dict[str, Any]:
         """
         生成散点图配置
 
@@ -375,40 +311,21 @@ class ChartGenerator:
             "type": "scatter",
             "title": title,
             "echarts_option": {
-                "title": {
-                    "text": title,
-                    "subtext": subtitle,
-                    "left": "center"
-                },
+                "title": {"text": title, "subtext": subtitle, "left": "center"},
                 "tooltip": {
                     "trigger": "item",
-                    "formatter": f"{x_name}: {{c[0]}}<br/>{y_name}: {{c[1]}}"
+                    "formatter": f"{x_name}: {{c[0]}}<br/>{y_name}: {{c[1]}}",
                 },
-                "xAxis": {
-                    "type": "value",
-                    "name": x_name
-                },
-                "yAxis": {
-                    "type": "value",
-                    "name": y_name
-                },
-                "series": [{
-                    "type": "scatter",
-                    "data": scatter_data,
-                    "symbolSize": 10
-                }],
-                "color": self.colors
-            }
+                "xAxis": {"type": "value", "name": x_name},
+                "yAxis": {"type": "value", "name": y_name},
+                "series": [{"type": "scatter", "data": scatter_data, "symbolSize": 10}],
+                "color": self.colors,
+            },
         }
 
         return config
 
-    def generate_table(
-        self,
-        data: Union[Dict, List],
-        title: str,
-        **kwargs
-    ) -> Dict[str, Any]:
+    def generate_table(self, data: dict | list, title: str, **kwargs) -> dict[str, Any]:
         """
         生成表格配置
 
@@ -420,10 +337,7 @@ class ChartGenerator:
             表格配置
         """
         if isinstance(data, dict):
-            if 'data' in data:
-                rows = data['data']
-            else:
-                rows = [data]
+            rows = data.get("data", [data])
         elif isinstance(data, list):
             rows = data
         else:
@@ -440,20 +354,20 @@ class ChartGenerator:
             "columns": [{"key": col, "label": col} for col in columns],
             "data": rows,
             "pagination": len(rows) > 10,
-            "pageSize": 10
+            "pageSize": 10,
         }
 
         return config
 
-    def _parse_series_data(self, data: Union[Dict, List]) -> tuple:
+    def _parse_series_data(self, data: dict | list) -> tuple:
         """解析系列数据格式"""
         x_data = []
         series_data = []
 
         if isinstance(data, dict):
             # 格式: {xAxis: [], series: [{name, data}]}
-            x_data = data.get('xAxis', [])
-            series_data = data.get('series', [])
+            x_data = data.get("xAxis", [])
+            series_data = data.get("series", [])
 
             # 如果没有 series，尝试其他格式
             if not series_data:
@@ -464,28 +378,28 @@ class ChartGenerator:
         elif isinstance(data, list):
             if data and isinstance(data[0], dict):
                 # 格式: [{name, value}, ...]
-                x_data = [item.get('name', f'项目{i}') for i, item in enumerate(data)]
-                series_data = [{"name": "数值", "data": [item.get('value', 0) for item in data]}]
+                x_data = [item.get("name", f"项目{i}") for i, item in enumerate(data)]
+                series_data = [{"name": "数值", "data": [item.get("value", 0) for item in data]}]
             else:
                 # 格式: [value1, value2, ...]
-                x_data = [f'项目{i+1}' for i in range(len(data))]
+                x_data = [f"项目{i + 1}" for i in range(len(data))]
                 series_data = [{"name": "数值", "data": data}]
 
         return x_data, series_data
 
-    def _parse_pie_data(self, data: Union[Dict, List]) -> List[Dict]:
+    def _parse_pie_data(self, data: dict | list) -> list[dict]:
         """解析饼图数据格式"""
         pie_data = []
 
         if isinstance(data, dict):
-            if 'series' in data and data['series']:
+            if "series" in data and data["series"]:
                 # 格式: {series: [{data: [{name, value}]}]}
-                series = data['series'][0]
-                pie_data = series.get('data', [])
+                series = data["series"][0]
+                pie_data = series.get("data", [])
             else:
                 # 格式: {category1: value1, category2: value2}
                 for k, v in data.items():
-                    if k not in ['xAxis', 'series', 'type', 'title']:
+                    if k not in ["xAxis", "series", "type", "title"]:
                         pie_data.append({"name": k, "value": v})
 
         elif isinstance(data, list):
@@ -493,11 +407,11 @@ class ChartGenerator:
                 pie_data = data
             else:
                 # 格式: [value1, value2, ...]
-                pie_data = [{"name": f"项目{i+1}", "value": v} for i, v in enumerate(data)]
+                pie_data = [{"name": f"项目{i + 1}", "value": v} for i, v in enumerate(data)]
 
         return pie_data
 
-    def _parse_scatter_data(self, data: Union[Dict, List]) -> List[List]:
+    def _parse_scatter_data(self, data: dict | list) -> list[list]:
         """解析散点图数据格式"""
         scatter_data = []
 
@@ -506,13 +420,13 @@ class ChartGenerator:
                 if isinstance(item, (list, tuple)) and len(item) >= 2:
                     scatter_data.append([item[0], item[1]])
                 elif isinstance(item, dict):
-                    x = item.get('x', item.get('value', 0))
-                    y = item.get('y', item.get('count', 0))
+                    x = item.get("x", item.get("value", 0))
+                    y = item.get("y", item.get("count", 0))
                     scatter_data.append([x, y])
 
         return scatter_data
 
-    def merge_configs(self, *configs) -> Dict[str, Any]:
+    def merge_configs(self, *configs) -> dict[str, Any]:
         """合并多个图表配置"""
         # 实现配置合并逻辑
         pass

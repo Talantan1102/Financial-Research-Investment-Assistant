@@ -13,15 +13,13 @@ DeepResearch V2.0 - 深度侦探 Agent (DeepScout)
 (MCP 专用版 - 所有搜索通过 MCP ToolAdapter 执行)
 """
 
-import uuid
 import asyncio
 import hashlib
-import json
-from typing import Dict, Any, List, Optional
+import uuid
 from datetime import datetime
 
+from ..state import ResearchPhase, ResearchState
 from .base import BaseAgent
-from ..state import ResearchState, ResearchPhase
 
 
 class DeepScout(BaseAgent):
@@ -148,18 +146,18 @@ URL: {url}
         llm_base_url: str,
         search_api_key: str,
         model: str = "qwen-plus",
-        tool_adapter=None  # 新增：可选的 ToolAdapter（用于 MCP 集成）
+        tool_adapter=None,  # 新增：可选的 ToolAdapter（用于 MCP 集成）
     ):
         super().__init__(
             name="DeepScout",
             role="深度侦探",
             llm_api_key=llm_api_key,
             llm_base_url=llm_base_url,
-            model=model
+            model=model,
         )
         self.search_api_key = search_api_key
-        self.search_cache: Dict[str, List] = {}
-        self.fact_fingerprints: Dict[str, str] = {}  # 事实指纹用于去重
+        self.search_cache: dict[str, list] = {}
+        self.fact_fingerprints: dict[str, str] = {}  # 事实指纹用于去重
         self.tool_adapter = tool_adapter  # MCP ToolAdapter（必需）
 
     async def process(self, state: ResearchState) -> ResearchState:
@@ -203,21 +201,29 @@ URL: {url}
         subtitle = " + ".join(search_mode_desc) if search_mode_desc else "深度搜索"
 
         # 发送 research_step 开始事件
-        self.add_message(state, "research_step", {
-            "step_id": f"step_searching_{uuid.uuid4().hex[:8]}",
-            "step_type": "searching",
-            "title": "信息检索",
-            "subtitle": subtitle,
-            "status": "running",
-            "stats": {"sections_count": len(pending_sections), "results_count": 0},
-            "search_web": search_web,
-            "search_local": search_local
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_id": f"step_searching_{uuid.uuid4().hex[:8]}",
+                "step_type": "searching",
+                "title": "信息检索",
+                "subtitle": subtitle,
+                "status": "running",
+                "stats": {"sections_count": len(pending_sections), "results_count": 0},
+                "search_web": search_web,
+                "search_local": search_local,
+            },
+        )
 
-        self.add_message(state, "thought", {
-            "agent": self.name,
-            "content": f"开始{'、'.join(search_mode_desc)}，共 {len(pending_sections)} 个章节待研究..."
-        })
+        self.add_message(
+            state,
+            "thought",
+            {
+                "agent": self.name,
+                "content": f"开始{'、'.join(search_mode_desc)}，共 {len(pending_sections)} 个章节待研究...",
+            },
+        )
 
         # 并行研究多个章节
         tasks = []
@@ -227,16 +233,22 @@ URL: {url}
         await asyncio.gather(*tasks)
 
         # 发送 research_step 完成事件
-        self.add_message(state, "research_step", {
-            "step_type": "searching",
-            "title": "信息检索",
-            "subtitle": "全网深度搜索",
-            "status": "completed",
-            "stats": {
-                "results_count": len(state.get("facts", [])),
-                "sources_count": len(set(f.get("source_url", "") for f in state.get("facts", [])))
-            }
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_type": "searching",
+                "title": "信息检索",
+                "subtitle": "全网深度搜索",
+                "status": "completed",
+                "stats": {
+                    "results_count": len(state.get("facts", [])),
+                    "sources_count": len(
+                        set(f.get("source_url", "") for f in state.get("facts", []))
+                    ),
+                },
+            },
+        )
 
         # 发送搜索结果事件供前端详情面板展示
         self._emit_search_results_event(state)
@@ -259,40 +271,44 @@ URL: {url}
         self.logger.info(f"Starting supplementary research with {len(pending_queries)} queries")
 
         # 发送 research_step 开始事件
-        self.add_message(state, "research_step", {
-            "step_id": f"step_supplementary_{uuid.uuid4().hex[:8]}",
-            "step_type": "searching",
-            "title": "补充搜索",
-            "subtitle": "针对性信息补充",
-            "status": "running",
-            "stats": {"queries_count": len(pending_queries), "results_count": 0}
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_id": f"step_supplementary_{uuid.uuid4().hex[:8]}",
+                "step_type": "searching",
+                "title": "补充搜索",
+                "subtitle": "针对性信息补充",
+                "status": "running",
+                "stats": {"queries_count": len(pending_queries), "results_count": 0},
+            },
+        )
 
-        self.add_message(state, "thought", {
-            "agent": self.name,
-            "content": f"根据审核反馈，开始补充搜索 {len(pending_queries)} 个问题..."
-        })
+        self.add_message(
+            state,
+            "thought",
+            {
+                "agent": self.name,
+                "content": f"根据审核反馈，开始补充搜索 {len(pending_queries)} 个问题...",
+            },
+        )
 
         # 执行补充搜索
         initial_facts_count = len(state.get("facts", []))
 
         for query in pending_queries[:5]:  # 最多处理5个补充查询
-            self.add_message(state, "action", {
-                "agent": self.name,
-                "tool": "supplementary_search",
-                "query": query
-            })
+            self.add_message(
+                state,
+                "action",
+                {"agent": self.name, "tool": "supplementary_search", "query": query},
+            )
 
             # 执行搜索
             results = await self._execute_search(query, count=8)
 
             if results:
                 # 分析结果
-                analysis = await self._analyze_supplementary_results(
-                    state["query"],
-                    query,
-                    results
-                )
+                analysis = await self._analyze_supplementary_results(state["query"], query, results)
 
                 if analysis:
                     # 添加新事实
@@ -309,7 +325,7 @@ URL: {url}
                                 "source_type": fact.get("source_type", "news"),
                                 "credibility_score": fact.get("credibility_score", 0.5),
                                 "is_supplementary": True,  # 标记为补充搜索获得
-                                "related_sections": []
+                                "related_sections": [],
                             }
                             state["facts"].append(fact_entry)
 
@@ -318,21 +334,32 @@ URL: {url}
 
         # 发送完成事件
         new_facts_count = len(state.get("facts", [])) - initial_facts_count
-        self.add_message(state, "research_step", {
-            "step_type": "searching",
-            "title": "补充搜索",
-            "subtitle": "针对性信息补充",
-            "status": "completed",
-            "stats": {
-                "results_count": new_facts_count,
-                "sources_count": len(set(f.get("source_url", "") for f in state.get("facts", [])[-new_facts_count:] if new_facts_count > 0))
-            }
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_type": "searching",
+                "title": "补充搜索",
+                "subtitle": "针对性信息补充",
+                "status": "completed",
+                "stats": {
+                    "results_count": new_facts_count,
+                    "sources_count": len(
+                        set(
+                            f.get("source_url", "")
+                            for f in state.get("facts", [])[-new_facts_count:]
+                            if new_facts_count > 0
+                        )
+                    ),
+                },
+            },
+        )
 
-        self.add_message(state, "observation", {
-            "agent": self.name,
-            "content": f"补充搜索完成，新增 {new_facts_count} 条事实"
-        })
+        self.add_message(
+            state,
+            "observation",
+            {"agent": self.name, "content": f"补充搜索完成，新增 {new_facts_count} 条事实"},
+        )
 
         # 发送更新后的搜索结果
         self._emit_search_results_event(state)
@@ -387,50 +414,60 @@ URL: {url}
                     if "data_points" not in state:
                         state["data_points"] = []
 
-                    state["data_points"].extend([
-                        {
-                            "name": f"{data['name']}当前股价",
-                            "value": float(data['nowPri']) if data['nowPri'] else 0,
-                            "unit": "元",
-                            "source": "聚合数据股票API",
-                            "source_type": "realtime"
-                        },
-                        {
-                            "name": f"{data['name']}涨跌幅",
-                            "value": data['increPer'],
-                            "unit": "%",
-                            "source": "聚合数据股票API",
-                            "source_type": "realtime"
-                        },
-                        {
-                            "name": f"{data['name']}今日成交量",
-                            "value": data['traAmount'],
-                            "unit": "手",
-                            "source": "聚合数据股票API",
-                            "source_type": "realtime"
-                        },
-                    ])
+                    state["data_points"].extend(
+                        [
+                            {
+                                "name": f"{data['name']}当前股价",
+                                "value": float(data["nowPri"]) if data["nowPri"] else 0,
+                                "unit": "元",
+                                "source": "聚合数据股票API",
+                                "source_type": "realtime",
+                            },
+                            {
+                                "name": f"{data['name']}涨跌幅",
+                                "value": data["increPer"],
+                                "unit": "%",
+                                "source": "聚合数据股票API",
+                                "source_type": "realtime",
+                            },
+                            {
+                                "name": f"{data['name']}今日成交量",
+                                "value": data["traAmount"],
+                                "unit": "手",
+                                "source": "聚合数据股票API",
+                                "source_type": "realtime",
+                            },
+                        ]
+                    )
 
                     # 发送实时行情消息
-                    self.add_message(state, "stock_quote", {
-                        "agent": self.name,
-                        "code": stock_code,
-                        "name": data['name'],
-                        "price": data['nowPri'],
-                        "change": data['increase'],
-                        "change_percent": data['increPer'],
-                        "high": data['todayMax'],
-                        "low": data['todayMin'],
-                        "volume": data['traAmount'],
-                        "turnover": data['traNumber'],
-                        "open": data['todayStartPri'],
-                        "prev_close": data['yestodEndPri']
-                    })
+                    self.add_message(
+                        state,
+                        "stock_quote",
+                        {
+                            "agent": self.name,
+                            "code": stock_code,
+                            "name": data["name"],
+                            "price": data["nowPri"],
+                            "change": data["increase"],
+                            "change_percent": data["increPer"],
+                            "high": data["todayMax"],
+                            "low": data["todayMin"],
+                            "volume": data["traAmount"],
+                            "turnover": data["traNumber"],
+                            "open": data["todayStartPri"],
+                            "prev_close": data["yestodEndPri"],
+                        },
+                    )
 
-                    self.add_message(state, "thought", {
-                        "agent": self.name,
-                        "content": f"已获取 {data['name']} 实时行情：¥{data['nowPri']} ({data['increPer']})"
-                    })
+                    self.add_message(
+                        state,
+                        "thought",
+                        {
+                            "agent": self.name,
+                            "content": f"已获取 {data['name']} 实时行情：¥{data['nowPri']} ({data['increPer']})",
+                        },
+                    )
 
                     self.logger.info(f"获取股票数据成功: {data['name']} ¥{data['nowPri']}")
                 else:
@@ -442,15 +479,14 @@ URL: {url}
             self.logger.error(f"获取股票数据异常: {e}")
 
     async def _analyze_supplementary_results(
-        self,
-        original_query: str,
-        search_query: str,
-        results: List[Dict]
-    ) -> Optional[Dict]:
+        self, original_query: str, search_query: str, results: list[dict]
+    ) -> dict | None:
         """分析补充搜索结果"""
         results_text = []
         for r in results[:8]:
-            results_text.append(f"标题: {r.get('title', 'N/A')}\n来源: {r.get('site_name', 'N/A')}\n内容: {r.get('summary', '')[:300]}")
+            results_text.append(
+                f"标题: {r.get('title', 'N/A')}\n来源: {r.get('site_name', 'N/A')}\n内容: {r.get('summary', '')[:300]}"
+            )
 
         prompt = f"""你是一位专业的研究分析师，正在补充搜索以解决审核发现的信息缺失问题。
 
@@ -489,7 +525,7 @@ URL: {url}
             system_prompt="你是专业的信息提取专家，擅长从搜索结果中提取结构化信息。",
             user_prompt=prompt,
             json_mode=True,
-            temperature=0.2
+            temperature=0.2,
         )
 
         return self.parse_json_response(response)
@@ -498,22 +534,24 @@ URL: {url}
         """发送搜索结果事件供前端展示"""
         search_results_for_ui = []
         for fact in state.get("facts", [])[-20:]:  # 取最近的20条
-            search_results_for_ui.append({
-                "id": fact.get("id", ""),
-                "title": fact.get("content", "")[:80] + "..." if len(fact.get("content", "")) > 80 else fact.get("content", ""),
-                "source": fact.get("source_name", "未知来源"),
-                "url": fact.get("source_url", ""),
-                "snippet": fact.get("content", "")[:200],
-                "date": fact.get("date", ""),
-                "isSupplementary": fact.get("is_supplementary", False)
-            })
+            search_results_for_ui.append(
+                {
+                    "id": fact.get("id", ""),
+                    "title": fact.get("content", "")[:80] + "..."
+                    if len(fact.get("content", "")) > 80
+                    else fact.get("content", ""),
+                    "source": fact.get("source_name", "未知来源"),
+                    "url": fact.get("source_url", ""),
+                    "snippet": fact.get("content", "")[:200],
+                    "date": fact.get("date", ""),
+                    "isSupplementary": fact.get("is_supplementary", False),
+                }
+            )
 
         if search_results_for_ui:
-            self.add_message(state, "search_results", {
-                "results": search_results_for_ui
-            })
+            self.add_message(state, "search_results", {"results": search_results_for_ui})
 
-    async def _research_section(self, state: ResearchState, section: Dict) -> None:
+    async def _research_section(self, state: ResearchState, section: dict) -> None:
         """研究单个章节"""
         section_id = section["id"]
         section_title = section["title"]
@@ -523,16 +561,22 @@ URL: {url}
         search_web = state.get("search_web", True)
         search_local = state.get("search_local", False)
 
-        self.logger.info(f"Researching section: {section_title} (web={search_web}, local={search_local})")
+        self.logger.info(
+            f"Researching section: {section_title} (web={search_web}, local={search_local})"
+        )
 
-        self.add_message(state, "action", {
-            "agent": self.name,
-            "tool": "parallel_search",
-            "section": section_title,
-            "queries": search_queries,
-            "search_web": search_web,
-            "search_local": search_local
-        })
+        self.add_message(
+            state,
+            "action",
+            {
+                "agent": self.name,
+                "tool": "parallel_search",
+                "section": section_title,
+                "queries": search_queries,
+                "search_web": search_web,
+                "search_local": search_local,
+            },
+        )
 
         # 逐个执行搜索，每完成一个就发送事件（提升用户体验）
         all_results = []
@@ -544,15 +588,19 @@ URL: {url}
 
                 # 搜索完成后立即发送原始结果（让用户看到进度）
                 if results:
-                    self.add_message(state, "search_progress", {
-                        "agent": self.name,
-                        "query": query,
-                        "results_count": len(results),
-                        "total_so_far": len(all_results),
-                        "section": section_title,
-                        "progress": f"{i + 1}/{len(search_queries)}",
-                        "search_type": "web"
-                    })
+                    self.add_message(
+                        state,
+                        "search_progress",
+                        {
+                            "agent": self.name,
+                            "query": query,
+                            "results_count": len(results),
+                            "total_so_far": len(all_results),
+                            "section": section_title,
+                            "progress": f"{i + 1}/{len(search_queries)}",
+                            "search_type": "web",
+                        },
+                    )
 
                     # 立即发送搜索结果供前端展示
                     search_results_for_ui = [
@@ -563,15 +611,19 @@ URL: {url}
                             "url": r.get("url", ""),
                             "snippet": r.get("summary", "") or r.get("snippet", ""),
                             "date": r.get("date", ""),
-                            "isLocal": False
+                            "isLocal": False,
                         }
                         for r in results[:5]  # 每次最多显示5条
                     ]
-                    self.add_message(state, "search_results", {
-                        "results": search_results_for_ui,
-                        "isIncremental": True,
-                        "searchType": "web"
-                    })
+                    self.add_message(
+                        state,
+                        "search_results",
+                        {
+                            "results": search_results_for_ui,
+                            "isIncremental": True,
+                            "searchType": "web",
+                        },
+                    )
 
             # 本地知识库搜索
             if search_local:
@@ -579,15 +631,19 @@ URL: {url}
                 all_results.extend(local_results)
 
                 if local_results:
-                    self.add_message(state, "search_progress", {
-                        "agent": self.name,
-                        "query": query,
-                        "results_count": len(local_results),
-                        "total_so_far": len(all_results),
-                        "section": section_title,
-                        "progress": f"{i + 1}/{len(search_queries)}",
-                        "search_type": "local"
-                    })
+                    self.add_message(
+                        state,
+                        "search_progress",
+                        {
+                            "agent": self.name,
+                            "query": query,
+                            "results_count": len(local_results),
+                            "total_so_far": len(all_results),
+                            "section": section_title,
+                            "progress": f"{i + 1}/{len(search_queries)}",
+                            "search_type": "local",
+                        },
+                    )
 
                     # 发送本地搜索结果
                     local_results_for_ui = [
@@ -599,31 +655,36 @@ URL: {url}
                             "snippet": r.get("summary", "") or r.get("snippet", ""),
                             "date": "",
                             "isLocal": True,
-                            "score": r.get("score", 0)
+                            "score": r.get("score", 0),
                         }
                         for r in local_results[:5]
                     ]
-                    self.add_message(state, "search_results", {
-                        "results": local_results_for_ui,
-                        "isIncremental": True,
-                        "searchType": "local"
-                    })
+                    self.add_message(
+                        state,
+                        "search_results",
+                        {
+                            "results": local_results_for_ui,
+                            "isIncremental": True,
+                            "searchType": "local",
+                        },
+                    )
 
         if not all_results:
             self.logger.warning(f"No search results for section: {section_title}")
             return
 
-        self.add_message(state, "thought", {
-            "agent": self.name,
-            "content": f"搜索完成，获得 {len(all_results)} 条结果，正在分析提取关键信息..."
-        })
+        self.add_message(
+            state,
+            "thought",
+            {
+                "agent": self.name,
+                "content": f"搜索完成，获得 {len(all_results)} 条结果，正在分析提取关键信息...",
+            },
+        )
 
         # 分析搜索结果（传入假设以便验证）
         analysis = await self._analyze_search_results(
-            state["query"],
-            section,
-            all_results,
-            hypotheses=state.get("hypotheses", [])
+            state["query"], section, all_results, hypotheses=state.get("hypotheses", [])
         )
 
         if analysis:
@@ -651,7 +712,7 @@ URL: {url}
                     "verified": False,
                     "related_hypothesis": fact.get("related_hypothesis"),
                     "hypothesis_support": fact.get("hypothesis_support"),
-                    "metadata": {}
+                    "metadata": {},
                 }
                 state["facts"].append(fact_entry)
                 added_facts += 1
@@ -665,7 +726,7 @@ URL: {url}
                         "unit": dp.get("unit", ""),
                         "year": dp.get("year"),
                         "source": fact.get("source_name", ""),
-                        "confidence": fact.get("credibility_score", 0.5)
+                        "confidence": fact.get("credibility_score", 0.5),
                     }
                     state["data_points"].append(data_point)
 
@@ -679,14 +740,18 @@ URL: {url}
                 self.logger.info(f"Added {len(entities)} entities to knowledge graph")
                 # 发送知识图谱增量更新事件
                 graph = state.get("knowledge_graph", {"nodes": [], "edges": []})
-                self.add_message(state, "knowledge_graph", {
-                    "graph": graph,
-                    "stats": {
-                        "entitiesCount": len(graph.get("nodes", [])),
-                        "relationsCount": len(graph.get("edges", []))
+                self.add_message(
+                    state,
+                    "knowledge_graph",
+                    {
+                        "graph": graph,
+                        "stats": {
+                            "entitiesCount": len(graph.get("nodes", [])),
+                            "relationsCount": len(graph.get("edges", [])),
+                        },
+                        "isIncremental": True,
                     },
-                    "isIncremental": True
-                })
+                )
 
             # 更新假设状态
             hypothesis_evidence = analysis.get("hypothesis_evidence", [])
@@ -702,75 +767,90 @@ URL: {url}
             extracted_data_points = []
             for fact in analysis.get("extracted_facts", []):
                 for dp in fact.get("data_points", []):
-                    extracted_data_points.append({
-                        "name": dp.get("name", ""),
-                        "value": dp.get("value", ""),
-                        "unit": dp.get("unit", ""),
-                        "year": dp.get("year"),
-                        "source": fact.get("source_name", "")
-                    })
+                    extracted_data_points.append(
+                        {
+                            "name": dp.get("name", ""),
+                            "value": dp.get("value", ""),
+                            "unit": dp.get("unit", ""),
+                            "year": dp.get("year"),
+                            "source": fact.get("source_name", ""),
+                        }
+                    )
 
             # 发送观察结果 (包含详细数据供前端展示)
-            self.add_message(state, "observation", {
-                "agent": self.name,
-                "section": section_title,
-                "facts_count": added_facts,
-                "duplicates_removed": duplicate_facts,
-                "data_points_count": len(extracted_data_points),
-                "insights": analysis.get("key_insights", [])[:3],
-                "source_quality": analysis.get("source_quality_assessment", ""),
-                "hypothesis_updates": len(hypothesis_evidence),
-                # 新增: 原始搜索结果 (供前端详情面板展示)
-                "search_results": [
-                    {
-                        "title": r.get("title", ""),
-                        "url": r.get("url", ""),
-                        "source": r.get("site_name", ""),
-                        "snippet": r.get("summary", "") or r.get("snippet", ""),
-                        "date": r.get("date", "")
-                    }
-                    for r in all_results[:10]  # 最多返回10条
-                ],
-                # 新增: 提取的事实
-                "extracted_facts": [
-                    {
-                        "content": f.get("content", ""),
-                        "source_name": f.get("source_name", ""),
-                        "source_url": f.get("source_url", ""),
-                        "credibility": f.get("credibility_score", 0.5)
-                    }
-                    for f in analysis.get("extracted_facts", [])[:8]
-                ],
-                # 新增: 提取的数据点
-                "data_points": extracted_data_points[:10]
-            })
+            self.add_message(
+                state,
+                "observation",
+                {
+                    "agent": self.name,
+                    "section": section_title,
+                    "facts_count": added_facts,
+                    "duplicates_removed": duplicate_facts,
+                    "data_points_count": len(extracted_data_points),
+                    "insights": analysis.get("key_insights", [])[:3],
+                    "source_quality": analysis.get("source_quality_assessment", ""),
+                    "hypothesis_updates": len(hypothesis_evidence),
+                    # 新增: 原始搜索结果 (供前端详情面板展示)
+                    "search_results": [
+                        {
+                            "title": r.get("title", ""),
+                            "url": r.get("url", ""),
+                            "source": r.get("site_name", ""),
+                            "snippet": r.get("summary", "") or r.get("snippet", ""),
+                            "date": r.get("date", ""),
+                        }
+                        for r in all_results[:10]  # 最多返回10条
+                    ],
+                    # 新增: 提取的事实
+                    "extracted_facts": [
+                        {
+                            "content": f.get("content", ""),
+                            "source_name": f.get("source_name", ""),
+                            "source_url": f.get("source_url", ""),
+                            "credibility": f.get("credibility_score", 0.5),
+                        }
+                        for f in analysis.get("extracted_facts", [])[:8]
+                    ],
+                    # 新增: 提取的数据点
+                    "data_points": extracted_data_points[:10],
+                },
+            )
 
             # 递归搜索：信源追溯查询（优先级最高）
             source_tracing = analysis.get("source_tracing_queries", [])
             if source_tracing and state["iteration"] < state["max_iterations"]:
-                self.add_message(state, "thought", {
-                    "agent": self.name,
-                    "content": f"追溯原始数据源: {', '.join(source_tracing[:2])}"
-                })
+                self.add_message(
+                    state,
+                    "thought",
+                    {
+                        "agent": self.name,
+                        "content": f"追溯原始数据源: {', '.join(source_tracing[:2])}",
+                    },
+                )
                 # 执行信源追溯搜索
                 await self._execute_deep_search(
-                    state, section_id, source_tracing[:2],
+                    state,
+                    section_id,
+                    source_tracing[:2],
                     search_type="source_tracing",
-                    hypotheses=state.get("hypotheses", [])
+                    hypotheses=state.get("hypotheses", []),
                 )
 
             # 递归搜索：追踪发现的新线索
             follow_up = analysis.get("follow_up_queries", [])
             if follow_up and state["iteration"] < state["max_iterations"]:
-                self.add_message(state, "thought", {
-                    "agent": self.name,
-                    "content": f"追踪发现的线索: {', '.join(follow_up[:2])}"
-                })
+                self.add_message(
+                    state,
+                    "thought",
+                    {"agent": self.name, "content": f"追踪发现的线索: {', '.join(follow_up[:2])}"},
+                )
                 # 执行线索追踪搜索
                 await self._execute_deep_search(
-                    state, section_id, follow_up[:2],
+                    state,
+                    section_id,
+                    follow_up[:2],
                     search_type="follow_up",
-                    hypotheses=state.get("hypotheses", [])
+                    hypotheses=state.get("hypotheses", []),
                 )
 
         # 更新章节状态
@@ -780,11 +860,11 @@ URL: {url}
         self,
         state: ResearchState,
         section_id: str,
-        queries: List[str],
+        queries: list[str],
         search_type: str,
-        hypotheses: List[Dict],
+        hypotheses: list[dict],
         depth: int = 1,
-        max_depth: int = 2
+        max_depth: int = 2,
     ) -> None:
         """
         执行深度递归搜索
@@ -802,17 +882,18 @@ URL: {url}
             self.logger.info(f"Reached max recursion depth ({max_depth})")
             return
 
-        type_labels = {
-            "source_tracing": "信源追溯",
-            "follow_up": "线索追踪"
-        }
+        type_labels = {"source_tracing": "信源追溯", "follow_up": "线索追踪"}
 
-        self.add_message(state, "action", {
-            "agent": self.name,
-            "tool": f"deep_search_{search_type}",
-            "queries": queries,
-            "depth": depth
-        })
+        self.add_message(
+            state,
+            "action",
+            {
+                "agent": self.name,
+                "tool": f"deep_search_{search_type}",
+                "queries": queries,
+                "depth": depth,
+            },
+        )
 
         for query in queries:
             # 执行搜索
@@ -829,24 +910,24 @@ URL: {url}
                     "source": r.get("site_name", "未知来源"),
                     "url": r.get("url", ""),
                     "snippet": r.get("summary", "") or r.get("snippet", ""),
-                    "date": r.get("date", "")
+                    "date": r.get("date", ""),
                 }
                 for r in results[:5]
             ]
-            self.add_message(state, "search_results", {
-                "results": search_results_for_ui,
-                "isIncremental": True,
-                "searchType": type_labels.get(search_type, search_type),
-                "depth": depth
-            })
+            self.add_message(
+                state,
+                "search_results",
+                {
+                    "results": search_results_for_ui,
+                    "isIncremental": True,
+                    "searchType": type_labels.get(search_type, search_type),
+                    "depth": depth,
+                },
+            )
 
             # 分析结果
             analysis = await self._analyze_deep_search_results(
-                state["query"],
-                query,
-                results,
-                search_type,
-                hypotheses
+                state["query"], query, results, search_type, hypotheses
             )
 
             if not analysis:
@@ -868,7 +949,7 @@ URL: {url}
                         "credibility_score": fact.get("credibility_score", 0.5),
                         "related_sections": [section_id],
                         "search_depth": depth,
-                        "search_type": search_type
+                        "search_type": search_type,
                     }
                     state["facts"].append(fact_entry)
                     added_facts += 1
@@ -886,51 +967,65 @@ URL: {url}
 
             # 提取数据点
             for dp in analysis.get("data_points", []):
-                state["data_points"].append({
-                    "id": f"dp_{uuid.uuid4().hex[:8]}",
-                    "name": dp.get("name"),
-                    "value": dp.get("value"),
-                    "unit": dp.get("unit", ""),
-                    "year": dp.get("year"),
-                    "source": dp.get("source", query),
-                    "confidence": dp.get("confidence", 0.7),
-                    "search_depth": depth
-                })
+                state["data_points"].append(
+                    {
+                        "id": f"dp_{uuid.uuid4().hex[:8]}",
+                        "name": dp.get("name"),
+                        "value": dp.get("value"),
+                        "unit": dp.get("unit", ""),
+                        "year": dp.get("year"),
+                        "source": dp.get("source", query),
+                        "confidence": dp.get("confidence", 0.7),
+                        "search_depth": depth,
+                    }
+                )
 
-            self.logger.info(f"Deep search ({search_type}, depth={depth}): +{added_facts} facts for query '{query[:30]}...'")
+            self.logger.info(
+                f"Deep search ({search_type}, depth={depth}): +{added_facts} facts for query '{query[:30]}...'"
+            )
 
             # 如果发现更多需要追溯的线索，继续递归（但不超过max_depth）
             if depth < max_depth:
                 further_tracing = analysis.get("further_tracing_queries", [])
                 if further_tracing:
-                    self.add_message(state, "thought", {
-                        "agent": self.name,
-                        "content": f"发现更深层线索 (深度{depth+1}): {', '.join(further_tracing[:2])}"
-                    })
+                    self.add_message(
+                        state,
+                        "thought",
+                        {
+                            "agent": self.name,
+                            "content": f"发现更深层线索 (深度{depth + 1}): {', '.join(further_tracing[:2])}",
+                        },
+                    )
                     await self._execute_deep_search(
-                        state, section_id, further_tracing[:2],
-                        search_type, hypotheses,
-                        depth=depth + 1, max_depth=max_depth
+                        state,
+                        section_id,
+                        further_tracing[:2],
+                        search_type,
+                        hypotheses,
+                        depth=depth + 1,
+                        max_depth=max_depth,
                     )
 
     async def _analyze_deep_search_results(
         self,
         original_query: str,
         search_query: str,
-        results: List[Dict],
+        results: list[dict],
         search_type: str,
-        hypotheses: List[Dict]
-    ) -> Optional[Dict]:
+        hypotheses: list[dict],
+    ) -> dict | None:
         """分析深度搜索结果"""
         results_text = []
         for r in results[:6]:
-            results_text.append(f"标题: {r.get('title', 'N/A')}\n来源: {r.get('site_name', 'N/A')}\n内容: {r.get('summary', '')[:300]}")
+            results_text.append(
+                f"标题: {r.get('title', 'N/A')}\n来源: {r.get('site_name', 'N/A')}\n内容: {r.get('summary', '')[:300]}"
+            )
 
         hypotheses_text = ""
         if hypotheses:
-            hypotheses_text = "## 研究假设\n" + "\n".join([
-                f"- [{h.get('id')}] {h.get('content')}" for h in hypotheses[:3]
-            ])
+            hypotheses_text = "## 研究假设\n" + "\n".join(
+                [f"- [{h.get('id')}] {h.get('content')}" for h in hypotheses[:3]]
+            )
 
         search_type_desc = "追溯原始数据源" if search_type == "source_tracing" else "追踪相关线索"
 
@@ -977,12 +1072,12 @@ URL: {url}
             system_prompt="你是专业的信息验证专家，擅长从搜索结果中提取权威信息并追溯原始来源。",
             user_prompt=prompt,
             json_mode=True,
-            temperature=0.2
+            temperature=0.2,
         )
 
         return self.parse_json_response(response)
 
-    async def _execute_local_search(self, query: str, top_k: int = 10) -> List[Dict]:
+    async def _execute_local_search(self, query: str, top_k: int = 10) -> list[dict]:
         """
         执行本地知识库搜索
 
@@ -999,9 +1094,7 @@ URL: {url}
             raise RuntimeError("ToolAdapter 未初始化，无法执行本地搜索")
 
         result = await self.tool_adapter.knowledge_search(
-            query=query,
-            kb_name="knowledge_base",
-            top_k=top_k
+            query=query, kb_name="knowledge_base", top_k=top_k
         )
 
         data = result.get("data", {})
@@ -1010,21 +1103,23 @@ URL: {url}
         # 格式化为统一格式
         formatted_results = []
         for r in results:
-            formatted_results.append({
-                'url': r.get('url', ''),
-                'title': r.get('name', 'N/A'),
-                'summary': r.get('summary', '')[:500],
-                'snippet': r.get('snippet', ''),
-                'site_name': r.get('siteName', '本地知识库'),
-                'date': '',
-                'score': r.get('score', 0),
-                'is_local': True
-            })
+            formatted_results.append(
+                {
+                    "url": r.get("url", ""),
+                    "title": r.get("name", "N/A"),
+                    "summary": r.get("summary", "")[:500],
+                    "snippet": r.get("snippet", ""),
+                    "site_name": r.get("siteName", "本地知识库"),
+                    "date": "",
+                    "score": r.get("score", 0),
+                    "is_local": True,
+                }
+            )
 
         self.logger.info(f"Local search returned {len(formatted_results)} results")
         return formatted_results
 
-    async def _execute_search(self, query: str, count: int = 10) -> List[Dict]:
+    async def _execute_search(self, query: str, count: int = 10) -> list[dict]:
         """
         执行网络搜索
 
@@ -1047,15 +1142,17 @@ URL: {url}
         # 格式化为统一格式
         formatted_results = []
         for item in results:
-            if item.get('url') and (item.get('snippet') or item.get('summary')):
-                formatted_results.append({
-                    'url': item['url'],
-                    'title': item.get('name', 'N/A'),
-                    'summary': item.get('summary', item.get('snippet', '')),
-                    'snippet': item.get('snippet', ''),
-                    'site_name': item.get('siteName', 'N/A'),
-                    'date': item.get('datePublished', '')
-                })
+            if item.get("url") and (item.get("snippet") or item.get("summary")):
+                formatted_results.append(
+                    {
+                        "url": item["url"],
+                        "title": item.get("name", "N/A"),
+                        "summary": item.get("summary", item.get("snippet", "")),
+                        "snippet": item.get("snippet", ""),
+                        "site_name": item.get("siteName", "N/A"),
+                        "date": item.get("datePublished", ""),
+                    }
+                )
 
         self.logger.info(f"Web search returned {len(formatted_results)} results")
 
@@ -1064,12 +1161,8 @@ URL: {url}
         return formatted_results
 
     async def _analyze_search_results(
-        self,
-        query: str,
-        section: Dict,
-        results: List[Dict],
-        hypotheses: List[Dict] = None
-    ) -> Optional[Dict]:
+        self, query: str, section: dict, results: list[dict], hypotheses: list[dict] = None
+    ) -> dict | None:
         """分析搜索结果"""
         if not results:
             return None
@@ -1078,11 +1171,11 @@ URL: {url}
         formatted_results = []
         for i, r in enumerate(results[:15]):  # 最多分析15条
             formatted_results.append(f"""
-[{i+1}] {r.get('title', 'N/A')}
-URL: {r.get('url', '')}
-来源: {r.get('site_name', 'N/A')}
-日期: {r.get('date', 'N/A')}
-摘要: {r.get('summary', '')[:300]}
+[{i + 1}] {r.get("title", "N/A")}
+URL: {r.get("url", "")}
+来源: {r.get("site_name", "N/A")}
+日期: {r.get("date", "N/A")}
+摘要: {r.get("summary", "")[:300]}
 """)
 
         # 格式化假设
@@ -1099,19 +1192,19 @@ URL: {r.get('url', '')}
             section_title=section.get("title", ""),
             section_description=section.get("description", ""),
             hypotheses=hypotheses_text,
-            search_results="\n".join(formatted_results)
+            search_results="\n".join(formatted_results),
         )
 
         response = await self.call_llm(
             system_prompt="你是专业的研究分析师，擅长从搜索结果中提取结构化信息、验证假设并评估来源质量。",
             user_prompt=prompt,
             json_mode=True,
-            temperature=0.2
+            temperature=0.2,
         )
 
         return self.parse_json_response(response)
 
-    async def deep_read_url(self, url: str, title: str, query: str) -> Optional[Dict]:
+    async def deep_read_url(self, url: str, title: str, query: str) -> dict | None:
         """
         深度阅读网页内容
 
@@ -1122,10 +1215,7 @@ URL: {r.get('url', '')}
 
         try:
             # 通过 MCP 调用网页提取工具
-            result = await self.tool_adapter.extract_webpage(
-                url=url,
-                extract_type="article"
-            )
+            result = await self.tool_adapter.extract_webpage(url=url, extract_type="article")
 
             data = result.get("data", {})
             content = data.get("content", "")
@@ -1135,16 +1225,11 @@ URL: {r.get('url', '')}
                 return None
 
             prompt = self.DEEP_READ_PROMPT.format(
-                query=query,
-                url=url,
-                title=title,
-                content=content
+                query=query, url=url, title=title, content=content
             )
 
             llm_response = await self.call_llm(
-                system_prompt="你是专业的文档分析师。",
-                user_prompt=prompt,
-                json_mode=True
+                system_prompt="你是专业的文档分析师。", user_prompt=prompt, json_mode=True
             )
 
             return self.parse_json_response(llm_response)
@@ -1181,7 +1266,7 @@ URL: {r.get('url', '')}
                     include_comments=False,
                     include_tables=True,
                     no_fallback=False,
-                    favor_precision=True
+                    favor_precision=True,
                 )
                 if text and len(text) > 200:
                     self.logger.debug(f"Trafilatura extracted {len(text)} chars from {url}")
@@ -1192,36 +1277,57 @@ URL: {r.get('url', '')}
         # 方法 2: 使用 BeautifulSoup
         if BS4_AVAILABLE:
             try:
-                soup = BeautifulSoup(html, 'lxml')
+                soup = BeautifulSoup(html, "lxml")
 
                 # 移除无用标签
-                for tag in soup(['script', 'style', 'nav', 'header', 'footer',
-                                'aside', 'iframe', 'noscript', 'meta', 'link']):
+                for tag in soup(
+                    [
+                        "script",
+                        "style",
+                        "nav",
+                        "header",
+                        "footer",
+                        "aside",
+                        "iframe",
+                        "noscript",
+                        "meta",
+                        "link",
+                    ]
+                ):
                     tag.decompose()
 
                 # 尝试找正文区域
                 main_content = None
-                for selector in ['article', 'main', '.content', '.article',
-                                '#content', '#article', '.post', '.entry']:
+                for selector in [
+                    "article",
+                    "main",
+                    ".content",
+                    ".article",
+                    "#content",
+                    "#article",
+                    ".post",
+                    ".entry",
+                ]:
                     main_content = soup.select_one(selector)
                     if main_content:
                         break
 
                 if main_content:
-                    text = main_content.get_text(separator='\n', strip=True)
+                    text = main_content.get_text(separator="\n", strip=True)
                 else:
                     # 找不到正文区域，提取 body
-                    body = soup.find('body')
+                    body = soup.find("body")
                     if body:
-                        text = body.get_text(separator='\n', strip=True)
+                        text = body.get_text(separator="\n", strip=True)
                     else:
-                        text = soup.get_text(separator='\n', strip=True)
+                        text = soup.get_text(separator="\n", strip=True)
 
                 if text and len(text) > 200:
                     # 清理多余空白
                     import re
-                    text = re.sub(r'\n{3,}', '\n\n', text)
-                    text = re.sub(r' {2,}', ' ', text)
+
+                    text = re.sub(r"\n{3,}", "\n\n", text)
+                    text = re.sub(r" {2,}", " ", text)
                     self.logger.debug(f"BeautifulSoup extracted {len(text)} chars from {url}")
                     return text[:max_length]
 
@@ -1230,16 +1336,17 @@ URL: {r.get('url', '')}
 
         # 方法 3: 简单正则（最后的备选）
         import re
+
         # 移除 script 和 style
-        text = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<script[^>]*>.*?</script>", "", html, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE)
         # 移除所有 HTML 标签
-        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r"<[^>]+>", " ", text)
         # 解码 HTML 实体
-        text = text.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>')
-        text = text.replace('&amp;', '&').replace('&quot;', '"')
+        text = text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">")
+        text = text.replace("&amp;", "&").replace("&quot;", '"')
         # 清理空白
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
 
         self.logger.debug(f"Regex extracted {len(text)} chars from {url}")
         return text[:max_length]
@@ -1249,9 +1356,10 @@ URL: {r.get('url', '')}
         # 简化版：使用内容hash
         # TODO: 集成向量嵌入进行语义相似度比较
         import re
+
         # 提取数字和关键词作为指纹
-        numbers = re.findall(r'\d+\.?\d*', content)
-        keywords = re.findall(r'[\u4e00-\u9fa5]{2,4}', content)[:5]
+        numbers = re.findall(r"\d+\.?\d*", content)
+        keywords = re.findall(r"[\u4e00-\u9fa5]{2,4}", content)[:5]
         fingerprint = f"{','.join(numbers[:3])}|{','.join(keywords)}"
         return hashlib.md5(fingerprint.encode()).hexdigest()[:16]
 
@@ -1272,7 +1380,7 @@ URL: {r.get('url', '')}
         self.fact_fingerprints[fingerprint] = source_url
         return False
 
-    def _update_knowledge_graph(self, state: ResearchState, entities: List[Dict]) -> None:
+    def _update_knowledge_graph(self, state: ResearchState, entities: list[dict]) -> None:
         """更新知识图谱"""
         graph = state.get("knowledge_graph", {"nodes": [], "edges": []})
         existing_nodes = {n.get("name") for n in graph["nodes"]}
@@ -1283,26 +1391,30 @@ URL: {r.get('url', '')}
                 continue
 
             # 添加节点
-            graph["nodes"].append({
-                "id": f"node_{len(graph['nodes'])}",
-                "name": name,
-                "type": entity.get("type", "unknown"),
-                "discovered_at": datetime.now().isoformat()
-            })
+            graph["nodes"].append(
+                {
+                    "id": f"node_{len(graph['nodes'])}",
+                    "name": name,
+                    "type": entity.get("type", "unknown"),
+                    "discovered_at": datetime.now().isoformat(),
+                }
+            )
             existing_nodes.add(name)
 
             # 添加边（关系）
             for relation in entity.get("relations", []):
                 # 简单解析关系
-                graph["edges"].append({
-                    "source": name,
-                    "relation": relation,
-                    "discovered_at": datetime.now().isoformat()
-                })
+                graph["edges"].append(
+                    {
+                        "source": name,
+                        "relation": relation,
+                        "discovered_at": datetime.now().isoformat(),
+                    }
+                )
 
         state["knowledge_graph"] = graph
 
-    def _update_hypothesis_status(self, state: ResearchState, evidence: List[Dict]) -> None:
+    def _update_hypothesis_status(self, state: ResearchState, evidence: list[dict]) -> None:
         """根据证据更新假设状态"""
         hypotheses = state.get("hypotheses", [])
 

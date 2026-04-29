@@ -6,9 +6,10 @@
 提供数据分析与可视化功能。
 """
 
-from typing import Dict, Any, Optional, List
-from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
 import statistics
+from typing import Any
+
+from app.mcp_server.skills.base import BaseSkill, ToolParameter, ToolResult
 
 
 class DataAnalysisSkill(BaseSkill):
@@ -34,20 +35,15 @@ class DataAnalysisSkill(BaseSkill):
             handler=self.calculate_statistics,
             description="计算数据的统计指标（均值、标准差、最大值、最小值等）",
             parameters=[
-                ToolParameter(
-                    name="data",
-                    type="array",
-                    description="数值数组",
-                    required=True
-                ),
+                ToolParameter(name="data", type="array", description="数值数组", required=True),
                 ToolParameter(
                     name="metrics",
                     type="array",
                     description="需要计算的指标：mean(均值), std(标准差), min(最小值), max(最大值), median(中位数)",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 2. 价格趋势分析（纯数据分析）
@@ -60,16 +56,16 @@ class DataAnalysisSkill(BaseSkill):
                     name="data",
                     type="array",
                     description="价格数据数组，每个元素包含close(收盘价)、date(日期)等字段",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="price_field",
                     type="string",
                     description="价格字段名，默认为'close'",
                     required=False,
-                    default="close"
-                )
-            ]
+                    default="close",
+                ),
+            ],
         )
 
         # 3. 相关性分析（纯数据分析）
@@ -79,18 +75,12 @@ class DataAnalysisSkill(BaseSkill):
             description="计算两组数据的相关性",
             parameters=[
                 ToolParameter(
-                    name="data1",
-                    type="array",
-                    description="第一组数值数组",
-                    required=True
+                    name="data1", type="array", description="第一组数值数组", required=True
                 ),
                 ToolParameter(
-                    name="data2",
-                    type="array",
-                    description="第二组数值数组",
-                    required=True
-                )
-            ]
+                    name="data2", type="array", description="第二组数值数组", required=True
+                ),
+            ],
         )
 
         # 4. 技术指标计算（纯数据分析）
@@ -103,16 +93,16 @@ class DataAnalysisSkill(BaseSkill):
                     name="data",
                     type="array",
                     description="价格数据数组，每个元素需包含close(收盘价)、high(最高价)、low(最低价)等字段",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="indicators",
                     type="array",
                     description="指标列表：ma(移动平均线), rsi(相对强弱指标), macd, boll(布林带)",
                     required=False,
-                    default=None
-                )
-            ]
+                    default=None,
+                ),
+            ],
         )
 
         # 5. 数据标准化
@@ -121,20 +111,15 @@ class DataAnalysisSkill(BaseSkill):
             handler=self.normalize_data,
             description="对数据进行标准化处理（Min-Max或Z-Score）",
             parameters=[
-                ToolParameter(
-                    name="data",
-                    type="array",
-                    description="数值数组",
-                    required=True
-                ),
+                ToolParameter(name="data", type="array", description="数值数组", required=True),
                 ToolParameter(
                     name="method",
                     type="string",
                     description="标准化方法：minmax(最小-最大), zscore(Z-Score)",
                     required=False,
-                    default="minmax"
-                )
-            ]
+                    default="minmax",
+                ),
+            ],
         )
 
         # 6. 生成图表数据（纯数据分析）
@@ -147,33 +132,35 @@ class DataAnalysisSkill(BaseSkill):
                     name="data",
                     type="array",
                     description="数据数组，每个元素包含日期、价格等字段",
-                    required=True
+                    required=True,
                 ),
                 ToolParameter(
                     name="chart_type",
                     type="string",
                     description="图表类型：candlestick(K线), line(折线), bar(柱状), area(面积)",
                     required=False,
-                    default="line"
+                    default="line",
                 ),
                 ToolParameter(
                     name="date_field",
                     type="string",
                     description="日期字段名，默认为'trade_date'或'date'",
                     required=False,
-                    default="trade_date"
+                    default="trade_date",
                 ),
                 ToolParameter(
                     name="value_field",
                     type="string",
                     description="数值字段名，默认为'close'",
                     required=False,
-                    default="close"
-                )
-            ]
+                    default="close",
+                ),
+            ],
         )
 
-    async def calculate_statistics(self, data: List[float], metrics: List[str] = None) -> ToolResult:
+    async def calculate_statistics(
+        self, data: list[float], metrics: list[str] = None
+    ) -> ToolResult:
         """计算统计指标"""
         if not data:
             return ToolResult(success=False, error="数据不能为空")
@@ -203,10 +190,12 @@ class DataAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"计算统计指标失败: {str(e)}")
 
-    async def analyze_price_trend(self, data: List[Dict[str, Any]], price_field: str = "close") -> ToolResult:
+    async def analyze_price_trend(
+        self, data: list[dict[str, Any]], price_field: str = "close"
+    ) -> ToolResult:
         """
         分析价格趋势（纯数据分析）
-        
+
         Args:
             data: 价格数据数组，每个元素包含价格字段
             price_field: 价格字段名，默认为'close'
@@ -217,7 +206,7 @@ class DataAnalysisSkill(BaseSkill):
         try:
             # 提取收盘价
             closes = [d.get(price_field) for d in data if d.get(price_field) is not None]
-            
+
             if len(closes) < 5:
                 return ToolResult(success=False, error="价格数据不足，至少需要5条数据")
 
@@ -231,25 +220,34 @@ class DataAnalysisSkill(BaseSkill):
             # 计算波动率
             returns = []
             for i in range(len(closes) - 1):
-                if closes[i+1] > 0:
-                    returns.append((closes[i] - closes[i+1]) / closes[i+1])
+                if closes[i + 1] > 0:
+                    returns.append((closes[i] - closes[i + 1]) / closes[i + 1])
 
-            volatility = statistics.stdev(returns) * (252 ** 0.5) if len(returns) > 1 else 0
+            volatility = statistics.stdev(returns) * (252**0.5) if len(returns) > 1 else 0
 
             # 提取日期字段用于返回
-            dates = [d.get("trade_date") or d.get("date") for d in data if d.get("trade_date") or d.get("date")]
-            
+            dates = [
+                d.get("trade_date") or d.get("date")
+                for d in data
+                if d.get("trade_date") or d.get("date")
+            ]
+
             analysis = {
                 "data_points": len(closes),
-                "date_range": {"from": dates[-1] if dates else None, "to": dates[0] if dates else None},
+                "date_range": {
+                    "from": dates[-1] if dates else None,
+                    "to": dates[0] if dates else None,
+                },
                 "current_price": closes[0],
                 "period_high": max(closes),
                 "period_low": min(closes),
                 "price_change": closes[0] - closes[-1],
-                "price_change_percent": (closes[0] - closes[-1]) / closes[-1] * 100 if closes[-1] else 0,
+                "price_change_percent": (closes[0] - closes[-1]) / closes[-1] * 100
+                if closes[-1]
+                else 0,
                 "trend_direction": trend["direction"],
                 "trend_strength": trend["strength"],
-                "volatility": round(volatility * 100, 2)
+                "volatility": round(volatility * 100, 2),
             }
 
             return ToolResult(success=True, data=analysis)
@@ -257,7 +255,7 @@ class DataAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"分析价格趋势失败: {str(e)}")
 
-    def _calculate_trend(self, prices: List[float]) -> Dict[str, Any]:
+    def _calculate_trend(self, prices: list[float]) -> dict[str, Any]:
         """计算趋势方向和强度"""
         n = len(prices)
         if n < 2:
@@ -286,15 +284,12 @@ class DataAnalysisSkill(BaseSkill):
         ss_tot = sum((prices[i] - mean_y) ** 2 for i in range(n))
         r_squared = 1 - (ss_res / ss_tot) if ss_tot else 0
 
-        return {
-            "direction": direction,
-            "strength": round(abs(r_squared) * 100, 2)
-        }
+        return {"direction": direction, "strength": round(abs(r_squared) * 100, 2)}
 
-    async def calculate_correlation(self, data1: List[float], data2: List[float]) -> ToolResult:
+    async def calculate_correlation(self, data1: list[float], data2: list[float]) -> ToolResult:
         """
         计算相关性（纯数据分析）
-        
+
         Args:
             data1: 第一组数值数组
             data2: 第二组数值数组
@@ -307,31 +302,34 @@ class DataAnalysisSkill(BaseSkill):
             min_len = min(len(data1), len(data2))
             if min_len < 5:
                 return ToolResult(success=False, error="数据不足，每组至少需要5个数据点")
-            
+
             arr1 = data1[:min_len]
             arr2 = data2[:min_len]
 
             # 计算相关系数
             correlation = self._pearson_correlation(arr1, arr2)
 
-            return ToolResult(success=True, data={
-                "data_points": min_len,
-                "correlation": round(correlation, 4),
-                "interpretation": self._interpret_correlation(correlation)
-            })
+            return ToolResult(
+                success=True,
+                data={
+                    "data_points": min_len,
+                    "correlation": round(correlation, 4),
+                    "interpretation": self._interpret_correlation(correlation),
+                },
+            )
 
         except Exception as e:
             return ToolResult(success=False, error=f"计算相关性失败: {str(e)}")
 
-    def _calculate_returns(self, prices: List[float]) -> List[float]:
+    def _calculate_returns(self, prices: list[float]) -> list[float]:
         """计算收益率序列"""
         returns = []
         for i in range(len(prices) - 1):
-            if prices[i+1] > 0:
-                returns.append((prices[i] - prices[i+1]) / prices[i+1])
+            if prices[i + 1] > 0:
+                returns.append((prices[i] - prices[i + 1]) / prices[i + 1])
         return returns
 
-    def _pearson_correlation(self, x: List[float], y: List[float]) -> float:
+    def _pearson_correlation(self, x: list[float], y: list[float]) -> float:
         """计算皮尔逊相关系数"""
         n = len(x)
         if n != len(y) or n == 0:
@@ -361,10 +359,12 @@ class DataAnalysisSkill(BaseSkill):
         else:
             return "几乎无关"
 
-    async def calculate_technical_indicators(self, data: List[Dict[str, Any]], indicators: List[str] = None) -> ToolResult:
+    async def calculate_technical_indicators(
+        self, data: list[dict[str, Any]], indicators: list[str] = None
+    ) -> ToolResult:
         """
         计算技术指标（纯数据分析）
-        
+
         Args:
             data: 价格数据数组，需包含close/high/low等字段
             indicators: 要计算的指标列表
@@ -392,7 +392,7 @@ class DataAnalysisSkill(BaseSkill):
                     "ma5": sum(closes[:5]) / 5,
                     "ma10": sum(closes[:10]) / 10,
                     "ma20": sum(closes[:20]) / 20,
-                    "ma60": sum(closes[:60]) / 60 if len(closes) >= 60 else None
+                    "ma60": sum(closes[:60]) / 60 if len(closes) >= 60 else None,
                 }
 
             if "rsi" in indicators:
@@ -409,7 +409,7 @@ class DataAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"计算技术指标失败: {str(e)}")
 
-    def _calculate_rsi(self, prices: List[float], period: int = 14) -> Dict[str, float]:
+    def _calculate_rsi(self, prices: list[float], period: int = 14) -> dict[str, float]:
         """计算RSI"""
         if len(prices) < period + 1:
             return {"rsi": 50}
@@ -418,7 +418,7 @@ class DataAnalysisSkill(BaseSkill):
         losses = []
 
         for i in range(1, period + 1):
-            change = prices[i-1] - prices[i]
+            change = prices[i - 1] - prices[i]
             if change > 0:
                 gains.append(change)
                 losses.append(0)
@@ -437,7 +437,7 @@ class DataAnalysisSkill(BaseSkill):
 
         return {"rsi": round(rsi, 2)}
 
-    def _calculate_macd(self, prices: List[float]) -> Dict[str, Any]:
+    def _calculate_macd(self, prices: list[float]) -> dict[str, Any]:
         """计算MACD"""
         # 简化计算，使用EMA近似
         ema12 = self._calculate_ema(prices, 12)
@@ -452,10 +452,10 @@ class DataAnalysisSkill(BaseSkill):
         return {
             "macd": round(macd_line, 4),
             "signal": round(signal_line, 4),
-            "histogram": round(macd_line - signal_line, 4)
+            "histogram": round(macd_line - signal_line, 4),
         }
 
-    def _calculate_ema(self, prices: List[float], period: int) -> Optional[float]:
+    def _calculate_ema(self, prices: list[float], period: int) -> float | None:
         """计算EMA"""
         if len(prices) < period:
             return None
@@ -468,7 +468,7 @@ class DataAnalysisSkill(BaseSkill):
 
         return ema
 
-    def _calculate_bollinger(self, prices: List[float], period: int = 20) -> Dict[str, float]:
+    def _calculate_bollinger(self, prices: list[float], period: int = 20) -> dict[str, float]:
         """计算布林带"""
         if len(prices) < period:
             return {"upper": None, "middle": None, "lower": None}
@@ -480,10 +480,10 @@ class DataAnalysisSkill(BaseSkill):
         return {
             "upper": round(middle + 2 * std, 2),
             "middle": round(middle, 2),
-            "lower": round(middle - 2 * std, 2)
+            "lower": round(middle - 2 * std, 2),
         }
 
-    async def normalize_data(self, data: List[float], method: str = "minmax") -> ToolResult:
+    async def normalize_data(self, data: list[float], method: str = "minmax") -> ToolResult:
         """数据标准化"""
         if not data:
             return ToolResult(success=False, error="数据不能为空")
@@ -502,22 +502,19 @@ class DataAnalysisSkill(BaseSkill):
                 result = {
                     "method": "minmax",
                     "original_range": {"min": min_val, "max": max_val},
-                    "normalized": normalized
+                    "normalized": normalized,
                 }
 
             elif method == "zscore":
                 mean = statistics.mean(data)
                 std = statistics.stdev(data) if len(data) > 1 else 1
 
-                if std == 0:
-                    normalized = [0] * len(data)
-                else:
-                    normalized = [(x - mean) / std for x in data]
+                normalized = [0] * len(data) if std == 0 else [(x - mean) / std for x in data]
 
                 result = {
                     "method": "zscore",
                     "original_stats": {"mean": mean, "std": std},
-                    "normalized": normalized
+                    "normalized": normalized,
                 }
             else:
                 return ToolResult(success=False, error=f"不支持的标准化方法: {method}")
@@ -527,11 +524,16 @@ class DataAnalysisSkill(BaseSkill):
         except Exception as e:
             return ToolResult(success=False, error=f"数据标准化失败: {str(e)}")
 
-    async def generate_chart_data(self, data: List[Dict[str, Any]], chart_type: str = "line",
-                                   date_field: str = "trade_date", value_field: str = "close") -> ToolResult:
+    async def generate_chart_data(
+        self,
+        data: list[dict[str, Any]],
+        chart_type: str = "line",
+        date_field: str = "trade_date",
+        value_field: str = "close",
+    ) -> ToolResult:
         """
         生成图表数据（纯数据分析）
-        
+
         Args:
             data: 数据数组
             chart_type: 图表类型
@@ -550,7 +552,7 @@ class DataAnalysisSkill(BaseSkill):
                         "high": d.get("high"),
                         "low": d.get("low"),
                         "close": d.get("close"),
-                        "volume": d.get("vol") or d.get("volume")
+                        "volume": d.get("vol") or d.get("volume"),
                     }
                     for d in data
                 ]
@@ -561,23 +563,28 @@ class DataAnalysisSkill(BaseSkill):
                 ]
             elif chart_type == "bar":
                 chart_data = [
-                    {"date": d.get(date_field) or d.get("date"), "value": d.get("vol") or d.get("volume")}
+                    {
+                        "date": d.get(date_field) or d.get("date"),
+                        "value": d.get("vol") or d.get("volume"),
+                    }
                     for d in data
                 ]
             elif chart_type == "area":
                 chart_data = [
-                    {"date": d.get(date_field) or d.get("date"), "value": d.get(value_field), 
-                     "volume": d.get("vol") or d.get("volume")}
+                    {
+                        "date": d.get(date_field) or d.get("date"),
+                        "value": d.get(value_field),
+                        "volume": d.get("vol") or d.get("volume"),
+                    }
                     for d in data
                 ]
             else:
                 return ToolResult(success=False, error=f"不支持的图表类型: {chart_type}")
 
-            return ToolResult(success=True, data={
-                "chart_type": chart_type,
-                "data_points": len(chart_data),
-                "data": chart_data
-            })
+            return ToolResult(
+                success=True,
+                data={"chart_type": chart_type, "data_points": len(chart_data), "data": chart_data},
+            )
 
         except Exception as e:
             return ToolResult(success=False, error=f"生成图表数据失败: {str(e)}")

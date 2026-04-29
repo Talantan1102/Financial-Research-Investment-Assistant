@@ -2,24 +2,25 @@
 # 未经授权，禁止转售或仿制。
 
 """会话管理路由"""
-from typing import List, Optional
-from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 
-from app.core.database import get_db
-from app.models.chat import ChatSession, ChatMessage
-from app.models.user import User
-from app.router.auth_router import get_current_user_required, get_current_user
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from schemas.chat import (
-    SessionCreate,
-    SessionUpdate,
-    SessionResponse,
-    SessionWithMessagesResponse,
     MessageCreate,
     MessageResponse,
+    SessionCreate,
+    SessionResponse,
+    SessionUpdate,
+    SessionWithMessagesResponse,
 )
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.chat import ChatMessage, ChatSession
+from app.models.user import User
+from app.router.auth_router import get_current_user_required
 
 router = APIRouter(prefix="/sessions", tags=["会话管理"])
 
@@ -50,11 +51,11 @@ def message_to_response(message: ChatMessage) -> MessageResponse:
     )
 
 
-@router.get("", response_model=List[SessionResponse])
+@router.get("", response_model=list[SessionResponse])
 async def get_sessions(
     limit: int = Query(50, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
-    session_type: Optional[str] = Query(None, description="会话类型筛选"),
+    session_type: str | None = Query(None, description="会话类型筛选"),
     current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db),
 ):
@@ -70,9 +71,11 @@ async def get_sessions(
     # 获取每个会话的消息数量
     result = []
     for session in sessions:
-        message_count = db.query(func.count(ChatMessage.id)).filter(
-            ChatMessage.session_id == session.id
-        ).scalar()
+        message_count = (
+            db.query(func.count(ChatMessage.id))
+            .filter(ChatMessage.session_id == session.id)
+            .scalar()
+        )
         result.append(session_to_response(session, message_count))
 
     return result
@@ -107,26 +110,24 @@ async def get_session(
     try:
         session_uuid = UUID(session_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的会话ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
-    session = db.query(ChatSession).filter(
-        ChatSession.id == session_uuid,
-        ChatSession.user_id == current_user.id
-    ).first()
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_uuid, ChatSession.user_id == current_user.id)
+        .first()
+    )
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="会话不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     # 获取消息列表
-    messages = db.query(ChatMessage).filter(
-        ChatMessage.session_id == session.id
-    ).order_by(ChatMessage.created_at.asc()).all()
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session.id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
 
     return SessionWithMessagesResponse(
         id=str(session.id),
@@ -150,29 +151,24 @@ async def update_session(
     try:
         session_uuid = UUID(session_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的会话ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
-    session = db.query(ChatSession).filter(
-        ChatSession.id == session_uuid,
-        ChatSession.user_id == current_user.id
-    ).first()
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_uuid, ChatSession.user_id == current_user.id)
+        .first()
+    )
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="会话不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     session.title = session_data.title
     db.commit()
     db.refresh(session)
 
-    message_count = db.query(func.count(ChatMessage.id)).filter(
-        ChatMessage.session_id == session.id
-    ).scalar()
+    message_count = (
+        db.query(func.count(ChatMessage.id)).filter(ChatMessage.session_id == session.id).scalar()
+    )
 
     return session_to_response(session, message_count)
 
@@ -187,28 +183,23 @@ async def delete_session(
     try:
         session_uuid = UUID(session_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的会话ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
-    session = db.query(ChatSession).filter(
-        ChatSession.id == session_uuid,
-        ChatSession.user_id == current_user.id
-    ).first()
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_uuid, ChatSession.user_id == current_user.id)
+        .first()
+    )
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="会话不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     db.delete(session)
     db.commit()
     return None
 
 
-@router.get("/{session_id}/messages", response_model=List[MessageResponse])
+@router.get("/{session_id}/messages", response_model=list[MessageResponse])
 async def get_messages(
     session_id: str,
     limit: int = Query(100, ge=1, le=500, description="返回数量限制"),
@@ -220,31 +211,33 @@ async def get_messages(
     try:
         session_uuid = UUID(session_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的会话ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
     # 验证会话所有权
-    session = db.query(ChatSession).filter(
-        ChatSession.id == session_uuid,
-        ChatSession.user_id == current_user.id
-    ).first()
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_uuid, ChatSession.user_id == current_user.id)
+        .first()
+    )
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="会话不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
-    messages = db.query(ChatMessage).filter(
-        ChatMessage.session_id == session_uuid
-    ).order_by(ChatMessage.created_at.asc()).offset(offset).limit(limit).all()
+    messages = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_uuid)
+        .order_by(ChatMessage.created_at.asc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
 
     return [message_to_response(m) for m in messages]
 
 
-@router.post("/{session_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{session_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED
+)
 async def add_message(
     session_id: str,
     message_data: MessageCreate,
@@ -255,22 +248,17 @@ async def add_message(
     try:
         session_uuid = UUID(session_id)
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的会话ID格式"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
     # 验证会话所有权
-    session = db.query(ChatSession).filter(
-        ChatSession.id == session_uuid,
-        ChatSession.user_id == current_user.id
-    ).first()
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_uuid, ChatSession.user_id == current_user.id)
+        .first()
+    )
 
     if not session:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="会话不存在"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     # 创建消息
     message = ChatMessage(
@@ -285,12 +273,15 @@ async def add_message(
 
     # 更新会话的 updated_at
     from datetime import datetime
+
     session.updated_at = datetime.utcnow()
 
     # 如果是第一条用户消息，自动生成标题
     if message_data.role == "user" and session.title == "新对话":
         # 取消息前20个字符作为标题
-        session.title = message_data.content[:20] + ("..." if len(message_data.content) > 20 else "")
+        session.title = message_data.content[:20] + (
+            "..." if len(message_data.content) > 20 else ""
+        )
 
     db.commit()
     db.refresh(message)

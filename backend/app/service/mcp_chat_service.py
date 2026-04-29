@@ -19,17 +19,18 @@ MCP Chat Service - 三轮编排架构
   [assistant] 贵州茅台(600519) 当前价格 ¥1,850.50...             ← Round 3
 """
 
-import os
-import json
 import asyncio
+import json
 import logging
-from typing import Dict, Any, List, Optional, AsyncGenerator
-from datetime import datetime
+import os
+from collections.abc import AsyncGenerator
+from typing import Any
 
 # DashScope (Qwen)
 try:
     import dashscope
     from dashscope import Generation
+
     DASHSCOPE_AVAILABLE = True
 except ImportError:
     DASHSCOPE_AVAILABLE = False
@@ -38,10 +39,12 @@ except ImportError:
 # MCP Client
 try:
     from app.mcp_client.client import MCPClient
+
     MCP_AVAILABLE = True
 except ImportError:
     try:
         from mcp_client.client import MCPClient
+
         MCP_AVAILABLE = True
     except ImportError:
         MCP_AVAILABLE = False
@@ -67,7 +70,7 @@ class MCPChatService:
         api_key: str = None,
         connect_timeout: float = 30.0,
         call_timeout: float = 30.0,
-        max_iterations: int = 10
+        max_iterations: int = 10,
     ):
         if not DASHSCOPE_AVAILABLE:
             raise RuntimeError("dashscope 未安装。安装: pip install dashscope")
@@ -94,8 +97,8 @@ class MCPChatService:
         self.max_iterations = max_iterations
 
         # 运行时状态
-        self.mcp_client: Optional[MCPClient] = None
-        self.tools_list: List[Dict] = []  # 元工具列表
+        self.mcp_client: MCPClient | None = None
+        self.tools_list: list[dict] = []  # 元工具列表
         self.is_connected = False
 
         logger.info(f"MCP Chat Service 初始化: model={model}, server={mcp_server_path}")
@@ -111,7 +114,7 @@ class MCPChatService:
             self.mcp_client = MCPClient(
                 server_script_path=self.mcp_server_path,
                 connect_timeout=self.connect_timeout,
-                call_timeout=self.call_timeout
+                call_timeout=self.call_timeout,
             )
 
             connected = await self.mcp_client.connect()
@@ -145,7 +148,7 @@ class MCPChatService:
             self.is_connected = False
             logger.info("MCP Client 已断开连接")
 
-    def _mcp_tool_to_qwen(self, mcp_tool: Dict) -> Dict:
+    def _mcp_tool_to_qwen(self, mcp_tool: dict) -> dict:
         """将 MCP 工具格式转换为 qwen function calling 格式"""
         # qwen 的 function name 不能有 "."，用 "__" 替代
         qwen_name = mcp_tool["name"].replace(".", "__")
@@ -154,15 +157,15 @@ class MCPChatService:
             "function": {
                 "name": qwen_name,
                 "description": mcp_tool.get("description", ""),
-                "parameters": mcp_tool.get("inputSchema", mcp_tool.get("parameters", {}))
-            }
+                "parameters": mcp_tool.get("inputSchema", mcp_tool.get("parameters", {})),
+            },
         }
 
     def _qwen_name_to_mcp(self, qwen_name: str) -> str:
         """将 qwen function name 转回 MCP tool name"""
         return qwen_name.replace("__", ".")
 
-    async def _call_mcp_tool(self, tool_name: str, arguments: Dict) -> Any:
+    async def _call_mcp_tool(self, tool_name: str, arguments: dict) -> Any:
         """调用 MCP 工具，返回原始结果"""
         if not self.is_connected:
             return {"error": "MCP Client 未连接"}
@@ -174,7 +177,7 @@ class MCPChatService:
 
         if result.get("success") is not None:
             if result.get("success"):
-                logger.info(f"  工具调用成功")
+                logger.info("  工具调用成功")
                 return result.get("data", result)
             else:
                 error = result.get("error", "未知错误")
@@ -184,7 +187,7 @@ class MCPChatService:
             # call_tool 返回的可能是直接的数据（非标准格式）
             return result
 
-    async def _call_mcp_tool_raw(self, tool_name: str, arguments: Dict) -> str:
+    async def _call_mcp_tool_raw(self, tool_name: str, arguments: dict) -> str:
         """
         调用 MCP 工具，返回原始文本（不做 JSON 解析）。
 
@@ -195,18 +198,17 @@ class MCPChatService:
 
         try:
             result = await asyncio.wait_for(
-                self.mcp_client._session.call_tool(tool_name, arguments),
-                timeout=self.call_timeout
+                self.mcp_client._session.call_tool(tool_name, arguments), timeout=self.call_timeout
             )
 
             if result.content and len(result.content) > 0:
                 first_content = result.content[0]
-                if hasattr(first_content, 'text'):
+                if hasattr(first_content, "text"):
                     return first_content.text
 
             return json.dumps({"error": "工具返回为空"})
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return json.dumps({"error": f"工具调用超时 ({self.call_timeout}s)"})
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -214,19 +216,21 @@ class MCPChatService:
     def _build_messages(
         self,
         user_question: str,
-        system_prompt: Optional[str] = None,
-        conversation_history: Optional[List[Dict]] = None
-    ) -> List[Dict]:
+        system_prompt: str | None = None,
+        conversation_history: list[dict] | None = None,
+    ) -> list[dict]:
         """构建消息列表"""
         messages = []
 
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         else:
-            messages.append({
-                "role": "system",
-                "content": "你是一个专业的金融投资分析师。你可以使用提供的工具来查询股票数据、分析财务指标和评估风险。请基于真实数据给出专业、客观的投资建议。"
-            })
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "你是一个专业的金融投资分析师。你可以使用提供的工具来查询股票数据、分析财务指标和评估风险。请基于真实数据给出专业、客观的投资建议。",
+                }
+            )
 
         if conversation_history:
             messages.extend(conversation_history)
@@ -234,12 +238,12 @@ class MCPChatService:
         messages.append({"role": "user", "content": user_question})
         return messages
 
-    def _extract_tool_calls(self, assistant_message) -> Optional[List]:
+    def _extract_tool_calls(self, assistant_message) -> list | None:
         """从 assistant 消息中提取 tool_calls"""
         tool_calls = None
-        if hasattr(assistant_message, 'get'):
-            tool_calls = assistant_message.get('tool_calls')
-        elif hasattr(assistant_message, 'tool_calls'):
+        if hasattr(assistant_message, "get"):
+            tool_calls = assistant_message.get("tool_calls")
+        elif hasattr(assistant_message, "tool_calls"):
             try:
                 tool_calls = assistant_message.tool_calls
             except (AttributeError, KeyError):
@@ -248,39 +252,39 @@ class MCPChatService:
 
     def _get_assistant_content(self, assistant_message) -> str:
         """从 assistant 消息中提取 content"""
-        if hasattr(assistant_message, 'get'):
-            return assistant_message.get('content', '') or ''
-        return (assistant_message.content or '') if hasattr(assistant_message, 'content') else ''
+        if hasattr(assistant_message, "get"):
+            return assistant_message.get("content", "") or ""
+        return (assistant_message.content or "") if hasattr(assistant_message, "content") else ""
 
     def _get_assistant_role(self, assistant_message) -> str:
         """从 assistant 消息中提取 role"""
-        if hasattr(assistant_message, 'get'):
-            return assistant_message.get('role', 'assistant')
-        return assistant_message.role if hasattr(assistant_message, 'role') else 'assistant'
+        if hasattr(assistant_message, "get"):
+            return assistant_message.get("role", "assistant")
+        return assistant_message.role if hasattr(assistant_message, "role") else "assistant"
 
     def _parse_tool_call(self, tool_call) -> tuple:
         """解析单个 tool_call，返回 (function_name, function_args)"""
         if isinstance(tool_call, dict):
-            function_name = tool_call['function']['name']
-            function_args = json.loads(tool_call['function']['arguments'])
+            function_name = tool_call["function"]["name"]
+            function_args = json.loads(tool_call["function"]["arguments"])
         else:
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
         return function_name, function_args
 
-    def _call_llm(self, messages: List[Dict], tools: List[Dict]):
+    def _call_llm(self, messages: list[dict], tools: list[dict]):
         """调用 LLM"""
         response = Generation.call(
             model=self.model,
             messages=messages,
             tools=tools if tools else None,
-            result_format='message'
+            result_format="message",
         )
         if response.status_code != 200:
             raise RuntimeError(f"qwen API 调用失败: {response.code} - {response.message}")
         return response.output.choices[0].message
 
-    async def _round1_select_skill(self, messages: List[Dict]) -> tuple:
+    async def _round1_select_skill(self, messages: list[dict]) -> tuple:
         """
         Round 1: Skill 选择
 
@@ -309,11 +313,13 @@ class MCPChatService:
         tool_calls = self._extract_tool_calls(assistant_msg)
 
         # 将 assistant 消息追加到 messages
-        messages.append({
-            "role": self._get_assistant_role(assistant_msg),
-            "content": self._get_assistant_content(assistant_msg),
-            "tool_calls": tool_calls
-        })
+        messages.append(
+            {
+                "role": self._get_assistant_role(assistant_msg),
+                "content": self._get_assistant_content(assistant_msg),
+                "tool_calls": tool_calls,
+            }
+        )
 
         if not tool_calls:
             # LLM 直接回答，不需要 skill
@@ -327,7 +333,9 @@ class MCPChatService:
         logger.info(f"Round 1: LLM tool_call: name={function_name}, args={function_args}")
 
         if mcp_tool_name != "skill":
-            logger.warning(f"Round 1: LLM 调用了非 skill 工具: {mcp_tool_name}，尝试作为 skill name 处理")
+            logger.warning(
+                f"Round 1: LLM 调用了非 skill 工具: {mcp_tool_name}，尝试作为 skill name 处理"
+            )
             # qwen 有时会把 skill name 直接作为 function name 返回
             # 将其视为对该 skill 的选择
             skill_name = mcp_tool_name
@@ -339,11 +347,7 @@ class MCPChatService:
         skill_md = await self._call_mcp_tool_raw("skill", {"name": skill_name})
 
         # 将 SKILL.md 内容作为 tool result 追加到 messages
-        messages.append({
-            "role": "tool",
-            "name": function_name,
-            "content": skill_md
-        })
+        messages.append({"role": "tool", "name": function_name, "content": skill_md})
 
         # 通过 MCP 获取工具定义
         tools_result = await self._call_mcp_tool("get_skill_tools", {"name": skill_name})
@@ -353,7 +357,7 @@ class MCPChatService:
             try:
                 tools_result = json.loads(tools_result)
             except json.JSONDecodeError:
-                logger.error(f"解析 get_skill_tools 结果失败")
+                logger.error("解析 get_skill_tools 结果失败")
                 return skill_name, skill_md, []
 
         # 从返回结果中提取工具定义
@@ -366,11 +370,7 @@ class MCPChatService:
         return skill_name, skill_md, skill_tools
 
     async def _round2_execute_tools(
-        self,
-        messages: List[Dict],
-        skill_name: str,
-        skill_tools: List[Dict],
-        max_rounds: int = 5
+        self, messages: list[dict], skill_name: str, skill_tools: list[dict], max_rounds: int = 5
     ):
         """
         Round 2: 工具调用（可循环）
@@ -383,14 +383,16 @@ class MCPChatService:
         # 将 skill 工具定义转为 qwen function calling 格式
         qwen_tools = []
         for tool_def in skill_tools:
-            qwen_tools.append({
-                "type": "function",
-                "function": {
-                    "name": tool_def["name"].replace(".", "__"),
-                    "description": tool_def.get("description", ""),
-                    "parameters": tool_def.get("parameters", {})
+            qwen_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool_def["name"].replace(".", "__"),
+                        "description": tool_def.get("description", ""),
+                        "parameters": tool_def.get("parameters", {}),
+                    },
                 }
-            })
+            )
 
         # function calling 循环
         for round_num in range(max_rounds):
@@ -399,11 +401,13 @@ class MCPChatService:
             assistant_msg = self._call_llm(messages, qwen_tools)
             tool_calls = self._extract_tool_calls(assistant_msg)
 
-            messages.append({
-                "role": self._get_assistant_role(assistant_msg),
-                "content": self._get_assistant_content(assistant_msg),
-                "tool_calls": tool_calls
-            })
+            messages.append(
+                {
+                    "role": self._get_assistant_role(assistant_msg),
+                    "content": self._get_assistant_content(assistant_msg),
+                    "tool_calls": tool_calls,
+                }
+            )
 
             if not tool_calls:
                 # 没有 tool_call，LLM 已生成回答
@@ -427,23 +431,26 @@ class MCPChatService:
                     call_tool_name = mcp_tool_name
 
                 # 通过 execute_skill_tool 执行
-                tool_result = await self._call_mcp_tool("execute_skill_tool", {
-                    "skill_name": call_skill_name,
-                    "tool_name": call_tool_name,
-                    "arguments": function_args
-                })
+                tool_result = await self._call_mcp_tool(
+                    "execute_skill_tool",
+                    {
+                        "skill_name": call_skill_name,
+                        "tool_name": call_tool_name,
+                        "arguments": function_args,
+                    },
+                )
 
                 # 将工具结果追加到 messages
-                result_str = json.dumps(tool_result, ensure_ascii=False) if not isinstance(tool_result, str) else tool_result
-                messages.append({
-                    "role": "tool",
-                    "name": function_name,
-                    "content": result_str
-                })
+                result_str = (
+                    json.dumps(tool_result, ensure_ascii=False)
+                    if not isinstance(tool_result, str)
+                    else tool_result
+                )
+                messages.append({"role": "tool", "name": function_name, "content": result_str})
 
         logger.warning(f"Round 2: 达到最大迭代次数 {max_rounds}")
 
-    def _get_last_assistant_content(self, messages: List[Dict]) -> str:
+    def _get_last_assistant_content(self, messages: list[dict]) -> str:
         """获取 messages 中最后一条 assistant 消息的 content"""
         for msg in reversed(messages):
             if msg.get("role") == "assistant" and msg.get("content"):
@@ -453,8 +460,8 @@ class MCPChatService:
     async def chat(
         self,
         user_question: str,
-        system_prompt: Optional[str] = None,
-        conversation_history: Optional[List[Dict]] = None
+        system_prompt: str | None = None,
+        conversation_history: list[dict] | None = None,
     ) -> str:
         """
         三轮编排对话
@@ -494,10 +501,7 @@ class MCPChatService:
             logger.info("=== Round 3: 生成最终回答 ===")
             assistant_msg = self._call_llm(messages, [])
             content = self._get_assistant_content(assistant_msg)
-            messages.append({
-                "role": "assistant",
-                "content": content
-            })
+            messages.append({"role": "assistant", "content": content})
             return content
 
         except Exception as e:
@@ -507,8 +511,8 @@ class MCPChatService:
     async def chat_stream(
         self,
         user_question: str,
-        system_prompt: Optional[str] = None,
-        conversation_history: Optional[List[Dict]] = None
+        system_prompt: str | None = None,
+        conversation_history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
         """
         流式对话（暂不支持 function calling 流式，先返回完整结果）
@@ -527,11 +531,7 @@ class MCPChatService:
 
 
 # 便捷函数
-async def mcp_chat(
-    question: str,
-    model: str = "qwen-max",
-    system_prompt: Optional[str] = None
-) -> str:
+async def mcp_chat(question: str, model: str = "qwen-max", system_prompt: str | None = None) -> str:
     """
     便捷函数：快速调用 MCP Chat Service
 

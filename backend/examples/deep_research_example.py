@@ -5,8 +5,8 @@
 """
 
 import asyncio
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -30,21 +30,21 @@ async def example_1_quick_research():
         "deep_research.quick_research",
         {
             "query": "贵州茅台2024年投资价值分析，包括股价表现、财务指标、市场地位",
-            "max_iterations": 3
-        }
+            "max_iterations": 3,
+        },
     )
 
     if result["success"]:
         data = result["data"]
-        print(f"\n📊 研究结果:")
+        print("\n📊 研究结果:")
         print(f"质量评分: {data.get('quality_score', 0):.2f}")
         print(f"迭代次数: {data.get('iterations', 0)}")
-        print(f"\n📝 摘要:")
+        print("\n📝 摘要:")
         print(data.get("summary", "无摘要"))
-        print(f"\n💡 核心发现:")
+        print("\n💡 核心发现:")
         for fact in data.get("key_facts", [])[:3]:
             print(f"  - {fact.get('content', '')}")
-        print(f"\n🔍 关键洞察:")
+        print("\n🔍 关键洞察:")
         for insight in data.get("key_insights", []):
             print(f"  - {insight}")
     else:
@@ -69,17 +69,17 @@ async def example_2_deep_research():
         "deep_research.research_sync",
         {
             "query": "中国新能源汽车行业2024年发展现状与趋势，包括市场规模、主要玩家、竞争格局",
-            "search_web": True
-        }
+            "search_web": True,
+        },
     )
 
     if result["success"]:
         data = result["data"]
-        print(f"\n📊 研究结果:")
+        print("\n📊 研究结果:")
         print(f"会话ID: {data.get('session_id', '')}")
         print(f"质量评分: {data.get('quality_score', 0):.2f}")
         print(f"迭代次数: {data.get('iterations', 0)}")
-        print(f"\n📄 报告预览:")
+        print("\n📄 报告预览:")
         report = data.get("final_report", "")
         print(report[:300] + "..." if len(report) > 300 else report)
         print(f"\n📈 数据点数量: {len(data.get('data_points', []))}")
@@ -102,11 +102,9 @@ async def example_3_with_qwen():
     from app.service.mcp_chat_service import mcp_chat
 
     # qwen 会自动判断是否需要使用 deep_research 工具
-    answer = await mcp_chat(
-        "帮我深入研究一下比亚迪和特斯拉的竞争格局，分析各自的优势和劣势"
-    )
+    answer = await mcp_chat("帮我深入研究一下比亚迪和特斯拉的竞争格局，分析各自的优势和劣势")
 
-    print(f"\n🤖 qwen 的回答:")
+    print("\n🤖 qwen 的回答:")
     print(answer)
 
 
@@ -150,4 +148,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ 示例运行失败: {e}")
         import traceback
+
         traceback.print_exc()

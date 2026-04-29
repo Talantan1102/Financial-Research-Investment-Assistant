@@ -5,7 +5,7 @@ Tool Adapter - MCP Client 统一封装
 通过 MCP Client 统一调用所有 Skills 的工具。
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ToolAdapter:
@@ -37,7 +37,7 @@ class ToolAdapter:
 
         self.mcp_client = mcp_client
 
-    async def _call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    async def _call_tool(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """
         调用 MCP 工具
 
@@ -66,37 +66,24 @@ class ToolAdapter:
         # 通过 execute_skill_tool 调用
         return await self.mcp_client.call_tool(
             "execute_skill_tool",
-            {
-                "skill_name": skill_name,
-                "tool_name": actual_tool_name,
-                "arguments": arguments
-            }
+            {"skill_name": skill_name, "tool_name": actual_tool_name, "arguments": arguments},
         )
 
     # ========== Market Data 工具 ==========
 
-    async def get_stock_by_code(self, stock_code: str) -> Dict[str, Any]:
+    async def get_stock_by_code(self, stock_code: str) -> dict[str, Any]:
         """获取股票行情数据"""
-        return await self._call_tool(
-            "market_data.get_quote",
-            {"symbol": stock_code}
-        )
+        return await self._call_tool("market_data.get_quote", {"symbol": stock_code})
 
-    async def search_stock(self, keyword: str) -> Dict[str, Any]:
+    async def search_stock(self, keyword: str) -> dict[str, Any]:
         """搜索股票"""
-        return await self._call_tool(
-            "market_data.search_stock",
-            {"keyword": keyword}
-        )
+        return await self._call_tool("market_data.search_stock", {"keyword": keyword})
 
     # ========== Web Research 工具 ==========
 
     async def web_search(
-        self,
-        query: str,
-        count: int = 5,
-        freshness: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, query: str, count: int = 5, freshness: str | None = None
+    ) -> dict[str, Any]:
         """网络搜索"""
         arguments = {"query": query, "count": count}
         if freshness:
@@ -105,11 +92,8 @@ class ToolAdapter:
         return await self._call_tool("web_research.web_search", arguments)
 
     async def knowledge_search(
-        self,
-        query: str,
-        kb_name: str = "",
-        top_k: int = 5
-    ) -> Dict[str, Any]:
+        self, query: str, kb_name: str = "", top_k: int = 5
+    ) -> dict[str, Any]:
         """知识库搜索"""
         arguments = {"query": query, "top_k": top_k}
         if kb_name:
@@ -120,51 +104,34 @@ class ToolAdapter:
     async def deep_search(
         self,
         query: str,
-        sub_queries: Optional[List[str]] = None,
+        sub_queries: list[str] | None = None,
         max_depth: int = 2,
-        cross_verify: bool = True
-    ) -> Dict[str, Any]:
+        cross_verify: bool = True,
+    ) -> dict[str, Any]:
         """深度搜索"""
-        arguments = {
-            "query": query,
-            "max_depth": max_depth,
-            "cross_verify": cross_verify
-        }
+        arguments = {"query": query, "max_depth": max_depth, "cross_verify": cross_verify}
         if sub_queries:
             arguments["sub_queries"] = sub_queries
 
         return await self._call_tool("web_research.deep_search", arguments)
 
-    async def batch_search(
-        self,
-        queries: List[Dict],
-        search_type: str = "web"
-    ) -> Dict[str, Any]:
+    async def batch_search(self, queries: list[dict], search_type: str = "web") -> dict[str, Any]:
         """批量搜索"""
         return await self._call_tool(
-            "web_research.batch_search",
-            {"queries": queries, "search_type": search_type}
+            "web_research.batch_search", {"queries": queries, "search_type": search_type}
         )
 
-    async def extract_webpage(
-        self,
-        url: str,
-        extract_type: str = "article"
-    ) -> Dict[str, Any]:
+    async def extract_webpage(self, url: str, extract_type: str = "article") -> dict[str, Any]:
         """提取网页内容"""
         return await self._call_tool(
-            "web_research.extract_webpage",
-            {"url": url, "extract_type": extract_type}
+            "web_research.extract_webpage", {"url": url, "extract_type": extract_type}
         )
 
     # ========== Data Analysis 工具 ==========
 
     async def analyze_data(
-        self,
-        data: List[Dict],
-        analysis_type: str = "auto",
-        context: str = ""
-    ) -> Dict[str, Any]:
+        self, data: list[dict], analysis_type: str = "auto", context: str = ""
+    ) -> dict[str, Any]:
         """智能数据分析"""
         arguments = {"data": data, "analysis_type": analysis_type}
         if context:
@@ -174,11 +141,11 @@ class ToolAdapter:
 
     async def generate_chart(
         self,
-        data: Dict,
+        data: dict,
         chart_type: str = "bar",
         title: str = "数据图表",
-        options: Optional[Dict] = None
-    ) -> Dict[str, Any]:
+        options: dict | None = None,
+    ) -> dict[str, Any]:
         """生成图表配置"""
         arguments = {"data": data, "chart_type": chart_type, "title": title}
         if options:
@@ -187,11 +154,8 @@ class ToolAdapter:
         return await self._call_tool("data_analysis.generate_chart", arguments)
 
     async def text_to_sql(
-        self,
-        question: str,
-        intent: str = "stats",
-        table_hints: Optional[List[str]] = None
-    ) -> Dict[str, Any]:
+        self, question: str, intent: str = "stats", table_hints: list[str] | None = None
+    ) -> dict[str, Any]:
         """自然语言转 SQL"""
         arguments = {"question": question, "intent": intent}
         if table_hints:
@@ -201,11 +165,11 @@ class ToolAdapter:
 
     async def calculate_metrics(
         self,
-        data: List[Dict],
-        metrics: List[str],
+        data: list[dict],
+        metrics: list[str],
         value_field: str = "value",
-        time_field: str = "time"
-    ) -> Dict[str, Any]:
+        time_field: str = "time",
+    ) -> dict[str, Any]:
         """计算金融指标"""
         return await self._call_tool(
             "data_analysis.calculate_metrics",
@@ -213,89 +177,59 @@ class ToolAdapter:
                 "data": data,
                 "metrics": metrics,
                 "value_field": value_field,
-                "time_field": time_field
-            }
+                "time_field": time_field,
+            },
         )
 
     # ========== Financial Analysis 工具 ==========
 
     async def analyze_financial_report(
-        self,
-        symbol: str,
-        report_type: str = "income"
-    ) -> Dict[str, Any]:
+        self, symbol: str, report_type: str = "income"
+    ) -> dict[str, Any]:
         """分析财务报表"""
         return await self._call_tool(
-            "financial_analysis.analyze_report",
-            {"symbol": symbol, "report_type": report_type}
+            "financial_analysis.analyze_report", {"symbol": symbol, "report_type": report_type}
         )
 
-    async def calculate_financial_ratios(self, symbol: str) -> Dict[str, Any]:
+    async def calculate_financial_ratios(self, symbol: str) -> dict[str, Any]:
         """计算财务比率"""
-        return await self._call_tool(
-            "financial_analysis.calculate_ratios",
-            {"symbol": symbol}
-        )
+        return await self._call_tool("financial_analysis.calculate_ratios", {"symbol": symbol})
 
-    async def analyze_business(self, symbol: str) -> Dict[str, Any]:
+    async def analyze_business(self, symbol: str) -> dict[str, Any]:
         """分析经营情况"""
-        return await self._call_tool(
-            "financial_analysis.analyze_business",
-            {"symbol": symbol}
-        )
+        return await self._call_tool("financial_analysis.analyze_business", {"symbol": symbol})
 
     # ========== Risk Assessment 工具 ==========
 
-    async def assess_risk(self, symbol: str) -> Dict[str, Any]:
+    async def assess_risk(self, symbol: str) -> dict[str, Any]:
         """风险评估"""
-        return await self._call_tool(
-            "risk_assessment.assess",
-            {"symbol": symbol}
-        )
+        return await self._call_tool("risk_assessment.assess", {"symbol": symbol})
 
-    async def predict_risk(self, symbol: str, days: int = 30) -> Dict[str, Any]:
+    async def predict_risk(self, symbol: str, days: int = 30) -> dict[str, Any]:
         """风险预测"""
-        return await self._call_tool(
-            "risk_assessment.predict",
-            {"symbol": symbol, "days": days}
-        )
+        return await self._call_tool("risk_assessment.predict", {"symbol": symbol, "days": days})
 
-    async def monitor_risk(self, symbol: str) -> Dict[str, Any]:
+    async def monitor_risk(self, symbol: str) -> dict[str, Any]:
         """风险监控"""
-        return await self._call_tool(
-            "risk_assessment.monitor",
-            {"symbol": symbol}
-        )
+        return await self._call_tool("risk_assessment.monitor", {"symbol": symbol})
 
     # ========== Deep Research 工具 ==========
 
-    async def research_plan(self, query: str) -> Dict[str, Any]:
+    async def research_plan(self, query: str) -> dict[str, Any]:
         """研究规划"""
-        return await self._call_tool(
-            "deep_research.plan",
-            {"query": query}
-        )
+        return await self._call_tool("deep_research.plan", {"query": query})
 
-    async def research_search(self, session_id: str) -> Dict[str, Any]:
+    async def research_search(self, session_id: str) -> dict[str, Any]:
         """研究搜索"""
-        return await self._call_tool(
-            "deep_research.search",
-            {"session_id": session_id}
-        )
+        return await self._call_tool("deep_research.search", {"session_id": session_id})
 
-    async def research_analyze(self, session_id: str) -> Dict[str, Any]:
+    async def research_analyze(self, session_id: str) -> dict[str, Any]:
         """研究分析"""
-        return await self._call_tool(
-            "deep_research.analyze",
-            {"session_id": session_id}
-        )
+        return await self._call_tool("deep_research.analyze", {"session_id": session_id})
 
-    async def research_write(self, session_id: str) -> Dict[str, Any]:
+    async def research_write(self, session_id: str) -> dict[str, Any]:
         """研究报告撰写"""
-        return await self._call_tool(
-            "deep_research.write",
-            {"session_id": session_id}
-        )
+        return await self._call_tool("deep_research.write", {"session_id": session_id})
 
     # ========== 状态检查 ==========
 

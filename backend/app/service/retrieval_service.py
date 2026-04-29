@@ -9,17 +9,18 @@
 2. retrieve_from_knowledge_base - 从知识库检索内容
 """
 
-from typing import List, Dict, Any, Optional
-from app.service.milvus_service import get_milvus_service
+from typing import Any
+
 from app.service.embedding_service import generate_embedding
+from app.service.milvus_service import get_milvus_service
 
 
 def retrieve_content(
     indexNames: str,
     question: str,
     top_k: int = 5,
-    kb_id: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+    kb_id: str | None = None,
+) -> list[dict[str, Any]]:
     """
     检索相关内容
 
@@ -67,6 +68,7 @@ def retrieve_content(
     except Exception as e:
         print(f"检索错误: {str(e)}")
         import traceback
+
         traceback.print_exc()
         return []
 
@@ -75,7 +77,7 @@ def retrieve_from_knowledge_base(
     kb_name: str,
     question: str,
     top_k: int = 5,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     从知识库检索内容
 

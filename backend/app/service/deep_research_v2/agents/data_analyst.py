@@ -12,11 +12,10 @@ DeepResearch V2.0 - 数据分析师 Agent (DataAnalyst)
 """
 
 import uuid
-from typing import Dict, Any, List
-from datetime import datetime
+from typing import Any
 
+from ..state import ResearchPhase, ResearchState
 from .base import BaseAgent
-from ..state import ResearchState, ResearchPhase
 
 
 class DataAnalyst(BaseAgent):
@@ -244,13 +243,15 @@ class DataAnalyst(BaseAgent):
 }}
 ```"""
 
-    def __init__(self, llm_api_key: str, llm_base_url: str, model: str = "qwen-max", tool_adapter=None):
+    def __init__(
+        self, llm_api_key: str, llm_base_url: str, model: str = "qwen-max", tool_adapter=None
+    ):
         super().__init__(
             name="DataAnalyst",
             role="数据分析师",
             llm_api_key=llm_api_key,
             llm_base_url=llm_base_url,
-            model=model
+            model=model,
         )
         self.tool_adapter = tool_adapter  # MCP ToolAdapter（可选）
 
@@ -265,14 +266,18 @@ class DataAnalyst(BaseAgent):
         self.logger.info("Starting data analysis...")
 
         # 发送开始事件
-        self.add_message(state, "research_step", {
-            "step_id": f"step_analyze_{uuid.uuid4().hex[:8]}",
-            "step_type": "analyzing",
-            "title": "数据分析",
-            "subtitle": "生成可视化",
-            "status": "running",
-            "stats": {"results_count": 0, "charts_count": 0, "entities_count": 0}
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_id": f"step_analyze_{uuid.uuid4().hex[:8]}",
+                "step_type": "analyzing",
+                "title": "数据分析",
+                "subtitle": "生成可视化",
+                "status": "running",
+                "stats": {"results_count": 0, "charts_count": 0, "entities_count": 0},
+            },
+        )
 
         # 1. 提取结构化数据
         extracted_data = await self._extract_data(state)
@@ -287,63 +292,76 @@ class DataAnalyst(BaseAgent):
         if knowledge_graph:
             state["knowledge_graph"] = knowledge_graph
             # 发送知识图谱事件
-            self.add_message(state, "knowledge_graph", {
-                "graph": knowledge_graph,
-                "stats": {
-                    "entities_count": len(knowledge_graph.get("nodes", [])),
-                    "relations_count": len(knowledge_graph.get("edges", []))
-                }
-            })
+            self.add_message(
+                state,
+                "knowledge_graph",
+                {
+                    "graph": knowledge_graph,
+                    "stats": {
+                        "entities_count": len(knowledge_graph.get("nodes", [])),
+                        "relations_count": len(knowledge_graph.get("edges", [])),
+                    },
+                },
+            )
 
         if charts:
             state["charts"].extend(charts)
-            self.logger.info(f"[DataAnalyst] 生成了 {len(charts)} 个 ECharts 图表，准备发送 charts 事件")
+            self.logger.info(
+                f"[DataAnalyst] 生成了 {len(charts)} 个 ECharts 图表，准备发送 charts 事件"
+            )
             for i, chart in enumerate(charts):
-                self.logger.info(f"[DataAnalyst] 图表 {i+1}: id={chart.get('id')}, title={chart.get('title')}, has_echarts_option={bool(chart.get('echarts_option'))}")
+                self.logger.info(
+                    f"[DataAnalyst] 图表 {i + 1}: id={chart.get('id')}, title={chart.get('title')}, has_echarts_option={bool(chart.get('echarts_option'))}"
+                )
             # 发送图表事件
-            self.add_message(state, "charts", {
-                "charts": charts
-            })
-            self.logger.info(f"[DataAnalyst] ✅ charts 事件已发送")
+            self.add_message(state, "charts", {"charts": charts})
+            self.logger.info("[DataAnalyst] ✅ charts 事件已发送")
 
         # 发送完成事件
-        self.add_message(state, "research_step", {
-            "step_type": "analyzing",
-            "title": "数据分析",
-            "subtitle": "生成可视化",
-            "status": "completed",
-            "stats": {
-                "results_count": len(state.get("facts", [])),
-                "charts_count": len(charts) if charts else 0,
-                "entities_count": len(knowledge_graph.get("nodes", [])) if knowledge_graph else 0
-            }
-        })
+        self.add_message(
+            state,
+            "research_step",
+            {
+                "step_type": "analyzing",
+                "title": "数据分析",
+                "subtitle": "生成可视化",
+                "status": "completed",
+                "stats": {
+                    "results_count": len(state.get("facts", [])),
+                    "charts_count": len(charts) if charts else 0,
+                    "entities_count": len(knowledge_graph.get("nodes", []))
+                    if knowledge_graph
+                    else 0,
+                },
+            },
+        )
 
         return state
 
-    async def _extract_data(self, state: ResearchState) -> Dict[str, Any]:
+    async def _extract_data(self, state: ResearchState) -> dict[str, Any]:
         """从搜索结果中提取结构化数据"""
         self.logger.info("Extracting structured data...")
 
         # 收集搜索结果
         search_results_text = []
         for fact in state.get("facts", [])[:20]:
-            search_results_text.append(f"- {fact.get('content', '')} (来源: {fact.get('source_name', '未知')})")
+            search_results_text.append(
+                f"- {fact.get('content', '')} (来源: {fact.get('source_name', '未知')})"
+            )
 
         if not search_results_text:
             self.logger.info("No facts to extract data from")
             return {"data_points": [], "time_series": [], "distributions": [], "insights": []}
 
         prompt = self.DATA_EXTRACTION_PROMPT.format(
-            query=state["query"],
-            search_results="\n".join(search_results_text)
+            query=state["query"], search_results="\n".join(search_results_text)
         )
 
         response = await self.call_llm(
             system_prompt="你是专业的数据分析师，擅长从文本中提取结构化数据。请输出JSON格式。",
             user_prompt=prompt,
             json_mode=True,
-            temperature=0.2
+            temperature=0.2,
         )
 
         result = self.parse_json_response(response)
@@ -357,11 +375,13 @@ class DataAnalyst(BaseAgent):
         if result.get("insights"):
             state["insights"].extend(result["insights"])
 
-        self.logger.info(f"Extracted {len(result.get('data_points', []))} data points, {len(result.get('time_series', []))} time series")
+        self.logger.info(
+            f"Extracted {len(result.get('data_points', []))} data points, {len(result.get('time_series', []))} time series"
+        )
 
         return result
 
-    async def _build_knowledge_graph(self, state: ResearchState) -> Dict[str, Any]:
+    async def _build_knowledge_graph(self, state: ResearchState) -> dict[str, Any]:
         """构建知识图谱"""
         self.logger.info("Building knowledge graph...")
 
@@ -375,15 +395,14 @@ class DataAnalyst(BaseAgent):
             return {"nodes": [], "edges": []}
 
         prompt = self.KNOWLEDGE_GRAPH_PROMPT.format(
-            query=state["query"],
-            content="\n".join(content_parts)
+            query=state["query"], content="\n".join(content_parts)
         )
 
         response = await self.call_llm(
             system_prompt="你是知识图谱专家，擅长从文本中提取实体和关系。请输出JSON格式。",
             user_prompt=prompt,
             json_mode=True,
-            temperature=0.2
+            temperature=0.2,
         )
 
         result = self.parse_json_response(response)
@@ -394,11 +413,15 @@ class DataAnalyst(BaseAgent):
                 importance = node.get("importance", 5)
                 node["size"] = 20 + importance * 3  # 20-50 range
 
-        self.logger.info(f"Built knowledge graph with {len(result.get('nodes', []))} nodes, {len(result.get('edges', []))} edges")
+        self.logger.info(
+            f"Built knowledge graph with {len(result.get('nodes', []))} nodes, {len(result.get('edges', []))} edges"
+        )
 
         return result
 
-    async def _generate_charts(self, state: ResearchState, extracted_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _generate_charts(
+        self, state: ResearchState, extracted_data: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """生成可视化图表"""
         self.logger.info("[DataAnalyst] ========== 开始生成 ECharts 可视化图表 ==========")
 
@@ -407,30 +430,33 @@ class DataAnalyst(BaseAgent):
             "data_points": extracted_data.get("data_points", []),
             "time_series": extracted_data.get("time_series", []),
             "distributions": extracted_data.get("distributions", []),
-            "existing_data_points": state.get("data_points", [])[:10]
+            "existing_data_points": state.get("data_points", [])[:10],
         }
 
         # 如果没有足够数据，跳过
-        total_data = (len(data_for_charts["data_points"]) +
-                     len(data_for_charts["time_series"]) +
-                     len(data_for_charts["distributions"]))
+        total_data = (
+            len(data_for_charts["data_points"])
+            + len(data_for_charts["time_series"])
+            + len(data_for_charts["distributions"])
+        )
 
-        self.logger.info(f"[DataAnalyst] 图表数据统计: data_points={len(data_for_charts['data_points'])}, time_series={len(data_for_charts['time_series'])}, distributions={len(data_for_charts['distributions'])}, total={total_data}")
+        self.logger.info(
+            f"[DataAnalyst] 图表数据统计: data_points={len(data_for_charts['data_points'])}, time_series={len(data_for_charts['time_series'])}, distributions={len(data_for_charts['distributions'])}, total={total_data}"
+        )
 
         if total_data == 0:
             self.logger.warning("[DataAnalyst] ⚠️ 没有足够数据生成图表，跳过")
             return []
 
         prompt = self.CHART_GENERATION_PROMPT.format(
-            query=state["query"],
-            data=str(data_for_charts)
+            query=state["query"], data=str(data_for_charts)
         )
 
         response = await self.call_llm(
             system_prompt="你是数据可视化专家，擅长生成ECharts图表配置。请输出JSON格式。",
             user_prompt=prompt,
             json_mode=True,
-            temperature=0.3
+            temperature=0.3,
         )
 
         result = self.parse_json_response(response)
@@ -445,13 +471,14 @@ class DataAnalyst(BaseAgent):
 
         return charts
 
-    async def analyze_for_section(self, state: ResearchState, section_title: str) -> Dict[str, Any]:
+    async def analyze_for_section(self, state: ResearchState, section_title: str) -> dict[str, Any]:
         """为特定章节分析数据（可被其他Agent调用）"""
         self.logger.info(f"Analyzing data for section: {section_title}")
 
         # 收集与该章节相关的事实
-        related_facts = [f for f in state.get("facts", [])
-                        if section_title in str(f.get("related_sections", []))]
+        related_facts = [
+            f for f in state.get("facts", []) if section_title in str(f.get("related_sections", []))
+        ]
 
         if not related_facts:
             related_facts = state.get("facts", [])[:10]
@@ -476,7 +503,7 @@ class DataAnalyst(BaseAgent):
             system_prompt="你是数据分析师，提取关键数据。",
             user_prompt=prompt,
             json_mode=True,
-            temperature=0.2
+            temperature=0.2,
         )
 
         return self.parse_json_response(response)
