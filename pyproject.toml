@@ -151,31 +151,29 @@ exclude = [
     "__pycache__",
 ]
 
-# Strict tier — once these dirs exist (Plan B/C/D + v0 spec), they MUST be 100% typed.
-# Currently empty, so mypy skips; activated as code is added.
+# Strict tier — these dirs don't exist yet; will be populated by v0 spec.
+# Once they exist, they MUST be 100% typed; mypy skips empty namespaces today.
+# Override only adds disallow_untyped_defs delta; strict_optional inherited from global.
 # Note: module names rooted at `app.*` (not `backend.app.*`) because there is no
 # `backend/__init__.py`; mypy's source root is `backend/` so the package is `app`.
 [[tool.mypy.overrides]]
 module = "app.services.*"
 disallow_untyped_defs = true
-strict_optional = true
 
 [[tool.mypy.overrides]]
 module = "app.agents.*"
 disallow_untyped_defs = true
-strict_optional = true
 
 [[tool.mypy.overrides]]
 module = "app.tools.*"
 disallow_untyped_defs = true
-strict_optional = true
 
 [[tool.mypy.overrides]]
 module = "app.orchestration.*"
 disallow_untyped_defs = true
-strict_optional = true
 
-# Legacy code we will delete in v0 — silence mypy.
+# Legacy code scheduled for deletion in v0
+# (see spec §11 现有文件去向 + 附录 B in docs/superpowers/specs/2026-04-29-dev-test-loop-design.md).
 [[tool.mypy.overrides]]
 module = [
     "app.service.*",       # old service dir (note: singular)
@@ -191,16 +189,17 @@ ignore_errors = true
 module = "app.data.tushare_client"
 ignore_errors = true
 
-# Routers and models: SQLAlchemy `Column[X] vs X` and FastAPI `UploadFile.filename: str | None`
-# issues — systemic mypy/SQLAlchemy interop gaps. Proper fix requires the SQLAlchemy
-# mypy plugin (or a migration to typed ORM 2.0 mapped_column). Out of v0 typing scope;
-# v0 main path lives under app.{services,agents,tools,orchestration} (strict tier above).
-# chat_router will be rewritten in v0 anyway; other routers stay as preserved HTTP surface.
+# SQLAlchemy ORM models — Column[X] vs X interop. Fix requires SA 2.0
+# mapped_column migration or the SQLAlchemy mypy plugin. Out of v0 typing scope.
 [[tool.mypy.overrides]]
-module = [
-    "app.router.*",
-    "app.models.*",
-]
+module = "app.models.*"
+ignore_errors = true
+
+# FastAPI routers — UploadFile.filename: str | None and Depends signature gaps.
+# chat_router rewritten in v0 spec; other routers preserved as HTTP surface
+# and will get types as part of v0 router-typing pass.
+[[tool.mypy.overrides]]
+module = "app.router.*"
 ignore_errors = true
 
 # Legacy top-level test scripts scheduled for deletion in Plan A Task 6
