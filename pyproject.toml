@@ -1,0 +1,77 @@
+[project]
+name = "financial-research-assistant"
+version = "0.1.0"
+description = "Financial Research Investment Assistant — LLM application portfolio project"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # Web Framework
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "python-dotenv>=1.0",
+    # Database
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    # Authentication
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
+    "pydantic[email]>=2.7",
+    # AI/LLM
+    "openai>=1.40",
+    "tiktoken>=0.7",
+    "langgraph>=0.2",
+    # Vector DB (kept for KB; v0 main path doesn't use it)
+    "pymilvus>=2.4",
+    # NLP
+    "nltk>=3.8",
+    "jieba>=0.42",
+    # HTTP
+    "httpx>=0.27",
+    "aiohttp>=3.10",
+    "requests>=2.32",
+    # Document parsing
+    "beautifulsoup4>=4.12",
+    "trafilatura>=1.10",
+    "lxml>=5.2",
+    "pypdf2>=3.0",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "markdown>=3.6",
+    # Data
+    "numpy>=1.26",
+    "pandas>=2.2",
+    # Visualization
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+    # Utils
+    "pyyaml>=6.0",
+    "python-dateutil>=2.9",
+    # MCP
+    "mcp>=1.0",
+    # Stock data
+    "tushare>=1.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-recording>=0.13",
+    "pytest-cov>=5.0",
+    "poethepoet>=0.27",
+    "pip-audit>=2.7",
+    "pre-commit>=3.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
+
+[tool.uv]
+managed = true
