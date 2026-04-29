@@ -14,3 +14,9 @@ repos:
         language: system
         stages: [commit-msg]
         always_run: true
+      - id: check-cassette-sanitize
+        name: Check that cassettes contain no live credentials
+        entry: uv run python scripts/check_cassette_sanitize.py
+        language: system
+        files: ^backend/tests/fixtures/cassettes/.*\.ya?ml$
+        pass_filenames: true
