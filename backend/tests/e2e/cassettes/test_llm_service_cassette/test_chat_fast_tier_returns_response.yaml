@@ -1,0 +1,72 @@
+interactions:
+- request:
+    body: '{"messages":[{"role":"user","content":"Say hi in one word."}],"model":"deepseek-v4-flash","max_tokens":64}'
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '106'
+      Content-Type:
+      - application/json
+      Host:
+      - dashscope.aliyuncs.com
+      User-Agent:
+      - OpenAI/Python 2.33.0
+      X-Stainless-Arch:
+      - arm64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.33.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  response:
+    body:
+      string: '{"choices":[{"message":{"content":"Hi","reasoning_content":"We need
+        to respond with a single word greeting. \"Hi\" itself is one word, but the
+        instruction says \"Say hi in one word.\" So the answer should be \"Hi\".","role":"assistant"},"finish_reason":"stop","index":0,"logprobs":null}],"object":"chat.completion","usage":{"prompt_tokens":10,"completion_tokens":40,"total_tokens":50,"completion_tokens_details":{"reasoning_tokens":37},"prompt_tokens_details":{"cached_tokens":0}},"created":1777489306,"system_fingerprint":null,"model":"deepseek-v4-flash","id":"chatcmpl-1ffcb5db-d24b-9821-92e2-475b566d652c"}'
+    headers:
+      content-length:
+      - '609'
+      content-type:
+      - application/json
+      date:
+      - Wed, 29 Apr 2026 19:01:46 GMT
+      req-arrive-time:
+      - '1777489305554'
+      req-cost-time:
+      - '565'
+      resp-start-time:
+      - '1777489306119'
+      server:
+      - istio-envoy
+      transfer-encoding:
+      - chunked
+      vary:
+      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      x-dashscope-call-gateway:
+      - 'true'
+      x-envoy-upstream-service-time:
+      - '565'
+      x-request-id:
+      - 1ffcb5db-d24b-9821-92e2-475b566d652c
+    status:
+      code: 200
+      message: OK
+version: 1
