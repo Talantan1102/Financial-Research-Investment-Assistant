@@ -417,7 +417,7 @@ class ChartGenerator:
 
         if isinstance(data, list):
             for item in data:
-                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                if isinstance(item, list | tuple) and len(item) >= 2:
                     scatter_data.append([item[0], item[1]])
                 elif isinstance(item, dict):
                     x = item.get("x", item.get("value", 0))

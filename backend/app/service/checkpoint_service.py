@@ -342,7 +342,7 @@ class CheckpointService:
                 clean[key] = value
             except (TypeError, ValueError):
                 # 跳过不可序列化的值，或转换为字符串
-                if isinstance(value, (list, tuple)):
+                if isinstance(value, list | tuple):
                     clean[key] = [str(v) for v in value]
                 elif isinstance(value, dict):
                     clean[key] = self._clean_state_for_storage(value)
