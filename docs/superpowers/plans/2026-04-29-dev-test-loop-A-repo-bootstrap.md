@@ -185,6 +185,8 @@ EOF
 
 - [ ] **Step 1: Add ruff config to `pyproject.toml`**
 
+**Note (revised during execution):** The original plan listed 4 ignored rules. During implementation, 4 additional rules were added with rationale (E402, N815, B904, B905) and 2 rules (E722, F841) were scoped to per-file-ignores instead of global. See commit `46ef108`.
+
 Append the following to `pyproject.toml`:
 
 ```toml
@@ -196,6 +198,27 @@ extend-exclude = [
     ".venv",
     "venv",
     "__pycache__",
+    # Legacy services scheduled for deletion in v0 — excluded from lint until removed.
+    # See spec 附录 B (deletion list) in docs/superpowers/specs/2026-04-29-dev-test-loop-design.md.
+    "backend/app/service/chat_service*.py",
+    "backend/app/service/mcp_chat_service.py",
+    "backend/app/service/react_controller.py",
+    "backend/app/service/smart_analyzer.py",
+    "backend/app/service/dr_g.py",
+    "backend/app/service/bidding_service.py",
+    "backend/app/service/database_explorer.py",
+    "backend/app/service/text2sql_service.py",
+    "backend/app/service/deep_research_v2/",
+    "backend/app/service/docmind_service.py",
+    "backend/app/service/news_collection_service.py",
+    # Legacy test files scheduled for deletion (replaced by tests/{unit,integration,e2e,eval}/)
+    "backend/test_mock_tushare.py",
+    "backend/test_mock_integration.py",
+    "backend/test_mock_extended.py",
+    "backend/app/mcp_server/tests/test_mcp_server.py",
+    "backend/tests/integration/test_mcp_meta_tools.py",
+    "backend/tests/integration/test_mcp_resource_tool_arch.py",
+    "backend/tests/e2e/test_e2e_chat.py",
 ]
 
 [tool.ruff.lint]
@@ -209,10 +232,23 @@ ignore = [
     "B008",  # function-call-in-default-argument (FastAPI Depends idiom)
     "N803",  # function args lowercase (we have ts_code, etc.)
     "N806",  # variable in function should be lowercase (we have DataFrames)
+    # v0 baseline — legitimate project-wide patterns
+    "E402",  # module-level import not at top (app_main loads .env before imports)
+    "N815",  # mixed-case attrs (Tushare API field names use camelCase)
+    "B904",  # raise-from in except (cleanup pass scheduled post-v0)
+    "B905",  # zip-without-explicit-strict (re-enable after py311 sweep)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "backend/tests/**/*.py" = ["B011"]  # assert in tests is fine
+# E722/F841 in active code, scoped per-file with TODO markers for v0 cleanup
+"backend/app/data/tushare_client.py" = ["E722", "F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"benchmark/validate_tools.py" = ["E722"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/mcp_server/control_flow/engine.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/mcp_server/skills/base.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/mcp_server/skills/data_analysis.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/mcp_server/skills/deep_research.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+"backend/app/router/chat_router.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
 ```
 
 - [ ] **Step 2: Run format pass on entire codebase**
