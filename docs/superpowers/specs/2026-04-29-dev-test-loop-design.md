@@ -619,6 +619,8 @@ backend/
 
 ## 12. 决策十一:本地 DX / Task runner
 
+> **Note(I-1 修订, 2026-04-30)**: `backend/` 不是 Python package(无 `__init__.py`),uvicorn / mypy / pytest 都把 `backend/` 当作 source root,模块名实际是 `app.*`(不是 `backend.app.*`)。下面所有 `backend.app.*` 引用应解读为 `app.*` + `--app-dir backend`(为 uvicorn)或 `files = ["backend/app"]`(为 mypy)。最终采用的是后者形态:不引入 `backend/__init__.py`(避免重命名 100+ 文件),保持 `backend/` 作为非-package source root,并在所有工具的配置里显式声明 source root。
+
 ### ① 问题陈述
 开发常用命令(启服务 / 跑测试 / 看 trace / 跑 eval / lint)散在 README 和各种脚本里。需要 one-stop task runner。
 
