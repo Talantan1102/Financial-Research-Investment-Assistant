@@ -60,8 +60,6 @@ interactions:
       - chunked
       vary:
       - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
-      x-dashscope-call-gateway:
-      - 'true'
       x-envoy-upstream-service-time:
       - '565'
       x-request-id:

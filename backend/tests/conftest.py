@@ -39,6 +39,20 @@ def mock_llm_client() -> MockLLMClient:
     return MockLLMClient.from_fixture_dir(FIXTURES_DIR / "llm_mocks")
 
 
+@pytest.fixture
+def vcr_cassette_dir(request: pytest.FixtureRequest) -> str:
+    """L2 fixture — tells pytest-recording where to store/find cassettes.
+
+    Cassettes live at backend/tests/fixtures/cassettes/<module-stem>/
+    so the Task-7 sanitize pre-commit hook (regex ^backend/tests/fixtures/cassettes/)
+    actually covers every cassette recorded in this project.
+    """
+    module_stem = request.module.__name__.rsplit(".", 1)[-1]
+    cassette_dir = FIXTURES_DIR / "cassettes" / module_stem
+    cassette_dir.mkdir(parents=True, exist_ok=True)
+    return str(cassette_dir)
+
+
 @pytest.fixture(scope="module")
 def vcr_config() -> dict[str, object]:
     """L2 fixture — pytest-recording config. Sanitizes auth headers, matches
