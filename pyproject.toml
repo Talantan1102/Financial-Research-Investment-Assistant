@@ -127,11 +127,11 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "backend/tests/**/*.py" = ["B011"]  # assert in tests is fine
-# E722/F841 in active code, scoped per-file with TODO markers for v0 cleanup
-"backend/app/data/tushare_client.py" = ["E722", "F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
-"benchmark/validate_tools.py" = ["E722"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
-"backend/app/mcp_server/control_flow/engine.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
-"backend/app/mcp_server/skills/base.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
-"backend/app/mcp_server/skills/data_analysis.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
-"backend/app/mcp_server/skills/deep_research.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
-"backend/app/router/chat_router.py" = ["F841"]  # TODO(v0): refactor when this file is touched in v0 chat-path implementation
+# E722/F841 in active code, scoped per-file with TODO markers tracing each entry to its v0 disposition
+"backend/app/data/tushare_client.py" = ["E722", "F841"]  # TODO(v0): fix during data-adapter refactor in v0 spec
+"benchmark/validate_tools.py" = ["E722"]  # TODO(v0): file moves to docs/archive/benchmark-pre-v0/ in Plan A Task 7 — drop this entry afterward
+"backend/app/mcp_server/control_flow/engine.py" = ["F841"]  # TODO(v0): file deleted in v0 spec (mcp_server replaced by orchestration/) — drop this entry then
+"backend/app/mcp_server/skills/base.py" = ["F841"]  # TODO(v0): file deleted in v0 spec (skills/ replaced by tools/) — drop this entry then
+"backend/app/mcp_server/skills/data_analysis.py" = ["F841"]  # TODO(v1): file migrated to tools/ in v1 工具迁移 spec — drop this entry then
+"backend/app/mcp_server/skills/deep_research.py" = ["F841"]  # TODO(v0): file deleted in v0 spec (deep_research → ResearchPlanner agent) — drop this entry then
+"backend/app/router/chat_router.py" = ["F841"]  # TODO(v0): rewritten in v0 spec (HTTP contract preserved, internals new) — drop this entry then
