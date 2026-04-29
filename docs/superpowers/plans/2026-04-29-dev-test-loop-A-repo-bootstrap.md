@@ -1511,4 +1511,42 @@ of the [dev-test-loop spec](docs/superpowers/specs/2026-04-29-dev-test-loop-desi
 
 ## Retrospective
 
-(To be filled in after Plan A is fully merged to `main`.)
+**Implementation completion date**: 2026-04-30
+**Branch**: `feat/dev-test-loop-A` (PR #2, merge commit `9558745`)
+**Total commits**: 20 (11 task commits + 7 review-iter fix commits + 2 polish commits)
+**Total time**: ~5 hours (within 4-6h estimate)
+
+### 对的设计(3 条)
+
+1. **任务粒度 11 个 task / 62 step** — 每个 task 一个 commit 边界,subagent 派出去能干净 review。10-15 task 是个人 portfolio 项目最舒服的颗粒度。
+2. **`原因 layer:` enforcement 从 Task 8 立刻投入使用** — Task 9 一装上 hook 后,所有后续 fix commit(包括 Plan A 内的 5 个 lint fix)都自动 self-validate,验证了机制可用。这套约定将延续到 Plan B/C/D。
+3. **`pyproject.toml` 单一来源** — 5 个工具(uv / ruff / mypy / pytest / poe)的配置全在一个文件,新人/未来自己看一眼就懂工具链全貌。这是 portfolio 上的清晰故事点。
+
+### 错的设计 / plan 漏了什么(3 条)
+
+1. **Plan 里 `[tool.ruff.lint] ignore` 列表过细(只写 4 条)**,实施发现 active code 有 137 个 lint 错误需要处理。结果 Task 2 走了 5 commit 来回(原始 + 2 spec compliance fix + 2 plan sync)。**Lesson**: plan 应该写"intent + 约束",不要写最终列表 — 让实施过程发现具体内容,然后 sync plan 回来。
+2. **Plan 里 conftest 用 `pytest_configure` hook 设 LLM_MODE 是错的**(全局 hook,session 级,后加载的覆盖前面)。Task 6 实施才发现,改用 autouse fixture + monkeypatch.setenv 才对。**Lesson**: 涉及 pytest 多 layer 协同的设计,plan 阶段应该跑一个最小验证 spike。
+3. **`backend/__init__.py` 缺失导致 `app.*` vs `backend.app.*` 命名不一致(I-1)**,横跨 Tasks 1/3/5 多次浮上来,最终 spec § 12 加 note 解决(option b)而非 100+ 文件重命名(option a)。**Lesson**: 包结构问题应该 spec 阶段就明确,不要模糊带过。
+
+### 下个 spec / plan 要避免(3 条)
+
+1. **Plan B/C/D 写的时候**,工具版本 / 库 list / config 内容不要过细,只写**意图 + 约束 + 验证标准**,具体用什么版本由实施时决定 + sync plan 回来。
+2. **涉及 pytest / asyncio / 多层运行**的设计,plan 评审时跑一个 30 秒的 spike(用最小 example 跑通),避免 mechanism-not-working 的 plan deviation。
+3. **跨 task 共享的"包结构 / 命名 / 路径"决策**,spec 阶段必须明确写 note,不要靠 plan 推断。
+
+### 沉淀到 memory
+
+- [feedback_plan_specificity.md](.claude/projects/-Users-talantan--openclaw-workspace-main-financial-research-assistant/memory/feedback_plan_specificity.md) — Plan 写"意图 + 约束",不写最终配置内容
+- [feedback_pytest_layer_env.md](.claude/projects/-Users-talantan--openclaw-workspace-main-financial-research-assistant/memory/feedback_pytest_layer_env.md) — pytest 多 layer 设 env var 必须用 autouse fixture + monkeypatch,不能用 pytest_configure hook
+- [project_python_package_layout.md](.claude/projects/-Users-talantan--openclaw-workspace-main-financial-research-assistant/memory/project_python_package_layout.md) — `backend/` 是非 package source root,模块名是 `app.*`(不是 `backend.app.*`);uvicorn / mypy / pytest 各自需要 source root 声明
+
+### Subagent-driven-development 节奏复盘
+
+- 总 subagent 调用:~30 次(11 implementer + 多次 spec/quality reviewer + polish iter)
+- Spec compliance review 抓到 Critical 1 次(Task 2 ignore 扩展)、Important 多次(I-1 / I-2 / TODO 标注)
+- Code quality review 都是 APPROVE WITH FOLLOWUP,follow-up 都 inline 修了
+- 主对话上下文消耗:中等偏高;后续 Plan B/C/D 要继续优化(可以更大胆地 inline review trivial config tasks,只对 logic-heavy task 全 dispatch)
+
+### Plan B 启动条件已就绪
+
+Plan A 把 ruff / mypy / pytest / poe / pre-commit / 测试目录 / WORKING_AGREEMENT / commit-msg validator 全立起,Plan B(LLM Test Infrastructure)可以直接在这个基础上做 mock client + cassette + LLMService stub。
