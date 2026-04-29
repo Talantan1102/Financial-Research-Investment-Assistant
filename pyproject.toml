@@ -135,3 +135,80 @@ ignore = [
 "backend/app/mcp_server/skills/data_analysis.py" = ["F841"]  # TODO(v1): file migrated to tools/ in v1 工具迁移 spec — drop this entry then
 "backend/app/mcp_server/skills/deep_research.py" = ["F841"]  # TODO(v0): file deleted in v0 spec (deep_research → ResearchPlanner agent) — drop this entry then
 "backend/app/router/chat_router.py" = ["F841"]  # TODO(v0): rewritten in v0 spec (HTTP contract preserved, internals new) — drop this entry then
+
+[tool.mypy]
+python_version = "3.11"
+strict_optional = true
+disallow_untyped_defs = false  # lenient for legacy code; tighten per directory below
+warn_unused_ignores = true
+warn_redundant_casts = true
+ignore_missing_imports = true  # 3rd-party stubs missing OK for now
+files = ["backend/app", "backend/tests"]
+exclude = [
+    "docs/archive",
+    "venv",
+    ".venv",
+    "__pycache__",
+]
+
+# Strict tier — once these dirs exist (Plan B/C/D + v0 spec), they MUST be 100% typed.
+# Currently empty, so mypy skips; activated as code is added.
+# Note: module names rooted at `app.*` (not `backend.app.*`) because there is no
+# `backend/__init__.py`; mypy's source root is `backend/` so the package is `app`.
+[[tool.mypy.overrides]]
+module = "app.services.*"
+disallow_untyped_defs = true
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = "app.agents.*"
+disallow_untyped_defs = true
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = "app.tools.*"
+disallow_untyped_defs = true
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = "app.orchestration.*"
+disallow_untyped_defs = true
+strict_optional = true
+
+# Legacy code we will delete in v0 — silence mypy.
+[[tool.mypy.overrides]]
+module = [
+    "app.service.*",       # old service dir (note: singular)
+    "app.mcp_server.*",
+    "app.mcp_client.*",
+]
+ignore_errors = true
+
+# tushare_client is on the v0 refactor list (see ruff per-file-ignores TODO);
+# 95 type errors today, all PEP 484 implicit-Optional and stub-coverage gaps.
+# Type fix is part of the v0 data-adapter refactor, not v0 typing scope.
+[[tool.mypy.overrides]]
+module = "app.data.tushare_client"
+ignore_errors = true
+
+# Routers and models: SQLAlchemy `Column[X] vs X` and FastAPI `UploadFile.filename: str | None`
+# issues — systemic mypy/SQLAlchemy interop gaps. Proper fix requires the SQLAlchemy
+# mypy plugin (or a migration to typed ORM 2.0 mapped_column). Out of v0 typing scope;
+# v0 main path lives under app.{services,agents,tools,orchestration} (strict tier above).
+# chat_router will be rewritten in v0 anyway; other routers stay as preserved HTTP surface.
+[[tool.mypy.overrides]]
+module = [
+    "app.router.*",
+    "app.models.*",
+]
+ignore_errors = true
+
+# Legacy top-level test scripts scheduled for deletion in Plan A Task 6
+# (already in ruff per-file-ignores as such).
+[[tool.mypy.overrides]]
+module = [
+    "test_mock_tushare",
+    "test_mock_integration",
+    "test_mock_extended",
+]
+ignore_errors = true
