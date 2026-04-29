@@ -37,65 +37,64 @@ MCPChatService（三轮编排）
 | 后端 | FastAPI | 异步 API 框架 |
 | 前端 | React + Vite | 现代化前端 |
 
-## 快速开始
+## Development
 
-### 环境要求
+### Prerequisites
 
-- Python 3.10+
-- Node.js 18+
-- Docker 20.0+（可选，用于运行基础服务）
+- Python 3.11 (via conda env `deepresearch` or system Python)
+- [uv](https://docs.astral.sh/uv/) for dependency management:
 
-### 1. 克隆仓库
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+
+### Setup
 
 ```bash
-git clone <repository-url>
+git clone <repo>
 cd financial-research-assistant
+conda activate deepresearch  # optional; provides Python 3.11
+uv sync --all-extras         # install all deps (incl. dev)
+uv run pre-commit install --install-hooks
+uv run pre-commit install --hook-type commit-msg
+cp backend/.env.example backend/.env  # then edit DASHSCOPE_API_KEY etc.
 ```
 
-### 2. 配置环境变量
+### Common commands
 
-```bash
-cd backend
-cp .env.example .env
-```
+All managed by [poethepoet](https://github.com/nat-n/poethepoet):
 
-编辑 `.env` 文件，填入以下必需的 API Key：
+| Command | What it does |
+|---|---|
+| `uv run poe dev` | Start backend (FastAPI uvicorn, port 8000, hot reload) |
+| `uv run poe lint` | Run ruff format check + ruff check + mypy |
+| `uv run poe format` | Auto-format code with ruff |
+| `uv run poe test` | Run L0 + L1 + L2 tests (no slow / live API) |
+| `uv run poe test-all` | Run everything including L3 eval |
+| `uv run poe ci` | Local simulation of PR CI (lint + test) |
+| `uv run poe trace-view` | Open trace viewer (Plan C) |
+| `uv run poe eval` | Run golden set eval (Plan C) |
+| `uv run poe eval-validate` | Cross-judge sanity check (Plan C) |
 
-```bash
-# 阿里云百炼（必需）
-DASHSCOPE_API_KEY=your_dashscope_api_key
+### Test layers
 
-# Tushare（必需）
-TUSHARE_API_TOKEN=your_tushare_token
-TUSHARE_API_URL=https://api.tushare.pro  # 可选，自定义代理地址
-```
+| Layer | LLM mode | Speed | When |
+|---|---|---|---|
+| L0 unit (`backend/tests/unit/`) | none (no LLM call) | <5s | every save, every PR |
+| L1 integration (`backend/tests/integration/`) | mock (deterministic) | <30s | every PR |
+| L2 e2e (`backend/tests/e2e/`) | cassette (recorded) | <2min subset | PR (subset), nightly (full) |
+| L3 eval (`backend/tests/eval/`) | live (real API, costs ¥) | 5-15min | nightly + manual |
 
-### 3. 安装后端依赖
+### Working agreement
 
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+See [WORKING_AGREEMENT.md](WORKING_AGREEMENT.md) for fix-commit conventions,
+feedback SLAs, and spec retrospective requirements.
 
-### 4. 启动后端服务
+### Architecture & specs
 
-```bash
-python app/app_main.py
-```
-
-后端服务默认运行在 http://localhost:8000
-
-### 5. 安装前端依赖（可选）
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-前端默认运行在 http://localhost:5173
+- Specs: [`docs/superpowers/specs/`](docs/superpowers/specs/)
+- Plans: [`docs/superpowers/plans/`](docs/superpowers/plans/)
+- Project memory: `.claude/projects/-.../memory/` (persisted across Claude sessions)
 
 ## 使用示例
 
@@ -183,16 +182,6 @@ financial-research-assistant/
 | financial_analysis | 3 | 财报查询、财务指标、财务对比 |
 | risk_assessment | 3 | 风险指标计算、投资组合风险评估 |
 | deep_research | 7 | 研究规划、搜索、分析、撰写、评审 |
-
-## 运行测试
-
-```bash
-# 集成测试
-python -m pytest backend/tests/integration/ -v
-
-# 端到端测试
-python -m pytest backend/tests/e2e/ -v
-```
 
 ## 环境变量说明
 
