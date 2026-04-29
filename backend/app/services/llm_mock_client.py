@@ -138,9 +138,7 @@ class MockLLMClient:
 
         # 3. Regex pattern entries (first match wins, {group_1} interpolation)
         for compiled_pattern, template, base_completion in self._patterns:
-            m = compiled_pattern.fullmatch(prompt)
-            if m is None:
-                m = compiled_pattern.search(prompt)
+            m = compiled_pattern.search(prompt)
             if m is not None:
                 try:
                     interpolated = template.format(group_1=m.group(1))

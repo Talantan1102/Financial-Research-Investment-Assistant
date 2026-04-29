@@ -5,7 +5,7 @@ entries:
       prompt_tokens: 15
       completion_tokens: 20
 
-  - pattern: ".*?(\\d{6}\\.(SH|SZ)).*"
+  - pattern: "(\\d{6}\\.(SH|SZ))"
     response:
       content: "The quote for {group_1} has been retrieved successfully."
       prompt_tokens: 18
