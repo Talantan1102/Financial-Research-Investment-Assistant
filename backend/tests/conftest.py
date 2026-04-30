@@ -73,7 +73,7 @@ def vcr_config() -> dict[str, object]:
 
 
 @pytest.fixture
-def tmp_eval_db(tmp_path: Path) -> Path:  # type: ignore[no-untyped-def]
+def tmp_eval_db(tmp_path: Path) -> Path:
     """L0/L1 fixture — fresh SQLite file per test, auto-cleaned by tmp_path.
 
     SQLite path modeling: every test that touches TraceService / EvalRecorder
