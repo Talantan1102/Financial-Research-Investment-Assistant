@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from pydantic import BaseModel
 
 from app.services.llm_service import ChatCompletionRaw
