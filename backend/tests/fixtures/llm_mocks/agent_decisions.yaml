@@ -1,4 +1,16 @@
 entries:
+  - pattern: "^SANITY_WRONG_"
+    response:
+      content: "你好,我是助手。"
+      prompt_tokens: 10
+      completion_tokens: 8
+
+  - pattern: "^你是金融研究助手的输出评审员[\\s\\S]*你好,我是助手"
+    response:
+      content: "__recorded__:judge_4dim_obvious_wrong"
+      prompt_tokens: 10
+      completion_tokens: 80
+
   - exact: "What is the price of 600519.SH?"
     response:
       content: "The current price of 600519.SH (Kweichow Moutai) is 1680.00 CNY."

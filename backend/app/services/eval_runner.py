@@ -68,3 +68,27 @@ class EvalRunner:
         spans = [trace.root_span, *trace.root_span_children]
         names = ", ".join(s.name for s in spans)
         return f"spans=[{names}] total_latency_ms={trace.total_latency_ms}"
+
+
+def compute_sanity_pass_rate(
+    labeled: list[tuple[EvalResult, str]],
+) -> tuple[float, list[str]]:
+    """Compute sanity-check pass rate from labeled eval results.
+
+    `labeled` is a list of (result, sanity_label) tuples where sanity_label
+    is "obvious_correct" or "obvious_wrong". Per spec § 8:
+    - obvious_correct must score factuality >= 8
+    - obvious_wrong must score factuality <= 3
+
+    Returns (pass_rate, failures) where failures is a list of human-readable
+    strings describing each failed case.
+    """
+    failures: list[str] = []
+    for result, label in labeled:
+        f = result.scores.factuality
+        if label == "obvious_correct" and f < 8:
+            failures.append(f"{result.case_id}: obvious_correct but factuality={f} (< 8)")
+        elif label == "obvious_wrong" and f > 3:
+            failures.append(f"{result.case_id}: obvious_wrong but factuality={f} (> 3)")
+    pass_rate = 1.0 - (len(failures) / len(labeled)) if labeled else 1.0
+    return pass_rate, failures

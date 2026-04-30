@@ -1,0 +1,8 @@
+{
+  "id": "judge_4dim_obvious_wrong",
+  "response": {
+    "content": "{\"factuality\": {\"score\": 1, \"evidence\": \"SUT response is completely off-topic and does not address the question\"}, \"tool_correctness\": {\"score\": null, \"evidence\": \"N/A — no tool calls\"}, \"coverage\": {\"score\": 1, \"evidence\": \"SUT response covers none of the expected content\"}, \"structure\": {\"score\": 3, \"evidence\": \"Response has minimal structure\"}}",
+    "prompt_tokens": 10,
+    "completion_tokens": 80
+  }
+}
