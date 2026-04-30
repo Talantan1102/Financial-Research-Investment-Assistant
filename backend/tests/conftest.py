@@ -70,3 +70,14 @@ def vcr_config() -> dict[str, object]:
         "record_mode": os.environ.get("VCR_RECORD_MODE", "none"),
         "match_on": ["method", "scheme", "host", "port", "path", "body"],
     }
+
+
+@pytest.fixture
+def tmp_eval_db(tmp_path: Path) -> Path:  # type: ignore[no-untyped-def]
+    """L0/L1 fixture — fresh SQLite file per test, auto-cleaned by tmp_path.
+
+    SQLite path modeling: every test that touches TraceService / EvalRecorder
+    must accept this fixture and pass it as db_path. Sharing a global db is
+    forbidden — Plan B's feedback_test_env_modeling lesson.
+    """
+    return tmp_path / "eval.sqlite"

@@ -50,3 +50,6 @@ USER_ACTION.md
 
 # Git worktrees (Plan B+ subagent-driven workflow)
 .worktrees/
+
+# Eval/trace local SQLite (regenerated from schema each run)
+backend/data/
