@@ -1,0 +1,153 @@
+interactions:
+- request:
+    body: "{\"messages\":[{\"role\":\"user\",\"content\":\"\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u4EE3\u7801\u662F\u4EC0\u4E48?\u7528\u4E00\u53E5\u8BDD\u56DE\u7B54\u3002\"}],\"model\":\"deepseek-v4-flash\",\"max_tokens\":300}"
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '146'
+      Content-Type:
+      - application/json
+      Host:
+      - dashscope.aliyuncs.com
+      User-Agent:
+      - OpenAI/Python 2.33.0
+      X-Stainless-Arch:
+      - arm64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.33.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  response:
+    body:
+      string: "{\"choices\":[{\"message\":{\"content\":\"\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u4EE3\u7801\u662F600519\uFF08\u4E0A\u6D77\u8BC1\u5238\u4EA4\u6613\u6240\uFF09\u3002\",\"reasoning_content\":\"\u6211\u4EEC\u8981\u6C42\u7528\u4E00\u53E5\u8BDD\u56DE\u7B54\uFF1A\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u4EE3\u7801\u662F\u4EC0\u4E48\uFF1F\u7B54\u6848\u662F\uFF1A\u8D35\u5DDE\u8305\u53F0\u5728A\u80A1\u4E0A\u5E02\u7684\u80A1\u7968\u4EE3\u7801\u662F600519\u3002\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"object\":\"chat.completion\",\"usage\":{\"prompt_tokens\":15,\"completion_tokens\":41,\"total_tokens\":56,\"completion_tokens_details\":{\"reasoning_tokens\":27},\"prompt_tokens_details\":{\"cached_tokens\":0}},\"created\":1777558018,\"system_fingerprint\":null,\"model\":\"deepseek-v4-flash\",\"id\":\"chatcmpl-d209d69f-76ec-9a78-911d-4f455b49bc3d\"}"
+    headers:
+      content-length:
+      - '654'
+      content-type:
+      - application/json
+      date:
+      - Thu, 30 Apr 2026 14:06:58 GMT
+      req-arrive-time:
+      - '1777558017354'
+      req-cost-time:
+      - '1068'
+      resp-start-time:
+      - '1777558018422'
+      server:
+      - istio-envoy
+      transfer-encoding:
+      - chunked
+      vary:
+      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      x-envoy-upstream-service-time:
+      - '1067'
+      x-request-id:
+      - d209d69f-76ec-9a78-911d-4f455b49bc3d
+    status:
+      code: 200
+      message: OK
+- request:
+    body: "{\"messages\":[{\"role\":\"user\",\"content\":\"\u4F60\u662F\u91D1\u878D\u7814\u7A76\u52A9\u624B\u7684\u8F93\u51FA\u8BC4\u5BA1\u5458\u3002\u7ED9\u5B9A:\\n-
+      \u7528\u6237\u8F93\u5165: \u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u4EE3\u7801\u662F\u4EC0\u4E48?\u7528\u4E00\u53E5\u8BDD\u56DE\u7B54\u3002\\n-
+      \u671F\u671B\u884C\u4E3A: {\\\"response_must_contain\\\": [\\\"600519\\\"]}\\n-
+      \u5B9E\u9645 trace: spans=[LLMService.chat] total_latency_ms=1304\\n- \u5B9E\u9645\u54CD\u5E94:
+      \u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u4EE3\u7801\u662F600519\uFF08\u4E0A\u6D77\u8BC1\u5238\u4EA4\u6613\u6240\uFF09\u3002\\n\\n\u6309\u4EE5\u4E0B
+      4 \u7EF4\u5EA6\u5404\u6253 0-10 \u5206,\u8F93\u51FA JSON\u3002\u5982\u679C\u67D0\u7EF4\u5EA6\u4E0D\u9002\u7528(\u4F8B\u5982
+      trace \u4E2D\u65E0 tool_calls,\\n\u5219 tool_correctness \u4E0D\u9002\u7528),\u5C06
+      score \u8BBE\u4E3A null,evidence \u5199 \\\"N/A \u2014 <\u539F\u56E0>\\\"\u3002\\n\\n{\\n
+      \ \\\"factuality\\\": {\\\"score\\\": 0-10, \\\"evidence\\\": \\\"1 \u53E5\u8BDD\\\"},\\n
+      \ \\\"tool_correctness\\\": {\\\"score\\\": 0-10 \u6216 null, \\\"evidence\\\":
+      \\\"1 \u53E5\u8BDD\\\"},\\n  \\\"coverage\\\": {\\\"score\\\": 0-10, \\\"evidence\\\":
+      \\\"1 \u53E5\u8BDD\\\"},\\n  \\\"structure\\\": {\\\"score\\\": 0-10, \\\"evidence\\\":
+      \\\"1 \u53E5\u8BDD\\\"}\\n}\\n\\n\u4EC5\u8F93\u51FA JSON,\u65E0\u5176\u4ED6\u6587\u5B57\u3002\\n\"}],\"model\":\"deepseek-v4-flash\",\"max_tokens\":300}"
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '944'
+      Content-Type:
+      - application/json
+      Host:
+      - dashscope.aliyuncs.com
+      User-Agent:
+      - OpenAI/Python 2.33.0
+      X-Stainless-Arch:
+      - arm64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.33.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  response:
+    body:
+      string: "{\"choices\":[{\"message\":{\"content\":\"{\\n  \\\"factuality\\\":
+        {\\\"score\\\": 10, \\\"evidence\\\": \\\"\u54CD\u5E94\u51C6\u786E\u7ED9\u51FA\u4E86\u8305\u53F0\u80A1\u7968\u4EE3\u7801600519\uFF0C\u4E8B\u5B9E\u6B63\u786E\u3002\\\"},\\n
+        \ \\\"tool_correctness\\\": {\\\"score\\\": null, \\\"evidence\\\": \\\"N/A
+        \u2014 \u65E0\u5DE5\u5177\u8C03\u7528\\\"},\\n  \\\"coverage\\\": {\\\"score\\\":
+        10, \\\"evidence\\\": \\\"\u54CD\u5E94\u4EE5\u4E00\u53E5\u8BDD\u5B8C\u6574\u56DE\u7B54\u4E86\u7528\u6237\u95EE\u9898\uFF0C\u5305\u542B\u6240\u9700\u4EE3\u7801\u3002\\\"},\\n
+        \ \\\"structure\\\": {\\\"score\\\": 10, \\\"evidence\\\": \\\"\u54CD\u5E94\u4E3A\u4E00\u53E5\u7B80\u6D01\u7684\u8BDD\uFF0C\u7B26\u5408\u7528\u6237\u8981\u6C42\u3002\\\"}\\n}\",\"reasoning_content\":\"\u6211\u4EEC\u6839\u636E\u7528\u6237\u8F93\u5165\u3001\u671F\u671B\u884C\u4E3A\u3001\u5B9E\u9645\u54CD\u5E94\u6765\u8BC4\u5206\u3002\\n\\n\u7528\u6237\u8F93\u5165\uFF1A\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u4EE3\u7801\u662F\u4EC0\u4E48\uFF1F\u7528\u4E00\u53E5\u8BDD\u56DE\u7B54\u3002\\n\u671F\u671B\u884C\u4E3A\uFF1Aresponse_must_contain
+        [\\\"600519\\\"]\u3002\\n\u5B9E\u9645\u54CD\u5E94\uFF1A\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u4EE3\u7801\u662F600519\uFF08\u4E0A\u6D77\u8BC1\u5238\u4EA4\u6613\u6240\uFF09\u3002\\n\\n\u68C0\u67E5\uFF1A\\nfactuality\uFF1A\u5B9E\u9645\u54CD\u5E94\u6B63\u786E\u5305\u542B600519\uFF0C\u4E14\u4E8B\u5B9E\u6B63\u786E\uFF08\u8305\u53F0\u786E\u5B9E\u4E0A\u4EA4\u6240\u4E0A\u5E02\uFF0C\u4EE3\u7801600519\uFF09\u3002\u6EE1\u520610\u5206\u3002\\ntool_correctness\uFF1Atrace\u4E2D\u53EA\u6709LLMService.chat\uFF0C\u6CA1\u6709tool_calls\uFF0C\u56E0\u6B64\u4E0D\u9002\u7528\u3002\u8BBE\u4E3Anull\uFF0Cevidence\u5199\\\"N/A
+        \u2014 \u65E0\u5DE5\u5177\u8C03\u7528\\\"\u3002\\ncoverage\uFF1A\u7528\u6237\u8981\u6C42\u4E00\u53E5\u8BDD\u56DE\u7B54\uFF0C\u5B9E\u9645\u54CD\u5E94\u662F\u4E00\u53E5\u8BDD\uFF0C\u5E76\u4E14\u5305\u542B\u4E86\u6240\u9700\u4FE1\u606F\u3002\u4F46\u7528\u6237\u53EA\u8981\u6C42\u4EE3\u7801\uFF0C\u54CD\u5E94\u8FD8\u52A0\u4E86\u62EC\u53F7\u8BF4\u660E\u4EA4\u6613\u6240\uFF0C\u4F46\u672A\u8D85\u51FA\u8303\u56F4\u3002\u8986\u76D6\u5EA6\u5F88\u597D\u3002\u7ED910\u5206\u3002\\nstructure\uFF1A\u54CD\u5E94\u662F\u4E00\u53E5\u8BDD\uFF0C\u7B26\u5408\u7528\u6237\u8981\u6C42\u3002\u7ED910\u5206\u3002\\n\\n\u8F93\u51FAJSON\u3002\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"object\":\"chat.completion\",\"usage\":{\"prompt_tokens\":246,\"completion_tokens\":292,\"total_tokens\":538,\"completion_tokens_details\":{\"reasoning_tokens\":183},\"prompt_tokens_details\":{\"cached_tokens\":0}},\"created\":1777558021,\"system_fingerprint\":null,\"model\":\"deepseek-v4-flash\",\"id\":\"chatcmpl-0044ebe4-8911-9741-bf94-e2c6e9558b4b\"}"
+    headers:
+      content-length:
+      - '1761'
+      content-type:
+      - application/json
+      date:
+      - Thu, 30 Apr 2026 14:07:01 GMT
+      req-arrive-time:
+      - '1777558018558'
+      req-cost-time:
+      - '2562'
+      resp-start-time:
+      - '1777558021120'
+      server:
+      - istio-envoy
+      transfer-encoding:
+      - chunked
+      vary:
+      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      x-envoy-upstream-service-time:
+      - '2562'
+      x-request-id:
+      - 0044ebe4-8911-9741-bf94-e2c6e9558b4b
+    status:
+      code: 200
+      message: OK
+version: 1
