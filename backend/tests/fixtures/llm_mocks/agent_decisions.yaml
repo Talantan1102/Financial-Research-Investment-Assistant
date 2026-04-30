@@ -5,6 +5,12 @@ entries:
       prompt_tokens: 15
       completion_tokens: 20
 
+  - pattern: "^你是金融研究助手的输出评审员"
+    response:
+      content: "__recorded__:judge_4dim_response"
+      prompt_tokens: 350
+      completion_tokens: 80
+
   - pattern: "(\\d{6}\\.(SH|SZ))"
     response:
       content: "The quote for {group_1} has been retrieved successfully."

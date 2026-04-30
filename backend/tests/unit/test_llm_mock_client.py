@@ -45,3 +45,17 @@ def test_token_counts_are_deterministic() -> None:
     r2 = client.chat(prompt="What is the price of 600519.SH?", model="m", schema=None)
     assert r1.prompt_tokens == r2.prompt_tokens
     assert r1.completion_tokens == r2.completion_tokens
+
+
+def test_pattern_match_with_recorded_redirect() -> None:
+    """A pattern entry whose response is `__recorded__:<id>` resolves
+    via the recorded-fixture index."""
+    client = MockLLMClient.from_fixture_dir(FIXTURES)
+    r = client.chat(
+        prompt="你是金融研究助手的输出评审员。请给一个示例。",
+        model="m",
+        schema=None,
+    )
+    # Recorded judge_4dim_response content is JSON; first chars are `{` or whitespace
+    assert "factuality" in r.content
+    assert "tool_correctness" in r.content
