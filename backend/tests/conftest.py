@@ -53,6 +53,20 @@ def vcr_cassette_dir(request: pytest.FixtureRequest) -> str:
     return str(cassette_dir)
 
 
+def _strip_dashscope_response_headers(response: dict) -> dict:
+    """Remove DashScope-specific response headers before recording.
+
+    Headers like ``x-dashscope-call-gateway`` contain the substring
+    ``dashscope-``, which the check_cassette_sanitize.py script flags as a
+    potential credential leak (the pattern is intentionally broad to catch
+    any ``sk-dashscope-…`` token). Strip them at recording time so cassettes
+    stay clean without loosening the sanitize rules.
+    """
+    headers = response.get("headers", {})
+    response["headers"] = {k: v for k, v in headers.items() if "dashscope" not in k.lower()}
+    return response
+
+
 @pytest.fixture(scope="module")
 def vcr_config() -> dict[str, object]:
     """L2 fixture — pytest-recording config. Sanitizes auth headers, matches
@@ -69,4 +83,16 @@ def vcr_config() -> dict[str, object]:
         "decode_compressed_response": True,
         "record_mode": os.environ.get("VCR_RECORD_MODE", "none"),
         "match_on": ["method", "scheme", "host", "port", "path", "body"],
+        "before_record_response": _strip_dashscope_response_headers,
     }
+
+
+@pytest.fixture
+def tmp_eval_db(tmp_path: Path) -> Path:
+    """L0/L1 fixture — fresh SQLite file per test, auto-cleaned by tmp_path.
+
+    SQLite path modeling: every test that touches TraceService / EvalRecorder
+    must accept this fixture and pass it as db_path. Sharing a global db is
+    forbidden — Plan B's feedback_test_env_modeling lesson.
+    """
+    return tmp_path / "eval.sqlite"

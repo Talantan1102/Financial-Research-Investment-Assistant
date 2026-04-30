@@ -24,6 +24,7 @@ class LLMResponse(BaseModel):
     cost_cny: float = Field(ge=0.0)
     latency_ms: int = Field(ge=0)
     cache_hit: bool = False
+    request_id: str | None = None
 
     @model_validator(mode="after")
     def _total_tokens_consistent(self) -> "LLMResponse":

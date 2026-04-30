@@ -144,6 +144,12 @@ class MockLLMClient:
                     interpolated = template.format(group_1=m.group(1))
                 except IndexError:
                     interpolated = template
+                # If the interpolated content is a recorded-fixture pointer,
+                # resolve it through the recorded-fixture index.
+                if interpolated.startswith("__recorded__:"):
+                    record_id = interpolated[len("__recorded__:") :]
+                    if record_id in self._recorded:
+                        return self._recorded[record_id]
                 return _RawCompletion(
                     content=interpolated,
                     prompt_tokens=base_completion.prompt_tokens,

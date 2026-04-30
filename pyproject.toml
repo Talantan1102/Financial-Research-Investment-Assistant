@@ -235,10 +235,15 @@ test-all     = "pytest backend/tests"
 # `backend/__init__.py` doesn't exist. To be unified before Plan A PR.
 dev          = "uvicorn app.app_main:app --reload --port 8000 --app-dir backend"
 
-# Stubbed — implemented in later plans
-trace-view    = "echo 'trace viewer comes in Plan C (eval-trace-infra). See spec §9.'"
-eval          = "echo 'eval runner comes in Plan C (eval-trace-infra). See spec §8.'"
-eval-validate = "echo 'eval validate comes in Plan C (eval-trace-infra). See spec §8.'"
+# Stubbed — implemented in Plan D
+trace-view    = "echo 'trace viewer comes in Plan D. See spec §9.'"
+
+# Plan C eval pipeline — runs L1 EvalRunner + sanity check (mock SUT + mock Judge).
+# Real-LLM eval runs via L2 cassette, already covered by `poe ci`.
+eval          = "pytest backend/tests/integration/test_eval_runner.py backend/tests/integration/test_sanity_check.py -v"
+eval-sanity   = "pytest backend/tests/integration/test_sanity_check.py -v"
+# Manual trigger: `poe eval-cross-judge -- --judge-a a.jsonl --judge-b b.jsonl`
+eval-cross-judge.shell = "uv run python scripts/cross_judge_check.py $@"
 
 # Plan B scaffolds for spec § 4 quantification; full impl in Plan C/D.
 # Today: just runs the L1 suite under LLM_MODE=mock to surface obvious determinism breaks.
