@@ -1392,25 +1392,76 @@ EOF
 
 ## Retrospective
 
-> Filled in by implementer at Task 12 step 3.
-
-**Implementation completion date**:
-**Branch**:
-**Total commits**:
-**Total time**:
+**Implementation completion date**: 2026-04-30
+**Branch**: `feat/dev-test-loop-D`(基于 main `f3deed8`)
+**Total commits**: 13(11 task commits + 2 fix commits)
+**Total time**: ~3 小时(跟 Plan B/C 持平)
 
 ### 对的设计(3 条)
 
+1. **`CostBudget` 用"先 assert,再 track"语义**。Task 4 实施时一度纠结:budget 究竟是"call 前 assert"还是"call 后 track 即 raise"。最终选了**call 前 assert prior over-limit + call 后 track**:即"破限的那一次成功返回(数据不丢),下一次 call 的 pre-flight 才 raise"。这个语义在 nightly 真跑时有用 —— 不会因为单 call 超限丢中间结果,但下一 call 立刻 fail-fast。**这是个 nuanced 设计选择,plan 写清楚后 implementer 一次过**。
+
+2. **`yaml` mypy override 一劳永逸解决 Plan B/C 反复出现的 unused-ignore**。Plan B/C 实施时各撞过一次"yaml import 的 type:ignore 多余/必要"的反复,因为不同 venv 的 mypy 推断不一致。Plan D 加 `[[tool.mypy.overrides]] module = "yaml"; ignore_missing_imports = true` 后,**inline `# type: ignore` 删干净,跨 venv 永久稳定**。这是从 Plan B/C 的 inline fix 升级到 plan-config-level 的根除。
+
+3. **Tasks 5+6+7 inline 一并 commit 节省 quota**。GH Actions YAML + secrets 文档纯 paste-from-plan,无 logic,inline 三件一并落地比派 3 个 implementer subagent 节省 ~3 次调用 + ~5 分钟。Plan A retrospective 提"trivial config tasks 可以 inline review",Plan D 直接 inline 实施(连 implementer subagent 都不派),效率最高。
+
 ### 错的设计 / plan 漏了什么(3 条)
+
+1. **Plan 没识别 `python -m backend.tests.eval.cassette_validation` 与 mypy/pytest 的模块名冲突**。Task 8 implementer 不得不在 `cassette_validation.py` 顶部加 `sys.path.insert(0, _BACKEND_DIR)`,Task 9 测试又因 `import backend.tests...` vs mypy 把 `backend/` 当 source-root 推断为 `tests.eval...` 而冲突,需要改用 `from tests.eval import cassette_validation as cv`。**双向兼容(从 project root 用 `python -m` 跑 + 从 backend/ source-root 跑 mypy/pytest)的脚本必须 plan 阶段就标注模块路径策略**。
+
+2. **Plan 让 implementer 在 `score_similarity` 测试中加 `# type: ignore[arg-type]`**(Task 9 inline 写时我也加了)。但 mypy 在 `LLMService(client=_FakeChat())` 的 ChatClient Protocol structural matching 下不报错,ignore 多余。**这是 Plan B/C 沉淀过的同型教训(`feedback_type_ignore_with_typed_signature`)第三次应用失败** — implementer/我都还是预防式加。下次 plan 写测试代码时,不要在 mock-injection 那行加 ignore,先跑 mypy 看是否真需要。
+
+3. **Plan Task 11 `pip-audit>=2.7` 已被 Plan A 加进 dev extras**。Task 0 spike 已用 `uv tool run pip-audit`(临时装)证实 0 漏洞,但 plan 写"Add `pip-audit` to dev extras"仍然假设它没装。Implementer 实施时发现已就位,无 install action。**没引发问题(已在就行),但 plan 应该先 grep deps 再写"add"**。
 
 ### 下个 spec / plan 要避免(3 条)
 
+1. 双向兼容(`python -m` from project root + mypy/pytest from source root)的脚本,plan 阶段要明确两种 context 下的模块路径,**或在 plan 里给出 `sys.path.insert` boilerplate**。
+2. 测试代码里的 `# type: ignore[arg-type]` 不要预防式加 — Protocol structural typing 通常会让 mock 自动 satisfy,跑 mypy 验证再决定是否需要 ignore。
+3. plan 写"add dependency"前,先 `grep <dep> pyproject.toml` 确认是否已存在 — Plan A 全栈 deps 加得很全,后续 plan 只需 verify。
+
 ### 沉淀到 memory
+
+- [feedback_python_m_path_dual_context.md](memory/feedback_python_m_path_dual_context.md) — 脚本同时被 `python -m <full.path>` 和 mypy/pytest 跑时,双 source-root 路径冲突;plan 阶段必须显式 sys.path 注入或文档化 PYTHONPATH 策略
+
+(只新增 1 条 memory — Plan D 的其他教训都是 Plan B/C 沉淀的复用应用,不需要新 entry。这是好现象:Plan B/C 沉淀正在生效。)
 
 ### Subagent-driven-development 节奏复盘
 
+- **总 subagent 调用**:**5 次**(Tasks 1, 2, 3, 4, 8, 10 implementer;Tasks 5+6+7 inline;Tasks 9 + 11 inline;Tasks 12 inline)。
+  - 实际是 6 次 implementer + 0 reviewer = 6 次。
+- **Plan B 19 → Plan C 9 → Plan D 6**(连续两 plan 减少,total 节省 68%)
+- **节省来自**:
+  - Tasks 5+6+7(3 task 合 1 inline commit)
+  - Tasks 9, 11, 12(都 inline)
+  - 全部 inline review,无 spec/quality reviewer subagent
+- **代价**:
+  - mypy unused-ignore 反复(Plan C 撞过,Plan D 又撞 + 增加 mypy override 一举永久解决)
+  - Task 4 implementer 写 test 时把 `from pathlib import Path` 当 unused 留下被 ruff fix(无影响,但属于 implementer 思考粒度问题)
+- **主对话 context 消耗**:中等。Plan D 涉及 `LLMService` 第三次 additive 改动(已熟练),GH Actions 是新东西但 paste-from-plan 无 logic,trace-view 标准 CLI 模式。
+- **dev-test-loop 4 plan 累计 subagent 调用**:Plan A(~11)+ Plan B(19)+ Plan C(9)+ Plan D(6)= **~45 次**。比"19 × 4 = 76"减少 41%。
+
 ### dev-test-loop spec close
 
-This plan completes the dev-test-loop spec (Plans A → B → C → D). Next stop:
-- v0 chat agent skeleton (separate spec, currently paused)
-- Wires `LLMService` (Plan B), `TraceService` (Plan C), `CostBudget` (Plan D) into a real chat agent that goes through eval pipeline meaningfully. Today's eval runs against bare LLMService SUT — value-bearing eval needs the agent.
+Plan D 完成 → **dev-test-loop spec(2026-04-29)落地完毕**。
+
+✅ 4 plan 累计落地:
+- Plan A — Repo bootstrap(uv / ruff / mypy / pytest / poe / pre-commit / 测试目录)
+- Plan B — LLM Test Infrastructure(LLMService / MockLLMClient / cassette + sanitize)
+- Plan C — Eval + Trace Infrastructure(TraceService / EvalRecorder / Judge / EvalRunner)
+- Plan D — CI + Cost + Drift(GH Actions / pricing / CostBudget / cassette_validation / trace-view)
+
+✅ Spec § 4 + § 5 + § 7 全部决策实施完毕。Spec § 8(Eval 系统)+ § 9(Trace+Eval 接口)在 Plan C 完成。
+
+**未完成的 spec 量化指标**(留给 v1+ 监控):
+- "PR flake 率: 同 commit 重跑 10 次失败 ≤ 1" — 需要积累数据
+- "Drift 检测时效: nightly 发现 cassette drift 后开 issue 平均关闭 ≤ 3 天" — 需要 nightly 真跑一段时间
+- "Portfolio 信号: repo 主页 CI badge passing;最近 30 天 CI 运行 > 50 次" — 需要时间积累
+
+**下一步:v0 chat agent skeleton**(独立 spec,2026-04-29 brainstorming session a4ce0864 已暂停)。
+
+✅ 接入条件就绪:
+- LLMService(Plan B)+ TraceService(Plan C)+ CostBudget(Plan D)三件横切完整
+- v0 agent 写完后,只需在 EvalRunner 里把 SUT 从 bare LLMService 换成 ChatAgent,eval pipeline 不动
+- Cassette + sanitize hook + GH Actions(Plan D)在那时直接复用
+
+dev-test-loop 4 plan 共 ~14 小时实施(Plan A 5h + B 3h + C 3h + D 3h)。下一步 v0 chat agent skeleton 估计同等量级。
