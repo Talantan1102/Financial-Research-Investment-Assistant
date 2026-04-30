@@ -242,8 +242,11 @@ test-all     = "pytest backend/tests"
 # `backend/__init__.py` doesn't exist. To be unified before Plan A PR.
 dev          = "uvicorn app.app_main:app --reload --port 8000 --app-dir backend"
 
-# Stubbed — implemented in Plan D
-trace-view    = "echo 'trace viewer comes in Plan D. See spec §9.'"
+# Plan D: trace-view CLI (replaces earlier echo stub)
+trace-view.shell = "uv run python scripts/trace_view.py $@"
+
+# Plan D: dependency security audit (manual + nightly)
+audit         = "pip-audit"
 
 # Plan C eval pipeline — runs L1 EvalRunner + sanity check (mock SUT + mock Judge).
 # Real-LLM eval runs via L2 cassette, already covered by `poe ci`.
@@ -272,4 +275,13 @@ sequence = [
 sequence = [
     { ref = "lint" },
     { ref = "test" },
+]
+
+# Plan D: simulates the nightly job locally (uses live LLM via .env).
+# Skips pip-audit (run via `poe audit` if needed).
+[tool.poe.tasks.nightly-local]
+sequence = [
+    { cmd = "pytest backend/tests/e2e -v" },
+    { cmd = "uv run poe eval" },
+    { shell = "unset all_proxy https_proxy http_proxy && uv run python -m backend.tests.eval.cassette_validation" },
 ]
