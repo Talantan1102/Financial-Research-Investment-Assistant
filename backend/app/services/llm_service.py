@@ -9,10 +9,14 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import UTC, datetime
 from typing import Any, Protocol
+from uuid import uuid4
 
 from app.services.llm_response import LLMResponse, Tier
 from app.services.tier_router import TierRouter
+from app.services.trace_models import Span
+from app.services.trace_service import TraceService
 
 
 class ChatCompletionRaw(Protocol):
@@ -48,9 +52,12 @@ class LLMService:
         self,
         client: ChatClient,
         tier_router: TierRouter | None = None,
+        trace_service: TraceService | None = None,
     ) -> None:
         self._client = client
         self._tier_router = tier_router or TierRouter.from_default_v0_config()
+        self._trace = trace_service
+        self._span_counter: int = 0
         if os.getenv("LLM_MODE") == "none":
             raise RuntimeError(
                 "LLMService instantiated under LLM_MODE=none — L0 unit tests "
@@ -63,12 +70,18 @@ class LLMService:
         prompt: str,
         tier: Tier = "fast",
         schema: dict[str, Any] | None = None,
+        request_id: str | None = None,
+        parent_span_id: str | None = None,
     ) -> LLMResponse:
         model = self._tier_router.resolve(tier)
+        if request_id is None:
+            request_id = f"req-{uuid4().hex[:12]}"
+        started_at = datetime.now(UTC)
         started = time.perf_counter()
         raw = self._client.chat(prompt=prompt, model=model, schema=schema)
         latency_ms = int((time.perf_counter() - started) * 1000)
-        return LLMResponse(
+        ended_at = datetime.now(UTC)
+        response = LLMResponse(
             content=raw.content,
             parsed=None,
             model=model,
@@ -78,4 +91,28 @@ class LLMService:
             total_tokens=raw.prompt_tokens + raw.completion_tokens,
             cost_cny=0.0,
             latency_ms=latency_ms,
+            request_id=request_id,
         )
+        if self._trace is not None:
+            self._span_counter += 1
+            span = Span(
+                span_id=f"{request_id}-llm-{self._span_counter}",
+                request_id=request_id,
+                parent_id=parent_span_id,
+                name="LLMService.chat",
+                inputs={"prompt": prompt, "tier": tier, "schema": schema},
+                outputs={"content": raw.content, "model": model},
+                metadata={
+                    "prompt_tokens": raw.prompt_tokens,
+                    "completion_tokens": raw.completion_tokens,
+                    "total_tokens": raw.prompt_tokens + raw.completion_tokens,
+                    "cost_cny": 0.0,
+                    "cache_hit": False,
+                    "tier": tier,
+                },
+                started_at=started_at,
+                ended_at=ended_at,
+                error=None,
+            )
+            self._trace.write_span(span)
+        return response
