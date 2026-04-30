@@ -2075,21 +2075,67 @@ EOF
 
 ## Retrospective
 
-> Filled in by implementer at Task 12 step 3.
-
-**Implementation completion date**:
-**Branch**:
-**Total commits**:
-**Total time**:
+**Implementation completion date**: 2026-04-30
+**Branch**: `feat/dev-test-loop-C`(基于 main `750ee3f`)
+**Total commits**: 13(11 task commits + 2 fix commits)
+**Total time**: ~3 小时(跟 Plan B 的 3 小时持平,比 Plan A 的 5 小时少;Plan A/B 立基础设施 vs Plan C 是上层服务垒)
 
 ### 对的设计(3 条)
 
+1. **`LLMService.chat` 加 trace 是严格 additive,Plan B 契约零回归**。`trace_service: TraceService | None = None` 默认 None,Plan B 11 个 LLMService-related 测试 + 5 个 MockLLMClient 测试零修改。`request_id` 加到 `LLMResponse` 也是 default-None additive。这个"零回归扩展"模式将延续 Plan D 加 cost_cny price table 时也不破坏 schema。
+
+2. **`tmp_eval_db` fixture 把 Plan B 教训直接落地**。每个测试自己一份 sqlite,tmp_path 自动清理。0 次共享 db 污染,0 次"我跑这个测试影响了那个测试"。Plan B `feedback_test_env_modeling` 沉淀的"测试 env 必须 plan 阶段建模到 fixture"完美兑现。
+
+3. **MockLLMClient pattern→recorded redirect 让 mock 也能区分多 judge 分数**。Task 7 加 4 行(命中 pattern 后检查 `__recorded__:` 前缀就 redirect),Task 9 sanity check 用两层路由(`SANITY_WRONG_q1` SUT 输入 → MockLLMClient 返回 `"你好,我是助手"` → judge prompt 含该串 → 命中 specific judge pattern → routed to `judge_4dim_obvious_wrong` 给 factuality=1)。**没改 Plan B 已稳定代码的核心 dispatch logic**,只在 pattern 命中后加一个 if-startswith 分支。这就是好的扩展性。
+
 ### 错的设计 / plan 漏了什么(3 条)
+
+1. **Plan 让 implementer 同时加 typed signature 和 `# type: ignore[no-untyped-def]`**(Task 2 step 1 fixture)。两者矛盾:typed signature 已经让 mypy 不报 no-untyped-def,ignore 反而触发 unused-ignore 警告。Task 1/2 都是单文件 mypy 跑没暴露,Task 3 后跑全 backend mypy 才出错。**Lesson**:plan 写"加 type:ignore" 时,先想清楚同位置的 type annotation 是不是已经满足 — 不要预防式加 ignore。
+
+2. **Plan 没指定 cassette `before_record_response` 处理 vendor headers**。Plan B retrospective 已记录"`x-dashscope-call-gateway` header 触发 sanitize hook"是事后补丁,但 Plan C plan 没把这个 sediment 落地为 conftest 改动。Task 10 implementer 又一次"recording 时发现 leak,加 strip"。**Plan B 的教训没成功传到 Plan C plan 阶段** — 这本身是 plan 与 retrospective 流转的问题。
+
+3. **Plan 没考虑 trace_summary 含 latency_ms 会让 cassette body match 失败**。Task 10 implementer 发现 `_summarize_trace` 给 judge prompt 注入 `total_latency_ms=137`(实测一次)、`total_latency_ms=2`(replay 时 mock client 速度)—— 同一 prompt body 在 record 和 replay 之间不同,vcr `body` matcher 拒绝。implementer 不得不在 test-module 级 override vcr_config 删 body match。**Lesson**:任何 prompt template 含动态值(latency / timestamp / uuid),plan 阶段就要选择 strip-from-prompt 或 vcr-not-match-body 二者之一。
 
 ### 下个 spec / plan 要避免(3 条)
 
+1. **`# type: ignore` 不要预防式加** — 先想清楚同位置的 type annotation 是否已满足该错码;如果是,ignore 多余,会触发 unused-ignore。
+2. **任何动态值进 prompt 必预案** — latency / timestamp / uuid 进 prompt body 会让 cassette body match 失效,plan 阶段就决定 strip 还是 vcr_config 不 match body。
+3. **跨 plan 的 retrospective sediment 必须显式落地到下一 plan 的具体 task** — Plan B 的 vendor-header strip 教训没传到 Plan C plan,导致 Task 10 重蹈覆辙。新 plan 的"Memory inputs"段落要不只是列 memory 文件,还要把每条 memory 翻译成具体 task 步骤。
+
 ### 沉淀到 memory
+
+- [feedback_cassette_dynamic_prompt_values.md](memory/feedback_cassette_dynamic_prompt_values.md) — prompt 含动态值(latency/uuid/timestamp)会破坏 cassette body match;plan 阶段必须选 strip-from-prompt 或 vcr-not-match-body
+- [feedback_type_ignore_with_typed_signature.md](memory/feedback_type_ignore_with_typed_signature.md) — typed signature 已满足 no-untyped-def 时不要加 `# type: ignore`,会触发 unused-ignore 警告
+- [project_eval_pipeline_contract.md](memory/project_eval_pipeline_contract.md) — Plan C 立的 EvalRunner / Judge / TraceService / EvalRecorder 契约;SUT 通过 DI 注入(v0 是 bare LLMService);v0~v3 稳定;两表共享 sqlite 文件 + request_id JOIN
 
 ### Subagent-driven-development 节奏复盘
 
+- **总 subagent 调用**:**9 次**(8 implementer + 1 final reviewer 撞 rate limit 取消)。Plan B 是 19 次,Plan C 减少 53%。
+- **节省来自**:
+  - (1) 全部 inline review,跳过 spec reviewer + code quality reviewer subagent
+  - (2) Task 0 spike + Task 4 L1 test + Task 12 poe/retrospective 直接 inline 不派 implementer
+  - (3) 单一 sonnet model 全部一轮过,无 review-loop iteration
+- **全 inline review 的代价**:1 次 mypy unused-ignore 错误未被 implementer 提前发现(Task 2 后),inline 加了 2 个 fix commit(`385122a` + `853c93c`)。比派 spec reviewer 节省的 quota 多。
+- **主对话 context 消耗**:中等。涉及多个 task 修改 Plan B 已稳定代码(`LLMService` / `MockLLMClient`),inline review 需要细看 diff,但 0 次回归。
+- **没派 final-reviewer 因为 rate limit**(8:10pm 重置撞上)。inline self-verify 替代:跑全套 ci + 验证关键架构契约(LLM_MODE 不分支 / openai 不 import / cassette 路径 / sanitize 0 命中)。
+- **Plan B 的"两层 review"缺席没造成质量下降**:implementer 自己抓到 yaml pattern 顺序问题(Task 7)+ cassette body match 漂移(Task 10)+ vendor header sanitize(Task 10),都比预期更主动。
+
 ### Plan D 启动条件
+
+Plan C 完成后,Plan D(Nightly CI + Cost Guardrail + Drift Detection)依赖已就位:
+
+- ✅ Eval pipeline 端到端可跑(SUT → trace → judge → recorder),`poe eval` / `poe eval-sanity` 一键
+- ✅ Cross-judge Spearman 计算可用(`poe eval-cross-judge`),手动触发
+- ✅ L2 cassette 录制 + 回放闭环验证过两次(Plan B `test_llm_service_cassette` + Plan C `test_eval_pipeline_cassette`)
+- ✅ Sanitize hook + before_record_response 钩子组合可靠(实测两次发现 + 自动修)
+- ✅ Cost 数据点充分(Task 0 spike:judge prompt 757 total_tokens,其中 reasoning 占 73%)。Plan D 写 `EVAL_COST_LIMIT_CNY` enforcement 时按 total_tokens 累加,不要按 visible content length。
+
+**Plan D 范围**(spec § 5 + § 6):
+- GH Actions PR job(ruff + mypy + L0 + L1 + L2 子集 ≤ 5min)
+- GH Actions nightly job(L2 全集 + L3 eval + cassette validation + dependency security audit ≤ 30min)
+- `EVAL_COST_LIMIT_CNY=20` hard limit(LLMService 累计成本超阈值即 abort)
+- Per-model price table(消除 Plan B/C 的 `cost_cny=0.0` stub)
+- Cassette drift detection(nightly 真打 LLM 对 cassette 跑 LLM-as-judge,差异 ≥ 阈值开 issue)
+- `trace-view` CLI(读 SQLite spans 表呈现 trace,replace 现有 echo stub)
+
+**未解风险**:`deepseek-v4-flash` reasoning_tokens 占比 73%(Plan B + Plan C 都观察到)。如果 v0 model 切到非 reasoning model(spec § 7 留接口),per-token 成本会大幅下降但行为可能变。Plan D cost guardrail 默认按当前 reasoning model 估,留 5x buffer。
