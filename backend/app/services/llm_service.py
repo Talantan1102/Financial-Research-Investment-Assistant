@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
 
+from app.services.cost_budget import CostBudget
 from app.services.llm_response import LLMResponse, Tier
 from app.services.pricing import compute_cost
 from app.services.tier_router import TierRouter
@@ -54,10 +55,12 @@ class LLMService:
         client: ChatClient,
         tier_router: TierRouter | None = None,
         trace_service: TraceService | None = None,
+        cost_budget: CostBudget | None = None,
     ) -> None:
         self._client = client
         self._tier_router = tier_router or TierRouter.from_default_v0_config()
         self._trace = trace_service
+        self._budget = cost_budget
         self._span_counter: int = 0
         if os.getenv("LLM_MODE") == "none":
             raise RuntimeError(
@@ -74,6 +77,8 @@ class LLMService:
         request_id: str | None = None,
         parent_span_id: str | None = None,
     ) -> LLMResponse:
+        if self._budget is not None:
+            self._budget.assert_under_limit()  # fail-fast on PRIOR over-limit
         model = self._tier_router.resolve(tier)
         if request_id is None:
             request_id = f"req-{uuid4().hex[:12]}"
@@ -87,6 +92,8 @@ class LLMService:
             prompt_tokens=raw.prompt_tokens,
             completion_tokens=raw.completion_tokens,
         )
+        if self._budget is not None:
+            self._budget.track(cost_cny)
         response = LLMResponse(
             content=raw.content,
             parsed=None,
