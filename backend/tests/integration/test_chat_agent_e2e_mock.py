@@ -126,9 +126,8 @@ async def test_chat_agent_e2e_tool_path(mock_llm_client: MockLLMClient) -> None:
     # Assertions
     assert output.request_id == "req-e2e-test"
     assert output.response_text, "response_text should be non-empty"
-    assert (
-        len(output.tool_calls) >= 1
-    ), f"Expected ≥1 tool_call from ChatPlanner fixture, got {output.tool_calls}"
+    n_calls = len(output.tool_calls)
+    assert n_calls >= 1, f"Expected ≥1 tool_call from fixture, got {output.tool_calls}"
     # Specifically the fixture returns get_stock_quote
     tool_names = [tc.tool_name for tc in output.tool_calls]
     assert "get_stock_quote" in tool_names
