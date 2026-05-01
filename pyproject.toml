@@ -242,6 +242,8 @@ test-all     = "pytest backend/tests"
 # TODO(I-1): canonical naming — uvicorn currently uses `app.app_main:app` because
 # `backend/__init__.py` doesn't exist. To be unified before Plan A PR.
 dev          = "uvicorn app.app_main:app --reload --port 8000 --app-dir backend"
+# Task 13: local uvicorn dev run (same as dev; explicit alias for `poe serve`)
+serve        = "uvicorn app.app_main:app --reload --port 8000 --app-dir backend"
 
 # Plan D: trace-view CLI (replaces earlier echo stub)
 trace-view.shell = "uv run python scripts/trace_view.py $@"
