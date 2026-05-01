@@ -82,9 +82,10 @@ class TushareClient:
         self.use_mock = os.getenv("USE_MOCK_TUSHARE", "false").lower() == "true"
         self._mock_service = None
         if self.use_mock:
+            from app.data._llm_adapter import build_llm_service_from_env
             from app.service.mock_tushare_service import MockTushareService
 
-            self._mock_service = MockTushareService()
+            self._mock_service = MockTushareService(llm=build_llm_service_from_env())
             logger.info("TushareClient 已启用 Mock 模式")
 
         # 延迟初始化：不立即创建 api 实例
