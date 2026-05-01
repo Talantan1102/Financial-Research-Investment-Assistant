@@ -160,7 +160,5 @@ def test_research_agent_sut_report_markdown_quality_not_none(
     # report_markdown_quality: EvalRunner passes response_text as report_markdown →
     # 5-dim judge fixture → non-null score
     rmq = result.scores.report_markdown_quality
-    assert (
-        rmq is not None
-    ), "Expected report_markdown_quality to be scored for ResearchAgent SUT, got None"
+    assert rmq is not None, "report_markdown_quality should be scored for ResearchAgent SUT"
     assert 0.0 <= rmq <= 10.0, f"report_markdown_quality out of range [0,10]: {rmq}"
