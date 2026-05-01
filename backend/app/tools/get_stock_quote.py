@@ -31,12 +31,15 @@ class StockQuoteTool(Tool):
     )
     args_schema = StockQuoteArgs
 
-    def __init__(self, mock_tushare: MockTushareService) -> None:
+    def __init__(self, mock_tushare: MockTushareService | None = None) -> None:
         self._mock_tushare = mock_tushare
 
     async def run(self, args: BaseModel) -> dict[str, Any]:
         # Narrow type: registry always validates against args_schema first
         validated = StockQuoteArgs.model_validate(args.model_dump())
+
+        if self._mock_tushare is None:
+            raise ToolError("mock_tushare not configured — cannot fetch daily data")
 
         today = datetime.now().strftime("%Y%m%d")
         # Fetch last 3 days to ensure at least one trading day is included

@@ -23,6 +23,14 @@ entries:
       prompt_tokens: 350
       completion_tokens: 80
 
+  # ChatPlanner: matched by the system-role prefix injected by build_planner_prompt
+  # Must appear BEFORE the generic ts_code pattern below so it wins on planner prompts.
+  - pattern: "^你是金融研究助手 planner"
+    response:
+      content: '{"tool_calls":[{"tool_name":"get_stock_quote","args":{"ts_code":"600519.SH"},"rationale":"user asked"}],"direct_response":false,"reasoning":"single tool"}'
+      prompt_tokens: 120
+      completion_tokens: 45
+
   - pattern: "(\\d{6}\\.(SH|SZ))"
     response:
       content: "The quote for {group_1} has been retrieved successfully."
