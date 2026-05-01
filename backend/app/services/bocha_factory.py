@@ -12,9 +12,18 @@ signature, a thin _MockBochaAdapter wraps it to expose .search() shape.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 from app.services.bocha_client import BochaClient
+
+# Resolve eval.sqlite relative to this file (not cwd).
+# __file__: backend/app/services/bocha_factory.py
+# parents[0] = backend/app/services/
+# parents[1] = backend/app/
+# parents[2] = backend/
+# → backend/data/eval.sqlite (absolute, cwd-independent)
+_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "eval.sqlite"
 
 
 @runtime_checkable
@@ -68,7 +77,6 @@ def build_bocha_service_from_env() -> BochaService:
         if "BOCHA_API_KEY" not in os.environ:
             raise KeyError("BOCHA_API_KEY required when BOCHA_MODE=real")
         base_url = os.environ.get("BOCHA_BASE_URL", "https://api.bochaai.com/v1/web-search")
-        from pathlib import Path
 
         from app.services.circuit_breaker import CircuitBreaker
         from app.services.cost_budget import CostBudget
@@ -82,7 +90,7 @@ def build_bocha_service_from_env() -> BochaService:
             rate_limiter=RateLimiter(max_calls=60, window_s=60.0),
             circuit_breaker=CircuitBreaker(failure_threshold=5, cooldown_s=30.0),
             quota_counter=QuotaCounter(
-                db_path=Path("backend/data/eval.sqlite"),
+                db_path=_DB_PATH,
                 name="bocha_search_monthly",
                 monthly_limit=1000,
             ),
