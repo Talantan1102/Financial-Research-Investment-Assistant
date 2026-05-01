@@ -22,10 +22,38 @@ from collections import Counter
 from collections.abc import Callable
 from typing import Any
 
+# TODO(v0 plan Task 1 cleanup): ReActContext/ToolType/SmartDataAnalyzer removed in archive
+# from .react_controller import ReActContext, ToolType  # react_controller deleted in Task 1
+# Stub: ReActContext = Any (placeholder — original type was react_controller.ReActContext)
+ReActContext = Any  # type: ignore[assignment]
+
 import requests
 from openai import OpenAI
 
-from .react_controller import ReActContext, ToolType
+_TOOL_TYPE_STUBS: dict[str, str] = {
+    "web_search": "web_search",
+    "knowledge_search": "knowledge_search",
+    "text2sql": "text2sql",
+    "data_analyzer": "data_analyzer",
+    "chart_generator": "chart_generator",
+    "stock_query": "stock_query",
+    "bidding_search": "bidding_search",
+    "finish": "finish",
+}
+
+
+class ToolType:  # noqa: N801 — stub replacing deleted react_controller.ToolType
+    """Stub for deleted ToolType enum from react_controller (archived Task 1)."""
+
+    WEB_SEARCH = type("_V", (), {"value": "web_search"})()
+    KNOWLEDGE_SEARCH = type("_V", (), {"value": "knowledge_search"})()
+    TEXT2SQL = type("_V", (), {"value": "text2sql"})()
+    DATA_ANALYZER = type("_V", (), {"value": "data_analyzer"})()
+    CHART_GENERATOR = type("_V", (), {"value": "chart_generator"})()
+    STOCK_QUERY = type("_V", (), {"value": "stock_query"})()
+    BIDDING_SEARCH = type("_V", (), {"value": "bidding_search"})()
+    FINISH = type("_V", (), {"value": "finish"})()
+
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -319,7 +347,8 @@ class ToolExecutor:
 
         # 动态导入智能分析器
         try:
-            from service.smart_analyzer import SmartDataAnalyzer
+            # TODO(v0 plan Task 1 cleanup): SmartDataAnalyzer removed in archive; graceful ImportError fallback below
+            from service.smart_analyzer import SmartDataAnalyzer  # type: ignore[import]
 
             analyzer = SmartDataAnalyzer()
             result = await asyncio.to_thread(analyzer.analyze, data, analysis_type)

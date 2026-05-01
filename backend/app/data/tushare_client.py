@@ -83,8 +83,9 @@ class TushareClient:
         self._mock_service = None
         if self.use_mock:
             from app.service.mock_tushare_service import MockTushareService
+            from app.services.openai_client import build_llm_service_from_env
 
-            self._mock_service = MockTushareService()
+            self._mock_service = MockTushareService(llm=build_llm_service_from_env())
             logger.info("TushareClient 已启用 Mock 模式")
 
         # 延迟初始化：不立即创建 api 实例

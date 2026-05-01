@@ -1,10 +1,10 @@
 # Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
 # 未经授权，禁止转售或仿制。
 
-# Document router package
-from .chat_router import router as chat_router
-from .document_router import router as document_router
-from .research_router import router as research_router
-from .search_router import router as search_router
+# Router package — new strict routers live in submodules (app.router.chat etc.)
+# Legacy routers (document_router / research_router / search_router) are imported
+# directly in app_main.py via the bare `router` package (--app-dir backend).
+# They are NOT re-exported here because they use bare `schemas.*` imports that
+# only resolve under the old app-dir invocation, not under the `backend/` source root.
 
-__all__ = ["document_router", "search_router", "chat_router", "research_router"]
+__all__: list[str] = []

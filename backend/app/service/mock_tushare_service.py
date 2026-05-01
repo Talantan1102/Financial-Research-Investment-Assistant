@@ -8,15 +8,13 @@
 """
 
 import asyncio
-import os
 from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
-from openai import OpenAI
 from pydantic import BaseModel, Field, field_validator
 
-from app.config.llm_config import LLMConfig
+from app.services.llm_service import LLMService
 
 
 class DailyDataItem(BaseModel):
@@ -829,12 +827,20 @@ class MockTushareService:
         "交通运输": 25.0,
     }
 
-    def __init__(self):
-        config = LLMConfig()
-        self.client = OpenAI(api_key=config.api_key, base_url=config.base_url)
-        self.model = os.getenv("MOCK_TUSHARE_MODEL", "deepseek-v3.2")
+    def __init__(self, llm: LLMService) -> None:
+        self._llm = llm
         self._stock_map = {s["ts_code"]: s for s in self.MOCK_STOCKS}
         self._symbol_map = {s["symbol"]: s for s in self.MOCK_STOCKS}
+
+    async def _call_llm_async(self, system_msg: str, user_prompt: str) -> str:
+        """调用 LLMService，将 system 和 user 消息合并为单一 prompt。
+
+        LLMService.chat 是同步方法，此处用 asyncio.to_thread 包装以兼容
+        async 调用方。返回 LLM 响应文本内容。
+        """
+        combined_prompt = f"{system_msg}\n\n{user_prompt}"
+        response = await asyncio.to_thread(self._llm.chat, combined_prompt, "fast")
+        return response.content
 
     def _get_stock_info(self, ts_code: str) -> dict[str, Any] | None:
         """获取股票信息"""
@@ -874,22 +880,10 @@ class MockTushareService:
             ts_code, stock_name, industry, start_date, end_date, base_price
         )
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回数据，不要包含任何markdown代码块标记或其他说明文字。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回数据，不要包含任何markdown代码块标记或其他说明文字。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -949,22 +943,10 @@ class MockTushareService:
 
         prompt = self._build_daily_basic_prompt(stocks, trade_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1083,22 +1065,10 @@ class MockTushareService:
 
         prompt = self._build_fina_indicator_prompt(stocks, end_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟财务指标数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5,
-            max_tokens=8000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟财务指标数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1195,22 +1165,10 @@ class MockTushareService:
 
         prompt = self._build_income_prompt(stocks, end_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟利润表数据，确保利润核算关系合理。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5,
-            max_tokens=8000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟利润表数据，确保利润核算关系合理。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1293,22 +1251,10 @@ class MockTushareService:
 
         prompt = self._build_balance_sheet_prompt(stocks, end_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟资产负债表数据，确保会计等式关系：资产=负债+所有者权益。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5,
-            max_tokens=8000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟资产负债表数据，确保会计等式关系：资产=负债+所有者权益。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1452,22 +1398,10 @@ class MockTushareService:
 
         prompt = self._build_cash_flow_prompt(stocks, end_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟现金流量表数据，确保现金流量勾稽关系合理。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5,
-            max_tokens=8000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟现金流量表数据，确保现金流量勾稽关系合理。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1609,22 +1543,10 @@ class MockTushareService:
 
         prompt = self._build_money_flow_prompt(stocks, trade_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟资金流向数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.6,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟资金流向数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1673,22 +1595,10 @@ class MockTushareService:
 
         prompt = self._build_top_list_prompt(trade_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟龙虎榜数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟龙虎榜数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1734,22 +1644,10 @@ class MockTushareService:
 
         prompt = self._build_limit_list_prompt(trade_date, limit_type)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟涨停榜数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟涨停榜数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1802,22 +1700,10 @@ class MockTushareService:
 
         prompt = self._build_margin_prompt(stocks, trade_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟融资融券数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟融资融券数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1864,22 +1750,10 @@ class MockTushareService:
 
         prompt = self._build_money_flow_hsgt_prompt(start_date, end_date)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟沪深港通资金流向数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.5,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟沪深港通资金流向数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1915,22 +1789,10 @@ class MockTushareService:
         """生成概念股分类数据"""
         prompt = self._build_concept_prompt()
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟概念股分类数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.7,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟概念股分类数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -1957,22 +1819,10 @@ class MockTushareService:
 
         prompt = self._build_concept_detail_prompt(concept_name)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟概念股明细数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.6,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟概念股明细数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 
@@ -2001,22 +1851,10 @@ class MockTushareService:
 
         prompt = self._build_stock_company_prompt(stocks)
 
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=self.model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟上市公司基本信息数据。",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.6,
-            max_tokens=4000,
+        content = await self._call_llm_async(
+            "你是一个专业的金融数据生成助手。请严格按照用户要求的JSON格式返回模拟上市公司基本信息数据。",
+            prompt,
         )
-
-        content = response.choices[0].message.content
         if not content:
             raise ValueError("LLM返回内容为空")
 

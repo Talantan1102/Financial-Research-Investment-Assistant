@@ -17,11 +17,35 @@ entries:
       prompt_tokens: 15
       completion_tokens: 20
 
+  # Judge with tool_calls section (ChatAgent SUT path) — must precede generic judge pattern.
+  - pattern: "^你是金融研究助手的输出评审员[\\s\\S]*实际 tool_calls"
+    response:
+      content: "__recorded__:judge_4dim_with_tools"
+      prompt_tokens: 380
+      completion_tokens: 90
+
   - pattern: "^你是金融研究助手的输出评审员"
     response:
       content: "__recorded__:judge_4dim_response"
       prompt_tokens: 350
       completion_tokens: 80
+
+  # Responder: matched by the system-role prefix injected by build_responder_prompt.
+  # Must appear BEFORE generic patterns so it wins on responder prompts.
+  # Pattern is DISTINCT from ChatPlanner's "planner" prefix to avoid first-match shadowing.
+  - pattern: "^你是金融研究助手 responder"
+    response:
+      content: "根据查询,茅台(600519.SH)当前股价 1820.5 元。"
+      prompt_tokens: 80
+      completion_tokens: 20
+
+  # ChatPlanner: matched by the system-role prefix injected by build_planner_prompt
+  # Must appear BEFORE the generic ts_code pattern below so it wins on planner prompts.
+  - pattern: "^你是金融研究助手 planner"
+    response:
+      content: '{"tool_calls":[{"tool_name":"get_stock_quote","args":{"ts_code":"600519.SH"},"rationale":"user asked"}],"direct_response":false,"reasoning":"single tool"}'
+      prompt_tokens: 120
+      completion_tokens: 45
 
   - pattern: "(\\d{6}\\.(SH|SZ))"
     response:

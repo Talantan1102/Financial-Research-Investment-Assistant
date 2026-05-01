@@ -1,20 +1,41 @@
 # Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
 # 未经授权，禁止转售或仿制。
 
+import json
 import logging
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from service import ResearchService, ServiceConfig
 from starlette.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_500_INTERNAL_SERVER_ERROR
 
 from app.core.redis_client import cache  # 导入 Redis 缓存
 
 # V2 导入
 from app.service.deep_research_v2.service import DeepResearchV2Service
-from app.service.dr_g import serialize_event  # 导入序列化函数
+
+# TODO(v0 plan Task 1 cleanup): ResearchService removed in archive; v0.5 research mode spec replaces
+# from service import ResearchService, ServiceConfig
+
+
+# TODO(v0 plan Task 1): dr_g.py deleted; inline minimal serialize_event here
+def serialize_event(event_data: dict[str, Any]) -> str:
+    """将事件数据序列化为JSON字符串"""
+
+    def _default(obj: Any) -> Any:
+        if isinstance(obj, set):
+            return list(obj)
+        if isinstance(obj, Exception):
+            return str(obj)
+        raise TypeError(f"Type {type(obj)} not serializable")
+
+    try:
+        return json.dumps(event_data, default=_default, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"Failed to serialize event: {e}")
+        return json.dumps({"type": "error", "content": f"Serialization error: {e}"})
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ResearchRouter")
@@ -67,13 +88,11 @@ class ResearchRequest(BaseModel):
 # 获取服务实例
 def get_research_service():
     """获取研究服务实例"""
-    config = ServiceConfig.get_api_config()
-    research_service = ResearchService(
-        search_api_key=config.get("bochaai_api_key"),
-        llm_api_key=config.get("dashscope_api_key"),
-        llm_base_url=config.get("dashscope_base_url"),
+    # TODO(v0 plan Task 1 cleanup): ResearchService removed in archive; v0.5 research mode spec replaces
+    # V1 路径已归档 — 调用此函数会在 v1 端点运行时抛出 503
+    raise NotImplementedError(
+        "ResearchService (v1) has been archived. Use v2 endpoints or wait for v0.5 research mode spec."
     )
-    return {"research_service": research_service}
 
 
 def get_research_service_v2():

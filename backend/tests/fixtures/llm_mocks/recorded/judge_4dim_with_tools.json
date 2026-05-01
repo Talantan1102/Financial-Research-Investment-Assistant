@@ -1,0 +1,8 @@
+{
+  "id": "judge_4dim_with_tools",
+  "response": {
+    "content": "{\"factuality\": {\"score\": 8, \"evidence\": \"示例 evidence\"}, \"tool_correctness\": {\"score\": 9, \"evidence\": \"tool get_stock_quote called correctly\"}, \"coverage\": {\"score\": 7, \"evidence\": \"示例 evidence\"}, \"structure\": {\"score\": 9, \"evidence\": \"示例 evidence\"}}",
+    "prompt_tokens": 380,
+    "completion_tokens": 90
+  }
+}
