@@ -1,4 +1,10 @@
 entries:
+  - pattern: "^你是金融研究助手 critic_"
+    response:
+      content: '{"score": 8.0, "evidence": "数据准确,结构清晰,符合预期。"}'
+      prompt_tokens: 200
+      completion_tokens: 30
+
   - pattern: "^SANITY_WRONG_"
     response:
       content: "你好,我是助手。"
