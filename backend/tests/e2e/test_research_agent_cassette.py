@@ -305,8 +305,6 @@ async def test_research_agent_maotai_fundamental(real_adapter: _Adapter) -> None
     )
 
     assert output.response_text, "Writer must return a non-empty Markdown report"
-    n_tool_calls = len(output.tool_calls)
-    assert (
-        n_tool_calls >= 1
-    ), f"DataCollector must have executed at least 1 tool, got {output.tool_calls!r}"
+    n = len(output.tool_calls)
+    assert n >= 1, f"DataCollector must have executed at least 1 tool, got {output.tool_calls!r}"
     assert output.request_id == "cassette-research-1"
