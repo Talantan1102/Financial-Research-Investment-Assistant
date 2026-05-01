@@ -17,6 +17,13 @@ entries:
       prompt_tokens: 15
       completion_tokens: 20
 
+  # Judge with tool_calls section (ChatAgent SUT path) — must precede generic judge pattern.
+  - pattern: "^你是金融研究助手的输出评审员[\\s\\S]*实际 tool_calls"
+    response:
+      content: "__recorded__:judge_4dim_with_tools"
+      prompt_tokens: 380
+      completion_tokens: 90
+
   - pattern: "^你是金融研究助手的输出评审员"
     response:
       content: "__recorded__:judge_4dim_response"
