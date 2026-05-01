@@ -97,13 +97,14 @@ def get_research_graph() -> Any:
     from app.orchestration.research_graph import build_research_graph
     from app.service.mock_bocha_service import MockBochaService  # type: ignore[import]
     from app.service.mock_tushare_service import MockTushareService  # type: ignore[import]
+    from app.services.bocha_factory import build_bocha_service_from_env
     from app.services.openai_client import build_llm_service_from_env
     from app.tools.get_financials import GetFinancialsTool
     from app.tools.get_news import GetNewsTool
     from app.tools.get_stock_quote import StockQuoteTool
     from app.tools.mock_kb_search import MockKbSearchTool
-    from app.tools.mock_web_search import MockWebSearchTool
     from app.tools.registry import ToolRegistry
+    from app.tools.web_search import WebSearchTool
 
     llm = build_llm_service_from_env()
     mock_tushare = MockTushareService(llm=llm)
@@ -113,7 +114,8 @@ def get_research_graph() -> Any:
     registry.register(StockQuoteTool(mock_tushare=mock_tushare))
     registry.register(GetFinancialsTool(mock_tushare=mock_tushare))
     registry.register(GetNewsTool(mock_bocha=mock_bocha))
-    registry.register(MockWebSearchTool(mock_bocha=mock_bocha))
+    bocha_for_websearch = build_bocha_service_from_env()
+    registry.register(WebSearchTool(bocha=bocha_for_websearch))
     registry.register(MockKbSearchTool(mock_bocha=mock_bocha))
 
     planner = ResearchPlanner(llm=llm)

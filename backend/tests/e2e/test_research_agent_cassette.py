@@ -123,7 +123,12 @@ class _StubWebSearchArgs(BaseModel):
 
 
 class _StubWebSearchTool(Tool):
-    """Stub for mock_web_search — no LLM I/O."""
+    """Stub registered as "mock_web_search" to match the tool name baked into the VCR cassette.
+
+    The cassette records a ResearchPlanner LLM response that outputs
+    required_tools=["mock_web_search"]. Re-recording would need VCR_RECORD_MODE=once.
+    Keep this name pinned until cassette is re-recorded post-v0.6 rename.
+    """
 
     name = "mock_web_search"
     description = "搜索网络获取最新资讯(stub)。"
