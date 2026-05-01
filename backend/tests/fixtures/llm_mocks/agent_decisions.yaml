@@ -23,6 +23,14 @@ entries:
       prompt_tokens: 15
       completion_tokens: 20
 
+  # Judge with report_markdown_quality (ResearchAgent SUT path, 5-dim) — most specific,
+  # must precede the 4-dim with-tools and generic judge patterns.
+  - pattern: "^你是金融研究助手的输出评审员[\\s\\S]*研报 Markdown:"
+    response:
+      content: "__recorded__:judge_5dim_with_report_markdown"
+      prompt_tokens: 400
+      completion_tokens: 100
+
   # Judge with tool_calls section (ChatAgent SUT path) — must precede generic judge pattern.
   - pattern: "^你是金融研究助手的输出评审员[\\s\\S]*实际 tool_calls"
     response:
