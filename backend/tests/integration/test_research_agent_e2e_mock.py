@@ -142,9 +142,7 @@ async def test_research_agent_e2e_full_pipeline(mock_llm_client: MockLLMClient) 
     assert output.request_id == "req-research-e2e-test"
 
     assert output.response_text, "response_text should be non-empty"
-    assert (
-        len(output.response_text) > 50
-    ), f"Writer fixture should produce >50 chars, got {len(output.response_text)}"
+    assert len(output.response_text) > 50, "Writer fixture should produce >50 chars"
 
     n_calls = len(output.tool_calls)
     assert n_calls >= 2, f"Expected >=2 tool_calls (one per subtask), got {output.tool_calls}"
