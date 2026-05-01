@@ -207,6 +207,4 @@ async def test_chat_agent_stock_quote_end_to_end(real_adapter: _Adapter) -> None
     assert output.response_text, "Responder must return a non-empty reply"
     assert len(output.tool_calls) >= 1, "ChatPlanner must have called at least one tool"
     tool_names = [tc.tool_name for tc in output.tool_calls]
-    assert (
-        "get_stock_quote" in tool_names
-    ), f"Expected get_stock_quote in tool_calls, got {tool_names}"
+    assert "get_stock_quote" in tool_names, f"tool_calls={tool_names!r}"
