@@ -15,6 +15,21 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.agents.schemas import ToolCall
+
+
+class SUTOutput(BaseModel):
+    """Output contract for any SUT (System Under Test) in the eval pipeline.
+
+    Stable v0~v3 — Task 12 adds the SUT Protocol referencing this type.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    request_id: str
+    response_text: str
+    tool_calls: list[ToolCall] = Field(default_factory=list)
+
 
 class JudgeScores(BaseModel):
     model_config = ConfigDict(frozen=True)
