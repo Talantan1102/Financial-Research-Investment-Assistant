@@ -8,13 +8,15 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from service import ResearchService, ServiceConfig
 from starlette.status import HTTP_200_OK, HTTP_400_BAD_REQUEST, HTTP_500_INTERNAL_SERVER_ERROR
 
 from app.core.redis_client import cache  # 导入 Redis 缓存
 
 # V2 导入
 from app.service.deep_research_v2.service import DeepResearchV2Service
+
+# TODO(v0 plan Task 1 cleanup): ResearchService removed in archive; v0.5 research mode spec replaces
+# from service import ResearchService, ServiceConfig
 
 
 # TODO(v0 plan Task 1): dr_g.py deleted; inline minimal serialize_event here
@@ -86,13 +88,11 @@ class ResearchRequest(BaseModel):
 # 获取服务实例
 def get_research_service():
     """获取研究服务实例"""
-    config = ServiceConfig.get_api_config()
-    research_service = ResearchService(
-        search_api_key=config.get("bochaai_api_key"),
-        llm_api_key=config.get("dashscope_api_key"),
-        llm_base_url=config.get("dashscope_base_url"),
+    # TODO(v0 plan Task 1 cleanup): ResearchService removed in archive; v0.5 research mode spec replaces
+    # V1 路径已归档 — 调用此函数会在 v1 端点运行时抛出 503
+    raise NotImplementedError(
+        "ResearchService (v1) has been archived. Use v2 endpoints or wait for v0.5 research mode spec."
     )
-    return {"research_service": research_service}
 
 
 def get_research_service_v2():
