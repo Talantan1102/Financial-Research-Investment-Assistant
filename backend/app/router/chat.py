@@ -107,8 +107,8 @@ def _build_graph_singleton() -> CompiledStateGraph[Any, Any, Any, Any]:
     from app.agents.chat_planner import ChatPlanner
     from app.agents.responder import Responder
     from app.orchestration.chat_graph import build_chat_graph
-    from app.service.mock_bocha_service import MockBochaService
     from app.service.mock_tushare_service import MockTushareService
+    from app.services.bocha_factory import build_bocha_service_from_env
     from app.services.openai_client import build_llm_service_from_env
     from app.tools.get_financials import GetFinancialsTool
     from app.tools.get_news import GetNewsTool
@@ -117,12 +117,11 @@ def _build_graph_singleton() -> CompiledStateGraph[Any, Any, Any, Any]:
 
     llm = build_llm_service_from_env()
     mock_tushare = MockTushareService(llm=llm)
-    mock_bocha = MockBochaService()
 
     registry = ToolRegistry()
     registry.register(StockQuoteTool(mock_tushare=mock_tushare))
     registry.register(GetFinancialsTool(mock_tushare=mock_tushare))
-    registry.register(GetNewsTool(mock_bocha=mock_bocha))
+    registry.register(GetNewsTool(bocha=build_bocha_service_from_env()))
 
     planner = ChatPlanner(llm=llm, registry=registry)
     responder = Responder(llm=llm)

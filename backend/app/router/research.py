@@ -113,9 +113,8 @@ def get_research_graph() -> Any:
     registry = ToolRegistry()
     registry.register(StockQuoteTool(mock_tushare=mock_tushare))
     registry.register(GetFinancialsTool(mock_tushare=mock_tushare))
-    registry.register(GetNewsTool(mock_bocha=mock_bocha))
-    bocha_for_websearch = build_bocha_service_from_env()
-    registry.register(WebSearchTool(bocha=bocha_for_websearch))
+    registry.register(GetNewsTool(bocha=build_bocha_service_from_env()))
+    registry.register(WebSearchTool(bocha=build_bocha_service_from_env()))
     registry.register(MockKbSearchTool(mock_bocha=mock_bocha))
 
     planner = ResearchPlanner(llm=llm)
