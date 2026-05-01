@@ -103,11 +103,20 @@ class EvalRunner:
             sut_output.tool_calls if sut_output.tool_calls else None
         )
 
+        # v0.5: pass report_markdown only when the SUT produced tool_calls
+        # (i.e., agentic / research-mode SUT path). Bare LLMService SUT has no
+        # tool_calls → report_markdown stays None → 4-dim judge prompt (Plan C
+        # backward compat preserved). ResearchAgent always has tool_calls →
+        # 5-dim judge prompt → report_markdown_quality scored.
+        report_markdown_for_judge: str | None = (
+            sut_output.response_text if tool_calls_for_judge is not None else None
+        )
         scores, judge_meta = self._judge.score(
             case=case,
             sut_response=sut_output.response_text,
             trace_summary=trace_summary,
             tool_calls=tool_calls_for_judge,
+            report_markdown=report_markdown_for_judge,
         )
 
         result = EvalResult(

@@ -1,0 +1,8 @@
+{
+  "id": "judge_5dim_with_report_markdown",
+  "response": {
+    "content": "{\"factuality\": {\"score\": 8, \"evidence\": \"数据准确\"}, \"tool_correctness\": {\"score\": 9, \"evidence\": \"tool get_stock_quote called correctly\"}, \"coverage\": {\"score\": 7, \"evidence\": \"覆盖主要维度\"}, \"structure\": {\"score\": 8, \"evidence\": \"结构清晰\"}, \"report_markdown_quality\": {\"score\": 8.5, \"evidence\": \"Markdown 格式规范,章节完整\"}}",
+    "prompt_tokens": 400,
+    "completion_tokens": 100
+  }
+}

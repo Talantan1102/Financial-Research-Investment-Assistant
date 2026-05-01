@@ -1,4 +1,10 @@
 entries:
+  - pattern: "^你是金融研究助手 critic_"
+    response:
+      content: '{"score": 8.0, "evidence": "数据准确,结构清晰,符合预期。"}'
+      prompt_tokens: 200
+      completion_tokens: 30
+
   - pattern: "^SANITY_WRONG_"
     response:
       content: "你好,我是助手。"
@@ -16,6 +22,14 @@ entries:
       content: "The current price of 600519.SH (Kweichow Moutai) is 1680.00 CNY."
       prompt_tokens: 15
       completion_tokens: 20
+
+  # Judge with report_markdown_quality (ResearchAgent SUT path, 5-dim) — most specific,
+  # must precede the 4-dim with-tools and generic judge patterns.
+  - pattern: "^你是金融研究助手的输出评审员[\\s\\S]*研报 Markdown:"
+    response:
+      content: "__recorded__:judge_5dim_with_report_markdown"
+      prompt_tokens: 400
+      completion_tokens: 100
 
   # Judge with tool_calls section (ChatAgent SUT path) — must precede generic judge pattern.
   - pattern: "^你是金融研究助手的输出评审员[\\s\\S]*实际 tool_calls"
@@ -38,6 +52,30 @@ entries:
       content: "根据查询,茅台(600519.SH)当前股价 1820.5 元。"
       prompt_tokens: 80
       completion_tokens: 20
+
+  # Writer: matched by the system-role prefix injected by build_writer_prompt.
+  # Must appear BEFORE Analyst/ResearchPlanner/ChatPlanner patterns.
+  - pattern: "^你是金融研究助手 writer"
+    response:
+      content: '{"report_markdown":"# 茅台(600519.SH)研报\n\n## 概况\n茅台当前股价 1820.5 元。\n\n![价格走势](chart://c1)\n\n## 财务\n营收稳健增长。\n","chart_specs":[{"chart_id":"c1","chart_type":"line","title":"价格走势","data":[{"date":"2026-04-30","price":1820.5}],"x_axis":"date","y_axis":"price"}]}'
+      prompt_tokens: 100
+      completion_tokens: 80
+
+  # Analyst: matched by the system-role prefix injected by build_analyst_prompt.
+  # Must appear BEFORE ResearchPlanner and ChatPlanner patterns.
+  - pattern: "^你是金融研究助手 analyst"
+    response:
+      content: '{"insights":[{"subtask_id":"overview","finding":"茅台当前股价 1820.5 元,处于高位震荡","supporting_data":[{"price":1820.5}],"confidence":"high"},{"subtask_id":"financial_health","finding":"营收稳健增长","supporting_data":[],"confidence":"medium"}]}'
+      prompt_tokens: 120
+      completion_tokens: 80
+
+  # ResearchPlanner: matched by the system-role prefix injected by build_planner_prompt.
+  # Must appear BEFORE ChatPlanner's "planner" prefix so more-specific match wins.
+  - pattern: "^你是金融研究助手 research_planner"
+    response:
+      content: '{"subtasks":[{"subtask_id":"overview","description":"公司概况","required_tools":["get_stock_quote"],"rationale":"行情基线"},{"subtask_id":"financial_health","description":"财务健康度","required_tools":["get_financials"],"rationale":"基本面"}],"target_entity":"600519.SH","research_style":"comprehensive","reasoning":"双子任务拆分"}'
+      prompt_tokens: 120
+      completion_tokens: 60
 
   # ChatPlanner: matched by the system-role prefix injected by build_planner_prompt
   # Must appear BEFORE the generic ts_code pattern below so it wins on planner prompts.

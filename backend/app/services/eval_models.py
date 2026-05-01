@@ -42,13 +42,21 @@ class JudgeScores(BaseModel):
     coverage_evidence: str
     structure: int = Field(ge=0, le=10)
     structure_evidence: str
+    # v0.5 Task 12: additive — scored when report_markdown is provided to Judge.score
+    report_markdown_quality: float | None = None
 
     @property
     def aggregate_avg(self) -> float:
         """Average over present (non-None) dimensions."""
         present = [
             v
-            for v in (self.factuality, self.tool_correctness, self.coverage, self.structure)
+            for v in (
+                self.factuality,
+                self.tool_correctness,
+                self.coverage,
+                self.structure,
+                self.report_markdown_quality,
+            )
             if v is not None
         ]
         return sum(present) / len(present)
@@ -82,6 +90,8 @@ class GoldenCase(BaseModel):
     user_input: str
     expected_behavior: dict[str, Any]
     metadata: dict[str, Any]
+    # v0.5 Task 12: additive — topic coverage hints for research-mode evaluation
+    expected_topics: list[str] = Field(default_factory=list)
 
 
 def load_golden_jsonl(path: Path) -> list[GoldenCase]:
