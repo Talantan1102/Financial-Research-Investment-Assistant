@@ -39,6 +39,14 @@ entries:
       prompt_tokens: 80
       completion_tokens: 20
 
+  # Writer: matched by the system-role prefix injected by build_writer_prompt.
+  # Must appear BEFORE Analyst/ResearchPlanner/ChatPlanner patterns.
+  - pattern: "^你是金融研究助手 writer"
+    response:
+      content: '{"report_markdown":"# 茅台(600519.SH)研报\n\n## 概况\n茅台当前股价 1820.5 元。\n\n![价格走势](chart://c1)\n\n## 财务\n营收稳健增长。\n","chart_specs":[{"chart_id":"c1","chart_type":"line","title":"价格走势","data":[{"date":"2026-04-30","price":1820.5}],"x_axis":"date","y_axis":"price"}]}'
+      prompt_tokens: 100
+      completion_tokens: 80
+
   # Analyst: matched by the system-role prefix injected by build_analyst_prompt.
   # Must appear BEFORE ResearchPlanner and ChatPlanner patterns.
   - pattern: "^你是金融研究助手 analyst"
