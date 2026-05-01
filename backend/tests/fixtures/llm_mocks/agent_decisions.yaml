@@ -23,6 +23,15 @@ entries:
       prompt_tokens: 350
       completion_tokens: 80
 
+  # Responder: matched by the system-role prefix injected by build_responder_prompt.
+  # Must appear BEFORE generic patterns so it wins on responder prompts.
+  # Pattern is DISTINCT from ChatPlanner's "planner" prefix to avoid first-match shadowing.
+  - pattern: "^你是金融研究助手 responder"
+    response:
+      content: "根据查询,茅台(600519.SH)当前股价 1820.5 元。"
+      prompt_tokens: 80
+      completion_tokens: 20
+
   # ChatPlanner: matched by the system-role prefix injected by build_planner_prompt
   # Must appear BEFORE the generic ts_code pattern below so it wins on planner prompts.
   - pattern: "^你是金融研究助手 planner"
