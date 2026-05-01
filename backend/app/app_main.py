@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 from router import document_router, research_router, search_router
 
 from app.core.database import Base, engine
-from app.router import chat
+from app.router import chat, research
 from app.router.attachment_router import router as attachment_router
 from app.router.auth_router import router as auth_router
 from app.router.database_router import router as database_router
@@ -86,6 +86,7 @@ app.include_router(database_router)
 app.include_router(document_router)
 app.include_router(search_router)
 app.include_router(chat.router)
+app.include_router(research.router)
 app.include_router(research_router)
 app.include_router(news_router)
 
