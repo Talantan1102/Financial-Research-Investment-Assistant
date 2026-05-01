@@ -119,9 +119,8 @@ def test_llm_service_sut_tool_correctness_is_none(
     result = runner.run_one(case)
 
     assert result.scores.factuality is not None
-    assert (
-        result.scores.tool_correctness is None
-    ), f"Expected tool_correctness=None for bare LLMService SUT, got {result.scores.tool_correctness}"
+    tc = result.scores.tool_correctness
+    assert tc is None, f"Expected tool_correctness=None for bare LLMService SUT, got {tc}"
 
 
 def test_chat_agent_sut_tool_correctness_is_not_none(
@@ -154,6 +153,5 @@ def test_chat_agent_sut_tool_correctness_is_not_none(
     result = runner.run_one(case)
 
     assert result.scores.factuality is not None
-    assert (
-        result.scores.tool_correctness is not None
-    ), "Expected tool_correctness to be scored for ChatAgent SUT, got None"
+    tc = result.scores.tool_correctness
+    assert tc is not None, "Expected tool_correctness to be scored for ChatAgent SUT, got None"
