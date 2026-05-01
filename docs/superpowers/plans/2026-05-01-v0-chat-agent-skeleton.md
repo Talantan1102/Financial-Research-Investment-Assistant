@@ -1578,22 +1578,62 @@ serve = "uvicorn app.app_main:app --reload --port 8000 --app-dir backend"
 
 > Filled in by implementer at Task 14.
 
-**Implementation completion date**:
-**Branch**:
-**Total commits**:
-**Total time**:
+**Implementation completion date**: 2026-05-01
+**Branch**: `feat/v0-chat-skeleton`
+**Total commits**: 19(13 个 feat/refactor/test + 4 个 chore format/deps + 1 个 spec/plan 提交 + 1 个 follow-up cleanup)
+**Total LOC delta**: 82 文件 / +6,056 / -13,094 = **净瘦身 -7,038 行**(超出 spec 估算的"-3-5k 行")
+**Total time**: ~3 小时主对话(subagent-driven cadence,约 14 个 subagent 派发,每次 implementer + 0-1 次 reviewer)
+**Final ci**: 143 tests pass(82 baseline + 61 新),mypy strict 154 源文件干净,ruff 干净,L2 cassette 18KB 0 drift ¥0.0005
 
 ### 对的设计(3 条)
 
+1. **B 路径(prompt-engineered JSON)即使 Spike A 兼容也保留** — Spike 1 证 DashScope deepseek-v4-flash 原生支持 OpenAI tool-calling,但 Task 7 仍选 B 路径。**收益**:LLMService 契约保持(没新增 `tools=` 参数),复用 Plan B Judge 已稳的 prompt+JSON parse 模式,代码对称。**实测验证**:cassette 真打跑通,Plan JSON 解析没问题,planner 路由到 `get_stock_quote` 正确。
+
+2. **SUT Protocol + adapter 兼容 Plan C 老测试零修改** — Task 12 `EvalRunner.__init__(sut: SUT | LLMService, ...)` + `_LLMServiceSUT` adapter 让 Plan C/D 现有 EvalRunner tests 不需要改一行,同时新加 ChatAgent SUT 路径解锁 `tool_correctness` 评分维度。**这是"additive 不破坏"的教科书示例**,值得在 v0.5 spec 推广(ResearchAgent 加 SUT 时同模式)。
+
+3. **Task 0 spike 真值 5 分钟 + plan retrospective 显式填写** — 3 个 spike(DashScope tool-calling / LangGraph 事件类型 / SqliteSaver import 路径)在 Task 1 之前 5 分钟跑完,**直接修正了 plan 的 LangGraph 版本假设(0.2 → 1.1)+ 提前发现 SqliteSaver 已拆 separate package**。如果不 spike,Task 9 实施时撞到 ImportError 才发现,plan revision 成本高得多。
+
 ### 错的设计 / plan 漏了什么(3 条)
+
+1. **Plan Step 4 "绝不让 import 失败" 在 Task 1 第一次执行没彻底** — implementer 第一次提交后,`research_router.py:11` + `tool_executor.py:28` 仍有 unguarded import of deleted modules。**spec compliance reviewer 抓出来才修(commit `6c2562d`)**。教训:删除型 task 的 implementer prompt 要把"grep 验证"作为 explicit self-review checklist,不只是 plan 内文字契约。
+
+2. **`_llm_adapter.py` 一开始放在 `app.data` 是 architectural smell** — Task 5 implementer 为了让 `tushare_client.py`(legacy)不破坏,新建 `app/data/_llm_adapter.py` 但其中含 `from openai import OpenAI`,违反"agents/tools/services 不 import openai"契约的精神(虽然 `app.data` 不在 list 里)。**Task 11 移到 `app/services/openai_client.py` 才正名**。教训:Plan B/C/D 把 LLMService 契约写得很死(只 LLMService 能 import openai),但**没说真 LLM client adapter 该住哪里**,Task 13(cassette)前迟早要建,plan 应该在 Task 5 / 11 之间 explicit 化。
+
+3. **ruff 0.6.9(pre-commit pinned)vs 0.15.12(venv resolved)version drift** — pyproject 的 `ruff>=0.6` 让 venv 装最新,但 .pre-commit-config.yaml 仍 pin 0.6.9。两版对 `assert (...) , msg` 多行 wrap 模式 disagree,**Task 10/12/13 各撞了一次,3 个 chore(format) 跟进 commit**。教训:dev-tooling 版本应该 pin 一致(下次 spec 在"开发环境"一节加"version-pin alignment between pyproject + pre-commit")。
 
 ### 下个 spec / plan 要避免(3 条)
 
+1. **删除型 task 必须 plan 阶段嵌一个"unguarded reference 自动 grep"步骤** — 不能只靠 implementer 看 plan Step 4 的契约文字。模板:
+   ```
+   STEP X.Y: 自动 grep 全 backend/ 寻找 N 个被删模块的 unguarded references
+   - 命令固定写在 plan 里
+   - implementer 要把 grep 输出贴在 self-review report 里
+   - 任何 unguarded match 都要 stub/comment/import-guard,不能合并
+   ```
+
+2. **跨 task 共享的"基础设施类组件"(如 OpenAIClient adapter)不能让 implementer 自己决定放哪** — plan 应该 explicit 标注"production wiring 组件应放 `app.services.<name>.py`",而不是依赖 implementer 灵感。下次 spec 加一节"基础设施落点表",每个共享组件标 module path + 谁先建谁负责。
+
+3. **dev-tooling 版本 alignment 应该在 spec 一开头检查** — 下次 spec 第 0 节"开发环境"应包含一条 "verify pyproject `<tool>>=X.Y` lower-bound matches `.pre-commit-config.yaml` `rev: vX.Y.Z`",自动避免本次 ruff 0.6/0.15 漂移。
+
 ### 沉淀到 memory
+
+需要新加的 memories:
+- **`feedback_unguarded_imports_after_delete`**(feedback)— 删除型 task 必须 plan 阶段强制 grep N 个被删模块的 unguarded refs,不能只写"Step 4: 处理引用"(本 plan Task 1 教训,被 reviewer 抓出来)。
+- **`feedback_dev_tool_version_pin_alignment`**(feedback)— pyproject `>=X.Y` lower-bound 与 `.pre-commit-config.yaml` `rev: vX.Y.Z` 必须 align,否则 hooks 与 venv runs 会 disagree(本 plan ruff 0.6 vs 0.15 教训)。
+- **`project_v0_architecture_landed`**(project)— v0 chat agent skeleton 落地状态:LangGraph 1.1 + Pydantic agents + 3 tools + SSE + SqliteSaver checkpointer + EvalRunner SUT swap;`app.services.openai_client.build_llm_service_from_env()` 是真 LLM 入口;deepseek-v4-flash 是 v0 默认。
+- 更新 **`project_eval_pipeline_contract`**:加 SUT Protocol + ChatAgent 作为新 SUT 类型,Plan C bare LLMService 仍兼容(`_LLMServiceSUT` adapter)。
 
 ### Subagent-driven-development 节奏复盘
 
+- **总 14 个 task 的 subagent 派发**:Task 1 / 5 / 11 / 12 / 13 用了 implementer + 1 spec reviewer 双步,其他 task(Task 2 / 3 / 4 / 6 / 7 / 8 / 9 / 10)用 implementer 单步 + 主控 spot-check。**Task 1 双步 catch 到 BLOCKING import 缺口,值回票价**;**Task 5 双步 catch 到 architectural smell(_llm_adapter 放错位置),defer 到 Task 11 修**。
+- **subagent 报告偶有不准**(Task 5 implementer 报"101 tests" 实际 100,Task 10 报 "ci 绿" 但 ruff format 没跑过)。**主控必须独立 verify**(`uv run poe ci`),不能盲信 implementer self-report。
+- **格式漂移成本**:每次 ruff 0.6/0.15 撞车需要一个 follow-up `chore(format)` commit;3 次共消耗 ~10 分钟主对话。如果当时直接 fix `.pre-commit-config.yaml` 的 ruff `rev: v0.15.x` 会一次性解决,但担心引发其他 file 的 reformatting 涟漪,选了 "撞一个修一个" 路径。下次正经修。
+- **subagent 选择 sonnet 全程够用**:14 次 implementer + 5 次 reviewer,均跑通,没有需要升级到 opus 的场景(因为 plan 写得够具体,implementer 只需 follow + grep + 局部判断)。
+
 ### v0.5 启动条件
+
+v0 完成后,v0.5 research mode spec 可以起草。依赖就位:
+- ✅ LangGraph + checkpointer 已用过
 
 v0 完成后,v0.5 research mode spec 可以起草。依赖就位:
 - ✅ LangGraph + checkpointer 已用过
