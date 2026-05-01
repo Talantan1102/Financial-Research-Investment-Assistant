@@ -31,7 +31,7 @@ def test_factory_real(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BOCHA_API_KEY", "fake-key-for-test")
     svc = build_bocha_service_from_env()
     assert _supports_protocol(svc)
-    assert type(svc).__name__ == "BochaClient"
+    assert type(svc).__name__ == "ReliableBochaService"  # was "BochaClient"
 
 
 def test_factory_unknown_mode_rejected(monkeypatch: pytest.MonkeyPatch) -> None:

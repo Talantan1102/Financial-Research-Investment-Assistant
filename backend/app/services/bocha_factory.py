@@ -68,5 +68,26 @@ def build_bocha_service_from_env() -> BochaService:
         if "BOCHA_API_KEY" not in os.environ:
             raise KeyError("BOCHA_API_KEY required when BOCHA_MODE=real")
         base_url = os.environ.get("BOCHA_BASE_URL", "https://api.bochaai.com/v1/web-search")
-        return BochaClient(api_key=os.environ["BOCHA_API_KEY"], base_url=base_url)
+        from pathlib import Path
+
+        from app.services.circuit_breaker import CircuitBreaker
+        from app.services.cost_budget import CostBudget
+        from app.services.quota_counter import QuotaCounter
+        from app.services.rate_limiter import RateLimiter
+        from app.services.reliable_bocha_service import ReliableBochaService
+
+        client = BochaClient(api_key=os.environ["BOCHA_API_KEY"], base_url=base_url)
+        return ReliableBochaService(
+            inner=client,
+            rate_limiter=RateLimiter(max_calls=60, window_s=60.0),
+            circuit_breaker=CircuitBreaker(failure_threshold=5, cooldown_s=30.0),
+            quota_counter=QuotaCounter(
+                db_path=Path("backend/data/eval.sqlite"),
+                name="bocha_search_monthly",
+                monthly_limit=1000,
+            ),
+            cost_budget=CostBudget(limit_cny=20.0),
+            per_call_cost_cny=0.02,
+            max_retries=3,
+        )
     raise ValueError(f"BOCHA_MODE must be 'mock' or 'real', got {mode!r}")
