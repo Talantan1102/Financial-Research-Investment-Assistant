@@ -17,9 +17,16 @@ _SYSTEM_PROMPT = """你是金融研究助手 analyst。
 输出 JSON:
 {
   "insights": [
-    {"subtask_id":"...", "finding":"...", "supporting_data":[...], "confidence":"high|medium|low"}
+    {
+      "subtask_id": "...",
+      "finding": "...",
+      "supporting_data": [{"key": "price", "value": "1820.5"}],
+      "confidence": "high|medium|low"
+    }
   ]
 }
+
+注意:supporting_data 每个元素必须是 JSON 对象(dict),不能是字符串。
 """
 
 
