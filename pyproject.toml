@@ -20,7 +20,8 @@ dependencies = [
     # AI/LLM
     "openai>=1.40",
     "tiktoken>=0.7",
-    "langgraph>=0.2",
+    "langgraph>=1.0,<2",
+    "langgraph-checkpoint-sqlite>=3.0,<4",
     # Vector DB (kept for KB; v0 main path doesn't use it)
     "pymilvus>=2.4",
     # NLP

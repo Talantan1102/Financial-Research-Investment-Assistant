@@ -1546,20 +1546,31 @@ serve = "uvicorn app.app_main:app --reload --port 8000 --app-dir backend"
 > Filled in by implementer at Task 0.
 
 ### Spike 1: DashScope OpenAI tool-calling 兼容性
-- **Date probed**:
-- **Result**: A / B / C
-- **HAS_TOOL_CALLS**:
-- **Action taken**: Task 7 走哪条路径
+- **Date probed**: 2026-05-01
+- **Result**: **A** — DashScope native supports OpenAI tool-calling
+- **HAS_TOOL_CALLS**: `True`,返回 `ChatCompletionMessageFunctionToolCall(function=Function(arguments='{"ts_code": "600519.SH"}', name='get_stock_quote'))`,LLM 准确识别意图 + 提取参数
+- **Model probed**: `deepseek-v4-flash` via `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- **Usage**: 283 prompt tokens + 77 completion tokens
+- **Action taken**: Task 7 决定走 **B 路径**(prompt-engineered JSON),即使 Spike 显示 A 兼容。理由:复用 Plan B Judge 已验证的 "prompt + JSON parse" 模式,LLMService 契约保持不破坏(不加 `tools=` 参数),代码对称性更好;Spike 1 已证 deepseek-v4-flash 智能足以 handle B 路径。如果 B 路径 prompt-engineered 路由率不达标(< 70%),再切 A 并扩展 LLMService。
 
 ### Spike 2: LangGraph astream_events v2 事件类型
-- **Date probed**:
-- **EVENT_TYPES**:
-- **Action taken**: Task 11 _adapt_event 形态
+- **Date probed**: 2026-05-01
+- **LangGraph version**: **1.1.10**(plan 假设的 0.2.x 已大幅 outdated;pyproject 已收紧到 `>=1.0,<2`)
+- **EVENT_TYPES**: `['on_chain_end', 'on_chain_start', 'on_chain_stream']`(3 种 chain-level 事件,与 spec § 5 假设大致一致)
+- **Event order**(2 节点 toy graph,共 10 events):`on_chain_start/LangGraph` → `on_chain_start/p` → `on_chain_stream/p` → `on_chain_end/p` → `on_chain_stream/LangGraph` → `on_chain_start/r` → ... 节点级嵌套清晰,`name` 字段区分节点
+- **Action taken**: Task 11 `_adapt_event` 按 (event, name) tuple 分发:`on_chain_start/<node>` → `plan` / `tool_start` 事件;`on_chain_end/<node>` → `tool_end` 事件。父级 `on_chain_start/LangGraph` 滤掉(否则 SSE 重复)。LLM token 流(`on_chat_model_stream`)Task 11 实施时再验(本 toy 无 LLM 节点未触发)。
 
 ### Spike 3: LangGraph SqliteSaver
-- **Date probed**:
-- **Import path**:
-- **Action taken**: Task 9 import 是否需调整 + 是否新增 dep
+- **Date probed**: 2026-05-01
+- **Import path**: `from langgraph.checkpoint.sqlite import SqliteSaver`(与 spec § 2 一致,但 **该 module 不在 langgraph 主 package 中**,而是在独立的 `langgraph-checkpoint-sqlite==3.0.3` package)
+- **公共方法**: `aget_tuple` / `aput` / `aput_writes` / `alist` / `delete_thread` / `acopy_thread` 等齐全,`thread_id` based 跨 session 隔离原生支持
+- **Action taken**: pyproject 加 dep `langgraph-checkpoint-sqlite>=3.0,<4`(已加,uv lock 已更新)。Task 9 `checkpointer.py` import 路径与 plan 草拟一致,无需调整。
+
+### Spike outcome summary
+- **Plan 大致 intact**:9 个核心决策无需调整,只是 LangGraph 大版本升级(0.2 → 1.1)+ checkpoint 拆分独立 package。
+- **pyproject deps 已更新**:`langgraph>=1.0,<2` + 新增 `langgraph-checkpoint-sqlite>=3.0,<4`(原 plan Task 13 计划做的版本锁同步前移到 Task 0)。
+- **Task 7 (ChatPlanner) 路径决议**:走 prompt-engineered JSON(B 路径),保持 LLMService 契约稳定。
+- **Task 13 pyproject 改动**:不再需要(版本锁已在 Task 0 完成);Task 13 仍要加 `serve` poe task。
 
 ---
 
