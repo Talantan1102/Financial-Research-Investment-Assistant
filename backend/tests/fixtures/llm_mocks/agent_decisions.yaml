@@ -39,6 +39,14 @@ entries:
       prompt_tokens: 80
       completion_tokens: 20
 
+  # Analyst: matched by the system-role prefix injected by build_analyst_prompt.
+  # Must appear BEFORE ResearchPlanner and ChatPlanner patterns.
+  - pattern: "^你是金融研究助手 analyst"
+    response:
+      content: '{"insights":[{"subtask_id":"overview","finding":"茅台当前股价 1820.5 元,处于高位震荡","supporting_data":[{"price":1820.5}],"confidence":"high"},{"subtask_id":"financial_health","finding":"营收稳健增长","supporting_data":[],"confidence":"medium"}]}'
+      prompt_tokens: 120
+      completion_tokens: 80
+
   # ResearchPlanner: matched by the system-role prefix injected by build_planner_prompt.
   # Must appear BEFORE ChatPlanner's "planner" prefix so more-specific match wins.
   - pattern: "^你是金融研究助手 research_planner"
