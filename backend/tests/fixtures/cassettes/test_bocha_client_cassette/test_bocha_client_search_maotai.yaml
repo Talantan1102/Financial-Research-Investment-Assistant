@@ -1,0 +1,57 @@
+interactions:
+- request:
+    body: "{\"query\":\"\u8D35\u5DDE\u8305\u53F0 600519\",\"summary\":true,\"count\":3,\"page\":1}"
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '65'
+      Content-Type:
+      - application/json
+      Host:
+      - api.bochaai.com
+      User-Agent:
+      - python-httpx/0.28.1
+    method: POST
+    uri: https://api.bochaai.com/v1/web-search
+  response:
+    body:
+      string: "{\"code\":200,\"log_id\":\"92027af4ca1be4a8\",\"msg\":null,\"data\":{\"_type\":\"SearchResponse\",\"queryContext\":{\"originalQuery\":\"\u8D35\u5DDE\u8305\u53F0
+        600519\"},\"webPages\":{\"webSearchUrl\":\"https://bochaai.com/search?q=\u8D35\u5DDE\u8305\u53F0
+        600519\",\"totalEstimatedMatches\":10000000,\"value\":[{\"id\":\"https://api.bochaai.com/v1/#WebPages.0\",\"name\":\":\u56DE\u590D\",\"url\":\"https://xueqiu.com/6037840773/321219864\",\"displayUrl\":\"https://xueqiu.com/6037840773/321219864\",\"snippet\":\"$\u8D35\u5DDE\u8305\u53F0(SH600519)$
+        , , , , , \u3001 \u3001 \u3001 \u3001 , , \u3001 \u3001 , \\n\u5C55\u5F00
+        \uE63C\",\"summary\":\"$\u8D35\u5DDE\u8305\u53F0(SH600519)$ , , , , , \u3001
+        \u3001 \u3001 \u3001 , , \u3001 \u3001 , \\n\u5C55\u5F00 \uE63C\",\"siteName\":\"\u96EA\u7403\",\"siteIcon\":\"https://th.bochaai.com/favicon?domain_url=https://xueqiu.com/6037840773/321219864\",\"datePublished\":\"2025-01-22T01:47:00+08:00\",\"dateLastCrawled\":\"2025-01-22T01:47:00Z\",\"cachedPageUrl\":null,\"language\":null,\"isFamilyFriendly\":null,\"isNavigational\":null},{\"id\":\"https://api.bochaai.com/v1/#WebPages.1\",\"name\":\"\u8D35\u5DDE\u8305\u53F0(600519)\",\"url\":\"http://data.eastmoney.com/notices/stock/600519.html?f_node=5\",\"displayUrl\":\"http://data.eastmoney.com/notices/stock/600519.html?f_node=5\",\"snippet\":\"\u90D1\u91CD\u58F0\u660E:
+        \u4E1C\u65B9\u8D22\u5BCC\u7F51\u53D1\u5E03\u6B64\u4FE1\u606F\u7684\u76EE\u7684\u5728\u4E8E\u4F20\u64AD\u66F4\u591A\u4FE1\u606F,\u4E0E\u672C\u7AD9\u7ACB\u573A\u65E0\u5173\u3002\u4E1C\u65B9\u8D22\u5BCC\u7F51\u4E0D\u4FDD\u8BC1\u8BE5\u4FE1\u606F(\u5305\u62EC\u4F46\u4E0D\u9650\u4E8E\u6587\u5B57\u3001\u89C6\u9891\u3001\u97F3\u9891\u3001\u6570\u636E\u53CA\u56FE\u8868)\u5168\u90E8\u6216\u8005\u90E8\u5206\u5185\u5BB9\u7684\u51C6\u786E\u6027\u3001\u771F\u5B9E\u6027\u3001\u5B8C\u6574\u6027\u3001\u6709\u6548\u6027\u3001\u53CA\u65F6\u6027\u3001\u539F\u521B\",\"summary\":\"\u90D1\u91CD\u58F0\u660E:
+        \u4E1C\u65B9\u8D22\u5BCC\u7F51\u53D1\u5E03\u6B64\u4FE1\u606F\u7684\u76EE\u7684\u5728\u4E8E\u4F20\u64AD\u66F4\u591A\u4FE1\u606F,\u4E0E\u672C\u7AD9\u7ACB\u573A\u65E0\u5173\u3002\u4E1C\u65B9\u8D22\u5BCC\u7F51\u4E0D\u4FDD\u8BC1\u8BE5\u4FE1\u606F(\u5305\u62EC\u4F46\u4E0D\u9650\u4E8E\u6587\u5B57\u3001\u89C6\u9891\u3001\u97F3\u9891\u3001\u6570\u636E\u53CA\u56FE\u8868)\u5168\u90E8\u6216\u8005\u90E8\u5206\u5185\u5BB9\u7684\u51C6\u786E\u6027\u3001\u771F\u5B9E\u6027\u3001\u5B8C\u6574\u6027\u3001\u6709\u6548\u6027\u3001\u53CA\u65F6\u6027\u3001\u539F\u521B\u6027\u7B49\u3002\u76F8\u5173\u4FE1\u606F\u5E76\u672A\u7ECF\u8FC7\u672C\u7F51\u7AD9\u8BC1\u5B9E,\u4E0D\u5BF9\u60A8\u6784\u6210\u4EFB\u4F55\u6295\u8D44\u5EFA\u8BAE,\u636E\u6B64\u64CD\u4F5C,\u98CE\u9669\u81EA\u62C5\u3002\",\"siteName\":\"\u4E1C\u65B9\u8D22\u5BCC\u7F51\u6570\u636E\u4E2D\u5FC3\",\"siteIcon\":\"https://th.bochaai.com/favicon?domain_url=http://data.eastmoney.com/notices/stock/600519.html?f_node=5\",\"datePublished\":\"2025-04-09T13:05:21+08:00\",\"dateLastCrawled\":\"2025-04-09T13:05:21Z\",\"cachedPageUrl\":null,\"language\":null,\"isFamilyFriendly\":null,\"isNavigational\":null},{\"id\":\"https://api.bochaai.com/v1/#WebPages.2\",\"name\":\"600519_\u8D35\u5DDE\u8305\u53F0_\u80A1\u7968\u884C\u60C5_\u80A1\u5E02_\u4E2D\u641C\u80A1\u7968\",\"url\":\"http://600519.stock.zhongsou.com/\",\"displayUrl\":\"http://600519.stock.zhongsou.com/\",\"snippet\":\"600519\u8D35\u5DDE\u8305\u53F0\u7684\u4E2A\u80A1\u4FE1\u606F,600519\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u5E02\u52A8\u6001,600519\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u884C\u60C5\u3001600519\u8D35\u5DDE\u8305\u53F0\u5927\u76D8\u52A8\u6001\u7B49\u4FE1\u606F\",\"summary\":\"600519\u8D35\u5DDE\u8305\u53F0\u7684\u4E2A\u80A1\u4FE1\u606F,600519\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u5E02\u52A8\u6001,600519\u8D35\u5DDE\u8305\u53F0\u7684\u80A1\u7968\u884C\u60C5\u3001600519\u8D35\u5DDE\u8305\u53F0\u5927\u76D8\u52A8\u6001\u7B49\u4FE1\u606F\",\"siteName\":\"600519.stock.zhongsou.com\",\"siteIcon\":\"https://th.bochaai.com/favicon?domain_url=http://600519.stock.zhongsou.com/\",\"datePublished\":\"2019-07-16T00:09:12+08:00\",\"dateLastCrawled\":\"2019-07-16T00:09:12Z\",\"cachedPageUrl\":null,\"language\":null,\"isFamilyFriendly\":null,\"isNavigational\":null}],\"someResultsRemoved\":true},\"images\":null,\"videos\":null}}"
+    headers:
+      Access-Control-Allow-Credentials:
+      - 'true'
+      Access-Control-Allow-Headers:
+      - '*'
+      Access-Control-Allow-Methods:
+      - GET, POST, PUT, DELETE, OPTIONS
+      Access-Control-Allow-Origin:
+      - '*'
+      Connection:
+      - keep-alive
+      Content-Type:
+      - application/json
+      Date:
+      - Fri, 01 May 2026 16:40:15 GMT
+      Set-Cookie:
+      - JSESSIONID=6FB50CC2F1ADA4A7384240B568176D81; Path=/; HttpOnly
+      Transfer-Encoding:
+      - chunked
+      Vary:
+      - Accept-Encoding
+      content-length:
+      - '3021'
+    status:
+      code: 200
+      message: ''
+version: 1
