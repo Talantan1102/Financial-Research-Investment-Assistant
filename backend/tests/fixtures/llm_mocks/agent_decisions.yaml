@@ -39,6 +39,14 @@ entries:
       prompt_tokens: 80
       completion_tokens: 20
 
+  # ResearchPlanner: matched by the system-role prefix injected by build_planner_prompt.
+  # Must appear BEFORE ChatPlanner's "planner" prefix so more-specific match wins.
+  - pattern: "^你是金融研究助手 research_planner"
+    response:
+      content: '{"subtasks":[{"subtask_id":"overview","description":"公司概况","required_tools":["get_stock_quote"],"rationale":"行情基线"},{"subtask_id":"financial_health","description":"财务健康度","required_tools":["get_financials"],"rationale":"基本面"}],"target_entity":"600519.SH","research_style":"comprehensive","reasoning":"双子任务拆分"}'
+      prompt_tokens: 120
+      completion_tokens: 60
+
   # ChatPlanner: matched by the system-role prefix injected by build_planner_prompt
   # Must appear BEFORE the generic ts_code pattern below so it wins on planner prompts.
   - pattern: "^你是金融研究助手 planner"
