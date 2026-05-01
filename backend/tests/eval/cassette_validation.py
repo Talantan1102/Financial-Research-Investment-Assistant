@@ -38,7 +38,12 @@ SIMILARITY_THRESHOLD = 8  # 0-10 scale; spec § 4 says 0.8
 
 
 def _extract_first_interaction(cassette_path: Path) -> tuple[str, str, str] | None:
-    """Returns (model, prompt, recorded_response) or None if cassette is empty/unsupported."""
+    """Returns (model, prompt, recorded_response) or None if cassette is empty/unsupported.
+
+    Only handles LLM-shaped cassettes (OpenAI-compatible chat.completions response).
+    Non-LLM cassettes (e.g. Bocha search API) are skipped — drift detection for
+    those uses different signal types and lives outside this validator.
+    """
     data = yaml.safe_load(cassette_path.read_text(encoding="utf-8"))
     if not data or "interactions" not in data or not data["interactions"]:
         return None
@@ -50,6 +55,9 @@ def _extract_first_interaction(cassette_path: Path) -> tuple[str, str, str] | No
     prompt = msgs[-1]["content"] if msgs else ""
     resp_str = first["response"]["body"]["string"]
     resp_obj = json.loads(resp_str)
+    # Skip non-LLM cassettes (no `choices` key — e.g. search APIs)
+    if "choices" not in resp_obj:
+        return None
     recorded = resp_obj["choices"][0]["message"]["content"]
     return model, prompt, recorded
 
