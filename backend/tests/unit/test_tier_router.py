@@ -4,11 +4,11 @@ import pytest
 from app.services.tier_router import TierConfig, TierRouter
 
 
-def test_default_v0_config_all_tiers_resolve_to_v4_flash() -> None:
+def test_default_v0_config_all_tiers_resolve_to_default_model() -> None:
     router = TierRouter.from_default_v0_config()
-    assert router.resolve("fast") == "deepseek-v4-flash"
-    assert router.resolve("balanced") == "deepseek-v4-flash"
-    assert router.resolve("deep") == "deepseek-v4-flash"
+    assert router.resolve("fast") == "deepseek-v3.2"
+    assert router.resolve("balanced") == "deepseek-v3.2"
+    assert router.resolve("deep") == "deepseek-v3.2"
 
 
 def test_custom_config_resolves_per_tier() -> None:

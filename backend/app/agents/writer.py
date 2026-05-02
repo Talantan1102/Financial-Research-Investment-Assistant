@@ -40,7 +40,16 @@ def _parse_writer_output(content: str) -> tuple[str, list[ChartSpec]]:
     cleaned = re.sub(r"\s*```\s*$", "", cleaned)
     data: dict[str, Any] = json.loads(cleaned)
     md = str(data.get("report_markdown", ""))
-    specs = [ChartSpec.model_validate(s) for s in data.get("chart_specs", [])]
+    # Some LLM backends (e.g. deepseek-v3.2) emit `data` as a string instead of
+    # list[dict] — a Pydantic ValidationError there must not bring down the whole
+    # writer node, since chart_specs is a soft enrichment and the report markdown
+    # is the load-bearing output.
+    specs: list[ChartSpec] = []
+    for s in data.get("chart_specs", []):
+        try:
+            specs.append(ChartSpec.model_validate(s))
+        except Exception:
+            continue
     return md, specs
 
 
