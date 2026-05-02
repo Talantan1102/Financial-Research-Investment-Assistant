@@ -9,8 +9,7 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 import dashscope
 
@@ -54,27 +53,18 @@ class QwenEmbeddingService:
         if base_url:
             dashscope.base_http_api_url = base_url
 
-    async def _call_api(self, batch: list[str]) -> Any:
-        """Call dashscope.TextEmbedding.call, supporting both sync SDK and AsyncMock in tests."""
-        result = await asyncio.to_thread(
-            dashscope.TextEmbedding.call,
-            model=self.model_name,
-            input=batch,
-            dimension=self.dimension,
-        )
-        # AsyncMock (used in tests) returns a coroutine when called in to_thread;
-        # real dashscope SDK returns a plain response object.
-        if inspect.iscoroutine(result):
-            result = await result
-        return result
-
     async def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
         out: list[list[float]] = []
         for i in range(0, len(texts), _QWEN_MAX_BATCH):
             batch = texts[i : i + _QWEN_MAX_BATCH]
-            resp = await self._call_api(batch)
+            resp = await asyncio.to_thread(
+                dashscope.TextEmbedding.call,
+                model=self.model_name,
+                input=batch,
+                dimension=self.dimension,
+            )
             if resp.status_code != 200:
                 raise RuntimeError(
                     f"dashscope embed failed: {resp.status_code} {getattr(resp, 'message', '')}"

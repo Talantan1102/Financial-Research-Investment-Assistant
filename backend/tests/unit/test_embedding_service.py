@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 from app.services.embedding_service import (
@@ -52,8 +51,7 @@ async def test_qwen_embed_calls_dashscope_and_returns_vectors(
         },
     )()
 
-    call_mock = AsyncMock(return_value=fake_response)
-    monkeypatch.setattr("dashscope.TextEmbedding.call", call_mock)
+    monkeypatch.setattr("dashscope.TextEmbedding.call", lambda **kw: fake_response)
 
     svc = QwenEmbeddingService(api_key="sk-test")
     vectors = await svc.embed(["text 1", "text 2"])
