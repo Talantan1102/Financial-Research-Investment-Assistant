@@ -1142,6 +1142,21 @@ wheels = [
 ]
 
 [[package]]
+name = "dashscope"
+version = "1.25.17"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "certifi" },
+    { name = "cryptography" },
+    { name = "requests" },
+    { name = "websocket-client" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4a/25/2e9d14f3a0e200a7468069ba31953998f6a234ee2d73b1bb74aaf7aa66cb/dashscope-1.25.17-py3-none-any.whl", hash = "sha256:ed5ff8508f91df1663300ebef572e2b73f2acd7a0473a80d7179f5225a13c7d9", size = 1346198, upload-time = "2026-04-16T02:24:21.889Z" },
+]
+
+[[package]]
 name = "dateparser"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1348,6 +1363,7 @@ dependencies = [
     { name = "alembic" },
     { name = "beautifulsoup4" },
     { name = "cachetools" },
+    { name = "dashscope" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jieba" },
@@ -1405,6 +1421,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "beautifulsoup4", specifier = ">=4.12" },
     { name = "cachetools", specifier = ">=5.5.0" },
+    { name = "dashscope", specifier = ">=1.20" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "jieba", specifier = ">=0.42" },
