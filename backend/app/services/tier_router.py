@@ -3,10 +3,7 @@
 v0 maps all tiers to a single chat model; the interface stays stable so
 v1+ can swap to multi-model with a config change only.
 
-v0.7 endpoint cutover (2026-05-03): default switched from deepseek-v4-flash
-(legacy DashScope post-pay account, decommissioned) to deepseek-v3.2
-(token-plan endpoint). Same vendor family — JSON output style and code-fence
-stripping in agent _parse_plan keep working unchanged.
+default = deepseek-v4-flash (DashScope post-pay account, restored 2026-05-03 after a brief token-plan misadventure)
 """
 
 from pydantic import BaseModel, ConfigDict
