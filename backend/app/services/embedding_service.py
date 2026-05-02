@@ -50,7 +50,11 @@ class QwenEmbeddingService:
         self._api_key = api_key
         self._base_url = base_url
         dashscope.api_key = api_key
-        if base_url:
+        # ⚠️ DASHSCOPE_BASE_URL 在 .env 是 OpenAI compatible-mode endpoint
+        # (https://dashscope.aliyuncs.com/compatible-mode/v1),给 LLMService 走 openai SDK 用;
+        # dashscope SDK TextEmbedding.call 用 native API,设 compatible-mode URL 会 404。
+        # 仅当 base_url 是 native dashscope endpoint(不含 compatible-mode)时才覆盖默认。
+        if base_url and "compatible-mode" not in base_url:
             dashscope.base_http_api_url = base_url
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
