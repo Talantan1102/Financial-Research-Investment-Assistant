@@ -111,24 +111,34 @@ class IngestPipeline:
         return reports
 
     @staticmethod
-    def _enforce_chunk_size_cap(chunks: list[Chunk], max_chars: int = 4800) -> list[Chunk]:
-        """Final cap:任何 chunk.text > max_chars 强切多段,re-assign chunk_index 顺序。
+    def _enforce_chunk_size_cap(chunks: list[Chunk], max_bytes: int = 4500) -> list[Chunk]:
+        """Final cap:任何 chunk.text UTF-8 字节长度 > max_bytes 强切多段。
 
-        max_chars=4800 留 200 char margin to Milvus VARCHAR(5000)上限。
-        中文 4800 chars × 1.33 ≈ 6400 tokens,在 dashscope embed 8192 token 限内。
+        ⚠️ Milvus VARCHAR max_length=5000 是 **字节** 不是字符。中文 UTF-8 3 bytes/char,
+        5000 bytes ~ 1666 chars max。max_bytes=4500 留 500 bytes margin。
+        切片用 UTF-8 byte boundary 回退,避免切断 multi-byte 字符。
+
+        chunker RecursiveSplitter chunk_size 是 char count(soft limit),某些 corpus
+        (财报大段 table markdown / 政策长条款)无合适 separator 切不开,在此做 final
+        byte-aware safety net。
         """
         out: list[Chunk] = []
         idx = 0
         for c in chunks:
-            if len(c.text) <= max_chars:
+            encoded = c.text.encode("utf-8")
+            if len(encoded) <= max_bytes:
                 out.append(c.model_copy(update={"chunk_index": idx}))
                 idx += 1
             else:
                 from app.kb.chunkers.base import count_tokens
 
-                # 强切 max_chars chars 一段
-                for sub_start in range(0, len(c.text), max_chars):
-                    sub_text = c.text[sub_start : sub_start + max_chars]
+                cursor = 0
+                while cursor < len(encoded):
+                    end = min(cursor + max_bytes, len(encoded))
+                    # 回退到 UTF-8 char boundary(non-leading byte: 10xxxxxx,即 & 0xC0 == 0x80)
+                    while end < len(encoded) and (encoded[end] & 0xC0) == 0x80:
+                        end -= 1
+                    sub_text = encoded[cursor:end].decode("utf-8")
                     out.append(
                         c.model_copy(
                             update={
@@ -138,6 +148,7 @@ class IngestPipeline:
                             }
                         )
                     )
+                    cursor = end
                     idx += 1
         return out
 

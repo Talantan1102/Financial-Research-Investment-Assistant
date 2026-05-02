@@ -133,23 +133,41 @@ async def test_pipeline_uses_cache_for_repeated_chunks(
 
 
 def test_enforce_chunk_size_cap_splits_oversize() -> None:
-    """oversize chunk(> max_chars)被强切成多段,chunk_index 重排."""
+    """oversize chunk(UTF-8 bytes > max_bytes)被强切成多段,chunk_index 重排."""
     from app.kb.chunkers.base import Chunk
 
     chunks = [
         Chunk(chunk_index=0, text="短段 A", tokens=4),
-        Chunk(chunk_index=1, text="x" * 12000, tokens=12000),  # 严重超长
+        Chunk(chunk_index=1, text="x" * 12000, tokens=12000),  # ASCII 12000 bytes
         Chunk(chunk_index=2, text="短段 B", tokens=4),
     ]
-    capped = IngestPipeline._enforce_chunk_size_cap(chunks, max_chars=4800)
+    capped = IngestPipeline._enforce_chunk_size_cap(chunks, max_bytes=4500)
 
-    # 12000 / 4800 = 3 段(4800 + 4800 + 2400),加上 2 个短段 = 5 chunks
+    # 12000 / 4500 = 3 段(4500 + 4500 + 3000)+ 2 短段 = 5 chunks
     assert len(capped) == 5
-    assert all(len(c.text) <= 4800 for c in capped)
+    assert all(len(c.text.encode("utf-8")) <= 4500 for c in capped)
     assert [c.chunk_index for c in capped] == [0, 1, 2, 3, 4]
-    # 短段 A / B 不被切
     assert capped[0].text == "短段 A"
     assert capped[4].text == "短段 B"
+
+
+def test_enforce_chunk_size_cap_chinese_byte_boundary() -> None:
+    """中文 UTF-8 3 bytes/char,切片不能切断 multi-byte char."""
+    from app.kb.chunkers.base import Chunk
+
+    # 2000 个中文字符 = 6000 bytes,需切 ≥ 2 段
+    long_zh = "金融" * 1000
+    assert len(long_zh.encode("utf-8")) == 6000
+
+    chunks = [Chunk(chunk_index=0, text=long_zh, tokens=2000)]
+    capped = IngestPipeline._enforce_chunk_size_cap(chunks, max_bytes=4500)
+
+    # 切出来每段 bytes ≤ 4500
+    assert all(len(c.text.encode("utf-8")) <= 4500 for c in capped)
+    # 重新 join 应该还原原文(无字符丢失)
+    assert "".join(c.text for c in capped) == long_zh
+    # 至少 2 段
+    assert len(capped) >= 2
 
 
 @pytest.mark.asyncio
