@@ -75,6 +75,12 @@ class IngestPipeline:
                 logger.warning("ingest doc=%s no_chunks_extracted", spec.doc_id)
                 return IngestReport(doc_id=spec.doc_id, success=False, error="no chunks")
 
+            # Hard cap 切分:任何 chunk text > 4800 chars 强切 — 守 Milvus VARCHAR 5000 上限
+            # 和 dashscope embed 8192 tokens 上限(中文 1.33 tokens/char,4800 chars ≈ 6400 tokens)。
+            # chunker RecursiveSplitter chunk_size=600 是 soft limit,某些 corpus(财报大段
+            # table markdown / 政策长条款)无合适 separator 切不开,在此做 final safety net。
+            chunks = self._enforce_chunk_size_cap(chunks)
+
             vectors = await self._embed_with_cache(chunks)
             rows = self._chunks_to_rows(spec, chunks, vectors)
 
@@ -103,6 +109,37 @@ class IngestPipeline:
             report = await self.ingest_doc(spec, force=force)
             reports.append(report)
         return reports
+
+    @staticmethod
+    def _enforce_chunk_size_cap(chunks: list[Chunk], max_chars: int = 4800) -> list[Chunk]:
+        """Final cap:任何 chunk.text > max_chars 强切多段,re-assign chunk_index 顺序。
+
+        max_chars=4800 留 200 char margin to Milvus VARCHAR(5000)上限。
+        中文 4800 chars × 1.33 ≈ 6400 tokens,在 dashscope embed 8192 token 限内。
+        """
+        out: list[Chunk] = []
+        idx = 0
+        for c in chunks:
+            if len(c.text) <= max_chars:
+                out.append(c.model_copy(update={"chunk_index": idx}))
+                idx += 1
+            else:
+                from app.kb.chunkers.base import count_tokens
+
+                # 强切 max_chars chars 一段
+                for sub_start in range(0, len(c.text), max_chars):
+                    sub_text = c.text[sub_start : sub_start + max_chars]
+                    out.append(
+                        c.model_copy(
+                            update={
+                                "chunk_index": idx,
+                                "text": sub_text,
+                                "tokens": count_tokens(sub_text),
+                            }
+                        )
+                    )
+                    idx += 1
+        return out
 
     async def _embed_with_cache(self, chunks: list[Chunk]) -> list[list[float]]:
         """Cache miss 的 chunks 批量 embed,hit 的直接拿."""

@@ -132,6 +132,26 @@ async def test_pipeline_uses_cache_for_repeated_chunks(
     assert "未缓存" in embed_input[0]
 
 
+def test_enforce_chunk_size_cap_splits_oversize() -> None:
+    """oversize chunk(> max_chars)被强切成多段,chunk_index 重排."""
+    from app.kb.chunkers.base import Chunk
+
+    chunks = [
+        Chunk(chunk_index=0, text="短段 A", tokens=4),
+        Chunk(chunk_index=1, text="x" * 12000, tokens=12000),  # 严重超长
+        Chunk(chunk_index=2, text="短段 B", tokens=4),
+    ]
+    capped = IngestPipeline._enforce_chunk_size_cap(chunks, max_chars=4800)
+
+    # 12000 / 4800 = 3 段(4800 + 4800 + 2400),加上 2 个短段 = 5 chunks
+    assert len(capped) == 5
+    assert all(len(c.text) <= 4800 for c in capped)
+    assert [c.chunk_index for c in capped] == [0, 1, 2, 3, 4]
+    # 短段 A / B 不被切
+    assert capped[0].text == "短段 A"
+    assert capped[4].text == "短段 B"
+
+
 @pytest.mark.asyncio
 async def test_pipeline_isolates_failed_doc(
     tmp_path: Path,
