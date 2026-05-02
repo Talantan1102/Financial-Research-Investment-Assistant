@@ -65,6 +65,6 @@ def _default_args_for(tool_name: str, target: str, user_message: str) -> dict[st
         return {"ts_code": target if target else None, "n": 5, "days_back": 7}
     if tool_name == "web_search":
         return {"query": user_message, "search_type": "news", "count": 5}
-    if tool_name == "mock_kb_search":
+    if tool_name == "kb_search":
         return {"query": user_message, "top_k": 5}
     return {}

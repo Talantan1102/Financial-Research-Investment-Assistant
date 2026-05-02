@@ -95,27 +95,27 @@ def get_research_graph() -> Any:
     from app.agents.research_planner import ResearchPlanner
     from app.agents.writer import Writer
     from app.orchestration.research_graph import build_research_graph
-    from app.service.mock_bocha_service import MockBochaService  # type: ignore[import]
     from app.service.mock_tushare_service import MockTushareService  # type: ignore[import]
     from app.services.bocha_factory import build_bocha_service_from_env
+    from app.services.kb_factory import build_kb_search_service_from_env
     from app.services.openai_client import build_llm_service_from_env
     from app.tools.get_financials import GetFinancialsTool
     from app.tools.get_news import GetNewsTool
     from app.tools.get_stock_quote import StockQuoteTool
-    from app.tools.mock_kb_search import MockKbSearchTool
+    from app.tools.kb_search import KbSearchTool
     from app.tools.registry import ToolRegistry
     from app.tools.web_search import WebSearchTool
 
     llm = build_llm_service_from_env()
     mock_tushare = MockTushareService(llm=llm)
-    mock_bocha = MockBochaService(llm=llm)
 
     registry = ToolRegistry()
     registry.register(StockQuoteTool(mock_tushare=mock_tushare))
     registry.register(GetFinancialsTool(mock_tushare=mock_tushare))
     registry.register(GetNewsTool(bocha=build_bocha_service_from_env()))
     registry.register(WebSearchTool(bocha=build_bocha_service_from_env()))
-    registry.register(MockKbSearchTool(mock_bocha=mock_bocha))
+    kb_service = build_kb_search_service_from_env()
+    registry.register(KbSearchTool(kb_service=kb_service))
 
     planner = ResearchPlanner(llm=llm)
     collector = DataCollector(llm=llm, registry=registry)
