@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import pytest
@@ -19,6 +20,10 @@ async def real_kb_service(
     monkeypatch.setenv("EMBEDDING_MODE", "qwen")
     monkeypatch.setenv("MILVUS_HOST", str(milvus_test_container["host"]))
     monkeypatch.setenv("MILVUS_PORT", str(milvus_test_container["port"]))
+    monkeypatch.setenv(
+        "DASHSCOPE_API_KEY",
+        os.environ.get("DASHSCOPE_API_KEY") or "sk-replay-placeholder",
+    )
     return build_kb_search_service_from_env()
 
 
