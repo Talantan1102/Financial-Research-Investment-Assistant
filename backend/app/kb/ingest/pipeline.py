@@ -83,6 +83,7 @@ class IngestPipeline:
 
             vectors = await self._embed_with_cache(chunks)
             rows = self._chunks_to_rows(spec, chunks, vectors)
+            rows = self._truncate_varchar_fields(rows)
 
             await self._milvus.insert(spec.collection, rows)
             await self._state.mark_ingested(
@@ -174,6 +175,55 @@ class IngestPipeline:
                 cached[i] = vec
 
         return [cached[i] for i in range(len(chunks))]
+
+    # Milvus VARCHAR field byte-length limits(对应 milvus_client.py schema 锁死值,
+    # 单位是 UTF-8 字节,不是字符)。MinerU 切出的 section title / metadata 偶尔
+    # 超限(例如 maotai 财报某个 section 53 bytes 超 50 byte limit),需 truncate。
+    _VARCHAR_BYTE_LIMITS: dict[str, int] = {
+        "chunk_id": 80,
+        "doc_id": 64,
+        "chunk_text": 5000,
+        "pub_date": 10,
+        "source_url": 500,
+        "source_type": 20,
+        # research
+        "broker": 50,
+        "industry": 50,
+        "rating": 20,
+        "analyst": 100,
+        # financial
+        "company_code": 10,
+        "company_name": 100,
+        "fiscal_quarter": 4,
+        "section": 50,
+        # policy
+        "issuer": 50,
+        "doc_number": 50,
+        "scope": 100,
+    }
+
+    @classmethod
+    def _truncate_varchar_fields(cls, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Final safety net:按 schema VARCHAR byte limits 截断每个 row 的 string 值。
+
+        Byte-aware truncate(回退到 UTF-8 char boundary 避免切断 multi-byte char)。
+        """
+        for row in rows:
+            for k, v in list(row.items()):
+                if not isinstance(v, str):
+                    continue
+                limit = cls._VARCHAR_BYTE_LIMITS.get(k)
+                if limit is None:
+                    continue
+                encoded = v.encode("utf-8")
+                if len(encoded) <= limit:
+                    continue
+                # byte-aware truncate
+                end = limit
+                while end < len(encoded) and (encoded[end] & 0xC0) == 0x80:
+                    end -= 1
+                row[k] = encoded[:end].decode("utf-8")
+        return rows
 
     @staticmethod
     def _chunks_to_rows(

@@ -151,6 +151,30 @@ def test_enforce_chunk_size_cap_splits_oversize() -> None:
     assert capped[4].text == "短段 B"
 
 
+def test_truncate_varchar_fields_section_overlimit() -> None:
+    """section field VARCHAR 50 bytes 超限时按 byte boundary 截断."""
+    long_zh_section = "金融市场风险管理与监管框架解读分析"  # 17 chars × 3 bytes = 51 bytes,超 50
+    assert len(long_zh_section.encode("utf-8")) == 51
+
+    rows = [
+        {
+            "chunk_id": "d1::0",
+            "doc_id": "d1",
+            "chunk_text": "test",
+            "section": long_zh_section,
+            "fiscal_year": 2024,  # int 不应被 truncate
+            "vector": [0.1] * 1024,  # list 不应被 truncate
+        }
+    ]
+    out = IngestPipeline._truncate_varchar_fields(rows)
+    assert len(out[0]["section"].encode("utf-8")) <= 50
+    # int / list 字段不动
+    assert out[0]["fiscal_year"] == 2024
+    assert len(out[0]["vector"]) == 1024
+    # short fields 不动
+    assert out[0]["chunk_id"] == "d1::0"
+
+
 def test_enforce_chunk_size_cap_chinese_byte_boundary() -> None:
     """中文 UTF-8 3 bytes/char,切片不能切断 multi-byte char."""
     from app.kb.chunkers.base import Chunk
