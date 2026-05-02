@@ -67,7 +67,7 @@ def build_llm_service_from_env() -> LLMService:
     into MockTushareService.
     """
     config = LLMConfig()
-    model = os.getenv("MOCK_TUSHARE_MODEL", "deepseek-v3.2")
+    model = os.getenv("MOCK_TUSHARE_MODEL", "deepseek-v4-flash")
     raw_client = OpenAI(api_key=config.api_key, base_url=config.base_url)
     adapter = _OpenAIAdapter(client=raw_client, model=model)
     return LLMService(client=adapter)

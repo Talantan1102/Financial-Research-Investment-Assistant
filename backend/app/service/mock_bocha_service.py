@@ -95,7 +95,7 @@ class MockBochaService:
     def __init__(self):
         config = LLMConfig()
         self.client = OpenAI(api_key=config.api_key, base_url=config.base_url)
-        self.model = "deepseek-v3.2"
+        self.model = "deepseek-v4-flash"
 
     async def generate_search_results(
         self,

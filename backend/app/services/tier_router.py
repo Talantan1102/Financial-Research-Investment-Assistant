@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.services.llm_response import Tier
 
-V0_DEFAULT_MODEL = "deepseek-v3.2"
+V0_DEFAULT_MODEL = "deepseek-v4-flash"
 
 
 class TierConfig(BaseModel):
