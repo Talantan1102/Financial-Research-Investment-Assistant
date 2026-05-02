@@ -19,11 +19,17 @@ dependencies = [
     "pydantic[email]>=2.7",
     # AI/LLM
     "openai>=1.40",
-    "tiktoken>=0.7",
+    "tiktoken>=0.8.0",
     "langgraph>=1.0,<2",
     "langgraph-checkpoint-sqlite>=3.0,<4",
     # Vector DB (kept for KB; v0 main path doesn't use it)
-    "pymilvus>=2.4",
+    "pymilvus>=2.6.0",
+    # v0.7 KB Search
+    "mineru[core]>=3.1.0",
+    "pdfplumber>=0.11.0",
+    "langchain-text-splitters>=0.3.0",
+    "tqdm>=4.66.0",
+    "cachetools>=5.5.0",
     # NLP
     "nltk>=3.8",
     "jieba>=0.42",
