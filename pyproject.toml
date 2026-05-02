@@ -107,6 +107,10 @@ extend-exclude = [
     "backend/app/service/deep_research_v2/",
     "backend/app/service/docmind_service.py",
     "backend/app/service/news_collection_service.py",
+    # Legacy bootstrap script — `from models import ...` relies on sys.path hack
+    # (line 15) so isort can't determine ordering; scheduled for deletion when
+    # the industry-data tables are migrated to the v0+ app/services/ stack.
+    "backend/app/scripts/init_industry_data.py",
     # Legacy test files scheduled for deletion (replaced by tests/{unit,integration,e2e,eval}/)
     "backend/test_mock_tushare.py",
     "backend/test_mock_integration.py",
