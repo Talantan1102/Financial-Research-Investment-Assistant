@@ -18,7 +18,7 @@ _SYSTEM_PROMPT = """你是金融研究助手 research_planner。
 - 财务数据(get_financials)
 - 财经新闻(get_news)
 - 网络搜索(web_search)
-- 知识库搜索(mock_kb_search)
+- 知识库搜索(kb_search)
 
 输出格式:仅输出 JSON,符合以下 schema:
 {

@@ -19,11 +19,18 @@ dependencies = [
     "pydantic[email]>=2.7",
     # AI/LLM
     "openai>=1.40",
-    "tiktoken>=0.7",
+    "tiktoken>=0.8.0",
     "langgraph>=1.0,<2",
     "langgraph-checkpoint-sqlite>=3.0,<4",
+    "dashscope>=1.20",
     # Vector DB (kept for KB; v0 main path doesn't use it)
-    "pymilvus>=2.4",
+    "pymilvus>=2.6.0",
+    # v0.7 KB Search
+    "mineru[core]>=3.1.0",
+    "pdfplumber>=0.11.0",
+    "langchain-text-splitters>=0.3.0",
+    "tqdm>=4.66.0",
+    "cachetools>=5.5.0",
     # NLP
     "nltk>=3.8",
     "jieba>=0.42",
@@ -66,6 +73,7 @@ dev = [
     "poethepoet>=0.27",
     "pip-audit>=2.7",
     "pre-commit>=3.8",
+    "types-cachetools>=5.5.0",
 ]
 
 [build-system]
@@ -99,6 +107,10 @@ extend-exclude = [
     "backend/app/service/deep_research_v2/",
     "backend/app/service/docmind_service.py",
     "backend/app/service/news_collection_service.py",
+    # Legacy bootstrap script — `from models import ...` relies on sys.path hack
+    # (line 15) so isort can't determine ordering; scheduled for deletion when
+    # the industry-data tables are migrated to the v0+ app/services/ stack.
+    "backend/app/scripts/init_industry_data.py",
     # Legacy test files scheduled for deletion (replaced by tests/{unit,integration,e2e,eval}/)
     "backend/test_mock_tushare.py",
     "backend/test_mock_integration.py",

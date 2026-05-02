@@ -1,11 +1,11 @@
-"""L0 — args validation for web_search / mock_kb_search.
+"""L0 — args validation for web_search / kb_search.
 
 WebSearchArgs (v0.6) supports search_type in {"news", "industry", "report"};
 "announcement" was dropped because the real Bocha API augments query instead.
 """
 
 import pytest
-from app.tools.mock_kb_search import KbSearchArgs
+from app.tools.kb_search import KbSearchArgs
 from app.tools.web_search import WebSearchArgs
 from pydantic import ValidationError
 

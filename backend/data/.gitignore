@@ -1,0 +1,5 @@
+.ingest_state.sqlite
+.ingest_state.sqlite-journal
+.embedding_cache.sqlite
+.embedding_cache.sqlite-journal
+sample_corpus/**/*.pdf

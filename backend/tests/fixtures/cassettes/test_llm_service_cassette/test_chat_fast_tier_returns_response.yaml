@@ -1,19 +1,19 @@
 interactions:
 - request:
-    body: '{"messages":[{"role":"user","content":"Say hi in one word."}],"model":"deepseek-v4-flash","max_tokens":64}'
+    body: '{"messages":[{"role":"user","content":"Say hi in one word."}],"model":"deepseek-v3.2","max_tokens":64}'
     headers:
       Accept:
       - application/json
       Accept-Encoding:
-      - gzip, deflate, zstd
+      - gzip, deflate, br, zstd
       Connection:
       - keep-alive
       Content-Length:
-      - '106'
+      - '102'
       Content-Type:
       - application/json
       Host:
-      - dashscope.aliyuncs.com
+      - token-plan.cn-beijing.maas.aliyuncs.com
       User-Agent:
       - OpenAI/Python 2.33.0
       X-Stainless-Arch:
@@ -35,35 +35,37 @@ interactions:
       x-stainless-retry-count:
       - '0'
     method: POST
-    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+    uri: https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions
   response:
     body:
-      string: '{"choices":[{"message":{"content":"Hi","reasoning_content":"We need
-        to respond with a single word greeting. \"Hi\" itself is one word, but the
-        instruction says \"Say hi in one word.\" So the answer should be \"Hi\".","role":"assistant"},"finish_reason":"stop","index":0,"logprobs":null}],"object":"chat.completion","usage":{"prompt_tokens":10,"completion_tokens":40,"total_tokens":50,"completion_tokens_details":{"reasoning_tokens":37},"prompt_tokens_details":{"cached_tokens":0}},"created":1777489306,"system_fingerprint":null,"model":"deepseek-v4-flash","id":"chatcmpl-1ffcb5db-d24b-9821-92e2-475b566d652c"}'
+      string: '{"id":"chatcmpl-a20e0130-1ce6-44a5-8fcb-1378b54a10bc","object":"chat.completion","created":1777743926,"model":"deepseek-v3.2","choices":[{"index":0,"message":{"role":"assistant","content":"Hi"},"finish_reason":"stop","logprobs":null}],"usage":{"prompt_tokens":10,"total_tokens":11,"completion_tokens":1,"prompt_tokens_details":{"cached_tokens":0}}}'
     headers:
       content-length:
-      - '609'
+      - '348'
       content-type:
-      - application/json
+      - application/json; charset=utf-8
       date:
-      - Wed, 29 Apr 2026 19:01:46 GMT
+      - Sat, 02 May 2026 17:45:26 GMT
+      grpc-accept-encoding:
+      - gzip
+      grpc-encoding:
+      - identity
       req-arrive-time:
-      - '1777489305554'
+      - '1777743926073'
       req-cost-time:
-      - '565'
+      - '744'
       resp-start-time:
-      - '1777489306119'
+      - '1777743926817'
       server:
       - istio-envoy
       transfer-encoding:
       - chunked
       vary:
-      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      - Accept-Encoding
       x-envoy-upstream-service-time:
-      - '565'
+      - '743'
       x-request-id:
-      - 1ffcb5db-d24b-9821-92e2-475b566d652c
+      - a20e0130-1ce6-44a5-8fcb-1378b54a10bc
     status:
       code: 200
       message: OK

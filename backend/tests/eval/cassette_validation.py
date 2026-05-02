@@ -50,7 +50,7 @@ def _extract_first_interaction(cassette_path: Path) -> tuple[str, str, str] | No
     first = data["interactions"][0]
     body_raw = first["request"]["body"]
     body = json.loads(body_raw) if isinstance(body_raw, str) else body_raw
-    model = body.get("model", "deepseek-v4-flash")
+    model = body.get("model", "deepseek-v3.2")
     msgs = body.get("messages", [])
     prompt = msgs[-1]["content"] if msgs else ""
     resp_str = first["response"]["body"]["string"]

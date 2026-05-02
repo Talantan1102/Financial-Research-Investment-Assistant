@@ -7,7 +7,11 @@ accounting for reasoning. compute_cost takes plain prompt/completion ints.
 
 Sources:
 - DashScope deepseek-v4-flash: ¥0.0002 / 1K input, ¥0.0008 / 1K output
-  (as of 2026-04, sync if changed).
+  (as of 2026-04). Account decommissioned 2026-05-03; entry retained for
+  legacy cassette / unit-test fixtures.
+- token-plan deepseek-v3.2: ¥0.0005 / 1K input, ¥0.002 / 1K output
+  (token-plan prepaid bundle, effective rate as of 2026-05-03; update
+  when the bundle is renegotiated).
 """
 
 from __future__ import annotations
@@ -17,6 +21,8 @@ from dataclasses import dataclass
 # Public price constants — referenced from tests
 DEEPSEEK_V4_FLASH_INPUT_CNY_PER_1K: float = 0.0002
 DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_1K: float = 0.0008
+DEEPSEEK_V32_INPUT_CNY_PER_1K: float = 0.0005
+DEEPSEEK_V32_OUTPUT_CNY_PER_1K: float = 0.002
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,10 @@ _TABLE: dict[str, ModelPrice] = {
     "deepseek-v4-flash": ModelPrice(
         input_per_1k_cny=DEEPSEEK_V4_FLASH_INPUT_CNY_PER_1K,
         output_per_1k_cny=DEEPSEEK_V4_FLASH_OUTPUT_CNY_PER_1K,
+    ),
+    "deepseek-v3.2": ModelPrice(
+        input_per_1k_cny=DEEPSEEK_V32_INPUT_CNY_PER_1K,
+        output_per_1k_cny=DEEPSEEK_V32_OUTPUT_CNY_PER_1K,
     ),
 }
 
