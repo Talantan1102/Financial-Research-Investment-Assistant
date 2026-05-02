@@ -216,9 +216,9 @@ class _Raw:
 class _Adapter:
     """OpenAI-compatible adapter with capped max_tokens to control cost.
 
-    max_tokens raised to 2048 (from 1024) for the v0.7 cutover to deepseek-v3.2:
-    the new default model writes more verbose Markdown reports than the legacy
-    deepseek-v4-flash, and 1024 tokens truncated the Writer JSON mid-string.
+    max_tokens=2048 retained as defensive headroom — verbose Writer output
+    (insights summary + chart_specs JSON) may exceed 1024 on real maotai
+    research prompts.
     """
 
     def __init__(self, client: OpenAI) -> None:
@@ -248,7 +248,7 @@ def real_adapter() -> _Adapter:
                 "DASHSCOPE_BASE_URL",
                 # Must match the host recorded in the cassette so VCR replay
                 # works without DASHSCOPE_BASE_URL set (e.g. on CI).
-                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
             ),
         )
     )
