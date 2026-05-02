@@ -81,29 +81,33 @@ class MilvusKbClient:
         self._client: Any = MilvusClient(uri=self._uri)
 
     async def ensure_collections(self) -> None:
-        """Create collections + HNSW index if missing."""
+        """Create collections + HNSW index if missing; load all collections."""
         for name in (COLLECTION_RESEARCH, COLLECTION_FINANCIAL, COLLECTION_POLICY):
             exists = await asyncio.to_thread(self._client.has_collection, name)
-            if exists:
-                continue
-            schema = schema_for(name)
+            if not exists:
+                schema = schema_for(name)
+                await asyncio.to_thread(
+                    self._client.create_collection,
+                    collection_name=name,
+                    schema=schema,
+                )
+                # HNSW index on vector field
+                index_params = MilvusClient.prepare_index_params()
+                index_params.add_index(
+                    field_name="vector",
+                    index_type="HNSW",
+                    metric_type="COSINE",
+                    params={"M": 16, "efConstruction": 200},
+                )
+                await asyncio.to_thread(
+                    self._client.create_index,
+                    collection_name=name,
+                    index_params=index_params,
+                )
+            # 每次 ensure 都 load(幂等:已 load 不报错)
             await asyncio.to_thread(
-                self._client.create_collection,
+                self._client.load_collection,
                 collection_name=name,
-                schema=schema,
-            )
-            # HNSW index on vector field
-            index_params = MilvusClient.prepare_index_params()
-            index_params.add_index(
-                field_name="vector",
-                index_type="HNSW",
-                metric_type="COSINE",
-                params={"M": 16, "efConstruction": 200},
-            )
-            await asyncio.to_thread(
-                self._client.create_index,
-                collection_name=name,
-                index_params=index_params,
             )
 
     async def insert(self, collection_name: str, rows: list[dict[str, Any]]) -> None:
