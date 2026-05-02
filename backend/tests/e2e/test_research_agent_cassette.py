@@ -123,14 +123,9 @@ class _StubWebSearchArgs(BaseModel):
 
 
 class _StubWebSearchTool(Tool):
-    """Stub registered as "mock_web_search" to match the tool name baked into the VCR cassette.
+    """Stub for web_search — no LLM I/O."""
 
-    The cassette records a ResearchPlanner LLM response that outputs
-    required_tools=["mock_web_search"]. Re-recording would need VCR_RECORD_MODE=once.
-    Keep this name pinned until cassette is re-recorded post-v0.6 rename.
-    """
-
-    name = "mock_web_search"
+    name = "web_search"
     description = "搜索网络获取最新资讯(stub)。"
     args_schema = _StubWebSearchArgs
 
@@ -152,9 +147,9 @@ class _StubKbSearchArgs(BaseModel):
 
 
 class _StubKbSearchTool(Tool):
-    """Stub for mock_kb_search — no LLM I/O."""
+    """Stub for kb_search — no LLM I/O."""
 
-    name = "mock_kb_search"
+    name = "kb_search"
     description = "搜索内部知识库(stub)。"
     args_schema = _StubKbSearchArgs
 
@@ -219,7 +214,12 @@ class _Raw:
 
 
 class _Adapter:
-    """OpenAI-compatible adapter with capped max_tokens to control cost."""
+    """OpenAI-compatible adapter with capped max_tokens to control cost.
+
+    max_tokens raised to 2048 (from 1024) for the v0.7 cutover to deepseek-v3.2:
+    the new default model writes more verbose Markdown reports than the legacy
+    deepseek-v4-flash, and 1024 tokens truncated the Writer JSON mid-string.
+    """
 
     def __init__(self, client: OpenAI) -> None:
         self._c = client
@@ -228,7 +228,7 @@ class _Adapter:
         r = self._c.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=1024,
+            max_tokens=2048,
         )
         return _Raw(
             content=r.choices[0].message.content or "",
@@ -246,7 +246,9 @@ def real_adapter() -> _Adapter:
             api_key=os.environ.get("DASHSCOPE_API_KEY", "fake-for-replay"),
             base_url=os.environ.get(
                 "DASHSCOPE_BASE_URL",
-                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                # Must match the host recorded in the cassette so VCR replay
+                # works without DASHSCOPE_BASE_URL set (e.g. on CI).
+                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
             ),
         )
     )
@@ -257,9 +259,6 @@ def real_adapter() -> _Adapter:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(
-    reason="cassette to be re-recorded in v0.7 Task 13 — prompt now uses 'kb_search' instead of 'mock_kb_search'"
-)
 @pytest.mark.vcr
 @pytest.mark.asyncio
 async def test_research_agent_maotai_fundamental(real_adapter: _Adapter) -> None:

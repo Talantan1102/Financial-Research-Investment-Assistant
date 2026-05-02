@@ -48,7 +48,9 @@ def real_openai_adapter() -> _OpenAIClientAdapter:
             api_key=os.environ.get("DASHSCOPE_API_KEY", "fake-for-replay"),
             base_url=os.environ.get(
                 "DASHSCOPE_BASE_URL",
-                "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                # Must match the host recorded in the cassette so VCR replay
+                # works without DASHSCOPE_BASE_URL set (e.g. on CI).
+                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
             ),
         )
     )
@@ -61,6 +63,6 @@ def test_chat_fast_tier_returns_response(
     svc = LLMService(client=real_openai_adapter)
     r: LLMResponse = svc.chat(prompt="Say hi in one word.", tier="fast")
     assert r.tier == "fast"
-    assert r.model == "deepseek-v4-flash"
+    assert r.model == "deepseek-v3.2"
     assert len(r.content) > 0
     assert r.prompt_tokens > 0
