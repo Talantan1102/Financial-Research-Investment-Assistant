@@ -1,5 +1,6 @@
 import { AuthGuard } from '@/components/auth-guard'
 import { BaseLayout } from '@/layout/base'
+import { ThemedRoot } from '@/themes/themed-root'
 import NotFound from '@/pages/404'
 import LoginPage from '@/pages/auth/login'
 import Chat from '@/pages/chat'
@@ -68,23 +69,29 @@ export const routes: IRouteObject[] = [
 export const router = createBrowserRouter(
   [
     {
-      path: '/login',
-      element: <LoginPage />,
-    },
-    {
       path: '/',
-      element: (
-        <AuthGuard>
-          <BaseLayout>
-            <Outlet />
-          </BaseLayout>
-        </AuthGuard>
-      ),
-      children: routes,
-    },
-    {
-      path: '*',
-      element: <Navigate to="/404" />,
+      Component: ThemedRoot,
+      children: [
+        {
+          path: '/login',
+          element: <LoginPage />,
+        },
+        {
+          path: '/',
+          element: (
+            <AuthGuard>
+              <BaseLayout>
+                <Outlet />
+              </BaseLayout>
+            </AuthGuard>
+          ),
+          children: routes,
+        },
+        {
+          path: '*',
+          element: <Navigate to="/404" />,
+        },
+      ],
     },
   ] as RouteObject[],
   {
