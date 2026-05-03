@@ -42,7 +42,7 @@ function MountApi() {
 export function ThemedRoot() {
   const themeConfig = useActiveTheme();
   return (
-    <ConfigProvider theme={themeConfig} locale={zhCN}>
+    <ConfigProvider theme={{ ...themeConfig, cssVar: true }} locale={zhCN}>
       <AntdApp>
         <MountApi />
         <Outlet />
