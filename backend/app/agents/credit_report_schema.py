@@ -49,7 +49,9 @@ class CompanyOverview(BaseModel):
     main_business: str = Field(description="主营业务一句话")
     controlling_shareholder: str | None = Field(default=None, description="实际控制人")
     listing_status: str | None = Field(default=None, description="上市/非上市 + 板块")
-    evidence: list[str] = Field(min_length=1, description="引用的 chunk_id 列表(至少 1 个)")
+    evidence: list[str] = Field(
+        min_length=1, description="引用的 chunk_id 列表(至少 1 个,必须来自当次 retrieval 结果)"
+    )
 
 
 class LegalQualification(BaseModel):
@@ -61,7 +63,9 @@ class LegalQualification(BaseModel):
     legal_status: str = Field(description="法律主体合规情况")
     business_qualifications: list[str] = Field(description="经营资质列表(空 list 也行)")
     adverse_records: list[str] = Field(description="不良记录(空 list 也行)")
-    evidence: list[str] = Field(min_length=1)
+    evidence: list[str] = Field(
+        min_length=1, description="引用的 chunk_id 列表(至少 1 个,必须来自当次 retrieval 结果)"
+    )
 
 
 class FinancialAnalysis(BaseModel):
@@ -75,7 +79,9 @@ class FinancialAnalysis(BaseModel):
     profitability_analysis: str = Field(description="盈利能力")
     cash_flow_analysis: str = Field(description="现金流分析")
     year_over_year_summary: str | None = Field(default=None, description="同比变化(若多年数据)")
-    evidence: list[str] = Field(min_length=1)
+    evidence: list[str] = Field(
+        min_length=1, description="引用的 chunk_id 列表(至少 1 个,必须来自当次 retrieval 结果)"
+    )
 
 
 class IndustryAnalysis(BaseModel):
@@ -89,7 +95,9 @@ class IndustryAnalysis(BaseModel):
     competitive_position: str = Field(description="在行业中的竞争地位")
     key_competitors: list[str] = Field(description="主要竞争对手(空 list 也行)")
     policy_impact: str = Field(description="相关政策影响")
-    evidence: list[str] = Field(min_length=1)
+    evidence: list[str] = Field(
+        min_length=1, description="引用的 chunk_id 列表(至少 1 个,必须来自当次 retrieval 结果)"
+    )
 
 
 class RiskAssessment(BaseModel):
@@ -105,7 +113,9 @@ class RiskAssessment(BaseModel):
     overall_risk_level: Literal["low", "medium", "high", "very_high"] = Field(
         description="整体风险等级"
     )
-    evidence: list[str] = Field(min_length=1)
+    evidence: list[str] = Field(
+        min_length=1, description="引用的 chunk_id 列表(至少 1 个,必须来自当次 retrieval 结果)"
+    )
 
 
 class CreditRecommendation(BaseModel):
@@ -122,7 +132,9 @@ class CreditRecommendation(BaseModel):
     recommended_rate_range: str | None = Field(default=None, description="建议利率区间")
     guarantee_requirements: list[str] = Field(description="担保要求(空 list 也行)")
     conditions: list[str] = Field(description="附加条件(approve_with_conditions 时填)")
-    evidence: list[str] = Field(min_length=1)
+    evidence: list[str] = Field(
+        min_length=1, description="引用的 chunk_id 列表(至少 1 个,必须来自当次 retrieval 结果)"
+    )
 
 
 # ── 主 schema ──────────────────────────────────────────────────────────────────
