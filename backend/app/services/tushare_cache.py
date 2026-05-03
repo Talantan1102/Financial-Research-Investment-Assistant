@@ -110,10 +110,13 @@ class TushareCache:
         self,
         api_name: str,
         params_hash: str,
-        blob: bytes,
+        df: pd.DataFrame,
         now: float,
         ttl_s: float,
     ) -> None:
+        # Serialize inside the thread so pickle.dumps (CPU-bound) doesn't block
+        # the event loop — I-B carryover fix.
+        blob = pickle.dumps(df)
         with sqlite3.connect(self._db_path) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO tushare_cache "
@@ -136,5 +139,4 @@ class TushareCache:
         async with self._lock:
             now = time.time()
             params_hash = _hash_params(params)
-            blob = pickle.dumps(df)
-            await asyncio.to_thread(self._set_sync, api_name, params_hash, blob, now, ttl_s)
+            await asyncio.to_thread(self._set_sync, api_name, params_hash, df, now, ttl_s)

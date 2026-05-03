@@ -18,18 +18,29 @@ class TushareError(RuntimeError):
     """Raised when tushare API returns code != 0."""
 
 
+class TushareNetworkError(TushareError):
+    """Raised when a network-level error occurs (DNS / TCP / TLS / timeout).
+
+    Always chained from the original httpx exception via `raise ... from`.
+    Allows service layer to distinguish:
+      - TushareError       → tushare app error (code != 0)
+      - TushareNetworkError → network down / unreachable (subclass of TushareError)
+    """
+
+
 class TushareClient:
     def __init__(
         self,
         token: str,
         base_url: str = "http://api.tushare.pro",
         timeout_s: float = 30.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if not token:
             raise ValueError("token must not be empty")
         self._token = token
         self.base_url = base_url
-        self._timeout_s = timeout_s
+        self._client = httpx.AsyncClient(timeout=timeout_s, transport=transport)
 
     async def call(
         self,
@@ -45,11 +56,13 @@ class TushareClient:
         if fields is not None:
             body["fields"] = fields
 
-        async with httpx.AsyncClient(timeout=self._timeout_s) as session:
-            resp = await session.post(self.base_url, json=body)
+        try:
+            resp = await self._client.post(self.base_url, json=body)
             resp.raise_for_status()
-            payload = resp.json()
+        except httpx.HTTPError as exc:
+            raise TushareNetworkError(f"network error calling {api_name}: {exc}") from exc
 
+        payload = resp.json()
         code = payload.get("code")
         if code != 0:
             raise TushareError(
@@ -60,3 +73,6 @@ class TushareClient:
         cols = data.get("fields") or []
         rows = data.get("items") or []
         return pd.DataFrame(rows, columns=cols)
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
