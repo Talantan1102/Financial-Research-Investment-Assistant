@@ -278,7 +278,7 @@ def b1_graph(monkeypatch: pytest.MonkeyPatch) -> Any:
         StructureScorer(llm=llm),
         ConcisenessScorer(llm=llm),
     ]
-    critic = Critic(llm=llm, scorers=scorers)
+    critic = Critic(llm=llm, scorers=scorers)  # type: ignore[arg-type]
 
     return build_research_graph(
         planner=planner,

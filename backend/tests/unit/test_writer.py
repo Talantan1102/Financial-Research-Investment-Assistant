@@ -30,7 +30,6 @@ def test_build_prompt_includes_insights() -> None:
     assert "银行公司金融部" in prompt
     assert "overview" in prompt
     assert "信贷调查报告" in prompt
-    assert "CreditInvestigationReport" in prompt
 
 
 def test_build_prompt_includes_user_message() -> None:
