@@ -22,7 +22,7 @@ def _result(eval_id: str, request_id: str, case_id: str) -> EvalResult:
             structure=9,
             structure_evidence="ok",
         ),
-        judge_model="deepseek-v3.2",
+        judge_model="deepseek-v4-flash",
         judge_cost_cny=0.001,
         judge_latency_ms=420,
         timestamp=datetime(2026, 4, 30, 12, 0, 0),

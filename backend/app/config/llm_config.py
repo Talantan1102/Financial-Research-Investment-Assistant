@@ -41,7 +41,7 @@ class AgentsConfig:
     # 规划师 - 分析问题，生成研究大纲
     architect: AgentModelConfig = field(
         default_factory=lambda: AgentModelConfig(
-            model="deepseek-v3.2", temperature=0.7, max_tokens=4000
+            model="deepseek-v4-flash", temperature=0.7, max_tokens=4000
         )
     )
 
@@ -57,28 +57,28 @@ class AgentsConfig:
     # 数据分析师 - 数据提取和分析
     data_analyst: AgentModelConfig = field(
         default_factory=lambda: AgentModelConfig(
-            model="deepseek-v3.2", temperature=0.3, max_tokens=8000
+            model="deepseek-v4-flash", temperature=0.3, max_tokens=8000
         )
     )
 
     # 代码极客 - 代码生成和图表绘制
     wizard: AgentModelConfig = field(
         default_factory=lambda: AgentModelConfig(
-            model="deepseek-v3.2", temperature=0.3, max_tokens=8000
+            model="deepseek-v4-flash", temperature=0.3, max_tokens=8000
         )
     )
 
     # 审核大师 - 对抗式审核
     critic: AgentModelConfig = field(
         default_factory=lambda: AgentModelConfig(
-            model="deepseek-v3.2", temperature=0.5, max_tokens=4000
+            model="deepseek-v4-flash", temperature=0.5, max_tokens=4000
         )
     )
 
     # 首席写手 - 报告撰写
     writer: AgentModelConfig = field(
         default_factory=lambda: AgentModelConfig(
-            model="deepseek-v3.2", temperature=0.7, max_tokens=16000
+            model="deepseek-v4-flash", temperature=0.7, max_tokens=16000
         )
     )
 
@@ -123,7 +123,7 @@ class LLMConfig:
     search_api_key: str = field(default_factory=lambda: os.getenv("BOCHA_API_KEY", ""))
 
     # 默认模型（用于未单独配置的场景）
-    default_model: str = "deepseek-v3.2"
+    default_model: str = "deepseek-v4-flash"
 
     # Agent 配置
     agents: AgentsConfig = field(default_factory=AgentsConfig)

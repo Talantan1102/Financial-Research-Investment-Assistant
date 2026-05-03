@@ -15,7 +15,7 @@ def test_chat_fast_tier_returns_v0_default_model(
     svc = LLMService(client=mock_llm_client)
     r = svc.chat(prompt="What is the price of 600519.SH?", tier="fast")
     assert r.tier == "fast"
-    assert r.model == "deepseek-v3.2"
+    assert r.model == "deepseek-v4-flash"
     assert "600519" in r.content
     assert r.latency_ms >= 0
     assert r.total_tokens == r.prompt_tokens + r.completion_tokens

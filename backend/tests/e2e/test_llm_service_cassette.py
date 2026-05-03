@@ -50,7 +50,7 @@ def real_openai_adapter() -> _OpenAIClientAdapter:
                 "DASHSCOPE_BASE_URL",
                 # Must match the host recorded in the cassette so VCR replay
                 # works without DASHSCOPE_BASE_URL set (e.g. on CI).
-                "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1",
             ),
         )
     )
@@ -63,6 +63,6 @@ def test_chat_fast_tier_returns_response(
     svc = LLMService(client=real_openai_adapter)
     r: LLMResponse = svc.chat(prompt="Say hi in one word.", tier="fast")
     assert r.tier == "fast"
-    assert r.model == "deepseek-v3.2"
+    assert r.model == "deepseek-v4-flash"
     assert len(r.content) > 0
     assert r.prompt_tokens > 0

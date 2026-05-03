@@ -7,11 +7,10 @@ accounting for reasoning. compute_cost takes plain prompt/completion ints.
 
 Sources:
 - DashScope deepseek-v4-flash: ¥0.0002 / 1K input, ¥0.0008 / 1K output
-  (as of 2026-04). Account decommissioned 2026-05-03; entry retained for
-  legacy cassette / unit-test fixtures.
-- token-plan deepseek-v3.2: ¥0.0005 / 1K input, ¥0.002 / 1K output
-  (token-plan prepaid bundle, effective rate as of 2026-05-03; update
-  when the bundle is renegotiated).
+  (DashScope post-pay account, default for v0~v0.6 and restored 2026-05-03).
+- deepseek-v3.2: ¥0.0005 / 1K input, ¥0.002 / 1K output (legacy from
+  token-plan trial 2026-05-03 → reverted; entry retained so backward-compat
+  unit tests and any historical cassette continue to resolve a price).
 """
 
 from __future__ import annotations

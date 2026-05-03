@@ -8,7 +8,7 @@ from pydantic import ValidationError
 def test_minimal_response_validates() -> None:
     r = LLMResponse(
         content="hello",
-        model="deepseek-v3.2",
+        model="deepseek-v4-flash",
         tier="fast",
         prompt_tokens=10,
         completion_tokens=2,
