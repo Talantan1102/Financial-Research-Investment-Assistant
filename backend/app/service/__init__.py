@@ -1,3 +1,8 @@
+"""Legacy module — see backend/LEGACY_LAYOUT.md for module-by-module status and v1.x evolution plan.
+
+New features should prefer importing from `app/services/*` (plural, v0.8.x main path).
+"""
+
 from .chart_generator import ChartGenerator, create_chart_generator
 
 # TODO(v0 plan Task 1): chat_service deleted (replaced by Task 11 chat agent)

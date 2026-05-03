@@ -1,3 +1,8 @@
+"""Legacy module — see backend/LEGACY_LAYOUT.md for module-by-module status and v1.x evolution plan.
+
+New features should prefer importing from `app/services/*` (plural, v0.8.x main path).
+"""
+
 from .database import Base, SessionLocal, engine, get_db
 from .redis_client import RedisCache, cache, get_redis_client
 from .security import (
