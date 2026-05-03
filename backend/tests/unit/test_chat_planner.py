@@ -16,7 +16,7 @@ def _state(msg: str) -> GraphState:
 def test_build_prompt_includes_tools() -> None:
     """build_planner_prompt injects tool name + schema hint + user message."""
     reg = ToolRegistry()
-    reg.register(StockQuoteTool(mock_tushare=None))
+    reg.register(StockQuoteTool(tushare=None))
     prompt = build_planner_prompt(state=_state("茅台股价?"), registry=reg)
     assert "茅台股价" in prompt
     assert "get_stock_quote" in prompt
@@ -76,7 +76,7 @@ def test_chat_planner_step_returns_plan(
 
     svc = LLMService(client=mock_llm_client)
     reg = ToolRegistry()
-    reg.register(StockQuoteTool(mock_tushare=None))
+    reg.register(StockQuoteTool(tushare=None))
 
     planner = ChatPlanner(llm=svc, registry=reg)
     result = planner.step(_state("茅台股价?"))

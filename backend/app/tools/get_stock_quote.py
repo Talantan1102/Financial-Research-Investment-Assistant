@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.tools.base import Tool, ToolError
 
 if TYPE_CHECKING:
-    from app.service.mock_tushare_service import MockTushareService
+    from app.services.tushare_service import TushareService
 
 
 class StockQuoteArgs(BaseModel):
@@ -20,7 +20,7 @@ class StockQuoteArgs(BaseModel):
 class StockQuoteTool(Tool):
     """Return the latest daily price/volume snapshot for a given A-share.
 
-    Data source: MockTushareService.generate_daily_data (daily K-line).
+    Data source: TushareService.get_daily (daily K-line).
     The most recent row is extracted and mapped to a compact quote dict.
     """
 
@@ -31,26 +31,26 @@ class StockQuoteTool(Tool):
     )
     args_schema = StockQuoteArgs
 
-    def __init__(self, mock_tushare: MockTushareService | None = None) -> None:
-        self._mock_tushare = mock_tushare
+    def __init__(self, tushare: TushareService | None = None) -> None:
+        self._tushare = tushare
 
     async def run(self, args: BaseModel) -> dict[str, Any]:
         # Narrow type: registry always validates against args_schema first
         validated = StockQuoteArgs.model_validate(args.model_dump())
 
-        if self._mock_tushare is None:
-            raise ToolError("mock_tushare not configured — cannot fetch daily data")
+        if self._tushare is None:
+            raise ToolError("tushare not configured — cannot fetch daily data")
 
         today = datetime.now().strftime("%Y%m%d")
         # Fetch last 3 days to ensure at least one trading day is included
         try:
-            df = await self._mock_tushare.generate_daily_data(
+            df = await self._tushare.get_daily(
                 ts_code=validated.ts_code,
-                start_date=today,
-                end_date=today,
+                start=today,
+                end=today,
             )
         except Exception as exc:
-            raise ToolError(f"generate_daily_data failed: {exc}") from exc
+            raise ToolError(f"get_daily failed: {exc}") from exc
 
         if df.empty:
             raise ToolError(f"No daily data returned for ts_code={validated.ts_code!r}")

@@ -189,8 +189,8 @@ async def test_chat_agent_stock_quote_end_to_end(real_adapter: _Adapter) -> None
     mock_tushare = MockTushareService(llm=llm)
 
     registry = ToolRegistry()
-    registry.register(StockQuoteTool(mock_tushare=mock_tushare))
-    registry.register(GetFinancialsTool(mock_tushare=mock_tushare))
+    registry.register(StockQuoteTool(tushare=mock_tushare))
+    registry.register(GetFinancialsTool(tushare=mock_tushare))
     registry.register(_StubNewsTool())
 
     planner = ChatPlanner(llm=llm, registry=registry)

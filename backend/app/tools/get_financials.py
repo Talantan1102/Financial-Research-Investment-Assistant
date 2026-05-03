@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.tools.base import Tool, ToolError
 
 if TYPE_CHECKING:
-    from app.service.mock_tushare_service import MockTushareService
+    from app.services.tushare_service import TushareService
 
 
 class FinancialsArgs(BaseModel):
@@ -20,8 +20,8 @@ class FinancialsArgs(BaseModel):
 class GetFinancialsTool(Tool):
     """Return key financial metrics for a given A-share.
 
-    Data source: MockTushareService.generate_income (profit / loss statement)
-    and MockTushareService.generate_fina_indicator (financial ratios).
+    Data source: TushareService.get_income (profit / loss statement)
+    and TushareService.get_fina_indicator (financial ratios).
     Both methods take an optional end_date; we default to the latest period
     (20241231) regardless of the `period` arg—the mock always returns one
     synthetic period per query, so "latest" / "quarterly" / "annual" are
@@ -35,17 +35,20 @@ class GetFinancialsTool(Tool):
     )
     args_schema = FinancialsArgs
 
-    def __init__(self, mock_tushare: MockTushareService) -> None:
-        self._mock_tushare = mock_tushare
+    def __init__(self, tushare: TushareService | None = None) -> None:
+        self._tushare = tushare
 
     async def run(self, args: BaseModel) -> dict[str, Any]:
         validated = FinancialsArgs.model_validate(args.model_dump())
 
+        if self._tushare is None:
+            raise ToolError("tushare not configured — cannot fetch financial data")
+
         try:
-            income_df = await self._mock_tushare.generate_income(ts_code=validated.ts_code)
-            fina_df = await self._mock_tushare.generate_fina_indicator(ts_code=validated.ts_code)
+            income_df = await self._tushare.get_income(ts_code=validated.ts_code)
+            fina_df = await self._tushare.get_fina_indicator(ts_code=validated.ts_code)
         except Exception as exc:
-            raise ToolError(f"MockTushareService call failed: {exc}") from exc
+            raise ToolError(f"TushareService call failed: {exc}") from exc
 
         # Extract most recent income row
         revenue: float = 0.0

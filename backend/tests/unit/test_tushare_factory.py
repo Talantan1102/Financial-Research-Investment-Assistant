@@ -6,13 +6,13 @@ import pytest
 from app.services.tushare_factory import build_tushare_service
 
 
-@pytest.mark.skip(reason="depends on Task 4 LegacyMockTushareAdapter")
 def test_default_mode_is_mock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("TUSHARE_MODE", raising=False)
     monkeypatch.delenv("TUSHARE_TOKEN", raising=False)
     svc = build_tushare_service()
-    # Mock svc 类型是 LegacyMockTushareAdapter,具体名后 Task 4 引入,这里只验返回非 None
-    assert svc is not None
+    from app.services.tushare_mock_adapter import LegacyMockTushareAdapter
+
+    assert isinstance(svc, LegacyMockTushareAdapter)
 
 
 def test_real_mode_requires_token(monkeypatch: pytest.MonkeyPatch) -> None:

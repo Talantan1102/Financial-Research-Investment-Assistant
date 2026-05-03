@@ -64,7 +64,7 @@ async def test_planner_node_returns_state_update(
 
     svc = LLMService(client=mock_llm_client)
     reg = ToolRegistry()
-    reg.register(StockQuoteTool(mock_tushare=None))
+    reg.register(StockQuoteTool(tushare=None))
     planner = ChatPlanner(llm=svc, registry=reg)
 
     state = _state()
