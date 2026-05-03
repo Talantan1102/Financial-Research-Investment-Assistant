@@ -49,7 +49,12 @@ def _parse_insights(content: str) -> list[Insight]:
     cleaned = re.sub(r"^```(?:json)?\s*", "", content.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r"\s*```\s*$", "", cleaned)
     data = json.loads(cleaned)
-    return [Insight.model_validate(i) for i in data["insights"]]
+    insights_raw = data["insights"]
+    # Coerce subtask_id to str: LLM occasionally returns integer subtask_ids (e.g. 1 → "1")
+    for item in insights_raw:
+        if "subtask_id" in item and not isinstance(item["subtask_id"], str):
+            item["subtask_id"] = str(item["subtask_id"])
+    return [Insight.model_validate(i) for i in insights_raw]
 
 
 class Analyst(Agent):

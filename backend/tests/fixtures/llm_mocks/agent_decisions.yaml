@@ -53,13 +53,14 @@ entries:
       prompt_tokens: 80
       completion_tokens: 20
 
-  # Writer: matched by the system-role prefix injected by build_writer_prompt.
+  # Writer (v0.8.2): matched by the system-role prefix injected by build_credit_report_prompt.
+  # Returns a valid CreditInvestigationReport JSON (schema-conformant).
   # Must appear BEFORE Analyst/ResearchPlanner/ChatPlanner patterns.
-  - pattern: "^你是金融研究助手 writer"
+  - pattern: "^你是银行公司金融部"
     response:
-      content: '{"report_markdown":"# 茅台(600519.SH)研报\n\n## 概况\n茅台当前股价 1820.5 元。\n\n![价格走势](chart://c1)\n\n## 财务\n营收稳健增长。\n","chart_specs":[{"chart_id":"c1","chart_type":"line","title":"价格走势","data":[{"date":"2026-04-30","price":1820.5}],"x_axis":"date","y_axis":"price"}]}'
+      content: '{"company_name":"600519.SH","request_id":"req-mock","generated_at":"2026-05-03T00:00:00","company_overview":{"narrative":"茅台为中国白酒龙头企业,主营飞天茅台等高端白酒产品。","main_business":"高端白酒生产销售","evidence":["c1::0"]},"legal_qualification":{"narrative":"主体资格完备,无重大不良记录。","legal_status":"正常","business_qualifications":["白酒生产许可证"],"adverse_records":[],"evidence":["c1::1"]},"financial_analysis":{"narrative":"资产负债率偏低,经营性现金流充裕,盈利能力强劲。","key_metrics":[{"name":"营收","value":"1276亿元","period":"2023","yoy_change":null}],"solvency_analysis":"资产负债率约19%,偿债能力极强。","profitability_analysis":"净利润率约51%,高于行业平均水平。","cash_flow_analysis":"经营性现金流净额约700亿元,健康充裕。","year_over_year_summary":null,"evidence":["c1::2"]},"industry_analysis":{"narrative":"高端白酒行业景气度高,竞争格局稳固。","industry_name":"白酒","industry_outlook":"稳定增长","competitive_position":"市场龙头","key_competitors":["五粮液","洋河股份"],"policy_impact":"消费税政策存在调整风险","evidence":["c1::3"]},"risk_assessment":{"narrative":"整体风险可控,主要关注消费税政策变化及高端消费需求波动。","operational_risks":[{"title":"品牌管理风险","description":"品牌声誉下滑可能影响销售","severity":"low","mitigations":[]}],"financial_risks":[],"industry_risks":[{"title":"消费税政策风险","description":"消费税调整可能影响利润","severity":"medium","mitigations":[]}],"compliance_risks":[],"overall_risk_level":"low","evidence":["c1::4"]},"credit_recommendation":{"narrative":"综合评估,建议批准信贷申请。","decision":"approve","recommended_credit_limit":null,"recommended_term":null,"recommended_rate_range":null,"guarantee_requirements":[],"conditions":[],"evidence":["c1::5"]}}'
       prompt_tokens: 100
-      completion_tokens: 80
+      completion_tokens: 200
 
   # Analyst: matched by the system-role prefix injected by build_analyst_prompt.
   # Must appear BEFORE ResearchPlanner and ChatPlanner patterns.

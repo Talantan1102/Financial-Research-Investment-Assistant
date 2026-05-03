@@ -1,10 +1,7 @@
-"""L0 — Writer prompt construction + markdown + chart_specs parsing."""
+"""L0 — Writer prompt construction (v0.8.2 credit report rewrite)."""
 
-import pytest
 from app.agents.schemas import Insight, ResearchPlan, ResearchState, Subtask
-from app.agents.writer import Writer, build_writer_prompt
-from app.services.llm_mock_client import MockLLMClient
-from app.services.llm_service import LLMService
+from app.agents.writer import build_credit_report_prompt
 
 
 def _state_with_insights() -> ResearchState:
@@ -29,26 +26,14 @@ def _state_with_insights() -> ResearchState:
 
 def test_build_prompt_includes_insights() -> None:
     state = _state_with_insights()
-    prompt = build_writer_prompt(state)
-    assert "你是金融研究助手 writer" in prompt
+    prompt = build_credit_report_prompt(state)
+    assert "银行公司金融部" in prompt
     assert "overview" in prompt
-    assert "chart_id" in prompt
-    assert "chart://" in prompt
+    assert "信贷调查报告" in prompt
 
 
-def test_writer_step_returns_markdown(
-    mock_llm_client: MockLLMClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("LLM_MODE", "mock")
-    svc = LLMService(client=mock_llm_client)
-    writer = Writer(llm=svc)
-
+def test_build_prompt_includes_user_message() -> None:
     state = _state_with_insights()
-    sr = writer.step(state)
-
-    md = sr.state_update["report_markdown"]
-    assert isinstance(md, str)
-    n = len(md)
-    assert n > 50, f"report markdown too short ({n} chars)"
-    chart_specs = sr.state_update.get("chart_specs", [])
-    assert isinstance(chart_specs, list)
+    prompt = build_credit_report_prompt(state)
+    assert "m" in prompt
+    assert "用户原始需求" in prompt

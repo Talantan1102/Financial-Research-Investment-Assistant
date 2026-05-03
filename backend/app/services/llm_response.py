@@ -15,7 +15,7 @@ class LLMResponse(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     content: str
-    parsed: dict[str, Any] | None = None
+    parsed: dict[str, Any] | BaseModel | None = None
     model: str
     tier: Tier
     prompt_tokens: int = Field(ge=0)
