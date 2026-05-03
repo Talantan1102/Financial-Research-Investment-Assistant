@@ -35,14 +35,11 @@ class GetFinancialsTool(Tool):
     )
     args_schema = FinancialsArgs
 
-    def __init__(self, tushare: TushareService | None = None) -> None:
+    def __init__(self, tushare: TushareService) -> None:
         self._tushare = tushare
 
     async def run(self, args: BaseModel) -> dict[str, Any]:
         validated = FinancialsArgs.model_validate(args.model_dump())
-
-        if self._tushare is None:
-            raise ToolError("tushare not configured — cannot fetch financial data")
 
         try:
             income_df = await self._tushare.get_income(ts_code=validated.ts_code)

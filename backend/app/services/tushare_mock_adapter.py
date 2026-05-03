@@ -67,8 +67,19 @@ class LegacyMockTushareAdapter:
         return await self._ensure_inner().generate_fina_indicator(ts_code=ts_code)
 
     async def get_balance_sheet(self, *, ts_code: str, end_date: str | None = None) -> pd.DataFrame:
-        # Delegates to existing LLM-based generate_balance_sheet (accepts ts_code: str | None).
-        return await self._ensure_inner().generate_balance_sheet(ts_code=ts_code, end_date=end_date)
+        # Deterministic inline builder — avoids the LLM-based legacy generate_balance_sheet.
+        # Columns include debt_to_assets required by Task 8 FinancialRatioRule.
+        rows = [
+            {
+                "ts_code": ts_code,
+                "end_date": ed,
+                "total_assets": 1.5e10 + i * 1e8,
+                "total_liab": 6e9 + i * 5e7,
+                "debt_to_assets": 0.4 + i * 0.02,
+            }
+            for i, ed in enumerate(["20240331", "20240630", "20240930", "20241231"])
+        ]
+        return pd.DataFrame(rows)
 
     async def get_cashflow(self, *, ts_code: str, end_date: str | None = None) -> pd.DataFrame:
         return await self._ensure_inner().generate_cashflow(ts_code=ts_code, end_date=end_date)
