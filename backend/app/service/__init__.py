@@ -1,5 +1,7 @@
-# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
-# 未经授权，禁止转售或仿制。
+"""Legacy module — see backend/LEGACY_LAYOUT.md for module-by-module status and v1.x evolution plan.
+
+New features should prefer importing from `app/services/*` (plural, v0.8.x main path).
+"""
 
 from .chart_generator import ChartGenerator, create_chart_generator
 

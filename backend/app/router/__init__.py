@@ -1,6 +1,3 @@
-# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
-# 未经授权，禁止转售或仿制。
-
 # Router package — new strict routers live in submodules (app.router.chat etc.)
 # Legacy routers (document_router / research_router / search_router) are imported
 # directly in app_main.py via the bare `router` package (--app-dir backend).

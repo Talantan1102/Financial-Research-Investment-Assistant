@@ -1,10 +1,6 @@
-/**
- * Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
- * 未经授权，禁止转售或仿制。
- */
-
 import { AuthGuard } from '@/components/auth-guard'
 import { BaseLayout } from '@/layout/base'
+import { ThemedRoot } from '@/themes/themed-root'
 import NotFound from '@/pages/404'
 import LoginPage from '@/pages/auth/login'
 import Chat from '@/pages/chat'
@@ -14,7 +10,6 @@ import KnowledgePage from '@/pages/knowledge'
 import MemoryPage from '@/pages/memory'
 import DatabasePage from '@/pages/database'
 import NewsPage from '@/pages/news'
-import BiddingPage from '@/pages/bidding'
 import {
   Navigate,
   Outlet,
@@ -65,10 +60,6 @@ export const routes: IRouteObject[] = [
     Component: NewsPage,
   },
   {
-    path: '/bidding',
-    Component: BiddingPage,
-  },
-  {
     path: '/404',
     Component: NotFound,
     pure: true,
@@ -78,23 +69,29 @@ export const routes: IRouteObject[] = [
 export const router = createBrowserRouter(
   [
     {
-      path: '/login',
-      element: <LoginPage />,
-    },
-    {
       path: '/',
-      element: (
-        <AuthGuard>
-          <BaseLayout>
-            <Outlet />
-          </BaseLayout>
-        </AuthGuard>
-      ),
-      children: routes,
-    },
-    {
-      path: '*',
-      element: <Navigate to="/404" />,
+      Component: ThemedRoot,
+      children: [
+        {
+          path: '/login',
+          element: <LoginPage />,
+        },
+        {
+          path: '/',
+          element: (
+            <AuthGuard>
+              <BaseLayout>
+                <Outlet />
+              </BaseLayout>
+            </AuthGuard>
+          ),
+          children: routes,
+        },
+        {
+          path: '*',
+          element: <Navigate to="/404" />,
+        },
+      ],
     },
   ] as RouteObject[],
   {

@@ -1,9 +1,3 @@
-/**
- * Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
- * 未经授权，禁止转售或仿制。
- */
-
-import IconBid from '@/assets/layout/bid.svg'
 import IconHistory from '@/assets/layout/history.svg'
 import IconHome from '@/assets/layout/home.svg'
 import IconKnowledge from '@/assets/layout/knowledge.svg'
@@ -93,12 +87,6 @@ export function Nav() {
         label: '行业资讯',
         icon: IconNews,
         href: '/news',
-      },
-      {
-        key: 'bid',
-        label: '招投标信息',
-        icon: IconBid,
-        href: '/bidding',
       },
       // 暂时隐藏职业规划
       // {
