@@ -125,3 +125,67 @@ def test_idempotent() -> None:
 def test_decision_label_zh() -> None:
     md = render_credit_report_markdown(_full_report())
     assert "批准" in md  # approve → 批准
+
+
+def test_decision_zh_covers_all_literals() -> None:
+    """Meta-guard: _DECISION_ZH must cover every Literal value in CreditRecommendation.decision."""
+    from typing import get_args
+
+    from app.agents.credit_report_renderer import _DECISION_ZH
+    from app.agents.credit_report_schema import CreditRecommendation
+
+    decision_field = CreditRecommendation.model_fields["decision"]
+    literal_values = set(get_args(decision_field.annotation))
+    assert literal_values == set(_DECISION_ZH.keys()), (
+        f"_DECISION_ZH out of sync with schema: "
+        f"missing={literal_values - set(_DECISION_ZH.keys())}, "
+        f"extra={set(_DECISION_ZH.keys()) - literal_values}"
+    )
+
+
+def test_risk_level_zh_covers_all_literals() -> None:
+    """Meta-guard: _RISK_LEVEL_ZH must cover every Literal value in RiskAssessment.overall_risk_level."""
+    from typing import get_args
+
+    from app.agents.credit_report_renderer import _RISK_LEVEL_ZH
+    from app.agents.credit_report_schema import RiskAssessment
+
+    field = RiskAssessment.model_fields["overall_risk_level"]
+    literal_values = set(get_args(field.annotation))
+    assert literal_values == set(_RISK_LEVEL_ZH.keys())
+
+
+def test_severity_zh_covers_all_literals() -> None:
+    """Meta-guard: _SEVERITY_ZH must cover every Literal value in RiskItem.severity."""
+    from typing import get_args
+
+    from app.agents.credit_report_renderer import _SEVERITY_ZH
+    from app.agents.credit_report_schema import RiskItem
+
+    field = RiskItem.model_fields["severity"]
+    literal_values = set(get_args(field.annotation))
+    assert literal_values == set(_SEVERITY_ZH.keys())
+
+
+def test_empty_key_metrics_renders_placeholder() -> None:
+    """FinancialAnalysis.key_metrics=[] should render a placeholder, not crash."""
+    r = _full_report()
+    r.financial_analysis.key_metrics = []
+    md = render_credit_report_markdown(r)
+    assert "_暂无关键财务指标_" in md
+    assert "## § 3 财务分析" in md  # section still rendered
+
+
+def test_all_empty_risk_categories_render_placeholders() -> None:
+    """All risk categories empty should render '_无' placeholders for each, not crash."""
+    r = _full_report()
+    r.risk_assessment.operational_risks = []
+    r.risk_assessment.financial_risks = []
+    r.risk_assessment.industry_risks = []
+    r.risk_assessment.compliance_risks = []
+    md = render_credit_report_markdown(r)
+    # Each category renders an empty placeholder
+    assert "_经营风险:无_" in md
+    assert "_财务风险:无_" in md
+    assert "_行业风险:无_" in md
+    assert "_合规风险:无_" in md
