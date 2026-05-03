@@ -9,7 +9,6 @@ import KnowledgePage from '@/pages/knowledge'
 import MemoryPage from '@/pages/memory'
 import DatabasePage from '@/pages/database'
 import NewsPage from '@/pages/news'
-import BiddingPage from '@/pages/bidding'
 import {
   Navigate,
   Outlet,
@@ -58,10 +57,6 @@ export const routes: IRouteObject[] = [
   {
     path: '/news',
     Component: NewsPage,
-  },
-  {
-    path: '/bidding',
-    Component: BiddingPage,
   },
   {
     path: '/404',

@@ -1,3 +1,5 @@
+// legacy data; v0.8.x main path consumes Bocha API instead
+// Used by: frontend/src/pages/chat/component/news.tsx
 export default [
   {
     title: '深学笃行阐释习近平经济思想｜一以贯之做好向海发展大文章',
