@@ -1,4 +1,3 @@
-
 import * as api from '@/api'
 import ComPageLayout from '@/components/page-layout'
 import ComSender, { AttachmentInfo } from '@/components/sender'

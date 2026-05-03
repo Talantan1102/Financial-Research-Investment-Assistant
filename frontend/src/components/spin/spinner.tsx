@@ -1,4 +1,3 @@
-
 import './spinner.scss'
 
 export default function ComSpinner() {

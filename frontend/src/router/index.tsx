@@ -1,4 +1,3 @@
-
 import { RouterProvider } from 'react-router-dom'
 import { RouterContext } from './context'
 import { router } from './routes'

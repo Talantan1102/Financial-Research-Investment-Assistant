@@ -1,4 +1,3 @@
-
 import { CheckOutlined, LoadingOutlined } from '@ant-design/icons'
 import classNames from 'classnames'
 import styles from './index.module.scss'

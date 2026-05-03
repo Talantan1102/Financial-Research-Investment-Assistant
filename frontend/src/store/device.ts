@@ -1,4 +1,3 @@
-
 import storage from './storage'
 import proxyWithPersist, { PersistStrategy } from './valtio-persist'
 

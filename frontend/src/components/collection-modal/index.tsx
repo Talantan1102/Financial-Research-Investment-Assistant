@@ -1,4 +1,3 @@
-
 import { Modal, Steps, Result, Spin } from 'antd'
 import { LoadingOutlined, CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import styles from './index.module.scss'

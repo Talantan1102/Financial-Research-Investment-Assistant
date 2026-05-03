@@ -1,4 +1,3 @@
-
 import { AxiosResponse } from 'axios'
 
 export class ResponseError extends Error {

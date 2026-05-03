@@ -1,4 +1,3 @@
-
 import IconCompleted from '@/assets/chat/completed.svg'
 import IconFile from '@/assets/chat/file.svg'
 import IconSelectFile from '@/assets/chat/select-file.svg'

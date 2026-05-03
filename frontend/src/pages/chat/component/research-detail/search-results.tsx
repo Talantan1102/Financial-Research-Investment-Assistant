@@ -1,4 +1,3 @@
-
 import { FileTextOutlined } from '@ant-design/icons'
 import styles from './search-results.module.scss'
 

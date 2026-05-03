@@ -1,4 +1,3 @@
-
 import { UpOutlined } from '@ant-design/icons'
 import { Collapse } from 'antd'
 import styles from './section.module.scss'

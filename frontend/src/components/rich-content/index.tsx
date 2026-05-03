@@ -1,4 +1,3 @@
-
 /**
  * RichContent Component - 图文混排渲染器
  *

@@ -1,4 +1,3 @@
-
 import IconViews from '@/assets/chat/views.png'
 import newsData from '@/configs/data/news'
 import { useRequest } from 'ahooks'

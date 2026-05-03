@@ -1,4 +1,3 @@
-
 import { LinkOutlined, FileTextOutlined, BarChartOutlined, BulbOutlined } from '@ant-design/icons'
 import { Empty, Tag, Collapse } from 'antd'
 import styles from './index.module.scss'

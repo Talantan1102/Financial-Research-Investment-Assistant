@@ -1,4 +1,3 @@
-
 import { AxiosResponse } from 'axios'
 import { ResponseError } from '../error'
 import { IRequestPlugin } from './plugin'

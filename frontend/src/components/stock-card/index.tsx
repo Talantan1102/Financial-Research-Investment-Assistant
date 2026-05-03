@@ -1,4 +1,3 @@
-
 import { ArrowUpOutlined, ArrowDownOutlined, StockOutlined } from '@ant-design/icons'
 import styles from './index.module.scss'
 

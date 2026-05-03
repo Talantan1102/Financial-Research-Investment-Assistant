@@ -1,4 +1,3 @@
-
 import classNames from 'classnames'
 import { PropsWithChildren } from 'react'
 import styles from './drawer.module.scss'

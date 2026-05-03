@@ -1,4 +1,3 @@
-
 import { request } from './request'
 
 // 资讯类型定义

@@ -1,4 +1,3 @@
-
 import IconImage from '@/assets/chat/image.svg'
 import IconSource from '@/assets/chat/source.svg'
 import IconThink from '@/assets/chat/think.svg'

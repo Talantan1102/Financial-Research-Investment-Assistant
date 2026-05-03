@@ -1,4 +1,3 @@
-
 import IconBg from '@/assets/index/bg.png'
 import IconSearch from '@/assets/index/search.svg'
 import { Input, message } from 'antd'

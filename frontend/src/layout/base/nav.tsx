@@ -1,4 +1,3 @@
-
 import IconBid from '@/assets/layout/bid.svg'
 import IconHistory from '@/assets/layout/history.svg'
 import IconHome from '@/assets/layout/home.svg'

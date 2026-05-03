@@ -1,4 +1,3 @@
-
 import axios, { AxiosRequestConfig } from 'axios'
 import { authPlugin } from './plugins/auth'
 import { errorToastPlugin } from './plugins/error-toast'

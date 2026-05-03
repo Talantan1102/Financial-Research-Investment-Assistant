@@ -1,4 +1,3 @@
-
 import { ProxyPersistStorageEngine } from './valtio-persist'
 
 const storage: ProxyPersistStorageEngine = {

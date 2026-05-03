@@ -1,4 +1,3 @@
-
 declare namespace API {
   interface ChatItem {
     id: number

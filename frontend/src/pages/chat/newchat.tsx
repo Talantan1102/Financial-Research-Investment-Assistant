@@ -1,4 +1,3 @@
-
 import * as api from '@/api'
 import type { NewsItem, BiddingItem } from '@/api/news'
 import IconNews from '@/assets/layout/news.svg'

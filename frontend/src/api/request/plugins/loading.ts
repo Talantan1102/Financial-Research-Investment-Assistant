@@ -1,4 +1,3 @@
-
 import { AxiosRequestConfig, AxiosResponse } from 'axios'
 import { IRequestPlugin } from './plugin'
 

@@ -1,4 +1,3 @@
-
 import { Footer } from './footer'
 import './index.scss'
 import { Nav } from './nav'

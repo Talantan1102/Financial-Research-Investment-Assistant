@@ -1,4 +1,3 @@
-
 import { Router } from '@/router'
 import { App as AntdApp, ConfigProvider, Spin } from 'antd'
 import zhCN from 'antd/locale/zh_CN'

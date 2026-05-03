@@ -1,4 +1,3 @@
-
 import { PageTransportKey } from '@/utils'
 
 export type ChatEnterData = {

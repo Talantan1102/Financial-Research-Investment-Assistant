@@ -1,4 +1,3 @@
-
 import IconFile from '@/assets/component/file.svg'
 import IconSend from '@/assets/component/send.svg'
 import { deviceActions, deviceState, SearchMode } from '@/store/device'

@@ -1,4 +1,3 @@
-
 import ComSpinner from '@/components/spin/spinner'
 import { ChatRole } from '@/configs'
 import classNames from 'classnames'

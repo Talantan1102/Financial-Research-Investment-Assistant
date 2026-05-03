@@ -1,4 +1,3 @@
-
 import { AuthGuard } from '@/components/auth-guard'
 import { BaseLayout } from '@/layout/base'
 import NotFound from '@/pages/404'

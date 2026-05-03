@@ -1,4 +1,3 @@
-
 import { request } from './request'
 
 export interface KnowledgeBase {

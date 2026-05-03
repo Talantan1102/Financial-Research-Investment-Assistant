@@ -1,4 +1,3 @@
-
 import fs from 'node:fs'
 import { MockMethod } from 'vite-plugin-mock'
 

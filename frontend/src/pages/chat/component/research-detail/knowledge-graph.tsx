@@ -1,4 +1,3 @@
-
 import { ShareAltOutlined } from '@ant-design/icons'
 import ReactECharts from 'echarts-for-react'
 import styles from './knowledge-graph.module.scss'

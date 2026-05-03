@@ -1,4 +1,3 @@
-
 import { proxy } from 'valtio'
 import * as knowledgeApi from '@/api/knowledge'
 import type { KnowledgeBase, KnowledgeBaseWithDocuments, KBDocument } from '@/api/knowledge'
