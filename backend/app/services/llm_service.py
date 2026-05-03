@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
 
+from pydantic import BaseModel
+
 from app.services.cost_budget import CostBudget
 from app.services.llm_response import LLMResponse, Tier
 from app.services.pricing import compute_cost
@@ -73,18 +75,26 @@ class LLMService:
         self,
         prompt: str,
         tier: Tier = "fast",
-        schema: dict[str, Any] | None = None,
+        schema: dict[str, Any] | type[BaseModel] | None = None,
         request_id: str | None = None,
         parent_span_id: str | None = None,
     ) -> LLMResponse:
         if self._budget is not None:
             self._budget.assert_under_limit()  # fail-fast on PRIOR over-limit
+        # v0.8.2: support Pydantic class as schema (auto-convert + auto-parse)
+        pydantic_class: type[BaseModel] | None = None
+        client_schema: dict[str, Any] | None
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            pydantic_class = schema
+            client_schema = schema.model_json_schema()
+        else:
+            client_schema = schema  # dict | None
         model = self._tier_router.resolve(tier)
         if request_id is None:
             request_id = f"req-{uuid4().hex[:12]}"
         started_at = datetime.now(UTC)
         started = time.perf_counter()
-        raw = self._client.chat(prompt=prompt, model=model, schema=schema)
+        raw = self._client.chat(prompt=prompt, model=model, schema=client_schema)
         latency_ms = int((time.perf_counter() - started) * 1000)
         ended_at = datetime.now(UTC)
         cost_cny = compute_cost(
@@ -96,7 +106,7 @@ class LLMService:
             self._budget.track(cost_cny)
         response = LLMResponse(
             content=raw.content,
-            parsed=None,
+            parsed=pydantic_class.model_validate_json(raw.content) if pydantic_class else None,
             model=model,
             tier=tier,
             prompt_tokens=raw.prompt_tokens,

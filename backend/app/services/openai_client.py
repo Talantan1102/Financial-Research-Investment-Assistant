@@ -38,6 +38,10 @@ class _Raw:
         self.completion_tokens = completion_tokens
 
 
+# Public alias for use in tests that need a concrete ChatCompletionRaw-compatible type.
+_RawClientResponse = _Raw
+
+
 class _OpenAIAdapter:
     """Thin wrapper around openai.OpenAI that satisfies the ChatClient protocol."""
 
