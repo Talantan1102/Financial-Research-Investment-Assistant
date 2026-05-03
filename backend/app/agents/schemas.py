@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.agents.credit_report_schema import CreditInvestigationReport
+
 
 class ToolCall(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -164,6 +166,7 @@ class ResearchState(BaseModel):
     insights: list[Insight] = Field(default_factory=list)
     report_markdown: str | None = None
     chart_specs: list[ChartSpec] = Field(default_factory=list)
+    credit_report: CreditInvestigationReport | None = None
     critic_report: CriticReport | None = None
 
     span_stack: list[str] = Field(default_factory=list)
