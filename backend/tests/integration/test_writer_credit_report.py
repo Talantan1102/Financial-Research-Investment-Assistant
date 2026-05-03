@@ -129,7 +129,7 @@ def _state_with_insights() -> ResearchState:
 
 def test_writer_emits_credit_report(stub_report_json: str) -> None:
     state = _state_with_insights()
-    writer = Writer(llm=_StubLlm(stub_report_json))
+    writer = Writer(llm=_StubLlm(stub_report_json))  # type: ignore[arg-type]
     sr = writer.step(state)
 
     assert "credit_report" in sr.state_update
@@ -143,14 +143,14 @@ def test_writer_passes_schema_to_llm(stub_report_json: str) -> None:
     """Writer must call LLMService.chat with schema=CreditInvestigationReport."""
     state = _state_with_insights()
     stub = _StubLlm(stub_report_json)
-    writer = Writer(llm=stub)
+    writer = Writer(llm=stub)  # type: ignore[arg-type]
     writer.step(state)
     assert stub.last_schema is CreditInvestigationReport
 
 
 def test_writer_renders_markdown(stub_report_json: str) -> None:
     state = _state_with_insights()
-    writer = Writer(llm=_StubLlm(stub_report_json))
+    writer = Writer(llm=_StubLlm(stub_report_json))  # type: ignore[arg-type]
     sr = writer.step(state)
     md = sr.state_update["report_markdown"]
     assert "# 信贷调查报告 — 测试公司" in md
