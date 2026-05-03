@@ -95,16 +95,41 @@ async def test_get_disclosure_date_dispatches(
     assert fake.calls[-1][0] == "disclosure_date"
 
 
-def test_protocol_runtime_check() -> None:
-    """RealTushareService satisfies TushareService Protocol structurally."""
-    # No assertion needed — mypy + isinstance via @runtime_checkable
-    assert hasattr(RealTushareService, "get_daily")
-    assert hasattr(RealTushareService, "get_income")
-    assert hasattr(RealTushareService, "get_fina_indicator")
-    assert hasattr(RealTushareService, "get_balance_sheet")
-    assert hasattr(RealTushareService, "get_cashflow")
-    assert hasattr(RealTushareService, "get_stk_holdernumber")
-    assert hasattr(RealTushareService, "get_disclosure_date")
-    assert hasattr(RealTushareService, "get_anns")
-    # Verify protocol exists
-    assert TushareService is not None
+def test_protocol_runtime_check(
+    cache: TushareCache,
+) -> None:
+    """isinstance(svc, TushareService) exercises @runtime_checkable structurally."""
+    fake = FakeTushareClient()
+    svc = RealTushareService(
+        client=fake,  # type: ignore[arg-type]
+        cache=cache,
+        rate_limiter=RateLimiter(max_calls=10, window_s=60.0),
+    )
+    assert isinstance(svc, TushareService)
+
+
+class _CountingRateLimiter:
+    """Wraps RateLimiter to count acquire() calls — used to verify cache-hit skips RL."""
+
+    def __init__(self, max_calls: int, window_s: float) -> None:
+        self._inner = RateLimiter(max_calls=max_calls, window_s=window_s)
+        self.acquire_count = 0
+
+    async def acquire(self) -> None:
+        self.acquire_count += 1
+        await self._inner.acquire()
+
+
+@pytest.mark.asyncio
+async def test_cache_hit_skips_rate_limiter(cache: TushareCache) -> None:
+    """Second call with same params must not invoke rate_limiter.acquire()."""
+    fake = FakeTushareClient()
+    rl = _CountingRateLimiter(max_calls=10, window_s=60.0)
+    svc = RealTushareService(
+        client=fake,  # type: ignore[arg-type]
+        cache=cache,
+        rate_limiter=rl,  # type: ignore[arg-type]
+    )
+    await svc.get_daily(ts_code="600519.SH", start="20240501", end="20240502")
+    await svc.get_daily(ts_code="600519.SH", start="20240501", end="20240502")
+    assert rl.acquire_count == 1  # cache hit → no second acquire

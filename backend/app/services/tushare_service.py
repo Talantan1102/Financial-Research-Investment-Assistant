@@ -33,6 +33,8 @@ class TushareService(Protocol):
         self, *, ts_code: str | None, start: str, end: str
     ) -> pd.DataFrame: ...
     async def get_anns(self, *, ts_code: str, start: str, end: str) -> pd.DataFrame: ...
+    # Mock implementations should override aclose() as a no-op or handle their own cleanup.
+    async def aclose(self) -> None: ...
 
 
 class RealTushareService:
@@ -107,3 +109,6 @@ class RealTushareService:
         return await self._call_cached(
             "anns", {"ts_code": ts_code, "start_date": start, "end_date": end}
         )
+
+    async def aclose(self) -> None:
+        await self._client.aclose()

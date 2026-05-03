@@ -7,15 +7,11 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from app.services.rate_limiter import RateLimiter
 from app.services.tushare_cache import TushareCache
 from app.services.tushare_client import TushareClient
 from app.services.tushare_service import RealTushareService, TushareService
-
-if TYPE_CHECKING:
-    pass
 
 _CACHE_PATH = Path(__file__).resolve().parents[2] / "data" / "tushare_cache.sqlite"
 
