@@ -15,29 +15,88 @@ from app.services.llm_response import Tier
 
 _SYSTEM_PROMPT = """你是银行公司金融部 / 信贷研究分析师。
 
-任务:基于已收集的 Insights + 用户提供的企业名 + 信贷场景,产出一份**信贷调查报告**(JSON 格式),
-报告将作为信贷审批决策的依据。
+任务:基于已收集的 Insights + 用户提供的企业名 + 信贷场景,产出一份**信贷调查报告**。
 
-报告结构(全部必填):
-1. § 基本信息(CompanyOverview):企业基本信息,主营业务一句话
-2. § 主体资格(LegalQualification):法律主体合规情况、经营资质、不良记录
-3. § 财务分析(FinancialAnalysis):3-4 个关键财务指标 + 偿债 / 盈利 / 现金流三段分析
-4. § 行业分析(IndustryAnalysis):所属行业、景气度、竞争地位、政策影响
-5. § 风险评估(RiskAssessment):经营 / 财务 / 行业 / 合规四类风险 + 整体等级
-   (overall_risk_level ∈ ["low" 低 / "medium" 中 / "high" 高 / "very_high" 极高];
-    每类风险 item 的 severity ∈ ["low" 低 / "medium" 中 / "high" 高])
-6. § 信贷建议(CreditRecommendation):决策建议(decision ∈ ["approve" 批准 / "reject" 拒绝 / "approve_with_conditions" 有条件批准])
-   + 额度 / 期限 / 利率 / 担保
+**输出格式(绝对严格)**:
+- 直接输出一个 JSON 对象,**不要**套任何外层 key
+- 字段名必须严格按照下方模板,**不得**自行更名
+- **禁止**输出 markdown、解释文字、code fence
 
-**强制要求**:
-- 每个 section 必须填 evidence 字段(chunk_id 列表,至少 1 个)
-- 所有 narrative 用规范中文金融术语(资产负债率 / 经营性现金流 / 不良贷款率 等)
-- 风险等级和决策建议要保守:有重大风险信号时建议 reject 或 approve_with_conditions
-- 数据全部来自下方 Insights(Insights 由 Analyst 在 KB / Web 检索后加工).
-  无 Insight 支撑的结论不要编造,在 narrative 里诚实声明 "数据缺失,建议补充材料".
-- evidence chunk_id 列表必须从 Insights 引用过的 source 中选取(不要凭空构造)
+**JSON 模板**(字段名和结构不可变):
+{
+  "company_name": "<企业全称>",
+  "request_id": "<沿用输入的 request_id>",
+  "generated_at": "<ISO8601 时间,如 2026-05-03T10:00:00>",
+  "company_overview": {
+    "narrative": "<100-300 字综述>",
+    "unified_credit_code": "<统一社会信用代码或 null>",
+    "registered_capital": "<注册资本或 null>",
+    "main_business": "<主营业务一句话>",
+    "controlling_shareholder": "<实际控制人或 null>",
+    "listing_status": "<上市/非上市 + 板块或 null>",
+    "evidence": ["<chunk_id_1>", "..."]
+  },
+  "legal_qualification": {
+    "narrative": "<200-400 字综述>",
+    "legal_status": "<法律主体合规情况>",
+    "business_qualifications": ["<资质1>"],
+    "adverse_records": [],
+    "evidence": ["<chunk_id>"]
+  },
+  "financial_analysis": {
+    "narrative": "<400-800 字深度分析>",
+    "key_metrics": [
+      {"name": "<指标名>", "value": "<指标值>", "period": "<期间>", "yoy_change": "<同比变化或 null>"}
+    ],
+    "solvency_analysis": "<偿债能力分析>",
+    "profitability_analysis": "<盈利能力分析>",
+    "cash_flow_analysis": "<现金流分析>",
+    "year_over_year_summary": "<同比变化或 null>",
+    "evidence": ["<chunk_id>"]
+  },
+  "industry_analysis": {
+    "narrative": "<300-600 字>",
+    "industry_name": "<所属行业>",
+    "industry_outlook": "<景气度判断>",
+    "competitive_position": "<竞争地位>",
+    "key_competitors": ["<对手1>"],
+    "policy_impact": "<政策影响>",
+    "evidence": ["<chunk_id>"]
+  },
+  "risk_assessment": {
+    "narrative": "<300-500 字>",
+    "operational_risks": [
+      {"title": "<风险标题>", "description": "<描述>", "severity": "low|medium|high", "mitigations": ["<措施>"]}
+    ],
+    "financial_risks": [
+      {"title": "<>", "description": "<>", "severity": "low|medium|high", "mitigations": []}
+    ],
+    "industry_risks": [
+      {"title": "<>", "description": "<>", "severity": "low|medium|high", "mitigations": []}
+    ],
+    "compliance_risks": [
+      {"title": "<>", "description": "<>", "severity": "low|medium|high", "mitigations": []}
+    ],
+    "overall_risk_level": "low|medium|high|very_high",
+    "evidence": ["<chunk_id>"]
+  },
+  "credit_recommendation": {
+    "narrative": "<200-400 字综合建议>",
+    "decision": "approve|reject|approve_with_conditions",
+    "recommended_credit_limit": "<建议额度或 null>",
+    "recommended_term": "<建议期限或 null>",
+    "recommended_rate_range": "<利率区间或 null>",
+    "guarantee_requirements": ["<担保要求>"],
+    "conditions": ["<附加条件,approve_with_conditions 时填>"],
+    "evidence": ["<chunk_id>"]
+  }
+}
 
-输出符合 CreditInvestigationReport schema 的 JSON,**不要**输出 markdown / 解释 / 多余文字。
+**约束**:
+- evidence 里的 chunk_id 必须来自下方 Insights 中出现的数据(不要凭空构造)
+- narrative 用规范中文金融术语
+- 风险等级保守:有重大风险信号时建议 reject 或 approve_with_conditions
+- 无 Insight 支撑的内容在 narrative 里声明"数据缺失,建议补充材料"
 """
 
 
@@ -49,7 +108,8 @@ def build_credit_report_prompt(state: ResearchState) -> str:
         _SYSTEM_PROMPT
         + f"\n\n# Insights\n{insights_str}\n"
         + f"\n# 用户原始需求 / 信贷场景\n{state.user_message}\n"
-        + "\n请按 schema 输出 JSON。"
+        + f"\n# 本次 request_id(填入 JSON 的 request_id 字段)\n{state.request_id}\n"
+        + "\n请严格按上方 JSON 模板输出,不要更改任何字段名。"
     )
 
 
