@@ -1,6 +1,3 @@
-# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
-# 未经授权，禁止转售或仿制。
-
 """Mock Tushare 服务
 
 利用大模型能力生成模拟的 Tushare API 数据，格式与真实 Tushare API 返回格式完全一致。

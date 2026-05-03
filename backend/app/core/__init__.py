@@ -1,6 +1,3 @@
-# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
-# 未经授权，禁止转售或仿制。
-
 from .database import Base, SessionLocal, engine, get_db
 from .redis_client import RedisCache, cache, get_redis_client
 from .security import (

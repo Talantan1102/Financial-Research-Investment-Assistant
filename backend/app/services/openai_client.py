@@ -1,6 +1,3 @@
-# Copyright © 2026 深圳市深维智见教育科技有限公司 版权所有
-# 未经授权，禁止转售或仿制。
-
 """OpenAI adapter — moved from app.data._llm_adapter to app.services.
 
 Provides ``build_llm_service_from_env()`` so that the HTTP router and
