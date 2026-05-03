@@ -9,12 +9,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import pickle
 import sqlite3
 import time
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # TTL classification per spec § 3.3
 _TTL_FINANCIAL_S = 365 * 24 * 3600  # 财务接口"永久" — 用 1 年代表
@@ -66,35 +69,72 @@ class TushareCache:
                 """
             )
 
+    # ------------------------------------------------------------------ #
+    # Sync helpers (run inside asyncio.to_thread)                          #
+    # ------------------------------------------------------------------ #
+
+    def _get_sync(self, api_name: str, params_hash: str, now: float) -> pd.DataFrame | None:
+        with sqlite3.connect(self._db_path) as conn:
+            cur = conn.execute(
+                "SELECT response_blob, expires_at FROM tushare_cache "
+                "WHERE api_name = ? AND params_hash = ?",
+                (api_name, params_hash),
+            )
+            row = cur.fetchone()
+        if row is None:
+            return None
+        blob, expires_at = row
+        if expires_at < now:
+            return None
+        try:
+            df = pickle.loads(blob)  # noqa: S301
+        except (pickle.UnpicklingError, EOFError, AttributeError, ValueError, TypeError) as exc:
+            logger.warning(
+                "TushareCache: corrupt blob for api=%s params_hash=%s — treating as cache miss (%s)",
+                api_name,
+                params_hash,
+                exc,
+            )
+            return None
+        if not isinstance(df, pd.DataFrame):
+            logger.warning(
+                "TushareCache: deserialized non-DataFrame for api=%s params_hash=%s (%s) — treating as cache miss",
+                api_name,
+                params_hash,
+                type(df),
+            )
+            return None
+        return df
+
+    def _set_sync(
+        self,
+        api_name: str,
+        params_hash: str,
+        blob: bytes,
+        now: float,
+        ttl_s: float,
+    ) -> None:
+        with sqlite3.connect(self._db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO tushare_cache "
+                "(api_name, params_hash, response_blob, fetched_at, expires_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (api_name, params_hash, blob, now, now + ttl_s),
+            )
+
+    # ------------------------------------------------------------------ #
+    # Public async API                                                      #
+    # ------------------------------------------------------------------ #
+
     async def get(self, api_name: str, params: dict) -> pd.DataFrame | None:
         async with self._lock:
             now = time.time()
             params_hash = _hash_params(params)
-            with sqlite3.connect(self._db_path) as conn:
-                cur = conn.execute(
-                    "SELECT response_blob, expires_at FROM tushare_cache "
-                    "WHERE api_name = ? AND params_hash = ?",
-                    (api_name, params_hash),
-                )
-                row = cur.fetchone()
-            if row is None:
-                return None
-            blob, expires_at = row
-            if expires_at < now:
-                return None
-            df = pickle.loads(blob)
-            assert isinstance(df, pd.DataFrame)
-            return df
+            return await asyncio.to_thread(self._get_sync, api_name, params_hash, now)
 
     async def set(self, api_name: str, params: dict, df: pd.DataFrame, ttl_s: float) -> None:
         async with self._lock:
             now = time.time()
             params_hash = _hash_params(params)
             blob = pickle.dumps(df)
-            with sqlite3.connect(self._db_path) as conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO tushare_cache "
-                    "(api_name, params_hash, response_blob, fetched_at, expires_at) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (api_name, params_hash, blob, now, now + ttl_s),
-                )
+            await asyncio.to_thread(self._set_sync, api_name, params_hash, blob, now, ttl_s)

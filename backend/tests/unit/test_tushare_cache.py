@@ -58,3 +58,23 @@ def test_classify_ttl_daily() -> None:
 
 def test_classify_ttl_default() -> None:
     assert classify_ttl("unknown_api") == 3600
+
+
+@pytest.mark.asyncio
+async def test_get_returns_none_on_corrupt_blob(cache: TushareCache) -> None:
+    """Cache miss invariant: corrupt blob must return None, not raise."""
+    import sqlite3 as _sqlite3
+
+    # Initialise the schema by writing a real entry first, then overwrite its blob
+    df = pd.DataFrame({"a": [1]})
+    await cache.set("daily", {"ts_code": "x"}, df, ttl_s=3600)
+
+    # Overwrite the stored blob with garbage bytes
+    with _sqlite3.connect(cache._db_path) as conn:
+        conn.execute(
+            "UPDATE tushare_cache SET response_blob = ? WHERE api_name = 'daily'",
+            (b"not-a-valid-pickle-blob",),
+        )
+
+    result = await cache.get("daily", {"ts_code": "x"})
+    assert result is None
