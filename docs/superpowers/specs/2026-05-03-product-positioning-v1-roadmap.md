@@ -175,6 +175,8 @@
 
 ### 5.2 D2 — 本地部署 / 私有化能力
 
+> **Status(2026-05-04 update)**:**v1.0 不交付,v1.x roadmap**。理由:作者本地硬件性能受限,跑 BGE-M3 + 本地 7B LLM benchmark 不现实。架构上 LLMService 已通过 ChatClient Protocol 抽象,retrieval 层同样 protocol 化,**切本地实现不动调用方;口子留好不做实施**。简历仍保银行 persona,面试被追问时坦诚回答:"硬件限制,v1.0 只做云端 demo + 架构留口;v1.x roadmap"。
+
 **问题陈述**:银行场景严禁数据出域。必须能跑本地 embedding + 本地 LLM。即使个人 dogfood 不需要,**作为差异化叙事**必须演示得了。
 
 **业界 alternatives**:
@@ -183,15 +185,12 @@
 - 混合(本地 embed + 云 LLM):embed 数据量大也敏感,不行
 - Private deployment of frontier model(GPT-4 Azure private / Claude AWS private):贵且复杂
 
-**我们取舍**:
-- **Embedding 做 BGE-M3 本地 spike**:开源 SOTA 中文 embed,1024 dim 跟 qwen 兼容
-- **LLM 做 DeepSeek / Qwen-7B-Chat 本地 spike**:跟云端 API 对比 quality + benchmark
-- **不全切换**,做 option(env switch),云端默认 + 本地可选;面试时演示本地跑通即可
+**我们取舍(原计划 — v1.0 不执行,留 v1.x)**:
+- ~~Embedding 做 BGE-M3 本地 spike~~ → 留 v1.x
+- ~~LLM 做 DeepSeek / Qwen-7B-Chat 本地 spike~~ → 留 v1.x
+- **架构留口子**(v1.0 已具备):LLMService 通过 ChatClient Protocol 注入;Retrieval 层同样 protocol 化;切本地实现不需动 caller
 
-**量化评估**:
-- BGE vs Qwen embed retrieval recall@5(50 query golden set),gap < 5%
-- 本地 LLM 在 B-1 任务上的 LLM-as-judge score(5 case),gap < 10%
-- benchmark:tokens/s + p50/p99 latency + 显存占用,有数据即可
+**量化评估**:留 v1.x 再补
 
 ### 5.3 D3 — 中文金融特化
 
@@ -270,8 +269,8 @@
 | 实时财务 API | tushare(免费版) | 🟡 只有 mock | **真接 tushare**(v0.8.x) |
 | Web 搜索 | Bocha API | ✅ production(v0.6) | 加 user 开关 + 主路径常开 |
 | 持久 memory | sqlite(自建) | ❌ 未做 | **memory 子系统 v1**(语义+流程层,v0.8.x) |
-| 本地 embedding | BGE-M3 | ❌ stub | **spike + benchmark + option**(v0.8.x) |
-| 本地 LLM | DeepSeek / Qwen-7B | ❌ 未做 | **spike + benchmark + option**(v0.8.x) |
+| 本地 embedding | BGE-M3 | ❌ stub | **v1.0 不做,v1.x roadmap**(2026-05-04 砍,本地硬件受限;retrieval protocol 留口) |
+| 本地 LLM | DeepSeek / Qwen-7B | ❌ 未做 | **v1.0 不做,v1.x roadmap**(2026-05-04 砍,本地硬件受限;ChatClient Protocol 留口) |
 | 公告增量 ingest | tushare 公告接口 | ❌ | YAGNI 留 v0.9+ |
 | 实时新闻 API | 财新 / 第一财经 | ❌ | YAGNI(Web search 覆盖) |
 
@@ -279,7 +278,7 @@
 
 1. **不扩 corpus**:13 篇够 dogfood;扩 corpus 是 ingest 工程,不是 portfolio 卖点
 2. **mock → real 渐进替换**:tushare 优先(v0.8.x);其余视需要
-3. **本地能力做 spike,不做全切**:BGE / 本地 LLM 演示得了即可,云端默认
+3. **本地能力 v1.0 不做(D2 dropped 2026-05-04)**:作者本地硬件受限;架构上保留 ChatClient Protocol + retrieval protocol 口子,v1.x 再补 spike
 4. **持久 memory 限两层**:语义层(用户研究历史 embedding + 摘要)+ 流程层(workflow snapshot);跨用户缓存层 + 评测层留 v0.9+
 
 ### 6.3 显式 out of scope(数据)
@@ -301,9 +300,9 @@
 | **3** | **B-7 端到端**:审批人对生成的报告追问 → chat 答出引用回原章节 |
 | **4** | **C 端 5 case 都跑通**:C-1 个股 / C-2 行业 / C-3 事件 / C-5 财报 / C-7 概念 |
 | **5** | **D1 强引用**:每条结论可点回原文 PDF 段落(UI + trace) |
-| **6** | **D2 本地化**:BGE-M3 + 本地 LLM 跑通 + benchmark 数据(跟云端 baseline 对比) |
-| **7** | **D4 结构化输出**:[信贷调查报告] / [客户跟踪简报] 至少 2 种业务模板的 JSON schema + writer agent 出符合 schema 的报告 |
-| **8** | **D6 agent-level eval**:golden set ≥ 10 case + LLM-as-judge rubric + dashboard 可看 score / cost / latency |
+| ~~**6**~~ | ~~**D2 本地化**~~:**v1.x roadmap,v1.0 不交付**(2026-05-04 决定,作者本地硬件受限;架构 protocol 口子已留) |
+| **6** | **D4 结构化输出**:[信贷调查报告] / [客户跟踪简报] 至少 2 种业务模板的 JSON schema + writer agent 出符合 schema 的报告 |
+| **7** | **D6 agent-level eval**:golden set ≥ 10 case + LLM-as-judge rubric + dashboard 可看 score / cost / latency |
 
 **D3 中文金融特化**:贯穿 1-7 全部,不是单独一项 deliverable
 
@@ -315,9 +314,7 @@
 |---|---|---|---|
 | D1 强引用 | citation precision | 10 case × LLM-as-judge spot check | ≥ 0.85 |
 | D1 强引用 | citation recall | 同上 | ≥ 0.95 |
-| D2 本地 embed | retrieval recall@5(BGE vs Qwen) | 50 query golden set | gap < 5% |
-| D2 本地 LLM | task quality(本地 vs 云端,B-1 跑分) | 5 case × judge | gap < 10% |
-| D2 本地 | benchmark | spike | tokens/s + p50/p99 latency + 显存有数据即可 |
+| ~~D2 本地~~ | — | — | **v1.x roadmap,v1.0 不交付**(2026-05-04 砍,本地硬件受限) |
 | D3 中文金融(可量化部分) | 中文财务术语 retrieval 命中率 | 20 个术语 query × top-5 | ≥ 90% recall |
 | D3 中文金融(qualitative) | spot check report | 5-10 个 corner case | 文档化 |
 | D4 结构化输出 | schema validation pass rate | writer 全部输出 | 100%(pydantic 强制) |
@@ -354,15 +351,19 @@
   - 客户跟踪简报 schema + writer
   - 测试覆盖
 
-### v0.8.4:本地化 + 评测可观测升级
+### v0.8.4:agent-level eval 升级(D6 单做)
 
-- 工作量:~2.5 周
-- 出货:可以 demo "本地推理跑通 + 评分表"
-- 内容:
-  - BGE-M3 本地 embed spike + benchmark + option(不全切)
-  - 本地 LLM(DeepSeek/Qwen-Chat)spike + benchmark + option
-  - D6 agent-level eval:golden set ≥ 10 + judge rubric + dashboard
-  - 跟云端 baseline 对比 report
+> **2026-05-04 范围调整**:原计划 D2 本地化 + D6 agent eval 一起做,因作者本地硬件受限,**砍 D2 留 v1.x**,本版本只做 D6。工期从 ~2.5 周收到 ~1-1.5 周。
+
+- 工作量:~1-1.5 周
+- 出货:可以 demo "改 prompt 立刻看 golden set 跑分变化 + dashboard 看 cost/latency/score"
+- 内容(待 v0.8.4 brainstorming 收紧):
+  - D6 agent-level eval:golden set ≥ B-1 ×10 + B-3 ×10 + C 端 ×20
+  - SUT 从 LLMService 升到 ResearchAgent(整 agent run 的 trace)
+  - LLM-as-judge rubric 多维度(完整性 / 准确性 / 引用质量 / 风险识别 [B-1/B-3] / 相关性 [C 端])
+  - Dashboard 可视化(reuse trace-view CLI 或加 web UI — brainstorming 决定)
+  - PR regression gate:golden score 下降 > 5% 不让 merge
+  - Cost budget:30+ case 跑一次的预算 — brainstorming 估算
 
 ### v0.8.5:B-7 追问 + D1 引用 UI + C 端打磨
 
@@ -376,7 +377,7 @@
 
 ### 总历时
 
-理性悲观 ~9 人周;考虑学习成本 + dogfood 反馈调整,**实际 2-3 个月 ship v1.0**。
+砍 D2 后:v0.8.4 ~1-1.5 周 + v0.8.5 ~2 周 = 剩余 ~3-4 周(原计划 ~4.5 周)。**v1.0 ship 估 1.5-2 个月**(2026-05 → 2026-06/07)。
 
 ### 版本号语义注释
 
@@ -422,7 +423,7 @@ v0.8.x 系列在历史上是 1 周内 ship 的小迭代(v0/0.5/0.6/0.7 各 1 天
 ### 技术能力
 - Memory 跨用户缓存层
 - Memory 评测层
-- BGE / 本地 LLM 全切(只 spike + option)
+- **D2 整体本地化(BGE / 本地 LLM)v1.0 不做**(2026-05-04 调整,作者本地硬件受限;架构 protocol 口子已留,v1.x roadmap)
 - Fine-tune 任何模型
 - Multi-tenant / RBAC
 - 灰度 / A/B 测试基础设施
