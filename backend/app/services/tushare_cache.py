@@ -26,9 +26,13 @@ _TTL_DAILY_S = 3600
 _TTL_DEFAULT_S = 3600
 
 _FINANCIAL_APIS = frozenset(
-    {"income", "balance_sheet", "cashflow", "fina_indicator", "stk_holdernumber"}
+    # Note: Tushare Pro uses "balancesheet" (no underscore) for the balance sheet API.
+    {"income", "balancesheet", "cashflow", "fina_indicator", "stk_holdernumber"}
 )
-_ANNS_APIS = frozenset({"anns", "disclosure_date"})
+_ANNS_APIS = frozenset(
+    # Note: Tushare Pro uses "anns_d" (not "anns") for daily announcements.
+    {"anns_d", "disclosure_date"}
+)
 
 
 def classify_ttl(api_name: str) -> int:

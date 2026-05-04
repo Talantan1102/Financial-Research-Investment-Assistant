@@ -41,14 +41,16 @@ async def test_get_returns_none_on_expired(cache: TushareCache) -> None:
 
 def test_classify_ttl_financial() -> None:
     assert classify_ttl("income") == 365 * 24 * 3600  # 永久(用 1 年代表)
-    assert classify_ttl("balance_sheet") == 365 * 24 * 3600
+    # Tushare Pro balance sheet API is "balancesheet" (no underscore)
+    assert classify_ttl("balancesheet") == 365 * 24 * 3600
     assert classify_ttl("cashflow") == 365 * 24 * 3600
     assert classify_ttl("fina_indicator") == 365 * 24 * 3600
     assert classify_ttl("stk_holdernumber") == 365 * 24 * 3600
 
 
 def test_classify_ttl_announcements() -> None:
-    assert classify_ttl("anns") == 24 * 3600
+    # Tushare Pro daily announcements API is "anns_d" (not "anns")
+    assert classify_ttl("anns_d") == 24 * 3600
     assert classify_ttl("disclosure_date") == 24 * 3600
 
 

@@ -81,7 +81,8 @@ class RealTushareService:
         params: dict[str, Any] = {"ts_code": ts_code}
         if end_date:
             params["end_date"] = end_date
-        return await self._call_cached("balance_sheet", params)
+        # Tushare Pro API name is "balancesheet" (no underscore)
+        return await self._call_cached("balancesheet", params)
 
     async def get_cashflow(self, *, ts_code: str, end_date: str | None = None) -> pd.DataFrame:
         params: dict[str, Any] = {"ts_code": ts_code}
@@ -106,8 +107,9 @@ class RealTushareService:
         return await self._call_cached("disclosure_date", params)
 
     async def get_anns(self, *, ts_code: str, start: str, end: str) -> pd.DataFrame:
+        # Tushare Pro API name for daily announcements is "anns_d" (not "anns")
         return await self._call_cached(
-            "anns", {"ts_code": ts_code, "start_date": start, "end_date": end}
+            "anns_d", {"ts_code": ts_code, "start_date": start, "end_date": end}
         )
 
     async def aclose(self) -> None:

@@ -65,10 +65,12 @@ async def test_get_daily_uses_cache_second_time(
     [
         ("get_income", "income"),
         ("get_fina_indicator", "fina_indicator"),
-        ("get_balance_sheet", "balance_sheet"),
+        # Tushare Pro uses "balancesheet" (no underscore) for balance sheet
+        ("get_balance_sheet", "balancesheet"),
         ("get_cashflow", "cashflow"),
         ("get_stk_holdernumber", "stk_holdernumber"),
-        ("get_anns", "anns"),
+        # Tushare Pro uses "anns_d" (not "anns") for daily announcements
+        ("get_anns", "anns_d"),
     ],
 )
 @pytest.mark.asyncio
@@ -79,7 +81,7 @@ async def test_8_methods_dispatch_to_correct_api(
 ) -> None:
     svc, fake = service
     fn = getattr(svc, method)
-    if api_name == "anns":
+    if api_name == "anns_d":
         await fn(ts_code="600519.SH", start="20240501", end="20240601")
     else:
         await fn(ts_code="600519.SH")
