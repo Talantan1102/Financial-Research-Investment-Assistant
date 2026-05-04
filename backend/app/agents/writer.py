@@ -13,6 +13,7 @@ from datetime import datetime
 from app.agents.base import Agent
 from app.agents.credit_report_renderer import render_credit_report_markdown
 from app.agents.credit_report_schema import CreditInvestigationReport
+from app.agents.portfolio_warning_schema import PortfolioWarningReport
 from app.agents.schemas import ResearchState, StepResult
 from app.services.llm_response import Tier
 
@@ -186,8 +187,6 @@ class Writer(Agent):
 
     async def _run_alert_writer(self, state: ResearchState) -> ResearchState:
         """Output PortfolioWarningReport (alert_deep_dive mode)."""
-        from app.agents.portfolio_warning_schema import PortfolioWarningReport
-
         prompt = _build_alert_prompt(state)
         response = self._llm.chat(
             prompt=prompt,
