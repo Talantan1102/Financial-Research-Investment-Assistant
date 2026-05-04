@@ -103,7 +103,7 @@ def _planner_router(state: _CriticSubState) -> list[Send]:
 async def _aggregate_node(state: _CriticSubState) -> dict[str, Any]:
     n = len(state.collected_scores)
     avg = sum(d.score for d in state.collected_scores) / n if n > 0 else 0.0
-    summary = f"6-dim parallel scoring; collected={n}; overall={avg:.2f}"
+    summary = f"{n}-dim parallel scoring; collected={n}; overall={avg:.2f}"
     report = aggregate_scores(state.collected_scores, summary=summary)
     return {"critic_report": report}
 

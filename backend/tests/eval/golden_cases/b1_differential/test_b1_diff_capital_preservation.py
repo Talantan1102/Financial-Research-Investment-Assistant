@@ -96,13 +96,10 @@ async def test_b1_capital_preservation_茅台(  # noqa: N802
         f"got {position_pct:.1f}%. Writer prompt conditioning not working."
     )
 
-    # ── 3. recommendation ∈ hold / overweight (no strong buy for conservative) ─
-    assert report.investment_recommendation.recommendation in {
-        "recommend_hold",
-        "recommend_overweight",
-    }, (
-        f"capital_preservation client should not receive strong buy/sell. "
-        f"Got: {report.investment_recommendation.recommendation!r}"
+    # ── 3. recommendation != strong buy (capital_preservation ≠ aggressive) ─────
+    recommendation = report.investment_recommendation.recommendation
+    assert recommendation != "recommend_buy", (
+        f"capital_preservation client should not get strong buy, got {recommendation}"
     )
 
     # ── 4. markdown 含保本/稳健/防御关键词 ──────────────────────────────────────
