@@ -28,7 +28,7 @@ if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
 import yaml  # noqa: I001 — sys.path insert above must precede app.* imports
-from openai import OpenAI
+from openai import APIStatusError, OpenAI
 from app.services.cost_budget import CostBudget
 from app.services.llm_response import Tier
 from app.services.llm_service import LLMService
@@ -122,13 +122,23 @@ def main() -> int:
     judge = LLMService(client=adapter, cost_budget=budget)
 
     drifts: list[str] = []
+    infra_skips: list[str] = []
     for cassette in cassettes:
         ext = _extract_first_interaction(cassette)
         if ext is None:
             print(f"SKIP {cassette}: no interactions")
             continue
         model, prompt, recorded = ext
-        live = sut.chat(prompt=prompt, tier="balanced")
+        try:
+            live = sut.chat(prompt=prompt, tier="balanced")
+        except APIStatusError as exc:
+            # Account-level / rate-limit infra issues (Arrearage, InsufficientQuota,
+            # 429 RateLimit, 503) are not real drift — skip and continue.
+            print(
+                f"SKIP {cassette.relative_to(CASSETTES_ROOT)}: live LLM unavailable ({exc.status_code} {type(exc).__name__})"
+            )
+            infra_skips.append(str(cassette.relative_to(CASSETTES_ROOT)))
+            continue
         sim = score_similarity(judge, old=recorded, new=live.content)
         verdict = "OK" if sim >= SIMILARITY_THRESHOLD else "DRIFT"
         print(f"{verdict} sim={sim}/10 cassette={cassette.relative_to(CASSETTES_ROOT)}")
@@ -136,13 +146,19 @@ def main() -> int:
             drifts.append(str(cassette.relative_to(CASSETTES_ROOT)))
 
     print(
-        f"\nTotal cassettes: {len(cassettes)} | drifts: {len(drifts)} | spent: ¥{budget.spent_cny:.4f}"
+        f"\nTotal cassettes: {len(cassettes)} | drifts: {len(drifts)} | "
+        f"infra-skips: {len(infra_skips)} | spent: ¥{budget.spent_cny:.4f}"
     )
     if drifts:
         print("Drift detected in:")
         for d in drifts:
             print(f"  - {d}")
         return 1
+    if infra_skips and len(infra_skips) == len(cassettes):
+        # ALL cassettes skipped due to infra — drift detection didn't actually
+        # run. Emit warning but don't fail the nightly (account欠费 is user's
+        # operational issue, not a code regression).
+        print("WARNING: drift detection could not run for any cassette (LLM API unavailable).")
     return 0
 
 

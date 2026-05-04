@@ -5,6 +5,10 @@ on:
     - cron: "0 19 * * *"  # 19:00 UTC = 03:00 北京
   workflow_dispatch:  # manual trigger
 
+permissions:
+  contents: read
+  issues: write  # Open issue on nightly failure
+
 jobs:
   full-tests-and-eval:
     runs-on: ubuntu-latest
