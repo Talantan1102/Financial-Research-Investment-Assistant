@@ -3,6 +3,7 @@ import IconHome from '@/assets/layout/home.svg'
 import IconKnowledge from '@/assets/layout/knowledge.svg'
 import IconMemory from '@/assets/layout/memory.svg'
 import IconDatabase from '@/assets/layout/database.svg'
+import IconMonitoring from '@/assets/layout/monitoring.svg'
 import IconNewChat from '@/assets/layout/newchat.svg'
 import IconNews from '@/assets/layout/news.svg'
 import React, { useMemo, useState } from 'react'
@@ -87,6 +88,12 @@ export function Nav() {
         label: '行业资讯',
         icon: IconNews,
         href: '/news',
+      },
+      {
+        key: 'monitoring',
+        label: '持仓预警',
+        icon: IconMonitoring,
+        href: '/monitoring',
       },
       // 暂时隐藏职业规划
       // {

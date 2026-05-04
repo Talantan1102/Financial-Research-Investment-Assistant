@@ -1,10 +1,13 @@
 """数据库连接和会话管理"""
 
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
+from app.scripts.init_monitoring_tables import init_monitoring_tables
 
 # 从环境变量获取数据库配置
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
@@ -28,3 +31,15 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# Initialise monitoring sqlite tables (idempotent — CREATE TABLE IF NOT EXISTS).
+_MONITORING_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "monitoring.sqlite"
+try:
+    init_monitoring_tables(_MONITORING_DB_PATH)
+except OSError as exc:
+    import logging
+
+    logging.getLogger(__name__).warning(
+        "monitoring.sqlite init skipped (likely read-only fs): %s", exc
+    )

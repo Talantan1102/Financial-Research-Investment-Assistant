@@ -11,6 +11,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agents.credit_report_schema import CreditInvestigationReport
+from app.agents.portfolio_warning_schema import PortfolioWarningReport
+from app.services.monitoring.signal_rules.base import SignalResult
 
 
 class ToolCall(BaseModel):
@@ -170,3 +172,9 @@ class ResearchState(BaseModel):
     critic_report: CriticReport | None = None
 
     span_stack: list[str] = Field(default_factory=list)
+
+    # v0.8.3 — alert mode for portfolio monitoring (B-3)
+    mode: Literal["full_research", "alert_deep_dive"] = "full_research"
+    alert_signals: list[SignalResult] | None = None
+    portfolio_warning_report: PortfolioWarningReport | None = None
+    deep_dive_section: str | None = None

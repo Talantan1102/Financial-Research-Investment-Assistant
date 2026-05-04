@@ -3010,3 +3010,51 @@ class MockTushareService:
             except Exception as e:
                 raise ValueError(f"第{idx + 1}条记录校验失败: {str(e)}")
         return {"data": validated_items}
+
+    async def generate_cashflow(self, ts_code: str, end_date: str | None = None) -> pd.DataFrame:
+        """Mock 现金流量表(4 季)。"""
+        rows = [
+            {
+                "ts_code": ts_code,
+                "end_date": ed,
+                "n_cashflow_act": 5e8 - i * 2e7,  # 经营性现金流(故意递减,触发 yellow)
+                "n_cashflow_inv_act": -2e8,
+                "n_cash_flows_fnc_act": 1e8,
+            }
+            for i, ed in enumerate(["20240331", "20240630", "20240930", "20241231"])
+        ]
+        return pd.DataFrame(rows)
+
+    async def generate_stk_holdernumber(
+        self, ts_code: str, end_date: str | None = None
+    ) -> pd.DataFrame:
+        """Mock 股东户数。"""
+        rows = [
+            {
+                "ts_code": ts_code,
+                "end_date": ed,
+                "holder_num": 100000 - i * 5000,
+            }
+            for i, ed in enumerate(["20240331", "20240630", "20240930", "20241231"])
+        ]
+        return pd.DataFrame(rows)
+
+    async def generate_disclosure_date(
+        self, ts_code: str | None = None, start: str = "", end: str = ""
+    ) -> pd.DataFrame:
+        """Mock 披露日历(空 → 不触发事件)。"""
+        return pd.DataFrame(columns=["ts_code", "ann_date", "end_date", "type"])
+
+    async def generate_anns(self, ts_code: str, start: str = "", end: str = "") -> pd.DataFrame:
+        """Mock 公告(简化:返回 1 条普通公告)。"""
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": ts_code,
+                    "ann_date": "20240501",
+                    "title": "关于 2023 年度股东大会决议公告",
+                    "content": "审议通过年度报告。",
+                    "url": "https://example.com/ann/1",
+                }
+            ]
+        )

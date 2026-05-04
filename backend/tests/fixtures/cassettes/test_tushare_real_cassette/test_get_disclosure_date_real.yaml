@@ -1,0 +1,37 @@
+interactions:
+- request:
+    body: '{"api_name": "disclosure_date", "token": "REDACTED", "params": {"start_date":
+      "20240301", "end_date": "20240501"}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate, br, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '141'
+      Content-Type:
+      - application/json
+      Host:
+      - api.tushare.pro
+      User-Agent:
+      - python-httpx/0.28.1
+    method: POST
+    uri: http://api.tushare.pro/
+  response:
+    body:
+      string: '{"code": 0, "msg": null, "data": {"fields": [], "items": []}}'
+    headers:
+      content-length:
+      - '61'
+      content-type:
+      - application/json
+      date:
+      - Mon, 04 May 2026 04:08:20 GMT
+      server:
+      - uvicorn
+    status:
+      code: 200
+      message: OK
+version: 1

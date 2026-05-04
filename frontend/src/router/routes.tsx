@@ -9,6 +9,9 @@ import Index from '@/pages/index'
 import KnowledgePage from '@/pages/knowledge'
 import MemoryPage from '@/pages/memory'
 import DatabasePage from '@/pages/database'
+import MonitoringIndex from '@/pages/monitoring'
+import AlertDetail from '@/pages/monitoring/alert-detail'
+import MonitoringConfig from '@/pages/monitoring/config'
 import NewsPage from '@/pages/news'
 import {
   Navigate,
@@ -58,6 +61,18 @@ export const routes: IRouteObject[] = [
   {
     path: '/news',
     Component: NewsPage,
+  },
+  {
+    path: '/monitoring',
+    Component: MonitoringIndex,
+  },
+  {
+    path: '/monitoring/:cid/alert/:aid',
+    Component: AlertDetail,
+  },
+  {
+    path: '/monitoring/config',
+    Component: MonitoringConfig,
   },
   {
     path: '/404',

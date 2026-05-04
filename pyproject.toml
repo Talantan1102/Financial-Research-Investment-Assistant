@@ -59,6 +59,8 @@ dependencies = [
     "mcp>=1.0",
     # Stock data
     "tushare>=1.4",
+    # v0.8.3 — monitoring scheduler
+    "apscheduler>=3.11",
 ]
 
 [project.optional-dependencies]
@@ -244,6 +246,7 @@ markers = [
     "eval: L3 — golden set + LLM-as-judge, LLM in live mode",
     "live_only: requires real LLM API (excluded from PR job)",
     "slow: takes > 5s (excluded from default `poe test`)",
+    "golden: B-3 dogfood golden cases — deterministic, no real API calls",
 ]
 
 [tool.poe.tasks]

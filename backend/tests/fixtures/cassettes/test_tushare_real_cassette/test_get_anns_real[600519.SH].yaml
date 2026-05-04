@@ -1,0 +1,98 @@
+interactions:
+- request:
+    body: '{"api_name": "anns_d", "token": "REDACTED", "params": {"ts_code": "600519.SH",
+      "start_date": "20240301", "end_date": "20240501"}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate, br, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '154'
+      Content-Type:
+      - application/json
+      Host:
+      - api.tushare.pro
+      User-Agent:
+      - python-httpx/0.28.1
+    method: POST
+    uri: http://api.tushare.pro/
+  response:
+    body:
+      string: "{\"code\": 0, \"msg\": null, \"data\": {\"fields\": [\"ann_date\",
+        \"ts_code\", \"name\", \"title\", \"url\"], \"items\": [[\"20240501\", \"600519.SH\",
+        \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5173\u4E8E\u8463\u4E8B\u957F\u8F9E\u804C\u7684\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-05-01/1219958953.PDF\"], [\"20240430\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5173\u4E8E\u6536\u5230\u63A8\u8350\u8463\u4E8B\u957F\u4EBA\u9009\u6587\u4EF6\u7684\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-30/1219926376.PDF\"], [\"20240427\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u7B2C\u56DB\u5C4A\u76D1\u4E8B\u4F1A2024\u5E74\u5EA6\u7B2C\u4E8C\u6B21\u4F1A\u8BAE\u51B3\u8BAE\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-27/1219875831.PDF\"], [\"20240427\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u7B2C\u56DB\u5C4A\u8463\u4E8B\u4F1A2024\u5E74\u5EA6\u7B2C\u56DB\u6B21\u4F1A\u8BAE\u51B3\u8BAE\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-27/1219875830.PDF\"], [\"20240427\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02024\u5E74\u7B2C\u4E00\u5B63\u5EA6\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-27/1219875828.PDF\"], [\"20240427\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5173\u4E8E\u53EC\u5F002023\u5E74\u5EA6\u53CA2024\u5E74\u7B2C\u4E00\u5B63\u5EA6\u4E1A\u7EE9\u8BF4\u660E\u4F1A\u7684\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-27/1219875829.PDF\"], [\"20240427\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5173\u4E8E\u8D35\u5DDE\u8305\u53F0\u96C6\u56E2\u8D22\u52A1\u6709\u9650\u516C\u53F8\u65E5\u5E38\u5173\u8054\u4EA4\u6613\u7684\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-27/1219875827.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5BA1\u8BA1\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506500.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5185\u63A7\u5BA1\u8BA1\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506495.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5EA6\u72EC\u7ACB\u8463\u4E8B\u8FF0\u804C\u62A5\u544A\uFF08\u738B\u946B\uFF09\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506509.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5EA6\u72EC\u7ACB\u8463\u4E8B\u8FF0\u804C\u62A5\u544A\uFF08\u90ED\u7530\u52C7\uFF09\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506501.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u8463\u4E8B\u4F1A\u5173\u4E8E\u72EC\u7ACB\u8463\u4E8B\u72EC\u7ACB\u6027\u60C5\u51B5\u7684\u4E13\u9879\u610F\u89C1\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506499.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5EA6\u72EC\u7ACB\u8463\u4E8B\u8FF0\u804C\u62A5\u544A\uFF08\u76DB\u96F7\u9E23\uFF09\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506494.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5173\u4E8E\u65E5\u5E38\u5173\u8054\u4EA4\u6613\u7684\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506513.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5173\u4E8E\u8D35\u5DDE\u8305\u53F0\u96C6\u56E2\u8D22\u52A1\u6709\u9650\u516C\u53F8\u7684\u98CE\u9669\u8BC4\u4F30\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506512.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5BA1\u8BA1\u59D4\u5458\u4F1A\u5BF9\u4F1A\u8BA1\u5E08\u4E8B\u52A1\u62402023\u5E74\u5EA6\u5C65\u804C\u60C5\u51B5\u7684\u8BC4\u4F30\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506511.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5BF9\u4F1A\u8BA1\u5E08\u4E8B\u52A1\u62402023\u5E74\u5EA6\u5C65\u804C\u60C5\u51B5\u7684\u8BC4\u4F30\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506508.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u73AF\u5883\u3001\u793E\u4F1A\u53CA\u6CBB\u7406\uFF08ESG\uFF09\u62A5\u544A\uFF08\u82F1\u6587\u7248\uFF09\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506507.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\uFF1A\u5173\u4E8E\u8D35\u5DDE\u8305\u53F0\u9152\u80A1\u4EFD\u6709\u9650\u516C\u53F82023\u5E74\u5EA6\u6D89\u53CA\u8D22\u52A1\u516C\u53F8\u5173\u8054\u4EA4\u6613\u7684\u5B58\u6B3E\u3001\u8D37\u6B3E\u7B49\u91D1\u878D\u4E1A\u52A1\u7684\u4E13\u9879\u8BF4\u660E\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506506.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5EA6\u5185\u90E8\u63A7\u5236\u8BC4\u4EF7\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506505.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\uFF1A\u5173\u4E8E\u8D35\u5DDE\u8305\u53F0\u9152\u80A1\u4EFD\u6709\u9650\u516C\u53F8\u63A7\u80A1\u80A1\u4E1C\u53CA\u5176\u4ED6\u5173\u8054\u65B9\u8D44\u91D1\u5360\u7528\u60C5\u51B5\u7684\u4E13\u9879\u8BF4\u660E\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506503.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u5173\u4E8E\u53D8\u66F4\u4F1A\u8BA1\u5E08\u4E8B\u52A1\u6240\u7684\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506502.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u73AF\u5883\u3001\u793E\u4F1A\u53CA\u6CBB\u7406\uFF08ESG\uFF09\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506498.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5EA6\u8463\u4E8B\u4F1A\u5BA1\u8BA1\u59D4\u5458\u4F1A\u5C65\u804C\u60C5\u51B5\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506492.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u7B2C\u56DB\u5C4A\u76D1\u4E8B\u4F1A2024\u5E74\u5EA6\u7B2C\u4E00\u6B21\u4F1A\u8BAE\u51B3\u8BAE\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506491.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F0\u7B2C\u56DB\u5C4A\u8463\u4E8B\u4F1A2024\u5E74\u5EA6\u7B2C\u4E09\u6B21\u4F1A\u8BAE\u51B3\u8BAE\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506493.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5EA6\u5229\u6DA6\u5206\u914D\u65B9\u6848\u516C\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506496.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5E74\u5EA6\u62A5\u544A\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506510.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5E74\u5EA6\u62A5\u544A\u6458\u8981\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506504.PDF\"], [\"20240403\",
+        \"600519.SH\", \"\u8D35\u5DDE\u8305\u53F0\", \"\u8D35\u5DDE\u8305\u53F02023\u5E74\u5E74\u5EA6\u62A5\u544A\uFF08\u82F1\u6587\u7248\uFF09\",
+        \"https://static.cninfo.com.cn/finalpage/2024-04-03/1219506497.PDF\"]]}}"
+    headers:
+      content-length:
+      - '5411'
+      content-type:
+      - application/json
+      date:
+      - Mon, 04 May 2026 04:08:29 GMT
+      server:
+      - uvicorn
+    status:
+      code: 200
+      message: OK
+version: 1

@@ -1,5 +1,8 @@
 """Writer — emits CreditInvestigationReport schema-conformant JSON (v0.8.2).
 
+v0.8.3: adds alert_writer mode — when state.mode == "alert_deep_dive" the writer
+produces a PortfolioWarningReport instead of a CreditInvestigationReport.
+
 设计 ref: docs/superpowers/specs/2026-05-03-v0.8.2-credit-research-report-design.md § 3
 """
 
@@ -10,6 +13,7 @@ from datetime import datetime
 from app.agents.base import Agent
 from app.agents.credit_report_renderer import render_credit_report_markdown
 from app.agents.credit_report_schema import CreditInvestigationReport
+from app.agents.portfolio_warning_schema import PortfolioWarningReport
 from app.agents.schemas import ResearchState, StepResult
 from app.services.llm_response import Tier
 
@@ -113,11 +117,27 @@ def build_credit_report_prompt(state: ResearchState) -> str:
     )
 
 
+def _build_alert_prompt(state: ResearchState) -> str:
+    signals = state.alert_signals or []
+    signals_text = "\n".join(f"- {s.rule_name}({s.level.value}): {s.explanation}" for s in signals)
+    return f"""为已触发以下信号的客户生成 PortfolioWarningReport JSON:
+
+触发信号:
+{signals_text}
+
+要求:summary 100-200 字;triggered_signals 复制输入信号;risk_diagnosis.narrative 200-400 字;recommendations 至少 2 条.
+"""
+
+
 class Writer(Agent):
     name = "Writer"
     model_tier: Tier = "balanced"
 
     def step(self, state: ResearchState) -> StepResult:  # type: ignore[override]
+        """Sync entry point — full_research mode only.
+
+        For alert_deep_dive mode use the async run() method.
+        """
         prompt = build_credit_report_prompt(state)
         r = self._llm.chat(
             prompt=prompt,
@@ -149,3 +169,32 @@ class Writer(Agent):
             },
             span_metadata={"agent": "Writer", "model": r.model, "cost_cny": r.cost_cny},
         )
+
+    async def run(self, state: ResearchState) -> ResearchState:
+        """Async entry point — dispatches on state.mode.
+
+        - "full_research": delegates to sync step() and wraps in ResearchState
+        - "alert_deep_dive": calls _run_alert_writer() to produce PortfolioWarningReport
+        """
+        if state.mode == "alert_deep_dive":
+            return await self._run_alert_writer(state)
+        return await self._run_full_research_writer(state)
+
+    async def _run_full_research_writer(self, state: ResearchState) -> ResearchState:
+        """Async wrapper around the sync step() for full_research mode."""
+        sr = self.step(state)
+        return state.model_copy(update=sr.state_update)
+
+    async def _run_alert_writer(self, state: ResearchState) -> ResearchState:
+        """Output PortfolioWarningReport (alert_deep_dive mode)."""
+        prompt = _build_alert_prompt(state)
+        response = self._llm.chat(
+            prompt=prompt,
+            tier="fast",  # alert deep_dive 短任务,走 fast
+            schema=PortfolioWarningReport,
+            request_id=state.request_id,
+        )
+        if response.parsed is None:
+            # Defensive fallback — Writer 走 schema 模式未解析时直接抛
+            raise RuntimeError("alert writer LLM returned no parsed PortfolioWarningReport")
+        return state.model_copy(update={"portfolio_warning_report": response.parsed})
