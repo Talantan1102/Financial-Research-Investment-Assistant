@@ -30,11 +30,12 @@ def build_tushare_service() -> TushareService:
     if mode == "real":
         if "TUSHARE_TOKEN" not in os.environ:
             raise KeyError("TUSHARE_TOKEN required when TUSHARE_MODE=real")
-        client = TushareClient(token=os.environ["TUSHARE_TOKEN"])
+        base_url = os.environ.get("TUSHARE_BASE_URL", "http://api.tushare.pro")
+        client = TushareClient(token=os.environ["TUSHARE_TOKEN"], base_url=base_url)
         cache = TushareCache(db_path=_CACHE_PATH)
         return RealTushareService(
             client=client,
             cache=cache,
-            rate_limiter=RateLimiter(max_calls=400, window_s=60.0),
+            rate_limiter=RateLimiter(max_calls=100, window_s=60.0),
         )
     raise ValueError(f"TUSHARE_MODE must be 'mock' or 'real', got {mode!r}")
