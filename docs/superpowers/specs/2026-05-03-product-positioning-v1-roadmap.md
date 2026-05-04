@@ -25,47 +25,50 @@
 
 ---
 
-## § 1 项目定位:双重身份
+## § 1 项目定位:投资研究 agent 平台 + 2 persona + 共享底座
 
-| 维度 | 简历版本(对外讲故事) | 面试 / 实施版本(对内真实) |
-|---|---|---|
-| 项目名 | Agent 投研助手 | (同) |
-| 交付对象 | 银行客户(假设性) | 个人作品集 |
-| 用户场景 | 银行公司金融部 / 信贷研究 copilot | 个人投资研究 / 关心的标的和行业 |
-| 数据 | 模拟银行内部 KB + 行情 + 监管文件 | 公开 PDF(已 ingest 13 篇) + tushare + Web |
-| 设计哲学 | 按银行级约束:本地化、强引用、可追溯、可审计、流程化 | 用户=作者本人,但按上面那套约束做,体现技术能力 |
-| 评估 | 假设的"业务规则 + 监管合规"(用公开数据模拟) | 作者 dogfood 能判断好坏 + 引用准确性 |
+**核心叙事**:"投资研究 agent 平台,服务两类用户 — 银行私行客户经理(假想 banking persona)做投资标的尽调 + 客户持仓监控 + 客户追问;散户投资者(作者本人)dogfood 短对话 + 个人持仓监控。两类用户共享同一套 agent 底座,只是 use case 频次和 surface 不同。"
 
-**面试讲法**:"我做的是 Agent 投研助手,我假想的用户 persona 是银行公司金融部的信贷研究分析师,我按 banking 的合规/可追溯/本地化约束设计;但作为个人项目,我 dogfood 用法是把自己当 C 端散户使用,验证产品质量。两种用户共享同一套 agent 底座。"
+| 层 | 内容 |
+|---|---|
+| **平台层(主角 — 共享底座)** | 投资研究 agent 平台:planner / agent 池 / tool registry / memory / context / observability / eval |
+| **Persona 1 — 银行私行客户经理(假想)** | 主用:B-1 重仓股尽调 / B-3 客户预警 / B-7 追问报告;次用:C 端 chat 协助写客户简报 |
+| **Persona 2 — 散户投资者(作者本人 dogfood)** | 主用:C-1~C-7 短对话 / C-4 持仓分析;次用:B-1 重仓股深调 / B-3 持仓预警(个人组合视角) |
+| **共享相通** | 两个 persona 都需要:尽调 / 监控 / 短对话 三件事;共享 agent 底座是业务事实,不是工程巧合 |
+
+**对比之前 v 单一 persona unify 方案**:reframe 不假装散户作者就是私行经理,承认两个真实 persona,但保留共享底座叙事。诚实性更高,简历讲故事时面试官不容易戳穿。
 
 **绝不假装是真银行项目**。诚实声明个人 portfolio + 假想 persona,既保护甲方信息也体现工业级设计能力。
+
+详见 § 4 模式映射图(完整 ASCII 视图)。
 
 ---
 
 ## § 2 用户画像
 
-### 2.1 B 端 — 银行金融部 / 信贷研究分析师(假想 persona)
+### 2.1 Persona 1 — 银行私行客户经理(假想 persona)
 
 **画像**:
-- 公司金融部 / 信贷审批中心 / 风险管理部
-- 日常工作:为信贷决策提供研究支持(尽调、风险评估、存量跟踪)
-- 工作产出:**结构化研究报告**(信贷调查报告、客户跟踪简报、行业准入报告)
-- 决策影响:百万级以上信贷风险敞口
+- 主流私行(招商私行 / 平安私行 / 中行私行 / 工行私行 等)中级客户经理
+- 客户结构:600W ~ 3000W 可投资资产 HNW(高净值)客户;客户:经理比 50:1 ~ 100:1
+- 日常工作流:KYC(了解客户) / 资产配置(大类比例) / 标的尽调(进个股 / 基金前) / 持仓监控(季度 review + 异动跟踪) / 客户沟通(每月简报 + 追问应答) / 风险预警(回撤超阈值 / 黑天鹅 / 政策变化)
+- 工作产出:**客户层面的投资建议 + 标的尽调报告 + 持仓跟踪简报 + 风险预警通知**
+- 决策影响:客户百万级以上账户的资产配置决策
 
 **对工具的硬约束**:
-- **数据合规**:严禁调通用云 LLM API on 客户数据;**必须本地部署 + 可审计**(监管要求)
+- **数据合规**:严禁调通用云 LLM API on 客户数据;**必须本地部署 + 可审计**(监管要求,留 v1.x roadmap)
 - **强引用 + 可追溯**:每条结论可追到原文(决策依据要能查);hallucination 是 PR 灾难
-- **强结构化输出**:输出符合内部模板,可直接进现有 workflow(信贷审批表)
-- **多角色协作**:分析师起草 → 风控 review → 合规盖章
+- **强结构化输出**:输出符合内部模板,可直接进现有 workflow(客户简报模板 / 投资建议表)
+- **多角色协作**:客户经理起草 → 投顾 review → 合规盖章 → 客户呈递
 - **模型偏好**:可控的小模型 / 私有化部署(Qwen 本地、ChatGLM、DeepSeek 本地);避免黑盒 API
 
-### 2.2 C 端 — 个人投资者(作者本人 dogfood)
+### 2.2 Persona 2 — 散户投资者(作者本人 dogfood)
 
 **画像**:
-- 关心 A 股市场,有自己的投资标的和行业 watch list
-- 日常需求:个股研究、行业判断、事件追踪、财报快速解读、概念学习
+- 关心 A 股市场,有自己的重仓标的(3-5 个核心持仓)+ 长尾观察池(20-50 个 watch list)+ 行业兴趣(科技 / 消费 / 医药 等)
+- 日常需求:**短对话**(个股研究、行业判断、事件追踪、财报快速解读、概念学习)+ **个人持仓监控**(回撤跟踪 / 仓位预警)+ 偶尔重仓股**深度调研**(进新仓前 / 卖出决策前)
 - 决策影响:个人持仓的买卖判断
-- 不是专业研究员,需要**口语化交互 + 短回答 + 简单图表**
+- 不是专业研究员,需要**口语化交互 + 短回答 + 简单图表 + 不放弃引用**
 
 **对工具的需求**:
 - **快速响应**:几秒到几十秒
@@ -73,80 +76,80 @@
 - **引用回原文**:可追溯但不强制(质量加分项)
 - **数据多样**:KB + 实时行情 + Web 新闻
 
-### 2.3 双用户共享底座的合理性
+**作者双角色 dogfood**:作者 dogfood 时既扮演"模拟客户经理"(用 B-1 / B-3 / B-7 走私行 workflow,验证 banking persona 端体验),也扮演"模拟 HNW 客户"(用 C 端 chat 验证散户体验);两个角色共用一套 agent 底座 + 数据源,只是入口和报告形态不同。
 
-两类用户在**形态上完全不同**(B 端长报告 / C 端短对话),但**底层能力可共享**:
+### 2.3 共享底座的合理性
+
+两个 persona 在 surface 上完全不同(B 端长报告 + 客户视角 / C 端短对话 + 个人视角),但都需要**尽调 + 监控 + 短对话 三件事**(只是频次和入口不同):
+
+- 私行客户经理:**主用尽调**(为客户决策)+ 主用监控(客户预警)+ 次用短对话(协助写客户简报)
+- 散户投资者:主用短对话(快速答疑) + **主用监控**(个人持仓)+ 次用尽调(重仓股深调研)
+
+共享 agent / planner / tool registry / context / memory / cost / observability 是**业务事实**,不是工程巧合。技术上落到同一套 LangGraph 编排 + tool 池 + sqlite memory + LLMService:
 
 - planner / agent 池(retrieval / writer / critic / data_collector)
 - 工具栈(KB 检索 / Web 搜索 / 行情 API)
 - context 管理 + cost budget + observability + memory
 
 只是**不同入口编排策略不同**:
-- B 端走 A 研报模式(长流程 + Critic + Writer)
-- C 端走 B 对话模式(短流程 + 流式 + 自主调度工具)
+- B-1 / B-3 / B-7 走研报 / 监控 / 追问编排(长流程 + Critic + Writer)
+- C-1 ~ C-7 走对话编排(短流程 + 流式 + 自主调度工具)
 
 ---
 
-## § 3 Use case(B + C 共 8 个)
+## § 3 Use case(9 个 — 2 persona 合并表)
 
-### 3.1 B 端 use case
-
-| ID | Use case | 触发 | 输入 | 输出形态 | 模式 |
+| ID | Use case | 输入 / 输出 | Persona 1<br/>私行经理 | Persona 2<br/>散户作者 | 模式 |
 |---|---|---|---|---|---|
-| **B-1** | **企业信贷尽调研究** | 客户申请贷款 → 信贷部要研究 | 企业名 + 贷款金额/期限/用途 | "信贷调查报告":主体资格 / 财务 / 行业地位 / 风险 / 建议 | A 研报 |
-| **B-3** | **存量客户预警跟踪** | 季度/月度 review 已放贷客户 | 企业名(已是客户) | "客户跟踪简报":新增信号 + 风险评级变化 + 跟进动作 | A 研报 + memory |
-| **B-7** | **审批人对报告的多轮追问** | 审批人 review 报告时遇到疑问 | 自然语言问句("XX 应收账款波动原因") | 流式回答 + 引用回原章节 | B 对话(接 report context) |
+| **B-1** | **重仓股深度尽调**(InvestmentDueDiligenceReport) | 企业名 + 投资目标 / 时长 / 风险偏好 → 长报告:标的概况 / 法务资质 / 财务 / 行业 / 风险 / 投资建议 | ✓ 客户重仓股尽调 | △ 我的重仓股深度调研 | 研报 |
+| **B-3** | **持仓预警跟踪**(ClientTrackingBrief) | 持仓 snapshot → 简报:新增信号 + 风险评级变化 + 跟进动作 | ✓ 客户持仓预警 | △ 个人组合预警 | 研报 + memory |
+| **B-7** | **报告追问** | 自然语言问句 + report context → 流式回答 + 引用回原章节 | ✓ 客户对报告追问 | △ 散户偶尔追问 | 对话(接 report context) |
+| **C-1** | 个股 / 标的研究 | "茅台最近怎么样" / "比亚迪 vs 宁德对比" → 几条要点 + 引用 + 图表 | △ 客户对话辅助 | ✓ | 对话 |
+| **C-2** | 行业 / 主题判断 | "半导体下半年看法" → 几条要点 + 关键标的 | △ | ✓ | 对话 |
+| **C-3** | 事件追踪 | "美联储议息后市场反应" / 新政影响 → 时间线 + 受影响标的 | △ | ✓ | 对话 |
+| **C-4** | 持仓 / 组合分析(2026-05-04 拉回 v1.0) | 持仓 snapshot → 短对话 + 简表:仓位归因 + 风险分布 | △ | ✓ 个人组合归因 | 对话 + 简表 |
+| **C-5** | 财报快速解读 | "茅台 Q3 亮点和雷点" → 财务要点 + 增长 / 风险 | △ | ✓ | 对话 |
+| **C-7** | 概念 / 术语解释 | "什么是久期管理" → 定义 + 应用场景 + 例子 | △ 客户教育 | ✓ | 对话 |
 
-### 3.2 C 端 use case
-
-| ID | Use case | 输入 | 输出 |
-|---|---|---|---|
-| **C-1** | 个股 / 标的研究 | "茅台最近怎么样" / "比亚迪 vs 宁德对比" | 几条要点 + 引用 + 图表 |
-| **C-2** | 行业 / 主题判断 | "半导体下半年看法" | 几条要点 + 关键标的 |
-| **C-3** | 事件追踪 | "美联储议息后市场反应" / 新政影响 | 时间线 + 受影响标的 |
-| **C-5** | 财报快速解读 | "茅台 Q3 亮点和雷点" | 财务要点 + 增长 / 风险 |
-| **C-7** | 概念 / 术语解释 | "什么是久期管理" | 定义 + 应用场景 + 例子 |
+✓ = 主用(高频 + 深度);△ = 次用(共享底座顺带)
 
 ### 3.3 显式不做(YAGNI)
 
 - B-2 行业准入研究(B-1 包含)、B-4 政策快速研判(ad-hoc 强不好做 demo)、B-5 同业对标(B-1 多 instance 扩展)、B-6 专题研究(太广)
-- C-4 持仓 / 组合分析(需 portfolio 数据)、C-6 盘中实时盯盘(需行情 stream)
+- C-6 盘中实时盯盘(需行情 stream)
 - 留 v0.9+ 或永远不做
+
+> **2026-05-04 update**:**C-4 持仓 / 组合分析从 YAGNI 拉回 v1.0 范围**。reframe 后,C-4 的数据模型(持仓 snapshot + 异动检测)可 reuse B-3 monitoring 引擎,边际成本低 + 散户 dogfood 主用,留在 v1.0 散户 batch deep 阶段一并交付(详见 § 9 v0.8.6)。
 
 ---
 
-## § 4 模式映射
+## § 4 模式映射:平台 + 2 persona + 共享底座
 
 ```
-                    ┌───────────────────────────────────┐
-                    │         共享底座(单进程)         │
-                    │  planner / agent 池 / 工具栈      │
-                    │  context / cost / observability   │
-                    │  memory(语义层 + 流程层)        │
-                    └───────────────────────────────────┘
-                              ↑                ↑
-                              │                │
-              ┌───────────────┘                └───────────────┐
-              │                                                │
-   ┌──────────┴──────────┐                          ┌──────────┴──────────┐
-   │  A 研报模式入口     │                          │  B 对话模式入口     │
-   │  (长流程 + Critic   │                          │  (流式 + 自主调度)  │
-   │   + Writer + chart) │                          │                     │
-   └──────────┬──────────┘                          └──────────┬──────────┘
-              │                                                │
-   ┌──────────┴──────────┐                          ┌──────────┴──────────┐
-   │   B 端              │                          │  B 端 secondary +   │
-   │   ・B-1 信贷尽调   │                          │  C 端 primary       │
-   │   ・B-3 存量预警   │                          │  ・B-7 审批人追问  │
-   │                     │                          │  ・C-1 个股研究    │
-   │                     │                          │  ・C-2 行业判断    │
-   │                     │                          │  ・C-3 事件追踪    │
-   │                     │                          │  ・C-5 财报解读    │
-   │                     │                          │  ・C-7 概念解释    │
-   └─────────────────────┘                          └─────────────────────┘
+                ┌─────────────────────────────────────────────┐
+                │   投资研究 agent 平台(共享底座 — 主角)    │
+                │   planner / agent 池 / tool registry /      │
+                │   memory / context / observability / eval   │
+                └─────────────────────────────────────────────┘
+                           ↑                       ↑
+                共享相通                   共享相通
+                           │                       │
+              ┌────────────┴───────┐  ┌────────────┴───────┐
+              │ Persona 1:        │  │ Persona 2:         │
+              │ 银行私行客户经理 │  │ 散户投资者         │
+              │ (假想 banking)    │  │ (作者本人 dogfood) │
+              ├────────────────────┤  ├────────────────────┤
+              │ 主用:             │  │ 主用:             │
+              │  ・B-1 重仓股尽调 │  │  ・C-1~C-7 短对话  │
+              │  ・B-3 客户预警  │  │  ・C-4 持仓分析    │
+              │  ・B-7 追问报告  │  │ 次用:             │
+              │ 次用:             │  │  ・B-1 重仓股深调 │
+              │  ・C 端 chat 协助│  │  ・B-3 持仓预警   │
+              │   写客户简报      │  │   (个人组合视角)  │
+              └────────────────────┘  └────────────────────┘
 ```
 
-**讲故事时**:"我做了一个 Agent 投研助手,有研报模式和对话模式两种形态,共享同一套 agent 底座。研报模式产出银行内部需要的结构化报告(信贷调查 / 客户跟踪),对话模式服务个人用户的快速问答。两种模式的 planner 接口一致,只是编排策略不同。"
+**讲故事时**:"我做了一个投资研究 agent 平台,服务两类用户 — 银行私行客户经理(假想 banking persona)+ 散户投资者(作者本人 dogfood)。两类用户共享同一套 agent 底座(planner / agent 池 / tool registry / memory / context / observability / eval),只是 use case 频次和 surface 不同:私行经理主用 B-1 重仓股尽调 / B-3 客户预警 / B-7 追问报告;散户主用 C-1~C-7 短对话 / C-4 持仓分析。共享底座是业务事实,因为两个 persona 都需要尽调 + 监控 + 短对话三件事。"
 
 ---
 
@@ -213,7 +216,7 @@
 
 ### 5.4 D4 — 结构化输出
 
-**问题陈述**:B-1 / B-3 输出必须符合**银行内部业务模板**(信贷调查报告 / 客户跟踪简报),自由文本输出无法直接进 workflow。
+**问题陈述**:B-1 / B-3 输出必须符合**银行内部业务模板**(投资标的尽调报告 / 客户跟踪简报),自由文本输出无法直接进 workflow。
 
 **业界 alternatives**:
 - 自由文本 + 模板 prompt("请按以下格式..."):LLM 不稳定,字段缺失常见
@@ -223,7 +226,7 @@
 
 **我们取舍**:
 - 用 **Pydantic schema + LLM structured output**(项目已有 LLMResponse + tier_router,扩 schema 即可)
-- 定 2 种业务模板:`CreditInvestigationReport`(B-1)、`ClientTrackingBrief`(B-3)
+- 定 2 种业务模板:`InvestmentDueDiligenceReport`(B-1)、`ClientTrackingBrief`(B-3)
 - 每种模板有 5-10 个 sections,每个 section 有必填字段 + 可选字段
 - writer agent 按 schema 输出,fail 时重试 + critic 检查
 
@@ -295,13 +298,13 @@
 
 | # | 完成定义 |
 |---|---|
-| **1** | **B-1 端到端**:输入企业名 → 跑完整尽调研究 → 输出 [信贷调查报告] 模板的结构化报告 |
-| **2** | **B-3 端到端**:对已研究过的客户跑预警 → 输出 [客户跟踪简报] 显示 delta + 风险评级变化 |
-| **3** | **B-7 端到端**:审批人对生成的报告追问 → chat 答出引用回原章节 |
-| **4** | **C 端 5 case 都跑通**:C-1 个股 / C-2 行业 / C-3 事件 / C-5 财报 / C-7 概念 |
+| **1** | **B-1 端到端**:输入企业名 + 投资目标 / 时长 / 风险偏好 → 跑完整投资标的尽调 → 输出 [投资标的尽调报告] 模板的结构化报告 |
+| **2** | **B-3 端到端**:对已研究客户 / 个人组合跑客户持仓预警跟踪 → 输出 [客户跟踪简报] 显示 delta + 风险评级变化(私行客户经理视角 + 散户个人组合视角共享同一引擎) |
+| **3** | **B-7 端到端**:私行经理 / 散户对生成的报告追问 → chat 答出引用回原章节 |
+| **4** | **C 端 6 case 都跑通**:C-1 个股 / C-2 行业 / C-3 事件 / C-4 持仓 / C-5 财报 / C-7 概念 |
 | **5** | **D1 强引用**:每条结论可点回原文 PDF 段落(UI + trace) |
 | ~~**6**~~ | ~~**D2 本地化**~~:**v1.x roadmap,v1.0 不交付**(2026-05-04 决定,作者本地硬件受限;架构 protocol 口子已留) |
-| **6** | **D4 结构化输出**:[信贷调查报告] / [客户跟踪简报] 至少 2 种业务模板的 JSON schema + writer agent 出符合 schema 的报告 |
+| **6** | **D4 结构化输出**:[投资标的尽调报告] / [客户跟踪简报] 至少 2 种业务模板的 JSON schema + writer agent 出符合 schema 的报告 |
 | **7** | **D6 agent-level eval**:golden set ≥ 10 case + LLM-as-judge rubric + dashboard 可看 score / cost / latency |
 
 **D3 中文金融特化**:贯穿 1-7 全部,不是单独一项 deliverable
@@ -351,37 +354,60 @@
   - 客户跟踪简报 schema + writer
   - 测试覆盖
 
-### v0.8.4:agent-level eval 升级(D6 单做)
+### v0.8.4:B-1 single deep + 产品定位 reframe
 
-> **2026-05-04 范围调整**:原计划 D2 本地化 + D6 agent eval 一起做,因作者本地硬件受限,**砍 D2 留 v1.x**,本版本只做 D6。工期从 ~2.5 周收到 ~1-1.5 周。
+> **2026-05-04 范围调整**:原计划 D2 本地化 + D6 agent eval 一起做(D2 已砍留 v1.x)。Q3 audit 揭示 v0.8.2 ship 的 B-1 backend 半装饰(input 字段不真驱动 5 agent prompt),先做 D6 评测变成"给半成品做评测"。**v0.8.4 调整为 B-1 single deep — 一个 use case 极致 polish + 同步做产品定位 reframe(平台 + 2 persona + 共享底座)**;D6 agent eval 顺延到 v0.8.5。
 
-- 工作量:~1-1.5 周
-- 出货:可以 demo "改 prompt 立刻看 golden set 跑分变化 + dashboard 看 cost/latency/score"
-- 内容(待 v0.8.4 brainstorming 收紧):
-  - D6 agent-level eval:golden set ≥ B-1 ×10 + B-3 ×10 + C 端 ×20
+- 工作量:~3-5 周
+- 出货:可以 demo "私行客户经理 / 散户从 landing 进 `/research`,填 6 字段表单,看 5-agent 流式跑出投资标的尽调报告,带 disclaimer + 引用 + 投资建议"
+- 内容:
+  - 产品定位 reframe:roadmap spec § 1-12 narrative 重写(本 PR)
+  - B-1 schema 改名为 `InvestmentDueDiligenceReport`(字段重新设计 + § 6 InvestmentRecommendation 5 档卖方研报标准化术语 + disclaimer 固定字段),旧 v0.8.2 schema 全 repo 替换
+  - Backend 5-agent prompt 改造:Planner / DataCollector / Analyst / Writer / Critic 全部 condition on 6 input 字段(`target_ts_code` / `client_total_aum` / `client_existing_position` / `investment_objective` / `investment_horizon` / `risk_tolerance`)
+  - 3 differential golden case(同 ts_code,3 组 input variation,LLM-as-judge "input_context_appropriateness" ≥ 0.85)— D6 SUT seed
+  - Frontend `/research` 完整 user journey:路由 + B-1 6 字段表单 + 历史列表 + C2 流式 progress + D output 渲染(TL;DR + outline + evidence 侧栏 + disclaimer)+ 错误兜底
+  - dogfood ≥ 10 个真实标的 + 修 bug
+- ref `docs/superpowers/plans/2026-05-04-v0.8.4-b1-single-deep.md`(7-task implementation plan,通过 `superpowers:writing-plans` 已拆)
+
+### v0.8.5:D6 agent-level eval + B-3 narrative 调整 + B-7 deep follow B-1 模板
+
+- 工作量:~3 周
+- 出货:可以 demo "改 prompt 立刻看 golden set 跑分变化 + dashboard 看 cost/latency/score" + B-3 narrative 调到"客户持仓 / 个人组合"双视角 + B-7 端到端追问
+- 内容:
+  - D6 agent-level eval:golden set ≥ B-1 ×10(7 独立 ts_code + 3 differential)+ B-3 ×10 + C 端 ×20
   - SUT 从 LLMService 升到 ResearchAgent(整 agent run 的 trace)
   - LLM-as-judge rubric 多维度(完整性 / 准确性 / 引用质量 / 风险识别 [B-1/B-3] / 相关性 [C 端])
-  - Dashboard 可视化(reuse trace-view CLI 或加 web UI — brainstorming 决定)
+  - Dashboard 可视化(reuse trace-view CLI 或加 web UI — 顶后续 brainstorming)
   - PR regression gate:golden score 下降 > 5% 不让 merge
-  - Cost budget:30+ case 跑一次的预算 — brainstorming 估算
+  - B-3 narrative 调整:从"存量信贷客户预警"改为"客户持仓 / 个人组合 双视角共享 monitoring 引擎"
+  - B-7 deep follow B-1 模板:5 维 user journey(entry / form / progress / output / error)+ 接 report context
 
-### v0.8.5:B-7 追问 + D1 引用 UI + C 端打磨
+### v0.8.6:C 端 5+1 use case batch deep follow B-1 模板
 
-- 工作量:~2 周
-- 出货:完整 v1.0 demo
+- 工作量:~3 周
+- 出货:C 端完整体验,散户作者 dogfood 主入口
 - 内容:
-  - B-7 审批人追问:chat 接生成的报告上下文
-  - D1 引用 UI:前端点击结论 → 跳转 PDF chunk
-  - C 端 chat UI 打磨 + Web search 开关
-  - 测试覆盖
+  - C-1 / C-2 / C-3 / C-4(2026-05-04 拉回) / C-5 / C-7 共 6 个 use case follow B-1 5 维 user journey 模板
+  - C-4 持仓 / 组合分析:reuse B-3 monitoring 引擎,加散户简表 UI + 仓位归因
+  - 测试覆盖 + dogfood
+
+### v0.9:整体收尾 + v1.0 ship gate
+
+- 工作量:~1 周
+- 出货:v1.0 ship 准备就绪
+- 内容:
+  - performance 收紧(p50 latency / cost per case 达 § 8 阈值)
+  - 简历 / project-story.md update(v1.0 实际能力反映)
+  - dogfood report markdown 文档化 5-10 个 corner case
+  - v1.0 ship gate 检查(§ 8 量化质量标准全部达标)
 
 ### 总历时
 
-砍 D2 后:v0.8.4 ~1-1.5 周 + v0.8.5 ~2 周 = 剩余 ~3-4 周(原计划 ~4.5 周)。**v1.0 ship 估 1.5-2 个月**(2026-05 → 2026-06/07)。
+v0.8.4 ~3-5 周 + v0.8.5 ~3 周 + v0.8.6 ~3 周 + v0.9 ~1 周 = ~10-12 周。**v1.0 ship 估 2026-06 → 2026-07 中下(~2-3 个月,wall time)**。
 
 ### 版本号语义注释
 
-v0.8.x 系列在历史上是 1 周内 ship 的小迭代(v0/0.5/0.6/0.7 各 1 天-1 周)。本 roadmap 4 个 sub-version 加起来 ~9 周,严格按历史语义应该叫 v0.9 / v0.10 / v0.11 / v1.0。但为保持本文档已写的命名一致,沿用 v0.8.2 ~ v0.8.5。**ship v0.8.5 后 = v1.0 ship**。
+v0.8.x 系列在历史上是 1 周内 ship 的小迭代(v0/0.5/0.6/0.7 各 1 天-1 周)。本 roadmap 4 个 sub-version 加起来 ~10-12 周,严格按历史语义应该叫 v0.9 / v0.10 / v0.11 / v1.0。但为保持本文档已写的命名一致,沿用 v0.8.4 ~ v0.9。**ship v0.9 后 = v1.0 ship**。
 
 ---
 
@@ -417,8 +443,9 @@ v0.8.x 系列在历史上是 1 周内 ship 的小迭代(v0/0.5/0.6/0.7 各 1 天
 - B-4 政策快速研判(独立)
 - B-5 同业对标研究
 - B-6 专题研究 / 行业 outlook(独立)
-- C-4 持仓 / 组合分析
 - C-6 盘中实时盯盘
+- **私募基金 / 信托产品尽调**(80% 数据需 mock,v1.x 处理)
+- ~~C-4 持仓 / 组合分析~~(2026-05-04 拉回 v1.0,详见 § 9 v0.8.6)
 
 ### 技术能力
 - Memory 跨用户缓存层
@@ -438,5 +465,6 @@ v0.8.x 系列在历史上是 1 周内 ship 的小迭代(v0/0.5/0.6/0.7 各 1 天
 
 - **本 spec(Spec A)不进 writing-plans**:它是 v1.0 长期蓝本,沉淀产品判断
 - **v0.8.2 切片 spec(Spec B)由 `2026-05-03-v0.8.2-credit-research-report-design.md` 单独承载**,写完后过 writing-plans 拆 implementation plan
-- **v0.8.3 / v0.8.4 / v0.8.5 spec 留到对应时间点单独 brainstorming + 写**,本 roadmap 提供 anchor 但不预先冻结具体实施细节
-- **简历更新**:本 spec ship 后,简历"Agent 投研助手 - 面向银行客户交付"标题下可补充 functions 描述(从 § 3 use case + § 5 差异化里提取 3-4 个 bullet)
+- **v0.8.4 实施按 `docs/superpowers/plans/2026-05-04-v0.8.4-b1-single-deep.md`,通过 `superpowers:writing-plans` 已拆 task-level plan**(7 task,backend → frontend → integration 顺序);spec 由 `docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md` 承载产品定位 reframe + B-1 schema + 5 维 user journey 决策
+- **v0.8.5 / v0.8.6 / v0.9 spec 留到对应时间点单独 brainstorming + 写**,本 roadmap § 9 提供 anchor 但不预先冻结具体实施细节
+- **简历更新**:本 spec ship 后,简历"投资研究 agent 平台 - 服务私行客户经理 + 散户双 persona"标题下可补充 functions 描述(从 § 3 use case + § 5 差异化里提取 3-4 个 bullet)
