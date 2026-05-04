@@ -40,7 +40,11 @@ jobs:
         run: uv run python -m backend.tests.eval.cassette_validation
 
       - name: Dependency security audit
-        run: uv run pip-audit
+        # GHSA-69w3-r845-3855 (CVE-2026-1839): transformers Trainer RCE — we
+        # use transformers only via mineru[core] for PDF inference, never the
+        # Trainer class, so attack surface is 0. Ignore until mineru bumps
+        # transformers to >=5.0 in upstream. Re-evaluate quarterly.
+        run: uv run pip-audit --ignore-vuln GHSA-69w3-r845-3855
 
       - name: Open issue on failure
         if: failure()
