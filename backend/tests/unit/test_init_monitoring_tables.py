@@ -18,8 +18,8 @@ def test_init_creates_5_tables(db_path: Path) -> None:
     init_monitoring_tables(db_path)
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' "
-            "AND name LIKE 'monitoring_%' OR name = 'notifications'"
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND (name LIKE 'monitoring_%' OR name = 'notifications')"
         ).fetchall()
     names = {r[0] for r in rows}
     assert names == {

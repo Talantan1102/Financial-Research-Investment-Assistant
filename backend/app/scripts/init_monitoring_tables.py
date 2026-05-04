@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS monitoring_runs (
     finished_at TIMESTAMP,
     status TEXT NOT NULL,
     error_message TEXT,
-    cost_cny REAL DEFAULT 0
+    cost_cny REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS monitoring_signals (
@@ -69,6 +69,12 @@ def init_monitoring_tables(db_path: Path) -> None:
     """Create all 5 monitoring tables in the sqlite DB at *db_path*.
 
     Safe to call multiple times — uses CREATE TABLE IF NOT EXISTS throughout.
+    Schema evolution requires manual ALTER TABLE; this script is additive-only
+    (CREATE TABLE IF NOT EXISTS does nothing on existing tables).
+
+    Note: FK enforcement requires PRAGMA foreign_keys=ON per connection
+    (Task 14 responsibility — set it in MonitoringService after every
+    sqlite3.connect() call, as SQLite disables FKs by default).
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:

@@ -34,5 +34,12 @@ def get_db():
 
 
 # Initialise monitoring sqlite tables (idempotent — CREATE TABLE IF NOT EXISTS).
-_MONITORING_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "monitoring.sqlite"
-init_monitoring_tables(_MONITORING_DB_PATH)
+_MONITORING_DB_PATH = Path(__file__).resolve().parents[2] / "data" / "monitoring.sqlite"
+try:
+    init_monitoring_tables(_MONITORING_DB_PATH)
+except OSError as exc:
+    import logging
+
+    logging.getLogger(__name__).warning(
+        "monitoring.sqlite init skipped (likely read-only fs): %s", exc
+    )
