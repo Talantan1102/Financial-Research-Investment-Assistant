@@ -257,6 +257,20 @@ export default function MonitoringIndex() {
     return m;
   }, [alerts]);
 
+  // ── Latest alert ID per customer (for navigation to detail page) ──
+  const customerLatestAlertIdMap = useMemo(() => {
+    const idMap: Record<string, string> = {};
+    const tsMap: Record<string, string> = {};
+    for (const a of alerts) {
+      const curTs = tsMap[a.customer_id];
+      if (!curTs || a.created_at > curTs) {
+        tsMap[a.customer_id] = a.created_at;
+        idMap[a.customer_id] = a.id;
+      }
+    }
+    return idMap;
+  }, [alerts]);
+
   // ── Industry options ──
   const industryOptions = useMemo(() => {
     const set = new Set(customers.map((c) => c.industry));
@@ -443,7 +457,8 @@ export default function MonitoringIndex() {
             </span>
           );
         const level = customerLevelMap[record.id] ?? "green";
-        return (
+        const latestAlertId = customerLatestAlertIdMap[record.id];
+        const inner = (
           <span
             style={{
               fontFamily: TOKEN.monoFont,
@@ -453,6 +468,17 @@ export default function MonitoringIndex() {
           >
             {count}
           </span>
+        );
+        if (!latestAlertId) return inner;
+        return (
+          <Tooltip title="查看最新 Alert 详情">
+            <Link
+              to={`/monitoring/${record.id}/alert/${latestAlertId}`}
+              style={{ textDecoration: "none" }}
+            >
+              {inner}
+            </Link>
+          </Tooltip>
         );
       },
     },
