@@ -186,6 +186,65 @@ export interface SSEResearchEvent {
   data: Record<string, unknown> // narrowed by Task 6 consumers
 }
 
+// ── Agent state types (for C2 progress UI in new.tsx) ─────────────────────────
+
+export type AgentName =
+  | 'Planner'
+  | 'DataCollector'
+  | 'Analyst'
+  | 'Writer'
+  | 'Critic'
+
+export type AgentStatus =
+  | 'pending'
+  | 'running'
+  | 'done'
+  | 'degraded'
+  | 'failed'
+
+export interface AgentState {
+  name: AgentName
+  status: AgentStatus
+  subtasks?: SubtaskState[]
+}
+
+export interface SubtaskState {
+  label: string
+  status: AgentStatus
+}
+
+export type AgentStateMap = Partial<Record<AgentName, AgentState>>
+
+// ── Critic scores (from SSE critic_score event) ───────────────────────────────
+
+export interface CriticScores {
+  data_quality: number
+  logical_coherence: number
+  client_fit: number
+  risk_disclosure: number
+  regulatory_compliance: number
+  actionability: number
+  total: number
+}
+
+// ── Error state (for ErrorBanner) ─────────────────────────────────────────────
+
+export type ErrorType =
+  | 'degraded_mode'
+  | 'schema_fallback'
+  | 'cost_exceeded'
+  | 'sse_disconnected'
+  | 'agent_crash'
+
+export interface ErrorState {
+  type: ErrorType
+  message: string
+  /** Which tool degraded — only present for degraded_mode */
+  degradedTool?: string
+  /** backend request_id for crash logs */
+  requestId?: string
+}
+
 // ── Chinese i18n labels ───────────────────────────────────────────────────────
 
 export const INVESTMENT_OBJECTIVE_LABELS: Record<InvestmentObjective, string> = {

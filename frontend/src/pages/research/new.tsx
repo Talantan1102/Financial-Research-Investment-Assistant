@@ -2,6 +2,11 @@
  * frontend/src/pages/research/new.tsx
  * B-1 新建尽调表单页面。
  *
+ * 两态:
+ *   1. form 态  — 6 字段表单
+ *   2. progress 态 — submit 后展示 AgentStatusSidebar + CostLatencyMetrics
+ *                    直到 done 事件 → navigate /research/:id
+ *
  * 6 字段:
  *   1. target_ts_code    — AutoComplete (ts_code + 名称联想)
  *   2. client_total_aum  — InputNumber  (CNY, 必填, > 0)
@@ -11,7 +16,14 @@
  *   6. risk_tolerance        — Select (5 选项)
  *   user_message — TextArea (可选补充说明)
  *
- * 提交 → POST /api/v0.5/research SSE → navigate 到 /research/:id
+ * SSE event 处理 (C2 进度 UI):
+ *   plan          → Planner running
+ *   data_progress → DataCollector running + subtask progress
+ *   insight       → Analyst running
+ *   report_chunk  → Writer running
+ *   critic_score  → Critic done + CriticScores
+ *   done          → navigate /research/:id
+ *   error         → ErrorBanner agent_crash
  */
 
 import { useCallback, useRef, useState } from 'react'
@@ -38,6 +50,10 @@ import {
   RISK_TOLERANCE_LABELS,
 } from '@/types/research'
 import type {
+  AgentName,
+  AgentStateMap,
+  CriticScores,
+  ErrorState,
   InvestmentHorizon,
   InvestmentObjective,
   ResearchRequest,
@@ -45,6 +61,9 @@ import type {
   SSEResearchEvent,
   TsCodeSuggestion,
 } from '@/types/research'
+import AgentStatusSidebar from './components/AgentStatusSidebar'
+import CostLatencyMetrics from './components/CostLatencyMetrics'
+import ErrorBanner from './components/ErrorBanner'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -85,15 +104,110 @@ interface FormValues {
   user_message?: string
 }
 
+// ── SSE event → agent state transitions ──────────────────────────────────────
+
+function applySSEToAgentStates(
+  prev: AgentStateMap,
+  ev: SSEResearchEvent,
+): AgentStateMap {
+  const next = { ...prev }
+
+  switch (ev.type) {
+    case 'plan':
+      // Planner running → done
+      next['Planner'] = { name: 'Planner', status: 'done' }
+      next['DataCollector'] = { name: 'DataCollector', status: 'running' }
+      break
+
+    case 'data_progress': {
+      // DataCollector subtask progress
+      const tool = (ev.data['tool'] as string | undefined) ?? 'unknown'
+      const toolDone = (ev.data['done'] as boolean | undefined) ?? false
+      const existing = prev['DataCollector']
+      const subtasks = existing?.subtasks ? [...existing.subtasks] : []
+      const idx = subtasks.findIndex((s) => s.label === tool)
+      if (idx === -1) {
+        subtasks.push({ label: tool, status: toolDone ? 'done' : 'running' })
+      } else {
+        subtasks[idx] = { ...subtasks[idx], status: toolDone ? 'done' : 'running' }
+      }
+      next['DataCollector'] = {
+        name: 'DataCollector',
+        status: 'running',
+        subtasks,
+      }
+      break
+    }
+
+    case 'insight':
+      // DataCollector done, Analyst running
+      next['DataCollector'] = {
+        ...prev['DataCollector'],
+        name: 'DataCollector',
+        status: 'done',
+      }
+      next['Analyst'] = { name: 'Analyst', status: 'running' }
+      break
+
+    case 'report_chunk':
+      // Analyst done (first chunk), Writer running
+      if (prev['Analyst']?.status !== 'done') {
+        next['Analyst'] = { name: 'Analyst', status: 'done' }
+      }
+      next['Writer'] = { name: 'Writer', status: 'running' }
+      break
+
+    case 'critic_score':
+      // Writer done, Critic done
+      next['Writer'] = { ...prev['Writer'], name: 'Writer', status: 'done' }
+      next['Critic'] = { name: 'Critic', status: 'done' }
+      break
+
+    case 'done':
+      // All done
+      for (const name of ['Planner', 'DataCollector', 'Analyst', 'Writer', 'Critic'] as AgentName[]) {
+        if (next[name]?.status !== 'done') {
+          next[name] = { name, status: 'done' }
+        }
+      }
+      break
+
+    case 'error': {
+      const failedAgent = (ev.data['agent'] as AgentName | undefined)
+      if (failedAgent) {
+        next[failedAgent] = { name: failedAgent, status: 'failed' }
+      }
+      break
+    }
+
+    default:
+      break
+  }
+
+  return next
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function ResearchNew() {
   const navigate = useNavigate()
   const [form] = Form.useForm<FormValues>()
+
+  // ── Form state ──────────────────────────────────────────────────────────────
   const [submitting, setSubmitting] = useState(false)
   const [suggestions, setSuggestions] = useState<TsCodeSuggestion[]>([])
   const abortRef = useRef<(() => void) | null>(null)
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ── C2 progress state ───────────────────────────────────────────────────────
+  const [inProgress, setInProgress] = useState(false)
+  const [agentStates, setAgentStates] = useState<AgentStateMap>({})
+  const [costCny, setCostCny] = useState(0)
+  const [latencyMs, setLatencyMs] = useState(0)
+  const [criticScores, setCriticScores] = useState<CriticScores | null>(null)
+  const [progressError, setProgressError] = useState<ErrorState | null>(null)
+  const startTimeRef = useRef<number>(0)
+  const latencyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // ── AutoComplete: fetch suggestions on input change (250ms debounce) ─────────
   const handleTsCodeSearch = useCallback((value: string) => {
@@ -116,10 +230,47 @@ export default function ResearchNew() {
     label: `${s.name}（${s.ts_code}）`,
   }))
 
+  // ── Start latency ticker ──────────────────────────────────────────────────
+  const startLatencyTicker = useCallback(() => {
+    startTimeRef.current = Date.now()
+    if (latencyTimerRef.current !== null) clearInterval(latencyTimerRef.current)
+    latencyTimerRef.current = setInterval(() => {
+      setLatencyMs(Date.now() - startTimeRef.current)
+    }, 500)
+  }, [])
+
+  const stopLatencyTicker = useCallback(() => {
+    if (latencyTimerRef.current !== null) {
+      clearInterval(latencyTimerRef.current)
+      latencyTimerRef.current = null
+    }
+    // One final accurate reading
+    setLatencyMs(Date.now() - startTimeRef.current)
+  }, [])
+
+  // ── Retry — resets progress state and goes back to form ───────────────────
+  const handleReset = useCallback(() => {
+    abortRef.current?.()
+    stopLatencyTicker()
+    setInProgress(false)
+    setAgentStates({})
+    setCostCny(0)
+    setLatencyMs(0)
+    setCriticScores(null)
+    setProgressError(null)
+    setSubmitting(false)
+  }, [stopLatencyTicker])
+
   // ── Form submit ─────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(
     (values: FormValues) => {
       setSubmitting(true)
+      setInProgress(true)
+      setAgentStates({ 'Planner': { name: 'Planner', status: 'running' } })
+      setCostCny(0)
+      setLatencyMs(0)
+      setCriticScores(null)
+      setProgressError(null)
 
       const req: ResearchRequest = {
         target_ts_code: values.target_ts_code.trim(),
@@ -133,37 +284,216 @@ export default function ResearchNew() {
 
       // Abort any in-flight request before starting a new one.
       abortRef.current?.()
+      startLatencyTicker()
 
-      // Strategy (I-1 fix): wait for the backend `done` event which carries
-      // the real request_id (e.g. "research-a3f8c2"), then navigate to
-      // /research/<request_id>.  This avoids the client-slug ↔ backend-ID
-      // mismatch that would cause GET /api/v0.5/research/:id to 404.
       const { abort } = submitResearch(
         req,
         (ev: SSEResearchEvent) => {
+          // Update agent states
+          setAgentStates((prev) => applySSEToAgentStates(prev, ev))
+
+          // Extract cost if present in any event
+          if (ev.data && typeof ev.data['cost_cny'] === 'number') {
+            setCostCny(ev.data['cost_cny'] as number)
+          }
+
+          // Critic score event
+          if (ev.type === 'critic_score' && ev.data) {
+            const scores: CriticScores = {
+              data_quality: (ev.data['data_quality'] as number) ?? 0,
+              logical_coherence: (ev.data['logical_coherence'] as number) ?? 0,
+              client_fit: (ev.data['client_fit'] as number) ?? 0,
+              risk_disclosure: (ev.data['risk_disclosure'] as number) ?? 0,
+              regulatory_compliance: (ev.data['regulatory_compliance'] as number) ?? 0,
+              actionability: (ev.data['actionability'] as number) ?? 0,
+              total: (ev.data['total'] as number) ?? 0,
+            }
+            setCriticScores(scores)
+          }
+
+          // Done → navigate
           if (ev.type === 'done' && ev.data && 'request_id' in ev.data) {
             const backendId = ev.data.request_id as string
             if (backendId) {
+              stopLatencyTicker()
               setSubmitting(false)
               void navigate(`/research/${backendId}`, { state: { req } })
             }
           }
+
+          // Error event
           if (ev.type === 'error') {
+            stopLatencyTicker()
             setSubmitting(false)
-            void message.error('尽调过程出错，请重试')
+            const isDegraded = (ev.data['degraded'] as boolean | undefined) === true
+            if (isDegraded) {
+              setProgressError({
+                type: 'degraded_mode',
+                message: (ev.data['message'] as string | undefined) ?? '工具降级',
+                degradedTool: ev.data['tool'] as string | undefined,
+              })
+            } else {
+              setProgressError({
+                type: 'agent_crash',
+                message: (ev.data['message'] as string | undefined) ?? '尽调过程出错，请重试',
+                requestId: ev.data['request_id'] as string | undefined,
+              })
+            }
           }
         },
         (err: Error) => {
+          stopLatencyTicker()
           setSubmitting(false)
-          void message.error(`提交失败：${err.message}`)
+          const isCostExceeded = err.message.toLowerCase().includes('cost') ||
+            err.message.includes('budget')
+          if (isCostExceeded) {
+            setProgressError({
+              type: 'cost_exceeded',
+              message: err.message,
+            })
+          } else if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+            setProgressError({
+              type: 'sse_disconnected',
+              message: err.message,
+            })
+          } else {
+            void message.error(`提交失败：${err.message}`)
+            setProgressError({
+              type: 'agent_crash',
+              message: err.message,
+            })
+          }
         },
       )
 
       abortRef.current = abort
     },
-    [navigate],
+    [navigate, startLatencyTicker, stopLatencyTicker],
   )
 
+  // ── Render: progress overlay ─────────────────────────────────────────────
+  if (inProgress) {
+    return (
+      <div
+        style={{
+          padding: '32px 24px',
+          backgroundColor: TOKEN.pageBg,
+          minHeight: '100%',
+        }}
+      >
+        {/* Header */}
+        <div style={{ marginBottom: 24 }}>
+          <Title
+            level={3}
+            style={{
+              margin: 0,
+              fontSize: 20,
+              fontWeight: 600,
+              color: TOKEN.textPrimary,
+              letterSpacing: '-0.01em',
+            }}
+          >
+            尽调报告生成中
+          </Title>
+          <Text
+            style={{
+              fontSize: 13,
+              color: TOKEN.textTertiary,
+              marginTop: 4,
+              display: 'block',
+            }}
+          >
+            AI 正在采集数据、分析财务与行业信息，请稍候...
+          </Text>
+        </div>
+
+        {/* Error banner (degraded mode can show while still running) */}
+        {progressError && (
+          <div style={{ marginBottom: 16 }}>
+            <ErrorBanner
+              error={progressError}
+              onRetry={handleReset}
+              onDismiss={() => setProgressError(null)}
+            />
+          </div>
+        )}
+
+        {/* Progress area */}
+        <div
+          style={{
+            display: 'flex',
+            gap: 16,
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+          }}
+        >
+          {/* Agent sidebar */}
+          <AgentStatusSidebar
+            agentStates={agentStates}
+            style={{ flex: '0 0 220px' }}
+          />
+
+          {/* Cost + latency */}
+          <CostLatencyMetrics
+            costCny={costCny}
+            latencyMs={latencyMs}
+            criticScores={criticScores}
+            style={{ flex: '0 0 220px' }}
+          />
+
+          {/* Message area */}
+          <div
+            style={{
+              flex: '1 1 300px',
+              backgroundColor: TOKEN.cardBg,
+              border: `1px solid ${TOKEN.borderColor}`,
+              borderRadius: 10,
+              padding: '16px 20px',
+              minHeight: 180,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                color: TOKEN.textTertiary,
+                fontWeight: 600,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+              }}
+            >
+              生成提示
+            </div>
+            <div style={{ fontSize: 13, color: TOKEN.textSecondary, lineHeight: 1.7 }}>
+              <p style={{ margin: 0 }}>
+                报告通常需要 2–5 分钟完成。生成完毕后将自动跳转到报告页面。
+              </p>
+              <p style={{ margin: '8px 0 0' }}>
+                如需终止并重新填写，请点击下方"取消"按钮。
+              </p>
+            </div>
+            <div style={{ marginTop: 'auto' }}>
+              <Button
+                onClick={handleReset}
+                disabled={submitting && !progressError}
+                style={{
+                  borderColor: TOKEN.borderColor,
+                  color: TOKEN.textSecondary,
+                  fontSize: 13,
+                }}
+              >
+                {progressError ? '返回表单' : '取消'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Render: form ─────────────────────────────────────────────────────────
   return (
     <div
       style={{
