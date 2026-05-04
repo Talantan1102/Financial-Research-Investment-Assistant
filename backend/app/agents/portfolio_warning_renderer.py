@@ -1,4 +1,4 @@
-"""Render PortfolioWarningReport → markdown(类比 credit_report_renderer)."""
+"""Render PortfolioWarningReport → markdown(类比 investment_dd_renderer)."""
 
 from __future__ import annotations
 

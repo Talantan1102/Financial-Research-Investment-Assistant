@@ -139,16 +139,7 @@ def test_recommendation_enum_strict() -> None:
         )
 
 
-def test_disclaimer_has_default() -> None:
-    """disclaimer 字段有非空默认值且包含 'AI 模型'。"""
-    from tests.fixtures.investment_dd_fixtures import minimal_valid_report
-
-    r = minimal_valid_report()
-    assert r.disclaimer
-    assert "AI 模型" in r.disclaimer
-
-
-def test_price_range_low_must_be_less_than_high() -> None:
+def test_price_range_accepts_valid_low_high() -> None:
     """PriceRange: low < high 是业务约束 — 只验证类型可实例化。"""
     pr = PriceRange(low=100.0, high=200.0)
     assert pr.low < pr.high

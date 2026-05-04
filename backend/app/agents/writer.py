@@ -118,7 +118,7 @@ _SYSTEM_PROMPT = """你是专业投资研究分析师。
 """
 
 
-def build_credit_report_prompt(state: ResearchState) -> str:
+def build_investment_dd_prompt(state: ResearchState) -> str:
     insights_str = "\n".join(
         f"- [{i.subtask_id}] {i.finding}(confidence={i.confidence})" for i in state.insights
     )
@@ -152,7 +152,7 @@ class Writer(Agent):
 
         For alert_deep_dive mode use the async run() method.
         """
-        prompt = build_credit_report_prompt(state)
+        prompt = build_investment_dd_prompt(state)
         r = self._llm.chat(
             prompt=prompt,
             tier=self.model_tier,

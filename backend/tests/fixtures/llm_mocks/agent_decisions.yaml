@@ -53,7 +53,7 @@ entries:
       prompt_tokens: 80
       completion_tokens: 20
 
-  # Writer (v0.8.4): matched by the system-role prefix injected by build_credit_report_prompt.
+  # Writer (v0.8.4): matched by the system-role prefix injected by build_investment_dd_prompt.
   # Returns a valid InvestmentDueDiligenceReport JSON (schema-conformant).
   # Must appear BEFORE Analyst/ResearchPlanner/ChatPlanner patterns.
   - pattern: "^你是专业投资研究分析师"

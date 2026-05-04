@@ -6,13 +6,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 # ── 免责声明文本(固定)────────────────────────────────────────────────────────
 
-DEFAULT_DISCLAIMER = (
+DEFAULT_DISCLAIMER: Final[str] = (
     "本报告由 AI 模型(LLM)基于截至生成时间的公开数据辅助生成,"
     "仅供客户经理参考,不构成投资建议或具体买卖指令。"
     "投资决策应由客户经理结合客户具体情况及最新市场状况审慎判断。"
