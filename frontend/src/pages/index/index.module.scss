@@ -34,6 +34,70 @@
     }
   }
 
+  .cta-banner {
+    margin-top: 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 28px;
+    background: linear-gradient(135deg, #1144ba 0%, #055588 100%);
+    border-radius: 16px;
+    cursor: pointer;
+    transition: box-shadow 0.25s ease-in-out, transform 0.15s ease-in-out;
+    color: white;
+    outline: none;
+
+    &:hover {
+      box-shadow: 0 8px 24px rgba(17, 68, 186, 0.35);
+      transform: translateY(-2px);
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+
+    &:focus-visible {
+      outline: 3px solid rgba(255, 255, 255, 0.6);
+      outline-offset: 2px;
+    }
+
+    .cta-banner__icon {
+      flex-shrink: 0;
+      width: 52px;
+      height: 52px;
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.18);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+
+    .cta-banner__content {
+      flex: 1;
+      min-width: 0;
+
+      .cta-banner__title {
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1.3;
+      }
+
+      .cta-banner__desc {
+        margin-top: 4px;
+        font-size: 13px;
+        opacity: 0.82;
+        line-height: 1.5;
+      }
+    }
+
+    .cta-banner__arrow {
+      flex-shrink: 0;
+      font-size: 20px;
+      opacity: 0.75;
+    }
+  }
+
   .search-bar {
     margin-top: 110px;
     display: flex;
