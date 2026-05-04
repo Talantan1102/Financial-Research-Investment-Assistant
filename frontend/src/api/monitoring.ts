@@ -76,6 +76,19 @@ export async function triggerScan(customerIds: string[]): Promise<void> {
   });
 }
 
+export async function updateCustomer(
+  id: string,
+  payload: Partial<Pick<MonitoringCustomer, "ts_code" | "name" | "industry" | "enabled">>,
+): Promise<MonitoringCustomer> {
+  const res = await fetch(`${BASE}/customers/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`updateCustomer ${id} failed: ${res.status}`);
+  return (await res.json()) as MonitoringCustomer;
+}
+
 export async function getConfig(): Promise<MonitoringConfig> {
   const res = await fetch(`${BASE}/config`);
   return (await res.json()) as MonitoringConfig;
