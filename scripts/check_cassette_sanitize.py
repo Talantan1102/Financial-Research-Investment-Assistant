@@ -44,6 +44,7 @@ LEAK_PATTERNS: tuple[str, ...] = (
     "sk-",
     "bearer ",
     "x-api-key:",
+    "47.109.59.144",  # tushare proxy IP — should be scrubbed by before_record_request
 )
 
 

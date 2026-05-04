@@ -21,9 +21,11 @@ import contextlib
 import json
 import os
 import re
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 from app.services.rate_limiter import RateLimiter
 from app.services.tushare_cache import TushareCache
@@ -168,19 +170,26 @@ def vcr_cassette_dir() -> str:
 
 
 @pytest.fixture
-def service(tmp_path: Path) -> RealTushareService:
+async def service(tmp_path: Path) -> AsyncIterator[RealTushareService]:
     """Build a RealTushareService pointed at env-configured URL.
 
     During recording: TUSHARE_TOKEN + TUSHARE_BASE_URL from .env
     During replay: token placeholder (VCR intercepts before network)
+
+    Async generator so the httpx.AsyncClient pool is closed on teardown,
+    preventing ResourceWarning during VCR_RECORD_MODE=new_episodes re-records.
     """
     token = os.environ.get("TUSHARE_TOKEN", "REDACTED")
     base_url = os.environ.get("TUSHARE_BASE_URL", "http://api.tushare.pro")
-    return RealTushareService(
+    svc = RealTushareService(
         client=TushareClient(token=token, base_url=base_url),
         cache=TushareCache(db_path=tmp_path / "tushare_cache.sqlite"),
         rate_limiter=RateLimiter(max_calls=100, window_s=60.0),
     )
+    try:
+        yield svc
+    finally:
+        await svc.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +258,9 @@ async def test_get_stk_holdernumber_real(service: RealTushareService, ts_code: s
     """
     df = await service.get_stk_holdernumber(ts_code=ts_code)
     # stk_holdernumber may be empty for some stocks (no disclosure) — that's OK
-    assert df is not None, f"get_stk_holdernumber raised for {ts_code}"
+    assert isinstance(df, pd.DataFrame), (
+        f"get_stk_holdernumber returned non-DataFrame for {ts_code}"
+    )
 
 
 @pytest.mark.vcr
@@ -257,8 +268,9 @@ async def test_get_stk_holdernumber_real(service: RealTushareService, ts_code: s
 async def test_get_disclosure_date_real(service: RealTushareService) -> None:
     """Fetch report disclosure dates (market-wide, ts_code=None) for 2024-03 to 2024-05."""
     df = await service.get_disclosure_date(ts_code=None, start="20240301", end="20240501")
-    # May be empty if no disclosures in range, but must not raise
-    assert df is not None, "get_disclosure_date raised unexpectedly"
+    # May be empty if no disclosures in range, but must not raise.
+    # Recorded cassette may have empty data — acceptable smoke-test outcome.
+    assert isinstance(df, pd.DataFrame), "get_disclosure_date returned non-DataFrame"
 
 
 @pytest.mark.vcr
@@ -270,4 +282,5 @@ async def test_get_anns_real(service: RealTushareService, ts_code: str) -> None:
     May be empty for some stocks — that's OK.
     """
     df = await service.get_anns(ts_code=ts_code, start="20240301", end="20240501")
-    assert df is not None, f"get_anns raised for {ts_code}"
+    assert isinstance(df, pd.DataFrame), f"get_anns returned non-DataFrame for {ts_code}"
+    assert len(df.columns) > 0, f"get_anns returned malformed empty schema for {ts_code}"
