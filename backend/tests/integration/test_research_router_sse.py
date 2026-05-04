@@ -195,7 +195,13 @@ def test_research_sse_http_200(test_client: TestClient) -> None:
     """POST /api/v0.5/research returns HTTP 200 with text/event-stream content type."""
     resp = test_client.post(
         "/api/v0.5/research",
-        json={"user_message": "深度分析茅台 600519.SH"},
+        json={
+            "target_ts_code": "600519.SH",
+            "client_total_aum": 50_000_000.0,
+            "investment_objective": "balanced",
+            "investment_horizon": "medium_term",
+            "risk_tolerance": "moderate",
+        },
         headers={"Accept": "text/event-stream"},
     )
     assert resp.status_code == 200, f"Expected 200 got {resp.status_code}: {resp.text}"
@@ -207,7 +213,13 @@ def test_research_sse_event_framing(test_client: TestClient) -> None:
     """Every SSE line starts with 'data: ' and is valid JSON."""
     resp = test_client.post(
         "/api/v0.5/research",
-        json={"user_message": "深度分析茅台 600519.SH"},
+        json={
+            "target_ts_code": "600519.SH",
+            "client_total_aum": 50_000_000.0,
+            "investment_objective": "balanced",
+            "investment_horizon": "medium_term",
+            "risk_tolerance": "moderate",
+        },
     )
     assert resp.status_code == 200
 
@@ -232,7 +244,13 @@ def test_research_sse_event_types_within_spec(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     n = len(events)
@@ -246,7 +264,13 @@ def test_research_sse_has_plan_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     plan_events = [e for e in events if e["type"] == "plan"]
@@ -259,7 +283,13 @@ def test_research_sse_has_data_progress_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     dp_events = [e for e in events if e["type"] == "data_progress"]
@@ -272,7 +302,13 @@ def test_research_sse_has_report_chunk_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     rc_events = [e for e in events if e["type"] == "report_chunk"]
@@ -285,7 +321,13 @@ def test_research_sse_has_critic_score_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     cs_events = [e for e in events if e["type"] == "critic_score"]
@@ -298,7 +340,13 @@ def test_research_sse_has_done_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     done_events = [e for e in events if e["type"] == "done"]
@@ -310,7 +358,13 @@ def test_research_sse_stream_event_schema(test_client: TestClient) -> None:
     """Each SSE event validates against the ResearchStreamEvent Pydantic schema."""
     resp = test_client.post(
         "/api/v0.5/research",
-        json={"user_message": "深度分析茅台 600519.SH"},
+        json={
+            "target_ts_code": "600519.SH",
+            "client_total_aum": 50_000_000.0,
+            "investment_objective": "balanced",
+            "investment_horizon": "medium_term",
+            "risk_tolerance": "moderate",
+        },
     )
     assert resp.status_code == 200
 
@@ -326,10 +380,16 @@ def test_research_sse_stream_event_schema(test_client: TestClient) -> None:
 
 def test_research_request_schema_validation() -> None:
     """ResearchRequest Pydantic schema: required fields + defaults."""
-    req = ResearchRequest(user_message="深度分析茅台")
-    assert req.user_message == "深度分析茅台"
-    assert req.target_entity == ""
-    assert req.research_style == "comprehensive"
+    req = ResearchRequest(
+        target_ts_code="600519.SH",
+        client_total_aum=50_000_000.0,
+        investment_objective="balanced",
+        investment_horizon="medium_term",
+        risk_tolerance="moderate",
+    )
+    assert req.target_ts_code == "600519.SH"
+    assert req.investment_objective == "balanced"
+    assert req.user_message is None
 
 
 def test_research_stream_event_schema_validation() -> None:

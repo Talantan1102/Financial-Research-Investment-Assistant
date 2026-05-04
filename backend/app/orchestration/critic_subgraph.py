@@ -9,8 +9,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agents.credit_report_schema import CreditInvestigationReport
 from app.agents.critic import Critic, aggregate_scores
+from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.schemas import (
     CriticDimensionScore,
     CriticReport,
@@ -31,7 +31,7 @@ class _CriticSubState(BaseModel):
     user_message: str
     request_id: str
     report_markdown: str | None = None
-    credit_report: CreditInvestigationReport | None = None
+    investment_report: InvestmentDueDiligenceReport | None = None
     insights: list[Insight] = Field(default_factory=list)
     plan: ResearchPlan | None = None
     tool_results: list[ToolResult] = Field(default_factory=list)
@@ -57,7 +57,7 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
             user_message=s.user_message,
             request_id=s.request_id,
             report_markdown=s.report_markdown,
-            credit_report=s.credit_report,
+            investment_report=s.investment_report,
             insights=s.insights,
             plan=s.plan,
             tool_results=s.tool_results,

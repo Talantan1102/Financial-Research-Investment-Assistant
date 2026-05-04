@@ -31,14 +31,14 @@ async def writer_node(state: ResearchState, writer: Writer) -> dict[str, Any]:
     # Return the diff between old and new state so LangGraph merges correctly.
     # For alert_deep_dive mode, Writer populates portfolio_warning_report only;
     # deep_dive_section is reserved for future deep-dive text (e.g. EscalationCoordinator output).
-    # For full_research mode, write to credit_report + report_markdown + chart_specs.
+    # For full_research mode, write to investment_report + report_markdown + chart_specs.
     if state.mode == "alert_deep_dive":
         return {
             "portfolio_warning_report": new_state.portfolio_warning_report,
             "deep_dive_section": new_state.deep_dive_section,
         }
     return {
-        "credit_report": new_state.credit_report,
+        "investment_report": new_state.investment_report,
         "report_markdown": new_state.report_markdown,
         "chart_specs": new_state.chart_specs,
     }

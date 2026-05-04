@@ -1,11 +1,11 @@
-"""L2 e2e — B-1 信贷尽调 茅台端到端 cassette (v0.8.2).
+"""L2 e2e — B-1 投资标的尽调 茅台端到端 cassette (v0.8.4).
 
 Records one full research pipeline run:
   ResearchPlanner → DataCollector (all stub tools — no tool HTTP)
-  → Analyst → Writer (CreditInvestigationReport JSON schema)
-  → Critic (x5) → credit_report_renderer
+  → Analyst → Writer (InvestmentDueDiligenceReport JSON schema)
+  → Critic (x5) → investment_dd_renderer
 
-LLM:     DashScope post-pay endpoint (DASHSCOPE_API_KEY in backend/.env).
+LLM:     DashScope endpoint (DASHSCOPE_API_KEY in backend/.env).
 Tools:   All stub — no Milvus, no Bocha, no MockTushare HTTP calls.
 
 Design note — why all stub tools (not real KB):
@@ -18,7 +18,7 @@ Design note — why all stub tools (not real KB):
     [1] planner → [2] analyst → [3] writer → [4-8] 5 critics
   This is identical to test_research_agent_cassette.py's design choice.
 
-  The credit report schema compliance (Writer + CreditInvestigationReport)
+  The investment report schema compliance (Writer + InvestmentDueDiligenceReport)
   is the primary value of this test. Real KB fidelity is tested separately
   in test_kb_search_cassette.py.
 """
@@ -26,11 +26,20 @@ Design note — why all stub tools (not real KB):
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
+
+# Load backend/.env so DASHSCOPE_API_KEY is available during recording.
+# During replay the env var is patched to "sk-replay-placeholder" by b1_graph fixture.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+
+    _load_dotenv(Path(__file__).parents[2] / ".env")
+except ImportError:
+    pass  # dotenv not installed — env vars must be set manually
 
 import pytest
 from app.agents.analyst import Analyst
-from app.agents.credit_report_schema import CreditInvestigationReport
 from app.agents.critic import Critic
 from app.agents.critic_subagents.conciseness import ConcisenessScorer
 from app.agents.critic_subagents.coverage import CoverageScorer
@@ -38,6 +47,7 @@ from app.agents.critic_subagents.factuality import FactualityScorer
 from app.agents.critic_subagents.insight import InsightScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.data_collector import DataCollector
+from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.research_planner import ResearchPlanner
 from app.agents.schemas import ResearchState
 from app.agents.writer import Writer
@@ -144,7 +154,7 @@ class _StubWebSearchTool(Tool):
                 {
                     "title": "茅台信用评级:AAA级",
                     "url": "https://example.com/1",
-                    "snippet": "贵州茅台股份有限公司长期信用评级AAA,主体资格合规",
+                    "snippet": "贵州茅台股份有限公司长期主体评级AAA,合规",
                 },
                 {
                     "title": "白酒行业监管:符合国家产业政策",
@@ -180,10 +190,10 @@ class _StubKbSearchTool(Tool):
                     "metadata": {"source_type": "financial", "company_code": "600519"},
                 },
                 {
-                    "chunk_id": "maotai_credit_profile::0",
+                    "chunk_id": "maotai_investment_profile::0",
                     "chunk_text": (
-                        "贵州茅台酒股份有限公司统一社会信用代码:91520000230887934K。"
-                        "注册资本125,619.78万元,实际控制人为贵州省国有资产监督管理委员会。"
+                        "贵州茅台酒股份有限公司(600519.SH)注册资本125,619.78万元,"
+                        "实际控制人为贵州省国有资产监督管理委员会。"
                         "公司在上海证券交易所主板上市,股票代码600519.SH。"
                         "长期主体信用评级AAA,无重大不良记录。"
                     ),
@@ -233,7 +243,7 @@ def vcr_config() -> dict[str, Any]:
         ],
         "filter_post_data_parameters": [],
         "decode_compressed_response": True,
-        "record_mode": os.environ.get("VCR_RECORD_MODE", "none"),
+        "record_mode": os.environ.get("VCR_RECORD_MODE", "once"),
         "match_on": ["method", "scheme", "host", "port", "path"],
         "before_record_response": _strip_dashscope_response_headers,
     }
@@ -296,69 +306,76 @@ def b1_graph(monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_b1_maotai_credit_report_e2e_cassette(b1_graph: Any) -> None:
-    """B-1 端到端:输入茅台 + 信贷场景,产出符合 CreditInvestigationReport schema 的报告。
+async def test_b1_maotai_investment_dd_e2e_cassette(b1_graph: Any) -> None:
+    """B-1 端到端:输入茅台 + 6 结构化字段,产出符合 InvestmentDueDiligenceReport schema 的报告。
 
-    Adaptation from plan:
-      - Plan referenced build_research_pipeline_from_env() / pipeline.run() — these
-        don't exist in the codebase. The actual entry is build_research_graph() +
-        graph.ainvoke(state_dict, config). ResearchState is validated from the result
-        dict via model_validate().
-      - All tools replaced with stubs (no HTTP) to make cassette sequence deterministic.
-        Concurrent tool execution in asyncio.gather + VCR body-less matching caused
-        cassette entry misassignment. Stub tools eliminate all tool HTTP calls; the
-        cassette contains exactly: planner + analyst + writer + 5 critics = 8 LLM calls.
-      - No milvus_test_container fixture dependency; test runs without Milvus.
+    v0.8.4 change:
+      - Input: 6 structured fields (target_ts_code / client_total_aum /
+        investment_objective / investment_horizon / risk_tolerance)
+      - Output: InvestmentDueDiligenceReport (from CreditInvestigationReport)
+      - investment_dd_renderer replaces credit_report_renderer
     """
-    user_message = "评估贵州茅台(600519.SH)50 亿元 3 年期流动资金贷款。请输出完整信贷调查报告。"
-    thread_id = "b1-maotai-test-1"
+    thread_id = "b1-maotai-investment-dd-test-1"
     initial = ResearchState(
         user_id="test",
         session_id=thread_id,
-        user_message=user_message,
+        user_message="请对贵州茅台(600519.SH)进行投资标的尽调。",
         request_id=thread_id,
+        target_ts_code="600519.SH",
+        client_total_aum=50_000_000_000.0,  # 500亿 AUM
+        investment_objective="balanced",
+        investment_horizon="medium_term",
+        risk_tolerance="moderate",
     )
     config = {"configurable": {"thread_id": thread_id}}
 
     result = await b1_graph.ainvoke(initial.model_dump(), config=config)
     final_state = ResearchState.model_validate(result)
 
-    # 1. State contains credit_report
-    assert final_state.credit_report is not None, "Writer must produce a CreditInvestigationReport"
-    report = final_state.credit_report
-    assert isinstance(report, CreditInvestigationReport)
+    # 1. State contains investment_report
+    assert final_state.investment_report is not None, (
+        "Writer must produce an InvestmentDueDiligenceReport"
+    )
+    report = final_state.investment_report
+    assert isinstance(report, InvestmentDueDiligenceReport)
 
-    # 2. company_name 锚定茅台
-    assert "茅台" in report.company_name, (
-        f"company_name must mention 茅台, got: {report.company_name!r}"
+    # 2. target_name 锚定茅台
+    assert "茅台" in report.target_name, (
+        f"target_name must mention 茅台, got: {report.target_name!r}"
     )
 
     # 3. 6 sections all non-None (schema enforces required; this is a sanity check)
-    assert report.company_overview is not None
+    assert report.target_overview is not None
     assert report.legal_qualification is not None
     assert report.financial_analysis is not None
     assert report.industry_analysis is not None
     assert report.risk_assessment is not None
-    assert report.credit_recommendation is not None
+    assert report.investment_recommendation is not None
 
     # 4. Evidence non-empty per section (schema min_length=1 enforces this too)
-    assert len(report.company_overview.evidence) >= 1
+    assert len(report.target_overview.evidence) >= 1
     assert len(report.financial_analysis.evidence) >= 1
-    assert len(report.credit_recommendation.evidence) >= 1
+    assert len(report.investment_recommendation.evidence) >= 1
 
-    # 5. decision is a valid enum value
-    assert report.credit_recommendation.decision in {
-        "approve",
-        "reject",
-        "approve_with_conditions",
+    # 5. recommendation is a valid enum value (5 档卖方研报标准)
+    assert report.investment_recommendation.recommendation in {
+        "recommend_buy",
+        "recommend_overweight",
+        "recommend_hold",
+        "recommend_underweight",
+        "recommend_sell",
     }
 
-    # 6. markdown rendered and sufficiently long
+    # 6. disclaimer field exists and non-empty
+    assert report.disclaimer
+    assert "AI 模型" in report.disclaimer
+
+    # 7. markdown rendered and sufficiently long
     assert final_state.report_markdown is not None, "report_markdown must be set by writer_node"
     assert len(final_state.report_markdown) > 1500, (
         f"Markdown too short ({len(final_state.report_markdown)} chars); "
-        "expected > 1500 chars for a 6-section credit report"
+        "expected > 1500 chars for a 6-section investment DD report"
     )
-    assert "# 信贷调查报告 — " in final_state.report_markdown, (
-        "Markdown must begin with '# 信贷调查报告 — <company_name>' per renderer"
+    assert "# 投资标的尽调报告 — " in final_state.report_markdown, (
+        "Markdown must begin with '# 投资标的尽调报告 — <target_name> (<ts_code>)' per renderer"
     )

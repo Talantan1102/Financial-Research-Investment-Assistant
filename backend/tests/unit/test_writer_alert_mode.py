@@ -83,16 +83,16 @@ async def test_writer_alert_mode_produces_portfolio_warning_report() -> None:
 
 
 @pytest.mark.asyncio
-async def test_writer_alert_mode_does_not_set_credit_report() -> None:
-    """Alert mode must NOT touch credit_report — different deliverable."""
+async def test_writer_alert_mode_does_not_set_investment_report() -> None:
+    """Alert mode must NOT touch investment_report — different deliverable."""
     expected = _make_warning_report()
     writer = Writer(llm=_llm_returning(expected))
     state = _alert_state()
 
     new_state = await writer.run(state)
 
-    # credit_report stays None in alert mode
-    assert new_state.credit_report is None
+    # investment_report stays None in alert mode
+    assert new_state.investment_report is None
 
 
 @pytest.mark.asyncio
@@ -134,27 +134,26 @@ async def test_writer_alert_mode_raises_when_parsed_is_none() -> None:
 @pytest.mark.asyncio
 async def test_writer_full_research_mode_via_run() -> None:
     """run() in full_research mode must delegate to step() and return ResearchState."""
-    from app.agents.credit_report_schema import (
-        CompanyOverview,
-        CreditInvestigationReport,
-        CreditRecommendation,
+    from app.agents.investment_dd_schema import (
         FinancialAnalysis,
         IndustryAnalysis,
+        InvestmentDueDiligenceReport,
+        InvestmentRecommendation,
         LegalQualification,
+        PriceRange,
         RiskAssessment,
+        TargetOverview,
+        ValuationAnalysis,
     )
 
-    fake_report = CreditInvestigationReport(
-        company_name="贵州茅台",
+    fake_report = InvestmentDueDiligenceReport(
+        target_name="贵州茅台",
+        target_ts_code="600519.SH",
         request_id="req-test",
         generated_at=datetime(2026, 5, 4),
-        company_overview=CompanyOverview(
+        target_overview=TargetOverview(
             narrative="综述",
-            unified_credit_code=None,
-            registered_capital=None,
             main_business="白酒",
-            controlling_shareholder=None,
-            listing_status=None,
             evidence=["chunk-001"],
         ),
         legal_qualification=LegalQualification(
@@ -167,10 +166,11 @@ async def test_writer_full_research_mode_via_run() -> None:
         financial_analysis=FinancialAnalysis(
             narrative="财务分析",
             key_metrics=[],
-            solvency_analysis="偿债能力强",
             profitability_analysis="盈利能力强",
+            growth_analysis="成长性良好",
+            return_analysis="ROE 高",
             cash_flow_analysis="现金流充裕",
-            year_over_year_summary=None,
+            valuation_analysis=ValuationAnalysis(narrative="估值合理"),
             evidence=["chunk-001"],
         ),
         industry_analysis=IndustryAnalysis(
@@ -184,21 +184,22 @@ async def test_writer_full_research_mode_via_run() -> None:
         ),
         risk_assessment=RiskAssessment(
             narrative="风险评估",
-            operational_risks=[],
-            financial_risks=[],
-            industry_risks=[],
-            compliance_risks=[],
+            market_risk=[],
+            growth_risk=[],
+            event_risk=[],
+            valuation_risk=[],
             overall_risk_level="low",
             evidence=["chunk-001"],
         ),
-        credit_recommendation=CreditRecommendation(
-            narrative="建议",
-            decision="approve",
-            recommended_credit_limit=None,
-            recommended_term=None,
-            recommended_rate_range=None,
-            guarantee_requirements=[],
-            conditions=[],
+        investment_recommendation=InvestmentRecommendation(
+            narrative="建议增持",
+            recommendation="recommend_overweight",
+            recommended_position_size_pct=5.0,
+            recommended_holding_period="medium_term",
+            recommended_entry_price_range=PriceRange(low=1700.0, high=1800.0),
+            recommended_stop_loss_price=1600.0,
+            estimated_target_price_range=PriceRange(low=2000.0, high=2200.0),
+            position_management_conditions=[],
             evidence=["chunk-001"],
         ),
     )
@@ -214,15 +215,15 @@ async def test_writer_full_research_mode_via_run() -> None:
     state = ResearchState(
         user_id="u",
         session_id="s",
-        user_message="信贷调查",
+        user_message="投资尽调",
         request_id="req-test",
         mode="full_research",
     )
 
     new_state = await writer.run(state)
 
-    assert new_state.credit_report is not None
-    assert new_state.credit_report.company_name == "贵州茅台"
+    assert new_state.investment_report is not None
+    assert new_state.investment_report.target_name == "贵州茅台"
     assert new_state.report_markdown is not None
     # alert fields stay None
     assert new_state.portfolio_warning_report is None

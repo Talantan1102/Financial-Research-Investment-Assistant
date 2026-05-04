@@ -1,100 +1,53 @@
-"""Unit test for CreditInvestigationReport Pydantic schema."""
+"""Unit tests for InvestmentDueDiligenceReport Pydantic schema (v0.8.4).
+
+Replaces the former test_credit_report_schema.py (CreditInvestigationReport).
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
-
 import pytest
-from app.agents.credit_report_schema import (
-    CompanyOverview,
-    CreditInvestigationReport,
-    CreditRecommendation,
-    FinancialAnalysis,
-    FinancialMetric,
-    IndustryAnalysis,
-    LegalQualification,
+from app.agents.investment_dd_schema import (
+    InvestmentDueDiligenceReport,
+    InvestmentRecommendation,
+    PriceRange,
     RiskAssessment,
     RiskItem,
+    TargetOverview,
 )
 from pydantic import ValidationError
 
 
-def _minimal_report() -> CreditInvestigationReport:
+def _minimal_report() -> InvestmentDueDiligenceReport:
     """Minimal valid report — all required fields filled, all optionals empty."""
-    return CreditInvestigationReport(
-        company_name="测试公司",
-        request_id="req-test-001",
-        generated_at=datetime(2026, 5, 3, 12, 0, 0),
-        company_overview=CompanyOverview(
-            narrative="测试综述。",
-            main_business="测试主营。",
-            evidence=["c1::0"],
-        ),
-        legal_qualification=LegalQualification(
-            narrative="主体合规。",
-            legal_status="合规",
-            business_qualifications=[],
-            adverse_records=[],
-            evidence=["c1::1"],
-        ),
-        financial_analysis=FinancialAnalysis(
-            narrative="财务稳定。",
-            key_metrics=[
-                FinancialMetric(name="营业收入", value="100 亿元", period="2024 H1"),
-            ],
-            solvency_analysis="偿债能力强。",
-            profitability_analysis="盈利稳定。",
-            cash_flow_analysis="现金流健康。",
-            evidence=["c1::2"],
-        ),
-        industry_analysis=IndustryAnalysis(
-            narrative="行业景气。",
-            industry_name="白酒",
-            industry_outlook="稳定增长",
-            competitive_position="龙头",
-            key_competitors=[],
-            policy_impact="无重大不利政策。",
-            evidence=["c1::3"],
-        ),
-        risk_assessment=RiskAssessment(
-            narrative="整体风险可控。",
-            operational_risks=[],
-            financial_risks=[],
-            industry_risks=[],
-            compliance_risks=[],
-            overall_risk_level="low",
-            evidence=["c1::4"],
-        ),
-        credit_recommendation=CreditRecommendation(
-            narrative="建议批准。",
-            decision="approve",
-            guarantee_requirements=[],
-            conditions=[],
-            evidence=["c1::5"],
-        ),
-    )
+    from tests.fixtures.investment_dd_fixtures import minimal_valid_report
+
+    return minimal_valid_report()
 
 
 def test_minimal_valid_report() -> None:
     r = _minimal_report()
-    assert r.company_name == "测试公司"
-    assert r.credit_recommendation.decision == "approve"
+    assert r.target_name == "贵州茅台酒股份有限公司"
+    assert r.investment_recommendation.recommendation == "recommend_overweight"
 
 
 def test_empty_evidence_rejected() -> None:
     """每个 section evidence 至少 1 个 chunk_id(min_length=1)。"""
     with pytest.raises(ValidationError):
-        CompanyOverview(narrative="x", main_business="y", evidence=[])
+        TargetOverview(narrative="x", main_business="y", evidence=[])
 
 
-def test_decision_enum_strict() -> None:
-    """decision 必须是三值之一。"""
+def test_recommendation_enum_strict() -> None:
+    """recommendation 必须是 5 档之一。"""
     with pytest.raises(ValidationError):
-        CreditRecommendation(
+        InvestmentRecommendation(
             narrative="x",
-            decision="maybe",  # type: ignore[arg-type]
-            guarantee_requirements=[],
-            conditions=[],
+            recommendation="maybe",  # type: ignore[arg-type]
+            recommended_position_size_pct=5.0,
+            recommended_holding_period="medium_term",
+            recommended_entry_price_range=PriceRange(low=100.0, high=110.0),
+            recommended_stop_loss_price=90.0,
+            estimated_target_price_range=PriceRange(low=120.0, high=140.0),
+            position_management_conditions=[],
             evidence=["c1::0"],
         )
 
@@ -103,10 +56,10 @@ def test_overall_risk_level_enum_strict() -> None:
     with pytest.raises(ValidationError):
         RiskAssessment(
             narrative="x",
-            operational_risks=[],
-            financial_risks=[],
-            industry_risks=[],
-            compliance_risks=[],
+            market_risk=[],
+            growth_risk=[],
+            event_risk=[],
+            valuation_risk=[],
             overall_risk_level="catastrophic",  # type: ignore[arg-type]
             evidence=["c1::0"],
         )
@@ -122,20 +75,27 @@ def test_risk_item_severity_enum_strict() -> None:
 
 
 def test_required_field_missing_rejected() -> None:
-    """company_overview 缺 main_business 必拒。"""
+    """target_overview 缺 main_business 必拒。"""
     with pytest.raises(ValidationError):
-        CompanyOverview(narrative="x", evidence=["c1::0"])  # type: ignore[call-arg]
+        TargetOverview(narrative="x", evidence=["c1::0"])  # type: ignore[call-arg]
 
 
 def test_json_roundtrip() -> None:
     r = _minimal_report()
     j = r.model_dump_json()
-    r2 = CreditInvestigationReport.model_validate_json(j)
+    r2 = InvestmentDueDiligenceReport.model_validate_json(j)
     assert r2 == r
 
 
 def test_json_schema_generation() -> None:
     """`model_json_schema()` 不抛异常,作为 LLMService.chat schema= 入参形态。"""
-    schema = CreditInvestigationReport.model_json_schema()
+    schema = InvestmentDueDiligenceReport.model_json_schema()
     assert schema["type"] == "object"
-    assert "company_name" in schema["properties"]
+    assert "target_name" in schema["properties"]
+
+
+def test_disclaimer_has_default() -> None:
+    """disclaimer 字段必须有非空默认值包含 'AI 模型'。"""
+    r = _minimal_report()
+    assert r.disclaimer
+    assert "AI 模型" in r.disclaimer

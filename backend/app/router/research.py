@@ -11,16 +11,13 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.agents.schemas import ResearchState
+from app.agents.schemas import (
+    ResearchRequest,
+    ResearchState,
+)
 from app.router.chat import _AnonUser, get_current_user  # reuse v0 stub auth
 
 router = APIRouter(tags=["research-v0.5"])
-
-
-class ResearchRequest(BaseModel):
-    target_entity: str = ""
-    user_message: str
-    research_style: Literal["concise", "comprehensive"] = "comprehensive"
 
 
 class ResearchStreamEvent(BaseModel):
@@ -169,8 +166,14 @@ async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) ->
     initial = ResearchState(
         user_id=user.id,
         session_id=request_id,
-        user_message=req.user_message,
+        user_message=req.user_message or f"请对 {req.target_ts_code} 进行投资标的尽调。",
         request_id=request_id,
+        target_ts_code=req.target_ts_code,
+        client_total_aum=req.client_total_aum,
+        client_existing_position=req.client_existing_position,
+        investment_objective=req.investment_objective,
+        investment_horizon=req.investment_horizon,
+        risk_tolerance=req.risk_tolerance,
     )
     config = {"configurable": {"thread_id": f"research:{user.id}:{request_id}"}}
 

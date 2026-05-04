@@ -1,35 +1,49 @@
-"""Unit test for credit_report_renderer."""
+"""Unit tests for investment_dd_renderer (v0.8.4).
+
+Replaces the former test_credit_report_renderer.py (render_credit_report_markdown).
+"""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from app.agents.credit_report_renderer import render_credit_report_markdown
-from app.agents.credit_report_schema import (
-    CompanyOverview,
-    CreditInvestigationReport,
-    CreditRecommendation,
+from app.agents.investment_dd_renderer import (
+    _RECOMMENDATION_ZH,
+    _RISK_LEVEL_ZH,
+    _SEVERITY_ZH,
+    render_investment_dd_report_markdown,
+)
+from app.agents.investment_dd_schema import (
     FinancialAnalysis,
     FinancialMetric,
     IndustryAnalysis,
+    InvestmentDueDiligenceReport,
+    InvestmentRecommendation,
     LegalQualification,
+    PriceRange,
     RiskAssessment,
     RiskItem,
+    TargetOverview,
+    ValuationAnalysis,
 )
 
 
-def _full_report() -> CreditInvestigationReport:
-    return CreditInvestigationReport(
-        company_name="贵州茅台",
+def _full_report() -> InvestmentDueDiligenceReport:
+    return InvestmentDueDiligenceReport(
+        target_name="贵州茅台酒股份有限公司",
+        target_ts_code="600519.SH",
         request_id="req-test-002",
-        generated_at=datetime(2026, 5, 3, 12, 0, 0),
-        company_overview=CompanyOverview(
+        generated_at=datetime(2026, 5, 4, 12, 0, 0),
+        target_overview=TargetOverview(
             narrative="贵州茅台是国内白酒龙头。",
-            unified_credit_code="91520000215123456X",
             registered_capital="12.56 亿元",
             main_business="白酒生产销售",
             controlling_shareholder="贵州省国资委",
             listing_status="A 股主板",
+            current_pe=25.0,
+            current_pb=8.5,
+            current_market_cap=22000.0,
+            dividend_yield=2.0,
             evidence=["maotai_2024_h1::3", "maotai_2024_h1::5"],
         ),
         legal_qualification=LegalQualification(
@@ -49,9 +63,16 @@ def _full_report() -> CreditInvestigationReport:
                     name="净利润", value="417 亿元", period="2024 H1", yoy_change="+15%"
                 ),
             ],
-            solvency_analysis="偿债能力优异,现金充裕。",
             profitability_analysis="毛利率 91%,行业第一。",
+            growth_analysis="营收同比 +17%,净利同比 +15%。",
+            return_analysis="ROE 33.5%,高于行业均值。",
             cash_flow_analysis="经营性现金流持续为正。",
+            valuation_analysis=ValuationAnalysis(
+                narrative="当前估值处于历史中低位。",
+                pe_historical_percentile="近 5 年 30 分位",
+                dcf_valuation="DCF 内在价值 2100 元",
+                peer_comparison="五粮液 PE 22x,茅台溢价合理",
+            ),
             year_over_year_summary="同比双位数增长。",
             evidence=["maotai_2024_h1::20", "maotai_2024_h1::25"],
         ),
@@ -66,89 +87,83 @@ def _full_report() -> CreditInvestigationReport:
         ),
         risk_assessment=RiskAssessment(
             narrative="整体风险低。",
-            operational_risks=[
+            market_risk=[
                 RiskItem(
-                    title="渠道库存",
-                    description="经销商压货。",
+                    title="市场流动性",
+                    description="大盘下跌带动回调风险。",
                     severity="low",
-                    mitigations=["渠道优化"],
+                    mitigations=["分批建仓"],
                 ),
             ],
-            financial_risks=[],
-            industry_risks=[],
-            compliance_risks=[],
+            growth_risk=[],
+            event_risk=[],
+            valuation_risk=[],
             overall_risk_level="low",
             evidence=["maotai_2024_h1::50"],
         ),
-        credit_recommendation=CreditRecommendation(
-            narrative="建议批准 50 亿元 3 年期流动资金贷款。",
-            decision="approve",
-            recommended_credit_limit="50 亿元",
-            recommended_term="3 年",
-            recommended_rate_range="LPR + 0bp ~ LPR + 30bp",
-            guarantee_requirements=[],
-            conditions=[],
+        investment_recommendation=InvestmentRecommendation(
+            narrative="建议增持,中期持有。",
+            recommendation="recommend_overweight",
+            recommended_position_size_pct=5.0,
+            recommended_holding_period="medium_term",
+            recommended_entry_price_range=PriceRange(low=1700.0, high=1800.0),
+            recommended_stop_loss_price=1600.0,
+            estimated_target_price_range=PriceRange(low=2000.0, high=2200.0),
+            position_management_conditions=["回调 5% 时加仓"],
             evidence=["maotai_2024_h1::60"],
         ),
     )
 
 
 def test_renders_all_six_sections() -> None:
-    md = render_credit_report_markdown(_full_report())
-    assert "# 信贷调查报告 — 贵州茅台" in md
-    assert "## § 1 基本信息" in md
+    md = render_investment_dd_report_markdown(_full_report())
+    assert "# 投资标的尽调报告 — 贵州茅台酒股份有限公司 (600519.SH)" in md
+    assert "## § 1 标的基本信息" in md
     assert "## § 2 主体资格" in md
     assert "## § 3 财务分析" in md
     assert "## § 4 行业分析" in md
     assert "## § 5 风险评估" in md
-    assert "## § 6 信贷建议" in md
+    assert "## § 6 投资建议" in md
 
 
 def test_includes_metric_table() -> None:
-    md = render_credit_report_markdown(_full_report())
+    md = render_investment_dd_report_markdown(_full_report())
     assert "营业收入" in md
     assert "819 亿元" in md
 
 
-def test_includes_evidence_footer_per_section() -> None:
-    md = render_credit_report_markdown(_full_report())
-    assert "maotai_2024_h1::3" in md  # company_overview evidence
+def test_includes_evidence_footnotes_per_section() -> None:
+    md = render_investment_dd_report_markdown(_full_report())
+    assert "maotai_2024_h1::3" in md  # target_overview evidence
     assert "maotai_2024_h1::20" in md  # financial_analysis evidence
-    assert "maotai_2024_h1::60" in md  # credit_recommendation evidence
+    assert "maotai_2024_h1::60" in md  # investment_recommendation evidence
 
 
 def test_idempotent() -> None:
     r = _full_report()
-    assert render_credit_report_markdown(r) == render_credit_report_markdown(r)
+    assert render_investment_dd_report_markdown(r) == render_investment_dd_report_markdown(r)
 
 
-def test_decision_label_zh() -> None:
-    md = render_credit_report_markdown(_full_report())
-    assert "批准" in md  # approve → 批准
+def test_recommendation_label_zh() -> None:
+    md = render_investment_dd_report_markdown(_full_report())
+    assert "增持" in md  # recommend_overweight → 增持
 
 
-def test_decision_zh_covers_all_literals() -> None:
-    """Meta-guard: _DECISION_ZH must cover every Literal value in CreditRecommendation.decision."""
+def test_recommendation_zh_covers_all_literals() -> None:
+    """Meta-guard: _RECOMMENDATION_ZH must cover every Literal value."""
     from typing import get_args
 
-    from app.agents.credit_report_renderer import _DECISION_ZH
-    from app.agents.credit_report_schema import CreditRecommendation
-
-    decision_field = CreditRecommendation.model_fields["decision"]
+    decision_field = InvestmentRecommendation.model_fields["recommendation"]
     literal_values = set(get_args(decision_field.annotation))
-    assert literal_values == set(_DECISION_ZH.keys()), (
-        f"_DECISION_ZH out of sync with schema: "
-        f"missing={literal_values - set(_DECISION_ZH.keys())}, "
-        f"extra={set(_DECISION_ZH.keys()) - literal_values}"
+    assert literal_values == set(_RECOMMENDATION_ZH.keys()), (
+        f"_RECOMMENDATION_ZH out of sync with schema: "
+        f"missing={literal_values - set(_RECOMMENDATION_ZH.keys())}, "
+        f"extra={set(_RECOMMENDATION_ZH.keys()) - literal_values}"
     )
 
 
 def test_risk_level_zh_covers_all_literals() -> None:
-    """Meta-guard: _RISK_LEVEL_ZH must cover every Literal value in RiskAssessment.overall_risk_level."""
     from typing import get_args
-
-    from app.agents.credit_report_renderer import _RISK_LEVEL_ZH
-    from app.agents.credit_report_schema import RiskAssessment
 
     field = RiskAssessment.model_fields["overall_risk_level"]
     literal_values = set(get_args(field.annotation))
@@ -156,11 +171,7 @@ def test_risk_level_zh_covers_all_literals() -> None:
 
 
 def test_severity_zh_covers_all_literals() -> None:
-    """Meta-guard: _SEVERITY_ZH must cover every Literal value in RiskItem.severity."""
     from typing import get_args
-
-    from app.agents.credit_report_renderer import _SEVERITY_ZH
-    from app.agents.credit_report_schema import RiskItem
 
     field = RiskItem.model_fields["severity"]
     literal_values = set(get_args(field.annotation))
@@ -171,21 +182,12 @@ def test_empty_key_metrics_renders_placeholder() -> None:
     """FinancialAnalysis.key_metrics=[] should render a placeholder, not crash."""
     r = _full_report()
     r.financial_analysis.key_metrics = []
-    md = render_credit_report_markdown(r)
+    md = render_investment_dd_report_markdown(r)
     assert "_暂无关键财务指标_" in md
     assert "## § 3 财务分析" in md  # section still rendered
 
 
-def test_all_empty_risk_categories_render_placeholders() -> None:
-    """All risk categories empty should render '_无' placeholders for each, not crash."""
-    r = _full_report()
-    r.risk_assessment.operational_risks = []
-    r.risk_assessment.financial_risks = []
-    r.risk_assessment.industry_risks = []
-    r.risk_assessment.compliance_risks = []
-    md = render_credit_report_markdown(r)
-    # Each category renders an empty placeholder
-    assert "_经营风险:无_" in md
-    assert "_财务风险:无_" in md
-    assert "_行业风险:无_" in md
-    assert "_合规风险:无_" in md
+def test_disclaimer_appears_in_output() -> None:
+    md = render_investment_dd_report_markdown(_full_report())
+    assert "AI 模型" in md
+    assert "投资决策" in md
