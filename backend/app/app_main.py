@@ -15,9 +15,6 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 导入所有模型以确保它们被注册
-from router import document_router, research_router, search_router
-
 from app.core.database import Base, engine
 from app.router import chat, research
 from app.router.attachment_router import router as attachment_router
@@ -201,7 +198,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
 
     # 初始化定时任务调度器并检查数据
     try:
-        from service.scheduler_service import init_scheduler_and_check_data
+        from app.service.scheduler_service import init_scheduler_and_check_data
 
         await init_scheduler_and_check_data()
         logger.info("定时任务调度器启动成功")
@@ -260,7 +257,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     # 关闭时执行
     logger.info("应用关闭中...")
     try:
-        from service.scheduler_service import get_scheduler_service
+        from app.service.scheduler_service import get_scheduler_service
 
         scheduler = get_scheduler_service()
         scheduler.stop()
@@ -291,11 +288,8 @@ app.include_router(knowledge_router)
 app.include_router(attachment_router)
 app.include_router(memory_router)
 app.include_router(database_router)
-app.include_router(document_router)
-app.include_router(search_router)
 app.include_router(chat.router)
 app.include_router(research.router)
-app.include_router(research_router)
 app.include_router(news_router)
 app.include_router(monitoring_router)
 

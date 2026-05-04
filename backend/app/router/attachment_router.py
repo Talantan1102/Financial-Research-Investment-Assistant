@@ -14,13 +14,13 @@ from fastapi import (
     UploadFile,
     status,
 )
-from schemas.chat import AttachmentListResponse, AttachmentResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.chat import ChatAttachment, ChatSession
 from app.models.user import User
 from app.router.auth_router import get_current_user
+from app.schemas.chat import AttachmentListResponse, AttachmentResponse
 
 router = APIRouter(prefix="/attachments", tags=["聊天附件"])
 

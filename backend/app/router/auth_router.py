@@ -2,13 +2,6 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from schemas.user import (
-    PasswordChange,
-    TokenResponse,
-    UserCreate,
-    UserLogin,
-    UserResponse,
-)
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -19,6 +12,13 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import User
+from app.schemas.user import (
+    PasswordChange,
+    TokenResponse,
+    UserCreate,
+    UserLogin,
+    UserResponse,
+)
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 

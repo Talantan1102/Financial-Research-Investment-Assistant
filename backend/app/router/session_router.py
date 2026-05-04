@@ -3,14 +3,6 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from schemas.chat import (
-    MessageCreate,
-    MessageResponse,
-    SessionCreate,
-    SessionResponse,
-    SessionUpdate,
-    SessionWithMessagesResponse,
-)
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -18,6 +10,14 @@ from app.core.database import get_db
 from app.models.chat import ChatMessage, ChatSession
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
+from app.schemas.chat import (
+    MessageCreate,
+    MessageResponse,
+    SessionCreate,
+    SessionResponse,
+    SessionUpdate,
+    SessionWithMessagesResponse,
+)
 
 router = APIRouter(prefix="/sessions", tags=["会话管理"])
 
