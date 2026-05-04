@@ -93,6 +93,8 @@ _OBJECTIVE_SECTION6_GUIDANCE: dict[str, str] = {
         "recommended_position_size_pct 不超过风险容忍度上限的 60%;"
         "recommended_stop_loss_price 必须比建议入场价低不超过 5%;"
         "position_management_conditions 至少含 1 条止损触发条件。"
+        "§ 6 narrative 必须明确提及 capital_preservation 目标(如'基于您保本保值的投资目标' / "
+        "'capital_preservation 客户应优先保障本金安全'等)以及客户的保守型风险承受度。"
     ),
     "stable_growth": (
         "投资目标为 stable_growth(稳健增长):§ 6 建议取中性偏多——"
@@ -100,6 +102,7 @@ _OBJECTIVE_SECTION6_GUIDANCE: dict[str, str] = {
         "recommended_position_size_pct 按中等风险容忍度计算;"
         "stop_loss 距入场价 8-12%;"
         "position_management_conditions 至少含 1 条分批建仓 + 1 条止损条件。"
+        "§ 6 narrative 必须明确提及 stable_growth 目标(如'基于您稳健增长的投资目标'等)。"
     ),
     "balanced": (
         "投资目标为 balanced(均衡配置):§ 6 建议平衡收益与风险——"
@@ -107,6 +110,8 @@ _OBJECTIVE_SECTION6_GUIDANCE: dict[str, str] = {
         "recommended_position_size_pct 按 risk_tolerance 正常计算;"
         "stop_loss 距入场价 8-15%;"
         "position_management_conditions 覆盖加仓 / 减仓 / 止损三类。"
+        "§ 6 narrative 必须明确提及 balanced 均衡配置目标(如'基于您 balanced 均衡型的投资目标' / "
+        "'均衡配置策略下建议兼顾成长与防御'等)以及客户的 moderate 风险承受度。"
     ),
     "aggressive_growth": (
         "投资目标为 aggressive_growth(激进成长):§ 6 建议可偏进取——"
@@ -114,6 +119,8 @@ _OBJECTIVE_SECTION6_GUIDANCE: dict[str, str] = {
         "recommended_position_size_pct 按 risk_tolerance 上限计算;"
         "stop_loss 可设在入场价 12-20% 以下(成长型允许更大波动容忍);"
         "position_management_conditions 至少含 1 条上涨目标价分批减仓条件。"
+        "§ 6 narrative 必须明确提及 aggressive_growth 目标(如'基于您激进成长的投资目标' / "
+        "'aggressive_growth 客户可追求高成长弹性'等)以及客户的高风险容忍度。"
     ),
 }
 

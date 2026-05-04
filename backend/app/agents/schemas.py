@@ -176,7 +176,14 @@ class ChartSpec(BaseModel):
     y_axis: str | None = None
 
 
-CriticDimension = Literal["factuality", "coverage", "insight", "structure", "conciseness"]
+CriticDimension = Literal[
+    "factuality",
+    "coverage",
+    "insight",
+    "structure",
+    "conciseness",
+    "input_context_appropriateness",
+]
 
 
 class CriticDimensionScore(BaseModel):
@@ -198,6 +205,13 @@ class CriticReport(BaseModel):
     dimensions: list[CriticDimensionScore]
     overall_score: float = Field(ge=0.0, le=10.0)
     summary_markdown: str
+
+    def get_score(self, dimension: CriticDimension) -> float | None:
+        """Look up a single dimension score by name. Returns None if not found."""
+        for d in self.dimensions:
+            if d.dimension == dimension:
+                return d.score
+        return None
 
 
 class ResearchState(BaseModel):

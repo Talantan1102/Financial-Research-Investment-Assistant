@@ -31,6 +31,9 @@ from app.agents.critic import Critic
 from app.agents.critic_subagents.conciseness import ConcisenessScorer
 from app.agents.critic_subagents.coverage import CoverageScorer
 from app.agents.critic_subagents.factuality import FactualityScorer
+from app.agents.critic_subagents.input_context_scorer import (
+    InputContextAppropriatenessScorer,
+)
 from app.agents.critic_subagents.insight import InsightScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.data_collector import DataCollector
@@ -135,6 +138,7 @@ def _build_test_research_graph() -> Any:
         InsightScorer(llm=svc),
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
+        InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
     ]
     critic = Critic(llm=svc, scorers=scorers)
 

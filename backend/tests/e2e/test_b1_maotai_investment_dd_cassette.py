@@ -3,7 +3,7 @@
 Records one full research pipeline run:
   ResearchPlanner → DataCollector (all stub tools — no tool HTTP)
   → Analyst → Writer (InvestmentDueDiligenceReport JSON schema)
-  → Critic (x5) → investment_dd_renderer
+  → Critic (x6) → investment_dd_renderer
 
 LLM:     DashScope endpoint (DASHSCOPE_API_KEY in backend/.env).
 Tools:   All stub — no Milvus, no Bocha, no MockTushare HTTP calls.
@@ -15,8 +15,11 @@ Design note — why all stub tools (not real KB):
   call arrives before the Analyst's LLM call, VCR returns the wrong
   cassette entry. Stub tools (returning hardcoded data) produce 0 tool
   HTTP calls, making the cassette sequence deterministic:
-    [1] planner → [2] analyst → [3] writer → [4-8] 5 critics
+    [1] planner → [2] analyst → [3] writer → [4-9] 6 critics
   This is identical to test_research_agent_cassette.py's design choice.
+
+  v0.8.4: Added 6th Critic scorer (InputContextAppropriatenessScorer).
+  Cassette sequence is now 9 LLM calls (was 8).
 
   The investment report schema compliance (Writer + InvestmentDueDiligenceReport)
   is the primary value of this test. Real KB fidelity is tested separately
@@ -44,6 +47,9 @@ from app.agents.critic import Critic
 from app.agents.critic_subagents.conciseness import ConcisenessScorer
 from app.agents.critic_subagents.coverage import CoverageScorer
 from app.agents.critic_subagents.factuality import FactualityScorer
+from app.agents.critic_subagents.input_context_scorer import (
+    InputContextAppropriatenessScorer,
+)
 from app.agents.critic_subagents.insight import InsightScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.data_collector import DataCollector
@@ -260,8 +266,11 @@ def b1_graph(monkeypatch: pytest.MonkeyPatch) -> Any:
 
     All tool calls return hardcoded 茅台-relevant data. This produces 0 tool
     HTTP calls, making the cassette sequence exactly:
-      [1] planner LLM → [2] analyst LLM → [3] writer LLM → [4-8] 5 critic LLMs
+      [1] planner LLM → [2] analyst LLM → [3] writer LLM → [4-9] 6 critic LLMs
     No Milvus/embedding/Bocha/MockTushare calls in cassette.
+
+    v0.8.4: Added 6th critic (InputContextAppropriatenessScorer). Cassette has
+    9 LLM interactions (was 8). Re-recorded with --record-mode=once.
     """
     monkeypatch.setenv(
         "DASHSCOPE_API_KEY",
@@ -287,8 +296,9 @@ def b1_graph(monkeypatch: pytest.MonkeyPatch) -> Any:
         InsightScorer(llm=llm),
         StructureScorer(llm=llm),
         ConcisenessScorer(llm=llm),
+        InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer (v0.8.4)
     ]
-    critic = Critic(llm=llm, scorers=scorers)  # type: ignore[arg-type]
+    critic = Critic(llm=llm, scorers=scorers)
 
     return build_research_graph(
         planner=planner,

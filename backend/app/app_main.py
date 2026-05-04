@@ -110,6 +110,9 @@ def get_monitoring_service() -> "MonitoringService":
     from app.agents.critic_subagents.conciseness import ConcisenessScorer
     from app.agents.critic_subagents.coverage import CoverageScorer
     from app.agents.critic_subagents.factuality import FactualityScorer
+    from app.agents.critic_subagents.input_context_scorer import (
+        InputContextAppropriatenessScorer,
+    )
     from app.agents.critic_subagents.insight import InsightScorer
     from app.agents.critic_subagents.structure import StructureScorer
     from app.agents.data_collector import DataCollector
@@ -137,6 +140,7 @@ def get_monitoring_service() -> "MonitoringService":
         FactualityScorer(llm=llm),
         InsightScorer(llm=llm),
         StructureScorer(llm=llm),
+        InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer (v0.8.4)
     ]
     critic = Critic(llm=llm, scorers=scorers)
 
