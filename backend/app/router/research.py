@@ -61,7 +61,14 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
         if name == "analyst_node":
             return ResearchStreamEvent(type="insight", data={"name": name})
         if name == "writer_node":
-            return ResearchStreamEvent(type="report_chunk", data={"name": name})
+            # Extract report_markdown from node output so the frontend can
+            # render the full report incrementally in the progress overlay.
+            output: dict[str, Any] = ev.get("output") or {}
+            md: str = output.get("report_markdown") or ""
+            return ResearchStreamEvent(
+                type="report_chunk",
+                data={"name": name, "chunk": md},
+            )
         if name.startswith("scorer_"):
             return ResearchStreamEvent(type="critic_score", data={"scorer": name})
         if name == "LangGraph":

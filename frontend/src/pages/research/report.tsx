@@ -810,7 +810,7 @@ export default function ResearchReport() {
           className="report-left-sticky"
           style={{ flexShrink: 0 }}
         >
-          <ReportOutline report={report} />
+          <ReportOutline />
         </Col>
 
         {/* Center: report sections */}

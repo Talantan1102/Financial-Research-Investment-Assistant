@@ -6,7 +6,6 @@
  * SECTION_ANCHORS is in sectionAnchors.ts (separated for react-refresh compat).
  */
 
-import type { InvestmentDueDiligenceReport } from '@/types/research'
 import { SECTION_ANCHORS } from './sectionAnchors'
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -20,8 +19,6 @@ const TOKEN = {
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 interface ReportOutlineProps {
-  /** Reserved for future active-section highlighting */
-  report: InvestmentDueDiligenceReport
   style?: React.CSSProperties
   className?: string
 }

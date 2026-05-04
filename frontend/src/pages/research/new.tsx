@@ -20,7 +20,7 @@
  *   plan          → Planner running
  *   data_progress → DataCollector running + subtask progress
  *   insight       → Analyst running
- *   report_chunk  → Writer running
+ *   report_chunk  → Writer running + accumulate streamingMd (spec § 4.3)
  *   critic_score  → Critic done + CriticScores
  *   done          → navigate /research/:id
  *   error         → ErrorBanner agent_crash
@@ -64,6 +64,7 @@ import type {
 import AgentStatusSidebar from './components/AgentStatusSidebar'
 import CostLatencyMetrics from './components/CostLatencyMetrics'
 import ErrorBanner from './components/ErrorBanner'
+import Markdown from '@/components/markdown'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -206,6 +207,8 @@ export default function ResearchNew() {
   const [latencyMs, setLatencyMs] = useState(0)
   const [criticScores, setCriticScores] = useState<CriticScores | null>(null)
   const [progressError, setProgressError] = useState<ErrorState | null>(null)
+  // Streaming markdown: accumulated from report_chunk SSE events (spec § 4.3)
+  const [streamingMd, setStreamingMd] = useState('')
   const startTimeRef = useRef<number>(0)
   const latencyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -258,6 +261,7 @@ export default function ResearchNew() {
     setLatencyMs(0)
     setCriticScores(null)
     setProgressError(null)
+    setStreamingMd('')
     setSubmitting(false)
   }, [stopLatencyTicker])
 
@@ -271,6 +275,7 @@ export default function ResearchNew() {
       setLatencyMs(0)
       setCriticScores(null)
       setProgressError(null)
+      setStreamingMd('')
 
       const req: ResearchRequest = {
         target_ts_code: values.target_ts_code.trim(),
@@ -291,6 +296,14 @@ export default function ResearchNew() {
         (ev: SSEResearchEvent) => {
           // Update agent states
           setAgentStates((prev) => applySSEToAgentStates(prev, ev))
+
+          // spec § 4.3: accumulate streaming markdown from writer node
+          if (ev.type === 'report_chunk') {
+            const chunk = (ev.data['chunk'] as string | undefined) ?? ''
+            if (chunk) {
+              setStreamingMd((prev) => prev + chunk)
+            }
+          }
 
           // Extract cost if present in any event
           if (ev.data && typeof ev.data['cost_cny'] === 'number') {
@@ -441,7 +454,7 @@ export default function ResearchNew() {
             style={{ flex: '0 0 220px' }}
           />
 
-          {/* Message area */}
+          {/* Main area: streaming markdown (spec § 4.3) or placeholder */}
           <div
             style={{
               flex: '1 1 300px',
@@ -464,16 +477,30 @@ export default function ResearchNew() {
                 textTransform: 'uppercase',
               }}
             >
-              生成提示
+              {streamingMd ? '报告预览' : '生成提示'}
             </div>
-            <div style={{ fontSize: 13, color: TOKEN.textSecondary, lineHeight: 1.7 }}>
-              <p style={{ margin: 0 }}>
-                报告通常需要 2–5 分钟完成。生成完毕后将自动跳转到报告页面。
-              </p>
-              <p style={{ margin: '8px 0 0' }}>
-                如需终止并重新填写，请点击下方"取消"按钮。
-              </p>
-            </div>
+            {streamingMd ? (
+              <div
+                style={{
+                  maxHeight: '60vh',
+                  overflowY: 'auto',
+                  fontSize: 13,
+                  lineHeight: 1.7,
+                  color: TOKEN.textPrimary,
+                }}
+              >
+                <Markdown value={streamingMd} />
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: TOKEN.textSecondary, lineHeight: 1.7 }}>
+                <p style={{ margin: 0 }}>
+                  报告通常需要 2–5 分钟完成。生成完毕后将自动跳转到报告页面。
+                </p>
+                <p style={{ margin: '8px 0 0' }}>
+                  如需终止并重新填写，请点击下方"取消"按钮。
+                </p>
+              </div>
+            )}
             <div style={{ marginTop: 'auto' }}>
               <Button
                 onClick={handleReset}
