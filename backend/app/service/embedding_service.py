@@ -3,16 +3,11 @@ Embedding 服务 - 使用阿里 DashScope
 
 功能：
 1. generate_embedding - 使用 text-embedding-v4 生成向量
-2. rerank_similarity - 使用 DashScope Rerank 重排序
 """
 
 import os
 
-import numpy as np
 from dotenv import load_dotenv
-from llama_index.core.data_structs import Node
-from llama_index.core.schema import NodeWithScore
-from llama_index.postprocessor.dashscope_rerank import DashScopeRerank
 from openai import OpenAI
 
 load_dotenv()
@@ -91,38 +86,3 @@ def generate_embedding(
         return all_embeddings
 
     return None
-
-
-def rerank_similarity(query: str, texts: list[str], top_n: int = None) -> tuple[np.ndarray, None]:
-    """
-    使用 DashScope Rerank 对文本进行重排序
-
-    Args:
-        query: 查询文本
-        texts: 待排序的文本列表
-        top_n: 返回前N个结果（默认返回全部）
-
-    Returns:
-        (scores, None) - 分数数组和占位符
-    """
-    api_key = os.getenv("DASHSCOPE_API_KEY")
-
-    if not api_key:
-        print("错误: 缺少 DASHSCOPE_API_KEY 环境变量")
-        return np.array([]), None
-
-    top_n = top_n or len(texts)
-
-    # 创建节点列表
-    nodes = [NodeWithScore(node=Node(text=text), score=1.0) for text in texts]
-
-    # 初始化 DashScopeRerank
-    dashscope_rerank = DashScopeRerank(top_n=top_n, api_key=api_key)
-
-    # 执行重排序
-    results = dashscope_rerank.postprocess_nodes(nodes, query_str=query)
-
-    # 提取分数
-    scores = np.array([res.score for res in results])
-
-    return scores, None
