@@ -207,12 +207,6 @@ def _parse_plan(content: str) -> ResearchPlan:
     return ResearchPlan.model_validate(data)
 
 
-def _extract_target_or_default(user_message: str) -> str:
-    """Heuristic: 提取 .SH/.SZ 股票代码;否则返回空让 LLM 自己识别。"""
-    m = re.search(r"\b\d{6}\.(SH|SZ)\b", user_message)
-    return m.group(0) if m else ""
-
-
 class ResearchPlanner(Agent):
     name = "ResearchPlanner"
     model_tier: Tier = "balanced"

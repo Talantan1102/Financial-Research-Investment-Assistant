@@ -17,6 +17,7 @@ spec ref: docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md § 3
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Final
 
 from app.agents.base import Agent
 from app.agents.investment_dd_renderer import render_investment_dd_report_markdown
@@ -49,6 +50,8 @@ _RECOMMENDATION_FACTOR: dict[str, float] = {
     "recommend_sell": 0.0,
 }
 
+_SMALL_CAP_MARKET_CAP_THRESHOLD_CNY: Final[float] = 50_000_000_000.0
+
 
 def calc_recommended_position_size_pct(
     recommendation: Recommendation,
@@ -61,20 +64,19 @@ def calc_recommended_position_size_pct(
     Logic:
       base_pct = risk_ceiling(risk_tolerance) × recommendation_factor(recommendation)
 
-    Liquidity cap: if target_market_cap < 50B CNY (mid/small cap), reduce by 20%
-    to avoid potential liquidity issues for larger AUM clients.
+    Liquidity cap: if target_market_cap < 50B CNY (mid/small cap), reduce by 20%.
+    client_total_aum is used as a non-zero guard for the small-cap liquidity haircut.
+    target_market_cap triggers a 20% haircut when below the small-cap threshold.
 
     Returns a float in [0.0, 30.0] representing % of client_total_aum.
-    client_total_aum and target_market_cap are accepted for signature completeness
-    and future liquidity-based adjustments.
     """
     ceiling = _RISK_CEILING.get(risk_tolerance, 12.0)
     factor = _RECOMMENDATION_FACTOR.get(recommendation, 0.0)
     base_pct = ceiling * factor
 
-    # Liquidity adjustment: smaller-cap stocks warrant a 20% haircut for large AUM clients
-    _50B_CNY = 50_000_000_000.0
-    if target_market_cap < _50B_CNY and client_total_aum > 0:
+    # Liquidity adjustment: smaller-cap stocks warrant a 20% haircut
+    # to avoid potential liquidity issues for any non-zero AUM client when holding a small-cap position.
+    if target_market_cap < _SMALL_CAP_MARKET_CAP_THRESHOLD_CNY and client_total_aum > 0:
         base_pct = base_pct * 0.8
 
     return round(base_pct, 2)
@@ -142,7 +144,9 @@ def _build_section6_constraint_block(state: ResearchState) -> str:
     objective_block = _OBJECTIVE_SECTION6_GUIDANCE.get(
         objective, _OBJECTIVE_SECTION6_GUIDANCE["balanced"]
     )
-    horizon_hint = _HORIZON_HOLDING_PERIOD_HINT.get(investment_horizon, "medium_term")
+    horizon_hint = _HORIZON_HOLDING_PERIOD_HINT.get(
+        investment_horizon, _HORIZON_HOLDING_PERIOD_HINT["medium_term"]
+    )
 
     existing_str = (
         f"- client_existing_position(现有持仓): {existing_position:,.0f} CNY"
