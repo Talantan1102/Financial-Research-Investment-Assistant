@@ -312,7 +312,7 @@ async def test_b1_maotai_investment_dd_e2e_cassette(b1_graph: Any) -> None:
     v0.8.4 change:
       - Input: 6 structured fields (target_ts_code / client_total_aum /
         investment_objective / investment_horizon / risk_tolerance)
-      - Output: InvestmentDueDiligenceReport (from CreditInvestigationReport)
+      - Output: InvestmentDueDiligenceReport
       - investment_dd_renderer replaces credit_report_renderer
     """
     thread_id = "b1-maotai-investment-dd-test-1"

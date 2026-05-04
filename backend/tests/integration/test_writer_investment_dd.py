@@ -1,7 +1,4 @@
-"""L1 integration: Writer agent emits InvestmentDueDiligenceReport (v0.8.4).
-
-Replaces the former test_writer_credit_report.py (CreditInvestigationReport).
-"""
+"""L1 integration: Writer agent emits InvestmentDueDiligenceReport (v0.8.4)."""
 
 from __future__ import annotations
 

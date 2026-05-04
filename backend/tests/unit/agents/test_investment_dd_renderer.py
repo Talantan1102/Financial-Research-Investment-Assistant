@@ -84,3 +84,47 @@ def test_severity_zh_covers_all_literals() -> None:
     field = RiskItem.model_fields["severity"]
     literal_values = set(get_args(field.annotation))
     assert literal_values == set(_SEVERITY_ZH.keys())
+
+
+def test_includes_metric_table() -> None:
+    from app.agents.investment_dd_schema import FinancialMetric
+
+    report = minimal_valid_report()
+    report.financial_analysis.key_metrics = [
+        FinancialMetric(name="营业收入", value="819 亿元", period="2024 H1", yoy_change="+17%"),
+    ]
+    md = render_investment_dd_report_markdown(report)
+    assert "营业收入" in md
+    assert "819 亿元" in md
+
+
+def test_idempotent() -> None:
+    report = minimal_valid_report()
+    assert render_investment_dd_report_markdown(report) == render_investment_dd_report_markdown(
+        report
+    )
+
+
+def test_empty_key_metrics_renders_placeholder() -> None:
+    """FinancialAnalysis.key_metrics=[] should render a placeholder, not crash."""
+    report = minimal_valid_report()
+    report.financial_analysis.key_metrics = []
+    md = render_investment_dd_report_markdown(report)
+    assert "_暂无关键财务指标_" in md
+    assert "## § 3 财务分析" in md
+
+
+def test_includes_evidence_footnotes_per_section() -> None:
+    """Evidence chunk_ids from multiple sections must all appear as footnotes."""
+    report = minimal_valid_report()
+    md = render_investment_dd_report_markdown(report)
+    # Fixture uses maotai_2024::0 ... maotai_2024::5 across 6 sections
+    assert "maotai_2024::0" in md
+    assert "maotai_2024::5" in md
+
+
+def test_disclaimer_appears_in_output() -> None:
+    """Disclaimer text must contain both 'AI 模型' and '投资决策'."""
+    md = render_investment_dd_report_markdown(minimal_valid_report())
+    assert "AI 模型" in md
+    assert "投资决策" in md
