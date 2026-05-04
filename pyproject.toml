@@ -246,6 +246,7 @@ markers = [
     "eval: L3 — golden set + LLM-as-judge, LLM in live mode",
     "live_only: requires real LLM API (excluded from PR job)",
     "slow: takes > 5s (excluded from default `poe test`)",
+    "golden: B-3 dogfood golden cases — deterministic, no real API calls",
 ]
 
 [tool.poe.tasks]
