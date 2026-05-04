@@ -171,6 +171,34 @@ def test_create_customer_with_thresholds(client: TestClient) -> None:
 
 
 # ---------------------------------------------------------------------------
+# PUT /api/monitoring/customers/{cid}
+# ---------------------------------------------------------------------------
+
+
+def test_update_customer_success(client: TestClient, tmp_db: Path) -> None:
+    _insert_customer(tmp_db, "cid-upd", "002594.SZ", "比亚迪", "汽车")
+    resp = client.put(
+        "/api/monitoring/customers/cid-upd",
+        json={"name": "比亚迪股份", "enabled": False},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == "cid-upd"
+    assert body["name"] == "比亚迪股份"
+    assert body["enabled"] is False
+    # unchanged fields survive
+    assert body["industry"] == "汽车"
+
+
+def test_update_customer_404(client: TestClient) -> None:
+    resp = client.put(
+        "/api/monitoring/customers/nonexistent",
+        json={"name": "does not matter"},
+    )
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # DELETE /api/monitoring/customers/{cid}
 # ---------------------------------------------------------------------------
 

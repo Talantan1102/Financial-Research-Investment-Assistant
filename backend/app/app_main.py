@@ -208,6 +208,16 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     except Exception as e:
         logger.error(f"定时任务调度器启动失败: {e}")
 
+    # v0.8.3 — MonitoringService DI: always install the factory so that
+    # POST /api/monitoring/runs works regardless of MONITORING_SCHEDULER_ENABLED.
+    # The scheduler cron is still feature-flagged below.
+    try:
+        svc = get_monitoring_service()
+        logger.info("MonitoringService singleton initialised and factory installed")
+    except Exception as e:  # noqa: BLE001
+        svc = None
+        logger.warning("MonitoringService init failed (non-fatal): %s", e)
+
     # v0.8.3 — MonitoringScheduler (feature-flagged via MONITORING_SCHEDULER_ENABLED)
     # Default is "false" to keep test/CI environments safe.  Set to "true" in
     # production .env to activate the 16:30 + 17:00 cron scans.
@@ -216,11 +226,9 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         "1",
         "yes",
     )
-    if scheduler_enabled:
+    if scheduler_enabled and svc is not None:
         try:
             from app.services.monitoring.scheduler import MonitoringScheduler
-
-            svc = get_monitoring_service()
 
             db_path_for_sched = (
                 Path(__file__).resolve().parent.parent / "data" / "monitoring.sqlite"

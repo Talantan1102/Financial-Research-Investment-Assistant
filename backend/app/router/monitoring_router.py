@@ -22,13 +22,16 @@ Carryover (Task 15 instructions):
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/monitoring", tags=["monitoring"])
 
@@ -349,7 +352,10 @@ async def trigger_scan(payload: RunRequest, bg: BackgroundTasks) -> dict[str, An
     svc = _get_monitoring_service_fn()
 
     async def _run() -> None:
-        await svc.run_scan(payload.customer_ids, trigger_type="manual")
+        try:
+            await svc.run_scan(payload.customer_ids, trigger_type="manual")
+        except Exception as exc:
+            logger.error("monitoring run_scan failed in background task: %s", exc, exc_info=True)
 
     bg.add_task(_run)
     return {"customer_ids": payload.customer_ids, "status": "queued"}
@@ -363,7 +369,7 @@ async def trigger_scan(payload: RunRequest, bg: BackgroundTasks) -> dict[str, An
 @router.get("/alerts", response_model=dict[str, list[AlertSummaryOut]])
 def list_alerts(
     customer_id: str | None = None,
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=500),
 ) -> dict[str, list[AlertSummaryOut]]:
     """List alert summaries (no full report_json to keep response small)."""
     _ensure_db_exists()
