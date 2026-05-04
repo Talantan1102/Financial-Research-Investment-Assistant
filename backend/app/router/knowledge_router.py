@@ -5,7 +5,13 @@ import shutil
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
-from schemas.knowledge import (
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.knowledge import Document, KnowledgeBase
+from app.models.user import User
+from app.router.auth_router import get_current_user_required
+from app.schemas.knowledge import (
     DocumentResponse,
     DocumentUploadResponse,
     KnowledgeBaseCreate,
@@ -13,12 +19,6 @@ from schemas.knowledge import (
     KnowledgeBaseUpdate,
     KnowledgeBaseWithDocuments,
 )
-from sqlalchemy.orm import Session
-
-from app.core.database import get_db
-from app.models.knowledge import Document, KnowledgeBase
-from app.models.user import User
-from app.router.auth_router import get_current_user_required
 
 router = APIRouter(prefix="/knowledge-bases", tags=["知识库管理"])
 
