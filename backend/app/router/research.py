@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -66,14 +65,22 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
         if name.startswith("scorer_"):
             return ResearchStreamEvent(type="critic_score", data={"scorer": name})
         if name == "LangGraph":
-            # Only emit done for the outermost graph completion.
-            # The critic subgraph also emits name="LangGraph" but with
-            # non-empty parent_ids — those must be skipped to avoid
-            # duplicate done events.
-            parent_ids: list[str] = ev.get("parent_ids") or []
-            if not parent_ids:
-                return ResearchStreamEvent(type="done", data={})
+            # Outermost graph completion: parent_ids is empty.
+            # Critic subgraph also emits name="LangGraph" with non-empty
+            # parent_ids — those are skipped.
+            # We return None here; _stream_research detects this event itself
+            # so it can attach the real request_id to the done payload.
+            pass
     return None
+
+
+def _is_root_done_event(ev: dict[str, Any]) -> bool:
+    """Return True iff *ev* is the outermost LangGraph on_chain_end (done)."""
+    return (
+        ev.get("event") == "on_chain_end"
+        and ev.get("name") == "LangGraph"
+        and not (ev.get("parent_ids") or [])
+    )
 
 
 _RESEARCH_GRAPH_SINGLETON: Any = None
@@ -187,6 +194,12 @@ async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) ->
 
     try:
         async for ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
+            if _is_root_done_event(ev):
+                # Emit done with the real backend request_id so the frontend
+                # can navigate to the correct /research/<request_id> URL.
+                done_evt = ResearchStreamEvent(type="done", data={"request_id": request_id})
+                yield f"data: {done_evt.model_dump_json()}\n\n"
+                continue
             adapted = _adapt_event(ev)
             if adapted is not None:
                 yield f"data: {adapted.model_dump_json()}\n\n"
@@ -232,60 +245,58 @@ _MOCK_RUNS: list[ResearchRunSummary] = [
 def _read_research_runs_from_sqlite(db_path: Path, limit: int = 50) -> list[ResearchRunSummary]:
     """Read recent research runs from SqliteSaver checkpoint DB.
 
-    The SqliteSaver stores thread snapshots in the `checkpoints` table.
-    We join to `checkpoint_blobs` to fish out the ResearchState blob and
-    extract investment_report fields.  If the DB does not yet exist or the
-    table schema is unexpected, we fall back to mock data.
+    Uses the SqliteSaver.list() API (not raw SQL) so we are immune to
+    schema changes.  SqliteSaver.list(None) iterates all threads newest-first;
+    we filter to threads whose thread_id starts with 'research:' and extract
+    the 'investment_report' field from channel_values.
+
+    Returns an empty list when the DB is absent or no research threads exist.
+    Falls back to [] (not mock) — callers apply the mock fallback.
 
     TODO(Task 7 dogfood): replace mock fallback with proper error once we have
     real runs stored post-dogfood.
     """
     import sqlite3
 
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
     try:
         if not db_path.exists():
             return []
 
         conn = sqlite3.connect(str(db_path), check_same_thread=False)
-        cursor = conn.cursor()
-
-        # SqliteSaver v1 schema: table `checkpoints` with columns
-        # (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata)
-        # and `checkpoint_blobs` with (thread_id, checkpoint_ns, channel, type, blob).
-        # We look for the latest checkpoint per research thread_id and extract
-        # the `investment_report` channel blob.
-        cursor.execute(
-            """
-            SELECT c.thread_id, cb.blob
-            FROM checkpoints c
-            JOIN checkpoint_blobs cb ON cb.thread_id = c.thread_id
-            WHERE c.thread_id LIKE 'research:%'
-              AND cb.channel = 'investment_report'
-              AND cb.type = 'json'
-            ORDER BY c.checkpoint_id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        )
-        rows = cursor.fetchall()
-        conn.close()
+        saver = SqliteSaver(conn)
 
         results: list[ResearchRunSummary] = []
         seen_thread_ids: set[str] = set()
-        for thread_id, blob in rows:
+
+        # list(None) yields all checkpoints across all threads, newest-first.
+        for ct in saver.list(None, limit=limit * 10):  # over-fetch to get one per thread
+            thread_id: str = ct.config.get("configurable", {}).get("thread_id", "")
+            if not thread_id.startswith("research:"):
+                continue
             if thread_id in seen_thread_ids:
+                # Already captured the latest checkpoint for this thread.
                 continue
             seen_thread_ids.add(thread_id)
+
+            report = ct.checkpoint.get("channel_values", {}).get("investment_report")
+            if report is None:
+                continue
+
             try:
-                report_data = json.loads(blob)
-                request_id = report_data.get("request_id", thread_id)
-                target_name = report_data.get("target_name", "")
-                target_ts_code = report_data.get("target_ts_code", "")
-                generated_at = str(report_data.get("generated_at", ""))
-                # TL;DR: use investment_recommendation.narrative first 80 chars
-                rec = report_data.get("investment_recommendation", {})
-                recommendation = rec.get("recommendation", "")
-                narrative = rec.get("narrative", "")
+                # report is already a deserialized dict (SqliteSaver deserializes blobs).
+                if not isinstance(report, dict):
+                    report = report.model_dump() if hasattr(report, "model_dump") else {}
+                request_id = str(report.get("request_id", thread_id))
+                target_name = str(report.get("target_name", ""))
+                target_ts_code = str(report.get("target_ts_code", ""))
+                generated_at = str(report.get("generated_at", ""))
+                rec = report.get("investment_recommendation") or {}
+                if not isinstance(rec, dict):
+                    rec = rec.model_dump() if hasattr(rec, "model_dump") else {}
+                recommendation = str(rec.get("recommendation", ""))
+                narrative = str(rec.get("narrative", ""))
                 tldr = narrative[:80] + ("…" if len(narrative) > 80 else "")
                 results.append(
                     ResearchRunSummary(
@@ -299,6 +310,11 @@ def _read_research_runs_from_sqlite(db_path: Path, limit: int = 50) -> list[Rese
                 )
             except Exception:
                 continue
+
+            if len(results) >= limit:
+                break
+
+        conn.close()
         return results
 
     except Exception:
@@ -329,35 +345,44 @@ async def list_research_runs(
 async def get_research_report(run_id: str) -> Any:
     """GET /api/v0.5/research/{run_id} — fetch a full InvestmentDueDiligenceReport.
 
-    Looks up the checkpoint thread matching the given run_id (request_id)
-    and returns the serialised InvestmentDueDiligenceReport.
+    Uses the SqliteSaver.get_tuple() API to look up the latest checkpoint for
+    the thread_id 'research:<user>:<run_id>' (or a LIKE scan across all research
+    threads when the full thread_id is unknown).
 
-    TODO(Task 7 dogfood): implement proper lookup once real runs are stored.
+    TODO(Task 7 dogfood): consider exposing thread_id directly so we can skip
+    the scan.
     """
     db_path = Path("backend/data/research.sqlite")
     try:
         if db_path.exists():
             import sqlite3
 
+            from langgraph.checkpoint.sqlite import SqliteSaver
+
             conn = sqlite3.connect(str(db_path), check_same_thread=False)
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                SELECT cb.blob
-                FROM checkpoints c
-                JOIN checkpoint_blobs cb ON cb.thread_id = c.thread_id
-                WHERE cb.channel = 'investment_report'
-                  AND cb.type = 'json'
-                  AND (c.thread_id LIKE ? OR cb.blob LIKE ?)
-                ORDER BY c.checkpoint_id DESC
-                LIMIT 1
-                """,
-                (f"%{run_id}%", f'%"request_id": "{run_id}"%'),
-            )
-            row = cursor.fetchone()
+            saver = SqliteSaver(conn)
+
+            # Strategy: scan all research threads for one whose thread_id
+            # contains run_id or whose investment_report.request_id == run_id.
+            # list(None) yields newest-first so the first hit is the latest.
+            for ct in saver.list(None):
+                thread_id: str = ct.config.get("configurable", {}).get("thread_id", "")
+                if not thread_id.startswith("research:"):
+                    continue
+
+                report = ct.checkpoint.get("channel_values", {}).get("investment_report")
+                if report is None:
+                    continue
+
+                if not isinstance(report, dict):
+                    report = report.model_dump() if hasattr(report, "model_dump") else {}
+
+                # Match by run_id in thread_id or in report.request_id.
+                if run_id in thread_id or str(report.get("request_id", "")) == run_id:
+                    conn.close()
+                    return report
+
             conn.close()
-            if row:
-                return json.loads(row[0])
     except Exception:
         logger.exception("Failed to fetch research report %s from sqlite", run_id)
 

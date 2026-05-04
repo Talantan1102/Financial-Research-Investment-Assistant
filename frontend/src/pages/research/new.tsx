@@ -32,7 +32,6 @@ import {
   autocompleteTsCode,
   submitResearch,
 } from '@/api/research'
-import type { TsCodeSuggestion } from '@/api/research'
 import {
   INVESTMENT_HORIZON_LABELS,
   INVESTMENT_OBJECTIVE_LABELS,
@@ -44,6 +43,7 @@ import type {
   ResearchRequest,
   RiskTolerance,
   SSEResearchEvent,
+  TsCodeSuggestion,
 } from '@/types/research'
 
 const { Title, Text } = Typography
@@ -93,20 +93,22 @@ export default function ResearchNew() {
   const [submitting, setSubmitting] = useState(false)
   const [suggestions, setSuggestions] = useState<TsCodeSuggestion[]>([])
   const abortRef = useRef<(() => void) | null>(null)
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // ── AutoComplete: fetch suggestions on input change ─────────────────────────
-  const handleTsCodeSearch = useCallback(async (value: string) => {
+  // ── AutoComplete: fetch suggestions on input change (250ms debounce) ─────────
+  const handleTsCodeSearch = useCallback((value: string) => {
+    if (searchTimerRef.current !== null) {
+      clearTimeout(searchTimerRef.current)
+    }
     if (!value || value.length < 1) {
       setSuggestions([])
       return
     }
-    try {
-      const results = await autocompleteTsCode(value)
-      setSuggestions(results)
-    } catch {
-      // Network errors silently ignored; user can type ts_code manually.
-      setSuggestions([])
-    }
+    searchTimerRef.current = setTimeout(() => {
+      void autocompleteTsCode(value).then(setSuggestions).catch(() => {
+        setSuggestions([])
+      })
+    }, 250)
   }, [])
 
   const autoCompleteOptions = suggestions.map((s) => ({
@@ -116,7 +118,7 @@ export default function ResearchNew() {
 
   // ── Form submit ─────────────────────────────────────────────────────────────
   const handleSubmit = useCallback(
-    async (values: FormValues) => {
+    (values: FormValues) => {
       setSubmitting(true)
 
       const req: ResearchRequest = {
@@ -129,36 +131,25 @@ export default function ResearchNew() {
         user_message: values.user_message?.trim() || undefined,
       }
 
-      // We use submitResearch and navigate to the report page as soon as the
-      // first event arrives (request_id is embedded in the done event).
-      // For now we navigate eagerly with a generated local ID and let the
-      // report page pick up the SSE stream.
-      //
-      // Strategy: generate a client-side run ID from timestamp, start the
-      // stream in background, navigate to /research/:id immediately so the
-      // report page (Task 6) can hook into the same stream via context or
-      // re-subscribe. This matches spec § 4.2 "提交 → 跳 /research/:id".
-      //
-      // The run ID used here is a short slug the report page uses as
-      // session_id for the SSE subscription re-open if needed.
-      const runId = `run-${Date.now().toString(36)}`
-
       // Abort any in-flight request before starting a new one.
       abortRef.current?.()
 
-      let navigated = false
-
+      // Strategy (I-1 fix): wait for the backend `done` event which carries
+      // the real request_id (e.g. "research-a3f8c2"), then navigate to
+      // /research/<request_id>.  This avoids the client-slug ↔ backend-ID
+      // mismatch that would cause GET /api/v0.5/research/:id to 404.
       const { abort } = submitResearch(
         req,
         (ev: SSEResearchEvent) => {
-          if (!navigated) {
-            navigated = true
-            void navigate(`/research/${runId}`, {
-              state: { req, runId },
-            })
+          if (ev.type === 'done' && ev.data && 'request_id' in ev.data) {
+            const backendId = ev.data.request_id as string
+            if (backendId) {
+              setSubmitting(false)
+              void navigate(`/research/${backendId}`, { state: { req } })
+            }
           }
-          // Subsequent events handled by the report page (Task 6).
           if (ev.type === 'error') {
+            setSubmitting(false)
             void message.error('尽调过程出错，请重试')
           }
         },
@@ -169,16 +160,6 @@ export default function ResearchNew() {
       )
 
       abortRef.current = abort
-
-      // Navigate immediately even if stream takes time to start.
-      if (!navigated) {
-        navigated = true
-        void navigate(`/research/${runId}`, {
-          state: { req, runId },
-        })
-      }
-
-      // Note: setSubmitting(false) is handled by the report page after done event.
     },
     [navigate],
   )
@@ -284,7 +265,7 @@ export default function ResearchNew() {
               formatter={(v) =>
                 v ? `¥ ${String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}` : ''
               }
-              parser={(v) => Number(String(v).replace(/¥\s?|(,*)/g, '')) as 5000000}
+              parser={(v) => Number(String(v).replace(/¥\s?|(,*)/g, '')) as number}
             />
           </Form.Item>
 
@@ -308,7 +289,7 @@ export default function ResearchNew() {
               formatter={(v) =>
                 v ? `¥ ${String(v).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}` : ''
               }
-              parser={(v) => Number(String(v).replace(/¥\s?|(,*)/g, '')) as 0}
+              parser={(v) => Number(String(v).replace(/¥\s?|(,*)/g, '')) as number}
             />
           </Form.Item>
 

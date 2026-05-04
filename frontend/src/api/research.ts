@@ -6,8 +6,12 @@
 import type {
   InvestmentDueDiligenceReport,
   ResearchRequest,
+  ResearchRunSummary,
   SSEResearchEvent,
+  TsCodeSuggestion,
 } from '@/types/research'
+
+export type { ResearchRunSummary, TsCodeSuggestion }
 
 // ── API base (resolves via Vite proxy VITE_API_BASE) ─────────────────────────
 
@@ -17,17 +21,6 @@ function apiUrl(path: string): string {
   // Remove trailing slash from base, ensure leading slash on path.
   const base = (API_BASE ?? '').replace(/\/$/, '')
   return `${base}${path}`
-}
-
-// ── Run summary (returned by listResearchRuns) ────────────────────────────────
-
-export interface ResearchRunSummary {
-  id: string // request_id
-  target_name: string
-  target_ts_code: string
-  generated_at: string
-  tldr: string
-  recommendation: string
 }
 
 // ── REST helpers ──────────────────────────────────────────────────────────────
@@ -136,11 +129,6 @@ export function submitResearch(
 }
 
 // ── Autocomplete ──────────────────────────────────────────────────────────────
-
-export interface TsCodeSuggestion {
-  ts_code: string
-  name: string
-}
 
 /**
  * GET /api/v0.5/tushare/stock_basic_search?prefix=... — ts_code autocomplete.

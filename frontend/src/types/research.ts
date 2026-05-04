@@ -154,6 +154,24 @@ export interface InvestmentDueDiligenceReport {
   disclaimer: string
 }
 
+// ── Run summary (returned by listResearchRuns) ────────────────────────────────
+
+export interface ResearchRunSummary {
+  id: string // request_id
+  target_name: string
+  target_ts_code: string
+  generated_at: string
+  tldr: string
+  recommendation: string
+}
+
+// ── Autocomplete suggestion ───────────────────────────────────────────────────
+
+export interface TsCodeSuggestion {
+  ts_code: string
+  name: string
+}
+
 // ── SSE event (mirrors ResearchStreamEvent in router/research.py) ─────────────
 
 export interface SSEResearchEvent {
