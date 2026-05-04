@@ -27,7 +27,6 @@ from pydantic import BaseModel
 
 _PROXY_IP_PATTERN = re.compile(r"47\.109\.59\.144")
 _HTTP_PROXY_PATTERN = re.compile(r"http://47\.109[^\s]*")
-_FIELD_TRUNCATE = 500  # chars — per-field cap for explanation snippets
 MAX_BODY_CHARS = 50_000  # overall body cap
 
 
@@ -111,10 +110,18 @@ class RealEmailNotifier:
             msg.add_alternative(clean_html, subtype="html")
 
         def _send() -> None:
-            smtp_cls = smtplib.SMTP_SSL if self._use_tls else smtplib.SMTP
-            with smtp_cls(self._host, self._port) as smtp:
-                smtp.login(self._user, self._password)
-                smtp.send_message(msg)
+            if self._use_tls:
+                with smtplib.SMTP_SSL(self._host, self._port) as smtp:
+                    smtp.login(self._user, self._password)
+                    smtp.send_message(msg)
+            else:
+                with smtplib.SMTP(self._host, self._port) as smtp:
+                    # starttls() upgrades plain SMTP to TLS — required to avoid
+                    # plaintext credentials.  Use smtplib.SMTP_SSL for implicit
+                    # TLS (port 465).
+                    smtp.starttls()
+                    smtp.login(self._user, self._password)
+                    smtp.send_message(msg)
 
         try:
             await asyncio.to_thread(_send)

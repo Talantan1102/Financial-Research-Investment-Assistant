@@ -101,7 +101,7 @@ async def test_real_notifier_uses_smtp() -> None:
 
 @pytest.mark.asyncio
 async def test_real_notifier_no_tls_uses_smtp() -> None:
-    """use_tls=False should branch to smtplib.SMTP instead of SMTP_SSL."""
+    """use_tls=False should branch to smtplib.SMTP with STARTTLS upgrade before login."""
     fake_smtp = MagicMock()
     fake_smtp.__enter__ = MagicMock(return_value=fake_smtp)
     fake_smtp.__exit__ = MagicMock(return_value=False)
@@ -119,6 +119,9 @@ async def test_real_notifier_no_tls_uses_smtp() -> None:
         result = await n.send(to_addrs=["a@b.com"], subject="s", body_text="hi")
 
     assert result.success
+    # starttls() must be called before login() to avoid plaintext credential transmission
+    fake_smtp.starttls.assert_called_once()
+    fake_smtp.login.assert_called_once_with("u@t.com", "x")
     fake_smtp.send_message.assert_called_once()
 
 
