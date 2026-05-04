@@ -135,7 +135,7 @@ function SectionCard({ id, title, children }: SectionCardProps) {
           borderColor: TOKEN.borderColor,
           borderRadius: 10,
         }}
-        bodyStyle={{ padding: '24px 28px' }}
+        styles={{ body: { padding: '24px 28px' } }}
       >
         <Title
           level={4}
@@ -410,14 +410,14 @@ function RiskItemCard({ item }: { item: RiskItem }) {
 }
 
 // ── § 5 Risk Assessment ───────────────────────────────────────────────────────
-function Section5({ data }: { data: InvestmentDueDiligenceReport['risk_assessment'] }) {
-  const allRisks = [
-    ...data.market_risk,
-    ...data.growth_risk,
-    ...data.event_risk,
-    ...data.valuation_risk,
-  ]
+const RISK_CATEGORIES: { key: keyof Pick<InvestmentDueDiligenceReport['risk_assessment'], 'market_risk' | 'growth_risk' | 'event_risk' | 'valuation_risk'>; label: string }[] = [
+  { key: 'market_risk', label: '市场风险' },
+  { key: 'growth_risk', label: '成长风险' },
+  { key: 'event_risk', label: '事件风险' },
+  { key: 'valuation_risk', label: '估值风险' },
+]
 
+function Section5({ data }: { data: InvestmentDueDiligenceReport['risk_assessment'] }) {
   return (
     <SectionCard id={SECTION_ANCHORS[4].id} title={SECTION_ANCHORS[4].label}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
@@ -431,9 +431,20 @@ function Section5({ data }: { data: InvestmentDueDiligenceReport['risk_assessmen
       </div>
       <Markdown value={data.narrative} />
       <div style={{ marginTop: 16 }}>
-        {allRisks.map((item, i) => (
-          <RiskItemCard key={i} item={item} />
-        ))}
+        {RISK_CATEGORIES.map(({ key, label }) => {
+          const items = data[key] as RiskItem[]
+          if (!items || items.length === 0) return null
+          return (
+            <div key={key} style={{ marginBottom: 16 }}>
+              <h4 style={{ marginTop: 16, marginBottom: 8, fontSize: 14, color: TOKEN.textSecondary, fontWeight: 600 }}>
+                {label}
+              </h4>
+              {items.map((item, i) => (
+                <RiskItemCard key={i} item={item} />
+              ))}
+            </div>
+          )
+        })}
       </div>
     </SectionCard>
   )

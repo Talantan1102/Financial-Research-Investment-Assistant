@@ -563,7 +563,7 @@ export default function ResearchNew() {
           borderRadius: 10,
           backgroundColor: TOKEN.cardBg,
         }}
-        bodyStyle={{ padding: '28px 32px' }}
+        styles={{ body: { padding: '28px 32px' } }}
       >
         <Form<FormValues>
           form={form}
