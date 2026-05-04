@@ -59,6 +59,8 @@ dependencies = [
     "mcp>=1.0",
     # Stock data
     "tushare>=1.4",
+    # v0.8.3 — monitoring scheduler
+    "apscheduler>=3.11",
 ]
 
 [project.optional-dependencies]
