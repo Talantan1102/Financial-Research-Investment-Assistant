@@ -88,7 +88,7 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
 
 
 def _planner_router(state: _CriticSubState) -> list[Send]:
-    """Fan-out to 6 scorer nodes via Send API."""
+    """Fan-out to 7 scorer nodes via Send API."""
     payload = state.model_dump()
     return [
         Send("scorer_factuality", payload),
@@ -97,6 +97,7 @@ def _planner_router(state: _CriticSubState) -> list[Send]:
         Send("scorer_structure", payload),
         Send("scorer_conciseness", payload),
         Send("scorer_input_context", payload),
+        Send("scorer_plan_correctness", payload),
     ]
 
 
@@ -121,6 +122,10 @@ def build_critic_subgraph(critic: Critic) -> Any:
         "scorer_input_context",
         _scorer_node_factory(critic, "InputContextAppropriatenessScorer"),
     )
+    g.add_node(
+        "scorer_plan_correctness",
+        _scorer_node_factory(critic, "PlanCorrectnessScorer"),
+    )
     g.add_node("aggregate", _aggregate_node)
 
     g.add_conditional_edges(
@@ -133,6 +138,7 @@ def build_critic_subgraph(critic: Critic) -> Any:
             "scorer_structure",
             "scorer_conciseness",
             "scorer_input_context",
+            "scorer_plan_correctness",
         ],
     )
     for n in [
@@ -142,6 +148,7 @@ def build_critic_subgraph(critic: Critic) -> Any:
         "scorer_structure",
         "scorer_conciseness",
         "scorer_input_context",
+        "scorer_plan_correctness",
     ]:
         g.add_edge(n, "aggregate")
     g.add_edge("aggregate", END)

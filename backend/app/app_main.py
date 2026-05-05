@@ -114,6 +114,7 @@ def get_monitoring_service() -> "MonitoringService":
         InputContextAppropriatenessScorer,
     )
     from app.agents.critic_subagents.insight import InsightScorer
+    from app.agents.critic_subagents.plan_correctness_scorer import PlanCorrectnessScorer
     from app.agents.critic_subagents.structure import StructureScorer
     from app.agents.data_collector import DataCollector
     from app.agents.research_planner import ResearchPlanner
@@ -141,6 +142,7 @@ def get_monitoring_service() -> "MonitoringService":
         InsightScorer(llm=llm),
         StructureScorer(llm=llm),
         InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer (v0.8.4)
+        PlanCorrectnessScorer(llm=llm),  # 第 7 scorer (v0.8.5)
     ]
     critic = Critic(llm=llm, scorers=scorers)
 

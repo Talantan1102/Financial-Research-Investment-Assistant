@@ -1,4 +1,4 @@
-"""L0 — critic_subgraph builds, runs 6 scorers (v0.8.4), returns CriticReport."""
+"""L0 — critic_subgraph builds, runs 7 scorers (v0.8.5), returns CriticReport."""
 
 from typing import Any
 
@@ -12,6 +12,7 @@ from app.agents.critic_subagents.input_context_scorer import (
     InputContextAppropriatenessScorer,
 )
 from app.agents.critic_subagents.insight import InsightScorer
+from app.agents.critic_subagents.plan_correctness_scorer import PlanCorrectnessScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.schemas import CriticReport
 from app.orchestration.critic_subgraph import build_critic_subgraph
@@ -20,10 +21,10 @@ from app.services.llm_service import LLMService
 
 
 @pytest.mark.asyncio
-async def test_critic_subgraph_runs_6_scorers(
+async def test_critic_subgraph_runs_7_scorers(
     mock_llm_client: MockLLMClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """v0.8.4: subgraph now orchestrates 6 scorers (5 original + input_context_appropriateness)."""
+    """v0.8.5: subgraph orchestrates 7 scorers (6 v0.8.4 + plan_correctness)."""
     monkeypatch.setenv("LLM_MODE", "mock")
     svc = LLMService(client=mock_llm_client)
     scorers: list[Agent] = [
@@ -33,6 +34,7 @@ async def test_critic_subgraph_runs_6_scorers(
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
         InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
+        PlanCorrectnessScorer(llm=svc),  # 第 7 scorer (v0.8.5)
     ]
     critic = Critic(llm=svc, scorers=scorers)
     sub_app = build_critic_subgraph(critic)
@@ -44,7 +46,7 @@ async def test_critic_subgraph_runs_6_scorers(
         "request_id": "req-test1234",
         "report_markdown": "# 测试研报",
         "insights": [],
-        "plan": None,
+        "plan": None,  # PlanCorrectnessScorer short-circuits to score=0 when plan is None
         "tool_results": [],
         "collected_scores": [],
         # v0.8.4 — 6 structured input fields (needed by InputContextAppropriatenessScorer)
@@ -60,9 +62,14 @@ async def test_critic_subgraph_runs_6_scorers(
     report = final["critic_report"]
     assert isinstance(report, CriticReport)
     n = len(report.dimensions)
-    assert n == 6, f"Expected 6 dimensions (5 original + input_context_appropriateness), got {n}"
+    assert n == 7, f"Expected 7 dimensions (6 v0.8.4 + plan_correctness), got {n}"
 
     # Verify input_context_appropriateness dimension is present
     ic_score = report.get_score("input_context_appropriateness")
     assert ic_score is not None, "input_context_appropriateness must be in critic_report.dimensions"
     assert 0.0 <= ic_score <= 10.0
+
+    # Verify plan_correctness dimension is present (v0.8.5)
+    pc_score = report.get_score("plan_correctness")
+    assert pc_score is not None, "plan_correctness must be in critic_report.dimensions"
+    assert 0.0 <= pc_score <= 10.0
