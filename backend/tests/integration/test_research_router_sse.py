@@ -412,6 +412,78 @@ def test_research_stream_event_schema_validation() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Metadata / progress timeline regression tests (dogfood UX fix)
+# ---------------------------------------------------------------------------
+
+
+def test_research_sse_plan_event_has_summary_and_subtasks(test_client: TestClient) -> None:
+    """plan event must include 'summary' (str) and 'subtasks' (list[str]) metadata.
+
+    Verifies the dogfood UX fix: _adapt_event now extracts ResearchPlan.subtasks
+    from the node output and attaches them to the plan event data so the frontend
+    progress timeline can display '已规划 N 个子任务' + subtask descriptions.
+    """
+    events = _collect_sse_events(
+        test_client.post(
+            "/api/v0.5/research",
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
+        ).content
+    )
+    plan_events = [e for e in events if e["type"] == "plan"]
+    assert plan_events, "Expected at least one plan event"
+    ev_data = plan_events[0]["data"]
+    assert "summary" in ev_data, f"plan event data missing 'summary': {ev_data}"
+    assert isinstance(ev_data["summary"], str), (
+        f"summary must be str, got {type(ev_data['summary'])}"
+    )
+    assert "subtasks" in ev_data, f"plan event data missing 'subtasks': {ev_data}"
+    assert isinstance(ev_data["subtasks"], list), (
+        f"subtasks must be list, got {type(ev_data['subtasks'])}"
+    )
+    # summary should mention N tasks
+    assert "个子任务" in ev_data["summary"], (
+        f"summary should say '已规划 N 个子任务': {ev_data['summary']}"
+    )
+
+
+def test_research_sse_data_progress_event_has_summary_and_tools(test_client: TestClient) -> None:
+    """data_progress event must include 'summary' (str) and 'tools' (list[str]) metadata.
+
+    Verifies the dogfood UX fix: _adapt_event now extracts ToolResult.tool_name list
+    from data_collector_node output and attaches them to data_progress event data
+    so the frontend can display '已采集 N 项数据'.
+    """
+    events = _collect_sse_events(
+        test_client.post(
+            "/api/v0.5/research",
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
+        ).content
+    )
+    dp_events = [e for e in events if e["type"] == "data_progress"]
+    assert dp_events, "Expected at least one data_progress event"
+    ev_data = dp_events[0]["data"]
+    assert "summary" in ev_data, f"data_progress event missing 'summary': {ev_data}"
+    assert isinstance(ev_data["summary"], str), "summary must be str"
+    assert "tools" in ev_data, f"data_progress event missing 'tools': {ev_data}"
+    assert isinstance(ev_data["tools"], list), f"tools must be list, got {type(ev_data['tools'])}"
+    assert "已采集" in ev_data["summary"], (
+        f"summary should say '已采集 N 项数据': {ev_data['summary']}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Regression tests: AsyncSqliteSaver checkpointer + astream_events path
 # ---------------------------------------------------------------------------
 

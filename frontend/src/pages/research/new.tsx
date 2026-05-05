@@ -38,6 +38,7 @@ import {
   Typography,
   Input,
   message,
+  Collapse,
 } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import {
@@ -64,10 +65,25 @@ import type {
 import AgentStatusSidebar from './components/AgentStatusSidebar'
 import CostLatencyMetrics from './components/CostLatencyMetrics'
 import ErrorBanner from './components/ErrorBanner'
+import ProgressTimeline from './components/ProgressTimeline'
+import type { TimelineEntry } from './components/ProgressTimeline'
 import Markdown from '@/components/markdown'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
+const { Panel } = Collapse
+
+// ── Agent display labels (for timeline) ──────────────────────────────────────
+const AGENT_TIMELINE_LABELS: Record<string, string> = {
+  research_planner_node: '规划师',
+  data_collector_node: '数据采集',
+  analyst_node: '分析师',
+  writer_node: '撰写师',
+}
+
+function scorerLabel(scorer: string): string {
+  return scorer.replace('scorer_', '').replace(/_/g, ' ')
+}
 
 // ── Design tokens (aligned with monitoring page) ──────────────────────────────
 const TOKEN = {
@@ -209,6 +225,8 @@ export default function ResearchNew() {
   const [progressError, setProgressError] = useState<ErrorState | null>(null)
   // Streaming markdown: accumulated from report_chunk SSE events (spec § 4.3)
   const [streamingMd, setStreamingMd] = useState('')
+  // Progress timeline entries for UX timeline display
+  const [timelineEntries, setTimelineEntries] = useState<TimelineEntry[]>([])
   const startTimeRef = useRef<number>(0)
   const latencyTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -262,6 +280,7 @@ export default function ResearchNew() {
     setCriticScores(null)
     setProgressError(null)
     setStreamingMd('')
+    setTimelineEntries([])
     setSubmitting(false)
   }, [stopLatencyTicker])
 
@@ -276,6 +295,7 @@ export default function ResearchNew() {
       setCriticScores(null)
       setProgressError(null)
       setStreamingMd('')
+      setTimelineEntries([])
 
       const req: ResearchRequest = {
         target_ts_code: values.target_ts_code.trim(),
@@ -296,6 +316,45 @@ export default function ResearchNew() {
         (ev: SSEResearchEvent) => {
           // Update agent states
           setAgentStates((prev) => applySSEToAgentStates(prev, ev))
+
+          // Push timeline entry for progress UX (dogfood fix)
+          {
+            const elapsedSec = (Date.now() - startTimeRef.current) / 1000
+            let entry: TimelineEntry | null = null
+            if (ev.type === 'plan') {
+              const summary = (ev.data['summary'] as string | undefined) ?? '规划完成'
+              const subtasks = (ev.data['subtasks'] as string[] | undefined) ?? []
+              entry = { elapsedSec, agentLabel: '规划师', summary, bullets: subtasks, done: true }
+            } else if (ev.type === 'data_progress') {
+              const summary = (ev.data['summary'] as string | undefined) ?? '数据采集完成'
+              const tools = (ev.data['tools'] as string[] | undefined) ?? []
+              entry = { elapsedSec, agentLabel: '数据采集', summary, bullets: tools, done: true }
+            } else if (ev.type === 'insight') {
+              const summary = (ev.data['summary'] as string | undefined) ?? '分析完成'
+              entry = { elapsedSec, agentLabel: '分析师', summary, done: true }
+            } else if (ev.type === 'report_chunk') {
+              // Only push once (first report_chunk)
+              entry = { elapsedSec, agentLabel: '撰写师', summary: '完整报告生成完毕', done: true }
+            } else if (ev.type === 'critic_score') {
+              const scorer = (ev.data['scorer'] as string | undefined) ?? ''
+              const label = scorerLabel(scorer)
+              const summary = (ev.data['summary'] as string | undefined) ?? `${label} 评分完成`
+              entry = { elapsedSec, agentLabel: '评审官', summary, done: true }
+            } else if (ev.type === 'done') {
+              entry = { elapsedSec, agentLabel: '完成', summary: '报告生成完毕，即将跳转...', done: true }
+            }
+            if (entry !== null) {
+              // For report_chunk: only push the first one to avoid duplicates
+              if (ev.type === 'report_chunk') {
+                setTimelineEntries((prev) => {
+                  const hasWriter = prev.some((e) => e.agentLabel === '撰写师')
+                  return hasWriter ? prev : [...prev, entry as TimelineEntry]
+                })
+              } else {
+                setTimelineEntries((prev) => [...prev, entry as TimelineEntry])
+              }
+            }
+          }
 
           // spec § 4.3: accumulate streaming markdown from writer node
           if (ev.type === 'report_chunk') {
@@ -386,16 +445,23 @@ export default function ResearchNew() {
 
   // ── Render: progress overlay ─────────────────────────────────────────────
   if (inProgress) {
+    const latencySec = (latencyMs / 1000).toFixed(1)
+    // TODO(v0.8.5): attach cumulative cost from LLMService; currently no per-request
+    // cost accumulator is exposed from the backend streaming path. Cost stays ¥0.
+    const costDisplay = costCny.toFixed(4)
+
     return (
       <div
         style={{
-          padding: '32px 24px',
+          padding: '32px 24px 0',
           backgroundColor: TOKEN.pageBg,
           minHeight: '100%',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
         {/* Header */}
-        <div style={{ marginBottom: 24 }}>
+        <div style={{ marginBottom: 20 }}>
           <Title
             level={3}
             style={{
@@ -431,77 +497,90 @@ export default function ResearchNew() {
           </div>
         )}
 
-        {/* Progress area */}
+        {/* Progress area — 2-col: left=AgentSidebar, right=ProgressTimeline */}
         <div
           style={{
             display: 'flex',
             gap: 16,
             alignItems: 'flex-start',
-            flexWrap: 'wrap',
+            flex: 1,
           }}
         >
-          {/* Agent sidebar */}
+          {/* Left: Agent status sidebar */}
           <AgentStatusSidebar
             agentStates={agentStates}
             style={{ flex: '0 0 220px' }}
           />
 
-          {/* Cost + latency */}
-          <CostLatencyMetrics
-            costCny={costCny}
-            latencyMs={latencyMs}
-            criticScores={criticScores}
-            style={{ flex: '0 0 220px' }}
-          />
+          {/* Right: Progress timeline main area */}
+          <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <ProgressTimeline
+              entries={timelineEntries}
+              style={{ flex: 1 }}
+            />
 
-          {/* Main area: streaming markdown (spec § 4.3) or placeholder */}
-          <div
-            style={{
-              flex: '1 1 300px',
-              backgroundColor: TOKEN.cardBg,
-              border: `1px solid ${TOKEN.borderColor}`,
-              borderRadius: 10,
-              padding: '16px 20px',
-              minHeight: 180,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                color: TOKEN.textTertiary,
-                fontWeight: 600,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-              }}
-            >
-              {streamingMd ? '报告预览' : '生成提示'}
-            </div>
-            {streamingMd ? (
+            {/* Streaming markdown preview — shown once writer starts (spec § 4.3) */}
+            {streamingMd && (
               <div
                 style={{
-                  maxHeight: '60vh',
-                  overflowY: 'auto',
-                  fontSize: 13,
-                  lineHeight: 1.7,
-                  color: TOKEN.textPrimary,
+                  backgroundColor: TOKEN.cardBg,
+                  border: `1px solid ${TOKEN.borderColor}`,
+                  borderRadius: 10,
+                  padding: '16px 20px',
                 }}
               >
-                <Markdown value={streamingMd} />
-              </div>
-            ) : (
-              <div style={{ fontSize: 13, color: TOKEN.textSecondary, lineHeight: 1.7 }}>
-                <p style={{ margin: 0 }}>
-                  报告通常需要 2–5 分钟完成。生成完毕后将自动跳转到报告页面。
-                </p>
-                <p style={{ margin: '8px 0 0' }}>
-                  如需终止并重新填写，请点击下方"取消"按钮。
-                </p>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: TOKEN.textTertiary,
+                    fontWeight: 600,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    marginBottom: 8,
+                  }}
+                >
+                  报告预览
+                </div>
+                <div
+                  style={{
+                    maxHeight: '40vh',
+                    overflowY: 'auto',
+                    fontSize: 13,
+                    lineHeight: 1.7,
+                    color: TOKEN.textPrimary,
+                  }}
+                >
+                  <Markdown value={streamingMd} />
+                </div>
               </div>
             )}
-            <div style={{ marginTop: 'auto' }}>
+
+            {/* Critic 6-dim scores — collapsible, shown after critic_score event */}
+            {criticScores && (
+              <Collapse
+                size="small"
+                style={{ borderColor: TOKEN.borderColor, backgroundColor: TOKEN.cardBg }}
+              >
+                <Panel
+                  header={
+                    <span style={{ fontSize: 12, color: TOKEN.textSecondary, fontWeight: 600 }}>
+                      Critic 评分 — 综合 {criticScores.total.toFixed(1)} / 10
+                    </span>
+                  }
+                  key="critic"
+                >
+                  <CostLatencyMetrics
+                    costCny={costCny}
+                    latencyMs={latencyMs}
+                    criticScores={criticScores}
+                    style={{ border: 'none', padding: 0, borderRadius: 0 }}
+                  />
+                </Panel>
+              </Collapse>
+            )}
+
+            {/* Cancel / retry button */}
+            <div style={{ paddingBottom: 16 }}>
               <Button
                 onClick={handleReset}
                 disabled={submitting && !progressError}
@@ -515,6 +594,38 @@ export default function ResearchNew() {
               </Button>
             </div>
           </div>
+        </div>
+
+        {/* Bottom status bar — 1 line: latency · cost / budget */}
+        <div
+          style={{
+            position: 'sticky',
+            bottom: 0,
+            backgroundColor: TOKEN.pageBg,
+            borderTop: `1px solid ${TOKEN.borderColor}`,
+            padding: '8px 0',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            fontSize: 12,
+            color: TOKEN.textTertiary,
+          }}
+        >
+          <span>
+            已用{' '}
+            <span style={{ fontFamily: '"SF Mono", Consolas, monospace', color: TOKEN.textSecondary }}>
+              {latencySec}s
+            </span>
+          </span>
+          <span style={{ color: TOKEN.borderColor }}>·</span>
+          <span>
+            费用{' '}
+            <span style={{ fontFamily: '"SF Mono", Consolas, monospace', color: TOKEN.textSecondary }}>
+              ¥{costDisplay}
+            </span>
+            {' / ¥20'}
+            {/* TODO(v0.8.5): wire cumulative cost from backend SSE cost_cny field */}
+          </span>
         </div>
       </div>
     )

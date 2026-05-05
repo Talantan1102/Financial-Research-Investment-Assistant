@@ -41,37 +41,113 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
     """LangGraph event → ResearchStreamEvent (or None to skip).
 
     Event mapping:
-      on_chain_end / research_planner_node → plan
-      on_chain_end / data_collector_node   → data_progress
-      on_chain_end / analyst_node          → insight
+      on_chain_end / research_planner_node → plan       (+ subtasks metadata)
+      on_chain_end / data_collector_node   → data_progress (+ tools metadata)
+      on_chain_end / analyst_node          → insight    (+ summary metadata)
       on_chain_end / writer_node           → report_chunk
-      on_chain_end / scorer_*              → critic_score
+      on_chain_end / scorer_*              → critic_score (+ scorer name summary)
       on_chain_end / LangGraph (root only) → done
         (root = parent_ids is empty; critic subgraph also emits LangGraph
          but with non-empty parent_ids — those are skipped)
       all others                           → None (skipped)
+
+    Metadata fields added for progress timeline UX (dogfood fix):
+      plan:          summary str, subtasks list[str] (first 50 chars each, max 5)
+      data_progress: summary str, tools list[str] (tool names from tool_results)
+      insight:       summary str (first finding[:120] + "...")
+      critic_score:  summary str (human-readable scorer name)
     """
     et = ev.get("event")
     name = ev.get("name", "")
 
     if et == "on_chain_end":
         if name == "research_planner_node":
-            return ResearchStreamEvent(type="plan", data={"name": name})
+            output: dict[str, Any] = ev.get("output") or {}
+            # plan comes back as a ResearchPlan instance or a dict
+            plan_val = output.get("plan") or {}
+            if hasattr(plan_val, "subtasks"):
+                subtasks_raw = plan_val.subtasks or []
+            else:
+                subtasks_raw = plan_val.get("subtasks") or []
+            subtask_descs: list[str] = []
+            for s in subtasks_raw[:5]:
+                if hasattr(s, "description"):
+                    desc = str(s.description)
+                else:
+                    desc = str(s.get("description", ""))
+                subtask_descs.append(desc[:50])
+            n = len(subtasks_raw)
+            return ResearchStreamEvent(
+                type="plan",
+                data={
+                    "name": name,
+                    "summary": f"已规划 {n} 个子任务",
+                    "subtasks": subtask_descs,
+                },
+            )
+
         if name == "data_collector_node":
-            return ResearchStreamEvent(type="data_progress", data={"name": name})
+            output = ev.get("output") or {}
+            # tool_results is a list of ToolResult instances or dicts
+            results_raw = output.get("tool_results") or []
+            tool_names: list[str] = []
+            for r in results_raw:
+                if hasattr(r, "tool_name"):
+                    tool_names.append(str(r.tool_name))
+                else:
+                    tool_names.append(str(r.get("tool_name", "")))
+            n = len(tool_names)
+            return ResearchStreamEvent(
+                type="data_progress",
+                data={
+                    "name": name,
+                    "summary": f"已采集 {n} 项数据",
+                    "tools": tool_names,
+                },
+            )
+
         if name == "analyst_node":
-            return ResearchStreamEvent(type="insight", data={"name": name})
+            output = ev.get("output") or {}
+            # insights is a list of Insight instances or dicts
+            insights_raw = output.get("insights") or []
+            summary = "分析完成"
+            if insights_raw:
+                first = insights_raw[0]
+                if hasattr(first, "finding"):
+                    finding = str(first.finding)
+                else:
+                    finding = str(first.get("finding", ""))
+                if len(finding) > 120:
+                    finding = finding[:120] + "..."
+                summary = finding
+            return ResearchStreamEvent(
+                type="insight",
+                data={
+                    "name": name,
+                    "summary": summary,
+                },
+            )
+
         if name == "writer_node":
             # Extract report_markdown from node output so the frontend can
             # render the full report incrementally in the progress overlay.
-            output: dict[str, Any] = ev.get("output") or {}
+            output = ev.get("output") or {}
             md: str = output.get("report_markdown") or ""
             return ResearchStreamEvent(
                 type="report_chunk",
                 data={"name": name, "chunk": md},
             )
+
         if name.startswith("scorer_"):
-            return ResearchStreamEvent(type="critic_score", data={"scorer": name})
+            scorer_label = name.replace("scorer_", "").replace("_", " ")
+            return ResearchStreamEvent(
+                type="critic_score",
+                data={
+                    "scorer": name,
+                    "summary": f"{scorer_label} 评分完成",
+                },
+            )
+
         if name == "LangGraph":
             # Outermost graph completion: parent_ids is empty.
             # Critic subgraph also emits name="LangGraph" with non-empty
