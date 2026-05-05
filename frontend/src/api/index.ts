@@ -1,4 +1,1 @@
 export * as auth from './auth'
-export * as memory from './memory'
-export * as database from './database'
-export * as news from './news'

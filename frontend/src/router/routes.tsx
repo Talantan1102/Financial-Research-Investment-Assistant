@@ -5,12 +5,9 @@ import NotFound from '@/pages/404'
 import LoginPage from '@/pages/auth/login'
 import Index from '@/pages/index'
 import KnowledgePage from '@/pages/knowledge'
-import MemoryPage from '@/pages/memory'
-import DatabasePage from '@/pages/database'
 import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
-import NewsPage from '@/pages/news'
 import ResearchIndex from '@/pages/research/index'
 import ResearchNew from '@/pages/research/new'
 import ResearchReport from '@/pages/research/report'
@@ -37,18 +34,6 @@ export const routes: IRouteObject[] = [
   {
     path: '/knowledge',
     Component: KnowledgePage,
-  },
-  {
-    path: '/memory',
-    Component: MemoryPage,
-  },
-  {
-    path: '/database',
-    Component: DatabasePage,
-  },
-  {
-    path: '/news',
-    Component: NewsPage,
   },
   {
     path: '/monitoring',

@@ -1,13 +1,10 @@
 import IconHome from '@/assets/layout/home.svg'
 import IconKnowledge from '@/assets/layout/knowledge.svg'
-import IconMemory from '@/assets/layout/memory.svg'
-import IconDatabase from '@/assets/layout/database.svg'
 import IconMonitoring from '@/assets/layout/monitoring.svg'
-import IconNews from '@/assets/layout/news.svg'
 import React, { useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
-import { Dropdown, message } from 'antd'
+import { Dropdown } from 'antd'
 import { DownOutlined } from '@ant-design/icons'
 import { NavItem } from './nav-item'
 import { industryState, setCurrentIndustry } from '@/store/industry'
@@ -48,29 +45,10 @@ export function Nav() {
         href: '/',
       },
       {
-        key: 'memory',
-        label: '记忆库',
-        icon: IconMemory,
-        href: '#',
-        onClick: () => message.info('暂未开放'),
-      },
-      {
         key: 'knowledge',
         label: '知识库',
         icon: IconKnowledge,
         href: '/knowledge',
-      },
-      {
-        key: 'database',
-        label: '数据库',
-        icon: IconDatabase,
-        href: '/database',
-      },
-      {
-        key: 'news',
-        label: '行业资讯',
-        icon: IconNews,
-        href: '/news',
       },
       {
         key: 'monitoring',
