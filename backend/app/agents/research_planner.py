@@ -39,7 +39,10 @@ _PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是金融研究助手 research_planner�
 
 # 用户自由文本补充
 {user_message}
-{critic_feedback_section}
+
+# Critic feedback (如有)
+{critic_feedback}
+
 # 候选 plan_id (只能选 1 个)
 - capital_preservation — 保本/防风险型, 偏重偿债/现金流/治理风险
 - stable_growth — 稳健增长型, 偏重 ROE/分红/行业地位
@@ -55,14 +58,11 @@ _PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是金融研究助手 research_planner�
 | aggressive_growth       | aggressive_growth       |
 
 # 例外 override (用户自由文本含以下关键词时, 偏离主映射)
-1. 用户文本含 "避险/规避风险/不要亏" → 一律选 capital_preservation \
-   (即使 investment_objective=aggressive_growth)
-2. 用户文本含 "短期机会/抓热点/博弈" + investment_horizon=short_term → 选 aggressive_growth \
-   (即使 investment_objective=balanced)
-3. 用户文本含 "长期持有/养老/穿越周期" + investment_horizon=long_term → 选 stable_growth \
-   (即使 investment_objective=balanced)
-4. 用户文本含 "高股息/红利/稳定分红" → 选 stable_growth (即使 objective=balanced)
-5. 用户文本同时含 "成长" + "稳健" → 选 balanced (避免极端)
+1. user_message 含 "短期机会 / 波段 / 抓机会" + objective != capital_preservation → aggressive_growth
+2. user_message 含 "避险 / 防御 / 担心下跌 / 保本" + objective != capital_preservation → capital_preservation
+3. user_message 含 "长期持有 / 不在乎短期波动 / 长跑" + objective != aggressive_growth → stable_growth
+4. user_message 含 "稳定收益 / 红利 / 股息" → stable_growth
+5. user_message 含 "全面分析 / 综合判断" → balanced
 
 # 输出要求
 仅输出 JSON: {{"plan_id": "<one_of_4>", "rationale": "<≤200 字解释>"}}
@@ -80,12 +80,11 @@ def build_router_prompt(state: ResearchState) -> str:
     if not user_msg:
         user_msg = "(无)"
 
-    if state.planner_critic_feedback:
-        critic_feedback_section = (
-            f"\n# Critic 上一轮反馈 (你必须修正这些问题)\n{state.planner_critic_feedback}\n"
-        )
-    else:
-        critic_feedback_section = ""
+    critic_feedback = (
+        f"上一轮 plan 被 Critic 评分 < 8.5, 反馈:{state.planner_critic_feedback}"
+        if state.planner_critic_feedback
+        else "(无 — 第一轮 router)"
+    )
 
     return _PLANNER_SYSTEM_PROMPT_TEMPLATE.format(
         objective=state.investment_objective or "(未指定)",
@@ -99,7 +98,7 @@ def build_router_prompt(state: ResearchState) -> str:
         ),
         ts_code=state.target_ts_code or "(未指定)",
         user_message=user_msg,
-        critic_feedback_section=critic_feedback_section,
+        critic_feedback=critic_feedback,
     )
 
 

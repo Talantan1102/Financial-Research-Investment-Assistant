@@ -285,7 +285,8 @@ def test_critic_feedback_injected_into_prompt() -> None:
     prompt = build_router_prompt(state)
 
     assert feedback in prompt
-    assert "Critic 上一轮反馈" in prompt
+    assert "Critic feedback" in prompt
+    assert "上一轮 plan 被 Critic 评分 < 8.5" in prompt
 
 
 # ---------------------------------------------------------------------------
