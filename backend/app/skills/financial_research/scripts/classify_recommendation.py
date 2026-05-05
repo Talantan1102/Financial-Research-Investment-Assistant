@@ -57,9 +57,14 @@ def _eval_condition(cond: dict[str, Any], metrics: dict[str, Any]) -> bool:
     field: str = cond["field"]
     op: str = cond["op"]
     value: Any = cond["value"]
-    if field not in metrics:
+    val = metrics.get(field)
+    if val is None:
         return False
-    return _OPS[op](metrics[field], value)
+    try:
+        return bool(_OPS[op](val, value))
+    except TypeError:
+        # 类型不匹配 (e.g. str compared with float) → no-match.
+        return False
 
 
 def _eval_rule(rule: dict[str, Any], metrics: dict[str, Any]) -> bool:
@@ -70,7 +75,10 @@ def _eval_rule(rule: dict[str, Any], metrics: dict[str, Any]) -> bool:
         return all(_eval_condition(c, metrics) for c in conds["all_of"])
     if "any_of" in conds:
         return any(_eval_condition(c, metrics) for c in conds["any_of"])
-    return False
+    raise ValueError(
+        f"unrecognized rule envelope (typo or unsupported shape?): "
+        f"rule keys={list(rule.keys())}, conditions keys={list(conds.keys())}"
+    )
 
 
 def classify_recommendation(metrics: dict[str, Any]) -> Recommendation:

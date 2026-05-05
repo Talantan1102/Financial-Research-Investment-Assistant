@@ -29,7 +29,9 @@ def lookup_industry_benchmark(*, industry: str, indicator: str) -> float:
 
     Raises:
         KeyError: If the indicator is missing from BOTH the requested industry
-            and ``DEFAULT`` (i.e. genuinely unknown indicator).
+            AND ``DEFAULT``, OR if the indicator is a private metadata key
+            (starts with ``_``, e.g. ``_note``) — these are intentionally
+            unreachable as numeric lookups.
     """
     industry_data: dict[str, Any] = _BENCHMARKS.get(industry, _BENCHMARKS["DEFAULT"])
     if indicator in industry_data and not indicator.startswith("_"):
