@@ -64,6 +64,13 @@ class GetForecastTool(Tool):
         df = await self._tushare.get_forecast(ts_code=a.ts_code, period=a.period)
         if df.empty:
             return {"ts_code": a.ts_code, "error": "no data"}
+        # Pick latest period if multiple rows present. Tushare forecast 表
+        # column 含 `period` (quarter end YYYYMMDD) — desc 排序后 [0] 为最新.
+        # Fallback to ann_date if period 不在 (defensive — schema 漂移防御).
+        if "period" in df.columns and len(df) > 1:
+            df = df.sort_values("period", ascending=False)
+        elif "ann_date" in df.columns and len(df) > 1:
+            df = df.sort_values("ann_date", ascending=False)
         row = df.iloc[0]
         forecast_type = str(row.get("type", "") or "")
         return {

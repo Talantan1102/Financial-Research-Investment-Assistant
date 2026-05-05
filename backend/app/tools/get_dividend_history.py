@@ -44,6 +44,11 @@ class GetDividendHistoryTool(Tool):
         df = await self._tushare.get_dividend_history(ts_code=a.ts_code, years_back=a.years_back)
         if df.empty:
             return {"ts_code": a.ts_code, "error": "no data"}
+        # Sort by ann_date desc so recent_dividends 列表语义稳定 (latest first).
+        # Real Tushare 顺序不保证 — mock 已 desc 但 production 可能 asc.
+        # consistency 数学 order-independent, 但列表语义会翻转.
+        if "ann_date" in df.columns:
+            df = df.sort_values("ann_date", ascending=False)
         # Compact recent_dividends list (latest N rows)
         recent: list[dict[str, Any]] = []
         cash_divs: list[float] = []

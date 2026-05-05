@@ -27,6 +27,10 @@ class GetCashflowTool(Tool):
     net_income, which is on a separate Tushare endpoint. To keep this tool
     pure (single-API, deterministic under LLM_MODE=none) we expose a coarser
     boolean signal instead. The Analyst can cross-reference get_financials.
+
+    TODO(Task 5): cashflow_quality.md methodology 应明示 Analyst —
+    真 OCF/NI 比率 = GetCashflowTool.n_cashflow_act / GetFinancialsTool.net_profit
+    (本 tool 派生只给 positive_ocf binary signal, 完整比率需 Analyst 跨 tool 算).
     """
 
     name = "get_cashflow"

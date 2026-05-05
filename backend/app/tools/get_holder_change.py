@@ -30,9 +30,11 @@ def _classify_holder_trend(latest: float, earliest: float) -> HolderTrend:
     if earliest <= 0:
         return "stable"
     delta_ratio = (latest - earliest) / earliest
-    if delta_ratio < -0.05:
+    # Inclusive thresholds — docstring 说"户数减少 5%+" / "增加 5%+",
+    # -5.0% / +5.0% 临界值归 concentration / dispersion (而非 stable).
+    if delta_ratio <= -0.05:
         return "concentration"
-    if delta_ratio > 0.05:
+    if delta_ratio >= 0.05:
         return "dispersion"
     return "stable"
 

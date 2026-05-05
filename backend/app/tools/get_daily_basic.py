@@ -43,6 +43,10 @@ class GetDailyBasicTool(Tool):
         df = await self._tushare.get_daily_basic(ts_code=a.ts_code, trade_date=a.trade_date)
         if df.empty:
             return {"ts_code": a.ts_code, "error": "no data"}
+        # Pick latest trade_date if multiple rows present (real Tushare may
+        # return ascending series; mock returns 1 row so doesn't expose).
+        if "trade_date" in df.columns and len(df) > 1:
+            df = df.sort_values("trade_date", ascending=False)
         row = df.iloc[0]
         return {
             "ts_code": a.ts_code,

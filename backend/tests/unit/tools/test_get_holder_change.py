@@ -39,6 +39,14 @@ def test_classify_holder_trend_thresholds() -> None:
     assert _classify_holder_trend(latest=100.0, earliest=0.0) == "stable"
 
 
+def test_classify_holder_trend_boundary_inclusive() -> None:
+    """5% 边界 inclusive: -5.0% / +5.0% 归 concentration / dispersion (per docstring)."""
+    # 户数 100 → 95, delta = -5.0% 临界 → concentration (inclusive)
+    assert _classify_holder_trend(latest=95.0, earliest=100.0) == "concentration"
+    # 户数 100 → 105, delta = +5.0% 临界 → dispersion (inclusive)
+    assert _classify_holder_trend(latest=105.0, earliest=100.0) == "dispersion"
+
+
 def test_get_holder_change_args_years_back_validation() -> None:
     with pytest.raises(ValidationError):
         HolderChangeArgs(ts_code="x", years_back=0)

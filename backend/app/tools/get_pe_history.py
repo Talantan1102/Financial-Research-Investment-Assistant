@@ -55,6 +55,8 @@ class GetPeHistoryTool(Tool):
         df = await self._tushare.get_pe_history(ts_code=a.ts_code, years_back=a.years_back)
         if df.empty:
             return {"ts_code": a.ts_code, "error": "no data"}
+        # aggregation result, single row by design — no sort needed
+        # (RealTushareService.get_pe_history 自己构造 1 行 df, 含分位/min/max/median)
         row = df.iloc[0]
         percentile = float(row.get("historical_percentile", 0.0) or 0.0)
         return {
