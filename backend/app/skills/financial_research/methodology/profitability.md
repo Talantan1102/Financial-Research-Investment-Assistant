@@ -7,7 +7,7 @@
 - 净利率 = `净利润 / 营业收入` — 剔除费用 / 税后的最终赚钱能力.
 - 净利润 yoy = `(本期净利润 - 去年同期) / 去年同期` (派生字段, `GetFinancialsTool.net_profit`).
 
-**判断阈值** (引用 `references/industry_benchmarls.json` — 必须用 `lookup_industry_benchmark`):
+**判断阈值** (引用 `references/industry_benchmarks.json` — 必须用 `lookup_industry_benchmark`):
 
 | 指标 | 健康 (DEFAULT) | 一般 | 警戒 | 高风险 |
 |---|---|---|---|---|
