@@ -1,4 +1,12 @@
 entries:
+  # PlanCorrectnessScorer (v0.8.5) — schema is {score, reasoning} not {score, evidence}.
+  # Must precede the generic critic_ pattern below.
+  - pattern: "^你是评测员, 评判 LLM router"
+    response:
+      content: '{"score": 9.0, "reasoning": "v0.8.5 mock — plan_id 符合主映射规则"}'
+      prompt_tokens: 200
+      completion_tokens: 30
+
   - pattern: "^你是金融研究助手 critic_"
     response:
       content: '{"score": 8.0, "evidence": "数据准确,结构清晰,符合预期。"}'
@@ -70,13 +78,14 @@ entries:
       prompt_tokens: 120
       completion_tokens: 80
 
-  # ResearchPlanner: matched by the system-role prefix injected by build_planner_prompt.
+  # ResearchPlanner (v0.8.5 constrained router): outputs only (plan_id, rationale).
+  # subtasks runtime instantiated by plan_registry.instantiate_plan(plan_id, ...).
   # Must appear BEFORE ChatPlanner's "planner" prefix so more-specific match wins.
   - pattern: "^你是金融研究助手 research_planner"
     response:
-      content: '{"subtasks":[{"subtask_id":"overview","description":"公司概况","required_tools":["get_stock_quote"],"rationale":"行情基线"},{"subtask_id":"financial_health","description":"财务健康度","required_tools":["get_financials"],"rationale":"基本面"}],"target_entity":"600519.SH","research_style":"comprehensive","reasoning":"双子任务拆分"}'
+      content: '{"plan_id":"balanced","rationale":"v0.8.5 mock — 默认走 balanced 主映射"}'
       prompt_tokens: 120
-      completion_tokens: 60
+      completion_tokens: 30
 
   # ChatPlanner: matched by the system-role prefix injected by build_planner_prompt
   # Must appear BEFORE the generic ts_code pattern below so it wins on planner prompts.

@@ -25,6 +25,7 @@ from app.agents.critic_subagents.input_context_scorer import (
     InputContextAppropriatenessScorer,
 )
 from app.agents.critic_subagents.insight import InsightScorer
+from app.agents.critic_subagents.plan_correctness_scorer import PlanCorrectnessScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.data_collector import DataCollector
 from app.agents.research_agent import ResearchAgent
@@ -107,6 +108,7 @@ def _build_research_agent(svc: LLMService) -> ResearchAgent:
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
         InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
+        PlanCorrectnessScorer(llm=svc),  # 第 7 scorer (v0.8.5)
     ]
     critic = Critic(llm=svc, scorers=scorers)
     graph = build_research_graph(
