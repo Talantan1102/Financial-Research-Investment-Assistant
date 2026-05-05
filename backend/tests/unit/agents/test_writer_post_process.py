@@ -193,6 +193,43 @@ def test_writer_post_process_narrative_footer_idempotent() -> None:
     assert out1.investment_recommendation.narrative.count("Python 决定论修正") == 1
 
 
+def test_writer_post_process_footer_idempotent_when_llm_quotes_marker_text() -> None:
+    """v0.8.5 — LLM 在 narrative 引用可见文字 'Python 决定论修正' 不能让 footer 误 skip.
+
+    sentinel 是 HTML 注释 _FOOTER_SENTINEL ('<!-- v0.8.5-pyoverride-v1 -->'),
+    markdown 渲染不可见; 旧版 bare-substring 检测 'Python 决定论修正' 会被 LLM
+    narrative 中的同名文字触发 false-positive skip, 导致 footer 不被追加 →
+    Python 决定论失效但用户看不到提示.
+    """
+    state = _make_state()
+    base = _make_dd_report(recommendation="recommend_buy", position_size_pct=18.0)
+    # 模拟 LLM narrative 引用了可见 marker text 但没有真 sentinel
+    quoting_narrative = (
+        "本次基于多维分析给出 recommend_buy。(注:最终 Python 决定论修正会在下方追加,以本部分为准。)"
+    )
+    base_with_quote = base.model_copy(
+        update={
+            "investment_recommendation": base.investment_recommendation.model_copy(
+                update={"narrative": quoting_narrative}
+            )
+        }
+    )
+    out = post_process_writer_output(state, base_with_quote)
+    out_narr = out.investment_recommendation.narrative
+    # 原 LLM 引用文字保留 (作为 prefix)
+    assert quoting_narrative.rstrip() in out_narr, (
+        f"LLM-quoted 'Python 决定论修正' 文字必须保留为 prefix; got {out_narr!r}"
+    )
+    # sentinel HTML 注释必须真 append (不被 quote 误 skip)
+    assert "<!-- v0.8.5-pyoverride-v1 -->" in out_narr, (
+        f"sentinel 必须 append; LLM quote 不能误 skip footer; got {out_narr!r}"
+    )
+    # 第二次 post_process 应识别 sentinel 并 skip — 真 idempotent
+    out2 = post_process_writer_output(state, out)
+    assert out.investment_recommendation.narrative == out2.investment_recommendation.narrative
+    assert out2.investment_recommendation.narrative.count("<!-- v0.8.5-pyoverride-v1 -->") == 1
+
+
 def test_writer_post_process_uses_state_risk_tolerance() -> None:
     """风险容忍度 conservative vs aggressive 应得出不同仓位。"""
     llm_report = _make_dd_report(
@@ -251,6 +288,29 @@ def test_extract_metrics_falls_back_to_regex_parse_of_str_percentile() -> None:
     assert metrics["pe_percentile"] == 0.30, (
         f"regex fallback should parse '30 分位' → 0.30, got {metrics['pe_percentile']}"
     )
+
+
+def test_extract_metrics_rejects_bool_pe_value() -> None:
+    """v0.8.5 — bool 是 int subclass, 必须显式 reject 防 True/False 误触发 red-line.
+
+    isinstance(True, int) == True 在 Python 是 True, 没有 not-bool guard
+    pe_historical_percentile_value=True 会通过 0.0<=float(True)=1.0<=1.0 拿 1.0
+    触发 sell red-line — silent misroute. 这里 fixture 不提供 str pe →
+    fallback 到 0.5 mid-cap default.
+    """
+    for bad in [True, False]:
+        report = {
+            "financial_analysis": {
+                "valuation_analysis": {
+                    "pe_historical_percentile_value": bad,
+                }
+            }
+        }
+        metrics = _extract_metrics_from_llm_report(report)
+        assert metrics["pe_percentile"] == 0.5, (
+            f"bool {bad!r} must be rejected, fall through to 0.5 default; "
+            f"got {metrics['pe_percentile']}"
+        )
 
 
 def test_extract_metrics_falls_back_to_default_on_unparseable_string() -> None:

@@ -51,6 +51,11 @@ from app.skills.financial_research.scripts import (
 _SKILL_BUNDLE = load_skill()
 _SOP_TEXT = _SKILL_BUNDLE.composed_sop()
 
+# v0.8.5 — narrative footer sentinel for idempotent post_process. Use HTML
+# comment so markdown rendering hides it; LLM quoting the visible text
+# "Python 决定论修正" cannot accidentally trip the idempotent skip check.
+_FOOTER_SENTINEL = "<!-- v0.8.5-pyoverride-v1 -->"
+
 
 # ---------------------------------------------------------------------------
 # Investment-objective–specific § 6 framing blocks
@@ -385,9 +390,16 @@ def _extract_metrics_from_llm_report(report: dict[str, Any]) -> dict[str, Any]:
     overview: dict[str, Any] = report.get("target_overview") or {}
 
     # v0.8.5 forward concern 1 — numeric > regex > 0.5 fallback chain.
+    # bool subclass guard: Python bool is int subclass (isinstance(True, int) == True),
+    # so without this guard pe_historical_percentile_value=True (LLM bug) would pass
+    # the 0.0 <= 1.0 <= 1.0 range check and silently misroute to sell red-line.
     pe_pct: float
     pe_numeric = va.get("pe_historical_percentile_value")
-    if isinstance(pe_numeric, int | float) and 0.0 <= float(pe_numeric) <= 1.0:
+    if (
+        isinstance(pe_numeric, int | float)
+        and not isinstance(pe_numeric, bool)
+        and 0.0 <= float(pe_numeric) <= 1.0
+    ):
         pe_pct = float(pe_numeric)
     else:
         parsed = _parse_pe_percentile_str(va.get("pe_historical_percentile"))
@@ -437,15 +449,16 @@ def post_process_writer_output(
     )
 
     # v0.8.5 forward concern 2 — narrative footer announcing Python override.
-    # Strip trailing whitespace + idempotency guard so re-running post_process
-    # on an already-processed report does not stack footers.
+    # Idempotency guard uses HTML comment sentinel _FOOTER_SENTINEL (markdown-
+    # invisible) so an LLM-narrative that quotes the visible "Python 决定论修正"
+    # phrase cannot accidentally trip the skip check.
     base_narrative = (llm_report.investment_recommendation.narrative or "").rstrip()
-    footer_marker = "Python 决定论修正"
-    if footer_marker not in base_narrative:
+    if _FOOTER_SENTINEL not in base_narrative:
         narrative_with_footer = (
             f"{base_narrative}\n\n"
             f"---\n"
-            f"{footer_marker}: 评级 = {classified_rec}, 仓位 = {pct:.2f}%"
+            f"{_FOOTER_SENTINEL}\n"
+            f"📊 Python 决定论修正: 评级 = {classified_rec}, 仓位 = {pct:.2f}%"
             f" (基于客户 risk_tolerance={risk_tolerance} + 市值数据 + skill bundle 规则)。"
         ).strip()
     else:
