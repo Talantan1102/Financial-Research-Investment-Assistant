@@ -476,8 +476,14 @@ def _read_research_runs_from_sqlite(db_path: Path, limit: int = 50) -> list[Rese
         results: list[ResearchRunSummary] = []
         seen_thread_ids: set[str] = set()
 
-        # list(None) yields all checkpoints across all threads, newest-first.
-        for ct in saver.list(None, limit=limit * 10):  # over-fetch to get one per thread
+        # Materialize the generator BEFORE we iterate + break + close conn.
+        # SqliteSaver.list() yields cursors that are still backed by `conn`;
+        # if we break out of the loop and then close the conn, Python GC will
+        # try to clean up the still-open generator's cursor on a closed db
+        # and raise sqlite3.ProgrammingError.  Forcing list() consumes the
+        # generator fully while conn is alive.
+        checkpoints = list(saver.list(None, limit=limit * 10))  # over-fetch to get one per thread
+        for ct in checkpoints:
             thread_id: str = ct.config.get("configurable", {}).get("thread_id", "")
             if not thread_id.startswith("research:"):
                 continue
@@ -571,24 +577,27 @@ async def get_research_report(run_id: str) -> Any:
             # Strategy: scan all research threads for one whose thread_id
             # contains run_id or whose investment_report.request_id == run_id.
             # list(None) yields newest-first so the first hit is the latest.
-            for ct in saver.list(None):
-                thread_id: str = ct.config.get("configurable", {}).get("thread_id", "")
-                if not thread_id.startswith("research:"):
-                    continue
+            # Materialize generator to avoid sqlite3.ProgrammingError on early
+            # return — see _read_research_runs_from_sqlite for the same fix.
+            checkpoints = list(saver.list(None))
+            try:
+                for ct in checkpoints:
+                    thread_id: str = ct.config.get("configurable", {}).get("thread_id", "")
+                    if not thread_id.startswith("research:"):
+                        continue
 
-                report = ct.checkpoint.get("channel_values", {}).get("investment_report")
-                if report is None:
-                    continue
+                    report = ct.checkpoint.get("channel_values", {}).get("investment_report")
+                    if report is None:
+                        continue
 
-                if not isinstance(report, dict):
-                    report = report.model_dump() if hasattr(report, "model_dump") else {}
+                    if not isinstance(report, dict):
+                        report = report.model_dump() if hasattr(report, "model_dump") else {}
 
-                # Match by run_id in thread_id or in report.request_id.
-                if run_id in thread_id or str(report.get("request_id", "")) == run_id:
-                    conn.close()
-                    return report
-
-            conn.close()
+                    # Match by run_id in thread_id or in report.request_id.
+                    if run_id in thread_id or str(report.get("request_id", "")) == run_id:
+                        return report
+            finally:
+                conn.close()
     except Exception:
         logger.exception("Failed to fetch research report %s from sqlite", run_id)
 
