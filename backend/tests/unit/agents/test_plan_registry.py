@@ -86,3 +86,26 @@ def test_stable_growth_emphasizes_dividend() -> None:
     for tmpl in PLAN_REGISTRY["stable_growth"]:
         used.update(tmpl.required_tools)
     assert "get_dividend_history" in used
+
+
+def test_subtask_template_rejects_unknown_tool() -> None:
+    """Pydantic 静态 + 运行时双层拒收非 ToolName Literal 字符串."""
+    from app.agents.schemas import SubtaskTemplate
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        SubtaskTemplate(
+            description_template="x {target_name} ({ts_code})",
+            rationale="r",
+            required_tools=("nonexistent_tool",),  # type: ignore[arg-type]
+        )
+
+
+def test_subtask_ids_unique_across_all_plans() -> None:
+    """16 subtask_id 跨 4 plan 全 unique — 防止 reporting/aggregation 层 dedupe 失效."""
+    all_ids: list[str] = []
+    for plan_id in PLAN_REGISTRY:
+        subtasks = instantiate_plan(plan_id, target_name="X", ts_code="000001.SZ")
+        all_ids.extend(st.subtask_id for st in subtasks)
+    assert len(all_ids) == 16
+    assert len(set(all_ids)) == 16  # all unique

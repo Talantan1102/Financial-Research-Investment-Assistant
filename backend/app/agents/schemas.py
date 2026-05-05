@@ -90,7 +90,7 @@ class SubtaskTemplate(BaseModel):
 
     description_template: str
     rationale: str
-    required_tools: list[ToolName]
+    required_tools: tuple[ToolName, ...]
 
 
 class ResearchRequest(BaseModel):
@@ -182,6 +182,8 @@ class Subtask(BaseModel):
 
     subtask_id: str
     description: str
+    # v0.8.4 兼容: kept as list[str] for legacy callers; planner-emitted instances
+    # 实际全是 ToolName Literal (via instantiate_plan from typed SubtaskTemplate).
     required_tools: list[str]
     rationale: str
 
