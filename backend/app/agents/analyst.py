@@ -2,8 +2,11 @@
 
 v0.8.4: prompt is conditioned on investment_horizon + investment_objective from
         ResearchState so the analyst weights dimensions appropriate to the client context.
+v0.8.5: prompt appended with composed_sop() from financial_research skill bundle
+        (11 methodology dimensions injected as a single SOP block).
 
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md § 5.3
+spec ref: docs/superpowers/specs/2026-05-04-v0.8.5-constrained-router-design.md § Task 5
 """
 
 from __future__ import annotations
@@ -14,6 +17,11 @@ import re
 from app.agents.base import Agent
 from app.agents.schemas import Insight, ResearchState, StepResult
 from app.services.llm_response import Tier
+from app.skills.financial_research import load_skill
+
+# Module-level skill load — methodology + references parsed once at import time.
+_SKILL_BUNDLE = load_skill()
+_SOP_TEXT = _SKILL_BUNDLE.composed_sop()
 
 _BASE_SYSTEM_PROMPT = """你是金融研究助手 analyst。
 
@@ -147,7 +155,10 @@ def build_analyst_prompt(state: ResearchState) -> str:
     )
 
     return (
-        system + f"\n\n# Subtasks\n{plan_summary}\n# Tool Results\n{tool_summary}\n\n请输出 JSON。"
+        system
+        + f"\n\n# Subtasks\n{plan_summary}\n# Tool Results\n{tool_summary}\n"
+        + f"\n# 投资研究员 SOP (跨 11 维度方法论)\n\n{_SOP_TEXT}\n"
+        + "\n请输出 JSON。"
     )
 
 

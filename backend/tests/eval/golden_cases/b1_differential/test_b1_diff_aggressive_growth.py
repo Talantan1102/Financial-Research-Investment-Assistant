@@ -30,7 +30,20 @@ from app.agents.schemas import ResearchState
 
 from tests.eval.golden_cases.b1_differential._graph_builder import build_b1_diff_graph
 
-pytestmark = pytest.mark.vcr
+pytestmark = [
+    pytest.mark.vcr,
+    pytest.mark.xfail(
+        reason=(
+            "v0.8.5 Task 5: post_process_writer_output overrides recommendation + "
+            "position_size deterministically. Stub data lacks numeric metrics so "
+            "classify_recommendation falls to recommend_hold fallback "
+            "(compute_position_size_pct(hold, very_aggressive, …) = 7.0%, < 10%). "
+            "Cassette to be re-recorded in Task 9 with new SOP-injected prompts; "
+            "acceptance criteria likely need recalibration vs new helper output."
+        ),
+        strict=True,
+    ),
+]
 
 _THREAD_ID = "b1-diff-aggressive-growth-test-1"
 

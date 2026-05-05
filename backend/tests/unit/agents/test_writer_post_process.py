@@ -1,0 +1,217 @@
+"""Unit tests — Writer post_process_writer_output (v0.8.5).
+
+Verify deterministic Python override of recommendation + position_size_pct
+fields. The LLM-emitted values are intentionally overridden by skill-bundle
+helpers (classify_recommendation + compute_position_size_pct).
+
+spec ref: docs/superpowers/specs/2026-05-04-v0.8.5-constrained-router-design.md § Task 5
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from app.agents.investment_dd_schema import (
+    FinancialAnalysis,
+    IndustryAnalysis,
+    InvestmentDueDiligenceReport,
+    InvestmentRecommendation,
+    LegalQualification,
+    PriceRange,
+    RiskAssessment,
+    TargetOverview,
+    ValuationAnalysis,
+)
+from app.agents.schemas import ResearchState
+from app.agents.writer import (
+    _extract_metrics_from_llm_report,
+    build_investment_dd_prompt,
+    post_process_writer_output,
+)
+
+
+def _make_state(**kwargs: object) -> ResearchState:
+    defaults: dict[str, object] = {
+        "user_id": "test",
+        "session_id": "sess-1",
+        "user_message": "请对贵州茅台进行投资尽调。",
+        "request_id": "req-1",
+        "target_ts_code": "600519.SH",
+        "client_total_aum": 10_000_000.0,
+        "investment_objective": "balanced",
+        "investment_horizon": "medium_term",
+        "risk_tolerance": "moderate",
+    }
+    defaults.update(kwargs)
+    return ResearchState(**defaults)  # type: ignore[arg-type]
+
+
+def _make_dd_report(
+    *,
+    recommendation: str = "recommend_buy",
+    position_size_pct: float = 18.0,
+    market_cap: float | None = 1_000_000_000_000.0,
+) -> InvestmentDueDiligenceReport:
+    """Build a minimal InvestmentDueDiligenceReport with controllable § 6 values."""
+    return InvestmentDueDiligenceReport(
+        target_name="贵州茅台",
+        target_ts_code="600519.SH",
+        request_id="req-1",
+        generated_at=datetime(2026, 5, 5, 10, 0, 0),
+        target_overview=TargetOverview(
+            narrative="标的综述",
+            main_business="白酒生产销售",
+            current_market_cap=market_cap,
+        ),
+        legal_qualification=LegalQualification(
+            narrative="资质综述",
+            legal_status="合规",
+            business_qualifications=[],
+            adverse_records=[],
+        ),
+        financial_analysis=FinancialAnalysis(
+            narrative="财务综述",
+            key_metrics=[],
+            profitability_analysis="盈利分析",
+            growth_analysis="成长分析",
+            return_analysis="回报分析",
+            cash_flow_analysis="现金流分析",
+            valuation_analysis=ValuationAnalysis(narrative="估值综述"),
+        ),
+        industry_analysis=IndustryAnalysis(
+            narrative="行业综述",
+            industry_name="白酒",
+            industry_outlook="景气",
+            competitive_position="龙头",
+            key_competitors=[],
+            policy_impact="无重大影响",
+        ),
+        risk_assessment=RiskAssessment(
+            narrative="风险综述",
+            market_risk=[],
+            growth_risk=[],
+            event_risk=[],
+            valuation_risk=[],
+            overall_risk_level="medium",
+        ),
+        investment_recommendation=InvestmentRecommendation(
+            narrative="LLM 给出的建议综述(将被 post_process 覆盖)",
+            recommendation=recommendation,  # type: ignore[arg-type]
+            recommended_position_size_pct=position_size_pct,
+            recommended_holding_period="medium_term",
+            recommended_entry_price_range=PriceRange(low=1500.0, high=1800.0),
+            recommended_stop_loss_price=1400.0,
+            estimated_target_price_range=PriceRange(low=2000.0, high=2200.0),
+            position_management_conditions=["分批建仓"],
+        ),
+    )
+
+
+def test_writer_post_process_overrides_recommendation_and_size() -> None:
+    """LLM 输出 recommend_buy + 18% — post_process 必须根据 metrics 重新分类。
+
+    LLM-driven report carries the schema fields used by the schema (no `roe` /
+    `revenue_yoy` numeric extras) so classify_recommendation falls through to
+    the recommend_hold fallback rule. compute_position_size_pct(hold, moderate,
+    1T) = 5.0 * 1.0 * 1.0 = 5.0%. Both values must override the LLM's
+    optimistic 18% / recommend_buy.
+    """
+    state = _make_state(risk_tolerance="moderate")
+    llm_report = _make_dd_report(
+        recommendation="recommend_buy",
+        position_size_pct=18.0,
+        market_cap=1_000_000_000_000.0,
+    )
+    out = post_process_writer_output(state, llm_report)
+    # LLM 的 recommend_buy 被覆盖为 fallback recommend_hold
+    assert out.investment_recommendation.recommendation == "recommend_hold"
+    # 仓位也由 deterministic 公式重算 — 不再是 LLM 的 18.0
+    assert out.investment_recommendation.recommended_position_size_pct == 5.0
+
+
+def test_writer_post_process_deterministic() -> None:
+    """同 (state, llm_report) 多次调用必须产生一致输出 (idempotent)。"""
+    state = _make_state(risk_tolerance="aggressive")
+    llm_report = _make_dd_report(recommendation="recommend_overweight", position_size_pct=10.0)
+    out1 = post_process_writer_output(state, llm_report)
+    out2 = post_process_writer_output(state, llm_report)
+    assert out1.investment_recommendation.recommendation == (
+        out2.investment_recommendation.recommendation
+    )
+    assert out1.investment_recommendation.recommended_position_size_pct == (
+        out2.investment_recommendation.recommended_position_size_pct
+    )
+
+
+def test_writer_post_process_preserves_other_fields() -> None:
+    """post_process 只改 recommendation + size,其它字段必须保持原样。"""
+    state = _make_state()
+    llm_report = _make_dd_report(recommendation="recommend_buy", position_size_pct=18.0)
+    out = post_process_writer_output(state, llm_report)
+    # narrative / 价格 / holding_period / position_management_conditions 不动
+    assert out.investment_recommendation.narrative == llm_report.investment_recommendation.narrative
+    assert (
+        out.investment_recommendation.recommended_holding_period
+        == llm_report.investment_recommendation.recommended_holding_period
+    )
+    assert (
+        out.investment_recommendation.recommended_entry_price_range
+        == llm_report.investment_recommendation.recommended_entry_price_range
+    )
+    assert (
+        out.investment_recommendation.recommended_stop_loss_price
+        == llm_report.investment_recommendation.recommended_stop_loss_price
+    )
+    # 其它 section 完全不动
+    assert out.target_overview == llm_report.target_overview
+    assert out.financial_analysis == llm_report.financial_analysis
+    assert out.industry_analysis == llm_report.industry_analysis
+
+
+def test_writer_post_process_uses_state_risk_tolerance() -> None:
+    """风险容忍度 conservative vs aggressive 应得出不同仓位。"""
+    llm_report = _make_dd_report(
+        recommendation="recommend_buy",
+        position_size_pct=10.0,
+        market_cap=1_000_000_000_000.0,
+    )
+    state_cons = _make_state(risk_tolerance="conservative")
+    state_aggr = _make_state(risk_tolerance="aggressive")
+    out_cons = post_process_writer_output(state_cons, llm_report)
+    out_aggr = post_process_writer_output(state_aggr, llm_report)
+    # 二者 recommendation 都会 fallback 到 recommend_hold (默认 metric 不足),
+    # 但 compute_position_size_pct(hold, conservative=0.5x) < (hold, aggressive=1.6x)
+    pct_cons = out_cons.investment_recommendation.recommended_position_size_pct
+    pct_aggr = out_aggr.investment_recommendation.recommended_position_size_pct
+    assert pct_cons < pct_aggr, f"conservative 仓位 ({pct_cons}) 应小于 aggressive ({pct_aggr})"
+
+
+def test_extract_metrics_handles_missing_fields() -> None:
+    """_extract_metrics_from_llm_report 在缺字段时不报错,返回默认。"""
+    metrics = _extract_metrics_from_llm_report({})
+    assert metrics["pe_percentile"] == 0.5
+    assert metrics["roe"] == 0.0
+    assert metrics["forecast_signal"] == "neutral"
+    assert metrics["asset_liability_warning"] is False
+
+
+def test_writer_prompt_contains_sop_section() -> None:
+    """v0.8.5 — Writer prompt 必须含 SOP 11 维度方法论 section。"""
+    state = _make_state()
+    prompt = build_investment_dd_prompt(state)
+    assert "投资研究员 SOP" in prompt or "11 维度方法论" in prompt
+    # 至少 11 关键词中的代表性几个出现
+    for kw in [
+        "偿债",
+        "盈利",
+        "成长",
+        "现金流",
+        "估值",
+        "行业",
+        "股东",
+        "资金流",
+        "事件",
+        "风险",
+        "决策",
+    ]:
+        assert kw in prompt, f"writer prompt missing SOP keyword: {kw}"
