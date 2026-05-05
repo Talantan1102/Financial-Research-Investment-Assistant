@@ -67,6 +67,32 @@ ToolName = Literal[
 ]
 
 
+# v0.8.5 — constrained-router plan_id catalog. Independent Literal from
+# InvestmentObjective (semantic separation): InvestmentObjective is the
+# user-facing investment goal; PlanId is the internal plan-template selector
+# the planner LLM picks from PLAN_REGISTRY.
+PlanId = Literal[
+    "capital_preservation",
+    "stable_growth",
+    "balanced",
+    "aggressive_growth",
+]
+
+
+class SubtaskTemplate(BaseModel):
+    """Template for plan_registry — instantiated to Subtask at runtime.
+
+    description_template uses {target_name} and {ts_code} placeholders that
+    instantiate_plan() formats with concrete values per request.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    description_template: str
+    rationale: str
+    required_tools: list[ToolName]
+
+
 class ResearchRequest(BaseModel):
     """B-1 研报请求(v0.8.4 — 6 结构化字段 + 可选自由文本)。"""
 
