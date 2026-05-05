@@ -38,20 +38,26 @@ def test_recommendation_enum_values() -> None:
         assert rec.recommendation == v
 
 
-def test_evidence_min_length_enforced() -> None:
-    """每个 section evidence 至少 1 chunk_id。"""
-    with pytest.raises(ValidationError):
-        InvestmentRecommendation(
-            narrative="...",
-            recommendation="recommend_hold",
-            recommended_position_size_pct=5.0,
-            recommended_holding_period="medium_term",
-            recommended_entry_price_range=PriceRange(low=100.0, high=110.0),
-            recommended_stop_loss_price=90.0,
-            estimated_target_price_range=PriceRange(low=120.0, high=140.0),
-            position_management_conditions=[],
-            evidence=[],  # ← empty,必须 fail
-        )
+def test_evidence_accepts_empty_list() -> None:
+    """evidence 接受空 list — schema 软约束,Critic factuality 评分扣分代替强制。
+
+    v0.8.4 dogfood revealed that mock KB data does not cover all 6 sections
+    (legal_qualification / industry_analysis often empty). Strict min_length=1
+    breaks the dogfood pipeline. Schema relaxed; Critic factuality scorer
+    detects missing evidence and lowers the score instead.
+    """
+    rec = InvestmentRecommendation(
+        narrative="...",
+        recommendation="recommend_hold",
+        recommended_position_size_pct=5.0,
+        recommended_holding_period="medium_term",
+        recommended_entry_price_range=PriceRange(low=100.0, high=110.0),
+        recommended_stop_loss_price=90.0,
+        estimated_target_price_range=PriceRange(low=120.0, high=140.0),
+        position_management_conditions=[],
+        evidence=[],  # ← schema accepts empty; Critic scorer handles
+    )
+    assert rec.evidence == []
 
 
 def test_main_report_has_disclaimer_field() -> None:
@@ -117,10 +123,10 @@ def test_json_schema_generation() -> None:
     assert "target_name" in schema["properties"]
 
 
-def test_empty_evidence_in_target_overview_rejected() -> None:
-    """TargetOverview evidence 至少 1 chunk_id(独立于 InvestmentRecommendation 的校验)。"""
-    with pytest.raises(ValidationError):
-        TargetOverview(narrative="x", main_business="y", evidence=[])
+def test_empty_evidence_in_target_overview_accepted() -> None:
+    """TargetOverview evidence 允许空(同上,软约束 + Critic 评分扣分)。"""
+    overview = TargetOverview(narrative="x", main_business="y", evidence=[])
+    assert overview.evidence == []
 
 
 def test_recommendation_enum_strict() -> None:

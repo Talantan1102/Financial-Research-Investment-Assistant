@@ -86,7 +86,10 @@ class TargetOverview(BaseModel):
     current_pb: float | None = Field(default=None, description="当前市净率(PB)")
     current_market_cap: float | None = Field(default=None, description="当前总市值(亿元)")
     dividend_yield: float | None = Field(default=None, description="股息率(%)")
-    evidence: list[str] = Field(min_length=1, description="引用的 chunk_id 列表(至少 1 个)")
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
+    )
 
 
 class LegalQualification(BaseModel):
@@ -98,7 +101,10 @@ class LegalQualification(BaseModel):
     legal_status: str = Field(description="法律主体合规情况")
     business_qualifications: list[str] = Field(description="经营资质列表(空 list 也行)")
     adverse_records: list[str] = Field(description="不良记录(空 list 也行)")
-    evidence: list[str] = Field(min_length=1, description="引用的 chunk_id 列表(至少 1 个)")
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
+    )
 
 
 class FinancialAnalysis(BaseModel):
@@ -114,7 +120,10 @@ class FinancialAnalysis(BaseModel):
     cash_flow_analysis: str = Field(description="现金流分析")
     valuation_analysis: ValuationAnalysis = Field(description="估值分析(PE/PB/DCF/同业)")
     year_over_year_summary: str | None = Field(default=None, description="同比变化(若多年数据)")
-    evidence: list[str] = Field(min_length=1, description="引用的 chunk_id 列表(至少 1 个)")
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
+    )
 
 
 class IndustryAnalysis(BaseModel):
@@ -128,7 +137,10 @@ class IndustryAnalysis(BaseModel):
     competitive_position: str = Field(description="在行业中的竞争地位")
     key_competitors: list[str] = Field(description="主要竞争对手(空 list 也行)")
     policy_impact: str = Field(description="相关政策影响")
-    evidence: list[str] = Field(min_length=1, description="引用的 chunk_id 列表(至少 1 个)")
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
+    )
 
 
 class RiskAssessment(BaseModel):
@@ -144,7 +156,10 @@ class RiskAssessment(BaseModel):
     overall_risk_level: Literal["low", "medium", "high", "very_high"] = Field(
         description="整体风险等级"
     )
-    evidence: list[str] = Field(min_length=1, description="引用的 chunk_id 列表(至少 1 个)")
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
+    )
 
 
 class InvestmentRecommendation(BaseModel):
@@ -170,7 +185,10 @@ class InvestmentRecommendation(BaseModel):
     recommended_stop_loss_price: float = Field(description="建议止损价格")
     estimated_target_price_range: PriceRange = Field(description="目标价格区间(estimated 降权)")
     position_management_conditions: list[str] = Field(description="加仓/减仓触发条件(空 list 也行)")
-    evidence: list[str] = Field(min_length=1, description="引用的 chunk_id 列表(至少 1 个)")
+    evidence: list[str] = Field(
+        default_factory=list,
+        description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
+    )
 
 
 # ── 主 schema ──────────────────────────────────────────────────────────────────
