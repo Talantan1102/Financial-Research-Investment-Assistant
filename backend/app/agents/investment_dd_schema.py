@@ -27,7 +27,7 @@ DEFAULT_DISCLAIMER: Final[str] = (
 class PriceRange(BaseModel):
     """价格区间。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     low: float = Field(description="区间下限")
     high: float = Field(description="区间上限")
@@ -36,7 +36,7 @@ class PriceRange(BaseModel):
 class FinancialMetric(BaseModel):
     """单条财务指标。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     name: str = Field(description="指标名,如 '营业收入' / '资产负债率'")
     value: str = Field(description="指标值,如 '150 亿元' / '12.5%'(字符串,不强制单位)")
@@ -47,7 +47,7 @@ class FinancialMetric(BaseModel):
 class RiskItem(BaseModel):
     """单条风险项。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     title: str = Field(description="风险标题")
     description: str = Field(description="风险描述")
@@ -58,7 +58,7 @@ class RiskItem(BaseModel):
 class ValuationAnalysis(BaseModel):
     """估值分析子模块(FinancialAnalysis § 3 新增)。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     narrative: str = Field(description="估值分析综述")
     pe_historical_percentile: str | None = Field(
@@ -74,7 +74,7 @@ class ValuationAnalysis(BaseModel):
 class TargetOverview(BaseModel):
     """§ 1 标的基本信息(含估值快照)。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     narrative: str = Field(description="100-300 字综述")
     registered_capital: str | None = Field(default=None, description="注册资本")
@@ -95,7 +95,7 @@ class TargetOverview(BaseModel):
 class LegalQualification(BaseModel):
     """§ 2 主体资格。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     narrative: str = Field(description="200-400 字综述")
     legal_status: str = Field(description="法律主体合规情况")
@@ -110,7 +110,7 @@ class LegalQualification(BaseModel):
 class FinancialAnalysis(BaseModel):
     """§ 3 财务分析(投资视角,含估值分析)。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     narrative: str = Field(description="400-800 字深度分析")
     key_metrics: list[FinancialMetric] = Field(description="关键财务指标")
@@ -129,7 +129,7 @@ class FinancialAnalysis(BaseModel):
 class IndustryAnalysis(BaseModel):
     """§ 4 行业分析。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     narrative: str = Field(description="300-600 字")
     industry_name: str = Field(description="所属行业")
@@ -146,7 +146,7 @@ class IndustryAnalysis(BaseModel):
 class RiskAssessment(BaseModel):
     """§ 5 风险评估(投资视角风险维度)。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     narrative: str = Field(description="300-500 字")
     market_risk: list[RiskItem] = Field(description="市场风险(beta / 流动性)")
@@ -165,7 +165,7 @@ class RiskAssessment(BaseModel):
 class InvestmentRecommendation(BaseModel):
     """§ 6 投资建议(5 档卖方研报标准化术语)。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     narrative: str = Field(description="200-400 字综合建议")
     recommendation: Literal[
@@ -197,7 +197,7 @@ class InvestmentRecommendation(BaseModel):
 class InvestmentDueDiligenceReport(BaseModel):
     """投资标的尽调报告(B-1 use case 主输出,v0.8.4)。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     # 主键 + snapshot
     target_name: str = Field(description="标的全称")
