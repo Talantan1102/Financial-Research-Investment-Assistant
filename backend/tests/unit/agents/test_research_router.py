@@ -310,3 +310,29 @@ def test_target_entity_fallback_to_ts_code_when_none() -> None:
     # So every subtask description has 600519.SH at least once (typically twice).
     for st in plan.subtasks:
         assert "600519.SH" in st.description
+
+
+# ---------------------------------------------------------------------------
+# 19: model_copy idempotency — original r.parsed instance must NOT be mutated
+# ---------------------------------------------------------------------------
+
+
+def test_model_copy_does_not_mutate_original_plan() -> None:
+    """Idempotency: r.parsed 实例不应被 step() 通过 model_copy mutate.
+
+    防止未来"简化"成 plan.subtasks = subtasks (mutate) 导致 r.parsed 共享引用污染.
+    """
+    original_plan = ResearchPlan(plan_id="balanced", rationale="orig")
+    response = MagicMock()
+    response.parsed = original_plan
+    response.content = original_plan.model_dump_json()
+    response.model = "qwen-plus"
+    response.cost_cny = 0.001
+    llm = MagicMock()
+    llm.chat.return_value = response
+    planner = ResearchPlanner(llm=llm)
+
+    state = _make_state(objective="balanced")
+    planner.step(state)
+
+    assert original_plan.subtasks == [], "original r.parsed instance was mutated"

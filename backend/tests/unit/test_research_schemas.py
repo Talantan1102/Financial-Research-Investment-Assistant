@@ -28,25 +28,9 @@ def test_research_plan_minimal() -> None:
         subtasks=[
             Subtask(subtask_id="overview", description="x", required_tools=[], rationale="r")
         ],
-        target_entity="600519.SH",
-        research_style="comprehensive",
-        reasoning="single subtask",
     )
     assert len(p.subtasks) == 1
-    assert p.research_style == "comprehensive"
     assert p.plan_id == "balanced"
-
-
-def test_research_plan_invalid_style_rejected() -> None:
-    with pytest.raises(ValidationError):
-        ResearchPlan(
-            plan_id="balanced",
-            rationale="r",
-            subtasks=[],
-            target_entity="x",
-            research_style="weekly",  # type: ignore[arg-type]
-            reasoning="r",
-        )
 
 
 def test_research_plan_invalid_plan_id_rejected() -> None:

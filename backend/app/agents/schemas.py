@@ -193,10 +193,7 @@ class ResearchPlan(BaseModel):
 
     The planner LLM emits ``(plan_id, rationale)``; ``subtasks`` is then
     filled at runtime by ``instantiate_plan(plan_id, target_name, ts_code)``
-    from PLAN_REGISTRY. Legacy v0.8.4 fields ``target_entity`` /
-    ``research_style`` / ``reasoning`` kept as optional defaults so existing
-    callers / tests that still construct ResearchPlan with them work
-    unchanged (the planner itself no longer emits them).
+    from PLAN_REGISTRY.
     """
 
     # extra="ignore" so a hallucinated LLM emitting extra keys does not break
@@ -207,12 +204,9 @@ class ResearchPlan(BaseModel):
     plan_id: PlanId
     rationale: str = Field(max_length=200, description="LLM 解释为什么选此 plan_id")
     # subtasks 默认空, 由 instantiate_plan() runtime 填充 (Task 7 spec).
-    subtasks: list[Subtask] = Field(default_factory=list)
-
-    # v0.8.4 legacy compat (kept with defaults so existing tests/callers work).
-    target_entity: str = ""
-    research_style: Literal["concise", "comprehensive"] = "comprehensive"
-    reasoning: str = ""
+    subtasks: list[Subtask] = Field(
+        default_factory=list, description="Runtime instantiated by plan_registry"
+    )
 
 
 class Insight(BaseModel):

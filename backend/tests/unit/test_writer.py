@@ -11,9 +11,6 @@ def _state_with_insights() -> ResearchState:
         subtasks=[
             Subtask(subtask_id="overview", description="d", required_tools=[], rationale="r")
         ],
-        target_entity="600519.SH",
-        research_style="comprehensive",
-        reasoning="r",
     )
     insights = [Insight(subtask_id="overview", finding="x", supporting_data=[], confidence="high")]
     return ResearchState(

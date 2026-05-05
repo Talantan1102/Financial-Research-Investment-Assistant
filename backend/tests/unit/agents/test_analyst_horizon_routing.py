@@ -32,9 +32,6 @@ def _make_state(**kwargs: object) -> ResearchState:
                     rationale="获取最新行情",
                 )
             ],
-            target_entity="600519.SH",
-            research_style="comprehensive",
-            reasoning="基础分析",
         ),
         "insights": [
             Insight(

@@ -25,9 +25,6 @@ def _state_with_data() -> ResearchState:
                 rationale="r",
             )
         ],
-        target_entity="600519.SH",
-        research_style="comprehensive",
-        reasoning="r",
     )
     tr = ToolResult(
         tool_name="get_stock_quote",

@@ -117,14 +117,14 @@ class ResearchPlanner(Agent):
             schema=ResearchPlan,
             request_id=state.request_id,
         )
-        # LLMService auto-parses to ResearchPlan via Pydantic class schema.
-        # Defensive: if parsed is missing (mock/cassette path that returned dict),
-        # validate from raw content.
+        # LLMService.chat with schema=ResearchPlan strongly types r.parsed as
+        # ResearchPlan instance (or raises during validation). Assert as
+        # self-documenting contract — fail-loud if LLMService ever regresses.
         parsed = r.parsed
-        if isinstance(parsed, ResearchPlan):
-            plan = parsed
-        else:
-            plan = ResearchPlan.model_validate_json(r.content)
+        assert isinstance(parsed, ResearchPlan), (
+            f"LLMService contract violated: expected ResearchPlan, got {type(parsed).__name__}"
+        )
+        plan: ResearchPlan = parsed
 
         # Resolve target_name: prefer state.target_entity, fall back to ts_code,
         # then empty (instantiate_plan still works — placeholders just become "").
