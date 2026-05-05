@@ -3,6 +3,7 @@ import { BaseLayout } from '@/layout/base'
 import { ThemedRoot } from '@/themes/themed-root'
 import NotFound from '@/pages/404'
 import LoginPage from '@/pages/auth/login'
+import RegisterPage from '@/pages/auth/register'
 import Index from '@/pages/index'
 import KnowledgePage from '@/pages/knowledge'
 import MonitoringIndex from '@/pages/monitoring'
@@ -75,6 +76,10 @@ export const router = createBrowserRouter(
         {
           path: '/login',
           element: <LoginPage />,
+        },
+        {
+          path: '/register',
+          element: <RegisterPage />,
         },
         {
           path: '/',
