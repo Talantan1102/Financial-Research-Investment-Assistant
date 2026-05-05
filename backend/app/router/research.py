@@ -17,7 +17,7 @@ from app.agents.schemas import (
     ResearchRequest,
     ResearchState,
 )
-from app.router.chat import _AnonUser, get_current_user  # reuse v0 stub auth
+from app.router.auth_helpers import _AnonUser, get_current_user
 
 logger = logging.getLogger(__name__)
 
