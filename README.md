@@ -2,25 +2,28 @@
 
 LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
 
-**当前版本**:v0.8.3(tushare 真接入 + B-3 持仓预警引擎)
+**当前版本**:v0.8.4(B-1 投资标的尽调 + 产品定位 reframe + 5-agent prompt 改造 + 3 differential golden)
 
 ## 三个使用模式
 
 | 模式 | 路径 | 说明 |
 |---|---|---|
-| **研报模式 (Research)** | `/research` | 5-agent 流程(Planner → DataCollector → Analyst → Writer → Critic 5 子打分),产出结构化信贷调查报告(Pydantic schema) |
+| **投资标的尽调 (B-1)** | `/research` | 5-agent 流程(Planner 4 模板路由 → DataCollector → Analyst horizon-conditioned → Writer 6 字段驱动 → Critic 6 维评分),产出 `InvestmentDueDiligenceReport` Pydantic schema;6 字段 form(ts_code + horizon + objective + risk_tolerance + 持仓 + 机构类型) |
 | **对话模式 (Chat)** | `/chat` | ChatAgent + planner + tool registry,自然语言问答 + 工具调用(行情/财务/web/KB) |
 | **持仓预警 (Monitoring, B-3)** | `/monitoring` | 5 SignalRule 并发评分 → 红色 alert 触发 5-agent deep_dive escalation → 邮件通知;支持手动 + cron 触发 |
 
 ## 架构
 
 ```
-                    ┌────────────────────────────────────────────────┐
-                    │ FastAPI + LangGraph 1.x orchestration          │
-                    │   ├─ ResearchAgent (5-agent + Critic subgraph) │
-                    │   ├─ ChatAgent     (planner + tool registry)   │
-                    │   └─ MonitoringService (signal + escalation)   │
-                    └────────────────────────────────────────────────┘
+                    ┌──────────────────────────────────────────────────────────┐
+                    │ FastAPI + LangGraph 1.x orchestration                    │
+                    │   ├─ ResearchAgent (5-agent + Critic 6-dim subgraph)     │
+                    │   │    InvestmentDueDiligenceReport schema (v0.8.4)      │
+                    │   │    Planner(4 templates) → Analyst(horizon-conditioned)│
+                    │   │    Writer(6 sections) → Critic(6 scorer)             │
+                    │   ├─ ChatAgent     (planner + tool registry)             │
+                    │   └─ MonitoringService (signal + escalation)             │
+                    └──────────────────────────────────────────────────────────┘
                                           │
    ┌──────────────────────────────────────┼──────────────────────────────────────┐
    │ 横切服务 (app/services/) — 全部 Protocol + Real/Mock + factory             │
@@ -56,7 +59,8 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | v0.8.1 | Token-plan 重构 + v0.7 收尾 cassette | #10 |
 | v0.8.2 | Credit investigation report schema + Writer 重构 + B-1 茅台 e2e | #11 |
 | v0.8.3-pre | 项目个人化 + legacy 标识 + 设计语言对齐 | #12 |
-| **v0.8.3** | **Tushare 真接 8 接口 + B-3 持仓预警引擎(signal + escalation + email + 3 前端页)** | **#13** |
+| v0.8.3 | Tushare 真接 8 接口 + B-3 持仓预警引擎(signal + escalation + email + 3 前端页) | #13 |
+| **v0.8.4** | **B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey** | **#16** |
 
 ## 技术栈
 
@@ -130,7 +134,7 @@ cd frontend && npm run dev
 | **L2 e2e** (`backend/tests/e2e/`) | cassette(replay) | <2min | 每个 PR |
 | **L3 eval** (`backend/tests/eval/`) | live(真 API,烧钱) | 5-15min | nightly + 手动 |
 
-**当前状态**(v0.8.3):528 passed + 4 documented skip,mypy 0 errors / 302 source files,cassette 36 episodes(8 endpoint × 5 ts_code,replay 0.81s)。
+**当前状态**(v0.8.4):582 passed + 4 documented skip,mypy 0 errors / 308 source files,cassette 36 episodes + B-1 茅台 e2e cassette(84KB)。3 differential golden case(LLM-as-judge ic_score ≥ 9.0)。
 
 ## 环境变量
 
@@ -138,8 +142,9 @@ cd frontend && npm run dev
 
 | 变量 | 必需 | 说明 |
 |---|---|---|
-| `DASHSCOPE_API_KEY` | ✅ | LLM API key(阿里百炼 / OpenAI 兼容) |
+| `DASHSCOPE_API_KEY` | ✅ | LLM API key(阿里百炼 / OpenAI 兼容);B-1 /research 路由必需 |
 | `DASHSCOPE_BASE_URL` | ❌ | 默认 `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| `KB_MODE` | ❌ | `mock`(默认)或 `real`;real 模式需 Milvus 启动 |
 | `TUSHARE_MODE` | ❌ | `mock`(默认)或 `real` |
 | `TUSHARE_TOKEN` | real 需要 | Tushare Pro token |
 | `TUSHARE_BASE_URL` | ❌ | 默认 `http://api.tushare.pro`,自定义代理可覆盖 |
@@ -183,7 +188,7 @@ financial-research-assistant/
 │   └── data/                    # sqlite(gitignored)
 ├── frontend/
 │   └── src/
-│       ├── pages/{chat,research,monitoring,knowledge,news,...}
+│       ├── pages/{chat,research(/research history·/research/new 6-字段 form·/research/:id D 输出),monitoring,knowledge,news,...}
 │       ├── api/                 # typed fetch clients
 │       ├── types/               # TS schema per module
 │       └── components/markdown/ # 共享 markdown 渲染
