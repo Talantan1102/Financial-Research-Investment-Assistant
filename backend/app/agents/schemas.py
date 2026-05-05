@@ -47,6 +47,25 @@ Recommendation = Literal[
     "recommend_sell",
 ]
 
+# v0.8.5 — full tool catalog (5 existing + 8 new). Used by PLAN_REGISTRY's
+# required_tools field type constraint so the planner can only choose from
+# registered tool names.
+ToolName = Literal[
+    "get_stock_quote",
+    "get_financials",
+    "get_news",
+    "web_search",
+    "kb_search",
+    "get_balance_sheet",
+    "get_cashflow",
+    "get_daily_basic",
+    "get_pe_history",
+    "get_forecast",
+    "get_dividend_history",
+    "get_holder_change",
+    "get_money_flow",
+]
+
 
 class ResearchRequest(BaseModel):
     """B-1 研报请求(v0.8.4 — 6 结构化字段 + 可选自由文本)。"""
