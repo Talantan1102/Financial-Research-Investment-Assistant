@@ -64,6 +64,16 @@ class ValuationAnalysis(BaseModel):
     pe_historical_percentile: str | None = Field(
         default=None, description="PE 历史百分位,如 '近 5 年 30 分位'"
     )
+    # v0.8.5 forward concern 1 — numeric sibling for classify_recommendation.
+    # 0.0 ≤ x ≤ 1.0 (e.g. 0.30 = 30 分位). Existing str field stays for
+    # narrative use; downstream extractor prefers numeric when present, falls
+    # back to regex-parsing the str, then to 0.5 mid-cap default.
+    pe_historical_percentile_value: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="PE 历史百分位的数值化(0.0-1.0,如 0.30 = 近 5 年 30 分位)",
+    )
     dcf_valuation: str | None = Field(default=None, description="DCF 估值结论")
     peer_comparison: str | None = Field(default=None, description="同业估值对比")
 
@@ -119,6 +129,14 @@ class FinancialAnalysis(BaseModel):
     return_analysis: str = Field(description="投资回报分析(ROE/ROIC 等)")
     cash_flow_analysis: str = Field(description="现金流分析")
     valuation_analysis: ValuationAnalysis = Field(description="估值分析(PE/PB/DCF/同业)")
+    # v0.8.5 forward concern 3 — wires asset_liability_warning red-line in
+    # writer.post_process. Prior to this field the str check
+    # `fa.get("debt_ratio_assessment") in {"警戒","高风险"}` was dead code (field
+    # did not exist on schema, LLM never emitted it).
+    debt_ratio_assessment: Literal["健康", "一般", "警戒", "高风险"] | None = Field(
+        default=None,
+        description="资产负债率评估(用于触发 asset_liability_warning red-line)",
+    )
     year_over_year_summary: str | None = Field(default=None, description="同比变化(若多年数据)")
     evidence: list[str] = Field(
         default_factory=list,

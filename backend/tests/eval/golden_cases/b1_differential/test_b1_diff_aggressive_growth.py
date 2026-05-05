@@ -38,8 +38,12 @@ pytestmark = [
             "position_size deterministically. Stub data lacks numeric metrics so "
             "classify_recommendation falls to recommend_hold fallback "
             "(compute_position_size_pct(hold, very_aggressive, …) = 7.0%, < 10%). "
-            "Cassette to be re-recorded in Task 9 with new SOP-injected prompts; "
-            "acceptance criteria likely need recalibration vs new helper output."
+            "Phase 9a (Task 9) wired forward concerns 1 (numeric pe_percentile + "
+            "regex fallback) and 3 (debt_ratio_assessment), so the LLM CAN now "
+            "supply numeric metrics. Phase 9b cassette re-record + un-xfail: when "
+            "user records new cassette and removes this xfail, strict=True will "
+            "force the test back to PASS — keep strict=True so the un-xfail "
+            "transition is loud."
         ),
         strict=True,
     ),

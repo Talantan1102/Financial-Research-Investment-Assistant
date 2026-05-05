@@ -144,12 +144,22 @@ def test_writer_post_process_deterministic() -> None:
 
 
 def test_writer_post_process_preserves_other_fields() -> None:
-    """post_process 只改 recommendation + size,其它字段必须保持原样。"""
+    """post_process 改 recommendation + size + narrative footer,其它字段必须保持原样。
+
+    v0.8.5 forward concern 2: post_process now also appends a deterministic
+    narrative footer announcing the Python override. The original LLM-authored
+    narrative prefix must still be preserved as the leading text.
+    """
     state = _make_state()
     llm_report = _make_dd_report(recommendation="recommend_buy", position_size_pct=18.0)
     out = post_process_writer_output(state, llm_report)
-    # narrative / 价格 / holding_period / position_management_conditions 不动
-    assert out.investment_recommendation.narrative == llm_report.investment_recommendation.narrative
+    # narrative 的 LLM 部分必须保留 (作为前缀); footer 是新增内容
+    out_narr = out.investment_recommendation.narrative
+    src_narr = llm_report.investment_recommendation.narrative
+    assert out_narr.startswith(src_narr.rstrip()), (
+        f"LLM-authored narrative must remain as prefix; got {out_narr!r}"
+    )
+    assert "Python 决定论修正" in out_narr, "footer must be appended"
     assert (
         out.investment_recommendation.recommended_holding_period
         == llm_report.investment_recommendation.recommended_holding_period
@@ -166,6 +176,21 @@ def test_writer_post_process_preserves_other_fields() -> None:
     assert out.target_overview == llm_report.target_overview
     assert out.financial_analysis == llm_report.financial_analysis
     assert out.industry_analysis == llm_report.industry_analysis
+
+
+def test_writer_post_process_narrative_footer_idempotent() -> None:
+    """v0.8.5 forward concern 2 — re-running post_process must not stack footers.
+
+    Footer marker '`Python 决定论修正`' is detected via substring; second pass
+    finds it and skips appending so narrative stays exactly one footer long.
+    """
+    state = _make_state()
+    llm_report = _make_dd_report(recommendation="recommend_buy", position_size_pct=18.0)
+    out1 = post_process_writer_output(state, llm_report)
+    out2 = post_process_writer_output(state, out1)
+    assert out1.investment_recommendation.narrative == out2.investment_recommendation.narrative
+    # Exactly one occurrence of the footer marker
+    assert out1.investment_recommendation.narrative.count("Python 决定论修正") == 1
 
 
 def test_writer_post_process_uses_state_risk_tolerance() -> None:
@@ -193,6 +218,73 @@ def test_extract_metrics_handles_missing_fields() -> None:
     assert metrics["roe"] == 0.0
     assert metrics["forecast_signal"] == "neutral"
     assert metrics["asset_liability_warning"] is False
+
+
+def test_extract_metrics_uses_numeric_pe_percentile_when_present() -> None:
+    """v0.8.5 forward concern 1 — numeric field takes precedence over str."""
+    report = {
+        "financial_analysis": {
+            "valuation_analysis": {
+                # Both fields present; numeric wins.
+                "pe_historical_percentile": "近 5 年 80 分位",
+                "pe_historical_percentile_value": 0.30,
+            }
+        }
+    }
+    metrics = _extract_metrics_from_llm_report(report)
+    assert metrics["pe_percentile"] == 0.30, (
+        "numeric pe_historical_percentile_value must take precedence over str"
+    )
+
+
+def test_extract_metrics_falls_back_to_regex_parse_of_str_percentile() -> None:
+    """v0.8.5 forward concern 1 — regex parses '近 5 年 30 分位' → 0.30."""
+    report = {
+        "financial_analysis": {
+            "valuation_analysis": {
+                "pe_historical_percentile": "近 5 年 30 分位",
+                # numeric field absent → regex fallback.
+            }
+        }
+    }
+    metrics = _extract_metrics_from_llm_report(report)
+    assert metrics["pe_percentile"] == 0.30, (
+        f"regex fallback should parse '30 分位' → 0.30, got {metrics['pe_percentile']}"
+    )
+
+
+def test_extract_metrics_falls_back_to_default_on_unparseable_string() -> None:
+    """v0.8.5 forward concern 1 — bad str → 0.5 mid-cap default."""
+    report = {
+        "financial_analysis": {
+            "valuation_analysis": {
+                "pe_historical_percentile": "估值合理(未给具体百分位)",
+            }
+        }
+    }
+    metrics = _extract_metrics_from_llm_report(report)
+    assert metrics["pe_percentile"] == 0.5
+
+
+def test_extract_metrics_debt_ratio_assessment_warning_red_line() -> None:
+    """v0.8.5 forward concern 3 — debt_ratio_assessment 字段 wired (was dead code)."""
+    # 警戒 → True
+    report_warn = {
+        "financial_analysis": {"debt_ratio_assessment": "警戒"},
+    }
+    assert _extract_metrics_from_llm_report(report_warn)["asset_liability_warning"] is True
+
+    # 高风险 → True
+    report_risk = {
+        "financial_analysis": {"debt_ratio_assessment": "高风险"},
+    }
+    assert _extract_metrics_from_llm_report(report_risk)["asset_liability_warning"] is True
+
+    # 健康 → False
+    report_ok = {
+        "financial_analysis": {"debt_ratio_assessment": "健康"},
+    }
+    assert _extract_metrics_from_llm_report(report_ok)["asset_liability_warning"] is False
 
 
 def test_writer_prompt_contains_sop_section() -> None:

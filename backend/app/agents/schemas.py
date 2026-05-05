@@ -295,9 +295,11 @@ class ResearchState(BaseModel):
 
     # v0.8.5 — constrained router retry edge fields (Task 7 schema; Task 9 wires
     # the actual conditional retry edge in research_graph.py).
+    # ge=0/le=2 mirrors _MAX_PLANNER_RETRY in research_graph.py — hard cap so the
+    # retry router cannot loop indefinitely even if state is corrupted upstream.
     target_entity: str | None = None  # e.g. "贵州茅台"; falls back to ts_code if None
-    planner_retry_count: int = 0
-    planner_critic_feedback: str | None = None
+    planner_retry_count: int = Field(default=0, ge=0, le=2)
+    planner_critic_feedback: str | None = Field(default=None, max_length=300)
     insights: list[Insight] = Field(default_factory=list)
     report_markdown: str | None = None
     chart_specs: list[ChartSpec] = Field(default_factory=list)

@@ -18,12 +18,20 @@ gets the final say on those two fields. Skill bundle scripts
 (compute_position_size_pct + classify_recommendation) are the single source of
 truth.
 
+v0.8.5 Task 9 forward concerns wired into prompt + post-process:
+  1. valuation_analysis.pe_historical_percentile_value (numeric 0-1 sibling)
+  2. financial_analysis.debt_ratio_assessment (Literal[健康/一般/警戒/高风险])
+  3. post_process_writer_output appends deterministic narrative footer that
+     announces Python override of recommendation + position pct.
+
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md § 3 / § 5.3
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.5-constrained-router-design.md § Task 5
+spec ref: docs/superpowers/plans/2026-05-05-v0.8.5-constrained-router-implementation.md § Task 9
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -201,9 +209,11 @@ _SYSTEM_PROMPT_BASE = """你是专业投资研究分析师。
     "valuation_analysis": {
       "narrative": "<估值分析综述>",
       "pe_historical_percentile": "<PE 历史百分位或 null>",
+      "pe_historical_percentile_value": null,
       "dcf_valuation": "<DCF 估值或 null>",
       "peer_comparison": "<同业估值对比或 null>"
     },
+    "debt_ratio_assessment": null,
     "year_over_year_summary": "<同比变化或 null>",
     "evidence": ["<chunk_id>"]
   },
@@ -251,6 +261,12 @@ _SYSTEM_PROMPT_BASE = """你是专业投资研究分析师。
 - narrative 用规范中文金融术语
 - 风险等级客观评估:有重大风险信号时 overall_risk_level 选 high 或 very_high
 - 无 Insight 支撑的内容在 narrative 里声明"数据缺失,建议补充材料"
+
+**v0.8.5 数值化字段(若可量化必须同时填,以便后端决定论 helper 使用)**:
+- ``financial_analysis.valuation_analysis.pe_historical_percentile_value``: float in [0.0, 1.0],
+  例如近 5 年 PE 30 分位 → 0.30。无法判断时填 null,narrative 中说明数据缺失。
+- ``financial_analysis.debt_ratio_assessment``: 必须从 {"健康", "一般", "警戒", "高风险"} 中四选一
+  (资产负债率<30% → 健康;30-50% → 一般;50-70% → 警戒;>70% → 高风险);数据缺失时填 null。
 """
 
 
@@ -319,29 +335,66 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
 # ---------------------------------------------------------------------------
 
 
+# v0.8.5 forward concern 1 — regex fallback for pe_historical_percentile str.
+# Captures the first numeric (int or decimal) followed by 0+ whitespace and
+# "分位" (e.g. "近 5 年 30 分位" → "30", "30.5 分位" → "30.5"). Returns the
+# normalised float in [0.0, 1.0] or None on no match.
+_PE_PERCENTILE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*分位")
+
+
+def _parse_pe_percentile_str(s: str | None) -> float | None:
+    """Best-effort regex parse of '近 5 年 30 分位' → 0.30.
+
+    Returns None when no '<num> 分位' substring is found, allowing the caller
+    to apply its own default (typically 0.5 for missing data). Defensive
+    against LLM outputs that mix half-numerals or missing 分位 token.
+    """
+    if not s:
+        return None
+    m = _PE_PERCENTILE_PATTERN.search(s)
+    if m is None:
+        return None
+    try:
+        raw = float(m.group(1))
+    except ValueError:
+        return None
+    # Treat values >1 as percentage (e.g. "30 分位" → 30 → 0.30); values ≤1
+    # already normalized (e.g. "0.3 分位" → 0.3).
+    pct = raw / 100.0 if raw > 1.0 else raw
+    if 0.0 <= pct <= 1.0:
+        return pct
+    return None
+
+
 def _extract_metrics_from_llm_report(report: dict[str, Any]) -> dict[str, Any]:
     """Extract metrics dict consumed by classify_recommendation.
 
-    LLM-generated reports carry narrative text plus a few sparse numeric fields.
-    We defensively pull what we can (`.get(...) or default`); fields the schema
-    does not guarantee (`roe`, `revenue_yoy`, etc.) usually fall through to
-    defaults, which causes classify_recommendation to drop to its `recommend_hold`
-    fallback rule. That is the intended v0.8.5 baseline behaviour — refining
-    metric extraction (parsing pe_historical_percentile str → float, etc.) is
-    a future task. The deterministic override is what matters: LLM cannot
-    talk the recommendation up.
+    Resolution order for ``pe_percentile``:
+      1. ``valuation_analysis.pe_historical_percentile_value`` (v0.8.5 numeric)
+      2. regex parse of ``valuation_analysis.pe_historical_percentile`` str
+         (e.g. "近 5 年 30 分位" → 0.30)
+      3. 0.5 (中位) — missing/unparseable, neither buy nor sell red-line.
+
+    Other fields the schema does not guarantee (``roe``, ``revenue_yoy``, etc.)
+    fall through to defaults causing classify_recommendation to drop to its
+    ``recommend_hold`` fallback rule. The deterministic override is what
+    matters: the LLM cannot talk the recommendation up via narrative alone.
     """
     fa: dict[str, Any] = report.get("financial_analysis") or {}
     va: dict[str, Any] = fa.get("valuation_analysis") or {}
     overview: dict[str, Any] = report.get("target_overview") or {}
+
+    # v0.8.5 forward concern 1 — numeric > regex > 0.5 fallback chain.
+    pe_pct: float
+    pe_numeric = va.get("pe_historical_percentile_value")
+    if isinstance(pe_numeric, int | float) and 0.0 <= float(pe_numeric) <= 1.0:
+        pe_pct = float(pe_numeric)
+    else:
+        parsed = _parse_pe_percentile_str(va.get("pe_historical_percentile"))
+        pe_pct = parsed if parsed is not None else 0.5
+
     return {
-        # NOTE: pe_historical_percentile in the schema is `str | None`
-        # (e.g. "近 5 年 30 分位"). classify_recommendation's _eval_condition
-        # silently catches type mismatch — string compared with float returns
-        # False, no crash.
-        # 0.5 (中位) fallback — missing/str-typed 时不触发 sell red-line (>0.90) 也不
-        # 触发 buy 条件 (<0.30). Task 9 cassette 重录会改 schema 加 numeric percentile.
-        "pe_percentile": va.get("pe_historical_percentile") or 0.5,
+        "pe_percentile": pe_pct,
         "roe": fa.get("roe") or 0.0,
         "revenue_yoy": fa.get("revenue_yoy") or 0.0,
         "net_profit_yoy": fa.get("net_profit_yoy") or 0.0,
@@ -350,6 +403,7 @@ def _extract_metrics_from_llm_report(report: dict[str, Any]) -> dict[str, Any]:
         # default 1e12 anchor 一致).
         "market_cap_cny": overview.get("current_market_cap") or 1_000_000_000_000.0,
         "forecast_signal": fa.get("forecast_signal") or "neutral",
+        # v0.8.5 forward concern 3 — debt_ratio_assessment now schema-real.
         "asset_liability_warning": fa.get("debt_ratio_assessment") in {"警戒", "高风险"},
     }
 
@@ -363,9 +417,13 @@ def post_process_writer_output(
       - investment_recommendation.recommendation → classify_recommendation(metrics)
       - investment_recommendation.recommended_position_size_pct →
             compute_position_size_pct(rec, risk_tol, market_cap)
+      - narrative footer appended announcing the override (forward concern 2).
+        This guarantees the LLM-narrative number cannot drift from the final
+        Python-decided number. v0.9 will replace this with a 2nd LLM rewrite
+        for fluency; v0.8.5 keeps it deterministic and idempotent.
 
-    All other fields (narrative, prices, holding_period, evidence) remain LLM-
-    authored. Pure function — idempotent on a fixed (state, llm_report) pair.
+    All other fields (prices, holding_period, evidence) remain LLM-authored.
+    Pure function — idempotent on a fixed (state, llm_report) pair.
     """
     report_dict = llm_report.model_dump()
     metrics = _extract_metrics_from_llm_report(report_dict)
@@ -378,10 +436,26 @@ def post_process_writer_output(
         market_cap_cny=market_cap,
     )
 
+    # v0.8.5 forward concern 2 — narrative footer announcing Python override.
+    # Strip trailing whitespace + idempotency guard so re-running post_process
+    # on an already-processed report does not stack footers.
+    base_narrative = (llm_report.investment_recommendation.narrative or "").rstrip()
+    footer_marker = "Python 决定论修正"
+    if footer_marker not in base_narrative:
+        narrative_with_footer = (
+            f"{base_narrative}\n\n"
+            f"---\n"
+            f"{footer_marker}: 评级 = {classified_rec}, 仓位 = {pct:.2f}%"
+            f" (基于客户 risk_tolerance={risk_tolerance} + 市值数据 + skill bundle 规则)。"
+        ).strip()
+    else:
+        narrative_with_footer = base_narrative
+
     new_recommendation = llm_report.investment_recommendation.model_copy(
         update={
             "recommendation": classified_rec,
             "recommended_position_size_pct": pct,
+            "narrative": narrative_with_footer,
         }
     )
     return llm_report.model_copy(update={"investment_recommendation": new_recommendation})
