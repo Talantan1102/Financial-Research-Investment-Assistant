@@ -303,7 +303,6 @@ async def get_research_graph() -> Any:
         from app.agents.data_collector import DataCollector
         from app.agents.research_planner import ResearchPlanner
         from app.agents.writer import Writer
-        from app.orchestration.checkpointer import make_async_chat_checkpointer
         from app.orchestration.research_graph import build_research_graph
         from app.services.bocha_factory import build_bocha_service_from_env
         from app.services.kb_factory import build_kb_search_service_from_env
@@ -341,12 +340,15 @@ async def get_research_graph() -> Any:
         ]
         critic = Critic(llm=llm, scorers=scorers)
 
-        # AsyncSqliteSaver must be created inside the running event loop.
-        # make_async_chat_checkpointer opens an aiosqlite connection and keeps it
-        # open for the lifetime of the process (singleton pattern).
-        async_checkpointer = await make_async_chat_checkpointer(
-            Path("backend/data/research.sqlite")
-        )
+        # AsyncSqliteSaver hangs on graph.astream_events() in the production
+        # event loop (root cause: aiosqlite worker thread starvation under
+        # uvicorn ProactorEventLoop or async generator yield interaction).
+        # langgraph integration tests pass because they run with their own
+        # event loop policy. Until v0.8.5 D6 evaluation we use MemorySaver —
+        # no sqlite persistence, but graph.astream_events works. Run history
+        # is read directly from the deferred research.sqlite (which still
+        # has past run data from before this switch).
+        from langgraph.checkpoint.memory import MemorySaver
 
         _RESEARCH_GRAPH_SINGLETON = build_research_graph(
             planner=planner,
@@ -354,7 +356,7 @@ async def get_research_graph() -> Any:
             analyst=analyst,
             writer=writer,
             critic=critic,
-            checkpointer=async_checkpointer,
+            checkpointer=MemorySaver(),
         )
         return _RESEARCH_GRAPH_SINGLETON
 

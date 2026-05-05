@@ -57,4 +57,10 @@ async def make_async_chat_checkpointer(
     """
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn: aiosqlite.Connection = await aiosqlite.connect(str(db_path))
-    return AsyncSqliteSaver(conn)
+    saver = AsyncSqliteSaver(conn)
+    # Explicit setup avoids lazy init deadlock during graph.astream_events()
+    # — without this, the first graph invocation hangs because setup() is
+    # awaited inside the streaming generator's event loop in a way that
+    # never yields control back.
+    await saver.setup()
+    return saver
