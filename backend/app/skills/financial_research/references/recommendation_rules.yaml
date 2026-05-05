@@ -1,0 +1,42 @@
+# 5 档评级规则 — sell / buy / overweight / underweight / hold
+# DSL 支持:
+#   - all_of / any_of: list of conditions
+#   - condition: {field, op, value} triple OR {count_at_least_3: [...]}
+#   - op: <, >, ==, <=, >=
+#   - fallback: true (last resort)
+#
+# 优先级 (按本文件 list 顺序):
+#   recommend_sell → recommend_buy → recommend_overweight → recommend_underweight → recommend_hold
+
+rules:
+  - name: recommend_sell
+    any_of:
+      - {field: pe_percentile, op: ">", value: 0.90}
+      - {field: forecast_signal, op: "==", value: "negative"}
+      - {field: pledge_ratio, op: ">", value: 0.60}
+      - {field: asset_liability_warning, op: "==", value: true}
+
+  - name: recommend_buy
+    all_of:
+      - {field: pe_percentile, op: "<", value: 0.30}
+      - {field: roe, op: ">", value: 0.15}
+      - {field: revenue_yoy, op: ">", value: 0}
+      - {field: net_profit_yoy, op: ">", value: 0}
+
+  - name: recommend_overweight
+    any_of:
+      - {field: forecast_signal, op: "==", value: "positive"}
+      - count_at_least_3:
+          - {field: pe_percentile, op: "<", value: 0.50}
+          - {field: roe, op: ">", value: 0.12}
+          - {field: revenue_yoy, op: ">", value: 0}
+          - {field: net_profit_yoy, op: ">", value: 0}
+
+  - name: recommend_underweight
+    any_of:
+      - {field: pe_percentile, op: ">", value: 0.70}
+      - {field: revenue_yoy, op: "<", value: 0}
+      - {field: net_profit_yoy, op: "<", value: 0}
+
+  - name: recommend_hold
+    fallback: true
