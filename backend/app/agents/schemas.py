@@ -189,14 +189,30 @@ class Subtask(BaseModel):
 
 
 class ResearchPlan(BaseModel):
-    """ResearchPlanner 输出。"""
+    """ResearchPlanner 输出 — v0.8.5 constrained-router schema.
 
-    model_config = ConfigDict(frozen=True)
+    The planner LLM emits ``(plan_id, rationale)``; ``subtasks`` is then
+    filled at runtime by ``instantiate_plan(plan_id, target_name, ts_code)``
+    from PLAN_REGISTRY. Legacy v0.8.4 fields ``target_entity`` /
+    ``research_style`` / ``reasoning`` kept as optional defaults so existing
+    callers / tests that still construct ResearchPlan with them work
+    unchanged (the planner itself no longer emits them).
+    """
 
-    subtasks: list[Subtask]
-    target_entity: str
-    research_style: Literal["concise", "comprehensive"]
-    reasoning: str
+    # extra="ignore" so a hallucinated LLM emitting extra keys does not break
+    # parsing. Not frozen — instantiate_plan's caller may need to overwrite
+    # subtasks; downstream agents treat the instance as read-only by convention.
+    model_config = ConfigDict(extra="ignore")
+
+    plan_id: PlanId
+    rationale: str = Field(max_length=200, description="LLM 解释为什么选此 plan_id")
+    # subtasks 默认空, 由 instantiate_plan() runtime 填充 (Task 7 spec).
+    subtasks: list[Subtask] = Field(default_factory=list)
+
+    # v0.8.4 legacy compat (kept with defaults so existing tests/callers work).
+    target_entity: str = ""
+    research_style: Literal["concise", "comprehensive"] = "comprehensive"
+    reasoning: str = ""
 
 
 class Insight(BaseModel):
@@ -281,6 +297,12 @@ class ResearchState(BaseModel):
 
     plan: ResearchPlan | None = None
     tool_results: list[ToolResult] = Field(default_factory=list)
+
+    # v0.8.5 — constrained router retry edge fields (Task 7 schema; Task 9 wires
+    # the actual conditional retry edge in research_graph.py).
+    target_entity: str | None = None  # e.g. "贵州茅台"; falls back to ts_code if None
+    planner_retry_count: int = 0
+    planner_critic_feedback: str | None = None
     insights: list[Insight] = Field(default_factory=list)
     report_markdown: str | None = None
     chart_specs: list[ChartSpec] = Field(default_factory=list)
