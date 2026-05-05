@@ -31,6 +31,9 @@ from app.agents.critic import Critic
 from app.agents.critic_subagents.conciseness import ConcisenessScorer
 from app.agents.critic_subagents.coverage import CoverageScorer
 from app.agents.critic_subagents.factuality import FactualityScorer
+from app.agents.critic_subagents.input_context_scorer import (
+    InputContextAppropriatenessScorer,
+)
 from app.agents.critic_subagents.insight import InsightScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.data_collector import DataCollector
@@ -135,6 +138,7 @@ def _build_test_research_graph() -> Any:
         InsightScorer(llm=svc),
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
+        InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
     ]
     critic = Critic(llm=svc, scorers=scorers)
 
@@ -195,7 +199,13 @@ def test_research_sse_http_200(test_client: TestClient) -> None:
     """POST /api/v0.5/research returns HTTP 200 with text/event-stream content type."""
     resp = test_client.post(
         "/api/v0.5/research",
-        json={"user_message": "深度分析茅台 600519.SH"},
+        json={
+            "target_ts_code": "600519.SH",
+            "client_total_aum": 50_000_000.0,
+            "investment_objective": "balanced",
+            "investment_horizon": "medium_term",
+            "risk_tolerance": "moderate",
+        },
         headers={"Accept": "text/event-stream"},
     )
     assert resp.status_code == 200, f"Expected 200 got {resp.status_code}: {resp.text}"
@@ -207,7 +217,13 @@ def test_research_sse_event_framing(test_client: TestClient) -> None:
     """Every SSE line starts with 'data: ' and is valid JSON."""
     resp = test_client.post(
         "/api/v0.5/research",
-        json={"user_message": "深度分析茅台 600519.SH"},
+        json={
+            "target_ts_code": "600519.SH",
+            "client_total_aum": 50_000_000.0,
+            "investment_objective": "balanced",
+            "investment_horizon": "medium_term",
+            "risk_tolerance": "moderate",
+        },
     )
     assert resp.status_code == 200
 
@@ -232,7 +248,13 @@ def test_research_sse_event_types_within_spec(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     n = len(events)
@@ -246,7 +268,13 @@ def test_research_sse_has_plan_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     plan_events = [e for e in events if e["type"] == "plan"]
@@ -259,7 +287,13 @@ def test_research_sse_has_data_progress_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     dp_events = [e for e in events if e["type"] == "data_progress"]
@@ -272,7 +306,13 @@ def test_research_sse_has_report_chunk_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     rc_events = [e for e in events if e["type"] == "report_chunk"]
@@ -285,7 +325,13 @@ def test_research_sse_has_critic_score_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     cs_events = [e for e in events if e["type"] == "critic_score"]
@@ -298,7 +344,13 @@ def test_research_sse_has_done_event(test_client: TestClient) -> None:
     events = _collect_sse_events(
         test_client.post(
             "/api/v0.5/research",
-            json={"user_message": "深度分析茅台 600519.SH"},
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
         ).content
     )
     done_events = [e for e in events if e["type"] == "done"]
@@ -310,7 +362,13 @@ def test_research_sse_stream_event_schema(test_client: TestClient) -> None:
     """Each SSE event validates against the ResearchStreamEvent Pydantic schema."""
     resp = test_client.post(
         "/api/v0.5/research",
-        json={"user_message": "深度分析茅台 600519.SH"},
+        json={
+            "target_ts_code": "600519.SH",
+            "client_total_aum": 50_000_000.0,
+            "investment_objective": "balanced",
+            "investment_horizon": "medium_term",
+            "risk_tolerance": "moderate",
+        },
     )
     assert resp.status_code == 200
 
@@ -326,10 +384,16 @@ def test_research_sse_stream_event_schema(test_client: TestClient) -> None:
 
 def test_research_request_schema_validation() -> None:
     """ResearchRequest Pydantic schema: required fields + defaults."""
-    req = ResearchRequest(user_message="深度分析茅台")
-    assert req.user_message == "深度分析茅台"
-    assert req.target_entity == ""
-    assert req.research_style == "comprehensive"
+    req = ResearchRequest(
+        target_ts_code="600519.SH",
+        client_total_aum=50_000_000.0,
+        investment_objective="balanced",
+        investment_horizon="medium_term",
+        risk_tolerance="moderate",
+    )
+    assert req.target_ts_code == "600519.SH"
+    assert req.investment_objective == "balanced"
+    assert req.user_message is None
 
 
 def test_research_stream_event_schema_validation() -> None:
@@ -345,3 +409,195 @@ def test_research_stream_event_schema_validation() -> None:
     ):
         ev = ResearchStreamEvent(type=ev_type, data={"key": "value"})
         assert ev.type == ev_type
+
+
+# ---------------------------------------------------------------------------
+# Metadata / progress timeline regression tests (dogfood UX fix)
+# ---------------------------------------------------------------------------
+
+
+def test_research_sse_plan_event_has_summary_and_subtasks(test_client: TestClient) -> None:
+    """plan event must include 'summary' (str) and 'subtasks' (list[str]) metadata.
+
+    Verifies the dogfood UX fix: _adapt_event now extracts ResearchPlan.subtasks
+    from the node output and attaches them to the plan event data so the frontend
+    research log can display '已拆解为 N 个研究维度' + subtask descriptions.
+    Business-friendly wording hides internal agent name.
+    """
+    events = _collect_sse_events(
+        test_client.post(
+            "/api/v0.5/research",
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
+        ).content
+    )
+    plan_events = [e for e in events if e["type"] == "plan"]
+    assert plan_events, "Expected at least one plan event"
+    ev_data = plan_events[0]["data"]
+    assert "summary" in ev_data, f"plan event data missing 'summary': {ev_data}"
+    assert isinstance(ev_data["summary"], str), (
+        f"summary must be str, got {type(ev_data['summary'])}"
+    )
+    assert "subtasks" in ev_data, f"plan event data missing 'subtasks': {ev_data}"
+    assert isinstance(ev_data["subtasks"], list), (
+        f"subtasks must be list, got {type(ev_data['subtasks'])}"
+    )
+    # summary should mention research dimensions (business-friendly UX reword)
+    summary_str: str = ev_data["summary"]
+    assert "研究维度" in summary_str or "子任务" in summary_str or "拆解" in summary_str, (
+        f"summary should describe research breakdown: {summary_str}"
+    )
+
+
+def test_research_sse_data_progress_event_has_summary_and_tools(test_client: TestClient) -> None:
+    """data_progress event must include 'summary' (str) and 'tools' (list[str]) metadata.
+
+    Verifies the dogfood UX fix: _adapt_event now extracts ToolResult.tool_name list
+    from data_collector_node output and attaches human-readable tool labels so the
+    frontend research log can display '✅ 已采集 N 项数据' with specific source names.
+    """
+    events = _collect_sse_events(
+        test_client.post(
+            "/api/v0.5/research",
+            json={
+                "target_ts_code": "600519.SH",
+                "client_total_aum": 50_000_000.0,
+                "investment_objective": "balanced",
+                "investment_horizon": "medium_term",
+                "risk_tolerance": "moderate",
+            },
+        ).content
+    )
+    dp_events = [e for e in events if e["type"] == "data_progress"]
+    assert dp_events, "Expected at least one data_progress event"
+    ev_data = dp_events[0]["data"]
+    assert "summary" in ev_data, f"data_progress event missing 'summary': {ev_data}"
+    assert isinstance(ev_data["summary"], str), "summary must be str"
+    assert "tools" in ev_data, f"data_progress event missing 'tools': {ev_data}"
+    assert isinstance(ev_data["tools"], list), f"tools must be list, got {type(ev_data['tools'])}"
+    assert "已采集" in ev_data["summary"], (
+        f"summary should say '已采集 N 项数据': {ev_data['summary']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: AsyncSqliteSaver checkpointer + astream_events path
+# ---------------------------------------------------------------------------
+
+
+async def test_research_graph_with_async_checkpointer_does_not_raise(
+    tmp_path: Any,
+) -> None:
+    """Regression: graph compiled with AsyncSqliteSaver must work with astream_events.
+
+    This test reproduces the dogfood blocker:
+      "The SqliteSaver does not support async methods.
+       Consider using AsyncSqliteSaver instead."
+
+    The bug only surfaces when *both* conditions are true:
+      1. The graph checkpointer is a sync SqliteSaver.
+      2. The graph is driven via graph.astream_events() (async path).
+
+    The fix is to use AsyncSqliteSaver via make_async_chat_checkpointer.
+    This test builds a real graph with AsyncSqliteSaver and invokes
+    astream_events() to verify no error is raised.
+    """
+    from pathlib import Path
+
+    from app.orchestration.checkpointer import make_async_chat_checkpointer
+
+    db_path = Path(tmp_path) / "test_regression_async.sqlite"
+    async_checkpointer = await make_async_chat_checkpointer(db_path)
+
+    mock_client = MockLLMClient.from_fixture_dir(FIXTURES_DIR)
+    svc = LLMService(client=mock_client)
+
+    registry = ToolRegistry()
+    registry.register(_StubQuoteTool())
+    registry.register(_StubFinancialsTool())
+
+    planner = ResearchPlanner(llm=svc)
+    collector = DataCollector(llm=svc, registry=registry)
+    analyst = Analyst(llm=svc)
+    writer = Writer(llm=svc)
+    scorers: list[Agent] = [
+        FactualityScorer(llm=svc),
+        CoverageScorer(llm=svc),
+        InsightScorer(llm=svc),
+        StructureScorer(llm=svc),
+        ConcisenessScorer(llm=svc),
+        InputContextAppropriatenessScorer(llm=svc),
+    ]
+    critic = Critic(llm=svc, scorers=scorers)
+
+    graph = build_research_graph(
+        planner=planner,
+        collector=collector,
+        analyst=analyst,
+        writer=writer,
+        critic=critic,
+        checkpointer=async_checkpointer,
+    )
+
+    from app.agents.schemas import ResearchState
+
+    initial = ResearchState(
+        user_id="test-user",
+        session_id="test-session",
+        user_message="请对 600519.SH 进行投资标的尽调。",
+        request_id="test-regression-001",
+        target_ts_code="600519.SH",
+        client_total_aum=50_000_000.0,
+        investment_objective="balanced",
+        investment_horizon="medium_term",
+        risk_tolerance="moderate",
+    )
+    config = {"configurable": {"thread_id": "regression-test-async-001"}}
+
+    # This must NOT raise "SqliteSaver does not support async methods".
+    event_count = 0
+    async for _ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
+        event_count += 1
+
+    assert event_count >= 1, "Expected at least one LangGraph event from astream_events"
+
+    # Cleanup: close the aiosqlite connection.
+    await async_checkpointer.conn.close()
+
+
+async def test_get_research_graph_dependency_returns_compiled_graph(
+    monkeypatch: Any,
+) -> None:
+    """get_research_graph DI factory must return a non-None compiled graph
+    with a checkpointer that supports async streaming.
+
+    v0.8.4 dogfood note: the production factory uses MemorySaver as a
+    workaround for AsyncSqliteSaver hangs in graph.astream_events(). This
+    test verifies the factory returns a usable graph; v0.8.5 D6 evaluation
+    pipeline reinstates AsyncSqliteSaver for proper persistence.
+    """
+    import app.router.research as research_mod
+
+    # Reset the singleton so the factory rebuilds during this test.
+    monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_SINGLETON", None)
+    monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_LOCK", None)
+
+    graph = await research_mod.get_research_graph()
+    assert graph is not None, "get_research_graph must return a non-None compiled graph"
+    # Checkpointer must exist and not be the sync SqliteSaver (which would
+    # hang astream_events). Both MemorySaver and AsyncSqliteSaver are fine.
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    assert graph.checkpointer is not None, "graph must have a checkpointer"
+    assert not isinstance(graph.checkpointer, SqliteSaver), (
+        f"sync SqliteSaver causes async streaming hang; got {type(graph.checkpointer)}"
+    )
+
+    # Reset singleton so other tests start fresh.
+    monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_SINGLETON", None)
+    monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_LOCK", None)

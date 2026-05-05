@@ -1,4 +1,4 @@
-"""Critic — orchestrates 5-dim parallel scoring via LangGraph subgraph (Send API).
+"""Critic — orchestrates 6-dim parallel scoring via LangGraph subgraph (Send API).
 
 The actual fan-out + reduce happens at the orchestration layer
 (critic_subgraph.py). Critic class itself owns the sub_agents list and
@@ -7,6 +7,10 @@ provides:
     base.py's NotImplementedError placeholder)
   - aggregate_scores helper for the subgraph reduce phase
   - step() sync fallback for unit-test of Agent contract
+
+6 dimensions (v0.8.4):
+  factuality / coverage / insight / structure / conciseness /
+  input_context_appropriateness (第 6 scorer — 报告是否真 condition on 6 input 字段)
 """
 
 from __future__ import annotations

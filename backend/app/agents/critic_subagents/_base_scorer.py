@@ -14,6 +14,12 @@ from app.agents.schemas import (
 )
 from app.services.llm_response import Tier
 
+# Hard cap on report_markdown passed to base scorers.
+# The reasoning model (deepseek-v4-flash) counts thinking tokens against max_tokens=8000.
+# Long reports (5000+ chars) cause completion truncation → JSONDecodeError.
+# 5000 chars covers ~6-8 pages of Chinese text, sufficient for all 5 scoring dimensions.
+_REPORT_CHAR_CAP = 5000
+
 _BASE_SCORER_TEMPLATE = """你是金融研究助手 critic_{dimension}_scorer。
 
 任务:为以下研报评分(0-10 分),仅评估 {dimension} 维度。
@@ -46,10 +52,13 @@ class _BaseScorer(Agent):
     model_tier: Tier = "fast"
 
     def step(self, state: ResearchState) -> StepResult:  # type: ignore[override]
+        raw_md = state.report_markdown or "(empty)"
+        # Truncate to prevent reasoning-model token overflow (see _REPORT_CHAR_CAP comment)
+        report_md = raw_md[:_REPORT_CHAR_CAP] if len(raw_md) > _REPORT_CHAR_CAP else raw_md
         prompt = _BASE_SCORER_TEMPLATE.format(
             dimension=self.dimension,
             rubric=self.rubric,
-            report_markdown=state.report_markdown or "(empty)",
+            report_markdown=report_md,
             context=_build_context(state),
         )
         r = self._llm.chat(prompt=prompt, tier=self.model_tier, request_id=state.request_id)

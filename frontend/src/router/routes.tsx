@@ -13,6 +13,9 @@ import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
 import NewsPage from '@/pages/news'
+import ResearchIndex from '@/pages/research/index'
+import ResearchNew from '@/pages/research/new'
+import ResearchReport from '@/pages/research/report'
 import {
   Navigate,
   Outlet,
@@ -73,6 +76,18 @@ export const routes: IRouteObject[] = [
   {
     path: '/monitoring/config',
     Component: MonitoringConfig,
+  },
+  {
+    path: '/research',
+    Component: ResearchIndex,
+  },
+  {
+    path: '/research/new',
+    Component: ResearchNew,
+  },
+  {
+    path: '/research/:id',
+    Component: ResearchReport,
   },
   {
     path: '/404',

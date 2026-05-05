@@ -1,7 +1,7 @@
-"""L0 — Writer prompt construction (v0.8.2 credit report rewrite)."""
+"""L0 — Writer prompt construction (v0.8.4 investment report rewrite)."""
 
 from app.agents.schemas import Insight, ResearchPlan, ResearchState, Subtask
-from app.agents.writer import build_credit_report_prompt
+from app.agents.writer import build_investment_dd_prompt
 
 
 def _state_with_insights() -> ResearchState:
@@ -26,14 +26,14 @@ def _state_with_insights() -> ResearchState:
 
 def test_build_prompt_includes_insights() -> None:
     state = _state_with_insights()
-    prompt = build_credit_report_prompt(state)
-    assert "银行公司金融部" in prompt
+    prompt = build_investment_dd_prompt(state)
+    assert "专业投资研究分析师" in prompt
     assert "overview" in prompt
-    assert "信贷调查报告" in prompt
+    assert "投资标的尽调报告" in prompt
 
 
 def test_build_prompt_includes_user_message() -> None:
     state = _state_with_insights()
-    prompt = build_credit_report_prompt(state)
+    prompt = build_investment_dd_prompt(state)
     assert "m" in prompt
     assert "用户原始需求" in prompt

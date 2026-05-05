@@ -51,5 +51,8 @@ USER_ACTION.md
 # Git worktrees (Plan B+ subagent-driven workflow)
 .worktrees/
 
+# Superpowers brainstorming visual companion (per-session HTML mockups)
+.superpowers/
+
 # Eval/trace local SQLite (regenerated from schema each run)
 backend/data/

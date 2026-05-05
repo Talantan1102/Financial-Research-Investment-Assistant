@@ -1,5 +1,6 @@
 import IconBg from '@/assets/index/bg.png'
 import IconSearch from '@/assets/index/search.svg'
+import { AuditOutlined, ArrowRightOutlined } from '@ant-design/icons'
 import { Input, message } from 'antd'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -56,6 +57,28 @@ export default function Index() {
         <div className={styles.title}>Hi～欢迎来到行业咨询助手</div>
         <div className={styles.desc}>
           大模型驱动的行业资讯助手，为不同类型用户提供更便捷的AI应用开发平台
+        </div>
+      </div>
+
+      {/* B-1 CTA banner — 投资标的尽调入口 */}
+      <div
+        className={styles['cta-banner']}
+        onClick={() => navigate('/research/new')}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => e.key === 'Enter' && navigate('/research/new')}
+      >
+        <div className={styles['cta-banner__icon']}>
+          <AuditOutlined />
+        </div>
+        <div className={styles['cta-banner__content']}>
+          <div className={styles['cta-banner__title']}>投资标的尽调</div>
+          <div className={styles['cta-banner__desc']}>
+            5-agent 协作产出完整尽调报告 — 覆盖基本面、估值、风险与投资建议
+          </div>
+        </div>
+        <div className={styles['cta-banner__arrow']}>
+          <ArrowRightOutlined />
         </div>
       </div>
 

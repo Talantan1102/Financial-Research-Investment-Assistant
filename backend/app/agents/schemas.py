@@ -10,9 +10,56 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.agents.credit_report_schema import CreditInvestigationReport
+from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
 from app.services.monitoring.signal_rules.base import SignalResult
+
+# ---------------------------------------------------------------------------
+# v0.8.4 structured input enums
+# ---------------------------------------------------------------------------
+
+InvestmentObjective = Literal[
+    "capital_preservation",
+    "stable_growth",
+    "balanced",
+    "aggressive_growth",
+]
+
+InvestmentHorizon = Literal[
+    "short_term",
+    "medium_term",
+    "long_term",
+]
+
+RiskTolerance = Literal[
+    "conservative",
+    "moderate",
+    "balanced",
+    "aggressive",
+    "very_aggressive",
+]
+
+Recommendation = Literal[
+    "recommend_buy",
+    "recommend_overweight",
+    "recommend_hold",
+    "recommend_underweight",
+    "recommend_sell",
+]
+
+
+class ResearchRequest(BaseModel):
+    """B-1 研报请求(v0.8.4 — 6 结构化字段 + 可选自由文本)。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target_ts_code: str = Field(description="股票代码,如 600519.SH")
+    client_total_aum: float = Field(description="客户总资产管理规模(CNY)")
+    client_existing_position: float | None = Field(default=None, description="现有持仓(CNY,可选)")
+    investment_objective: InvestmentObjective = Field(description="投资目标")
+    investment_horizon: InvestmentHorizon = Field(description="投资期限")
+    risk_tolerance: RiskTolerance = Field(description="风险承受度")
+    user_message: str | None = Field(default=None, description="可选自由文本补充说明")
 
 
 class ToolCall(BaseModel):
@@ -129,7 +176,14 @@ class ChartSpec(BaseModel):
     y_axis: str | None = None
 
 
-CriticDimension = Literal["factuality", "coverage", "insight", "structure", "conciseness"]
+CriticDimension = Literal[
+    "factuality",
+    "coverage",
+    "insight",
+    "structure",
+    "conciseness",
+    "input_context_appropriateness",
+]
 
 
 class CriticDimensionScore(BaseModel):
@@ -152,6 +206,13 @@ class CriticReport(BaseModel):
     overall_score: float = Field(ge=0.0, le=10.0)
     summary_markdown: str
 
+    def get_score(self, dimension: CriticDimension) -> float | None:
+        """Look up a single dimension score by name. Returns None if not found."""
+        for d in self.dimensions:
+            if d.dimension == dimension:
+                return d.score
+        return None
+
 
 class ResearchState(BaseModel):
     """LangGraph 研报状态(类比 v0 GraphState)。"""
@@ -163,12 +224,20 @@ class ResearchState(BaseModel):
     user_message: str
     request_id: str
 
+    # v0.8.4 — 6 structured input fields (synced from ResearchRequest)
+    target_ts_code: str | None = None
+    client_total_aum: float | None = None
+    client_existing_position: float | None = None
+    investment_objective: InvestmentObjective | None = None
+    investment_horizon: InvestmentHorizon | None = None
+    risk_tolerance: RiskTolerance | None = None
+
     plan: ResearchPlan | None = None
     tool_results: list[ToolResult] = Field(default_factory=list)
     insights: list[Insight] = Field(default_factory=list)
     report_markdown: str | None = None
     chart_specs: list[ChartSpec] = Field(default_factory=list)
-    credit_report: CreditInvestigationReport | None = None
+    investment_report: InvestmentDueDiligenceReport | None = None
     critic_report: CriticReport | None = None
 
     span_stack: list[str] = Field(default_factory=list)

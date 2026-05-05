@@ -13,11 +13,13 @@ def _state(target: str, msg: str) -> ResearchState:
         session_id="s",
         user_message=msg,
         request_id="req-test1234",
+        target_ts_code=target,
     )
 
 
 def test_build_prompt_includes_target_and_message() -> None:
-    prompt = build_planner_prompt(target_entity="600519.SH", user_message="深度分析茅台基本面")
+    state = _state("600519.SH", "深度分析茅台基本面")
+    prompt = build_planner_prompt(state)
     assert "你是金融研究助手 research_planner" in prompt
     assert "600519.SH" in prompt
     assert "深度分析茅台基本面" in prompt

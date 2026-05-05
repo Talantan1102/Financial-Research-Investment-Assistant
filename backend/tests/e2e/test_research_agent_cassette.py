@@ -260,9 +260,9 @@ def real_adapter() -> _Adapter:
 
 
 @pytest.mark.skip(
-    reason="v0.8.2 Writer rewrite changed output schema (CreditInvestigationReport with extra='forbid'); "
+    reason="v0.8.4 Writer rewrite changed output schema (InvestmentDueDiligenceReport); "
     "v0.5 cassette has free-text markdown response and cannot replay. "
-    "B-1 茅台 e2e is now in test_b1_maotai_credit_report_cassette.py (Task 7)."
+    "B-1 茅台 e2e is now in test_b1_maotai_investment_dd_cassette.py."
 )
 @pytest.mark.vcr
 @pytest.mark.asyncio
