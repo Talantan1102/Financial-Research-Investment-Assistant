@@ -82,7 +82,7 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
 
     if et == "on_chain_end":
         if name == "research_planner_node":
-            output: dict[str, Any] = ev.get("output") or {}
+            output: dict[str, Any] = ev.get("data", {}).get("output") or ev.get("output") or {}
             # plan comes back as a ResearchPlan instance or a dict
             plan_val = output.get("plan") or {}
             if hasattr(plan_val, "subtasks"):
@@ -110,7 +110,7 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
             )
 
         if name == "data_collector_node":
-            output = ev.get("output") or {}
+            output = ev.get("data", {}).get("output") or ev.get("output") or {}
             # tool_results is a list of ToolResult instances or dicts
             results_raw = output.get("tool_results") or []
             tool_names_raw: list[str] = []
@@ -142,7 +142,7 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
             )
 
         if name == "analyst_node":
-            output = ev.get("output") or {}
+            output = ev.get("data", {}).get("output") or ev.get("output") or {}
             # insights is a list of Insight instances or dicts
             insights_raw = output.get("insights") or []
             findings: list[str] = []
@@ -166,7 +166,7 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
         if name == "writer_node":
             # Extract report_markdown from node output so the frontend can
             # render the full report incrementally in the progress overlay.
-            output = ev.get("output") or {}
+            output = ev.get("data", {}).get("output") or ev.get("output") or {}
             md: str = output.get("report_markdown") or ""
             # Count sections (H2 headers) in markdown as proxy for report size
             section_count = md.count("\n## ")
@@ -185,7 +185,7 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
         if name == "aggregate":
             # Critic subgraph aggregate node: emit final CriticReport scores.
             # output is {"critic_report": CriticReport | dict}
-            output = ev.get("output") or {}
+            output = ev.get("data", {}).get("output") or ev.get("output") or {}
             report_val = output.get("critic_report")
             scores: dict[str, float] = {}
             overall = 0.0
@@ -411,15 +411,16 @@ async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) ->
             # Stash writer output into in-memory cache so GET /research/{id} works
             # without sqlite persistence (MemorySaver workaround until v0.8.5).
             if ev.get("event") == "on_chain_end" and ev.get("name") == "writer_node":
-                output = ev.get("output") or {}
-                report_val = output.get("investment_report")
+                # LangGraph astream_events v2 places node return under
+                # ev["data"]["output"]. Older paths used ev["output"]; check
+                # both for forward/backward compatibility.
+                output = ev.get("data", {}).get("output") or ev.get("output") or {}
+                report_val = output.get("investment_report") if isinstance(output, dict) else None
                 if report_val is not None:
                     if hasattr(report_val, "model_dump"):
                         _RUN_RESULTS_CACHE[request_id] = report_val.model_dump()
                     elif isinstance(report_val, dict):
                         _RUN_RESULTS_CACHE[request_id] = report_val
-                    # Also stash the request_id into the cached report so the
-                    # frontend GET /research/{id} returns a self-consistent doc.
                     if request_id in _RUN_RESULTS_CACHE:
                         _RUN_RESULTS_CACHE[request_id]["request_id"] = request_id
 

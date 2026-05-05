@@ -570,54 +570,33 @@ async def test_research_graph_with_async_checkpointer_does_not_raise(
     await async_checkpointer.conn.close()
 
 
-async def test_get_research_graph_dependency_returns_async_checkpointer_graph(
-    tmp_path: Any,
+async def test_get_research_graph_dependency_returns_compiled_graph(
     monkeypatch: Any,
 ) -> None:
-    """get_research_graph DI factory must return a graph with AsyncSqliteSaver.
+    """get_research_graph DI factory must return a non-None compiled graph
+    with a checkpointer that supports async streaming.
 
-    Verifies that the production singleton factory no longer injects a sync
-    SqliteSaver — the graph it returns must be drivable via astream_events()
-    without raising "does not support async methods".
-
-    Uses monkeypatch to reset the module-level singleton so the factory
-    rebuilds with a tmp_path DB instead of backend/data/research.sqlite.
+    v0.8.4 dogfood note: the production factory uses MemorySaver as a
+    workaround for AsyncSqliteSaver hangs in graph.astream_events(). This
+    test verifies the factory returns a usable graph; v0.8.5 D6 evaluation
+    pipeline reinstates AsyncSqliteSaver for proper persistence.
     """
-    from pathlib import Path
-
     import app.router.research as research_mod
 
     # Reset the singleton so the factory rebuilds during this test.
     monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_SINGLETON", None)
     monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_LOCK", None)
 
-    # Patch make_async_chat_checkpointer to use tmp_path so CI doesn't touch
-    # backend/data/research.sqlite.
-    from app.orchestration import checkpointer as ckpt_mod
-
-    original_make = ckpt_mod.make_async_chat_checkpointer
-
-    async def _patched_make(db_path: Path = ckpt_mod.DEFAULT_RESEARCH_DB_PATH) -> Any:
-        return await original_make(Path(tmp_path) / "test_di_factory.sqlite")
-
-    monkeypatch.setattr(ckpt_mod, "make_async_chat_checkpointer", _patched_make)
-    # Also patch the reference imported inside get_research_graph's local scope.
-    import app.orchestration.checkpointer as ckpt_direct
-
-    monkeypatch.setattr(ckpt_direct, "make_async_chat_checkpointer", _patched_make)
-
     graph = await research_mod.get_research_graph()
     assert graph is not None, "get_research_graph must return a non-None compiled graph"
+    # Checkpointer must exist and not be the sync SqliteSaver (which would
+    # hang astream_events). Both MemorySaver and AsyncSqliteSaver are fine.
+    from langgraph.checkpoint.sqlite import SqliteSaver
 
-    # The compiled graph's checkpointer must be an AsyncSqliteSaver.
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
-    assert isinstance(graph.checkpointer, AsyncSqliteSaver), (
-        f"Expected AsyncSqliteSaver, got {type(graph.checkpointer)}"
+    assert graph.checkpointer is not None, "graph must have a checkpointer"
+    assert not isinstance(graph.checkpointer, SqliteSaver), (
+        f"sync SqliteSaver causes async streaming hang; got {type(graph.checkpointer)}"
     )
-
-    # Clean up connection.
-    await graph.checkpointer.conn.close()
 
     # Reset singleton so other tests start fresh.
     monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_SINGLETON", None)
