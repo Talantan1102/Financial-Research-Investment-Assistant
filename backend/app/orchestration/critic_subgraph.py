@@ -1,4 +1,4 @@
-"""Critic 内部 subgraph — Send API fan-out 6 sub-agents + reduce + aggregate."""
+"""Critic 内部 subgraph — Send API fan-out 7 sub-agents + reduce + aggregate."""
 
 from __future__ import annotations
 

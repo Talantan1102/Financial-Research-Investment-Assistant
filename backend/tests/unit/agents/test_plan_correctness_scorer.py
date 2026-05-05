@@ -125,3 +125,69 @@ def test_scorer_low_score_for_mismatched_plan() -> None:
     assert score_obj.score == 3.0
     assert score_obj.score < 6.0  # mismatched threshold
     assert score_obj.evidence
+
+
+# ---------------------------------------------------------------------------
+# Edge / regression tests: no-plan short-circuit + LLM call argument contract
+# ---------------------------------------------------------------------------
+
+
+def test_scorer_returns_zero_when_plan_is_none() -> None:
+    """state.plan is None → 不调 LLM, 返 score=0.0 + evidence + skipped span.
+
+    Locks down the short-circuit at PlanCorrectnessScorer.step() top: when
+    upstream ResearchPlanner failed / was skipped, scorer must NOT consume
+    tokens and must surface the skip via span_metadata for observability.
+    """
+    llm = MagicMock()
+    scorer = PlanCorrectnessScorer(llm=llm)
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        request_id="r",
+        user_message="",
+        target_ts_code="600519.SH",
+        target_entity="贵州茅台",
+        client_total_aum=10_000_000.0,
+        investment_objective="balanced",
+        investment_horizon="medium_term",
+        risk_tolerance="moderate",
+    )
+    # plan default None — verified via schemas.py:293
+
+    sr = scorer.step(state)
+
+    score_obj = sr.state_update["plan_correctness_score"]
+    assert isinstance(score_obj, CriticDimensionScore)
+    assert score_obj.dimension == "plan_correctness"
+    assert score_obj.score == 0.0
+    assert score_obj.evidence == "no plan available"
+    assert sr.span_metadata.get("skipped") == "no_plan"
+    assert sr.span_metadata["agent"] == "PlanCorrectnessScorer"
+    assert sr.span_metadata["dimension"] == "plan_correctness"
+    llm.chat.assert_not_called()  # no token consumption on short-circuit
+
+
+def test_scorer_calls_llm_with_correct_schema_and_tier() -> None:
+    """LLM call 必须 schema=_PlanCorrectnessScore + tier='balanced' (防 regression).
+
+    Guards against:
+    - schema arg drop → silent fallback to free-text mode (parsed=None)
+    - tier 漂移 → cost / latency regression vs tier_router config
+    - prompt 未注入 objective → judge 评不到 override 例外
+    """
+    mock_llm = _make_mock_llm(score=8.0, reasoning="ok")
+    scorer = PlanCorrectnessScorer(llm=mock_llm)
+    state = _make_state(
+        objective="balanced",
+        plan_id="balanced",
+        rationale="objective=balanced 默认映射",
+    )
+
+    scorer.step(state)
+
+    chat_kwargs = mock_llm.chat.call_args.kwargs
+    assert chat_kwargs["schema"] is _PlanCorrectnessScore
+    assert chat_kwargs["tier"] == "balanced"
+    prompt_arg = chat_kwargs["prompt"]
+    assert "balanced" in prompt_arg.lower()  # objective injected into prompt
