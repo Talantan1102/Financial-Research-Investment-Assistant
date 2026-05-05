@@ -57,3 +57,35 @@ def test_deterministic_across_repeated_calls() -> None:
         for _ in range(5)
     ]
     assert len(set(results)) == 1
+
+
+def test_buy_conservative_large_cap_yields_7_5() -> None:
+    """conservative multiplier=0.5 explicit numeric: 15 * 0.5 * 1.0 = 7.5%."""
+    pct = compute_position_size_pct(
+        recommendation="recommend_buy",
+        risk_tolerance="conservative",
+        market_cap_cny=200_000_000_000.0,  # large cap
+    )
+    assert pct == pytest.approx(7.5)
+
+
+def test_hold_between_buy_and_sell_position() -> None:
+    """hold position 应在 buy 和 sell 之间 (defensive ordering)."""
+    buy = compute_position_size_pct(
+        recommendation="recommend_buy",
+        risk_tolerance="moderate",
+        market_cap_cny=200_000_000_000.0,
+    )
+    hold = compute_position_size_pct(
+        recommendation="recommend_hold",
+        risk_tolerance="moderate",
+        market_cap_cny=200_000_000_000.0,
+    )
+    sell = compute_position_size_pct(
+        recommendation="recommend_sell",
+        risk_tolerance="moderate",
+        market_cap_cny=200_000_000_000.0,
+    )
+    assert sell <= hold <= buy
+    # 防止 hold 改 0%: hold 应该是 5.0% (5 * 1.0 * 1.0)
+    assert hold == pytest.approx(5.0)

@@ -339,11 +339,16 @@ def _extract_metrics_from_llm_report(report: dict[str, Any]) -> dict[str, Any]:
         # (e.g. "近 5 年 30 分位"). classify_recommendation's _eval_condition
         # silently catches type mismatch — string compared with float returns
         # False, no crash.
+        # 0.5 (中位) fallback — missing/str-typed 时不触发 sell red-line (>0.90) 也不
+        # 触发 buy 条件 (<0.30). Task 9 cassette 重录会改 schema 加 numeric percentile.
         "pe_percentile": va.get("pe_historical_percentile") or 0.5,
         "roe": fa.get("roe") or 0.0,
         "revenue_yoy": fa.get("revenue_yoy") or 0.0,
         "net_profit_yoy": fa.get("net_profit_yoy") or 0.0,
-        "market_cap_cny": overview.get("current_market_cap") or 0.0,
+        # 1 万亿 CNY large-cap 中位 default — 避免 missing data 误触发 small-cap haircut
+        # (`or` 对 0.0 也 fallback, 但真"market_cap=0"极罕见; 跟 writer.py:114 prompt-side
+        # default 1e12 anchor 一致).
+        "market_cap_cny": overview.get("current_market_cap") or 1_000_000_000_000.0,
         "forecast_signal": fa.get("forecast_signal") or "neutral",
         "asset_liability_warning": fa.get("debt_ratio_assessment") in {"警戒", "高风险"},
     }
