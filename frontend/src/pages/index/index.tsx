@@ -43,11 +43,11 @@ export default function Index() {
     )
   }, [cardList, searchKeyword])
 
-  // 点击卡片，切换行业并跳转到聊天页
-  const handleCardClick = (industryId: string, title: string) => {
-    console.log('[Index] 点击行业卡片:', industryId, title)
+  // 点击卡片，切换行业并跳转到尽调入口（v0.9.x: /chat 已废弃）
+  const handleCardClick = (industryId: string, _title: string) => {
+    console.log('[Index] 点击行业卡片:', industryId, _title)
     setCurrentIndustry(industryId)
-    navigate(`/chat?title=${encodeURIComponent(title)}`)
+    navigate('/research/new')
   }
 
   return (

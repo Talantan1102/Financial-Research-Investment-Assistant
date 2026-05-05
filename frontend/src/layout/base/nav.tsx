@@ -1,24 +1,20 @@
-import IconHistory from '@/assets/layout/history.svg'
 import IconHome from '@/assets/layout/home.svg'
 import IconKnowledge from '@/assets/layout/knowledge.svg'
 import IconMemory from '@/assets/layout/memory.svg'
 import IconDatabase from '@/assets/layout/database.svg'
 import IconMonitoring from '@/assets/layout/monitoring.svg'
-import IconNewChat from '@/assets/layout/newchat.svg'
 import IconNews from '@/assets/layout/news.svg'
-import React, { useMemo, useState } from 'react'
+import React, { useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
 import { Dropdown, message } from 'antd'
 import { DownOutlined } from '@ant-design/icons'
 import { NavItem } from './nav-item'
-import { SessionDrawer } from '@/components/session-drawer'
 import { industryState, setCurrentIndustry } from '@/store/industry'
 import './nav.scss'
 
 export function Nav() {
   const { pathname } = useLocation()
-  const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false)
   const { currentIndustryId, industries } = useSnapshot(industryState)
 
   const currentIndustry = useMemo(() => {
@@ -50,19 +46,6 @@ export function Nav() {
         label: '首页',
         icon: IconHome,
         href: '/',
-      },
-      {
-        key: 'newchat',
-        label: '新的聊天',
-        icon: IconNewChat,
-        href: '/chat',
-      },
-      {
-        key: 'history',
-        label: '对话历史',
-        icon: IconHistory,
-        href: '#',
-        onClick: () => setSessionDrawerOpen(true),
       },
       {
         key: 'memory',
@@ -152,10 +135,6 @@ export function Nav() {
           />
         ))}
       </div>
-      <SessionDrawer
-        open={sessionDrawerOpen}
-        onClose={() => setSessionDrawerOpen(false)}
-      />
     </>
   )
 }

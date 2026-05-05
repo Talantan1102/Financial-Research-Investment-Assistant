@@ -3,8 +3,6 @@ import { BaseLayout } from '@/layout/base'
 import { ThemedRoot } from '@/themes/themed-root'
 import NotFound from '@/pages/404'
 import LoginPage from '@/pages/auth/login'
-import Chat from '@/pages/chat'
-import NewChat from '@/pages/chat/newchat'
 import Index from '@/pages/index'
 import KnowledgePage from '@/pages/knowledge'
 import MemoryPage from '@/pages/memory'
@@ -35,19 +33,6 @@ export const routes: IRouteObject[] = [
   {
     path: '/',
     Component: Index,
-  },
-  {
-    path: '/chat',
-    children: [
-      {
-        path: '',
-        Component: NewChat,
-      },
-      {
-        path: ':id',
-        Component: Chat,
-      },
-    ],
   },
   {
     path: '/knowledge',

@@ -12,7 +12,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [isLogin, setIsLogin] = useState(true)
 
-  const from = (location.state as any)?.from?.pathname || '/chat'
+  const from = (location.state as any)?.from?.pathname || '/'
 
   const onLogin = async (values: { username: string; password: string }) => {
     setLoading(true)
