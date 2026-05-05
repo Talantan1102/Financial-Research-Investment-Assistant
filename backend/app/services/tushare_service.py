@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 
 from app.services.rate_limiter import RateLimiter
 from app.services.tushare_cache import TushareCache, classify_ttl
@@ -134,15 +135,12 @@ class RealTushareService:
 
     @staticmethod
     def _today_yyyymmdd() -> str:
-        from datetime import datetime
-
         return datetime.now(UTC).strftime("%Y%m%d")
 
     @staticmethod
     def _n_years_ago(n: int) -> str:
-        from datetime import datetime, timedelta
-
-        return (datetime.now(UTC) - timedelta(days=365 * n)).strftime("%Y%m%d")
+        # relativedelta avoids leap-year drift (5 days over 5 years vs timedelta(days=365*n)).
+        return (datetime.now(UTC) - relativedelta(years=n)).strftime("%Y%m%d")
 
     async def get_daily_basic(self, *, ts_code: str, trade_date: str | None = None) -> pd.DataFrame:
         return await self._call_cached(
@@ -167,7 +165,14 @@ class RealTushareService:
             latest = await self._call_cached(
                 "daily_basic", {"ts_code": ts_code, "trade_date": end, "fields": "pe"}
             )
-            current_pe = float(latest["pe"].iloc[0]) if not latest.empty else 0.0
+            # 不能 silent fallback 0.0:那会让 percentile 算出"PE 处于 0% 分位",
+            # 看起来像"史上最便宜"的伪买入信号.调用方必须显式处理空数据.
+            if latest.empty or pd.isna(latest["pe"].iloc[0]):
+                raise ValueError(
+                    f"cannot resolve current_pe for {ts_code} on {end}: "
+                    "latest daily_basic is empty or NaN"
+                )
+            current_pe = float(latest["pe"].iloc[0])
         pe_series = history["pe"].dropna().sort_values()
         n = len(pe_series)
         rank = int((pe_series < current_pe).sum())

@@ -70,6 +70,14 @@ class LegacyMockTushareAdapter:
         # Deterministic inline builder — avoids the LLM-based legacy generate_balance_sheet.
         # Columns include debt_to_assets required by Task 8 FinancialRatioRule.
         # v0.8.5: extended with total_cur_assets / total_cur_liab for liquidity ratio analysis.
+        #
+        # Mock column contract (intentionally minimal):
+        # 提供:ts_code / end_date / total_assets / total_liab / total_cur_assets /
+        #       total_cur_liab / debt_to_assets — 覆盖 Task 1/8 当前规则需求.
+        # 不提供:Tushare balancesheet 真实接口约 150 列(money_funds / accounts_receiv /
+        #       inventories / fix_assets / lt_borr / oth_eqt_tools_p_shr / ...).
+        # 未来如果需要其他列, 直接扩 fixture 行的 dict, 不要 fallback 到 LLM-based
+        # generate_balance_sheet — 那条路径不 deterministic.
         rows = [
             {
                 "ts_code": ts_code,
@@ -88,6 +96,14 @@ class LegacyMockTushareAdapter:
         # Deterministic inline builder — avoids the LLM-based legacy generate_cashflow.
         # 4 quarters; preserves CashFlowRule's expectations on n_cashflow_act / end_date.
         # n_cashflow_act intentionally decreasing to keep yellow-signal coverage stable.
+        #
+        # Mock column contract (intentionally minimal):
+        # 提供:ts_code / end_date / n_cashflow_act / n_cashflow_inv_act / n_cash_flows_fnc_act
+        #       — 覆盖 Task 1/8 CashFlowRule 当前需求.
+        # 不提供:Tushare cashflow 真实接口约 80 列(c_paid_for_invest / c_inf_fr_operate_a /
+        #       c_paid_to_for_empl / c_pay_dist_dpcp_int_exp / free_cashflow / ...).
+        # 未来如果某 rule 需要 free_cashflow 等列, 扩 fixture row dict, 不要回到
+        # LLM-based generate_cashflow — 那条路径不 deterministic.
         rows = [
             {
                 "ts_code": ts_code,
