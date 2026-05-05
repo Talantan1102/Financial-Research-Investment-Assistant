@@ -264,6 +264,12 @@ def _is_root_done_event(ev: dict[str, Any]) -> bool:
 _RESEARCH_GRAPH_SINGLETON: Any = None
 _RESEARCH_GRAPH_LOCK: asyncio.Lock | None = None
 
+# In-memory cache of completed runs (request_id → InvestmentDueDiligenceReport dict)
+# Required because MemorySaver doesn't persist to sqlite, so GET /research/{id}
+# can't read past runs from the checkpoint DB.  Process restart loses cache.
+# v0.8.5 D6 evaluation pipeline replaces this with proper sqlite persistence.
+_RUN_RESULTS_CACHE: dict[str, dict[str, Any]] = {}
+
 
 def _get_graph_lock() -> asyncio.Lock:
     """Return the module-level asyncio.Lock, creating it lazily inside the event loop."""
@@ -402,6 +408,21 @@ async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) ->
 
     try:
         async for ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
+            # Stash writer output into in-memory cache so GET /research/{id} works
+            # without sqlite persistence (MemorySaver workaround until v0.8.5).
+            if ev.get("event") == "on_chain_end" and ev.get("name") == "writer_node":
+                output = ev.get("output") or {}
+                report_val = output.get("investment_report")
+                if report_val is not None:
+                    if hasattr(report_val, "model_dump"):
+                        _RUN_RESULTS_CACHE[request_id] = report_val.model_dump()
+                    elif isinstance(report_val, dict):
+                        _RUN_RESULTS_CACHE[request_id] = report_val
+                    # Also stash the request_id into the cached report so the
+                    # frontend GET /research/{id} returns a self-consistent doc.
+                    if request_id in _RUN_RESULTS_CACHE:
+                        _RUN_RESULTS_CACHE[request_id]["request_id"] = request_id
+
             if _is_root_done_event(ev):
                 # Emit done with the real backend request_id so the frontend
                 # can navigate to the correct /research/<request_id> URL.
@@ -559,13 +580,24 @@ async def list_research_runs(
 async def get_research_report(run_id: str) -> Any:
     """GET /api/v0.5/research/{run_id} — fetch a full InvestmentDueDiligenceReport.
 
-    Uses the SqliteSaver.get_tuple() API to look up the latest checkpoint for
-    the thread_id 'research:<user>:<run_id>' (or a LIKE scan across all research
-    threads when the full thread_id is unknown).
+    Lookup order:
+      1. In-memory cache (this process's completed runs) — populated by
+         _stream_research from writer_node output. MemorySaver doesn't
+         persist to sqlite, so this cache is the primary source for runs
+         completed in the current process.
+      2. SqliteSaver.get_tuple() scan of past sqlite checkpoints — for runs
+         from before the MemorySaver switch. Falls back to 404.
 
     TODO(Task 7 dogfood): consider exposing thread_id directly so we can skip
-    the scan.
+    the scan. v0.8.5 D6 evaluation pipeline replaces this with proper sqlite
+    persistence so the cache becomes redundant.
     """
+    # 1. Try in-memory cache first (current process's completed runs).
+    cached = _RUN_RESULTS_CACHE.get(run_id)
+    if cached is not None:
+        return cached
+
+    # 2. Fall back to sqlite checkpoint scan (past runs from before MemorySaver).
     db_path = Path("backend/data/research.sqlite")
     try:
         if db_path.exists():
