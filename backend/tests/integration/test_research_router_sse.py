@@ -421,7 +421,8 @@ def test_research_sse_plan_event_has_summary_and_subtasks(test_client: TestClien
 
     Verifies the dogfood UX fix: _adapt_event now extracts ResearchPlan.subtasks
     from the node output and attaches them to the plan event data so the frontend
-    progress timeline can display '已规划 N 个子任务' + subtask descriptions.
+    research log can display '已拆解为 N 个研究维度' + subtask descriptions.
+    Business-friendly wording hides internal agent name.
     """
     events = _collect_sse_events(
         test_client.post(
@@ -446,9 +447,10 @@ def test_research_sse_plan_event_has_summary_and_subtasks(test_client: TestClien
     assert isinstance(ev_data["subtasks"], list), (
         f"subtasks must be list, got {type(ev_data['subtasks'])}"
     )
-    # summary should mention N tasks
-    assert "个子任务" in ev_data["summary"], (
-        f"summary should say '已规划 N 个子任务': {ev_data['summary']}"
+    # summary should mention research dimensions (business-friendly UX reword)
+    summary_str: str = ev_data["summary"]
+    assert "研究维度" in summary_str or "子任务" in summary_str or "拆解" in summary_str, (
+        f"summary should describe research breakdown: {summary_str}"
     )
 
 
@@ -456,8 +458,8 @@ def test_research_sse_data_progress_event_has_summary_and_tools(test_client: Tes
     """data_progress event must include 'summary' (str) and 'tools' (list[str]) metadata.
 
     Verifies the dogfood UX fix: _adapt_event now extracts ToolResult.tool_name list
-    from data_collector_node output and attaches them to data_progress event data
-    so the frontend can display '已采集 N 项数据'.
+    from data_collector_node output and attaches human-readable tool labels so the
+    frontend research log can display '✅ 已采集 N 项数据' with specific source names.
     """
     events = _collect_sse_events(
         test_client.post(

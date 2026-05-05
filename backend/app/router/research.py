@@ -37,25 +37,45 @@ class ResearchStreamEvent(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
 
 
+_TOOL_DISPLAY_LABELS: dict[str, str] = {
+    "get_stock_quote": "实时行情",
+    "get_financials": "财务报表",
+    "get_news": "行业新闻",
+    "web_search": "网络搜索",
+    "kb_search": "知识库文档",
+}
+
+_SCORER_DISPLAY_LABELS: dict[str, str] = {
+    "scorer_factuality": "事实准确性",
+    "scorer_coverage": "覆盖完整度",
+    "scorer_insight": "分析深度",
+    "scorer_structure": "报告结构",
+    "scorer_conciseness": "表达简洁性",
+    "scorer_input_context": "客户适配度",
+}
+
+
 def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
     """LangGraph event → ResearchStreamEvent (or None to skip).
 
     Event mapping:
       on_chain_end / research_planner_node → plan       (+ subtasks metadata)
       on_chain_end / data_collector_node   → data_progress (+ tools metadata)
-      on_chain_end / analyst_node          → insight    (+ summary metadata)
+      on_chain_end / analyst_node          → insight    (+ findings metadata)
       on_chain_end / writer_node           → report_chunk
-      on_chain_end / scorer_*              → critic_score (+ scorer name summary)
+      on_chain_end / scorer_*              → critic_score (individual scorer done)
+      on_chain_end / aggregate             → critic_score (final aggregate scores)
       on_chain_end / LangGraph (root only) → done
         (root = parent_ids is empty; critic subgraph also emits LangGraph
          but with non-empty parent_ids — those are skipped)
       all others                           → None (skipped)
 
-    Metadata fields added for progress timeline UX (dogfood fix):
-      plan:          summary str, subtasks list[str] (first 50 chars each, max 5)
-      data_progress: summary str, tools list[str] (tool names from tool_results)
-      insight:       summary str (first finding[:120] + "...")
-      critic_score:  summary str (human-readable scorer name)
+    Metadata fields (for business-friendly research log UX):
+      plan:          summary str (业务化), subtasks list[str] (descriptions, max 5)
+      data_progress: summary str (业务化), tools list[str] (human labels)
+      insight:       summary str (业务化), findings list[str] (key findings, max 5)
+      report_chunk:  chunk str (markdown content)
+      critic_score:  summary str, scores dict (dimension → score), overall float
     """
     et = ev.get("event")
     name = ev.get("name", "")
@@ -75,14 +95,17 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
                     desc = str(s.description)
                 else:
                     desc = str(s.get("description", ""))
-                subtask_descs.append(desc[:50])
+                subtask_descs.append(desc[:60])
             n = len(subtasks_raw)
+            # Business-friendly summary (hide internal agent name)
+            summary = f"已拆解为 {n} 个研究维度" if n > 0 else "正在拆解研究路径..."
             return ResearchStreamEvent(
                 type="plan",
                 data={
-                    "name": name,
-                    "summary": f"已规划 {n} 个子任务",
+                    "summary": f"📋 {summary}",
                     "subtasks": subtask_descs,
+                    # keep name for AgentStatusSidebar in tech panel
+                    "name": name,
                 },
             )
 
@@ -90,19 +113,31 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
             output = ev.get("output") or {}
             # tool_results is a list of ToolResult instances or dicts
             results_raw = output.get("tool_results") or []
-            tool_names: list[str] = []
+            tool_names_raw: list[str] = []
             for r in results_raw:
                 if hasattr(r, "tool_name"):
-                    tool_names.append(str(r.tool_name))
+                    tool_names_raw.append(str(r.tool_name))
                 else:
-                    tool_names.append(str(r.get("tool_name", "")))
-            n = len(tool_names)
+                    tool_names_raw.append(str(r.get("tool_name", "")))
+            # Deduplicate tools (same tool called multiple times for different subtasks)
+            seen: set[str] = set()
+            unique_tools: list[str] = []
+            for t in tool_names_raw:
+                if t not in seen:
+                    seen.add(t)
+                    unique_tools.append(t)
+            # Map to human-readable labels
+            tool_labels = [_TOOL_DISPLAY_LABELS.get(t, t) for t in unique_tools]
+            n = len(results_raw)
+            summary = f"✅ 已采集 {n} 项数据"
             return ResearchStreamEvent(
                 type="data_progress",
                 data={
+                    "summary": summary,
+                    "tools": tool_labels,
+                    # keep raw names for downstream (AgentStatusSidebar)
+                    "tool_names_raw": tool_names_raw,
                     "name": name,
-                    "summary": f"已采集 {n} 项数据",
-                    "tools": tool_names,
                 },
             )
 
@@ -110,21 +145,21 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
             output = ev.get("output") or {}
             # insights is a list of Insight instances or dicts
             insights_raw = output.get("insights") or []
-            summary = "分析完成"
-            if insights_raw:
-                first = insights_raw[0]
-                if hasattr(first, "finding"):
-                    finding = str(first.finding)
+            findings: list[str] = []
+            for item in insights_raw[:5]:
+                if hasattr(item, "finding"):
+                    finding = str(item.finding)
                 else:
-                    finding = str(first.get("finding", ""))
-                if len(finding) > 120:
-                    finding = finding[:120] + "..."
-                summary = finding
+                    finding = str(item.get("finding", ""))
+                findings.append(finding[:80] + ("..." if len(finding) > 80 else ""))
+            n = len(insights_raw)
+            summary = f"💡 已识别 {n} 项关键洞察" if n > 0 else "💡 正在综合分析..."
             return ResearchStreamEvent(
                 type="insight",
                 data={
-                    "name": name,
                     "summary": summary,
+                    "findings": findings,
+                    "name": name,
                 },
             )
 
@@ -133,18 +168,77 @@ def _adapt_event(ev: dict[str, Any]) -> ResearchStreamEvent | None:
             # render the full report incrementally in the progress overlay.
             output = ev.get("output") or {}
             md: str = output.get("report_markdown") or ""
+            # Count sections (H2 headers) in markdown as proxy for report size
+            section_count = md.count("\n## ")
+            if section_count == 0:
+                section_count = md.count("## ")
+            section_str = f" ({section_count} 节)" if section_count > 0 else ""
             return ResearchStreamEvent(
                 type="report_chunk",
-                data={"name": name, "chunk": md},
+                data={
+                    "summary": f"📝 报告撰写完成{section_str}",
+                    "chunk": md,
+                    "name": name,
+                },
+            )
+
+        if name == "aggregate":
+            # Critic subgraph aggregate node: emit final CriticReport scores.
+            # output is {"critic_report": CriticReport | dict}
+            output = ev.get("output") or {}
+            report_val = output.get("critic_report")
+            scores: dict[str, float] = {}
+            overall = 0.0
+            if report_val is not None:
+                if hasattr(report_val, "dimensions"):
+                    # Pydantic CriticReport model
+                    for dim in report_val.dimensions:
+                        scores[str(dim.dimension)] = float(dim.score)
+                    overall = float(report_val.overall_score)
+                elif isinstance(report_val, dict):
+                    for dim in report_val.get("dimensions", []):
+                        if isinstance(dim, dict):
+                            scores[str(dim.get("dimension", ""))] = float(dim.get("score", 0))
+                        else:
+                            scores[str(dim.dimension)] = float(dim.score)
+                    overall = float(report_val.get("overall_score", 0))
+            # Build human-readable summary with key scores
+            if scores:
+                score_parts = []
+                for dim_key, label in [
+                    ("factuality", "事实"),
+                    ("coverage", "覆盖"),
+                    ("structure", "结构"),
+                ]:
+                    if dim_key in scores:
+                        score_parts.append(f"{label} {scores[dim_key]:.1f}")
+                score_str = " / ".join(score_parts) if score_parts else ""
+                summary = f"🔬 评审完成: {score_str} (综合 {overall:.1f}/10)"
+            else:
+                summary = "🔬 评审完成"
+            return ResearchStreamEvent(
+                type="critic_score",
+                data={
+                    "summary": summary,
+                    "scores": scores,
+                    "overall": overall,
+                    "scorer": "aggregate",
+                    "name": name,
+                },
             )
 
         if name.startswith("scorer_"):
-            scorer_label = name.replace("scorer_", "").replace("_", " ")
+            # Individual scorer completed — emit lightweight event for progress tracking
+            scorer_label = _SCORER_DISPLAY_LABELS.get(
+                name, name.replace("scorer_", "").replace("_", " ")
+            )
             return ResearchStreamEvent(
                 type="critic_score",
                 data={
                     "scorer": name,
-                    "summary": f"{scorer_label} 评分完成",
+                    "summary": f"🔬 {scorer_label} 评分中...",
+                    "scores": {},
+                    "overall": 0.0,
                 },
             )
 

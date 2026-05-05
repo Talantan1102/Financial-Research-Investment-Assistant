@@ -3,8 +3,8 @@
  * B-1 新建尽调表单页面。
  *
  * 两态:
- *   1. form 态  — 6 字段表单
- *   2. progress 态 — submit 后展示 AgentStatusSidebar + CostLatencyMetrics
+ *   1. form 态     — 6 字段表单
+ *   2. progress 态 — submit 后展示研究日志 + 技术细节 expandable
  *                    直到 done 事件 → navigate /research/:id
  *
  * 6 字段:
@@ -16,12 +16,19 @@
  *   6. risk_tolerance        — Select (5 选项)
  *   user_message — TextArea (可选补充说明)
  *
- * SSE event 处理 (C2 进度 UI):
- *   plan          → Planner running
- *   data_progress → DataCollector running + subtask progress
- *   insight       → Analyst running
- *   report_chunk  → Writer running + accumulate streamingMd (spec § 4.3)
- *   critic_score  → Critic done + CriticScores
+ * Progress overlay 布局 (v0.8.4 业务化重构):
+ *   主区: 业务化"研究日志" timeline (ProgressTimeline)
+ *         — 自然语言 + emoji, 隐藏 agent 名
+ *   技术细节 (collapsed by default): AgentStatusSidebar + 6-dim Critic 评分
+ *         — 面试官 / 架构透明用
+ *   底部 status bar: latency + cost
+ *
+ * SSE event 处理:
+ *   plan          → 研究维度日志
+ *   data_progress → 数据采集日志
+ *   insight       → 关键洞察日志
+ *   report_chunk  → 报告撰写完成 + streamingMd
+ *   critic_score  → aggregate 时 emit 6-dim 评分
  *   done          → navigate /research/:id
  *   error         → ErrorBanner agent_crash
  */
@@ -72,18 +79,6 @@ import Markdown from '@/components/markdown'
 const { Title, Text } = Typography
 const { TextArea } = Input
 const { Panel } = Collapse
-
-// ── Agent display labels (for timeline) ──────────────────────────────────────
-const AGENT_TIMELINE_LABELS: Record<string, string> = {
-  research_planner_node: '规划师',
-  data_collector_node: '数据采集',
-  analyst_node: '分析师',
-  writer_node: '撰写师',
-}
-
-function scorerLabel(scorer: string): string {
-  return scorer.replace('scorer_', '').replace(/_/g, ' ')
-}
 
 // ── Design tokens (aligned with monitoring page) ──────────────────────────────
 const TOKEN = {
@@ -137,48 +132,45 @@ function applySSEToAgentStates(
       break
 
     case 'data_progress': {
-      // DataCollector subtask progress
-      const tool = (ev.data['tool'] as string | undefined) ?? 'unknown'
-      const toolDone = (ev.data['done'] as boolean | undefined) ?? false
-      const existing = prev['DataCollector']
-      const subtasks = existing?.subtasks ? [...existing.subtasks] : []
-      const idx = subtasks.findIndex((s) => s.label === tool)
-      if (idx === -1) {
-        subtasks.push({ label: tool, status: toolDone ? 'done' : 'running' })
-      } else {
-        subtasks[idx] = { ...subtasks[idx], status: toolDone ? 'done' : 'running' }
-      }
+      // DataCollector done — all tools completed (backend emits one event per node completion)
+      // tools: human-readable labels; tool_names_raw: internal names
+      const toolLabels = (ev.data['tools'] as string[] | undefined) ?? []
+      const subtasks = toolLabels.map((label) => ({ label, status: 'done' as const }))
       next['DataCollector'] = {
         name: 'DataCollector',
-        status: 'running',
+        status: 'done',
         subtasks,
       }
+      next['Analyst'] = { name: 'Analyst', status: 'running' }
       break
     }
 
     case 'insight':
-      // DataCollector done, Analyst running
-      next['DataCollector'] = {
-        ...prev['DataCollector'],
-        name: 'DataCollector',
-        status: 'done',
-      }
-      next['Analyst'] = { name: 'Analyst', status: 'running' }
-      break
-
-    case 'report_chunk':
-      // Analyst done (first chunk), Writer running
-      if (prev['Analyst']?.status !== 'done') {
-        next['Analyst'] = { name: 'Analyst', status: 'done' }
-      }
+      // Analyst done — insights generated
+      // (DataCollector was already marked done via data_progress event)
+      next['Analyst'] = { name: 'Analyst', status: 'done' }
       next['Writer'] = { name: 'Writer', status: 'running' }
       break
 
-    case 'critic_score':
-      // Writer done, Critic done
-      next['Writer'] = { ...prev['Writer'], name: 'Writer', status: 'done' }
-      next['Critic'] = { name: 'Critic', status: 'done' }
+    case 'report_chunk':
+      // Writer done — report generated
+      next['Writer'] = { name: 'Writer', status: 'done' }
+      next['Critic'] = { name: 'Critic', status: 'running' }
       break
+
+    case 'critic_score': {
+      // Individual scorer: Critic still running; aggregate: Critic done
+      const scorer = (ev.data['scorer'] as string | undefined) ?? ''
+      if (scorer === 'aggregate') {
+        next['Critic'] = { name: 'Critic', status: 'done' }
+      } else {
+        // Keep Critic running during individual scorer execution
+        if (next['Critic']?.status !== 'done') {
+          next['Critic'] = { name: 'Critic', status: 'running' }
+        }
+      }
+      break
+    }
 
     case 'done':
       // All done
@@ -317,37 +309,46 @@ export default function ResearchNew() {
           // Update agent states
           setAgentStates((prev) => applySSEToAgentStates(prev, ev))
 
-          // Push timeline entry for progress UX (dogfood fix)
+          // Push research log entry (业务化研究日志 — 不显示 agent 名)
           {
             const elapsedSec = (Date.now() - startTimeRef.current) / 1000
             let entry: TimelineEntry | null = null
             if (ev.type === 'plan') {
-              const summary = (ev.data['summary'] as string | undefined) ?? '规划完成'
+              // Backend summary already has emoji prefix (e.g. "📋 已拆解为 N 个研究维度")
+              const summary = (ev.data['summary'] as string | undefined) ?? '📋 正在规划研究路径...'
               const subtasks = (ev.data['subtasks'] as string[] | undefined) ?? []
-              entry = { elapsedSec, agentLabel: '规划师', summary, bullets: subtasks, done: true }
+              // agentLabel kept for AgentStatusSidebar internal use, not displayed in log
+              entry = { elapsedSec, agentLabel: 'Planner', summary, bullets: subtasks, done: true }
             } else if (ev.type === 'data_progress') {
-              const summary = (ev.data['summary'] as string | undefined) ?? '数据采集完成'
+              const summary = (ev.data['summary'] as string | undefined) ?? '✅ 数据采集完成'
               const tools = (ev.data['tools'] as string[] | undefined) ?? []
-              entry = { elapsedSec, agentLabel: '数据采集', summary, bullets: tools, done: true }
+              entry = { elapsedSec, agentLabel: 'DataCollector', summary, bullets: tools, done: true }
             } else if (ev.type === 'insight') {
-              const summary = (ev.data['summary'] as string | undefined) ?? '分析完成'
-              entry = { elapsedSec, agentLabel: '分析师', summary, done: true }
+              const summary = (ev.data['summary'] as string | undefined) ?? '💡 分析完成'
+              const findings = (ev.data['findings'] as string[] | undefined) ?? []
+              entry = { elapsedSec, agentLabel: 'Analyst', summary, bullets: findings, done: true }
             } else if (ev.type === 'report_chunk') {
-              // Only push once (first report_chunk)
-              entry = { elapsedSec, agentLabel: '撰写师', summary: '完整报告生成完毕', done: true }
+              // Only push once (first report_chunk); backend now sets summary field
+              const summary = (ev.data['summary'] as string | undefined) ?? '📝 报告撰写完成'
+              entry = { elapsedSec, agentLabel: 'Writer', summary, done: true }
             } else if (ev.type === 'critic_score') {
               const scorer = (ev.data['scorer'] as string | undefined) ?? ''
-              const label = scorerLabel(scorer)
-              const summary = (ev.data['summary'] as string | undefined) ?? `${label} 评分完成`
-              entry = { elapsedSec, agentLabel: '评审官', summary, done: true }
+              const isAggregate = scorer === 'aggregate'
+              if (isAggregate) {
+                // Only aggregate emit goes into the research log
+                const summary = (ev.data['summary'] as string | undefined) ?? '🔬 评审完成'
+                entry = { elapsedSec, agentLabel: 'Critic', summary, done: true }
+              }
+              // Individual scorer events are skipped in the research log
+              // (they show up in the AgentStatusSidebar tech panel)
             } else if (ev.type === 'done') {
-              entry = { elapsedSec, agentLabel: '完成', summary: '报告生成完毕，即将跳转...', done: true }
+              entry = { elapsedSec, agentLabel: 'done', summary: '✅ 报告生成完毕，即将跳转...', done: true }
             }
             if (entry !== null) {
               // For report_chunk: only push the first one to avoid duplicates
               if (ev.type === 'report_chunk') {
                 setTimelineEntries((prev) => {
-                  const hasWriter = prev.some((e) => e.agentLabel === '撰写师')
+                  const hasWriter = prev.some((e) => e.agentLabel === 'Writer')
                   return hasWriter ? prev : [...prev, entry as TimelineEntry]
                 })
               } else {
@@ -369,18 +370,26 @@ export default function ResearchNew() {
             setCostCny(ev.data['cost_cny'] as number)
           }
 
-          // Critic score event
+          // Critic score event — only update scores from aggregate node (has real scores)
           if (ev.type === 'critic_score' && ev.data) {
-            const scores: CriticScores = {
-              data_quality: (ev.data['data_quality'] as number) ?? 0,
-              logical_coherence: (ev.data['logical_coherence'] as number) ?? 0,
-              client_fit: (ev.data['client_fit'] as number) ?? 0,
-              risk_disclosure: (ev.data['risk_disclosure'] as number) ?? 0,
-              regulatory_compliance: (ev.data['regulatory_compliance'] as number) ?? 0,
-              actionability: (ev.data['actionability'] as number) ?? 0,
-              total: (ev.data['total'] as number) ?? 0,
+            const scorer = (ev.data['scorer'] as string | undefined) ?? ''
+            const isAggregate = scorer === 'aggregate'
+            if (isAggregate) {
+              // New format: scores is a dict of dimension → score, overall is float
+              const scoresRaw = (ev.data['scores'] as Record<string, number> | undefined) ?? {}
+              const overall = (ev.data['overall'] as number | undefined) ?? 0
+              // Map to CriticScores interface (best-effort mapping from new 6-dim schema)
+              const scores: CriticScores = {
+                data_quality: scoresRaw['factuality'] ?? 0,
+                logical_coherence: scoresRaw['insight'] ?? 0,
+                client_fit: scoresRaw['input_context_appropriateness'] ?? 0,
+                risk_disclosure: scoresRaw['coverage'] ?? 0,
+                regulatory_compliance: scoresRaw['conciseness'] ?? 0,
+                actionability: scoresRaw['structure'] ?? 0,
+                total: overall,
+              }
+              setCriticScores(scores)
             }
-            setCriticScores(scores)
           }
 
           // Done → navigate
@@ -497,102 +506,109 @@ export default function ResearchNew() {
           </div>
         )}
 
-        {/* Progress area — 2-col: left=AgentSidebar, right=ProgressTimeline */}
+        {/* Main progress area — single column: research log + expandable tech panel */}
         <div
           style={{
-            display: 'flex',
-            gap: 16,
-            alignItems: 'flex-start',
             flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            maxWidth: 760,
           }}
         >
-          {/* Left: Agent status sidebar */}
-          <AgentStatusSidebar
-            agentStates={agentStates}
-            style={{ flex: '0 0 220px' }}
+          {/* Main area: Business-friendly research log timeline */}
+          <ProgressTimeline
+            entries={timelineEntries}
+            style={{ flex: 1 }}
           />
 
-          {/* Right: Progress timeline main area */}
-          <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <ProgressTimeline
-              entries={timelineEntries}
-              style={{ flex: 1 }}
-            />
-
-            {/* Streaming markdown preview — shown once writer starts (spec § 4.3) */}
-            {streamingMd && (
+          {/* Streaming markdown preview — shown once writer completes (spec § 4.3) */}
+          {streamingMd && (
+            <div
+              style={{
+                backgroundColor: TOKEN.cardBg,
+                border: `1px solid ${TOKEN.borderColor}`,
+                borderRadius: 10,
+                padding: '16px 20px',
+              }}
+            >
               <div
                 style={{
-                  backgroundColor: TOKEN.cardBg,
-                  border: `1px solid ${TOKEN.borderColor}`,
-                  borderRadius: 10,
-                  padding: '16px 20px',
+                  fontSize: 12,
+                  color: TOKEN.textTertiary,
+                  fontWeight: 600,
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                  marginBottom: 8,
                 }}
               >
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: TOKEN.textTertiary,
-                    fontWeight: 600,
-                    letterSpacing: '0.06em',
-                    textTransform: 'uppercase',
-                    marginBottom: 8,
-                  }}
-                >
-                  报告预览
-                </div>
-                <div
-                  style={{
-                    maxHeight: '40vh',
-                    overflowY: 'auto',
-                    fontSize: 13,
-                    lineHeight: 1.7,
-                    color: TOKEN.textPrimary,
-                  }}
-                >
-                  <Markdown value={streamingMd} />
-                </div>
+                报告预览
               </div>
-            )}
-
-            {/* Critic 6-dim scores — collapsible, shown after critic_score event */}
-            {criticScores && (
-              <Collapse
-                size="small"
-                style={{ borderColor: TOKEN.borderColor, backgroundColor: TOKEN.cardBg }}
-              >
-                <Panel
-                  header={
-                    <span style={{ fontSize: 12, color: TOKEN.textSecondary, fontWeight: 600 }}>
-                      Critic 评分 — 综合 {criticScores.total.toFixed(1)} / 10
-                    </span>
-                  }
-                  key="critic"
-                >
-                  <CostLatencyMetrics
-                    costCny={costCny}
-                    latencyMs={latencyMs}
-                    criticScores={criticScores}
-                    style={{ border: 'none', padding: 0, borderRadius: 0 }}
-                  />
-                </Panel>
-              </Collapse>
-            )}
-
-            {/* Cancel / retry button */}
-            <div style={{ paddingBottom: 16 }}>
-              <Button
-                onClick={handleReset}
-                disabled={submitting && !progressError}
+              <div
                 style={{
-                  borderColor: TOKEN.borderColor,
-                  color: TOKEN.textSecondary,
+                  maxHeight: '40vh',
+                  overflowY: 'auto',
                   fontSize: 13,
+                  lineHeight: 1.7,
+                  color: TOKEN.textPrimary,
                 }}
               >
-                {progressError ? '返回表单' : '取消'}
-              </Button>
+                <Markdown value={streamingMd} />
+              </div>
             </div>
+          )}
+
+          {/* 技术细节 expandable panel (collapsed by default)
+              面试官 / 架构透明: 5-agent pipeline + 6-dim Critic 评分 */}
+          <Collapse
+            size="small"
+            style={{ borderColor: TOKEN.borderColor, backgroundColor: TOKEN.pageBg }}
+            defaultActiveKey={[]}
+          >
+            <Panel
+              header={
+                <span style={{ fontSize: 12, color: TOKEN.textSecondary, fontWeight: 600 }}>
+                  技术细节 — 5-agent 架构 + Critic 评分
+                </span>
+              }
+              key="tech"
+            >
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                {/* Agent pipeline */}
+                <div style={{ flex: '0 0 200px', minWidth: 180 }}>
+                  <AgentStatusSidebar
+                    agentStates={agentStates}
+                    style={{ border: 'none', padding: 0, borderRadius: 0, minWidth: 'unset' }}
+                  />
+                </div>
+                {/* 6-dim Critic scores (shown after critic aggregate fires) */}
+                {criticScores && (
+                  <div style={{ flex: 1, minWidth: 220 }}>
+                    <CostLatencyMetrics
+                      costCny={costCny}
+                      latencyMs={latencyMs}
+                      criticScores={criticScores}
+                      style={{ border: 'none', padding: 0, borderRadius: 0 }}
+                    />
+                  </div>
+                )}
+              </div>
+            </Panel>
+          </Collapse>
+
+          {/* Cancel / retry button */}
+          <div style={{ paddingBottom: 16 }}>
+            <Button
+              onClick={handleReset}
+              disabled={submitting && !progressError}
+              style={{
+                borderColor: TOKEN.borderColor,
+                color: TOKEN.textSecondary,
+                fontSize: 13,
+              }}
+            >
+              {progressError ? '返回表单' : '取消'}
+            </Button>
           </div>
         </div>
 

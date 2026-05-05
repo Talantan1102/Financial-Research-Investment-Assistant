@@ -1,10 +1,12 @@
 /**
  * ProgressTimeline.tsx
- * Displays a chronological list of agent actions during SSE streaming.
- * Each entry shows elapsed time + agent name + summary text (+ optional subtask bullets).
+ * Business-friendly "research log" — each SSE event produces one log entry.
+ * Shows elapsed time + summary text (+ optional bullet sub-items).
+ * Agent names are intentionally hidden from the main display; they live in
+ * the collapsible "技术细节" panel in new.tsx.
  *
- * UX fix (dogfood): replaces empty "生成提示" placeholder in progress overlay main area
- * with a meaningful real-time log of agent activity, reducing user wait anxiety.
+ * UX ref: Perplexity / OpenAI Deep Research / Kimi 探索版 — natural-language
+ * research monologue, hiding internal pipeline details.
  */
 
 import type { CSSProperties } from 'react'
@@ -26,13 +28,17 @@ const TOKEN = {
 export interface TimelineEntry {
   /** Elapsed seconds since streaming started (shown as [MM:SS]) */
   elapsedSec: number
-  /** Human-readable agent label, e.g. "规划师" */
+  /**
+   * Agent label — retained for AgentStatusSidebar use in tech panel,
+   * but NOT displayed in the main research log timeline.
+   * @internal
+   */
   agentLabel: string
-  /** One-line summary text */
+  /** Business-friendly one-line summary (may include emoji prefix) */
   summary: string
-  /** Optional bullet items (subtasks / tool names / etc.) */
+  /** Optional bullet items (subtask descriptions / tool labels / findings) */
   bullets?: string[]
-  /** Whether this is a terminal / completed entry */
+  /** Whether this is a completed entry */
   done: boolean
 }
 
@@ -59,7 +65,7 @@ export default function ProgressTimeline({ entries, style }: ProgressTimelinePro
           backgroundColor: TOKEN.cardBg,
           border: `1px solid ${TOKEN.borderColor}`,
           borderRadius: 10,
-          padding: '16px 20px',
+          padding: '20px 24px',
           minHeight: 120,
           display: 'flex',
           flexDirection: 'column',
@@ -74,14 +80,15 @@ export default function ProgressTimeline({ entries, style }: ProgressTimelinePro
             fontWeight: 600,
             letterSpacing: '0.06em',
             textTransform: 'uppercase',
+            marginBottom: 4,
           }}
         >
-          进度摘要
+          研究进展
         </div>
-        <div style={{ fontSize: 13, color: TOKEN.textSecondary, lineHeight: 1.7 }}>
-          <p style={{ margin: 0 }}>AI 正在初始化，请稍候...</p>
+        <div style={{ fontSize: 13, color: TOKEN.textSecondary, lineHeight: 1.8 }}>
+          <p style={{ margin: 0 }}>正在初始化研究路径，请稍候...</p>
           <p style={{ margin: '8px 0 0', color: TOKEN.textTertiary, fontSize: 12 }}>
-            报告通常需要 2–5 分钟完成。生成完毕后将自动跳转到报告页面。
+            完整研报通常需要 2–5 分钟。生成完毕后将自动跳转到报告页面。
           </p>
         </div>
       </div>
@@ -94,7 +101,7 @@ export default function ProgressTimeline({ entries, style }: ProgressTimelinePro
         backgroundColor: TOKEN.cardBg,
         border: `1px solid ${TOKEN.borderColor}`,
         borderRadius: 10,
-        padding: '16px 20px',
+        padding: '20px 24px',
         minHeight: 120,
         maxHeight: '55vh',
         overflowY: 'auto',
@@ -108,23 +115,23 @@ export default function ProgressTimeline({ entries, style }: ProgressTimelinePro
           fontWeight: 600,
           letterSpacing: '0.06em',
           textTransform: 'uppercase',
-          marginBottom: 12,
+          marginBottom: 14,
         }}
       >
-        进度摘要
+        研究进展
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {entries.map((entry, idx) => (
-          <div key={idx} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            {/* Timeline dot + vertical line */}
+          <div key={idx} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            {/* Timeline dot + vertical connector */}
             <div
               style={{
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 flexShrink: 0,
-                paddingTop: 2,
+                paddingTop: 3,
               }}
             >
               <div
@@ -141,7 +148,7 @@ export default function ProgressTimeline({ entries, style }: ProgressTimelinePro
                   style={{
                     width: 1,
                     flex: 1,
-                    minHeight: 16,
+                    minHeight: 18,
                     backgroundColor: TOKEN.borderColor,
                     marginTop: 4,
                   }}
@@ -149,15 +156,16 @@ export default function ProgressTimeline({ entries, style }: ProgressTimelinePro
               )}
             </div>
 
-            {/* Content */}
-            <div style={{ flex: 1, paddingBottom: idx < entries.length - 1 ? 6 : 0 }}>
-              {/* Time + agent label */}
+            {/* Entry content — no agentLabel display */}
+            <div style={{ flex: 1, paddingBottom: idx < entries.length - 1 ? 4 : 0 }}>
+              {/* Timestamp + summary on same line */}
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'baseline',
-                  gap: 6,
-                  marginBottom: entry.bullets && entry.bullets.length > 0 ? 4 : 0,
+                  gap: 8,
+                  flexWrap: 'wrap',
+                  marginBottom: entry.bullets && entry.bullets.length > 0 ? 6 : 0,
                 }}
               >
                 <span
@@ -168,22 +176,13 @@ export default function ProgressTimeline({ entries, style }: ProgressTimelinePro
                     flexShrink: 0,
                   }}
                 >
-                  [{formatElapsed(entry.elapsedSec)}]
+                  {formatElapsed(entry.elapsedSec)}
                 </span>
                 <span
                   style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: entry.done ? TOKEN.accentGreen : TOKEN.textSecondary,
-                    flexShrink: 0,
-                  }}
-                >
-                  {entry.agentLabel}
-                </span>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: TOKEN.textPrimary,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: entry.done ? TOKEN.textPrimary : TOKEN.accentBlue,
                     lineHeight: 1.5,
                     wordBreak: 'break-word',
                   }}
@@ -192,23 +191,26 @@ export default function ProgressTimeline({ entries, style }: ProgressTimelinePro
                 </span>
               </div>
 
-              {/* Bullet items (subtasks / tools) */}
+              {/* Bullet items (subtask descriptions / tool labels / findings) */}
               {entry.bullets && entry.bullets.length > 0 && (
                 <div
                   style={{
-                    paddingLeft: 8,
+                    paddingLeft: 10,
                     borderLeft: `2px solid ${TOKEN.borderColor}`,
-                    marginLeft: 4,
+                    marginLeft: 2,
                     marginTop: 2,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 1,
                   }}
                 >
                   {entry.bullets.map((b, bi) => (
                     <div
                       key={bi}
                       style={{
-                        fontSize: 11,
+                        fontSize: 12,
                         color: TOKEN.textSecondary,
-                        lineHeight: 1.6,
+                        lineHeight: 1.7,
                         paddingLeft: 4,
                       }}
                     >
