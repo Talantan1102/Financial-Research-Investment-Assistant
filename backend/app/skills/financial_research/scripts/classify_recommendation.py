@@ -2,10 +2,12 @@
 
 Mini DSL:
     - condition: ``{field, op, value}`` triple OR ``{count_at_least_3: [...]}``
-    - rule: ``all_of`` / ``any_of`` list of conditions OR ``fallback: true``
+    - rule envelope: ``{description, conditions: {all_of|any_of: [...]}}`` OR
+      ``{description, fallback: true}``
     - op: ``<``, ``>``, ``==``, ``<=``, ``>=``
 
-Priority: rule order in the YAML list (first match wins).
+Priority is hard-coded in ``_PRIORITY`` (NOT YAML mapping order) so future
+edits to recommendation_rules.yaml cannot silently re-order evaluation.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ Recommendation = Literal[
 
 _RULES_PATH = Path(__file__).parent.parent / "references" / "recommendation_rules.yaml"
 _RULES_DOC: dict[str, Any] = yaml.safe_load(_RULES_PATH.read_text(encoding="utf-8"))
-_RULES: list[dict[str, Any]] = list(_RULES_DOC["rules"])
+_RULES: dict[str, dict[str, Any]] = dict(_RULES_DOC["rules"])
 
 _OPS: dict[str, Callable[[Any, Any], bool]] = {
     "<": lambda a, b: a < b,
@@ -35,6 +37,16 @@ _OPS: dict[str, Callable[[Any, Any], bool]] = {
     "<=": lambda a, b: a <= b,
     ">=": lambda a, b: a >= b,
 }
+
+# 评级优先级顺序(先 sell 红线, 再 buy / overweight, 最后 underweight, 兜底 hold)
+# Hard-coded so YAML mapping order can't silently shift priority.
+_PRIORITY: list[Recommendation] = [
+    "recommend_sell",
+    "recommend_buy",
+    "recommend_overweight",
+    "recommend_underweight",
+    "recommend_hold",
+]
 
 
 def _eval_condition(cond: dict[str, Any], metrics: dict[str, Any]) -> bool:
@@ -53,10 +65,11 @@ def _eval_condition(cond: dict[str, Any], metrics: dict[str, Any]) -> bool:
 def _eval_rule(rule: dict[str, Any], metrics: dict[str, Any]) -> bool:
     if rule.get("fallback") is True:
         return True
-    if "all_of" in rule:
-        return all(_eval_condition(c, metrics) for c in rule["all_of"])
-    if "any_of" in rule:
-        return any(_eval_condition(c, metrics) for c in rule["any_of"])
+    conds: dict[str, Any] = rule.get("conditions", {})
+    if "all_of" in conds:
+        return all(_eval_condition(c, metrics) for c in conds["all_of"])
+    if "any_of" in conds:
+        return any(_eval_condition(c, metrics) for c in conds["any_of"])
     return False
 
 
@@ -71,19 +84,13 @@ def classify_recommendation(metrics: dict[str, Any]) -> Recommendation:
             ``pledge_ratio``, ``asset_liability_warning`` (bool).
 
     Returns:
-        Recommendation literal — first matching rule in priority order.
+        Recommendation literal — first matching rule in ``_PRIORITY`` order.
     """
-    for rule in _RULES:
+    for rec in _PRIORITY:
+        rule = _RULES.get(rec)
+        if rule is None:
+            continue
         if _eval_rule(rule, metrics):
-            name: str = rule["name"]
-            # narrow str → Recommendation Literal via cast-ish assert
-            assert name in (
-                "recommend_buy",
-                "recommend_overweight",
-                "recommend_hold",
-                "recommend_underweight",
-                "recommend_sell",
-            ), f"Unknown rule name: {name}"
-            return name  # type: ignore[return-value]
-    # Should never happen — recommend_hold is fallback. Defensive default.
+            return rec
+    # Should never reach — recommend_hold is fallback. Defensive default.
     return "recommend_hold"
