@@ -2,13 +2,13 @@
 
 LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
 
-**当前版本**:v0.8.4(B-1 投资标的尽调 + 产品定位 reframe + 5-agent prompt 改造 + 3 differential golden)
+**当前版本**:v0.8.5(constrained LLM router + 17-component Anthropic Skills bundle + 7th critic plan_correctness + LangGraph self-correcting retry edge)
 
 ## 三个使用模式
 
 | 模式 | 路径 | 说明 |
 |---|---|---|
-| **投资标的尽调 (B-1)** | `/research` | 5-agent 流程(Planner 4 模板路由 → DataCollector → Analyst horizon-conditioned → Writer 6 字段驱动 → Critic 6 维评分),产出 `InvestmentDueDiligenceReport` Pydantic schema;6 字段 form(ts_code + horizon + objective + risk_tolerance + 持仓 + 机构类型) |
+| **投资标的尽调 (B-1)** | `/research` | 5-agent 流程(Planner constrained router 4 选 1 → DataCollector → Analyst horizon-conditioned → Writer 6 字段驱动 + Python helper 决定论修正 → Critic 7 维评分 含 plan_correctness),产出 `InvestmentDueDiligenceReport` Pydantic schema;6 字段 form(ts_code + horizon + objective + risk_tolerance + 持仓 + 机构类型);LangGraph self-correcting retry edge(plan_correctness < 8.5 且 retry_count < 2 → 回 planner 重选,max 2 轮硬上限) |
 | **对话模式 (Chat)** | `/chat` | ChatAgent + planner + tool registry,自然语言问答 + 工具调用(行情/财务/web/KB) |
 | **持仓预警 (Monitoring, B-3)** | `/monitoring` | 5 SignalRule 并发评分 → 红色 alert 触发 5-agent deep_dive escalation → 邮件通知;支持手动 + cron 触发 |
 
@@ -17,10 +17,13 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 ```
                     ┌──────────────────────────────────────────────────────────┐
                     │ FastAPI + LangGraph 1.x orchestration                    │
-                    │   ├─ ResearchAgent (5-agent + Critic 6-dim subgraph)     │
+                    │   ├─ ResearchAgent (5-agent + Critic 7-dim subgraph + retry edge) │
                     │   │    InvestmentDueDiligenceReport schema (v0.8.4)      │
-                    │   │    Planner(4 templates) → Analyst(horizon-conditioned)│
-                    │   │    Writer(6 sections) → Critic(6 scorer)             │
+                    │   │    Planner(constrained router 4-id Literal) → Analyst(horizon-conditioned) │
+                    │   │    Writer(6 sections + Python helpers 决定论修正)    │
+                    │   │    Critic(7 scorer 含 plan_correctness LLM-as-judge) │
+                    │   │    Self-correcting retry edge(plan_correctness < 8.5 → 回 planner, max 2 轮) │
+                    │   │    financial_research/ skill bundle(17 components — Anthropic Skills 模式) │
                     │   ├─ ChatAgent     (planner + tool registry)             │
                     │   └─ MonitoringService (signal + escalation)             │
                     └──────────────────────────────────────────────────────────┘
@@ -29,7 +32,7 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
    │ 横切服务 (app/services/) — 全部 Protocol + Real/Mock + factory             │
    ├──────────────────────────────────────┼──────────────────────────────────────┤
    │ LLMService   │ TushareService  │ BochaService     │ KBService              │
-   │ (OpenAI 兼容) │ (8 接口 + 缓存) │ (Web 搜索 + 4 reliability) │ (Milvus 向量库) │
+   │ (OpenAI 兼容) │ (13 接口 + 缓存)│ (Web 搜索 + 4 reliability) │ (Milvus 向量库) │
    │ TraceService │ EvalRunner      │ Judge            │ EmailNotifier (B-3)    │
    │ CostBudget   │ TierRouter      │ RateLimiter      │ CircuitBreaker          │
    └──────────────────────────────────────────────────────────────────────────────┘
@@ -47,6 +50,9 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 - **VCR cassette e2e**:LLM/Tushare/Bocha 的真调用录成 yaml,replay 0.81s 跑 36 个 endpoint × 5 ts_code。代理 host 在录制时被 scrub 成官方 host(repo 不暴露代理 URL)。
 - **mypy strict**:`app/services/*` `app/agents/*` `app/orchestration/*` 全 strict 通过。legacy `app/service/`(单数)mypy ignore_errors。
 - **commit-msg layer 标记**:fix 类 commit body 必须含 `原因 layer: <impl|plan|spec>`(pre-commit hook 强制),溯源 bug 起源。
+- **Constrained LLM router (v0.8.5)**:Planner 不自由生成 ResearchPlan,LLM 仅在 4 个 hardcode plan_id Literal(`capital_preservation` / `balanced` / `aggressive_growth` / `event_driven`)中四选一 + rationale ≤200 字符;subtask templates hardcode 在 `plan_registry`,LLM 不参与生成,保证 plan deterministic + golden case 可写。
+- **Anthropic Skills bundle (v0.8.5)**:`backend/app/agents/research/financial_research/` 17 components — 11 .md methodology(solvency / profitability / growth / cashflow_quality / valuation / industry / shareholder_governance / short_term_capital_flow / event_driven / risk_factors / decision_framework)+ 3 references(industry_benchmarks.json + recommendation_rules.yaml + position_size_rules.yaml)+ 3 Python helpers(`compute_position_size` / `classify_recommendation` / `lookup_industry_benchmark`,纯函数 deterministic)。Writer 调 Python helper 算 recommendation + position_size_pct,LLM 仅生成 narrative,footer 标 "Python 决定论修正"。
+- **Self-correcting retry edge (v0.8.5)**:LangGraph `add_conditional_edges`,plan_correctness < 8.5 AND retry_count < 2 → 回 `research_planner_node` 收 critic feedback 重选,max 2 轮硬上限,防 LLM judgment 错或 ambiguous case。
 
 ## 版本演进
 
@@ -60,7 +66,8 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | v0.8.2 | Credit investigation report schema + Writer 重构 + B-1 茅台 e2e | #11 |
 | v0.8.3-pre | 项目个人化 + legacy 标识 + 设计语言对齐 | #12 |
 | v0.8.3 | Tushare 真接 8 接口 + B-3 持仓预警引擎(signal + escalation + email + 3 前端页) | #13 |
-| **v0.8.4** | **B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey** | **#16** |
+| v0.8.4 | B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey | #16 |
+| **v0.8.5** | **Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字** | TBD |
 
 ## 技术栈
 
@@ -68,7 +75,7 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 |---|---|
 | LLM | OpenAI 兼容协议(默认阿里云百炼 Qwen,可切 OpenAI / DeepSeek / 任意兼容端点) |
 | 编排 | LangGraph 1.x(Pydantic state + Send API + subgraph) |
-| 数据 | Tushare Pro(8 接口)+ Bocha Web 搜索 + Milvus 向量库 |
+| 数据 | Tushare Pro(13 接口:8 base + 5 v0.8.5 财务/估值/资金信号)+ Bocha Web 搜索 + Milvus 向量库 |
 | 持久化 | sqlite(monitoring / cache / trace / eval) + PostgreSQL(用户/会话,可选) + Redis(可选) |
 | 后端 | FastAPI + httpx async + APScheduler(B-3 cron) |
 | 前端 | React 18 + Vite + Antd 5 + TypeScript strict |
@@ -134,7 +141,8 @@ cd frontend && npm run dev
 | **L2 e2e** (`backend/tests/e2e/`) | cassette(replay) | <2min | 每个 PR |
 | **L3 eval** (`backend/tests/eval/`) | live(真 API,烧钱) | 5-15min | nightly + 手动 |
 
-**当前状态**(v0.8.4):582 passed + 4 documented skip,mypy 0 errors / 308 source files,cassette 36 episodes + B-1 茅台 e2e cassette(84KB)。3 differential golden case(LLM-as-judge ic_score ≥ 9.0)。
+**当前状态**(v0.8.5):564 unit + 60+ integration / e2e + 3 retry edge integration,mypy 0 errors,ruff clean,cassette 36 episodes + B-1 茅台 e2e cassette(84KB)。4 differential golden case(LLM-as-judge ic_score ≥ 9.0;含 1 retry-trigger pending Phase 9b cassette 重录)。
+- **constrained router 测试**:plan_registry 15 + router 18 + skill helper 20 + plan_correctness scorer 4 + retry edge 3 + new tool 21 + writer post_process 13。
 
 ## 环境变量
 
@@ -165,6 +173,10 @@ financial-research-assistant/
 ├── backend/
 │   ├── app/
 │   │   ├── agents/              # 7 agent + portfolio_warning schema/renderer + credit_report
+│   │   │   └── research/financial_research/  # v0.8.5 Anthropic Skills bundle (17 components)
+│   │   │       ├── methodology/  # 11 .md (solvency / profitability / growth / ... / decision_framework)
+│   │   │       ├── references/   # industry_benchmarks.json + recommendation_rules.yaml + position_size_rules.yaml
+│   │   │       └── helpers/      # compute_position_size / classify_recommendation / lookup_industry_benchmark
 │   │   ├── orchestration/       # LangGraph 装配(research_graph / chat_graph)
 │   │   ├── services/            # 横切服务(全 Protocol + Real/Mock + factory)
 │   │   │   ├── monitoring/      # B-3 v0.8.3 — signal_rules / escalation / scheduler / notifications
