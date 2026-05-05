@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from functools import partial
-from pathlib import Path
 from typing import Any
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.analyst import Analyst
@@ -14,7 +14,6 @@ from app.agents.data_collector import DataCollector
 from app.agents.research_planner import ResearchPlanner
 from app.agents.schemas import ResearchState
 from app.agents.writer import Writer
-from app.orchestration.checkpointer import make_chat_checkpointer
 from app.orchestration.critic_subgraph import build_critic_subgraph
 from app.orchestration.research_nodes import (
     analyst_node,
@@ -31,7 +30,8 @@ def build_research_graph(
     writer: Writer,
     critic: Critic,
     *,
-    db_path: Path | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
+    db_path: None = None,  # deprecated — ignored; use checkpointer= instead
 ) -> Any:
     """Assemble and compile the v0.5 research LangGraph StateGraph.
 
@@ -41,13 +41,17 @@ def build_research_graph(
               → writer_node → critic_node → END
 
     Args:
-        planner:   ResearchPlanner that decomposes the user query into subtasks.
-        collector: DataCollector that executes tool calls in parallel.
-        analyst:   Analyst that derives insights from tool results.
-        writer:    Writer that synthesises the final research report.
-        critic:    Critic subagent that scores the report on 5 dimensions.
-        db_path:   Optional path to a SQLite file for checkpointing.
-                   Pass None for a stateless in-memory graph (tests / eval).
+        planner:      ResearchPlanner that decomposes the user query into subtasks.
+        collector:    DataCollector that executes tool calls in parallel.
+        analyst:      Analyst that derives insights from tool results.
+        writer:       Writer that synthesises the final research report.
+        critic:       Critic subagent that scores the report on 5 dimensions.
+        checkpointer: Optional pre-constructed checkpointer (sync or async).
+                      Pass ``None`` for a stateless in-memory graph (tests / eval).
+                      For the production async streaming path use
+                      ``AsyncSqliteSaver`` (see ``make_async_chat_checkpointer``).
+        db_path:      Deprecated parameter; kept for call-site compatibility.
+                      Always pass ``None``.  The ``checkpointer=`` kwarg supersedes it.
 
     Returns:
         A compiled LangGraph object ready for .ainvoke / .astream_events.
@@ -69,5 +73,4 @@ def build_research_graph(
     g.add_edge("writer_node", "critic_node")
     g.add_edge("critic_node", END)
 
-    checkpointer = make_chat_checkpointer(db_path) if db_path else None
     return g.compile(checkpointer=checkpointer)

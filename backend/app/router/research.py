@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -91,73 +92,101 @@ def _is_root_done_event(ev: dict[str, Any]) -> bool:
 
 
 _RESEARCH_GRAPH_SINGLETON: Any = None
+_RESEARCH_GRAPH_LOCK: asyncio.Lock | None = None
 
 
-def get_research_graph() -> Any:
-    """DI factory: build the research graph singleton at first request (lazy init)."""
+def _get_graph_lock() -> asyncio.Lock:
+    """Return the module-level asyncio.Lock, creating it lazily inside the event loop."""
+    global _RESEARCH_GRAPH_LOCK
+    if _RESEARCH_GRAPH_LOCK is None:
+        _RESEARCH_GRAPH_LOCK = asyncio.Lock()
+    return _RESEARCH_GRAPH_LOCK
+
+
+async def get_research_graph() -> Any:
+    """Async DI factory: build the research graph singleton at first request (lazy init).
+
+    Uses AsyncSqliteSaver so that graph.astream_events() works correctly in
+    the async FastAPI event loop.  The singleton is built exactly once; subsequent
+    calls return the cached instance without re-acquiring the lock.
+    """
     global _RESEARCH_GRAPH_SINGLETON
     if _RESEARCH_GRAPH_SINGLETON is not None:
         return _RESEARCH_GRAPH_SINGLETON
 
-    from app.agents.analyst import Analyst
-    from app.agents.critic import Critic
-    from app.agents.critic_subagents.conciseness import ConcisenessScorer
-    from app.agents.critic_subagents.coverage import CoverageScorer
-    from app.agents.critic_subagents.factuality import FactualityScorer
-    from app.agents.critic_subagents.input_context_scorer import (
-        InputContextAppropriatenessScorer,
-    )
-    from app.agents.critic_subagents.insight import InsightScorer
-    from app.agents.critic_subagents.structure import StructureScorer
-    from app.agents.data_collector import DataCollector
-    from app.agents.research_planner import ResearchPlanner
-    from app.agents.writer import Writer
-    from app.orchestration.research_graph import build_research_graph
-    from app.services.bocha_factory import build_bocha_service_from_env
-    from app.services.kb_factory import build_kb_search_service_from_env
-    from app.services.openai_client import build_llm_service_from_env
-    from app.services.tushare_factory import build_tushare_service
-    from app.tools.get_financials import GetFinancialsTool
-    from app.tools.get_news import GetNewsTool
-    from app.tools.get_stock_quote import StockQuoteTool
-    from app.tools.kb_search import KbSearchTool
-    from app.tools.registry import ToolRegistry
-    from app.tools.web_search import WebSearchTool
+    lock = _get_graph_lock()
+    async with lock:
+        # Double-checked locking: another coroutine may have built it while we waited.
+        if _RESEARCH_GRAPH_SINGLETON is not None:
+            return _RESEARCH_GRAPH_SINGLETON
 
-    llm = build_llm_service_from_env()
-    tushare = build_tushare_service()
+        from app.agents.analyst import Analyst
+        from app.agents.critic import Critic
+        from app.agents.critic_subagents.conciseness import ConcisenessScorer
+        from app.agents.critic_subagents.coverage import CoverageScorer
+        from app.agents.critic_subagents.factuality import FactualityScorer
+        from app.agents.critic_subagents.input_context_scorer import (
+            InputContextAppropriatenessScorer,
+        )
+        from app.agents.critic_subagents.insight import InsightScorer
+        from app.agents.critic_subagents.structure import StructureScorer
+        from app.agents.data_collector import DataCollector
+        from app.agents.research_planner import ResearchPlanner
+        from app.agents.writer import Writer
+        from app.orchestration.checkpointer import make_async_chat_checkpointer
+        from app.orchestration.research_graph import build_research_graph
+        from app.services.bocha_factory import build_bocha_service_from_env
+        from app.services.kb_factory import build_kb_search_service_from_env
+        from app.services.openai_client import build_llm_service_from_env
+        from app.services.tushare_factory import build_tushare_service
+        from app.tools.get_financials import GetFinancialsTool
+        from app.tools.get_news import GetNewsTool
+        from app.tools.get_stock_quote import StockQuoteTool
+        from app.tools.kb_search import KbSearchTool
+        from app.tools.registry import ToolRegistry
+        from app.tools.web_search import WebSearchTool
 
-    registry = ToolRegistry()
-    registry.register(StockQuoteTool(tushare=tushare))
-    registry.register(GetFinancialsTool(tushare=tushare))
-    registry.register(GetNewsTool(bocha=build_bocha_service_from_env()))
-    registry.register(WebSearchTool(bocha=build_bocha_service_from_env()))
-    kb_service = build_kb_search_service_from_env()
-    registry.register(KbSearchTool(kb_service=kb_service))
+        llm = build_llm_service_from_env()
+        tushare = build_tushare_service()
 
-    planner = ResearchPlanner(llm=llm)
-    collector = DataCollector(llm=llm, registry=registry)
-    analyst = Analyst(llm=llm)
-    writer = Writer(llm=llm)
-    scorers = [
-        FactualityScorer(llm=llm),
-        CoverageScorer(llm=llm),
-        InsightScorer(llm=llm),
-        StructureScorer(llm=llm),
-        ConcisenessScorer(llm=llm),
-        InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer (v0.8.4)
-    ]
-    critic = Critic(llm=llm, scorers=scorers)
+        registry = ToolRegistry()
+        registry.register(StockQuoteTool(tushare=tushare))
+        registry.register(GetFinancialsTool(tushare=tushare))
+        registry.register(GetNewsTool(bocha=build_bocha_service_from_env()))
+        registry.register(WebSearchTool(bocha=build_bocha_service_from_env()))
+        kb_service = build_kb_search_service_from_env()
+        registry.register(KbSearchTool(kb_service=kb_service))
 
-    _RESEARCH_GRAPH_SINGLETON = build_research_graph(
-        planner=planner,
-        collector=collector,
-        analyst=analyst,
-        writer=writer,
-        critic=critic,
-        db_path=Path("backend/data/research.sqlite"),
-    )
-    return _RESEARCH_GRAPH_SINGLETON
+        planner = ResearchPlanner(llm=llm)
+        collector = DataCollector(llm=llm, registry=registry)
+        analyst = Analyst(llm=llm)
+        writer = Writer(llm=llm)
+        scorers = [
+            FactualityScorer(llm=llm),
+            CoverageScorer(llm=llm),
+            InsightScorer(llm=llm),
+            StructureScorer(llm=llm),
+            ConcisenessScorer(llm=llm),
+            InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer (v0.8.4)
+        ]
+        critic = Critic(llm=llm, scorers=scorers)
+
+        # AsyncSqliteSaver must be created inside the running event loop.
+        # make_async_chat_checkpointer opens an aiosqlite connection and keeps it
+        # open for the lifetime of the process (singleton pattern).
+        async_checkpointer = await make_async_chat_checkpointer(
+            Path("backend/data/research.sqlite")
+        )
+
+        _RESEARCH_GRAPH_SINGLETON = build_research_graph(
+            planner=planner,
+            collector=collector,
+            analyst=analyst,
+            writer=writer,
+            critic=critic,
+            checkpointer=async_checkpointer,
+        )
+        return _RESEARCH_GRAPH_SINGLETON
 
 
 @router.post("/api/v0.5/research")

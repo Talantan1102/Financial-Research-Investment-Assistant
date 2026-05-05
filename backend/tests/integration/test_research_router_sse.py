@@ -409,3 +409,142 @@ def test_research_stream_event_schema_validation() -> None:
     ):
         ev = ResearchStreamEvent(type=ev_type, data={"key": "value"})
         assert ev.type == ev_type
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: AsyncSqliteSaver checkpointer + astream_events path
+# ---------------------------------------------------------------------------
+
+
+async def test_research_graph_with_async_checkpointer_does_not_raise(
+    tmp_path: Any,
+) -> None:
+    """Regression: graph compiled with AsyncSqliteSaver must work with astream_events.
+
+    This test reproduces the dogfood blocker:
+      "The SqliteSaver does not support async methods.
+       Consider using AsyncSqliteSaver instead."
+
+    The bug only surfaces when *both* conditions are true:
+      1. The graph checkpointer is a sync SqliteSaver.
+      2. The graph is driven via graph.astream_events() (async path).
+
+    The fix is to use AsyncSqliteSaver via make_async_chat_checkpointer.
+    This test builds a real graph with AsyncSqliteSaver and invokes
+    astream_events() to verify no error is raised.
+    """
+    from pathlib import Path
+
+    from app.orchestration.checkpointer import make_async_chat_checkpointer
+
+    db_path = Path(tmp_path) / "test_regression_async.sqlite"
+    async_checkpointer = await make_async_chat_checkpointer(db_path)
+
+    mock_client = MockLLMClient.from_fixture_dir(FIXTURES_DIR)
+    svc = LLMService(client=mock_client)
+
+    registry = ToolRegistry()
+    registry.register(_StubQuoteTool())
+    registry.register(_StubFinancialsTool())
+
+    planner = ResearchPlanner(llm=svc)
+    collector = DataCollector(llm=svc, registry=registry)
+    analyst = Analyst(llm=svc)
+    writer = Writer(llm=svc)
+    scorers: list[Agent] = [
+        FactualityScorer(llm=svc),
+        CoverageScorer(llm=svc),
+        InsightScorer(llm=svc),
+        StructureScorer(llm=svc),
+        ConcisenessScorer(llm=svc),
+        InputContextAppropriatenessScorer(llm=svc),
+    ]
+    critic = Critic(llm=svc, scorers=scorers)
+
+    graph = build_research_graph(
+        planner=planner,
+        collector=collector,
+        analyst=analyst,
+        writer=writer,
+        critic=critic,
+        checkpointer=async_checkpointer,
+    )
+
+    from app.agents.schemas import ResearchState
+
+    initial = ResearchState(
+        user_id="test-user",
+        session_id="test-session",
+        user_message="请对 600519.SH 进行投资标的尽调。",
+        request_id="test-regression-001",
+        target_ts_code="600519.SH",
+        client_total_aum=50_000_000.0,
+        investment_objective="balanced",
+        investment_horizon="medium_term",
+        risk_tolerance="moderate",
+    )
+    config = {"configurable": {"thread_id": "regression-test-async-001"}}
+
+    # This must NOT raise "SqliteSaver does not support async methods".
+    event_count = 0
+    async for _ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
+        event_count += 1
+
+    assert event_count >= 1, "Expected at least one LangGraph event from astream_events"
+
+    # Cleanup: close the aiosqlite connection.
+    await async_checkpointer.conn.close()
+
+
+async def test_get_research_graph_dependency_returns_async_checkpointer_graph(
+    tmp_path: Any,
+    monkeypatch: Any,
+) -> None:
+    """get_research_graph DI factory must return a graph with AsyncSqliteSaver.
+
+    Verifies that the production singleton factory no longer injects a sync
+    SqliteSaver — the graph it returns must be drivable via astream_events()
+    without raising "does not support async methods".
+
+    Uses monkeypatch to reset the module-level singleton so the factory
+    rebuilds with a tmp_path DB instead of backend/data/research.sqlite.
+    """
+    from pathlib import Path
+
+    import app.router.research as research_mod
+
+    # Reset the singleton so the factory rebuilds during this test.
+    monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_SINGLETON", None)
+    monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_LOCK", None)
+
+    # Patch make_async_chat_checkpointer to use tmp_path so CI doesn't touch
+    # backend/data/research.sqlite.
+    from app.orchestration import checkpointer as ckpt_mod
+
+    original_make = ckpt_mod.make_async_chat_checkpointer
+
+    async def _patched_make(db_path: Path = ckpt_mod.DEFAULT_RESEARCH_DB_PATH) -> Any:
+        return await original_make(Path(tmp_path) / "test_di_factory.sqlite")
+
+    monkeypatch.setattr(ckpt_mod, "make_async_chat_checkpointer", _patched_make)
+    # Also patch the reference imported inside get_research_graph's local scope.
+    import app.orchestration.checkpointer as ckpt_direct
+
+    monkeypatch.setattr(ckpt_direct, "make_async_chat_checkpointer", _patched_make)
+
+    graph = await research_mod.get_research_graph()
+    assert graph is not None, "get_research_graph must return a non-None compiled graph"
+
+    # The compiled graph's checkpointer must be an AsyncSqliteSaver.
+    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+    assert isinstance(graph.checkpointer, AsyncSqliteSaver), (
+        f"Expected AsyncSqliteSaver, got {type(graph.checkpointer)}"
+    )
+
+    # Clean up connection.
+    await graph.checkpointer.conn.close()
+
+    # Reset singleton so other tests start fresh.
+    monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_SINGLETON", None)
+    monkeypatch.setattr(research_mod, "_RESEARCH_GRAPH_LOCK", None)
