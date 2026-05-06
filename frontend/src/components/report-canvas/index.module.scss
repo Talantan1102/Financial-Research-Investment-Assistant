@@ -1,0 +1,49 @@
+.container {
+  display: flex;
+  gap: 32px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.canvas {
+  flex: 1;
+  max-width: 800px;
+  padding: 32px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.section {
+  margin-bottom: 48px;
+  scroll-margin-top: 80px;
+
+  &:last-child {
+    margin-bottom: 0;
+  }
+}
+
+.markdown {
+  font-size: 15px;
+  line-height: 1.8;
+
+  h3 { margin-top: 24px; }
+  ul, ol { padding-left: 24px; }
+  pre { background: #f5f5f5; padding: 12px; border-radius: 4px; overflow-x: auto; }
+  code { font-size: 13px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    th, td { padding: 8px 12px; border: 1px solid #e8e8e8; text-align: left; }
+    th { background: #fafafa; font-weight: 600; }
+  }
+}
+
+.toc {
+  width: 240px;
+  position: sticky;
+  top: 80px;
+  align-self: flex-start;
+  height: fit-content;
+}

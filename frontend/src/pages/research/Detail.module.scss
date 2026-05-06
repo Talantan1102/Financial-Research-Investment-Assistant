@@ -1,0 +1,35 @@
+.page {
+  padding: 24px;
+  background: #fafafa;
+  min-height: 100vh;
+}
+
+.meta {
+  max-width: 1400px;
+  margin: 0 auto 24px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.metaRow {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  color: #666;
+  font-size: 14px;
+}
+
+.tsCode {
+  font-family: monospace;
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.spin {
+  margin: 200px auto;
+  display: block;
+}

@@ -9,9 +9,9 @@ import KnowledgePage from '@/pages/knowledge'
 import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
+import ResearchDetailPage from '@/pages/research/Detail'
 import ResearchListPage from '@/pages/research/List'
 import ResearchNew from '@/pages/research/new'
-import ResearchReport from '@/pages/research/report'
 import {
   Navigate,
   Outlet,
@@ -58,7 +58,7 @@ export const routes: IRouteObject[] = [
   },
   {
     path: '/research/:id',
-    Component: ResearchReport,
+    Component: ResearchDetailPage,
   },
   {
     path: '/404',
