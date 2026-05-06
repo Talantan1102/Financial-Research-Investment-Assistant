@@ -25,6 +25,7 @@ import { reportState, reportActions } from '@/store/report'
 import type { InvestmentDueDiligenceReport } from '@/types/research'
 import ReportCanvas from '@/components/report-canvas'
 import ProgressOverlay from '@/components/progress-overlay'
+import ExportButton from '@/components/export-button'
 import styles from './Detail.module.scss'
 
 const STATUS_COLOR: Record<string, string> = {
@@ -97,6 +98,12 @@ export default function ResearchDetailPage() {
           )}
         </div>
       </header>
+
+      {r.status === 'completed' && (
+        <div className={styles.exportRow}>
+          <ExportButton report={r} />
+        </div>
+      )}
 
       {r.status === 'streaming' ? (
         <StreamingBody />
