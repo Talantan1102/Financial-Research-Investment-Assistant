@@ -31,6 +31,7 @@ spec ref: docs/superpowers/plans/2026-05-05-v0.8.5-constrained-router-implementa
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime
 from typing import Any
@@ -541,14 +542,23 @@ class Writer(Agent):
         return await self._run_full_research_writer(state)
 
     async def _run_full_research_writer(self, state: ResearchState) -> ResearchState:
-        """Async wrapper around the sync step() for full_research mode."""
-        sr = self.step(state)
+        """Async wrapper around the sync step() for full_research mode.
+
+        v0.9.x fix: ``asyncio.to_thread`` so the blocking sync LLMService.chat
+        does not stall the FastAPI event loop driving SSE streaming.
+        """
+        sr = await asyncio.to_thread(self.step, state)
         return state.model_copy(update=sr.state_update)
 
     async def _run_alert_writer(self, state: ResearchState) -> ResearchState:
-        """Output PortfolioWarningReport (alert_deep_dive mode)."""
+        """Output PortfolioWarningReport (alert_deep_dive mode).
+
+        v0.9.x fix: ``asyncio.to_thread`` around the sync LLM call so the
+        FastAPI event loop is never blocked.
+        """
         prompt = _build_alert_prompt(state)
-        response = self._llm.chat(
+        response = await asyncio.to_thread(
+            self._llm.chat,
             prompt=prompt,
             tier="fast",  # alert deep_dive 短任务,走 fast
             schema=PortfolioWarningReport,

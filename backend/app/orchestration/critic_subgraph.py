@@ -80,6 +80,12 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
             investment_horizon=s.investment_horizon,
             risk_tolerance=s.risk_tolerance,
         )
+        # v0.9.x note: 不 wrap asyncio.to_thread — 该 wrap 让 7 scorer 真并发,
+        # VCR cassette 按调用顺序匹配 LLM responses,导致 b1_differential
+        # input_context_appropriateness score 错位 (8.5+ → 6.0). critic 是
+        # 短任务 (每个几百 tokens),sync 调用即使 serialize 也不会卡 event
+        # loop 太久; 真正卡的是 Writer 长 LLM 调用 (8000 tokens),那边保留
+        # to_thread wrap.
         sr = critic.dispatch_subagent(name=scorer_name, state=rs)
         scores = [v for v in sr.state_update.values() if isinstance(v, CriticDimensionScore)]
         return {"collected_scores": scores}

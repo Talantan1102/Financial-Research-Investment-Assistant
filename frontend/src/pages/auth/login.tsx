@@ -38,12 +38,15 @@ export default function LoginPage() {
         {/* 左侧品牌区域 */}
         <div className={styles['brand-section']}>
           <div className={styles['brand-content']}>
-            <h1 className={styles['brand-title']}>金融研究助手</h1>
+            <h1 className={styles['brand-title']}>AlphaScout</h1>
             <p className={styles['brand-slogan']}>
-              通用金融 agent 平台 · 投资标的尽调首发场景
+              Multi-agent Financial Research Platform
             </p>
             <p className={styles['brand-hint']}>
-              假想 banking 风控分析师 demo;欢迎注册体验。
+              通用金融 agent 平台 · 投资标的尽调首发场景<br />
+              <small style={{ opacity: 0.6 }}>
+                假想 banking 风控分析师 demo;欢迎注册体验。
+              </small>
             </p>
           </div>
         </div>

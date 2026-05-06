@@ -418,8 +418,11 @@ async def research(
 async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) -> AsyncIterator[str]:
     """Async generator: drive astream_events and yield SSE-framed JSON strings."""
     request_id = f"research-{uuid4().hex[:12]}"
+    # v0.9.x: User.id is UUID (sqlalchemy column); _AnonUser.id is str.
+    # ResearchState.user_id is typed str — cast both branches.
+    user_id_str = str(user.id)
     initial = ResearchState(
-        user_id=user.id,
+        user_id=user_id_str,
         session_id=request_id,
         user_message=req.user_message or f"请对 {req.target_ts_code} 进行投资标的尽调。",
         request_id=request_id,
@@ -430,7 +433,7 @@ async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) ->
         investment_horizon=req.investment_horizon,
         risk_tolerance=req.risk_tolerance,
     )
-    config = {"configurable": {"thread_id": f"research:{user.id}:{request_id}"}}
+    config = {"configurable": {"thread_id": f"research:{user_id_str}:{request_id}"}}
 
     try:
         async for ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
@@ -460,6 +463,8 @@ async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) ->
             if adapted is not None:
                 yield f"data: {adapted.model_dump_json()}\n\n"
     except Exception as e:
+        # v0.9.x: 之前 swallow 异常成 error event,backend log 看不到根因 → 现在 log
+        logger.exception("_stream_research astream_events raised: %s", e)
         err = ResearchStreamEvent(type="error", data={"message": str(e)})
         yield f"data: {err.model_dump_json()}\n\n"
 

@@ -10,11 +10,18 @@ export const MESSAGE_KEY = 'message'
  */
 export const servicePlugin: IRequestPlugin = {
   install(instance) {
+    // envelope 形态:`{status: 'success' | 'fail' | 'error', message?, data?}`
+    // 业务字段 status(如 ReportDetail.status='streaming'/'completed'/'failed')不被误判为 envelope
+    const ENVELOPE_CODES = new Set(['success', 'fail', 'error'])
+    const isEnvelope = (data: unknown): boolean =>
+      isObject(data) &&
+      CODE_KEY in (data as Record<string, unknown>) &&
+      ENVELOPE_CODES.has(String((data as Record<string, unknown>)[CODE_KEY]))
+
     instance.interceptors.response.use(
       (response) => {
         const data = response?.data
-        if (!response || !isObject(data)) return response
-        if (!(CODE_KEY in data)) return response
+        if (!response || !isEnvelope(data)) return response
 
         const code = data[CODE_KEY]
         if (code !== 'success') {
@@ -30,8 +37,7 @@ export const servicePlugin: IRequestPlugin = {
         const response = error.response as AxiosResponse<any> | undefined
 
         const data = response?.data
-        if (!response || !isObject(data)) return Promise.reject(error)
-        if (!(CODE_KEY in data)) return Promise.reject(error)
+        if (!response || !isEnvelope(data)) return Promise.reject(error)
 
         const code = data[CODE_KEY]
         if (code !== 'success') {

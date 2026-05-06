@@ -1,182 +1,124 @@
-import IconBg from '@/assets/index/bg.png'
-import IconSearch from '@/assets/index/search.svg'
 import { AuditOutlined } from '@ant-design/icons'
-import { Button, Input, message } from 'antd'
-import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { INDUSTRY_CONFIGS, setCurrentIndustry } from '@/store/industry'
-import { reportActions } from '@/store/report'
+import ResearchEntry from '@/components/research-entry'
 import styles from './index.module.scss'
 
-// 行业卡片颜色配置
-const INDUSTRY_COLORS: Record<string, { color: string; bgColor: string }> = {
-  smart_transportation: { color: '#055588', bgColor: '#E7F4FF' },
-  finance: { color: '#1144BA', bgColor: '#EFF3FF' },
-  healthcare: { color: '#335519', bgColor: '#EDF7E6' },
-  energy: { color: '#B85C00', bgColor: '#FFF4E6' },
-}
+const PIPELINE_STEPS = [
+  { num: '01', name: 'Plan', desc: '拆解为 4 个维度的研究子任务' },
+  { num: '02', name: 'Collect', desc: '5 个数据源并行 — 财务 / 行情 / 新闻 / 网页 / 知识库' },
+  { num: '03', name: 'Analyze', desc: 'Analyst 提炼关键洞察与 thesis' },
+  { num: '04', name: 'Draft', desc: 'Writer 产出 6 节结构化尽调报告' },
+  { num: '05', name: 'Critique', desc: '6 维度 Critic 评分,综合 score' },
+]
 
 export default function Index() {
   const navigate = useNavigate()
-  const [searchKeyword, setSearchKeyword] = useState('')
-  const [targetName, setTargetName] = useState('')
-  const [tsCode, setTsCode] = useState('')
-  const [starting, setStarting] = useState(false)
-
-  const handleStartResearch = async () => {
-    const name = targetName.trim()
-    if (!name) {
-      message.warning('请输入目标名称')
-      return
-    }
-    setStarting(true)
-    try {
-      const id = await reportActions.startReport(name, tsCode.trim() || undefined)
-      navigate(`/research/${id}`)
-    } catch (err) {
-      console.error('[Index] startReport failed:', err)
-      message.error('启动研报失败,请稍后重试')
-    } finally {
-      setStarting(false)
-    }
-  }
-
-  const cardList = useMemo(
-    () =>
-      INDUSTRY_CONFIGS.map((industry) => ({
-        id: industry.id,
-        title: `${industry.name}助手`,
-        icon: IconSearch,
-        desc: industry.description,
-        color: INDUSTRY_COLORS[industry.id]?.color || '#333',
-        bgColor: INDUSTRY_COLORS[industry.id]?.bgColor || '#f5f5f5',
-      })),
-    [],
-  )
-
-  // 根据搜索关键词过滤卡片
-  const filteredCardList = useMemo(() => {
-    if (!searchKeyword.trim()) return cardList
-    const keyword = searchKeyword.toLowerCase()
-    return cardList.filter(
-      (item) =>
-        item.title.toLowerCase().includes(keyword) ||
-        item.desc.toLowerCase().includes(keyword)
-    )
-  }, [cardList, searchKeyword])
-
-  // 点击卡片，切换行业并跳转到尽调入口（v0.9.x: /chat 已废弃）
-  const handleCardClick = (industryId: string, _title: string) => {
-    console.log('[Index] 点击行业卡片:', industryId, _title)
-    setCurrentIndustry(industryId)
-    navigate('/research/new')
-  }
+  const today = new Date()
+  const issueNo = `${today.getFullYear()} · ${String(today.getMonth() + 1).padStart(2, '0')}`
 
   return (
     <div className={styles['index-page']}>
-      <div className={styles.header}>
-        <img className={styles.bg} src={IconBg} />
-        <div className={styles.title}>Hi～欢迎来到行业咨询助手</div>
-        <div className={styles.desc}>
-          大模型驱动的行业资讯助手，为不同类型用户提供更便捷的AI应用开发平台
+      <div className={styles.shell}>
+        {/* Top bar */}
+        <div className={styles.topbar}>
+          <span className={styles.topbar__brand}>AlphaScout</span>
+          <span>
+            <span className={styles.topbar__sep}>—</span> Research Issue {issueNo}{' '}
+            <span className={styles.topbar__sep}>—</span> Powered by 5-agent collaboration
+          </span>
         </div>
-      </div>
 
-      {/* Task 16 — 投资尽调入口 form (target_name + ts_code → startReport → /research/:id) */}
-      <div className={styles['research-entry']}>
-        <div className={styles['research-entry__header']}>
-          <div className={styles['research-entry__icon']}>
-            <AuditOutlined />
+        {/* Hero */}
+        <header className={styles.hero}>
+          <div className={styles.hero__copy}>
+            <div className={styles.hero__eyebrow}>Multi-agent · Investment Research</div>
+            <h1 className={styles.hero__brand}>
+              Alpha<span className={styles.italic}>Scout</span>.
+            </h1>
+            <p className={styles.hero__tagline}>
+              A research desk where five agents argue, draft, and critique — until
+              the report is fit to bring to your investment committee.
+            </p>
+            <div className={styles.hero__divider} />
+            <p className={styles.hero__subtitle}>
+              通用金融 agent 平台,首个落地场景为<strong>投资标的尽调</strong>。
+              Planner / DataCollector / Analyst / Writer / Critic 五位 agent
+              围绕你输入的标的协作 — 平均 3 分钟产出涵盖基本面、估值、风险与建议的结构化报告。
+            </p>
           </div>
-          <div className={styles['research-entry__heading']}>
-            <div className={styles['research-entry__title']}>新建投资尽调研报</div>
-            <div className={styles['research-entry__desc']}>
-              5-agent 协作产出完整尽调报告 — 覆盖基本面、估值、风险与投资建议
+
+          <aside className={styles.hero__meta}>
+            <div className={styles.hero__metaCard}>
+              <div className={styles.hero__metaCard__label}>Latency</div>
+              <div className={styles.hero__metaCard__value}>
+                ≈ <span className="num">3</span> min
+              </div>
+              <div className={styles.hero__metaCard__hint}>
+                平均 5-agent 流水线
+              </div>
+            </div>
+            <div className={styles.hero__metaCard}>
+              <div className={styles.hero__metaCard__label}>Cost</div>
+              <div className={styles.hero__metaCard__value}>
+                ¥ <span className="num">0.30</span>
+              </div>
+              <div className={styles.hero__metaCard__hint}>
+                每份完整尽调研报
+              </div>
+            </div>
+            <div className={styles.hero__metaCard}>
+              <div className={styles.hero__metaCard__label}>Critic Dimensions</div>
+              <div className={styles.hero__metaCard__value}>
+                <span className="num">6</span>
+              </div>
+              <div className={styles.hero__metaCard__hint}>
+                逻辑 / 数据 / 风险 / 合规 / 客户 / 可操作
+              </div>
+            </div>
+          </aside>
+        </header>
+
+        {/* Research entry */}
+        <main className={styles['research-entry']}>
+          <div className={styles['research-entry__header']}>
+            <div className={styles['research-entry__icon']}>
+              <AuditOutlined />
+            </div>
+            <div className={styles['research-entry__heading']}>
+              <div className={styles['research-entry__title']}>
+                新建投资尽调研报
+              </div>
+              <div className={styles['research-entry__desc']}>
+                输入股票代码或名称,
+                <span className={styles['research-entry__desc'] + ' pipeline'}>
+                  <span className="pipeline">5-agent</span>
+                </span>{' '}
+                协作产出完整尽调 — 覆盖基本面、估值、风险与投资建议。
+              </div>
             </div>
           </div>
+          <ResearchEntry />
           <a
-            className={styles['research-entry__link']}
+            className={styles['research-entry__history']}
             onClick={() => navigate('/research')}
           >
-            查看历史研报 →
+            View past reports <span className={styles.arrow}>→</span>
           </a>
-        </div>
-        <div className={styles['research-entry__form']}>
-          <Input
-            placeholder="目标名称(如 贵州茅台)"
-            value={targetName}
-            onChange={(e) => setTargetName(e.target.value)}
-            size="large"
-            onPressEnter={handleStartResearch}
-            disabled={starting}
-          />
-          <Input
-            placeholder="股票代码(如 600519.SH,可选)"
-            value={tsCode}
-            onChange={(e) => setTsCode(e.target.value)}
-            size="large"
-            onPressEnter={handleStartResearch}
-            disabled={starting}
-          />
-          <Button
-            type="primary"
-            size="large"
-            onClick={handleStartResearch}
-            loading={starting}
-            disabled={!targetName.trim()}
-          >
-            开始研究
-          </Button>
-        </div>
-      </div>
+        </main>
 
-      <div className={styles['search-bar']}>
-        <div className={styles['switch']}>
-          <div onClick={() => message.info('暂未开放')} style={{ cursor: 'pointer' }}>我的</div>
-          <div className={styles.active}>市场</div>
-        </div>
-
-        <div className={styles['search-bar__input']}>
-          <Input
-            prefix={<img src={IconSearch} />}
-            placeholder="搜索应用"
-            size="large"
-            value={searchKeyword}
-            onChange={(e) => setSearchKeyword(e.target.value)}
-            allowClear
-          />
-        </div>
-      </div>
-
-      <div className={styles['card-list']}>
-        {filteredCardList.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#999', width: '100%' }}>
-            未找到匹配的应用
+        {/* Pipeline visualization */}
+        <section className={styles.pipeline}>
+          <div className={styles.pipeline__label}>How AlphaScout works</div>
+          <div className={styles.pipeline__row}>
+            {PIPELINE_STEPS.map((s) => (
+              <div key={s.num} className={styles.pipeline__step}>
+                <div className={styles.pipeline__step__num}>{s.num}</div>
+                <div className={styles.pipeline__step__name}>{s.name}</div>
+                <div className={styles.pipeline__step__desc}>{s.desc}</div>
+              </div>
+            ))}
           </div>
-        ) : filteredCardList.map((item) => (
-          <div
-            className={styles['card-item']}
-            key={item.id}
-            style={{
-              backgroundColor: item.bgColor,
-              color: item.color,
-              cursor: 'pointer',
-            }}
-            onClick={() => handleCardClick(item.id, item.title)}
-          >
-            <div
-              className={styles['card-item__icon']}
-              style={{
-                borderColor: item.color,
-              }}
-            >
-              <img src={item.icon} />
-            </div>
-
-            <div className={styles['card-item__title']}>{item.title}</div>
-            <div className={styles['card-item__desc']}>{item.desc}</div>
-          </div>
-        ))}
+        </section>
       </div>
     </div>
   )

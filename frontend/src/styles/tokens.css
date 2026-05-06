@@ -1,0 +1,217 @@
+/**
+ * AlphaScout — Editorial × Terminal design tokens
+ * v0.9.x frontend redesign — Fraunces serif + JetBrains Mono + PingFang SC
+ */
+
+:root {
+  /* ── Color: warm-paper editorial palette ─────────────────────── */
+  --as-bg: #f8f5ee;
+  --as-bg-tint: #f1ece0;
+  --as-surface: #ffffff;
+  --as-surface-soft: #fcfaf4;
+
+  --as-ink: #1a1d21;
+  --as-ink-soft: #2c3138;
+  --as-text-secondary: #5d6875;
+  --as-text-tertiary: #8a96a3;
+  --as-text-muted: #b3bcc8;
+
+  --as-border: #e8e4dc;
+  --as-border-strong: #d8d2c5;
+  --as-divider: #f0ece4;
+
+  --as-accent: #1d4ed8;
+  --as-accent-soft: #e7eefe;
+  --as-accent-deep: #1438a3;
+
+  --as-success: #27875a;
+  --as-success-soft: #e3f1ea;
+  --as-warning: #b8860b;
+  --as-warning-soft: #f7eed5;
+  --as-danger: #c0392b;
+  --as-danger-soft: #f8dfd9;
+
+  --as-gold: #b89c5c;
+
+  /* ── Typography ───────────────────────────────────────────────── */
+  --as-font-display: 'Fraunces', 'Source Han Serif CN', 'Songti SC',
+    'Times New Roman', serif;
+  --as-font-sans: 'PingFang SC', 'Helvetica Neue', 'Helvetica', 'Arial',
+    'Source Han Sans CN', system-ui, sans-serif;
+  --as-font-mono: 'JetBrains Mono', 'SF Mono', 'Menlo', 'Consolas', monospace;
+
+  /* ── Spacing ─────────────────────────────────────────────────── */
+  --as-radius-sm: 4px;
+  --as-radius: 8px;
+  --as-radius-lg: 12px;
+
+  /* ── Shadow ─────────────────────────────────────────────────── */
+  --as-shadow-card: 0 1px 2px rgba(26, 29, 33, 0.04),
+    0 4px 16px -8px rgba(26, 29, 33, 0.08);
+  --as-shadow-hover: 0 2px 4px rgba(26, 29, 33, 0.06),
+    0 8px 24px -10px rgba(26, 29, 33, 0.12);
+}
+
+/* ── Global typography baseline ─────────────────────────────── */
+html,
+body {
+  font-family: var(--as-font-sans);
+  background: var(--as-bg);
+  color: var(--as-ink);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ── Selection ─────────────────────────────────────────────── */
+::selection {
+  background: var(--as-accent);
+  color: #fff;
+}
+
+/* ── Scrollbar (subtle) ────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--as-border-strong);
+  border: 2px solid var(--as-bg);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--as-text-muted);
+}
+
+/* ── Utility classes ───────────────────────────────────────── */
+.as-display {
+  font-family: var(--as-font-display);
+  font-optical-sizing: auto;
+  letter-spacing: -0.01em;
+  font-weight: 460;
+}
+
+.as-mono {
+  font-family: var(--as-font-mono);
+  font-feature-settings: 'tnum';
+}
+
+.as-eyebrow {
+  font-family: var(--as-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--as-text-secondary);
+}
+
+.as-numeric {
+  font-family: var(--as-font-mono);
+  font-feature-settings: 'tnum';
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Pulse animation (used by streaming states) ────────────── */
+@keyframes as-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes as-shimmer {
+  0% {
+    background-position: -1200px 0;
+  }
+  100% {
+    background-position: 1200px 0;
+  }
+}
+
+.as-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--as-divider) 0%,
+    var(--as-bg-tint) 40%,
+    var(--as-divider) 80%
+  );
+  background-size: 1200px 100%;
+  animation: as-shimmer 2.4s linear infinite;
+  border-radius: var(--as-radius-sm);
+}
+
+/* ── Hairline rule (editorial) ──────────────────────────────── */
+.as-rule {
+  border-top: 1px solid var(--as-border);
+  height: 0;
+  margin: 0;
+}
+
+.as-rule-double {
+  border-top: 1px solid var(--as-border);
+  border-bottom: 1px solid var(--as-border);
+  height: 4px;
+  margin: 0;
+}
+
+/* ── ant-design overrides for editorial feel ──────────────── */
+.ant-btn-primary {
+  background: var(--as-ink);
+  border-color: var(--as-ink);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  box-shadow: none !important;
+}
+.ant-btn-primary:not(:disabled):hover {
+  background: var(--as-accent) !important;
+  border-color: var(--as-accent) !important;
+}
+.ant-btn-primary:not(:disabled):active {
+  background: var(--as-accent-deep) !important;
+}
+
+.ant-btn-default {
+  background: transparent;
+  border-color: var(--as-border-strong);
+  color: var(--as-ink);
+}
+.ant-btn-default:not(:disabled):hover {
+  border-color: var(--as-ink) !important;
+  color: var(--as-ink) !important;
+}
+
+.ant-input,
+.ant-input-affix-wrapper {
+  border-color: var(--as-border-strong);
+  background: var(--as-surface);
+}
+.ant-input:hover,
+.ant-input-affix-wrapper:hover {
+  border-color: var(--as-text-secondary) !important;
+}
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-affix-wrapper-focused {
+  border-color: var(--as-accent) !important;
+  box-shadow: 0 0 0 2px var(--as-accent-soft) !important;
+}
+
+.ant-tag {
+  border-radius: var(--as-radius-sm);
+  font-family: var(--as-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-width: 1px;
+}

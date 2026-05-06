@@ -1,3 +1,4 @@
+import ProgressOverlay from '@/components/progress-overlay'
 import { Footer } from './footer'
 import './index.scss'
 import { Nav } from './nav'
@@ -14,6 +15,9 @@ export function BaseLayout({ children }: { children?: React.ReactNode }) {
       </div>
 
       <div className="base-layout__content">{children}</div>
+
+      {/* 全局 sticky overlay — 跨页存活,SSE 进行中始终可见 */}
+      <ProgressOverlay />
     </div>
   )
 }
