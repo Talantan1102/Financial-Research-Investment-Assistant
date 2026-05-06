@@ -1,7 +1,13 @@
-"""Critic 内部 subgraph — Send API fan-out 6 sub-agents + reduce + aggregate."""
+"""Critic 内部 subgraph — Send API fan-out 6 sub-agents + reduce + aggregate.
+
+v0.9.x fix — wrap the sync ``critic.dispatch_subagent`` (which calls a
+sync LLMService.chat under the hood) in ``asyncio.to_thread`` so the 6
+parallel scorer nodes do not block the FastAPI event loop driving SSE.
+"""
 
 from __future__ import annotations
 
+import asyncio
 import operator
 from typing import Annotated, Any
 
@@ -80,7 +86,7 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
             investment_horizon=s.investment_horizon,
             risk_tolerance=s.risk_tolerance,
         )
-        sr = critic.dispatch_subagent(name=scorer_name, state=rs)
+        sr = await asyncio.to_thread(critic.dispatch_subagent, name=scorer_name, state=rs)
         scores = [v for v in sr.state_update.values() if isinstance(v, CriticDimensionScore)]
         return {"collected_scores": scores}
 

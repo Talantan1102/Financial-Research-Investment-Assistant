@@ -5,6 +5,9 @@ collaborator (agent or registry), executes the synchronous/async step, and
 returns a plain dict of state updates that LangGraph merges back into the
 graph state.
 
+v0.9.x fix — sync agent steps wrapped in ``asyncio.to_thread`` so blocking
+LLM calls never stall the FastAPI event loop driving SSE streaming.
+
 Usage pattern (Task 10):
 
     graph.add_node("planner", partial(planner_node, planner=chat_planner))
@@ -14,6 +17,7 @@ Usage pattern (Task 10):
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from app.agents.chat_planner import ChatPlanner
@@ -32,7 +36,7 @@ async def planner_node(state: GraphState, *, planner: ChatPlanner) -> dict[str, 
     Returns:
         dict containing at least ``{"plan": Plan}``.
     """
-    sr = planner.step(state)
+    sr = await asyncio.to_thread(planner.step, state)
     return sr.state_update
 
 
@@ -67,5 +71,5 @@ async def responder_node(state: GraphState, *, responder: Responder) -> dict[str
     Returns:
         dict containing at least ``{"final_response": str}``.
     """
-    sr = responder.step(state)
+    sr = await asyncio.to_thread(responder.step, state)
     return sr.state_update

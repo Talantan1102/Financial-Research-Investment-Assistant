@@ -1,7 +1,16 @@
-"""Outer-graph node functions for v0.5 research mode."""
+"""Outer-graph node functions for v0.5 research mode.
+
+v0.9.x fix — wrap sync agent steps with ``asyncio.to_thread`` so blocking
+LLMService.chat (sync httpx under the hood) does not stall the FastAPI
+event loop while LangGraph drives ``astream_events``.  Without the wrap,
+SSE endpoints serialise behind the active LLM call and downstream
+requests appear to hang.  The wrapped sync path keeps the existing
+ChatClient protocol / cassette setup intact (no AsyncOpenAI swap).
+"""
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from app.agents.analyst import Analyst
@@ -12,7 +21,7 @@ from app.agents.writer import Writer
 
 
 async def research_planner_node(state: ResearchState, planner: ResearchPlanner) -> dict[str, Any]:
-    sr = planner.step(state)
+    sr = await asyncio.to_thread(planner.step, state)
     return sr.state_update
 
 
@@ -22,7 +31,7 @@ async def data_collector_node(state: ResearchState, collector: DataCollector) ->
 
 
 async def analyst_node(state: ResearchState, analyst: Analyst) -> dict[str, Any]:
-    sr = analyst.step(state)
+    sr = await asyncio.to_thread(analyst.step, state)
     return sr.state_update
 
 
