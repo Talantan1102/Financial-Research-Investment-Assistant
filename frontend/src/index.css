@@ -20,3 +20,46 @@
 .scrollbar-style::-webkit-scrollbar {
   width: 8px;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Print stylesheet — drives `导出 PDF` (window.print → 另存为 PDF) on
+ * the research detail page. CSS Modules hash class names, so we use
+ * attribute selectors to match by substring.
+ * ───────────────────────────────────────────────────────────────────── */
+@media print {
+  /* Hide chrome: nav / aside / progress overlay / export buttons / generic
+     buttons everywhere on the page. */
+  nav,
+  aside,
+  [class*="progressOverlay"],
+  [class*="overlay"],
+  [class*="exportRow"],
+  button {
+    display: none !important;
+  }
+
+  /* Flatten body / html backgrounds so the printed page is plain white. */
+  body,
+  html {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* Detail page wrapper — kill padding/background. */
+  [class*="page"] {
+    padding: 0 !important;
+    background: #fff !important;
+  }
+
+  /* Report canvas / streaming canvas — full-width flat layout. */
+  [class*="canvas"] {
+    max-width: 100% !important;
+    box-shadow: none !important;
+    padding: 16px !important;
+  }
+
+  /* Avoid breaking sections across pages. */
+  section {
+    page-break-inside: avoid;
+  }
+}

@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.chat import ChatAttachment, ChatSession
 from app.models.user import User
-from app.router.auth_router import get_current_user
+from app.router.auth_router import get_current_user_required
 from app.schemas.chat import AttachmentListResponse, AttachmentResponse
 
 router = APIRouter(prefix="/attachments", tags=["聊天附件"])
@@ -155,7 +155,7 @@ async def upload_attachment(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     session_id: str = Form(...),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db),
 ):
     """上传聊天附件"""
@@ -165,8 +165,12 @@ async def upload_attachment(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
-    # 验证会话存在
-    session = db.query(ChatSession).filter(ChatSession.id == session_uuid).first()
+    # 验证会话存在并属于当前用户(数据隔离)
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_uuid, ChatSession.user_id == current_user.id)
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
@@ -199,7 +203,7 @@ async def upload_attachment(
     # 创建附件记录
     att = ChatAttachment(
         session_id=session_uuid,
-        user_id=current_user.id if current_user else None,
+        user_id=current_user.id,
         filename=file.filename,
         file_type=ext[1:] if ext else "unknown",
         file_size=file_size,
@@ -221,7 +225,7 @@ async def upload_attachment(
 @router.get("/{attachment_id}", response_model=AttachmentResponse)
 async def get_attachment(
     attachment_id: str,
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db),
 ):
     """获取附件详情"""
@@ -230,7 +234,11 @@ async def get_attachment(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的附件ID格式")
 
-    att = db.query(ChatAttachment).filter(ChatAttachment.id == att_uuid).first()
+    att = (
+        db.query(ChatAttachment)
+        .filter(ChatAttachment.id == att_uuid, ChatAttachment.user_id == current_user.id)
+        .first()
+    )
     if not att:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在")
 
@@ -240,7 +248,7 @@ async def get_attachment(
 @router.get("/session/{session_id}", response_model=AttachmentListResponse)
 async def get_session_attachments(
     session_id: str,
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db),
 ):
     """获取会话的所有附件"""
@@ -249,14 +257,21 @@ async def get_session_attachments(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
 
-    # 验证会话存在
-    session = db.query(ChatSession).filter(ChatSession.id == session_uuid).first()
+    # 验证会话存在并属于当前用户(数据隔离)
+    session = (
+        db.query(ChatSession)
+        .filter(ChatSession.id == session_uuid, ChatSession.user_id == current_user.id)
+        .first()
+    )
     if not session:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     attachments = (
         db.query(ChatAttachment)
-        .filter(ChatAttachment.session_id == session_uuid)
+        .filter(
+            ChatAttachment.session_id == session_uuid,
+            ChatAttachment.user_id == current_user.id,
+        )
         .order_by(ChatAttachment.created_at.desc())
         .all()
     )
@@ -270,7 +285,7 @@ async def get_session_attachments(
 @router.delete("/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_attachment(
     attachment_id: str,
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_required),
     db: Session = Depends(get_db),
 ):
     """删除附件"""
@@ -279,7 +294,11 @@ async def delete_attachment(
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的附件ID格式")
 
-    att = db.query(ChatAttachment).filter(ChatAttachment.id == att_uuid).first()
+    att = (
+        db.query(ChatAttachment)
+        .filter(ChatAttachment.id == att_uuid, ChatAttachment.user_id == current_user.id)
+        .first()
+    )
     if not att:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="附件不存在")
 

@@ -1,4 +1,6 @@
-.login-page {
+// 共享 auth 样式 (login + register 共用)
+
+.auth-page {
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -8,53 +10,7 @@
   overflow: hidden;
 }
 
-// 背景装饰 - 更柔和
-.bg-decoration {
-  position: absolute;
-  top: -30%;
-  right: -15%;
-  width: 70%;
-  height: 100%;
-  background: radial-gradient(ellipse, rgba(107, 166, 147, 0.04) 0%, transparent 65%);
-  pointer-events: none;
-}
-
-.bg-circle-1,
-.bg-circle-2,
-.bg-circle-3 {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}
-
-.bg-circle-1 {
-  width: 400px;
-  height: 400px;
-  background: rgba(107, 166, 147, 0.03);
-  top: 5%;
-  left: -8%;
-  filter: blur(40px);
-}
-
-.bg-circle-2 {
-  width: 280px;
-  height: 280px;
-  background: rgba(107, 166, 147, 0.025);
-  bottom: 10%;
-  right: 3%;
-  filter: blur(30px);
-}
-
-.bg-circle-3 {
-  width: 200px;
-  height: 200px;
-  background: rgba(107, 166, 147, 0.035);
-  top: 55%;
-  left: 12%;
-  filter: blur(25px);
-}
-
-.login-container {
+.auth-container {
   display: flex;
   width: 100%;
   max-width: 920px;
@@ -71,14 +27,14 @@
   z-index: 1;
 }
 
-// 左侧品牌区域 - 更沉稳的色调
+// 左侧品牌区域 - 深蓝主调 + 金色点缀
 .brand-section {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(165deg, #4a9b80 0%, #3d8b72 50%, #357a65 100%);
-  padding: 56px;
+  background: linear-gradient(135deg, #0a2540 0%, #143456 50%, #1a3a5c 100%);
+  padding: 56px 48px;
   position: relative;
   overflow: hidden;
 
@@ -90,82 +46,42 @@
     right: 0;
     bottom: 0;
     background:
-      radial-gradient(ellipse at 30% 20%, rgba(255, 255, 255, 0.08) 0%, transparent 50%),
-      radial-gradient(ellipse at 70% 80%, rgba(0, 0, 0, 0.05) 0%, transparent 50%);
-  }
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: -100%;
-    right: -50%;
-    width: 100%;
-    height: 200%;
-    background: linear-gradient(45deg, transparent 40%, rgba(255, 255, 255, 0.03) 50%, transparent 60%);
+      radial-gradient(ellipse at 30% 20%, rgba(255, 215, 0, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 70% 80%, rgba(0, 0, 0, 0.15) 0%, transparent 50%);
+    pointer-events: none;
   }
 }
 
 .brand-content {
-  text-align: center;
-  color: #fff;
   position: relative;
   z-index: 1;
-}
-
-.brand-icon {
-  width: 56px;
-  height: 56px;
-  margin: 0 auto 28px;
-  opacity: 0.95;
-
-  svg {
-    width: 100%;
-    height: 100%;
-    color: #fff;
-    stroke-width: 1.2;
-  }
+  color: #fff;
+  text-align: left;
+  max-width: 320px;
 }
 
 .brand-title {
-  font-size: 24px;
-  font-weight: 500;
-  margin-bottom: 10px;
-  letter-spacing: 2px;
-  opacity: 0.95;
-}
-
-.brand-subtitle {
-  font-size: 12px;
-  opacity: 0.7;
-  margin-bottom: 44px;
-  letter-spacing: 3px;
-  text-transform: uppercase;
-}
-
-.brand-features {
-  text-align: left;
-  display: inline-block;
-}
-
-.feature-item {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+  font-size: 32px;
+  font-weight: 600;
   margin-bottom: 16px;
-  font-size: 13px;
-  opacity: 0.8;
-  letter-spacing: 0.5px;
-
-  &:last-child {
-    margin-bottom: 0;
-  }
+  color: #ffd700;
+  letter-spacing: 1px;
 }
 
-.feature-icon {
-  width: 5px;
-  height: 5px;
-  background: rgba(255, 255, 255, 0.6);
-  border-radius: 50%;
+.brand-slogan {
+  font-size: 16px;
+  margin-bottom: 32px;
+  opacity: 0.9;
+  line-height: 1.6;
+}
+
+.brand-hint {
+  font-size: 13px;
+  opacity: 0.6;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  padding-top: 16px;
+  margin-top: 24px;
+  line-height: 1.6;
 }
 
 // 右侧表单区域
@@ -180,18 +96,18 @@
 
 .form-container {
   width: 100%;
-  max-width: 300px;
+  max-width: 320px;
 }
 
 .form-header {
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 32px;
 
   h2 {
-    font-size: 22px;
+    font-size: 24px;
     font-weight: 500;
     color: #1f2937;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     letter-spacing: 0.5px;
   }
 
@@ -217,9 +133,9 @@
   }
 
   &:focus {
-    border-color: #4a9b80 !important;
+    border-color: #0a2540 !important;
     background: #fff !important;
-    box-shadow: 0 0 0 3px rgba(74, 155, 128, 0.08) !important;
+    box-shadow: 0 0 0 3px rgba(10, 37, 64, 0.1) !important;
   }
 
   input {
@@ -244,31 +160,31 @@
   font-size: 14px !important;
   font-weight: 500 !important;
   letter-spacing: 0.5px !important;
-  background: linear-gradient(135deg, #4a9b80 0%, #3d8b72 100%) !important;
+  background: linear-gradient(135deg, #0a2540 0%, #1a3a5c 100%) !important;
   border: none !important;
   box-shadow:
-    0 1px 2px rgba(74, 155, 128, 0.1),
-    0 4px 12px rgba(74, 155, 128, 0.15) !important;
+    0 1px 2px rgba(10, 37, 64, 0.15),
+    0 4px 12px rgba(10, 37, 64, 0.2) !important;
   transition: all 0.25s ease !important;
 
   &:hover {
-    background: linear-gradient(135deg, #3d8b72 0%, #357a65 100%) !important;
+    background: linear-gradient(135deg, #143456 0%, #1f4368 100%) !important;
     box-shadow:
-      0 2px 4px rgba(74, 155, 128, 0.15),
-      0 8px 20px rgba(74, 155, 128, 0.2) !important;
+      0 2px 4px rgba(10, 37, 64, 0.2),
+      0 8px 20px rgba(10, 37, 64, 0.25) !important;
     transform: translateY(-1px);
   }
 
   &:active {
     transform: translateY(0);
     box-shadow:
-      0 1px 2px rgba(74, 155, 128, 0.1),
-      0 2px 8px rgba(74, 155, 128, 0.15) !important;
+      0 1px 2px rgba(10, 37, 64, 0.15),
+      0 2px 8px rgba(10, 37, 64, 0.2) !important;
   }
 }
 
 .form-footer {
-  margin-top: 32px;
+  margin-top: 24px;
   text-align: center;
 }
 
@@ -278,18 +194,15 @@
 }
 
 .switch-btn {
-  background: none;
-  border: none;
-  color: #4a9b80;
+  color: #0a2540;
   font-size: 13px;
   font-weight: 500;
-  cursor: pointer;
-  padding: 0;
   margin-left: 6px;
+  text-decoration: none;
   transition: color 0.2s ease;
 
   &:hover {
-    color: #3d8b72;
+    color: #ffd700;
   }
 }
 
@@ -318,9 +231,9 @@
     }
 
     &:focus-within {
-      border-color: #4a9b80 !important;
+      border-color: #0a2540 !important;
       background: #fff !important;
-      box-shadow: 0 0 0 3px rgba(74, 155, 128, 0.08) !important;
+      box-shadow: 0 0 0 3px rgba(10, 37, 64, 0.1) !important;
     }
 
     .ant-input {
@@ -339,7 +252,7 @@
         transition: color 0.2s ease;
 
         &:hover {
-          color: #4a9b80 !important;
+          color: #0a2540 !important;
         }
       }
     }
@@ -348,7 +261,7 @@
 
 // 响应式
 @media (max-width: 768px) {
-  .login-container {
+  .auth-container {
     flex-direction: column;
     max-width: 440px;
     min-height: auto;
@@ -359,10 +272,15 @@
   }
 
   .brand-title {
-    font-size: 20px;
+    font-size: 24px;
   }
 
-  .brand-features {
+  .brand-slogan {
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+
+  .brand-hint {
     display: none;
   }
 
@@ -372,11 +290,11 @@
 }
 
 @media (max-width: 480px) {
-  .login-page {
+  .auth-page {
     background: #fff;
   }
 
-  .login-container {
+  .auth-container {
     margin: 0;
     border-radius: 0;
     box-shadow: none;
@@ -385,12 +303,5 @@
 
   .brand-section {
     border-radius: 0;
-  }
-
-  .bg-decoration,
-  .bg-circle-1,
-  .bg-circle-2,
-  .bg-circle-3 {
-    display: none;
   }
 }

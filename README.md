@@ -106,11 +106,16 @@ uv run poe serve
 # Terminal 2 — 前端(端口 5173)
 cd frontend && npm run dev
 
-# (可选)Terminal 0 — Postgres/Milvus/Redis 基础设施(仅用 KB / 持久会话时需要)
+# (可选)Terminal 0 — Postgres 数据库(legacy auth / news / session router 需要;仅 chat / research / monitoring 路径无需启)
+docker compose up -d postgres
+
+# (可选)Terminal 0 — Milvus / Redis(KB / 持久会话用)
 ./start-services.sh start
 ```
 
 默认 `*_MODE=mock`,**不烧钱**;切 `TUSHARE_MODE=real` / `BOCHA_MODE=real` 走真接入。
+
+> v0.9.x:`uv run poe serve` 启动时若 PG 未起,只会 log warning 不再硬 crash(graceful degradation)。依赖 PG 的 router(auth/news/session/database)调用时会报 500;其余路由(chat / research / monitoring / KB)正常工作。
 
 ### 常用命令(uv + poe)
 

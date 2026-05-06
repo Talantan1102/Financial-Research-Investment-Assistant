@@ -1,32 +1,31 @@
-import * as api from '@/api'
 import { authActions } from '@/store/auth'
-import { LockOutlined, UserOutlined } from '@ant-design/icons'
+import { LockOutlined, MailOutlined, UserOutlined } from '@ant-design/icons'
 import { Button, Form, Input, message } from 'antd'
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import styles from './login.module.scss'
 
-interface LoginForm {
+interface RegisterForm {
   username: string
+  email: string
   password: string
 }
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const [loading, setLoading] = useState(false)
 
   const from = (location.state as any)?.from?.pathname || '/'
 
-  const onLogin = async (values: LoginForm) => {
+  const onRegister = async (values: RegisterForm) => {
     setLoading(true)
     try {
-      const { data } = await api.auth.login(values)
-      authActions.login(data.access_token, data.user)
-      message.success('登录成功')
+      await authActions.register(values.username, values.password, values.email)
+      message.success('注册成功')
       navigate(from, { replace: true })
     } catch (error: any) {
-      message.error(error?.response?.data?.detail || '登录失败')
+      message.error(error?.response?.data?.detail || '注册失败')
     } finally {
       setLoading(false)
     }
@@ -39,11 +38,9 @@ export default function LoginPage() {
         <div className={styles['brand-section']}>
           <div className={styles['brand-content']}>
             <h1 className={styles['brand-title']}>金融研究助手</h1>
-            <p className={styles['brand-slogan']}>
-              通用金融 agent 平台 · 投资标的尽调首发场景
-            </p>
+            <p className={styles['brand-slogan']}>通用金融 agent 平台</p>
             <p className={styles['brand-hint']}>
-              假想 banking 风控分析师 demo;欢迎注册体验。
+              注册后,你的研究记录将与他人完全隔离。
             </p>
           </div>
         </div>
@@ -52,12 +49,12 @@ export default function LoginPage() {
         <div className={styles['form-section']}>
           <div className={styles['form-container']}>
             <div className={styles['form-header']}>
-              <h2>登录</h2>
+              <h2>注册</h2>
             </div>
 
-            <Form<LoginForm>
-              name="login"
-              onFinish={onLogin}
+            <Form<RegisterForm>
+              name="register"
+              onFinish={onRegister}
               autoComplete="off"
               layout="vertical"
               requiredMark={false}
@@ -72,6 +69,21 @@ export default function LoginPage() {
                 <Input
                   prefix={<UserOutlined className={styles['input-icon']} />}
                   placeholder="用户名"
+                  size="large"
+                  className={styles['form-input']}
+                />
+              </Form.Item>
+
+              <Form.Item
+                name="email"
+                rules={[
+                  { required: true, message: '请输入邮箱' },
+                  { type: 'email', message: '请输入有效的邮箱地址' },
+                ]}
+              >
+                <Input
+                  prefix={<MailOutlined className={styles['input-icon']} />}
+                  placeholder="邮箱"
                   size="large"
                   className={styles['form-input']}
                 />
@@ -101,15 +113,15 @@ export default function LoginPage() {
                   size="large"
                   className={styles['submit-btn']}
                 >
-                  登录
+                  注册
                 </Button>
               </Form.Item>
             </Form>
 
             <div className={styles['form-footer']}>
-              <span className={styles['switch-text']}>没有账号?</span>
-              <Link to="/register" className={styles['switch-btn']}>
-                立即注册
+              <span className={styles['switch-text']}>已有账号?</span>
+              <Link to="/login" className={styles['switch-btn']}>
+                直接登录
               </Link>
             </div>
           </div>

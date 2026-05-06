@@ -1,3 +1,4 @@
+import * as authApi from '@/api/auth'
 import { proxy, subscribe } from 'valtio'
 
 export interface UserInfo {
@@ -58,6 +59,18 @@ export const authActions = {
     authState.token = token
     authState.user = user
     authState.isLoggedIn = true
+  },
+
+  /**
+   * 注册新用户：调 API → 写 state → localStorage(由 subscribe 自动)
+   * 注册成功后自动登录,设置 token + user。
+   */
+  async register(username: string, password: string, email: string) {
+    const { data } = await authApi.register({ username, password, email })
+    authState.token = data.access_token
+    authState.user = data.user
+    authState.isLoggedIn = true
+    return data
   },
 
   logout() {

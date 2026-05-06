@@ -1,10 +1,11 @@
 import IconBg from '@/assets/index/bg.png'
 import IconSearch from '@/assets/index/search.svg'
-import { AuditOutlined, ArrowRightOutlined } from '@ant-design/icons'
-import { Input, message } from 'antd'
+import { AuditOutlined } from '@ant-design/icons'
+import { Button, Input, message } from 'antd'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { INDUSTRY_CONFIGS, setCurrentIndustry } from '@/store/industry'
+import { reportActions } from '@/store/report'
 import styles from './index.module.scss'
 
 // 行业卡片颜色配置
@@ -18,6 +19,27 @@ const INDUSTRY_COLORS: Record<string, { color: string; bgColor: string }> = {
 export default function Index() {
   const navigate = useNavigate()
   const [searchKeyword, setSearchKeyword] = useState('')
+  const [targetName, setTargetName] = useState('')
+  const [tsCode, setTsCode] = useState('')
+  const [starting, setStarting] = useState(false)
+
+  const handleStartResearch = async () => {
+    const name = targetName.trim()
+    if (!name) {
+      message.warning('请输入目标名称')
+      return
+    }
+    setStarting(true)
+    try {
+      const id = await reportActions.startReport(name, tsCode.trim() || undefined)
+      navigate(`/research/${id}`)
+    } catch (err) {
+      console.error('[Index] startReport failed:', err)
+      message.error('启动研报失败,请稍后重试')
+    } finally {
+      setStarting(false)
+    }
+  }
 
   const cardList = useMemo(
     () =>
@@ -43,11 +65,11 @@ export default function Index() {
     )
   }, [cardList, searchKeyword])
 
-  // 点击卡片，切换行业并跳转到聊天页
-  const handleCardClick = (industryId: string, title: string) => {
-    console.log('[Index] 点击行业卡片:', industryId, title)
+  // 点击卡片，切换行业并跳转到尽调入口（v0.9.x: /chat 已废弃）
+  const handleCardClick = (industryId: string, _title: string) => {
+    console.log('[Index] 点击行业卡片:', industryId, _title)
     setCurrentIndustry(industryId)
-    navigate(`/chat?title=${encodeURIComponent(title)}`)
+    navigate('/research/new')
   }
 
   return (
@@ -60,25 +82,51 @@ export default function Index() {
         </div>
       </div>
 
-      {/* B-1 CTA banner — 投资标的尽调入口 */}
-      <div
-        className={styles['cta-banner']}
-        onClick={() => navigate('/research/new')}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && navigate('/research/new')}
-      >
-        <div className={styles['cta-banner__icon']}>
-          <AuditOutlined />
-        </div>
-        <div className={styles['cta-banner__content']}>
-          <div className={styles['cta-banner__title']}>投资标的尽调</div>
-          <div className={styles['cta-banner__desc']}>
-            5-agent 协作产出完整尽调报告 — 覆盖基本面、估值、风险与投资建议
+      {/* Task 16 — 投资尽调入口 form (target_name + ts_code → startReport → /research/:id) */}
+      <div className={styles['research-entry']}>
+        <div className={styles['research-entry__header']}>
+          <div className={styles['research-entry__icon']}>
+            <AuditOutlined />
           </div>
+          <div className={styles['research-entry__heading']}>
+            <div className={styles['research-entry__title']}>新建投资尽调研报</div>
+            <div className={styles['research-entry__desc']}>
+              5-agent 协作产出完整尽调报告 — 覆盖基本面、估值、风险与投资建议
+            </div>
+          </div>
+          <a
+            className={styles['research-entry__link']}
+            onClick={() => navigate('/research')}
+          >
+            查看历史研报 →
+          </a>
         </div>
-        <div className={styles['cta-banner__arrow']}>
-          <ArrowRightOutlined />
+        <div className={styles['research-entry__form']}>
+          <Input
+            placeholder="目标名称(如 贵州茅台)"
+            value={targetName}
+            onChange={(e) => setTargetName(e.target.value)}
+            size="large"
+            onPressEnter={handleStartResearch}
+            disabled={starting}
+          />
+          <Input
+            placeholder="股票代码(如 600519.SH,可选)"
+            value={tsCode}
+            onChange={(e) => setTsCode(e.target.value)}
+            size="large"
+            onPressEnter={handleStartResearch}
+            disabled={starting}
+          />
+          <Button
+            type="primary"
+            size="large"
+            onClick={handleStartResearch}
+            loading={starting}
+            disabled={!targetName.trim()}
+          >
+            开始研究
+          </Button>
         </div>
       </div>
 

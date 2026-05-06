@@ -3,19 +3,15 @@ import { BaseLayout } from '@/layout/base'
 import { ThemedRoot } from '@/themes/themed-root'
 import NotFound from '@/pages/404'
 import LoginPage from '@/pages/auth/login'
-import Chat from '@/pages/chat'
-import NewChat from '@/pages/chat/newchat'
+import RegisterPage from '@/pages/auth/register'
 import Index from '@/pages/index'
 import KnowledgePage from '@/pages/knowledge'
-import MemoryPage from '@/pages/memory'
-import DatabasePage from '@/pages/database'
 import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
-import NewsPage from '@/pages/news'
-import ResearchIndex from '@/pages/research/index'
+import ResearchDetailPage from '@/pages/research/Detail'
+import ResearchListPage from '@/pages/research/List'
 import ResearchNew from '@/pages/research/new'
-import ResearchReport from '@/pages/research/report'
 import {
   Navigate,
   Outlet,
@@ -37,33 +33,8 @@ export const routes: IRouteObject[] = [
     Component: Index,
   },
   {
-    path: '/chat',
-    children: [
-      {
-        path: '',
-        Component: NewChat,
-      },
-      {
-        path: ':id',
-        Component: Chat,
-      },
-    ],
-  },
-  {
     path: '/knowledge',
     Component: KnowledgePage,
-  },
-  {
-    path: '/memory',
-    Component: MemoryPage,
-  },
-  {
-    path: '/database',
-    Component: DatabasePage,
-  },
-  {
-    path: '/news',
-    Component: NewsPage,
   },
   {
     path: '/monitoring',
@@ -79,7 +50,7 @@ export const routes: IRouteObject[] = [
   },
   {
     path: '/research',
-    Component: ResearchIndex,
+    Component: ResearchListPage,
   },
   {
     path: '/research/new',
@@ -87,7 +58,7 @@ export const routes: IRouteObject[] = [
   },
   {
     path: '/research/:id',
-    Component: ResearchReport,
+    Component: ResearchDetailPage,
   },
   {
     path: '/404',
@@ -105,6 +76,10 @@ export const router = createBrowserRouter(
         {
           path: '/login',
           element: <LoginPage />,
+        },
+        {
+          path: '/register',
+          element: <RegisterPage />,
         },
         {
           path: '/',

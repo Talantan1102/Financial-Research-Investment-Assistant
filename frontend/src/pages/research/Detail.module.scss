@@ -1,0 +1,107 @@
+.page {
+  padding: 24px;
+  background: #fafafa;
+  min-height: 100vh;
+}
+
+.meta {
+  max-width: 1400px;
+  margin: 0 auto 24px;
+}
+
+.title {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.metaRow {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  color: #666;
+  font-size: 14px;
+}
+
+.tsCode {
+  font-family: monospace;
+  background: #f0f0f0;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.exportRow {
+  max-width: 1400px;
+  margin: 0 auto 16px;
+}
+
+.spin {
+  margin: 200px auto;
+  display: block;
+}
+
+.streamingPlaceholder {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 80px 0;
+  text-align: center;
+}
+
+.streamingCanvas {
+  max-width: 1400px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: center;
+}
+
+.streamingMarkdown {
+  flex: 1;
+  max-width: 800px;
+  padding: 32px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  font-size: 15px;
+  line-height: 1.8;
+
+  h1 {
+    font-size: 24px;
+    margin-top: 0;
+  }
+  h2 {
+    font-size: 20px;
+    margin-top: 32px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+  }
+  h3 {
+    margin-top: 24px;
+  }
+  ul,
+  ol {
+    padding-left: 24px;
+  }
+  pre {
+    background: #f5f5f5;
+    padding: 12px;
+    border-radius: 4px;
+    overflow-x: auto;
+  }
+  code {
+    font-size: 13px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    th,
+    td {
+      padding: 8px 12px;
+      border: 1px solid #e8e8e8;
+      text-align: left;
+    }
+    th {
+      background: #fafafa;
+      font-weight: 600;
+    }
+  }
+}

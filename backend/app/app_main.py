@@ -3,42 +3,34 @@ import os
 import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# 加载环境变量
+# 加载环境变量 — must run before any app.* import that reads POSTGRES_* /
+# DASHSCOPE_* / TUSHARE_* etc. at module-load time (e.g. app.core.database).
 load_dotenv()
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from app.core.database import Base, engine
-from app.router import chat, research
-from app.router.attachment_router import router as attachment_router
-from app.router.auth_router import router as auth_router
-from app.router.database_router import router as database_router
-from app.router.knowledge_router import router as knowledge_router
-from app.router.memory_router import router as memory_router
-from app.router.monitoring_router import router as monitoring_router
-from app.router.news_router import router as news_router
-from app.router.session_router import router as session_router
-
-# 创建所有数据表（如果不存在）
-Base.metadata.create_all(bind=engine)
+from app.core.database import Base, engine  # noqa: E402  (must follow load_dotenv)
+from app.router import research  # noqa: E402
+from app.router.attachment_router import router as attachment_router  # noqa: E402
+from app.router.auth_router import router as auth_router  # noqa: E402
+from app.router.knowledge_router import router as knowledge_router  # noqa: E402
+from app.router.monitoring_router import router as monitoring_router  # noqa: E402
+from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
 
 # ---------------------------------------------------------------------------
 # MonitoringService singleton
 # ---------------------------------------------------------------------------
-
 # The singleton is constructed lazily on first call so that test environments
 # that only import app_main for the FastAPI `app` object don't pay the cost of
 # building the full monitoring dependency graph.
-
-# Avoid importing Any at module level to keep import side-effects minimal
-from typing import TYPE_CHECKING, Any
 
 _monitoring_service_singleton: Any = None
 
@@ -200,6 +192,22 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     # 启动时执行
     logger.info("应用启动中...")
 
+    # 创建所有数据表（如果不存在）— 移入 lifespan 避免 import-time PG 硬依赖
+    # (v0.9.x feedback_serve_path_no_ci_coverage)。本地无 PG 时仅 warn,不阻塞启动。
+    # 显式 import models 包(barrel)以确保所有 model 注册到 Base.metadata —
+    # 例如 ResearchReport 没有任何 router 直接 import,只能靠 barrel 拉入。
+    try:
+        import app.models as _models  # noqa: F401  ensure all models registered to Base
+
+        Base.metadata.create_all(bind=engine)
+        logger.info("PostgreSQL 表初始化完成")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "PostgreSQL 表初始化跳过(可能 PG 未启动): %s — "
+            "依赖 PG 的 router(auth/news/session/...) 调用时会报错,但启动不阻塞",
+            e,
+        )
+
     # 初始化定时任务调度器并检查数据
     try:
         from app.service.scheduler_service import init_scheduler_and_check_data
@@ -286,16 +294,14 @@ app.add_middleware(
 )
 
 # 注册路由
+# v0.9.x — chat / database / news / memory / session 已不再 served (frontend 已删
+# 对应路由,routers 文件保留但不 include).参考 Task 8 spec.
 app.include_router(auth_router)
-app.include_router(session_router)
 app.include_router(knowledge_router)
 app.include_router(attachment_router)
-app.include_router(memory_router)
-app.include_router(database_router)
-app.include_router(chat.router)
 app.include_router(research.router)
-app.include_router(news_router)
 app.include_router(monitoring_router)
+app.include_router(reports_router)  # v0.9.x — research reports CRUD
 
 
 @app.get("/hello")

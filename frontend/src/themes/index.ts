@@ -5,7 +5,7 @@
  *   /credit-report/* | /portfolio-monitoring/* | /monitoring/*
  *
  * Retail entries (浅色, C 端):
- *   /ticker/* | /watchlist/* | /screener/* | /chat/* | / (default)
+ *   /ticker/* | /watchlist/* | /screener/* | / (default)
  */
 
 import { useLocation } from 'react-router-dom';
