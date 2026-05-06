@@ -18,15 +18,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from app.core.database import Base, engine  # noqa: E402  (must follow load_dotenv)
-from app.router import chat, research  # noqa: E402
+from app.router import research  # noqa: E402
 from app.router.attachment_router import router as attachment_router  # noqa: E402
 from app.router.auth_router import router as auth_router  # noqa: E402
-from app.router.database_router import router as database_router  # noqa: E402
 from app.router.knowledge_router import router as knowledge_router  # noqa: E402
-from app.router.memory_router import router as memory_router  # noqa: E402
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
-from app.router.news_router import router as news_router  # noqa: E402
-from app.router.session_router import router as session_router  # noqa: E402
+from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
 
 # ---------------------------------------------------------------------------
 # MonitoringService singleton
@@ -297,16 +294,14 @@ app.add_middleware(
 )
 
 # 注册路由
+# v0.9.x — chat / database / news / memory / session 已不再 served (frontend 已删
+# 对应路由,routers 文件保留但不 include).参考 Task 8 spec.
 app.include_router(auth_router)
-app.include_router(session_router)
 app.include_router(knowledge_router)
 app.include_router(attachment_router)
-app.include_router(memory_router)
-app.include_router(database_router)
-app.include_router(chat.router)
 app.include_router(research.router)
-app.include_router(news_router)
 app.include_router(monitoring_router)
+app.include_router(reports_router)  # v0.9.x — research reports CRUD
 
 
 @app.get("/hello")
