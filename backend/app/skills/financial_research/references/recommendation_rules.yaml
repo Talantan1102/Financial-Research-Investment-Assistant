@@ -1,0 +1,55 @@
+# 5 档评级 if-else 规则 (按优先级评估)
+# Input: dict 含 pe_percentile, roe, revenue_yoy, net_profit_yoy, asset_liability_ratio,
+#         industry_benchmark, holder_change_trend, forecast_signal, ...
+#
+# DSL 支持:
+#   - all_of / any_of: list of conditions
+#   - condition: {field, op, value} triple OR {count_at_least_3: [...]}
+#   - op: <, >, ==, <=, >=
+#   - fallback: true (last resort)
+#
+# 评级触发顺序由 classify_recommendation._PRIORITY hard-coded list 强保证:
+#   recommend_sell → recommend_buy → recommend_overweight → recommend_underweight → recommend_hold
+# YAML mapping 顺序仅作可读性参考,真正优先级在 Python 侧。
+
+rules:
+  recommend_sell:
+    description: "财务恶化 OR 治理风险 OR 估值显著偏高 OR 行业政策冲击"
+    conditions:
+      any_of:
+        - {field: pe_percentile, op: ">", value: 0.90}
+        - {field: forecast_signal, op: "==", value: "negative"}
+        - {field: pledge_ratio, op: ">", value: 0.60}
+        - {field: asset_liability_warning, op: "==", value: true}
+
+  recommend_buy:
+    description: "PE 历史分位 < 30% 且 ROE > 行业平均 1.5x 且营收/净利双升 且行业景气"
+    conditions:
+      all_of:
+        - {field: pe_percentile, op: "<", value: 0.30}
+        - {field: roe, op: ">", value: 0.15}
+        - {field: revenue_yoy, op: ">", value: 0}
+        - {field: net_profit_yoy, op: ">", value: 0}
+
+  recommend_overweight:
+    description: "满足 buy 条件 3/4 OR 短期催化(业绩预告/回购/增持)"
+    conditions:
+      any_of:
+        - {field: forecast_signal, op: "==", value: "positive"}
+        - count_at_least_3:
+            - {field: pe_percentile, op: "<", value: 0.50}
+            - {field: roe, op: ">", value: 0.12}
+            - {field: revenue_yoy, op: ">", value: 0}
+            - {field: net_profit_yoy, op: ">", value: 0}
+
+  recommend_underweight:
+    description: "PE 历史分位 > 70% OR 营收/净利单边下降 OR 行业政策承压"
+    conditions:
+      any_of:
+        - {field: pe_percentile, op: ">", value: 0.70}
+        - {field: revenue_yoy, op: "<", value: 0}
+        - {field: net_profit_yoy, op: "<", value: 0}
+
+  recommend_hold:
+    description: "估值合理 + 财务健康,无明显催化也无明显风险 — 默认兜底"
+    fallback: true

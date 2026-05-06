@@ -47,6 +47,51 @@ Recommendation = Literal[
     "recommend_sell",
 ]
 
+# v0.8.5 — full tool catalog (5 existing + 8 new). Used by PLAN_REGISTRY's
+# required_tools field type constraint so the planner can only choose from
+# registered tool names.
+ToolName = Literal[
+    "get_stock_quote",
+    "get_financials",
+    "get_news",
+    "web_search",
+    "kb_search",
+    "get_balance_sheet",
+    "get_cashflow",
+    "get_daily_basic",
+    "get_pe_history",
+    "get_forecast",
+    "get_dividend_history",
+    "get_holder_change",
+    "get_money_flow",
+]
+
+
+# v0.8.5 — constrained-router plan_id catalog. Independent Literal from
+# InvestmentObjective (semantic separation): InvestmentObjective is the
+# user-facing investment goal; PlanId is the internal plan-template selector
+# the planner LLM picks from PLAN_REGISTRY.
+PlanId = Literal[
+    "capital_preservation",
+    "stable_growth",
+    "balanced",
+    "aggressive_growth",
+]
+
+
+class SubtaskTemplate(BaseModel):
+    """Template for plan_registry — instantiated to Subtask at runtime.
+
+    description_template uses {target_name} and {ts_code} placeholders that
+    instantiate_plan() formats with concrete values per request.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    description_template: str
+    rationale: str
+    required_tools: tuple[ToolName, ...]
+
 
 class ResearchRequest(BaseModel):
     """B-1 研报请求(v0.8.4 — 6 结构化字段 + 可选自由文本)。"""
@@ -137,19 +182,31 @@ class Subtask(BaseModel):
 
     subtask_id: str
     description: str
+    # v0.8.4 兼容: kept as list[str] for legacy callers; planner-emitted instances
+    # 实际全是 ToolName Literal (via instantiate_plan from typed SubtaskTemplate).
     required_tools: list[str]
     rationale: str
 
 
 class ResearchPlan(BaseModel):
-    """ResearchPlanner 输出。"""
+    """ResearchPlanner 输出 — v0.8.5 constrained-router schema.
 
-    model_config = ConfigDict(frozen=True)
+    The planner LLM emits ``(plan_id, rationale)``; ``subtasks`` is then
+    filled at runtime by ``instantiate_plan(plan_id, target_name, ts_code)``
+    from PLAN_REGISTRY.
+    """
 
-    subtasks: list[Subtask]
-    target_entity: str
-    research_style: Literal["concise", "comprehensive"]
-    reasoning: str
+    # extra="ignore" so a hallucinated LLM emitting extra keys does not break
+    # parsing. Not frozen — instantiate_plan's caller may need to overwrite
+    # subtasks; downstream agents treat the instance as read-only by convention.
+    model_config = ConfigDict(extra="ignore")
+
+    plan_id: PlanId
+    rationale: str = Field(max_length=200, description="LLM 解释为什么选此 plan_id")
+    # subtasks 默认空, 由 instantiate_plan() runtime 填充 (Task 7 spec).
+    subtasks: list[Subtask] = Field(
+        default_factory=list, description="Runtime instantiated by plan_registry"
+    )
 
 
 class Insight(BaseModel):
@@ -183,6 +240,7 @@ CriticDimension = Literal[
     "structure",
     "conciseness",
     "input_context_appropriateness",
+    "plan_correctness",  # v0.8.5 — 第 7 scorer (LLM-as-judge for constrained-router)
 ]
 
 
@@ -234,6 +292,14 @@ class ResearchState(BaseModel):
 
     plan: ResearchPlan | None = None
     tool_results: list[ToolResult] = Field(default_factory=list)
+
+    # v0.8.5 — constrained router retry edge fields (Task 7 schema; Task 9 wires
+    # the actual conditional retry edge in research_graph.py).
+    # ge=0/le=2 mirrors _MAX_PLANNER_RETRY in research_graph.py — hard cap so the
+    # retry router cannot loop indefinitely even if state is corrupted upstream.
+    target_entity: str | None = None  # e.g. "贵州茅台"; falls back to ts_code if None
+    planner_retry_count: int = Field(default=0, ge=0, le=2)
+    planner_critic_feedback: str | None = Field(default=None, max_length=300)
     insights: list[Insight] = Field(default_factory=list)
     report_markdown: str | None = None
     chart_specs: list[ChartSpec] = Field(default_factory=list)

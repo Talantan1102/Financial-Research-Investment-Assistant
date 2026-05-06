@@ -305,6 +305,9 @@ async def get_research_graph() -> Any:
             InputContextAppropriatenessScorer,
         )
         from app.agents.critic_subagents.insight import InsightScorer
+        from app.agents.critic_subagents.plan_correctness_scorer import (
+            PlanCorrectnessScorer,
+        )
         from app.agents.critic_subagents.structure import StructureScorer
         from app.agents.data_collector import DataCollector
         from app.agents.research_planner import ResearchPlanner
@@ -314,8 +317,16 @@ async def get_research_graph() -> Any:
         from app.services.kb_factory import build_kb_search_service_from_env
         from app.services.openai_client import build_llm_service_from_env
         from app.services.tushare_factory import build_tushare_service
+        from app.tools.get_balance_sheet import GetBalanceSheetTool
+        from app.tools.get_cashflow import GetCashflowTool
+        from app.tools.get_daily_basic import GetDailyBasicTool
+        from app.tools.get_dividend_history import GetDividendHistoryTool
         from app.tools.get_financials import GetFinancialsTool
+        from app.tools.get_forecast import GetForecastTool
+        from app.tools.get_holder_change import GetHolderChangeTool
+        from app.tools.get_money_flow import GetMoneyFlowTool
         from app.tools.get_news import GetNewsTool
+        from app.tools.get_pe_history import GetPeHistoryTool
         from app.tools.get_stock_quote import StockQuoteTool
         from app.tools.kb_search import KbSearchTool
         from app.tools.registry import ToolRegistry
@@ -332,6 +343,16 @@ async def get_research_graph() -> Any:
         kb_service = build_kb_search_service_from_env()
         registry.register(KbSearchTool(kb_service=kb_service))
 
+        # v0.8.5 — 8 new tools per spec § 4.6
+        registry.register(GetBalanceSheetTool(tushare=tushare))
+        registry.register(GetCashflowTool(tushare=tushare))
+        registry.register(GetDailyBasicTool(tushare=tushare))
+        registry.register(GetPeHistoryTool(tushare=tushare))
+        registry.register(GetForecastTool(tushare=tushare))
+        registry.register(GetDividendHistoryTool(tushare=tushare))
+        registry.register(GetHolderChangeTool(tushare=tushare))
+        registry.register(GetMoneyFlowTool(tushare=tushare))
+
         planner = ResearchPlanner(llm=llm)
         collector = DataCollector(llm=llm, registry=registry)
         analyst = Analyst(llm=llm)
@@ -343,6 +364,7 @@ async def get_research_graph() -> Any:
             StructureScorer(llm=llm),
             ConcisenessScorer(llm=llm),
             InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer (v0.8.4)
+            PlanCorrectnessScorer(llm=llm),  # 第 7 scorer (v0.8.5)
         ]
         critic = Critic(llm=llm, scorers=scorers)
 
