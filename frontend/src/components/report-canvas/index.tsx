@@ -23,13 +23,14 @@ interface SectionDef {
   data: unknown
 }
 
-// 章节顺序与中文标题(与 backend schema sections 对应)
+// 章节顺序与中文标题(与 backend InvestmentDueDiligenceReport schema 对应,
+// 见 frontend/src/types/research.ts:148-153)
 const SECTION_ORDER: { key: string; title: string }[] = [
   { key: 'target_overview', title: '一、标的概览' },
   { key: 'legal_qualification', title: '二、合规与资质' },
-  { key: 'financial_health', title: '三、财务健康' },
-  { key: 'industry_position', title: '四、行业地位' },
-  { key: 'risk_factors', title: '五、风险因素' },
+  { key: 'financial_analysis', title: '三、财务健康' },
+  { key: 'industry_analysis', title: '四、行业地位' },
+  { key: 'risk_assessment', title: '五、风险因素' },
   { key: 'investment_recommendation', title: '六、投资建议' },
 ]
 
