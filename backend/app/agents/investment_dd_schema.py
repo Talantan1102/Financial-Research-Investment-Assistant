@@ -95,7 +95,9 @@ class TargetOverview(BaseModel):
     current_pe: float | None = Field(default=None, description="当前市盈率(PE)")
     current_pb: float | None = Field(default=None, description="当前市净率(PB)")
     current_market_cap: float | None = Field(default=None, description="当前总市值(亿元)")
-    dividend_yield: float | None = Field(default=None, description="股息率(%)")
+    dividend_yield: float | str | None = Field(
+        default=None, description="股息率(%) — float 优先, str 接受 LLM 自由文本如 '约2%'"
+    )
     evidence: list[str] = Field(
         default_factory=list,
         description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
