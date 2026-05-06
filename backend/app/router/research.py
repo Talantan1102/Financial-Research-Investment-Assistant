@@ -441,6 +441,8 @@ async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) ->
             if adapted is not None:
                 yield f"data: {adapted.model_dump_json()}\n\n"
     except Exception as e:
+        # v0.9.x: 之前 swallow 异常成 error event,backend log 看不到根因 → 现在 log
+        logger.exception("_stream_research astream_events raised: %s", e)
         err = ResearchStreamEvent(type="error", data={"message": str(e)})
         yield f"data: {err.model_dump_json()}\n\n"
 

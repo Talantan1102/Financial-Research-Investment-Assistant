@@ -341,17 +341,26 @@ export default function ResearchDetailPage() {
         {/* ── Body grid ─────────────────────────────────── */}
         <div className={styles.body}>
           <div className={styles.main}>
-            {/* Streaming OR completed canvas */}
+            {/* Streaming: ProgressTimeline 优先展示(实质过程内容) */}
             {r.status === 'streaming' && (
-              <StreamingCanvas
-                liveMd={liveMd}
-                hasProgress={snap.streaming.progress.length > 0}
-              />
+              <section className={styles.canvas}>
+                <div className={styles.canvasLabel}>
+                  Research Log · {timelineEntries.length}/5 stages
+                </div>
+                <ProgressTimeline entries={timelineEntries} />
+              </section>
             )}
 
-            {r.status === 'streaming' && timelineEntries.length > 0 && (
-              <section>
-                <ProgressTimeline entries={timelineEntries} />
+            {/* Streaming: markdown 来了之后追加 Draft Report 卡 */}
+            {r.status === 'streaming' && liveMd && (
+              <section className={styles.canvas}>
+                <div className={styles.canvasLabel}>Draft Report · live</div>
+                <div
+                  className={styles.streamingMarkdown}
+                  dangerouslySetInnerHTML={{
+                    __html: marked.parse(liveMd) as string,
+                  }}
+                />
               </section>
             )}
 
@@ -399,39 +408,3 @@ export default function ResearchDetailPage() {
   )
 }
 
-// ── Streaming canvas (live markdown OR shimmer) ─────────────────────────
-function StreamingCanvas({
-  liveMd,
-  hasProgress,
-}: {
-  liveMd: string
-  hasProgress: boolean
-}) {
-  return (
-    <section className={styles.canvas}>
-      <div className={styles.canvasLabel}>
-        {liveMd ? 'Draft Report · live' : 'Research Stage'}
-      </div>
-
-      {liveMd ? (
-        <div
-          className={styles.streamingMarkdown}
-          dangerouslySetInnerHTML={{ __html: marked.parse(liveMd) as string }}
-        />
-      ) : (
-        <div className={styles.canvasEmpty}>
-          <div className={`${styles.shimmerLine} ${styles.medium}`} />
-          <div className={`${styles.shimmerLine}`} />
-          <div className={`${styles.shimmerLine} ${styles.short}`} />
-          <div className={`${styles.shimmerLine}`} />
-          <div className={`${styles.shimmerLine} ${styles.tiny}`} />
-          <div className={styles.streamingHint}>
-            {hasProgress
-              ? 'Five-agent research in flight — drafting once data + analysis arrive.'
-              : 'Spinning up research graph — first event in ~10s.'}
-          </div>
-        </div>
-      )}
-    </section>
-  )
-}
