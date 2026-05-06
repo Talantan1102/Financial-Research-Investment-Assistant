@@ -367,13 +367,17 @@ async def get_research_graph() -> Any:
         return _RESEARCH_GRAPH_SINGLETON
 
 
-@router.post("/api/v0.5/research")
+@router.post("/api/v0.5/research", deprecated=True)
 async def research(
     req: ResearchRequest,
     user: _AnonUser = Depends(get_current_user),
     graph: Any = Depends(get_research_graph),
 ) -> StreamingResponse:
-    """POST /api/v0.5/research — stream a research report as SSE.
+    """[DEPRECATED v0.9.x] use POST /reports → GET /reports/:id/stream instead.
+
+    保留作为 alias,Task 9 align;v0.9.y 删除.
+
+    POST /api/v0.5/research — stream a research report as SSE.
 
     Request body: ResearchRequest (user_message, optional target_entity + research_style).
     Response: text/event-stream where each line is ``data: <ResearchStreamEvent JSON>``.
