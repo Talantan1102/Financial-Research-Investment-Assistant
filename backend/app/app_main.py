@@ -197,7 +197,11 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
 
     # 创建所有数据表（如果不存在）— 移入 lifespan 避免 import-time PG 硬依赖
     # (v0.9.x feedback_serve_path_no_ci_coverage)。本地无 PG 时仅 warn,不阻塞启动。
+    # 显式 import models 包(barrel)以确保所有 model 注册到 Base.metadata —
+    # 例如 ResearchReport 没有任何 router 直接 import,只能靠 barrel 拉入。
     try:
+        import app.models as _models  # noqa: F401  ensure all models registered to Base
+
         Base.metadata.create_all(bind=engine)
         logger.info("PostgreSQL 表初始化完成")
     except Exception as e:  # noqa: BLE001
