@@ -67,7 +67,7 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | v0.8.3-pre | 项目个人化 + legacy 标识 + 设计语言对齐 | #12 |
 | v0.8.3 | Tushare 真接 8 接口 + B-3 持仓预警引擎(signal + escalation + email + 3 前端页) | #13 |
 | v0.8.4 | B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey | #16 |
-| **v0.8.5** | **Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字** | TBD |
+| **v0.8.5** | **Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字** | #19 |
 
 ## 技术栈
 
@@ -146,7 +146,7 @@ docker compose up -d postgres
 | **L2 e2e** (`backend/tests/e2e/`) | cassette(replay) | <2min | 每个 PR |
 | **L3 eval** (`backend/tests/eval/`) | live(真 API,烧钱) | 5-15min | nightly + 手动 |
 
-**当前状态**(v0.8.5):564 unit + 60+ integration / e2e + 3 retry edge integration,mypy 0 errors,ruff clean,cassette 36 episodes + B-1 茅台 e2e cassette(84KB)。4 differential golden case(LLM-as-judge ic_score ≥ 9.0;含 1 retry-trigger pending Phase 9b cassette 重录)。
+**当前状态**(v0.8.5 ship #19):685 passed / 5 skipped(unit + integration + e2e + 3 retry edge integration),mypy 0 errors / 344 source files,ruff clean。4 differential golden case + 1 e2e 茅台 cassette ship(retry-trigger e2e cassette 录上但 skipped — LLM judge 不严格不稳定触发, retry edge wire 由 integration/test_planner_retry_edge.py 3 mocked cases 充分覆盖)。
 - **constrained router 测试**:plan_registry 15 + router 18 + skill helper 20 + plan_correctness scorer 4 + retry edge 3 + new tool 21 + writer post_process 13。
 
 ## 环境变量
