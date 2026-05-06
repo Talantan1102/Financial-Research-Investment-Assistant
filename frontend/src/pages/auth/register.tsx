@@ -37,10 +37,15 @@ export default function RegisterPage() {
         {/* 左侧品牌区域 */}
         <div className={styles['brand-section']}>
           <div className={styles['brand-content']}>
-            <h1 className={styles['brand-title']}>金融研究助手</h1>
-            <p className={styles['brand-slogan']}>通用金融 agent 平台</p>
+            <h1 className={styles['brand-title']}>AlphaScout</h1>
+            <p className={styles['brand-slogan']}>
+              Multi-agent Financial Research Platform
+            </p>
             <p className={styles['brand-hint']}>
-              注册后,你的研究记录将与他人完全隔离。
+              通用金融 agent 平台<br />
+              <small style={{ opacity: 0.6 }}>
+                注册后,你的研究记录将与他人完全隔离。
+              </small>
             </p>
           </div>
         </div>
