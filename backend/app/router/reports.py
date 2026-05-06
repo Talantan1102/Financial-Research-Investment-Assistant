@@ -347,6 +347,17 @@ async def _stream_research_with_persist(
 
             elif event_type == "done":
                 request_id = event_data.get("request_id") or request_id
+                # v0.9.x fix: SSE event 累积只能拿到 markdown 字符串和 critic 评分,
+                # 6 节结构化 InvestmentDueDiligenceReport 在 _RUN_RESULTS_CACHE 里
+                # (writer_node 完成时由 research.py 写入). merge 进 final_report
+                # 让前端 ReportCanvas + EvidenceSidebar 能拿到 target_overview /
+                # financial_analysis 等 6 节字段渲染.
+                if request_id:
+                    from app.router.research import _RUN_RESULTS_CACHE
+
+                    structured = _RUN_RESULTS_CACHE.get(request_id)
+                    if isinstance(structured, dict):
+                        final_report = {**structured, **final_report}
 
             elif event_type == "error":
                 # error event 来自 _stream_research 的 except 分支

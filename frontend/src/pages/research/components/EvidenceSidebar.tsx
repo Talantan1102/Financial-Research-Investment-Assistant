@@ -38,12 +38,14 @@ function collectEvidence(report: InvestmentDueDiligenceReport): EvidenceEntry[] 
     }
   }
 
-  addEvidence('公司概况', report.target_overview.evidence)
-  addEvidence('法律资质', report.legal_qualification.evidence)
-  addEvidence('财务分析', report.financial_analysis.evidence)
-  addEvidence('行业分析', report.industry_analysis.evidence)
-  addEvidence('风险评估', report.risk_assessment.evidence)
-  addEvidence('投资建议', report.investment_recommendation.evidence)
+  // v0.9.x: backend 偶尔回传 partial report_json (缺 6 节字段) — 加 optional chain
+  // guard,缺字段时跳过对应 section 而不是 crash 整个 React tree.
+  addEvidence('公司概况', report.target_overview?.evidence ?? [])
+  addEvidence('法律资质', report.legal_qualification?.evidence ?? [])
+  addEvidence('财务分析', report.financial_analysis?.evidence ?? [])
+  addEvidence('行业分析', report.industry_analysis?.evidence ?? [])
+  addEvidence('风险评估', report.risk_assessment?.evidence ?? [])
+  addEvidence('投资建议', report.investment_recommendation?.evidence ?? [])
 
   return Array.from(map.entries()).map(([chunkId, sectionsSet]) => ({
     chunkId,
