@@ -40,6 +40,11 @@ logs/
 # Build outputs
 frontend/dist/
 
+# Frontend test artifacts (Playwright + Vitest)
+frontend/test-results/
+frontend/playwright-report/
+frontend/coverage/
+
 # Langfuse (third-party)
 langfuse/
 

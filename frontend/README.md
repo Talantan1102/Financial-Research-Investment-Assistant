@@ -48,6 +48,45 @@ npm run build
 npm run lint
 ```
 
+## Tests
+
+前端测试基础设施(v0.9.x 加入 — 解决 dogfood 时 401 → API exception → SSE 500 → UI 不渲染多层 bug 没被 build 阶段拦住的根因)。
+
+### Vitest 单元测试
+
+覆盖 `store/` `api/` `api/request/plugins/` 三层关键逻辑(SSE event 解析、CRUD URL/payload、401 拦截器),不依赖真 backend / dev server / 浏览器。
+
+```bash
+npm run test          # 单次跑(CI 模式)
+npm run test:watch    # 文件变化即重跑(开发模式)
+```
+
+### Playwright e2e
+
+最小化 frontend 回归网 — 启 `vite` dev server, 拿 `page.route()` mock 后端, 跑 chromium。**不真启 backend / 不真调 LLM**。
+
+```bash
+# 第一次运行需装 chromium(已装过可跳)
+npx playwright install chromium
+
+npm run test:e2e
+```
+
+测试在 `tests/e2e/`:landing.spec.ts 覆盖 `/login` `/register` `/` 三页基本渲染 + AlphaScout brand assertion。
+
+### CI 集成(后续)
+
+vitest + playwright 已 self-contained 不依赖 backend, 后续可加到 GitHub Actions(本 task 范围外):
+
+```yaml
+# .github/workflows/frontend-test.yml(草稿,后续 task)
+- run: cd frontend && npm install --legacy-peer-deps
+- run: cd frontend && npm run build
+- run: cd frontend && npm run test
+- run: cd frontend && npx playwright install --with-deps chromium
+- run: cd frontend && npm run test:e2e
+```
+
 ## Design tokens
 
 双 theme(B 端 banking 深色 / C 端 retail 浅色)tokens 在 `src/themes/`, 设计规范 + 配色 / typography / spacing 详见 [docs/design-tokens.md](../docs/design-tokens.md).

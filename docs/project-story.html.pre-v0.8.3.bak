@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>金融研投助手 — 项目故事</title>
+<style>
+/* ========== Reset & Base ========== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --text: #1a1a2e;
+  --text-secondary: #4a4a6a;
+  --text-muted: #8888a0;
+  --bg: #ffffff;
+  --bg-alt: #f7f8fa;
+  --border: #e2e4e9;
+  --accent: #2563eb;
+  --accent-light: #eff4ff;
+  --accent-dark: #1d4ed8;
+  --green: #059669;
+  --green-light: #ecfdf5;
+  --orange: #d97706;
+  --orange-light: #fffbeb;
+  --red: #dc2626;
+  --red-light: #fef2f2;
+  --purple: #7c3aed;
+  --purple-light: #f5f3ff;
+  --toc-width: 240px;
+  --content-max: 820px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', 'Noto Sans SC', sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.8;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ========== Hero ========== */
+.hero {
+  background: linear-gradient(135deg, #f8faff 0%, #eef2ff 50%, #f0f5ff 100%);
+  border-bottom: 1px solid var(--border);
+  padding: 64px 24px 48px;
+  text-align: center;
+}
+
+.hero h1 {
+  font-size: 2.4rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  margin-bottom: 12px;
+}
+
+.hero .subtitle {
+  font-size: 1.1rem;
+  color: var(--text-secondary);
+  max-width: 680px;
+  margin: 0 auto 36px;
+  line-height: 1.7;
+}
+
+.hero-metrics {
+  display: flex;
+  justify-content: center;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+
+.hero-metric {
+  text-align: center;
+}
+
+.hero-metric .number {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--accent);
+  display: block;
+  line-height: 1.2;
+}
+
+.hero-metric .label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+/* ========== Layout ========== */
+.page-wrapper {
+  display: flex;
+  max-width: calc(var(--toc-width) + var(--content-max) + 80px);
+  margin: 0 auto;
+}
+
+/* ========== TOC ========== */
+.toc {
+  position: sticky;
+  top: 24px;
+  align-self: flex-start;
+  width: var(--toc-width);
+  min-width: var(--toc-width);
+  padding: 32px 0 32px 24px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.toc-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 16px;
+}
+
+.toc a {
+  display: block;
+  padding: 5px 0 5px 14px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: all 0.2s;
+  line-height: 1.5;
+}
+
+.toc a:hover {
+  color: var(--accent);
+}
+
+.toc a.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 500;
+}
+
+/* ========== Main Content ========== */
+.content {
+  flex: 1;
+  max-width: var(--content-max);
+  padding: 48px 40px 80px;
+  min-width: 0;
+}
+
+.section {
+  padding-bottom: 40px;
+  margin-bottom: 40px;
+  border-bottom: 1px solid var(--border);
+}
+
+.section:last-child {
+  border-bottom: none;
+}
+
+h2 {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 20px;
+  letter-spacing: -0.01em;
+}
+
+h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 32px 0 14px;
+}
+
+h4 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 24px 0 10px;
+}
+
+p {
+  margin-bottom: 16px;
+  color: var(--text-secondary);
+}
+
+strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ========== Inline Code ========== */
+code {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.88em;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+/* ========== Blockquote ========== */
+blockquote {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-light);
+  padding: 16px 20px;
+  margin: 16px 0;
+  border-radius: 0 6px 6px 0;
+  color: var(--text-secondary);
+}
+
+blockquote p:last-child { margin-bottom: 0; }
+
+/* ========== Tables ========== */
+.table-wrapper {
+  overflow-x: auto;
+  margin: 20px 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  min-width: 500px;
+}
+
+thead {
+  background: var(--bg-alt);
+}
+
+th {
+  text-align: left;
+  padding: 12px 16px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 2px solid var(--border);
+  white-space: nowrap;
+}
+
+td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+
+tr:last-child td { border-bottom: none; }
+tr:nth-child(even) { background: var(--bg-alt); }
+
+/* ========== Data Flywheel ========== */
+.flywheel {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px 24px;
+  margin: 24px 0;
+}
+
+.flywheel-title {
+  text-align: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--text);
+  margin-bottom: 28px;
+}
+
+.flywheel-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+.flywheel-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  position: relative;
+  padding-bottom: 8px;
+}
+
+.flywheel-step:not(:last-child) {
+  padding-bottom: 24px;
+}
+
+.flywheel-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 17px;
+  top: 38px;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.3;
+}
+
+.flywheel-num {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.flywheel-step:last-child .flywheel-num {
+  background: var(--green);
+}
+
+.flywheel-text {
+  padding-top: 6px;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.flywheel-text strong {
+  color: var(--text);
+}
+
+.flywheel-loop {
+  text-align: center;
+  margin-top: 20px;
+  padding: 12px;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+
+/* ========== STAR Cards ========== */
+.star-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 24px 0;
+  overflow: hidden;
+}
+
+.star-card-header {
+  padding: 16px 20px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.star-card-body {
+  padding: 20px;
+}
+
+.star-item {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.star-item:last-child { margin-bottom: 0; }
+
+.star-label {
+  flex-shrink: 0;
+  width: 64px;
+  height: 28px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  margin-top: 3px;
+}
+
+.star-label.s { background: var(--accent-light); color: var(--accent); }
+.star-label.t { background: var(--orange-light); color: var(--orange); }
+.star-label.a { background: var(--green-light); color: var(--green); }
+.star-label.r { background: var(--purple-light); color: var(--purple); }
+
+.star-content {
+  flex: 1;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.star-content p { margin-bottom: 10px; }
+.star-content p:last-child { margin-bottom: 0; }
+
+.iteration-block {
+  background: var(--bg-alt);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 10px 0;
+  border-left: 3px solid var(--border);
+}
+
+.iteration-block.fail { border-left-color: var(--red); }
+.iteration-block.success { border-left-color: var(--green); }
+
+.iteration-label {
+  font-weight: 700;
+  font-size: 0.88rem;
+  margin-bottom: 4px;
+}
+
+.iteration-label.fail { color: var(--red); }
+.iteration-label.success { color: var(--green); }
+
+/* ========== Agent List ========== */
+.agent-list {
+  list-style: none;
+  margin: 12px 0;
+}
+
+.agent-list li {
+  padding: 8px 0;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.agent-list li:last-child { border-bottom: none; }
+
+.agent-name {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ========== Accordion ========== */
+.accordion { margin: 20px 0; }
+
+.accordion-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.accordion-btn {
+  width: 100%;
+  text-align: left;
+  padding: 14px 20px;
+  background: var(--bg);
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: inherit;
+  transition: background 0.2s;
+}
+
+.accordion-btn:hover { background: var(--bg-alt); }
+
+.accordion-arrow {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  transition: transform 0.3s;
+}
+
+.accordion-item.open .accordion-arrow {
+  transform: rotate(180deg);
+}
+
+.accordion-body {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.35s ease;
+}
+
+.accordion-body-inner {
+  padding: 0 20px 16px;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.8;
+}
+
+/* ========== Metric Cards ========== */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin: 24px 0;
+}
+
+.metric-card {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  text-align: center;
+}
+
+.metric-card .value {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+
+.metric-card .metric-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.metric-card .desc {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ========== Highlight Box ========== */
+.highlight-box {
+  background: var(--accent-light);
+  border: 1px solid #c7d9ff;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+/* ========== Round Steps ========== */
+.round-steps {
+  margin: 16px 0;
+}
+
+.round-step {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 10px 0;
+}
+
+.round-badge {
+  flex-shrink: 0;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  margin-top: 3px;
+}
+
+.round-desc {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+/* ========== Defense Table ========== */
+.defense-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 20px 0;
+}
+
+.defense-card {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.defense-card .layer {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 0.85rem;
+  margin-bottom: 6px;
+}
+
+.defense-card .mechanism {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 0.92rem;
+  margin-bottom: 4px;
+}
+
+.defense-card .risk {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+/* ========== Footer ========== */
+.page-footer {
+  text-align: center;
+  padding: 32px 24px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ========== Repo Section ========== */
+.repo-block {
+  margin: 20px 0;
+}
+
+.repo-name {
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.repo-name span {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.file-list {
+  list-style: none;
+}
+
+.file-list li {
+  display: flex;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-list li:last-child { border-bottom: none; }
+
+.file-path {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 0.85rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.file-desc {
+  color: var(--text-muted);
+}
+
+/* ========== Example Box ========== */
+.example-box {
+  background: #f0fdf4;
+  border-left: 4px solid #16a34a;
+  border-radius: 0 8px 8px 0;
+  padding: 16px 20px;
+  margin: 20px 0;
+  font-size: 0.93rem;
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.example-box .example-title {
+  font-weight: 700;
+  color: #15803d;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.example-box ol,
+.example-box ul {
+  margin: 8px 0 8px 20px;
+}
+
+.example-box li {
+  margin-bottom: 4px;
+}
+
+.example-box code {
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
+/* ========== Responsive ========== */
+@media (max-width: 960px) {
+  .toc { display: none; }
+  .content { padding: 32px 20px 60px; }
+  .hero { padding: 48px 20px 36px; }
+  .hero h1 { font-size: 1.8rem; }
+  .hero-metrics { gap: 20px; }
+  .hero-metric .number { font-size: 1.5rem; }
+  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .defense-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  .metric-grid { grid-template-columns: 1fr; }
+  .hero-metrics { flex-direction: column; align-items: center; gap: 16px; }
+}
+
+/* ========== Print ========== */
+@media print {
+  .toc { display: none; }
+  .hero { background: none; padding: 32px 0; }
+  .content { padding: 0; max-width: 100%; }
+  .page-wrapper { display: block; }
+  .accordion-body { max-height: none !important; }
+  .section { page-break-inside: avoid; }
+  body { font-size: 11pt; }
+}
+</style>
+</head>
+<body>
+
+<!-- ========== Hero ========== -->
+<header class="hero">
+  <h1>金融研投助手</h1>
+  <p class="subtitle">
+    基于 MCP 协议的 AI 金融研究系统 —— 从应用到训练的完整闭环，用应用生成数据，用数据改进应用
+  </p>
+  <div class="hero-metrics">
+    <div class="hero-metric">
+      <span class="number">43</span>
+      <div class="label">金融工具</div>
+    </div>
+    <div class="hero-metric">
+      <span class="number">7</span>
+      <div class="label">能力域 Skill</div>
+    </div>
+    <div class="hero-metric">
+      <span class="number">6</span>
+      <div class="label">Agent 协作</div>
+    </div>
+    <div class="hero-metric">
+      <span class="number">30 万</span>
+      <div class="label">训练数据</div>
+    </div>
+    <div class="hero-metric">
+      <span class="number">60%+</span>
+      <div class="label">Prompt 节省</div>
+    </div>
+  </div>
+</header>
+
+<!-- ========== Page Layout ========== -->
+<div class="page-wrapper">
+
+  <!-- ========== TOC ========== -->
+  <nav class="toc">
+    <div class="toc-title">目录</div>
+    <a href="#background" data-section="background">业务背景与痛点</a>
+    <a href="#elevator" data-section="elevator">项目定位</a>
+    <a href="#flywheel" data-section="flywheel">数据飞轮</a>
+    <a href="#mcp" data-section="mcp">模块 1：金融 MCP Server</a>
+    <a href="#agentflow" data-section="agentflow">模块 2：数据合成</a>
+    <a href="#training" data-section="training">模块 3：GRPO 训练</a>
+    <a href="#star1" data-section="star1">难点 1：6 Agent 深度研究</a>
+    <a href="#star2" data-section="star2">难点 2：混合奖励函数</a>
+    <a href="#highlights" data-section="highlights">技术亮点速览</a>
+    <a href="#results" data-section="results">可量化成果</a>
+    <a href="#qa" data-section="qa">面试高频问答</a>
+    <a href="#appendix" data-section="appendix">仓库结构</a>
+  </nav>
+
+  <!-- ========== Content ========== -->
+  <main class="content">
+
+    <!-- 一、业务背景 -->
+    <section class="section" id="background">
+      <h2>一、业务背景与痛点</h2>
+      <p><strong>金融研究是一个高度依赖数据但又极度低效的领域。</strong></p>
+      <p>一个券商研究员写一份行业深度报告的典型工作流：在 Wind/Choice 里翻 30 分钟行情数据，打开年报 PDF 手动摘抄三表数据，用 Excel 算估值指标，再去同花顺看资金流向和北向持仓，最后东拼西凑写成文字。一份 10 页的报告，<strong>数据采集和清洗占了 60% 以上的时间</strong>，真正的分析和洞察只占一小部分。</p>
+      <p>更关键的问题是：<strong>研究分析的质量完全依赖个人经验</strong>。同样是"分析贵州茅台的估值是否合理"，一个资深分析师会交叉验证 PE/PB/DCF 三种方法，对比白酒行业历史估值中枢，再结合北向资金和机构持仓趋势给出判断；而一个新手可能只看 PE 就下结论。这种质量差异无法通过简单的工具解决 —— 它需要<strong>将分析方法论固化到系统中</strong>。</p>
+      <div class="highlight-box">
+        <strong>我们的项目瞄准的就是这个问题</strong>：不只是帮研究员查数据，而是构建一个能<strong>自主执行完整研究流程</strong>的 AI 系统 —— 从数据采集、多维分析到生成可引用的研究报告，并且通过训练闭环持续提升分析质量。
+      </div>
+    </section>
+
+    <!-- 二、项目定位 -->
+    <section class="section" id="elevator">
+      <h2>二、项目定位</h2>
+      <blockquote>
+        <p>构建了一个从 AI 金融应用到模型训练的<strong>完整闭环系统</strong>：首先实现了基于 MCP 协议的金融研究助手（7 大分析能力域、43 个工具 + 6 Agent 深度研究），覆盖 A 股研究中从行情查询、财务分析、资金流追踪到行业对比的全链路场景；然后将其作为 Sandbox 环境，设计了三阶段数据合成流水线（10 万种子 → 30 万条高质量训练数据），最后通过 GRPO 算法训练出金融场景特化的工具调用模型。</p>
+      </blockquote>
+    </section>
+
+    <!-- 三、数据飞轮 -->
+    <section class="section" id="flywheel">
+      <h2>三、核心叙事：数据飞轮</h2>
+      <p>大多数 AI 金融产品止步于"帮用户查个数据" —— 本质上是一个自然语言转 SQL 的接口。我们的项目做了一件不同的事 —— <strong>用应用本身来生成训练数据，再用训练出的模型来改进应用</strong>。</p>
+
+      <div class="flywheel">
+        <div class="flywheel-title">数据飞轮闭环</div>
+        <div class="flywheel-steps">
+          <div class="flywheel-step">
+            <div class="flywheel-num">1</div>
+            <div class="flywheel-text"><strong>构建金融 MCP Server</strong>（43 个工具，覆盖 A 股全链路）</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">2</div>
+            <div class="flywheel-text"><strong>接入 Sandbox</strong>，LLM 在其中自主探索金融场景</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">3</div>
+            <div class="flywheel-text"><strong>三阶段合成</strong>：采样 → 筛选 → QA 生成（10 万 seed → 30 万条高质量数据）</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">4</div>
+            <div class="flywheel-text"><strong>GRPO 训练</strong>（Rule + LLM 混合奖励，Sandbox 重放验证）</div>
+          </div>
+          <div class="flywheel-step">
+            <div class="flywheel-num">5</div>
+            <div class="flywheel-text"><strong>训练后模型部署回应用</strong>，工具调用能力提升</div>
+          </div>
+        </div>
+        <div class="flywheel-loop">↻ 更好的模型 → 更好的轨迹 → 更好的数据 → 更好的模型 …</div>
+      </div>
+
+      <p>这个闭环的价值在于：<strong>应用不仅是产品，也是训练基础设施</strong>。每一次用户查询都可能成为未来的训练样本。</p>
+    </section>
+
+    <!-- 四-1：MCP Server -->
+    <section class="section" id="mcp">
+      <h2>四、技术模块</h2>
+      <h3>模块 1：金融 MCP Server — 渐进式工具编排</h3>
+      <p><strong>业务场景</strong>：用户问"贵州茅台最近的估值是否合理？"。这个看似简单的问题，背后需要：查实时行情算市值 → 拉利润表取净利润 → 计算 PE/PB → 对比白酒行业估值中枢 → 查北向资金和机构持仓验证市场情绪。这涉及<strong>行情、财务、估值、行业对比、资金流</strong>五个分析域的协同。</p>
+      <p>系统将 A 股研究的完整工作流抽象为 <strong>7 大能力域（Skill）</strong>：</p>
+
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr><th>Skill</th><th>覆盖场景</th><th>典型工具</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>行情分析</strong></td><td>实时/历史行情、技术指标</td><td>日线行情、复权因子、涨跌停价</td></tr>
+            <tr><td><strong>财务分析</strong></td><td>三表解读、盈利能力、偿债能力</td><td>利润表、资产负债表、现金流量表、财务指标</td></tr>
+            <tr><td><strong>资金流向</strong></td><td>主力/散户博弈、北向资金、融资融券</td><td>个股资金流、北向持股、融资融券</td></tr>
+            <tr><td><strong>行业对比</strong></td><td>板块轮动、同业对标、概念热度</td><td>行业分类、概念成分、行业指数</td></tr>
+            <tr><td><strong>估值分析</strong></td><td>PE/PB/PS 多维估值、历史分位</td><td>每日指标、估值因子</td></tr>
+            <tr><td><strong>股东研究</strong></td><td>十大股东、机构持仓、股权质押</td><td>十大股东、机构持股、股权质押</td></tr>
+            <tr><td><strong>深度研究</strong></td><td>万字级研究报告、多源交叉验证</td><td>6 Agent 协作</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p><strong>技术挑战</strong>：43 个工具直接全量暴露给 LLM 会导致 ~15000 tokens 的 Context 膨胀和选择准确率骤降 —— 模型在"查个股行情"时也要读一遍"股权质押"的工具描述，认知负荷过高。</p>
+
+      <h4>设计 — 渐进式披露（Progressive Disclosure）</h4>
+      <p>本质是<strong>把一个困难的 43 选 N 问题分解为两个简单问题</strong> —— 像人类分析师的思路一样，先判断"这个问题属于什么分析类型"，再选择具体工具：</p>
+
+      <div class="round-steps">
+        <div class="round-step">
+          <span class="round-badge">Round 1</span>
+          <span class="round-desc">只看 7 个 Skill 摘要（~800 tokens），选择相关 Skill —— "估值分析是否合理"→ 选中「行情 + 财务 + 估值」</span>
+        </div>
+        <div class="round-step">
+          <span class="round-badge">Round 2</span>
+          <span class="round-desc">只展开选中 Skill 的工具（平均 6 个），精确调用 —— 调用日线行情、利润表、每日指标</span>
+        </div>
+        <div class="round-step">
+          <span class="round-badge">Round 3</span>
+          <span class="round-desc">基于真实数据生成分析报告 —— 交叉验证多维数据，给出结论</span>
+        </div>
+      </div>
+
+      <div class="example-box">
+        <div class="example-title">案例：用户问"贵州茅台最近的估值是否合理？"</div>
+        <ul>
+          <li><strong>Round 1</strong> → LLM 看 7 个 Skill 摘要，判断涉及「行情分析 + 财务分析 + 估值分析」3 个 Skill</li>
+          <li><strong>Round 2</strong> → 系统展开 3 个 Skill 的工具清单（~18 个工具），LLM 精确调用：<code>get_daily</code>（日线行情） → <code>get_income</code>（利润表取净利润） → <code>get_daily_basic</code>（PE/PB/PS）</li>
+          <li><strong>Round 3</strong> → 基于真实返回数据，交叉对比得出：茅台当前 PE 25.3x，位于近 5 年 40% 分位，低于行业中枢 28x → 给出"估值偏低但需关注Q4业绩"结论</li>
+        </ul>
+      </div>
+
+      <div class="highlight-box">
+        <strong>效果</strong>：Prompt 节省 60%+。更关键的是，这个认知负荷管理策略后来在数据合成中被复用 —— AgentFlow 的 Sandbox 也使用完全相同的三轮交互流程，确保合成数据的分布与真实使用一致。
+      </div>
+
+      <p>关键文件：<code>backend/app/mcp_server/server.py</code></p>
+    </section>
+
+    <!-- 四-2：AgentFlow -->
+    <section class="section" id="agentflow">
+      <h3>模块 2：AgentFlow — 三阶段数据合成</h3>
+      <p><strong>业务动机</strong>：通用模型在金融场景的工具调用能力不够好 —— 问"茅台 2024Q3 单季营收同比增速"，模型可能调错接口、传错参数、甚至不知道该查什么。<strong>我们需要领域特化的训练数据来教模型"像研究员一样思考"。</strong></p>
+      <p><strong>问题</strong>：高质量 Agent 训练数据极度稀缺。人工标注成本高且覆盖面窄 —— 一个标注员一天可能只能写 20 条多轮工具调用的 QA，而我们需要数千条覆盖 43 个工具各种组合的训练数据。</p>
+
+      <h4>设计 — 三阶段合成流水线</h4>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr><th>阶段</th><th>输入</th><th>过程</th><th>输出</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>1. 轨迹采样</strong></td>
+              <td>10 万条种子问题</td>
+              <td>LLM 在 Sandbox 中自主探索，构建分支轨迹树（branching_factor=2, max_depth=5）</td>
+              <td>~60 万条轨迹路径</td>
+            </tr>
+            <tr>
+              <td><strong>2. 轨迹筛选</strong></td>
+              <td>轨迹路径</td>
+              <td>按深度、信息丰富度、工具多样性打分；路径相似度去重（threshold=0.7）</td>
+              <td>~30 万条优质轨迹</td>
+            </tr>
+            <tr>
+              <td><strong>3. QA 合成</strong></td>
+              <td>优质轨迹</td>
+              <td>基于轨迹生成多跳推理 QA + 反捷径检查</td>
+              <td><strong>~30 万条</strong>高质量训练数据</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="example-box">
+        <div class="example-title">案例：轨迹树分支探索</div>
+        <p>种子"分析茅台基本面"在 Sandbox 中探索时，LLM 可能走出两条不同分支：</p>
+        <ul>
+          <li><strong>分支 A</strong>：先查行情 → 再查利润表 → 计算 PE（偏量化路径）</li>
+          <li><strong>分支 B</strong>：先查北向资金 → 再查机构持仓 → 分析市场情绪（偏情绪路径）</li>
+        </ul>
+        <p>两条分支都是合理的分析路径，都可生成有效训练数据。</p>
+      </div>
+
+      <p><strong>种子工程</strong>：不是简单的问题列表，而是结构化的 <code>{slots + entities}</code> 格式。例如同一个"估值分析"意图模板，通过组合不同的用户角色（散户/研究员/基金经理）、实体（茅台/宁德时代/比亚迪）、上下文（年报季/业绩暴雷/行业政策），可以生成数百条表述各异但分析路径一致的变体问题 —— 确保训练数据覆盖真实用户的多样化提问方式。</p>
+
+      <div class="example-box">
+        <div class="example-title">案例：一个"估值分析"种子模板如何扩展</div>
+        <p>模板：<code>{角色}想知道{股票}的{分析类型}，背景是{上下文}</code></p>
+        <ul>
+          <li>→ "我是散户，帮我看看贵州茅台估值贵不贵？最近白酒板块跌了不少"</li>
+          <li>→ "作为研究员，请分析宁德时代当前 PE 分位在行业中的位置"</li>
+          <li>→ "基金经理想评估比亚迪在新能源车板块的估值合理性，考虑到Q3产能释放"</li>
+        </ul>
+        <p>三条问题表述完全不同，但分析路径一致：都需要行情 + 财务 + 估值三个 Skill。</p>
+      </div>
+
+      <p>关键文件：<code>AgentFlow/synthesis/pipeline.py</code>、<code>AgentFlow/synthesis/core/sampler.py</code>、<code>AgentFlow/sandbox/server/backends/resources/finance_research.py</code></p>
+    </section>
+
+    <!-- 四-3：训练 -->
+    <section class="section" id="training">
+      <h3>模块 3：AgentFlow-Train — GRPO 训练与混合奖励</h3>
+      <p><strong>业务目标</strong>：让开源模型（Qwen3-8B/30B）在金融工具调用场景达到甚至超越商用 API 的水平 —— 降低推理成本的同时实现数据私有化，让金融机构可以在自有基础设施上部署，不需要将敏感的持仓、交易数据传输到第三方 API。</p>
+
+      <h4>核心设计 — 三层混合奖励</h4>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr><th>奖励类型</th><th>占比</th><th>适用场景</th><th>机制</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Rule-based</strong></td>
+              <td>40%</td>
+              <td>可验证任务</td>
+              <td>Sandbox 重放工具调用，对比真实 API 返回值</td>
+            </tr>
+            <tr>
+              <td><strong>LLM Judge</strong></td>
+              <td>15%</td>
+              <td>开放式任务</td>
+              <td>多维度 0-10 评分</td>
+            </tr>
+            <tr>
+              <td><strong>Hybrid</strong></td>
+              <td>45%</td>
+              <td>半开放式任务</td>
+              <td>可验证部分用规则，质量维度用 LLM</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="highlight-box">
+        <strong>Sandbox 重放验证</strong>：对于可验证的金融数据，reward 来自真实工具执行结果。模型说"茅台 PE 是 30 倍"？系统会在 Sandbox 里真正调用 Tushare API，拿到真实 PE 值来对比。这不是猜测，是<strong>事实核查</strong>。
+      </div>
+
+      <div class="example-box">
+        <div class="example-title">案例：一次 Rule-based 奖励计算</div>
+        <ul>
+          <li><strong>问题</strong>："茅台 2024 年净利润是多少？"</li>
+          <li><strong>模型回答</strong>："茅台 2024 年净利润约 862 亿元" + 调用了 <code>get_income(ts_code='600519.SH', period='20241231')</code></li>
+          <li><strong>Sandbox 重放</strong>：真正调用 Tushare API → 返回 n_income = 862.28 亿</li>
+          <li><strong>奖励计算</strong>：数据误差 < 1% → reward = 0.95（高分）</li>
+          <li><strong>对比</strong>：如果模型编造"净利润 1200 亿"且没有调用工具 → reward = 0（零分）</li>
+        </ul>
+      </div>
+
+      <h4>技术栈选型</h4>
+      <ul style="margin: 12px 0 12px 20px; color: var(--text-secondary); font-size: 0.95rem;">
+        <li><strong>GRPO</strong>（而非 PPO）：无需额外训练 Critic 模型，组内相对排序天然适合多轮工具调用的多样性探索</li>
+        <li><strong>verl 框架</strong>：只写了 2 个适配文件（<code>reward_fn.py</code> + <code>data_preprocess.py</code>），核心训练用官方实现 —— <strong>不造轮子</strong></li>
+        <li><strong>sglang 推理</strong>：RadixAttention 共享多轮对话的 prefix KV cache，对工具调用场景加速显著</li>
+        <li><strong>LoRA + FSDP2</strong>：Qwen3-30B MoE 模型在 param_offload 下单卡显存从 60GB 降到 12GB</li>
+      </ul>
+
+      <p>关键文件：<code>AgentFlow-Train/reward_fn.py</code>、<code>AgentFlow-Train/data_preprocess.py</code>、<code>AgentFlow/training/reward/</code></p>
+    </section>
+
+    <!-- 五-1：STAR 难点 1 -->
+    <section class="section" id="star1">
+      <h2>五、核心难点（STAR 格式）</h2>
+
+      <div class="star-card">
+        <div class="star-card-header">难点 1：6 Agent 对抗式深度研究 — 三次失败后的正确答案</div>
+        <div class="star-card-body">
+
+          <div class="star-item">
+            <div class="star-label s">Situation</div>
+            <div class="star-content">
+              <p>用户提出"帮我写一份比亚迪 vs 特斯拉的深度对比研报"。这在真实券商场景中是一份需要 2-3 天、涵盖财务对比、产能分析、市场份额、估值对标的万字级报告。LLM 单次生成幻觉严重、质量不可控。</p>
+              <p>金融领域的幻觉不仅"不好"，而且"危险" —— 一个编造的 PE 数据可能导致完全错误的投资判断。例如模型可能"自信地"说比亚迪 PE 是 15 倍（实际 25 倍），直接影响估值结论。</p>
+            </div>
+          </div>
+
+          <div class="star-item">
+            <div class="star-label t">Task</div>
+            <div class="star-content">
+              <p>构建可控、可追溯、质量稳定的研究报告生成系统，并且能提供完整的决策轨迹用于后续训练。</p>
+            </div>
+          </div>
+
+          <div class="star-item">
+            <div class="star-label a">Action</div>
+            <div class="star-content">
+              <p><strong>三次迭代：</strong></p>
+
+              <div class="iteration-block fail">
+                <div class="iteration-label fail">V0 黑盒（失败）</div>
+                一个大 Prompt 直出完整报告。→ 幻觉严重。更致命的是：<strong>无法定位问题出在哪里</strong> —— 是搜索不够、分析错误、还是写作编造？
+              </div>
+
+              <div class="iteration-block fail">
+                <div class="iteration-label fail">V1 灰盒（失败）</div>
+                拆为搜索→分析→写作三阶段。→ 审核 Agent 说"第三节数据不准"时，系统<strong>不知道该重做搜索还是重做分析</strong>。审核反馈和执行阶段之间存在"语义断层"。
+              </div>
+
+              <div class="iteration-block success">
+                <div class="iteration-label success">V2 白盒（成功）</div>
+                6 Agent 全拆分 + LangGraph 状态机 + 30+ 字段共享状态。
+              </div>
+
+              <ul class="agent-list">
+                <li><span class="agent-name">Architect</span> — 像研究总监：分析问题 → 拆解为研究大纲（财务对比/产能分析/估值对标等章节） → 提出需要验证的假设</li>
+                <li><span class="agent-name">Scout</span> — 像研究助理：并行搜索 Tushare 数据 + 网络资讯，提取事实，标注可信度（API 数据 > 机构研报 > 新闻资讯）</li>
+                <li><span class="agent-name">Analyst + Wizard</span> — 像量化分析师：数据提取 → 计算同比/环比/CAGR 等指标 → 图表可视化</li>
+                <li><span class="agent-name">Writer</span> — 像首席分析师：按大纲撰写，强制 <code>[来源: 工具名]</code> 引用格式，每个数据点都必须有出处</li>
+                <li><span class="agent-name">Critic</span> — 像合规审核：检查 6 类问题（数据错误/逻辑矛盾/来源缺失/时效过期/结论过度/覆盖不全），质量低于阈值则<strong>精确标记哪个章节、什么问题</strong>，打回对应 Agent 修订</li>
+              </ul>
+
+              <div class="example-box">
+                <div class="example-title">案例：6 Agent 如何协作完成"比亚迪 vs 特斯拉深度对比"</div>
+                <ol>
+                  <li><strong>Architect</strong> 拆解大纲 → 5 个章节（营收对比/毛利率/产能/市场份额/估值）</li>
+                  <li><strong>Scout</strong> 并行搜索 → Tushare 拉比亚迪三表 + 博查搜索特斯拉 10-K + 行业新闻</li>
+                  <li><strong>Analyst</strong> 计算 → 比亚迪营收 YoY +33%，特斯拉 YoY +2%；毛利率 20.1% vs 17.9%</li>
+                  <li><strong>Writer</strong> 按大纲撰写 → "比亚迪 2024 年营收 6023 亿<code>[来源: get_income]</code>，同比增长 33%..."</li>
+                  <li><strong>Critic</strong> 审核 → 发现"第3节市场份额数据无来源" → 打回 Scout 补充搜索</li>
+                  <li><strong>Scout</strong> 补搜 → <strong>Writer</strong> 修订 → <strong>Critic</strong> 通过 → 输出万字研报</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+
+          <div class="star-item">
+            <div class="star-label r">Result</div>
+            <div class="star-content">
+              <p>报告质量从"随机波动"变为"稳定可控"。</p>
+              <p><strong>关键副产品</strong>：白盒轨迹数据（query → plan → facts → analysis → draft → feedback → revision）直接构成 GRPO 训练数据。我们从一开始就将"可训练性"作为架构约束。</p>
+              <p><strong>反思</strong>：三次迭代的核心教训 —— <strong>可观测性是可控性的前提</strong>。这个认知贯穿了整个项目：MCP 的三轮编排让每次工具调用可追溯，白盒 Agent 让每个决策可审计，Sandbox 重放让每个奖励可验证。</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- 五-2：STAR 难点 2 -->
+    <section class="section" id="star2">
+
+      <div class="star-card">
+        <div class="star-card-header">难点 2：从"猜测奖励"到"事实核查奖励" — 混合奖励函数的设计</div>
+        <div class="star-card-body">
+
+          <div class="star-item">
+            <div class="star-label s">Situation</div>
+            <div class="star-content">
+              <p>用 GRPO 训练金融工具调用模型时，核心问题是<strong>如何定义奖励</strong>。金融场景有特殊性：部分任务是可验证的（有确定答案），部分是开放式的（没有标准答案），还有大量是半开放的（结论开放但数据可验证）。</p>
+              <p>用统一的 reward model 处理这三类任务，要么对可验证任务不够精确，要么对开放式任务过于死板。</p>
+            </div>
+          </div>
+
+          <div class="star-item">
+            <div class="star-label t">Task</div>
+            <div class="star-content">
+              <p>设计一个能同时处理可验证、开放式和半开放式任务的奖励函数，且对可验证部分必须基于事实而非猜测。</p>
+            </div>
+          </div>
+
+          <div class="star-item">
+            <div class="star-label a">Action</div>
+            <div class="star-content">
+              <p><strong>方案演进：</strong></p>
+
+              <div class="iteration-block fail">
+                <div class="iteration-label fail">V1 全 LLM Judge（失败）</div>
+                用 LLM 给所有回答打分 → 对可验证数据也在"猜"对不对，无法区分"回答了一个近似值"和"完全编造"。
+              </div>
+
+              <div class="iteration-block fail">
+                <div class="iteration-label fail">V2 全规则（失败）</div>
+                对所有回答做精确匹配 → 开放式问题无法规则评判，大量有价值的回答被误判为低分。
+              </div>
+
+              <div class="iteration-block success">
+                <div class="iteration-label success">V3 混合方案（成功）</div>
+                三层奖励 + Sandbox 重放。
+              </div>
+
+              <p><strong>最终设计四步</strong>：</p>
+              <ol style="margin: 8px 0 8px 20px; color: var(--text-secondary); font-size: 0.93rem;">
+                <li><strong>标签系统</strong>：每条训练数据标注 <code>verifiable=True/False</code> 和 <code>verification_method=api/compute/hybrid/llm_judge</code>，路由到对应奖励计算器</li>
+                <li><strong>Sandbox 重放</strong>：对可验证任务，在 CPU 端的 Sandbox 中<strong>真正重放工具调用</strong>，拿到真实 API 返回值做对比。sglang 只负责 GPU 上的文本生成，奖励计算完全在 CPU 端完成 —— <strong>生成和验证解耦</strong></li>
+                <li><strong>多维度 LLM Judge</strong>：对开放式任务，按信息完整性、数据支撑、逻辑连贯性、实用性四个维度独立评分</li>
+                <li><strong>Hybrid 融合</strong>：对半开放式任务，可验证字段用规则打分，质量维度用 LLM 打分，加权融合</li>
+              </ol>
+
+              <div class="example-box">
+                <div class="example-title">案例：Hybrid 奖励如何处理"茅台估值是否合理"</div>
+                <ul>
+                  <li><strong>可验证部分</strong>（Rule, 60% 权重）：检查模型引用的 PE=25.3x 是否正确 → Sandbox 重放确认 ✓ → 0.95</li>
+                  <li><strong>开放式部分</strong>（LLM Judge, 40% 权重）：评估分析逻辑是否自洽、是否考虑了多维因素 → 评分 8/10 → 0.80</li>
+                  <li><strong>最终 reward</strong> = 0.95 × 0.6 + 0.80 × 0.4 = <strong>0.89</strong></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="star-item">
+            <div class="star-label r">Result</div>
+            <div class="star-content">
+              <p>可验证任务的奖励信号<strong>零幻觉</strong> —— 因为对的就是对的，错的就是错的，不存在"猜测空间"。开放式任务保持评判灵活性，半开放式任务兼顾精确性和灵活性。GRPO 训练收敛更稳定 —— 因为 reward signal 的噪声更小。</p>
+              <p><strong>深层意义</strong>：在强化学习中，奖励函数的质量决定了训练的上限。我们的创新是把"应用本身"（MCP Server + Sandbox）变成了奖励计算的基础设施，而不是训练一个可能有偏差的 reward model 来猜测。</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- 六、技术亮点 -->
+    <section class="section" id="highlights">
+      <h2>六、关键技术亮点速览</h2>
+
+      <h3>金融幻觉四层防御</h3>
+      <p>金融领域的幻觉不同于一般 AI 幻觉 —— 一个错误的 PE 值、一个编造的营收数据，都可能直接影响投资决策。因此我们构建了<strong>从应用到训练的全链路防御</strong>：</p>
+
+      <div class="defense-grid">
+        <div class="defense-card">
+          <div class="layer">数据层</div>
+          <div class="mechanism">所有财务数据必须来自工具调用，禁止 LLM 自行推算</div>
+          <div class="risk">防止模型"记忆"过期数据</div>
+        </div>
+        <div class="defense-card">
+          <div class="layer">生成层</div>
+          <div class="mechanism">Writer 强制 [来源: 工具名] 引用标注</div>
+          <div class="risk">让报告可追溯，用户能验证每个数据点</div>
+        </div>
+        <div class="defense-card">
+          <div class="layer">审核层</div>
+          <div class="mechanism">Critic 对抗式检查 6 类问题</div>
+          <div class="risk">模拟券商合规审核流程</div>
+        </div>
+        <div class="defense-card">
+          <div class="layer">训练层</div>
+          <div class="mechanism">Sandbox 重放验证，从源头让模型学会"不编造"</div>
+          <div class="risk">从根本上降低模型编造金融数据的倾向</div>
+        </div>
+      </div>
+
+      <h3>多模型动态路由</h3>
+      <p>同一系统内不同 Agent 使用不同模型 —— 本质是<strong>推理预算分配</strong>问题：</p>
+      <ul style="margin: 12px 0 12px 20px; color: var(--text-secondary); font-size: 0.95rem;">
+        <li><strong>Scout</strong>（搜索）→ Qwen Plus（速度优先，搜索不需要深度推理）</li>
+        <li><strong>Analyst</strong>（分析）→ DeepSeek V3.2 低温度（数值精度）</li>
+        <li><strong>Writer</strong>（写作）→ DeepSeek V3.2 高温度（行文流畅）</li>
+        <li><strong>Critic</strong>（审核）→ DeepSeek V3.2 中温度（严谨推理）</li>
+      </ul>
+
+      <h3>评测方法论</h3>
+      <p>参考 BFCL（Berkeley Function Calling Leaderboard）设计两阶段评测：</p>
+      <ul style="margin: 12px 0 12px 20px; color: var(--text-secondary); font-size: 0.95rem;">
+        <li><strong>Phase 1</strong>：134 个单工具用例（43 工具 × 3 种表述变体 + 5 个 NO-SKILL）</li>
+        <li><strong>Phase 2</strong>：28 个复杂场景（多 Skill 协作 / 控制流 / 错误处理 / 边界）</li>
+        <li><strong>5 维评测指标</strong>：Skill 选择 / 工具选择 / 参数准确率 / NO-SKILL 识别率 / 工具链合理性</li>
+      </ul>
+    </section>
+
+    <!-- 七、可量化成果 -->
+    <section class="section" id="results">
+      <h2>七、可量化成果</h2>
+
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="value">7 / 43 / 6</div>
+          <div class="metric-label">Skill / 工具 / Agent</div>
+          <div class="desc">覆盖 A 股研究全链路</div>
+        </div>
+        <div class="metric-card">
+          <div class="value">30 万条</div>
+          <div class="metric-label">高质量训练数据</div>
+          <div class="desc">10 万种子 → 等效数百人天标注量，成本降低两个数量级</div>
+        </div>
+        <div class="metric-card">
+          <div class="value">GRPO</div>
+          <div class="metric-label">训练方案</div>
+          <div class="desc">开源模型私有化部署，敏感数据不出域；LoRA + sglang，支持 8B 和 30B MoE</div>
+        </div>
+        <div class="metric-card">
+          <div class="value">60%+</div>
+          <div class="metric-label">Prompt 节省</div>
+          <div class="desc">显存 60GB → 12GB，单卡可训练 30B 模型，降低硬件门槛</div>
+        </div>
+        <div class="metric-card">
+          <div class="value">162</div>
+          <div class="metric-label">基准测试用例</div>
+          <div class="desc">参考 BFCL 标准，5 维评测指标</div>
+        </div>
+        <div class="metric-card">
+          <div class="value">~26000 行</div>
+          <div class="metric-label">核心代码</div>
+          <div class="desc">3 个仓库，端到端闭环</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 八、面试问答 -->
+    <section class="section" id="qa">
+      <h2>八、面试高频问答</h2>
+
+      <div class="accordion">
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 用一句话介绍你的项目？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              一个面向 A 股研究场景的 AI 研究助手，覆盖从行情查询到万字研报生成的全链路；更关键的是，我把这个应用本身变成了训练数据的生产线 —— 用应用生成训练数据，用训练数据改进应用，形成数据飞轮。
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 这个项目解决了什么真实问题？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              券商研究员写一份深度报告，60% 以上时间花在数据采集和清洗上，真正的分析洞察时间被严重挤压。我们的系统让"提一个问题 → 得到一份有数据支撑、可追溯引用的研究报告"成为可能。同时，通过训练闭环持续提升开源模型的金融工具调用能力，使金融机构可以在自有基础设施上私有化部署，解决数据安全顾虑。
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 最深的技术难点？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              混合奖励函数设计。核心挑战是金融场景同时存在可验证、开放式、半开放式三类任务。创新是用 Sandbox 重放做"事实核查"替代传统 reward model 的"猜测"。
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 最重要的架构决策？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              渐进式披露。A 股研究涉及行情、三表、资金流、估值等多个分析域，43 个工具全量暴露会让模型"选择困难"。渐进式披露让模型像人类分析师一样先判断分析类型再选工具，Prompt 节省 60%，更关键的是这个设计从应用层贯穿到数据合成层，确保训练数据分布与真实使用一致。
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 遇到的失败？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              深度研究引擎的黑盒 / 灰盒两次失败。核心教训："可观测性是可控性的前提"。这个认知贯穿了整个项目：工具调用可追溯、Agent 决策可审计、奖励计算可验证。
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 为什么选 GRPO 而非 PPO？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              PPO 需要额外训练 Critic 模型。GRPO 用组内相对排序替代 Critic，降低训练复杂度。更关键的是，GRPO 的 group sampling 天然鼓励多样性探索 —— 同一个金融问题可能有多种合理的工具调用路径，我们需要模型探索这些路径而非收敛到单一答案。
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 这个项目的核心创新是什么？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              <strong>将应用本身变成训练基础设施</strong>。MCP Server 既是用户产品，也是 Sandbox 环境；工具调用结果既是用户答案，也是 reward signal。这种"应用即基础设施"的思路让数据飞轮成为可能。
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 技术成长？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              (1) 从应用开发到训练闭环的全链路视野 —— 不只是"会调 API"，而是理解了 AI 应用的完整生命周期；(2) 金融领域的 domain knowledge —— 理解了研究员的工作流、分析方法论和行业惯例；(3) 奖励函数设计决定训练上限的深刻理解；(4) "可观测性是可控性的前提"的工程哲学。
+            </div>
+          </div>
+        </div>
+
+        <div class="accordion-item">
+          <button class="accordion-btn">
+            Q: 如果给你更多资源，下一步做什么？
+            <span class="accordion-arrow">▼</span>
+          </button>
+          <div class="accordion-body">
+            <div class="accordion-body-inner">
+              两个方向：(1) <strong>横向扩展覆盖面</strong> —— 目前只覆盖 A 股，可以扩展到港股、美股、基金、债券；数据源从 Tushare 扩展到 Wind、Bloomberg；(2) <strong>纵向深化分析能力</strong> —— 引入更复杂的量化分析（因子模型、事件驱动策略），让系统不只是"查数据写报告"，而是能做初步的投资决策辅助。
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 附录 -->
+    <section class="section" id="appendix">
+      <h2>附录：仓库结构与关键文件</h2>
+
+      <div class="repo-block">
+        <div class="repo-name">financial-research-assistant <span>（应用层）</span></div>
+        <ul class="file-list">
+          <li><span class="file-path">backend/app/mcp_server/server.py</span><span class="file-desc">三轮编排核心逻辑</span></li>
+          <li><span class="file-path">backend/app/service/deep_research_v2/graph.py</span><span class="file-desc">6 Agent LangGraph 状态机</span></li>
+          <li><span class="file-path">backend/app/config/llm_config.py</span><span class="file-desc">多模型动态路由配置</span></li>
+          <li><span class="file-path">benchmark/</span><span class="file-desc">评测框架（162 个用例）</span></li>
+        </ul>
+      </div>
+
+      <div class="repo-block">
+        <div class="repo-name">AgentFlow <span>（数据合成层）</span></div>
+        <ul class="file-list">
+          <li><span class="file-path">synthesis/pipeline.py</span><span class="file-desc">三阶段合成流水线</span></li>
+          <li><span class="file-path">synthesis/core/sampler.py</span><span class="file-desc">轨迹采样器</span></li>
+          <li><span class="file-path">sandbox/server/backends/resources/finance_research.py</span><span class="file-desc">金融 Sandbox</span></li>
+          <li><span class="file-path">training/reward/</span><span class="file-desc">混合奖励函数</span></li>
+        </ul>
+      </div>
+
+      <div class="repo-block">
+        <div class="repo-name">AgentFlow-Train <span>（训练层）</span></div>
+        <ul class="file-list">
+          <li><span class="file-path">reward_fn.py</span><span class="file-desc">verl 奖励适配层</span></li>
+          <li><span class="file-path">data_preprocess.py</span><span class="file-desc">数据格式转换</span></li>
+          <li><span class="file-path">scripts/run_qwen3_8b_agentflow.sh</span><span class="file-desc">GRPO 训练脚本</span></li>
+        </ul>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer class="page-footer">
+  金融研投助手 — 项目故事 · 简历展示文档
+</footer>
+
+<!-- ========== JavaScript ========== -->
+<script>
+(function() {
+  // Accordion toggle
+  document.querySelectorAll('.accordion-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var item = this.parentElement;
+      var body = item.querySelector('.accordion-body');
+      var isOpen = item.classList.contains('open');
+
+      // Close all
+      document.querySelectorAll('.accordion-item.open').forEach(function(openItem) {
+        openItem.classList.remove('open');
+        openItem.querySelector('.accordion-body').style.maxHeight = null;
+      });
+
+      // Toggle current
+      if (!isOpen) {
+        item.classList.add('open');
+        body.style.maxHeight = body.scrollHeight + 'px';
+      }
+    });
+  });
+
+  // IntersectionObserver for TOC highlight
+  var tocLinks = document.querySelectorAll('.toc a[data-section]');
+  var sections = [];
+  tocLinks.forEach(function(link) {
+    var id = link.getAttribute('data-section');
+    var el = document.getElementById(id);
+    if (el) sections.push({ id: id, el: el, link: link });
+  });
+
+  if ('IntersectionObserver' in window && sections.length > 0) {
+    var observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          tocLinks.forEach(function(l) { l.classList.remove('active'); });
+          var match = sections.find(function(s) { return s.el === entry.target; });
+          if (match) match.link.classList.add('active');
+        }
+      });
+    }, {
+      rootMargin: '-80px 0px -60% 0px',
+      threshold: 0
+    });
+
+    sections.forEach(function(s) { observer.observe(s.el); });
+  }
+})();
+</script>
+
+</body>
+</html>
