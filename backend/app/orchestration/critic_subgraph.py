@@ -1,13 +1,7 @@
-"""Critic 内部 subgraph — Send API fan-out 7 sub-agents + reduce + aggregate.
-
-v0.9.x fix — wrap the sync ``critic.dispatch_subagent`` (which calls a
-sync LLMService.chat under the hood) in ``asyncio.to_thread`` so the 7
-parallel scorer nodes do not block the FastAPI event loop driving SSE.
-"""
+"""Critic 内部 subgraph — Send API fan-out 7 sub-agents + reduce + aggregate."""
 
 from __future__ import annotations
 
-import asyncio
 import operator
 from typing import Annotated, Any
 
@@ -86,7 +80,13 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
             investment_horizon=s.investment_horizon,
             risk_tolerance=s.risk_tolerance,
         )
-        sr = await asyncio.to_thread(critic.dispatch_subagent, name=scorer_name, state=rs)
+        # v0.9.x note: 不 wrap asyncio.to_thread — 该 wrap 让 7 scorer 真并发,
+        # VCR cassette 按调用顺序匹配 LLM responses,导致 b1_differential
+        # input_context_appropriateness score 错位 (8.5+ → 6.0). critic 是
+        # 短任务 (每个几百 tokens),sync 调用即使 serialize 也不会卡 event
+        # loop 太久; 真正卡的是 Writer 长 LLM 调用 (8000 tokens),那边保留
+        # to_thread wrap.
+        sr = critic.dispatch_subagent(name=scorer_name, state=rs)
         scores = [v for v in sr.state_update.values() if isinstance(v, CriticDimensionScore)]
         return {"collected_scores": scores}
 
