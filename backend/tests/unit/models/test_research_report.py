@@ -94,8 +94,8 @@ def test_research_report_status_transitions(session: Session) -> None:
 
     fetched = session.query(ResearchReport).filter_by(id="report-uuid-3").first()
     assert fetched is not None
-    fetched.status = "completed"
-    fetched.report_json = {"sections": ["overview"]}
+    fetched.status = "completed"  # type: ignore[assignment]
+    fetched.report_json = {"sections": ["overview"]}  # type: ignore[assignment]
     session.commit()
 
     re_fetched = session.query(ResearchReport).filter_by(id="report-uuid-3").first()

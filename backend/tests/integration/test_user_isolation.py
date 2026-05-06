@@ -39,7 +39,7 @@ def _str_uuid() -> str:
     return str(_uuid.uuid4())
 
 
-class _UUIDOrStr(TypeDecorator):  # type: ignore[type-arg]
+class _UUIDOrStr(TypeDecorator):
     """SQLite 测试用 UUID column type:bind 时把 UUID/str 都转 str.
 
     问题:legacy 模型的 PG `UUID(as_uuid=True)` 列在 SQLite 下被 patch 成
