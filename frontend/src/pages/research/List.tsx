@@ -9,7 +9,7 @@
  * 不查后端;后端 list 已按 created_at desc 返回。
  */
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Table, Button, Radio, Modal, Tag, Space } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router-dom'
@@ -18,6 +18,7 @@ import dayjs from 'dayjs'
 import { reportState, reportActions } from '@/store/report'
 import type { TimeFilter } from '@/store/report'
 import type { ReportListItem, ReportStatus } from '@/api/reports'
+import ResearchEntry from '@/components/research-entry'
 import {
   RECOMMENDATION_LABELS,
   type Recommendation,
@@ -61,6 +62,7 @@ function formatRecommendation(rec: string | null): {
 export default function ResearchListPage() {
   const navigate = useNavigate()
   const snap = useSnapshot(reportState)
+  const [newModalOpen, setNewModalOpen] = useState(false)
 
   useEffect(() => {
     void reportActions.fetchList()
@@ -188,10 +190,30 @@ export default function ResearchListPage() {
     <div className={styles.container}>
       <div className={styles.header}>
         <h1 className={styles.title}>研究历史</h1>
-        <Button type="primary" onClick={() => navigate('/research/new')}>
+        <Button type="primary" onClick={() => setNewModalOpen(true)}>
           新建研报
         </Button>
       </div>
+
+      <Modal
+        title="新建投资尽调研报"
+        open={newModalOpen}
+        onCancel={() => setNewModalOpen(false)}
+        footer={null}
+        destroyOnClose
+        width={520}
+      >
+        <p style={{ color: '#6b7c93', marginBottom: 16 }}>
+          5-agent 协作产出完整尽调报告 — 覆盖基本面、估值、风险与投资建议
+        </p>
+        <ResearchEntry
+          onSuccess={(id) => {
+            setNewModalOpen(false)
+            void reportActions.fetchList()
+            navigate(`/research/${id}`)
+          }}
+        />
+      </Modal>
       <Radio.Group
         value={snap.timeFilter}
         onChange={(e) =>

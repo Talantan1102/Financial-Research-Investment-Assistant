@@ -15,7 +15,7 @@
  *   ReportCanvas takes over and the overlay fades out.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { Spin, Tag, Empty } from 'antd'
 import { useSnapshot } from 'valtio'
@@ -24,7 +24,6 @@ import dayjs from 'dayjs'
 import { reportState, reportActions } from '@/store/report'
 import type { InvestmentDueDiligenceReport } from '@/types/research'
 import ReportCanvas from '@/components/report-canvas'
-import ProgressOverlay from '@/components/progress-overlay'
 import ExportButton from '@/components/export-button'
 import styles from './Detail.module.scss'
 
@@ -43,35 +42,22 @@ const STATUS_LABEL: Record<string, string> = {
 export default function ResearchDetailPage() {
   const { id } = useParams<{ id: string }>()
   const snap = useSnapshot(reportState)
-  const cancelStreamingRef = useRef<(() => void) | null>(null)
 
-  // 进入页面拉取 detail;离开页面取消订阅 + 清理 current.
+  // 进入页面拉 detail;离开**不取消 streaming**(让 store 全局管理 SSE,user 切走再切回 progress 不丢).
   useEffect(() => {
     if (id) void reportActions.fetchDetail(id)
     return () => {
-      cancelStreamingRef.current?.()
-      cancelStreamingRef.current = null
       reportActions.clearCurrent()
-      reportActions.resetStreaming()
     }
   }, [id])
 
-  // 状态变 streaming 时启动 SSE 订阅(仅启动一次).
+  // 状态变 streaming 时启动 SSE 订阅;store 自己判同 id 不重启.
   const status = snap.current?.status
   useEffect(() => {
-    if (!id) return
-    if (
-      status === 'streaming' &&
-      !snap.streaming.active &&
-      cancelStreamingRef.current === null
-    ) {
-      cancelStreamingRef.current = reportActions.startStreaming(id)
+    if (id && status === 'streaming') {
+      reportActions.startStreaming(id)
     }
-    // status 转出 streaming 时,顺手把 cancel ref 清掉(订阅已经自然结束).
-    if (status !== 'streaming' && cancelStreamingRef.current && !snap.streaming.active) {
-      cancelStreamingRef.current = null
-    }
-  }, [status, id, snap.streaming.active])
+  }, [status, id])
 
   if (snap.currentLoading && !snap.current) {
     return <Spin tip="加载研报..." className={styles.spin} />
@@ -110,8 +96,6 @@ export default function ResearchDetailPage() {
       ) : (
         <ReportCanvas report={r.report_json as InvestmentDueDiligenceReport} />
       )}
-
-      <ProgressOverlay />
     </div>
   )
 }

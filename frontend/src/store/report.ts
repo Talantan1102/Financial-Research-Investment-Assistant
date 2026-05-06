@@ -44,16 +44,13 @@ interface ReportState {
   current: ReportDetail | null
   currentLoading: boolean
 
-  // 流式态(streaming 模式 — Task 14 真订阅)
+  // 流式态 — 全局(不绑 component lifecycle):
+  // user 切走再切回 detail 页,SSE 仍在跑,progress overlay 持续显示。
   streaming: {
     active: boolean
+    /** 正在 stream 的 report id;null 表示无活跃 stream. */
+    currentId: string | null
     progress: ProgressEvent[]
-    /**
-     * Accumulated streaming output. Backend emits `report_chunk` events whose
-     * `data.chunk` is the *full* current markdown of the report (writer_node 把
-     * 整篇 markdown 一次性塞给 chunk),所以我们直接覆盖 `report_markdown`,
-     * 不做拼接。其它 event 也可累积进 partialSections(eg. critic_scores)。
-     */
     partialSections: Record<string, unknown>
   }
 }
@@ -69,10 +66,14 @@ export const reportState = proxy<ReportState>({
   currentLoading: false,
   streaming: {
     active: false,
+    currentId: null,
     progress: [],
     partialSections: {},
   },
 })
+
+// AbortController 不放 valtio proxy(class instance 不被 deep proxy 但保险起见放 module-level)
+let _streamController: AbortController | null = null
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -176,8 +177,17 @@ export const reportActions = {
 
   resetStreaming() {
     reportState.streaming.active = false
+    reportState.streaming.currentId = null
     reportState.streaming.progress = []
     reportState.streaming.partialSections = {}
+  },
+
+  /** 用户登出 / 全局取消 streaming */
+  cancelStreaming() {
+    _streamController?.abort()
+    _streamController = null
+    reportState.streaming.active = false
+    reportState.streaming.currentId = null
   },
 
   /**
@@ -189,13 +199,35 @@ export const reportActions = {
    *
    * Returns a `cancel` function the caller should invoke on unmount.
    */
-  startStreaming(reportId: string): () => void {
-    // 重置 streaming 子树(再次进入同一 reportId 时干净)
+  /**
+   * 启动 SSE 全局订阅 — 不绑 component lifecycle.
+   *
+   * - 已经在 stream 同 id → no-op(组件 re-mount 不重启 SSE,progress 不丢)
+   * - 已经在 stream 别的 id → abort 旧的 + 启动新的
+   * - 不返 cancel function(显式 cancel 用 cancelStreaming)
+   */
+  startStreaming(reportId: string): void {
+    // 同 id 已在跑 → no-op(避免组件 re-mount 重置 progress)
+    if (
+      reportState.streaming.active &&
+      reportState.streaming.currentId === reportId
+    ) {
+      return
+    }
+
+    // 切到新 id → abort 旧 stream
+    if (_streamController) {
+      _streamController.abort()
+      _streamController = null
+    }
+
     reportState.streaming.active = true
+    reportState.streaming.currentId = reportId
     reportState.streaming.progress = []
     reportState.streaming.partialSections = {}
 
     const controller = new AbortController()
+    _streamController = controller
     const token = readAuthToken()
 
     void (async () => {
@@ -308,13 +340,13 @@ export const reportActions = {
           message: `连接错误:${(e as Error).message}`,
           timestamp: Date.now(),
         })
+      } finally {
+        // 该 stream 结束(done / error / 自然结束):清 controller ref
+        if (_streamController === controller) {
+          _streamController = null
+        }
       }
     })()
-
-    return () => {
-      controller.abort()
-      reportState.streaming.active = false
-    }
   },
 }
 
