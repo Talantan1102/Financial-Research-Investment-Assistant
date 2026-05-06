@@ -1,13 +1,20 @@
-"""Unit tests — Writer calc_recommended_position_size_pct + 6-field prompt conditioning.
+"""Unit tests — Writer build_investment_dd_prompt 6-field conditioning.
+
+v0.8.5 — calc_recommended_position_size_pct removed (replaced by skill bundle
+compute_position_size_pct, tested separately in
+backend/tests/unit/skills/test_compute_position_size.py). The position-size
+calculator tests that lived here previously are now redundant; only prompt-
+conditioning tests remain.
 
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md § 5.3
+spec ref: docs/superpowers/specs/2026-05-04-v0.8.5-constrained-router-design.md § Task 5
 """
 
 from __future__ import annotations
 
 import pytest
 from app.agents.schemas import ResearchState
-from app.agents.writer import build_investment_dd_prompt, calc_recommended_position_size_pct
+from app.agents.writer import build_investment_dd_prompt
 
 
 def _make_state(**kwargs: object) -> ResearchState:
@@ -24,115 +31,6 @@ def _make_state(**kwargs: object) -> ResearchState:
     }
     defaults.update(kwargs)
     return ResearchState(**defaults)  # type: ignore[arg-type]
-
-
-# ---------------------------------------------------------------------------
-# Tests for calc_recommended_position_size_pct
-# ---------------------------------------------------------------------------
-
-
-def test_position_size_for_conservative_long_term() -> None:
-    """保守 + 长期 + 买入建议 = 仓位上限较低(≤ 10%)。"""
-    pct = calc_recommended_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance="conservative",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    assert 0 < pct <= 10.0, f"Expected conservative position ≤ 10%, got {pct}"
-
-
-def test_position_size_for_aggressive_short_term() -> None:
-    """激进 + 买入建议 = 仓位上限较高(10% < pct ≤ 30%)。"""
-    pct = calc_recommended_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance="very_aggressive",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    assert 10.0 < pct <= 30.0, f"Expected aggressive position 10-30%, got {pct}"
-
-
-def test_position_size_for_moderate_balanced() -> None:
-    """moderate / balanced 仓位应在 conservative 和 aggressive 之间。"""
-    conservative_pct = calc_recommended_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance="conservative",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    moderate_pct = calc_recommended_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance="moderate",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    aggressive_pct = calc_recommended_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance="very_aggressive",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    assert conservative_pct <= moderate_pct <= aggressive_pct, (
-        f"Expected conservative({conservative_pct}) ≤ moderate({moderate_pct}) "
-        f"≤ aggressive({aggressive_pct})"
-    )
-
-
-def test_position_size_sell_recommendation_is_zero_or_small() -> None:
-    """卖出建议时仓位应为 0。"""
-    pct = calc_recommended_position_size_pct(
-        recommendation="recommend_sell",
-        risk_tolerance="moderate",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    assert pct == 0.0, f"Sell recommendation should yield 0% position, got {pct}"
-
-
-def test_position_size_hold_is_between_buy_and_sell() -> None:
-    """持有建议仓位应低于买入。"""
-    buy_pct = calc_recommended_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance="moderate",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    hold_pct = calc_recommended_position_size_pct(
-        recommendation="recommend_hold",
-        risk_tolerance="moderate",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    assert hold_pct <= buy_pct, f"Hold({hold_pct}) should be ≤ buy({buy_pct})"
-
-
-def test_position_size_deterministic() -> None:
-    """同 input 必须同 output(deterministic 计算,非随机)。"""
-    pct1 = calc_recommended_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance="moderate",
-        client_total_aum=10_000_000.0,
-        target_market_cap=500_000_000_000.0,
-    )
-    pct2 = calc_recommended_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance="moderate",
-        client_total_aum=10_000_000.0,
-        target_market_cap=500_000_000_000.0,
-    )
-    assert pct1 == pct2, "calc_recommended_position_size_pct must be deterministic"
-
-
-def test_position_size_is_float() -> None:
-    """返回值必须是 float。"""
-    pct = calc_recommended_position_size_pct(
-        recommendation="recommend_overweight",
-        risk_tolerance="aggressive",
-        client_total_aum=10_000_000.0,
-        target_market_cap=1_000_000_000_000.0,
-    )
-    assert isinstance(pct, float)
 
 
 # ---------------------------------------------------------------------------

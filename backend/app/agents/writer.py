@@ -6,80 +6,55 @@ produces a PortfolioWarningReport instead of an InvestmentDueDiligenceReport.
 v0.8.4: build_investment_dd_prompt is conditioned on all 6 input fields:
   - investment_objective → § 5 risk framing + § 6 recommendation tone
   - investment_horizon   → § 6 recommended_holding_period guidance
-  - risk_tolerance       → § 6 calc_recommended_position_size_pct + entry/stop constraints
+  - risk_tolerance       → § 6 position-size hint + entry/stop constraints
   - client_total_aum     → § 6 position size CNY anchor
   - client_existing_position → § 6 加/持/减 decision framing
   - target_ts_code       → data anchor throughout
 
+v0.8.5: prompt appended with composed_sop() (11 methodology dimensions). § 6
+recommendation enum + recommended_position_size_pct are now overridden by a
+deterministic Python helper post_process_writer_output() — the LLM no longer
+gets the final say on those two fields. Skill bundle scripts
+(compute_position_size_pct + classify_recommendation) are the single source of
+truth.
+
+v0.8.5 Task 9 forward concerns wired into prompt + post-process:
+  1. valuation_analysis.pe_historical_percentile_value (numeric 0-1 sibling)
+  2. financial_analysis.debt_ratio_assessment (Literal[健康/一般/警戒/高风险])
+  3. post_process_writer_output appends deterministic narrative footer that
+     announces Python override of recommendation + position pct.
+
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md § 3 / § 5.3
+spec ref: docs/superpowers/specs/2026-05-04-v0.8.5-constrained-router-design.md § Task 5
+spec ref: docs/superpowers/plans/2026-05-05-v0.8.5-constrained-router-implementation.md § Task 9
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
-from typing import Final
+from typing import Any
 
 from app.agents.base import Agent
 from app.agents.investment_dd_renderer import render_investment_dd_report_markdown
 from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
-from app.agents.schemas import Recommendation, ResearchState, RiskTolerance, StepResult
+from app.agents.schemas import Recommendation, ResearchState, StepResult
 from app.services.llm_response import Tier
+from app.skills.financial_research import load_skill
+from app.skills.financial_research.scripts import (
+    classify_recommendation,
+    compute_position_size_pct,
+)
 
-# ---------------------------------------------------------------------------
-# Position size calculator (deterministic, pure function)
-# ---------------------------------------------------------------------------
+# Module-level skill load — methodology + references parsed once at import time.
+_SKILL_BUNDLE = load_skill()
+_SOP_TEXT = _SKILL_BUNDLE.composed_sop()
 
-# Base position size % ceilings by risk_tolerance × recommendation:
-#   - recommendation_factor: buy=1.0, overweight=0.7, hold=0.4, underweight=0.1, sell=0.0
-#   - risk_tolerance ceiling: conservative≤8, moderate≤12, balanced≤18, aggressive≤25, very_aggressive≤30
-
-_RISK_CEILING: dict[str, float] = {
-    "conservative": 8.0,
-    "moderate": 12.0,
-    "balanced": 18.0,
-    "aggressive": 25.0,
-    "very_aggressive": 30.0,
-}
-
-_RECOMMENDATION_FACTOR: dict[str, float] = {
-    "recommend_buy": 1.0,
-    "recommend_overweight": 0.7,
-    "recommend_hold": 0.4,
-    "recommend_underweight": 0.1,
-    "recommend_sell": 0.0,
-}
-
-_SMALL_CAP_MARKET_CAP_THRESHOLD_CNY: Final[float] = 50_000_000_000.0
-
-
-def calc_recommended_position_size_pct(
-    recommendation: Recommendation,
-    risk_tolerance: RiskTolerance,
-    client_total_aum: float,
-    target_market_cap: float,
-) -> float:
-    """Deterministic position size calculator for § 6 investment recommendation.
-
-    Logic:
-      base_pct = risk_ceiling(risk_tolerance) × recommendation_factor(recommendation)
-
-    Liquidity cap: if target_market_cap < 50B CNY (mid/small cap), reduce by 20%.
-    client_total_aum is used as a non-zero guard for the small-cap liquidity haircut.
-    target_market_cap triggers a 20% haircut when below the small-cap threshold.
-
-    Returns a float in [0.0, 30.0] representing % of client_total_aum.
-    """
-    ceiling = _RISK_CEILING.get(risk_tolerance, 12.0)
-    factor = _RECOMMENDATION_FACTOR.get(recommendation, 0.0)
-    base_pct = ceiling * factor
-
-    # Liquidity adjustment: smaller-cap stocks warrant a 20% haircut
-    # to avoid potential liquidity issues for any non-zero AUM client when holding a small-cap position.
-    if target_market_cap < _SMALL_CAP_MARKET_CAP_THRESHOLD_CNY and client_total_aum > 0:
-        base_pct = base_pct * 0.8
-
-    return round(base_pct, 2)
+# v0.8.5 — narrative footer sentinel for idempotent post_process. Use HTML
+# comment so markdown rendering hides it; LLM quoting the visible text
+# "Python 决定论修正" cannot accidentally trip the idempotent skip check.
+_FOOTER_SENTINEL = "<!-- v0.8.5-pyoverride-v1 -->"
 
 
 # ---------------------------------------------------------------------------
@@ -132,20 +107,24 @@ _HORIZON_HOLDING_PERIOD_HINT: dict[str, str] = {
 
 
 def _build_section6_constraint_block(state: ResearchState) -> str:
-    """Build § 6 constraint block conditioned on all 6 input fields."""
+    """Build § 6 constraint block conditioned on all 6 input fields.
+
+    v0.8.5 — uses skill bundle compute_position_size_pct to derive the prompt-
+    side hint number. Final value is overridden in post_process_writer_output(),
+    so this is purely a narrative anchor.
+    """
     objective = state.investment_objective or "balanced"
     risk_tolerance = state.risk_tolerance or "moderate"
     investment_horizon = state.investment_horizon or "medium_term"
     client_total_aum = state.client_total_aum or 0.0
     existing_position = state.client_existing_position
 
-    # Compute suggested position size pct (approximate — LLM should refine based on recommendation)
-    # We pass a placeholder market_cap here; LLM will finalize based on actual data
-    suggested_pct_buy = calc_recommended_position_size_pct(
+    # Compute suggested position size pct (prompt narrative anchor only — final
+    # value is set deterministically in post_process_writer_output).
+    suggested_pct_buy = compute_position_size_pct(
         recommendation="recommend_buy",
         risk_tolerance=risk_tolerance,
-        client_total_aum=client_total_aum,
-        target_market_cap=1_000_000_000_000.0,  # default large-cap anchor
+        market_cap_cny=1_000_000_000_000.0,  # default large-cap anchor
     )
 
     objective_block = _OBJECTIVE_SECTION6_GUIDANCE.get(
@@ -235,9 +214,11 @@ _SYSTEM_PROMPT_BASE = """你是专业投资研究分析师。
     "valuation_analysis": {
       "narrative": "<估值分析综述>",
       "pe_historical_percentile": "<PE 历史百分位或 null>",
+      "pe_historical_percentile_value": null,
       "dcf_valuation": "<DCF 估值或 null>",
       "peer_comparison": "<同业估值对比或 null>"
     },
+    "debt_ratio_assessment": null,
     "year_over_year_summary": "<同比变化或 null>",
     "evidence": ["<chunk_id>"]
   },
@@ -285,6 +266,12 @@ _SYSTEM_PROMPT_BASE = """你是专业投资研究分析师。
 - narrative 用规范中文金融术语
 - 风险等级客观评估:有重大风险信号时 overall_risk_level 选 high 或 very_high
 - 无 Insight 支撑的内容在 narrative 里声明"数据缺失,建议补充材料"
+
+**v0.8.5 数值化字段(若可量化必须同时填,以便后端决定论 helper 使用)**:
+- ``financial_analysis.valuation_analysis.pe_historical_percentile_value``: float in [0.0, 1.0],
+  例如近 5 年 PE 30 分位 → 0.30。无法判断时填 null,narrative 中说明数据缺失。
+- ``financial_analysis.debt_ratio_assessment``: 必须从 {"健康", "一般", "警戒", "高风险"} 中四选一
+  (资产负债率<30% → 健康;30-50% → 一般;50-70% → 警戒;>70% → 高风险);数据缺失时填 null。
 """
 
 
@@ -341,8 +328,150 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
         + f"\n\n# Insights\n{insights_str}\n"
         + f"\n# 用户原始需求 / 标的信息\n{state.user_message}\n"
         + f"\n# 本次 request_id(填入 JSON 的 request_id 字段)\n{state.request_id}\n"
+        + f"\n# 投资研究员 SOP (跨 11 维度方法论)\n\n{_SOP_TEXT}\n"
         + "\n请严格按上方 JSON 模板输出,不要更改任何字段名。"
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.8.5 post-processing — deterministic override of LLM-generated
+# recommendation + position size. Skill bundle scripts are the single source
+# of truth for these two fields.
+# ---------------------------------------------------------------------------
+
+
+# v0.8.5 forward concern 1 — regex fallback for pe_historical_percentile str.
+# Captures the first numeric (int or decimal) followed by 0+ whitespace and
+# "分位" (e.g. "近 5 年 30 分位" → "30", "30.5 分位" → "30.5"). Returns the
+# normalised float in [0.0, 1.0] or None on no match.
+_PE_PERCENTILE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*分位")
+
+
+def _parse_pe_percentile_str(s: str | None) -> float | None:
+    """Best-effort regex parse of '近 5 年 30 分位' → 0.30.
+
+    Returns None when no '<num> 分位' substring is found, allowing the caller
+    to apply its own default (typically 0.5 for missing data). Defensive
+    against LLM outputs that mix half-numerals or missing 分位 token.
+    """
+    if not s:
+        return None
+    m = _PE_PERCENTILE_PATTERN.search(s)
+    if m is None:
+        return None
+    try:
+        raw = float(m.group(1))
+    except ValueError:
+        return None
+    # Treat values >1 as percentage (e.g. "30 分位" → 30 → 0.30); values ≤1
+    # already normalized (e.g. "0.3 分位" → 0.3).
+    pct = raw / 100.0 if raw > 1.0 else raw
+    if 0.0 <= pct <= 1.0:
+        return pct
+    return None
+
+
+def _extract_metrics_from_llm_report(report: dict[str, Any]) -> dict[str, Any]:
+    """Extract metrics dict consumed by classify_recommendation.
+
+    Resolution order for ``pe_percentile``:
+      1. ``valuation_analysis.pe_historical_percentile_value`` (v0.8.5 numeric)
+      2. regex parse of ``valuation_analysis.pe_historical_percentile`` str
+         (e.g. "近 5 年 30 分位" → 0.30)
+      3. 0.5 (中位) — missing/unparseable, neither buy nor sell red-line.
+
+    Other fields the schema does not guarantee (``roe``, ``revenue_yoy``, etc.)
+    fall through to defaults causing classify_recommendation to drop to its
+    ``recommend_hold`` fallback rule. The deterministic override is what
+    matters: the LLM cannot talk the recommendation up via narrative alone.
+    """
+    fa: dict[str, Any] = report.get("financial_analysis") or {}
+    va: dict[str, Any] = fa.get("valuation_analysis") or {}
+    overview: dict[str, Any] = report.get("target_overview") or {}
+
+    # v0.8.5 forward concern 1 — numeric > regex > 0.5 fallback chain.
+    # bool subclass guard: Python bool is int subclass (isinstance(True, int) == True),
+    # so without this guard pe_historical_percentile_value=True (LLM bug) would pass
+    # the 0.0 <= 1.0 <= 1.0 range check and silently misroute to sell red-line.
+    pe_pct: float
+    pe_numeric = va.get("pe_historical_percentile_value")
+    if (
+        isinstance(pe_numeric, int | float)
+        and not isinstance(pe_numeric, bool)
+        and 0.0 <= float(pe_numeric) <= 1.0
+    ):
+        pe_pct = float(pe_numeric)
+    else:
+        parsed = _parse_pe_percentile_str(va.get("pe_historical_percentile"))
+        pe_pct = parsed if parsed is not None else 0.5
+
+    return {
+        "pe_percentile": pe_pct,
+        "roe": fa.get("roe") or 0.0,
+        "revenue_yoy": fa.get("revenue_yoy") or 0.0,
+        "net_profit_yoy": fa.get("net_profit_yoy") or 0.0,
+        # 1 万亿 CNY large-cap 中位 default — 避免 missing data 误触发 small-cap haircut
+        # (`or` 对 0.0 也 fallback, 但真"market_cap=0"极罕见; 跟 writer.py:114 prompt-side
+        # default 1e12 anchor 一致).
+        "market_cap_cny": overview.get("current_market_cap") or 1_000_000_000_000.0,
+        "forecast_signal": fa.get("forecast_signal") or "neutral",
+        # v0.8.5 forward concern 3 — debt_ratio_assessment now schema-real.
+        "asset_liability_warning": fa.get("debt_ratio_assessment") in {"警戒", "高风险"},
+    }
+
+
+def post_process_writer_output(
+    state: ResearchState, llm_report: InvestmentDueDiligenceReport
+) -> InvestmentDueDiligenceReport:
+    """Override LLM-generated recommendation + position_size with deterministic Python.
+
+    v0.8.5 single source of truth for § 6:
+      - investment_recommendation.recommendation → classify_recommendation(metrics)
+      - investment_recommendation.recommended_position_size_pct →
+            compute_position_size_pct(rec, risk_tol, market_cap)
+      - narrative footer appended announcing the override (forward concern 2).
+        This guarantees the LLM-narrative number cannot drift from the final
+        Python-decided number. v0.9 will replace this with a 2nd LLM rewrite
+        for fluency; v0.8.5 keeps it deterministic and idempotent.
+
+    All other fields (prices, holding_period, evidence) remain LLM-authored.
+    Pure function — idempotent on a fixed (state, llm_report) pair.
+    """
+    report_dict = llm_report.model_dump()
+    metrics = _extract_metrics_from_llm_report(report_dict)
+    classified_rec: Recommendation = classify_recommendation(metrics)
+    market_cap = float(metrics.get("market_cap_cny") or 0.0)
+    risk_tolerance = state.risk_tolerance or "moderate"
+    pct = compute_position_size_pct(
+        recommendation=classified_rec,
+        risk_tolerance=risk_tolerance,
+        market_cap_cny=market_cap,
+    )
+
+    # v0.8.5 forward concern 2 — narrative footer announcing Python override.
+    # Idempotency guard uses HTML comment sentinel _FOOTER_SENTINEL (markdown-
+    # invisible) so an LLM-narrative that quotes the visible "Python 决定论修正"
+    # phrase cannot accidentally trip the skip check.
+    base_narrative = (llm_report.investment_recommendation.narrative or "").rstrip()
+    if _FOOTER_SENTINEL not in base_narrative:
+        narrative_with_footer = (
+            f"{base_narrative}\n\n"
+            f"---\n"
+            f"{_FOOTER_SENTINEL}\n"
+            f"📊 Python 决定论修正: 评级 = {classified_rec}, 仓位 = {pct:.2f}%"
+            f" (基于客户 risk_tolerance={risk_tolerance} + 市值数据 + skill bundle 规则)。"
+        ).strip()
+    else:
+        narrative_with_footer = base_narrative
+
+    new_recommendation = llm_report.investment_recommendation.model_copy(
+        update={
+            "recommendation": classified_rec,
+            "recommended_position_size_pct": pct,
+            "narrative": narrative_with_footer,
+        }
+    )
+    return llm_report.model_copy(update={"investment_recommendation": new_recommendation})
 
 
 def _build_alert_prompt(state: ResearchState) -> str:
@@ -386,6 +515,9 @@ class Writer(Agent):
                 "generated_at": datetime.now(),
             }
         )
+        # v0.8.5 — post-process: deterministic Python overrides for § 6
+        # recommendation + recommended_position_size_pct.
+        report = post_process_writer_output(state, report)
 
         markdown = render_investment_dd_report_markdown(report)
 

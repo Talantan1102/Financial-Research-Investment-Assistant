@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 import pandas as pd
+from dateutil.relativedelta import relativedelta
 
 from app.services.rate_limiter import RateLimiter
 from app.services.tushare_cache import TushareCache, classify_ttl
@@ -33,6 +35,21 @@ class TushareService(Protocol):
         self, *, ts_code: str | None, start: str, end: str
     ) -> pd.DataFrame: ...
     async def get_anns(self, *, ts_code: str, start: str, end: str) -> pd.DataFrame: ...
+
+    # v0.8.5: 6 个新接口 (P0+P1 tool 扩展, ref spec § 4.6)
+    async def get_daily_basic(
+        self, *, ts_code: str, trade_date: str | None = None
+    ) -> pd.DataFrame: ...
+    async def get_pe_history(
+        self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None
+    ) -> pd.DataFrame: ...
+    async def get_forecast(self, *, ts_code: str, period: str | None = None) -> pd.DataFrame: ...
+    async def get_dividend_history(self, *, ts_code: str, years_back: int = 5) -> pd.DataFrame: ...
+    async def get_holder_change(self, *, ts_code: str, years_back: int = 2) -> pd.DataFrame: ...
+    async def get_money_flow(
+        self, *, ts_code: str, start_date: str, end_date: str
+    ) -> pd.DataFrame: ...
+
     # Mock implementations should override aclose() as a no-op or handle their own cleanup.
     async def aclose(self) -> None: ...
 
@@ -110,6 +127,94 @@ class RealTushareService:
         # Tushare Pro API name for daily announcements is "anns_d" (not "anns")
         return await self._call_cached(
             "anns_d", {"ts_code": ts_code, "start_date": start, "end_date": end}
+        )
+
+    # ---------------------------------------------------------------------
+    # v0.8.5 — 6 个新接口 (P0+P1 tool 扩展, ref spec § 4.6)
+    # ---------------------------------------------------------------------
+
+    @staticmethod
+    def _today_yyyymmdd() -> str:
+        return datetime.now(UTC).strftime("%Y%m%d")
+
+    @staticmethod
+    def _n_years_ago(n: int) -> str:
+        # relativedelta avoids leap-year drift (5 days over 5 years vs timedelta(days=365*n)).
+        return (datetime.now(UTC) - relativedelta(years=n)).strftime("%Y%m%d")
+
+    async def get_daily_basic(self, *, ts_code: str, trade_date: str | None = None) -> pd.DataFrame:
+        return await self._call_cached(
+            "daily_basic",
+            {"ts_code": ts_code, "trade_date": trade_date or self._today_yyyymmdd()},
+        )
+
+    async def get_pe_history(
+        self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None
+    ) -> pd.DataFrame:
+        """聚合历史 daily_basic 计算 PE 分位.
+
+        实现:取近 N 年的 daily_basic.pe 分布,计算 current_pe 在分布中的 percentile.
+        """
+        end = self._today_yyyymmdd()
+        start = self._n_years_ago(years_back)
+        history = await self._call_cached(
+            "daily_basic",
+            {"ts_code": ts_code, "start_date": start, "end_date": end, "fields": "pe"},
+        )
+        if current_pe is None:
+            latest = await self._call_cached(
+                "daily_basic", {"ts_code": ts_code, "trade_date": end, "fields": "pe"}
+            )
+            # 不能 silent fallback 0.0:那会让 percentile 算出"PE 处于 0% 分位",
+            # 看起来像"史上最便宜"的伪买入信号.调用方必须显式处理空数据.
+            if latest.empty or pd.isna(latest["pe"].iloc[0]):
+                raise ValueError(
+                    f"cannot resolve current_pe for {ts_code} on {end}: "
+                    "latest daily_basic is empty or NaN"
+                )
+            current_pe = float(latest["pe"].iloc[0])
+        pe_series = history["pe"].dropna().sort_values()
+        n = len(pe_series)
+        rank = int((pe_series < current_pe).sum())
+        percentile = rank / max(n, 1)
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code],
+                "current_pe": [current_pe],
+                "historical_percentile": [float(percentile)],
+                "min_pe": [float(pe_series.min()) if n > 0 else 0.0],
+                "max_pe": [float(pe_series.max()) if n > 0 else 0.0],
+                "median_pe": [float(pe_series.median()) if n > 0 else 0.0],
+            }
+        )
+
+    async def get_forecast(self, *, ts_code: str, period: str | None = None) -> pd.DataFrame:
+        params: dict[str, Any] = {"ts_code": ts_code}
+        if period:
+            params["period"] = period
+        return await self._call_cached("forecast", params)
+
+    async def get_dividend_history(self, *, ts_code: str, years_back: int = 5) -> pd.DataFrame:
+        end = self._today_yyyymmdd()
+        start = self._n_years_ago(years_back)
+        return await self._call_cached(
+            "dividend",
+            {"ts_code": ts_code, "ann_date_start": start, "ann_date_end": end},
+        )
+
+    async def get_holder_change(self, *, ts_code: str, years_back: int = 2) -> pd.DataFrame:
+        """股东户数变化 — wraps existing stk_holdernumber API with date range."""
+        end = self._today_yyyymmdd()
+        start = self._n_years_ago(years_back)
+        return await self._call_cached(
+            "stk_holdernumber",
+            {"ts_code": ts_code, "start_date": start, "end_date": end},
+        )
+
+    async def get_money_flow(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        return await self._call_cached(
+            "moneyflow",
+            {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
         )
 
     async def aclose(self) -> None:

@@ -36,6 +36,7 @@ from app.agents.critic_subagents.input_context_scorer import (
     InputContextAppropriatenessScorer,
 )
 from app.agents.critic_subagents.insight import InsightScorer
+from app.agents.critic_subagents.plan_correctness_scorer import PlanCorrectnessScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.data_collector import DataCollector
 from app.agents.research_agent import ResearchAgent
@@ -122,6 +123,7 @@ async def test_research_agent_e2e_full_pipeline(mock_llm_client: MockLLMClient) 
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
         InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
+        PlanCorrectnessScorer(llm=svc),  # 第 7 scorer (v0.8.5)
     ]
     critic = Critic(llm=svc, scorers=scorers)
 
@@ -152,5 +154,6 @@ async def test_research_agent_e2e_full_pipeline(mock_llm_client: MockLLMClient) 
     assert n_calls >= 2, f"Expected >=2 tool_calls (one per subtask), got {output.tool_calls}"
 
     tool_names = [tc.tool_name for tc in output.tool_calls]
-    assert "get_stock_quote" in tool_names, f"get_stock_quote missing from {tool_names}"
+    # v0.8.5: balanced plan_registry 4 subtasks 不含 get_stock_quote (研报场景不需实时报价).
+    # 但应含 get_financials (financial_health subtask).
     assert "get_financials" in tool_names, f"get_financials missing from {tool_names}"

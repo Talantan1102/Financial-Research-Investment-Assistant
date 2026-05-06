@@ -27,12 +27,23 @@ _TTL_DEFAULT_S = 3600
 
 _FINANCIAL_APIS = frozenset(
     # Note: Tushare Pro uses "balancesheet" (no underscore) for the balance sheet API.
-    {"income", "balancesheet", "cashflow", "fina_indicator", "stk_holdernumber"}
+    # v0.8.5: forecast / dividend 加入 — 季度/年度业绩预告与分红快照, intraday 不会变.
+    {
+        "income",
+        "balancesheet",
+        "cashflow",
+        "fina_indicator",
+        "stk_holdernumber",
+        "forecast",
+        "dividend",
+    }
 )
 _ANNS_APIS = frozenset(
     # Note: Tushare Pro uses "anns_d" (not "anns") for daily announcements.
     {"anns_d", "disclosure_date"}
 )
+# v0.8.5: daily band 显式枚举 — daily_basic / moneyflow 与 daily 同 1h TTL.
+_DAILY_APIS = frozenset({"daily", "daily_basic", "moneyflow"})
 
 
 def classify_ttl(api_name: str) -> int:
@@ -41,7 +52,7 @@ def classify_ttl(api_name: str) -> int:
         return _TTL_FINANCIAL_S
     if api_name in _ANNS_APIS:
         return _TTL_ANNS_S
-    if api_name == "daily":
+    if api_name in _DAILY_APIS:
         return _TTL_DAILY_S
     return _TTL_DEFAULT_S
 

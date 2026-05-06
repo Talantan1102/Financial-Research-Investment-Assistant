@@ -369,18 +369,21 @@
   - dogfood ≥ 10 个真实标的 + 修 bug
 - ref `docs/superpowers/plans/2026-05-04-v0.8.4-b1-single-deep.md`(7-task implementation plan,通过 `superpowers:writing-plans` 已拆)
 
-### v0.8.5:D6 agent-level eval + B-3 narrative 调整 + B-7 deep follow B-1 模板
+### v0.8.5:Constrained LLM router + Anthropic Skills bundle + self-correcting retry edge(2026-05-05 ship)
 
-- 工作量:~3 周
-- 出货:可以 demo "改 prompt 立刻看 golden set 跑分变化 + dashboard 看 cost/latency/score" + B-3 narrative 调到"客户持仓 / 个人组合"双视角 + B-7 端到端追问
+- 工作量:~1.5 周(实际 wall time)
+- 出货:planner 从自由生成 ResearchPlan 改为 schema-constrained 4 选 1 router + 17-component financial_research skill bundle + 第 7 critic LLM-as-judge + retry edge max 2 轮;dogfood 揭示的 plan-driven 不稳问题(prompt 微调 plan 走样)修复
 - 内容:
-  - D6 agent-level eval:golden set ≥ B-1 ×10(7 独立 ts_code + 3 differential)+ B-3 ×10 + C 端 ×20
-  - SUT 从 LLMService 升到 ResearchAgent(整 agent run 的 trace)
-  - LLM-as-judge rubric 多维度(完整性 / 准确性 / 引用质量 / 风险识别 [B-1/B-3] / 相关性 [C 端])
-  - Dashboard 可视化(reuse trace-view CLI 或加 web UI — 顶后续 brainstorming)
-  - PR regression gate:golden score 下降 > 5% 不让 merge
-  - B-3 narrative 调整:从"存量信贷客户预警"改为"客户持仓 / 个人组合 双视角共享 monitoring 引擎"
-  - B-7 deep follow B-1 模板:5 维 user journey(entry / form / progress / output / error)+ 接 report context
+  - **Constrained router**:Planner 收 6 字段 form → LLM 4 选 1 plan_id Literal(`capital_preservation` / `balanced` / `aggressive_growth` / `event_driven`)+ rationale ≤200 字符;subtask templates hardcode 在 `plan_registry`(4 plan × 4 subtask)
+  - **Anthropic Skills bundle**:`backend/app/agents/research/financial_research/` 17 components — 11 methodology .md(solvency / profitability / growth / cashflow_quality / valuation / industry / shareholder_governance / short_term_capital_flow / event_driven / risk_factors / decision_framework)+ 3 references(industry_benchmarks.json + recommendation_rules.yaml + position_size_rules.yaml)+ 3 Python helpers(`compute_position_size` / `classify_recommendation` / `lookup_industry_benchmark` 纯函数)
+  - **第 7 critic plan_correctness**:LLM-as-judge,0-10,threshold 8.5
+  - **LangGraph self-correcting retry edge**:plan_correctness < 8.5 AND retry_count < 2 → 回 `research_planner_node` 收 critic feedback 重选,max 2 轮硬上限
+  - **Tool inventory 5 → 13**:加 8 个 tushare-backed(balance_sheet / cashflow / daily_basic / pe_history / forecast / dividend / holder_change / money_flow + 派生 signal)
+  - **Writer 调 Python helper 替代 LLM 算数字**:仓位 + 评级 hardcode 在 Python(deterministic),LLM 仅 narrative + footer "Python 决定论修正"
+  - **测试**:base + 60+ new(router 18 + plan_registry 15 + skill helpers 20 + scorer 4 + retry 3 + new tool 21 + writer post_process 13);4 differential golden(含 1 retry-trigger pending Phase 9b cassette)
+  - **D6 agent-level eval / B-3 narrative / B-7 follow B-1**:从 v0.8.5 移到 v0.8.6+(本次 v0.8.5 聚焦 router + skill bundle + retry,先解决 plan-driven 不稳的根本问题)
+  - ref `docs/superpowers/specs/2026-05-05-v0.8.5-constrained-router-design.md`
+  - ref `docs/superpowers/plans/2026-05-05-v0.8.5-constrained-router-implementation.md`(10 task,Phase 10b dogfood + cassette 重录由 user 手跑)
 
 ### v0.8.6:C 端 5+1 use case batch deep follow B-1 模板
 

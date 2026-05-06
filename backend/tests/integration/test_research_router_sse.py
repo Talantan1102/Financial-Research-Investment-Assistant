@@ -35,6 +35,7 @@ from app.agents.critic_subagents.input_context_scorer import (
     InputContextAppropriatenessScorer,
 )
 from app.agents.critic_subagents.insight import InsightScorer
+from app.agents.critic_subagents.plan_correctness_scorer import PlanCorrectnessScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.data_collector import DataCollector
 from app.agents.research_planner import ResearchPlanner
@@ -139,6 +140,7 @@ def _build_test_research_graph() -> Any:
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
         InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
+        PlanCorrectnessScorer(llm=svc),  # 第 7 scorer (v0.8.5)
     ]
     critic = Critic(llm=svc, scorers=scorers)
 
@@ -532,6 +534,7 @@ async def test_research_graph_with_async_checkpointer_does_not_raise(
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
         InputContextAppropriatenessScorer(llm=svc),
+        PlanCorrectnessScorer(llm=svc),  # 第 7 scorer (v0.8.5)
     ]
     critic = Critic(llm=svc, scorers=scorers)
 

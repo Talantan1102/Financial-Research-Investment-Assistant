@@ -69,12 +69,23 @@ class LegacyMockTushareAdapter:
     async def get_balance_sheet(self, *, ts_code: str, end_date: str | None = None) -> pd.DataFrame:
         # Deterministic inline builder — avoids the LLM-based legacy generate_balance_sheet.
         # Columns include debt_to_assets required by Task 8 FinancialRatioRule.
+        # v0.8.5: extended with total_cur_assets / total_cur_liab for liquidity ratio analysis.
+        #
+        # Mock column contract (intentionally minimal):
+        # 提供:ts_code / end_date / total_assets / total_liab / total_cur_assets /
+        #       total_cur_liab / debt_to_assets — 覆盖 Task 1/8 当前规则需求.
+        # 不提供:Tushare balancesheet 真实接口约 150 列(money_funds / accounts_receiv /
+        #       inventories / fix_assets / lt_borr / oth_eqt_tools_p_shr / ...).
+        # 未来如果需要其他列, 直接扩 fixture 行的 dict, 不要 fallback 到 LLM-based
+        # generate_balance_sheet — 那条路径不 deterministic.
         rows = [
             {
                 "ts_code": ts_code,
                 "end_date": ed,
                 "total_assets": 1.5e10 + i * 1e8,
                 "total_liab": 6e9 + i * 5e7,
+                "total_cur_assets": 8e9 + i * 6e7,
+                "total_cur_liab": 3e9 + i * 3e7,
                 "debt_to_assets": 0.4 + i * 0.02,
             }
             for i, ed in enumerate(["20240331", "20240630", "20240930", "20241231"])
@@ -82,7 +93,28 @@ class LegacyMockTushareAdapter:
         return pd.DataFrame(rows)
 
     async def get_cashflow(self, *, ts_code: str, end_date: str | None = None) -> pd.DataFrame:
-        return await self._ensure_inner().generate_cashflow(ts_code=ts_code, end_date=end_date)
+        # Deterministic inline builder — avoids the LLM-based legacy generate_cashflow.
+        # 4 quarters; preserves CashFlowRule's expectations on n_cashflow_act / end_date.
+        # n_cashflow_act intentionally decreasing to keep yellow-signal coverage stable.
+        #
+        # Mock column contract (intentionally minimal):
+        # 提供:ts_code / end_date / n_cashflow_act / n_cashflow_inv_act / n_cash_flows_fnc_act
+        #       — 覆盖 Task 1/8 CashFlowRule 当前需求.
+        # 不提供:Tushare cashflow 真实接口约 80 列(c_paid_for_invest / c_inf_fr_operate_a /
+        #       c_paid_to_for_empl / c_pay_dist_dpcp_int_exp / free_cashflow / ...).
+        # 未来如果某 rule 需要 free_cashflow 等列, 扩 fixture row dict, 不要回到
+        # LLM-based generate_cashflow — 那条路径不 deterministic.
+        rows = [
+            {
+                "ts_code": ts_code,
+                "end_date": ed,
+                "n_cashflow_act": 5e8 - i * 2e7,  # 经营性现金流 (递减触发 yellow)
+                "n_cashflow_inv_act": -2e8,
+                "n_cash_flows_fnc_act": 1e8,  # 注:列名带 s_ — Tushare Pro 历史命名
+            }
+            for i, ed in enumerate(["20240331", "20240630", "20240930", "20241231"])
+        ]
+        return pd.DataFrame(rows)
 
     async def get_stk_holdernumber(
         self, *, ts_code: str, end_date: str | None = None
@@ -100,6 +132,82 @@ class LegacyMockTushareAdapter:
 
     async def get_anns(self, *, ts_code: str, start: str, end: str) -> pd.DataFrame:
         return await self._ensure_inner().generate_anns(ts_code=ts_code, start=start, end=end)
+
+    # -------------------------------------------------------------------
+    # v0.8.5 — 6 个新接口的 deterministic mock fixtures
+    # 直接 hardcode (option a) 避免 LLM 依赖, 利于 unit-layer LLM_MODE=none 守卫.
+    # -------------------------------------------------------------------
+
+    async def get_daily_basic(self, *, ts_code: str, trade_date: str | None = None) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code],
+                "trade_date": [trade_date or "20241231"],
+                "pe": [64.19],
+                "pb": [12.5],
+                "ps": [22.0],
+                "dv_ratio": [1.95],  # 股息率 %
+                "total_mv": [22000e8],  # 总市值 (元)
+                "circ_mv": [22000e8],  # 流通市值
+                "turnover_rate": [0.32],
+            }
+        )
+
+    async def get_pe_history(
+        self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None
+    ) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code],
+                "current_pe": [current_pe if current_pe is not None else 64.19],
+                "historical_percentile": [0.78],  # PE 处于近 N 年 78% 分位
+                "min_pe": [22.0],
+                "max_pe": [78.5],
+                "median_pe": [38.2],
+            }
+        )
+
+    async def get_forecast(self, *, ts_code: str, period: str | None = None) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code],
+                "period": [period or "20241231"],
+                "type": ["预增"],
+                "p_change_min": [12.0],  # 预告净利润下限增长率 %
+                "p_change_max": [18.0],
+            }
+        )
+
+    async def get_dividend_history(self, *, ts_code: str, years_back: int = 5) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code] * 5,
+                "ann_date": ["20240515", "20230515", "20220515", "20210515", "20200515"],
+                "cash_div": [29.5, 25.9, 21.7, 19.3, 17.0],  # 每股现金分红 (元)
+                "stk_div": [0.0, 0.0, 0.0, 0.0, 0.0],  # 每股送转
+            }
+        )
+
+    async def get_holder_change(self, *, ts_code: str, years_back: int = 2) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code] * 4,
+                "end_date": ["20240331", "20230930", "20230331", "20220930"],
+                "holder_num": [83000, 85500, 88000, 91200],
+            }
+        )
+
+    async def get_money_flow(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code],
+                "trade_date": [end_date],
+                "buy_lg_amount": [3.5e8],
+                "sell_lg_amount": [3.2e8],
+                "buy_md_amount": [1.8e8],
+                "sell_md_amount": [1.6e8],
+            }
+        )
 
     async def aclose(self) -> None:
         """No-op: legacy MockTushareService has no connections to close."""
