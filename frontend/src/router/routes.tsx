@@ -9,7 +9,7 @@ import KnowledgePage from '@/pages/knowledge'
 import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
-import ResearchIndex from '@/pages/research/index'
+import ResearchListPage from '@/pages/research/List'
 import ResearchNew from '@/pages/research/new'
 import ResearchReport from '@/pages/research/report'
 import {
@@ -50,7 +50,7 @@ export const routes: IRouteObject[] = [
   },
   {
     path: '/research',
-    Component: ResearchIndex,
+    Component: ResearchListPage,
   },
   {
     path: '/research/new',

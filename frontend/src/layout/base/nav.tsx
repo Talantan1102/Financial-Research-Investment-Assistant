@@ -1,6 +1,7 @@
 import IconHome from '@/assets/layout/home.svg'
 import IconKnowledge from '@/assets/layout/knowledge.svg'
 import IconMonitoring from '@/assets/layout/monitoring.svg'
+import IconResearch from '@/assets/layout/policy.svg'
 import React, { useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
@@ -43,6 +44,12 @@ export function Nav() {
         label: '首页',
         icon: IconHome,
         href: '/',
+      },
+      {
+        key: 'research',
+        label: '研究历史',
+        icon: IconResearch,
+        href: '/research',
       },
       {
         key: 'knowledge',
