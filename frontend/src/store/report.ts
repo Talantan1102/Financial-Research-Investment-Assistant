@@ -4,9 +4,10 @@
  * Valtio store for v0.9.x research reports.
  * Sub-state: list (paginated) / current (detail) / streaming (SSE progress).
  *
- * SSE startStreaming subscription is intentionally NOT in this Task 11; it lands
- * in Task 14 once the展示页 needs live progress wiring. Here we only expose the
- * state shape so consumers can already read/write streaming.* without compile errors.
+ * Task 14: startStreaming subscribes to GET /reports/:id/stream via fetch +
+ * ReadableStream (instead of EventSource) so we can attach `Authorization:
+ * Bearer <token>` — EventSource API does not support custom request headers.
+ * This is the same pattern used by GitHub Copilot / OpenAI SDK for LLM streams.
  */
 
 import { proxy } from 'valtio'
@@ -47,6 +48,12 @@ interface ReportState {
   streaming: {
     active: boolean
     progress: ProgressEvent[]
+    /**
+     * Accumulated streaming output. Backend emits `report_chunk` events whose
+     * `data.chunk` is the *full* current markdown of the report (writer_node 把
+     * 整篇 markdown 一次性塞给 chunk),所以我们直接覆盖 `report_markdown`,
+     * 不做拼接。其它 event 也可累积进 partialSections(eg. critic_scores)。
+     */
     partialSections: Record<string, unknown>
   }
 }
@@ -66,6 +73,54 @@ export const reportState = proxy<ReportState>({
     partialSections: {},
   },
 })
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+
+const AUTH_STORAGE_KEY = 'auth'
+
+function readAuthToken(): string | null {
+  try {
+    const stored = localStorage.getItem(AUTH_STORAGE_KEY)
+    if (!stored) return null
+    const parsed = JSON.parse(stored) as { token?: string | null }
+    return parsed.token ?? null
+  } catch {
+    return null
+  }
+}
+
+function streamUrl(reportId: string): string {
+  // Match api/research.ts apiUrl() — VITE_API_BASE is the prefix Vite proxies.
+  const base = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+  return `${base.replace(/\/$/, '')}/reports/${reportId}/stream`
+}
+
+const PROGRESS_LABELS: Record<string, string> = {
+  plan: '正在制定研究计划',
+  data_progress: '收集数据中',
+  insight: '分析洞察',
+  report_chunk: '撰写章节',
+  critic_score: '内部审核',
+  done: '研报完成',
+  error: '出错了',
+}
+
+function extractMessage(
+  eventType: string,
+  eventData: Record<string, unknown> | string | null | undefined,
+): string {
+  // Backend _adapt_event 在 v0.9.x 几乎所有 event 都带 data.summary;直接用之.
+  if (typeof eventData === 'string') return eventData
+  if (eventData && typeof eventData === 'object') {
+    const summary = (eventData as Record<string, unknown>).summary
+    if (typeof summary === 'string' && summary.length > 0) return summary
+    const message = (eventData as Record<string, unknown>).message
+    if (typeof message === 'string' && message.length > 0) return message
+  }
+  return PROGRESS_LABELS[eventType] ?? eventType
+}
+
+// ── actions ─────────────────────────────────────────────────────────────────
 
 export const reportActions = {
   async fetchList(page = 1, pageSize = 20) {
@@ -125,7 +180,142 @@ export const reportActions = {
     reportState.streaming.partialSections = {}
   },
 
-  // startStreaming(id) — SSE EventSource subscription lands in Task 14
+  /**
+   * Subscribe to GET /reports/:id/stream (SSE).
+   *
+   * Implementation: fetch + ReadableStream (NOT EventSource) so we can attach
+   * `Authorization: Bearer <token>` — EventSource has no header API. This is
+   * the canonical pattern used by GitHub Copilot / OpenAI SDK / Anthropic SDK.
+   *
+   * Returns a `cancel` function the caller should invoke on unmount.
+   */
+  startStreaming(reportId: string): () => void {
+    // 重置 streaming 子树(再次进入同一 reportId 时干净)
+    reportState.streaming.active = true
+    reportState.streaming.progress = []
+    reportState.streaming.partialSections = {}
+
+    const controller = new AbortController()
+    const token = readAuthToken()
+
+    void (async () => {
+      try {
+        const response = await fetch(streamUrl(reportId), {
+          method: 'GET',
+          headers: {
+            Accept: 'text/event-stream',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          throw new Error(`SSE fetch failed: ${response.status}`)
+        }
+        if (!response.body) {
+          throw new Error('SSE response has no body')
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        // SSE 帧分隔符 = '\n\n';单帧 'data: <json>'.
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop() ?? ''
+
+          for (const part of parts) {
+            const line = part.trim()
+            if (!line.startsWith('data:')) continue
+            const json = line.slice('data:'.length).trim()
+            if (!json) continue
+
+            let event: { type?: string; data?: unknown }
+            try {
+              event = JSON.parse(json) as { type?: string; data?: unknown }
+            } catch {
+              continue
+            }
+
+            const eventType = event.type ?? 'unknown'
+            const eventData = (event.data ?? {}) as
+              | Record<string, unknown>
+              | string
+
+            reportState.streaming.progress.push({
+              type: eventType as ProgressEvent['type'],
+              message: extractMessage(eventType, eventData),
+              timestamp: Date.now(),
+              raw: event as Record<string, unknown>,
+            })
+
+            // Accumulate partial output for streaming render.
+            if (eventType === 'report_chunk' && typeof eventData === 'object') {
+              const chunk = (eventData as Record<string, unknown>).chunk
+              if (typeof chunk === 'string') {
+                reportState.streaming.partialSections.report_markdown = chunk
+              }
+            } else if (
+              eventType === 'critic_score' &&
+              typeof eventData === 'object'
+            ) {
+              const ed = eventData as Record<string, unknown>
+              if (ed.scorer === 'aggregate') {
+                if (ed.scores)
+                  reportState.streaming.partialSections.critic_scores = ed.scores
+                if (typeof ed.overall === 'number')
+                  reportState.streaming.partialSections.critic_overall = ed.overall
+              }
+            }
+
+            if (eventType === 'done') {
+              reportState.streaming.active = false
+              // re-fetch detail 拿后端写回的最终 report_json
+              try {
+                await reportActions.fetchDetail(reportId)
+              } catch (e) {
+                console.error('fetchDetail after done failed:', e)
+              }
+              return
+            }
+
+            if (eventType === 'error') {
+              reportState.streaming.active = false
+              return
+            }
+          }
+        }
+
+        // 流自然结束但没收到 done — 也视为完成,re-fetch detail.
+        if (reportState.streaming.active) {
+          reportState.streaming.active = false
+          try {
+            await reportActions.fetchDetail(reportId)
+          } catch {
+            /* noop */
+          }
+        }
+      } catch (e) {
+        if ((e as Error).name === 'AbortError') return
+        reportState.streaming.active = false
+        reportState.streaming.progress.push({
+          type: 'error',
+          message: `连接错误:${(e as Error).message}`,
+          timestamp: Date.now(),
+        })
+      }
+    })()
+
+    return () => {
+      controller.abort()
+      reportState.streaming.active = false
+    }
+  },
 }
 
 export type { ReportDetail, ReportListItem }
