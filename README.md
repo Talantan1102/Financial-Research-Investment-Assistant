@@ -146,8 +146,7 @@ docker compose up -d postgres
 | **L2 e2e** (`backend/tests/e2e/`) | cassette(replay) | <2min | 每个 PR |
 | **L3 eval** (`backend/tests/eval/`) | live(真 API,烧钱) | 5-15min | nightly + 手动 |
 
-**当前状态**(v0.8.5 ship #19):685 passed / 5 skipped(unit + integration + e2e + 3 retry edge integration),mypy 0 errors / 344 source files,ruff clean。4 differential golden case + 1 e2e 茅台 cassette ship(retry-trigger e2e cassette 录上但 skipped — LLM judge 不严格不稳定触发, retry edge wire 由 integration/test_planner_retry_edge.py 3 mocked cases 充分覆盖)。
-- **constrained router 测试**:plan_registry 15 + router 18 + skill helper 20 + plan_correctness scorer 4 + retry edge 3 + new tool 21 + writer post_process 13。
+**当前状态**(v0.8.5):L0-L2 全 PASS,mypy strict + ruff clean。L3 含 4 differential golden case + B-1 茅台 e2e cassette。
 
 ## 环境变量
 
