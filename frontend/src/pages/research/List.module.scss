@@ -1,24 +1,138 @@
+/**
+ * List.module.scss — research history list, editorial polish.
+ */
+
 .container {
-  padding: 24px;
-  background-color: #faf9f7;
-  min-height: 100%;
+  background: var(--as-bg);
+  min-height: 100vh;
+  padding: 32px 40px 80px;
+  position: relative;
+
+  &::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(
+      circle at 90% 10%,
+      rgba(184, 156, 92, 0.05) 0%,
+      transparent 38%
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+}
+
+.shell {
+  position: relative;
+  max-width: 1480px;
+  margin: 0 auto;
+  z-index: 1;
 }
 
 .header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
+  align-items: flex-end;
+  gap: 24px;
+  padding-bottom: 20px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--as-border);
+}
+
+.identity {
+  flex: 1;
+}
+
+.eyebrow {
+  font-family: var(--as-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--as-text-secondary);
+  margin-bottom: 8px;
 }
 
 .title {
+  font-family: var(--as-font-display);
+  font-optical-sizing: auto;
+  font-weight: 460;
+  font-size: clamp(28px, 3.4vw, 44px);
+  line-height: 1.05;
+  letter-spacing: -0.018em;
+  color: var(--as-ink);
   margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-  color: #1a1d21;
-  letter-spacing: -0.01em;
+  font-variation-settings: 'opsz' 96, 'SOFT' 30;
+}
+
+.subtitle {
+  margin-top: 10px;
+  font-family: var(--as-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--as-text-tertiary);
+
+  .count {
+    color: var(--as-ink-soft);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 .filter {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+}
+
+// ── Override antd Table for editorial feel ────────────────────────
+:global(.ant-table-wrapper) {
+  background: transparent;
+}
+
+:global(.ant-table) {
+  background: var(--as-surface);
+  border: 1px solid var(--as-border);
+  border-radius: var(--as-radius-lg);
+  font-family: var(--as-font-sans);
+  overflow: hidden;
+}
+
+:global(.ant-table-thead > tr > th) {
+  background: var(--as-bg-tint) !important;
+  border-bottom: 1px solid var(--as-border) !important;
+  font-family: var(--as-font-mono);
+  font-size: 11px !important;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--as-text-secondary) !important;
+  font-weight: 600 !important;
+  padding: 14px 16px !important;
+}
+
+:global(.ant-table-tbody > tr > td) {
+  padding: 16px !important;
+  border-bottom: 1px solid var(--as-divider) !important;
+  font-size: 14px;
+  color: var(--as-ink-soft);
+}
+
+:global(.ant-table-tbody > tr:hover > td) {
+  background: var(--as-bg-tint) !important;
+}
+
+:global(.ant-radio-button-wrapper) {
+  background: transparent;
+  border-color: var(--as-border-strong);
+  color: var(--as-text-secondary);
+  font-family: var(--as-font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+
+:global(.ant-radio-button-wrapper-checked:not(.ant-radio-button-wrapper-disabled)) {
+  background: var(--as-ink) !important;
+  border-color: var(--as-ink) !important;
+  color: #fff !important;
+
+  &::before {
+    background: var(--as-ink) !important;
+  }
 }

@@ -188,10 +188,18 @@ export default function ResearchListPage() {
 
   return (
     <div className={styles.container}>
+      <div className={styles.shell}>
       <div className={styles.header}>
-        <h1 className={styles.title}>研究历史</h1>
-        <Button type="primary" onClick={() => setNewModalOpen(true)}>
-          新建研报
+        <div className={styles.identity}>
+          <div className={styles.eyebrow}>AlphaScout · Archive</div>
+          <h1 className={styles.title}>Research Library</h1>
+          <div className={styles.subtitle}>
+            <span className={styles.count}>{snap.list.length}</span>{' '}
+            past reports — investment due diligence by 5-agent collaboration
+          </div>
+        </div>
+        <Button type="primary" size="large" onClick={() => setNewModalOpen(true)}>
+          + 新建研报
         </Button>
       </div>
 
@@ -237,6 +245,7 @@ export default function ResearchListPage() {
           onClick: () => navigate(`/research/${record.id}`),
         })}
       />
+      </div>
     </div>
   )
 }
