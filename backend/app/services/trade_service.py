@@ -61,8 +61,10 @@ class TradeService:
     def _recompute_position(self, *, user_id: str, ts_code: str, name: str) -> None:
         """fold 该 (user_id, ts_code) 全部 Trade → UPSERT Position 行。
 
-        SQL ORDER BY trade_date ASC, created_at ASC for deterministic
-        same-day trade ordering (fold algorithm relies on caller-provided ordering).
+        Note: SQL ORDER BY trade_date ASC, created_at ASC ensures same-day
+        trades arrive at recompute_position_from_trades in deterministic order.
+        The fold function re-sorts by trade_date (stable sort), so the
+        same-day created_at order is preserved through the fold.
         """
         trades = (
             self._session.query(Trade)

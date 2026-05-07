@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from decimal import Decimal
 from uuid import uuid4
 
@@ -16,7 +17,7 @@ from tests.unit._helpers import make_user
 
 
 @pytest.fixture
-def session() -> Session:
+def session() -> Generator[Session, None, None]:
     engine = create_engine("sqlite:///:memory:")
     User.__table__.create(engine)
     Position.__table__.create(engine)

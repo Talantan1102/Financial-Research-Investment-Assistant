@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from datetime import date
 from decimal import Decimal
 
@@ -17,7 +18,7 @@ from tests.unit._helpers import make_user  # NEW: from cleanup
 
 
 @pytest.fixture
-def session() -> Session:
+def session() -> Generator[Session, None, None]:
     engine = create_engine("sqlite:///:memory:")
     User.__table__.create(engine)
     Trade.__table__.create(engine)
@@ -34,7 +35,7 @@ def user(session: Session) -> User:
 def test_create_initial_trade_creates_position_row(session: Session, user: User) -> None:
     svc = TradeService(session)
     trade = svc.create(
-        user_id=user.id,
+        user_id=user.id,  # type: ignore[arg-type]
         ts_code="600519.SH",
         name="贵州茅台",
         ttype=TradeType.INITIAL,
@@ -60,7 +61,7 @@ def test_create_sequence_initial_buy_sell_matches_spec_scenario_1(
     """spec § 5 测试场景 1 的 e2e 重现 — TradeService 链式调用后 Position 数值。"""
     svc = TradeService(session)
     svc.create(
-        user_id=user.id,
+        user_id=user.id,  # type: ignore[arg-type]
         ts_code="600519.SH",
         name="贵州茅台",
         ttype=TradeType.INITIAL,
@@ -69,7 +70,7 @@ def test_create_sequence_initial_buy_sell_matches_spec_scenario_1(
         trade_date=date(2024, 6, 1),
     )
     svc.create(
-        user_id=user.id,
+        user_id=user.id,  # type: ignore[arg-type]
         ts_code="600519.SH",
         name="贵州茅台",
         ttype=TradeType.BUY,
@@ -78,7 +79,7 @@ def test_create_sequence_initial_buy_sell_matches_spec_scenario_1(
         trade_date=date(2026, 1, 15),
     )
     svc.create(
-        user_id=user.id,
+        user_id=user.id,  # type: ignore[arg-type]
         ts_code="600519.SH",
         name="贵州茅台",
         ttype=TradeType.SELL,
@@ -102,7 +103,7 @@ def test_create_does_not_leak_to_other_user(session: Session, user: User) -> Non
     user_b = make_user(session)
 
     svc.create(
-        user_id=user.id,
+        user_id=user.id,  # type: ignore[arg-type]
         ts_code="600519.SH",
         name="贵州茅台",
         ttype=TradeType.INITIAL,
