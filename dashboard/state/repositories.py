@@ -1,4 +1,4 @@
-"""sqlite CRUD。M1 仅 SnapshotRepo;M2 增 OverrideRepo / DecisionRepo。"""
+"""sqlite CRUD。M1 仅 SnapshotRepo;M2 增 OverrideRepo;M3 增 DecisionNoteRepo。"""
 
 from __future__ import annotations
 
@@ -81,4 +81,43 @@ class OverrideRepo:
             self.conn.execute(
                 "DELETE FROM capability_override WHERE capability_id = ?",
                 (capability_id,),
+            )
+
+
+class DecisionNoteRepo:
+    """sqlite CRUD for decision_note。single row per decision(spec § 4)。"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get_all(self) -> dict[str, str]:
+        """返回 {decision_id: note}"""
+        cur = self.conn.execute("SELECT decision_id, note FROM decision_note")
+        return {row["decision_id"]: row["note"] for row in cur.fetchall()}
+
+    def upsert(
+        self,
+        decision_id: str,
+        note: str,
+        set_at: str | None = None,
+    ) -> None:
+        """upsert per decision_id (PRIMARY KEY conflict 时覆盖)。"""
+        set_at = set_at or datetime.now(UTC).isoformat()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO decision_note (decision_id, note, set_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(decision_id) DO UPDATE SET
+                  note = excluded.note,
+                  set_at = excluded.set_at
+                """,
+                (decision_id, note, set_at),
+            )
+
+    def delete(self, decision_id: str) -> None:
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM decision_note WHERE decision_id = ?",
+                (decision_id,),
             )

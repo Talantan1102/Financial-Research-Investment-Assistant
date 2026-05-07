@@ -1,4 +1,4 @@
-"""sqlite schema + connection。M1 derived_snapshot;M2 加 capability_override。"""
+"""sqlite schema + connection。M1 derived_snapshot;M2 加 capability_override;M3 加 decision_note。"""
 
 from __future__ import annotations
 
@@ -16,6 +16,12 @@ CREATE TABLE IF NOT EXISTS capability_override (
   capability_id TEXT PRIMARY KEY,
   status TEXT NOT NULL,
   reason TEXT NOT NULL DEFAULT '',
+  set_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS decision_note (
+  decision_id TEXT PRIMARY KEY,
+  note TEXT NOT NULL DEFAULT '',
   set_at TEXT NOT NULL
 );
 """
