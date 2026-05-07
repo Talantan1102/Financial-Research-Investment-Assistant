@@ -16,7 +16,7 @@ from starlette.templating import Jinja2Templates
 from dashboard.derive.snapshot_builder import build_snapshot
 from dashboard.derive.types import SnapshotDict
 from dashboard.state.db import open_db
-from dashboard.state.repositories import SnapshotRepo
+from dashboard.state.repositories import OverrideRepo, SnapshotRepo
 
 DASHBOARD_ROOT = Path(__file__).parent
 PROJECT_ROOT = DASHBOARD_ROOT.parent
@@ -34,15 +34,17 @@ def _today_label() -> str:
 
 
 def _get_or_build_snapshot() -> SnapshotDict:
-    """Lazy 派生:若 sqlite 无 snapshot,跑一次 build。"""
+    """Lazy 派生:若 sqlite 无 snapshot,跑一次 build(把 override 喂进去)。"""
     conn = open_db(DB_PATH)
     try:
-        repo = SnapshotRepo(conn)
-        snap = repo.get_latest()
+        snap_repo = SnapshotRepo(conn)
+        snap = snap_repo.get_latest()
         if snap is None:
-            snapshot = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
-            repo.save(snapshot.refreshed_at, snapshot.to_dict())
-            snap = repo.get_latest()
+            override_repo = OverrideRepo(conn)
+            overrides = override_repo.get_all()
+            snapshot = build_snapshot(PROJECT_ROOT, CONFIG_DIR, overrides=overrides)
+            snap_repo.save(snapshot.refreshed_at, snapshot.to_dict())
+            snap = snap_repo.get_latest()
             assert snap is not None  # just saved
         return snap
     finally:
@@ -50,6 +52,9 @@ def _get_or_build_snapshot() -> SnapshotDict:
 
 
 async def index(request: Request) -> HTMLResponse:
+    view_mode = request.query_params.get("view", "d")
+    if view_mode not in ("d", "b"):
+        view_mode = "d"
     snap = _get_or_build_snapshot()
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
     return templates.TemplateResponse(
@@ -59,6 +64,7 @@ async def index(request: Request) -> HTMLResponse:
             "today": _today_label(),
             "snap": snap,
             "wips": wips,
+            "view_mode": view_mode,
         },
     )
 

@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
   {% include "_hero.html" %}
-  <section class="d-view">
-    {% include "_d_view.html" %}
+  {% include "_d_b_toggle.html" %}
+  <section class="view-content">
+    {% if view_mode == 'b' %}
+      <p class="placeholder">B Kanban — 在 Task 6 接入</p>
+    {% else %}
+      {% include "_d_view.html" %}
+    {% endif %}
   </section>
 {% endblock %}
