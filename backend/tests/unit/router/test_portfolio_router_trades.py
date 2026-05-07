@@ -194,3 +194,42 @@ def test_patch_buy_trade_returns_409(
     )
     assert patch_resp.status_code == 409
     assert "不可改" in patch_resp.json()["detail"]
+
+
+def test_delete_other_user_trade_returns_404(
+    app_and_session: tuple[FastAPI, Session, User],
+) -> None:
+    """Cross-user isolation: trade owned by another user should 404, not 500 or success."""
+    app, session, user = app_and_session
+    client = TestClient(app)
+    # Create a trade owned by 'user'
+    create_resp = client.post(
+        "/portfolio/trades",
+        json={
+            "ts_code": "600519.SH",
+            "name": "茅台",
+            "type": "initial",
+            "quantity": 100,
+            "price": "1450.00",
+            "trade_date": "2024-06-01",
+        },
+    )
+    trade_id = create_resp.json()["id"]
+
+    # Override auth to a different user
+    other_user = make_user(session)
+    session.commit()
+    app.dependency_overrides[get_current_user_required] = lambda: other_user
+
+    del_resp = client.delete(f"/portfolio/trades/{trade_id}")
+    assert del_resp.status_code == 404
+
+
+def test_delete_nonexistent_trade_returns_404(
+    app_and_session: tuple[FastAPI, Session, User],
+) -> None:
+    """Nonexistent trade_id should 404, not 500."""
+    app, _, _ = app_and_session
+    client = TestClient(app)
+    del_resp = client.delete("/portfolio/trades/nonexistent-id-xyz")
+    assert del_resp.status_code == 404

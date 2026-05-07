@@ -20,6 +20,7 @@ import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -34,16 +35,13 @@ from app.schemas.portfolio import (
 from app.services.portfolio_exceptions import (
     ExpiredDeletionError,
     ImmutableTradeError,
+    PortfolioError,
 )
 from app.services.trade_service import TradeService
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio-v1.0"])
-
-
-def _trade_type_from_str(s: str) -> TradeType:
-    return TradeType(s)
 
 
 @router.post(
@@ -57,19 +55,23 @@ async def create_trade(
     user: Annotated[User, Depends(get_current_user_required)],
 ) -> TradeRead:
     svc = TradeService(db)
-    trade = svc.create(
-        user_id=str(user.id),  # type: ignore[arg-type]
-        ts_code=payload.ts_code,
-        name=payload.name,
-        ttype=_trade_type_from_str(payload.type),
-        quantity=payload.quantity,
-        price=payload.price,
-        trade_date=payload.trade_date,
-        note=payload.note,
-    )
-    db.commit()
-    db.refresh(trade)
-    return TradeRead.model_validate(trade)
+    try:
+        trade = svc.create(
+            user_id=str(user.id),  # type: ignore[arg-type]
+            ts_code=payload.ts_code,
+            name=payload.name,
+            ttype=TradeType(payload.type),
+            quantity=payload.quantity,
+            price=payload.price,
+            trade_date=payload.trade_date,
+            note=payload.note,
+        )
+        db.commit()
+        db.refresh(trade)
+        return TradeRead.model_validate(trade)
+    except PortfolioError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 @router.delete(
@@ -83,8 +85,10 @@ async def delete_trade(
 ) -> None:
     svc = TradeService(db)
     try:
-        svc.delete(trade_id)
+        svc.delete(trade_id, user_id=str(user.id))  # type: ignore[arg-type]
         db.commit()
+    except NoResultFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
     except ExpiredDeletionError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -100,10 +104,12 @@ async def update_trade(
     svc = TradeService(db)
     fields = payload.model_dump(exclude_unset=True)
     try:
-        trade = svc.update(trade_id, **fields)
+        trade = svc.update(trade_id, user_id=str(user.id), **fields)  # type: ignore[arg-type]
         db.commit()
         db.refresh(trade)
         return TradeRead.model_validate(trade)
+    except NoResultFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
     except ImmutableTradeError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

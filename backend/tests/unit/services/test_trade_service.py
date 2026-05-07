@@ -149,7 +149,7 @@ def test_delete_within_24h_reverses_position(session: Session, user: User) -> No
     )
     session.commit()
 
-    svc.delete(buy.id)  # type: ignore[arg-type]
+    svc.delete(buy.id, user_id=user.id)  # type: ignore[arg-type]
     session.commit()
 
     pos = session.query(Position).filter_by(user_id=user.id, ts_code="600519.SH").one()
@@ -175,7 +175,7 @@ def test_delete_after_24h_raises_expired(session: Session, user: User) -> None:
     session.flush()
 
     with pytest.raises(ExpiredDeletionError):
-        svc.delete(trade.id)  # type: ignore[arg-type]
+        svc.delete(trade.id, user_id=user.id)  # type: ignore[arg-type]
 
 
 def test_update_initial_trade_succeeds_anytime(session: Session, user: User) -> None:
@@ -194,7 +194,7 @@ def test_update_initial_trade_succeeds_anytime(session: Session, user: User) -> 
     trade.created_at = datetime.utcnow() - timedelta(hours=48)  # type: ignore[assignment]
     session.flush()
 
-    updated = svc.update(trade.id, price=Decimal("1455.00"))  # type: ignore[arg-type]
+    updated = svc.update(trade.id, user_id=user.id, price=Decimal("1455.00"))  # type: ignore[arg-type]
     session.commit()
     assert updated.price == Decimal("1455.00")
 
@@ -228,7 +228,7 @@ def test_update_buy_trade_raises_immutable(session: Session, user: User) -> None
     session.commit()
 
     with pytest.raises(ImmutableTradeError):
-        svc.update(buy.id, price=Decimal("1499.00"))  # type: ignore[arg-type]
+        svc.update(buy.id, user_id=user.id, price=Decimal("1499.00"))  # type: ignore[arg-type]
 
 
 def test_update_sell_trade_raises_immutable(session: Session, user: User) -> None:
@@ -254,7 +254,7 @@ def test_update_sell_trade_raises_immutable(session: Session, user: User) -> Non
     session.commit()
 
     with pytest.raises(ImmutableTradeError):
-        svc.update(sell.id, quantity=20)  # type: ignore[arg-type]
+        svc.update(sell.id, user_id=user.id, quantity=20)  # type: ignore[arg-type]
 
 
 def test_update_unknown_field_raises_valueerror(session: Session, user: User) -> None:
@@ -272,4 +272,4 @@ def test_update_unknown_field_raises_valueerror(session: Session, user: User) ->
     session.commit()
 
     with pytest.raises(ValueError, match="unknown fields"):
-        svc.update(trade.id, foo="bar")  # type: ignore[arg-type]
+        svc.update(trade.id, user_id=user.id, foo="bar")  # type: ignore[arg-type]

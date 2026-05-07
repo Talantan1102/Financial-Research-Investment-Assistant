@@ -110,12 +110,13 @@ class TradeService:
             pos.name = name  # type: ignore[assignment]  # 同步名称变更
         self._session.flush()
 
-    def delete(self, trade_id: str) -> None:
+    def delete(self, trade_id: str, *, user_id: str) -> None:
         """删除 trade 并重算 Position。超 24h 抛 ExpiredDeletionError(spec § 3.3)。
 
+        user_id 必传 — 防止跨用户操作(spec § 3.3 implicit user-isolation)。
         Caller 负责 session.commit()。
         """
-        trade = self._session.query(Trade).filter_by(id=trade_id).one()
+        trade = self._session.query(Trade).filter_by(id=trade_id, user_id=user_id).one()
         if datetime.utcnow() - cast(datetime, trade.created_at) > timedelta(hours=24):
             raise ExpiredDeletionError("超 24h 不可删,请录反向交易抵消")
         user_id = cast(str, trade.user_id)
@@ -127,13 +128,14 @@ class TradeService:
 
     _INITIAL_UPDATABLE = {"ts_code", "name", "quantity", "price", "trade_date", "note"}
 
-    def update(self, trade_id: str, **fields: object) -> Trade:
+    def update(self, trade_id: str, *, user_id: str, **fields: object) -> Trade:
         """修改 INITIAL trade 的字段并重算 Position(spec § 3.3 + § 5 场景 3/5)。
 
+        user_id 必传 — 防止跨用户操作(spec § 3.3 implicit user-isolation)。
         非 INITIAL trade 无论时间早晚均抛 ImmutableTradeError。
         Caller 负责 session.commit()。
         """
-        trade = self._session.query(Trade).filter_by(id=trade_id).one()
+        trade = self._session.query(Trade).filter_by(id=trade_id, user_id=user_id).one()
         if trade.type != TradeType.INITIAL:
             raise ImmutableTradeError("常规交易不可改字段,过 24h 也不可")
 
