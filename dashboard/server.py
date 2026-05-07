@@ -57,16 +57,22 @@ async def index(request: Request) -> HTMLResponse:
         view_mode = "d"
     snap = _get_or_build_snapshot()
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
-    return templates.TemplateResponse(
-        request,
-        "main.html",
-        {
-            "today": _today_label(),
-            "snap": snap,
-            "wips": wips,
-            "view_mode": view_mode,
-        },
-    )
+    ctx: dict[str, object] = {
+        "today": _today_label(),
+        "snap": snap,
+        "wips": wips,
+        "view_mode": view_mode,
+    }
+    if view_mode == "b":
+        # Pre-compute Kanban lists (Risk 5 mitigation: avoid jinja list.append)
+        ctx["todo_caps"] = [
+            c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "todo"
+        ]
+        ctx["wip_caps"] = wips
+        ctx["lit_caps"] = [
+            c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "lit"
+        ]
+    return templates.TemplateResponse(request, "main.html", ctx)
 
 
 async def healthz(_request: Request) -> JSONResponse:

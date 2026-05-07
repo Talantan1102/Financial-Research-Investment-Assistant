@@ -121,3 +121,47 @@ html, body {
 /* 响应式简版 */
 @media (max-width: 1024px) { .layer-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) { .layer-grid { grid-template-columns: 1fr; } }
+
+/* Kanban (B view 三列) */
+.kanban {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.kanban-col {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  min-height: 120px;
+}
+.kanban-head {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.kanban-head summary {
+  cursor: pointer;
+  font-weight: inherit;
+}
+.kanban-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.kanban-todo .kanban-head { color: var(--todo-fg); }
+.kanban-doing .kanban-head { color: var(--wip-fg); }
+.kanban-done .kanban-head summary { color: var(--lit-fg); }
+.kanban-body .empty {
+  color: var(--todo-fg);
+  font-style: italic;
+  font-size: 11px;
+  padding: 4px;
+}
+
+/* Kanban 响应式 */
+@media (max-width: 800px) {
+  .kanban { grid-template-columns: 1fr; }
+}

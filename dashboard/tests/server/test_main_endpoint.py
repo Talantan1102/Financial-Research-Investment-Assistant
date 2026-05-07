@@ -36,11 +36,15 @@ def test_view_d_default() -> None:
         assert "D 维度" in body
 
 
-def test_view_b_placeholder() -> None:
-    """?view=b 进 B 视图,M2 Task 5 时是 placeholder(Task 6 接 Kanban)。"""
+def test_view_b_renders_kanban() -> None:
+    """?view=b 渲染 Kanban 三列。"""
     with TestClient(app) as client:
         r = client.get("/?view=b")
         assert r.status_code == 200
         body = r.text
         assert 'class="layer-card"' not in body  # 不显 D 视图
-        assert "placeholder" in body  # M2 Task 6 之前是 placeholder
+        assert 'class="kanban"' in body
+        assert "Todo (" in body  # todo 列 header
+        assert "Doing (" in body
+        assert "Done (" in body
+        assert "<details>" in body  # Done 列折叠

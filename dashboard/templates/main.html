@@ -4,7 +4,7 @@
   {% include "_d_b_toggle.html" %}
   <section class="view-content">
     {% if view_mode == 'b' %}
-      <p class="placeholder">B Kanban — 在 Task 6 接入</p>
+      {% include "_b_view.html" %}
     {% else %}
       {% include "_d_view.html" %}
     {% endif %}
