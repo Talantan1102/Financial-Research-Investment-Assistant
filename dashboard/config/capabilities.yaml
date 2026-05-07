@@ -16,15 +16,15 @@ dimensions:
       - id: constrained_schema
         name_cn: "输出 Schema 约束"
         name_en: "Constrained schema"
-        derive_rule: { type: code_grep, pattern: 'response_format', path_glob: 'backend/app/services/llm_*.py' }
+        derive_rule: { type: code_grep, pattern: 'response_format', path_glob: 'backend/app/services/openai_client.py' }
       - id: skills_bundle
         name_cn: "Skills bundle (17-component)"
         name_en: "Skills bundle"
-        derive_rule: { type: file_exists, path: 'backend/app/services/skills/registry.py' }
+        derive_rule: { type: file_exists, path: 'backend/app/skills/financial_research' }
       - id: per_task_registry
         name_cn: "Per-task plan registry"
         name_en: "Per-task plan registry"
-        derive_rule: { type: code_grep, pattern: 'plan_registry', path_glob: 'backend/app/services/skills/**' }
+        derive_rule: { type: code_grep, pattern: 'plan_registry', path_glob: 'backend/app/agents/**' }
       - id: prompt_versioning
         name_cn: "Prompt 版本化"
         name_en: "Prompt Versioning"
@@ -50,11 +50,11 @@ dimensions:
       - id: tool_registry
         name_cn: "Tool Registry"
         name_en: "Tool Registry"
-        derive_rule: { type: file_exists, path: 'backend/app/services/tool_registry.py' }
+        derive_rule: { type: file_exists, path: 'backend/app/tools/registry.py' }
       - id: schema_validated_io
         name_cn: "Schema-validated tool I/O"
         name_en: "Schema-validated I/O"
-        derive_rule: { type: code_grep, pattern: 'BaseModel.*Tool', path_glob: 'backend/app/tools/base.py' }
+        derive_rule: { type: code_grep, pattern: 'args_schema:\s*type\[BaseModel\]', path_glob: 'backend/app/tools/base.py' }
       - id: di_mock_real
         name_cn: "DI mock/real 切换"
         name_en: "DI mock/real toggle"
@@ -66,7 +66,7 @@ dimensions:
       - id: financial_tools
         name_cn: "8 个金融工具"
         name_en: "8 financial tools"
-        derive_rule: { type: code_grep, pattern: 'def get_', path_glob: 'backend/app/tools/get_*.py' }
+        derive_rule: { type: code_grep, pattern: 'class\s+\w+\(Tool\)', path_glob: 'backend/app/tools/get_*.py' }
       - id: mcp_bridge
         name_cn: "MCP 协议适配"
         name_en: "MCP bridge"
@@ -96,7 +96,7 @@ dimensions:
       - id: send_subgraph
         name_cn: "Send + subgraph 并行"
         name_en: "Send + subgraph"
-        derive_rule: { type: code_grep, pattern: 'Send\(', path_glob: 'backend/app/agents/**' }
+        derive_rule: { type: code_grep, pattern: 'Send\(', path_glob: 'backend/app/orchestration/**' }
       - id: critic_7_stage
         name_cn: "7 阶段 Critic"
         name_en: "7-stage Critic"
@@ -104,11 +104,11 @@ dimensions:
       - id: sse_streaming
         name_cn: "SSE 流式"
         name_en: "SSE streaming"
-        derive_rule: { type: code_grep, pattern: 'EventSource|StreamingResponse', path_glob: 'backend/app/api/**' }
+        derive_rule: { type: code_grep, pattern: 'EventSource|StreamingResponse', path_glob: 'backend/app/router/**' }
       - id: sqlite_saver
         name_cn: "SqliteSaver checkpoint"
         name_en: "SqliteSaver"
-        derive_rule: { type: code_grep, pattern: 'SqliteSaver', path_glob: 'backend/app/agents/**' }
+        derive_rule: { type: code_grep, pattern: 'SqliteSaver', path_glob: 'backend/app/orchestration/**' }
       - id: plan_and_execute
         name_cn: "Plan-and-Execute pattern"
         name_en: "Plan-and-Execute"
@@ -130,7 +130,7 @@ dimensions:
       - id: session_checkpoint
         name_cn: "Session checkpoint"
         name_en: "Session (SqliteSaver)"
-        derive_rule: { type: code_grep, pattern: 'SqliteSaver', path_glob: 'backend/app/agents/**' }
+        derive_rule: { type: code_grep, pattern: 'SqliteSaver', path_glob: 'backend/app/orchestration/**' }
       - id: long_term_memory
         name_cn: "长期记忆"
         name_en: "Long-term memory"
@@ -198,7 +198,7 @@ dimensions:
       - id: constrained_router
         name_cn: "Constrained LLM Router"
         name_en: "Constrained Router"
-        derive_rule: { type: file_exists, path: 'backend/app/services/constrained_router.py' }
+        derive_rule: { type: code_grep, pattern: 'constrained', path_glob: 'backend/app/agents/research_planner.py' }
       - id: pydantic_schema
         name_cn: "Pydantic schema 验证"
         name_en: "Pydantic schema"
@@ -206,7 +206,7 @@ dimensions:
       - id: langgraph_retry
         name_cn: "LangGraph retry edge"
         name_en: "LangGraph retry"
-        derive_rule: { type: code_grep, pattern: 'add_edge.*retry|conditional_edges', path_glob: 'backend/app/agents/**' }
+        derive_rule: { type: code_grep, pattern: 'add_edge.*retry|conditional_edges', path_glob: 'backend/app/orchestration/**' }
       - id: per_step_critic
         name_cn: "Per-step Critic"
         name_en: "Per-step Critic"
@@ -248,7 +248,7 @@ dimensions:
       - id: cassette_l2
         name_cn: "L2 Cassette VCR"
         name_en: "L2 Cassette"
-        derive_rule: { type: code_grep, pattern: 'use_cassette', path_glob: 'backend/tests/**' }
+        derive_rule: { type: code_grep, pattern: 'vcr_config|LLM_MODE', path_glob: 'backend/tests/**' }
       - id: test_suite
         name_cn: "289+ pytest"
         name_en: "289+ tests"
@@ -286,7 +286,7 @@ dimensions:
       - id: max_tokens_calibration
         name_cn: "max_tokens per-model 校准"
         name_en: "max_tokens calibration"
-        derive_rule: { type: code_grep, pattern: 'max_tokens', path_glob: 'backend/app/services/llm_*.py' }
+        derive_rule: { type: code_grep, pattern: 'max_tokens', path_glob: 'backend/app/services/openai_client.py' }
       - id: model_caching
         name_cn: "Model response 缓存"
         name_en: "Model caching"
