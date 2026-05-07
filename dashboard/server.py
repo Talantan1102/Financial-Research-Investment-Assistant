@@ -69,6 +69,7 @@ async def index(request: Request) -> HTMLResponse:
         "snap": snap,
         "wips": wips,
         "view_mode": view_mode,
+        "active_view": view_mode,  # M3:同 view_mode("d" 或 "b"),decisions 用独立 route 不走这
         "app_shell": app_shell,
     }
     if view_mode == "b":
