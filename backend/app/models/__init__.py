@@ -9,6 +9,7 @@ from .knowledge import Document, KnowledgeBase
 from .news import BiddingInfo, IndustryNews, NewsCollectionTask
 from .research import ResearchCheckpoint
 from .research_report import ResearchReport
+from .trade import Trade, TradeType
 from .user import User
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "PolicyData",
     "ResearchCheckpoint",
     "ResearchReport",
+    "Trade",
+    "TradeType",
     "IndustryNews",
     "BiddingInfo",
     "NewsCollectionTask",
