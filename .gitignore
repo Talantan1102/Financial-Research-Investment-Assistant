@@ -66,3 +66,6 @@ USER_ACTION.md
 
 # Eval/trace local SQLite (regenerated from schema each run)
 backend/data/
+
+# Harness Board sqlite (派生重建,不进 git)
+backend/data/board.db
