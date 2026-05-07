@@ -138,85 +138,38 @@ kb = [
 
 ---
 
-## § 3 代码改动
+## § 3 代码改动 — **无 active code 改动需要**
 
-### 3.1 新建 `backend/app/router/knowledge_stub.py`(~30 行)
+> ⚠️ **2026-05-07 实施中校准**:本节原计划 stub router + app_main try/except,实际验证发现是**基于错误假设**。校准后:**Task 2 pyproject 拆分已经达成所有目标,无需 router-level 兜底**。
 
-```python
-"""Stub knowledge_router used when kb extras not installed.
+### 3.1 校准:knowledge_router **不依赖 kb-extras**
 
-Roadmap 2026-05-07 dep refactor — when uv sync runs without --extra kb,
-the real knowledge_router import fails (ImportError on pymilvus/mineru/etc.).
-This stub takes its place: same /knowledge prefix, all routes return 503
-with informative error directing user to install kb extras.
+**原假设**(出 spec 时未深查):`from app.router.knowledge_router import router` 在 slim install 时会 ImportError(pymilvus 没装),所以需要 stub 兜底。
 
-See: docs/superpowers/specs/2026-05-07-dep-groups-refactor-design.md § 3
-"""
+**实际**(实施中 grep + 实测):
+- `knowledge_router.py:23` prefix 是 `/knowledge-bases`(不是 `/knowledge`),只做 KB metadata CRUD
+- 它的 imports 只有 `app.core.database` / `app.models.knowledge` / `app.models.user` / `app.router.auth_router` / `app.schemas.knowledge` —— **没** import `services.milvus_client` / `services.pdf_parser_factory` / `services.kb_search_service` / `services.kb_factory` 等任何 kb-extras 依赖路径
+- **slim install + `python -c "from app.app_main import app"` 实测**:42 routes 全部加载成功,**完全不报错**
 
-from fastapi import APIRouter, HTTPException, status
+### 3.2 真正会 ImportError 的位置(运行时,不在启动链上)
 
-router = APIRouter(prefix="/knowledge", tags=["knowledge-stub"])
+- `tools/kb_search.py:13` → `from app.services.kb_search_service import KbSearchService`(顶层 import)
+- `kb_search_service.py:11` → `from app.services.milvus_client import (...)`(顶层 import)
+- `milvus_client.py:9` → `from pymilvus import (...)` ← 这才是真 ImportError 触发点
+- `kb_factory.py:8-9` → 同样链路
+- `router/research.py:317` → **lazy import** in function body(`from app.services.kb_factory import build_kb_search_service_from_env`),只在 RAG search 调用时触发
 
-_UNAVAILABLE_DETAIL = {
-    "error": "kb_extras_not_installed",
-    "message": (
-        "KB feature requires optional 'kb' deps "
-        "(mineru / pymilvus / pdfplumber / langchain-text-splitters). "
-        "Install with: uv sync --extra dev --extra kb"
-    ),
-    "doc": "docs/superpowers/specs/2026-05-07-dep-groups-refactor-design.md",
-}
+**含义:** Slim install 启动 app 没问题。**只有 agent 运行时调 KB search 工具**(比如 research_agent 的 RAG 搜索 / kb_search tool)才会 ImportError。
 
+### 3.3 决策:**不在本 PR 处理运行时 KB ImportError**(YAGNI)
 
-@router.api_route(
-    "/{path:path}",
-    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-)
-async def kb_unavailable(path: str) -> None:
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail=_UNAVAILABLE_DETAIL,
-    )
-```
+理由:
+- 本 PR 目标是"Codespaces 32GB 装得下" → Task 2 已达成
+- 运行时失败位于 agent / tool 层面,不是 app 启动层 → 跟本 PR 主题不耦合
+- Slim install 用户的语境是"我做 #3.5 类不需要 KB 的工作" → 不期望 KB search 跑 → ImportError 是 expected behavior
+- 真要包,应该在 `kb_factory.build_kb_search_service_from_env` 入口加 try/except,让它返一个 stub `KbSearchService` 抛 informative error。这是独立 PR 的 scope(若未来真需要的话)
 
-### 3.2 改 `backend/app/app_main.py`
-
-**当前**(行 24,302):
-```python
-from app.router.knowledge_router import router as knowledge_router  # noqa: E402
-# ...
-app.include_router(knowledge_router)
-```
-
-**改为**(条件加载):
-```python
-# 行 24 附近 — 替换原 import 行:
-try:
-    from app.router.knowledge_router import router as knowledge_router  # noqa: E402
-    _kb_router_available = True
-    _kb_import_error: str | None = None
-except ImportError as e:
-    knowledge_router = None  # type: ignore[assignment]
-    _kb_router_available = False
-    _kb_import_error = str(e)
-
-# 行 302 附近 — 替换原 include_router 行:
-if _kb_router_available:
-    app.include_router(knowledge_router)
-    logger.info("KB router loaded — /knowledge endpoints active")
-else:
-    from app.router.knowledge_stub import router as knowledge_stub_router  # noqa: E402
-    app.include_router(knowledge_stub_router)
-    logger.warning(
-        "KB feature deps not installed (%s); /knowledge endpoints return 503. "
-        "Install with: uv sync --extra dev --extra kb",
-        _kb_import_error,
-    )
-```
-
-### 3.3 不动其他 import
-
-`services/milvus_client.py`、`services/pdf_parser_factory.py`、`kb/chunkers/section.py` 等模块的 top-level import **不动**。它们只在 knowledge_router 加载时被传递 import,本方案 short-circuit 在 router 层。
+**所以 § 3 全部代码改动 = 无**。Task 2 (pyproject 拆分) 是这个 PR 的全部代码改动。
 
 ---
 
@@ -269,11 +222,13 @@ uv sync --extra dev
 uv sync --extra dev --extra kb
 ```
 
-**精简安装**(磁盘紧张 / 不需要 KB feature 的开发场景,如 Codespaces 32GB):
+**精简安装**(磁盘紧张 / 不需要 KB 检索 + ingest 的开发场景,如 Codespaces 32GB):
 
 ```bash
 uv sync --extra dev
-# ⚠️ /knowledge endpoint 此模式下会返 503;ingest 工作流不可用
+# /knowledge-bases CRUD 仍可用(KB metadata 操作不依赖重型 ML deps)
+# 只有 KB 检索(milvus 向量搜索)+ ingest(PDF 切片)在 agent 运行时调用会 ImportError
+# 这种模式适合做 #3.5 类纯 DB / cache 等不碰 KB 检索的开发工作
 ```
 ```
 
@@ -282,16 +237,24 @@ uv sync --extra dev
 ```markdown
 ## KB feature
 
-Default `setup.sh` does **slim install** (`uv sync --extra dev`) — `/knowledge`
-endpoints return 503. To enable KB feature inside the codespace:
+Default `setup.sh` does **slim install** (`uv sync --extra dev`) — app starts
+cleanly, `/knowledge-bases` CRUD works (KB metadata 操作不需要重 ML deps)。
+但 KB 检索(走 milvus)和 ingest 工作流(走 mineru / pdfplumber)在调用时
+会 ImportError。
+
+要启用完整 KB feature(检索 + ingest),在 codespace 里:
 
 ```bash
 cd backend
 uv sync --extra dev --extra kb
 ```
 
-⚠️ `kb` extras 拉 ~5-8GB ML libs(mineru / torch / cuda)。32GB codespace 可能装不下;
-建议改 codespace machine 为 64GB(`gh codespace edit --machine premiumLinux`)再装。
+⚠️ `kb` extras 拉 ~5-8GB ML libs(mineru / torch / cuda)。32GB codespace 装不下;
+要改 codespace machine 为 64GB(`gh codespace edit --machine premiumLinux`)再装。
+
+**典型 codespace 工作流:**
+- Codespaces 默认 slim → 适合做不依赖 KB 检索的 dev 工作(DB 迁移 / cache / monitoring 等)
+- 需要 KB dogfood → 切到 Mac 本地 dev(已经装齐)或换大 codespace
 ```
 
 ---
@@ -304,7 +267,7 @@ uv sync --extra dev --extra kb
 | Mac dev 用户已有 venv | 已装齐 | 跑 `uv sync --extra dev --extra kb` re-sync,实际不会重装(deps 都在) |
 | 生产部署(若有) | 现在装齐 | 部署脚本改 `--extra dev --extra kb` |
 | CI(GitHub Actions) | 现在 `--extra dev` 装齐 | 决策 3 改 `--extra dev --extra kb`,CI 时间不变 |
-| **Codespaces** | 现在 slim install + setup.sh 装失败(磁盘满) | ship 后 setup.sh 跑 `uv sync --extra dev`,**装得下**;`/knowledge` 返 503 |
+| **Codespaces** | 现在 slim install + setup.sh 装失败(磁盘满) | ship 后 setup.sh 跑 `uv sync --extra dev`,**装得下**;`/knowledge-bases` CRUD 工作;agent 调 KB 检索 / ingest 时运行时 ImportError(expected) |
 
 **所有 `_DEFAULT_KB_*` 配置 / `KB_MODE=mock` 等 env 变量** 不动 —— 它们是 KB 内部的 config switch,本 PR 只改 install 入口。
 
@@ -314,24 +277,27 @@ uv sync --extra dev --extra kb
 
 | 风险 | 概率 | 后果 | 缓解 |
 |---|---|---|---|
-| KB 模块被非 KB 代码 transitive import(漏 grep) | 中 | slim install 后 app 启动崩溃,而不是 stub 路由接管 | 实施 task 0 强制 grep `from pymilvus\|from mineru\|from pdfplumber\|from langchain_text_splitters` 全 backend,把所有 top-level KB import 链路审一遍。如有非 KB 链路,本 PR 加 try/except 或推到独立 PR |
-| `services/milvus_client.py` 被某个 active service 依赖 | 低-中 | 同上 | 同上 + 单独审 milvus_client 的 callers |
-| README 文档不到位,Mac 用户 ship 后第一次 sync 没 `--extra kb` 导致 KB endpoint 返 503 | 中 | UX 困惑 | README 安装段重写 + 强提示;ship 时通知用户 |
-| Codespaces 用户在 codespace 里手动 `--extra kb` 装失败(32GB 不够) | 高 | UX:用户尝试装但看到磁盘错 | `.devcontainer/README.md` 标注 32GB 局限 + 推荐换 premiumLinux |
+| ~~KB 模块被非 KB 代码 transitive import~~ | ~~中~~ | ~~app 启动崩溃~~ | **2026-05-07 实测验证此风险不存在**:slim install 启动 app 成功,42 routes 全部加载,knowledge_router.py 不依赖 kb extras。原 spec 假设错误,§ 3 已校准 |
+| Mac 用户 ship 后第一次 sync 没 `--extra kb` 导致 agent 跑 KB 时 ImportError | 中 | UX 困惑(尤其是 dogfood 完整研报时撞到) | README 安装段强推荐"完整安装";本 PR ship 时通知用户;agent 报错信息可后续 PR 改 graceful |
+| Codespaces 用户在 codespace 里手动 `--extra kb` 装失败(32GB 不够) | 高 | UX:用户尝试装但看到磁盘错 | `.devcontainer/README.md` 标注 32GB 局限 + 推荐换 premiumLinux machine |
 | 测试发现某个 unit/integration 测试假定 KB deps 装着 → CI 不通 | 低 | CI 红 | CI 装 kb extras(决策 3),不踩这个坑 |
+| 运行时 ImportError 体验差(没 graceful 降级)| 低-中 | KB search 报 raw `ModuleNotFoundError: pymilvus` 而非"请装 kb extras" | 留作独立 PR(在 `kb_factory.build_kb_search_service_from_env` / `tools/kb_search.py` 入口加 try/except,YAGNI 直到真有用户撞)|
 
 ---
 
 ## § 8 自审(Spec Self-Review)
 
+> **2026-05-07 校准更新**:实施中发现原 § 3.1 (stub router) + § 3.2 (try/except) 基于错误假设(以为 knowledge_router import 链含 kb-extras,实测不含)。校准后:本 PR 唯一代码改动是 § 2 pyproject.toml 拆分。决策 2(stub 503)在校准后变为 N/A —— spec 保留为决策记录但实施跳过。
+
 - **Placeholder scan:** 无 TBD/TODO,所有 § 有具体内容
-- **Internal consistency:** 决策 1(minimal kb 组)→ § 2 pyproject 改动只动 6 行 ✓ ;决策 2(stub 503)→ § 3.1 stub router 30 行 ✓ ;决策 3(CI 全装)→ § 4 yml 改动一行 ✓ ;决策 4(Mac/CI 默认 full,只 Codespaces slim)→ § 6 migration 表对齐 ✓
-- **Scope check:** 一个 PR 里完成 pyproject.toml + 2 个代码文件 + 2 个 yml + README + .devcontainer 文档 — 7 个文件改动,3-4 小时,scope 合适
+- **Internal consistency:** 决策 1(minimal kb 组)→ § 2 pyproject 改动 ✓ ;~~决策 2(stub 503)→ § 3.1 stub router~~ → 校准后 N/A,§ 3 已重写说明原因 ✓ ;决策 3(CI 全装)→ § 4 yml 改动一行 ✓ ;决策 4(Mac/CI 默认 full,只 Codespaces slim)→ § 6 migration 表对齐 ✓
+- **Scope check:** 一个 PR 里完成 pyproject.toml + 2 个 yml + README + .devcontainer 文档 — **5 个文件改动**(校准后,从原 7 个减为 5 个),~2-3 小时(校准后偏乐观,1-2 小时即可),scope 简化
 - **Ambiguity check:**
   - "删 matplotlib/seaborn" 不是"移到 viz 组" — 决策 1 明确 ✓
-  - "stub router 走 503 不走 404" — 决策 2 明确 ✓
+  - ~~"stub router 走 503 不走 404"~~ — 校准后 N/A,knowledge_router 不需要 stub
   - Codespaces 用户主动加 kb extras 时磁盘可能不够 — § 7 风险表 + § 5 .devcontainer/README 标注 ✓
-- **Roadmap traceability:** § 0 引用 v0.9+ roadmap § 4 过渡期 #3 CI/dev 体验改进;PR #21 spec 提到了"已知 issue:legacy schema dual track"等 deferred 给 #3.5,本 PR 不算 roadmap 队列里的项,是 brainstorm 中冒出来的项目级清理(类比 § 4 过渡期 #2 legacy cleanup)
+  - "slim install 后 KB search 行为" — § 3.2 + § 5 明确(运行时 ImportError,/knowledge-bases CRUD 仍可用)
+- **Roadmap traceability:** § 0 引用 v0.9+ roadmap § 4 过渡期 #3 CI/dev 体验改进;本 PR 是 brainstorm 中冒出来的项目级清理(类比 § 4 过渡期 #2 legacy cleanup)
 
 ---
 

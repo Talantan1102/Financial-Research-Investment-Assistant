@@ -2,13 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move 4 KB feature heavy deps (mineru / pymilvus / pdfplumber / langchain-text-splitters) from `[project] dependencies` to `[project.optional-dependencies] kb`, delete unused matplotlib/seaborn, register a stub `knowledge_router` returning 503 when kb extras absent, update CI to install with `--extra kb`, document Mac/Codespaces install paths.
+> ⚠️ **2026-05-07 实施中校准** — Task 3 (knowledge_stub TDD) + Task 4 (app_main conditional) 是基于错误假设(以为 knowledge_router 在 slim install 时 ImportError),实测发现假设错误后**已 revert**。本 plan 实际有效任务:Task 0/1/2 + Task 5-14。Task 3/4 章节保留作历史记录,标 **REVERTED**。详见 spec § 3 校准说明 + § 8 自审。
 
-**Architecture:** `pyproject.toml` 改组结构 + `app_main.py` try/except import knowledge_router(失败时 fallback 到 stub `knowledge_stub.py` 返 503 with 信息明确的错误). 全程不动 KB 自身代码(milvus_client / pdf_parser_factory / chunkers 等),通过路由级 short-circuit 隔离 ImportError.
+**Goal:** Move 4 KB feature heavy deps (mineru / pymilvus / pdfplumber / langchain-text-splitters) from `[project] dependencies` to `[project.optional-dependencies] kb`, delete unused matplotlib/seaborn, ~~register a stub `knowledge_router` returning 503 when kb extras absent~~ (校准后 N/A — knowledge_router 实测不依赖 kb-extras), update CI to install with `--extra kb`, document Mac/Codespaces install paths.
 
-**Tech Stack:** uv(`uv sync --extra <group>`)、FastAPI APIRouter、pytest + pytest-asyncio、ruff/mypy strict.
+**Architecture:** `pyproject.toml` 改组结构 — 唯一代码改动。~~`app_main.py` try/except + stub fallback~~ → 校准后无需(knowledge_router 不在 kb-extras import 链上)。运行时 KB search ImportError(agent 调 kb_search tool 时)留独立 PR 处理。
 
-**Spec:** `docs/superpowers/specs/2026-05-07-dep-groups-refactor-design.md`
+**Tech Stack:** uv(`uv sync --extra <group>`)、ruff/mypy strict.
+
+**Spec:** `docs/superpowers/specs/2026-05-07-dep-groups-refactor-design.md`(2026-05-07 校准版)
 
 **Prerequisites:** 无(独立项目级清理,不依赖 #21/#22/#23 任何一个)
 
@@ -204,7 +206,11 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 3: Create knowledge_stub.py + 单元测试(TDD)
+## ~~Task 3: Create knowledge_stub.py + 单元测试(TDD)~~ — **REVERTED**
+
+> 2026-05-07 校准 — `knowledge_router.py` 实测不依赖 kb-extras(prefix 是 `/knowledge-bases`,只 import sqlalchemy/fastapi/app.models),slim install 时 import 不会 fail → stub 永远不会被加载,是 dead code。已 revert(commit 链回到 9e9ca99)。下方章节保留作历史记录。
+
+---
 
 **Files:**
 - Create: `backend/app/router/knowledge_stub.py`
@@ -364,7 +370,11 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
 ---
 
-## Task 4: app_main.py — 条件加载 knowledge_router
+## ~~Task 4: app_main.py — 条件加载 knowledge_router~~ — **REVERTED**
+
+> 2026-05-07 校准 — try/except import knowledge_router 永远走 happy branch(原 import 在 slim install 也不会 fail),no-op 死代码。已 revert(commit 链回到 9e9ca99)。下方章节保留作历史记录。
+
+---
 
 **Files:** Modify `backend/app/app_main.py`(行 24 + 行 302)
 
