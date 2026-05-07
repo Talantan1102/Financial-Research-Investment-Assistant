@@ -179,13 +179,26 @@ Demo: `backend/claude_skills/financial_analysis/scripts/calculate_dcf.py`
 
 ### 安装
 
+**完整安装**(推荐 — 含 KB feature):
+
 ```bash
-uv sync --extra dev
+uv sync --extra dev --extra kb
 uv run pre-commit install --install-hooks
 uv run pre-commit install --hook-type commit-msg
 cp backend/.env.example backend/.env  # 然后编辑 DASHSCOPE_API_KEY、TUSHARE_TOKEN 等
 cd frontend && npm install && cd ..
 ```
+
+**精简安装**(磁盘紧张 / 不需要 KB 检索 + ingest 的开发场景,如 Codespaces 32GB):
+
+```bash
+uv sync --extra dev
+# /knowledge-bases CRUD 仍可用(KB metadata 操作不依赖重型 ML deps)
+# 只有 KB 检索(milvus 向量搜索)+ ingest(PDF 切片)在 agent 运行时调用会 ImportError
+# 这种模式适合做 #3.5 类纯 DB / cache 等不碰 KB 检索的开发工作
+```
+
+KB feature 需要 ~5-8 GB ML libs(mineru / torch / cuda 等)。如果你不会用到 KB 检索或 ingest 工作流,可以走精简安装节省空间。
 
 ### 启动
 
