@@ -9,7 +9,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 TradeTypeStr = Literal["initial", "buy", "sell"]
 
@@ -55,6 +55,14 @@ class TradeRead(BaseModel):
     trade_date: date
     note: str | None
     created_at: datetime
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def coerce_trade_type(cls, v: object) -> str:
+        """ORM 返回 TradeType 枚举实例,序列化前取 .value。"""
+        if hasattr(v, "value"):
+            return str(v.value)
+        return str(v)
 
 
 class PositionRead(BaseModel):
