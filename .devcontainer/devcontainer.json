@@ -1,17 +1,6 @@
 {
   "name": "Financial Research Investment Assistant",
-  "image": "mcr.microsoft.com/devcontainers/python:1-3.12-bookworm",
-  "features": {
-    "ghcr.io/devcontainers/features/docker-in-docker:2": {
-      "version": "latest",
-      "moby": true,
-      "dockerDashComposeVersion": "v2"
-    },
-    "ghcr.io/devcontainers/features/node:1": {
-      "version": "20"
-    },
-    "ghcr.io/devcontainers/features/github-cli:1": {}
-  },
+  "image": "mcr.microsoft.com/devcontainers/universal:2-linux",
   "forwardPorts": [8000, 5173],
   "portsAttributes": {
     "8000": {
@@ -24,9 +13,6 @@
     }
   },
   "postCreateCommand": "bash .devcontainer/setup.sh",
-  "remoteEnv": {
-    "PATH": "${localEnv:HOME}/.local/bin:${containerEnv:PATH}"
-  },
   "customizations": {
     "vscode": {
       "extensions": [
@@ -49,6 +35,5 @@
         }
       }
     }
-  },
-  "remoteUser": "vscode"
+  }
 }
