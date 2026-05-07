@@ -19,8 +19,9 @@ from .types import Decision, DimensionConfig, compute_decision_id
 PROJECT_ROOT = Path(__file__).parent.parent.parent  # dashboard 顶级到 repo 根
 
 # spec filename:2026-05-05-v0.8.5-...md → v0.8.5
-# spec filename:2026-05-07-harness-board-m2-design.md → M2
-SPEC_VERSION_RE = re.compile(r"\d{4}-\d{2}-\d{2}-(v\d+\.\d+(?:\.\d+)?|M\d+|m\d+)")
+# spec filename:2026-05-07-harness-board-m2-design.md → m2
+# 允许 date 与 version token 之间有任意前缀(如 harness-board-),非贪婪匹配第一个 version token。
+SPEC_VERSION_RE = re.compile(r"\d{4}-\d{2}-\d{2}-.*?(v\d+\.\d+(?:\.\d+)?|M\d+|m\d+)")
 # memory filename:project_v0.8.5_architecture_landed.md → v0.8.5
 MEM_VERSION_RE = re.compile(r"^project_v(\d+\.\d+(?:\.\d+)?)_")
 # spec section header:## § 2 决策一:Constrained Router → "Constrained Router"
@@ -131,9 +132,13 @@ def extract_from_memory(memory_dir: Path, main_dims: list[DimensionConfig]) -> l
         if not m:
             continue
         try:
-            fm: dict[str, Any] = yaml.safe_load(m.group(1)) or {}
+            fm_raw = yaml.safe_load(m.group(1))
         except yaml.YAMLError:
             continue
+        # safe_load 可返回 str / list / dict / None;非 dict frontmatter 跳过(防 AttributeError)
+        if not isinstance(fm_raw, dict):
+            continue
+        fm: dict[str, Any] = fm_raw
         if fm.get("type") not in ("feedback", "project"):
             continue
         title = str(fm.get("name", mem_file.stem))
