@@ -4,18 +4,19 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-from dashboard.derive.capability_resolver import load_capabilities
+from dashboard.derive.capability_resolver import load_capabilities, resolve_status
 from dashboard.derive.snapshot_builder import build_snapshot
-from dashboard.derive.types import SnapshotDict
+from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
 from dashboard.state.db import open_db
 from dashboard.state.repositories import OverrideRepo, SnapshotRepo
 
@@ -93,11 +94,67 @@ async def edit_capability(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+async def post_override(request: Request) -> HTMLResponse:
+    """upsert override 或 clear (sentinel __clear__) + invalidate snapshot + 返回新 chip HTML。"""
+    cap_id = request.path_params["cap_id"]
+    form = await request.form()
+    status_raw = form.get("status", "")
+    if not isinstance(status_raw, str):
+        return HTMLResponse("invalid form", status_code=400)
+
+    conn = open_db(DB_PATH)
+    try:
+        override_repo = OverrideRepo(conn)
+        if status_raw == "__clear__":
+            override_repo.delete(cap_id)
+        elif status_raw in ("lit", "wip", "todo"):
+            override_repo.upsert(cap_id, cast(CapabilityStatus, status_raw), reason="via UI")
+        else:
+            return HTMLResponse(f"invalid status: {status_raw}", status_code=400)
+        # invalidate snapshot,下次 GET / 重 build
+        SnapshotRepo(conn).invalidate()
+        # 重新读 override(可能刚 delete)
+        overrides = override_repo.get_all()
+    finally:
+        conn.close()
+
+    # 重 resolve 这一个 capability,渲染新 chip
+    caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    target_cfg = next((c for c in caps if c.id == cap_id), None)
+    if target_cfg is None:
+        return HTMLResponse(f"capability {cap_id} not found", status_code=404)
+    derived = resolve_status(target_cfg, PROJECT_ROOT)
+    final_status = overrides.get(cap_id, derived)
+    cap = Capability(
+        id=target_cfg.id,
+        dimension=target_cfg.dimension,
+        name_cn=target_cfg.name_cn,
+        name_en=target_cfg.name_en,
+        status=final_status,
+        derived_status=derived,
+    )
+    template = templates.get_template("_capability_chip.html")
+    html = template.render(c=cap)
+    return HTMLResponse(html)
+
+
+async def post_refresh(_request: Request) -> Response:
+    """显式 invalidate snapshot,302 redirect 到 /。"""
+    conn = open_db(DB_PATH)
+    try:
+        SnapshotRepo(conn).invalidate()
+    finally:
+        conn.close()
+    return RedirectResponse("/", status_code=302)
+
+
 app = Starlette(
     routes=[
         Route("/", index),
         Route("/healthz", healthz),
         Route("/capability/{cap_id}/edit", edit_capability),
+        Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
+        Route("/refresh", post_refresh, methods=["POST"]),
         Mount(
             "/static",
             StaticFiles(directory=str(DASHBOARD_ROOT / "static")),

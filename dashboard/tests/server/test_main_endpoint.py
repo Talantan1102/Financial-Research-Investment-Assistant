@@ -70,3 +70,54 @@ def test_get_edit_404_unknown_id() -> None:
     with TestClient(app) as client:
         r = client.get("/capability/nope.fake/edit")
         assert r.status_code == 404
+
+
+def test_post_override_invalidates_and_swaps() -> None:
+    """POST override → 写 override 表 + invalidate snapshot + 返回新 chip HTML。"""
+    with TestClient(app) as client:
+        # cleanup any leftover state from prior runs
+        client.post("/capability/memory.long_term_memory/override", data={"status": "__clear__"})
+        # 先 GET / 触发 build_snapshot,确保表有 row
+        client.get("/")
+        # POST set wip
+        r = client.post(
+            "/capability/memory.long_term_memory/override",
+            data={"status": "wip"},
+        )
+        assert r.status_code == 200
+        body = r.text
+        assert 'class="chip wip"' in body
+        assert "🟠" in body
+        # invalidate 验证:再 GET /,snapshot 含新 wip
+        r2 = client.get("/")
+        assert "memory.long_term_memory" in r2.text  # capability 出现在页面
+        # cleanup at end
+        client.post("/capability/memory.long_term_memory/override", data={"status": "__clear__"})
+
+
+def test_post_override_clear_sentinel() -> None:
+    """POST status=__clear__ 删除 override row。"""
+    with TestClient(app) as client:
+        # 先种一个 override
+        client.post("/capability/memory.long_term_memory/override", data={"status": "wip"})
+        # 清掉
+        r = client.post(
+            "/capability/memory.long_term_memory/override",
+            data={"status": "__clear__"},
+        )
+        assert r.status_code == 200
+        body = r.text
+        # clear 后回到 derived 状态(memory.long_term_memory derive 是 todo,因 derive_rule type=manual)
+        assert 'class="chip todo"' in body
+        assert "stale-mark" not in body  # 派生 == status,无 stale
+
+
+def test_post_refresh_invalidates_and_redirects() -> None:
+    """POST /refresh → 302 to /,snapshot 被清。"""
+    with TestClient(app) as client:
+        # 触发 build
+        client.get("/")
+        # refresh
+        r = client.post("/refresh", follow_redirects=False)
+        assert r.status_code == 302
+        assert r.headers["location"] == "/"
