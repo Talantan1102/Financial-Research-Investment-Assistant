@@ -117,6 +117,43 @@ async def decisions_view(request: Request) -> HTMLResponse:
     )
 
 
+async def post_decision_note(request: Request) -> HTMLResponse:
+    """upsert decision note + 返回新 form HTML(htmx swap)。"""
+    decision_id = request.path_params["decision_id"]
+    form = await request.form()
+    note_raw = form.get("note", "")
+    if not isinstance(note_raw, str):
+        return HTMLResponse("invalid form", status_code=400)
+    conn = open_db(DB_PATH)
+    try:
+        DecisionNoteRepo(conn).upsert(decision_id, note_raw)
+    finally:
+        conn.close()
+    return _render_decision_note_form(decision_id, note_raw)
+
+
+async def delete_decision_note(request: Request) -> HTMLResponse:
+    """clear decision note + 返回空 form HTML。"""
+    decision_id = request.path_params["decision_id"]
+    conn = open_db(DB_PATH)
+    try:
+        DecisionNoteRepo(conn).delete(decision_id)
+    finally:
+        conn.close()
+    return _render_decision_note_form(decision_id, "")
+
+
+def _render_decision_note_form(decision_id: str, note: str) -> HTMLResponse:
+    """Render decision-note form HTML(用于 POST/DELETE htmx swap response)。
+
+    模板内容跟 _decision_card.html 内的 form 部分一致 — 共享单一 source of truth
+    在 _decision_note_form.html partial 里。
+    """
+    template = templates.get_template("_decision_note_form.html")
+    html = template.render(decision_id=decision_id, note=note)
+    return HTMLResponse(html)
+
+
 async def healthz(_request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
@@ -195,6 +232,8 @@ app = Starlette(
         Route("/", index),
         Route("/healthz", healthz),
         Route("/decisions", decisions_view),
+        Route("/decisions/{decision_id}/note", post_decision_note, methods=["POST"]),
+        Route("/decisions/{decision_id}/note", delete_decision_note, methods=["DELETE"]),
         Route("/capability/{cap_id}/edit", edit_capability),
         Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
         Route("/refresh", post_refresh, methods=["POST"]),
