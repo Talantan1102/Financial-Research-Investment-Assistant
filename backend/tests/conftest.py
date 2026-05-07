@@ -210,9 +210,7 @@ def _wait_for_pg_ready(
     raise TimeoutError(f"PG ({db}) not ready after {timeout}s: {last_err}")
 
 
-def _ensure_test_db_exists(
-    host: str, port: int, user: str, password: str, test_db: str
-) -> None:
+def _ensure_test_db_exists(host: str, port: int, user: str, password: str, test_db: str) -> None:
     """Create test_db if it doesn't exist. Idempotent.
 
     Handles the case where a developer's PG volume pre-dates 00-create-test-db.sql
@@ -222,9 +220,7 @@ def _ensure_test_db_exists(
     import psycopg2
 
     # Connect to default postgres db (always exists), check + create.
-    conn = psycopg2.connect(
-        host=host, port=port, dbname="postgres", user=user, password=password
-    )
+    conn = psycopg2.connect(host=host, port=port, dbname="postgres", user=user, password=password)
     conn.autocommit = True  # CREATE DATABASE cannot run inside a transaction
     try:
         cur = conn.cursor()
