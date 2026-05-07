@@ -40,8 +40,22 @@ def test_register_post_sse_get_with_real_pg(
     #    NOTE: app.core.database.engine 在 import 时读 POSTGRES_*。
     #    pytest_configure 已在 session 起始把 POSTGRES_DB 强制为 test db。
     from app.app_main import app
+    from app.core.database import engine
+    from app.models.research_report import ResearchReport
+    from app.models.user import User
 
-    # 3. 用 uuid 后缀做用户名,使重复 run 不冲突(避免 409 duplicate username)
+    # 3. Workaround for legacy dual-track schema bug — pre-create just the
+    #    two tables we need. Background: ChatSession.user_id is VARCHAR
+    #    while User.id is UUID, so app_main lifespan's
+    #    Base.metadata.create_all() raises DatatypeMismatch on the
+    #    chat_sessions FK and the whole DDL txn rolls back, leaving zero
+    #    tables. We pre-create users + research_reports each in their own
+    #    autocommit txn, sidestepping chat_sessions entirely.
+    #    See spec § 4 known issues — full fix deferred to roadmap #3.5.
+    User.__table__.create(bind=engine, checkfirst=True)
+    ResearchReport.__table__.create(bind=engine, checkfirst=True)
+
+    # 4. 用 uuid 后缀做用户名,使重复 run 不冲突(避免 409 duplicate username)
     suffix = _uuid.uuid4().hex[:8]
     alice_username = f"alice_e2e_{suffix}"
     alice_email = f"alice_e2e_{suffix}@example.com"

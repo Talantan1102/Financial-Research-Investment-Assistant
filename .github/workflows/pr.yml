@@ -21,7 +21,10 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres123
-          POSTGRES_DB: industry_assistant_test
+          # Default db = industry_assistant (matches local dev + 01-init.sql).
+          # Test db (industry_assistant_test) is created by 00-create-test-db.sql
+          # init script. Tests connect to test db via step-level POSTGRES_DB env.
+          POSTGRES_DB: industry_assistant
         ports:
           - 5432:5432
         options: >-
