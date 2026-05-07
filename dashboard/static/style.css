@@ -206,3 +206,117 @@ html, body {
   gap: 16px;
   flex-wrap: wrap;
 }
+
+/* Decision card */
+.decision-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 8px;
+}
+.decision-head {
+  display: flex;
+  gap: 12px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.decision-date { color: var(--muted); }
+.decision-version { color: var(--lit-fg); }
+.decision-layer { color: var(--wip-fg); font-weight: 600; }
+.decision-title {
+  margin: 4px 0 6px;
+  font-size: 14px;
+}
+.decision-why {
+  font-size: 13px;
+  color: var(--fg);
+  margin: 4px 0;
+}
+.decision-refs {
+  font-size: 11px;
+  color: var(--muted);
+}
+.decision-refs code {
+  background: var(--bg);
+  padding: 1px 4px;
+  border-radius: 2px;
+  margin-right: 4px;
+  font-size: 10px;
+}
+.decision-note {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+}
+.decision-note input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.decision-note button {
+  background: var(--lit-bg);
+  color: var(--lit-fg);
+  border: 1px solid #166534;
+  border-radius: 3px;
+  padding: 4px 12px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* Filter UI */
+.decision-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--panel);
+  border-radius: 6px;
+}
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.filter-chip {
+  background: transparent;
+  color: var(--muted);
+  border: 1px dashed var(--todo-border);
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  cursor: pointer;
+}
+.filter-chip.active {
+  background: var(--lit-bg);
+  color: var(--lit-fg);
+  border: 1px solid #166534;
+}
+.filter-keyword {
+  flex: 1;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-size: 12px;
+  min-width: 200px;
+}
+
+/* Warning banner */
+.warning-banner {
+  background: var(--wip-bg);
+  color: var(--wip-fg);
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}

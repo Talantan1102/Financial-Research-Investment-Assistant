@@ -1,0 +1,17 @@
+<section class="decision-filter">
+  <div class="filter-group filter-layer-group">
+    {% for dim in main_dims %}
+      <button class="filter-chip filter-layer-chip" data-value="{{ dim.id }}">
+        {{ dim.number }} {{ dim.name_cn }}
+      </button>
+    {% endfor %}
+    <button class="filter-chip filter-layer-chip" data-value="META">META</button>
+  </div>
+  <div class="filter-group filter-state-group">
+    <button class="filter-chip filter-state-chip" data-value="active">active</button>
+    <button class="filter-chip filter-state-chip" data-value="deprecated">deprecated</button>
+  </div>
+  <div class="filter-group filter-keyword-group">
+    <input class="filter-keyword" type="text" placeholder="关键字搜索...">
+  </div>
+</section>
