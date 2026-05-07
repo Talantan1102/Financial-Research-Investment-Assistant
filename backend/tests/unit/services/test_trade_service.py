@@ -272,4 +272,4 @@ def test_update_unknown_field_raises_valueerror(session: Session, user: User) ->
     session.commit()
 
     with pytest.raises(ValueError, match="unknown fields"):
-        svc.update(trade.id, foo="bar")  # type: ignore[call-arg]
+        svc.update(trade.id, foo="bar")  # type: ignore[arg-type]
