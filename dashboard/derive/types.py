@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 DimensionId = Literal[
     "prompt_context",
@@ -48,3 +48,33 @@ class Capability:
     name_en: str
     status: CapabilityStatus
     derived_status: CapabilityStatus  # 派生原值,与 status 比较可知是否 override
+
+
+class CapabilityDict(TypedDict):
+    id: str
+    dimension: DimensionId
+    name_cn: str
+    name_en: str
+    status: CapabilityStatus
+    derived_status: CapabilityStatus
+
+
+class LayerSummaryDict(TypedDict):
+    id: DimensionId
+    number: str
+    name_cn: str
+    name_en: str
+    lit: int
+    wip: int
+    todo: int
+    total: int
+    capabilities: list[CapabilityDict]
+
+
+class SnapshotDict(TypedDict):
+    refreshed_at: str
+    layers: list[LayerSummaryDict]
+    total_lit: int
+    total_wip: int
+    total_todo: int
+    total: int

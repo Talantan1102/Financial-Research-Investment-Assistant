@@ -1,14 +1,27 @@
 from pathlib import Path
 
+from dashboard.derive.types import SnapshotDict
 from dashboard.state.db import open_db
 from dashboard.state.repositories import SnapshotRepo
+
+
+def _make_snapshot(total: int, total_lit: int = 0) -> SnapshotDict:
+    """Minimal-shape SnapshotDict for repo persistence tests(content irrelevant)。"""
+    return SnapshotDict(
+        refreshed_at="",  # save() 写入时由 caller 提供;repo 用单独参数
+        layers=[],
+        total_lit=total_lit,
+        total_wip=0,
+        total_todo=0,
+        total=total,
+    )
 
 
 def test_snapshot_save_get(tmp_path: Path) -> None:
     conn = open_db(tmp_path / "board.db")
     repo = SnapshotRepo(conn)
     assert repo.get_latest() is None
-    repo.save("2026-05-07T00:00:00Z", {"total": 62, "total_lit": 35})
+    repo.save("2026-05-07T00:00:00Z", _make_snapshot(total=62, total_lit=35))
     latest = repo.get_latest()
     assert latest is not None
     assert latest["total"] == 62
@@ -18,8 +31,8 @@ def test_snapshot_save_get(tmp_path: Path) -> None:
 def test_snapshot_overwrite(tmp_path: Path) -> None:
     conn = open_db(tmp_path / "board.db")
     repo = SnapshotRepo(conn)
-    repo.save("t1", {"total": 60})
-    repo.save("t2", {"total": 62})
+    repo.save("t1", _make_snapshot(total=60))
+    repo.save("t2", _make_snapshot(total=62))
     latest = repo.get_latest()
     assert latest is not None
     assert latest["total"] == 62

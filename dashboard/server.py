@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import uvicorn
 from starlette.applications import Starlette
@@ -15,6 +14,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 from dashboard.derive.snapshot_builder import build_snapshot
+from dashboard.derive.types import SnapshotDict
 from dashboard.state.db import open_db
 from dashboard.state.repositories import SnapshotRepo
 
@@ -33,7 +33,7 @@ def _today_label() -> str:
     return f"{now.strftime('%Y-%m-%d')} 周{weekdays_cn[now.weekday()]}"
 
 
-def _get_or_build_snapshot() -> dict[str, Any]:
+def _get_or_build_snapshot() -> SnapshotDict:
     """Lazy 派生:若 sqlite 无 snapshot,跑一次 build。"""
     conn = open_db(DB_PATH)
     try:

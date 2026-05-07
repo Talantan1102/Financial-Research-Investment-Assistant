@@ -5,11 +5,11 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from .capability_resolver import load_capabilities, resolve_all
 from .path_router import load_dimensions
-from .types import Capability, CapabilityStatus
+from .types import Capability, CapabilityStatus, SnapshotDict
 
 
 @dataclass(frozen=True)
@@ -36,18 +36,21 @@ class Snapshot:
     total_todo: int
     total: int
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "refreshed_at": self.refreshed_at,
-            "layers": [
-                {**asdict(layer), "capabilities": [asdict(c) for c in layer.capabilities]}
-                for layer in self.layers
-            ],
-            "total_lit": self.total_lit,
-            "total_wip": self.total_wip,
-            "total_todo": self.total_todo,
-            "total": self.total,
-        }
+    def to_dict(self) -> SnapshotDict:
+        return cast(
+            SnapshotDict,
+            {
+                "refreshed_at": self.refreshed_at,
+                "layers": [
+                    {**asdict(layer), "capabilities": [asdict(c) for c in layer.capabilities]}
+                    for layer in self.layers
+                ],
+                "total_lit": self.total_lit,
+                "total_wip": self.total_wip,
+                "total_todo": self.total_todo,
+                "total": self.total,
+            },
+        )
 
 
 def build_snapshot(

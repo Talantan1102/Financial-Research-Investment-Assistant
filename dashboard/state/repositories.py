@@ -5,16 +5,15 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import UTC, datetime
-from typing import Any
 
-from dashboard.derive.types import CapabilityStatus
+from dashboard.derive.types import CapabilityStatus, SnapshotDict
 
 
 class SnapshotRepo:
-    def __init__(self, conn: sqlite3.Connection):
+    def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def save(self, refreshed_at: str, payload: dict[str, Any]) -> None:
+    def save(self, refreshed_at: str, payload: SnapshotDict) -> None:
         """全量替换 — 仅保留最新一行(M1 简单语义)。"""
         with self.conn:
             self.conn.execute("DELETE FROM derived_snapshot")
@@ -23,16 +22,21 @@ class SnapshotRepo:
                 (refreshed_at, json.dumps(payload)),
             )
 
-    def get_latest(self) -> dict[str, Any] | None:
+    def get_latest(self) -> SnapshotDict | None:
         cur = self.conn.execute(
             "SELECT refreshed_at, payload FROM derived_snapshot ORDER BY id DESC LIMIT 1"
         )
         row = cur.fetchone()
         if not row:
             return None
-        d: dict[str, Any] = json.loads(row["payload"])
+        d: SnapshotDict = json.loads(row["payload"])
         d["refreshed_at"] = row["refreshed_at"]
         return d
+
+    def invalidate(self) -> None:
+        """清空 derived_snapshot,下次 GET / 触发 lazy rebuild。"""
+        with self.conn:
+            self.conn.execute("DELETE FROM derived_snapshot")
 
 
 class OverrideRepo:
