@@ -12,6 +12,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from tests.unit._helpers import make_user
+
 
 @pytest.fixture
 def session() -> Session:
@@ -22,21 +24,8 @@ def session() -> Session:
         yield s
 
 
-def _make_user(session: Session) -> User:
-    uid = uuid4().hex[:8]
-    user = User(
-        id=str(uuid4()),
-        username=f"user-{uid}",
-        email=f"u-{uid}@test",
-        hashed_password="x",
-    )
-    session.add(user)
-    session.flush()
-    return user
-
-
 def test_position_can_be_persisted(session: Session) -> None:
-    user = _make_user(session)
+    user = make_user(session)
     pos = Position(
         id=str(uuid4()),
         user_id=user.id,
@@ -60,7 +49,7 @@ def test_position_can_be_persisted(session: Session) -> None:
 
 
 def test_position_unique_user_tscode(session: Session) -> None:
-    user = _make_user(session)
+    user = make_user(session)
     common = {
         "user_id": user.id,
         "ts_code": "600519.SH",

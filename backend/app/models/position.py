@@ -53,7 +53,7 @@ class Position(Base):
     last_quote_price = Column(Numeric(12, 4), nullable=True)
     last_quote_at = Column(DateTime, nullable=True)
 
-    # v1.x 静默仓位口子(spec § 8.2)
+    # v1.x 静默仓位口子(spec § 7)
     is_silenced = Column(Boolean, nullable=False, default=False)
 
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)

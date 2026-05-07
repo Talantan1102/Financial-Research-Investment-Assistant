@@ -12,6 +12,8 @@ from app.models.user import User
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
+from tests.unit._helpers import make_user
+
 
 @pytest.fixture
 def session() -> Session:
@@ -24,21 +26,8 @@ def session() -> Session:
         yield s
 
 
-def _make_user(session: Session) -> User:
-    uid = uuid4().hex[:8]
-    user = User(
-        id=str(uuid4()),
-        username=f"user-{uid}",
-        email=f"u-{uid}@test",
-        hashed_password="x",
-    )
-    session.add(user)
-    session.flush()
-    return user
-
-
 def test_trade_can_be_persisted(session: Session) -> None:
-    user = _make_user(session)
+    user = make_user(session)
     trade = Trade(
         id=str(uuid4()),
         user_id=user.id,
@@ -61,7 +50,7 @@ def test_trade_can_be_persisted(session: Session) -> None:
 
 
 def test_trade_type_enum_accepts_all_three_values(session: Session) -> None:
-    user = _make_user(session)
+    user = make_user(session)
     for ttype in [TradeType.INITIAL, TradeType.BUY, TradeType.SELL]:
         session.add(
             Trade(

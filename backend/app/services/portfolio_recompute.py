@@ -64,6 +64,7 @@ def recompute_position_from_trades(trades: Iterable[TradeInput]) -> PositionStat
             # avg_cost 保留(spec § 2.2 — quantity=0 保留最后非零值)
 
     # 量化精度:avg_cost 4 位小数,其他 2 位
+    # 四舍六入五成偶 (ROUND_HALF_EVEN, Python Decimal default) — 与 A 股报表四舍五入差异仅在中间值
     return PositionState(
         quantity=quantity,
         avg_cost=avg_cost.quantize(Decimal("0.0001")),
