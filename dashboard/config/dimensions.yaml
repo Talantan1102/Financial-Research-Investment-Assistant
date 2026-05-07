@@ -89,16 +89,30 @@ dimensions:
 app_shell:
   - id: frontend
     name_cn: "前端"
-    paths: ["frontend/**"]
+    paths:
+      - "frontend/src/**"
   - id: backend
     name_cn: "后端"
-    paths: ["backend/app/api/**", "backend/app/main.py"]
+    paths:
+      - "backend/app/router/**"
+      - "backend/app/app_main.py"
+      - "backend/app/core/**"
   - id: auth
     name_cn: "鉴权"
-    paths: ["backend/app/api/auth*", "frontend/src/**/Login*", "frontend/src/**/Auth*"]
+    paths:
+      - "backend/app/router/auth*.py"
+      - "frontend/src/pages/auth/**"
+      - "frontend/src/components/auth-guard/**"
+      - "frontend/src/api/auth*"
+      - "frontend/src/store/auth*"
   - id: database
     name_cn: "数据库"
-    paths: ["backend/app/**/db.py", "backend/data/*.sql"]
+    paths:
+      - "backend/app/core/database.py"
+      - "backend/app/router/database_router.py"
+      - "backend/app/service/database_explorer.py"
+      - "backend/data/*.sqlite"
+      - "backend/data/*.db"
   - id: connectors
     name_cn: "外部数据连接器"
     paths:
