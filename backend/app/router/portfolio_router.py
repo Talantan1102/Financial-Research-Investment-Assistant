@@ -28,6 +28,9 @@ from app.models.trade import TradeType
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.schemas.portfolio import (
+    OnboardingRequest,
+    OnboardingResponse,
+    PositionRead,
     TradeCreate,
     TradeRead,
     TradeUpdate,
@@ -37,6 +40,7 @@ from app.services.portfolio_exceptions import (
     ImmutableTradeError,
     PortfolioError,
 )
+from app.services.position_service import PositionService
 from app.services.trade_service import TradeService
 
 logger = logging.getLogger(__name__)
@@ -113,3 +117,58 @@ async def update_trade(
     except ImmutableTradeError as exc:
         db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get("/positions", response_model=list[PositionRead])
+async def list_positions(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user_required)],
+) -> list[PositionRead]:
+    svc = PositionService(db)
+    positions = svc.list_for_user(str(user.id))  # type: ignore[arg-type]
+    return [PositionRead.model_validate(p) for p in positions]
+
+
+@router.post(
+    "/onboarding",
+    response_model=OnboardingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def onboarding(
+    payload: OnboardingRequest,
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user_required)],
+) -> OnboardingResponse:
+    """雪球做法:批量录入 INITIAL trade,all-or-nothing 单事务。"""
+    # 严格只接受 initial type(雪球语义)
+    for tc in payload.trades:
+        if tc.type != "initial":
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="onboarding 仅接受 type='initial' trades",
+            )
+
+    trade_svc = TradeService(db)
+    pos_svc = PositionService(db)
+    created_trades = []
+    for tc in payload.trades:
+        trade = trade_svc.create(
+            user_id=str(user.id),  # type: ignore[arg-type]
+            ts_code=tc.ts_code,
+            name=tc.name,
+            ttype=TradeType(tc.type),
+            quantity=tc.quantity,
+            price=tc.price,
+            trade_date=tc.trade_date,
+            note=tc.note,
+        )
+        created_trades.append(trade)
+    db.commit()
+    for t in created_trades:
+        db.refresh(t)
+
+    positions = pos_svc.list_for_user(str(user.id))  # type: ignore[arg-type]
+    return OnboardingResponse(
+        trades=[TradeRead.model_validate(t) for t in created_trades],
+        positions=[PositionRead.model_validate(p) for p in positions],
+    )
