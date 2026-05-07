@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.position import Position
 from app.models.trade import Trade, TradeType
-from app.services.portfolio_exceptions import ExpiredDeletionError
+from app.services.portfolio_exceptions import ExpiredDeletionError, ImmutableTradeError
 from app.services.portfolio_recompute import (
     TradeInput,
     recompute_position_from_trades,
@@ -124,3 +124,29 @@ class TradeService:
         self._session.delete(trade)
         self._session.flush()
         self._recompute_position(user_id=user_id, ts_code=ts_code, name=name)
+
+    _INITIAL_UPDATABLE = {"ts_code", "name", "quantity", "price", "trade_date", "note"}
+
+    def update(self, trade_id: str, **fields: object) -> Trade:
+        """修改 INITIAL trade 的字段并重算 Position(spec § 3.3 + § 5 场景 3/5)。
+
+        非 INITIAL trade 无论时间早晚均抛 ImmutableTradeError。
+        Caller 负责 session.commit()。
+        """
+        trade = self._session.query(Trade).filter_by(id=trade_id).one()
+        if trade.type != TradeType.INITIAL:
+            raise ImmutableTradeError("常规交易不可改字段,过 24h 也不可")
+
+        unknown = set(fields.keys()) - self._INITIAL_UPDATABLE
+        if unknown:
+            raise ValueError(f"unknown fields for update: {unknown}")
+
+        for k, v in fields.items():
+            setattr(trade, k, v)
+        self._session.flush()
+        self._recompute_position(
+            user_id=cast(str, trade.user_id),
+            ts_code=cast(str, trade.ts_code),
+            name=cast(str, trade.name),
+        )
+        return trade

@@ -10,7 +10,7 @@ import pytest
 from app.models.position import Position
 from app.models.trade import Trade, TradeType
 from app.models.user import User
-from app.services.portfolio_exceptions import ExpiredDeletionError
+from app.services.portfolio_exceptions import ExpiredDeletionError, ImmutableTradeError
 from app.services.trade_service import TradeService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -176,3 +176,82 @@ def test_delete_after_24h_raises_expired(session: Session, user: User) -> None:
 
     with pytest.raises(ExpiredDeletionError):
         svc.delete(trade.id)  # type: ignore[arg-type]
+
+
+def test_update_initial_trade_succeeds_anytime(session: Session, user: User) -> None:
+    """spec § 5 场景 5 — initial trade 任何时候可改字段。"""
+    svc = TradeService(session)
+    trade = svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.INITIAL,
+        quantity=200,
+        price=Decimal("1450.00"),
+        trade_date=date(2024, 6, 1),
+    )
+    # 强制 48h 前(模拟旧 trade)
+    trade.created_at = datetime.utcnow() - timedelta(hours=48)  # type: ignore[assignment]
+    session.flush()
+
+    updated = svc.update(trade.id, price=Decimal("1455.00"))  # type: ignore[arg-type]
+    session.commit()
+    assert updated.price == Decimal("1455.00")
+
+    # Position 应跟着 recompute(total_cost 变了)
+    pos = session.query(Position).filter_by(user_id=user.id, ts_code="600519.SH").one()
+    assert pos.total_cost == Decimal("291000.00")  # 200 * 1455
+    assert pos.avg_cost == Decimal("1455.0000")
+
+
+def test_update_buy_trade_raises_immutable(session: Session, user: User) -> None:
+    """spec § 5 场景 3 — 常规 trade(buy/sell)字段不可改。"""
+    svc = TradeService(session)
+    svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.INITIAL,
+        quantity=200,
+        price=Decimal("1450.00"),
+        trade_date=date(2024, 6, 1),
+    )
+    buy = svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.BUY,
+        quantity=50,
+        price=Decimal("1500.00"),
+        trade_date=date(2026, 1, 15),
+    )
+    session.commit()
+
+    with pytest.raises(ImmutableTradeError):
+        svc.update(buy.id, price=Decimal("1499.00"))  # type: ignore[arg-type]
+
+
+def test_update_sell_trade_raises_immutable(session: Session, user: User) -> None:
+    svc = TradeService(session)
+    svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.INITIAL,
+        quantity=200,
+        price=Decimal("1450.00"),
+        trade_date=date(2024, 6, 1),
+    )
+    sell = svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.SELL,
+        quantity=30,
+        price=Decimal("1600.00"),
+        trade_date=date(2026, 4, 20),
+    )
+    session.commit()
+
+    with pytest.raises(ImmutableTradeError):
+        svc.update(sell.id, quantity=20)  # type: ignore[arg-type]
