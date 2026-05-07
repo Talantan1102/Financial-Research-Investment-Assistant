@@ -113,7 +113,7 @@ uv run poe serve
 # Terminal 2 — 前端(端口 5173)
 cd frontend && npm run dev
 
-# (可选)Terminal 0 — Postgres 数据库(legacy auth / news / session router 需要;仅 chat / research / monitoring 路径无需启)
+# Terminal 0 — Postgres(必需:auth / /reports 持久化 / 用户隔离 都依赖)
 docker compose up -d postgres
 
 # (可选)Terminal 0 — Milvus / Redis(KB / 持久会话用)
@@ -122,7 +122,11 @@ docker compose up -d postgres
 
 默认 `*_MODE=mock`,**不烧钱**;切 `TUSHARE_MODE=real` / `BOCHA_MODE=real` 走真接入。
 
-> v0.9.x:`uv run poe serve` 启动时若 PG 未起,只会 log warning 不再硬 crash(graceful degradation)。依赖 PG 的 router(auth/news/session/database)调用时会报 500;其余路由(chat / research / monitoring / KB)正常工作。
+> **PG 是必需的**(`/reports` 持久化、`/auth`、用户隔离都依赖)。`uv run poe serve` 启动时若 PG 未起只 log warning 不硬 crash(graceful degradation),但依赖 PG 的 router 调用时会报 500。
+>
+> **测试用独立 db `industry_assistant_test`**,由 `docker/init-db/00-create-test-db.sql` 启动时自动创建,仅 `backend/tests/e2e/test_pg_serve_path_e2e.py` 使用 — 其他测试用 sqlite-override(per-test 临时 sqlite + `dependency_overrides[get_db]`)。
+>
+> **Schema 管理**:v0.9.x 用 SQLAlchemy `Base.metadata.create_all()` 启动时幂等创建。alembic 留到 roadmap #3.5(DB 统一)一并引入,见 `docs/superpowers/specs/2026-05-05-v0.9+-roadmap-and-long-running-task-scheduling.md` § 6 #3.5。
 
 ### 常用命令(uv + poe)
 
