@@ -11,10 +11,7 @@
       </div>
       <div class="cap-list">
         {% for c in L.capabilities %}
-          <span class="chip {{ c.status }}" title="{{ c.id }}">
-            {% if c.status == 'lit' %}✅{% elif c.status == 'wip' %}🟠{% else %}⬜{% endif %}
-            {{ c.name_cn }}
-          </span>
+          {% include "_capability_chip.html" %}
         {% endfor %}
       </div>
     </article>
