@@ -112,6 +112,35 @@ def test_post_override_clear_sentinel() -> None:
         assert "stale-mark" not in body  # 派生 == status,无 stale
 
 
+def test_post_override_unknown_cap_id_returns_404_no_write() -> None:
+    """POST 未知 cap_id 返 404 且不写 override 表(防 orphan row)。"""
+    from pathlib import Path
+
+    from dashboard.state.db import open_db
+    from dashboard.state.repositories import OverrideRepo
+
+    with TestClient(app) as client:
+        # cleanup: ensure no row with this cap_id exists
+        client.post(
+            "/capability/nope.fake/override",
+            data={"status": "__clear__"},
+        )
+        # POST with unknown cap_id and valid status
+        r = client.post(
+            "/capability/nope.fake/override",
+            data={"status": "wip"},
+        )
+        assert r.status_code == 404
+        assert "not found" in r.text
+        # Verify NO row written to capability_override table for nope.fake
+        conn = open_db(Path("backend/data/board.db"))
+        try:
+            overrides = OverrideRepo(conn).get_all()
+        finally:
+            conn.close()
+        assert "nope.fake" not in overrides
+
+
 def test_post_refresh_invalidates_and_redirects() -> None:
     """POST /refresh → 302 to /,snapshot 被清。"""
     with TestClient(app) as client:

@@ -101,16 +101,22 @@ async def post_override(request: Request) -> HTMLResponse:
     status_raw = form.get("status", "")
     if not isinstance(status_raw, str):
         return HTMLResponse("invalid form", status_code=400)
+    if status_raw != "__clear__" and status_raw not in ("lit", "wip", "todo"):
+        return HTMLResponse(f"invalid status: {status_raw}", status_code=400)
+
+    # Validate cap_id BEFORE touching DB (fix: write-before-validate orphan row bug)
+    caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    target_cfg = next((c for c in caps if c.id == cap_id), None)
+    if target_cfg is None:
+        return HTMLResponse(f"capability {cap_id} not found", status_code=404)
 
     conn = open_db(DB_PATH)
     try:
         override_repo = OverrideRepo(conn)
         if status_raw == "__clear__":
             override_repo.delete(cap_id)
-        elif status_raw in ("lit", "wip", "todo"):
-            override_repo.upsert(cap_id, cast(CapabilityStatus, status_raw), reason="via UI")
         else:
-            return HTMLResponse(f"invalid status: {status_raw}", status_code=400)
+            override_repo.upsert(cap_id, cast(CapabilityStatus, status_raw), reason="via UI")
         # invalidate snapshot,下次 GET / 重 build
         SnapshotRepo(conn).invalidate()
         # 重新读 override(可能刚 delete)
@@ -119,10 +125,6 @@ async def post_override(request: Request) -> HTMLResponse:
         conn.close()
 
     # 重 resolve 这一个 capability,渲染新 chip
-    caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    target_cfg = next((c for c in caps if c.id == cap_id), None)
-    if target_cfg is None:
-        return HTMLResponse(f"capability {cap_id} not found", status_code=404)
     derived = resolve_status(target_cfg, PROJECT_ROOT)
     final_status = overrides.get(cap_id, derived)
     cap = Capability(
