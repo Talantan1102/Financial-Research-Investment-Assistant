@@ -5,7 +5,7 @@ Spec ref: § 3.1 流程 + § 3.3 三态机 guard(本文件 create + delete + upd
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 from uuid import uuid4
@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.position import Position
 from app.models.trade import Trade, TradeType
+from app.services.portfolio_exceptions import ExpiredDeletionError
 from app.services.portfolio_recompute import (
     TradeInput,
     recompute_position_from_trades,
@@ -66,6 +67,9 @@ class TradeService:
         The fold function re-sorts by trade_date (stable sort), so the
         same-day created_at order is preserved through the fold.
         """
+        # NOTE: stable-sort coupling with portfolio_recompute.recompute_position_from_trades
+        # — that fold function re-sorts by trade_date (stable). Keep these in sync if
+        # either side changes its sort key.
         trades = (
             self._session.query(Trade)
             .filter_by(user_id=user_id, ts_code=ts_code)
@@ -105,3 +109,18 @@ class TradeService:
             pos.realized_pnl = state.realized_pnl  # type: ignore[assignment]
             pos.name = name  # type: ignore[assignment]  # 同步名称变更
         self._session.flush()
+
+    def delete(self, trade_id: str) -> None:
+        """删除 trade 并重算 Position。超 24h 抛 ExpiredDeletionError(spec § 3.3)。
+
+        Caller 负责 session.commit()。
+        """
+        trade = self._session.query(Trade).filter_by(id=trade_id).one()
+        if datetime.utcnow() - cast(datetime, trade.created_at) > timedelta(hours=24):
+            raise ExpiredDeletionError("超 24h 不可删,请录反向交易抵消")
+        user_id = cast(str, trade.user_id)
+        ts_code = cast(str, trade.ts_code)
+        name = cast(str, trade.name)
+        self._session.delete(trade)
+        self._session.flush()
+        self._recompute_position(user_id=user_id, ts_code=ts_code, name=name)

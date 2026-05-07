@@ -1,15 +1,16 @@
-"""TradeService.create 测试 — 单事务 Trade insert + Position UPSERT。"""
+"""TradeService.create + delete 测试 — 单事务 Trade insert/delete + Position UPSERT。"""
 
 from __future__ import annotations
 
 from collections.abc import Generator
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from app.models.position import Position
 from app.models.trade import Trade, TradeType
 from app.models.user import User
+from app.services.portfolio_exceptions import ExpiredDeletionError
 from app.services.trade_service import TradeService
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -114,3 +115,64 @@ def test_create_does_not_leak_to_other_user(session: Session, user: User) -> Non
     session.commit()
 
     assert session.query(Position).filter_by(user_id=user_b.id).count() == 0
+
+
+def test_delete_within_24h_reverses_position(session: Session, user: User) -> None:
+    """spec § 5 场景 2 — 删 buy → Position 回退到 initial+sell 序列结果。"""
+    svc = TradeService(session)
+    svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.INITIAL,
+        quantity=200,
+        price=Decimal("1450.00"),
+        trade_date=date(2024, 6, 1),
+    )
+    buy = svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.BUY,
+        quantity=50,
+        price=Decimal("1500.00"),
+        trade_date=date(2026, 1, 15),
+    )
+    svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.SELL,
+        quantity=30,
+        price=Decimal("1600.00"),
+        trade_date=date(2026, 4, 20),
+    )
+    session.commit()
+
+    svc.delete(buy.id)  # type: ignore[arg-type]
+    session.commit()
+
+    pos = session.query(Position).filter_by(user_id=user.id, ts_code="600519.SH").one()
+    assert pos.quantity == 170
+    assert pos.avg_cost == Decimal("1450.0000")
+    assert pos.total_cost == Decimal("246500.00")
+    assert pos.realized_pnl == Decimal("4500.00")
+
+
+def test_delete_after_24h_raises_expired(session: Session, user: User) -> None:
+    svc = TradeService(session)
+    trade = svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.INITIAL,
+        quantity=100,
+        price=Decimal("1450.00"),
+        trade_date=date(2024, 6, 1),
+    )
+    # 强制把 created_at 改到 25h 前(模拟过期)
+    trade.created_at = datetime.utcnow() - timedelta(hours=25)  # type: ignore[assignment]
+    session.flush()
+
+    with pytest.raises(ExpiredDeletionError):
+        svc.delete(trade.id)  # type: ignore[arg-type]
