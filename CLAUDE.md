@@ -11,6 +11,11 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### 作者 / 作品定位
 - [作品定位与作者期望](docs/claude-context/user-portfolio-target.md) — 项目是个人作品,不追求生产级,但要体现 LLM 算法+应用设计的技术深度
 
+### 产品 / Use case 演进
+- [v1.0 第二个 use case = 持仓监控](docs/claude-context/v1.0-use-case-2-portfolio-monitoring.md) — B-3 + C-4 一体两面;选 vs C-3 的理由;锚 `2026-05-07-v1.0-portfolio-monitoring-design.md`
+- [9 个 use case 重新分类](docs/claude-context/v1-use-case-classification.md) — 3 支柱(B-1 / B-3+C-4 / C-3) + 组件群(B-7 / C-1 / C-5) + 显式不做(C-2 / C-7)
+- [产品决策默认 aggressive minimalism](docs/claude-context/product-minimalism-default.md) — 推荐时默认走克制版本,v1.x escape hatch 走架构留口子,不破坏已定的"不做"决策
+
 ### KB（知识库）子系统
 - [KB 切块策略](docs/claude-context/kb-chunking-strategy.md) — 类型路由：研报 semantic / 财报 section / 政策 clause；中文 separators + tiktoken 计数 + 关键参数
 - [KB Embedding 选型](docs/claude-context/kb-embedding-choice.md) — qwen text-embedding-v3 主力（1024d），BGE-M3 stub 留 v0.9；batch=10 / 同维互换不重建 collection
