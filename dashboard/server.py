@@ -16,11 +16,12 @@ from starlette.templating import Jinja2Templates
 
 from dashboard.derive.app_shell_stat import compute_app_shell_stat
 from dashboard.derive.capability_resolver import load_capabilities, resolve_status
+from dashboard.derive.decision_extractor import extract_all, resolve_memory_path
 from dashboard.derive.path_router import load_dimensions
 from dashboard.derive.snapshot_builder import build_snapshot
 from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
 from dashboard.state.db import open_db
-from dashboard.state.repositories import OverrideRepo, SnapshotRepo
+from dashboard.state.repositories import DecisionNoteRepo, OverrideRepo, SnapshotRepo
 
 DASHBOARD_ROOT = Path(__file__).parent
 PROJECT_ROOT = DASHBOARD_ROOT.parent
@@ -82,6 +83,38 @@ async def index(request: Request) -> HTMLResponse:
             c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "lit"
         ]
     return templates.TemplateResponse(request, "main.html", ctx)
+
+
+async def decisions_view(request: Request) -> HTMLResponse:
+    """GET /decisions — render 全部决策卡 + filter UI(client JS)。"""
+    decisions = extract_all()
+    memory_path = resolve_memory_path()
+    # snap + wips 复用(base.html / _hero.html 需要)
+    snap = _get_or_build_snapshot()
+    wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
+    # 读 note 持久化
+    conn = open_db(DB_PATH)
+    try:
+        note_repo = DecisionNoteRepo(conn)
+        note_lookup = note_repo.get_all()
+    finally:
+        conn.close()
+    # 加载 main_dims for filter chip(layer 列)
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    return templates.TemplateResponse(
+        request,
+        "decisions.html",
+        {
+            "today": _today_label(),
+            "snap": snap,
+            "wips": wips,
+            "decisions": decisions,
+            "note_lookup": note_lookup,
+            "main_dims": main_dims,
+            "active_view": "decisions",
+            "memory_path_warning": memory_path is None,
+        },
+    )
 
 
 async def healthz(_request: Request) -> JSONResponse:
@@ -161,6 +194,7 @@ app = Starlette(
     routes=[
         Route("/", index),
         Route("/healthz", healthz),
+        Route("/decisions", decisions_view),
         Route("/capability/{cap_id}/edit", edit_capability),
         Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
         Route("/refresh", post_refresh, methods=["POST"]),
