@@ -7,7 +7,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
 
 
-def test_snapshot_has_8_layers():
+def test_snapshot_has_8_layers() -> None:
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
     assert len(snap.layers) == 8
     assert {L.id for L in snap.layers} == {
@@ -22,25 +22,25 @@ def test_snapshot_has_8_layers():
     }
 
 
-def test_snapshot_total_62():
+def test_snapshot_total_62() -> None:
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
     assert snap.total == 62
     assert snap.total_lit + snap.total_wip + snap.total_todo == 62
 
 
-def test_snapshot_lit_anchor_within_range():
+def test_snapshot_lit_anchor_within_range() -> None:
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
     assert 30 <= snap.total_lit <= 40, f"Lit {snap.total_lit} out of expected 35±5"
 
 
-def test_snapshot_overrides_applied():
+def test_snapshot_overrides_applied() -> None:
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR, overrides={"memory.long_term_memory": "wip"})
     mem = next(L for L in snap.layers if L.id == "memory")
     target = next(c for c in mem.capabilities if c.id == "memory.long_term_memory")
     assert target.status == "wip"
 
 
-def test_snapshot_to_dict_json_roundtrip():
+def test_snapshot_to_dict_json_roundtrip() -> None:
     import json
 
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)

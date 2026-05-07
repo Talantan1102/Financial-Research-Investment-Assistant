@@ -3,15 +3,18 @@ from pathlib import Path
 import pytest
 
 from dashboard.derive.path_router import classify_path, load_dimensions
+from dashboard.derive.types import DimensionConfig
 
 
 @pytest.fixture
-def dims() -> tuple[list, list]:
+def dims() -> tuple[list[DimensionConfig], list[DimensionConfig]]:
     yaml_path = Path(__file__).parent.parent.parent / "config" / "dimensions.yaml"
     return load_dimensions(yaml_path)
 
 
-def test_loads_8_main_dims_and_6_app_shell(dims: tuple[list, list]) -> None:
+def test_loads_8_main_dims_and_6_app_shell(
+    dims: tuple[list[DimensionConfig], list[DimensionConfig]],
+) -> None:
     main, app_shell = dims
     assert len(main) == 8
     assert len(app_shell) == 6
@@ -45,6 +48,10 @@ def test_loads_8_main_dims_and_6_app_shell(dims: tuple[list, list]) -> None:
         ("backend/app/services/milvus_client.py", "app_shell"),
     ],
 )
-def test_classify_path(dims: tuple[list, list], path: str, expected: str) -> None:
+def test_classify_path(
+    dims: tuple[list[DimensionConfig], list[DimensionConfig]],
+    path: str,
+    expected: str,
+) -> None:
     main, app_shell = dims
     assert classify_path(path, main, app_shell) == expected
