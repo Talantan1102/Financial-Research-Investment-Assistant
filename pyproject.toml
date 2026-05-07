@@ -24,12 +24,6 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=3.0,<4",
     "langgraph-checkpoint-postgres>=2.0",
     "dashscope>=1.20",
-    # Vector DB (kept for KB; v0 main path doesn't use it)
-    "pymilvus>=2.6.0",
-    # v0.7 KB Search
-    "mineru[core]>=3.1.0",
-    "pdfplumber>=0.11.0",
-    "langchain-text-splitters>=0.3.0",
     "tqdm>=4.66.0",
     "cachetools>=5.5.0",
     # NLP
@@ -50,9 +44,6 @@ dependencies = [
     # Data
     "numpy>=1.26",
     "pandas>=2.2",
-    # Visualization
-    "matplotlib>=3.9",
-    "seaborn>=0.13",
     # Utils
     "pyyaml>=6.0",
     "python-dateutil>=2.9",
@@ -90,6 +81,16 @@ dev = [
 test = [
     # v1.0 monitoring engine — L2 e2e Redis container fixture
     "testcontainers[redis]>=4.0,<5.0",
+]
+
+# Roadmap 2026-05-07 dep refactor: KB feature 4 重型 deps 拆 optional
+# Slim install (no KB):  uv sync --extra dev   →  /knowledge endpoint 返 503 stub
+# Full install (with KB): uv sync --extra dev --extra kb
+kb = [
+    "mineru[core]>=3.1.0",
+    "pymilvus>=2.6.0",
+    "pdfplumber>=0.11.0",
+    "langchain-text-splitters>=0.3.0",
 ]
 
 [build-system]
