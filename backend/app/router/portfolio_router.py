@@ -24,7 +24,7 @@ from sqlalchemy.exc import NoResultFound
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.trade import TradeType
+from app.models.trade import Trade, TradeType
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.schemas.portfolio import (
@@ -150,20 +150,24 @@ async def onboarding(
 
     trade_svc = TradeService(db)
     pos_svc = PositionService(db)
-    created_trades = []
-    for tc in payload.trades:
-        trade = trade_svc.create(
-            user_id=str(user.id),  # type: ignore[arg-type]
-            ts_code=tc.ts_code,
-            name=tc.name,
-            ttype=TradeType(tc.type),
-            quantity=tc.quantity,
-            price=tc.price,
-            trade_date=tc.trade_date,
-            note=tc.note,
-        )
-        created_trades.append(trade)
-    db.commit()
+    created_trades: list[Trade] = []
+    try:
+        for tc in payload.trades:
+            trade = trade_svc.create(
+                user_id=str(user.id),  # type: ignore[arg-type]
+                ts_code=tc.ts_code,
+                name=tc.name,
+                ttype=TradeType(tc.type),
+                quantity=tc.quantity,
+                price=tc.price,
+                trade_date=tc.trade_date,
+                note=tc.note,
+            )
+            created_trades.append(trade)
+        db.commit()
+    except PortfolioError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     for t in created_trades:
         db.refresh(t)
 
