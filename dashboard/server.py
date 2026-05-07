@@ -14,7 +14,9 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
+from dashboard.derive.app_shell_stat import compute_app_shell_stat
 from dashboard.derive.capability_resolver import load_capabilities, resolve_status
+from dashboard.derive.path_router import load_dimensions
 from dashboard.derive.snapshot_builder import build_snapshot
 from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
 from dashboard.state.db import open_db
@@ -59,11 +61,15 @@ async def index(request: Request) -> HTMLResponse:
         view_mode = "d"
     snap = _get_or_build_snapshot()
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
+    # App Shell 第 9 行 mini stat
+    _main_dims, app_shell_dims = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    app_shell = compute_app_shell_stat(PROJECT_ROOT, app_shell_dims)
     ctx: dict[str, object] = {
         "today": _today_label(),
         "snap": snap,
         "wips": wips,
         "view_mode": view_mode,
+        "app_shell": app_shell,
     }
     if view_mode == "b":
         # Pre-compute Kanban lists (Risk 5 mitigation: avoid jinja list.append)

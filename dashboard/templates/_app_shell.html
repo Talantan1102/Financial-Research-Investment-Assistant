@@ -1,0 +1,9 @@
+<aside class="app-shell-row">
+  <span class="app-shell-num">09</span>
+  <span class="app-shell-name">App Shell</span>
+  <span class="app-shell-items">
+    {% for item in app_shell %}
+      <span class="app-shell-item">{{ item.name_cn }}: {{ item.file_count }}</span>
+    {% endfor %}
+  </span>
+</aside>

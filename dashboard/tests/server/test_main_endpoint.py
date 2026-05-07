@@ -150,3 +150,15 @@ def test_post_refresh_invalidates_and_redirects() -> None:
         r = client.post("/refresh", follow_redirects=False)
         assert r.status_code == 302
         assert r.headers["location"] == "/"
+
+
+def test_index_shows_app_shell_row() -> None:
+    """主视图含 App Shell 第 9 行。"""
+    with TestClient(app) as client:
+        r = client.get("/")
+        body = r.text
+        assert 'class="app-shell-row"' in body
+        assert "09" in body  # app shell number
+        assert "App Shell" in body
+        # 6 项至少出现一项(具体名称随 dimensions.yaml,只验"前端"在 yaml 默认配置中)
+        assert "前端" in body
