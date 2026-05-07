@@ -48,3 +48,25 @@ def test_view_b_renders_kanban() -> None:
         assert "Doing (" in body
         assert "Done (" in body
         assert "<details>" in body  # Done 列折叠
+
+
+def test_get_edit_returns_select() -> None:
+    """点击 chip 触发的 GET /capability/{id}/edit 返回 select form。"""
+    with TestClient(app) as client:
+        r = client.get("/capability/memory.long_term_memory/edit")
+        assert r.status_code == 200
+        body = r.text
+        assert "<select" in body
+        assert "force-lit" in body
+        assert "set-wip" in body
+        assert "force-todo" in body
+        assert "clear override" in body
+        assert "hx-post" in body
+        assert "/capability/memory.long_term_memory/override" in body
+
+
+def test_get_edit_404_unknown_id() -> None:
+    """未知 capability id 返 404。"""
+    with TestClient(app) as client:
+        r = client.get("/capability/nope.fake/edit")
+        assert r.status_code == 404

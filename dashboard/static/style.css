@@ -165,3 +165,18 @@ html, body {
 @media (max-width: 800px) {
   .kanban { grid-template-columns: 1fr; }
 }
+
+/* Edit select (chip click → select swap) */
+.edit-select {
+  display: inline-block;
+  margin: 0;
+}
+.edit-select select {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--lit-fg);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+}

@@ -13,6 +13,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
+from dashboard.derive.capability_resolver import load_capabilities
 from dashboard.derive.snapshot_builder import build_snapshot
 from dashboard.derive.types import SnapshotDict
 from dashboard.state.db import open_db
@@ -79,10 +80,24 @@ async def healthz(_request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+async def edit_capability(request: Request) -> HTMLResponse:
+    """返回 chip 替换为 edit select 的 HTML 片段(htmx swap source)。"""
+    cap_id = request.path_params["cap_id"]
+    # 从 capabilities.yaml 拿到这个 capability 的元数据(name_cn 用于 select 头)
+    caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    target = next((c for c in caps if c.id == cap_id), None)
+    if target is None:
+        return HTMLResponse(f"capability {cap_id} not found", status_code=404)
+    template = templates.get_template("_edit_select.html")
+    html = template.render(c=target)
+    return HTMLResponse(html)
+
+
 app = Starlette(
     routes=[
         Route("/", index),
         Route("/healthz", healthz),
+        Route("/capability/{cap_id}/edit", edit_capability),
         Mount(
             "/static",
             StaticFiles(directory=str(DASHBOARD_ROOT / "static")),
