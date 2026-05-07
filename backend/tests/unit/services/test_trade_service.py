@@ -255,3 +255,21 @@ def test_update_sell_trade_raises_immutable(session: Session, user: User) -> Non
 
     with pytest.raises(ImmutableTradeError):
         svc.update(sell.id, quantity=20)  # type: ignore[arg-type]
+
+
+def test_update_unknown_field_raises_valueerror(session: Session, user: User) -> None:
+    """update kwargs not in _INITIAL_UPDATABLE whitelist raise ValueError."""
+    svc = TradeService(session)
+    trade = svc.create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.INITIAL,
+        quantity=200,
+        price=Decimal("1450.00"),
+        trade_date=date(2024, 6, 1),
+    )
+    session.commit()
+
+    with pytest.raises(ValueError, match="unknown fields"):
+        svc.update(trade.id, foo="bar")  # type: ignore[call-arg]
