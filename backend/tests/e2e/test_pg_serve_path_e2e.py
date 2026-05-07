@@ -23,13 +23,9 @@ app_main 即可(import 时机敏感:必须在 fixture yield 之后)。
 from __future__ import annotations
 
 import uuid as _uuid
-from typing import TYPE_CHECKING
 
 import pytest
 from fastapi.testclient import TestClient
-
-if TYPE_CHECKING:
-    pass
 
 
 @pytest.mark.usefixtures("pg_test_container")
@@ -42,11 +38,8 @@ def test_register_post_sse_get_with_real_pg(
 
     # 2. import app_main(serve path 真覆盖) — fixture 已确保 PG up + test db exists
     #    NOTE: app.core.database.engine 在 import 时读 POSTGRES_*。
-    #    pytest_configure 已在 session 起始把 POSTGRES_DB 强制为 test db,
-    #    因此 import 链上任何模块若已经 import 了 database,engine 也是连 test db。
+    #    pytest_configure 已在 session 起始把 POSTGRES_DB 强制为 test db。
     from app.app_main import app
-
-    client = TestClient(app)
 
     # 3. 用 uuid 后缀做用户名,使重复 run 不冲突(避免 409 duplicate username)
     suffix = _uuid.uuid4().hex[:8]
@@ -55,75 +48,87 @@ def test_register_post_sse_get_with_real_pg(
     bob_username = f"bob_e2e_{suffix}"
     bob_email = f"bob_e2e_{suffix}@example.com"
 
-    # 4. User A 注册
-    r = client.post(
-        "/auth/register",
-        json={"username": alice_username, "password": "alice_password_123", "email": alice_email},
-    )
-    assert r.status_code in (200, 201), f"register alice failed: {r.status_code} {r.text}"
-    body = r.json()
-    assert "access_token" in body, f"missing access_token: {body}"
-    token_a = body["access_token"]
-    headers_a = {"Authorization": f"Bearer {token_a}"}
+    # 4. TestClient 必须用 context manager 才会触发 lifespan startup/shutdown
+    #    (Starlette 默认不跑 lifespan — 这正是 serve path 守护要测的核心:
+    #     lifespan 里 Base.metadata.create_all 必须真跑出 users / research_reports 表)
+    with TestClient(app) as client:
+        # User A 注册
+        r = client.post(
+            "/auth/register",
+            json={
+                "username": alice_username,
+                "password": "alice_password_123",
+                "email": alice_email,
+            },
+        )
+        assert r.status_code in (200, 201), f"register alice failed: {r.status_code} {r.text}"
+        body = r.json()
+        assert "access_token" in body, f"missing access_token: {body}"
+        token_a = body["access_token"]
+        headers_a = {"Authorization": f"Bearer {token_a}"}
 
-    # 5. User A 发起报告(POST /reports — body shape: target_name, target_ts_code, research_style)
-    r = client.post(
-        "/reports",
-        json={
-            "target_name": "贵州茅台",
-            "target_ts_code": "600519.SH",
-            "research_style": "comprehensive",
-        },
-        headers=headers_a,
-    )
-    assert r.status_code in (200, 201), f"POST /reports failed: {r.status_code} {r.text}"
-    report_id = r.json()["id"]
-    assert isinstance(report_id, str) and report_id
+        # User A 发起报告(POST /reports — body: target_name, target_ts_code, research_style)
+        r = client.post(
+            "/reports",
+            json={
+                "target_name": "贵州茅台",
+                "target_ts_code": "600519.SH",
+                "research_style": "comprehensive",
+            },
+            headers=headers_a,
+        )
+        assert r.status_code in (200, 201), f"POST /reports failed: {r.status_code} {r.text}"
+        report_id = r.json()["id"]
+        assert isinstance(report_id, str) and report_id
 
-    # 6. User A 订阅 SSE,drain 完到 event: done
-    #    用 read=120s 因为 mock LLM 全链路要跑 5 agents
-    saw_done = False
-    with client.stream(
-        "GET",
-        f"/reports/{report_id}/stream",
-        headers=headers_a,
-        timeout=120.0,
-    ) as resp:
-        assert resp.status_code == 200, f"SSE not 200: {resp.status_code}"
-        for raw in resp.iter_lines():
-            line = raw if isinstance(raw, str) else raw.decode("utf-8", errors="replace")
-            if line.startswith("event: done"):
-                saw_done = True
-                break
-    assert saw_done, "SSE did not reach 'event: done' before stream closed"
+        # User A 订阅 SSE,drain 完到 event: done
+        # 用 read=120s 因为 mock LLM 全链路要跑 5 agents
+        saw_done = False
+        with client.stream(
+            "GET",
+            f"/reports/{report_id}/stream",
+            headers=headers_a,
+            timeout=120.0,
+        ) as resp:
+            assert resp.status_code == 200, f"SSE not 200: {resp.status_code}"
+            for raw in resp.iter_lines():
+                line = raw if isinstance(raw, str) else raw.decode("utf-8", errors="replace")
+                if line.startswith("event: done"):
+                    saw_done = True
+                    break
+        assert saw_done, "SSE did not reach 'event: done' before stream closed"
 
-    # 7. User A 看到自己的列表(列表 wrap 在 {items, total, page, page_size})
-    r = client.get("/reports", headers=headers_a)
-    assert r.status_code == 200, r.text
-    items = r.json()["items"]
-    assert any(item["id"] == report_id for item in items), (
-        f"alice should see her own report {report_id} in list: {items}"
-    )
+        # User A 看到自己的列表(列表 wrap 在 {items, total, page, page_size})
+        r = client.get("/reports", headers=headers_a)
+        assert r.status_code == 200, r.text
+        items = r.json()["items"]
+        assert any(item["id"] == report_id for item in items), (
+            f"alice should see her own report {report_id} in list: {items}"
+        )
 
-    # 8. User B 注册
-    r = client.post(
-        "/auth/register",
-        json={"username": bob_username, "password": "bob_password_456", "email": bob_email},
-    )
-    assert r.status_code in (200, 201), f"register bob failed: {r.status_code} {r.text}"
-    token_b = r.json()["access_token"]
-    headers_b = {"Authorization": f"Bearer {token_b}"}
+        # User B 注册
+        r = client.post(
+            "/auth/register",
+            json={
+                "username": bob_username,
+                "password": "bob_password_456",
+                "email": bob_email,
+            },
+        )
+        assert r.status_code in (200, 201), f"register bob failed: {r.status_code} {r.text}"
+        token_b = r.json()["access_token"]
+        headers_b = {"Authorization": f"Bearer {token_b}"}
 
-    # 9. User B 列表里看不到 alice 的 report(数据隔离 — list)
-    r = client.get("/reports", headers=headers_b)
-    assert r.status_code == 200
-    items = r.json()["items"]
-    assert all(item["id"] != report_id for item in items), (
-        f"bob should NOT see alice's report {report_id} in his list: {items}"
-    )
+        # User B 列表里看不到 alice 的 report(数据隔离 — list)
+        r = client.get("/reports", headers=headers_b)
+        assert r.status_code == 200
+        items = r.json()["items"]
+        assert all(item["id"] != report_id for item in items), (
+            f"bob should NOT see alice's report {report_id} in his list: {items}"
+        )
 
-    # 10. User B 看不到 alice 的报告详情(数据隔离 — detail,403/404 都 ok)
-    r = client.get(f"/reports/{report_id}", headers=headers_b)
-    assert r.status_code in (403, 404), (
-        f"bob should be 403/404 on alice's report; got {r.status_code} {r.text}"
-    )
+        # User B 看不到 alice 的报告详情(数据隔离 — detail,403/404 都 ok)
+        r = client.get(f"/reports/{report_id}", headers=headers_b)
+        assert r.status_code in (403, 404), (
+            f"bob should be 403/404 on alice's report; got {r.status_code} {r.text}"
+        )
