@@ -92,6 +92,7 @@ async def delete_trade(
         svc.delete(trade_id, user_id=str(user.id))  # type: ignore[arg-type]
         db.commit()
     except NoResultFound:
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
     except ExpiredDeletionError as exc:
         db.rollback()
@@ -113,6 +114,7 @@ async def update_trade(
         db.refresh(trade)
         return TradeRead.model_validate(trade)
     except NoResultFound:
+        db.rollback()
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Trade not found")
     except ImmutableTradeError as exc:
         db.rollback()

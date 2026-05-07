@@ -1,5 +1,10 @@
 """TradeService.create + delete 测试 — 单事务 Trade insert/delete + Position UPSERT。"""
 
+# TODO(test): spec § 5 scenario 9 (transaction atomicity — Trade write fail leaves
+# Position untouched) deferred. Architecturally guaranteed by single-session
+# contract (svc.create flushes; caller commits). Add explicit DB error injection
+# test in v1.x if monitoring engine surfaces atomicity violations.
+
 from __future__ import annotations
 
 from collections.abc import Generator

@@ -58,6 +58,9 @@ def recompute_position_from_trades(trades: Iterable[TradeInput]) -> PositionStat
             if quantity > 0:
                 avg_cost = total_cost / Decimal(quantity)
         elif tr.type == TradeType.SELL:
+            # NOTE: no oversell guard. If sell.quantity > current quantity, fold produces
+            # negative quantity + total_cost. v1.0 trusts user input; future v1.x can add
+            # validation if needed (e.g., business rule "can't sell more than you hold").
             realized_pnl += Decimal(tr.quantity) * (tr.price - avg_cost)
             total_cost -= Decimal(tr.quantity) * avg_cost
             quantity -= tr.quantity
