@@ -23,7 +23,7 @@ CapabilityStatus = Literal["lit", "wip", "todo"]
 
 @dataclass(frozen=True)
 class DimensionConfig:
-    id: DimensionId
+    id: str  # 主 8 维取 DimensionId 值;App Shell 6 项取子 id (frontend/backend/...)
     number: str  # "01"-"08" or "09"
     name_cn: str
     name_en: str
@@ -78,3 +78,12 @@ class SnapshotDict(TypedDict):
     total_wip: int
     total_todo: int
     total: int
+
+
+@dataclass(frozen=True)
+class AppShellItem:
+    """App Shell 第 9 行单项 — 显示文件计数。"""
+
+    id: str  # "frontend" / "backend" / "auth" / "database" / "connectors" / "infra"
+    name_cn: str
+    file_count: int
