@@ -21,9 +21,7 @@ def _docker_available() -> bool:
     if not shutil.which("docker"):
         return False
     try:
-        result = subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=5
-        )
+        result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
         return result.returncode == 0
     except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
         return False
@@ -69,8 +67,13 @@ def test_full_detection_cycle_writes_signals_and_alerts(
         session.add(user)
         session.flush()
         pos = Position(
-            id=str(uuid4()), user_id=user.id, ts_code="600519.SH", name="贵州茅台",
-            quantity=100, avg_cost=Decimal("100"), total_cost=Decimal("10000"),
+            id=str(uuid4()),
+            user_id=user.id,
+            ts_code="600519.SH",
+            name="贵州茅台",
+            quantity=100,
+            avg_cost=Decimal("100"),
+            total_cost=Decimal("10000"),
             realized_pnl=Decimal("0"),
         )
         session.add(pos)
@@ -79,11 +82,13 @@ def test_full_detection_cycle_writes_signals_and_alerts(
 
     # 2. Trigger detection cycle (real Celery enqueue, not eager)
     from app.tasks.monitoring import detection_cycle
+
     result = detection_cycle.delay(user_filter=user_id)
     result.get(timeout=60)
 
     # 3. Verify monitoring_runs written
     from app.models.monitoring import MonitoringAlert, MonitoringRun
+
     with SessionLocal() as session:
         runs = session.query(MonitoringRun).filter_by(user_id=user_id).all()
         assert len(runs) == 1

@@ -9,13 +9,12 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     DateTime,
     Float,
     ForeignKey,
-    Integer,
-    JSON,
     String,
     UniqueConstraint,
 )
@@ -27,6 +26,7 @@ from app.core.database import Base
 
 class DetailStatus(StrEnum):
     """spec § 3.2 详情卡状态机。"""
+
     PENDING = "pending"
     READY = "ready"
     FAILED = "failed"
@@ -52,9 +52,7 @@ class MonitoringRun(Base):
     error_message = Column(String(2048), nullable=True)
     cost_cny = Column(Float, nullable=False, default=0.0)
 
-    __table_args__ = (
-        UniqueConstraint("cycle_id", "user_id", name="uq_runs_cycle_user"),
-    )
+    __table_args__ = (UniqueConstraint("cycle_id", "user_id", name="uq_runs_cycle_user"),)
 
 
 class MonitoringSignal(Base):
@@ -63,7 +61,9 @@ class MonitoringSignal(Base):
     __tablename__ = "monitoring_signals"
 
     id = Column(String(36), primary_key=True)
-    run_id = Column(String(36), ForeignKey("monitoring_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id = Column(
+        String(36), ForeignKey("monitoring_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     user_id = Column(
         UUID(as_uuid=True).with_variant(String(36), "sqlite"),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -86,7 +86,9 @@ class MonitoringAlert(Base):
     __tablename__ = "monitoring_alerts"
 
     id = Column(String(36), primary_key=True)
-    run_id = Column(String(36), ForeignKey("monitoring_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    run_id = Column(
+        String(36), ForeignKey("monitoring_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     user_id = Column(
         UUID(as_uuid=True).with_variant(String(36), "sqlite"),
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -105,7 +107,9 @@ class MonitoringAlert(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    notifications = relationship("Notification", back_populates="alert", cascade="all, delete-orphan")
+    notifications = relationship(
+        "Notification", back_populates="alert", cascade="all, delete-orphan"
+    )
 
 
 class Notification(Base):
@@ -114,7 +118,12 @@ class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(String(36), primary_key=True)
-    alert_id = Column(String(36), ForeignKey("monitoring_alerts.id", ondelete="CASCADE"), nullable=False, index=True)
+    alert_id = Column(
+        String(36),
+        ForeignKey("monitoring_alerts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     channel = Column(String(16), nullable=False)  # in_app / email
     recipient = Column(String(256), nullable=True)
     sent_at = Column(DateTime, nullable=True)

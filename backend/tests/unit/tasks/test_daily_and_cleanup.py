@@ -7,9 +7,6 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-
 from app.models.monitoring import (
     MonitoringAlert,
     MonitoringRun,
@@ -17,6 +14,8 @@ from app.models.monitoring import (
     Notification,
 )
 from app.models.user import User
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture(autouse=True)
@@ -46,10 +45,12 @@ def test_daily_full_scan_calls_detection_cycle(session):
     def _fake(*args, **kwargs):
         called.append(True)
         from celery.result import EagerResult
+
         return EagerResult(str(uuid4()), {}, "SUCCESS")
 
     with patch("app.tasks.monitoring.detection_cycle.apply", side_effect=_fake):
         from app.tasks.monitoring import daily_full_scan
+
         daily_full_scan.apply().get()
 
     assert len(called) == 1
@@ -68,13 +69,17 @@ def test_cleanup_old_deletes_runs_older_than_7_days(session):
     session.flush()
 
     old_run = MonitoringRun(
-        id=str(uuid4()), user_id=user.id, cycle_id=str(uuid4()),
+        id=str(uuid4()),
+        user_id=user.id,
+        cycle_id=str(uuid4()),
         trigger_type="cron",
         started_at=datetime.utcnow() - timedelta(days=10),
         status="success",
     )
     new_run = MonitoringRun(
-        id=str(uuid4()), user_id=user.id, cycle_id=str(uuid4()),
+        id=str(uuid4()),
+        user_id=user.id,
+        cycle_id=str(uuid4()),
         trigger_type="cron",
         started_at=datetime.utcnow() - timedelta(days=2),
         status="success",
@@ -84,6 +89,7 @@ def test_cleanup_old_deletes_runs_older_than_7_days(session):
 
     with patch("app.tasks.monitoring._get_session", return_value=session):
         from app.tasks.monitoring import cleanup_old
+
         cleanup_old.apply(kwargs={"days": 7}).get()
 
     remaining = session.query(MonitoringRun).all()

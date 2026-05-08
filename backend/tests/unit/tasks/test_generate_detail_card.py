@@ -10,9 +10,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-
 from app.models.monitoring import (
     DetailStatus,
     MonitoringAlert,
@@ -21,6 +18,8 @@ from app.models.monitoring import (
     Notification,
 )
 from app.models.user import User
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture(autouse=True)
@@ -80,14 +79,19 @@ def test_generate_detail_card_success_sets_ready(session):
     alert_id = _make_alert(session)
 
     mock_writer = MagicMock()
-    mock_writer.alert_writer = AsyncMock(return_value={
-        "json": {"summary": "茅台 -6% 因为 X"},
-        "markdown": "# 异动\n茅台 -6% 因为 X",
-    })
+    mock_writer.alert_writer = AsyncMock(
+        return_value={
+            "json": {"summary": "茅台 -6% 因为 X"},
+            "markdown": "# 异动\n茅台 -6% 因为 X",
+        }
+    )
 
-    with patch("app.tasks.monitoring._build_writer", return_value=mock_writer), \
-         patch("app.tasks.monitoring._get_session", return_value=session):
+    with (
+        patch("app.tasks.monitoring._build_writer", return_value=mock_writer),
+        patch("app.tasks.monitoring._get_session", return_value=session),
+    ):
         from app.tasks.monitoring import generate_detail_card
+
         generate_detail_card.apply(args=[alert_id]).get()
 
     refreshed = session.query(MonitoringAlert).filter_by(id=alert_id).one()
@@ -101,11 +105,14 @@ def test_generate_detail_card_llm_failure_after_retries_sets_failed(session):
     mock_writer = MagicMock()
     mock_writer.alert_writer = AsyncMock(side_effect=Exception("LLM rate limit"))
 
-    with patch("app.tasks.monitoring._build_writer", return_value=mock_writer), \
-         patch("app.tasks.monitoring._get_session", return_value=session):
+    with (
+        patch("app.tasks.monitoring._build_writer", return_value=mock_writer),
+        patch("app.tasks.monitoring._get_session", return_value=session),
+    ):
         from app.tasks.monitoring import generate_detail_card
+
         # eager mode + propagates → 异常 raise(autoretry 在 eager 不真的 retry,直接到最大次数)
-        with pytest.raises(Exception):
+        with pytest.raises(Exception, match="rate limit"):
             generate_detail_card.apply(args=[alert_id]).get()
 
     refreshed = session.query(MonitoringAlert).filter_by(id=alert_id).one()
@@ -119,13 +126,14 @@ def test_generate_detail_card_idempotent_on_retry(session):
     alert_id = _make_alert(session)
 
     mock_writer = MagicMock()
-    mock_writer.alert_writer = AsyncMock(return_value={
-        "json": {"a": 1}, "markdown": "# x"
-    })
+    mock_writer.alert_writer = AsyncMock(return_value={"json": {"a": 1}, "markdown": "# x"})
 
-    with patch("app.tasks.monitoring._build_writer", return_value=mock_writer), \
-         patch("app.tasks.monitoring._get_session", return_value=session):
+    with (
+        patch("app.tasks.monitoring._build_writer", return_value=mock_writer),
+        patch("app.tasks.monitoring._get_session", return_value=session),
+    ):
         from app.tasks.monitoring import generate_detail_card
+
         generate_detail_card.apply(args=[alert_id]).get()
         generate_detail_card.apply(args=[alert_id]).get()  # 第二次 — 同 UPDATE
 

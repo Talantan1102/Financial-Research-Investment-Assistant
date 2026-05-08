@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-
 from app.models.monitoring import (
     DetailStatus,
     MonitoringAlert,
@@ -21,6 +17,8 @@ from app.models.monitoring import (
 from app.models.position import Position
 from app.models.user import User
 from app.services.monitoring.signal_rules.base import SignalLevel, SignalResult
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture(autouse=True)
@@ -59,8 +57,13 @@ def _make_user(session: Session) -> User:
 
 def _make_position(session: Session, user: User, ts_code: str) -> Position:
     p = Position(
-        id=str(uuid4()), user_id=user.id, ts_code=ts_code, name=f"name-{ts_code}",
-        quantity=100, avg_cost=Decimal("100"), total_cost=Decimal("10000"),
+        id=str(uuid4()),
+        user_id=user.id,
+        ts_code=ts_code,
+        name=f"name-{ts_code}",
+        quantity=100,
+        avg_cost=Decimal("100"),
+        total_cost=Decimal("10000"),
         realized_pnl=Decimal("0"),
     )
     session.add(p)
@@ -76,13 +79,19 @@ def test_detection_cycle_creates_run_per_user(session, monkeypatch):
 
     # Mock SignalDetector 全 GREEN
     mock_detector = MagicMock()
-    mock_detector.detect = AsyncMock(return_value=(
-        SignalLevel.GREEN, [SignalResult(rule_name="x", level=SignalLevel.GREEN, explanation="ok")]
-    ))
+    mock_detector.detect = AsyncMock(
+        return_value=(
+            SignalLevel.GREEN,
+            [SignalResult(rule_name="x", level=SignalLevel.GREEN, explanation="ok")],
+        )
+    )
 
-    with patch("app.tasks.monitoring._build_detector", return_value=mock_detector), \
-         patch("app.tasks.monitoring._get_session", return_value=session):
+    with (
+        patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
+        patch("app.tasks.monitoring._get_session", return_value=session),
+    ):
         from app.tasks.monitoring import detection_cycle
+
         detection_cycle.apply().get()
 
     runs = session.query(MonitoringRun).all()
@@ -95,19 +104,25 @@ def test_detection_cycle_yellow_creates_alert_with_pending_status(session, monke
     session.commit()
 
     mock_detector = MagicMock()
-    mock_detector.detect = AsyncMock(return_value=(
-        SignalLevel.YELLOW,
-        [SignalResult(rule_name="price_anomaly", level=SignalLevel.YELLOW, explanation="-6%")]
-    ))
+    mock_detector.detect = AsyncMock(
+        return_value=(
+            SignalLevel.YELLOW,
+            [SignalResult(rule_name="price_anomaly", level=SignalLevel.YELLOW, explanation="-6%")],
+        )
+    )
 
     enqueued = []
+
     def _fake_delay(alert_id: str, **kwargs) -> None:
         enqueued.append(alert_id)
 
-    with patch("app.tasks.monitoring._build_detector", return_value=mock_detector), \
-         patch("app.tasks.monitoring._get_session", return_value=session), \
-         patch("app.tasks.monitoring.generate_detail_card.delay", side_effect=_fake_delay):
+    with (
+        patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
+        patch("app.tasks.monitoring._get_session", return_value=session),
+        patch("app.tasks.monitoring.generate_detail_card.delay", side_effect=_fake_delay),
+    ):
         from app.tasks.monitoring import detection_cycle
+
         detection_cycle.apply().get()
 
     alerts = session.query(MonitoringAlert).all()
@@ -134,9 +149,12 @@ def test_detection_cycle_dedupes_ts_code_across_users(session, monkeypatch):
 
     mock_detector.detect = _detect_spy
 
-    with patch("app.tasks.monitoring._build_detector", return_value=mock_detector), \
-         patch("app.tasks.monitoring._get_session", return_value=session):
+    with (
+        patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
+        patch("app.tasks.monitoring._get_session", return_value=session),
+    ):
         from app.tasks.monitoring import detection_cycle
+
         detection_cycle.apply().get()
 
     assert detect_calls.count("600519.SH") == 1  # 去重
@@ -150,20 +168,28 @@ def test_detection_cycle_updates_position_last_quote(session, monkeypatch):
     session.commit()
 
     mock_detector = MagicMock()
-    mock_detector.detect = AsyncMock(return_value=(
-        SignalLevel.GREEN,
-        [SignalResult(
-            rule_name="price_anomaly", level=SignalLevel.GREEN, explanation="ok",
-            raw_data_ref={"close": 1500.0},  # quote snapshot
-        )]
-    ))
+    mock_detector.detect = AsyncMock(
+        return_value=(
+            SignalLevel.GREEN,
+            [
+                SignalResult(
+                    rule_name="price_anomaly",
+                    level=SignalLevel.GREEN,
+                    explanation="ok",
+                    raw_data_ref={"close": 1500.0},  # quote snapshot
+                )
+            ],
+        )
+    )
 
-    with patch("app.tasks.monitoring._build_detector", return_value=mock_detector), \
-         patch("app.tasks.monitoring._get_session", return_value=session):
+    with (
+        patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
+        patch("app.tasks.monitoring._get_session", return_value=session),
+    ):
         from app.tasks.monitoring import detection_cycle
+
         detection_cycle.apply().get()
 
-    from app.models.position import Position as P
-    refreshed = session.query(P).filter_by(id=pos_id).one()
+    refreshed = session.query(Position).filter_by(id=pos_id).one()
     assert refreshed.last_quote_price == Decimal("1500.0")
     assert refreshed.last_quote_at is not None

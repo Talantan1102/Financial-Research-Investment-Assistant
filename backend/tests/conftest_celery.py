@@ -16,6 +16,7 @@ import pytest
 
 try:
     from testcontainers.redis import RedisContainer
+
     HAS_TESTCONTAINERS = True
 except ImportError:
     HAS_TESTCONTAINERS = False
@@ -54,10 +55,18 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
 
     proc = subprocess.Popen(
         [
-            "uv", "run", "celery", "-A", "app.tasks.celery_app", "worker",
-            "-Q", "default,llm",
-            "--concurrency", "1",
-            "--loglevel", "INFO",
+            "uv",
+            "run",
+            "celery",
+            "-A",
+            "app.tasks.celery_app",
+            "worker",
+            "-Q",
+            "default,llm",
+            "--concurrency",
+            "1",
+            "--loglevel",
+            "INFO",
         ],
         cwd="backend",
         env=env,

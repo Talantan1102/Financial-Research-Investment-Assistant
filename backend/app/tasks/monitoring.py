@@ -42,13 +42,15 @@ def _get_session() -> Session:
 
 def _build_detector() -> SignalDetector:
     """Hook 点:测试覆盖通过 patch."""
-    return SignalDetector(rules=[
-        AnnouncementRule(),
-        PriceAnomalyRule(),
-        CashFlowRule(),
-        FinancialRatioRule(),
-        ShareholderCountRule(),
-    ])
+    return SignalDetector(
+        rules=[
+            AnnouncementRule(),
+            PriceAnomalyRule(),
+            CashFlowRule(),
+            FinancialRatioRule(),
+            ShareholderCountRule(),
+        ]
+    )
 
 
 def _build_writer():
@@ -62,6 +64,7 @@ def _build_writer():
     所以 Task 10 的 task body 已可独立验证。
     """
     from app.agents.writer import Writer  # lazy import — production wiring TBD
+
     return Writer()
 
 
@@ -142,7 +145,8 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
             # 每 user 一行 run(同 cycle_id 内复用)
             if subject.user_id not in per_user_runs:
                 run = run_repo.create(
-                    user_id=subject.user_id, cycle_id=cycle_id,
+                    user_id=subject.user_id,
+                    cycle_id=cycle_id,
                     trigger_type="manual" if user_filter else "cron",
                     started_at=datetime.utcnow(),
                 )
@@ -152,9 +156,14 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
             # 写 signals
             for sig in signals:
                 sig_repo.create(
-                    run_id=run_id, user_id=subject.user_id, ts_code=subject.ts_code,
-                    rule_name=sig.rule_name, level=sig.level.value,
-                    detected_value=str(sig.detected_value) if sig.detected_value is not None else None,
+                    run_id=run_id,
+                    user_id=subject.user_id,
+                    ts_code=subject.ts_code,
+                    rule_name=sig.rule_name,
+                    level=sig.level.value,
+                    detected_value=str(sig.detected_value)
+                    if sig.detected_value is not None
+                    else None,
                     threshold=str(sig.threshold) if sig.threshold is not None else None,
                     explanation=sig.explanation,
                     raw_data_ref=sig.raw_data_ref,
@@ -163,8 +172,11 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
             # 标红 → 写 alert + enqueue generate_detail_card
             if level in (SignalLevel.YELLOW, SignalLevel.RED):
                 alert = alert_repo.create(
-                    run_id=run_id, user_id=subject.user_id, ts_code=subject.ts_code,
-                    alert_level=level.value, report_json={},
+                    run_id=run_id,
+                    user_id=subject.user_id,
+                    ts_code=subject.ts_code,
+                    alert_level=level.value,
+                    report_json={},
                 )
                 session.flush()
                 generate_detail_card.delay(alert.id)
@@ -251,6 +263,7 @@ def cleanup_old(days: int = 7) -> dict[str, Any]:
     session = _get_session()
     try:
         from app.models.monitoring import MonitoringRun
+
         deleted = (
             session.query(MonitoringRun)
             .filter(MonitoringRun.started_at < cutoff)

@@ -7,9 +7,6 @@ from datetime import datetime
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-
 from app.models.monitoring import (
     DetailStatus,
     MonitoringAlert,
@@ -18,6 +15,8 @@ from app.models.monitoring import (
     Notification,
 )
 from app.models.user import User
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from tests.unit._helpers import make_user
 
@@ -55,8 +54,12 @@ def test_monitoring_run_can_be_persisted(session: Session) -> None:
 def test_monitoring_signal_can_be_persisted(session: Session) -> None:
     user = make_user(session)
     run = MonitoringRun(
-        id=str(uuid4()), user_id=user.id, cycle_id=str(uuid4()),
-        trigger_type="cron", started_at=datetime.utcnow(), status="success",
+        id=str(uuid4()),
+        user_id=user.id,
+        cycle_id=str(uuid4()),
+        trigger_type="cron",
+        started_at=datetime.utcnow(),
+        status="success",
     )
     session.add(run)
     session.flush()
@@ -78,8 +81,12 @@ def test_monitoring_alert_default_detail_status_pending(session: Session) -> Non
     """Spec § 3.2:新写 alert 默认 detail_status=pending。"""
     user = make_user(session)
     run = MonitoringRun(
-        id=str(uuid4()), user_id=user.id, cycle_id=str(uuid4()),
-        trigger_type="cron", started_at=datetime.utcnow(), status="success",
+        id=str(uuid4()),
+        user_id=user.id,
+        cycle_id=str(uuid4()),
+        trigger_type="cron",
+        started_at=datetime.utcnow(),
+        status="success",
     )
     session.add(run)
     session.flush()
@@ -101,14 +108,22 @@ def test_monitoring_alert_detail_status_state_machine(session: Session) -> None:
     """Spec § 3.2:pending → ready / pending → failed。"""
     user = make_user(session)
     run = MonitoringRun(
-        id=str(uuid4()), user_id=user.id, cycle_id=str(uuid4()),
-        trigger_type="cron", started_at=datetime.utcnow(), status="success",
+        id=str(uuid4()),
+        user_id=user.id,
+        cycle_id=str(uuid4()),
+        trigger_type="cron",
+        started_at=datetime.utcnow(),
+        status="success",
     )
     session.add(run)
     session.flush()
     alert = MonitoringAlert(
-        id=str(uuid4()), run_id=run.id, user_id=user.id, ts_code="600519.SH",
-        alert_level="red", report_json={},
+        id=str(uuid4()),
+        run_id=run.id,
+        user_id=user.id,
+        ts_code="600519.SH",
+        alert_level="red",
+        report_json={},
     )
     session.add(alert)
     session.commit()
@@ -122,14 +137,22 @@ def test_monitoring_alert_detail_status_state_machine(session: Session) -> None:
 def test_notification_can_be_persisted(session: Session) -> None:
     user = make_user(session)
     run = MonitoringRun(
-        id=str(uuid4()), user_id=user.id, cycle_id=str(uuid4()),
-        trigger_type="cron", started_at=datetime.utcnow(), status="success",
+        id=str(uuid4()),
+        user_id=user.id,
+        cycle_id=str(uuid4()),
+        trigger_type="cron",
+        started_at=datetime.utcnow(),
+        status="success",
     )
     session.add(run)
     session.flush()
     alert = MonitoringAlert(
-        id=str(uuid4()), run_id=run.id, user_id=user.id, ts_code="600519.SH",
-        alert_level="red", report_json={},
+        id=str(uuid4()),
+        run_id=run.id,
+        user_id=user.id,
+        ts_code="600519.SH",
+        alert_level="red",
+        report_json={},
     )
     session.add(alert)
     session.flush()

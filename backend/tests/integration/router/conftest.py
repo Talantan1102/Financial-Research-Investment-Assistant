@@ -15,11 +15,6 @@ from collections.abc import Generator
 from uuid import uuid4
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from app.core.database import get_db
 from app.models.monitoring import (
     MonitoringAlert,
@@ -29,6 +24,10 @@ from app.models.monitoring import (
 )
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture

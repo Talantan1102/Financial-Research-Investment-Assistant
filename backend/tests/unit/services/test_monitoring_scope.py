@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-
 from app.models.position import Position
 from app.models.user import User
 from app.services.monitoring.scope import MonitoringSubject, load_active_subjects
+from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
@@ -42,8 +41,13 @@ def _make_user(session: Session, email: str = "") -> User:
 
 def _make_position(session: Session, user: User, ts_code: str, name: str, qty: int) -> Position:
     pos = Position(
-        id=str(uuid4()), user_id=user.id, ts_code=ts_code, name=name,
-        quantity=qty, avg_cost=Decimal("100"), total_cost=Decimal("100") * qty,
+        id=str(uuid4()),
+        user_id=user.id,
+        ts_code=ts_code,
+        name=name,
+        quantity=qty,
+        avg_cost=Decimal("100"),
+        total_cost=Decimal("100") * qty,
         realized_pnl=Decimal("0"),
     )
     session.add(pos)
@@ -90,5 +94,5 @@ def test_load_active_subjects_cross_user(session: Session) -> None:
 
 def test_subject_pydantic_extra_forbid() -> None:
     """schema 冻 extra='forbid' 不接收意外字段。"""
-    with pytest.raises(Exception):  # ValidationError
+    with pytest.raises(ValidationError):
         MonitoringSubject(user_id="u", ts_code="x", name="n", garbage="field")

@@ -5,10 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import uuid4
 
-from sqlalchemy.orm import Session
-
 from app.models.monitoring import MonitoringAlert, MonitoringRun
 from app.models.user import User
+from sqlalchemy.orm import Session
 
 
 def _make_alert(session: Session, user_id: str, ts_code: str, status: str = "pending") -> str:

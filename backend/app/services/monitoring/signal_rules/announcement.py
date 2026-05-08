@@ -23,8 +23,9 @@ if TYPE_CHECKING:
 
 class AnnouncementType(StrEnum):
     """5 类公告(spec § 5.2)+ 其他兜底."""
-    EARNINGS_DISCLOSURE = "财报披露"        # 季报/半年报/年报
-    PERFORMANCE_FORECAST = "业绩预告"       # 预增/预减/预亏
+
+    EARNINGS_DISCLOSURE = "财报披露"  # 季报/半年报/年报
+    PERFORMANCE_FORECAST = "业绩预告"  # 预增/预减/预亏
     ST_DELISTING = "ST/退市风险警示"
     MAJOR_RESTRUCTURING = "重大资产重组/并购"
     REGULATORY_PENALTY = "重大监管处罚/立案调查"
@@ -88,8 +89,15 @@ class AnnouncementRule(SignalRule):
         title = first.get("title", "")
         content = (first.get("content", "") or "")[:500]
 
-        prompt = _SYSTEM_PROMPT + "\n\n" + _USER_PROMPT_TEMPLATE.format(
-            title=title, summary=content, name=subject.name, ts_code=subject.ts_code,
+        prompt = (
+            _SYSTEM_PROMPT
+            + "\n\n"
+            + _USER_PROMPT_TEMPLATE.format(
+                title=title,
+                summary=content,
+                name=subject.name,
+                ts_code=subject.ts_code,
+            )
         )
 
         response = llm.chat(prompt=prompt, tier="fast", schema=AnnouncementClassification)
@@ -125,5 +133,9 @@ class AnnouncementRule(SignalRule):
             detected_value=score,
             threshold=red_th,
             explanation=f"{parsed.type.value} score={score:.2f}: {parsed.reasoning}",
-            raw_data_ref={"ts_code": subject.ts_code, "anns_count": len(df), "type": parsed.type.value},
+            raw_data_ref={
+                "ts_code": subject.ts_code,
+                "anns_count": len(df),
+                "type": parsed.type.value,
+            },
         )

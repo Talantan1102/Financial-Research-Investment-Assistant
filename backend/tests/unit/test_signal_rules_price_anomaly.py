@@ -6,10 +6,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pandas as pd
 import pytest
-
 from app.services.monitoring.scope import MonitoringSubject
-from app.services.monitoring.signal_rules.price_anomaly import PriceAnomalyRule
 from app.services.monitoring.signal_rules.base import SignalLevel
+from app.services.monitoring.signal_rules.price_anomaly import PriceAnomalyRule
 
 
 @pytest.fixture
@@ -38,10 +37,12 @@ def _mock_tushare_with_closes(closes: list[float]) -> Mock:
 
     n = len(closes)
     base = date(2026, 1, 1)
-    df = pd.DataFrame({
-        "trade_date": [(base + timedelta(days=i)).strftime("%Y%m%d") for i in range(n)],
-        "close": closes,
-    })
+    df = pd.DataFrame(
+        {
+            "trade_date": [(base + timedelta(days=i)).strftime("%Y%m%d") for i in range(n)],
+            "close": closes,
+        }
+    )
     tushare = Mock()
     tushare.get_daily = AsyncMock(return_value=df)
     return tushare
@@ -98,7 +99,7 @@ async def test_60d_drop_25pct_returns_yellow(subject, thresholds):
     closes[-1] = 75.0  # -25% cumulative,但 single-day 跟 closes[-2]=100 是 -25% 也 RED
     # 改为更细的 path:让最后两天单日变化 < 5%(GREEN) 但 60d 累计 -25%
     closes = [100.0]
-    for i in range(58):
+    for _i in range(58):
         closes.append(closes[-1] * 0.995)  # 每天 -0.5%,累计 ~25%
     closes.append(closes[-1])  # 最后一天和倒数第二天相同
     tushare = _mock_tushare_with_closes(closes)
