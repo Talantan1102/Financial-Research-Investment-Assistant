@@ -2,7 +2,7 @@
 
 LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
 
-**当前版本**:v0.8.5(constrained LLM router + 17-component Anthropic Skills bundle + 7th critic plan_correctness + LangGraph self-correcting retry edge)+ Harness Board M2(dev meta-tool — D/B 视图 toggle + 编辑模式 + App Shell 第 9 行)
+**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ Harness Board M2(dev meta-tool — D/B 视图 toggle + 编辑模式 + App Shell 第 9 行)
 
 ## 三个使用模式
 
