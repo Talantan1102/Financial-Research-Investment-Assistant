@@ -1,7 +1,7 @@
 # 个人 / 临时(不入库)
 .claude/
-CLAUDE.md
 *.pre-v*.bak
+# 注:CLAUDE.md 历史上当个人笔记用,2026-05-07 起改作项目级共享上下文(跨机 git 同步入口),已入库
 
 # Python
 __pycache__/
