@@ -20,8 +20,16 @@ LLMMode = Literal["none", "mock", "cassette", "live"]
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Set default LLM_MODE if not already set by environment or layer conftest."""
+    """Set default LLM_MODE if not already set by environment or layer conftest.
+
+    Roadmap #2.5: POSTGRES_DB is force-set to the test db. sqlite-override tests
+    are unaffected (don't read POSTGRES_DB at all); real-PG tests
+    (test_pg_serve_path_e2e.py) need this set BEFORE any module imports
+    `app.core.database` — pytest_configure runs before any test or test
+    conftest module loads, so this is the only safe place.
+    """
     os.environ.setdefault("LLM_MODE", "none")
+    os.environ["POSTGRES_DB"] = "industry_assistant_test"
 
 
 @pytest.fixture
@@ -168,5 +176,109 @@ def milvus_test_container() -> Iterator[dict[str, object]]:
             subprocess.run(
                 ["docker", "compose", "-f", str(compose_file), "down", "-v"],
                 cwd=str(backend_dir),
+                check=False,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Roadmap #2.5 PG container fixture — same shape as milvus_test_container,
+# different compose file (repo-root docker-compose.yml) and readiness probe.
+# Used only by tests/e2e/test_pg_serve_path_e2e.py for serve-path coverage.
+# See: docs/superpowers/specs/2026-05-07-v0.9.x-pg-and-ci-setup.md § Task 2
+# ---------------------------------------------------------------------------
+
+
+def _wait_for_pg_ready(
+    host: str, port: int, db: str, user: str, password: str, timeout: int = 60
+) -> None:
+    """Poll PG via psycopg2 until accepting connections + db is reachable."""
+    deadline = time.time() + timeout
+    last_err: Exception | None = None
+    while time.time() < deadline:
+        if _is_port_listening(host, port):
+            try:
+                import psycopg2
+
+                conn = psycopg2.connect(
+                    host=host, port=port, dbname=db, user=user, password=password
+                )
+                conn.close()
+                return
+            except Exception as e:  # psycopg2.OperationalError etc.
+                last_err = e
+        time.sleep(2)
+    raise TimeoutError(f"PG ({db}) not ready after {timeout}s: {last_err}")
+
+
+def _ensure_test_db_exists(host: str, port: int, user: str, password: str, test_db: str) -> None:
+    """Create test_db if it doesn't exist. Idempotent.
+
+    Handles the case where a developer's PG volume pre-dates 00-create-test-db.sql
+    (postgres entrypoint init scripts only run on FIRST volume init,
+    not on existing volumes).
+    """
+    import psycopg2
+
+    # Connect to default postgres db (always exists), check + create.
+    conn = psycopg2.connect(host=host, port=port, dbname="postgres", user=user, password=password)
+    conn.autocommit = True  # CREATE DATABASE cannot run inside a transaction
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (test_db,))
+        if cur.fetchone() is None:
+            # quote_ident not available without extension; safe inline because
+            # test_db is a hardcoded constant, not user input
+            cur.execute(f'CREATE DATABASE "{test_db}"')
+        cur.close()
+    finally:
+        conn.close()
+
+
+@pytest.fixture(scope="session")
+def pg_test_container() -> Iterator[dict[str, object]]:
+    """Session-scoped PG container, mirrors milvus_test_container.
+
+    若已外部启动(127.0.0.1:5432 listening + industry_assistant_test 可连),复用,
+    session 末**不**清理(避免影响外部 db / 开发者 dev 环境)。
+    若没启动,fixture 自动 docker compose up -d postgres,session 末 down -v 清理。
+    """
+    backend_dir = Path(__file__).resolve().parents[1]  # → backend/
+    repo_root = backend_dir.parent
+    compose_file = repo_root / "docker-compose.yml"
+    host = os.environ.get("POSTGRES_HOST", "127.0.0.1")
+    port = int(os.environ.get("POSTGRES_PORT", "5432"))
+    user = os.environ.get("POSTGRES_USER", "postgres")
+    password = os.environ.get("POSTGRES_PASSWORD", "postgres123")
+    test_db = "industry_assistant_test"
+
+    started_by_us = False
+    if not _is_port_listening(host, port):
+        subprocess.run(
+            ["docker", "compose", "-f", str(compose_file), "up", "-d", "postgres"],
+            cwd=str(repo_root),
+            check=True,
+        )
+        started_by_us = True
+
+    try:
+        # First wait for the default postgres db (always present once container is up)
+        _wait_for_pg_ready(host, port, "postgres", user, password, timeout=60)
+        # Then ensure test db exists (covers existing-volume migration case)
+        _ensure_test_db_exists(host, port, user, password, test_db)
+        # Final probe: test db must be reachable
+        _wait_for_pg_ready(host, port, test_db, user, password, timeout=10)
+        yield {
+            "host": host,
+            "port": port,
+            "user": user,
+            "password": password,
+            "db": test_db,
+            "url": f"postgresql://{user}:{password}@{host}:{port}/{test_db}",
+        }
+    finally:
+        if started_by_us:
+            subprocess.run(
+                ["docker", "compose", "-f", str(compose_file), "down", "-v"],
+                cwd=str(repo_root),
                 check=False,
             )
