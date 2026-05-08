@@ -59,10 +59,12 @@ dependencies = [
     "mcp>=1.0",
     # Stock data
     "tushare>=1.4",
-    # v0.8.3 — monitoring scheduler
+    # v0.8.3 — monitoring scheduler (apscheduler retired in v1.0, kept until Task 14 退役)
     "apscheduler>=3.11",
     "psycopg2-binary>=2.9.12",
     "redis>=7.4.0",
+    # v1.0 monitoring engine — Celery async task system
+    "celery>=5.3,<6.0",
     # Harness Board (dashboard/) — server-side rendering
     "jinja2>=3.1",
 ]
@@ -81,6 +83,10 @@ dev = [
     "pre-commit>=3.8",
     "types-cachetools>=5.5.0",
     "types-python-dateutil>=2.9",
+]
+test = [
+    # v1.0 monitoring engine — L2 e2e Redis container fixture
+    "testcontainers[redis]>=4.0,<5.0",
 ]
 
 [build-system]
