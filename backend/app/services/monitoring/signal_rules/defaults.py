@@ -24,9 +24,8 @@ DEFAULT_THRESHOLDS: dict[str, dict[str, float]] = {
         "red_threshold": 0.8,
     },
     "price_anomaly": {
-        "yellow_single_day_drop_pct": 5.0,
-        "yellow_60d_drop_pct": 20.0,
-        "red_single_day_drop_pct": 10.0,
-        "red_consecutive_5d_drop_pct": 25.0,
+        "yellow_single_day_change_pct": 5.0,
+        "yellow_60d_change_pct": 20.0,
+        "red_single_day_change_pct": 10.0,
     },
 }
