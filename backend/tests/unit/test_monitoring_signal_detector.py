@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 from app.services.monitoring.signal_detector import SignalDetector
 from app.services.monitoring.signal_rules.base import (
-    MonitoringCustomer,
+    MonitoringSubject,
     SignalLevel,
     SignalResult,
     SignalRule,
@@ -28,7 +28,7 @@ def _make_fake_rule(rule_name: str, level: SignalLevel) -> SignalRule:
 
         async def evaluate(
             self,
-            customer: MonitoringCustomer,
+            subject: MonitoringSubject,
             tushare: TushareService,
             bocha: BochaService,
             llm: LLMService,
@@ -40,40 +40,40 @@ def _make_fake_rule(rule_name: str, level: SignalLevel) -> SignalRule:
 
 
 @pytest.fixture
-def customer() -> MonitoringCustomer:
-    return MonitoringCustomer(id="x", ts_code="x.SH", name="x", industry="x")
+def subject() -> MonitoringSubject:
+    return MonitoringSubject(user_id="x", ts_code="x.SH", name="x")
 
 
 @pytest.mark.asyncio
-async def test_all_green_returns_green(customer: MonitoringCustomer) -> None:
+async def test_all_green_returns_green(subject: MonitoringSubject) -> None:
     detector = SignalDetector(
         rules=[_make_fake_rule("a", SignalLevel.GREEN), _make_fake_rule("b", SignalLevel.GREEN)]
     )
-    overall, results = await detector.detect(customer, MagicMock(), MagicMock(), MagicMock(), {})
+    overall, results = await detector.detect(subject, MagicMock(), MagicMock(), MagicMock(), {})
     assert overall == SignalLevel.GREEN
     assert len(results) == 2
 
 
 @pytest.mark.asyncio
-async def test_one_yellow_returns_yellow(customer: MonitoringCustomer) -> None:
+async def test_one_yellow_returns_yellow(subject: MonitoringSubject) -> None:
     detector = SignalDetector(
         rules=[_make_fake_rule("a", SignalLevel.GREEN), _make_fake_rule("b", SignalLevel.YELLOW)]
     )
-    overall, _ = await detector.detect(customer, MagicMock(), MagicMock(), MagicMock(), {})
+    overall, _ = await detector.detect(subject, MagicMock(), MagicMock(), MagicMock(), {})
     assert overall == SignalLevel.YELLOW
 
 
 @pytest.mark.asyncio
-async def test_one_red_returns_red(customer: MonitoringCustomer) -> None:
+async def test_one_red_returns_red(subject: MonitoringSubject) -> None:
     detector = SignalDetector(
         rules=[_make_fake_rule("a", SignalLevel.YELLOW), _make_fake_rule("b", SignalLevel.RED)]
     )
-    overall, _ = await detector.detect(customer, MagicMock(), MagicMock(), MagicMock(), {})
+    overall, _ = await detector.detect(subject, MagicMock(), MagicMock(), MagicMock(), {})
     assert overall == SignalLevel.RED
 
 
 @pytest.mark.asyncio
-async def test_rule_exception_caught_as_green(customer: MonitoringCustomer) -> None:
+async def test_rule_exception_caught_as_green(subject: MonitoringSubject) -> None:
     """规则抛错不应阻塞其他 rule;该 rule 算 green + log."""
 
     class BoomRule(SignalRule):
@@ -81,7 +81,7 @@ async def test_rule_exception_caught_as_green(customer: MonitoringCustomer) -> N
 
         async def evaluate(
             self,
-            customer: MonitoringCustomer,
+            subject: MonitoringSubject,
             tushare: TushareService,
             bocha: BochaService,
             llm: LLMService,
@@ -90,7 +90,7 @@ async def test_rule_exception_caught_as_green(customer: MonitoringCustomer) -> N
             raise RuntimeError("kaboom")
 
     detector = SignalDetector(rules=[BoomRule(), _make_fake_rule("ok", SignalLevel.GREEN)])
-    overall, results = await detector.detect(customer, MagicMock(), MagicMock(), MagicMock(), {})
+    overall, results = await detector.detect(subject, MagicMock(), MagicMock(), MagicMock(), {})
     assert overall == SignalLevel.GREEN
     assert len(results) == 2
     assert any(r.rule_name == "boom" and "error" in r.explanation.lower() for r in results)

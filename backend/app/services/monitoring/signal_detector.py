@@ -7,7 +7,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from app.services.monitoring.signal_rules.base import (
-    MonitoringCustomer,
+    MonitoringSubject,
     SignalLevel,
     SignalResult,
     SignalRule,
@@ -32,7 +32,7 @@ class SignalDetector:
 
     async def detect(
         self,
-        customer: MonitoringCustomer,
+        subject: MonitoringSubject,
         tushare: TushareService,
         bocha: BochaService,
         llm: LLMService,
@@ -41,7 +41,7 @@ class SignalDetector:
         async def _safe(rule: SignalRule) -> SignalResult:
             try:
                 rule_thresh = thresholds_per_rule.get(rule.name, {})
-                return await rule.evaluate(customer, tushare, bocha, llm, rule_thresh)
+                return await rule.evaluate(subject, tushare, bocha, llm, rule_thresh)
             except Exception as exc:
                 _logger.warning("signal rule %s failed: %s", rule.name, exc)
                 return SignalResult(

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from app.services.monitoring.signal_rules.base import (
-    MonitoringCustomer,
+    MonitoringSubject,
     SignalLevel,
     SignalResult,
     SignalRule,
@@ -41,7 +41,7 @@ class AnnouncementRule(SignalRule):
 
     async def evaluate(
         self,
-        customer: MonitoringCustomer,
+        subject: MonitoringSubject,
         tushare: TushareService,
         bocha: BochaService,
         llm: LLMService,
@@ -49,7 +49,7 @@ class AnnouncementRule(SignalRule):
     ) -> SignalResult:
         end = datetime.now().strftime("%Y%m%d")
         start = (datetime.now() - timedelta(days=7)).strftime("%Y%m%d")
-        df = await tushare.get_anns(ts_code=customer.ts_code, start=start, end=end)
+        df = await tushare.get_anns(ts_code=subject.ts_code, start=start, end=end)
         if df.empty:
             return SignalResult(
                 rule_name=self.name, level=SignalLevel.GREEN, explanation="近 7 天无公告"
@@ -60,8 +60,8 @@ class AnnouncementRule(SignalRule):
             for _, row in df.iterrows()
         )
         prompt = _PROMPT.format(
-            name=customer.name,
-            ts_code=customer.ts_code,
+            name=subject.name,
+            ts_code=subject.ts_code,
             anns_text=anns_text,
         )
 
@@ -87,5 +87,5 @@ class AnnouncementRule(SignalRule):
             detected_value=score,
             threshold=thresholds["red_threshold"],
             explanation=f"LLM 评分 {score:.2f}: {parsed.summary}",
-            raw_data_ref={"ts_code": customer.ts_code, "anns_count": len(df)},
+            raw_data_ref={"ts_code": subject.ts_code, "anns_count": len(df)},
         )

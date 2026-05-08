@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.services.monitoring.signal_rules.base import (
-    MonitoringCustomer,
+    MonitoringSubject,
     SignalLevel,
     SignalResult,
     SignalRule,
@@ -23,14 +23,14 @@ class FinancialRatioRule(SignalRule):
 
     async def evaluate(
         self,
-        customer: MonitoringCustomer,
+        subject: MonitoringSubject,
         tushare: TushareService,
         bocha: BochaService,
         llm: LLMService,
         thresholds: dict[str, float],
     ) -> SignalResult:
-        balance = await tushare.get_balance_sheet(ts_code=customer.ts_code)
-        fina = await tushare.get_fina_indicator(ts_code=customer.ts_code)
+        balance = await tushare.get_balance_sheet(ts_code=subject.ts_code)
+        fina = await tushare.get_fina_indicator(ts_code=subject.ts_code)
 
         balance = balance.sort_values("end_date").tail(4)
         fina = fina.sort_values("end_date").tail(4)
@@ -46,7 +46,7 @@ class FinancialRatioRule(SignalRule):
                     threshold=thresholds["red_debt_ratio_abs"],
                     explanation=f"资产负债率 {latest_debt_pct:.1f}% 超 {thresholds['red_debt_ratio_abs']}%",
                     raw_data_ref={
-                        "ts_code": customer.ts_code,
+                        "ts_code": subject.ts_code,
                         "end_date": str(balance["end_date"].iloc[-1]),
                     },
                 )
@@ -61,7 +61,7 @@ class FinancialRatioRule(SignalRule):
                     detected_value=str(last_two_margins),
                     threshold="0",
                     explanation=f"连续 2 季净利率为负: {last_two_margins}",
-                    raw_data_ref={"ts_code": customer.ts_code},
+                    raw_data_ref={"ts_code": subject.ts_code},
                 )
 
         # Yellow: debt ratio QoQ jump >= +5pp
@@ -77,7 +77,7 @@ class FinancialRatioRule(SignalRule):
                     detected_value=qoq_delta_pp,
                     threshold=thresholds["yellow_debt_ratio_qoq_pp"],
                     explanation=f"资产负债率单季环比 +{qoq_delta_pp:.1f}pp 超阈值",
-                    raw_data_ref={"ts_code": customer.ts_code},
+                    raw_data_ref={"ts_code": subject.ts_code},
                 )
 
         # Yellow: 净利率为负
@@ -90,7 +90,7 @@ class FinancialRatioRule(SignalRule):
                     detected_value=latest_margin,
                     threshold=0.0,
                     explanation=f"最新净利率 {latest_margin:.2%} 为负",
-                    raw_data_ref={"ts_code": customer.ts_code},
+                    raw_data_ref={"ts_code": subject.ts_code},
                 )
 
         return SignalResult(

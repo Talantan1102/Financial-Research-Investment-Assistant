@@ -10,13 +10,13 @@ from app.services.monitoring.signal_rules.announcement import (
     AnnouncementClassification,
     AnnouncementRule,
 )
-from app.services.monitoring.signal_rules.base import MonitoringCustomer, SignalLevel
+from app.services.monitoring.signal_rules.base import MonitoringSubject, SignalLevel
 from app.services.monitoring.signal_rules.defaults import DEFAULT_THRESHOLDS
 
 
 @pytest.fixture
-def customer() -> MonitoringCustomer:
-    return MonitoringCustomer(id="x", ts_code="x.SH", name="x", industry="x")
+def subject() -> MonitoringSubject:
+    return MonitoringSubject(user_id="x", ts_code="x.SH", name="x")
 
 
 def _llm(score: float) -> MagicMock:
@@ -37,36 +37,36 @@ def _ts(anns_df: pd.DataFrame) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_green_no_announcement(customer: MonitoringCustomer) -> None:
+async def test_green_no_announcement(subject: MonitoringSubject) -> None:
     df = pd.DataFrame(columns=["title", "content"])
     r = await AnnouncementRule().evaluate(
-        customer, _ts(df), MagicMock(), _llm(0.0), DEFAULT_THRESHOLDS["announcement"]
+        subject, _ts(df), MagicMock(), _llm(0.0), DEFAULT_THRESHOLDS["announcement"]
     )
     assert r.level == SignalLevel.GREEN
 
 
 @pytest.mark.asyncio
-async def test_yellow_on_mid_score(customer: MonitoringCustomer) -> None:
+async def test_yellow_on_mid_score(subject: MonitoringSubject) -> None:
     df = pd.DataFrame([{"title": "诉讼公告", "content": "x"}])
     r = await AnnouncementRule().evaluate(
-        customer, _ts(df), MagicMock(), _llm(0.6), DEFAULT_THRESHOLDS["announcement"]
+        subject, _ts(df), MagicMock(), _llm(0.6), DEFAULT_THRESHOLDS["announcement"]
     )
     assert r.level == SignalLevel.YELLOW
 
 
 @pytest.mark.asyncio
-async def test_red_on_high_score(customer: MonitoringCustomer) -> None:
+async def test_red_on_high_score(subject: MonitoringSubject) -> None:
     df = pd.DataFrame([{"title": "立案调查", "content": "x"}])
     r = await AnnouncementRule().evaluate(
-        customer, _ts(df), MagicMock(), _llm(0.9), DEFAULT_THRESHOLDS["announcement"]
+        subject, _ts(df), MagicMock(), _llm(0.9), DEFAULT_THRESHOLDS["announcement"]
     )
     assert r.level == SignalLevel.RED
 
 
 @pytest.mark.asyncio
-async def test_green_low_score(customer: MonitoringCustomer) -> None:
+async def test_green_low_score(subject: MonitoringSubject) -> None:
     df = pd.DataFrame([{"title": "常规公告", "content": "x"}])
     r = await AnnouncementRule().evaluate(
-        customer, _ts(df), MagicMock(), _llm(0.2), DEFAULT_THRESHOLDS["announcement"]
+        subject, _ts(df), MagicMock(), _llm(0.2), DEFAULT_THRESHOLDS["announcement"]
     )
     assert r.level == SignalLevel.GREEN

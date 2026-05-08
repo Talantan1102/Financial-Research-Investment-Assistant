@@ -6,14 +6,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pandas as pd
 import pytest
-from app.services.monitoring.signal_rules.base import MonitoringCustomer, SignalLevel
+from app.services.monitoring.signal_rules.base import MonitoringSubject, SignalLevel
 from app.services.monitoring.signal_rules.cash_flow import CashFlowRule
 from app.services.monitoring.signal_rules.defaults import DEFAULT_THRESHOLDS
 
 
 @pytest.fixture
-def customer() -> MonitoringCustomer:
-    return MonitoringCustomer(id="x", ts_code="x.SH", name="x", industry="x")
+def subject() -> MonitoringSubject:
+    return MonitoringSubject(user_id="x", ts_code="x.SH", name="x")
 
 
 def _ts(df: pd.DataFrame) -> MagicMock:
@@ -23,7 +23,7 @@ def _ts(df: pd.DataFrame) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_green_when_stable(customer: MonitoringCustomer) -> None:
+async def test_green_when_stable(subject: MonitoringSubject) -> None:
     df = pd.DataFrame(
         [
             {"end_date": ed, "n_cashflow_act": v}
@@ -37,13 +37,13 @@ async def test_green_when_stable(customer: MonitoringCustomer) -> None:
     )
     rule = CashFlowRule()
     result = await rule.evaluate(
-        customer, _ts(df), MagicMock(), MagicMock(), DEFAULT_THRESHOLDS["cash_flow"]
+        subject, _ts(df), MagicMock(), MagicMock(), DEFAULT_THRESHOLDS["cash_flow"]
     )
     assert result.level == SignalLevel.GREEN
 
 
 @pytest.mark.asyncio
-async def test_yellow_on_qoq_drop(customer: MonitoringCustomer) -> None:
+async def test_yellow_on_qoq_drop(subject: MonitoringSubject) -> None:
     df = pd.DataFrame(
         [
             {"end_date": ed, "n_cashflow_act": v}
@@ -55,13 +55,13 @@ async def test_yellow_on_qoq_drop(customer: MonitoringCustomer) -> None:
     )
     rule = CashFlowRule()
     result = await rule.evaluate(
-        customer, _ts(df), MagicMock(), MagicMock(), DEFAULT_THRESHOLDS["cash_flow"]
+        subject, _ts(df), MagicMock(), MagicMock(), DEFAULT_THRESHOLDS["cash_flow"]
     )
     assert result.level == SignalLevel.YELLOW
 
 
 @pytest.mark.asyncio
-async def test_red_on_consecutive_negative(customer: MonitoringCustomer) -> None:
+async def test_red_on_consecutive_negative(subject: MonitoringSubject) -> None:
     df = pd.DataFrame(
         [
             {"end_date": ed, "n_cashflow_act": v}
@@ -73,16 +73,16 @@ async def test_red_on_consecutive_negative(customer: MonitoringCustomer) -> None
     )
     rule = CashFlowRule()
     result = await rule.evaluate(
-        customer, _ts(df), MagicMock(), MagicMock(), DEFAULT_THRESHOLDS["cash_flow"]
+        subject, _ts(df), MagicMock(), MagicMock(), DEFAULT_THRESHOLDS["cash_flow"]
     )
     assert result.level == SignalLevel.RED
 
 
 @pytest.mark.asyncio
-async def test_green_empty_data(customer: MonitoringCustomer) -> None:
+async def test_green_empty_data(subject: MonitoringSubject) -> None:
     df = pd.DataFrame(columns=["end_date", "n_cashflow_act"])
     rule = CashFlowRule()
     result = await rule.evaluate(
-        customer, _ts(df), MagicMock(), MagicMock(), DEFAULT_THRESHOLDS["cash_flow"]
+        subject, _ts(df), MagicMock(), MagicMock(), DEFAULT_THRESHOLDS["cash_flow"]
     )
     assert result.level == SignalLevel.GREEN

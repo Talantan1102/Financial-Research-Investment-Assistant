@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from app.services.monitoring.signal_rules.base import (
-    MonitoringCustomer,
+    MonitoringSubject,
     SignalLevel,
     SignalResult,
     SignalRule,
@@ -23,13 +23,13 @@ class ShareholderCountRule(SignalRule):
 
     async def evaluate(
         self,
-        customer: MonitoringCustomer,
+        subject: MonitoringSubject,
         tushare: TushareService,
         bocha: BochaService,
         llm: LLMService,
         thresholds: dict[str, float],
     ) -> SignalResult:
-        df = await tushare.get_stk_holdernumber(ts_code=customer.ts_code)
+        df = await tushare.get_stk_holdernumber(ts_code=subject.ts_code)
         df = df.sort_values("end_date").tail(2)
         if len(df) < 2:
             return SignalResult(
@@ -52,7 +52,7 @@ class ShareholderCountRule(SignalRule):
                 detected_value=drop_pct,
                 threshold=thresholds["red_drop_pct"],
                 explanation=f"股东户数环比 -{drop_pct:.1f}% 超 RED 阈值",
-                raw_data_ref={"ts_code": customer.ts_code},
+                raw_data_ref={"ts_code": subject.ts_code},
             )
 
         if drop_pct >= thresholds["yellow_min_drop_pct"]:
@@ -62,7 +62,7 @@ class ShareholderCountRule(SignalRule):
                 detected_value=drop_pct,
                 threshold=thresholds["yellow_min_drop_pct"],
                 explanation=f"股东户数环比 -{drop_pct:.1f}% 超 YELLOW 阈值",
-                raw_data_ref={"ts_code": customer.ts_code},
+                raw_data_ref={"ts_code": subject.ts_code},
             )
 
         return SignalResult(
