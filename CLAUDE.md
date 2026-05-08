@@ -33,6 +33,10 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [v0.9.x 不引 alembic](docs/claude-context/v0.9.x-no-alembic-until-db-unify.md) — schema 用 `create_all()` 幂等；alembic 推到 #3.5 DB 统一
 - [v0.9.x #2.5 PG + CI ship 完](docs/claude-context/v0.9.x-pg-ci-done.md) — PR #21 ship，serve path 已被 CI e2e 守护
 
+### v1.0 ship
+- [v1.0 持仓监控引擎 + 5 类公告 ship 完](docs/claude-context/v1.0-monitoring-engine-done.md) — Celery + Redis + PG 统一 / 5 决策落地
+- [Celery + Redis 测试 fixture pattern](docs/claude-context/celery-redis-test-fixture-pattern.md) — L0/L1 eager + L2 worker subprocess
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。

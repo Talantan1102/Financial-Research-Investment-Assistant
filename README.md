@@ -124,6 +124,20 @@ docker compose up -d postgres
 
 > v0.9.x:`uv run poe serve` 启动时若 PG 未起,只会 log warning 不再硬 crash(graceful degradation)。依赖 PG 的 router(auth/news/session/database)调用时会报 500;其余路由(chat / research / monitoring / KB)正常工作。
 
+### v1.0 监控引擎部署(2026-05-08 起)
+
+监控引擎从 v0.8.3 进程内 APScheduler 迁到 Celery + Redis 异步任务系统,部署模型变化:
+
+```
+docker-compose up postgres redis  # infra(已有)
+# 应用层 3 个进程:
+make backend    # web (FastAPI) - HTTP only
+make worker     # Celery worker - detection / LLM 详情卡
+make beat       # Celery beat - 30min cycle / 16:30 daily / 02:00 cleanup
+```
+
+调度时区:Asia/Shanghai。盘内时段(周一到周五 9:30-15:30 每 30 分钟)自动 detection cycle。
+
 ### 常用命令(uv + poe)
 
 | 命令 | 作用 |
