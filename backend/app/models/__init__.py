@@ -6,6 +6,13 @@ New features should prefer importing from `app/services/*` (plural, v0.8.x main 
 from .chat import ChatAttachment, ChatMessage, ChatSession, LongTermMemory
 from .industry_data import CompanyData, IndustryStats, PolicyData
 from .knowledge import Document, KnowledgeBase
+from .monitoring import (
+    DetailStatus,
+    MonitoringAlert,
+    MonitoringRun,
+    MonitoringSignal,
+    Notification,
+)
 from .news import BiddingInfo, IndustryNews, NewsCollectionTask
 from .position import Position
 from .research import ResearchCheckpoint
@@ -32,4 +39,9 @@ __all__ = [
     "IndustryNews",
     "BiddingInfo",
     "NewsCollectionTask",
+    "DetailStatus",
+    "MonitoringAlert",
+    "MonitoringRun",
+    "MonitoringSignal",
+    "Notification",
 ]
