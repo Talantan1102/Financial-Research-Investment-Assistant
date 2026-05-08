@@ -7,13 +7,38 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 import time
 from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 
-pytestmark = pytest.mark.e2e
+
+def _docker_available() -> bool:
+    """True only if `docker` binary exists AND `docker info` returns 0."""
+    if not shutil.which("docker"):
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=5
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return False
+
+
+# Module-level skip — pg_test_container fixture invokes `docker compose` directly
+# without a docker-availability guard, so without this skip the test would error
+# (FileNotFoundError) before the redis_url fixture's skip path can fire.
+pytestmark = [
+    pytest.mark.e2e,
+    pytest.mark.skipif(
+        not _docker_available(),
+        reason="docker not available — L2 e2e requires docker for PG + Redis containers",
+    ),
+]
 
 
 def test_full_detection_cycle_writes_signals_and_alerts(
