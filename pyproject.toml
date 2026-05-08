@@ -63,6 +63,8 @@ dependencies = [
     "apscheduler>=3.11",
     "psycopg2-binary>=2.9.12",
     "redis>=7.4.0",
+    # Harness Board (dashboard/) — server-side rendering
+    "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -124,6 +126,9 @@ extend-exclude = [
     "backend/tests/integration/test_mcp_meta_tools.py",
     "backend/tests/integration/test_mcp_resource_tool_arch.py",
     "backend/tests/e2e/test_e2e_chat.py",
+    # Harness Board derive fixtures — read as text by code_grep, not executed.
+    # Intentional bare-name references (e.g. `Tier`) simulate real backend modules.
+    "dashboard/tests/derive/fixtures/",
 ]
 
 [tool.ruff.lint]
@@ -167,6 +172,9 @@ exclude = [
     "venv",
     ".venv",
     "__pycache__",
+    # Harness Board derive fixtures — read as text by code_grep, not imported.
+    # Intentional bare-name references (e.g. `Tier`) simulate real backend modules.
+    "dashboard/tests/derive/fixtures/",
 ]
 
 # Strict tier — these dirs don't exist yet; will be populated by v0 spec.

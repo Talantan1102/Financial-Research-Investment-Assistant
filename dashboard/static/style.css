@@ -1,0 +1,89 @@
+/* dashboard/static/style.css — 单文件手写,无框架 */
+
+:root {
+  --bg: #020617;
+  --fg: #f1f5f9;
+  --muted: #94a3b8;
+  --panel: #0f172a;
+  --border: #334155;
+  --lit-bg: #14532d;
+  --lit-fg: #86efac;
+  --wip-bg: #7c2d12;
+  --wip-fg: #fdba74;
+  --todo-fg: #64748b;
+  --todo-border: #475569;
+  --link: #93c5fd;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+
+.board {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+/* Hero */
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 16px;
+  background: var(--panel);
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+.hero-date { color: var(--muted); }
+.hero-wips { flex: 1; color: var(--muted); }
+.hero-wips a { color: var(--wip-fg); text-decoration: none; margin-right: 8px; }
+.hero-wips .empty { color: var(--todo-fg); font-style: italic; }
+.hero-counter { color: var(--lit-fg); font-family: ui-monospace, monospace; font-size: 12px; }
+
+/* Layer grid (D view) */
+.layer-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.layer-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+}
+.layer-head {
+  display: flex;
+  justify-content: space-between;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+.layer-name { margin: 4px 0 8px; }
+.layer-name strong { font-size: 14px; }
+.layer-name small { color: var(--muted); margin-left: 4px; }
+.cap-list { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* Chip 三态 */
+.chip {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+}
+.chip.lit  { background: var(--lit-bg);  color: var(--lit-fg);  border: 1px solid #166534; }
+.chip.wip  { background: var(--wip-bg);  color: var(--wip-fg);  border: 1px solid #9a3412; }
+.chip.todo { background: transparent;    color: var(--todo-fg); border: 1px dashed var(--todo-border); }
+
+/* 响应式简版 */
+@media (max-width: 1024px) { .layer-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 600px) { .layer-grid { grid-template-columns: 1fr; } }

@@ -1,0 +1,3 @@
+# fixture
+class ToolRegistry:
+    pass

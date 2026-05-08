@@ -1,0 +1,16 @@
+<header class="hero">
+  <span class="hero-date">📅 {{ today }}</span>
+  <span class="hero-wips">
+    {% if wips %}
+      当前 wip:
+      {% for c in wips %}
+        <a class="chip wip" href="#layer-{{ c.dimension }}">[{{ c.dimension[:2] }}] {{ c.name_cn }}</a>
+      {% endfor %}
+    {% else %}
+      <em class="empty">今天没在做任何 capability — 从 todo 挑一个?</em>
+    {% endif %}
+  </span>
+  <span class="hero-actions">
+    <span class="hero-counter">{{ snap.total_lit }}/{{ snap.total }} lit</span>
+  </span>
+</header>

@@ -1,0 +1,22 @@
+<div class="layer-grid">
+  {% for L in snap.layers %}
+    <article class="layer-card" id="layer-{{ L.id }}">
+      <div class="layer-head">
+        <span class="layer-num">{{ L.number }}</span>
+        <span class="layer-count">{{ L.lit }}/{{ L.total }}</span>
+      </div>
+      <div class="layer-name">
+        <strong>{{ L.name_cn }}</strong>
+        <small>· {{ L.name_en }}</small>
+      </div>
+      <div class="cap-list">
+        {% for c in L.capabilities %}
+          <span class="chip {{ c.status }}" title="{{ c.id }}">
+            {% if c.status == 'lit' %}✅{% elif c.status == 'wip' %}🟠{% else %}⬜{% endif %}
+            {{ c.name_cn }}
+          </span>
+        {% endfor %}
+      </div>
+    </article>
+  {% endfor %}
+</div>
