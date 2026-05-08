@@ -43,3 +43,8 @@ celery_app.conf.update(
     task_always_eager=os.environ.get("CELERY_TASK_ALWAYS_EAGER") == "1",
     task_eager_propagates=os.environ.get("CELERY_TASK_EAGER_PROPAGATES") == "1",
 )
+
+# Wire beat schedule (imported here to avoid circular)
+from app.tasks.celery_beat_schedule import beat_schedule  # noqa: E402
+
+celery_app.conf.beat_schedule = beat_schedule
