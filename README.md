@@ -2,7 +2,7 @@
 
 LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
 
-**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ Harness Board M1(dev meta-tool — `make board` 看 8 维 × 62 capability matrix)
+**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ Harness Board M2(dev meta-tool — D/B 视图 toggle + 编辑模式 + App Shell 第 9 行)
 
 ## 三个使用模式
 
@@ -43,13 +43,6 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
                               │  ├─ monitoring        │
                               │  └─ eval / trace      │
                               └────────────────────────┘
-                              ┌────────────────────────┐
-                              │ PostgreSQL (用户数据)  │
-                              │  ├─ users / sessions  │
-                              │  ├─ reports           │
-                              │  ├─ trades  (v1.0)   │
-                              │  └─ positions (v1.0) │
-                              └────────────────────────┘
 ```
 
 **关键模式**:
@@ -74,8 +67,7 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | v0.8.3-pre | 项目个人化 + legacy 标识 + 设计语言对齐 | #12 |
 | v0.8.3 | Tushare 真接 8 接口 + B-3 持仓预警引擎(signal + escalation + email + 3 前端页) | #13 |
 | v0.8.4 | B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey | #16 |
-| v0.8.5 | Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字 | #19 |
-| **v1.0** | **持仓监控数据模型 + Onboarding:Trade(SoT)+ Position(materialized 决策 1)+ 三态机 service guard(决策 2)+ 5 endpoints(POST/DELETE/PATCH trades + GET positions + POST onboarding)+ cross-user ownership 隔离** | — |
+| **v0.8.5** | **Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字** | #19 |
 
 ## 技术栈
 
@@ -84,7 +76,7 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | LLM | OpenAI 兼容协议(默认阿里云百炼 Qwen,可切 OpenAI / DeepSeek / 任意兼容端点) |
 | 编排 | LangGraph 1.x(Pydantic state + Send API + subgraph) |
 | 数据 | Tushare Pro(13 接口:8 base + 5 v0.8.5 财务/估值/资金信号)+ Bocha Web 搜索 + Milvus 向量库 |
-| 持久化 | sqlite(monitoring / cache / trace / eval) + PostgreSQL(用户/会话/reports/trades/positions) + Redis(可选) |
+| 持久化 | sqlite(monitoring / cache / trace / eval) + PostgreSQL(用户/会话,可选) + Redis(可选) |
 | 后端 | FastAPI + httpx async + APScheduler(B-3 cron) |
 | 前端 | React 18 + Vite + Antd 5 + TypeScript strict |
 | 测试 | pytest + pytest-recording(VCR) + mypy strict + ruff |
@@ -121,7 +113,7 @@ uv run poe serve
 # Terminal 2 — 前端(端口 5173)
 cd frontend && npm run dev
 
-# Terminal 0 — Postgres(必需:auth / /reports 持久化 / 用户隔离 都依赖)
+# (可选)Terminal 0 — Postgres 数据库(legacy auth / news / session router 需要;仅 chat / research / monitoring 路径无需启)
 docker compose up -d postgres
 
 # (可选)Terminal 0 — Milvus / Redis(KB / 持久会话用)
@@ -130,11 +122,7 @@ docker compose up -d postgres
 
 默认 `*_MODE=mock`,**不烧钱**;切 `TUSHARE_MODE=real` / `BOCHA_MODE=real` 走真接入。
 
-> **PG 是必需的**(`/reports` 持久化、`/auth`、用户隔离都依赖)。`uv run poe serve` 启动时若 PG 未起只 log warning 不硬 crash(graceful degradation),但依赖 PG 的 router 调用时会报 500。
->
-> **测试用独立 db `industry_assistant_test`**,由 `docker/init-db/00-create-test-db.sql` 启动时自动创建,仅 `backend/tests/e2e/test_pg_serve_path_e2e.py` 使用 — 其他测试用 sqlite-override(per-test 临时 sqlite + `dependency_overrides[get_db]`)。
->
-> **Schema 管理**:v0.9.x 用 SQLAlchemy `Base.metadata.create_all()` 启动时幂等创建。alembic 留到 roadmap #3.5(DB 统一)一并引入,见 `docs/superpowers/specs/2026-05-05-v0.9+-roadmap-and-long-running-task-scheduling.md` § 6 #3.5。
+> v0.9.x:`uv run poe serve` 启动时若 PG 未起,只会 log warning 不再硬 crash(graceful degradation)。依赖 PG 的 router(auth/news/session/database)调用时会报 500;其余路由(chat / research / monitoring / KB)正常工作。
 
 ### 常用命令(uv + poe)
 
@@ -149,8 +137,9 @@ docker compose up -d postgres
 | `uv run poe trace-view` | 打开 trace 查看器 |
 | `uv run poe eval` | 跑 golden case 评测 |
 | `make board` | 起 Harness Board(localhost:8910,自动 `open`) |
-| `make board-test` | 跑 dashboard/ 测试套(28 项) |
+| `make board-test` | 跑 dashboard/ 测试套(47 项) |
 | `make board-stop` | lsof port-scoped kill 8910 |
+| `make board-refresh` | curl -X POST /refresh,显式 invalidate snapshot cache |
 
 ## 测试分层
 
@@ -161,7 +150,7 @@ docker compose up -d postgres
 | **L2 e2e** (`backend/tests/e2e/`) | cassette(replay) | <2min | 每个 PR |
 | **L3 eval** (`backend/tests/eval/`) | live(真 API,烧钱) | 5-15min | nightly + 手动 |
 
-**当前状态**(v1.0):L0-L2 全 PASS,mypy strict + ruff clean。L3 含 4 differential golden case + B-1 茅台 e2e cassette。v1.0 新增 portfolio L0 unit + L1 router + L2 e2e(PG container)。
+**当前状态**(v0.8.5):L0-L2 全 PASS,mypy strict + ruff clean。L3 含 4 differential golden case + B-1 茅台 e2e cassette。
 
 ## 环境变量
 
@@ -223,15 +212,15 @@ financial-research-assistant/
 │       ├── api/                 # typed fetch clients
 │       ├── types/               # TS schema per module
 │       └── components/markdown/ # 共享 markdown 渲染
-├── dashboard/                   # Harness Board M1(dev meta-tool,sibling 顶级目录)
-│   ├── server.py                # Starlette + Jinja(GET / + GET /healthz)
-│   ├── derive/                  # path_router / capability_resolver / snapshot_builder(纯函数)
-│   ├── state/                   # sqlite + SnapshotRepo(全量替换语义)
+├── dashboard/                   # Harness Board M2(dev meta-tool,sibling 顶级目录)
+│   ├── server.py                # Starlette + Jinja(GET / + GET /healthz + edit + override + refresh)
+│   ├── derive/                  # path_router / capability_resolver / snapshot_builder / app_shell_stat(纯函数)
+│   ├── state/                   # sqlite + SnapshotRepo + OverrideRepo(全量替换 + upsert/DELETE)
 │   ├── config/{dimensions,capabilities}.yaml  # 8 维 + 62 capability + 5 类 derive_rule
-│   ├── templates/               # base / main / _hero / _d_view(htmx 1.9.10 vendored)
+│   ├── templates/               # base / main / _hero / _d_view / _b_view / _d_b_toggle / _app_shell / _capability_chip / _edit_select(htmx 1.9.10 vendored)
 │   ├── static/{style.css,htmx.min.js}
-│   └── tests/                   # 28 测试,mypy strict 清洁
-├── Makefile                     # board / board-stop / board-test / board-refresh(M2)
+│   └── tests/                   # 47 测试,mypy strict 清洁
+├── Makefile                     # board / board-stop / board-test / board-refresh
 ├── docs/
 │   ├── superpowers/{specs,plans}/  # 设计文档 + 实施计划(每版本一份)
 │   ├── project-story.md / .html    # 项目故事(求职 / 面试用)

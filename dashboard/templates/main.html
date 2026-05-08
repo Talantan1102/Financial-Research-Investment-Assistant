@@ -1,7 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
   {% include "_hero.html" %}
-  <section class="d-view">
-    {% include "_d_view.html" %}
+  {% include "_d_b_toggle.html" %}
+  <section class="view-content">
+    {% if view_mode == 'b' %}
+      {% include "_b_view.html" %}
+    {% else %}
+      {% include "_d_view.html" %}
+    {% endif %}
   </section>
+  {% include "_app_shell.html" %}
 {% endblock %}

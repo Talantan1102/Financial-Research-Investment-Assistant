@@ -84,6 +84,125 @@ html, body {
 .chip.wip  { background: var(--wip-bg);  color: var(--wip-fg);  border: 1px solid #9a3412; }
 .chip.todo { background: transparent;    color: var(--todo-fg); border: 1px dashed var(--todo-border); }
 
+/* Stale override mark (chip 上 ✏️) */
+.stale-mark {
+  font-size: 9px;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+
+/* View toggle (D/B Tab nav) */
+.view-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.view-toggle a {
+  padding: 8px 20px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.view-toggle a.active {
+  color: var(--fg);
+  border-bottom-color: var(--lit-fg);
+}
+
+.placeholder {
+  color: var(--muted);
+  font-style: italic;
+  padding: 32px 0;
+  text-align: center;
+}
+
 /* 响应式简版 */
 @media (max-width: 1024px) { .layer-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) { .layer-grid { grid-template-columns: 1fr; } }
+
+/* Kanban (B view 三列) */
+.kanban {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+.kanban-col {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  min-height: 120px;
+}
+.kanban-head {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+.kanban-head summary {
+  cursor: pointer;
+  font-weight: inherit;
+}
+.kanban-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.kanban-todo .kanban-head { color: var(--todo-fg); }
+.kanban-doing .kanban-head { color: var(--wip-fg); }
+.kanban-done .kanban-head summary { color: var(--lit-fg); }
+.kanban-body .empty {
+  color: var(--todo-fg);
+  font-style: italic;
+  font-size: 11px;
+  padding: 4px;
+}
+
+/* Kanban 响应式 */
+@media (max-width: 800px) {
+  .kanban { grid-template-columns: 1fr; }
+}
+
+/* Edit select (chip click → select swap) */
+.edit-select {
+  display: inline-block;
+  margin: 0;
+}
+.edit-select select {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1px solid var(--lit-fg);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+}
+
+/* App Shell 第 9 行 mini stat */
+.app-shell-row {
+  margin-top: 16px;
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+}
+.app-shell-num {
+  color: var(--todo-fg);
+  font-weight: 600;
+}
+.app-shell-name {
+  color: var(--fg);
+}
+.app-shell-items {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}

@@ -47,3 +47,44 @@ def test_snapshot_to_dict_json_roundtrip():
     d = snap.to_dict()
     s = json.dumps(d)
     assert json.loads(s)["total"] == 62
+
+
+def test_snapshot_to_dict_satisfies_typed_dict() -> None:
+    """to_dict 返回的字段必须满足 SnapshotDict 契约(verify 运行时形状)。"""
+    from dashboard.derive.types import SnapshotDict
+
+    snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
+    d: SnapshotDict = snap.to_dict()
+    # 顶层字段
+    assert set(d.keys()) >= {
+        "refreshed_at",
+        "layers",
+        "total_lit",
+        "total_wip",
+        "total_todo",
+        "total",
+    }
+    # 第一层 layer 字段
+    L0 = d["layers"][0]
+    assert set(L0.keys()) >= {
+        "id",
+        "number",
+        "name_cn",
+        "name_en",
+        "lit",
+        "wip",
+        "todo",
+        "total",
+        "capabilities",
+    }
+    # 第一个 capability 字段(若存在)
+    if L0["capabilities"]:
+        c0 = L0["capabilities"][0]
+        assert set(c0.keys()) >= {
+            "id",
+            "dimension",
+            "name_cn",
+            "name_en",
+            "status",
+            "derived_status",
+        }

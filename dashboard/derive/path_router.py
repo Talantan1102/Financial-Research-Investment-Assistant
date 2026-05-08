@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from fnmatch import fnmatch
 from pathlib import Path
+from typing import cast
 
 import yaml
 
@@ -31,7 +32,7 @@ def load_dimensions(
     ]
     app_shell = [
         DimensionConfig(
-            id="app_shell",
+            id=d["id"],  # M2:保留 frontend/backend/auth/... 子 id
             number="09",
             name_cn=d["name_cn"],
             name_en=d["name_cn"],  # App Shell 子项无 name_en,降级用中文
@@ -57,7 +58,8 @@ def classify_path(
     for d in main_dims:
         for glob in d.paths:
             if fnmatch(path, glob):
-                candidates.append((_specificity(glob), d.id))
+                # main_dims 的 id 在 yaml 内容上仍为 DimensionId 子集,运行时安全
+                candidates.append((_specificity(glob), cast(DimensionId, d.id)))
     for d in app_shell:
         for glob in d.paths:
             if fnmatch(path, glob):
