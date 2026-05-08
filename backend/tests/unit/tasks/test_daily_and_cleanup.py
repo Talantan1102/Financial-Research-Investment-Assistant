@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from datetime import datetime, timedelta
 from unittest.mock import patch
 from uuid import uuid4
@@ -25,7 +26,7 @@ def celery_eager(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def session() -> Session:
+def session() -> Generator[Session, None, None]:
     # 项目约定:不全量 create_all(其他模型有 JSONB 在 sqlite 不可编译);只建本测试用到的表
     engine = create_engine("sqlite:///:memory:")
     User.__table__.create(engine)

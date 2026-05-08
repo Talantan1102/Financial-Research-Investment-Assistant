@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from decimal import Decimal
 from uuid import uuid4
 
@@ -15,7 +16,7 @@ from sqlalchemy.orm import Session
 
 
 @pytest.fixture
-def session() -> Session:
+def session() -> Generator[Session, None, None]:
     engine = create_engine("sqlite:///:memory:")
     # 项目约定:不全量 create_all(其他模型有 JSONB 在 sqlite 不可编译);只建本测试用到的表
     User.__table__.create(engine)
@@ -95,4 +96,4 @@ def test_load_active_subjects_cross_user(session: Session) -> None:
 def test_subject_pydantic_extra_forbid() -> None:
     """schema 冻 extra='forbid' 不接收意外字段。"""
     with pytest.raises(ValidationError):
-        MonitoringSubject(user_id="u", ts_code="x", name="n", garbage="field")
+        MonitoringSubject(user_id="u", ts_code="x", name="n", garbage="field")  # type: ignore[call-arg]
