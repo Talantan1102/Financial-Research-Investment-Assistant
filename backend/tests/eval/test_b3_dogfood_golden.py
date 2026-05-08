@@ -111,10 +111,17 @@ def _make_mock_bocha() -> Any:
 
 def _make_mock_llm() -> Any:
     """Mock LLM that returns GREEN score for announcement classification."""
-    from app.services.monitoring.signal_rules.announcement import AnnouncementClassification
+    from app.services.monitoring.signal_rules.announcement import (
+        AnnouncementClassification,
+        AnnouncementType,
+    )
 
     mock_response = MagicMock()
-    mock_response.parsed = AnnouncementClassification(score=0.1, summary="常规公告,无重大影响")
+    mock_response.parsed = AnnouncementClassification(
+        type=AnnouncementType.OTHER,
+        score=0.1,
+        reasoning="常规公告,无重大影响",
+    )
     mock = MagicMock()
     mock.chat = MagicMock(return_value=mock_response)
     return mock
