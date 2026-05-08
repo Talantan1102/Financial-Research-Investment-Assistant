@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pandas as pd
 import pytest
 from app.services.monitoring.signal_rules.base import (
-    MonitoringCustomer,
+    MonitoringSubject,
     SignalLevel,
 )
 from app.services.monitoring.signal_rules.defaults import DEFAULT_THRESHOLDS
@@ -15,8 +15,8 @@ from app.services.monitoring.signal_rules.financial_ratio import FinancialRatioR
 
 
 @pytest.fixture
-def customer() -> MonitoringCustomer:
-    return MonitoringCustomer(id="x", ts_code="600519.SH", name="茅台", industry="消费")
+def subject() -> MonitoringSubject:
+    return MonitoringSubject(user_id="x", ts_code="600519.SH", name="茅台")
 
 
 def _fake_tushare(balance_df: pd.DataFrame, fina_df: pd.DataFrame) -> MagicMock:
@@ -27,7 +27,7 @@ def _fake_tushare(balance_df: pd.DataFrame, fina_df: pd.DataFrame) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_green_when_stable(customer: MonitoringCustomer) -> None:
+async def test_green_when_stable(subject: MonitoringSubject) -> None:
     balance = pd.DataFrame(
         [
             {"end_date": "20240331", "debt_to_assets": 0.40},
@@ -46,7 +46,7 @@ async def test_green_when_stable(customer: MonitoringCustomer) -> None:
     )
     rule = FinancialRatioRule()
     result = await rule.evaluate(
-        customer,
+        subject,
         _fake_tushare(balance, fina),
         MagicMock(),
         MagicMock(),
@@ -56,7 +56,7 @@ async def test_green_when_stable(customer: MonitoringCustomer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_yellow_on_debt_ratio_jump(customer: MonitoringCustomer) -> None:
+async def test_yellow_on_debt_ratio_jump(subject: MonitoringSubject) -> None:
     balance = pd.DataFrame(
         [
             {"end_date": "20240331", "debt_to_assets": 0.40},
@@ -68,7 +68,7 @@ async def test_yellow_on_debt_ratio_jump(customer: MonitoringCustomer) -> None:
     fina = pd.DataFrame([{"end_date": "20241231", "netprofit_margin": 0.20}])
     rule = FinancialRatioRule()
     result = await rule.evaluate(
-        customer,
+        subject,
         _fake_tushare(balance, fina),
         MagicMock(),
         MagicMock(),
@@ -78,7 +78,7 @@ async def test_yellow_on_debt_ratio_jump(customer: MonitoringCustomer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_red_on_high_debt_ratio_abs(customer: MonitoringCustomer) -> None:
+async def test_red_on_high_debt_ratio_abs(subject: MonitoringSubject) -> None:
     balance = pd.DataFrame(
         [
             {"end_date": "20240331", "debt_to_assets": 0.78},
@@ -90,7 +90,7 @@ async def test_red_on_high_debt_ratio_abs(customer: MonitoringCustomer) -> None:
     fina = pd.DataFrame([{"end_date": "20241231", "netprofit_margin": 0.15}])
     rule = FinancialRatioRule()
     result = await rule.evaluate(
-        customer,
+        subject,
         _fake_tushare(balance, fina),
         MagicMock(),
         MagicMock(),
@@ -100,7 +100,7 @@ async def test_red_on_high_debt_ratio_abs(customer: MonitoringCustomer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_red_on_consecutive_loss(customer: MonitoringCustomer) -> None:
+async def test_red_on_consecutive_loss(subject: MonitoringSubject) -> None:
     balance = pd.DataFrame([{"end_date": "20241231", "debt_to_assets": 0.50}])
     fina = pd.DataFrame(
         [
@@ -110,7 +110,7 @@ async def test_red_on_consecutive_loss(customer: MonitoringCustomer) -> None:
     )
     rule = FinancialRatioRule()
     result = await rule.evaluate(
-        customer,
+        subject,
         _fake_tushare(balance, fina),
         MagicMock(),
         MagicMock(),
@@ -120,12 +120,12 @@ async def test_red_on_consecutive_loss(customer: MonitoringCustomer) -> None:
 
 
 @pytest.mark.asyncio
-async def test_green_empty_data(customer: MonitoringCustomer) -> None:
+async def test_green_empty_data(subject: MonitoringSubject) -> None:
     balance = pd.DataFrame(columns=["end_date", "debt_to_assets"])
     fina = pd.DataFrame(columns=["end_date", "netprofit_margin"])
     rule = FinancialRatioRule()
     result = await rule.evaluate(
-        customer,
+        subject,
         _fake_tushare(balance, fina),
         MagicMock(),
         MagicMock(),

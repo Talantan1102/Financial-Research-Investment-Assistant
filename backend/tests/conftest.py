@@ -16,6 +16,12 @@ from typing import Literal
 import pytest
 from app.services.llm_mock_client import MockLLMClient
 
+# v1.0 monitoring-engine L2 e2e fixtures (Redis container + Celery worker
+# subprocess). pytest only auto-loads files literally named `conftest.py`,
+# so we explicitly re-export from `tests.conftest_celery` to register the
+# fixtures into this conftest's scope.
+from tests.conftest_celery import celery_worker_subprocess, redis_url  # noqa: F401, E402
+
 LLMMode = Literal["none", "mock", "cassette", "live"]
 
 
