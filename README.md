@@ -2,7 +2,7 @@
 
 LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
 
-**当前版本**:v0.8.5(constrained LLM router + 17-component Anthropic Skills bundle + 7th critic plan_correctness + LangGraph self-correcting retry edge)
+**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)
 
 ## 三个使用模式
 
@@ -43,6 +43,13 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
                               │  ├─ monitoring        │
                               │  └─ eval / trace      │
                               └────────────────────────┘
+                              ┌────────────────────────┐
+                              │ PostgreSQL (用户数据)  │
+                              │  ├─ users / sessions  │
+                              │  ├─ reports           │
+                              │  ├─ trades  (v1.0)   │
+                              │  └─ positions (v1.0) │
+                              └────────────────────────┘
 ```
 
 **关键模式**:
@@ -67,7 +74,8 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | v0.8.3-pre | 项目个人化 + legacy 标识 + 设计语言对齐 | #12 |
 | v0.8.3 | Tushare 真接 8 接口 + B-3 持仓预警引擎(signal + escalation + email + 3 前端页) | #13 |
 | v0.8.4 | B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey | #16 |
-| **v0.8.5** | **Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字** | #19 |
+| v0.8.5 | Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字 | #19 |
+| **v1.0** | **持仓监控数据模型 + Onboarding:Trade(SoT)+ Position(materialized 决策 1)+ 三态机 service guard(决策 2)+ 5 endpoints(POST/DELETE/PATCH trades + GET positions + POST onboarding)+ cross-user ownership 隔离** | — |
 
 ## 技术栈
 
@@ -76,7 +84,7 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | LLM | OpenAI 兼容协议(默认阿里云百炼 Qwen,可切 OpenAI / DeepSeek / 任意兼容端点) |
 | 编排 | LangGraph 1.x(Pydantic state + Send API + subgraph) |
 | 数据 | Tushare Pro(13 接口:8 base + 5 v0.8.5 财务/估值/资金信号)+ Bocha Web 搜索 + Milvus 向量库 |
-| 持久化 | sqlite(monitoring / cache / trace / eval) + PostgreSQL(用户/会话,可选) + Redis(可选) |
+| 持久化 | sqlite(monitoring / cache / trace / eval) + PostgreSQL(用户/会话/reports/trades/positions) + Redis(可选) |
 | 后端 | FastAPI + httpx async + APScheduler(B-3 cron) |
 | 前端 | React 18 + Vite + Antd 5 + TypeScript strict |
 | 测试 | pytest + pytest-recording(VCR) + mypy strict + ruff |
@@ -150,7 +158,7 @@ docker compose up -d postgres
 | **L2 e2e** (`backend/tests/e2e/`) | cassette(replay) | <2min | 每个 PR |
 | **L3 eval** (`backend/tests/eval/`) | live(真 API,烧钱) | 5-15min | nightly + 手动 |
 
-**当前状态**(v0.8.5):L0-L2 全 PASS,mypy strict + ruff clean。L3 含 4 differential golden case + B-1 茅台 e2e cassette。
+**当前状态**(v1.0):L0-L2 全 PASS,mypy strict + ruff clean。L3 含 4 differential golden case + B-1 茅台 e2e cassette。v1.0 新增 portfolio L0 unit + L1 router + L2 e2e(PG container)。
 
 ## 环境变量
 
