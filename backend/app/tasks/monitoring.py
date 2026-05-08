@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -49,6 +49,20 @@ def _build_detector() -> SignalDetector:
         FinancialRatioRule(),
         ShareholderCountRule(),
     ])
+
+
+def _build_writer():
+    """Hook 点:测试 patch。
+
+    TODO(Task 17): 真实 Writer.alert_writer(alert_id) 协议尚未在 app.agents.writer
+    Writer 类上定型(目前只有 _run_alert_writer(state) 接受 ResearchState)。
+    生产 wiring 需要薄 adapter:从 alert_id 加载 ResearchState → 调用
+    Writer._run_alert_writer → 抽出 {"json", "markdown"}。
+    单元测试通过 patch("app.tasks.monitoring._build_writer") 注入 mock,
+    所以 Task 10 的 task body 已可独立验证。
+    """
+    from app.agents.writer import Writer  # lazy import — production wiring TBD
+    return Writer()
 
 
 def _resolve_quote_from_signals(signals: list[Any]) -> Decimal | None:
@@ -182,12 +196,67 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
         session.close()
 
 
-# Placeholder — real implementation lands in Task 10.
-# Defined now so that detection_cycle can import + .delay() it without ImportError.
 @celery_app.task(
     name="app.tasks.monitoring.generate_detail_card",
-    bind=True,
+    autoretry_for=(Exception,),  # 简化:任何异常 retry,真生产可窄到 LLMError
+    retry_backoff=True,
+    max_retries=2,
+    rate_limit="5/m",
+    acks_late=True,
 )
-def generate_detail_card(self, alert_id: str) -> dict[str, Any]:  # pragma: no cover
-    """Generate detail card for a flagged alert. Implemented in Task 10."""
-    raise NotImplementedError("generate_detail_card lands in Task 10")
+def generate_detail_card(alert_id: str) -> dict[str, Any]:
+    """Spec § 5.1:autoretry max=2 + acks_late + state machine."""
+    return asyncio.run(_run_generate_detail_card(alert_id))
+
+
+async def _run_generate_detail_card(alert_id: str) -> dict[str, Any]:
+    session = _get_session()
+    alert_repo = MonitoringAlertRepo(session)
+    writer = _build_writer()
+
+    try:
+        result = await writer.alert_writer(alert_id)  # returns {"json": ..., "markdown": ...}
+        alert_repo.update_detail(
+            alert_id,
+            status=DetailStatus.READY,
+            report_json=result["json"],
+            report_markdown=result["markdown"],
+        )
+        session.commit()
+        return {"alert_id": alert_id, "status": "ready"}
+    except Exception as exc:
+        # 记 failed(每次 retry 都写一次,最终值就是失败值)
+        alert_repo.update_detail(
+            alert_id,
+            status=DetailStatus.FAILED,
+            error_message=str(exc)[:2000],
+        )
+        session.commit()
+        raise  # autoretry kicks in
+    finally:
+        session.close()
+
+
+@celery_app.task(name="app.tasks.monitoring.daily_full_scan")
+def daily_full_scan() -> dict[str, Any]:
+    """16:30 工作日收盘后兜底全量(等价于 detection_cycle 但 trigger_type='daily')."""
+    detection_cycle.apply()
+    return {"status": "queued daily full scan"}
+
+
+@celery_app.task(name="app.tasks.monitoring.cleanup_old")
+def cleanup_old(days: int = 7) -> dict[str, Any]:
+    """清 N 天前的 monitoring_runs(级联删 signals/alerts/notifications)."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    session = _get_session()
+    try:
+        from app.models.monitoring import MonitoringRun
+        deleted = (
+            session.query(MonitoringRun)
+            .filter(MonitoringRun.started_at < cutoff)
+            .delete(synchronize_session=False)
+        )
+        session.commit()
+        return {"deleted_runs": deleted}
+    finally:
+        session.close()
