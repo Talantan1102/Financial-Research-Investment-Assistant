@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+  {% include "_hero.html" %}
+  {% include "_view_toggle.html" %}
+  {% if memory_path_warning %}
+    <p class="warning-banner">⚠ memory 路径未找到,仅显示 spec 决策 ~{{ decisions|length }} 项</p>
+  {% endif %}
+  {% include "_decision_filter.html" %}
+  <section class="decisions-list">
+    {% for d in decisions %}
+      {% include "_decision_card.html" %}
+    {% endfor %}
+  </section>
+  <script src="/static/decisions-filter.js" defer></script>
+{% endblock %}

@@ -75,8 +75,6 @@ def test_get_edit_404_unknown_id() -> None:
 def test_post_override_invalidates_and_swaps() -> None:
     """POST override → 写 override 表 + invalidate snapshot + 返回新 chip HTML。"""
     with TestClient(app) as client:
-        # cleanup any leftover state from prior runs
-        client.post("/capability/memory.long_term_memory/override", data={"status": "__clear__"})
         # 先 GET / 触发 build_snapshot,确保表有 row
         client.get("/")
         # POST set wip
@@ -91,8 +89,6 @@ def test_post_override_invalidates_and_swaps() -> None:
         # invalidate 验证:再 GET /,snapshot 含新 wip
         r2 = client.get("/")
         assert "memory.long_term_memory" in r2.text  # capability 出现在页面
-        # cleanup at end
-        client.post("/capability/memory.long_term_memory/override", data={"status": "__clear__"})
 
 
 def test_post_override_clear_sentinel() -> None:
@@ -114,17 +110,11 @@ def test_post_override_clear_sentinel() -> None:
 
 def test_post_override_unknown_cap_id_returns_404_no_write() -> None:
     """POST 未知 cap_id 返 404 且不写 override 表(防 orphan row)。"""
-    from pathlib import Path
-
+    from dashboard import server as dashboard_server
     from dashboard.state.db import open_db
     from dashboard.state.repositories import OverrideRepo
 
     with TestClient(app) as client:
-        # cleanup: ensure no row with this cap_id exists
-        client.post(
-            "/capability/nope.fake/override",
-            data={"status": "__clear__"},
-        )
         # POST with unknown cap_id and valid status
         r = client.post(
             "/capability/nope.fake/override",
@@ -133,7 +123,8 @@ def test_post_override_unknown_cap_id_returns_404_no_write() -> None:
         assert r.status_code == 404
         assert "not found" in r.text
         # Verify NO row written to capability_override table for nope.fake
-        conn = open_db(Path("backend/data/board.db"))
+        # (use isolated DB_PATH from autouse fixture, not prod path)
+        conn = open_db(dashboard_server.DB_PATH)
         try:
             overrides = OverrideRepo(conn).get_all()
         finally:

@@ -2,7 +2,7 @@
 
 LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
 
-**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ Harness Board M2(dev meta-tool — D/B 视图 toggle + 编辑模式 + App Shell 第 9 行)
+**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ Harness Board M3(dev meta-tool — D/B/决策 三 tab + decision_extractor + filter UI + note 持久化)
 
 ## 三个使用模式
 
@@ -137,7 +137,11 @@ docker compose up -d postgres
 | `uv run poe trace-view` | 打开 trace 查看器 |
 | `uv run poe eval` | 跑 golden case 评测 |
 | `make board` | 起 Harness Board(localhost:8910,自动 `open`) |
+<<<<<<< HEAD
+| `make board-test` | 跑 dashboard/ 测试套(65 项) |
+=======
 | `make board-test` | 跑 dashboard/ 测试套(47 项) |
+>>>>>>> origin/main
 | `make board-stop` | lsof port-scoped kill 8910 |
 | `make board-refresh` | curl -X POST /refresh,显式 invalidate snapshot cache |
 
@@ -212,6 +216,16 @@ financial-research-assistant/
 │       ├── api/                 # typed fetch clients
 │       ├── types/               # TS schema per module
 │       └── components/markdown/ # 共享 markdown 渲染
+<<<<<<< HEAD
+├── dashboard/                   # Harness Board M3(dev meta-tool,sibling 顶级目录)
+│   ├── server.py                # Starlette + Jinja(GET / + /healthz + /decisions + edit + override + refresh + note POST/DELETE)
+│   ├── derive/                  # path_router / capability_resolver / snapshot_builder / app_shell_stat / decision_extractor(纯函数)
+│   ├── state/                   # sqlite + SnapshotRepo + OverrideRepo + DecisionNoteRepo(全量替换 + upsert/DELETE × 2)
+│   ├── config/{dimensions,capabilities}.yaml  # 8 维 + 62 capability + 5 类 derive_rule
+│   ├── templates/               # base / main / decisions / _hero / _d_view / _b_view / _view_toggle / _app_shell / _capability_chip / _edit_select / _decision_card / _decision_filter / _decision_note_form
+│   ├── static/{style.css,htmx.min.js,decisions-filter.js}
+│   └── tests/                   # 65 测试,mypy strict 清洁(含 test files)
+=======
 ├── dashboard/                   # Harness Board M2(dev meta-tool,sibling 顶级目录)
 │   ├── server.py                # Starlette + Jinja(GET / + GET /healthz + edit + override + refresh)
 │   ├── derive/                  # path_router / capability_resolver / snapshot_builder / app_shell_stat(纯函数)
@@ -220,6 +234,7 @@ financial-research-assistant/
 │   ├── templates/               # base / main / _hero / _d_view / _b_view / _d_b_toggle / _app_shell / _capability_chip / _edit_select(htmx 1.9.10 vendored)
 │   ├── static/{style.css,htmx.min.js}
 │   └── tests/                   # 47 测试,mypy strict 清洁
+>>>>>>> origin/main
 ├── Makefile                     # board / board-stop / board-test / board-refresh
 ├── docs/
 │   ├── superpowers/{specs,plans}/  # 设计文档 + 实施计划(每版本一份)
