@@ -23,6 +23,7 @@ from app.router.attachment_router import router as attachment_router  # noqa: E4
 from app.router.auth_router import router as auth_router  # noqa: E402
 from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
+from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
 
 # ---------------------------------------------------------------------------
@@ -304,6 +305,7 @@ app.include_router(attachment_router)
 app.include_router(research.router)
 app.include_router(monitoring_router)
 app.include_router(reports_router)  # v0.9.x — research reports CRUD
+app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
 
 
 @app.get("/hello")
