@@ -145,3 +145,37 @@ describe('useChatSSE — F6 backoff sequence', () => {
     expect(snapshot(currentChatState).last_seq).toBe(2)
   })
 })
+
+describe('useChatSSE — F8 multi-chat lifecycle', () => {
+  beforeEach(() => currentChatActions.reset())
+
+  it('aborts old stream when sessionId changes (F8)', async () => {
+    const ctrlA = controllableSseResponse()
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () => ctrlA.response),
+    )
+
+    const { result, rerender } = renderHook(
+      ({ sid }: { sid: string }) =>
+        useChatSSE({ sessionId: sid, delayMs: async () => {} }),
+      { initialProps: { sid: 'A' } },
+    )
+    currentChatActions.setSession('A', [])
+    const send = result.current.sendMessage('hello')
+    ctrlA.push({ type: 'token', seq: 1, content: 'fromA' })
+    await waitFor(() => {
+      expect(snapshot(currentChatState).last_seq).toBe(1)
+    })
+
+    currentChatActions.setSession('B', [])
+    rerender({ sid: 'B' })
+
+    ctrlA.push({ type: 'token', seq: 2, content: 'fromA-late' })
+    ctrlA.disconnect()
+    await send.catch(() => {})
+
+    const s = snapshot(currentChatState)
+    expect(s.session_id).toBe('B')
+    expect(s.last_seq).toBe(0)
+  })
+})
