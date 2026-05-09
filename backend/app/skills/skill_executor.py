@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import json
 import os
+import platform
+import resource
 import signal
 import subprocess
 import sys
@@ -21,6 +23,29 @@ from app.skills.script_schemas import (
     SkillScriptRef,
 )
 from app.skills.skill_workdir import make_skill_workdir
+
+
+def _apply_rlimits(*, memory_mb: int, cpu_seconds: int):
+    """Build a preexec_fn closure that caps memory + CPU in the child process.
+
+    POSIX-only. macOS RLIMIT_AS is unreliable for malloc — fall back to
+    RLIMIT_DATA there.
+    """
+
+    def _set() -> None:
+        soft_mem = memory_mb * 1024 * 1024
+        if platform.system() != "Darwin":
+            resource.setrlimit(resource.RLIMIT_AS, (soft_mem, soft_mem))
+        else:
+            with contextlib.suppress(ValueError, OSError):
+                resource.setrlimit(resource.RLIMIT_DATA, (soft_mem, soft_mem))
+
+        soft_cpu = cpu_seconds
+        hard_cpu = max(cpu_seconds + 5, int(cpu_seconds * 1.5))
+        resource.setrlimit(resource.RLIMIT_CPU, (soft_cpu, hard_cpu))
+
+    return _set
+
 
 # Sandbox / I/O contract constants — tunable via env/Settings later.
 DEFAULT_TIMEOUT_S: Final[int] = 30
@@ -97,6 +122,10 @@ class SkillExecutor:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
+                preexec_fn=_apply_rlimits(
+                    memory_mb=self._max_memory_mb,
+                    cpu_seconds=timeout_s,
+                ),
             )
         except OSError as exc:
             return _err_result(
