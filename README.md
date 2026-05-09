@@ -68,6 +68,39 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | v0.8.3 | Tushare 真接 8 接口 + B-3 持仓预警引擎(signal + escalation + email + 3 前端页) | #13 |
 | v0.8.4 | B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey | #16 |
 | **v0.8.5** | **Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字** | #19 |
+| **v0.9 (Plan 1)** | **Chat backend foundation: LangGraph supervisor topology + MCP single-mode tool layer + PG-persisted chat state + 5 chat REST endpoints + 6 MCP tools + in-session memory Protocol DI** | feat/v0.9-chat-c1c2 |
+
+### v0.9 Chat Mode (backend foundation, Plan 1 of 5)
+
+Production-style chat agent with LangGraph supervisor topology + MCP single-mode tool layer + PG-persisted state.
+
+- **Endpoints:**
+  - `POST /api/v0/chat` — SSE streaming chat (19 event types: token / plan / tool_start / tool_end / cost_update / done / error / + Plan 2-3 extensions)
+  - `POST /api/v0/chats` — create new chat session
+  - `GET /api/v0/chats/` — list user's chat sessions
+  - `GET /api/v0/chats/{session_id}` — get session + messages
+  - `DELETE /api/v0/chats/{session_id}` — delete session
+
+- **6 MCP tools** (via stdio subprocess, `backend/app/mcp_server/`):
+  - `get_stock_quote` (tushare A-share daily price)
+  - `get_financials` (tushare financials)
+  - `get_news` (tushare news)
+  - `web_search` (Bocha)
+  - `kb_search` (Milvus)
+  - `compare_stocks` (composite — quote + financials for 2-5 stocks)
+
+- **Persistence (PG):**
+  - Business tables in `public` schema (chat_sessions, chat_messages, tool_result_cache)
+  - LangGraph checkpoints in `langgraph_checkpoints` schema (AsyncPostgresSaver)
+
+- **In-session memory (Q4 E):** tool-result dedup + token-guard summarization via `Memory` Protocol DI (extensible to D MemGPT in C.5)
+
+- **Env vars:** Existing `DATABASE_URL` + `DASHSCOPE_API_KEY` + `DASHSCOPE_BASE_URL` — no new vars
+
+- **Plan 1 carryover (TODO before Plan 2 ship):**
+  - MCP tool wiring into planner runtime ToolRegistry (currently legacy in-process tools wired)
+  - Real `ToolResultCache` injection (currently `_NoOpCache` stub)
+  - PG schema migration formalization (v0.9 columns added via manual ALTER during smoke; future via alembic in v1.x)
 
 ## 技术栈
 
@@ -151,11 +184,7 @@ make beat       # Celery beat - 30min cycle / 16:30 daily / 02:00 cleanup
 | `uv run poe trace-view` | 打开 trace 查看器 |
 | `uv run poe eval` | 跑 golden case 评测 |
 | `make board` | 起 Harness Board(localhost:8910,自动 `open`) |
-<<<<<<< HEAD
 | `make board-test` | 跑 dashboard/ 测试套(65 项) |
-=======
-| `make board-test` | 跑 dashboard/ 测试套(47 项) |
->>>>>>> origin/main
 | `make board-stop` | lsof port-scoped kill 8910 |
 | `make board-refresh` | curl -X POST /refresh,显式 invalidate snapshot cache |
 
@@ -230,7 +259,6 @@ financial-research-assistant/
 │       ├── api/                 # typed fetch clients
 │       ├── types/               # TS schema per module
 │       └── components/markdown/ # 共享 markdown 渲染
-<<<<<<< HEAD
 ├── dashboard/                   # Harness Board M3(dev meta-tool,sibling 顶级目录)
 │   ├── server.py                # Starlette + Jinja(GET / + /healthz + /decisions + edit + override + refresh + note POST/DELETE)
 │   ├── derive/                  # path_router / capability_resolver / snapshot_builder / app_shell_stat / decision_extractor(纯函数)
@@ -239,16 +267,6 @@ financial-research-assistant/
 │   ├── templates/               # base / main / decisions / _hero / _d_view / _b_view / _view_toggle / _app_shell / _capability_chip / _edit_select / _decision_card / _decision_filter / _decision_note_form
 │   ├── static/{style.css,htmx.min.js,decisions-filter.js}
 │   └── tests/                   # 65 测试,mypy strict 清洁(含 test files)
-=======
-├── dashboard/                   # Harness Board M2(dev meta-tool,sibling 顶级目录)
-│   ├── server.py                # Starlette + Jinja(GET / + GET /healthz + edit + override + refresh)
-│   ├── derive/                  # path_router / capability_resolver / snapshot_builder / app_shell_stat(纯函数)
-│   ├── state/                   # sqlite + SnapshotRepo + OverrideRepo(全量替换 + upsert/DELETE)
-│   ├── config/{dimensions,capabilities}.yaml  # 8 维 + 62 capability + 5 类 derive_rule
-│   ├── templates/               # base / main / _hero / _d_view / _b_view / _d_b_toggle / _app_shell / _capability_chip / _edit_select(htmx 1.9.10 vendored)
-│   ├── static/{style.css,htmx.min.js}
-│   └── tests/                   # 47 测试,mypy strict 清洁
->>>>>>> origin/main
 ├── Makefile                     # board / board-stop / board-test / board-refresh
 ├── docs/
 │   ├── superpowers/{specs,plans}/  # 设计文档 + 实施计划(每版本一份)
