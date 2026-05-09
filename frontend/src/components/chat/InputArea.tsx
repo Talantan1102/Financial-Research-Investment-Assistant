@@ -1,4 +1,4 @@
-import { CloseCircleOutlined, SendOutlined } from '@ant-design/icons'
+import { CloseCircleOutlined, SendOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { Button } from 'antd'
 import {
   useCallback,
@@ -26,6 +26,8 @@ export function InputArea(props: InputAreaProps) {
   const taRef = useRef<HTMLTextAreaElement>(null)
   const snap = useSnapshot(currentChatState)
   const streaming = snap.streaming_phase !== 'idle'
+  const messages = snap.messages ?? []
+  const hasContext = messages.length > 0
 
   const autoResize = useCallback(() => {
     const ta = taRef.current
@@ -82,6 +84,15 @@ export function InputArea(props: InputAreaProps) {
         rows={1}
       />
       <div className={styles.inputActions}>
+        {!streaming && hasContext ? (
+          <Button
+            icon={<ThunderboltOutlined />}
+            onClick={() => props.onEscalate?.()}
+            aria-label="Escalate"
+          >
+            ⚡ 升级到深度研究
+          </Button>
+        ) : null}
         {streaming ? (
           <Button
             danger

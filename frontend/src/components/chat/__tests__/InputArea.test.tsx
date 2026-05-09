@@ -77,3 +77,54 @@ describe('<InputArea> Cmd+K abort', () => {
     expect(onAbort).toHaveBeenCalled()
   })
 })
+
+describe('<InputArea> Escalate button', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+  })
+
+  it('renders ⚡ Escalate button when not streaming and chat has at least 1 message', () => {
+    currentChatActions.setSession('s1', [
+      {
+        id: 'a',
+        session_id: 's1',
+        role: 'user',
+        content: 'q?',
+        message_type: 'text',
+        tool_call_data: null,
+        research_report_id: null,
+        research_report_summary: null,
+        created_at: '2026-05-09T00:00:00Z',
+      },
+    ])
+    render(<InputArea sessionId="s1" />)
+    expect(screen.getByRole('button', { name: /Escalate|升级到深度研究|⚡/i })).toBeInTheDocument()
+  })
+
+  it('hides Escalate button on empty chat', () => {
+    currentChatActions.setSession('s1', [])
+    render(<InputArea sessionId="s1" />)
+    expect(screen.queryByRole('button', { name: /Escalate|升级到深度研究|⚡/i })).toBeNull()
+  })
+
+  it('clicking Escalate calls onEscalate', async () => {
+    currentChatActions.setSession('s1', [
+      {
+        id: 'a',
+        session_id: 's1',
+        role: 'user',
+        content: 'q?',
+        message_type: 'text',
+        tool_call_data: null,
+        research_report_id: null,
+        research_report_summary: null,
+        created_at: '2026-05-09T00:00:00Z',
+      },
+    ])
+    const onEscalate = vi.fn()
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" onEscalate={onEscalate} />)
+    await user.click(screen.getByRole('button', { name: /Escalate|升级到深度研究|⚡/i }))
+    expect(onEscalate).toHaveBeenCalled()
+  })
+})
