@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.agents.escalation_protocol import Entity, Preference, ToolResultRef
 from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
 from app.services.monitoring.signal_rules.base import SignalResult
@@ -417,3 +418,9 @@ class ResearchState(BaseModel):
     alert_signals: list[SignalResult] | None = None
     portfolio_warning_report: PortfolioWarningReport | None = None
     deep_dive_section: str | None = None
+
+    # === Plan 3 — chat-derived fields ===
+    chat_extracted_entities: list[Entity] = Field(default_factory=list)
+    chat_extracted_preferences: list[Preference] = Field(default_factory=list)
+    chat_known_tool_results: list[ToolResultRef] = Field(default_factory=list)
+    chat_session_id: str | None = None
