@@ -49,6 +49,34 @@ class SkillLoader:
             out.append(manifest)
         return out
 
+    # --- L2 ----------------------------------------------------------------
+
+    def load_skill_md(self, name: str) -> str:
+        """Return SKILL.md body (frontmatter stripped) for the given skill.
+
+        Raises SkillLoaderError if skill missing.
+
+        S3: emits a WARNING log if SKILL.md exceeds 30kB (soft threshold).
+        """
+        skill_md = self.skills_root / name / "SKILL.md"
+        if not skill_md.exists():
+            raise SkillLoaderError(f"skill not found: {name}")
+
+        text = skill_md.read_text(encoding="utf-8")
+        size = len(text.encode("utf-8"))
+        if size > SKILL_MD_WARN_BYTES:
+            log.warning(
+                "SKILL.md size %d bytes exceeds soft cap %d bytes for skill %s",
+                size,
+                SKILL_MD_WARN_BYTES,
+                name,
+            )
+
+        m = _FRONTMATTER_RE.match(text)
+        if not m:
+            return text
+        return m.group(2)
+
     def _parse_frontmatter(self, dir_name: str, skill_md: Path) -> SkillManifest:
         text = skill_md.read_text(encoding="utf-8")
         m = _FRONTMATTER_RE.match(text)
