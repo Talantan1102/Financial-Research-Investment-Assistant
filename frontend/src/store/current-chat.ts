@@ -77,6 +77,11 @@ export const currentChatActions = {
     currentChatState.streamingDraft = ''
     currentChatState.errorMessage = null
   },
+  resumeStreaming() {
+    // Like beginStreaming but preserves streamingDraft for F6 reconnect continuity
+    currentChatState.streamingStatus = 'streaming'
+    currentChatState.errorMessage = null
+  },
   setReconnecting() {
     currentChatState.streamingStatus = 'reconnecting'
   },

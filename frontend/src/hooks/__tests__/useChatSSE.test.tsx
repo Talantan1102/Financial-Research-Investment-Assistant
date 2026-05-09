@@ -68,3 +68,45 @@ describe('useChatSSE — abort', () => {
     expect(snapshot(currentChatState).last_seq).toBe(1)
   })
 })
+
+describe('useChatSSE — F6 reconnect (last_event_id)', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+    currentChatActions.setSession('s1', [])
+  })
+
+  it('reconnects to /stream/:id?last_event_id=N when initial stream closes early', async () => {
+    let initialSeen = false
+    let reconnectQuery: string | null = null
+
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () => {
+        initialSeen = true
+        return sseResponse([
+          { type: 'token', seq: 1, content: 'A' },
+          { type: 'token', seq: 2, content: 'B' },
+        ])
+      }),
+      http.get(`${API_BASE}/api/v0/chat/stream/s1`, ({ request }) => {
+        reconnectQuery = new URL(request.url).searchParams.get('last_event_id')
+        return sseResponse([
+          { type: 'token', seq: 3, content: 'C' },
+          { type: 'done', seq: 4 },
+        ])
+      }),
+    )
+
+    const { result } = renderHook(() =>
+      useChatSSE({ sessionId: 's1', delayMs: async () => {} }),
+    )
+    await act(async () => {
+      await result.current.sendMessage('hi')
+    })
+    expect(initialSeen).toBe(true)
+    expect(reconnectQuery).toBe('2')
+    expect(snapshot(currentChatState).last_seq).toBe(4)
+    expect(snapshot(currentChatState).streamingDraft).toBe('')
+    expect(snapshot(currentChatState).messages.at(-1)?.content).toBe('ABC')
+    expect(snapshot(currentChatState).streamingStatus).toBe('idle')
+  })
+})

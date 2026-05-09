@@ -143,7 +143,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
           const url = buildChatStreamUrl(sessionId, currentChatState.last_seq)
           const res = await fetchImpl(url, { signal: ac.signal })
           if (!res.ok) continue
-          currentChatActions.beginStreaming()
+          currentChatActions.resumeStreaming()
           const result = await consumeStream(res, ac.signal)
           doneSeen = result.doneSeen
         } catch {
