@@ -13,6 +13,7 @@ dependencies = [
     # Database
     "sqlalchemy>=2.0",
     "alembic>=1.13",
+    "asyncpg>=0.30",
     # Authentication
     "python-jose[cryptography]>=3.3",
     "passlib[bcrypt]>=1.7",
@@ -22,6 +23,7 @@ dependencies = [
     "tiktoken>=0.8.0",
     "langgraph>=1.0,<2",
     "langgraph-checkpoint-sqlite>=3.0,<4",
+    "langgraph-checkpoint-postgres>=2.0",
     "dashscope>=1.20",
     # Vector DB (kept for KB; v0 main path doesn't use it)
     "pymilvus>=2.6.0",
@@ -62,6 +64,7 @@ dependencies = [
     # v0.8.3 — monitoring scheduler (apscheduler retired in v1.0, kept until Task 14 退役)
     "apscheduler>=3.11",
     "psycopg2-binary>=2.9.12",
+    "psycopg[binary]>=3.1",  # bundled libpq — required by langgraph-checkpoint-postgres>=3.x
     "redis>=7.4.0",
     # v1.0 monitoring engine — Celery async task system
     "celery>=5.3,<6.0",
