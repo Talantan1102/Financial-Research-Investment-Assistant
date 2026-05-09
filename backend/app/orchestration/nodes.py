@@ -37,7 +37,9 @@ logger = logging.getLogger(__name__)
 
 
 async def planner_node(state: GraphState, *, planner: ChatPlanner) -> dict[str, Any]:
-    """Run ChatPlanner.step and return its state_update dict.
+    """Run ChatPlanner.run and return its state_update dict.
+
+    v0.9: delegates to planner.run(state) (async, returns dict directly).
 
     Args:
         state:   Current LangGraph GraphState.
@@ -46,8 +48,7 @@ async def planner_node(state: GraphState, *, planner: ChatPlanner) -> dict[str, 
     Returns:
         dict containing at least ``{"plan": Plan}``.
     """
-    sr = await asyncio.to_thread(planner.step, state)
-    return sr.state_update
+    return await planner.run(state)
 
 
 async def tool_node(
@@ -147,7 +148,9 @@ async def _dispatch_one(
 
 
 async def responder_node(state: GraphState, *, responder: Responder) -> dict[str, Any]:
-    """Run Responder.step and return its state_update dict.
+    """Run Responder.run and return its state_update dict.
+
+    v0.9: delegates to responder.run(state) (async, returns dict directly).
 
     Args:
         state:     Current LangGraph GraphState.
@@ -156,5 +159,4 @@ async def responder_node(state: GraphState, *, responder: Responder) -> dict[str
     Returns:
         dict containing at least ``{"final_response": str}``.
     """
-    sr = await asyncio.to_thread(responder.step, state)
-    return sr.state_update
+    return await responder.run(state)

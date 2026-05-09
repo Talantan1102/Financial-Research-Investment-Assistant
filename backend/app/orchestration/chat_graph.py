@@ -1,80 +1,93 @@
-"""build_chat_graph — wire ChatPlanner + Responder + ToolRegistry into a LangGraph StateGraph.
+"""build_chat_graph v0.9 — supervisor topology with Q4 E memory and PG checkpointer.
 
-Graph topology:
-  START → planner_node → [conditional] → tool_node → responder_node → END
-                                       → responder_node → END  (direct_response or no plan)
+Topology (per spec § 4.1):
+
+    START
+      ↓
+    context_node       (Q4 E: tool dedup + token-guard summarize)
+      ↓
+    planner_node       (constrained LLM + tool_choice + parallelizable + escalate)
+      ↓ _route_after_planner
+      ├→ tool_node     (asyncio.gather + ToolResultCache + error recording)
+      │     ↓
+      │   responder_node
+      │     ↓
+      │   END
+      └→ responder_node  (direct response, no tools)
+              ↓
+            END
 """
 
 from __future__ import annotations
 
 from functools import partial
-from pathlib import Path
 from typing import Any, Literal
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from app.agents.chat_planner import ChatPlanner
+from app.agents.memory_protocol import Memory
 from app.agents.responder import Responder
-from app.agents.schemas import GraphState
-from app.orchestration.checkpointer import make_chat_checkpointer
+from app.agents.schemas import ChatState
+from app.orchestration.context_node import context_node
 from app.orchestration.nodes import planner_node, responder_node, tool_node
+from app.services.tool_result_cache import ToolResultCache
 from app.tools.registry import ToolRegistry
 
 
-def _route_after_planner(state: GraphState) -> Literal["tool_node", "responder_node"]:
-    """Routing function: direct to tool_node if tool_calls exist, else responder_node.
-
-    Handles two cases where responder is called directly:
-    - plan is None (planner failed gracefully)
-    - plan.direct_response is True (no tools needed)
-    - plan.tool_calls is empty (defensive)
-    """
+def _route_after_planner(state: ChatState) -> Literal["tool_node", "responder_node"]:
     if state.plan is None:
-        return "responder_node"  # planner failed gracefully — let responder explain
-    return "tool_node" if state.plan.tool_calls else "responder_node"
+        return "responder_node"
+    if state.plan.direct_response or not state.plan.tool_calls:
+        return "responder_node"
+    return "tool_node"
 
 
 def build_chat_graph(
     planner: ChatPlanner,
     responder: Responder,
     registry: ToolRegistry,
+    memory: Memory,
+    cache: ToolResultCache,
     *,
-    db_path: Path | None = None,
+    checkpointer: BaseCheckpointSaver[Any] | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
-    """Assemble and compile the chat LangGraph StateGraph.
+    """Assemble and compile the chat LangGraph StateGraph (v0.9 supervisor topology).
 
     Graph topology::
 
-        START → planner_node → [_route_after_planner] → tool_node → responder_node → END
-                                                       → responder_node → END
+        START → context_node → planner_node → [_route_after_planner] → tool_node → responder_node → END
+                                                                       → responder_node → END
 
     Args:
-        planner:  ChatPlanner instance deciding which tools to call.
-        responder: Responder instance synthesising the final reply.
-        registry: ToolRegistry with all available tools.
-        db_path:  Optional path to a SQLite file for checkpointing.
-                  Pass None for a stateless in-memory graph (tests / eval).
+        planner:      ChatPlanner instance deciding which tools to call.
+        responder:    Responder instance synthesising the final reply.
+        registry:     ToolRegistry with all available tools.
+        memory:       Memory implementation for Q4 E context management.
+        cache:        ToolResultCache for dedup and parallel dispatch.
+        checkpointer: Optional PG (or any BaseCheckpointSaver) for cross-turn persistence.
+                      Pass None for a stateless in-memory graph (tests / eval).
 
     Returns:
         A compiled LangGraph :class:`CompiledStateGraph` ready for .ainvoke / .astream_events.
     """
-    g: StateGraph[Any, Any, Any, Any] = StateGraph(GraphState)
+    g: StateGraph[Any, Any, Any, Any] = StateGraph(ChatState)
+
+    g.add_node("context_node", partial(context_node, memory=memory))
     g.add_node("planner_node", partial(planner_node, planner=planner))
-    g.add_node("tool_node", partial(tool_node, registry=registry))
+    g.add_node("tool_node", partial(tool_node, registry=registry, cache=cache))
     g.add_node("responder_node", partial(responder_node, responder=responder))
 
-    g.add_edge(START, "planner_node")
+    g.add_edge(START, "context_node")
+    g.add_edge("context_node", "planner_node")
     g.add_conditional_edges(
         "planner_node",
         _route_after_planner,
-        {
-            "tool_node": "tool_node",
-            "responder_node": "responder_node",
-        },
+        {"tool_node": "tool_node", "responder_node": "responder_node"},
     )
     g.add_edge("tool_node", "responder_node")
     g.add_edge("responder_node", END)
 
-    checkpointer = make_chat_checkpointer(db_path) if db_path else None
     return g.compile(checkpointer=checkpointer)
