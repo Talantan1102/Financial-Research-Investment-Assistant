@@ -75,6 +75,12 @@ export interface MissingFieldHint {
   llm_question_for_user: string
 }
 
+// Literal type aliases (for use as standalone types in forms / InlineEditField)
+export type EntityRole = 'primary_target' | 'comparative_target' | 'mentioned_in_passing'
+export type PreferenceCategory = 'risk_tolerance' | 'focus_metric' | 'comparative_focus' | 'horizon' | 'other'
+export type FieldEditType = 'modify' | 'delete' | 'add'
+export type MissingFieldReason = 'llm_uncertain' | 'schema_required_but_empty' | 'user_skipped'
+
 export interface ResearchProgress {
   stage:
     | 'idle'

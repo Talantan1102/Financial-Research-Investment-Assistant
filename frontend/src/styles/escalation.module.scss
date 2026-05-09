@@ -1,0 +1,14 @@
+.escalationDialog {
+  :global(.ant-modal-body) {
+    padding: 16px 24px;
+  }
+}
+
+.dialogFooter {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}

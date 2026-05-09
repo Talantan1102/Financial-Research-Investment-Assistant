@@ -20,6 +20,8 @@ export interface EscalationState {
   user_edits: FieldEdit[]
   research_progress: ResearchProgress
   error: string | null
+  dialog_open: boolean
+  session_id: string | null
 }
 
 const INITIAL: EscalationState = {
@@ -28,6 +30,8 @@ const INITIAL: EscalationState = {
   user_edits: [],
   research_progress: { stage: 'idle' },
   error: null,
+  dialog_open: false,
+  session_id: null,
 }
 
 export const escalationState = proxy<EscalationState>({ ...INITIAL })
@@ -62,11 +66,20 @@ export const escalationActions = {
       escalationState.phase = 'researching'
     }
   },
+  openDialog(sessionId: string) {
+    escalationState.dialog_open = true
+    escalationState.session_id = sessionId
+  },
+  closeDialog() {
+    escalationState.dialog_open = false
+  },
   reset() {
     escalationState.phase = INITIAL.phase
     escalationState.packet_draft = null
     escalationState.user_edits = []
     escalationState.research_progress = { stage: 'idle' }
     escalationState.error = null
+    escalationState.dialog_open = false
+    escalationState.session_id = null
   },
 }
