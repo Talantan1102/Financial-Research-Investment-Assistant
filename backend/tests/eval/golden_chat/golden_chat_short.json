@@ -1,0 +1,15 @@
+{
+  "id": "chat_short_v1",
+  "description": "短 chat — 1-2 轮 + 单 tool。验证 A1 selection / A3 arg fidelity / B2 relevance.",
+  "persona": "default",
+  "chat_history": [],
+  "final_user_message": "工商银行现价多少",
+  "expected_signals": ["6.", "工商银行", "601398"],
+  "expected_tool_calls": ["get_stock_quote"],
+  "expected_skills_loaded": [],
+  "expected_escalation": false,
+  "judge_rubric": {
+    "criteria": ["tool selection correct", "ts_code 准确传参", "response 包含价格"],
+    "score_threshold": 0.7
+  }
+}
