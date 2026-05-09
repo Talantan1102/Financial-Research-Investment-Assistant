@@ -42,15 +42,17 @@ def fake_packet_dict():
 
 
 def _build_app(repo, research_agent=None) -> FastAPI:
+    from unittest.mock import AsyncMock, MagicMock
+
     from app.router.escalate import (
+        get_chat_session_repo,
         get_escalation_record_repo,
         get_research_agent,
+        get_research_report_repo,
         router,
     )
 
     if research_agent is None:
-        from unittest.mock import AsyncMock, MagicMock
-
         from app.services.eval_models import SUTOutput
 
         research_agent = MagicMock()
@@ -58,10 +60,22 @@ def _build_app(repo, research_agent=None) -> FastAPI:
             return_value=SUTOutput(request_id="r", response_text="(report)", tool_calls=[])
         )
 
+    # Stub chat_session_repo: append_message is a no-op
+    stub_chat_repo = MagicMock()
+    stub_chat_repo.append_message = AsyncMock(return_value=None)
+
+    # Stub research_report_repo: create_from_sut_output returns a fake row
+    stub_rpt_row = MagicMock()
+    stub_rpt_row.id = "fake-rpt-id"
+    stub_rpt_repo = MagicMock()
+    stub_rpt_repo.create_from_sut_output = AsyncMock(return_value=stub_rpt_row)
+
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_escalation_record_repo] = lambda: repo
     app.dependency_overrides[get_research_agent] = lambda: research_agent
+    app.dependency_overrides[get_chat_session_repo] = lambda: stub_chat_repo
+    app.dependency_overrides[get_research_report_repo] = lambda: stub_rpt_repo
     return app
 
 

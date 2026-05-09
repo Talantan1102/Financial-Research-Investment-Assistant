@@ -135,11 +135,61 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         _chat_engine_url = _sqlalchemy_async_pg_url()  # SQLAlchemy needs +psycopg prefix
         app.state.chat_async_engine = create_async_engine(_chat_engine_url, future=True)
         _factory = async_sessionmaker(app.state.chat_async_engine, expire_on_commit=False)
+        # Store factory on app.state so escalate deps (T11) can reuse it
+        app.state.async_session_factory = _factory
         app.state.chat_session_repo = ChatSessionRepo(session_factory=_factory)
         logger.info("ChatSessionRepo 初始化完成")
     except Exception as e:  # noqa: BLE001
+        app.state.async_session_factory = None
         app.state.chat_session_repo = None
         logger.warning("ChatSessionRepo 初始化跳过: %s", e)
+
+    # === Plan 3 escalate deps ===
+
+    # 4. EscalationExtractor (needs LLMService)
+    try:
+        from app.agents.escalation_extractor import EscalationExtractor
+        from app.services.openai_client import build_llm_service_from_env
+
+        llm_for_extraction = build_llm_service_from_env()
+        app.state.escalation_extractor = EscalationExtractor(llm=llm_for_extraction)
+        logger.info("EscalationExtractor 初始化完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.escalation_extractor = None
+        logger.warning("EscalationExtractor 初始化跳过: %s", e)
+
+    # 5. EscalationRecordRepo + ResearchReportRepo (reuse async_session_factory)
+    try:
+        from app.services.escalation_record_repo import EscalationRecordRepo
+        from app.services.research_report_repo import ResearchReportRepo
+
+        if getattr(app.state, "async_session_factory", None) is not None:
+            app.state.escalation_record_repo = EscalationRecordRepo(
+                session_factory=app.state.async_session_factory,
+            )
+            app.state.research_report_repo = ResearchReportRepo(
+                session_factory=app.state.async_session_factory,
+            )
+            logger.info("EscalationRecordRepo + ResearchReportRepo 初始化完成")
+        else:
+            app.state.escalation_record_repo = None
+            app.state.research_report_repo = None
+            logger.warning(
+                "async_session_factory not in app.state; "
+                "EscalationRecordRepo / ResearchReportRepo 未初始化"
+            )
+    except Exception as e:  # noqa: BLE001
+        app.state.escalation_record_repo = None
+        app.state.research_report_repo = None
+        logger.warning("EscalationRecordRepo / ResearchReportRepo 初始化跳过: %s", e)
+
+    # 6. ResearchAgent — stub None; escalate router handles None gracefully
+    try:
+        if not hasattr(app.state, "research_agent"):
+            app.state.research_agent = None
+    except Exception as e:  # noqa: BLE001
+        app.state.research_agent = None
+        logger.warning("research_agent 初始化跳过: %s", e)
 
     yield
 
@@ -205,6 +255,48 @@ def _get_chat_session_repo() -> ChatSessionRepo:
 
 
 app.dependency_overrides[chats_router_module.get_repo] = _get_chat_session_repo
+
+
+# === Plan 3 dependency overrides (T11) ===
+
+
+def _override_or_fallback(state_attr: str):  # type: ignore[return]
+    """Return a zero-arg callable that yields app.state.<state_attr>, or raises if None."""
+
+    def _factory():  # type: ignore[return]
+        val = getattr(app.state, state_attr, None)
+        if val is None:
+            raise RuntimeError(f"app.state.{state_attr} not initialized")
+        return val
+
+    return _factory
+
+
+from app.router.chat import (  # noqa: E402
+    get_escalation_extractor as chat_get_extractor,
+)
+from app.router.chat import (
+    get_escalation_record_repo as chat_get_repo,
+)
+from app.router.escalate import (  # noqa: E402
+    get_chat_session_repo as esc_get_chat_repo,
+)
+from app.router.escalate import (
+    get_escalation_record_repo as esc_get_repo,
+)
+from app.router.escalate import (
+    get_research_agent as esc_get_agent,
+)
+from app.router.escalate import (
+    get_research_report_repo as esc_get_rpt_repo,
+)
+
+app.dependency_overrides[chat_get_extractor] = _override_or_fallback("escalation_extractor")
+app.dependency_overrides[chat_get_repo] = _override_or_fallback("escalation_record_repo")
+app.dependency_overrides[esc_get_repo] = _override_or_fallback("escalation_record_repo")
+app.dependency_overrides[esc_get_agent] = _override_or_fallback("research_agent")
+app.dependency_overrides[esc_get_chat_repo] = _override_or_fallback("chat_session_repo")
+app.dependency_overrides[esc_get_rpt_repo] = _override_or_fallback("research_report_repo")
 
 
 @app.get("/hello")
