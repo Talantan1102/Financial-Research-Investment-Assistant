@@ -125,6 +125,7 @@ class ToolResult(BaseModel):
     output: dict[str, Any] | None = None
     error: str | None = None
     latency_ms: int = Field(ge=0)
+    cached: bool = False  # v0.9: True when result came from ToolResultCache (B3)
 
 
 class Plan(BaseModel):
