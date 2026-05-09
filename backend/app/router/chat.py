@@ -16,12 +16,17 @@ Event mapping (from Spike 2 probe; confirmed against real astream_events output)
   all other events                → None (skipped)
   any unhandled exception          → error (best-effort, stream continues)
 
+Escalation events (Plan 3 — emitted after main stream when planner.escalate_offered):
+  escalate_request      → emitted immediately if final_state.escalate_offered
+  escalate_packet_draft → emitted after EscalationExtractor.run() + repo.create_draft()
+
 StreamEvent.seq is a monotonic per-stream counter starting at 1, used for
 last_event_id-based SSE reconnect (spec § 4.6 / G1 industrial problem).
 """
 
 from __future__ import annotations
 
+import logging
 import traceback
 from collections.abc import AsyncIterator
 from typing import Any, Literal
@@ -33,9 +38,38 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel
 
+from app.agents.escalation_extractor import EscalationExtractor
 from app.agents.schemas import GraphState
+from app.services.escalation_record_repo import EscalationRecordRepo
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat-v0"])
+
+# ---------------------------------------------------------------------------
+# Escalation dependency stubs (Plan 3 E2 — wired by app_main lifespan in T11)
+# ---------------------------------------------------------------------------
+
+
+def get_escalation_extractor() -> EscalationExtractor:
+    """Return an EscalationExtractor instance.
+
+    Replaced via ``dependency_overrides`` in tests and by app_main lifespan in
+    Task 11 (which wires the real LLMService).  Raising here acts as a safe
+    sentinel: any request that reaches escalation without a proper override will
+    fail loudly rather than silently skip extraction.
+    """
+    raise RuntimeError("EscalationExtractor dependency not configured")
+
+
+def get_escalation_record_repo() -> EscalationRecordRepo:
+    """Return an EscalationRecordRepo instance.
+
+    Replaced via ``dependency_overrides`` in tests and by app_main lifespan in
+    Task 11 (which wires the real async DB session factory).
+    """
+    raise RuntimeError("EscalationRecordRepo dependency not configured")
+
 
 # ---------------------------------------------------------------------------
 # Request / Response schemas (spec § 5)
@@ -273,6 +307,8 @@ async def _stream_chat(
     req: ChatRequest,
     user: _AnonUser,
     graph: CompiledStateGraph[Any, Any, Any, Any],
+    extractor: EscalationExtractor | None,
+    record_repo: EscalationRecordRepo | None,
 ) -> AsyncIterator[str]:
     """Async generator: drive astream_events and yield SSE-framed JSON strings.
 
@@ -280,6 +316,14 @@ async def _stream_chat(
     - ``event: <type>`` line  (SSE named-event, enables browser EventSource filtering)
     - ``id: <seq>`` line      (last_event_id for reconnect per spec § 4.6 / G1)
     - ``data: <JSON>``        (StreamEvent payload without the `type` field)
+
+    Plan 3 escalation: after the main LangGraph stream finishes, if
+    ``final_state.escalate_offered`` is True, two additional events are emitted:
+    1. ``escalate_request``    — signals the intent to escalate, includes reason.
+    2. ``escalate_packet_draft`` — EscalationPacket draft + persisted record id.
+
+    If ``extractor`` or ``record_repo`` are None (e.g. not yet wired in app_main),
+    escalation events are skipped and a warning is logged.
     """
     request_id = f"req-{uuid4().hex[:12]}"
     initial = GraphState(
@@ -300,8 +344,14 @@ async def _stream_chat(
         seq += 1
         return seq
 
+    final_state: dict[str, Any] | None = None
+
     try:
         async for ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
+            # Capture top-level graph final state for post-stream escalation check
+            if ev.get("event") == "on_chain_end" and ev.get("name") == "LangGraph":
+                final_state = (ev.get("data") or {}).get("output") or {}
+
             sse = _adapt_event(ev, next_seq())
             if sse is not None:
                 yield (
@@ -320,6 +370,114 @@ async def _stream_chat(
             f"id: {error_event.seq}\n"
             f"data: {error_event.model_dump_json(exclude={'type'})}\n\n"
         )
+        return  # don't attempt escalation after a graph-level error
+
+    # ------------------------------------------------------------------
+    # Plan 3 E2: emit escalate events when planner offered escalation
+    # ------------------------------------------------------------------
+    if not (final_state and final_state.get("escalate_offered")):
+        return
+
+    if extractor is None or record_repo is None:
+        logger.warning(
+            "escalate_offered=True but EscalationExtractor/EscalationRecordRepo not wired; "
+            "skipping escalation events (configure deps in app_main lifespan, Task 11)"
+        )
+        return
+
+    # Extract escalate_reason from the plan stored in final_state
+    raw_plan = final_state.get("plan")
+    if isinstance(raw_plan, dict):
+        reason: str = raw_plan.get("escalate_reason") or ""
+    elif raw_plan is not None:
+        reason = getattr(raw_plan, "escalate_reason", None) or ""
+    else:
+        reason = ""
+
+    # 1. Emit escalate_request
+    evt_req = StreamEvent(
+        type="escalate_request",
+        seq=next_seq(),
+        data={"session_id": req.session_id, "reason": reason},
+    )
+    yield (
+        f"event: {evt_req.type}\n"
+        f"id: {evt_req.seq}\n"
+        f"data: {evt_req.model_dump_json(exclude={'type'})}\n\n"
+    )
+
+    # 2. Build history_dicts for extractor
+    raw_history = final_state.get("history") or []
+    history_dicts: list[dict[str, Any]] = []
+    for h in raw_history:
+        if isinstance(h, dict):
+            history_dicts.append({"role": h.get("role", ""), "content": h.get("content", "")})
+        else:
+            history_dicts.append(
+                {"role": getattr(h, "role", ""), "content": getattr(h, "content", "")}
+            )
+
+    # 3. Build cached_tool_results list from tool_result_cache in final_state
+    raw_cache = final_state.get("tool_result_cache") or {}
+    cached_tool_results: list[dict[str, Any]] = []
+    for cache_id, entry in raw_cache.items() if isinstance(raw_cache, dict) else []:
+        if isinstance(entry, dict):
+            cached_tool_results.append(
+                {
+                    "tool_name": entry.get("tool_name", ""),
+                    "tool_args": {},
+                    "result_summary": entry.get("result_summary", ""),
+                    "cache_id": cache_id,
+                }
+            )
+        else:
+            cached_tool_results.append(
+                {
+                    "tool_name": getattr(entry, "tool_name", ""),
+                    "tool_args": {},
+                    "result_summary": getattr(entry, "result_summary", ""),
+                    "cache_id": cache_id,
+                }
+            )
+
+    # 4. Run extraction + persist draft, then emit escalate_packet_draft
+    try:
+        packet = await extractor.run(
+            chat_session_id=req.session_id,
+            chat_turn_count=len(history_dicts),
+            chat_history_summary=final_state.get("history_summary"),
+            history=history_dicts,
+            cached_tool_results=cached_tool_results,
+        )
+        rec = await record_repo.create_draft(
+            session_id=req.session_id,
+            packet_draft=packet.model_dump(mode="json"),
+        )
+        evt_draft = StreamEvent(
+            type="escalate_packet_draft",
+            seq=next_seq(),
+            data={
+                "draft_record_id": str(rec.id),
+                "packet": packet.model_dump(mode="json"),
+            },
+        )
+        yield (
+            f"event: {evt_draft.type}\n"
+            f"id: {evt_draft.seq}\n"
+            f"data: {evt_draft.model_dump_json(exclude={'type'})}\n\n"
+        )
+    except Exception as exc:
+        logger.exception("escalation extraction/persist failed: %s", exc)
+        err_evt = StreamEvent(
+            type="error",
+            seq=next_seq(),
+            data={"error_msg": f"escalation extraction failed: {exc}"},
+        )
+        yield (
+            f"event: {err_evt.type}\n"
+            f"id: {err_evt.seq}\n"
+            f"data: {err_evt.model_dump_json(exclude={'type'})}\n\n"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +490,8 @@ async def chat(
     req: ChatRequest,
     user: _AnonUser = Depends(get_current_user),
     chat_agent_graph: CompiledStateGraph[Any, Any, Any, Any] = Depends(get_chat_graph),
+    extractor: EscalationExtractor = Depends(get_escalation_extractor),
+    record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
 ) -> StreamingResponse:
     """POST /api/v0/chat — stream a chat response as SSE.
 
@@ -346,9 +506,15 @@ async def chat(
 
     Full event type set defined in StreamEvent.type (see spec § 4.6).
     The ``done`` event signals the end of the stream.
+
+    Plan 3 escalation: if the planner emits escalate_offered=True, two
+    additional events follow the ``done`` event:
+    ``escalate_request`` then ``escalate_packet_draft``.
+    These require EscalationExtractor + EscalationRecordRepo to be wired
+    via dependency_overrides (tests) or app_main lifespan (production).
     """
     return StreamingResponse(
-        _stream_chat(req, user, chat_agent_graph),
+        _stream_chat(req, user, chat_agent_graph, extractor, record_repo),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

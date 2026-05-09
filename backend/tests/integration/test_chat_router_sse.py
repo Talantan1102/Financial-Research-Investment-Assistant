@@ -32,6 +32,8 @@ ChatRequest = _chat_mod.ChatRequest
 StreamEvent = _chat_mod.StreamEvent
 get_chat_graph = _chat_mod.get_chat_graph
 get_current_user = _chat_mod.get_current_user
+get_escalation_extractor = _chat_mod.get_escalation_extractor
+get_escalation_record_repo = _chat_mod.get_escalation_record_repo
 from app.services.llm_mock_client import MockLLMClient
 from app.services.llm_service import LLMService
 from app.tools.base import Tool
@@ -158,6 +160,10 @@ def test_client():
     test_graph = _build_test_graph()
     minimal_app.dependency_overrides[get_chat_graph] = lambda: test_graph
     minimal_app.dependency_overrides[get_current_user] = lambda: _StubUser()
+    # Plan 3 T7: stub out escalation deps so existing SSE tests aren't broken
+    # by the new required dependencies. These tests don't exercise escalation.
+    minimal_app.dependency_overrides[get_escalation_extractor] = lambda: None
+    minimal_app.dependency_overrides[get_escalation_record_repo] = lambda: None
 
     client = TestClient(minimal_app, raise_server_exceptions=True)
     yield client

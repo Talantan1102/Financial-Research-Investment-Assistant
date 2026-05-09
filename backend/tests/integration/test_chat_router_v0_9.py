@@ -120,7 +120,7 @@ async def test_stream_chat_emits_monotonic_seq() -> None:
 
     frames: list[str] = []
     with patch("app.router.chat.GraphState", return_value=mock_state):
-        async for frame in _stream_chat(req, user, mock_graph):
+        async for frame in _stream_chat(req, user, mock_graph, None, None):
             frames.append(frame)
 
     # We expect exactly 4 frames (plan, tool_start, tool_end, done).
