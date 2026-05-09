@@ -126,6 +126,7 @@ class ToolResult(BaseModel):
     error: str | None = None
     latency_ms: int = Field(ge=0)
     cached: bool = False  # v0.9: True when result came from ToolResultCache (B3)
+    tool_call_data: dict[str, Any] | None = None  # Plan 2b: skill_script metadata
 
 
 class SkillScriptCall(BaseModel):
