@@ -147,7 +147,11 @@ class SkillExecutor:
         except subprocess.TimeoutExpired:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            stdout_b, stderr_b = proc.communicate()
+            try:
+                stdout_b, stderr_b = proc.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                stdout_b, stderr_b = proc.communicate()
             elapsed = time.monotonic() - start
             return SkillExecutionResult(
                 ok=False,
