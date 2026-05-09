@@ -47,3 +47,23 @@ describe('<ToolCallCard> collapsed state', () => {
     expect(screen.getByTestId('tool-running-spinner')).toBeInTheDocument()
   })
 })
+
+describe('<ToolCallCard> error state', () => {
+  it('renders red border + error icon when status=error', () => {
+    const { container } = render(
+      <ToolCallCard message={makeToolMsg({ status: 'error', error_message: 'tushare rate limit' })} />,
+    )
+    expect(container.querySelector('[data-state="error"]')).not.toBeNull()
+    expect(screen.getByTestId('tool-error-icon')).toBeInTheDocument()
+  })
+
+  it('expands by default in error state to surface error_message', () => {
+    render(<ToolCallCard message={makeToolMsg({ status: 'error', error_message: 'tushare rate limit' })} />)
+    expect(screen.getByText(/tushare rate limit/)).toBeInTheDocument()
+  })
+
+  it('renders 重试 button in error state body', () => {
+    render(<ToolCallCard message={makeToolMsg({ status: 'error', error_message: 'fail' })} />)
+    expect(screen.getByRole('button', { name: /重试|retry/i })).toBeInTheDocument()
+  })
+})

@@ -1,5 +1,12 @@
-import { CheckCircleFilled, DownOutlined, LoadingOutlined, RightOutlined } from '@ant-design/icons'
-import { useState } from 'react'
+import {
+  CheckCircleFilled,
+  CloseCircleFilled,
+  DownOutlined,
+  LoadingOutlined,
+  ReloadOutlined,
+  RightOutlined,
+} from '@ant-design/icons'
+import { useEffect, useState } from 'react'
 import type { ChatMessage, ToolCallData } from '@/types/chat'
 import styles from '@/styles/chat.module.scss'
 
@@ -15,11 +22,25 @@ function formatDuration(start: string, end?: string): string {
 }
 
 export function ToolCallCard({ message }: ToolCallCardProps) {
-  const [expanded, setExpanded] = useState(false)
   const data = message.tool_call_data as unknown as ToolCallData | null
+  const isError = data?.status === 'error'
+  const [expanded, setExpanded] = useState(isError)
+
+  useEffect(() => {
+    if (isError) setExpanded(true)
+  }, [isError])
+
   if (!data) return null
+
   const isRunning = data.status === 'running'
-  const isError = data.status === 'error'
+  const Icon = isError ? (
+    <CloseCircleFilled data-testid="tool-error-icon" />
+  ) : isRunning ? (
+    <LoadingOutlined data-testid="tool-running-spinner" />
+  ) : (
+    <CheckCircleFilled />
+  )
+
   return (
     <div
       className={`${styles.toolCard} ${isError ? styles.toolCardError : ''}`}
@@ -33,13 +54,7 @@ export function ToolCallCard({ message }: ToolCallCardProps) {
         aria-expanded={expanded}
         aria-label={expanded ? 'collapse' : '展开'}
       >
-        <span className={styles.toolCardIcon}>
-          {isRunning ? (
-            <LoadingOutlined data-testid="tool-running-spinner" />
-          ) : (
-            <CheckCircleFilled />
-          )}
-        </span>
+        <span className={styles.toolCardIcon}>{Icon}</span>
         <span className={styles.toolCardName}>{data.tool_name}</span>
         <span className={styles.toolCardDuration}>
           {formatDuration(data.started_at, data.ended_at)}
@@ -54,7 +69,15 @@ export function ToolCallCard({ message }: ToolCallCardProps) {
             <strong>args:</strong>
             <pre>{JSON.stringify(data.tool_args, null, 2)}</pre>
           </div>
-          {data.result_summary ? (
+          {isError ? (
+            <div className={styles.toolCardSection}>
+              <strong>error:</strong>
+              <pre>{data.error_message ?? '(unknown)'}</pre>
+              <button type="button" className={styles.retryBtn} aria-label="重试">
+                <ReloadOutlined /> 重试
+              </button>
+            </div>
+          ) : data.result_summary ? (
             <div className={styles.toolCardSection}>
               <strong>result:</strong>
               <pre>{data.result_summary}</pre>
