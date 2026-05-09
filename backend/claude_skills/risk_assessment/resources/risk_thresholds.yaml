@@ -1,0 +1,83 @@
+# Quantitative thresholds for the risk_assessment skill.
+#
+# Loaded as an L3a resource by SkillLoader when the chat planner emits
+# {"action": "load_resource", "skill": "risk_assessment",
+#  "ref": "resources/risk_thresholds.yaml"} OR auto-loaded when the planner
+# emits {"action": "load_skill", "name": "risk_assessment"} (because
+# SKILL.md references this file via markdown link).
+#
+# Source: distilled from internal RiskService production heuristics
+# (backend/app/service/* tushare-derived metrics) — calibrated against
+# A-share market norms 2023-2025.
+#
+# Cap: this file MUST stay under 50kB. Currently ~1.2kB.
+
+valuation:
+  pe:
+    low_risk_max: 15
+    fair_max: 30
+    high_risk_max: 50
+    description: "Price/Earnings ratio cuts. Lower = cheaper relative to earnings."
+  pb:
+    low_risk_max: 1.5
+    fair_max: 3.0
+    high_risk_max: 5.0
+    description: "Price/Book ratio. PB > 5 typically indicates premium pricing."
+  ps:
+    low_risk_max: 1.0
+    fair_max: 3.0
+    high_risk_max: 8.0
+    description: "Price/Sales ratio. Useful for unprofitable growth companies."
+
+financial:
+  debt_to_assets:
+    low_risk_max: 0.40
+    moderate_max: 0.60
+    high_risk_max: 0.80
+    description: "Total liabilities / total assets. Bank/insurance stocks naturally higher."
+  current_ratio:
+    healthy_min: 1.5
+    risk_threshold: 1.0
+    description: "Current assets / current liabilities. < 1 means short-term cash strain."
+  quick_ratio:
+    healthy_min: 1.0
+    risk_threshold: 0.5
+    description: "Current assets minus inventory, divided by current liabilities."
+  interest_coverage:
+    healthy_min: 5.0
+    risk_threshold: 2.0
+    description: "EBIT / interest expense. < 2 = struggling to service debt."
+
+volatility:
+  annualized_volatility_pct:
+    low_risk_max: 20.0
+    moderate_max: 30.0
+    high_risk_max: 50.0
+    description: "Annualized stdev of daily returns × sqrt(252) × 100."
+  max_drawdown_pct:
+    low_risk_max: 10.0
+    moderate_max: 25.0
+    high_risk_max: 50.0
+    description: "Worst peak-to-trough decline within the lookback window."
+
+# Risk score aggregation weights (sum to 1.0).
+score_weights:
+  valuation: 0.40
+  financial: 0.35
+  volatility: 0.25
+
+# Risk-level cuts (final 0-100 composite).
+risk_level_cuts:
+  low: [0, 30]
+  moderate_low: [30, 50]
+  moderate: [50, 70]
+  moderate_high: [70, 85]
+  high: [85, 100]
+
+# Industry-PE adjustment factor.
+industry_relative_pe_adjustment_factor: 20.0
+
+# Notes:
+# - Anchored to A-share norms; cross-listed (HK/US) names may need different cuts.
+# - Banking/insurance/real-estate naturally have higher debt-to-assets — overlay
+#   sector context before firing high-risk warnings.
