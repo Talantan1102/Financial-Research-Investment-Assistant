@@ -41,12 +41,27 @@ def fake_packet_dict():
     }
 
 
-def _build_app(repo) -> FastAPI:
-    from app.router.escalate import get_escalation_record_repo, router
+def _build_app(repo, research_agent=None) -> FastAPI:
+    from app.router.escalate import (
+        get_escalation_record_repo,
+        get_research_agent,
+        router,
+    )
+
+    if research_agent is None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.services.eval_models import SUTOutput
+
+        research_agent = MagicMock()
+        research_agent.run = AsyncMock(
+            return_value=SUTOutput(request_id="r", response_text="(report)", tool_calls=[])
+        )
 
     app = FastAPI()
     app.include_router(router)
     app.dependency_overrides[get_escalation_record_repo] = lambda: repo
+    app.dependency_overrides[get_research_agent] = lambda: research_agent
     return app
 
 

@@ -35,13 +35,22 @@ class ResearchAgent:
         self._graph = graph
         self._trace = trace_service
 
-    async def run(self, user_input: str, request_id: str) -> SUTOutput:
+    async def run(
+        self,
+        user_input: str,
+        request_id: str,
+        *,
+        state_overrides: dict[str, Any] | None = None,
+    ) -> SUTOutput:
         """Execute the research graph end-to-end and return a structured SUTOutput.
 
         Args:
-            user_input: The user's natural-language research query.
-            request_id: Unique identifier for this evaluation run; used as
-                        LangGraph thread_id and propagated into ResearchState.
+            user_input:      The user's natural-language research query.
+            request_id:      Unique identifier for this evaluation run; used as
+                             LangGraph thread_id and propagated into ResearchState.
+            state_overrides: Optional dict of ResearchState field overrides to
+                             inject before graph invocation (E13 — chat-derived
+                             signals from EscalationPacket).
 
         Returns:
             :class:`~app.services.eval_models.SUTOutput` with ``response_text``
@@ -56,6 +65,10 @@ class ResearchAgent:
             user_message=user_input,
             request_id=request_id,
         )
+        if state_overrides:
+            for k, v in state_overrides.items():
+                if hasattr(initial, k):
+                    setattr(initial, k, v)
         final: dict[str, Any] = await self._graph.ainvoke(initial.model_dump(), config=config)
 
         # plan may come back as dict or ResearchPlan instance
