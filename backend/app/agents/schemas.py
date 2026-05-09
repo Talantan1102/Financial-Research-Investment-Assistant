@@ -1,11 +1,12 @@
 """Agent I/O Pydantic schemas — stable v0~v3.
 
-GraphState is the LangGraph state object (mutable across nodes).
+ChatState (née GraphState) is the LangGraph state object (mutable across nodes).
 Plan / ToolCall / ToolResult / StepResult are agent-level frozen contracts.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -149,25 +150,81 @@ class StepResult(BaseModel):
     span_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class GraphState(BaseModel):
-    """LangGraph state — mutable across nodes."""
+class HistoryMessage(BaseModel):
+    """One turn in chat history (v0.9 Q4-E memory)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    role: Literal["user", "assistant", "tool"]
+    content: str
+    turn_index: int
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    timestamp: datetime
+
+
+class CacheEntry(BaseModel):
+    """One cached tool result for cross-turn dedup (C1)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tool_name: str
+    args_hash: str
+    result_summary: str
+    cache_id: str  # → ToolResultCache PK
+    cached_at: datetime
+
+
+class ChatState(BaseModel):
+    """v0.9 chat agent graph state.
+
+    Layout per spec § 4.1.  Fields in 6 groups:
+      1. legacy v0 (user_id / session_id / user_message / request_id)
+      2. Q4 E memory (history / history_summary)
+      3. tool result mgmt (tool_results / tool_result_cache)
+      4. plan + final (legacy plan; final_response)
+      5. escalation hooks (Plan 3 will use these; Plan 1 reserves)
+      6. observability (trace_request_id / span_stack / cost_so_far)
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # === legacy v0 ===
     user_id: str
     session_id: str
     user_message: str
-    enable_web_search: bool = False  # v0 placeholder
-    enable_kb_search: bool = False  # v0 placeholder
+    request_id: str
 
-    plan: Plan | None = None
+    # === v0 placeholders (preserved for backwards-compat) ===
+    enable_web_search: bool = False
+    enable_kb_search: bool = False
+
+    # === Q4 E memory ===
+    history: list[HistoryMessage] = Field(default_factory=list)
+    history_summary: str | None = None
+
+    # === tool result mgmt (Plan 1 + B1/B2/B3/C1) ===
     tool_results: list[ToolResult] = Field(default_factory=list)
+    tool_result_cache: dict[str, CacheEntry] = Field(default_factory=dict)
 
+    # === legacy plan ===
+    plan: Plan | None = None
     final_response: str | None = None
     final_response_streamed: bool = False
 
-    request_id: str
+    # === escalation (Plan 3 deliverable; Plan 1 reserves only) ===
+    escalate_offered: bool = False
+    escalate_confirmed: bool = False
+
+    # === observability ===
+    trace_request_id: str
     span_stack: list[str] = Field(default_factory=list)
+    cost_so_far: float = 0.0
+
+
+# Backwards-compatibility alias for callers still importing GraphState.
+# Remove in v1.0 once all callers migrate to ChatState.
+GraphState = ChatState
 
 
 # ---------------------------------------------------------------------------
