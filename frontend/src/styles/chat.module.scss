@@ -23,3 +23,68 @@
   color: #999;
   font-size: 14px;
 }
+
+.toolCard {
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  margin: 8px 0;
+  background: #fafafa;
+}
+
+.toolCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+}
+
+.toolCardName {
+  flex: 1 1 auto;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.toolCardDuration {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+.toolCardChevron {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.toolCardIcon {
+  color: #52c41a;
+}
+
+.toolCardError {
+  border-color: #ff4d4f;
+  background: #fff2f0;
+
+  .toolCardIcon {
+    color: #ff4d4f;
+  }
+}
+
+.toolCardBody {
+  padding: 8px 12px;
+  border-top: 1px solid #d9d9d9;
+}
+
+.toolCardSection {
+  margin-bottom: 6px;
+
+  pre {
+    margin: 4px 0;
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #f0f0f0;
+    font-size: 12px;
+    overflow-x: auto;
+  }
+}
