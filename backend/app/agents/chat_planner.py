@@ -22,12 +22,53 @@ from app.agents.base import Agent
 from app.agents.schemas import ChatState, GraphState, Plan, StepResult, ToolCall
 from app.services.llm_response import Tier
 from app.services.llm_service import LLMService
+from app.skills import SkillManifest
 from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
 # Regex to strip markdown code fences (```json ... ``` or ``` ... ```)
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
+
+
+# ---------------------------------------------------------------------------
+# v0.9 skill list block (S2: L1 skill signal for ChatPlanner system prompt)
+# ---------------------------------------------------------------------------
+
+
+def build_skill_list_block(skills: list[SkillManifest]) -> str:
+    """Render the L1 skill list as a markdown block for the planner system prompt.
+
+    Format:
+        ## Available Skills
+
+        - **risk_assessment**: Investment risk assessment.
+        - **financial_analysis**: ...
+
+        To expand a skill, emit {"action": "load_skill", "name": "<n>"}.
+        To load a specific resource within a loaded skill, emit
+        {"action": "load_resource", "skill": "<n>", "ref": "resources/<file>"}.
+
+    S2: this is the only signal the planner has about each skill's capability.
+    Sorted by name for deterministic ordering. Empty input returns empty string.
+    """
+    if not skills:
+        return ""
+
+    lines = ["## Available Skills", ""]
+    for s in sorted(skills, key=lambda x: x.name):
+        desc = s.description.replace("\n", " ").strip()
+        lines.append(f"- **{s.name}**: {desc}")
+    lines.extend(
+        [
+            "",
+            'To expand a skill, emit {"action": "load_skill", "name": "<n>"}.',
+            "To load a specific resource within a loaded skill, emit "
+            '{"action": "load_resource", "skill": "<n>", "ref": "resources/<file>"}.',
+        ]
+    )
+    return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # Legacy v0 prompt helpers (preserved for research-mode graph)
