@@ -1,4 +1,4 @@
-import { http } from 'msw'
+import { http, HttpResponse as MswHttpResponse } from 'msw'
 import { describe, expect, it, beforeEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { snapshot } from 'valtio'
@@ -108,5 +108,40 @@ describe('useChatSSE — F6 reconnect (last_event_id)', () => {
     expect(snapshot(currentChatState).streamingDraft).toBe('')
     expect(snapshot(currentChatState).messages.at(-1)?.content).toBe('ABC')
     expect(snapshot(currentChatState).streamingStatus).toBe('idle')
+  })
+})
+
+describe('useChatSSE — F6 backoff sequence', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+    currentChatActions.setSession('s1', [])
+  })
+
+  it('uses 1s/2s/4s delays before successful reconnect', async () => {
+    const delays: number[] = []
+    let callCount = 0
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () =>
+        sseResponse([{ type: 'token', seq: 1, content: 'A' }]),
+      ),
+      http.get(`${API_BASE}/api/v0/chat/stream/s1`, () => {
+        callCount += 1
+        if (callCount < 3) return new MswHttpResponse(null, { status: 503 })
+        return sseResponse([{ type: 'done', seq: 2 }])
+      }),
+    )
+    const { result } = renderHook(() =>
+      useChatSSE({
+        sessionId: 's1',
+        delayMs: async (ms) => {
+          delays.push(ms)
+        },
+      }),
+    )
+    await act(async () => {
+      await result.current.sendMessage('hi')
+    })
+    expect(delays.slice(0, 3)).toEqual([1000, 2000, 4000])
+    expect(snapshot(currentChatState).last_seq).toBe(2)
   })
 })
