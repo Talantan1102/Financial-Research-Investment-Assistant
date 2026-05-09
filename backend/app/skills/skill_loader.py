@@ -9,8 +9,10 @@ from pathlib import Path
 import yaml
 
 from app.skills.types import (
+    NestedDepthExceededError,
     ResourceTooLargeError,
     SkillLoaderError,
+    SkillLoadResult,
     SkillManifest,
     SkillResource,
 )
@@ -148,6 +150,55 @@ class SkillLoader:
             content=content,
             size_bytes=size,
         )
+
+    # --- L2 + L3a orchestrator ---------------------------------------------
+
+    def load_skill(self, name: str) -> SkillLoadResult:
+        """Load SKILL.md + recursively-referenced L3a resources for `name`.
+
+        BFS walk:
+        - depth 1 = SKILL.md body
+        - depth 2 = resources from SKILL.md
+        - depth 3 = refs inside a depth-2 .md resource — REJECTED (S4)
+        """
+        skill_md_body = self.load_skill_md(name)
+        depth_used = 1
+        resources: list[SkillResource] = []
+
+        depth1_refs = self._detect_resource_refs(skill_md_body)
+        if not depth1_refs:
+            return SkillLoadResult(
+                name=name,
+                skill_md_content=skill_md_body,
+                resources=[],
+                total_size_bytes=len(skill_md_body.encode("utf-8")),
+                depth_used=1,
+            )
+
+        depth_used = 2
+        for ref in depth1_refs:
+            r = self._load_one_resource(name, ref)
+            resources.append(r)
+            if r.content_type == "md":
+                nested = self._detect_resource_refs(r.content)
+                if nested:
+                    raise NestedDepthExceededError(
+                        f"depth 3 > cap {NESTED_DEPTH_CAP} at {ref!r} "
+                        f"(found {len(nested)} nested ref(s) in markdown resource)"
+                    )
+
+        total = len(skill_md_body.encode("utf-8")) + sum(r.size_bytes for r in resources)
+        return SkillLoadResult(
+            name=name,
+            skill_md_content=skill_md_body,
+            resources=resources,
+            total_size_bytes=total,
+            depth_used=depth_used,
+        )
+
+    def load_resource(self, skill_name: str, relative_ref: str) -> SkillResource:
+        """Public API: load one resource without walking SKILL.md."""
+        return self._load_one_resource(skill_name, relative_ref)
 
     def _parse_frontmatter(self, dir_name: str, skill_md: Path) -> SkillManifest:
         text = skill_md.read_text(encoding="utf-8")

@@ -119,3 +119,88 @@ class TestLoadOneResource:
         loader = SkillLoader(skills_root=base)
         r = loader._load_one_resource("x", "resources/exact.yaml")
         assert r.size_bytes == 50 * 1024
+
+
+class TestLoadSkillFull:
+    @pytest.fixture
+    def linear_skill(self, tmp_path: Path) -> Path:
+        base = tmp_path / "claude_skills"
+        (base / "linear" / "resources").mkdir(parents=True)
+        (base / "linear" / "SKILL.md").write_text(
+            "---\nname: linear\ndescription: linear demo\n---\n"
+            "# Linear\n\nSee [thresholds](resources/thresholds.yaml).\n"
+        )
+        (base / "linear" / "resources" / "thresholds.yaml").write_text("a: 1\n")
+        return base
+
+    def test_load_skill_returns_l2_plus_l3a(self, linear_skill: Path) -> None:
+        loader = SkillLoader(skills_root=linear_skill)
+        result = loader.load_skill("linear")
+        assert result.name == "linear"
+        assert "Linear" in result.skill_md_content
+        assert len(result.resources) == 1
+        assert result.resources[0].name == "thresholds"
+        assert result.depth_used == 2
+
+    def test_load_skill_no_resources_depth_one(self, tmp_path: Path) -> None:
+        base = tmp_path / "claude_skills"
+        (base / "bare").mkdir(parents=True)
+        (base / "bare" / "SKILL.md").write_text(
+            "---\nname: bare\ndescription: x\n---\n# Bare\n\nNo links.\n"
+        )
+        loader = SkillLoader(skills_root=base)
+        result = loader.load_skill("bare")
+        assert result.depth_used == 1
+        assert result.resources == []
+
+    @pytest.fixture
+    def nested_skill(self, tmp_path: Path) -> Path:
+        base = tmp_path / "claude_skills"
+        (base / "nested" / "resources").mkdir(parents=True)
+        (base / "nested" / "SKILL.md").write_text(
+            "---\nname: nested\ndescription: x\n---\n# Nested\n[notes](resources/notes.md)\n"
+        )
+        (base / "nested" / "resources" / "notes.md").write_text(
+            "Notes — see [more](resources/deeper.md).\n"
+        )
+        (base / "nested" / "resources" / "deeper.md").write_text("# deeper\n")
+        return base
+
+    def test_load_skill_depth_3_raises(self, nested_skill: Path) -> None:
+        from app.skills import NestedDepthExceededError
+
+        loader = SkillLoader(skills_root=nested_skill)
+        with pytest.raises(NestedDepthExceededError, match="depth"):
+            loader.load_skill("nested")
+
+    @pytest.fixture
+    def depth2_skill(self, tmp_path: Path) -> Path:
+        base = tmp_path / "claude_skills"
+        (base / "d2" / "resources").mkdir(parents=True)
+        (base / "d2" / "SKILL.md").write_text(
+            "---\nname: d2\ndescription: x\n---\n# d2\n[notes](resources/notes.md)\n"
+        )
+        (base / "d2" / "resources" / "notes.md").write_text("# Notes\nNo nested refs here.\n")
+        return base
+
+    def test_load_skill_depth_2_accepted(self, depth2_skill: Path) -> None:
+        loader = SkillLoader(skills_root=depth2_skill)
+        result = loader.load_skill("d2")
+        assert result.depth_used == 2
+        assert len(result.resources) == 1
+        assert result.resources[0].name == "notes"
+
+    def test_load_skill_total_size_aggregates(self, linear_skill: Path) -> None:
+        loader = SkillLoader(skills_root=linear_skill)
+        result = loader.load_skill("linear")
+        expected = len(result.skill_md_content.encode("utf-8")) + sum(
+            r.size_bytes for r in result.resources
+        )
+        assert result.total_size_bytes == expected
+
+    def test_load_skill_unknown_raises(self, linear_skill: Path) -> None:
+        from app.skills import SkillLoaderError
+
+        loader = SkillLoader(skills_root=linear_skill)
+        with pytest.raises(SkillLoaderError, match="not found"):
+            loader.load_skill("ghost")
