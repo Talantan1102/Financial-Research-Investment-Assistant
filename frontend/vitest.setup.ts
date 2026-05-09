@@ -13,6 +13,20 @@ import '@testing-library/jest-dom/vitest'
 import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest'
 import { server } from '@/test-utils/msw-server'
 
+// react-window (VariableSizeList) uses ResizeObserver internally; jsdom doesn't
+// provide it. Stub it so tests don't throw "ResizeObserver is not defined".
+class _ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
+// @ts-expect-error jsdom shim
+globalThis.ResizeObserver = globalThis.ResizeObserver ?? _ResizeObserverStub
+
+// react-window also calls getBoundingClientRect on its outer container to
+// determine visible area. In jsdom all elements return 0. Provide a fallback
+// offsetHeight so VariableSizeList renders at least one row in tests.
+Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
+  configurable: true,
+  get() { return (this as HTMLElement).style?.height ? parseInt((this as HTMLElement).style.height, 10) || 600 : 600 },
+})
+
 // antd responsive components (List, Grid, etc.) use window.matchMedia which
 // is not implemented in jsdom. Provide a no-op stub so antd doesn't throw.
 if (typeof window !== 'undefined' && !window.matchMedia) {

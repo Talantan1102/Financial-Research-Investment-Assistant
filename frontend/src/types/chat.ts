@@ -8,6 +8,23 @@
 
 import type { EscalationPacket } from './escalation'
 
+export type MessageType = 'text' | 'tool_call' | 'tool_result' | 'research_report' | 'escalation' | 'system'
+
+export interface ToolCallData {
+  tool_name: string
+  tool_args: Record<string, unknown>
+  status: 'running' | 'success' | 'error'
+  result_summary?: string
+  error_message?: string
+  started_at: string
+  ended_at?: string
+}
+
+export interface ChartSpec {
+  type: 'echarts'
+  option: Record<string, unknown>
+}
+
 export interface BaseEvent {
   seq: number
 }
@@ -160,7 +177,7 @@ export interface ChatMessage {
   session_id: string
   role: 'user' | 'assistant' | 'tool' | 'system'
   content: string
-  message_type: 'text' | 'tool_call' | 'tool_result' | 'research_report' | 'escalation'
+  message_type: MessageType
   tool_call_data: Record<string, unknown> | null
   research_report_id: string | null
   research_report_summary: string | null
