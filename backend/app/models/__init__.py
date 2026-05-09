@@ -17,6 +17,7 @@ from .news import BiddingInfo, IndustryNews, NewsCollectionTask
 from .position import Position
 from .research import ResearchCheckpoint
 from .research_report import ResearchReport
+from .tool_result_cache import ToolResultCacheRow  # noqa: F401
 from .trade import Trade, TradeType
 from .user import User
 
