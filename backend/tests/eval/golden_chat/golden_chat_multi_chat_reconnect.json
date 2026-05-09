@@ -1,0 +1,25 @@
+{
+  "id": "chat_multi_chat_v1",
+  "description": "User has 2 active chat sessions, switches between them mid-conversation, reconnects mid-stream. Verifies G2 user namespace / multi-chat lifecycle / SSE 重连不串 session.",
+  "persona": "default",
+  "chat_history": [
+    {"role": "user", "content": "聊聊招行", "session_label": "A"},
+    {"role": "assistant", "content": "招商银行...", "session_label": "A"},
+    {"role": "user", "content": "看看 ICBC", "session_label": "B"},
+    {"role": "assistant", "content": "工商银行...", "session_label": "B"}
+  ],
+  "final_user_message": "回到 A 接着聊招行的零售业务",
+  "expected_signals": ["招行", "零售"],
+  "expected_tool_calls": [],
+  "expected_skills_loaded": [],
+  "expected_escalation": false,
+  "judge_rubric": {
+    "criteria": [
+      "session A 的 history 不污染 session B (G2 namespace)",
+      "切回 A 时能用 A 的上下文,不出现 ICBC 信息 (cross-session leak 否定)",
+      "SSE 重连后 last_event_id 收尾正确 (G1 monotonic)",
+      "final response 聚焦招行零售,不泛泛而谈"
+    ],
+    "score_threshold": 0.7
+  }
+}
