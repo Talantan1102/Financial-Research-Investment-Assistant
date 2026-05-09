@@ -1,6 +1,6 @@
-import { Spin } from 'antd'
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ChatPane } from '@/components/chat/ChatPane'
 import { chatSessionsActions } from '@/store/chat-sessions'
 
 export function ChatLandingPage() {
@@ -17,11 +17,7 @@ export function ChatLandingPage() {
       cancelled = true
     }
   }, [navigate])
-  return (
-    <div style={{ padding: 24 }}>
-      <Spin /> Creating new chat…
-    </div>
-  )
+  return <ChatPane />
 }
 
 export default ChatLandingPage
