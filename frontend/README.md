@@ -100,3 +100,22 @@ vitest + playwright 已 self-contained 不依赖 backend, 后续可加到 GitHub
 - backend 默认起在 `http://localhost:8000`
 - frontend dev server proxy 配置见 `vite.config.ts`
 - API 类型定义在 `src/api/`
+
+## v0.9 chat-first frontend foundation (Plan 4a)
+
+Routes:
+- `/` → redirect `/chat`
+- `/chat` ChatLandingPage (auto-creates session + redirects)
+- `/chat/:session_id` ChatSessionPage (Plan 4a foundation; Plan 4b fills ChatPane)
+- `/reports` ReportsListPage (placeholder)
+- `/research` `/research/new` `/research/:id` (preserved)
+- `/portfolio` `/monitoring` `/knowledge` `/auth/*` (preserved)
+
+Stores: `chatSessionsStore` / `currentChatStore` / `escalationStore` (valtio).
+Hook: `useChatSSE({ sessionId })` returns `{ sendMessage, abort, status }` with F6 reconnect (last_event_id, 1s/2s/4s/8s/30s cap) and F8 multi-chat abort-on-swap.
+Layout: `AppShell` (TopBar 56px + Sidebar 240px + Main).
+
+Run tests:
+```
+npm test
+```
