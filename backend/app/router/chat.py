@@ -1,11 +1,11 @@
 """HTTP POST /api/v0/chat — SSE streaming chat endpoint.
 
 Wires together:
-- ChatRequest / StreamEvent Pydantic models (per spec § 5)
+- ChatRequest / StreamEvent Pydantic models (per spec § 5 / § 4.6)
 - get_chat_graph() DI: lazy singleton CompiledStateGraph
 - get_current_user() DI: v0 stub (anonymous) — real auth preserved in auth_router
 - _stream_chat(): async generator over LangGraph astream_events → SSE frames
-- _adapt_event(): maps LangGraph event types to the 6 v0 StreamEvent types
+- _adapt_event(): maps LangGraph event types to StreamEvent types per spec § 4.6
 
 Event mapping (from Spike 2 probe; confirmed against real astream_events output):
   on_chain_end / planner_node     → plan
@@ -15,6 +15,9 @@ Event mapping (from Spike 2 probe; confirmed against real astream_events output)
   on_chat_model_stream             → token (v0 Responder uses sync chat; may not appear)
   all other events                → None (skipped)
   any unhandled exception          → error (best-effort, stream continues)
+
+StreamEvent.seq is a monotonic per-stream counter starting at 1, used for
+last_event_id-based SSE reconnect (spec § 4.6 / G1 industrial problem).
 """
 
 from __future__ import annotations
@@ -47,7 +50,38 @@ class ChatRequest(BaseModel):
 
 
 class StreamEvent(BaseModel):
-    type: Literal["plan", "tool_start", "tool_end", "token", "done", "error"]
+    """SSE event shape per spec § 4.6.
+
+    `seq` is a monotonic counter scoped to the chat stream, used for
+    last_event_id-based reconnect (G1 industrial problem).  It starts at 1
+    and increments by 1 for every emitted event in a single stream.
+    """
+
+    type: Literal[
+        # chat-mode events
+        "token",
+        "plan",
+        "tool_start",
+        "tool_end",
+        "tool_error",
+        "skill_load",  # Plan 2 emits
+        "escalate_request",
+        "escalate_packet_draft",  # Plan 3 emits
+        # research-subgraph events (Plan 3 forwards from research mode)
+        "research_planner_done",
+        "research_tool_start",
+        "research_tool_end",
+        "research_analyst_done",
+        "research_writer_done",
+        "research_critic_done",
+        "escalate_done",
+        "escalate_error",
+        # cross-cutting
+        "cost_update",
+        "done",
+        "error",
+    ]
+    seq: int  # monotonic; starts at 1, increments per emit per stream
     data: dict[str, Any]
 
 
@@ -141,19 +175,21 @@ def get_chat_graph() -> CompiledStateGraph[Any, Any, Any, Any]:
 # SSE event adapter
 # ---------------------------------------------------------------------------
 
-_VALID_TYPES = {"plan", "tool_start", "tool_end", "token", "done", "error"}
 
+def _adapt_event(ev: dict[str, Any], seq: int) -> StreamEvent | None:
+    """Translate a LangGraph astream_events dict into a StreamEvent or None.
 
-def _adapt_event(ev: dict[str, Any]) -> StreamEvent | None:
-    """Translate a LangGraph astream_events dict into a v0 StreamEvent or None.
-
-    Mapping (confirmed by Spike 2 local probe):
+    Mapping (confirmed by Spike 2 local probe; extended to spec § 4.6 types):
       on_chain_end   + planner_node  → plan       (plan decided)
       on_chain_start + tool_node     → tool_start
       on_chain_end   + tool_node     → tool_end
       on_chain_end   + LangGraph     → done       (top-level graph finished)
       on_chat_model_stream           → token      (streaming token; v0 may not emit)
       all others                     → None (skip)
+
+    Args:
+        ev:  Raw LangGraph astream_events dict.
+        seq: Monotonic sequence number for this event (already incremented by caller).
     """
     ev_type: str = ev.get("event", "")
     ev_name: str = ev.get("name", "")
@@ -161,19 +197,20 @@ def _adapt_event(ev: dict[str, Any]) -> StreamEvent | None:
 
     if ev_type == "on_chain_end" and ev_name == "planner_node":
         output = ev_data.get("output", {}) or {}
-        return StreamEvent(type="plan", data={"node": "planner_node", "output": output})
+        return StreamEvent(type="plan", seq=seq, data={"node": "planner_node", "output": output})
 
     if ev_type == "on_chain_start" and ev_name == "tool_node":
-        return StreamEvent(type="tool_start", data={"node": "tool_node"})
+        return StreamEvent(type="tool_start", seq=seq, data={"node": "tool_node"})
 
     if ev_type == "on_chain_end" and ev_name == "tool_node":
         output = ev_data.get("output", {}) or {}
-        return StreamEvent(type="tool_end", data={"node": "tool_node", "output": output})
+        return StreamEvent(type="tool_end", seq=seq, data={"node": "tool_node", "output": output})
 
     if ev_type == "on_chain_end" and ev_name == "LangGraph":
         output = ev_data.get("output", {}) or {}
         return StreamEvent(
             type="done",
+            seq=seq,
             data={
                 "output": output,
             },
@@ -186,7 +223,7 @@ def _adapt_event(ev: dict[str, Any]) -> StreamEvent | None:
             text = str(chunk.content)
         elif isinstance(chunk, dict):
             text = str(chunk.get("content", ""))
-        return StreamEvent(type="token", data={"text": text})
+        return StreamEvent(type="token", seq=seq, data={"text": text})
 
     # Skip: on_chain_start/LangGraph, on_chain_stream/*, _route_after_planner, etc.
     return None
@@ -202,7 +239,13 @@ async def _stream_chat(
     user: _AnonUser,
     graph: CompiledStateGraph[Any, Any, Any, Any],
 ) -> AsyncIterator[str]:
-    """Async generator: drive astream_events and yield SSE-framed JSON strings."""
+    """Async generator: drive astream_events and yield SSE-framed JSON strings.
+
+    Each emitted SSE frame includes:
+    - ``event: <type>`` line  (SSE named-event, enables browser EventSource filtering)
+    - ``id: <seq>`` line      (last_event_id for reconnect per spec § 4.6 / G1)
+    - ``data: <JSON>``        (StreamEvent payload without the `type` field)
+    """
     request_id = f"req-{uuid4().hex[:12]}"
     initial = GraphState(
         user_id=user.id,
@@ -214,17 +257,33 @@ async def _stream_chat(
     )
     config: RunnableConfig = {"configurable": {"thread_id": f"{user.id}:{req.session_id}"}}
 
+    seq = 0
+
+    def next_seq() -> int:
+        nonlocal seq
+        seq += 1
+        return seq
+
     try:
         async for ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
-            sse = _adapt_event(ev)
+            sse = _adapt_event(ev, next_seq())
             if sse is not None:
-                yield f"data: {sse.model_dump_json()}\n\n"
+                yield (
+                    f"event: {sse.type}\n"
+                    f"id: {sse.seq}\n"
+                    f"data: {sse.model_dump_json(exclude={'type'})}\n\n"
+                )
     except Exception as exc:
         error_event = StreamEvent(
             type="error",
+            seq=next_seq(),
             data={"message": str(exc), "traceback": traceback.format_exc()},
         )
-        yield f"data: {error_event.model_dump_json()}\n\n"
+        yield (
+            f"event: {error_event.type}\n"
+            f"id: {error_event.seq}\n"
+            f"data: {error_event.model_dump_json(exclude={'type'})}\n\n"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -241,10 +300,16 @@ async def chat(
     """POST /api/v0/chat — stream a chat response as SSE.
 
     Request body: ChatRequest (session_id, message, optional flags).
-    Response: text/event-stream where each line is ``data: <StreamEvent JSON>``.
+    Response: text/event-stream per spec § 4.6.
 
-    StreamEvent types: plan | tool_start | tool_end | token | done | error.
-    The done event signals the end of the stream.
+    Each SSE frame has the form::
+
+        event: <type>
+        id: <seq>
+        data: {"seq": <n>, "data": {...}}
+
+    Full event type set defined in StreamEvent.type (see spec § 4.6).
+    The ``done`` event signals the end of the stream.
     """
     return StreamingResponse(
         _stream_chat(req, user, chat_agent_graph),
