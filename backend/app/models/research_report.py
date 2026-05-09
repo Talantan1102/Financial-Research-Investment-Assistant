@@ -58,5 +58,14 @@ class ResearchReport(Base):
     # JOIN trace 用 (TraceService request_id)
     request_id = Column(String(64), nullable=True, index=True)
 
+    # chat→research 升级链路溯源 (E13/E14)
+    # ON DELETE SET NULL: 删 chat session 时保留研报记录
+    source_chat_session_id = Column(
+        UUID(as_uuid=True).with_variant(String(36), "sqlite"),
+        ForeignKey("chat_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # 关系
     user = relationship("User", backref="research_reports")
