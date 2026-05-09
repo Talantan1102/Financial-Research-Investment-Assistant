@@ -9,8 +9,10 @@ from pathlib import Path
 import yaml
 
 from app.skills.types import (
+    ResourceTooLargeError,
     SkillLoaderError,
     SkillManifest,
+    SkillResource,
 )
 
 log = logging.getLogger(__name__)
@@ -95,6 +97,57 @@ class SkillLoader:
                 seen.add(ref)
                 out.append(ref)
         return out
+
+    _CONTENT_TYPE_BY_EXT: dict[str, str] = {
+        ".yaml": "yaml",
+        ".yml": "yaml",
+        ".json": "json",
+        ".md": "md",
+    }
+
+    def _load_one_resource(self, skill_name: str, relative_ref: str) -> SkillResource:
+        """Read a single resource file with size + path-traversal guards (S5)."""
+        if not relative_ref.startswith("resources/"):
+            raise SkillLoaderError(
+                f"invalid resource ref (must start with 'resources/'): {relative_ref!r}"
+            )
+
+        skill_root = (self.skills_root / skill_name).resolve()
+        resources_root = (skill_root / "resources").resolve()
+        target = (skill_root / relative_ref).resolve()
+
+        try:
+            target.relative_to(resources_root)
+        except ValueError as e:
+            raise SkillLoaderError(
+                f"path traversal blocked: {relative_ref!r} escapes resources/"
+            ) from e
+
+        if not target.exists() or not target.is_file():
+            raise SkillLoaderError(f"resource not found: {relative_ref}")
+
+        ext = target.suffix.lower()
+        ct = self._CONTENT_TYPE_BY_EXT.get(ext)
+        if ct is None:
+            raise SkillLoaderError(
+                f"unsupported resource extension {ext!r} (allowed: .yaml/.yml/.json/.md)"
+            )
+
+        size = target.stat().st_size
+        if size > RESOURCE_SIZE_CAP_BYTES:
+            raise ResourceTooLargeError(
+                f"resource {relative_ref} is {size} bytes, exceeds 50kB cap "
+                f"({RESOURCE_SIZE_CAP_BYTES} bytes)"
+            )
+
+        content = target.read_text(encoding="utf-8")
+        return SkillResource(
+            name=target.stem,
+            relative_path=relative_ref,
+            content_type=ct,  # type: ignore[arg-type]
+            content=content,
+            size_bytes=size,
+        )
 
     def _parse_frontmatter(self, dir_name: str, skill_md: Path) -> SkillManifest:
         text = skill_md.read_text(encoding="utf-8")

@@ -46,3 +46,76 @@ class TestDetectResourceRefs:
         body = "[a](resources/x.yaml)\n[b](resources/x.yaml)\n[c](resources/y.json)\n"
         refs = loader._detect_resource_refs(body)
         assert sorted(refs) == ["resources/x.yaml", "resources/y.json"]
+
+
+import pytest  # noqa: E402
+
+
+class TestLoadOneResource:
+    @pytest.fixture
+    def skills_dir(self, tmp_path: Path) -> Path:
+        base = tmp_path / "claude_skills"
+        (base / "demo").mkdir(parents=True)
+        (base / "demo" / "SKILL.md").write_text("---\nname: demo\ndescription: x\n---\n# Demo\n")
+        (base / "demo" / "resources").mkdir()
+        (base / "demo" / "resources" / "thresholds.yaml").write_text("pe_max: 30\npb_max: 5\n")
+        (base / "demo" / "resources" / "examples.json").write_text('{"a": 1, "b": 2}\n')
+        (base / "demo" / "resources" / "notes.md").write_text("# Notes\nSome content.\n")
+        return base
+
+    def test_load_yaml_resource(self, skills_dir: Path) -> None:
+        loader = SkillLoader(skills_root=skills_dir)
+        r = loader._load_one_resource("demo", "resources/thresholds.yaml")
+        assert r.content_type == "yaml"
+        assert "pe_max: 30" in r.content
+        assert r.size_bytes == len(r.content.encode("utf-8"))
+
+    def test_load_json_resource(self, skills_dir: Path) -> None:
+        loader = SkillLoader(skills_root=skills_dir)
+        r = loader._load_one_resource("demo", "resources/examples.json")
+        assert r.content_type == "json"
+
+    def test_load_md_resource(self, skills_dir: Path) -> None:
+        loader = SkillLoader(skills_root=skills_dir)
+        r = loader._load_one_resource("demo", "resources/notes.md")
+        assert r.content_type == "md"
+
+    def test_unknown_extension_raises(self, tmp_path: Path) -> None:
+        base = tmp_path / "claude_skills"
+        (base / "x" / "resources").mkdir(parents=True)
+        (base / "x" / "resources" / "data.txt").write_text("hi")
+        loader = SkillLoader(skills_root=base)
+        with pytest.raises(Exception, match="unsupported"):
+            loader._load_one_resource("x", "resources/data.txt")
+
+    def test_missing_resource_raises(self, skills_dir: Path) -> None:
+        loader = SkillLoader(skills_root=skills_dir)
+        from app.skills import SkillLoaderError
+
+        with pytest.raises(SkillLoaderError, match="not found"):
+            loader._load_one_resource("demo", "resources/missing.yaml")
+
+    def test_path_traversal_blocked(self, skills_dir: Path) -> None:
+        loader = SkillLoader(skills_root=skills_dir)
+        from app.skills import SkillLoaderError
+
+        with pytest.raises(SkillLoaderError, match="path traversal|invalid"):
+            loader._load_one_resource("demo", "resources/../SKILL.md")
+
+    def test_oversized_resource_raises(self, tmp_path: Path) -> None:
+        base = tmp_path / "claude_skills"
+        (base / "x" / "resources").mkdir(parents=True)
+        (base / "x" / "resources" / "big.yaml").write_text("a" * (51 * 1024))
+        loader = SkillLoader(skills_root=base)
+        from app.skills import ResourceTooLargeError
+
+        with pytest.raises(ResourceTooLargeError, match="50"):
+            loader._load_one_resource("x", "resources/big.yaml")
+
+    def test_at_cap_boundary_accepted(self, tmp_path: Path) -> None:
+        base = tmp_path / "claude_skills"
+        (base / "x" / "resources").mkdir(parents=True)
+        (base / "x" / "resources" / "exact.yaml").write_text("a" * (50 * 1024))
+        loader = SkillLoader(skills_root=base)
+        r = loader._load_one_resource("x", "resources/exact.yaml")
+        assert r.size_bytes == 50 * 1024
