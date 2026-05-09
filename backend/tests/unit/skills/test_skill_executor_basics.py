@@ -83,3 +83,67 @@ async def test_executor_rejects_unknown_skill(tmp_path):
     result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
     assert result.ok is False
     assert result.error.kind == "subprocess_launch_failed"
+
+
+@pytest.mark.asyncio
+async def test_executor_handles_stdout_invalid_json(fake_skills_root, tmp_path):
+    ref = _write_script(fake_skills_root, "freetext.py", "print('hello world, not json')\n")
+    ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
+    result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
+    assert result.ok is False
+    assert result.error.kind == "stdout_invalid_json"
+
+
+@pytest.mark.asyncio
+async def test_executor_truncates_stderr_to_2kb(fake_skills_root, tmp_path):
+    ref = _write_script(
+        fake_skills_root,
+        "spew.py",
+        "import sys, json\nsys.stderr.write('X' * 5000)\nprint(json.dumps({'ok': True}))\n",
+    )
+    ex = SkillExecutor(
+        skills_root=fake_skills_root,
+        workdir_root=tmp_path / "wd",
+        stderr_max_bytes=2048,
+    )
+    result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
+    assert result.ok is True
+    assert len(result.stderr_text) <= 2048 + 50
+    assert "[truncated]" in result.stderr_text
+
+
+@pytest.mark.asyncio
+async def test_executor_passes_complex_args_via_stdin(fake_skills_root, tmp_path):
+    ref = _write_script(
+        fake_skills_root,
+        "roundtrip.py",
+        "import json, sys\n"
+        "data = json.load(sys.stdin)\n"
+        "data['marker'] = 'roundtripped'\n"
+        "print(json.dumps(data))\n",
+    )
+    payload = {
+        "financials": {"revenue": [100, 110, 120], "ebit": [20, 22, 25]},
+        "wacc": 0.085,
+        "horizon_years": 5,
+    }
+    ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
+    result = await ex.execute(ref=ref, args=SkillScriptArgs(payload=payload))
+    assert result.ok is True
+    assert result.stdout_json["marker"] == "roundtripped"
+    assert result.stdout_json["financials"]["revenue"] == [100, 110, 120]
+
+
+@pytest.mark.asyncio
+async def test_executor_non_zero_exit_propagates(fake_skills_root, tmp_path):
+    ref = _write_script(
+        fake_skills_root,
+        "fail.py",
+        "import sys\nsys.stderr.write('something went wrong')\nsys.exit(2)\n",
+    )
+    ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
+    result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
+    assert result.ok is False
+    assert result.error.kind == "non_zero_exit"
+    assert result.exit_code == 2
+    assert "something went wrong" in result.stderr_text
