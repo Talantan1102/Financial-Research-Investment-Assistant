@@ -140,13 +140,30 @@ class Plan(BaseModel):
     escalate_offered: bool = False  # Q3: Plan 3 escalation hook
     escalate_reason: str | None = None  # human-readable; SSE event payload
 
+    # === Plan 2a NEW (S2: skill context loader) ===
+    load_skill: str | None = Field(
+        default=None,
+        description="Skill name to expand from L1 to L2 (with L3a resources).",
+    )
+    load_resource: dict | None = Field(
+        default=None,
+        description="Specific resource to load: {'skill': str, 'ref': str}.",
+    )
+
     @model_validator(mode="after")
     def _check_consistency(self) -> Plan:
         if self.direct_response and self.tool_calls:
             raise ValueError("direct_response=True 时 tool_calls 必须为空")
-        if not self.direct_response and not self.tool_calls and not self.escalate_offered:
+        has_action = (
+            bool(self.tool_calls)
+            or self.escalate_offered
+            or self.load_skill is not None
+            or self.load_resource is not None
+        )
+        if not self.direct_response and not has_action:
             raise ValueError(
-                "direct_response=False 时 tool_calls 至少有 1 个（或 escalate_offered=True）"
+                "direct_response=False 时 tool_calls 至少有 1 个"
+                "（或 escalate_offered=True / load_skill / load_resource）"
             )
         return self
 
@@ -223,6 +240,15 @@ class ChatState(BaseModel):
     # === escalation (Plan 3 deliverable; Plan 1 reserves only) ===
     escalate_offered: bool = False
     escalate_confirmed: bool = False
+
+    # === Plan 2a skill loader hook ===
+    skill_context: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Loaded skill bundles (L2 SKILL.md + concatenated L3a resources). "
+            "Keyed by skill name. Persisted across planner turns via LangGraph checkpointer."
+        ),
+    )
 
     # === observability ===
     trace_request_id: str

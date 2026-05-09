@@ -44,3 +44,57 @@ class TestBuildSkillListBlock:
         out = build_skill_list_block([m])
         assert "load_skill" in out
         assert "load_resource" in out
+
+
+class TestPlannerSkillActionFields:
+    def test_plan_has_load_skill_field(self) -> None:
+        from app.agents.schemas import Plan
+
+        p = Plan(direct_response=True, tool_calls=[], reasoning="r", load_skill="risk_assessment")
+        assert p.load_skill == "risk_assessment"
+
+    def test_plan_has_load_resource_field(self) -> None:
+        from app.agents.schemas import Plan
+
+        p = Plan(
+            direct_response=True,
+            tool_calls=[],
+            reasoning="r",
+            load_resource={"skill": "risk_assessment", "ref": "resources/foo.yaml"},
+        )
+        assert p.load_resource is not None
+        assert p.load_resource["skill"] == "risk_assessment"
+
+    def test_plan_load_fields_default_none(self) -> None:
+        from app.agents.schemas import Plan
+
+        p = Plan(direct_response=True, tool_calls=[], reasoning="r")
+        assert p.load_skill is None
+        assert p.load_resource is None
+
+
+class TestChatStateSkillContext:
+    def test_skill_context_default_empty(self) -> None:
+        from app.agents.schemas import ChatState
+
+        s = ChatState(
+            user_id="u",
+            session_id="s",
+            user_message="x",
+            request_id="r",
+            trace_request_id="r",
+        )
+        assert s.skill_context == {}
+
+    def test_skill_context_accepts_str_values(self) -> None:
+        from app.agents.schemas import ChatState
+
+        s = ChatState(
+            user_id="u",
+            session_id="s",
+            user_message="x",
+            request_id="r",
+            trace_request_id="r",
+            skill_context={"risk_assessment": "# Risk\n..."},
+        )
+        assert s.skill_context["risk_assessment"].startswith("# Risk")

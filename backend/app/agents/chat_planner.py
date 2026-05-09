@@ -186,6 +186,9 @@ _PLANNER_PROMPT_TEMPLATE = """\
 2. 如果可并行(无依赖),设 parallelizable=true。
 3. 如果用户在请求"深度报告 / 完整尽调 / 详细分析"这类长程任务,设 escalate_offered=true 并给 reason。
 4. 如果只是闲聊或简单问答,设 direct_response=true,tool_calls 留空。
+5. 如果用户问题需要某 skill 的细节(SKILL.md 全文),设 load_skill="<skill_name>"。
+6. 如果你已经看过 SKILL.md,需要里面引用的具体 resource,设 load_resource={{"skill": "<n>", "ref": "resources/<file>"}}。
+   注意: load_skill / load_resource / tool_calls 三选一,不要同时设置多个。
 
 严格按下列 JSON 输出,不要带任何额外文字:
 {{
@@ -194,7 +197,9 @@ _PLANNER_PROMPT_TEMPLATE = """\
   "direct_response": true|false,
   "escalate_offered": true|false,
   "escalate_reason": "..." or null,
-  "reasoning": "<一句话摘要>"
+  "reasoning": "<一句话摘要>",
+  "load_skill": "..." or null,
+  "load_resource": {{"skill": "...", "ref": "..."}} or null
 }}
 """
 
@@ -273,10 +278,17 @@ class ChatPlanner(Agent):
         parallelizable = bool(data.get("parallelizable", False))
         reasoning = data.get("reasoning", "")
 
+        # Plan 2a: parse new skill action fields
+        raw_load_skill = data.get("load_skill")
+        load_skill = raw_load_skill if isinstance(raw_load_skill, str) else None
+        raw_load_resource = data.get("load_resource")
+        load_resource = raw_load_resource if isinstance(raw_load_resource, dict) else None
+
         # Build Plan — handle edge cases for validator:
         # - escalate_offered=True with no tool_calls: use direct_response=True
-        # - tool_calls filtered to empty: force direct_response=True
-        if not valid_calls and not direct_response:
+        # - tool_calls filtered to empty and no skill action: force direct_response=True
+        has_action = bool(valid_calls) or escalate_offered or load_skill or load_resource
+        if not has_action and not direct_response:
             direct_response = True
 
         plan = Plan(
@@ -286,6 +298,8 @@ class ChatPlanner(Agent):
             parallelizable=parallelizable,
             escalate_offered=escalate_offered,
             escalate_reason=data.get("escalate_reason"),
+            load_skill=load_skill,
+            load_resource=load_resource,
         )
 
         return {
