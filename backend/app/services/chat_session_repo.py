@@ -11,6 +11,9 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Literal
 
+# Placeholder UUID for the pre-auth "anonymous" user (C.6 will use JWT sub).
+_ANONYMOUS_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,11 +24,24 @@ class ChatSessionRepo:
     def __init__(self, session_factory: Callable[[], AsyncSession]) -> None:
         self._sf = session_factory
 
+    @staticmethod
+    def _resolve_user_uuid(user_id: str | uuid.UUID) -> uuid.UUID | None:
+        """Resolve user_id string to UUID.
+
+        'anonymous' maps to None (NULL in DB) since pre-auth sessions have no
+        real user row. C.6 will pass a real JWT sub UUID here instead.
+        """
+        if isinstance(user_id, uuid.UUID):
+            return user_id
+        if user_id == "anonymous":
+            return None  # FK is nullable — NULL avoids FK violation pre-auth
+        return uuid.UUID(user_id)
+
     async def create_session(self, user_id: str, title: str = "新对话") -> ChatSession:
         async with self._sf() as sess:
             row = ChatSession(
                 id=uuid.uuid4(),
-                user_id=uuid.UUID(user_id) if isinstance(user_id, str) else user_id,
+                user_id=self._resolve_user_uuid(user_id),
                 title=title,
             )
             sess.add(row)
@@ -34,11 +50,15 @@ class ChatSessionRepo:
             return row
 
     async def list_for_user(self, user_id: str, limit: int = 50) -> list[ChatSession]:
-        uid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+        uid = self._resolve_user_uuid(user_id)
         async with self._sf() as sess:
+            # NULL user_id (anonymous) requires IS NULL, not == NULL
+            user_filter = (
+                ChatSession.user_id.is_(None) if uid is None else ChatSession.user_id == uid
+            )
             stmt = (
                 select(ChatSession)
-                .where(ChatSession.user_id == uid)
+                .where(user_filter)
                 .order_by(desc(ChatSession.updated_at))
                 .limit(limit)
             )

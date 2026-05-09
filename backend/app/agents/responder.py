@@ -123,7 +123,7 @@ class Responder(Agent):
             history_summary=state.history_summary or "(无)",
             tool_results=tool_block,
         )
-        resp = self._llm.chat(prompt=prompt, tier="default", schema=None)
+        resp = self._llm.chat(prompt=prompt, tier=self.model_tier, schema=None)
         return {"final_response": resp.content.strip()}
 
     def _format_chat_tool_results(self, state: ChatState) -> str:

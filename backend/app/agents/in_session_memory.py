@@ -83,7 +83,7 @@ class InSessionMemory:
             return state.history_summary or ""
         old = state.history[: -self._recent_k]
         prompt = _build_summarize_prompt(old, state.history_summary)
-        resp = self._llm.chat(prompt=prompt, tier="default", schema=None)
+        resp = self._llm.chat(prompt=prompt, tier="fast", schema=None)
         return resp.text.strip()
 
     async def load_for_turn(self, session_id: str) -> ChatState:

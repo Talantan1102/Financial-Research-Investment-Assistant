@@ -38,7 +38,26 @@ from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover t
 
 
 def _async_pg_url() -> str:
-    """Return a psycopg3-compatible conninfo URI (postgresql+psycopg://)."""
+    """Return a psycopg3-compatible conninfo URI (plain postgresql://).
+
+    Note: psycopg3 / psycopg_pool use the libpq URI format (postgresql://)
+    NOT the SQLAlchemy driver format (postgresql+psycopg://).  The +psycopg
+    prefix is SQLAlchemy-only and is rejected by psycopg_pool.AsyncConnectionPool.
+    """
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "postgres123")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db = os.getenv("POSTGRES_DB", "industry_assistant")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
+
+def _sqlalchemy_async_pg_url() -> str:
+    """Return a SQLAlchemy async engine URL (postgresql+psycopg://).
+
+    SQLAlchemy's create_async_engine requires the +psycopg driver suffix
+    to select the psycopg3 backend over psycopg2.
+    """
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD", "postgres123")
     host = os.getenv("POSTGRES_HOST", "localhost")
@@ -112,7 +131,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     try:
         from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-        _chat_engine_url = _async_pg_url()
+        _chat_engine_url = _sqlalchemy_async_pg_url()  # SQLAlchemy needs +psycopg prefix
         app.state.chat_async_engine = create_async_engine(_chat_engine_url, future=True)
         _factory = async_sessionmaker(app.state.chat_async_engine, expire_on_commit=False)
         app.state.chat_session_repo = ChatSessionRepo(session_factory=_factory)

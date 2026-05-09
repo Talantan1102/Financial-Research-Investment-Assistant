@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -116,7 +116,9 @@ def get_current_user() -> _AnonUser:
 _graph_singleton: CompiledStateGraph[Any, Any, Any, Any] | None = None
 
 
-def _build_graph_singleton() -> CompiledStateGraph[Any, Any, Any, Any]:
+def _build_graph_singleton(
+    checkpointer: Any | None = None,
+) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build the CompiledStateGraph once and cache it as a module-level singleton.
 
     Build sequence:
@@ -124,18 +126,21 @@ def _build_graph_singleton() -> CompiledStateGraph[Any, Any, Any, Any]:
        which client is used at env-var dispatch time, not here).
     2. build_tushare_service()        — mock or real per TUSHARE_MODE env var
     3. MockBochaService()            — reads LLMConfig internally
-    4. Register StockQuoteTool / GetFinancialsTool / GetNewsTool
+    4. Register StockQuoteTool / GetFinancialsTool / GetNewsTool (legacy 3-tool set)
+       MCP-based tools (6 total) are registered via MCPClient tools in Plan 2.
     5. ChatPlanner + Responder
-    6. build_chat_graph with SQLite checkpointer for session isolation
+    6. InSessionMemory (Q4 E: tool dedup + token-guard)
+    7. ToolResultCache (placeholder — no async_engine at singleton build time; cache is
+       None-ish until ChatSessionRepo async_engine is wired in Plan 2)
+    8. build_chat_graph with PG checkpointer from app.state (or None for tests)
 
     Thread safety: FastAPI runs in a single async event loop for the
     startup sequence; the singleton is set before requests arrive.
     For multi-worker deployments the per-worker singleton is acceptable
     since LangGraph state isolation is provided by thread_id, not process.
     """
-    from pathlib import Path
-
     from app.agents.chat_planner import ChatPlanner
+    from app.agents.in_session_memory import InSessionMemory
     from app.agents.responder import Responder
     from app.orchestration.chat_graph import build_chat_graph
     from app.services.bocha_factory import build_bocha_service_from_env
@@ -157,17 +162,43 @@ def _build_graph_singleton() -> CompiledStateGraph[Any, Any, Any, Any]:
     planner = ChatPlanner(llm=llm, registry=registry)
     responder = Responder(llm=llm)
 
-    db_path = Path("backend/data/chat.sqlite")
+    # Q4 E: in-session memory for tool dedup + token-guard summarize
+    memory = InSessionMemory(llm=llm)
+
+    # ToolResultCache requires async session factory; deferred to Plan 2 when
+    # ChatSessionRepo engine is wired. For now pass a no-op stub cache.
+    class _NoOpCache:
+        """Stub ToolResultCache that always misses (no PG async wiring at build time)."""
+
+        async def get_or_compute(
+            self,
+            user_id: str,
+            tool_name: str,
+            args: Any,
+            compute_fn: Any,
+        ) -> Any:
+            return await compute_fn()
+
     return build_chat_graph(
-        planner=planner, responder=responder, registry=registry, db_path=db_path
+        planner=planner,
+        responder=responder,
+        registry=registry,
+        memory=memory,
+        cache=_NoOpCache(),  # type: ignore[arg-type]
+        checkpointer=checkpointer,
     )
 
 
-def get_chat_graph() -> CompiledStateGraph[Any, Any, Any, Any]:
-    """FastAPI dependency: return the module-level singleton graph."""
+def get_chat_graph(request: Request) -> CompiledStateGraph[Any, Any, Any, Any]:
+    """FastAPI dependency: return the module-level singleton graph.
+
+    The PG checkpointer is read from app.state (set during lifespan) on first
+    call, then the compiled graph is cached for the lifetime of the process.
+    """
     global _graph_singleton
     if _graph_singleton is None:
-        _graph_singleton = _build_graph_singleton()
+        checkpointer = getattr(request.app.state, "chat_checkpointer", None)
+        _graph_singleton = _build_graph_singleton(checkpointer=checkpointer)
     return _graph_singleton
 
 
@@ -254,6 +285,7 @@ async def _stream_chat(
         enable_web_search=req.enable_web_search,
         enable_kb_search=req.enable_kb_search,
         request_id=request_id,
+        trace_request_id=request_id,  # v0.9 observability; same as request_id at entry
     )
     config: RunnableConfig = {"configurable": {"thread_id": f"{user.id}:{req.session_id}"}}
 
