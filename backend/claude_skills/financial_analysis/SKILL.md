@@ -467,3 +467,7 @@ All tools return standardized response:
 **Skill Version**: v1.0  
 **Last Updated**: 2026-03-20  
 **Compatible with**: AgentFlow v1.0, MCP Protocol
+
+## Available scripts
+
+- `scripts/calculate_dcf.py` — 计算自由现金流贴现 (DCF) 估值, 输入 FCF 列表 + WACC + 永续增长率 + 总股本 + 净负债, 输出企业价值/股权价值/每股价值。
