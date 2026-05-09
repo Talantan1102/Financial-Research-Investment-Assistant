@@ -36,6 +36,15 @@ const INITIAL: EscalationState = {
 
 export const escalationState = proxy<EscalationState>({ ...INITIAL })
 
+export function recordUserEdit(edit: FieldEdit): void {
+  const i = escalationState.user_edits.findIndex((e) => e.field_path === edit.field_path)
+  if (i >= 0) {
+    escalationState.user_edits.splice(i, 1, edit)
+  } else {
+    escalationState.user_edits.push(edit)
+  }
+}
+
 export const escalationActions = {
   setPacketDraft(packet: EscalationPacket) {
     escalationState.packet_draft = packet
