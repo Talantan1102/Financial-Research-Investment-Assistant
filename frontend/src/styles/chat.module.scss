@@ -99,3 +99,41 @@
   cursor: pointer;
   font-size: 12px;
 }
+
+.reportCard {
+  border: 1px solid #1677ff;
+  border-radius: 8px;
+  background: #f0f7ff;
+  padding: 12px 14px;
+  margin: 10px 0;
+}
+
+.reportCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.reportCardId {
+  color: rgba(0, 0, 0, 0.45);
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.reportCardSummary {
+  margin: 8px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.reportCardBody {
+  padding: 8px 0;
+  border-top: 1px dashed rgba(22, 119, 255, 0.4);
+}
+
+.reportCardActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
