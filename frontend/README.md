@@ -119,3 +119,33 @@ Run tests:
 ```
 npm test
 ```
+
+## v0.9 chat-first dashboard (Plan 4b ship)
+
+ChatPane internals:
+- `<MessageList>` — react-window virtualized list, routes by `message_type`
+- `<TextMessage>` — marked + highlight.js + KaTeX + ECharts (chart_specs)
+- `<ToolCallCard>` — Cursor-style tri-state (collapsed / expanded / error+retry)
+- `<ResearchReportCard>` — summary + 展开 / 跳转 Reports / 继续提问
+- `<StreamingIndicator>` — phase bar (思考 / 调工具 / 写回答 / research_*)
+- `<InputArea>` — auto-resize + Enter/Shift+Enter + Cmd+K abort + ⚡ Escalate
+- `<CostMeter>` — cross-mode breakdown (chat $ + research $)
+
+EscalationConfirmDialog:
+- 4 sub-forms (ExplicitTask / ChatDerivedSignals / KnownFacts / SessionMetadata)
+- InlineEditField — pencil → input → save → FieldEdit traced into escalationStore.user_edits
+- MissingFieldBanner — ⚠️ + LLM 反问 per field
+- Confirm → POST `/api/v0/chat/escalate` (Plan 3 endpoint)
+
+Reports page: full impl at `/reports` (list + filter + detail modal + chat deep link).
+
+F1-F10 industry polish:
+- F1 token render perf (virtualized + useDeferredValue + memo)
+- F2 tool tri-state
+- F3 scroll auto-stick
+- F4 input UX (4 channels)
+- F5 EscalationConfirmDialog inline edit
+- F7 markdown + KaTeX + chart_specs
+- F9 cost meter cross-mode
+- F10 long prompt + paste 占位 (real upload deferred to C.4)
+- F6 + F8 from Plan 4a (SSE reconnect + multi-chat lifecycle)

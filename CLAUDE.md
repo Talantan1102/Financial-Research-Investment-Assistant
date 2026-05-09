@@ -38,6 +38,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [v1.0 持仓监控引擎 + 5 类公告 ship 完](docs/claude-context/v1.0-monitoring-engine-done.md) — Celery + Redis + PG 统一 / 5 决策落地
 - [Celery + Redis 测试 fixture pattern](docs/claude-context/celery-redis-test-fixture-pattern.md) — L0/L1 eager + L2 worker subprocess
 - [v0.9 chat frontend foundation landed](docs/claude-context/v0.9-chat-frontend-foundation.md) — Plan 4a ship,AppShell + 240px Sidebar + 3 valtio stores + useChatSSE(F6/F8);Plan 4b 填 ChatPane / EscalationConfirmDialog
+- [v0.9 chat plan 4b frontend chatpane ship](docs/claude-context/v0.9-chat-plan4b-architecture.md) — ChatPane + EscalationConfirmDialog + Reports + F1-F10 polish landed (e2e deferred)
 
 ## 设计稿与实施计划
 

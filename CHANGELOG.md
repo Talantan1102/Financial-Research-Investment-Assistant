@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.0-plan4b] — 2026-05-10
+
+### Added — ChatPane + EscalationConfirmDialog + Reports + F1-F10 polish
+
+- ChatPane sub-components: MessageList (react-window virtualized) / TextMessage (marked + hljs + KaTeX + chart_specs) / ToolCallCard (tri-state collapsed/expanded/error) / ResearchReportCard (summary + 3 actions) / StreamingIndicator (phase bar) / InputArea (4-channel UX) / CostMeter (cross-mode breakdown)
+- EscalationConfirmDialog: 4 sub-forms (ExplicitTask / ChatDerivedSignals / KnownFacts / SessionMetadata) + InlineEditField + MissingFieldBanner + POST /chat/escalate Confirm flow
+- ReportsListPage full impl: list + detail modal + chat deep link (E13/E14)
+
+### F1-F10 industry polish landed
+- F1 token render perf (virtualized + useDeferredValue + React.memo)
+- F2 tool 卡片 tri-state with auto-expand on error + 重试 button
+- F3 scroll auto-stick via IntersectionObserver
+- F4 input UX (auto-resize + Enter/Shift+Enter + Cmd+K abort + ⚡ Escalate)
+- F5 EscalationConfirmDialog inline structured edit + LLM 反问
+- F7 markdown + KaTeX + chart_specs (3 channels)
+- F9 cost meter cross-mode + StreamingIndicator phase
+- F10 long prompt counter + paste image guard (upload deferred to C.4)
+- F6 + F8 from Plan 4a (SSE reconnect + multi-chat lifecycle)
+
+### Deps added
+- react-window ^1.8.10 / highlight.js ^11 / katex ^0.16 / react-katex ^3 / @types/react-window
+- echarts-for-react ^3 + echarts ^5 (already present)
+- msw ^2.7 (Plan 4a baseline)
+
+### Deferred to manual verification
+- Playwright e2e (chat-basic + chat-escalate) — autonomous pipeline skip; can be added in a follow-up commit when browsers are installed locally
+
 ## [v0.9.0-plan3] — 2026-05-10
 
 ### Added — Escalation Channel (chat → research handoff)
