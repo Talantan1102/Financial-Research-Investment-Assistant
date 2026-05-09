@@ -83,3 +83,40 @@ def test_skill_execution_error_kind_enum():
     assert err.kind in valid_kinds
     with pytest.raises(ValidationError):
         SkillExecutionError(kind="not_a_real_kind", message="x")
+
+
+def test_skill_execution_result_invariant_ok_implies_zero_exit_and_json():
+    with pytest.raises(ValidationError):
+        SkillExecutionResult(
+            ok=True,
+            stdout_json=None,
+            stderr_text="",
+            exit_code=0,
+            elapsed_s=1.0,
+            skill_name="x",
+            script_path="scripts/y.py",
+        )
+    with pytest.raises(ValidationError):
+        SkillExecutionResult(
+            ok=True,
+            stdout_json={"a": 1},
+            stderr_text="",
+            exit_code=2,
+            elapsed_s=1.0,
+            skill_name="x",
+            script_path="scripts/y.py",
+        )
+
+
+def test_skill_execution_result_invariant_failure_must_have_error():
+    with pytest.raises(ValidationError):
+        SkillExecutionResult(
+            ok=False,
+            stdout_json=None,
+            stderr_text="",
+            exit_code=1,
+            elapsed_s=1.0,
+            skill_name="x",
+            script_path="scripts/y.py",
+            error=None,
+        )

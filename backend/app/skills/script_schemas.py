@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 ErrorKind = Literal[
     "timeout",
@@ -64,3 +64,17 @@ class SkillExecutionResult(BaseModel):
     skill_name: str
     script_path: str
     error: SkillExecutionError | None = None
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> SkillExecutionResult:
+        if self.ok:
+            if self.exit_code != 0:
+                raise ValueError("ok=True requires exit_code==0")
+            if self.stdout_json is None:
+                raise ValueError("ok=True requires stdout_json to be a dict")
+            if self.error is not None:
+                raise ValueError("ok=True must not carry error")
+        else:
+            if self.error is None:
+                raise ValueError("ok=False must carry error")
+        return self
