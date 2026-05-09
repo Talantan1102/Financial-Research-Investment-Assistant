@@ -80,6 +80,10 @@ class StreamEvent(BaseModel):
         "cost_update",
         "done",
         "error",
+        # Plan 2b NEW — L3b script execution
+        "skill_execute_start",
+        "skill_execute_end",
+        "skill_execute_error",
     ]
     seq: int  # monotonic; starts at 1, increments per emit per stream
     data: dict[str, Any]
