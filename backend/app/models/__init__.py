@@ -4,6 +4,7 @@ New features should prefer importing from `app/services/*` (plural, v0.8.x main 
 """
 
 from .chat import ChatAttachment, ChatMessage, ChatSession, LongTermMemory
+from .escalation_record import EscalationRecord  # noqa: F401
 from .industry_data import CompanyData, IndustryStats, PolicyData
 from .knowledge import Document, KnowledgeBase
 from .monitoring import (
@@ -45,4 +46,5 @@ __all__ = [
     "MonitoringRun",
     "MonitoringSignal",
     "Notification",
+    "EscalationRecord",
 ]
