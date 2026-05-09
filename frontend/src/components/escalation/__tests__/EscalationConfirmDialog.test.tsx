@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, beforeEach } from 'vitest'
 import { EscalationConfirmDialog } from '@/components/escalation/EscalationConfirmDialog'
 import { escalationActions, escalationState } from '@/store/escalation'
@@ -74,5 +75,66 @@ describe('<EscalationConfirmDialog>', () => {
     escalationState.dialog_open = false
     render(<EscalationConfirmDialog />)
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+describe('<EscalationConfirmDialog> ChatDerivedSignals + SessionMetadata', () => {
+  beforeEach(() => {
+    escalationActions.reset()
+    escalationState.dialog_open = true
+    escalationState.session_id = 'c1'
+    escalationState.phase = 'draft'
+  })
+
+  it('renders entities[] with name + ts_code + role tags', async () => {
+    escalationState.packet_draft = {
+      ...makeDraft(),
+      chat_derived_signals: {
+        entities: [
+          {
+            name: '工商银行',
+            ts_code: '601398.SH',
+            role: 'primary_target',
+            mention_turn_indices: [1, 3],
+          },
+          {
+            name: '招商银行',
+            ts_code: '600036.SH',
+            role: 'comparative_target',
+            mention_turn_indices: [5],
+          },
+        ],
+        preferences: [
+          { text: '关注分红', category: 'focus_metric', confidence: 0.7 },
+        ],
+        open_questions: ['ROE 趋势如何'],
+        inferred_persona: '稳健银行投资者',
+        extraction_confidence: 0.82,
+      },
+    }
+    const user = userEvent.setup()
+    render(<EscalationConfirmDialog />)
+    await user.click(screen.getByText(/对话信号/))
+    expect(screen.getByText(/工商银行/)).toBeInTheDocument()
+    expect(screen.getByText(/comparative_target/)).toBeInTheDocument()
+    expect(screen.getByText(/关注分红/)).toBeInTheDocument()
+    expect(screen.getByText(/ROE 趋势如何/)).toBeInTheDocument()
+  })
+
+  it('SessionMetadata form shows turn_count + history_summary read-only', async () => {
+    escalationState.packet_draft = {
+      ...makeDraft(),
+      session_metadata: {
+        chat_session_id: 'c1',
+        chat_turn_count: 7,
+        chat_history_summary: '4 轮关于工商银行 + 2 轮招商银行',
+        user_confirmed_at: '',
+        user_edits: [],
+      },
+    }
+    const user = userEvent.setup()
+    render(<EscalationConfirmDialog />)
+    await user.click(screen.getByText(/Session/))
+    expect(screen.getByText(/4 轮关于工商银行/)).toBeInTheDocument()
   })
 })

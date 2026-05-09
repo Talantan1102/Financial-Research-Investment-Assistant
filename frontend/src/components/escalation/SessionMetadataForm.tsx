@@ -1,3 +1,4 @@
+import { Form, Input, InputNumber } from 'antd'
 import type { SessionMetadata } from '@/types/escalation'
 
 export interface SessionMetadataFormProps {
@@ -6,9 +7,20 @@ export interface SessionMetadataFormProps {
 
 export function SessionMetadataForm({ value }: SessionMetadataFormProps) {
   return (
-    <div data-testid="session-metadata-form">
-      <p>chat_session_id: {value.chat_session_id}</p>
-      <p>chat_turn_count: {value.chat_turn_count}</p>
-    </div>
+    <Form layout="vertical">
+      <Form.Item label="chat_session_id">
+        <Input value={value.chat_session_id} readOnly />
+      </Form.Item>
+      <Form.Item label="对话轮次">
+        <InputNumber value={value.chat_turn_count} readOnly />
+      </Form.Item>
+      <Form.Item label="对话历史摘要">
+        <Input.TextArea
+          value={value.chat_history_summary ?? ''}
+          readOnly
+          autoSize={{ minRows: 2, maxRows: 6 }}
+        />
+      </Form.Item>
+    </Form>
   )
 }
