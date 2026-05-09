@@ -73,4 +73,28 @@ export function buildEscalateUrl(): string {
   return apiUrl('/api/v0/chat/escalate')
 }
 
+import type { EscalationPacket } from '@/types/escalation'
+
+export interface ConfirmEscalationArgs {
+  session_id: string
+  packet: EscalationPacket
+}
+
+export interface ConfirmEscalationResult {
+  ok: true
+  record_id?: string
+}
+
+export async function confirmEscalation(
+  args: ConfirmEscalationArgs,
+): Promise<ConfirmEscalationResult> {
+  const res = await fetch(buildEscalateUrl(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(args),
+  })
+  if (!res.ok) throw new Error(`escalate failed: ${res.status}`)
+  return { ok: true }
+}
+
 export type { CreateChatRequest, SendChatMessageRequest }

@@ -1,6 +1,6 @@
 import { Button, Modal, Spin, Tabs } from 'antd'
 import { useSnapshot } from 'valtio'
-import { escalationState } from '@/store/escalation'
+import { escalationState, submitEscalation } from '@/store/escalation'
 import { ChatDerivedSignalsForm } from './ChatDerivedSignalsForm'
 import { ExplicitTaskForm } from './ExplicitTaskForm'
 import { KnownFactsForm } from './KnownFactsForm'
@@ -71,11 +71,12 @@ export function EscalationConfirmDialog() {
             <Button
               type="primary"
               data-testid="escalation-confirm-btn"
+              loading={snap.submitting}
               onClick={() => {
-                /* wired in Task 22 */
+                void submitEscalation()
               }}
             >
-              确认并启动深度研究
+              {snap.submitting ? '提交中...' : '确认并启动深度研究'}
             </Button>
           </div>
         </>

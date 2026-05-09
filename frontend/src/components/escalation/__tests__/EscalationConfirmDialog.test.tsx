@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { EscalationConfirmDialog } from '@/components/escalation/EscalationConfirmDialog'
 import { escalationActions, escalationState } from '@/store/escalation'
 import type { EscalationPacket } from '@/types/escalation'
@@ -75,6 +75,56 @@ describe('<EscalationConfirmDialog>', () => {
     escalationState.dialog_open = false
     render(<EscalationConfirmDialog />)
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+})
+
+import { waitFor } from '@testing-library/react'
+import { setConfirmEscalationFn } from '@/store/escalation'
+import type { ConfirmEscalationArgs, ConfirmEscalationResult } from '@/api/chatApi'
+
+describe('<EscalationConfirmDialog> Confirm flow', () => {
+  beforeEach(() => {
+    escalationActions.reset()
+    escalationState.dialog_open = true
+    escalationState.session_id = 'c1'
+    escalationState.packet_draft = makeDraft()
+    escalationState.phase = 'draft'
+  })
+
+  it('Confirm button calls chatApi.confirmEscalation with packet + user_edits', async () => {
+    const spy = vi.fn<[ConfirmEscalationArgs], Promise<ConfirmEscalationResult>>().mockResolvedValue({ ok: true })
+    setConfirmEscalationFn(spy)
+    escalationState.user_edits = [
+      {
+        field_path: 'explicit_task.extracted_intent',
+        llm_value: '投资尽调',
+        user_value: '尽调 + 风险评估',
+        edit_type: 'modify',
+      },
+    ]
+    const user = userEvent.setup()
+    render(<EscalationConfirmDialog />)
+    await user.click(screen.getByTestId('escalation-confirm-btn'))
+    await waitFor(() => expect(spy).toHaveBeenCalled())
+    const arg = spy.mock.calls[0][0]
+    expect(arg.session_id).toBe('c1')
+    expect(arg.packet.session_metadata.user_edits.length).toBe(1)
+  })
+
+  it('shows 提交中 while in flight', async () => {
+    let resolve: ((v: ConfirmEscalationResult) => void) | null = null
+    const spy = vi.fn<[ConfirmEscalationArgs], Promise<ConfirmEscalationResult>>().mockImplementation(
+      () =>
+        new Promise<ConfirmEscalationResult>((r) => {
+          resolve = r
+        }),
+    )
+    setConfirmEscalationFn(spy)
+    const user = userEvent.setup()
+    render(<EscalationConfirmDialog />)
+    await user.click(screen.getByTestId('escalation-confirm-btn'))
+    await waitFor(() => expect(screen.getByText(/提交中/)).toBeInTheDocument())
+    resolve?.({ ok: true })
   })
 })
 

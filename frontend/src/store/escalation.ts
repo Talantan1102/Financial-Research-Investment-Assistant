@@ -11,6 +11,7 @@ import type {
   FieldEdit,
   ResearchProgress,
 } from '@/types/escalation'
+import type { ConfirmEscalationArgs, ConfirmEscalationResult } from '@/api/chatApi'
 
 export type EscalationPhase = 'idle' | 'draft' | 'confirmed' | 'researching' | 'done' | 'error'
 
@@ -22,6 +23,7 @@ export interface EscalationState {
   error: string | null
   dialog_open: boolean
   session_id: string | null
+  submitting: boolean
 }
 
 const INITIAL: EscalationState = {
@@ -32,9 +34,24 @@ const INITIAL: EscalationState = {
   error: null,
   dialog_open: false,
   session_id: null,
+  submitting: false,
 }
 
 export const escalationState = proxy<EscalationState>({ ...INITIAL })
+
+// Dependency injection slot — replaced in tests via setConfirmEscalationFn()
+let _confirmEscalation: (
+  args: ConfirmEscalationArgs,
+) => Promise<ConfirmEscalationResult> = async (args) => {
+  const { confirmEscalation } = await import('@/api/chatApi')
+  return confirmEscalation(args)
+}
+
+export function setConfirmEscalationFn(
+  fn: (args: ConfirmEscalationArgs) => Promise<ConfirmEscalationResult>,
+): void {
+  _confirmEscalation = fn
+}
 
 export function recordUserEdit(edit: FieldEdit): void {
   const i = escalationState.user_edits.findIndex((e) => e.field_path === edit.field_path)
@@ -90,5 +107,41 @@ export const escalationActions = {
     escalationState.error = null
     escalationState.dialog_open = false
     escalationState.session_id = null
+    escalationState.submitting = false
   },
+}
+
+function applyUserEdits(
+  draft: EscalationPacket,
+  edits: readonly FieldEdit[],
+): EscalationPacket {
+  // Use JSON round-trip to deep-clone: structuredClone cannot handle valtio proxies
+  const merged = JSON.parse(JSON.stringify(draft)) as EscalationPacket
+  merged.session_metadata = {
+    ...merged.session_metadata,
+    user_edits: [...edits],
+    user_confirmed_at: new Date().toISOString(),
+  }
+  return merged
+}
+
+export async function submitEscalation(): Promise<void> {
+  if (!escalationState.packet_draft || !escalationState.session_id) return
+  escalationState.submitting = true
+  escalationState.error = null
+  try {
+    const confirmed = applyUserEdits(
+      escalationState.packet_draft as EscalationPacket,
+      escalationState.user_edits,
+    )
+    await _confirmEscalation({
+      session_id: escalationState.session_id,
+      packet: confirmed,
+    })
+    escalationState.dialog_open = false
+  } catch (e) {
+    escalationState.error = e instanceof Error ? e.message : String(e)
+  } finally {
+    escalationState.submitting = false
+  }
 }
