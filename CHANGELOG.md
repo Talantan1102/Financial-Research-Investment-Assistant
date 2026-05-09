@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.0-plan3] — 2026-05-10
+
+### Added — Escalation Channel (chat → research handoff)
+- POST `/api/v0/chat/escalate` SSE endpoint streams `research_*` events + `escalate_done`
+- LLM-fill `EscalationPacket` (4-class signal schema: ExplicitTask / ChatDerivedSignals / KnownFacts / SessionMetadata + MissingFieldHint)
+- `EscalationExtractor` agent — chat history → packet draft via prompt
+- `escalation_records` PG table (packet_draft / packet_confirmed / user_edits jsonb) — prompt-tuning trace
+- `research_reports.source_chat_session_id` FK + double-write to `ChatMessage(message_type=research_report)` for bidirectional link
+- `ResearchPlanner` / `Analyst` / `Writer` prompts honor chat-derived signals (entities, preferences, known tools)
+- New SSE event types: `escalate_request`, `escalate_packet_draft`, `research_planner_done`, `research_analyst_done`, `research_writer_done`, `research_critic_done`, `research_tool_start`, `research_tool_end`, `escalate_done`, `escalate_error`
+
+### Industrial problems hit (from spec § 6)
+- E1 packet schema (full 4-class + sub-class definitions)
+- E2 progress visibility (research_* SSE during minute-long research)
+- E4 failure rollback (research crash + double-write failure both → status=failed)
+- E9 LLM extraction quality (prompt + golden tests)
+- E10 missing-field detect (`MissingFieldHint`)
+- E11 dialog inline edit (wire format only — UI in Plan 4)
+- E12 packet diff trace (`user_edits` jsonb captures LLM→user diffs)
+- E13 bidirectional link (FK + ChatMessage row)
+- E14 reports table compatibility (additive `source_chat_session_id` column with ON DELETE SET NULL)
+
 ## [v0.9.0-plan1] — 2026-05-09
 
 ### Added

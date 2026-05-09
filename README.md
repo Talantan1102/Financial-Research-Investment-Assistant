@@ -69,6 +69,7 @@ LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构�
 | v0.8.4 | B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey | #16 |
 | **v0.8.5** | **Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字** | #19 |
 | **v0.9 (Plan 1)** | **Chat backend foundation: LangGraph supervisor topology + MCP single-mode tool layer + PG-persisted chat state + 5 chat REST endpoints + 6 MCP tools + in-session memory Protocol DI** | feat/v0.9-chat-c1c2 |
+| **v0.9 (Plan 3)** | **Escalation channel (chat→research handoff): EscalationPacket 4-class schema + EscalationExtractor + escalate SSE endpoint + escalation_records PG table + research prompt upgrades + bidirectional report link** | feat/v0.9-chat-c1c2 |
 
 ### v0.9 Chat Mode (backend foundation, Plan 1 of 5)
 
@@ -76,6 +77,7 @@ Production-style chat agent with LangGraph supervisor topology + MCP single-mode
 
 - **Endpoints:**
   - `POST /api/v0/chat` — SSE streaming chat (19 event types: token / plan / tool_start / tool_end / cost_update / done / error / + Plan 2-3 extensions)
+  - `POST /api/v0/chat/escalate` — SSE chat→research handoff (Plan 3); streams `escalate_request` → `escalate_packet_draft` → `research_*` events → `escalate_done`
   - `POST /api/v0/chats` — create new chat session
   - `GET /api/v0/chats/` — list user's chat sessions
   - `GET /api/v0/chats/{session_id}` — get session + messages
@@ -96,6 +98,19 @@ Production-style chat agent with LangGraph supervisor topology + MCP single-mode
 - **In-session memory (Q4 E):** tool-result dedup + token-guard summarization via `Memory` Protocol DI (extensible to D MemGPT in C.5)
 
 - **Env vars:** Existing `DATABASE_URL` + `DASHSCOPE_API_KEY` + `DASHSCOPE_BASE_URL` — no new vars
+
+### Escalation Channel — Plan 3 (chat → research handoff)
+
+User-explicit-confirm pattern: LLM extracts signals from chat history → user reviews/edits → research pipeline runs with chat-derived context.
+
+- **Endpoint:** `POST /api/v0/chat/escalate` — SSE, accepts `{session_id, confirmed_packet?}`
+- **SSE event flow:** `escalate_request` → `escalate_packet_draft` (LLM-extracted `EscalationPacket`) → `research_planner_done` / `research_analyst_done` / `research_writer_done` / `research_critic_done` / `research_tool_start` / `research_tool_end` → `escalate_done` (or `escalate_error`)
+- **EscalationPacket schema** (`backend/app/agents/escalation_protocol.py`): 4-class structure — `ExplicitTask` / `ChatDerivedSignals` (entities + preferences + known_tool_results) / `KnownFacts` / `SessionMetadata` + `MissingFieldHint` list
+- **PG table `escalation_records`:** `packet_draft` / `packet_confirmed` / `user_edits` jsonb columns — captures LLM→user diffs for prompt-tuning trace
+- **Bidirectional link:** `research_reports.source_chat_session_id` FK (ON DELETE SET NULL) + `ChatMessage(message_type="research_report")` double-write — report appears in chat history
+- **Research prompts upgraded:** `ResearchPlanner` / `Analyst` / `Writer` honor chat-derived entities / preferences / known tool results
+- **Failure rollback (E4):** research crash OR double-write failure → `escalate_error` SSE + `escalation_records.status=failed`
+- **Plan 4 (TODO):** `<EscalationConfirmDialog>` frontend UI consuming `escalate_packet_draft` event
 
 - **Plan 1 carryover (TODO before Plan 2 ship):**
   - MCP tool wiring into planner runtime ToolRegistry (currently legacy in-process tools wired)
