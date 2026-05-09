@@ -77,6 +77,25 @@ class SkillLoader:
             return text
         return m.group(2)
 
+    # --- L3a helpers -------------------------------------------------------
+
+    @staticmethod
+    def _detect_resource_refs(text: str) -> list[str]:
+        """Return de-duplicated list of `resources/*` refs in markdown text.
+
+        S4: foundation of nested-depth tracking. Resources can themselves
+        contain refs (only md files in practice). Caller walks BFS up to
+        depth 2.
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for m in _RESOURCE_LINK_RE.finditer(text):
+            ref = m.group(1)
+            if ref not in seen:
+                seen.add(ref)
+                out.append(ref)
+        return out
+
     def _parse_frontmatter(self, dir_name: str, skill_md: Path) -> SkillManifest:
         text = skill_md.read_text(encoding="utf-8")
         m = _FRONTMATTER_RE.match(text)
