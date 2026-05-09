@@ -1,14 +1,16 @@
 import { AuthGuard } from '@/components/auth-guard'
-import { BaseLayout } from '@/layout/base'
+import { AppShell } from '@/layout/app-shell'
 import { ThemedRoot } from '@/themes/themed-root'
 import NotFound from '@/pages/404'
 import LoginPage from '@/pages/auth/login'
 import RegisterPage from '@/pages/auth/register'
-import Index from '@/pages/index'
+import ChatLandingPage from '@/pages/chat/landing'
+import ChatSessionPage from '@/pages/chat/session'
 import KnowledgePage from '@/pages/knowledge'
 import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
+import ReportsListPage from '@/pages/reports'
 import ResearchDetailPage from '@/pages/research/Detail'
 import ResearchListPage from '@/pages/research/List'
 import ResearchNew from '@/pages/research/new'
@@ -28,43 +30,19 @@ export type IRouteObject = {
 } & Omit<RouteObject, 'children'>
 
 export const routes: IRouteObject[] = [
-  {
-    path: '/',
-    Component: Index,
-  },
-  {
-    path: '/knowledge',
-    Component: KnowledgePage,
-  },
-  {
-    path: '/monitoring',
-    Component: MonitoringIndex,
-  },
-  {
-    path: '/monitoring/:cid/alert/:aid',
-    Component: AlertDetail,
-  },
-  {
-    path: '/monitoring/config',
-    Component: MonitoringConfig,
-  },
-  {
-    path: '/research',
-    Component: ResearchListPage,
-  },
-  {
-    path: '/research/new',
-    Component: ResearchNew,
-  },
-  {
-    path: '/research/:id',
-    Component: ResearchDetailPage,
-  },
-  {
-    path: '/404',
-    Component: NotFound,
-    pure: true,
-  },
+  { path: '/', element: <Navigate to="/chat" replace /> },
+  { path: '/chat', Component: ChatLandingPage },
+  { path: '/chat/:session_id', Component: ChatSessionPage },
+  { path: '/reports', Component: ReportsListPage },
+  { path: '/research', Component: ResearchListPage },
+  { path: '/research/new', Component: ResearchNew },
+  { path: '/research/:id', Component: ResearchDetailPage },
+  { path: '/portfolio', element: <div data-testid="portfolio-stub">Portfolio (todo)</div> },
+  { path: '/knowledge', Component: KnowledgePage },
+  { path: '/monitoring', Component: MonitoringIndex },
+  { path: '/monitoring/:cid/alert/:aid', Component: AlertDetail },
+  { path: '/monitoring/config', Component: MonitoringConfig },
+  { path: '/404', Component: NotFound, pure: true },
 ]
 
 export const router = createBrowserRouter(
@@ -73,33 +51,22 @@ export const router = createBrowserRouter(
       path: '/',
       Component: ThemedRoot,
       children: [
-        {
-          path: '/login',
-          element: <LoginPage />,
-        },
-        {
-          path: '/register',
-          element: <RegisterPage />,
-        },
+        { path: '/login', element: <LoginPage /> },
+        { path: '/register', element: <RegisterPage /> },
         {
           path: '/',
           element: (
             <AuthGuard>
-              <BaseLayout>
+              <AppShell>
                 <Outlet />
-              </BaseLayout>
+              </AppShell>
             </AuthGuard>
           ),
           children: routes,
         },
-        {
-          path: '*',
-          element: <Navigate to="/404" />,
-        },
+        { path: '*', element: <Navigate to="/404" /> },
       ],
     },
   ] as RouteObject[],
-  {
-    basename: import.meta.env.BASE_URL,
-  },
+  { basename: import.meta.env.BASE_URL },
 )
