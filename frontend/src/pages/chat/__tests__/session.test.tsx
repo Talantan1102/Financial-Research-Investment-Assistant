@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { Route, Routes } from 'react-router-dom'
 import { renderWithProviders } from '@/test-utils/render'
@@ -6,12 +6,16 @@ import { server } from '@/test-utils/msw-server'
 import ChatSessionPage from '@/pages/chat/session'
 import { currentChatActions } from '@/store/current-chat'
 
+vi.mock('@/hooks/useChatSSE', () => ({
+  useChatSSE: () => ({ sendMessage: vi.fn(async () => {}), abort: vi.fn(), status: () => 'idle' }),
+}))
+
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 
 describe('<ChatSessionPage>', () => {
   beforeEach(() => currentChatActions.reset())
 
-  it('loads chat detail by route param and exposes ChatPane slot', async () => {
+  it('loads chat detail by route param and renders ChatPane', async () => {
     server.use(
       http.get(`${API_BASE}/api/v0/chats/abc`, () =>
         HttpResponse.json({
@@ -31,6 +35,6 @@ describe('<ChatSessionPage>', () => {
       </Routes>,
       { initialRoute: '/chat/abc' },
     )
-    expect(await findByTestId('chat-pane-slot')).toBeInTheDocument()
+    expect(await findByTestId('cost-meter')).toBeInTheDocument()
   })
 })
