@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { useSnapshot } from 'valtio'
 import { useParams } from 'react-router-dom'
 import { CostMeter } from './CostMeter'
@@ -18,6 +19,12 @@ export function ChatPane({ sessionId: sessionIdProp }: ChatPaneProps = {}) {
   const snap = useSnapshot(currentChatState)
   const messages = useDeferredMessages(snap.messages ?? [])
   const empty = messages.length === 0
+
+  const onContinueAsk = useCallback((_id: string) => {
+    const ta = document.querySelector<HTMLTextAreaElement>('[data-testid="input-textarea"]')
+    ta?.focus()
+  }, [])
+
   return (
     <div className={styles.chatPane}>
       <CostMeter />
@@ -25,7 +32,7 @@ export function ChatPane({ sessionId: sessionIdProp }: ChatPaneProps = {}) {
         {empty ? (
           <div className={styles.emptyState}>开始一个新对话 — 试试问 "工商银行现价多少?"</div>
         ) : (
-          <MessageList messages={[...messages]} />
+          <MessageList messages={[...messages]} onContinueAsk={onContinueAsk} />
         )}
         <StreamingIndicator />
       </section>

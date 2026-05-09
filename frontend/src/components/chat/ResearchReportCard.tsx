@@ -7,9 +7,10 @@ import styles from '@/styles/chat.module.scss'
 
 export interface ResearchReportCardProps {
   message: ChatMessage
+  onContinueAsk?: (messageId: string) => void
 }
 
-export function ResearchReportCard({ message }: ResearchReportCardProps) {
+export function ResearchReportCard({ message, onContinueAsk }: ResearchReportCardProps) {
   const [expanded, setExpanded] = useState(false)
   const navigate = useNavigate()
   const reportId = message.research_report_id
@@ -38,7 +39,7 @@ export function ResearchReportCard({ message }: ResearchReportCardProps) {
         >
           跳转 Reports
         </Button>
-        <Button size="small">继续提问</Button>
+        <Button size="small" aria-label="继续提问" onClick={() => onContinueAsk?.(message.id)}>继续提问</Button>
       </div>
     </div>
   )

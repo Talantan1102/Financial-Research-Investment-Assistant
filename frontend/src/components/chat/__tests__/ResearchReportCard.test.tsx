@@ -47,3 +47,17 @@ describe('<ResearchReportCard>', () => {
     expect(navigate).toHaveBeenCalledWith('/reports/rep-42')
   })
 })
+
+describe('<ResearchReportCard> 继续提问 action', () => {
+  it('invokes onContinueAsk(message.id) on 继续提问 click', async () => {
+    const user = userEvent.setup()
+    const onContinueAsk = vi.fn()
+    render(
+      <MemoryRouter>
+        <ResearchReportCard message={makeReportMsg()} onContinueAsk={onContinueAsk} />
+      </MemoryRouter>,
+    )
+    await user.click(screen.getByRole('button', { name: /继续提问/ }))
+    expect(onContinueAsk).toHaveBeenCalledWith('r1')
+  })
+})
