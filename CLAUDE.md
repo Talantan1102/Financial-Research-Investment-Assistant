@@ -39,6 +39,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [Celery + Redis 测试 fixture pattern](docs/claude-context/celery-redis-test-fixture-pattern.md) — L0/L1 eager + L2 worker subprocess
 - [v0.9 chat frontend foundation landed](docs/claude-context/v0.9-chat-frontend-foundation.md) — Plan 4a ship,AppShell + 240px Sidebar + 3 valtio stores + useChatSSE(F6/F8);Plan 4b 填 ChatPane / EscalationConfirmDialog
 - [v0.9 chat plan 4b frontend chatpane ship](docs/claude-context/v0.9-chat-plan4b-architecture.md) — ChatPane + EscalationConfirmDialog + Reports + F1-F10 polish landed (e2e deferred)
+- [v0.9 chat C.1+C.2 ship](docs/claude-context/v0.9-chat-c1c2-architecture.md) — production-style chat: LangGraph supervisor + MCP + Skill L1/L2/L3 + Escalation + chat-first frontend / 30 工业难题 P0+P1 全撞 / cassette+dogfood manual follow-up
 
 ## 设计稿与实施计划
 

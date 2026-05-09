@@ -2,6 +2,60 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.9.0] — 2026-05-10
+
+### Added — v0.9 chat mode (C.1 + C.2 production-style)
+
+**Backend:**
+- ChatAgent v0.9 — LangGraph supervisor (context_node → planner → tool/responder)
+- 6 MCP tool wrappers via stdio: get_stock_quote / get_financials / get_news / web_search / kb_search / compare_stocks
+- ToolResultCache (per-tool TTL + user_id namespace)
+- AsyncPostgresSaver — LangGraph state 全切 PG schema=langgraph_checkpoints
+- ChatSessionRepo + multi-chat REST CRUD (`/api/v0/chats`, `/api/v0/chat`, SSE)
+- Skill L1/L2/L3 progressive disclosure loader + sandboxed L3b script executor (subprocess + RLIMIT + AST safety scan + cwd isolation)
+- 2 demo skills: risk_assessment (resources/) + financial_analysis (scripts/calculate_dcf.py)
+- EscalationProtocol — 4-class signal packet (ExplicitTask / ChatDerivedSignals / KnownFacts / SessionMetadata) + MissingFieldHint
+- POST /api/v0/chat/escalate SSE endpoint with research_* progress streaming
+- ResearchState +4 chat-derived fields (chat_extracted_entities / chat_extracted_preferences / chat_known_tool_results / chat_session_id)
+- ResearchPlanner / Analyst / Writer prompts honor chat-derived signals
+- escalation_records PG table (packet_draft / packet_confirmed / user_edits jsonb) for prompt-tuning trace
+- research_reports.source_chat_session_id FK + double-write to ChatMessage(message_type=research_report)
+
+**Frontend (Plan 4a + 4b):**
+- AppShell layout (TopBar 56px + Sidebar 240px + Main)
+- Chat-first routes: `/` → /chat, /chat, /chat/:session_id, /reports
+- 3 valtio stores (chatSessionsStore / currentChatStore / escalationStore)
+- useChatSSE hook with last_event_id reconnect (1s/2s/4s/8s/30s cap) + multi-chat abort-on-swap
+- ChatPane sub-components: MessageList (react-window virtualized) / TextMessage (marked + highlight.js + KaTeX + chart_specs) / ToolCallCard (tri-state) / ResearchReportCard / StreamingIndicator / InputArea (Enter/Shift+Enter/Cmd+K abort/⚡ Escalate) / CostMeter
+- EscalationConfirmDialog: 4 sub-forms + InlineEditField + MissingFieldBanner + Confirm POST /chat/escalate
+- ReportsListPage full impl + detail modal + chat deep link
+
+**Eval / Testing:**
+- 5 differential golden chat cases (short / medium / skill / escalation / multi-chat)
+- E9 LLM extraction quality eval pipeline (`extraction_quality_eval.py`) using EscalationRecord.user_edits as ground truth — 5 metrics (field_accuracy / entity_recall / entity_precision / preference_F1 / missing_field_quality)
+- 12 metric-function L0 smoke tests
+
+**Industrial problems hit (30 from spec § 5):**
+- A1-A4 tool selection / parallel / arg fidelity / hallucination
+- B1-B3 token bloat / relevance / staleness
+- C1-C2 multi-turn coordination / failure recovery
+- M1-M4 MCP lifecycle / transport / schema / latency
+- S1-S10 Skill progressive disclosure
+- E1-E14 Escalation channel
+- F1-F10 frontend polish (F10 paste-image deferred to C.4)
+- G1-G10 cross-cutting
+
+### Deferred / not done in autonomous pipeline (manual follow-up)
+
+- 5 L2 cassettes (T2-T6) — autonomous can't safely hit real DashScope LLM
+- Playwright e2e (chat-basic + chat-escalate) — needs browser install + Vite dev server
+- 2 dogfood reports — manual user flows
+- Judge integration over cassettes (T8) — depends on cassettes
+
+### Deps added
+- backend: langgraph-checkpoint-postgres, mcp, anthropic-skills (all in optional extras)
+- frontend: msw / react-window / highlight.js / katex / react-katex / @types/react-window
+
 ## [v0.9.0-plan4b] — 2026-05-10
 
 ### Added — ChatPane + EscalationConfirmDialog + Reports + F1-F10 polish

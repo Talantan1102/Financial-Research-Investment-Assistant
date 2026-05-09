@@ -347,6 +347,35 @@ financial-research-assistant/
 | [docs/project-story.md](docs/project-story.md) | 项目故事(求职 / 面试用) |
 | `.claude/projects/.../memory/` | Claude session 跨会话记忆(协作约定 / 教训沉淀) |
 
+## v0.9 chat mode (C.1 + C.2)
+
+Chat-first dashboard with production-style multi-turn LLM agent + escalation channel to deep research.
+
+**Architecture:**
+- Backend: FastAPI + LangGraph 1.x supervisor (context_node → planner → tool/responder), 6 tools via MCP stdio, AsyncPostgresSaver checkpointer
+- Skill L1/L2/L3 progressive disclosure (description / SKILL.md / resources+scripts)
+- Escalation: chat → user explicit confirm (4-class EscalationPacket) → ResearchAgent
+- Frontend: React 19 + valtio stores + useChatSSE hook + AppShell + ChatPane + EscalationConfirmDialog
+
+**Endpoints:**
+- `POST /api/v0/chat` — chat SSE (NEW v0.9)
+- `POST /api/v0/chat/escalate` — escalate to research SSE (NEW v0.9)
+- `GET /api/v0/chats` — multi-chat list (NEW v0.9)
+
+**Run:**
+```bash
+docker compose up -d postgres redis
+cd backend && uv run uvicorn app.app_main:app --port 8000 &
+cd frontend && npm run dev   # http://localhost:5173/chat
+```
+
+**Tests:**
+- L0 unit / L1 integration: `cd backend && uv run pytest tests/`
+- Frontend vitest: `cd frontend && npm test`
+- Golden differential: `cd backend && uv run pytest tests/eval/`
+
+See `docs/claude-context/v0.9-chat-c1c2-architecture.md` for the long-form architecture card.
+
 ## 许可证
 
 MIT License
