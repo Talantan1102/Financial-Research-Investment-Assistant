@@ -56,9 +56,14 @@ def _build_app(repo, research_agent=None) -> FastAPI:
         from app.services.eval_models import SUTOutput
 
         research_agent = MagicMock()
-        research_agent.run = AsyncMock(
-            return_value=SUTOutput(request_id="r", response_text="(report)", tool_calls=[])
-        )
+
+        async def _fake_streaming(user_input, request_id, **kw):
+            yield {
+                "event": "_final_sut_output",
+                "data": SUTOutput(request_id="r", response_text="(report)", tool_calls=[]),
+            }
+
+        research_agent.run_streaming = _fake_streaming
 
     # Stub chat_session_repo: append_message is a no-op
     stub_chat_repo = MagicMock()

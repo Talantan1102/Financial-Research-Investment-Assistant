@@ -111,6 +111,8 @@ def fake_sut_output():
 
 @pytest.fixture
 def mocked_repos(fake_sut_output):
+    from unittest.mock import MagicMock
+
     rpt_row = SimpleNamespace(id="rpt-abc123def456")
 
     record_repo = AsyncMock()
@@ -124,8 +126,13 @@ def mocked_repos(fake_sut_output):
     rpt_repo = AsyncMock()
     rpt_repo.create_from_sut_output = AsyncMock(return_value=rpt_row)
 
-    research_agent = AsyncMock()
-    research_agent.run = AsyncMock(return_value=fake_sut_output)
+    # run_streaming is an async generator — cannot use AsyncMock directly
+    research_agent = MagicMock()
+
+    async def _fake_streaming(user_input, request_id, **kw):
+        yield {"event": "_final_sut_output", "data": fake_sut_output}
+
+    research_agent.run_streaming = _fake_streaming
 
     return record_repo, research_agent, chat_repo, rpt_repo, rpt_row
 

@@ -111,13 +111,14 @@ async def escalate(
             yield _format_sse("escalate_error", {"error": f"persist failed: {e}"}, seq["n"])
             return
 
-        # 2. Build ResearchState and invoke ResearchAgent (E13)
+        # 2. Build ResearchState and stream ResearchAgent events (E13/E15)
         request_id = f"esc:{uuid4().hex[:16]}"
         state = packet_to_research_state(req.packet_confirmed, request_id=request_id)
 
+        sut_out = None
         try:
             await record_repo.update_status(req.draft_record_id, status="running")
-            sut_out = await research_agent.run(
+            async for evt in research_agent.run_streaming(
                 user_input=state.user_message,
                 request_id=request_id,
                 state_overrides={
@@ -128,9 +129,14 @@ async def escalate(
                     "chat_known_tool_results": state.chat_known_tool_results,
                     "chat_session_id": state.chat_session_id,
                 },
-            )
+            ):
+                if evt["event"] == "_final_sut_output":
+                    sut_out = evt["data"]
+                    continue
+                seq["n"] += 1
+                yield _format_sse(evt["event"], evt["data"], seq["n"])
         except Exception as e:
-            logger.exception("escalate: research_agent.run failed")
+            logger.exception("escalate: research_agent.run_streaming failed")
             await record_repo.update_status(
                 req.draft_record_id,
                 status="failed",
@@ -140,6 +146,18 @@ async def escalate(
             yield _format_sse(
                 "escalate_error",
                 {"error": str(e), "draft_record_id": str(req.draft_record_id)},
+                seq["n"],
+            )
+            return
+
+        if sut_out is None:
+            seq["n"] += 1
+            yield _format_sse(
+                "escalate_error",
+                {
+                    "error": "research stream ended without final output",
+                    "draft_record_id": str(req.draft_record_id),
+                },
                 seq["n"],
             )
             return

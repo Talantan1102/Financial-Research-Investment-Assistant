@@ -12,6 +12,7 @@ Note on state deserialization:
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 from app.agents.schemas import ResearchPlan, ResearchState, ToolCall
@@ -88,3 +89,83 @@ class ResearchAgent:
             response_text=final.get("report_markdown") or "",
             tool_calls=tool_calls,
         )
+
+    async def run_streaming(
+        self,
+        user_input: str,
+        request_id: str,
+        *,
+        state_overrides: dict[str, Any] | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream graph events as ``{event, data}`` dicts.
+
+        Yields intermediate SSE-ready dicts for each significant graph event
+        (node completions, tool start/end).  The final item is always::
+
+            {"event": "_final_sut_output", "data": SUTOutput}
+
+        This allows callers to relay progress events while still obtaining the
+        final structured output, without a second ``ainvoke`` round-trip.
+
+        Node name mapping (actual graph node names → SSE event names):
+            - ``research_planner_node``  → ``research_planner_done``
+            - ``data_collector_node``    → (no event — internal detail)
+            - ``analyst_node``           → ``research_analyst_done``
+            - ``writer_node``            → ``research_writer_done``
+            - ``critic_node`` / any name containing "critic" → ``research_critic_done``
+            - ``LangGraph`` (top-level)  → used to capture final state
+
+        Args:
+            user_input:      The user's natural-language research query.
+            request_id:      Unique identifier; used as LangGraph thread_id.
+            state_overrides: Optional ResearchState field overrides (E13).
+
+        Yields:
+            Dicts with ``event`` (str) and ``data`` (dict or SUTOutput).
+        """
+        config = {"configurable": {"thread_id": f"research:{request_id}"}}
+        initial = ResearchState(
+            user_id="eval",
+            session_id=request_id,
+            user_message=user_input,
+            request_id=request_id,
+        )
+        if state_overrides:
+            for k, v in state_overrides.items():
+                if hasattr(initial, k):
+                    setattr(initial, k, v)
+
+        final_state: dict[str, Any] = {}
+        async for chunk in self._graph.astream_events(
+            initial.model_dump(), config=config, version="v2"
+        ):
+            kind = chunk.get("event", "")
+            name = chunk.get("name", "")
+            if kind == "on_chain_end":
+                # Map actual node names to SSE event names
+                if name in ("research_planner_node", "planner", "research_planner"):
+                    yield {"event": "research_planner_done", "data": {"name": name}}
+                elif name in ("analyst_node", "analyst", "research_analyst"):
+                    yield {"event": "research_analyst_done", "data": {"name": name}}
+                elif name in ("writer_node", "writer", "research_writer"):
+                    yield {"event": "research_writer_done", "data": {"name": name}}
+                elif "critic" in name.lower():
+                    yield {"event": "research_critic_done", "data": {"name": name}}
+                elif name == "LangGraph":
+                    final_state = (chunk.get("data") or {}).get("output", {}) or {}
+            elif kind == "on_tool_start":
+                yield {"event": "research_tool_start", "data": {"tool": name}}
+            elif kind == "on_tool_end":
+                yield {"event": "research_tool_end", "data": {"tool": name}}
+
+        response_text = (
+            final_state.get("report_markdown") or final_state.get("final_response") or ""
+        )
+        yield {
+            "event": "_final_sut_output",
+            "data": SUTOutput(
+                request_id=request_id,
+                response_text=response_text,
+                tool_calls=[],
+            ),
+        }
