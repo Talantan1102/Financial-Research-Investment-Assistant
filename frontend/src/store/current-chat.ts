@@ -20,6 +20,16 @@ import type {
 
 export type StreamingStatus = 'idle' | 'streaming' | 'reconnecting' | 'error'
 
+export type StreamingPhase =
+  | 'idle'
+  | 'thinking'
+  | 'tool'
+  | 'writing'
+  | 'research_planning'
+  | 'research_running'
+  | 'research_writing'
+  | 'error'
+
 export interface CurrentChatState {
   session_id: string | null
   messages: ChatMessage[]
@@ -29,6 +39,8 @@ export interface CurrentChatState {
   cost_so_far: number
   toolEvents: SSEEvent[]
   errorMessage: string | null
+  streaming_phase: StreamingPhase
+  streaming_phase_label?: string
 }
 
 const INITIAL: CurrentChatState = {
@@ -40,6 +52,8 @@ const INITIAL: CurrentChatState = {
   cost_so_far: 0,
   toolEvents: [],
   errorMessage: null,
+  streaming_phase: 'idle',
+  streaming_phase_label: undefined,
 }
 
 export const currentChatState = proxy<CurrentChatState>({ ...INITIAL })
@@ -125,6 +139,10 @@ export const currentChatActions = {
         currentChatState.toolEvents.push(ev)
     }
   },
+  setStreamingPhase(phase: StreamingPhase, label?: string) {
+    currentChatState.streaming_phase = phase
+    currentChatState.streaming_phase_label = label
+  },
   reset() {
     currentChatState.session_id = INITIAL.session_id
     currentChatState.messages = []
@@ -134,5 +152,7 @@ export const currentChatActions = {
     currentChatState.cost_so_far = INITIAL.cost_so_far
     currentChatState.toolEvents = []
     currentChatState.errorMessage = null
+    currentChatState.streaming_phase = INITIAL.streaming_phase
+    currentChatState.streaming_phase_label = INITIAL.streaming_phase_label
   },
 }
