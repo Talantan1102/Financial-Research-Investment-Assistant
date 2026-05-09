@@ -20,6 +20,12 @@ import type {
 
 export type StreamingStatus = 'idle' | 'streaming' | 'reconnecting' | 'error'
 
+export interface CostBreakdown {
+  chat_usd: number
+  research_usd: number
+  total_usd: number
+}
+
 export type StreamingPhase =
   | 'idle'
   | 'thinking'
@@ -37,6 +43,7 @@ export interface CurrentChatState {
   streamingDraft: string
   last_seq: number
   cost_so_far: number
+  cost_breakdown: CostBreakdown
   toolEvents: SSEEvent[]
   errorMessage: string | null
   streaming_phase: StreamingPhase
@@ -50,6 +57,7 @@ const INITIAL: CurrentChatState = {
   streamingDraft: '',
   last_seq: 0,
   cost_so_far: 0,
+  cost_breakdown: { chat_usd: 0, research_usd: 0, total_usd: 0 },
   toolEvents: [],
   errorMessage: null,
   streaming_phase: 'idle',
@@ -83,6 +91,7 @@ export const currentChatActions = {
     currentChatState.streamingDraft = ''
     currentChatState.last_seq = 0
     currentChatState.cost_so_far = 0
+    currentChatState.cost_breakdown = { chat_usd: 0, research_usd: 0, total_usd: 0 }
     currentChatState.toolEvents = []
     currentChatState.errorMessage = null
   },
@@ -150,6 +159,7 @@ export const currentChatActions = {
     currentChatState.streamingDraft = INITIAL.streamingDraft
     currentChatState.last_seq = INITIAL.last_seq
     currentChatState.cost_so_far = INITIAL.cost_so_far
+    currentChatState.cost_breakdown = { ...INITIAL.cost_breakdown }
     currentChatState.toolEvents = []
     currentChatState.errorMessage = null
     currentChatState.streaming_phase = INITIAL.streaming_phase
