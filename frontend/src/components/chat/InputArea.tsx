@@ -1,4 +1,4 @@
-import { SendOutlined } from '@ant-design/icons'
+import { CloseCircleOutlined, SendOutlined } from '@ant-design/icons'
 import { Button } from 'antd'
 import {
   useCallback,
@@ -39,6 +39,17 @@ export function InputArea(props: InputAreaProps) {
     autoResize()
   }, [value, autoResize])
 
+  useEffect(() => {
+    function onKeyGlobal(e: globalThis.KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        if (streaming) props.onAbort?.()
+      }
+    }
+    window.addEventListener('keydown', onKeyGlobal)
+    return () => window.removeEventListener('keydown', onKeyGlobal)
+  }, [streaming, props])
+
   const send = useCallback(() => {
     const text = value.trim()
     if (!text) return
@@ -71,15 +82,26 @@ export function InputArea(props: InputAreaProps) {
         rows={1}
       />
       <div className={styles.inputActions}>
-        <Button
-          type="primary"
-          icon={<SendOutlined />}
-          onClick={send}
-          disabled={!value.trim() || streaming}
-          aria-label="发送"
-        >
-          发送
-        </Button>
+        {streaming ? (
+          <Button
+            danger
+            icon={<CloseCircleOutlined />}
+            onClick={() => props.onAbort?.()}
+            aria-label="中断"
+          >
+            中断
+          </Button>
+        ) : (
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={send}
+            disabled={!value.trim()}
+            aria-label="发送"
+          >
+            发送
+          </Button>
+        )}
       </div>
     </div>
   )

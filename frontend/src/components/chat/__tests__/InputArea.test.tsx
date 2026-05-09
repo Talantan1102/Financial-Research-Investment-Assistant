@@ -44,10 +44,36 @@ describe('<InputArea>', () => {
     expect(ta.style.height).toBeTruthy()
   })
 
-  it('disables send when streaming_phase != idle', () => {
+  it('hides send button and shows 中断 when streaming_phase != idle', () => {
     currentChatState.streaming_phase = 'thinking'
     render(<InputArea sessionId="s1" />)
-    const btn = screen.getByRole('button', { name: /发送|send/i }) as HTMLButtonElement
-    expect(btn.disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: /发送|send/i })).toBeNull()
+    expect(screen.getByRole('button', { name: /中断|abort/i })).toBeInTheDocument()
+  })
+})
+
+describe('<InputArea> Cmd+K abort', () => {
+  it('shows 中断 button while streaming, hides 发送', () => {
+    currentChatState.streaming_phase = 'writing'
+    render(<InputArea sessionId="s1" />)
+    expect(screen.getByRole('button', { name: /中断|abort/i })).toBeInTheDocument()
+  })
+
+  it('Cmd+K calls onAbort while streaming', async () => {
+    currentChatState.streaming_phase = 'writing'
+    const onAbort = vi.fn()
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" onAbort={onAbort} />)
+    await user.keyboard('{Meta>}k{/Meta}')
+    expect(onAbort).toHaveBeenCalled()
+  })
+
+  it('Ctrl+K also triggers abort (cross-platform)', async () => {
+    currentChatState.streaming_phase = 'writing'
+    const onAbort = vi.fn()
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" onAbort={onAbort} />)
+    await user.keyboard('{Control>}k{/Control}')
+    expect(onAbort).toHaveBeenCalled()
   })
 })
