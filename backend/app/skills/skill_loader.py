@@ -1,4 +1,4 @@
-"""SkillLoader — L1 list + L2 SKILL.md + L3a resource progressive disclosure."""
+"""SkillLoader — L1 list + L2 SKILL.md + L3a resource + L3b script refs."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from app.skills.script_schemas import SkillScriptRef
 from app.skills.types import (
     NestedDepthExceededError,
     ResourceTooLargeError,
@@ -199,6 +200,48 @@ class SkillLoader:
     def load_resource(self, skill_name: str, relative_ref: str) -> SkillResource:
         """Public API: load one resource without walking SKILL.md."""
         return self._load_one_resource(skill_name, relative_ref)
+
+    # --- L3b — script refs -------------------------------------------------
+
+    _L3B_SCRIPT_RE = re.compile(r"`(scripts/[A-Za-z0-9_\-./]+\.py)`\s*[—\-]?\s*(.*)")
+
+    def detect_l3b_refs(self, skill_name: str) -> list[SkillScriptRef]:
+        """Parse SKILL.md, extract every `scripts/X.py` reference + description.
+
+        Only refs whose target file actually exists on disk are returned;
+        dead references (script file missing) are silently skipped.
+        Duplicate paths yield a single entry (first occurrence wins).
+        """
+        skill_dir = self.skills_root / skill_name
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
+            return []
+
+        text = skill_md.read_text(encoding="utf-8")
+        refs: list[SkillScriptRef] = []
+        seen: set[str] = set()
+        for line in text.splitlines():
+            m = self._L3B_SCRIPT_RE.search(line)
+            if not m:
+                continue
+            script_path = m.group(1)
+            description = m.group(2).strip() or None
+            if script_path in seen:
+                continue
+            if not (skill_dir / script_path).is_file():
+                continue  # dead reference — skip
+            seen.add(script_path)
+            try:
+                refs.append(
+                    SkillScriptRef(
+                        skill_name=skill_name,
+                        script_path=script_path,
+                        description=description,
+                    )
+                )
+            except Exception:
+                continue
+        return refs
 
     def _parse_frontmatter(self, dir_name: str, skill_md: Path) -> SkillManifest:
         text = skill_md.read_text(encoding="utf-8")
