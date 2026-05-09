@@ -29,6 +29,7 @@ class SUTOutput(BaseModel):
     request_id: str
     response_text: str
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    escalate_offered: bool = False
 
 
 class JudgeScores(BaseModel):
