@@ -102,6 +102,26 @@ Production-style chat agent with LangGraph supervisor topology + MCP single-mode
   - Real `ToolResultCache` injection (currently `_NoOpCache` stub)
   - PG schema migration formalization (v0.9 columns added via manual ALTER during smoke; future via alembic in v1.x)
 
+### Skill Loader (L1 + L2 + L3a)
+
+The chat agent's `ChatPlanner` discovers skills via progressive disclosure:
+
+| Layer | Content | When loaded |
+|---|---|---|
+| L1 | name + description (≤ 512 chars) | session start, every planner prompt |
+| L2 | full SKILL.md body | planner emits `{"action": "load_skill", "name": "X"}` |
+| L3a | resource files (yaml/json/md) | auto when SKILL.md links to `resources/...`, or on `{"action": "load_resource", ...}` |
+| L3b | scripts/*.py executable | NOT IMPLEMENTED in v0.9 — see Plan 2b |
+
+Caps:
+- L3a resource: **50kB hard cap per file** (rejects with `ResourceTooLargeError`)
+- Nested ref depth: **≤ 2** (SKILL.md → resource → resource is rejected)
+- Resource path: must stay under `<skill>/resources/` (path-traversal blocked)
+
+7 skills are L1-discoverable: `data_analysis`, `deep_research`, `financial_analysis`, `market_data`, `risk_assessment`, `sector_analysis`, `web_research`. `risk_assessment` is the L3a demo — its `resources/risk_thresholds.yaml` carries quantitative cuts referenced by SKILL.md.
+
+SSE event `skill_load` is emitted at L2 and L3a load points with `{name, level, size_tokens, [ref]}` payload.
+
 ## 技术栈
 
 | 层级 | 技术 |

@@ -32,6 +32,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### v0.9.x 阶段性里程碑
 - [v0.9.x 不引 alembic](docs/claude-context/v0.9.x-no-alembic-until-db-unify.md) — schema 用 `create_all()` 幂等；alembic 推到 #3.5 DB 统一
 - [v0.9.x #2.5 PG + CI ship 完](docs/claude-context/v0.9.x-pg-ci-done.md) — PR #21 ship，serve path 已被 CI e2e 守护
+- [v0.9 skill loader L1+L2+L3a ship 完](docs/claude-context/v0.9-skill-loader-l1-l2-l3a-landed.md) — Plan 2a; 7 skill L1 + risk_assessment L3a demo; S2/S3/S4/S5/S10 撞透; L3b 留 Plan 2b
 
 ### v1.0 ship
 - [v1.0 持仓监控引擎 + 5 类公告 ship 完](docs/claude-context/v1.0-monitoring-engine-done.md) — Celery + Redis + PG 统一 / 5 决策落地
