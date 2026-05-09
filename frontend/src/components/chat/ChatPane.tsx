@@ -4,6 +4,7 @@ import { CostMeter } from './CostMeter'
 import { InputArea } from './InputArea'
 import { MessageList } from './MessageList'
 import { StreamingIndicator } from './StreamingIndicator'
+import { useDeferredMessages } from './useDeferredMessages'
 import { currentChatState } from '@/store/current-chat'
 import styles from '@/styles/chat.module.scss'
 
@@ -15,7 +16,7 @@ export function ChatPane({ sessionId: sessionIdProp }: ChatPaneProps = {}) {
   const params = useParams<{ session_id: string }>()
   const sessionId = sessionIdProp ?? params.session_id
   const snap = useSnapshot(currentChatState)
-  const messages = snap.messages ?? []
+  const messages = useDeferredMessages(snap.messages ?? [])
   const empty = messages.length === 0
   return (
     <div className={styles.chatPane}>
