@@ -13,6 +13,24 @@ import '@testing-library/jest-dom/vitest'
 import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest'
 import { server } from '@/test-utils/msw-server'
 
+// antd responsive components (List, Grid, etc.) use window.matchMedia which
+// is not implemented in jsdom. Provide a no-op stub so antd doesn't throw.
+if (typeof window !== 'undefined' && !window.matchMedia) {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  })
+}
+
 // msw server lifecycle
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterAll(() => server.close())
