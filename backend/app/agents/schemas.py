@@ -134,12 +134,19 @@ class Plan(BaseModel):
     direct_response: bool
     reasoning: str
 
+    # === v0.9 NEW ===
+    parallelizable: bool = False  # A2: parallel tool dispatch
+    escalate_offered: bool = False  # Q3: Plan 3 escalation hook
+    escalate_reason: str | None = None  # human-readable; SSE event payload
+
     @model_validator(mode="after")
     def _check_consistency(self) -> Plan:
         if self.direct_response and self.tool_calls:
             raise ValueError("direct_response=True 时 tool_calls 必须为空")
-        if not self.direct_response and not self.tool_calls:
-            raise ValueError("direct_response=False 时 tool_calls 至少有 1 个")
+        if not self.direct_response and not self.tool_calls and not self.escalate_offered:
+            raise ValueError(
+                "direct_response=False 时 tool_calls 至少有 1 个（或 escalate_offered=True）"
+            )
         return self
 
 
