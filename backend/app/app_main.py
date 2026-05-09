@@ -21,6 +21,7 @@ from app.orchestration.postgres_checkpointer import (  # noqa: E402
 )
 from app.router import chat as chat_router_module  # noqa: E402
 from app.router import chats as chats_router_module  # noqa: E402
+from app.router import escalate as escalate_router  # noqa: E402
 from app.router import research  # noqa: E402
 from app.router.attachment_router import router as attachment_router  # noqa: E402
 from app.router.auth_router import router as auth_router  # noqa: E402
@@ -195,6 +196,7 @@ app.include_router(reports_router)  # v0.9.x — research reports CRUD
 app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
 app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE streaming)
 app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
+app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (confirmed packet)
 
 
 # Dependency override: chats router's get_repo reads from app.state at request time
