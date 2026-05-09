@@ -122,6 +122,22 @@ Caps:
 
 SSE event `skill_load` is emitted at L2 and L3a load points with `{name, level, size_tokens, [ref]}` payload.
 
+### Skill Scripts (L3b sandbox)
+
+The chat agent can execute Anthropic-style skill scripts (`backend/claude_skills/<skill>/scripts/X.py`)
+through a sandboxed `SkillExecutor`.
+
+| Surface | Guarantee |
+|---|---|
+| Filesystem | `cwd` is a fresh tmp dir under `backend/data/skill_workdir/`, cleaned up after run |
+| Memory | RLIMIT_AS cap of 256MB (configurable) |
+| CPU / wall | 30s default / 5min max; SIGKILL on overrun |
+| Environment | only `PATH`/`LANG`/`LC_*` passed through; no `DASHSCOPE_API_KEY` |
+| Banned APIs | `os.system`, `subprocess.*`, `socket.socket`, `urlopen`, `requests.*`, `httpx.*`, `eval`, `exec`, `__import__` rejected by static AST scan |
+| stdout/stderr | stderr truncated to 2kB; stdout must be valid JSON |
+
+Demo: `backend/claude_skills/financial_analysis/scripts/calculate_dcf.py`
+
 ## 技术栈
 
 | 层级 | 技术 |
