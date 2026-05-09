@@ -21,11 +21,14 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from app.agents.chat_planner import ChatPlanner
+from app.agents.in_session_memory import InSessionMemory
 from app.agents.responder import Responder
 from app.orchestration.chat_graph import build_chat_graph
+from app.services.tool_result_cache import ToolResultCache
 
 _chat_mod = importlib.import_module("app.router.chat")
 ChatRequest = _chat_mod.ChatRequest
@@ -119,21 +122,39 @@ def _build_test_graph() -> Any:
     registry.register(_StubNewsTool())
     planner = ChatPlanner(llm=svc, registry=registry)
     responder = Responder(llm=svc)
-    # No checkpointer for test isolation
-    return build_chat_graph(planner=planner, responder=responder, registry=registry)
+    # No checkpointer for test isolation; Plan 1 signature: memory + cache required
+    memory = InSessionMemory()
+    cache = ToolResultCache(session_factory=MagicMock())
+    return build_chat_graph(
+        planner=planner, responder=responder, registry=registry, memory=memory, cache=cache
+    )
 
 
 def _collect_sse_events(raw_body: bytes) -> list[dict[str, Any]]:
-    """Parse SSE body into a list of JSON-decoded event dicts."""
+    """Parse SSE body into a list of JSON-decoded event dicts.
+
+    Supports the v0.9 multi-line SSE format (Plan 1):
+      event: <type>
+      id: <seq>
+      data: <JSON without type>
+
+    Reconstructs full event dicts with 'type' key from the event: line.
+    """
     import json
 
     events: list[dict[str, Any]] = []
     text = raw_body.decode("utf-8")
+    current_type: str | None = None
     for line in text.splitlines():
-        line = line.strip()
-        if line.startswith("data: "):
-            payload = line[len("data: ") :]
-            events.append(json.loads(payload))
+        stripped = line.strip()
+        if stripped.startswith("event: "):
+            current_type = stripped[len("event: ") :]
+        elif stripped.startswith("data: "):
+            payload = json.loads(stripped[len("data: ") :])
+            if current_type is not None:
+                payload["type"] = current_type
+            events.append(payload)
+            current_type = None
     return events
 
 
@@ -187,7 +208,7 @@ def test_chat_sse_http_200(test_client: TestClient) -> None:
 
 
 def test_chat_sse_event_framing(test_client: TestClient) -> None:
-    """Every SSE line starts with 'data: ' and is valid JSON."""
+    """SSE stream uses v0.9 multi-line format: event:/id:/data: lines, valid JSON on data:."""
     import json
 
     resp = test_client.post(
@@ -198,18 +219,26 @@ def test_chat_sse_event_framing(test_client: TestClient) -> None:
 
     raw = resp.content
     text = raw.decode("utf-8")
-    data_lines = [line for line in text.splitlines() if line.strip()]
+    non_empty_lines = [line.strip() for line in text.splitlines() if line.strip()]
 
-    n_data = len(data_lines)
-    assert n_data >= 1, "Expected at least one SSE data line"
+    n_lines = len(non_empty_lines)
+    assert n_lines >= 1, "Expected at least one SSE line"
 
-    for line in data_lines:
-        line = line.strip()
-        assert line.startswith("data: "), f"SSE line must start with 'data: ': {line!r}"
-        payload = line[len("data: ") :]
-        parsed = json.loads(payload)  # must not raise
-        assert "type" in parsed, f"StreamEvent must have 'type' field: {parsed}"
-        assert parsed["type"] in _VALID_EVENT_TYPES, f"Unknown event type: {parsed['type']}"
+    # v0.9 format: each SSE field line starts with event:, id:, or data:
+    valid_prefixes = ("event: ", "id: ", "data: ")
+    for line in non_empty_lines:
+        assert any(line.startswith(p) for p in valid_prefixes), (
+            f"SSE line must start with event:/id:/data:: {line!r}"
+        )
+        if line.startswith("data: "):
+            json.loads(line[len("data: ") :])  # must parse as JSON
+
+    # At least one complete event (event: + data: pair)
+    events = _collect_sse_events(raw)
+    assert len(events) >= 1, "Expected at least one reconstructed SSE event"
+    for ev in events:
+        assert "type" in ev, f"Reconstructed event must have 'type': {ev}"
+        assert ev["type"] in _VALID_EVENT_TYPES, f"Unknown event type: {ev['type']}"
 
 
 def test_chat_sse_event_types_within_spec(test_client: TestClient) -> None:
@@ -279,22 +308,20 @@ def test_chat_sse_has_done_event(test_client: TestClient) -> None:
 
 
 def test_chat_sse_stream_event_schema(test_client: TestClient) -> None:
-    """Each SSE event validates against the StreamEvent Pydantic schema."""
-    import json
+    """Each reconstructed SSE event validates against the StreamEvent Pydantic schema.
 
+    v0.9 SSE format emits type on the event: line and excludes it from data: JSON.
+    _collect_sse_events re-injects type so StreamEvent.model_validate succeeds.
+    """
     resp = test_client.post(
         "/api/v0/chat",
         json={"session_id": "test-session-8", "message": "查一下 600519.SH 的股价"},
     )
     assert resp.status_code == 200
 
-    text = resp.content.decode("utf-8")
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("data: "):
-            continue
-        payload = json.loads(line[len("data: ") :])
-        # Validate against Pydantic StreamEvent schema
+    events = _collect_sse_events(resp.content)
+    assert len(events) >= 1, "Expected at least one SSE event"
+    for payload in events:
         ev = StreamEvent.model_validate(payload)
         assert ev.type in _VALID_EVENT_TYPES
 
@@ -309,7 +336,9 @@ def test_chat_request_schema_validation() -> None:
 
 
 def test_stream_event_schema_validation() -> None:
-    """StreamEvent accepts all 6 valid types."""
-    for ev_type in ("plan", "tool_start", "tool_end", "token", "done", "error"):
-        ev = StreamEvent(type=ev_type, data={"key": "value"})
+    """StreamEvent accepts core valid types (seq required since Plan 1 monotonic counter)."""
+    for i, ev_type in enumerate(
+        ("plan", "tool_start", "tool_end", "token", "done", "error"), start=1
+    ):
+        ev = StreamEvent(type=ev_type, seq=i, data={"key": "value"})
         assert ev.type == ev_type
