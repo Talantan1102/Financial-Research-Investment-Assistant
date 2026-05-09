@@ -68,3 +68,38 @@ export function renderMarkdown(content: string): string {
   const raw = mdInstance.parse(content) as string
   return renderKatex(raw)
 }
+
+import type { ChartSpec } from '@/types/chat'
+
+const CHART_FENCE = /```chart_spec\n([\s\S]+?)\n```/g
+
+function extractCharts(content: string): {
+  stripped: string
+  charts: Array<{ id: string; spec: ChartSpec }>
+} {
+  const charts: Array<{ id: string; spec: ChartSpec }> = []
+  let i = 0
+  const stripped = content.replace(CHART_FENCE, (_, json: string) => {
+    try {
+      const spec = JSON.parse(json) as ChartSpec
+      const id = `chart-${i++}`
+      charts.push({ id, spec })
+      return `<div data-chart-spec-id="${id}"></div>`
+    } catch {
+      return '`(chart_spec parse error)`'
+    }
+  })
+  return { stripped, charts }
+}
+
+export interface MarkdownRenderResult {
+  html: string
+  charts: Array<{ id: string; spec: ChartSpec }>
+}
+
+export function renderMarkdownWithCharts(content: string): MarkdownRenderResult {
+  const { stripped, charts } = extractCharts(content)
+  const raw = mdInstance.parse(stripped) as string
+  const html = renderKatex(raw)
+  return { html, charts }
+}
