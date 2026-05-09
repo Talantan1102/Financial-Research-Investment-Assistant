@@ -5,6 +5,7 @@
  */
 
 import { proxy } from 'valtio'
+import { createChat, listChats } from '@/api/chatApi'
 import type { ChatSession } from '@/types/chat'
 
 export type ChatSessionsStatus = 'idle' | 'loading' | 'loaded' | 'error'
@@ -57,5 +58,22 @@ export const chatSessionsActions = {
     chatSessionsState.sessions = []
     chatSessionsState.status = 'idle'
     chatSessionsState.error = null
+  },
+  async loadSessions() {
+    chatSessionsState.status = 'loading'
+    chatSessionsState.error = null
+    try {
+      const list = await listChats()
+      chatSessionsActions.setSessions(list)
+    } catch (e) {
+      chatSessionsState.status = 'error'
+      chatSessionsState.error = (e as Error).message
+      throw e
+    }
+  },
+  async createAndAdd(title?: string) {
+    const created = await createChat(title === undefined ? {} : { title })
+    chatSessionsActions.upsertSession(created)
+    return created
   },
 }

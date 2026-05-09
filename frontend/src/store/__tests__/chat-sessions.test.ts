@@ -5,6 +5,8 @@ import {
   chatSessionsState,
 } from '@/store/chat-sessions'
 import type { ChatSession } from '@/types/chat'
+import { http, HttpResponse } from 'msw'
+import { server } from '@/test-utils/msw-server'
 
 const session = (id: string, lastActive: string): ChatSession => ({
   id,
@@ -53,5 +55,53 @@ describe('chatSessionsStore', () => {
     chatSessionsActions.removeSession('a')
     const s = snapshot(chatSessionsState)
     expect(s.sessions.map((x) => x.id)).toEqual(['b'])
+  })
+})
+
+const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
+
+describe('chatSessionsStore + chatApi', () => {
+  beforeEach(() => chatSessionsActions.reset())
+
+  it('loadSessions sets status loading→loaded and populates list', async () => {
+    server.use(
+      http.get(`${API_BASE}/api/v0/chats`, () =>
+        HttpResponse.json([
+          {
+            id: 'a',
+            user_id: null,
+            title: 'a',
+            created_at: '2026-05-09T00:00:00Z',
+            last_active_at: '2026-05-09T00:00:00Z',
+            message_count: 0,
+            last_msg_preview: null,
+          },
+        ]),
+      ),
+    )
+    await chatSessionsActions.loadSessions()
+    const s = snapshot(chatSessionsState)
+    expect(s.status).toBe('loaded')
+    expect(s.sessions).toHaveLength(1)
+  })
+
+  it('createAndAdd POSTs new chat then upserts', async () => {
+    server.use(
+      http.post(`${API_BASE}/api/v0/chats`, () =>
+        HttpResponse.json({
+          id: 'new-id',
+          user_id: null,
+          title: 'New chat',
+          created_at: '2026-05-09T00:00:00Z',
+          last_active_at: '2026-05-09T00:00:00Z',
+          message_count: 0,
+          last_msg_preview: null,
+        }),
+      ),
+    )
+    const created = await chatSessionsActions.createAndAdd()
+    expect(created.id).toBe('new-id')
+    const s = snapshot(chatSessionsState)
+    expect(s.sessions.map((x) => x.id)).toContain('new-id')
   })
 })
