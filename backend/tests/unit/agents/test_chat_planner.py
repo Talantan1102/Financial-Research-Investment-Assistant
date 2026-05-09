@@ -125,3 +125,86 @@ async def test_planner_filters_unknown_tool_names(caplog):
     out = await planner.run(state)
     assert len(out["plan"].tool_calls) == 1
     assert out["plan"].tool_calls[0].tool_name == "get_quote"
+
+
+@pytest.mark.asyncio
+async def test_planner_emits_execute_script_action():
+    llm = _make_llm(
+        json.dumps(
+            {
+                "tool_calls": [],
+                "script_calls": [
+                    {
+                        "skill": "financial_analysis",
+                        "script": "scripts/calculate_dcf.py",
+                        "args": {
+                            "financials": {"revenue": [100, 110, 120]},
+                            "wacc": 0.085,
+                            "terminal_growth": 0.03,
+                        },
+                    },
+                ],
+                "parallelizable": False,
+                "direct_response": False,
+                "escalate_offered": False,
+                "reasoning": "use DCF",
+            }
+        )
+    )
+    planner = ChatPlanner(
+        llm=llm,
+        available_tools=[],
+        available_skills=["financial_analysis"],
+    )
+    state = ChatState(
+        user_id="u",
+        session_id="s",
+        user_message="算 ICBC DCF 估值",
+        request_id="r",
+        trace_request_id="r",
+    )
+    out = await planner.run(state)
+    plan = out["plan"]
+    assert len(plan.script_calls) == 1
+    assert plan.script_calls[0].skill == "financial_analysis"
+    assert plan.script_calls[0].script == "scripts/calculate_dcf.py"
+    assert plan.script_calls[0].args["wacc"] == 0.085
+
+
+@pytest.mark.asyncio
+async def test_planner_filters_unknown_skill_in_script_call():
+    llm = _make_llm(
+        json.dumps(
+            {
+                "tool_calls": [],
+                "script_calls": [
+                    {"skill": "ghost_skill", "script": "scripts/x.py", "args": {}},
+                    {
+                        "skill": "financial_analysis",
+                        "script": "scripts/calculate_dcf.py",
+                        "args": {},
+                    },
+                ],
+                "parallelizable": False,
+                "direct_response": False,
+                "escalate_offered": False,
+                "reasoning": "x",
+            }
+        )
+    )
+    planner = ChatPlanner(
+        llm=llm,
+        available_tools=[],
+        available_skills=["financial_analysis"],
+    )
+    state = ChatState(
+        user_id="u",
+        session_id="s",
+        user_message="X",
+        request_id="r",
+        trace_request_id="r",
+    )
+    out = await planner.run(state)
+    plan = out["plan"]
+    assert len(plan.script_calls) == 1
+    assert plan.script_calls[0].skill == "financial_analysis"

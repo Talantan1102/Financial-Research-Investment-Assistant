@@ -128,6 +128,14 @@ class ToolResult(BaseModel):
     cached: bool = False  # v0.9: True when result came from ToolResultCache (B3)
 
 
+class SkillScriptCall(BaseModel):
+    """One execute_script action emitted by ChatPlanner."""
+
+    skill: str
+    script: str  # relative path, e.g. "scripts/calculate_dcf.py"
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
 class Plan(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -150,6 +158,9 @@ class Plan(BaseModel):
         description="Specific resource to load: {'skill': str, 'ref': str}.",
     )
 
+    # === Plan 2b NEW ===
+    script_calls: list[SkillScriptCall] = Field(default_factory=list)
+
     @model_validator(mode="after")
     def _check_consistency(self) -> Plan:
         if self.direct_response and self.tool_calls:
@@ -159,11 +170,12 @@ class Plan(BaseModel):
             or self.escalate_offered
             or self.load_skill is not None
             or self.load_resource is not None
+            or bool(self.script_calls)
         )
         if not self.direct_response and not has_action:
             raise ValueError(
                 "direct_response=False 时 tool_calls 至少有 1 个"
-                "（或 escalate_offered=True / load_skill / load_resource）"
+                "（或 escalate_offered=True / load_skill / load_resource / script_calls）"
             )
         return self
 

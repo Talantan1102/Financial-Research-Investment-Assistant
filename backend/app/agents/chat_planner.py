@@ -19,7 +19,7 @@ import re
 from typing import Any
 
 from app.agents.base import Agent
-from app.agents.schemas import ChatState, GraphState, Plan, StepResult, ToolCall
+from app.agents.schemas import ChatState, GraphState, Plan, SkillScriptCall, StepResult, ToolCall
 from app.services.llm_response import Tier
 from app.services.llm_service import LLMService
 from app.skills import SkillManifest
@@ -189,10 +189,14 @@ _PLANNER_PROMPT_TEMPLATE = """\
 5. 如果用户问题需要某 skill 的细节(SKILL.md 全文),设 load_skill="<skill_name>"。
 6. 如果你已经看过 SKILL.md,需要里面引用的具体 resource,设 load_resource={{"skill": "<n>", "ref": "resources/<file>"}}。
    注意: load_skill / load_resource / tool_calls 三选一,不要同时设置多个。
+7. 如果某 skill 提供脚本能完成用户的计算需求(如 DCF 估值、风险打分等),优先用 script_calls。
+   script_calls 格式: [{{"skill": "<skill_name>", "script": "scripts/<file>.py", "args": {{...}}}}]
+   每个 entry 的 script 字段必须以 "scripts/" 开头。
 
 严格按下列 JSON 输出,不要带任何额外文字:
 {{
   "tool_calls": [{{"tool_name": "...", "args": {{...}}, "rationale": "..."}}, ...],
+  "script_calls": [{{"skill": "...", "script": "scripts/...", "args": {{...}}}}],
   "parallelizable": true|false,
   "direct_response": true|false,
   "escalate_offered": true|false,
@@ -229,11 +233,13 @@ class ChatPlanner(Agent):
         llm: LLMService,
         registry: ToolRegistry | None = None,
         available_tools: list[str] | None = None,
+        available_skills: list[str] | None = None,
         recent_k: int = 4,
     ) -> None:
         super().__init__(llm)
         self._registry = registry
         self._available_tools = available_tools or []
+        self._available_skills = available_skills or []
         self._recent_k = recent_k
 
     # ------------------------------------------------------------------
@@ -284,10 +290,28 @@ class ChatPlanner(Agent):
         raw_load_resource = data.get("load_resource")
         load_resource = raw_load_resource if isinstance(raw_load_resource, dict) else None
 
+        # Plan 2b: parse execute_script actions (whitelist by available_skills)
+        whitelist_skills = set(self._available_skills)
+        valid_script_calls: list[SkillScriptCall] = [
+            SkillScriptCall(
+                skill=sc["skill"],
+                script=sc["script"],
+                args=sc.get("args", {}),
+            )
+            for sc in data.get("script_calls", [])
+            if sc.get("skill") in whitelist_skills and sc.get("script", "").startswith("scripts/")
+        ]
+
         # Build Plan — handle edge cases for validator:
         # - escalate_offered=True with no tool_calls: use direct_response=True
         # - tool_calls filtered to empty and no skill action: force direct_response=True
-        has_action = bool(valid_calls) or escalate_offered or load_skill or load_resource
+        has_action = (
+            bool(valid_calls)
+            or escalate_offered
+            or load_skill
+            or load_resource
+            or bool(valid_script_calls)
+        )
         if not has_action and not direct_response:
             direct_response = True
 
@@ -300,6 +324,7 @@ class ChatPlanner(Agent):
             escalate_reason=data.get("escalate_reason"),
             load_skill=load_skill,
             load_resource=load_resource,
+            script_calls=valid_script_calls,
         )
 
         return {
