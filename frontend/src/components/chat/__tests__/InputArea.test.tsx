@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { InputArea } from '@/components/chat/InputArea'
@@ -126,5 +126,29 @@ describe('<InputArea> Escalate button', () => {
     render(<InputArea sessionId="s1" onEscalate={onEscalate} />)
     await user.click(screen.getByRole('button', { name: /Escalate|升级到深度研究|⚡/i }))
     expect(onEscalate).toHaveBeenCalled()
+  })
+})
+
+describe('<InputArea> F10 placeholder', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+  })
+
+  it('long prompt > 500 chars shows char counter', async () => {
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" />)
+    const ta = screen.getByRole('textbox')
+    await user.click(ta)
+    await user.paste('x'.repeat(600))
+    expect(screen.getByText(/600 \/ 4000/)).toBeInTheDocument()
+  })
+
+  it('paste image triggers placeholder banner "暂不支持上传 (C.4)"', async () => {
+    render(<InputArea sessionId="s1" />)
+    const ta = screen.getByRole('textbox') as HTMLTextAreaElement
+    // jsdom does not define DataTransfer; use manual mock per adaptation note
+    const mockClipboardData = { items: [{ kind: 'file' }], getData: () => '' }
+    fireEvent.paste(ta, { clipboardData: mockClipboardData })
+    expect(await screen.findByText(/暂不支持上传/)).toBeInTheDocument()
   })
 })

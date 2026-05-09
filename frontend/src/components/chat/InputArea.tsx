@@ -20,9 +20,11 @@ export interface InputAreaProps {
 
 const MIN_HEIGHT = 44
 const MAX_HEIGHT = 240
+const MAX_CHARS = 4000
 
 export function InputArea(props: InputAreaProps) {
   const [value, setValue] = useState('')
+  const [pasteWarn, setPasteWarn] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const snap = useSnapshot(currentChatState)
   const streaming = snap.streaming_phase !== 'idle'
@@ -40,6 +42,24 @@ export function InputArea(props: InputAreaProps) {
   useEffect(() => {
     autoResize()
   }, [value, autoResize])
+
+  const onPaste = useCallback((e: ClipboardEvent) => {
+    const dt = e.clipboardData
+    if (!dt) return
+    const hasFile = Array.from(dt.items).some((it) => it.kind === 'file')
+    if (hasFile) {
+      setPasteWarn('暂不支持上传 (C.4 milestone)')
+      e.preventDefault()
+      setTimeout(() => setPasteWarn(null), 4000)
+    }
+  }, [])
+
+  useEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.addEventListener('paste', onPaste)
+    return () => ta.removeEventListener('paste', onPaste)
+  }, [onPaste])
 
   useEffect(() => {
     function onKeyGlobal(e: globalThis.KeyboardEvent) {
@@ -114,6 +134,15 @@ export function InputArea(props: InputAreaProps) {
           </Button>
         )}
       </div>
+      {value.length > MAX_CHARS / 8 ? (
+        <div
+          className={styles.charCounter}
+          data-warn={value.length > MAX_CHARS}
+        >
+          {value.length} / {MAX_CHARS}
+        </div>
+      ) : null}
+      {pasteWarn ? <div className={styles.pasteWarn}>{pasteWarn}</div> : null}
     </div>
   )
 }
