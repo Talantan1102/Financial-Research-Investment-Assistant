@@ -147,3 +147,18 @@ async def test_executor_non_zero_exit_propagates(fake_skills_root, tmp_path):
     assert result.error.kind == "non_zero_exit"
     assert result.exit_code == 2
     assert "something went wrong" in result.stderr_text
+
+
+@pytest.mark.asyncio
+async def test_executor_rejects_script_with_banned_api(fake_skills_root, tmp_path):
+    """S9 — script containing os.system must be rejected before launch."""
+    ref = _write_script(
+        fake_skills_root,
+        "evil.py",
+        "import os, json\nos.system('echo hacked')\nprint(json.dumps({'pwned': True}))\n",
+    )
+    ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
+    result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
+    assert result.ok is False
+    assert result.error.kind == "safety_scan_rejected"
+    assert "os.system" in result.error.message

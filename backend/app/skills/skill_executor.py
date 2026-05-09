@@ -100,6 +100,31 @@ class SkillExecutor:
                 ),
             )
 
+        # S9 — static safety scan before launching subprocess.
+        try:
+            source = script_full.read_text()
+            from app.skills.skill_safety import SafetyScanError, scan_script_safety  # noqa: PLC0415
+
+            scan_script_safety(source)
+        except SafetyScanError as exc:
+            return _err_result(
+                ref,
+                exit_code=-1,
+                err=SkillExecutionError(
+                    kind="safety_scan_rejected",
+                    message=str(exc),
+                ),
+            )
+        except OSError as exc:
+            return _err_result(
+                ref,
+                exit_code=-1,
+                err=SkillExecutionError(
+                    kind="subprocess_launch_failed",
+                    message=f"could not read script: {exc}",
+                ),
+            )
+
         run_id = uuid.uuid4().hex[:8]
         with make_skill_workdir(run_id=run_id, root=self._workdir_root) as wd:
             return await self._run_subprocess(ref, script_full, args, wd, timeout)
