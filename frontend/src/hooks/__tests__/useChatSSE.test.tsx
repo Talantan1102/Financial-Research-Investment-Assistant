@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { snapshot } from 'valtio'
 import { useChatSSE } from '@/hooks/useChatSSE'
 import { server } from '@/test-utils/msw-server'
-import { sseResponse } from '@/test-utils/sse-mock'
+import { sseResponse, controllableSseResponse } from '@/test-utils/sse-mock'
 import {
   currentChatActions,
   currentChatState,
@@ -40,5 +40,31 @@ describe('useChatSSE — basic consume', () => {
     })
     expect(snapshot(currentChatState).streamingStatus).toBe('idle')
     expect(snapshot(currentChatState).messages.at(-1)?.content).toBe('Hello')
+  })
+})
+
+describe('useChatSSE — abort', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+    currentChatActions.setSession('s1', [])
+  })
+
+  it('abort() stops dispatching subsequent events', async () => {
+    const ctrl = controllableSseResponse()
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () => ctrl.response),
+    )
+
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+    const send = result.current.sendMessage('hi')
+    ctrl.push({ type: 'token', seq: 1, content: 'a' })
+    await waitFor(() => {
+      expect(snapshot(currentChatState).last_seq).toBe(1)
+    })
+    act(() => result.current.abort())
+    ctrl.push({ type: 'token', seq: 2, content: 'b' })
+    ctrl.disconnect()
+    await send.catch(() => {})
+    expect(snapshot(currentChatState).last_seq).toBe(1)
   })
 })

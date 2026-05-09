@@ -72,6 +72,10 @@ async function consumeStream(
     buffer += decoder.decode(value, { stream: true })
     let idx = buffer.indexOf(SSE_FRAME_DELIMITER)
     while (idx >= 0) {
+      if (signal.aborted) {
+        reader.cancel().catch(() => {})
+        return { doneSeen }
+      }
       const frame = buffer.slice(0, idx)
       buffer = buffer.slice(idx + SSE_FRAME_DELIMITER.length)
       const ev = parseFrame(frame)
