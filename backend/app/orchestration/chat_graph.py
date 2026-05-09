@@ -48,6 +48,11 @@ from app.skills.skill_loader import SkillLoader
 from app.tools.registry import ToolRegistry
 
 
+def _approx_tokens(text: str) -> int:
+    """1 token ≈ 4 bytes UTF-8 (mixed CJK + English heuristic)."""
+    return len(text.encode("utf-8")) // 4
+
+
 def _route_after_planner(
     state: ChatState,
 ) -> Literal["tool_node", "responder_node", "skill_load_node", "resource_load_node"]:
@@ -66,9 +71,30 @@ async def skill_load_node(state: ChatState, *, loader: SkillLoader) -> dict[str,
     """Inject L2 + L3a content for skill name in plan.load_skill.
 
     Clears plan after loading so the planner re-evaluates with the new skill context.
+    Emits a ``skill_load`` SSE event (level=L2) via LangGraph stream writer when in
+    a streaming context; safely no-ops otherwise.
     """
     assert state.plan is not None  # guarded by _route_after_planner
     new_state = handle_skill_load_action(state, state.plan, loader)
+
+    name = state.plan.load_skill
+    if name and name not in state.skill_context and name in new_state.skill_context:
+        loaded_text = new_state.skill_context[name]
+        try:
+            from langgraph.config import get_stream_writer  # type: ignore[import-untyped]
+
+            writer = get_stream_writer()
+            writer(
+                {
+                    "type": "skill_load",
+                    "name": name,
+                    "level": "L2",
+                    "size_tokens": _approx_tokens(loaded_text),
+                }
+            )
+        except (RuntimeError, ImportError):
+            pass  # not in streaming context
+
     return {"skill_context": new_state.skill_context, "plan": None}
 
 
@@ -76,9 +102,37 @@ async def resource_load_node(state: ChatState, *, loader: SkillLoader) -> dict[s
     """Append a single L3a resource to existing skill context.
 
     Clears plan after loading so the planner re-evaluates with the new resource.
+    Emits a ``skill_load`` SSE event (level=L3a) via LangGraph stream writer when in
+    a streaming context; safely no-ops otherwise.
     """
     assert state.plan is not None  # guarded by _route_after_planner
     new_state = handle_resource_load_action(state, state.plan, loader)
+
+    spec = state.plan.load_resource
+    if isinstance(spec, dict):
+        skill = spec.get("skill")
+        ref = spec.get("ref")
+        if skill and ref:
+            before = state.skill_context.get(skill, "")
+            after = new_state.skill_context.get(skill, "")
+            delta = after[len(before) :]
+            if delta:
+                try:
+                    from langgraph.config import get_stream_writer  # type: ignore[import-untyped]
+
+                    writer = get_stream_writer()
+                    writer(
+                        {
+                            "type": "skill_load",
+                            "name": skill,
+                            "level": "L3a",
+                            "ref": ref,
+                            "size_tokens": _approx_tokens(delta),
+                        }
+                    )
+                except (RuntimeError, ImportError):
+                    pass  # not in streaming context
+
     return {"skill_context": new_state.skill_context, "plan": None}
 
 
