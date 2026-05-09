@@ -19,6 +19,21 @@ class _ResizeObserverStub { observe() {} unobserve() {} disconnect() {} }
 // @ts-expect-error jsdom shim
 globalThis.ResizeObserver = globalThis.ResizeObserver ?? _ResizeObserverStub
 
+// useScrollStick (MessageList) uses IntersectionObserver; jsdom doesn't
+// provide it. Stub it so tests don't throw "IntersectionObserver is not defined".
+// The stub never fires callbacks, so isAtBottom stays true (safe default).
+class _IntersectionObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() { return [] }
+  root = null
+  rootMargin = ''
+  thresholds: number[] = []
+}
+// @ts-expect-error jsdom shim
+globalThis.IntersectionObserver = globalThis.IntersectionObserver ?? _IntersectionObserverStub
+
 // react-window also calls getBoundingClientRect on its outer container to
 // determine visible area. In jsdom all elements return 0. Provide a fallback
 // offsetHeight so VariableSizeList renders at least one row in tests.

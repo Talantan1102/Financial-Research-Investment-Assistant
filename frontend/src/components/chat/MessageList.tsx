@@ -1,5 +1,6 @@
-import { memo, useCallback, useMemo, useRef } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { VariableSizeList, type ListChildComponentProps } from 'react-window'
+import { useScrollStick } from './useScrollStick'
 import type { ChatMessage } from '@/types/chat'
 import { ResearchReportCard } from './ResearchReportCard'
 import { SystemMessage } from './SystemMessage'
@@ -68,18 +69,32 @@ export function MessageList({ messages, height = 600, onContinueAsk }: MessageLi
 
   const data = useMemo<RowData>(() => ({ messages, onContinueAsk }), [messages, onContinueAsk])
 
+  const [sentinelEl, setSentinelEl] = useState<HTMLDivElement | null>(null)
+  const { isAtBottom, scrollToBottom } = useScrollStick(sentinelEl)
+  const lastCount = useRef(messages.length)
+
+  useEffect(() => {
+    if (messages.length > lastCount.current && isAtBottom) {
+      scrollToBottom()
+    }
+    lastCount.current = messages.length
+  }, [messages.length, isAtBottom, scrollToBottom])
+
   return (
-    <VariableSizeList
-      ref={listRef}
-      height={height}
-      width="100%"
-      itemCount={messages.length}
-      itemSize={itemSize}
-      itemKey={itemKey}
-      itemData={data}
-      overscanCount={4}
-    >
-      {MemoRow}
-    </VariableSizeList>
+    <>
+      <VariableSizeList
+        ref={listRef}
+        height={height}
+        width="100%"
+        itemCount={messages.length}
+        itemSize={itemSize}
+        itemKey={itemKey}
+        itemData={data}
+        overscanCount={4}
+      >
+        {MemoRow}
+      </VariableSizeList>
+      <div ref={setSentinelEl} data-testid="scroll-sentinel" style={{ height: 1 }} />
+    </>
   )
 }
