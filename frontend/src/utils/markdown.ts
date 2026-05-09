@@ -1,4 +1,5 @@
 import hljs from 'highlight.js'
+import katex from 'katex'
 import { Marked } from 'marked'
 
 /**
@@ -42,6 +43,28 @@ mdInstance.use({
   },
 })
 
+const BLOCK_MATH = /\$\$([\s\S]+?)\$\$/g
+const INLINE_MATH = /\$([^\n$]+?)\$/g
+
+function renderKatex(html: string): string {
+  let out = html.replace(BLOCK_MATH, (full, expr: string) => {
+    try {
+      return katex.renderToString(expr, { displayMode: true, throwOnError: false })
+    } catch {
+      return full
+    }
+  })
+  out = out.replace(INLINE_MATH, (full, expr: string) => {
+    try {
+      return katex.renderToString(expr, { displayMode: false, throwOnError: false })
+    } catch {
+      return full
+    }
+  })
+  return out
+}
+
 export function renderMarkdown(content: string): string {
-  return mdInstance.parse(content) as string
+  const raw = mdInstance.parse(content) as string
+  return renderKatex(raw)
 }

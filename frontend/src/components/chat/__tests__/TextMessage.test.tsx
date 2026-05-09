@@ -17,6 +17,18 @@ function m(content: string, role: 'user' | 'assistant' = 'assistant'): ChatMessa
   }
 }
 
+describe('<TextMessage> KaTeX', () => {
+  it('renders inline math $...$ via KaTeX', () => {
+    render(<TextMessage message={m('Euler: $e^{i\\pi}+1=0$')} />)
+    expect(document.querySelector('.katex')).not.toBeNull()
+  })
+
+  it('renders display math $$...$$ as block', () => {
+    render(<TextMessage message={m('$$\\sum_{i=1}^n i = \\frac{n(n+1)}{2}$$')} />)
+    expect(document.querySelector('.katex-display')).not.toBeNull()
+  })
+})
+
 describe('<TextMessage> markdown', () => {
   it('renders **bold** as <strong>', () => {
     render(<TextMessage message={m('this is **bold**')} />)
