@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -14,6 +15,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from app.core.database import Base, engine  # noqa: E402  (must follow load_dotenv)
+from app.orchestration.postgres_checkpointer import (  # noqa: E402
+    PostgresCheckpointerConfig,
+    make_postgres_checkpointer,
+)
+from app.router import chat as chat_router_module  # noqa: E402
+from app.router import chats as chats_router_module  # noqa: E402
 from app.router import research  # noqa: E402
 from app.router.attachment_router import router as attachment_router  # noqa: E402
 from app.router.auth_router import router as auth_router  # noqa: E402
@@ -21,7 +28,24 @@ from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
+from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
+from app.services.mcp_client import MCPClient  # noqa: E402
 from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover trigger)
+
+# ---------------------------------------------------------------------------
+# Helper: build psycopg3-compatible async DATABASE_URL from env vars
+# ---------------------------------------------------------------------------
+
+
+def _async_pg_url() -> str:
+    """Return a psycopg3-compatible conninfo URI (postgresql+psycopg://)."""
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "postgres123")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db = os.getenv("POSTGRES_DB", "industry_assistant")
+    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db}"
+
 
 # ---------------------------------------------------------------------------
 # App lifespan
@@ -59,6 +83,44 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     except Exception as e:
         logger.error(f"定时任务调度器启动失败: {e}")
 
+    # === v0.9 chat additions ===
+
+    # 1. PG checkpointer for LangGraph (psycopg3 async pool)
+    _chat_checkpointer_ctx = None
+    try:
+        conninfo = _async_pg_url()
+        app.state.chat_checkpointer = await make_postgres_checkpointer(
+            PostgresCheckpointerConfig(conninfo=conninfo)
+        )
+        logger.info("LangGraph PG checkpointer 初始化完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.chat_checkpointer = None
+        logger.warning("LangGraph PG checkpointer 初始化跳过: %s", e)
+
+    # 2. MCP client subprocess — use as context manager
+    _mcp_ctx = MCPClient.from_subprocess()
+    try:
+        app.state.mcp_client = await _mcp_ctx.__aenter__()
+        app.state._mcp_ctx = _mcp_ctx
+        logger.info("MCP client 启动完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.mcp_client = None
+        app.state._mcp_ctx = None
+        logger.warning("MCP client 启动跳过: %s", e)
+
+    # 3. ChatSessionRepo (no existing async_session_factory — create one inline)
+    try:
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        _chat_engine_url = _async_pg_url()
+        app.state.chat_async_engine = create_async_engine(_chat_engine_url, future=True)
+        _factory = async_sessionmaker(app.state.chat_async_engine, expire_on_commit=False)
+        app.state.chat_session_repo = ChatSessionRepo(session_factory=_factory)
+        logger.info("ChatSessionRepo 初始化完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.chat_session_repo = None
+        logger.warning("ChatSessionRepo 初始化跳过: %s", e)
+
     yield
 
     # 关闭时执行
@@ -70,6 +132,20 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         scheduler.stop()
     except Exception as e:
         logger.error(f"定时任务调度器关闭失败: {e}")
+
+    # === v0.9 chat shutdown ===
+    if getattr(app.state, "_mcp_ctx", None) is not None:
+        try:
+            await app.state._mcp_ctx.__aexit__(None, None, None)
+            logger.info("MCP client 已关闭")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("MCP client 关闭失败: %s", e)
+    if getattr(app.state, "chat_async_engine", None) is not None:
+        try:
+            await app.state.chat_async_engine.dispose()
+            logger.info("ChatSessionRepo async engine 已关闭")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ChatSessionRepo async engine 关闭失败: %s", e)
 
 
 app = FastAPI(
@@ -98,6 +174,16 @@ app.include_router(research.router)
 app.include_router(monitoring_router)
 app.include_router(reports_router)  # v0.9.x — research reports CRUD
 app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
+app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE streaming)
+app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
+
+
+# Dependency override: chats router's get_repo reads from app.state at request time
+def _get_chat_session_repo() -> ChatSessionRepo:
+    return app.state.chat_session_repo  # type: ignore[no-any-return]
+
+
+app.dependency_overrides[chats_router_module.get_repo] = _get_chat_session_repo
 
 
 @app.get("/hello")
