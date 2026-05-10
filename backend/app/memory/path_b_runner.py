@@ -52,7 +52,9 @@ class _LLMExtractorLike(Protocol):
         turns: list[dict[str, Any]],
         session_id: UUID,
         episode_ids: list[UUID],
-    ) -> dict[str, Any]: ...
+    ) -> Any:
+        """Returns either list[ExtractionOutput] (per § 17 A2 (4)) or
+        dict {entities, edges} (legacy mock shape used in unit tests)."""
 
 
 ArchivalInsertFn = Callable[..., Awaitable[ChatMemoryEdge | None]]
@@ -181,7 +183,7 @@ class PathBRunner:
                     continue
 
                 # 走 Plan 2A archival_memory_insert pipeline
-                edges_payload = list(extracted.get("edges") or [])
+                edges_payload = _coerce_edges(extracted)
                 facts_total += len(edges_payload)
                 user_id_val: UUID = _uuid(chunk.episodes[0].user_id)
                 inserted_in_chunk = 0
@@ -262,3 +264,31 @@ def _uuid(val: Any) -> UUID:
     if isinstance(val, UUID):
         return val
     return UUID(str(val))
+
+
+def _coerce_edges(extracted: Any) -> list[dict[str, Any]]:
+    """Accept both shapes for cross-turn extractor return:
+
+    - dict {"entities": [...], "edges": [...]} (legacy mock / pre-§17 shape)
+    - list[ExtractionOutput] (per shared contract § 17 A2 (4) final)
+
+    Returns flat list of edge dicts (each is the JSON shape passed to
+    archival_memory_insert as `content`).
+    """
+    if isinstance(extracted, dict):
+        return list(extracted.get("edges") or [])
+    if isinstance(extracted, list):
+        out: list[dict[str, Any]] = []
+        for item in extracted:
+            # Pydantic ExtractionOutput → has .edges (list of ExtractedEdge)
+            edges = getattr(item, "edges", None)
+            if edges is None and isinstance(item, dict):
+                edges = item.get("edges") or []
+            for edge in edges or []:
+                # Convert pydantic ExtractedEdge to dict for downstream consumer
+                if hasattr(edge, "model_dump"):
+                    out.append(edge.model_dump())
+                elif isinstance(edge, dict):
+                    out.append(edge)
+        return out
+    return []
