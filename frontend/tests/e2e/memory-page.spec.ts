@@ -89,6 +89,10 @@ test.describe('/memory page foundation', () => {
     context,
     page,
   }) => {
+    // suppress Plan 7B onboarding modal so it doesn't intercept clicks.
+    await context.addInitScript(() =>
+      window.localStorage.setItem('memory_onboarding_seen_v1', '1'),
+    )
     await seedAuth(context)
     await stubMemoryEndpoints(page)
 
@@ -100,6 +104,10 @@ test.describe('/memory page foundation', () => {
   })
 
   test('three tabs visible and switchable', async ({ context, page }) => {
+    // suppress onboarding modal in this Plan 7A regression test
+    await context.addInitScript(() =>
+      window.localStorage.setItem('memory_onboarding_seen_v1', '1'),
+    )
     await seedAuth(context)
     await stubMemoryEndpoints(page)
 
@@ -109,24 +117,26 @@ test.describe('/memory page foundation', () => {
     await expect(page.getByTestId('memory-tab-timeline')).toBeVisible()
     await expect(page.getByTestId('memory-tab-audit')).toBeVisible()
 
-    // 默认 graph
-    await expect(page.getByTestId('memory-graph-placeholder')).toBeVisible()
+    // Plan 7B Task 2 起替换 graph placeholder 为 MemoryGraph; 空 graph
+    // 走 empty state.
+    await expect(page.getByText(/还没有 memory/)).toBeVisible({ timeout: 5000 })
 
-    // 切 timeline
+    // 切 timeline (Plan 7B Task 3 起替换为 MemoryTimeline; 空走 empty)
     await page.getByTestId('memory-tab-timeline').click()
-    await expect(
-      page.getByTestId('memory-timeline-placeholder'),
-    ).toBeVisible()
+    await expect(page.getByText(/还没有时间序列/)).toBeVisible({ timeout: 5000 })
 
-    // 切 audit
+    // 切 audit (Plan 7B Task 4 起替换为 MemoryAuditLog)
     await page.getByTestId('memory-tab-audit').click()
-    await expect(page.getByTestId('memory-audit-placeholder')).toBeVisible()
+    await expect(page.getByText(/暂无被纠正的记录/)).toBeVisible({ timeout: 5000 })
   })
 
   test('working blocks card renders persona content', async ({
     context,
     page,
   }) => {
+    await context.addInitScript(() =>
+      window.localStorage.setItem('memory_onboarding_seen_v1', '1'),
+    )
     await seedAuth(context)
     await stubMemoryEndpoints(page)
 
