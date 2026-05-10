@@ -17,7 +17,7 @@ celery_app = Celery(
     "monitoring",
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=["app.tasks.monitoring"],
+    include=["app.tasks.monitoring", "app.tasks.memory"],
 )
 
 celery_app.conf.update(
@@ -25,16 +25,20 @@ celery_app.conf.update(
     task_acks_late=True,
     worker_max_tasks_per_child=100,
     worker_prefetch_multiplier=1,
-    # Spec § 4.1:queues
+    # Spec § 4.1:queues + C.5 Plan 2B/5 共建 memory_llm
     task_queues=(
         Queue("default", routing_key="default"),
         Queue("llm", routing_key="llm"),
+        Queue("memory_llm", routing_key="memory_llm"),
     ),
     task_default_queue="default",
     task_default_routing_key="default",
     # Routing:llm 标记 task → llm 队列(per-task 装饰器也可,但全局映射更清晰)
     task_routes={
         "app.tasks.monitoring.generate_detail_card": {"queue": "llm"},
+        # C.5 Plan 2B memory tasks
+        "app.tasks.memory.extract_session_episodes_async": {"queue": "memory_llm"},
+        "app.tasks.memory.reconcile_pending_milvus": {"queue": "memory_llm"},
     },
     # 时区
     timezone="Asia/Shanghai",
