@@ -94,6 +94,40 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
             e,
         )
 
+    # C.5 cross-session memory: apply SQL migration(partial index / GIN / AGE 图).
+    # 幂等(IF NOT EXISTS), PG 不可用时只 warn 不阻塞启动(serve path 不强依赖 c5).
+    # path 用 Path(__file__).resolve().parents[1] 锚 backend/, 不依赖 cwd
+    # (sediment: feedback_path_resolution_in_plans.md).
+    try:
+        from pathlib import Path
+
+        from sqlalchemy import text as _sql_text
+
+        c5_migration = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "migrations"
+            / "2026-05-11-c5-memory-schema.sql"
+        )
+        if c5_migration.exists():
+            sql = c5_migration.read_text(encoding="utf-8")
+            with engine.begin() as conn:
+                conn.execute(_sql_text(sql))
+            logger.info("C.5 memory SQL migration applied")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("C.5 memory SQL migration skipped: %s", e)
+
+    # C.5 Milvus collection ensure(幂等). Milvus 不可用时只 warn.
+    try:
+        milvus_host = os.getenv("MILVUS_HOST", "127.0.0.1")
+        milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
+        from app.memory.milvus_setup import ensure_chat_memory_edge_collection
+
+        ensure_chat_memory_edge_collection(host=milvus_host, port=milvus_port)
+        logger.info("C.5 Milvus chat_memory_edge_embeddings ensured")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("C.5 Milvus collection ensure skipped: %s", e)
+
     # 初始化定时任务调度器并检查数据
     try:
         from app.service.scheduler_service import init_scheduler_and_check_data
