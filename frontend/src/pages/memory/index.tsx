@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Col, Row, Tabs } from 'antd'
 import type { TabsProps } from 'antd'
 import MemoryGraph from '@/components/memory/MemoryGraph'
+import MemoryTimeline from '@/components/memory/MemoryTimeline'
 import { MemoryWorkingBlocks } from './components/MemoryWorkingBlocks'
 
 /**
@@ -30,14 +31,7 @@ export default function MemoryPage() {
     {
       key: 'timeline',
       label: <span data-testid="memory-tab-timeline">Timeline</span>,
-      children: (
-        <div
-          data-testid="memory-timeline-placeholder"
-          style={{ minHeight: 480, padding: 24, color: '#8a96a3' }}
-        >
-          Timeline view (Plan 7B Task 3 实现)
-        </div>
-      ),
+      children: <MemoryTimeline />,
     },
     {
       key: 'audit',

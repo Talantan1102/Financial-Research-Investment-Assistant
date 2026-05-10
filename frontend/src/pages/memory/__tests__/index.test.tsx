@@ -69,12 +69,10 @@ describe('MemoryPage', () => {
       expect(screen.getByText(/还没有 memory/)).toBeInTheDocument(),
     )
 
-    // 切到 timeline (Task 3 之前仍是 placeholder)
+    // 切到 timeline (Plan 7B Task 3 已替换 placeholder, 空数据走 empty)
     fireEvent.click(screen.getByTestId('memory-tab-timeline'))
     await waitFor(() =>
-      expect(
-        screen.getByTestId('memory-timeline-placeholder'),
-      ).toBeInTheDocument(),
+      expect(screen.getByText(/还没有时间序列/)).toBeInTheDocument(),
     )
 
     // 切到 audit (Task 4 之前仍是 placeholder)
