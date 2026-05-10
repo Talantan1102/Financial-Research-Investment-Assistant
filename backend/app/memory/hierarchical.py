@@ -461,7 +461,117 @@ class HierarchicalMemory:
     async def archival_memory_search(
         self, user_id: UUID, query: str, k: int = 5
     ) -> list[ChatMemoryEdge]:
-        raise NotImplementedError("filled by Plan 3")
+        """spec § 5 3-way Hybrid + RRF v2.
+
+        路径:
+            1. BM25 (PG GIN + jieba) — 词法
+            2. Vector (Milvus + qwen embed) — 语义
+            (Graph 不进 default, 留 archival_memory_traverse 调用)
+
+        Fusion: rrf.reciprocal_rank_fusion_v2 (importance 三档 + 时间感知).
+        Instrumentation: log_retrieval_hit 落库 → Plan 5 calibration / Plan 8 eval 消费.
+
+        失败模式:
+            - vector_search 失败(Milvus / embed) → log warning, 仅返 BM25 结果
+            - instrumentation 失败 → log warning 不阻塞 search
+            - 完全无召回 → 返空 list
+        """
+        import time
+
+        from sqlalchemy import select
+
+        from app.memory.instrumentation import log_retrieval_hit
+        from app.memory.models import ChatMemoryEdge as _Edge
+        from app.memory.retriever import (
+            bm25_search,
+            format_edges_meta_for_rrf,
+            vector_search,
+        )
+        from app.memory.rrf import reciprocal_rank_fusion_v2
+
+        t0 = time.time()
+        session = self._pg_session_factory()
+        try:
+            # 路径 1: BM25 (sync)
+            bm25_hits: list[dict[str, Any]] = []
+            try:
+                bm25_hits = bm25_search(session, user_id=user_id, query=query, k=k * 2)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("archival_memory_search BM25 failed: %s", exc)
+
+            # 路径 2: Vector (async)
+            vector_hits: list[dict[str, Any]] = []
+            if self._milvus is not None and self._embed is not None:
+                try:
+                    vector_hits = await vector_search(
+                        session,
+                        milvus_client=self._milvus,
+                        embed_service=self._embed,
+                        user_id=user_id,
+                        query=query,
+                        k=k * 2,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("archival_memory_search vector failed: %s", exc)
+
+            edges_meta = format_edges_meta_for_rrf([bm25_hits, vector_hits])
+            if not edges_meta:
+                return []
+
+            rrf_top = reciprocal_rank_fusion_v2(
+                retriever_results=[bm25_hits, vector_hits],
+                edges_meta=edges_meta,
+                top=k,
+            )
+            if not rrf_top:
+                return []
+
+            top_eids = [r["edge_id"] for r in rrf_top]
+            edges = (
+                session.execute(
+                    select(_Edge).where(
+                        _Edge.edge_id.in_(top_eids),
+                        _Edge.invalidated_at.is_(None),
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            by_id = {str(e.edge_id): e for e in edges}
+            ordered: list[ChatMemoryEdge] = []
+            for r in rrf_top:
+                edge = by_id.get(r["edge_id"])
+                if edge is not None:
+                    ordered.append(edge)
+
+            latency_ms = int((time.time() - t0) * 1000)
+            try:
+                log_retrieval_hit(
+                    session,
+                    user_id=user_id,
+                    query_text=query,
+                    retrieved_edge_ids=[r["edge_id"] for r in rrf_top],
+                    rrf_scores={r["edge_id"]: r["score"] for r in rrf_top},
+                    edges_meta=edges_meta,
+                    retriever_breakdown={
+                        "bm25": len(bm25_hits),
+                        "vector": len(vector_hits),
+                        "graph": 0,
+                    },
+                    latency_ms=latency_ms,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("log_retrieval_hit failed: %s", exc)
+
+            session.commit()
+            for e in ordered:
+                session.expunge(e)
+            return ordered
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     async def archival_memory_traverse(
         self,

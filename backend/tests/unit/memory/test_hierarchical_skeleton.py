@@ -75,7 +75,12 @@ async def test_archival_memory_insert_implemented_post_plan_2a() -> None:
     assert not isinstance(excinfo.value, NotImplementedError)
 
 
-async def test_archival_memory_search_stub() -> None:
+async def test_archival_memory_search_no_longer_stub() -> None:
+    """Plan 3 shipped: archival_memory_search 不再 NotImplementedError.
+
+    pg_session_factory=None → 调用时 raise TypeError (None not callable),
+    不应再是 NotImplementedError(Plan 3 替换了 stub).
+    """
     mem = HierarchicalMemory(
         pg_session_factory=None,
         age_executor=None,
@@ -84,7 +89,7 @@ async def test_archival_memory_search_stub() -> None:
         llm_extractor=None,
         llm_judge=None,
     )
-    with pytest.raises(NotImplementedError, match="Plan 3"):
+    with pytest.raises((TypeError, AttributeError)):
         await mem.archival_memory_search(uuid4(), "q")
 
 
