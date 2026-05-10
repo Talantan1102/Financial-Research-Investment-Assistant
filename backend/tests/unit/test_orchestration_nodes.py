@@ -88,7 +88,11 @@ async def test_tool_node_no_plan_returns_empty() -> None:
     from app.services.tool_result_cache import ToolResultCache
 
     state = _state(plan=None)
-    result = await tool_node(state, registry=ToolRegistry(), cache=ToolResultCache(session_factory=MagicMock()))
+    result = await tool_node(
+        state,
+        registry=ToolRegistry(),
+        cache=ToolResultCache(session_factory=MagicMock()),
+    )
     assert result == {}
 
 
@@ -107,7 +111,11 @@ async def test_tool_node_executes_calls() -> None:
         reasoning="unit test",
     )
     state = _state(plan=plan)
-    result = await tool_node(state, registry=reg, cache=ToolResultCache(session_factory=MagicMock()))
+    result = await tool_node(
+        state,
+        registry=reg,
+        cache=ToolResultCache(session_factory=MagicMock()),
+    )
 
     assert "tool_results" in result
     results: list[ToolResult] = result["tool_results"]
