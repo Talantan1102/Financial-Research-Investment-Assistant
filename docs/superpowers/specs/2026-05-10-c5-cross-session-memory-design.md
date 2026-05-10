@@ -1146,6 +1146,33 @@ def routing_accuracy(golden_cases):
 
 每条 spec 里独立段落展开，简历叙事 16 条独立讲点。
 
+### 4 个规模化补丁（百万用户场景）
+
+⚠️ **本节定位**：上面 16 条解法在 dogfood / 千用户级别足够。一旦规模化到百万用户 / 千万 episode / 天，要补这 4 条。每条独立成 milestone（不阻塞 v1.x ship，但是简历讲故事和面试答"工业级产品思维"的关键）。
+
+**为啥单列**：诚实承认 spec 主体是 dogfood 级设计，工业产品先 ship 再 scale，不预先猜测；4 条每条都是独立的 system design 答题点；工程量独立估算 +15-20 天，不阻塞 ship。
+
+| # | 规模化难题 | spec 主体缺口 | 补丁分层（按上线顺序）| 验证目标 |
+|---|---|---|---|---|
+| Scale-1 | **写入成本规模化** | 单 session $0.005 在百万用户 / 千万 episode / 天 ≈ $50K/天，老板会问 | (a) **写入分级**：importance ≥ 0.9 走中模型 + 数值正则双校验 / 中信号走 Haiku 4.5 / 低信号纯规则 (b) **前置过滤升级**：现在的"关键词 + 长度"是规则版，规模化时上 200M 参数本地小分类器（1ms 推理）再砍 50% (c) **离线 + 流式分离**：用户主路径只做"原文落库 + 标记待抽"，抽取全部丢后台批，每小时跑一次 (d) **滥用保护**：每用户每小时 memory 写入次数限额 | 单租户 P95 主路径写入 < 100ms / 后台抽取吞吐 ≥ 1 万 episode/分钟 / cost per 千 episode ≤ $1 |
+| Scale-2 | **累积抽取错误（图卫生）** | normalize 失败 audit + provenance 是被动机制，没有主动巡检，错误会污染检索 | (a) **重要 edge 双层校验**：importance ≥ 0.9 走"小模型抽 + 中模型 verify + 数值正则"，三关不通过留 staging 表不进图 (b) **用户回路 first-class**：/memory page "一键否决"按钮做核心 UX 不是隐藏功能；每周邮件推"我们记的关于您最新 5 件事，请确认"（金融审计路径常态化） (c) **图卫生定期巡检**：每月后台 job 统计哪些 prompt pattern 产出 edge 频繁被 invalidated → 反馈调 prompt（Zep-2 的 audit query 升级为 SOP）| invalidation rate < 5%（dogfood baseline）/ 用户主动否决率 < 2% / prompt 调优 release ≥ 月度 |
+| Scale-3 | **调试可解释性 + 上线安全** | provenance FK + /memory UI 是"事后"机制，缺"全链路 trace"和"上线 dual-write" | (a) **统一 request_id 全链路**：用户提问 → 检索 query → 命中 edge → 原始 episode → LLM 输入输出，全部一个 ID 串到一张 observability 表，客服 30 秒定位（PR #39 已有 trace 框架，扩展）(b) **dual-write 1-2 月**：v0.9 in-session memory 和 v1.x archival 并行跑，每天 diff 检查同问题答案一致性，差异自动入 eval 集 (c) **三层指标进监控大盘**：检索路由准确率 ≥ 0.85 / 抽取召回 F1 ≥ 0.7（每周 50 条人工标）/ 端到端回答正确率（v0.8.5 LLM-judge）— 单层退化告警 | dual-write diff < 10% / 大盘三层指标 ≥ baseline / SOP "客诉 → 30 秒定位 → 1 小时复现"演练通过 |
+| Scale-4 | **多租户 + 规模化隐形成本** | 只有 user_id 第一字段 + 索引，单 PG 单 AGE 图全用户共享，撑不到 50 万用户 | (a) **分库分表**：user_id hash 取模分 N 个 PG schema，每 schema 独立 AGE 图实例 — 牺牲跨用户全局查询（金融助手用不到），换每 schema ≤ 2000 万行 edge (b) **Milvus 按 user 分区**：partition by user_id，检索时 partition pruning 避免全 collection 扫 (c) **冷热分离**：90 天前 edge 走 PG 分区表（按 recorded_at 分），冷数据归档到压缩分区 (d) **GDPR / 用户删除**：`DELETE WHERE user_id = $1` 后台 job 异步执行，Milvus 同步 `delete_by_filter`，审计日志保留删除时间戳 (e) **监控指标**：每用户 edge 数 P95 / 单用户检索 P99 / 分区倾斜度，超阈值告警 | 单 schema ≤ 2000 万 edge / Milvus partition pruning 命中 ≥ 90% / 99% 检索只扫近 90 天热数据 / GDPR 删除 SLA ≤ 24h |
+
+### 规模化补丁的触发上线条件
+
+不是 v1.x ship 时全做，按真实流量触发：
+
+- **Scale-1 触发**：日活 > 1 万 或 月成本 > $1K
+- **Scale-2 触发**：dogfood 1 月后 invalidation rate > 5% 或用户报错
+- **Scale-3 触发**：第一次客诉 "答错了为啥" 30 分钟内定位不到
+- **Scale-4 触发**：注册用户 > 10 万 或 单库 edge > 5000 万行
+
+### 简历叙事维度
+
+16 工业难题 = 算法 / 系统设计深度（"我撞实了 16 个"）。
+4 规模化补丁 = 工业产品思维（"我懂从 dogfood 到百万用户的差距"）。**面试官常问的"上量后会遇到啥"答的就是这 4 条。**
+
 ---
 
 ## § 12 Test Strategy
@@ -1239,6 +1266,8 @@ async def test_bi_temporal_holding_evolution():
 | Spec / plan / docs | 2 |
 | **Total** | **38**（max scenario）/ **30**（smooth scenario）|
 
+> **注**：以上 30-38 天是 dogfood / 千用户级别 ship 工程量。**§ 11 末尾的 4 条规模化补丁（Scale-1 ~ Scale-4）独立 +15-20 天 milestone，不阻塞 v1.x ship**，按 § 11 的"触发上线条件"分批做。
+
 跟 v1.0 监控引擎实际 ship（~25 天）比 ×1.2-1.5 量级，跟 PR #39 (~80+ task autonomous pipeline) 比小 1/2。
 
 适合走 PR #39 同款 autonomous overnight pipeline 模式（spec → 5-7 plan → autonomous agent execute → manual followup cassette + dogfood）。
@@ -1294,6 +1323,15 @@ async def test_bi_temporal_holding_evolution():
 
 ### P3 留 Hook（v1.x 后期 / v2）
 
+#### 规模化补丁 4 条（§ 11 4 条 Scale-X 的 hook，按 § 11 触发条件上线）
+
+- [ ] **Scale-1 写入分级 + 前置过滤升级 + 离线 batch 流式化**（importance-based 模型路由 / 200M 本地小分类器 / 主路径只落库异步抽 / per-user rate limit）
+- [ ] **Scale-2 图卫生 + 用户回路 first-class**（重要 edge 双层校验 + 数值正则 / /memory 一键否决 UX 进核心 / 月度 prompt 巡检 SOP / 周邮件用户确认）
+- [ ] **Scale-3 全链路 trace + dual-write + 三层监控大盘**（request_id 串全链路 / 1-2 月 in-session 与 archival dual-write diff / 检索 / 抽取 / 回答三层指标进大盘 + 单层退化告警）
+- [ ] **Scale-4 分库分表 + Milvus 分区 + 冷热分离 + GDPR pipeline**（user_id hash 分 N schema / Milvus partition by user_id / 90 天 PG 分区表归档冷数据 / 用户删除后台 job + 审计日志）
+
+#### 产品功能 hook
+
 - [ ] /memory UI edit & delete (含 cascade invalidation 复杂度)
 - [ ] 跨用户 memory sharing (团队共享 memory)
 - [ ] Memory replay (LLM-as-time-machine：用某天 graph 重放 chat)
@@ -1310,6 +1348,22 @@ async def test_bi_temporal_holding_evolution():
 C.5 ship 完后,可以这样讲:
 
 > "C.5 cross-session memory 撞实 16 个工业难题 (13 通用 + 3 Zep 特有)。架构是 Letta MemGPT 论文 (2023) 的 agent-self-managed tool 接口 + Zep / Graphiti 论文 (Jan 2025) 的 temporal knowledge graph 后端 杂交版,加 mem0 风的 LLM-judge conflict resolution + Anthropic Citations API 风的 provenance FK。Storage 选 PG + Apache AGE 不上 Neo4j —— 复用 v1.0 PG 基建,运维一致,但 PG 表存全数据 + B-tree 索引 / AGE 镜像存图拓扑给 Cypher 用,避开 AGE agtype 索引能力弱的问题。Bi-temporal model (Snodgrass 1993) 区分 real-world validity vs transaction time,让'用户对茅台态度演化'这类金融 use case 关键 query 表达力完整。3-way hybrid retrieval (BM25 + vector + graph) + RRF fusion 是 2024-2025 工业前沿 (Microsoft GraphRAG paper)。Cost optimization 5 项 ladder (prompt cache + batch + skip gate + async + embedding cache) 把单 session 成本从 $0.025 降到 $0.005,接近 mem0 paper 报告的 $0.001。"
+
+### 面试场景叙事段（"工业级产品思维"维度）
+
+被问到"你这个 dogfood 项目怎么扩到百万用户"时:
+
+> "Spec 主体是 dogfood / 千用户级落地,30-38 天 ship。但我在 spec § 11 末尾显式列了 4 条规模化补丁 (Scale-1 ~ Scale-4),每条带触发上线条件、补丁分层、验证目标 —— 不预先做、不假装支持、不阻塞 ship。
+> 
+> Scale-1 写入成本规模化:把 spec 主体的 5 项省钱组合拳从单用户视角扩到百万用户,加写入分级 (importance ≥ 0.9 走中模型 + 数值正则,中信号 Haiku,低信号纯规则) + 200M 参数本地小分类器替代规则版前置过滤 + 主路径只落库异步抽 + per-user rate limit。
+> 
+> Scale-2 累积抽取错误:重要 edge 走"小模型抽 + 中模型 verify + 数值正则"三关 + /memory page 一键否决做核心 UX (不是隐藏功能) + 月度 prompt 巡检 SOP。**这是工业产品和纯 ML 项目的分水岭 —— 不指望 LLM 100% 对,指望系统让用户花 10 秒就能纠正。**
+> 
+> Scale-3 调试 + 上线安全:request_id 全链路串到 observability 表 (PR #39 trace 框架扩展) + v0.9 in-session 和 v1.x archival dual-write 1-2 月 diff 检查 + 三层指标进监控大盘 (路由准确率 / 抽取召回 F1 / 端到端正确率)。
+> 
+> Scale-4 多租户 + 规模化:user_id hash 分 N 个 PG schema (每 schema ≤ 2000 万 edge) + Milvus partition by user_id (检索时 partition pruning) + 90 天 PG 分区表冷热分离 + GDPR 删除走后台 job (`DELETE WHERE user_id` 不进主路径)。
+> 
+> 工程量这 4 条单独 +15-20 天独立 milestone,按真实流量触发分批做。Spec 主体 30-38 天先 ship,等 dogfood / 真用户暴露问题再扩。"
 
 ---
 
@@ -1360,4 +1414,5 @@ trigger traverse 词清单（system prompt 内）：
 | Tool count | 6 | § 6 |
 | 工业难题 | 16 全 surface | § 11 |
 | Cost optimization | 5 项 ladder | § 4 |
-| 工程量 | 30-38 天 | § 13 |
+| **规模化补丁** | **4 条 Scale-X 独立 milestone（不阻塞 ship，按真实流量触发）** | **§ 11 § 14** |
+| 工程量 | 30-38 天（dogfood 级，规模化补丁 +15-20 天） | § 13 |
