@@ -1173,6 +1173,100 @@ def routing_accuracy(golden_cases):
 16 工业难题 = 算法 / 系统设计深度（"我撞实了 16 个"）。
 4 规模化补丁 = 工业产品思维（"我懂从 dogfood 到百万用户的差距"）。**面试官常问的"上量后会遇到啥"答的就是这 4 条。**
 
+### 8 条算法深度 + 工程细节难题
+
+⚠️ **本节定位**：spec 主体 16 条覆盖 baseline，§ 11 4 条规模化补丁覆盖上量场景。这 8 条是"算法深度 + 工程细节 + 安全 / UX 完整度"层，**dogfood 期就可能撞**（不像规模化补丁要等上量），按"v1.x ship 必做（6 条）/ 触发后做（2 条）"分组。
+
+#### 优先级分组
+
+| 类别 | v1.x ship 必做（6 条）| 触发后做（2 条）|
+|---|---|---|
+| 算法 | #2 投毒 + Agent 幻觉写 / #3 importance + 时间感知 / #4 跨轮抽取 | #1 向量模型升级（qwen v3→v4 时触发）|
+| 工程 | #5 3 方一致性反向失败 / #7 Memory vs KB routing | #6 Ontology 演化（加新 type 时触发）|
+| 业务 | #8 用户心智模型 + 信任 | — |
+
+#### 8 条详表
+
+| # | 难题 | spec 主体缺口 | 补丁 | 验证 |
+|---|---|---|---|---|
+| 1 | **向量模型升级迁移** | § 4 优化只写 embedding cache，无升级期 dual-write / 维度不同 / alias 切换 | (a) Milvus alias 模式：`current_alias` 指向真 collection，升级时建新 collection 重算，alias 原子切换 (b) `embedding_version` 字段标记每条向量的模型版本 (c) 重算期 dual-write，检索按 alias 取当前版本 | 切换演练：N 万向量 dual-write 1 小时无错 / alias 切换零 downtime / 老版本可回滚 |
+| 2 | **Memory 投毒 + Agent 幻觉写入** | § 4 写入 pipeline 假设 episode 内容可信，无 prompt injection 检测，无 agent 写入审计 | (a) 写入前过 prompt-injection 分类器（小模型 + 关键词组合），命中标 `audit_flag='suspicious'` 不进 archival，走人工 review (b) Agent 调 `archival_memory_insert` 必须带 `evidence_quote`，必须能在 episode 原文 substring 找到的引用，找不到拒绝写 (c) 监控：每用户每周新写入 / 老 edge 比例突然飙高 → 告警 | L1 投毒攻击测试集（30 个已知 prompt injection pattern）/ agent evidence_quote 命中率 ≥ 0.95 / 监控告警演练 |
+| 3 | **Importance 不稳 + 最近偏置（时间感知 ranking）** | importance 连续值 LLM 标不稳 / RRF 公式 `Σ 1/(60+rank)` 不带 importance 加权 / 不带时间衰减 → 长尾老 edge 沉底 | (a) **importance 离散三档** `{high=0.9, medium=0.5, low=0.2}`，LLM 标离散更稳定，cost 不变 (b) **后验行为信号校准**：周 job 根据"被 retrieve 命中数 + 用户否决"反向调 importance，行为信号比 LLM 自评准 (c) **RRF 加 importance 加权 + 时间感知**：`score_final = (Σ 1/(60+rank)) × importance_weight × time_decay`（详见下方 #3 公式展开）(d) **τ 按 rel_type 分级**：τ_持仓（HOLDS/SOLD）=365d / τ_偏好（PREFERS/AVOIDS/WATCHES）=180d / τ_观点（EXPRESSED_VIEW/STUDIED）=90d — 金融市场观点 3-6 月过时，持仓事实可更长 (e) 长尾召回监控（eval pipeline sample 100 query，top-5 valid_from P90 不能全集中近 7 天）| 离散三档 importance 跨 session 一致性 ≥ 0.9 / RRF v2 加时间感知前后 long-tail recall 提升 ≥ 15% / 长尾召回监控周报上大盘 |
+| 4 | **跨轮关系抽取** | episode 单元粒度死板，完整 fact 跨 3 turn 抽不出（"我刚买了" → "买了什么" → "茅台 500 股"）| (a) End-of-session 兜底批扫时按"语义连续性"合并相邻 episodes（关键词共指 + 时间间隔 < 5 分钟）(b) 抽取 prompt 输入升级为"最近 5 turn 滑动窗口"而非单 turn (c) L1 测试新增"跨 turn fact 完整性测试" | 跨 turn fact 抽取召回 ≥ 0.7 / 单 turn fact 抽取召回不退化 |
+| 5 | **PG + AGE + Milvus 三方一致性反向失败** | § 4 Step 7 outbox 只覆盖 Milvus 单向失败，反向（AGE 成功 PG rollback / 进程崩溃在 Step 8 之前 → 重复抽）未覆盖 | (a) AGE 同步必须在 PG 同事务（spec 已写，补 verify 测试）(b) **幂等键 UNIQUE constraint** `(episode_id, source_label, target_label, rel_type, valid_from)` 防重复抽 (c) 进程崩溃恢复 job：启动时扫"PG 写完 + Milvus pending + episode `extracted_at IS NULL`"的 inconsistent 状态做 reconciliation | L2 chaos test：抽取 pipeline 中途 kill 进程，重启后 episode 不重复抽 / 不留孤儿 AGE 节点 |
+| 6 | **Ontology / Schema 演化迁移** | § 3 "drift-tolerant" 只允许新词进 properties，无新 entity_type 上线时回填老边的 migration 框架 | (a) `ontology_version` 字段落每条 edge (b) 上新 type 时跑 data migration job：扫所有老 edge properties，LLM 重判是否归入新 type (c) migration 输出 diff 让作者 review，不自动 apply — "data migration job"，类似 Alembic 但跑数据 | v1.x 试做一次 "Bond 加入 ontology" 的 data migration 演练 / migration diff 准确率 ≥ 0.9 |
+| 7 | **Memory vs KB Search 检索路由** | v0.7 KB Search 已有 / C.5 上 archival memory / spec § 6 routing 只在 memory 内部 6 tool / memory 整体 vs KB 整体 routing 没写 → 用户问"基于持仓推荐"agent 不知道走哪 | (a) **LangGraph supervisor 加 router 节点** 输出 `retrieval_targets: ["memory" / "kb" / "both"]` (b) 触发词区分：memory（"我 / 我的 / 上次 / 持仓 / 偏好"）/ KB（"研报 / 财报 / 公告 / 政策"）/ both（"基于我 + 推荐 / 结合 + 我的"）(c) 两路结果 prompt 显式区隔：`[用户上下文]`（memory）vs `[市场知识]`（KB），让 LLM 不混淆个人事实和公开知识 (d) 默认 fallback memory（个人化场景多）| Routing eval 50 case ≥ 0.85 / both 类 query LLM 不矛盾化（用户偏好 vs 市场跑输应该是 trade-off 不是矛盾）|
+| 8 | **用户心智模型 + 信任危机** | § 9 /memory page 是被动 UI（用户主动来才看到），无主动告知机制 → 上线第一周用户问"你怎么监视我" | (a) Agent 在 chat 内**显式提及来源**："基于您 2024-11 提过的偏好（[查看](#mem-id)）..." 让用户感知 memory 在用 (b) 首次 session 强 onboarding 弹窗："我会记住您的投资偏好和持仓，可随时在 /memory 删除" (c) 每月推一封"我们记得关于您的 5 件事，请确认"邮件（也是 § 11 Scale-2 图卫生 hook）| 用户调研 5 人：首次 session 后 4/5 知道有 memory 系统 / 月度确认邮件打开率 ≥ 30% |
+
+#### #3 时间感知 RRF 公式展开（替换 § 5 现有 RRF）
+
+跟 § 5 现有 RRF（`score = Σ 1/(60+rank_in_retr)`）兼容，在 fusion 后再乘两个因子：
+
+```python
+def reciprocal_rank_fusion_v2(retriever_results, edges_meta, k=60, top=5):
+    rrf_scores = defaultdict(float)
+    for retriever_list in retriever_results:
+        for rank, item in enumerate(retriever_list, start=1):
+            rrf_scores[item["edge_id"]] += 1.0 / (k + rank)
+    
+    final_scores = {}
+    now = datetime.utcnow()
+    for eid, base in rrf_scores.items():
+        meta = edges_meta[eid]
+        # importance 三档映射，low 不完全压制(下限 0.6)
+        imp_weight = {0.9: 0.95, 0.5: 0.75, 0.2: 0.6}.get(meta["importance"], 0.75)
+        # 时间衰减按 rel_type 分级 τ
+        tau_days = {
+            "HOLDS": 365, "SOLD": 365,
+            "PREFERS": 180, "AVOIDS": 180, "WATCHES": 180,
+            "EXPRESSED_VIEW": 90, "STUDIED": 90,
+        }.get(meta["rel_type"], 180)
+        # 历史 edge (valid_to IS NOT NULL) 取 max(valid_from, valid_to) 作为参考时间
+        ref_time = meta["valid_to"] or meta["valid_from"]
+        delta_days = (now - ref_time).days
+        # 衰减底 0.5 不消失 — 老 fact 仍可被检索，保 audit / 长尾价值
+        time_decay = 0.5 + 0.5 * math.exp(-delta_days / tau_days)
+        final_scores[eid] = base * imp_weight * time_decay
+    
+    return sorted_top_k(final_scores, top)
+```
+
+**关键设计取舍**：
+- **衰减底 0.5 不为 0**：防止老 fact 完全消失。1 年前用户说"我永不碰科技"仍要可被召回，只是排名靠后
+- **importance 下限 0.6**：low importance 不被完全压制（0.6 vs 0.95 = 36% 差距，有区分度但不一边倒）
+- **τ 按 rel_type 分级**：金融垂直洞察 — 持仓事实（365d）> 偏好（180d）> 观点（90d），工业 ranking 系统通用 lifecycle 思路
+- **历史 edge 用 valid_to 衰减**：事实"最近一次为真的时间"作参考 — 用户 2024-08 买 2025-03 卖的茅台，从 2025-03 起开始衰减，不是从 2024-08
+- **后验校准 importance**：LLM 一次抽完不动，周 job 再调一次，行为信号比 LLM 自评稳定 — 类似 YouTube / TikTok ranking 系统的"prediction + posterior calibration"
+
+#### 简历讲点（8 条）
+
+跟 16 + 4 三层叠加（总 28 条独立讲点）：
+- **第 1 层 16 条** = 算法 / 系统设计 baseline
+- **第 2 层 4 条 Scale-X** = 工业产品思维（上量后）
+- **第 3 层 8 条** = 算法深度 + 工程细节 + 安全 / UX
+
+简历讲法：
+
+> "我没只做工业 baseline。从 dogfood 期就把投毒 + Agent 幻觉写 / 三方一致性 / Memory vs KB routing / 时间感知 ranking（RRF + importance 三档 + τ 按 rel_type 分级 + 后验行为校准）这些工业系统真实痛点纳入 spec，撞实并落代码。"
+
+#### 工程量增量
+
+**v1.x ship 必做 6 条 +5-7 天**（已加进 § 13 主表）：
+
+| # | 补丁 | 天 |
+|---|---|---|
+| #2 | 投毒 + Agent 幻觉（分类器 + evidence_quote 校验 + 监控）| 1.5 |
+| #3 | importance 三档 + 时间感知 RRF + τ 配置 + 长尾监控 | 1.5 |
+| #4 | 跨轮抽取（5 turn 滑动窗口 + 测试）| 1 |
+| #5 | 三方一致性（幂等键 + 崩溃恢复 job）| 1 |
+| #7 | Memory vs KB routing（supervisor router + prompt 区隔 + eval）| 1 |
+| #8 | 用户心智（显式提及 + onboarding + 邮件 spec）| 0.5 |
+| **小计** | | **6.5** |
+
+**触发后做 2 条**（进 § 14 P3 hooks）：
+- #1 向量模型升级 — qwen v3→v4 时触发
+- #6 Ontology 演化 — 加新 entity_type / rel_type 时触发
+
 ---
 
 ## § 12 Test Strategy
@@ -1264,9 +1358,14 @@ async def test_bi_temporal_holding_evolution():
 | Eval pipeline (3 metric + 50 golden + routing accuracy) | 3 |
 | Tests (L0 + L1 + L2 + bi-temporal differential) | 5 |
 | Spec / plan / docs | 2 |
-| **Total** | **38**（max scenario）/ **30**（smooth scenario）|
+| **算法深度 + 工程细节 6 条 v1.x 必做（§ 11 末尾详表）** | **6.5** |
+| **Total** | **44.5**（max scenario）/ **36.5**（smooth scenario）|
 
-> **注**：以上 30-38 天是 dogfood / 千用户级别 ship 工程量。**§ 11 末尾的 4 条规模化补丁（Scale-1 ~ Scale-4）独立 +15-20 天 milestone，不阻塞 v1.x ship**，按 § 11 的"触发上线条件"分批做。
+> **注 1**：以上 36.5-44.5 天 = 30-38 天 dogfood baseline + 6.5 天算法深度补丁（§ 11 末尾 8 条中 v1.x 必做的 6 条 — 投毒检测 / 时间感知 RRF / 跨轮抽取 / 三方一致性 / Memory-vs-KB routing / 用户心智）。
+>
+> **注 2**：**§ 11 4 条规模化补丁（Scale-1 ~ Scale-4）独立 +15-20 天 milestone**，不阻塞 v1.x ship，按 § 11 的"触发上线条件"分批做。
+>
+> **注 3**：§ 11 末尾 8 条中**触发后做的 2 条**（#1 向量模型升级 / #6 Ontology 演化）进 § 14 P3 hooks，触发后才上工。
 
 跟 v1.0 监控引擎实际 ship（~25 天）比 ×1.2-1.5 量级，跟 PR #39 (~80+ task autonomous pipeline) 比小 1/2。
 
@@ -1330,6 +1429,11 @@ async def test_bi_temporal_holding_evolution():
 - [ ] **Scale-3 全链路 trace + dual-write + 三层监控大盘**（request_id 串全链路 / 1-2 月 in-session 与 archival dual-write diff / 检索 / 抽取 / 回答三层指标进大盘 + 单层退化告警）
 - [ ] **Scale-4 分库分表 + Milvus 分区 + 冷热分离 + GDPR pipeline**（user_id hash 分 N schema / Milvus partition by user_id / 90 天 PG 分区表归档冷数据 / 用户删除后台 job + 审计日志）
 
+#### 算法深度 hook 2 条（§ 11 末尾 8 条中触发后做的）
+
+- [ ] **#1 向量模型升级迁移**（Milvus alias 模式 + `embedding_version` 字段 + dual-write 期检索一致性 + 老版本回滚）— qwen v3→v4 或同维度模型对比时触发
+- [ ] **#6 Ontology / Schema 演化迁移**（`ontology_version` 字段 + LLM 重判老 edge type + diff review 不自动 apply）— 加新 entity_type（如 Bond）或 rel_type（如 HEDGES）时触发
+
 #### 产品功能 hook
 
 - [ ] /memory UI edit & delete (含 cascade invalidation 复杂度)
@@ -1364,6 +1468,24 @@ C.5 ship 完后,可以这样讲:
 > Scale-4 多租户 + 规模化:user_id hash 分 N 个 PG schema (每 schema ≤ 2000 万 edge) + Milvus partition by user_id (检索时 partition pruning) + 90 天 PG 分区表冷热分离 + GDPR 删除走后台 job (`DELETE WHERE user_id` 不进主路径)。
 > 
 > 工程量这 4 条单独 +15-20 天独立 milestone,按真实流量触发分批做。Spec 主体 30-38 天先 ship,等 dogfood / 真用户暴露问题再扩。"
+
+### 面试场景叙事段（"算法深度 + 工程细节"维度）
+
+被问到"你 ranking / 安全 / 工程一致性怎么做"时:
+
+> "Spec § 11 末尾我又加了 8 条算法深度 + 工程细节难题,6 条 v1.x 必做 +5-7 天进 spec,2 条触发后做进 P3 hooks。重点几个:
+>
+> **检索 ranking 不是 RRF 跑完就完事**。原 RRF 公式 `Σ 1/(60+rank)` 不带 importance 加权也不带时间衰减,长尾老 edge 会沉底。我加 RRF v2: `score_final = (Σ 1/(60+rank)) × importance_weight × time_decay`。importance 改三档离散 `{high=0.9, medium=0.5, low=0.2}` 让 LLM 标的更稳,映射到 [0.6, 0.95] 加权(low 不完全压制);time_decay = 0.5 + 0.5×exp(-Δt/τ) 衰减底 0.5 不消失保 audit 价值;**τ 按 rel_type 分级** — 持仓事实(HOLDS/SOLD)τ=365 天,偏好(PREFERS/AVOIDS)τ=180 天,观点(EXPRESSED_VIEW/STUDIED)τ=90 天 — 金融市场观点 3-6 月就过时,持仓事实可更长。importance 还有**后验行为信号校准**周 job(被 retrieve 命中数 + 用户否决) — 类似 YouTube / TikTok 的 "prediction + posterior calibration"。
+>
+> **Memory 投毒 + Agent 自我幻觉写**(Anthropic 2024 indirect prompt injection paper 真案例):写入前过 prompt-injection 分类器命中 audit_flag 不进图;Agent 调 `archival_memory_insert` 必须带 `evidence_quote`(必须能在 episode 原文 substring 找到的引用),找不到拒绝写。
+>
+> **PG + AGE + Milvus 三方一致性反向失败**:spec 主体只覆盖 Milvus 单向 outbox,但反向(AGE 成功 PG rollback / 进程崩溃在标记 extracted_at 之前 → 重复抽)我加幂等键 UNIQUE constraint + 启动时 inconsistent 状态 reconciliation job + L2 chaos test。
+>
+> **Memory vs KB 检索路由**(v0.7 KB Search 已有,C.5 上 archival memory):LangGraph supervisor 加 router 节点输出 `["memory" / "kb" / "both"]`,触发词区分(我 / 我的 → memory,研报 / 财报 → KB,基于我 + 推荐 → both),两路结果 prompt 显式区隔 `[用户上下文]` vs `[市场知识]` 让 LLM 不混。
+>
+> **跨轮关系抽取**:spec 主体按 episode(单 turn)抽,但'我刚买了' → '买了什么' → '茅台 500 股' 跨 3 turn 单 turn 都抽不出。eos 兜底批扫时按语义连续性合并相邻 episode + 抽取 prompt 升级为 5 turn 滑动窗口。
+>
+> **用户心智模型 + 信任**:Agent 在 chat 内显式提及 memory 来源(基于您 2024-11 的偏好 [查看](#mem-id))、首次 session onboarding 弹窗、月度'我们记得关于您的 5 件事请确认'邮件 — Apple Intelligence / ChatGPT memory 上线第一周都吃过这个亏。"
 
 ---
 
@@ -1415,4 +1537,5 @@ trigger traverse 词清单（system prompt 内）：
 | 工业难题 | 16 全 surface | § 11 |
 | Cost optimization | 5 项 ladder | § 4 |
 | **规模化补丁** | **4 条 Scale-X 独立 milestone（不阻塞 ship，按真实流量触发）** | **§ 11 § 14** |
-| 工程量 | 30-38 天（dogfood 级，规模化补丁 +15-20 天） | § 13 |
+| **算法深度 + 工程细节** | **8 条（v1.x 必做 6 + 触发后 2），含时间感知 RRF + importance 三档 + τ 按 rel_type 分级** | **§ 11 § 5 § 14** |
+| 工程量 | 36.5-44.5 天（dogfood + 6 条算法深度），规模化补丁 +15-20 天 / 算法深度 hook 2 条触发后做 | § 13 |
