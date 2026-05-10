@@ -66,14 +66,94 @@ class HierarchicalMemory:
     # === Tier 1 Working Memory(Plan 1B Task 6 实现) ===
 
     async def get_working_blocks(self, user_id: UUID) -> dict[str, ChatMemoryWorkingBlock]:
-        # Task 6 fill
-        raise NotImplementedError("filled by Plan 1B Task 6")
+        """Return {block_name: block} for user's persona / scratchpad.
+
+        新用户 / 没建过 block 的用户 → 返回空 dict(不自动建).
+        cold_start 走单独 path 给新用户初始化 block.
+        """
+        from app.memory.models import ChatMemoryWorkingBlock
+
+        session = self._pg_session_factory()
+        try:
+            rows = (
+                session.query(ChatMemoryWorkingBlock)
+                .filter(ChatMemoryWorkingBlock.user_id == user_id)
+                .all()
+            )
+            result = {b.block_name: b for b in rows}
+            for r in rows:
+                session.expunge(r)
+            return result
+        finally:
+            session.close()
 
     async def core_memory_append(
         self, user_id: UUID, block_name: str, content: str
     ) -> ChatMemoryWorkingBlock:
-        # Task 6 fill
-        raise NotImplementedError("filled by Plan 1B Task 6")
+        """Append content to block. Auto-paging if exceed max_tokens.
+
+        Plan 1B: paged_out_lines 通过 logger.warning 记(后续 Plan 2 ship 后,
+        改成调 self.archival_memory_insert 真归档).
+        """
+        from app.memory.models import ChatMemoryWorkingBlock
+        from app.memory.working_blocks import (
+            BLOCK_DEFAULTS,
+            approx_token_count,
+            do_append_with_paging,
+        )
+
+        if block_name not in BLOCK_DEFAULTS:
+            raise ValueError(
+                f"unknown block_name {block_name!r}; valid: {list(BLOCK_DEFAULTS.keys())}"
+            )
+
+        session = self._pg_session_factory()
+        try:
+            block = (
+                session.query(ChatMemoryWorkingBlock)
+                .filter(
+                    ChatMemoryWorkingBlock.user_id == user_id,
+                    ChatMemoryWorkingBlock.block_name == block_name,
+                )
+                .first()
+            )
+            if block is None:
+                block = ChatMemoryWorkingBlock(
+                    user_id=user_id,
+                    block_name=block_name,
+                    content="",
+                    token_count=0,
+                    max_tokens=BLOCK_DEFAULTS[block_name],
+                )
+                session.add(block)
+                session.flush()
+
+            new_content, paged = do_append_with_paging(
+                existing=block.content,
+                new=content,
+                max_tokens=block.max_tokens,
+            )
+            block.content = new_content
+            block.token_count = approx_token_count(new_content)
+
+            if paged:
+                logger.warning(
+                    "core_memory_append: paged %d lines from block %s/user=%s — "
+                    "Plan 2 ship 后改 archival_memory_insert 真归档(spec § 7)",
+                    len(paged),
+                    block_name,
+                    user_id,
+                )
+
+            session.commit()
+            session.refresh(block)
+            session.expunge(block)
+            return block
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     async def core_memory_replace(
         self,
@@ -82,8 +162,46 @@ class HierarchicalMemory:
         old_content: str,
         new_content: str,
     ) -> ChatMemoryWorkingBlock:
-        # Task 6 fill
-        raise NotImplementedError("filled by Plan 1B Task 6")
+        """Exact substring replace. Raise ValueError if not found."""
+        from app.memory.models import ChatMemoryWorkingBlock
+        from app.memory.working_blocks import (
+            BLOCK_DEFAULTS,
+            approx_token_count,
+            do_replace_exact,
+        )
+
+        if block_name not in BLOCK_DEFAULTS:
+            raise ValueError(
+                f"unknown block_name {block_name!r}; valid: {list(BLOCK_DEFAULTS.keys())}"
+            )
+
+        session = self._pg_session_factory()
+        try:
+            block = (
+                session.query(ChatMemoryWorkingBlock)
+                .filter(
+                    ChatMemoryWorkingBlock.user_id == user_id,
+                    ChatMemoryWorkingBlock.block_name == block_name,
+                )
+                .first()
+            )
+            if block is None:
+                raise ValueError(
+                    f"core_memory_replace: block {block_name} not found for user {user_id}"
+                )
+
+            replaced = do_replace_exact(block.content, old_content, new_content)
+            block.content = replaced
+            block.token_count = approx_token_count(replaced)
+            session.commit()
+            session.refresh(block)
+            session.expunge(block)
+            return block
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     # === Tier 2 Archival ===
 

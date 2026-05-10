@@ -9,7 +9,7 @@ added in Task 7. Plan 1B will Edit to add additional fixtures.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +85,32 @@ def pg_memory_session(pg_memory_fixture: dict[str, Any]) -> Iterator[Any]:
     yield session
     session.rollback()
     session.close()
+
+
+# ---------------------------------------------------------------------------
+# Plan 1B: pg_memory_session_factory — callable factory for HierarchicalMemory DI
+# (per shared contract § 17 A1, Plan 1B Edit adds this fixture)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def pg_memory_session_factory(
+    pg_memory_fixture: dict[str, Any],
+) -> Callable[[], Any]:
+    """Returns a no-arg callable that produces a fresh sync Session.
+
+    HierarchicalMemory's DI contract (§ 3) expects pg_session_factory: () -> Session,
+    a sync callable. Plan 1B tests that drive HierarchicalMemory consume this.
+    Each invocation yields a brand-new Session — caller is responsible for
+    commit / rollback / close.
+    """
+    engine = pg_memory_fixture["engine"]
+    SessionLocal = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+
+    def _factory() -> Any:
+        return SessionLocal()
+
+    return _factory
 
 
 # ---------------------------------------------------------------------------
