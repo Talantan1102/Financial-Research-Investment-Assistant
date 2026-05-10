@@ -264,10 +264,44 @@ class ChatState(BaseModel):
         ),
     )
 
+    # === C.5 Plan 6 — Memory vs KB routing ===
+    retrieval_targets: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Output of memory_kb_router_node — single-element list "
+            "containing 'memory' / 'kb' / 'both'. Empty before router runs."
+        ),
+    )
+    memory_hits: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "archival_memory_search results when retrieval_targets includes memory/both. "
+            "Serialized ChatMemoryEdge dicts."
+        ),
+    )
+    kb_hits: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "KbSearchService.search results when retrieval_targets includes kb/both. "
+            "Serialized KbHit dicts."
+        ),
+    )
+    memory_kb_routing_reasoning: str | None = Field(
+        default=None,
+        description="Reasoning string from memory_kb_router for trace/debug.",
+    )
+
     # === observability ===
     trace_request_id: str
     span_stack: list[str] = Field(default_factory=list)
     cost_so_far: float = 0.0
+
+    @model_validator(mode="after")
+    def _check_retrieval_targets_field(self) -> ChatState:
+        for t in self.retrieval_targets:
+            if t not in ("memory", "kb", "both"):
+                raise ValueError(f"Invalid retrieval target in ChatState: {t!r}")
+        return self
 
 
 # Backwards-compatibility alias for callers still importing GraphState.
