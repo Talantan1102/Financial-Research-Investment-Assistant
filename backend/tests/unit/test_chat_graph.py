@@ -8,6 +8,7 @@ Tests cover:
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from app.agents.schemas import GraphState, Plan, ToolCall
@@ -111,7 +112,7 @@ def test_build_chat_graph_returns_compiled_graph(
         responder=responder,
         registry=registry,
         memory=InSessionMemory(),
-        cache=ToolResultCache(),
+        cache=ToolResultCache(session_factory=MagicMock()),
     )
 
     assert isinstance(graph, CompiledStateGraph)
@@ -142,7 +143,7 @@ def test_build_chat_graph_no_checkpointer_by_default(
         responder=responder,
         registry=registry,
         memory=InSessionMemory(),
-        cache=ToolResultCache(),
+        cache=ToolResultCache(session_factory=MagicMock()),
     )
 
     # No checkpointer should be attached — attribute may be None or absent

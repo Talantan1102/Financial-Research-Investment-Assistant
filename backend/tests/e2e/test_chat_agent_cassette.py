@@ -200,6 +200,8 @@ async def test_chat_agent_stock_quote_end_to_end(real_adapter: _Adapter) -> None
     planner = ChatPlanner(llm=llm, registry=registry)
     responder = Responder(llm=llm)
 
+    from unittest.mock import MagicMock
+
     from app.agents.in_session_memory import InSessionMemory
     from app.services.tool_result_cache import ToolResultCache
 
@@ -208,7 +210,7 @@ async def test_chat_agent_stock_quote_end_to_end(real_adapter: _Adapter) -> None
         responder=responder,
         registry=registry,
         memory=InSessionMemory(),
-        cache=ToolResultCache(),
+        cache=ToolResultCache(session_factory=MagicMock()),
     )
 
     # Run the full graph directly to capture tool_results from GraphState.
