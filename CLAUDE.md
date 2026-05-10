@@ -24,6 +24,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### 工程约定与 dep 管理
 - [重型 deps 走 optional extras](docs/claude-context/optional-extras-for-heavy-deps.md) — base 留 core，重型/可选进 `[project.optional-dependencies]`
 - [import 链假设要 smoke test 验](docs/claude-context/verify-import-chain-with-smoke-test.md) — spec 谈"X import 会 fail"必须先 `python -c "from X import"` 实测，grep 看不到 lazy/transitive/subprocess
+- [brainstorm 阶段每节 ~100 行,不做 spec dump](docs/claude-context/brainstorm-section-density.md) — code/prompt/trace/简历叙事推到 spec doc,chat 只对齐决策方向
 
 ### 测试 / DB
 - [测试 DB 分层策略](docs/claude-context/test-db-layered-strategy.md) — L0/L1 sqlite-override，L2.5 真 PG fixture 守护 serve path
