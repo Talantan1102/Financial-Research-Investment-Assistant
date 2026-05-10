@@ -21,7 +21,7 @@ import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -127,7 +127,7 @@ def _write_episode(
         )
         sess.add(ep)
         sess.commit()
-        return ep.episode_id  # type: ignore[no-any-return]
+        return cast(UUID, ep.episode_id)
     finally:
         sess.close()
 

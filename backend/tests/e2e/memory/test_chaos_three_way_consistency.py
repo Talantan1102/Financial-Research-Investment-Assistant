@@ -19,7 +19,7 @@ import json
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -141,7 +141,7 @@ async def test_chaos_milvus_failure_falls_back_to_outbox(
         )
         sess.add(ep)
         sess.commit()
-        ep_id = ep.episode_id
+        ep_id = cast(UUID, ep.episode_id)
     finally:
         sess.close()
 
@@ -405,7 +405,7 @@ async def test_chaos_pg_integrity_error_rolls_back_no_orphan_nodes(
         )
         sess.add(edge1)
         sess.commit()
-        ep2_id = ep2.episode_id
+        ep2_id = cast(UUID, ep2.episode_id)
     finally:
         sess.close()
 
