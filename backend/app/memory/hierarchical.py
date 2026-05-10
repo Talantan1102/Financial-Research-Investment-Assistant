@@ -582,12 +582,23 @@ class HierarchicalMemory:
     ) -> list[dict[str, Any]]:
         raise NotImplementedError("filled by Plan 4")
 
-    # === Tier 3 Recall ===
+    # === Tier 3 Recall (Plan 4 fill) ===
 
     async def recall_memory_search(
         self, user_id: UUID, query: str, k: int = 5
     ) -> list[dict[str, Any]]:
-        raise NotImplementedError("filled by Plan 4")
+        """spec § 6 Tier 3 — semantic search over PR #39 chat_messages.
+
+        In-memory cosine over qwen-embedded user messages (cap 5000 / user).
+        """
+        from app.memory.recall_search import RecallSearcher
+
+        if not hasattr(self, "_recall_searcher"):
+            self._recall_searcher = RecallSearcher(
+                session_factory=self._pg_session_factory,
+                embed_service=self._embed,
+            )
+        return await self._recall_searcher.search(user_id, query, k)
 
     # === 持久化 episodes(Plan 1B Task 7 实现) ===
 
