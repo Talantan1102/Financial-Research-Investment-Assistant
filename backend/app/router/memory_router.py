@@ -352,11 +352,13 @@ def invalidate_edge(
     已 invalidated 重复 POST → 400 (防覆盖 audit log 时间戳).
     """
     try:
-        eid = UUID(edge_id)
+        eid_str = str(UUID(edge_id))
     except ValueError:
         raise HTTPException(status_code=404, detail="edge not found") from None
 
-    edge = db.query(ChatMemoryEdge).filter(ChatMemoryEdge.edge_id == eid).first()
+    # Pass as str to dodge sqlite-variant bind issue (no UUID→str converter on sqlite).
+    # PG accepts str-form UUID equivalently.
+    edge = db.query(ChatMemoryEdge).filter(ChatMemoryEdge.edge_id == eid_str).first()
     if edge is None or str(edge.user_id) != str(user.id):
         raise HTTPException(status_code=404, detail="edge not found")
     if edge.invalidated_at is not None:
