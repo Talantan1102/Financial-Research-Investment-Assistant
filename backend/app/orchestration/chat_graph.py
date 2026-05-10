@@ -43,7 +43,12 @@ from app.orchestration.context_node import (
     handle_resource_load_action,
     handle_skill_load_action,
 )
+from app.orchestration.memory_kb_router_node import (  # Plan 6 (c5)
+    RouterFn,
+    memory_kb_router_node,
+)
 from app.orchestration.nodes import planner_node, responder_node, tool_node
+from app.services.kb_search_service import KbSearchService  # Plan 6 (c5)
 from app.services.tool_result_cache import ToolResultCache
 from app.skills.skill_loader import SkillLoader
 from app.tools.registry import ToolRegistry
@@ -146,31 +151,49 @@ def build_chat_graph(
     *,
     checkpointer: BaseCheckpointSaver[Any] | None = None,
     skill_loader: SkillLoader | None = None,  # NEW Plan 2a
+    kb_search_service: KbSearchService | None = None,  # NEW Plan 6 (c5)
+    memory_kb_router_fn: RouterFn | None = None,  # NEW Plan 6 (c5)
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Assemble and compile the chat LangGraph StateGraph (v0.9 supervisor topology).
 
     Graph topology::
 
-        START → context_node → planner_node → [_route_after_planner] → tool_node → responder_node → END
-                                                                       → responder_node → END
-                                                                       → skill_load_node → planner_node  (Plan 2a)
-                                                                       → resource_load_node → planner_node (Plan 2a)
+        START → context_node → [memory_kb_router_node?] → planner_node → [_route_after_planner]
+                                                                          → tool_node → responder_node → END
+                                                                          → responder_node → END
+                                                                          → skill_load_node → planner_node  (Plan 2a)
+                                                                          → resource_load_node → planner_node (Plan 2a)
 
     Args:
-        planner:      ChatPlanner instance deciding which tools to call.
-        responder:    Responder instance synthesising the final reply.
-        registry:     ToolRegistry with all available tools.
-        memory:       Memory implementation for Q4 E context management.
-        cache:        ToolResultCache for dedup and parallel dispatch.
-        checkpointer: Optional PG (or any BaseCheckpointSaver) for cross-turn persistence.
-                      Pass None for a stateless in-memory graph (tests / eval).
-        skill_loader: Optional SkillLoader for Plan 2a skill-routing nodes.
-                      When None the skill_load_node / resource_load_node are not registered
-                      and the legacy graph topology is preserved for backward compat.
+        planner:             ChatPlanner instance deciding which tools to call.
+        responder:           Responder instance synthesising the final reply.
+        registry:            ToolRegistry with all available tools.
+        memory:              Memory implementation for Q4 E context management.
+        cache:               ToolResultCache for dedup and parallel dispatch.
+        checkpointer:        Optional PG (or any BaseCheckpointSaver) for cross-turn persistence.
+                             Pass None for a stateless in-memory graph (tests / eval).
+        skill_loader:        Optional SkillLoader for Plan 2a skill-routing nodes.
+                             When None the skill_load_node / resource_load_node are not registered
+                             and the legacy graph topology is preserved for backward compat.
+        kb_search_service:   Optional KbSearchService (C.5 Plan 6) — when provided together
+                             with ``memory_kb_router_fn`` the supervisor inserts a
+                             ``memory_kb_router_node`` between context_node and planner_node
+                             (memory vs kb retrieval routing). When None routing is skipped
+                             entirely (backward compat for the legacy chat router).
+        memory_kb_router_fn: Optional async callable ``str -> RouterDecision`` (C.5 Plan 6).
+                             Must be provided together with ``kb_search_service``.
 
     Returns:
         A compiled LangGraph :class:`CompiledStateGraph` ready for .ainvoke / .astream_events.
+
+    Raises:
+        ValueError: when exactly one of ``kb_search_service`` / ``memory_kb_router_fn`` is set
+                    (they must be passed as a pair).
     """
+    if (kb_search_service is None) != (memory_kb_router_fn is None):
+        raise ValueError("kb_search_service and memory_kb_router_fn must be provided together")
+    enable_kb_routing = kb_search_service is not None and memory_kb_router_fn is not None
+
     g: StateGraph[Any, Any, Any, Any] = StateGraph(ChatState)
 
     g.add_node("context_node", partial(context_node, memory=memory))
@@ -183,8 +206,27 @@ def build_chat_graph(
         g.add_node("skill_load_node", partial(skill_load_node, loader=skill_loader))
         g.add_node("resource_load_node", partial(resource_load_node, loader=skill_loader))
 
+    # Plan 6 (c5) — Memory vs KB router (between context and planner)
+    if enable_kb_routing:
+        # type narrowing: both are non-None inside this branch
+        assert kb_search_service is not None
+        assert memory_kb_router_fn is not None
+        g.add_node(
+            "memory_kb_router_node",
+            partial(
+                memory_kb_router_node,
+                memory=memory,
+                kb=kb_search_service,
+                router_fn=memory_kb_router_fn,
+            ),
+        )
+
     g.add_edge(START, "context_node")
-    g.add_edge("context_node", "planner_node")
+    if enable_kb_routing:
+        g.add_edge("context_node", "memory_kb_router_node")
+        g.add_edge("memory_kb_router_node", "planner_node")
+    else:
+        g.add_edge("context_node", "planner_node")
 
     edge_map: dict[Hashable, str] = {
         "tool_node": "tool_node",
