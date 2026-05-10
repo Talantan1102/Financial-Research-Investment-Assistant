@@ -25,6 +25,7 @@ def _state(**overrides: Any) -> GraphState:
         "session_id": "s",
         "user_message": "茅台股价?",
         "request_id": "req-graph-test",
+        "trace_request_id": "req-graph-test",
     }
     defaults.update(overrides)
     return GraphState(**defaults)
