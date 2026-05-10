@@ -140,6 +140,19 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
             with engine.begin() as conn:
                 conn.execute(_sql_text(instr_sql))
             logger.info("C.5 Plan 3 instrumentation SQL migration applied")
+
+        # Plan 4: mcp_tool_call_log (spec § 6 周报 SQL data source)
+        c5_plan4_migration = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "migrations"
+            / "2026-05-11-c5-plan4-mcp-tool-call-log.sql"
+        )
+        if c5_plan4_migration.exists():
+            mcp_sql = c5_plan4_migration.read_text(encoding="utf-8")
+            with engine.begin() as conn:
+                conn.execute(_sql_text(mcp_sql))
+            logger.info("C.5 Plan 4 mcp_tool_call_log SQL migration applied")
     except Exception as e:  # noqa: BLE001
         logger.warning("C.5 memory SQL migration skipped: %s", e)
 

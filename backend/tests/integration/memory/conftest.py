@@ -89,6 +89,15 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
         with engine.begin() as conn:
             conn.execute(text(instr_sql))
 
+    # Plan 4: mcp_tool_call_log (spec § 6 周报 SQL data source)
+    mcp_log_migration_path = (
+        backend_dir / "scripts" / "migrations" / "2026-05-11-c5-plan4-mcp-tool-call-log.sql"
+    )
+    if mcp_log_migration_path.exists():
+        mcp_log_sql = mcp_log_migration_path.read_text(encoding="utf-8")
+        with engine.begin() as conn:
+            conn.execute(text(mcp_log_sql))
+
     yield {"url": url, "engine": engine, **pg_test_container}
 
     engine.dispose()
