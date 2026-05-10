@@ -39,6 +39,10 @@ celery_app.conf.update(
         # C.5 Plan 2B memory tasks
         "app.tasks.memory.extract_session_episodes_async": {"queue": "memory_llm"},
         "app.tasks.memory.reconcile_pending_milvus": {"queue": "memory_llm"},
+        # C.5 Plan 5 memory tasks
+        "app.tasks.memory.extract_episode_async": {"queue": "memory_llm"},
+        "app.tasks.memory.extract_session_batch_async": {"queue": "memory_llm"},
+        "app.tasks.memory.posterior_calibration_weekly": {"queue": "memory_llm"},
     },
     # 时区
     timezone="Asia/Shanghai",

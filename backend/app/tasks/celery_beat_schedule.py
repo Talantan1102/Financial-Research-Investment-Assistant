@@ -29,4 +29,11 @@ beat_schedule = {
         "task": "app.tasks.memory.reconcile_pending_milvus",
         "schedule": crontab(minute="*/5"),
     },
+    # C.5 Plan 5: posterior calibration weekly (spec § 11 末尾 #3)
+    # 周一 03:00 Asia/Shanghai (celery_app enable_utc=False, timezone="Asia/Shanghai")
+    "posterior_calibration_weekly": {
+        "task": "app.tasks.memory.posterior_calibration_weekly",
+        "schedule": crontab(hour=3, minute=0, day_of_week=1),
+        "options": {"queue": "memory_llm"},
+    },
 }
