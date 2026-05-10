@@ -48,6 +48,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [c5 Plan 3 read pipeline ship](docs/claude-context/c5-plan3-read-pipeline-done.md) — 3-way hybrid retrieval + RRF v2 时间感知 ranking + persona auto-injection + 长尾召回监控
 - [c5 Plan 4 MCP tools ship](docs/claude-context/c5-plan4-mcp-tools-done.md) — 6 memory MCP tool + memory profile + evidence_quote 校验 (algorithm 深度补丁 #2) + Tier 3 recall + tool routing 监控周报 SQL
 - [c5 Plan 5 cost optimization ship](docs/claude-context/c5-plan5-cost-optimization-done.md) — 5 项 ladder + injection classifier 规则层 (algorithm 深度补丁 #2) + posterior calibration weekly job (algorithm 深度补丁 #3) + chat_memory_calibration_runs audit / 单 session $0.025 → $0.005
+- [c5 Plan 6 memory vs kb routing ship](docs/claude-context/c5-plan6-memory-kb-routing-done.md) — supervisor router 节点 + 触发词分类(memory 13 / kb 11 / both 6) + prompt 区隔 [用户上下文] / [市场知识] + LLMRouterFallback default memory + 8 seed case + accuracy hook(Plan 8 收 50 case)
 
 ## 设计稿与实施计划
 
