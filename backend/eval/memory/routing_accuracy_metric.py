@@ -1,31 +1,24 @@
-"""Memory tool routing accuracy metric — Plan 4 skeleton, Plan 8 fills 50 cases.
+"""Memory tool routing accuracy metric.
 
-Inputs (Plan 8 will load from `c5_memory_golden.jsonl` etc.):
+Plan 4 ship: compute_routing_accuracy (single-tool exact-match).
+Plan 8 ship: routing_accuracy (multi-tool subset-match — works on
+c5_memory_golden.jsonl 20 routing case 的 expected_tools: list[str]).
+
+Inputs:
     cases: list of {
-        "query": str,            # user utterance
-        "expected_tool": str,    # ground-truth memory MCP tool name
-        "predicted_tool": str,   # supervisor's chosen tool
+        "query": str,
+        "expected_tools": list[str],   # Plan 8 schema (subset match)
+        ...
     }
+    planner: object with `.plan(query) -> Plan` 返回含 `.tool_calls[].tool_name`.
 
-Output:
-    {
-        "total": int,
-        "correct": int,
-        "accuracy": float,                       # correct / total (0 if total==0)
-        "per_tool_recall": {tool_name: float},  # one entry per MEMORY_TOOLS
-        "errors": [{query, expected, predicted}],
-    }
-
-Plan 8 will add:
-    - thresholds (e.g. assert accuracy > 0.7)
-    - per-tool precision / F1 (currently only recall)
-    - confusion matrix output
+spec § 10 routing accuracy ≥ 0.85.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Any
+from typing import Any, Protocol
 
 MEMORY_TOOLS: list[str] = [
     "core_memory_append",
@@ -80,3 +73,41 @@ def compute_routing_accuracy(cases: list[dict[str, Any]]) -> dict[str, Any]:
         "per_tool_recall": per_tool_recall,
         "errors": errors,
     }
+
+
+# ============================================================================
+# Plan 8 — subset-match routing_accuracy (works on golden case
+# `expected_tools: list[str]` schema, used by eval_runner Task 11)
+# ============================================================================
+
+
+class PlannerProtocol(Protocol):
+    """planner 抽象 — 真 chat agent / supervisor 调 .plan(query) 输出 tool 调用计划."""
+
+    async def plan(self, query: str) -> Any: ...
+
+
+async def routing_accuracy(
+    planner: PlannerProtocol,
+    golden_cases: list[dict[str, Any]],
+) -> float:
+    """spec § 10 subset-match routing accuracy.
+
+    for each case:
+        plan = await planner.plan(case["query"])
+        actual_tools = {tc.tool_name for tc in plan.tool_calls}
+        correct += set(case["expected_tools"]).issubset(actual_tools)
+    return correct / len(cases)
+
+    Empty cases → 0.0.
+    """
+    if not golden_cases:
+        return 0.0
+    correct = 0
+    for case in golden_cases:
+        plan_obj = await planner.plan(case["query"])
+        actual = {tc.tool_name for tc in plan_obj.tool_calls}
+        expected = set(case["expected_tools"])
+        if expected.issubset(actual):
+            correct += 1
+    return correct / len(golden_cases)
