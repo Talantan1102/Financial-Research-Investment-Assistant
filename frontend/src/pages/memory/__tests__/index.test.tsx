@@ -2,14 +2,22 @@
  * frontend/src/pages/memory/__tests__/index.test.tsx
  *
  * L0 RTL — tab 切换 + working blocks 卡 渲染.
- * Plan 7A Task 8.
+ * Plan 7A Task 8 起底, Plan 7B Task 2 替换 Graph placeholder 为 MemoryGraph
+ * 真实组件后, 把对 placeholder 的断言换成对 graph empty state / 其他 tab
+ * placeholder 的断言.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { HttpResponse, http } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import MemoryPage from '@/pages/memory'
 import { server } from '@/test-utils/msw-server'
+
+// Mock cytoscape — jsdom canvas missing, MemoryGraph empty state path doesn't
+// hit the cytoscape mount but we still install the stub for safety.
+vi.mock('react-cytoscapejs', () => ({
+  default: () => <div data-testid="cyto-stub" />,
+}))
 
 const API_BASE = ((import.meta.env.VITE_API_BASE as string) ?? '').replace(
   /\/$/,
@@ -56,10 +64,12 @@ describe('MemoryPage', () => {
     expect(screen.getByTestId('memory-tab-timeline')).toBeInTheDocument()
     expect(screen.getByTestId('memory-tab-audit')).toBeInTheDocument()
 
-    // 初始默认 graph tab (placeholder 可见)
-    expect(screen.getByTestId('memory-graph-placeholder')).toBeInTheDocument()
+    // 默认 Graph tab — empty graph 显示提示 (Plan 7B Task 2 替换 placeholder)
+    await waitFor(() =>
+      expect(screen.getByText(/还没有 memory/)).toBeInTheDocument(),
+    )
 
-    // 切到 timeline
+    // 切到 timeline (Task 3 之前仍是 placeholder)
     fireEvent.click(screen.getByTestId('memory-tab-timeline'))
     await waitFor(() =>
       expect(
@@ -67,12 +77,10 @@ describe('MemoryPage', () => {
       ).toBeInTheDocument(),
     )
 
-    // 切到 audit
+    // 切到 audit (Task 4 之前仍是 placeholder)
     fireEvent.click(screen.getByTestId('memory-tab-audit'))
     await waitFor(() =>
-      expect(
-        screen.getByTestId('memory-audit-placeholder'),
-      ).toBeInTheDocument(),
+      expect(screen.getByTestId('memory-audit-placeholder')).toBeInTheDocument(),
     )
   })
 

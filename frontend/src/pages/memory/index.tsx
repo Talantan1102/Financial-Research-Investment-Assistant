@@ -1,32 +1,31 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Col, Row, Tabs } from 'antd'
 import type { TabsProps } from 'antd'
+import MemoryGraph from '@/components/memory/MemoryGraph'
 import { MemoryWorkingBlocks } from './components/MemoryWorkingBlocks'
 
 /**
- * /memory page shell — Plan 7A.
+ * /memory page shell — Plan 7A scaffold + Plan 7B 三视图组件挂载.
  *
- * 三 tab(Graph / Timeline / Audit)+ 右栏 working blocks always-visible.
- * tab 内容此 plan 留 placeholder div, 由 Plan 7B 替换为 MemoryGraph /
- * MemoryTimeline / MemoryAuditLog 真实组件。
+ * 三 tab(Graph / Timeline / Audit) — Plan 7B Task 2 挂 Graph,
+ * Task 3/4 挂 Timeline / Audit。右栏 working blocks 始终可见。
  *
- * spec § 9 + shared contracts § 10
+ * `?highlight_edge=<edge_id>` query param: 由 chat TextMessage [查看](#mem-...)
+ * 链接跳转传入, 由 MemoryGraph 高亮该 edge.
+ *
+ * spec § 9 + shared contracts § 10.
  */
 export default function MemoryPage() {
   const [activeKey, setActiveKey] = useState<string>('graph')
+  const [searchParams] = useSearchParams()
+  const highlightEdge = searchParams.get('highlight_edge')
 
   const tabs: TabsProps['items'] = [
     {
       key: 'graph',
       label: <span data-testid="memory-tab-graph">Graph</span>,
-      children: (
-        <div
-          data-testid="memory-graph-placeholder"
-          style={{ minHeight: 480, padding: 24, color: '#8a96a3' }}
-        >
-          Graph view (Plan 7B 实现 Cytoscape 可视化)
-        </div>
-      ),
+      children: <MemoryGraph highlightEdgeId={highlightEdge} />,
     },
     {
       key: 'timeline',
@@ -36,7 +35,7 @@ export default function MemoryPage() {
           data-testid="memory-timeline-placeholder"
           style={{ minHeight: 480, padding: 24, color: '#8a96a3' }}
         >
-          Timeline view (Plan 7B 实现 horizontal bar + valid_from 排序)
+          Timeline view (Plan 7B Task 3 实现)
         </div>
       ),
     },
@@ -48,7 +47,7 @@ export default function MemoryPage() {
           data-testid="memory-audit-placeholder"
           style={{ minHeight: 480, padding: 24, color: '#8a96a3' }}
         >
-          Audit log (Plan 7B 实现 invalidated edges 列表 + 一键否决)
+          Audit log (Plan 7B Task 4 实现)
         </div>
       ),
     },
