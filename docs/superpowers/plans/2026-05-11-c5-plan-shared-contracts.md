@@ -898,3 +898,81 @@ Plan 8 (Eval + Tests + Docs) 依赖全部其他 Plan ship.
 | § 13 工程量估算 | 全 Plan |
 | § 14 v1.x Ship Checklist + P3 Hooks | Plan 8 ship checklist |
 | § 15 简历叙事段 | Plan 8 总卡引用 |
+
+---
+
+## § 17 Audit Resolutions（2026-05-11，11 plan 并行 ship 后）
+
+11 plan 并行写完做了一致性 audit，发现以下 conflict，本节给出 final 决议。**实施 subagent 必须按本节决议执行，不得按 plan 文件内描述跑（plan 内冲突部分以本节为准）。**
+
+### A1 文件 CREATE 冲突（实施时按下面顺序）
+
+| 冲突文件 | 决议 |
+|---|---|
+| `backend/app/memory/__init__.py` | Plan 1A 创建空文件 → Plan 1B Edit 加 export |
+| `backend/app/tasks/memory.py` | Plan 2B 创建文件 + 2 task stub → Plan 5 Edit 填 task body + 加 calibration task |
+| `backend/tests/integration/memory/conftest.py` | Plan 1A 创建 + 加 fixture → Plan 1B Edit 加 fixture |
+| `backend/tests/unit/memory/__init__.py` | Plan 1A 创建空文件即可（Plan 1B 不创建）|
+| `backend/eval/memory/poison_attacks_golden.jsonl` | Plan 5 创建初始 5-10 case → Plan 8 Edit 扩展到 30 case |
+
+### A2 接口签名 final
+
+1. **Celery task 注册名统一**：`reconcile_pending_milvus`（Plan 2B 用此名，Plan 5 改为此名，避免 beat schedule 路由失败）
+2. **`compute_time_decay` final**：
+
+   ```python
+   def compute_time_decay(
+       rel_type: str,
+       valid_from: datetime,
+       valid_to: datetime | None,
+       *,
+       _now: datetime | None = None,  # test 用 _now 注入 fake time
+   ) -> float: ...
+   ```
+3. **`EmbedCache.get_or_compute` final**（3 参数版本）：
+
+   ```python
+   async def get_or_compute(
+       text: str,
+       user_id: UUID,
+       compute_fn: Callable[[], Awaitable[list[float]]],
+   ) -> list[float]: ...
+   ```
+4. **`LLMExtractor` 双方法 final**：
+
+   ```python
+   class LLMExtractor:
+       async def extract(  # Path A 单 episode (Plan 2A 实现)
+           self, user_message: str, agent_response: str, episode_id: UUID,
+       ) -> ExtractionOutput: ...
+
+       async def extract_facts(  # Path B 跨轮 5 turn 滑动窗口 (Plan 2B 实现)
+           self, turns: list[dict], session_id: UUID, episode_ids: list[UUID],
+       ) -> list[ExtractionOutput]: ...
+   ```
+
+5. **类型统一**：删除 `ExtractedFact`，统一用 `ExtractionOutput`（含 entities + edges）+ `ExtractedEdge`（单 edge dataclass，spec § 4 prompt 输出 schema）。Plan 5 batch_extractor 输出 `list[ExtractionOutput]`。
+
+### A4 Instrumentation 表名 final
+
+- 检索日志表：`chat_memory_retrieval_logs`（Plan 3 ship，Plan 5 calibration 读）
+- 用户反馈表：`chat_memory_retrieval_feedback`（Plan 3 ship，Plan 5 calibration 读）
+- Plan 5 不另建表，复用 Plan 3 这两个表
+
+### A6 evidence_quote 循环依赖
+
+- `evidence_quote_in_episode(quote, episode_text) -> bool` 的 minimal 版（空白容忍 substring 检测）由 **Plan 4 在 `backend/app/memory/injection_classifier.py` ship**
+- Plan 5 实施 `is_prompt_injection` 时 Edit 同一文件加新函数，不替换 evidence_quote 函数
+- 这样 Plan 4 ship 时 archival_memory_insert 立即可用 evidence_quote 校验，不等 Plan 5
+
+### A2-others Fixture 命名补充
+
+- `redis_test_container` fixture：归属 `backend/tests/conftest.py`（v1.0 监控引擎已有，复用）
+- `mock_llm_extractor_cross_turn` fixture：Plan 2B 在 `backend/tests/unit/memory/conftest.py` 添加，名字保留（不抢占 `mock_llm_extraction` 通用名）
+
+### Audit 通过条件
+
+实施 subagent 在 ship 每 plan 时必须：
+1. 读本节（§ 17）确认 final 接口
+2. 按本节决议处理文件冲突（不按 plan 内的 CREATE/MODIFY 描述）
+3. ship 完后 grep 验证表名 / 函数签名跟本节一致
