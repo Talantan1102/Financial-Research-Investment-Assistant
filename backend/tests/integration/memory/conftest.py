@@ -85,3 +85,38 @@ def pg_memory_session(pg_memory_fixture: dict[str, Any]) -> Iterator[Any]:
     yield session
     session.rollback()
     session.close()
+
+
+# ---------------------------------------------------------------------------
+# milvus_memory_fixture — 真 Milvus + chat_memory_edge_embeddings_v1 + alias
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def milvus_memory_fixture(
+    milvus_test_container: dict[str, object],
+) -> Iterator[dict[str, Any]]:
+    """Real Milvus + chat_memory_edge_embeddings_v1 collection + alias 已建.
+
+    依赖 backend/tests/conftest.py 的 milvus_test_container(已 ship v0.7).
+    """
+    from app.memory.milvus_setup import (
+        ALIAS_NAME,
+        COLLECTION_V1_NAME,
+        ensure_chat_memory_edge_collection,
+    )
+
+    host = str(milvus_test_container["host"])
+    port = int(str(milvus_test_container["port"]))
+
+    # 幂等创建
+    ensure_chat_memory_edge_collection(host=host, port=port)
+
+    yield {
+        "host": host,
+        "port": port,
+        "collection_name": COLLECTION_V1_NAME,
+        "alias_name": ALIAS_NAME,
+    }
+
+    # session 末不清理(跟 milvus_test_container 同 fail-safe)
