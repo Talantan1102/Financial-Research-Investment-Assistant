@@ -80,6 +80,15 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
         with engine.begin() as conn:
             conn.execute(text(outbox_sql))
 
+    # Plan 3: instrumentation tables (chat_memory_retrieval_logs / chat_memory_retrieval_feedback)
+    instr_migration_path = (
+        backend_dir / "scripts" / "migrations" / "2026-05-11-c5-plan3-instrumentation.sql"
+    )
+    if instr_migration_path.exists():
+        instr_sql = instr_migration_path.read_text(encoding="utf-8")
+        with engine.begin() as conn:
+            conn.execute(text(instr_sql))
+
     yield {"url": url, "engine": engine, **pg_test_container}
 
     engine.dispose()
