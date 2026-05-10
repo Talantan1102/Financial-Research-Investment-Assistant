@@ -580,7 +580,26 @@ class HierarchicalMemory:
         hops: int = 2,
         rel_types: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        raise NotImplementedError("filled by Plan 4")
+        """spec § 5 路径 3 — on-demand AGE Cypher multi-hop traversal.
+
+        Plan 4 fill (Plan 1 left this as stub raise NotImplementedError).
+        Wraps app.memory.retriever.graph_traverse; AGE 不可用时返空 list 不报错
+        (符合 spec § 5 graph 路径 fail-safe 语义).
+        """
+        from app.memory.retriever import graph_traverse
+
+        session = self._pg_session_factory()
+        try:
+            return await graph_traverse(
+                session,
+                age_executor=self._age,
+                user_id=user_id,
+                start_label=start_label,
+                hops=hops,
+                rel_types=rel_types,
+            )
+        finally:
+            session.close()
 
     # === Tier 3 Recall (Plan 4 fill) ===
 
