@@ -14,7 +14,7 @@ import asyncio
 import inspect
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import text
@@ -103,21 +103,25 @@ async def try_milvus_insert(
     DOES NOT raise — failure is fully absorbed via outbox so PG transaction
     can commit (spec § 4 失败处理矩阵: Milvus 失败 → 写 pending_milvus_inserts).
     """
+    edge_id_uuid = cast(UUID, edge.edge_id)
+    user_id_uuid = cast(UUID, edge.user_id)
+    rel_type_str = cast(str, edge.rel_type)
+
     try:
         embed_call = embed_service.embed(edge_text)
         embedding = await _maybe_await(embed_call)
     except Exception as exc:  # noqa: BLE001  intentional outbox absorb
         _logger.warning(
             "milvus outbox: embed failed for edge_id=%s: %s",
-            edge.edge_id,
+            edge_id_uuid,
             exc,
         )
         enqueue_milvus_insert(
             session=session,
-            edge_id=edge.edge_id,
+            edge_id=edge_id_uuid,
             edge_text=edge_text,
-            user_id=edge.user_id,
-            rel_type=edge.rel_type,
+            user_id=user_id_uuid,
+            rel_type=rel_type_str,
             last_error=f"embed failed: {exc}",
         )
         return False
@@ -128,10 +132,10 @@ async def try_milvus_insert(
             collection_name="chat_memory_edge_embeddings",
             data=[
                 {
-                    "edge_id": str(edge.edge_id),
-                    "user_id": str(edge.user_id),
+                    "edge_id": str(edge_id_uuid),
+                    "user_id": str(user_id_uuid),
                     "embedding": embedding,
-                    "rel_type": edge.rel_type,
+                    "rel_type": rel_type_str,
                 }
             ],
         )
@@ -141,15 +145,15 @@ async def try_milvus_insert(
     except Exception as exc:  # noqa: BLE001  intentional outbox absorb
         _logger.warning(
             "milvus outbox: insert failed for edge_id=%s: %s",
-            edge.edge_id,
+            edge_id_uuid,
             exc,
         )
         enqueue_milvus_insert(
             session=session,
-            edge_id=edge.edge_id,
+            edge_id=edge_id_uuid,
             edge_text=edge_text,
-            user_id=edge.user_id,
-            rel_type=edge.rel_type,
+            user_id=user_id_uuid,
+            rel_type=rel_type_str,
             last_error=f"milvus insert failed: {exc}",
         )
         return False

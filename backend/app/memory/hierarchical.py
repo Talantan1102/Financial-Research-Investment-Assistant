@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
@@ -294,7 +294,11 @@ class HierarchicalMemory:
                 session.flush()
                 # AGE MERGE node mirror — best-effort (AGE 不可用时静默)
                 try:
-                    age_merge_node(session=session, node_id=node.node_id, entity_type=entity_type)
+                    age_merge_node(
+                        session=session,
+                        node_id=cast(UUID, node.node_id),
+                        entity_type=entity_type,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     logger.debug(
                         "AGE merge_node failed (best-effort): %s; entity_type=%s",
@@ -346,9 +350,9 @@ class HierarchicalMemory:
                     existing_edges_summary=existing_summaries,
                 )
 
-            existing_ids = [e.edge_id for e in existing]
-            src_node_id = src_node.node_id
-            tgt_node_id = tgt_node.node_id
+            existing_ids: list[UUID] = [cast(UUID, e.edge_id) for e in existing]
+            src_node_id = cast(UUID, src_node.node_id)
+            tgt_node_id = cast(UUID, tgt_node.node_id)
 
             # Step 6: apply
             new_edge = apply_action(
@@ -382,7 +386,7 @@ class HierarchicalMemory:
                 session.commit()
                 return None
 
-            new_edge_id = new_edge.edge_id
+            new_edge_id = cast(UUID, new_edge.edge_id)
 
             # Step 7a: AGE same-txn Cypher CREATE — failure rolls back PG (spec § 4 失败矩阵)
             age_create_edge(
