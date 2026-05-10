@@ -111,6 +111,39 @@ def extract_session_episodes_async(session_id: str, trigger_reason: str) -> dict
     return asdict(result)
 
 
+def _run_milvus_reconciliation() -> Any:
+    """Hook 点 — 测试 patch('app.tasks.memory._run_milvus_reconciliation').
+
+    Production wiring (lazy import):
+    - SessionLocal: app.core.database.SessionLocal
+    - embed_fn: build qwen embed via build_embedding_service_from_env().embed
+    - milvus_client: pymilvus MilvusClient pointing at MILVUS_HOST/PORT
+    """
+    import os
+
+    from pymilvus import MilvusClient
+
+    from app.core.database import SessionLocal
+    from app.memory.reconciliation import reconcile_pending_milvus_inserts
+    from app.services.embedding_factory import build_embedding_service_from_env
+
+    embed_service = build_embedding_service_from_env()
+
+    async def _embed_one(text_input: str) -> list[float]:
+        vecs = await embed_service.embed([text_input])
+        return vecs[0] if vecs else []
+
+    host = os.environ.get("MILVUS_HOST", "127.0.0.1")
+    port = int(os.environ.get("MILVUS_PORT", "19530"))
+    milvus_client = MilvusClient(uri=f"http://{host}:{port}")
+
+    return reconcile_pending_milvus_inserts(
+        session_factory=SessionLocal,
+        embed_fn=_embed_one,
+        milvus_client=milvus_client,
+    )
+
+
 @celery_app.task(
     name="app.tasks.memory.reconcile_pending_milvus",
     autoretry_for=(Exception,),
@@ -119,8 +152,19 @@ def extract_session_episodes_async(session_id: str, trigger_reason: str) -> dict
     acks_late=True,
 )
 def reconcile_pending_milvus() -> dict[str, Any]:
-    """Beat 每 5 分钟跑,扫 pending_milvus_inserts retry embed + insert.
-
-    Task 6 填实 (本 stub 阶段保留 NotImplementedError 直到 Task 6 改写).
-    """
-    raise NotImplementedError("filled by Task 6")
+    """Beat 每 5 分钟跑,扫 pending_milvus_inserts retry embed + insert."""
+    result = _run_milvus_reconciliation()
+    out = {
+        "processed": result.processed,
+        "succeeded": result.succeeded,
+        "failed": result.failed,
+        "alerted": result.alerted,
+    }
+    _logger.info(
+        "milvus reconciliation finished: processed=%d succeeded=%d failed=%d alerted=%d",
+        result.processed,
+        result.succeeded,
+        result.failed,
+        result.alerted,
+    )
+    return out

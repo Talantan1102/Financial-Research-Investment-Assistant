@@ -1,29 +1,147 @@
-"""Reconciliation job 骨架 — scan inconsistent state.
+"""Reconciliation jobs — scan inconsistent state + Milvus pending retry.
 
-spec ref: § 11 末尾 #5 三方一致性反向失败
+spec ref:
+- § 11 末尾 #5 三方一致性反向失败 (Plan 1B 骨架)
+- § 4 末尾失败矩阵 行 5 (Plan 2B Milvus pending retry job)
+
 contract ref: § 1 reconciliation.py 进程崩溃恢复 job 骨架
 
-Plan 1B 范围(本):
+Plan 1B 范围:
 - scan_inconsistent_state(user_id) → list[ReconciliationCase]
-- 简单 case detection:
-  - 'edge_exists_episode_unextracted': edge ref episode 但 episode.extracted_at IS NULL
-    (Step 7 done, Step 8 崩) — Plan 5 weekly job 调 mark_episode_extracted 修
-  - 'pending_milvus' placeholder — Plan 2/5 ship pending_milvus_inserts 表后接
-- 不实施 retry / fix(Plan 5 weekly job 收束)
 
-为啥 Plan 1B ship 入口骨架而不是放到 Plan 5:
-  Plan 1A 已经 ship 了幂等键 UNIQUE constraint, Plan 1B 顺势 ship 这个 hook 让
-  作品集叙事完整(算法深度补丁 #5 cover 全), Plan 5 只填实际 retry 逻辑.
+Plan 2B 范围 (本 Task 6 加):
+- reconcile_pending_milvus_inserts(session_factory, embed_fn, milvus_client)
+  → ReconcileResult: 扫 pending_milvus_inserts → retry embed + insert →
+  成功删 / 失败 retry_count++ / max-3 alert.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import text
+from sqlalchemy.orm import Session, sessionmaker
+
 logger = logging.getLogger(__name__)
+
+
+# ===== Plan 2B Milvus reconcile constants =====
+
+MAX_RECONCILE_RETRIES = 3
+RECONCILE_BATCH_LIMIT = 200
+
+
+@dataclass
+class ReconcileResult:
+    """Milvus pending reconciliation 跑一轮的结果."""
+
+    processed: int
+    succeeded: int
+    failed: int
+    alerted: int
+
+
+EmbedFn = Callable[[str], Awaitable[list[float]]]
+
+
+def reconcile_pending_milvus_inserts(
+    session_factory: sessionmaker[Session] | Callable[[], Session],
+    embed_fn: EmbedFn,
+    milvus_client: Any,
+) -> ReconcileResult:
+    """扫 pending_milvus_inserts 行, retry embed + Milvus insert.
+
+    成功 → DELETE 行
+    失败 → retry_count + 1, last_error / last_attempt_at 更新
+    retry_count >= MAX_RECONCILE_RETRIES → log error('max_reconcile_retries_exceeded'),
+      行保留(不删 不 retry, 留作 audit)
+
+    Plan 2A migration (`pending_milvus_inserts`) 列名 (per Plan 2A SQL):
+    - id (BIGSERIAL PK)
+    - edge_id (UUID FK chat_memory_edges)
+    - edge_text (TEXT)
+    - user_id / rel_type
+    - retry_count / last_error / created_at / last_attempt_at
+    """
+    sess = session_factory()
+    processed = 0
+    succeeded = 0
+    failed = 0
+    alerted = 0
+    try:
+        rows = sess.execute(
+            text(
+                """SELECT id, edge_id, edge_text, retry_count
+                   FROM pending_milvus_inserts
+                   ORDER BY created_at ASC
+                   LIMIT :lim"""
+            ),
+            {"lim": RECONCILE_BATCH_LIMIT},
+        ).fetchall()
+        for row in rows:
+            processed += 1
+            pending_id = row[0]
+            edge_id = row[1]
+            edge_text = row[2] or f"edge:{edge_id}"
+            retry_count = int(row[3] or 0)
+            if retry_count >= MAX_RECONCILE_RETRIES:
+                logger.error(
+                    "max_reconcile_retries_exceeded edge_id=%s retry_count=%d — manual triage",
+                    edge_id,
+                    retry_count,
+                )
+                alerted += 1
+                continue
+            try:
+                embedding: list[float] = asyncio.run(embed_fn(edge_text))  # type: ignore[arg-type]
+                milvus_client.insert(
+                    collection_name="chat_memory_edge_embeddings",
+                    data=[
+                        {
+                            "edge_id": str(edge_id),
+                            "embedding": embedding,
+                        }
+                    ],
+                )
+                sess.execute(
+                    text("DELETE FROM pending_milvus_inserts WHERE id=:pid"),
+                    {"pid": pending_id},
+                )
+                sess.commit()
+                succeeded += 1
+            except Exception as exc:  # noqa: BLE001  intentional accumulator
+                failed += 1
+                sess.rollback()
+                sess.execute(
+                    text(
+                        """UPDATE pending_milvus_inserts
+                           SET retry_count = retry_count + 1,
+                               last_error = :err,
+                               last_attempt_at = :ts
+                           WHERE id = :pid"""
+                    ),
+                    {
+                        "pid": pending_id,
+                        "err": str(exc)[:500],
+                        "ts": datetime.now(tz=UTC),
+                    },
+                )
+                sess.commit()
+                logger.warning("reconcile failed for edge %s: %s", edge_id, exc)
+        return ReconcileResult(
+            processed=processed, succeeded=succeeded, failed=failed, alerted=alerted
+        )
+    finally:
+        sess.close()
+
+
+# ===== Plan 1B scan inconsistent state (untouched skeleton) =====
 
 
 @dataclass(frozen=True)

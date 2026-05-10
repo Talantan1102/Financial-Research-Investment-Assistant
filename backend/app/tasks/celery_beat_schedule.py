@@ -1,9 +1,10 @@
-"""Celery beat schedule — spec § 4.2.
+"""Celery beat schedule — spec § 4.2 + C.5 Plan 2B 末尾失败矩阵 行 5.
 
-3 个定时任务:
+定时任务:
 - detection_cycle_30min:盘内时段(周一到周五 9:30-15:30 每 30 分钟)
 - daily_full_scan:16:30 工作日收盘后兜底
 - cleanup_old:凌晨 2 点清 retention
+- reconcile_pending_milvus: 每 5 分钟扫 pending_milvus_inserts retry (C.5 Plan 2B)
 """
 
 from __future__ import annotations
@@ -22,5 +23,10 @@ beat_schedule = {
     "cleanup_old": {
         "task": "app.tasks.monitoring.cleanup_old",
         "schedule": crontab(minute=0, hour=2),  # 每天 02:00
+    },
+    # C.5 Plan 2B: Milvus pending reconciliation (spec § 4 末尾矩阵 行 5)
+    "reconcile_pending_milvus": {
+        "task": "app.tasks.memory.reconcile_pending_milvus",
+        "schedule": crontab(minute="*/5"),
     },
 }
