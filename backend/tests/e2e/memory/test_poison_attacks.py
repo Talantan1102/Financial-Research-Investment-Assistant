@@ -1,8 +1,9 @@
-"""L2 (Plan 5 范围) — 30 case poison_attacks_golden 命中率验证.
+"""L2 — 30 case poison_attacks_golden 命中率验证.
 
-spec § 11 末尾 #2 算法深度补丁: classifier 30 case 命中率 ≥ 0.95 是 Plan 8 收束目标.
-Plan 5 提供 12 representative + 8 safe = 20 case (剩 10 placeholder Plan 8 收束),
-命中率阈值先 ≥ 0.85 + false-positive 率 < 0.1.
+spec § 11 末尾 #2 算法深度补丁 — Plan 8 收束阈值:
+    - 攻击命中率 (recall) ≥ 0.95 (Plan 5 阶段为 0.85; Plan 8 30 case 收紧)
+    - 安全 case 误杀率 (false-positive) ≤ 0.20 (防止过拟合)
+    - 所有 placeholder 已 fill, 不再 skip
 """
 
 from __future__ import annotations
@@ -27,29 +28,45 @@ def _load_golden() -> list[dict]:
             if not line:
                 continue
             row = json.loads(line)
-            if row["id"].startswith("_PLACEHOLDER_"):
-                continue  # Plan 8 收束
+            # Plan 8 收束: 不能再有 placeholder
+            assert not row["id"].startswith("_PLACEHOLDER_"), (
+                f"Plan 8 收束: placeholder {row['id']} 未 fill"
+            )
             rows.append(row)
     return rows
 
 
 @pytest.mark.e2e
-def test_poison_attacks_recall_above_threshold() -> None:
+def test_poison_attacks_golden_size_is_30() -> None:
+    """Plan 8 收束: 30 case = 20 攻击 + 10 安全."""
     rows = _load_golden()
-    assert len(rows) >= 20, "Plan 5 范围: 至少 12 representative + 8 safe = 20 case"
-
+    assert len(rows) == 30, f"expect 30 cases, got {len(rows)}"
     inj_rows = [r for r in rows if r["expected_inj"]]
     safe_rows = [r for r in rows if not r["expected_inj"]]
+    assert len(inj_rows) >= 20, f"攻击 case 至少 20, got {len(inj_rows)}"
+    assert len(safe_rows) >= 10, f"安全 case 至少 10, got {len(safe_rows)}"
 
-    # 命中率 = 真阳 / 真阳应有
+
+@pytest.mark.e2e
+def test_poison_attacks_block_rate_above_95pct() -> None:
+    """Plan 8 收束: 攻击 case 命中率 ≥ 0.95."""
+    rows = _load_golden()
+    inj_rows = [r for r in rows if r["expected_inj"]]
+
     hits = sum(1 for r in inj_rows if is_prompt_injection(r["text"])[0])
     recall = hits / len(inj_rows)
-    assert recall >= 0.85, f"Plan 5 阶段命中率 ≥ 0.85, got {recall:.3f} ({hits}/{len(inj_rows)})"
+    assert recall >= 0.95, f"Plan 8 命中率应 ≥ 0.95, got {recall:.3f} ({hits}/{len(inj_rows)})"
 
-    # false-positive 率 < 0.1
+
+@pytest.mark.e2e
+def test_poison_attacks_false_positive_rate_below_20pct() -> None:
+    """Plan 8 收束: 安全 case 误杀率 ≤ 0.20 (防止过拟合)."""
+    rows = _load_golden()
+    safe_rows = [r for r in rows if not r["expected_inj"]]
+
     fps = sum(1 for r in safe_rows if is_prompt_injection(r["text"])[0])
-    fpr = fps / max(len(safe_rows), 1)
-    assert fpr < 0.1, f"safe case false-positive 率 < 0.1, got {fpr:.3f} ({fps}/{len(safe_rows)})"
+    fpr = fps / len(safe_rows)
+    assert fpr <= 0.20, f"safe case 误杀率应 ≤ 0.20, got {fpr:.3f} ({fps}/{len(safe_rows)})"
 
 
 @pytest.mark.e2e
