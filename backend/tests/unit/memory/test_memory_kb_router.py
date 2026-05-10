@@ -171,3 +171,92 @@ class TestRuleMatchBoundary:
         d = rule_match("基于我的持仓推荐")
         assert d is not None
         assert d.retrieval_targets == ["both"]
+
+
+# =====================================================================
+# Task 2 — LLMRouterFallback 测试 (constrained-LLM, JSON output, fallback memory)
+# =====================================================================
+
+
+class _FakeRawCompletion:
+    """Satisfies ChatCompletionRaw — content / prompt_tokens / completion_tokens."""
+
+    def __init__(self, content: str, prompt_tokens: int = 100, completion_tokens: int = 30):
+        self.content = content
+        self.prompt_tokens = prompt_tokens
+        self.completion_tokens = completion_tokens
+
+
+class _StubLLMService:
+    """Stub LLMService — captures last chat() call kwargs and returns a canned LLMResponse.
+
+    LLMService.chat is sync (returns LLMResponse, not awaitable). We only need
+    .content of the response in LLMRouterFallback, so we return a SimpleNamespace-like
+    object with a .content attribute.
+    """
+
+    def __init__(self, content: str, raise_exc: BaseException | None = None) -> None:
+        self._content = content
+        self._raise_exc = raise_exc
+        self.call_kwargs: dict[str, object] = {}
+
+    def chat(self, prompt: str, tier: str = "fast", **kwargs: object) -> object:
+        self.call_kwargs = {"prompt": prompt, "tier": tier, **kwargs}
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return _FakeRawCompletion(content=self._content)
+
+
+class TestLLMRouterFallback:
+    async def test_llm_fallback_emits_valid_decision(self) -> None:
+        from app.memory.memory_kb_router import LLMRouterFallback
+
+        llm = _StubLLMService(
+            content='{"retrieval_targets":["memory"],"reasoning":"个人偏好类问题"}'
+        )
+        fallback = LLMRouterFallback(llm=llm)  # type: ignore[arg-type]
+        d = await fallback.decide("帮我看看哪个标的更适合长期持有")
+
+        assert d.retrieval_targets == ["memory"]
+        assert "个人偏好" in d.reasoning
+        # constrained-router 风格: tier=balanced
+        assert llm.call_kwargs.get("tier") == "balanced"
+
+    async def test_llm_fallback_strips_code_fence(self) -> None:
+        from app.memory.memory_kb_router import LLMRouterFallback
+
+        llm = _StubLLMService(
+            content='```json\n{"retrieval_targets":["both"],"reasoning":"边界混合 query"}\n```'
+        )
+        fallback = LLMRouterFallback(llm=llm)  # type: ignore[arg-type]
+        d = await fallback.decide("综合判断下")
+        assert d.retrieval_targets == ["both"]
+
+    async def test_llm_fallback_invalid_json_falls_back_to_memory(self) -> None:
+        # spec § 11 末尾 #7 (d): 默认 fallback memory
+        from app.memory.memory_kb_router import LLMRouterFallback
+
+        llm = _StubLLMService(content="this is not json at all")
+        fallback = LLMRouterFallback(llm=llm)  # type: ignore[arg-type]
+        d = await fallback.decide("xxx")
+        assert d.retrieval_targets == ["memory"]
+        assert "fallback" in d.reasoning.lower()
+
+    async def test_llm_fallback_invalid_target_falls_back_to_memory(self) -> None:
+        from app.memory.memory_kb_router import LLMRouterFallback
+
+        llm = _StubLLMService(content='{"retrieval_targets":["bogus"],"reasoning":"x"}')
+        fallback = LLMRouterFallback(llm=llm)  # type: ignore[arg-type]
+        d = await fallback.decide("xxx")
+        assert d.retrieval_targets == ["memory"]
+        assert "fallback" in d.reasoning.lower()
+
+    async def test_llm_fallback_chat_exception_falls_back_to_memory(self) -> None:
+        # 任何 LLMService.chat 异常 → fallback memory
+        from app.memory.memory_kb_router import LLMRouterFallback
+
+        llm = _StubLLMService(content="", raise_exc=RuntimeError("api down"))
+        fallback = LLMRouterFallback(llm=llm)  # type: ignore[arg-type]
+        d = await fallback.decide("xxx")
+        assert d.retrieval_targets == ["memory"]
+        assert "fallback" in d.reasoning.lower()
