@@ -1,0 +1,8 @@
+{"query": "我之前买了什么股票", "expected": "memory", "category": "pure-memory"}
+{"query": "我对消费板块的偏好是什么", "expected": "both", "category": "pure-memory-with-kb-word"}
+{"query": "茅台最新研报怎么说", "expected": "kb", "category": "pure-kb"}
+{"query": "新能源车补贴政策最新动态", "expected": "kb", "category": "pure-kb"}
+{"query": "基于我的持仓推荐一些股票", "expected": "both", "category": "pure-both"}
+{"query": "结合我的偏好分析下当前市场", "expected": "both", "category": "pure-both"}
+{"query": "今天天气如何", "expected": "memory", "category": "boundary-noise"}
+{"query": "讲个笑话", "expected": "memory", "category": "boundary-noise"}
