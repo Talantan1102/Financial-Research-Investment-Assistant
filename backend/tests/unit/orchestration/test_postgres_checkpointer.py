@@ -84,6 +84,7 @@ def _pg_available() -> bool:
 
 
 @pytest.mark.asyncio
+@pytest.mark.slow
 @pytest.mark.skipif(not _pg_available(), reason=_SKIP_REASON)
 async def test_make_postgres_checkpointer_real_pg() -> None:
     """Factory opens pool, calls saver.setup(), returns AsyncPostgresSaver instance."""
