@@ -45,6 +45,8 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### C.5 Cross-Session Memory(跨 session memory 子系统, 进行中)
 - [c5 Plan 1B business foundation ship](docs/claude-context/c5-plan1b-business-foundation-done.md) — Memory Protocol + HierarchicalMemory 骨架 + working blocks + cold_start + reconciliation 入口
 - [c5 Plan 2A write pipeline core ship](docs/claude-context/c5-plan2a-write-pipeline-core-done.md) — Path A 主体: 8-step pipeline + 4-action conflict + bi-temporal correctness + AGE/Milvus 三方一致性
+- [c5 Plan 3 read pipeline ship](docs/claude-context/c5-plan3-read-pipeline-done.md) — 3-way hybrid retrieval + RRF v2 时间感知 ranking + persona auto-injection + 长尾召回监控
+- [c5 Plan 4 MCP tools ship](docs/claude-context/c5-plan4-mcp-tools-done.md) — 6 memory MCP tool + memory profile + evidence_quote 校验 (algorithm 深度补丁 #2) + Tier 3 recall + tool routing 监控周报 SQL
 
 ## 设计稿与实施计划
 

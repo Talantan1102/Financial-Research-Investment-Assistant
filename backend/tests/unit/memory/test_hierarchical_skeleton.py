@@ -93,7 +93,12 @@ async def test_archival_memory_search_no_longer_stub() -> None:
         await mem.archival_memory_search(uuid4(), "q")
 
 
-async def test_archival_memory_traverse_stub() -> None:
+async def test_archival_memory_traverse_no_longer_stub() -> None:
+    """Plan 4 shipped: archival_memory_traverse delegates to retriever.graph_traverse.
+
+    pg_session_factory=None → calling the wrapper raises TypeError (None not
+    callable), NOT NotImplementedError (Plan 1 stub replaced).
+    """
     mem = HierarchicalMemory(
         pg_session_factory=None,
         age_executor=None,
@@ -102,11 +107,16 @@ async def test_archival_memory_traverse_stub() -> None:
         llm_extractor=None,
         llm_judge=None,
     )
-    with pytest.raises(NotImplementedError, match="Plan 4"):
+    with pytest.raises((TypeError, AttributeError)):
         await mem.archival_memory_traverse(uuid4(), "User")
 
 
-async def test_recall_memory_search_stub() -> None:
+async def test_recall_memory_search_no_longer_stub() -> None:
+    """Plan 4 shipped: recall_memory_search delegates to RecallSearcher.
+
+    pg_session_factory=None → TypeError (None not callable), not
+    NotImplementedError.
+    """
     mem = HierarchicalMemory(
         pg_session_factory=None,
         age_executor=None,
@@ -115,5 +125,5 @@ async def test_recall_memory_search_stub() -> None:
         llm_extractor=None,
         llm_judge=None,
     )
-    with pytest.raises(NotImplementedError, match="Plan 4"):
+    with pytest.raises((TypeError, AttributeError)):
         await mem.recall_memory_search(uuid4(), "q")
