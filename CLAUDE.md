@@ -42,6 +42,10 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [v0.9 chat plan 4b frontend chatpane ship](docs/claude-context/v0.9-chat-plan4b-architecture.md) — ChatPane + EscalationConfirmDialog + Reports + F1-F10 polish landed (e2e deferred)
 - [v0.9 chat C.1+C.2 ship](docs/claude-context/v0.9-chat-c1c2-architecture.md) — production-style chat: LangGraph supervisor + MCP + Skill L1/L2/L3 + Escalation + chat-first frontend / 30 工业难题 P0+P1 全撞 / cassette+dogfood manual follow-up
 
+### C.5 Cross-Session Memory(跨 session memory 子系统, 进行中)
+- [c5 Plan 1B business foundation ship](docs/claude-context/c5-plan1b-business-foundation-done.md) — Memory Protocol + HierarchicalMemory 骨架 + working blocks + cold_start + reconciliation 入口
+- [c5 Plan 2A write pipeline core ship](docs/claude-context/c5-plan2a-write-pipeline-core-done.md) — Path A 主体: 8-step pipeline + 4-action conflict + bi-temporal correctness + AGE/Milvus 三方一致性
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。
