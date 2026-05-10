@@ -21,6 +21,8 @@ DI 设计:
 - llm_extractor: Plan 2 LLMExtractor(本 Plan 不 import / 不调用)
 - llm_judge: Plan 2 ConflictJudge(本 Plan 不 import / 不调用)
 - injection_classifier: Plan 5 InjectionClassifier(默认 None = no check)
+- embed_cache: Plan 5 EmbedCache(默认 None = 直走 embed_service, 不缓存); 契约 § 9
+- prompt_cache_store: Plan 5 PromptCacheStore(默认 None = 不 mark prompt cache); 契约 § 9
 """
 
 from __future__ import annotations
@@ -55,6 +57,8 @@ class HierarchicalMemory:
         llm_extractor: Any,
         llm_judge: Any,
         injection_classifier: Any | None = None,
+        embed_cache: Any | None = None,
+        prompt_cache_store: Any | None = None,
     ) -> None:
         self._pg_session_factory = pg_session_factory
         self._age = age_executor
@@ -63,6 +67,9 @@ class HierarchicalMemory:
         self._llm_extractor = llm_extractor
         self._llm_judge = llm_judge
         self._injection_classifier = injection_classifier
+        # Plan 5 cost optimization DI hooks (契约 § 9). 默认 None 保 Plan 1B 测试无破坏.
+        self._embed_cache = embed_cache
+        self._prompt_cache_store = prompt_cache_store
 
     # === Tier 1 Working Memory(Plan 1B Task 6 实现) ===
 
