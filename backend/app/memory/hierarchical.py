@@ -26,6 +26,7 @@ DI 设计:
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -248,14 +249,54 @@ class HierarchicalMemory:
         agent_response: str,
         source_kind: str = "chat_turn",
     ) -> ChatMemoryEpisode:
-        # Task 7 fill
-        raise NotImplementedError("filled by Plan 1B Task 7")
+        """Path A 写入 step 1: episode 入库, extracted_at=NULL."""
+        from app.memory.models import ChatMemoryEpisode
+
+        session = self._pg_session_factory()
+        try:
+            ep = ChatMemoryEpisode(
+                user_id=user_id,
+                session_id=session_id,
+                episode_index=episode_index,
+                user_message_text=user_message,
+                agent_response_text=agent_response,
+                source_kind=source_kind,
+            )
+            session.add(ep)
+            session.commit()
+            session.refresh(ep)
+            session.expunge(ep)
+            return ep
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
     async def get_unextracted_episodes(
         self, user_id: UUID, limit: int = 100
     ) -> list[ChatMemoryEpisode]:
-        # Task 7 fill
-        raise NotImplementedError("filled by Plan 1B Task 7")
+        """Path B end-of-session batch 用. extracted_at IS NULL 过滤."""
+        from app.memory.models import ChatMemoryEpisode
+
+        session = self._pg_session_factory()
+        try:
+            rows = (
+                session.query(ChatMemoryEpisode)
+                .filter(
+                    ChatMemoryEpisode.user_id == user_id,
+                    ChatMemoryEpisode.extracted_at.is_(None),
+                )
+                .order_by(ChatMemoryEpisode.created_at)
+                .limit(limit)
+                .all()
+            )
+            # detach 让 caller 在 session 关后仍可读 attributes
+            for r in rows:
+                session.expunge(r)
+            return rows
+        finally:
+            session.close()
 
     async def mark_episode_extracted(
         self,
@@ -263,5 +304,22 @@ class HierarchicalMemory:
         extracted_by: str,
         extraction_metadata: dict[str, Any],
     ) -> None:
-        # Task 7 fill
-        raise NotImplementedError("filled by Plan 1B Task 7")
+        """Step 8: 抽取完成标记."""
+        from datetime import datetime
+
+        from app.memory.models import ChatMemoryEpisode
+
+        session = self._pg_session_factory()
+        try:
+            ep = session.query(ChatMemoryEpisode).filter_by(episode_id=episode_id).first()
+            if ep is None:
+                raise ValueError(f"episode {episode_id} not found")
+            ep.extracted_at = datetime.now(UTC)
+            ep.extracted_by = extracted_by
+            ep.extraction_metadata = extraction_metadata
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
