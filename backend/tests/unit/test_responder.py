@@ -13,6 +13,7 @@ def _state(msg: str, tool_results: list[ToolResult] | None = None) -> GraphState
         session_id="s",
         user_message=msg,
         request_id="req-test-resp",
+        trace_request_id="req-test-resp",
         tool_results=tool_results or [],
     )
 

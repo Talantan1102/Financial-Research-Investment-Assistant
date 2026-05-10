@@ -322,6 +322,29 @@ All tools return standardized response:
 
 ---
 
+## Quantitative Thresholds
+
+For the precise numeric cuts used by all tools (PE/PB/PS valuation cuts,
+debt/liquidity ratios, volatility / drawdown cuts, score weights, and
+risk-level boundaries), see [risk_thresholds](resources/risk_thresholds.yaml).
+
+The thresholds file is loaded automatically as an L3a resource when this
+skill is expanded. It can also be re-loaded standalone via
+`{"action": "load_resource", "skill": "risk_assessment", "ref": "resources/risk_thresholds.yaml"}`
+if the conversation has drifted out of context.
+
+**When to consult the thresholds explicitly:**
+- User asks "what's your cutoff for high PE?"
+- User asks "how do you weight valuation vs. financial risk?"
+- Disagreement between tool output and user intuition — re-read thresholds
+  to explain the decision
+
+**Sector caveats:** thresholds are A-share-anchored. Banking / insurance /
+real-estate sectors naturally exceed `debt_to_assets` cuts (regulatory
+norms); apply sector overlay before firing high-risk warnings.
+
+---
+
 **Skill Version**: v1.0  
 **Last Updated**: 2026-03-20  
 **Compatible with**: AgentFlow v1.0, MCP Protocol

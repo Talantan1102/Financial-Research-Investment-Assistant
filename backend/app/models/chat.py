@@ -50,6 +50,10 @@ class ChatSession(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # === v0.9 NEW (sidebar list usage) ===
+    message_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_msg_preview = Column(Text, nullable=True)
+
     # 关系
     user = relationship("User", back_populates="sessions")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
@@ -72,6 +76,17 @@ class ChatMessage(Base):
     references_data = Column(JSONB)  # 引用的文档
     image_results = Column(JSONB)  # 图片搜索结果
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # === v0.9 NEW ===
+    message_type = Column(
+        String(32),
+        nullable=False,
+        default="text",
+        server_default="text",
+    )  # text|tool_result|research_report
+    research_report_id = Column(String(64), nullable=True)
+    research_report_summary = Column(Text, nullable=True)
+    tool_call_data = Column(JSONB(), nullable=True)
 
     # 关系
     session = relationship("ChatSession", back_populates="messages")

@@ -28,6 +28,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.mark.slow
 @pytest.mark.usefixtures("pg_test_container")
 def test_register_post_sse_get_with_real_pg(
     pg_test_container: dict[str, object], monkeypatch: pytest.MonkeyPatch

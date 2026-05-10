@@ -123,6 +123,27 @@ _OBJECTIVE_INSTRUCTIONS: dict[str, str] = {
 }
 
 
+def _format_chat_signals(state: ResearchState) -> str:
+    """Format chat-derived entities + preferences for analyst prompt (E13).
+
+    Injected only when ResearchState carries chat_extracted_entities with
+    comparative_target role or non-empty chat_extracted_preferences.
+    Returns an empty string when no signals are present (no block injected).
+    """
+    parts = []
+    comparative = [e for e in state.chat_extracted_entities if e.role == "comparative_target"]
+    if comparative:
+        names = ", ".join(f"{e.name} ({e.ts_code})" if e.ts_code else e.name for e in comparative)
+        parts.append(
+            f"\n【用户在 chat 中比较过的对标公司 (comparative_target)】: {names}\n"
+            f"→ 在 industry_analysis 中包含这些公司的对比分析。"
+        )
+    if state.chat_extracted_preferences:
+        prefs = "; ".join(f"[{p.category}] {p.text}" for p in state.chat_extracted_preferences)
+        parts.append(f"\n【用户偏好】: {prefs}\n→ 分析角度需贴合这些偏好。")
+    return "\n".join(parts) if parts else ""
+
+
 def build_analyst_prompt(state: ResearchState) -> str:
     """Build analyst prompt conditioned on investment_horizon + investment_objective."""
     # horizon-specific instruction
@@ -154,10 +175,14 @@ def build_analyst_prompt(state: ResearchState) -> str:
         for tr in state.tool_results
     )
 
+    # Chat-derived signals block (E13) — empty string when no signals present
+    chat_signals_block = _format_chat_signals(state)
+
     return (
         system
         + f"\n\n# Subtasks\n{plan_summary}\n# Tool Results\n{tool_summary}\n"
         + f"\n# 投资研究员 SOP (跨 11 维度方法论)\n\n{_SOP_TEXT}\n"
+        + (f"\n# Chat 信号 (来自历史对话)\n{chat_signals_block}\n" if chat_signals_block else "")
         + "\n请输出 JSON。"
     )
 

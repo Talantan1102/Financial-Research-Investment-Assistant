@@ -107,6 +107,21 @@ _HORIZON_HOLDING_PERIOD_HINT: dict[str, str] = {
 }
 
 
+def _format_user_preferences(state: ResearchState) -> str:
+    """Return a formatted preference block for the prompt, or empty string.
+
+    v0.9 — when chat_extracted_preferences is non-empty, injects a section
+    that instructs the LLM to honor user-expressed preferences (horizon,
+    risk_tolerance, etc.) in the investment_recommendation narrative.
+    """
+    if not state.chat_extracted_preferences:
+        return ""
+    lines = ["\n【用户在 chat 表达的偏好 (投资建议必须 honor)】"]
+    for p in state.chat_extracted_preferences:
+        lines.append(f"- [{p.category}] {p.text}  (置信度 {p.confidence:.2f})")
+    return "\n".join(lines)
+
+
 def _build_section6_constraint_block(state: ResearchState) -> str:
     """Build § 6 constraint block conditioned on all 6 input fields.
 
@@ -321,11 +336,15 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
         f"- [{i.subtask_id}] {i.finding}(confidence={i.confidence})" for i in state.insights
     )
 
+    # v0.9 — chat preference block (empty string when no preferences).
+    preference_block = _format_user_preferences(state)
+
     return (
         _SYSTEM_PROMPT_BASE
         + client_context
         + risk_framing
         + section6_block
+        + preference_block
         + f"\n\n# Insights\n{insights_str}\n"
         + f"\n# 用户原始需求 / 标的信息\n{state.user_message}\n"
         + f"\n# 本次 request_id(填入 JSON 的 request_id 字段)\n{state.request_id}\n"

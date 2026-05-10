@@ -1,0 +1,20 @@
+{
+  "id": "chat_skill_v1",
+  "description": "User asks for risk assessment → planner loads risk_assessment skill (L2) → loads risk_thresholds.yaml (L3a) → executes calculate_score.py (L3b) → final answer cites computed score. Verifies S1/S2/S3/S5/S6/S10.",
+  "persona": "capital_preservation",
+  "chat_history": [],
+  "final_user_message": "帮我评估工商银行的风险,给个综合打分",
+  "expected_signals": ["风险", "工商银行", "601398"],
+  "expected_tool_calls": ["get_stock_quote", "get_financials"],
+  "expected_skills_loaded": ["risk_assessment"],
+  "expected_escalation": false,
+  "judge_rubric": {
+    "criteria": [
+      "确实 load 了 risk_assessment skill (不是把 risk 逻辑现编 - S10 边界)",
+      "L3b script 真 execute 而非 hallucinate 结果(S6)",
+      "final response 引用了 calculate_score.py 的输出数字",
+      "答案 honor capital_preservation persona(保守口吻 + 警告高风险因子)"
+    ],
+    "score_threshold": 0.7
+  }
+}

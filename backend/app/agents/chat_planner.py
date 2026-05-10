@@ -1,31 +1,79 @@
 """ChatPlanner — first LangGraph agent: decides which tools (if any) to call.
 
-Path B (prompt-engineered JSON) per Task 0 Spike 1 retrospective:
-- Build a prompt that lists available tools in human-readable markdown
-- Include the user message
-- Instruct LLM to output a JSON object matching the ``Plan`` schema
-- ``_parse_plan`` strips code fences and Pydantic-validates the JSON
+v0.9 per spec § 4.1:
+  - constrained LLM (strict JSON schema) per A3 (arg fidelity)
+  - emits parallelizable: bool (A2)
+  - filters hallucinated tool names against registry whitelist (A4)
+  - emits escalate_offered when planner detects deep intent (Q3 hook for Plan 3)
 
-This intentionally does NOT add a ``tools=`` parameter to LLMService;
-the LLMService.chat(prompt, tier, schema) contract stays stable.
+Legacy path (ToolRegistry-based) is preserved for backwards-compat with v0
+research-mode graph. v0.9 chat mode uses the new ChatPlanner(llm, available_tools)
+constructor path with async run(ChatState) -> dict.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
 from app.agents.base import Agent
-from app.agents.schemas import GraphState, Plan, StepResult
+from app.agents.schemas import ChatState, GraphState, Plan, SkillScriptCall, StepResult, ToolCall
 from app.services.llm_response import Tier
 from app.services.llm_service import LLMService
+from app.skills import SkillManifest
 from app.tools.registry import ToolRegistry
+
+logger = logging.getLogger(__name__)
 
 # Regex to strip markdown code fences (```json ... ``` or ``` ... ```)
 _CODE_FENCE_RE = re.compile(r"^```(?:json)?\s*\n?(.*?)\n?```$", re.DOTALL)
 
-# Prompt template pieces
+
+# ---------------------------------------------------------------------------
+# v0.9 skill list block (S2: L1 skill signal for ChatPlanner system prompt)
+# ---------------------------------------------------------------------------
+
+
+def build_skill_list_block(skills: list[SkillManifest]) -> str:
+    """Render the L1 skill list as a markdown block for the planner system prompt.
+
+    Format:
+        ## Available Skills
+
+        - **risk_assessment**: Investment risk assessment.
+        - **financial_analysis**: ...
+
+        To expand a skill, emit {"action": "load_skill", "name": "<n>"}.
+        To load a specific resource within a loaded skill, emit
+        {"action": "load_resource", "skill": "<n>", "ref": "resources/<file>"}.
+
+    S2: this is the only signal the planner has about each skill's capability.
+    Sorted by name for deterministic ordering. Empty input returns empty string.
+    """
+    if not skills:
+        return ""
+
+    lines = ["## Available Skills", ""]
+    for s in sorted(skills, key=lambda x: x.name):
+        desc = s.description.replace("\n", " ").strip()
+        lines.append(f"- **{s.name}**: {desc}")
+    lines.extend(
+        [
+            "",
+            'To expand a skill, emit {"action": "load_skill", "name": "<n>"}.',
+            "To load a specific resource within a loaded skill, emit "
+            '{"action": "load_resource", "skill": "<n>", "ref": "resources/<file>"}.',
+        ]
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Legacy v0 prompt helpers (preserved for research-mode graph)
+# ---------------------------------------------------------------------------
+
 _SYSTEM_ROLE = "你是金融研究助手 planner。"
 
 _PLAN_SCHEMA_DESCRIPTION = """\
@@ -114,22 +162,204 @@ def _parse_plan(content: str) -> Plan:
     return Plan.model_validate(parsed)
 
 
-class ChatPlanner(Agent):
-    """Decide which tools to call (or respond directly) for a user message.
+# ---------------------------------------------------------------------------
+# v0.9 prompt template (chat mode)
+# ---------------------------------------------------------------------------
 
-    Uses prompt-engineered JSON (Path B) — the LLM is asked to output a
-    JSON object matching the Plan schema. No openai tool-calling is used.
+_PLANNER_PROMPT_TEMPLATE = """\
+你是金融研究助手 chat 模式的 planner。决定本轮要做什么。
+
+可用工具(只能从这里选,不要编):
+{tool_descriptions}
+
+用户当前问题:
+{user_message}
+
+历史摘要(如有):
+{history_summary}
+
+最近 {recent_k} 轮:
+{recent_turns}
+
+任务:
+1. 决定是否调工具。如果用户问的问题需要数据,选合适的工具。
+2. 如果可并行(无依赖),设 parallelizable=true。
+3. 如果用户在请求"深度报告 / 完整尽调 / 详细分析"这类长程任务,设 escalate_offered=true 并给 reason。
+4. 如果只是闲聊或简单问答,设 direct_response=true,tool_calls 留空。
+5. 如果用户问题需要某 skill 的细节(SKILL.md 全文),设 load_skill="<skill_name>"。
+6. 如果你已经看过 SKILL.md,需要里面引用的具体 resource,设 load_resource={{"skill": "<n>", "ref": "resources/<file>"}}。
+   注意: load_skill / load_resource / tool_calls 三选一,不要同时设置多个。
+7. 如果某 skill 提供脚本能完成用户的计算需求(如 DCF 估值、风险打分等),优先用 script_calls。
+   script_calls 格式: [{{"skill": "<skill_name>", "script": "scripts/<file>.py", "args": {{...}}}}]
+   每个 entry 的 script 字段必须以 "scripts/" 开头。
+
+严格按下列 JSON 输出,不要带任何额外文字:
+{{
+  "tool_calls": [{{"tool_name": "...", "args": {{...}}, "rationale": "..."}}, ...],
+  "script_calls": [{{"skill": "...", "script": "scripts/...", "args": {{...}}}}],
+  "parallelizable": true|false,
+  "direct_response": true|false,
+  "escalate_offered": true|false,
+  "escalate_reason": "..." or null,
+  "reasoning": "<一句话摘要>",
+  "load_skill": "..." or null,
+  "load_resource": {{"skill": "...", "ref": "..."}} or null
+}}
+"""
+
+
+# ---------------------------------------------------------------------------
+# ChatPlanner — v0.9 primary class
+# ---------------------------------------------------------------------------
+
+
+class ChatPlanner(Agent):
+    """Supervisor-style planner for v0.9 chat mode.
+
+    v0.9 constructor (used by chat graph):
+        ChatPlanner(llm, available_tools=[...])
+        → async run(ChatState) -> dict[str, Any]
+
+    Legacy constructor (research-mode graph, backwards-compat):
+        ChatPlanner(llm, registry=ToolRegistry)
+        → step(GraphState) -> StepResult
     """
 
     name = "ChatPlanner"
     model_tier: Tier = "balanced"
 
-    def __init__(self, llm: LLMService, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        llm: LLMService,
+        registry: ToolRegistry | None = None,
+        available_tools: list[str] | None = None,
+        available_skills: list[str] | None = None,
+        recent_k: int = 4,
+    ) -> None:
         super().__init__(llm)
         self._registry = registry
+        self._available_tools = available_tools or []
+        self._available_skills = available_skills or []
+        self._recent_k = recent_k
+
+    # ------------------------------------------------------------------
+    # v0.9 async interface (chat mode)
+    # ------------------------------------------------------------------
+
+    async def run(self, state: ChatState) -> dict[str, Any]:
+        """Plan one chat turn: call LLM, filter hallucinated tools, emit Plan."""
+        prompt = self._build_chat_prompt(state)
+        resp = self._llm.chat(prompt=prompt, tier="balanced", schema=None)
+
+        try:
+            data = json.loads(resp.content)
+        except json.JSONDecodeError:
+            logger.warning("planner LLM returned non-JSON; defaulting to direct_response")
+            return {
+                "plan": Plan(
+                    tool_calls=[],
+                    direct_response=True,
+                    reasoning="LLM 输出非 JSON，回退到 direct_response",
+                ),
+            }
+
+        # A4: filter hallucinated tool names against whitelist
+        whitelist = set(self._available_tools)
+        valid_calls: list[ToolCall] = []
+        for tc in data.get("tool_calls", []):
+            tool_name = tc.get("tool_name", "")
+            if not whitelist or tool_name in whitelist:
+                valid_calls.append(
+                    ToolCall(
+                        tool_name=tool_name,
+                        args=tc.get("args", {}),
+                        rationale=tc.get("rationale", ""),
+                    )
+                )
+            else:
+                logger.warning("planner hallucinated tool: %s; dropping", tool_name)
+
+        direct_response = bool(data.get("direct_response", False))
+        escalate_offered = bool(data.get("escalate_offered", False))
+        parallelizable = bool(data.get("parallelizable", False))
+        reasoning = data.get("reasoning", "")
+
+        # Plan 2a: parse new skill action fields
+        raw_load_skill = data.get("load_skill")
+        load_skill = raw_load_skill if isinstance(raw_load_skill, str) else None
+        raw_load_resource = data.get("load_resource")
+        load_resource = raw_load_resource if isinstance(raw_load_resource, dict) else None
+
+        # Plan 2b: parse execute_script actions (whitelist by available_skills)
+        whitelist_skills = set(self._available_skills)
+        valid_script_calls: list[SkillScriptCall] = [
+            SkillScriptCall(
+                skill=sc["skill"],
+                script=sc["script"],
+                args=sc.get("args", {}),
+            )
+            for sc in data.get("script_calls", [])
+            if sc.get("skill") in whitelist_skills and sc.get("script", "").startswith("scripts/")
+        ]
+
+        # Build Plan — handle edge cases for validator:
+        # - escalate_offered=True with no tool_calls: use direct_response=True
+        # - tool_calls filtered to empty and no skill action: force direct_response=True
+        has_action = (
+            bool(valid_calls)
+            or escalate_offered
+            or load_skill
+            or load_resource
+            or bool(valid_script_calls)
+        )
+        if not has_action and not direct_response:
+            direct_response = True
+
+        plan = Plan(
+            tool_calls=valid_calls,
+            direct_response=direct_response,
+            reasoning=reasoning,
+            parallelizable=parallelizable,
+            escalate_offered=escalate_offered,
+            escalate_reason=data.get("escalate_reason"),
+            load_skill=load_skill,
+            load_resource=load_resource,
+            script_calls=valid_script_calls,
+        )
+
+        return {
+            "plan": plan,
+            "escalate_offered": escalate_offered,
+        }
+
+    def _build_chat_prompt(self, state: ChatState) -> str:
+        tool_lines = (
+            [f"- {t}" for t in self._available_tools] if self._available_tools else ["(no tools)"]
+        )
+        recent = state.history[-self._recent_k :] if state.history else []
+        recent_lines = [f"[{m.turn_index}] {m.role}: {m.content[:200]}" for m in recent]
+        return _PLANNER_PROMPT_TEMPLATE.format(
+            tool_descriptions="\n".join(tool_lines),
+            user_message=state.user_message,
+            history_summary=state.history_summary or "(无)",
+            recent_k=self._recent_k,
+            recent_turns="\n".join(recent_lines) or "(无)",
+        )
+
+    # ------------------------------------------------------------------
+    # Legacy v0 sync interface (research-mode graph)
+    # ------------------------------------------------------------------
 
     def step(self, state: GraphState) -> StepResult:
-        """Build a planner prompt, call LLM, parse the returned Plan JSON."""
+        """Build a planner prompt, call LLM, parse the returned Plan JSON.
+
+        Legacy research-mode path — requires self._registry to be set.
+        """
+        if self._registry is None:
+            raise RuntimeError(
+                "ChatPlanner.step() requires registry=ToolRegistry; "
+                "use run(ChatState) for v0.9 chat mode."
+            )
         prompt = build_planner_prompt(state=state, registry=self._registry)
         r = self._llm.chat(
             prompt=prompt,

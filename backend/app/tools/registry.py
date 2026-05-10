@@ -3,12 +3,41 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from app.agents.schemas import ToolCall, ToolResult
 from app.tools.base import Tool, ToolError, ToolNotFoundError
+
+if TYPE_CHECKING:
+    from app.services.mcp_client import MCPClient
+
+
+class _MCPToolProxy(Tool):
+    """Wraps an MCP-exposed tool to satisfy the in-process Tool interface.
+
+    The MCP server validates input schema on its side; we use a permissive
+    Pydantic model so that ToolRegistry.execute() can call model_validate()
+    without schema conflicts.
+    """
+
+    def __init__(self, client: MCPClient, manifest: dict[str, Any]) -> None:
+        self.name: str = manifest["name"]
+        self.description: str = manifest["description"]
+        self._client = client
+        self.args_schema: type[BaseModel] = self._build_args_model()
+
+    @staticmethod
+    def _build_args_model() -> type[BaseModel]:
+        # Permissive — MCP server validates schema on its side
+        class _Args(BaseModel):
+            model_config = {"extra": "allow"}
+
+        return _Args
+
+    async def run(self, args: BaseModel) -> dict[str, Any]:
+        return await self._client.call_tool(self.name, args.model_dump())
 
 
 class ToolRegistry:
@@ -24,6 +53,13 @@ class ToolRegistry:
         if name not in self._tools:
             raise ToolNotFoundError(f"no tool registered with name={name!r}")
         return self._tools[name]
+
+    async def register_mcp_client_async(self, client: MCPClient) -> None:
+        """Register all tools exposed by an MCPClient (via stdio MCP server)."""
+        tools = await client.list_tools()
+        for t in tools:
+            proxy = _MCPToolProxy(client, t)
+            self._tools[proxy.name] = proxy
 
     def list_for_llm(self) -> list[dict[str, Any]]:
         return [tool.schema_for_llm() for tool in self._tools.values()]

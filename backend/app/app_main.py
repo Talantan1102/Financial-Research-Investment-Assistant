@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -14,6 +15,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from app.core.database import Base, engine  # noqa: E402  (must follow load_dotenv)
+from app.orchestration.postgres_checkpointer import (  # noqa: E402
+    PostgresCheckpointerConfig,
+    make_postgres_checkpointer,
+)
+from app.router import chat as chat_router_module  # noqa: E402
+from app.router import chats as chats_router_module  # noqa: E402
+from app.router import escalate as escalate_router  # noqa: E402
 from app.router import research  # noqa: E402
 from app.router.attachment_router import router as attachment_router  # noqa: E402
 from app.router.auth_router import router as auth_router  # noqa: E402
@@ -21,7 +29,43 @@ from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
+from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
+from app.services.mcp_client import MCPClient  # noqa: E402
 from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover trigger)
+
+# ---------------------------------------------------------------------------
+# Helper: build psycopg3-compatible async DATABASE_URL from env vars
+# ---------------------------------------------------------------------------
+
+
+def _async_pg_url() -> str:
+    """Return a psycopg3-compatible conninfo URI (plain postgresql://).
+
+    Note: psycopg3 / psycopg_pool use the libpq URI format (postgresql://)
+    NOT the SQLAlchemy driver format (postgresql+psycopg://).  The +psycopg
+    prefix is SQLAlchemy-only and is rejected by psycopg_pool.AsyncConnectionPool.
+    """
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "postgres123")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db = os.getenv("POSTGRES_DB", "industry_assistant")
+    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+
+
+def _sqlalchemy_async_pg_url() -> str:
+    """Return a SQLAlchemy async engine URL (postgresql+psycopg://).
+
+    SQLAlchemy's create_async_engine requires the +psycopg driver suffix
+    to select the psycopg3 backend over psycopg2.
+    """
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", "postgres123")
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    db = os.getenv("POSTGRES_DB", "industry_assistant")
+    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db}"
+
 
 # ---------------------------------------------------------------------------
 # App lifespan
@@ -59,6 +103,94 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     except Exception as e:
         logger.error(f"定时任务调度器启动失败: {e}")
 
+    # === v0.9 chat additions ===
+
+    # 1. PG checkpointer for LangGraph (psycopg3 async pool)
+    _chat_checkpointer_ctx = None
+    try:
+        conninfo = _async_pg_url()
+        app.state.chat_checkpointer = await make_postgres_checkpointer(
+            PostgresCheckpointerConfig(conninfo=conninfo)
+        )
+        logger.info("LangGraph PG checkpointer 初始化完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.chat_checkpointer = None
+        logger.warning("LangGraph PG checkpointer 初始化跳过: %s", e)
+
+    # 2. MCP client subprocess — use as context manager
+    _mcp_ctx = MCPClient.from_subprocess()
+    try:
+        app.state.mcp_client = await _mcp_ctx.__aenter__()
+        app.state._mcp_ctx = _mcp_ctx
+        logger.info("MCP client 启动完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.mcp_client = None
+        app.state._mcp_ctx = None
+        logger.warning("MCP client 启动跳过: %s", e)
+
+    # 3. ChatSessionRepo (no existing async_session_factory — create one inline)
+    try:
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        _chat_engine_url = _sqlalchemy_async_pg_url()  # SQLAlchemy needs +psycopg prefix
+        app.state.chat_async_engine = create_async_engine(_chat_engine_url, future=True)
+        _factory = async_sessionmaker(app.state.chat_async_engine, expire_on_commit=False)
+        # Store factory on app.state so escalate deps (T11) can reuse it
+        app.state.async_session_factory = _factory
+        app.state.chat_session_repo = ChatSessionRepo(session_factory=_factory)
+        logger.info("ChatSessionRepo 初始化完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.async_session_factory = None
+        app.state.chat_session_repo = None
+        logger.warning("ChatSessionRepo 初始化跳过: %s", e)
+
+    # === Plan 3 escalate deps ===
+
+    # 4. EscalationExtractor (needs LLMService)
+    try:
+        from app.agents.escalation_extractor import EscalationExtractor
+        from app.services.openai_client import build_llm_service_from_env
+
+        llm_for_extraction = build_llm_service_from_env()
+        app.state.escalation_extractor = EscalationExtractor(llm=llm_for_extraction)
+        logger.info("EscalationExtractor 初始化完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.escalation_extractor = None
+        logger.warning("EscalationExtractor 初始化跳过: %s", e)
+
+    # 5. EscalationRecordRepo + ResearchReportRepo (reuse async_session_factory)
+    try:
+        from app.services.escalation_record_repo import EscalationRecordRepo
+        from app.services.research_report_repo import ResearchReportRepo
+
+        if getattr(app.state, "async_session_factory", None) is not None:
+            app.state.escalation_record_repo = EscalationRecordRepo(
+                session_factory=app.state.async_session_factory,
+            )
+            app.state.research_report_repo = ResearchReportRepo(
+                session_factory=app.state.async_session_factory,
+            )
+            logger.info("EscalationRecordRepo + ResearchReportRepo 初始化完成")
+        else:
+            app.state.escalation_record_repo = None
+            app.state.research_report_repo = None
+            logger.warning(
+                "async_session_factory not in app.state; "
+                "EscalationRecordRepo / ResearchReportRepo 未初始化"
+            )
+    except Exception as e:  # noqa: BLE001
+        app.state.escalation_record_repo = None
+        app.state.research_report_repo = None
+        logger.warning("EscalationRecordRepo / ResearchReportRepo 初始化跳过: %s", e)
+
+    # 6. ResearchAgent — stub None; escalate router handles None gracefully
+    try:
+        if not hasattr(app.state, "research_agent"):
+            app.state.research_agent = None
+    except Exception as e:  # noqa: BLE001
+        app.state.research_agent = None
+        logger.warning("research_agent 初始化跳过: %s", e)
+
     yield
 
     # 关闭时执行
@@ -70,6 +202,20 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         scheduler.stop()
     except Exception as e:
         logger.error(f"定时任务调度器关闭失败: {e}")
+
+    # === v0.9 chat shutdown ===
+    if getattr(app.state, "_mcp_ctx", None) is not None:
+        try:
+            await app.state._mcp_ctx.__aexit__(None, None, None)
+            logger.info("MCP client 已关闭")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("MCP client 关闭失败: %s", e)
+    if getattr(app.state, "chat_async_engine", None) is not None:
+        try:
+            await app.state.chat_async_engine.dispose()
+            logger.info("ChatSessionRepo async engine 已关闭")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ChatSessionRepo async engine 关闭失败: %s", e)
 
 
 app = FastAPI(
@@ -98,6 +244,59 @@ app.include_router(research.router)
 app.include_router(monitoring_router)
 app.include_router(reports_router)  # v0.9.x — research reports CRUD
 app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
+app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE streaming)
+app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
+app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (confirmed packet)
+
+
+# Dependency override: chats router's get_repo reads from app.state at request time
+def _get_chat_session_repo() -> ChatSessionRepo:
+    return app.state.chat_session_repo
+
+
+app.dependency_overrides[chats_router_module.get_repo] = _get_chat_session_repo
+
+
+# === Plan 3 dependency overrides (T11) ===
+
+
+def _override_or_fallback(state_attr: str):
+    """Return a zero-arg callable that yields app.state.<state_attr>, or raises if None."""
+
+    def _factory():
+        val = getattr(app.state, state_attr, None)
+        if val is None:
+            raise RuntimeError(f"app.state.{state_attr} not initialized")
+        return val
+
+    return _factory
+
+
+from app.router.chat import (  # noqa: E402
+    get_escalation_extractor as chat_get_extractor,
+)
+from app.router.chat import (
+    get_escalation_record_repo as chat_get_repo,
+)
+from app.router.escalate import (  # noqa: E402
+    get_chat_session_repo as esc_get_chat_repo,
+)
+from app.router.escalate import (
+    get_escalation_record_repo as esc_get_repo,
+)
+from app.router.escalate import (
+    get_research_agent as esc_get_agent,
+)
+from app.router.escalate import (
+    get_research_report_repo as esc_get_rpt_repo,
+)
+
+app.dependency_overrides[chat_get_extractor] = _override_or_fallback("escalation_extractor")
+app.dependency_overrides[chat_get_repo] = _override_or_fallback("escalation_record_repo")
+app.dependency_overrides[esc_get_repo] = _override_or_fallback("escalation_record_repo")
+app.dependency_overrides[esc_get_agent] = _override_or_fallback("research_agent")
+app.dependency_overrides[esc_get_chat_repo] = _override_or_fallback("chat_session_repo")
+app.dependency_overrides[esc_get_rpt_repo] = _override_or_fallback("research_report_repo")
 
 
 @app.get("/hello")

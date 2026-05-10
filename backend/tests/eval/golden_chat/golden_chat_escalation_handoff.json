@@ -1,0 +1,27 @@
+{
+  "id": "chat_escalation_v1",
+  "description": "Multi-turn ICBC + 招行 chat → escalate_offered → user confirms → ResearchAgent runs → report quality. Verifies E1/E9/E10 + research-side prompt 升级 (chat_extracted_entities/preferences honor).",
+  "persona": "capital_preservation",
+  "chat_history": [
+    {"role": "user", "content": "工商银行最近表现怎么样"},
+    {"role": "assistant", "content": "工商银行(601398.SH)..."},
+    {"role": "user", "content": "招商银行呢"},
+    {"role": "assistant", "content": "招商银行(600036.SH)..."},
+    {"role": "user", "content": "我比较保守,主要看股息和估值,可不可以帮我深度对比一下"}
+  ],
+  "final_user_message": "好,请生成研报",
+  "expected_signals": ["对比", "工商银行", "招商银行", "股息"],
+  "expected_tool_calls": [],
+  "expected_skills_loaded": [],
+  "expected_escalation": true,
+  "judge_rubric": {
+    "criteria": [
+      "EscalationPacket.entities 包含 ICBC (role=primary_target 或 comparative_target) + CMB",
+      "EscalationPacket.preferences 包含 '保守' / '股息' / '估值' 至少 2 个",
+      "EscalationPacket.missing_field_hints 不为空 (至少 horizon 或 amount 标 missing - E10)",
+      "ResearchAgent 生成 report 真 honor 保守 persona (不推激进股 + 警告风险)",
+      "Report 包含两支股的对比,不是只写 ICBC 而忽略 CMB"
+    ],
+    "score_threshold": 0.7
+  }
+}

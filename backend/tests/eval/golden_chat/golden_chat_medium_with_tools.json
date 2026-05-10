@@ -1,0 +1,30 @@
+{
+  "id": "chat_medium_v1",
+  "description": "10-turn chat about ICBC, mixing get_stock_quote / get_financials / get_news / web_search. Verifies B1 token bloat / B2 relevance filter / C1 multi-turn coordination.",
+  "persona": "balanced",
+  "chat_history": [
+    {"role": "user", "content": "工商银行现价多少"},
+    {"role": "assistant", "content": "工商银行(601398.SH)当前价格约 6.45 元,涨跌幅 +0.15%。"},
+    {"role": "user", "content": "最近一季度财报呢"},
+    {"role": "assistant", "content": "2025Q4 营业收入 X 亿,净利润 Y 亿,ROE 11.5%。"},
+    {"role": "user", "content": "有什么近期新闻"},
+    {"role": "assistant", "content": "近期主要新闻包括..."},
+    {"role": "user", "content": "市场怎么看ICBC"},
+    {"role": "assistant", "content": "市场普遍持..."},
+    {"role": "user", "content": "PE 估值水平如何"}
+  ],
+  "final_user_message": "综合来看,现在适合买入吗",
+  "expected_signals": ["综合", "ICBC", "买入"],
+  "expected_tool_calls": [],
+  "expected_skills_loaded": [],
+  "expected_escalation": false,
+  "judge_rubric": {
+    "criteria": [
+      "response 综合前面 9 轮的 tool 结果而非重新调 tool(C1 dedup)",
+      "response 长度合理(B1 不爆 token)",
+      "response 只引用相关 tool 结果,不夹无关数据(B2 relevance)",
+      "推理符合 balanced persona(不极端激进/保守)"
+    ],
+    "score_threshold": 0.7
+  }
+}

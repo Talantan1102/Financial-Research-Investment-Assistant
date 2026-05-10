@@ -1,15 +1,17 @@
 """Agent I/O Pydantic schemas — stable v0~v3.
 
-GraphState is the LangGraph state object (mutable across nodes).
+ChatState (née GraphState) is the LangGraph state object (mutable across nodes).
 Plan / ToolCall / ToolResult / StepResult are agent-level frozen contracts.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.agents.escalation_protocol import Entity, Preference, ToolResultRef
 from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
 from app.services.monitoring.signal_rules.base import SignalResult
@@ -124,6 +126,16 @@ class ToolResult(BaseModel):
     output: dict[str, Any] | None = None
     error: str | None = None
     latency_ms: int = Field(ge=0)
+    cached: bool = False  # v0.9: True when result came from ToolResultCache (B3)
+    tool_call_data: dict[str, Any] | None = None  # Plan 2b: skill_script metadata
+
+
+class SkillScriptCall(BaseModel):
+    """One execute_script action emitted by ChatPlanner."""
+
+    skill: str
+    script: str  # relative path, e.g. "scripts/calculate_dcf.py"
+    args: dict[str, Any] = Field(default_factory=dict)
 
 
 class Plan(BaseModel):
@@ -133,12 +145,40 @@ class Plan(BaseModel):
     direct_response: bool
     reasoning: str
 
+    # === v0.9 NEW ===
+    parallelizable: bool = False  # A2: parallel tool dispatch
+    escalate_offered: bool = False  # Q3: Plan 3 escalation hook
+    escalate_reason: str | None = None  # human-readable; SSE event payload
+
+    # === Plan 2a NEW (S2: skill context loader) ===
+    load_skill: str | None = Field(
+        default=None,
+        description="Skill name to expand from L1 to L2 (with L3a resources).",
+    )
+    load_resource: dict | None = Field(
+        default=None,
+        description="Specific resource to load: {'skill': str, 'ref': str}.",
+    )
+
+    # === Plan 2b NEW ===
+    script_calls: list[SkillScriptCall] = Field(default_factory=list)
+
     @model_validator(mode="after")
     def _check_consistency(self) -> Plan:
         if self.direct_response and self.tool_calls:
             raise ValueError("direct_response=True 时 tool_calls 必须为空")
-        if not self.direct_response and not self.tool_calls:
-            raise ValueError("direct_response=False 时 tool_calls 至少有 1 个")
+        has_action = (
+            bool(self.tool_calls)
+            or self.escalate_offered
+            or self.load_skill is not None
+            or self.load_resource is not None
+            or bool(self.script_calls)
+        )
+        if not self.direct_response and not has_action:
+            raise ValueError(
+                "direct_response=False 时 tool_calls 至少有 1 个"
+                "（或 escalate_offered=True / load_skill / load_resource / script_calls）"
+            )
         return self
 
 
@@ -149,25 +189,90 @@ class StepResult(BaseModel):
     span_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class GraphState(BaseModel):
-    """LangGraph state — mutable across nodes."""
+class HistoryMessage(BaseModel):
+    """One turn in chat history (v0.9 Q4-E memory)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    role: Literal["user", "assistant", "tool"]
+    content: str
+    turn_index: int
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    timestamp: datetime
+
+
+class CacheEntry(BaseModel):
+    """One cached tool result for cross-turn dedup (C1)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    tool_name: str
+    args_hash: str
+    result_summary: str
+    cache_id: str  # → ToolResultCache PK
+    cached_at: datetime
+
+
+class ChatState(BaseModel):
+    """v0.9 chat agent graph state.
+
+    Layout per spec § 4.1.  Fields in 6 groups:
+      1. legacy v0 (user_id / session_id / user_message / request_id)
+      2. Q4 E memory (history / history_summary)
+      3. tool result mgmt (tool_results / tool_result_cache)
+      4. plan + final (legacy plan; final_response)
+      5. escalation hooks (Plan 3 will use these; Plan 1 reserves)
+      6. observability (trace_request_id / span_stack / cost_so_far)
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    # === legacy v0 ===
     user_id: str
     session_id: str
     user_message: str
-    enable_web_search: bool = False  # v0 placeholder
-    enable_kb_search: bool = False  # v0 placeholder
+    request_id: str
 
-    plan: Plan | None = None
+    # === v0 placeholders (preserved for backwards-compat) ===
+    enable_web_search: bool = False
+    enable_kb_search: bool = False
+
+    # === Q4 E memory ===
+    history: list[HistoryMessage] = Field(default_factory=list)
+    history_summary: str | None = None
+
+    # === tool result mgmt (Plan 1 + B1/B2/B3/C1) ===
     tool_results: list[ToolResult] = Field(default_factory=list)
+    tool_result_cache: dict[str, CacheEntry] = Field(default_factory=dict)
 
+    # === legacy plan ===
+    plan: Plan | None = None
     final_response: str | None = None
     final_response_streamed: bool = False
 
-    request_id: str
+    # === escalation (Plan 3 deliverable; Plan 1 reserves only) ===
+    escalate_offered: bool = False
+    escalate_confirmed: bool = False
+
+    # === Plan 2a skill loader hook ===
+    skill_context: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Loaded skill bundles (L2 SKILL.md + concatenated L3a resources). "
+            "Keyed by skill name. Persisted across planner turns via LangGraph checkpointer."
+        ),
+    )
+
+    # === observability ===
+    trace_request_id: str
     span_stack: list[str] = Field(default_factory=list)
+    cost_so_far: float = 0.0
+
+
+# Backwards-compatibility alias for callers still importing GraphState.
+# Remove in v1.0 once all callers migrate to ChatState.
+GraphState = ChatState
 
 
 # ---------------------------------------------------------------------------
@@ -313,3 +418,9 @@ class ResearchState(BaseModel):
     alert_signals: list[SignalResult] | None = None
     portfolio_warning_report: PortfolioWarningReport | None = None
     deep_dive_section: str | None = None
+
+    # === Plan 3 — chat-derived fields ===
+    chat_extracted_entities: list[Entity] = Field(default_factory=list)
+    chat_extracted_preferences: list[Preference] = Field(default_factory=list)
+    chat_known_tool_results: list[ToolResultRef] = Field(default_factory=list)
+    chat_session_id: str | None = None

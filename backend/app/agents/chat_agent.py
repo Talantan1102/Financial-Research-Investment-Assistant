@@ -1,7 +1,7 @@
-"""ChatAgent — SUT-friendly wrapper around the compiled LangGraph chat graph.
+"""ChatAgent v0.9 — SUT-friendly wrapper around the compiled LangGraph chat graph.
 
 Provides a ``run(user_input, request_id) -> SUTOutput`` interface consumed by
-Task 12 EvalRunner and Task 13 cassette E2E tests.
+EvalRunner and cassette E2E tests.
 
 Note on `plan` deserialization:
     LangGraph 1.x returns the state as a plain dict.  When the graph nodes
@@ -11,6 +11,12 @@ Note on `plan` deserialization:
     spike: ``final.get("plan")`` is a ``Plan`` instance.  If that changes in
     a future LangGraph version, ``Plan.model_validate(plan_val)`` handles the
     dict-fallback path.
+
+v0.9 changes:
+    - Uses ``ChatState`` (renamed from ``GraphState`` alias in T4) with
+      required ``trace_request_id`` field.
+    - Exposes ``escalate_offered`` from the final state in ``SUTOutput``.
+    - thread_id prefix changed to ``chat:`` to match production router.
 """
 
 from __future__ import annotations
@@ -20,7 +26,7 @@ from typing import Any
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
-from app.agents.schemas import Plan
+from app.agents.schemas import ChatState, Plan
 from app.services.eval_models import SUTOutput
 from app.services.trace_service import TraceService
 
@@ -47,21 +53,20 @@ class ChatAgent:
         Args:
             user_input: The user's natural-language query.
             request_id: Unique identifier for this evaluation run; used as
-                        LangGraph thread_id and propagated into GraphState.
+                        LangGraph thread_id and propagated into ChatState.
 
         Returns:
             :class:`~app.services.eval_models.SUTOutput` with ``response_text``,
-            ``tool_calls`` extracted from the final planner plan, and
-            ``request_id`` echo.
+            ``tool_calls`` extracted from the final planner plan,
+            ``escalate_offered`` from the final state, and ``request_id`` echo.
         """
-        from app.agents.schemas import GraphState
-
-        config: RunnableConfig = {"configurable": {"thread_id": f"eval:{request_id}"}}
-        initial = GraphState(
-            user_id="eval",
+        config: RunnableConfig = {"configurable": {"thread_id": f"chat:{request_id}"}}
+        initial = ChatState(
+            user_id="anonymous",
             session_id=request_id,
             user_message=user_input,
             request_id=request_id,
+            trace_request_id=request_id,
         )
         final: dict[str, Any] = await self._graph.ainvoke(initial.model_dump(), config=config)
 
@@ -81,4 +86,5 @@ class ChatAgent:
             request_id=request_id,
             response_text=final.get("final_response") or "",
             tool_calls=plan.tool_calls if plan else [],
+            escalate_offered=bool(final.get("escalate_offered", False)),
         )

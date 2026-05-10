@@ -100,3 +100,52 @@ vitest + playwright 已 self-contained 不依赖 backend, 后续可加到 GitHub
 - backend 默认起在 `http://localhost:8000`
 - frontend dev server proxy 配置见 `vite.config.ts`
 - API 类型定义在 `src/api/`
+
+## v0.9 chat-first frontend foundation (Plan 4a)
+
+Routes:
+- `/` → redirect `/chat`
+- `/chat` ChatLandingPage (auto-creates session + redirects)
+- `/chat/:session_id` ChatSessionPage (Plan 4a foundation; Plan 4b fills ChatPane)
+- `/reports` ReportsListPage (placeholder)
+- `/research` `/research/new` `/research/:id` (preserved)
+- `/portfolio` `/monitoring` `/knowledge` `/auth/*` (preserved)
+
+Stores: `chatSessionsStore` / `currentChatStore` / `escalationStore` (valtio).
+Hook: `useChatSSE({ sessionId })` returns `{ sendMessage, abort, status }` with F6 reconnect (last_event_id, 1s/2s/4s/8s/30s cap) and F8 multi-chat abort-on-swap.
+Layout: `AppShell` (TopBar 56px + Sidebar 240px + Main).
+
+Run tests:
+```
+npm test
+```
+
+## v0.9 chat-first dashboard (Plan 4b ship)
+
+ChatPane internals:
+- `<MessageList>` — react-window virtualized list, routes by `message_type`
+- `<TextMessage>` — marked + highlight.js + KaTeX + ECharts (chart_specs)
+- `<ToolCallCard>` — Cursor-style tri-state (collapsed / expanded / error+retry)
+- `<ResearchReportCard>` — summary + 展开 / 跳转 Reports / 继续提问
+- `<StreamingIndicator>` — phase bar (思考 / 调工具 / 写回答 / research_*)
+- `<InputArea>` — auto-resize + Enter/Shift+Enter + Cmd+K abort + ⚡ Escalate
+- `<CostMeter>` — cross-mode breakdown (chat $ + research $)
+
+EscalationConfirmDialog:
+- 4 sub-forms (ExplicitTask / ChatDerivedSignals / KnownFacts / SessionMetadata)
+- InlineEditField — pencil → input → save → FieldEdit traced into escalationStore.user_edits
+- MissingFieldBanner — ⚠️ + LLM 反问 per field
+- Confirm → POST `/api/v0/chat/escalate` (Plan 3 endpoint)
+
+Reports page: full impl at `/reports` (list + filter + detail modal + chat deep link).
+
+F1-F10 industry polish:
+- F1 token render perf (virtualized + useDeferredValue + memo)
+- F2 tool tri-state
+- F3 scroll auto-stick
+- F4 input UX (4 channels)
+- F5 EscalationConfirmDialog inline edit
+- F7 markdown + KaTeX + chart_specs
+- F9 cost meter cross-mode
+- F10 long prompt + paste 占位 (real upload deferred to C.4)
+- F6 + F8 from Plan 4a (SSE reconnect + multi-chat lifecycle)

@@ -10,7 +10,13 @@ from app.tools.registry import ToolRegistry
 
 
 def _state(msg: str) -> GraphState:
-    return GraphState(user_id="u", session_id="s", user_message=msg, request_id="req-test1234")
+    return GraphState(
+        user_id="u",
+        session_id="s",
+        user_message=msg,
+        request_id="req-test1234",
+        trace_request_id="req-test1234",
+    )
 
 
 def test_build_prompt_includes_tools() -> None:

@@ -87,9 +87,11 @@ entries:
       prompt_tokens: 120
       completion_tokens: 30
 
-  # ChatPlanner: matched by the system-role prefix injected by build_planner_prompt
+  # ChatPlanner (v0.9 chat mode): matched by _PLANNER_PROMPT_TEMPLATE prefix.
+  # Also matches legacy build_planner_prompt prefix for research-mode step().
   # Must appear BEFORE the generic ts_code pattern below so it wins on planner prompts.
-  - pattern: "^你是金融研究助手 planner"
+  # Note: uses non-capturing group (?:...) so template.format(group_1=...) is not triggered.
+  - pattern: "^你是金融研究助手 (?:chat 模式的 )?planner"
     response:
       content: '{"tool_calls":[{"tool_name":"get_stock_quote","args":{"ts_code":"600519.SH"},"rationale":"user asked"}],"direct_response":false,"reasoning":"single tool"}'
       prompt_tokens: 120

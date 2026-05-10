@@ -12,9 +12,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import MagicMock
 
 from app.agents.chat_agent import ChatAgent
 from app.agents.chat_planner import ChatPlanner
+from app.agents.in_session_memory import InSessionMemory
 from app.agents.responder import Responder
 from app.orchestration.chat_graph import build_chat_graph
 from app.services.eval_models import GoldenCase
@@ -23,6 +25,7 @@ from app.services.eval_runner import EvalRunner
 from app.services.judge import Judge
 from app.services.llm_mock_client import MockLLMClient
 from app.services.llm_service import LLMService
+from app.services.tool_result_cache import ToolResultCache
 from app.services.trace_service import TraceService
 from app.tools.base import Tool
 from app.tools.registry import ToolRegistry
@@ -141,7 +144,12 @@ def test_chat_agent_sut_tool_correctness_is_not_none(
     registry.register(StubNewsTool())
     planner = ChatPlanner(llm=svc, registry=registry)
     responder = Responder(llm=svc)
-    graph = build_chat_graph(planner=planner, responder=responder, registry=registry)
+    # Plan 1 signature: memory + cache required; use lightweight stubs for tests
+    memory = InSessionMemory()
+    cache = ToolResultCache(session_factory=MagicMock())
+    graph = build_chat_graph(
+        planner=planner, responder=responder, registry=registry, memory=memory, cache=cache
+    )
     agent = ChatAgent(graph=graph)
 
     judge_llm = LLMService(client=mock_llm_client)

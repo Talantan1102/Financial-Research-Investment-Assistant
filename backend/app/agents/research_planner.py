@@ -14,6 +14,7 @@ spec ref: docs/superpowers/specs/2026-05-04-v0.8.5-skill-bundles-and-constrained
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.agents.base import Agent
@@ -70,6 +71,28 @@ _PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是金融研究助手 research_planner�
 """
 
 
+def _format_chat_known_tools(results: list) -> str:
+    """Render the chat-session cached tool results block for the planner prompt.
+
+    Returns an empty string when ``results`` is empty so callers can safely
+    concatenate without adding blank sections.
+    """
+    if not results:
+        return ""
+    lines = ["\n【chat 期间已查过的工具结果(已知, 不要重复调)】"]
+    for r in results:
+        args_str = json.dumps(
+            r.tool_args if hasattr(r, "tool_args") else r["tool_args"],
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        name = r.tool_name if hasattr(r, "tool_name") else r["tool_name"]
+        summary = r.result_summary if hasattr(r, "result_summary") else r["result_summary"]
+        lines.append(f"- {name}({args_str}) → {summary}")
+    lines.append("\n规划时如果某 tool/args 组合已在上面列表中, **跳过它**, 直接用已知结果。")
+    return "\n".join(lines)
+
+
 def build_router_prompt(state: ResearchState) -> str:
     """Format the constrained-router system prompt from a ResearchState.
 
@@ -86,7 +109,7 @@ def build_router_prompt(state: ResearchState) -> str:
         else "(无 — 第一轮 router)"
     )
 
-    return _PLANNER_SYSTEM_PROMPT_TEMPLATE.format(
+    base = _PLANNER_SYSTEM_PROMPT_TEMPLATE.format(
         objective=state.investment_objective or "(未指定)",
         horizon=state.investment_horizon or "(未指定)",
         risk=state.risk_tolerance or "(未指定)",
@@ -100,6 +123,8 @@ def build_router_prompt(state: ResearchState) -> str:
         user_message=user_msg,
         critic_feedback=critic_feedback,
     )
+    chat_known_block = _format_chat_known_tools(state.chat_known_tool_results)
+    return base + chat_known_block
 
 
 class ResearchPlanner(Agent):
