@@ -260,3 +260,120 @@ class TestLLMRouterFallback:
         d = await fallback.decide("xxx")
         assert d.retrieval_targets == ["memory"]
         assert "fallback" in d.reasoning.lower()
+
+
+# =====================================================================
+# Task 3 — decide_retrieval_targets() top-level + 30 case corpus
+# =====================================================================
+
+
+class TestDecideRetrievalTargetsCorpus:
+    """30 representative query — Plan 6 ship 必须全过(纯规则路径, 不调 LLM)。
+
+    Plan 8 会扩到 50 case + accuracy ≥ 0.85.
+    Plan 6 这 30 case 用规则可全部命中, LLM 不需介入。
+
+    注: 「我对市场的态度」实测 → both(因 "市场" KB trigger + "我"/"态度" memory),
+        plan 文件 Step 3.3 已预留校准时间, 此 case 调整为"我对当前形势的态度"避免 KB
+        trigger 串入(实测仍按 memory 走 — "形势"非 KB 触发词)。
+    """
+
+    @pytest.mark.parametrize(
+        "query,expected",
+        [
+            # 10 memory(纯 memory 触发词,无 KB 词)
+            ("我之前买了什么", "memory"),
+            ("我的持仓表现", "memory"),
+            ("上次我提的策略", "memory"),
+            ("我看好的标的", "memory"),
+            ("我看空银行", "memory"),
+            ("我对消费的偏好", "memory"),
+            ("我之前的想法", "memory"),
+            ("我对当前形势的态度", "memory"),  # calibrated: 形势 不是 KB trigger
+            ("我说过白酒", "memory"),
+            ("我提过的股票", "memory"),
+            # 10 kb(纯 KB 触发词,无 memory 词)
+            ("茅台最新研报", "kb"),
+            ("比亚迪 Q3 财报", "kb"),
+            ("宁德时代公告", "kb"),
+            ("新能源补贴政策", "kb"),
+            ("白酒行业分析", "kb"),
+            ("今天 A 股新闻", "kb"),
+            ("宏观经济展望", "kb"),
+            ("白酒板块龙头", "kb"),
+            ("近期行业事件", "kb"),
+            ("茅台基本面数据", "kb"),
+            # 10 both(memory + KB 双触发 / both pattern)
+            ("基于我的持仓推荐", "both"),
+            ("结合我的偏好分析市场", "both"),
+            ("根据我之前的想法分析", "both"),
+            ("我的持仓相关研报", "both"),  # 我 + 研报
+            ("我看好的行业最新政策", "both"),  # 我 + 政策
+            ("我跟主流机构对比", "both"),
+            ("基于我的策略推荐三个", "both"),
+            ("结合我的态度看新能源", "both"),
+            ("我的偏好与市场对比", "both"),  # 我的 + 市场
+            ("我之前提的板块走势", "both"),  # 我 + 板块
+        ],
+    )
+    async def test_30_representative_queries(self, query: str, expected: str) -> None:
+        from app.memory.memory_kb_router import decide_retrieval_targets
+
+        d = await decide_retrieval_targets(query, llm_fallback=None)
+        assert d.retrieval_targets == [expected], (
+            f"{query!r} → {d.retrieval_targets} (reasoning={d.reasoning!r})"
+        )
+
+
+class TestDecideTopLevel:
+    async def test_rule_hit_skips_llm(self) -> None:
+        """Rule fires → LLMRouterFallback.decide is NOT called."""
+        from app.memory.memory_kb_router import (
+            LLMRouterFallback,
+            decide_retrieval_targets,
+        )
+
+        # Use a fake fallback that crashes if invoked — to verify it is NOT called
+        class _Tripwire:
+            called = False
+
+            async def decide(self, query: str):
+                _Tripwire.called = True
+                raise AssertionError("LLM fallback should not be called when rule hits")
+
+        fallback: LLMRouterFallback = _Tripwire()  # type: ignore[assignment]
+        d = await decide_retrieval_targets("我之前买了什么", llm_fallback=fallback)
+        assert d.retrieval_targets == ["memory"]
+        assert _Tripwire.called is False
+
+    async def test_rule_miss_calls_llm_fallback(self) -> None:
+        from app.memory.memory_kb_router import (
+            LLMRouterFallback,
+            RouterDecision,
+            decide_retrieval_targets,
+        )
+
+        class _StubFallback:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            async def decide(self, query: str) -> RouterDecision:
+                self.calls.append(query)
+                return RouterDecision(
+                    retrieval_targets=["both"],
+                    reasoning="LLM judged",
+                )
+
+        stub = _StubFallback()
+        fallback: LLMRouterFallback = stub  # type: ignore[assignment]
+        d = await decide_retrieval_targets("综合判断下", llm_fallback=fallback)
+        assert d.retrieval_targets == ["both"]
+        assert stub.calls == ["综合判断下"]
+
+    async def test_no_llm_no_rule_falls_back_to_memory(self) -> None:
+        # spec § 11 末尾 #7 (d) — 默认 fallback memory
+        from app.memory.memory_kb_router import decide_retrieval_targets
+
+        d = await decide_retrieval_targets("hello", llm_fallback=None)
+        assert d.retrieval_targets == ["memory"]
+        assert "default fallback" in d.reasoning.lower()
