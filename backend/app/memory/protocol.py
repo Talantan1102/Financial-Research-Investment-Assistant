@@ -64,8 +64,11 @@ class Memory(Protocol):
         importance: float,
         evidence_quote: str,  # 算法深度补丁 #2: 防 Agent 幻觉写
         episode_id: UUID,
-    ) -> ChatMemoryEdge:
-        """Write fact to graph. Plan 2 实现完整 pipeline."""
+    ) -> ChatMemoryEdge | None:
+        """Write fact to graph. Plan 2 实现完整 pipeline.
+
+        Returns None for NO_OP path (spec § 4 Step 5 完全重复事实).
+        """
         ...
 
     async def archival_memory_search(

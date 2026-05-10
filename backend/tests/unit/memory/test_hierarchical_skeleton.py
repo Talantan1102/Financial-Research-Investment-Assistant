@@ -47,7 +47,13 @@ def test_injection_classifier_defaults_none() -> None:
 # ---- Plan 2-4 stub method 必须 raise NotImplementedError ----
 
 
-async def test_archival_memory_insert_stub() -> None:
+async def test_archival_memory_insert_implemented_post_plan_2a() -> None:
+    """Plan 2A ship 后, archival_memory_insert 不再是 stub.
+
+    Plan 2A 替换 stub 为 8-step pipeline (extractor + conflict_resolver +
+    age_sync + milvus_outbox). 不能再 raise NotImplementedError; 调 empty content
+    会因 KeyError / 缺 DI 抛 — 本 test 只验"非 NotImplementedError".
+    """
     mem = HierarchicalMemory(
         pg_session_factory=None,
         age_executor=None,
@@ -56,7 +62,8 @@ async def test_archival_memory_insert_stub() -> None:
         llm_extractor=None,
         llm_judge=None,
     )
-    with pytest.raises(NotImplementedError, match="Plan 2"):
+    # Empty content → KeyError 'rel_type' (or 类似), 不是 NotImplementedError
+    with pytest.raises(Exception) as excinfo:
         await mem.archival_memory_insert(
             user_id=uuid4(),
             content={},
@@ -65,6 +72,7 @@ async def test_archival_memory_insert_stub() -> None:
             evidence_quote="ev",
             episode_id=uuid4(),
         )
+    assert not isinstance(excinfo.value, NotImplementedError)
 
 
 async def test_archival_memory_search_stub() -> None:

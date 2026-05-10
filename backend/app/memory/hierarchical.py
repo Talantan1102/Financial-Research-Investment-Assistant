@@ -214,8 +214,245 @@ class HierarchicalMemory:
         importance: float,
         evidence_quote: str,
         episode_id: UUID,
-    ) -> ChatMemoryEdge:
-        raise NotImplementedError("filled by Plan 2")
+    ) -> ChatMemoryEdge | None:
+        """spec § 4 Path A — agent-triggered Step 1-8 pipeline.
+
+        Path A 假设 caller (Plan 4 MCP tool) 已给半结构化:
+            content = {
+                "rel_type": str,
+                "source_entity_type": str, "source_label": str,
+                "target_entity_type": str, "target_label": str,
+                "valid_from": datetime, "valid_to": datetime | None,
+                "properties": dict,
+            }
+
+        跳过 Step 2 (LLM extraction), 走 Step 3-8.
+
+        Step 3: Entity normalize (registry.normalize_entity, 失败 audit_flag 写)
+        Step 4: existing edges query (current snapshot, 5 latest)
+        Step 5: ConflictResolver.judge (跳过 if no existing)
+        Step 6: apply_action (bi-temporal correctness)
+        Step 7: AGE Cypher CREATE (same txn) + Milvus outbox (separate try)
+        Step 8: mark_episode_extracted (extracted_by='agent')
+
+        evidence_quote 校验 — Plan 4 archival_memory_insert MCP wrapper 层做.
+
+        Returns the new edge, or None for NO_OP (spec § 4 Step 5 重复事实).
+        """
+        from sqlalchemy import select
+
+        from app.memory.age_sync import age_create_edge, age_merge_node
+        from app.memory.conflict_resolver import (
+            ConflictAction,
+            ConflictVerdict,
+            apply_action,
+        )
+        from app.memory.milvus_outbox import build_edge_embed_text, try_milvus_insert
+        from app.memory.models import ChatMemoryEdge, ChatMemoryNode
+        from app.memory.registry import normalize_entity
+
+        rel_type = content["rel_type"]
+        src_type = content["source_entity_type"]
+        src_label_raw = content["source_label"]
+        tgt_type = content["target_entity_type"]
+        tgt_label_raw = content["target_label"]
+        valid_from = content["valid_from"]
+        valid_to = content.get("valid_to")
+        properties = dict(content.get("properties", {}))
+
+        # Step 3: Normalize
+        src_label, src_audit = normalize_entity(src_type, src_label_raw)
+        tgt_label, tgt_audit = normalize_entity(tgt_type, tgt_label_raw)
+        if src_audit or tgt_audit:
+            properties = {
+                **properties,
+                "_normalize_audit": {
+                    "source": src_audit,
+                    "target": tgt_audit,
+                    "raw_source": src_label_raw,
+                    "raw_target": tgt_label_raw,
+                },
+            }
+
+        session = self._pg_session_factory()
+        try:
+            # Step 3.1: get_or_create entity nodes
+            def _get_or_create_node(entity_type: str, label: str) -> ChatMemoryNode:
+                row = (
+                    session.query(ChatMemoryNode)
+                    .filter(
+                        ChatMemoryNode.user_id == user_id,
+                        ChatMemoryNode.entity_type == entity_type,
+                        ChatMemoryNode.entity_label == label,
+                    )
+                    .first()
+                )
+                if row is not None:
+                    return row
+                node = ChatMemoryNode(user_id=user_id, entity_type=entity_type, entity_label=label)
+                session.add(node)
+                session.flush()
+                # AGE MERGE node mirror — best-effort (AGE 不可用时静默)
+                try:
+                    age_merge_node(session=session, node_id=node.node_id, entity_type=entity_type)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "AGE merge_node failed (best-effort): %s; entity_type=%s",
+                        exc,
+                        entity_type,
+                    )
+                return node
+
+            src_node = _get_or_create_node(src_type, src_label)
+            tgt_node = _get_or_create_node(tgt_type, tgt_label)
+
+            # Step 4: query existing edges (current snapshot — invalidated_at IS NULL)
+            existing = (
+                session.execute(
+                    select(ChatMemoryEdge)
+                    .where(
+                        ChatMemoryEdge.user_id == user_id,
+                        ChatMemoryEdge.source_node_id == src_node.node_id,
+                        ChatMemoryEdge.rel_type == rel_type,
+                        ChatMemoryEdge.target_node_id == tgt_node.node_id,
+                        ChatMemoryEdge.invalidated_at.is_(None),
+                    )
+                    .order_by(ChatMemoryEdge.valid_from.desc())
+                    .limit(5)
+                )
+                .scalars()
+                .all()
+            )
+
+            # Step 5: judge (skip LLM if no existing — APPEND_NEW shortcut)
+            if not existing:
+                verdict = ConflictVerdict(
+                    action=ConflictAction.APPEND_NEW,
+                    reasoning="no existing edge",
+                )
+            else:
+                new_summary = (
+                    f"{rel_type} {src_type} {src_label} → "
+                    f"{tgt_type} {tgt_label} valid_from={valid_from.isoformat()}"
+                )
+                existing_summaries = [
+                    f"{rel_type} {src_type} {src_label} → {tgt_type} {tgt_label} "
+                    f"valid_from={e.valid_from.isoformat()} "
+                    f"valid_to={e.valid_to.isoformat() if e.valid_to else 'ongoing'}"
+                    for e in existing
+                ]
+                verdict = await self._llm_judge.judge(
+                    new_edge_summary=new_summary,
+                    existing_edges_summary=existing_summaries,
+                )
+
+            existing_ids = [e.edge_id for e in existing]
+            src_node_id = src_node.node_id
+            tgt_node_id = tgt_node.node_id
+
+            # Step 6: apply
+            new_edge = apply_action(
+                session=session,
+                verdict=verdict,
+                existing_edge_ids=existing_ids,
+                user_id=user_id,
+                source_node_id=src_node_id,
+                target_node_id=tgt_node_id,
+                rel_type=rel_type,
+                valid_from=valid_from,
+                valid_to=valid_to,
+                source_episode_id=episode_id,
+                importance=importance,
+                reasoning=reasoning,
+                properties=properties,
+            )
+
+            if new_edge is None:
+                # NO_OP: still mark episode extracted (Step 8)
+                self._mark_episode_extracted_in_session(
+                    session=session,
+                    episode_id=episode_id,
+                    extracted_by="agent",
+                    extraction_metadata={
+                        "edge_count": 0,
+                        "action": verdict.action.value,
+                        "reasoning": verdict.reasoning,
+                    },
+                )
+                session.commit()
+                return None
+
+            new_edge_id = new_edge.edge_id
+
+            # Step 7a: AGE same-txn Cypher CREATE — failure rolls back PG (spec § 4 失败矩阵)
+            age_create_edge(
+                session=session,
+                edge_id=new_edge_id,
+                source_node_id=src_node_id,
+                target_node_id=tgt_node_id,
+                rel_type=rel_type,
+            )
+
+            # Step 7b: Milvus outbox (separate semantics — failure absorbed via outbox)
+            edge_text = build_edge_embed_text(
+                rel_type=rel_type,
+                source_entity_type=src_type,
+                source_label=src_label,
+                target_entity_type=tgt_type,
+                target_label=tgt_label,
+                reasoning=reasoning,
+                properties=properties,
+            )
+            await try_milvus_insert(
+                session=session,
+                milvus_client=self._milvus,
+                embed_service=self._embed,
+                edge=new_edge,
+                edge_text=edge_text,
+            )
+
+            # Step 8: mark episode extracted
+            self._mark_episode_extracted_in_session(
+                session=session,
+                episode_id=episode_id,
+                extracted_by="agent",
+                extraction_metadata={
+                    "edge_count": 1,
+                    "action": verdict.action.value,
+                    "rel_type": rel_type,
+                    "importance": importance,
+                },
+            )
+
+            session.commit()
+            session.refresh(new_edge)
+            session.expunge(new_edge)
+            return new_edge
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    @staticmethod
+    def _mark_episode_extracted_in_session(
+        *,
+        session: Any,
+        episode_id: UUID,
+        extracted_by: str,
+        extraction_metadata: dict[str, Any],
+    ) -> None:
+        """Helper: 在已存在 transaction 内标记 episode extracted (不 commit)."""
+        from datetime import datetime
+
+        from app.memory.models import ChatMemoryEpisode
+
+        ep = session.query(ChatMemoryEpisode).filter_by(episode_id=episode_id).first()
+        if ep is None:
+            raise ValueError(f"episode {episode_id} not found")
+        ep.extracted_at = datetime.now(UTC)
+        ep.extracted_by = extracted_by
+        ep.extraction_metadata = extraction_metadata
 
     async def archival_memory_search(
         self, user_id: UUID, query: str, k: int = 5
