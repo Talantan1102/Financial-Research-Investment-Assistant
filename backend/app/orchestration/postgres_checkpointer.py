@@ -22,6 +22,8 @@ from __future__ import annotations
 from typing import Any
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 from pydantic import BaseModel, Field
 
@@ -75,9 +77,9 @@ async def make_postgres_checkpointer(
         whose underlying pool is open.  The caller owns the pool lifecycle —
         call ``await saver.conn.close()`` on shutdown.
     """
-    pool: AsyncConnectionPool = AsyncConnectionPool(
+    pool: AsyncConnectionPool[AsyncConnection[dict[str, Any]]] = AsyncConnectionPool(
         conninfo=cfg.conninfo,
-        kwargs=cfg.conn_kwargs,
+        kwargs={**cfg.conn_kwargs, "row_factory": dict_row},
         min_size=cfg.min_pool_size,
         max_size=cfg.max_pool_size,
         open=False,  # explicit open() gives us lifecycle control

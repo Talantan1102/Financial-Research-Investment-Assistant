@@ -26,6 +26,7 @@ Topology (per spec § 4.1):
 
 from __future__ import annotations
 
+from collections.abc import Hashable
 from functools import partial
 from typing import Any, Literal
 
@@ -81,7 +82,7 @@ async def skill_load_node(state: ChatState, *, loader: SkillLoader) -> dict[str,
     if name and name not in state.skill_context and name in new_state.skill_context:
         loaded_text = new_state.skill_context[name]
         try:
-            from langgraph.config import get_stream_writer  # type: ignore[import-untyped]
+            from langgraph.config import get_stream_writer
 
             writer = get_stream_writer()
             writer(
@@ -118,7 +119,7 @@ async def resource_load_node(state: ChatState, *, loader: SkillLoader) -> dict[s
             delta = after[len(before) :]
             if delta:
                 try:
-                    from langgraph.config import get_stream_writer  # type: ignore[import-untyped]
+                    from langgraph.config import get_stream_writer
 
                     writer = get_stream_writer()
                     writer(
@@ -185,7 +186,7 @@ def build_chat_graph(
     g.add_edge(START, "context_node")
     g.add_edge("context_node", "planner_node")
 
-    edge_map: dict[str, str] = {
+    edge_map: dict[Hashable, str] = {
         "tool_node": "tool_node",
         "responder_node": "responder_node",
     }

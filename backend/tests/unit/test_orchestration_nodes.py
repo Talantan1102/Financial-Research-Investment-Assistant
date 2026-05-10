@@ -21,6 +21,7 @@ def _state(**overrides: Any) -> GraphState:
         "session_id": "s",
         "user_message": "茅台股价?",
         "request_id": "req-node-test",
+        "trace_request_id": "req-node-test",
     }
     defaults.update(overrides)
     return GraphState(**defaults)
@@ -83,9 +84,10 @@ async def test_planner_node_returns_state_update(
 async def test_tool_node_no_plan_returns_empty() -> None:
     """tool_node returns {} when state.plan is None."""
     from app.orchestration.nodes import tool_node
+    from app.services.tool_result_cache import ToolResultCache
 
     state = _state(plan=None)
-    result = await tool_node(state, registry=ToolRegistry())
+    result = await tool_node(state, registry=ToolRegistry(), cache=ToolResultCache())
     assert result == {}
 
 
@@ -93,6 +95,7 @@ async def test_tool_node_no_plan_returns_empty() -> None:
 async def test_tool_node_executes_calls() -> None:
     """tool_node fans out plan.tool_calls through registry, returns tool_results."""
     from app.orchestration.nodes import tool_node
+    from app.services.tool_result_cache import ToolResultCache
 
     reg = ToolRegistry()
     reg.register(_OkTool())
@@ -103,7 +106,7 @@ async def test_tool_node_executes_calls() -> None:
         reasoning="unit test",
     )
     state = _state(plan=plan)
-    result = await tool_node(state, registry=reg)
+    result = await tool_node(state, registry=reg, cache=ToolResultCache())
 
     assert "tool_results" in result
     results: list[ToolResult] = result["tool_results"]

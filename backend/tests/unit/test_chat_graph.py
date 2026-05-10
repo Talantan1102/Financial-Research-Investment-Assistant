@@ -94,9 +94,11 @@ def test_build_chat_graph_returns_compiled_graph(
     monkeypatch.setenv("LLM_MODE", "mock")
 
     from app.agents.chat_planner import ChatPlanner
+    from app.agents.in_session_memory import InSessionMemory
     from app.agents.responder import Responder
     from app.orchestration.chat_graph import build_chat_graph
     from app.services.llm_service import LLMService
+    from app.services.tool_result_cache import ToolResultCache
     from app.tools.registry import ToolRegistry
 
     svc = LLMService(client=mock_llm_client)
@@ -104,7 +106,13 @@ def test_build_chat_graph_returns_compiled_graph(
     planner = ChatPlanner(llm=svc, registry=registry)
     responder = Responder(llm=svc)
 
-    graph = build_chat_graph(planner=planner, responder=responder, registry=registry)
+    graph = build_chat_graph(
+        planner=planner,
+        responder=responder,
+        registry=registry,
+        memory=InSessionMemory(),
+        cache=ToolResultCache(),
+    )
 
     assert isinstance(graph, CompiledStateGraph)
 
@@ -113,13 +121,15 @@ def test_build_chat_graph_no_checkpointer_by_default(
     monkeypatch: pytest.MonkeyPatch,
     mock_llm_client: Any,
 ) -> None:
-    """build_chat_graph without db_path produces a graph with no checkpointer (stateless)."""
+    """build_chat_graph without checkpointer produces a graph with no checkpointer (stateless)."""
     monkeypatch.setenv("LLM_MODE", "mock")
 
     from app.agents.chat_planner import ChatPlanner
+    from app.agents.in_session_memory import InSessionMemory
     from app.agents.responder import Responder
     from app.orchestration.chat_graph import build_chat_graph
     from app.services.llm_service import LLMService
+    from app.services.tool_result_cache import ToolResultCache
     from app.tools.registry import ToolRegistry
 
     svc = LLMService(client=mock_llm_client)
@@ -127,7 +137,13 @@ def test_build_chat_graph_no_checkpointer_by_default(
     planner = ChatPlanner(llm=svc, registry=registry)
     responder = Responder(llm=svc)
 
-    graph = build_chat_graph(planner=planner, responder=responder, registry=registry, db_path=None)
+    graph = build_chat_graph(
+        planner=planner,
+        responder=responder,
+        registry=registry,
+        memory=InSessionMemory(),
+        cache=ToolResultCache(),
+    )
 
     # No checkpointer should be attached — attribute may be None or absent
     checkpointer = getattr(graph, "checkpointer", None)

@@ -71,7 +71,7 @@ _PLANNER_SYSTEM_PROMPT_TEMPLATE = """你是金融研究助手 research_planner�
 """
 
 
-def _format_chat_known_tools(results: list) -> str:  # type: ignore[type-arg]
+def _format_chat_known_tools(results: list) -> str:
     """Render the chat-session cached tool results block for the planner prompt.
 
     Returns an empty string when ``results`` is empty so callers can safely

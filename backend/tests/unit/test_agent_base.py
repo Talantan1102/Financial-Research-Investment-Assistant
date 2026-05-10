@@ -16,6 +16,7 @@ def _make_state() -> GraphState:
         session_id="s",
         user_message="hi",
         request_id="req-test1234",
+        trace_request_id="req-test1234",
     )
 
 

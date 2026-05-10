@@ -49,7 +49,7 @@ def test_stream_event_schema_accepts_v0_9_types() -> None:
         "error",
     )
     for t in all_types:
-        evt = StreamEvent(type=t, seq=1, data={})
+        evt = StreamEvent(type=t, seq=1, data={})  # type: ignore[arg-type]
         assert evt.type == t, f"type round-trip failed for {t!r}"
         assert evt.seq == 1
 
@@ -102,7 +102,7 @@ async def test_stream_chat_emits_monotonic_seq() -> None:
         {"event": "on_chain_end", "name": "LangGraph", "data": {"output": {}}},
     ]
 
-    async def _fake_astream_events(*args: object, **kwargs: object) -> AsyncIterator[dict]:  # type: ignore[type-arg]
+    async def _fake_astream_events(*args: object, **kwargs: object) -> AsyncIterator[dict]:
         for ev in fake_lg_events:
             yield ev
 

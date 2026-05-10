@@ -55,7 +55,7 @@ class TestSkillResource:
             SkillResource(
                 name="x",
                 relative_path="resources/x.exe",
-                content_type="binary",
+                content_type="binary",  # type: ignore[arg-type]
                 content="",
                 size_bytes=0,
             )

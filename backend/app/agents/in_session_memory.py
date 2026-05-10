@@ -36,7 +36,7 @@ def _approx_tokens_chars(total_chars: int) -> int:
     return int(total_chars / APPROX_CHARS_PER_TOKEN)
 
 
-def _sig(tool_name: str, args: dict) -> str:  # type: ignore[type-arg]
+def _sig(tool_name: str, args: dict) -> str:
     """Cross-turn dedup signature: (tool_name, sorted-arg-hash)."""
     try:
         normalized = json.dumps(args, sort_keys=True, ensure_ascii=False)
@@ -84,7 +84,7 @@ class InSessionMemory:
         old = state.history[: -self._recent_k]
         prompt = _build_summarize_prompt(old, state.history_summary)
         resp = self._llm.chat(prompt=prompt, tier="fast", schema=None)
-        return resp.text.strip()
+        return resp.content.strip()
 
     async def load_for_turn(self, session_id: str) -> ChatState:
         raise NotImplementedError(

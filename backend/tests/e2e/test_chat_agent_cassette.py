@@ -200,7 +200,16 @@ async def test_chat_agent_stock_quote_end_to_end(real_adapter: _Adapter) -> None
     planner = ChatPlanner(llm=llm, registry=registry)
     responder = Responder(llm=llm)
 
-    graph = build_chat_graph(planner=planner, responder=responder, registry=registry)
+    from app.agents.in_session_memory import InSessionMemory
+    from app.services.tool_result_cache import ToolResultCache
+
+    graph = build_chat_graph(
+        planner=planner,
+        responder=responder,
+        registry=registry,
+        memory=InSessionMemory(),
+        cache=ToolResultCache(),
+    )
 
     # Run the full graph directly to capture tool_results from GraphState.
     # (ChatAgent.run() returns SUTOutput with tool_calls from the plan, not
@@ -213,6 +222,7 @@ async def test_chat_agent_stock_quote_end_to_end(real_adapter: _Adapter) -> None
         session_id="cassette-test-1",
         user_message="查一下 600519.SH 的股价",
         request_id="cassette-test-1",
+        trace_request_id="cassette-test-1",
     )
     final = await graph.ainvoke(initial.model_dump(), config=config)
 

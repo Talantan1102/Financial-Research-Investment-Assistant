@@ -99,7 +99,7 @@ async def test_make_postgres_checkpointer_real_pg() -> None:
 
     assert isinstance(saver, AsyncPostgresSaver)
     # Verify pool is open — pool.closed should be False
-    assert not saver.conn.closed  # type: ignore[union-attr]
+    assert not saver.conn.closed
 
     # Cleanup — close the pool
-    await saver.conn.close()  # type: ignore[union-attr]
+    await saver.conn.close()

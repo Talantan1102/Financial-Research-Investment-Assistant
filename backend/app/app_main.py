@@ -251,7 +251,7 @@ app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (co
 
 # Dependency override: chats router's get_repo reads from app.state at request time
 def _get_chat_session_repo() -> ChatSessionRepo:
-    return app.state.chat_session_repo  # type: ignore[no-any-return]
+    return app.state.chat_session_repo
 
 
 app.dependency_overrides[chats_router_module.get_repo] = _get_chat_session_repo
@@ -260,10 +260,10 @@ app.dependency_overrides[chats_router_module.get_repo] = _get_chat_session_repo
 # === Plan 3 dependency overrides (T11) ===
 
 
-def _override_or_fallback(state_attr: str):  # type: ignore[return]
+def _override_or_fallback(state_attr: str):
     """Return a zero-arg callable that yields app.state.<state_attr>, or raises if None."""
 
-    def _factory():  # type: ignore[return]
+    def _factory():
         val = getattr(app.state, state_attr, None)
         if val is None:
             raise RuntimeError(f"app.state.{state_attr} not initialized")

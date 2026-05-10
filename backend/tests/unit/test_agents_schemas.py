@@ -74,6 +74,7 @@ def test_graph_state_minimal() -> None:
         session_id="s1",
         user_message="茅台股价?",
         request_id="req-abc12345",
+        trace_request_id="req-abc12345",
     )
     assert s.plan is None
     assert s.tool_results == []

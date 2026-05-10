@@ -119,7 +119,7 @@ async def run_extraction_quality_eval(
 ) -> ExtractionQualityReport:
     """Pull all EscalationRecord rows, compute metrics, return aggregated report."""
     try:
-        import asyncpg  # type: ignore[import-not-found]
+        import asyncpg
     except ImportError as exc:
         raise RuntimeError(
             "asyncpg is required to run the extraction quality eval pipeline. "
