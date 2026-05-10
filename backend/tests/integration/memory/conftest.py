@@ -71,6 +71,15 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
         with engine.begin() as conn:
             conn.execute(text(sql))
 
+    # Plan 2A: pending_milvus_inserts outbox table(算法深度补丁 #5 三方一致性)
+    outbox_migration_path = (
+        backend_dir / "scripts" / "migrations" / "2026-05-11-c5-pending-milvus-outbox.sql"
+    )
+    if outbox_migration_path.exists():
+        outbox_sql = outbox_migration_path.read_text(encoding="utf-8")
+        with engine.begin() as conn:
+            conn.execute(text(outbox_sql))
+
     yield {"url": url, "engine": engine, **pg_test_container}
 
     engine.dispose()

@@ -114,6 +114,19 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
             with engine.begin() as conn:
                 conn.execute(_sql_text(sql))
             logger.info("C.5 memory SQL migration applied")
+
+        # Plan 2A: pending_milvus_inserts outbox table
+        c5_outbox_migration = (
+            Path(__file__).resolve().parents[1]
+            / "scripts"
+            / "migrations"
+            / "2026-05-11-c5-pending-milvus-outbox.sql"
+        )
+        if c5_outbox_migration.exists():
+            outbox_sql = c5_outbox_migration.read_text(encoding="utf-8")
+            with engine.begin() as conn:
+                conn.execute(_sql_text(outbox_sql))
+            logger.info("C.5 Plan 2A outbox SQL migration applied")
     except Exception as e:  # noqa: BLE001
         logger.warning("C.5 memory SQL migration skipped: %s", e)
 
