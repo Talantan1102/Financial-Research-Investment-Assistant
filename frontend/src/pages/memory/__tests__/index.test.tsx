@@ -75,10 +75,10 @@ describe('MemoryPage', () => {
       expect(screen.getByText(/还没有时间序列/)).toBeInTheDocument(),
     )
 
-    // 切到 audit (Task 4 之前仍是 placeholder)
+    // 切到 audit (Plan 7B Task 4 已替换 placeholder, 空数据走 empty)
     fireEvent.click(screen.getByTestId('memory-tab-audit'))
     await waitFor(() =>
-      expect(screen.getByTestId('memory-audit-placeholder')).toBeInTheDocument(),
+      expect(screen.getByText(/暂无被纠正的记录/)).toBeInTheDocument(),
     )
   })
 

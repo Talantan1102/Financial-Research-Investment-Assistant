@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Col, Row, Tabs } from 'antd'
 import type { TabsProps } from 'antd'
+import MemoryAuditLog from '@/components/memory/MemoryAuditLog'
 import MemoryGraph from '@/components/memory/MemoryGraph'
 import MemoryTimeline from '@/components/memory/MemoryTimeline'
 import { MemoryWorkingBlocks } from './components/MemoryWorkingBlocks'
@@ -36,14 +37,7 @@ export default function MemoryPage() {
     {
       key: 'audit',
       label: <span data-testid="memory-tab-audit">Audit</span>,
-      children: (
-        <div
-          data-testid="memory-audit-placeholder"
-          style={{ minHeight: 480, padding: 24, color: '#8a96a3' }}
-        >
-          Audit log (Plan 7B Task 4 实现)
-        </div>
-      ),
+      children: <MemoryAuditLog />,
     },
   ]
 
