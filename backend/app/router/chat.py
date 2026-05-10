@@ -30,7 +30,7 @@ import logging
 import traceback
 from collections.abc import AsyncIterator
 from typing import Any, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -347,6 +347,14 @@ def _adapt_event(ev: dict[str, Any], seq: int) -> StreamEvent | None:
 # ---------------------------------------------------------------------------
 
 
+_persona_populated_sessions: set[str] = set()
+"""C.5 Plan 3 session-start dedupe — best-effort per-process cache.
+
+避免每 turn 重跑 4 次 PG query. 生产可换成 PG 标记 / Redis ttl, 当前 portfolio
+范围只防 in-process 重跑就够用.
+"""
+
+
 async def _stream_chat(
     req: ChatRequest,
     user: _AnonUser,
@@ -368,7 +376,24 @@ async def _stream_chat(
 
     If ``extractor`` or ``record_repo`` are None (e.g. not yet wired in app_main),
     escalation events are skipped and a warning is logged.
+
+    C.5 Plan 3: session-start hook — 第一个 turn 跑 populate_persona_on_session_start
+    填 working_blocks(persona). 失败仅 log 不阻塞 chat.
     """
+    # C.5 Plan 3: persona auto-injection (best-effort, fail-safe)
+    session_key = f"{user.id}:{req.session_id}"
+    if session_key not in _persona_populated_sessions:
+        _persona_populated_sessions.add(session_key)
+        try:
+            from app.memory.persona_populator import populate_persona_on_session_start
+
+            pg_factory = _build_async_pg_session_factory_or_none()
+            if pg_factory is not None:
+                user_uuid = user.id if isinstance(user.id, UUID) else UUID(str(user.id))
+                populate_persona_on_session_start(pg_factory, user_id=user_uuid)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("populate_persona_on_session_start failed: %s", exc)
+
     request_id = f"req-{uuid4().hex[:12]}"
     initial = GraphState(
         user_id=user.id,
