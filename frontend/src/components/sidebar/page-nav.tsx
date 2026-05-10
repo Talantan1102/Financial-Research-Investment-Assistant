@@ -5,6 +5,7 @@ const LINKS = [
   { to: '/reports', label: 'Reports' },
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/monitoring', label: 'Monitoring' },
+  { to: '/memory', label: 'Memory' },
   { to: '/knowledge', label: 'Knowledge' },
 ]
 
