@@ -96,6 +96,60 @@ class InSessionMemory:
             "Plan 1 calls save_after_turn() through ChatSessionRepo, not Memory directly."
         )
 
+    # === C.5 Plan 1B: Protocol 兼容 stub(InSessionMemory 不实现 cross-session) ===
+    # 这些 method 的具体实现在 HierarchicalMemory(C.5 Plan 1B+).
+    # InSessionMemory 提供 stub 让 isinstance(InSessionMemory(...), app.memory.protocol.Memory)
+    # 返回 True, 保持 Protocol 兼容. 实际 cross-session 操作走 HierarchicalMemory.
+
+    async def get_working_blocks(self, user_id):  # type: ignore[no-untyped-def]
+        raise NotImplementedError(
+            "InSessionMemory 是 in-session memory(PR #39 Q4 E), "
+            "Tier 1 working blocks 由 HierarchicalMemory(C.5 Plan 1B+)实现."
+        )
+
+    async def core_memory_append(self, user_id, block_name, content):  # type: ignore[no-untyped-def]
+        raise NotImplementedError("see HierarchicalMemory.core_memory_append")
+
+    async def core_memory_replace(  # type: ignore[no-untyped-def]
+        self, user_id, block_name, old_content, new_content
+    ):
+        raise NotImplementedError("see HierarchicalMemory.core_memory_replace")
+
+    async def archival_memory_insert(  # type: ignore[no-untyped-def]
+        self, user_id, content, reasoning, importance, evidence_quote, episode_id
+    ):
+        raise NotImplementedError("see HierarchicalMemory.archival_memory_insert (Plan 2)")
+
+    async def archival_memory_search(self, user_id, query, k=5):  # type: ignore[no-untyped-def]
+        raise NotImplementedError("see HierarchicalMemory.archival_memory_search (Plan 3)")
+
+    async def archival_memory_traverse(  # type: ignore[no-untyped-def]
+        self, user_id, start_label, hops=2, rel_types=None
+    ):
+        raise NotImplementedError("see HierarchicalMemory.archival_memory_traverse (Plan 4)")
+
+    async def recall_memory_search(self, user_id, query, k=5):  # type: ignore[no-untyped-def]
+        raise NotImplementedError("see HierarchicalMemory.recall_memory_search (Plan 4)")
+
+    async def write_episode(  # type: ignore[no-untyped-def]
+        self,
+        user_id,
+        session_id,
+        episode_index,
+        user_message,
+        agent_response,
+        source_kind="chat_turn",
+    ):
+        raise NotImplementedError("see HierarchicalMemory.write_episode")
+
+    async def get_unextracted_episodes(self, user_id, limit=100):  # type: ignore[no-untyped-def]
+        raise NotImplementedError("see HierarchicalMemory.get_unextracted_episodes")
+
+    async def mark_episode_extracted(  # type: ignore[no-untyped-def]
+        self, episode_id, extracted_by, extraction_metadata
+    ):
+        raise NotImplementedError("see HierarchicalMemory.mark_episode_extracted")
+
 
 def _build_summarize_prompt(history: list[HistoryMessage], prior_summary: str | None) -> str:
     """Concise summarization prompt; produces 200-400 char Chinese summary."""
