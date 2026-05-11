@@ -24,6 +24,38 @@ CREATE TABLE IF NOT EXISTS decision_note (
   note TEXT NOT NULL DEFAULT '',
   set_at TEXT NOT NULL
 );
+
+-- v2 schema: Harness Board Review Mode (spec § 6.1)
+-- 实施时为简化 Pydantic roundtrip 改为单 JSON column,sqlite < 1M 数据性能足够
+CREATE TABLE IF NOT EXISTS deep_cards (
+  cap_id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,           -- 全 DeepCard 序列化 JSON
+  last_edited_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS flashcards (
+  id TEXT PRIMARY KEY,             -- f"{cap_id}::{template_kind}"
+  cap_id TEXT NOT NULL,
+  template_kind TEXT NOT NULL,
+  question TEXT NOT NULL,
+  answer TEXT NOT NULL,
+  srs_state TEXT NOT NULL,         -- JSON
+  created_at TEXT NOT NULL,
+  last_reviewed_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_flashcards_cap_id ON flashcards(cap_id);
+CREATE INDEX IF NOT EXISTS idx_flashcards_next_review
+  ON flashcards(json_extract(srs_state, '$.next_review_at'));
+
+CREATE TABLE IF NOT EXISTS prefill_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  cap_id TEXT NOT NULL,
+  field_name TEXT NOT NULL,
+  status TEXT NOT NULL,            -- 'success' | 'rejected_quote' | 'llm_error' | 'skipped'
+  detail TEXT,
+  ran_at TEXT NOT NULL
+);
 """
 
 
