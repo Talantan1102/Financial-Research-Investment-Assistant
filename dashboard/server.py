@@ -264,6 +264,193 @@ def _try_milvus_related(_cap_id: str, _k: int) -> tuple[list[dict[str, object]] 
     return None, "milvus_search_not_wired_plan1"
 
 
+ALLOWED_EDITABLE_FIELDS = {
+    "what",
+    "why",
+    "tradeoff",
+    "lessons_learned",
+    "chosen_alternative",
+}
+
+
+def _get_llm_service() -> object:
+    """lazy build LLMService — 测试可 patch。返回 LLMService(避免顶层 import)。"""
+    from app.services.openai_client import build_llm_service_from_env
+
+    return build_llm_service_from_env()
+
+
+def _render_deep_card_field(cap_id: str, field_name: str) -> HTMLResponse:
+    """重 render 单字段 partial(POST 后 htmx swap)。"""
+    conn = open_db(DB_PATH)
+    try:
+        card = DeepCardRepo(conn).get(cap_id)
+    finally:
+        conn.close()
+    if card is None:
+        return HTMLResponse("<div class='error'>card lost</div>", status_code=500)
+    prov = card.provenance.get(field_name)
+    template = templates.get_template("_deep_card_field.html")
+    html = template.render(
+        cap={"id": cap_id},
+        field={
+            "field": field_name,
+            "value": getattr(card, field_name),
+            "provenance": prov,
+            "source": card.prefill_source,
+        },
+    )
+    return HTMLResponse(html)
+
+
+async def post_field_update(request: Request) -> HTMLResponse:
+    """POST /cap/{cap_id}/field/{field} — V2 inline 编辑保存。"""
+    cap_id = request.path_params["cap_id"]
+    field = request.path_params["field"]
+    if field not in ALLOWED_EDITABLE_FIELDS:
+        return HTMLResponse(
+            f"<div class='error'>field not editable: {field}</div>", status_code=400
+        )
+    form = await request.form()
+    value_raw = form.get("value", "")
+    if not isinstance(value_raw, str):
+        return HTMLResponse("value must be str", status_code=400)
+    conn = open_db(DB_PATH)
+    try:
+        DeepCardRepo(conn).update_field(cap_id, field, value_raw.strip())
+    finally:
+        conn.close()
+    return _render_deep_card_field(cap_id, field)
+
+
+async def post_ai_draft(request: Request) -> HTMLResponse:
+    """POST /cap/{cap_id}/ai_draft/{field} — V2 AI 草拟单字段。"""
+    from dashboard.derive.deep_card_types import DeepCard
+    from dashboard.derive.llm_prefill_prompt import (
+        PrefillRequest,
+        SingleFieldPrefillResponse,
+        build_single_field_prefill_prompt,
+    )
+    from dashboard.derive.provenance import verify_quote_in_source
+
+    cap_id = request.path_params["cap_id"]
+    field = request.path_params["field"]
+    if field not in {
+        "what",
+        "why",
+        "alternatives",
+        "chosen_alternative",
+        "tradeoff",
+        "lessons_learned",
+    }:
+        return HTMLResponse(f"field not draftable: {field}", status_code=400)
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    cfg = next((c for c in caps_cfg if c.id == cap_id), None)
+    if cfg is None:
+        return HTMLResponse("cap not found", status_code=404)
+
+    try:
+        llm: object = _get_llm_service()
+    except Exception as e:
+        return HTMLResponse(f"LLM unavailable: {e}", status_code=503)
+
+    # 取已有 linked_specs / memories(Plan 2 可 enrich,Plan 1 仅用现有)
+    conn = open_db(DB_PATH)
+    try:
+        repo = DeepCardRepo(conn)
+        existing = repo.get(cap_id)
+    finally:
+        conn.close()
+    linked_specs = list(existing.linked_specs) if existing else []
+    linked_memories = list(existing.linked_memories) if existing else []
+
+    req = PrefillRequest(
+        cap_id=cap_id,
+        cap_name_cn=cfg.name_cn,
+        linked_spec_paths=linked_specs,
+        linked_memory_paths=linked_memories,
+        decisions_summary=[],
+    )
+    prompt = build_single_field_prefill_prompt(req, field_name=field)
+    try:
+        resp = llm.chat(  # type: ignore[attr-defined]
+            prompt=prompt, tier="balanced", schema=SingleFieldPrefillResponse
+        )
+    except Exception as e:
+        return HTMLResponse(f"LLM error: {e}", status_code=502)
+
+    parsed_raw = getattr(resp, "parsed", None)
+    if isinstance(parsed_raw, SingleFieldPrefillResponse):
+        parsed = parsed_raw
+    else:
+        parsed = SingleFieldPrefillResponse.model_validate_json(resp.content)
+    if not parsed.provenance.quote:
+        return HTMLResponse("LLM gave up (no quote)", status_code=422)
+    check = verify_quote_in_source(
+        parsed.provenance.quote, parsed.provenance.source, base_dir=PROJECT_ROOT
+    )
+    if not check.ok:
+        return HTMLResponse(f"provenance 校验失败:{check.reason}", status_code=422)
+
+    # 写入字段 + provenance + 标 prefill_source = llm
+    conn = open_db(DB_PATH)
+    try:
+        repo = DeepCardRepo(conn)
+        repo.update_field(cap_id, field, parsed.value)
+        card = repo.get(cap_id)
+        assert card is not None
+        new_prov = dict(card.provenance)
+        new_prov[field] = parsed.provenance
+        new_data = card.model_dump()
+        new_data["provenance"] = {k: v.model_dump() for k, v in new_prov.items()}
+        new_data["prefill_source"] = "llm"
+        repo.upsert(DeepCard.model_validate(new_data))
+    finally:
+        conn.close()
+    return _render_deep_card_field(cap_id, field)
+
+
+async def deep_card_modal(request: Request) -> HTMLResponse:
+    """GET /cap/{cap_id} — V2 模块深读 modal HTML 片段(htmx swap into overlay)。"""
+    cap_id = request.path_params["cap_id"]
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    cfg = next((c for c in caps_cfg if c.id == cap_id), None)
+    if cfg is None:
+        return HTMLResponse(f"<div class='error'>cap not found: {cap_id}</div>", status_code=404)
+
+    conn = open_db(DB_PATH)
+    try:
+        card = DeepCardRepo(conn).get(cap_id)
+    finally:
+        conn.close()
+
+    derived_status = resolve_status(cfg, PROJECT_ROOT)
+    cap = {"id": cfg.id, "name_cn": cfg.name_cn, "status": derived_status}
+
+    content_fields: list[dict[str, object]] = []
+    for f in (
+        "what",
+        "why",
+        "alternatives",
+        "chosen_alternative",
+        "tradeoff",
+        "lessons_learned",
+    ):
+        value = getattr(card, f, None) if card else None
+        prov = card.provenance.get(f) if (card and card.provenance) else None
+        content_fields.append(
+            {
+                "field": f,
+                "value": value,
+                "provenance": prov,
+                "source": card.prefill_source if card else "manual",
+            }
+        )
+    template = templates.get_template("_deep_card_modal.html")
+    html = template.render(cap=cap, deep_card=card, content_fields=content_fields)
+    return HTMLResponse(html)
+
+
 async def related_capabilities(request: Request) -> JSONResponse:
     """GET /cap/{cap_id}/related?k=5 — 相关 cap 推荐 (Milvus 真路径 / keyword fallback)。"""
     cap_id = request.path_params["cap_id"]
@@ -306,7 +493,10 @@ app = Starlette(
         Route("/capability/{cap_id}/edit", edit_capability),
         Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
         Route("/refresh", post_refresh, methods=["POST"]),
+        Route("/cap/{cap_id}", deep_card_modal, methods=["GET"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
+        Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
+        Route("/cap/{cap_id}/ai_draft/{field}", post_ai_draft, methods=["POST"]),
         Mount(
             "/static",
             StaticFiles(directory=str(DASHBOARD_ROOT / "static")),
