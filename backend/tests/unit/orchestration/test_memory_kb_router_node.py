@@ -94,7 +94,7 @@ class TestMemoryKbRouterNode:
 
         update = await memory_kb_router_node(
             _state("我之前买了什么"),
-            memory=memory,  # type: ignore[arg-type]
+            memory=memory,
             kb=kb,  # type: ignore[arg-type]
             router_fn=router_fn,
         )
@@ -111,7 +111,7 @@ class TestMemoryKbRouterNode:
 
         update = await memory_kb_router_node(
             _state("茅台最新研报"),
-            memory=memory,  # type: ignore[arg-type]
+            memory=memory,
             kb=kb,  # type: ignore[arg-type]
             router_fn=router_fn,
         )
@@ -128,7 +128,7 @@ class TestMemoryKbRouterNode:
 
         update = await memory_kb_router_node(
             _state("基于我的持仓推荐"),
-            memory=memory,  # type: ignore[arg-type]
+            memory=memory,
             kb=kb,  # type: ignore[arg-type]
             router_fn=router_fn,
         )
@@ -147,7 +147,7 @@ class TestMemoryKbRouterNode:
 
         update = await memory_kb_router_node(
             _state("基于我的持仓推荐"),
-            memory=memory,  # type: ignore[arg-type]
+            memory=memory,
             kb=kb,  # type: ignore[arg-type]
             router_fn=router_fn,
         )
@@ -163,7 +163,7 @@ class TestMemoryKbRouterNode:
 
         update = await memory_kb_router_node(
             _state("基于我的持仓推荐"),
-            memory=memory,  # type: ignore[arg-type]
+            memory=memory,
             kb=kb,  # type: ignore[arg-type]
             router_fn=router_fn,
         )
@@ -181,7 +181,7 @@ class TestMemoryKbRouterNode:
 
         update = await memory_kb_router_node(
             _state("我"),
-            memory=memory,  # type: ignore[arg-type]
+            memory=memory,
             kb=kb,  # type: ignore[arg-type]
             router_fn=router_fn,
         )
@@ -202,7 +202,7 @@ class TestMemoryKbRouterNode:
         )
         update = await memory_kb_router_node(
             s,
-            memory=memory,  # type: ignore[arg-type]
+            memory=memory,
             kb=kb,  # type: ignore[arg-type]
             router_fn=router_fn,
         )

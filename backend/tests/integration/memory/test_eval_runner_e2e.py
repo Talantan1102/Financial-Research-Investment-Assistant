@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from backend.eval.memory.eval_runner import (
+from eval.memory.eval_runner import (
     METRIC_THRESHOLDS,
     assert_thresholds,
     load_golden_cases,

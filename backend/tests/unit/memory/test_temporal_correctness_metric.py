@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
-from backend.eval.memory.temporal_correctness_metric import (
+from eval.memory.temporal_correctness_metric import (
     fact_overlaps_range,
     temporal_correctness,
 )
@@ -37,7 +38,7 @@ def test_fact_overlaps_range_after_window() -> None:
 
 
 def test_temporal_correctness_all_in_range() -> None:
-    facts = [
+    facts: list[dict[str, Any]] = [
         {"valid_from": _utc("2024-08-01"), "valid_to": None},
         {"valid_from": _utc("2024-08-01"), "valid_to": _utc("2024-10-01")},
     ]
@@ -49,7 +50,7 @@ def test_temporal_correctness_all_in_range() -> None:
 
 
 def test_temporal_correctness_partial() -> None:
-    facts = [
+    facts: list[dict[str, Any]] = [
         {"valid_from": _utc("2024-08-01"), "valid_to": None},  # ok
         {"valid_from": _utc("2023-01-01"), "valid_to": _utc("2023-06-01")},  # not ok
     ]

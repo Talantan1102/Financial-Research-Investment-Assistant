@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from backend.eval.memory.long_tail_monitor import (
+from eval.memory.long_tail_monitor import (
     long_tail_recall_check,
     weekly_report_sql,
 )

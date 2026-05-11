@@ -30,11 +30,11 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
-from backend.eval.memory.faithful_answer_metric import faithful_answer
-from backend.eval.memory.long_tail_monitor import long_tail_recall_check
-from backend.eval.memory.recall_precision_metric import recall_precision
-from backend.eval.memory.routing_accuracy_metric import routing_accuracy
-from backend.eval.memory.temporal_correctness_metric import temporal_correctness
+from eval.memory.faithful_answer_metric import faithful_answer
+from eval.memory.long_tail_monitor import long_tail_recall_check
+from eval.memory.recall_precision_metric import recall_precision
+from eval.memory.routing_accuracy_metric import routing_accuracy
+from eval.memory.temporal_correctness_metric import temporal_correctness
 
 METRIC_THRESHOLDS: dict[str, float] = {
     "recall_precision": 0.7,
@@ -213,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # 真实 wiring 在 _runner_deps.py 内 — CLI 入口仅 nightly / dogfood 用.
     # L0/L1 测试直接调 metric 函数, 不经此 CLI.
-    from backend.eval.memory._runner_deps import build_runtime_deps
+    from eval.memory._runner_deps import build_runtime_deps
 
     judge, planner, retriever = build_runtime_deps()
 

@@ -218,7 +218,7 @@ def test_log_user_reject_invalid_kind_raises() -> None:
     fake_session = type("FakeSession", (), {"execute": lambda *a, **k: None})()
     with pytest.raises(ValueError, match="reject"):
         log_user_reject(
-            fake_session,  # type: ignore[arg-type]
+            fake_session,
             user_id=uuid4(),
             edge_id=uuid4(),
             feedback_kind="bogus",

@@ -76,5 +76,5 @@ class TestLoadRoutingCases:
     def test_seed_round_trip_to_metric(self) -> None:
         cases = load_routing_cases(_SEED_PATH)
         # 先验证 100% 命中(用 ground truth 当 predictions)能得 1.0
-        predictions = {c.query: c.expected for c in cases}
+        predictions: dict[str, str] = {c.query: c.expected for c in cases}
         assert compute_routing_accuracy(cases, predictions) == 1.0

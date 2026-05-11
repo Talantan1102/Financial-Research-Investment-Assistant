@@ -7,8 +7,7 @@ Plan 8 subset match: expected_tools ⊆ actual_tools 算 correct.
 from __future__ import annotations
 
 import pytest
-
-from backend.eval.memory.routing_accuracy_metric import routing_accuracy
+from eval.memory.routing_accuracy_metric import routing_accuracy
 
 
 class _Plan:

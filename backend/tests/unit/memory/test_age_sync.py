@@ -15,7 +15,7 @@ def test_age_create_edge_invalid_rel_type_raises_value_error() -> None:
     """rel_type 不在 11 类 elabel → 直接 ValueError, 不调底层 Cypher."""
     with pytest.raises(ValueError, match="rel_type"):
         age_create_edge(
-            session=None,  # type: ignore[arg-type]  validation precedes session use
+            session=None,  # type: ignore[arg-type]  # validation precedes session use
             edge_id=uuid4(),
             source_node_id=uuid4(),
             target_node_id=uuid4(),

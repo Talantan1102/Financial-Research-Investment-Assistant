@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
-from backend.eval.memory.recall_precision_metric import recall_precision
+from eval.memory.recall_precision_metric import recall_precision
 
 
 class _MockJudge:

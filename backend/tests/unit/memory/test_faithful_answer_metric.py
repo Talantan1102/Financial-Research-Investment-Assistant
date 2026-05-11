@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
-from backend.eval.memory.faithful_answer_metric import (
+from eval.memory.faithful_answer_metric import (
     claim_in_episode_text,
     faithful_answer,
 )

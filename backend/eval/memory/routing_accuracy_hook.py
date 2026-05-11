@@ -6,7 +6,7 @@ selection. This hook is for the supervisor-level **memory vs kb retrieval** rout
 
 usage(Plan 8 will扩到 50 case):
 
-    from backend.eval.memory.routing_accuracy_hook import (
+    from eval.memory.routing_accuracy_hook import (
         RoutingCase, compute_routing_accuracy, load_routing_cases,
     )
     cases = load_routing_cases("backend/eval/memory/c5_memory_golden.jsonl")
