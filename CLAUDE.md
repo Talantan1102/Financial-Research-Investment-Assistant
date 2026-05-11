@@ -57,6 +57,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [c5 Plan 8 eval + tests + docs 收束 ship](docs/claude-context/c5-plan8-eval-tests-docs-done.md) — 50 golden + 4 metric + bi-temporal differential + chaos + 投毒 30 case + eval_runner CLI + 总卡
 - [c5 S1 injection_classifier 死代码修复](docs/claude-context/c5-injection-classifier-wired.md) — Plan 5 自卡声称已接但实际 0 调用点; 4 写入入口接通 + L0/L1/L2 e2e 守护
 
+### Harness Board Review Mode(2026-05-12 起, Plan 1 ship,Plan 2/3 待续)
+- [Plan 1 底座 + V2 模块深读 ship](docs/claude-context/harness-board-review-plan1-done.md) — DeepCard schema + sqlite v2 + provenance fuzzy match + Milvus collection + V2 modal + AI 草拟按钮
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。
