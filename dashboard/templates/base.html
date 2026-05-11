@@ -10,5 +10,7 @@
   <main class="board">
     {% block content %}{% endblock %}
   </main>
+  {# V2 模块深读 modal overlay — 默认隐藏,htmx swap 注入内容 #}
+  <div id="modal-overlay" onclick="if(event.target===this){this.style.display='none';}"></div>
 </body>
 </html>
