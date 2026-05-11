@@ -170,7 +170,24 @@ class LLMExtractor:
 
         Raises ValueError for invalid JSON or schema validation failure.
         Caller (Path B Plan 2B) should fail-safe by catching and skipping.
+
+        S1 fix — episode 文本过 injection 分类器, 命中返空 ExtractionOutput
+        (不 raise, 避免阻塞 caller; spec § 11 末尾 #2 part a 死代码修复).
         """
+        from app.memory.injection_classifier import is_prompt_injection
+
+        combined = (user_message or "") + "\n" + (agent_response or "")
+        is_inj, conf, pattern_id = is_prompt_injection(combined)
+        if is_inj:
+            _logger.warning(
+                "LLMExtractor.extract skipped episode_id=%s flagged as prompt injection "
+                "(pattern=%s, confidence=%.2f)",
+                episode_id,
+                pattern_id,
+                conf,
+            )
+            return ExtractionOutput(entities=[], edges=[])
+
         prompt = _EXTRACTION_USER_PROMPT_TEMPLATE.format(
             episode_id=episode_id,
             user_message=user_message,
@@ -211,9 +228,30 @@ class LLMExtractor:
         返回 list[ExtractionOutput] (Plan 2B 单 chunk 一次 LLM call → list 长度 1;
         Plan 5 升级 batch 时长度 = 输入 episode 数). 不抛 — invalid JSON / schema
         验证失败 raise ValueError, caller (PathBRunner) 走 failure_matrix.
+
+        S1 fix — chunk 内任一 turn 命中 injection 分类器 → 整 chunk 返空 list
+        (保守; 一颗老鼠屎污染整 chunk 的语义上下文, 不冒险只剔单 turn).
         """
+        from app.memory.injection_classifier import is_prompt_injection
+
         if not turns:
             return []
+
+        for t in turns:
+            combined = (
+                str(t.get("user_message", "") or "") + "\n" + str(t.get("agent_response", "") or "")
+            )
+            is_inj, conf, pattern_id = is_prompt_injection(combined)
+            if is_inj:
+                _logger.warning(
+                    "LLMExtractor.extract_facts skipped chunk session=%s "
+                    "(injection in episode_id=%s pattern=%s confidence=%.2f)",
+                    session_id,
+                    t.get("episode_id"),
+                    pattern_id,
+                    conf,
+                )
+                return []
 
         prompt = _build_cross_turn_user_prompt(turns, session_id=session_id)
         raw = await self._llm.chat(

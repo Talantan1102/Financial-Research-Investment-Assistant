@@ -125,7 +125,9 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
     )
     from app.memory.injection_classifier import (
         EvidenceNotFoundError,
+        PromptInjectionDetectedError,
         evidence_quote_in_episode,
+        is_prompt_injection,
     )
     from app.memory.models import ChatMemoryEpisode
 
@@ -155,6 +157,14 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
                 episode_text = (
                     (episode.user_message_text or "") + "\n" + (episode.agent_response_text or "")
                 )
+                # S1 fix — prompt injection 拦截 (spec § 11 末尾 #2 part a; 死代码修复)
+                is_inj, conf, pattern_id = is_prompt_injection(episode_text)
+                if is_inj:
+                    raise PromptInjectionDetectedError(
+                        f"episode {validated.episode_id} flagged as prompt injection "
+                        f"(pattern={pattern_id}, confidence={conf:.2f}) — "
+                        f"refusing graph write (algorithm depth patch #2 part a)"
+                    )
                 if not evidence_quote_in_episode(validated.evidence_quote, episode_text):
                     raise EvidenceNotFoundError(
                         f"evidence_quote {validated.evidence_quote!r} not a "

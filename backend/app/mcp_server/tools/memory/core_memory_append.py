@@ -56,6 +56,10 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
         build_memory_from_env,
         write_tool_call_log,
     )
+    from app.memory.injection_classifier import (
+        PromptInjectionDetectedError,
+        is_prompt_injection,
+    )
 
     validated = CoreMemoryAppendArgs.model_validate(args)
     memory = build_memory_from_env()
@@ -65,6 +69,15 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
     timer = Timer()
     try:
         with timer:
+            # S1 fix — content 写入 working_blocks 前过 injection 分类器
+            # ({{persona_block}} / {{scratchpad_block}} 未来回灌 system prompt 风险)
+            is_inj, conf, pattern_id = is_prompt_injection(validated.content)
+            if is_inj:
+                raise PromptInjectionDetectedError(
+                    f"core_memory_append content flagged as prompt injection "
+                    f"(pattern={pattern_id}, confidence={conf:.2f}) — "
+                    f"refusing working_blocks write (algorithm depth patch #2 part a)"
+                )
             block = await memory.core_memory_append(
                 user_id=validated.user_id,
                 block_name=validated.block_name,

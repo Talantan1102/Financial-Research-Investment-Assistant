@@ -55,6 +55,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [c5 Plan 7A /memory UI shell ship](docs/claude-context/c5-plan7a-memory-ui-shell-done.md) — 5 REST endpoint + memoryApi client + /memory page shell
 - [c5 Plan 7B memory visualizations + onboarding ship](docs/claude-context/c5-plan7b-visualizations-onboarding-done.md) — Cytoscape graph viz + timeline + audit + onboarding modal + chat anchor + monthly digest
 - [c5 Plan 8 eval + tests + docs 收束 ship](docs/claude-context/c5-plan8-eval-tests-docs-done.md) — 50 golden + 4 metric + bi-temporal differential + chaos + 投毒 30 case + eval_runner CLI + 总卡
+- [c5 S1 injection_classifier 死代码修复](docs/claude-context/c5-injection-classifier-wired.md) — Plan 5 自卡声称已接但实际 0 调用点; 4 写入入口接通 + L0/L1/L2 e2e 守护
 
 ## 设计稿与实施计划
 
