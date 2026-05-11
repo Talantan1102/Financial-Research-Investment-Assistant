@@ -36,21 +36,47 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
     import app.models  # noqa: F401  barrel registers chat_memory_* + FK targets
     from app.core.database import Base
 
-    # repo_root for legacy schema bootstrap + later c5 migrations
     backend_dir = Path(__file__).resolve().parents[3]
-    repo_root = backend_dir.parent
 
-    # 0. Bootstrap legacy schema (users / chat_sessions / FK targets) from
-    # docker/init-db/01-init.sql. Dev mounts this via docker-compose; CI's
-    # bare PG service container does not, so c5's selective create_all below
-    # would fail with UndefinedTable. Script is fully IF NOT EXISTS-safe.
-    # We use the legacy DDL (not SQLAlchemy create_all) because User.id has
-    # a sqlite/PG with_variant that emits incompatible DDL vs ChatSession.user_id.
-    init_sql_path = repo_root / "docker" / "init-db" / "01-init.sql"
-    if init_sql_path.exists():
-        init_sql = init_sql_path.read_text(encoding="utf-8")
-        with engine.begin() as conn:
-            conn.execute(text(init_sql))
+    # 0. Inline minimal FK target DDL — c5 chat_memory_* tables FK into
+    # users.id and chat_sessions.id. CI's bare PG service container does not
+    # mount docker/init-db/01-init.sql (dev-only via compose). Other e2e
+    # tests pre-create users via User.__table__.create() (different index name
+    # `ix_users_username` from SQLAlchemy index=True), so we cannot reuse
+    # 01-init.sql here without colliding on its CREATE INDEX idx_users_username.
+    # Project design (00-create-test-db.sql header) says test_db schema is
+    # owned by SQLAlchemy/test fixtures, not legacy 01-init.sql.
+    # Both statements fully IF NOT EXISTS-safe → re-runnable.
+    with engine.begin() as conn:
+        conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS users (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                username VARCHAR(50) UNIQUE,
+                email VARCHAR(100) UNIQUE,
+                hashed_password VARCHAR(255),
+                is_active BOOLEAN DEFAULT TRUE,
+                is_superuser BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """)
+        )
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(255),
+                session_type VARCHAR(50),
+                message_count INTEGER NOT NULL DEFAULT 0,
+                last_msg_preview TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+            """)
+        )
 
     # Pre-flight cleanup: drop existing chat_memory_* tables in case test db
     # has stale schema from prior plan iterations / failed runs. Order matters
