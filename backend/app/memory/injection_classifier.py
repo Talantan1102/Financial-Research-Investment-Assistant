@@ -28,6 +28,24 @@ class EvidenceNotFoundError(ValueError):
     """
 
 
+class PromptInjectionDetectedError(ValueError):
+    """`is_prompt_injection` 命中, write path 拒绝写入.
+
+    Plan 5 自卡声明 archival_memory_insert 写入前过滤 episode 内容, 但实际未接通,
+    `is_prompt_injection` 长期是死代码 (S1 fix). 本异常由 4 个写入入口在确认 injection
+    后 raise, 阻止任何 working_blocks / graph / Milvus 写入:
+
+      - `archival_memory_insert` MCP tool — episode_text / reasoning / evidence_quote
+      - `core_memory_append` MCP tool — content
+      - `core_memory_replace` MCP tool — new_content
+      - `LLMExtractor.extract` / `extract_facts` — episode_text / turn 文本 (返回空 ExtractionOutput
+        而非 raise, 避免阻塞 Path B 整个 chunk)
+
+    继承 ValueError 保持 caller `except ValueError` 兼容. err message 含命中 pattern_id
+    给 mcp_tool_call_log audit 用.
+    """
+
+
 def evidence_quote_in_episode(quote: str, episode_text: str) -> bool:
     """Substring 校验 (空白容忍).
 
