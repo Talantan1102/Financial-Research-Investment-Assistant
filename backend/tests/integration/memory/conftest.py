@@ -36,6 +36,22 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
     import app.models  # noqa: F401  barrel registers chat_memory_* + FK targets
     from app.core.database import Base
 
+    # repo_root for legacy schema bootstrap + later c5 migrations
+    backend_dir = Path(__file__).resolve().parents[3]
+    repo_root = backend_dir.parent
+
+    # 0. Bootstrap legacy schema (users / chat_sessions / FK targets) from
+    # docker/init-db/01-init.sql. Dev mounts this via docker-compose; CI's
+    # bare PG service container does not, so c5's selective create_all below
+    # would fail with UndefinedTable. Script is fully IF NOT EXISTS-safe.
+    # We use the legacy DDL (not SQLAlchemy create_all) because User.id has
+    # a sqlite/PG with_variant that emits incompatible DDL vs ChatSession.user_id.
+    init_sql_path = repo_root / "docker" / "init-db" / "01-init.sql"
+    if init_sql_path.exists():
+        init_sql = init_sql_path.read_text(encoding="utf-8")
+        with engine.begin() as conn:
+            conn.execute(text(init_sql))
+
     # Pre-flight cleanup: drop existing chat_memory_* tables in case test db
     # has stale schema from prior plan iterations / failed runs. Order matters
     # (edges → nodes/episodes due to FK).
@@ -45,15 +61,24 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
         conn.execute(text("DROP TABLE IF EXISTS chat_memory_episodes CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS chat_memory_working_blocks CASCADE"))
 
-    # Build all registered tables — chat_memory_* edges/nodes FK into `users`
-    # and `chat_sessions`, which CI's bare PG service container does not seed
-    # (docker-compose mounts docker/init-db/01-init.sql for local dev only).
-    # Other tests use sqlite-override; only c5 memory tests touch this PG.
-    Base.metadata.create_all(bind=engine)
+    # Selective create: only the 4 chat_memory_* tables (FK target tables —
+    # users / chat_sessions — created by 01-init.sql above).
+    from app.memory.models import (
+        ChatMemoryEdge,
+        ChatMemoryEpisode,
+        ChatMemoryNode,
+        ChatMemoryWorkingBlock,
+    )
+
+    target_tables = [
+        ChatMemoryEpisode.__table__,
+        ChatMemoryNode.__table__,
+        ChatMemoryEdge.__table__,
+        ChatMemoryWorkingBlock.__table__,
+    ]
+    Base.metadata.create_all(bind=engine, tables=target_tables)
 
     # 2. apply SQL migration(partial index / GIN / AGE / GENERATED tsvector)
-    # backend_dir = backend/tests/integration/memory/conftest.py → parents[3] = backend/
-    backend_dir = Path(__file__).resolve().parents[3]
     migration_path = backend_dir / "scripts" / "migrations" / "2026-05-11-c5-memory-schema.sql"
     if migration_path.exists():
         sql = migration_path.read_text(encoding="utf-8")
