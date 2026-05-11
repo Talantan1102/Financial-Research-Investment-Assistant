@@ -45,22 +45,11 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
         conn.execute(text("DROP TABLE IF EXISTS chat_memory_episodes CASCADE"))
         conn.execute(text("DROP TABLE IF EXISTS chat_memory_working_blocks CASCADE"))
 
-    # Selective create: only the 4 chat_memory_* tables (FK target tables —
-    # users / chat_sessions — already exist in test db with legacy schema).
-    from app.memory.models import (
-        ChatMemoryEdge,
-        ChatMemoryEpisode,
-        ChatMemoryNode,
-        ChatMemoryWorkingBlock,
-    )
-
-    target_tables = [
-        ChatMemoryEpisode.__table__,
-        ChatMemoryNode.__table__,
-        ChatMemoryEdge.__table__,
-        ChatMemoryWorkingBlock.__table__,
-    ]
-    Base.metadata.create_all(bind=engine, tables=target_tables)
+    # Build all registered tables — chat_memory_* edges/nodes FK into `users`
+    # and `chat_sessions`, which CI's bare PG service container does not seed
+    # (docker-compose mounts docker/init-db/01-init.sql for local dev only).
+    # Other tests use sqlite-override; only c5 memory tests touch this PG.
+    Base.metadata.create_all(bind=engine)
 
     # 2. apply SQL migration(partial index / GIN / AGE / GENERATED tsvector)
     # backend_dir = backend/tests/integration/memory/conftest.py → parents[3] = backend/
