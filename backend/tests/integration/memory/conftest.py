@@ -77,6 +77,21 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
             )
             """)
         )
+        # chat_messages — recall_memory_search reads historical messages
+        conn.execute(
+            text("""
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                session_id UUID REFERENCES chat_sessions(id) ON DELETE CASCADE,
+                role VARCHAR(20) NOT NULL,
+                content TEXT NOT NULL,
+                thinking TEXT,
+                references_data JSONB,
+                image_results JSONB,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+            """)
+        )
 
     # Pre-flight cleanup: drop existing chat_memory_* tables in case test db
     # has stale schema from prior plan iterations / failed runs. Order matters
