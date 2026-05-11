@@ -238,8 +238,8 @@ class LLMExtractor:
             return []
 
         for t in turns:
-            combined = str(t.get("user_message", "") or "") + "\n" + str(
-                t.get("agent_response", "") or ""
+            combined = (
+                str(t.get("user_message", "") or "") + "\n" + str(t.get("agent_response", "") or "")
             )
             is_inj, conf, pattern_id = is_prompt_injection(combined)
             if is_inj:
