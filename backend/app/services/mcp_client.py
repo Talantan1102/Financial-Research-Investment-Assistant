@@ -28,7 +28,14 @@ class MCPClient:
     async def from_subprocess(
         cls,
         server_module: str = "app.mcp_server.server",
+        profile: str = "chat_tools",
     ) -> AsyncIterator[MCPClient]:
+        """Launch MCP server subprocess via stdio for the given profile.
+
+        Plan 4 added `profile` (default 'chat_tools' for PR #39 backward compat).
+        Memory tools are exposed by passing `profile='memory'`; the subprocess
+        loads only that tool registry.
+        """
         # Ensure subprocess can find app.* modules — backend/ must be in PYTHONPATH
         backend_path = Path(__file__).parent.parent.parent  # backend/
         env = os.environ.copy()
@@ -39,7 +46,7 @@ class MCPClient:
 
         params = StdioServerParameters(
             command=sys.executable,
-            args=["-m", server_module],
+            args=["-m", server_module, "--profile", profile],
             env=env,
         )
         async with (

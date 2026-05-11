@@ -1,4 +1,5 @@
-import { Fragment, memo, useMemo } from 'react'
+import { Fragment, memo, useCallback, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { ChatMessage } from '@/types/chat'
 import { renderMarkdownWithCharts } from '@/utils/markdown'
 import { ChartSpecRenderer } from './ChartSpecRenderer'
@@ -8,17 +9,48 @@ export interface TextMessageProps {
   message: ChatMessage
 }
 
+/**
+ * `[查看](#mem-{edge_id})` anchor pattern (C.5 Plan 7B Task 6).
+ *
+ * Agent 在回复中显式提及 memory 来源时插此 link, 前端拦截点击 → 跳
+ * `/memory?highlight_edge={edge_id}` (MemoryGraph 高亮该 edge).
+ *
+ * 普通 anchor (`#section1`) / 普通 http link 不被拦截.
+ */
+const MEM_LINK_HREF = /^#mem-([A-Za-z0-9_-]+)$/
+
 function TextMessageInner({ message }: TextMessageProps) {
+  const navigate = useNavigate()
   const { html, charts } = useMemo(
     () => renderMarkdownWithCharts(message.content),
     [message.content],
   )
   const parts = html.split(/(<div data-chart-spec-id="chart-\d+"><\/div>)/g)
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      // Bubble up: find nearest <a>
+      let el: HTMLElement | null = e.target as HTMLElement
+      while (el && el !== e.currentTarget && el.tagName !== 'A') {
+        el = el.parentElement
+      }
+      if (!el || el.tagName !== 'A') return
+      const href = (el as HTMLAnchorElement).getAttribute('href') ?? ''
+      const m = href.match(MEM_LINK_HREF)
+      if (m) {
+        e.preventDefault()
+        navigate(`/memory?highlight_edge=${encodeURIComponent(m[1])}`)
+      }
+    },
+    [navigate],
+  )
+
   return (
     <div
       data-role={message.role}
       data-testid={`text-msg-${message.id}`}
       className={`${styles.markdownBody} ${message.role === 'user' ? styles.user : styles.assistant}`}
+      onClick={handleClick}
     >
       {parts.map((p, idx) => {
         const m = p.match(/data-chart-spec-id="(chart-\d+)"/)

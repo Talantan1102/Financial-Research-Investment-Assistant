@@ -1378,41 +1378,41 @@ async def test_bi_temporal_holding_evolution():
 ### v1.x ship 完整 checklist
 
 #### 后端
-- [ ] `chat_memory_episodes / nodes / edges / working_blocks` 4 PG 表 + 索引 ship
-- [ ] AGE 扩展加载 + 'chat_memory' 图 + 7 vlabel + 11 elabel ship
-- [ ] Milvus `chat_memory_edge_embeddings` collection ship
-- [ ] HierarchicalMemory class impl + Memory protocol DI 切换 in chat agent
-- [ ] 6 MCP tool 接入 `mcp_servers.yaml` 独立 `memory` profile
-- [ ] 写入 pipeline 8 step + 4-action conflict resolution
-- [ ] 读取 pipeline 3-way hybrid + RRF + working memory auto-injection
-- [ ] Cold start populator (3 路 seed + 幂等)
-- [ ] Cost optimization 5 项启用 (prompt cache + batch + skip gate + async + embedding cache)
-- [ ] outbox pattern for Milvus + 后台 retry job
+- [x] `chat_memory_episodes / nodes / edges / working_blocks` 4 PG 表 + 索引 ship  → Plan 1A
+- [x] AGE 扩展加载 + 'chat_memory' 图 + 7 vlabel + 11 elabel ship  → Plan 1A
+- [x] Milvus `chat_memory_edge_embeddings` collection ship  → Plan 1A
+- [x] HierarchicalMemory class impl + Memory protocol DI 切换 in chat agent  → Plan 1B
+- [x] 6 MCP tool 接入 `mcp_servers.yaml` 独立 `memory` profile  → Plan 4
+- [x] 写入 pipeline 8 step + 4-action conflict resolution  → Plan 2A
+- [x] 读取 pipeline 3-way hybrid + RRF + working memory auto-injection  → Plan 3
+- [x] Cold start populator (3 路 seed + 幂等)  → Plan 1B
+- [x] Cost optimization 5 项启用 (prompt cache + batch + skip gate + async + embedding cache)  → Plan 5
+- [x] outbox pattern for Milvus + 后台 retry job  → Plan 2A/2B
 
 #### 前端
-- [ ] `/memory` 路由进 sidebar
-- [ ] Graph viz (Cytoscape.js)
-- [ ] Timeline view
-- [ ] Audit log view
-- [ ] 3 个 backend API endpoint (graph / timeline / audit)
+- [x] `/memory` 路由进 sidebar  → Plan 7A
+- [x] Graph viz (Cytoscape.js)  → Plan 7B
+- [x] Timeline view  → Plan 7B
+- [x] Audit log view  → Plan 7B
+- [x] 3 个 backend API endpoint (graph / timeline / audit)  → Plan 7A (5 endpoint 实际)
 
 #### Eval
-- [ ] 50 golden case `c5_memory_golden.jsonl`
-- [ ] 3 metric impl (Recall Precision / Temporal Correctness / Faithful Answer)
-- [ ] Tool routing accuracy ≥ 0.85
-- [ ] Cost / session ≤ $0.005
+- [x] 50 golden case `c5_memory_golden.jsonl`  → Plan 8
+- [x] 3 metric impl (Recall Precision / Temporal Correctness / Faithful Answer)  → Plan 8 (实 4: + Routing Accuracy)
+- [x] Tool routing accuracy ≥ 0.85  → Plan 8 routing 20 case
+- [ ] Cost / session ≤ $0.005  → Plan 5 dogfood 实测待回填
 
 #### Tests
-- [ ] L0 unit (schema + RRF + paging logic)
-- [ ] L1 integration (extraction + conflict + 6 tool)
-- [ ] L2 cassette (search / traverse / recall full path)
-- [ ] **Bi-temporal differential test (5 session 序列)**
-- [ ] L3 dogfood ≥ 10 chat 真实验证
+- [x] L0 unit (schema + RRF + paging logic)  → Plan 1-7 + Plan 8 audit (58% cov)
+- [x] L1 integration (extraction + conflict + 6 tool)  → Plan 1-7 + Plan 8 audit (29 test 文件)
+- [ ] L2 cassette (search / traverse / recall full path)  → 5 stub 已建, real recording manual followup (spec § 14 不阻塞 ship)
+- [x] **Bi-temporal differential test (5 session 序列)**  → Plan 8 1:1 实现
+- [ ] L3 dogfood ≥ 10 chat 真实验证  → 待跑 (dogfood-week-1.md 待写)
 
 #### Docs
-- [ ] `docs/claude-context/c5-cross-session-memory-done.md` 知识卡 ship 完
-- [ ] CLAUDE.md 加索引
-- [ ] 16 工业难题撞实表完整 spec 化（每条 paper ref + 方案 + 验证）
+- [x] `docs/claude-context/c5-cross-session-memory-done.md` 知识卡 ship 完  → Plan 8
+- [x] CLAUDE.md 加索引  → Plan 8
+- [x] 16 工业难题撞实表完整 spec 化（每条 paper ref + 方案 + 验证）  → spec § 11 already
 
 ### Manual Followup（不阻塞 ship）
 

@@ -7,6 +7,7 @@ import RegisterPage from '@/pages/auth/register'
 import ChatLandingPage from '@/pages/chat/landing'
 import ChatSessionPage from '@/pages/chat/session'
 import KnowledgePage from '@/pages/knowledge'
+import MemoryPage from '@/pages/memory'
 import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
@@ -42,6 +43,7 @@ export const routes: IRouteObject[] = [
   { path: '/monitoring', Component: MonitoringIndex },
   { path: '/monitoring/:cid/alert/:aid', Component: AlertDetail },
   { path: '/monitoring/config', Component: MonitoringConfig },
+  { path: '/memory', Component: MemoryPage },
   { path: '/404', Component: NotFound, pure: true },
 ]
 

@@ -16,6 +16,13 @@ from uuid import uuid4
 
 import pytest
 from app.core.database import get_db
+from app.memory.models import (
+    ChatMemoryEdge,
+    ChatMemoryEpisode,
+    ChatMemoryNode,
+    ChatMemoryWorkingBlock,
+)
+from app.models.chat import ChatSession
 from app.models.monitoring import (
     MonitoringAlert,
     MonitoringRun,
@@ -48,6 +55,14 @@ def session() -> Generator[Session, None, None]:
     MonitoringSignal.__table__.create(engine)
     MonitoringAlert.__table__.create(engine)
     Notification.__table__.create(engine)
+    # C.5 memory 4 表 (Plan 7A 起需要) — Plan 1 ship 已加 with_variant(JSON, "sqlite")
+    # 让 JSONB / PgUUID 在 sqlite override 下能 compile (见 app/memory/models.py).
+    # ChatSession FK 是 episodes.session_id 引用, 必须先建.
+    ChatSession.__table__.create(engine)
+    ChatMemoryEpisode.__table__.create(engine)
+    ChatMemoryNode.__table__.create(engine)
+    ChatMemoryEdge.__table__.create(engine)
+    ChatMemoryWorkingBlock.__table__.create(engine)
 
     Session_ = sessionmaker(bind=engine, expire_on_commit=False)
     sess = Session_()

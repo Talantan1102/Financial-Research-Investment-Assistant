@@ -42,6 +42,20 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [v0.9 chat plan 4b frontend chatpane ship](docs/claude-context/v0.9-chat-plan4b-architecture.md) — ChatPane + EscalationConfirmDialog + Reports + F1-F10 polish landed (e2e deferred)
 - [v0.9 chat C.1+C.2 ship](docs/claude-context/v0.9-chat-c1c2-architecture.md) — production-style chat: LangGraph supervisor + MCP + Skill L1/L2/L3 + Escalation + chat-first frontend / 30 工业难题 P0+P1 全撞 / cassette+dogfood manual follow-up
 
+### C.5 Cross-Session Memory(v1.x ship 完)
+- [C.5 cross-session memory ship 完](docs/claude-context/c5-cross-session-memory-done.md) — 总卡, MemGPT hierarchical + Zep bi-temporal graph 杂交, 16 工业难题 + 6 算法深度补丁 ship
+- [c5 Plan 1A foundation schema ship](docs/claude-context/c5-plan1a-foundation-schema-done.md) — 4 PG 表 + AGE 7v/11e + Milvus alias + app_main lifespan
+- [c5 Plan 1B business foundation ship](docs/claude-context/c5-plan1b-business-foundation-done.md) — Memory Protocol + HierarchicalMemory 骨架 + working blocks + cold_start + reconciliation 入口
+- [c5 Plan 2A write pipeline core ship](docs/claude-context/c5-plan2a-write-pipeline-core-done.md) — Path A 主体: 8-step pipeline + 4-action conflict + bi-temporal correctness + AGE/Milvus 三方一致性
+- [c5 Plan 2B cross-turn write pipeline ship](docs/claude-context/c5-plan2b-write-pipeline-cross-turn-done.md) — cross_turn_grouper + Path B Celery + failure_matrix
+- [c5 Plan 3 read pipeline ship](docs/claude-context/c5-plan3-read-pipeline-done.md) — 3-way hybrid retrieval + RRF v2 时间感知 ranking + persona auto-injection + 长尾召回监控
+- [c5 Plan 4 MCP tools ship](docs/claude-context/c5-plan4-mcp-tools-done.md) — 6 memory MCP tool + memory profile + evidence_quote 校验 (algorithm 深度补丁 #2) + Tier 3 recall + tool routing 监控周报 SQL
+- [c5 Plan 5 cost optimization ship](docs/claude-context/c5-plan5-cost-optimization-done.md) — 5 项 ladder + injection classifier 规则层 (algorithm 深度补丁 #2) + posterior calibration weekly job (algorithm 深度补丁 #3) + chat_memory_calibration_runs audit / 单 session $0.025 → $0.005
+- [c5 Plan 6 memory vs kb routing ship](docs/claude-context/c5-plan6-memory-kb-routing-done.md) — supervisor router 节点 + 触发词分类(memory 13 / kb 11 / both 6) + prompt 区隔 [用户上下文] / [市场知识] + LLMRouterFallback default memory + 8 seed case + accuracy hook(Plan 8 收 50 case)
+- [c5 Plan 7A /memory UI shell ship](docs/claude-context/c5-plan7a-memory-ui-shell-done.md) — 5 REST endpoint + memoryApi client + /memory page shell
+- [c5 Plan 7B memory visualizations + onboarding ship](docs/claude-context/c5-plan7b-visualizations-onboarding-done.md) — Cytoscape graph viz + timeline + audit + onboarding modal + chat anchor + monthly digest
+- [c5 Plan 8 eval + tests + docs 收束 ship](docs/claude-context/c5-plan8-eval-tests-docs-done.md) — 50 golden + 4 metric + bi-temporal differential + chaos + 投毒 30 case + eval_runner CLI + 总卡
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。

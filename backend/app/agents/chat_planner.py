@@ -166,6 +166,63 @@ def _parse_plan(content: str) -> Plan:
 # v0.9 prompt template (chat mode)
 # ---------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# Plan 6 (c5) — Memory vs KB routing prompt segregation
+# spec § 11 末尾 #7 (c): 两路结果 prompt 显式区隔 [用户上下文] vs [市场知识]
+# --------------------------------------------------------------------------
+
+_USER_CONTEXT_HEADER = "[用户上下文]  ← 来自用户私人记忆,只用作偏好/持仓背景,不是投资结论"
+_MARKET_KNOWLEDGE_HEADER = (
+    "[市场知识]  ← 来自公开知识库(研报/财报/政策/新闻),客观信息,跟用户偏好独立"
+)
+_SEGREGATION_DISCLAIMER = (
+    "\n注意: [用户上下文] 是用户的个人事实(持仓/偏好/历史想法),[市场知识] 是公开信息。"
+    "回答时请区分,不要把它们混淆 — 比如 用户偏好白马 + 市场跑输大盘 是 trade-off,不是矛盾。\n"
+)
+
+
+def _format_memory_hits(hits: list[dict[str, Any]]) -> str:
+    """Render memory hits into a compact user-context block.
+
+    Top-5 truncation 防爆;每个 hit 渲染为单行 ``- {rel}: {ts_code}(valid_from=...)``
+    或 fallback dump properties。
+    """
+    if not hits:
+        return ""
+    lines = [_USER_CONTEXT_HEADER]
+    for h in hits[:5]:  # 防爆
+        rel = h.get("rel_type", "?")
+        props = h.get("properties", {}) or {}
+        valid_from = h.get("valid_from", "?")
+        ts_code = props.get("ts_code") or props.get("label") or ""
+        if ts_code:
+            lines.append(f"- {rel}: {ts_code}(valid_from={valid_from})")
+        else:
+            lines.append(f"- {rel}: {props}(valid_from={valid_from})")
+    return "\n".join(lines)
+
+
+def _format_kb_hits(hits: list[dict[str, Any]]) -> str:
+    """Render kb hits into a compact market-knowledge block.
+
+    Top-5 truncation + 240 char chunk_text 截断。
+    """
+    if not hits:
+        return ""
+    lines = [_MARKET_KNOWLEDGE_HEADER]
+    for h in hits[:5]:
+        text = str(h.get("chunk_text", ""))[:240]
+        try:
+            sim = float(h.get("similarity", 0.0))
+        except (TypeError, ValueError):
+            sim = 0.0
+        meta = h.get("metadata", {}) or {}
+        broker = meta.get("broker", "")
+        broker_part = f", {broker}" if broker else ""
+        lines.append(f"- (sim={sim:.2f}{broker_part}) {text}")
+    return "\n".join(lines)
+
+
 _PLANNER_PROMPT_TEMPLATE = """\
 你是金融研究助手 chat 模式的 planner。决定本轮要做什么。
 
@@ -338,13 +395,33 @@ class ChatPlanner(Agent):
         )
         recent = state.history[-self._recent_k :] if state.history else []
         recent_lines = [f"[{m.turn_index}] {m.role}: {m.content[:200]}" for m in recent]
-        return _PLANNER_PROMPT_TEMPLATE.format(
+        prompt = _PLANNER_PROMPT_TEMPLATE.format(
             tool_descriptions="\n".join(tool_lines),
             user_message=state.user_message,
             history_summary=state.history_summary or "(无)",
             recent_k=self._recent_k,
             recent_turns="\n".join(recent_lines) or "(无)",
         )
+
+        # === Plan 6 (c5) — segregation blocks injection ===
+        # spec § 11 末尾 #7 (c): 两路结果 prompt 显式区隔 [用户上下文] vs [市场知识]
+        user_ctx_block = _format_memory_hits(state.memory_hits)
+        market_block = _format_kb_hits(state.kb_hits)
+
+        if user_ctx_block or market_block:
+            inject_parts: list[str] = []
+            if user_ctx_block:
+                inject_parts.append(user_ctx_block)
+            if market_block:
+                inject_parts.append(market_block)
+            if user_ctx_block and market_block:
+                inject_parts.append(_SEGREGATION_DISCLAIMER)
+            inject_block = "\n\n".join(inject_parts) + "\n\n"
+            # Insert before "用户当前问题:" anchor — 最显眼位置
+            anchor = "用户当前问题:"
+            prompt = prompt.replace(anchor, inject_block + anchor, 1)
+
+        return prompt
 
     # ------------------------------------------------------------------
     # Legacy v0 sync interface (research-mode graph)

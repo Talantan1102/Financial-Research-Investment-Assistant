@@ -3,10 +3,20 @@
 New features should prefer importing from `app/services/*` (plural, v0.8.x main path).
 """
 
+# c5 memory schema (Plan 1A) — note: physical location is app/memory/, NOT
+# app/models/. Absolute import keeps barrel decoupled from c5 directory layout.
+from app.memory.models import (  # noqa: E402  (import after relative imports)
+    ChatMemoryEdge,
+    ChatMemoryEpisode,
+    ChatMemoryNode,
+    ChatMemoryWorkingBlock,
+)
+
 from .chat import ChatAttachment, ChatMessage, ChatSession, LongTermMemory
 from .escalation_record import EscalationRecord  # noqa: F401
 from .industry_data import CompanyData, IndustryStats, PolicyData
 from .knowledge import Document, KnowledgeBase
+from .memory_calibration import ChatMemoryCalibrationRun  # noqa: F401  (Plan 5)
 from .monitoring import (
     DetailStatus,
     MonitoringAlert,
@@ -47,4 +57,11 @@ __all__ = [
     "MonitoringSignal",
     "Notification",
     "EscalationRecord",
+    # c5 memory(Plan 1A)
+    "ChatMemoryEpisode",
+    "ChatMemoryNode",
+    "ChatMemoryEdge",
+    "ChatMemoryWorkingBlock",
+    # c5 memory Plan 5 audit
+    "ChatMemoryCalibrationRun",
 ]

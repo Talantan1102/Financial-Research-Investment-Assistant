@@ -112,6 +112,13 @@ test.describe('AlphaScout v0.9.x landing — minimal frontend smoke', () => {
     page,
     context,
   }) => {
+    // Plan 7B Task 5 起 AppShell 挂 MemoryOnboardingModal — 已 seen 跳过避免遮罩
+    // (此 test 在 main HEAD 已失败, 修 onboarding 不能恢复, 但保留 init script
+    // 让 onboarding 不影响 future 修复. 真正的 'AlphaScout 品牌不可见' 是 / →
+    // /chat 路由切换 + chat landing 用旧品牌, 已是 pre-existing issue).
+    await context.addInitScript(() =>
+      window.localStorage.setItem('memory_onboarding_seen_v1', '1'),
+    )
     await seedAuth(context)
     await stubBackend(page)
 

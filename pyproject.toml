@@ -175,7 +175,9 @@ disallow_untyped_defs = false  # lenient for legacy code; tighten per directory 
 warn_unused_ignores = true
 warn_redundant_casts = true
 ignore_missing_imports = true  # 3rd-party stubs missing OK for now
-files = ["backend/app", "backend/tests"]
+files = ["backend/app", "backend/tests", "backend/eval"]
+mypy_path = ["backend"]
+explicit_package_bases = true
 exclude = [
     "docs/archive",
     "venv",
@@ -246,6 +248,28 @@ module = [
     # Golden eval still uses legacy MonitoringCustomer schema; migration to
     # MonitoringSubject deferred to escalation.py retirement.
     "tests.eval.test_b3_dogfood_golden",
+]
+ignore_errors = true
+
+# C.5 cross-session memory tests — same SA 2.0 Column[T] interop debt as
+# the v1.0 monitoring block above. Tests construct ORM models (AgeNode,
+# Episode, etc.) and pass their `.id` (Column[UUID] per mypy) to functions
+# expecting UUID. test_mcp_tools also passes str UUID literals to Pydantic
+# args that declare `user_id: UUID` (Pydantic auto-coerces at runtime).
+# Both resolve with the same mapped_column migration deferred to SA 2.0 sweep.
+[[tool.mypy.overrides]]
+module = [
+    "tests.integration.memory.test_apply_action_e2e",
+    "tests.integration.memory.test_milvus_outbox_e2e",
+    "tests.integration.memory.test_cost_opt_e2e",
+    "tests.integration.memory.test_conflict_resolver_e2e",
+    "tests.integration.memory.test_episodes_e2e",
+    "tests.integration.memory.test_extractor_e2e",
+    "tests.integration.memory.test_instrumentation_e2e",
+    "tests.integration.memory.test_working_blocks_e2e",
+    "tests.integration.memory.test_write_pipeline_hardening",
+    "tests.unit.memory.test_batch_extractor",
+    "tests.unit.memory.test_mcp_tools",
 ]
 ignore_errors = true
 

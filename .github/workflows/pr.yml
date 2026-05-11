@@ -42,7 +42,7 @@ jobs:
       - name: Lint
         run: uv run ruff check .
       - name: Type check
-        run: uv run mypy backend
+        run: uv run mypy
       - name: Tests (L0 + L1 + L2 cassette)
         env:
           LLM_MODE: cassette

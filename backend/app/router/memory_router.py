@@ -1,240 +1,405 @@
-"""长期记忆管理路由"""
+"""REST API for C.5 cross-session memory page.
 
-from datetime import datetime
+Endpoints (契约 § 10):
+  GET  /api/v0/memory/graph              graph viz nodes + edges 当前快照
+  GET  /api/v0/memory/timeline           按 valid_from DESC 排序的 edge 列表(分页 + 筛)
+  GET  /api/v0/memory/audit              已 invalidate 的 edges(纠错史)
+  POST /api/v0/memory/edges/{edge_id}/invalidate 用户一键否决
+  GET  /api/v0/memory/blocks             working blocks 当前内容(persona / scratchpad)
+
+Auth: 所有 endpoint 强制从 get_current_user_required 取 user_id,
+path/query 不接受 user_id 参数 (防越权, 契约 § 10 末尾约定)。
+
+Note(Plan 7A): 此文件替换原 legacy /memories 路由(未注册到 app_main, 无活跃 caller)。
+新 C.5 路由按 shared contracts § 1 + § 10 实现, prefix=/api/v0/memory。
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.chat import ChatMessage, ChatSession, LongTermMemory
+from app.memory.models import (
+    ChatMemoryEdge,
+    ChatMemoryNode,
+    ChatMemoryWorkingBlock,
+)
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
-from app.service.memory_service import get_memory_service
 
-router = APIRouter(prefix="/memories", tags=["长期记忆"])
-
-
-# ========== Schemas ==========
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/v0/memory", tags=["c5-memory"])
 
 
-class MemoryResponse(BaseModel):
-    """记忆响应"""
-
-    id: str = Field(..., description="记忆ID")
-    session_id: str | None = Field(None, description="关联会话ID")
-    summary: str = Field(..., description="记忆摘要")
-    key_insights: dict | None = Field(None, description="关键洞察")
-    token_count: int | None = Field(None, description="Token数量")
-    created_at: datetime = Field(..., description="创建时间")
-
-    class Config:
-        from_attributes = True
+# ---------------------------------------------------------------------------
+# Pydantic schemas — Graph view
+# ---------------------------------------------------------------------------
 
 
-class MemoryListResponse(BaseModel):
-    """记忆列表响应"""
+class GraphNodeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    memories: list[MemoryResponse] = Field(default_factory=list, description="记忆列表")
-    total: int = Field(0, description="总数")
-
-
-class MemorySearchRequest(BaseModel):
-    """记忆搜索请求"""
-
-    query: str = Field(..., description="搜索查询")
-    top_k: int = Field(5, ge=1, le=20, description="返回结果数量")
+    node_id: str
+    entity_type: str  # 7 类: User / Stock / Industry / Sector / Metric / Strategy / Concept
+    entity_label: str
+    properties: dict
 
 
-class MemorySearchResult(BaseModel):
-    """记忆搜索结果"""
+class GraphEdgeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    id: str
-    session_id: str | None
-    memory_type: str
+    edge_id: str
+    source_node_id: str
+    target_node_id: str
+    rel_type: str
+    valid_from: str
+    valid_to: str | None
+    importance: float = Field(..., description="三档 0.9 / 0.5 / 0.2 (契约 § 4)")
+    reasoning: str | None
+
+    @field_validator("importance")
+    @classmethod
+    def _check_importance(cls, v: float) -> float:
+        if v not in (0.2, 0.5, 0.9):
+            raise ValueError(f"importance must be one of [0.2, 0.5, 0.9], got {v}")
+        return v
+
+
+class GraphResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    nodes: list[GraphNodeOut]
+    edges: list[GraphEdgeOut]
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas — Timeline view
+# ---------------------------------------------------------------------------
+
+
+class TimelineEdgeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edge_id: str
+    rel_type: str
+    source_label: str  # entity_label of source node
+    target_label: str  # entity_label of target node
+    valid_from: str
+    valid_to: str | None
+    importance: float
+    invalidated_at: str | None
+
+
+class TimelineResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[TimelineEdgeOut]
+    total: int
+    page: int
+    page_size: int
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas — Audit view
+# ---------------------------------------------------------------------------
+
+
+class AuditEdgeOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edge_id: str
+    rel_type: str
+    source_label: str
+    target_label: str
+    invalidated_at: str
+    invalidated_by_edge_id: str | None  # nullable: 用户手动 invalidate 时无替代 fact
+    original_reasoning: str | None
+
+
+class AuditResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[AuditEdgeOut]
+    total: int
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schemas — Working Blocks
+# ---------------------------------------------------------------------------
+
+
+class WorkingBlockOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    block_name: str  # 'persona' / 'scratchpad'
     content: str
-    score: float
+    token_count: int
+    max_tokens: int
+    updated_at: str
 
 
-class CreateMemoryRequest(BaseModel):
-    """创建记忆请求"""
-
-    session_id: str = Field(..., description="要总结的会话ID")
-
-
-# ========== Routes ==========
+class BlocksResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    blocks: list[WorkingBlockOut]
 
 
-@router.get("", response_model=MemoryListResponse)
-async def get_memories(
-    limit: int = 20,
-    offset: int = 0,
-    current_user: User = Depends(get_current_user_required),
+# ---------------------------------------------------------------------------
+# Pydantic schemas — Invalidate
+# ---------------------------------------------------------------------------
+
+
+class InvalidateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    edge_id: str
+    invalidated_at: str
+    status: Literal["invalidated"]
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/graph", response_model=GraphResponse)
+def get_graph(
     db: Session = Depends(get_db),
-):
-    """获取用户的长期记忆列表"""
-    memories = (
-        db.query(LongTermMemory)
-        .filter(LongTermMemory.user_id == current_user.id)
-        .order_by(LongTermMemory.created_at.desc())
-        .offset(offset)
-        .limit(limit)
+    user: User = Depends(get_current_user_required),
+) -> GraphResponse:
+    """Return current snapshot: edges with valid_to IS NULL AND invalidated_at IS NULL.
+
+    Spec § 9 行 965, § 5 路径 3.
+    """
+    edges = (
+        db.query(ChatMemoryEdge)
+        .filter(
+            ChatMemoryEdge.user_id == user.id,
+            ChatMemoryEdge.valid_to.is_(None),
+            ChatMemoryEdge.invalidated_at.is_(None),
+        )
         .all()
     )
 
-    total = db.query(LongTermMemory).filter(LongTermMemory.user_id == current_user.id).count()
+    # 收集涉及的 node ids
+    node_ids: set = set()
+    for e in edges:
+        node_ids.add(e.source_node_id)
+        node_ids.add(e.target_node_id)
 
-    return MemoryListResponse(
-        memories=[
-            MemoryResponse(
-                id=str(mem.id),
-                session_id=str(mem.session_id) if mem.session_id else None,
-                summary=mem.summary,
-                key_insights=mem.key_insights,
-                token_count=mem.token_count,
-                created_at=mem.created_at,
+    nodes_q: list[ChatMemoryNode] = []
+    if node_ids:
+        nodes_q = (
+            db.query(ChatMemoryNode)
+            .filter(
+                ChatMemoryNode.user_id == user.id,
+                ChatMemoryNode.node_id.in_(node_ids),
             )
-            for mem in memories
-        ],
-        total=total,
-    )
-
-
-@router.get("/{memory_id}", response_model=MemoryResponse)
-async def get_memory(
-    memory_id: str,
-    current_user: User = Depends(get_current_user_required),
-    db: Session = Depends(get_db),
-):
-    """获取单个记忆详情"""
-    try:
-        mem_uuid = UUID(memory_id)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的记忆ID格式")
-
-    memory = (
-        db.query(LongTermMemory)
-        .filter(LongTermMemory.id == mem_uuid, LongTermMemory.user_id == current_user.id)
-        .first()
-    )
-
-    if not memory:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="记忆不存在")
-
-    return MemoryResponse(
-        id=str(memory.id),
-        session_id=str(memory.session_id) if memory.session_id else None,
-        summary=memory.summary,
-        key_insights=memory.key_insights,
-        token_count=memory.token_count,
-        created_at=memory.created_at,
-    )
-
-
-@router.post("/search", response_model=list[MemorySearchResult])
-async def search_memories(
-    request: MemorySearchRequest,
-    current_user: User = Depends(get_current_user_required),
-):
-    """搜索相关记忆"""
-    memory_service = get_memory_service()
-    results = memory_service.retrieve_memories(
-        user_id=str(current_user.id), query=request.query, top_k=request.top_k
-    )
-
-    return [
-        MemorySearchResult(
-            id=r.get("id", ""),
-            session_id=r.get("session_id"),
-            memory_type=r.get("memory_type", "unknown"),
-            content=r.get("content", ""),
-            score=r.get("score", 0.0),
+            .all()
         )
-        for r in results
-    ]
 
-
-@router.post("/create", response_model=MemoryResponse)
-async def create_memory_from_session(
-    request: CreateMemoryRequest,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user_required),
-    db: Session = Depends(get_db),
-):
-    """从会话创建长期记忆"""
-    try:
-        session_uuid = UUID(request.session_id)
-    except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的会话ID格式")
-
-    # 验证会话存在且属于当前用户
-    session = (
-        db.query(ChatSession)
-        .filter(ChatSession.id == session_uuid, ChatSession.user_id == current_user.id)
-        .first()
+    return GraphResponse(
+        nodes=[
+            GraphNodeOut(
+                node_id=str(n.node_id),
+                entity_type=n.entity_type,
+                entity_label=n.entity_label,
+                properties=n.properties or {},
+            )
+            for n in nodes_q
+        ],
+        edges=[
+            GraphEdgeOut(
+                edge_id=str(e.edge_id),
+                source_node_id=str(e.source_node_id),
+                target_node_id=str(e.target_node_id),
+                rel_type=e.rel_type,
+                valid_from=e.valid_from.isoformat(),
+                valid_to=e.valid_to.isoformat() if e.valid_to else None,
+                importance=e.importance,
+                reasoning=e.reasoning,
+            )
+            for e in edges
+        ],
     )
 
-    if not session:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
-    # 获取会话消息
-    messages = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.session_id == session_uuid)
-        .order_by(ChatMessage.created_at.asc())
+@router.get("/timeline", response_model=TimelineResponse)
+def get_timeline(
+    rel_type: str | None = None,
+    entity_label: str | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_required),
+) -> TimelineResponse:
+    """spec § 9 行 967 — 按 valid_from DESC 排序, 支持 rel_type / entity_label 筛."""
+    q = db.query(ChatMemoryEdge).filter(ChatMemoryEdge.user_id == user.id)
+
+    if rel_type:
+        q = q.filter(ChatMemoryEdge.rel_type == rel_type)
+
+    if entity_label:
+        # 跨用户隔离: 两步 query (先查 user 的 nodes, 再 filter edges)
+        matching_node_ids = [
+            n.node_id
+            for n in db.query(ChatMemoryNode)
+            .filter(
+                ChatMemoryNode.user_id == user.id,
+                ChatMemoryNode.entity_label == entity_label,
+            )
+            .all()
+        ]
+        if not matching_node_ids:
+            return TimelineResponse(items=[], total=0, page=page, page_size=page_size)
+        q = q.filter(
+            or_(
+                ChatMemoryEdge.source_node_id.in_(matching_node_ids),
+                ChatMemoryEdge.target_node_id.in_(matching_node_ids),
+            )
+        )
+
+    total = q.count()
+    edges = (
+        q.order_by(ChatMemoryEdge.valid_from.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
 
-    if not messages:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="会话没有消息")
+    # 反查 src / tgt label
+    all_node_ids: set = set()
+    for e in edges:
+        all_node_ids.add(e.source_node_id)
+        all_node_ids.add(e.target_node_id)
+    label_map: dict = {}
+    if all_node_ids:
+        for n in db.query(ChatMemoryNode).filter(ChatMemoryNode.node_id.in_(all_node_ids)).all():
+            label_map[n.node_id] = n.entity_label
 
-    # 创建记忆
-    memory_service = get_memory_service()
-    memory = memory_service.create_memory(
-        db=db, user_id=str(current_user.id), session_id=str(session_uuid), messages=messages
-    )
-
-    if not memory:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="创建记忆失败"
+    items = [
+        TimelineEdgeOut(
+            edge_id=str(e.edge_id),
+            rel_type=e.rel_type,
+            source_label=label_map.get(e.source_node_id, "?"),
+            target_label=label_map.get(e.target_node_id, "?"),
+            valid_from=e.valid_from.isoformat(),
+            valid_to=e.valid_to.isoformat() if e.valid_to else None,
+            importance=e.importance,
+            invalidated_at=e.invalidated_at.isoformat() if e.invalidated_at else None,
         )
-
-    return MemoryResponse(
-        id=str(memory.id),
-        session_id=str(memory.session_id) if memory.session_id else None,
-        summary=memory.summary,
-        key_insights=memory.key_insights,
-        token_count=memory.token_count,
-        created_at=memory.created_at,
-    )
+        for e in edges
+    ]
+    return TimelineResponse(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_memory(
-    memory_id: str,
-    current_user: User = Depends(get_current_user_required),
+@router.get("/audit", response_model=AuditResponse)
+def get_audit(
     db: Session = Depends(get_db),
-):
-    """删除长期记忆"""
-    memory_service = get_memory_service()
-    success = memory_service.delete_memory(db=db, memory_id=memory_id, user_id=str(current_user.id))
+    user: User = Depends(get_current_user_required),
+) -> AuditResponse:
+    """spec § 9 行 974 — invalidated_at IS NOT NULL 的纠错史.
 
-    if not success:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="记忆不存在")
-
-    return None
-
-
-@router.get("/context/{query}", response_model=dict)
-async def get_memory_context(
-    query: str,
-    current_user: User = Depends(get_current_user_required),
-):
-    """获取与查询相关的记忆上下文"""
-    memory_service = get_memory_service()
-    context = memory_service.build_memory_context(
-        user_id=str(current_user.id), current_query=query, max_memories=3
+    invalidated_by_edge_id 从 properties JSONB 读 (Plan 2 conflict_resolver 写入)。
+    """
+    edges = (
+        db.query(ChatMemoryEdge)
+        .filter(
+            ChatMemoryEdge.user_id == user.id,
+            ChatMemoryEdge.invalidated_at.is_not(None),
+        )
+        .order_by(ChatMemoryEdge.invalidated_at.desc())
+        .all()
     )
 
-    return {"context": context}
+    all_node_ids: set = set()
+    for e in edges:
+        all_node_ids.add(e.source_node_id)
+        all_node_ids.add(e.target_node_id)
+    label_map: dict = {}
+    if all_node_ids:
+        for n in db.query(ChatMemoryNode).filter(ChatMemoryNode.node_id.in_(all_node_ids)).all():
+            label_map[n.node_id] = n.entity_label
+
+    items = [
+        AuditEdgeOut(
+            edge_id=str(e.edge_id),
+            rel_type=e.rel_type,
+            source_label=label_map.get(e.source_node_id, "?"),
+            target_label=label_map.get(e.target_node_id, "?"),
+            invalidated_at=e.invalidated_at.isoformat(),
+            invalidated_by_edge_id=(e.properties or {}).get("invalidated_by_edge_id"),
+            original_reasoning=e.reasoning,
+        )
+        for e in edges
+    ]
+    return AuditResponse(items=items, total=len(items))
+
+
+@router.post("/edges/{edge_id}/invalidate", response_model=InvalidateResponse)
+def invalidate_edge(
+    edge_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_required),
+) -> InvalidateResponse:
+    """spec § 14 P1 #8 — 用户一键否决.
+
+    跨用户访问 → 404 (防越权, user_id 不在 path/query).
+    已 invalidated 重复 POST → 400 (防覆盖 audit log 时间戳).
+    """
+    try:
+        eid_str = str(UUID(edge_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="edge not found") from None
+
+    # Pass as str to dodge sqlite-variant bind issue (no UUID→str converter on sqlite).
+    # PG accepts str-form UUID equivalently.
+    edge = db.query(ChatMemoryEdge).filter(ChatMemoryEdge.edge_id == eid_str).first()
+    if edge is None or str(edge.user_id) != str(user.id):
+        raise HTTPException(status_code=404, detail="edge not found")
+    if edge.invalidated_at is not None:
+        raise HTTPException(status_code=400, detail="edge already invalidated")
+
+    now = datetime.now(UTC)
+    edge.invalidated_at = now
+    # SQLAlchemy JSONB mutate-detect: 重新赋整个 dict (model 未标 MutableDict)
+    new_props = dict(edge.properties or {})
+    new_props["invalidated_by"] = "user_manual"
+    edge.properties = new_props
+    db.commit()
+
+    return InvalidateResponse(
+        edge_id=str(edge.edge_id),
+        invalidated_at=now.isoformat(),
+        status="invalidated",
+    )
+
+
+@router.get("/blocks", response_model=BlocksResponse)
+def get_blocks(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user_required),
+) -> BlocksResponse:
+    """spec § 7 working memory budget — 返 persona / scratchpad 当前内容(只读)."""
+    blocks = (
+        db.query(ChatMemoryWorkingBlock)
+        .filter(ChatMemoryWorkingBlock.user_id == user.id)
+        .order_by(ChatMemoryWorkingBlock.block_name.asc())
+        .all()
+    )
+    return BlocksResponse(
+        blocks=[
+            WorkingBlockOut(
+                block_name=b.block_name,
+                content=b.content or "",
+                token_count=b.token_count,
+                max_tokens=b.max_tokens,
+                updated_at=b.updated_at.isoformat() if b.updated_at else "",
+            )
+            for b in blocks
+        ]
+    )

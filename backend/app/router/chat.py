@@ -30,7 +30,7 @@ import logging
 import traceback
 from collections.abc import AsyncIterator
 from typing import Any, Literal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -154,6 +154,32 @@ def get_current_user() -> _AnonUser:
 _graph_singleton: CompiledStateGraph[Any, Any, Any, Any] | None = None
 
 
+def _build_async_pg_session_factory_or_none() -> Any | None:
+    """Build sync session factory from env DATABASE_URL.
+
+    无 PG / 测试环境返回 None, fallback 走 InSessionMemory(保 Q4 E 兼容).
+    """
+    import os
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        return None
+    try:
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session, sessionmaker
+
+        engine = create_engine(db_url, pool_pre_ping=True)
+        Factory = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
+
+        def _factory() -> Session:
+            return Factory()
+
+        return _factory
+    except Exception as e:
+        logger.warning("DI fallback to InSessionMemory: %s", e)
+        return None
+
+
 def _build_graph_singleton(
     checkpointer: Any | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
@@ -180,6 +206,7 @@ def _build_graph_singleton(
     from app.agents.chat_planner import ChatPlanner
     from app.agents.in_session_memory import InSessionMemory
     from app.agents.responder import Responder
+    from app.memory.hierarchical import HierarchicalMemory
     from app.orchestration.chat_graph import build_chat_graph
     from app.services.bocha_factory import build_bocha_service_from_env
     from app.services.openai_client import build_llm_service_from_env
@@ -200,8 +227,25 @@ def _build_graph_singleton(
     planner = ChatPlanner(llm=llm, registry=registry)
     responder = Responder(llm=llm)
 
-    # Q4 E: in-session memory for tool dedup + token-guard summarize
-    memory = InSessionMemory(llm=llm)
+    # C.5 Plan 1B: HierarchicalMemory 替换 InSessionMemory 作为主 Memory Protocol 实现.
+    # InSessionMemory 仍可用于 in-session dedup / token-guard summarize(Q4 E),
+    # 但 cross-session memory 方法走 HierarchicalMemory.
+    # Plan 2-4 的 archival_memory_* 方法 ship 后, 此处真 inject embed_service / llm_extractor;
+    # Plan 1B 阶段 Plan 2-4 stub 方法 raise NotImplementedError, agent 调到时报错(预期).
+    pg_factory = _build_async_pg_session_factory_or_none()
+    memory: Any
+    if pg_factory is None:
+        # 测试 / 无 PG 环境: fallback InSessionMemory 保 Q4 E behavior
+        memory = InSessionMemory(llm=llm)
+    else:
+        memory = HierarchicalMemory(
+            pg_session_factory=pg_factory,
+            age_executor=None,  # Plan 2 inject
+            milvus_client=None,  # Plan 2 inject
+            embed_service=None,  # Plan 2 inject
+            llm_extractor=None,  # Plan 2 inject
+            llm_judge=None,  # Plan 2 inject
+        )
 
     # ToolResultCache requires async session factory; deferred to Plan 2 when
     # ChatSessionRepo engine is wired. For now pass a no-op stub cache.
@@ -303,6 +347,14 @@ def _adapt_event(ev: dict[str, Any], seq: int) -> StreamEvent | None:
 # ---------------------------------------------------------------------------
 
 
+_persona_populated_sessions: set[str] = set()
+"""C.5 Plan 3 session-start dedupe — best-effort per-process cache.
+
+避免每 turn 重跑 4 次 PG query. 生产可换成 PG 标记 / Redis ttl, 当前 portfolio
+范围只防 in-process 重跑就够用.
+"""
+
+
 async def _stream_chat(
     req: ChatRequest,
     user: _AnonUser,
@@ -324,7 +376,24 @@ async def _stream_chat(
 
     If ``extractor`` or ``record_repo`` are None (e.g. not yet wired in app_main),
     escalation events are skipped and a warning is logged.
+
+    C.5 Plan 3: session-start hook — 第一个 turn 跑 populate_persona_on_session_start
+    填 working_blocks(persona). 失败仅 log 不阻塞 chat.
     """
+    # C.5 Plan 3: persona auto-injection (best-effort, fail-safe)
+    session_key = f"{user.id}:{req.session_id}"
+    if session_key not in _persona_populated_sessions:
+        _persona_populated_sessions.add(session_key)
+        try:
+            from app.memory.persona_populator import populate_persona_on_session_start
+
+            pg_factory = _build_async_pg_session_factory_or_none()
+            if pg_factory is not None:
+                user_uuid = user.id if isinstance(user.id, UUID) else UUID(str(user.id))
+                populate_persona_on_session_start(pg_factory, user_id=user_uuid)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("populate_persona_on_session_start failed: %s", exc)
+
     request_id = f"req-{uuid4().hex[:12]}"
     initial = GraphState(
         user_id=user.id,
