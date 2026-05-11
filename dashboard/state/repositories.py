@@ -1,4 +1,5 @@
-"""sqlite CRUD。M1 仅 SnapshotRepo;M2 增 OverrideRepo;M3 增 DecisionNoteRepo。"""
+"""sqlite CRUD。M1 仅 SnapshotRepo;M2 增 OverrideRepo;M3 增 DecisionNoteRepo;
+Review Mode v2 增 DeepCardRepo / FlashcardRepo。"""
 
 from __future__ import annotations
 
@@ -6,6 +7,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
+from dashboard.derive.deep_card_types import DeepCard
 from dashboard.derive.types import CapabilityStatus, SnapshotDict
 
 
@@ -121,3 +123,63 @@ class DecisionNoteRepo:
                 "DELETE FROM decision_note WHERE decision_id = ?",
                 (decision_id,),
             )
+
+
+class DeepCardRepo:
+    """sqlite CRUD for deep_cards。spec § 6.1。
+
+    实施时:为简化 Pydantic roundtrip,DeepCard 用单 `payload` JSON 列(非分列)。
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get(self, cap_id: str) -> DeepCard | None:
+        cur = self.conn.execute("SELECT payload FROM deep_cards WHERE cap_id = ?", (cap_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        result: DeepCard = DeepCard.model_validate_json(row["payload"])
+        return result
+
+    def get_all(self) -> list[DeepCard]:
+        cur = self.conn.execute("SELECT payload FROM deep_cards ORDER BY cap_id")
+        return [DeepCard.model_validate_json(r["payload"]) for r in cur.fetchall()]
+
+    def upsert(self, card: DeepCard) -> None:
+        now = datetime.now(UTC).isoformat()
+        payload = card.model_dump_json()
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO deep_cards (cap_id, payload, last_edited_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(cap_id) DO UPDATE SET
+                  payload = excluded.payload,
+                  last_edited_at = excluded.last_edited_at
+                """,
+                (card.cap_id, payload, now),
+            )
+
+    def update_field(self, cap_id: str, field_name: str, value: object) -> None:
+        """改单个字段。自动转 prefill_source(spec § 5.2):
+        llm + 人改 → hybrid;manual + 人改 → manual;hybrid + 人改 → hybrid。
+        """
+        card = self.get(cap_id) or DeepCard(cap_id=cap_id)
+        if field_name not in DeepCard.model_fields:
+            raise KeyError(f"DeepCard has no field {field_name}")
+        new_data = card.model_dump()
+        new_data[field_name] = value
+        new_data["last_edited_at"] = datetime.now(UTC).isoformat()
+        if card.prefill_source == "llm":
+            new_data["prefill_source"] = "hybrid"
+        updated = DeepCard.model_validate(new_data)
+        self.upsert(updated)
+
+    def mark_ai_drafted(self, cap_id: str, field_name: str) -> None:  # noqa: ARG002
+        """AI 草拟单字段成功后调:prefill_source = llm (覆盖 manual)。field_name 留作未来 per-field 状态扩展。"""
+        card = self.get(cap_id) or DeepCard(cap_id=cap_id)
+        new_data = card.model_dump()
+        new_data["prefill_source"] = "llm"
+        new_data["prefill_at"] = datetime.now(UTC).isoformat()
+        self.upsert(DeepCard.model_validate(new_data))
