@@ -7,7 +7,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
-from dashboard.derive.deep_card_types import DeepCard
+from dashboard.derive.deep_card_types import DeepCard, Flashcard, SrsState, TemplateKind
 from dashboard.derive.types import CapabilityStatus, SnapshotDict
 
 
@@ -183,3 +183,85 @@ class DeepCardRepo:
         new_data["prefill_source"] = "llm"
         new_data["prefill_at"] = datetime.now(UTC).isoformat()
         self.upsert(DeepCard.model_validate(new_data))
+
+
+class FlashcardRepo:
+    """sqlite CRUD for flashcards. Plan 1 仅 CRUD;SRS 算法在 Plan 3。spec § 6.1。"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def get(self, flashcard_id: str) -> Flashcard | None:
+        cur = self.conn.execute(
+            "SELECT id, cap_id, template_kind, question, answer, srs_state, "
+            "created_at, last_reviewed_at FROM flashcards WHERE id = ?",
+            (flashcard_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return self._row_to_fc(row)
+
+    def get_by_cap_id(self, cap_id: str) -> list[Flashcard]:
+        cur = self.conn.execute(
+            "SELECT id, cap_id, template_kind, question, answer, srs_state, "
+            "created_at, last_reviewed_at FROM flashcards WHERE cap_id = ?",
+            (cap_id,),
+        )
+        return [self._row_to_fc(r) for r in cur.fetchall()]
+
+    def get_all(self) -> list[Flashcard]:
+        cur = self.conn.execute(
+            "SELECT id, cap_id, template_kind, question, answer, srs_state, "
+            "created_at, last_reviewed_at FROM flashcards"
+        )
+        return [self._row_to_fc(r) for r in cur.fetchall()]
+
+    def upsert(self, fc: Flashcard) -> None:
+        now = datetime.now(UTC).isoformat()
+        created_at = fc.created_at.isoformat() if fc.created_at else now
+        last = fc.last_reviewed_at.isoformat() if fc.last_reviewed_at else None
+        with self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO flashcards
+                  (id, cap_id, template_kind, question, answer, srs_state,
+                   created_at, last_reviewed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  question = excluded.question,
+                  answer = excluded.answer,
+                  srs_state = excluded.srs_state,
+                  last_reviewed_at = excluded.last_reviewed_at
+                """,
+                (
+                    fc.id,
+                    fc.cap_id,
+                    fc.template_kind,
+                    fc.question,
+                    fc.answer,
+                    fc.srs_state.model_dump_json(),
+                    created_at,
+                    last,
+                ),
+            )
+
+    def delete_by_cap_id(self, cap_id: str) -> None:
+        with self.conn:
+            self.conn.execute("DELETE FROM flashcards WHERE cap_id = ?", (cap_id,))
+
+    @staticmethod
+    def _row_to_fc(row: sqlite3.Row) -> Flashcard:
+        template_kind: TemplateKind = row["template_kind"]
+        return Flashcard(
+            id=row["id"],
+            cap_id=row["cap_id"],
+            template_kind=template_kind,
+            question=row["question"],
+            answer=row["answer"],
+            srs_state=SrsState.model_validate_json(row["srs_state"]),
+            created_at=datetime.fromisoformat(row["created_at"]) if row["created_at"] else None,
+            last_reviewed_at=(
+                datetime.fromisoformat(row["last_reviewed_at"]) if row["last_reviewed_at"] else None
+            ),
+        )
