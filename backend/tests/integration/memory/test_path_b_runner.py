@@ -93,17 +93,25 @@ async def test_path_b_full_path_calls_extractor_and_marks_extracted(
     SessionLocal = sessionmaker(bind=engine, future=True, expire_on_commit=False)
     user_id, session_id = _seed_user_session(pg_memory_fixture)
     base = datetime(2026, 5, 11, 10, 0, 0, tzinfo=UTC)
+    # Plan 5 skip_gate 需要 strategy / ts_code 触发词,否则 < 50 字短消息 false-skip
     eids = [
-        _make_episode(SessionLocal, user_id, session_id, 0, base, "我刚买了股票"),
+        _make_episode(SessionLocal, user_id, session_id, 0, base, "我刚买入了股票"),
         _make_episode(
             SessionLocal,
             user_id,
             session_id,
             1,
             base + timedelta(minutes=2),
-            "茅台 600519",
+            "茅台 600519.SH",
         ),
-        _make_episode(SessionLocal, user_id, session_id, 2, base + timedelta(minutes=4), "500 股"),
+        _make_episode(
+            SessionLocal,
+            user_id,
+            session_id,
+            2,
+            base + timedelta(minutes=4),
+            "500 股长期持有",
+        ),
     ]
 
     mock_extractor = MagicMock()

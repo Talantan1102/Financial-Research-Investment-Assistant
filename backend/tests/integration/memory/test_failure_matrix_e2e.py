@@ -201,7 +201,7 @@ async def test_row3_conflict_judge_failsafe_append_new(
     engine = pg_memory_fixture["engine"]
     SessionLocal = sessionmaker(bind=engine, future=True, expire_on_commit=False)
     user_id, session_id = _seed_user_session(pg_memory_fixture)
-    _seed_episode(SessionLocal, user_id, session_id, "我又买了茅台 200 股")
+    _seed_episode(SessionLocal, user_id, session_id, "我又买入茅台 200 股")
 
     mock_extractor = MagicMock()
     mock_extractor.extract_facts = AsyncMock(
@@ -215,7 +215,7 @@ async def test_row3_conflict_judge_failsafe_append_new(
                     "valid_from": datetime.now(tz=UTC).isoformat(),
                     "importance": 0.9,
                     "reasoning": "judge mock fails internally — append_new fallback",
-                    "evidence_quote": "我又买了茅台 200 股",
+                    "evidence_quote": "我又买入茅台 200 股",
                     "properties": {"qty": 200},
                 }
             ],
@@ -251,7 +251,7 @@ async def test_row4_age_sync_failure_records_insert_failure(
     engine = pg_memory_fixture["engine"]
     SessionLocal = sessionmaker(bind=engine, future=True, expire_on_commit=False)
     user_id, session_id = _seed_user_session(pg_memory_fixture)
-    eid = _seed_episode(SessionLocal, user_id, session_id, "我建仓茅台 100 股")
+    eid = _seed_episode(SessionLocal, user_id, session_id, "我加仓茅台 100 股")
 
     mock_extractor = MagicMock()
     mock_extractor.extract_facts = AsyncMock(
@@ -265,7 +265,7 @@ async def test_row4_age_sync_failure_records_insert_failure(
                     "valid_from": datetime.now(tz=UTC).isoformat(),
                     "importance": 0.9,
                     "reasoning": "build position",
-                    "evidence_quote": "我建仓茅台 100 股",
+                    "evidence_quote": "我加仓茅台 100 股",
                     "properties": {"qty": 100},
                 }
             ],

@@ -58,11 +58,13 @@ def _seed_three_turn(SessionLocal: Any, session_id: UUID, user_id: UUID) -> list
     sess = SessionLocal()
     eids: list[UUID] = []
     try:
+        # Plan 5 skip_gate(< 50 字 + 无关键词 → skip)— msg 内塞 strategy/ts_code
+        # 触发词(买入 / 600519.SH),避免 fixture 短文本被 false-skip。
         for i, (msg, ts_offset) in enumerate(
             [
-                ("我刚买了股票", 0),
-                ("买什么", 2),
-                ("茅台 600519, 500 股", 4),
+                ("我刚买入了股票", 0),
+                ("打算买入什么股票", 2),
+                ("茅台 600519.SH, 500 股", 4),
             ]
         ):
             ep = ChatMemoryEpisode(
@@ -115,7 +117,7 @@ async def test_cross_turn_fact_extraction_full_path(
                     "valid_to": None,
                     "importance": 0.9,
                     "reasoning": "user explicitly bought 500 shares",
-                    "evidence_quote": "茅台 600519, 500 股",
+                    "evidence_quote": "茅台 600519.SH, 500 股",
                     "properties": {"qty": 500},
                     "source_episode_id": str(episode_ids[-1]),
                 }
@@ -146,7 +148,7 @@ async def test_cross_turn_fact_extraction_full_path(
     assert len(captured_turns[0]) == 3
     # archival_memory_insert 收到 fact source_episode_id == 第 3 turn
     assert captured_inserts[0]["importance"] == 0.9
-    assert captured_inserts[0]["evidence_quote"] == "茅台 600519, 500 股"
+    assert captured_inserts[0]["evidence_quote"] == "茅台 600519.SH, 500 股"
     assert captured_inserts[0]["episode_id"] == eids[2]
     content = captured_inserts[0]["content"]
     assert content.get("rel_type") == "HOLDS"
