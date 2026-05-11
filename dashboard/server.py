@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -10,6 +12,8 @@ import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+
+logger = logging.getLogger(__name__)
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -21,7 +25,16 @@ from dashboard.derive.path_router import load_dimensions
 from dashboard.derive.snapshot_builder import build_snapshot
 from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
 from dashboard.state.db import open_db
-from dashboard.state.repositories import DecisionNoteRepo, OverrideRepo, SnapshotRepo
+from dashboard.state.keyword_recommender import recommend_by_keyword
+from dashboard.state.repositories import (
+    DecisionNoteRepo,
+    DeepCardRepo,
+    OverrideRepo,
+    SnapshotRepo,
+)
+
+MILVUS_HOST = os.getenv("HARNESS_BOARD_MILVUS_HOST")
+MILVUS_PORT = int(os.getenv("HARNESS_BOARD_MILVUS_PORT", "19530"))
 
 DASHBOARD_ROOT = Path(__file__).parent
 PROJECT_ROOT = DASHBOARD_ROOT.parent
@@ -61,6 +74,22 @@ async def index(request: Request) -> HTMLResponse:
     if view_mode not in ("d", "b"):
         view_mode = "d"
     snap = _get_or_build_snapshot()
+
+    # DeepCard 完成度 + SRS confidence 注入到每个 chip(Review Mode Task 10)
+    from dashboard.derive.completion import completion_level_or_none
+
+    conn = open_db(DB_PATH)
+    try:
+        deep_cards_by_id = {c.cap_id: c for c in DeepCardRepo(conn).get_all()}
+    finally:
+        conn.close()
+    for layer in snap["layers"]:
+        for c in layer["capabilities"]:
+            dc = deep_cards_by_id.get(c["id"])
+            # TypedDict 不支持动态 key,但 chip 模板用 dict access 兼容
+            c["completion_level"] = completion_level_or_none(dc)  # type: ignore[typeddict-unknown-key]
+            c["confidence"] = dc.srs_state.confidence if dc else 0  # type: ignore[typeddict-unknown-key]
+
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
     # App Shell 第 9 行 mini stat
     _main_dims, app_shell_dims = load_dimensions(CONFIG_DIR / "dimensions.yaml")
@@ -227,6 +256,46 @@ async def post_refresh(_request: Request) -> Response:
     return RedirectResponse("/", status_code=302)
 
 
+def _try_milvus_related(_cap_id: str, _k: int) -> tuple[list[dict[str, object]] | None, str]:
+    """尝试 Milvus 查询;Plan 1 简化为只支持 fallback,Plan 2 Task 6 wire 完整路径。"""
+    if MILVUS_HOST is None:
+        return None, "milvus_disabled"
+    # Plan 2 wire 时替换,当前直接 fallback
+    return None, "milvus_search_not_wired_plan1"
+
+
+async def related_capabilities(request: Request) -> JSONResponse:
+    """GET /cap/{cap_id}/related?k=5 — 相关 cap 推荐 (Milvus 真路径 / keyword fallback)。"""
+    cap_id = request.path_params["cap_id"]
+    try:
+        k = int(request.query_params.get("k", "5"))
+    except ValueError:
+        k = 5
+
+    conn = open_db(DB_PATH)
+    try:
+        repo = DeepCardRepo(conn)
+        pivot = repo.get(cap_id)
+        if pivot is None:
+            return JSONResponse({"error": "cap not found"}, status_code=404)
+        all_cards = repo.get_all()
+    finally:
+        conn.close()
+
+    milvus_result, _reason = _try_milvus_related(cap_id, k)
+    if milvus_result is not None:
+        return JSONResponse(milvus_result, headers={"X-Milvus-Status": "ok"})
+    # fallback to keyword
+    recs = recommend_by_keyword(pivot, all_cards, k=k)
+    # name_cn 从 capabilities.yaml 取(简化:不每次重读;若性能瓶颈再 cache)
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    name_by_id = {c.id: c.name_cn for c in caps_cfg}
+    payload = [
+        {"cap_id": r.cap_id, "name_cn": name_by_id.get(r.cap_id, ""), "score": 0.0} for r in recs
+    ]
+    return JSONResponse(payload, headers={"X-Milvus-Status": "fallback"})
+
+
 app = Starlette(
     routes=[
         Route("/", index),
@@ -237,6 +306,7 @@ app = Starlette(
         Route("/capability/{cap_id}/edit", edit_capability),
         Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
         Route("/refresh", post_refresh, methods=["POST"]),
+        Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Mount(
             "/static",
             StaticFiles(directory=str(DASHBOARD_ROOT / "static")),

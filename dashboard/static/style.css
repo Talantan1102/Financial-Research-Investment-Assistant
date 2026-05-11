@@ -320,3 +320,32 @@ html, body {
   margin-bottom: 12px;
   font-size: 12px;
 }
+
+/* ============================================================
+ * Review Mode (Plan 1 Task 10): chip 完成度角标 + confidence
+ * ============================================================ */
+.chip {
+  position: relative;
+  padding-right: 18px;  /* 给角标 + confidence 留位 */
+}
+.chip-completion {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  position: absolute;
+  top: 3px;
+  right: 4px;
+}
+.chip-completion--empty { background: #d1d5db; }
+.chip-completion--partial { background: #f59e0b; }
+.chip-completion--full { background: #10b981; }
+.chip-confidence {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 9px;
+  color: #6b7280;
+  font-weight: bold;
+  line-height: 1;
+}

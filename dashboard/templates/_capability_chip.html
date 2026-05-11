@@ -8,4 +8,8 @@
   {% if c.status == 'lit' %}✅{% elif c.status == 'wip' %}🟠{% else %}⬜{% endif %}
   {{ c.name_cn }}
   {% if c.derived_status != c.status %}<span class="stale-mark" title="手填覆盖派生状态({{ c.derived_status }})">✏️</span>{% endif %}
+  {% set cl = c.completion_level if c.completion_level is defined else none %}
+  {% if cl %}<span class="chip-completion chip-completion--{{ cl }}" title="DeepCard 完成度:{{ cl }}"></span>{% endif %}
+  {% set cf = c.confidence if c.confidence is defined else 0 %}
+  {% if cf and cf > 0 %}<span class="chip-confidence" title="SRS confidence">{{ cf }}</span>{% endif %}
 </span>
