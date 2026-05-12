@@ -24,9 +24,7 @@ def test_story_card_has_three_sections() -> None:
         tradeoff="选 schema 因为 OpenAI 协议支持",
         lessons_learned="撞过 LLM 输出 escape 错误",
     )
-    cards = build_story_cards(
-        [cap], [card], commit_times={"x.a": "2026-05-01T00:00:00+00:00"}
-    )
+    cards = build_story_cards([cap], [card], commit_times={"x.a": "2026-05-01T00:00:00+00:00"})
     assert len(cards) == 1
     sc = cards[0]
     assert sc.cap_id == "x.a"
@@ -129,9 +127,7 @@ def test_story_filter_by_dimension() -> None:
         DeepCard(cap_id="01.a", why="...", tradeoff="..."),
         DeepCard(cap_id="04.b", why="...", tradeoff="..."),
     ]
-    out = build_story_cards(
-        caps, cards, commit_times={}, filter_dimensions={"prompt_context"}
-    )
+    out = build_story_cards(caps, cards, commit_times={}, filter_dimensions={"prompt_context"})
     assert len(out) == 1
     assert out[0].cap_id == "01.a"
 
@@ -160,8 +156,6 @@ def test_story_filter_time_window() -> None:
         DeepCard(cap_id="x.b", why="...", tradeoff="..."),
     ]
     times = {"x.a": "2026-05-10T00:00:00+00:00", "x.b": "2026-04-01T00:00:00+00:00"}
-    out = build_story_cards(
-        caps, cards, commit_times=times, time_after="2026-05-01"
-    )
+    out = build_story_cards(caps, cards, commit_times=times, time_after="2026-05-01")
     assert len(out) == 1
     assert out[0].cap_id == "x.a"

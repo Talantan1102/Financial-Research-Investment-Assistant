@@ -19,9 +19,7 @@ def test_extract_first_commit_simple(tmp_path: Path) -> None:
         "dashboard.derive.commit_time_extractor.subprocess.check_output",
         return_value=fake_output,
     ):
-        ts = extract_first_commit_for_paths(
-            ["backend/app/services/llm_service.py"], cwd=tmp_path
-        )
+        ts = extract_first_commit_for_paths(["backend/app/services/llm_service.py"], cwd=tmp_path)
     assert ts is not None
     assert ts.startswith("2026-04-15")
 
@@ -66,9 +64,7 @@ def test_glob_expansion_passes_to_git(tmp_path: Path) -> None:
     # 创建几个真实文件
     (tmp_path / "a.py").write_text("x", encoding="utf-8")
     (tmp_path / "b.py").write_text("x", encoding="utf-8")
-    with patch(
-        "dashboard.derive.commit_time_extractor.subprocess.check_output"
-    ) as m:
+    with patch("dashboard.derive.commit_time_extractor.subprocess.check_output") as m:
         m.return_value = "2026-01-01T00:00:00+00:00"
         rule = {"type": "code_grep", "path_glob": "*.py", "pattern": "x"}
         extract_cap_commit_time(rule, cwd=tmp_path)

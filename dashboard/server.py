@@ -275,9 +275,7 @@ async def _build_embedder() -> object:
     return build_embedding_service_from_env()
 
 
-async def _try_milvus_related(
-    cap_id: str, k: int
-) -> tuple[list[dict[str, object]] | None, str]:
+async def _try_milvus_related(cap_id: str, k: int) -> tuple[list[dict[str, object]] | None, str]:
     """尝试 Milvus 查询 → top_k 相关 cap。失败返回 (None, reason) 让调用者 fallback。"""
     if MILVUS_HOST is None:
         return None, "milvus_disabled"
@@ -335,9 +333,7 @@ async def post_admin_milvus_reindex(_request: Request) -> JSONResponse:
         rows.append(
             {
                 "cap_id": card.cap_id,
-                "dimension": (
-                    card.cap_id.split(".", 1)[0] if "." in card.cap_id else ""
-                ),
+                "dimension": (card.cap_id.split(".", 1)[0] if "." in card.cap_id else ""),
                 "name_cn": name_cn,
                 "status": "lit",
                 "confidence": card.srs_state.confidence,
@@ -694,9 +690,7 @@ async def overview_fallback(request: Request) -> HTMLResponse:
         for d in main_dims
     ]
     template = templates.get_template("overview_fallback.html")
-    return HTMLResponse(
-        template.render(dimensions_with_caps=dims_with_caps, active_nav="overview")
-    )
+    return HTMLResponse(template.render(dimensions_with_caps=dims_with_caps, active_nav="overview"))
 
 
 async def related_capabilities(request: Request) -> JSONResponse:

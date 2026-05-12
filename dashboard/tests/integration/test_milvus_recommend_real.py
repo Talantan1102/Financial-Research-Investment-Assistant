@@ -28,9 +28,7 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
 
 
 @milvus_skip
-def test_milvus_recommend_returns_real_hits(
-    client: TestClient, tmp_path: Path
-) -> None:
+def test_milvus_recommend_returns_real_hits(client: TestClient, tmp_path: Path) -> None:
     """Seed 3 DeepCard,Milvus upsert,再 query。"""
     from dashboard.derive.deep_card_types import DeepCard
     from dashboard.state.db import open_db

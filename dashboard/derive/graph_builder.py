@@ -70,13 +70,10 @@ def build_graph_payload(
                 continue
             if other not in visible_ids:
                 continue
-            pair = (
-                (dc.cap_id, other) if dc.cap_id <= other else (other, dc.cap_id)
-            )
+            pair = (dc.cap_id, other) if dc.cap_id <= other else (other, dc.cap_id)
             edge_pairs.add(pair)
     edges: list[dict[str, Any]] = [
-        {"data": {"source": s, "target": t, "id": f"{s}__{t}"}}
-        for s, t in sorted(edge_pairs)
+        {"data": {"source": s, "target": t, "id": f"{s}__{t}"}} for s, t in sorted(edge_pairs)
     ]
 
     return {"nodes": nodes, "edges": edges}
