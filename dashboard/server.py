@@ -256,12 +256,97 @@ async def post_refresh(_request: Request) -> Response:
     return RedirectResponse("/", status_code=302)
 
 
-def _try_milvus_related(_cap_id: str, _k: int) -> tuple[list[dict[str, object]] | None, str]:
-    """尝试 Milvus 查询;Plan 1 简化为只支持 fallback,Plan 2 Task 6 wire 完整路径。"""
+async def _build_milvus_client() -> object:
+    """lazy Milvus init,失败抛 ConnectionError。"""
+    if not MILVUS_HOST:
+        raise ConnectionError("MILVUS_HOST not set")
+    from dashboard.state.milvus_collection import DeepCardMilvusClient
+
+    client = DeepCardMilvusClient(host=MILVUS_HOST, port=MILVUS_PORT)
+    await client.ensure_collection()
+    return client
+
+
+async def _build_embedder() -> object:
+    from app.services.embedding_factory import build_embedding_service_from_env
+
+    return build_embedding_service_from_env()
+
+
+async def _try_milvus_related(
+    cap_id: str, k: int
+) -> tuple[list[dict[str, object]] | None, str]:
+    """尝试 Milvus 查询 → top_k 相关 cap。失败返回 (None, reason) 让调用者 fallback。"""
     if MILVUS_HOST is None:
         return None, "milvus_disabled"
-    # Plan 2 wire 时替换,当前直接 fallback
-    return None, "milvus_search_not_wired_plan1"
+    try:
+        from dashboard.state.milvus_collection import embedding_text
+
+        client = await _build_milvus_client()
+        embedder = await _build_embedder()
+
+        conn = open_db(DB_PATH)
+        try:
+            pivot = DeepCardRepo(conn).get(cap_id)
+        finally:
+            conn.close()
+        if pivot is None:
+            return None, "no_pivot_card"
+
+        caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+        name_cn = next((c.name_cn for c in caps_cfg if c.id == cap_id), "")
+        text = embedding_text(pivot, name_cn=name_cn)
+        vec = (await embedder.embed([text]))[0]  # type: ignore[attr-defined]
+        hits = await client.search(vec, top_k=k + 1)  # type: ignore[attr-defined]
+        # filter self
+        hits = [h for h in hits if h["cap_id"] != cap_id][:k]
+        return hits, "ok"
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Milvus related fallback: %s", e)
+        return None, f"milvus_error:{e}"
+
+
+async def post_admin_milvus_reindex(_request: Request) -> JSONResponse:
+    """全量 reindex — 显式触发 DeepCard → Milvus embedding 同步。"""
+    if MILVUS_HOST is None:
+        return JSONResponse({"error": "milvus disabled"}, status_code=503)
+    from dashboard.state.milvus_collection import embedding_text
+
+    client = await _build_milvus_client()
+    embedder = await _build_embedder()
+
+    conn = open_db(DB_PATH)
+    try:
+        cards = DeepCardRepo(conn).get_all()
+    finally:
+        conn.close()
+
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    name_by_id = {c.id: c.name_cn for c in caps_cfg}
+
+    rows: list[dict[str, object]] = []
+    texts: list[str] = []
+    for card in cards:
+        name_cn = name_by_id.get(card.cap_id, "")
+        text = embedding_text(card, name_cn=name_cn)
+        texts.append(text)
+        rows.append(
+            {
+                "cap_id": card.cap_id,
+                "dimension": (
+                    card.cap_id.split(".", 1)[0] if "." in card.cap_id else ""
+                ),
+                "name_cn": name_cn,
+                "status": "lit",
+                "confidence": card.srs_state.confidence,
+            }
+        )
+    if texts:
+        vecs = await embedder.embed(texts)  # type: ignore[attr-defined]
+        for r, v in zip(rows, vecs, strict=True):
+            r["embedding"] = v
+        await client.upsert(rows)  # type: ignore[attr-defined]
+    return JSONResponse({"upserted": len(rows)})
 
 
 ALLOWED_EDITABLE_FIELDS = {
@@ -548,7 +633,7 @@ async def related_capabilities(request: Request) -> JSONResponse:
     finally:
         conn.close()
 
-    milvus_result, _reason = _try_milvus_related(cap_id, k)
+    milvus_result, _reason = await _try_milvus_related(cap_id, k)
     if milvus_result is not None:
         return JSONResponse(milvus_result, headers={"X-Milvus-Status": "ok"})
     # fallback to keyword
@@ -579,6 +664,11 @@ app = Starlette(
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
         Route("/cap/{cap_id}/ai_draft/{field}", post_ai_draft, methods=["POST"]),
+        Route(
+            "/admin/milvus/reindex",
+            post_admin_milvus_reindex,
+            methods=["POST"],
+        ),
         Mount(
             "/static",
             StaticFiles(directory=str(DASHBOARD_ROOT / "static")),
