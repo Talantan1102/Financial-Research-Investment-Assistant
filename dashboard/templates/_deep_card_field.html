@@ -1,0 +1,38 @@
+{# V2 modal 内单字段子模板 — spec § 5.2
+   传入:cap (with id), field {field, value, provenance, source} #}
+<div class="dc-field dc-field--{{ field.source }}" data-field="{{ field.field }}">
+  <div class="dc-field-header">
+    <span class="dc-field-label">{{ field.field }}</span>
+    {% if field.value is none or field.value == '' or field.value == [] or field.source == 'manual' %}
+      <button class="ai-draft-btn"
+              hx-post="/cap/{{ cap.id }}/ai_draft/{{ field.field }}"
+              hx-target="closest .dc-field"
+              hx-swap="outerHTML">🤖 AI 草拟</button>
+    {% endif %}
+  </div>
+  {% if field.value is none or field.value == '' or field.value == [] %}
+    <div class="dc-field-empty">(未填)</div>
+  {% elif field.value is iterable and field.value is not string and field.value is not mapping %}
+    <ul class="alternatives-list">
+      {% for item in field.value %}
+        <li>
+          <strong>{{ item.name }}</strong> — {{ item.brief_tradeoff }}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <div class="dc-field-value"
+         contenteditable="true"
+         data-original="{{ field.value }}"
+         hx-post="/cap/{{ cap.id }}/field/{{ field.field }}"
+         hx-trigger="blur changed"
+         hx-vals='js:{value: event.target.innerText}'
+         hx-target="closest .dc-field"
+         hx-swap="outerHTML">{{ field.value }}</div>
+  {% endif %}
+  {% if field.provenance %}
+    <div class="dc-field-provenance">
+      "{{ field.provenance.quote }}" — <code>{{ field.provenance.source }}</code>
+    </div>
+  {% endif %}
+</div>

@@ -1,0 +1,55 @@
+{# V2 模块深读 modal — spec § 5.2 #}
+<div class="deep-card-modal" id="modal-{{ cap.id }}">
+  <div class="modal-header">
+    <h2>{{ cap.name_cn }}</h2>
+    <span class="cap-id-badge">{{ cap.id }}</span>
+    <span class="status-badge status--{{ cap.status }}">{{ cap.status }}</span>
+    <button class="modal-close" onclick="document.getElementById('modal-overlay').style.display='none';">×</button>
+  </div>
+  <div class="modal-body">
+    <div class="modal-left">
+      {% for field in content_fields %}
+        {% include "_deep_card_field.html" with context %}
+      {% endfor %}
+    </div>
+    <div class="modal-right">
+      <h3>关键代码</h3>
+      <ul class="link-list">
+        {% if deep_card and deep_card.code_anchors %}
+          {% for ca in deep_card.code_anchors %}
+            <li><code>{{ ca.file }}:{{ ca.line }}</code> {% if ca.note %}— {{ ca.note }}{% endif %}</li>
+          {% endfor %}
+        {% else %}
+          <li class="muted">(无 code_anchors)</li>
+        {% endif %}
+      </ul>
+      <h3>linked decisions</h3>
+      <ul class="link-list">
+        {% if deep_card and deep_card.linked_decisions %}
+          {% for did in deep_card.linked_decisions %}
+            <li><a href="/decisions#dec_{{ did }}">{{ did }}</a></li>
+          {% endfor %}
+        {% else %}
+          <li class="muted">(无)</li>
+        {% endif %}
+      </ul>
+      <h3>linked specs</h3>
+      <ul class="link-list">
+        {% if deep_card and deep_card.linked_specs %}
+          {% for sp in deep_card.linked_specs %}
+            <li class="ellipsis"><code>{{ sp.split('/')[-1] }}</code></li>
+          {% endfor %}
+        {% else %}
+          <li class="muted">(无)</li>
+        {% endif %}
+      </ul>
+      <h3>相关 capability</h3>
+      <div class="related-block"
+           hx-get="/cap/{{ cap.id }}/related?k=5"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <span class="muted">载入中...</span>
+      </div>
+    </div>
+  </div>
+</div>

@@ -320,3 +320,201 @@ html, body {
   margin-bottom: 12px;
   font-size: 12px;
 }
+
+/* ============================================================
+ * Review Mode (Plan 1 Task 10): chip 完成度角标 + confidence
+ * ============================================================ */
+.chip {
+  position: relative;
+  padding-right: 18px;  /* 给角标 + confidence 留位 */
+}
+.chip-completion {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  position: absolute;
+  top: 3px;
+  right: 4px;
+}
+.chip-completion--empty { background: #d1d5db; }
+.chip-completion--partial { background: #f59e0b; }
+.chip-completion--full { background: #10b981; }
+.chip-confidence {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 9px;
+  color: #6b7280;
+  font-weight: bold;
+  line-height: 1;
+}
+
+/* ============================================================
+ * Review Mode (Plan 1 Task 14): V2 modal + provenance UI
+ * ============================================================ */
+#modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.deep-card-modal {
+  background: white;
+  width: 1200px;
+  max-width: 95vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.deep-card-modal .modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid #e5e7eb;
+}
+.deep-card-modal .modal-header h2 { margin: 0; flex: 1; font-size: 18px; }
+.cap-id-badge {
+  font-family: monospace;
+  background: #f3f4f6;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #4b5563;
+}
+.status-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.status-badge.status--lit { background: #d1fae5; color: #065f46; }
+.status-badge.status--wip { background: #fef3c7; color: #92400e; }
+.status-badge.status--todo { background: #e5e7eb; color: #4b5563; }
+.modal-close {
+  background: transparent;
+  border: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: #6b7280;
+}
+.modal-close:hover { color: #111827; }
+.deep-card-modal .modal-body {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+  padding: 16px 24px;
+  overflow: auto;
+}
+.modal-left .dc-field {
+  margin-bottom: 16px;
+  padding: 12px;
+  border-left: 4px solid #999;
+  background: #fafafa;
+  border-radius: 0 4px 4px 0;
+}
+.dc-field--llm {
+  border-left-color: #f59e0b;
+  background: #fffbeb;
+}
+.dc-field--hybrid {
+  border-left-color: #3b82f6;
+  background: #eff6ff;
+}
+.dc-field--manual {
+  border-left-color: #10b981;
+  background: #f0fdf4;
+}
+.dc-field-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.dc-field-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: #6b7280;
+  flex: 1;
+}
+.dc-field-value {
+  padding: 6px;
+  border-radius: 3px;
+  background: white;
+  border: 1px solid transparent;
+  min-height: 20px;
+}
+.dc-field-value:focus { border-color: #3b82f6; outline: none; }
+.dc-field-value:hover:not(:focus) { border-color: #d1d5db; }
+.dc-field-empty {
+  color: #9ca3af;
+  font-style: italic;
+  padding: 6px;
+}
+.dc-field-provenance {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6b7280;
+  font-style: italic;
+  line-height: 1.5;
+}
+.dc-field-provenance code {
+  font-size: 10px;
+  background: rgba(255,255,255,0.6);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.alternatives-list {
+  margin: 4px 0 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+}
+.alternatives-list li { margin: 4px 0; }
+.ai-draft-btn {
+  font-size: 11px;
+  padding: 3px 10px;
+  background: #f59e0b;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.ai-draft-btn:hover { background: #d97706; }
+.modal-right h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin: 16px 0 6px 0;
+}
+.modal-right h3:first-child { margin-top: 0; }
+.link-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 13px;
+}
+.link-list li {
+  padding: 3px 0;
+  word-break: break-word;
+}
+.link-list .muted { color: #9ca3af; font-style: italic; }
+.link-list code {
+  font-size: 11px;
+  background: #f3f4f6;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.related-block { font-size: 13px; }
