@@ -1,0 +1,30 @@
+{# 单张闪卡 — 翻面 + 0-5 自评。spec § 5.5。 #}
+<div class="flashcard-card" id="card-{{ fc.id }}">
+  <div class="flashcard-meta">
+    <a href="/cap/{{ fc.cap_id }}" target="_blank" hx-get="/cap/{{ fc.cap_id }}" hx-target="#modal-overlay" hx-swap="innerHTML">{{ fc.cap_id }}</a>
+    · <span class="flashcard-kind">{{ fc.template_kind }}</span>
+    · conf: {{ fc.srs_state.confidence }}
+    {% if fc.srs_state.next_review_at %}
+      · next: {{ fc.srs_state.next_review_at.isoformat()[:10] }}
+    {% else %}
+      · 新卡
+    {% endif %}
+  </div>
+  <div class="flashcard-question">
+    {{ fc.question }}
+  </div>
+  <button class="reveal-btn" onclick="this.parentElement.querySelector('.flashcard-answer').style.display='block'; this.parentElement.querySelector('.grade-row').style.display='flex'; this.style.display='none';">
+    看答案
+  </button>
+  <div class="flashcard-answer" style="display:none;">
+    {{ fc.answer }}
+  </div>
+  <div class="grade-row" style="display:none;">
+    <button class="grade-btn grade-0" hx-post="/flashcards/{{ fc.id }}/review" hx-vals='{"grade":"0"}' hx-target="#card-{{ fc.id }}" hx-swap="outerHTML">0 完全忘</button>
+    <button class="grade-btn grade-1" hx-post="/flashcards/{{ fc.id }}/review" hx-vals='{"grade":"1"}' hx-target="#card-{{ fc.id }}" hx-swap="outerHTML">1</button>
+    <button class="grade-btn grade-2" hx-post="/flashcards/{{ fc.id }}/review" hx-vals='{"grade":"2"}' hx-target="#card-{{ fc.id }}" hx-swap="outerHTML">2</button>
+    <button class="grade-btn grade-3" hx-post="/flashcards/{{ fc.id }}/review" hx-vals='{"grade":"3"}' hx-target="#card-{{ fc.id }}" hx-swap="outerHTML">3 一半</button>
+    <button class="grade-btn grade-4" hx-post="/flashcards/{{ fc.id }}/review" hx-vals='{"grade":"4"}' hx-target="#card-{{ fc.id }}" hx-swap="outerHTML">4</button>
+    <button class="grade-btn grade-5" hx-post="/flashcards/{{ fc.id }}/review" hx-vals='{"grade":"5"}' hx-target="#card-{{ fc.id }}" hx-swap="outerHTML">5 完美</button>
+  </div>
+</div>

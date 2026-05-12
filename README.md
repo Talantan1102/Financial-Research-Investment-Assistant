@@ -2,7 +2,7 @@
 
 LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
 
-**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ Harness Board M3(dev meta-tool — D/B/决策 三 tab + decision_extractor + filter UI + note 持久化)
+**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ **Harness Board Review Mode**(复合型项目知识工具 — 底座 DeepCard + 5 视图 V1 网格 / V2 模块深读 / V3 系统鸟瞰 / V4 故事时间线 / V5 闪卡 SRS,Milvus 相关推荐 + LLM L2 一次性 prefill + 35 张 hand-curated seed)
 
 ## 三个使用模式
 
@@ -234,10 +234,12 @@ make beat       # Celery beat - 30min cycle / 16:30 daily / 02:00 cleanup
 | `uv run poe test-all` | 包含 L3 真 LLM eval(烧钱) |
 | `uv run poe trace-view` | 打开 trace 查看器 |
 | `uv run poe eval` | 跑 golden case 评测 |
-| `make board` | 起 Harness Board(localhost:8910,自动 `open`) |
-| `make board-test` | 跑 dashboard/ 测试套(65 项) |
+| `make board` | 起 Harness Board(localhost:8910,自动 `open`)+ 5 视图(/ 网格 / /overview 鸟瞰 / /story 故事 / /flashcards/today 闪卡 / /decisions 决策) |
+| `make board-test` | 跑 dashboard/ 测试套(181 项,Plan 1+2+3 累计) |
 | `make board-stop` | lsof port-scoped kill 8910 |
 | `make board-refresh` | curl -X POST /refresh,显式 invalidate snapshot cache |
+| `uv run python -m app.scripts.seed_deep_cards --seed dashboard/data/deep_cards_seed.jsonl --db backend/data/board.db --regenerate-flashcards` | 一键载入 35 张 hand-curated DeepCard + 触发闪卡重生成 |
+| `uv run python -m app.scripts.prefill_deep_cards --caps <ids> --db backend/data/board.db` | LLM batch prefill DeepCard(需 OPENAI_API_KEY) |
 
 ## 测试分层
 

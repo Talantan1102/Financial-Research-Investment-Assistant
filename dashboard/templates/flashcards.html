@@ -1,0 +1,32 @@
+{# V5 闪卡今日复习主入口。spec § 5.5。 #}
+{% extends "base.html" %}
+{% block content %}
+{% include "_board_nav.html" %}
+<div class="flashcards-page">
+  <div class="flashcards-toolbar">
+    <a href="/" class="btn-back">← 返回网格</a>
+    <span>🎴 今日复习 ({{ today_cards | length }} 张)</span>
+    <a href="/flashcards/stats" class="btn-stats">📊 学习统计</a>
+  </div>
+
+  {% if today_cards %}
+    <div class="flashcards-progress">
+      已完成 <span id="reviewed-count">0</span> / {{ today_cards | length }}
+    </div>
+    <div class="flashcards-deck">
+      {% for fc in today_cards %}
+        <div class="flashcard" data-fc-id="{{ fc.id }}"
+             data-fc-index="{{ loop.index0 }}"
+             {% if not loop.first %}style="display:none;"{% endif %}>
+          {% include "_flashcard_review.html" %}
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="flashcards-empty">
+      📭 今日暂无可复习卡 — 先到 <a href="/">网格</a> 给一些 cap 填 DeepCard
+    </div>
+  {% endif %}
+</div>
+<script src="/static/flashcards.js"></script>
+{% endblock %}

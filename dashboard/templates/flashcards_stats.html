@@ -1,0 +1,41 @@
+{# V5 闪卡学习统计 — 总数 / 已掌握 / 维度分布。spec § 5.5。 #}
+{% extends "base.html" %}
+{% block content %}
+{% include "_board_nav.html" %}
+<div class="stats-page">
+  <div class="flashcards-toolbar">
+    <a href="/flashcards/today" class="btn-back">← 回到今日复习</a>
+    <span>📊 学习统计</span>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">总闪卡</div>
+      <div class="stat-value">{{ total }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">新卡</div>
+      <div class="stat-value">{{ new }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">已掌握 (conf ≥ 4)</div>
+      <div class="stat-value">{{ mastered }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">平均 confidence</div>
+      <div class="stat-value">{{ avg_conf }}</div>
+    </div>
+  </div>
+
+  <h3 class="stats-section-heading">维度分布(cap_id 前缀)</h3>
+  {% if dim_dist %}
+    <ul class="stats-dim-list">
+      {% for dim, n in dim_dist %}
+        <li><span class="stats-dim-name">{{ dim }}</span> · {{ n }} 张</li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="stats-empty">(暂无维度分布数据 — 闪卡库为空)</p>
+  {% endif %}
+</div>
+{% endblock %}
