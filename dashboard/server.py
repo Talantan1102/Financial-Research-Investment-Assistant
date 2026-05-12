@@ -100,6 +100,7 @@ async def index(request: Request) -> HTMLResponse:
         "wips": wips,
         "view_mode": view_mode,
         "active_view": view_mode,  # M3:同 view_mode("d" 或 "b"),decisions 用独立 route 不走这
+        "active_nav": "grid",
         "app_shell": app_shell,
     }
     if view_mode == "b":
@@ -141,6 +142,7 @@ async def decisions_view(request: Request) -> HTMLResponse:
             "note_lookup": note_lookup,
             "main_dims": main_dims,
             "active_view": "decisions",
+            "active_nav": "decisions",
             "memory_path_warning": memory_path is None,
         },
     )
