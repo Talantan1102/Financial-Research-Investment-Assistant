@@ -100,6 +100,7 @@ async def index(request: Request) -> HTMLResponse:
         "wips": wips,
         "view_mode": view_mode,
         "active_view": view_mode,  # M3:同 view_mode("d" 或 "b"),decisions 用独立 route 不走这
+        "active_nav": "grid",
         "app_shell": app_shell,
     }
     if view_mode == "b":
@@ -141,6 +142,7 @@ async def decisions_view(request: Request) -> HTMLResponse:
             "note_lookup": note_lookup,
             "main_dims": main_dims,
             "active_view": "decisions",
+            "active_nav": "decisions",
             "memory_path_warning": memory_path is None,
         },
     )
@@ -256,12 +258,93 @@ async def post_refresh(_request: Request) -> Response:
     return RedirectResponse("/", status_code=302)
 
 
-def _try_milvus_related(_cap_id: str, _k: int) -> tuple[list[dict[str, object]] | None, str]:
-    """尝试 Milvus 查询;Plan 1 简化为只支持 fallback,Plan 2 Task 6 wire 完整路径。"""
+async def _build_milvus_client() -> object:
+    """lazy Milvus init,失败抛 ConnectionError。"""
+    if not MILVUS_HOST:
+        raise ConnectionError("MILVUS_HOST not set")
+    from dashboard.state.milvus_collection import DeepCardMilvusClient
+
+    client = DeepCardMilvusClient(host=MILVUS_HOST, port=MILVUS_PORT)
+    await client.ensure_collection()
+    return client
+
+
+async def _build_embedder() -> object:
+    from app.services.embedding_factory import build_embedding_service_from_env
+
+    return build_embedding_service_from_env()
+
+
+async def _try_milvus_related(cap_id: str, k: int) -> tuple[list[dict[str, object]] | None, str]:
+    """尝试 Milvus 查询 → top_k 相关 cap。失败返回 (None, reason) 让调用者 fallback。"""
     if MILVUS_HOST is None:
         return None, "milvus_disabled"
-    # Plan 2 wire 时替换,当前直接 fallback
-    return None, "milvus_search_not_wired_plan1"
+    try:
+        from dashboard.state.milvus_collection import embedding_text
+
+        client = await _build_milvus_client()
+        embedder = await _build_embedder()
+
+        conn = open_db(DB_PATH)
+        try:
+            pivot = DeepCardRepo(conn).get(cap_id)
+        finally:
+            conn.close()
+        if pivot is None:
+            return None, "no_pivot_card"
+
+        caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+        name_cn = next((c.name_cn for c in caps_cfg if c.id == cap_id), "")
+        text = embedding_text(pivot, name_cn=name_cn)
+        vec = (await embedder.embed([text]))[0]  # type: ignore[attr-defined]
+        hits = await client.search(vec, top_k=k + 1)  # type: ignore[attr-defined]
+        # filter self
+        hits = [h for h in hits if h["cap_id"] != cap_id][:k]
+        return hits, "ok"
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Milvus related fallback: %s", e)
+        return None, f"milvus_error:{e}"
+
+
+async def post_admin_milvus_reindex(_request: Request) -> JSONResponse:
+    """全量 reindex — 显式触发 DeepCard → Milvus embedding 同步。"""
+    if MILVUS_HOST is None:
+        return JSONResponse({"error": "milvus disabled"}, status_code=503)
+    from dashboard.state.milvus_collection import embedding_text
+
+    client = await _build_milvus_client()
+    embedder = await _build_embedder()
+
+    conn = open_db(DB_PATH)
+    try:
+        cards = DeepCardRepo(conn).get_all()
+    finally:
+        conn.close()
+
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    name_by_id = {c.id: c.name_cn for c in caps_cfg}
+
+    rows: list[dict[str, object]] = []
+    texts: list[str] = []
+    for card in cards:
+        name_cn = name_by_id.get(card.cap_id, "")
+        text = embedding_text(card, name_cn=name_cn)
+        texts.append(text)
+        rows.append(
+            {
+                "cap_id": card.cap_id,
+                "dimension": (card.cap_id.split(".", 1)[0] if "." in card.cap_id else ""),
+                "name_cn": name_cn,
+                "status": "lit",
+                "confidence": card.srs_state.confidence,
+            }
+        )
+    if texts:
+        vecs = await embedder.embed(texts)  # type: ignore[attr-defined]
+        for r, v in zip(rows, vecs, strict=True):
+            r["embedding"] = v
+        await client.upsert(rows)  # type: ignore[attr-defined]
+    return JSONResponse({"upserted": len(rows)})
 
 
 ALLOWED_EDITABLE_FIELDS = {
@@ -451,6 +534,165 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+def _extract_commit_times_for_caps(caps_cfg: list[object]) -> dict[str, str]:
+    """对所有 cap 抽 git log 首个 commit time。
+
+    spec § 5.4 fallback chain;Plan 3 改为后台 job + cache。
+    单独函数以便测试 monkeypatch 跳过。
+    """
+    from dashboard.derive.commit_time_extractor import extract_cap_commit_time
+
+    out: dict[str, str] = {}
+    for cap_cfg in caps_cfg:
+        # duck-typed:caps_cfg 是 CapabilityConfig list
+        cap_id = getattr(cap_cfg, "id", None)
+        rule = getattr(cap_cfg, "derive_rule", None)
+        if cap_id is None or rule is None:
+            continue
+        ts = extract_cap_commit_time(rule, cwd=PROJECT_ROOT)
+        if ts:
+            out[cap_id] = ts
+    return out
+
+
+async def story_view(request: Request) -> HTMLResponse:
+    """V4 故事时间线主页 — 三段式卡片流。spec § 5.4。"""
+    from dashboard.derive.story_builder import build_story_cards
+
+    qp = request.query_params
+    dims = qp.getlist("dim")
+    selected_dims: set[str] | None = set(dims) if dims else None
+    time_after = qp.get("after") or None
+    time_before = qp.get("before") or None
+    order = qp.get("order", "asc")
+
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+
+    # 抽 commit_time(可缓存,Plan 3 改为后台 job;Plan 2 每次现抽)
+    commit_times = _extract_commit_times_for_caps(list(caps_cfg))
+
+    snap = _get_or_build_snapshot()
+    all_caps: list[Capability] = []
+    for layer in snap["layers"]:
+        for cd in layer["capabilities"]:
+            all_caps.append(
+                Capability(
+                    id=cd["id"],
+                    dimension=cd["dimension"],
+                    name_cn=cd["name_cn"],
+                    name_en=cd["name_en"],
+                    status=cd["status"],
+                    derived_status=cd["derived_status"],
+                )
+            )
+
+    conn = open_db(DB_PATH)
+    try:
+        cards = DeepCardRepo(conn).get_all()
+    finally:
+        conn.close()
+
+    stories = build_story_cards(
+        all_caps,
+        cards,
+        commit_times=commit_times,
+        filter_dimensions=selected_dims,
+        time_after=time_after,
+        time_before=time_before,
+        order=order,
+    )
+    template = templates.get_template("story.html")
+    return HTMLResponse(
+        template.render(
+            stories=stories,
+            dimensions=main_dims,
+            selected_dims=selected_dims or set(),
+            time_after=time_after,
+            time_before=time_before,
+            order=order,
+            active_nav="story",
+        )
+    )
+
+
+async def overview_view(request: Request) -> HTMLResponse:
+    """V3 鸟瞰主页 — 渲染含 cytoscape 容器,数据由 /api/overview/graph.json 拉。"""
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    template = templates.get_template("overview.html")
+    html = template.render(
+        dimensions=main_dims,
+        total_nodes=len(caps_cfg),
+        active_nav="overview",
+    )
+    return HTMLResponse(html)
+
+
+async def overview_graph_json(request: Request) -> JSONResponse:
+    """V3 cytoscape 数据源。支持 ?dim=memory,prompt_context / ?status=lit / ?low_conf=1。"""
+    from dashboard.derive.graph_builder import build_graph_payload
+
+    qp = request.query_params
+    filter_dims: set[str] | None = (
+        {x for x in qp.get("dim", "").split(",") if x} if qp.get("dim") else None
+    )
+    filter_statuses: set[str] | None = (
+        {x for x in qp.get("status", "").split(",") if x} if qp.get("status") else None
+    )
+    only_low_conf = qp.get("low_conf") == "1"
+
+    snap = _get_or_build_snapshot()
+    all_caps: list[Capability] = []
+    for layer in snap["layers"]:
+        for c_dict in layer["capabilities"]:
+            all_caps.append(
+                Capability(
+                    id=c_dict["id"],
+                    dimension=c_dict["dimension"],
+                    name_cn=c_dict["name_cn"],
+                    name_en=c_dict["name_en"],
+                    status=c_dict["status"],
+                    derived_status=c_dict["derived_status"],
+                )
+            )
+
+    conn = open_db(DB_PATH)
+    try:
+        cards = DeepCardRepo(conn).get_all()
+    finally:
+        conn.close()
+
+    payload = build_graph_payload(
+        all_caps,
+        cards,
+        filter_dimensions=filter_dims,
+        filter_statuses=filter_statuses,
+        only_low_confidence=only_low_conf,
+    )
+    return JSONResponse(payload)
+
+
+async def overview_fallback(request: Request) -> HTMLResponse:
+    """V3 cytoscape 加载失败兜底 — 维度卡片墙。"""
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    by_dim: dict[str, list[dict[str, str]]] = {d.id: [] for d in main_dims}
+    for c in caps_cfg:
+        by_dim.setdefault(c.dimension, []).append({"id": c.id, "name_cn": c.name_cn})
+    dims_with_caps = [
+        {
+            "id": d.id,
+            "number": d.number,
+            "name_cn": d.name_cn,
+            "capabilities": by_dim.get(d.id, []),
+        }
+        for d in main_dims
+    ]
+    template = templates.get_template("overview_fallback.html")
+    return HTMLResponse(template.render(dimensions_with_caps=dims_with_caps, active_nav="overview"))
+
+
 async def related_capabilities(request: Request) -> JSONResponse:
     """GET /cap/{cap_id}/related?k=5 — 相关 cap 推荐 (Milvus 真路径 / keyword fallback)。"""
     cap_id = request.path_params["cap_id"]
@@ -469,7 +711,7 @@ async def related_capabilities(request: Request) -> JSONResponse:
     finally:
         conn.close()
 
-    milvus_result, _reason = _try_milvus_related(cap_id, k)
+    milvus_result, _reason = await _try_milvus_related(cap_id, k)
     if milvus_result is not None:
         return JSONResponse(milvus_result, headers={"X-Milvus-Status": "ok"})
     # fallback to keyword
@@ -493,10 +735,19 @@ app = Starlette(
         Route("/capability/{cap_id}/edit", edit_capability),
         Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
         Route("/refresh", post_refresh, methods=["POST"]),
+        Route("/overview", overview_view),
+        Route("/overview/fallback", overview_fallback),
+        Route("/api/overview/graph.json", overview_graph_json),
+        Route("/story", story_view),
         Route("/cap/{cap_id}", deep_card_modal, methods=["GET"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
         Route("/cap/{cap_id}/ai_draft/{field}", post_ai_draft, methods=["POST"]),
+        Route(
+            "/admin/milvus/reindex",
+            post_admin_milvus_reindex,
+            methods=["POST"],
+        ),
         Mount(
             "/static",
             StaticFiles(directory=str(DASHBOARD_ROOT / "static")),
