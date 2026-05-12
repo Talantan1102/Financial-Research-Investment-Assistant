@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <title>Harness Board · {{ snap.refreshed_at[:10] }}</title>
+  <title>Harness Board{% if snap %} · {{ snap.refreshed_at[:10] }}{% endif %}</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
 </head>

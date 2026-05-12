@@ -451,6 +451,85 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+async def overview_view(request: Request) -> HTMLResponse:
+    """V3 鸟瞰主页 — 渲染含 cytoscape 容器,数据由 /api/overview/graph.json 拉。"""
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    template = templates.get_template("overview.html")
+    html = template.render(
+        dimensions=main_dims,
+        total_nodes=len(caps_cfg),
+        active_nav="overview",
+    )
+    return HTMLResponse(html)
+
+
+async def overview_graph_json(request: Request) -> JSONResponse:
+    """V3 cytoscape 数据源。支持 ?dim=memory,prompt_context / ?status=lit / ?low_conf=1。"""
+    from dashboard.derive.graph_builder import build_graph_payload
+
+    qp = request.query_params
+    filter_dims: set[str] | None = (
+        {x for x in qp.get("dim", "").split(",") if x} if qp.get("dim") else None
+    )
+    filter_statuses: set[str] | None = (
+        {x for x in qp.get("status", "").split(",") if x} if qp.get("status") else None
+    )
+    only_low_conf = qp.get("low_conf") == "1"
+
+    snap = _get_or_build_snapshot()
+    all_caps: list[Capability] = []
+    for layer in snap["layers"]:
+        for c_dict in layer["capabilities"]:
+            all_caps.append(
+                Capability(
+                    id=c_dict["id"],
+                    dimension=c_dict["dimension"],
+                    name_cn=c_dict["name_cn"],
+                    name_en=c_dict["name_en"],
+                    status=c_dict["status"],
+                    derived_status=c_dict["derived_status"],
+                )
+            )
+
+    conn = open_db(DB_PATH)
+    try:
+        cards = DeepCardRepo(conn).get_all()
+    finally:
+        conn.close()
+
+    payload = build_graph_payload(
+        all_caps,
+        cards,
+        filter_dimensions=filter_dims,
+        filter_statuses=filter_statuses,
+        only_low_confidence=only_low_conf,
+    )
+    return JSONResponse(payload)
+
+
+async def overview_fallback(request: Request) -> HTMLResponse:
+    """V3 cytoscape 加载失败兜底 — 维度卡片墙。"""
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    by_dim: dict[str, list[dict[str, str]]] = {d.id: [] for d in main_dims}
+    for c in caps_cfg:
+        by_dim.setdefault(c.dimension, []).append({"id": c.id, "name_cn": c.name_cn})
+    dims_with_caps = [
+        {
+            "id": d.id,
+            "number": d.number,
+            "name_cn": d.name_cn,
+            "capabilities": by_dim.get(d.id, []),
+        }
+        for d in main_dims
+    ]
+    template = templates.get_template("overview_fallback.html")
+    return HTMLResponse(
+        template.render(dimensions_with_caps=dims_with_caps, active_nav="overview")
+    )
+
+
 async def related_capabilities(request: Request) -> JSONResponse:
     """GET /cap/{cap_id}/related?k=5 — 相关 cap 推荐 (Milvus 真路径 / keyword fallback)。"""
     cap_id = request.path_params["cap_id"]
@@ -493,6 +572,9 @@ app = Starlette(
         Route("/capability/{cap_id}/edit", edit_capability),
         Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
         Route("/refresh", post_refresh, methods=["POST"]),
+        Route("/overview", overview_view),
+        Route("/overview/fallback", overview_fallback),
+        Route("/api/overview/graph.json", overview_graph_json),
         Route("/cap/{cap_id}", deep_card_modal, methods=["GET"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
