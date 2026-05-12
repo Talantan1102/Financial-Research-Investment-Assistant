@@ -89,3 +89,23 @@ def test_ai_draft_llm_unavailable_503(client: TestClient, monkeypatch: pytest.Mo
     )
     resp = client.post("/cap/prompt_context.constrained_schema/ai_draft/what")
     assert resp.status_code == 503
+
+
+def test_modal_linked_capability_renders_overview_anchor(
+    client: TestClient, tmp_path: Path
+) -> None:
+    """Plan 2 Task 10:linked_capabilities 渲染为 /overview#cap_{id} 跳转链接。"""
+    db = tmp_path / "board.db"
+    conn = open_db(db)
+    DeepCardRepo(conn).upsert(
+        DeepCard(
+            cap_id="prompt_context.skills_bundle",
+            what="Anthropic Skills bundle 17 件",
+            linked_capabilities=["memory.cross_session", "orchestration.supervisor"],
+        )
+    )
+    resp = client.get("/cap/prompt_context.skills_bundle")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "/overview#cap_memory.cross_session" in body
+    assert "/overview#cap_orchestration.supervisor" in body

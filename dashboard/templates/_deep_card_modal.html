@@ -33,6 +33,16 @@
           <li class="muted">(无)</li>
         {% endif %}
       </ul>
+      <h3>linked capability</h3>
+      <ul class="link-list">
+        {% if deep_card and deep_card.linked_capabilities %}
+          {% for other_id in deep_card.linked_capabilities %}
+            <li><a href="/overview#cap_{{ other_id }}">{{ other_id }}</a></li>
+          {% endfor %}
+        {% else %}
+          <li class="muted">(无)</li>
+        {% endif %}
+      </ul>
       <h3>linked specs</h3>
       <ul class="link-list">
         {% if deep_card and deep_card.linked_specs %}
