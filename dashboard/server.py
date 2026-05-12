@@ -21,6 +21,7 @@ from starlette.templating import Jinja2Templates
 from dashboard.derive.app_shell_stat import compute_app_shell_stat
 from dashboard.derive.capability_resolver import load_capabilities, resolve_status
 from dashboard.derive.decision_extractor import extract_all, resolve_memory_path
+from dashboard.derive.deep_card_types import Flashcard
 from dashboard.derive.path_router import load_dimensions
 from dashboard.derive.snapshot_builder import build_snapshot
 from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
@@ -747,6 +748,121 @@ async def related_capabilities(request: Request) -> JSONResponse:
     return JSONResponse(payload, headers={"X-Milvus-Status": "fallback"})
 
 
+async def flashcards_today(request: Request) -> HTMLResponse:  # noqa: ARG001
+    """V5 每日复习入口 — 新卡 ≤5 + 到期 ≤20。spec § 5.5。"""
+    from datetime import UTC, datetime
+
+    conn = open_db(DB_PATH)
+    try:
+        all_fcs = FlashcardRepo(conn).get_all()
+    finally:
+        conn.close()
+
+    now = datetime.now(UTC)
+    new_cards: list[Flashcard] = [f for f in all_fcs if f.srs_state.repetition == 0][:5]
+    due: list[Flashcard] = [
+        f
+        for f in all_fcs
+        if f.srs_state.repetition > 0
+        and f.srs_state.next_review_at is not None
+        and f.srs_state.next_review_at <= now
+    ][:20]
+
+    today_cards = new_cards + due
+    template = templates.get_template("flashcards.html")
+    return HTMLResponse(
+        template.render(
+            today_cards=today_cards,
+            active_nav="flashcards",
+        )
+    )
+
+
+async def post_flashcard_review(request: Request) -> HTMLResponse:
+    """V5 单卡 0-5 自评 → SM-2 → 新 srs_state 落库。spec § 5.5。"""
+    from dashboard.derive.srs import schedule_next_review
+
+    flashcard_id = request.path_params["flashcard_id"]
+    form = await request.form()
+    grade_raw = form.get("grade", "")
+    if not isinstance(grade_raw, str):
+        return HTMLResponse("invalid grade", status_code=400)
+    try:
+        grade = int(grade_raw)
+    except ValueError:
+        return HTMLResponse("invalid grade", status_code=400)
+    if not 0 <= grade <= 5:
+        return HTMLResponse("grade must be 0..5", status_code=400)
+
+    conn = open_db(DB_PATH)
+    try:
+        repo = FlashcardRepo(conn)
+        fc = repo.get(flashcard_id)
+        if fc is None:
+            return HTMLResponse("flashcard not found", status_code=404)
+        new_state = schedule_next_review(fc.srs_state, grade=grade)
+        updated = fc.model_copy(
+            update={
+                "srs_state": new_state,
+                "last_reviewed_at": new_state.last_reviewed_at,
+            }
+        )
+        repo.upsert(updated)
+    finally:
+        conn.close()
+
+    assert new_state.next_review_at is not None
+    return HTMLResponse(
+        (
+            f"<div class='flashcard flashcard-reviewed' data-fc-reviewed='1'>"
+            f"✅ 已复习 → 下次:{new_state.next_review_at.date()} "
+            f"(conf={grade})"
+            f"</div>"
+        ),
+        headers={"X-Reviewed": "1"},
+    )
+
+
+async def flashcards_stats(request: Request) -> HTMLResponse:  # noqa: ARG001
+    """V5 学习统计页 — 总数 / 已掌握 / 维度分布。spec § 5.5。"""
+    conn = open_db(DB_PATH)
+    try:
+        cur = conn.execute(
+            "SELECT COUNT(*) as total, "
+            "SUM(CASE WHEN json_extract(srs_state, '$.repetition') = 0 THEN 1 ELSE 0 END) as new_n, "
+            "SUM(CASE WHEN json_extract(srs_state, '$.confidence') >= 4 THEN 1 ELSE 0 END) as mastered, "
+            "AVG(json_extract(srs_state, '$.confidence')) as avg_conf "
+            "FROM flashcards"
+        )
+        row = cur.fetchone()
+        # 维度分布(基于 cap_id 前缀,粗略)
+        dim_cur = conn.execute(
+            "SELECT substr(cap_id, 1, instr(cap_id, '.') - 1) as dim, COUNT(*) as n "
+            "FROM flashcards WHERE instr(cap_id, '.') > 0 "
+            "GROUP BY dim ORDER BY n DESC"
+        )
+        dim_dist = [(r["dim"], r["n"]) for r in dim_cur.fetchall()]
+    finally:
+        conn.close()
+
+    total = row["total"] or 0
+    new_n = row["new_n"] or 0
+    mastered = row["mastered"] or 0
+    avg_conf = round(row["avg_conf"] or 0.0, 2)
+
+    template = templates.get_template("flashcards_stats.html")
+    return HTMLResponse(
+        template.render(
+            total=total,
+            new=new_n,
+            mastered=mastered,
+            avg_conf=avg_conf,
+            dim_dist=dim_dist,
+            active_nav="flashcards",
+        )
+    )
+
+
 app = Starlette(
     routes=[
         Route("/", index),
@@ -765,6 +881,13 @@ app = Starlette(
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
         Route("/cap/{cap_id}/ai_draft/{field}", post_ai_draft, methods=["POST"]),
+        Route("/flashcards/today", flashcards_today),
+        Route("/flashcards/stats", flashcards_stats),
+        Route(
+            "/flashcards/{flashcard_id:path}/review",
+            post_flashcard_review,
+            methods=["POST"],
+        ),
         Route(
             "/admin/milvus/reindex",
             post_admin_milvus_reindex,
