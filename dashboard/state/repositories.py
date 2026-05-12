@@ -265,3 +265,46 @@ class FlashcardRepo:
                 datetime.fromisoformat(row["last_reviewed_at"]) if row["last_reviewed_at"] else None
             ),
         )
+
+
+def regenerate_flashcards_for(
+    cap_id: str,
+    *,
+    dc_repo: DeepCardRepo,
+    fc_repo: FlashcardRepo,
+    cap_name_cn: str,
+) -> None:
+    """DeepCard 编辑后调:重生成 flashcard 集合,保留 srs_state。
+
+    流程:
+    1. 取当前 DeepCard
+    2. 派生新 flashcard 集合 (generate_flashcards)
+    3. 取旧 flashcard srs_state 按 template_kind 索引
+    4. 新集合每张:若 kind 已有 srs_state,用旧的 + 旧 created_at / last_reviewed_at;
+       否则用默认
+    5. delete_by_cap_id 然后 upsert 新集合
+    """
+    from dashboard.derive.flashcard_generator import generate_flashcards
+
+    card = dc_repo.get(cap_id)
+    if card is None:
+        fc_repo.delete_by_cap_id(cap_id)
+        return
+
+    new_cards = generate_flashcards(card, cap_name_cn=cap_name_cn)
+
+    old_cards = {f.template_kind: f for f in fc_repo.get_by_cap_id(cap_id)}
+    fc_repo.delete_by_cap_id(cap_id)
+    for nc in new_cards:
+        old = old_cards.get(nc.template_kind)
+        if old is not None:
+            preserved = nc.model_copy(
+                update={
+                    "srs_state": old.srs_state,
+                    "created_at": old.created_at,
+                    "last_reviewed_at": old.last_reviewed_at,
+                }
+            )
+            fc_repo.upsert(preserved)
+        else:
+            fc_repo.upsert(nc)

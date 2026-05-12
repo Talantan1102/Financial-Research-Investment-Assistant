@@ -29,8 +29,10 @@ from dashboard.state.keyword_recommender import recommend_by_keyword
 from dashboard.state.repositories import (
     DecisionNoteRepo,
     DeepCardRepo,
+    FlashcardRepo,
     OverrideRepo,
     SnapshotRepo,
+    regenerate_flashcards_for,
 )
 
 MILVUS_HOST = os.getenv("HARNESS_BOARD_MILVUS_HOST")
@@ -386,6 +388,24 @@ def _render_deep_card_field(cap_id: str, field_name: str) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+def _regenerate_flashcards_if_known(cap_id: str) -> None:
+    """V2 编辑或 AI 草拟后触发闪卡重生成。cap 未在 yaml 中时静默跳过(不阻塞编辑)。"""
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    cfg = next((c for c in caps_cfg if c.id == cap_id), None)
+    if cfg is None:
+        return
+    conn = open_db(DB_PATH)
+    try:
+        regenerate_flashcards_for(
+            cap_id,
+            dc_repo=DeepCardRepo(conn),
+            fc_repo=FlashcardRepo(conn),
+            cap_name_cn=cfg.name_cn,
+        )
+    finally:
+        conn.close()
+
+
 async def post_field_update(request: Request) -> HTMLResponse:
     """POST /cap/{cap_id}/field/{field} — V2 inline 编辑保存。"""
     cap_id = request.path_params["cap_id"]
@@ -403,6 +423,7 @@ async def post_field_update(request: Request) -> HTMLResponse:
         DeepCardRepo(conn).update_field(cap_id, field, value_raw.strip())
     finally:
         conn.close()
+    _regenerate_flashcards_if_known(cap_id)
     return _render_deep_card_field(cap_id, field)
 
 
@@ -490,6 +511,7 @@ async def post_ai_draft(request: Request) -> HTMLResponse:
         repo.upsert(DeepCard.model_validate(new_data))
     finally:
         conn.close()
+    _regenerate_flashcards_if_known(cap_id)
     return _render_deep_card_field(cap_id, field)
 
 
