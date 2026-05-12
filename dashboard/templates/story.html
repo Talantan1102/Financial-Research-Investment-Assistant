@@ -1,0 +1,39 @@
+{# V4 故事时间线 — 三段式卡片流 + 工具栏。spec § 5.4。 #}
+{% extends "base.html" %}
+{% block content %}
+{% include "_board_nav.html" %}
+<div class="story-toolbar">
+  <a href="/" class="btn-back">← 返回网格</a>
+  <span>📖 项目故事时间线 ({{ stories | length }} 条)</span>
+  <form method="get" class="story-filter">
+    {% for d in dimensions %}
+      <label><input type="checkbox" name="dim" value="{{ d.id }}"
+        {% if d.id in selected_dims %}checked{% endif %} />
+        <span class="dim-color dim-color--{{ d.id }}"></span>{{ d.name_cn }}</label>
+    {% endfor %}
+    <span>时间窗</span>
+    <input type="date" name="after" value="{{ time_after or '' }}" />
+    <span>~</span>
+    <input type="date" name="before" value="{{ time_before or '' }}" />
+    <select name="order">
+      <option value="asc" {% if order=='asc' %}selected{% endif %}>正序</option>
+      <option value="desc" {% if order=='desc' %}selected{% endif %}>倒序</option>
+    </select>
+    <button type="submit">应用</button>
+  </form>
+</div>
+
+<div class="story-list">
+  {% if stories %}
+    {% for sc in stories %}
+      {% include "_story_card.html" %}
+    {% endfor %}
+  {% else %}
+    <div class="story-empty">
+      📭 暂无 DeepCard 内容 — 先到 <a href="/">网格</a> 给一些 cap 填 DeepCard
+    </div>
+  {% endif %}
+</div>
+
+<script src="/static/htmx.min.js"></script>
+{% endblock %}

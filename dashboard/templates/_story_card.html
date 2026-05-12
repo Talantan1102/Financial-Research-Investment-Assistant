@@ -1,0 +1,45 @@
+{# V4 单卡片子模板 — 三段式渲染 #}
+<div class="story-card dim-color--{{ sc.dimension }}">
+  <div class="story-card-header">
+    <a href="/cap/{{ sc.cap_id }}" class="story-card-link"
+       hx-get="/cap/{{ sc.cap_id }}"
+       hx-target="#modal-overlay"
+       hx-swap="innerHTML"
+       onclick="document.getElementById('modal-overlay').style.display='flex';">
+      {{ sc.name_cn }}
+    </a>
+    <span class="story-card-time">
+      {% if sc.in_no_time_group %}
+        ⏱ 无时间归属
+      {% else %}
+        🗓 {{ sc.sort_time[:10] }}
+      {% endif %}
+    </span>
+  </div>
+  <div class="story-card-body">
+    <div class="story-section story-section--problem">
+      <div class="story-section-label">难题</div>
+      <div>{{ sc.problem }}</div>
+    </div>
+    <div class="story-section story-section--decision">
+      <div class="story-section-label">决策</div>
+      <div>{{ sc.decision }}</div>
+    </div>
+    {% if sc.outcome %}
+      <div class="story-section story-section--outcome">
+        <div class="story-section-label">收获</div>
+        <div>{{ sc.outcome }}</div>
+      </div>
+    {% endif %}
+  </div>
+  {% if sc.linked_specs or sc.linked_decisions %}
+    <div class="story-card-footer">
+      {% for sp in sc.linked_specs %}
+        <a href="/{{ sp }}" target="_blank" class="link-tag">📄 {{ sp.split('/')[-1] }}</a>
+      {% endfor %}
+      {% for did in sc.linked_decisions %}
+        <a href="/decisions#dec_{{ did }}" class="link-tag">⚖ {{ did }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+</div>

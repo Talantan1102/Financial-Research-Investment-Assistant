@@ -536,6 +536,88 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+def _extract_commit_times_for_caps(caps_cfg: list[object]) -> dict[str, str]:
+    """对所有 cap 抽 git log 首个 commit time。
+
+    spec § 5.4 fallback chain;Plan 3 改为后台 job + cache。
+    单独函数以便测试 monkeypatch 跳过。
+    """
+    from dashboard.derive.commit_time_extractor import extract_cap_commit_time
+
+    out: dict[str, str] = {}
+    for cap_cfg in caps_cfg:
+        # duck-typed:caps_cfg 是 CapabilityConfig list
+        cap_id = getattr(cap_cfg, "id", None)
+        rule = getattr(cap_cfg, "derive_rule", None)
+        if cap_id is None or rule is None:
+            continue
+        ts = extract_cap_commit_time(rule, cwd=PROJECT_ROOT)
+        if ts:
+            out[cap_id] = ts
+    return out
+
+
+async def story_view(request: Request) -> HTMLResponse:
+    """V4 故事时间线主页 — 三段式卡片流。spec § 5.4。"""
+    from dashboard.derive.story_builder import build_story_cards
+
+    qp = request.query_params
+    dims = qp.getlist("dim")
+    selected_dims: set[str] | None = set(dims) if dims else None
+    time_after = qp.get("after") or None
+    time_before = qp.get("before") or None
+    order = qp.get("order", "asc")
+
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+
+    # 抽 commit_time(可缓存,Plan 3 改为后台 job;Plan 2 每次现抽)
+    commit_times = _extract_commit_times_for_caps(list(caps_cfg))
+
+    snap = _get_or_build_snapshot()
+    all_caps: list[Capability] = []
+    for layer in snap["layers"]:
+        for cd in layer["capabilities"]:
+            all_caps.append(
+                Capability(
+                    id=cd["id"],
+                    dimension=cd["dimension"],
+                    name_cn=cd["name_cn"],
+                    name_en=cd["name_en"],
+                    status=cd["status"],
+                    derived_status=cd["derived_status"],
+                )
+            )
+
+    conn = open_db(DB_PATH)
+    try:
+        cards = DeepCardRepo(conn).get_all()
+    finally:
+        conn.close()
+
+    stories = build_story_cards(
+        all_caps,
+        cards,
+        commit_times=commit_times,
+        filter_dimensions=selected_dims,
+        time_after=time_after,
+        time_before=time_before,
+        order=order,
+    )
+    template = templates.get_template("story.html")
+    return HTMLResponse(
+        template.render(
+            stories=stories,
+            dimensions=main_dims,
+            selected_dims=selected_dims or set(),
+            time_after=time_after,
+            time_before=time_before,
+            order=order,
+            active_nav="story",
+        )
+    )
+
+
 async def overview_view(request: Request) -> HTMLResponse:
     """V3 鸟瞰主页 — 渲染含 cytoscape 容器,数据由 /api/overview/graph.json 拉。"""
     main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
@@ -660,6 +742,7 @@ app = Starlette(
         Route("/overview", overview_view),
         Route("/overview/fallback", overview_fallback),
         Route("/api/overview/graph.json", overview_graph_json),
+        Route("/story", story_view),
         Route("/cap/{cap_id}", deep_card_modal, methods=["GET"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
