@@ -1,45 +1,69 @@
-{# V4 单卡片子模板 — 三段式渲染 #}
-<div class="story-card dim-color--{{ sc.dimension }}">
-  <div class="story-card-header">
-    <a href="/cap/{{ sc.cap_id }}" class="story-card-link"
+{# V4 单卡片子模板 — serial + three-cuts + cap-link + drop cap #}
+<article class="story-card" data-dim="{{ sc.dimension }}">
+  <div class="meta">
+    <span class="serial">No.{{ sc_index }} · {{ sc.dimension|upper }}</span>
+    <span class="date">
+      {% if sc.in_no_time_group %}
+        无时间归属
+      {% else %}
+        {{ sc.sort_time[:10] }}
+      {% endif %}
+    </span>
+    <a class="cap-link"
+       href="/cap/{{ sc.cap_id }}"
        hx-get="/cap/{{ sc.cap_id }}"
        hx-target="#modal-overlay"
        hx-swap="innerHTML"
        onclick="document.getElementById('modal-overlay').style.display='flex';">
       {{ sc.name_cn }}
     </a>
-    <span class="story-card-time">
-      {% if sc.in_no_time_group %}
-        ⏱ 无时间归属
-      {% else %}
-        🗓 {{ sc.sort_time[:10] }}
-      {% endif %}
-    </span>
   </div>
-  <div class="story-card-body">
-    <div class="story-section story-section--problem">
-      <div class="story-section-label">难题</div>
-      <div>{{ sc.problem }}</div>
-    </div>
-    <div class="story-section story-section--decision">
-      <div class="story-section-label">决策</div>
-      <div>{{ sc.decision }}</div>
-    </div>
-    {% if sc.outcome %}
-      <div class="story-section story-section--outcome">
-        <div class="story-section-label">收获</div>
-        <div>{{ sc.outcome }}</div>
-      </div>
+
+  <h3>{{ sc.name_cn }}</h3>
+
+  <div class="body">
+    <p>{{ sc.problem }}</p>
+    {% if sc.decision %}
+      <p><strong>决策:</strong>{{ sc.decision }}</p>
     {% endif %}
   </div>
-  {% if sc.linked_specs or sc.linked_decisions %}
-    <div class="story-card-footer">
-      {% for sp in sc.linked_specs %}
-        <a href="/{{ sp }}" target="_blank" class="link-tag">📄 {{ sp.split('/')[-1] }}</a>
-      {% endfor %}
-      {% for did in sc.linked_decisions %}
-        <a href="/decisions#dec_{{ did }}" class="link-tag">⚖ {{ did }}</a>
-      {% endfor %}
+
+  {% if sc.outcome %}
+  <div class="three-cuts">
+    <div class="cut">
+      <div class="h">Why</div>
+      <div class="b">{{ sc.problem }}</div>
     </div>
+    <div class="cut">
+      <div class="h">What</div>
+      <div class="b">{{ sc.decision or '—' }}</div>
+    </div>
+    <div class="cut">
+      <div class="h">Lessons</div>
+      <div class="b">{{ sc.outcome }}</div>
+    </div>
+  </div>
+  {% elif sc.decision %}
+  <div class="three-cuts three-cuts--two">
+    <div class="cut">
+      <div class="h">Why</div>
+      <div class="b">{{ sc.problem }}</div>
+    </div>
+    <div class="cut">
+      <div class="h">What</div>
+      <div class="b">{{ sc.decision }}</div>
+    </div>
+  </div>
   {% endif %}
-</div>
+
+  {% if sc.linked_specs or sc.linked_decisions %}
+  <div class="story-card-footer">
+    {% for sp in sc.linked_specs %}
+      <a href="/{{ sp }}" target="_blank" class="link-tag">{{ sp.split('/')[-1] }}</a>
+    {% endfor %}
+    {% for did in sc.linked_decisions %}
+      <a href="/decisions#dec_{{ did }}" class="link-tag">{{ did }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+</article>

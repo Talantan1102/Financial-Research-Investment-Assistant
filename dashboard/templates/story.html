@@ -1,40 +1,61 @@
-{# V4 故事时间线 — 三段式卡片流 + 工具栏。spec § 5.4。 #}
+{# V4 故事时间线 — 三段式卡片流 + filter pill + drop cap。spec § 5.4。 #}
 {% extends "base.html" %}
 {% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
-{% include "_board_nav.html" %}
-<div class="story-toolbar">
-  <a href="/" class="btn-back">← 返回网格</a>
-  <span>📖 项目故事时间线 ({{ stories | length }} 条)</span>
-  <form method="get" class="story-filter">
-    {% for d in dimensions %}
-      <label><input type="checkbox" name="dim" value="{{ d.id }}"
-        {% if d.id in selected_dims %}checked{% endif %} />
-        <span class="dim-color dim-color--{{ d.id }}"></span>{{ d.name_cn }}</label>
-    {% endfor %}
-    <span>时间窗</span>
-    <input type="date" name="after" value="{{ time_after or '' }}" />
-    <span>~</span>
-    <input type="date" name="before" value="{{ time_before or '' }}" />
-    <select name="order">
-      <option value="asc" {% if order=='asc' %}selected{% endif %}>正序</option>
-      <option value="desc" {% if order=='desc' %}selected{% endif %}>倒序</option>
-    </select>
-    <button type="submit">应用</button>
-  </form>
+
+{% set DIM_SHORT = {
+  'prompt_context':     'prompt',
+  'tools_function':     'tools',
+  'orchestration':      'orch',
+  'memory':             'memory',
+  'rag_knowledge':      'rag',
+  'guardrails':         'guard',
+  'eval_observability': 'eval',
+  'cost_routing':       'cost'
+} %}
+
+<div class="section-marker">
+  <span class="sm-num">§ 03</span>
+  <span class="sm-title">Story · 三段式时间线</span>
+  <span class="sm-desc">书页排版 · drop cap · why / what / lessons 三切</span>
 </div>
 
-<div class="story-list">
-  {% if stories %}
+<form method="get" class="story-filter">
+  <div class="filter-row">
+    <span class="filter-label">维度</span>
+    {% for d in dimensions %}
+      {% set short = DIM_SHORT.get(d.id, d.id) %}
+      <label class="pill{% if d.id in selected_dims %} active{% endif %}">
+        <input type="checkbox" name="dim" value="{{ d.id }}"
+          {% if d.id in selected_dims %}checked{% endif %} hidden>
+        <span class="dot dot-{{ short }}"></span>{{ d.name_cn }}
+      </label>
+    {% endfor %}
+  </div>
+  <div class="filter-row">
+    <span class="filter-label">时间窗</span>
+    <input type="date" name="after" value="{{ time_after or '' }}" class="filter-date">
+    <span class="filter-sep">~</span>
+    <input type="date" name="before" value="{{ time_before or '' }}" class="filter-date">
+    <select name="order" class="filter-select">
+      <option value="asc" {% if order == 'asc' %}selected{% endif %}>正序</option>
+      <option value="desc" {% if order == 'desc' %}selected{% endif %}>倒序</option>
+    </select>
+    <button type="submit" class="filter-apply">应用</button>
+  </div>
+</form>
+
+{% if stories %}
+  <div class="story-rail">
     {% for sc in stories %}
+      {% set sc_index = loop.index %}
       {% include "_story_card.html" %}
     {% endfor %}
-  {% else %}
-    <div class="story-empty">
-      📭 暂无 DeepCard 内容 — 先到 <a href="/">网格</a> 给一些 cap 填 DeepCard
-    </div>
-  {% endif %}
-</div>
+  </div>
+{% else %}
+  <div class="empty-state">
+    暂无 DeepCard 内容 — 先到 <a href="/">网格</a> 给一些 cap 填 DeepCard
+  </div>
+{% endif %}
 
-<script src="/static/htmx.min.js"></script>
 {% endblock %}
