@@ -568,7 +568,13 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
         conn.close()
 
     derived_status = resolve_status(cfg, PROJECT_ROOT)
-    cap = {"id": cfg.id, "name_cn": cfg.name_cn, "status": derived_status}
+    cap = {
+        "id": cfg.id,
+        "name_cn": cfg.name_cn,
+        "status": derived_status,
+        "dimension": cfg.dimension,
+        "confidence": card.srs_state.confidence if card else 0,
+    }
 
     content_fields: list[dict[str, object]] = []
     for f in (
