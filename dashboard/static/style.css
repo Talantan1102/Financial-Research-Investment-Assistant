@@ -170,3 +170,170 @@ body::before {
 .reveal.d2 { animation-delay: 200ms; }
 .reveal.d3 { animation-delay: 360ms; }
 .reveal.d4 { animation-delay: 520ms; }
+
+/* =========================================================
+   Phase 2: Nav-rail
+   ========================================================= */
+.nav-rail {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: 80px;
+  background: var(--ink-2);
+  border-right: 1px solid var(--hair);
+  display: flex; flex-direction: column;
+  align-items: center;
+  padding: 28px 0;
+  gap: 4px;
+  z-index: 10;
+}
+.nav-rail .brand-mark {
+  font-family: var(--display); font-weight: 600;
+  font-size: 22px; color: var(--amber);
+  font-variation-settings: "opsz" 60;
+  margin-bottom: 36px;
+  line-height: 1;
+}
+.nav-rail a,
+.nav-rail .nav-item {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 14px 0; width: 100%;
+  color: var(--fg-mute);
+  text-decoration: none;
+  font-size: 10px; font-family: var(--mono); font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  border-left: 2px solid transparent;
+  transition: color 240ms, border-color 240ms;
+  cursor: pointer;
+}
+.nav-rail a svg,
+.nav-rail .nav-item svg { width: 18px; height: 18px; stroke-width: 1.5; margin-bottom: 6px; opacity: 0.7; }
+.nav-rail a:hover,
+.nav-rail .nav-item:hover { color: var(--teal); }
+.nav-rail a.active,
+.nav-rail .nav-item.active {
+  color: var(--amber); border-left-color: var(--amber);
+}
+.nav-rail a.active svg,
+.nav-rail .nav-item.active svg { opacity: 1; }
+.nav-rail .nav-bottom { margin-top: auto; }
+.nav-rail .refresh-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--amber-deep);
+  color: var(--amber);
+  cursor: pointer;
+  background: transparent;
+  transition: all 240ms;
+}
+.nav-rail .refresh-btn:hover {
+  background: var(--amber);
+  color: var(--ink);
+  transform: rotate(180deg);
+}
+.nav-rail .refresh-btn svg { width: 16px; height: 16px; stroke-width: 1.8; }
+.nav-rail .refresh-btn.active {
+  animation: pulse-border 1.2s ease-in-out infinite;
+}
+
+/* =========================================================
+   Phase 2: Hero block
+   ========================================================= */
+.hero-block {
+  padding-top: 80px;
+  padding-bottom: 64px;
+  position: relative;
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 64px;
+  align-items: end;
+}
+.hero-meta {
+  font-family: var(--mono); font-size: 11px;
+  color: var(--fg-mute); letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+.hero-meta .pill {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--amber-deep);
+  color: var(--amber);
+  border-radius: 2px;
+  margin-right: 10px;
+}
+.hero-title {
+  font-family: var(--display);
+  font-weight: 380;
+  font-size: clamp(52px, 7.6vw, 100px);
+  line-height: 0.98;
+  letter-spacing: -0.02em;
+  color: var(--fg);
+  font-variation-settings: "opsz" 72;
+  margin: 0;
+}
+.hero-title em {
+  font-style: italic;
+  font-weight: 350;
+  color: var(--amber);
+  font-variation-settings: "opsz" 72;
+}
+.hero-title em.cool {
+  color: var(--teal);
+}
+.hero-sub {
+  margin-top: 26px;
+  max-width: 580px;
+  color: var(--fg-dim);
+  font-size: 17px; line-height: 1.85;
+  font-family: var(--serif-cn);
+  letter-spacing: 0.005em;
+}
+.hero-sub .accent {
+  color: var(--amber); font-weight: 500;
+}
+.hero-sub .accent-cool {
+  color: var(--teal); font-weight: 500;
+}
+.hero-wips {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hair);
+  font-family: var(--mono); font-size: 12px;
+  color: var(--fg-mute);
+  letter-spacing: 0.04em;
+}
+.hero-wips .label {
+  color: var(--wip);
+  margin-right: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-size: 10px;
+}
+.hero-wips a {
+  color: var(--fg-dim);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hair);
+  padding-bottom: 1px;
+  margin-right: 18px;
+  transition: color 200ms, border-color 200ms;
+}
+.hero-wips a:hover { color: var(--teal); border-bottom-color: var(--teal); }
+
+/* =========================================================
+   Phase 2: Fingerprint
+   ========================================================= */
+.fingerprint {
+  width: 320px; height: 320px;
+  position: relative;
+}
+.fingerprint svg { width: 100%; height: 100%; }
+.fingerprint-caption {
+  margin-top: 12px;
+  font-family: var(--mono); font-size: 10px;
+  color: var(--fg-faint);
+  letter-spacing: 0.18em; text-transform: uppercase;
+  text-align: center;
+}
+.fingerprint-caption strong { color: var(--amber); font-weight: 500; }
