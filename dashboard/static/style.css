@@ -1558,3 +1558,312 @@ body::before {
   display: block;
   max-width: 600px;
 }
+
+/* =========================================================
+   Phase 6 — Decisions changelog + warning banner + form inputs
+   ========================================================= */
+
+/* Warning banner */
+.warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  margin-bottom: 24px;
+  background: var(--wip-bg);
+  border: 1px solid rgba(212, 130, 74, 0.35);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--wip);
+  letter-spacing: 0.02em;
+}
+
+.warning-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+/* Decisions grid layout */
+.decisions-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 48px;
+  align-items: start;
+}
+
+/* Left sidebar */
+.decisions-side {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+}
+
+.decisions-side h5 {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin: 0 0 14px;
+  font-weight: 500;
+}
+
+.filter-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 32px;
+}
+
+.filter-item {
+  padding: 7px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-bottom: 1px dashed var(--hair-2);
+  cursor: pointer;
+  transition: color 200ms;
+  user-select: none;
+}
+
+.filter-count {
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 11px;
+  color: var(--fg-mute);
+}
+
+.filter-item:hover {
+  color: var(--teal);
+}
+
+.filter-item.active {
+  color: var(--amber);
+}
+
+.filter-keyword {
+  width: 100%;
+  background: var(--ink-2);
+  border: 1px solid var(--hair);
+  border-radius: 3px;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color 200ms;
+}
+
+.filter-keyword::placeholder {
+  color: var(--fg-faint);
+}
+
+.filter-keyword:focus {
+  border-color: var(--amber);
+}
+
+/* Right decisions timeline list */
+.decisions-list {
+  min-width: 0;
+}
+
+/* Decision card — Linear changelog style */
+.decision-card {
+  background: transparent;
+  border-left: 1px solid var(--hair);
+  padding: 0 0 36px 32px;
+  position: relative;
+  margin-left: 4px;
+}
+
+.decision-card::before {
+  content: '';
+  position: absolute;
+  left: -5px;
+  top: 8px;
+  width: 9px;
+  height: 9px;
+  background: var(--amber);
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px var(--ink);
+}
+
+.decision-card .head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.decision-card .commit {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--amber);
+  letter-spacing: 0.05em;
+}
+
+.decision-card .when {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  letter-spacing: 0.1em;
+}
+
+.decision-card h4 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 19px;
+  line-height: 1.4;
+  color: var(--fg);
+  margin: 0 0 10px;
+  font-variation-settings: "opsz" 48;
+  letter-spacing: -0.003em;
+}
+
+.decision-card .summary {
+  font-family: var(--serif-cn);
+  font-size: 14.5px;
+  line-height: 1.8;
+  color: var(--fg-dim);
+  margin-bottom: 16px;
+  letter-spacing: 0.005em;
+}
+
+.decision-card .tags {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.decision-card .tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  padding: 2px 7px;
+  border: 1px solid var(--hair);
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+}
+
+.decision-card .tag.dim {
+  color: var(--amber);
+  border-color: rgba(200, 148, 86, 0.28);
+  background: var(--amber-soft);
+}
+
+.decision-card .tag.layer {
+  color: var(--teal);
+  border-color: rgba(111, 148, 148, 0.28);
+  background: var(--teal-soft);
+}
+
+/* Decision note drawer */
+.decision-note-drawer {
+  margin-top: 14px;
+}
+
+details::-webkit-details-marker {
+  display: none;
+}
+
+.decision-note-toggle {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  list-style: none;
+  outline: none;
+  transition: color 180ms;
+}
+
+.decision-note-toggle::before {
+  content: '+';
+  color: var(--amber);
+  margin-right: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+details[open] .decision-note-toggle::before {
+  content: '−';
+}
+
+.decision-note-toggle:hover {
+  color: var(--fg-dim);
+}
+
+.decision-note {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.decision-note textarea {
+  width: 100%;
+  background: var(--ink-2);
+  border: 1px solid var(--hair);
+  border-radius: 3px;
+  color: var(--fg-dim);
+  font-family: var(--serif-cn);
+  font-size: 14px;
+  line-height: 1.7;
+  padding: 10px 12px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 200ms;
+}
+
+.decision-note textarea::placeholder {
+  color: var(--fg-faint);
+}
+
+.decision-note textarea:focus {
+  border-color: var(--amber);
+}
+
+.decision-note-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.note-submit {
+  background: var(--amber-soft);
+  border: 1px solid var(--amber-deep);
+  color: var(--amber);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  padding: 5px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background 180ms, color 180ms;
+}
+
+.note-submit:hover {
+  background: var(--amber);
+  color: var(--ink);
+}
+
+/* Empty state */
+.empty-state {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-faint);
+  padding: 32px 0;
+  letter-spacing: 0.04em;
+}
