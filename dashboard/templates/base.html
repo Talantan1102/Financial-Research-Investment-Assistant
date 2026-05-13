@@ -3,14 +3,43 @@
 <head>
   <meta charset="utf-8">
   <title>Harness Board{% if snap %} · {{ snap.refreshed_at[:10] }}{% endif %}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  {# Google Fonts — Newsreader (opsz 6-72 ital) + Manrope + Geist Mono + Noto Serif SC + Noto Sans SC #}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&family=Manrope:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500;600&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
 </head>
 <body>
+
+  {# Left nav-rail slot — each page extends this with _board_nav.html #}
+  {% block nav %}{% endblock %}
+
+  {# Refresh panel partial — Plan 3 wires SSE logic; here just container #}
+  {% include "_refresh_panel.html" ignore missing %}
+
   <main class="board">
     {% block content %}{% endblock %}
   </main>
-  {# V2 模块深读 modal overlay — 默认隐藏,htmx swap 注入内容 #}
-  <div id="modal-overlay" onclick="if(event.target===this){this.style.display='none';}"></div>
+
+  {# Deep-card / generic modal overlay — htmx swaps content in #}
+  <div id="modal-overlay"
+       class="modal-overlay"
+       role="dialog"
+       aria-modal="true"
+       aria-hidden="true"></div>
+
+  {# Toast notification container #}
+  <div id="toast-container"
+       class="toast-container"
+       aria-live="polite"></div>
+
+  {# Global JS — Toast API + Modal open/close #}
+  <script src="/static/toast.js" defer></script>
+  <script src="/static/modal.js" defer></script>
+
 </body>
 </html>
