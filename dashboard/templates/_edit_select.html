@@ -1,9 +1,9 @@
-<form class="edit-select"
+<form class="edit-select-form"
       id="cap-{{ c.id|replace('.', '-') }}"
       hx-post="/capability/{{ c.id }}/override"
       hx-target="this"
       hx-swap="outerHTML">
-  <select name="status" onchange="this.form.requestSubmit()" autofocus>
+  <select class="custom-select" name="status" onchange="this.form.requestSubmit()" autofocus>
     <option value="" disabled selected>{{ c.name_cn }}</option>
     <option value="lit">force-lit</option>
     <option value="wip">set-wip</option>
