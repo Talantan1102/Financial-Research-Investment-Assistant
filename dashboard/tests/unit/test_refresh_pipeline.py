@@ -40,7 +40,7 @@ def test_chip_resolve_step_returns_done(pipeline: RefreshPipeline) -> None:
 
 
 def test_seed_ingest_step_returns_done(pipeline: RefreshPipeline) -> None:
-    ev = pipeline._seed_ingest_step()  # type: ignore[attr-defined]
+    ev = pipeline._seed_ingest_step()
     assert ev.step == "seed_ingest"
     assert ev.status == "done"
     # detail 应含 "insert"/"skip" 计数
@@ -48,7 +48,7 @@ def test_seed_ingest_step_returns_done(pipeline: RefreshPipeline) -> None:
 
 
 def test_decision_extract_step_returns_done(pipeline: RefreshPipeline) -> None:
-    ev = pipeline._decision_extract_step()  # type: ignore[attr-defined]
+    ev = pipeline._decision_extract_step()
     assert ev.step == "decision_extract"
     assert ev.status == "done"
     # 至少抽出一个决策(本仓 specs 多)
@@ -56,7 +56,7 @@ def test_decision_extract_step_returns_done(pipeline: RefreshPipeline) -> None:
 
 
 def test_snapshot_finalize_step_returns_done(pipeline: RefreshPipeline) -> None:
-    ev = pipeline._snapshot_finalize_step()  # type: ignore[attr-defined]
+    ev = pipeline._snapshot_finalize_step()
     assert ev.step == "snapshot_finalize"
     assert ev.status == "done"
     assert "refreshed_at" in ev.detail or "snapshot" in ev.detail.lower()
@@ -69,7 +69,7 @@ def test_milvus_reindex_skip_when_host_missing(
 
     import asyncio
 
-    ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
+    ev = asyncio.run(pipeline._milvus_reindex_step())
     assert ev.step == "milvus_reindex"
     assert ev.status == "skip"
     assert "milvus disabled" in ev.detail.lower()
@@ -84,7 +84,7 @@ def test_milvus_reindex_skip_when_embedding_key_missing(
 
     import asyncio
 
-    ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
+    ev = asyncio.run(pipeline._milvus_reindex_step())
     assert ev.status == "skip"
     assert "embedding" in ev.detail.lower() and "missing" in ev.detail.lower()
 
@@ -111,7 +111,7 @@ def test_milvus_reindex_skip_when_milvus_unreachable(
 
     import asyncio
 
-    ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
+    ev = asyncio.run(pipeline._milvus_reindex_step())
     assert ev.status == "skip"
     assert "unreachable" in ev.detail.lower()
 
@@ -158,7 +158,7 @@ def test_milvus_reindex_skip_when_embedding_call_fails(
 
     import asyncio
 
-    ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
+    ev = asyncio.run(pipeline._milvus_reindex_step())
     assert ev.status == "skip"
     assert "embedding error" in ev.detail.lower()
 
