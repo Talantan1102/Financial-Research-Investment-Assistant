@@ -20,13 +20,11 @@
   <span class="sm-desc">cytoscape · 维度成簇 · 边轻轨</span>
 </div>
 
-{% if total_nodes < 5 %}
-<div class="empty-state empty-state--overview" id="overview-empty-hint">
+<div class="empty-state empty-state--overview" id="overview-empty-hint" hidden>
   <span class="empty-icon">·</span>
   <span class="empty-msg">看上去 DeepCard 还很少 · 跑一次全量刷新?</span>
   <button class="empty-cta" id="overview-refresh-trigger">运行 refresh</button>
 </div>
-{% endif %}
 
 <div class="overview-frame">
   <div class="overview-toolbar">

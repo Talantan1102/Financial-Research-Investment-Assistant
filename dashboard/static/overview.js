@@ -155,6 +155,24 @@
       }
     });
 
+    // 空状态浮条:nodes < 5 时显示,按钮 click 触发 HarnessRefresh.open()
+    const emptyHint = document.getElementById('overview-empty-hint');
+    if (emptyHint) {
+      emptyHint.hidden = payload.nodes.length >= 5;
+    }
+    const emptyBtn = document.getElementById('overview-refresh-trigger');
+    if (emptyBtn && !emptyBtn.dataset.bound) {
+      emptyBtn.dataset.bound = '1';
+      emptyBtn.addEventListener('click', function () {
+        if (window.HarnessRefresh && typeof window.HarnessRefresh.open === 'function') {
+          window.HarnessRefresh.open();
+        } else {
+          // refresh-panel.js 未加载,fallback toast
+          if (window.Toast) window.Toast.show({ type: 'warn', msg: '刷新模块未就绪' });
+        }
+      });
+    }
+
     // anchor jump support
     handleHashJump();
   }
