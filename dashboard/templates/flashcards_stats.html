@@ -1,42 +1,106 @@
-{# V5 闪卡学习统计 — 总数 / 已掌握 / 维度分布。spec § 5.5。 #}
+{# V5 闪卡学习统计 — 静态壳 + SVG mount 点。Plan 3 inline JS hydrate。spec § 5.5。 #}
 {% extends "base.html" %}
 {% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
-{% include "_board_nav.html" %}
-<div class="stats-page">
-  <div class="flashcards-toolbar">
-    <a href="/flashcards/today" class="btn-back">← 回到今日复习</a>
-    <span>📊 学习统计</span>
+<div class="board">
+
+  <div class="section-marker">
+    <span class="sm-num">§ 04.S</span>
+    <span class="sm-title">Cards · 学习统计</span>
+    <span class="sm-desc">SRS · 总览 · 环图 · 时间轴 · 散点</span>
   </div>
 
-  <div class="stats-grid">
-    <div class="stat-card">
-      <div class="stat-label">总闪卡</div>
-      <div class="stat-value">{{ total }}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">新卡</div>
-      <div class="stat-value">{{ new }}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">已掌握 (conf ≥ 4)</div>
-      <div class="stat-value">{{ mastered }}</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">平均 confidence</div>
-      <div class="stat-value">{{ avg_conf }}</div>
-    </div>
-  </div>
+  <div class="stats-page">
 
-  <h3 class="stats-section-heading">维度分布(cap_id 前缀)</h3>
-  {% if dim_dist %}
-    <ul class="stats-dim-list">
-      {% for dim, n in dim_dist %}
-        <li><span class="stats-dim-name">{{ dim }}</span> · {{ n }} 张</li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p class="stats-empty">(暂无维度分布数据 — 闪卡库为空)</p>
-  {% endif %}
+    <header class="stats-head">
+      <h2 class="stats-title">📊 学习统计</h2>
+      <a href="/flashcards/today" class="btn-back">← 回到今日复习</a>
+    </header>
+
+    {# ── 4 stat numbers ─────────────────────────────────────── #}
+    <section class="stats-numbers" id="stats-numbers">
+      <div class="stat-num">
+        <span class="num" id="stat-total">—</span>
+        <span class="label">总卡</span>
+      </div>
+      <div class="stat-num">
+        <span class="num" id="stat-today">—</span>
+        <span class="label">今日待复习</span>
+      </div>
+      <div class="stat-num">
+        <span class="num" id="stat-avg">—</span>
+        <span class="label">平均 conf</span>
+      </div>
+      <div class="stat-num">
+        <span class="num" id="stat-streak">—</span>
+        <span class="label">已掌握</span>
+      </div>
+    </section>
+
+    {# ── Donut ring ─────────────────────────────────────────── #}
+    <section class="stats-ring-wrap">
+      <svg id="stats-ring" width="200" height="200" viewBox="0 0 200 200"
+           xmlns="http://www.w3.org/2000/svg">
+        {# Background track #}
+        <circle cx="100" cy="100" r="80"
+                fill="none"
+                stroke="var(--hair)"
+                stroke-width="14"/>
+        {# Fill arc — JS sets stroke-dashoffset to animate #}
+        <circle id="stats-ring-fill"
+                cx="100" cy="100" r="80"
+                fill="none"
+                stroke="var(--amber)"
+                stroke-width="14"
+                stroke-linecap="round"
+                stroke-dasharray="502.65"
+                stroke-dashoffset="502.65"
+                transform="rotate(-90 100 100)"
+                style="transition: stroke-dashoffset 800ms cubic-bezier(0.22,1,0.36,1);"/>
+        {# Center text — mastered count #}
+        <text id="stats-ring-text"
+              x="100" y="106"
+              text-anchor="middle"
+              fill="var(--amber)"
+              font-family="'Newsreader', Georgia, serif"
+              font-style="italic"
+              font-size="36">—</text>
+        {# Denominator label #}
+        <text id="stats-ring-denom"
+              x="100" y="126"
+              text-anchor="middle"
+              fill="var(--fg-mute)"
+              font-family="'Geist Mono', monospace"
+              font-size="11">/ —</text>
+      </svg>
+      <p class="ring-cap">掌握率 (conf ≥ 4)</p>
+    </section>
+
+    {# ── 30-day timeline ────────────────────────────────────── #}
+    <section class="stats-timeline-wrap">
+      <h3 class="stats-sub">过去 30 天</h3>
+      <svg id="stats-timeline"
+           width="800" height="80"
+           viewBox="0 0 800 80"
+           xmlns="http://www.w3.org/2000/svg"
+           preserveAspectRatio="xMinYMid meet">
+        {# Base line — JS appends dots #}
+        <line x1="0" y1="40" x2="800" y2="40"
+              stroke="var(--hair)" stroke-width="1"/>
+      </svg>
+    </section>
+
+    {# ── 8-dim × confidence scatter ─────────────────────────── #}
+    <section class="stats-scatter-wrap">
+      <h3 class="stats-sub">8 维 × confidence 散点</h3>
+      <svg id="stats-scatter"
+           width="600" height="240"
+           viewBox="0 0 600 240"
+           xmlns="http://www.w3.org/2000/svg">
+        {# JS appends circles after fetch /api/flashcards/stats.json #}
+      </svg>
+    </section>
+
+  </div>{# /.stats-page #}
 </div>
 {% endblock %}
