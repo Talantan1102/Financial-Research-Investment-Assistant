@@ -63,6 +63,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [Plan 2 V3 鸟瞰 + V4 故事 ship](docs/claude-context/harness-board-review-plan2-done.md) — cytoscape graph + commit-time 抽取 + 三段式 story + Milvus 真路径 wire + 跨视图联动
 - [Plan 3 V5 闪卡 + 全量 prefill + 收尾 ship](docs/claude-context/harness-board-review-plan3-done.md) — SM-2 SRS + 3 模板派生 + DeepCard 编辑 hook + /flashcards/today + /stats + 35 张 hand-curated seed
 
+### Harness Board V2 Polish(2026-05-14 ship 完)
+- [V2 Polish 总卡](docs/claude-context/harness-board-v2-polish-done.md) — Quiet Workshop UI 全重写 + SSE 5-step refresh pipeline + seed 自动 ingest 修鸟瞰空 + 双强调 amber × teal + Newsreader/Source Han Serif/Manrope/Geist Mono / 42 task / 43 commit / pytest+mypy+ruff 全绿;mockup-v2.html 留作 design SoT
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。
