@@ -16,7 +16,7 @@ def test_index_renders() -> None:
         assert r.status_code == 200
         body = r.text
         # Hero
-        assert "📅" in body
+        assert "hero-title" in body
         # 8 layer 卡片
         assert body.count("layer-card") >= 8
         # 三态 chip
