@@ -1,0 +1,40 @@
+<aside class="refresh-panel" id="refresh-panel" role="dialog" aria-modal="false" aria-hidden="true" hidden>
+  <header class="refresh-panel-head">
+    <span class="refresh-panel-icon" aria-hidden="true">↻</span>
+    <h3>全量刷新</h3>
+    <button class="refresh-panel-close" type="button" aria-label="关闭面板" onclick="document.getElementById('refresh-panel').hidden = true;">×</button>
+  </header>
+
+  <ol class="refresh-step-list">
+    <li class="refresh-step" data-step="chip_resolve">
+      <span class="step-icon" data-state="pending" aria-hidden="true">○</span>
+      <span class="step-label">扫代码判断 chip 状态</span>
+      <span class="step-detail"></span>
+    </li>
+    <li class="refresh-step" data-step="seed_ingest">
+      <span class="step-icon" data-state="pending" aria-hidden="true">○</span>
+      <span class="step-label">加载 DeepCard seed</span>
+      <span class="step-detail"></span>
+    </li>
+    <li class="refresh-step" data-step="decision_extract">
+      <span class="step-icon" data-state="pending" aria-hidden="true">○</span>
+      <span class="step-label">重抽 spec/plan 决策</span>
+      <span class="step-detail"></span>
+    </li>
+    <li class="refresh-step" data-step="milvus_reindex">
+      <span class="step-icon" data-state="pending" aria-hidden="true">○</span>
+      <span class="step-label">向量重建</span>
+      <span class="step-detail"></span>
+    </li>
+    <li class="refresh-step" data-step="snapshot_finalize">
+      <span class="step-icon" data-state="pending" aria-hidden="true">○</span>
+      <span class="step-label">整合 snapshot</span>
+      <span class="step-detail"></span>
+    </li>
+  </ol>
+
+  <footer class="refresh-panel-foot">
+    <span class="refresh-summary" id="refresh-summary"></span>
+    <button class="refresh-retry" type="button" id="refresh-retry" hidden>retry</button>
+  </footer>
+</aside>
