@@ -52,3 +52,18 @@ def test_overview_graph_after_explicit_refresh_has_filled_nodes() -> None:
         payload = r2.json()
     nodes = payload.get("nodes") or payload.get("elements", {}).get("nodes") or []
     assert len(nodes) >= 35
+
+
+def test_graph_edges_carry_weight_field() -> None:
+    """Plan 3 Task 8 — 每个 edge 有 weight 字段(0.6 或 1.2)。"""
+    from dashboard.server import app
+
+    with TestClient(app) as client:
+        r = client.get("/api/overview/graph.json")
+        assert r.status_code == 200
+        payload = r.json()
+    edges = payload.get("edges") or payload.get("elements", {}).get("edges") or []
+    assert len(edges) >= 10, f"expect ≥10 edges, got {len(edges)}"
+    for e in edges:
+        assert "weight" in e["data"], f"edge missing weight: {e}"
+        assert e["data"]["weight"] in (0.6, 1.2), f"unexpected weight: {e['data']['weight']}"
