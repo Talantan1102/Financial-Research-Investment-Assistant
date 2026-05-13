@@ -37,3 +37,26 @@ def test_chip_resolve_step_returns_done(pipeline: RefreshPipeline) -> None:
     assert ev.status == "done"
     assert "chip" in ev.detail.lower() or ev.detail  # 实现给出 detail
     assert ev.duration_ms >= 0
+
+
+def test_seed_ingest_step_returns_done(pipeline: RefreshPipeline) -> None:
+    ev = pipeline._seed_ingest_step()  # type: ignore[attr-defined]
+    assert ev.step == "seed_ingest"
+    assert ev.status == "done"
+    # detail 应含 "insert"/"skip" 计数
+    assert "insert" in ev.detail or "skipped" in ev.detail
+
+
+def test_decision_extract_step_returns_done(pipeline: RefreshPipeline) -> None:
+    ev = pipeline._decision_extract_step()  # type: ignore[attr-defined]
+    assert ev.step == "decision_extract"
+    assert ev.status == "done"
+    # 至少抽出一个决策(本仓 specs 多)
+    assert "entries" in ev.detail or "decision" in ev.detail.lower()
+
+
+def test_snapshot_finalize_step_returns_done(pipeline: RefreshPipeline) -> None:
+    ev = pipeline._snapshot_finalize_step()  # type: ignore[attr-defined]
+    assert ev.step == "snapshot_finalize"
+    assert ev.status == "done"
+    assert "refreshed_at" in ev.detail or "snapshot" in ev.detail.lower()

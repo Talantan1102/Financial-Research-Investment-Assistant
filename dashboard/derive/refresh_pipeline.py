@@ -77,6 +77,67 @@ class RefreshPipeline:
             duration_ms=dt,
         )
 
+    def _seed_ingest_step(self) -> StepEvent:
+        from dashboard.derive.seed_ingest import SeedIngestService
+
+        t0 = time.perf_counter()
+        svc = SeedIngestService(
+            seed_path=self.seed_path, db_path=self.db_path, config_dir=self.config_dir
+        )
+        # refresh 走 insert-if-missing(force=False),保护手动编辑;
+        # 用户想 force 走 CLI --force 或后续 admin endpoint。
+        result = svc.run(force=False)
+        dt = int((time.perf_counter() - t0) * 1000)
+        return StepEvent(
+            step="seed_ingest",
+            status="done",
+            label=_LABELS["seed_ingest"],
+            detail=(
+                f"{result.total_seed} cards · {result.inserted} insert / "
+                f"{result.skipped_existing} skip(existing) / "
+                f"{result.skipped_invalid} skip(invalid)"
+            ),
+            duration_ms=dt,
+        )
+
+    def _decision_extract_step(self) -> StepEvent:
+        from dashboard.derive.decision_extractor import extract_all
+
+        t0 = time.perf_counter()
+        decisions = extract_all()
+        dt = int((time.perf_counter() - t0) * 1000)
+        return StepEvent(
+            step="decision_extract",
+            status="done",
+            label=_LABELS["decision_extract"],
+            detail=f"{len(decisions)} entries",
+            duration_ms=dt,
+        )
+
+    def _snapshot_finalize_step(self) -> StepEvent:
+        from dashboard.derive.snapshot_builder import build_snapshot
+        from dashboard.state.db import open_db
+        from dashboard.state.repositories import OverrideRepo, SnapshotRepo
+
+        t0 = time.perf_counter()
+        conn = open_db(self.db_path)
+        try:
+            overrides = OverrideRepo(conn).get_all()
+            snap_repo = SnapshotRepo(conn)
+            snap_repo.invalidate()
+            snapshot = build_snapshot(self.project_root, self.config_dir, overrides=overrides)
+            snap_repo.save(snapshot.refreshed_at, snapshot.to_dict())
+        finally:
+            conn.close()
+        dt = int((time.perf_counter() - t0) * 1000)
+        return StepEvent(
+            step="snapshot_finalize",
+            status="done",
+            label=_LABELS["snapshot_finalize"],
+            detail=f"refreshed_at {snapshot.refreshed_at}",
+            duration_ms=dt,
+        )
+
     async def stream(self) -> AsyncIterator[StepEvent]:
         """yield 5 个 step × (running, done|skip|error)。后续 task 完成。"""
         raise NotImplementedError("see Task 9")
