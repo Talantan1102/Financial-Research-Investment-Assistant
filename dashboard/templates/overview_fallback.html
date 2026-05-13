@@ -1,5 +1,6 @@
 {# V3 cytoscape 加载失败兜底 — 维度卡片墙。spec § 5.3 fallback。 #}
 {% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
 {% include "_board_nav.html" %}
 <div class="overview-toolbar">
