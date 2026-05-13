@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -222,5 +222,58 @@ class RefreshPipeline:
         )
 
     async def stream(self) -> AsyncIterator[StepEvent]:
-        """yield 5 个 step × (running, done|skip|error)。后续 task 完成。"""
-        raise NotImplementedError("see Task 9")
+        """yield 5 个 step × (running + done|skip|error)。
+
+        协议:
+        - 每个 step 先 yield 一个 status=running 占位 event
+        - 再调对应 _xxx_step,把返回结果 yield 出去
+        - critical step(chip_resolve / seed_ingest / decision_extract / snapshot_finalize)
+          抛异常时 yield status=error 但**不取消**后续 step(spec § 2.4)
+        - milvus_reindex 内部已封装 4 种 skip,不会向外抛
+        """
+        sync_steps: tuple[tuple[str, Callable[[], StepEvent]], ...] = (
+            ("chip_resolve", self._chip_resolve_step),
+            ("seed_ingest", self._seed_ingest_step),
+            ("decision_extract", self._decision_extract_step),
+        )
+
+        for name, fn in sync_steps:
+            yield StepEvent(step=name, status="running", label=_LABELS[name])
+            try:
+                yield fn()
+            except Exception as e:  # noqa: BLE001
+                logger.exception("step %s failed", name)
+                yield StepEvent(
+                    step=name,
+                    status="error",
+                    label=_LABELS[name],
+                    detail=str(e)[:120],
+                )
+
+        # milvus_reindex(async)
+        yield StepEvent(step="milvus_reindex", status="running", label=_LABELS["milvus_reindex"])
+        try:
+            yield await self._milvus_reindex_step()
+        except Exception as e:  # noqa: BLE001
+            logger.exception("milvus_reindex unexpectedly raised")
+            yield StepEvent(
+                step="milvus_reindex",
+                status="skip",
+                label=_LABELS["milvus_reindex"],
+                detail=f"unexpected: {str(e)[:80]}",
+            )
+
+        # snapshot_finalize 始终最后跑
+        yield StepEvent(
+            step="snapshot_finalize", status="running", label=_LABELS["snapshot_finalize"]
+        )
+        try:
+            yield self._snapshot_finalize_step()
+        except Exception as e:  # noqa: BLE001
+            logger.exception("snapshot_finalize failed")
+            yield StepEvent(
+                step="snapshot_finalize",
+                status="error",
+                label=_LABELS["snapshot_finalize"],
+                detail=str(e)[:120],
+            )

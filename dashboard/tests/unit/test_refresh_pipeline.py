@@ -161,3 +161,62 @@ def test_milvus_reindex_skip_when_embedding_call_fails(
     ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
     assert ev.status == "skip"
     assert "embedding error" in ev.detail.lower()
+
+
+def test_stream_yields_all_5_steps_in_order(
+    pipeline: RefreshPipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("HARNESS_BOARD_MILVUS_HOST", raising=False)
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+
+    import asyncio
+
+    async def _collect() -> list[StepEvent]:
+        return [e async for e in pipeline.stream()]
+
+    events = asyncio.run(_collect())
+    # 每 step 一 running + 一 done|skip|error,共 5×2 = 10
+    assert len(events) == 10
+    expected_order = [
+        "chip_resolve",
+        "chip_resolve",
+        "seed_ingest",
+        "seed_ingest",
+        "decision_extract",
+        "decision_extract",
+        "milvus_reindex",
+        "milvus_reindex",
+        "snapshot_finalize",
+        "snapshot_finalize",
+    ]
+    assert [e.step for e in events] == expected_order
+    assert [e.status for e in events[::2]] == ["running"] * 5
+    # milvus skip,其他 done
+    statuses = [e.status for e in events[1::2]]
+    assert statuses == ["done", "done", "done", "skip", "done"]
+
+
+def test_stream_yields_error_event_when_chip_resolve_raises(
+    pipeline: RefreshPipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("HARNESS_BOARD_MILVUS_HOST", raising=False)
+
+    def _boom(_self: object) -> StepEvent:
+        raise RuntimeError("chip resolve boom")
+
+    monkeypatch.setattr(RefreshPipeline, "_chip_resolve_step", _boom)
+
+    import asyncio
+
+    async def _collect() -> list[StepEvent]:
+        return [e async for e in pipeline.stream()]
+
+    events = asyncio.run(_collect())
+    # chip_resolve running + error,但后续 step 仍然跑(spec § 2.4 不取消,只标 step error)
+    chip_events = [e for e in events if e.step == "chip_resolve"]
+    assert len(chip_events) == 2
+    assert chip_events[0].status == "running"
+    assert chip_events[1].status == "error"
+    assert "boom" in chip_events[1].detail
+    # snapshot_finalize 总是跑
+    assert any(e.step == "snapshot_finalize" and e.status == "done" for e in events)
