@@ -8,7 +8,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -866,44 +866,107 @@ async def post_flashcard_review(request: Request) -> HTMLResponse:
     )
 
 
-async def flashcards_stats(request: Request) -> HTMLResponse:  # noqa: ARG001
-    """V5 学习统计页 — 总数 / 已掌握 / 维度分布。spec § 5.5。"""
+def _compute_streak_days(review_dates: list[date]) -> int:
+    """连续复习天数 — 从今天往前数,直到第一个 gap。"""
+    if not review_dates:
+        return 0
+    unique = sorted(set(review_dates), reverse=True)
+    today = datetime.now(UTC).date()
+    streak = 0
+    expected = today
+    for d in unique:
+        if d == expected:
+            streak += 1
+            expected = expected - timedelta(days=1)
+        elif d == expected + timedelta(days=1):
+            # 今天没复习但昨天复习了 — streak 从昨天起算
+            if streak == 0:
+                expected = d
+                streak = 1
+                expected = expected - timedelta(days=1)
+            else:
+                break
+        else:
+            break
+    return streak
+
+
+async def flashcards_stats_json(_request: Request) -> JSONResponse:
+    """Plan 3 — flashcards_stats.html 的数据 endpoint。"""
     conn = open_db(DB_PATH)
     try:
-        cur = conn.execute(
-            "SELECT COUNT(*) as total, "
-            "SUM(CASE WHEN json_extract(srs_state, '$.repetition') = 0 THEN 1 ELSE 0 END) as new_n, "
-            "SUM(CASE WHEN json_extract(srs_state, '$.confidence') >= 4 THEN 1 ELSE 0 END) as mastered, "
-            "AVG(json_extract(srs_state, '$.confidence')) as avg_conf "
-            "FROM flashcards"
-        )
-        row = cur.fetchone()
-        # 维度分布(基于 cap_id 前缀,粗略)
-        dim_cur = conn.execute(
-            "SELECT substr(cap_id, 1, instr(cap_id, '.') - 1) as dim, COUNT(*) as n "
-            "FROM flashcards WHERE instr(cap_id, '.') > 0 "
-            "GROUP BY dim ORDER BY n DESC"
-        )
-        dim_dist = [(r["dim"], r["n"]) for r in dim_cur.fetchall()]
+        fcs = FlashcardRepo(conn).get_all()
     finally:
         conn.close()
 
-    total = row["total"] or 0
-    new_n = row["new_n"] or 0
-    mastered = row["mastered"] or 0
-    avg_conf = round(row["avg_conf"] or 0.0, 2)
-
-    template = templates.get_template("flashcards_stats.html")
-    return HTMLResponse(
-        template.render(
-            total=total,
-            new=new_n,
-            mastered=mastered,
-            avg_conf=avg_conf,
-            dim_dist=dim_dist,
-            active_nav="flashcards",
+    total = len(fcs)
+    if total == 0:
+        return JSONResponse(
+            {
+                "total": 0,
+                "today": 0,
+                "avg_confidence": 0.0,
+                "streak_days": 0,
+                "timeline": [],
+                "scatter": [],
+            }
         )
+
+    today_utc = datetime.now(UTC).date()
+    reviewed = [f for f in fcs if f.srs_state.last_reviewed_at is not None]
+    today_count = sum(
+        1
+        for f in reviewed
+        if f.srs_state.last_reviewed_at and f.srs_state.last_reviewed_at.date() == today_utc
     )
+
+    # 平均 confidence(只算已复习过的;空则 0)
+    if reviewed:
+        avg_conf = round(sum(f.srs_state.confidence for f in reviewed) / len(reviewed), 2)
+    else:
+        avg_conf = 0.0
+
+    # 连续天数
+    streak = _compute_streak_days(
+        [f.srs_state.last_reviewed_at.date() for f in reviewed if f.srs_state.last_reviewed_at]
+    )
+
+    # 时间线:过去 30 天,每个 reviewed flashcard 一个点
+    cutoff = today_utc - timedelta(days=30)
+    timeline = []
+    for f in reviewed:
+        if f.srs_state.last_reviewed_at is None:
+            continue
+        d = f.srs_state.last_reviewed_at.date()
+        if d < cutoff:
+            continue
+        timeline.append({"date": d.isoformat(), "grade": f.srs_state.confidence})
+    timeline.sort(key=lambda x: x["date"])
+
+    # 散点:每卡 (dim, conf);dim 由 cap_id 前缀派生 — 跟 capabilities.yaml 维度一致
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    cap_to_dim = {c.id: c.dimension for c in caps_cfg}
+    scatter = []
+    for f in fcs:
+        dim = cap_to_dim.get(f.cap_id, "unknown")
+        scatter.append({"dim": dim, "conf": f.srs_state.confidence})
+
+    return JSONResponse(
+        {
+            "total": total,
+            "today": today_count,
+            "avg_confidence": avg_conf,
+            "streak_days": streak,
+            "timeline": timeline,
+            "scatter": scatter,
+        }
+    )
+
+
+async def flashcards_stats(_request: Request) -> HTMLResponse:  # noqa: ARG001
+    """V5 学习统计页 — 只 render 静态壳,数据 JS 拉 /api/flashcards/stats.json。"""
+    template = templates.get_template("flashcards_stats.html")
+    return HTMLResponse(template.render(active_nav="flashcards"))
 
 
 @asynccontextmanager
@@ -943,6 +1006,7 @@ app = Starlette(
         Route("/cap/{cap_id}/ai_draft/{field}", post_ai_draft, methods=["POST"]),
         Route("/flashcards/today", flashcards_today),
         Route("/flashcards/stats", flashcards_stats),
+        Route("/api/flashcards/stats.json", flashcards_stats_json),
         Route(
             "/flashcards/{flashcard_id:path}/review",
             post_flashcard_review,
