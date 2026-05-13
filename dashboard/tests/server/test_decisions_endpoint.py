@@ -10,8 +10,8 @@ def test_get_decisions_renders_cards() -> None:
         assert r.status_code == 200
         body = r.text
         assert 'class="decision-card"' in body
-        # active class 在第三 tab(决策)上
-        assert 'class="active">决策</a>' in body or 'active">决策' in body
+        # active class 在 nav-rail decisions 项上(nav-item active)
+        assert "nav-item active" in body or 'active" title="决策"' in body
 
 
 def test_post_decision_note() -> None:

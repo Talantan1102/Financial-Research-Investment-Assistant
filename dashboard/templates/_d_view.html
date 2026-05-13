@@ -1,19 +1,42 @@
-<div class="layer-grid">
+{% set DIM_SHORT = {
+  'prompt_context':     'prompt',
+  'tools_function':     'tools',
+  'orchestration':      'orch',
+  'memory':             'memory',
+  'rag_knowledge':      'rag',
+  'guardrails':         'guard',
+  'eval_observability': 'eval',
+  'cost_routing':       'cost'
+} %}
+<div class="section-marker">
+  <span class="sm-num">§ 01</span>
+  <span class="sm-title">Grid · 8 维 × {{ snap.total }} capability</span>
+  <span class="sm-desc">非均匀栅格 · lit / wip / todo · hover 浮起</span>
+</div>
+
+<div class="layer-stack">
   {% for L in snap.layers %}
-    <article class="layer-card" id="layer-{{ L.id }}">
-      <div class="layer-head">
-        <span class="layer-num">{{ L.number }}</span>
-        <span class="layer-count">{{ L.lit }}/{{ L.total }}</span>
-      </div>
-      <div class="layer-name">
-        <strong>{{ L.name_cn }}</strong>
-        <small>· {{ L.name_en }}</small>
-      </div>
-      <div class="cap-list">
-        {% for c in L.capabilities %}
-          {% include "_capability_chip.html" %}
-        {% endfor %}
-      </div>
-    </article>
+  {% set short = DIM_SHORT.get(L.id, L.id) %}
+  <article class="layer" id="layer-{{ L.id }}">
+    <span class="numeral">{{ L.number }}</span>
+    <div class="l-eyebrow">
+      <span class="dot dot-{{ short }}"></span>
+      {{ L.name_en }}
+    </div>
+    <div class="l-title">
+      {{ L.name_cn }}
+      <span class="en">{{ L.name_en }}</span>
+    </div>
+    <div class="l-stat">
+      <span>{{ L.lit }}{% if L.wip %} + {{ L.wip }}wip{% endif %} / {{ L.total }}</span>
+      <span class="bar"><i style="width:{{ ((L.lit + L.wip * 0.5) / L.total * 100)|int if L.total else 0 }}%"></i></span>
+      <span>{{ "%.2f"|format((L.lit / L.total) if L.total else 0) }}</span>
+    </div>
+    <div class="chips">
+      {% for c in L.capabilities %}
+        {% include "_capability_chip.html" %}
+      {% endfor %}
+    </div>
+  </article>
   {% endfor %}
 </div>

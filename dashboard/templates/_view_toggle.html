@@ -1,5 +1,10 @@
 <nav class="view-toggle">
-  <a href="/?view=d" class="{% if active_view == 'd' %}active{% endif %}">D 维度</a>
-  <a href="/?view=b" class="{% if active_view == 'b' %}active{% endif %}">B Kanban</a>
-  <a href="/decisions" class="{% if active_view == 'decisions' %}active{% endif %}">决策</a>
+  <a href="/?view=d" class="view-tab{% if view_mode == 'd' or not view_mode %} active{% endif %}">
+    <span class="tab-num">D</span>
+    <span class="tab-name">维度</span>
+  </a>
+  <a href="/?view=b" class="view-tab{% if view_mode == 'b' %} active{% endif %}">
+    <span class="tab-num">B</span>
+    <span class="tab-name">Kanban</span>
+  </a>
 </nav>
