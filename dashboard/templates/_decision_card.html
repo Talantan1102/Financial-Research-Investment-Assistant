@@ -1,18 +1,21 @@
 <article class="decision-card"
+         id="dec_{{ d.id }}"
          data-layer="{{ d.layer }}"
          data-state="{{ d.state }}"
          data-text="{{ (d.title + ' ' + d.why)|lower }}">
-  <header class="decision-head">
-    <span class="decision-date">{{ d.date }}</span>
-    <span class="decision-version">{{ d.version }}</span>
-    <span class="decision-layer">[{{ d.layer }}]</span>
-  </header>
-  <h3 class="decision-title">{{ d.title }}</h3>
-  {% if d.why %}<p class="decision-why"><strong>Why:</strong> {{ d.why }}</p>{% endif %}
-  <p class="decision-refs">
-    refs:
-    {% for ref in d.refs %}<code>{{ ref }}</code>{% endfor %}
-  </p>
+  <div class="head">
+    <span class="commit">{{ d.version|default('—') }}</span>
+    <span class="when">{{ d.date }}</span>
+  </div>
+  <h4>{{ d.title }}</h4>
+  {% if d.why %}<p class="summary">{{ d.why }}</p>{% endif %}
+  <div class="tags">
+    <span class="tag dim">{{ d.layer }}</span>
+    {% for ref in d.refs %}
+      <span class="tag layer">{{ ref }}</span>
+    {% endfor %}
+    <span class="tag layer">{{ d.state }}</span>
+  </div>
   {% with decision_id=d.id, note=note_lookup.get(d.id, '') %}
     {% include "_decision_note_form.html" %}
   {% endwith %}

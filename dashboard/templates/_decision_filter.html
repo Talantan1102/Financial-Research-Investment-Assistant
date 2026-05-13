@@ -1,17 +1,34 @@
-<section class="decision-filter">
-  <div class="filter-group filter-layer-group">
+<aside class="decisions-side">
+  <h5>维度</h5>
+  <ul class="filter-list filter-dim-list">
+    <li class="filter-item active" data-value="">
+      All
+      <span class="filter-count">{{ decisions|length }}</span>
+    </li>
     {% for dim in main_dims %}
-      <button class="filter-chip filter-layer-chip" data-value="{{ dim.id }}">
+      <li class="filter-item filter-layer-chip" data-value="{{ dim.id }}">
         {{ dim.number }} {{ dim.name_cn }}
-      </button>
+        <span class="filter-count">{{ (dim_counts or {})[dim.id]|default(0) }}</span>
+      </li>
     {% endfor %}
-    <button class="filter-chip filter-layer-chip" data-value="META">META</button>
-  </div>
-  <div class="filter-group filter-state-group">
-    <button class="filter-chip filter-state-chip" data-value="active">active</button>
-    <button class="filter-chip filter-state-chip" data-value="deprecated">deprecated</button>
-  </div>
-  <div class="filter-group filter-keyword-group">
-    <input class="filter-keyword" type="text" placeholder="关键字搜索...">
-  </div>
-</section>
+    <li class="filter-item filter-layer-chip" data-value="META">
+      META
+      <span class="filter-count">{{ (dim_counts or {})['META']|default(0) }}</span>
+    </li>
+  </ul>
+
+  <h5>层级</h5>
+  <ul class="filter-list filter-state-list">
+    <li class="filter-item filter-state-chip" data-value="active">
+      active
+      <span class="filter-count">{{ (state_counts or {})['active']|default(0) }}</span>
+    </li>
+    <li class="filter-item filter-state-chip" data-value="deprecated">
+      deprecated
+      <span class="filter-count">{{ (state_counts or {})['deprecated']|default(0) }}</span>
+    </li>
+  </ul>
+
+  <h5>关键字</h5>
+  <input class="filter-keyword" type="text" placeholder="搜索...">
+</aside>
