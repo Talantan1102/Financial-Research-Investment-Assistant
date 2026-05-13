@@ -60,7 +60,7 @@ def build_graph_payload(
             }
         )
 
-    # edges — 无向 dedupe + self-loop 去
+    # edges — 无向 dedupe + self-loop 去 + confidence 加权
     edge_pairs: set[tuple[str, str]] = set()
     for dc in deep_cards:
         if dc.cap_id not in visible_ids:
@@ -72,8 +72,18 @@ def build_graph_payload(
                 continue
             pair = (dc.cap_id, other) if dc.cap_id <= other else (other, dc.cap_id)
             edge_pairs.add(pair)
+
+    def _edge_weight(a: str, b: str) -> float:
+        """两端 confidence 取 min;≥ 4 → 1.2 实线主线,否则 0.6 半透。"""
+        ca = cards_by_id.get(a)
+        cb = cards_by_id.get(b)
+        conf_a = ca.srs_state.confidence if ca else 0
+        conf_b = cb.srs_state.confidence if cb else 0
+        return 1.2 if min(conf_a, conf_b) >= 4 else 0.6
+
     edges: list[dict[str, Any]] = [
-        {"data": {"source": s, "target": t, "id": f"{s}__{t}"}} for s, t in sorted(edge_pairs)
+        {"data": {"source": s, "target": t, "id": f"{s}__{t}", "weight": _edge_weight(s, t)}}
+        for s, t in sorted(edge_pairs)
     ]
 
     return {"nodes": nodes, "edges": edges}

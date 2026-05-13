@@ -133,3 +133,116 @@ def test_graph_filter_low_confidence_only() -> None:
     payload = build_graph_payload(caps, cards, only_low_confidence=True)
     ids = {n["data"]["id"] for n in payload["nodes"]}
     assert "x.a" in ids and "x.b" not in ids
+
+
+def test_edge_weight_both_endpoints_high_conf() -> None:
+    """两端 conf ≥ 4 → weight 1.2(实线主线)"""
+    caps = [
+        Capability(
+            id="01.a",
+            dimension="prompt_context",
+            name_cn="A",
+            name_en="A",
+            status="lit",
+            derived_status="lit",
+        ),
+        Capability(
+            id="02.b",
+            dimension="tools_function",
+            name_cn="B",
+            name_en="B",
+            status="lit",
+            derived_status="lit",
+        ),
+    ]
+    cards = [
+        DeepCard(cap_id="01.a", linked_capabilities=["02.b"], srs_state=SrsState(confidence=4)),
+        DeepCard(cap_id="02.b", linked_capabilities=["01.a"], srs_state=SrsState(confidence=5)),
+    ]
+    payload = build_graph_payload(caps, cards)
+    assert payload["edges"][0]["data"]["weight"] == 1.2
+
+
+def test_edge_weight_one_endpoint_low_conf() -> None:
+    """一端 conf < 4 → weight 0.6(半透次要)"""
+    caps = [
+        Capability(
+            id="01.a",
+            dimension="prompt_context",
+            name_cn="A",
+            name_en="A",
+            status="lit",
+            derived_status="lit",
+        ),
+        Capability(
+            id="02.b",
+            dimension="tools_function",
+            name_cn="B",
+            name_en="B",
+            status="lit",
+            derived_status="lit",
+        ),
+    ]
+    cards = [
+        DeepCard(cap_id="01.a", linked_capabilities=["02.b"], srs_state=SrsState(confidence=2)),
+        DeepCard(cap_id="02.b", linked_capabilities=["01.a"], srs_state=SrsState(confidence=5)),
+    ]
+    payload = build_graph_payload(caps, cards)
+    assert payload["edges"][0]["data"]["weight"] == 0.6
+
+
+def test_edge_weight_both_low_conf() -> None:
+    """两端都低 conf → weight 0.6"""
+    caps = [
+        Capability(
+            id="01.a",
+            dimension="prompt_context",
+            name_cn="A",
+            name_en="A",
+            status="lit",
+            derived_status="lit",
+        ),
+        Capability(
+            id="02.b",
+            dimension="tools_function",
+            name_cn="B",
+            name_en="B",
+            status="lit",
+            derived_status="lit",
+        ),
+    ]
+    cards = [
+        DeepCard(cap_id="01.a", linked_capabilities=["02.b"], srs_state=SrsState(confidence=1)),
+        DeepCard(cap_id="02.b", linked_capabilities=["01.a"], srs_state=SrsState(confidence=3)),
+    ]
+    payload = build_graph_payload(caps, cards)
+    assert payload["edges"][0]["data"]["weight"] == 0.6
+
+
+def test_edge_weight_one_endpoint_no_deep_card() -> None:
+    """一端无 DeepCard → conf=0 → weight 0.6"""
+    caps = [
+        Capability(
+            id="01.a",
+            dimension="prompt_context",
+            name_cn="A",
+            name_en="A",
+            status="lit",
+            derived_status="lit",
+        ),
+        Capability(
+            id="02.b",
+            dimension="tools_function",
+            name_cn="B",
+            name_en="B",
+            status="todo",
+            derived_status="todo",
+        ),
+    ]
+    cards = [
+        DeepCard(cap_id="01.a", linked_capabilities=["02.b"], srs_state=SrsState(confidence=5)),
+    ]
+    payload = build_graph_payload(caps, cards)
+    # edge 应仍存在(02.b 在 visible_ids)— weight 走低分支
+    assert len(payload["edges"]) == 1
+    assert payload["edges"][0]["data"]["weight"] == 0.6
