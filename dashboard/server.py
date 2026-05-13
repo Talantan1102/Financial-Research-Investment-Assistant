@@ -941,7 +941,7 @@ async def flashcards_stats_json(_request: Request) -> JSONResponse:
         if d < cutoff:
             continue
         timeline.append({"date": d.isoformat(), "grade": f.srs_state.confidence})
-    timeline.sort(key=lambda x: x["date"])
+    timeline.sort(key=lambda x: str(x["date"]))
 
     # 散点:每卡 (dim, conf);dim 由 cap_id 前缀派生 — 跟 capabilities.yaml 维度一致
     caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
