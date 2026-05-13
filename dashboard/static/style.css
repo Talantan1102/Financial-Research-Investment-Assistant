@@ -1161,3 +1161,400 @@ body::before {
   background: var(--teal-soft);
   color: var(--teal-glow);
 }
+
+/* =========================================================
+   Phase 5: Flashcard 3D flip + Stats viz
+   ========================================================= */
+
+/* ---- Flashcard toolbar ---- */
+.flash-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--hair);
+}
+
+.flash-toolbar .flash-count {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--fg-mute);
+  letter-spacing: 0.08em;
+}
+
+.flash-toolbar .flash-count strong {
+  color: var(--amber);
+  font-weight: 600;
+  font-family: var(--display);
+  font-size: 15px;
+}
+
+.flash-toolbar .flash-stats-link {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--teal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  letter-spacing: 0.05em;
+  transition: color 200ms;
+}
+
+.flash-toolbar .flash-stats-link:hover { color: var(--teal-glow); }
+
+/* ---- Progress indicator ---- */
+.flash-progress {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 24px;
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--fg-mute);
+  letter-spacing: 0.01em;
+}
+
+.flash-progress em {
+  color: var(--amber);
+  font-style: italic;
+  font-size: 22px;
+  font-weight: 400;
+  font-variation-settings: "opsz" 48;
+}
+
+.flash-progress .fp-sep,
+.flash-progress .fp-total {
+  color: var(--fg-mute);
+}
+
+/* ---- Stage: card deck + rate aside ---- */
+.flash-stage {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 32px;
+  align-items: start;
+}
+
+/* ---- Card deck perspective wrapper ---- */
+.flash-card-deck {
+  perspective: 1600px;
+}
+
+/* ---- Individual card slot ---- */
+.flash-card {
+  height: 360px;
+  margin-bottom: 20px;
+}
+
+/* ---- 3D frame ---- */
+.flash-card-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.flash-card-frame .inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform-style: preserve-3d;
+  cursor: pointer;
+}
+
+.flash-card.flipped .inner,
+.flash-card-frame.flipped .inner {
+  transform: rotateY(180deg);
+}
+
+/* ---- Card faces ---- */
+.flash-card-frame .face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  background: linear-gradient(160deg, var(--paper-2) 0%, var(--paper) 100%);
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  padding: 44px 48px;
+  display: flex;
+  flex-direction: column;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.04),
+    0 24px 48px -24px rgba(0,0,0,0.6);
+}
+
+.flash-card-frame .face.back {
+  transform: rotateY(180deg);
+}
+
+/* ---- Face internals ---- */
+.flash-card-frame .face .corner {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--fg-faint);
+  letter-spacing: 0.2em;
+}
+
+.flash-card-frame .face .eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--amber);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.flash-card-frame .face h2 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 28px;
+  line-height: 1.22;
+  color: var(--fg);
+  margin: 0 0 20px;
+  font-variation-settings: "opsz" 72;
+  letter-spacing: -0.01em;
+}
+
+.flash-card-frame .face .body {
+  font-family: var(--serif-cn);
+  font-size: 15.5px;
+  line-height: 1.85;
+  color: var(--fg-dim);
+  flex: 1;
+  letter-spacing: 0.005em;
+}
+
+.flash-card-frame .face .footnote {
+  margin-top: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  letter-spacing: 0.12em;
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ---- Grade row (inside card, hidden until flip) ---- */
+.grade-row {
+  position: absolute;
+  bottom: -56px;
+  left: 0; right: 0;
+  display: flex;
+  gap: 6px;
+}
+
+/* ---- Rating aside ---- */
+.flash-rate {
+  position: sticky;
+  top: 28px;
+  background: var(--paper);
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  padding: 24px;
+}
+
+.flash-rate h4 {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin: 0 0 14px;
+}
+
+.flash-rate .grade {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+
+.flash-rate .grade .grade-btn,
+.grade-row .grade-btn {
+  aspect-ratio: 1;
+  background: transparent;
+  border: 1px solid var(--hair);
+  border-radius: 50%;
+  color: var(--fg-mute);
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 200ms;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flash-rate .grade .grade-btn:hover,
+.grade-row .grade-btn:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+  background: rgba(200,148,86,0.06);
+  transform: translateY(-2px);
+}
+
+.flash-rate .grade .grade-btn[data-g="5"],
+.grade-row .grade-btn[data-g="5"] {
+  color: var(--lit);
+  border-color: rgba(148,184,122,0.3);
+}
+
+.flash-rate .grade .grade-btn[data-g="0"],
+.grade-row .grade-btn[data-g="0"] {
+  color: var(--danger);
+  border-color: rgba(166,69,69,0.3);
+}
+
+.flash-rate .hint {
+  margin-top: 16px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+/* ---- Empty state ---- */
+.flash-empty {
+  padding: 48px 0;
+  font-family: var(--serif-cn);
+  font-size: 15px;
+  color: var(--fg-mute);
+  text-align: center;
+}
+
+.flash-empty a {
+  color: var(--teal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* =========================================================
+   Phase 5: Stats page
+   ========================================================= */
+
+.stats-page {
+  padding-top: 8px;
+}
+
+.stats-head {
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+
+.stats-title {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 28px;
+  color: var(--fg);
+  margin: 0;
+  font-variation-settings: "opsz" 60;
+  letter-spacing: -0.01em;
+}
+
+.btn-back {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--teal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  letter-spacing: 0.05em;
+  transition: color 200ms;
+}
+
+.btn-back:hover { color: var(--teal-glow); }
+
+/* ---- 4-stat row ---- */
+.stats-numbers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 40px;
+}
+
+.stat-num {
+  background: var(--paper);
+  border: 1px solid var(--hair);
+  border-radius: 6px;
+  padding: 22px 20px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stat-num .num {
+  font-family: var(--display);
+  font-size: 38px;
+  line-height: 1;
+  color: var(--amber);
+  letter-spacing: -0.02em;
+  font-weight: 400;
+  font-variation-settings: "opsz" 72;
+}
+
+.stat-num .label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+
+/* ---- Ring chart ---- */
+.stats-ring-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 40px;
+}
+
+#stats-ring {
+  display: block;
+}
+
+.ring-cap {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-faint);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* ---- Timeline ---- */
+.stats-timeline-wrap {
+  margin-bottom: 40px;
+}
+
+.stats-sub {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--fg-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  margin: 0 0 12px;
+  font-weight: 500;
+}
+
+#stats-timeline {
+  width: 100%;
+  height: 80px;
+  display: block;
+}
+
+/* ---- Scatter ---- */
+.stats-scatter-wrap {
+  margin-bottom: 40px;
+}
+
+#stats-scatter {
+  display: block;
+  max-width: 600px;
+}
