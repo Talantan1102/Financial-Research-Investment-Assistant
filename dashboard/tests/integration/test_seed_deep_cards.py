@@ -60,3 +60,36 @@ def test_seed_load_direct_into_tmp_db(tmp_path: Path) -> None:
     # 校验闪卡数 — 每 card 至少 tradeoff 必填,所以 ≥ 30
     all_fcs = fc_repo.get_all()
     assert len(all_fcs) >= 30
+
+
+def test_cli_force_flag_overwrites(tmp_path: Path) -> None:
+    """CLI --force 委托 SeedIngestService(force=True)。"""
+    seed_path = PROJECT_ROOT / "dashboard" / "data" / "deep_cards_seed.jsonl"
+    db = tmp_path / "board.db"
+
+    # 先非 force 跑一次
+    rc = sd.main(["--seed", str(seed_path), "--db", str(db)])
+    assert rc == 0
+
+    # 手动改一条 row
+    from dashboard.derive.deep_card_types import DeepCard
+
+    conn = open_db(db)
+    try:
+        DeepCardRepo(conn).upsert(
+            DeepCard(cap_id="memory.long_term_memory", what="USER_EDITED_BEFORE_FORCE")
+        )
+    finally:
+        conn.close()
+
+    # --force 跑一次 → 应覆盖
+    rc = sd.main(["--seed", str(seed_path), "--db", str(db), "--force"])
+    assert rc == 0
+
+    conn = open_db(db)
+    try:
+        survived = DeepCardRepo(conn).get("memory.long_term_memory")
+    finally:
+        conn.close()
+    assert survived is not None
+    assert survived.what != "USER_EDITED_BEFORE_FORCE"
