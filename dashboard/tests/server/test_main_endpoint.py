@@ -132,15 +132,15 @@ def test_post_override_unknown_cap_id_returns_404_no_write() -> None:
         assert "nope.fake" not in overrides
 
 
-def test_post_refresh_invalidates_and_redirects() -> None:
-    """POST /refresh → 302 to /,snapshot 被清。"""
+def test_post_refresh_returns_sse_event_stream() -> None:
+    """POST /refresh → text/event-stream(spec § 2,Plan 1 起 breaking change)。"""
     with TestClient(app) as client:
-        # 触发 build
         client.get("/")
-        # refresh
-        r = client.post("/refresh", follow_redirects=False)
-        assert r.status_code == 302
-        assert r.headers["location"] == "/"
+        with client.stream("POST", "/refresh") as r:
+            assert r.status_code == 200
+            assert r.headers["content-type"].startswith("text/event-stream")
+            body = "".join(chunk.decode("utf-8") for chunk in r.iter_bytes())
+            assert "event: done" in body
 
 
 def test_index_shows_app_shell_row() -> None:

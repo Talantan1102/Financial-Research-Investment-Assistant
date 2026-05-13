@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -11,18 +15,20 @@ from typing import cast
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-
-logger = logging.getLogger(__name__)
+from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
+
+logger = logging.getLogger(__name__)
 
 from dashboard.derive.app_shell_stat import compute_app_shell_stat
 from dashboard.derive.capability_resolver import load_capabilities, resolve_status
 from dashboard.derive.decision_extractor import extract_all, resolve_memory_path
 from dashboard.derive.deep_card_types import Flashcard
 from dashboard.derive.path_router import load_dimensions
+from dashboard.derive.refresh_pipeline import RefreshPipeline
+from dashboard.derive.seed_ingest import SeedIngestService
 from dashboard.derive.snapshot_builder import build_snapshot
 from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
 from dashboard.state.db import open_db
@@ -43,6 +49,7 @@ DASHBOARD_ROOT = Path(__file__).parent
 PROJECT_ROOT = DASHBOARD_ROOT.parent
 CONFIG_DIR = DASHBOARD_ROOT / "config"
 DB_PATH = PROJECT_ROOT / "backend" / "data" / "board.db"
+SEED_PATH = DASHBOARD_ROOT / "data" / "deep_cards_seed.jsonl"
 
 templates = Jinja2Templates(directory=str(DASHBOARD_ROOT / "templates"))
 
@@ -251,14 +258,44 @@ async def post_override(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
-async def post_refresh(_request: Request) -> Response:
-    """显式 invalidate snapshot,302 redirect 到 /。"""
-    conn = open_db(DB_PATH)
-    try:
-        SnapshotRepo(conn).invalidate()
-    finally:
-        conn.close()
-    return RedirectResponse("/", status_code=302)
+async def post_refresh(_request: Request) -> StreamingResponse:
+    """SSE 5-step pipeline。spec § 2.1 / § 2.4。
+
+    Breaking change(v0.9.6):不再 302 redirect 到 /,改为 text/event-stream。
+    """
+    pipeline = RefreshPipeline(
+        project_root=PROJECT_ROOT,
+        config_dir=CONFIG_DIR,
+        db_path=DB_PATH,
+        seed_path=SEED_PATH,
+    )
+
+    async def _gen() -> AsyncIterator[bytes]:
+        import time as _time
+
+        t0 = _time.perf_counter()
+        summary = {"done": 0, "skip": 0, "error": 0}
+        snapshot_refreshed_at = ""
+        async for ev in pipeline.stream():
+            if ev.status in summary:
+                summary[ev.status] += 1
+            if ev.step == "snapshot_finalize" and ev.status == "done":
+                # detail = "refreshed_at <iso>"
+                snapshot_refreshed_at = ev.detail.replace("refreshed_at ", "", 1)
+            payload = json.dumps(asdict(ev), ensure_ascii=False)
+            yield f"event: step\ndata: {payload}\n\n".encode()
+        total_ms = int((_time.perf_counter() - t0) * 1000)
+        done_payload = json.dumps(
+            {
+                "total_ms": total_ms,
+                "snapshot_refreshed_at": snapshot_refreshed_at,
+                "steps_summary": summary,
+            },
+            ensure_ascii=False,
+        )
+        yield f"event: done\ndata: {done_payload}\n\n".encode()
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 async def _build_milvus_client() -> object:
@@ -863,6 +900,23 @@ async def flashcards_stats(request: Request) -> HTMLResponse:  # noqa: ARG001
     )
 
 
+@asynccontextmanager
+async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+    """startup:db DeepCard 数 < seed 总数时 insert-if-missing 跑一次。
+
+    spec § 2.5。不删除任何 row,保护 SRS flashcard 进度。
+    """
+    try:
+        SeedIngestService(
+            seed_path=SEED_PATH,
+            db_path=DB_PATH,
+            config_dir=CONFIG_DIR,
+        ).run_once_if_underfilled()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("lifespan seed ingest skipped due to: %s", e)
+    yield
+
+
 app = Starlette(
     routes=[
         Route("/", index),
@@ -899,6 +953,7 @@ app = Starlette(
             name="static",
         ),
     ],
+    lifespan=lifespan,
 )
 
 
