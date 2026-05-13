@@ -60,3 +60,104 @@ def test_snapshot_finalize_step_returns_done(pipeline: RefreshPipeline) -> None:
     assert ev.step == "snapshot_finalize"
     assert ev.status == "done"
     assert "refreshed_at" in ev.detail or "snapshot" in ev.detail.lower()
+
+
+def test_milvus_reindex_skip_when_host_missing(
+    pipeline: RefreshPipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("HARNESS_BOARD_MILVUS_HOST", raising=False)
+
+    import asyncio
+
+    ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
+    assert ev.step == "milvus_reindex"
+    assert ev.status == "skip"
+    assert "milvus disabled" in ev.detail.lower()
+
+
+def test_milvus_reindex_skip_when_embedding_key_missing(
+    pipeline: RefreshPipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HARNESS_BOARD_MILVUS_HOST", "localhost")
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setenv("EMBEDDING_MODE", "qwen")
+
+    import asyncio
+
+    ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
+    assert ev.status == "skip"
+    assert "embedding" in ev.detail.lower() and "missing" in ev.detail.lower()
+
+
+def test_milvus_reindex_skip_when_milvus_unreachable(
+    pipeline: RefreshPipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HARNESS_BOARD_MILVUS_HOST", "localhost")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "fake-key-for-test")
+    monkeypatch.setenv("EMBEDDING_MODE", "qwen")
+
+    async def _raise_connection_error(self_: object) -> None:
+        raise ConnectionError("milvus boom")
+
+    monkeypatch.setattr(
+        "dashboard.state.milvus_collection.DeepCardMilvusClient.ensure_collection",
+        _raise_connection_error,
+    )
+    # 防真的连接 Milvus(__init__ 也连):patch __init__ no-op
+    monkeypatch.setattr(
+        "dashboard.state.milvus_collection.DeepCardMilvusClient.__init__",
+        lambda self, **kw: None,
+    )
+
+    import asyncio
+
+    ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
+    assert ev.status == "skip"
+    assert "unreachable" in ev.detail.lower()
+
+
+def test_milvus_reindex_skip_when_embedding_call_fails(
+    pipeline: RefreshPipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HARNESS_BOARD_MILVUS_HOST", "localhost")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "fake-key-for-test")
+    monkeypatch.setenv("EMBEDDING_MODE", "qwen")
+
+    # 让 ensure_collection 不抛(假装连上)
+    monkeypatch.setattr(
+        "dashboard.state.milvus_collection.DeepCardMilvusClient.__init__",
+        lambda self, **kw: None,
+    )
+
+    async def _noop_ensure(self_: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "dashboard.state.milvus_collection.DeepCardMilvusClient.ensure_collection", _noop_ensure
+    )
+
+    class _BoomEmbedder:
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            raise RuntimeError("boom embedding")
+
+    monkeypatch.setattr(
+        "app.services.embedding_factory.build_embedding_service_from_env",
+        lambda: _BoomEmbedder(),
+    )
+
+    # 先塞一张 deep_card,否则 cards 列表空就直接 done with 0 upserts
+    from dashboard.derive.deep_card_types import DeepCard
+    from dashboard.state.db import open_db
+    from dashboard.state.repositories import DeepCardRepo
+
+    conn = open_db(pipeline.db_path)
+    try:
+        DeepCardRepo(conn).upsert(DeepCard(cap_id="memory.long_term_memory", what="x"))
+    finally:
+        conn.close()
+
+    import asyncio
+
+    ev = asyncio.run(pipeline._milvus_reindex_step())  # type: ignore[attr-defined]
+    assert ev.status == "skip"
+    assert "embedding error" in ev.detail.lower()

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -113,6 +114,88 @@ class RefreshPipeline:
             detail=f"{len(decisions)} entries",
             duration_ms=dt,
         )
+
+    async def _milvus_reindex_step(self) -> StepEvent:
+        """全量 reindex DeepCard → Milvus,4 种 skip 降级(spec § 2.3)。"""
+        t0 = time.perf_counter()
+
+        def _ev(status: StepStatus, detail: str) -> StepEvent:
+            return StepEvent(
+                step="milvus_reindex",
+                status=status,
+                label=_LABELS["milvus_reindex"],
+                detail=detail,
+                duration_ms=int((time.perf_counter() - t0) * 1000),
+            )
+
+        # 1. host 未设
+        host = os.getenv("HARNESS_BOARD_MILVUS_HOST")
+        if not host:
+            return _ev("skip", "milvus disabled")
+
+        # 2. embedding key 缺失(qwen mode 需 DASHSCOPE_API_KEY)
+        mode = os.getenv("EMBEDDING_MODE", "qwen")
+        if mode == "qwen" and not os.getenv("DASHSCOPE_API_KEY"):
+            return _ev("skip", "embedding key missing")
+
+        port = int(os.getenv("HARNESS_BOARD_MILVUS_PORT", "19530"))
+
+        # 3. Milvus 不可达
+        try:
+            from dashboard.state.milvus_collection import DeepCardMilvusClient, embedding_text
+
+            client = DeepCardMilvusClient(host=host, port=port)
+            await client.ensure_collection()
+        except ConnectionError as e:
+            logger.warning("milvus_reindex skip (connection): %s", e)
+            return _ev("skip", "milvus unreachable")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("milvus_reindex skip (collection init): %s", e)
+            return _ev("skip", f"milvus unreachable: {str(e)[:60]}")
+
+        # 4. embedding 调用失败
+        try:
+            from app.services.embedding_factory import build_embedding_service_from_env
+
+            from dashboard.derive.capability_resolver import load_capabilities
+            from dashboard.state.db import open_db
+            from dashboard.state.repositories import DeepCardRepo
+
+            embedder = build_embedding_service_from_env()
+
+            conn = open_db(self.db_path)
+            try:
+                cards = DeepCardRepo(conn).get_all()
+            finally:
+                conn.close()
+
+            caps = load_capabilities(self.config_dir / "capabilities.yaml")
+            name_by_id = {c.id: c.name_cn for c in caps}
+
+            rows: list[dict[str, object]] = []
+            texts: list[str] = []
+            for card in cards:
+                name_cn = name_by_id.get(card.cap_id, "")
+                texts.append(embedding_text(card, name_cn=name_cn))
+                rows.append(
+                    {
+                        "cap_id": card.cap_id,
+                        "dimension": (card.cap_id.split(".", 1)[0] if "." in card.cap_id else ""),
+                        "name_cn": name_cn,
+                        "status": "lit",
+                        "confidence": card.srs_state.confidence,
+                    }
+                )
+            if texts:
+                vecs = await embedder.embed(texts)
+                for r, v in zip(rows, vecs, strict=True):
+                    r["embedding"] = v
+                await client.upsert(rows)
+            return _ev("done", f"{len(rows)} cards upserted")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("milvus_reindex skip (embedding/upsert): %s", e)
+            msg = str(e).replace("\n", " ")[:80]
+            return _ev("skip", f"embedding error: {msg}")
 
     def _snapshot_finalize_step(self) -> StepEvent:
         from dashboard.derive.snapshot_builder import build_snapshot
