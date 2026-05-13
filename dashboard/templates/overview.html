@@ -1,24 +1,61 @@
-{# V3 系统鸟瞰 — cytoscape canvas + 工具栏。spec § 5.3。 #}
+{# V3 系统鸟瞰 — cytoscape canvas + pill toolbar + empty-state. spec § 5.3. #}
 {% extends "base.html" %}
 {% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
-{% include "_board_nav.html" %}
-<div class="overview-toolbar">
-  <a href="/" class="btn-back">← 返回网格</a>
-  <span>📊 系统鸟瞰 ({{ total_nodes }} 节点)</span>
-  <div class="filter-group">
-    {% for d in dimensions %}
-      <label><input type="checkbox" class="filter-dim" value="{{ d.id }}" checked />
-        <span class="dim-color dim-color--{{ d.id }}"></span>{{ d.name_cn }}</label>
-    {% endfor %}
-  </div>
-  <div class="filter-group">
-    <label><input type="radio" name="conf-filter" value="all" checked /> 全部</label>
-    <label><input type="radio" name="conf-filter" value="low" /> 仅需复习 (conf&lt;3)</label>
-  </div>
+
+{% set DIM_SHORT = {
+  'prompt_context':     'prompt',
+  'tools_function':     'tools',
+  'orchestration':      'orch',
+  'memory':             'memory',
+  'rag_knowledge':      'rag',
+  'guardrails':         'guard',
+  'eval_observability': 'eval',
+  'cost_routing':       'cost'
+} %}
+
+<div class="section-marker">
+  <span class="sm-num">§ 02</span>
+  <span class="sm-title">Map · 系统鸟瞰</span>
+  <span class="sm-desc">cytoscape · 维度成簇 · 边轻轨</span>
 </div>
 
-<div id="overview-canvas" style="width:100%;height:80vh;border:1px solid #ddd;"></div>
+{% if total_nodes < 5 %}
+<div class="empty-state empty-state--overview" id="overview-empty-hint">
+  <span class="empty-icon">·</span>
+  <span class="empty-msg">看上去 DeepCard 还很少 · 跑一次全量刷新?</span>
+  <button class="empty-cta" id="overview-refresh-trigger">运行 refresh</button>
+</div>
+{% endif %}
+
+<div class="overview-frame">
+  <div class="overview-toolbar">
+    <span class="ov-label">维度</span>
+    {% for d in dimensions %}
+      {% set short = DIM_SHORT.get(d.id, d.id) %}
+      <label class="pill">
+        <input type="checkbox" class="filter-dim" value="{{ d.id }}" checked hidden>
+        <span class="dot dot-{{ short }}"></span>{{ d.name_cn }}
+      </label>
+    {% endfor %}
+    <span class="ovsep">/</span>
+    <label class="pill">
+      <input type="radio" name="conf-filter" value="low" hidden>
+      ★ low conf only
+    </label>
+    <span class="ov-count">{{ total_nodes }} nodes · {{ total_edges|default(0) }} edges</span>
+  </div>
+
+  <div id="overview-canvas" class="overview-canvas"></div>
+
+  <div id="overview-tooltip" class="overview-tooltip" hidden></div>
+
+  <div class="overview-legend">
+    <div class="lg-item"><span class="swatch lit-glow"></span> lit (有 DeepCard)</div>
+    <div class="lg-item"><span class="swatch wip-clay"></span> wip</div>
+    <div class="lg-item"><span class="swatch todo-dashed"></span> todo / 无 card</div>
+  </div>
+</div>
 
 <script src="/static/cytoscape.min.js"></script>
 <script src="/static/cytoscape-cose-bilkent.min.js"></script>
