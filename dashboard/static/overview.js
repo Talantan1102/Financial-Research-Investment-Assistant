@@ -121,6 +121,26 @@
       layout: { name: 'cose-bilkent', animate: false, randomize: false },
     });
 
+    const tooltip = document.getElementById('overview-tooltip');
+    cy.on('mouseover', 'node', function (evt) {
+      if (!tooltip) return;
+      const d = evt.target.data();
+      const text = d.has_deep_card
+        ? `${d.label} · conf ${d.confidence}/5`
+        : `${d.label} · 待填 DeepCard`;
+      tooltip.textContent = text;
+      tooltip.hidden = false;
+    });
+    cy.on('mouseout', 'node', function () {
+      if (tooltip) tooltip.hidden = true;
+    });
+    // 跟随鼠标
+    document.getElementById('overview-canvas').addEventListener('mousemove', function (e) {
+      if (!tooltip || tooltip.hidden) return;
+      tooltip.style.left = (e.clientX + 12) + 'px';
+      tooltip.style.top  = (e.clientY + 12) + 'px';
+    });
+
     cy.on('tap', 'node', async function (evt) {
       const id = evt.target.data('id');
       const overlay = document.getElementById('modal-overlay');
