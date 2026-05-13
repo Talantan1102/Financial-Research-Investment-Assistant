@@ -1,106 +1,163 @@
-{# V5 闪卡学习统计 — 静态壳 + SVG mount 点。Plan 3 inline JS hydrate。spec § 5.5。 #}
+{# Plan 3 — flashcards_stats 视觉重做。spec § 5.3。 #}
 {% extends "base.html" %}
-{% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
-<div class="board">
+{% include "_board_nav.html" %}
 
-  <div class="section-marker">
-    <span class="sm-num">§ 04.S</span>
-    <span class="sm-title">Cards · 学习统计</span>
-    <span class="sm-desc">SRS · 总览 · 环图 · 时间轴 · 散点</span>
-  </div>
+<div class="stats-page">
+  <header class="stats-head">
+    <h2 class="stats-title">📊 学习统计</h2>
+    <a href="/flashcards/today" class="btn-back">← 回到今日复习</a>
+  </header>
 
-  <div class="stats-page">
+  <section class="stats-numbers" id="stats-numbers">
+    <div class="stat-num"><span class="num" id="stat-total">—</span><span class="label">总卡</span></div>
+    <div class="stat-num"><span class="num" id="stat-today">—</span><span class="label">今日</span></div>
+    <div class="stat-num"><span class="num" id="stat-avg">—</span><span class="label">平均 conf</span></div>
+    <div class="stat-num"><span class="num" id="stat-streak">—</span><span class="label">连续天</span></div>
+  </section>
 
-    <header class="stats-head">
-      <h2 class="stats-title">📊 学习统计</h2>
-      <a href="/flashcards/today" class="btn-back">← 回到今日复习</a>
-    </header>
+  <section class="stats-ring-wrap">
+    <svg id="stats-ring" width="200" height="200" viewBox="0 0 200 200">
+      <circle cx="100" cy="100" r="80" fill="none" stroke="var(--hair)" stroke-width="6"/>
+      <circle id="stats-ring-fill" cx="100" cy="100" r="80" fill="none"
+              stroke="var(--amber)" stroke-width="6" stroke-linecap="round"
+              stroke-dasharray="502.65" stroke-dashoffset="502.65"
+              transform="rotate(-90 100 100)"/>
+      <text id="stats-ring-text" x="100" y="106" text-anchor="middle"
+            font-family="Newsreader" font-style="italic" font-size="36"
+            fill="var(--fg)">0</text>
+      <text x="100" y="130" text-anchor="middle"
+            font-family="Geist Mono" font-size="11" fill="var(--fg-mute)">/ 35</text>
+    </svg>
+  </section>
 
-    {# ── 4 stat numbers ─────────────────────────────────────── #}
-    <section class="stats-numbers" id="stats-numbers">
-      <div class="stat-num">
-        <span class="num" id="stat-total">—</span>
-        <span class="label">总卡</span>
-      </div>
-      <div class="stat-num">
-        <span class="num" id="stat-today">—</span>
-        <span class="label">今日待复习</span>
-      </div>
-      <div class="stat-num">
-        <span class="num" id="stat-avg">—</span>
-        <span class="label">平均 conf</span>
-      </div>
-      <div class="stat-num">
-        <span class="num" id="stat-streak">—</span>
-        <span class="label">已掌握</span>
-      </div>
-    </section>
+  <section class="stats-timeline-wrap">
+    <h3 class="stats-sub">过去 30 天</h3>
+    <svg id="stats-timeline" width="800" height="80" viewBox="0 0 800 80">
+      <line x1="20" y1="70" x2="780" y2="70" stroke="var(--hair)" stroke-width="1"/>
+    </svg>
+  </section>
 
-    {# ── Donut ring ─────────────────────────────────────────── #}
-    <section class="stats-ring-wrap">
-      <svg id="stats-ring" width="200" height="200" viewBox="0 0 200 200"
-           xmlns="http://www.w3.org/2000/svg">
-        {# Background track #}
-        <circle cx="100" cy="100" r="80"
-                fill="none"
-                stroke="var(--hair)"
-                stroke-width="14"/>
-        {# Fill arc — JS sets stroke-dashoffset to animate #}
-        <circle id="stats-ring-fill"
-                cx="100" cy="100" r="80"
-                fill="none"
-                stroke="var(--amber)"
-                stroke-width="14"
-                stroke-linecap="round"
-                stroke-dasharray="502.65"
-                stroke-dashoffset="502.65"
-                transform="rotate(-90 100 100)"
-                style="transition: stroke-dashoffset 800ms cubic-bezier(0.22,1,0.36,1);"/>
-        {# Center text — mastered count #}
-        <text id="stats-ring-text"
-              x="100" y="106"
-              text-anchor="middle"
-              fill="var(--amber)"
-              font-family="'Newsreader', Georgia, serif"
-              font-style="italic"
-              font-size="36">—</text>
-        {# Denominator label #}
-        <text id="stats-ring-denom"
-              x="100" y="126"
-              text-anchor="middle"
-              fill="var(--fg-mute)"
-              font-family="'Geist Mono', monospace"
-              font-size="11">/ —</text>
-      </svg>
-      <p class="ring-cap">掌握率 (conf ≥ 4)</p>
-    </section>
-
-    {# ── 30-day timeline ────────────────────────────────────── #}
-    <section class="stats-timeline-wrap">
-      <h3 class="stats-sub">过去 30 天</h3>
-      <svg id="stats-timeline"
-           width="800" height="80"
-           viewBox="0 0 800 80"
-           xmlns="http://www.w3.org/2000/svg"
-           preserveAspectRatio="xMinYMid meet">
-        {# Base line — JS appends dots #}
-        <line x1="0" y1="40" x2="800" y2="40"
-              stroke="var(--hair)" stroke-width="1"/>
-      </svg>
-    </section>
-
-    {# ── 8-dim × confidence scatter ─────────────────────────── #}
-    <section class="stats-scatter-wrap">
-      <h3 class="stats-sub">8 维 × confidence 散点</h3>
-      <svg id="stats-scatter"
-           width="600" height="240"
-           viewBox="0 0 600 240"
-           xmlns="http://www.w3.org/2000/svg">
-        {# JS appends circles after fetch /api/flashcards/stats.json #}
-      </svg>
-    </section>
-
-  </div>{# /.stats-page #}
+  <section class="stats-scatter-wrap">
+    <h3 class="stats-sub">8 维 × confidence 散点</h3>
+    <svg id="stats-scatter" width="600" height="240" viewBox="0 0 600 240"></svg>
+  </section>
 </div>
+
+<script>
+(function () {
+  const DIM_COLORS = {
+    prompt_context:    '#c89456',
+    tools_function:    '#6f9494',
+    orchestration:     '#94b87a',
+    memory:            '#d4824a',
+    rag_knowledge:     '#8db1b1',
+    guardrails:        '#a64545',
+    eval_observability:'#b9ad94',
+    cost_routing:      '#e5b079',
+    unknown:           '#7d6e58',
+  };
+  const DIM_ORDER = [
+    'prompt_context','tools_function','orchestration','memory',
+    'rag_knowledge','guardrails','eval_observability','cost_routing',
+  ];
+
+  function gradeColor(grade) {
+    // grade 0→wip 颜色,5→lit;中间线性
+    const wip = [212, 130, 74];  // d4824a
+    const lit = [148, 184, 122]; // 94b87a
+    const t = Math.max(0, Math.min(5, grade)) / 5;
+    const c = wip.map((v, i) => Math.round(v + (lit[i] - v) * t));
+    return 'rgb(' + c.join(',') + ')';
+  }
+
+  function renderRing(total, mastered) {
+    const C = 2 * Math.PI * 80;  // 502.65
+    const ratio = total > 0 ? Math.min(1, mastered / total) : 0;
+    document.getElementById('stats-ring-fill').setAttribute(
+      'stroke-dashoffset', String(C * (1 - ratio))
+    );
+    document.getElementById('stats-ring-text').textContent = String(mastered);
+  }
+
+  function renderTimeline(timeline) {
+    const svg = document.getElementById('stats-timeline');
+    const today = new Date();
+    const cutoffMs = today.getTime() - 30 * 86400000;
+    timeline.forEach(function (pt) {
+      const dt = new Date(pt.date + 'T00:00:00Z').getTime();
+      const x = ((dt - cutoffMs) / (30 * 86400000)) * 760 + 20;
+      const y = 70 - (pt.grade / 5) * 60;
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', String(x.toFixed(1)));
+      c.setAttribute('cy', String(y.toFixed(1)));
+      c.setAttribute('r', '4');
+      c.setAttribute('fill', gradeColor(pt.grade));
+      c.setAttribute('opacity', '0.85');
+      svg.appendChild(c);
+    });
+  }
+
+  function renderScatter(scatter) {
+    const svg = document.getElementById('stats-scatter');
+    // 维度 label
+    DIM_ORDER.forEach(function (dim, col) {
+      const cx = col * 75 + 37.5;
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', String(cx));
+      t.setAttribute('y', '232');
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('font-family', 'Geist Mono');
+      t.setAttribute('font-size', '9');
+      t.setAttribute('fill', 'var(--fg-mute)');
+      t.textContent = dim.slice(0, 6);
+      svg.appendChild(t);
+    });
+    // confidence row label
+    for (let conf = 0; conf <= 5; conf++) {
+      const cy = 220 - (conf + 0.5) * 35;
+      const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      t.setAttribute('x', '4'); t.setAttribute('y', String(cy + 3));
+      t.setAttribute('font-family', 'Geist Mono'); t.setAttribute('font-size', '9');
+      t.setAttribute('fill', 'var(--fg-faint)');
+      t.textContent = String(conf);
+      svg.appendChild(t);
+    }
+    // 点(jitter 避免重叠)
+    scatter.forEach(function (pt) {
+      const col = DIM_ORDER.indexOf(pt.dim);
+      const cx = (col >= 0 ? col : 0) * 75 + 37.5 + (Math.random() - 0.5) * 14;
+      const cy = 220 - (pt.conf + 0.5) * 35 + (Math.random() - 0.5) * 8;
+      const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      c.setAttribute('cx', String(cx.toFixed(1)));
+      c.setAttribute('cy', String(cy.toFixed(1)));
+      c.setAttribute('r', '3.5');
+      c.setAttribute('fill', DIM_COLORS[pt.dim] || DIM_COLORS.unknown);
+      c.setAttribute('opacity', '0.75');
+      svg.appendChild(c);
+    });
+  }
+
+  async function hydrate() {
+    try {
+      const resp = await fetch('/api/flashcards/stats.json');
+      if (!resp.ok) throw new Error('http ' + resp.status);
+      const d = await resp.json();
+      document.getElementById('stat-total').textContent  = d.total;
+      document.getElementById('stat-today').textContent  = d.today;
+      document.getElementById('stat-avg').textContent    = d.avg_confidence.toFixed(2);
+      document.getElementById('stat-streak').textContent = d.streak_days;
+      // mastered = scatter 里 conf≥4 数
+      const mastered = d.scatter.filter(s => s.conf >= 4).length;
+      renderRing(d.total, mastered);
+      renderTimeline(d.timeline);
+      renderScatter(d.scatter);
+    } catch (e) {
+      console.error('stats hydrate failed', e);
+      if (window.Toast) window.Toast.show({ type: 'error', msg: '统计数据加载失败' });
+    }
+  }
+  hydrate();
+})();
+</script>
 {% endblock %}
