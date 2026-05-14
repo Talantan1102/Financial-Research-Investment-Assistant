@@ -1,21 +1,28 @@
 {# V3 cytoscape 加载失败兜底 — 维度卡片墙。spec § 5.3 fallback。 #}
 {% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
-{% include "_board_nav.html" %}
-<div class="overview-toolbar">
-  <a href="/" class="btn-back">← 返回网格</a>
-  <span>📊 系统鸟瞰(图加载失败,显示卡片墙)</span>
+
+<div class="section-marker">
+  <span class="sm-num">§ 02</span>
+  <span class="sm-title">Map · 维度卡片墙(fallback)</span>
+  <span class="sm-desc">图加载失败 · 静态卡片墙</span>
 </div>
+
 <div class="overview-fallback-grid">
   {% for dim in dimensions_with_caps %}
-    <div class="dim-block dim-color--{{ dim.id }}">
-      <h3>{{ dim.number }} {{ dim.name_cn }}</h3>
-      <div class="caps-row">
-        {% for cap in dim.capabilities %}
-          <a href="/cap/{{ cap.id }}" class="capability-chip">{{ cap.name_cn }}</a>
-        {% endfor %}
-      </div>
+  <article class="dim-block">
+    <div class="dim-block-head">
+      <span class="dim-block-num">{{ dim.number }}</span>
+      <span class="dim-block-name">{{ dim.name_cn }}</span>
     </div>
+    <div class="dim-block-caps">
+      {% for cap in dim.capabilities %}
+        <a href="/cap/{{ cap.id }}" class="chip chip--fallback">{{ cap.name_cn }}</a>
+      {% endfor %}
+    </div>
+  </article>
   {% endfor %}
 </div>
+
 {% endblock %}

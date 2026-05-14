@@ -1,0 +1,1742 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Harness Board · Mockup v2 (Quiet Workshop)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&family=Manrope:wght@300;400;500;600;700&family=Geist+Mono:wght@300;400;500;600&family=Noto+Serif+SC:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* =========================================================
+       Quiet Workshop — design tokens
+       ========================================================= */
+    :root {
+      /* Warm ink palette */
+      --ink:        #0c0908;
+      --ink-2:      #14100c;
+      --paper:      #1a1410;
+      --paper-2:    #221b15;
+      --hair:       rgba(235, 227, 212, 0.08);
+      --hair-2:     rgba(235, 227, 212, 0.04);
+
+      /* Text */
+      --fg:         #ebe3d4;
+      --fg-dim:     #b9ad94;
+      --fg-mute:   #7d6e58;
+      --fg-faint:  #4a3f33;
+
+      /* Dual accent — warm amber × cool patina teal (complementary, both desaturated) */
+      --amber:       #c89456;
+      --amber-glow:  #e5b079;
+      --amber-deep:  #8a5f30;
+      --amber-soft:  rgba(200,148,86,0.12);
+
+      --teal:        #6f9494;   /* patina / 古铜青 — 次级强调:路径、链接、数据 */
+      --teal-glow:   #8db1b1;
+      --teal-deep:   #3f5e5e;
+      --teal-soft:   rgba(111,148,148,0.13);
+
+      /* Status — sand / clay / dust / brick */
+      --lit:        #94b87a;  /* sage / sand-green */
+      --lit-bg:     rgba(148,184,122,0.10);
+      --wip:        #d4824a;  /* terracotta */
+      --wip-bg:     rgba(212,130,74,0.12);
+      --todo:       #6b5d49;
+      --todo-bg:    transparent;
+      --danger:     #a64545;
+
+      /* Typography — Newsreader (editorial serif, optical-size) × Source Han Serif (中文) × Manrope × Geist Mono */
+      --display:   'Newsreader', 'Source Han Serif SC', 'Noto Serif SC', Georgia, serif;
+      --serif-cn:  'Source Han Serif SC', 'Noto Serif SC', 'Newsreader', Georgia, serif;
+      --sans:      'Manrope', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+      --mono:      'Geist Mono', ui-monospace, "SF Mono", Menlo, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--ink); color: var(--fg);
+      font-family: var(--sans);
+      font-size: 15.5px;
+      line-height: 1.68;
+      letter-spacing: 0.005em;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    /* Subtle paper grain overlay */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      pointer-events: none;
+      z-index: 100;
+      opacity: 0.035;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>");
+    }
+
+    /* Section frame */
+    .stage {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 56px;
+    }
+    .section-marker {
+      display: flex; align-items: baseline; gap: 14px;
+      padding: 56px 0 24px;
+      border-bottom: 1px solid var(--hair);
+      margin-bottom: 32px;
+    }
+    .section-marker .sm-num {
+      font-family: var(--display); font-weight: 300;
+      font-size: 13px; color: var(--amber); letter-spacing: 0.2em;
+      font-variation-settings: "opsz" 6;
+    }
+    .section-marker .sm-title {
+      font-family: var(--display); font-weight: 400;
+      font-size: 26px; color: var(--fg);
+      font-variation-settings: "opsz" 60;
+      letter-spacing: -0.01em;
+    }
+    .section-marker .sm-desc {
+      margin-left: auto;
+      font-size: 12px; color: var(--fg-mute); font-family: var(--mono);
+    }
+
+    /* =========================================================
+       SECTION · Banner (mockup self-intro)
+       ========================================================= */
+    .mockup-banner {
+      background: linear-gradient(180deg, var(--paper) 0%, var(--ink) 100%);
+      border-bottom: 1px solid var(--hair);
+      padding: 18px 56px;
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--fg-mute);
+      display: flex; align-items: center; gap: 16px;
+      letter-spacing: 0.05em;
+    }
+    .mockup-banner strong { color: var(--amber); font-weight: 500; }
+    .mockup-banner em { color: var(--fg); font-style: normal; }
+    .mockup-banner .sep { color: var(--fg-faint); }
+
+    /* =========================================================
+       SECTION · Hero (网格首页 — 主秀)
+       ========================================================= */
+    .hero-block {
+      padding-top: 80px;
+      padding-bottom: 64px;
+      position: relative;
+    }
+
+    /* Nav rail — 左侧竖排 5 视图入口 */
+    .nav-rail {
+      position: fixed; top: 0; left: 0; bottom: 0;
+      width: 80px;
+      background: var(--ink-2);
+      border-right: 1px solid var(--hair);
+      display: flex; flex-direction: column;
+      align-items: center;
+      padding: 28px 0;
+      gap: 4px;
+      z-index: 10;
+    }
+    .nav-rail .brand-mark {
+      font-family: var(--display); font-weight: 600;
+      font-size: 22px; color: var(--amber);
+      font-variation-settings: "opsz" 60;
+      margin-bottom: 36px;
+      line-height: 1;
+    }
+    .nav-rail a {
+      display: flex; flex-direction: column; align-items: center;
+      padding: 14px 0; width: 100%;
+      color: var(--fg-mute);
+      text-decoration: none;
+      font-size: 10px; font-family: var(--mono); font-weight: 500;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      border-left: 2px solid transparent;
+      transition: color 240ms, border-color 240ms;
+      cursor: pointer;
+    }
+    .nav-rail a svg { width: 18px; height: 18px; stroke-width: 1.5; margin-bottom: 6px; opacity: 0.7; }
+    .nav-rail a:hover { color: var(--teal); }
+    .nav-rail a.active {
+      color: var(--amber); border-left-color: var(--amber);
+    }
+    .nav-rail a.active svg { opacity: 1; }
+    .nav-rail .nav-bottom { margin-top: auto; }
+    .nav-rail .refresh-btn {
+      display: flex; align-items: center; justify-content: center;
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      border: 1px solid var(--amber-deep);
+      color: var(--amber);
+      cursor: pointer;
+      background: transparent;
+      transition: all 240ms;
+    }
+    .nav-rail .refresh-btn:hover {
+      background: var(--amber);
+      color: var(--ink);
+      transform: rotate(180deg);
+    }
+    .nav-rail .refresh-btn svg { width: 16px; height: 16px; stroke-width: 1.8; }
+
+    /* Move content right of rail */
+    body { padding-left: 80px; }
+
+    /* Hero typography */
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 64px;
+      align-items: end;
+    }
+    .hero-meta {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--fg-mute); letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+    .hero-meta .pill {
+      display: inline-block;
+      padding: 3px 8px;
+      border: 1px solid var(--amber-deep);
+      color: var(--amber);
+      border-radius: 2px;
+      margin-right: 10px;
+    }
+    .hero-title {
+      font-family: var(--display);
+      font-weight: 380;
+      font-size: clamp(52px, 7.6vw, 100px);
+      line-height: 0.98;
+      letter-spacing: -0.02em;
+      color: var(--fg);
+      font-variation-settings: "opsz" 72;
+      margin: 0;
+    }
+    .hero-title em {
+      font-style: italic;
+      font-weight: 350;
+      color: var(--amber);
+      font-variation-settings: "opsz" 72;
+    }
+    .hero-title em.cool {
+      color: var(--teal);
+    }
+    .hero-sub {
+      margin-top: 26px;
+      max-width: 580px;
+      color: var(--fg-dim);
+      font-size: 17px; line-height: 1.85;
+      font-family: var(--serif-cn);
+      letter-spacing: 0.005em;
+    }
+    .hero-sub .accent {
+      color: var(--amber); font-weight: 500;
+    }
+    .hero-sub .accent-cool {
+      color: var(--teal); font-weight: 500;
+    }
+
+    /* WIP scroll */
+    .hero-wips {
+      margin-top: 28px;
+      padding-top: 20px;
+      border-top: 1px solid var(--hair);
+      font-family: var(--mono); font-size: 12px;
+      color: var(--fg-mute);
+      letter-spacing: 0.04em;
+    }
+    .hero-wips .label {
+      color: var(--wip);
+      margin-right: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      font-size: 10px;
+    }
+    .hero-wips a {
+      color: var(--fg-dim);
+      text-decoration: none;
+      border-bottom: 1px solid var(--hair);
+      padding-bottom: 1px;
+      margin-right: 18px;
+      transition: color 200ms, border-color 200ms;
+    }
+    .hero-wips a:hover { color: var(--teal); border-bottom-color: var(--teal); }
+
+    /* Fingerprint — 8-dim geometric signature */
+    .fingerprint {
+      width: 320px; height: 320px;
+      position: relative;
+    }
+    .fingerprint svg { width: 100%; height: 100%; }
+    .fingerprint-caption {
+      margin-top: 12px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-faint);
+      letter-spacing: 0.18em; text-transform: uppercase;
+      text-align: center;
+    }
+    .fingerprint-caption strong { color: var(--amber); font-weight: 500; }
+
+    /* =========================================================
+       SECTION · Grid (8 dimensions / 62 capabilities)
+       ========================================================= */
+    .layer-stack {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 20px;
+    }
+    /* asymmetric span — 不规则栅格 */
+    .layer:nth-child(1)  { grid-column: span 7; }
+    .layer:nth-child(2)  { grid-column: span 5; }
+    .layer:nth-child(3)  { grid-column: span 4; }
+    .layer:nth-child(4)  { grid-column: span 4; }
+    .layer:nth-child(5)  { grid-column: span 4; }
+    .layer:nth-child(6)  { grid-column: span 6; }
+    .layer:nth-child(7)  { grid-column: span 6; }
+    .layer:nth-child(8)  { grid-column: span 12; }
+
+    .layer {
+      position: relative;
+      background: var(--paper);
+      border: 1px solid var(--hair);
+      border-radius: 4px;
+      padding: 22px 22px 18px;
+      overflow: hidden;
+      transition: border-color 240ms;
+    }
+    .layer:hover { border-color: rgba(200,148,86,0.25); }
+
+    /* Big numeral watermark */
+    .layer .numeral {
+      position: absolute;
+      top: -8px; right: 14px;
+      font-family: var(--display);
+      font-weight: 600;
+      font-size: 86px;
+      color: var(--paper-2);
+      line-height: 1;
+      pointer-events: none;
+      font-variation-settings: "opsz" 60;
+      user-select: none;
+    }
+    .layer .l-eyebrow {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .layer .l-eyebrow .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      display: inline-block;
+    }
+    .layer .l-title {
+      margin: 8px 0 6px;
+      font-family: var(--display); font-weight: 400;
+      font-size: 24px; line-height: 1.22;
+      color: var(--fg);
+      font-variation-settings: "opsz" 48;
+      letter-spacing: -0.005em;
+    }
+    .layer .l-title .en {
+      display: block;
+      font-family: var(--display); font-style: italic;
+      font-size: 13px; color: var(--fg-mute);
+      font-weight: 300;
+      margin-top: 4px;
+      letter-spacing: 0.01em;
+    }
+    .layer .l-stat {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--fg-mute);
+      margin: 14px 0 12px;
+      letter-spacing: 0.05em;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .layer .l-stat .bar {
+      flex: 1;
+      height: 2px;
+      background: var(--hair);
+      position: relative;
+      overflow: hidden;
+    }
+    .layer .l-stat .bar i {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      background: var(--lit);
+      transition: width 800ms cubic-bezier(0.22,1,0.36,1);
+    }
+    .layer .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+    /* Chip — capability */
+    .chip {
+      position: relative;
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 9px;
+      font-family: var(--mono); font-size: 11.5px;
+      font-weight: 500;
+      letter-spacing: 0.01em;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: transform 200ms, box-shadow 200ms, border-color 200ms;
+      border: 1px solid;
+      white-space: nowrap;
+    }
+    .chip.lit  {
+      background: var(--lit-bg);
+      color: var(--lit);
+      border-color: rgba(148,184,122,0.30);
+    }
+    .chip.wip  {
+      background: var(--wip-bg);
+      color: var(--wip);
+      border-color: rgba(212,130,74,0.35);
+    }
+    .chip.wip::after {
+      content: '';
+      position: absolute; top: 50%; right: -3px;
+      width: 4px; height: 4px; border-radius: 50%;
+      background: var(--wip);
+      transform: translateY(-50%);
+      box-shadow: 0 0 8px var(--wip);
+      animation: blink 1.6s ease-in-out infinite;
+    }
+    .chip.todo {
+      background: transparent;
+      color: var(--fg-mute);
+      border-color: var(--fg-faint);
+      border-style: dashed;
+    }
+    .chip:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 14px -6px rgba(0,0,0,0.6);
+      border-color: var(--amber);
+      color: var(--amber);
+    }
+    .chip .conf-dots {
+      display: inline-flex; gap: 1px;
+      opacity: 0.6;
+    }
+    .chip .conf-dots i {
+      width: 3px; height: 3px;
+      background: currentColor;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; transform: translateY(-50%) scale(1); }
+      50%      { opacity: 0.35; transform: translateY(-50%) scale(0.6); }
+    }
+
+    /* Dimension dot colors */
+    .dot-prompt    { background: #9b8cd4; }
+    .dot-tools     { background: #6fb3d4; }
+    .dot-orch      { background: #c89456; }
+    .dot-memory    { background: #d4af6c; }
+    .dot-rag       { background: #94b87a; }
+    .dot-guard     { background: #c97b7b; }
+    .dot-eval      { background: #b89764; }
+    .dot-cost      { background: #c98aa9; }
+
+    /* =========================================================
+       SECTION · Overview (鸟瞰 — static SVG preview)
+       ========================================================= */
+    .overview-frame {
+      background: radial-gradient(ellipse 80% 60% at 50% 50%, var(--paper-2) 0%, var(--ink) 80%);
+      border: 1px solid var(--hair);
+      border-radius: 4px;
+      padding: 32px;
+      position: relative;
+      overflow: hidden;
+    }
+    .overview-toolbar {
+      display: flex; gap: 14px; align-items: center;
+      margin-bottom: 24px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--fg-mute);
+      letter-spacing: 0.05em;
+    }
+    .overview-toolbar .pill {
+      padding: 4px 10px;
+      border: 1px solid var(--hair);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: all 200ms;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .overview-toolbar .pill:hover, .overview-toolbar .pill.active {
+      color: var(--amber); border-color: var(--amber-deep);
+    }
+    .overview-toolbar .pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .overview-toolbar .ovsep { color: var(--fg-faint); margin: 0 4px; }
+
+    .overview-canvas {
+      width: 100%; height: 460px;
+      position: relative;
+    }
+    .overview-canvas svg { width: 100%; height: 100%; }
+    .overview-canvas svg .node-label {
+      font-family: var(--mono); font-size: 9px; fill: var(--fg-mute);
+      letter-spacing: 0.04em;
+    }
+    .overview-canvas svg .node-label.bright { fill: var(--fg-dim); }
+    .overview-legend {
+      position: absolute; bottom: 24px; right: 24px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      display: flex; gap: 14px;
+      letter-spacing: 0.05em;
+    }
+    .overview-legend .lg-item { display: flex; align-items: center; gap: 6px; }
+    .overview-legend .lg-item .swatch {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+    }
+
+    /* =========================================================
+       SECTION · Story (三段式时间线 / Stripe Press 书页风)
+       ========================================================= */
+    .story-rail {
+      position: relative;
+      padding-left: 80px;
+    }
+    .story-rail::before {
+      content: '';
+      position: absolute; left: 20px; top: 12px; bottom: 12px;
+      width: 1px;
+      background: var(--hair);
+    }
+    .story-card {
+      position: relative;
+      background: var(--paper);
+      border: 1px solid var(--hair);
+      border-radius: 4px;
+      padding: 36px 44px;
+      margin-bottom: 28px;
+    }
+    .story-card::before {
+      /* dot on rail */
+      content: '';
+      position: absolute;
+      left: -68px; top: 44px;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--ink);
+      border: 2px solid var(--amber);
+      box-shadow: 0 0 0 4px var(--ink);
+    }
+    .story-card .meta {
+      display: flex; align-items: baseline; gap: 16px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      letter-spacing: 0.18em; text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+    .story-card .serial {
+      font-family: var(--display); font-weight: 500;
+      font-size: 12px; color: var(--amber);
+      font-variation-settings: "opsz" 6;
+    }
+    .story-card .meta .date { color: var(--fg-dim); }
+    .story-card h3 {
+      font-family: var(--display); font-weight: 400;
+      font-size: 32px; line-height: 1.2;
+      color: var(--fg);
+      margin: 0 0 6px;
+      letter-spacing: -0.01em;
+      font-variation-settings: "opsz" 72;
+    }
+    .story-card h3 .quiet {
+      display: block;
+      font-size: 15px;
+      color: var(--fg-mute);
+      font-style: italic;
+      font-weight: 300;
+      margin-top: 6px;
+      letter-spacing: 0.005em;
+    }
+    .story-card .body {
+      margin-top: 24px;
+      font-family: var(--serif-cn);
+      font-size: 16px; line-height: 1.9;
+      color: var(--fg-dim);
+      letter-spacing: 0.005em;
+    }
+    .story-card .body p { margin: 0 0 14px; }
+    .story-card .body p:first-of-type::first-letter {
+      font-family: var(--display);
+      font-weight: 400;
+      font-size: 56px;
+      line-height: 0.85;
+      float: left;
+      margin: 6px 10px 0 -2px;
+      color: var(--amber);
+      font-style: italic;
+      font-variation-settings: "opsz" 60;
+    }
+    .story-card .body strong { color: var(--amber); font-weight: 500; }
+    .story-card .body em { color: var(--teal); font-style: italic; font-family: var(--display); font-weight: 500; }
+    .story-card .three-cuts {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 28px;
+      padding-top: 22px;
+      border-top: 1px solid var(--hair);
+    }
+    .story-card .cut .h {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--amber);
+      letter-spacing: 0.2em; text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .story-card .cut .b {
+      font-family: var(--serif-cn);
+      font-size: 13.5px; line-height: 1.65;
+      color: var(--fg-dim);
+    }
+
+    /* =========================================================
+       SECTION · Flashcard (3D flip)
+       ========================================================= */
+    .flash-stage {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 32px;
+      align-items: start;
+    }
+    .flash-card {
+      perspective: 1600px;
+      height: 360px;
+    }
+    .flash-card .inner {
+      position: relative; width: 100%; height: 100%;
+      transition: transform 600ms cubic-bezier(0.22,1,0.36,1);
+      transform-style: preserve-3d;
+      cursor: pointer;
+    }
+    .flash-card.flipped .inner { transform: rotateY(180deg); }
+    .flash-card .face {
+      position: absolute; inset: 0;
+      backface-visibility: hidden;
+      background: linear-gradient(160deg, var(--paper-2) 0%, var(--paper) 100%);
+      border: 1px solid var(--hair);
+      border-radius: 6px;
+      padding: 44px 48px;
+      display: flex; flex-direction: column;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.04),
+        0 24px 48px -24px rgba(0,0,0,0.6);
+    }
+    .flash-card .face.back { transform: rotateY(180deg); }
+    .flash-card .face .eyebrow {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--amber);
+      letter-spacing: 0.2em; text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+    .flash-card .face h2 {
+      font-family: var(--display); font-weight: 400;
+      font-size: 34px; line-height: 1.22;
+      color: var(--fg);
+      margin: 0 0 20px;
+      font-variation-settings: "opsz" 72;
+      letter-spacing: -0.01em;
+    }
+    .flash-card .face .body {
+      font-family: var(--serif-cn);
+      font-size: 15.5px; line-height: 1.85;
+      color: var(--fg-dim);
+      flex: 1;
+      letter-spacing: 0.005em;
+    }
+    .flash-card .face .footnote {
+      margin-top: auto;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      letter-spacing: 0.12em;
+      display: flex; justify-content: space-between;
+    }
+    .flash-card .face .corner {
+      position: absolute; top: 20px; right: 20px;
+      font-family: var(--mono); font-size: 9px;
+      color: var(--fg-faint);
+      letter-spacing: 0.2em;
+    }
+    /* Rating dial — 唱片机式 */
+    .flash-rate {
+      background: var(--paper);
+      border: 1px solid var(--hair);
+      border-radius: 6px;
+      padding: 24px;
+    }
+    .flash-rate h4 {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      letter-spacing: 0.2em; text-transform: uppercase;
+      margin: 0 0 14px;
+    }
+    .flash-rate .grade {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 6px;
+    }
+    .flash-rate .grade button {
+      aspect-ratio: 1;
+      background: transparent;
+      border: 1px solid var(--hair);
+      border-radius: 50%;
+      color: var(--fg-mute);
+      font-family: var(--display);
+      font-weight: 500;
+      font-size: 16px;
+      cursor: pointer;
+      transition: all 200ms;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .flash-rate .grade button:hover {
+      color: var(--amber);
+      border-color: var(--amber);
+      background: rgba(200,148,86,0.06);
+      transform: translateY(-2px);
+    }
+    .flash-rate .grade button[data-g="5"] { color: var(--lit); border-color: rgba(148,184,122,0.3); }
+    .flash-rate .grade button[data-g="0"] { color: var(--danger); border-color: rgba(166,69,69,0.3); }
+    .flash-rate .hint {
+      margin-top: 16px;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      letter-spacing: 0.05em;
+      text-align: center;
+    }
+
+    /* =========================================================
+       SECTION · Decisions (Linear changelog 风)
+       ========================================================= */
+    .decisions-grid {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 48px;
+    }
+    .decisions-side {
+      position: sticky; top: 24px; align-self: start;
+    }
+    .decisions-side h5 {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      letter-spacing: 0.2em; text-transform: uppercase;
+      margin: 0 0 14px;
+    }
+    .decisions-side .filter-list {
+      list-style: none; padding: 0; margin: 0 0 32px;
+    }
+    .decisions-side .filter-list li {
+      padding: 7px 0;
+      font-family: var(--mono); font-size: 12px;
+      color: var(--fg-dim);
+      display: flex; justify-content: space-between;
+      border-bottom: 1px dashed var(--hair-2);
+      cursor: pointer;
+      transition: color 200ms;
+    }
+    .decisions-side .filter-list li .count {
+      font-family: var(--display); font-size: 11px;
+      color: var(--fg-mute);
+    }
+
+    .decision-card {
+      background: transparent;
+      border-left: 1px solid var(--hair);
+      padding: 0 0 36px 32px;
+      position: relative;
+      margin-left: 4px;
+    }
+    .decision-card::before {
+      content: '';
+      position: absolute; left: -5px; top: 8px;
+      width: 9px; height: 9px;
+      background: var(--amber);
+      border-radius: 50%;
+      box-shadow: 0 0 0 4px var(--ink);
+    }
+    .decision-card .head {
+      display: flex; align-items: baseline; gap: 16px;
+      margin-bottom: 8px;
+    }
+    .decision-card .commit {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--amber);
+      letter-spacing: 0.05em;
+    }
+    .decision-card .when {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      letter-spacing: 0.1em;
+    }
+    .decision-card h4 {
+      font-family: var(--display); font-weight: 400;
+      font-size: 19px; line-height: 1.4;
+      color: var(--fg);
+      margin: 0 0 10px;
+      font-variation-settings: "opsz" 48;
+      letter-spacing: -0.003em;
+    }
+    .decision-card .summary {
+      font-family: var(--serif-cn); font-size: 14.5px; line-height: 1.8;
+      color: var(--fg-dim);
+      margin-bottom: 16px;
+      letter-spacing: 0.005em;
+    }
+    .decision-card .tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    .decision-card .tags .tag {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      padding: 2px 7px;
+      border: 1px solid var(--hair);
+      border-radius: 2px;
+      letter-spacing: 0.05em;
+    }
+    .decision-card .tags .tag.dim {
+      color: var(--amber); border-color: rgba(200,148,86,0.28);
+      background: var(--amber-soft);
+    }
+    .decision-card .tags .tag.layer {
+      color: var(--teal); border-color: rgba(111,148,148,0.28);
+      background: var(--teal-soft);
+    }
+    .decisions-side .filter-list li:hover { color: var(--teal); }
+    .decisions-side .filter-list li.active { color: var(--amber); }
+
+    /* =========================================================
+       SECTION · DeepCard modal preview
+       ========================================================= */
+    .deep-card {
+      background: var(--paper);
+      border: 1px solid var(--hair);
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 32px 64px -32px rgba(0,0,0,0.7);
+    }
+    .deep-card .dc-head {
+      padding: 28px 40px 24px;
+      border-bottom: 1px solid var(--hair);
+      display: flex; align-items: baseline; gap: 16px;
+      background: linear-gradient(180deg, var(--paper-2) 0%, var(--paper) 100%);
+    }
+    .deep-card .dc-cap-id {
+      font-family: var(--mono); font-size: 11px;
+      color: var(--amber);
+      letter-spacing: 0.1em;
+    }
+    .deep-card .dc-head h2 {
+      font-family: var(--display); font-weight: 400;
+      font-size: 32px; line-height: 1.15;
+      color: var(--fg);
+      margin: 0;
+      font-variation-settings: "opsz" 72;
+      letter-spacing: -0.005em;
+    }
+    .deep-card .dc-head .status {
+      margin-left: auto;
+      font-family: var(--mono); font-size: 10px;
+      color: var(--lit);
+      letter-spacing: 0.2em; text-transform: uppercase;
+      padding: 4px 10px;
+      border: 1px solid rgba(148,184,122,0.3);
+      border-radius: 999px;
+    }
+    .deep-card .dc-body {
+      display: grid;
+      grid-template-columns: 1fr 280px;
+      gap: 0;
+    }
+    .deep-card .dc-left {
+      padding: 28px 40px;
+    }
+    .deep-card .dc-right {
+      padding: 28px 32px;
+      background: var(--ink-2);
+      border-left: 1px solid var(--hair);
+    }
+    .deep-card .dc-field {
+      margin-bottom: 24px;
+    }
+    .deep-card .dc-field .lbl {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--amber);
+      letter-spacing: 0.22em; text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .deep-card .dc-field .val {
+      font-family: var(--serif-cn); font-size: 15.5px; line-height: 1.85;
+      color: var(--fg-dim);
+      letter-spacing: 0.005em;
+    }
+    .deep-card .dc-right h5 {
+      font-family: var(--mono); font-size: 10px;
+      color: var(--fg-mute);
+      letter-spacing: 0.22em; text-transform: uppercase;
+      margin: 0 0 10px;
+    }
+    .deep-card .dc-right ul {
+      list-style: none; padding: 0; margin: 0 0 22px;
+    }
+    .deep-card .dc-right li {
+      font-family: var(--mono); font-size: 11.5px;
+      color: var(--fg-dim);
+      padding: 5px 0;
+      border-bottom: 1px dashed var(--hair-2);
+    }
+    .deep-card .dc-right li code {
+      color: var(--teal);
+      font-family: var(--mono);
+    }
+    .deep-card .dc-right li a,
+    .deep-card .dc-right li {
+      color: var(--fg-dim);
+    }
+    .deep-card .dc-right h5 {
+      color: var(--teal);
+      opacity: 0.75;
+    }
+    .deep-card .dc-field .val em {
+      font-style: italic;
+      color: var(--teal);
+      font-family: var(--display);
+    }
+
+    /* =========================================================
+       Footer / closing
+       ========================================================= */
+    .closing {
+      padding: 96px 0 64px;
+      text-align: center;
+      border-top: 1px solid var(--hair);
+      margin-top: 96px;
+    }
+    .closing .mark {
+      font-family: var(--display); font-weight: 500;
+      font-size: 22px; color: var(--amber);
+      font-variation-settings: "opsz" 60;
+      letter-spacing: 0.05em;
+    }
+    .closing .sub {
+      margin-top: 12px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--fg-mute);
+      letter-spacing: 0.18em; text-transform: uppercase;
+    }
+
+    /* =========================================================
+       Reveal on load
+       ========================================================= */
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .reveal {
+      animation: rise 800ms cubic-bezier(0.22,1,0.36,1) backwards;
+    }
+    .reveal.d1 { animation-delay: 80ms; }
+    .reveal.d2 { animation-delay: 200ms; }
+    .reveal.d3 { animation-delay: 360ms; }
+    .reveal.d4 { animation-delay: 520ms; }
+  </style>
+</head>
+<body>
+
+<!-- =========================================================
+     Mockup intro banner
+     ========================================================= -->
+<div class="mockup-banner">
+  <strong>MOCKUP v3</strong>
+  <span class="sep">·</span>
+  <em>Quiet Workshop</em>
+  <span class="sep">·</span>
+  <span>暖黑作坊 / 琥珀 × 古铜青 双强调 / Newsreader × Source Han Serif × Manrope × Geist Mono</span>
+  <span class="sep">·</span>
+  <span style="margin-left:auto;">这是静态方向稿,真数据接通在 plan 实施阶段</span>
+</div>
+
+<!-- =========================================================
+     Left nav rail
+     ========================================================= -->
+<nav class="nav-rail">
+  <div class="brand-mark">H.</div>
+  <a class="active" title="网格">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+      <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+    </svg>
+    Grid
+  </a>
+  <a title="鸟瞰">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
+      <circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><circle cx="12" cy="12" r="2"/>
+      <path d="M8 6L12 12M16 6L12 12M8 18L12 12M16 18L12 12"/>
+    </svg>
+    Map
+  </a>
+  <a title="故事">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M4 4h14a2 2 0 0 1 2 2v14M4 4v15a2 2 0 0 0 2 2h14M4 4l4 4M9 9h7M9 13h7M9 17h4"/>
+    </svg>
+    Story
+  </a>
+  <a title="闪卡">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <rect x="5" y="7" width="14" height="12" rx="1.5"/>
+      <path d="M5 11h14M9 4l-2 3M15 4l2 3"/>
+    </svg>
+    Cards
+  </a>
+  <a title="决策">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+      <path d="M12 3v18M5 7l7-4 7 4M5 7v10l7 4 7-4V7"/>
+    </svg>
+    Forge
+  </a>
+  <div class="nav-bottom">
+    <button class="refresh-btn" title="一键全量更新">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/>
+      </svg>
+    </button>
+  </div>
+</nav>
+
+<!-- =========================================================
+     SECTION 1 — Hero (网格首页)
+     ========================================================= -->
+<section class="hero-block">
+  <div class="stage">
+    <div class="hero-grid">
+      <div>
+        <div class="hero-meta reveal d1">
+          <span class="pill">v0.9.5 · workshop</span>
+          <span>2026-05-14 周三 · 62 capabilities · 35 deep cards</span>
+        </div>
+        <h1 class="hero-title reveal d2">
+          所有<em>力气</em><br>
+          都留在<em class="cool">架子</em>上。
+        </h1>
+        <p class="hero-sub reveal d3">
+          Harness Board 是这个金融 agent 项目的 <span class="accent">项目复盘 + 知识沉淀工具</span>。8 维 × 62 capability <span class="accent-cool">网格</span>记录"我做到哪一步",DeepCard 写下 why / tradeoff / lesson,闪卡把它们 SRS 复习成肌肉记忆。
+        </p>
+        <div class="hero-wips reveal d4">
+          <span class="label">In flux ›</span>
+          <a>memory.bi_temporal</a>
+          <a>orchestration.langgraph_retry</a>
+          <a>eval.differential_golden</a>
+        </div>
+      </div>
+
+      <!-- Fingerprint — 8-dim signature -->
+      <div class="reveal d3">
+        <div class="fingerprint">
+          <svg viewBox="-160 -160 320 320" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <radialGradient id="fpglow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#c89456" stop-opacity="0.18"/>
+                <stop offset="60%" stop-color="#c89456" stop-opacity="0.04"/>
+                <stop offset="100%" stop-color="#c89456" stop-opacity="0"/>
+              </radialGradient>
+            </defs>
+            <circle cx="0" cy="0" r="140" fill="url(#fpglow)"/>
+            <!-- Outer ring -->
+            <circle cx="0" cy="0" r="140" fill="none" stroke="#2a2018" stroke-width="1"/>
+            <circle cx="0" cy="0" r="100" fill="none" stroke="#2a2018" stroke-width="1" stroke-dasharray="2 4"/>
+            <circle cx="0" cy="0" r="60" fill="none" stroke="#2a2018" stroke-width="1"/>
+
+            <!-- 8 dimensions as radial spokes with chip stacks -->
+            <!-- Each dimension: spoke + 3 dots indicating lit/wip/todo -->
+            <g id="dims">
+              <!-- 01 Prompt: top, 4 lit -->
+              <g transform="rotate(0)">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                <circle cx="0" cy="-80" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-95" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-110" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-125" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-140" r="3" fill="#6b5d49"/>
+                <text x="0" y="-150" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7d6e58" letter-spacing="0.15em">01</text>
+              </g>
+              <!-- 02 Tools: 45deg, 5 lit -->
+              <g transform="rotate(45)">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                <circle cx="0" cy="-80" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-95" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-110" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-125" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-140" r="5" fill="#94b87a"/>
+                <text x="0" y="-150" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7d6e58" transform="rotate(-45 0 -150)" letter-spacing="0.15em">02</text>
+              </g>
+              <!-- 03 Orch: 90deg, 3 lit + 1 wip -->
+              <g transform="rotate(90)">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                <circle cx="0" cy="-80" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-95" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-110" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-125" r="5" fill="#d4824a"/>
+                <text x="0" y="-150" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7d6e58" transform="rotate(-90 0 -150)" letter-spacing="0.15em">03</text>
+              </g>
+              <!-- 04 Memory: 135deg, 6 lit (fully done) -->
+              <g transform="rotate(135)">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                <circle cx="0" cy="-75" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-88" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-101" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-114" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-127" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-140" r="5" fill="#94b87a"/>
+                <text x="0" y="-150" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#c89456" transform="rotate(-135 0 -150)" letter-spacing="0.15em">04</text>
+              </g>
+              <!-- 05 RAG: 180deg, 3 lit -->
+              <g transform="rotate(180)">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                <circle cx="0" cy="-80" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-95" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-110" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-125" r="3" fill="#6b5d49"/>
+                <text x="0" y="-150" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7d6e58" transform="rotate(-180 0 -150)" letter-spacing="0.15em">05</text>
+              </g>
+              <!-- 06 Guard: 225deg, 1 lit + 1 wip -->
+              <g transform="rotate(225)">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                <circle cx="0" cy="-80" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-95" r="5" fill="#d4824a"/>
+                <circle cx="0" cy="-110" r="3" fill="#6b5d49"/>
+                <circle cx="0" cy="-125" r="3" fill="#6b5d49"/>
+                <text x="0" y="-150" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7d6e58" transform="rotate(-225 0 -150)" letter-spacing="0.15em">06</text>
+              </g>
+              <!-- 07 Eval: 270deg, 4 lit + 1 wip -->
+              <g transform="rotate(270)">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                <circle cx="0" cy="-80" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-95" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-110" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-125" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-140" r="5" fill="#d4824a"/>
+                <text x="0" y="-150" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7d6e58" transform="rotate(-270 0 -150)" letter-spacing="0.15em">07</text>
+              </g>
+              <!-- 08 Cost: 315deg, 2 lit -->
+              <g transform="rotate(315)">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                <circle cx="0" cy="-80" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-95" r="5" fill="#94b87a"/>
+                <circle cx="0" cy="-110" r="3" fill="#6b5d49"/>
+                <circle cx="0" cy="-125" r="3" fill="#6b5d49"/>
+                <text x="0" y="-150" text-anchor="middle" font-family="JetBrains Mono" font-size="9" fill="#7d6e58" transform="rotate(-315 0 -150)" letter-spacing="0.15em">08</text>
+              </g>
+            </g>
+            <!-- center — dual ring (teal outer, amber inner) -->
+            <circle cx="0" cy="0" r="28" fill="none" stroke="#6f9494" stroke-width="0.8" opacity="0.7"/>
+            <circle cx="0" cy="0" r="22" fill="#1a1410" stroke="#c89456" stroke-width="1"/>
+            <text x="0" y="5" text-anchor="middle" font-family="Newsreader" font-weight="500" font-size="16" fill="#c89456" font-style="italic">H</text>
+          </svg>
+          <div class="fingerprint-caption">
+            <strong>fingerprint</strong> · 42 lit / 5 wip / 15 todo
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     SECTION 2 — Grid (8 dimensions)
+     ========================================================= -->
+<section>
+  <div class="stage">
+    <div class="section-marker">
+      <span class="sm-num">§ 01</span>
+      <span class="sm-title">Grid · 8 维 × 62 capability</span>
+      <span class="sm-desc">非均匀栅格 · lit / wip / todo · hover 浮起</span>
+    </div>
+
+    <div class="layer-stack">
+      <!-- 01 Prompt -->
+      <div class="layer">
+        <span class="numeral">01</span>
+        <div class="l-eyebrow"><span class="dot dot-prompt"></span> Prompt & Context</div>
+        <div class="l-title">提示词与上下文 <span class="en">Prompt engineering</span></div>
+        <div class="l-stat"><span>4 / 8 lit</span><span class="bar"><i style="width:50%"></i></span><span>0.50</span></div>
+        <div class="chips">
+          <span class="chip lit">multi_tier_signature<span class="conf-dots"><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">constrained_schema<span class="conf-dots"><i></i><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">skills_bundle<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">per_task_registry<span class="conf-dots"><i></i><i></i></span></span>
+          <span class="chip todo">prompt_versioning</span>
+          <span class="chip todo">few_shot_library</span>
+          <span class="chip todo">prompt_caching</span>
+          <span class="chip todo">ctx_compression</span>
+        </div>
+      </div>
+
+      <!-- 02 Tools -->
+      <div class="layer">
+        <span class="numeral">02</span>
+        <div class="l-eyebrow"><span class="dot dot-tools"></span> Tools &amp; Function Calling</div>
+        <div class="l-title">工具与函数调用 <span class="en">Function calling</span></div>
+        <div class="l-stat"><span>5 / 8 lit</span><span class="bar"><i style="width:62%"></i></span><span>0.62</span></div>
+        <div class="chips">
+          <span class="chip lit">tool_registry<span class="conf-dots"><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">schema_validated_io<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">financial_tools<span class="conf-dots"><i></i><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">reliability_layer<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">mcp_bridge<span class="conf-dots"><i></i><i></i></span></span>
+          <span class="chip todo">tool_observability</span>
+          <span class="chip todo">tool_versioning</span>
+          <span class="chip todo">parallel_tool_calls</span>
+        </div>
+      </div>
+
+      <!-- 03 Orchestration -->
+      <div class="layer">
+        <span class="numeral">03</span>
+        <div class="l-eyebrow"><span class="dot dot-orch"></span> Orchestration</div>
+        <div class="l-title">编排 <span class="en">Orchestration</span></div>
+        <div class="l-stat"><span>3 + 1wip / 7</span><span class="bar"><i style="width:50%"></i></span><span>0.43</span></div>
+        <div class="chips">
+          <span class="chip lit">langgraph_skeleton<span class="conf-dots"><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">research_5agent<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">critic_retry_edge<span class="conf-dots"><i></i><i></i></span></span>
+          <span class="chip wip">langgraph_retry</span>
+          <span class="chip todo">handoff_pattern</span>
+          <span class="chip todo">parallel_subagents</span>
+          <span class="chip todo">supervisor_router</span>
+        </div>
+      </div>
+
+      <!-- 04 Memory — highlight, 全 lit -->
+      <div class="layer">
+        <span class="numeral">04</span>
+        <div class="l-eyebrow"><span class="dot dot-memory"></span> Memory</div>
+        <div class="l-title">记忆系统 <span class="en">Cross-session memory</span></div>
+        <div class="l-stat"><span style="color:var(--amber);">6 / 6 lit ★</span><span class="bar"><i style="width:100%"></i></span><span style="color:var(--amber);">1.00</span></div>
+        <div class="chips">
+          <span class="chip lit">hierarchical<span class="conf-dots"><i></i><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">bi_temporal<span class="conf-dots"><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">graph_zep<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">milvus_3coll<span class="conf-dots"><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">rrf_v2<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">injection_guard<span class="conf-dots"><i></i><i></i></span></span>
+        </div>
+      </div>
+
+      <!-- 05 RAG -->
+      <div class="layer">
+        <span class="numeral">05</span>
+        <div class="l-eyebrow"><span class="dot dot-rag"></span> RAG &amp; Knowledge</div>
+        <div class="l-title">检索与知识 <span class="en">Retrieval</span></div>
+        <div class="l-stat"><span>3 / 7 lit</span><span class="bar"><i style="width:43%"></i></span><span>0.43</span></div>
+        <div class="chips">
+          <span class="chip lit">milvus_3_collections<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">chunker_routing<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">embedding_qwen<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip todo">reranker</span>
+          <span class="chip todo">hybrid_search</span>
+          <span class="chip todo">query_rewriting</span>
+          <span class="chip todo">eval_offline</span>
+        </div>
+      </div>
+
+      <!-- 06 Guardrails -->
+      <div class="layer">
+        <span class="numeral">06</span>
+        <div class="l-eyebrow"><span class="dot dot-guard"></span> Guardrails &amp; Safety</div>
+        <div class="l-title">护栏与安全 <span class="en">Guardrails</span></div>
+        <div class="l-stat"><span>1 + 1wip / 6</span><span class="bar"><i style="width:25%"></i></span><span>0.16</span></div>
+        <div class="chips">
+          <span class="chip lit">injection_classifier<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip wip">output_validator</span>
+          <span class="chip todo">pii_redaction</span>
+          <span class="chip todo">cost_budget_hard_stop</span>
+          <span class="chip todo">jailbreak_detector</span>
+          <span class="chip todo">disclaimer_inject</span>
+        </div>
+      </div>
+
+      <!-- 07 Eval -->
+      <div class="layer">
+        <span class="numeral">07</span>
+        <div class="l-eyebrow"><span class="dot dot-eval"></span> Eval &amp; Observability</div>
+        <div class="l-title">评测与可观测 <span class="en">Evaluation</span></div>
+        <div class="l-stat"><span>4 + 1wip / 9</span><span class="bar"><i style="width:55%"></i></span><span>0.50</span></div>
+        <div class="chips">
+          <span class="chip lit">trace_service<span class="conf-dots"><i></i><i></i><i></i><i></i></span></span>
+          <span class="chip lit">golden_runner<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">llm_judge<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">cassette_vcr<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip wip">differential_golden</span>
+          <span class="chip todo">prod_dashboard</span>
+          <span class="chip todo">regression_gate</span>
+          <span class="chip todo">cost_per_case</span>
+          <span class="chip todo">latency_p50</span>
+        </div>
+      </div>
+
+      <!-- 08 Cost -->
+      <div class="layer">
+        <span class="numeral">08</span>
+        <div class="l-eyebrow"><span class="dot dot-cost"></span> Cost &amp; Routing</div>
+        <div class="l-title">成本与路由 <span class="en">Cost optimization</span></div>
+        <div class="l-stat"><span>2 / 6 lit</span><span class="bar"><i style="width:33%"></i></span><span>0.33</span></div>
+        <div class="chips">
+          <span class="chip lit">constrained_router<span class="conf-dots"><i></i><i></i><i></i></span></span>
+          <span class="chip lit">tier_pricing<span class="conf-dots"><i></i><i></i></span></span>
+          <span class="chip todo">cache_layer</span>
+          <span class="chip todo">batch_api</span>
+          <span class="chip todo">budget_alert</span>
+          <span class="chip todo">model_fallback</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     SECTION 3 — Overview (鸟瞰)
+     ========================================================= -->
+<section>
+  <div class="stage">
+    <div class="section-marker">
+      <span class="sm-num">§ 02</span>
+      <span class="sm-title">Map · 系统鸟瞰</span>
+      <span class="sm-desc">cytoscape · 维度成簇 · 边轻轨</span>
+    </div>
+
+    <div class="overview-frame">
+      <div class="overview-toolbar">
+        <span style="color:var(--fg-dim);">维度</span>
+        <span class="pill active"><span class="dot dot-memory"></span> Memory</span>
+        <span class="pill active"><span class="dot dot-prompt"></span> Prompt</span>
+        <span class="pill active"><span class="dot dot-tools"></span> Tools</span>
+        <span class="pill"><span class="dot dot-rag"></span> RAG</span>
+        <span class="pill"><span class="dot dot-orch"></span> Orchestration</span>
+        <span class="ovsep">/</span>
+        <span class="pill">★ low conf only</span>
+        <span style="margin-left:auto; color:var(--fg-faint);">42 nodes · 18 edges</span>
+      </div>
+
+      <div class="overview-canvas">
+        <svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <radialGradient id="g-memory" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#d4af6c" stop-opacity="0.9"/>
+              <stop offset="60%" stop-color="#d4af6c" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#d4af6c" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="g-prompt" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#9b8cd4" stop-opacity="0.9"/>
+              <stop offset="60%" stop-color="#9b8cd4" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#9b8cd4" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="g-tools" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#6fb3d4" stop-opacity="0.9"/>
+              <stop offset="60%" stop-color="#6fb3d4" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#6fb3d4" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="g-orch" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#c89456" stop-opacity="0.9"/>
+              <stop offset="60%" stop-color="#c89456" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#c89456" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="g-rag" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#6f9494" stop-opacity="0.85"/>
+              <stop offset="60%" stop-color="#6f9494" stop-opacity="0.32"/>
+              <stop offset="100%" stop-color="#6f9494" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+
+          <!-- Dim cluster halos -->
+          <ellipse cx="320" cy="180" rx="160" ry="110" fill="url(#g-memory)" opacity="0.5"/>
+          <ellipse cx="780" cy="160" rx="140" ry="100" fill="url(#g-prompt)" opacity="0.45"/>
+          <ellipse cx="820" cy="340" rx="130" ry="90" fill="url(#g-tools)" opacity="0.45"/>
+          <ellipse cx="220" cy="360" rx="100" ry="80" fill="url(#g-orch)" opacity="0.45"/>
+          <ellipse cx="560" cy="250" rx="80" ry="60" fill="url(#g-rag)" opacity="0.45"/>
+
+          <!-- Edges (drawn first, low opacity) -->
+          <g stroke="#3a2e22" stroke-width="0.8" fill="none" opacity="0.7">
+            <path d="M310,150 Q450,180 540,230"/>
+            <path d="M320,210 Q450,230 540,250"/>
+            <path d="M280,180 Q430,200 540,240"/>
+            <path d="M540,250 Q620,200 760,170"/>
+            <path d="M560,260 Q650,300 780,330"/>
+            <path d="M790,165 Q820,250 815,330"/>
+            <path d="M220,360 Q380,310 540,260"/>
+            <path d="M240,330 Q360,290 540,250"/>
+            <path d="M770,200 Q820,250 815,330"/>
+            <path d="M820,140 Q780,180 760,160"/>
+            <path d="M340,150 Q400,150 760,150"/>
+            <path d="M820,330 Q780,280 760,200"/>
+          </g>
+
+          <!-- Memory nodes (cluster, all lit, large) -->
+          <g>
+            <circle cx="320" cy="180" r="14" fill="#d4af6c" filter="drop-shadow(0 0 8px #d4af6c)"/>
+            <text class="node-label bright" x="320" y="208" text-anchor="middle">hierarchical</text>
+            <circle cx="265" cy="155" r="11" fill="#d4af6c" filter="drop-shadow(0 0 6px #d4af6c)"/>
+            <text class="node-label bright" x="265" y="180" text-anchor="middle">bi_temporal</text>
+            <circle cx="380" cy="155" r="10" fill="#d4af6c" filter="drop-shadow(0 0 6px #d4af6c)"/>
+            <text class="node-label bright" x="380" y="178" text-anchor="middle">graph_zep</text>
+            <circle cx="240" cy="220" r="9" fill="#d4af6c" filter="drop-shadow(0 0 5px #d4af6c)"/>
+            <text class="node-label bright" x="240" y="242" text-anchor="middle">milvus_3coll</text>
+            <circle cx="370" cy="220" r="9" fill="#d4af6c" filter="drop-shadow(0 0 5px #d4af6c)"/>
+            <text class="node-label bright" x="370" y="242" text-anchor="middle">rrf_v2</text>
+            <circle cx="320" cy="125" r="8" fill="#d4af6c" filter="drop-shadow(0 0 5px #d4af6c)"/>
+            <text class="node-label bright" x="320" y="115" text-anchor="middle">inj_guard</text>
+          </g>
+
+          <!-- Prompt nodes -->
+          <g>
+            <circle cx="780" cy="160" r="11" fill="#9b8cd4" filter="drop-shadow(0 0 6px #9b8cd4)"/>
+            <text class="node-label bright" x="780" y="185" text-anchor="middle">multi_tier_sig</text>
+            <circle cx="830" cy="125" r="10" fill="#9b8cd4" filter="drop-shadow(0 0 6px #9b8cd4)"/>
+            <text class="node-label bright" x="830" y="115" text-anchor="middle">constrained_schema</text>
+            <circle cx="720" cy="135" r="9" fill="#9b8cd4" filter="drop-shadow(0 0 5px #9b8cd4)"/>
+            <text class="node-label bright" x="720" y="125" text-anchor="middle">skills_bundle</text>
+            <circle cx="840" cy="200" r="8" fill="#9b8cd4" filter="drop-shadow(0 0 4px #9b8cd4)"/>
+            <text class="node-label bright" x="840" y="222" text-anchor="middle">per_task_reg</text>
+            <!-- Dashed (todo, no deep card) -->
+            <circle cx="760" cy="210" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <text class="node-label" x="760" y="228" text-anchor="middle">prompt_caching</text>
+          </g>
+
+          <!-- Tools nodes -->
+          <g>
+            <circle cx="820" cy="340" r="12" fill="#6fb3d4" filter="drop-shadow(0 0 6px #6fb3d4)"/>
+            <text class="node-label bright" x="820" y="367" text-anchor="middle">tool_registry</text>
+            <circle cx="760" cy="380" r="10" fill="#6fb3d4" filter="drop-shadow(0 0 5px #6fb3d4)"/>
+            <text class="node-label bright" x="760" y="402" text-anchor="middle">financial_tools</text>
+            <circle cx="870" cy="385" r="9" fill="#6fb3d4" filter="drop-shadow(0 0 5px #6fb3d4)"/>
+            <text class="node-label bright" x="870" y="407" text-anchor="middle">schema_io</text>
+            <circle cx="860" cy="290" r="8" fill="#6fb3d4" filter="drop-shadow(0 0 4px #6fb3d4)"/>
+            <text class="node-label bright" x="860" y="278" text-anchor="middle">reliability</text>
+          </g>
+
+          <!-- Orch nodes -->
+          <g>
+            <circle cx="220" cy="360" r="11" fill="#c89456" filter="drop-shadow(0 0 6px #c89456)"/>
+            <text class="node-label bright" x="220" y="385" text-anchor="middle">langgraph_skel</text>
+            <circle cx="160" cy="390" r="9" fill="#c89456" filter="drop-shadow(0 0 5px #c89456)"/>
+            <text class="node-label bright" x="160" y="412" text-anchor="middle">research_5agent</text>
+            <!-- wip -->
+            <circle cx="270" cy="395" r="8" fill="#d4824a"/>
+            <circle cx="270" cy="395" r="13" fill="none" stroke="#d4824a" stroke-width="1" opacity="0.5">
+              <animate attributeName="r" values="13;19;13" dur="2.4s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.5;0;0.5" dur="2.4s" repeatCount="indefinite"/>
+            </circle>
+            <text class="node-label bright" x="270" y="417" text-anchor="middle">retry_edge ◇wip</text>
+          </g>
+
+          <!-- RAG center bridge — patina teal -->
+          <g>
+            <circle cx="560" cy="250" r="11" fill="#6f9494" filter="drop-shadow(0 0 7px #6f9494)"/>
+            <text class="node-label bright" x="560" y="275" text-anchor="middle">chunker_routing</text>
+            <circle cx="600" cy="220" r="9" fill="#6f9494" filter="drop-shadow(0 0 5px #6f9494)"/>
+            <text class="node-label bright" x="600" y="208" text-anchor="middle">embedding</text>
+            <circle cx="520" cy="225" r="9" fill="#6f9494" filter="drop-shadow(0 0 5px #6f9494)"/>
+            <text class="node-label bright" x="520" y="213" text-anchor="middle">milvus</text>
+          </g>
+
+          <!-- Todo / faded nodes scattered -->
+          <g>
+            <circle cx="950" cy="100" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="980" cy="170" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="1000" cy="240" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="60" cy="180" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="100" cy="280" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="950" cy="430" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="120" cy="60" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="480" cy="50" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="600" cy="420" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+            <circle cx="380" cy="400" r="5" fill="none" stroke="#5a4d3a" stroke-width="1" stroke-dasharray="2 2"/>
+          </g>
+        </svg>
+
+        <div class="overview-legend">
+          <div class="lg-item"><span class="swatch" style="background:#d4af6c; box-shadow: 0 0 6px #d4af6c;"></span> lit (有 DeepCard)</div>
+          <div class="lg-item"><span class="swatch" style="background:#d4824a;"></span> wip</div>
+          <div class="lg-item"><span class="swatch" style="background:transparent; border:1px dashed #5a4d3a;"></span> todo / 无 card</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     SECTION 4 — Story (三段式)
+     ========================================================= -->
+<section>
+  <div class="stage">
+    <div class="section-marker">
+      <span class="sm-num">§ 03</span>
+      <span class="sm-title">Story · 三段式时间线</span>
+      <span class="sm-desc">书页排版 · drop cap · why / what / lessons 三切</span>
+    </div>
+
+    <div class="story-rail">
+      <article class="story-card">
+        <div class="meta">
+          <span class="serial">No. 04 · MEMORY</span>
+          <span class="date">2026 · 05 · 11</span>
+          <span style="margin-left:auto; color:var(--fg-faint);">~ 9 min read</span>
+        </div>
+        <h3>
+          跨会话记忆为什么不能只用 vector search
+          <span class="quiet">Why cross-session memory needs a bi-temporal knowledge graph</span>
+        </h3>
+        <div class="body">
+          <p>当一个 agent 真的需要"记住上一周用户说过什么",最容易想到的方案是把对话切 chunk 丢进 vector DB,下次查询时按相似度召回。我也是这样开始的——v0.7 的 RAG 子系统已经接好 Milvus,加一个 collection 似乎就万事大吉。半个月后 dogfood 第一次撞上 <em>"用户改主意"</em> 这个场景:他先说"持仓里加宁德",后又说"算了换成比亚迪",再问 agent "我的持仓",vector retrieval 把两条都召回来了。</p>
+          <p>问题不是 retrieval 不准——两条都"相关"。问题是 agent <strong>不知道时间轴</strong>。这一刻才意识到 Letta + Zep 那篇 paper 在讲什么:记忆需要 <em>bi-temporal</em>,既有事件发生时间,又有事实有效区间;graph 上一条关系既能"成立"又能"失效"。换 vector 为 graph 不是为了更花哨,是为了让 agent 答得对。</p>
+        </div>
+        <div class="three-cuts">
+          <div class="cut">
+            <div class="h">Why</div>
+            <div class="b">用户改主意 = 旧事实失效。纯 vector 召回不区分有效/失效,会把矛盾两条都还给 LLM。</div>
+          </div>
+          <div class="cut">
+            <div class="h">What</div>
+            <div class="b">MemGPT hierarchical(core/episodic/archival)+ Zep bi-temporal graph(event_time × valid_at)杂交。7 节点 / 11 边。</div>
+          </div>
+          <div class="cut">
+            <div class="h">Lessons</div>
+            <div class="b">retrieval 准确 ≠ agent 答得对。时间和关系是 vector 拿不到的形状,加 graph 是必要不是装饰。</div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     SECTION 5 — Flashcard (3D flip)
+     ========================================================= -->
+<section>
+  <div class="stage">
+    <div class="section-marker">
+      <span class="sm-num">§ 04</span>
+      <span class="sm-title">Cards · 闪卡复习</span>
+      <span class="sm-desc">SRS · 翻牌动画 · 0–5 评分</span>
+    </div>
+
+    <div class="flash-stage">
+      <div class="flash-card" id="fcard">
+        <div class="inner">
+          <div class="face front">
+            <span class="corner">CARD 04 / 42</span>
+            <div class="eyebrow">memory · bi_temporal</div>
+            <h2>Bi-temporal 在 cross-session memory 里解决什么 ?</h2>
+            <div class="body">
+              用一句话说清楚: 为什么单纯按 chunk 时间排序的 vector retrieval, 在用户"改主意"的场景下会答错 ?
+            </div>
+            <div class="footnote">
+              <span>tap to flip</span>
+              <span>last review · 3d ago</span>
+            </div>
+          </div>
+          <div class="face back">
+            <span class="corner">CARD 04 / 42</span>
+            <div class="eyebrow">memory · bi_temporal · ANSWER</div>
+            <h2 style="font-size:24px;">事件发生 ≠ 事实有效</h2>
+            <div class="body">
+              两条时间轴: <strong style="color:var(--amber);">event_time</strong>(事实何时被陈述)与 <strong style="color:var(--teal);">valid_at</strong>(事实何时被认为有效)。用户改主意时, 旧 fact 仍存在 (event_time 在), 但 valid_at = 当前 → 不再有效。retrieval 必须按 valid_at 过滤, 不是 event_time 排序。
+            </div>
+            <div class="footnote">
+              <span>graph_zep / rrf_v2</span>
+              <span>SRS interval · 6 d</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flash-rate">
+        <h4>记得有多牢 ?</h4>
+        <div class="grade">
+          <button data-g="0" title="完全忘了">0</button>
+          <button data-g="1" title="基本忘">1</button>
+          <button data-g="2">2</button>
+          <button data-g="3" title="想起来了">3</button>
+          <button data-g="4" title="清楚">4</button>
+          <button data-g="5" title="脱口而出">5</button>
+        </div>
+        <div class="hint">0 = 重置 · 5 = 间隔 ×2.5</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     SECTION 6 — Decisions (changelog)
+     ========================================================= -->
+<section>
+  <div class="stage">
+    <div class="section-marker">
+      <span class="sm-num">§ 05</span>
+      <span class="sm-title">Forge · 决策日志</span>
+      <span class="sm-desc">commit-time 抽取 · 标签筛选 · note 补充</span>
+    </div>
+
+    <div class="decisions-grid">
+      <aside class="decisions-side">
+        <h5>维度</h5>
+        <ul class="filter-list">
+          <li class="active">All <span class="count">128</span></li>
+          <li>Memory <span class="count">31</span></li>
+          <li>Orchestration <span class="count">24</span></li>
+          <li>Prompt <span class="count">18</span></li>
+          <li>Eval <span class="count">16</span></li>
+          <li>RAG <span class="count">14</span></li>
+          <li>Tools <span class="count">12</span></li>
+          <li>Guardrails <span class="count">8</span></li>
+          <li>Cost <span class="count">5</span></li>
+        </ul>
+        <h5>层级</h5>
+        <ul class="filter-list">
+          <li>spec 决策 <span class="count">62</span></li>
+          <li>plan 决策 <span class="count">41</span></li>
+          <li>memory 沉淀 <span class="count">25</span></li>
+        </ul>
+      </aside>
+
+      <div>
+        <div class="decision-card">
+          <div class="head">
+            <span class="commit">52ca9bd</span>
+            <span class="when">5 · 11 · 2026</span>
+          </div>
+          <h4>C.5 cross-session memory v1.x ship — 107 commits / 11 plans / 6 算法深度补丁</h4>
+          <p class="summary">MemGPT hierarchical + Zep bi-temporal graph 杂交;16 工业难题 P0+P1 全撞;cassette + dogfood manual follow-up。算法层 6 处深度补丁(injection classifier 规则层 / posterior calibration weekly / evidence_quote 校验 / Tier 3 recall / RRF v2 时间感知 / 长尾召回监控)。</p>
+          <div class="tags">
+            <span class="tag dim">memory</span>
+            <span class="tag dim">orchestration</span>
+            <span class="tag layer">spec-decision</span>
+            <span class="tag layer">plan-decision × 11</span>
+            <span class="tag layer">incident-rooted</span>
+          </div>
+        </div>
+
+        <div class="decision-card">
+          <div class="head">
+            <span class="commit">da05974</span>
+            <span class="when">5 · 12 · 2026</span>
+          </div>
+          <h4>fix(c5): wire is_prompt_injection into 4 memory write paths</h4>
+          <p class="summary">原因 layer: impl。Plan 5 自卡声称已接但实际 0 调用点,4 写入入口接通 + L0/L1/L2 e2e 守护。撞上"自卡 vs 现实"差距经典模式。</p>
+          <div class="tags">
+            <span class="tag dim">guardrails</span>
+            <span class="tag dim">memory</span>
+            <span class="tag layer">fix · impl-layer</span>
+          </div>
+        </div>
+
+        <div class="decision-card">
+          <div class="head">
+            <span class="commit">b914dcb</span>
+            <span class="when">5 · 06 · 2026</span>
+          </div>
+          <h4>v0.8.5 constrained LLM router + 17-component Anthropic Skills bundle</h4>
+          <p class="summary">Planner 从自由生成 ResearchPlan 改为 schema-constrained 4 选 1 router;17-component financial_research skill bundle(11 methodology + 3 references + 3 Python helpers);第 7 critic plan_correctness + retry edge max 2 轮。</p>
+          <div class="tags">
+            <span class="tag dim">prompt</span>
+            <span class="tag dim">orchestration</span>
+            <span class="tag layer">spec-decision</span>
+            <span class="tag layer">incident-rooted</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     SECTION 7 — Deep Card modal preview
+     ========================================================= -->
+<section>
+  <div class="stage">
+    <div class="section-marker">
+      <span class="sm-num">§ 06</span>
+      <span class="sm-title">Deep Card · 单卡详读</span>
+      <span class="sm-desc">点击 chip 唤起 · 左主体 / 右联动</span>
+    </div>
+
+    <div class="deep-card">
+      <div class="dc-head">
+        <span class="dc-cap-id">04 · memory.bi_temporal</span>
+        <h2>双时间轴知识图</h2>
+        <span class="status">LIT · conf 4/5</span>
+      </div>
+      <div class="dc-body">
+        <div class="dc-left">
+          <div class="dc-field">
+            <div class="lbl">What</div>
+            <div class="val">每条 fact 同时记录两条时间轴:<em>event_time</em>(事实被陈述的时刻)与 <em>valid_at</em>(事实被系统认为有效的区间起点)。retrieval 阶段按 valid_at 过滤,event_time 仅用于 audit 追溯。</div>
+          </div>
+          <div class="dc-field">
+            <div class="lbl">Why</div>
+            <div class="val">v1.0 dogfood 撞上"用户改主意"场景:先说"持仓加宁德"再说"换比亚迪",纯 vector 召回把两条都还给 LLM,agent 答错。问题不是 retrieval 不准,是没有时间维度区分有效/失效。</div>
+          </div>
+          <div class="dc-field">
+            <div class="lbl">Chosen alternative</div>
+            <div class="val">Zep bi-temporal graph(事件层 + 事实层双轴),而非纯 vector 时间戳排序、也不是单层 graph。两轴分离让 audit 与 inference 可独立优化。</div>
+          </div>
+          <div class="dc-field">
+            <div class="lbl">Tradeoff</div>
+            <div class="val">写入复杂度 +30%(每条 fact 需更新 valid_at 区间),读出可控,audit 完整。pure vector 写入简单但 retrieval 形态错。</div>
+          </div>
+          <div class="dc-field">
+            <div class="lbl">Lessons learned</div>
+            <div class="val">retrieval 准确 ≠ agent 答得对。时间和关系是 vector 拿不到的形状,加 graph 是必要不是装饰。<br>—— 撞上 P0 工业难题第 3 项时(2026-05-10),才意识到这件事的份量。</div>
+          </div>
+        </div>
+        <div class="dc-right">
+          <h5>Code anchors</h5>
+          <ul>
+            <li><code>memory/graph_store.py:42</code> — Zep client init</li>
+            <li><code>memory/bi_temporal.py:88</code> — valid_at update</li>
+            <li><code>memory/retrieval.py:156</code> — RRF v2 filter</li>
+          </ul>
+          <h5>Linked decisions</h5>
+          <ul>
+            <li>dec_2026-05-11-c5-graph</li>
+            <li>dec_2026-05-12-injection-wire</li>
+          </ul>
+          <h5>Linked capability</h5>
+          <ul>
+            <li>memory.hierarchical</li>
+            <li>memory.rrf_v2</li>
+            <li>guardrails.injection_classifier</li>
+          </ul>
+          <h5>Linked specs</h5>
+          <ul>
+            <li><code>2026-05-10-c5-cross-session-memory-design.md</code></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =========================================================
+     Closing
+     ========================================================= -->
+<div class="closing">
+  <div class="mark">— Quiet Workshop —</div>
+  <div class="sub">Mockup v2 · static direction · 2026-05-14</div>
+</div>
+
+<script>
+  // Flashcard flip
+  document.querySelectorAll('.flash-card').forEach(el => {
+    el.addEventListener('click', () => el.classList.toggle('flipped'));
+  });
+  // Chip hover ripple — currently CSS only, hook here if needed
+</script>
+
+</body>
+</html>

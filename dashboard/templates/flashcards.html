@@ -1,32 +1,58 @@
 {# V5 闪卡今日复习主入口。spec § 5.5。 #}
 {% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
-{% include "_board_nav.html" %}
-<div class="flashcards-page">
-  <div class="flashcards-toolbar">
-    <a href="/" class="btn-back">← 返回网格</a>
-    <span>🎴 今日复习 ({{ today_cards | length }} 张)</span>
-    <a href="/flashcards/stats" class="btn-stats">📊 学习统计</a>
+<div class="board">
+
+  <div class="section-marker">
+    <span class="sm-num">§ 04</span>
+    <span class="sm-title">Cards · 闪卡复习</span>
+    <span class="sm-desc">SRS · 翻牌动画 · 0–5 评分</span>
+  </div>
+
+  <div class="flash-toolbar">
+    <span class="flash-count">今日 <strong>{{ today_cards | length }}</strong> 张待复习</span>
+    <a href="/flashcards/stats" class="flash-stats-link">📊 学习统计</a>
   </div>
 
   {% if today_cards %}
-    <div class="flashcards-progress">
-      已完成 <span id="reviewed-count">0</span> / {{ today_cards | length }}
+    <div class="flash-progress">
+      <span class="fp-label">已完成</span>
+      <em id="reviewed-count">0</em>
+      <span class="fp-sep">/</span>
+      <span class="fp-total">{{ today_cards | length }}</span>
     </div>
-    <div class="flashcards-deck">
-      {% for fc in today_cards %}
-        <div class="flashcard" data-fc-id="{{ fc.id }}"
-             data-fc-index="{{ loop.index0 }}"
-             {% if not loop.first %}style="display:none;"{% endif %}>
-          {% include "_flashcard_review.html" %}
+
+    <div class="flash-stage">
+      <div class="flash-card-deck">
+        {% for fc in today_cards %}
+          <div class="flashcard flash-card" data-fc-id="{{ fc.id }}" data-fc-index="{{ loop.index0 }}"
+               {% if not loop.first %}style="display:none;"{% endif %}>
+            {% include "_flashcard_review.html" %}
+          </div>
+        {% endfor %}
+      </div>
+
+      <aside class="flash-rate">
+        <h4>记得有多牢?</h4>
+        <div class="grade">
+          <button class="grade-btn" data-g="0" title="完全忘了">0</button>
+          <button class="grade-btn" data-g="1" title="基本忘">1</button>
+          <button class="grade-btn" data-g="2">2</button>
+          <button class="grade-btn" data-g="3" title="想起来了">3</button>
+          <button class="grade-btn" data-g="4" title="清楚">4</button>
+          <button class="grade-btn" data-g="5" title="脱口而出">5</button>
         </div>
-      {% endfor %}
+        <div class="hint">0 = 重置 · 5 = 间隔 ×2.5</div>
+      </aside>
     </div>
+
   {% else %}
-    <div class="flashcards-empty">
-      📭 今日暂无可复习卡 — 先到 <a href="/">网格</a> 给一些 cap 填 DeepCard
+    <div class="flash-empty">
+      <p>📭 今日暂无可复习卡 — 先到 <a href="/">网格</a> 给一些 cap 填 DeepCard</p>
     </div>
   {% endif %}
+
 </div>
 <script src="/static/flashcards.js"></script>
 {% endblock %}

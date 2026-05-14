@@ -35,7 +35,8 @@ def test_modal_returns_html(client: TestClient, tmp_path: Path) -> None:
     body = resp.text
     assert "Anthropic Skills bundle" in body
     assert "progressive disclosure" in body
-    assert "deep-card-modal" in body
+    assert 'class="deep-card"' in body
+    assert "data-modal-content" in body
 
 
 def test_modal_unknown_cap_returns_404(client: TestClient) -> None:

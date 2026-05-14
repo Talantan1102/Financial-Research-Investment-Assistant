@@ -1,16 +1,94 @@
-<header class="hero">
-  <span class="hero-date">📅 {{ today }}</span>
-  <span class="hero-wips">
-    {% if wips %}
-      当前 wip:
-      {% for c in wips %}
-        <a class="chip wip" href="#layer-{{ c.dimension }}">[{{ c.dimension[:2] }}] {{ c.name_cn }}</a>
-      {% endfor %}
-    {% else %}
-      <em class="empty">今天没在做任何 capability — 从 todo 挑一个?</em>
-    {% endif %}
-  </span>
-  <span class="hero-actions">
-    <span class="hero-counter">{{ snap.total_lit }}/{{ snap.total }} lit</span>
-  </span>
-</header>
+<section class="hero-block">
+  <div class="stage">
+    <div class="hero-grid">
+      <div>
+        <div class="hero-meta reveal d1">
+          <span class="pill">v0.9.6 · workshop</span>
+          <span>{{ today }} · {{ snap.total }} capabilities</span>
+        </div>
+        <h1 class="hero-title reveal d2">
+          所有<em>力气</em><br>
+          都留在<em class="cool">架子</em>上。
+        </h1>
+        <p class="hero-sub reveal d3">
+          Harness Board 是这个金融 agent 项目的 <span class="accent">项目复盘 + 知识沉淀工具</span>。8 维 × {{ snap.total }} capability <span class="accent-cool">网格</span>记录"我做到哪一步",DeepCard 写下 why / tradeoff / lesson,闪卡把它们 SRS 复习成肌肉记忆。
+        </p>
+        <div class="hero-wips reveal d4">
+          {% if wips %}
+            <span class="label">In flux ›</span>
+            {% for c in wips %}
+              <a href="#layer-{{ c.dimension }}">{{ c.name_cn }}</a>
+            {% endfor %}
+          {% else %}
+            <span class="label">All clear ›</span>
+            <span style="color: var(--fg-faint); font-size: 11px;">今天没有 wip — 从 todo 挑一个?</span>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Fingerprint — 8-dim geometric signature -->
+      <div class="reveal d3">
+        <div class="fingerprint">
+          <svg viewBox="-160 -160 320 320" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <radialGradient id="fpglow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#c89456" stop-opacity="0.18"/>
+                <stop offset="60%" stop-color="#c89456" stop-opacity="0.04"/>
+                <stop offset="100%" stop-color="#c89456" stop-opacity="0"/>
+              </radialGradient>
+            </defs>
+            <!-- Background glow -->
+            <circle cx="0" cy="0" r="140" fill="url(#fpglow)"/>
+            <!-- Concentric rings -->
+            <circle cx="0" cy="0" r="140" fill="none" stroke="#2a2018" stroke-width="1"/>
+            <circle cx="0" cy="0" r="100" fill="none" stroke="#2a2018" stroke-width="1" stroke-dasharray="2 4"/>
+            <circle cx="0" cy="0" r="60" fill="none" stroke="#2a2018" stroke-width="1"/>
+
+            <!-- 8-dim spokes — Jinja derived from snap.layers -->
+            {% for layer in snap.layers %}
+              {% set angle = loop.index0 * 45 %}
+              {% set lit_n = [layer.lit, 5] | min %}
+              {% set wip_n = [layer.wip, 5 - lit_n] | min %}
+              {% set todo_n = 5 - lit_n - wip_n %}
+              {% set is_memory = (layer.id == 'memory') %}
+              <g transform="rotate({{ angle }})">
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
+                {# Dot positions: 5 slots at cy -80, -95, -110, -125, -140 #}
+                {# lit dots (green, r=5) #}
+                {% for i in range(lit_n) %}
+                  <circle cx="0" cy="{{ -80 - i * 15 }}" r="5" fill="#94b87a"/>
+                {% endfor %}
+                {# wip dots (orange, r=5) #}
+                {% for i in range(wip_n) %}
+                  <circle cx="0" cy="{{ -80 - (lit_n + i) * 15 }}" r="5" fill="#d4824a"/>
+                {% endfor %}
+                {# todo dots (gray, r=3) #}
+                {% for i in range(todo_n) %}
+                  <circle cx="0" cy="{{ -80 - (lit_n + wip_n + i) * 15 }}" r="3" fill="#6b5d49"/>
+                {% endfor %}
+                {# Dimension number label — counter-rotated so text stays upright #}
+                <text
+                  x="0" y="-150"
+                  text-anchor="middle"
+                  font-family="'Geist Mono', 'JetBrains Mono', monospace"
+                  font-size="9"
+                  fill="{{ '#c89456' if is_memory else '#7d6e58' }}"
+                  transform="rotate({{ -angle }} 0 -150)"
+                  letter-spacing="0.15em">{{ layer.number }}</text>
+              </g>
+            {% endfor %}
+
+            <!-- Center — dual ring (teal outer + amber inner) + italic H -->
+            <circle cx="0" cy="0" r="28" fill="none" stroke="#6f9494" stroke-width="0.8" opacity="0.7"/>
+            <circle cx="0" cy="0" r="22" fill="#1a1410" stroke="#c89456" stroke-width="1"/>
+            <text x="0" y="5" text-anchor="middle" font-family="Newsreader" font-weight="500" font-size="16" fill="#c89456" font-style="italic">H</text>
+          </svg>
+        </div>
+        <div class="fingerprint-caption">
+          <strong>fingerprint</strong> · {{ snap.total_lit }} lit / {{ snap.total_wip }} wip / {{ snap.total_todo }} todo
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>

@@ -2,27 +2,33 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-from datetime import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import asdict
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
 import uvicorn
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-
-logger = logging.getLogger(__name__)
+from starlette.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
+
+logger = logging.getLogger(__name__)
 
 from dashboard.derive.app_shell_stat import compute_app_shell_stat
 from dashboard.derive.capability_resolver import load_capabilities, resolve_status
 from dashboard.derive.decision_extractor import extract_all, resolve_memory_path
 from dashboard.derive.deep_card_types import Flashcard
 from dashboard.derive.path_router import load_dimensions
+from dashboard.derive.refresh_pipeline import RefreshPipeline
+from dashboard.derive.seed_ingest import SeedIngestService
 from dashboard.derive.snapshot_builder import build_snapshot
 from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
 from dashboard.state.db import open_db
@@ -43,6 +49,7 @@ DASHBOARD_ROOT = Path(__file__).parent
 PROJECT_ROOT = DASHBOARD_ROOT.parent
 CONFIG_DIR = DASHBOARD_ROOT / "config"
 DB_PATH = PROJECT_ROOT / "backend" / "data" / "board.db"
+SEED_PATH = DASHBOARD_ROOT / "data" / "deep_cards_seed.jsonl"
 
 templates = Jinja2Templates(directory=str(DASHBOARD_ROOT / "templates"))
 
@@ -251,14 +258,44 @@ async def post_override(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
-async def post_refresh(_request: Request) -> Response:
-    """显式 invalidate snapshot,302 redirect 到 /。"""
-    conn = open_db(DB_PATH)
-    try:
-        SnapshotRepo(conn).invalidate()
-    finally:
-        conn.close()
-    return RedirectResponse("/", status_code=302)
+async def post_refresh(_request: Request) -> StreamingResponse:
+    """SSE 5-step pipeline。spec § 2.1 / § 2.4。
+
+    Breaking change(v0.9.6):不再 302 redirect 到 /,改为 text/event-stream。
+    """
+    pipeline = RefreshPipeline(
+        project_root=PROJECT_ROOT,
+        config_dir=CONFIG_DIR,
+        db_path=DB_PATH,
+        seed_path=SEED_PATH,
+    )
+
+    async def _gen() -> AsyncIterator[bytes]:
+        import time as _time
+
+        t0 = _time.perf_counter()
+        summary = {"done": 0, "skip": 0, "error": 0}
+        snapshot_refreshed_at = ""
+        async for ev in pipeline.stream():
+            if ev.status in summary:
+                summary[ev.status] += 1
+            if ev.step == "snapshot_finalize" and ev.status == "done":
+                # detail = "refreshed_at <iso>"
+                snapshot_refreshed_at = ev.detail.replace("refreshed_at ", "", 1)
+            payload = json.dumps(asdict(ev), ensure_ascii=False)
+            yield f"event: step\ndata: {payload}\n\n".encode()
+        total_ms = int((_time.perf_counter() - t0) * 1000)
+        done_payload = json.dumps(
+            {
+                "total_ms": total_ms,
+                "snapshot_refreshed_at": snapshot_refreshed_at,
+                "steps_summary": summary,
+            },
+            ensure_ascii=False,
+        )
+        yield f"event: done\ndata: {done_payload}\n\n".encode()
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 async def _build_milvus_client() -> object:
@@ -531,7 +568,13 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
         conn.close()
 
     derived_status = resolve_status(cfg, PROJECT_ROOT)
-    cap = {"id": cfg.id, "name_cn": cfg.name_cn, "status": derived_status}
+    cap = {
+        "id": cfg.id,
+        "name_cn": cfg.name_cn,
+        "status": derived_status,
+        "dimension": cfg.dimension,
+        "confidence": card.srs_state.confidence if card else 0,
+    }
 
     content_fields: list[dict[str, object]] = []
     for f in (
@@ -823,44 +866,124 @@ async def post_flashcard_review(request: Request) -> HTMLResponse:
     )
 
 
-async def flashcards_stats(request: Request) -> HTMLResponse:  # noqa: ARG001
-    """V5 学习统计页 — 总数 / 已掌握 / 维度分布。spec § 5.5。"""
+def _compute_streak_days(review_dates: list[date]) -> int:
+    """连续复习天数 — 从今天往前数,直到第一个 gap。"""
+    if not review_dates:
+        return 0
+    unique = sorted(set(review_dates), reverse=True)
+    today = datetime.now(UTC).date()
+    streak = 0
+    expected = today
+    for d in unique:
+        if d == expected:
+            streak += 1
+            expected = expected - timedelta(days=1)
+        elif d == expected + timedelta(days=1):
+            # 今天没复习但昨天复习了 — streak 从昨天起算
+            if streak == 0:
+                expected = d
+                streak = 1
+                expected = expected - timedelta(days=1)
+            else:
+                break
+        else:
+            break
+    return streak
+
+
+async def flashcards_stats_json(_request: Request) -> JSONResponse:
+    """Plan 3 — flashcards_stats.html 的数据 endpoint。"""
     conn = open_db(DB_PATH)
     try:
-        cur = conn.execute(
-            "SELECT COUNT(*) as total, "
-            "SUM(CASE WHEN json_extract(srs_state, '$.repetition') = 0 THEN 1 ELSE 0 END) as new_n, "
-            "SUM(CASE WHEN json_extract(srs_state, '$.confidence') >= 4 THEN 1 ELSE 0 END) as mastered, "
-            "AVG(json_extract(srs_state, '$.confidence')) as avg_conf "
-            "FROM flashcards"
-        )
-        row = cur.fetchone()
-        # 维度分布(基于 cap_id 前缀,粗略)
-        dim_cur = conn.execute(
-            "SELECT substr(cap_id, 1, instr(cap_id, '.') - 1) as dim, COUNT(*) as n "
-            "FROM flashcards WHERE instr(cap_id, '.') > 0 "
-            "GROUP BY dim ORDER BY n DESC"
-        )
-        dim_dist = [(r["dim"], r["n"]) for r in dim_cur.fetchall()]
+        fcs = FlashcardRepo(conn).get_all()
     finally:
         conn.close()
 
-    total = row["total"] or 0
-    new_n = row["new_n"] or 0
-    mastered = row["mastered"] or 0
-    avg_conf = round(row["avg_conf"] or 0.0, 2)
-
-    template = templates.get_template("flashcards_stats.html")
-    return HTMLResponse(
-        template.render(
-            total=total,
-            new=new_n,
-            mastered=mastered,
-            avg_conf=avg_conf,
-            dim_dist=dim_dist,
-            active_nav="flashcards",
+    total = len(fcs)
+    if total == 0:
+        return JSONResponse(
+            {
+                "total": 0,
+                "today": 0,
+                "avg_confidence": 0.0,
+                "streak_days": 0,
+                "timeline": [],
+                "scatter": [],
+            }
         )
+
+    today_utc = datetime.now(UTC).date()
+    reviewed = [f for f in fcs if f.srs_state.last_reviewed_at is not None]
+    today_count = sum(
+        1
+        for f in reviewed
+        if f.srs_state.last_reviewed_at and f.srs_state.last_reviewed_at.date() == today_utc
     )
+
+    # 平均 confidence(只算已复习过的;空则 0)
+    if reviewed:
+        avg_conf = round(sum(f.srs_state.confidence for f in reviewed) / len(reviewed), 2)
+    else:
+        avg_conf = 0.0
+
+    # 连续天数
+    streak = _compute_streak_days(
+        [f.srs_state.last_reviewed_at.date() for f in reviewed if f.srs_state.last_reviewed_at]
+    )
+
+    # 时间线:过去 30 天,每个 reviewed flashcard 一个点
+    cutoff = today_utc - timedelta(days=30)
+    timeline = []
+    for f in reviewed:
+        if f.srs_state.last_reviewed_at is None:
+            continue
+        d = f.srs_state.last_reviewed_at.date()
+        if d < cutoff:
+            continue
+        timeline.append({"date": d.isoformat(), "grade": f.srs_state.confidence})
+    timeline.sort(key=lambda x: str(x["date"]))
+
+    # 散点:每卡 (dim, conf);dim 由 cap_id 前缀派生 — 跟 capabilities.yaml 维度一致
+    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
+    cap_to_dim = {c.id: c.dimension for c in caps_cfg}
+    scatter = []
+    for f in fcs:
+        dim = cap_to_dim.get(f.cap_id, "unknown")
+        scatter.append({"dim": dim, "conf": f.srs_state.confidence})
+
+    return JSONResponse(
+        {
+            "total": total,
+            "today": today_count,
+            "avg_confidence": avg_conf,
+            "streak_days": streak,
+            "timeline": timeline,
+            "scatter": scatter,
+        }
+    )
+
+
+async def flashcards_stats(_request: Request) -> HTMLResponse:  # noqa: ARG001
+    """V5 学习统计页 — 只 render 静态壳,数据 JS 拉 /api/flashcards/stats.json。"""
+    template = templates.get_template("flashcards_stats.html")
+    return HTMLResponse(template.render(active_nav="flashcards"))
+
+
+@asynccontextmanager
+async def lifespan(_app: Starlette) -> AsyncIterator[None]:
+    """startup:db DeepCard 数 < seed 总数时 insert-if-missing 跑一次。
+
+    spec § 2.5。不删除任何 row,保护 SRS flashcard 进度。
+    """
+    try:
+        SeedIngestService(
+            seed_path=SEED_PATH,
+            db_path=DB_PATH,
+            config_dir=CONFIG_DIR,
+        ).run_once_if_underfilled()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("lifespan seed ingest skipped due to: %s", e)
+    yield
 
 
 app = Starlette(
@@ -883,6 +1006,7 @@ app = Starlette(
         Route("/cap/{cap_id}/ai_draft/{field}", post_ai_draft, methods=["POST"]),
         Route("/flashcards/today", flashcards_today),
         Route("/flashcards/stats", flashcards_stats),
+        Route("/api/flashcards/stats.json", flashcards_stats_json),
         Route(
             "/flashcards/{flashcard_id:path}/review",
             post_flashcard_review,
@@ -899,6 +1023,7 @@ app = Starlette(
             name="static",
         ),
     ],
+    lifespan=lifespan,
 )
 
 

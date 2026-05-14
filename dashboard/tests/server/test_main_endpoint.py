@@ -16,9 +16,9 @@ def test_index_renders() -> None:
         assert r.status_code == 200
         body = r.text
         # Hero
-        assert "📅" in body
-        # 8 layer 卡片
-        assert body.count("layer-card") >= 8
+        assert "hero-title" in body
+        # 8 layer 卡片(新结构使用 class="layer")
+        assert body.count('class="layer"') >= 8
         # 三态 chip
         assert "lit" in body and "todo" in body
         # 计数
@@ -26,14 +26,14 @@ def test_index_renders() -> None:
 
 
 def test_view_d_default() -> None:
-    """无 query 默认 D 视图,有 layer-card 和 Tab nav。"""
+    """无 query 默认 D 视图,有 layer-stack 和 Tab nav。"""
     with TestClient(app) as client:
         r = client.get("/")
         assert r.status_code == 200
         body = r.text
-        assert 'class="layer-card"' in body
-        assert "B Kanban" in body  # tab nav
-        assert "D 维度" in body
+        assert 'class="layer-stack"' in body
+        assert "Kanban" in body  # tab nav B view
+        assert "维度" in body  # tab nav D view
 
 
 def test_view_b_renders_kanban() -> None:
@@ -42,12 +42,11 @@ def test_view_b_renders_kanban() -> None:
         r = client.get("/?view=b")
         assert r.status_code == 200
         body = r.text
-        assert 'class="layer-card"' not in body  # 不显 D 视图
+        assert 'class="layer-stack"' not in body  # 不显 D 视图
         assert 'class="kanban"' in body
-        assert "Todo (" in body  # todo 列 header
-        assert "Doing (" in body
-        assert "Done (" in body
-        assert "<details>" in body  # Done 列折叠
+        assert "kanban-todo" in body  # todo 列
+        assert "kanban-doing" in body
+        assert "kanban-done" in body
 
 
 def test_get_edit_returns_select() -> None:
@@ -85,7 +84,6 @@ def test_post_override_invalidates_and_swaps() -> None:
         assert r.status_code == 200
         body = r.text
         assert 'class="chip wip"' in body
-        assert "🟠" in body
         # invalidate 验证:再 GET /,snapshot 含新 wip
         r2 = client.get("/")
         assert "memory.long_term_memory" in r2.text  # capability 出现在页面
@@ -132,15 +130,15 @@ def test_post_override_unknown_cap_id_returns_404_no_write() -> None:
         assert "nope.fake" not in overrides
 
 
-def test_post_refresh_invalidates_and_redirects() -> None:
-    """POST /refresh → 302 to /,snapshot 被清。"""
+def test_post_refresh_returns_sse_event_stream() -> None:
+    """POST /refresh → text/event-stream(spec § 2,Plan 1 起 breaking change)。"""
     with TestClient(app) as client:
-        # 触发 build
         client.get("/")
-        # refresh
-        r = client.post("/refresh", follow_redirects=False)
-        assert r.status_code == 302
-        assert r.headers["location"] == "/"
+        with client.stream("POST", "/refresh") as r:
+            assert r.status_code == 200
+            assert r.headers["content-type"].startswith("text/event-stream")
+            body = "".join(chunk.decode("utf-8") for chunk in r.iter_bytes())
+            assert "event: done" in body
 
 
 def test_index_shows_app_shell_row() -> None:

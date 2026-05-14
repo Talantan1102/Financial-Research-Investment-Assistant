@@ -1,7 +1,15 @@
-<form class="decision-note"
-      hx-post="/decisions/{{ decision_id }}/note"
-      hx-target="this"
-      hx-swap="outerHTML">
-  <input name="note" value="{{ note }}" placeholder="(用户备注)">
-  <button type="submit">保存</button>
-</form>
+<details class="decision-note-drawer">
+  <summary class="decision-note-toggle">
+    {% if note %}{{ note[:60] }}{% if note|length > 60 %}…{% endif %}{% else %}加 note{% endif %}
+  </summary>
+  <form class="decision-note"
+        hx-post="/decisions/{{ decision_id }}/note"
+        hx-target="closest details"
+        hx-swap="outerHTML"
+        hx-on::after-request="if(event.detail.successful) Toast.show({type:'success', msg:'note 已保存'})">
+    <textarea name="note" rows="3" placeholder="(用户备注)">{{ note }}</textarea>
+    <div class="decision-note-actions">
+      <button type="submit" class="note-submit">保存</button>
+    </div>
+  </form>
+</details>
