@@ -130,11 +130,11 @@ def test_post_override_unknown_cap_id_returns_404_no_write() -> None:
         assert "nope.fake" not in overrides
 
 
-def test_post_refresh_returns_sse_event_stream() -> None:
-    """POST /refresh → text/event-stream(spec § 2,Plan 1 起 breaking change)。"""
+def test_get_refresh_returns_sse_event_stream() -> None:
+    """GET /refresh → text/event-stream(SSE 标准 = GET;EventSource 强制 GET)。"""
     with TestClient(app) as client:
         client.get("/")
-        with client.stream("POST", "/refresh") as r:
+        with client.stream("GET", "/refresh") as r:
             assert r.status_code == 200
             assert r.headers["content-type"].startswith("text/event-stream")
             body = "".join(chunk.decode("utf-8") for chunk in r.iter_bytes())

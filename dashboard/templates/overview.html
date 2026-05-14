@@ -41,7 +41,7 @@
       <input type="radio" name="conf-filter" value="low" hidden>
       ★ low conf only
     </label>
-    <span class="ov-count">{{ total_nodes }} nodes · {{ total_edges|default(0) }} edges</span>
+    <span class="ov-count">{{ total_nodes }} nodes · — edges</span>
   </div>
 
   <div id="overview-canvas" class="overview-canvas"></div>
@@ -56,6 +56,5 @@
 </div>
 
 <script src="/static/cytoscape.min.js"></script>
-<script src="/static/cytoscape-cose-bilkent.min.js"></script>
 <script src="/static/overview.js"></script>
 {% endblock %}

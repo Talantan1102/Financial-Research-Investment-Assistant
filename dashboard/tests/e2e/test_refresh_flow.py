@@ -20,14 +20,14 @@ BASE_URL = "http://localhost:8910"
 
 
 def test_refresh_flow(page: Page) -> None:
-    """/ 首页加载 + chip 可见 + /api/refresh 触发后返回 200。"""
+    """/ 首页加载 + chip 可见 + GET /refresh 触发后返回 200。"""
     page.goto(BASE_URL)
     page.wait_for_selector(".chip", timeout=5000)
     chips = page.locator(".chip")
     assert chips.count() > 0, "首页应含 ≥1 chip"
 
-    resp = page.request.post(f"{BASE_URL}/api/refresh")
-    assert resp.status == 200, f"/api/refresh 应返回 200,得到 {resp.status}"
+    resp = page.request.get(f"{BASE_URL}/refresh")
+    assert resp.status == 200, f"GET /refresh 应返回 200,得到 {resp.status}"
 
 
 def test_overview_has_enough_nodes(page: Page) -> None:

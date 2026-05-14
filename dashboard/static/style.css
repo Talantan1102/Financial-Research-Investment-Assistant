@@ -735,6 +735,11 @@ body::before {
   margin-bottom: 20px;
 }
 
+/* [hidden] 显式覆盖,优先级高于上面的 display:inline-flex */
+.empty-state--overview[hidden] {
+  display: none;
+}
+
 /* ---- Empty state minimal ---- */
 .empty-state {
   font-family: var(--mono);

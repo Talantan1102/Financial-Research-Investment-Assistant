@@ -995,7 +995,7 @@ app = Starlette(
         Route("/decisions/{decision_id}/note", delete_decision_note, methods=["DELETE"]),
         Route("/capability/{cap_id}/edit", edit_capability),
         Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
-        Route("/refresh", post_refresh, methods=["POST"]),
+        Route("/refresh", post_refresh, methods=["GET"]),
         Route("/overview", overview_view),
         Route("/overview/fallback", overview_fallback),
         Route("/api/overview/graph.json", overview_graph_json),

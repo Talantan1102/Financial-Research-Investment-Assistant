@@ -51,6 +51,12 @@
     }
 
     const elements = [...payload.nodes, ...payload.edges];
+
+    const countEl = document.querySelector('.ov-count');
+    if (countEl) {
+      countEl.textContent = payload.nodes.length + ' nodes · ' + payload.edges.length + ' edges';
+    }
+
     cy = cytoscape({
       container: document.getElementById('overview-canvas'),
       elements: elements,
@@ -118,7 +124,7 @@
           },
         },
       ],
-      layout: { name: 'cose-bilkent', animate: false, randomize: false },
+      layout: { name: 'cose', animate: false, randomize: false },
     });
 
     const tooltip = document.getElementById('overview-tooltip');

@@ -38,12 +38,12 @@ def test_overview_graph_after_refresh_has_filled_nodes() -> None:
 
 
 def test_overview_graph_after_explicit_refresh_has_filled_nodes() -> None:
-    """同上,但显式触发 POST /refresh(verify SSE 完成后 graph 拉到新数据)。"""
+    """同上,但显式触发 GET /refresh(verify SSE 完成后 graph 拉到新数据)。"""
     from dashboard.server import app
 
     with TestClient(app) as client:
         # 跑 SSE refresh(消耗完流)
-        with client.stream("POST", "/refresh") as r:
+        with client.stream("GET", "/refresh") as r:
             for _ in r.iter_bytes():
                 pass
             assert r.status_code == 200
