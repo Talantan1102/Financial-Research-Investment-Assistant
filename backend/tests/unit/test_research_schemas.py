@@ -23,29 +23,29 @@ def test_subtask_minimal() -> None:
 
 def test_research_plan_minimal() -> None:
     p = ResearchPlan(
-        plan_id="balanced",
         rationale="single subtask",
         subtasks=[
             Subtask(subtask_id="overview", description="x", required_tools=[], rationale="r")
         ],
     )
     assert len(p.subtasks) == 1
-    assert p.plan_id == "balanced"
 
 
-def test_research_plan_invalid_plan_id_rejected() -> None:
-    """v0.8.5 — plan_id must be one of 4 PlanId Literal values."""
+def test_research_plan_requires_subtasks() -> None:
+    """v1.x — ResearchPlan requires ≥1 subtask (no more plan_id selector)."""
     with pytest.raises(ValidationError):
-        ResearchPlan(
-            plan_id="speculative",  # type: ignore[arg-type]
-            rationale="r",
-        )
+        ResearchPlan(rationale="r", subtasks=[])
 
 
 def test_research_plan_rationale_max_length() -> None:
-    """v0.8.5 — rationale capped at 200 chars."""
+    """v1.x — rationale capped at 300 chars (was 200 in v0.8.5)."""
     with pytest.raises(ValidationError):
-        ResearchPlan(plan_id="balanced", rationale="x" * 201)
+        ResearchPlan(
+            rationale="x" * 301,
+            subtasks=[
+                Subtask(subtask_id="s", description="d", required_tools=[], rationale="r")
+            ],
+        )
 
 
 def test_insight_confidence_levels() -> None:

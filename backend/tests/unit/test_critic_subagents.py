@@ -28,7 +28,6 @@ def _state_with_report() -> ResearchState:
             Insight(subtask_id="overview", finding="x", supporting_data=[], confidence="high")
         ],
         plan=ResearchPlan(
-            plan_id="balanced",
             rationale="default test plan",
             subtasks=[
                 Subtask(subtask_id="overview", description="d", required_tools=[], rationale="r")

@@ -328,23 +328,22 @@ class Subtask(BaseModel):
 
 
 class ResearchPlan(BaseModel):
-    """ResearchPlanner 输出 — v0.8.5 constrained-router schema.
+    """ResearchPlanner 输出 — v1.x A4 template-guided schema.
 
-    The planner LLM emits ``(plan_id, rationale)``; ``subtasks`` is then
-    filled at runtime by ``instantiate_plan(plan_id, target_name, ts_code)``
-    from PLAN_REGISTRY.
+    The planner LLM emits a full subtask list (description + rationale + tool
+    selection) within DD_PLAN_TEMPLATE constraints. plan_validator.validate_plan
+    enforces; retry ≤2 then fallback to SAFE_DEFAULT_PLAN.
+
+    plan_id (v0.8.5 constrained-router 4-plan selector) removed — see
+    docs/superpowers/specs/2026-05-15-v1.x-plan-template-validator-design.md § 4.
     """
 
-    # extra="ignore" so a hallucinated LLM emitting extra keys does not break
-    # parsing. Not frozen — instantiate_plan's caller may need to overwrite
-    # subtasks; downstream agents treat the instance as read-only by convention.
     model_config = ConfigDict(extra="ignore")
 
-    plan_id: PlanId
-    rationale: str = Field(max_length=200, description="LLM 解释为什么选此 plan_id")
-    # subtasks 默认空, 由 instantiate_plan() runtime 填充 (Task 7 spec).
+    rationale: str = Field(max_length=300, description="LLM 解释 plan 生成逻辑")
     subtasks: list[Subtask] = Field(
-        default_factory=list, description="Runtime instantiated by plan_registry"
+        min_length=1,
+        description="LLM 在 template 约束内生成的 subtask 列表",
     )
 
 

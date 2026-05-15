@@ -6,7 +6,6 @@ from app.agents.writer import build_investment_dd_prompt
 
 def _state_with_insights() -> ResearchState:
     plan = ResearchPlan(
-        plan_id="balanced",
         rationale="default test plan",
         subtasks=[
             Subtask(subtask_id="overview", description="d", required_tools=[], rationale="r")

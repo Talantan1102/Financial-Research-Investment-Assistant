@@ -15,7 +15,6 @@ from app.services.llm_service import LLMService
 
 def _state_with_data() -> ResearchState:
     plan = ResearchPlan(
-        plan_id="balanced",
         rationale="default test plan",
         subtasks=[
             Subtask(

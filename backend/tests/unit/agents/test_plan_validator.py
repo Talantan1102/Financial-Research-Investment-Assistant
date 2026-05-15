@@ -11,8 +11,7 @@ def _mk_sub(sid: str, desc: str, tools: list[str], rationale: str = "r") -> Subt
 
 
 def _mk_plan(subtasks: list[Subtask]) -> ResearchPlan:
-    # plan_id still required by current schema (removed in Task 1.3). Use a valid value.
-    return ResearchPlan(plan_id="balanced", rationale="t", subtasks=subtasks)
+    return ResearchPlan(rationale="t", subtasks=subtasks)
 
 
 def test_validate_ok_minimal_required_coverage() -> None:
