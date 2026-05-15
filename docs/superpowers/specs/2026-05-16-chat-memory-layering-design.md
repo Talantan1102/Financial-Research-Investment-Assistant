@@ -39,10 +39,12 @@ C.5 cross-session memory 已 ship,但 brainstorming 时发现两个核心问题:
 |---|---|---|
 | 1 | 分层粒度 | **5 层**:画像 / 持仓 / 便签 / 档案 / 知识 |
 | 2 | Prompt assembly 模式 | **静态区(画像+持仓 frozen snapshot)+ 动态区(便签滚动+召回)** |
-| 3 | 静态区刷新策略 | **Frozen snapshot**(session 起手装入,session 内不变)— 跟 Hermes 一致,不走 MemGPT 每轮重读 |
+| 3 | 静态区刷新策略 | **Open-time frozen snapshot** — 每次 session 打开(新开 / idle 回来 / 回访老 session)重读一次,单次连续会话内不变。**修正**:之前是"session 起手一次性",但 session 模型改成持久对话线程后,改成"每次 open 重读" |
 | 4 | 存储模式 | **DB 底层 + markdown 视图**(混合)— 不走纯 file(Hermes 路线)也不走纯 DB(传统 SaaS) |
-| 5 | 持仓层主动推送 | **接 v1.0 持仓监控引擎** — 监控触发时直接改写持仓层 PG 表,下个 session agent 起手看到 |
-| 6 | 便签层 session 结束消化 | **复用 c5 LLMExtractor + path_b_runner** — session 结束抽取重要事实写入档案层 |
+| 5 | 持仓层主动推送 | **接 v1.0 持仓监控引擎** — 监控触发时直接改写持仓层 PG 表,下次任一 session 打开 agent 起手看到 |
+| 6 | Session 模型 | **类 ChatGPT / Claude.ai 持久对话线程** — 用户可同时开多个并发 session,可随时回访过去任一 session 继续。没有"session 结束",只有 active / cold / archived 状态 |
+| 7 | 便签层存储 | **PG `chat_scratchpad` 表 + session_id 绑定持久化**(不再 TTL 销毁)。用户回到老 session 便签还在 |
+| 8 | 便签抽取触发 | **三层叠加,LLM-self-managed 为主**:agent 边聊边自决调工具写(≥70%)+ c5 path_b_runner 每轮异步 fallback(≤25%)+ Celery beat 冷冻 30 天兜底(<5%)。跟 Claude Code / openclaw / Hermes 工业共识对齐 |
 
 ---
 
@@ -58,7 +60,7 @@ C.5 cross-session memory 已 ship,但 brainstorming 时发现两个核心问题:
 |---|---|---|---|---|---|---|
 | **1** | **画像层** (Profile) | 用户长期稳定身份:风险偏好、投资风格、资产规模、禁忌行业、沟通习惯 | 用户明示 / 多轮信号沉淀 / onboarding 表单 | session 起手快照,session 内不变 | PG `chat_user_profile` 表 | ~1500 chars |
 | **2** | **持仓层** (Portfolio) | 此刻事实:重仓股、加减仓动作、关注列表、上次买入价 | agent 工具写 / 用户同步 / **持仓监控引擎直接改写** | session 起手快照,session 内不变 | PG `chat_user_portfolio_snapshot` 表 | ~2000 chars |
-| **3** | **便签层** (Scratchpad) | 本次对话临时草稿:本轮候选股、刚说的临时偏好、当前讨论焦点 | session 内 agent 工具写 / 系统自动凝聚 | session 内可滚动更新,放 prompt 末尾(动态区) | Redis 或 PG session-scoped | ~1000 chars |
+| **3** | **便签层** (Scratchpad) | 本次对话线程的临时草稿:本轮候选股、刚说的临时偏好、当前讨论焦点 | session 内 agent 工具写(self-managed 主路径)+ path_b_runner 每轮异步 fallback | session 内可滚动更新,放 prompt 末尾(动态区) | **PG `chat_scratchpad` 表 + session_id 绑定持久化**(不 TTL) | ~1000 chars |
 | **4** | **档案层** (Archival) | 跨 session 长期事实图:历史决策、过往观点、研究痕迹 | 每轮异步抽取 / session 结束抽取 / 便签层结束消化 | 基于本轮 query prefetch 召回 top-K,prompt 末尾 | PG + AGE + Milvus(三方一致,**复用 C.5**) | 无上限,召回 top-5 |
 | **5** | **知识层** (Knowledge) | 跟用户独立的外部资料:研报、财报、政策、公告、新闻 | 离线 ingest / 监控引擎入库 | 基于本轮 query prefetch 召回 top-K,prompt 末尾 | Milvus + PG 文档 chunk(**已 ship**) | 无上限,召回 top-5 |
 
@@ -284,37 +286,124 @@ v1.0 持仓监控引擎已 ship — Celery 异步扫描用户持仓,触发 5 类
 
 ---
 
-## § 6 决策 6 — 便签层 session 结束消化
+## § 6 决策 6/7/8 — Session 模型 + 便签持久化 + 三层抽取触发
 
 ### 问题陈述
 
-便签层是 session-scoped(TTL 24h 或 session 结束销毁)。session 结束时,便签里的重要事实怎么进档案层?
+之前 spec 把 session 当成"暂态对话过程",便签 session 结束就销毁。brainstorm 撞实两个反例:
 
-### 设计
+1. **用户会同时开多个独立 session**(研究医药一个 / 跟踪监控告警一个 / 尽调一个)
+2. **用户会回访过去的 session 继续对话**(类 ChatGPT 设计,过去 30 天的对话点开就能继续)
 
-复用 c5 已 ship 的 `LLMExtractor` + `path_b_runner`:
+这把 session 从"过程"改成了**对象**。模型修正后,便签和抽取触发必须重设计。
+
+### 决策 6 — Session 模型:类 ChatGPT 持久对话线程
 
 ```
-session 结束(用户离开 / TTL 到期 / 显式 /reset)
-    ↓ Hermes 的 on_session_end hook 风
-    ↓ session_end_extractor 触发
-    ↓ 把便签 markdown 喂给 LLMExtractor(已 ship)
-    ↓ 抽取出的 fact 进 path_b_runner 队列(已 ship)
-    ↓ Celery memory_llm 队列异步消化进 archival 图
-    
-档案层(已 ship)增量
+user (1:N)
+  ├─ profile           ← 画像层,所有 session 共享
+  ├─ portfolio_snapshot ← 持仓层,所有 session 共享 + 监控引擎写
+  ├─ archival_graph    ← 档案层,所有 session 共享
+  └─ sessions (1:N)    ← 多个并行对话线程,持久
+      ├─ session_A (status: active / cold / archived)
+      │   ├─ messages   (PG `chat_messages`, 已 ship)
+      │   └─ scratchpad (PG `chat_scratchpad`, 本 spec 新增,session_id 绑定)
+      ├─ session_B ...
 ```
 
-### 业界对照
+**状态机**:
+- `active` — 最近 30 天有过用户消息
+- `cold` — 30 天无活动,Celery beat 触发兜底抽取后转 cold(便签 lock,history 只读)
+- `archived` — 用户显式归档(便签消化 + 转只读)
 
-- Hermes:`on_session_end(messages)` hook,provider 自己实现 extraction
-- 本项目:**复用 c5 已 ship 的 8-step write pipeline + 4-action conflict resolution**,只需要加一个 trigger 入口
+### 决策 7 — 便签层持久化(PG, session_id 绑定)
+
+之前的 Redis TTL 方案被废弃,理由:用户回访老 session 时 TTL 早已过期,便签丢失。
+
+```sql
+CREATE TABLE chat_scratchpad (
+  session_id UUID PRIMARY KEY REFERENCES chat_sessions(session_id),
+  user_id UUID NOT NULL,
+  content TEXT NOT NULL DEFAULT '',
+  token_count INT NOT NULL DEFAULT 0,
+  max_tokens INT NOT NULL DEFAULT 1000,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+多 tab 同 session 共享同一 scratchpad(session_id 单实例);多并发 session 各自独立。
+
+### 决策 8 — 三层抽取触发(LLM-self-managed 为主)
+
+**业界共识调研(2026-05-16)**:
+- Claude Code(`~/.claude/CLAUDE.md` auto memory 段):agent 自己识别 4 类信号(user/feedback/project/reference)→ 调 Write tool 写 .md
+- openclaw(`~/.openclaw/workspace-main/AGENTS.md` § Memory):agent 在 daily log 中自己 Write,长期 MEMORY.md 用户显式说"记下来"时更新
+- Hermes(`hermes-agent/tools/memory_tool.py:513` MEMORY_SCHEMA):tool schema description 里写完整 "WHEN TO SAVE" 教程,agent 主动调用
+
+三家都不用"批处理 session 结束"或"每轮异步增量"作主路径,**全部 LLM-self-managed**(MemGPT 哲学的实践版)。
+
+**三层叠加方案**:
+
+| 层 | 角色 | 触发 | 占比目标 | 复用 |
+|---|---|---|---|---|
+| **1. agent self-managed (主)** | LLM 在对话中自决,调 c5 6 MCP tool 之一写入 | 实时,每条用户消息后 agent 自决 | ≥ 70% 写入 | c5 MCP tools |
+| **2. 每轮异步 fallback** | path_b_runner 后台扫,作 agent 漏写时的保险层 | 每轮异步,skip_gate 过滤短文本 | ≤ 25% 写入 | c5 path_b_runner + skip_gate |
+| **3. 冷冻兜底** | session 30 天无活动 → Celery beat 扫便签整体抽一次 → 标记 cold | 极少触发,周一 04:00 Asia/Shanghai | < 5% 写入 | 新增 cron 任务 |
+
+**为什么 self-managed 是主**:
+- 跟 Claude Code / openclaw / Hermes 工业共识对齐
+- agent 在对话语境里最清楚"这条用户表达是否值得记",信号强
+- evidence_quote / reasoning 是 agent 当下生成,quality 高(c5 已 ship 的 evidence_quote substring 校验是为此设计)
+- 简历叙事价值:"Letta agent-self-managed 范式" > "每轮异步 extract"
+
+### Self-managed 三要素具体落地
+
+| 要素 | 状态 | 文件 |
+|---|---|---|
+| **1. Tools(可调的 API)** | ✅ 已 ship(c5 Plan 4) | 6 MCP tools in `backend/app/mcp_server/tools/memory/` |
+| **2. Behavior guide(教 agent 何时调)** | ✅ 已写,质量高 | `backend/app/agents/chat/prompts/memory_tool_usage.md` |
+| **3. Agent loop(prompt 拼回主 prompt)** | ❌ **缺最后一步** | 需修改 `chat_planner._PLANNER_PROMPT_TEMPLATE` |
+
+**Phase 1 工程量**(1-2 天):
+
+```python
+# chat_planner.py 改造
+def _build_chat_prompt(self, state: ChatState) -> str:
+    # 新增:渲染 self-managed 教程 + 当前 working memory 内容
+    memory_guide = load_memory_tool_usage_prompt(
+        persona_block=render_persona_markdown(state.user_id),
+        scratchpad_block=render_scratchpad_markdown(state.session_id),
+    )
+    # 拼到主 prompt 开头
+    prompt = memory_guide + "\n\n" + _PLANNER_PROMPT_TEMPLATE.format(...)
+    return prompt
+```
+
+`memory_tool_usage.md` 内容已经包含 "Memory hygiene rules" 5 条,符合 self-managed 教学需求。本 spec 在此基础上加 3 条金融业务定制规则:
+
+```markdown
+## Domain-specific save triggers (本 spec 新增)
+- 用户表达投资偏好 / 风格 / 禁忌 → core_memory_append("profile", ...) 或 写画像层
+- 用户报告加减仓 / 新增关注 → archival_memory_insert(rel_type="HOLDS"|"WATCHES")
+- 用户对某股表态 / 给出研究结论 → archival_memory_insert(rel_type="EXPRESSED_VIEW")
+- 用户纠正之前的事实 → core_memory_replace 或 archival 重写
+
+## Don't save
+- 一次性事实查询(用户问"茅台今天涨没涨")不要记
+- 闲聊 / 寒暄
+- agent 自己推理出来但用户没说过的"事实"(evidence_quote substring 校验会 reject)
+```
 
 ### 量化评估
 
-- 50 个 session 结束抽取,recall(重要事实抽出来)≥ 0.7
-- false_positive(无关闲聊被抽进档案)≤ 0.2
-- 抽取延迟:session 结束到 archival 写入完成 ≤ 30s(Celery 异步,可容忍)
+| 指标 | 阈值 | 测量方法 |
+|---|---|---|
+| Self-managed 写入占比 | ≥ 70% | 50 个 dogfood session,看每个写入的 source(planner_initiated vs path_b vs cron) |
+| Fallback 漏召率 | ≤ 0.2 | 50 case golden,agent 该写而没写的事实占比 |
+| 冷冻兜底误删率 | < 5% | session 30 天后真有用户回访时,便签是否还在(应是被消化但不删,可读) |
+| 抽取 quality (recall) | ≥ 0.7 | 50 case dogfood,重要事实抽出来比例 |
+| 抽取 quality (precision) | ≥ 0.8 | 50 case dogfood,抽出的事实是用户真表达的比例 |
 
 ---
 
@@ -371,18 +460,25 @@ session 结束(用户离开 / TTL 到期 / 显式 /reset)
 
 ---
 
-## § 9 待 brainstorm decide 的细节(留给 review / planning)
+## § 9 brainstorm review 锁定记录(2026-05-16)
 
-以下细节本 spec 标注 TBD,等用户 review 时锁:
+### 已锁(review 通过)
 
-1. **画像层 schema 字段**:`risk_appetite` / `style` / `assets_scale` / `forbidden_industries` / `communication_style` — 是结构化字段还是自由文本?
-2. **持仓层 schema 字段**:`HOLDS` 是 list of {ts_code, shares, entry_date, entry_price} 还是字符串?跟 v1.0 `portfolio` 表 schema 怎么对齐(直接 view 还是 sync 表)?
-3. **便签层存储**:Redis 还是 PG?Redis 性能好但增加 deps;PG 复用已有基建
-4. **各层字符上限具体数值**:画像 1500 / 持仓 2000 / 便签 1000 是直觉值,需要 dogfood 校准
-5. **画像层信号沉淀规则**:"多轮稳定" 具体是几轮?LLM judge 还是规则
-6. **session 边界定义**:用户离开多久算 session 结束?同一用户多 tab 怎么算?
-7. **便签层 session 结束抽取的阈值**:importance 三档怎么映射?复用 c5 还是新建?
-8. **回滚策略细节**:Phase 2/3 数据迁移失败怎么办
+| # | 决策点 | 锁定结果 |
+|---|---|---|
+| 6 | session 边界 | **类 ChatGPT 持久对话线程**;active / cold / archived 状态机;多 tab 同一 session 共享便签;多并发 session 各自独立;不存在"session 结束"概念,只有 30 天无活动转 cold |
+| 7 | 便签层存储 | **PG `chat_scratchpad` 表 + session_id 绑定持久化**,不用 Redis,不 TTL |
+| 8 | 便签抽取触发 | **三层叠加**:agent self-managed 主路径(≥70%)+ path_b_runner 每轮异步 fallback(≤25%)+ Celery beat 30 天冷冻兜底(<5%) |
+| - | 回滚策略 | **D 共存,不迁旧数据**:旧档案图 HOLDS edges 原封不动,新画像/持仓 PG 表只装上线后新数据;Phase 2/3 失败可一键关掉新表读路径 fallback 回旧路径 |
+| - | Self-managed 三要素 | Tools + Behavior guide ✅ 已 ship;**Phase 1 缺第三步:把 `memory_tool_usage.md` 拼回 chat_planner 主 prompt + 加 3 条金融业务定制 save triggers** |
+
+### 留 plan 阶段 decide 的细节(细到 plan 才能合理决策)
+
+1. **画像层 schema 字段**:`risk_appetite` / `style` / `assets_scale` / `forbidden_industries` / `communication_style` — 结构化字段还是自由文本?(plan 阶段看 schema design 决定)
+2. **持仓层 schema 跟 v1.0 `portfolio` 表对齐**:直接 view(只读)还是 sync 表(双写)?需要看 v1.0 monitoring_engine 写哪个表
+3. **各层字符上限具体数值**:画像 1500 / 持仓 2000 / 便签 1000 是直觉值;plan 阶段加 dogfood 校准 loop
+4. **画像层信号沉淀规则**:"多轮稳定" 是 LLM judge 还是规则?需要 plan 阶段设计 `profile_signal_consolidator`
+5. **3 条 domain-specific save triggers 的精确 prompt 表述**:plan 阶段配合 dogfood 调优
 
 ---
 
