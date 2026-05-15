@@ -5,18 +5,7 @@
 
 from __future__ import annotations
 
-import uuid
-
 from app.models.chat import ChatMessage, ChatTask
-
-
-def test_chat_task_default_status_is_queued() -> None:
-    task = ChatTask(
-        session_id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
-        langgraph_thread_id="user-123:session-456",
-    )
-    assert task.status == "queued"
 
 
 def test_chat_task_has_required_columns() -> None:

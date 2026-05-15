@@ -124,7 +124,11 @@ class ChatTask(Base):
         ForeignKey("chat_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    user_id = Column(UUID(as_uuid=True), nullable=False)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     status = Column(
         String(16),
         nullable=False,
@@ -138,7 +142,11 @@ class ChatTask(Base):
     finished_at = Column(DateTime, nullable=True)
     error_message = Column(Text, nullable=True)
     last_event_seq = Column(BigInteger, nullable=False, default=0, server_default="0")
-    initial_prompt_message_id = Column(UUID(as_uuid=True), nullable=True)
+    initial_prompt_message_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     parent_task_id = Column(
         UUID(as_uuid=True),
         ForeignKey("chat_tasks.id", ondelete="SET NULL"),
@@ -151,11 +159,6 @@ class ChatTask(Base):
             name="chat_tasks_status_check",
         ),
     )
-
-    def __init__(self, **kwargs: object) -> None:
-        kwargs.setdefault("status", "queued")
-        kwargs.setdefault("last_event_seq", 0)
-        super().__init__(**kwargs)
 
 
 class LongTermMemory(Base):
