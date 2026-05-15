@@ -36,6 +36,8 @@ def app_with_chats():
     repo.get_session = AsyncMock(return_value=fake_session)
     repo.list_messages = AsyncMock(return_value=[])
     repo.delete_session = AsyncMock(return_value=None)
+    # Task 7: default no in-flight task
+    repo.find_active_task_for_session = AsyncMock(return_value=None)
 
     app.dependency_overrides[get_repo] = lambda: repo
     return app, repo, fake_id
@@ -83,3 +85,56 @@ def test_delete_chat(app_with_chats):
     assert r.status_code == 200
     assert r.json()["status"] == "deleted"
     repo.delete_session.assert_awaited_once()
+
+
+def test_get_chat_returns_null_active_task_when_no_inflight(app_with_chats):
+    """Task 7: 无 chat_task → active_task_id is null。每条 message 仍带 task_id/status 字段。"""
+    app, repo, fake_id = app_with_chats
+    # 一条 legacy 消息(没有 task_id)
+    fake_msg = SimpleNamespace(
+        id=uuid4(),
+        role="user",
+        content="hello",
+        message_type="text",
+        task_id=None,
+        status="done",
+        created_at=datetime.utcnow(),
+    )
+    repo.list_messages = AsyncMock(return_value=[fake_msg])
+    repo.find_active_task_for_session = AsyncMock(return_value=None)
+
+    client = TestClient(app)
+    r = client.get(f"/api/v0/chats/{fake_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["active_task_id"] is None
+    assert len(body["messages"]) == 1
+    assert body["messages"][0]["task_id"] is None
+    assert body["messages"][0]["status"] == "done"
+    repo.find_active_task_for_session.assert_awaited_once()
+
+
+def test_get_chat_returns_active_task_id_when_running(app_with_chats):
+    """Task 7: 有 running chat_task → active_task_id is its UUID 串;message 携带 task_id。"""
+    app, repo, fake_id = app_with_chats
+    task_id = uuid4()
+    fake_task = SimpleNamespace(id=task_id, status="running")
+    fake_msg = SimpleNamespace(
+        id=uuid4(),
+        role="user",
+        content="hello",
+        message_type="text",
+        task_id=task_id,
+        status="partial",
+        created_at=datetime.utcnow(),
+    )
+    repo.list_messages = AsyncMock(return_value=[fake_msg])
+    repo.find_active_task_for_session = AsyncMock(return_value=fake_task)
+
+    client = TestClient(app)
+    r = client.get(f"/api/v0/chats/{fake_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["active_task_id"] == str(task_id)
+    assert body["messages"][0]["task_id"] == str(task_id)
+    assert body["messages"][0]["status"] == "partial"
