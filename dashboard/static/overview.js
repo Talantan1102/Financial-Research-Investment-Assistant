@@ -152,7 +152,8 @@
       const overlay = document.getElementById('modal-overlay');
       if (!overlay) return;
       overlay.innerHTML = '<div class="modal-loading">载入...</div>';
-      overlay.style.display = 'flex';
+      // 走 Modal.open() class-based — 直接改 inline display 会让 Modal.close() 关不掉
+      if (window.Modal && typeof window.Modal.open === 'function') Modal.open();
       try {
         const html = await (await fetch('/cap/' + encodeURIComponent(id))).text();
         overlay.innerHTML = html;

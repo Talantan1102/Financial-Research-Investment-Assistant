@@ -11,6 +11,8 @@
   function close() {
     const ov = getOverlay(); if (!ov) return;
     ov.classList.remove('modal-overlay--open');
+    // 兜底:若调用方写过 inline display(绕过 Modal.open),class 移除不够,必须显式清
+    ov.style.display = '';
     ov.setAttribute('aria-hidden', 'true');
     document.body.style.overflow = '';
     setTimeout(() => { if (!ov.classList.contains('modal-overlay--open')) ov.innerHTML = ''; }, 220);

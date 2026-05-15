@@ -87,6 +87,29 @@ def test_refresh_route_accepts_get_for_eventsource() -> None:
     )
 
 
+def test_modal_overlay_callers_use_modal_helper() -> None:
+    """打开 modal-overlay 必须走 Modal.open(),不能直接改 inline display。
+
+    bug history:overview.js / _story_card.html 直接 `overlay.style.display='flex'`,
+    但 Modal.close() 是 class-based 只移除 'modal-overlay--open',inline display
+    不被清 → modal 视觉不消失 → 用户被遮罩困住,看似卡死。
+    """
+    inline_display = re.compile(
+        r"""(?:getElementById\(['"]modal-overlay['"]\)|#modal-overlay)"""
+        r"""[^;<>]*?\.style\.display\s*=\s*['"]"""
+    )
+    offenders: list[str] = []
+    for path in [*STATIC_DIR.glob("*.js"), *TEMPLATES_DIR.rglob("*.html")]:
+        if path.name.endswith(".min.js") or path.name == "mockup-v2.html":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if inline_display.search(text):
+            offenders.append(path.name)
+    assert not offenders, (
+        f"以下文件直接改 modal-overlay inline display(应改用 Modal.open()):{offenders}"
+    )
+
+
 def test_overview_empty_hint_has_hidden_css_override() -> None:
     """`.empty-state--overview` 用 display:inline-flex,必须配 [hidden] 显式覆盖。
 

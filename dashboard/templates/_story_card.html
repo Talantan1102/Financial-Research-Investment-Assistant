@@ -14,7 +14,7 @@
        hx-get="/cap/{{ sc.cap_id }}"
        hx-target="#modal-overlay"
        hx-swap="innerHTML"
-       onclick="document.getElementById('modal-overlay').style.display='flex';">
+       onclick="if(window.Modal)Modal.open();">
       {{ sc.name_cn }}
     </a>
   </div>
