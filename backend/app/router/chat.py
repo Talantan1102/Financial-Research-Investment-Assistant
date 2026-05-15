@@ -224,14 +224,12 @@ def _build_graph_singleton(
     registry.register(GetFinancialsTool(tushare=tushare))
     registry.register(GetNewsTool(bocha=build_bocha_service_from_env()))
 
-    planner = ChatPlanner(llm=llm, registry=registry)
-    responder = Responder(llm=llm)
-
     # C.5 Plan 1B: HierarchicalMemory 替换 InSessionMemory 作为主 Memory Protocol 实现.
     # InSessionMemory 仍可用于 in-session dedup / token-guard summarize(Q4 E),
     # 但 cross-session memory 方法走 HierarchicalMemory.
     # Plan 2-4 的 archival_memory_* 方法 ship 后, 此处真 inject embed_service / llm_extractor;
     # Plan 1B 阶段 Plan 2-4 stub 方法 raise NotImplementedError, agent 调到时报错(预期).
+    # Phase 1 self-managed wire: memory 须在 ChatPlanner 之前构造, 以便 DI 到 planner.
     pg_factory = _build_async_pg_session_factory_or_none()
     memory: Any
     if pg_factory is None:
@@ -246,6 +244,11 @@ def _build_graph_singleton(
             llm_extractor=None,  # Plan 2 inject
             llm_judge=None,  # Plan 2 inject
         )
+
+    # Phase 1 self-managed wire: 传 memory= 让 planner 能在每个 chat 请求
+    # prepend memory_tool_usage prompt(参见 chat_planner._build_chat_prompt).
+    planner = ChatPlanner(llm=llm, registry=registry, memory=memory)
+    responder = Responder(llm=llm)
 
     # ToolResultCache requires async session factory; deferred to Plan 2 when
     # ChatSessionRepo engine is wired. For now pass a no-op stub cache.
