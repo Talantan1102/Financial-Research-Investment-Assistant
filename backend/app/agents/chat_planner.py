@@ -20,6 +20,7 @@ from typing import Any
 
 from app.agents.base import Agent
 from app.agents.schemas import ChatState, GraphState, Plan, SkillScriptCall, StepResult, ToolCall
+from app.memory.protocol import Memory
 from app.services.llm_response import Tier
 from app.services.llm_service import LLMService
 from app.skills import SkillManifest
@@ -292,12 +293,14 @@ class ChatPlanner(Agent):
         available_tools: list[str] | None = None,
         available_skills: list[str] | None = None,
         recent_k: int = 4,
+        memory: Memory | None = None,  # ← 新增, Phase 1 self-managed wire
     ) -> None:
         super().__init__(llm)
         self._registry = registry
         self._available_tools = available_tools or []
         self._available_skills = available_skills or []
         self._recent_k = recent_k
+        self._memory = memory  # ← 新增
 
     # ------------------------------------------------------------------
     # v0.9 async interface (chat mode)
@@ -305,7 +308,7 @@ class ChatPlanner(Agent):
 
     async def run(self, state: ChatState) -> dict[str, Any]:
         """Plan one chat turn: call LLM, filter hallucinated tools, emit Plan."""
-        prompt = self._build_chat_prompt(state)
+        prompt = await self._build_chat_prompt(state)
         resp = self._llm.chat(prompt=prompt, tier="balanced", schema=None)
 
         try:
@@ -389,7 +392,7 @@ class ChatPlanner(Agent):
             "escalate_offered": escalate_offered,
         }
 
-    def _build_chat_prompt(self, state: ChatState) -> str:
+    async def _build_chat_prompt(self, state: ChatState) -> str:
         tool_lines = (
             [f"- {t}" for t in self._available_tools] if self._available_tools else ["(no tools)"]
         )
@@ -420,6 +423,25 @@ class ChatPlanner(Agent):
             # Insert before "用户当前问题:" anchor — 最显眼位置
             anchor = "用户当前问题:"
             prompt = prompt.replace(anchor, inject_block + anchor, 1)
+
+        # === Phase 1 (chat-memory-layering) — self-managed wire ===
+        # spec § 7 Phase 1: memory_tool_usage prompt prepend 到主 prompt 头部
+        if self._memory is not None:
+            try:
+                from uuid import UUID
+
+                from app.agents.chat.prompt_loader import (
+                    load_memory_tool_usage_prompt,
+                )
+
+                memory_block = await load_memory_tool_usage_prompt(
+                    memory=self._memory,
+                    user_id=UUID(state.user_id),
+                    session_id=UUID(state.session_id),
+                )
+                prompt = memory_block + "\n\n---\n\n" + prompt
+            except Exception as exc:  # noqa: BLE001 — chat 不崩 fail-safe
+                logger.warning("memory_tool_usage prompt injection failed: %s", exc)
 
         return prompt
 
