@@ -64,8 +64,15 @@ _EXTRACTOR_PROMPT_TEMPLATE = """\
     "user_confirmed_at": "{now_iso}",
     "user_edits": []
   }},
-  "missing_field_hints": [...]
+  "missing_field_hints": [...],
+  "escalation_intent": "<≤200 字, 蒸馏用户的核心尽调请求>",
+  "discussion_focus": ["≤30 字 焦点 1", "焦点 2", "..."],
+  "explicit_exclusions": ["≤30 字 排除项 1", "..."],
+  "llm_self_confidence": "high|medium|low",
+  "confidence_rationale": "<≤100 字 解释>"
 }}
+
+注: discussion_focus 最多 5 条; explicit_exclusions 最多 3 条。
 
 ==== 工程约束 ====
 
@@ -73,6 +80,11 @@ _EXTRACTOR_PROMPT_TEMPLATE = """\
 2. 不确定就标 missing_field_hints。
 3. preferences 必须从对话中能找到证据。
 4. extraction_confidence 反映自己的把握。
+5. escalation_intent: 从最后 5 轮聚焦, 蒸馏用户为什么想做尽调 (不是闲聊主题)。≤200 字。
+6. discussion_focus: 对话中反复出现的关注点 — 例 "客户担心负债率" / "对比五粮液"。每条 ≤30 字, 最多 5 条。
+7. explicit_exclusions: 用户明确表达不关注 / 不在意的方面 — 例 "不关心 ESG" / "不看技术面"。每条 ≤30 字, 最多 3 条。
+8. llm_self_confidence: high (对话明确 + 5+ 轮 + entity 频繁) / medium / low (对话短或前后矛盾)。
+9. confidence_rationale: ≤100 字解释自己的把握来源 — 帮助用户判断是否要 override。
 """
 
 
