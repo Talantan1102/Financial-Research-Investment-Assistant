@@ -39,6 +39,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
+    AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
@@ -59,7 +60,7 @@ _REQUIRED_TABLE_NAMES = ("users", "chat_sessions", "chat_tasks", "chat_messages"
 
 def _selective_create_all(sync_conn: object) -> None:
     tables = [Base.metadata.tables[name] for name in _REQUIRED_TABLE_NAMES]
-    Base.metadata.create_all(sync_conn, tables=tables)  # type: ignore[arg-type]
+    Base.metadata.create_all(sync_conn, tables=tables)
 
 
 # ---------------------------------------------------------------------------
@@ -132,13 +133,41 @@ def _build_test_graph() -> Any:
     )
 
 
+class _FailingLLMClient:
+    """ChatClient stub that always raises — used to verify finally / error path."""
+
+    def chat(
+        self,
+        prompt: str,
+        model: str,
+        schema: dict[str, Any] | None,
+    ) -> Any:
+        raise RuntimeError("simulated LLM 429 rate limited")
+
+
+def _build_failing_test_graph() -> Any:
+    """Same shape as _build_test_graph but with an LLM client that always raises."""
+    svc = LLMService(client=_FailingLLMClient())
+    registry = ToolRegistry()
+    registry.register(_StubQuoteTool())
+    registry.register(_StubFinancialsTool())
+    registry.register(_StubNewsTool())
+    planner = ChatPlanner(llm=svc, registry=registry)
+    responder = Responder(llm=svc)
+    memory = InSessionMemory()
+    cache = ToolResultCache(session_factory=MagicMock())
+    return build_chat_graph(
+        planner=planner, responder=responder, registry=registry, memory=memory, cache=cache
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures: in-memory async sqlite + seeded ChatSession
 # ---------------------------------------------------------------------------
 
 
 @pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[object]]:
+async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as conn:
         await conn.run_sync(_selective_create_all)
@@ -149,7 +178,7 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[object]]:
 
 @pytest_asyncio.fixture
 async def seeded_session_id(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> uuid.UUID:
     sid = uuid.uuid4()
     async with session_factory() as sess:
@@ -160,7 +189,7 @@ async def seeded_session_id(
 
 @pytest.fixture
 def test_client_with_pg(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
 ):
     """FastAPI TestClient with chat router + PG session factory wired via DI override."""
     from app.router.chat import router as chat_router
@@ -180,6 +209,29 @@ def test_client_with_pg(
     yield client
 
 
+@pytest.fixture
+def test_client_with_failing_llm(
+    session_factory: async_sessionmaker[AsyncSession],
+):
+    """Same as test_client_with_pg but with a graph whose LLM client always raises."""
+    from app.router.chat import router as chat_router
+
+    minimal_app = FastAPI()
+    minimal_app.include_router(chat_router)
+
+    failing_graph = _build_failing_test_graph()
+    minimal_app.dependency_overrides[get_chat_graph] = lambda: failing_graph
+    minimal_app.dependency_overrides[get_current_user] = lambda: _StubUser()
+    minimal_app.dependency_overrides[get_escalation_extractor] = lambda: None
+    minimal_app.dependency_overrides[get_escalation_record_repo] = lambda: None
+    minimal_app.dependency_overrides[get_async_session_factory] = lambda: session_factory
+
+    # raise_server_exceptions=False — the graph raises but our finally must commit;
+    # we don't want TestClient to re-raise and skip body consumption.
+    client = TestClient(minimal_app, raise_server_exceptions=False)
+    yield client
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -188,7 +240,7 @@ def test_client_with_pg(
 @pytest.mark.asyncio
 async def test_post_chat_persists_user_and_assistant_messages(
     test_client_with_pg: TestClient,
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session_id: uuid.UUID,
 ) -> None:
     """POST /chat → 1 chat_task(done) + 2 chat_messages(user + assistant)."""
@@ -235,7 +287,7 @@ async def test_post_chat_persists_user_and_assistant_messages(
 @pytest.mark.asyncio
 async def test_post_chat_creates_task_with_running_status_at_entry(
     test_client_with_pg: TestClient,
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session_id: uuid.UUID,
 ) -> None:
     """Sanity: task is created with status=running (not stuck at queued) after handler entry."""
@@ -254,3 +306,51 @@ async def test_post_chat_creates_task_with_running_status_at_entry(
     task_repo = ChatTaskRepo(session_factory)
     active = await task_repo.find_active_for_session(seeded_session_id)
     assert active is None, "no active task should remain after stream finishes"
+
+
+@pytest.mark.asyncio
+async def test_post_chat_llm_error_marks_task_error_and_persists_assistant(
+    test_client_with_failing_llm: TestClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    seeded_session_id: uuid.UUID,
+) -> None:
+    """LLM 抛 RuntimeError → finally 仍落 assistant(status=error)+ mark task=error。
+
+    Spec § 7 错误处理矩阵第一行(LLM API 报错):
+    - chat_messages.assistant.status = 'error'
+    - chat_tasks.status = 'error', error_message 非空
+    - user message 仍正常 commit(因为它发生在 graph 调用之前)
+    """
+    resp = test_client_with_failing_llm.post(
+        "/api/v0/chat",
+        json={
+            "session_id": str(seeded_session_id),
+            "message": "trigger LLM boom",
+        },
+    )
+    # SSE stream opens 200; error 事件在流中下发,handler 不向 client 抛 500
+    assert resp.status_code == 200
+    # 必须消费完整 body 让 finally 真跑
+    body = resp.content
+    assert b"error" in body, "SSE stream must carry an 'error' event when LLM raises"
+
+    msg_repo = ChatSessionRepo(session_factory)
+    msgs = await msg_repo.list_messages(str(seeded_session_id))
+    assert len(msgs) == 2, (
+        f"expected user + error-assistant, got {len(msgs)}: {[(m.role, m.status) for m in msgs]}"
+    )
+
+    user_msg = msgs[0]
+    asst_msg = msgs[1]
+    assert user_msg.role == "user"
+    assert user_msg.status == "done"  # user message commit 路径不受 LLM 影响
+    assert asst_msg.role == "assistant"
+    assert asst_msg.status == "error"
+    assert asst_msg.task_id is not None
+
+    task_repo = ChatTaskRepo(session_factory)
+    task = await task_repo.get_by_id(asst_msg.task_id)  # type: ignore[arg-type]
+    assert task is not None
+    assert task.status == "error", f"expected status=error, got {task.status}"
+    assert task.error_message is not None
+    assert "simulated LLM 429" in task.error_message
