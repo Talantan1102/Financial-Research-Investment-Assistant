@@ -9,6 +9,12 @@ forbid_duplicate_calls semantic: per-subtask only — cross-subtask reuse of
 the same tool is allowed (e.g. get_news in 风险底线 + 近期催化 with
 different analytical lens).
 
+Coverage matching contract: a subtask covers a required dim iff the dim's
+exact name string appears in the subtask's description or rationale.
+LLM planner prompt MUST instruct the model to echo dim names verbatim
+("财务全景 — ...", not paraphrased). This is asserted by
+test_validate_paraphrased_dim_name_fails_coverage.
+
 spec ref: docs/superpowers/specs/2026-05-15-v1.x-plan-template-validator-design.md § 4.3
 """
 
@@ -50,8 +56,19 @@ def _unique_candidate_tools_for_dim(plan: ResearchPlan, dim: DimensionSpec) -> i
     return len(used)
 
 
-def _subtask_has_duplicate(sub: Subtask) -> bool:
-    return len(set(sub.required_tools)) != len(sub.required_tools)
+def _subtask_duplicates(sub: Subtask) -> list[str]:
+    """Return list of tool names that appear more than once in sub.required_tools.
+
+    Empty list when no duplicates. Cross-subtask reuse is not detected here
+    (per architectural decision — see module docstring)."""
+    seen: set[str] = set()
+    dups: set[str] = set()
+    for t in sub.required_tools:
+        if t in seen:
+            dups.add(t)
+        else:
+            seen.add(t)
+    return sorted(dups)
 
 
 def validate_plan(plan: ResearchPlan, template: PlanTemplate) -> ValidationResult:
@@ -93,10 +110,11 @@ def validate_plan(plan: ResearchPlan, template: PlanTemplate) -> ValidationResul
     # L2.e — per-subtask no duplicates (cross-subtask reuse is OK)
     if constraints["forbid_duplicate_calls"]:
         for sub in plan.subtasks:
-            if _subtask_has_duplicate(sub):
+            dups = _subtask_duplicates(sub)
+            if dups:
                 errors.append(
-                    f"subtask '{sub.subtask_id}' has duplicate tools in required_tools: "
-                    f"{sub.required_tools}"
+                    f"subtask '{sub.subtask_id}' has duplicate tool(s) "
+                    f"{dups} in required_tools={sub.required_tools}"
                 )
 
     # L3 cost — not wired in v1.x
