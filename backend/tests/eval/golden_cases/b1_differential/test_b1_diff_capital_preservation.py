@@ -30,7 +30,14 @@ from app.agents.schemas import ResearchState
 
 from tests.eval.golden_cases.b1_differential._graph_builder import build_b1_diff_graph
 
-pytestmark = pytest.mark.vcr
+pytestmark = [
+    pytest.mark.vcr,
+    pytest.mark.skip(
+        reason="v1.x cassette pending re-record on Mac (Task 1.11/1.12). "
+        "Re-record with VCR_RECORD_MODE=new_episodes after setting "
+        "DASHSCOPE_API_KEY / TUSHARE_API_TOKEN / BOCHA_API_KEY in backend/.env."
+    ),
+]
 
 _THREAD_ID = "b1-diff-capital-preservation-test-1"
 
