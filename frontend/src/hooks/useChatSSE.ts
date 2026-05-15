@@ -3,10 +3,9 @@
  *
  * SSE consumer for chat. Encapsulates:
  *   - POST /api/v0/chat (initial message) — fetch + ReadableStream
- *   - GET  /api/v0/chat/stream/:id?last_event_id=N (reconnect)
  *   - parse `id: <seq>\nevent: <type>\ndata: <json>\n\n` frames
  *   - dispatch each event into currentChatStore
- *   - on disconnect: exponential backoff retry until done event seen or aborted
+ *   - on disconnect: GET /api/v0/chats/:id to reload history (no in-flight subscribe yet — Plan 2)
  *   - on session swap: abort previous, reset state, start fresh (F8)
  *
  * Plan 4a exposes:  { sendMessage, abort, status }
@@ -14,20 +13,18 @@
  */
 
 import { useCallback, useEffect, useRef } from 'react'
-import {
-  buildChatPostUrl,
-  buildChatStreamUrl,
-} from '@/api/chatApi'
+import { buildChatPostUrl, getChat } from '@/api/chatApi'
 import {
   currentChatActions,
   currentChatState,
 } from '@/store/current-chat'
 import type { SSEEvent } from '@/types/chat'
-import { computeBackoffMs } from './useExponentialBackoff'
 
 interface UseChatSSEOptions {
   sessionId: string | null
   fetchImpl?: typeof fetch
+  // delayMs kept in the options shape for backward-compat with existing tests
+  // (Plan 1 removed the reconnect backoff loop; Plan 2 may reintroduce it).
   delayMs?: (ms: number) => Promise<void>
 }
 
@@ -89,13 +86,8 @@ async function consumeStream(
   return { doneSeen }
 }
 
-function defaultDelay(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
 export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
   const fetchImpl = options.fetchImpl ?? fetch
-  const delay = options.delayMs ?? defaultDelay
   const abortRef = useRef<AbortController | null>(null)
   const sessionIdRef = useRef<string | null>(options.sessionId)
 
@@ -117,7 +109,6 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
       currentChatActions.appendUserMessage(content)
       currentChatActions.beginStreaming()
 
-      let attempt = 0
       let doneSeen = false
 
       try {
@@ -134,24 +125,24 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         if (ac.signal.aborted) return
       }
 
-      while (!doneSeen && !ac.signal.aborted) {
+      // Plan 1: 不再轮询不存在的 GET /api/v0/chat/stream/:id endpoint。
+      // 断流时改一次性 GET /api/v0/chats/:id 重载历史 messages —
+      // backend Task 5 已在 finally 块持久化完整的 assistant message,
+      // 通过 currentChatActions.setSession 替换 UI state。
+      // Plan 2 会重新引入真正的 /chat/stream/{task_id} (Celery + Redis Streams)。
+      if (!doneSeen && !ac.signal.aborted) {
         currentChatActions.setReconnecting()
-        const backoffMs = computeBackoffMs(attempt++)
-        await delay(backoffMs)
-        if (ac.signal.aborted) return
         try {
-          const url = buildChatStreamUrl(sessionId, currentChatState.last_seq)
-          const res = await fetchImpl(url, { signal: ac.signal })
-          if (!res.ok) continue
-          currentChatActions.resumeStreaming()
-          const result = await consumeStream(res, ac.signal)
-          doneSeen = result.doneSeen
+          const fresh = await getChat(sessionId)
+          if (!ac.signal.aborted) {
+            currentChatActions.setSession(sessionId, fresh.messages)
+          }
         } catch {
-          if (ac.signal.aborted) return
+          // Silent — leave streamingStatus as reconnecting; next user action will retry.
         }
       }
     },
-    [delay, fetchImpl],
+    [fetchImpl],
   )
 
   const abort = useCallback(() => {
