@@ -17,7 +17,8 @@ _ANONYMOUS_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.chat import ChatMessage, ChatSession
+from app.models.chat import ChatMessage, ChatSession, ChatTask
+from app.services.chat_task_repo import ChatTaskRepo
 
 
 class ChatSessionRepo:
@@ -78,6 +79,9 @@ class ChatSessionRepo:
         tool_call_data: dict[str, Any] | None = None,
         research_report_id: str | None = None,
         research_report_summary: str | None = None,
+        *,
+        task_id: uuid.UUID | None = None,
+        status: Literal["done", "partial", "cancelled", "error"] = "done",
     ) -> ChatMessage:
         sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
         async with self._sf() as sess:
@@ -90,6 +94,8 @@ class ChatSessionRepo:
                 tool_call_data=tool_call_data,
                 research_report_id=research_report_id,
                 research_report_summary=research_report_summary,
+                task_id=task_id,
+                status=status,
             )
             sess.add(row)
             # bump session updated_at so list_for_user ordering is MRU
@@ -128,3 +134,11 @@ class ChatSessionRepo:
             if row:
                 await sess.delete(row)  # CASCADE clears ChatMessage rows
                 await sess.commit()
+
+    async def find_active_task_for_session(self, session_id: uuid.UUID | str) -> ChatTask | None:
+        """委托 ChatTaskRepo;放在 ChatSessionRepo 作为前端 single endpoint
+        (/chats/{sid}) 的便利方法。
+        """
+        sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+        task_repo = ChatTaskRepo(self._sf)
+        return await task_repo.find_active_for_session(sid)
