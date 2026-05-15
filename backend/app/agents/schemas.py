@@ -462,3 +462,10 @@ class ResearchState(BaseModel):
     chat_extracted_preferences: list[Preference] = Field(default_factory=list)
     chat_known_tool_results: list[ToolResultRef] = Field(default_factory=list)
     chat_session_id: str | None = None
+
+    # v1.x — multi-turn distillation fields (spec § 6.4; mirrors EscalationPacket).
+    # Injected via state_overrides when escalation router decides confidence ≥ threshold.
+    # Empty defaults mean "form-style direct entry" path (no chat distillation available).
+    escalation_intent: str = Field(default="", max_length=200)
+    discussion_focus: list[str] = Field(default_factory=list, max_length=5)
+    explicit_exclusions: list[str] = Field(default_factory=list, max_length=3)
