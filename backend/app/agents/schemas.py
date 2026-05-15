@@ -438,6 +438,11 @@ class ResearchState(BaseModel):
     target_entity: str | None = None  # e.g. "贵州茅台"; falls back to ts_code if None
     planner_retry_count: int = Field(default=0, ge=0, le=2)
     planner_critic_feedback: str | None = Field(default=None, max_length=300)
+    # v1.x — writer retry state (spec 2026-05-15 § 7.2; replaces planner retry).
+    # Planner is now Validator-gated → "wrong plan" can't reach Critic;
+    # the real failure mode is Writer using data sloppily → factuality < 7.0.
+    writer_retry_count: int = Field(default=0, ge=0, le=1)
+    writer_critic_feedback: str | None = Field(default=None, max_length=300)
     insights: list[Insight] = Field(default_factory=list)
     report_markdown: str | None = None
     chart_specs: list[ChartSpec] = Field(default_factory=list)
