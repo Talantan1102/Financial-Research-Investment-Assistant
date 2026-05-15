@@ -1,0 +1,73 @@
+{# § 06 Survey · 外部 agent 项目 harness trick 调研。8 维度分组,trick 卡片. #}
+{% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
+{% block content %}
+
+{% set DIM_SHORT = {
+  'prompt_context':     'prompt',
+  'tools_function':     'tools',
+  'orchestration':      'orch',
+  'memory':             'memory',
+  'rag_knowledge':      'rag',
+  'guardrails':         'guard',
+  'eval_observability': 'eval',
+  'cost_routing':       'cost'
+} %}
+
+<div class="section-marker">
+  <span class="sm-num">§ 06</span>
+  <span class="sm-title">Survey · 外部 agent 项目 harness trick</span>
+  <span class="sm-desc">5 个开源项目 · 按 8 维度分组 · 每条带源锚点</span>
+</div>
+
+<div class="survey-summary">
+  <span class="ss-label">已扫描</span>
+  {% for r in repos %}
+    <a href="{{ r.url }}" target="_blank" class="ss-repo">
+      <span class="ss-name">{{ r.repo }}</span>
+      <span class="ss-meta">{{ r.stars }}⭐ · {{ r.trick_count }} trick</span>
+    </a>
+  {% endfor %}
+</div>
+
+{% if not tricks_by_dim %}
+  <div class="empty-state">
+    暂无外部 trick 数据 — 检查 dashboard/data/external_agent_survey.jsonl
+  </div>
+{% else %}
+  {% for d in dimensions %}
+    {% if d.id in tricks_by_dim %}
+      {% set short = DIM_SHORT.get(d.id, d.id) %}
+      <section class="survey-dim">
+        <h3 class="sd-head">
+          <span class="dot dot-{{ short }}"></span>
+          <span class="sd-num">§ {{ d.number }}</span>
+          <span class="sd-name">{{ d.name_cn }}</span>
+          <span class="sd-en">{{ d.name_en }}</span>
+          <span class="sd-count">{{ tricks_by_dim[d.id]|length }} trick</span>
+        </h3>
+        <div class="survey-grid">
+          {% for t in tricks_by_dim[d.id] %}
+            <article class="survey-card" data-dim="{{ t.dimension }}">
+              <header class="sc-head">
+                <a href="{{ t.url }}" target="_blank" class="sc-repo">{{ t.repo }}</a>
+                <span class="sc-stars">{{ t.stars }}⭐</span>
+              </header>
+              <h4 class="sc-title">{{ t.trick_title }}</h4>
+              <p class="sc-desc">{{ t.description }}</p>
+              <div class="sc-anchor">
+                <code>{{ t.source_anchor }}</code>
+              </div>
+              <p class="sc-why">{{ t.why_interesting }}</p>
+              {% if t.linked_cap_id %}
+                <a class="sc-link" href="/overview#cap_{{ t.linked_cap_id }}">→ 我们的 {{ t.linked_cap_id }}</a>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+  {% endfor %}
+{% endif %}
+
+{% endblock %}

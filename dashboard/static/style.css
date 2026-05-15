@@ -2545,3 +2545,182 @@ details[open] .decision-note-toggle::before {
   color: var(--fg-faint);
   font-style: italic;
 }
+
+/* --- § 06 Survey · 外部 agent harness trick 调研 --- */
+.survey-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  padding: 14px 22px;
+  margin: 16px 0 28px;
+  border: 1px solid var(--border, #2a2520);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.015);
+  font-family: var(--mono, 'Geist Mono', monospace);
+  font-size: 12.5px;
+}
+
+.survey-summary .ss-label {
+  color: var(--fg-mute, #7d6e58);
+  margin-right: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.survey-summary .ss-repo {
+  display: inline-flex;
+  flex-direction: column;
+  text-decoration: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border, #2a2520);
+  transition: background 120ms;
+}
+
+.survey-summary .ss-repo:hover {
+  background: rgba(200, 148, 86, 0.08);
+}
+
+.survey-summary .ss-name {
+  color: var(--fg, #b9ad94);
+  font-weight: 500;
+}
+
+.survey-summary .ss-meta {
+  color: var(--fg-mute, #7d6e58);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.survey-dim {
+  margin: 36px 0 24px;
+}
+
+.survey-dim .sd-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  margin: 0 0 18px;
+  border-bottom: 1px solid var(--border, #2a2520);
+  font-family: var(--mono, 'Geist Mono', monospace);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.sd-head .sd-num {
+  color: var(--fg-mute, #7d6e58);
+  font-size: 12px;
+}
+
+.sd-head .sd-name {
+  color: var(--fg, #b9ad94);
+}
+
+.sd-head .sd-en {
+  color: var(--fg-mute, #7d6e58);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.sd-head .sd-count {
+  margin-left: auto;
+  color: var(--fg-mute, #7d6e58);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.survey-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+
+.survey-card {
+  border: 1px solid var(--border, #2a2520);
+  border-radius: 6px;
+  padding: 16px 18px;
+  background: rgba(255, 255, 255, 0.012);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 140ms, background 140ms;
+}
+
+.survey-card:hover {
+  border-color: rgba(200, 148, 86, 0.45);
+  background: rgba(200, 148, 86, 0.03);
+}
+
+.survey-card .sc-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono, 'Geist Mono', monospace);
+  font-size: 11.5px;
+}
+
+.sc-head .sc-repo {
+  color: var(--accent-amber, #c89456);
+  text-decoration: none;
+}
+
+.sc-head .sc-repo:hover {
+  text-decoration: underline;
+}
+
+.sc-head .sc-stars {
+  color: var(--fg-mute, #7d6e58);
+}
+
+.survey-card .sc-title {
+  margin: 0;
+  font-family: var(--serif, 'Newsreader', serif);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--fg, #b9ad94);
+}
+
+.survey-card .sc-desc {
+  margin: 0;
+  color: var(--fg, #b9ad94);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.survey-card .sc-anchor {
+  font-family: var(--mono, 'Geist Mono', monospace);
+  font-size: 11px;
+}
+
+.sc-anchor code {
+  color: var(--accent-teal, #6f9494);
+  background: rgba(111, 148, 148, 0.08);
+  padding: 2px 6px;
+  border-radius: 3px;
+  word-break: break-all;
+}
+
+.survey-card .sc-why {
+  margin: 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--fg-mute, #7d6e58);
+  border-left: 2px solid var(--accent-amber, #c89456);
+  padding-left: 10px;
+}
+
+.survey-card .sc-link {
+  font-family: var(--mono, 'Geist Mono', monospace);
+  font-size: 11px;
+  color: var(--accent-teal, #6f9494);
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.sc-link:hover {
+  text-decoration: underline;
+}
