@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from typing import Literal
 from unittest.mock import patch
 
 from app.agents.escalation_protocol import (
@@ -30,7 +31,7 @@ def _mk_packet(
     intent: str = "客户希望对茅台做全面尽调",
     focus: list[str] | None = None,
     exclusions: list[str] | None = None,
-    llm_self: str = "high",
+    llm_self: Literal["high", "medium", "low"] = "high",
     target_ts: str = "600519.SH",
     target_name: str = "贵州茅台",
     turn_count: int = 5,

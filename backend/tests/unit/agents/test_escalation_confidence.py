@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 import pytest
 from app.agents.escalation_confidence import (
@@ -26,7 +27,10 @@ class _Msg:
     content: str
 
 
-def _mk_packet(focus: list[str] | None = None, llm_self: str = "high"):
+def _mk_packet(
+    focus: list[str] | None = None,
+    llm_self: Literal["high", "medium", "low"] = "high",
+):
     return EscalationPacket(
         explicit_task=ExplicitTask(raw_last_user_turn="x", extracted_intent="y"),
         chat_derived_signals=ChatDerivedSignals(extraction_confidence=0.8),
