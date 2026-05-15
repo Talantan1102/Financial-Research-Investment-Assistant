@@ -67,6 +67,8 @@ async def test_critic_subgraph_runs_6_scorers(
     assert ic_score is not None, "input_context_appropriateness must be in critic_report.dimensions"
     assert 0.0 <= ic_score <= 10.0
 
-    # Verify plan_correctness dimension is absent (v1.x)
-    pc_score = report.get_score("plan_correctness")
+    # Verify plan_correctness dimension is absent (v1.x): negative test —
+    # CriticReport.get_score is typed to the 6-dim Literal post-v1.x;
+    # asking about a removed dim is the whole point of this assertion.
+    pc_score = report.get_score("plan_correctness")  # type: ignore[arg-type]
     assert pc_score is None, "plan_correctness must NOT be in critic_report.dimensions in v1.x"

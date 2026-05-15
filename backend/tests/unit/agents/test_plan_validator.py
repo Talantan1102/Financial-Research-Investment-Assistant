@@ -198,4 +198,4 @@ def test_validation_result_frozen() -> None:
 
     r = ValidationResult(ok=True, errors=[])
     with pytest.raises((ValidationError, AttributeError, TypeError)):
-        r.ok = False  # type: ignore[misc]
+        r.ok = False

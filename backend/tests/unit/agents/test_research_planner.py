@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 from app.agents.plan_template import DD_PLAN_TEMPLATE
@@ -13,8 +14,8 @@ from app.agents.research_planner import (
 from app.agents.schemas import ResearchPlan, ResearchState, Subtask
 
 
-def _mk_state(**kw) -> ResearchState:
-    base = {
+def _mk_state(**kw: Any) -> ResearchState:
+    base: dict[str, Any] = {
         "user_id": "u1",
         "session_id": "s1",
         "user_message": "分析贵州茅台",
