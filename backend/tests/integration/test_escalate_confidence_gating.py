@@ -1,4 +1,5 @@
 """Confidence-gated distilled fields injection in packet_to_research_state."""
+
 from __future__ import annotations
 
 import os

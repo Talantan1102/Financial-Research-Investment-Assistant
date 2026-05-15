@@ -115,9 +115,7 @@ class EscalationPacket(BaseModel):
     def _validate_item_lengths(self) -> EscalationPacket:
         for i, item in enumerate(self.discussion_focus):
             if len(item) > 30:
-                raise ValueError(
-                    f"discussion_focus[{i}] is {len(item)} chars > 30: {item[:35]}..."
-                )
+                raise ValueError(f"discussion_focus[{i}] is {len(item)} chars > 30: {item[:35]}...")
         for i, item in enumerate(self.explicit_exclusions):
             if len(item) > 30:
                 raise ValueError(

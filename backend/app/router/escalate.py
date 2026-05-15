@@ -140,11 +140,13 @@ def packet_to_research_state(
     )
 
     if conf >= threshold:
-        return state.model_copy(update={
-            "escalation_intent": pkt.escalation_intent,
-            "discussion_focus": list(pkt.discussion_focus),
-            "explicit_exclusions": list(pkt.explicit_exclusions),
-        })
+        return state.model_copy(
+            update={
+                "escalation_intent": pkt.escalation_intent,
+                "discussion_focus": list(pkt.discussion_focus),
+                "explicit_exclusions": list(pkt.explicit_exclusions),
+            }
+        )
 
     # L3 fallback — state stays form-style (user_message = raw_last_user_turn)
     return state

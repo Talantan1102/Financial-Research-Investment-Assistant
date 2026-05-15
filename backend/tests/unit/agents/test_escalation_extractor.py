@@ -246,6 +246,7 @@ async def test_extractor_passes_full_history_to_llm():
 def test_extractor_prompt_requests_5_new_v1x_fields() -> None:
     """v1.x: prompt instructs LLM to fill 5 new fields."""
     from app.agents.escalation_extractor import _EXTRACTOR_PROMPT_TEMPLATE
+
     for field in (
         "escalation_intent",
         "discussion_focus",
@@ -259,18 +260,32 @@ def test_extractor_prompt_requests_5_new_v1x_fields() -> None:
 def test_extractor_prompt_specifies_field_constraints() -> None:
     """Prompt should specify length caps + list size caps so LLM doesn't overshoot."""
     from app.agents.escalation_extractor import _EXTRACTOR_PROMPT_TEMPLATE
+
     # Length / count hints
     assert "200" in _EXTRACTOR_PROMPT_TEMPLATE  # intent max length
     assert "30" in _EXTRACTOR_PROMPT_TEMPLATE  # per-item length
-    assert "high" in _EXTRACTOR_PROMPT_TEMPLATE.lower() and "medium" in _EXTRACTOR_PROMPT_TEMPLATE.lower() and "low" in _EXTRACTOR_PROMPT_TEMPLATE.lower()
+    assert (
+        "high" in _EXTRACTOR_PROMPT_TEMPLATE.lower()
+        and "medium" in _EXTRACTOR_PROMPT_TEMPLATE.lower()
+        and "low" in _EXTRACTOR_PROMPT_TEMPLATE.lower()
+    )
 
 
 def test_extractor_prompt_has_extraction_rule_for_v1x_fields() -> None:
     """Prompt should give the LLM guidance on how to extract each new field."""
     from app.agents.escalation_extractor import _EXTRACTOR_PROMPT_TEMPLATE
+
     # Heuristic — extraction rules section mentions distillation, focus, exclusion semantics
     text_lower = _EXTRACTOR_PROMPT_TEMPLATE.lower()
     # Either explicit Chinese instruction or English keyword
-    assert "蒸馏" in _EXTRACTOR_PROMPT_TEMPLATE or "distill" in text_lower or "提炼" in _EXTRACTOR_PROMPT_TEMPLATE
+    assert (
+        "蒸馏" in _EXTRACTOR_PROMPT_TEMPLATE
+        or "distill" in text_lower
+        or "提炼" in _EXTRACTOR_PROMPT_TEMPLATE
+    )
     assert "关注点" in _EXTRACTOR_PROMPT_TEMPLATE or "focus" in text_lower
-    assert "不关注" in _EXTRACTOR_PROMPT_TEMPLATE or "排除" in _EXTRACTOR_PROMPT_TEMPLATE or "exclu" in text_lower
+    assert (
+        "不关注" in _EXTRACTOR_PROMPT_TEMPLATE
+        or "排除" in _EXTRACTOR_PROMPT_TEMPLATE
+        or "exclu" in text_lower
+    )

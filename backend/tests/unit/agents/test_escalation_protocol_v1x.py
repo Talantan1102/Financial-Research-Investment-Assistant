@@ -1,4 +1,5 @@
 """v1.x EscalationPacket — 3 distillation fields + llm_self_confidence."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -53,7 +54,9 @@ def test_packet_default_field_values() -> None:
         chat_derived_signals=ChatDerivedSignals(extraction_confidence=0.5),
         known_facts=KnownFacts(),
         session_metadata=SessionMetadata(
-            chat_session_id="s", chat_turn_count=1, user_confirmed_at=_now(),
+            chat_session_id="s",
+            chat_turn_count=1,
+            user_confirmed_at=_now(),
         ),
     )
     assert p.escalation_intent == ""
@@ -107,8 +110,13 @@ def test_packet_confidence_rationale_max_length_100() -> None:
 def test_packet_serializes_with_new_fields() -> None:
     p = EscalationPacket(**_base_kwargs())
     d = p.model_dump()
-    for k in ("escalation_intent", "discussion_focus", "explicit_exclusions",
-              "llm_self_confidence", "confidence_rationale"):
+    for k in (
+        "escalation_intent",
+        "discussion_focus",
+        "explicit_exclusions",
+        "llm_self_confidence",
+        "confidence_rationale",
+    ):
         assert k in d
 
 
@@ -119,7 +127,9 @@ def test_packet_backwards_compatible_construction() -> None:
         chat_derived_signals=ChatDerivedSignals(extraction_confidence=0.5),
         known_facts=KnownFacts(),
         session_metadata=SessionMetadata(
-            chat_session_id="s", chat_turn_count=1, user_confirmed_at=_now(),
+            chat_session_id="s",
+            chat_turn_count=1,
+            user_confirmed_at=_now(),
         ),
         missing_field_hints=[],
     )

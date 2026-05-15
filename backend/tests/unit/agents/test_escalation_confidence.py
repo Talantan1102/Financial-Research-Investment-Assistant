@@ -1,4 +1,5 @@
 """C6 composite confidence (LLM self ∩ 5 deterministic features, take min)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,7 +32,8 @@ def _mk_packet(focus: list[str] | None = None, llm_self: str = "high"):
         chat_derived_signals=ChatDerivedSignals(extraction_confidence=0.8),
         known_facts=KnownFacts(),
         session_metadata=SessionMetadata(
-            chat_session_id="s", chat_turn_count=5,
+            chat_session_id="s",
+            chat_turn_count=5,
             user_confirmed_at=datetime.now(UTC),
         ),
         escalation_intent="x",
@@ -42,8 +44,9 @@ def _mk_packet(focus: list[str] | None = None, llm_self: str = "high"):
     )
 
 
-def _full_chat(target_ts: str = "600519.SH", target_name: str = "贵州茅台", n: int = 5,
-               keyword: str = "尽调") -> list[_Msg]:
+def _full_chat(
+    target_ts: str = "600519.SH", target_name: str = "贵州茅台", n: int = 5, keyword: str = "尽调"
+) -> list[_Msg]:
     """Full positive-signal chat — 5 turns, lots of target mentions, has keyword."""
     msgs = [_Msg(f"{target_ts} {target_name} 怎么样") for _ in range(n - 1)]
     msgs.append(_Msg(f"帮我做个 {keyword}"))
@@ -72,7 +75,11 @@ def test_f1_chat_length_short_low() -> None:
     """≤2 turns → F1 = 2/5 = 0.4."""
     hist = [_Msg("hi"), _Msg("ok")]
     conf = compute_deterministic_confidence(
-        _mk_packet(), hist, "600519.SH", "贵州茅台", True,
+        _mk_packet(),
+        hist,
+        "600519.SH",
+        "贵州茅台",
+        True,
     )
     # F1=0.4, F2=0 (no mentions), F3=0.6 (no keyword), F4=1.0, F5=1.0
     # avg = (0.4 + 0 + 0.6 + 1 + 1) / 5 = 0.6
@@ -83,7 +90,11 @@ def test_f2_entity_density_zero() -> None:
     """0 target mentions → F2 = 0 (drags composite down)."""
     hist = [_Msg("聊点别的") for _ in range(5)]
     conf = compute_deterministic_confidence(
-        _mk_packet(), hist, "600519.SH", "贵州茅台", True,
+        _mk_packet(),
+        hist,
+        "600519.SH",
+        "贵州茅台",
+        True,
     )
     # F1=1, F2=0, F3=0.6, F4=1, F5=1 → avg=0.72
     assert conf < 0.8
@@ -93,7 +104,11 @@ def test_f2_entity_density_high() -> None:
     """3+ mentions → F2 = 1.0."""
     hist = _full_chat()
     conf = compute_deterministic_confidence(
-        _mk_packet(), hist, "600519.SH", "贵州茅台", True,
+        _mk_packet(),
+        hist,
+        "600519.SH",
+        "贵州茅台",
+        True,
     )
     # F1=1, F2=1, F3=1, F4=1, F5=1 → avg=1.0
     assert conf == pytest.approx(1.0)
@@ -111,7 +126,9 @@ def test_f3_keyword_in_recent_turns_only() -> None:
     """Keyword in OLD turn (not last 3) does NOT trigger F3=1.0."""
     hist = [
         _Msg("尽调"),  # turn 0 — OLD, ignored
-        _Msg("贵州茅台"), _Msg("贵州茅台"), _Msg("贵州茅台"),
+        _Msg("贵州茅台"),
+        _Msg("贵州茅台"),
+        _Msg("贵州茅台"),
         _Msg("近期表现"),  # turn 4 — recent, no keyword
     ]
     conf = compute_deterministic_confidence(_mk_packet(), hist, "600519.SH", "贵州茅台", True)
@@ -132,10 +149,20 @@ def test_f4_contradiction_penalty() -> None:
 def test_f4_contradiction_pairs() -> None:
     """Multiple contradiction pairs detected."""
     hist = _full_chat()
-    for pair in [("买入", "卖出"), ("加仓", "减仓"), ("做多", "做空"), ("看多", "看空"), ("乐观", "悲观")]:
+    for pair in [
+        ("买入", "卖出"),
+        ("加仓", "减仓"),
+        ("做多", "做空"),
+        ("看多", "看空"),
+        ("乐观", "悲观"),
+    ]:
         focus = [f"想{pair[0]}", f"也想{pair[1]}"]
         conf = compute_deterministic_confidence(
-            _mk_packet(focus=focus), hist, "600519.SH", "贵州茅台", True,
+            _mk_packet(focus=focus),
+            hist,
+            "600519.SH",
+            "贵州茅台",
+            True,
         )
         # F4=0.3 (contradiction) → avg = (1+1+1+0.3+1)/5 = 0.86
         assert conf == pytest.approx(0.86, abs=0.01), f"pair {pair}: {conf}"
@@ -144,7 +171,9 @@ def test_f4_contradiction_pairs() -> None:
 def test_f5_explicit_confirm_boost() -> None:
     hist = _full_chat()
     confirmed = compute_deterministic_confidence(_mk_packet(), hist, "600519.SH", "贵州茅台", True)
-    not_confirmed = compute_deterministic_confidence(_mk_packet(), hist, "600519.SH", "贵州茅台", False)
+    not_confirmed = compute_deterministic_confidence(
+        _mk_packet(), hist, "600519.SH", "贵州茅台", False
+    )
     assert confirmed > not_confirmed
     # F5 difference: 1.0 vs 0.7 → 0.3 / 5 = 0.06 avg diff
     assert (confirmed - not_confirmed) == pytest.approx(0.06, abs=0.01)

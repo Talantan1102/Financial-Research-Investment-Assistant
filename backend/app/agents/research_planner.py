@@ -112,30 +112,17 @@ def _format_distilled_block(state: ResearchState) -> str:
     Returns empty string when all 3 distilled fields are empty (form-style
     direct entry path — preserve original prompt shape).
     """
-    if (
-        not state.escalation_intent
-        and not state.discussion_focus
-        and not state.explicit_exclusions
-    ):
+    if not state.escalation_intent and not state.discussion_focus and not state.explicit_exclusions:
         return ""
     parts: list[str] = []
     if state.escalation_intent:
-        parts.append(
-            "# 本次尽调的核心意图(来自最近对话蒸馏)\n"
-            f"{state.escalation_intent}\n"
-        )
+        parts.append(f"# 本次尽调的核心意图(来自最近对话蒸馏)\n{state.escalation_intent}\n")
     if state.discussion_focus:
         focuses = "\n".join(f"- {f}" for f in state.discussion_focus)
-        parts.append(
-            "# 用户在对话中重点关注的焦点\n"
-            f"{focuses}\n"
-        )
+        parts.append(f"# 用户在对话中重点关注的焦点\n{focuses}\n")
     if state.explicit_exclusions:
         excls = "\n".join(f"- {e}" for e in state.explicit_exclusions)
-        parts.append(
-            "# 用户表达过不关注的方面\n"
-            f"{excls}\n"
-        )
+        parts.append(f"# 用户表达过不关注的方面\n{excls}\n")
     return "\n".join(parts) + "\n"
 
 

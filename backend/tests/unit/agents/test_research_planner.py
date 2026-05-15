@@ -311,7 +311,10 @@ def test_prompt_includes_distilled_block_when_intent_present() -> None:
     from app.agents.schemas import ResearchState
 
     s = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         target_ts_code="600519.SH",
         escalation_intent="客户希望对茅台做全面尽调",
     )
@@ -326,7 +329,10 @@ def test_prompt_includes_focus_list_when_present() -> None:
     from app.agents.schemas import ResearchState
 
     s = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         target_ts_code="600519.SH",
         discussion_focus=["担心负债率上升", "对比五粮液"],
     )
@@ -343,7 +349,10 @@ def test_prompt_includes_exclusions_when_present() -> None:
     from app.agents.schemas import ResearchState
 
     s = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         target_ts_code="600519.SH",
         explicit_exclusions=["不关心 ESG"],
     )
@@ -359,7 +368,10 @@ def test_prompt_omits_distilled_section_when_all_empty() -> None:
     from app.agents.schemas import ResearchState
 
     s = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         target_ts_code="600519.SH",
     )
     prompt = build_planner_prompt(s, DD_PLAN_TEMPLATE)
@@ -375,7 +387,10 @@ def test_prompt_partial_distillation_renders_only_present_fields() -> None:
     from app.agents.schemas import ResearchState
 
     s = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         target_ts_code="600519.SH",
         escalation_intent="想全面看看",
     )
@@ -393,7 +408,10 @@ def test_prompt_distilled_block_appears_before_plan_template() -> None:
     from app.agents.schemas import ResearchState
 
     s = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         target_ts_code="600519.SH",
         escalation_intent="尽调全面",
     )

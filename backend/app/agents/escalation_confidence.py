@@ -32,9 +32,16 @@ _LLM_CONF_MAP: dict[str, float] = {"high": 0.9, "medium": 0.6, "low": 0.3}
 F_THRESHOLDS: dict[str, Any] = {
     "chat_length_target": 5,
     "entity_density_target": 3,
-    "explicit_keywords": frozenset({
-        "尽调", "深度分析", "详细看看", "全面研究", "深入研究", "做个调研",
-    }),
+    "explicit_keywords": frozenset(
+        {
+            "尽调",
+            "深度分析",
+            "详细看看",
+            "全面研究",
+            "深入研究",
+            "做个调研",
+        }
+    ),
     "contradiction_pairs": (
         ("买入", "卖出"),
         ("加仓", "减仓"),
@@ -54,13 +61,11 @@ def _f1_chat_length(history: list[_ChatMsgLike]) -> float:
     return min(len(history) / target, 1.0)
 
 
-def _f2_entity_density(
-    history: list[_ChatMsgLike], ts_code: str, target_name: str
-) -> float:
+def _f2_entity_density(history: list[_ChatMsgLike], ts_code: str, target_name: str) -> float:
     mentions = sum(
-        1 for m in history
-        if (ts_code and ts_code in m.content)
-        or (target_name and target_name in m.content)
+        1
+        for m in history
+        if (ts_code and ts_code in m.content) or (target_name and target_name in m.content)
     )
     target = F_THRESHOLDS["entity_density_target"]
     return min(mentions / target, 1.0)
@@ -116,7 +121,10 @@ def compute_confidence(
     """
     llm = _LLM_CONF_MAP[extracted.llm_self_confidence]
     det = compute_deterministic_confidence(
-        extracted, chat_history, target_ts_code, target_name,
+        extracted,
+        chat_history,
+        target_ts_code,
+        target_name,
         user_confirmed_escalation,
     )
     return min(llm, det)
