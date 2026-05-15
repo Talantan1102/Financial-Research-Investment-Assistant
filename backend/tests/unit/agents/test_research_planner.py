@@ -69,21 +69,29 @@ def test_prompt_contains_optional_dims() -> None:
 
 
 def test_prompt_contains_six_input_fields() -> None:
-    state = _mk_state(client_total_aum=5_000_000.0)
+    state = _mk_state(
+        client_total_aum=5_000_000.0,
+        client_existing_position=1_500_000.0,
+    )
     prompt = build_planner_prompt(state, DD_PLAN_TEMPLATE)
-    assert "balanced" in prompt
-    assert "medium_term" in prompt
-    assert "moderate" in prompt
-    assert "600519.SH" in prompt
-    assert "5000000" in prompt or "5_000_000" in prompt or "5,000,000" in prompt
+    # 6 fields = objective + horizon + risk + aum + existing_position + ts_code
+    assert "balanced" in prompt  # investment_objective
+    assert "medium_term" in prompt  # investment_horizon
+    assert "moderate" in prompt  # risk_tolerance
+    assert "5000000" in prompt or "5_000_000" in prompt or "5,000,000" in prompt  # aum
+    assert "1500000" in prompt or "1_500_000" in prompt or "1,500,000" in prompt  # existing_position
+    assert "600519.SH" in prompt  # target_ts_code
 
 
 def test_prompt_includes_verbatim_dim_echo_instruction() -> None:
     """Prompt must tell LLM to echo dim names verbatim — pins the
-    substring-match contract in plan_validator."""
+    substring-match contract in plan_validator. The literal word
+    'verbatim' must appear; loosening this test = loosening the contract."""
     prompt = build_planner_prompt(_mk_state(), DD_PLAN_TEMPLATE)
-    # Look for instruction about dim name in description
-    assert "维度名" in prompt or "dim" in prompt.lower() or "维度" in prompt
+    assert "verbatim" in prompt
+    assert "维度名" in prompt
+    # Confirm the load-bearing marker is preserved
+    assert "LOAD-BEARING" in prompt
 
 
 def test_prompt_no_validator_feedback_when_first_attempt() -> None:
@@ -175,3 +183,68 @@ def test_safe_default_plan_passes_validator_self_check() -> None:
     plan = _build_safe_default_plan("贵州茅台", "600519.SH")
     r = validate_plan(plan, DD_PLAN_TEMPLATE)
     assert r.ok, r.errors
+
+
+def test_success_span_metadata_includes_model_and_cost() -> None:
+    """Trace contract — model + cost_cny propagate from LLMService."""
+    llm = MagicMock()
+    good = _mk_good_plan()
+    llm.chat.return_value = MagicMock(parsed=good, model="claude-opus-4-7", cost_cny=0.12)
+
+    planner = ResearchPlanner(llm)
+    result = planner.step(_mk_state())
+
+    md = result.span_metadata
+    assert md["model"] == "claude-opus-4-7"
+    assert md["cost_cny"] == 0.12
+    assert md["agent"] == "ResearchPlanner"
+
+
+def test_third_attempt_receives_second_attempt_errors() -> None:
+    """`last_errors` should reflect the most recent failed attempt, not the
+    first. Pin this so a future refactor doesn't accidentally accumulate
+    feedback or only show first-attempt feedback to LLM."""
+    from app.agents.schemas import Subtask
+
+    # 1st bad: missing 财务全景
+    bad_missing_finance = ResearchPlan(
+        rationale="missing finance",
+        subtasks=[
+            Subtask(subtask_id="s1", description="估值", required_tools=["get_pe_history"], rationale="r"),
+            Subtask(subtask_id="s2", description="行业地位", required_tools=["web_search"], rationale="r"),
+            Subtask(subtask_id="s3", description="风险底线", required_tools=["get_holder_change"], rationale="r"),
+        ],
+    )
+    # 2nd bad: missing 风险底线 (different errors than 1st)
+    bad_missing_risk = ResearchPlan(
+        rationale="missing risk",
+        subtasks=[
+            Subtask(subtask_id="s1", description="财务全景", required_tools=["get_financials", "get_balance_sheet"], rationale="r"),
+            Subtask(subtask_id="s2", description="估值", required_tools=["get_pe_history"], rationale="r"),
+            Subtask(subtask_id="s3", description="行业地位", required_tools=["web_search"], rationale="r"),
+        ],
+    )
+    llm = MagicMock()
+    llm.chat.side_effect = [
+        MagicMock(parsed=bad_missing_finance, model="m", cost_cny=0.0),
+        MagicMock(parsed=bad_missing_risk, model="m", cost_cny=0.0),
+        MagicMock(parsed=bad_missing_finance, model="m", cost_cny=0.0),  # still bad
+    ]
+    planner = ResearchPlanner(llm)
+    result = planner.step(_mk_state())
+
+    # 3 LLM calls made
+    assert llm.chat.call_count == 3
+
+    # 3rd call's prompt must reference the 2nd attempt's errors (风险底线), not 1st (财务全景)
+    third_prompt = llm.chat.call_args_list[2][1]["prompt"]
+    assert "风险底线" in third_prompt, (
+        f"3rd attempt should receive 2nd attempt's errors (missing 风险底线), "
+        f"but prompt does not mention 风险底线. Prompt excerpt: {third_prompt[-500:]}"
+    )
+
+    # And validator_last_plan in fallback metadata should be the 3rd attempt's plan
+    # (which was bad_missing_finance again — same as 1st)
+    assert result.span_metadata["validator_fallback"] is True
+    # validator_last_errors should mention 财务全景 (3rd attempt missing it)
+    assert "财务全景" in result.span_metadata["validator_last_errors"]

@@ -9,6 +9,12 @@ from PLAN_REGISTRY). plan_registry.py is deprecated; this module no longer
 imports it.
 
 spec ref: docs/superpowers/specs/2026-05-15-v1.x-plan-template-validator-design.md § 4
+
+Exception policy: LLM exceptions (RateLimitError, network errors, etc.) are
+NOT caught by the retry loop — they bubble up to the caller (graph node →
+ResearchAgent). LLMService is expected to have its own retry layer for
+transient faults. Validator failures are distinct from LLM exceptions and
+ARE handled by the retry loop.
 """
 
 from __future__ import annotations
@@ -179,9 +185,11 @@ class ResearchPlanner(Agent):
                 schema=ResearchPlan,
                 request_id=state.request_id,
             )
-            assert isinstance(r.parsed, ResearchPlan), (
-                f"LLMService contract violated: expected ResearchPlan, got {type(r.parsed).__name__}"
-            )
+            if not isinstance(r.parsed, ResearchPlan):
+                raise TypeError(
+                    f"LLMService contract violated: expected ResearchPlan, "
+                    f"got {type(r.parsed).__name__}"
+                )
             plan: ResearchPlan = r.parsed
             v = validate_plan(plan, self.template)
             if v.ok:
