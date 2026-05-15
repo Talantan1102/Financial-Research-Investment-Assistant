@@ -12,8 +12,9 @@ Phase 1 — self-managed wire 用,从 c5 已 ship 的 HierarchicalMemory.get_wor
 from __future__ import annotations
 
 import logging
-from typing import Any
 from uuid import UUID
+
+from app.memory.protocol import Memory
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ _PERSONA_EMPTY = "(暂无画像 — 用户首次对话,等待信号沉淀)"
 _SCRATCHPAD_EMPTY = "(本 session 暂无便签)"
 
 
-async def render_persona_markdown(memory: Any, user_id: UUID) -> str:
+async def render_persona_markdown(memory: Memory, user_id: UUID) -> str:
     """渲染 persona working block 为 markdown 字符串.
 
     Args:
@@ -34,7 +35,7 @@ async def render_persona_markdown(memory: Any, user_id: UUID) -> str:
     """
     try:
         blocks = await memory.get_working_blocks(user_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — intentional fail-safe so chat doesn't crash on DB error
         logger.warning("render_persona_markdown: get_working_blocks failed: %s", exc)
         return f"(画像渲染失败 — {type(exc).__name__})"
 
@@ -44,7 +45,7 @@ async def render_persona_markdown(memory: Any, user_id: UUID) -> str:
     return str(block.content)
 
 
-async def render_scratchpad_markdown(memory: Any, user_id: UUID) -> str:
+async def render_scratchpad_markdown(memory: Memory, user_id: UUID) -> str:
     """渲染 scratchpad working block 为 markdown.
 
     Phase 1 沿用 c5 working_blocks 表(user-scoped, 不是 session-scoped).
@@ -52,7 +53,7 @@ async def render_scratchpad_markdown(memory: Any, user_id: UUID) -> str:
     """
     try:
         blocks = await memory.get_working_blocks(user_id)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — intentional fail-safe so chat doesn't crash on DB error
         logger.warning("render_scratchpad_markdown: get_working_blocks failed: %s", exc)
         return f"(便签渲染失败 — {type(exc).__name__})"
 
