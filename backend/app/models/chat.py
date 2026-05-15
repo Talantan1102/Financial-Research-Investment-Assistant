@@ -3,7 +3,16 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -87,10 +96,66 @@ class ChatMessage(Base):
     research_report_id = Column(String(64), nullable=True)
     research_report_summary = Column(Text, nullable=True)
     tool_call_data = Column(JSONB(), nullable=True)
+    task_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status = Column(
+        String(16),
+        nullable=False,
+        default="done",
+        server_default="done",
+    )  # done|partial|cancelled|error
 
     # 关系
     session = relationship("ChatSession", back_populates="messages")
     attachments = relationship("ChatAttachment", back_populates="message")
+
+
+class ChatTask(Base):
+    """聊天任务模型(Plan 1 落地;Plan 2 由 Celery worker 写入)"""
+
+    __tablename__ = "chat_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    status = Column(
+        String(16),
+        nullable=False,
+        default="queued",
+        server_default="queued",
+    )  # queued|running|done|cancelled|partial|error
+    langgraph_thread_id = Column(String(128), nullable=False)
+    langgraph_checkpoint_id = Column(String(128), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
+    last_event_seq = Column(BigInteger, nullable=False, default=0, server_default="0")
+    initial_prompt_message_id = Column(UUID(as_uuid=True), nullable=True)
+    parent_task_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued','running','done','cancelled','partial','error')",
+            name="chat_tasks_status_check",
+        ),
+    )
+
+    def __init__(self, **kwargs: object) -> None:
+        kwargs.setdefault("status", "queued")
+        kwargs.setdefault("last_event_seq", 0)
+        super().__init__(**kwargs)
 
 
 class LongTermMemory(Base):
