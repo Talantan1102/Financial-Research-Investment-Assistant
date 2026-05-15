@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ExplicitTask(BaseModel):
@@ -84,3 +84,43 @@ class EscalationPacket(BaseModel):
     known_facts: KnownFacts
     session_metadata: SessionMetadata
     missing_field_hints: list[MissingFieldHint] = Field(default_factory=list)
+
+    # v1.x — multi-turn distillation fields (spec § 6.4)
+    escalation_intent: str = Field(
+        default="",
+        max_length=200,
+        description="从最近 N 轮对话蒸馏的明确尽调请求",
+    )
+    discussion_focus: list[str] = Field(
+        default_factory=list,
+        max_length=5,
+        description="对话中反复出现的关注点 (每条 ≤30 字)",
+    )
+    explicit_exclusions: list[str] = Field(
+        default_factory=list,
+        max_length=3,
+        description="用户明确表达过不关注的方面 (每条 ≤30 字)",
+    )
+    llm_self_confidence: Literal["high", "medium", "low"] = Field(
+        default="medium",
+        description="LLM extractor 自评抽取置信度",
+    )
+    confidence_rationale: str = Field(
+        default="",
+        max_length=100,
+        description="LLM 解释为什么是此置信度 (≤100 字)",
+    )
+
+    @model_validator(mode="after")
+    def _validate_item_lengths(self) -> EscalationPacket:
+        for i, item in enumerate(self.discussion_focus):
+            if len(item) > 30:
+                raise ValueError(
+                    f"discussion_focus[{i}] is {len(item)} chars > 30: {item[:35]}..."
+                )
+        for i, item in enumerate(self.explicit_exclusions):
+            if len(item) > 30:
+                raise ValueError(
+                    f"explicit_exclusions[{i}] is {len(item)} chars > 30: {item[:35]}..."
+                )
+        return self
