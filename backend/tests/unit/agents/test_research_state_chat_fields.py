@@ -59,18 +59,26 @@ def test_research_state_writer_retry_count_max_1() -> None:
     from pydantic import ValidationError
 
     # 0 and 1 OK
-    s0 = ResearchState(user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=0)
-    s1 = ResearchState(user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=1)
+    s0 = ResearchState(
+        user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=0
+    )
+    s1 = ResearchState(
+        user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=1
+    )
     assert s0.writer_retry_count == 0
     assert s1.writer_retry_count == 1
 
     # 2 should fail
     with pytest.raises(ValidationError):
-        ResearchState(user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=2)
+        ResearchState(
+            user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=2
+        )
 
     # -1 should fail
     with pytest.raises(ValidationError):
-        ResearchState(user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=-1)
+        ResearchState(
+            user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=-1
+        )
 
 
 def test_research_state_writer_critic_feedback_max_length_300() -> None:
@@ -80,12 +88,18 @@ def test_research_state_writer_critic_feedback_max_length_300() -> None:
 
     # 300 chars OK
     ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         writer_critic_feedback="x" * 300,
     )
     # 301 fails
     with pytest.raises(ValidationError):
         ResearchState(
-            user_id="u", session_id="s", user_message="m", request_id="r",
+            user_id="u",
+            session_id="s",
+            user_message="m",
+            request_id="r",
             writer_critic_feedback="x" * 301,
         )

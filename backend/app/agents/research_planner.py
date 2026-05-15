@@ -94,9 +94,7 @@ def _format_required_dims(template: PlanTemplate) -> str:
     lines = []
     for d in template["required_dimensions"]:
         candidates = ", ".join(d["tool_candidates"])
-        lines.append(
-            f"- {d['name']}: tool_candidates=[{candidates}], min_tools={d['min_tools']}"
-        )
+        lines.append(f"- {d['name']}: tool_candidates=[{candidates}], min_tools={d['min_tools']}")
     return "\n".join(lines)
 
 
@@ -151,9 +149,7 @@ def _build_safe_default_plan(target_name: str, ts_code: str) -> ResearchPlan:
     subtasks = [
         Subtask(
             subtask_id=f"safe_{idx}",
-            description=tmpl.description_template.format(
-                target_name=target_name, ts_code=ts_code
-            ),
+            description=tmpl.description_template.format(target_name=target_name, ts_code=ts_code),
             required_tools=list(tmpl.required_tools),
             rationale=tmpl.rationale,
         )

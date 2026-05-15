@@ -42,9 +42,7 @@ def test_research_plan_rationale_max_length() -> None:
     with pytest.raises(ValidationError):
         ResearchPlan(
             rationale="x" * 301,
-            subtasks=[
-                Subtask(subtask_id="s", description="d", required_tools=[], rationale="r")
-            ],
+            subtasks=[Subtask(subtask_id="s", description="d", required_tools=[], rationale="r")],
         )
 
 

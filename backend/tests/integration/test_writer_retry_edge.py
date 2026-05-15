@@ -1,4 +1,5 @@
 """Integration test — writer retry edge on factuality < 7.0 (v1.x)."""
+
 from __future__ import annotations
 
 from app.agents.schemas import CriticDimensionScore, CriticReport, ResearchState
@@ -12,12 +13,14 @@ def _mk_state_with_factuality(score: float, writer_retry_count: int = 0) -> Rese
         request_id="r",
         writer_retry_count=writer_retry_count,
         critic_report=CriticReport(
-            dimensions=[CriticDimensionScore(
-                dimension="factuality",
-                score=score,
-                evidence="evidence text",
-                sub_agent_request_id="x",
-            )],
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality",
+                    score=score,
+                    evidence="evidence text",
+                    sub_agent_request_id="x",
+                )
+            ],
             overall_score=score,
             summary_markdown="",
         ),
@@ -56,7 +59,10 @@ def test_writer_retry_continues_when_no_critic_report() -> None:
     from app.orchestration.research_graph import _writer_retry_router
 
     state = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         critic_report=None,
     )
     assert _writer_retry_router(state) == "continue"
@@ -67,11 +73,19 @@ def test_writer_retry_continues_when_factuality_score_missing() -> None:
     from app.orchestration.research_graph import _writer_retry_router
 
     state = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         critic_report=CriticReport(
-            dimensions=[CriticDimensionScore(
-                dimension="coverage", score=5.0, evidence="x", sub_agent_request_id="y",
-            )],
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="coverage",
+                    score=5.0,
+                    evidence="x",
+                    sub_agent_request_id="y",
+                )
+            ],
             overall_score=5.0,
             summary_markdown="",
         ),
@@ -92,14 +106,20 @@ def test_writer_retry_state_update_caps_feedback_at_300() -> None:
     from app.orchestration.research_graph import _writer_retry_state_update
 
     state = ResearchState(
-        user_id="u", session_id="s", user_message="m", request_id="r",
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
         writer_retry_count=0,
         critic_report=CriticReport(
-            dimensions=[CriticDimensionScore(
-                dimension="factuality", score=6.0,
-                evidence="x" * 500,
-                sub_agent_request_id="y",
-            )],
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality",
+                    score=6.0,
+                    evidence="x" * 500,
+                    sub_agent_request_id="y",
+                )
+            ],
             overall_score=6.0,
             summary_markdown="",
         ),

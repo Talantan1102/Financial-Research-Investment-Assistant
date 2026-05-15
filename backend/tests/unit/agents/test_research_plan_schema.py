@@ -1,4 +1,5 @@
 """ResearchPlan v1.x schema — drop plan_id, require subtasks."""
+
 from __future__ import annotations
 
 import pytest
@@ -20,12 +21,14 @@ def test_research_plan_requires_subtasks() -> None:
 def test_research_plan_accepts_valid_input() -> None:
     p = ResearchPlan(
         rationale="balanced strategy",
-        subtasks=[Subtask(
-            subtask_id="s1",
-            description="财务全景",
-            required_tools=["get_financials"],
-            rationale="basics",
-        )],
+        subtasks=[
+            Subtask(
+                subtask_id="s1",
+                description="财务全景",
+                required_tools=["get_financials"],
+                rationale="basics",
+            )
+        ],
     )
     assert p.rationale == "balanced strategy"
     assert len(p.subtasks) == 1
@@ -33,11 +36,15 @@ def test_research_plan_accepts_valid_input() -> None:
 
 def test_research_plan_extra_ignore() -> None:
     """extra fields silently dropped (LLM hallucinate-tolerant)."""
-    p = ResearchPlan.model_validate({
-        "rationale": "x",
-        "subtasks": [{"subtask_id": "s1", "description": "d", "required_tools": [], "rationale": "r"}],
-        "extra_field": "should be ignored",
-    })
+    p = ResearchPlan.model_validate(
+        {
+            "rationale": "x",
+            "subtasks": [
+                {"subtask_id": "s1", "description": "d", "required_tools": [], "rationale": "r"}
+            ],
+            "extra_field": "should be ignored",
+        }
+    )
     assert not hasattr(p, "extra_field")
 
 

@@ -26,9 +26,7 @@ def _make_planner_with_llm() -> ResearchPlanner:
     subtasks = [
         Subtask(
             subtask_id=f"s{idx + 1}",
-            description=tmpl.description_template.format(
-                target_name="ICBC", ts_code="601398.SH"
-            ),
+            description=tmpl.description_template.format(target_name="ICBC", ts_code="601398.SH"),
             required_tools=list(tmpl.required_tools),
             rationale=tmpl.rationale,
         )

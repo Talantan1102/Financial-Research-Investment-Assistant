@@ -32,6 +32,7 @@ class DimensionSpec(TypedDict):
     min_tools: minimum unique tools (from candidates) required to satisfy
         coverage. 0 for optional dims.
     """
+
     name: str
     tool_candidates: list[ToolName]
     min_tools: int
@@ -48,6 +49,7 @@ class Constraints(TypedDict):
         multiple subtasks (different analytical lens). DataCollector
         does call-level dedup separately via chat_known_tool_results.
     """
+
     max_subtasks: int
     max_tool_calls_per_subtask: int
     forbid_duplicate_calls: bool
@@ -56,6 +58,7 @@ class Constraints(TypedDict):
 class PlanTemplate(TypedDict):
     """Top-level plan template — declares dims + tool whitelist + constraints
     that bound LLM-generated ResearchPlan."""
+
     required_dimensions: list[DimensionSpec]
     optional_dimensions: list[DimensionSpec]
     tool_palette: list[ToolName]
@@ -91,11 +94,17 @@ DD_PLAN_TEMPLATE: PlanTemplate = {
         {"name": "同业对比", "tool_candidates": ["get_daily_basic"], "min_tools": 0},
     ],
     "tool_palette": [
-        "get_financials", "get_balance_sheet", "get_cashflow",
-        "get_pe_history", "get_daily_basic",
-        "web_search", "kb_search",
-        "get_holder_change", "get_news",
-        "get_forecast", "get_money_flow",
+        "get_financials",
+        "get_balance_sheet",
+        "get_cashflow",
+        "get_pe_history",
+        "get_daily_basic",
+        "web_search",
+        "kb_search",
+        "get_holder_change",
+        "get_news",
+        "get_forecast",
+        "get_money_flow",
     ],
     "constraints": {
         "max_subtasks": 10,

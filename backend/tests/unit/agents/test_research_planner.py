@@ -1,4 +1,5 @@
 """Tests for v1.x ResearchPlanner — template-guided + validator retry loop."""
+
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -31,14 +32,30 @@ def _mk_good_plan() -> ResearchPlan:
     return ResearchPlan(
         rationale="均衡配置 — 覆盖财务全景 / 估值 / 行业地位 / 风险底线",
         subtasks=[
-            Subtask(subtask_id="s1", description="财务全景: 三表 + ROE 趋势",
-                    required_tools=["get_financials", "get_balance_sheet"], rationale="r"),
-            Subtask(subtask_id="s2", description="估值: PE 历史分位",
-                    required_tools=["get_pe_history"], rationale="r"),
-            Subtask(subtask_id="s3", description="行业地位",
-                    required_tools=["web_search"], rationale="r"),
-            Subtask(subtask_id="s4", description="风险底线",
-                    required_tools=["get_holder_change"], rationale="r"),
+            Subtask(
+                subtask_id="s1",
+                description="财务全景: 三表 + ROE 趋势",
+                required_tools=["get_financials", "get_balance_sheet"],
+                rationale="r",
+            ),
+            Subtask(
+                subtask_id="s2",
+                description="估值: PE 历史分位",
+                required_tools=["get_pe_history"],
+                rationale="r",
+            ),
+            Subtask(
+                subtask_id="s3",
+                description="行业地位",
+                required_tools=["web_search"],
+                rationale="r",
+            ),
+            Subtask(
+                subtask_id="s4",
+                description="风险底线",
+                required_tools=["get_holder_change"],
+                rationale="r",
+            ),
         ],
     )
 
@@ -47,8 +64,11 @@ def _mk_bad_plan() -> ResearchPlan:
     """Missing all 4 required dims — Validator should reject."""
     return ResearchPlan(
         rationale="bad — no required dim coverage",
-        subtasks=[Subtask(subtask_id="x", description="无关",
-                          required_tools=["get_financials"], rationale="r")],
+        subtasks=[
+            Subtask(
+                subtask_id="x", description="无关", required_tools=["get_financials"], rationale="r"
+            )
+        ],
     )
 
 
@@ -79,7 +99,9 @@ def test_prompt_contains_six_input_fields() -> None:
     assert "medium_term" in prompt  # investment_horizon
     assert "moderate" in prompt  # risk_tolerance
     assert "5000000" in prompt or "5_000_000" in prompt or "5,000,000" in prompt  # aum
-    assert "1500000" in prompt or "1_500_000" in prompt or "1,500,000" in prompt  # existing_position
+    assert (
+        "1500000" in prompt or "1_500_000" in prompt or "1,500,000" in prompt
+    )  # existing_position
     assert "600519.SH" in prompt  # target_ts_code
 
 
@@ -170,7 +192,9 @@ def test_retry_prompt_includes_validator_errors() -> None:
     second_call_kwargs = llm.chat.call_args_list[1][1]
     second_prompt = second_call_kwargs["prompt"]
     # Should mention either the missing dim names or validator/errors keyword
-    assert "财务全景" in second_prompt or "校验" in second_prompt or "errors" in second_prompt.lower()
+    assert (
+        "财务全景" in second_prompt or "校验" in second_prompt or "errors" in second_prompt.lower()
+    )
 
 
 def test_safe_default_plan_passes_validator_self_check() -> None:
@@ -210,18 +234,48 @@ def test_third_attempt_receives_second_attempt_errors() -> None:
     bad_missing_finance = ResearchPlan(
         rationale="missing finance",
         subtasks=[
-            Subtask(subtask_id="s1", description="估值", required_tools=["get_pe_history"], rationale="r"),
-            Subtask(subtask_id="s2", description="行业地位", required_tools=["web_search"], rationale="r"),
-            Subtask(subtask_id="s3", description="风险底线", required_tools=["get_holder_change"], rationale="r"),
+            Subtask(
+                subtask_id="s1",
+                description="估值",
+                required_tools=["get_pe_history"],
+                rationale="r",
+            ),
+            Subtask(
+                subtask_id="s2",
+                description="行业地位",
+                required_tools=["web_search"],
+                rationale="r",
+            ),
+            Subtask(
+                subtask_id="s3",
+                description="风险底线",
+                required_tools=["get_holder_change"],
+                rationale="r",
+            ),
         ],
     )
     # 2nd bad: missing 风险底线 (different errors than 1st)
     bad_missing_risk = ResearchPlan(
         rationale="missing risk",
         subtasks=[
-            Subtask(subtask_id="s1", description="财务全景", required_tools=["get_financials", "get_balance_sheet"], rationale="r"),
-            Subtask(subtask_id="s2", description="估值", required_tools=["get_pe_history"], rationale="r"),
-            Subtask(subtask_id="s3", description="行业地位", required_tools=["web_search"], rationale="r"),
+            Subtask(
+                subtask_id="s1",
+                description="财务全景",
+                required_tools=["get_financials", "get_balance_sheet"],
+                rationale="r",
+            ),
+            Subtask(
+                subtask_id="s2",
+                description="估值",
+                required_tools=["get_pe_history"],
+                rationale="r",
+            ),
+            Subtask(
+                subtask_id="s3",
+                description="行业地位",
+                required_tools=["web_search"],
+                rationale="r",
+            ),
         ],
     )
     llm = MagicMock()

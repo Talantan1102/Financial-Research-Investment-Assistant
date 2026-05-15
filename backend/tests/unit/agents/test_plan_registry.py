@@ -9,6 +9,7 @@ If you genuinely need plan_registry's old PLAN_REGISTRY data, copy what you
 need into the new home (plan_template.py) — do NOT re-import from the
 deprecated module.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -27,6 +28,7 @@ def test_plan_registry_not_imported_in_app() -> None:
 def test_plan_registry_module_marked_deprecated() -> None:
     """The deprecation banner must remain in the module docstring."""
     import app.agents.plan_registry as pr
+
     docstring = pr.__doc__ or ""
     assert "DEPRECATED" in docstring
     assert "v1.x" in docstring

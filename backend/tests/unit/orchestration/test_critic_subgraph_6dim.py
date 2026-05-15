@@ -1,4 +1,5 @@
 """Critic subgraph fan-out — v1.x has 6 scorers (plan_correctness removed)."""
+
 from __future__ import annotations
 
 from app.orchestration.critic_subgraph import _CriticSubState, _planner_router
