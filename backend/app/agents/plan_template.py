@@ -14,20 +14,48 @@ from typing import TypedDict
 
 from app.agents.schemas import SubtaskTemplate, ToolName
 
+__all__ = [
+    "Constraints",
+    "DD_PLAN_TEMPLATE",
+    "DimensionSpec",
+    "PlanTemplate",
+    "SAFE_DEFAULT_PLAN",
+]
+
 
 class DimensionSpec(TypedDict):
+    """A single research dimension declared in the plan template.
+
+    name: human-readable dim name (e.g. "财务全景"). Validator checks
+        subtask description/rationale contains this string.
+    tool_candidates: tools the LLM may pick to cover this dim.
+    min_tools: minimum unique tools (from candidates) required to satisfy
+        coverage. 0 for optional dims.
+    """
     name: str
     tool_candidates: list[ToolName]
     min_tools: int
 
 
 class Constraints(TypedDict):
+    """Template-level business constraints enforced by plan_validator.
+
+    max_subtasks: hard cap on total subtask count per plan.
+    max_tool_calls_per_subtask: max len(subtask.required_tools).
+    forbid_duplicate_calls: when True, validator rejects a plan where a
+        single subtask has the same tool twice in required_tools.
+        Cross-subtask reuse is ALLOWED — same tool can appear in
+        multiple subtasks (different analytical lens). DataCollector
+        does call-level dedup separately via chat_known_tool_results.
+    """
     max_subtasks: int
     max_tool_calls_per_subtask: int
     forbid_duplicate_calls: bool
 
 
 class PlanTemplate(TypedDict):
+    """Top-level plan template — declares dims + tool whitelist + constraints
+    that bound LLM-generated ResearchPlan."""
     required_dimensions: list[DimensionSpec]
     optional_dimensions: list[DimensionSpec]
     tool_palette: list[ToolName]
@@ -68,7 +96,6 @@ DD_PLAN_TEMPLATE: PlanTemplate = {
         "web_search", "kb_search",
         "get_holder_change", "get_news",
         "get_forecast", "get_money_flow",
-        "get_dividend_history",
     ],
     "constraints": {
         "max_subtasks": 10,
