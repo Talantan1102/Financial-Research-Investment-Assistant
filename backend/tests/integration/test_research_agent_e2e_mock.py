@@ -26,13 +26,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
-pytestmark = pytest.mark.skip(
-    reason="v1.x mock LLM responses pending rewire — agent_decisions.yaml "
-    "still emits v0.8.5 {plan_id,...} but ResearchPlan now requires "
-    "{rationale, subtasks}. Re-mock alongside cassette re-record on Mac."
-)
-
 from app.agents.analyst import Analyst
 from app.agents.base import Agent
 from app.agents.critic import Critic

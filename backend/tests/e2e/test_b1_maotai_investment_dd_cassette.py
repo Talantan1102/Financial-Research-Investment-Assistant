@@ -63,14 +63,7 @@ from app.tools.base import Tool
 from app.tools.registry import ToolRegistry
 from pydantic import BaseModel, Field
 
-pytestmark = [
-    pytest.mark.vcr,
-    pytest.mark.skip(
-        reason="v1.x cassette pending re-record on Mac (Task 1.11/1.12). "
-        "Re-record with VCR_RECORD_MODE=new_episodes after setting "
-        "DASHSCOPE_API_KEY / TUSHARE_API_TOKEN / BOCHA_API_KEY in backend/.env."
-    ),
-]
+pytestmark = [pytest.mark.vcr]
 
 
 # ---------------------------------------------------------------------------

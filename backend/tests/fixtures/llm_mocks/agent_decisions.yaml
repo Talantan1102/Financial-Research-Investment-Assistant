@@ -1,11 +1,6 @@
 entries:
-  # PlanCorrectnessScorer (v0.8.5) — schema is {score, reasoning} not {score, evidence}.
-  # Must precede the generic critic_ pattern below.
-  - pattern: "^你是评测员, 评判 LLM router"
-    response:
-      content: '{"score": 9.0, "reasoning": "v0.8.5 mock — plan_id 符合主映射规则"}'
-      prompt_tokens: 200
-      completion_tokens: 30
+  # PlanCorrectnessScorer mock removed: v1.x dropped this scorer (commit 1dca0af);
+  # 6-dim critic stack lives in test_critic_subgraph_6dim.py.
 
   - pattern: "^你是金融研究助手 critic_"
     response:
@@ -78,14 +73,16 @@ entries:
       prompt_tokens: 120
       completion_tokens: 80
 
-  # ResearchPlanner (v0.8.5 constrained router): outputs only (plan_id, rationale).
-  # subtasks runtime instantiated by plan_registry.instantiate_plan(plan_id, ...).
+  # ResearchPlanner (v1.x A4): outputs (rationale, subtasks[]). 4-required-dim coverage:
+  # 财务全景 (≥2 tools), 估值, 行业地位, 风险底线 (each ≥1 tool from candidates).
+  # dim name must appear verbatim in description or rationale (plan_validator
+  # _dim_keyword_match). tool names must be in DD_PLAN_TEMPLATE palette.
   # Must appear BEFORE ChatPlanner's "planner" prefix so more-specific match wins.
   - pattern: "^你是金融研究助手 research_planner"
     response:
-      content: '{"plan_id":"balanced","rationale":"v0.8.5 mock — 默认走 balanced 主映射"}'
+      content: '{"rationale":"v1.x mock — DD 4 required dim 全覆盖","subtasks":[{"subtask_id":"st_finance","description":"评估财务全景 — 三表完整 + ROE","required_tools":["get_financials","get_balance_sheet"],"rationale":"财务基础"},{"subtask_id":"st_valuation","description":"评估估值 — PE 历史分位","required_tools":["get_pe_history"],"rationale":"估值锚定"},{"subtask_id":"st_industry","description":"评估行业地位 — 行业研报","required_tools":["web_search"],"rationale":"行业地位"},{"subtask_id":"st_risk","description":"评估风险底线 — 大股东动作 + 负面新闻","required_tools":["get_news"],"rationale":"风险底线"}]}'
       prompt_tokens: 120
-      completion_tokens: 30
+      completion_tokens: 200
 
   # ChatPlanner (v0.9 chat mode): matched by _PLANNER_PROMPT_TEMPLATE prefix.
   # Also matches legacy build_planner_prompt prefix for research-mode step().
