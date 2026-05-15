@@ -378,7 +378,7 @@ CriticDimension = Literal[
     "structure",
     "conciseness",
     "input_context_appropriateness",
-    "plan_correctness",  # v0.8.5 — 第 7 scorer (LLM-as-judge for constrained-router)
+    # plan_correctness removed in v1.x (Validator replaces it; see 2026-05-15 spec § 7.1)
 ]
 
 

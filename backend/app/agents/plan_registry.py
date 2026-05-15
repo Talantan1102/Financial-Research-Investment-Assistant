@@ -1,13 +1,11 @@
-"""4 plan × ~4 subtask hardcoded registry (v0.8.5 spec § 4.2 + § 4.6).
+"""DEPRECATED in v1.x — superseded by plan_template.py + plan_validator.py.
 
-This is the ground-truth catalog the constrained planner LLM picks from.
-The planner returns only (plan_id, rationale); instantiate_plan() expands
-the chosen plan_id into a concrete list[Subtask] by filling the
-{target_name}/{ts_code} placeholders in each template.
+The v0.8.5 4-plan constrained-router (capital_preservation / stable_growth /
+balanced / aggressive_growth) is replaced by a single DD_PLAN_TEMPLATE +
+Validator gate. This module is kept as archive; no live code path imports it.
+Will be removed after v1.x stable.
 
-Subtask.subtask_id is generated deterministically as ``f"{plan_id}_{idx}"``
-because SubtaskTemplate intentionally omits subtask_id (the registry has no
-notion of per-instance identity — only the position within a plan).
+spec ref: docs/superpowers/specs/2026-05-15-v1.x-plan-template-validator-design.md § 12
 """
 
 from __future__ import annotations

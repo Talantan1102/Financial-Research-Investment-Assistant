@@ -46,7 +46,9 @@ def _retry_router(state: ResearchState) -> Literal["retry", "continue"]:
     """
     if state.critic_report is None:
         return "continue"
-    plan_score = state.critic_report.get_score("plan_correctness")
+    # v1.x: plan_correctness removed from CriticDimension Literal (Task 1.5);
+    # this retry router is slated for removal in Task 1.6. Cast to silence mypy.
+    plan_score = state.critic_report.get_score("plan_correctness")  # type: ignore[arg-type]
     if plan_score is None:
         return "continue"
     if plan_score < _PLAN_CORRECTNESS_THRESHOLD and state.planner_retry_count < _MAX_PLANNER_RETRY:
