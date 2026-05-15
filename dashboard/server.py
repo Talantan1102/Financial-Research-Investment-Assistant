@@ -52,6 +52,15 @@ DB_PATH = PROJECT_ROOT / "backend" / "data" / "board.db"
 SEED_PATH = DASHBOARD_ROOT / "data" / "deep_cards_seed.jsonl"
 
 templates = Jinja2Templates(directory=str(DASHBOARD_ROOT / "templates"))
+# 静态资源 cache buster — 用 static/ 目录所有 .js/.css 的最大 mtime,server 启动时算一次。
+# 资源文件改动后下次启动 hash 变化,浏览器(尤其 Safari)被迫重新拉取,绕开本地缓存。
+_STATIC_DIR = DASHBOARD_ROOT / "static"
+_asset_mtime = max(
+    (p.stat().st_mtime for p in _STATIC_DIR.glob("*") if p.suffix in {".js", ".css"}),
+    default=0.0,
+)
+ASSET_VERSION = f"{int(_asset_mtime):x}"
+templates.env.globals["asset_v"] = ASSET_VERSION
 
 
 def _today_label() -> str:

@@ -59,7 +59,7 @@ def test_template_script_srcs_resolve_to_static_files() -> None:
     bug history:cytoscape-cose-bilkent.min.js 加进来但 cose-base.js 没加,
     且没人 grep 静态资源对应关系 → ship 漏依赖。
     """
-    pattern = re.compile(r'<script\s+src="/static/([^"]+)"')
+    pattern = re.compile(r'<script\s+src="/static/([^"?]+)')
     missing: list[tuple[str, str]] = []
     for tpl in TEMPLATES_DIR.rglob("*.html"):
         for m in pattern.finditer(tpl.read_text(encoding="utf-8")):
@@ -85,6 +85,25 @@ def test_refresh_route_accepts_get_for_eventsource() -> None:
     assert "GET" in methods, (
         f"/refresh 必须接受 GET(EventSource 标准),当前 methods={sorted(methods)}"
     )
+
+
+def test_static_assets_have_cache_buster() -> None:
+    """所有 <script src="/static/*"> / <link href="/static/*"> 必须带 ?v=,
+    防止 Safari 等浏览器缓存旧 JS/CSS 导致修复不生效。
+
+    bug history:V2 polish hotfix 改 overview.js 后 Safari 用本地缓存的旧 JS,
+    用户 hard reload 也未必生效;加 ?v={{ asset_v }} 强制 cache miss。
+    """
+    asset_ref = re.compile(r'(?:<script\s+src|<link\s+rel="stylesheet"\s+href)="/static/[^"]*"')
+    offenders: list[tuple[str, str]] = []
+    for tpl in TEMPLATES_DIR.rglob("*.html"):
+        if tpl.name == "mockup-v2.html":
+            continue
+        for m in asset_ref.finditer(tpl.read_text(encoding="utf-8")):
+            ref = m.group(0)
+            if "?v=" not in ref:
+                offenders.append((tpl.name, ref[:80]))
+    assert not offenders, f"静态资源引用缺 ?v= cache buster:{offenders}"
 
 
 def test_modal_overlay_callers_use_modal_helper() -> None:
