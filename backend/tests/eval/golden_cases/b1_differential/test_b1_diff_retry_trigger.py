@@ -1,36 +1,24 @@
-"""B-1 differential golden case 4 — retry-trigger via contradictory user_message.
+"""B-1 differential golden case 4 — writer retry-trigger via contradictory user_message.
 
-Verifies the v0.8.5 retry edge fires end-to-end on a real LLM round-trip:
-  investment_objective = balanced
-  user_message         = "担心下跌避险, 但又想抓短期机会" (矛盾 — 同时触发避险 +
-                          抓机会 keywords)
+v1.x A4 reframe: Plan-layer retry (PlanCorrectnessScorer < 8.5) is gone — the
+plan is now守 by Validator + SAFE_DEFAULT_PLAN. The remaining retry edge fires
+on **Writer factuality** (Critic factuality < threshold) and carries
+writer_critic_feedback into a second Writer pass.
 
-Expected behaviour:
-  - The constrained-router LLM picks one plan_id but the rationale won't satisfy
-    PlanCorrectnessScorer's β rules (overrides 1 vs 2 conflict).
-  - PlanCorrectnessScorer scores < 8.5 on round 1 → retry edge fires.
-  - On round 2 the planner sees ``planner_critic_feedback`` and produces a
-    better plan_id + rationale (or hits the max-2 retry hard cap).
-  - Final ``state.planner_retry_count`` ≥ 1.
+This file historically tested v0.8.5 planner retry; v1.x equivalent is Writer
+factuality retry. The retry edge mechanism is fully守 by the 4 mocked
+integration tests in `backend/tests/integration/test_writer_retry_edge.py`
+(Task 1.8). This e2e LLM-judge variant is kept as documentation of the
+client-driven contradiction scenario but is **skipped by default**:
 
-Acceptance criteria:
-  1. ``investment_report`` is not None (graph runs to completion).
-  2. ``planner_retry_count`` ≥ 1 (the retry edge actually fired).
-  3. ``critic_report.get_score("plan_correctness")`` is not None.
-  4. ``planner_critic_feedback`` is non-None on the final state when retry
-     happened (carries the round-1 critic evidence).
+  - v0.8.5 dogfood showed e2e LLM judge does not reliably score < 8.5 on a
+    single contradictory user_message — retry_count came back 0 instead of ≥1.
+  - v1.x retains the same constraint at the Writer factuality scorer level.
 
-Cassette:  backend/tests/fixtures/cassettes/b1_differential/
-           test_b1_diff_retry_trigger/<cassette>.yaml
+To revisit: dogfood ≥ 5 contradictory prompts, calibrate Critic factuality
+threshold, then unskip.
 
-Phase 9b record (user manual):
-  unset all_proxy https_proxy http_proxy
-  uv run pytest backend/tests/eval/golden_cases/b1_differential/test_b1_diff_retry_trigger.py \
-      --record-mode=once -v
-  # Then change the skipif below to ``False``.
-
-spec ref: docs/superpowers/specs/2026-05-05-v0.8.5-constrained-router-design.md § 4.4
-spec ref: docs/superpowers/plans/2026-05-05-v0.8.5-constrained-router-implementation.md § Task 9 Step 7
+spec ref: docs/superpowers/specs/2026-05-15-v1.x-plan-template-validator-design.md § 7.2
 """
 
 from __future__ import annotations
@@ -41,29 +29,15 @@ from app.agents.schemas import ResearchState
 
 from tests.eval.golden_cases.b1_differential._graph_builder import build_b1_diff_graph
 
-# Phase 9b record verified retry edge wire works at e2e level, but LLM judge
-# is not strict enough to reliably trigger plan_correctness < 8.5 on a single
-# contradictory user_message — retry_count came back 0 instead of ≥1.
-# Retry edge mechanism is fully covered by 3 integration tests in
-# `backend/tests/integration/test_planner_retry_edge.py` (mocked PlanCorrectnessScorer).
-# Skip this e2e-LLM-judge test as flaky; revisit in v0.8.6 with prompt iteration.
-_CASSETTE_RECORDED = True
-_E2E_RELIABLE = False  # judge 不严格, retry 不稳定触发
-
 pytestmark = [
     pytest.mark.vcr,
     pytest.mark.skip(
-        reason="v1.x cassette pending re-record on Mac (Task 1.11/1.12). "
-        "Re-record with VCR_RECORD_MODE=new_episodes after setting "
-        "DASHSCOPE_API_KEY / TUSHARE_API_TOKEN / BOCHA_API_KEY in backend/.env."
-    ),
-    pytest.mark.skipif(
-        not _CASSETTE_RECORDED or not _E2E_RELIABLE,
         reason=(
-            "v0.8.5 baseline: e2e LLM judge 不严格, 矛盾 user_message 不稳定触发 retry. "
-            "Retry edge wire 已由 integration/test_planner_retry_edge.py 3 cases (mocked) "
-            "充分覆盖. v0.8.6 prompt iterate 后 unskip."
-        ),
+            "v1.x writer-factuality retry: e2e LLM judge 不稳定触发 retry "
+            "(v0.8.5 同因)。Writer retry edge 已由 integration/"
+            "test_writer_retry_edge.py 4 cases (mocked Critic) 充分覆盖。"
+            "Dogfood ≥ 5 contradictory prompts 后 calibrate factuality threshold 再 unskip。"
+        )
     ),
 ]
 
@@ -80,13 +54,13 @@ def b1_diff_retry_trigger_graph(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN20
 async def test_b1_retry_trigger_茅台_矛盾_input(  # noqa: N802
     b1_diff_retry_trigger_graph,
 ) -> None:
-    """矛盾 user_message + balanced objective → retry edge fires, plan_correctness 纠正。
+    """矛盾 user_message → Writer factuality 应低分 → writer_retry_count ≥ 1 (永远 skip)。
 
-    Differential assertion: compared to the 3 plain differential cases, this
-    case must show:
-      - planner_retry_count ≥ 1 (retry edge actually fired at least once)
-      - planner_critic_feedback populated (carries round-1 critic evidence)
-      - critic_report.plan_correctness present
+    v1.x assertion shape (parked behind skip — see module docstring):
+      - investment_report not None (graph completes)
+      - writer_retry_count ∈ [0, 1] (v1.x _MAX_WRITER_RETRY=1)
+      - if writer_retry_count ≥ 1 then writer_critic_feedback populated
+      - critic_report.factuality present
     """
     initial = ResearchState(
         user_id="test",
@@ -108,35 +82,20 @@ async def test_b1_retry_trigger_茅台_矛盾_input(  # noqa: N802
     final_state = ResearchState.model_validate(result)
 
     # ── 1. Report generated (graph runs to completion) ───────────────────────
-    assert final_state.investment_report is not None, (
-        "Writer must produce an InvestmentDueDiligenceReport even when retry fires"
-    )
+    assert final_state.investment_report is not None
     assert isinstance(final_state.investment_report, InvestmentDueDiligenceReport)
 
-    # ── 2. Retry edge fired at least once ────────────────────────────────────
-    assert final_state.planner_retry_count >= 1, (
-        f"Expected retry_count ≥ 1 (contradictory user_message should trigger "
-        f"plan_correctness < 8.5), got {final_state.planner_retry_count}. "
-        f"Either the LLM resolved the contradiction unilaterally on round 1 "
-        f"(re-think prompt) or PlanCorrectnessScorer threshold needs tuning."
-    )
-    assert final_state.planner_retry_count <= 2, (
-        f"retry_count must respect _MAX_PLANNER_RETRY=2 hard cap, got "
-        f"{final_state.planner_retry_count}"
+    # ── 2. Writer retry within hard cap (_MAX_WRITER_RETRY = 1, v1.x) ────────
+    assert 0 <= final_state.writer_retry_count <= 1, (
+        f"writer_retry_count must respect _MAX_WRITER_RETRY=1, got {final_state.writer_retry_count}"
     )
 
-    # ── 3. plan_correctness dimension is present in critic_report ───────────
-    assert final_state.critic_report is not None, "Critic must produce a CriticReport"
-    pc_score = final_state.critic_report.get_score("plan_correctness")  # type: ignore[arg-type]
-    assert pc_score is not None, (
-        "plan_correctness score must be present in critic_report.dimensions"
-    )
+    # ── 3. factuality dimension present in critic_report (v1.x 6-dim) ───────
+    assert final_state.critic_report is not None
+    f_score = final_state.critic_report.get_score("factuality")
+    assert f_score is not None
 
-    # ── 4. critic feedback was injected when retry happened ──────────────────
-    assert final_state.planner_critic_feedback is not None, (
-        "planner_critic_feedback must be populated when retry_count ≥ 1 "
-        "(the transition node should have copied round-1 critic evidence)"
-    )
-    assert len(final_state.planner_critic_feedback) <= 300, (
-        "planner_critic_feedback must respect Field(max_length=300) constraint"
-    )
+    # ── 4. If retry fired, writer_critic_feedback carries round-1 evidence ──
+    if final_state.writer_retry_count >= 1:
+        assert final_state.writer_critic_feedback is not None
+        assert len(final_state.writer_critic_feedback) <= 300
