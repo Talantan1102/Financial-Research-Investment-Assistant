@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -17,6 +18,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.agents.escalation_confidence import compute_confidence
 from app.agents.escalation_protocol import EscalationPacket, FieldEdit
 from app.agents.research_agent import ResearchAgent
 from app.agents.schemas import ResearchState
@@ -27,6 +29,24 @@ from app.services.research_report_repo import ResearchReportRepo
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v0/chat", tags=["chat-escalate"])
+
+
+ESCALATION_CONFIDENCE_THRESHOLD_DEFAULT = 0.7
+
+
+def get_confidence_threshold() -> float:
+    """Read ESCALATION_CONFIDENCE_THRESHOLD env var, fall back to default.
+
+    Invalid env values (not parseable as float) silently fall back to the
+    default — operator typos shouldn't break the router.
+    """
+    raw = os.getenv("ESCALATION_CONFIDENCE_THRESHOLD")
+    if raw is None:
+        return ESCALATION_CONFIDENCE_THRESHOLD_DEFAULT
+    try:
+        return float(raw)
+    except ValueError:
+        return ESCALATION_CONFIDENCE_THRESHOLD_DEFAULT
 
 
 class EscalateRequest(BaseModel):
@@ -69,9 +89,32 @@ def _format_sse(event: str, data: dict[str, Any], seq: int) -> str:
     return f"event: {event}\ndata: {json.dumps(body, ensure_ascii=False, default=str)}\n\n"
 
 
-def packet_to_research_state(pkt: EscalationPacket, *, request_id: str) -> ResearchState:
-    """Convert confirmed EscalationPacket into ResearchState (E13)."""
-    return ResearchState(
+def packet_to_research_state(
+    pkt: EscalationPacket,
+    *,
+    request_id: str,
+    chat_history: list[Any] | None = None,
+) -> ResearchState:
+    """Convert confirmed EscalationPacket into ResearchState (E13 + v1.x § 6.7).
+
+    Confidence-gated distillation injection (v1.x):
+      L1: compute_confidence(pkt, history, ...) ≥ ESCALATION_CONFIDENCE_THRESHOLD
+          → populate escalation_intent/discussion_focus/explicit_exclusions on state.
+      L3 (raw fallback): otherwise leave distilled fields empty;
+          user_message stays as raw_last_user_turn (form-style entry semantics).
+
+    TODO(v1.x+): L2 summary fallback — call LLM to summarize last 3 chat turns
+    when conf is "borderline". Currently skipped to keep router lean; add when
+    dogfood shows borderline-conf cases need rescue.
+
+    Args:
+      pkt: User-confirmed EscalationPacket from chat→DD button.
+      request_id: Trace request id.
+      chat_history: Optional list of chat messages (each with .content). When
+          None, distilled fields are not populated (safe-default — treats
+          missing context as low-confidence path).
+    """
+    state = ResearchState(
         user_id="anonymous",
         session_id=request_id,
         user_message=pkt.explicit_task.raw_last_user_turn,
@@ -83,6 +126,28 @@ def packet_to_research_state(pkt: EscalationPacket, *, request_id: str) -> Resea
         chat_known_tool_results=list(pkt.known_facts.tool_results),
         chat_session_id=pkt.session_metadata.chat_session_id,
     )
+
+    if chat_history is None:
+        return state
+
+    threshold = get_confidence_threshold()
+    conf = compute_confidence(
+        extracted=pkt,
+        chat_history=chat_history,
+        target_ts_code=pkt.explicit_task.target_ts_code or "",
+        target_name=pkt.explicit_task.target_entity_name or "",
+        user_confirmed_escalation=True,  # entry is from explicit confirm button
+    )
+
+    if conf >= threshold:
+        return state.model_copy(update={
+            "escalation_intent": pkt.escalation_intent,
+            "discussion_focus": list(pkt.discussion_focus),
+            "explicit_exclusions": list(pkt.explicit_exclusions),
+        })
+
+    # L3 fallback — state stays form-style (user_message = raw_last_user_turn)
+    return state
 
 
 @router.post("/escalate")
@@ -113,6 +178,10 @@ async def escalate(
 
         # 2. Build ResearchState and stream ResearchAgent events (E13/E15)
         request_id = f"esc:{uuid4().hex[:16]}"
+        # TODO(v1.x+): fetch chat history from chat_session_repo here and pass
+        # to packet_to_research_state(chat_history=...) so confidence-gating
+        # can populate distilled fields. Currently history=None → safe-default
+        # path (distilled empty). User can override via direct API.
         state = packet_to_research_state(req.packet_confirmed, request_id=request_id)
 
         sut_out = None
@@ -128,6 +197,10 @@ async def escalate(
                     "chat_extracted_preferences": state.chat_extracted_preferences,
                     "chat_known_tool_results": state.chat_known_tool_results,
                     "chat_session_id": state.chat_session_id,
+                    # v1.x distilled (populated only when confidence ≥ threshold)
+                    "escalation_intent": state.escalation_intent,
+                    "discussion_focus": state.discussion_focus,
+                    "explicit_exclusions": state.explicit_exclusions,
                 },
             ):
                 if evt["event"] == "_final_sut_output":
