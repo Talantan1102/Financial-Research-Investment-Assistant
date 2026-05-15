@@ -75,3 +75,21 @@ def test_template_mentions_evidence_quote_constraint() -> None:
     assert "evidence_quote" in content
     # Must mention substring + reject semantics
     assert "substring" in content.lower() or "原文" in content
+
+
+def test_template_has_domain_specific_save_triggers() -> None:
+    """Plan 1 spec § 6 决策 8 — 金融业务定制 save triggers."""
+    content = PROMPT_PATH.read_text(encoding="utf-8")
+    # 3 条 domain-specific save triggers
+    assert "投资偏好" in content
+    assert "加减仓" in content or "HOLDS" in content
+    assert "EXPRESSED_VIEW" in content
+    # Don't save 反例
+    assert "一次性" in content or "闲聊" in content
+
+
+def test_template_has_dont_save_section() -> None:
+    """Phase 1 — 反例避免 agent over-write."""
+    content = PROMPT_PATH.read_text(encoding="utf-8")
+    # 反例 section 必须存在
+    assert "Don't save" in content or "不要 save" in content

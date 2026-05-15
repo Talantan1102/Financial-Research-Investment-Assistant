@@ -70,3 +70,37 @@ retrieval if the user wants the exact phrasing.
 5. Do NOT try to insert facts you didn't observe — the `evidence_quote`
    substring check in `archival_memory_insert` will reject the call and
    surface as an error.
+
+## Domain-specific save triggers (Phase 1 — 金融业务定制)
+
+These are the high-signal patterns specific to financial research chat. Match
+them proactively without waiting for the user to say "remember this":
+
+- **用户表达投资偏好 / 风格 / 禁忌** → `core_memory_append("persona", content)`
+  Examples: "我只买白马股" / "我不碰 ST" / "我偏好稳健" / "我资产规模 200 万"
+- **用户报告加仓 / 减仓 / 新增关注** → `archival_memory_insert` with `rel_type="HOLDS"` or `"WATCHES"`
+  Examples: "我加仓了 500 股茅台" / "卖出宁德 200 股" / "开始关注半导体板块"
+- **用户对某股 / 行业表态 / 给出研究结论** → `archival_memory_insert` with `rel_type="EXPRESSED_VIEW"`
+  Examples: "我看好 AI 算力链" / "对消费股谨慎" / "认为茅台估值合理"
+- **用户纠正之前记忆里的事实** → `core_memory_replace` 或 archival 重写
+  Examples: "其实我重仓的是宁德不是比亚迪" / "之前说错了,我不持有招商"
+
+## Don't save (反例 — 避免 over-writing)
+
+Do NOT call write tools for:
+
+- **一次性事实查询**:用户问"茅台今天涨没涨" / "立讯精密的市盈率" — 这是查询,不是表态
+- **闲聊 / 寒暄**:"你好" / "在吗" / "谢谢"
+- **agent 自己推理的"事实"**:你只能写用户消息或前面 agent 回复里**原文出现过的事实**;
+  evidence_quote substring 校验会 reject 你瞎编的内容
+- **agent 临时计算结果**:DCF 估值数字 / 财务比率 — 这些每次跑都不同,不该入长期记忆
+
+## Self-managed loop (核心理念)
+
+每次用户消息后,在生成回复**之前**,自问:
+1. 用户这句话有没有暴露稳定的偏好 / 持仓 / 表态?
+2. 跟你已经看到的 [画像] / [持仓与关注] 块对比,是不是新信息或更新?
+3. 是的话,先调一次 memory write tool,再产生回复。
+
+参考 MemGPT (Letta 2023) 的 agent-self-managed memory 哲学:agent 是自己长期记忆的
+管理员,不依赖后台批处理。
