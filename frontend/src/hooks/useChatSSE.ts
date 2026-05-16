@@ -45,6 +45,10 @@ interface UseChatSSE {
   sendMessage(content: string): Promise<void>
   abort(): void
   status: () => string
+  // Plan 2 Scenario B: 切 session 回来时如果 GET /chats/{sid} 返回 active_task_id,
+  // 调本 method subscribe in-flight stream;继续接收剩余 token + done event。
+  // last_event_id='0' = from start;若前端记得上次的 entry_id 传它续读。
+  subscribeToTask(taskId: string, lastEventId?: string): Promise<void>
 }
 
 interface Typewriter {
@@ -235,5 +239,40 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
     [],
   )
 
-  return { sendMessage, abort, status }
+  // Plan 2 Scenario B: 重连 in-flight stream(切 session 回来 / 重开页面时)。
+  // sendMessage 的子集 — 跳过 POST,直接 GET stream/{task_id}?last_event_id=X。
+  const subscribeToTask = useCallback(
+    async (taskId: string, lastEventId: string = '0') => {
+      abortRef.current?.abort()
+      const ac = new AbortController()
+      abortRef.current = ac
+
+      currentChatActions.beginStreaming()
+
+      let doneSeen = false
+      try {
+        const streamUrl = buildChatTaskStreamUrl(taskId, lastEventId)
+        const streamRes = await fetchImpl(streamUrl, { signal: ac.signal })
+        if (!streamRes.ok) {
+          // 404 (task 不存在 / 已 GC) 或 503 (no Redis) — 静默退出,user 看到的还是
+          // GET /chats/{sid} 拉的 PG 历史
+          return
+        }
+        const result = await consumeStream(
+          streamRes,
+          ac.signal,
+          typewriterRef.current,
+        )
+        doneSeen = result.doneSeen
+      } catch {
+        if (ac.signal.aborted) return
+      }
+      if (!doneSeen) {
+        typewriterRef.current.flush()
+      }
+    },
+    [fetchImpl],
+  )
+
+  return { sendMessage, abort, status, subscribeToTask }
 }

@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
 import { CostMeter } from './CostMeter'
@@ -13,14 +13,29 @@ import styles from '@/styles/chat.module.scss'
 
 export interface ChatPaneProps {
   sessionId?: string
+  // Plan 2 Scenario B: 切 session 回来时,若 GET /chats/{sid} 返 active_task_id 非空,
+  // 通过本 prop 传入,ChatPane 自动 subscribe in-flight stream(继续吐字)。
+  activeTaskId?: string | null
 }
 
-export function ChatPane({ sessionId: sessionIdProp }: ChatPaneProps = {}) {
+export function ChatPane({
+  sessionId: sessionIdProp,
+  activeTaskId,
+}: ChatPaneProps = {}) {
   const params = useParams<{ session_id: string }>()
   const sessionId = sessionIdProp ?? params.session_id ?? null
   const snap = useSnapshot(currentChatState)
   const messages = useDeferredMessages(snap.messages ?? [])
   const sse = useChatSSE({ sessionId })
+
+  // Plan 2 dogfood Scenario B: activeTaskId 非空 → 自动 subscribe in-flight
+  // stream。effect deps 仅含 activeTaskId,避免 sse 引用变更导致重复 subscribe。
+  useEffect(() => {
+    if (activeTaskId) {
+      void sse.subscribeToTask(activeTaskId, '0')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTaskId])
 
   // Plan 2 dogfood fix: typewriter 通过 currentChatState.streamingDraft 一字字
   // push,但 ChatPane 之前只渲染 messages → 用户看不到打字机过程,只有 done
