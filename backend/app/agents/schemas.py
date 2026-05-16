@@ -470,3 +470,19 @@ class ResearchState(BaseModel):
     escalation_intent: str = Field(default="", max_length=200)
     discussion_focus: list[str] = Field(default_factory=list, max_length=5)
     explicit_exclusions: list[str] = Field(default_factory=list, max_length=3)
+
+    # v1.x A5a: DCF inputs (DataCollector populates in Task 15 wire)
+    forecast_growth: float | None = Field(
+        default=None,
+        description=(
+            "tushare get_forecast 业绩预告增速 (e.g. 0.10 = 10%);"
+            "缺则 None,DCF helper 走 historical fallback"
+        ),
+    )
+    price_history_for_beta: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "近 60 日 OHLC + 沪深 300 close;Analyst 用以算 60-day β。"
+            "结构: [{trade_date, close, index_close}, ...]"
+        ),
+    )

@@ -186,3 +186,31 @@ def test_outlier_diagnosis_is_frozen() -> None:
     )
     with pytest.raises(ValidationError):
         od.likely_cause = "modified"
+
+
+def test_research_state_v1x_a5a_new_fields() -> None:
+    """ResearchState 加 forecast_growth + price_history_for_beta 字段."""
+    from app.agents.schemas import ResearchState
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        forecast_growth=0.10,
+        price_history_for_beta=[
+            {"trade_date": "2026-04-01", "close": 1800.0, "index_close": 4000.0}
+        ],
+    )
+    assert state.forecast_growth == 0.10
+    assert state.price_history_for_beta is not None
+    assert len(state.price_history_for_beta) == 1
+
+
+def test_research_state_v1x_a5a_fields_default_none() -> None:
+    """新字段默认 None(向后兼容)."""
+    from app.agents.schemas import ResearchState
+
+    state = ResearchState(user_id="u", session_id="s", user_message="m", request_id="r")
+    assert state.forecast_growth is None
+    assert state.price_history_for_beta is None
