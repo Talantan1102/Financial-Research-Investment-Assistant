@@ -97,11 +97,19 @@ async function consumeStream(
       const ev = parseFrame(frame)
       if (ev) {
         if (ev.type === 'token') {
-          // Plan 2 Task 6:token 不走 dispatchEvent,改入 typewriter queue,
-          // 由 RAF loop 逐字符 push 进 streamingDraft。bump last_seq 仍需 do —
-          // 否则 abort / reconnect 时序判断失效。
-          if (ev.seq > currentChatState.last_seq) {
-            currentChatState.last_seq = ev.seq
+          // Plan 2 dogfood root cause: backend SSE event JSON payload 没 seq 字段
+          // (`{type:token, text, content}`),`ev.seq` = undefined → `undefined > 0`
+          // = false → token 被 dedup 跳过 → typewriter 从未 enqueue → 用户看不到流式。
+          // Plan 1 inline SSE 用 StreamEvent.model_dump 带 seq,Plan 2 直接 Redis
+          // Stream payload 不带。修补:只在 seq 存在且 ≤ last_seq 时 skip(真重复),
+          // 其他情况都 enqueue。
+          const evSeq = (ev as { seq?: number }).seq
+          if (typeof evSeq === 'number' && evSeq <= currentChatState.last_seq) {
+            // dedup: 重复 event 跳过
+          } else {
+            if (typeof evSeq === 'number') {
+              currentChatState.last_seq = evSeq
+            }
             typewriter.enqueue((ev as TokenEvent).content ?? '')
           }
         } else {
