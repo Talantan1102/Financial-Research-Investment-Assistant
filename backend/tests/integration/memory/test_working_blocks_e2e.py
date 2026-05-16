@@ -66,42 +66,58 @@ async def test_get_working_blocks_empty_user_returns_empty_dict(
 async def test_core_memory_append_creates_block(
     hier_memory: HierarchicalMemory, pg_memory_fixture: dict[str, Any]
 ) -> None:
+    """Task 17: persona block routes to PersonaService — returns None.
+    Verify content written via get_working_blocks (reads ChatMemoryWorkingBlock synced by PersonaService).
+    """
     uid = _make_user(pg_memory_fixture)
-    block = await hier_memory.core_memory_append(uid, "persona", "我偏好 ROE")
-    assert block.block_name == "persona"
-    assert "我偏好 ROE" in block.content
-    assert block.max_tokens == 500
+    result = await hier_memory.core_memory_append(uid, "persona", "我偏好 ROE")
+    # Task 17: persona path returns None (routed to PersonaService)
+    assert result is None
+    # Verify content persisted via working block sync
+    blocks = await hier_memory.get_working_blocks(uid)
+    assert "persona" in blocks
+    assert "我偏好 ROE" in blocks["persona"].content
 
 
 @pytest.mark.integration
 async def test_core_memory_append_idempotent_appends(
     hier_memory: HierarchicalMemory, pg_memory_fixture: dict[str, Any]
 ) -> None:
+    """Task 17: persona block routes to PersonaService — both appends persisted."""
     uid = _make_user(pg_memory_fixture)
     await hier_memory.core_memory_append(uid, "persona", "fact A")
-    block = await hier_memory.core_memory_append(uid, "persona", "fact B")
-    assert "fact A" in block.content
-    assert "fact B" in block.content
+    result = await hier_memory.core_memory_append(uid, "persona", "fact B")
+    # Task 17: persona path returns None
+    assert result is None
+    blocks = await hier_memory.get_working_blocks(uid)
+    assert "fact A" in blocks["persona"].content
+    assert "fact B" in blocks["persona"].content
 
 
 @pytest.mark.integration
 async def test_core_memory_replace_exact_match(
     hier_memory: HierarchicalMemory, pg_memory_fixture: dict[str, Any]
 ) -> None:
+    """Task 17: persona replace routes to PersonaService.apply_agent_replace — returns None."""
     uid = _make_user(pg_memory_fixture)
     await hier_memory.core_memory_append(uid, "persona", "ROE 重要")
-    block = await hier_memory.core_memory_replace(uid, "persona", "重要", "关键")
-    assert "ROE 关键" in block.content
+    result = await hier_memory.core_memory_replace(uid, "persona", "ROE 重要", "ROE 关键")
+    # Task 17: persona path returns None
+    assert result is None
+    blocks = await hier_memory.get_working_blocks(uid)
+    assert "ROE 关键" in blocks["persona"].content
 
 
 @pytest.mark.integration
-async def test_core_memory_replace_no_match_raises(
+async def test_core_memory_replace_no_match_falls_back_to_append(
     hier_memory: HierarchicalMemory, pg_memory_fixture: dict[str, Any]
 ) -> None:
+    """Task 17: persona replace with no match → PersonaService falls back to append (no raise)."""
     uid = _make_user(pg_memory_fixture)
     await hier_memory.core_memory_append(uid, "persona", "ROE")
-    with pytest.raises(ValueError, match="not found"):
-        await hier_memory.core_memory_replace(uid, "persona", "MISSING", "X")
+    # PersonaService.apply_agent_replace falls back to append on no-match (no ValueError)
+    result = await hier_memory.core_memory_replace(uid, "persona", "MISSING", "X")
+    assert result is None  # persona path always returns None
 
 
 @pytest.mark.integration
@@ -117,16 +133,16 @@ async def test_unknown_block_name_raises(
 async def test_append_exceed_budget_pages_oldest(
     hier_memory: HierarchicalMemory, pg_memory_fixture: dict[str, Any]
 ) -> None:
-    """超 max_tokens 自动 paging — paged_lines 通过 logger 记录(Plan 2 ship 后归档)."""
+    """Task 17: persona block routes to PersonaService — 20 appends create 20 items.
+    PersonaService stores each line as a separate ChatMemoryPersonaItem (no hard token cap).
+    Verify content synced to working block is non-empty.
+    """
     uid = _make_user(pg_memory_fixture)
-    # 故意写超 max_tokens
     for i in range(20):
         await hier_memory.core_memory_append(
             uid, "persona", f"fact_{i}: 茅台白酒 ROE 持仓 偏好 现金流"
         )
     blocks = await hier_memory.get_working_blocks(uid)
-    persona = blocks["persona"]
-    # Plan 1B 不会真 raise; 内容会被 page 到 max_tokens 内
-    from app.memory.working_blocks import approx_token_count
-
-    assert approx_token_count(persona.content) <= 500
+    assert "persona" in blocks
+    # PersonaService syncs all items to working block; content non-empty
+    assert len(blocks["persona"].content) > 0

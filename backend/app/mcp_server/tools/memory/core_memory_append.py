@@ -99,6 +99,18 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
             error=err,
         )
 
+    # Task 17: persona block routes to PersonaService — no ChatMemoryWorkingBlock returned.
+    if block is None:
+        return [
+            TextContent(
+                type="text",
+                text=json.dumps(
+                    {"block_name": validated.block_name, "ok": True},
+                    ensure_ascii=False,
+                ),
+            )
+        ]
+
     return [
         TextContent(
             type="text",

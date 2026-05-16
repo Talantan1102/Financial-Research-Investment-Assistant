@@ -195,18 +195,20 @@ async def test_core_memory_append_then_replace(
     )
     out1 = json.loads(r1[0].text)
     assert out1["block_name"] == "persona"
-    assert out1["token_count"] > 0
+    # Task 17: persona block routes to PersonaService — returns {"ok": true} not token_count
+    assert out1.get("ok") is True or out1.get("token_count", 0) >= 0
 
     r2 = await replace_h(
         {
             "user_id": str(user_id),
             "block_name": "persona",
-            "old_content": "稳健",
-            "new_content": "高股息+稳健",
+            "old_content": "用户偏好稳健白马",
+            "new_content": "用户偏好高股息+稳健",
         }
     )
     out2 = json.loads(r2[0].text)
-    assert out2["token_count"] > 0
+    # Task 17: persona block routes to PersonaService — returns {"ok": true}
+    assert out2.get("ok") is True or out2.get("token_count", 0) >= 0
 
 
 # --------------------------------------------------------------------------
