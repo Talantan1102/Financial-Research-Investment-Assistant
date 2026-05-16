@@ -125,3 +125,67 @@ def test_calculator_consistency_none_when_all_skip() -> None:
     assert result.pe_value is None
     assert result.dcf_base is None
     assert result.valuation_consistency is None
+
+
+def test_calculator_dcf_skip_on_missing_growth_signal() -> None:
+    """historical_growth=[] + forecast_growth=None → DCF growth_trajectory raise → DCF skip,
+    所有 DCF 字段 None (binary reset),PE 仍正常."""
+    from app.agents.valuation_calculator import calculate_valuations
+
+    inputs = _maotai_inputs()
+    inputs.historical_growth = []
+    inputs.forecast_growth = None
+    result = calculate_valuations(inputs, router_override=None)
+
+    # DCF 全 None (binary reset)
+    assert result.dcf_base is None
+    assert result.dcf_bull is None
+    assert result.dcf_bear is None
+    assert result.dcf_sensitivity is None
+    assert ValuationModel.DCF in result.skipped_models
+    # PE 仍 OK
+    assert result.pe_value is not None
+
+
+def test_calculator_single_model_override_returns_none_consistency() -> None:
+    """override 只指定 1 model → 算完后 valid lens 只 1 个 → consistency=None"""
+    from app.agents.valuation_calculator import calculate_valuations
+
+    override = RouterOverride(
+        override_models=[ValuationModel.PE],
+        reasoning="testing single-model path",
+        confidence="high",
+    )
+    result = calculate_valuations(_maotai_inputs(), router_override=override)
+
+    assert result.active_models == [ValuationModel.PE]
+    assert result.pe_value is not None
+    assert result.dcf_base is None
+    assert result.valuation_consistency is None  # 单 lens 无 cross-check
+
+
+def test_calculator_severe_consistency_explicit() -> None:
+    """构造 PE 跟 DCF 价差 > 30% → consistency='severe'.
+
+    技术上 PE 跟 DCF 数学差异主要看 industry_pe 倍数 vs DCF assumption。
+    构造低行业 PE (5x) + 正常 DCF inputs → PE 值低,DCF 值高,差异 > 30%。
+    """
+    from app.agents.valuation_calculator import calculate_valuations
+
+    inputs = _maotai_inputs()
+    # 低行业 PE → PE 值低
+    inputs.industry_pe_avg = 5.0
+    inputs.industry_pe_median = 4.0
+    # 行业其它假设保持(DCF 不变)→ PE 值变成 60 × 4.5 = 270,DCF 仍 ~1000+,严重打架
+    result = calculate_valuations(inputs, router_override=None)
+
+    assert result.pe_value is not None
+    assert result.dcf_base is not None
+    # 验确实严重打架
+    cv_check_values = [result.pe_value, result.dcf_base]
+    mean = sum(cv_check_values) / 2
+    assert mean > 0
+    diff_ratio = abs(result.pe_value - result.dcf_base) / mean
+    assert diff_ratio > 0.5  # sanity: 真的打架
+    # 期望 severe (CV > 30%)
+    assert result.valuation_consistency == "severe"

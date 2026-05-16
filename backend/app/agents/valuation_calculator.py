@@ -116,47 +116,56 @@ def calculate_valuations(
                     industry_ev_ebitda_median=inputs.industry_ev_ebitda_median,
                 )
             elif model == ValuationModel.DCF:
-                wacc = compute_company_wacc(
-                    industry_baseline_wacc=inputs.industry_baseline_wacc,
-                    company_beta=inputs.company_beta,
-                    debt_to_equity=inputs.debt_to_equity,
-                )
-                # 3 场景
-                for scenario_name in ("base", "bull", "bear"):
-                    trajectory = compute_growth_trajectory(
+                try:
+                    wacc = compute_company_wacc(
+                        industry_baseline_wacc=inputs.industry_baseline_wacc,
+                        company_beta=inputs.company_beta,
+                        debt_to_equity=inputs.debt_to_equity,
+                    )
+                    # 3 场景
+                    for scenario_name in ("base", "bull", "bear"):
+                        trajectory = compute_growth_trajectory(
+                            historical_growth=inputs.historical_growth,
+                            forecast_growth=inputs.forecast_growth,
+                            industry_terminal=inputs.industry_terminal_growth,
+                            scenario=scenario_name,
+                        )
+                        price = compute_dcf_value(
+                            free_cash_flow_base=inputs.free_cash_flow_base,
+                            shares_outstanding=inputs.shares_outstanding,
+                            growth_trajectory=trajectory,
+                            terminal_growth=inputs.industry_terminal_growth,
+                            wacc=wacc,
+                        )
+                        if scenario_name == "base":
+                            result.dcf_base = price
+                        elif scenario_name == "bull":
+                            result.dcf_bull = price
+                        elif scenario_name == "bear":
+                            result.dcf_bear = price
+
+                    # sensitivity (基于 base 场景的 trajectory)
+                    base_trajectory = compute_growth_trajectory(
                         historical_growth=inputs.historical_growth,
                         forecast_growth=inputs.forecast_growth,
                         industry_terminal=inputs.industry_terminal_growth,
-                        scenario=scenario_name,
+                        scenario="base",
                     )
-                    price = compute_dcf_value(
+                    result.dcf_sensitivity = compute_dcf_sensitivity(
                         free_cash_flow_base=inputs.free_cash_flow_base,
                         shares_outstanding=inputs.shares_outstanding,
-                        growth_trajectory=trajectory,
-                        terminal_growth=inputs.industry_terminal_growth,
-                        wacc=wacc,
+                        growth_trajectory=base_trajectory,
+                        base_terminal_growth=inputs.industry_terminal_growth,
+                        base_wacc=wacc,
                     )
-                    if scenario_name == "base":
-                        result.dcf_base = price
-                    elif scenario_name == "bull":
-                        result.dcf_bull = price
-                    elif scenario_name == "bear":
-                        result.dcf_bear = price
-
-                # sensitivity (基于 base 场景的 trajectory)
-                base_trajectory = compute_growth_trajectory(
-                    historical_growth=inputs.historical_growth,
-                    forecast_growth=inputs.forecast_growth,
-                    industry_terminal=inputs.industry_terminal_growth,
-                    scenario="base",
-                )
-                result.dcf_sensitivity = compute_dcf_sensitivity(
-                    free_cash_flow_base=inputs.free_cash_flow_base,
-                    shares_outstanding=inputs.shares_outstanding,
-                    growth_trajectory=base_trajectory,
-                    base_terminal_growth=inputs.industry_terminal_growth,
-                    base_wacc=wacc,
-                )
+                except InsufficientDataForModelError:
+                    # binary reset: partial DCF state 不留下,避免 caller 语义打架
+                    # (dcf_base != None + DCF in skipped_models 共存)
+                    result.dcf_base = None
+                    result.dcf_bull = None
+                    result.dcf_bear = None
+                    result.dcf_sensitivity = None
+                    raise  # 让外层 except 写 skipped_models[DCF]
         except InsufficientDataForModelError as e:
             result.skipped_models[model] = e.reason
 
