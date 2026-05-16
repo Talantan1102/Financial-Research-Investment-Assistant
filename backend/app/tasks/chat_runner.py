@@ -147,7 +147,7 @@ async def run_chat_async(
     redis: Any,
     user_message: str,
     session_id: str,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | str | None,
 ) -> None:
     """Main worker async entry — DI 友好,test 可直接 await。
 
@@ -156,7 +156,9 @@ async def run_chat_async(
     - graph_factory: returns a CompiledStateGraph (or fake stub in tests)
     - session_factory: async_sessionmaker / 同 ChatTaskRepo / ChatSessionRepo 约定
     - redis: redis.asyncio.Redis(production)或 fakeredis.aioredis.FakeRedis(test)
-    - user_message / session_id / user_id: 注入 LangGraph 的 initial state
+    - user_message / session_id: 注入 LangGraph 的 initial state
+    - user_id: 真 UUID(post-auth)/ 字符串如 "anonymous"(pre-auth)/ None;
+      仅用于 LangGraph thread_id 拼接,不写 PG(chat_tasks.user_id 由 router 写入)
     """
     task_repo = ChatTaskRepo(session_factory)
     bus = ChatEventBus(redis=redis)
@@ -277,6 +279,8 @@ def run_chat(
     """
     import asyncio
 
+    # user_id 可能是真 UUID(post-auth)/ "anonymous" / 任何非 UUID 字符串。
+    # 不强制 cast UUID — run_chat_async user_id 只用于 thread_id 拼接,接受 str/UUID/None。
     asyncio.run(
         run_chat_async(
             task_id=uuid.UUID(task_id),
@@ -285,7 +289,7 @@ def run_chat(
             redis=_build_redis_for_worker(),
             user_message=user_message,
             session_id=session_id,
-            user_id=uuid.UUID(user_id),
+            user_id=user_id,
         )
     )
 
