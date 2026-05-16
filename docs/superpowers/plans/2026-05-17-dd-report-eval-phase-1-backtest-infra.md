@@ -668,7 +668,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.2 — LLMSwapper OpenRouter wrapper
 - Modify: `backend/app/kb/ingest/<ingester>.py`(若有专门的 ingester)— ingest 时提取 publish_date
 - Test: `backend/tests/unit/kb/test_chunk_schema_publish_date.py`
 
-- [ ] **Step 1: Write failing test — Chunk schema 含 publish_date**
+- [x] **Step 1: Write failing test — Chunk schema 含 publish_date**
 
 ```python
 # backend/tests/unit/kb/test_chunk_schema_publish_date.py
@@ -700,7 +700,7 @@ def test_chunk_publish_date_optional() -> None:
     assert chunk.publish_date is None
 ```
 
-- [ ] **Step 2: Run test — verify failure**
+- [x] **Step 2: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/unit/kb/test_chunk_schema_publish_date.py -v
@@ -708,7 +708,7 @@ uv run pytest backend/tests/unit/kb/test_chunk_schema_publish_date.py -v
 
 Expected: FAIL — `Chunk` 没有 `publish_date` 字段。
 
-- [ ] **Step 3: Implement — Chunk schema 加 publish_date**
+- [x] **Step 3: Implement — Chunk schema 加 publish_date**
 
 修改 `backend/app/kb/ingest/schemas.py`(以 spike 结果为准),在 `Chunk` 类加:
 
@@ -722,7 +722,7 @@ publish_date: date | None = Field(
 )
 ```
 
-- [ ] **Step 4: Run test — verify pass**
+- [x] **Step 4: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/unit/kb/test_chunk_schema_publish_date.py -v
@@ -730,7 +730,7 @@ uv run pytest backend/tests/unit/kb/test_chunk_schema_publish_date.py -v
 
 Expected: PASS.
 
-- [ ] **Step 5: 检查 ingest path 是否需要传 publish_date**
+- [x] **Step 5: 检查 ingest path 是否需要传 publish_date**
 
 Grep 已有 ingest path:
 
@@ -750,7 +750,7 @@ chunk = Chunk(
 
 **注意**:历史已 ingest 的 chunk 没有 publish_date,在 backtest 时只能选 `publish_date is None` → 当作"unknown,默认通过"或"unknown,默认拒绝",**决策放 Task 1.4 backtest_adapter 时统一处理**(本 task 先只加字段)。
 
-- [ ] **Step 6: 跑 KB 全套 test 确认无回归**
+- [x] **Step 6: 跑 KB 全套 test 确认无回归**
 
 ```bash
 uv run pytest backend/tests/unit/kb/ -v --maxfail=3
@@ -758,7 +758,7 @@ uv run pytest backend/tests/unit/kb/ -v --maxfail=3
 
 Expected: 全 PASS,无回归。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/app/kb/ingest/schemas.py backend/app/kb/ingest/<ingester>.py backend/tests/unit/kb/test_chunk_schema_publish_date.py
