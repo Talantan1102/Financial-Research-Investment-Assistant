@@ -41,18 +41,12 @@ def test_chunk_publish_date_accepts_date_value() -> None:
 
 
 def test_chunk_publish_date_field_type() -> None:
-    """publish_date 字段 annotation 必须是 date | None."""
-    import typing
-
+    """publish_date 字段必须是非必填字段 (is_required() == False)."""
     from app.kb.chunkers.base import Chunk
 
-    field_info = Chunk.model_fields["publish_date"]
-    # The annotation should allow None (i.e. Optional[date])
-    annotation = field_info.annotation
-    # get_args returns (date, NoneType) for Optional[date]
-    args = typing.get_args(annotation)
-    assert date in args, f"publish_date annotation args {args!r} 应含 date"
-    assert type(None) in args, f"publish_date annotation args {args!r} 应含 NoneType"
+    assert Chunk.model_fields["publish_date"].is_required() is False, (
+        "publish_date 应为可选字段 (默认 None),不能是 required"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -89,3 +83,66 @@ def test_parse_pub_date_malformed_returns_none() -> None:
     assert _parse_pub_date("not-a-date") is None
     assert _parse_pub_date("2024/07/30") is None
     assert _parse_pub_date("99999999") is None
+
+
+# ---------------------------------------------------------------------------
+# I1 回归测试: _chunks_to_rows pub_date 行与 Chunk.publish_date 一致
+# ---------------------------------------------------------------------------
+
+
+def test_chunks_to_rows_pub_date_iso_from_parsed_chunk() -> None:
+    """I1 回归: chunk.publish_date=date(2024,7,30) → Milvus row pub_date='2024-07-30' (ISO).
+
+    raw spec.metadata 可以是 malformed ('2024/07/30'),但 Milvus 行必须用 parsed
+    publish_date.isoformat(),保证 T1.5 KBBacktestAdapter strict-mode 可靠过滤。
+    """
+    from pathlib import Path
+
+    from app.kb.chunkers.base import Chunk
+    from app.kb.ingest.pipeline import DocSpec, IngestPipeline
+
+    parsed_date = date(2024, 7, 30)
+    chunk = Chunk(
+        chunk_index=0,
+        text="Q2 财报摘要",
+        tokens=8,
+        publish_date=parsed_date,
+    )
+    spec = DocSpec(
+        doc_id="test_doc_001",
+        pdf_path=Path("/dev/null"),
+        collection="kb_research",
+        source_type="research",
+        metadata={"pub_date": "2024/07/30"},  # malformed raw — should NOT appear in row
+    )
+    dummy_vector: list[float] = [0.0] * 4
+
+    rows = IngestPipeline._chunks_to_rows(spec, [chunk], [dummy_vector])
+
+    assert len(rows) == 1
+    assert rows[0]["pub_date"] == "2024-07-30", (
+        f"Milvus row pub_date 应为 ISO 格式 '2024-07-30',实际得到 {rows[0]['pub_date']!r}. "
+        "raw malformed '2024/07/30' 不得直接写入 row (I1 回归)"
+    )
+
+
+def test_chunks_to_rows_pub_date_empty_when_publish_date_none() -> None:
+    """I1 边界: chunk.publish_date=None + spec.metadata pub_date='' → row pub_date=''."""
+    from pathlib import Path
+
+    from app.kb.chunkers.base import Chunk
+    from app.kb.ingest.pipeline import DocSpec, IngestPipeline
+
+    chunk = Chunk(chunk_index=0, text="无日期文档", tokens=6)
+    spec = DocSpec(
+        doc_id="test_doc_002",
+        pdf_path=Path("/dev/null"),
+        collection="kb_research",
+        source_type="research",
+        metadata={},
+    )
+    dummy_vector: list[float] = [0.0] * 4
+
+    rows = IngestPipeline._chunks_to_rows(spec, [chunk], [dummy_vector])
+
+    assert rows[0]["pub_date"] == ""

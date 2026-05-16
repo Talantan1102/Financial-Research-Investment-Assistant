@@ -100,7 +100,14 @@ class IngestPipeline:
 
             # 从 spec.metadata 注入 publish_date(backtest time-travel filter 需要)。
             # chunker 模块无法访问 spec.metadata,统一在 pipeline 层补填。
-            pub_date = _parse_pub_date(spec.metadata.get("pub_date", ""))
+            raw_pub_date = spec.metadata.get("pub_date", "")
+            pub_date = _parse_pub_date(raw_pub_date)
+            if raw_pub_date and pub_date is None:
+                logger.warning(
+                    "ingest doc=%s pub_date 解析失败 raw=%r — chunks 落库 publish_date=None",
+                    spec.doc_id,
+                    raw_pub_date,
+                )
             if pub_date is not None:
                 chunks = [c.model_copy(update={"publish_date": pub_date}) for c in chunks]
 
@@ -260,7 +267,9 @@ class IngestPipeline:
                 "chunk_index": c.chunk_index,
                 "chunk_text": c.text,
                 "vector": v,
-                "pub_date": spec.metadata.get("pub_date", ""),
+                "pub_date": c.publish_date.isoformat()
+                if c.publish_date is not None
+                else spec.metadata.get("pub_date", ""),
                 "source_url": spec.metadata.get("source_url", ""),
                 "source_type": spec.source_type,
             }
