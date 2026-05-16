@@ -460,7 +460,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.1 — DB schema 扩展 (eval_result
 - Test: `backend/tests/eval/dd_report/test_llm_swapper.py`
 - Reference: `backend/app/services/openai_client.py`(参考 OpenAI adapter pattern)
 
-- [ ] **Step 1: Write failing test — LLMSwapper 接受 model id 返回 callable**
+- [x] **Step 1: Write failing test — LLMSwapper 接受 model id 返回 callable**
 
 ```python
 # backend/tests/eval/dd_report/test_llm_swapper.py
@@ -515,7 +515,7 @@ def test_llm_swapper_unknown_model_raises() -> None:
         swapper.get_client("not-a-real-model")
 ```
 
-- [ ] **Step 2: Run test — verify failure**
+- [x] **Step 2: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_llm_swapper.py -v
@@ -523,7 +523,7 @@ uv run pytest backend/tests/eval/dd_report/test_llm_swapper.py -v
 
 Expected: FAIL — `eval.dd_report.llm_swapper` 不存在。
 
-- [ ] **Step 3: Implement — LLMSwapper**
+- [x] **Step 3: Implement — LLMSwapper**
 
 ```python
 # backend/eval/dd_report/llm_swapper.py
@@ -634,7 +634,7 @@ class LLMSwapper:
         return EvaluatorClient(model=model_id, api_key=self.api_key, _client=client)
 ```
 
-- [ ] **Step 4: Run test — verify pass**
+- [x] **Step 4: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_llm_swapper.py -v
@@ -642,7 +642,7 @@ uv run pytest backend/tests/eval/dd_report/test_llm_swapper.py -v
 
 Expected: 4 个 test 全 PASS。
 
-- [ ] **Step 5: Mypy strict check**
+- [x] **Step 5: Mypy strict check**
 
 ```bash
 cd backend && uv run mypy app eval/dd_report --strict
@@ -650,7 +650,7 @@ cd backend && uv run mypy app eval/dd_report --strict
 
 Expected: PASS 无 type error。若 fail,根据具体 error 修正 type annotation(注意:`from openai import OpenAI` 的 stubs 在 pyproject.toml `ignore_missing_imports=true` 全局覆盖,该 import 无需 type:ignore)。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/eval/dd_report/llm_swapper.py backend/tests/eval/dd_report/test_llm_swapper.py
