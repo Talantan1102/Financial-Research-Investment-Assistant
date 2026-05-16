@@ -643,7 +643,7 @@ async def _stream_chat(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/api/v0/chat")
+@router.post("/api/v0/chat", response_model=None)
 async def chat(
     req: ChatRequest,
     user: _AnonUser = Depends(get_current_user),
@@ -651,36 +651,65 @@ async def chat(
     extractor: EscalationExtractor = Depends(get_escalation_extractor),
     record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
     pg_factory: Any | None = Depends(get_async_session_factory),
-) -> StreamingResponse:
-    """POST /api/v0/chat — stream a chat response as SSE.
+    redis: AsyncRedis | None = Depends(get_redis_async),
+) -> StreamingResponse | dict[str, str]:
+    """POST /api/v0/chat — chat entry endpoint(双 path,graceful degrade)。
+
+    Plan 1 inline path(legacy):pg_factory wired but redis None →
+    inline SSE streaming via ``_stream_chat``,response is text/event-stream。
+
+    Plan 2 enqueue path:pg_factory + redis 都 wired → 持久化 user message +
+    create chat_task + enqueue Celery `run_chat_async`,返 JSON
+    ``{task_id, session_id, stream_url}``,前端用 GET /chat/stream/{tid}
+    订阅 Redis Streams replay。
+
+    Graceful degrade:
+    - pg_factory + redis 都 None / 任一 None  → Plan 1 inline path (preserve
+      Plan 1 production behavior + 老 SSE regression test 不破坏)
+    - Plan 2 Task 7 wire ``app.state.redis_async`` 后 production 自动切到 Plan 2
 
     Request body: ChatRequest (session_id, message, optional flags).
-    Response: text/event-stream per spec § 4.6.
+    Responses:
+        - Plan 1: text/event-stream (SSE, see spec § 4.6)
+        - Plan 2: application/json (``{task_id, session_id, stream_url}``)
 
-    Each SSE frame has the form::
-
-        event: <type>
-        id: <seq>
-        data: {"seq": <n>, "data": {...}}
-
-    Full event type set defined in StreamEvent.type (see spec § 4.6).
-    The ``done`` event signals the end of the stream.
-
-    Plan 3 escalation: if the planner emits escalate_offered=True, two
-    additional events follow the ``done`` event:
-    ``escalate_request`` then ``escalate_packet_draft``.
-    These require EscalationExtractor + EscalationRecordRepo to be wired
-    via dependency_overrides (tests) or app_main lifespan (production).
-
-    Plan 1 Task 5 persistence:
-    - When ``pg_factory`` is non-None (PG configured), the handler inserts the
-      user message + creates a ``chat_tasks`` row (queued → running) before the
-      stream starts. The trailing assistant message + task status (done / error)
-      are written from ``_stream_chat``'s finally block.
-    - When ``pg_factory`` is None (legacy SSE test path / dev without PG), the
-      handler degrades gracefully and skips all persistence work. Existing SSE
-      regression tests rely on this.
+    Plan 3 escalation 流(escalate_request / escalate_packet_draft)目前仍
+    inline 在 Plan 1 path,Plan 2 path 由 Celery worker chunk-level forward
+    (out-of-scope for Task 5)。
     """
+    # ===== Plan 2 new path: Celery enqueue + return JSON =====
+    if pg_factory is not None and redis is not None:
+        from app.tasks.chat_runner import enqueue_run_chat
+
+        session_repo = ChatSessionRepo(pg_factory)
+        task_repo = ChatTaskRepo(pg_factory)
+
+        user_msg = await session_repo.append_message(
+            session_id=req.session_id,
+            role="user",
+            content=req.message,
+        )
+        task = await task_repo.create_queued(
+            session_id=req.session_id,
+            user_id=_coerce_user_uuid(user.id),
+            langgraph_thread_id=f"{user.id}:{req.session_id}",
+            initial_prompt_message_id=user_msg.id,
+        )
+
+        enqueue_run_chat(
+            task_id=str(task.id),
+            session_id=req.session_id,
+            user_id=str(user.id),
+            user_message=req.message,
+        )
+
+        return {
+            "task_id": str(task.id),
+            "session_id": req.session_id,
+            "stream_url": f"/api/v0/chat/stream/{task.id}",
+        }
+
+    # ===== Plan 1 legacy path: inline SSE streaming (UNCHANGED behavior) =====
     task_id: UUID | None = None
 
     if pg_factory is not None:

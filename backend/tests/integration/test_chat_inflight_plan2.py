@@ -195,3 +195,81 @@ async def test_stream_endpoint_404_for_unknown_task(
     client = _client(session_factory, fake_redis)
     resp = client.get(f"/api/v0/chat/stream/{fake_tid}")
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_chat_with_redis_enqueues_and_returns_task_id(
+    session_factory: async_sessionmaker[AsyncSession],
+    fake_redis: FakeRedis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plan 2 Task 5: POST /chat (Redis wired) → JSON {task_id, stream_url, session_id}.
+
+    - Response 必须是 JSON,不是 SSE
+    - Celery enqueue_run_chat 被调用一次,kwargs 正确
+    - User message 持久化到 PG (Plan 1 entry semantics 保留)
+    - ChatTask 行已创建 (status queued or running)
+    """
+    enqueued: list[dict[str, Any]] = []
+
+    def fake_enqueue(**kwargs: Any) -> Any:
+        enqueued.append(kwargs)
+
+        class _Result:
+            def __init__(self, tid: str) -> None:
+                self.id = tid
+
+        return _Result(kwargs["task_id"])
+
+    # Patch chat_runner.enqueue_run_chat (production entry from POST handler)
+    from app.tasks import chat_runner
+
+    monkeypatch.setattr(chat_runner, "enqueue_run_chat", fake_enqueue)
+
+    # Seed session
+    sid = uuid.uuid4()
+    async with session_factory() as sess:
+        sess.add(ChatSession(id=sid, user_id=None, title="t"))
+        await sess.commit()
+
+    client = _client(session_factory, fake_redis)
+    resp = client.post(
+        "/api/v0/chat",
+        json={"session_id": str(sid), "message": "查 600519 股价"},
+    )
+    assert resp.status_code == 200, f"expected 200 got {resp.status_code}: {resp.text}"
+    # Content-Type 应该是 application/json,不是 text/event-stream
+    assert "application/json" in resp.headers.get("content-type", ""), (
+        f"expected JSON content-type, got {resp.headers.get('content-type')}"
+    )
+
+    body = resp.json()
+    assert "task_id" in body
+    assert "stream_url" in body
+    assert body["session_id"] == str(sid)
+    assert body["task_id"] in body["stream_url"]
+    assert body["stream_url"].endswith(body["task_id"])  # path format /chat/stream/{tid}
+
+    # enqueue called once with right kwargs
+    assert len(enqueued) == 1, f"expected 1 enqueue, got {len(enqueued)}"
+    assert enqueued[0]["session_id"] == str(sid)
+    assert enqueued[0]["user_message"] == "查 600519 股价"
+    assert "task_id" in enqueued[0]
+    assert "user_id" in enqueued[0]
+
+    # PG: user message should be persisted (Plan 1 entry semantics preserved)
+    from app.services.chat_session_repo import ChatSessionRepo
+
+    msg_repo = ChatSessionRepo(session_factory)
+    msgs = await msg_repo.list_messages(str(sid))
+    assert len(msgs) == 1, f"expected 1 user message, got {len(msgs)}"
+    assert msgs[0].role == "user"
+    assert msgs[0].content == "查 600519 股价"
+
+    # PG: chat_task created with status queued or running (POST handler may or
+    # may not mark_running before enqueue — Plan 2 lets Celery worker mark; we
+    # accept either here).
+    task_repo = ChatTaskRepo(session_factory)
+    task = await task_repo.get_by_id(uuid.UUID(body["task_id"]))
+    assert task is not None
+    assert task.status in ("queued", "running"), f"expected queued or running, got {task.status}"
