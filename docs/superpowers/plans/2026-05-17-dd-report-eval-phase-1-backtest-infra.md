@@ -1464,7 +1464,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.6 — BacktestRunner skeleton (装�
 - Create: `backend/eval/dd_report/leak_detector.py`
 - Test: `backend/tests/eval/dd_report/test_leak_detector.py`
 
-- [ ] **Step 1: Write failing test — LeakDetector 检测 ann_date > cut_off**
+- [x] **Step 1: Write failing test — LeakDetector 检测 ann_date > cut_off**
 
 ```python
 # backend/tests/eval/dd_report/test_leak_detector.py
@@ -1536,7 +1536,7 @@ def test_leak_detector_assertion_helper() -> None:
         detector.assert_no_leaks(detector.scan_tushare_rows(rows))
 ```
 
-- [ ] **Step 2: Run test — verify failure**
+- [x] **Step 2: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_leak_detector.py -v
@@ -1544,7 +1544,7 @@ uv run pytest backend/tests/eval/dd_report/test_leak_detector.py -v
 
 Expected: FAIL — `LeakDetector` 不存在。
 
-- [ ] **Step 3: Implement — LeakDetector**
+- [x] **Step 3: Implement — LeakDetector**
 
 ```python
 # backend/eval/dd_report/leak_detector.py
@@ -1635,7 +1635,7 @@ class LeakDetector:
             )
 ```
 
-- [ ] **Step 4: Run test — verify pass**
+- [x] **Step 4: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_leak_detector.py -v
@@ -1643,7 +1643,7 @@ uv run pytest backend/tests/eval/dd_report/test_leak_detector.py -v
 
 Expected: 5 个 test 全 PASS.
 
-- [ ] **Step 5: 加 integration smoke test — BacktestRunner + LeakDetector 联合**
+- [x] **Step 5: 加 integration smoke test — BacktestRunner + LeakDetector 联合**
 
 ```python
 # 加到 backend/tests/eval/dd_report/test_backtest_runner.py 末尾:
@@ -1706,7 +1706,7 @@ def test_backtest_run_fails_leak_detector_with_polluted_data(tmp_db: Path) -> No
         detector.assert_no_leaks(leaks)
 ```
 
-- [ ] **Step 6: Run integration test — verify pass**
+- [x] **Step 6: Run integration test — verify pass**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_backtest_runner.py -v
@@ -1714,7 +1714,7 @@ uv run pytest backend/tests/eval/dd_report/test_backtest_runner.py -v
 
 Expected: 5 个 test 全 PASS(原 3 + 新 2).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add backend/eval/dd_report/leak_detector.py backend/tests/eval/dd_report/test_leak_detector.py backend/tests/eval/dd_report/test_backtest_runner.py
