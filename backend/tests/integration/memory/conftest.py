@@ -18,6 +18,10 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 # ---------------------------------------------------------------------------
+# seed_persona_user — shared helper fixture for persona FK seed
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # pg_memory_fixture — 真 PG + create_all + 跑 SQL migration
 # ---------------------------------------------------------------------------
 
@@ -230,3 +234,38 @@ def milvus_memory_fixture(
     }
 
     # session 末不清理(跟 milvus_test_container 同 fail-safe)
+
+
+@pytest.fixture
+def seed_persona_user(pg_memory_fixture: dict[str, Any]) -> Callable[..., None]:
+    """Helper fixture to seed a `users` row before persona tests insert items.
+
+    chat_memory_persona_items.user_id has FK to users.id; tests using uuid4()
+    must seed first. Returns a callable: ``seed_persona_user(user_id)``.
+
+    The INSERT is ON CONFLICT DO NOTHING so calling it twice with the same
+    user_id is safe (idempotent within a session-scoped PG container).
+    """
+    engine = pg_memory_fixture["engine"]
+
+    def _seed(user_id: Any, prefix: str = "persona_test_") -> None:
+        from sqlalchemy import text as _text
+
+        with engine.begin() as conn:
+            uid_str = str(user_id)
+            short = uid_str[:8]
+            conn.execute(
+                _text(
+                    "INSERT INTO users (id, username, email, hashed_password, is_active) "
+                    "VALUES (:id, :u, :e, :p, true) "
+                    "ON CONFLICT (id) DO NOTHING"
+                ),
+                {
+                    "id": uid_str,
+                    "u": f"{prefix}{short}",
+                    "e": f"{prefix}{short}@e2e.local",
+                    "p": "x",
+                },
+            )
+
+    return _seed

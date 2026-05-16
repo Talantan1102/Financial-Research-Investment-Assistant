@@ -3,20 +3,19 @@
 复用 pg_memory_session_factory fixture (backend/tests/integration/memory/conftest.py).
 
 Note: chat_memory_persona_items.user_id FK → users.id, so each test must seed
-a user row before inserting persona items. We follow the same pattern as
-test_persona_populator_e2e.py: accept pg_memory_fixture to get the engine and
-INSERT users via raw SQL.
+a user row before inserting persona items. `seed_persona_user` fixture in
+conftest handles this (Task 19 consolidation).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from app.memory.models import ChatMemoryPersonaItem, ChatMemoryWorkingBlock
 from app.memory.persona_service import PersonaService
-from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
@@ -25,31 +24,14 @@ def _service(factory: Any) -> PersonaService:
     return PersonaService(pg_session_factory=factory)
 
 
-def _seed_user(engine: Any, user_id: UUID) -> None:
-    """Insert a minimal user row to satisfy the FK constraint."""
-    with engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO users (id, username, email, hashed_password, is_active) "
-                "VALUES (:id, :u, :e, :p, true)"
-            ),
-            {
-                "id": str(user_id),
-                "u": f"pe2e_{user_id.hex[:8]}",
-                "e": f"{user_id.hex[:8]}@persona-e2e.local",
-                "p": "x",
-            },
-        )
-
-
 def test_full_lifecycle_user_add_agent_append_upgrade(
     pg_memory_fixture: dict[str, Any],
     pg_memory_session_factory: Any,
+    seed_persona_user: Callable[..., None],
 ) -> None:
-    engine = pg_memory_fixture["engine"]
     svc = _service(pg_memory_session_factory)
     user_id = uuid4()
-    _seed_user(engine, user_id)
+    seed_persona_user(user_id, prefix="pe2e_")
 
     # 1. user 加一条
     u1 = svc.add_item(user_id=user_id, text="保守稳健", target_section="user")
@@ -98,13 +80,13 @@ def test_full_lifecycle_user_add_agent_append_upgrade(
 def test_cross_user_isolation(
     pg_memory_fixture: dict[str, Any],
     pg_memory_session_factory: Any,
+    seed_persona_user: Callable[..., None],
 ) -> None:
-    engine = pg_memory_fixture["engine"]
     svc = _service(pg_memory_session_factory)
     user_a = uuid4()
     user_b = uuid4()
-    _seed_user(engine, user_a)
-    _seed_user(engine, user_b)
+    seed_persona_user(user_a, prefix="pe2e_a_")
+    seed_persona_user(user_b, prefix="pe2e_b_")
 
     svc.add_item(user_id=user_a, text="A 的条", target_section="user")
     svc.add_item(user_id=user_b, text="B 的条", target_section="user")
@@ -119,11 +101,11 @@ def test_cross_user_isolation(
 def test_apply_agent_replace_fallback_to_append(
     pg_memory_fixture: dict[str, Any],
     pg_memory_session_factory: Any,
+    seed_persona_user: Callable[..., None],
 ) -> None:
-    engine = pg_memory_fixture["engine"]
     svc = _service(pg_memory_session_factory)
     user_id = uuid4()
-    _seed_user(engine, user_id)
+    seed_persona_user(user_id, prefix="pe2e_repl_")
 
     # 没有任何 agent item → replace 应 fallback 为 append
     items = svc.apply_agent_replace(user_id=user_id, old_content="不存在", new_content="新加的")
@@ -135,11 +117,11 @@ def test_apply_agent_replace_fallback_to_append(
 def test_delete_item_removes_row(
     pg_memory_fixture: dict[str, Any],
     pg_memory_session_factory: Any,
+    seed_persona_user: Callable[..., None],
 ) -> None:
-    engine = pg_memory_fixture["engine"]
     svc = _service(pg_memory_session_factory)
     user_id = uuid4()
-    _seed_user(engine, user_id)
+    seed_persona_user(user_id, prefix="pe2e_del_")
 
     item = svc.add_item(user_id=user_id, text="待删", target_section="user")
 
