@@ -69,6 +69,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### Chat 记忆分层 Phase 1(2026-05-16 ship 完)
 - [Phase 1 self-managed wire ship](docs/claude-context/chat-memory-phase1-self-managed-wire-done.md) — memory_tool_usage prompt 拼回 chat_planner / agent self-managed 三要素全接通 / 24+ 新测试 / 601 PASS scope-clean / Phase 2-4 留 hook 等 dogfood
 
+### v1.x A5a 多模型估值 cross-check(2026-05-16 ship 完)
+- [v1.x A5a 多模型估值 cross-check ship](docs/claude-context/v1.x-multi-valuation-cross-check-landed.md) — 4 model cross-check + IndustryModelRouter + DCF 3 scenarios + OutlierDiagnosisAgent + Critic 7 维 + Writer prompt + retry edge / ~1700 行 / cassette+input wire 留 follow-up
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。
