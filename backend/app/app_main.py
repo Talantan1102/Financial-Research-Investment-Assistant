@@ -265,6 +265,21 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         app.state.research_agent = None
         logger.warning("research_agent 初始化跳过: %s", e)
 
+    # 7. Plan 2 Task 7: Redis async client(GET /chat/stream/{tid} XREAD + Celery worker
+    #    push events 共用一条 conn pool).无 Redis 时 get_redis_async DI 返 None,
+    #    POST /chat 自动 graceful degrade 到 Plan 1 inline SSE path.
+    try:
+        import redis.asyncio as _redis_async
+
+        _redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        app.state.redis_async = _redis_async.Redis.from_url(_redis_url, decode_responses=False)
+        # Fail-fast ping — 如果 Redis 不可达,标 None,Plan 2 path 自动 fallback
+        await app.state.redis_async.ping()
+        logger.info("Plan 2 Redis async client 已 wire: %s", _redis_url)
+    except Exception as e:  # noqa: BLE001
+        app.state.redis_async = None
+        logger.warning("Plan 2 Redis async client 初始化跳过: %s", e)
+
     yield
 
     # 关闭时执行
@@ -290,6 +305,12 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
             logger.info("ChatSessionRepo async engine 已关闭")
         except Exception as e:  # noqa: BLE001
             logger.warning("ChatSessionRepo async engine 关闭失败: %s", e)
+    if getattr(app.state, "redis_async", None) is not None:
+        try:
+            await app.state.redis_async.aclose()
+            logger.info("Plan 2 Redis async client 已关闭")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Plan 2 Redis async client 关闭失败: %s", e)
 
 
 app = FastAPI(
