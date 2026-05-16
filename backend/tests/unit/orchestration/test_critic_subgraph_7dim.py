@@ -1,11 +1,11 @@
-"""Critic subgraph fan-out — v1.x has 6 scorers (plan_correctness removed)."""
+"""Critic subgraph fan-out — v1.x A5a has 7 scorers (valuation_consistency added)."""
 
 from __future__ import annotations
 
 from app.orchestration.critic_subgraph import _CriticSubState, _planner_router
 
 
-def test_planner_router_sends_to_6_scorers() -> None:
+def test_planner_router_sends_to_7_scorers() -> None:
     state = _CriticSubState(
         user_id="u",
         session_id="s",
@@ -13,7 +13,7 @@ def test_planner_router_sends_to_6_scorers() -> None:
         request_id="r",
     )
     sends = _planner_router(state)
-    assert len(sends) == 6
+    assert len(sends) == 7
     names = {s.node for s in sends}
     expected = {
         "scorer_factuality",
@@ -22,6 +22,7 @@ def test_planner_router_sends_to_6_scorers() -> None:
         "scorer_structure",
         "scorer_conciseness",
         "scorer_input_context",
+        "scorer_valuation_consistency",  # v1.x A5a 第 7 维
     }
     assert names == expected
     assert "scorer_plan_correctness" not in names
@@ -38,5 +39,7 @@ def test_build_critic_subgraph_no_plan_correctness_node() -> None:
     node_names = set(g.get_graph().nodes.keys()) if hasattr(g, "get_graph") else set()
     if node_names:
         assert "scorer_plan_correctness" not in node_names
+        # v1.x A5a guard — valuation_consistency node真存在
+        assert "scorer_valuation_consistency" in node_names
     else:
         assert g is not None

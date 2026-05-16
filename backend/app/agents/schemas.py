@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agents.escalation_protocol import Entity, Preference, ToolResultRef
-from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
+from app.agents.investment_dd_schema import InvestmentDueDiligenceReport, ValuationAnalysis
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
 from app.services.monitoring.signal_rules.base import SignalResult
 
@@ -378,6 +378,7 @@ CriticDimension = Literal[
     "structure",
     "conciseness",
     "input_context_appropriateness",
+    "valuation_consistency",  # v1.x A5a (第 7 维)
     # plan_correctness removed in v1.x (Validator replaces it; see 2026-05-15 spec § 7.1)
 ]
 
@@ -469,3 +470,31 @@ class ResearchState(BaseModel):
     escalation_intent: str = Field(default="", max_length=200)
     discussion_focus: list[str] = Field(default_factory=list, max_length=5)
     explicit_exclusions: list[str] = Field(default_factory=list, max_length=3)
+
+    # v1.x A5a: DCF inputs (DataCollector populates in Task 15 wire)
+    forecast_growth: float | None = Field(
+        default=None,
+        description=(
+            "tushare get_forecast 业绩预告增速 (e.g. 0.10 = 10%);"
+            "缺则 None,DCF helper 走 historical fallback"
+        ),
+    )
+    price_history_for_beta: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "近 60 日 OHLC + 沪深 300 close;Analyst 用以算 60-day β。"
+            "结构: [{trade_date, close, index_close}, ...]"
+        ),
+    )
+
+    # v1.x A5a: Analyst 算出来的 multi-model cross-check 结果。Writer
+    # post_process_writer_output 在 LLM call 之后拷到
+    # InvestmentDueDiligenceReport.financial_analysis.valuation_analysis,
+    # 覆盖 LLM 占位 — 保证 Python 决定论是 single source of truth。
+    valuation_analysis: ValuationAnalysis | None = Field(
+        default=None,
+        description=(
+            "v1.x A5a Analyst 节点产出的多模型估值 cross-check;"
+            "Writer post_process 拷到 report.financial_analysis.valuation_analysis"
+        ),
+    )

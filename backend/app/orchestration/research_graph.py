@@ -29,34 +29,54 @@ from app.orchestration.research_nodes import (
 # "wrong plan" can't reach Critic. The real failure mode worth retrying is
 # Writer using data sloppily → factuality < 7.0. Writer retry is expensive
 # (long LLM call), so only 1 retry allowed (vs 2 for planner in v0.8.5).
+#
+# v1.x A5a: added valuation_consistency OR trigger — narrative that masks
+# cross-check divergence (未提偏离原因 / 未引用 diagnosis) also fires retry.
 # ---------------------------------------------------------------------------
 
 _FACTUALITY_THRESHOLD = 7.0
+_VALUATION_CONSISTENCY_THRESHOLD = 7.0  # v1.x A5a
 _MAX_WRITER_RETRY = 1
 
 
 def _writer_retry_router(state: ResearchState) -> Literal["retry", "continue"]:
-    """Conditional edge after critic_node — retry writer iff factuality
-    score is below threshold AND retry budget remains."""
+    """Conditional edge after critic_node — retry writer iff (factuality OR
+    valuation_consistency) score is below threshold AND retry budget remains.
+
+    v1.x A5a: adds valuation_consistency trigger — narrative that fails to
+    reflect cross-check signals (掩盖打架 / 未提偏离 / 未引用 diagnosis) causes
+    a writer retry so the report is rewritten with explicit feedback.
+    """
     if state.critic_report is None:
         return "continue"
-    fact_score = state.critic_report.get_score("factuality")
-    if fact_score is None:
+    if state.writer_retry_count >= _MAX_WRITER_RETRY:
         return "continue"
-    if fact_score < _FACTUALITY_THRESHOLD and state.writer_retry_count < _MAX_WRITER_RETRY:
+
+    fact_score = state.critic_report.get_score("factuality")
+    valuation_score = state.critic_report.get_score("valuation_consistency")
+
+    fact_trigger = fact_score is not None and fact_score < _FACTUALITY_THRESHOLD
+    valuation_trigger = (
+        valuation_score is not None and valuation_score < _VALUATION_CONSISTENCY_THRESHOLD
+    )
+    if fact_trigger or valuation_trigger:
         return "retry"
     return "continue"
 
 
 def _writer_retry_state_update(state: ResearchState) -> dict[str, Any]:
-    """State diff for retry transition: bump count + capture critic factuality
-    evidence into writer_critic_feedback (capped at 300 chars)."""
-    feedback = ""
+    """State diff for retry transition: bump count + capture critic evidence
+    (factuality + valuation_consistency, joined, capped at 300 chars).
+
+    v1.x A5a: feedback includes both factuality and valuation_consistency
+    evidence (when present) so the writer sees both dimensions on retry.
+    """
+    pieces: list[str] = []
     if state.critic_report is not None:
         for dim in state.critic_report.dimensions:
-            if dim.dimension == "factuality":
-                feedback = dim.evidence
-                break
+            if dim.dimension in ("factuality", "valuation_consistency"):
+                pieces.append(f"[{dim.dimension}={dim.score:.1f}] {dim.evidence}")
+    feedback = " | ".join(pieces)
     return {
         "writer_retry_count": state.writer_retry_count + 1,
         "writer_critic_feedback": feedback[:300],
