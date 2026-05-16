@@ -54,6 +54,26 @@ CREATE INDEX IF NOT EXISTS idx_btrun_llm      ON backtest_runs(llm_model);
 """
 
 
+def _maybe_add_column(con: sqlite3.Connection, table: str, col: str, col_def: str) -> None:
+    """Add *col* to *table* if it exists but does not already have the column.
+
+    Required because ``CREATE TABLE IF NOT EXISTS`` is a no-op on an existing
+    table — it does NOT add new columns.  Callers use this to migrate legacy
+    DBs that were created before Phase-1 added the 4 backtest columns.
+
+    No-op when the table does not yet exist (fresh DB — the column will be
+    included in the initial ``CREATE TABLE`` statement instead).
+    """
+    table_exists = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+    ).fetchone()
+    if not table_exists:
+        return
+    existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+    if col not in existing:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_def}")
+
+
 class EvalRecorder:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
@@ -61,6 +81,14 @@ class EvalRecorder:
 
     def init_schema(self) -> None:
         with sqlite3.connect(self._db_path) as con:
+            # Migrate legacy eval_results DBs that pre-date Phase-1.  Must run
+            # before executescript(_EVAL_RESULTS_SCHEMA) because that script
+            # creates indexes referencing the new columns — those would fail on
+            # a table that still has only 8 columns.
+            _maybe_add_column(con, "eval_results", "backtest_run_id", "TEXT")
+            _maybe_add_column(con, "eval_results", "cut_off_date", "TEXT")
+            _maybe_add_column(con, "eval_results", "evaluator_llm", "TEXT")
+            _maybe_add_column(con, "eval_results", "case_type", "TEXT")
             con.executescript(_EVAL_RESULTS_SCHEMA)
             con.executescript(_BACKTEST_RUNS_SCHEMA)
 

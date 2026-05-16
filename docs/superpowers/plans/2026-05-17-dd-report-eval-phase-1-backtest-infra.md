@@ -55,7 +55,7 @@
 - Create: `backend/tests/eval/dd_report/__init__.py`
 - Inspect(spike): `backend/app/kb/` 全树,定位 chunk schema 文件 + 确认是否已有 `publish_date`
 
-- [ ] **Step 1: 创建模块骨架目录 + __init__.py**
+- [x] **Step 1: 创建模块骨架目录 + __init__.py**
 
 ```bash
 mkdir -p backend/eval/dd_report/golden
@@ -77,7 +77,7 @@ spec: docs/superpowers/specs/2026-05-17-dd-report-quality-eval-design.md
 # empty marker file
 ```
 
-- [ ] **Step 2: Spike KB chunk schema — 确认 publish_date 字段存在性**
+- [x] **Step 2: Spike KB chunk schema — 确认 publish_date 字段存在性**
 
 Run:
 
@@ -99,7 +99,7 @@ Expected outcomes:
 - 若 no,Task 1.3 第一步要在该文件加字段 + 提供 migration / re-ingest 方案
 ```
 
-- [ ] **Step 3: 验证 OpenRouter API 可用性 + .env.example 加 key**
+- [x] **Step 3: 验证 OpenRouter API 可用性 + .env.example 加 key**
 
 修改 `backend/.env.example` 在 OpenRouter 段加注释 + key 模板(若已有 OPENROUTER_API_KEY 跳过此 step):
 
@@ -115,7 +115,7 @@ grep -n "OPENROUTER_API_KEY" backend/.env.example
 OPENROUTER_API_KEY=your-openrouter-api-key
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add backend/eval/dd_report/__init__.py backend/tests/eval/dd_report/__init__.py backend/.env.example
@@ -140,7 +140,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.0 — 创建 dd_report 模块骨架
 
 **注意**:项目记忆 `v0.9.x-no-alembic-until-db-unify.md` 说 v0.9.x 不引 alembic。但 spec § 5.2 / § 5.3 提到 alembic + roadmap 3.5 已经 PR A 引入了 alembic foundation(`2026-05-07-roadmap-3.5-pr-A-alembic-foundation.md`)。**Step 1 先确认 alembic 是否已 ship**:
 
-- [ ] **Step 1: 确认 alembic 状态**
+- [x] **Step 1: 确认 alembic 状态**
 
 Run:
 
@@ -156,11 +156,11 @@ Expected:
 
 ```markdown
 ## Alembic Status (Step 1 结果)
-- alembic 是否已 ship: yes / no
-- 路线: alembic migration / create_all() 幂等
+- alembic 是否已 ship: no
+- 路线: create_all() 幂等 (raw CREATE TABLE IF NOT EXISTS + ALTER TABLE ADD COLUMN migration)
 ```
 
-- [ ] **Step 2: Write failing test — EvalResult 接受新字段**
+- [x] **Step 2: Write failing test — EvalResult 接受新字段**
 
 ```python
 # backend/tests/unit/test_eval_recorder.py (在文件末尾加新测试)
@@ -195,7 +195,7 @@ def test_eval_result_accepts_backtest_fields() -> None:
     assert result.case_type == "backtest"
 ```
 
-- [ ] **Step 3: Run test — verify failure**
+- [x] **Step 3: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/unit/test_eval_recorder.py::test_eval_result_accepts_backtest_fields -v
@@ -203,7 +203,7 @@ uv run pytest backend/tests/unit/test_eval_recorder.py::test_eval_result_accepts
 
 Expected: FAIL — `EvalResult` 没有 `backtest_run_id` 等字段。
 
-- [ ] **Step 4: Implement — EvalResult 加可选字段**
+- [x] **Step 4: Implement — EvalResult 加可选字段**
 
 修改 `backend/app/services/eval_models.py`,在 `EvalResult` 类里加:
 
@@ -227,7 +227,7 @@ case_type: Literal["backtest", "sanity", "financebench", "cross_llm"] | None = F
 
 确保文件顶部 `from typing import Literal` 已 import。
 
-- [ ] **Step 5: Run test — verify pass**
+- [x] **Step 5: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/unit/test_eval_recorder.py::test_eval_result_accepts_backtest_fields -v
@@ -235,7 +235,7 @@ uv run pytest backend/tests/unit/test_eval_recorder.py::test_eval_result_accepts
 
 Expected: PASS.
 
-- [ ] **Step 6: Write failing test — EvalRecorder 持久化新字段**
+- [x] **Step 6: Write failing test — EvalRecorder 持久化新字段**
 
 ```python
 # backend/tests/unit/test_eval_recorder.py (继续)
@@ -273,7 +273,7 @@ def test_eval_recorder_persists_backtest_fields(tmp_path: Path) -> None:
     assert got.case_type == "backtest"
 ```
 
-- [ ] **Step 7: Run test — verify failure**
+- [x] **Step 7: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/unit/test_eval_recorder.py::test_eval_recorder_persists_backtest_fields -v
@@ -281,7 +281,7 @@ uv run pytest backend/tests/unit/test_eval_recorder.py::test_eval_recorder_persi
 
 Expected: FAIL — `EvalRecorder.write` 当前不接受新字段,或 SQL schema 不含新列。
 
-- [ ] **Step 8: Implement — EvalRecorder schema + write 接 4 新字段**
+- [x] **Step 8: Implement — EvalRecorder schema + write 接 4 新字段**
 
 修改 `backend/app/services/eval_recorder.py`:
 
@@ -358,7 +358,7 @@ def _row_to_result(row: sqlite3.Row) -> EvalResult:
     )
 ```
 
-- [ ] **Step 9: Run tests — verify pass**
+- [x] **Step 9: Run tests — verify pass**
 
 ```bash
 uv run pytest backend/tests/unit/test_eval_recorder.py -v
@@ -366,7 +366,7 @@ uv run pytest backend/tests/unit/test_eval_recorder.py -v
 
 Expected: 全 PASS(包括原有测试 + 2 个新测试)。
 
-- [ ] **Step 10: Write failing test — backtest_runs 表 schema 存在**
+- [x] **Step 10: Write failing test — backtest_runs 表 schema 存在**
 
 ```python
 # backend/tests/unit/test_eval_recorder.py (继续)
@@ -389,7 +389,7 @@ def test_backtest_runs_table_schema(tmp_path: Path) -> None:
     assert expected.issubset(cols), f"missing: {expected - cols}"
 ```
 
-- [ ] **Step 11: Run test — verify failure**
+- [x] **Step 11: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/unit/test_eval_recorder.py::test_backtest_runs_table_schema -v
@@ -397,7 +397,7 @@ uv run pytest backend/tests/unit/test_eval_recorder.py::test_backtest_runs_table
 
 Expected: FAIL — backtest_runs 表不存在。
 
-- [ ] **Step 12: Implement — backtest_runs 表 schema 加入 init_schema()**
+- [x] **Step 12: Implement — backtest_runs 表 schema 加入 init_schema()**
 
 在 `backend/app/services/eval_recorder.py` 顶部加 schema 常量:
 
@@ -428,7 +428,7 @@ def init_schema(self) -> None:
         con.executescript(_BACKTEST_RUNS_SCHEMA)
 ```
 
-- [ ] **Step 13: Run test — verify pass**
+- [x] **Step 13: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/unit/test_eval_recorder.py::test_backtest_runs_table_schema -v
@@ -436,7 +436,7 @@ uv run pytest backend/tests/unit/test_eval_recorder.py::test_backtest_runs_table
 
 Expected: PASS.
 
-- [ ] **Step 14: 跑全套 backend test 确认无回归**
+- [x] **Step 14: 跑全套 backend test 确认无回归**
 
 ```bash
 uv run pytest backend/tests/unit/ -v --maxfail=3
@@ -444,7 +444,7 @@ uv run pytest backend/tests/unit/ -v --maxfail=3
 
 Expected: 全 PASS,无回归。
 
-- [ ] **Step 15: Commit**
+- [x] **Step 15: Commit**
 
 ```bash
 git add backend/app/services/eval_models.py backend/app/services/eval_recorder.py backend/tests/unit/test_eval_recorder.py
