@@ -985,7 +985,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.4 — TushareBacktestAdapter (cut_o
 - Create: `backend/eval/dd_report/kb_backtest_adapter.py`
 - Test: `backend/tests/eval/dd_report/test_kb_backtest_adapter.py`
 
-- [ ] **Step 1: Write failing test — KB adapter 过滤 publish_date > cut_off 的 chunk**
+- [x] **Step 1: Write failing test — KB adapter 过滤 publish_date > cut_off 的 chunk**
 
 ```python
 # backend/tests/eval/dd_report/test_kb_backtest_adapter.py
@@ -1066,7 +1066,7 @@ def test_kb_adapter_cut_off_required() -> None:
         KBBacktestAdapter(inner=MagicMock())  # type: ignore[call-arg]
 ```
 
-- [ ] **Step 2: Run test — verify failure**
+- [x] **Step 2: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_kb_backtest_adapter.py -v
@@ -1074,7 +1074,7 @@ uv run pytest backend/tests/eval/dd_report/test_kb_backtest_adapter.py -v
 
 Expected: FAIL — adapter 不存在。
 
-- [ ] **Step 3: Implement — KBBacktestAdapter**
+- [x] **Step 3: Implement — KBBacktestAdapter**
 
 ```python
 # backend/eval/dd_report/kb_backtest_adapter.py
@@ -1121,7 +1121,7 @@ class KBBacktestAdapter:
         return pd <= self.cut_off
 ```
 
-- [ ] **Step 4: Run test — verify pass**
+- [x] **Step 4: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_kb_backtest_adapter.py -v
@@ -1129,7 +1129,7 @@ uv run pytest backend/tests/eval/dd_report/test_kb_backtest_adapter.py -v
 
 Expected: 4 个 test 全 PASS.
 
-- [ ] **Step 5: Mypy strict check**
+- [x] **Step 5: Mypy strict check**
 
 ```bash
 cd backend && uv run mypy app eval/dd_report --strict
@@ -1137,7 +1137,7 @@ cd backend && uv run mypy app eval/dd_report --strict
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/eval/dd_report/kb_backtest_adapter.py backend/tests/eval/dd_report/test_kb_backtest_adapter.py
