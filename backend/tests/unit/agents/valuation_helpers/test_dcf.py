@@ -452,3 +452,138 @@ def test_dcf_value_empty_growth_trajectory_raises() -> None:
             terminal_growth=0.025,
             wacc=0.08,
         )
+
+
+# ── compute_dcf_sensitivity ───────────────────────────────────────────────────
+
+
+def test_sensitivity_shape_5x5() -> None:
+    """default 5×5 matrix"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_sensitivity
+
+    matrix = compute_dcf_sensitivity(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        base_terminal_growth=0.025,
+        base_wacc=0.08,
+    )
+    assert len(matrix) == 5
+    assert all(len(row) == 5 for row in matrix)
+
+
+def test_sensitivity_center_matches_base_dcf() -> None:
+    """matrix[2][2] (base wacc, base terminal) == 直接调 compute_dcf_value 的结果"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_sensitivity, compute_dcf_value
+
+    matrix = compute_dcf_sensitivity(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        base_terminal_growth=0.025,
+        base_wacc=0.08,
+    )
+    expected = compute_dcf_value(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        terminal_growth=0.025,
+        wacc=0.08,
+    )
+    assert matrix[2][2] == pytest.approx(expected, rel=0.001)
+
+
+def test_sensitivity_lower_wacc_higher_value() -> None:
+    """同一列(同 terminal)low wacc 给更高 value(row 0 wacc -2% > row 4 wacc +2%)"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_sensitivity
+
+    matrix = compute_dcf_sensitivity(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        base_terminal_growth=0.025,
+        base_wacc=0.08,
+    )
+    for col in range(5):
+        assert matrix[0][col] > matrix[4][col]
+
+
+def test_sensitivity_higher_terminal_higher_value() -> None:
+    """同一行(同 wacc)higher terminal 给更高 value(col 4 terminal+1% > col 0 terminal-1%)"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_sensitivity
+
+    matrix = compute_dcf_sensitivity(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        base_terminal_growth=0.025,
+        base_wacc=0.08,
+    )
+    for row in range(5):
+        # 跳过 divergent cells (value=0); 其它必单调
+        nonzero = [matrix[row][c] for c in range(5) if matrix[row][c] > 0]
+        if len(nonzero) >= 2:
+            # 单调递增(higher terminal → higher value)
+            for c in range(len(nonzero) - 1):
+                assert nonzero[c] <= nonzero[c + 1] + 1e-6
+
+
+def test_sensitivity_divergent_cells_are_zero() -> None:
+    """terminal ≥ wacc 的 cell → 0.0(数学发散 fallback)"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_sensitivity
+
+    # base wacc 6%, base terminal 4%: 当 wacc -2% (=4%) 且 terminal +1% (=5%) → terminal > wacc → 0
+    matrix = compute_dcf_sensitivity(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        base_terminal_growth=0.04,
+        base_wacc=0.06,
+    )
+    # row 0 (wacc 4%), col 4 (terminal 5%) → 发散 → 0
+    assert matrix[0][4] == 0.0
+
+
+def test_sensitivity_custom_deltas() -> None:
+    """custom wacc/terminal deltas 也工作(non-default 5×5 not assumed)"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_sensitivity
+
+    matrix = compute_dcf_sensitivity(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        base_terminal_growth=0.025,
+        base_wacc=0.08,
+        wacc_deltas=(0.0, 0.01),
+        terminal_deltas=(0.0, 0.005, 0.01),
+    )
+    assert len(matrix) == 2
+    assert all(len(row) == 3 for row in matrix)
+
+
+def test_sensitivity_propagates_non_divergent_errors() -> None:
+    """non-divergent compute_dcf_value 错误(NaN, neg FCF)不该 swallow,直接上抛"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_sensitivity
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_sensitivity(
+            free_cash_flow_base=-100e8,  # 亏损 → raise,不是 divergent
+            shares_outstanding=10e8,
+            growth_trajectory=[0.05] * 10,
+            base_terminal_growth=0.025,
+            base_wacc=0.08,
+        )
+
+
+def test_wacc_boundary_d_e_exactly_1_no_premium() -> None:
+    """Task 7 review M1 fold:d/e == 1.0 (strict > threshold) → no leverage premium"""
+    from app.agents.valuation_helpers.dcf import compute_company_wacc
+
+    wacc = compute_company_wacc(
+        industry_baseline_wacc=0.08,
+        company_beta=1.0,
+        debt_to_equity=1.0,  # boundary
+    )
+    # β neutral + d/e at boundary → 8% + 0 + 0 = 8%
+    assert wacc == pytest.approx(0.08, rel=0.001)

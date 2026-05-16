@@ -26,7 +26,7 @@ __all__ = [
     "compute_growth_trajectory",
     "compute_company_wacc",
     "compute_dcf_value",
-    # compute_dcf_sensitivity — added in Task 8
+    "compute_dcf_sensitivity",
 ]
 
 # Bull/bear scenario multipliers (spec § 6.3 defaults; calibrate post-dogfood).
@@ -266,3 +266,46 @@ def compute_dcf_value(
     # 4. EV → implied price
     enterprise_value = pv_fcf_total + pv_terminal
     return enterprise_value / shares_outstanding
+
+
+def compute_dcf_sensitivity(
+    *,
+    free_cash_flow_base: float,
+    shares_outstanding: float,
+    growth_trajectory: list[float],
+    base_terminal_growth: float,
+    base_wacc: float,
+    wacc_deltas: tuple[float, ...] = (-0.02, -0.01, 0.0, 0.01, 0.02),
+    terminal_deltas: tuple[float, ...] = (-0.01, -0.005, 0.0, 0.005, 0.01),
+) -> list[list[float]]:
+    """生成 sensitivity matrix:matrix[i][j] = DCF at (wacc=base+wacc_deltas[i], terminal=base+terminal_deltas[j])
+
+    Default 5×5 (deltas 数组长度决定 shape)。
+    Divergent cell (terminal ≥ wacc) → 0.0 不 raise(caller 看到 0 知道是发散,narrative flag)。
+    其它输入错(NaN / 负 FCF / 空 trajectory 等)→ propagate compute_dcf_value 的 raise。
+
+    spec ref: 2026-05-16-v1.x-multi-valuation-cross-check-design.md § 6.5(灵敏度表必做)
+    """
+    matrix: list[list[float]] = []
+    for wacc_d in wacc_deltas:
+        row: list[float] = []
+        wacc = base_wacc + wacc_d
+        for terminal_d in terminal_deltas:
+            terminal = base_terminal_growth + terminal_d
+            try:
+                v = compute_dcf_value(
+                    free_cash_flow_base=free_cash_flow_base,
+                    shares_outstanding=shares_outstanding,
+                    growth_trajectory=growth_trajectory,
+                    terminal_growth=terminal,
+                    wacc=wacc,
+                )
+                row.append(v)
+            except InsufficientDataForModelError as exc:
+                # 只 swallow Gordon-divergence 错(terminal ≥ wacc),其它 propagate
+                if exc.missing_field == "terminal_growth_vs_wacc":
+                    row.append(0.0)
+                else:
+                    raise
+        matrix.append(row)
+    return matrix
