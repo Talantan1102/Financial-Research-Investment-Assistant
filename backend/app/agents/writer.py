@@ -122,6 +122,82 @@ def _format_user_preferences(state: ResearchState) -> str:
     return "\n".join(lines)
 
 
+def _format_cross_check_block(state: ResearchState) -> str:
+    """v1.x A5a: 根据 state.valuation_analysis 状态产生 narrative 引用约束 block.
+
+    valuation_analysis=None → return ""(LLM 自由写,跟 v0.8.5 一样)
+    consistency=consistent  → 提醒 narrative 提及一致性
+    consistency=moderate    → 提醒 narrative 解释偏离原因
+    consistency=severe + diagnosis exists → 提醒 narrative 显式引用 diagnosis.narrative
+    consistency=severe + diagnosis None   → 提醒 narrative flag 诊断不确定
+
+    spec ref: 2026-05-16-v1.x-multi-valuation-cross-check-design.md § 9.2
+    """
+    va = state.valuation_analysis
+    if va is None or va.valuation_consistency is None:
+        return ""
+
+    # 收集激活的 lens 数字给 LLM context
+    vals_lines: list[str] = []
+    if va.pe_value is not None:
+        vals_lines.append(f"  - PE: {va.pe_value:,.2f}")
+    if va.pb_value is not None:
+        vals_lines.append(f"  - PB: {va.pb_value:,.2f}")
+    if va.ev_ebitda_value is not None:
+        vals_lines.append(f"  - EV/EBITDA: {va.ev_ebitda_value:,.2f}")
+    if va.dcf_base is not None:
+        vals_lines.append(f"  - DCF base: {va.dcf_base:,.2f}")
+    if va.dcf_bull is not None:
+        vals_lines.append(f"  - DCF bull: {va.dcf_bull:,.2f}")
+    if va.dcf_bear is not None:
+        vals_lines.append(f"  - DCF bear: {va.dcf_bear:,.2f}")
+    vals_block = "\n".join(vals_lines) if vals_lines else "  (无有效 lens 数据)"
+
+    header = (
+        f"\n\n# v1.x A5a cross-check 约束(Critic 第 7 维 valuation_consistency 守护)\n"
+        f"多模型估值结果 ({va.valuation_consistency}):\n"
+        f"{vals_block}\n"
+    )
+
+    if va.valuation_consistency == "consistent":
+        return (
+            header
+            + "**§ 估值 narrative 要求**:多个 lens 信号一致,narrative 应用 '一致 / 吻合 / 趋同' "
+            + "等词显式说明 cross-check 收敛,给读者 confidence。\n"
+        )
+
+    if va.valuation_consistency == "moderate":
+        return (
+            header
+            + "**§ 估值 narrative 要求**:lens 存在 15-30% 偏离,narrative 必须用 "
+            + "'偏离 / 差异 / 偏低 / 偏高 / 不一致' 等词显式解释偏离原因(行业周期 / 业务模式特点等)。\n"
+        )
+
+    # severe
+    if va.outlier_diagnosis is not None:
+        d = va.outlier_diagnosis
+        return (
+            header
+            + "\n**Outlier 诊断**(由 OutlierDiagnosisAgent 产出):\n"
+            + f"- outlier_model: {d.outlier_model.value}\n"
+            + f"- likely_cause: {d.likely_cause}\n"
+            + f"- confidence: {d.confidence}\n"
+            + f"- recommended_action: {d.recommended_action}\n"
+            + f"- diagnosis narrative: {d.narrative}\n\n"
+            + "**§ 估值 narrative 要求**:cross-check 严重打架(>30% CV),narrative 必须"
+            + f"**显式包含**上面的 diagnosis narrative 全文('{d.narrative}')"
+            + "。禁止掩饰 / 平均化打架。打架本身是 signal,不是 bug。\n"
+        )
+
+    # severe but no diagnosis
+    return (
+        header
+        + "**§ 估值 narrative 要求**:cross-check 严重打架但 OutlierDiagnosisAgent 未产出诊断 "
+        + "(LLM 失败 fallback);narrative 必须用 '无法诊断' / '不确定' 等词显式 flag,"
+        + "建议人工 review。禁止隐藏 cross-check 不一致信号。\n"
+    )
+
+
 def _build_section6_constraint_block(state: ResearchState) -> str:
     """Build § 6 constraint block conditioned on all 6 input fields.
 
@@ -339,6 +415,11 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
     # v0.9 — chat preference block (empty string when no preferences).
     preference_block = _format_user_preferences(state)
 
+    # v1.x A5a — cross-check constraint block (empty string when no valuation_analysis
+    # or valuation_consistency is None). Injects lens numbers + narrative rules so the
+    # LLM can correctly reference outlier diagnosis / consistency signal.
+    cross_check_block = _format_cross_check_block(state)
+
     # v1.x — Critic factuality feedback for writer retry path (spec § 7.2 / Task 1.9).
     # When ResearchState.writer_critic_feedback is set (populated by
     # writer_retry_transition node when factuality < 7.0), inject a feedback
@@ -358,6 +439,7 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
         + risk_framing
         + section6_block
         + preference_block
+        + cross_check_block  # v1.x A5a
         + f"\n\n# Insights\n{insights_str}\n"
         + f"\n# 用户原始需求 / 标的信息\n{state.user_message}\n"
         + f"\n# 本次 request_id(填入 JSON 的 request_id 字段)\n{state.request_id}\n"
