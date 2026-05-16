@@ -1,8 +1,15 @@
 """一次性 backfill: 老 persona blob → chat_memory_persona_items (Plan Task 6).
 
 调用时机：app_main lifespan startup 时检测一次。
-跑过的标记位记在每个 user 的 working_block.token_count 字段（向后兼容方案），
-而是用 "if 该 user 已有 persona_items 则 skip" 做幂等判断。
+**不记**跑过的标记位（如 working_block.token_count 字段），而是用 "if 该 user 已有
+persona_items 则 skip" 做幂等判断 — schema 简单 + 反映实际状态而非可能漂移的 flag。
+
+## 已知限制 (v1.0 接受, scale 前修复)
+
+- **多 worker race**: count() == 0 → INSERT 是 TOCTOU; `uvicorn --workers N` /
+  k8s replicas N 启动时, N 个 worker 同时观测 count == 0, 同时 insert 会双倍 row.
+  当前单实例 dev 不撞; 多 worker 前需加 PG advisory lock (`pg_try_advisory_xact_lock`
+  hashed by user_id) 或 UNIQUE(user_id, source, position) + IntegrityError 兜底.
 """
 
 from __future__ import annotations
@@ -79,8 +86,8 @@ def migrate_all(session_factory: Any) -> dict[str, int]:
             result = migrate_user_persona(session=per_user_session, user_id=uid)
             key = result["status"]
             stats[key] = stats.get(key, 0) + 1
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("persona migration failed user=%s: %s", uid, exc)
+        except Exception:
+            logger.exception("persona migration failed user=%s", uid)
             stats["errors"] += 1
         finally:
             per_user_session.close()

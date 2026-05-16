@@ -267,6 +267,9 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
 
     # Persona Editable UI Plan Task 6 — 一次性 backfill (幂等)
     # SessionLocal: app.core.database.SessionLocal (sync session factory, used by Celery tasks)
+    # Must run before any code path that reads persona items (Task 17 wires agent path).
+    from sqlalchemy.exc import ProgrammingError as _PgProgrammingError
+
     try:
         from scripts.migrate_persona_blob_to_items import migrate_all
 
@@ -274,8 +277,14 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
 
         stats = migrate_all(SessionLocal)
         logger.info("persona migration stats: %s", stats)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("persona migration startup hook failed: %s", exc)
+    except _PgProgrammingError:
+        # 表不存在等 schema 问题 — silent fail 会让 agent 看到空 persona, 标 ERROR
+        logger.exception(
+            "persona migration startup hook 失败 (schema 问题, 检查 create_all 是否跑过)",
+        )
+    except Exception:
+        # 运行时错误 (DB down 等) — 不阻塞启动, 但保留 traceback 便于诊断
+        logger.exception("persona migration startup hook 失败 (运行时错误)")
 
     yield
 

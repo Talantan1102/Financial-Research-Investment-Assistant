@@ -76,3 +76,24 @@ def test_migrate_user_persona_no_block_no_op() -> None:
     result = migrate_user_persona(session=session, user_id=uuid4())
 
     assert result == {"status": "noop", "reason": "no persona block"}
+
+
+@pytest.mark.unit
+def test_migrate_user_persona_block_with_empty_content_is_noop() -> None:
+    """block 存在但 content 为空 → empty blob noop, 不 insert/commit."""
+    session = MagicMock()
+    session.query.return_value.filter_by.return_value.count.return_value = 0
+    block = ChatMemoryWorkingBlock(
+        user_id=uuid4(),
+        block_name="persona",
+        content="",
+        max_tokens=500,
+        token_count=0,
+    )
+    session.query.return_value.filter_by.return_value.first.return_value = block
+
+    result = migrate_user_persona(session=session, user_id=uuid4())
+
+    assert result == {"status": "noop", "reason": "empty blob"}
+    session.add.assert_not_called()
+    session.commit.assert_not_called()
