@@ -114,18 +114,46 @@ describe('MemoryPage', () => {
     )
   })
 
-  it('renders working blocks card from /blocks', async () => {
+  it('renders working blocks card from /blocks (persona filtered — has own tab)', async () => {
+    // M2 fix: persona block is filtered out of the sidebar; it has its own dedicated tab.
+    // The mock returns only a persona block, so the sidebar should show the empty state.
+    server.use(
+      http.get(`${API_BASE}/api/v0/memory/blocks`, () =>
+        HttpResponse.json({
+          blocks: [
+            // persona is filtered out by MemoryWorkingBlocks
+            {
+              block_name: 'persona',
+              content: 'long-term value investor',
+              token_count: 5,
+              max_tokens: 500,
+              updated_at: '2026-05-11T00:00:00Z',
+            },
+            // scratchpad is shown
+            {
+              block_name: 'scratchpad',
+              content: 'meeting notes',
+              token_count: 3,
+              max_tokens: 1000,
+              updated_at: '2026-05-11T00:00:00Z',
+            },
+          ],
+        }),
+      ),
+    )
+
     render(
       <MemoryRouter>
         <MemoryPage />
       </MemoryRouter>,
     )
 
+    // scratchpad is shown in the sidebar
     await waitFor(() =>
-      expect(screen.getByText(/persona/i)).toBeInTheDocument(),
+      expect(screen.getByText('scratchpad')).toBeInTheDocument(),
     )
-    expect(
-      screen.getByText(/long-term value investor/),
-    ).toBeInTheDocument()
+    expect(screen.getByText(/meeting notes/)).toBeInTheDocument()
+    // persona block content NOT in sidebar (it's in the dedicated persona tab)
+    expect(screen.queryByText('long-term value investor')).not.toBeInTheDocument()
   })
 })

@@ -346,7 +346,7 @@ def test_sync_to_working_block_upserts_existing() -> None:
     session.query.side_effect = _dispatch
     service = PersonaService(pg_session_factory=factory)
 
-    service._sync_to_working_block(session=None, user_id=user_id)
+    service._sync_to_working_block(user_id=user_id)
 
     assert "## 你声明的" in existing_block.content
     session.commit.assert_called()
@@ -375,7 +375,7 @@ def test_sync_to_working_block_inserts_new() -> None:
     session.query.side_effect = _dispatch
     service = PersonaService(pg_session_factory=factory)
 
-    service._sync_to_working_block(session=None, user_id=uuid4())
+    service._sync_to_working_block(user_id=uuid4())
 
     session.add.assert_called()
     session.commit.assert_called()
@@ -408,6 +408,6 @@ def test_sync_to_working_block_rolls_back_on_commit_failure() -> None:
     service = PersonaService(pg_session_factory=factory)
 
     with pytest.raises(OperationalError):
-        service._sync_to_working_block(session=None, user_id=uuid4())
+        service._sync_to_working_block(user_id=uuid4())
 
     session.rollback.assert_called_once()

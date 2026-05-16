@@ -83,7 +83,7 @@ class PersonaService:
             raise
         finally:
             session.close()
-        self._sync_to_working_block(session=None, user_id=user_id)
+        self._sync_to_working_block(user_id=user_id)
         return item
 
     def update_item(self, *, user_id: UUID, item_id: UUID, text: str) -> ChatMemoryPersonaItem:
@@ -113,7 +113,7 @@ class PersonaService:
             raise
         finally:
             session.close()
-        self._sync_to_working_block(session=None, user_id=user_id)
+        self._sync_to_working_block(user_id=user_id)
         return item
 
     def delete_item(self, *, user_id: UUID, item_id: UUID) -> None:
@@ -133,7 +133,7 @@ class PersonaService:
             raise
         finally:
             session.close()
-        self._sync_to_working_block(session=None, user_id=user_id)
+        self._sync_to_working_block(user_id=user_id)
 
     # ----- agent write API (HierarchicalMemory.core_memory_* 转译) -----
 
@@ -170,7 +170,7 @@ class PersonaService:
             raise
         finally:
             session.close()
-        self._sync_to_working_block(session=None, user_id=user_id)
+        self._sync_to_working_block(user_id=user_id)
         return new_items
 
     def apply_agent_replace(
@@ -212,7 +212,7 @@ class PersonaService:
             session.close()
 
         if matched_target is not None:
-            self._sync_to_working_block(session=None, user_id=user_id)
+            self._sync_to_working_block(user_id=user_id)
             return [matched_target]
 
         # fallback: 没命中 → append 一条新 agent item（含命中 user 区也走这）
@@ -270,7 +270,7 @@ class PersonaService:
             return 0
         return int(max_pos) + 1
 
-    def _sync_to_working_block(self, *, session: Session | None, user_id: UUID) -> None:
+    def _sync_to_working_block(self, *, user_id: UUID) -> None:
         """渲染 items → markdown → 写回 ChatMemoryWorkingBlock.persona.content.
 
         保 ChatPlanner Phase 1 render_persona_markdown 路径不变；下次 session
@@ -286,8 +286,7 @@ class PersonaService:
         """
 
         markdown = self.render_to_markdown(user_id=user_id)
-        own_session = session is None
-        sess = session or self._session_factory()
+        sess = self._session_factory()
         try:
             block = (
                 sess.query(ChatMemoryWorkingBlock)
@@ -310,5 +309,4 @@ class PersonaService:
             sess.rollback()
             raise
         finally:
-            if own_session:
-                sess.close()
+            sess.close()
