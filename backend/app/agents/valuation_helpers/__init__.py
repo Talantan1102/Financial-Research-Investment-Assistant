@@ -5,6 +5,6 @@ LLM 局部 override(增长率 base / router active_models)+ OutlierDiagnosisAgen
 是更上层的事,在 industry_model_router / outlier_diagnosis_agent 模块。
 """
 
-from app.agents.valuation_helpers.exceptions import InsufficientDataForModel
+from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
 
-__all__ = ["InsufficientDataForModel"]
+__all__ = ["InsufficientDataForModelError"]

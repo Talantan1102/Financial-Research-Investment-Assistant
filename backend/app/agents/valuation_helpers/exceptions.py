@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-class InsufficientDataForModel(Exception):  # noqa: N818
+class InsufficientDataForModelError(Exception):
     """raised when a Python valuation helper cannot compute due to missing/invalid input.
 
     Caller (ValuationCalculator) catches this and removes the failing model from

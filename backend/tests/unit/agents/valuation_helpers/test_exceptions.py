@@ -1,4 +1,4 @@
-"""L0 — InsufficientDataForModel exception contract."""
+"""L0 — InsufficientDataForModelError exception contract."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ import pytest
 
 
 def test_insufficient_data_for_model_is_exception() -> None:
-    from app.agents.valuation_helpers.exceptions import InsufficientDataForModel
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
 
-    exc = InsufficientDataForModel(
+    exc = InsufficientDataForModelError(
         model="dcf",
         missing_field="forecast_revenue",
         reason="tushare get_forecast 返回空",
@@ -22,10 +22,10 @@ def test_insufficient_data_for_model_is_exception() -> None:
 
 
 def test_insufficient_data_raises_correctly() -> None:
-    from app.agents.valuation_helpers.exceptions import InsufficientDataForModel
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
 
-    with pytest.raises(InsufficientDataForModel) as exc_info:
-        raise InsufficientDataForModel(
+    with pytest.raises(InsufficientDataForModelError) as exc_info:
+        raise InsufficientDataForModelError(
             model="pe",
             missing_field="net_profit",
             reason="负利润,PE 失效",
