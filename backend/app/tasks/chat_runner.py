@@ -422,6 +422,7 @@ def run_chat(
     session_id: str,
     user_id: str,
     user_message: str,
+    resume_checkpoint_id: str | None = None,
 ) -> None:
     """Celery sync entry. Bridges to async via asyncio.run() + builds worker-side deps.
 
@@ -431,6 +432,9 @@ def run_chat(
     - session_factory: _build_session_factory_for_worker — async_sessionmaker
       tied to PG via _sqlalchemy_async_pg_url
     - redis: _build_redis_for_worker — redis.asyncio.Redis from REDIS_URL
+
+    Plan 3 Task 5:resume_checkpoint_id 直接透传给 run_chat_async,worker
+    LangGraph 从该 checkpoint state 续跑(spec § 5.4 Scenario D / § 6.4)。
 
     L0 / L1 path 直接 await run_chat_async(test_chat_runner.py);
     L2 path 走真 worker subprocess(test_chat_inflight_l2.py)。
@@ -448,18 +452,37 @@ def run_chat(
             user_message=user_message,
             session_id=session_id,
             user_id=user_id,
+            resume_checkpoint_id=resume_checkpoint_id,
         )
     )
 
 
-def enqueue_run_chat(*, task_id: str, session_id: str, user_id: str, user_message: str) -> Any:
-    """Production enqueue — POST /chat 改造(Task 5)调本函数。
+def enqueue_run_chat(
+    *,
+    task_id: str,
+    session_id: str,
+    user_id: str,
+    user_message: str,
+    resume_checkpoint_id: str | None = None,
+    parent_task_id: str | None = None,  # noqa: ARG001 — audit-only; worker doesn't consume
+) -> Any:
+    """Production enqueue — POST /chat 改造(Plan 2 Task 5)+ POST /chat/retry
+    (Plan 3 Task 5)都调本函数。
 
-    Tests monkey-patch this function to bypass real Celery .delay().
+    Plan 3 retry 加 resume_checkpoint_id 参数;worker async entry 用它构造
+    RunnableConfig {configurable: {thread_id, checkpoint_id}} 让 LangGraph
+    从 checkpoint state 续跑。
+
+    parent_task_id 是 audit-only(retry 链已经在 chat_tasks.parent_task_id
+    列里持久化了);此参数让 endpoint 显式表达"这是 retry enqueue"以便
+    后续监控 hook 接入,但 worker 路径不需要消费它。
+
+    Tests monkey-patch this function to bypass real Celery .delay()。
     """
     return run_chat.delay(
         task_id=task_id,
         session_id=session_id,
         user_id=user_id,
         user_message=user_message,
+        resume_checkpoint_id=resume_checkpoint_id,
     )

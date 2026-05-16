@@ -889,3 +889,95 @@ async def chat_cancel(
         "receivers": str(receivers),
         "status": "cancel_published",
     }
+
+
+# ---------------------------------------------------------------------------
+# Plan 3 Task 5: POST /api/v0/chat/retry/{task_id} — resume failed task
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/v0/chat/retry/{task_id}")
+async def chat_retry(
+    task_id: str,
+    pg_factory: Any | None = Depends(get_async_session_factory),
+    redis: AsyncRedis | None = Depends(get_redis_async),
+) -> dict[str, str]:
+    """Retry failed/cancelled/partial task from LangGraph checkpoint.
+
+    Spec § 5.4 Scenario D + § 6.4 retry 链:
+    - task.status 必须 ∈ {error, partial, cancelled}(done / running / queued 拒)
+    - task.langgraph_checkpoint_id 必须非空,否则 422(从头重跑要重发 prompt)
+    - 创建新 chat_tasks row,parent_task_id=旧 tid,initial_prompt_message_id 沿用
+    - enqueue Celery 带 resume_checkpoint_id,worker LangGraph 续跑
+
+    Status codes:
+        - 200: new task enqueued; body = {task_id, parent_task_id, stream_url,
+          resumed_from_checkpoint}
+        - 404: invalid task_id (not UUID) OR task not found
+        - 409: task status ∉ retryable set
+        - 422: task has no langgraph_checkpoint_id (early failure before commit)
+        - 503: PG / Redis unavailable
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(status_code=404, detail=f"invalid task_id: {task_id}") from exc
+
+    if pg_factory is None or redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="chat retry not available — PG or Redis unavailable",
+        )
+
+    task_repo = ChatTaskRepo(pg_factory)
+    old_task = await task_repo.get_by_id(task_uuid)
+    if old_task is None:
+        raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+
+    if old_task.status not in ("error", "partial", "cancelled"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"cannot retry task in status={old_task.status}; "
+                "only error/partial/cancelled retryable"
+            ),
+        )
+    if not old_task.langgraph_checkpoint_id:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "cannot resume: task has no langgraph_checkpoint_id "
+                "(early failure before any checkpoint commit)"
+            ),
+        )
+
+    # Create new task linked to old (parent_task_id chain; initial prompt msg sticky)
+    new_task = await task_repo.create_queued(
+        session_id=old_task.session_id,
+        user_id=old_task.user_id,
+        langgraph_thread_id=old_task.langgraph_thread_id,
+        initial_prompt_message_id=old_task.initial_prompt_message_id,
+        parent_task_id=old_task.id,
+    )
+
+    # Inline import: chat_runner pulls Celery + redis; defer to runtime so the
+    # chat router stays importable in dev environments without Celery configured.
+    from app.tasks.chat_runner import enqueue_run_chat
+
+    enqueue_run_chat(
+        task_id=str(new_task.id),
+        session_id=str(old_task.session_id),
+        user_id=str(old_task.user_id) if old_task.user_id else "anonymous",
+        # resume 不需要新 user_message — graph 从 checkpoint state 续跑,
+        # 原始 user prompt 已经在 checkpoint 的 messages 里了。
+        user_message="",
+        resume_checkpoint_id=old_task.langgraph_checkpoint_id,
+        parent_task_id=str(old_task.id),
+    )
+
+    return {
+        "task_id": str(new_task.id),
+        "parent_task_id": str(old_task.id),
+        "stream_url": f"/api/v0/chat/stream/{new_task.id}",
+        "resumed_from_checkpoint": old_task.langgraph_checkpoint_id,
+    }
