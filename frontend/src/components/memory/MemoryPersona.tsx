@@ -1,5 +1,5 @@
 import { Alert, Button, Input, message, Modal, Popconfirm, Spin } from 'antd'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   addPersonaItem,
@@ -26,6 +26,14 @@ export default function MemoryPersona({ initialData }: MemoryPersonaProps = {}) 
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [recentlyUpgradedId, setRecentlyUpgradedId] = useState<string | null>(null)
+  const upgradeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (upgradeTimerRef.current !== null) clearTimeout(upgradeTimerRef.current)
+    },
+    [],
+  )
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -100,7 +108,8 @@ export default function MemoryPersona({ initialData }: MemoryPersonaProps = {}) 
       if (item.source === 'agent' && updated.source === 'user') {
         setRecentlyUpgradedId(updated.id)
         void message.success('已迁到你的声明区')
-        setTimeout(() => setRecentlyUpgradedId(null), 1500)
+        if (upgradeTimerRef.current !== null) clearTimeout(upgradeTimerRef.current)
+        upgradeTimerRef.current = setTimeout(() => setRecentlyUpgradedId(null), 1500)
       }
       await refresh()
     } catch (err) {
@@ -129,17 +138,17 @@ export default function MemoryPersona({ initialData }: MemoryPersonaProps = {}) 
             添加我的第一条
           </Button>
         </div>
-        {renderAddModal({
-          open: addModalOpen,
-          text: addText,
-          adding,
-          onChange: setAddText,
-          onCancel: () => {
+        <AddModal
+          open={addModalOpen}
+          text={addText}
+          adding={adding}
+          onChange={setAddText}
+          onCancel={() => {
             setAddModalOpen(false)
             setAddText('')
-          },
-          onOk: handleAdd,
-        })}
+          }}
+          onOk={handleAdd}
+        />
       </>
     )
   }
@@ -172,17 +181,17 @@ export default function MemoryPersona({ initialData }: MemoryPersonaProps = {}) 
         onDelete={handleDelete}
         recentlyUpgradedId={recentlyUpgradedId}
       />
-      {renderAddModal({
-        open: addModalOpen,
-        text: addText,
-        adding,
-        onChange: setAddText,
-        onCancel: () => {
+      <AddModal
+        open={addModalOpen}
+        text={addText}
+        adding={adding}
+        onChange={setAddText}
+        onCancel={() => {
           setAddModalOpen(false)
           setAddText('')
-        },
-        onOk: handleAdd,
-      })}
+        }}
+        onOk={handleAdd}
+      />
     </div>
   )
 }
@@ -296,7 +305,7 @@ function Section({
   )
 }
 
-interface AddModalArgs {
+interface AddModalProps {
   open: boolean
   text: string
   adding: boolean
@@ -305,7 +314,7 @@ interface AddModalArgs {
   onOk: () => void
 }
 
-function renderAddModal({ open, text, adding, onChange, onCancel, onOk }: AddModalArgs) {
+function AddModal({ open, text, adding, onChange, onCancel, onOk }: AddModalProps) {
   return (
     <Modal
       open={open}
