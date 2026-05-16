@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -57,10 +58,16 @@ async def create_chat(
 
 @router.get("/{session_id}")
 async def get_chat(session_id: str, repo: ChatSessionRepo = Depends(get_repo)) -> dict[str, Any]:
+    """Get one session with messages + active_task_id (if a chat_task is in_flight).
+
+    Plan 1 Task 7: 新增 active_task_id 字段(null 或 chat_task.id str)。每条 message
+    携带 task_id + status,方便前端展示 task-level 状态(Plan 2 会扩展 stream URL)。
+    """
     s = await repo.get_session(session_id)
     if not s:
         raise HTTPException(404, "session not found")
     msgs = await repo.list_messages(session_id)
+    active_task = await repo.find_active_task_for_session(uuid.UUID(session_id))
     last_preview = msgs[-1].content[:100] if msgs else ""
     return {
         "session": _to_view(s, message_count=len(msgs), preview=last_preview).model_dump(),
@@ -70,10 +77,13 @@ async def get_chat(session_id: str, repo: ChatSessionRepo = Depends(get_repo)) -
                 "role": m.role,
                 "content": m.content,
                 "message_type": m.message_type,
+                "task_id": str(m.task_id) if m.task_id else None,
+                "status": m.status,
                 "created_at": m.created_at.isoformat() if m.created_at else "",
             }
             for m in msgs
         ],
+        "active_task_id": str(active_task.id) if active_task else None,
     }
 
 

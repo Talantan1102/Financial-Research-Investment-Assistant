@@ -59,6 +59,13 @@ export function buildChatPostUrl(): string {
   return apiUrl('/api/v0/chat')
 }
 
+/**
+ * @deprecated Plan 1 — frontend no longer uses this. Backend endpoint
+ *   GET /api/v0/chat/stream/:id is unimplemented; Plan 2 will reintroduce
+ *   a different endpoint (`/chat/stream/{task_id}`) with real Redis Streams replay.
+ *   This function is kept exported only because `chatApi.test.ts` still tests
+ *   its URL shape and Plan 2 may rename/replace.
+ */
 export function buildChatStreamUrl(
   sessionId: string,
   lastEventId?: number,

@@ -9,6 +9,38 @@ import {
   currentChatActions,
   currentChatState,
 } from '@/store/current-chat'
+import type { ChatDetail, ChatMessage, ChatSession } from '@/types/chat'
+
+function makeSession(id: string): ChatSession {
+  return {
+    id,
+    user_id: null,
+    title: 'mock',
+    created_at: '2026-05-16T00:00:00Z',
+    last_active_at: '2026-05-16T00:00:00Z',
+    message_count: 0,
+    last_msg_preview: null,
+  }
+}
+
+function makeMessage(
+  id: string,
+  role: ChatMessage['role'],
+  content: string,
+  sessionId: string,
+): ChatMessage {
+  return {
+    id,
+    session_id: sessionId,
+    role,
+    content,
+    message_type: 'text',
+    tool_call_data: null,
+    research_report_id: null,
+    research_report_summary: null,
+    created_at: '2026-05-16T00:00:00Z',
+  }
+}
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 
@@ -69,15 +101,16 @@ describe('useChatSSE — abort', () => {
   })
 })
 
-describe('useChatSSE — F6 reconnect (last_event_id)', () => {
+describe('useChatSSE — Plan 1: 断流后改一次性 history reload', () => {
   beforeEach(() => {
     currentChatActions.reset()
     currentChatActions.setSession('s1', [])
   })
 
-  it('reconnects to /stream/:id?last_event_id=N when initial stream closes early', async () => {
+  it('calls GET /api/v0/chats/:id (not /chat/stream/:id) when initial stream closes early', async () => {
     let initialSeen = false
-    let reconnectQuery: string | null = null
+    let getChatSeen = false
+    let legacyStreamSeen = false
 
     server.use(
       http.post(`${API_BASE}/api/v0/chat`, () => {
@@ -87,12 +120,21 @@ describe('useChatSSE — F6 reconnect (last_event_id)', () => {
           { type: 'token', seq: 2, content: 'B' },
         ])
       }),
-      http.get(`${API_BASE}/api/v0/chat/stream/s1`, ({ request }) => {
-        reconnectQuery = new URL(request.url).searchParams.get('last_event_id')
-        return sseResponse([
-          { type: 'token', seq: 3, content: 'C' },
-          { type: 'done', seq: 4 },
-        ])
+      http.get(`${API_BASE}/api/v0/chats/s1`, () => {
+        getChatSeen = true
+        const detail: ChatDetail = {
+          session: makeSession('s1'),
+          messages: [
+            makeMessage('m-user', 'user', 'hi', 's1'),
+            makeMessage('m-asst', 'assistant', 'AB (persisted)', 's1'),
+          ],
+        }
+        return MswHttpResponse.json(detail)
+      }),
+      http.get(`${API_BASE}/api/v0/chat/stream/s1`, () => {
+        // Legacy endpoint must NOT be hit anymore.
+        legacyStreamSeen = true
+        return new MswHttpResponse(null, { status: 404 })
       }),
     )
 
@@ -102,47 +144,66 @@ describe('useChatSSE — F6 reconnect (last_event_id)', () => {
     await act(async () => {
       await result.current.sendMessage('hi')
     })
+
     expect(initialSeen).toBe(true)
-    expect(reconnectQuery).toBe('2')
-    expect(snapshot(currentChatState).last_seq).toBe(4)
-    expect(snapshot(currentChatState).streamingDraft).toBe('')
-    expect(snapshot(currentChatState).messages.at(-1)?.content).toBe('ABC')
-    expect(snapshot(currentChatState).streamingStatus).toBe('idle')
-  })
-})
-
-describe('useChatSSE — F6 backoff sequence', () => {
-  beforeEach(() => {
-    currentChatActions.reset()
-    currentChatActions.setSession('s1', [])
+    expect(getChatSeen).toBe(true)
+    expect(legacyStreamSeen).toBe(false)
   })
 
-  it('uses 1s/2s/4s delays before successful reconnect', async () => {
-    const delays: number[] = []
-    let callCount = 0
+  it('replaces currentChatState.messages with the GET /chats/:id response', async () => {
     server.use(
       http.post(`${API_BASE}/api/v0/chat`, () =>
-        sseResponse([{ type: 'token', seq: 1, content: 'A' }]),
+        sseResponse([
+          { type: 'token', seq: 1, content: 'A' },
+          { type: 'token', seq: 2, content: 'B' },
+        ]),
       ),
-      http.get(`${API_BASE}/api/v0/chat/stream/s1`, () => {
-        callCount += 1
-        if (callCount < 3) return new MswHttpResponse(null, { status: 503 })
-        return sseResponse([{ type: 'done', seq: 2 }])
+      http.get(`${API_BASE}/api/v0/chats/s1`, () => {
+        const detail: ChatDetail = {
+          session: makeSession('s1'),
+          messages: [
+            makeMessage('m-user', 'user', 'hi', 's1'),
+            makeMessage('m-asst', 'assistant', 'reloaded AB content', 's1'),
+          ],
+        }
+        return MswHttpResponse.json(detail)
       }),
     )
+
     const { result } = renderHook(() =>
-      useChatSSE({
-        sessionId: 's1',
-        delayMs: async (ms) => {
-          delays.push(ms)
-        },
-      }),
+      useChatSSE({ sessionId: 's1', delayMs: async () => {} }),
     )
     await act(async () => {
       await result.current.sendMessage('hi')
     })
-    expect(delays.slice(0, 3)).toEqual([1000, 2000, 4000])
-    expect(snapshot(currentChatState).last_seq).toBe(2)
+
+    const s = snapshot(currentChatState)
+    // After reload via setSession, messages should match the GET response.
+    expect(s.messages.length).toBe(2)
+    expect(s.messages.at(-1)?.content).toBe('reloaded AB content')
+    expect(s.messages.at(-1)?.role).toBe('assistant')
+    expect(s.last_seq).toBe(0) // setSession resets last_seq
+    expect(s.streamingDraft).toBe('')
+  })
+
+  it('does not throw and leaves status untouched if GET /chats/:id fails', async () => {
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () =>
+        sseResponse([{ type: 'token', seq: 1, content: 'A' }]),
+      ),
+      http.get(`${API_BASE}/api/v0/chats/s1`, () =>
+        new MswHttpResponse(null, { status: 500 }),
+      ),
+    )
+
+    const { result } = renderHook(() =>
+      useChatSSE({ sessionId: 's1', delayMs: async () => {} }),
+    )
+    await act(async () => {
+      await result.current.sendMessage('hi')
+    })
+    // Silent failure — should not loop / throw; reconnecting status persists.
+    expect(snapshot(currentChatState).streamingStatus).toBe('reconnecting')
   })
 })
 

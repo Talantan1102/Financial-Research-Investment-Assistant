@@ -40,6 +40,8 @@ from pydantic import BaseModel
 
 from app.agents.escalation_extractor import EscalationExtractor
 from app.agents.schemas import GraphState
+from app.services.chat_session_repo import ChatSessionRepo
+from app.services.chat_task_repo import ChatTaskRepo
 from app.services.escalation_record_repo import EscalationRecordRepo
 
 logger = logging.getLogger(__name__)
@@ -69,6 +71,21 @@ def get_escalation_record_repo() -> EscalationRecordRepo:
     Task 11 (which wires the real async DB session factory).
     """
     raise RuntimeError("EscalationRecordRepo dependency not configured")
+
+
+def get_async_session_factory(request: Request) -> Any | None:
+    """Return the async PG session factory wired by app_main lifespan, or None.
+
+    Plan 1 Task 5: POST /api/v0/chat reads this dependency to decide whether to
+    persist chat messages + task rows. If the factory is None (test path / dev
+    without PG), the handler degrades gracefully to legacy streaming-only
+    behavior so existing SSE tests keep passing.
+
+    Sourced from ``app.state.async_session_factory`` (set in app_main.lifespan).
+    Overridden in tests via ``dependency_overrides[get_async_session_factory]``
+    to inject an in-memory sqlite ``async_sessionmaker``.
+    """
+    return getattr(request.app.state, "async_session_factory", None)
 
 
 # ---------------------------------------------------------------------------
@@ -358,12 +375,106 @@ _persona_populated_sessions: set[str] = set()
 """
 
 
+def _coerce_user_uuid(user_id: Any) -> UUID | None:
+    """Resolve a possibly-anonymous user_id into a real UUID or None.
+
+    Production users have UUID; the v0 stub uses ``"anonymous"`` and test code
+    uses ``"test-user"``. Non-UUID strings (anonymous / test stub) → None so
+    that ChatTask.user_id stays NULL pre-auth — matches ChatSession.user_id's
+    nullable behavior. Production PG FK (``users.id``) would otherwise reject
+    a synthetic uuid5 that has no matching row in ``users``.
+
+    C.6 接 JWT 后,user.id 永远是真 UUID,本函数走直通分支。
+    """
+    if isinstance(user_id, UUID):
+        return user_id
+    s = str(user_id)
+    try:
+        return UUID(s)
+    except (ValueError, AttributeError):
+        return None  # anonymous / test stub → NULL in DB
+
+
+async def _finalize_task_persistence(
+    *,
+    pg_factory: Any,
+    task_id: UUID,
+    session_id: str,
+    graph: CompiledStateGraph[Any, Any, Any, Any],
+    config: RunnableConfig,
+    final_state: dict[str, Any] | None,
+    accumulated_token_text: str,
+    graph_error: Exception | None,
+) -> None:
+    """Plan 1 Task 5: write the trailing assistant message + mark chat_task status.
+
+    Called from ``_stream_chat`` finally block when persistence is wired
+    (``pg_factory`` and ``task_id`` both non-None). Failures here are caught
+    by the caller and logged — they MUST NOT propagate into the SSE stream.
+
+    Behavior:
+    - Success path: pick the assistant body in priority order
+        1. ``final_state["final_response"]`` — set by the responder node
+        2. accumulated ``on_chat_model_stream`` token text
+        3. empty string (no responder ran — degraded transcript)
+      then ``append_message(role='assistant', status='done')`` + ``mark_done``.
+    - Error path: assistant body = accumulated text (may be empty), status=error;
+      ``mark_error(error_message=<truncated str(exc)>)``.
+
+    The LangGraph checkpoint id is best-effort: the API surface for it varies
+    across LG versions, so failures to read it fall through to None.
+    """
+    session_repo = ChatSessionRepo(pg_factory)
+    task_repo = ChatTaskRepo(pg_factory)
+
+    if graph_error is None:
+        assistant_content = ""
+        if isinstance(final_state, dict):
+            fr = final_state.get("final_response")
+            if isinstance(fr, str) and fr:
+                assistant_content = fr
+        if not assistant_content:
+            assistant_content = accumulated_token_text
+
+        checkpoint_id: str | None = None
+        try:
+            state = await graph.aget_state(config)
+            cfg = getattr(state, "config", None) or {}
+            configurable = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
+            cp = configurable.get("checkpoint_id") if isinstance(configurable, dict) else None
+            if isinstance(cp, str):
+                checkpoint_id = cp
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("aget_state checkpoint_id unavailable (%s); leaving NULL", exc)
+
+        await session_repo.append_message(
+            session_id=session_id,
+            role="assistant",
+            content=assistant_content,
+            task_id=task_id,
+            status="done",
+        )
+        await task_repo.mark_done(task_id, langgraph_checkpoint_id=checkpoint_id)
+    else:
+        await session_repo.append_message(
+            session_id=session_id,
+            role="assistant",
+            content=accumulated_token_text,
+            task_id=task_id,
+            status="error",
+        )
+        await task_repo.mark_error(task_id, error_message=str(graph_error)[:500])
+
+
 async def _stream_chat(
     req: ChatRequest,
     user: _AnonUser,
     graph: CompiledStateGraph[Any, Any, Any, Any],
     extractor: EscalationExtractor | None,
     record_repo: EscalationRecordRepo | None,
+    *,
+    task_id: UUID | None = None,
+    pg_factory: Any | None = None,
 ) -> AsyncIterator[str]:
     """Async generator: drive astream_events and yield SSE-framed JSON strings.
 
@@ -383,17 +494,19 @@ async def _stream_chat(
     C.5 Plan 3: session-start hook — 第一个 turn 跑 populate_persona_on_session_start
     填 working_blocks(persona). 失败仅 log 不阻塞 chat.
     """
-    # C.5 Plan 3: persona auto-injection (best-effort, fail-safe)
+    # C.5 Plan 3: persona auto-injection (best-effort, fail-safe).
+    # NOTE: use a distinct local name (``persona_pg_factory``) so we do not
+    # shadow the ``pg_factory`` kwarg used by Plan 1 finalize_task_persistence.
     session_key = f"{user.id}:{req.session_id}"
     if session_key not in _persona_populated_sessions:
         _persona_populated_sessions.add(session_key)
         try:
             from app.memory.persona_populator import populate_persona_on_session_start
 
-            pg_factory = _build_async_pg_session_factory_or_none()
-            if pg_factory is not None:
+            persona_pg_factory = _build_async_pg_session_factory_or_none()
+            if persona_pg_factory is not None:
                 user_uuid = user.id if isinstance(user.id, UUID) else UUID(str(user.id))
-                populate_persona_on_session_start(pg_factory, user_id=user_uuid)
+                populate_persona_on_session_start(persona_pg_factory, user_id=user_uuid)
         except Exception as exc:  # noqa: BLE001
             logger.warning("populate_persona_on_session_start failed: %s", exc)
 
@@ -417,31 +530,59 @@ async def _stream_chat(
         return seq
 
     final_state: dict[str, Any] | None = None
+    # Plan 1 Task 5: accumulate token text for assistant message persistence.
+    acc_assistant: list[str] = []
+    graph_error: Exception | None = None
 
     try:
-        async for ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
-            # Capture top-level graph final state for post-stream escalation check
-            if ev.get("event") == "on_chain_end" and ev.get("name") == "LangGraph":
-                final_state = (ev.get("data") or {}).get("output") or {}
+        try:
+            async for ev in graph.astream_events(initial.model_dump(), config=config, version="v2"):
+                # Capture top-level graph final state for post-stream escalation check
+                if ev.get("event") == "on_chain_end" and ev.get("name") == "LangGraph":
+                    final_state = (ev.get("data") or {}).get("output") or {}
 
-            sse = _adapt_event(ev, next_seq())
-            if sse is not None:
-                yield (
-                    f"event: {sse.type}\n"
-                    f"id: {sse.seq}\n"
-                    f"data: {sse.model_dump_json(exclude={'type'})}\n\n"
+                sse = _adapt_event(ev, next_seq())
+                if sse is not None:
+                    # Plan 1: accumulate token-event text for finally-block persistence
+                    if sse.type == "token" and isinstance(sse.data, dict):
+                        acc_assistant.append(str(sse.data.get("text", "")))
+                    yield (
+                        f"event: {sse.type}\n"
+                        f"id: {sse.seq}\n"
+                        f"data: {sse.model_dump_json(exclude={'type'})}\n\n"
+                    )
+        except Exception as exc:
+            graph_error = exc
+            error_event = StreamEvent(
+                type="error",
+                seq=next_seq(),
+                data={"message": str(exc), "traceback": traceback.format_exc()},
+            )
+            yield (
+                f"event: {error_event.type}\n"
+                f"id: {error_event.seq}\n"
+                f"data: {error_event.model_dump_json(exclude={'type'})}\n\n"
+            )
+            # fall through to finally; skip escalation post-processing below
+    finally:
+        # Plan 1 Task 5: persist assistant message + mark chat_task status.
+        # Best-effort — failures here MUST NOT crash the SSE stream.
+        if pg_factory is not None and task_id is not None:
+            try:
+                await _finalize_task_persistence(
+                    pg_factory=pg_factory,
+                    task_id=task_id,
+                    session_id=req.session_id,
+                    graph=graph,
+                    config=config,
+                    final_state=final_state,
+                    accumulated_token_text="".join(acc_assistant),
+                    graph_error=graph_error,
                 )
-    except Exception as exc:
-        error_event = StreamEvent(
-            type="error",
-            seq=next_seq(),
-            data={"message": str(exc), "traceback": traceback.format_exc()},
-        )
-        yield (
-            f"event: {error_event.type}\n"
-            f"id: {error_event.seq}\n"
-            f"data: {error_event.model_dump_json(exclude={'type'})}\n\n"
-        )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Plan 1 finalize_task_persistence failed: %s", exc)
+
+    if graph_error is not None:
         return  # don't attempt escalation after a graph-level error
 
     # ------------------------------------------------------------------
@@ -564,6 +705,7 @@ async def chat(
     chat_agent_graph: CompiledStateGraph[Any, Any, Any, Any] = Depends(get_chat_graph),
     extractor: EscalationExtractor = Depends(get_escalation_extractor),
     record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
+    pg_factory: Any | None = Depends(get_async_session_factory),
 ) -> StreamingResponse:
     """POST /api/v0/chat — stream a chat response as SSE.
 
@@ -584,9 +726,51 @@ async def chat(
     ``escalate_request`` then ``escalate_packet_draft``.
     These require EscalationExtractor + EscalationRecordRepo to be wired
     via dependency_overrides (tests) or app_main lifespan (production).
+
+    Plan 1 Task 5 persistence:
+    - When ``pg_factory`` is non-None (PG configured), the handler inserts the
+      user message + creates a ``chat_tasks`` row (queued → running) before the
+      stream starts. The trailing assistant message + task status (done / error)
+      are written from ``_stream_chat``'s finally block.
+    - When ``pg_factory`` is None (legacy SSE test path / dev without PG), the
+      handler degrades gracefully and skips all persistence work. Existing SSE
+      regression tests rely on this.
     """
+    task_id: UUID | None = None
+
+    if pg_factory is not None:
+        try:
+            session_repo = ChatSessionRepo(pg_factory)
+            task_repo = ChatTaskRepo(pg_factory)
+            user_msg = await session_repo.append_message(
+                session_id=req.session_id,
+                role="user",
+                content=req.message,
+            )
+            task = await task_repo.create_queued(
+                session_id=req.session_id,
+                user_id=_coerce_user_uuid(user.id),
+                langgraph_thread_id=f"{user.id}:{req.session_id}",
+                initial_prompt_message_id=user_msg.id,
+            )
+            await task_repo.mark_running(task.id)
+            task_id = task.id
+        except Exception as exc:  # noqa: BLE001
+            # Best-effort: if persistence fails at entry, log and fall through to
+            # legacy non-persisted stream — don't 500 the user-visible request.
+            logger.exception("Plan 1 entry persistence failed; degrading to legacy path: %s", exc)
+            task_id = None
+
     return StreamingResponse(
-        _stream_chat(req, user, chat_agent_graph, extractor, record_repo),
+        _stream_chat(
+            req,
+            user,
+            chat_agent_graph,
+            extractor,
+            record_repo,
+            task_id=task_id,
+            pg_factory=pg_factory if task_id is not None else None,
+        ),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
