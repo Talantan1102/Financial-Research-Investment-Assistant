@@ -102,14 +102,14 @@ def test_research_state_minimal() -> None:
     assert s.critic_report is None
 
 
-def test_valuation_analysis_v1x_a5a_new_fields_default_none():
+def test_valuation_analysis_v1x_a5a_new_fields_default_none() -> None:
     """v1.x A5a: ValuationAnalysis 7 new fields default None, schema backward compat."""
-    from app.agents.investment_dd_schema import ValuationAnalysis
+    from app.agents.investment_dd_schema import ValuationAnalysis, ValuationModel
 
     va = ValuationAnalysis(
         narrative="test",
         industry_classification="白酒",
-        active_models=["pe", "dcf"],
+        active_models=[ValuationModel.PE, ValuationModel.DCF],
         valuation_consistency="consistent",
     )
 
@@ -128,7 +128,7 @@ def test_valuation_analysis_v1x_a5a_new_fields_default_none():
     assert va.pe_historical_percentile is None
 
 
-def test_outlier_diagnosis_schema_required_fields():
+def test_outlier_diagnosis_schema_required_fields() -> None:
     from app.agents.investment_dd_schema import OutlierDiagnosis, ValuationModel
 
     od = OutlierDiagnosis(
@@ -142,7 +142,7 @@ def test_outlier_diagnosis_schema_required_fields():
     assert od.confidence == "high"
 
 
-def test_critic_dimension_v1x_a5a_adds_valuation_consistency():
+def test_critic_dimension_v1x_a5a_adds_valuation_consistency() -> None:
     from app.agents.schemas import CriticDimensionScore
 
     score = CriticDimensionScore(
@@ -152,3 +152,37 @@ def test_critic_dimension_v1x_a5a_adds_valuation_consistency():
         sub_agent_request_id="req-001",
     )
     assert score.dimension == "valuation_consistency"
+
+
+def test_valuation_analysis_active_models_max_length_4() -> None:
+    """ValuationAnalysis.active_models 超过 4 个 → ValidationError."""
+    from app.agents.investment_dd_schema import ValuationAnalysis, ValuationModel
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ValuationAnalysis(
+            narrative="x",
+            active_models=[  # 5 元素 — exceeds max_length=4
+                ValuationModel.PE,
+                ValuationModel.PB,
+                ValuationModel.EV_EBITDA,
+                ValuationModel.DCF,
+                ValuationModel.PE,
+            ],
+        )
+
+
+def test_outlier_diagnosis_is_frozen() -> None:
+    """OutlierDiagnosis frozen=True → mutation 应 raise ValidationError."""
+    from app.agents.investment_dd_schema import OutlierDiagnosis, ValuationModel
+    from pydantic import ValidationError
+
+    od = OutlierDiagnosis(
+        outlier_model=ValuationModel.DCF,
+        likely_cause="x",
+        confidence="high",
+        recommended_action="trust_consensus",
+        narrative="x",
+    )
+    with pytest.raises(ValidationError):
+        od.likely_cause = "modified"
