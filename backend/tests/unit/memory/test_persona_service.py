@@ -121,9 +121,9 @@ def test_update_item_agent_source_upgrades_to_user() -> None:
     service = PersonaService(pg_session_factory=factory)
 
     updated = service.update_item(
-        user_id=existing.user_id,
-        item_id=existing.item_id,
-        text="改后内容",  # type: ignore[arg-type]
+        user_id=existing.user_id,  # type: ignore[arg-type]
+        item_id=existing.item_id,  # type: ignore[arg-type]
+        text="改后内容",
     )
 
     assert updated.source == "user"
@@ -227,9 +227,9 @@ def test_apply_agent_replace_match_agent_item() -> None:
     service = PersonaService(pg_session_factory=factory)
 
     items = service.apply_agent_replace(
-        user_id=target.user_id,
+        user_id=target.user_id,  # type: ignore[arg-type]
         old_content="保守",
-        new_content="偏成长",  # type: ignore[arg-type]
+        new_content="偏成长",
     )
 
     assert items[0].text == "偏成长"
@@ -255,9 +255,9 @@ def test_apply_agent_replace_never_match_user_item() -> None:
     service = PersonaService(pg_session_factory=factory)
 
     items = service.apply_agent_replace(
-        user_id=user_item.user_id,
+        user_id=user_item.user_id,  # type: ignore[arg-type]
         old_content="保守稳健",
-        new_content="激进",  # type: ignore[arg-type]
+        new_content="激进",
     )
 
     # fallback: 没匹配到 → append 一条新 agent item
