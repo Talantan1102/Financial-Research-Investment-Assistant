@@ -18,7 +18,9 @@ dependencies = [
     "passlib[bcrypt]>=1.7",
     "pydantic[email]>=2.7",
     # AI/LLM
-    "openai>=1.40",
+    # cap openai<2.37 — 2.37 引入构造期 credentials 强制校验,
+    # 跟 LLMConfig() 在 mock 路径传空 api_key 的模式冲突 (test_bocha_factory).
+    "openai>=1.40,<2.37",
     "tiktoken>=0.8.0",
     "langgraph>=1.0,<2",
     "langgraph-checkpoint-sqlite>=3.0,<4",
