@@ -62,8 +62,8 @@ def test_full_lifecycle_user_add_agent_append_upgrade(
     # 3. user 改 agent 区第一条 → 升级
     upgraded = svc.update_item(
         user_id=user_id,
-        item_id=appended[0].item_id,
-        text="关注新能源 + 储能",  # type: ignore[arg-type]
+        item_id=appended[0].item_id,  # type: ignore[arg-type]
+        text="关注新能源 + 储能",
     )
     assert upgraded.source == "user"
 
