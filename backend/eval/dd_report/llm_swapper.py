@@ -17,7 +17,7 @@ Cross-LLM 矩阵(决策 8.2)额外支持:
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import cast
 
 import httpx
@@ -54,7 +54,7 @@ class EvaluatorClient:
     """
 
     model: str
-    api_key: str
+    api_key: str = field(repr=False)
     _client: OpenAI
 
     def chat(
@@ -66,19 +66,14 @@ class EvaluatorClient:
         messages: list[ChatCompletionMessageParam] = [
             cast(ChatCompletionMessageParam, {"role": "user", "content": prompt})
         ]
+        create_kwargs: dict[str, object] = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": 8000,
+        }
         if response_format is not None:
-            r = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=8000,
-                response_format=response_format,
-            )
-        else:
-            r = self._client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                max_tokens=8000,
-            )
+            create_kwargs["response_format"] = response_format
+        r = self._client.chat.completions.create(**create_kwargs)  # type: ignore[call-overload]
         return r.choices[0].message.content or ""
 
 
@@ -97,8 +92,19 @@ class LLMSwapper:
     def get_client(self, model_id: str) -> EvaluatorClient:
         """返回已绑定 model 的 EvaluatorClient.
 
+        Network note: httpx.Client 用 trust_env=False 构造, 避免 SOCKS proxy 环境变量
+        (ALL_PROXY / HTTPS_PROXY) 干扰对 openrouter.ai 的直连。**已知限制**: 用户若
+        确实需要 HTTP proxy 才能访问 OpenRouter(如大陆网络环境), 此 proxy 会被
+        静默忽略 — 需要时请设置 OPENROUTER_BASE_URL 指向可达的 mirror。
+
+        Args:
+            model_id: 必须在 EVALUATOR_MODELS 白名单内。
+
         Raises:
             ValueError: model_id 不在白名单。
+
+        Returns:
+            EvaluatorClient: 已绑定该 model_id 的 OpenAI-compatible client。
         """
         if model_id not in EVALUATOR_MODELS:
             raise ValueError(f"unknown evaluator model {model_id!r}; allowed: {EVALUATOR_MODELS}")

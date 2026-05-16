@@ -48,3 +48,16 @@ def test_llm_swapper_unknown_model_raises() -> None:
     swapper = LLMSwapper(api_key="test-key")
     with pytest.raises(ValueError, match="unknown evaluator model"):
         swapper.get_client("not-a-real-model")
+
+
+def test_evaluator_client_repr_hides_api_key() -> None:
+    """I2 regression: api_key 不能出现在 repr 中, 防 log 泄露 credential."""
+    from eval.dd_report.llm_swapper import LLMSwapper
+
+    swapper = LLMSwapper(api_key="secret-token-xyz")
+    client = swapper.get_client("gpt-4o-2024-05-13")
+
+    rep = repr(client)
+    assert "secret-token-xyz" not in rep, f"api_key leaked in repr: {rep!r}"
+    # model 仍应该在 repr 中显示, 便于 debug
+    assert "gpt-4o-2024-05-13" in rep
