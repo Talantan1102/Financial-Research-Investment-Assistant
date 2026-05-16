@@ -38,11 +38,11 @@ class PersonaPostRequest(BaseModel):
     @field_validator("text")
     @classmethod
     def _strip_and_check(cls, v: str) -> str:
+        # Field(max_length=500) 已先验长度; 此处只补 strip 后非空检查
+        # (Field min_length=1 拦 "" 不拦 "   ")
         stripped = v.strip()
         if not stripped:
             raise ValueError("text must not be empty after strip")
-        if len(stripped) > 500:
-            raise ValueError("text too long")
         return stripped
 
 
@@ -54,9 +54,9 @@ class PersonaPatchRequest(BaseModel):
     @field_validator("text")
     @classmethod
     def _strip_and_check(cls, v: str) -> str:
+        # Field(max_length=500) 已先验长度; 此处只补 strip 后非空检查
+        # (Field min_length=1 拦 "" 不拦 "   ")
         stripped = v.strip()
         if not stripped:
             raise ValueError("text must not be empty after strip")
-        if len(stripped) > 500:
-            raise ValueError("text too long")
         return stripped
