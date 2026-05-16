@@ -303,3 +303,120 @@ def test_third_attempt_receives_second_attempt_errors() -> None:
     assert result.span_metadata["validator_fallback"] is True
     # validator_last_errors should mention 财务全景 (3rd attempt missing it)
     assert "财务全景" in result.span_metadata["validator_last_errors"]
+
+
+def test_prompt_includes_distilled_block_when_intent_present() -> None:
+    from app.agents.plan_template import DD_PLAN_TEMPLATE
+    from app.agents.research_planner import build_planner_prompt
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        target_ts_code="600519.SH",
+        escalation_intent="客户希望对茅台做全面尽调",
+    )
+    prompt = build_planner_prompt(s, DD_PLAN_TEMPLATE)
+    assert "客户希望对茅台做全面尽调" in prompt
+    assert "核心意图" in prompt
+
+
+def test_prompt_includes_focus_list_when_present() -> None:
+    from app.agents.plan_template import DD_PLAN_TEMPLATE
+    from app.agents.research_planner import build_planner_prompt
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        target_ts_code="600519.SH",
+        discussion_focus=["担心负债率上升", "对比五粮液"],
+    )
+    prompt = build_planner_prompt(s, DD_PLAN_TEMPLATE)
+    assert "担心负债率上升" in prompt
+    assert "对比五粮液" in prompt
+    assert "重点关注的焦点" in prompt
+    assert "- 担心负债率上升" in prompt or "- 对比五粮液" in prompt
+
+
+def test_prompt_includes_exclusions_when_present() -> None:
+    from app.agents.plan_template import DD_PLAN_TEMPLATE
+    from app.agents.research_planner import build_planner_prompt
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        target_ts_code="600519.SH",
+        explicit_exclusions=["不关心 ESG"],
+    )
+    prompt = build_planner_prompt(s, DD_PLAN_TEMPLATE)
+    assert "不关心 ESG" in prompt
+    assert "不关注的方面" in prompt or "排除" in prompt or "不关心" in prompt
+
+
+def test_prompt_omits_distilled_section_when_all_empty() -> None:
+    """Default state (form-style entry) → no distilled headers in prompt."""
+    from app.agents.plan_template import DD_PLAN_TEMPLATE
+    from app.agents.research_planner import build_planner_prompt
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        target_ts_code="600519.SH",
+    )
+    prompt = build_planner_prompt(s, DD_PLAN_TEMPLATE)
+    assert "本次尽调的核心意图" not in prompt
+    assert "重点关注的焦点" not in prompt
+    assert "不关注的方面" not in prompt
+
+
+def test_prompt_partial_distillation_renders_only_present_fields() -> None:
+    """Only intent set → no focus/exclusion sections, just intent block."""
+    from app.agents.plan_template import DD_PLAN_TEMPLATE
+    from app.agents.research_planner import build_planner_prompt
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        target_ts_code="600519.SH",
+        escalation_intent="想全面看看",
+    )
+    prompt = build_planner_prompt(s, DD_PLAN_TEMPLATE)
+    assert "想全面看看" in prompt
+    assert "核心意图" in prompt
+    assert "重点关注的焦点" not in prompt
+    assert "不关注的方面" not in prompt
+
+
+def test_prompt_distilled_block_appears_before_plan_template() -> None:
+    """Order matters — distilled context before template constraints."""
+    from app.agents.plan_template import DD_PLAN_TEMPLATE
+    from app.agents.research_planner import build_planner_prompt
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        target_ts_code="600519.SH",
+        escalation_intent="尽调全面",
+    )
+    prompt = build_planner_prompt(s, DD_PLAN_TEMPLATE)
+    intent_pos = prompt.find("核心意图")
+    template_pos = prompt.find("Plan Template")
+    assert intent_pos > 0 and template_pos > 0
+    assert intent_pos < template_pos, "distilled block must come before template block"

@@ -103,3 +103,64 @@ def test_research_state_writer_critic_feedback_max_length_300() -> None:
             request_id="r",
             writer_critic_feedback="x" * 301,
         )
+
+
+def test_research_state_has_distilled_chat_fields() -> None:
+    """v1.x: escalation_intent / discussion_focus / explicit_exclusions."""
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(user_id="u", session_id="s", user_message="m", request_id="r")
+    assert s.escalation_intent == ""
+    assert s.discussion_focus == []
+    assert s.explicit_exclusions == []
+
+
+def test_research_state_distilled_field_constraints() -> None:
+    import pytest
+    from app.agents.schemas import ResearchState
+    from pydantic import ValidationError
+
+    # escalation_intent max 200
+    with pytest.raises(ValidationError):
+        ResearchState(
+            user_id="u",
+            session_id="s",
+            user_message="m",
+            request_id="r",
+            escalation_intent="x" * 201,
+        )
+    # discussion_focus max 5 items
+    with pytest.raises(ValidationError):
+        ResearchState(
+            user_id="u",
+            session_id="s",
+            user_message="m",
+            request_id="r",
+            discussion_focus=["f"] * 6,
+        )
+    # explicit_exclusions max 3 items
+    with pytest.raises(ValidationError):
+        ResearchState(
+            user_id="u",
+            session_id="s",
+            user_message="m",
+            request_id="r",
+            explicit_exclusions=["e"] * 4,
+        )
+
+
+def test_research_state_accepts_filled_distilled_fields() -> None:
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        escalation_intent="客户希望对茅台做全面尽调",
+        discussion_focus=["担心负债率", "对比五粮液"],
+        explicit_exclusions=["不关心 ESG"],
+    )
+    assert s.escalation_intent.startswith("客户")
+    assert len(s.discussion_focus) == 2
+    assert len(s.explicit_exclusions) == 1
