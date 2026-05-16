@@ -1733,7 +1733,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.7 — LeakDetector + BacktestRunner
 
 **注**:本 task 只做"采集 + 校验"。真的跑 ground truth(后续 1/3/6/12 月股价 + 真实公告)留 Phase 2 M4 实现时。
 
-- [ ] **Step 1: 定义 8 公司 × 4 时点 case 列表**
+- [x] **Step 1: 定义 8 公司 × 4 时点 case 列表**
 
 8 公司选股(spec § 4.4):
 
@@ -1756,7 +1756,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.7 — LeakDetector + BacktestRunner
 - sanity: 8 × 1 = 8
 - 总 40 case
 
-- [ ] **Step 2: Write failing test — golden case file 存在且行数对**
+- [x] **Step 2: Write failing test — golden case file 存在且行数对**
 
 ```python
 # backend/tests/eval/dd_report/test_golden_cases_smoke.py
@@ -1811,7 +1811,7 @@ def test_golden_case_fields_complete() -> None:
         assert required.issubset(c.keys()), f"case {c.get('case_id')} missing {required - c.keys()}"
 ```
 
-- [ ] **Step 3: Run test — verify failure**
+- [x] **Step 3: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_golden_cases_smoke.py -v
@@ -1819,7 +1819,7 @@ uv run pytest backend/tests/eval/dd_report/test_golden_cases_smoke.py -v
 
 Expected: FAIL — golden file 不存在。
 
-- [ ] **Step 4: 写 CLI 生成 backtest_cases.jsonl**
+- [x] **Step 4: 写 CLI 生成 backtest_cases.jsonl**
 
 ```python
 # backend/scripts/build_dd_backtest_cases.py
@@ -1906,7 +1906,7 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 5: 跑 CLI 生成 file**
+- [x] **Step 5: 跑 CLI 生成 file**
 
 ```bash
 uv run python -m backend.scripts.build_dd_backtest_cases
@@ -1914,7 +1914,7 @@ uv run python -m backend.scripts.build_dd_backtest_cases
 
 Expected: 输出 `wrote 40 cases to .../backtest_cases.jsonl`.
 
-- [ ] **Step 6: Run test — verify pass**
+- [x] **Step 6: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_golden_cases_smoke.py -v
@@ -1922,7 +1922,7 @@ uv run pytest backend/tests/eval/dd_report/test_golden_cases_smoke.py -v
 
 Expected: 6 个 test 全 PASS.
 
-- [ ] **Step 7: 加 ground_truth_loader.py 占位(Phase 2 M4 用)**
+- [x] **Step 7: 加 ground_truth_loader.py 占位(Phase 2 M4 用)**
 
 ```python
 # backend/eval/dd_report/golden/ground_truth_loader.py
@@ -1976,7 +1976,7 @@ class GroundTruthLoader:
         raise NotImplementedError("Phase 2 M4 prediction metric 实施")
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend/scripts/build_dd_backtest_cases.py \
@@ -1995,7 +1995,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.8 — 32 backtest + 8 sanity golden
 - Modify: `pyproject.toml`(若需要,确认 `eval` 在 pytest paths)
 - Create: `docs/claude-context/dd-report-eval-phase-1-landed.md` — sediment 卡片
 
-- [ ] **Step 1: 创建 conftest.py(env + proxy)**
+- [x] **Step 1: 创建 conftest.py(env + proxy)**
 
 ```python
 # backend/tests/eval/dd_report/conftest.py
@@ -2024,7 +2024,7 @@ def _unset_proxy_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(var, raising=False)
 ```
 
-- [ ] **Step 2: 跑 Phase 1 全套测试**
+- [x] **Step 2: 跑 Phase 1 全套测试**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/ -v
@@ -2032,7 +2032,7 @@ uv run pytest backend/tests/eval/dd_report/ -v
 
 Expected: 全 PASS,task 1.2 / 1.4 / 1.5 / 1.6 / 1.7 / 1.8 的所有 test 都过。
 
-- [ ] **Step 3: 跑全 backend 测试集确认无回归**
+- [x] **Step 3: 跑全 backend 测试集确认无回归**
 
 ```bash
 uv run pytest backend/tests/ --maxfail=5
@@ -2040,7 +2040,7 @@ uv run pytest backend/tests/ --maxfail=5
 
 Expected: 全 PASS,无回归。若有 failure 修复后再 commit。
 
-- [ ] **Step 4: mypy 全 backend strict**
+- [x] **Step 4: mypy 全 backend strict**
 
 ```bash
 cd backend && uv run mypy app eval --strict
@@ -2048,7 +2048,7 @@ cd backend && uv run mypy app eval --strict
 
 Expected: PASS.
 
-- [ ] **Step 5: ruff format + lint**
+- [x] **Step 5: ruff format + lint**
 
 ```bash
 cd backend && uv run ruff format eval/dd_report tests/eval/dd_report scripts/build_dd_backtest_cases.py
@@ -2057,7 +2057,7 @@ cd backend && uv run ruff check eval/dd_report tests/eval/dd_report scripts/buil
 
 Expected: 全过。
 
-- [ ] **Step 6: 写 sediment 卡片**
+- [x] **Step 6: 写 sediment 卡片**
 
 ```markdown
 <!-- docs/claude-context/dd-report-eval-phase-1-landed.md -->
@@ -2102,7 +2102,7 @@ type: project
 
 修改 `docs/claude-context/README.md` 索引(若有的话)加这个卡片链接。
 
-- [ ] **Step 7: 收尾 commit + push**
+- [x] **Step 7: 收尾 commit + push**
 
 ```bash
 git add backend/tests/eval/dd_report/conftest.py \
@@ -2114,16 +2114,16 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.9 — conftest + sediment 卡片, P
 
 ## Phase 1 完成验收清单
 
-- [ ] `backend/eval/dd_report/` 目录骨架 + 7 个核心 py 文件(`__init__` / `llm_swapper` / `tushare_backtest_adapter` / `kb_backtest_adapter` / `backtest_runner` / `leak_detector` / `golden/ground_truth_loader`)
-- [ ] `backend/eval/dd_report/golden/backtest_cases.jsonl` 40 行(32 backtest + 8 sanity)
-- [ ] `backend/scripts/build_dd_backtest_cases.py` CLI 可重跑
-- [ ] `backend/tests/eval/dd_report/` 6 个 test 文件(`test_llm_swapper` / `test_tushare_backtest_adapter` / `test_kb_backtest_adapter` / `test_backtest_runner` / `test_leak_detector` / `test_golden_cases_smoke`)+ `conftest.py`
-- [ ] DB schema:`eval_results` 4 新列 + `backtest_runs` 表 8 字段
-- [ ] KB Chunk schema 加 `publish_date` 字段(若 Task 1.0 spike 标记缺失)
-- [ ] `backend/.env.example` 含 `OPENROUTER_API_KEY` 模板
-- [ ] 全 backend 测试集 PASS,mypy strict PASS,ruff PASS
-- [ ] sediment 卡片 `docs/claude-context/dd-report-eval-phase-1-landed.md`
-- [ ] git log:9 个 task commit 全有,commit message 带 `Phase 1 Task X.Y`
+- [x] `backend/eval/dd_report/` 目录骨架 + 7 个核心 py 文件(`__init__` / `llm_swapper` / `tushare_backtest_adapter` / `kb_backtest_adapter` / `backtest_runner` / `leak_detector` / `golden/ground_truth_loader`)
+- [x] `backend/eval/dd_report/golden/backtest_cases.jsonl` 40 行(32 backtest + 8 sanity)
+- [x] `backend/scripts/build_dd_backtest_cases.py` CLI 可重跑
+- [x] `backend/tests/eval/dd_report/` 6 个 test 文件(`test_llm_swapper` / `test_tushare_backtest_adapter` / `test_kb_backtest_adapter` / `test_backtest_runner` / `test_leak_detector` / `test_golden_cases_smoke`)+ `conftest.py`
+- [x] DB schema:`eval_results` 4 新列 + `backtest_runs` 表 8 字段
+- [x] KB Chunk schema 加 `publish_date` 字段(若 Task 1.0 spike 标记缺失)
+- [x] `backend/.env.example` 含 `OPENROUTER_API_KEY` 模板
+- [x] 全 backend 测试集 PASS,mypy strict PASS,ruff PASS
+- [x] sediment 卡片 `docs/claude-context/dd-report-eval-phase-1-landed.md`
+- [x] git log:9 个 task commit 全有,commit message 带 `Phase 1 Task X.Y`
 
 ---
 
