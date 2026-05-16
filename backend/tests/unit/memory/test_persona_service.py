@@ -165,3 +165,90 @@ def test_delete_item_not_found_raises() -> None:
 
     with pytest.raises(LookupError):
         service.delete_item(user_id=uuid4(), item_id=uuid4())
+
+
+@pytest.mark.unit
+def test_apply_agent_append_splits_lines() -> None:
+    """多行 content 切多条；prefix `- ` / `* ` 自动去除."""
+    factory, session = _mk_session_factory()
+    service = PersonaService(pg_session_factory=factory)
+
+    items = service.apply_agent_append(
+        user_id=uuid4(), content="- 看好新能源\n* 关注高股息\n空行不算\n"
+    )
+
+    assert [i.text for i in items] == ["看好新能源", "关注高股息", "空行不算"]
+    assert all(i.source == "agent" for i in items)
+    assert session.add.call_count == 3
+    session.commit.assert_called_once()
+
+
+@pytest.mark.unit
+def test_apply_agent_append_empty_noop() -> None:
+    factory, session = _mk_session_factory()
+    service = PersonaService(pg_session_factory=factory)
+    items = service.apply_agent_append(user_id=uuid4(), content="   \n  ")
+    assert items == []
+    session.add.assert_not_called()
+
+
+@pytest.mark.unit
+def test_apply_agent_replace_match_agent_item() -> None:
+    """命中 source='agent' 的 item → 改 text，source 保持 agent."""
+    factory, session = _mk_session_factory()
+    target = ChatMemoryPersonaItem(
+        item_id=uuid4(),
+        user_id=uuid4(),
+        source="agent",
+        text="保守",
+        position=0,
+    )
+    session.query.return_value.filter_by.return_value.all.return_value = [target]
+    service = PersonaService(pg_session_factory=factory)
+
+    items = service.apply_agent_replace(
+        user_id=target.user_id, old_content="保守", new_content="偏成长"
+    )
+
+    assert items[0].text == "偏成长"
+    assert items[0].source == "agent"
+    session.commit.assert_called_once()
+
+
+@pytest.mark.unit
+def test_apply_agent_replace_never_match_user_item() -> None:
+    """即使 text 一致也不能动 source='user' 的 item — 双轨保护."""
+    factory, session = _mk_session_factory()
+    user_item = ChatMemoryPersonaItem(
+        item_id=uuid4(),
+        user_id=uuid4(),
+        source="user",
+        text="保守稳健",
+        position=0,
+    )
+    # filter_by(source='agent') 应返回空
+    session.query.return_value.filter_by.return_value.all.return_value = []
+    service = PersonaService(pg_session_factory=factory)
+
+    items = service.apply_agent_replace(
+        user_id=user_item.user_id, old_content="保守稳健", new_content="激进"
+    )
+
+    # fallback: 没匹配到 → append 一条新 agent item
+    assert len(items) == 1
+    assert items[0].source == "agent"
+    assert items[0].text == "激进"
+
+
+@pytest.mark.unit
+def test_apply_agent_replace_no_match_falls_back_to_append() -> None:
+    """spec § 8.2: 未找到 → 降级为 apply_agent_append + log warn."""
+    factory, session = _mk_session_factory()
+    session.query.return_value.filter_by.return_value.all.return_value = []
+    service = PersonaService(pg_session_factory=factory)
+
+    items = service.apply_agent_replace(user_id=uuid4(), old_content="不存在的", new_content="新条")
+
+    assert len(items) == 1
+    assert items[0].text == "新条"
+    assert items[0].source == "agent"
