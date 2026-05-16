@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from app.agents.chat_planner import ChatPlanner
 from app.agents.schemas import ChatState
 from app.services.llm_service import LLMService
@@ -42,16 +43,18 @@ def _state(memory_hits: list[dict[str, Any]], kb_hits: list[dict[str, Any]]) -> 
 
 
 class TestPlannerPromptSegregation:
-    def test_no_routing_results_no_segregation_blocks(self) -> None:
+    @pytest.mark.asyncio
+    async def test_no_routing_results_no_segregation_blocks(self) -> None:
         # 没有 routing 结果 — prompt 不应注入 [用户上下文] / [市场知识] 段
         planner = _make_planner()
-        prompt = planner._build_chat_prompt(_state(memory_hits=[], kb_hits=[]))
+        prompt = await planner._build_chat_prompt(_state(memory_hits=[], kb_hits=[]))
         assert "[用户上下文]" not in prompt
         assert "[市场知识]" not in prompt
 
-    def test_memory_only_injects_user_context_block(self) -> None:
+    @pytest.mark.asyncio
+    async def test_memory_only_injects_user_context_block(self) -> None:
         planner = _make_planner()
-        prompt = planner._build_chat_prompt(
+        prompt = await planner._build_chat_prompt(
             _state(
                 memory_hits=[
                     {
@@ -68,9 +71,10 @@ class TestPlannerPromptSegregation:
         assert "600519.SH" in prompt
         assert "[市场知识]" not in prompt
 
-    def test_kb_only_injects_market_knowledge_block(self) -> None:
+    @pytest.mark.asyncio
+    async def test_kb_only_injects_market_knowledge_block(self) -> None:
         planner = _make_planner()
-        prompt = planner._build_chat_prompt(
+        prompt = await planner._build_chat_prompt(
             _state(
                 memory_hits=[],
                 kb_hits=[
@@ -87,9 +91,10 @@ class TestPlannerPromptSegregation:
         assert "茅台 Q3" in prompt
         assert "[用户上下文]" not in prompt
 
-    def test_both_injects_both_blocks_separately(self) -> None:
+    @pytest.mark.asyncio
+    async def test_both_injects_both_blocks_separately(self) -> None:
         planner = _make_planner()
-        prompt = planner._build_chat_prompt(
+        prompt = await planner._build_chat_prompt(
             _state(
                 memory_hits=[
                     {
@@ -113,10 +118,11 @@ class TestPlannerPromptSegregation:
         idx_mkt = prompt.find("[市场知识]")
         assert 0 <= idx_user < idx_mkt
 
-    def test_segregation_prompt_explicit_disclaimer(self) -> None:
+    @pytest.mark.asyncio
+    async def test_segregation_prompt_explicit_disclaimer(self) -> None:
         # spec § 11 末尾 #7 (c): 让 LLM 不混淆个人事实和公开知识
         planner = _make_planner()
-        prompt = planner._build_chat_prompt(
+        prompt = await planner._build_chat_prompt(
             _state(
                 memory_hits=[{"rel_type": "PREFERS", "properties": {}, "valid_from": "2024"}],
                 kb_hits=[
@@ -134,7 +140,8 @@ class TestPlannerPromptSegregation:
         # 经典示例: 用户偏好白马 + 市场跑输 = trade-off 不是矛盾
         assert "trade-off" in prompt or "矛盾" in prompt
 
-    def test_top5_truncation(self) -> None:
+    @pytest.mark.asyncio
+    async def test_top5_truncation(self) -> None:
         # 防爆 — memory_hits 超过 5 时只渲染 top-5
         planner = _make_planner()
         many_hits = [
@@ -145,16 +152,17 @@ class TestPlannerPromptSegregation:
             }
             for i in range(10)
         ]
-        prompt = planner._build_chat_prompt(_state(memory_hits=many_hits, kb_hits=[]))
+        prompt = await planner._build_chat_prompt(_state(memory_hits=many_hits, kb_hits=[]))
         # 前 5 应该在,后面 5 不应该在
         assert "REL_0" in prompt
         assert "REL_4" in prompt
         assert "REL_9" not in prompt
 
-    def test_kb_chunk_text_truncated(self) -> None:
+    @pytest.mark.asyncio
+    async def test_kb_chunk_text_truncated(self) -> None:
         planner = _make_planner()
         long_text = "A" * 500
-        prompt = planner._build_chat_prompt(
+        prompt = await planner._build_chat_prompt(
             _state(
                 memory_hits=[],
                 kb_hits=[
