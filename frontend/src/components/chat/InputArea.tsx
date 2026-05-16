@@ -16,6 +16,10 @@ export interface InputAreaProps {
   onSend?: (text: string) => void
   onAbort?: () => void
   onEscalate?: () => void
+  // Plan 3 Task 7: streaming 中按「停止生成」时,如果 store 有 active_task_id,
+  // 调 onCancel(tid) → backend POST /chat/cancel/{tid}(worker partial commit);
+  // 否则 fallback onAbort(纯前端 abort)。
+  onCancel?: (taskId: string) => void
 }
 
 const MIN_HEIGHT = 44
@@ -117,10 +121,18 @@ export function InputArea(props: InputAreaProps) {
           <Button
             danger
             icon={<CloseCircleOutlined />}
-            onClick={() => props.onAbort?.()}
-            aria-label="中断"
+            onClick={() => {
+              // Plan 3:有 active_task_id + onCancel → 真 backend cancel(partial commit);
+              // 否则 fallback onAbort(纯前端 abort,worker 继续跑完)
+              if (snap.active_task_id && props.onCancel) {
+                props.onCancel(snap.active_task_id)
+              } else {
+                props.onAbort?.()
+              }
+            }}
+            aria-label="停止生成"
           >
-            中断
+            停止生成
           </Button>
         ) : (
           <Button

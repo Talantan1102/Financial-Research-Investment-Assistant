@@ -48,7 +48,7 @@ describe('<InputArea>', () => {
     currentChatState.streaming_phase = 'thinking'
     render(<InputArea sessionId="s1" />)
     expect(screen.queryByRole('button', { name: /发送|send/i })).toBeNull()
-    expect(screen.getByRole('button', { name: /中断|abort/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /停止生成|中断|abort/i })).toBeInTheDocument()
   })
 })
 
@@ -56,7 +56,7 @@ describe('<InputArea> Cmd+K abort', () => {
   it('shows 中断 button while streaming, hides 发送', () => {
     currentChatState.streaming_phase = 'writing'
     render(<InputArea sessionId="s1" />)
-    expect(screen.getByRole('button', { name: /中断|abort/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /停止生成|中断|abort/i })).toBeInTheDocument()
   })
 
   it('Cmd+K calls onAbort while streaming', async () => {
