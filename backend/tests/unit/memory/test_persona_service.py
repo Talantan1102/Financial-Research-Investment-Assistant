@@ -28,3 +28,140 @@ def test_persona_item_model_basic_fields() -> None:
     assert table.name == "chat_memory_persona_items"
     index_names = {idx.name for idx in table.indexes}
     assert "ix_persona_items_user_source_pos" in index_names
+
+
+from unittest.mock import MagicMock  # noqa: E402
+
+from app.memory.persona_service import PersonaService  # noqa: E402
+
+
+def _mk_session_factory() -> tuple[MagicMock, MagicMock]:
+    """构造 mock session_factory 跟 mock session，方便测试 commit/rollback 调用."""
+    session = MagicMock()
+    session.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = []
+    session.query.return_value.filter_by.return_value.first.return_value = None
+    factory = MagicMock(return_value=session)
+    return factory, session
+
+
+@pytest.mark.unit
+def test_list_items_empty() -> None:
+    factory, session = _mk_session_factory()
+    service = PersonaService(pg_session_factory=factory)
+
+    result = service.list_items(user_id=uuid4())
+
+    assert result == {"user_declared": [], "agent_inferred": []}
+    session.close.assert_called_once()
+
+
+@pytest.mark.unit
+def test_add_item_user_section() -> None:
+    factory, session = _mk_session_factory()
+    service = PersonaService(pg_session_factory=factory)
+    user_id = uuid4()
+
+    item = service.add_item(user_id=user_id, text="保守稳健", target_section="user")
+
+    assert item.source == "user"
+    assert item.text == "保守稳健"
+    session.add.assert_called_once()
+    session.commit.assert_called_once()
+
+
+@pytest.mark.unit
+def test_add_item_strips_and_validates_length() -> None:
+    factory, _ = _mk_session_factory()
+    service = PersonaService(pg_session_factory=factory)
+
+    with pytest.raises(ValueError, match="empty"):
+        service.add_item(user_id=uuid4(), text="   ", target_section="user")
+
+    with pytest.raises(ValueError, match="too long"):
+        service.add_item(user_id=uuid4(), text="a" * 501, target_section="user")
+
+
+@pytest.mark.unit
+def test_update_item_text_keeps_source() -> None:
+    """改 source='user' 的 item，source 不变."""
+    factory, session = _mk_session_factory()
+    existing = ChatMemoryPersonaItem(
+        item_id=uuid4(),
+        user_id=uuid4(),
+        source="user",
+        text="原文",
+        position=0,
+    )
+    session.query.return_value.filter_by.return_value.first.return_value = existing
+    service = PersonaService(pg_session_factory=factory)
+
+    updated = service.update_item(user_id=existing.user_id, item_id=existing.item_id, text="新内容")
+
+    assert updated.source == "user"
+    assert updated.text == "新内容"
+    session.commit.assert_called_once()
+
+
+@pytest.mark.unit
+def test_update_item_agent_source_upgrades_to_user() -> None:
+    """改 agent 区条目自动升级到 user 区 — spec 决策 3."""
+    factory, session = _mk_session_factory()
+    existing = ChatMemoryPersonaItem(
+        item_id=uuid4(),
+        user_id=uuid4(),
+        source="agent",
+        text="原 agent 推断",
+        position=5,
+    )
+    session.query.return_value.filter_by.return_value.first.return_value = existing
+    # 模拟查 user 区当前 max position
+    max_query = MagicMock()
+    max_query.scalar.return_value = 2
+    session.query.return_value.filter_by.return_value.with_entities.return_value = max_query
+    service = PersonaService(pg_session_factory=factory)
+
+    updated = service.update_item(
+        user_id=existing.user_id, item_id=existing.item_id, text="改后内容"
+    )
+
+    assert updated.source == "user"
+    assert updated.position == 3  # max(2) + 1
+
+
+@pytest.mark.unit
+def test_update_item_not_found_raises() -> None:
+    factory, session = _mk_session_factory()
+    session.query.return_value.filter_by.return_value.first.return_value = None
+    service = PersonaService(pg_session_factory=factory)
+
+    with pytest.raises(LookupError):
+        service.update_item(user_id=uuid4(), item_id=uuid4(), text="x")
+
+
+@pytest.mark.unit
+def test_delete_item_calls_delete_and_commit() -> None:
+    factory, session = _mk_session_factory()
+    existing = ChatMemoryPersonaItem(
+        item_id=uuid4(),
+        user_id=uuid4(),
+        source="user",
+        text="待删",
+        position=0,
+    )
+    session.query.return_value.filter_by.return_value.first.return_value = existing
+    service = PersonaService(pg_session_factory=factory)
+
+    service.delete_item(user_id=existing.user_id, item_id=existing.item_id)
+
+    session.delete.assert_called_once_with(existing)
+    session.commit.assert_called_once()
+
+
+@pytest.mark.unit
+def test_delete_item_not_found_raises() -> None:
+    factory, session = _mk_session_factory()
+    session.query.return_value.filter_by.return_value.first.return_value = None
+    service = PersonaService(pg_session_factory=factory)
+
+    with pytest.raises(LookupError):
+        service.delete_item(user_id=uuid4(), item_id=uuid4())
