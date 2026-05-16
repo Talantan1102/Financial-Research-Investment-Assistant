@@ -24,12 +24,19 @@ from app.agents.valuation_helpers.exceptions import InsufficientDataForModelErro
 
 __all__ = [
     "compute_growth_trajectory",
-    # compute_company_wacc / compute_dcf_value / compute_dcf_sensitivity — added in Task 7/8
+    "compute_company_wacc",
+    "compute_dcf_value",
+    # compute_dcf_sensitivity — added in Task 8
 ]
 
 # Bull/bear scenario multipliers (spec § 6.3 defaults; calibrate post-dogfood).
 _BULL_MULTIPLIER = 1.2
 _BEAR_MULTIPLIER = 0.8
+
+# CAPM-style WACC adjustment coefficients (spec § 6.6; calibrate post-dogfood).
+_BETA_ADJUSTMENT_PER_UNIT = 0.02  # β 偏离 1.0 每单位调整 ±2%
+_LEVERAGE_THRESHOLD = 1.0  # d/e > 1.0 视为高杠杆
+_LEVERAGE_RISK_PREMIUM = 0.01  # 高杠杆 +1% 风险溢价
 
 
 def compute_growth_trajectory(
@@ -120,3 +127,142 @@ def compute_growth_trajectory(
         return [start]
     step = (start - industry_terminal) / (n_years - 1)
     return [max(start - step * i, industry_terminal) for i in range(n_years)]
+
+
+def compute_company_wacc(
+    *,
+    industry_baseline_wacc: float,
+    company_beta: float | None,
+    debt_to_equity: float,
+) -> float:
+    """简化 CAPM 调整:WACC = industry_baseline + β_adj + leverage_adj
+
+    - β_adj = (β - 1.0) × _BETA_ADJUSTMENT_PER_UNIT (β 偏离 1.0 → 风险 ±2%)
+    - leverage_adj = _LEVERAGE_RISK_PREMIUM if d/e > _LEVERAGE_THRESHOLD else 0
+    - 缺 β 时 β_adj = 0 (行业 baseline fallback,跟 team-view 范式一致)
+
+    Raises:
+        InsufficientDataForModelError:
+            - industry_baseline_wacc ≤ 0 (实际 WACC 都正,≤ 0 是数据 corruption)
+            - 任一 float 输入为 NaN/inf
+    """
+    if not math.isfinite(industry_baseline_wacc):
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="industry_baseline_wacc",
+            reason=f"industry_baseline_wacc={industry_baseline_wacc} not finite",
+        )
+    if company_beta is not None and not math.isfinite(company_beta):
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="company_beta",
+            reason=f"company_beta={company_beta} not finite",
+        )
+    if not math.isfinite(debt_to_equity):
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="debt_to_equity",
+            reason=f"debt_to_equity={debt_to_equity} not finite",
+        )
+    if industry_baseline_wacc <= 0:
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="industry_baseline_wacc",
+            reason=f"industry_baseline_wacc={industry_baseline_wacc} <= 0",
+        )
+
+    beta_adj = (company_beta - 1.0) * _BETA_ADJUSTMENT_PER_UNIT if company_beta is not None else 0.0
+    leverage_adj = _LEVERAGE_RISK_PREMIUM if debt_to_equity > _LEVERAGE_THRESHOLD else 0.0
+    return industry_baseline_wacc + beta_adj + leverage_adj
+
+
+def compute_dcf_value(
+    *,
+    free_cash_flow_base: float,
+    shares_outstanding: float,
+    growth_trajectory: list[float],
+    terminal_growth: float,
+    wacc: float,
+) -> float:
+    """单场景 DCF 主入口。
+
+    1. FCF_t = FCF_base × Π_{i=0..t-1} (1 + g_i)
+    2. PV_t = FCF_t / (1+wacc)^t
+    3. Terminal Value = FCF_{n+1} / (wacc - terminal_growth)  [Gordon Growth]
+    4. PV_Terminal = TV / (1+wacc)^n
+    5. EV = Σ PV_t + PV_Terminal
+    6. implied_price = EV / shares_outstanding
+
+    Raises:
+        InsufficientDataForModelError:
+            - free_cash_flow_base <= 0 (DCF 不适用亏损 / 烧钱公司)
+            - shares_outstanding <= 0
+            - terminal_growth >= wacc (Gordon Growth 发散)
+            - growth_trajectory 空
+            - 任一 float / list 元素为 NaN/inf
+    """
+    # NaN/inf guard (含 list 元素)
+    scalars = (free_cash_flow_base, shares_outstanding, terminal_growth, wacc)
+    if not all(math.isfinite(x) for x in scalars):
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="numeric_finite",
+            reason=(
+                f"non-finite scalar input: fcf={free_cash_flow_base}, "
+                f"shares={shares_outstanding}, terminal={terminal_growth}, wacc={wacc}"
+            ),
+        )
+    if any(not math.isfinite(g) for g in growth_trajectory):
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="growth_trajectory",
+            reason=f"growth_trajectory contains non-finite: {growth_trajectory}",
+        )
+
+    if not growth_trajectory:
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="growth_trajectory",
+            reason="growth_trajectory empty, 无法做 FCF projection",
+        )
+    if shares_outstanding <= 0:
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="shares_outstanding",
+            reason=f"shares_outstanding={shares_outstanding} <= 0",
+        )
+    if free_cash_flow_base <= 0:
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="free_cash_flow_base",
+            reason=f"FCF base={free_cash_flow_base} <= 0 (DCF 不适用亏损 / 烧钱公司)",
+        )
+    if terminal_growth >= wacc:
+        raise InsufficientDataForModelError(
+            model="dcf",
+            missing_field="terminal_growth_vs_wacc",
+            reason=f"terminal_growth={terminal_growth} >= wacc={wacc} (Gordon Growth 发散)",
+        )
+
+    n = len(growth_trajectory)
+
+    # 1. 算每年 FCF (compound from base)
+    fcf_t: list[float] = []
+    fcf_prev = free_cash_flow_base
+    for g in growth_trajectory:
+        fcf_prev = fcf_prev * (1.0 + g)
+        fcf_t.append(fcf_prev)
+
+    # 2. 折现各年 FCF
+    pv_fcf_total = 0.0
+    for t, fcf in enumerate(fcf_t, start=1):
+        pv_fcf_total += fcf / ((1.0 + wacc) ** t)
+
+    # 3. Terminal value (Gordon Growth) + 折现
+    fcf_n_plus_1 = fcf_t[-1] * (1.0 + terminal_growth)
+    terminal_value = fcf_n_plus_1 / (wacc - terminal_growth)
+    pv_terminal = terminal_value / ((1.0 + wacc) ** n)
+
+    # 4. EV → implied price
+    enterprise_value = pv_fcf_total + pv_terminal
+    return enterprise_value / shares_outstanding

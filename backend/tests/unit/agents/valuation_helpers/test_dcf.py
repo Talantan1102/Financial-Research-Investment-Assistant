@@ -224,3 +224,231 @@ def test_growth_trajectory_negative_historical_base_clamps() -> None:
     )
     # avg = -0.02 < terminal 0.025 → 全 clamp
     assert all(r == pytest.approx(0.025) for r in rates)
+
+
+# ── compute_company_wacc ──────────────────────────────────────────────────────
+
+
+def test_wacc_neutral_beta_low_leverage() -> None:
+    """β=1.0, d/e=0.3, baseline 8% → wacc = 8% + 0 + 0 = 8%"""
+    from app.agents.valuation_helpers.dcf import compute_company_wacc
+
+    wacc = compute_company_wacc(industry_baseline_wacc=0.08, company_beta=1.0, debt_to_equity=0.3)
+    assert wacc == pytest.approx(0.08, rel=0.01)
+
+
+def test_wacc_high_beta_high_leverage() -> None:
+    """β=1.5, d/e=1.5, baseline 8% → wacc = 8% + 1% + 1% = 10%"""
+    from app.agents.valuation_helpers.dcf import compute_company_wacc
+
+    wacc = compute_company_wacc(industry_baseline_wacc=0.08, company_beta=1.5, debt_to_equity=1.5)
+    assert wacc == pytest.approx(0.10, rel=0.01)
+
+
+def test_wacc_low_beta_low_leverage() -> None:
+    """β=0.5, d/e=0.1, baseline 10% → wacc = 10% + (-1%) + 0 = 9%"""
+    from app.agents.valuation_helpers.dcf import compute_company_wacc
+
+    wacc = compute_company_wacc(industry_baseline_wacc=0.10, company_beta=0.5, debt_to_equity=0.1)
+    assert wacc == pytest.approx(0.09, rel=0.01)
+
+
+def test_wacc_missing_beta_uses_baseline() -> None:
+    """缺 β → β_adj = 0, 只走 leverage_adj"""
+    from app.agents.valuation_helpers.dcf import compute_company_wacc
+
+    wacc = compute_company_wacc(industry_baseline_wacc=0.10, company_beta=None, debt_to_equity=0.2)
+    assert wacc == pytest.approx(0.10, rel=0.01)
+
+
+def test_wacc_raises_on_nan_input() -> None:
+    """baseline / beta / d/e 任一 NaN → raise"""
+    from app.agents.valuation_helpers.dcf import compute_company_wacc
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(InsufficientDataForModelError):
+        compute_company_wacc(industry_baseline_wacc=math.nan, company_beta=1.0, debt_to_equity=0.5)
+    with pytest.raises(InsufficientDataForModelError):
+        compute_company_wacc(industry_baseline_wacc=0.08, company_beta=math.nan, debt_to_equity=0.5)
+    with pytest.raises(InsufficientDataForModelError):
+        compute_company_wacc(industry_baseline_wacc=0.08, company_beta=1.0, debt_to_equity=math.nan)
+
+
+def test_wacc_raises_on_inf_input() -> None:
+    from app.agents.valuation_helpers.dcf import compute_company_wacc
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(InsufficientDataForModelError):
+        compute_company_wacc(industry_baseline_wacc=math.inf, company_beta=1.0, debt_to_equity=0.5)
+
+
+def test_wacc_raises_on_negative_baseline() -> None:
+    """baseline_wacc ≤ 0 是数据 corruption(实际 WACC 都 > 0)→ raise"""
+    from app.agents.valuation_helpers.dcf import compute_company_wacc
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(InsufficientDataForModelError):
+        compute_company_wacc(industry_baseline_wacc=0, company_beta=1.0, debt_to_equity=0.5)
+    with pytest.raises(InsufficientDataForModelError):
+        compute_company_wacc(industry_baseline_wacc=-0.05, company_beta=1.0, debt_to_equity=0.5)
+
+
+# ── compute_dcf_value ─────────────────────────────────────────────────────────
+
+
+def test_dcf_value_stable_growth_sanity_range() -> None:
+    """成熟公司:FCF=100亿, 增速 [5%]*10, terminal 2.5%, WACC 8%, 股本 10亿
+    粗校验:price > 0,合理数量级(几十到几百)
+    """
+    from app.agents.valuation_helpers.dcf import compute_dcf_value
+
+    price = compute_dcf_value(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        terminal_growth=0.025,
+        wacc=0.08,
+    )
+    assert 50 < price < 500
+
+
+def test_dcf_value_terminal_ge_wacc_raises() -> None:
+    """terminal_growth ≥ wacc → Gordon Growth 数学发散 → raise"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_value
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_value(
+            free_cash_flow_base=100e8,
+            shares_outstanding=10e8,
+            growth_trajectory=[0.05] * 10,
+            terminal_growth=0.08,  # == wacc, 发散
+            wacc=0.08,
+        )
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_value(
+            free_cash_flow_base=100e8,
+            shares_outstanding=10e8,
+            growth_trajectory=[0.05] * 10,
+            terminal_growth=0.10,  # > wacc
+            wacc=0.08,
+        )
+
+
+def test_dcf_value_raises_for_zero_shares() -> None:
+    from app.agents.valuation_helpers.dcf import compute_dcf_value
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_value(
+            free_cash_flow_base=100e8,
+            shares_outstanding=0,
+            growth_trajectory=[0.05] * 10,
+            terminal_growth=0.025,
+            wacc=0.08,
+        )
+
+
+def test_dcf_value_raises_for_negative_fcf() -> None:
+    """当前 FCF ≤ 0 → DCF 不适用亏损 / 烧钱公司 → raise"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_value
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_value(
+            free_cash_flow_base=-10e8,
+            shares_outstanding=10e8,
+            growth_trajectory=[0.05] * 10,
+            terminal_growth=0.025,
+            wacc=0.08,
+        )
+
+
+def test_dcf_value_higher_wacc_gives_lower_price() -> None:
+    """灵敏度直觉:WACC ↑ → 折现率 ↑ → 现值 ↓"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_value
+
+    price_8 = compute_dcf_value(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        terminal_growth=0.025,
+        wacc=0.08,
+    )
+    price_10 = compute_dcf_value(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        terminal_growth=0.025,
+        wacc=0.10,
+    )
+    assert price_8 > price_10
+
+
+def test_dcf_value_higher_terminal_gives_higher_price() -> None:
+    """灵敏度直觉:terminal ↑ → 终值 ↑ → 现值 ↑ (前提 terminal < wacc)"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_value
+
+    price_2 = compute_dcf_value(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        terminal_growth=0.02,
+        wacc=0.08,
+    )
+    price_3 = compute_dcf_value(
+        free_cash_flow_base=100e8,
+        shares_outstanding=10e8,
+        growth_trajectory=[0.05] * 10,
+        terminal_growth=0.03,
+        wacc=0.08,
+    )
+    assert price_3 > price_2
+
+
+def test_dcf_value_raises_on_nan_input() -> None:
+    from app.agents.valuation_helpers.dcf import compute_dcf_value
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    # fcf NaN
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_value(
+            free_cash_flow_base=math.nan,
+            shares_outstanding=10e8,
+            growth_trajectory=[0.05] * 10,
+            terminal_growth=0.025,
+            wacc=0.08,
+        )
+    # growth_trajectory 含 NaN
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_value(
+            free_cash_flow_base=100e8,
+            shares_outstanding=10e8,
+            growth_trajectory=[0.05, math.nan, 0.05],
+            terminal_growth=0.025,
+            wacc=0.08,
+        )
+    # wacc NaN
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_value(
+            free_cash_flow_base=100e8,
+            shares_outstanding=10e8,
+            growth_trajectory=[0.05] * 10,
+            terminal_growth=0.025,
+            wacc=math.nan,
+        )
+
+
+def test_dcf_value_empty_growth_trajectory_raises() -> None:
+    """growth_trajectory 空 → raise(无法算 FCF projection)"""
+    from app.agents.valuation_helpers.dcf import compute_dcf_value
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(InsufficientDataForModelError):
+        compute_dcf_value(
+            free_cash_flow_base=100e8,
+            shares_outstanding=10e8,
+            growth_trajectory=[],
+            terminal_growth=0.025,
+            wacc=0.08,
+        )
