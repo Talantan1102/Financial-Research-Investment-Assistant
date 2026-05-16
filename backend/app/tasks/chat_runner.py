@@ -123,7 +123,10 @@ def _adapt_event_for_stream(ev: dict[str, Any]) -> dict[str, Any] | None:
             text = str(chunk.content)
         elif isinstance(chunk, dict):
             text = str(chunk.get("content", ""))
-        return {"type": "token", "text": text}
+        # Dual field: `text` for backend tests (chat_runner / event_bus L0 测试),
+        # `content` for frontend TokenEvent.content(frontend/src/types/chat.ts).
+        # 两端历史约定不一致,Plan 2 dogfood 暴露;双字段发避免破 unit test 同时让前端能消费。
+        return {"type": "token", "text": text, "content": text}
 
     if ev_type == "on_chain_start" and ev_name == "tool_node":
         return {"type": "tool_start", "node": ev_name}
@@ -260,7 +263,10 @@ async def run_chat_async(
             if fallback_text:
                 try:
                     await bus.xadd_event(
-                        sid_uuid, task_id, {"type": "token", "text": fallback_text}
+                        sid_uuid,
+                        task_id,
+                        # Dual field — 同 _adapt_event_for_stream 的 token event
+                        {"type": "token", "text": fallback_text, "content": fallback_text},
                     )
                     acc_assistant.append(fallback_text)
                 except Exception as exc:  # noqa: BLE001
