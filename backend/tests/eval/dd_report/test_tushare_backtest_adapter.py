@@ -67,3 +67,44 @@ def test_adapter_cut_off_required() -> None:
 
     with pytest.raises(TypeError):
         TushareBacktestAdapter(inner=MagicMock())  # type: ignore[call-arg]
+
+
+def test_adapter_drops_rows_with_missing_ann_date() -> None:
+    """I-1 契约守护: 缺 ann_date 字段的行被 '99999999' 哨兵丢掉(silent drop, 非 raise).
+
+    backtest 下 silent leak 比 silent drop 更危险, 所以契约是丢。本 test 显式
+    守护该契约, 防止未来改 fallback 时无声破坏 backtest 正确性。
+    """
+    from eval.dd_report.tushare_backtest_adapter import TushareBacktestAdapter
+
+    inner = MagicMock()
+    inner.income.return_value = [
+        {"ts_code": "600519.SH", "ann_date": "20240315"},  # 正常 — 保留
+        {"ts_code": "600519.SH"},  # 缺 ann_date — 必须丢
+    ]
+
+    adapter = TushareBacktestAdapter(inner=inner, cut_off=date(2024, 6, 30))
+    rows = adapter.fetch_income(ts_code="600519.SH")
+
+    assert len(rows) == 1
+    assert rows[0]["ann_date"] == "20240315"
+
+
+def test_adapter_announcements_filters_by_ann_date() -> None:
+    """M-3 fetch_announcements 也按 ann_date 二次过滤 (anns 接口主键是 ann_date)."""
+    from eval.dd_report.tushare_backtest_adapter import TushareBacktestAdapter
+
+    inner = MagicMock()
+    inner.anns.return_value = [
+        {"ann_date": "20240501", "title": "Q1 财报"},
+        {"ann_date": "20240920", "title": "Q3 财报"},  # > cut_off, 必须丢
+    ]
+
+    adapter = TushareBacktestAdapter(inner=inner, cut_off=date(2024, 6, 30))
+    rows = adapter.fetch_announcements(ts_code="600519.SH")
+
+    assert len(rows) == 1
+    assert rows[0]["ann_date"] == "20240501"
+    # Layer 1 也要验证 — inner.anns 被注入 end_date
+    kwargs = inner.anns.call_args.kwargs
+    assert kwargs.get("end_date") == "20240630"
