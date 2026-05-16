@@ -378,6 +378,7 @@ CriticDimension = Literal[
     "structure",
     "conciseness",
     "input_context_appropriateness",
+    "valuation_consistency",  # v1.x A5a (第 7 维)
     # plan_correctness removed in v1.x (Validator replaces it; see 2026-05-15 spec § 7.1)
 ]
 

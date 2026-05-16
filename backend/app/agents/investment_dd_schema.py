@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -55,27 +56,93 @@ class RiskItem(BaseModel):
     mitigations: list[str] = Field(default_factory=list, description="可缓释措施")
 
 
+class ValuationModel(StrEnum):
+    """v1.x A5a: 多模型估值 cross-check 中可激活的模型。"""
+
+    PE = "pe"
+    PB = "pb"
+    EV_EBITDA = "ev_ebitda"
+    DCF = "dcf"
+
+
+class OutlierDiagnosis(BaseModel):
+    """v1.x A5a: severe cross-check divergence 时由 OutlierDiagnosisAgent 产出。
+
+    Writer narrative 必须显式引用本对象的 `narrative` 字段。
+    Critic.valuation_consistency 守护 narrative 是否引用。
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    outlier_model: ValuationModel
+    likely_cause: str = Field(max_length=300, description="LLM 诊断的假设错在哪")
+    confidence: Literal["high", "medium", "low"]
+    recommended_action: Literal[
+        "trust_consensus",  # 信另外几个 lens
+        "flag_uncertainty",  # 报告里 flag 给用户决定
+        "recompute_assumption",  # v1.x++ 留口子,本 PR 不实施
+    ]
+    narrative: str = Field(max_length=500, description="客户视角解释,Writer 必须引用")
+
+
 class ValuationAnalysis(BaseModel):
-    """估值分析子模块(FinancialAnalysis § 3 新增)。"""
+    """估值分析子模块(FinancialAnalysis § 3 新增)。
+
+    v0.8.5: pe_historical_percentile_value (numeric for classify_recommendation)
+    v1.x A5a: + 多模型 cross-check (PE/PB/EV-EBITDA/DCF) + router + outlier diagnosis
+    """
 
     model_config = ConfigDict(extra="ignore")
 
     narrative: str = Field(description="估值分析综述")
+
+    # v0.8.4-v0.8.5 字段(向后兼容保留)
     pe_historical_percentile: str | None = Field(
         default=None, description="PE 历史百分位,如 '近 5 年 30 分位'"
     )
-    # v0.8.5 forward concern 1 — numeric sibling for classify_recommendation.
-    # 0.0 ≤ x ≤ 1.0 (e.g. 0.30 = 30 分位). Existing str field stays for
-    # narrative use; downstream extractor prefers numeric when present, falls
-    # back to regex-parsing the str, then to 0.5 mid-cap default.
     pe_historical_percentile_value: float | None = Field(
         default=None,
         ge=0.0,
         le=1.0,
-        description="PE 历史百分位的数值化(0.0-1.0,如 0.30 = 近 5 年 30 分位)",
+        description="PE 历史百分位数值化(0.0-1.0)",
     )
-    dcf_valuation: str | None = Field(default=None, description="DCF 估值结论")
-    peer_comparison: str | None = Field(default=None, description="同业估值对比")
+    dcf_valuation: str | None = Field(default=None, description="DCF 估值结论 narrative")
+    peer_comparison: str | None = Field(default=None, description="同业估值对比 narrative")
+
+    # v1.x A5a: 多模型 cross-check 新字段
+    industry_classification: str | None = Field(
+        default=None, description="tushare industry_code 标准化"
+    )
+    active_models: list[ValuationModel] = Field(
+        default_factory=list,
+        max_length=4,
+        description="Router 激活的估值模型列表(default 0-4 个)",
+    )
+    router_override_reasoning: str | None = Field(
+        default=None,
+        max_length=200,
+        description="LLM analyst override 时的 reasoning",
+    )
+
+    pe_value: float | None = Field(default=None, description="PE 模型理论价(元/股)")
+    pb_value: float | None = Field(default=None, description="PB 模型理论价")
+    ev_ebitda_value: float | None = Field(default=None, description="EV/EBITDA 理论价")
+    dcf_base: float | None = Field(default=None, description="DCF base 场景")
+    dcf_bull: float | None = Field(default=None, description="DCF bull 场景")
+    dcf_bear: float | None = Field(default=None, description="DCF bear 场景")
+
+    dcf_sensitivity: list[list[float]] | None = Field(
+        default=None,
+        description="DCF sensitivity 5×5 矩阵 (WACC ±1%/±2% × Terminal ±0.5%/±1%)",
+    )
+
+    valuation_consistency: Literal["consistent", "moderate", "severe"] | None = Field(
+        default=None,
+        description="cross-check 一致性等级 (None = 单 lens 无 cross-check)",
+    )
+    outlier_diagnosis: OutlierDiagnosis | None = Field(
+        default=None, description="仅 severe 时由 OutlierDiagnosisAgent 填写"
+    )
 
 
 # ── Section schemas ────────────────────────────────────────────────────────────
