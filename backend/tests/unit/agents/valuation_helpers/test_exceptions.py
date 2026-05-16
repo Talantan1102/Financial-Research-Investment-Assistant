@@ -31,3 +31,11 @@ def test_insufficient_data_raises_correctly() -> None:
             reason="负利润,PE 失效",
         )
     assert exc_info.value.model == "pe"
+
+
+def test_init_rejects_positional_args() -> None:
+    """keyword-only init: 3 个 str 一字排开易混,positional 必须报错."""
+    from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+
+    with pytest.raises(TypeError):
+        InsufficientDataForModelError("dcf", "forecast_revenue", "x")  # type: ignore[misc]
