@@ -106,11 +106,11 @@ async function consumeStream(
           }
         } else {
           if (ev.type === 'done' || ev.type === 'error') {
-            // Drain typewriter SYNC before dispatch — dispatchEvent('done')
-            // calls flushDraftAsMessage which snapshots streamingDraft into
-            // the persisted assistant message;若 typewriter 还有 char 没吐,
-            // 会丢字。先 flush 保证 streamingDraft 完整。
-            typewriter.flush()
+            // dogfood fix: 等 typewriter natural RAF 排空再 dispatch done。
+            // 之前用 sync flush 会瞬间排空 streamingDraft → user 看不到打字机过程。
+            // 现在 await drained() 让 RAF 按 30 chars/s 自然吐字,完成后 dispatch
+            // done → flushDraftAsMessage 入 messages。
+            await typewriter.drained()
             doneSeen = true
           }
           currentChatActions.dispatchEvent(ev)

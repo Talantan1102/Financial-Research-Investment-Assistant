@@ -27,6 +27,7 @@ interface UseTypewriterOptions {
 interface UseTypewriter {
   enqueue: (text: string) => void
   flush: () => void // drain everything immediately + cancel RAF
+  drained: () => Promise<void> // wait until RAF naturally drains the queue
 }
 
 export function useTypewriter(options: UseTypewriterOptions): UseTypewriter {
@@ -97,6 +98,23 @@ export function useTypewriter(options: UseTypewriterOptions): UseTypewriter {
     }
   }, [])
 
+  const drained = useCallback((): Promise<void> => {
+    return new Promise((resolve) => {
+      const check = () => {
+        if (queueRef.current.length === 0 && rafRef.current === null) {
+          resolve()
+        } else {
+          // 用 setTimeout 而非 RAF — drained 的 caller 可能在 RAF 已停的情况
+          // 下被调用(比如 done event 紧跟在 token event 之后,queue 立刻有 chars
+          // 但 RAF 还没有时间触发 startLoop)。每 ~16ms 轮一次,RAF loop 在
+          // 推完前不会 resolve。
+          setTimeout(check, 16)
+        }
+      }
+      check()
+    })
+  }, [])
+
   useEffect(() => {
     return () => {
       if (rafRef.current !== null && typeof cancelAnimationFrame === 'function') {
@@ -105,5 +123,5 @@ export function useTypewriter(options: UseTypewriterOptions): UseTypewriter {
     }
   }, [])
 
-  return { enqueue, flush }
+  return { enqueue, flush, drained }
 }

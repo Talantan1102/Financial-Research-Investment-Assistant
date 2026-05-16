@@ -142,6 +142,30 @@ def _adapt_event_for_stream(ev: dict[str, Any]) -> dict[str, Any] | None:
     return None  # all others skip (LangGraph done emitted by finally)
 
 
+def _extract_response_text(raw: str) -> str:
+    """LLM 输出可能是 JSON-encoded `{"text"/"answer"/"response"/"content": "..."}`。
+    试解析拿 string-valued 字段(优先 text > answer > response > content > 任意 string),
+    失败 fallback 用 raw 字符串。
+    """
+    import json as _json
+
+    try:
+        parsed = _json.loads(raw)
+    except Exception:
+        return raw
+    if not isinstance(parsed, dict):
+        return raw
+    for key in ("text", "answer", "response", "content"):
+        v = parsed.get(key)
+        if isinstance(v, str) and v:
+            return v
+    # Fallback: 第一个 string-valued 字段
+    for v in parsed.values():
+        if isinstance(v, str) and v:
+            return v
+    return raw
+
+
 def _to_jsonable(obj: Any) -> Any:
     """LangGraph node output 可能含 Pydantic BaseModel(如 planner 的 Plan,tool 结果等)。
     json.dumps 不接 Pydantic 对象,需要 model_dump 转 dict。递归处理 dict / list / Pydantic。
@@ -248,18 +272,11 @@ async def run_chat_async(
             if isinstance(final_state, dict):
                 fr = final_state.get("final_response")
                 if isinstance(fr, str) and fr:
-                    # responder 输出常是 JSON-encoded `{"text": "..."}` —
-                    # 解析拿 text 字段,失败 fallback 用 raw string。
-                    try:
-                        import json as _json
-
-                        parsed = _json.loads(fr)
-                        if isinstance(parsed, dict) and isinstance(parsed.get("text"), str):
-                            fallback_text = parsed["text"]
-                        else:
-                            fallback_text = fr
-                    except Exception:
-                        fallback_text = fr
+                    # responder 设计是自由文本,但 LLM(qwen / dashscope)
+                    # 实际常返 JSON 格式 `{"text": ...}` / `{"answer": ...}` /
+                    # `{"response": ...}`。兼容尝试解第一个 string-valued 字段,
+                    # 失败 fallback 用 raw string。
+                    fallback_text = _extract_response_text(fr)
             if fallback_text:
                 try:
                     await bus.xadd_event(
