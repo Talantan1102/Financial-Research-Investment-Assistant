@@ -1,0 +1,227 @@
+"""Celery task: run_chat — 异步跑 LangGraph + XADD events to Redis Streams。
+
+入口语义:
+- Celery worker 收到 task_id → mark_running → 跑 graph
+- 每个 LangGraph chunk-level event → XADD to chat:events:{sid}:{tid}
+- 完成 / 异常 → XADD 终止事件 + finalize_task_persistence(commit assistant +
+  mark task)
+
+Plan 2 Task 3 scope:
+- run_chat_async(internal async,test 直接 await 它)
+- run_chat(Celery sync wrapper,thin shim;real worker 走 .delay() → 这里)
+- enqueue_run_chat(production 入口,POST /chat 改造在 Task 5)
+
+Test 策略(test_chat_runner.py):directly await run_chat_async,inject
+fakeredis + fake graph + sqlite session_factory。
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from collections.abc import Callable
+from typing import Any
+
+from app.router.chat_finalize import finalize_task_persistence
+from app.services.chat_event_bus import ChatEventBus
+from app.services.chat_task_repo import ChatTaskRepo
+from app.tasks.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
+
+
+def _adapt_event_for_stream(ev: dict[str, Any]) -> dict[str, Any] | None:
+    """Map LangGraph astream_events dict → Plan 2 chunk-level event dict (or None).
+
+    Plan 2 输出的事件类型(spec § 6.5):
+    - token : {type, text}  (chunk-level model output)
+    - tool_start: {type, node}
+    - tool_end  : {type, node, output}
+    - plan      : {type, output}
+
+    LangGraph 自然结束(on_chain_end + name=LangGraph)由调用方在 finally
+    内 XADD `{type: done}`,因此本函数对它返 None。
+    """
+    ev_type = ev.get("event", "")
+    ev_name = ev.get("name", "")
+    ev_data = ev.get("data", {})
+
+    if ev_type == "on_chat_model_stream":
+        chunk = ev_data.get("chunk", {}) if isinstance(ev_data, dict) else {}
+        text = ""
+        if hasattr(chunk, "content"):
+            text = str(chunk.content)
+        elif isinstance(chunk, dict):
+            text = str(chunk.get("content", ""))
+        return {"type": "token", "text": text}
+
+    if ev_type == "on_chain_start" and ev_name == "tool_node":
+        return {"type": "tool_start", "node": ev_name}
+
+    if ev_type == "on_chain_end" and ev_name == "tool_node":
+        output = ev_data.get("output", {}) if isinstance(ev_data, dict) else {}
+        return {"type": "tool_end", "node": ev_name, "output": output}
+
+    if ev_type == "on_chain_end" and ev_name == "planner_node":
+        output = ev_data.get("output", {}) if isinstance(ev_data, dict) else {}
+        return {"type": "plan", "output": output}
+
+    return None  # all others skip (LangGraph done emitted by finally)
+
+
+async def run_chat_async(
+    *,
+    task_id: uuid.UUID,
+    graph_factory: Callable[[], Any],
+    session_factory: Callable[[], Any],
+    redis: Any,
+    user_message: str,
+    session_id: str,
+    user_id: uuid.UUID,
+) -> None:
+    """Main worker async entry — DI 友好,test 可直接 await。
+
+    Contract:
+    - task_id: chat_tasks row id;调用前 router 已 create_queued
+    - graph_factory: returns a CompiledStateGraph (or fake stub in tests)
+    - session_factory: async_sessionmaker / 同 ChatTaskRepo / ChatSessionRepo 约定
+    - redis: redis.asyncio.Redis(production)或 fakeredis.aioredis.FakeRedis(test)
+    - user_message / session_id / user_id: 注入 LangGraph 的 initial state
+    """
+    task_repo = ChatTaskRepo(session_factory)
+    bus = ChatEventBus(redis=redis)
+
+    sid_uuid: uuid.UUID = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
+
+    # mark_running idempotent (Plan 1 router 已 mark,这里 race-safe 再 mark)
+    try:
+        await task_repo.mark_running(task_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("mark_running on worker entry skipped: %s", exc)
+
+    try:
+        await bus.set_ttl(sid_uuid, task_id, seconds=ChatEventBus.DEFAULT_TTL_SECONDS)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("set_ttl on worker entry skipped: %s", exc)
+
+    acc_assistant: list[str] = []
+    graph_error: Exception | None = None
+    final_state: dict[str, Any] | None = None
+
+    graph = graph_factory()
+
+    initial = {
+        "user_id": str(user_id),
+        "session_id": session_id,
+        "user_message": user_message,
+        "request_id": f"req-{uuid.uuid4().hex[:12]}",
+        "trace_request_id": f"req-{uuid.uuid4().hex[:12]}",
+    }
+    config: dict[str, Any] = {"configurable": {"thread_id": f"{user_id}:{session_id}"}}
+
+    try:
+        async for ev in graph.astream_events(initial, config=config, version="v2"):
+            # capture final_state from LangGraph done event
+            if ev.get("event") == "on_chain_end" and ev.get("name") == "LangGraph":
+                output = (ev.get("data") or {}).get("output") or {}
+                if isinstance(output, dict):
+                    final_state = output
+
+            adapted = _adapt_event_for_stream(ev)
+            if adapted is None:
+                continue
+            try:
+                await bus.xadd_event(sid_uuid, task_id, adapted)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("xadd_event failed for task %s: %s", task_id, exc)
+            if adapted.get("type") == "token":
+                acc_assistant.append(adapted.get("text", ""))
+            try:
+                await task_repo.bump_seq(task_id, delta=1)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("bump_seq skipped for task %s: %s", task_id, exc)
+    except Exception as exc:  # noqa: BLE001
+        graph_error = exc
+        try:
+            await bus.xadd_event(sid_uuid, task_id, {"type": "error", "message": str(exc)[:500]})
+        except Exception as inner:  # noqa: BLE001
+            logger.warning("xadd error event failed for task %s: %s", task_id, inner)
+    finally:
+        # 终止事件:成功 → done;失败 → error_done
+        try:
+            await bus.xadd_event(
+                sid_uuid,
+                task_id,
+                {"type": "done"} if graph_error is None else {"type": "error_done"},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("terminal xadd failed for task %s: %s", task_id, exc)
+
+        # Commit assistant message + mark task — 复用 Plan 1 helper
+        accumulated = "".join(acc_assistant)
+        try:
+            await finalize_task_persistence(
+                pg_factory=session_factory,
+                task_id=task_id,
+                session_id=session_id,
+                graph=graph,
+                config=config,  # type: ignore[arg-type]
+                final_state=final_state,
+                accumulated_token_text=accumulated,
+                graph_error=graph_error,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("finalize_task_persistence failed for task %s: %s", task_id, exc)
+
+        # Refresh TTL — task 结束后再续 24h
+        try:
+            await bus.set_ttl(sid_uuid, task_id, seconds=ChatEventBus.DEFAULT_TTL_SECONDS)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("TTL refresh skipped for task %s: %s", task_id, exc)
+
+
+# ---------------------------------------------------------------------------
+# Celery wrapper — thin sync→async bridge
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(name="app.tasks.chat_runner.run_chat", bind=True)
+def run_chat(
+    self: Any,
+    task_id: str,
+    session_id: str,
+    user_id: str,
+    user_message: str,
+) -> None:
+    """Celery sync entry. Bridges to async via asyncio.run().
+
+    Production wiring(graph / session_factory / redis singleton load)在 Task 7:
+    - graph_factory: provides chat_agent_graph singleton from app.state
+    - session_factory: async_sessionmaker from app.state.async_session_factory
+    - redis: redis.asyncio client from app.state.redis_async
+
+    本 Plan 2 Task 3 范围:只实现 task 定义 + run_chat_async core;
+    production wiring 在 Task 7。
+
+    Tests do NOT exercise this wrapper; they directly await run_chat_async.
+    """
+    # Production wiring stub — Task 7 will populate from app.state singletons.
+    # Until then, raise to fail loud if Celery worker calls without context.
+    raise NotImplementedError(
+        "run_chat Celery wrapper requires Plan 2 Task 7 wiring "
+        "(graph_factory / session_factory / redis async client). "
+        "Tests should call run_chat_async directly."
+    )
+
+
+def enqueue_run_chat(*, task_id: str, session_id: str, user_id: str, user_message: str) -> Any:
+    """Production enqueue — POST /chat 改造(Task 5)调本函数。
+
+    Tests monkey-patch this function to bypass real Celery .delay().
+    """
+    return run_chat.delay(
+        task_id=task_id,
+        session_id=session_id,
+        user_id=user_id,
+        user_message=user_message,
+    )
