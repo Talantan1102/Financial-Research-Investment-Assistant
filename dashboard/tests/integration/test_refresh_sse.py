@@ -44,7 +44,7 @@ def test_refresh_sse_returns_event_stream_with_done() -> None:
 
     from dashboard.server import app
 
-    with TestClient(app) as client, client.stream("POST", "/refresh") as r:
+    with TestClient(app) as client, client.stream("GET", "/refresh") as r:
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/event-stream")
         body = "".join(chunk.decode("utf-8") for chunk in r.iter_bytes())
@@ -67,7 +67,7 @@ def test_refresh_sse_milvus_skip_does_not_block_snapshot() -> None:
 
     from dashboard.server import app
 
-    with TestClient(app) as client, client.stream("POST", "/refresh") as r:
+    with TestClient(app) as client, client.stream("GET", "/refresh") as r:
         body = "".join(chunk.decode("utf-8") for chunk in r.iter_bytes())
 
     events = _parse_sse(body)
