@@ -273,3 +273,66 @@ async def test_post_chat_with_redis_enqueues_and_returns_task_id(
     task = await task_repo.get_by_id(uuid.UUID(body["task_id"]))
     assert task is not None
     assert task.status in ("queued", "running"), f"expected queued or running, got {task.status}"
+
+
+# ---------------------------------------------------------------------------
+# Plan 3 Task 4: POST /api/v0/chat/cancel/{task_id} — publish to Redis pub/sub
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_post_chat_cancel_publishes_to_pubsub(
+    session_factory: async_sessionmaker[AsyncSession],
+    fake_redis: FakeRedis,
+    seeded_running_task: dict[str, Any],
+) -> None:
+    """POST /api/v0/chat/cancel/{tid} → ChatCancelBus.publish_cancel,Redis pub/sub
+    应该有 1 个 receiver(test 内 subscribe)。"""
+    import asyncio
+
+    from app.services.chat_cancel_bus import ChatCancelBus
+
+    tid = seeded_running_task["task_id"]
+    received: list[bytes] = []
+    flag = asyncio.Event()
+
+    async def subscriber() -> None:
+        cancel_bus = ChatCancelBus(fake_redis)
+        async for data in cancel_bus.subscribe_cancel(tid):
+            received.append(data)
+            flag.set()
+            return
+
+    sub_task = asyncio.create_task(subscriber())
+    await asyncio.sleep(0.05)
+
+    client = _client(session_factory, fake_redis)
+    resp = client.post(f"/api/v0/chat/cancel/{tid}")
+    assert resp.status_code == 202, f"expected 202 got {resp.status_code}: {resp.text}"
+
+    await asyncio.wait_for(flag.wait(), timeout=2.0)
+    await sub_task
+    assert len(received) == 1
+
+
+@pytest.mark.asyncio
+async def test_post_chat_cancel_404_for_unknown_task(
+    session_factory: async_sessionmaker[AsyncSession],
+    fake_redis: FakeRedis,
+) -> None:
+    """Unknown task_id → 404。"""
+    fake_tid = uuid.uuid4()
+    client = _client(session_factory, fake_redis)
+    resp = client.post(f"/api/v0/chat/cancel/{fake_tid}")
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_post_chat_cancel_invalid_uuid_404(
+    session_factory: async_sessionmaker[AsyncSession],
+    fake_redis: FakeRedis,
+) -> None:
+    """非 UUID 格式 task_id → 404。"""
+    client = _client(session_factory, fake_redis)
+    resp = client.post("/api/v0/chat/cancel/not-a-uuid")
+    assert resp.status_code == 404

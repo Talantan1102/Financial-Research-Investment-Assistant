@@ -838,3 +838,54 @@ async def chat_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 3 Task 4: POST /api/v0/chat/cancel/{task_id} — publish cancel signal
+# ---------------------------------------------------------------------------
+
+
+@router.post("/api/v0/chat/cancel/{task_id}", status_code=202)
+async def chat_cancel(
+    task_id: str,
+    pg_factory: Any | None = Depends(get_async_session_factory),
+    redis: AsyncRedis | None = Depends(get_redis_async),
+) -> dict[str, str]:
+    """Publish cancel signal to ``chat:cancel:{tid}`` channel.
+
+    Spec § 5.3 Scenario C:用户点停止 → 立即 return 202(异步生效);worker 内
+    listener 收到 signal → raise GraphInterrupt → finalize 走 partial commit
+    (Plan 3 Task 3 已实施)。
+
+    Status codes:
+        - 202: cancel signal published (worker reacts async)
+        - 404: invalid task_id (not UUID) OR task not found in PG
+        - 503: PG / Redis 未 wire
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(status_code=404, detail=f"invalid task_id: {task_id}") from exc
+
+    if pg_factory is None or redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="chat cancel not available — PG or Redis unavailable",
+        )
+
+    task_repo = ChatTaskRepo(pg_factory)
+    task = await task_repo.get_by_id(task_uuid)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+
+    # Inline import: ChatCancelBus → redis.asyncio import; defer to runtime to
+    # keep chat router importable in dev environments without redis configured.
+    from app.services.chat_cancel_bus import ChatCancelBus
+
+    cancel_bus = ChatCancelBus(redis=redis)  # type: ignore[arg-type]
+    receivers = await cancel_bus.publish_cancel(task_uuid)
+    return {
+        "task_id": task_id,
+        "receivers": str(receivers),
+        "status": "cancel_published",
+    }
