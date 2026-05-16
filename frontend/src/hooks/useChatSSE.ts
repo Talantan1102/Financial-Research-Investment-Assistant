@@ -1,24 +1,37 @@
 /**
  * frontend/src/hooks/useChatSSE.ts
  *
- * SSE consumer for chat. Encapsulates:
- *   - POST /api/v0/chat (initial message) — fetch + ReadableStream
- *   - parse `id: <seq>\nevent: <type>\ndata: <json>\n\n` frames
- *   - dispatch each event into currentChatStore
- *   - on disconnect: GET /api/v0/chats/:id to reload history (no in-flight subscribe yet — Plan 2)
- *   - on session swap: abort previous, reset state, start fresh (F8)
+ * SSE consumer for chat. Plan 2 双 path graceful degrade:
  *
- * Plan 4a exposes:  { sendMessage, abort, status }
- * Plan 4b consumes the same surface unchanged.
+ *   Plan 1 (legacy):POST /api/v0/chat 直接返 text/event-stream → 现有 consume.
+ *   Plan 2 (enqueue):POST /api/v0/chat 返 application/json
+ *     `{task_id, session_id, stream_url}` → 自动打开
+ *     GET /api/v0/chat/stream/{task_id} (SSE replay from Redis Streams).
+ *
+ * 分流逻辑只看 response Content-Type。后端 redis_async wired → Plan 2;否则
+ * 自动 fallback Plan 1。前端无感知,组件 sendMessage(content) 接口不变。
+ *
+ * Plan 2 spec § 6.5:token event 走 RAF + char queue 打字机 (useTypewriter),
+ * 把后端 chunk-level chunk 拆成字符渲染,视觉等同 token-level 流。
+ *
+ * 其它行为:
+ *   - 断流时一次性 GET /api/v0/chats/:id reload 历史 (Plan 1 修补)
+ *   - session swap → abort 旧 stream (F8)
  */
 
 import { useCallback, useEffect, useRef } from 'react'
-import { buildChatPostUrl, getChat } from '@/api/chatApi'
+import {
+  buildChatPostUrl,
+  buildChatTaskStreamUrl,
+  getChat,
+  type ChatPostJsonResponse,
+} from '@/api/chatApi'
 import {
   currentChatActions,
   currentChatState,
 } from '@/store/current-chat'
-import type { SSEEvent } from '@/types/chat'
+import type { SSEEvent, TokenEvent } from '@/types/chat'
+import { useTypewriter } from './useTypewriter'
 
 interface UseChatSSEOptions {
   sessionId: string | null
@@ -32,6 +45,11 @@ interface UseChatSSE {
   sendMessage(content: string): Promise<void>
   abort(): void
   status: () => string
+}
+
+interface Typewriter {
+  enqueue: (text: string) => void
+  flush: () => void
 }
 
 const SSE_FRAME_DELIMITER = '\n\n'
@@ -52,6 +70,7 @@ function parseFrame(frame: string): SSEEvent | null {
 async function consumeStream(
   res: Response,
   signal: AbortSignal,
+  typewriter: Typewriter,
 ): Promise<{ doneSeen: boolean }> {
   const reader = res.body?.getReader()
   if (!reader) return { doneSeen: false }
@@ -77,8 +96,25 @@ async function consumeStream(
       buffer = buffer.slice(idx + SSE_FRAME_DELIMITER.length)
       const ev = parseFrame(frame)
       if (ev) {
-        currentChatActions.dispatchEvent(ev)
-        if (ev.type === 'done' || ev.type === 'error') doneSeen = true
+        if (ev.type === 'token') {
+          // Plan 2 Task 6:token 不走 dispatchEvent,改入 typewriter queue,
+          // 由 RAF loop 逐字符 push 进 streamingDraft。bump last_seq 仍需 do —
+          // 否则 abort / reconnect 时序判断失效。
+          if (ev.seq > currentChatState.last_seq) {
+            currentChatState.last_seq = ev.seq
+            typewriter.enqueue((ev as TokenEvent).content ?? '')
+          }
+        } else {
+          if (ev.type === 'done' || ev.type === 'error') {
+            // Drain typewriter SYNC before dispatch — dispatchEvent('done')
+            // calls flushDraftAsMessage which snapshots streamingDraft into
+            // the persisted assistant message;若 typewriter 还有 char 没吐,
+            // 会丢字。先 flush 保证 streamingDraft 完整。
+            typewriter.flush()
+            doneSeen = true
+          }
+          currentChatActions.dispatchEvent(ev)
+        }
       }
       idx = buffer.indexOf(SSE_FRAME_DELIMITER)
     }
@@ -90,6 +126,16 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
   const fetchImpl = options.fetchImpl ?? fetch
   const abortRef = useRef<AbortController | null>(null)
   const sessionIdRef = useRef<string | null>(options.sessionId)
+
+  const typewriter = useTypewriter({
+    onChar: (ch) => {
+      currentChatState.streamingDraft += ch
+    },
+  })
+  // Keep latest typewriter ref to avoid re-creating sendMessage when typewriter
+  // identity changes between renders (it shouldn't, but defensive).
+  const typewriterRef = useRef(typewriter)
+  typewriterRef.current = typewriter
 
   useEffect(() => {
     if (sessionIdRef.current !== options.sessionId) {
@@ -119,18 +165,45 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
           signal: ac.signal,
         })
         if (!res.ok) throw new Error(`POST /api/v0/chat ${res.status}`)
-        const result = await consumeStream(res, ac.signal)
-        doneSeen = result.doneSeen
+
+        const contentType = res.headers.get('content-type') ?? ''
+
+        if (contentType.includes('application/json')) {
+          // ===== Plan 2 path =====
+          const json = (await res.json()) as ChatPostJsonResponse
+          const streamUrl = buildChatTaskStreamUrl(json.task_id, '0')
+          const streamRes = await fetchImpl(streamUrl, { signal: ac.signal })
+          if (!streamRes.ok) {
+            throw new Error(`GET stream ${streamRes.status}`)
+          }
+          const result = await consumeStream(
+            streamRes,
+            ac.signal,
+            typewriterRef.current,
+          )
+          doneSeen = result.doneSeen
+        } else {
+          // ===== Plan 1 path (legacy SSE inline) =====
+          const result = await consumeStream(
+            res,
+            ac.signal,
+            typewriterRef.current,
+          )
+          doneSeen = result.doneSeen
+        }
+
+        // Flush any remaining typewriter chars so the persisted assistant
+        // message captures the full token stream (dispatchEvent('done') already
+        // ran flushDraftAsMessage with whatever streamingDraft had at the time;
+        // we flush typewriter BEFORE done arrives via consumeStream — but the
+        // RAF loop is async, so chars may still be queued. Drain them here.)
+        typewriterRef.current.flush()
       } catch {
         if (ac.signal.aborted) return
       }
 
-      // Plan 1: 不再轮询不存在的 GET /api/v0/chat/stream/:id endpoint。
-      // 断流时改一次性 GET /api/v0/chats/:id 重载历史 messages —
-      // backend Task 5 已在 finally 块持久化完整的 assistant message,
-      // 通过 currentChatActions.setSession 替换 UI state。
-      // Plan 2 会重新引入真正的 /chat/stream/{task_id} (Celery + Redis Streams)。
       if (!doneSeen && !ac.signal.aborted) {
+        // 流断了 — Plan 1 修补行为:reload 历史 (Plan 2 task 9 会强化此分支)。
         currentChatActions.setReconnecting()
         try {
           const fresh = await getChat(sessionId)

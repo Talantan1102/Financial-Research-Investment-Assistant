@@ -59,12 +59,33 @@ export function buildChatPostUrl(): string {
   return apiUrl('/api/v0/chat')
 }
 
+export interface ChatPostJsonResponse {
+  task_id: string
+  session_id: string
+  stream_url: string
+}
+
+/**
+ * Plan 2: GET /api/v0/chat/stream/{task_id}?last_event_id=X URL builder.
+ *
+ * 用于前端 useChatSSE 在收到 POST /chat 的 JSON 响应后,打开 Redis Streams
+ * replay 端点。`last_event_id` 是 Redis Stream entry id (`<ms>-<seq>`),
+ * 断流后回传给服务端 XREAD STREAMS key {last_id} 续读。首次连接传 '0' 拿全量。
+ */
+export function buildChatTaskStreamUrl(
+  taskId: string,
+  lastEventId: string = '0',
+): string {
+  return apiUrl(
+    `/api/v0/chat/stream/${encodeURIComponent(taskId)}?last_event_id=${encodeURIComponent(lastEventId)}`,
+  )
+}
+
 /**
  * @deprecated Plan 1 — frontend no longer uses this. Backend endpoint
- *   GET /api/v0/chat/stream/:id is unimplemented; Plan 2 will reintroduce
- *   a different endpoint (`/chat/stream/{task_id}`) with real Redis Streams replay.
- *   This function is kept exported only because `chatApi.test.ts` still tests
- *   its URL shape and Plan 2 may rename/replace.
+ *   GET /api/v0/chat/stream/:id (sessionId variant) was never implemented;
+ *   Plan 2 uses `buildChatTaskStreamUrl(taskId)` instead.
+ *   Kept exported only because `chatApi.test.ts` still asserts its URL shape.
  */
 export function buildChatStreamUrl(
   sessionId: string,
