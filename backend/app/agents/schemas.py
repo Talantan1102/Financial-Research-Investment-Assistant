@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agents.escalation_protocol import Entity, Preference, ToolResultRef
-from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
+from app.agents.investment_dd_schema import InvestmentDueDiligenceReport, ValuationAnalysis
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
 from app.services.monitoring.signal_rules.base import SignalResult
 
@@ -484,5 +484,17 @@ class ResearchState(BaseModel):
         description=(
             "近 60 日 OHLC + 沪深 300 close;Analyst 用以算 60-day β。"
             "结构: [{trade_date, close, index_close}, ...]"
+        ),
+    )
+
+    # v1.x A5a: Analyst 算出来的 multi-model cross-check 结果。Writer
+    # post_process_writer_output 在 LLM call 之后拷到
+    # InvestmentDueDiligenceReport.financial_analysis.valuation_analysis,
+    # 覆盖 LLM 占位 — 保证 Python 决定论是 single source of truth。
+    valuation_analysis: ValuationAnalysis | None = Field(
+        default=None,
+        description=(
+            "v1.x A5a Analyst 节点产出的多模型估值 cross-check;"
+            "Writer post_process 拷到 report.financial_analysis.valuation_analysis"
         ),
     )

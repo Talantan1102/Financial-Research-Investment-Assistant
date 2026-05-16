@@ -12,12 +12,23 @@ spec ref: docs/superpowers/specs/2026-05-04-v0.8.5-constrained-router-design.md 
 from __future__ import annotations
 
 import json
+import logging
 import re
+from typing import Any
 
 from app.agents.base import Agent
+from app.agents.investment_dd_schema import (
+    OutlierDiagnosis,
+    ValuationAnalysis,
+    ValuationModel,
+)
+from app.agents.outlier_diagnosis_agent import OutlierDiagnosisAgent
 from app.agents.schemas import Insight, ResearchState, StepResult
+from app.agents.valuation_calculator import ValuationInputs, calculate_valuations
 from app.services.llm_response import Tier
 from app.skills.financial_research import load_skill
+
+logger = logging.getLogger(__name__)
 
 # Module-level skill load — methodology + references parsed once at import time.
 _SKILL_BUNDLE = load_skill()
@@ -207,7 +218,108 @@ class Analyst(Agent):
         prompt = build_analyst_prompt(state)
         r = self._llm.chat(prompt=prompt, tier=self.model_tier, request_id=state.request_id)
         insights = _parse_insights(r.content)
+
+        # v1.x A5a: try to compute multi-model valuation cross-check.
+        # Graceful skip when state.tool_results 缺数据 — 不破既有 e2e。
+        valuation_analysis = self._maybe_compute_valuation_analysis(state)
+
+        state_update: dict[str, Any] = {"insights": insights}
+        if valuation_analysis is not None:
+            state_update["valuation_analysis"] = valuation_analysis
+
         return StepResult(
-            state_update={"insights": insights},
+            state_update=state_update,
             span_metadata={"agent": "Analyst", "model": r.model, "cost_cny": r.cost_cny},
         )
+
+    def _maybe_compute_valuation_analysis(self, state: ResearchState) -> ValuationAnalysis | None:
+        """v1.x A5a hook. 从 state.tool_results 拼 inputs → ValuationAnalysis。
+
+        设计:
+        - 任何数据缺失都 graceful skip (return None),保证不破现有 e2e
+        - severe consistency → 触发 OutlierDiagnosisAgent (亦 silent fail)
+        - 本期 v1.x A5a Task 15 简化:_build_valuation_inputs_from_state 直接 return None;
+          真 tushare wire 留下一 iteration。这样 hook 接通但占位不破任何 test。
+        """
+        try:
+            inputs = self._build_valuation_inputs_from_state(state)
+        except (KeyError, ValueError, AttributeError) as e:
+            logger.debug("v1.x A5a: valuation_analysis skip (tool_results 缺数据): %s", e)
+            return None
+        if inputs is None:
+            return None
+
+        result = calculate_valuations(inputs, router_override=None)
+
+        diagnosis: OutlierDiagnosis | None = None
+        if result.valuation_consistency == "severe":
+            diagnosis = self._maybe_diagnose_outlier(state, inputs, result)
+
+        return ValuationAnalysis(
+            narrative="v1.x A5a multi-model cross-check (Writer 阶段会扩充 narrative)",
+            industry_classification=inputs.industry_classification,
+            active_models=result.active_models,
+            router_override_reasoning=result.router_override_reasoning,
+            pe_value=result.pe_value,
+            pb_value=result.pb_value,
+            ev_ebitda_value=result.ev_ebitda_value,
+            dcf_base=result.dcf_base,
+            dcf_bull=result.dcf_bull,
+            dcf_bear=result.dcf_bear,
+            dcf_sensitivity=result.dcf_sensitivity,
+            valuation_consistency=result.valuation_consistency,
+            outlier_diagnosis=diagnosis,
+        )
+
+    def _maybe_diagnose_outlier(
+        self,
+        state: ResearchState,
+        inputs: ValuationInputs,
+        result: Any,
+    ) -> OutlierDiagnosis | None:
+        """severe consistency 时触发 OutlierDiagnosisAgent。silent fail on any error."""
+        try:
+            diagnosis_agent = OutlierDiagnosisAgent(llm=self._llm)
+
+            vals: dict[str, float] = {}
+            if result.pe_value is not None:
+                vals["pe"] = result.pe_value
+            if result.pb_value is not None:
+                vals["pb"] = result.pb_value
+            if result.ev_ebitda_value is not None:
+                vals["ev_ebitda"] = result.ev_ebitda_value
+            if result.dcf_base is not None:
+                vals["dcf_base"] = result.dcf_base
+
+            # 收 assumptions — 简化:仅 DCF (其它 model 假设少且不数值化)
+            assumptions: dict[str, dict[str, float]] = {}
+            if (
+                ValuationModel.DCF in result.active_models
+                and ValuationModel.DCF not in result.skipped_models
+            ):
+                assumptions["dcf"] = {
+                    "industry_baseline_wacc": inputs.industry_baseline_wacc,
+                    "industry_terminal_growth": inputs.industry_terminal_growth,
+                }
+
+            company_narrative = f"{state.target_ts_code or 'unknown'} - {state.user_message}"
+            return diagnosis_agent.diagnose(
+                valuations=vals,
+                assumptions=assumptions,
+                company_narrative=company_narrative,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("v1.x A5a: OutlierDiagnosisAgent 失败 (silent): %s", e)
+            return None
+
+    def _build_valuation_inputs_from_state(self, state: ResearchState) -> ValuationInputs | None:
+        """从 state.tool_results 提取 valuation inputs;字段缺失 → None。
+
+        本期 v1.x A5a Task 15 简化:直接 return None,wait 下一 iteration 真 wire tushare
+        (income/balance/cashflow/daily_basic/get_forecast/行业可比/β 算法)。
+        这样既保证现有 e2e 通过,又留 hook — Analyst.step() 的 wire 已接通,
+        只待下一 task 把 tool_results → ValuationInputs 的解析逻辑填进来。
+        """
+        # 显式 reference state 避免 ARG002 / 静态 lint 抱怨 — 占位实现
+        _ = state.tool_results
+        return None

@@ -505,7 +505,18 @@ def post_process_writer_output(
             "narrative": narrative_with_footer,
         }
     )
-    return llm_report.model_copy(update={"investment_recommendation": new_recommendation})
+    report_updates: dict[str, Any] = {"investment_recommendation": new_recommendation}
+
+    # v1.x A5a: 若 Analyst 算出了 multi-model cross-check 结果,覆盖 LLM 占位。
+    # Python 决定论 — Calculator+Router+OutlierDiagnosis 是 single source of truth,
+    # LLM 在 financial_analysis.valuation_analysis 写的数字一律以 state 为准。
+    if state.valuation_analysis is not None:
+        new_financial = llm_report.financial_analysis.model_copy(
+            update={"valuation_analysis": state.valuation_analysis}
+        )
+        report_updates["financial_analysis"] = new_financial
+
+    return llm_report.model_copy(update=report_updates)
 
 
 def _build_alert_prompt(state: ResearchState) -> str:
