@@ -122,6 +122,12 @@ git add backend/eval/dd_report/__init__.py backend/tests/eval/dd_report/__init__
 git commit -m "feat(dd-eval): Phase 1 Task 1.0 — 创建 dd_report 模块骨架 + KB schema spike + .env 加 OPENROUTER_API_KEY"
 ```
 
+## Spike Notes (Task 1.0 Step 2 结果)
+- KB chunk schema 文件位置: `backend/app/kb/chunkers/base.py`
+- chunk 类名: `Chunk`
+- publish_date 字段是否存在: **no** — `Chunk` model 仅含 `chunk_index / text / tokens / section_title / is_table / extra`。`pub_date` 字段存在于 Milvus ingest pipeline 的 row dict（`backend/app/kb/ingest/pipeline.py:240`），由 `spec.metadata.get("pub_date", "")` 填充，但未注入回 `Chunk` model 本身。
+- 若 no, Task 1.3 必须执行：在 `Chunk` model 加 `pub_date: str = ""` 字段，使 chunker 输出携带日期，供 `KBBacktestAdapter` 过滤使用。
+
 ---
 
 ## Task 1.1:DB schema 扩展(eval_results 加列 + backtest_runs 新表)
