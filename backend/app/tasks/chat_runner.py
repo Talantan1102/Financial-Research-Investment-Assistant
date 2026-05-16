@@ -130,13 +130,29 @@ def _adapt_event_for_stream(ev: dict[str, Any]) -> dict[str, Any] | None:
 
     if ev_type == "on_chain_end" and ev_name == "tool_node":
         output = ev_data.get("output", {}) if isinstance(ev_data, dict) else {}
-        return {"type": "tool_end", "node": ev_name, "output": output}
+        return {"type": "tool_end", "node": ev_name, "output": _to_jsonable(output)}
 
     if ev_type == "on_chain_end" and ev_name == "planner_node":
         output = ev_data.get("output", {}) if isinstance(ev_data, dict) else {}
-        return {"type": "plan", "output": output}
+        return {"type": "plan", "output": _to_jsonable(output)}
 
     return None  # all others skip (LangGraph done emitted by finally)
+
+
+def _to_jsonable(obj: Any) -> Any:
+    """LangGraph node output 可能含 Pydantic BaseModel(如 planner 的 Plan,tool 结果等)。
+    json.dumps 不接 Pydantic 对象,需要 model_dump 转 dict。递归处理 dict / list / Pydantic。
+
+    Plan 2 dogfood 暴露的 bug:plan event xadd_event 报 "Object of type Plan is not
+    JSON serializable" → plan event 没推到 Redis Stream → 前端拿不到 plan / partial state。
+    """
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(mode="json")
+    if isinstance(obj, dict):
+        return {k: _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_jsonable(v) for v in obj]
+    return obj
 
 
 async def run_chat_async(
@@ -219,6 +235,37 @@ async def run_chat_async(
         except Exception as inner:  # noqa: BLE001
             logger.warning("xadd error event failed for task %s: %s", task_id, inner)
     finally:
+        # Plan 2 dogfood bug fix: 如果 graph 走 direct_response 路径(planner 决定不调
+        # tool,responder 一次性 invoke),没 on_chat_model_stream 事件 → acc_assistant
+        # 空 → 前端 typewriter 没字符可吐 → assistant message 不显示。
+        # Fallback: 拿 final_state.final_response 一次性 emit 为 token event,
+        # 让前端 typewriter 接到 content 后逐字符吐(视觉等同 streaming)。
+        if graph_error is None and not acc_assistant:
+            fallback_text = ""
+            if isinstance(final_state, dict):
+                fr = final_state.get("final_response")
+                if isinstance(fr, str) and fr:
+                    # responder 输出常是 JSON-encoded `{"text": "..."}` —
+                    # 解析拿 text 字段,失败 fallback 用 raw string。
+                    try:
+                        import json as _json
+
+                        parsed = _json.loads(fr)
+                        if isinstance(parsed, dict) and isinstance(parsed.get("text"), str):
+                            fallback_text = parsed["text"]
+                        else:
+                            fallback_text = fr
+                    except Exception:
+                        fallback_text = fr
+            if fallback_text:
+                try:
+                    await bus.xadd_event(
+                        sid_uuid, task_id, {"type": "token", "text": fallback_text}
+                    )
+                    acc_assistant.append(fallback_text)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("fallback token xadd failed for task %s: %s", task_id, exc)
+
         # 终止事件:成功 → done;失败 → error_done
         try:
             await bus.xadd_event(
