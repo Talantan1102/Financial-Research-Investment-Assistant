@@ -12,6 +12,7 @@ spec ref: docs/superpowers/specs/2026-05-16-v1.x-multi-valuation-cross-check-des
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 from app.agents.analyst import Analyst
@@ -27,8 +28,96 @@ from app.agents.investment_dd_schema import (
     ValuationAnalysis,
     ValuationModel,
 )
-from app.agents.schemas import ResearchState
+from app.agents.schemas import ResearchState, ToolResult
 from app.agents.writer import post_process_writer_output
+
+
+def _tr(name: str, output: dict[str, Any]) -> ToolResult:
+    return ToolResult(
+        tool_name=name,
+        args={"ts_code": "600519.SH"},
+        success=True,
+        output=output,
+        latency_ms=10,
+    )
+
+
+def _make_state_with_complete_tool_results() -> ResearchState:
+    """ResearchState with 4 核心 tool_results + pe_history + cashflow — Analyst 真产 VA."""
+    tool_results = [
+        _tr("get_stock_quote", {"price": 1800.0, "change_pct": 1.0, "volume": 1000.0}),
+        _tr(
+            "get_daily_basic",
+            {
+                "ts_code": "600519.SH",
+                "pe": 25.0,
+                "pb": 8.0,
+                "ps": 8.0,
+                "dv_ratio": 1.2,
+                "total_mv": 22000000.0,
+                "circ_mv": 22000000.0,
+                "turnover_rate": 0.5,
+            },
+        ),
+        _tr(
+            "get_financials",
+            {
+                "ts_code": "600519.SH",
+                "period": "latest",
+                "revenue": 1000000000.0,
+                "net_profit": 500000000.0,
+                "roe": 30.0,
+                "pe": 25.0,
+            },
+        ),
+        _tr(
+            "get_balance_sheet",
+            {
+                "ts_code": "600519.SH",
+                "total_assets": 100000000.0,
+                "total_liab": 20000000.0,
+                "total_cur_assets": 50000000.0,
+                "total_cur_liab": 15000000.0,
+                "asset_liability_ratio": 0.2,
+                "current_ratio": 3.3,
+            },
+        ),
+        _tr(
+            "get_cashflow",
+            {
+                "ts_code": "600519.SH",
+                "n_cashflow_act": 300000000.0,
+                "n_cashflow_inv_act": -50000000.0,
+                "n_cash_flows_fnc_act": -10000000.0,
+                "positive_ocf": True,
+            },
+        ),
+        _tr(
+            "get_pe_history",
+            {
+                "ts_code": "600519.SH",
+                "current_pe": 25.0,
+                "historical_percentile": 0.4,
+                "min_pe": 15.0,
+                "max_pe": 50.0,
+                "median_pe": 28.0,
+                "valuation_band": "合理",
+            },
+        ),
+    ]
+    return ResearchState(
+        user_id="test",
+        session_id="s",
+        user_message="尽调 600519.SH 贵州茅台 白酒",
+        request_id="r",
+        target_ts_code="600519.SH",
+        target_entity="贵州茅台",
+        client_total_aum=10_000_000.0,
+        investment_objective="balanced",
+        investment_horizon="medium_term",
+        risk_tolerance="moderate",
+        tool_results=tool_results,
+    )
 
 
 def _make_minimal_state() -> ResearchState:
@@ -206,6 +295,63 @@ def test_writer_post_process_no_valuation_analysis_keeps_llm_placeholder() -> No
     # 没替换 — 仍是 LLM 占位
     assert out.financial_analysis.valuation_analysis == original_va
     assert out.financial_analysis.valuation_analysis.narrative == "LLM 占位 narrative — 应保留"
+
+
+# ---------------------------------------------------------------------------
+# v1.x A5a follow-up #1: Analyst真 wire — tool_results 完整 → ValuationAnalysis 非 None
+# ---------------------------------------------------------------------------
+
+
+def test_analyst_complete_tool_results_yields_valuation_analysis() -> None:
+    """完整 tool_results → _maybe_compute_valuation_analysis 真产 ValuationAnalysis.
+
+    白酒 industry → PE + DCF active; daily_basic.pe=25 + pb=8 + total_mv 反推 eps/bvps/shares;
+    pe_history.median_pe=28 作 industry_pe 可比 fallback;
+    EBITDA 缺 (设 0) → 但白酒 industry mapping 不激活 EV-EBITDA,故无 skip 影响;
+    DCF: forecast_growth=None + historical=空 → InsufficientDataForModelError → DCF skip
+    剩 PE 真算: implied_price = 72 (eps) × (28 median+pe_avg avg)/2 ≈ legit number
+    """
+    llm = MagicMock()
+    agent = Analyst(llm=llm)
+
+    state = _make_state_with_complete_tool_results()
+    va = agent._maybe_compute_valuation_analysis(state)  # noqa: SLF001
+
+    assert va is not None
+    assert isinstance(va, ValuationAnalysis)
+    assert va.industry_classification == "白酒"
+    # PE 真算成功 (eps>0 + industry_pe>0)
+    assert va.pe_value is not None
+    assert va.pe_value > 0
+    # DCF 应该 skip (growth signal 缺): dcf_base = None
+    assert va.dcf_base is None
+    # active_models 仍是 router default (PE + DCF),DCF skip 不改 active_models
+    assert ValuationModel.PE in va.active_models
+    # narrative 是占位 (Writer 阶段会扩充)
+    assert "multi-model cross-check" in va.narrative
+
+
+def test_analyst_step_complete_tool_results_writes_valuation_to_state_update() -> None:
+    """Analyst.step() 真 wire — 完整 tool_results → state_update 含 valuation_analysis."""
+    llm = MagicMock()
+    llm.chat = MagicMock(
+        return_value=MagicMock(
+            content='{"insights": []}',
+            model="m",
+            cost_cny=0.001,
+        )
+    )
+    agent = Analyst(llm=llm)
+    state = _make_state_with_complete_tool_results()
+
+    result = agent.step(state)
+
+    assert "insights" in result.state_update
+    assert "valuation_analysis" in result.state_update
+    va = result.state_update["valuation_analysis"]
+    assert isinstance(va, ValuationAnalysis)
+    assert va.pe_value is not None and va.pe_value > 0
+    assert va.industry_classification == "白酒"
 
 
 def test_writer_post_process_preserves_other_financial_fields_when_copying_va() -> None:
