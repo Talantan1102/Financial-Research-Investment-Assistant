@@ -265,6 +265,18 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         app.state.research_agent = None
         logger.warning("research_agent 初始化跳过: %s", e)
 
+    # Persona Editable UI Plan Task 6 — 一次性 backfill (幂等)
+    # SessionLocal: app.core.database.SessionLocal (sync session factory, used by Celery tasks)
+    try:
+        from scripts.migrate_persona_blob_to_items import migrate_all
+
+        from app.core.database import SessionLocal
+
+        stats = migrate_all(SessionLocal)
+        logger.info("persona migration stats: %s", stats)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("persona migration startup hook failed: %s", exc)
+
     yield
 
     # 关闭时执行
