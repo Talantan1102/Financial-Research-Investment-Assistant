@@ -1154,7 +1154,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.5 — KBBacktestAdapter (publish_da
 
 **注**:Phase 1 的 BacktestRunner 是 skeleton — 接受 case + cut_off + LLM model id,负责装配 adapter + swap LLM + 调用 pipeline + emit `backtest_run` row。**不接 metric**(metric 是 Phase 2 接进来,通过 `MetricRegistry`)。
 
-- [ ] **Step 1: Write failing test — BacktestRunner 初始化 + run_one 基础**
+- [x] **Step 1: Write failing test — BacktestRunner 初始化 + run_one 基础**
 
 ```python
 # backend/tests/eval/dd_report/test_backtest_runner.py
@@ -1277,7 +1277,7 @@ def test_backtest_runner_calls_pipeline_with_adapters(tmp_db: Path) -> None:
     assert kwargs["evaluator_client"].model == "qwen2.5-72b-instruct"
 ```
 
-- [ ] **Step 2: Run test — verify failure**
+- [x] **Step 2: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_backtest_runner.py -v
@@ -1285,7 +1285,7 @@ uv run pytest backend/tests/eval/dd_report/test_backtest_runner.py -v
 
 Expected: FAIL — `BacktestRunner` 不存在。
 
-- [ ] **Step 3: Implement — BacktestRunner skeleton**
+- [x] **Step 3: Implement — BacktestRunner skeleton**
 
 ```python
 # backend/eval/dd_report/backtest_runner.py
@@ -1433,7 +1433,7 @@ class BacktestRunner:
             )
 ```
 
-- [ ] **Step 4: Run test — verify pass**
+- [x] **Step 4: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_backtest_runner.py -v
@@ -1441,7 +1441,7 @@ uv run pytest backend/tests/eval/dd_report/test_backtest_runner.py -v
 
 Expected: 3 个 test 全 PASS.
 
-- [ ] **Step 5: Mypy strict check**
+- [x] **Step 5: Mypy strict check**
 
 ```bash
 cd backend && uv run mypy app eval/dd_report --strict
@@ -1449,7 +1449,7 @@ cd backend && uv run mypy app eval/dd_report --strict
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/eval/dd_report/backtest_runner.py backend/tests/eval/dd_report/test_backtest_runner.py
