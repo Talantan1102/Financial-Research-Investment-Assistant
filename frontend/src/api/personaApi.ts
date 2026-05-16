@@ -1,7 +1,8 @@
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 const BASE = '/api/v0/persona'
 
-const apiUrl = (path: string) => `${API_BASE}${path}`
+// trailing-slash 安全: VITE_API_BASE 可能写成 "http://x/" 也可能不带, 跟 memoryApi.ts 对齐
+const apiUrl = (path: string) => `${API_BASE.replace(/\/$/, '')}${path}`
 
 export type PersonaSource = 'user' | 'agent'
 
