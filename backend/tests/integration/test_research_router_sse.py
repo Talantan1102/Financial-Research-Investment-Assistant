@@ -36,6 +36,7 @@ from app.agents.critic_subagents.input_context_scorer import (
 )
 from app.agents.critic_subagents.insight import InsightScorer
 from app.agents.critic_subagents.structure import StructureScorer
+from app.agents.critic_subagents.valuation_consistency import ValuationConsistencyScorer
 from app.agents.data_collector import DataCollector
 from app.agents.research_planner import ResearchPlanner
 from app.agents.writer import Writer
@@ -139,6 +140,7 @@ def _build_test_research_graph() -> Any:
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
         InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
+        ValuationConsistencyScorer(llm=svc),  # 第 7 scorer (v1.x A5a)
         # v1.x: PlanCorrectnessScorer removed (Task 1.5).
     ]
     critic = Critic(llm=svc, scorers=scorers)

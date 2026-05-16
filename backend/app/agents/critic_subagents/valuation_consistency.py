@@ -17,8 +17,10 @@ from __future__ import annotations
 
 from typing import Literal
 
+from app.agents.base import Agent
 from app.agents.investment_dd_schema import OutlierDiagnosis
-from app.agents.schemas import CriticDimension, CriticDimensionScore
+from app.agents.schemas import CriticDimension, CriticDimensionScore, ResearchState, StepResult
+from app.services.llm_response import Tier
 from app.services.llm_service import LLMService
 
 __all__ = ["ValuationConsistencyScorer"]
@@ -29,18 +31,58 @@ _DIVERGENCE_KEYWORDS = ("偏离", "差异", "偏低", "偏高", "不一致")
 _UNCERTAINTY_KEYWORDS = ("无法诊断", "不确定")
 
 
-class ValuationConsistencyScorer:
+class ValuationConsistencyScorer(Agent):
     """Critic 第 7 维 scorer. Rule-based, sync API。
 
     本期不调 LLM(规则即可表达"narrative 是否反映 cross-check 信号");LLM DI
     接口预留(未来若需 LLM-as-judge 可换实现而不破契约)。
+
+    Wire pattern(与其它 6 scorer 一致):
+      - 继承 Agent (name + model_tier + step(state) -> StepResult)
+      - step() 从 state.valuation_analysis 提取 (consistency, diagnosis),
+        report_markdown 从 state.report_markdown,转发到内部 score(...) 方法
+      - 内部 score(...) 公共签名保留供 10 个 unit test 直接调用(不破契约)
     """
 
+    name = "ValuationConsistencyScorer"
     dimension: CriticDimension = "valuation_consistency"
+    state_field = "valuation_consistency_score"
+    # rule-based, 不调 LLM;Tier 字段仅满足 Agent ABC 契约
+    model_tier: Tier = "fast"
 
     def __init__(self, *, llm: LLMService) -> None:
         # LLM kept for DI consistency with other scorers; not used in v1.x A5a
-        self._llm = llm
+        super().__init__(llm)
+
+    def step(self, state: ResearchState) -> StepResult:  # type: ignore[override]
+        """Adapter for critic_subgraph fan-out.
+
+        Reads multi-model cross-check signals from state.valuation_analysis
+        (Analyst writes there; Writer post_process 拷到
+        report.financial_analysis.valuation_analysis). 用 state.valuation_analysis
+        而不是 investment_report.financial_analysis.valuation_analysis 是因为
+        critic_subgraph 跑在 Writer 之后但用的是 ResearchState 不是 InvestmentDDReport,
+        且 Analyst 写入的 state.valuation_analysis 是 Python 决定论 single
+        source of truth。
+        """
+        va = state.valuation_analysis
+        consistency = va.valuation_consistency if va is not None else None
+        diagnosis = va.outlier_diagnosis if va is not None else None
+        score = self.score(
+            report_markdown=state.report_markdown or "",
+            valuation_consistency=consistency,
+            outlier_diagnosis=diagnosis,
+            request_id=state.request_id,
+        )
+        return StepResult(
+            state_update={self.state_field: score},
+            span_metadata={
+                "agent": self.name,
+                "dimension": self.dimension,
+                "consistency": consistency or "none",
+                "has_diagnosis": diagnosis is not None,
+            },
+        )
 
     def score(
         self,
