@@ -28,6 +28,7 @@ from app.router.auth_router import router as auth_router  # noqa: E402
 from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.memory_router import router as memory_router  # noqa: E402  (C.5)
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
+from app.router.persona_router import router as persona_router  # noqa: E402  (persona-ui)
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
@@ -343,6 +344,7 @@ app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE stre
 app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
 app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (confirmed packet)
 app.include_router(memory_router)  # C.5 — /api/v0/memory (cross-session memory page)
+app.include_router(persona_router)  # persona-ui — /api/v0/persona (Tier 1 persona items)
 
 
 # Dependency override: chats router's get_repo reads from app.state at request time
