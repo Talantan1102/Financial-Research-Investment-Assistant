@@ -12,6 +12,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.database import SessionLocal
+from app.memory.models import ChatMemoryPersonaItem
 from app.memory.persona_service import PersonaService
 from app.models.user import User
 from app.router._persona_schemas import (
@@ -35,6 +37,10 @@ def _get_current_user_id(
 ) -> UUID:
     """Extract UUID from current authenticated user.
 
+    User.id 是 UUID(as_uuid=True).with_variant(String(36), "sqlite") — PG 下是
+    typed UUID, SQLite 下是 str. 这里统一 cast 为 UUID 给下游 PersonaService 用,
+    避免 4 个 endpoint 重复散布 cast 知识.
+
     test fixture 通过 app.dependency_overrides 替换此 dep。
     """
     return UUID(str(current_user.id))
@@ -46,8 +52,6 @@ def _get_current_user_id(
 
 
 def get_persona_session_factory() -> Callable[[], Session]:
-    from app.core.database import SessionLocal
-
     return SessionLocal  # type: ignore[return-value]
 
 
@@ -62,14 +66,14 @@ def get_persona_service(
 # ---------------------------------------------------------------------------
 
 
-def _to_out(item: object) -> PersonaItemOut:
+def _to_out(item: ChatMemoryPersonaItem) -> PersonaItemOut:
     return PersonaItemOut(
-        id=item.item_id,  # type: ignore[union-attr]
-        text=item.text,  # type: ignore[union-attr]
-        source=item.source,  # type: ignore[union-attr]
-        position=item.position,  # type: ignore[union-attr]
-        created_at=item.created_at,  # type: ignore[union-attr]
-        updated_at=item.updated_at,  # type: ignore[union-attr]
+        id=item.item_id,
+        text=item.text,
+        source=item.source,  # type: ignore[arg-type]
+        position=item.position,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
     )
 
 
