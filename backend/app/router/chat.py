@@ -26,13 +26,15 @@ last_event_id-based SSE reconnect (spec § 4.6 / G1 industrial problem).
 
 from __future__ import annotations
 
+import json
 import logging
 import traceback
+import uuid
 from collections.abc import AsyncIterator
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -44,6 +46,9 @@ from app.router.chat_finalize import finalize_task_persistence
 from app.services.chat_session_repo import ChatSessionRepo
 from app.services.chat_task_repo import ChatTaskRepo
 from app.services.escalation_record_repo import EscalationRecordRepo
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis as AsyncRedis
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +92,16 @@ def get_async_session_factory(request: Request) -> Any | None:
     to inject an in-memory sqlite ``async_sessionmaker``.
     """
     return getattr(request.app.state, "async_session_factory", None)
+
+
+def get_redis_async(request: Request) -> AsyncRedis | None:
+    """Plan 2: Redis async client wired by app_main lifespan to app.state.redis_async.
+
+    Returns None if Redis is not configured — endpoints that need it 503 gracefully.
+    Overridden in tests via ``dependency_overrides[get_redis_async]`` to inject
+    a fakeredis instance.
+    """
+    return getattr(request.app.state, "redis_async", None)
 
 
 # ---------------------------------------------------------------------------
@@ -701,6 +716,96 @@ async def chat(
             task_id=task_id,
             pg_factory=pg_factory if task_id is not None else None,
         ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Plan 2 Task 4: GET /api/v0/chat/stream/{task_id} — SSE replay endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/v0/chat/stream/{task_id}")
+async def chat_stream(
+    task_id: str,
+    request: Request,
+    last_event_id: str = "0",
+    pg_factory: Any | None = Depends(get_async_session_factory),
+    redis: AsyncRedis | None = Depends(get_redis_async),
+) -> StreamingResponse:
+    """SSE replay endpoint — XREAD from Redis Streams + forward as SSE frames.
+
+    Plan 2 Task 4:前端打开 SSE 后,我们从 Redis Stream 拉 chunk-level event 转发。
+    Spec § 6.2:entry id 直接透传作为 SSE ``id:`` field → 前端断流时回传
+    ``last_event_id`` 续读;§ 5.5:客户端断开 → 停转发(不杀 Celery task)。
+
+    Args:
+        task_id: ChatTask UUID
+        last_event_id: Redis Stream entry id ("0" = from start; ``<ms>-<seq>``
+            from a previous reconnect)
+
+    Returns:
+        text/event-stream with frames ``event: <type>\\nid: <entry_id>\\ndata: <json>\\n\\n``.
+
+    Status codes:
+        - 200: streaming OK
+        - 404: invalid uuid OR task not found
+        - 503: PG / Redis not wired
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(status_code=404, detail=f"invalid task_id: {task_id}") from exc
+
+    if pg_factory is None or redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="chat streaming not configured (PG or Redis unavailable)",
+        )
+
+    task_repo = ChatTaskRepo(pg_factory)
+    task = await task_repo.get_by_id(task_uuid)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+
+    session_id_uuid = task.session_id  # ChatTask.session_id is UUID
+
+    async def _forward_sse() -> AsyncIterator[str]:
+        # Inline import: ChatEventBus → redis.asyncio import; defer to runtime so
+        # the chat router stays importable in dev environments without redis.
+        from app.services.chat_event_bus import ChatEventBus
+
+        bus = ChatEventBus(redis=redis)  # type: ignore[arg-type]
+        cur_id = last_event_id
+        while True:
+            # Spec § 5.5: client disconnect → stop forwarding, do NOT kill Celery task.
+            if await request.is_disconnected():
+                logger.debug(
+                    "client disconnected from /chat/stream/%s; stopping forward",
+                    task_id,
+                )
+                return
+            entries = await bus.xread_blocking(
+                session_id_uuid,
+                task_uuid,
+                last_id=cur_id,
+                count=20,
+                block_ms=10_000,  # 10s block then re-check disconnect
+            )
+            if not entries:
+                continue
+            for entry_id, payload in entries:
+                cur_id = entry_id
+                ev_type = payload.get("type", "unknown")
+                data_str = json.dumps(payload, ensure_ascii=False)
+                yield f"event: {ev_type}\nid: {entry_id}\ndata: {data_str}\n\n"
+                # Terminal events: stop the forward loop.
+                if ev_type in ("done", "error_done"):
+                    return
+
+    return StreamingResponse(
+        _forward_sse(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
