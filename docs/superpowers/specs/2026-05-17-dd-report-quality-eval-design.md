@@ -2,7 +2,7 @@
 
 | 字段 | 值 |
 |---|---|
-| 版本 | v1.0-draft |
+| 版本 | v1.1-draft |
 | 状态 | brainstorm 完成,待 user review → writing-plans |
 | 起草日期 | 2026-05-17 |
 | 关联 use case | B-1 InvestmentDueDiligenceReport(v0.8.4 ship) |
@@ -52,11 +52,13 @@ B-1 use case 在 v0.8.4 已 ship `InvestmentDueDiligenceReport`(6 sections × `e
 
 ### § 2.2 工业 LLM eval benchmark 可对标的 3 个
 
-| 厂商 / 项目 | 关键 take-away | 对我们的可复用度 |
-|---|---|---|
-| **FinanceBench** (Patronus AI, MIT, 10231 SEC QA) | 唯一公开可复用金融 QA dataset,带 evidence string;GPT-4-Turbo + RAG 在 150 case 子集**81% 错或拒答** | 中文子集存在性待调研(原 dataset 英文)— Phase 4 单独评估 |
-| **Hebbia Financial AI Benchmark** | **三段式方法论:extraction / summarization / reasoning**;Multi-agent autonomous consensus("who evaluates the evaluator") | 高 — 直接作为 metric 分层架构基础 |
-| **JurisTech 2026 Hallucination Benchmark** | 6 主流 LLM **4/6 会编财务数据**;提出"incomplete-source 下 fabrication 率" | 中 — 启发 M2 numerical accuracy + M1 citation 设计 |
+| 厂商 / 项目 | 公开 dataset? | 可跑性 | 我们的处理 |
+|---|---|---|---|
+| **FinanceBench** (Patronus AI, MIT, 10231 SEC QA) | ✓ 英文 SEC + evidence string | **部分** — 原 dataset 英文,跟我们中文 KB corpus 失配 | Phase 4 **自建 ~50 case 中文版**(QA 结构 + 容差判分方法对齐原 paper),报告我们 pipeline 的绝对数字 — **不打榜**,corpus 不同不可比 |
+| **Hebbia Financial AI Benchmark** | ✗ 商业内部 600+ task | **不能** — 没 dataset | 只**借鉴方法论**:三段式 extraction/summarization/reasoning + multi-LLM consensus("who evaluates the evaluator") |
+| **JurisTech 2026 Hallucination Benchmark** | ✗ 厂商 blog 报告 | **不能** — 没 dataset | 只**借鉴指标视角**:incomplete-source 下 fabrication 率,M1 citation + M2 numerical 设计参考 |
+
+**关键结论**:**3 个 benchmark 都不能直接"打榜对比"** — FinanceBench 不同 corpus,后两者无公开 dataset。我们能拿出来的"做得多好"证据靠的是**内部三维对比**(§ 4.7-4.8):ablation / 版本迭代 / cross-LLM。
 
 ### § 2.3 关键学术 / 监管基线
 
@@ -78,16 +80,17 @@ B-1 use case 在 v0.8.4 已 ship `InvestmentDueDiligenceReport`(6 sections × `e
 | # | 模块 | 算法亮点 |
 |---|---|---|
 | 1 | **5 个 metric 集**(M1-M5,对齐 Hebbia 三段式) | citation 算法 / numerical fact-check / risk-mitigation pairing / backtest prediction / multi-LLM judge |
-| 2 | **Pipeline-as-SUT backtest 框架** | 32 case × 3 LLM cross-check,leak-free 绝对数字 |
-| 3 | **生产模型 sanity check 副线** | 8 case in cutoff-after 窗口,与 backtest 趋同验证 |
-| 4 | **FinanceBench 中文子集 baseline** | 外部公开 benchmark 对比,简历可比性 |
-| 5 | **Eval Dashboard**(harness-board § 07) | Hebbia 三段式骨架 + drill-down 详情,产品级 frontend |
+| 2 | **Pipeline-as-SUT backtest 框架** | 32 case × 3 LLM cross-check,leak-free 绝对数字 + 生产模型 sanity 副线趋同验证 |
+| 3 | **内部三维对比**(量化"做得多好") | (a) **Ablation**:无 RAG / 无 multi-agent / 无 Critic — 量化每个组件贡献;(b) **版本迭代**:每次 backtest run 带 git_sha,dashboard 趋势线;(c) **Cross-LLM**:同 pipeline × N 个 LLM 矩阵 |
+| 4 | **FinanceBench 中文子集**(reference 数字,**不打榜**) | 自建 ~50 case 中文版,方法论参照 FinanceBench;输出我们 pipeline 绝对数字作 reference |
+| 5 | **Eval Dashboard**(harness-board § 07) | Hebbia 三段式骨架 + drill-down 详情 + 趋势线 + ablation 矩阵 + cross-LLM 矩阵,产品级 frontend |
 
 ### § 3.2 Out of scope(显式不做)
 
 - 跨业态 rubric(VC / PE / 投行 / 银行四套独立 rubric)— 形态 3 抽象,Product-first 原则推迟
 - 跨 use case 通用框架(C-3 全市场扫描 / 行业研究 eval 复用)— 第 2 个 use case 真撞上来再抽
 - **投后真实回填**(等 3-6 月被动累积)— 跟 c5 Plan 5 posterior calibration runner 共用底座,但 v1.x 不主动 push
+- **横向打榜对比**(vs TradingAgents / FinRobot / 等开源项目)— use case 错位 + 工业 reviewer 关注"组件贡献量化"而非"打榜赢",改用 ablation 替代
 - 人工 conviction rating UI — dogfood 阶段如果需要再加
 
 ### § 3.3 简历叙事三支柱
@@ -96,7 +99,7 @@ B-1 use case 在 v0.8.4 已 ship `InvestmentDueDiligenceReport`(6 sections × `e
 |---|---|---|
 | 1 | **Pipeline-as-SUT backtest** — 评估的是 pipeline 不是 LLM,生产模型 swap 评估模型,leak-free | quant 圈 walk-forward backtest 范式 |
 | 2 | **Hebbia 三段式 + multi-LLM consensus judge** — extraction/summarization/reasoning 分层,不是一锅 judge | Hebbia "who evaluates the evaluator" |
-| 3 | **FinanceBench 中文子集 baseline + 生产 sanity 双闭环** | 国际公开 benchmark + 持续滚动验证 |
+| 3 | **内部三维对比量化组件贡献** — Ablation(无 RAG / 无 multi-agent / 无 Critic)+ 版本迭代 git_sha 趋势 + Cross-LLM 模型矩阵,不靠外部打榜,靠控制变量内部数字 | 控制实验 + 工业 ML 工程严谨度 |
 
 ---
 
@@ -263,6 +266,84 @@ B-1 use case 在 v0.8.4 已 ship `InvestmentDueDiligenceReport`(6 sections × `e
 
 **Trade-off**:c5 Plan 5 calibration 是为 memory injection classifier 设计,可能 abstraction leak — Phase 3 实施时不预判,以代码为准。
 
+### § 4.7 决策 7:Ablation 变体设计(组件贡献量化)
+
+**问题陈述**:外部横向对比(vs TradingAgents / FinRobot 等)use case 错位且 reviewer 关心的"组件贡献"答不上来。需要**控制变量**方式量化我们 pipeline 每个组件的实际贡献。
+
+**业界 alternatives**:
+
+| 方案 | 做法 | 信号强度 |
+|---|---|---|
+| (a) 横向打榜 | vs 开源同类项目跑同 case | use case 错位时数字噪音大 |
+| (b) **Ablation 控制变量** | 拿掉 / 替换 pipeline 一个组件,跑同 case,数字差 = 该组件贡献 | **最强** — 控制变量,reviewer 直接信服 |
+| (c) 跨时间内部对比 | 不同版本 metric 提升(决策 8 处理) | 进步叙事 |
+
+选 **(b)**(决策 7)+ (c)(决策 8 处理)。
+
+**4 个 Ablation 变体**:
+
+| # | 变体 | 拿掉什么 / 替换什么 | 量化什么 |
+|---|---|---|---|
+| **V0 baseline** | 完整 pipeline | 5 metric 基线数字 |
+| **V1 无 RAG** | RAG 检索 → 替换为 LLM 直接生成(无外部知识) | M1 citation / M2 numerical 的 RAG 增益 |
+| **V2 无 multi-agent** | 5 agent → 合并成单 prompt(单 LLM 一次性出全报告) | M4 prediction / M5 composite 的 multi-agent 编排增益 |
+| **V3 无 Critic 不 retry** | 拿掉 critic 反思循环(直接采纳 writer 首版) | M3 risk-pairing / M5 composite 的 critic 增益 |
+
+**关键设计**:
+
+- **Ablation 变体复用同一 backtest 框架** — `BacktestRunner` 接受 `ablation_variant` 参数,内部按变体名 swap pipeline 组件
+- **跑的是同 32 case + 同 3 evaluator LLM** — 总 cost = 4 变体 × 之前 backtest cost ≈ 4 × $5 = $20/完整 ablation run
+- **结果存进 `ablation_results` 表**(或扩 `backtest_runs.ablation_variant` 字段),dashboard 出对比矩阵
+
+**实施位置**:Phase 2 metric 实现完成后,Phase 2 末尾跑一次完整 ablation(4 变体 × 32 case × 3 LLM cross-check)。
+
+**简历叙事样本**(待真跑出数据后填):
+
+> "Ablation 显示:RAG 让 M1 citation 从 X% → Y%(+Z pp),multi-agent 让 M4 prediction 从 X% → Y%(+Z pp),Critic 让 M3 risk-pairing 从 X% → Y%(+Z pp)。每个 pipeline 组件的贡献都被定量证伪。"
+
+### § 4.8 决策 8:版本迭代趋势 + Cross-LLM 矩阵
+
+**问题陈述**:除了"组件贡献"还需要回答两个问题 — (a) 我们 v1.x 实施过程中的迭代是否真的让 metric 提升?(b) 同一 pipeline 在不同 LLM 上的表现差异有多大?
+
+#### § 4.8.1 版本迭代趋势
+
+**做法**:
+
+- 每次 `BacktestRunner` 跑完后,把 `git_sha` 写进 `backtest_runs.git_sha` 字段
+- Dashboard 顶部 KPI 下方加**趋势线 panel**:M1-M5 按 `git_sha` + `created_at` 排序的折线图
+- 简历叙事样本:"v1.x 实施过程 10 次迭代,M4 prediction 从 v0.8.4 的 X% → v1.x 末的 Y%(+Z pp)"
+
+**关键工程**:
+
+- **不强求跑历史 checkout**(v0.8.4 之前没 InvestmentDueDiligenceReport schema,跑不了)
+- **从 v1.x Phase 2 起开始累积** — 每次 ablation run / 每次 prompt 迭代 / 每次 agent 改造完成 = 一次 backtest run
+- Dashboard 折线图本质是"v1.x 实施过程的自我迭代曲线"
+
+#### § 4.8.2 Cross-LLM 矩阵
+
+**做法**:
+
+- `LLMSwapper` 扩展 model list,加生产 deepseek-v4-flash 进 cross-LLM 横评(不进 backtest 主线)
+- 同一套 32 case 跑 N 个 LLM,出 metric 矩阵
+- N 的候选:
+  - GPT-4o-2024-05(已在 backtest 主线)
+  - Qwen2.5-72B-Instruct(已在 backtest 主线)
+  - DeepSeek-V3(已在 backtest 主线)
+  - **deepseek-v4-flash 生产模型**(新加,2026-04 cutoff)
+  - Claude 3.5 Sonnet 或 Claude Sonnet 4(可选)
+  - GPT-4-Turbo 或 GPT-4o-mini(可选)
+- 重点:**生产模型必须进矩阵**,才能回答"生产实际跑出来跟 backtest 基准差多少"
+
+**关键 caveat**:
+
+- 加入生产模型(cutoff 2026-04)跑 2024-2025 backtest case 会有 leakage
+- 解决:**Cross-LLM 矩阵只跑 sanity case(2026-04-30 cutoff 时点 8 case)**,backtest 主线仍用 3 cutoff < 2024 LLM
+- 矩阵存进 `cross_llm_results` 表(或扩 `backtest_runs` 加 `llm_model` 字段)
+
+**简历叙事样本**:
+
+> "Cross-LLM 矩阵显示:在 sanity 8 case 上,生产 deepseek-v4-flash 的 M4 prediction 为 X%,GPT-4o-2024-05 为 Y%,Claude 4 Sonnet 为 Z% — 我们 pipeline 对 LLM 的依赖度量化为 (max - min) / mean = W%。"
+
 ---
 
 ## § 5 系统架构
@@ -309,26 +390,29 @@ backend/eval/                   # 已有 — 跟 backend/eval/memory/ 同级
 
 **DB schema 扩展**:
 
-- `eval_results` 表加列:`backtest_run_id` `cut_off_date` `evaluator_llm` `case_type`(backtest / sanity / financebench)
-- 新建 `backtest_runs` 表:`run_id` `created_at` `case_count` `metric_summary_json` `status`
+- `eval_results` 表加列:`backtest_run_id` `cut_off_date` `evaluator_llm` `case_type`(backtest / sanity / financebench / cross_llm)
+- 新建 `backtest_runs` 表:`run_id` `created_at` `case_count` `metric_summary_json` `status` `git_sha`(决策 8 版本迭代) `ablation_variant`(决策 7 ablation,值:V0_baseline / V1_no_rag / V2_no_multi_agent / V3_no_critic) `llm_model`(决策 8 cross-LLM 矩阵)
 - 新建 `dd_report_calibration_runs` 表(跟 c5 同 schema 风格)
 
 ### § 5.3 LLM swap 机制
 
-- 通过 OpenRouter 接 GPT-4o-2024-05 / Qwen2.5-72B-Instruct / DeepSeek-V3
+- 通过 OpenRouter 接 GPT-4o-2024-05 / Qwen2.5-72B-Instruct / DeepSeek-V3(backtest 主线 evaluator)
+- **Cross-LLM 矩阵扩展**(决策 8.2):加生产 deepseek-v4-flash + 可选 Claude Sonnet 4 + GPT-4-Turbo,仅跑 sanity 8 case 矩阵
 - **Evaluator 隔离**:`LLMSwapper` 只在 `BacktestRunner` 使用,生产 chat/research path 不影响
-- **成本估算**:32 case × 3 evaluator × 6 agent call ≈ 576 LLM call × 平均 4k token = **~2.3M token / 单次完整 backtest**。按 OpenRouter 价格(GPT-4o ~$2.5/M、Qwen2.5 ~$0.4/M、DSv3 ~$0.27/M)→ **~$5/run**,人民币约 35 元
-- 单次 backtest 可接受;weekly job 一年 ~50 次 → ~1750 RMB,留 cost guardrail
+- **成本估算**:
+  - **完整 backtest**:32 case × 3 evaluator × 6 agent call ≈ 576 call × 4k token = **~2.3M token**,按 OpenRouter 价格 → **~$5/run** ≈ 35 RMB
+  - **Ablation**(决策 7,4 变体):**~$20/完整 ablation run** ≈ 140 RMB
+  - **Cross-LLM 矩阵**(决策 8.2,8 sanity case × N 个 model):**~$3-5/run** ≈ 20-35 RMB
+  - 完整一轮 dogfood(backtest + ablation + cross-LLM) = **~$28/run** ≈ 200 RMB
+- 单次可接受;Phase 5 dogfood 跑 5-10 轮 → ~1000-2000 RMB,在 cost budget 内
 
-### § 5.4 FinanceBench 中文子集集成
+### § 5.4 FinanceBench 中文子集集成(reference 数字,**不打榜**)
 
-- 上游 dataset 是 Patronus AI 英文 SEC QA(MIT license)
-- **中文子集需要 Phase 4 第一周 spike 确认**:
-  - 选项 1:用原英文 dataset 直接跑(我们 KB 是中文 corpus,会失配)
-  - 选项 2:找已有的中文金融 QA benchmark(如有)
-  - 选项 3:自己构建小规模中文 SEC-like dataset(50 case,从 tushare 公告 + 真实问题)
-- 推荐 **选项 3** — 构建 50 case 中文版作为 reference benchmark,简历讲"我们建立了 InvestmentDueDiligenceReport 的中文 QA reference benchmark"
+- 上游 dataset 是 Patronus AI 英文 SEC QA(MIT license)— 跟我们中文 KB corpus 不匹配,**确定走自建路径**(不再 spike 选项)
+- **自建 50 case 中文版**:从 tushare 公告 + 招股书 + 财报抽真实问题,QA 结构 + evidence string + 容差判分方法 **结构对齐** FinanceBench 原 paper
+- **明确不可"打榜对比"**:corpus 不同,数字不可比。我们只报告自己 pipeline 在该 reference set 上的绝对数字
 - 单次跑分,不进 production pipeline,输出 markdown report 进 `docs/eval-reports/`
+- **简历叙事用法**:"参照 FinanceBench 方法论(QA + evidence + 容差判分)自建 50 case 中文 reference set,GPT-4o-2024-05 + 我们 RAG pipeline 在该 set 上 citation precision X%、numerical accuracy Y%"— 诚实建立 reference,不假打榜
 
 ---
 
@@ -386,11 +470,52 @@ side filter:[時點][Case type][LLM evaluator][score range]
 - **Sanity vs Backtest tab**:顶部 toggle 切换"backtest 主线 32 case" / "sanity 副线 8 case" / "合并"
 - **趋同警报**:如果 sanity 副线低于 backtest 基准 90%,顶部红色 banner
 
-### § 6.4 SSE refresh pipeline 复用
+### § 6.4 三段式之外的 3 个对比 panel(决策 7-8 可视化)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ PANEL — 版本迭代趋势(决策 8.1)                          │
+│ M1 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 折线        │
+│ M2 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 折线        │
+│ M3-M5 ...                                                │
+│ X 轴:git_sha (短) + created_at                          │
+│ Y 轴:metric 数字                                         │
+│ hover 显示该 commit 的 metric 详情 + 一行 commit message │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│ PANEL — Ablation 对比矩阵(决策 7)                       │
+│ ┌──────────┬───────┬───────┬───────┬───────┬───────┐    │
+│ │ Variant  │  M1   │  M2   │  M3   │  M4   │  M5   │    │
+│ │ V0 base  │  92%  │  91%  │  79%  │  72%  │  81%  │    │
+│ │ V1 no RG │  45%  │  91%  │  78%  │  60%  │  68%  │    │
+│ │ V2 no MA │  85%  │  84%  │  61%  │  58%  │  62%  │    │
+│ │ V3 no Cr │  92%  │  91%  │  61%  │  72%  │  74%  │    │
+│ └──────────┴───────┴───────┴───────┴───────┴───────┘    │
+│ Δ 列高亮:RAG +47pp / MA +14pp / Cr +18pp 等             │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│ PANEL — Cross-LLM 矩阵(决策 8.2)                        │
+│ ┌──────────────┬───────┬───────┬───────┬───────┬─────┐   │
+│ │ Model        │  M1   │  M2   │  M3   │  M4   │ Avg │   │
+│ │ DSv4-flash 生│  88%  │  90%  │  72%  │  68%  │ 80% │   │
+│ │ GPT-4o-24-05 │  93%  │  92%  │  79%  │  73%  │ 84% │   │
+│ │ Qwen2.5-72B  │  90%  │  89%  │  74%  │  70%  │ 81% │   │
+│ │ DSv3         │  91%  │  88%  │  73%  │  70%  │ 81% │   │
+│ │ Claude 4 Son │  92%  │  91%  │  77%  │  74%  │ 84% │   │
+│ └──────────────┴───────┴───────┴───────┴───────┴─────┘   │
+│ 量化"对 LLM 的依赖度":(max - min)/mean = W%             │
+└─────────────────────────────────────────────────────────┘
+```
+
+数字均为示意 — 具体由 Phase 5 dogfood 跑出。
+
+### § 6.5 SSE refresh pipeline 复用
 
 harness-board V2 已有 5-step SSE refresh pipeline(2026-05-14 ship),eval dashboard 复用 — `BacktestRunner` 跑完后 emit `eval.updated` event,前端订阅自动刷新。
 
-### § 6.5 视觉细节须 frontend-design skill 在 plan 阶段 polish
+### § 6.6 视觉细节须 frontend-design skill 在 plan 阶段 polish
 
 本 spec 只锁定信息架构 + 视觉基线,具体 mockup 高保真 + 交互细节 → plan 阶段调用 `frontend-design` skill 单独迭代。
 
@@ -428,12 +553,12 @@ harness-board V2 已有 5-step SSE refresh pipeline(2026-05-14 ship),eval dashbo
 
 | Phase | 内容 | 时长 |
 |---|---|---|
-| **Phase 1** | backtest infra: BacktestRunner + LLMSwapper + LeakDetector + Time-travel data control + golden case 32 个采集 | **1.5 周** |
-| **Phase 2** | 5 个 metric 实现 + L0/L1 测试:M1 citation / M2 numerical / M3 risk-pairing / M4 prediction / M5 multi-LLM judge | **1.5 周** |
-| **Phase 3** | Sanity check 副线(8 case 跑生产模型) + eval dashboard frontend(harness-board § 07,frontend-design polish) + SSE wire | **1 周** |
-| **Phase 4** | FinanceBench 中文子集(spike 选项 → 自建 50 case → 跑分 → markdown report) | **3-5 天** |
-| **Phase 5** | dogfood:跑全套,撞问题,sediment 到 docs/claude-context + 简历叙事打磨 + README 同步 | **3-5 天** |
-| **总计** | | **4.5-5.5 周** |
+| **Phase 1** | backtest infra: BacktestRunner + LLMSwapper + LeakDetector + Time-travel data control + golden case 32 个采集 + DB schema(`git_sha` / `ablation_variant` / `llm_model` 字段) | **1.5 周** |
+| **Phase 2** | 5 个 metric 实现 + L0/L1 测试:M1 citation / M2 numerical / M3 risk-pairing / M4 prediction / M5 multi-LLM judge + **Phase 2 末跑 ablation V0-V3 完整一轮**(决策 7) | **1.5 周 + 1 天 ablation 跑分** |
+| **Phase 3** | Sanity check 副线(8 case 跑生产模型) + eval dashboard frontend(harness-board § 07,frontend-design polish,三段式 + 趋势线 + ablation 矩阵 + cross-LLM 矩阵 4 个 panel) + SSE wire + **Cross-LLM 矩阵实际跑分**(决策 8.2) | **1 周 + 1 天 cross-LLM 跑分** |
+| **Phase 4** | FinanceBench 中文子集自建 50 case + 跑分 + markdown report | **3-5 天** |
+| **Phase 5** | dogfood:跑 5-10 轮全套(每轮 ~200 RMB),撞问题,记录 git_sha 进 backtest_runs 形成版本迭代趋势数据(决策 8.1),sediment 到 docs/claude-context + 简历叙事打磨 + README 同步 | **3-5 天** |
+| **总计** | | **~4.7-5.7 周**(原 4.5-5.5 + ~1-1.5 天 ablation/cross-LLM 跑分) |
 
 **关键工期假设**:
 
@@ -488,13 +613,13 @@ harness-board V2 已有 5-step SSE refresh pipeline(2026-05-14 ship),eval dashbo
 
 **短版(1 句)**:
 
-> 为 InvestmentDueDiligenceReport 设计了基于 Hebbia 三段式 + Pipeline-as-SUT 范式的 backtest 评估体系,5 个 metric(citation / numerical / risk-pairing / prediction / multi-LLM consensus)分层评分,生产模型在 cutoff-after 窗口做 sanity 趋同验证,与国际公开 FinanceBench 子集 baseline 对标。
+> 为 InvestmentDueDiligenceReport 设计了基于 Hebbia 三段式 + Pipeline-as-SUT 范式的 backtest 评估体系,5 个 metric(citation / numerical / risk-pairing / prediction / multi-LLM consensus)分层评分,内部三维对比(Ablation + 版本迭代 + Cross-LLM)量化每个组件贡献,自建 FinanceBench 中文 reference set 报告绝对数字(不打榜)。
 
 **中版(3 句)**:
 
-> 我设计并实现了金融研究助手 v1.x 的尽调报告质量评估体系。算法上分三层:(1) Pipeline-as-SUT backtest — 评估的是 RAG + agent + prompt 整体 pipeline,LLM 是 swap-in 组件,用 cutoff < 2024 的 3 个 LLM(GPT-4o / Qwen2.5 / DeepSeek-V3)cross-check 跑 32 case 历史 backtest,leak-free;(2) Hebbia 三段式 metric 分层 — extraction(citation precision + numerical accuracy 程序化)/ summarization(risk-mitigation pairing LLM judge)/ reasoning(投资 prediction backtest + multi-LLM consensus judge),不同段位用最合适的算法,而不是一锅 LLM-as-judge;(3) 生产模型在 cutoff-after 窗口做 sanity check 副线,验证生产表现与 backtest 基准趋同,随时间推移窗口自然拉长形成滚动验证闭环。
+> 我设计并实现了金融研究助手 v1.x 的尽调报告质量评估体系。算法上分三层:(1) **Pipeline-as-SUT backtest** — 评估的是 RAG + agent + prompt 整体 pipeline,LLM 是 swap-in 组件,用 cutoff < 2024 的 3 个 LLM(GPT-4o / Qwen2.5 / DeepSeek-V3)cross-check 跑 32 case 历史 backtest,leak-free;生产模型在 cutoff-after 窗口做 sanity 副线验证趋同。(2) **Hebbia 三段式 metric 分层** — extraction(citation precision + numerical accuracy 程序化)/ summarization(risk-mitigation pairing LLM judge)/ reasoning(投资 prediction backtest + multi-LLM consensus judge),不同段位用最合适的算法,而不是一锅 LLM-as-judge。(3) **内部三维对比量化组件贡献** — Ablation(无 RAG +X pp / 无 multi-agent +Y pp / 无 Critic +Z pp)+ 版本迭代趋势(git_sha 趋势线追踪 v1.x 迭代曲线)+ Cross-LLM 矩阵(8 case × 5 LLM 量化对 LLM 的依赖度),不靠外部打榜,靠控制变量内部数字 — 工业 LLM 应用算法 reviewer 关注的"组件贡献量化"直接答透。
 
-**长版**:留 plan 阶段或 dogfood 完成后写 blog,基于真实跑出的数字。
+**长版**:留 plan 阶段或 dogfood 完成后写 blog,基于真实跑出的数字。建议三段:(a) 为什么需要这个 eval — 业界 5 业态调研 + 3 个 benchmark 不可直接打榜的诚实评估;(b) 算法纵深 — Pipeline-as-SUT + Hebbia 三段式 + multi-LLM consensus 三个非平凡决策的 alternatives + tradeoff;(c) 量化"做得多好" — 内部三维对比真实数字 + caveat。
 
 ---
 
@@ -503,3 +628,4 @@ harness-board V2 已有 5-step SSE refresh pipeline(2026-05-14 ship),eval dashbo
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v1.0-draft | 2026-05-17 | brainstorm 收口,所有决策点用 alternatives + tradeoff + 选择 + 评估方法的四件套写出 |
+| v1.1-draft | 2026-05-17 | (a) § 2.2 benchmark 表加"可跑性"列,明确 3 个 benchmark 都不可直接打榜对比;(b) § 3.1 In scope 加内部三维对比;(c) § 3.2 Out of scope 加"横向打榜对比"(use case 错位);(d) § 3.3 简历叙事第 3 支柱重写为"内部三维对比";(e) § 4 加决策 7(Ablation 变体设计)+ 决策 8(版本迭代 + Cross-LLM 矩阵);(f) § 5 架构 — `backtest_runs` 加 `git_sha` / `ablation_variant` / `llm_model` 字段,LLMSwapper 扩 model list + cost 重算;(g) § 5.4 FinanceBench 明确"自建,不打榜";(h) § 6 dashboard 加版本趋势线 + ablation 矩阵 + cross-LLM 矩阵 3 个 panel;(i) § 8 工期微调 +1-1.5 天(原 4.5-5.5 → ~4.7-5.7 周);(j) § 11 简历叙事三版本重写,去掉"打榜"措辞,加内部三维对比叙事 |
