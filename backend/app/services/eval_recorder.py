@@ -23,10 +23,34 @@ CREATE TABLE IF NOT EXISTS eval_results (
     judge_model        TEXT NOT NULL,
     judge_cost_cny     REAL NOT NULL,
     judge_latency_ms   INTEGER NOT NULL,
-    timestamp          TEXT NOT NULL
+    timestamp          TEXT NOT NULL,
+    backtest_run_id    TEXT,
+    cut_off_date       TEXT,
+    evaluator_llm      TEXT,
+    case_type          TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_eval_request ON eval_results(request_id);
-CREATE INDEX IF NOT EXISTS idx_eval_case    ON eval_results(case_id);
+CREATE INDEX IF NOT EXISTS idx_eval_request  ON eval_results(request_id);
+CREATE INDEX IF NOT EXISTS idx_eval_case     ON eval_results(case_id);
+CREATE INDEX IF NOT EXISTS idx_eval_btrun    ON eval_results(backtest_run_id);
+CREATE INDEX IF NOT EXISTS idx_eval_casetype ON eval_results(case_type);
+"""
+
+# v1.x Phase 1: backtest run metadata table.
+# alembic not yet in repo (v0.9.x pattern) — raw CREATE TABLE IF NOT EXISTS.
+_BACKTEST_RUNS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS backtest_runs (
+    run_id              TEXT PRIMARY KEY,
+    created_at          TEXT NOT NULL,
+    case_count          INTEGER NOT NULL,
+    metric_summary_json TEXT,
+    status              TEXT NOT NULL,
+    git_sha             TEXT,
+    ablation_variant    TEXT,
+    llm_model           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_btrun_created  ON backtest_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_btrun_ablation ON backtest_runs(ablation_variant);
+CREATE INDEX IF NOT EXISTS idx_btrun_llm      ON backtest_runs(llm_model);
 """
 
 
@@ -38,11 +62,16 @@ class EvalRecorder:
     def init_schema(self) -> None:
         with sqlite3.connect(self._db_path) as con:
             con.executescript(_EVAL_RESULTS_SCHEMA)
+            con.executescript(_BACKTEST_RUNS_SCHEMA)
 
     def write(self, result: EvalResult) -> None:
         with sqlite3.connect(self._db_path) as con:
             con.execute(
-                "INSERT OR REPLACE INTO eval_results VALUES (?,?,?,?,?,?,?,?)",
+                "INSERT OR REPLACE INTO eval_results "
+                "(eval_id, request_id, case_id, scores_json, judge_model, "
+                "judge_cost_cny, judge_latency_ms, timestamp, "
+                "backtest_run_id, cut_off_date, evaluator_llm, case_type) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     result.eval_id,
                     result.request_id,
@@ -52,6 +81,10 @@ class EvalRecorder:
                     result.judge_cost_cny,
                     result.judge_latency_ms,
                     result.timestamp.isoformat(),
+                    result.backtest_run_id,
+                    result.cut_off_date,
+                    result.evaluator_llm,
+                    result.case_type,
                 ),
             )
 
@@ -87,4 +120,8 @@ class EvalRecorder:
             judge_cost_cny=row["judge_cost_cny"],
             judge_latency_ms=row["judge_latency_ms"],
             timestamp=datetime.fromisoformat(row["timestamp"]),
+            backtest_run_id=row["backtest_run_id"],
+            cut_off_date=row["cut_off_date"],
+            evaluator_llm=row["evaluator_llm"],
+            case_type=row["case_type"],
         )
