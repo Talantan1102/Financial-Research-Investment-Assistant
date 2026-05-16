@@ -1,3 +1,6 @@
+# mypy: disable-error-code="arg-type"
+# SQLAlchemy classical Column[UUID] 在 instance attr 上 mypy 推断不准
+# (task.id 实际是 UUID runtime,mypy 视为 Column[UUID])— 测试代码 silence。
 """ChatTaskRepo 单元测试 — 6 状态机 + Repo 方法集。
 
 测试策略:in-memory sqlite + 选择性 create_all(只建 users / chat_sessions /
@@ -22,6 +25,7 @@ from app.models.user import User  # noqa: F401 — 注册 users 表
 from app.services.chat_task_repo import ChatTaskRepo
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
+    AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
@@ -32,11 +36,11 @@ _REQUIRED_TABLE_NAMES = ("users", "chat_sessions", "chat_tasks")
 
 def _selective_create_all(sync_conn: object) -> None:
     tables = [Base.metadata.tables[name] for name in _REQUIRED_TABLE_NAMES]
-    Base.metadata.create_all(sync_conn, tables=tables)  # type: ignore[arg-type]
+    Base.metadata.create_all(sync_conn, tables=tables)
 
 
 @pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[object]]:
+async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as conn:
         await conn.run_sync(_selective_create_all)
@@ -47,7 +51,7 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[object]]:
 
 @pytest_asyncio.fixture
 async def seeded_session(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> uuid.UUID:
     """种一个 ChatSession 让 ChatTask 的 session_id FK 有对应行。"""
     sid = uuid.uuid4()
@@ -63,7 +67,7 @@ async def seeded_session(
 
 
 async def test_create_queued_inserts_row(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     repo = ChatTaskRepo(session_factory)
@@ -88,7 +92,7 @@ async def test_create_queued_inserts_row(
 
 
 async def test_mark_running_sets_started_at(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     repo = ChatTaskRepo(session_factory)
@@ -113,7 +117,7 @@ async def test_mark_running_sets_started_at(
 
 
 async def test_mark_done_sets_finished_at_and_checkpoint(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     repo = ChatTaskRepo(session_factory)
@@ -138,7 +142,7 @@ async def test_mark_done_sets_finished_at_and_checkpoint(
 
 
 async def test_mark_partial_keeps_checkpoint(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     repo = ChatTaskRepo(session_factory)
@@ -162,7 +166,7 @@ async def test_mark_partial_keeps_checkpoint(
 
 
 async def test_mark_cancelled_no_checkpoint_needed(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     repo = ChatTaskRepo(session_factory)
@@ -186,7 +190,7 @@ async def test_mark_cancelled_no_checkpoint_needed(
 
 
 async def test_mark_error_sets_error_message(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     repo = ChatTaskRepo(session_factory)
@@ -210,7 +214,7 @@ async def test_mark_error_sets_error_message(
 
 
 async def test_get_by_id_returns_none_for_unknown(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     repo = ChatTaskRepo(session_factory)
     fetched = await repo.get_by_id(uuid.uuid4())
@@ -223,7 +227,7 @@ async def test_get_by_id_returns_none_for_unknown(
 
 
 async def test_find_active_for_session_returns_queued_or_running(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     repo = ChatTaskRepo(session_factory)
@@ -251,7 +255,7 @@ async def test_find_active_for_session_returns_queued_or_running(
 
 
 async def test_bump_seq_increments_last_event_seq(
-    session_factory: async_sessionmaker[object],
+    session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     """Plan 2 用,Plan 1 先实现 + 测,避免 Plan 2 时翻 schema。"""
