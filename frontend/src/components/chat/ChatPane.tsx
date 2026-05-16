@@ -22,6 +22,26 @@ export function ChatPane({ sessionId: sessionIdProp }: ChatPaneProps = {}) {
   const messages = useDeferredMessages(snap.messages ?? [])
   const sse = useChatSSE({ sessionId })
 
+  // Plan 2 dogfood fix: typewriter 通过 currentChatState.streamingDraft 一字字
+  // push,但 ChatPane 之前只渲染 messages → 用户看不到打字机过程,只有 done
+  // 后 flushDraftAsMessage 入 messages 才一次性显示。修补:streamingDraft 非
+  // 空时插一条 pending assistant message,role/id 跟真 message 区分。
+  const pendingMessage =
+    snap.streamingDraft && sessionId
+      ? {
+          id: '__pending_assistant__',
+          session_id: sessionId,
+          role: 'assistant' as const,
+          content: snap.streamingDraft,
+          message_type: 'text' as const,
+          tool_call_data: null,
+          research_report_id: null,
+          research_report_summary: null,
+          created_at: new Date().toISOString(),
+        }
+      : null
+  const displayMessages = pendingMessage ? [...messages, pendingMessage] : messages
+
   const onSend = useCallback(
     (text: string) => {
       if (!sessionId) return
@@ -45,7 +65,7 @@ export function ChatPane({ sessionId: sessionIdProp }: ChatPaneProps = {}) {
     ta?.focus()
   }, [])
 
-  const empty = messages.length === 0
+  const empty = displayMessages.length === 0
   return (
     <div className={styles.chatPane}>
       <CostMeter />
@@ -53,7 +73,7 @@ export function ChatPane({ sessionId: sessionIdProp }: ChatPaneProps = {}) {
         {empty ? (
           <div className={styles.emptyState}>开始一个新对话 — 试试问 "工商银行现价多少?"</div>
         ) : (
-          <MessageList messages={[...messages]} onContinueAsk={onContinueAsk} />
+          <MessageList messages={[...displayMessages]} onContinueAsk={onContinueAsk} />
         )}
         <StreamingIndicator />
       </section>
