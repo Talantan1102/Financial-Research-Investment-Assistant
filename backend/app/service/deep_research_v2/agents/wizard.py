@@ -9,6 +9,15 @@ DeepResearch V2.0 - 数据极客 Agent (CodeWizard)
 4. 专业绘图 - 生成高质量数据可视化
 """
 
+# DEAD CODE NOTICE (2026-05-07 dep refactor):
+# This file imports matplotlib/seaborn at runtime (in _execute_in_sandbox),
+# but matplotlib/seaborn were removed from base deps. This file is in
+# legacy app/service/deep_research_v2/ and is excluded from all tooling
+# (see pyproject.toml [tool.ruff] extend-exclude + [tool.mypy] overrides
+# ignore_errors). Calling _execute_in_sandbox in current state will
+# raise ImportError. File scheduled for deletion in v0 spec — do not
+# revive without re-installing deps as optional 'viz' extra.
+
 import asyncio
 import base64
 import io

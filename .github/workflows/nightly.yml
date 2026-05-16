@@ -41,7 +41,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - name: Install deps
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra kb
 
       - name: L2 full (e2e cassettes)
         env:
