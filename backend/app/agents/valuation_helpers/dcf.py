@@ -27,6 +27,10 @@ __all__ = [
     # compute_company_wacc / compute_dcf_value / compute_dcf_sensitivity — added in Task 7/8
 ]
 
+# Bull/bear scenario multipliers (spec § 6.3 defaults; calibrate post-dogfood).
+_BULL_MULTIPLIER = 1.2
+_BEAR_MULTIPLIER = 0.8
+
 
 def compute_growth_trajectory(
     *,
@@ -73,6 +77,10 @@ def compute_growth_trajectory(
             reason=f"historical_growth contains non-finite: {historical_growth}",
         )
 
+    # n_years boundary guard (programming error, not data error)
+    if n_years < 1:
+        raise ValueError(f"n_years must be >= 1, got {n_years}")
+
     # Both signals empty
     if not historical_growth and forecast_growth is None:
         raise InsufficientDataForModelError(
@@ -95,10 +103,10 @@ def compute_growth_trajectory(
             start = historical_avg
     elif scenario == "bull":
         signals = [g for g in (historical_avg, forecast_growth) if g is not None]
-        start = max(signals) * 1.2
+        start = max(signals) * _BULL_MULTIPLIER
     elif scenario == "bear":
         signals = [g for g in (historical_avg, forecast_growth) if g is not None]
-        start = min(signals) * 0.8
+        start = min(signals) * _BEAR_MULTIPLIER
     else:
         # Literal 已收口,但 runtime defensive
         raise ValueError(f"invalid scenario: {scenario!r}")
