@@ -11,6 +11,13 @@ Plan 2 Task 3 scope:
 - run_chat(Celery sync wrapper,thin shim;real worker 走 .delay() → 这里)
 - enqueue_run_chat(production 入口,POST /chat 改造在 Task 5)
 
+Plan 2 Task 8 scope:
+- run_chat wrapper production wiring(替换 NotImplementedError stub)
+- worker-side build helpers(_build_chat_graph_for_worker /
+  _build_session_factory_for_worker / _build_redis_for_worker), module-level
+  lazy singletons — worker init once + reuse across tasks
+- 1 个 L2 sanity test(test_chat_inflight_l2.py)守护 wrapper wire 通
+
 Test 策略(test_chat_runner.py):directly await run_chat_async,inject
 fakeredis + fake graph + sqlite session_factory。
 """
@@ -18,6 +25,7 @@ fakeredis + fake graph + sqlite session_factory。
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -28,6 +36,68 @@ from app.services.chat_task_repo import ChatTaskRepo
 from app.tasks.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Worker-side singleton caches — initialized lazily on first task invocation.
+# Worker subprocess does NOT have access to FastAPI app.state, so we re-build
+# graph / session_factory / redis using env vars (same primitives lifespan uses).
+# ---------------------------------------------------------------------------
+_GRAPH_SINGLETON: Any | None = None
+_SESSION_FACTORY_SINGLETON: Any | None = None
+_REDIS_SINGLETON: Any | None = None
+
+
+def _build_chat_graph_for_worker() -> Any:
+    """Build (or reuse cached) chat graph for Celery worker context.
+
+    Reuses `app.router.chat._build_graph_singleton` — that function reads env
+    (LLM / Tushare / Bocha mode), wires planner/responder/registry/memory, and
+    returns the compiled LangGraph. Worker can import it; no app.state needed.
+
+    NOTE: checkpointer is intentionally None on worker side — the web side
+    threads checkpointer into the graph via FastAPI dependency injection at
+    request time. Worker tasks use thread_id to find prior state; no shared
+    in-memory checkpoint required for Plan 2 path.
+    """
+    global _GRAPH_SINGLETON
+    if _GRAPH_SINGLETON is None:
+        from app.router.chat import _build_graph_singleton
+
+        _GRAPH_SINGLETON = _build_graph_singleton(checkpointer=None)
+    return _GRAPH_SINGLETON
+
+
+def _build_session_factory_for_worker() -> Any:
+    """Build async_sessionmaker for Celery worker context.
+
+    Worker has no lifespan; can't use app.state.async_session_factory.
+    Builds the same SQLAlchemy async engine that web lifespan does, using
+    `_sqlalchemy_async_pg_url` from app_main (single source of URL truth).
+    """
+    global _SESSION_FACTORY_SINGLETON
+    if _SESSION_FACTORY_SINGLETON is None:
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from app.app_main import _sqlalchemy_async_pg_url
+
+        engine = create_async_engine(_sqlalchemy_async_pg_url(), future=True)
+        _SESSION_FACTORY_SINGLETON = async_sessionmaker(engine, expire_on_commit=False)
+    return _SESSION_FACTORY_SINGLETON
+
+
+def _build_redis_for_worker() -> Any:
+    """Build redis.asyncio client for Celery worker context.
+
+    Same conn pool reuse pattern as factory — Redis client is cached and reused
+    across tasks within the same worker process.
+    """
+    global _REDIS_SINGLETON
+    if _REDIS_SINGLETON is None:
+        import redis.asyncio as redis_async
+
+        redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        _REDIS_SINGLETON = redis_async.Redis.from_url(redis_url, decode_responses=False)
+    return _REDIS_SINGLETON
 
 
 def _adapt_event_for_stream(ev: dict[str, Any]) -> dict[str, Any] | None:
@@ -193,24 +263,30 @@ def run_chat(
     user_id: str,
     user_message: str,
 ) -> None:
-    """Celery sync entry. Bridges to async via asyncio.run().
+    """Celery sync entry. Bridges to async via asyncio.run() + builds worker-side deps.
 
-    Production wiring(graph / session_factory / redis singleton load)在 Task 7:
-    - graph_factory: provides chat_agent_graph singleton from app.state
-    - session_factory: async_sessionmaker from app.state.async_session_factory
-    - redis: redis.asyncio client from app.state.redis_async
+    Production-ready wiring(Plan 2 Task 8):
+    - graph_factory: _build_chat_graph_for_worker — reuses _build_graph_singleton
+      from app.router.chat(env-driven, no app.state needed)
+    - session_factory: _build_session_factory_for_worker — async_sessionmaker
+      tied to PG via _sqlalchemy_async_pg_url
+    - redis: _build_redis_for_worker — redis.asyncio.Redis from REDIS_URL
 
-    本 Plan 2 Task 3 范围:只实现 task 定义 + run_chat_async core;
-    production wiring 在 Task 7。
-
-    Tests do NOT exercise this wrapper; they directly await run_chat_async.
+    L0 / L1 path 直接 await run_chat_async(test_chat_runner.py);
+    L2 path 走真 worker subprocess(test_chat_inflight_l2.py)。
     """
-    # Production wiring stub — Task 7 will populate from app.state singletons.
-    # Until then, raise to fail loud if Celery worker calls without context.
-    raise NotImplementedError(
-        "run_chat Celery wrapper requires Plan 2 Task 7 wiring "
-        "(graph_factory / session_factory / redis async client). "
-        "Tests should call run_chat_async directly."
+    import asyncio
+
+    asyncio.run(
+        run_chat_async(
+            task_id=uuid.UUID(task_id),
+            graph_factory=_build_chat_graph_for_worker,
+            session_factory=_build_session_factory_for_worker(),
+            redis=_build_redis_for_worker(),
+            user_message=user_message,
+            session_id=session_id,
+            user_id=uuid.UUID(user_id),
+        )
     )
 
 

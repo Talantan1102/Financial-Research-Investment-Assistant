@@ -71,19 +71,39 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
         cwd="backend",
         env=env,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # merge stderr → stdout; celery logs to stderr by default
+        bufsize=1,
     )
 
-    # Wait for "ready" log line (max 15s)
+    # Wait for "ready" log line (max 60s — graph singleton build is heavy:
+    # imports langchain/langgraph + builds CompiledStateGraph at worker import time).
+    # Use select with short timeout so we re-check wall clock between readline calls
+    # (readline alone can block past deadline if pipe is silent).
+    import select
+
     start = time.time()
-    while time.time() - start < 15:
-        line = proc.stdout.readline().decode("utf-8", errors="ignore") if proc.stdout else ""
-        if "celery@" in line and "ready" in line:
+    ready = False
+    while time.time() - start < 60:
+        if proc.stdout is None:
             break
-        time.sleep(0.2)
-    else:
+        rlist, _, _ = select.select([proc.stdout], [], [], 0.5)
+        if not rlist:
+            continue
+        line = proc.stdout.readline().decode("utf-8", errors="ignore")
+        if not line:
+            # EOF — worker died
+            break
+        if "celery@" in line and "ready" in line:
+            ready = True
+            break
+
+    if not ready:
         proc.terminate()
-        pytest.skip("celery worker did not become ready in 15s")
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        pytest.skip("celery worker did not become ready in 60s")
 
     yield
 
