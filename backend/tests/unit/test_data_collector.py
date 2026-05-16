@@ -45,7 +45,6 @@ async def test_data_collector_parallel_success(
     reg.register(_OkTool())
 
     plan = ResearchPlan(
-        plan_id="balanced",
         rationale="default test plan",
         subtasks=[
             Subtask(subtask_id="s1", description="d1", required_tools=["ok"], rationale="r"),
@@ -75,7 +74,6 @@ async def test_data_collector_partial_failure_does_not_block(
     reg.register(_FailTool())
 
     plan = ResearchPlan(
-        plan_id="balanced",
         rationale="default test plan",
         subtasks=[
             Subtask(

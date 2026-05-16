@@ -22,7 +22,6 @@ def _make_state(**kwargs: object) -> ResearchState:
         "investment_horizon": "medium_term",
         "risk_tolerance": "moderate",
         "plan": ResearchPlan(
-            plan_id="balanced",
             rationale="default test plan",
             subtasks=[
                 Subtask(

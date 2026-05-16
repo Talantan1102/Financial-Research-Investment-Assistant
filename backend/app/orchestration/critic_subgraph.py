@@ -1,4 +1,4 @@
-"""Critic 内部 subgraph — Send API fan-out 7 sub-agents + reduce + aggregate."""
+"""Critic 内部 subgraph — Send API fan-out 6 sub-agents + reduce + aggregate."""
 
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
             investment_horizon=s.investment_horizon,
             risk_tolerance=s.risk_tolerance,
         )
-        # v0.9.x note: 不 wrap asyncio.to_thread — 该 wrap 让 7 scorer 真并发,
+        # v0.9.x note: 不 wrap asyncio.to_thread — 该 wrap 让 6 scorer 真并发,
         # VCR cassette 按调用顺序匹配 LLM responses,导致 b1_differential
         # input_context_appropriateness score 错位 (8.5+ → 6.0). critic 是
         # 短任务 (每个几百 tokens),sync 调用即使 serialize 也不会卡 event
@@ -94,7 +94,7 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
 
 
 def _planner_router(state: _CriticSubState) -> list[Send]:
-    """Fan-out to 7 scorer nodes via Send API."""
+    """Fan-out to 6 scorer nodes via Send API."""
     payload = state.model_dump()
     return [
         Send("scorer_factuality", payload),
@@ -103,7 +103,6 @@ def _planner_router(state: _CriticSubState) -> list[Send]:
         Send("scorer_structure", payload),
         Send("scorer_conciseness", payload),
         Send("scorer_input_context", payload),
-        Send("scorer_plan_correctness", payload),
     ]
 
 
@@ -128,10 +127,6 @@ def build_critic_subgraph(critic: Critic) -> Any:
         "scorer_input_context",
         _scorer_node_factory(critic, "InputContextAppropriatenessScorer"),
     )
-    g.add_node(
-        "scorer_plan_correctness",
-        _scorer_node_factory(critic, "PlanCorrectnessScorer"),
-    )
     g.add_node("aggregate", _aggregate_node)
 
     g.add_conditional_edges(
@@ -144,7 +139,6 @@ def build_critic_subgraph(critic: Critic) -> Any:
             "scorer_structure",
             "scorer_conciseness",
             "scorer_input_context",
-            "scorer_plan_correctness",
         ],
     )
     for n in [
@@ -154,7 +148,6 @@ def build_critic_subgraph(critic: Critic) -> Any:
         "scorer_structure",
         "scorer_conciseness",
         "scorer_input_context",
-        "scorer_plan_correctness",
     ]:
         g.add_edge(n, "aggregate")
     g.add_edge("aggregate", END)

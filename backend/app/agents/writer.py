@@ -339,6 +339,19 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
     # v0.9 — chat preference block (empty string when no preferences).
     preference_block = _format_user_preferences(state)
 
+    # v1.x — Critic factuality feedback for writer retry path (spec § 7.2 / Task 1.9).
+    # When ResearchState.writer_critic_feedback is set (populated by
+    # writer_retry_transition node when factuality < 7.0), inject a feedback
+    # block instructing the LLM to fix evidence/chunk_id issues on retry.
+    feedback_block = ""
+    if state.writer_critic_feedback:
+        feedback_block = (
+            f"\n# Critic 反馈(上一轮 factuality 评分低,需重写以修正)\n"
+            f"{state.writer_critic_feedback}\n"
+            f"→ 检查证据引用,修正不准确表述,确保 evidence chunk_id 真实存在。"
+            f"避免编造数据点或引用不存在的 chunk。\n"
+        )
+
     return (
         _SYSTEM_PROMPT_BASE
         + client_context
@@ -349,6 +362,7 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
         + f"\n# 用户原始需求 / 标的信息\n{state.user_message}\n"
         + f"\n# 本次 request_id(填入 JSON 的 request_id 字段)\n{state.request_id}\n"
         + f"\n# 投资研究员 SOP (跨 11 维度方法论)\n\n{_SOP_TEXT}\n"
+        + feedback_block
         + "\n请严格按上方 JSON 模板输出,不要更改任何字段名。"
     )
 

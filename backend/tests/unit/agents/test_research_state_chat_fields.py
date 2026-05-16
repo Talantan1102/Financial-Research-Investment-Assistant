@@ -41,3 +41,65 @@ def test_research_state_accepts_chat_signals():
     assert s.chat_extracted_entities[0].name == "工商银行"
     assert s.chat_extracted_preferences[0].category == "risk_tolerance"
     assert s.chat_session_id == "chat-abc"
+
+
+def test_research_state_has_writer_retry_fields() -> None:
+    """v1.x: writer_retry_count + writer_critic_feedback added."""
+    from app.agents.schemas import ResearchState
+
+    s = ResearchState(user_id="u", session_id="s", user_message="m", request_id="r")
+    assert s.writer_retry_count == 0
+    assert s.writer_critic_feedback is None
+
+
+def test_research_state_writer_retry_count_max_1() -> None:
+    """writer_retry_count is bounded ge=0 le=1 (MAX_WRITER_RETRY)."""
+    import pytest
+    from app.agents.schemas import ResearchState
+    from pydantic import ValidationError
+
+    # 0 and 1 OK
+    s0 = ResearchState(
+        user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=0
+    )
+    s1 = ResearchState(
+        user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=1
+    )
+    assert s0.writer_retry_count == 0
+    assert s1.writer_retry_count == 1
+
+    # 2 should fail
+    with pytest.raises(ValidationError):
+        ResearchState(
+            user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=2
+        )
+
+    # -1 should fail
+    with pytest.raises(ValidationError):
+        ResearchState(
+            user_id="u", session_id="s", user_message="m", request_id="r", writer_retry_count=-1
+        )
+
+
+def test_research_state_writer_critic_feedback_max_length_300() -> None:
+    import pytest
+    from app.agents.schemas import ResearchState
+    from pydantic import ValidationError
+
+    # 300 chars OK
+    ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_critic_feedback="x" * 300,
+    )
+    # 301 fails
+    with pytest.raises(ValidationError):
+        ResearchState(
+            user_id="u",
+            session_id="s",
+            user_message="m",
+            request_id="r",
+            writer_critic_feedback="x" * 301,
+        )

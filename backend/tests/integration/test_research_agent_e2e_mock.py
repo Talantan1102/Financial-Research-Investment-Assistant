@@ -36,7 +36,6 @@ from app.agents.critic_subagents.input_context_scorer import (
     InputContextAppropriatenessScorer,
 )
 from app.agents.critic_subagents.insight import InsightScorer
-from app.agents.critic_subagents.plan_correctness_scorer import PlanCorrectnessScorer
 from app.agents.critic_subagents.structure import StructureScorer
 from app.agents.data_collector import DataCollector
 from app.agents.research_agent import ResearchAgent
@@ -123,7 +122,7 @@ async def test_research_agent_e2e_full_pipeline(mock_llm_client: MockLLMClient) 
         StructureScorer(llm=svc),
         ConcisenessScorer(llm=svc),
         InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
-        PlanCorrectnessScorer(llm=svc),  # 第 7 scorer (v0.8.5)
+        # v1.x: PlanCorrectnessScorer removed (Task 1.5).
     ]
     critic = Critic(llm=svc, scorers=scorers)
 
