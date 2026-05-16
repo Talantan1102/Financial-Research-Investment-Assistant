@@ -192,6 +192,7 @@ class PersonaService:
             candidates = (
                 session.query(ChatMemoryPersonaItem)
                 .filter_by(user_id=user_id, source="agent")
+                .order_by(ChatMemoryPersonaItem.position.asc())
                 .all()
             )
             matched = [c for c in candidates if c.text.strip() == old_normalized]

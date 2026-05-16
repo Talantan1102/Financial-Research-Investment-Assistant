@@ -184,6 +184,22 @@ def test_apply_agent_append_splits_lines() -> None:
 
 
 @pytest.mark.unit
+def test_apply_agent_append_mixed_bullets_and_blank_lines() -> None:
+    """混合 -/* prefix + 多个空行 + 缩进 — 容忍 LLM 输出变体."""
+    factory, session = _mk_session_factory()
+    service = PersonaService(pg_session_factory=factory)
+
+    items = service.apply_agent_append(
+        user_id=uuid4(),
+        content="\n\n- foo\n\n* bar\n   \n  - baz\n",
+    )
+
+    assert [i.text for i in items] == ["foo", "bar", "baz"]
+    assert all(i.source == "agent" for i in items)
+    assert session.add.call_count == 3
+
+
+@pytest.mark.unit
 def test_apply_agent_append_empty_noop() -> None:
     factory, session = _mk_session_factory()
     service = PersonaService(pg_session_factory=factory)
@@ -203,7 +219,9 @@ def test_apply_agent_replace_match_agent_item() -> None:
         text="保守",
         position=0,
     )
-    session.query.return_value.filter_by.return_value.all.return_value = [target]
+    session.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = [
+        target
+    ]
     service = PersonaService(pg_session_factory=factory)
 
     items = service.apply_agent_replace(
@@ -212,6 +230,8 @@ def test_apply_agent_replace_match_agent_item() -> None:
 
     assert items[0].text == "偏成长"
     assert items[0].source == "agent"
+    # 同一 item_id 验证走 match 路径而非 fallback append（fallback 会创建新 UUID）
+    assert items[0].item_id == target.item_id
     session.commit.assert_called_once()
 
 
@@ -226,8 +246,8 @@ def test_apply_agent_replace_never_match_user_item() -> None:
         text="保守稳健",
         position=0,
     )
-    # filter_by(source='agent') 应返回空
-    session.query.return_value.filter_by.return_value.all.return_value = []
+    # filter_by(source='agent') → order_by → all 返回空
+    session.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = []
     service = PersonaService(pg_session_factory=factory)
 
     items = service.apply_agent_replace(
@@ -244,7 +264,7 @@ def test_apply_agent_replace_never_match_user_item() -> None:
 def test_apply_agent_replace_no_match_falls_back_to_append() -> None:
     """spec § 8.2: 未找到 → 降级为 apply_agent_append + log warn."""
     factory, session = _mk_session_factory()
-    session.query.return_value.filter_by.return_value.all.return_value = []
+    session.query.return_value.filter_by.return_value.order_by.return_value.all.return_value = []
     service = PersonaService(pg_session_factory=factory)
 
     items = service.apply_agent_replace(user_id=uuid4(), old_content="不存在的", new_content="新条")
