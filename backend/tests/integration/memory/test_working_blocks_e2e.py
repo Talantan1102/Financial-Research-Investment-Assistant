@@ -130,19 +130,22 @@ async def test_unknown_block_name_raises(
 
 
 @pytest.mark.integration
-async def test_append_exceed_budget_pages_oldest(
+async def test_append_persists_many_items_via_persona_service(
     hier_memory: HierarchicalMemory, pg_memory_fixture: dict[str, Any]
 ) -> None:
-    """Task 17: persona block routes to PersonaService — 20 appends create 20 items.
-    PersonaService stores each line as a separate ChatMemoryPersonaItem (no hard token cap).
-    Verify content synced to working block is non-empty.
+    """Task 17: PersonaService 不分页 — 20 次 append 全部持久化为独立 PersonaItem.
+    验证 (1) working block sync 写回包含首末两条, (2) PersonaService 实际持久化条数 == 20.
     """
     uid = _make_user(pg_memory_fixture)
     for i in range(20):
         await hier_memory.core_memory_append(
-            uid, "persona", f"fact_{i}: 茅台白酒 ROE 持仓 偏好 现金流"
+            uid, "persona", f"fact {i}: 茅台白酒 ROE 持仓 偏好 现金流"
         )
     blocks = await hier_memory.get_working_blocks(uid)
     assert "persona" in blocks
-    # PersonaService syncs all items to working block; content non-empty
-    assert len(blocks["persona"].content) > 0
+    # 验证 sync 写回成功 — 首末两条都出现在 working block content
+    assert "fact 0" in blocks["persona"].content
+    assert "fact 19" in blocks["persona"].content
+    # 验证 PersonaService 实际持久化的条数
+    items = hier_memory._persona_service.list_items(user_id=uid)
+    assert len(items["agent_inferred"]) == 20

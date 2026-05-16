@@ -196,7 +196,7 @@ async def test_core_memory_append_then_replace(
     out1 = json.loads(r1[0].text)
     assert out1["block_name"] == "persona"
     # Task 17: persona block routes to PersonaService — returns {"ok": true} not token_count
-    assert out1.get("ok") is True or out1.get("token_count", 0) >= 0
+    assert out1.get("ok") is True  # Task 17: persona block routes to PersonaService
 
     r2 = await replace_h(
         {
@@ -208,7 +208,8 @@ async def test_core_memory_append_then_replace(
     )
     out2 = json.loads(r2[0].text)
     # Task 17: persona block routes to PersonaService — returns {"ok": true}
-    assert out2.get("ok") is True or out2.get("token_count", 0) >= 0
+    assert out2.get("ok") is True  # Task 17: persona block routes to PersonaService
+    assert out2["block_name"] == "persona"
 
 
 # --------------------------------------------------------------------------

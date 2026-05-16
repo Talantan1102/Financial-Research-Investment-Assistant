@@ -61,6 +61,7 @@ class HierarchicalMemory:
         injection_classifier: Any | None = None,
         embed_cache: Any | None = None,
         prompt_cache_store: Any | None = None,
+        persona_service: PersonaService | None = None,
     ) -> None:
         self._pg_session_factory = pg_session_factory
         self._age = age_executor
@@ -72,9 +73,8 @@ class HierarchicalMemory:
         # Plan 5 cost optimization DI hooks (契约 § 9). 默认 None 保 Plan 1B 测试无破坏.
         self._embed_cache = embed_cache
         self._prompt_cache_store = prompt_cache_store
-        # Task 17: PersonaService for persona block routing (eagerly constructed,
-        # typed Optional so tests can override via setattr with MagicMock).
-        self._persona_service: PersonaService | None = PersonaService(
+        # Task 17: PersonaService DI — caller may inject mock; defaults to real instance.
+        self._persona_service: PersonaService = persona_service or PersonaService(
             pg_session_factory=pg_session_factory
         )
 
@@ -114,7 +114,7 @@ class HierarchicalMemory:
         returns None (MCP tool caller handles None for persona path).
         """
         # Task 17: persona block — route to PersonaService, skip legacy path
-        if block_name == "persona" and self._persona_service is not None:
+        if block_name == "persona":
             self._persona_service.apply_agent_append(user_id=user_id, content=content)
             return None
 
@@ -191,7 +191,7 @@ class HierarchicalMemory:
         returns None (MCP tool caller handles None for persona path).
         """
         # Task 17: persona block — route to PersonaService, skip legacy path
-        if block_name == "persona" and self._persona_service is not None:
+        if block_name == "persona":
             self._persona_service.apply_agent_replace(
                 user_id=user_id, old_content=old_content, new_content=new_content
             )
