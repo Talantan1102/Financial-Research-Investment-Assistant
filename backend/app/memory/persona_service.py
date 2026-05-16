@@ -17,7 +17,8 @@ from uuid import UUID, uuid4
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.memory.models import ChatMemoryPersonaItem
+from app.memory.models import ChatMemoryPersonaItem, ChatMemoryWorkingBlock
+from app.memory.persona_items_md import render_items_to_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +233,15 @@ class PersonaService:
                 out.append(line)
         return out
 
+    # ----- render / sync -----
+
+    def render_to_markdown(self, *, user_id: UUID) -> str:
+        result = self.list_items(user_id=user_id)
+        return render_items_to_markdown(
+            user_items=[i.text for i in result["user_declared"]],  # type: ignore[misc]
+            agent_items=[i.text for i in result["agent_inferred"]],  # type: ignore[misc]
+        )
+
     # ----- internal helpers -----
 
     @staticmethod
@@ -259,8 +269,34 @@ class PersonaService:
     def _sync_to_working_block(self, *, session: Session | None, user_id: UUID) -> None:
         """渲染 items → markdown → 写回 ChatMemoryWorkingBlock.persona.content.
 
-        Task 5 才接通真正的写回逻辑；此 Task 仅保留 hook，确保 caller 调用点稳定。
+        保 ChatPlanner Phase 1 render_persona_markdown 路径不变；下次 session
+        起手 frozen snapshot 时自动拿最新值。
         """
-        logger.debug(
-            "persona _sync_to_working_block hook for user=%s (Task 5 wires writer)", user_id
-        )
+
+        markdown = self.render_to_markdown(user_id=user_id)
+        own_session = session is None
+        sess = session or self._session_factory()
+        try:
+            block = (
+                sess.query(ChatMemoryWorkingBlock)
+                .filter_by(user_id=user_id, block_name="persona")
+                .first()
+            )
+            if block is None:
+                block = ChatMemoryWorkingBlock(
+                    user_id=user_id,
+                    block_name="persona",
+                    content=markdown,
+                    max_tokens=500,
+                    token_count=0,
+                )
+                sess.add(block)
+            else:
+                block.content = markdown  # type: ignore[assignment]
+            sess.commit()
+        except Exception:
+            sess.rollback()
+            raise
+        finally:
+            if own_session:
+                sess.close()

@@ -65,8 +65,8 @@ def test_add_item_user_section() -> None:
 
     assert item.source == "user"
     assert item.text == "保守稳健"
-    session.add.assert_called_once()
-    session.commit.assert_called_once()
+    session.add.assert_called()  # ≥1: item add + _sync_to_working_block block add
+    session.commit.assert_called()  # ≥1: crud commit + sync commit
 
 
 @pytest.mark.unit
@@ -99,7 +99,7 @@ def test_update_item_text_keeps_source() -> None:
 
     assert updated.source == "user"
     assert updated.text == "新内容"
-    session.commit.assert_called_once()
+    session.commit.assert_called()  # ≥1: crud commit + sync commit
 
 
 @pytest.mark.unit
@@ -154,7 +154,7 @@ def test_delete_item_calls_delete_and_commit() -> None:
     service.delete_item(user_id=existing.user_id, item_id=existing.item_id)
 
     session.delete.assert_called_once_with(existing)
-    session.commit.assert_called_once()
+    session.commit.assert_called()  # ≥1: crud commit + sync commit
 
 
 @pytest.mark.unit
@@ -179,8 +179,8 @@ def test_apply_agent_append_splits_lines() -> None:
 
     assert [i.text for i in items] == ["看好新能源", "关注高股息", "空行不算"]
     assert all(i.source == "agent" for i in items)
-    assert session.add.call_count == 3
-    session.commit.assert_called_once()
+    assert session.add.call_count >= 3  # 3 items + _sync_to_working_block block add
+    session.commit.assert_called()  # ≥1: crud commit + sync commit
 
 
 @pytest.mark.unit
@@ -196,7 +196,7 @@ def test_apply_agent_append_mixed_bullets_and_blank_lines() -> None:
 
     assert [i.text for i in items] == ["foo", "bar", "baz"]
     assert all(i.source == "agent" for i in items)
-    assert session.add.call_count == 3
+    assert session.add.call_count >= 3  # 3 items + _sync_to_working_block block add
 
 
 @pytest.mark.unit
@@ -232,7 +232,7 @@ def test_apply_agent_replace_match_agent_item() -> None:
     assert items[0].source == "agent"
     # 同一 item_id 验证走 match 路径而非 fallback append（fallback 会创建新 UUID）
     assert items[0].item_id == target.item_id
-    session.commit.assert_called_once()
+    session.commit.assert_called()  # ≥1: crud commit + sync commit
 
 
 @pytest.mark.unit
@@ -272,3 +272,104 @@ def test_apply_agent_replace_no_match_falls_back_to_append() -> None:
     assert len(items) == 1
     assert items[0].text == "新条"
     assert items[0].source == "agent"
+
+
+from app.memory.models import ChatMemoryWorkingBlock  # noqa: E402
+
+
+@pytest.mark.unit
+def test_render_to_markdown_uses_items() -> None:
+    """render_to_markdown 接 persona_items_md.render_items_to_markdown."""
+    factory, session = _mk_session_factory()
+    user_id = uuid4()
+    user_rows = [
+        ChatMemoryPersonaItem(user_id=user_id, source="user", text="A", position=0),
+    ]
+    agent_rows = [
+        ChatMemoryPersonaItem(user_id=user_id, source="agent", text="B", position=0),
+        ChatMemoryPersonaItem(user_id=user_id, source="agent", text="C", position=1),
+    ]
+
+    def _query_dispatch(*_a, **_kw):  # type: ignore[no-untyped-def]
+        m = MagicMock()
+        # 简化：分别针对 user / agent filter_by 返回不同 mock
+        m.filter_by.side_effect = lambda **kw: {
+            "user": MagicMock(order_by=lambda *_a, **_kw: MagicMock(all=lambda: user_rows)),
+            "agent": MagicMock(order_by=lambda *_a, **_kw: MagicMock(all=lambda: agent_rows)),
+        }[kw["source"]]
+        return m
+
+    session.query.side_effect = _query_dispatch
+    service = PersonaService(pg_session_factory=factory)
+
+    md = service.render_to_markdown(user_id=user_id)
+
+    assert "- A" in md
+    assert "- B" in md
+    assert "- C" in md
+    assert md.index("- A") < md.index("- B")  # user 区先于 agent 区
+
+
+@pytest.mark.unit
+def test_sync_to_working_block_upserts_existing() -> None:
+    """已有 persona working_block → 更新 content."""
+    factory, session = _mk_session_factory()
+    user_id = uuid4()
+    existing_block = ChatMemoryWorkingBlock(
+        user_id=user_id, block_name="persona", content="old", max_tokens=500, token_count=0
+    )
+
+    def _block_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+        m = MagicMock()
+        m.filter_by.return_value.first.return_value = existing_block
+        return m
+
+    def _items_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+        m = MagicMock()
+        m.filter_by.return_value.order_by.return_value.all.return_value = []
+        return m
+
+    call_count = {"n": 0}
+
+    def _dispatch(model_cls):  # type: ignore[no-untyped-def]
+        call_count["n"] += 1
+        if model_cls is ChatMemoryWorkingBlock:
+            return _block_query()
+        return _items_query()
+
+    session.query.side_effect = _dispatch
+    service = PersonaService(pg_session_factory=factory)
+
+    service._sync_to_working_block(session=None, user_id=user_id)
+
+    assert "## 你声明的" in existing_block.content
+    session.commit.assert_called()
+
+
+@pytest.mark.unit
+def test_sync_to_working_block_inserts_new() -> None:
+    """无既有 persona block → insert."""
+    factory, session = _mk_session_factory()
+
+    def _block_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+        m = MagicMock()
+        m.filter_by.return_value.first.return_value = None  # 不存在
+        return m
+
+    def _items_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+        m = MagicMock()
+        m.filter_by.return_value.order_by.return_value.all.return_value = []
+        return m
+
+    def _dispatch(model_cls):  # type: ignore[no-untyped-def]
+        if model_cls is ChatMemoryWorkingBlock:
+            return _block_query()
+        return _items_query()
+
+    session.query.side_effect = _dispatch
+    service = PersonaService(pg_session_factory=factory)
+
+    service._sync_to_working_block(session=None, user_id=uuid4())
+
+    session.add.assert_called()
+    session.commit.assert_called()
