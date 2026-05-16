@@ -101,6 +101,45 @@ export function buildEscalateUrl(): string {
   return apiUrl('/api/v0/chat/escalate')
 }
 
+/**
+ * Plan 3 Task 4: POST /api/v0/chat/cancel/{task_id} — async cancel signal。
+ * 服务端 publish 到 Redis pub/sub channel,worker 内 listener 接到 → graph
+ * 节点之间检查 flag → raise GraphInterrupt → finalize 走 partial commit。
+ * 立即返 202,不等 worker 反应。
+ */
+export async function cancelChatTask(taskId: string): Promise<void> {
+  const res = await fetch(
+    apiUrl(`/api/v0/chat/cancel/${encodeURIComponent(taskId)}`),
+    { method: 'POST' },
+  )
+  if (!res.ok && res.status !== 202) {
+    throw new Error(`cancel failed: ${res.status}`)
+  }
+}
+
+export interface RetryChatResponse {
+  task_id: string
+  parent_task_id: string
+  stream_url: string
+  resumed_from_checkpoint: string
+}
+
+/**
+ * Plan 3 Task 5: POST /api/v0/chat/retry/{task_id} — resume from checkpoint。
+ * 后端从 chat_tasks.langgraph_checkpoint_id 创建新 task(parent_task_id 链),
+ * 返回新 task_id + stream_url。前端拿到后立刻打开 stream 接续。
+ */
+export async function retryChatTask(taskId: string): Promise<RetryChatResponse> {
+  const res = await fetch(
+    apiUrl(`/api/v0/chat/retry/${encodeURIComponent(taskId)}`),
+    { method: 'POST' },
+  )
+  if (!res.ok) {
+    throw new Error(`retry failed: ${res.status}`)
+  }
+  return (await res.json()) as RetryChatResponse
+}
+
 import type { EscalationPacket } from '@/types/escalation'
 
 export interface ConfirmEscalationArgs {

@@ -23,7 +23,9 @@ import { useCallback, useEffect, useRef } from 'react'
 import {
   buildChatPostUrl,
   buildChatTaskStreamUrl,
+  cancelChatTask,
   getChat,
+  retryChatTask,
   type ChatPostJsonResponse,
 } from '@/api/chatApi'
 import {
@@ -49,6 +51,13 @@ interface UseChatSSE {
   // 调本 method subscribe in-flight stream;继续接收剩余 token + done event。
   // last_event_id='0' = from start;若前端记得上次的 entry_id 传它续读。
   subscribeToTask(taskId: string, lastEventId?: string): Promise<void>
+  // Plan 3 Task 7: cancel in-flight task。POST /chat/cancel/{tid} → 202,
+  // worker 内 listener 接 Redis pub/sub → graph 节点拦截 → partial commit。
+  // 前端同时 abort 当前 SSE fetch 防 stale frame。
+  cancelTask(taskId: string): Promise<void>
+  // Plan 3 Task 7: retry from checkpoint。POST /chat/retry/{tid} → 拿新
+  // task_id + stream_url,自动 abort 旧 stream → 立刻 subscribe 新 stream。
+  retryTask(taskId: string): Promise<void>
 }
 
 interface Typewriter {
@@ -183,6 +192,8 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         if (contentType.includes('application/json')) {
           // ===== Plan 2 path =====
           const json = (await res.json()) as ChatPostJsonResponse
+          // Plan 3 Task 7: track in-flight task_id for cancel button + ChatPane UI
+          currentChatActions.setActiveTaskId(json.task_id)
           const streamUrl = buildChatTaskStreamUrl(json.task_id, '0')
           const streamRes = await fetchImpl(streamUrl, { signal: ac.signal })
           if (!streamRes.ok) {
@@ -274,5 +285,37 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
     [fetchImpl],
   )
 
-  return { sendMessage, abort, status, subscribeToTask }
+  // Plan 3 Task 7: cancel in-flight task。POST /chat/cancel/{tid} → 202;
+  // worker 内 listener 接 Redis pub/sub → graph 节点拦截 → partial commit。
+  // 前端同时 abort 当前 SSE fetch 防 stale frame。
+  const cancelTask = useCallback(async (taskId: string) => {
+    abortRef.current?.abort()
+    try {
+      await cancelChatTask(taskId)
+    } catch {
+      // 失败也 reset UI(用户感知 cancel 了)
+    }
+    // worker emit cancelled event 会让 streaming → idle;但 abort 已经截了 SSE,
+    // 主动 reset 让前端立刻响应
+    currentChatActions.setActiveTaskId(null)
+  }, [])
+
+  // Plan 3 Task 7: retry from checkpoint。POST /chat/retry/{tid} → 新 task_id
+  // + stream_url → 自动 abort 旧 + 立刻 subscribe 新 task stream(typewriter 接续)。
+  const retryTask = useCallback(
+    async (taskId: string) => {
+      abortRef.current?.abort()
+      try {
+        const resp = await retryChatTask(taskId)
+        currentChatActions.setActiveTaskId(resp.task_id)
+        // 调内部 subscribeToTask 复用 stream consume 逻辑
+        await subscribeToTask(resp.task_id, '0')
+      } catch {
+        // 失败留 UI 在 error 状态;用户可以再点 retry
+      }
+    },
+    [subscribeToTask],
+  )
+
+  return { sendMessage, abort, status, subscribeToTask, cancelTask, retryTask }
 }

@@ -88,7 +88,11 @@ export function ChatPane({
         {empty ? (
           <div className={styles.emptyState}>开始一个新对话 — 试试问 "工商银行现价多少?"</div>
         ) : (
-          <MessageList messages={[...displayMessages]} onContinueAsk={onContinueAsk} />
+          <MessageList
+            messages={[...displayMessages]}
+            onContinueAsk={onContinueAsk}
+            onRetry={sse.retryTask}
+          />
         )}
         <StreamingIndicator />
       </section>
@@ -98,6 +102,7 @@ export function ChatPane({
           onSend={onSend}
           onAbort={onAbort}
           onEscalate={onEscalate}
+          onCancel={sse.cancelTask}
         />
       </section>
     </div>

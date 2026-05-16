@@ -182,6 +182,17 @@ def _to_jsonable(obj: Any) -> Any:
     return obj
 
 
+class _CancelledByUser(Exception):  # noqa: N818
+    """Internal signal: cancel_event 被 listener 设置后,graph stream loop raise 它,
+    finally 块走 partial commit 路径(非 finalize_task_persistence)。
+
+    Spec § 6.1: LangGraph 1.x 不支持外部 kill 信号 → wrapper 在每个 graph event
+    之间检查 cancel_event,触发即 raise → finalize 走 partial commit。
+
+    Naming intentionally not "Error" suffix — 这是 control-flow signal 不是错误。
+    """
+
+
 async def run_chat_async(
     *,
     task_id: uuid.UUID,
@@ -191,6 +202,7 @@ async def run_chat_async(
     user_message: str,
     session_id: str,
     user_id: uuid.UUID | str | None,
+    resume_checkpoint_id: str | None = None,
 ) -> None:
     """Main worker async entry — DI 友好,test 可直接 await。
 
@@ -202,9 +214,36 @@ async def run_chat_async(
     - user_message / session_id: 注入 LangGraph 的 initial state
     - user_id: 真 UUID(post-auth)/ 字符串如 "anonymous"(pre-auth)/ None;
       仅用于 LangGraph thread_id 拼接,不写 PG(chat_tasks.user_id 由 router 写入)
+    - resume_checkpoint_id: Plan 3 retry 用,若传则注入 LangGraph config 让其
+      从该 checkpoint state 续跑(本 Task 3 仅加签名 + config 接通,真行为留 Task 5
+      golden case 测)
+
+    Plan 3 加:
+    - ChatCancelBus listener task — Redis pub/sub subscribe task channel,
+      收到 cancel 信号即 set asyncio.Event flag
+    - graph stream loop 每 event 之间 check cancel_event → raise _CancelledByUser
+    - finally 块:cancel 走 mark_partial + append_message(status="partial");
+      success 走 finalize_task_persistence(原 Plan 2 路径);error 同 Plan 2
     """
+    import asyncio
+    from contextlib import suppress
+
+    from app.services.chat_cancel_bus import ChatCancelBus
+
     task_repo = ChatTaskRepo(session_factory)
     bus = ChatEventBus(redis=redis)
+    cancel_bus = ChatCancelBus(redis=redis)
+    cancel_event = asyncio.Event()
+
+    async def _cancel_listener() -> None:
+        try:
+            async for _ in cancel_bus.subscribe_cancel(task_id):
+                cancel_event.set()
+                return
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("cancel listener exit for task %s: %s", task_id, exc)
+
+    listener_task = asyncio.create_task(_cancel_listener())
 
     sid_uuid: uuid.UUID = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
 
@@ -221,6 +260,7 @@ async def run_chat_async(
 
     acc_assistant: list[str] = []
     graph_error: Exception | None = None
+    cancelled_by_user = False
     final_state: dict[str, Any] | None = None
 
     graph = graph_factory()
@@ -232,10 +272,19 @@ async def run_chat_async(
         "request_id": f"req-{uuid.uuid4().hex[:12]}",
         "trace_request_id": f"req-{uuid.uuid4().hex[:12]}",
     }
-    config: dict[str, Any] = {"configurable": {"thread_id": f"{user_id}:{session_id}"}}
+    # Plan 3 retry:传 checkpoint_id 让 LangGraph 从 checkpoint state 续跑。
+    # Task 3 仅加签名 + config 接通;真 resume 行为 Task 5 + golden 测。
+    configurable: dict[str, Any] = {"thread_id": f"{user_id}:{session_id}"}
+    if resume_checkpoint_id is not None:
+        configurable["checkpoint_id"] = resume_checkpoint_id
+    config: dict[str, Any] = {"configurable": configurable}
 
     try:
         async for ev in graph.astream_events(initial, config=config, version="v2"):
+            # Plan 3:每 event 之间检查 cancel flag(spec § 6.1 wrapper 模式)
+            if cancel_event.is_set():
+                raise _CancelledByUser()
+
             # capture final_state from LangGraph done event
             if ev.get("event") == "on_chain_end" and ev.get("name") == "LangGraph":
                 output = (ev.get("data") or {}).get("output") or {}
@@ -255,6 +304,12 @@ async def run_chat_async(
                 await task_repo.bump_seq(task_id, delta=1)
             except Exception as exc:  # noqa: BLE001
                 logger.debug("bump_seq skipped for task %s: %s", task_id, exc)
+    except _CancelledByUser:
+        cancelled_by_user = True
+        try:
+            await bus.xadd_event(sid_uuid, task_id, {"type": "cancelled", "reason": "user_cancel"})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("xadd cancelled event failed for task %s: %s", task_id, exc)
     except Exception as exc:  # noqa: BLE001
         graph_error = exc
         try:
@@ -262,12 +317,18 @@ async def run_chat_async(
         except Exception as inner:  # noqa: BLE001
             logger.warning("xadd error event failed for task %s: %s", task_id, inner)
     finally:
+        # Stop cancel listener — 不论如何退,listener 都要 clean up。
+        listener_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await listener_task
+
         # Plan 2 dogfood bug fix: 如果 graph 走 direct_response 路径(planner 决定不调
         # tool,responder 一次性 invoke),没 on_chat_model_stream 事件 → acc_assistant
         # 空 → 前端 typewriter 没字符可吐 → assistant message 不显示。
         # Fallback: 拿 final_state.final_response 一次性 emit 为 token event,
         # 让前端 typewriter 接到 content 后逐字符吐(视觉等同 streaming)。
-        if graph_error is None and not acc_assistant:
+        # Cancel 路径跳过(用户主动停,不补内容)。
+        if graph_error is None and not cancelled_by_user and not acc_assistant:
             fallback_text = ""
             if isinstance(final_state, dict):
                 fr = final_state.get("final_response")
@@ -289,31 +350,58 @@ async def run_chat_async(
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("fallback token xadd failed for task %s: %s", task_id, exc)
 
-        # 终止事件:成功 → done;失败 → error_done
+        # 终止事件:cancel → cancelled;成功 → done;失败 → error_done
         try:
-            await bus.xadd_event(
-                sid_uuid,
-                task_id,
-                {"type": "done"} if graph_error is None else {"type": "error_done"},
-            )
+            if cancelled_by_user:
+                terminal_event: dict[str, Any] = {"type": "cancelled"}
+            elif graph_error is None:
+                terminal_event = {"type": "done"}
+            else:
+                terminal_event = {"type": "error_done"}
+            await bus.xadd_event(sid_uuid, task_id, terminal_event)
         except Exception as exc:  # noqa: BLE001
             logger.warning("terminal xadd failed for task %s: %s", task_id, exc)
 
-        # Commit assistant message + mark task — 复用 Plan 1 helper
+        # Finalize commit
         accumulated = "".join(acc_assistant)
         try:
-            await finalize_task_persistence(
-                pg_factory=session_factory,
-                task_id=task_id,
-                session_id=session_id,
-                graph=graph,
-                config=config,  # type: ignore[arg-type]
-                final_state=final_state,
-                accumulated_token_text=accumulated,
-                graph_error=graph_error,
-            )
+            if cancelled_by_user:
+                # Custom partial commit path — 不走 finalize_task_persistence
+                # (那条路径会按 graph_error 是否空判 done/error,partial 不在其语义内)。
+                from app.services.chat_session_repo import ChatSessionRepo
+
+                session_repo = ChatSessionRepo(session_factory)
+                checkpoint_id: str | None = None
+                try:
+                    state = await graph.aget_state(config)
+                    cp = (state.config.get("configurable", {}) or {}).get("checkpoint_id")
+                    if isinstance(cp, str):
+                        checkpoint_id = cp
+                except Exception:  # noqa: BLE001
+                    # aget_state 可能失败(stub graph / 真 graph 未起 checkpointer),
+                    # 那就 checkpoint_id=None,后续 retry 走从头重跑(spec § 6.1 兜底)。
+                    pass
+                await session_repo.append_message(
+                    session_id=session_id,
+                    role="assistant",
+                    content=accumulated,
+                    task_id=task_id,
+                    status="partial",
+                )
+                await task_repo.mark_partial(task_id, langgraph_checkpoint_id=checkpoint_id)
+            else:
+                await finalize_task_persistence(
+                    pg_factory=session_factory,
+                    task_id=task_id,
+                    session_id=session_id,
+                    graph=graph,
+                    config=config,  # type: ignore[arg-type]
+                    final_state=final_state,
+                    accumulated_token_text=accumulated,
+                    graph_error=graph_error,
+                )
         except Exception as exc:  # noqa: BLE001
-            logger.exception("finalize_task_persistence failed for task %s: %s", task_id, exc)
+            logger.exception("finalize failed for task %s: %s", task_id, exc)
 
         # Refresh TTL — task 结束后再续 24h
         try:
@@ -334,6 +422,7 @@ def run_chat(
     session_id: str,
     user_id: str,
     user_message: str,
+    resume_checkpoint_id: str | None = None,
 ) -> None:
     """Celery sync entry. Bridges to async via asyncio.run() + builds worker-side deps.
 
@@ -343,6 +432,9 @@ def run_chat(
     - session_factory: _build_session_factory_for_worker — async_sessionmaker
       tied to PG via _sqlalchemy_async_pg_url
     - redis: _build_redis_for_worker — redis.asyncio.Redis from REDIS_URL
+
+    Plan 3 Task 5:resume_checkpoint_id 直接透传给 run_chat_async,worker
+    LangGraph 从该 checkpoint state 续跑(spec § 5.4 Scenario D / § 6.4)。
 
     L0 / L1 path 直接 await run_chat_async(test_chat_runner.py);
     L2 path 走真 worker subprocess(test_chat_inflight_l2.py)。
@@ -360,18 +452,37 @@ def run_chat(
             user_message=user_message,
             session_id=session_id,
             user_id=user_id,
+            resume_checkpoint_id=resume_checkpoint_id,
         )
     )
 
 
-def enqueue_run_chat(*, task_id: str, session_id: str, user_id: str, user_message: str) -> Any:
-    """Production enqueue — POST /chat 改造(Task 5)调本函数。
+def enqueue_run_chat(
+    *,
+    task_id: str,
+    session_id: str,
+    user_id: str,
+    user_message: str,
+    resume_checkpoint_id: str | None = None,
+    parent_task_id: str | None = None,  # noqa: ARG001 — audit-only; worker doesn't consume
+) -> Any:
+    """Production enqueue — POST /chat 改造(Plan 2 Task 5)+ POST /chat/retry
+    (Plan 3 Task 5)都调本函数。
 
-    Tests monkey-patch this function to bypass real Celery .delay().
+    Plan 3 retry 加 resume_checkpoint_id 参数;worker async entry 用它构造
+    RunnableConfig {configurable: {thread_id, checkpoint_id}} 让 LangGraph
+    从 checkpoint state 续跑。
+
+    parent_task_id 是 audit-only(retry 链已经在 chat_tasks.parent_task_id
+    列里持久化了);此参数让 endpoint 显式表达"这是 retry enqueue"以便
+    后续监控 hook 接入,但 worker 路径不需要消费它。
+
+    Tests monkey-patch this function to bypass real Celery .delay()。
     """
     return run_chat.delay(
         task_id=task_id,
         session_id=session_id,
         user_id=user_id,
         user_message=user_message,
+        resume_checkpoint_id=resume_checkpoint_id,
     )

@@ -202,3 +202,101 @@ async def test_run_chat_async_llm_error_xadds_error_and_marks_error(
     assert refreshed.status == "error"
     assert refreshed.error_message is not None
     assert "simulated 429" in refreshed.error_message
+
+
+async def test_run_chat_async_cancel_signal_aborts_graph_and_marks_partial(
+    session_factory: async_sessionmaker[AsyncSession],
+    seeded_running_task: dict[str, Any],
+) -> None:
+    """模拟 ChatCancelBus.publish_cancel 期间 worker listener 收到 signal,
+    graph wrapper 检查 cancel_event → raise → finalize 走 partial 路径。
+
+    Steps:
+    1. Build fake graph with 0.3s gap between chunks
+    2. Run run_chat_async + 并行 publish cancel after 0.5s(gap 内)
+    3. Verify task.status=partial, assistant.status=partial, Redis Stream
+       cancelled event
+    """
+    import asyncio
+
+    from app.services.chat_cancel_bus import ChatCancelBus
+
+    fake_redis = FakeRedis(decode_responses=False)
+    cancel_bus = ChatCancelBus(fake_redis)
+
+    # Fake graph yields part1 → 0.3s gap → part2 → 2s gap → done.
+    # cancel publish at 0.5s 应该在 part1 yield 之后,part2 之后的检查 cycle 触发。
+    class _SlowFakeGraph:
+        async def astream_events(
+            self,
+            _initial: Any,
+            config: Any = None,
+            version: str = "v2",
+        ) -> AsyncIterator[dict[str, Any]]:
+            yield {
+                "event": "on_chat_model_stream",
+                "name": "model",
+                "data": {"chunk": MagicMock(content="part1 ")},
+            }
+            await asyncio.sleep(0.3)
+            yield {
+                "event": "on_chat_model_stream",
+                "name": "model",
+                "data": {"chunk": MagicMock(content="part2 ")},
+            }
+            await asyncio.sleep(2.0)
+            yield {
+                "event": "on_chain_end",
+                "name": "LangGraph",
+                "data": {"output": {"final_response": "full"}},
+            }
+
+        async def aget_state(self, _config: Any) -> Any:
+            return MagicMock(config={"configurable": {"checkpoint_id": "ckpt-partial"}})
+
+    fake_graph = _SlowFakeGraph()
+    tid = seeded_running_task["task_id"]
+    sid = seeded_running_task["session_id"]
+    uid = seeded_running_task["user_id"]
+
+    async def trigger_cancel() -> None:
+        await asyncio.sleep(0.5)
+        await cancel_bus.publish_cancel(tid)
+
+    cancel_trigger = asyncio.create_task(trigger_cancel())
+
+    await run_chat_async(
+        task_id=tid,
+        graph_factory=lambda: fake_graph,
+        session_factory=session_factory,
+        redis=fake_redis,
+        user_message="cancel me",
+        session_id=str(sid),
+        user_id=uid,
+    )
+    await cancel_trigger
+
+    # Assertions: task.status=partial,checkpoint_id 写入
+    task_repo = ChatTaskRepo(session_factory)
+    refreshed = await task_repo.get_by_id(tid)
+    assert refreshed is not None
+    assert refreshed.status in ("partial", "cancelled"), (
+        f"expected partial/cancelled, got {refreshed.status}"
+    )
+
+    # PG chat_messages assistant 应该 status=partial,内容含至少 part1
+    msg_repo = ChatSessionRepo(session_factory)
+    msgs = await msg_repo.list_messages(str(sid))
+    assistant_msgs = [m for m in msgs if m.role == "assistant"]
+    assert len(assistant_msgs) == 1
+    assert assistant_msgs[0].status in ("partial", "cancelled")
+    assert "part1" in assistant_msgs[0].content
+
+    # Redis Stream 应有 cancelled / error_done 终止事件
+    bus = ChatEventBus(fake_redis)
+    entries = await bus.xread_blocking(sid, tid, last_id="0", count=100, block_ms=10)
+    types = [e[1].get("type") for e in entries]
+    has_cancel_terminal = "cancelled" in types or any(
+        e[1].get("reason") == "cancelled" for e in entries
+    )
+    assert has_cancel_terminal, f"expected cancelled-style terminal, got types={types}"

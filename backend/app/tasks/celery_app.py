@@ -17,7 +17,12 @@ celery_app = Celery(
     "monitoring",
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=["app.tasks.monitoring", "app.tasks.memory", "app.tasks.chat_runner"],
+    include=[
+        "app.tasks.monitoring",
+        "app.tasks.memory",
+        "app.tasks.chat_runner",
+        "app.tasks.chat_stale_scanner",  # Plan 3 Task 6
+    ],
 )
 
 celery_app.conf.update(
