@@ -275,3 +275,78 @@ async def test_bump_seq_increments_last_event_seq(
     fetched2 = await repo.get_by_id(task.id)
     assert fetched2 is not None
     assert fetched2.last_event_seq == 8
+
+
+# -----------------------------------------------------------------------------
+# find_stale_running_tasks (Plan 3)
+# -----------------------------------------------------------------------------
+
+
+async def test_find_stale_running_tasks_returns_old_running(
+    session_factory: async_sessionmaker[AsyncSession],
+    seeded_session: uuid.UUID,
+) -> None:
+    """status=running 且 started_at 早于 cutoff → 视为 stale。"""
+    repo = ChatTaskRepo(session_factory)
+    task = await repo.create_queued(
+        session_id=str(seeded_session),
+        user_id=uuid.uuid4(),
+        langgraph_thread_id="t",
+        initial_prompt_message_id=None,
+    )
+    await repo.mark_running(task.id)
+
+    # 直接 update started_at 为 10 分钟前
+    from datetime import timedelta
+
+    from app.models.chat import ChatTask
+    from sqlalchemy import update
+
+    old_time = datetime.utcnow() - timedelta(minutes=10)
+    async with session_factory() as sess:
+        await sess.execute(
+            update(ChatTask).where(ChatTask.id == task.id).values(started_at=old_time)
+        )
+        await sess.commit()
+
+    stale = await repo.find_stale_running_tasks(min_age_minutes=5)
+    assert any(t.id == task.id for t in stale), (
+        f"expected task in stale list, got {[t.id for t in stale]}"
+    )
+
+
+async def test_find_stale_running_tasks_excludes_recent_running(
+    session_factory: async_sessionmaker[AsyncSession],
+    seeded_session: uuid.UUID,
+) -> None:
+    """刚 mark_running 的 task(started_at < 5min ago)→ 不算 stale。"""
+    repo = ChatTaskRepo(session_factory)
+    task = await repo.create_queued(
+        session_id=str(seeded_session),
+        user_id=uuid.uuid4(),
+        langgraph_thread_id="t",
+        initial_prompt_message_id=None,
+    )
+    await repo.mark_running(task.id)
+
+    stale = await repo.find_stale_running_tasks(min_age_minutes=5)
+    assert all(t.id != task.id for t in stale), "fresh running task should not be stale"
+
+
+async def test_find_stale_running_tasks_excludes_done(
+    session_factory: async_sessionmaker[AsyncSession],
+    seeded_session: uuid.UUID,
+) -> None:
+    """已完成 task 不算 stale。"""
+    repo = ChatTaskRepo(session_factory)
+    task = await repo.create_queued(
+        session_id=str(seeded_session),
+        user_id=uuid.uuid4(),
+        langgraph_thread_id="t",
+        initial_prompt_message_id=None,
+    )
+    await repo.mark_running(task.id)
+    await repo.mark_done(task.id, langgraph_checkpoint_id=None)
+
+    stale = await repo.find_stale_running_tasks(min_age_minutes=0)
+    assert all(t.id != task.id for t in stale), "done task should not be stale"
