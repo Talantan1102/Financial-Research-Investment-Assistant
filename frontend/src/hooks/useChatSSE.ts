@@ -161,7 +161,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         const res = await fetchImpl(buildChatPostUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sessionId, content }),
+          body: JSON.stringify({ session_id: sessionId, message: content }),
           signal: ac.signal,
         })
         if (!res.ok) throw new Error(`POST /api/v0/chat ${res.status}`)
