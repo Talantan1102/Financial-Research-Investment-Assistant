@@ -774,7 +774,7 @@ git commit -m "feat(dd-eval): Phase 1 Task 1.3 — KB Chunk schema 加 publish_d
 - Test: `backend/tests/eval/dd_report/test_tushare_backtest_adapter.py`
 - Reference: `backend/app/data/tushare_client.py:202`(已有 `ann_date_start/end`)+ `backend/app/services/tushare_service.py`
 
-- [ ] **Step 1: Write failing test — adapter 注入 cut_off 到所有 ann_date 查询**
+- [x] **Step 1: Write failing test — adapter 注入 cut_off 到所有 ann_date 查询**
 
 ```python
 # backend/tests/eval/dd_report/test_tushare_backtest_adapter.py
@@ -850,7 +850,7 @@ def test_adapter_cut_off_required() -> None:
         TushareBacktestAdapter(inner=MagicMock())  # type: ignore[call-arg]
 ```
 
-- [ ] **Step 2: Run test — verify failure**
+- [x] **Step 2: Run test — verify failure**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_tushare_backtest_adapter.py -v
@@ -858,7 +858,7 @@ uv run pytest backend/tests/eval/dd_report/test_tushare_backtest_adapter.py -v
 
 Expected: FAIL — adapter 不存在。
 
-- [ ] **Step 3: Implement — TushareBacktestAdapter**
+- [x] **Step 3: Implement — TushareBacktestAdapter**
 
 ```python
 # backend/eval/dd_report/tushare_backtest_adapter.py
@@ -954,7 +954,7 @@ class TushareBacktestAdapter:
         ]
 ```
 
-- [ ] **Step 4: Run test — verify pass**
+- [x] **Step 4: Run test — verify pass**
 
 ```bash
 uv run pytest backend/tests/eval/dd_report/test_tushare_backtest_adapter.py -v
@@ -962,7 +962,7 @@ uv run pytest backend/tests/eval/dd_report/test_tushare_backtest_adapter.py -v
 
 Expected: 4 个 test 全 PASS.
 
-- [ ] **Step 5: Mypy strict check**
+- [x] **Step 5: Mypy strict check**
 
 ```bash
 cd backend && uv run mypy app eval/dd_report --strict
@@ -970,7 +970,7 @@ cd backend && uv run mypy app eval/dd_report --strict
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/eval/dd_report/tushare_backtest_adapter.py backend/tests/eval/dd_report/test_tushare_backtest_adapter.py
