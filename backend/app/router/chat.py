@@ -26,13 +26,15 @@ last_event_id-based SSE reconnect (spec § 4.6 / G1 industrial problem).
 
 from __future__ import annotations
 
+import json
 import logging
 import traceback
+import uuid
 from collections.abc import AsyncIterator
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
@@ -40,9 +42,13 @@ from pydantic import BaseModel
 
 from app.agents.escalation_extractor import EscalationExtractor
 from app.agents.schemas import GraphState
+from app.router.chat_finalize import finalize_task_persistence
 from app.services.chat_session_repo import ChatSessionRepo
 from app.services.chat_task_repo import ChatTaskRepo
 from app.services.escalation_record_repo import EscalationRecordRepo
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis as AsyncRedis
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +92,16 @@ def get_async_session_factory(request: Request) -> Any | None:
     to inject an in-memory sqlite ``async_sessionmaker``.
     """
     return getattr(request.app.state, "async_session_factory", None)
+
+
+def get_redis_async(request: Request) -> AsyncRedis | None:
+    """Plan 2: Redis async client wired by app_main lifespan to app.state.redis_async.
+
+    Returns None if Redis is not configured — endpoints that need it 503 gracefully.
+    Overridden in tests via ``dependency_overrides[get_redis_async]`` to inject
+    a fakeredis instance.
+    """
+    return getattr(request.app.state, "redis_async", None)
 
 
 # ---------------------------------------------------------------------------
@@ -395,77 +411,6 @@ def _coerce_user_uuid(user_id: Any) -> UUID | None:
         return None  # anonymous / test stub → NULL in DB
 
 
-async def _finalize_task_persistence(
-    *,
-    pg_factory: Any,
-    task_id: UUID,
-    session_id: str,
-    graph: CompiledStateGraph[Any, Any, Any, Any],
-    config: RunnableConfig,
-    final_state: dict[str, Any] | None,
-    accumulated_token_text: str,
-    graph_error: Exception | None,
-) -> None:
-    """Plan 1 Task 5: write the trailing assistant message + mark chat_task status.
-
-    Called from ``_stream_chat`` finally block when persistence is wired
-    (``pg_factory`` and ``task_id`` both non-None). Failures here are caught
-    by the caller and logged — they MUST NOT propagate into the SSE stream.
-
-    Behavior:
-    - Success path: pick the assistant body in priority order
-        1. ``final_state["final_response"]`` — set by the responder node
-        2. accumulated ``on_chat_model_stream`` token text
-        3. empty string (no responder ran — degraded transcript)
-      then ``append_message(role='assistant', status='done')`` + ``mark_done``.
-    - Error path: assistant body = accumulated text (may be empty), status=error;
-      ``mark_error(error_message=<truncated str(exc)>)``.
-
-    The LangGraph checkpoint id is best-effort: the API surface for it varies
-    across LG versions, so failures to read it fall through to None.
-    """
-    session_repo = ChatSessionRepo(pg_factory)
-    task_repo = ChatTaskRepo(pg_factory)
-
-    if graph_error is None:
-        assistant_content = ""
-        if isinstance(final_state, dict):
-            fr = final_state.get("final_response")
-            if isinstance(fr, str) and fr:
-                assistant_content = fr
-        if not assistant_content:
-            assistant_content = accumulated_token_text
-
-        checkpoint_id: str | None = None
-        try:
-            state = await graph.aget_state(config)
-            cfg = getattr(state, "config", None) or {}
-            configurable = cfg.get("configurable", {}) if isinstance(cfg, dict) else {}
-            cp = configurable.get("checkpoint_id") if isinstance(configurable, dict) else None
-            if isinstance(cp, str):
-                checkpoint_id = cp
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("aget_state checkpoint_id unavailable (%s); leaving NULL", exc)
-
-        await session_repo.append_message(
-            session_id=session_id,
-            role="assistant",
-            content=assistant_content,
-            task_id=task_id,
-            status="done",
-        )
-        await task_repo.mark_done(task_id, langgraph_checkpoint_id=checkpoint_id)
-    else:
-        await session_repo.append_message(
-            session_id=session_id,
-            role="assistant",
-            content=accumulated_token_text,
-            task_id=task_id,
-            status="error",
-        )
-        await task_repo.mark_error(task_id, error_message=str(graph_error)[:500])
-
-
 async def _stream_chat(
     req: ChatRequest,
     user: _AnonUser,
@@ -569,7 +514,7 @@ async def _stream_chat(
         # Best-effort — failures here MUST NOT crash the SSE stream.
         if pg_factory is not None and task_id is not None:
             try:
-                await _finalize_task_persistence(
+                await finalize_task_persistence(
                     pg_factory=pg_factory,
                     task_id=task_id,
                     session_id=req.session_id,
@@ -698,7 +643,7 @@ async def _stream_chat(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/api/v0/chat")
+@router.post("/api/v0/chat", response_model=None)
 async def chat(
     req: ChatRequest,
     user: _AnonUser = Depends(get_current_user),
@@ -706,36 +651,65 @@ async def chat(
     extractor: EscalationExtractor = Depends(get_escalation_extractor),
     record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
     pg_factory: Any | None = Depends(get_async_session_factory),
-) -> StreamingResponse:
-    """POST /api/v0/chat — stream a chat response as SSE.
+    redis: AsyncRedis | None = Depends(get_redis_async),
+) -> StreamingResponse | dict[str, str]:
+    """POST /api/v0/chat — chat entry endpoint(双 path,graceful degrade)。
+
+    Plan 1 inline path(legacy):pg_factory wired but redis None →
+    inline SSE streaming via ``_stream_chat``,response is text/event-stream。
+
+    Plan 2 enqueue path:pg_factory + redis 都 wired → 持久化 user message +
+    create chat_task + enqueue Celery `run_chat_async`,返 JSON
+    ``{task_id, session_id, stream_url}``,前端用 GET /chat/stream/{tid}
+    订阅 Redis Streams replay。
+
+    Graceful degrade:
+    - pg_factory + redis 都 None / 任一 None  → Plan 1 inline path (preserve
+      Plan 1 production behavior + 老 SSE regression test 不破坏)
+    - Plan 2 Task 7 wire ``app.state.redis_async`` 后 production 自动切到 Plan 2
 
     Request body: ChatRequest (session_id, message, optional flags).
-    Response: text/event-stream per spec § 4.6.
+    Responses:
+        - Plan 1: text/event-stream (SSE, see spec § 4.6)
+        - Plan 2: application/json (``{task_id, session_id, stream_url}``)
 
-    Each SSE frame has the form::
-
-        event: <type>
-        id: <seq>
-        data: {"seq": <n>, "data": {...}}
-
-    Full event type set defined in StreamEvent.type (see spec § 4.6).
-    The ``done`` event signals the end of the stream.
-
-    Plan 3 escalation: if the planner emits escalate_offered=True, two
-    additional events follow the ``done`` event:
-    ``escalate_request`` then ``escalate_packet_draft``.
-    These require EscalationExtractor + EscalationRecordRepo to be wired
-    via dependency_overrides (tests) or app_main lifespan (production).
-
-    Plan 1 Task 5 persistence:
-    - When ``pg_factory`` is non-None (PG configured), the handler inserts the
-      user message + creates a ``chat_tasks`` row (queued → running) before the
-      stream starts. The trailing assistant message + task status (done / error)
-      are written from ``_stream_chat``'s finally block.
-    - When ``pg_factory`` is None (legacy SSE test path / dev without PG), the
-      handler degrades gracefully and skips all persistence work. Existing SSE
-      regression tests rely on this.
+    Plan 3 escalation 流(escalate_request / escalate_packet_draft)目前仍
+    inline 在 Plan 1 path,Plan 2 path 由 Celery worker chunk-level forward
+    (out-of-scope for Task 5)。
     """
+    # ===== Plan 2 new path: Celery enqueue + return JSON =====
+    if pg_factory is not None and redis is not None:
+        from app.tasks.chat_runner import enqueue_run_chat
+
+        session_repo = ChatSessionRepo(pg_factory)
+        task_repo = ChatTaskRepo(pg_factory)
+
+        user_msg = await session_repo.append_message(
+            session_id=req.session_id,
+            role="user",
+            content=req.message,
+        )
+        task = await task_repo.create_queued(
+            session_id=req.session_id,
+            user_id=_coerce_user_uuid(user.id),
+            langgraph_thread_id=f"{user.id}:{req.session_id}",
+            initial_prompt_message_id=user_msg.id,
+        )
+
+        enqueue_run_chat(
+            task_id=str(task.id),
+            session_id=req.session_id,
+            user_id=str(user.id),
+            user_message=req.message,
+        )
+
+        return {
+            "task_id": str(task.id),
+            "session_id": req.session_id,
+            "stream_url": f"/api/v0/chat/stream/{task.id}",
+        }
+
+    # ===== Plan 1 legacy path: inline SSE streaming (UNCHANGED behavior) =====
     task_id: UUID | None = None
 
     if pg_factory is not None:
@@ -771,6 +745,96 @@ async def chat(
             task_id=task_id,
             pg_factory=pg_factory if task_id is not None else None,
         ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Plan 2 Task 4: GET /api/v0/chat/stream/{task_id} — SSE replay endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/v0/chat/stream/{task_id}")
+async def chat_stream(
+    task_id: str,
+    request: Request,
+    last_event_id: str = "0",
+    pg_factory: Any | None = Depends(get_async_session_factory),
+    redis: AsyncRedis | None = Depends(get_redis_async),
+) -> StreamingResponse:
+    """SSE replay endpoint — XREAD from Redis Streams + forward as SSE frames.
+
+    Plan 2 Task 4:前端打开 SSE 后,我们从 Redis Stream 拉 chunk-level event 转发。
+    Spec § 6.2:entry id 直接透传作为 SSE ``id:`` field → 前端断流时回传
+    ``last_event_id`` 续读;§ 5.5:客户端断开 → 停转发(不杀 Celery task)。
+
+    Args:
+        task_id: ChatTask UUID
+        last_event_id: Redis Stream entry id ("0" = from start; ``<ms>-<seq>``
+            from a previous reconnect)
+
+    Returns:
+        text/event-stream with frames ``event: <type>\\nid: <entry_id>\\ndata: <json>\\n\\n``.
+
+    Status codes:
+        - 200: streaming OK
+        - 404: invalid uuid OR task not found
+        - 503: PG / Redis not wired
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(status_code=404, detail=f"invalid task_id: {task_id}") from exc
+
+    if pg_factory is None or redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="chat streaming not configured (PG or Redis unavailable)",
+        )
+
+    task_repo = ChatTaskRepo(pg_factory)
+    task = await task_repo.get_by_id(task_uuid)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+
+    session_id_uuid = task.session_id  # ChatTask.session_id is UUID
+
+    async def _forward_sse() -> AsyncIterator[str]:
+        # Inline import: ChatEventBus → redis.asyncio import; defer to runtime so
+        # the chat router stays importable in dev environments without redis.
+        from app.services.chat_event_bus import ChatEventBus
+
+        bus = ChatEventBus(redis=redis)  # type: ignore[arg-type]
+        cur_id = last_event_id
+        while True:
+            # Spec § 5.5: client disconnect → stop forwarding, do NOT kill Celery task.
+            if await request.is_disconnected():
+                logger.debug(
+                    "client disconnected from /chat/stream/%s; stopping forward",
+                    task_id,
+                )
+                return
+            entries = await bus.xread_blocking(
+                session_id_uuid,
+                task_uuid,
+                last_id=cur_id,
+                count=20,
+                block_ms=10_000,  # 10s block then re-check disconnect
+            )
+            if not entries:
+                continue
+            for entry_id, payload in entries:
+                cur_id = entry_id
+                ev_type = payload.get("type", "unknown")
+                data_str = json.dumps(payload, ensure_ascii=False)
+                yield f"event: {ev_type}\nid: {entry_id}\ndata: {data_str}\n\n"
+                # Terminal events: stop the forward loop.
+                if ev_type in ("done", "error_done"):
+                    return
+
+    return StreamingResponse(
+        _forward_sse(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

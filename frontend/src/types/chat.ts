@@ -187,6 +187,10 @@ export interface ChatMessage {
 export interface ChatDetail {
   session: ChatSession
   messages: ChatMessage[]
+  // Plan 2 Task 7: backend GET /chats/{sid} 返回当前 in-flight chat_task UUID
+  // (queued/running 状态),否则 null。前端切回 session 时用这字段 subscribe
+  // in-flight stream — Spec § 5.2 Scenario B 核心。
+  active_task_id?: string | null
 }
 
 export interface CreateChatRequest {
