@@ -128,6 +128,164 @@ def test_writer_retry_state_update_caps_feedback_at_300() -> None:
     assert len(diff["writer_critic_feedback"]) == 300
 
 
+# ---------------------------------------------------------------------------
+# v1.x A5a — valuation_consistency OR trigger tests
+# ---------------------------------------------------------------------------
+
+
+def test_writer_retry_on_valuation_consistency_low() -> None:
+    """factuality OK (9.0), valuation_consistency 4.0 → retry fires (< threshold)."""
+    from app.orchestration.research_graph import _writer_retry_router
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=0,
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality",
+                    score=9.0,
+                    evidence="all evidence accurate",
+                    sub_agent_request_id="req-f",
+                ),
+                CriticDimensionScore(
+                    dimension="valuation_consistency",
+                    score=4.0,
+                    evidence="moderate (narrative 未提偏离原因)",
+                    sub_agent_request_id="req-vc",
+                ),
+            ],
+            overall_score=6.5,
+            summary_markdown="...",
+        ),
+    )
+    assert _writer_retry_router(state) == "retry"
+
+
+def test_writer_no_retry_on_valuation_consistency_above_threshold() -> None:
+    """valuation_consistency 9.0 → no retry from this dim."""
+    from app.orchestration.research_graph import _writer_retry_router
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=0,
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality",
+                    score=9.0,
+                    evidence="ok",
+                    sub_agent_request_id="req-f",
+                ),
+                CriticDimensionScore(
+                    dimension="valuation_consistency",
+                    score=9.0,
+                    evidence="severe + narrative 显式引用 diagnosis",
+                    sub_agent_request_id="req-vc",
+                ),
+            ],
+            overall_score=9.0,
+            summary_markdown="...",
+        ),
+    )
+    assert _writer_retry_router(state) == "continue"
+
+
+def test_writer_no_retry_on_valuation_consistency_missing() -> None:
+    """valuation_consistency 缺失 (单 lens / 旧 case) + factuality OK → no retry."""
+    from app.orchestration.research_graph import _writer_retry_router
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=0,
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality",
+                    score=9.0,
+                    evidence="ok",
+                    sub_agent_request_id="req-f",
+                ),
+                # no valuation_consistency dim
+            ],
+            overall_score=9.0,
+            summary_markdown="...",
+        ),
+    )
+    assert _writer_retry_router(state) == "continue"
+
+
+def test_writer_retry_state_update_captures_valuation_evidence() -> None:
+    """Transition node: if retry triggered by valuation_consistency, feedback captures its evidence."""
+    from app.orchestration.research_graph import _writer_retry_state_update
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=0,
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality",
+                    score=9.0,
+                    evidence="ok",
+                    sub_agent_request_id="req-f",
+                ),
+                CriticDimensionScore(
+                    dimension="valuation_consistency",
+                    score=3.0,
+                    evidence="severe + narrative 未引用 diagnosis (掩盖打架信号)",
+                    sub_agent_request_id="req-vc",
+                ),
+            ],
+            overall_score=6.0,
+            summary_markdown="...",
+        ),
+    )
+    diff = _writer_retry_state_update(state)
+    assert diff["writer_retry_count"] == 1
+    feedback = diff["writer_critic_feedback"]
+    assert "valuation_consistency" in feedback.lower() or "未引用 diagnosis" in feedback
+    assert len(feedback) <= 300
+
+
+def test_writer_no_retry_when_budget_exhausted_even_if_valuation_low() -> None:
+    """writer_retry_count >= _MAX_WRITER_RETRY: no retry even if valuation_consistency is low."""
+    from app.orchestration.research_graph import _writer_retry_router
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=1,  # budget exhausted
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="valuation_consistency",
+                    score=3.0,
+                    evidence="severe + narrative 未引用",
+                    sub_agent_request_id="req-vc",
+                ),
+            ],
+            overall_score=3.0,
+            summary_markdown="...",
+        ),
+    )
+    assert _writer_retry_router(state) == "continue"
+
+
 def test_build_research_graph_writer_retry_edge_present() -> None:
     """Smoke — graph builder wires writer_retry_transition node."""
     from unittest.mock import MagicMock
