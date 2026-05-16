@@ -128,8 +128,8 @@ class ChatTask(Base):
     user_id = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+        nullable=True,
+    )  # anonymous pre-auth: None;C.6 接 JWT 后 always 真 user UUID
     status = Column(
         String(16),
         nullable=False,

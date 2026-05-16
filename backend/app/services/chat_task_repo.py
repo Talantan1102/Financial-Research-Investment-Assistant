@@ -31,13 +31,17 @@ class ChatTaskRepo:
         self,
         *,
         session_id: str | uuid.UUID,
-        user_id: str | uuid.UUID,
+        user_id: str | uuid.UUID | None,
         langgraph_thread_id: str,
         initial_prompt_message_id: uuid.UUID | None,
         parent_task_id: uuid.UUID | None = None,
     ) -> ChatTask:
         sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
-        uid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+        uid: uuid.UUID | None
+        if user_id is None:
+            uid = None  # anonymous pre-auth(对齐 ChatSession.user_id 模式)
+        else:
+            uid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
         async with self._sf() as sess:
             row = ChatTask(
                 id=uuid.uuid4(),

@@ -30,7 +30,7 @@ import logging
 import traceback
 from collections.abc import AsyncIterator
 from typing import Any, Literal
-from uuid import NAMESPACE_DNS, UUID, uuid4, uuid5
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -372,15 +372,16 @@ _persona_populated_sessions: set[str] = set()
 """
 
 
-def _coerce_user_uuid(user_id: Any) -> UUID:
-    """Resolve a possibly-anonymous user_id into a UUID for ChatTaskRepo.
+def _coerce_user_uuid(user_id: Any) -> UUID | None:
+    """Resolve a possibly-anonymous user_id into a real UUID or None.
 
     Production users have UUID; the v0 stub uses ``"anonymous"`` and test code
-    uses ``"test-user"``. Both fall back to a deterministic uuid5 derived from
-    the string so the value roundtrips correctly through both PG (native UUID
-    column) and sqlite (BLOB storage). A zero UUID (``int=0``) would roundtrip
-    as integer 0 from sqlite, breaking the SQLAlchemy UUID type adapter — that
-    bites Plan 1 L1 tests, so we use a non-zero deterministic uuid5 instead.
+    uses ``"test-user"``. Non-UUID strings (anonymous / test stub) → None so
+    that ChatTask.user_id stays NULL pre-auth — matches ChatSession.user_id's
+    nullable behavior. Production PG FK (``users.id``) would otherwise reject
+    a synthetic uuid5 that has no matching row in ``users``.
+
+    C.6 接 JWT 后,user.id 永远是真 UUID,本函数走直通分支。
     """
     if isinstance(user_id, UUID):
         return user_id
@@ -388,7 +389,7 @@ def _coerce_user_uuid(user_id: Any) -> UUID:
     try:
         return UUID(s)
     except (ValueError, AttributeError):
-        return uuid5(NAMESPACE_DNS, f"chat-anon:{s}")
+        return None  # anonymous / test stub → NULL in DB
 
 
 async def _finalize_task_persistence(
