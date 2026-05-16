@@ -117,3 +117,65 @@ def test_backtest_runner_calls_pipeline_with_adapters(tmp_db: Path) -> None:
     assert "kb_adapter" in kwargs
     assert "evaluator_client" in kwargs
     assert kwargs["evaluator_client"].model == "qwen2.5-72b-instruct"
+
+
+def test_backtest_run_passes_leak_detector_with_clean_data(tmp_db: Path) -> None:
+    """跑一个 case, 用 LeakDetector 审查 tushare/kb 返回行无 leak."""
+    from datetime import date
+    from unittest.mock import MagicMock
+
+    from eval.dd_report.backtest_runner import BacktestCase, BacktestRunner
+    from eval.dd_report.leak_detector import LeakDetector
+    from eval.dd_report.llm_swapper import LLMSwapper
+
+    tushare_inner = MagicMock()
+    tushare_inner.income.return_value = [{"ann_date": "20240315", "ts_code": "600519.SH"}]
+    tushare_inner.daily.return_value = [{"trade_date": "20240329", "close": 1700.0}]
+
+    kb_inner = MagicMock()
+    kb_inner.search.return_value = []
+
+    pipeline = MagicMock()
+    pipeline.run.return_value = {"target_name": "贵州茅台"}
+
+    runner = BacktestRunner(
+        swapper=LLMSwapper(api_key="test"),
+        tushare_inner=tushare_inner,
+        kb_inner=kb_inner,
+        db_path=tmp_db,
+        pipeline=pipeline,
+    )
+
+    case = BacktestCase(
+        case_id="bt-smoke-001",
+        ts_code="600519.SH",
+        target_name="贵州茅台",
+        cut_off_date=date(2024, 6, 30),
+    )
+    runner.run_one(
+        case=case,
+        evaluator_llm="gpt-4o-2024-05-13",
+        ablation_variant="V0_baseline",
+        git_sha="smoke",
+    )
+
+    detector = LeakDetector(cut_off=date(2024, 6, 30))
+    income_rows = tushare_inner.income.return_value
+    daily_rows = tushare_inner.daily.return_value
+
+    leaks = detector.scan_tushare_rows(income_rows) + detector.scan_tushare_rows(daily_rows)
+    detector.assert_no_leaks(leaks)
+
+
+def test_backtest_run_fails_leak_detector_with_polluted_data(tmp_db: Path) -> None:
+    """如果数据带 leak, detector 必须 catch."""
+    from datetime import date
+
+    import pytest
+    from eval.dd_report.leak_detector import LeakDetector
+
+    detector = LeakDetector(cut_off=date(2024, 6, 30))
+    polluted = [{"ann_date": "20240715", "ts_code": "600519.SH"}]
+    leaks = detector.scan_tushare_rows(polluted)
+    with pytest.raises(AssertionError, match="data leakage detected"):
+        detector.assert_no_leaks(leaks)
