@@ -95,7 +95,7 @@ def test_update_item_text_keeps_source() -> None:
     session.query.return_value.filter_by.return_value.first.return_value = existing
     service = PersonaService(pg_session_factory=factory)
 
-    updated = service.update_item(user_id=existing.user_id, item_id=existing.item_id, text="新内容")
+    updated = service.update_item(user_id=existing.user_id, item_id=existing.item_id, text="新内容")  # type: ignore[arg-type]
 
     assert updated.source == "user"
     assert updated.text == "新内容"
@@ -121,7 +121,9 @@ def test_update_item_agent_source_upgrades_to_user() -> None:
     service = PersonaService(pg_session_factory=factory)
 
     updated = service.update_item(
-        user_id=existing.user_id, item_id=existing.item_id, text="改后内容"
+        user_id=existing.user_id,
+        item_id=existing.item_id,
+        text="改后内容",  # type: ignore[arg-type]
     )
 
     assert updated.source == "user"
@@ -151,7 +153,7 @@ def test_delete_item_calls_delete_and_commit() -> None:
     session.query.return_value.filter_by.return_value.first.return_value = existing
     service = PersonaService(pg_session_factory=factory)
 
-    service.delete_item(user_id=existing.user_id, item_id=existing.item_id)
+    service.delete_item(user_id=existing.user_id, item_id=existing.item_id)  # type: ignore[arg-type]
 
     session.delete.assert_called_once_with(existing)
     assert session.commit.call_count == 2  # 1 CRUD commit + 1 sync commit
@@ -225,7 +227,9 @@ def test_apply_agent_replace_match_agent_item() -> None:
     service = PersonaService(pg_session_factory=factory)
 
     items = service.apply_agent_replace(
-        user_id=target.user_id, old_content="保守", new_content="偏成长"
+        user_id=target.user_id,
+        old_content="保守",
+        new_content="偏成长",  # type: ignore[arg-type]
     )
 
     assert items[0].text == "偏成长"
@@ -251,7 +255,9 @@ def test_apply_agent_replace_never_match_user_item() -> None:
     service = PersonaService(pg_session_factory=factory)
 
     items = service.apply_agent_replace(
-        user_id=user_item.user_id, old_content="保守稳健", new_content="激进"
+        user_id=user_item.user_id,
+        old_content="保守稳健",
+        new_content="激进",  # type: ignore[arg-type]
     )
 
     # fallback: 没匹配到 → append 一条新 agent item
@@ -290,7 +296,7 @@ def test_render_to_markdown_uses_items() -> None:
         ChatMemoryPersonaItem(user_id=user_id, source="agent", text="C", position=1),
     ]
 
-    def _query_dispatch(*_a, **_kw):  # type: ignore[no-untyped-def]
+    def _query_dispatch(*_a: object, **_kw: object) -> MagicMock:
         m = MagicMock()
         # 简化：分别针对 user / agent filter_by 返回不同 mock
         m.filter_by.side_effect = lambda **kw: {
@@ -319,19 +325,19 @@ def test_sync_to_working_block_upserts_existing() -> None:
         user_id=user_id, block_name="persona", content="old", max_tokens=500, token_count=0
     )
 
-    def _block_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+    def _block_query(*_a: object, **_kw: object) -> MagicMock:
         m = MagicMock()
         m.filter_by.return_value.first.return_value = existing_block
         return m
 
-    def _items_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+    def _items_query(*_a: object, **_kw: object) -> MagicMock:
         m = MagicMock()
         m.filter_by.return_value.order_by.return_value.all.return_value = []
         return m
 
     call_count = {"n": 0}
 
-    def _dispatch(model_cls):  # type: ignore[no-untyped-def]
+    def _dispatch(model_cls: object) -> MagicMock:
         call_count["n"] += 1
         if model_cls is ChatMemoryWorkingBlock:
             return _block_query()
@@ -351,17 +357,17 @@ def test_sync_to_working_block_inserts_new() -> None:
     """无既有 persona block → insert."""
     factory, session = _mk_session_factory()
 
-    def _block_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+    def _block_query(*_a: object, **_kw: object) -> MagicMock:
         m = MagicMock()
         m.filter_by.return_value.first.return_value = None  # 不存在
         return m
 
-    def _items_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+    def _items_query(*_a: object, **_kw: object) -> MagicMock:
         m = MagicMock()
         m.filter_by.return_value.order_by.return_value.all.return_value = []
         return m
 
-    def _dispatch(model_cls):  # type: ignore[no-untyped-def]
+    def _dispatch(model_cls: object) -> MagicMock:
         if model_cls is ChatMemoryWorkingBlock:
             return _block_query()
         return _items_query()
@@ -382,23 +388,23 @@ def test_sync_to_working_block_rolls_back_on_commit_failure() -> None:
 
     factory, session = _mk_session_factory()
 
-    def _block_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+    def _block_query(*_a: object, **_kw: object) -> MagicMock:
         m = MagicMock()
         m.filter_by.return_value.first.return_value = None
         return m
 
-    def _items_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+    def _items_query(*_a: object, **_kw: object) -> MagicMock:
         m = MagicMock()
         m.filter_by.return_value.order_by.return_value.all.return_value = []
         return m
 
-    def _dispatch(model_cls):  # type: ignore[no-untyped-def]
+    def _dispatch(model_cls: object) -> MagicMock:
         if model_cls is ChatMemoryWorkingBlock:
             return _block_query()
         return _items_query()
 
     session.query.side_effect = _dispatch
-    session.commit.side_effect = OperationalError("DB down", None, None)
+    session.commit.side_effect = OperationalError("DB down", None, Exception("simulated"))
     service = PersonaService(pg_session_factory=factory)
 
     with pytest.raises(OperationalError):
