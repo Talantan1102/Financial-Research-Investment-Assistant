@@ -108,6 +108,7 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
         ChatMemoryEdge,
         ChatMemoryEpisode,
         ChatMemoryNode,
+        ChatMemoryPersonaItem,
         ChatMemoryWorkingBlock,
     )
 
@@ -116,6 +117,7 @@ def pg_memory_fixture(pg_test_container: dict[str, object]) -> Iterator[dict[str
         ChatMemoryNode.__table__,
         ChatMemoryEdge.__table__,
         ChatMemoryWorkingBlock.__table__,
+        ChatMemoryPersonaItem.__table__,
     ]
     Base.metadata.create_all(bind=engine, tables=target_tables)
 
