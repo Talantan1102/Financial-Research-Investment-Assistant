@@ -65,8 +65,8 @@ def test_add_item_user_section() -> None:
 
     assert item.source == "user"
     assert item.text == "保守稳健"
-    session.add.assert_called()  # ≥1: item add + _sync_to_working_block block add
-    session.commit.assert_called()  # ≥1: crud commit + sync commit
+    assert session.add.call_count >= 1  # ≥1: item add + _sync_to_working_block block add
+    assert session.commit.call_count == 2  # 1 CRUD commit + 1 sync commit
 
 
 @pytest.mark.unit
@@ -99,7 +99,7 @@ def test_update_item_text_keeps_source() -> None:
 
     assert updated.source == "user"
     assert updated.text == "新内容"
-    session.commit.assert_called()  # ≥1: crud commit + sync commit
+    assert session.commit.call_count == 2  # 1 CRUD commit + 1 sync commit
 
 
 @pytest.mark.unit
@@ -154,7 +154,7 @@ def test_delete_item_calls_delete_and_commit() -> None:
     service.delete_item(user_id=existing.user_id, item_id=existing.item_id)
 
     session.delete.assert_called_once_with(existing)
-    session.commit.assert_called()  # ≥1: crud commit + sync commit
+    assert session.commit.call_count == 2  # 1 CRUD commit + 1 sync commit
 
 
 @pytest.mark.unit
@@ -180,7 +180,7 @@ def test_apply_agent_append_splits_lines() -> None:
     assert [i.text for i in items] == ["看好新能源", "关注高股息", "空行不算"]
     assert all(i.source == "agent" for i in items)
     assert session.add.call_count >= 3  # 3 items + _sync_to_working_block block add
-    session.commit.assert_called()  # ≥1: crud commit + sync commit
+    assert session.commit.call_count == 2  # 1 CRUD commit + 1 sync commit
 
 
 @pytest.mark.unit
@@ -232,7 +232,7 @@ def test_apply_agent_replace_match_agent_item() -> None:
     assert items[0].source == "agent"
     # 同一 item_id 验证走 match 路径而非 fallback append（fallback 会创建新 UUID）
     assert items[0].item_id == target.item_id
-    session.commit.assert_called()  # ≥1: crud commit + sync commit
+    assert session.commit.call_count == 2  # 1 CRUD commit + 1 sync commit
 
 
 @pytest.mark.unit
@@ -373,3 +373,35 @@ def test_sync_to_working_block_inserts_new() -> None:
 
     session.add.assert_called()
     session.commit.assert_called()
+
+
+@pytest.mark.unit
+def test_sync_to_working_block_rolls_back_on_commit_failure() -> None:
+    """sync 上的 commit 失败时调用 rollback。"""
+    from sqlalchemy.exc import OperationalError
+
+    factory, session = _mk_session_factory()
+
+    def _block_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+        m = MagicMock()
+        m.filter_by.return_value.first.return_value = None
+        return m
+
+    def _items_query(*_a, **_kw):  # type: ignore[no-untyped-def]
+        m = MagicMock()
+        m.filter_by.return_value.order_by.return_value.all.return_value = []
+        return m
+
+    def _dispatch(model_cls):  # type: ignore[no-untyped-def]
+        if model_cls is ChatMemoryWorkingBlock:
+            return _block_query()
+        return _items_query()
+
+    session.query.side_effect = _dispatch
+    session.commit.side_effect = OperationalError("DB down", None, None)
+    service = PersonaService(pg_session_factory=factory)
+
+    with pytest.raises(OperationalError):
+        service._sync_to_working_block(session=None, user_id=uuid4())
+
+    session.rollback.assert_called_once()

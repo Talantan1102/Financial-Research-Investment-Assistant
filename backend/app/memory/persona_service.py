@@ -78,13 +78,13 @@ class PersonaService:
             session.commit()
             session.refresh(item)
             session.expunge(item)
-            self._sync_to_working_block(session=None, user_id=user_id)
-            return item
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+        self._sync_to_working_block(session=None, user_id=user_id)
+        return item
 
     def update_item(self, *, user_id: UUID, item_id: UUID, text: str) -> ChatMemoryPersonaItem:
         normalized = self._validate_text(text)
@@ -108,13 +108,13 @@ class PersonaService:
             session.commit()
             session.refresh(item)
             session.expunge(item)
-            self._sync_to_working_block(session=None, user_id=user_id)
-            return item
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+        self._sync_to_working_block(session=None, user_id=user_id)
+        return item
 
     def delete_item(self, *, user_id: UUID, item_id: UUID) -> None:
         session = self._session_factory()
@@ -128,12 +128,12 @@ class PersonaService:
                 raise LookupError(f"persona item {item_id} not found for user {user_id}")
             session.delete(item)
             session.commit()
-            self._sync_to_working_block(session=None, user_id=user_id)
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+        self._sync_to_working_block(session=None, user_id=user_id)
 
     # ----- agent write API (HierarchicalMemory.core_memory_* 转译) -----
 
@@ -165,13 +165,13 @@ class PersonaService:
             for item in new_items:
                 session.refresh(item)
                 session.expunge(item)
-            self._sync_to_working_block(session=None, user_id=user_id)
-            return new_items
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+        self._sync_to_working_block(session=None, user_id=user_id)
+        return new_items
 
     def apply_agent_replace(
         self, *, user_id: UUID, old_content: str, new_content: str
@@ -188,6 +188,7 @@ class PersonaService:
             logger.warning("apply_agent_replace: new_content empty after strip, no-op")
             return []
 
+        matched_target: ChatMemoryPersonaItem | None = None
         session = self._session_factory()
         try:
             candidates = (
@@ -203,13 +204,16 @@ class PersonaService:
                 session.commit()
                 session.refresh(target)
                 session.expunge(target)
-                self._sync_to_working_block(session=None, user_id=user_id)
-                return [target]
+                matched_target = target
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
+
+        if matched_target is not None:
+            self._sync_to_working_block(session=None, user_id=user_id)
+            return [matched_target]
 
         # fallback: 没命中 → append 一条新 agent item（含命中 user 区也走这）
         logger.warning(
@@ -271,6 +275,14 @@ class PersonaService:
 
         保 ChatPlanner Phase 1 render_persona_markdown 路径不变；下次 session
         起手 frozen snapshot 时自动拿最新值。
+
+        # 已知 debt (v1 接受, scale 前修复):
+        # - 并发 insert race: working_blocks unique(user_id, block_name); 当前
+        #   read-then-write 模式两个并发 op 可能同 observe None 同时 add. 当前
+        #   dogfood 阶段 UI 单 tab + agent 单线程触发, 概率极低. Task 17 wire
+        #   agent 写后概率上升, scale 前换 pg_insert(...).on_conflict_do_update.
+        # - token_count 写 0 是 placeholder; 真实 token count 计算待集成 qwen
+        #   tokenizer (跟 kb chunking embedding 一致), v1 不阻塞 ChatPlanner 路径.
         """
 
         markdown = self.render_to_markdown(user_id=user_id)
