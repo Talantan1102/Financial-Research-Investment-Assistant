@@ -15,15 +15,10 @@ class User(Base):
 
     __tablename__ = "users"
 
-    # PG = native UUID; SQLite (test) = String(36) — mirrors ResearchReport pattern.
-    # 必要因为 get_user_by_id(db, str_user_id) 在 SQLite + 纯 UUID column 下报
-    # AttributeError: 'str' object has no attribute 'hex'(SQLAlchemy UUID type
-    # 在 bind 时调 .hex);with_variant 让 SQLite 把 column 当 String(36) 处理.
-    # default 用 lambda → str(uuid4()) 让 SQLite 能直接 bind;PG 也接受 str 形式 UUID.
     id = Column(
-        UUID(as_uuid=True).with_variant(String(36), "sqlite"),
+        UUID(as_uuid=True),
         primary_key=True,
-        default=lambda: str(uuid.uuid4()),
+        default=uuid.uuid4,
     )
     username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(100), unique=True, nullable=False, index=True)
