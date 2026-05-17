@@ -1,4 +1,4 @@
-"""POST/DELETE/PATCH /portfolio/trades endpoint tests (with TestClient + sqlite override)。
+"""POST/DELETE/PATCH /portfolio/trades endpoint tests (with TestClient + db_session fixture)。
 
 Auth 模式跟 reports.py 同 — get_current_user_required(JWT)。
 """
@@ -10,55 +10,40 @@ from datetime import datetime, timedelta
 
 import pytest
 from app.core.database import get_db
-from app.models.position import Position
 from app.models.trade import Trade
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.router.portfolio_router import router as portfolio_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 from tests.unit._helpers import make_user
 
 
 @pytest.fixture
-def app_and_session() -> Generator[tuple[FastAPI, Session, User], None, None]:
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    User.__table__.create(engine)
-    Trade.__table__.create(engine)
-    Position.__table__.create(engine)
-    Session_ = sessionmaker(bind=engine, expire_on_commit=False)
-    session = Session_()
-    user = make_user(session)
-    session.commit()
+def app_and_session(
+    db_session: Session,
+) -> tuple[FastAPI, Session, User]:
+    user = make_user(db_session)
+    db_session.commit()
 
     app = FastAPI()
     app.include_router(portfolio_router)
 
     def _override_get_db() -> Generator[Session, None, None]:
-        try:
-            yield session
-        finally:
-            pass
+        yield db_session
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_current_user_required] = lambda: user
 
-    yield app, session, user
-    session.close()
+    return app, db_session, user
 
 
 def test_post_trades_creates_trade_and_position(
     app_and_session: tuple[FastAPI, Session, User],
 ) -> None:
-    app, session, user = app_and_session
+    app, db_session, user = app_and_session
     client = TestClient(app)
     resp = client.post(
         "/portfolio/trades",
@@ -77,14 +62,16 @@ def test_post_trades_creates_trade_and_position(
     assert body["ts_code"] == "600519.SH"
     assert body["quantity"] == 200
 
-    pos = session.query(Position).filter_by(user_id=user.id).one()
+    from app.models.position import Position
+
+    pos = db_session.query(Position).filter_by(user_id=user.id).one()
     assert pos.quantity == 200
 
 
 def test_delete_trade_within_24h_returns_204(
     app_and_session: tuple[FastAPI, Session, User],
 ) -> None:
-    app, session, user = app_and_session
+    app, db_session, user = app_and_session
     client = TestClient(app)
     create_resp = client.post(
         "/portfolio/trades",
@@ -102,13 +89,13 @@ def test_delete_trade_within_24h_returns_204(
 
     del_resp = client.delete(f"/portfolio/trades/{trade_id}")
     assert del_resp.status_code == 204
-    assert session.query(Trade).count() == 0
+    assert db_session.query(Trade).count() == 0
 
 
 def test_delete_trade_after_24h_returns_409(
     app_and_session: tuple[FastAPI, Session, User],
 ) -> None:
-    app, session, user = app_and_session
+    app, db_session, user = app_and_session
     client = TestClient(app)
     create_resp = client.post(
         "/portfolio/trades",
@@ -122,9 +109,9 @@ def test_delete_trade_after_24h_returns_409(
         },
     )
     trade_id = create_resp.json()["id"]
-    trade = session.query(Trade).filter_by(id=trade_id).one()
+    trade = db_session.query(Trade).filter_by(id=trade_id).one()
     trade.created_at = datetime.utcnow() - timedelta(hours=25)  # type: ignore[assignment]
-    session.commit()
+    db_session.commit()
 
     del_resp = client.delete(f"/portfolio/trades/{trade_id}")
     assert del_resp.status_code == 409
@@ -134,7 +121,7 @@ def test_delete_trade_after_24h_returns_409(
 def test_patch_initial_trade_succeeds(
     app_and_session: tuple[FastAPI, Session, User],
 ) -> None:
-    app, session, user = app_and_session
+    app, db_session, user = app_and_session
     client = TestClient(app)
     create_resp = client.post(
         "/portfolio/trades",
@@ -162,7 +149,7 @@ def test_patch_initial_trade_succeeds(
 def test_patch_buy_trade_returns_409(
     app_and_session: tuple[FastAPI, Session, User],
 ) -> None:
-    app, session, user = app_and_session
+    app, db_session, user = app_and_session
     client = TestClient(app)
     client.post(
         "/portfolio/trades",
@@ -200,7 +187,7 @@ def test_delete_other_user_trade_returns_404(
     app_and_session: tuple[FastAPI, Session, User],
 ) -> None:
     """Cross-user isolation: trade owned by another user should 404, not 500 or success."""
-    app, session, user = app_and_session
+    app, db_session, user = app_and_session
     client = TestClient(app)
     # Create a trade owned by 'user'
     create_resp = client.post(
@@ -217,8 +204,8 @@ def test_delete_other_user_trade_returns_404(
     trade_id = create_resp.json()["id"]
 
     # Override auth to a different user
-    other_user = make_user(session)
-    session.commit()
+    other_user = make_user(db_session)
+    db_session.commit()
     app.dependency_overrides[get_current_user_required] = lambda: other_user
 
     del_resp = client.delete(f"/portfolio/trades/{trade_id}")
@@ -239,7 +226,7 @@ def test_patch_other_user_trade_returns_404(
     app_and_session: tuple[FastAPI, Session, User],
 ) -> None:
     """Cross-user isolation on PATCH: trade owned by another user should 404."""
-    app, session, user = app_and_session
+    app, db_session, user = app_and_session
     client = TestClient(app)
     # Create a trade owned by 'user'
     create_resp = client.post(
@@ -256,8 +243,8 @@ def test_patch_other_user_trade_returns_404(
     trade_id = create_resp.json()["id"]
 
     # Override auth to a different user
-    other_user = make_user(session)
-    session.commit()
+    other_user = make_user(db_session)
+    db_session.commit()
     app.dependency_overrides[get_current_user_required] = lambda: other_user
 
     patch_resp = client.patch(
