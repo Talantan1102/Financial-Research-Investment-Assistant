@@ -22,7 +22,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from app.services.eval_models import EvalResult, JudgeScores
@@ -39,6 +39,8 @@ from eval.dd_report.metrics.base import (
     MetricResult,
 )
 from eval.dd_report.tushare_backtest_adapter import TushareBacktestAdapter
+
+CaseType = Literal["backtest", "sanity", "financebench", "cross_llm"]
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,7 @@ class BacktestRunner:
         evaluator_llm: str,
         ablation_variant: str,
         git_sha: str,
-        case_type: str = "backtest",
+        case_type: CaseType = "backtest",
     ) -> str:
         """跑一个 case: pipeline → leak detect → 5 metric → 写 eval_results +
         backtest_runs。返回 run_id.
@@ -135,6 +137,11 @@ class BacktestRunner:
                 )
             if self._enable_leak_detection:
                 self._run_leak_detection(report, case)
+            if self._metric_registry.metrics and not report:
+                raise RuntimeError(
+                    f"MetricRegistry has {len(self._metric_registry.metrics)} metric(s) "
+                    "but pipeline produced empty report; cannot compute metrics"
+                )
             if self._metric_registry.metrics and report:
                 case_meta = CaseMeta(
                     case_id=case.case_id,
@@ -200,7 +207,7 @@ class BacktestRunner:
         run_id: str,
         case: BacktestCase,
         evaluator_llm: str,
-        case_type: str,
+        case_type: CaseType,
         metric_results: list[MetricResult],
     ) -> None:
         bscores = _to_backtest_metric_scores(metric_results)
@@ -229,7 +236,7 @@ class BacktestRunner:
             backtest_run_id=run_id,
             cut_off_date=case.cut_off_date.isoformat(),
             evaluator_llm=evaluator_llm,
-            case_type=case_type,  # type: ignore[arg-type]
+            case_type=case_type,
             metric_scores_json=bscores.model_dump_json(),
         )
         self._recorder.write(result)

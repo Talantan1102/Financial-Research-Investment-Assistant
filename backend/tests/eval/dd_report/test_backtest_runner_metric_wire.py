@@ -248,3 +248,176 @@ def test_run_one_leakdetector_fires_when_pipeline_leaks_date_in_narrative(tmp_pa
             "SELECT status FROM backtest_runs WHERE git_sha = ?", ("testsha",)
         ).fetchone()
     assert r["status"] == "failed"
+
+
+def test_run_one_raises_when_registry_has_metrics_but_pipeline_empty(tmp_path) -> None:
+    """Fix 1 guard: prevent silent data inconsistency. If runner has metrics
+    in registry but pipeline is None or returns empty, raise RuntimeError so
+    backtest_runs.status='failed' (not silently 'completed' with no eval_results)."""
+    db = tmp_path / "eval.db"
+    from app.services.eval_recorder import EvalRecorder
+
+    EvalRecorder(db).init_schema()
+
+    # No pipeline set; metric_registry expects a report
+    runner = BacktestRunner(
+        swapper=_DummySwapper(),  # type: ignore[arg-type]
+        tushare_inner=_DummyTushare(),
+        kb_inner=_DummyKB(),
+        db_path=db,
+        pipeline=None,  # nothing to run
+        metric_registry=MetricRegistry([_ConstMetric("m1_citation", 0.9)]),
+    )
+    case = BacktestCase(
+        case_id=f"bt-{uuid4().hex[:8]}",
+        ts_code="600519.SH",
+        target_name="茅台",
+        cut_off_date=date(2024, 6, 30),
+    )
+    with pytest.raises(RuntimeError, match="cannot compute metrics"):
+        runner.run_one(
+            case=case,
+            evaluator_llm="gpt-4o-2024-05-13",
+            ablation_variant="V0_baseline",
+            git_sha="testsha-empty",
+        )
+    # run row written with status=failed
+    with sqlite3.connect(db) as con:
+        con.row_factory = sqlite3.Row
+        r = con.execute(
+            "SELECT status FROM backtest_runs WHERE git_sha = ?", ("testsha-empty",)
+        ).fetchone()
+    assert r["status"] == "failed"
+
+
+def test_run_one_writes_real_citation_metric_coverage_to_schema(tmp_path) -> None:
+    """Verify _to_backtest_metric_scores correctly pulls "citation_coverage" key
+    from real CitationMetric details (not falling back to silent default).
+    Guards against silent regression if T2.2 details key were renamed without
+    updating T2.7 lookup.
+    """
+    from app.services.eval_recorder import EvalRecorder
+    from eval.dd_report.metrics.citation_metric import CitationMetric
+
+    db = tmp_path / "eval.db"
+    EvalRecorder(db).init_schema()
+
+    class _AlwaysSupportsJudge:
+        def supports(self, claim: str, chunk_text: str) -> bool:
+            return True
+
+    class _PipelineWithCitations:
+        def run(self, **kwargs: Any) -> dict[str, Any]:
+            return {
+                "target_overview": {
+                    "narrative": "茅台是大白马",
+                    "evidence": ["chunk-1"],
+                },
+            }
+
+    def kb_lookup(chunk_id: str) -> dict[str, Any] | None:
+        return {"chunk_id": chunk_id, "text": "茅台稳健蓝筹"} if chunk_id == "chunk-1" else None
+
+    runner = BacktestRunner(
+        swapper=_DummySwapper(),  # type: ignore[arg-type]
+        tushare_inner=_DummyTushare(),
+        kb_inner=_DummyKB(),
+        db_path=db,
+        pipeline=_PipelineWithCitations(),
+        metric_registry=MetricRegistry(
+            [
+                CitationMetric(
+                    judge=_AlwaysSupportsJudge(),
+                    section_paths=("target_overview",),
+                ),
+            ]
+        ),
+        kb_lookup=kb_lookup,
+    )
+    case = BacktestCase(
+        case_id=f"bt-{uuid4().hex[:8]}",
+        ts_code="600519.SH",
+        target_name="茅台",
+        cut_off_date=date(2024, 6, 30),
+    )
+    run_id = runner.run_one(
+        case=case,
+        evaluator_llm="gpt-4o-2024-05-13",
+        ablation_variant="V0_baseline",
+        git_sha="testsha-cit",
+    )
+
+    with sqlite3.connect(db) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT metric_scores_json FROM eval_results WHERE backtest_run_id = ?",
+            (run_id,),
+        ).fetchall()
+    assert len(rows) == 1
+    mscores = json.loads(rows[0]["metric_scores_json"])
+    # 1/1 citation precision, 1/1 coverage → both 1.0
+    assert mscores["m1_citation_precision"] == 1.0
+    assert mscores["m1_citation_recall"] == 1.0
+
+
+def test_run_one_writes_real_citation_metric_partial_coverage(tmp_path) -> None:
+    """Stronger guard: 1/6 section coverage exposes silent-default fallback bug
+    (default 1.0 would hide the real 1/6 value)."""
+    import pytest as _pytest
+    from app.services.eval_recorder import EvalRecorder
+    from eval.dd_report.metrics.citation_metric import CitationMetric
+
+    db = tmp_path / "eval.db"
+    EvalRecorder(db).init_schema()
+
+    class _AlwaysSupportsJudge:
+        def supports(self, claim: str, chunk_text: str) -> bool:
+            return True
+
+    class _SingleSectionPipeline:
+        def run(self, **kwargs: Any) -> dict[str, Any]:
+            # only 1 of 6 default sections present
+            return {
+                "target_overview": {
+                    "narrative": "...",
+                    "evidence": ["chunk-1"],
+                },
+            }
+
+    def kb_lookup(cid: str) -> dict[str, Any] | None:
+        return {"chunk_id": cid, "text": "ok"} if cid == "chunk-1" else None
+
+    runner = BacktestRunner(
+        swapper=_DummySwapper(),  # type: ignore[arg-type]
+        tushare_inner=_DummyTushare(),
+        kb_inner=_DummyKB(),
+        db_path=db,
+        pipeline=_SingleSectionPipeline(),
+        metric_registry=MetricRegistry(
+            [
+                CitationMetric(judge=_AlwaysSupportsJudge()),  # default 6 section_paths
+            ]
+        ),
+        kb_lookup=kb_lookup,
+    )
+    case = BacktestCase(
+        case_id=f"bt-{uuid4().hex[:8]}",
+        ts_code="600519.SH",
+        target_name="茅台",
+        cut_off_date=date(2024, 6, 30),
+    )
+    run_id = runner.run_one(
+        case=case,
+        evaluator_llm="gpt-4o-2024-05-13",
+        ablation_variant="V0_baseline",
+        git_sha="testsha-partial",
+    )
+    with sqlite3.connect(db) as con:
+        con.row_factory = sqlite3.Row
+        rows = con.execute(
+            "SELECT metric_scores_json FROM eval_results WHERE backtest_run_id = ?",
+            (run_id,),
+        ).fetchall()
+    mscores = json.loads(rows[0]["metric_scores_json"])
+    # 1 section with evidence / 6 default required = 1/6
+    assert mscores["m1_citation_recall"] == _pytest.approx(1 / 6)
