@@ -288,3 +288,52 @@ def pg_test_container() -> Iterator[dict[str, object]]:
                 cwd=str(repo_root),
                 check=False,
             )
+
+
+# ---------------------------------------------------------------------------
+# PG fixture — L0/L1/L2.5 共用(取代 sqlite-override)
+# spec: docs/superpowers/specs/2026-05-17-pg-only-migration-design.md § 4 PR-A
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def pg_test_engine(pg_test_container: dict[str, object]):
+    """session-scoped SQLAlchemy engine bound to industry_assistant_test;
+    create_all 跑一次(覆盖所有注册的 metadata)。
+
+    Replaces 全部 in-memory sqlite engines used by L0/L1 tests.
+    """
+    import app.models  # noqa: F401 — barrel registers all metadata
+    import app.services.trace_models  # noqa: F401 — trace/eval metadata
+    from app.core.database import Base
+    from sqlalchemy import create_engine
+
+    url = str(pg_test_container["url"])
+    engine = create_engine(url, future=True, pool_pre_ping=True)
+
+    # idempotent — 跨 worktree session 复用 db 时不破坏
+    Base.metadata.create_all(bind=engine)
+
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def db_session(pg_test_engine):
+    """function-scoped Session with savepoint rollback.
+
+    每个 test 起一个 outer transaction,test 完 rollback,
+    所有 INSERT/UPDATE/DELETE 跨 test 不可见。
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    connection = pg_test_engine.connect()
+    transaction = connection.begin()
+    SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
