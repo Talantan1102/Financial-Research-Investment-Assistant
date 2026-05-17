@@ -308,8 +308,8 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         n_backfilled = backfill(engine)
         if n_backfilled:
             logger.info("backfilled %d old chat_sessions title_source=llm_generated", n_backfilled)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("title_source backfill skipped: %s", exc)
+    except Exception:  # noqa: BLE001
+        logger.exception("title_source backfill failed (non-fatal)")
 
     yield
 
