@@ -5,7 +5,7 @@
  */
 
 import { proxy } from 'valtio'
-import { createChat, listChats } from '@/api/chatApi'
+import { createChat, listChats, renameChat } from '@/api/chatApi'
 import type { ChatSession } from '@/types/chat'
 
 export type ChatSessionsStatus = 'idle' | 'loading' | 'loaded' | 'error'
@@ -75,5 +75,17 @@ export const chatSessionsActions = {
     const created = await createChat(title === undefined ? {} : { title })
     chatSessionsActions.upsertSession(created)
     return created
+  },
+  async renameSession(id: string, newTitle: string): Promise<void> {
+    const idx = chatSessionsState.sessions.findIndex((s) => s.id === id)
+    if (idx < 0) return
+    const prevTitle = chatSessionsState.sessions[idx].title
+    chatSessionsState.sessions[idx].title = newTitle // optimistic update
+    try {
+      await renameChat(id, newTitle)
+    } catch (e) {
+      chatSessionsState.sessions[idx].title = prevTitle // rollback
+      throw e
+    }
   },
 }
