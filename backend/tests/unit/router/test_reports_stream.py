@@ -12,48 +12,28 @@ Stream content/db-persist 行为通过 mock generator 验证(避免真 LangGraph
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Generator, Iterator
-from pathlib import Path
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import pytest
-from app.core.database import Base, get_db
-from app.models.research_report import ResearchReport
-from app.models.user import User
+from app.core.database import get_db
+from app.models.research_report import ResearchReport  # noqa: F401
+from app.models.user import User  # noqa: F401
 from app.router.auth_router import router as auth_router
 from app.router.reports import router as reports_router
 from app.router.research import get_research_graph
 from app.router.research import router as research_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
-def db_engine(tmp_path: Path) -> Generator[Engine, None, None]:
-    """Per-test SQLite file."""
-    db_path = tmp_path / "test_reports_stream.sqlite"
-    engine = create_engine(f"sqlite:///{db_path}")
-    Base.metadata.create_all(
-        engine,
-        tables=[User.__table__, ResearchReport.__table__],
-    )
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture
-def client(db_engine: Engine) -> TestClient:
+def client(db_session: Session) -> TestClient:
     """Minimal FastAPI app with auth + reports + research routers."""
-    TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
 
     def _override_get_db() -> Iterator[Session]:
-        db = TestingSession()
-        try:
-            yield db
-        finally:
-            db.close()
+        yield db_session
 
     # Override get_research_graph to a stub that won't be invoked unless
     # a test exercises the streaming path (Step 3 tests don't reach it).

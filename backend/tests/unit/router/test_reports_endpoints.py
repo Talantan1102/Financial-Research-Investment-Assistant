@@ -1,55 +1,34 @@
 """POST/GET/DELETE /reports — CRUD endpoints (Task 8).
 
-Test strategy: 与 test_auth_register.py 同 — mount auth_router + reports_router on
-a minimal FastAPI app + override get_db with a tmp-path SQLite session.
-
-不用 `from app.app_main import app` 因为 app_main 有重 lifespan(MonitoringService /
-research graph 构建)+ PG 硬依赖, 单元测试不需要这些副作用.
+Test strategy: mount auth_router + reports_router on a minimal FastAPI app +
+override get_db with the shared db_session fixture (PG transaction rollback
+isolation). 不用 `from app.app_main import app` 因为 app_main 有重 lifespan
+(MonitoringService / research graph 构建)+ PG 硬依赖, 单元测试不需要这些副作用.
 
 Real JWT auth 通过 Bearer token Authorization header 走 OAuth2PasswordBearer.
 """
 
 from __future__ import annotations
 
-from collections.abc import Generator, Iterator
-from pathlib import Path
+from collections.abc import Iterator
 
 import pytest
-from app.core.database import Base, get_db
-from app.models.research_report import ResearchReport
-from app.models.user import User
+from app.core.database import get_db
+from app.models.research_report import ResearchReport  # noqa: F401
+from app.models.user import User  # noqa: F401
 from app.router.auth_router import router as auth_router
 from app.router.reports import router as reports_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
-def db_engine(tmp_path: Path) -> Generator[Engine, None, None]:
-    """Per-test SQLite file. Each test gets isolated state."""
-    db_path = tmp_path / "test_reports.sqlite"
-    engine = create_engine(f"sqlite:///{db_path}")
-    Base.metadata.create_all(
-        engine,
-        tables=[User.__table__, ResearchReport.__table__],
-    )
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture
-def client(db_engine: Engine) -> TestClient:
-    """Minimal FastAPI app with auth_router + reports_router + get_db → SQLite."""
-    TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+def client(db_session: Session) -> TestClient:
+    """Minimal FastAPI app with auth_router + reports_router + get_db → db_session."""
 
     def _override_get_db() -> Iterator[Session]:
-        db = TestingSession()
-        try:
-            yield db
-        finally:
-            db.close()
+        yield db_session
 
     test_app = FastAPI()
     test_app.include_router(auth_router)
