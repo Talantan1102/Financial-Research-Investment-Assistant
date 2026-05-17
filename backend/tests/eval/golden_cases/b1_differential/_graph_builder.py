@@ -31,6 +31,7 @@ from app.agents.critic_subagents.input_context_scorer import (
 )
 from app.agents.critic_subagents.insight import InsightScorer
 from app.agents.critic_subagents.structure import StructureScorer
+from app.agents.critic_subagents.valuation_consistency import ValuationConsistencyScorer
 from app.agents.data_collector import DataCollector
 from app.agents.research_planner import ResearchPlanner
 from app.agents.writer import Writer
@@ -232,7 +233,8 @@ def build_b1_diff_graph(monkeypatch: pytest.MonkeyPatch) -> Any:
         StructureScorer(llm=llm),
         ConcisenessScorer(llm=llm),
         InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer
-        # v1.x: PlanCorrectnessScorer removed (Task 1.5). Critic now runs 6 scorers.
+        ValuationConsistencyScorer(llm=llm),  # 第 7 scorer (v1.x A5a)
+        # v1.x: PlanCorrectnessScorer removed (Task 1.5). Critic now runs 7 scorers.
     ]
     critic = Critic(llm=llm, scorers=scorers)
 

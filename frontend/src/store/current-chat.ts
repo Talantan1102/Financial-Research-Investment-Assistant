@@ -38,6 +38,10 @@ export type StreamingPhase =
 
 export interface CurrentChatState {
   session_id: string | null
+  // Plan 3 Task 7: 当前 in-flight task(streaming 中)的 UUID。
+  // sendMessage 拿到 POST /chat 返的 task_id 后 set;done/error event 后 clear。
+  // InputArea 据此切换 send ↔ stop button;ChatPane 据此判断是否要 cancel。
+  active_task_id: string | null
   messages: ChatMessage[]
   streamingStatus: StreamingStatus
   streamingDraft: string
@@ -52,6 +56,7 @@ export interface CurrentChatState {
 
 const INITIAL: CurrentChatState = {
   session_id: null,
+  active_task_id: null,
   messages: [],
   streamingStatus: 'idle',
   streamingDraft: '',
@@ -86,6 +91,7 @@ function flushDraftAsMessage() {
 export const currentChatActions = {
   setSession(session_id: string, messages: ChatMessage[]) {
     currentChatState.session_id = session_id
+    currentChatState.active_task_id = null
     currentChatState.messages = [...messages]
     currentChatState.streamingStatus = 'idle'
     currentChatState.streamingDraft = ''
@@ -94,6 +100,9 @@ export const currentChatActions = {
     currentChatState.cost_breakdown = { chat_usd: 0, research_usd: 0, total_usd: 0 }
     currentChatState.toolEvents = []
     currentChatState.errorMessage = null
+  },
+  setActiveTaskId(taskId: string | null) {
+    currentChatState.active_task_id = taskId
   },
   beginStreaming() {
     currentChatState.streamingStatus = 'streaming'
@@ -137,11 +146,15 @@ export const currentChatActions = {
       case 'done':
         flushDraftAsMessage()
         currentChatState.streamingStatus = 'idle'
+        // Plan 3 Task 7: terminal event → clear in-flight task tracker
+        currentChatState.active_task_id = null
         currentChatState.toolEvents.push(ev as DoneEvent)
         break
       case 'error':
         currentChatState.streamingStatus = 'error'
         currentChatState.errorMessage = (ev as ErrorEvent).error
+        // Plan 3 Task 7: terminal event → clear in-flight task tracker
+        currentChatState.active_task_id = null
         currentChatState.toolEvents.push(ev as ErrorEvent)
         break
       default:
@@ -154,6 +167,7 @@ export const currentChatActions = {
   },
   reset() {
     currentChatState.session_id = INITIAL.session_id
+    currentChatState.active_task_id = INITIAL.active_task_id
     currentChatState.messages = []
     currentChatState.streamingStatus = INITIAL.streamingStatus
     currentChatState.streamingDraft = INITIAL.streamingDraft

@@ -151,3 +151,25 @@ class ChatTaskRepo:
                 .values(last_event_seq=ChatTask.last_event_seq + delta)
             )
             await sess.commit()
+
+    async def find_stale_running_tasks(self, *, min_age_minutes: int = 5) -> list[ChatTask]:
+        """Return all chat_tasks with status='running' and started_at older than cutoff.
+
+        Plan 3 stale scanner 用 — Celery Beat 每分钟跑,扫到的 task 后续 mark_error +
+        XADD error event(spec § 6.6)。
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.utcnow() - timedelta(minutes=min_age_minutes)
+        async with self._sf() as sess:
+            stmt = (
+                select(ChatTask)
+                .where(
+                    and_(
+                        ChatTask.status == "running",
+                        ChatTask.started_at < cutoff,
+                    )
+                )
+                .order_by(ChatTask.started_at.asc())
+            )
+            return list((await sess.execute(stmt)).scalars().all())

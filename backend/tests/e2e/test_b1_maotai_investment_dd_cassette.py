@@ -52,6 +52,7 @@ from app.agents.critic_subagents.input_context_scorer import (
 )
 from app.agents.critic_subagents.insight import InsightScorer
 from app.agents.critic_subagents.structure import StructureScorer
+from app.agents.critic_subagents.valuation_consistency import ValuationConsistencyScorer
 from app.agents.data_collector import DataCollector
 from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.research_planner import ResearchPlanner
@@ -297,6 +298,7 @@ def b1_graph(monkeypatch: pytest.MonkeyPatch) -> Any:
         StructureScorer(llm=llm),
         ConcisenessScorer(llm=llm),
         InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer (v0.8.4)
+        ValuationConsistencyScorer(llm=llm),  # 第 7 scorer (v1.x A5a)
     ]
     critic = Critic(llm=llm, scorers=scorers)
 

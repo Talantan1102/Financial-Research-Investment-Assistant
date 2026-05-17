@@ -207,6 +207,86 @@ describe('useChatSSE — Plan 1: 断流后改一次性 history reload', () => {
   })
 })
 
+describe('useChatSSE — Plan 2 双阶段(JSON → GET stream)', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+    currentChatActions.setSession('s1', [])
+  })
+
+  it('POST 返回 JSON {task_id, stream_url} 时,自动打开 GET stream/{tid} 拉 event', async () => {
+    let postCalled = false
+    let streamCalled = false
+    const fakeTaskId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () => {
+        postCalled = true
+        return MswHttpResponse.json({
+          task_id: fakeTaskId,
+          session_id: 's1',
+          stream_url: `/api/v0/chat/stream/${fakeTaskId}`,
+        })
+      }),
+      http.get(`${API_BASE}/api/v0/chat/stream/${fakeTaskId}`, () => {
+        streamCalled = true
+        return sseResponse([
+          { type: 'token', seq: 1, content: 'hi' },
+          { type: 'done', seq: 2 },
+        ])
+      }),
+    )
+
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+    await act(async () => {
+      await result.current.sendMessage('hi')
+    })
+    expect(postCalled).toBe(true)
+    expect(streamCalled).toBe(true)
+    // After done event the assistant message is flushed; typewriter+flush
+    // ensures the 'hi' chars reached either streamingDraft (mid-flight) or
+    // the persisted messages list (post-done).
+    await waitFor(() => {
+      const s = snapshot(currentChatState)
+      const hasToken =
+        s.streamingDraft.includes('hi') ||
+        s.messages.some((m) => m.content.includes('hi') && m.role === 'assistant')
+      expect(hasToken).toBe(true)
+    })
+  })
+
+  it('POST 返回 SSE (Plan 1 legacy) 时,沿用现有 consume 流程,不调 stream endpoint', async () => {
+    let getStreamCalled = false
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () =>
+        sseResponse([
+          { type: 'token', seq: 1, content: 'legacy' },
+          { type: 'done', seq: 2 },
+        ]),
+      ),
+      // If hook (wrongly) calls /chat/stream/* on Plan 1 path, this trips.
+      http.get(`${API_BASE}/api/v0/chat/stream/:tid`, () => {
+        getStreamCalled = true
+        return new MswHttpResponse(null, { status: 500 })
+      }),
+    )
+
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+    await act(async () => {
+      await result.current.sendMessage('hello')
+    })
+
+    expect(getStreamCalled).toBe(false)
+    await waitFor(() => {
+      const s = snapshot(currentChatState)
+      const hasToken =
+        s.streamingDraft.includes('legacy') ||
+        s.messages.some(
+          (m) => m.content.includes('legacy') && m.role === 'assistant',
+        )
+      expect(hasToken).toBe(true)
+    })
+  })
+})
+
 describe('useChatSSE — F8 multi-chat lifecycle', () => {
   beforeEach(() => currentChatActions.reset())
 

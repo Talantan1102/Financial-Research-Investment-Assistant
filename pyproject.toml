@@ -369,3 +369,8 @@ sequence = [
     { cmd = "uv run poe eval" },
     { shell = "unset all_proxy https_proxy http_proxy && uv run python -m backend.tests.eval.cassette_validation" },
 ]
+
+[dependency-groups]
+dev = [
+    "fakeredis>=2.21",
+]

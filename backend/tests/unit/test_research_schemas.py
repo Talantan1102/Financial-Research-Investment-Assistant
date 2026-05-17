@@ -100,3 +100,117 @@ def test_research_state_minimal() -> None:
     assert s.tool_results == []
     assert s.report_markdown is None
     assert s.critic_report is None
+
+
+def test_valuation_analysis_v1x_a5a_new_fields_default_none() -> None:
+    """v1.x A5a: ValuationAnalysis 7 new fields default None, schema backward compat."""
+    from app.agents.investment_dd_schema import ValuationAnalysis, ValuationModel
+
+    va = ValuationAnalysis(
+        narrative="test",
+        industry_classification="白酒",
+        active_models=[ValuationModel.PE, ValuationModel.DCF],
+        valuation_consistency="consistent",
+    )
+
+    # New fields all default None
+    assert va.pe_value is None
+    assert va.pb_value is None
+    assert va.ev_ebitda_value is None
+    assert va.dcf_base is None
+    assert va.dcf_bull is None
+    assert va.dcf_bear is None
+    assert va.dcf_sensitivity is None
+    assert va.outlier_diagnosis is None
+    assert va.router_override_reasoning is None
+
+    # Backward compat: existing fields still work
+    assert va.pe_historical_percentile is None
+
+
+def test_outlier_diagnosis_schema_required_fields() -> None:
+    from app.agents.investment_dd_schema import OutlierDiagnosis, ValuationModel
+
+    od = OutlierDiagnosis(
+        outlier_model=ValuationModel.DCF,
+        likely_cause="永续增长率假设偏高",
+        confidence="high",
+        recommended_action="trust_consensus",
+        narrative="DCF 给出 5000,其他 3 lens 给出 1500-1800,DCF 永续增长率 5% 偏离行业 2.5%。",
+    )
+    assert od.outlier_model == ValuationModel.DCF
+    assert od.confidence == "high"
+
+
+def test_critic_dimension_v1x_a5a_adds_valuation_consistency() -> None:
+    from app.agents.schemas import CriticDimensionScore
+
+    score = CriticDimensionScore(
+        dimension="valuation_consistency",
+        score=8.5,
+        evidence="narrative reflects outlier diagnosis",
+        sub_agent_request_id="req-001",
+    )
+    assert score.dimension == "valuation_consistency"
+
+
+def test_valuation_analysis_active_models_max_length_4() -> None:
+    """ValuationAnalysis.active_models 超过 4 个 → ValidationError."""
+    from app.agents.investment_dd_schema import ValuationAnalysis, ValuationModel
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ValuationAnalysis(
+            narrative="x",
+            active_models=[  # 5 元素 — exceeds max_length=4
+                ValuationModel.PE,
+                ValuationModel.PB,
+                ValuationModel.EV_EBITDA,
+                ValuationModel.DCF,
+                ValuationModel.PE,
+            ],
+        )
+
+
+def test_outlier_diagnosis_is_frozen() -> None:
+    """OutlierDiagnosis frozen=True → mutation 应 raise ValidationError."""
+    from app.agents.investment_dd_schema import OutlierDiagnosis, ValuationModel
+    from pydantic import ValidationError
+
+    od = OutlierDiagnosis(
+        outlier_model=ValuationModel.DCF,
+        likely_cause="x",
+        confidence="high",
+        recommended_action="trust_consensus",
+        narrative="x",
+    )
+    with pytest.raises(ValidationError):
+        od.likely_cause = "modified"
+
+
+def test_research_state_v1x_a5a_new_fields() -> None:
+    """ResearchState 加 forecast_growth + price_history_for_beta 字段."""
+    from app.agents.schemas import ResearchState
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        forecast_growth=0.10,
+        price_history_for_beta=[
+            {"trade_date": "2026-04-01", "close": 1800.0, "index_close": 4000.0}
+        ],
+    )
+    assert state.forecast_growth == 0.10
+    assert state.price_history_for_beta is not None
+    assert len(state.price_history_for_beta) == 1
+
+
+def test_research_state_v1x_a5a_fields_default_none() -> None:
+    """新字段默认 None(向后兼容)."""
+    from app.agents.schemas import ResearchState
+
+    state = ResearchState(user_id="u", session_id="s", user_message="m", request_id="r")
+    assert state.forecast_growth is None
+    assert state.price_history_for_beta is None

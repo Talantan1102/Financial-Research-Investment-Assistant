@@ -59,12 +59,33 @@ export function buildChatPostUrl(): string {
   return apiUrl('/api/v0/chat')
 }
 
+export interface ChatPostJsonResponse {
+  task_id: string
+  session_id: string
+  stream_url: string
+}
+
+/**
+ * Plan 2: GET /api/v0/chat/stream/{task_id}?last_event_id=X URL builder.
+ *
+ * 用于前端 useChatSSE 在收到 POST /chat 的 JSON 响应后,打开 Redis Streams
+ * replay 端点。`last_event_id` 是 Redis Stream entry id (`<ms>-<seq>`),
+ * 断流后回传给服务端 XREAD STREAMS key {last_id} 续读。首次连接传 '0' 拿全量。
+ */
+export function buildChatTaskStreamUrl(
+  taskId: string,
+  lastEventId: string = '0',
+): string {
+  return apiUrl(
+    `/api/v0/chat/stream/${encodeURIComponent(taskId)}?last_event_id=${encodeURIComponent(lastEventId)}`,
+  )
+}
+
 /**
  * @deprecated Plan 1 — frontend no longer uses this. Backend endpoint
- *   GET /api/v0/chat/stream/:id is unimplemented; Plan 2 will reintroduce
- *   a different endpoint (`/chat/stream/{task_id}`) with real Redis Streams replay.
- *   This function is kept exported only because `chatApi.test.ts` still tests
- *   its URL shape and Plan 2 may rename/replace.
+ *   GET /api/v0/chat/stream/:id (sessionId variant) was never implemented;
+ *   Plan 2 uses `buildChatTaskStreamUrl(taskId)` instead.
+ *   Kept exported only because `chatApi.test.ts` still asserts its URL shape.
  */
 export function buildChatStreamUrl(
   sessionId: string,
@@ -78,6 +99,45 @@ export function buildChatStreamUrl(
 
 export function buildEscalateUrl(): string {
   return apiUrl('/api/v0/chat/escalate')
+}
+
+/**
+ * Plan 3 Task 4: POST /api/v0/chat/cancel/{task_id} — async cancel signal。
+ * 服务端 publish 到 Redis pub/sub channel,worker 内 listener 接到 → graph
+ * 节点之间检查 flag → raise GraphInterrupt → finalize 走 partial commit。
+ * 立即返 202,不等 worker 反应。
+ */
+export async function cancelChatTask(taskId: string): Promise<void> {
+  const res = await fetch(
+    apiUrl(`/api/v0/chat/cancel/${encodeURIComponent(taskId)}`),
+    { method: 'POST' },
+  )
+  if (!res.ok && res.status !== 202) {
+    throw new Error(`cancel failed: ${res.status}`)
+  }
+}
+
+export interface RetryChatResponse {
+  task_id: string
+  parent_task_id: string
+  stream_url: string
+  resumed_from_checkpoint: string
+}
+
+/**
+ * Plan 3 Task 5: POST /api/v0/chat/retry/{task_id} — resume from checkpoint。
+ * 后端从 chat_tasks.langgraph_checkpoint_id 创建新 task(parent_task_id 链),
+ * 返回新 task_id + stream_url。前端拿到后立刻打开 stream 接续。
+ */
+export async function retryChatTask(taskId: string): Promise<RetryChatResponse> {
+  const res = await fetch(
+    apiUrl(`/api/v0/chat/retry/${encodeURIComponent(taskId)}`),
+    { method: 'POST' },
+  )
+  if (!res.ok) {
+    throw new Error(`retry failed: ${res.status}`)
+  }
+  return (await res.json()) as RetryChatResponse
 }
 
 import type { EscalationPacket } from '@/types/escalation'

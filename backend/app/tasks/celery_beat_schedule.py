@@ -36,4 +36,9 @@ beat_schedule = {
         "schedule": crontab(hour=3, minute=0, day_of_week=1),
         "options": {"queue": "memory_llm"},
     },
+    # Plan 3 Task 6: 每分钟扫 stale running chat_tasks(spec § 6.6)
+    "app.tasks.chat_stale_scanner.scan_stale_chat_tasks": {
+        "task": "app.tasks.chat_stale_scanner.scan_stale_chat_tasks",
+        "schedule": 60.0,  # 每分钟一次
+    },
 }

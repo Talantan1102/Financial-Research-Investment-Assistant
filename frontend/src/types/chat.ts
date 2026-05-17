@@ -172,6 +172,10 @@ export interface ChatSession {
   last_msg_preview: string | null
 }
 
+// Plan 3 Task 5: chat_messages.status — done|partial|cancelled|error。
+// Frontend uses this to gate retry button rendering (only on partial / error).
+export type ChatMessageStatus = 'done' | 'partial' | 'cancelled' | 'error'
+
 export interface ChatMessage {
   id: string
   session_id: string
@@ -182,11 +186,20 @@ export interface ChatMessage {
   research_report_id: string | null
   research_report_summary: string | null
   created_at: string
+  // Plan 3 Task 7: backend GET /chats/{sid} 已返 task_id + status per message
+  // (router/chats.py)。前端用以渲染 retry button(error/partial 后)。
+  // 老消息可能为 null/缺失 — optional 即可。
+  task_id?: string | null
+  status?: ChatMessageStatus
 }
 
 export interface ChatDetail {
   session: ChatSession
   messages: ChatMessage[]
+  // Plan 2 Task 7: backend GET /chats/{sid} 返回当前 in-flight chat_task UUID
+  // (queued/running 状态),否则 null。前端切回 session 时用这字段 subscribe
+  // in-flight stream — Spec § 5.2 Scenario B 核心。
+  active_task_id?: string | null
 }
 
 export interface CreateChatRequest {
