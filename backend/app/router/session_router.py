@@ -160,6 +160,7 @@ async def update_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     session.title = session_data.title
+    session.title_source = "user_renamed"  # 2026-05-17: user rename is terminal state
     db.commit()
     db.refresh(session)
 
