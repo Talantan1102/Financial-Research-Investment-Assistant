@@ -273,13 +273,6 @@ async def add_message(
 
     session.updated_at = datetime.utcnow()
 
-    # 如果是第一条用户消息，自动生成标题
-    if message_data.role == "user" and session.title == "新对话":
-        # 取消息前20个字符作为标题
-        session.title = message_data.content[:20] + (
-            "..." if len(message_data.content) > 20 else ""
-        )
-
     db.commit()
     db.refresh(message)
 
