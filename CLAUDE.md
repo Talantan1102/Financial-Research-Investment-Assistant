@@ -72,6 +72,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### v1.x A5a 多模型估值 cross-check(2026-05-16 ship 完)
 - [v1.x A5a 多模型估值 cross-check ship](docs/claude-context/v1.x-multi-valuation-cross-check-landed.md) — 4 model cross-check + IndustryModelRouter + DCF 3 scenarios + OutlierDiagnosisAgent + Critic 7 维 + Writer prompt + retry edge / ~1700 行 / cassette+input wire 留 follow-up
 
+### Chat Session 持久化(2026-05-17 ship 完 — 三卷)
+- [Chat Session 持久化总卡](docs/claude-context/chat-session-persistence-done.md) — Plan 1+2+3 累计 ship,Spec § 1.2 三根因 3/3 全覆盖;DB-as-truth + Agent/Transport 解耦(Celery 独立进程)+ Redis Pub/Sub cancel + LangGraph checkpoint resume 四要素;6 状态 task lifecycle + stale scanner 自愈 + 3 differential golden;Plan 2 dogfood 6 round systematic-debugging 教训沉淀 `feedback_n_round_fix_means_phase1_redo`
+
 ### Persona Editable UI(2026-05-17 ship 完)
 - [persona editable UI ship](docs/claude-context/persona-editable-ui-done.md) — /memory 加画像 tab + 双轨语义 + atomic 操作 + 升级动画 / 21 task ship
 
