@@ -14,8 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     services:
-      # Roadmap #2.5: real PG for tests/e2e/test_pg_serve_path_e2e.py.
-      # Same shape as pr.yml services.postgres.
+      # PR-A 2026-05-17: 全测试用真 PG。同 pr.yml services.postgres 形态。
       postgres:
         image: postgres:15-alpine
         env:
