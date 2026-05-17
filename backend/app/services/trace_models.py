@@ -17,7 +17,6 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, model_validator
 from sqlalchemy import (
-    JSON,
     Column,
     DateTime,
     Float,
@@ -102,9 +101,9 @@ class TraceTree(BaseModel):
 # Queried by backend/scripts/memory/weekly_tool_routing_report.sql.
 # ---------------------------------------------------------------------------
 
-# L0 sqlite override-friendly variants
-_UUID_COL = PgUUID(as_uuid=True).with_variant(String(36), "sqlite")
-_JSONB_COL = JSONB().with_variant(JSON, "sqlite")
+# PG-only (PR-A 2026-05-17 删 sqlite-variant fallback)
+_UUID_COL = PgUUID(as_uuid=True)
+_JSONB_COL = JSONB()
 
 
 class MCPToolCallLog(Base):
