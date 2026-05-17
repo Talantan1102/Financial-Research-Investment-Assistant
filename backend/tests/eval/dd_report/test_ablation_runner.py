@@ -138,7 +138,7 @@ def test_run_4_variants_x_2_cases_writes_8_runs(tmp_path) -> None:
     results = runner.run_ablation(
         cases=cases,
         variants=list(AblationVariant),
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         git_sha="testsha",
     )
     assert len(results) == 4 * 2
@@ -285,7 +285,7 @@ def test_single_case_failure_does_not_abort_remaining_runs(tmp_path) -> None:
     results = runner.run_ablation(
         cases=cases,
         variants=list(AblationVariant),  # 4 variants × 2 cases = 8 total
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         git_sha="testsha-failsoft",
     )
 
@@ -314,7 +314,7 @@ def test_ablation_variant_field_set_per_run(tmp_path) -> None:
     runner.run_ablation(
         cases=cases,
         variants=[AblationVariant.V0_BASELINE, AblationVariant.V1_NO_RAG],
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         git_sha="testsha2",
     )
     with sqlite3.connect(tmp_path / "ev.db") as con:

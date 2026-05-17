@@ -1,0 +1,89 @@
+interactions:
+- request:
+    body: "{\"messages\":[{\"role\":\"user\",\"content\":\"\u5224\u65AD\u4E0B\u8FF0\u98CE\u9669\u7684
+      mitigation \u662F\u5426\u771F\u80FD\u7F13\u91CA\u8BE5\u98CE\u9669\u3002\\n\\n\u98CE\u9669\u6807\u9898:
+      \u80A1\u4EF7\u6CE2\u52A8\u98CE\u9669\\n\u98CE\u9669\u63CF\u8FF0: \u8305\u53F0
+      beta=1.2 \u4E2D\u671F\u53EF\u80FD 20% \u56DE\u64A4\\nmitigation: ['\u5206\u6279\u5EFA\u4ED3,
+      \u5355\u6B21\u4ED3\u4F4D\u4E0D\u8D85\u8FC7\u603B\u4ED3 5%', '\u8BBE 5% \u6B62\u635F\u7EBF']\\n\\n\u4E25\u683C\u8F93\u51FA\u4E00\u884C
+      JSON: {\\\"valid\\\": true} \u6216 {\\\"valid\\\": false}\"}],\"model\":\"deepseek-v4-flash\",\"max_tokens\":8000}"
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate, br, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '394'
+      Content-Type:
+      - application/json
+      Host:
+      - dashscope.aliyuncs.com
+      User-Agent:
+      - OpenAI/Python 2.33.0
+      X-Stainless-Arch:
+      - arm64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.33.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAAA2xT7U7aUBi+leVN/FdMrRBGk13JXEgpB+gsLaHVbCEkXR2KDkSHOh0ExeHHJsgW
+        F8UWxsVwzqH84haWWldZ4r+TN895vs57ciCmVElEGvCvc5BGmiYkEfA5EFVFR4oOPOSWYFWQpfgS
+        8C/07ArKAwNZJGiqIinJ6BOOFnex3SbFFj3oTL5tT46+j/vVycYW3f5BDwb0sEt2zml9k+4XR4bp
+        Aehh1zGb2L6jN6dk69IbTvslp1QglZ8xpAuvFua5ab+Eex1aPyaVrrM24Ng5UmvQz62RYc4qTPtf
+        SXGdbt4T28J2ddovkfI+bTexXcWDMu6VnduCM9ygho3tamhu2q85139Cc7RzSsvHY2s4MszZ+5Oj
+        Mh5s455B201qXPje8GCdfjmhN/uTD0NSKNP933hQ9QxN+zWfLTRHKl1sn02Odkjx1nNCy8ek9cvj
+        8BL5WbxozsU5qex6HI9SD2dabzvW1Swhtiou232BWOcjw3SGR9iqeT2Mm9fkuuGsDbxyJmuXpLju
+        2ye1E9yzngn60NKk5hrzwZ66p0jrBmldeLojw6SbBrbPiLXndM/8V3UN31zSjxX3Lc5N2qiTnknq
+        llcS7n1y7ko+7WPk0ytn2BjbHS/7Y2rDdvF22Vkb0O0LV/2hOl933NmjzSLuWe5CjgzTXUlVRsCD
+        oGmSpguKDnkGEpIiaamot63Ag6arGWBAUuLoHfAsA7KazGTVmAa8siLL+TcMqLG3SHTXWUwJ+ryo
+        pjMy0iVVAQZW/v2NTFZNZ/Sori4jRQM+wjLwBPTHCyGOAV3VBdkfcUHuGWg0jnRBkjWX+ulj+TTB
+        UJ75X3L2giiIKRT30Ww+z4CYRYKO4sAvhMMRluMWWZYB7b2mo3Q0ISlJlM1kJffPuqEZSKtxJAMP
+        cYQyGkLLgdVgICELWsqtKv5YhZjOyAEWhUQRccFAOBYKByIJUQgIiUQiILwU2WBsMRxhYxzk/wIA
+        AP//AwBEN5NkVAQAAA==
+    headers:
+      content-encoding:
+      - gzip
+      content-type:
+      - application/json
+      date:
+      - Sun, 17 May 2026 12:51:39 GMT
+      req-arrive-time:
+      - '1779022298571'
+      req-cost-time:
+      - '1407'
+      resp-start-time:
+      - '1779022299979'
+      server:
+      - istio-envoy
+      transfer-encoding:
+      - chunked
+      vary:
+      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      x-dashscope-call-gateway:
+      - 'true'
+      x-envoy-upstream-service-time:
+      - '1407'
+      x-request-id:
+      - 0e5cce24-7b57-9fca-afff-a8c04b3790b2
+    status:
+      code: 200
+      message: OK
+version: 1

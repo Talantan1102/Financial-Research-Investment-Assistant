@@ -105,7 +105,7 @@ def test_eval_result_persists_metric_scores_json(tmp_path) -> None:
         timestamp=datetime.now(UTC),
         backtest_run_id="bt-run-x",
         cut_off_date="2024-06-30",
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         case_type="backtest",
         metric_scores_json=scores.model_dump_json(),
     )

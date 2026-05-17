@@ -35,9 +35,9 @@ investment thesis 合理性 + risk completeness。
 """
 
 _DEFAULT_JUDGE_MODELS: tuple[str, ...] = (
-    "gpt-4o-2024-05-13",
-    "qwen2.5-72b-instruct",
-    "deepseek-v3",
+    "deepseek-v4-flash",
+    "qwen-plus",
+    "qwen-max",
 )
 
 _DEFAULT_SCORE = 5.0

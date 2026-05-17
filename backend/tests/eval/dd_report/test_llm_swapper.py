@@ -9,10 +9,10 @@ import pytest
 
 
 def test_llm_swapper_init_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """LLMSwapper init 时读 OPENROUTER_API_KEY env."""
+    """LLMSwapper init 时读 DASHSCOPE_API_KEY env (跟生产 LLMConfig 一致)."""
     from eval.dd_report.llm_swapper import LLMSwapper
 
-    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key-123")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "test-key-123")
     swapper = LLMSwapper()
     assert swapper.api_key == "test-key-123"
 
@@ -31,8 +31,8 @@ def test_llm_swapper_get_client_for_known_models() -> None:
 
     swapper = LLMSwapper(api_key="test-key")
 
-    # spec § 4.1 决策 1 — 3 个 backtest evaluator LLM
-    expected = {"gpt-4o-2024-05-13", "qwen2.5-72b-instruct", "deepseek-v3"}
+    # spec § 4.1 决策 1 — 3 个 backtest evaluator LLM (DashScope provider, 2026-05-17 切换)
+    expected = {"deepseek-v4-flash", "qwen-plus", "qwen-max"}
     assert expected.issubset(set(EVALUATOR_MODELS))
 
     for model_id in expected:
@@ -55,9 +55,9 @@ def test_evaluator_client_repr_hides_api_key() -> None:
     from eval.dd_report.llm_swapper import LLMSwapper
 
     swapper = LLMSwapper(api_key="secret-token-xyz")
-    client = swapper.get_client("gpt-4o-2024-05-13")
+    client = swapper.get_client("deepseek-v4-flash")
 
     rep = repr(client)
     assert "secret-token-xyz" not in rep, f"api_key leaked in repr: {rep!r}"
     # model 仍应该在 repr 中显示, 便于 debug
-    assert "gpt-4o-2024-05-13" in rep
+    assert "deepseek-v4-flash" in rep

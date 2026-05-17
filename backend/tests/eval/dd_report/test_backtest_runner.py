@@ -63,7 +63,7 @@ def test_backtest_runner_writes_run_row(tmp_db: Path) -> None:
     )
     run_id = runner.run_one(
         case=case,
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         ablation_variant="V0_baseline",
         git_sha="abc1234",
     )
@@ -79,7 +79,7 @@ def test_backtest_runner_writes_run_row(tmp_db: Path) -> None:
     assert row["case_count"] == 1
     assert row["git_sha"] == "abc1234"
     assert row["ablation_variant"] == "V0_baseline"
-    assert row["llm_model"] == "gpt-4o-2024-05-13"
+    assert row["llm_model"] == "deepseek-v4-flash"
 
 
 def test_backtest_runner_calls_pipeline_with_adapters(tmp_db: Path) -> None:
@@ -106,7 +106,7 @@ def test_backtest_runner_calls_pipeline_with_adapters(tmp_db: Path) -> None:
     )
     runner.run_one(
         case=case,
-        evaluator_llm="qwen2.5-72b-instruct",
+        evaluator_llm="qwen-plus",
         ablation_variant="V0_baseline",
         git_sha="abc1234",
     )
@@ -116,7 +116,7 @@ def test_backtest_runner_calls_pipeline_with_adapters(tmp_db: Path) -> None:
     assert "tushare_adapter" in kwargs
     assert "kb_adapter" in kwargs
     assert "evaluator_client" in kwargs
-    assert kwargs["evaluator_client"].model == "qwen2.5-72b-instruct"
+    assert kwargs["evaluator_client"].model == "qwen-plus"
 
 
 def test_backtest_run_passes_leak_detector_with_clean_data(tmp_db: Path) -> None:
@@ -154,7 +154,7 @@ def test_backtest_run_passes_leak_detector_with_clean_data(tmp_db: Path) -> None
     )
     runner.run_one(
         case=case,
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         ablation_variant="V0_baseline",
         git_sha="smoke",
     )

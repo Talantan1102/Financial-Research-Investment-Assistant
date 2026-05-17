@@ -117,7 +117,7 @@ def test_run_one_writes_backtest_runs_and_eval_results(tmp_path) -> None:
     )
     run_id = runner.run_one(
         case=case,
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         ablation_variant="V0_baseline",
         git_sha="testsha",
     )
@@ -126,7 +126,7 @@ def test_run_one_writes_backtest_runs_and_eval_results(tmp_path) -> None:
         con.row_factory = sqlite3.Row
         r = con.execute("SELECT * FROM backtest_runs WHERE run_id = ?", (run_id,)).fetchone()
     assert r["status"] == "completed"
-    assert r["llm_model"] == "gpt-4o-2024-05-13"
+    assert r["llm_model"] == "deepseek-v4-flash"
     assert r["ablation_variant"] == "V0_baseline"
     metric_summary = json.loads(r["metric_summary_json"])
     assert metric_summary["m1_citation"] == 0.9
@@ -140,7 +140,7 @@ def test_run_one_writes_backtest_runs_and_eval_results(tmp_path) -> None:
     er = rows[0]
     assert er["case_id"] == case.case_id
     assert er["cut_off_date"] == "2024-06-30"
-    assert er["evaluator_llm"] == "gpt-4o-2024-05-13"
+    assert er["evaluator_llm"] == "deepseek-v4-flash"
     mscores = json.loads(er["metric_scores_json"])
     assert mscores["m5_composite_mean"] == 8.0
 
@@ -192,7 +192,7 @@ def test_run_one_leakdetector_completes_when_adapter_blocks_leak(tmp_path) -> No
     )
     run_id = runner.run_one(
         case=case,
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         ablation_variant="V0_baseline",
         git_sha="testsha",
     )
@@ -237,7 +237,7 @@ def test_run_one_leakdetector_fires_when_pipeline_leaks_date_in_narrative(tmp_pa
     with pytest.raises(AssertionError, match="data leakage"):
         runner.run_one(
             case=case,
-            evaluator_llm="gpt-4o-2024-05-13",
+            evaluator_llm="deepseek-v4-flash",
             ablation_variant="V0_baseline",
             git_sha="testsha",
         )
@@ -277,7 +277,7 @@ def test_run_one_raises_when_registry_has_metrics_but_pipeline_empty(tmp_path) -
     with pytest.raises(RuntimeError, match="cannot compute metrics"):
         runner.run_one(
             case=case,
-            evaluator_llm="gpt-4o-2024-05-13",
+            evaluator_llm="deepseek-v4-flash",
             ablation_variant="V0_baseline",
             git_sha="testsha-empty",
         )
@@ -342,7 +342,7 @@ def test_run_one_writes_real_citation_metric_coverage_to_schema(tmp_path) -> Non
     )
     run_id = runner.run_one(
         case=case,
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         ablation_variant="V0_baseline",
         git_sha="testsha-cit",
     )
@@ -408,7 +408,7 @@ def test_run_one_writes_real_citation_metric_partial_coverage(tmp_path) -> None:
     )
     run_id = runner.run_one(
         case=case,
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         ablation_variant="V0_baseline",
         git_sha="testsha-partial",
     )

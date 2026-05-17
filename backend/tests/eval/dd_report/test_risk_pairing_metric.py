@@ -182,20 +182,21 @@ def test_judge_failure_counted_separately_not_silently_invalid() -> None:
 
 
 @pytest.mark.skipif(
-    not os.environ.get("OPENROUTER_API_KEY"),
-    reason="OPENROUTER_API_KEY not set; L1 cassette test skipped",
+    not os.environ.get("DASHSCOPE_API_KEY"),
+    reason="DASHSCOPE_API_KEY not set; L1 cassette test skipped",
 )
 def test_l1_risk_pairing_judge_via_cassette() -> None:
     from eval.dd_report.llm_swapper import LLMSwapper
 
     swapper = LLMSwapper()
-    client = swapper.get_client("gpt-4o-2024-05-13")
+    client = swapper.get_client("deepseek-v4-flash")
     judge = EvaluatorPairingJudge(client)
     CASSETTE_DIR.mkdir(parents=True, exist_ok=True)
     with vcr.use_cassette(
         str(CASSETTE_DIR / "risk_pairing_judge.yaml"),
         record_mode="new_episodes",
         match_on=["method", "scheme", "host", "port", "path"],
+        filter_headers=["authorization", "x-api-key"],
     ):
         ok = judge.is_valid_mitigation(
             "股价波动风险",

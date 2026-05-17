@@ -45,7 +45,7 @@ class MetricInputs:
     ground_truth: GroundTruthLoader | None
     tushare_adapter: TushareBacktestAdapter | None
     kb_lookup: Callable[[str], dict[str, Any] | None] | None  # chunk_id -> chunk
-    evaluator_clients: dict[str, EvaluatorClient]  # "gpt-4o-2024-05-13": client, ...
+    evaluator_clients: dict[str, EvaluatorClient]  # "deepseek-v4-flash": client, ...
 
 
 class MetricProtocol(Protocol):

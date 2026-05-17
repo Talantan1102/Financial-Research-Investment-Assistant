@@ -48,9 +48,9 @@ def _make_inputs(clients: dict[str, Any]) -> MetricInputs:
 
 def test_3_judges_consensus_mean_majority() -> None:
     clients = {
-        "gpt-4o-2024-05-13": _FakeClient(8),
-        "qwen2.5-72b-instruct": _FakeClient(7),
-        "deepseek-v3": _FakeClient(8),
+        "deepseek-v4-flash": _FakeClient(8),
+        "qwen-plus": _FakeClient(7),
+        "qwen-max": _FakeClient(8),
     }
     m = CompositeJudgeMetric()
     r = m.compute(_make_inputs(clients))
@@ -62,9 +62,9 @@ def test_3_judges_consensus_mean_majority() -> None:
 
 def test_high_disagreement_flags_audit() -> None:
     clients = {
-        "gpt-4o-2024-05-13": _FakeClient(9),
-        "qwen2.5-72b-instruct": _FakeClient(3),  # 6 分差
-        "deepseek-v3": _FakeClient(7),
+        "deepseek-v4-flash": _FakeClient(9),
+        "qwen-plus": _FakeClient(3),  # 6 分差
+        "qwen-max": _FakeClient(7),
     }
     m = CompositeJudgeMetric()
     r = m.compute(_make_inputs(clients))
@@ -74,9 +74,9 @@ def test_high_disagreement_flags_audit() -> None:
 
 def test_consensus_low_quality_flag() -> None:
     clients = {
-        "gpt-4o-2024-05-13": _FakeClient(3),
-        "qwen2.5-72b-instruct": _FakeClient(4),
-        "deepseek-v3": _FakeClient(3),
+        "deepseek-v4-flash": _FakeClient(3),
+        "qwen-plus": _FakeClient(4),
+        "qwen-max": _FakeClient(3),
     }
     m = CompositeJudgeMetric()
     r = m.compute(_make_inputs(clients))
@@ -85,9 +85,9 @@ def test_consensus_low_quality_flag() -> None:
 
 def test_main_value_is_mean_score() -> None:
     clients = {
-        "gpt-4o-2024-05-13": _FakeClient(8),
-        "qwen2.5-72b-instruct": _FakeClient(7),
-        "deepseek-v3": _FakeClient(7),
+        "deepseek-v4-flash": _FakeClient(8),
+        "qwen-plus": _FakeClient(7),
+        "qwen-max": _FakeClient(7),
     }
     m = CompositeJudgeMetric()
     r = m.compute(_make_inputs(clients))
@@ -97,7 +97,7 @@ def test_main_value_is_mean_score() -> None:
 def test_missing_clients_raises() -> None:
     m = CompositeJudgeMetric()
     with pytest.raises(ValueError, match="needs at least 3"):
-        m.compute(_make_inputs({"gpt-4o-2024-05-13": _FakeClient(5)}))
+        m.compute(_make_inputs({"deepseek-v4-flash": _FakeClient(5)}))
 
 
 def test_malformed_json_score_treated_as_neutral_5() -> None:
@@ -106,9 +106,9 @@ def test_malformed_json_score_treated_as_neutral_5() -> None:
             return "I cannot evaluate this"
 
     clients = {
-        "gpt-4o-2024-05-13": _MalformedClient(),
-        "qwen2.5-72b-instruct": _FakeClient(8),
-        "deepseek-v3": _FakeClient(7),
+        "deepseek-v4-flash": _MalformedClient(),
+        "qwen-plus": _FakeClient(8),
+        "qwen-max": _FakeClient(7),
     }
     m = CompositeJudgeMetric()
     r = m.compute(_make_inputs(clients))
@@ -118,8 +118,8 @@ def test_malformed_json_score_treated_as_neutral_5() -> None:
 
 
 @pytest.mark.skipif(
-    not os.environ.get("OPENROUTER_API_KEY"),
-    reason="OPENROUTER_API_KEY not set; L1 cassette test skipped",
+    not os.environ.get("DASHSCOPE_API_KEY"),
+    reason="DASHSCOPE_API_KEY not set; L1 cassette test skipped",
 )
 def test_l1_composite_judge_3llm_via_cassette() -> None:
     from eval.dd_report.llm_swapper import LLMSwapper
@@ -128,9 +128,9 @@ def test_l1_composite_judge_3llm_via_cassette() -> None:
     clients = {
         m: swapper.get_client(m)
         for m in (
-            "gpt-4o-2024-05-13",
-            "qwen2.5-72b-instruct",
-            "deepseek-v3",
+            "deepseek-v4-flash",
+            "qwen-plus",
+            "qwen-max",
         )
     }
     inputs = MetricInputs(
@@ -154,6 +154,7 @@ def test_l1_composite_judge_3llm_via_cassette() -> None:
         str(CASSETTE_DIR / "composite_judge_3llm.yaml"),
         record_mode="new_episodes",
         match_on=["method", "scheme", "host", "port", "path"],
+        filter_headers=["authorization", "x-api-key"],
     ):
         r = m.compute(inputs)
     assert r.value is not None
@@ -165,24 +166,24 @@ def test_judge_models_override_with_missing_client_pairs_labels_correctly() -> N
     """Fix 1 guard: judge_models override with one missing client must pair labels
     correctly. Previously zip(judge_models, present) misaligned labels in per_judge."""
     clients = {
-        "gpt-4o-2024-05-13": _FakeClient(9, evidence="gpt-says-nine"),
-        # "qwen2.5-72b-instruct" intentionally missing
-        "deepseek-v3": _FakeClient(7, evidence="ds-says-seven"),
-        "claude-sonnet-4": _FakeClient(8, evidence="claude-says-eight"),
+        "deepseek-v4-flash": _FakeClient(9, evidence="ds-says-nine"),
+        # "qwen-plus" intentionally missing
+        "qwen-max": _FakeClient(7, evidence="max-says-seven"),
+        "qwen-turbo": _FakeClient(8, evidence="turbo-says-eight"),
     }
     m = CompositeJudgeMetric(
         judge_models=(
-            "gpt-4o-2024-05-13",
-            "qwen2.5-72b-instruct",
-            "deepseek-v3",
-            "claude-sonnet-4",
+            "deepseek-v4-flash",
+            "qwen-plus",
+            "qwen-max",
+            "qwen-turbo",
         ),
     )
     r = m.compute(_make_inputs(clients))
     # 3 present clients, qwen skipped — labels must match the right scores
     labels = [j["model"] for j in r.details["per_judge"]]
     scores = [j["score"] for j in r.details["per_judge"]]
-    assert labels == ["gpt-4o-2024-05-13", "deepseek-v3", "claude-sonnet-4"]
+    assert labels == ["deepseek-v4-flash", "qwen-max", "qwen-turbo"]
     assert scores == [9.0, 7.0, 8.0]
 
 
@@ -196,9 +197,9 @@ def test_judge_chat_exception_handled_as_parse_failure() -> None:
             raise RuntimeError("simulated APIError: rate limit exceeded")
 
     clients = {
-        "gpt-4o-2024-05-13": _ExplodingClient(),
-        "qwen2.5-72b-instruct": _FakeClient(8),
-        "deepseek-v3": _FakeClient(7),
+        "deepseek-v4-flash": _ExplodingClient(),
+        "qwen-plus": _FakeClient(8),
+        "qwen-max": _FakeClient(7),
     }
     m = CompositeJudgeMetric()
     r = m.compute(_make_inputs(clients))

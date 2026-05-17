@@ -199,20 +199,24 @@ def test_judge_failure_counted_separately_not_silently_unsupported() -> None:
 
 
 @pytest.mark.skipif(
-    not os.environ.get("OPENROUTER_API_KEY"),
-    reason="OPENROUTER_API_KEY not set; L1 cassette test skipped",
+    not os.environ.get("DASHSCOPE_API_KEY"),
+    reason="DASHSCOPE_API_KEY not set; L1 cassette test skipped",
 )
 def test_l1_citation_judge_supports_via_cassette() -> None:
     from eval.dd_report.llm_swapper import LLMSwapper
 
     swapper = LLMSwapper()
-    client = swapper.get_client("gpt-4o-2024-05-13")
+    client = swapper.get_client("deepseek-v4-flash")
     judge = EvaluatorJudge(client)
     CASSETTE_DIR.mkdir(parents=True, exist_ok=True)
     with vcr.use_cassette(
         str(CASSETTE_DIR / "citation_supports_judge.yaml"),
         record_mode="new_episodes",
         match_on=["method", "scheme", "host", "port", "path"],
+        filter_headers=[
+            "authorization",
+            "x-api-key",
+        ],  # 防 credential 录进 cassette (T2.x DashScope 切换撞实)
     ):
         ok = judge.supports(
             "贵州茅台是大白马稳健蓝筹", "贵州茅台 2024 上半年营收稳健, 净利润同比 +15%"

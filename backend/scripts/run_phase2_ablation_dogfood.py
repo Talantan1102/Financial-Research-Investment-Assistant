@@ -1,7 +1,7 @@
 """Phase 2 末完整 ablation L2 dogfood — spec § 4.7 决策 7.
 
 跑 4 variant (V0/V1/V2/V3) × 8 sanity case (cut_off=2026-04-30) × 1 evaluator_llm
-(gpt-4o-2024-05-13) = 32 backtest_runs.
+(deepseek-v4-flash) = 32 backtest_runs.
 
 成本: ~28 RMB (per spec § 5.3). 单次 dogfood, 不在 CI 跑。
 
@@ -11,7 +11,7 @@
   - sediment 卡片需 user 手动 paste 真实数字
 
 前置:
-  - OPENROUTER_API_KEY 在 backend/.env
+  - DASHSCOPE_API_KEY 在 backend/.env
   - unset all_proxy https_proxy http_proxy
   - tushare client 接通
 
@@ -33,9 +33,9 @@ from typing import Any
 
 
 def main() -> int:
-    if not os.environ.get("OPENROUTER_API_KEY"):
-        print("ERROR: OPENROUTER_API_KEY not set in env. dogfood requires real LLM access.")
-        print("       Hint: source backend/.env or export OPENROUTER_API_KEY=...")
+    if not os.environ.get("DASHSCOPE_API_KEY"):
+        print("ERROR: DASHSCOPE_API_KEY not set in env. dogfood requires real LLM access.")
+        print("       Hint: source backend/.env or export DASHSCOPE_API_KEY=...")
         return 1
 
     db_path = Path("backend/data/eval_phase2_dogfood.db")
@@ -70,7 +70,7 @@ def main() -> int:
     assert len(sanity_cases) == 8, f"expected 8 sanity cases, got {len(sanity_cases)}"
 
     swapper = LLMSwapper()
-    eval_client = swapper.get_client("gpt-4o-2024-05-13")
+    eval_client = swapper.get_client("deepseek-v4-flash")
 
     # Try to wire tushare + KB; if either fails, fall back gracefully so the dogfood
     # still produces a partial run (M1/M2/M3/M4 may degrade).
@@ -124,7 +124,7 @@ def main() -> int:
     results = runner.run_ablation(
         cases=sanity_cases,
         variants=list(AblationVariant),
-        evaluator_llm="gpt-4o-2024-05-13",
+        evaluator_llm="deepseek-v4-flash",
         git_sha=git_sha,
         case_type="sanity",
     )

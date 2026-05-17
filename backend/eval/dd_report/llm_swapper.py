@@ -1,17 +1,21 @@
-"""LLMSwapper — OpenRouter API wrapper for evaluator LLM swap.
+"""LLMSwapper — DashScope (阿里百炼) API wrapper for evaluator LLM swap.
 
 spec § 4.1 决策 1 / § 5.3:Pipeline-as-SUT 评估的核心组件,允许 BacktestRunner
-在运行时切换 evaluator LLM。生产 path 不受影响(OpenAIAdapter 走 dashscope)。
+在运行时切换 evaluator LLM。**2026-05-17 切到 DashScope**(项目级 provider 决策,
+撞实 OpenRouter region/credit/free-tier 问题后,见
+docs/claude-context/phase-2-dogfood-real-blockers.md)。
 
-支持的 evaluator model(spec § 4.1 决策 1 选 cutoff < 2024):
-  - gpt-4o-2024-05-13       (cutoff 2023-10)
-  - qwen2.5-72b-instruct    (cutoff 2023-10)
-  - deepseek-v3             (cutoff 早期 2024)
+支持的 evaluator model(DashScope 实际可用 + spec § 4.1 用 cutoff 接近的 LLM
+cross-check 维持跨厂商多样性):
+  - deepseek-v4-flash       (cutoff 2026-04, DeepSeek)
+  - qwen-plus               (中量级 Qwen, cutoff ≥ 2024)
+  - qwen-max                (大量级 Qwen, cutoff ≥ 2024)
+  - qwen-turbo              (轻量, cross-LLM 矩阵备选)
 
-Cross-LLM 矩阵(决策 8.2)额外支持:
-  - deepseek-v4-flash       (生产模型,cutoff 2026-04 — 只跑 sanity case)
-  - claude-sonnet-4         (可选)
-  - gpt-4-turbo             (可选)
+**关键 caveat**: DashScope 主推模型 cutoff 全 ≥ 2024,原 spec § 4.1 "用 cutoff
+< 2024 LLM 跑 leak-free backtest" 设计**实际不可行** under DashScope-only
+provider 约束。Backtest 主线变成 sanity 副线(cut_off=2026-04-30, model
+cutoff 之后)+ 接受 backtest 主线 (2024-2025 时点) 有 leak。简历叙事需调整。
 """
 
 from __future__ import annotations
@@ -25,32 +29,32 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from openai.types.shared_params import ResponseFormatJSONObject, ResponseFormatText
 
-# Backtest 主线 evaluator (spec § 4.1 决策 1):cutoff < 2024 的 3 LLM cross-check
+# Backtest 主线 evaluator (DashScope 3 LLM cross-check)
 BACKTEST_EVALUATOR_MODELS: tuple[str, ...] = (
-    "gpt-4o-2024-05-13",
-    "qwen2.5-72b-instruct",
-    "deepseek-v3",
+    "deepseek-v4-flash",
+    "qwen-plus",
+    "qwen-max",
 )
 
-# Cross-LLM 矩阵 (spec § 4.8.2):上述 3 个 + 生产 + 可选
+# Cross-LLM 矩阵 (spec § 4.8.2):上述 3 个 + 轻量备选
 CROSS_LLM_MATRIX_MODELS: tuple[str, ...] = (
     *BACKTEST_EVALUATOR_MODELS,
-    "deepseek-v4-flash",
-    "claude-sonnet-4",
-    "gpt-4-turbo",
+    "qwen-turbo",
 )
 
 # 公共白名单
 EVALUATOR_MODELS: tuple[str, ...] = CROSS_LLM_MATRIX_MODELS
 
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DASHSCOPE_BASE_URL_DEFAULT = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 
 @dataclass
 class EvaluatorClient:
-    """已绑定 model id 的 OpenAI-compatible client.
+    """已绑定 model id 的 OpenAI-compatible client (走 DashScope endpoint).
 
-    暴露 chat(prompt, response_format) 形态,与 LLMService.chat 类似但不走 dashscope。
+    暴露 chat(prompt, response_format) 形态,与 LLMService.chat 类似;evaluator
+    跟生产 LLMService 共用 DashScope provider (single-provider 项目约束),
+    但 backtest swap 仍能跑不同 model 做 cross-LLM consensus / ablation。
     """
 
     model: str
@@ -62,7 +66,7 @@ class EvaluatorClient:
         prompt: str,
         response_format: ResponseFormatJSONObject | ResponseFormatText | None = None,
     ) -> str:
-        """Chat completion via OpenRouter, 返回 content str."""
+        """Chat completion via DashScope, 返回 content str."""
         messages: list[ChatCompletionMessageParam] = [
             cast(ChatCompletionMessageParam, {"role": "user", "content": prompt})
         ]
@@ -78,24 +82,34 @@ class EvaluatorClient:
 
 
 class LLMSwapper:
-    """Evaluator LLM swap orchestrator.
+    """Evaluator LLM swap orchestrator (DashScope-backed).
 
     使用方式:
-        swapper = LLMSwapper()  # 从 env 读 OPENROUTER_API_KEY
-        client = swapper.get_client("gpt-4o-2024-05-13")
+        swapper = LLMSwapper()  # 从 env 读 DASHSCOPE_API_KEY + base_url
+        client = swapper.get_client("deepseek-v4-flash")
         out = client.chat("Hello")
+
+    Env vars:
+        DASHSCOPE_API_KEY  — required
+        LLM_BASE_URL       — optional, defaults DASHSCOPE_BASE_URL_DEFAULT
+                             (与生产 LLMConfig env 命名一致, 见 app/config/llm_config.py)
     """
 
-    def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+        self.api_key = api_key or os.environ.get("DASHSCOPE_API_KEY", "")
+        self.base_url = (
+            base_url
+            or os.environ.get("LLM_BASE_URL")
+            or os.environ.get("DASHSCOPE_BASE_URL")
+            or DASHSCOPE_BASE_URL_DEFAULT
+        )
 
     def get_client(self, model_id: str) -> EvaluatorClient:
         """返回已绑定 model 的 EvaluatorClient.
 
         Network note: httpx.Client 用 trust_env=False 构造, 避免 SOCKS proxy 环境变量
-        (ALL_PROXY / HTTPS_PROXY) 干扰对 openrouter.ai 的直连。**已知限制**: 用户若
-        确实需要 HTTP proxy 才能访问 OpenRouter(如大陆网络环境), 此 proxy 会被
-        静默忽略 — 需要时请设置 OPENROUTER_BASE_URL 指向可达的 mirror。
+        (ALL_PROXY / HTTPS_PROXY) 干扰对 DashScope 直连。DashScope 在国内直连,
+        不需要 proxy,trust_env=False 是干净选择。
 
         Args:
             model_id: 必须在 EVALUATOR_MODELS 白名单内。
@@ -104,7 +118,7 @@ class LLMSwapper:
             ValueError: model_id 不在白名单。
 
         Returns:
-            EvaluatorClient: 已绑定该 model_id 的 OpenAI-compatible client。
+            EvaluatorClient: 已绑定该 model_id 的 OpenAI-compatible client (DashScope)。
         """
         if model_id not in EVALUATOR_MODELS:
             raise ValueError(f"unknown evaluator model {model_id!r}; allowed: {EVALUATOR_MODELS}")
@@ -112,7 +126,7 @@ class LLMSwapper:
         http_client = httpx.Client(trust_env=False)
         client = OpenAI(
             api_key=self.api_key,
-            base_url=OPENROUTER_BASE_URL,
+            base_url=self.base_url,
             http_client=http_client,
         )
         return EvaluatorClient(model=model_id, api_key=self.api_key, _client=client)
