@@ -598,6 +598,28 @@ def post_process_writer_output(
         )
         report_updates["financial_analysis"] = new_financial
 
+    # v1.x A5b: 若 Analyst 跑了 bull/bear debate,拷 final 论据进 InvestmentRecommendation。
+    # rounds_completed=2 用 v2 (debate 完整收敛),rounds_completed=1 fallback 用 v1。
+    if state.debate_trace is not None:
+        if state.debate_trace.rounds_completed == 2:
+            bull_final = state.debate_trace.bull_v2
+            bear_final = state.debate_trace.bear_v2
+        else:
+            bull_final = state.debate_trace.bull_v1
+            bear_final = state.debate_trace.bear_v1
+
+        debate_updates: dict[str, Any] = {}
+        if bull_final is not None:
+            debate_updates["bull_case"] = list(bull_final.arguments)
+            debate_updates["strongest_bull_point"] = bull_final.strongest_argument
+        if bear_final is not None:
+            debate_updates["bear_case"] = list(bear_final.arguments)
+            debate_updates["strongest_bear_point"] = bear_final.strongest_argument
+
+        if debate_updates:
+            new_recommendation = new_recommendation.model_copy(update=debate_updates)
+            report_updates["investment_recommendation"] = new_recommendation
+
     return llm_report.model_copy(update=report_updates)
 
 

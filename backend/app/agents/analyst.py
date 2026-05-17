@@ -18,6 +18,10 @@ import re
 from typing import Any
 
 from app.agents.base import Agent
+from app.agents.bear_advocate import BearAdvocate
+from app.agents.bull_advocate import BullAdvocate
+from app.agents.debate_orchestrator import DebateOrchestrator
+from app.agents.debate_schemas import DebateTrace
 from app.agents.investment_dd_schema import (
     OutlierDiagnosis,
     ValuationAnalysis,
@@ -228,14 +232,31 @@ class Analyst(Agent):
         # Graceful skip when state.tool_results 缺数据 — 不破既有 e2e。
         valuation_analysis = self._maybe_compute_valuation_analysis(state)
 
+        # v1.x A5b: try to run bull/bear debate.
+        # Graceful skip when 任何 advocate / orchestrator 失败 — 不破既有 e2e。
+        debate_trace = self._maybe_run_debate(state)
+
         state_update: dict[str, Any] = {"insights": insights}
         if valuation_analysis is not None:
             state_update["valuation_analysis"] = valuation_analysis
+        if debate_trace is not None:
+            state_update["debate_trace"] = debate_trace
 
         return StepResult(
             state_update=state_update,
             span_metadata={"agent": "Analyst", "model": r.model, "cost_cny": r.cost_cny},
         )
+
+    def _maybe_run_debate(self, state: ResearchState) -> DebateTrace | None:
+        """v1.x A5b: 跑 bull/bear 2 轮 debate, 任何失败 graceful → None."""
+        try:
+            bull = BullAdvocate(llm=self._llm)
+            bear = BearAdvocate(llm=self._llm)
+            orchestrator = DebateOrchestrator(bull=bull, bear=bear)
+            return orchestrator.run(state)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("v1.x A5b: DebateOrchestrator 失败 (silent): %s", e)
+            return None
 
     def _maybe_compute_valuation_analysis(self, state: ResearchState) -> ValuationAnalysis | None:
         """v1.x A5a hook. 从 state.tool_results 拼 inputs → ValuationAnalysis。
