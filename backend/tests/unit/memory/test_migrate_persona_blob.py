@@ -10,7 +10,10 @@ from uuid import uuid4
 
 import pytest
 from app.memory.models import ChatMemoryPersonaItem, ChatMemoryWorkingBlock
-from scripts.migrate_persona_blob_to_items import migrate_user_persona, parse_existing_blob_for_user
+from app.scripts.migrate_persona_blob_to_items import (
+    migrate_user_persona,
+    parse_existing_blob_for_user,
+)
 
 
 @pytest.mark.unit

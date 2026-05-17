@@ -287,9 +287,8 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     from sqlalchemy.exc import ProgrammingError as _PgProgrammingError
 
     try:
-        from scripts.migrate_persona_blob_to_items import migrate_all
-
         from app.core.database import SessionLocal
+        from app.scripts.migrate_persona_blob_to_items import migrate_all
 
         stats = migrate_all(SessionLocal)
         logger.info("persona migration stats: %s", stats)

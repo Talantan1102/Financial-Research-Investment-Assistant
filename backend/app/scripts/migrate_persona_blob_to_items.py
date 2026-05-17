@@ -18,9 +18,10 @@ import logging
 from typing import Any
 from uuid import UUID, uuid4
 
+from sqlalchemy.orm import Session
+
 from app.memory.models import ChatMemoryPersonaItem, ChatMemoryWorkingBlock
 from app.memory.persona_items_md import ItemDraft, parse_markdown_to_drafts
-from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
