@@ -78,8 +78,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### Persona Editable UI(2026-05-17 ship 完)
 - [persona editable UI ship](docs/claude-context/persona-editable-ui-done.md) — /memory 加画像 tab + 双轨语义 + atomic 操作 + 升级动画 / 21 task ship
 
-### PG-only Migration(2026-05-17 PR-A ship,PR-B/C/D 待)
+### PG-only Migration(2026-05-17 PR-A+B ship,PR-C/D 待)
 - [PR-A landed](docs/claude-context/pg-only-migration-pr-a-landed.md) — 删主 ORM 30+ with_variant + L0/L1 测试切真 PG + 19 个 unit test 文件迁 db_session / 0 regression / spec § 4 PR-A
+- [PR-B landed](docs/claude-context/pg-only-migration-pr-b-landed.md) — TraceService + EvalRecorder sqlite3 raw → SQLAlchemy ORM + PG;新增 TraceSpanRow + EvalResultRow / 顺手修 query_spans SQLi(CodeRabbit 主题 4 critical) / spec § 4 PR-B
 
 ## 设计稿与实施计划
 
