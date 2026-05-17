@@ -1,5 +1,5 @@
 import { http, HttpResponse as MswHttpResponse } from 'msw'
-import { describe, expect, it, beforeEach } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { snapshot } from 'valtio'
 import { useChatSSE } from '@/hooks/useChatSSE'
@@ -9,6 +9,7 @@ import {
   currentChatActions,
   currentChatState,
 } from '@/store/current-chat'
+import * as chatSessionsStore from '@/store/chat-sessions'
 import type { ChatDetail, ChatMessage, ChatSession } from '@/types/chat'
 
 function makeSession(id: string): ChatSession {
@@ -43,6 +44,15 @@ function makeMessage(
 }
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
+
+// Default handler: the new loadSessions() calls (immediate + delayed) after SSE done
+// will fire GET /api/v0/chats. Return [] to prevent MSW unhandled-request errors
+// in tests that don't care about the sidebar refetch behavior.
+beforeEach(() => {
+  server.use(
+    http.get(`${API_BASE}/api/v0/chats`, () => MswHttpResponse.json([])),
+  )
+})
 
 describe('useChatSSE — basic consume', () => {
   beforeEach(() => {
@@ -318,5 +328,101 @@ describe('useChatSSE — F8 multi-chat lifecycle', () => {
     const s = snapshot(currentChatState)
     expect(s.session_id).toBe('B')
     expect(s.last_seq).toBe(0)
+  })
+})
+
+describe('useChatSSE — delayed refetch on SSE done', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+    currentChatActions.setSession('s1', [])
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('calls loadSessions immediately on done, then again ~3s later', async () => {
+    const loadSessionsSpy = vi
+      .spyOn(chatSessionsStore.chatSessionsActions, 'loadSessions')
+      .mockResolvedValue(undefined)
+
+    // Capture the 3s delayed callback without blocking the real typewriter timers.
+    // We spy on window.setTimeout and intercept only the 3000ms call.
+    let delayedCallback: (() => void) | null = null
+    const origSetTimeout = window.setTimeout.bind(window)
+    vi.spyOn(window, 'setTimeout').mockImplementation(
+      (cb: TimerHandler, delay?: number, ...args: unknown[]) => {
+        if (delay === 3000 && typeof cb === 'function') {
+          delayedCallback = cb as () => void
+          return 0 as unknown as ReturnType<typeof setTimeout>
+        }
+        return origSetTimeout(cb, delay, ...args)
+      },
+    )
+
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () =>
+        sseResponse([
+          { type: 'token', seq: 1, content: 'Hi' },
+          { type: 'done', seq: 2 },
+        ]),
+      ),
+    )
+
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+
+    // Complete the stream — immediate refetch fires here
+    await act(async () => {
+      await result.current.sendMessage('hello')
+    })
+
+    // Immediate refetch fires on SSE done
+    expect(loadSessionsSpy).toHaveBeenCalledTimes(1)
+    // Delayed callback should have been registered
+    expect(delayedCallback).not.toBeNull()
+
+    // Manually fire the delayed callback
+    await act(async () => {
+      delayedCallback!()
+    })
+
+    expect(loadSessionsSpy).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not fire delayed refetch if stream was aborted before done', async () => {
+    const loadSessionsSpy = vi
+      .spyOn(chatSessionsStore.chatSessionsActions, 'loadSessions')
+      .mockResolvedValue(undefined)
+
+    let delayedCallback: (() => void) | null = null
+    const origSetTimeout = window.setTimeout.bind(window)
+    vi.spyOn(window, 'setTimeout').mockImplementation(
+      (cb: TimerHandler, delay?: number, ...args: unknown[]) => {
+        if (delay === 3000 && typeof cb === 'function') {
+          delayedCallback = cb as () => void
+          return 0 as unknown as ReturnType<typeof setTimeout>
+        }
+        return origSetTimeout(cb, delay, ...args)
+      },
+    )
+
+    const ctrl = controllableSseResponse()
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () => ctrl.response),
+    )
+
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+    const send = result.current.sendMessage('hi')
+    ctrl.push({ type: 'token', seq: 1, content: 'a' })
+    await waitFor(() => {
+      expect(snapshot(currentChatState).last_seq).toBe(1)
+    })
+    act(() => result.current.abort())
+    ctrl.disconnect()
+    await send.catch(() => {})
+
+    // No done event seen — neither immediate nor delayed refetch fires
+    expect(loadSessionsSpy).toHaveBeenCalledTimes(0)
+    expect(delayedCallback).toBeNull()
   })
 })
