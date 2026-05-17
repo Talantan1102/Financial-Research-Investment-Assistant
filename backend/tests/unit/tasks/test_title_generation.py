@@ -5,7 +5,8 @@
 - len(messages) < 2 → skip (防御)
 - LLM 返回带引号/「」 → strip 干净
 - LLM 输出 > 255 字 → 截断
-- LLM 全失败 → fallback user.content[:20] + "..."
+- LLM 全失败 + content >20 字 → fallback user.content[:20] + "..."
+- LLM 全失败 + content ≤20 字 → fallback user.content (无省略号)
 - 成功路径 → title_source 变 llm_generated
 """
 
@@ -35,7 +36,7 @@ def db_with_session(monkeypatch):
                 id=uuid.uuid4(),
                 session_id=sid,
                 role="user",
-                content="贵州茅台最近怎么样,值得现在买入吗?",
+                content="贵州茅台最近的财务表现怎么样,值得现在以这个价位买入吗?能否给我一些建议?",
                 status="done",
             )
         )
@@ -144,9 +145,58 @@ def test_fallback_when_llm_keeps_failing(db_with_session, monkeypatch):
         generate_session_title(sid)
     with Session() as sess:
         s = sess.query(ChatSession).filter_by(id=uuid.UUID(sid)).one()
-        # fallback: user.content[:20] + "..."
-        expected = "贵州茅台最近怎么样,值得现在买入吗?"[:20] + "..."
+        # fallback: content >20 chars → user.content[:20] + "..."
+        long_content = "贵州茅台最近的财务表现怎么样,值得现在以这个价位买入吗?能否给我一些建议?"
+        assert len(long_content) > 20, "fixture content must be >20 chars to test truncation path"
+        expected = long_content[:20] + "..."
         assert s.title == expected
+        assert s.title_source == "llm_generated"
+
+
+def test_fallback_short_content_no_ellipsis(monkeypatch):
+    """LLM 全失败 + content ≤20 字 → fallback 返回原文,不追加省略号."""
+    monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
+    engine = create_engine("sqlite:///:memory:")
+    ChatSession.__table__.create(bind=engine)
+    ChatMessage.__table__.create(bind=engine)
+    Session = sessionmaker(bind=engine)
+    sid = uuid.uuid4()
+    short_content = "hi"
+    with Session() as sess:
+        sess.add(ChatSession(id=sid, title="新对话", title_source="pending"))
+        sess.add(
+            ChatMessage(
+                id=uuid.uuid4(),
+                session_id=sid,
+                role="user",
+                content=short_content,
+                status="done",
+            )
+        )
+        sess.add(
+            ChatMessage(
+                id=uuid.uuid4(),
+                session_id=sid,
+                role="assistant",
+                content="好的",
+                status="done",
+            )
+        )
+        sess.commit()
+    _patch_db(monkeypatch, Session)
+
+    mock_llm = MagicMock()
+    mock_llm.chat.side_effect = RuntimeError("LLM down")
+
+    from app.tasks.title_generation import generate_session_title
+
+    with patch("app.tasks.title_generation.get_llm_service", return_value=mock_llm):
+        generate_session_title(str(sid))
+    with Session() as sess:
+        s = sess.query(ChatSession).filter_by(id=sid).one()
+        # short content (≤20 chars) → no ellipsis appended
+        assert s.title == short_content
+        assert "..." not in s.title
         assert s.title_source == "llm_generated"
 
 

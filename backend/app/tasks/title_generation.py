@@ -2,7 +2,7 @@
 
 触发: router/chat_finalize.py 在首轮 assistant 落库后 enqueue.
 幂等: 启动时检查 title_source 不为 pending 则 skip.
-失败兜底: 显式 3 次 attempt 用完后 fallback 到 user.content[:20] 截断.
+失败兜底: 显式 3 次 attempt 用完后 fallback 到 user.content[:20] 截断 (超 20 字才追加 "...").
 
 注: 用显式 for-loop attempts 而非 Celery autoretry, 因为 eager 模式下 autoretry 行为
 不可观察 / 难单测; 这种 best-effort 副产品任务三次本进程内即可, 失败成本极低。
@@ -104,7 +104,7 @@ def generate_session_title(self, session_id: str) -> None:  # noqa: ANN001
                         _MAX_ATTEMPTS,
                         exc,
                     )
-                    title = user_content[:20] + "..."
+                    title = user_content[:20] + ("..." if len(user_content) > 20 else "")
                     break
                 logger.debug(
                     "title task: LLM attempt %d failed (%s), retrying",
