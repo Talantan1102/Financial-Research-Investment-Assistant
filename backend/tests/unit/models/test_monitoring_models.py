@@ -1,12 +1,10 @@
-"""Monitoring SQLAlchemy models — sqlite-override smoke."""
+"""Monitoring SQLAlchemy models — pg db_session fixture smoke."""
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from datetime import datetime
 from uuid import uuid4
 
-import pytest
 from app.models.monitoring import (
     DetailStatus,
     MonitoringAlert,
@@ -14,29 +12,13 @@ from app.models.monitoring import (
     MonitoringSignal,
     Notification,
 )
-from app.models.user import User
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from tests.unit._helpers import make_user
 
 
-@pytest.fixture
-def session() -> Generator[Session, None, None]:
-    engine = create_engine("sqlite:///:memory:")
-    # Per-table create (matches project convention — `Base.metadata.create_all`
-    # fails because unrelated models like CompanyData use JSONB w/o sqlite variant).
-    User.__table__.create(engine)
-    MonitoringRun.__table__.create(engine)
-    MonitoringSignal.__table__.create(engine)
-    MonitoringAlert.__table__.create(engine)
-    Notification.__table__.create(engine)
-    with Session(engine) as s:
-        yield s
-
-
-def test_monitoring_run_can_be_persisted(session: Session) -> None:
-    user = make_user(session)
+def test_monitoring_run_can_be_persisted(db_session: Session) -> None:
+    user = make_user(db_session)
     run = MonitoringRun(
         id=str(uuid4()),
         user_id=user.id,
@@ -46,13 +28,13 @@ def test_monitoring_run_can_be_persisted(session: Session) -> None:
         finished_at=datetime.utcnow(),
         status="success",
     )
-    session.add(run)
-    session.commit()
-    assert session.query(MonitoringRun).count() == 1
+    db_session.add(run)
+    db_session.commit()
+    assert db_session.query(MonitoringRun).count() == 1
 
 
-def test_monitoring_signal_can_be_persisted(session: Session) -> None:
-    user = make_user(session)
+def test_monitoring_signal_can_be_persisted(db_session: Session) -> None:
+    user = make_user(db_session)
     run = MonitoringRun(
         id=str(uuid4()),
         user_id=user.id,
@@ -61,8 +43,8 @@ def test_monitoring_signal_can_be_persisted(session: Session) -> None:
         started_at=datetime.utcnow(),
         status="success",
     )
-    session.add(run)
-    session.flush()
+    db_session.add(run)
+    db_session.flush()
     signal = MonitoringSignal(
         id=str(uuid4()),
         run_id=run.id,
@@ -72,14 +54,14 @@ def test_monitoring_signal_can_be_persisted(session: Session) -> None:
         level="yellow",
         explanation="单日 -6.2% 超 5% 阈值",
     )
-    session.add(signal)
-    session.commit()
-    assert session.query(MonitoringSignal).count() == 1
+    db_session.add(signal)
+    db_session.commit()
+    assert db_session.query(MonitoringSignal).count() == 1
 
 
-def test_monitoring_alert_default_detail_status_pending(session: Session) -> None:
+def test_monitoring_alert_default_detail_status_pending(db_session: Session) -> None:
     """Spec § 3.2:新写 alert 默认 detail_status=pending。"""
-    user = make_user(session)
+    user = make_user(db_session)
     run = MonitoringRun(
         id=str(uuid4()),
         user_id=user.id,
@@ -88,8 +70,8 @@ def test_monitoring_alert_default_detail_status_pending(session: Session) -> Non
         started_at=datetime.utcnow(),
         status="success",
     )
-    session.add(run)
-    session.flush()
+    db_session.add(run)
+    db_session.flush()
     alert = MonitoringAlert(
         id=str(uuid4()),
         run_id=run.id,
@@ -98,15 +80,15 @@ def test_monitoring_alert_default_detail_status_pending(session: Session) -> Non
         alert_level="red",
         report_json={},
     )
-    session.add(alert)
-    session.commit()
-    saved = session.query(MonitoringAlert).first()
+    db_session.add(alert)
+    db_session.commit()
+    saved = db_session.query(MonitoringAlert).first()
     assert saved.detail_status == DetailStatus.PENDING
 
 
-def test_monitoring_alert_detail_status_state_machine(session: Session) -> None:
+def test_monitoring_alert_detail_status_state_machine(db_session: Session) -> None:
     """Spec § 3.2:pending → ready / pending → failed。"""
-    user = make_user(session)
+    user = make_user(db_session)
     run = MonitoringRun(
         id=str(uuid4()),
         user_id=user.id,
@@ -115,8 +97,8 @@ def test_monitoring_alert_detail_status_state_machine(session: Session) -> None:
         started_at=datetime.utcnow(),
         status="success",
     )
-    session.add(run)
-    session.flush()
+    db_session.add(run)
+    db_session.flush()
     alert = MonitoringAlert(
         id=str(uuid4()),
         run_id=run.id,
@@ -125,17 +107,17 @@ def test_monitoring_alert_detail_status_state_machine(session: Session) -> None:
         alert_level="red",
         report_json={},
     )
-    session.add(alert)
-    session.commit()
+    db_session.add(alert)
+    db_session.commit()
 
     alert.detail_status = DetailStatus.READY
     alert.report_markdown = "# 异动详情..."
-    session.commit()
-    assert session.query(MonitoringAlert).first().detail_status == DetailStatus.READY
+    db_session.commit()
+    assert db_session.query(MonitoringAlert).first().detail_status == DetailStatus.READY
 
 
-def test_notification_can_be_persisted(session: Session) -> None:
-    user = make_user(session)
+def test_notification_can_be_persisted(db_session: Session) -> None:
+    user = make_user(db_session)
     run = MonitoringRun(
         id=str(uuid4()),
         user_id=user.id,
@@ -144,8 +126,8 @@ def test_notification_can_be_persisted(session: Session) -> None:
         started_at=datetime.utcnow(),
         status="success",
     )
-    session.add(run)
-    session.flush()
+    db_session.add(run)
+    db_session.flush()
     alert = MonitoringAlert(
         id=str(uuid4()),
         run_id=run.id,
@@ -154,14 +136,14 @@ def test_notification_can_be_persisted(session: Session) -> None:
         alert_level="red",
         report_json={},
     )
-    session.add(alert)
-    session.flush()
+    db_session.add(alert)
+    db_session.flush()
     notif = Notification(
         id=str(uuid4()),
         alert_id=alert.id,
         channel="in_app",
         send_status="sent",
     )
-    session.add(notif)
-    session.commit()
-    assert session.query(Notification).count() == 1
+    db_session.add(notif)
+    db_session.commit()
+    assert db_session.query(Notification).count() == 1
