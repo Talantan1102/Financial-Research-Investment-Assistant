@@ -301,19 +301,29 @@ def pg_test_container() -> Iterator[dict[str, object]]:
 @pytest.fixture(scope="session")
 def pg_test_engine(pg_test_container: dict[str, object]) -> Iterator[Engine]:
     """session-scoped SQLAlchemy engine bound to industry_assistant_test;
-    create_all 跑一次(覆盖所有注册的 metadata)。
+    每 session 先 drop_all 再 create_all,保证 fresh schema。
 
-    Replaces 全部 in-memory sqlite engines used by L0/L1 tests.
+    Replaces 全部 in-memory sqlite engines used by L0/L1 tests。drop+create
+    才能在跨 worktree / schema 演化时不留旧列(checkfirst 跳过已存在表会
+    miss 新列)。industry_assistant_test 是测试专用 db,drop 影响范围有限。
     """
     import app.models  # noqa: F401 — barrel registers all metadata
     import app.services.trace_models  # noqa: F401 — trace/eval metadata
     from app.core.database import Base
-    from sqlalchemy import create_engine
+    from sqlalchemy import create_engine, text
 
     url = str(pg_test_container["url"])
-    engine = create_engine(url, future=True, pool_pre_ping=True)
+    engine = create_engine(url, future=True)
 
-    # idempotent — 跨 worktree session 复用 db 时不破坏
+    # DROP SCHEMA CASCADE 比 drop_all 强 — 跨循环 FK (chat_messages ↔ chat_tasks)
+    # 也能清。drop_all 需要 sortable topology, 循环 FK 会 raise
+    # CircularDependencyError。
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+        # uuid_generate_v4() 之类 ext 在 docker init 时建在 public,重建后丢
+        conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
+
     Base.metadata.create_all(bind=engine)
 
     yield engine
