@@ -72,6 +72,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### v1.x A5a 多模型估值 cross-check(2026-05-16 ship 完)
 - [v1.x A5a 多模型估值 cross-check ship](docs/claude-context/v1.x-multi-valuation-cross-check-landed.md) — 4 model cross-check + IndustryModelRouter + DCF 3 scenarios + OutlierDiagnosisAgent + Critic 7 维 + Writer prompt + retry edge / ~1700 行 / cassette+input wire 留 follow-up
 
+### v1.x A5b bull/bear multi-agent debate(2026-05-16 ship 完)
+- [v1.x A5b bull/bear debate ship](docs/claude-context/v1.x-bull-bear-debate-landed.md) — 2-round adversarial debate + Critic 第 8 维 + retry edge / "双 hallucination 防御"完整闭环 / ~1100 行 / dashboard tab 留 follow-up
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。
