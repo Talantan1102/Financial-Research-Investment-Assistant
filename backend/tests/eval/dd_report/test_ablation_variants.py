@@ -39,15 +39,23 @@ def test_v1_no_rag_swaps_kb_adapter_to_null() -> None:
 
 
 def test_v2_no_multi_agent_swaps_pipeline_to_single_agent() -> None:
-    """V2 单 agent: pipeline factory 整体替换成 SingleAgentPipeline."""
+    """V2 单 agent: pipeline factory 整体替换成 SingleAgentPipeline; 即使 invoke
+    pipeline_factory, production_factory 也不应被 call."""
     prod_factory = MagicMock()
-    build_pipeline_for_variant(
+    adapter = build_pipeline_for_variant(
         AblationVariant.V2_NO_MULTI_AGENT,
         production_factory=prod_factory,
         single_agent_pipeline_class=SingleAgentPipeline,
     )
-    # production_factory 完全不被使用
+    # 真 invoke wrapper factory — production_factory 即使在 invocation 时也不应被 call
+    runner = adapter.pipeline_factory(
+        tushare_adapter=MagicMock(),
+        kb_adapter=MagicMock(),
+        evaluator_client=MagicMock(),
+    )
     prod_factory.assert_not_called()
+    # runner 是 SingleAgentPipeline 实例 (V2 contract)
+    assert isinstance(runner, SingleAgentPipeline)
 
 
 def test_v3_no_critic_strips_critic_in_factory_kwargs() -> None:
@@ -78,18 +86,24 @@ def test_null_kb_adapter_search_returns_empty() -> None:
     assert a.search("anything", k=10) == []
 
 
-def test_single_agent_pipeline_callable_returns_report() -> None:
-    """SingleAgentPipeline 用单 prompt 一次性出报告 — 这里只验 protocol shape."""
+def test_single_agent_pipeline_invokes_and_falls_back_to_stub() -> None:
+    """SingleAgentPipeline 用单 prompt 出报告; LLM 返 '{}' 触发 Pydantic
+    ValidationError (缺 required fields) → 走 _minimal_stub fallback path."""
+    from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 
     class _MockEvaluatorClient:
         model = "fake"
 
         def chat(self, prompt: str, response_format: Any = None) -> str:
-            return "{}"  # SingleAgentPipeline 内部应有 fallback path
+            return "{}"  # 空 JSON → ValidationError → stub fallback
 
     pipe = SingleAgentPipeline(
         tushare_adapter=MagicMock(),
         kb_adapter=NullKBAdapter(),
         evaluator_client=_MockEvaluatorClient(),
     )
-    assert callable(pipe)
+    result = pipe("测试公司", "000001.SZ")
+    assert isinstance(result, InvestmentDueDiligenceReport)
+    assert result.request_id == "ablation-v2-stub"  # stub 指纹
+    assert result.target_name == "测试公司"
+    assert result.target_ts_code == "000001.SZ"
