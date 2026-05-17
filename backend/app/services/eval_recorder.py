@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS eval_results (
     backtest_run_id    TEXT,
     cut_off_date       TEXT,
     evaluator_llm      TEXT,
-    case_type          TEXT
+    case_type          TEXT,
+    metric_scores_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_eval_request  ON eval_results(request_id);
 CREATE INDEX IF NOT EXISTS idx_eval_case     ON eval_results(case_id);
@@ -89,6 +90,7 @@ class EvalRecorder:
             _maybe_add_column(con, "eval_results", "cut_off_date", "TEXT")
             _maybe_add_column(con, "eval_results", "evaluator_llm", "TEXT")
             _maybe_add_column(con, "eval_results", "case_type", "TEXT")
+            _maybe_add_column(con, "eval_results", "metric_scores_json", "TEXT")
             con.executescript(_EVAL_RESULTS_SCHEMA)
             con.executescript(_BACKTEST_RUNS_SCHEMA)
 
@@ -98,8 +100,9 @@ class EvalRecorder:
                 "INSERT OR REPLACE INTO eval_results "
                 "(eval_id, request_id, case_id, scores_json, judge_model, "
                 "judge_cost_cny, judge_latency_ms, timestamp, "
-                "backtest_run_id, cut_off_date, evaluator_llm, case_type) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "backtest_run_id, cut_off_date, evaluator_llm, case_type, "
+                "metric_scores_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     result.eval_id,
                     result.request_id,
@@ -113,6 +116,7 @@ class EvalRecorder:
                     result.cut_off_date,
                     result.evaluator_llm,
                     result.case_type,
+                    result.metric_scores_json,
                 ),
             )
 
@@ -152,4 +156,5 @@ class EvalRecorder:
             cut_off_date=row["cut_off_date"],
             evaluator_llm=row["evaluator_llm"],
             case_type=row["case_type"],
+            metric_scores_json=row["metric_scores_json"],
         )

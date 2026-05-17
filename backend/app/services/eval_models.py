@@ -89,6 +89,10 @@ class EvalResult(BaseModel):
     case_type: Literal["backtest", "sanity", "financebench", "cross_llm"] | None = Field(
         default=None, description="case 类别"
     )
+    metric_scores_json: str | None = Field(
+        default=None,
+        description="BacktestMetricScores.model_dump_json() — Phase 2 backtest 5-metric scores",
+    )
 
 
 GoldenCategory = Literal[
