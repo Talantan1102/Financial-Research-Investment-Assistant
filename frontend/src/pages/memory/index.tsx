@@ -4,6 +4,7 @@ import { Col, Row, Tabs } from 'antd'
 import type { TabsProps } from 'antd'
 import MemoryAuditLog from '@/components/memory/MemoryAuditLog'
 import MemoryGraph from '@/components/memory/MemoryGraph'
+import MemoryPersona from '@/components/memory/MemoryPersona'
 import MemoryTimeline from '@/components/memory/MemoryTimeline'
 import { MemoryWorkingBlocks } from './components/MemoryWorkingBlocks'
 
@@ -19,24 +20,29 @@ import { MemoryWorkingBlocks } from './components/MemoryWorkingBlocks'
  * spec § 9 + shared contracts § 10.
  */
 export default function MemoryPage() {
-  const [activeKey, setActiveKey] = useState<string>('graph')
+  const [activeKey, setActiveKey] = useState<string>('persona')
   const [searchParams] = useSearchParams()
   const highlightEdge = searchParams.get('highlight_edge')
 
   const tabs: TabsProps['items'] = [
     {
+      key: 'persona',
+      label: <span data-testid="memory-tab-persona">画像</span>,
+      children: <MemoryPersona />,
+    },
+    {
       key: 'graph',
-      label: <span data-testid="memory-tab-graph">Graph</span>,
+      label: <span data-testid="memory-tab-graph">图谱</span>,
       children: <MemoryGraph highlightEdgeId={highlightEdge} />,
     },
     {
       key: 'timeline',
-      label: <span data-testid="memory-tab-timeline">Timeline</span>,
+      label: <span data-testid="memory-tab-timeline">时间线</span>,
       children: <MemoryTimeline />,
     },
     {
       key: 'audit',
-      label: <span data-testid="memory-tab-audit">Audit</span>,
+      label: <span data-testid="memory-tab-audit">历史</span>,
       children: <MemoryAuditLog />,
     },
   ]

@@ -6,7 +6,8 @@ import type { WorkingBlock } from '@/types/memory'
 /**
  * MemoryWorkingBlocks — 只读 working memory 卡片 (Plan 7A).
  *
- * 显示 persona / scratchpad 当前内容 + token 消耗.
+ * 显示 scratchpad 当前内容 + token 消耗.
+ * persona 有专属 tab，此处不重复展示 (避免 token_count=0 placeholder drift).
  * 编辑 / 替换 留 Plan 7B (#8 chat-side 改造).
  */
 export function MemoryWorkingBlocks() {
@@ -17,7 +18,9 @@ export function MemoryWorkingBlocks() {
     let alive = true
     fetchMemoryBlocks()
       .then((res) => {
-        if (alive) setBlocks(res.blocks)
+        // Filter out persona block — it has its own dedicated tab.
+        // Showing it here would display a stale token_count=0 placeholder.
+        if (alive) setBlocks(res.blocks.filter((b) => b.block_name !== 'persona'))
       })
       .catch((e: Error) => {
         if (alive) setError(e.message)

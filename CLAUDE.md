@@ -75,6 +75,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### Chat Session 持久化(2026-05-17 ship 完 — 三卷)
 - [Chat Session 持久化总卡](docs/claude-context/chat-session-persistence-done.md) — Plan 1+2+3 累计 ship,Spec § 1.2 三根因 3/3 全覆盖;DB-as-truth + Agent/Transport 解耦(Celery 独立进程)+ Redis Pub/Sub cancel + LangGraph checkpoint resume 四要素;6 状态 task lifecycle + stale scanner 自愈 + 3 differential golden;Plan 2 dogfood 6 round systematic-debugging 教训沉淀 `feedback_n_round_fix_means_phase1_redo`
 
+### Persona Editable UI(2026-05-17 ship 完)
+- [persona editable UI ship](docs/claude-context/persona-editable-ui-done.md) — /memory 加画像 tab + 双轨语义 + atomic 操作 + 升级动画 / 21 task ship
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。

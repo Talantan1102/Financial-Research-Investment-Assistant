@@ -28,6 +28,7 @@ from app.router.auth_router import router as auth_router  # noqa: E402
 from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.memory_router import router as memory_router  # noqa: E402  (C.5)
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
+from app.router.persona_router import router as persona_router  # noqa: E402  (persona-ui)
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
@@ -280,6 +281,26 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         app.state.redis_async = None
         logger.warning("Plan 2 Redis async client 初始化跳过: %s", e)
 
+    # 8. Persona Editable UI Plan Task 6 — 一次性 backfill (幂等)
+    # SessionLocal: app.core.database.SessionLocal (sync session factory, used by Celery tasks)
+    # Must run before any code path that reads persona items (Task 17 wires agent path).
+    from sqlalchemy.exc import ProgrammingError as _PgProgrammingError
+
+    try:
+        from app.core.database import SessionLocal
+        from app.scripts.migrate_persona_blob_to_items import migrate_all
+
+        stats = migrate_all(SessionLocal)
+        logger.info("persona migration stats: %s", stats)
+    except _PgProgrammingError:
+        # 表不存在等 schema 问题 — silent fail 会让 agent 看到空 persona, 标 ERROR
+        logger.exception(
+            "persona migration startup hook 失败 (schema 问题, 检查 create_all 是否跑过)",
+        )
+    except Exception:
+        # 运行时错误 (DB down 等) — 不阻塞启动, 但保留 traceback 便于诊断
+        logger.exception("persona migration startup hook 失败 (运行时错误)")
+
     yield
 
     # 关闭时执行
@@ -343,6 +364,7 @@ app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE stre
 app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
 app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (confirmed packet)
 app.include_router(memory_router)  # C.5 — /api/v0/memory (cross-session memory page)
+app.include_router(persona_router)  # persona-ui — /api/v0/persona (Tier 1 persona items)
 
 
 # Dependency override: chats router's get_repo reads from app.state at request time

@@ -93,3 +93,10 @@ def test_template_has_dont_save_section() -> None:
     content = PROMPT_PATH.read_text(encoding="utf-8")
     # 反例 section 必须存在
     assert "Don't save" in content or "不要 save" in content
+
+
+def test_template_warns_not_to_modify_user_section() -> None:
+    """Plan Task 18 — 双轨保护 prompt 约束 (persona-ui spec § 8.3)."""
+    content = PROMPT_PATH.read_text(encoding="utf-8")
+    assert "不要试图修改" in content
+    assert "你声明的" in content

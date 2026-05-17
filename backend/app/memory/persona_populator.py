@@ -138,7 +138,31 @@ def populate_persona_on_session_start(
     sync session pattern, caller 包 try/except 防 session 创建失败.
 
     UPSERT 走 ON CONFLICT (user_id, block_name) → uq_working_blocks_user_name 唯一约束.
+
+    persona-ui Task 17/21 integration: items table is source of truth for users
+    who've engaged with /memory UI. Skip auto-populate to avoid overwriting
+    items-sourced content. Cold-start (no items yet) users still enjoy the legacy
+    graph-edge auto-populate behavior.
     """
+    # Guard: if the user already has persona items, the items table is the source
+    # of truth. PersonaService._sync_to_working_block handles writes there.
+    # Proceeding would race-overwrite items-sourced content.
+    from app.memory.models import ChatMemoryPersonaItem  # local import avoids circular dep
+
+    session = pg_session_factory()
+    try:
+        item_count = session.query(ChatMemoryPersonaItem).filter_by(user_id=user_id).count()
+    finally:
+        session.close()
+
+    if item_count > 0:
+        logger.debug(
+            "persona populator skipped for user %s — %d items present (items table is source of truth)",
+            user_id,
+            item_count,
+        )
+        return
+
     session = pg_session_factory()
     try:
         holdings_rows = session.execute(

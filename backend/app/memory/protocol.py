@@ -40,8 +40,11 @@ class Memory(Protocol):
 
     async def core_memory_append(
         self, user_id: UUID, block_name: str, content: str
-    ) -> ChatMemoryWorkingBlock:
-        """Append content to working block. Auto-paging if exceed max_tokens."""
+    ) -> ChatMemoryWorkingBlock | None:
+        """Append content to working block. Auto-paging if exceed max_tokens.
+
+        Returns None when block_name='persona' (Task 17: routed to PersonaService).
+        """
         ...
 
     async def core_memory_replace(
@@ -50,8 +53,11 @@ class Memory(Protocol):
         block_name: str,
         old_content: str,
         new_content: str,
-    ) -> ChatMemoryWorkingBlock:
-        """Replace exact substring. Raise ValueError if old_content not found."""
+    ) -> ChatMemoryWorkingBlock | None:
+        """Replace exact substring. Raise ValueError if old_content not found.
+
+        Returns None when block_name='persona' (Task 17: routed to PersonaService).
+        """
         ...
 
     # === Tier 2 Archival(Plan 2 写入 / Plan 3 读取) ===

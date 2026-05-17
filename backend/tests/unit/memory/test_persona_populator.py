@@ -71,34 +71,69 @@ class TestConstants:
 
 
 class TestPopulatePersonaOnSessionStart:
-    def test_writes_markdown_to_working_block(self) -> None:
-        """mock session: assert 4 query 调用 + 1 UPSERT working_blocks."""
+    def _make_cold_start_session(self) -> MagicMock:
+        """Build a mock session with item_count=0 (cold-start user, no items)."""
         sess = MagicMock()
-        # 4 queries return empty; 1 upsert
+        # Guard check: session.query(...).filter_by(...).count() → 0 (no items)
+        sess.query.return_value.filter_by.return_value.count.return_value = 0
+        # 4 graph edge queries return empty; 1 upsert
         empty_result = MagicMock()
         empty_result.fetchall = MagicMock(return_value=[])
         sess.execute = MagicMock(return_value=empty_result)
+        return sess
 
+    def test_writes_markdown_to_working_block(self) -> None:
+        """mock session (cold-start, item_count=0): assert 4 query + 1 UPSERT working_blocks.
+
+        C1 guard: factory called twice — once for item_count check (returns 0),
+        once for the main graph-edge queries + UPSERT.
+        """
+        sess = self._make_cold_start_session()
         factory = MagicMock(return_value=sess)
         populate_persona_on_session_start(factory, user_id=uuid4())
 
-        # 4 fetch + 1 upsert = 5 execute calls
+        # factory called twice: once for guard count, once for main queries
+        assert factory.call_count == 2
+        # 4 fetch + 1 upsert = 5 execute calls on the second session
         assert sess.execute.call_count >= 5
         # last call should be UPSERT working_blocks
         last_sql = str(sess.execute.call_args_list[-1].args[0])
         assert "chat_memory_working_blocks" in last_sql
         assert "INSERT" in last_sql.upper()
         sess.commit.assert_called_once()
-        sess.close.assert_called_once()
+        # close called twice: once for guard session, once for main session
+        assert sess.close.call_count == 2
 
     def test_rollback_on_exception(self) -> None:
+        """C1 guard session opens and closes cleanly; main session rolls back on error."""
         import contextlib
 
-        sess = MagicMock()
-        sess.execute = MagicMock(side_effect=RuntimeError("PG down"))
+        # First session: guard check (item_count=0, closes ok)
+        guard_sess = MagicMock()
+        guard_sess.query.return_value.filter_by.return_value.count.return_value = 0
 
-        factory = MagicMock(return_value=sess)
+        # Second session: raises on execute
+        main_sess = MagicMock()
+        main_sess.execute = MagicMock(side_effect=RuntimeError("PG down"))
+
+        factory = MagicMock(side_effect=[guard_sess, main_sess])
         with contextlib.suppress(RuntimeError):
             populate_persona_on_session_start(factory, user_id=uuid4())
-        sess.rollback.assert_called_once()
+
+        guard_sess.close.assert_called_once()
+        main_sess.rollback.assert_called_once()
+        main_sess.close.assert_called_once()
+
+    def test_skips_when_items_present(self) -> None:
+        """C1 guard: populator returns early when item_count > 0 (items table is SoT)."""
+        sess = MagicMock()
+        # item_count = 3 → should skip
+        sess.query.return_value.filter_by.return_value.count.return_value = 3
+        factory = MagicMock(return_value=sess)
+
+        populate_persona_on_session_start(factory, user_id=uuid4())
+
+        # Only the guard session was opened (and closed); no execute calls
+        factory.assert_called_once()
         sess.close.assert_called_once()
+        sess.execute.assert_not_called()
