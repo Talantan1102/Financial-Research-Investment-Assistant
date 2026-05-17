@@ -59,7 +59,7 @@ def test_advocate_output_frozen() -> None:
 
     out = AdvocateOutput(arguments=["1", "2", "3"], strongest_argument="x", confidence="high")
     with pytest.raises(ValidationError):
-        out.confidence = "low"  # type: ignore[misc]
+        out.confidence = "low"
 
 
 def test_debate_trace_default_none_partial() -> None:

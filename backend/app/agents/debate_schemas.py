@@ -38,7 +38,7 @@ class AdvocateOutput(BaseModel):
 
 
 class DebateTrace(BaseModel):
-    """v1.x A5b: 完整 debate 历史,dashboard 可观测。"""
+    """v1.x A5b: 完整 debate 历史 (0-2 轮),dashboard 可观测。"""
 
     model_config = ConfigDict(frozen=True)
 
