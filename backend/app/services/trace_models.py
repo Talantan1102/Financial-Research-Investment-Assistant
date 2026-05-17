@@ -130,3 +130,53 @@ class MCPToolCallLog(Base):
         # per-user routing 报表
         Index("idx_mcp_tool_call_log_user", "user_id"),
     )
+
+
+# ---------------------------------------------------------------------------
+# PR-B 2026-05-17: TraceSpan + EvalResult ORM rows. 替代 sqlite3 backend
+# (trace_service.py / eval_recorder.py)。schema 1:1 镜像现 sqlite,
+# request_id 仍是 JOIN 桥(spec § 9 契约保留)。
+# ---------------------------------------------------------------------------
+
+
+class TraceSpanRow(Base):
+    """One row per Span — PG-backed persistence for TraceService."""
+
+    __tablename__ = "trace_spans"
+
+    span_id = Column(String(64), primary_key=True)
+    request_id = Column(String(64), nullable=False)
+    parent_id = Column(String(64), nullable=True)
+    name = Column(String(128), nullable=False)
+    inputs = Column(_JSONB_COL, nullable=False, default=dict)
+    outputs = Column(_JSONB_COL, nullable=False, default=dict)
+    # SQLAlchemy `Base.metadata` reserved → Python attr `attrs_json`, PG column `metadata`
+    attrs_json = Column("metadata", _JSONB_COL, nullable=False, default=dict)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    ended_at = Column(DateTime(timezone=True), nullable=False)
+    error = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_trace_spans_request", "request_id"),
+        Index("idx_trace_spans_name", "name"),
+    )
+
+
+class EvalResultRow(Base):
+    """One row per EvalResult — PG-backed persistence for EvalRecorder."""
+
+    __tablename__ = "eval_results"
+
+    eval_id = Column(String(64), primary_key=True)
+    request_id = Column(String(64), nullable=False)
+    case_id = Column(String(64), nullable=False)
+    scores_json = Column(_JSONB_COL, nullable=False, default=dict)
+    judge_model = Column(String(64), nullable=False)
+    judge_cost_cny = Column(Float, nullable=False, default=0.0)
+    judge_latency_ms = Column(Integer, nullable=False, default=0)
+    timestamp = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("idx_eval_results_request", "request_id"),
+        Index("idx_eval_results_case", "case_id"),
+    )

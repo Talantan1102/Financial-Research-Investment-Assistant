@@ -1,7 +1,7 @@
-"""L0 — TraceService SQLite write/read round-trip."""
+"""L0 — TraceService PG write/read round-trip."""
 
+import contextlib
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from app.services.trace_models import Span, TraceTree
 from app.services.trace_service import TraceService
@@ -23,9 +23,8 @@ def _span(span_id: str, request_id: str, parent_id: str | None = None) -> Span:
     )
 
 
-def test_write_then_get_trace(tmp_eval_db: Path) -> None:
-    svc = TraceService(db_path=tmp_eval_db)
-    svc.init_schema()
+def test_write_then_get_trace(db_session) -> None:
+    svc = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
 
     root = _span("root", "r1")
     child = _span("c1", "r1", parent_id="root")
@@ -38,18 +37,16 @@ def test_write_then_get_trace(tmp_eval_db: Path) -> None:
     assert len(tree.root_span_children) == 1
 
 
-def test_get_trace_missing_request_raises(tmp_eval_db: Path) -> None:
-    svc = TraceService(db_path=tmp_eval_db)
-    svc.init_schema()
+def test_get_trace_missing_request_raises(db_session) -> None:
+    svc = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
     import pytest
 
     with pytest.raises(LookupError, match="no spans for request_id"):
         svc.get_trace("nonexistent")
 
 
-def test_query_spans_by_name(tmp_eval_db: Path) -> None:
-    svc = TraceService(db_path=tmp_eval_db)
-    svc.init_schema()
+def test_query_spans_by_name(db_session) -> None:
+    svc = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
 
     svc.write_span(_span("a", "r1"))
     svc.write_span(_span("b", "r1", parent_id="a"))
@@ -61,10 +58,8 @@ def test_query_spans_by_name(tmp_eval_db: Path) -> None:
     assert {s.span_id for s in results} == {"a", "b"}
 
 
-def test_init_schema_idempotent(tmp_eval_db: Path) -> None:
-    """Calling init_schema twice must not fail or wipe data."""
-    svc = TraceService(db_path=tmp_eval_db)
-    svc.init_schema()
+def test_init_schema_idempotent(db_session) -> None:
+    """Schema is already created by pg_test_engine fixture; write then re-query works."""
+    svc = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
     svc.write_span(_span("a", "r1"))
-    svc.init_schema()  # second call
     assert len(svc.query_spans({"request_id": "r1"})) == 1

@@ -5,6 +5,7 @@ A non-100% sanity pass with mock judge means the mock fixture's scores
 don't match the cases — fix the fixture.
 """
 
+import contextlib
 from pathlib import Path
 
 from app.services.eval_models import load_golden_jsonl
@@ -20,12 +21,10 @@ SANITY_PATH = Path("backend/tests/fixtures/eval/sanity_obvious_cases.jsonl")
 
 def test_mock_sanity_pass_rate_is_100(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
-    recorder = EvalRecorder(db_path=tmp_eval_db)
-    recorder.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
+    recorder = EvalRecorder(session_factory=lambda: contextlib.nullcontext(db_session))
     sut = LLMService(client=mock_llm_client, trace_service=trace)
     judge = Judge(llm=LLMService(client=mock_llm_client), judge_tier="balanced")
     runner = EvalRunner(sut=sut, judge=judge, trace_service=trace, recorder=recorder)

@@ -1,66 +1,76 @@
-"""TraceService — SQLite-backed span persistence + query.
+"""TraceService — PG-backed span persistence + query.
 
-Schema lives in code (`init_schema`); the .sqlite file is .gitignored and
-recreated per test (via tmp_eval_db fixture) or per app start.
+PR-B 2026-05-17:从 sqlite3 raw API 迁到 SQLAlchemy ORM + PG。Span Pydantic
+contract 保留(spec § 9),ORM 中间层做 Span ↔ TraceSpanRow 转换。
 
-Decoupled from EvalRecorder by sharing only the file path — they each own
-their own table and can be instantiated independently.
+CodeRabbit P1 (主题 4 critical) 修复:query_spans 的 filter dict 旧版直接拼
+SQL → SQL injection。新版用 SQLAlchemy whitelisted ORM column filter,
+拒绝任意未声明 key。
 """
 
 from __future__ import annotations
 
-import json
-import sqlite3
-from datetime import datetime
-from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
-from app.services.trace_models import Span, TraceTree
+from sqlalchemy.orm import Session
 
-_SPANS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS spans (
-    span_id     TEXT PRIMARY KEY,
-    request_id  TEXT NOT NULL,
-    parent_id   TEXT,
-    name        TEXT NOT NULL,
-    inputs      TEXT NOT NULL,
-    outputs     TEXT NOT NULL,
-    metadata    TEXT NOT NULL,
-    started_at  TEXT NOT NULL,
-    ended_at    TEXT NOT NULL,
-    error       TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_spans_request ON spans(request_id);
-CREATE INDEX IF NOT EXISTS idx_spans_name    ON spans(name);
-"""
+from app.services.trace_models import Span, TraceSpanRow, TraceTree
+
+# Whitelist allowed filter keys — 防 SQL injection(CodeRabbit critical 主题 4)
+_ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
+    {
+        "span_id",
+        "request_id",
+        "parent_id",
+        "name",
+        "error",
+    }
+)
 
 
 class TraceService:
-    def __init__(self, db_path: Path) -> None:
-        self._db_path = db_path
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+    """SQLAlchemy ORM persistence for Span rows.
 
-    def init_schema(self) -> None:
-        with sqlite3.connect(self._db_path) as con:
-            con.executescript(_SPANS_SCHEMA)
+    Construction:
+        TraceService(session_factory)  # session_factory: () -> Session
+
+    `session_factory` 生产环境通常是 `SessionLocal`(from `app.core.database`),
+    测试环境通常是 `lambda: db_session`(transaction rollback isolation)。
+    """
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        self._session_factory = session_factory
 
     def write_span(self, span: Span) -> None:
-        with sqlite3.connect(self._db_path) as con:
-            con.execute(
-                "INSERT OR REPLACE INTO spans VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (
-                    span.span_id,
-                    span.request_id,
-                    span.parent_id,
-                    span.name,
-                    json.dumps(span.inputs, default=str),
-                    json.dumps(span.outputs, default=str),
-                    json.dumps(span.metadata, default=str),
-                    span.started_at.isoformat(),
-                    span.ended_at.isoformat(),
-                    span.error,
-                ),
-            )
+        with self._session_factory() as session:
+            # UPSERT — span_id 是 PK
+            existing = session.get(TraceSpanRow, span.span_id)
+            if existing is not None:
+                existing.request_id = span.request_id  # type: ignore[assignment]
+                existing.parent_id = span.parent_id  # type: ignore[assignment]
+                existing.name = span.name  # type: ignore[assignment]
+                existing.inputs = span.inputs  # type: ignore[assignment]
+                existing.outputs = span.outputs  # type: ignore[assignment]
+                existing.attrs_json = span.metadata  # type: ignore[assignment]
+                existing.started_at = span.started_at  # type: ignore[assignment]
+                existing.ended_at = span.ended_at  # type: ignore[assignment]
+                existing.error = span.error  # type: ignore[assignment]
+            else:
+                row = TraceSpanRow(
+                    span_id=span.span_id,
+                    request_id=span.request_id,
+                    parent_id=span.parent_id,
+                    name=span.name,
+                    inputs=span.inputs,
+                    outputs=span.outputs,
+                    attrs_json=span.metadata,
+                    started_at=span.started_at,
+                    ended_at=span.ended_at,
+                    error=span.error,
+                )
+                session.add(row)
+            session.commit()
 
     def get_trace(self, request_id: str) -> TraceTree:
         spans = self.query_spans({"request_id": request_id})
@@ -69,29 +79,33 @@ class TraceService:
         return TraceTree.from_spans(spans)
 
     def query_spans(self, filters: dict[str, Any]) -> list[Span]:
-        if not filters:
-            sql = "SELECT * FROM spans"
-            params: tuple[Any, ...] = ()
-        else:
-            clauses = " AND ".join(f"{k} = ?" for k in filters)
-            sql = f"SELECT * FROM spans WHERE {clauses}"
-            params = tuple(filters.values())
-        with sqlite3.connect(self._db_path) as con:
-            con.row_factory = sqlite3.Row
-            rows = con.execute(sql, params).fetchall()
+        """Query spans by ORM-whitelisted filter keys.
+
+        Unrecognized filter keys → ValueError(不进 SQL,防 SQL injection)。
+        """
+        unknown = set(filters) - _ALLOWED_FILTER_KEYS
+        if unknown:
+            raise ValueError(
+                f"unknown filter keys: {sorted(unknown)} (allowed: {sorted(_ALLOWED_FILTER_KEYS)})"
+            )
+        with self._session_factory() as session:
+            stmt = session.query(TraceSpanRow)
+            for k, v in filters.items():
+                stmt = stmt.filter(getattr(TraceSpanRow, k) == v)
+            rows = stmt.all()
         return [self._row_to_span(r) for r in rows]
 
     @staticmethod
-    def _row_to_span(row: sqlite3.Row) -> Span:
+    def _row_to_span(row: TraceSpanRow) -> Span:
         return Span(
-            span_id=row["span_id"],
-            request_id=row["request_id"],
-            parent_id=row["parent_id"],
-            name=row["name"],
-            inputs=json.loads(row["inputs"]),
-            outputs=json.loads(row["outputs"]),
-            metadata=json.loads(row["metadata"]),
-            started_at=datetime.fromisoformat(row["started_at"]),
-            ended_at=datetime.fromisoformat(row["ended_at"]),
-            error=row["error"],
+            span_id=row.span_id,  # type: ignore[arg-type]
+            request_id=row.request_id,  # type: ignore[arg-type]
+            parent_id=row.parent_id,  # type: ignore[arg-type]
+            name=row.name,  # type: ignore[arg-type]
+            inputs=dict(row.inputs) if row.inputs else {},
+            outputs=dict(row.outputs) if row.outputs else {},
+            metadata=dict(row.attrs_json) if row.attrs_json else {},
+            started_at=row.started_at,  # type: ignore[arg-type]
+            ended_at=row.ended_at,  # type: ignore[arg-type]
+            error=row.error,  # type: ignore[arg-type]
         )
