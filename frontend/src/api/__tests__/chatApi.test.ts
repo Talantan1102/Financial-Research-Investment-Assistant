@@ -91,3 +91,28 @@ describe('chatApi REST', () => {
     expect(url).toContain('last_event_id=42')
   })
 })
+
+import { renameChat } from '../chatApi'
+
+describe('renameChat', () => {
+  it('sends PUT /api/sessions/:id with new title', async () => {
+    let received: { title: string } | null = null
+    server.use(
+      http.put('/api/sessions/abc-123', async ({ request }) => {
+        received = (await request.json()) as { title: string }
+        return HttpResponse.json({ id: 'abc-123', title: received.title })
+      }),
+    )
+    await renameChat('abc-123', 'New Title')
+    expect(received).toEqual({ title: 'New Title' })
+  })
+
+  it('throws on 4xx', async () => {
+    server.use(
+      http.put('/api/sessions/abc-123', () =>
+        HttpResponse.json({ detail: 'not found' }, { status: 404 }),
+      ),
+    )
+    await expect(renameChat('abc-123', 'x')).rejects.toThrow()
+  })
+})
