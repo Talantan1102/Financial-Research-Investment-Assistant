@@ -105,6 +105,22 @@ def test_target_price_hit_when_high_touched() -> None:
     assert r.details["target_price_hit"] is True
 
 
+def test_target_price_hit_false_when_high_above_range() -> None:
+    """T2.5 bug-fix guard: bar with high above target range ceiling must NOT count
+    as hit. The plan-prescribed `or float(h) >= low` clause was dropped because
+    a bar breaking past `high` shouldn't credit hit — this test守护 the fix."""
+    gt = _FakeGroundTruth(
+        kline=[
+            {"trade_date": "20240701", "close": 1550.0},
+            {"trade_date": "20240801", "high": 2100.0, "close": 2000.0},  # above 1900 ceiling
+        ],
+        anns=[],
+    )
+    m = PredictionMetric()
+    r = m.compute(_make_inputs(_report_buy_target_1700_1900_risk([]), gt))
+    assert r.details["target_price_hit"] is False
+
+
 def test_risk_flag_realized_match_in_announcement_title() -> None:
     gt = _FakeGroundTruth(
         kline=[{"trade_date": "20240701", "close": 1500.0}],
@@ -118,6 +134,32 @@ def test_risk_flag_realized_match_in_announcement_title() -> None:
     r = m.compute(_make_inputs(report, gt))
     # 退市 命中, 供应链中断 不命中 -> 1/2 = 0.5
     assert r.details["risk_flag_realized_rate"] == 0.5
+
+
+def test_value_mean_of_three_subs_when_all_non_none() -> None:
+    """All 3 sub-indicators populate: direction=True (1.0), target_price=True (1.0),
+    risk_flag=1.0 (one keyword matched). value = (1+1+1)/3 = 1.0."""
+    gt = _FakeGroundTruth(
+        kline=[
+            {"trade_date": "20240701", "high": 1620.0, "close": 1600.0},
+            {"trade_date": "20240801", "high": 1750.0, "close": 1720.0},  # hits 1700-1900
+            {
+                "trade_date": "20240901",
+                "high": 1800.0,
+                "close": 1750.0,
+            },  # last close 1750 vs anchor 1500 = +16.7%
+        ],
+        anns=[
+            {"ann_date": "20240801", "title": "公司就被ST退市风险提示"},
+        ],
+    )
+    report = _report_buy_target_1700_1900_risk(["退市风险"])
+    m = PredictionMetric()
+    r = m.compute(_make_inputs(report, gt))
+    assert r.details["direction_correct"] is True
+    assert r.details["target_price_hit"] is True
+    assert r.details["risk_flag_realized_rate"] == 1.0
+    assert r.value == 1.0
 
 
 def test_no_ground_truth_returns_all_none() -> None:
