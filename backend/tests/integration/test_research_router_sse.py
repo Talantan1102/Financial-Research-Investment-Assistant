@@ -30,6 +30,7 @@ from app.agents.base import Agent
 from app.agents.critic import Critic
 from app.agents.critic_subagents.conciseness import ConcisenessScorer
 from app.agents.critic_subagents.coverage import CoverageScorer
+from app.agents.critic_subagents.dialectical_balance import DialecticalBalanceScorer
 from app.agents.critic_subagents.factuality import FactualityScorer
 from app.agents.critic_subagents.input_context_scorer import (
     InputContextAppropriatenessScorer,
@@ -141,6 +142,7 @@ def _build_test_research_graph() -> Any:
         ConcisenessScorer(llm=svc),
         InputContextAppropriatenessScorer(llm=svc),  # 第 6 scorer (v0.8.4)
         ValuationConsistencyScorer(llm=svc),  # 第 7 scorer (v1.x A5a)
+        DialecticalBalanceScorer(llm=svc),  # 第 8 scorer (v1.x A5b)
         # v1.x: PlanCorrectnessScorer removed (Task 1.5).
     ]
     critic = Critic(llm=svc, scorers=scorers)
