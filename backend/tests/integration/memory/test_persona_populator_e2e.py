@@ -217,3 +217,65 @@ def test_idempotent_overwrite(
             {"uid": str(user_id), "bn": PERSONA_BLOCK_NAME},
         ).scalar_one()
     assert cnt == 1
+
+
+def test_populator_skips_when_persona_items_present(
+    pg_memory_fixture: dict[str, Any],
+    pg_memory_session_factory: Callable[[], Any],
+) -> None:
+    """C1 guard: populator 跳过已有 persona items 的用户 (items 表 is source of truth).
+
+    步骤:
+    1. 先用 PersonaService.add_item 写入 1 条 persona item (触发 _sync_to_working_block)
+    2. 记录此时 working_block.content (由 PersonaService 写入)
+    3. Seed 4 类 graph edges (HOLDS/PREFERS/AVOIDS/WATCHES)
+    4. 再次调用 populate_persona_on_session_start
+    5. 断言 working_block.content 未被 populator 覆盖 (不含 "600519.SH")
+    """
+    from app.memory.persona_service import PersonaService
+
+    user_id = uuid4()
+    session_id = uuid4()
+    _seed_user_session(pg_memory_fixture["engine"], user_id, session_id)
+
+    # Step 1-2: PersonaService 先写一条 item (items 表有数据)
+    svc = PersonaService(pg_session_factory=pg_memory_session_factory)
+    svc.add_item(user_id=user_id, text="保守稳健", target_section="user")
+
+    # 记录 PersonaService 写的 content
+    engine = pg_memory_fixture["engine"]
+    with engine.begin() as conn:
+        row_before = conn.execute(
+            text(
+                "SELECT content FROM chat_memory_working_blocks "
+                "WHERE user_id = :uid AND block_name = :bn"
+            ),
+            {"uid": str(user_id), "bn": PERSONA_BLOCK_NAME},
+        ).fetchone()
+    assert row_before is not None
+    content_before = row_before[0]
+    assert "保守稳健" in content_before  # PersonaService 写的
+
+    # Step 3: Seed graph edges (populator 若不跳过，会用这些覆盖)
+    _seed_persona_edges(pg_memory_session_factory, user_id, session_id)
+
+    # Step 4: 调 populator — 应该 skip
+    populate_persona_on_session_start(pg_memory_session_factory, user_id=user_id)
+
+    # Step 5: 断言 working_block 内容未被 graph-edge markdown 覆盖
+    with engine.begin() as conn:
+        row_after = conn.execute(
+            text(
+                "SELECT content FROM chat_memory_working_blocks "
+                "WHERE user_id = :uid AND block_name = :bn"
+            ),
+            {"uid": str(user_id), "bn": PERSONA_BLOCK_NAME},
+        ).fetchone()
+    assert row_after is not None
+    content_after = row_after[0]
+    # populator 写的特有内容不应出现
+    assert "600519.SH" not in content_after, (
+        "populator overwrote items-sourced content — C1 guard failed"
+    )
+    # PersonaService 写的 items 内容仍在
+    assert "保守稳健" in content_after

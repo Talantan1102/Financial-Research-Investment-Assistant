@@ -1,3 +1,6 @@
+import { Link } from 'react-router-dom'
+import { Button } from 'antd'
+
 export function TopBar() {
   return (
     <div
@@ -12,6 +15,10 @@ export function TopBar() {
       }}
     >
       <span>Financial Research Assistant</span>
+      <span style={{ flex: 1 }} />
+      <Link to="/memory#persona">
+        <Button type="text" size="small">📋 我的画像</Button>
+      </Link>
     </div>
   )
 }

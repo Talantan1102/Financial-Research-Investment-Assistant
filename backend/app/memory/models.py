@@ -192,3 +192,35 @@ class ChatMemoryWorkingBlock(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "block_name", name="uq_working_blocks_user_name"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Table 5: chat_memory_persona_items (Tier 1 persona row-per-item)
+# ---------------------------------------------------------------------------
+
+
+class ChatMemoryPersonaItem(Base):
+    """Tier 1 persona items, row-per-item with stable UUID.
+
+    spec § 4.1 — 替换 ChatMemoryWorkingBlock.persona 的单段 markdown blob
+    形态，每条 bullet 独立 row 以支持 atomic UI 操作。
+    """
+
+    __tablename__ = "chat_memory_persona_items"
+
+    item_id = Column(_UUID, primary_key=True, default=uuid4)
+    user_id = Column(_UUID, ForeignKey("users.id"), nullable=False)
+    source = Column(String(8), nullable=False)  # 'user' / 'agent'
+    text = Column(String(500), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    created_at = Column(_TS, nullable=False, server_default=func.now())
+    updated_at = Column(_TS, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index(
+            "ix_persona_items_user_source_pos",
+            "user_id",
+            "source",
+            "position",
+        ),
+    )

@@ -94,6 +94,10 @@ Do NOT call write tools for:
 - **agent 自己推理的"事实"**:你只能写用户消息或前面 agent 回复里**原文出现过的事实**;
   evidence_quote substring 校验会 reject 你瞎编的内容
 - **agent 临时计算结果**:DCF 估值数字 / 财务比率 — 这些每次跑都不同,不该入长期记忆
+- **❌ 不要试图修改 [你声明的] 区的任何 bullet**:这些是用户手动添加 / 改过的画像
+  条目,是用户的"主权区"。`core_memory_replace` 只能 match agent 写入的 bullet
+  (即 `## agent 观察到的` 段下的 - 项)。若你认为用户区某条已过期或与事实冲突,
+  **向用户提议**,不要直接 replace。
 
 ## Self-managed loop (核心理念)
 
