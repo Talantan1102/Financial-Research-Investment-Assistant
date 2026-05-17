@@ -5,22 +5,22 @@ from __future__ import annotations
 import uuid
 
 from app.models.chat import ChatSession
-from sqlalchemy import inspect
-
-
-def _col(model_class, name):  # type: ignore[no-untyped-def]
-    """Return the SQLAlchemy Column object for a mapped attribute name."""
-    mapper = inspect(model_class)
-    return mapper.columns[name]
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 
 def test_title_source_defaults_to_pending() -> None:
-    col = _col(ChatSession, "title_source")
-    assert col is not None
-    assert not col.nullable
-    assert col.default is not None
-    assert col.default.arg == "pending"
-    assert col.server_default is not None
+    """Verify ORM applies default='pending' when title_source is omitted at insert."""
+    engine = create_engine("sqlite:///:memory:")
+    ChatSession.__table__.create(bind=engine)
+    Session = sessionmaker(bind=engine)
+    with Session() as sess:
+        s = ChatSession(id=uuid.uuid4(), user_id=None, title="t")
+        # intentionally do NOT pass title_source — verify default kicks in
+        sess.add(s)
+        sess.commit()
+        sess.refresh(s)
+        assert s.title_source == "pending"
 
 
 def test_title_source_accepts_three_values() -> None:
