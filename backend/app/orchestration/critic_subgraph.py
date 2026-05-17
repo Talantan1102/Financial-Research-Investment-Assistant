@@ -1,6 +1,7 @@
-"""Critic 内部 subgraph — Send API fan-out 7 sub-agents + reduce + aggregate.
+"""Critic 内部 subgraph — Send API fan-out 8 sub-agents + reduce + aggregate.
 
 v1.x A5a: 加入第 7 维 valuation_consistency (rule-based scorer, 不调 LLM)。
+v1.x A5b: 加入第 8 维 dialectical_balance (rule-based scorer, 不调 LLM)。
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from langgraph.types import Send
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.critic import Critic, aggregate_scores
+from app.agents.debate_schemas import DebateTrace
 from app.agents.investment_dd_schema import InvestmentDueDiligenceReport, ValuationAnalysis
 from app.agents.schemas import (
     CriticDimensionScore,
@@ -53,7 +55,10 @@ class _CriticSubState(BaseModel):
     # v1.x A5a — multi-model cross-check signals (for ValuationConsistencyScorer)
     valuation_analysis: ValuationAnalysis | None = None
 
-    # reducer field — 7 scorer 各自 append 一个,框架自动 concat (operator.add 对 list 是 concat)
+    # v1.x A5b — bull/bear debate trace (for DialecticalBalanceScorer)
+    debate_trace: DebateTrace | None = None
+
+    # reducer field — 8 scorer 各自 append 一个,框架自动 concat (operator.add 对 list 是 concat)
     collected_scores: Annotated[list[CriticDimensionScore], operator.add] = Field(
         default_factory=list
     )
@@ -87,6 +92,8 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
             risk_tolerance=s.risk_tolerance,
             # v1.x A5a — pass multi-model cross-check for ValuationConsistencyScorer
             valuation_analysis=s.valuation_analysis,
+            # v1.x A5b — pass debate_trace for DialecticalBalanceScorer
+            debate_trace=s.debate_trace,
         )
         # v0.9.x note: 不 wrap asyncio.to_thread — 该 wrap 让 6 scorer 真并发,
         # VCR cassette 按调用顺序匹配 LLM responses,导致 b1_differential
@@ -102,7 +109,7 @@ def _scorer_node_factory(critic: Critic, scorer_name: str) -> Any:
 
 
 def _planner_router(state: _CriticSubState) -> list[Send]:
-    """Fan-out to 7 scorer nodes via Send API (v1.x A5a)."""
+    """Fan-out to 8 scorer nodes via Send API (v1.x A5b)."""
     payload = state.model_dump()
     return [
         Send("scorer_factuality", payload),
@@ -112,6 +119,7 @@ def _planner_router(state: _CriticSubState) -> list[Send]:
         Send("scorer_conciseness", payload),
         Send("scorer_input_context", payload),
         Send("scorer_valuation_consistency", payload),
+        Send("scorer_dialectical_balance", payload),
     ]
 
 
@@ -140,6 +148,10 @@ def build_critic_subgraph(critic: Critic) -> Any:
         "scorer_valuation_consistency",
         _scorer_node_factory(critic, "ValuationConsistencyScorer"),
     )
+    g.add_node(
+        "scorer_dialectical_balance",
+        _scorer_node_factory(critic, "DialecticalBalanceScorer"),
+    )
     g.add_node("aggregate", _aggregate_node)
 
     g.add_conditional_edges(
@@ -153,6 +165,7 @@ def build_critic_subgraph(critic: Critic) -> Any:
             "scorer_conciseness",
             "scorer_input_context",
             "scorer_valuation_consistency",
+            "scorer_dialectical_balance",
         ],
     )
     for n in [
@@ -163,6 +176,7 @@ def build_critic_subgraph(critic: Critic) -> Any:
         "scorer_conciseness",
         "scorer_input_context",
         "scorer_valuation_consistency",
+        "scorer_dialectical_balance",
     ]:
         g.add_edge(n, "aggregate")
     g.add_edge("aggregate", END)
