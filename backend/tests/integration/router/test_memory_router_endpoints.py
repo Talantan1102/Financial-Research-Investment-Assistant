@@ -1,7 +1,9 @@
-"""L1: memory_router endpoints — in-memory sqlite + fake_auth.
+"""L1: memory_router endpoints — real PG db_session (via session alias) + fake_auth.
 
 Plan 7A Task 2-6 — 5 endpoint 集成测试 + 跨用户隔离.
-依赖 conftest.py 的 session / fake_auth / client fixtures (已扩展 memory 表创建).
+依赖 conftest.py 的 session / fake_auth / client fixtures.
+
+PR-A T15: 迁到真 PG(db_session alias), 所有 PgUUID(as_uuid=True) 列传 UUID 实例而非 str.
 """
 
 from __future__ import annotations
@@ -24,8 +26,8 @@ from sqlalchemy.orm import Session
 
 def _mk_user_node(session: Session, user_id: str) -> ChatMemoryNode:
     n = ChatMemoryNode(
-        node_id=str(uuid4()),
-        user_id=user_id,
+        node_id=uuid4(),
+        user_id=UUID(user_id),
         entity_type="User",
         entity_label="User",
         properties={},
@@ -37,8 +39,8 @@ def _mk_user_node(session: Session, user_id: str) -> ChatMemoryNode:
 
 def _mk_stock_node(session: Session, user_id: str, ts_code: str) -> ChatMemoryNode:
     n = ChatMemoryNode(
-        node_id=str(uuid4()),
-        user_id=user_id,
+        node_id=uuid4(),
+        user_id=UUID(user_id),
         entity_type="Stock",
         entity_label=ts_code,
         properties={"name": ts_code},
@@ -49,8 +51,7 @@ def _mk_stock_node(session: Session, user_id: str, ts_code: str) -> ChatMemoryNo
 
 
 def _mk_chat_session(session: Session, user_id: str) -> ChatSession:
-    # ChatSession 用 PgUUID(as_uuid=True) 无 sqlite variant; bind 处理器调 .hex,
-    # 必须传 UUID 实例(不能传 str). user_id 同理.
+    # PgUUID(as_uuid=True) — must pass UUID instances, not strings.
     cs = ChatSession(
         id=uuid4(),
         user_id=UUID(user_id),
@@ -64,11 +65,10 @@ def _mk_chat_session(session: Session, user_id: str) -> ChatSession:
 def _mk_episode_with_session(
     session: Session, user_id: str, chat_session: ChatSession
 ) -> ChatMemoryEpisode:
-    """episode.session_id 是 _UUID with sqlite=String(36); 必须传 str."""
     ep = ChatMemoryEpisode(
-        episode_id=str(uuid4()),
-        user_id=user_id,
-        session_id=str(chat_session.id),
+        episode_id=uuid4(),
+        user_id=UUID(user_id),
+        session_id=chat_session.id,
         episode_index=int(datetime.now(UTC).timestamp() * 1000) % 1_000_000,
         user_message_text="重仓茅台",
         agent_response_text="ok",
@@ -104,8 +104,8 @@ def _mk_edge(
     if valid_from is None:
         valid_from = datetime.now(UTC) - timedelta(days=1)
     e = ChatMemoryEdge(
-        edge_id=str(uuid4()),
-        user_id=user_id,
+        edge_id=uuid4(),
+        user_id=UUID(user_id),
         source_node_id=src.node_id,
         target_node_id=tgt.node_id,
         rel_type=rel,
@@ -167,7 +167,7 @@ def test_get_graph_returns_current_snapshot_only(client, session, fake_auth):
 def test_get_graph_does_not_leak_other_user(client, session, fake_auth):
     own = fake_auth["user_id"]
     other = User(
-        id=str(uuid4()),
+        id=uuid4(),
         username=f"o-{uuid4().hex[:6]}",
         email=f"o-{uuid4().hex[:6]}@x",
         hashed_password="x",
@@ -203,9 +203,9 @@ def test_get_timeline_returns_paginated_sorted(client, session, fake_auth):
     chat_session = _mk_chat_session(session, uid)
     for i in range(3):
         ep = ChatMemoryEpisode(
-            episode_id=str(uuid4()),
-            user_id=uid,
-            session_id=str(chat_session.id),
+            episode_id=uuid4(),
+            user_id=UUID(uid),
+            session_id=chat_session.id,
             episode_index=i + 1,
             user_message_text=f"msg-{i}",
             agent_response_text="ok",
@@ -214,8 +214,8 @@ def test_get_timeline_returns_paginated_sorted(client, session, fake_auth):
         session.add(ep)
         session.flush()
         e = ChatMemoryEdge(
-            edge_id=str(uuid4()),
-            user_id=uid,
+            edge_id=uuid4(),
+            user_id=UUID(uid),
             source_node_id=user_node.node_id,
             target_node_id=stock.node_id,
             rel_type="HOLDS",
@@ -286,9 +286,9 @@ def test_get_timeline_pagination(client, session, fake_auth):
     base = datetime.now(UTC) - timedelta(days=10)
     for i in range(5):
         ep = ChatMemoryEpisode(
-            episode_id=str(uuid4()),
-            user_id=uid,
-            session_id=str(chat_session.id),
+            episode_id=uuid4(),
+            user_id=UUID(uid),
+            session_id=chat_session.id,
             episode_index=100 + i,
             user_message_text=f"msg-{i}",
             agent_response_text="ok",
@@ -297,8 +297,8 @@ def test_get_timeline_pagination(client, session, fake_auth):
         session.add(ep)
         session.flush()
         e = ChatMemoryEdge(
-            edge_id=str(uuid4()),
-            user_id=uid,
+            edge_id=uuid4(),
+            user_id=UUID(uid),
             source_node_id=user_node.node_id,
             target_node_id=stock.node_id,
             rel_type="HOLDS",
@@ -328,7 +328,7 @@ def test_get_timeline_pagination(client, session, fake_auth):
 def test_get_timeline_does_not_leak_other_user(client, session, fake_auth):
     own = fake_auth["user_id"]
     other = User(
-        id=str(uuid4()),
+        id=uuid4(),
         username=f"t-{uuid4().hex[:6]}",
         email=f"t-{uuid4().hex[:6]}@x",
         hashed_password="x",
@@ -362,12 +362,12 @@ def test_get_audit_returns_only_invalidated(client, session, fake_auth):
     # current — NOT in audit
     _mk_edge(session, uid, user_node, stock, rel="HOLDS")
     # invalidated — in audit
-    inv_eid = str(uuid4())
-    invalidator_id = str(uuid4())
+    inv_uuid = uuid4()
+    invalidator_uuid = uuid4()
     ep = _mk_episode(session, uid)
     e = ChatMemoryEdge(
-        edge_id=inv_eid,
-        user_id=uid,
+        edge_id=inv_uuid,
+        user_id=UUID(uid),
         source_node_id=user_node.node_id,
         target_node_id=stock.node_id,
         rel_type="WATCHES",
@@ -377,7 +377,7 @@ def test_get_audit_returns_only_invalidated(client, session, fake_auth):
         source_episode_id=ep.episode_id,
         importance=0.5,
         reasoning="bad early extraction",
-        properties={"invalidated_by_edge_id": invalidator_id},
+        properties={"invalidated_by_edge_id": str(invalidator_uuid)},
     )
     session.add(e)
     session.commit()
@@ -387,13 +387,13 @@ def test_get_audit_returns_only_invalidated(client, session, fake_auth):
     body = r.json()
     assert body["total"] == 1
     item = body["items"][0]
-    assert item["edge_id"] == inv_eid
-    assert item["invalidated_by_edge_id"] == invalidator_id
+    assert item["edge_id"] == str(inv_uuid)
+    assert item["invalidated_by_edge_id"] == str(invalidator_uuid)
 
 
 def test_get_audit_does_not_leak_other_user(client, session, fake_auth):
     other = User(
-        id=str(uuid4()),
+        id=uuid4(),
         username=f"a-{uuid4().hex[:6]}",
         email=f"a-{uuid4().hex[:6]}@x",
         hashed_password="x",
@@ -447,7 +447,7 @@ def test_invalidate_edge_marks_invalidated_at(client, session, fake_auth):
 
 def test_invalidate_edge_cross_user_returns_404(client, session, fake_auth):
     other = User(
-        id=str(uuid4()),
+        id=uuid4(),
         username=f"x-{uuid4().hex[:6]}",
         email=f"x-{uuid4().hex[:6]}@x",
         hashed_password="x",
@@ -508,16 +508,16 @@ def test_invalidate_edge_invalid_uuid_returns_404(client, session, fake_auth):
 def test_get_blocks_returns_user_blocks(client, session, fake_auth):
     uid = fake_auth["user_id"]
     persona = ChatMemoryWorkingBlock(
-        block_id=str(uuid4()),
-        user_id=uid,
+        block_id=uuid4(),
+        user_id=UUID(uid),
         block_name="persona",
         content="long-term value investor",
         token_count=10,
         max_tokens=500,
     )
     scratch = ChatMemoryWorkingBlock(
-        block_id=str(uuid4()),
-        user_id=uid,
+        block_id=uuid4(),
+        user_id=UUID(uid),
         block_name="scratchpad",
         content="thinking about 茅台",
         token_count=5,
@@ -543,7 +543,7 @@ def test_get_blocks_empty_when_no_data(client, session, fake_auth):
 def test_get_blocks_does_not_leak_other_user(client, session, fake_auth):
     # fake_auth fixture binds the active user (no own blocks created on purpose)
     other = User(
-        id=str(uuid4()),
+        id=uuid4(),
         username=f"b-{uuid4().hex[:6]}",
         email=f"b-{uuid4().hex[:6]}@x",
         hashed_password="x",
@@ -553,8 +553,8 @@ def test_get_blocks_does_not_leak_other_user(client, session, fake_auth):
     session.flush()
     session.add(
         ChatMemoryWorkingBlock(
-            block_id=str(uuid4()),
-            user_id=str(other.id),
+            block_id=uuid4(),
+            user_id=other.id,
             block_name="persona",
             content="leaked",
             token_count=2,

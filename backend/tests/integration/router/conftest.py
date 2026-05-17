@@ -1,7 +1,7 @@
 """Local fixtures for integration router tests.
 
 Provides:
-  - session: an in-memory sqlite session with the User + monitoring tables created
+  - session: alias to global db_session (real PG, transaction-rollback isolated)
   - fake_auth: a real User row + dependency_overrides for get_current_user_required
   - client: TestClient wired with get_db override + dependency_overrides reset on teardown
 
@@ -16,60 +16,21 @@ from uuid import uuid4
 
 import pytest
 from app.core.database import get_db
-from app.memory.models import (
-    ChatMemoryEdge,
-    ChatMemoryEpisode,
-    ChatMemoryNode,
-    ChatMemoryWorkingBlock,
-)
-from app.models.chat import ChatSession
-from app.models.monitoring import (
-    MonitoringAlert,
-    MonitoringRun,
-    MonitoringSignal,
-    Notification,
-)
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
-def session() -> Generator[Session, None, None]:
-    """Fresh in-memory sqlite per test with the User + monitoring tables.
+def session(db_session: Session) -> Session:
+    """Alias to global db_session — kept for backward compat with existing test args.
 
-    Cannot use ``Base.metadata.create_all`` because other models pull in
-    PG-only column types (e.g. JSONB) that sqlite can't compile.  Per-table
-    create gives us only what these tests need.
+    PR-A T15: replaced in-memory sqlite engine (broke on JSONB columns after
+    with_variant fallback removal) with the session-scoped PG fixture that uses
+    transaction rollback isolation.
     """
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    User.__table__.create(engine)
-    MonitoringRun.__table__.create(engine)
-    MonitoringSignal.__table__.create(engine)
-    MonitoringAlert.__table__.create(engine)
-    Notification.__table__.create(engine)
-    # C.5 memory 4 表 (Plan 7A 起需要) — Plan 1 ship 已加 with_variant(JSON, "sqlite")
-    # 让 JSONB / PgUUID 在 sqlite override 下能 compile (见 app/memory/models.py).
-    # ChatSession FK 是 episodes.session_id 引用, 必须先建.
-    ChatSession.__table__.create(engine)
-    ChatMemoryEpisode.__table__.create(engine)
-    ChatMemoryNode.__table__.create(engine)
-    ChatMemoryEdge.__table__.create(engine)
-    ChatMemoryWorkingBlock.__table__.create(engine)
-
-    Session_ = sessionmaker(bind=engine, expire_on_commit=False)
-    sess = Session_()
-    try:
-        yield sess
-    finally:
-        sess.close()
+    return db_session
 
 
 @pytest.fixture

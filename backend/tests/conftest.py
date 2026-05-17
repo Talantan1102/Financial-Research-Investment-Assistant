@@ -349,3 +349,29 @@ def db_session(pg_test_engine: Engine) -> Iterator[Session]:
             transaction.rollback()
     finally:
         connection.close()
+
+
+@pytest.fixture
+def pg_async_session_factory(pg_test_container: dict[str, object]) -> Iterator[object]:
+    """function-scoped async session factory bound to the test PG instance.
+
+    Returns a real async_sessionmaker using postgresql+psycopg (psycopg v3 async
+    driver).  Unlike db_session, this fixture does NOT wrap each test in an outer
+    transaction rollback — async tests that use ChatTaskRepo / ChatSessionRepo need
+    a full commit cycle to observe state changes across different async_with blocks.
+
+    PR-A T15: replaces in-memory sqlite+aiosqlite used by Plan 1/2/3 async
+    integration tests (broke after with_variant removal left JSONB columns
+    unrenderable on sqlite).
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    raw_url = str(pg_test_container["url"])
+    # Convert postgresql:// → postgresql+psycopg:// for psycopg v3 async driver
+    async_url = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    engine = create_async_engine(async_url, future=True)
+    factory: async_sessionmaker[AsyncSession] = async_sessionmaker(engine, expire_on_commit=False)
+    yield factory
+    # Use sync_engine.dispose() to clean up without needing an event loop in teardown
+    engine.sync_engine.dispose()
