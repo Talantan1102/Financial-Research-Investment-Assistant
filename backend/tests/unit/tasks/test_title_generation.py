@@ -99,6 +99,25 @@ def test_skip_when_less_than_two_messages(monkeypatch):
     mock_llm.chat.assert_not_called()
 
 
+def test_skip_when_session_deleted(monkeypatch):
+    """Session 在 enqueue 和 task 启动之间被删除 - task 静默 return, 不调 LLM."""
+    monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
+    engine = create_engine("sqlite:///:memory:")
+    ChatSession.__table__.create(bind=engine)
+    ChatMessage.__table__.create(bind=engine)
+    Session = sessionmaker(bind=engine)
+    # 不 seed 任何 session — 直接调 task 用一个 random session_id
+    _patch_db(monkeypatch, Session)
+
+    from app.tasks.title_generation import generate_session_title
+
+    mock_llm = MagicMock()
+    with patch("app.tasks.title_generation.get_llm_service", return_value=mock_llm):
+        generate_session_title(str(uuid.uuid4()))  # 任意 UUID, 数据库里不存在
+    # 不应抛异常, 不应调 LLM
+    mock_llm.chat.assert_not_called()
+
+
 def test_strips_quotes_and_brackets(db_with_session, monkeypatch):
     engine, sid, Session = db_with_session
     _patch_db(monkeypatch, Session)
