@@ -75,12 +75,7 @@ def main() -> int:
     # Try to wire tushare + KB; if either fails, fall back gracefully so the dogfood
     # still produces a partial run (M1/M2/M3/M4 may degrade).
     try:
-        tushare_token = os.environ.get("TUSHARE_TOKEN", "")
-        if not tushare_token:
-            raise ValueError("TUSHARE_TOKEN not set in env")
-        from app.services.tushare_client import TushareClient
-
-        tushare_inner: Any = TushareClient(token=tushare_token)
+        tushare_inner: Any = _build_tushare_client()
     except Exception as e:
         print(f"WARN: TushareClient unavailable ({e}); M2/M4 will skip.")
         tushare_inner = _stub_tushare()
@@ -188,6 +183,55 @@ def _avg(scores: dict[str, list[float]], k: str) -> str:
     return f"{sum(vs) / len(vs):.2f}" if vs else "N/A"
 
 
+def _build_tushare_client() -> Any:
+    """Build sync tushare client suitable for TushareBacktestAdapter.inner.
+
+    TushareBacktestAdapter.inner needs sync methods: income / daily / balancesheet /
+    cashflow / anns (each returns list[dict]).
+
+    The tushare Pro SDK (tushare.pro_api) provides a sync DataApi.query() call.
+    We wrap it here as a thin adapter exposing the 5 sync methods.
+    """
+    import tushare as ts
+
+    token = os.environ.get("TUSHARE_TOKEN", "")
+    if not token:
+        raise ValueError("TUSHARE_TOKEN not set in env")
+    base_url = os.environ.get("TUSHARE_BASE_URL", "http://api.tushare.pro")
+    api = ts.pro_api(token)
+    # Monkey-patch base_url if override provided
+    if base_url != "http://api.tushare.pro":
+        api._DataApi__url = base_url  # noqa: SLF001
+
+    class _SyncTushareClient:
+        """Sync wrapper around tushare Pro SDK DataApi for TushareBacktestAdapter."""
+
+        @staticmethod
+        def _query_to_list(api_name: str, **kwargs: Any) -> list[dict[str, Any]]:
+            df = api.query(api_name, **kwargs)
+            if df is None or df.empty:
+                return []
+            return df.to_dict(orient="records")
+
+        def income(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return self._query_to_list("income", **kwargs)
+
+        def daily(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return self._query_to_list("daily", **kwargs)
+
+        def balancesheet(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return self._query_to_list("balancesheet", **kwargs)
+
+        def cashflow(self, **kwargs: Any) -> list[dict[str, Any]]:
+            return self._query_to_list("cashflow", **kwargs)
+
+        def anns(self, **kwargs: Any) -> list[dict[str, Any]]:
+            # tushare Pro announcement api
+            return self._query_to_list("anns_d", **kwargs)
+
+    return _SyncTushareClient()
+
+
 def _stub_tushare() -> Any:
     """Stub tushare client for degraded dogfood paths."""
 
@@ -212,22 +256,37 @@ def _stub_tushare() -> Any:
 
 def _stub_kb() -> Any:
     class _Stub:
-        def search(self, q: str, k: int = 10, **kw: Any) -> list[Any]:
+        def search(self, query: str = "", k: int = 10, **kw: Any) -> list[Any]:
             return []
 
     return _Stub()
 
 
 def _build_kb_client() -> Any:
-    """Build production KB client. Implementer note: T2.11 真接 KB 时按
-    backend/app/service/kb_*.py 实际入口拼;若 Milvus 不在或 collection 未 load,
-    抛 Exception 走 fallback."""
-    raise NotImplementedError("Production KB wire deferred — see sediment card")
+    """Build production KB client from env (KB_MODE=real → Milvus; otherwise mock).
+
+    If KB_MODE is not set to 'real' or Milvus is unavailable, raises Exception
+    and dogfood falls back to stub.
+    """
+    kb_mode = os.environ.get("KB_MODE", "mock")
+    if kb_mode != "real":
+        raise ValueError(f"KB_MODE={kb_mode!r}; set KB_MODE=real + MILVUS_HOST to enable real KB.")
+    from app.services.kb_factory import build_kb_search_service_from_env
+
+    return build_kb_search_service_from_env()
 
 
 def _build_kb_lookup() -> Any:
-    """Build chunk_id -> chunk dict callable. Same deferred treatment as KB client."""
-    raise NotImplementedError("Production KB lookup wire deferred")
+    """Build chunk_id -> chunk dict callable.
+
+    Real Milvus chunk lookup by ID is complex (requires get_by_ids). For now return
+    a passthrough None callable — M1's total_cited > 0 requires actual lookup but
+    framework still runs; lookup_failures counter increments.
+
+    Deferred: implement get_by_chunk_id via MilvusKbClient when M1 real citation
+    scoring is needed beyond framework smoke.
+    """
+    return lambda cid: None
 
 
 if __name__ == "__main__":
