@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -27,7 +27,7 @@ def _make_fake_report(target_name: str, target_ts_code: str) -> InvestmentDueDil
         target_name=target_name,
         target_ts_code=target_ts_code,
         request_id="req-test",
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(UTC),
         target_close_price_at_gen=1500.0,
         target_overview=TargetOverview(narrative="...", main_business="白酒"),
         legal_qualification=LegalQualification(
@@ -106,6 +106,9 @@ def test_adapter_runs_pipeline_and_returns_report_dict() -> None:
     assert out["disclaimer"] == DEFAULT_DISCLAIMER
     assert captured_kwargs["target_name"] == "茅台"
     assert captured_kwargs["evaluator_client"] is not None
+    assert captured_kwargs["target_ts_code"] == "600519.SH"
+    assert captured_kwargs["tushare_adapter"] is not None
+    assert captured_kwargs["kb_adapter"] is not None
 
 
 def test_adapter_raises_when_pipeline_returns_wrong_type() -> None:
