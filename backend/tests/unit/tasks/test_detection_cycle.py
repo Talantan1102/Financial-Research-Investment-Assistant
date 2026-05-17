@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -12,13 +11,10 @@ from app.models.monitoring import (
     DetailStatus,
     MonitoringAlert,
     MonitoringRun,
-    MonitoringSignal,
-    Notification,
 )
 from app.models.position import Position
 from app.models.user import User
 from app.services.monitoring.signal_rules.base import SignalLevel, SignalResult
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 
@@ -26,20 +22,6 @@ from sqlalchemy.orm import Session
 def celery_eager(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
     monkeypatch.setenv("CELERY_TASK_EAGER_PROPAGATES", "1")
-
-
-@pytest.fixture
-def session() -> Generator[Session, None, None]:
-    # 项目约定:不全量 create_all(其他模型有 JSONB 在 sqlite 不可编译);只建本测试用到的表
-    engine = create_engine("sqlite:///:memory:")
-    User.__table__.create(engine)
-    Position.__table__.create(engine)
-    MonitoringRun.__table__.create(engine)
-    MonitoringSignal.__table__.create(engine)
-    MonitoringAlert.__table__.create(engine)
-    Notification.__table__.create(engine)
-    with Session(engine) as s:
-        yield s
 
 
 def _make_user(session: Session) -> User:
@@ -72,11 +54,13 @@ def _make_position(session: Session, user: User, ts_code: str) -> Position:
     return p
 
 
-def test_detection_cycle_creates_run_per_user(session, monkeypatch):
+def test_detection_cycle_creates_run_per_user(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """每个有持仓的 user 在该 cycle 内一行 monitoring_run."""
-    user = _make_user(session)
-    _make_position(session, user, "600519.SH")
-    session.commit()
+    user = _make_user(db_session)
+    _make_position(db_session, user, "600519.SH")
+    db_session.commit()
 
     # Mock SignalDetector 全 GREEN
     mock_detector = MagicMock()
@@ -89,20 +73,22 @@ def test_detection_cycle_creates_run_per_user(session, monkeypatch):
 
     with (
         patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
-        patch("app.tasks.monitoring._get_session", return_value=session),
+        patch("app.tasks.monitoring._get_session", return_value=db_session),
     ):
         from app.tasks.monitoring import detection_cycle
 
         detection_cycle.apply().get()
 
-    runs = session.query(MonitoringRun).all()
+    runs = db_session.query(MonitoringRun).filter_by(user_id=user.id).all()
     assert len(runs) >= 1
 
 
-def test_detection_cycle_yellow_creates_alert_with_pending_status(session, monkeypatch):
-    user = _make_user(session)
-    _make_position(session, user, "600519.SH")
-    session.commit()
+def test_detection_cycle_yellow_creates_alert_with_pending_status(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _make_user(db_session)
+    _make_position(db_session, user, "600519.SH")
+    db_session.commit()
 
     mock_detector = MagicMock()
     mock_detector.detect = AsyncMock(
@@ -119,27 +105,29 @@ def test_detection_cycle_yellow_creates_alert_with_pending_status(session, monke
 
     with (
         patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
-        patch("app.tasks.monitoring._get_session", return_value=session),
+        patch("app.tasks.monitoring._get_session", return_value=db_session),
         patch("app.tasks.monitoring.generate_detail_card.delay", side_effect=_fake_delay),
     ):
         from app.tasks.monitoring import detection_cycle
 
         detection_cycle.apply().get()
 
-    alerts = session.query(MonitoringAlert).all()
+    alerts = db_session.query(MonitoringAlert).filter_by(user_id=user.id).all()
     assert len(alerts) == 1
     assert alerts[0].alert_level == "yellow"
     assert alerts[0].detail_status == DetailStatus.PENDING
     assert len(enqueued) == 1  # generate_detail_card enqueued for the alert
 
 
-def test_detection_cycle_dedupes_ts_code_across_users(session, monkeypatch):
+def test_detection_cycle_dedupes_ts_code_across_users(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """同 ts_code 跨 user 共享 SignalDetector 一次调用(spec § 4.5 去重节省 cost)."""
-    u1 = _make_user(session)
-    u2 = _make_user(session)
-    _make_position(session, u1, "600519.SH")
-    _make_position(session, u2, "600519.SH")
-    session.commit()
+    u1 = _make_user(db_session)
+    u2 = _make_user(db_session)
+    _make_position(db_session, u1, "600519.SH")
+    _make_position(db_session, u2, "600519.SH")
+    db_session.commit()
 
     detect_calls = []
     mock_detector = MagicMock()
@@ -152,7 +140,7 @@ def test_detection_cycle_dedupes_ts_code_across_users(session, monkeypatch):
 
     with (
         patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
-        patch("app.tasks.monitoring._get_session", return_value=session),
+        patch("app.tasks.monitoring._get_session", return_value=db_session),
     ):
         from app.tasks.monitoring import detection_cycle
 
@@ -161,12 +149,14 @@ def test_detection_cycle_dedupes_ts_code_across_users(session, monkeypatch):
     assert detect_calls.count("600519.SH") == 1  # 去重
 
 
-def test_detection_cycle_updates_position_last_quote(session, monkeypatch):
+def test_detection_cycle_updates_position_last_quote(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """spec § 4.5 顺手刷新 Position.last_quote_price/at."""
-    user = _make_user(session)
-    pos = _make_position(session, user, "600519.SH")
+    user = _make_user(db_session)
+    pos = _make_position(db_session, user, "600519.SH")
     pos_id = pos.id  # capture before impl session.close() detaches the instance
-    session.commit()
+    db_session.commit()
 
     mock_detector = MagicMock()
     mock_detector.detect = AsyncMock(
@@ -185,12 +175,12 @@ def test_detection_cycle_updates_position_last_quote(session, monkeypatch):
 
     with (
         patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
-        patch("app.tasks.monitoring._get_session", return_value=session),
+        patch("app.tasks.monitoring._get_session", return_value=db_session),
     ):
         from app.tasks.monitoring import detection_cycle
 
         detection_cycle.apply().get()
 
-    refreshed = session.query(Position).filter_by(id=pos_id).one()
+    refreshed = db_session.query(Position).filter_by(id=pos_id).one()
     assert refreshed.last_quote_price == Decimal("1500.0")
     assert refreshed.last_quote_at is not None
