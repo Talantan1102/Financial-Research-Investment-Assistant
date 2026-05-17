@@ -61,3 +61,22 @@ def test_fetch_returns_empty_when_no_data() -> None:
     loader = GroundTruthLoader(inner=inner)
     assert loader.fetch_post_cut_off_kline("X", date(2024, 6, 30)) == []
     assert loader.fetch_post_cut_off_anns("X", date(2024, 6, 30)) == []
+
+
+def test_fetch_post_cut_off_kline_returns_ascending_order() -> None:
+    """tushare daily 默认 descending — adapter must sort ascending so kline[-1] = latest."""
+    inner = _FakeTushare(
+        kline=[
+            # simulate tushare descending order
+            {"trade_date": "20240901", "close": 1750.0},
+            {"trade_date": "20240801", "close": 1650.0},
+            {"trade_date": "20240701", "close": 1550.0},
+        ],
+        anns=[],
+    )
+    loader = GroundTruthLoader(inner=inner)
+    rows = loader.fetch_post_cut_off_kline("600519.SH", date(2024, 6, 30), horizon_days=90)
+    dates = [r["trade_date"] for r in rows]
+    assert dates == ["20240701", "20240801", "20240901"]
+    # kline[-1] is the latest day, as T2.5 _direction_correct contract requires
+    assert rows[-1]["close"] == 1750.0

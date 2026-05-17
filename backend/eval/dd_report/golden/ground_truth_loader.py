@@ -35,13 +35,18 @@ class GroundTruthLoader:
         cut_off: date,
         horizon_days: int = 90,
     ) -> list[dict[str, Any]]:
-        """取 cut_off 之后 horizon_days 天的日 K (含 cut_off 当天 +1, 不含 cut_off 当天).
+        """取 cut_off 之后 horizon_days 天的日 K (rows sorted ascending by trade_date — kline[-1] = latest day within horizon, T2.5 _direction_correct contract).
 
         用于 M4 prediction metric: cut_off 后股价方向 / 目标价命中检测。
         """
         start = (cut_off + timedelta(days=1)).strftime("%Y%m%d")
         end = (cut_off + timedelta(days=horizon_days)).strftime("%Y%m%d")
         rows = self.inner.daily(ts_code=ts_code, start_date=start, end_date=end)
+        # tushare daily returns descending by default; sort ascending for callers that index kline[-1]
+        rows = sorted(rows, key=lambda r: r.get("trade_date", ""))
+        # missing trade_date defaults to "" — falls below `start` so row drops (correct
+        # behavior in post-cut-off window; cf. Phase 1 TushareBacktestAdapter uses
+        # "99999999" sentinel for pre-cut-off filter where missing = future = drop)
         return [r for r in rows if start <= r.get("trade_date", "") <= end]
 
     def fetch_post_cut_off_anns(
@@ -57,4 +62,7 @@ class GroundTruthLoader:
         start = (cut_off + timedelta(days=1)).strftime("%Y%m%d")
         end = (cut_off + timedelta(days=horizon_days)).strftime("%Y%m%d")
         rows = self.inner.anns(ts_code=ts_code, start_date=start, end_date=end)
+        # missing ann_date defaults to "" — falls below `start` so row drops (correct
+        # behavior in post-cut-off window; cf. Phase 1 TushareBacktestAdapter uses
+        # "99999999" sentinel for pre-cut-off filter where missing = future = drop)
         return [r for r in rows if start <= r.get("ann_date", "") <= end]
