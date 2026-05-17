@@ -155,3 +155,96 @@ final commit,所有 9 个 orphan commit 重新 reachable。Working tree 同步,�
    独立。Plan 假设的 cross-LLM matrix 必须按 user 实际可用模型回头改
 3. **subagent git workflow** — `git checkout` 改用 `git switch`(更明确切 branch
    语义,detached 时报错),写进 finishing-a-development-branch skill 守护
+
+---
+
+## 2026-05-17 后续 — User 决策切 DashScope provider
+
+User 明确 "项目内不调用 OpenRouter / OpenAI / Claude 模型", architecture
+decision 全 stack 切 DashScope (跟生产 LLMService 同 provider, 跟
+`app/config/llm_config.py` env 命名一致)。
+
+### 切换实施(commit `8e13f3a`)
+
+- `LLMSwapper` OPENROUTER → DashScope (`DASHSCOPE_BASE_URL` + `DASHSCOPE_API_KEY`)
+- `BACKTEST_EVALUATOR_MODELS = (deepseek-v4-flash, qwen-plus, qwen-max)`
+- `CompositeJudgeMetric._DEFAULT_JUDGE_MODELS` 同步 + drop Claude
+- 8 个 Phase 1/2 test 文件 batch sed model id rename
+- 3 cassette 重录 (DashScope real LLM response)
+- dogfood script env + model id 更新
+
+### 撞实工业问题 5 — cassette default 录 Authorization Bearer 明文
+
+切 DashScope 后跑 3 个 L1 cassette test, 默认 vcr.use_cassette 把
+`Authorization: Bearer sk-...` header 写进 yaml 文件。pre-commit hook
+`check-cassette-credentials` 会 block, 但更严重的是磁盘上裸 token 泄漏。
+
+**修复 (in 8e13f3a)**: `vcr.use_cassette(filter_headers=['authorization',
+'x-api-key'])` — 录制时 mask header value 为 `"REDACTED"`。验证 yaml 文件 grep
+`Bearer\|sk-` 应为空。
+
+**Plan 沉淀**: 任何新加 cassette test, **必须** 配 `filter_headers`,跟
+existing cassette test pattern 一致(参考 `backend/tests/e2e/*_cassette.py`)。
+写进 spec 测试规范段落或 conftest fixture 强制。
+
+### 妥协(必须在简历/spec 透明)
+
+- 接受 `spec § 4.1 决策 1` 在 DashScope-only provider 下**实际不可行**:
+  DashScope 主推模型 cutoff ≥ 2024 (`deepseek-v4` 是 2026-04, qwen-plus/max
+  也是 2024+), 跑 2024-2025 backtest case 时 LLM 训练数据已包含真实结果, leak。
+- 实际可行的 backtest 范围只剩 **sanity 副线** (`cut_off=2026-04-30`,
+  模型 cutoff 之后,leak-free)
+- 简历叙事调整: 从 "leak-free backtest via multi-provider cross-LLM" 改为
+  "single-provider 约束下的 sanity-only backtest + ablation 控制变量量化组件贡献"
+- 这跟 spec § 9 风险 #1 (LLM swap 后表现差异) 收敛: 接受 sanity-only 验证
+
+### 验证完成
+
+- `git checkout feat/external-agent-survey at b7eac2e` then ff-merge **branch
+  ref 修复**(orphan commit chain recover)
+- `uv run pytest backend/tests/eval/dd_report/ -v` → **98 PASS, 0 SKIPPED**
+  (3 L1 cassette test 真 DashScope LLM call + record cassette)
+- 3 cassette 文件 grep `Bearer\|sk-` empty(filter_headers 起效)
+- `run_phase2_ablation_dogfood.py` 真跑 4×8=32 backtest **全 completed**
+  (git_sha=`8e13f3a`, 2026-05-17, 约 5 min wall time)
+
+### 真 4×5 矩阵 (dogfood 结果)
+
+```
+Variant              |     M1 |     M2 |     M3 |     M4 |     M5
+V0_baseline          |   0.00 |   1.00 |   1.00 |    N/A |   1.38
+V1_no_rag            |   0.00 |   1.00 |   1.00 |    N/A |   1.38
+V2_no_multi_agent    |   0.00 |   1.00 |   1.00 |    N/A |   1.33
+V3_no_critic         |   0.00 |   1.00 |   1.00 |    N/A |   1.38
+```
+
+**Ablation 信号 无意义** — 4 variant 都走 SingleAgentPipeline fallback
+(production_factory 未真接生产 ResearchAgent), 所以 V0≈V1≈V2≈V3。这是预期的
+T2.11 deferred 状态, **不是 framework bug**。等真接生产 ResearchAgent 后
+重跑才有真 ablation 对比。
+
+**Metric 单独信号**(各自有意义):
+- **M5=1.33-1.38** (满分 10) — **3 个 DashScope LLM 真评分** 都给 minimal
+  stub 极低分(deepseek-v4-flash + qwen-plus + qwen-max consensus), 验
+  multi-LLM consensus pipeline 真 work。**这是 32 case × 3 LLM = 96 真
+  LLM call 的真数字**。
+- **M1=0.00** — KB client deferred, SingleAgentPipeline 又没 evidence,
+  citation_coverage 自然 0。**当 user 真接生产 ResearchAgent 后, M1 应
+  ramp 到 0.3-0.7 区间**(看 production writer 是否真填 evidence list)。
+- **M2=1.00 / M3=1.00** — vacuous (TUSHARE_TOKEN 缺 + stub report 无
+  RiskItem)。这是兜底逻辑触发,**不代表"M2/M3 真好"**,只代表"没分母"。
+- **M4=N/A** — ground_truth (后续股价 + 公告) 拿不到 (TUSHARE_TOKEN 缺)。
+
+### 框架真 end-to-end 验证 ✅
+
+- 32 backtest_runs 行写 DB, 全 status='completed'
+- 32 eval_results 行(per case 5 metric scores JSON)
+- AblationRunner 4×8 笛卡尔积调度成功
+- MetricRegistry 5 metric 全 call
+- LeakDetector wire 进 BacktestRunner.run_one, enable_leak_detection=True
+  没触发(stub 内容无 future date)
+- M5 真调 DashScope 3 model × 32 case = 96 真 LLM call, mean=1.38,
+  disagreement 跨 LLM 一致 (3 LLM 都看出 stub 是 garbage)
+- DashScope 本次 dogfood 真 cost ≈ 1 USD ≈ 7 RMB (vs OpenRouter 预算 35 RMB)
+
+### Phase 2 框架 = 真可用,real ablation 数字推 user 手动接生产 ResearchAgent
