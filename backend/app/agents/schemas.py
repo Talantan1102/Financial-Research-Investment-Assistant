@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.agents.debate_schemas import DebateTrace
 from app.agents.escalation_protocol import Entity, Preference, ToolResultRef
 from app.agents.investment_dd_schema import InvestmentDueDiligenceReport, ValuationAnalysis
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
@@ -379,6 +380,7 @@ CriticDimension = Literal[
     "conciseness",
     "input_context_appropriateness",
     "valuation_consistency",  # v1.x A5a (第 7 维)
+    "dialectical_balance",  # v1.x A5b (第 8 维)
     # plan_correctness removed in v1.x (Validator replaces it; see 2026-05-15 spec § 7.1)
 ]
 
@@ -497,4 +499,10 @@ class ResearchState(BaseModel):
             "v1.x A5a Analyst 节点产出的多模型估值 cross-check;"
             "Writer post_process 拷到 report.financial_analysis.valuation_analysis"
         ),
+    )
+
+    # v1.x A5b: Bull/Bear debate 完整 trace
+    debate_trace: DebateTrace | None = Field(
+        default=None,
+        description="v1.x A5b: 4 round LLM call 完整 trace + 总 cost + latency",
     )
