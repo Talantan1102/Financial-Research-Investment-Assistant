@@ -4,8 +4,8 @@
 Spec: docs/superpowers/specs/2026-05-10-c5-cross-session-memory-design.md § 2
 
 设计取舍:
-- PgUUID + with_variant(String(36), "sqlite") — L0 unit test sqlite override 友好
-- JSONB + with_variant(JSON, "sqlite") — 同上
+- PgUUID — PG-only, L0/L1 测试走真 PG fixture (db_session)
+- JSONB — 同上
 - tsvector GENERATED + partial index — SQLAlchemy 表达力受限, 留 SQL migration
 - importance CHECK 三档(0.9/0.5/0.2) — § 11 末尾 #3 算法深度补丁
 - 幂等键 UNIQUE — § 11 末尾 #5 三方一致性补丁
@@ -18,7 +18,6 @@ from __future__ import annotations
 from uuid import uuid4
 
 from sqlalchemy import (
-    JSON,
     CheckConstraint,
     Column,
     DateTime,
@@ -39,11 +38,11 @@ from sqlalchemy.sql import func
 from app.core.database import Base
 
 # ---------------------------------------------------------------------------
-# Type adapters: L0 sqlite override fallback
+# Type adapters: PG-only (PR-A 2026-05-17 删 sqlite-variant fallback)
 # ---------------------------------------------------------------------------
 
-_UUID = PgUUID(as_uuid=True).with_variant(String(36), "sqlite")
-_JSONB = JSONB().with_variant(JSON, "sqlite")
+_UUID = PgUUID(as_uuid=True)
+_JSONB = JSONB()
 _TS = DateTime(timezone=True)
 
 
