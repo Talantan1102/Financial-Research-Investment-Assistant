@@ -6,15 +6,16 @@ L1: real LLM judge via cassette, 验 prompt 不漂。
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
 import pytest
 from eval.dd_report.metrics.base import CaseMeta, MetricInputs
-from eval.dd_report.metrics.citation_metric import CitationMetric
+from eval.dd_report.metrics.citation_metric import CitationMetric, _EvaluatorJudge
 
 
-def _fake_kb_lookup(known: dict[str, str]):
+def _fake_kb_lookup(known: dict[str, str]) -> Callable[[str], dict[str, Any] | None]:
     def lookup(chunk_id: str) -> dict[str, Any] | None:
         text = known.get(chunk_id)
         if text is None:
@@ -57,9 +58,9 @@ def test_perfect_citation_gives_precision_1_recall_1() -> None:
     kb = {"chunk-1": "贵州茅台是大白马"}
     metric = CitationMetric(judge=_FakeJudge(), section_paths=("target_overview",))
     r = metric.compute(_make_inputs(report, kb))
-    assert r.value is not None
+    assert r.value == 1.0
     assert r.details["precision"] == 1.0
-    assert r.details["recall"] == 1.0
+    assert r.details["citation_coverage"] == 1.0
 
 
 def test_missing_chunk_id_zero_precision_for_that_section() -> None:
@@ -73,8 +74,8 @@ def test_missing_chunk_id_zero_precision_for_that_section() -> None:
     r = metric.compute(_make_inputs(report, {}))
     assert r.details["lookup_failures"] == 1
     assert r.details["precision"] == 0.0
-    # has_evidence True 即使 lookup_fail; recall 衡量 "section 有写 evidence" 比例
-    assert r.details["recall"] == 1.0
+    # has_evidence True 即使 lookup_fail; citation_coverage 衡量 "section 有写 evidence" 比例
+    assert r.details["citation_coverage"] == 1.0
 
 
 def test_no_evidence_zero_recall_perfect_precision_vacuous() -> None:
@@ -86,7 +87,7 @@ def test_no_evidence_zero_recall_perfect_precision_vacuous() -> None:
     }
     metric = CitationMetric(judge=_FakeJudge(), section_paths=("target_overview",))
     r = metric.compute(_make_inputs(report, {}))
-    assert r.details["recall"] == 0.0
+    assert r.details["citation_coverage"] == 0.0
     # precision vacuously 1.0 (no cited chunks)
     assert r.details["precision"] == 1.0
 
@@ -112,7 +113,7 @@ def test_multiple_sections_micro_avg() -> None:
     )
     r = metric.compute(_make_inputs(report, kb))
     assert r.details["precision"] == 1.0
-    assert r.details["recall"] == 1.0
+    assert r.details["citation_coverage"] == 1.0
     assert r.details["sections_with_evidence"] == 2
 
 
@@ -124,7 +125,7 @@ def test_main_value_is_f1_of_precision_recall() -> None:
         },
         "industry_analysis": {
             "narrative": "测试",
-            "evidence": [],  # 这个 section 无 evidence -> recall 拉低
+            "evidence": [],  # 这个 section 无 evidence -> citation_coverage 拉低
         },
     }
     kb = {"chunk-1": "茅台行业"}
@@ -132,9 +133,29 @@ def test_main_value_is_f1_of_precision_recall() -> None:
         judge=_FakeJudge(), section_paths=("target_overview", "industry_analysis")
     )
     r = metric.compute(_make_inputs(report, kb))
-    # precision = 1/1 = 1.0, recall = 1/2 = 0.5
+    # precision = 1/1 = 1.0, citation_coverage = 1/2 = 0.5
     # F1 = 2 * 1 * 0.5 / 1.5 = 2/3
     assert r.value == pytest.approx(2 / 3, rel=1e-4)
+
+
+def test_recall_denominator_uses_required_sections_not_present_sections() -> None:
+    """Ablation fix: stripped reports must not artificially score citation_coverage=1.0
+    by virtue of having fewer sections. Using all 6 default sections, a 1-section
+    report with 1 evidence should score citation_coverage = 1/6, NOT 1/1.
+    """
+    report = {
+        "target_overview": {
+            "narrative": "茅台是大白马",
+            "evidence": ["chunk-1"],
+        },
+        # only 1 of 6 default sections present
+    }
+    kb = {"chunk-1": "茅台稳健"}
+    metric = CitationMetric(judge=_FakeJudge())  # default 6 section_paths
+    r = metric.compute(_make_inputs(report, kb))
+    assert r.details["n_sections_present"] == 1
+    assert r.details["n_sections_required"] == 6
+    assert r.details["citation_coverage"] == pytest.approx(1 / 6)
 
 
 # ---------------------------------------------------------------------------
@@ -147,23 +168,6 @@ from pathlib import Path
 import vcr
 
 CASSETTE_DIR = Path(__file__).parent / "cassettes"
-
-
-class _EvaluatorJudge:
-    """Wrap EvaluatorClient.chat into SupportsJudgeProtocol."""
-
-    def __init__(self, client: Any) -> None:
-        self._client = client
-
-    def supports(self, claim: str, chunk_text: str) -> bool:
-        prompt = (
-            f"判断下述 chunk 内容是否支持声明。chunk 必须明确陈述声明的事实"
-            f"或紧密相关的事实, 才算 'supports'。\n\n"
-            f"声明: {claim}\n\nchunk: {chunk_text}\n\n"
-            f'严格输出一行 JSON: {{"supports": true}} 或 {{"supports": false}}'
-        )
-        out = self._client.chat(prompt=prompt)
-        return '"supports": true' in out.lower() or '"supports":true' in out.lower()
 
 
 @pytest.mark.skipif(

@@ -1,8 +1,15 @@
-"""M1 CitationMetric — extraction precision/recall (spec § 4.2).
+"""M1 CitationMetric — extraction precision / citation_coverage (spec § 4.2).
 
-precision = chunks that LOOK UP + SUPPORT claim / total cited chunks
-recall    = sections with non-empty evidence / total sections evaluated
-value     = F1(precision, recall)
+precision         = chunks that look up AND judge confirms supports claim / total cited
+citation_coverage = sections with non-empty evidence / total sections required
+value             = F1(precision, citation_coverage)
+
+NOTE on naming: spec § 4.2 calls the right-hand component "recall", but
+implementation-wise it is a citation-coverage signal (only checks evidence list
+is non-empty, does NOT invoke the judge), not IR-recall (would require atomic
+claim decomposition + per-claim judge). The BacktestMetricScores schema field
+is still named `m1_citation_recall` for spec consistency; T2.7 wires
+`details["citation_coverage"]` into that field.
 
 简化(spec § 4.2 v0):
 - claim = section.narrative 整体 (atomic claim 拆解推到 v1.x)
@@ -12,6 +19,7 @@ value     = F1(precision, recall)
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -74,23 +82,69 @@ class CitationMetric:
                 else:
                     unsupported_log.append(f"{path}:{chunk_id}")
 
-        n_sections = sum(1 for p in self.section_paths if isinstance(inputs.report.get(p), dict))
+        n_sections_present = sum(
+            1 for p in self.section_paths if isinstance(inputs.report.get(p), dict)
+        )
+        n_sections_required = len(self.section_paths)
         precision = supports / total_cited if total_cited else 1.0
-        recall = sections_with_evidence / n_sections if n_sections else 1.0
-        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        citation_coverage = (
+            sections_with_evidence / n_sections_required if n_sections_required else 1.0
+        )
+        f1 = (
+            2 * precision * citation_coverage / (precision + citation_coverage)
+            if (precision + citation_coverage) > 0
+            else 0.0
+        )
 
         return MetricResult(
             name=self.name,
             value=f1,
             details={
                 "precision": precision,
-                "recall": recall,
+                # T2.7 wire: m1_citation_recall = m1.details.get("citation_coverage", 1.0)
+                "citation_coverage": citation_coverage,
                 "total_cited": total_cited,
                 "supports": supports,
                 "lookup_failures": lookup_failures,
                 "sections_with_evidence": sections_with_evidence,
-                "n_sections": n_sections,
+                "n_sections_present": n_sections_present,
+                "n_sections_required": n_sections_required,
                 "failed_cites": failed_cite_log[:20],
                 "unsupported_cites": unsupported_log[:20],
             },
         )
+
+
+class _EvaluatorJudge:
+    """Wraps EvaluatorClient.chat into SupportsJudgeProtocol.
+
+    Exported for T2.7 wire + T2.11 dogfood factory. The prompt is intentionally
+    minimal — the supports judgement is a simple binary classification.
+    """
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    def supports(self, claim: str, chunk_text: str) -> bool:
+        prompt = (
+            f"判断下述 chunk 内容是否支持声明。chunk 必须明确陈述声明的事实"
+            f"或紧密相关的事实, 才算 'supports'。\n\n"
+            f"声明: {claim}\n\nchunk: {chunk_text}\n\n"
+            f'严格输出一行 JSON: {{"supports": true}} 或 {{"supports": false}}'
+        )
+        out = self._client.chat(prompt=prompt)
+        return _parse_supports(out)
+
+
+def _parse_supports(text: str) -> bool:
+    """Parse {"supports": bool} JSON, fallback to substring match for robustness."""
+    if not text:
+        return False
+    try:
+        d = json.loads(text.strip())
+        if isinstance(d, dict) and "supports" in d:
+            return bool(d["supports"])
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    lo = text.lower()
+    return '"supports": true' in lo or '"supports":true' in lo
