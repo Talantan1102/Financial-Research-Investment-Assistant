@@ -88,7 +88,7 @@ class AblationRunner:
                             status="completed",
                         )
                     )
-                except Exception as e:
+                except Exception as e:  # noqa: BLE001 — per-case fail-soft: ablation matrix must not abort on single failure
                     results.append(
                         AblationRunResult(
                             variant=variant.value,
