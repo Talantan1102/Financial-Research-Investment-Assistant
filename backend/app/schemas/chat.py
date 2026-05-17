@@ -99,7 +99,7 @@ class ChatResponse(BaseModel):
 
     role: str = Field(..., description="角色（assistant或error）")
     content: str = Field(..., description="内容")
-    thinking: bool | None = Field(False, description="是否为思考过程")
+    thinking: str | None = Field(None, description="思考过程")
 
 
 # ========== 聊天附件相关 Schema ==========

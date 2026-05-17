@@ -359,7 +359,7 @@ async def upload_document(
     db.refresh(doc)
 
     # 获取数据库会话工厂
-    from core.database import SessionLocal
+    from app.core.database import SessionLocal
 
     # 在后台处理文档
     background_tasks.add_task(process_document, str(doc.id), file_path, kb.name, SessionLocal)

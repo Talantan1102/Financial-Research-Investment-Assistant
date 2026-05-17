@@ -215,7 +215,7 @@ async def upload_attachment(
     db.refresh(att)
 
     # 后台处理附件
-    from core.database import SessionLocal
+    from app.core.database import SessionLocal
 
     background_tasks.add_task(process_attachment, str(att.id), file_path, SessionLocal)
 

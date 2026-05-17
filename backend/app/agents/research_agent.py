@@ -59,7 +59,7 @@ class ResearchAgent:
             tool_results (for EvalRunner tool_correctness scoring), and
             ``request_id`` echo.
         """
-        config = {"configurable": {"thread_id": f"research:eval:{request_id}"}}
+        config = {"configurable": {"thread_id": f"research:{request_id}"}}
         initial = ResearchState(
             user_id="eval",
             session_id=request_id,
