@@ -8,9 +8,10 @@ mean <= 4         -> low_quality (push 到 dogfood loop)
 可重复性 (spec § 7.3): temperature=0 强制, 同 prompt 跑 3 次 majority 决策稳定 > 80%
 — 测试在 conftest fixture + 单独 stress test (本 task 不实施, Phase 5 dogfood 时拉)。
 
-partial-failure tolerance: 1 broken judge out of 3 不抛, 用 5.0 中性分代替 +
-parse_failures counter +1. 不同于 M1/M3 raise ValueError 的 silent-fail 防御 —
-M5 设计上需要 cross-LLM 共识, 失去 1 个 judge 不应整体 fail。
+partial-failure tolerance: 1 broken judge out of 3 不抛 (covers both client.chat()
+exception AND unparseable response), 用 5.0 中性分代替 + parse_failures counter +1.
+不同于 M1/M3 raise ValueError 的 silent-fail 防御 — M5 设计上需要 cross-LLM 共识,
+失去 1 个 judge 不应整体 fail。
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import re
 from dataclasses import dataclass
 from statistics import median
 
+from eval.dd_report.llm_swapper import EvaluatorClient
 from eval.dd_report.metrics.base import MetricInputs, MetricResult
 
 _PROMPT_TEMPLATE = """你是金融研究助手报告的评审员。给定下述 InvestmentDueDiligenceReport 内容,
@@ -51,11 +53,17 @@ class CompositeJudgeMetric:
     low_quality_threshold: float = _LOW_QUALITY_THRESHOLD
 
     def compute(self, inputs: MetricInputs) -> MetricResult:
-        clients_needed = [inputs.evaluator_clients.get(m) for m in self.judge_models]
-        present = [c for c in clients_needed if c is not None]
-        if len(present) < 3:
+        # 装配 (model, client) 对; 跳过缺失的 client 但保留正确的 label 配对
+        resolved: list[tuple[str, EvaluatorClient]] = []
+        for model in self.judge_models:
+            client = inputs.evaluator_clients.get(model)
+            if client is None:
+                continue
+            resolved.append((model, client))
+
+        if len(resolved) < 3:
             raise ValueError(
-                f"CompositeJudgeMetric needs at least 3 evaluator clients, got {len(present)}"
+                f"CompositeJudgeMetric needs at least 3 evaluator clients, got {len(resolved)}"
             )
 
         report_json = json.dumps(inputs.report, ensure_ascii=False)[:4000]
@@ -66,8 +74,20 @@ class CompositeJudgeMetric:
         raw_scores: list[dict[str, object]] = []
         parse_failures = 0
         scores_only: list[float] = []
-        for model, client in zip(self.judge_models, present, strict=False):
-            out = client.chat(prompt=prompt)
+        for model, client in resolved:
+            try:
+                out = client.chat(prompt=prompt)
+            except Exception as exc:  # noqa: BLE001 — partial-failure tolerance spec § 4.3
+                parse_failures += 1
+                scores_only.append(_DEFAULT_SCORE)
+                raw_scores.append(
+                    {
+                        "model": model,
+                        "score": None,
+                        "raw": f"<exception: {exc!r}>"[:200],
+                    }
+                )
+                continue
             parsed = _parse_score(out)
             if parsed is None:
                 parse_failures += 1

@@ -35,7 +35,7 @@ class _FakeGroundTruth:
         return self._anns
 
 
-def _make_inputs(report: dict, gt: _FakeGroundTruth) -> MetricInputs:
+def _make_inputs(report: dict[str, Any], gt: _FakeGroundTruth) -> MetricInputs:
     return MetricInputs(
         report=report,
         case_meta=CaseMeta("bt-test", "600519.SH", "茅台", date(2024, 6, 30)),
@@ -46,7 +46,7 @@ def _make_inputs(report: dict, gt: _FakeGroundTruth) -> MetricInputs:
     )
 
 
-def _report_buy_target_1700_1900_risk(risk_titles: list[str]) -> dict:
+def _report_buy_target_1700_1900_risk(risk_titles: list[str]) -> dict[str, Any]:
     return {
         "target_close_price_at_gen": 1500.0,
         "investment_recommendation": {

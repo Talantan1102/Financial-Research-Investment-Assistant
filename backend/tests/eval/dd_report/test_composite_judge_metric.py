@@ -28,7 +28,7 @@ class _FakeClient:
         return f'{{"score": {self._score}, "reasoning": "{self._evidence}"}}'
 
 
-def _make_inputs(clients: dict) -> MetricInputs:
+def _make_inputs(clients: dict[str, Any]) -> MetricInputs:
     return MetricInputs(
         report={
             "target_name": "茅台",
@@ -159,3 +159,53 @@ def test_l1_composite_judge_3llm_via_cassette() -> None:
     assert r.value is not None
     assert 0 <= r.value <= 10
     assert len(r.details["per_judge"]) == 3
+
+
+def test_judge_models_override_with_missing_client_pairs_labels_correctly() -> None:
+    """Fix 1 guard: judge_models override with one missing client must pair labels
+    correctly. Previously zip(judge_models, present) misaligned labels in per_judge."""
+    clients = {
+        "gpt-4o-2024-05-13": _FakeClient(9, evidence="gpt-says-nine"),
+        # "qwen2.5-72b-instruct" intentionally missing
+        "deepseek-v3": _FakeClient(7, evidence="ds-says-seven"),
+        "claude-sonnet-4": _FakeClient(8, evidence="claude-says-eight"),
+    }
+    m = CompositeJudgeMetric(
+        judge_models=(
+            "gpt-4o-2024-05-13",
+            "qwen2.5-72b-instruct",
+            "deepseek-v3",
+            "claude-sonnet-4",
+        ),
+    )
+    r = m.compute(_make_inputs(clients))
+    # 3 present clients, qwen skipped — labels must match the right scores
+    labels = [j["model"] for j in r.details["per_judge"]]
+    scores = [j["score"] for j in r.details["per_judge"]]
+    assert labels == ["gpt-4o-2024-05-13", "deepseek-v3", "claude-sonnet-4"]
+    assert scores == [9.0, 7.0, 8.0]
+
+
+def test_judge_chat_exception_handled_as_parse_failure() -> None:
+    """Fix 2 guard: client.chat() exception treated as parse failure (neutral 5.0
+    + parse_failures += 1 + exception captured in raw). Critical for T2.11 ablation
+    where 1 auth fail otherwise breaks entire compute()."""
+
+    class _ExplodingClient:
+        def chat(self, prompt: str, response_format: Any = None) -> str:
+            raise RuntimeError("simulated APIError: rate limit exceeded")
+
+    clients = {
+        "gpt-4o-2024-05-13": _ExplodingClient(),
+        "qwen2.5-72b-instruct": _FakeClient(8),
+        "deepseek-v3": _FakeClient(7),
+    }
+    m = CompositeJudgeMetric()
+    r = m.compute(_make_inputs(clients))
+    # exception → 5.0 + 8 + 7 = 20/3
+    assert r.details["mean"] == pytest.approx(20 / 3)
+    assert r.details["parse_failures"] >= 1
+    # exception detail captured in raw_scores
+    raws = [j for j in r.details["per_judge"] if j["score"] is None]
+    assert len(raws) >= 1
+    assert "exception" in str(raws[0]["raw"]).lower()
