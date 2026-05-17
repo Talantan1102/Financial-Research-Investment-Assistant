@@ -4,21 +4,16 @@
 - 4 model 类可 import + tablename 正确
 - 字段名 / 类型 / nullable 跟契约 § 4 对齐
 - UNIQUE / CHECK constraint 在 metadata 里被识别
-- create_all() on sqlite override 不报错
 """
 
 from __future__ import annotations
 
-import pytest
-from app.core.database import Base
 from app.memory.models import (
     ChatMemoryEdge,
     ChatMemoryEpisode,
     ChatMemoryNode,
     ChatMemoryWorkingBlock,
 )
-from sqlalchemy import create_engine, inspect
-from sqlalchemy.orm import sessionmaker
 
 # ---------------------------------------------------------------------------
 # 1. tablenames + import smoke
@@ -161,59 +156,7 @@ def test_episode_indexes() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 5. create_all() on sqlite — 跨 dialect 兼容(L0 友好)
+# 5. create_all() on PG — 现在所有 L0/L1 都走真 PG (conftest db_session fixture);
+# fixture 启动时 DROP SCHEMA + create_all,已经隐含验证 schema 可建。本文件不再
+# 单独跑 create_all smoke。
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def sqlite_session():  # noqa: ANN201
-    """fresh sqlite + create_all of only chat_memory_* + FK target tables.
-
-    NOTE: 仓库其它 model(如 industry_data.CompanyData)使用裸 JSONB 不带 sqlite
-    variant, 全 barrel `import app.models` 会让 sqlite create_all 在它们身上挂掉
-    (legacy 遗留)。本 fixture 只 import 必要 model: User / ChatSession (FK target)
-    + chat_memory_*, 然后用 metadata.create_all(tables=[...]) 选择性建表, 绕开
-    legacy JSONB 兼容性问题。
-    """
-    engine = create_engine("sqlite:///:memory:")
-
-    # 只 import 必要 model: FK target + 自己
-    from app.memory.models import (  # noqa: F401
-        ChatMemoryEdge as _Edge,
-    )
-    from app.memory.models import (  # noqa: F401
-        ChatMemoryEpisode as _Episode,
-    )
-    from app.memory.models import (  # noqa: F401
-        ChatMemoryNode as _Node,
-    )
-    from app.memory.models import (  # noqa: F401
-        ChatMemoryWorkingBlock as _Block,
-    )
-    from app.models.chat import ChatSession
-    from app.models.user import User
-
-    # 选择性 create_all — 仅这 6 张表(2 FK target + 4 c5)
-    target_tables = [
-        User.__table__,
-        ChatSession.__table__,
-        _Episode.__table__,
-        _Node.__table__,
-        _Edge.__table__,
-        _Block.__table__,
-    ]
-    Base.metadata.create_all(bind=engine, tables=target_tables)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
-
-
-def test_sqlite_create_all_works(sqlite_session) -> None:  # noqa: ANN001
-    """create_all on sqlite override 不抛 — proves with_variant 设置正确."""
-    insp = inspect(sqlite_session.bind)
-    tables = set(insp.get_table_names())
-    assert "chat_memory_episodes" in tables
-    assert "chat_memory_nodes" in tables
-    assert "chat_memory_edges" in tables
-    assert "chat_memory_working_blocks" in tables
