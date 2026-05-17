@@ -198,6 +198,47 @@ def _format_cross_check_block(state: ResearchState) -> str:
     )
 
 
+def _format_debate_block(state: ResearchState) -> str:
+    """v1.x A5b: 根据 state.debate_trace 产 narrative 引用约束 block。
+
+    debate_trace=None → "" (LLM 自由写, 跟 v0.8.5 一样)
+    rounds_completed=2 → 用 v2 (final 对抗后)
+    rounds_completed=1 → 用 v1 (round 2 失败 fallback)
+
+    spec ref: 2026-05-16-v1.x-bull-bear-debate-design.md § 8
+    """
+    trace = state.debate_trace
+    if trace is None:
+        return ""
+
+    if trace.rounds_completed == 2:
+        bull = trace.bull_v2
+        bear = trace.bear_v2
+        version = "v2 (round 2 后 final)"
+    else:
+        bull = trace.bull_v1
+        bear = trace.bear_v1
+        version = "v1 (round 2 失败 fallback)"
+
+    if bull is None or bear is None:
+        return ""
+
+    bull_block = "\n".join(f"  - {a}" for a in bull.arguments)
+    bear_block = "\n".join(f"  - {a}" for a in bear.arguments)
+
+    return (
+        f"\n\n# v1.x A5b debate cross-check 约束(Critic 第 8 维 dialectical_balance 守护)\n"
+        f"Bull/Bear advocate {version} 论据:\n\n"
+        f"看多 (Bull):\n{bull_block}\n"
+        f"  strongest: {bull.strongest_argument}\n\n"
+        f"看空 (Bear):\n{bear_block}\n"
+        f"  strongest: {bear.strongest_argument}\n\n"
+        f"**§ 6 投资建议 narrative 要求**:必须显式列举 **≥ 2 条 bull arguments + ≥ 2 条 bear arguments**;\n"
+        f"必须基于 strongest_bull + strongest_bear 综合给最终推荐。**禁止只挑一面之词**\n"
+        f"(打架 = signal, narrative 必须诚实双向论证)。\n"
+    )
+
+
 def _build_section6_constraint_block(state: ResearchState) -> str:
     """Build § 6 constraint block conditioned on all 6 input fields.
 
@@ -420,6 +461,10 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
     # LLM can correctly reference outlier diagnosis / consistency signal.
     cross_check_block = _format_cross_check_block(state)
 
+    # v1.x A5b — debate cross-check block (empty string when no debate_trace).
+    # Injects bull/bear final arguments + narrative bidirectional requirement.
+    debate_block = _format_debate_block(state)
+
     # v1.x — Critic factuality feedback for writer retry path (spec § 7.2 / Task 1.9).
     # When ResearchState.writer_critic_feedback is set (populated by
     # writer_retry_transition node when factuality < 7.0), inject a feedback
@@ -440,6 +485,7 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
         + section6_block
         + preference_block
         + cross_check_block  # v1.x A5a
+        + debate_block  # v1.x A5b
         + f"\n\n# Insights\n{insights_str}\n"
         + f"\n# 用户原始需求 / 标的信息\n{state.user_message}\n"
         + f"\n# 本次 request_id(填入 JSON 的 request_id 字段)\n{state.request_id}\n"
