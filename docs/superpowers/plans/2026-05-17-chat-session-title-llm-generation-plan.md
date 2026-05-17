@@ -54,7 +54,7 @@ import uuid
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.base import Base
+from app.core.database import Base
 from app.models.chat import ChatSession
 
 
@@ -141,7 +141,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.base import Base
+from app.core.database import Base
 from app.models.chat import ChatSession
 from app.scripts.backfill_title_source import backfill
 
@@ -216,9 +216,8 @@ def backfill(engine: Engine) -> int:
 
 
 if __name__ == "__main__":
-    from app.config.database import get_engine
+    from app.core.database import engine
 
-    engine = get_engine()
     n = backfill(engine)
     print(f"backfilled {n} old sessions to title_source='llm_generated'")
 ```
@@ -256,10 +255,10 @@ Edit `backend/app/app_main.py` — 在 lifespan startup 段(其他 startup 任�
 ```python
     # === title_source backfill (2026-05-17): 一次性 idempotent migration ===
     try:
-        from app.config.database import get_engine
+        from app.core.database import engine
         from app.scripts.backfill_title_source import backfill
 
-        n_backfilled = backfill(get_engine())
+        n_backfilled = backfill(engine)
         if n_backfilled:
             logger.info("backfilled %d old chat_sessions title_source=llm_generated", n_backfilled)
     except Exception as exc:  # noqa: BLE001
@@ -311,7 +310,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.base import Base
+from app.core.database import Base
 from app.models.chat import ChatMessage, ChatSession
 
 
@@ -503,7 +502,7 @@ import uuid
 
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.config.database import get_engine
+from app.core.database import engine
 from app.models.chat import ChatMessage, ChatSession
 from app.services.openai_client import build_llm_service_from_env
 from app.tasks.celery_app import celery_app
@@ -518,7 +517,7 @@ _MAX_ATTEMPTS = 3
 
 def _open_db_session() -> Session:
     """Indirection 给 unit test 用 monkeypatch."""
-    return sessionmaker(bind=get_engine())()
+    return sessionmaker(bind=engine)()
 
 
 def get_llm_service():
@@ -652,7 +651,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.base import Base
+from app.core.database import Base
 from app.models.chat import ChatMessage, ChatSession
 
 
@@ -852,7 +851,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.base import Base
+from app.core.database import Base
 from app.models.chat import ChatSession
 
 
@@ -860,7 +859,7 @@ from app.models.chat import ChatSession
 def client_with_seed(monkeypatch):
     """搭一个最小 fastapi app + sqlite + 1 个 session, 跳过 auth."""
     from app.app_main import app
-    from app.config.database import get_db
+    from app.core.database import get_db
 
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
