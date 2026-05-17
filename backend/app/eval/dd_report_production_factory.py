@@ -15,8 +15,8 @@ from typing import Any
 
 # Re-export judge wrappers (T2.2 / T2.4 ship the actual classes; here we just expose them
 # under app.eval namespace for T2.11 dogfood script convenience).
-from eval.dd_report.metrics.citation_metric import _EvaluatorJudge as _EvalJudge
-from eval.dd_report.metrics.risk_pairing_metric import _EvaluatorPairingJudge as _EvalPairing
+from eval.dd_report.metrics.citation_metric import EvaluatorJudge as _EvalJudge
+from eval.dd_report.metrics.risk_pairing_metric import EvaluatorPairingJudge as _EvalPairing
 
 
 def build_supports_judge(client: Any) -> _EvalJudge:

@@ -79,5 +79,12 @@ Run: `uv run python backend/scripts/run_phase2_ablation_dogfood.py`
 1. **真接 build_research_graph + 5 agents**:T2.11 production_factory 用 SingleAgentPipeline fallback (`app/eval/dd_report_production_factory.py`)。真接生产 pipeline 推 user follow-up,T2.8 已探索入口:`app/orchestration/research_graph.py::build_research_graph(planner, collector, analyst, writer, critic, *, checkpointer)`。
 2. **真 dogfood 4×8 ablation 数字**:dogfood script `backend/scripts/run_phase2_ablation_dogfood.py` ship 完;真跑需 OPENROUTER_API_KEY + TUSHARE_TOKEN + KB wire + 生产 pipeline。预算 ~28 RMB / 一轮。
 3. **康美 (600518.SH) 暴雷 case spike**:T2.5 留待 T2.11 dogfood 验,实际是否 cut_off=2024-06-30 后 180 天公告里有"退市/造假"关键词命中。
-4. **request_id collision (T2.7 review forward warn)**:同 case_id 在多 ablation variant 下复用,dashboard JOIN on request_id 会返多行;T2.11 dashboard 需用 backtest_run_id 区分。
+4. **request_id collision (Phase 3 必修, 不只是 forward warning)** — Phase 2 ablation 模式
+   `_write_eval_result` 用 `request_id = case.case_id`, 同一 case_id 在 4 个 ablation
+   variant run 下产生 4 行 eval_results 共享相同 request_id。`eval_results.idx_eval_request`
+   index 设计基于 "1 request_id = 1 result" 假设(chat-path),`EvalRecorder.load_results_for_request`
+   会返多行。当前 Phase 2 dogfood `_print_ablation_matrix` 从 `backtest_runs` 而非
+   `eval_results` 查,所以不受影响。**Phase 3 dashboard 接 eval_results 前必须修**:
+   要么改 composite `(case_id, ablation_variant) -> request_id`,要么加专用 `eval_run_id`
+   字段。优先级 P0 for Phase 3.
 5. **Production KB wire**:`_build_kb_client()` + `_build_kb_lookup()` 在 dogfood script 中显式 raise NotImplementedError;用户接通后需要按 `app/kb/` 实际入口拼 Milvus client + chunk dict。

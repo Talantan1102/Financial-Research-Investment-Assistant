@@ -123,7 +123,7 @@ class CitationMetric:
         )
 
 
-class _EvaluatorJudge:
+class EvaluatorJudge:
     """Wraps EvaluatorClient.chat into SupportsJudgeProtocol.
 
     Exported for T2.7 wire + T2.11 dogfood factory. The prompt is intentionally

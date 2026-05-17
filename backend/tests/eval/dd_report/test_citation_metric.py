@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 import vcr
 from eval.dd_report.metrics.base import CaseMeta, MetricInputs
-from eval.dd_report.metrics.citation_metric import CitationMetric, _EvaluatorJudge
+from eval.dd_report.metrics.citation_metric import CitationMetric, EvaluatorJudge
 
 
 def _fake_kb_lookup(known: dict[str, str]) -> Callable[[str], dict[str, Any] | None]:
@@ -207,7 +207,7 @@ def test_l1_citation_judge_supports_via_cassette() -> None:
 
     swapper = LLMSwapper()
     client = swapper.get_client("gpt-4o-2024-05-13")
-    judge = _EvaluatorJudge(client)
+    judge = EvaluatorJudge(client)
     CASSETTE_DIR.mkdir(parents=True, exist_ok=True)
     with vcr.use_cassette(
         str(CASSETTE_DIR / "citation_supports_judge.yaml"),

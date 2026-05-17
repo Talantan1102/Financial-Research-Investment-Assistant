@@ -63,7 +63,7 @@ def test_details_json_round_trips() -> None:
 
 
 def test_eval_result_persists_metric_scores_json(tmp_path) -> None:
-    from datetime import datetime
+    from datetime import UTC, datetime
 
     from app.services.eval_models import EvalResult, JudgeScores
     from app.services.eval_recorder import EvalRecorder
@@ -102,7 +102,7 @@ def test_eval_result_persists_metric_scores_json(tmp_path) -> None:
         judge_model="backtest",
         judge_cost_cny=0.0,
         judge_latency_ms=0,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(UTC),
         backtest_run_id="bt-run-x",
         cut_off_date="2024-06-30",
         evaluator_llm="gpt-4o-2024-05-13",

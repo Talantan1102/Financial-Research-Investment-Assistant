@@ -104,11 +104,11 @@ class RiskPairingMetric:
         )
 
 
-class _EvaluatorPairingJudge:
+class EvaluatorPairingJudge:
     """Wraps EvaluatorClient.chat into PairingJudgeProtocol.
 
     Exported for T2.7 wire + T2.11 dogfood factory. Same pattern as
-    citation_metric._EvaluatorJudge (T2.2 refactor sediment).
+    citation_metric.EvaluatorJudge (T2.2 refactor sediment).
     """
 
     def __init__(self, client: Any) -> None:

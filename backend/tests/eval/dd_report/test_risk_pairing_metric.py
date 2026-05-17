@@ -14,8 +14,8 @@ import pytest
 import vcr
 from eval.dd_report.metrics.base import CaseMeta, MetricInputs
 from eval.dd_report.metrics.risk_pairing_metric import (
+    EvaluatorPairingJudge,
     RiskPairingMetric,
-    _EvaluatorPairingJudge,
 )
 
 
@@ -190,7 +190,7 @@ def test_l1_risk_pairing_judge_via_cassette() -> None:
 
     swapper = LLMSwapper()
     client = swapper.get_client("gpt-4o-2024-05-13")
-    judge = _EvaluatorPairingJudge(client)
+    judge = EvaluatorPairingJudge(client)
     CASSETTE_DIR.mkdir(parents=True, exist_ok=True)
     with vcr.use_cassette(
         str(CASSETTE_DIR / "risk_pairing_judge.yaml"),
