@@ -34,6 +34,7 @@ def test_db_session_rolls_back_between_tests_step2(db_session: Session) -> None:
             "WHERE table_name = '_fixture_rollback_probe'"
         )
     ).scalar()
-    if result == 1:
-        rows = db_session.execute(text("SELECT COUNT(*) FROM _fixture_rollback_probe")).scalar()
-        assert rows == 0, "rollback failed — sentinel from prior test leaked"
+    assert result == 0, (
+        "rollback failed — _fixture_rollback_probe table leaked from prior test "
+        "(DDL in PG is transactional; table should not exist after outer-tx rollback)"
+    )

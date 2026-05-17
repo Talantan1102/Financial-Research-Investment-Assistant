@@ -15,6 +15,8 @@ from typing import Literal
 
 import pytest
 from app.services.llm_mock_client import MockLLMClient
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 # v1.0 monitoring-engine L2 e2e fixtures (Redis container + Celery worker
 # subprocess). pytest only auto-loads files literally named `conftest.py`,
@@ -297,7 +299,7 @@ def pg_test_container() -> Iterator[dict[str, object]]:
 
 
 @pytest.fixture(scope="session")
-def pg_test_engine(pg_test_container: dict[str, object]):
+def pg_test_engine(pg_test_container: dict[str, object]) -> Iterator[Engine]:
     """session-scoped SQLAlchemy engine bound to industry_assistant_test;
     create_all 跑一次(覆盖所有注册的 metadata)。
 
@@ -319,21 +321,21 @@ def pg_test_engine(pg_test_container: dict[str, object]):
 
 
 @pytest.fixture
-def db_session(pg_test_engine):
-    """function-scoped Session with savepoint rollback.
+def db_session(pg_test_engine: Engine) -> Iterator[Session]:
+    """function-scoped Session with savepoint rollback。
 
     每个 test 起一个 outer transaction,test 完 rollback,
     所有 INSERT/UPDATE/DELETE 跨 test 不可见。
     """
-    from sqlalchemy.orm import sessionmaker
-
     connection = pg_test_engine.connect()
-    transaction = connection.begin()
-    SessionLocal = sessionmaker(bind=connection, expire_on_commit=False)
-    session = SessionLocal()
     try:
-        yield session
+        transaction = connection.begin()
+        session_factory = sessionmaker(bind=connection, expire_on_commit=False)
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+            transaction.rollback()
     finally:
-        session.close()
-        transaction.rollback()
         connection.close()
