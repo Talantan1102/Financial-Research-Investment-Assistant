@@ -3,10 +3,15 @@
 简化 v0 — 支持 4 类指标 (其余 skip):
   - 营业收入  -> tushare income.revenue (单位 元)
   - 净利润    -> tushare income.n_income (单位 元)
-  - 资产负债率 -> 计算 balancesheet.total_liab / total_assets (百分比)
-  - ROE       -> tushare fina_indicator.roe (单位 %)
+  - 资产负债率 -> v0 简化 routes through fetch_income; 真值字段在 balancesheet
+                  (T2.11 dogfood 撞实后 sediment + 拉到 fetch_balancesheet)
+  - ROE       -> v0 简化 routes through fetch_income; 真值在 fina_indicator endpoint
+                  (T2.11 dogfood 撞实后 sediment + 加 fina_indicator 适配)
 
 容差 ±1% (spec § 4.2)。
+
+NOTE: 无单位数字 (parse_chinese_number("150") 默认 = 150 元), 不算亿; LLM output 应带
+单位。若 claim 无单位 vs. tushare 元值, 会触发 tolerance miss → wrong_values 入 log。
 """
 
 from __future__ import annotations
@@ -127,7 +132,11 @@ class NumericalMetric:
         rows = method(ts_code=ts_code)
         if not rows:
             return None
-        # 简化:取第一行(adapter 已 ann_date 过滤),按 row_key 取数
+        # Defensive sort — TushareBacktestAdapter applies ann_date filter but no sort; tushare
+        # typically returns descending by ann_date for financial statements but the adapter
+        # contract is silent. Explicit sort makes "rows[0] = latest reporting period before cut_off"
+        # guaranteed regardless of inner client behavior. cf. T2.1 GroundTruthLoader kline sort fix.
+        rows = sorted(rows, key=lambda r: r.get("ann_date", ""), reverse=True)
         row = rows[0]
         if spec["row_key"] == "_debt_ratio":
             total_liab = row.get("total_liab")
