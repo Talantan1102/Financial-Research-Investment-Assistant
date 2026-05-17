@@ -70,4 +70,5 @@ class MetricRegistry:
             seen.add(m.name)
 
     def compute_all(self, inputs: MetricInputs) -> list[MetricResult]:
+        """Compute all metrics; callers MUST filter MetricResult.value is None before aggregating (M4 returns None when post-cut-off data is absent)."""
         return [m.compute(inputs) for m in self.metrics]

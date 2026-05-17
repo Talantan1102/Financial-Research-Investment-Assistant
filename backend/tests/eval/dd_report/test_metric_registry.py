@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
 
 import pytest
 from eval.dd_report.metrics.base import (
@@ -60,7 +59,3 @@ def test_registry_duplicate_name_raises() -> None:
 def test_registry_empty_returns_empty_list() -> None:
     reg = MetricRegistry([])
     assert reg.compute_all(_make_inputs()) == []
-
-
-def _ignore_unused(_: Any) -> None:
-    pass

@@ -62,7 +62,7 @@ def test_details_json_round_trips() -> None:
     assert roundtripped.details_json == {"m1_failed_cites": ["chunk-x"]}
 
 
-def test_eval_result_persists_metric_scores_json(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_eval_result_persists_metric_scores_json(tmp_path) -> None:
     from datetime import datetime
 
     from app.services.eval_models import EvalResult, JudgeScores
