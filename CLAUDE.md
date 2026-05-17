@@ -81,6 +81,10 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### Persona Editable UI(2026-05-17 ship 完)
 - [persona editable UI ship](docs/claude-context/persona-editable-ui-done.md) — /memory 加画像 tab + 双轨语义 + atomic 操作 + 升级动画 / 21 task ship
 
+### v1.x DD Report Quality Eval
+- [Phase 1 (backtest infra) landed](docs/claude-context/dd-report-eval-phase-1-landed.md)
+- [Phase 2 (metric + ablation) landed](docs/claude-context/dd-report-eval-phase-2-landed.md) — 5 metric 实现 + V0-V3 ablation 控制变量 + ship 框架
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。
