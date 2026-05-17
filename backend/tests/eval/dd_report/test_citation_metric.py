@@ -6,11 +6,14 @@ L1: real LLM judge via cassette, 验 prompt 不漂。
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import pytest
+import vcr
 from eval.dd_report.metrics.base import CaseMeta, MetricInputs
 from eval.dd_report.metrics.citation_metric import CitationMetric, _EvaluatorJudge
 
@@ -162,12 +165,37 @@ def test_recall_denominator_uses_required_sections_not_present_sections() -> Non
 # L1 cassette test — real EvaluatorClient judge
 # ---------------------------------------------------------------------------
 
-import os
-from pathlib import Path
-
-import vcr
-
 CASSETTE_DIR = Path(__file__).parent / "cassettes"
+
+
+class _SupportsJudgeRaisesValueError:
+    """模拟 LLM judge 返回空字符串 / unparseable."""
+
+    def supports(self, claim: str, chunk_text: str) -> bool:
+        raise ValueError("LLM judge returned empty response — auth/rate-limit/network")
+
+
+def test_judge_failure_counted_separately_not_silently_unsupported() -> None:
+    """T2.4 backport fix: judge raising ValueError counted in judge_failures,
+    not silently as unsupported."""
+    report = {
+        "target_overview": {
+            "narrative": "茅台是大白马",
+            "evidence": ["chunk-1"],
+        },
+    }
+    kb = {"chunk-1": "茅台稳健"}
+    metric = CitationMetric(
+        judge=_SupportsJudgeRaisesValueError(),
+        section_paths=("target_overview",),
+    )
+    r = metric.compute(_make_inputs(report, kb))
+    assert r.details["total_cited"] == 1
+    assert r.details["supports"] == 0
+    assert r.details["judge_failures"] == 1
+    # unsupported_cites should include the judge_error tag
+    uns = r.details["unsupported_cites"]
+    assert any("judge_error" in s for s in uns)
 
 
 @pytest.mark.skipif(

@@ -58,6 +58,7 @@ class CitationMetric:
         total_cited = 0
         supports = 0
         lookup_failures = 0
+        judge_failures = 0
         sections_with_evidence = 0
         failed_cite_log: list[str] = []
         unsupported_log: list[str] = []
@@ -77,7 +78,13 @@ class CitationMetric:
                     lookup_failures += 1
                     failed_cite_log.append(f"{path}:{chunk_id}")
                     continue
-                if self.judge.supports(claim, chunk.get("text", "")):
+                try:
+                    is_supported = self.judge.supports(claim, chunk.get("text", ""))
+                except ValueError as e:
+                    judge_failures += 1
+                    unsupported_log.append(f"{path}:{chunk_id}:judge_error={str(e)[:80]}")
+                    continue
+                if is_supported:
                     supports += 1
                 else:
                     unsupported_log.append(f"{path}:{chunk_id}")
@@ -106,6 +113,7 @@ class CitationMetric:
                 "total_cited": total_cited,
                 "supports": supports,
                 "lookup_failures": lookup_failures,
+                "judge_failures": judge_failures,
                 "sections_with_evidence": sections_with_evidence,
                 "n_sections_present": n_sections_present,
                 "n_sections_required": n_sections_required,
@@ -139,7 +147,9 @@ class _EvaluatorJudge:
 def _parse_supports(text: str) -> bool:
     """Parse {"supports": bool} JSON, fallback to substring match for robustness."""
     if not text:
-        return False
+        raise ValueError(
+            "LLM judge returned empty response — likely auth/rate-limit/network failure"
+        )
     try:
         d = json.loads(text.strip())
         if isinstance(d, dict) and "supports" in d:

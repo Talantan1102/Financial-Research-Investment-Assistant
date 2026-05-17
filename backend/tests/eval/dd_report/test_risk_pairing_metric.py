@@ -5,13 +5,17 @@ L0 unit: fake judge 验算法逻辑。
 
 from __future__ import annotations
 
+import os
 from datetime import date
+from pathlib import Path
 from typing import Any
 
 import pytest
+import vcr
 from eval.dd_report.metrics.base import CaseMeta, MetricInputs
 from eval.dd_report.metrics.risk_pairing_metric import (
     RiskPairingMetric,
+    _EvaluatorPairingJudge,
 )
 
 
@@ -141,13 +145,40 @@ def test_no_risks_returns_vacuous_one() -> None:
     assert r.value == 1.0
 
 
-import os
-from pathlib import Path
-
-import vcr
-from eval.dd_report.metrics.risk_pairing_metric import _EvaluatorPairingJudge
-
 CASSETTE_DIR = Path(__file__).parent / "cassettes"
+
+
+class _JudgeRaisesValueError:
+    """模拟 LLM judge 返回空字符串 / unparseable (T2.4 fix from code review)."""
+
+    def is_valid_mitigation(self, risk_title: str, risk_desc: str, mitigations: list[str]) -> bool:
+        raise ValueError("LLM judge returned empty response — auth/rate-limit/network")
+
+
+def test_judge_failure_counted_separately_not_silently_invalid() -> None:
+    """T2.4 review fix: judge raising ValueError (empty/unparseable) is counted in
+    judge_failures, not silently bucketed as invalid. T2.11 ablation auth failures
+    must be diagnosable."""
+    report = {
+        "risk_assessment": {
+            "market_risk": [
+                {"title": "X", "description": "", "severity": "low", "mitigations": ["分批"]}
+            ],
+            "growth_risk": [],
+            "event_risk": [],
+            "valuation_risk": [],
+        },
+    }
+    m = RiskPairingMetric(judge=_JudgeRaisesValueError())
+    r = m.compute(_make_inputs(report))
+    assert r.details["total"] == 1
+    assert r.details["paired"] == 1
+    assert r.details["valid"] == 0
+    assert r.details["judge_failures"] == 1
+    # invalid_mitigations should record the judge_error
+    inv = r.details["invalid_mitigations"]
+    assert len(inv) == 1
+    assert "judge_error" in inv[0]
 
 
 @pytest.mark.skipif(

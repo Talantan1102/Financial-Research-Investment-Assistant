@@ -53,6 +53,7 @@ class RiskPairingMetric:
         total = 0
         paired = 0
         valid = 0
+        judge_failures = 0
         invalid_log: list[dict[str, Any]] = []
         unpaired_log: list[str] = []
 
@@ -68,7 +69,21 @@ class RiskPairingMetric:
                     unpaired_log.append(f"{bucket}:{title}")
                     continue
                 paired += 1
-                if self.judge.is_valid_mitigation(title, desc, mits):
+                try:
+                    is_valid = self.judge.is_valid_mitigation(title, desc, mits)
+                except ValueError as e:
+                    # judge returned empty / unparseable response — count as invalid, log diagnostic
+                    judge_failures += 1
+                    invalid_log.append(
+                        {
+                            "bucket": bucket,
+                            "title": title,
+                            "mits": mits,
+                            "judge_error": str(e)[:200],
+                        }
+                    )
+                    continue
+                if is_valid:
                     valid += 1
                 else:
                     invalid_log.append({"bucket": bucket, "title": title, "mits": mits})
@@ -82,6 +97,7 @@ class RiskPairingMetric:
                 "paired": paired,
                 "valid": valid,
                 "unpaired": total - paired,
+                "judge_failures": judge_failures,
                 "invalid_mitigations": invalid_log[:10],
                 "unpaired_risks": unpaired_log[:10],
             },
@@ -112,7 +128,9 @@ class _EvaluatorPairingJudge:
 def _parse_valid(text: str) -> bool:
     """Parse {"valid": bool} JSON, fallback to substring match for robustness."""
     if not text:
-        return False
+        raise ValueError(
+            "LLM judge returned empty response — likely auth/rate-limit/network failure"
+        )
     try:
         d = json.loads(text.strip())
         if isinstance(d, dict) and "valid" in d:
