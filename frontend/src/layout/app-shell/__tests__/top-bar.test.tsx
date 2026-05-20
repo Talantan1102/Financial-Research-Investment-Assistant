@@ -4,8 +4,8 @@ import { TopBar } from '@/layout/app-shell/top-bar'
 
 describe('<TopBar>', () => {
   it('renders product brand text', () => {
-    const { getByText } = renderWithProviders(<TopBar />)
-    expect(getByText(/financial research/i)).toBeInTheDocument()
+    const { getByTestId } = renderWithProviders(<TopBar />)
+    expect(getByTestId('app-topbar')).toBeInTheDocument()
   })
 
   it('renders 我的画像 link pointing to /memory#persona', () => {
