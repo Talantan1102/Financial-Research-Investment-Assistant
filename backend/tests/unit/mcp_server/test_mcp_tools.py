@@ -1,7 +1,8 @@
 """L0 — MCP tools registration smoke tests.
 
-Verifies that build_server() succeeds and all 6 tools are registered
-without requiring any real external services (no tushare / bocha / milvus calls).
+Verifies that build_server() succeeds and all 8 chat-profile tools are
+registered without requiring any real external services (no tushare /
+bocha / milvus calls).
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ def test_build_server_returns_server_instance() -> None:
     assert isinstance(s, Server)
 
 
-def test_build_server_lists_exactly_6_tools() -> None:
-    """The aggregated registry must contain exactly the 6 expected tool names.
+def test_build_server_lists_exactly_8_tools() -> None:
+    """The aggregated registry must contain exactly the 8 expected tool names.
 
     We introspect via s._mcp_tool_registry (attached by build_server() for
     testing) rather than calling the SDK's list_tools() handler directly,
@@ -33,7 +34,9 @@ def test_build_server_lists_exactly_6_tools() -> None:
     names = set(registry.keys())
     expected = {
         "get_stock_quote",
-        "get_financials",
+        "get_financial_statements",
+        "get_market_indicators",
+        "get_corporate_actions",
         "get_news",
         "web_search",
         "kb_search",
@@ -43,12 +46,14 @@ def test_build_server_lists_exactly_6_tools() -> None:
 
 
 def test_each_tool_module_exports_tool_def_and_handle() -> None:
-    """Each of the 6 tool modules exports TOOL_DEF (Tool) and handle (callable)."""
+    """Each of the 8 chat-profile tool modules exports TOOL_DEF + handle()."""
     import importlib
 
     modules = [
         "app.mcp_server.tools.get_stock_quote",
-        "app.mcp_server.tools.get_financials",
+        "app.mcp_server.tools.financial_statements",
+        "app.mcp_server.tools.market_indicators",
+        "app.mcp_server.tools.corporate_actions",
         "app.mcp_server.tools.get_news",
         "app.mcp_server.tools.web_search",
         "app.mcp_server.tools.kb_search",
@@ -68,7 +73,9 @@ def test_tool_def_names_match_expected() -> None:
 
     expected_names = {
         "app.mcp_server.tools.get_stock_quote": "get_stock_quote",
-        "app.mcp_server.tools.get_financials": "get_financials",
+        "app.mcp_server.tools.financial_statements": "get_financial_statements",
+        "app.mcp_server.tools.market_indicators": "get_market_indicators",
+        "app.mcp_server.tools.corporate_actions": "get_corporate_actions",
         "app.mcp_server.tools.get_news": "get_news",
         "app.mcp_server.tools.web_search": "web_search",
         "app.mcp_server.tools.kb_search": "kb_search",

@@ -393,9 +393,28 @@ class ChatPlanner(Agent):
         }
 
     async def _build_chat_prompt(self, state: ChatState) -> str:
-        tool_lines = (
-            [f"- {t}" for t in self._available_tools] if self._available_tools else ["(no tools)"]
-        )
+        # Tool descriptions: prefer registry full schema (name + description + JSON Schema)
+        # so the LLM emits args matching each tool's args_schema exactly. Fallback to
+        # bare name list when registry is absent (legacy callers).
+        tool_lines: list[str]
+        if self._registry is not None:
+            schemas = self._registry.list_for_llm()
+            if self._available_tools:
+                whitelist = set(self._available_tools)
+                schemas = [s for s in schemas if s["function"]["name"] in whitelist]
+            if schemas:
+                tool_lines = [
+                    f"- {s['function']['name']}: {s['function']['description']}\n"
+                    f"  parameters (JSON Schema): "
+                    f"{json.dumps(s['function']['parameters'], ensure_ascii=False)}"
+                    for s in schemas
+                ]
+            else:
+                tool_lines = ["(no tools)"]
+        elif self._available_tools:
+            tool_lines = [f"- {t}" for t in self._available_tools]
+        else:
+            tool_lines = ["(no tools)"]
         recent = state.history[-self._recent_k :] if state.history else []
         recent_lines = [f"[{m.turn_index}] {m.role}: {m.content[:200]}" for m in recent]
         prompt = _PLANNER_PROMPT_TEMPLATE.format(

@@ -32,27 +32,44 @@ def test_chat_planner_stores_memory() -> None:
 def test_chat_router_passes_memory_to_planner() -> None:
     """router._build_graph_singleton 必须把 memory= 传到 ChatPlanner.
 
-    通过源码 grep 检查 (避免 import 真 LLM/DB DI 副作用).
+    通过 ast 解析 chat.py (避免 import 真 LLM/DB DI 副作用,
+    并兼容多行 ChatPlanner(...) 调用形态).
     """
-    import re
+    import ast
     from pathlib import Path
 
     router_path = Path(__file__).resolve().parents[3] / "app" / "router" / "chat.py"
     source = router_path.read_text(encoding="utf-8")
 
-    # 找到 _build_graph_singleton 函数体内的 ChatPlanner( 调用
-    match = re.search(
-        r"def _build_graph_singleton.*?(?=\ndef |\Z)",
-        source,
-        re.DOTALL,
-    )
-    assert match is not None, "_build_graph_singleton not found"
-    body = match.group(0)
+    tree = ast.parse(source)
 
-    # 检查 ChatPlanner( ... memory=memory ... ) 调用形态
-    chat_planner_calls = re.findall(r"ChatPlanner\([^)]*\)", body)
-    assert len(chat_planner_calls) >= 1, "no ChatPlanner( call found in _build_graph_singleton"
-    assert any("memory=memory" in call for call in chat_planner_calls), (
-        f"ChatPlanner instantiation in _build_graph_singleton missing memory=memory; "
-        f"got: {chat_planner_calls}"
+    # _build_graph_singleton 可能是 sync def 或 async def,两者都看
+    build_fn: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name == "_build_graph_singleton"
+        ):
+            build_fn = node
+            break
+    assert build_fn is not None, "_build_graph_singleton not found"
+
+    chat_planner_calls: list[ast.Call] = []
+    for child in ast.walk(build_fn):
+        if (
+            isinstance(child, ast.Call)
+            and isinstance(child.func, ast.Name)
+            and child.func.id == "ChatPlanner"
+        ):
+            chat_planner_calls.append(child)
+    assert len(chat_planner_calls) >= 1, "no ChatPlanner(...) call in _build_graph_singleton"
+
+    def _has_memory_kwarg(call: ast.Call) -> bool:
+        for kw in call.keywords:
+            if kw.arg == "memory" and isinstance(kw.value, ast.Name) and kw.value.id == "memory":
+                return True
+        return False
+
+    assert any(_has_memory_kwarg(c) for c in chat_planner_calls), (
+        "ChatPlanner instantiation in _build_graph_singleton missing memory=memory kwarg"
     )
