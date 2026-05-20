@@ -11,7 +11,7 @@ def test_graph_payload_basic_node_edge() -> None:
     caps = [
         Capability(
             id="01.a",
-            dimension="prompt_context",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -19,7 +19,7 @@ def test_graph_payload_basic_node_edge() -> None:
         ),
         Capability(
             id="02.b",
-            dimension="tools_function",
+            dimension="tool",
             name_cn="B",
             name_en="B",
             status="lit",
@@ -39,7 +39,7 @@ def test_graph_payload_basic_node_edge() -> None:
     # 2 nodes
     assert len(payload["nodes"]) == 2
     a = next(n for n in payload["nodes"] if n["data"]["id"] == "01.a")
-    assert a["data"]["dimension"] == "prompt_context"
+    assert a["data"]["dimension"] == "context"
     assert a["data"]["confidence"] == 3
     assert a["data"]["size"] == 2  # 1 code_anchor + 1
     # bi-directional link → 1 edge (dedupe)
@@ -52,7 +52,7 @@ def test_graph_self_loop_deduped() -> None:
     caps = [
         Capability(
             id="x.a",
-            dimension="memory",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -69,7 +69,7 @@ def test_graph_no_deep_card_shows_dashed_node() -> None:
     caps = [
         Capability(
             id="x.a",
-            dimension="memory",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="todo",
@@ -87,7 +87,7 @@ def test_graph_filter_by_dimension() -> None:
     caps = [
         Capability(
             id="01.a",
-            dimension="prompt_context",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -95,14 +95,14 @@ def test_graph_filter_by_dimension() -> None:
         ),
         Capability(
             id="04.b",
-            dimension="memory",
+            dimension="lifecycle",
             name_cn="B",
             name_en="B",
             status="lit",
             derived_status="lit",
         ),
     ]
-    payload = build_graph_payload(caps, [], filter_dimensions={"prompt_context"})
+    payload = build_graph_payload(caps, [], filter_dimensions={"context"})
     assert len(payload["nodes"]) == 1
     assert payload["nodes"][0]["data"]["id"] == "01.a"
 
@@ -111,7 +111,7 @@ def test_graph_filter_low_confidence_only() -> None:
     caps = [
         Capability(
             id="x.a",
-            dimension="memory",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -119,7 +119,7 @@ def test_graph_filter_low_confidence_only() -> None:
         ),
         Capability(
             id="x.b",
-            dimension="memory",
+            dimension="context",
             name_cn="B",
             name_en="B",
             status="lit",
@@ -140,7 +140,7 @@ def test_edge_weight_both_endpoints_high_conf() -> None:
     caps = [
         Capability(
             id="01.a",
-            dimension="prompt_context",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -148,7 +148,7 @@ def test_edge_weight_both_endpoints_high_conf() -> None:
         ),
         Capability(
             id="02.b",
-            dimension="tools_function",
+            dimension="tool",
             name_cn="B",
             name_en="B",
             status="lit",
@@ -168,7 +168,7 @@ def test_edge_weight_one_endpoint_low_conf() -> None:
     caps = [
         Capability(
             id="01.a",
-            dimension="prompt_context",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -176,7 +176,7 @@ def test_edge_weight_one_endpoint_low_conf() -> None:
         ),
         Capability(
             id="02.b",
-            dimension="tools_function",
+            dimension="tool",
             name_cn="B",
             name_en="B",
             status="lit",
@@ -196,7 +196,7 @@ def test_edge_weight_both_low_conf() -> None:
     caps = [
         Capability(
             id="01.a",
-            dimension="prompt_context",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -204,7 +204,7 @@ def test_edge_weight_both_low_conf() -> None:
         ),
         Capability(
             id="02.b",
-            dimension="tools_function",
+            dimension="tool",
             name_cn="B",
             name_en="B",
             status="lit",
@@ -224,7 +224,7 @@ def test_edge_weight_one_endpoint_no_deep_card() -> None:
     caps = [
         Capability(
             id="01.a",
-            dimension="prompt_context",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -232,7 +232,7 @@ def test_edge_weight_one_endpoint_no_deep_card() -> None:
         ),
         Capability(
             id="02.b",
-            dimension="tools_function",
+            dimension="tool",
             name_cn="B",
             name_en="B",
             status="todo",

@@ -35,7 +35,7 @@ def test_story_renders_3_section_card(client: TestClient, tmp_path: Path) -> Non
     conn = open_db(db)
     DeepCardRepo(conn).upsert(
         DeepCard(
-            cap_id="prompt_context.constrained_schema",
+            cap_id="context.constrained_schema",
             why="避免 LLM 自由生成导致下游解析失败",
             tradeoff="选 constrained JSON schema 因为 OpenAI 协议支持",
             lessons_learned="撞过 ruff 行宽对齐撞了 3 次",

@@ -17,12 +17,12 @@ def test_index_renders() -> None:
         body = r.text
         # Hero
         assert "hero-title" in body
-        # 8 layer 卡片(新结构使用 class="layer")
-        assert body.count('class="layer"') >= 8
+        # 7 layer 卡片(ETCLOVG 新结构使用 class="layer")
+        assert body.count('class="layer"') >= 7
         # 三态 chip
         assert "lit" in body and "todo" in body
         # 计数
-        assert "/62" in body or "62" in body  # total appears somewhere
+        assert "/69" in body or "69" in body  # total appears somewhere
 
 
 def test_view_d_default() -> None:
@@ -52,7 +52,7 @@ def test_view_b_renders_kanban() -> None:
 def test_get_edit_returns_select() -> None:
     """点击 chip 触发的 GET /capability/{id}/edit 返回 select form。"""
     with TestClient(app) as client:
-        r = client.get("/capability/memory.long_term_memory/edit")
+        r = client.get("/capability/context.long_term_memory/edit")
         assert r.status_code == 200
         body = r.text
         assert "<select" in body
@@ -61,7 +61,7 @@ def test_get_edit_returns_select() -> None:
         assert "force-todo" in body
         assert "clear override" in body
         assert "hx-post" in body
-        assert "/capability/memory.long_term_memory/override" in body
+        assert "/capability/context.long_term_memory/override" in body
 
 
 def test_get_edit_404_unknown_id() -> None:
@@ -78,7 +78,7 @@ def test_post_override_invalidates_and_swaps() -> None:
         client.get("/")
         # POST set wip
         r = client.post(
-            "/capability/memory.long_term_memory/override",
+            "/capability/context.long_term_memory/override",
             data={"status": "wip"},
         )
         assert r.status_code == 200
@@ -86,22 +86,22 @@ def test_post_override_invalidates_and_swaps() -> None:
         assert 'class="chip wip"' in body
         # invalidate 验证:再 GET /,snapshot 含新 wip
         r2 = client.get("/")
-        assert "memory.long_term_memory" in r2.text  # capability 出现在页面
+        assert "context.long_term_memory" in r2.text  # capability 出现在页面
 
 
 def test_post_override_clear_sentinel() -> None:
     """POST status=__clear__ 删除 override row。"""
     with TestClient(app) as client:
         # 先种一个 override
-        client.post("/capability/memory.long_term_memory/override", data={"status": "wip"})
+        client.post("/capability/context.long_term_memory/override", data={"status": "wip"})
         # 清掉
         r = client.post(
-            "/capability/memory.long_term_memory/override",
+            "/capability/context.long_term_memory/override",
             data={"status": "__clear__"},
         )
         assert r.status_code == 200
         body = r.text
-        # clear 后回到 derived 状态(memory.long_term_memory derive 是 todo,因 derive_rule type=manual)
+        # clear 后回到 derived 状态(context.long_term_memory derive 是 todo,因 derive_rule type=manual)
         assert 'class="chip todo"' in body
         assert "stale-mark" not in body  # 派生 == status,无 stale
 

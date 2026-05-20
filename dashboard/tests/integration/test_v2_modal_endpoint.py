@@ -25,12 +25,12 @@ def test_modal_returns_html(client: TestClient, tmp_path: Path) -> None:
     conn = open_db(db)
     DeepCardRepo(conn).upsert(
         DeepCard(
-            cap_id="prompt_context.skills_bundle",
+            cap_id="context.skills_bundle",
             what="Anthropic Skills bundle 17 件",
             why="progressive disclosure",
         )
     )
-    resp = client.get("/cap/prompt_context.skills_bundle")
+    resp = client.get("/cap/context.skills_bundle")
     assert resp.status_code == 200
     body = resp.text
     assert "Anthropic Skills bundle" in body
@@ -46,7 +46,7 @@ def test_modal_unknown_cap_returns_404(client: TestClient) -> None:
 
 def test_modal_known_cap_no_deep_card(client: TestClient) -> None:
     """cap 在 yaml 但无 DeepCard → 显示 'AI 草拟' 按钮 / '(未填)' 引导。"""
-    resp = client.get("/cap/prompt_context.constrained_schema")
+    resp = client.get("/cap/context.constrained_schema")
     assert resp.status_code == 200
     body = resp.text
     assert "AI 草拟" in body
@@ -88,7 +88,7 @@ def test_ai_draft_llm_unavailable_503(client: TestClient, monkeypatch: pytest.Mo
     monkeypatch.setattr(
         server, "_get_llm_service", lambda: (_ for _ in ()).throw(RuntimeError("no llm"))
     )
-    resp = client.post("/cap/prompt_context.constrained_schema/ai_draft/what")
+    resp = client.post("/cap/context.constrained_schema/ai_draft/what")
     assert resp.status_code == 503
 
 
@@ -100,13 +100,13 @@ def test_modal_linked_capability_renders_overview_anchor(
     conn = open_db(db)
     DeepCardRepo(conn).upsert(
         DeepCard(
-            cap_id="prompt_context.skills_bundle",
+            cap_id="context.skills_bundle",
             what="Anthropic Skills bundle 17 件",
-            linked_capabilities=["memory.cross_session", "orchestration.supervisor"],
+            linked_capabilities=["context.cross_user_cache", "lifecycle.langgraph_skeleton"],
         )
     )
-    resp = client.get("/cap/prompt_context.skills_bundle")
+    resp = client.get("/cap/context.skills_bundle")
     assert resp.status_code == 200
     body = resp.text
-    assert "/overview#cap_memory.cross_session" in body
-    assert "/overview#cap_orchestration.supervisor" in body
+    assert "/overview#cap_context.cross_user_cache" in body
+    assert "/overview#cap_lifecycle.langgraph_skeleton" in body

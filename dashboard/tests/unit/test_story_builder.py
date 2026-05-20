@@ -12,7 +12,7 @@ from dashboard.derive.types import Capability
 def test_story_card_has_three_sections() -> None:
     cap = Capability(
         id="x.a",
-        dimension="memory",
+        dimension="context",
         name_cn="A",
         name_en="A",
         status="lit",
@@ -37,7 +37,7 @@ def test_story_sort_by_time() -> None:
     caps = [
         Capability(
             id="x.a",
-            dimension="memory",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -45,7 +45,7 @@ def test_story_sort_by_time() -> None:
         ),
         Capability(
             id="x.b",
-            dimension="memory",
+            dimension="context",
             name_cn="B",
             name_en="B",
             status="lit",
@@ -67,7 +67,7 @@ def test_story_fallback_to_prefill_at() -> None:
     caps = [
         Capability(
             id="x.a",
-            dimension="memory",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -91,7 +91,7 @@ def test_story_no_time_group_sentinel() -> None:
     caps = [
         Capability(
             id="x.a",
-            dimension="memory",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -108,7 +108,7 @@ def test_story_filter_by_dimension() -> None:
     caps = [
         Capability(
             id="01.a",
-            dimension="prompt_context",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -116,7 +116,7 @@ def test_story_filter_by_dimension() -> None:
         ),
         Capability(
             id="04.b",
-            dimension="memory",
+            dimension="lifecycle",
             name_cn="B",
             name_en="B",
             status="lit",
@@ -127,7 +127,7 @@ def test_story_filter_by_dimension() -> None:
         DeepCard(cap_id="01.a", why="...", tradeoff="..."),
         DeepCard(cap_id="04.b", why="...", tradeoff="..."),
     ]
-    out = build_story_cards(caps, cards, commit_times={}, filter_dimensions={"prompt_context"})
+    out = build_story_cards(caps, cards, commit_times={}, filter_dimensions={"context"})
     assert len(out) == 1
     assert out[0].cap_id == "01.a"
 
@@ -136,7 +136,7 @@ def test_story_filter_time_window() -> None:
     caps = [
         Capability(
             id="x.a",
-            dimension="memory",
+            dimension="context",
             name_cn="A",
             name_en="A",
             status="lit",
@@ -144,7 +144,7 @@ def test_story_filter_time_window() -> None:
         ),
         Capability(
             id="x.b",
-            dimension="memory",
+            dimension="context",
             name_cn="B",
             name_en="B",
             status="lit",

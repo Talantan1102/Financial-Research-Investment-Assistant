@@ -13,16 +13,16 @@ CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def test_load_62_capabilities() -> None:
+def test_load_69_capabilities() -> None:
     caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    assert len(caps) == 62
+    assert len(caps) == 69
     assert all(c.id.count(".") >= 1 for c in caps)
 
 
 def test_file_exists_rule(tmp_path: Path) -> None:
     cfg = CapabilityConfig(
         id="t.fe",
-        dimension="memory",
+        dimension="context",
         name_cn="x",
         name_en="x",
         derive_rule={"type": "file_exists", "path": "exists.py"},
@@ -31,7 +31,7 @@ def test_file_exists_rule(tmp_path: Path) -> None:
     assert resolve_status(cfg, tmp_path) == "lit"
     cfg2 = CapabilityConfig(
         id="t.fe2",
-        dimension="memory",
+        dimension="context",
         name_cn="x",
         name_en="x",
         derive_rule={"type": "file_exists", "path": "missing.py"},
@@ -43,7 +43,7 @@ def test_code_grep_rule(tmp_path: Path) -> None:
     (tmp_path / "x.py").write_text("def chat(self, prompt: str, tier: Tier): pass")
     cfg = CapabilityConfig(
         id="t.cg",
-        dimension="prompt_context",
+        dimension="context",
         name_cn="x",
         name_en="x",
         derive_rule={"type": "code_grep", "pattern": r"tier:\s*Tier", "path_glob": "*.py"},
@@ -54,7 +54,7 @@ def test_code_grep_rule(tmp_path: Path) -> None:
 def test_manual_rule_returns_todo() -> None:
     cfg = CapabilityConfig(
         id="t.m",
-        dimension="memory",
+        dimension="context",
         name_cn="x",
         name_en="x",
         derive_rule={"type": "manual"},
@@ -65,7 +65,7 @@ def test_manual_rule_returns_todo() -> None:
 def test_unknown_rule_raises() -> None:
     cfg = CapabilityConfig(
         id="t.u",
-        dimension="memory",
+        dimension="context",
         name_cn="x",
         name_en="x",
         derive_rule={"type": "wat"},
@@ -84,11 +84,11 @@ def test_overrides_applied() -> None:
 
 
 def test_real_project_lit_count_anchor() -> None:
-    """在真实 repo 跑全部 62 capability,lit 计数应 ≈ 34-35(spec § 3.2 anchor 35,
-    Task 3 fix 后实际 34,Task 7 ship dashboard/server.py 后变 35)。"""
+    """在真实 repo 跑全部 69 capability (ETCLOVG 7 维),lit ≈ 42
+    (E 层 7/7 + T 5/8 + C 9/22 + L 7/10 + O 5/9 + V 5/7 + G 4/6)。"""
     project_root = Path(__file__).parent.parent.parent.parent
     caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
     resolved = resolve_all(caps, project_root)
     lit_count = sum(1 for c in resolved if c.status == "lit")
-    # 容忍 ±5(grep pattern 可能调,manual 项可能改)
-    assert 30 <= lit_count <= 40, f"Lit count {lit_count} out of expected 35±5"
+    # 容忍 ±6(grep pattern 可能调,manual 项可能改)
+    assert 36 <= lit_count <= 48, f"Lit count {lit_count} out of expected 42±6"

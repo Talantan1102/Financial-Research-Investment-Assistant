@@ -24,19 +24,17 @@ def test_load_seed_parses_real_jsonl() -> None:
     seed_path = PROJECT_ROOT / "dashboard" / "data" / "deep_cards_seed.jsonl"
     cards = sd.load_seed(seed_path)
     assert len(cards) >= 30, f"Expect ≥30 seed cards, got {len(cards)}"
-    # 覆盖 8 维
+    # ETCLOVG 7 维 — execution 暂无 seed card (E 层是 Plan 1 新增);其余 6 维应有 ≥1 card
     dims = {c.cap_id.split(".")[0] for c in cards if "." in c.cap_id}
-    expected_dims = {
-        "prompt_context",
-        "tools_function",
-        "orchestration",
-        "memory",
-        "rag_knowledge",
-        "guardrails",
-        "eval_observability",
-        "cost_routing",
+    expected_subset = {
+        "context",
+        "tool",
+        "lifecycle",
+        "observability",
+        "verification",
+        "governance",
     }
-    assert dims == expected_dims, f"Missing dims: {expected_dims - dims}"
+    assert expected_subset.issubset(dims), f"Missing dims: {expected_subset - dims}"
 
 
 def test_seed_load_direct_into_tmp_db(tmp_path: Path) -> None:
@@ -77,7 +75,7 @@ def test_cli_force_flag_overwrites(tmp_path: Path) -> None:
     conn = open_db(db)
     try:
         DeepCardRepo(conn).upsert(
-            DeepCard(cap_id="memory.long_term_memory", what="USER_EDITED_BEFORE_FORCE")
+            DeepCard(cap_id="context.long_term_memory", what="USER_EDITED_BEFORE_FORCE")
         )
     finally:
         conn.close()
@@ -88,7 +86,7 @@ def test_cli_force_flag_overwrites(tmp_path: Path) -> None:
 
     conn = open_db(db)
     try:
-        survived = DeepCardRepo(conn).get("memory.long_term_memory")
+        survived = DeepCardRepo(conn).get("context.long_term_memory")
     finally:
         conn.close()
     assert survived is not None
