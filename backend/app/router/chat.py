@@ -181,10 +181,8 @@ def get_current_user() -> _AnonUser:
 
 
 # ---------------------------------------------------------------------------
-# Singleton graph — built once at first request, reused across requests
+# Graph singleton — built once at lifespan startup, stored on app.state.chat_graph
 # ---------------------------------------------------------------------------
-
-_graph_singleton: CompiledStateGraph[Any, Any, Any, Any] | None = None
 
 
 def _build_async_pg_session_factory_or_none() -> Any | None:
@@ -213,80 +211,82 @@ def _build_async_pg_session_factory_or_none() -> Any | None:
         return None
 
 
-def _build_graph_singleton(
+async def _build_graph_singleton(
+    *,
+    mcp_client: Any,
     checkpointer: Any | None = None,
 ) -> CompiledStateGraph[Any, Any, Any, Any]:
     """Build the CompiledStateGraph once and cache it as a module-level singleton.
 
-    Build sequence:
-    1. build_llm_service_from_env()  — real LLMService (LLM_MODE drives
-       which client is used at env-var dispatch time, not here).
-    2. build_tushare_service()        — mock or real per TUSHARE_MODE env var
-    3. MockBochaService()            — reads LLMConfig internally
-    4. Register StockQuoteTool / GetFinancialsTool / GetNewsTool (legacy 3-tool set)
-       MCP-based tools (6 total) are registered via MCPClient tools in Plan 2.
-    5. ChatPlanner + Responder
-    6. InSessionMemory (Q4 E: tool dedup + token-guard)
-    7. ToolResultCache (placeholder — no async_engine at singleton build time; cache is
-       None-ish until ChatSessionRepo async_engine is wired in Plan 2)
-    8. build_chat_graph with PG checkpointer from app.state (or None for tests)
+    All tools are sourced from the MCP server subprocess via `mcp_client`. This
+    is the single tool-interface boundary for chat mode — there is no in-process
+    Tool registration. The MCP server exposes 8 chat-profile tools:
+        get_stock_quote / get_financial_statements / get_market_indicators /
+        get_corporate_actions / get_news / web_search / kb_search /
+        compare_stocks
+    (Reference: app/mcp_server/server.py:_CHAT_TOOL_MODULES)
 
-    Thread safety: FastAPI runs in a single async event loop for the
-    startup sequence; the singleton is set before requests arrive.
-    For multi-worker deployments the per-worker singleton is acceptable
-    since LangGraph state isolation is provided by thread_id, not process.
+    Build sequence:
+      1. build_llm_service_from_env()  — real LLMService
+      2. ToolRegistry().register_mcp_client_async(mcp_client) — populate from MCP
+      3. HierarchicalMemory (with PG) or InSessionMemory (no PG) fallback
+      4. ChatPlanner (passed memory + tool whitelist from MCP) + Responder
+      5. build_chat_graph (PG checkpointer optional)
+
+    Args:
+        mcp_client: MCPClient connected to the chat_tools-profile subprocess.
+            Required — chat graph has no in-process tool fallback.
+        checkpointer: PG checkpointer for LangGraph state persistence (optional).
+
+    Raises:
+        ValueError: if mcp_client is None.
     """
     from app.agents.chat_planner import ChatPlanner
     from app.agents.in_session_memory import InSessionMemory
     from app.agents.responder import Responder
     from app.memory.hierarchical import HierarchicalMemory
     from app.orchestration.chat_graph import build_chat_graph
-    from app.services.bocha_factory import build_bocha_service_from_env
     from app.services.openai_client import build_llm_service_from_env
-    from app.services.tushare_factory import build_tushare_service
-    from app.tools.get_financials import GetFinancialsTool
-    from app.tools.get_news import GetNewsTool
-    from app.tools.get_stock_quote import StockQuoteTool
     from app.tools.registry import ToolRegistry
 
+    if mcp_client is None:
+        raise ValueError(
+            "_build_graph_singleton requires a live mcp_client; chat graph "
+            "has no in-process tool fallback after the MCP-only refactor."
+        )
+
     llm = build_llm_service_from_env()
-    tushare = build_tushare_service()
 
     registry = ToolRegistry()
-    registry.register(StockQuoteTool(tushare=tushare))
-    registry.register(GetFinancialsTool(tushare=tushare))
-    registry.register(GetNewsTool(bocha=build_bocha_service_from_env()))
+    await registry.register_mcp_client_async(mcp_client)
 
-    # C.5 Plan 1B: HierarchicalMemory 替换 InSessionMemory 作为主 Memory Protocol 实现.
-    # InSessionMemory 仍可用于 in-session dedup / token-guard summarize(Q4 E),
-    # 但 cross-session memory 方法走 HierarchicalMemory.
-    # Plan 2-4 的 archival_memory_* 方法 ship 后, 此处真 inject embed_service / llm_extractor;
-    # Plan 1B 阶段 Plan 2-4 stub 方法 raise NotImplementedError, agent 调到时报错(预期).
-    # Phase 1 self-managed wire: memory 须在 ChatPlanner 之前构造, 以便 DI 到 planner.
+    # C.5 Plan 1B: HierarchicalMemory 是主 Memory Protocol 实现; InSessionMemory
+    # 仅作 PG 不可用时的 fallback (保 Q4 E in-session dedup behavior)。
     pg_factory = _build_async_pg_session_factory_or_none()
     memory: Any
     if pg_factory is None:
-        # 测试 / 无 PG 环境: fallback InSessionMemory 保 Q4 E behavior
         memory = InSessionMemory(llm=llm)
     else:
         memory = HierarchicalMemory(
             pg_session_factory=pg_factory,
-            age_executor=None,  # Plan 2 inject
-            milvus_client=None,  # Plan 2 inject
-            embed_service=None,  # Plan 2 inject
-            llm_extractor=None,  # Plan 2 inject
-            llm_judge=None,  # Plan 2 inject
+            age_executor=None,
+            milvus_client=None,
+            embed_service=None,
+            llm_extractor=None,
+            llm_judge=None,
         )
 
-    # Phase 1 self-managed wire: 传 memory= 让 planner 能在每个 chat 请求
-    # prepend memory_tool_usage prompt(参见 chat_planner._build_chat_prompt).
-    planner = ChatPlanner(llm=llm, registry=registry, memory=memory)
+    planner = ChatPlanner(
+        llm=llm,
+        registry=registry,
+        available_tools=[t["function"]["name"] for t in registry.list_for_llm()],
+        memory=memory,
+    )
     responder = Responder(llm=llm)
 
-    # ToolResultCache requires async session factory; deferred to Plan 2 when
-    # ChatSessionRepo engine is wired. For now pass a no-op stub cache.
+    # ToolResultCache placeholder — async_engine 入站尚未 wire; 用 no-op stub。
     class _NoOpCache:
-        """Stub ToolResultCache that always misses (no PG async wiring at build time)."""
+        """Stub ToolResultCache that always misses."""
 
         async def get_or_compute(
             self,
@@ -308,16 +308,22 @@ def _build_graph_singleton(
 
 
 def get_chat_graph(request: Request) -> CompiledStateGraph[Any, Any, Any, Any]:
-    """FastAPI dependency: return the module-level singleton graph.
+    """FastAPI dependency: return the lifespan-built chat graph from app.state.
 
-    The PG checkpointer is read from app.state (set during lifespan) on first
-    call, then the compiled graph is cached for the lifetime of the process.
+    Lifespan (app_main.py) builds the graph after MCPClient subprocess is up
+    and stores it on app.state.chat_graph. Test code that wants to bypass
+    lifespan can set app.dependency_overrides[get_chat_graph] = lambda: <stub>.
     """
-    global _graph_singleton
-    if _graph_singleton is None:
-        checkpointer = getattr(request.app.state, "chat_checkpointer", None)
-        _graph_singleton = _build_graph_singleton(checkpointer=checkpointer)
-    return _graph_singleton
+    graph: CompiledStateGraph[Any, Any, Any, Any] | None = getattr(
+        request.app.state, "chat_graph", None
+    )
+    if graph is None:
+        raise RuntimeError(
+            "chat_graph not initialized on app.state — lifespan must run "
+            "_build_graph_singleton before any /chat request. If this fires "
+            "in tests, use dependency_overrides[get_chat_graph] instead."
+        )
+    return graph
 
 
 # ---------------------------------------------------------------------------

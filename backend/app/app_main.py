@@ -281,7 +281,26 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         app.state.redis_async = None
         logger.warning("Plan 2 Redis async client 初始化跳过: %s", e)
 
-    # 8. Persona Editable UI Plan Task 6 — 一次性 backfill (幂等)
+    # 8. Chat graph singleton — wire AFTER MCP client + checkpointer are up.
+    # All chat tools come from MCP server subprocess (no in-process Tool register);
+    # raises if app.state.mcp_client is None (fail-fast — chat /chat endpoint
+    # cannot serve without tools).
+    try:
+        from app.router.chat import _build_graph_singleton
+
+        if app.state.mcp_client is None:
+            raise RuntimeError("MCP client unavailable — chat graph cannot wire tools")
+
+        app.state.chat_graph = await _build_graph_singleton(
+            mcp_client=app.state.mcp_client,
+            checkpointer=app.state.chat_checkpointer,
+        )
+        logger.info("Chat graph singleton 构建完成 (MCP-backed tools)")
+    except Exception as e:  # noqa: BLE001
+        app.state.chat_graph = None
+        logger.error("Chat graph singleton 构建失败 — /chat 路径将 503: %s", e)
+
+    # 9. Persona Editable UI Plan Task 6 — 一次性 backfill (幂等)
     # SessionLocal: app.core.database.SessionLocal (sync session factory, used by Celery tasks)
     # Must run before any code path that reads persona items (Task 17 wires agent path).
     from sqlalchemy.exc import ProgrammingError as _PgProgrammingError

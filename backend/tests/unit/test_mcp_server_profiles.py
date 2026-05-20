@@ -9,14 +9,16 @@ from __future__ import annotations
 import pytest
 
 
-def test_chat_tools_profile_has_six_existing_tools() -> None:
+def test_chat_tools_profile_has_eight_tools() -> None:
     from app.mcp_server.server import build_server
 
     s = build_server(profile="chat_tools")
     names = set(s._mcp_tool_registry)  # type: ignore[attr-defined]
     assert names == {
         "get_stock_quote",
-        "get_financials",
+        "get_financial_statements",
+        "get_market_indicators",
+        "get_corporate_actions",
         "get_news",
         "web_search",
         "kb_search",

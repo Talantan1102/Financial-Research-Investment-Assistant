@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -52,6 +52,16 @@ async def seeded_running_task(
     )
     await task_repo.mark_running(task.id)
     return {"session_id": sid, "user_id": "test-user", "task_id": task.id}
+
+
+def _async_factory_of(graph: Any) -> Callable[[], Awaitable[Any]]:
+    """Wrap a pre-built fake graph in an async factory matching run_chat_async's
+    graph_factory: Callable[[], Awaitable[Any]] contract (MCP-only refactor)."""
+
+    async def _factory() -> Any:
+        return graph
+
+    return _factory
 
 
 def _build_fake_graph(token_texts: list[str]) -> Any:
@@ -110,7 +120,7 @@ async def test_run_chat_async_normal_path_xadds_events_and_finalizes_done(
 
     await run_chat_async(
         task_id=seeded_running_task["task_id"],
-        graph_factory=lambda: fake_graph,
+        graph_factory=_async_factory_of(fake_graph),
         session_factory=async_session_factory,
         redis=fake_redis,
         user_message="echo hello",
@@ -155,7 +165,7 @@ async def test_run_chat_async_llm_error_xadds_error_and_marks_error(
 
     await run_chat_async(
         task_id=seeded_running_task["task_id"],
-        graph_factory=lambda: fake_graph,
+        graph_factory=_async_factory_of(fake_graph),
         session_factory=async_session_factory,
         redis=fake_redis,
         user_message="hi",
@@ -245,7 +255,7 @@ async def test_run_chat_async_cancel_signal_aborts_graph_and_marks_partial(
 
     await run_chat_async(
         task_id=tid,
-        graph_factory=lambda: fake_graph,
+        graph_factory=_async_factory_of(fake_graph),
         session_factory=async_session_factory,
         redis=fake_redis,
         user_message="cancel me",
