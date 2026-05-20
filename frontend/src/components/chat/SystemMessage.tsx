@@ -1,4 +1,14 @@
 import type { ChatMessage } from '@/types/chat'
-export function SystemMessage({ message }: { message: ChatMessage }) {
-  return <div data-testid={`sys-msg-${message.id}`}>{message.content}</div>
+import styles from '@/styles/chat.module.scss'
+
+export interface SystemMessageProps {
+  message: ChatMessage
+}
+
+export function SystemMessage({ message }: SystemMessageProps) {
+  return (
+    <div className={styles.systemMsg} data-testid={`sys-msg-${message.id}`}>
+      {message.content}
+    </div>
+  )
 }

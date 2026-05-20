@@ -1,8 +1,7 @@
-import { FileTextOutlined } from '@ant-design/icons'
-import { Button } from 'antd'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ChatMessage } from '@/types/chat'
+import { Icon } from '@/components/shared/Icon'
 import styles from '@/styles/chat.module.scss'
 
 export interface ResearchReportCardProps {
@@ -15,12 +14,17 @@ export function ResearchReportCard({ message, onContinueAsk }: ResearchReportCar
   const navigate = useNavigate()
   const reportId = message.research_report_id
   const summary = message.research_report_summary ?? '(报告生成中)'
+
   return (
     <div className={styles.reportCard} data-report-id={reportId ?? undefined}>
-      <div className={styles.reportCardHeader}>
-        <FileTextOutlined />
-        <strong>研报已生成</strong>
-        <span className={styles.reportCardId}>#{reportId}</span>
+      <div className={styles.reportCardHead}>
+        <div className={styles.reportCardIconLarge}>
+          <Icon name="document" size={18} aria-hidden />
+        </div>
+        <div className={styles.reportCardHeadText}>
+          <div className={styles.reportCardId}>#{reportId}</div>
+          <div className={styles.reportCardTitle}>{message.content || '研报已生成'}</div>
+        </div>
       </div>
       <div className={styles.reportCardSummary}>{summary}</div>
       {expanded ? (
@@ -29,17 +33,28 @@ export function ResearchReportCard({ message, onContinueAsk }: ResearchReportCar
         </div>
       ) : null}
       <div className={styles.reportCardActions}>
-        <Button size="small" aria-label={expanded ? '收起' : '展开'} onClick={() => setExpanded((v) => !v)}>
-          <span>{expanded ? '收起' : '展开'}</span>
-        </Button>
-        <Button
-          size="small"
-          type="primary"
+        <button
+          type="button"
+          className={styles.pillBtn}
+          aria-label={expanded ? '收起' : '展开'}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? '收起' : '展开'}
+        </button>
+        <button
+          type="button"
+          className={`${styles.pillBtn} ${styles.primary}`}
           onClick={() => reportId && navigate(`/reports/${reportId}`)}
         >
           跳转 Reports
-        </Button>
-        <Button size="small" aria-label="继续提问" onClick={() => onContinueAsk?.(message.id)}>继续提问</Button>
+        </button>
+        <button
+          type="button"
+          className={styles.pillBtn}
+          onClick={() => onContinueAsk?.(message.id)}
+        >
+          继续提问
+        </button>
       </div>
     </div>
   )
