@@ -1,0 +1,50 @@
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 12px;
+  color: var(--ios-label-secondary);
+}
+
+.icon {
+  width: 64px; height: 64px;
+  border-radius: var(--ios-radius-lg);
+  background: var(--ios-bg-grouped);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ios-label-tertiary);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ios-label);
+  letter-spacing: -0.01em;
+}
+
+.desc {
+  font-size: 13px;
+  color: var(--ios-label-secondary);
+  text-align: center;
+  max-width: 320px;
+}
+
+.cta {
+  margin-top: 12px;
+  padding: 8px 16px;
+  background: var(--ios-bg-grouped);
+  color: var(--ios-blue);
+  border: none;
+  border-radius: var(--ios-radius-pill);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s;
+
+  &:hover { background: rgba(0, 122, 255, 0.08); }
+  &.primary {
+    background: var(--ios-blue); color: #fff;
+    &:hover { background: var(--ios-blue-hover); }
+  }
+}

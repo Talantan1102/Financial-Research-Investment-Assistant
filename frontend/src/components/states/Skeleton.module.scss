@@ -1,0 +1,39 @@
+@keyframes shimmer {
+  0% { background-position: -800px 0; }
+  100% { background-position: 800px 0; }
+}
+
+.bar {
+  background: linear-gradient(
+    90deg,
+    var(--ios-bg-grouped) 0%,
+    var(--ios-bg-secondary) 40%,
+    var(--ios-bg-grouped) 80%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 2s linear infinite;
+  border-radius: var(--ios-radius-sm);
+  height: 14px;
+}
+
+.list {
+  display: flex; flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+
+  .bar { height: 44px; border-radius: 10px; }
+}
+
+.message {
+  display: flex; flex-direction: column;
+  gap: 14px;
+
+  .bar { height: 80px; border-radius: 18px; }
+}
+
+.card {
+  display: flex; flex-direction: column;
+  gap: 10px;
+
+  .bar { height: 120px; border-radius: var(--ios-radius-lg); }
+}

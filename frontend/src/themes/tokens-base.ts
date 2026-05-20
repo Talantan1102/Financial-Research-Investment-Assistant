@@ -1,54 +1,33 @@
 /**
  * Base design tokens — shared across banking and retail themes.
- *
- * See docs/design-tokens.md for the design philosophy.
+ * iOS HIG-aligned token values.
  */
 
 export const baseTokens = {
-  // Spacing scale (8px base)
   spacing: {
-    xs: 4,
-    sm: 8,
-    md: 16,
-    lg: 24,
-    xl: 32,
-    xxl: 48,
+    xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48,
   },
-  // Border radius
   radius: {
-    sm: 4,
-    md: 8,
-    lg: 12,
+    sm: 8, md: 12, lg: 16,  // iOS HIG 大圆角
   },
-  // Motion durations (ms)
   motion: {
-    fast: 150,
-    base: 250,
-    slow: 400,
+    fast: 150, base: 250, slow: 400,
   },
-  // Font stack
   fontFamily: {
-    sans: '-apple-system, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif',
-    mono: '"SF Mono", "JetBrains Mono", "Cascadia Code", Consolas, monospace',
+    sans: '-apple-system, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", system-ui, sans-serif',
+    mono: '"SF Mono", ui-monospace, "JetBrains Mono", "Menlo", Consolas, monospace',
   },
-  // Font sizes
   fontSize: {
-    xs: 12,
-    sm: 14,
-    base: 16,
-    lg: 18,
-    xl: 24,
-    xxl: 32,
+    xs: 12, sm: 14, base: 15, lg: 17, xl: 22, xxl: 28,
   },
-  // Semantic colors (shared)
   semantic: {
-    success: '#52c41a',
-    warning: '#faad14',
-    error: '#f5222d',
-    info: '#1890ff',
-    // 涨跌专用 (中国标准: 红涨绿跌)
-    up: '#f5222d',
-    down: '#52c41a',
+    success: '#34c759',  // iOS systemGreen
+    warning: '#ff9500',  // iOS systemOrange
+    error: '#ff3b30',    // iOS systemRed
+    info: '#007aff',     // iOS systemBlue
+    // 中国市场涨跌(红涨绿跌)— 走 iOS 红绿但保中国惯例
+    up: '#ff3b30',
+    down: '#34c759',
   },
 } as const;
 

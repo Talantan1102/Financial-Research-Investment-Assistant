@@ -3,6 +3,16 @@ import { renderWithProviders } from '@/test-utils/render'
 import { Sidebar } from '@/layout/app-shell/sidebar'
 
 describe('<Sidebar>', () => {
+  it('renders sidebar wrapper with data-testid', () => {
+    const { getByTestId } = renderWithProviders(<Sidebar />)
+    expect(getByTestId('app-sidebar')).toBeInTheDocument()
+  })
+
+  it('renders search input', () => {
+    const { getByTestId } = renderWithProviders(<Sidebar />)
+    expect(getByTestId('sidebar-search-input')).toBeInTheDocument()
+  })
+
   it('renders 4 child sections: chat-session-list, new-chat-button, page-nav, user-panel', () => {
     const { getByTestId } = renderWithProviders(<Sidebar />)
     expect(getByTestId('sidebar-new-chat-button')).toBeInTheDocument()
