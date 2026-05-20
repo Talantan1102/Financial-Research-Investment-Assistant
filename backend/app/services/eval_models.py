@@ -75,6 +75,25 @@ class EvalResult(BaseModel):
     judge_latency_ms: int = Field(ge=0)
     timestamp: datetime
 
+    # v1.x DD report eval 扩展字段(可选,保持 Plan C/c5 backward compat)
+    # alembic 未引入(v0.9.x pattern); eval_recorder 走 CREATE TABLE IF NOT EXISTS 幂等
+    backtest_run_id: str | None = Field(
+        default=None, description="关联 backtest_runs.run_id (Phase 1 起)"
+    )
+    cut_off_date: str | None = Field(
+        default=None, description="backtest 时点 ISO date string (YYYY-MM-DD)"
+    )
+    evaluator_llm: str | None = Field(
+        default=None, description="评估时 swap 的 LLM model id (e.g. gpt-4o-2024-05-13)"
+    )
+    case_type: Literal["backtest", "sanity", "financebench", "cross_llm"] | None = Field(
+        default=None, description="case 类别"
+    )
+    metric_scores_json: str | None = Field(
+        default=None,
+        description="BacktestMetricScores.model_dump_json() — Phase 2 backtest 5-metric scores",
+    )
+
 
 GoldenCategory = Literal[
     "single_tool_call",
