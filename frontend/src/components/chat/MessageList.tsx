@@ -16,7 +16,7 @@ export interface MessageListProps {
   onRetry?: (taskId: string) => void
 }
 
-const ESTIMATE_ROW_HEIGHT = 96
+const ESTIMATE_ROW_HEIGHT = 120
 
 function MessageRouter({
   message,
