@@ -5,7 +5,7 @@
 
 测试策略:
 - 不真起 Celery worker;直接 `await run_chat_async(...)`
-- in-memory sqlite session_factory + fakeredis Redis
+- 真 PG(industry_assistant_test) async_session_factory + fakeredis Redis
 - 用 fake graph stub yield 固定 event 序列
 
 覆盖:
@@ -22,7 +22,6 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest_asyncio
-from app.core.database import Base
 from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — 注册 users 表
 from app.services.chat_event_bus import ChatEventBus
@@ -30,50 +29,39 @@ from app.services.chat_session_repo import ChatSessionRepo
 from app.services.chat_task_repo import ChatTaskRepo
 from app.tasks.chat_runner import run_chat_async
 from fakeredis.aioredis import FakeRedis
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-
-# chat_messages 模型用 JSONB().with_variant(JSON, "sqlite") 所以 sqlite 也能建。
-_REQUIRED_TABLE_NAMES = ("users", "chat_sessions", "chat_tasks", "chat_messages")
-
-
-def _selective_create_all(sync_conn: object) -> None:
-    tables = [Base.metadata.tables[name] for name in _REQUIRED_TABLE_NAMES]
-    Base.metadata.create_all(sync_conn, tables=tables)
-
-
-@pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(_selective_create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    yield factory
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 @pytest_asyncio.fixture
 async def seeded_running_task(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
 ) -> dict[str, Any]:
     sid = uuid.uuid4()
-    uid = uuid.uuid4()
-    async with session_factory() as sess:
+    # user_id=None: chat_tasks.user_id is nullable FK; random UUID fails PG FK check.
+    # run_chat_async only uses user_id for LangGraph thread_id concatenation,
+    # so we pass a fixed sentinel string "test-user" at the run_chat_async call site.
+    async with async_session_factory() as sess:
         sess.add(ChatSession(id=sid, user_id=None, title="t"))
         await sess.commit()
-    task_repo = ChatTaskRepo(session_factory)
+    task_repo = ChatTaskRepo(async_session_factory)
     task = await task_repo.create_queued(
         session_id=sid,
-        user_id=uid,
-        langgraph_thread_id=f"{uid}:{sid}",
+        user_id=None,  # nullable FK; PG enforces FK so we use None
+        langgraph_thread_id=f"test:{sid}",
         initial_prompt_message_id=None,
     )
     await task_repo.mark_running(task.id)
-    return {"session_id": sid, "user_id": uid, "task_id": task.id}
+    return {"session_id": sid, "user_id": "test-user", "task_id": task.id}
+
+
+def _async_factory_of(graph: Any) -> Callable[[], Awaitable[Any]]:
+    """Wrap a pre-built fake graph in an async factory matching run_chat_async's
+    graph_factory: Callable[[], Awaitable[Any]] contract (MCP-only refactor)."""
+
+    async def _factory() -> Any:
+        return graph
+
+    return _factory
 
 
 def _async_factory_of(graph: Any) -> Callable[[], Awaitable[Any]]:
@@ -134,7 +122,7 @@ def _build_fake_graph_that_raises(exc: Exception) -> Any:
 
 
 async def test_run_chat_async_normal_path_xadds_events_and_finalizes_done(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_running_task: dict[str, Any],
 ) -> None:
     fake_redis = FakeRedis(decode_responses=False)
@@ -143,7 +131,7 @@ async def test_run_chat_async_normal_path_xadds_events_and_finalizes_done(
     await run_chat_async(
         task_id=seeded_running_task["task_id"],
         graph_factory=_async_factory_of(fake_graph),
-        session_factory=session_factory,
+        session_factory=async_session_factory,
         redis=fake_redis,
         user_message="echo hello",
         session_id=str(seeded_running_task["session_id"]),
@@ -164,14 +152,14 @@ async def test_run_chat_async_normal_path_xadds_events_and_finalizes_done(
     assert "done" in types
 
     # PG: assistant row + task done
-    msg_repo = ChatSessionRepo(session_factory)
+    msg_repo = ChatSessionRepo(async_session_factory)
     msgs = await msg_repo.list_messages(str(seeded_running_task["session_id"]))
     assistant_msgs = [m for m in msgs if m.role == "assistant"]
     assert len(assistant_msgs) == 1
     assert assistant_msgs[0].status == "done"
     assert assistant_msgs[0].content == "hello world"
 
-    task_repo = ChatTaskRepo(session_factory)
+    task_repo = ChatTaskRepo(async_session_factory)
     refreshed = await task_repo.get_by_id(seeded_running_task["task_id"])
     assert refreshed is not None
     assert refreshed.status == "done"
@@ -179,7 +167,7 @@ async def test_run_chat_async_normal_path_xadds_events_and_finalizes_done(
 
 
 async def test_run_chat_async_llm_error_xadds_error_and_marks_error(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_running_task: dict[str, Any],
 ) -> None:
     fake_redis = FakeRedis(decode_responses=False)
@@ -188,7 +176,7 @@ async def test_run_chat_async_llm_error_xadds_error_and_marks_error(
     await run_chat_async(
         task_id=seeded_running_task["task_id"],
         graph_factory=_async_factory_of(fake_graph),
-        session_factory=session_factory,
+        session_factory=async_session_factory,
         redis=fake_redis,
         user_message="hi",
         session_id=str(seeded_running_task["session_id"]),
@@ -206,7 +194,7 @@ async def test_run_chat_async_llm_error_xadds_error_and_marks_error(
     types = [e[1].get("type") for e in entries]
     assert "error" in types or "error_done" in types
 
-    task_repo = ChatTaskRepo(session_factory)
+    task_repo = ChatTaskRepo(async_session_factory)
     refreshed = await task_repo.get_by_id(seeded_running_task["task_id"])
     assert refreshed is not None
     assert refreshed.status == "error"
@@ -215,7 +203,7 @@ async def test_run_chat_async_llm_error_xadds_error_and_marks_error(
 
 
 async def test_run_chat_async_cancel_signal_aborts_graph_and_marks_partial(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_running_task: dict[str, Any],
 ) -> None:
     """模拟 ChatCancelBus.publish_cancel 期间 worker listener 收到 signal,
@@ -278,7 +266,7 @@ async def test_run_chat_async_cancel_signal_aborts_graph_and_marks_partial(
     await run_chat_async(
         task_id=tid,
         graph_factory=_async_factory_of(fake_graph),
-        session_factory=session_factory,
+        session_factory=async_session_factory,
         redis=fake_redis,
         user_message="cancel me",
         session_id=str(sid),
@@ -287,7 +275,7 @@ async def test_run_chat_async_cancel_signal_aborts_graph_and_marks_partial(
     await cancel_trigger
 
     # Assertions: task.status=partial,checkpoint_id 写入
-    task_repo = ChatTaskRepo(session_factory)
+    task_repo = ChatTaskRepo(async_session_factory)
     refreshed = await task_repo.get_by_id(tid)
     assert refreshed is not None
     assert refreshed.status in ("partial", "cancelled"), (
@@ -295,7 +283,7 @@ async def test_run_chat_async_cancel_signal_aborts_graph_and_marks_partial(
     )
 
     # PG chat_messages assistant 应该 status=partial,内容含至少 part1
-    msg_repo = ChatSessionRepo(session_factory)
+    msg_repo = ChatSessionRepo(async_session_factory)
     msgs = await msg_repo.list_messages(str(sid))
     assistant_msgs = [m for m in msgs if m.role == "assistant"]
     assert len(assistant_msgs) == 1

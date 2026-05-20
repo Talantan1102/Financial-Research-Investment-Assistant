@@ -22,7 +22,6 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
-from app.core.database import Base
 from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — registers users table
 from app.router.chat import (
@@ -42,18 +41,9 @@ from fakeredis.aioredis import FakeRedis
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
-
-_REQUIRED_TABLE_NAMES = ("users", "chat_sessions", "chat_tasks", "chat_messages")
-
-
-def _selective_create_all(sync_conn: object) -> None:
-    tables = [Base.metadata.tables[name] for name in _REQUIRED_TABLE_NAMES]
-    Base.metadata.create_all(sync_conn, tables=tables)
 
 
 class _StubUser:
@@ -61,14 +51,15 @@ class _StubUser:
         self.id = "test-user"
 
 
-@pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(_selective_create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    yield factory
-    await engine.dispose()
+@pytest.fixture
+def session_factory(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> async_sessionmaker[AsyncSession]:
+    """Alias to global pg_async_session_factory — real PG, no sqlite.
+
+    PR-A T15: replaced sqlite+aiosqlite (broke on JSONB after with_variant removal).
+    """
+    return pg_async_session_factory
 
 
 @pytest_asyncio.fixture
@@ -83,19 +74,18 @@ async def seeded_running_task(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> dict[str, Any]:
     sid = uuid.uuid4()
-    uid = uuid.uuid4()
     async with session_factory() as sess:
         sess.add(ChatSession(id=sid, user_id=None, title="t"))
         await sess.commit()
     task_repo = ChatTaskRepo(session_factory)
     task = await task_repo.create_queued(
         session_id=sid,
-        user_id=uid,
-        langgraph_thread_id=f"{uid}:{sid}",
+        user_id=None,
+        langgraph_thread_id=f"anon:{sid}",
         initial_prompt_message_id=None,
     )
     await task_repo.mark_running(task.id)
-    return {"session_id": sid, "user_id": uid, "task_id": task.id}
+    return {"session_id": sid, "user_id": None, "task_id": task.id}
 
 
 def _client(

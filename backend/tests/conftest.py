@@ -15,6 +15,8 @@ from typing import Literal
 
 import pytest
 from app.services.llm_mock_client import MockLLMClient
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 # v1.0 monitoring-engine L2 e2e fixtures (Redis container + Celery worker
 # subprocess). pytest only auto-loads files literally named `conftest.py`,
@@ -288,3 +290,118 @@ def pg_test_container() -> Iterator[dict[str, object]]:
                 cwd=str(repo_root),
                 check=False,
             )
+
+
+# ---------------------------------------------------------------------------
+# PG fixture — L0/L1/L2.5 共用(取代 sqlite-override)
+# spec: docs/superpowers/specs/2026-05-17-pg-only-migration-design.md § 4 PR-A
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def pg_test_engine(pg_test_container: dict[str, object]) -> Iterator[Engine]:
+    """session-scoped SQLAlchemy engine bound to industry_assistant_test;
+    每 session 先 drop_all 再 create_all,保证 fresh schema。
+
+    Replaces 全部 in-memory sqlite engines used by L0/L1 tests。drop+create
+    才能在跨 worktree / schema 演化时不留旧列(checkfirst 跳过已存在表会
+    miss 新列)。industry_assistant_test 是测试专用 db,drop 影响范围有限。
+    """
+    import app.models  # noqa: F401 — barrel registers all metadata
+    import app.services.trace_models  # noqa: F401 — trace/eval metadata
+    from app.core.database import Base
+    from sqlalchemy import create_engine, text
+
+    url = str(pg_test_container["url"])
+    engine = create_engine(url, future=True)
+
+    # DROP SCHEMA CASCADE 比 drop_all 强 — 跨循环 FK (chat_messages ↔ chat_tasks)
+    # 也能清。drop_all 需要 sortable topology, 循环 FK 会 raise
+    # CircularDependencyError。
+    with engine.begin() as conn:
+        conn.execute(text("DROP SCHEMA public CASCADE"))
+        conn.execute(text("CREATE SCHEMA public"))
+        # uuid_generate_v4() 之类 ext 在 docker init 时建在 public,重建后丢
+        conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
+
+    Base.metadata.create_all(bind=engine)
+
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def db_session(pg_test_engine: Engine) -> Iterator[Session]:
+    """function-scoped Session with savepoint rollback。
+
+    每个 test 起一个 outer transaction,test 完 rollback,
+    所有 INSERT/UPDATE/DELETE 跨 test 不可见。
+
+    `join_transaction_mode="create_savepoint"` 让 session.commit() 走
+    SAVEPOINT release 而不是真 commit outer transaction — 否则 test 调
+    db_session.commit() 会持久化到 PG,跨 test 累积污染数据。
+
+    Setup 阶段先 TRUNCATE 所有 public schema 表(独立 connection 真 commit)
+    清除之前 async-fixture test 留下的累积数据。pg_async_session_factory
+    显式不走 rollback isolation,数据会落 PG,后续 db_session test 必须先清。
+    """
+    from sqlalchemy import text
+
+    # Step 1: Truncate all application tables on a separate connection.
+    # This MUST happen on its own connection with explicit commit — if done
+    # inside the outer transaction below, the rollback at the end would
+    # restore the data we just cleared.
+    with pg_test_engine.connect() as truncate_conn:
+        tables = [
+            row[0]
+            for row in truncate_conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+            )
+        ]
+        if tables:
+            truncate_conn.execute(text(f"TRUNCATE TABLE {', '.join(tables)} CASCADE"))
+            truncate_conn.commit()
+
+    # Step 2: Open outer transaction + Session with SAVEPOINT mode for this test.
+    connection = pg_test_engine.connect()
+    try:
+        transaction = connection.begin()
+        session_factory = sessionmaker(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+            transaction.rollback()
+    finally:
+        connection.close()
+
+
+@pytest.fixture
+def pg_async_session_factory(pg_test_container: dict[str, object]) -> Iterator[object]:
+    """function-scoped async session factory bound to the test PG instance.
+
+    Returns a real async_sessionmaker using postgresql+psycopg (psycopg v3 async
+    driver).  Unlike db_session, this fixture does NOT wrap each test in an outer
+    transaction rollback — async tests that use ChatTaskRepo / ChatSessionRepo need
+    a full commit cycle to observe state changes across different async_with blocks.
+
+    PR-A T15: replaces in-memory sqlite+aiosqlite used by Plan 1/2/3 async
+    integration tests (broke after with_variant removal left JSONB columns
+    unrenderable on sqlite).
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    raw_url = str(pg_test_container["url"])
+    # Convert postgresql:// → postgresql+psycopg:// for psycopg v3 async driver
+    async_url = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+    engine = create_async_engine(async_url, future=True)
+    factory: async_sessionmaker[AsyncSession] = async_sessionmaker(engine, expire_on_commit=False)
+    yield factory
+    # Use sync_engine.dispose() to clean up without needing an event loop in teardown
+    engine.sync_engine.dispose()

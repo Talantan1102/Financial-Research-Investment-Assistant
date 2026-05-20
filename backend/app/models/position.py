@@ -36,7 +36,7 @@ class Position(Base):
     id = Column(String(36), primary_key=True)
 
     user_id = Column(
-        UUID(as_uuid=True).with_variant(String(36), "sqlite"),
+        UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,

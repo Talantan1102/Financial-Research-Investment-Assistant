@@ -6,49 +6,33 @@ from collections.abc import Generator
 
 import pytest
 from app.core.database import get_db
-from app.models.position import Position
-from app.models.trade import Trade
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.router.portfolio_router import router as portfolio_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 from tests.unit._helpers import make_user
 
 
 @pytest.fixture
-def client_and_session() -> Generator[tuple[TestClient, Session, User], None, None]:
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    User.__table__.create(engine)
-    Trade.__table__.create(engine)
-    Position.__table__.create(engine)
-    Session_ = sessionmaker(bind=engine, expire_on_commit=False)
-    session = Session_()
-    user = make_user(session)
-    session.commit()
+def client_and_session(
+    db_session: Session,
+) -> tuple[TestClient, Session, User]:
+    user = make_user(db_session)
+    db_session.commit()
 
     app = FastAPI()
     app.include_router(portfolio_router)
 
     def _override_get_db() -> Generator[Session, None, None]:
-        try:
-            yield session
-        finally:
-            pass
+        yield db_session
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_current_user_required] = lambda: user
 
-    yield TestClient(app), session, user
-    session.close()
+    return TestClient(app), db_session, user
 
 
 def test_get_positions_empty_returns_empty_list(

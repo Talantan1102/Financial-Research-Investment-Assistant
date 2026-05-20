@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import abc
+from datetime import date
 from functools import cache
 from typing import Any
 
@@ -18,6 +19,10 @@ class Chunk(BaseModel):
     section_title: str | None = None
     is_table: bool = False
     extra: dict[str, Any] = Field(default_factory=dict)
+    publish_date: date | None = Field(
+        default=None,
+        description="原文档发布日期 (v1.x DD report backtest 用 — time-travel filter)",
+    )
 
 
 class Chunker(abc.ABC):

@@ -25,6 +25,10 @@ class CreateChatRequest(BaseModel):
     title: str = "新对话"
 
 
+class RenameChatRequest(BaseModel):
+    title: str
+
+
 def get_repo() -> ChatSessionRepo:
     """Replaced via Depends override in tests; defaults wired in app_main lifespan (Task 20)."""
     raise RuntimeError("ChatSessionRepo dependency not configured")
@@ -85,6 +89,22 @@ async def get_chat(session_id: str, repo: ChatSessionRepo = Depends(get_repo)) -
         ],
         "active_task_id": str(active_task.id) if active_task else None,
     }
+
+
+@router.put("/{session_id}")
+async def rename_chat(
+    session_id: str,
+    req: RenameChatRequest,
+    repo: ChatSessionRepo = Depends(get_repo),
+) -> ChatSessionView:
+    """User-driven rename. Sets title_source='user_renamed' (terminal) via repo."""
+    s = await repo.get_session(session_id)
+    if not s:
+        raise HTTPException(404, "session not found")
+    await repo.rename_session(session_id, req.title)
+    updated = await repo.get_session(session_id)
+    assert updated is not None
+    return _to_view(updated)
 
 
 @router.delete("/{session_id}")

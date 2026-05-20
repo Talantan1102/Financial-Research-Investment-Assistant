@@ -37,8 +37,8 @@ def _get_current_user_id(
 ) -> UUID:
     """Extract UUID from current authenticated user.
 
-    User.id 是 UUID(as_uuid=True).with_variant(String(36), "sqlite") — PG 下是
-    typed UUID, SQLite 下是 str. 这里统一 cast 为 UUID 给下游 PersonaService 用,
+    User.id 是 UUID(as_uuid=True) (PG-only) — 是
+    typed UUID. 这里统一 cast 为 UUID 给下游 PersonaService 用,
     避免 4 个 endpoint 重复散布 cast 知识.
 
     test fixture 通过 app.dependency_overrides 替换此 dep。

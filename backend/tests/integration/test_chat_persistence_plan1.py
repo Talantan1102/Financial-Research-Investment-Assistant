@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import importlib
 import uuid
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -23,7 +22,6 @@ import pytest_asyncio
 from app.agents.chat_planner import ChatPlanner
 from app.agents.in_session_memory import InSessionMemory
 from app.agents.responder import Responder
-from app.core.database import Base
 from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — registers users table
 from app.orchestration.chat_graph import build_chat_graph
@@ -38,10 +36,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 # Import the chat router module so we can monkey-patch its session-factory getter
@@ -53,14 +49,6 @@ get_escalation_record_repo = _chat_mod.get_escalation_record_repo
 get_async_session_factory = _chat_mod.get_async_session_factory
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "llm_mocks"
-
-# 4 张表: Repo 真实使用 + sqlite 编译可过
-_REQUIRED_TABLE_NAMES = ("users", "chat_sessions", "chat_tasks", "chat_messages")
-
-
-def _selective_create_all(sync_conn: object) -> None:
-    tables = [Base.metadata.tables[name] for name in _REQUIRED_TABLE_NAMES]
-    Base.metadata.create_all(sync_conn, tables=tables)
 
 
 # ---------------------------------------------------------------------------
@@ -166,14 +154,15 @@ def _build_failing_test_graph() -> Any:
 # ---------------------------------------------------------------------------
 
 
-@pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(_selective_create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    yield factory
-    await engine.dispose()
+@pytest.fixture
+def session_factory(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> async_sessionmaker[AsyncSession]:
+    """Alias to global pg_async_session_factory — real PG, no sqlite.
+
+    PR-A T15: replaced sqlite+aiosqlite (broke on JSONB after with_variant removal).
+    """
+    return pg_async_session_factory
 
 
 @pytest_asyncio.fixture

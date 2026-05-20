@@ -709,6 +709,20 @@ async def chat(
             user_message=req.message,
         )
 
+        # === Async session title (2026-05-17): user msg 入库即触发, 跟 chat agent 并行
+        # 跑;LLM 只读 user_msg, 不必等 assistant 完成, 比 chat_finalize 触发提前 ~5-10s
+        # → "新对话" 中间态尽量短(目标 <2s vs assistant 落库后再花 1-2s 出 title)。
+        # task 内部检查 title_source != "pending" 幂等 skip, 重复触发安全。
+        try:
+            session = await session_repo.get_session(str(req.session_id))
+            if session and session.title_source == "pending":
+                from app.tasks.title_generation import generate_session_title
+
+                generate_session_title.apply_async(args=[str(req.session_id)])
+                logger.info("enqueued generate_session_title for session %s", req.session_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("title enqueue skipped: %s", exc)
+
         return {
             "task_id": str(task.id),
             "session_id": req.session_id,

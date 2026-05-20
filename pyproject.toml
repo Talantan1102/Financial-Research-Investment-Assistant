@@ -300,6 +300,14 @@ ignore_errors = true
 module = "yaml"
 ignore_missing_imports = true
 
+# requests is only imported by tests/e2e/test_chat_title_e2e.py (dogfood-only).
+# Stubs ship via types-requests, but we don't want a new dev dep for one file;
+# global ignore_missing_imports only silences import-not-found, not import-untyped.
+[[tool.mypy.overrides]]
+module = "requests"
+ignore_missing_imports = true
+follow_imports = "skip"
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q --strict-markers"

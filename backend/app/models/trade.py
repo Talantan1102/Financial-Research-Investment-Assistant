@@ -4,7 +4,6 @@
 
 类型选型:
 - 生产 = PostgreSQL,使用 UUID native + Numeric
-- 单元测试 = sqlite in-memory,通过 with_variant 降级 String(36)
 """
 
 from __future__ import annotations
@@ -46,7 +45,7 @@ class Trade(Base):
     id = Column(String(36), primary_key=True)
 
     user_id = Column(
-        UUID(as_uuid=True).with_variant(String(36), "sqlite"),
+        UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,

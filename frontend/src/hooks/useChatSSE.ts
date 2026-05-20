@@ -32,6 +32,7 @@ import {
   currentChatActions,
   currentChatState,
 } from '@/store/current-chat'
+import { chatSessionsActions } from '@/store/chat-sessions'
 import type { SSEEvent, TokenEvent } from '@/types/chat'
 import { useTypewriter } from './useTypewriter'
 
@@ -147,6 +148,8 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
   const fetchImpl = options.fetchImpl ?? fetch
   const abortRef = useRef<AbortController | null>(null)
   const sessionIdRef = useRef<string | null>(options.sessionId)
+  // === NEW (2026-05-17): delayed sidebar refetch timer ref for cleanup on unmount ===
+  const titleRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const typewriter = useTypewriter({
     onChar: (ch) => {
@@ -162,6 +165,13 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
     if (sessionIdRef.current !== options.sessionId) {
       abortRef.current?.abort()
       sessionIdRef.current = options.sessionId
+    }
+    return () => {
+      // Clear delayed refetch timer on unmount to avoid late-firing after nav.
+      if (titleRefetchTimerRef.current !== null) {
+        clearTimeout(titleRefetchTimerRef.current)
+        titleRefetchTimerRef.current = null
+      }
     }
   }, [options.sessionId])
 
@@ -223,6 +233,21 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         typewriterRef.current.flush()
       } catch {
         if (ac.signal.aborted) return
+      }
+
+      if (doneSeen && !ac.signal.aborted) {
+        // === NEW (2026-05-17): 双阶段 sidebar 刷新 ===
+        // 第一次: SSE done 后立刻刷 sidebar,让 last_msg_preview 即时更新。
+        void chatSessionsActions.loadSessions()
+        // 第二次: 延迟 3s 再刷,等 Celery generate_session_title task 完成
+        // (countdown=1 + ~1-2s LLM call),让 LLM 生成的 title 出现在 sidebar。
+        if (titleRefetchTimerRef.current !== null) {
+          clearTimeout(titleRefetchTimerRef.current)
+        }
+        titleRefetchTimerRef.current = setTimeout(() => {
+          titleRefetchTimerRef.current = null
+          void chatSessionsActions.loadSessions()
+        }, 3000)
       }
 
       if (!doneSeen && !ac.signal.aborted) {

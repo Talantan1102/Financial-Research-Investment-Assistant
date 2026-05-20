@@ -303,6 +303,9 @@ async def get_research_graph(request: Request) -> Any:
         from app.agents.critic import Critic
         from app.agents.critic_subagents.conciseness import ConcisenessScorer
         from app.agents.critic_subagents.coverage import CoverageScorer
+        from app.agents.critic_subagents.dialectical_balance import (
+            DialecticalBalanceScorer,
+        )
         from app.agents.critic_subagents.factuality import FactualityScorer
         from app.agents.critic_subagents.input_context_scorer import (
             InputContextAppropriatenessScorer,
@@ -343,6 +346,7 @@ async def get_research_graph(request: Request) -> Any:
             ConcisenessScorer(llm=llm),
             InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer (v0.8.4)
             ValuationConsistencyScorer(llm=llm),  # 第 7 scorer (v1.x A5a)
+            DialecticalBalanceScorer(llm=llm),  # 第 8 scorer (v1.x A5b)
             # plan_correctness scorer removed in v1.x — Validator gate replaces it.
             # critic_subgraph still requests scorer_plan_correctness (Task 1.6 cleanup).
         ]
