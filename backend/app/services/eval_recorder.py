@@ -12,6 +12,7 @@ just on real PG now.
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -33,7 +34,7 @@ _ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
 class EvalRecorder:
     """SQLAlchemy ORM persistence for EvalResult rows."""
 
-    def __init__(self, session_factory: Callable[[], Session]) -> None:
+    def __init__(self, session_factory: Callable[[], AbstractContextManager[Session]]) -> None:
         self._session_factory = session_factory
 
     def write(self, result: EvalResult) -> None:

@@ -11,6 +11,7 @@ SQL → SQL injection。新版用 SQLAlchemy whitelisted ORM column filter,
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -33,13 +34,14 @@ class TraceService:
     """SQLAlchemy ORM persistence for Span rows.
 
     Construction:
-        TraceService(session_factory)  # session_factory: () -> Session
+        TraceService(session_factory)  # session_factory: () -> CM[Session]
 
-    `session_factory` 生产环境通常是 `SessionLocal`(from `app.core.database`),
-    测试环境通常是 `lambda: db_session`(transaction rollback isolation)。
+    `session_factory` 生产环境通常是 `SessionLocal`(Session 本身是 CM),
+    测试环境是 `lambda: contextlib.nullcontext(db_session)`(复用 outer fixture
+    的 transaction-rollback 隔离,不让 with-block 退出时 close)。
     """
 
-    def __init__(self, session_factory: Callable[[], Session]) -> None:
+    def __init__(self, session_factory: Callable[[], AbstractContextManager[Session]]) -> None:
         self._session_factory = session_factory
 
     def write_span(self, span: Span) -> None:
