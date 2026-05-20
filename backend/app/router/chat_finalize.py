@@ -86,6 +86,8 @@ async def finalize_task_persistence(
             status="done",
         )
         await task_repo.mark_done(task_id, langgraph_checkpoint_id=checkpoint_id)
+        # Title generation 改在 chat.py user msg 入库后立刻 enqueue
+        # (跟 chat agent 并行, 缩短 "新对话" 中间态)。
     else:
         await session_repo.append_message(
             session_id=session_id,

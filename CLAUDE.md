@@ -85,6 +85,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [Phase 1 (backtest infra) landed](docs/claude-context/dd-report-eval-phase-1-landed.md)
 - [Phase 2 (metric + ablation) landed](docs/claude-context/dd-report-eval-phase-2-landed.md) — 5 metric 实现 + V0-V3 ablation 控制变量 + ship 框架
 
+### Chat Session Title LLM 异步生成(2026-05-17 ship 完)
+- [chat session title LLM 异步生成 ship](docs/claude-context/chat-session-title-llm-generation-done.md) — 20 字截断 → Celery 异步 LLM 副产品模式 + title_source 三态防覆盖 + sidebar `...` 菜单 + inline rename / 15 task ship,异步副产品模式可复用
+
 ### PG-only Migration(2026-05-17 PR-A ship,PR-B/C/D 待)
 - [PR-A landed](docs/claude-context/pg-only-migration-pr-a-landed.md) — 删主 ORM 30+ with_variant + L0/L1 测试切真 PG + 19 个 unit test 文件迁 db_session / 0 regression / spec § 4 PR-A
 

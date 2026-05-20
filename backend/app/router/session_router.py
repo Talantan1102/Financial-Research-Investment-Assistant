@@ -160,6 +160,7 @@ async def update_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
 
     session.title = session_data.title
+    session.title_source = "user_renamed"  # 2026-05-17: user rename is terminal state
     db.commit()
     db.refresh(session)
 
@@ -272,13 +273,6 @@ async def add_message(
     from datetime import datetime
 
     session.updated_at = datetime.utcnow()
-
-    # 如果是第一条用户消息，自动生成标题
-    if message_data.role == "user" and session.title == "新对话":
-        # 取消息前20个字符作为标题
-        session.title = message_data.content[:20] + (
-            "..." if len(message_data.content) > 20 else ""
-        )
 
     db.commit()
     db.refresh(message)

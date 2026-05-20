@@ -63,6 +63,14 @@ class ChatSession(Base):
     message_count = Column(Integer, nullable=False, default=0, server_default="0")
     last_msg_preview = Column(Text, nullable=True)
 
+    # === Title 生成状态 (2026-05-17) ===
+    title_source = Column(
+        String(16),
+        nullable=False,
+        default="pending",
+        server_default="pending",
+    )  # pending | llm_generated | user_renamed
+
     # 关系
     user = relationship("User", back_populates="sessions")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")

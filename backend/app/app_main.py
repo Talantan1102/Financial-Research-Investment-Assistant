@@ -301,6 +301,16 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         # 运行时错误 (DB down 等) — 不阻塞启动, 但保留 traceback 便于诊断
         logger.exception("persona migration startup hook 失败 (运行时错误)")
 
+    # === title_source backfill (2026-05-17): 一次性 idempotent migration ===
+    try:
+        from app.scripts.backfill_title_source import backfill
+
+        n_backfilled = backfill(engine)
+        if n_backfilled:
+            logger.info("backfilled %d old chat_sessions title_source=llm_generated", n_backfilled)
+    except Exception:  # noqa: BLE001
+        logger.exception("title_source backfill failed (non-fatal)")
+
     yield
 
     # 关闭时执行
