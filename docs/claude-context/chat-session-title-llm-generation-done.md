@@ -52,7 +52,9 @@ inline rename input。
 **关键决策:**
 - title_source 三态而非 is_user_renamed 布尔 → 显式 "谁写的" + 留扩展位
 - Celery task 而非 inline await → 不阻塞首轮回复 + 复用已有基础设施
-- LLM input 是 user 首条 + assistant 首条 [:500] → ChatGPT 标准做法,主题准
+- LLM input 只用 user_msg (dogfood 修正,见下方) → 提取用户意图而非 AI 视角的对话总结
+- enqueue 在 user msg 入库后立刻触发 (dogfood 修正,见下方) → 跟 chat agent 并行跑,
+  "新对话" 中间态从 5-10s 压缩到 <2s
 - 失败兜底走 user.content[:20] + "..." → 比一直留 "新对话" 更有信息
 - 前端 3s setTimeout 而非 SSE event → v1 简单,v1.x 升级为推送
 
@@ -63,7 +65,9 @@ inline rename input。
 4. 历史 session 全量回填 LLM title(目前只对 new session 生效)
 5. Sidebar Delete session(软删 / 硬删 / 归档?)
 
-**Task 15 dogfood prep 沉淀:**
+**Task 15 dogfood 全程沉淀(10 处 ship-blocking bug + 教训):**
+
+CI prep 阶段(跑 `poe ci` + frontend tsc/vitest):
 - e2e fixture chain 需要 docker 时,`pytestmark.skipif(not _docker_available())`
   必须显式加,否则 collection-time error(`celery_worker_subprocess` 在
   fixture 实例化时抛 DockerException);跟 `feedback_third_party_plugin_defaults.md`
@@ -75,3 +79,46 @@ inline rename input。
 - `ReturnType<typeof window.setTimeout>` 在 @types/node 叠加 overload 下会解析
   成 NodeJS Timeout(不是预期的 DOM number),production / mock 必须统一不带
   `window.` 前缀,让 NodeJS overload 一致命中
+
+启动 + 真实 chat 阶段(暴露 spec / 实施 / 项目级 hidden bug):
+- **Celery worker 不自动注册 task** — 新建 `app/tasks/title_generation.py` 必须显式
+  加进 `celery_app.include` 列表;ImportError 不会 fail-loud,直接表现为 enqueue
+  succeeds + worker NotRegistered。验证手段:`celery_app.loader.import_default_modules()`
+  后 grep `celery_app.tasks` 看 task name 是否注册。
+- **`create_all()` 不 ALTER 已有表 ADD COLUMN** — Spec § 4.2 假设 "v0.9.x 不引
+  alembic, 用 create_all 幂等" **在新增列场景失败**;对持续部署的 PG 环境, ORM 新
+  Column 必须配 startup-time idempotent migration (inspect → 列不存在则 ALTER
+  TABLE ADD COLUMN, PG + sqlite 兼容语法);否则 ORM SELECT * 自动 include 新列 →
+  UndefinedColumn 500。
+- **`_OpenAIAdapter` 强制 `response_format=json_object`** — `LLMService.chat(schema=None)`
+  语义是"纯文本调用",但 adapter 把 response_format 写死,所有 caller 一律走 JSON
+  模式;DashScope 当 response_format=json_object 时强制要求 prompt 含 "json" 字,
+  纯文本任务 400 → 全 retry 失败 → fallback 走 20 字截断,sidebar 标题就是用户原话头部。
+  修法:`schema=None` 时不传 response_format,让 cheap-tier LLM 自由出纯文本。
+- **Router 改错家** — Task 9 改了 legacy `session_router.py` (prefix=/sessions, auth
+  required, 且**根本没被 app_main.include_router() 注册**),实际匿名 chat CRUD
+  在 `chats.py` (/api/v0/chats);改 endpoint 之前必须 grep 当前 mount 状态 +
+  对齐前端 fetch path。
+- **前端相对路径 vs 绝对 URL 混搭** — chatApi 大多用 `apiUrl()` helper 拼成
+  `http://localhost:8000/api/...` 跨域直打 backend, 但 `renameChat` 漏走 helper
+  → 走 vite proxy → vite proxy 配置 key 是 URL 不是 path prefix (跟 path-prefix
+  约定不一致) → 不触发 → 5183 → 404。一个 module 内 API 调用形态必须一致。
+- **Backend timestamp 时区不一致** — ChatSession `updated_at = Column(DateTime,
+  default=datetime.utcnow)` 存 naive UTC 数值, fastapi serializer 加 "+08:00"
+  后缀, 字符串数值 "23:18 UTC" 被错写成 "15:18+08:00"; 前端按字符串排序时新建
+  session 的 "15:18+08:00" < 旧 "22:14+08:00" → 排到中部不到顶部。dogfood-quick
+  fix 是前端 `upsertSession.unshift` 绕过排序, 根因 (backend timestamp 时区一致性)
+  是项目级 bug, scope 超出 chat-title。
+- **Vite HMR 不接住 valtio module-level singleton** — store 文件改动 HMR log
+  没显示 hmr update 行, 浏览器仍引用旧 proxy 实例;dev 时 store 逻辑改动必须
+  Cmd+R 硬刷新, 不能依赖 HMR。
+
+Prompt 设计 + 触发时机 dogfood 修正:
+- **prompt 喂 user+assistant 让 LLM 写"AI 视角对话总结"**(如"茅台投资需结合
+  数据与风险"),sidebar 该用"用户意图视角"(如"贵州茅台估值分析")。修正后
+  prompt 只喂 user_msg, 强调"6-12 字凝练用户提问意图, 像新闻标题"。
+- **enqueue 在 chat_finalize success branch 触发, 等 assistant 落库(5-10s)
+  才启动 title task**, "新对话" 渐变窗口太长。既然 prompt 不再需要 assistant_msg,
+  enqueue 可以提前到 user msg 入库后立刻触发(chat.py:enqueue_run_chat 之后, 跟
+  chat agent 并行),中间态压到 <2s。
+- **新建 session 顶部立刻可见 = unshift 不靠 sort**, ChatGPT 风顺序更稳。
