@@ -64,16 +64,6 @@ def _async_factory_of(graph: Any) -> Callable[[], Awaitable[Any]]:
     return _factory
 
 
-def _async_factory_of(graph: Any) -> Callable[[], Awaitable[Any]]:
-    """Wrap a pre-built fake graph in an async factory matching run_chat_async's
-    graph_factory: Callable[[], Awaitable[Any]] contract (MCP-only refactor)."""
-
-    async def _factory() -> Any:
-        return graph
-
-    return _factory
-
-
 def _build_fake_graph(token_texts: list[str]) -> Any:
     """Stub Graph: astream_events yields tokens + LangGraph done; aget_state returns ckpt."""
 
