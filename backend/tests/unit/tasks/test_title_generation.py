@@ -17,17 +17,25 @@ from unittest.mock import MagicMock, patch
 
 import pytest  # noqa: F401
 from app.models.chat import ChatMessage, ChatSession
-from sqlalchemy import create_engine
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 
 @pytest.fixture
-def db_with_session(monkeypatch):
+def db_with_session(pg_test_engine, monkeypatch):
+    """PG-backed fixture (sqlite 被 PR-A 删了 with_variant fallback,
+    Title test 原 sqlite:///:memory: 改用真 PG)。
+
+    用 pg_test_engine 共享 schema(已 create_all),直接 sessionmaker bind。
+    test 之间 TRUNCATE 自己用到的表清理 — 不走 db_session 是因为这些 test
+    patch _open_db_session 要它自己开新 Session,跟 SAVEPOINT isolation 不兼容。
+    """
     monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
-    engine = create_engine("sqlite:///:memory:")
-    ChatSession.__table__.create(bind=engine)
-    ChatMessage.__table__.create(bind=engine)
-    Session = sessionmaker(bind=engine)
+    # Cleanup before test: TRUNCATE the two tables we'll use.
+    with pg_test_engine.connect() as conn:
+        conn.execute(text("TRUNCATE TABLE chat_messages, chat_sessions CASCADE"))
+        conn.commit()
+    Session = sessionmaker(bind=pg_test_engine)
     sid = uuid.uuid4()
     with Session() as sess:
         sess.add(ChatSession(id=sid, title="新对话", title_source="pending"))
@@ -50,7 +58,11 @@ def db_with_session(monkeypatch):
             )
         )
         sess.commit()
-    return engine, str(sid), Session
+    yield pg_test_engine, str(sid), Session
+    # Cleanup after test.
+    with pg_test_engine.connect() as conn:
+        conn.execute(text("TRUNCATE TABLE chat_messages, chat_sessions CASCADE"))
+        conn.commit()
 
 
 def _patch_db(monkeypatch, Session):
@@ -76,13 +88,13 @@ def test_skip_when_title_source_not_pending(db_with_session, monkeypatch):
     mock_llm.chat.assert_not_called()
 
 
-def test_skip_when_no_user_message(monkeypatch):
+def test_skip_when_no_user_message(pg_test_engine, monkeypatch):
     """Race: title task 跑前 user msg 还没 commit (or commit 失败) — 静默 skip 不调 LLM."""
     monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
-    engine = create_engine("sqlite:///:memory:")
-    ChatSession.__table__.create(bind=engine)
-    ChatMessage.__table__.create(bind=engine)
-    Session = sessionmaker(bind=engine)
+    with pg_test_engine.connect() as conn:
+        conn.execute(text("TRUNCATE TABLE chat_messages, chat_sessions CASCADE"))
+        conn.commit()
+    Session = sessionmaker(bind=pg_test_engine)
     sid = uuid.uuid4()
     with Session() as sess:
         sess.add(ChatSession(id=sid, title="新对话", title_source="pending"))
@@ -97,13 +109,13 @@ def test_skip_when_no_user_message(monkeypatch):
     mock_llm.chat.assert_not_called()
 
 
-def test_skip_when_session_deleted(monkeypatch):
+def test_skip_when_session_deleted(pg_test_engine, monkeypatch):
     """Session 在 enqueue 和 task 启动之间被删除 - task 静默 return, 不调 LLM."""
     monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
-    engine = create_engine("sqlite:///:memory:")
-    ChatSession.__table__.create(bind=engine)
-    ChatMessage.__table__.create(bind=engine)
-    Session = sessionmaker(bind=engine)
+    with pg_test_engine.connect() as conn:
+        conn.execute(text("TRUNCATE TABLE chat_messages, chat_sessions CASCADE"))
+        conn.commit()
+    Session = sessionmaker(bind=pg_test_engine)
     # 不 seed 任何 session — 直接调 task 用一个 random session_id
     _patch_db(monkeypatch, Session)
 
@@ -170,13 +182,13 @@ def test_fallback_when_llm_keeps_failing(db_with_session, monkeypatch):
         assert s.title_source == "llm_generated"
 
 
-def test_fallback_short_content_no_ellipsis(monkeypatch):
+def test_fallback_short_content_no_ellipsis(pg_test_engine, monkeypatch):
     """LLM 全失败 + content ≤20 字 → fallback 返回原文,不追加省略号."""
     monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
-    engine = create_engine("sqlite:///:memory:")
-    ChatSession.__table__.create(bind=engine)
-    ChatMessage.__table__.create(bind=engine)
-    Session = sessionmaker(bind=engine)
+    with pg_test_engine.connect() as conn:
+        conn.execute(text("TRUNCATE TABLE chat_messages, chat_sessions CASCADE"))
+        conn.commit()
+    Session = sessionmaker(bind=pg_test_engine)
     sid = uuid.uuid4()
     short_content = "hi"
     with Session() as sess:
