@@ -76,7 +76,8 @@ def test_skip_when_title_source_not_pending(db_with_session, monkeypatch):
     mock_llm.chat.assert_not_called()
 
 
-def test_skip_when_less_than_two_messages(monkeypatch):
+def test_skip_when_no_user_message(monkeypatch):
+    """Race: title task 跑前 user msg 还没 commit (or commit 失败) — 静默 skip 不调 LLM."""
     monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
     engine = create_engine("sqlite:///:memory:")
     ChatSession.__table__.create(bind=engine)
@@ -85,10 +86,7 @@ def test_skip_when_less_than_two_messages(monkeypatch):
     sid = uuid.uuid4()
     with Session() as sess:
         sess.add(ChatSession(id=sid, title="新对话", title_source="pending"))
-        sess.add(
-            ChatMessage(id=uuid.uuid4(), session_id=sid, role="user", content="hi", status="done")
-        )
-        sess.commit()
+        sess.commit()  # 只有 session, 0 个 user msg
     _patch_db(monkeypatch, Session)
 
     from app.tasks.title_generation import generate_session_title

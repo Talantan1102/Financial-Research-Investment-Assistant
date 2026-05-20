@@ -86,17 +86,8 @@ async def finalize_task_persistence(
             status="done",
         )
         await task_repo.mark_done(task_id, langgraph_checkpoint_id=checkpoint_id)
-
-        # === NEW (2026-05-17): 首轮 assistant 完成后异步生成 session title ===
-        try:
-            session = await session_repo.get_session(str(session_id))
-            if session and session.title_source == "pending":
-                from app.tasks.title_generation import generate_session_title
-
-                generate_session_title.apply_async(args=[str(session_id)], countdown=1)
-                logger.info("enqueued generate_session_title for session %s", session_id)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("title enqueue skipped: %s", exc)
+        # Title generation 改在 chat.py user msg 入库后立刻 enqueue
+        # (跟 chat agent 并行, 缩短 "新对话" 中间态)。
     else:
         await session_repo.append_message(
             session_id=session_id,

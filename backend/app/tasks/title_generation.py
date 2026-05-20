@@ -23,7 +23,6 @@ from app.tasks.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 _TITLE_MAX_CHARS = 255
-_ASSISTANT_INPUT_CHARS = 500
 _STRIP_CHARS = "\"'「」 \n\t"
 _MAX_ATTEMPTS = 3
 
@@ -38,14 +37,19 @@ def get_llm_service():  # noqa: ANN201
     return build_llm_service_from_env()
 
 
-def _llm_generate_title(user_text: str, assistant_text: str) -> str:
-    """调 LLMService cheap tier 生成 10-15 字 title."""
+def _llm_generate_title(user_text: str) -> str:
+    """调 LLMService cheap tier 提取用户提问意图作为 6-12 字 session 标题.
+
+    只用 user_msg, 不喂 assistant_msg — assistant 输出会让 LLM 偏向"AI 视角的
+    对话总结"(如"茅台投资需结合数据与风险"), 我们要的是"用户问了什么"
+    (如"贵州茅台估值分析")。
+    """
     llm = get_llm_service()
     prompt = (
-        "请为以下对话生成一个 10-15 个汉字的简洁标题, 直接返回标题文本, "
-        "不要任何前后缀 / 引号 / 编号:\n\n"
-        f"用户: {user_text}\n"
-        f"助手: {assistant_text}"
+        "请提取以下用户提问的核心意图, 用 6-12 个汉字生成简洁的会话标题。"
+        "标题应聚焦用户问什么/想了解什么, 像新闻或文章标题那样凝练, "
+        "不要描述对话过程或回复内容, 不要任何前后缀 / 引号 / 编号:\n\n"
+        f"用户提问: {user_text}"
     )
     resp = llm.chat(prompt=prompt, tier="fast", schema=None)
     raw = resp.content.strip()
@@ -74,28 +78,22 @@ def generate_session_title(self, session_id: str) -> None:  # noqa: ANN001
             )
             return
 
-        msgs = (
+        user_msg = (
             db.query(ChatMessage)
-            .filter_by(session_id=sid)
+            .filter_by(session_id=sid, role="user")
             .order_by(ChatMessage.created_at.asc())
-            .limit(2)
-            .all()
+            .first()
         )
-        if len(msgs) < 2:
-            logger.debug("title task: only %d messages, skipping", len(msgs))
+        if user_msg is None:
+            logger.debug("title task: no user message yet, skipping")
             return
-        user_msg, assistant_msg = msgs[0], msgs[1]
 
         user_content: str = str(user_msg.content)
-        assistant_content: str = str(assistant_msg.content)
 
         title: str | None = None
         for attempt in range(_MAX_ATTEMPTS):
             try:
-                title = _llm_generate_title(
-                    user_text=user_content,
-                    assistant_text=assistant_content[:_ASSISTANT_INPUT_CHARS],
-                )
+                title = _llm_generate_title(user_text=user_content)
                 break
             except Exception as exc:  # noqa: BLE001
                 if attempt == _MAX_ATTEMPTS - 1:
