@@ -1,4 +1,4 @@
-# mypy: disable-error-code="arg-type"
+# mypy: disable-error-code="arg-type,return-value"
 # SQLAlchemy Column[UUID] 在 instance attr 上 mypy 推断不准(runtime 是 UUID,
 # 静态视为 Column[UUID])— 测试代码 silence,与 test_chat_task_repo.py 同。
 """Stale scanner L0 unit。
