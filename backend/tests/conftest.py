@@ -336,11 +336,19 @@ def db_session(pg_test_engine: Engine) -> Iterator[Session]:
 
     每个 test 起一个 outer transaction,test 完 rollback,
     所有 INSERT/UPDATE/DELETE 跨 test 不可见。
+
+    `join_transaction_mode="create_savepoint"` 让 session.commit() 走
+    SAVEPOINT release 而不是真 commit outer transaction — 否则 test 调
+    db_session.commit() 会持久化到 PG,跨 test 累积污染数据。
     """
     connection = pg_test_engine.connect()
     try:
         transaction = connection.begin()
-        session_factory = sessionmaker(bind=connection, expire_on_commit=False)
+        session_factory = sessionmaker(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
         session = session_factory()
         try:
             yield session
