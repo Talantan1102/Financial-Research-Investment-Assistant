@@ -24,9 +24,17 @@ const INITIAL: ChatSessionsState = {
 
 export const chatSessionsState = proxy<ChatSessionsState>({ ...INITIAL })
 
+function activityTs(s: ChatSession): string {
+  // backend chats router 返 `updated_at` 不返 `last_active_at`;为新建 session
+  // 排到列表顶部,优先取 last_active_at 兜底 updated_at。
+  return s.last_active_at || (s as { updated_at?: string }).updated_at || ''
+}
+
 function sortDesc(a: ChatSession, b: ChatSession): number {
-  if (a.last_active_at < b.last_active_at) return 1
-  if (a.last_active_at > b.last_active_at) return -1
+  const ta = activityTs(a)
+  const tb = activityTs(b)
+  if (ta < tb) return 1
+  if (ta > tb) return -1
   return 0
 }
 
