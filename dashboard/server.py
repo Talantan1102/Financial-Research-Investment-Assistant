@@ -111,8 +111,8 @@ async def index(request: Request) -> HTMLResponse:
 
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
     # App Shell 第 9 行 mini stat
-    _main_dims, app_shell_dims = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    app_shell = compute_app_shell_stat(PROJECT_ROOT, app_shell_dims)
+    _main_dims, catch_all_dims = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    app_shell = compute_app_shell_stat(PROJECT_ROOT, catch_all_dims)
     ctx: dict[str, object] = {
         "today": _today_label(),
         "snap": snap,

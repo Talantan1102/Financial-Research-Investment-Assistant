@@ -7,15 +7,14 @@ from dataclasses import dataclass, field
 from typing import Any, Literal, TypedDict
 
 DimensionId = Literal[
-    "prompt_context",
-    "tools_function",
-    "orchestration",
-    "memory",
-    "rag_knowledge",
-    "guardrails",
-    "eval_observability",
-    "cost_routing",
-    "app_shell",
+    "execution",
+    "tool",
+    "context",
+    "lifecycle",
+    "observability",
+    "verification",
+    "governance",
+    "shell",
     "unknown",
 ]
 
@@ -24,8 +23,8 @@ CapabilityStatus = Literal["lit", "wip", "todo"]
 
 @dataclass(frozen=True)
 class DimensionConfig:
-    id: str  # 主 8 维取 DimensionId 值;App Shell 6 项取子 id (frontend/backend/...)
-    number: str  # "01"-"08" or "09"
+    id: str  # 主 7 维取 DimensionId 值;catch_all 5 项取子 id (shell.frontend / shell.infra / ...)
+    number: str  # "01"-"07" 主泳道; catch_all 用 "08" 占位
     name_cn: str
     name_en: str
     paths: tuple[str, ...]

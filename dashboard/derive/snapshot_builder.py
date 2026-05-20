@@ -61,7 +61,7 @@ def build_snapshot(
 ) -> Snapshot:
     """读 yaml + 派生 + 聚合到 Snapshot。"""
     refreshed_at = refreshed_at or datetime.now(UTC).isoformat()
-    main_dims, _app_shell = load_dimensions(config_dir / "dimensions.yaml")
+    main_dims, _catch_all = load_dimensions(config_dir / "dimensions.yaml")
     caps = load_capabilities(config_dir / "capabilities.yaml")
     resolved = resolve_all(caps, project_root, overrides)
     by_dim: dict[str, list[Capability]] = {d.id: [] for d in main_dims}
