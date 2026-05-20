@@ -62,15 +62,14 @@ def test_details_json_round_trips() -> None:
     assert roundtripped.details_json == {"m1_failed_cites": ["chunk-x"]}
 
 
-def test_eval_result_persists_metric_scores_json(tmp_path) -> None:
+def test_eval_result_persists_metric_scores_json(db_session) -> None:
+    import contextlib
     from datetime import UTC, datetime
 
     from app.services.eval_models import EvalResult, JudgeScores
     from app.services.eval_recorder import EvalRecorder
 
-    db = tmp_path / "eval.db"
-    recorder = EvalRecorder(db)
-    recorder.init_schema()
+    recorder = EvalRecorder(session_factory=lambda: contextlib.nullcontext(db_session))
     scores = BacktestMetricScores(
         m1_citation_precision=0.9,
         m1_citation_recall=0.8,

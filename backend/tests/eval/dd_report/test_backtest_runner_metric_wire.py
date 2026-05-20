@@ -125,7 +125,7 @@ def test_run_one_writes_backtest_runs_and_eval_results(db_session) -> None:
     assert r.status == "completed"
     assert r.llm_model == "deepseek-v4-flash"
     assert r.ablation_variant == "V0_baseline"
-    metric_summary = json.loads(r.metric_summary_json)  # type: ignore[arg-type]
+    metric_summary = json.loads(r.metric_summary_json)
     assert metric_summary["m1_citation"] == 0.9
 
     # Verify eval_results row via ORM
@@ -135,7 +135,7 @@ def test_run_one_writes_backtest_runs_and_eval_results(db_session) -> None:
     assert er.case_id == case.case_id
     assert er.cut_off_date == "2024-06-30"
     assert er.evaluator_llm == "deepseek-v4-flash"
-    mscores = json.loads(er.metric_scores_json)  # type: ignore[arg-type]
+    mscores = json.loads(er.metric_scores_json)
     assert mscores["m5_composite_mean"] == 8.0
 
 
@@ -328,7 +328,7 @@ def test_run_one_writes_real_citation_metric_coverage_to_schema(db_session) -> N
 
     rows = db_session.query(EvalResultRow).filter(EvalResultRow.backtest_run_id == run_id).all()
     assert len(rows) == 1
-    mscores = json.loads(rows[0].metric_scores_json)  # type: ignore[arg-type]
+    mscores = json.loads(rows[0].metric_scores_json)
     # 1/1 citation precision, 1/1 coverage → both 1.0
     assert mscores["m1_citation_precision"] == 1.0
     assert mscores["m1_citation_recall"] == 1.0
@@ -385,6 +385,6 @@ def test_run_one_writes_real_citation_metric_partial_coverage(db_session) -> Non
     )
 
     rows = db_session.query(EvalResultRow).filter(EvalResultRow.backtest_run_id == run_id).all()
-    mscores = json.loads(rows[0].metric_scores_json)  # type: ignore[arg-type]
+    mscores = json.loads(rows[0].metric_scores_json)
     # 1 section with evidence / 6 default required = 1/6
     assert mscores["m1_citation_recall"] == _pytest.approx(1 / 6)

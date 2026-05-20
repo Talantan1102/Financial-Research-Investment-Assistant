@@ -2,23 +2,24 @@
 
 from __future__ import annotations
 
-import sqlite3
+import contextlib
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from datetime import UTC, date, datetime
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 from eval.dd_report.ablation.runner import AblationRunner
 from eval.dd_report.ablation.variants import AblationVariant
 from eval.dd_report.backtest_runner import BacktestCase
+from sqlalchemy.orm import Session
 
 
-def _make_runner(db: Path) -> AblationRunner:
+def _make_runner(
+    session_factory: Callable[[], AbstractContextManager[Session]],
+) -> AblationRunner:
     """AblationRunner 接受 production_factory + BacktestRunner deps."""
-    from app.services.eval_recorder import EvalRecorder
     from eval.dd_report.metrics.base import MetricRegistry
-
-    EvalRecorder(db).init_schema()
 
     class _Tushare:
         def income(self, **kw: Any) -> list[dict[str, Any]]:
@@ -123,14 +124,19 @@ def _make_runner(db: Path) -> AblationRunner:
         swapper=_DummySwapper(),  # type: ignore[arg-type]
         tushare_inner=_Tushare(),
         kb_inner=_KB(),
-        db_path=db,
+        session_factory=session_factory,
         production_factory=production_factory,
         metric_registry=MetricRegistry([]),  # 空 registry, 只验调度
     )
 
 
-def test_run_4_variants_x_2_cases_writes_8_runs(tmp_path) -> None:
-    runner = _make_runner(tmp_path / "ev.db")
+def test_run_4_variants_x_2_cases_writes_8_runs(db_session) -> None:
+    from app.services.trace_models import BacktestRunRow
+
+    def session_factory() -> AbstractContextManager[Session]:
+        return contextlib.nullcontext(db_session)
+
+    runner = _make_runner(session_factory)
     cases = [
         BacktestCase("c1", "600519.SH", "茅台", date(2024, 6, 30)),
         BacktestCase("c2", "300750.SZ", "宁德", date(2024, 6, 30)),
@@ -142,14 +148,11 @@ def test_run_4_variants_x_2_cases_writes_8_runs(tmp_path) -> None:
         git_sha="testsha",
     )
     assert len(results) == 4 * 2
-    with sqlite3.connect(tmp_path / "ev.db") as con:
-        n = con.execute(
-            "SELECT COUNT(*) FROM backtest_runs WHERE git_sha = ?", ("testsha",)
-        ).fetchone()[0]
+    n = db_session.query(BacktestRunRow).filter(BacktestRunRow.git_sha == "testsha").count()
     assert n == 8
 
 
-def test_single_case_failure_does_not_abort_remaining_runs(tmp_path) -> None:
+def test_single_case_failure_does_not_abort_remaining_runs(db_session) -> None:
     """Fail-soft contract: AblationRunner.except Exception ensures 1 failed (variant,
     case) doesn't abort remaining. T2.11 ablation 32 case run with 1 auth error
     must still produce 31 success entries + 1 failure entry.
@@ -158,10 +161,11 @@ def test_single_case_failure_does_not_abort_remaining_runs(tmp_path) -> None:
     call_count increments only for V0/V1/V3 = 3 variants × 2 cases = 6 invocations.
     First call (V0×c1) fails → 1 failed; remaining 7 complete → 7 completed.
     """
-    from app.services.eval_recorder import EvalRecorder
+    from app.services.trace_models import BacktestRunRow
     from eval.dd_report.metrics.base import MetricRegistry
 
-    EvalRecorder(tmp_path / "ev.db").init_schema()
+    def session_factory() -> AbstractContextManager[Session]:
+        return contextlib.nullcontext(db_session)
 
     class _Tushare:
         def income(self, **kw: Any) -> list[dict[str, Any]]:
@@ -274,7 +278,7 @@ def test_single_case_failure_does_not_abort_remaining_runs(tmp_path) -> None:
         swapper=_DummySwapper(),  # type: ignore[arg-type]
         tushare_inner=_Tushare(),
         kb_inner=_KB(),
-        db_path=tmp_path / "ev.db",
+        session_factory=session_factory,
         production_factory=failing_then_passing_factory,
         metric_registry=MetricRegistry([]),
     )
@@ -300,16 +304,21 @@ def test_single_case_failure_does_not_abort_remaining_runs(tmp_path) -> None:
     assert "auth error" in failed[0].error.lower()
 
     # BacktestRunner.finally writes status row even on failure — DB count must match
-    with sqlite3.connect(tmp_path / "ev.db") as con:
-        n = con.execute(
-            "SELECT COUNT(*) FROM backtest_runs WHERE git_sha = ?",
-            ("testsha-failsoft",),
-        ).fetchone()[0]
+    n = (
+        db_session.query(BacktestRunRow)
+        .filter(BacktestRunRow.git_sha == "testsha-failsoft")
+        .count()
+    )
     assert n == 8
 
 
-def test_ablation_variant_field_set_per_run(tmp_path) -> None:
-    runner = _make_runner(tmp_path / "ev.db")
+def test_ablation_variant_field_set_per_run(db_session) -> None:
+    from app.services.trace_models import BacktestRunRow
+
+    def session_factory() -> AbstractContextManager[Session]:
+        return contextlib.nullcontext(db_session)
+
+    runner = _make_runner(session_factory)
     cases = [BacktestCase("c1", "600519.SH", "茅台", date(2024, 6, 30))]
     runner.run_ablation(
         cases=cases,
@@ -317,10 +326,6 @@ def test_ablation_variant_field_set_per_run(tmp_path) -> None:
         evaluator_llm="deepseek-v4-flash",
         git_sha="testsha2",
     )
-    with sqlite3.connect(tmp_path / "ev.db") as con:
-        con.row_factory = sqlite3.Row
-        rows = con.execute(
-            "SELECT ablation_variant FROM backtest_runs WHERE git_sha = ?", ("testsha2",)
-        ).fetchall()
-    variants_written = sorted(r["ablation_variant"] for r in rows)
+    rows = db_session.query(BacktestRunRow).filter(BacktestRunRow.git_sha == "testsha2").all()
+    variants_written = sorted(str(r.ablation_variant) for r in rows)
     assert variants_written == ["V0_baseline", "V1_no_rag"]
