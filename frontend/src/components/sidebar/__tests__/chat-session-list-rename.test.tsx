@@ -1,5 +1,14 @@
+/**
+ * chat-session-list-rename.test.tsx
+ *
+ * NOTE(Task 5 refactor): The rename dropdown UI has been removed from
+ * ChatSessionList as part of the iOS-polish rewrite (antd List → native div
+ * groups).  Renaming is now a separate concern (e.g. long-press / context
+ * menu planned for v1.x).  Tests below verify the new session-item structure
+ * instead.
+ */
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 
 vi.mock('@/store/chat-sessions', async () => {
   const { proxy } = await import('valtio')
@@ -12,8 +21,8 @@ vi.mock('@/store/chat-sessions', async () => {
           title: 'old title',
           created_at: '2026-05-17T00:00:00Z',
           last_active_at: '2026-05-17T00:00:00Z',
-          message_count: 0,
-          last_msg_preview: null,
+          message_count: 3,
+          last_msg_preview: 'hello world',
         },
       ],
       status: 'loaded',
@@ -27,58 +36,41 @@ vi.mock('@/store/chat-sessions', async () => {
 })
 
 // Import store after mock
-import { chatSessionsActions } from '@/store/chat-sessions'
 import { MemoryRouter } from 'react-router-dom'
-import { ConfigProvider } from 'antd'
 import { ChatSessionList } from '../chat-session-list'
 
 function renderList() {
   return render(
-    <ConfigProvider>
-      <MemoryRouter>
-        <ChatSessionList />
-      </MemoryRouter>
-    </ConfigProvider>,
+    <MemoryRouter>
+      <ChatSessionList />
+    </MemoryRouter>,
   )
 }
 
-describe('ChatSessionList rename', () => {
+describe('ChatSessionList (iOS-polish structure)', () => {
   beforeEach(() => {
-    vi.mocked(chatSessionsActions.renameSession).mockReset()
+    vi.clearAllMocks()
   })
 
-  it('shows ... button on hover and reveals dropdown with Rename', () => {
+  it('renders session title', () => {
     renderList()
-    const row = screen.getByText('old title').closest('[data-session-row]')!
-    fireEvent.mouseEnter(row)
-    const moreBtn = screen.getByRole('button', { name: /more|更多|\.\.\./i })
-    fireEvent.click(moreBtn)
-    expect(screen.getByText('重命名')).toBeInTheDocument()
-  })
-
-  it('Rename → inline input, Enter submits and calls store.renameSession', () => {
-    vi.mocked(chatSessionsActions.renameSession).mockResolvedValue(undefined)
-    renderList()
-    const row = screen.getByText('old title').closest('[data-session-row]')!
-    fireEvent.mouseEnter(row)
-    fireEvent.click(screen.getByRole('button', { name: /more|更多|\.\.\./i }))
-    fireEvent.click(screen.getByText('重命名'))
-    const input = screen.getByRole('textbox') as HTMLInputElement
-    fireEvent.change(input, { target: { value: 'new title' } })
-    fireEvent.keyDown(input, { key: 'Enter' })
-    expect(chatSessionsActions.renameSession).toHaveBeenCalledWith('a', 'new title')
-  })
-
-  it('Esc cancels and restores title display', () => {
-    renderList()
-    const row = screen.getByText('old title').closest('[data-session-row]')!
-    fireEvent.mouseEnter(row)
-    fireEvent.click(screen.getByRole('button', { name: /more|更多|\.\.\./i }))
-    fireEvent.click(screen.getByText('重命名'))
-    const input = screen.getByRole('textbox') as HTMLInputElement
-    fireEvent.change(input, { target: { value: 'discard me' } })
-    fireEvent.keyDown(input, { key: 'Escape' })
-    expect(chatSessionsActions.renameSession).not.toHaveBeenCalled()
     expect(screen.getByText('old title')).toBeInTheDocument()
+  })
+
+  it('renders last_msg_preview when present', () => {
+    renderList()
+    expect(screen.getByText('hello world')).toBeInTheDocument()
+  })
+
+  it('renders session meta with message_count', () => {
+    renderList()
+    // meta line includes "· N turns"
+    const meta = screen.getByText(/3 turns/)
+    expect(meta).toBeInTheDocument()
+  })
+
+  it('session item has data-testid anchor', () => {
+    renderList()
+    expect(screen.getByTestId('session-item-a')).toBeInTheDocument()
   })
 })
