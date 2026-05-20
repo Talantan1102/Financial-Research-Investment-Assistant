@@ -166,7 +166,7 @@ export async function confirmEscalation(
 
 /** 重命名 session — PUT /api/sessions/:id (2026-05-17) */
 export async function renameChat(id: string, title: string): Promise<void> {
-  const resp = await fetch(`/api/sessions/${id}`, {
+  const resp = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(id)}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title }),
