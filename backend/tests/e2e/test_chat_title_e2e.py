@@ -42,6 +42,10 @@ pytestmark = [
         not _E2E_AVAILABLE,
         reason="requests not installed in this env",
     ),
+    pytest.mark.skipif(
+        not _docker_available(),
+        reason="docker daemon not reachable — celery_worker_subprocess fixture needs it",
+    ),
 ]
 
 

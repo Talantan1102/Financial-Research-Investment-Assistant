@@ -149,7 +149,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
   const abortRef = useRef<AbortController | null>(null)
   const sessionIdRef = useRef<string | null>(options.sessionId)
   // === NEW (2026-05-17): delayed sidebar refetch timer ref for cleanup on unmount ===
-  const titleRefetchTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
+  const titleRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const typewriter = useTypewriter({
     onChar: (ch) => {
@@ -244,7 +244,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         if (titleRefetchTimerRef.current !== null) {
           clearTimeout(titleRefetchTimerRef.current)
         }
-        titleRefetchTimerRef.current = window.setTimeout(() => {
+        titleRefetchTimerRef.current = setTimeout(() => {
           titleRefetchTimerRef.current = null
           void chatSessionsActions.loadSessions()
         }, 3000)

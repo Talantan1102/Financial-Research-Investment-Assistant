@@ -351,13 +351,13 @@ describe('useChatSSE — delayed refetch on SSE done', () => {
     let delayedCallback: (() => void) | null = null
     const origSetTimeout = window.setTimeout.bind(window)
     vi.spyOn(window, 'setTimeout').mockImplementation(
-      (cb: TimerHandler, delay?: number, ...args: unknown[]) => {
+      ((cb: TimerHandler, delay?: number, ...args: unknown[]) => {
         if (delay === 3000 && typeof cb === 'function') {
           delayedCallback = cb as () => void
           return 0 as unknown as ReturnType<typeof setTimeout>
         }
         return origSetTimeout(cb, delay, ...args)
-      },
+      }) as typeof window.setTimeout,
     )
 
     server.use(
@@ -397,13 +397,13 @@ describe('useChatSSE — delayed refetch on SSE done', () => {
     let delayedCallback: (() => void) | null = null
     const origSetTimeout = window.setTimeout.bind(window)
     vi.spyOn(window, 'setTimeout').mockImplementation(
-      (cb: TimerHandler, delay?: number, ...args: unknown[]) => {
+      ((cb: TimerHandler, delay?: number, ...args: unknown[]) => {
         if (delay === 3000 && typeof cb === 'function') {
           delayedCallback = cb as () => void
           return 0 as unknown as ReturnType<typeof setTimeout>
         }
         return origSetTimeout(cb, delay, ...args)
-      },
+      }) as typeof window.setTimeout,
     )
 
     const ctrl = controllableSseResponse()
