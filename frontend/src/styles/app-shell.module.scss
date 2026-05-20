@@ -1,0 +1,227 @@
+/* ── Sidebar 主结构 ─────────────────────────────────── */
+.sidebar {
+  background: var(--ios-bg-grouped);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 12px;
+  gap: 14px;
+  border-right: 1px solid var(--ios-separator);
+  height: 100%;
+  width: var(--ios-sidebar-w);
+}
+
+.brandRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+}
+.brandMark {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: var(--ios-grad-primary);
+  display: flex; align-items: center; justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+.brandName {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ios-label);
+  letter-spacing: -0.01em;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(118, 118, 128, 0.12);
+  border-radius: 10px;
+  padding: 7px 10px;
+  margin: 0 2px;
+
+  svg { width: 14px; height: 14px; color: var(--ios-label-secondary); flex-shrink: 0; }
+  input {
+    border: none; background: transparent; outline: none; flex: 1;
+    font-family: inherit; font-size: 14px; color: var(--ios-label);
+
+    &::placeholder { color: var(--ios-label-secondary); }
+  }
+}
+
+.sessionsScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.groupHeader {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ios-label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 12px;
+  margin: 12px 0 4px;
+}
+
+.session {
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.12s ease;
+
+  &:hover { background: var(--ios-surface-hover); }
+  &.active {
+    background: var(--ios-surface);
+    box-shadow: var(--ios-shadow-sm);
+  }
+}
+.sessionTitle {
+  font-size: 14px;
+  color: var(--ios-label);
+  font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.sessionPreview {
+  font-size: 12px;
+  color: var(--ios-label-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sessionMeta {
+  font-size: 11px;
+  color: var(--ios-label-tertiary);
+  margin-top: 2px;
+  font-family: var(--ios-font-mono);
+}
+
+/* ── TopBar ──────────────────────────────────────────── */
+.topbar {
+  height: var(--ios-topbar-h);
+  padding: 0 24px;
+  background: var(--ios-glass-bg);
+  backdrop-filter: var(--ios-glass-blur);
+  -webkit-backdrop-filter: var(--ios-glass-blur);
+  border-bottom: 1px solid var(--ios-separator);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  position: relative;
+  z-index: 10;
+}
+@supports not (backdrop-filter: blur(20px)) {
+  .topbar { background: var(--ios-surface); }
+}
+
+.topbarTitleWrap { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.topbarTitle {
+  font-size: 15px; font-weight: 600;
+  color: var(--ios-label);
+  letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.topbarSub {
+  font-size: 12px;
+  color: var(--ios-label-secondary);
+}
+
+.topbarActions { display: flex; gap: 6px; }
+
+.iconBtn {
+  width: 34px; height: 34px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--ios-blue);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s;
+  text-decoration: none;
+
+  &:hover { background: rgba(0, 122, 255, 0.08); }
+  svg { width: 18px; height: 18px; }
+}
+
+/* ── New Chat button ─────────────────────────────────── */
+.newChat {
+  margin: 4px 2px 0;
+  background: var(--ios-blue);
+  color: #fff;
+  border: none;
+  padding: 11px 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: var(--ios-shadow-sm);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s;
+
+  &:hover { transform: translateY(-1px); box-shadow: var(--ios-shadow); background: var(--ios-blue-hover); }
+  &:active { transform: translateY(0); }
+}
+.newChatKbd {
+  margin-left: auto;
+  font-family: var(--ios-font-mono);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Nav list ──────────────────────────────────────── */
+.navList {
+  padding: 4px;
+  background: var(--ios-surface);
+  border-radius: 12px;
+  box-shadow: var(--ios-shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--ios-label);
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
+
+  &:hover { background: var(--ios-surface-hover); }
+  svg { width: 18px; height: 18px; color: var(--ios-blue); flex-shrink: 0; }
+}
+
+/* ── User panel ────────────────────────────────────── */
+.userRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  margin-top: 6px;
+  border-radius: 12px;
+  cursor: pointer;
+  background: var(--ios-surface);
+  box-shadow: var(--ios-shadow-sm);
+
+  &:hover { background: var(--ios-surface-tinted); }
+}
+.userAvatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--ios-grad-warm);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600;
+}
+.userInfo { flex: 1; min-width: 0; }
+.userName { font-size: 14px; font-weight: 600; color: var(--ios-label); }
+.userRole { font-size: 12px; color: var(--ios-label-secondary); }
+.userChev { color: var(--ios-label-tertiary); }

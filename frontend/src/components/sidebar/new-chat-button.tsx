@@ -1,6 +1,7 @@
-import { Button } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { chatSessionsActions } from '@/store/chat-sessions'
+import { Icon } from '@/components/shared/Icon'
+import styles from '@/styles/app-shell.module.scss'
 
 export function NewChatButton() {
   const navigate = useNavigate()
@@ -9,13 +10,15 @@ export function NewChatButton() {
     navigate(`/chat/${created.id}`)
   }
   return (
-    <Button
-      type="primary"
-      block
+    <button
+      type="button"
+      className={styles.newChat}
       data-testid="sidebar-new-chat-button"
       onClick={handleClick}
     >
-      + New Chat
-    </Button>
+      <Icon name="plus" size={14} />
+      新对话
+      <span className={styles.newChatKbd}>⌘N</span>
+    </button>
   )
 }

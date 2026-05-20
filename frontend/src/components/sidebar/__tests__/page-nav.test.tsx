@@ -5,10 +5,10 @@ import { PageNav } from '@/components/sidebar/page-nav'
 describe('<PageNav>', () => {
   it('renders links to /research /reports /portfolio /monitoring /knowledge', () => {
     const { getByText } = renderWithProviders(<PageNav />)
-    expect(getByText('Research').closest('a')?.getAttribute('href')).toBe('/research')
-    expect(getByText('Reports').closest('a')?.getAttribute('href')).toBe('/reports')
-    expect(getByText('Portfolio').closest('a')?.getAttribute('href')).toBe('/portfolio')
-    expect(getByText('Monitoring').closest('a')?.getAttribute('href')).toBe('/monitoring')
-    expect(getByText('Knowledge').closest('a')?.getAttribute('href')).toBe('/knowledge')
+    expect(getByText('研报中心').closest('a')?.getAttribute('href')).toBe('/research')
+    expect(getByText('报告中心').closest('a')?.getAttribute('href')).toBe('/reports')
+    expect(getByText('持仓').closest('a')?.getAttribute('href')).toBe('/portfolio')
+    expect(getByText('监控告警').closest('a')?.getAttribute('href')).toBe('/monitoring')
+    expect(getByText('知识库').closest('a')?.getAttribute('href')).toBe('/knowledge')
   })
 })
