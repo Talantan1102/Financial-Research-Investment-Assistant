@@ -53,9 +53,12 @@ export const chatSessionsActions = {
     if (idx >= 0) {
       chatSessionsState.sessions[idx] = session
     } else {
-      chatSessionsState.sessions.push(session)
+      // 新建 session: unshift 到顶部,不依赖 sort。backend chats router 返
+      // updated_at 时区标记不一致(naive UTC 数值带 +08:00 后缀),按字符串
+      // 排序会把 "15:18+08:00" 错排到 "22:14+08:00" 后面,新 session 显示
+      // 在中部而非顶部。unshift 直接保证 ChatGPT 风顺序(刚创建立刻可见)。
+      chatSessionsState.sessions.unshift(session)
     }
-    chatSessionsState.sessions.sort(sortDesc)
   },
   removeSession(id: string) {
     chatSessionsState.sessions = chatSessionsState.sessions.filter(
