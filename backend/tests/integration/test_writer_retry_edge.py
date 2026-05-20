@@ -286,6 +286,132 @@ def test_writer_no_retry_when_budget_exhausted_even_if_valuation_low() -> None:
     assert _writer_retry_router(state) == "continue"
 
 
+# ---------------------------------------------------------------------------
+# v1.x A5b — dialectical_balance OR trigger tests
+# ---------------------------------------------------------------------------
+
+
+def test_writer_retry_on_dialectical_balance_low() -> None:
+    """factuality OK + valuation_consistency OK + dialectical_balance 3.0 → retry."""
+    from app.agents.schemas import CriticDimensionScore, CriticReport, ResearchState
+    from app.orchestration.research_graph import _writer_retry_router
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=0,
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality", score=9.0, evidence="ok", sub_agent_request_id="r-f"
+                ),
+                CriticDimensionScore(
+                    dimension="valuation_consistency",
+                    score=9.0,
+                    evidence="ok",
+                    sub_agent_request_id="r-v",
+                ),
+                CriticDimensionScore(
+                    dimension="dialectical_balance",
+                    score=3.0,
+                    evidence="掩盖看空",
+                    sub_agent_request_id="r-d",
+                ),
+            ],
+            overall_score=7.0,
+            summary_markdown="...",
+        ),
+    )
+    assert _writer_retry_router(state) == "retry"
+
+
+def test_writer_no_retry_on_dialectical_balance_high() -> None:
+    """dialectical_balance 9.0 → no retry."""
+    from app.agents.schemas import CriticDimensionScore, CriticReport, ResearchState
+    from app.orchestration.research_graph import _writer_retry_router
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=0,
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="dialectical_balance",
+                    score=9.0,
+                    evidence="双向论证",
+                    sub_agent_request_id="r-d",
+                ),
+            ],
+            overall_score=9.0,
+            summary_markdown="...",
+        ),
+    )
+    assert _writer_retry_router(state) == "continue"
+
+
+def test_writer_no_retry_on_dialectical_balance_missing() -> None:
+    """dialectical_balance dim 不在 dimensions → no retry from this dim."""
+    from app.agents.schemas import CriticDimensionScore, CriticReport, ResearchState
+    from app.orchestration.research_graph import _writer_retry_router
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=0,
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality", score=9.0, evidence="ok", sub_agent_request_id="r-f"
+                ),
+            ],
+            overall_score=9.0,
+            summary_markdown="...",
+        ),
+    )
+    assert _writer_retry_router(state) == "continue"
+
+
+def test_writer_retry_state_update_captures_dialectical_evidence() -> None:
+    """retry 由 dialectical_balance 触发 → feedback 含相关字段."""
+    from app.agents.schemas import CriticDimensionScore, CriticReport, ResearchState
+    from app.orchestration.research_graph import _writer_retry_state_update
+
+    state = ResearchState(
+        user_id="u",
+        session_id="s",
+        user_message="m",
+        request_id="r",
+        writer_retry_count=0,
+        critic_report=CriticReport(
+            dimensions=[
+                CriticDimensionScore(
+                    dimension="factuality", score=9.0, evidence="ok", sub_agent_request_id="r-f"
+                ),
+                CriticDimensionScore(
+                    dimension="dialectical_balance",
+                    score=3.0,
+                    evidence="掩盖看空 (bull 3 / bear 0)",
+                    sub_agent_request_id="r-d",
+                ),
+            ],
+            overall_score=6.0,
+            summary_markdown="...",
+        ),
+    )
+    diff = _writer_retry_state_update(state)
+    assert diff["writer_retry_count"] == 1
+    feedback = diff["writer_critic_feedback"]
+    assert "dialectical_balance" in feedback.lower() or "掩盖看空" in feedback
+    assert len(feedback) <= 300
+
+
 def test_build_research_graph_writer_retry_edge_present() -> None:
     """Smoke — graph builder wires writer_retry_transition node."""
     from unittest.mock import MagicMock

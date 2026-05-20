@@ -38,7 +38,15 @@ from app.agents.schemas import ResearchState
 
 from tests.eval.golden_cases.b1_differential._graph_builder import build_b1_diff_graph
 
-pytestmark = [pytest.mark.vcr]
+pytestmark = [
+    pytest.mark.vcr,
+    pytest.mark.skip(
+        reason="v1.x A5b 在 Analyst hot path 加 DebateOrchestrator 4 advocate LLM call;"
+        "旧 cassette 无 AdvocateOutput 录音,导致 LLM call 序列错位。"
+        "需 Mac 真 LLM 重录 cassette 才能恢复。"
+        "spec ref: 2026-05-16-v1.x-bull-bear-debate-design.md § 11.3"
+    ),
+]
 
 _THREAD_ID = "b1-diff-balanced-test-1"
 

@@ -72,11 +72,18 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### v1.x A5a 多模型估值 cross-check(2026-05-16 ship 完)
 - [v1.x A5a 多模型估值 cross-check ship](docs/claude-context/v1.x-multi-valuation-cross-check-landed.md) — 4 model cross-check + IndustryModelRouter + DCF 3 scenarios + OutlierDiagnosisAgent + Critic 7 维 + Writer prompt + retry edge / ~1700 行 / cassette+input wire 留 follow-up
 
+### v1.x A5b bull/bear multi-agent debate(2026-05-16 ship 完)
+- [v1.x A5b bull/bear debate ship](docs/claude-context/v1.x-bull-bear-debate-landed.md) — 2-round adversarial debate + Critic 第 8 维 + retry edge / "双 hallucination 防御"完整闭环 / ~1100 行 / dashboard tab 留 follow-up
+
 ### Chat Session 持久化(2026-05-17 ship 完 — 三卷)
 - [Chat Session 持久化总卡](docs/claude-context/chat-session-persistence-done.md) — Plan 1+2+3 累计 ship,Spec § 1.2 三根因 3/3 全覆盖;DB-as-truth + Agent/Transport 解耦(Celery 独立进程)+ Redis Pub/Sub cancel + LangGraph checkpoint resume 四要素;6 状态 task lifecycle + stale scanner 自愈 + 3 differential golden;Plan 2 dogfood 6 round systematic-debugging 教训沉淀 `feedback_n_round_fix_means_phase1_redo`
 
 ### Persona Editable UI(2026-05-17 ship 完)
 - [persona editable UI ship](docs/claude-context/persona-editable-ui-done.md) — /memory 加画像 tab + 双轨语义 + atomic 操作 + 升级动画 / 21 task ship
+
+### v1.x DD Report Quality Eval
+- [Phase 1 (backtest infra) landed](docs/claude-context/dd-report-eval-phase-1-landed.md)
+- [Phase 2 (metric + ablation) landed](docs/claude-context/dd-report-eval-phase-2-landed.md) — 5 metric 实现 + V0-V3 ablation 控制变量 + ship 框架
 
 ### PG-only Migration(2026-05-17 PR-A ship,PR-B/C/D 待)
 - [PR-A landed](docs/claude-context/pg-only-migration-pr-a-landed.md) — 删主 ORM 30+ with_variant + L0/L1 测试切真 PG + 19 个 unit test 文件迁 db_session / 0 regression / spec § 4 PR-A

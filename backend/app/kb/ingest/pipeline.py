@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,22 @@ from app.services.milvus_client import MilvusKbClient
 from app.services.pdf_parser import PdfParser
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_pub_date(s: str) -> date | None:
+    """Parse pub_date string from spec.metadata. Returns None for empty/malformed.
+
+    Accepts YYYYMMDD (8 digits) and YYYY-MM-DD (10 chars with dashes).
+    """
+    s = s.strip()
+    if not s:
+        return None
+    try:
+        if len(s) == 8 and s.isdigit():
+            return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+        return date.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
 
 
 class DocSpec(BaseModel):
@@ -80,6 +97,19 @@ class IngestPipeline:
             # chunker RecursiveSplitter chunk_size=600 是 soft limit,某些 corpus(财报大段
             # table markdown / 政策长条款)无合适 separator 切不开,在此做 final safety net。
             chunks = self._enforce_chunk_size_cap(chunks)
+
+            # 从 spec.metadata 注入 publish_date(backtest time-travel filter 需要)。
+            # chunker 模块无法访问 spec.metadata,统一在 pipeline 层补填。
+            raw_pub_date = spec.metadata.get("pub_date", "")
+            pub_date = _parse_pub_date(raw_pub_date)
+            if raw_pub_date and pub_date is None:
+                logger.warning(
+                    "ingest doc=%s pub_date 解析失败 raw=%r — chunks 落库 publish_date=None",
+                    spec.doc_id,
+                    raw_pub_date,
+                )
+            if pub_date is not None:
+                chunks = [c.model_copy(update={"publish_date": pub_date}) for c in chunks]
 
             vectors = await self._embed_with_cache(chunks)
             rows = self._chunks_to_rows(spec, chunks, vectors)
@@ -237,7 +267,9 @@ class IngestPipeline:
                 "chunk_index": c.chunk_index,
                 "chunk_text": c.text,
                 "vector": v,
-                "pub_date": spec.metadata.get("pub_date", ""),
+                "pub_date": c.publish_date.isoformat()
+                if c.publish_date is not None
+                else spec.metadata.get("pub_date", ""),
                 "source_url": spec.metadata.get("source_url", ""),
                 "source_type": spec.source_type,
             }
