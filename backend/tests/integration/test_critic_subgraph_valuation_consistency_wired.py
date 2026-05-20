@@ -24,6 +24,7 @@ from app.agents.base import Agent
 from app.agents.critic import Critic
 from app.agents.critic_subagents.conciseness import ConcisenessScorer
 from app.agents.critic_subagents.coverage import CoverageScorer
+from app.agents.critic_subagents.dialectical_balance import DialecticalBalanceScorer
 from app.agents.critic_subagents.factuality import FactualityScorer
 from app.agents.critic_subagents.input_context_scorer import (
     InputContextAppropriatenessScorer,
@@ -55,6 +56,7 @@ def _build_production_critic(llm: LLMService) -> Critic:
         ConcisenessScorer(llm=llm),
         InputContextAppropriatenessScorer(llm=llm),
         ValuationConsistencyScorer(llm=llm),  # 第 7 scorer — wire guard
+        DialecticalBalanceScorer(llm=llm),  # 第 8 scorer (v1.x A5b)
     ]
     return Critic(llm=llm, scorers=scorers)
 
@@ -109,8 +111,8 @@ async def test_valuation_consistency_dim_present_when_consistent(
     )
     assert vc_score == 9.0, f"consistent + narrative 提一致 → 9.0, got {vc_score}"
 
-    # All 7 dims now present
-    assert len(report.dimensions) == 7
+    # All 8 dims now present (v1.x A5b)
+    assert len(report.dimensions) == 8
 
 
 @pytest.mark.asyncio

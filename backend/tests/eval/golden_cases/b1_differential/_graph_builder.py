@@ -25,6 +25,7 @@ from app.agents.analyst import Analyst
 from app.agents.critic import Critic
 from app.agents.critic_subagents.conciseness import ConcisenessScorer
 from app.agents.critic_subagents.coverage import CoverageScorer
+from app.agents.critic_subagents.dialectical_balance import DialecticalBalanceScorer
 from app.agents.critic_subagents.factuality import FactualityScorer
 from app.agents.critic_subagents.input_context_scorer import (
     InputContextAppropriatenessScorer,
@@ -234,7 +235,8 @@ def build_b1_diff_graph(monkeypatch: pytest.MonkeyPatch) -> Any:
         ConcisenessScorer(llm=llm),
         InputContextAppropriatenessScorer(llm=llm),  # 第 6 scorer
         ValuationConsistencyScorer(llm=llm),  # 第 7 scorer (v1.x A5a)
-        # v1.x: PlanCorrectnessScorer removed (Task 1.5). Critic now runs 7 scorers.
+        DialecticalBalanceScorer(llm=llm),  # 第 8 scorer (v1.x A5b)
+        # v1.x: PlanCorrectnessScorer removed (Task 1.5). Critic now runs 8 scorers.
     ]
     critic = Critic(llm=llm, scorers=scorers)
 

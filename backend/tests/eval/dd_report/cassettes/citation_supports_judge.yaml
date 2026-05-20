@@ -1,0 +1,86 @@
+interactions:
+- request:
+    body: "{\"messages\":[{\"role\":\"user\",\"content\":\"\u5224\u65AD\u4E0B\u8FF0
+      chunk \u5185\u5BB9\u662F\u5426\u652F\u6301\u58F0\u660E\u3002chunk \u5FC5\u987B\u660E\u786E\u9648\u8FF0\u58F0\u660E\u7684\u4E8B\u5B9E\u6216\u7D27\u5BC6\u76F8\u5173\u7684\u4E8B\u5B9E,
+      \u624D\u7B97 'supports'\u3002\\n\\n\u58F0\u660E: \u8D35\u5DDE\u8305\u53F0\u662F\u5927\u767D\u9A6C\u7A33\u5065\u84DD\u7B79\\n\\nchunk:
+      \u8D35\u5DDE\u8305\u53F0 2024 \u4E0A\u534A\u5E74\u8425\u6536\u7A33\u5065, \u51C0\u5229\u6DA6\u540C\u6BD4
+      +15%\\n\\n\u4E25\u683C\u8F93\u51FA\u4E00\u884C JSON: {\\\"supports\\\": true}
+      \u6216 {\\\"supports\\\": false}\"}],\"model\":\"deepseek-v4-flash\",\"max_tokens\":8000}"
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate, br, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '415'
+      Content-Type:
+      - application/json
+      Host:
+      - dashscope.aliyuncs.com
+      User-Agent:
+      - OpenAI/Python 2.33.0
+      X-Stainless-Arch:
+      - arm64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.33.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAAA2ySb0/aUBTGv4o5yV6tXaCAQL/KXEhtL9BRepvey7KFNClGlJmqTNmm+Gf/0M1E
+        lETnkKF+F+1t6yu+wlKr4ozvbk6e5zy/e86pglzEqowIiC+rUEaESAUEYhVkrFOkUxChOgWkYhjY
+        pGQKxAlqVpAFHJhIIlhX9UJuLPUaH9y/+9ebNmt0vE9duVjRS97aIWvueq1Dz6mxHz1vbenKnoke
+        o2E7OP7N/mwHTp0t90Jl56e/fna9t+//OmK1nWB1y++eXtkzN50eyYWYkHT7C2xxgZ0eB80dr3US
+        ubgJNm+zxp53ssuajnfYeh5PPbtr4i03WaPnDuYeOkZDJ7hYd/tLEZfb7/rt2Ut78yHFpb3lb/RZ
+        /SjEbzre55NH7P6XHdZcDPHrK+6w5vbbo6Fzk+l/OwgOOu5gjtVvA/32bJTPVpwx7Pft648XEUs0
+        r8jinm26/cH9aCIcvz3rvz9l57UQZ+Or1+2Mhg4btILzVTY/eGpnV/ZMuDasIRBBIkQlVNIpWBzk
+        VV0lxVy0URCBUGwAB6quoLcgxjjQcMEw8TQBUa9omvWKAzz9GsnhyuWiRF/IuGxoiKpYBw4qdydk
+        mLhs0BzFJaQTEDMJDsbC+3I8JnBAMZW0cSmTekKaUxCVVI2ErcfHd+fJJi3u/8SHelmSi0i5F8cs
+        iwPZRBJFCojxdDobEwQhm+GAvCMUlXN5VS8g0zDV8KzDP3NQxgrSQAQFIYMgVOLfJPm8JpFiOCnl
+        dhJy2dD4WEKYTmTSSX4yrqT5rIRSfGZSUHg5n0xJKUHIyCgL1j8AAAD//wMAIWiHN3oDAAA=
+    headers:
+      content-encoding:
+      - gzip
+      content-type:
+      - application/json
+      date:
+      - Sun, 17 May 2026 12:51:38 GMT
+      req-arrive-time:
+      - '1779022297104'
+      req-cost-time:
+      - '1319'
+      resp-start-time:
+      - '1779022298423'
+      server:
+      - istio-envoy
+      transfer-encoding:
+      - chunked
+      vary:
+      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      x-dashscope-call-gateway:
+      - 'true'
+      x-envoy-upstream-service-time:
+      - '1318'
+      x-request-id:
+      - 032b3874-61d7-9ae5-862d-cf45a5228ce9
+    status:
+      code: 200
+      message: OK
+version: 1
