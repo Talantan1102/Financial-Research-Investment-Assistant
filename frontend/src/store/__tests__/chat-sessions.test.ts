@@ -60,6 +60,52 @@ describe('chatSessionsStore', () => {
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 
+describe('renameSession action', () => {
+  beforeEach(() => {
+    chatSessionsActions.reset()
+    chatSessionsState.sessions = [
+      {
+        id: 'a',
+        user_id: null,
+        title: 'old',
+        created_at: '2026-05-17T00:00:00Z',
+        last_active_at: '2026-05-17T00:00:00Z',
+        message_count: 0,
+        last_msg_preview: null,
+      },
+    ]
+  })
+
+  it('optimistically updates title then calls API', async () => {
+    server.use(
+      http.put(`${API_BASE}/api/v0/chats/a`, () => new HttpResponse(null, { status: 200 })),
+    )
+    const p = chatSessionsActions.renameSession('a', 'new')
+    // optimistic: title updated synchronously before await
+    expect(chatSessionsState.sessions[0].title).toBe('new')
+    await p
+    const s = snapshot(chatSessionsState)
+    expect(s.sessions[0].title).toBe('new')
+  })
+
+  it('rolls back on API failure', async () => {
+    server.use(
+      http.put(`${API_BASE}/api/v0/chats/a`, () => new HttpResponse(null, { status: 500 })),
+    )
+    await expect(chatSessionsActions.renameSession('a', 'new')).rejects.toThrow()
+    const s = snapshot(chatSessionsState)
+    expect(s.sessions[0].title).toBe('old')
+  })
+
+  it('no-ops when session id not found', async () => {
+    await expect(
+      chatSessionsActions.renameSession('nonexistent', 'new'),
+    ).resolves.toBeUndefined()
+    const s = snapshot(chatSessionsState)
+    expect(s.sessions[0].title).toBe('old')
+  })
+})
+
 describe('chatSessionsStore + chatApi', () => {
   beforeEach(() => chatSessionsActions.reset())
 

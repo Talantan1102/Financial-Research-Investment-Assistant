@@ -123,7 +123,11 @@ class ChatSessionRepo:
         sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
         async with self._sf() as sess:
             await sess.execute(
-                update(ChatSession).where(ChatSession.id == sid).values(title=new_title)
+                update(ChatSession)
+                .where(ChatSession.id == sid)
+                .values(
+                    title=new_title, title_source="user_renamed"
+                )  # 2026-05-17: user rename is terminal
             )
             await sess.commit()
 
