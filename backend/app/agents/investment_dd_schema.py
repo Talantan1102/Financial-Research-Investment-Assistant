@@ -277,6 +277,24 @@ class InvestmentRecommendation(BaseModel):
         description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
     )
 
+    # v1.x A5b: bull/bear debate final v2
+    bull_case: list[str] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Bull v2 final arguments (来自 state.debate_trace.bull_v2.arguments)",
+    )
+    bear_case: list[str] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Bear v2 final arguments",
+    )
+    strongest_bull_point: str | None = Field(
+        default=None, max_length=300, description="Bull self-evaluated strongest"
+    )
+    strongest_bear_point: str | None = Field(
+        default=None, max_length=300, description="Bear self-evaluated strongest"
+    )
+
 
 # ── 主 schema ──────────────────────────────────────────────────────────────────
 

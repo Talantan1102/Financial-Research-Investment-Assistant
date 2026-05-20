@@ -196,7 +196,7 @@ async def test_list_messages_returns_ordered_rows():
 
 @pytest.mark.asyncio
 async def test_rename_session_executes_update():
-    """L0 — rename_session issues an UPDATE and commits."""
+    """L0 — rename_session issues an UPDATE with title_source and commits."""
     sess = MagicMock()
     sess.execute = AsyncMock()
     sess.commit = AsyncMock()
@@ -207,6 +207,22 @@ async def test_rename_session_executes_update():
 
     sess.execute.assert_awaited_once()
     sess.commit.assert_awaited_once()
+
+    # Verify the UPDATE statement actually carries title_source="user_renamed"
+    # in its .values(...) — guards against forgetting the terminal-rename sentinel.
+    update_stmt = sess.execute.call_args[0][0]
+    values = dict(update_stmt._values) if hasattr(update_stmt, "_values") else {}
+    value_columns = [col.name if hasattr(col, "name") else str(col) for col in values]
+    assert "title_source" in value_columns, (
+        "UPDATE statement missing title_source column — "
+        "rename_session must set title_source='user_renamed'"
+    )
+    assert "title" in value_columns, "UPDATE statement missing title column"
+    # Also verify the actual bound values
+    compiled = update_stmt.compile(compile_kwargs={"literal_binds": True})
+    sql_str = str(compiled)
+    assert "user_renamed" in sql_str, f"Expected 'user_renamed' in compiled SQL, got: {sql_str}"
+    assert "新标题" in sql_str, f"Expected '新标题' in compiled SQL, got: {sql_str}"
 
 
 # ---------------------------------------------------------------------------

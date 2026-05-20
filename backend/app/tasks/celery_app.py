@@ -22,6 +22,7 @@ celery_app = Celery(
         "app.tasks.memory",
         "app.tasks.chat_runner",
         "app.tasks.chat_stale_scanner",  # Plan 3 Task 6
+        "app.tasks.title_generation",  # chat-title async LLM title
     ],
 )
 

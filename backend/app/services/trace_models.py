@@ -175,8 +175,40 @@ class EvalResultRow(Base):
     judge_cost_cny = Column(Float, nullable=False, default=0.0)
     judge_latency_ms = Column(Integer, nullable=False, default=0)
     timestamp = Column(DateTime(timezone=True), nullable=False)
+    # v1.x DD report eval Phase 1+2 extensions (PR-B ORM migration)
+    backtest_run_id = Column(String(64), nullable=True)
+    cut_off_date = Column(Text, nullable=True)
+    evaluator_llm = Column(String(128), nullable=True)
+    case_type = Column(String(32), nullable=True)
+    metric_scores_json = Column(Text, nullable=True)
 
     __table_args__ = (
         Index("idx_eval_results_request", "request_id"),
         Index("idx_eval_results_case", "case_id"),
+        Index("idx_eval_results_btrun", "backtest_run_id"),
+        Index("idx_eval_results_casetype", "case_type"),
+    )
+
+
+class BacktestRunRow(Base):
+    """One row per backtest run — PG-backed persistence for BacktestRunner.
+
+    Mirrors the backtest_runs sqlite table from main (Phase 1 DD report eval).
+    """
+
+    __tablename__ = "backtest_runs"
+
+    run_id = Column(String(64), primary_key=True)
+    created_at = Column(Text, nullable=False)  # ISO string, matches main pattern
+    case_count = Column(Integer, nullable=False, default=0)
+    metric_summary_json = Column(Text, nullable=True)
+    status = Column(String(32), nullable=False)
+    git_sha = Column(Text, nullable=True)
+    ablation_variant = Column(Text, nullable=True)
+    llm_model = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_btrun_created", "created_at"),
+        Index("idx_btrun_ablation", "ablation_variant"),
+        Index("idx_btrun_llm", "llm_model"),
     )

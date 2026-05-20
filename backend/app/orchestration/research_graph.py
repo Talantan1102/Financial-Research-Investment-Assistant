@@ -36,16 +36,15 @@ from app.orchestration.research_nodes import (
 
 _FACTUALITY_THRESHOLD = 7.0
 _VALUATION_CONSISTENCY_THRESHOLD = 7.0  # v1.x A5a
+_DIALECTICAL_BALANCE_THRESHOLD = 7.0  # v1.x A5b
 _MAX_WRITER_RETRY = 1
 
 
 def _writer_retry_router(state: ResearchState) -> Literal["retry", "continue"]:
     """Conditional edge after critic_node — retry writer iff (factuality OR
-    valuation_consistency) score is below threshold AND retry budget remains.
+    valuation_consistency OR dialectical_balance) below threshold AND retry budget remains.
 
-    v1.x A5a: adds valuation_consistency trigger — narrative that fails to
-    reflect cross-check signals (掩盖打架 / 未提偏离 / 未引用 diagnosis) causes
-    a writer retry so the report is rewritten with explicit feedback.
+    v1.x A5b: 加 dialectical_balance 触发器 — narrative 没真双向论证 → retry。
     """
     if state.critic_report is None:
         return "continue"
@@ -54,27 +53,27 @@ def _writer_retry_router(state: ResearchState) -> Literal["retry", "continue"]:
 
     fact_score = state.critic_report.get_score("factuality")
     valuation_score = state.critic_report.get_score("valuation_consistency")
+    dialectical_score = state.critic_report.get_score("dialectical_balance")
 
     fact_trigger = fact_score is not None and fact_score < _FACTUALITY_THRESHOLD
     valuation_trigger = (
         valuation_score is not None and valuation_score < _VALUATION_CONSISTENCY_THRESHOLD
     )
-    if fact_trigger or valuation_trigger:
+    dialectical_trigger = (
+        dialectical_score is not None and dialectical_score < _DIALECTICAL_BALANCE_THRESHOLD
+    )
+    if fact_trigger or valuation_trigger or dialectical_trigger:
         return "retry"
     return "continue"
 
 
 def _writer_retry_state_update(state: ResearchState) -> dict[str, Any]:
     """State diff for retry transition: bump count + capture critic evidence
-    (factuality + valuation_consistency, joined, capped at 300 chars).
-
-    v1.x A5a: feedback includes both factuality and valuation_consistency
-    evidence (when present) so the writer sees both dimensions on retry.
-    """
+    (factuality + valuation_consistency + dialectical_balance, 拼接, capped at 300 chars)."""
     pieces: list[str] = []
     if state.critic_report is not None:
         for dim in state.critic_report.dimensions:
-            if dim.dimension in ("factuality", "valuation_consistency"):
+            if dim.dimension in ("factuality", "valuation_consistency", "dialectical_balance"):
                 pieces.append(f"[{dim.dimension}={dim.score:.1f}] {dim.evidence}")
     feedback = " | ".join(pieces)
     return {

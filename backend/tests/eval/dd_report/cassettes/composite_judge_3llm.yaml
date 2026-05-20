@@ -1,0 +1,269 @@
+interactions:
+- request:
+    body: "{\"messages\":[{\"role\":\"user\",\"content\":\"\u4F60\u662F\u91D1\u878D\u7814\u7A76\u52A9\u624B\u62A5\u544A\u7684\u8BC4\u5BA1\u5458\u3002\u7ED9\u5B9A\u4E0B\u8FF0
+      InvestmentDueDiligenceReport \u5185\u5BB9,\\n\u6309\u4EE5\u4E0B 5 \u7EF4\u7EFC\u5408\u6253
+      1-10 \u5206(1=\u6781\u5DEE, 10=\u5B8C\u7F8E)\u3002\u7ED3\u5408 factuality +
+      coverage + structure +\\ninvestment thesis \u5408\u7406\u6027 + risk completeness\u3002\\n\\n\u62A5\u544A\u6807\u7684:
+      \u8305\u53F0\\n\u62A5\u544A\u6458\u8981 (JSON \u622A\u65AD 4000 \u5B57\u7B26):
+      {\\\"target_name\\\": \\\"\u8D35\u5DDE\u8305\u53F0\\\", \\\"target_overview\\\":
+      {\\\"narrative\\\": \\\"\u8305\u53F0\u662F\u5927\u767D\u9A6C\u7A33\u5065\u84DD\u7B79,
+      \u51C0\u5229\u6DA6 +15%.\\\"}, \\\"investment_recommendation\\\": {\\\"recommendation\\\":
+      \\\"recommend_buy\\\", \\\"narrative\\\": \\\"\u4F30\u503C\u5408\u7406,\u5EFA\u8BAE\u4E70\u5165,
+      \u76EE\u6807\u4EF7 1700-1900\\\"}}\\n\\n\u4E25\u683C\u8F93\u51FA\u4E00\u884C
+      JSON: {\\\"score\\\": <1-10>, \\\"reasoning\\\": \\\"<1 \u53E5\u8BDD>\\\"}\\n\"}],\"model\":\"deepseek-v4-flash\",\"max_tokens\":8000}"
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate, br, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '748'
+      Content-Type:
+      - application/json
+      Host:
+      - dashscope.aliyuncs.com
+      User-Agent:
+      - OpenAI/Python 2.33.0
+      X-Stainless-Arch:
+      - arm64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.33.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAAA2yS7VLaUBCGb8XZmf5q6CSIIrmV0mFCOEpqSDKc2GmHYSZQRWSCaFusirXQCq1W
+        Iq228hH1Ysg5Cb+4hU5KFfvx8+y+u+fdZzcDYlKVRISBf5yBFMJYWELAZ0BUFR0pOvCQiQIW1TSK
+        Aj8TZGaikEYCVhVJWfIjUaClJtkukcIasXr0MEf6Ldcy3GpzbJuu3Xd6Fe/iAyk1aLVDy9bQyI0+
+        bo72jkmxQA+3hkbOsTvEsOlOj55XySuTdPPkoO+1Cm5tZ2ybtFT1vq+OjIF3ve10y8QyafXCj7+t
+        0/MqfXNGzRzZKrpbBe9slViNoZGPQhaYqcnYdBJa3HYGp7Teo2XrvmvvpuY1zLsGkxTd3vVaOXJd
+        dN+3x7ZJKif0YMO1DFKu0krFu+mM7X3PXCOVDt09I0ef3L2r0fGp+/mc5Jre63duu+dXrRukeEx/
+        tB5ycw/GtjkZdmLYTw/6nmU5vQ5Z+4WrZtH6ujO45MIsG+AiLDs08t7NnjO4mnhyus3RenlC1R0U
+        vFJ+bO/Tbw16sPEX5PtU/2XuNUynu3/3dL8cOv0NWrfJV8NtbwyNPKnVafuIbK063RN3cEH6rdHL
+        K3JdJJfW0Mi7A38En5ffIedcbQ6NvM9clRHwIGAsYV1QdMgysCgpEk7GJusAHrCuasCApCTQc+BZ
+        BmR1SUurcQy8siLL2ScMqPGnSPT3JSYF/ZGopjQZ6ZKqAAMrt+eppdWUpsd0dRkpGHguvMDAVDmN
+        c/MM6KouyHehYCT0H2ksgXRBkrHfe3o6tzXhUJb588v7elEQkyhxJ2azWQbENBJ0lPCdhSNsMDjL
+        cgzgF1hHqdiipCyhtJaW/KP0h2YgpSaQDDwkENIwQsuBZ6HAoizgpI8q8RuFmNLkwGyIYyPiPBcQ
+        5+bigUhY4AKR+cVQIMSJc0E2nmAX2CBkfwIAAP//AwCSMNfP1wMAAA==
+    headers:
+      content-encoding:
+      - gzip
+      content-type:
+      - application/json
+      date:
+      - Sun, 17 May 2026 12:51:41 GMT
+      req-arrive-time:
+      - '1779022300144'
+      req-cost-time:
+      - '1347'
+      resp-start-time:
+      - '1779022301492'
+      server:
+      - istio-envoy
+      transfer-encoding:
+      - chunked
+      vary:
+      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      x-dashscope-call-gateway:
+      - 'true'
+      x-envoy-upstream-service-time:
+      - '1347'
+      x-request-id:
+      - 34109c61-c55b-97a1-96f4-41c520bd0802
+    status:
+      code: 200
+      message: OK
+- request:
+    body: "{\"messages\":[{\"role\":\"user\",\"content\":\"\u4F60\u662F\u91D1\u878D\u7814\u7A76\u52A9\u624B\u62A5\u544A\u7684\u8BC4\u5BA1\u5458\u3002\u7ED9\u5B9A\u4E0B\u8FF0
+      InvestmentDueDiligenceReport \u5185\u5BB9,\\n\u6309\u4EE5\u4E0B 5 \u7EF4\u7EFC\u5408\u6253
+      1-10 \u5206(1=\u6781\u5DEE, 10=\u5B8C\u7F8E)\u3002\u7ED3\u5408 factuality +
+      coverage + structure +\\ninvestment thesis \u5408\u7406\u6027 + risk completeness\u3002\\n\\n\u62A5\u544A\u6807\u7684:
+      \u8305\u53F0\\n\u62A5\u544A\u6458\u8981 (JSON \u622A\u65AD 4000 \u5B57\u7B26):
+      {\\\"target_name\\\": \\\"\u8D35\u5DDE\u8305\u53F0\\\", \\\"target_overview\\\":
+      {\\\"narrative\\\": \\\"\u8305\u53F0\u662F\u5927\u767D\u9A6C\u7A33\u5065\u84DD\u7B79,
+      \u51C0\u5229\u6DA6 +15%.\\\"}, \\\"investment_recommendation\\\": {\\\"recommendation\\\":
+      \\\"recommend_buy\\\", \\\"narrative\\\": \\\"\u4F30\u503C\u5408\u7406,\u5EFA\u8BAE\u4E70\u5165,
+      \u76EE\u6807\u4EF7 1700-1900\\\"}}\\n\\n\u4E25\u683C\u8F93\u51FA\u4E00\u884C
+      JSON: {\\\"score\\\": <1-10>, \\\"reasoning\\\": \\\"<1 \u53E5\u8BDD>\\\"}\\n\"}],\"model\":\"qwen-plus\",\"max_tokens\":8000}"
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate, br, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '740'
+      Content-Type:
+      - application/json
+      Host:
+      - dashscope.aliyuncs.com
+      User-Agent:
+      - OpenAI/Python 2.33.0
+      X-Stainless-Arch:
+      - arm64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.33.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAAA1ySX0/aYBTGv8pyrsssMkV6uc3t1mSXYzGlvEo3aBmt2RJCUpxgRZEyEP+O4TaZ
+        blpQmauluu8ifd+3XPEVFoZzyS7PL0+enHOeJw0JOYriwMHrN0jyJeMLCjAgRoEDIcarQiIZ902w
+        kRA/NSn4IoEHU76QEOJ9oUhgzhfyRwNTkwIKTaAgMCDEZFFACnDP05BAisLPI+DSIMiSiiQVOEiH
+        QRHkFAoDdy/A3AtDCvGKLInS/JCEgRQOcLngWgf95SJ1bPey5Nqr2Ky71x9I0Rw4Om4ukr1vpGS4
+        17uecUCqF2NYPyIXTZz76V5VyEabFM2elnWdNtYcUrsk5xs9LYtLLdKq4twxLllEr+H1PC6dzUyP
+        zTwcOCs9Les183S35lpFnDscODrZbHj7a661g/U8qRs9LUu/1117hTQcfKr1tCyxGv1sBdsVfLI1
+        HKu/6Emt/3m9v31ET1Zw7rxfNWm3g+3myJ92K6S+RMxV6ti3/p1PuLBPylteMzsUmPvUyOPTRc88
+        9Ey7p2Wnnz0leo2cdamR91pLrtMeWZHChvdjqa91vesyPbJJpz5wdLebo1/bN9rW6G5s6NTI32jb
+        uNghm43Hj56M0V0Lty5v31Jtkfflkd1oaWyu4dwhdWz85XTgrLlWkR43saHj9pXXfjdKBX+0yd6x
+        a1Vca4c0lvFyvqcthiEDDKTkOAIOeEURFZWXVMgwIEpR9BY4loE5URKV2OwoauBAUeUkZF4wIKQQ
+        r6IocP5gMMSOjwdYPwNy5CUS1Nvy3RfkRDKOVFGWgIGFv4VSZZWPz6ryKyQpwAXYIAP/hHfcP+TJ
+        lJxIqndsnGX/Y7NRpPJiXPlTVF6IoeidmM1kMr8BAAD//wMAnpF29h4DAAA=
+    headers:
+      content-encoding:
+      - gzip
+      content-type:
+      - application/json
+      date:
+      - Sun, 17 May 2026 12:51:44 GMT
+      req-arrive-time:
+      - '1779022301585'
+      req-cost-time:
+      - '3206'
+      resp-start-time:
+      - '1779022304791'
+      server:
+      - istio-envoy
+      transfer-encoding:
+      - chunked
+      vary:
+      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      x-dashscope-call-gateway:
+      - 'true'
+      x-envoy-upstream-service-time:
+      - '3205'
+      x-request-id:
+      - 50b9a86c-b348-9c9a-9b3f-91d386ce95e7
+    status:
+      code: 200
+      message: OK
+- request:
+    body: "{\"messages\":[{\"role\":\"user\",\"content\":\"\u4F60\u662F\u91D1\u878D\u7814\u7A76\u52A9\u624B\u62A5\u544A\u7684\u8BC4\u5BA1\u5458\u3002\u7ED9\u5B9A\u4E0B\u8FF0
+      InvestmentDueDiligenceReport \u5185\u5BB9,\\n\u6309\u4EE5\u4E0B 5 \u7EF4\u7EFC\u5408\u6253
+      1-10 \u5206(1=\u6781\u5DEE, 10=\u5B8C\u7F8E)\u3002\u7ED3\u5408 factuality +
+      coverage + structure +\\ninvestment thesis \u5408\u7406\u6027 + risk completeness\u3002\\n\\n\u62A5\u544A\u6807\u7684:
+      \u8305\u53F0\\n\u62A5\u544A\u6458\u8981 (JSON \u622A\u65AD 4000 \u5B57\u7B26):
+      {\\\"target_name\\\": \\\"\u8D35\u5DDE\u8305\u53F0\\\", \\\"target_overview\\\":
+      {\\\"narrative\\\": \\\"\u8305\u53F0\u662F\u5927\u767D\u9A6C\u7A33\u5065\u84DD\u7B79,
+      \u51C0\u5229\u6DA6 +15%.\\\"}, \\\"investment_recommendation\\\": {\\\"recommendation\\\":
+      \\\"recommend_buy\\\", \\\"narrative\\\": \\\"\u4F30\u503C\u5408\u7406,\u5EFA\u8BAE\u4E70\u5165,
+      \u76EE\u6807\u4EF7 1700-1900\\\"}}\\n\\n\u4E25\u683C\u8F93\u51FA\u4E00\u884C
+      JSON: {\\\"score\\\": <1-10>, \\\"reasoning\\\": \\\"<1 \u53E5\u8BDD>\\\"}\\n\"}],\"model\":\"qwen-max\",\"max_tokens\":8000}"
+    headers:
+      Accept:
+      - application/json
+      Accept-Encoding:
+      - gzip, deflate, br, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '739'
+      Content-Type:
+      - application/json
+      Host:
+      - dashscope.aliyuncs.com
+      User-Agent:
+      - OpenAI/Python 2.33.0
+      X-Stainless-Arch:
+      - arm64
+      X-Stainless-Async:
+      - 'false'
+      X-Stainless-Lang:
+      - python
+      X-Stainless-OS:
+      - MacOS
+      X-Stainless-Package-Version:
+      - 2.33.0
+      X-Stainless-Runtime:
+      - CPython
+      X-Stainless-Runtime-Version:
+      - 3.13.11
+      x-stainless-read-timeout:
+      - '600'
+      x-stainless-retry-count:
+      - '0'
+    method: POST
+    uri: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  response:
+    body:
+      string: !!binary |
+        H4sIAAAAAAAAA1SRy27TQBSGX6U66zFy3BCn8yoYRePxSTJgzxjPVBRFllqUJigECggWKaKqQEVl
+        k2QFapKKh6lvWfEKyIIWsf31naP/MgDeV4KjBvpgABFqzXoIdACJChEoMK2FNkwaIMCVNCgNUBh4
+        oLlK0AO6c5/seJAg00oK2asVD4rJRf52Us2uy+H3cj3Lx6tsNcqulvnxRb5eVfN5fjIpP86L83G2
+        /vFrM82uR+VmlV2dVIuv5XpUng7zF6Pi7E31c1xevrw5PNp+eb2dfasWw2yzzN9N8+PL7afP5emw
+        +LAsXs2L94tienRz+NyDFFICXSGF7nf+mAIK2qgYCAgZ4AFQm0CoenGifA1U7odh+pCA8h8hr6Px
+        PjP3uIriEI1QEgjs31YSJyqKTceoxyg1UMe2605uyTt9t0nAKMPCf2Qt/XfdCdAwEer6LWe8j8Ed
+        bKcpAZ4gMxgAbbjunu04u3aLgH6mDUadrpA9TOJE1FPU/glEKsAQKDx5itKK2EEdNvgbhkdxaPmN
+        RuAw37W46zNrz8am5bfdluW4zXarG9i+33Yh/Q0AAP//AwAZWNWBDQIAAA==
+    headers:
+      content-encoding:
+      - gzip
+      content-type:
+      - application/json
+      date:
+      - Sun, 17 May 2026 12:51:45 GMT
+      req-arrive-time:
+      - '1779022304891'
+      req-cost-time:
+      - '1235'
+      resp-start-time:
+      - '1779022306127'
+      server:
+      - istio-envoy
+      transfer-encoding:
+      - chunked
+      vary:
+      - Origin,Access-Control-Request-Method,Access-Control-Request-Headers, Accept-Encoding
+      x-dashscope-call-gateway:
+      - 'true'
+      x-envoy-upstream-service-time:
+      - '1234'
+      x-request-id:
+      - b11d2ab7-c7ba-90e4-b876-27486fd0bb87
+    status:
+      code: 200
+      message: OK
+version: 1
