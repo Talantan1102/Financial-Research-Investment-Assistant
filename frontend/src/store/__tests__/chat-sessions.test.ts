@@ -78,7 +78,7 @@ describe('renameSession action', () => {
 
   it('optimistically updates title then calls API', async () => {
     server.use(
-      http.put(`${API_BASE}/api/sessions/a`, () => new HttpResponse(null, { status: 200 })),
+      http.put(`${API_BASE}/api/v0/chats/a`, () => new HttpResponse(null, { status: 200 })),
     )
     const p = chatSessionsActions.renameSession('a', 'new')
     // optimistic: title updated synchronously before await
@@ -90,7 +90,7 @@ describe('renameSession action', () => {
 
   it('rolls back on API failure', async () => {
     server.use(
-      http.put(`${API_BASE}/api/sessions/a`, () => new HttpResponse(null, { status: 500 })),
+      http.put(`${API_BASE}/api/v0/chats/a`, () => new HttpResponse(null, { status: 500 })),
     )
     await expect(chatSessionsActions.renameSession('a', 'new')).rejects.toThrow()
     const s = snapshot(chatSessionsState)

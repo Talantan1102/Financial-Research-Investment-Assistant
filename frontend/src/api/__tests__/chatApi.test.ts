@@ -95,10 +95,10 @@ describe('chatApi REST', () => {
 import { renameChat } from '../chatApi'
 
 describe('renameChat', () => {
-  it('sends PUT /api/sessions/:id with new title', async () => {
+  it('sends PUT /api/v0/chats/:id with new title', async () => {
     let received: { title: string } | null = null
     server.use(
-      http.put('/api/sessions/abc-123', async ({ request }) => {
+      http.put(`${API_BASE}/api/v0/chats/abc-123`, async ({ request }) => {
         received = (await request.json()) as { title: string }
         return HttpResponse.json({ id: 'abc-123', title: received.title })
       }),
@@ -109,7 +109,7 @@ describe('renameChat', () => {
 
   it('throws on 4xx', async () => {
     server.use(
-      http.put('/api/sessions/abc-123', () =>
+      http.put(`${API_BASE}/api/v0/chats/abc-123`, () =>
         HttpResponse.json({ detail: 'not found' }, { status: 404 }),
       ),
     )
