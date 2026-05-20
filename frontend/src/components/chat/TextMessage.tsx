@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import type { ChatMessage } from '@/types/chat'
 import { renderMarkdownWithCharts } from '@/utils/markdown'
 import { ChartSpecRenderer } from './ChartSpecRenderer'
-import styles from '@/styles/markdown.module.scss'
+import chatStyles from '@/styles/chat.module.scss'
+import markdownStyles from '@/styles/markdown.module.scss'
 
 export interface TextMessageProps {
   message: ChatMessage
@@ -21,6 +22,9 @@ const MEM_LINK_HREF = /^#mem-([A-Za-z0-9_-]+)$/
 
 function TextMessageInner({ message }: TextMessageProps) {
   const navigate = useNavigate()
+  const isUser = message.role === 'user'
+  const isAssistant = message.role === 'assistant'
+
   const { html, charts } = useMemo(
     () => renderMarkdownWithCharts(message.content),
     [message.content],
@@ -45,11 +49,11 @@ function TextMessageInner({ message }: TextMessageProps) {
     [navigate],
   )
 
-  return (
+  const content = (
     <div
       data-role={message.role}
       data-testid={`text-msg-${message.id}`}
-      className={`${styles.markdownBody} ${message.role === 'user' ? styles.user : styles.assistant}`}
+      className={`${markdownStyles.markdownBody} ${isUser ? markdownStyles.user : markdownStyles.assistant}`}
       onClick={handleClick}
     >
       {parts.map((p, idx) => {
@@ -66,6 +70,25 @@ function TextMessageInner({ message }: TextMessageProps) {
       })}
     </div>
   )
+
+  if (isUser) {
+    return (
+      <div className={chatStyles.rowUser} data-testid={`msg-user-${message.id}`}>
+        <div className={chatStyles.bubbleUser}>{content}</div>
+      </div>
+    )
+  }
+  if (isAssistant) {
+    return (
+      <div className={chatStyles.rowAi} data-testid={`msg-ai-${message.id}`}>
+        <div className={chatStyles.aiMeta}>
+          <span className={chatStyles.aiBadge}>Analyst</span>
+        </div>
+        <div className={chatStyles.bubbleAi}>{content}</div>
+      </div>
+    )
+  }
+  return content
 }
 
 export const TextMessage = memo(

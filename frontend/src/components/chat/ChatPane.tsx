@@ -9,6 +9,7 @@ import { useDeferredMessages } from './useDeferredMessages'
 import { useChatSSE } from '@/hooks/useChatSSE'
 import { currentChatState } from '@/store/current-chat'
 import { escalationState } from '@/store/escalation'
+import { EmptyState } from '@/components/states/EmptyState'
 import styles from '@/styles/chat.module.scss'
 
 export interface ChatPaneProps {
@@ -85,25 +86,33 @@ export function ChatPane({
     <div className={styles.chatPane}>
       <CostMeter />
       <section role="region" aria-label="messages" className={styles.messagesRegion}>
-        {empty ? (
-          <div className={styles.emptyState}>开始一个新对话 — 试试问 "工商银行现价多少?"</div>
-        ) : (
-          <MessageList
-            messages={[...displayMessages]}
-            onContinueAsk={onContinueAsk}
-            onRetry={sse.retryTask}
-          />
-        )}
+        <div className={styles.chatContainer}>
+          {empty ? (
+            <EmptyState
+              variant="chat-empty"
+              title="开始一个新对话"
+              description='试试问 "工商银行现价多少?"'
+            />
+          ) : (
+            <MessageList
+              messages={[...displayMessages]}
+              onContinueAsk={onContinueAsk}
+              onRetry={sse.retryTask}
+            />
+          )}
+        </div>
         <StreamingIndicator />
       </section>
       <section role="region" aria-label="input" className={styles.inputRegion}>
-        <InputArea
-          sessionId={sessionId ?? undefined}
-          onSend={onSend}
-          onAbort={onAbort}
-          onEscalate={onEscalate}
-          onCancel={sse.cancelTask}
-        />
+        <div className={styles.inputContainer}>
+          <InputArea
+            sessionId={sessionId ?? undefined}
+            onSend={onSend}
+            onAbort={onAbort}
+            onEscalate={onEscalate}
+            onCancel={sse.cancelTask}
+          />
+        </div>
       </section>
     </div>
   )
