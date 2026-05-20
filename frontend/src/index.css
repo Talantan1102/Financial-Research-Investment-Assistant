@@ -1,12 +1,8 @@
 :root {
-  background-color: #fff;
+  background-color: var(--ios-bg-grouped);
   font-size: 14px;
   line-height: 1.5;
-  font-family:
-    Inter,
-    Pingfang SC,
-    Microsoft Yahei,
-    sans-serif;
+  font-family: var(--ios-font);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
