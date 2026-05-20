@@ -13,9 +13,10 @@ CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def test_load_69_capabilities() -> None:
+def test_load_87_capabilities() -> None:
+    """v0.9.7 ETCLOVG capability landscape — 87 项,按论文 §3-§9 子层细分。"""
     caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    assert len(caps) == 69
+    assert len(caps) == 87
     assert all(c.id.count(".") >= 1 for c in caps)
 
 
@@ -84,8 +85,10 @@ def test_overrides_applied() -> None:
 
 
 def test_real_project_lit_count_anchor() -> None:
-    """在真实 repo 跑全部 69 capability (ETCLOVG 7 维),lit ≈ 42
-    (E 层 7/7 + T 5/8 + C 9/22 + L 7/10 + O 5/9 + V 5/7 + G 4/6)。"""
+    """在真实 repo 跑全部 87 capability (ETCLOVG 7 维 + 论文子层细分),lit ≈ 42。
+
+    新增 18 项 manual capability(按论文 §3.2.2/3.2.5/3.2.7/3.3/4.3/4.4/5.6/
+    5.7/6.4/7.5/8.3/9.2/9.4/9.5/9.6/11.2/11.5/12.3)全 todo, lit 数不变。"""
     project_root = Path(__file__).parent.parent.parent.parent
     caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
     resolved = resolve_all(caps, project_root)

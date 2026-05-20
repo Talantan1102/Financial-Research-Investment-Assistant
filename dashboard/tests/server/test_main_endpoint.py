@@ -22,7 +22,7 @@ def test_index_renders() -> None:
         # 三态 chip
         assert "lit" in body and "todo" in body
         # 计数
-        assert "/69" in body or "69" in body  # total appears somewhere
+        assert "/87" in body or "87" in body  # total appears somewhere
 
 
 def test_view_d_default() -> None:

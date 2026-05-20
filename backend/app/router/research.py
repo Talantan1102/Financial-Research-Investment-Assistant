@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -279,12 +279,15 @@ def _get_graph_lock() -> asyncio.Lock:
     return _RESEARCH_GRAPH_LOCK
 
 
-async def get_research_graph() -> Any:
+async def get_research_graph(request: Request) -> Any:
     """Async DI factory: build the research graph singleton at first request (lazy init).
 
-    Uses AsyncSqliteSaver so that graph.astream_events() works correctly in
-    the async FastAPI event loop.  The singleton is built exactly once; subsequent
-    calls return the cached instance without re-acquiring the lock.
+    Reuses the MCP client subprocess launched by web lifespan (app.state.mcp_client)
+    — same chat_tools profile (8 tools) covers research mode's tool needs after the
+    grouped-dispatch refactor; no separate research-tools MCP profile is required.
+
+    Uses MemorySaver (AsyncSqliteSaver event-loop hang workaround); singleton
+    built exactly once and cached for the process lifetime.
     """
     global _RESEARCH_GRAPH_SINGLETON
     if _RESEARCH_GRAPH_SINGLETON is not None:
@@ -292,7 +295,7 @@ async def get_research_graph() -> Any:
 
     lock = _get_graph_lock()
     async with lock:
-        # Double-checked locking: another coroutine may have built it while we waited.
+        # Double-checked locking
         if _RESEARCH_GRAPH_SINGLETON is not None:
             return _RESEARCH_GRAPH_SINGLETON
 
@@ -313,45 +316,20 @@ async def get_research_graph() -> Any:
         from app.agents.research_planner import ResearchPlanner
         from app.agents.writer import Writer
         from app.orchestration.research_graph import build_research_graph
-        from app.services.bocha_factory import build_bocha_service_from_env
-        from app.services.kb_factory import build_kb_search_service_from_env
         from app.services.openai_client import build_llm_service_from_env
-        from app.services.tushare_factory import build_tushare_service
-        from app.tools.get_balance_sheet import GetBalanceSheetTool
-        from app.tools.get_cashflow import GetCashflowTool
-        from app.tools.get_daily_basic import GetDailyBasicTool
-        from app.tools.get_dividend_history import GetDividendHistoryTool
-        from app.tools.get_financials import GetFinancialsTool
-        from app.tools.get_forecast import GetForecastTool
-        from app.tools.get_holder_change import GetHolderChangeTool
-        from app.tools.get_money_flow import GetMoneyFlowTool
-        from app.tools.get_news import GetNewsTool
-        from app.tools.get_pe_history import GetPeHistoryTool
-        from app.tools.get_stock_quote import StockQuoteTool
-        from app.tools.kb_search import KbSearchTool
         from app.tools.registry import ToolRegistry
-        from app.tools.web_search import WebSearchTool
+
+        mcp_client = getattr(request.app.state, "mcp_client", None)
+        if mcp_client is None:
+            raise RuntimeError(
+                "research graph requires app.state.mcp_client — web lifespan "
+                "must initialize MCP subprocess before /research requests."
+            )
 
         llm = build_llm_service_from_env()
-        tushare = build_tushare_service()
 
         registry = ToolRegistry()
-        registry.register(StockQuoteTool(tushare=tushare))
-        registry.register(GetFinancialsTool(tushare=tushare))
-        registry.register(GetNewsTool(bocha=build_bocha_service_from_env()))
-        registry.register(WebSearchTool(bocha=build_bocha_service_from_env()))
-        kb_service = build_kb_search_service_from_env()
-        registry.register(KbSearchTool(kb_service=kb_service))
-
-        # v0.8.5 — 8 new tools per spec § 4.6
-        registry.register(GetBalanceSheetTool(tushare=tushare))
-        registry.register(GetCashflowTool(tushare=tushare))
-        registry.register(GetDailyBasicTool(tushare=tushare))
-        registry.register(GetPeHistoryTool(tushare=tushare))
-        registry.register(GetForecastTool(tushare=tushare))
-        registry.register(GetDividendHistoryTool(tushare=tushare))
-        registry.register(GetHolderChangeTool(tushare=tushare))
-        registry.register(GetMoneyFlowTool(tushare=tushare))
+        await registry.register_mcp_client_async(mcp_client)
 
         planner = ResearchPlanner(llm=llm)
         collector = DataCollector(llm=llm, registry=registry)

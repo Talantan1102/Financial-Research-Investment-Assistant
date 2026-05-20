@@ -53,9 +53,7 @@
 
 **不做（真 YAGNI）**：
 - alias / 兼容层 — 一次性硬切（v0 internal tool，无外部消费者）
-- 新增 E 层完整 capability 自检规则（首版以 manual 标 todo / wip 即可）
 - 各 capability 的 derive_rule 重写（仅在归属换层后顺手修复明显失效的 path_glob）
-- 论文里 §3.2 七子类 sandbox 全套自检（首版 E 层 7 capability 含 Celery/Redis 够）
 - 持久化 schema 迁移（已确认 sqlite 无 dimension 列）
 - LangFuse / OTel 实际接入（V/O 层的 observability instrumentation 是 v1 单独 spec）
 - 深色模式（iOS Calm Minimal 只做 Light Mode，决议 § 10.Q1）
@@ -619,7 +617,7 @@ mockup-v3 用作 design source-of-truth，CSS / 模板必须对照它实施。
 | 维度 | gate | 验证手段 |
 |---|---|---|
 | 维度数 | 主泳道 = 7（`dimensions:` 下）+ `catch_all:` 顶层独立 key | yaml load + types Literal |
-| capability 数 | 68 项（62 - 1 合并 + 7 E 新增） | yaml load count |
+| capability 数 | 87 项（62 - 1 合并 + 7 E 新增 + 18 论文子层细分 manual） | yaml load count |
 | 路径分类命中率 | backend/ 下 .py 文件归 7 维主泳道 ≥ 80%（剩余落 catch_all） | path_router 跑全 repo + 统计 |
 | E 层 lit | ≥ 6/7 | capability_resolver 跑 + 自检 |
 | C 层 fingerprint dot 数 | ≤ 8 dot per spoke | fingerprint 生成检查 |
@@ -639,7 +637,7 @@ mockup-v3 用作 design source-of-truth，CSS / 模板必须对照它实施。
 | 指标 | V2 polish ship 时（2026-05-14）| 迁移后目标 |
 |---|---|---|
 | 主泳道维度数 | 8 + App Shell(6) | 7 + catch_all(5) |
-| capability 总数 | 62 | 68 |
+| capability 总数 | 62 | 87（含论文子层细分 18 项 manual） |
 | 总 lit 数（snapshot） | 38（按 v0.8.5 报告） | ≥ 42（E 层贡献 6-7 新 lit；V/O 拆开后部分 lit 散到两边） |
 | fingerprint spoke | 8 | 7（C 维 amber 高光） |
 | 论文权威对齐 | 0%（自定义） | 100%（ETCLOVG） |

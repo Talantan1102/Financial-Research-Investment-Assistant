@@ -38,6 +38,26 @@ dimensions:
         name_cn: "Celery + Redis 异步队列"
         name_en: "Celery + Redis async queue"
         derive_rule: { type: file_exists, path: 'backend/app/tasks/celery_app.py' }
+      # 论文 §3.2.2 - Computer-Use Agent Infrastructure (Anthropic Computer Use, OSWorld)
+      - id: computer_use_agent
+        name_cn: "Computer-Use Agent (GUI 操作)"
+        name_en: "Computer-Use Agent (GUI ops)"
+        derive_rule: { type: manual }
+      # 论文 §3.2.5 - Browser Evaluation Environments (WebArena, BrowserGym)
+      - id: browser_eval_env
+        name_cn: "浏览器评测环境"
+        name_en: "Browser eval environment"
+        derive_rule: { type: manual }
+      # 论文 §3.2.7 - Sandbox Abstraction Layers (SWE-ReX, K8s Agent Sandbox)
+      - id: sandbox_abstraction
+        name_cn: "沙箱抽象层"
+        name_en: "Sandbox abstraction"
+        derive_rule: { type: manual }
+      # 论文 §3.3 - Threat Model and Sandbox Escape (SandboxEscapeBench)
+      - id: sandbox_escape_defense
+        name_cn: "沙箱逃逸防御"
+        name_en: "Sandbox escape defense"
+        derive_rule: { type: manual }
 
   # ============================================================
   # 02 Tool Interface & Protocol (8 项,预期 5 lit) §4
@@ -75,6 +95,16 @@ dimensions:
       - id: parallel_tool_calls
         name_cn: "并行 tool calls"
         name_en: "Parallel tool calls"
+        derive_rule: { type: manual }
+      # 论文 §4.3 - Tool-Augmented Training and Integration (Gorilla, ToolLLM, Toolformer)
+      - id: tool_augmented_training
+        name_cn: "Tool-augmented 训练 / 微调"
+        name_en: "Tool-augmented training"
+        derive_rule: { type: manual }
+      # 论文 §4.4 - Scalability and Session Management
+      - id: tool_session_management
+        name_cn: "工具会话扩展管理"
+        name_en: "Tool session management"
         derive_rule: { type: manual }
 
   # ============================================================
@@ -196,6 +226,18 @@ dimensions:
         name_cn: "Query 分解"
         name_en: "Query decomposition"
         derive_rule: { type: manual }
+      # 论文 §5.6 - Long-Horizon Techniques: Keeping Agents Coherent Over 100+ Turns
+      - id: long_horizon_coherence
+        group: long_term
+        name_cn: "100+ 轮长程一致性"
+        name_en: "100+ turn coherence"
+        derive_rule: { type: manual }
+      # 论文 §5.7 - Context Drift and the Limits of Current Approaches
+      - id: context_drift_detection
+        group: long_term
+        name_cn: "上下文漂移检测"
+        name_en: "Context drift detection"
+        derive_rule: { type: manual }
 
   # ============================================================
   # 04 Lifecycle & Orchestration (10 项,预期 6 lit) §6
@@ -242,6 +284,11 @@ dimensions:
         name_cn: "Agent handoff"
         name_en: "Agent handoff"
         derive_rule: { type: manual }
+      # 论文 §6.4 - Full Lifecycle Pipeline from Issue to Pull Request (OpenAI Symphony)
+      - id: issue_to_pr_pipeline
+        name_cn: "Issue → PR 全链路"
+        name_en: "Issue → PR full lifecycle"
+        derive_rule: { type: manual }
 
   # ============================================================
   # 05 Observability & Operations (9 项,预期 5 lit) §7
@@ -284,6 +331,16 @@ dimensions:
         name_cn: "Cost 预警"
         name_en: "Cost alerting"
         derive_rule: { type: manual }
+      # 论文 §7.5 - Toward Unified Observability (cross-system trace correlation)
+      - id: unified_observability
+        name_cn: "跨系统统一可观测"
+        name_en: "Unified observability"
+        derive_rule: { type: manual }
+      # 论文 §11.5 / §12.3 - Trace-Native Evaluation (traces as primary scoring artifact)
+      - id: trace_native_eval
+        name_cn: "Trace-native evaluation"
+        name_en: "Trace-native eval"
+        derive_rule: { type: manual }
 
   # ============================================================
   # 06 Verification & Evaluation (7 项,预期 5 lit) §8
@@ -318,6 +375,16 @@ dimensions:
         name_cn: "对抗测试"
         name_en: "Adversarial testing"
         derive_rule: { type: manual }
+      # 论文 §8.3 - Pre-execution Readiness Validation
+      - id: pre_execution_readiness
+        name_cn: "执行前就绪校验"
+        name_en: "Pre-execution readiness"
+        derive_rule: { type: manual }
+      # 论文 §12.3 - Failure Attribution from Traces (cross-layer diagnosis)
+      - id: failure_attribution
+        name_cn: "失败溯因 / 跨层归因"
+        name_en: "Failure attribution"
+        derive_rule: { type: manual }
 
   # ============================================================
   # 07 Governance & Security (6 项,预期 3-4 lit) §9
@@ -347,4 +414,29 @@ dimensions:
       - id: hallucination_check
         name_cn: "幻觉检测"
         name_en: "Hallucination check"
+        derive_rule: { type: manual }
+      # 论文 §9.2 - Lifecycle Hooks (PreToolUse / PostToolUse / SessionStart 等)
+      - id: lifecycle_hooks
+        name_cn: "生命周期 hook (Pre/Post tool, Session)"
+        name_en: "Lifecycle hooks"
+        derive_rule: { type: manual }
+      # 论文 §9.4 - Declarative Constitutions (Anthropic Constitution, OpenAI Model Spec)
+      - id: declarative_constitution
+        name_cn: "声明式 Constitution"
+        name_en: "Declarative constitution"
+        derive_rule: { type: manual }
+      # 论文 §9.5 - Audit Infrastructure (immutable trace + identity binding)
+      - id: audit_infrastructure
+        name_cn: "审计基础设施"
+        name_en: "Audit infrastructure"
+        derive_rule: { type: manual }
+      # 论文 §9.6 - Agent Security Landscape (prompt injection / goal hijack / data leakage)
+      - id: agent_security_landscape
+        name_cn: "Agent 安全全景 (注入 / 劫持 / 泄露)"
+        name_en: "Agent security landscape"
+        derive_rule: { type: manual }
+      # 论文 §11.2 - Capability-Control Tradeoff (per-action authority gate)
+      - id: capability_control_gate
+        name_cn: "Capability-Control 授权 gate"
+        name_en: "Capability-control gate"
         derive_rule: { type: manual }

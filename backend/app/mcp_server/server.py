@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 
 _CHAT_TOOL_MODULES = [
     "app.mcp_server.tools.get_stock_quote",
-    "app.mcp_server.tools.get_financials",
+    "app.mcp_server.tools.financial_statements",
+    "app.mcp_server.tools.market_indicators",
+    "app.mcp_server.tools.corporate_actions",
     "app.mcp_server.tools.get_news",
     "app.mcp_server.tools.web_search",
     "app.mcp_server.tools.kb_search",

@@ -21,10 +21,11 @@ def test_snapshot_has_7_layers() -> None:
     }
 
 
-def test_snapshot_total_69() -> None:
+def test_snapshot_total_87() -> None:
+    """v0.9.7 ETCLOVG 总数 — 87 项(原 69 + 论文子层细分 18 项 manual)。"""
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
-    assert snap.total == 69
-    assert snap.total_lit + snap.total_wip + snap.total_todo == 69
+    assert snap.total == 87
+    assert snap.total_lit + snap.total_wip + snap.total_todo == 87
 
 
 def test_snapshot_lit_anchor_within_range() -> None:
@@ -45,7 +46,7 @@ def test_snapshot_to_dict_json_roundtrip() -> None:
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
     d = snap.to_dict()
     s = json.dumps(d)
-    assert json.loads(s)["total"] == 69
+    assert json.loads(s)["total"] == 87
 
 
 def test_snapshot_to_dict_satisfies_typed_dict() -> None:

@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from app.router.chat_finalize import finalize_task_persistence
@@ -45,25 +45,39 @@ logger = logging.getLogger(__name__)
 _GRAPH_SINGLETON: Any | None = None
 _SESSION_FACTORY_SINGLETON: Any | None = None
 _REDIS_SINGLETON: Any | None = None
+_MCP_CLIENT_SINGLETON: Any | None = None
+_MCP_CTX_SINGLETON: Any | None = None  # keep ctx ref alive — GC would tear down subprocess
 
 
-def _build_chat_graph_for_worker() -> Any:
-    """Build (or reuse cached) chat graph for Celery worker context.
+async def _build_chat_graph_for_worker() -> Any:
+    """Build (or reuse cached) chat graph for Celery worker context (async).
 
-    Reuses `app.router.chat._build_graph_singleton` — that function reads env
-    (LLM / Tushare / Bocha mode), wires planner/responder/registry/memory, and
-    returns the compiled LangGraph. Worker can import it; no app.state needed.
+    Worker has no lifespan — we lazy-launch the MCP subprocess on first task
+    in this worker process, cache the client + ctx at module level, then build
+    the graph via `app.router.chat._build_graph_singleton`.
 
-    NOTE: checkpointer is intentionally None on worker side — the web side
-    threads checkpointer into the graph via FastAPI dependency injection at
-    request time. Worker tasks use thread_id to find prior state; no shared
-    in-memory checkpoint required for Plan 2 path.
+    Subprocess lifetime: __aenter__'d but never __aexit__'d here; Celery
+    worker shutdown SIGKILLs the subprocess as part of process exit. This
+    matches app_main.py's web lifespan handling (it also keeps the ctx ref
+    on app.state to prevent GC tear-down).
+
+    checkpointer=None on worker side — web side threads PG checkpointer in
+    via DI; worker tasks use LangGraph thread_id for state lookup, no
+    shared in-memory checkpoint required.
     """
-    global _GRAPH_SINGLETON
+    global _GRAPH_SINGLETON, _MCP_CLIENT_SINGLETON, _MCP_CTX_SINGLETON
     if _GRAPH_SINGLETON is None:
         from app.router.chat import _build_graph_singleton
+        from app.services.mcp_client import MCPClient
 
-        _GRAPH_SINGLETON = _build_graph_singleton(checkpointer=None)
+        if _MCP_CLIENT_SINGLETON is None:
+            _MCP_CTX_SINGLETON = MCPClient.from_subprocess()
+            _MCP_CLIENT_SINGLETON = await _MCP_CTX_SINGLETON.__aenter__()
+
+        _GRAPH_SINGLETON = await _build_graph_singleton(
+            mcp_client=_MCP_CLIENT_SINGLETON,
+            checkpointer=None,
+        )
     return _GRAPH_SINGLETON
 
 
@@ -196,7 +210,7 @@ class _CancelledByUser(Exception):  # noqa: N818
 async def run_chat_async(
     *,
     task_id: uuid.UUID,
-    graph_factory: Callable[[], Any],
+    graph_factory: Callable[[], Awaitable[Any]],
     session_factory: Callable[[], Any],
     redis: Any,
     user_message: str,
@@ -263,7 +277,7 @@ async def run_chat_async(
     cancelled_by_user = False
     final_state: dict[str, Any] | None = None
 
-    graph = graph_factory()
+    graph = await graph_factory()
 
     initial = {
         "user_id": str(user_id),
