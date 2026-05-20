@@ -78,6 +78,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### Persona Editable UI(2026-05-17 ship 完)
 - [persona editable UI ship](docs/claude-context/persona-editable-ui-done.md) — /memory 加画像 tab + 双轨语义 + atomic 操作 + 升级动画 / 21 task ship
 
+### Chat Session Title LLM 异步生成(2026-05-17 ship 完)
+- [chat session title LLM 异步生成 ship](docs/claude-context/chat-session-title-llm-generation-done.md) — 20 字截断 → Celery 异步 LLM 副产品模式 + title_source 三态防覆盖 + sidebar `...` 菜单 + inline rename / 15 task ship,异步副产品模式可复用
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。
