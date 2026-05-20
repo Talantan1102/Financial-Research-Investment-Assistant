@@ -1,51 +1,68 @@
 # dashboard/config/capabilities.yaml
-# 单一真源 — 62 项 capability + derive_rule
-# 5 类 derive_rule:code_grep / file_exists / spec_section / memory_frontmatter / manual
+# 单一真源 — 69 项 capability + derive_rule (ETCLOVG 7 维)
+# 5 类 derive_rule: code_grep / file_exists / spec_section / memory_frontmatter / manual
+# 论文锚点: Li et al., Agent Harness Engineering: A Survey (2026)
 
 dimensions:
 
   # ============================================================
-  # 01 Prompt & Context (8 项,预期 4 lit)
+  # 01 Execution Environment & Sandbox (7 项,预期 6-7 lit) §3
   # ============================================================
-  - id: prompt_context
+  - id: execution
     capabilities:
-      - id: multi_tier_signature
-        name_cn: "多层级签名"
-        name_en: "Multi-tier signature"
-        derive_rule: { type: code_grep, pattern: 'tier:\s*Tier', path_glob: 'backend/app/services/llm_*.py' }
-      - id: constrained_schema
-        name_cn: "输出 Schema 约束"
-        name_en: "Constrained schema"
-        derive_rule: { type: code_grep, pattern: 'response_format', path_glob: 'backend/app/services/openai_client.py' }
-      - id: skills_bundle
-        name_cn: "Skills bundle (17-component)"
-        name_en: "Skills bundle"
-        derive_rule: { type: file_exists, path: 'backend/app/skills/financial_research' }
-      - id: per_task_registry
-        name_cn: "Per-task plan registry"
-        name_en: "Per-task plan registry"
-        derive_rule: { type: code_grep, pattern: 'plan_registry', path_glob: 'backend/app/agents/**' }
-      - id: prompt_versioning
-        name_cn: "Prompt 版本化"
-        name_en: "Prompt Versioning"
+      - id: docker_compose
+        name_cn: "Docker Compose 编排"
+        name_en: "Docker Compose orchestration"
+        derive_rule: { type: file_exists, path: 'docker-compose.yml' }
+      - id: container_isolation
+        name_cn: "容器隔离 (Dockerfile)"
+        name_en: "Container isolation"
+        derive_rule: { type: file_exists, path: 'docker' }
+      - id: ci_workflow
+        name_cn: "CI workflow"
+        name_en: "CI workflow"
+        derive_rule: { type: file_exists, path: '.github/workflows' }
+      - id: venv_isolation
+        name_cn: "uv venv 隔离"
+        name_en: "uv venv isolation"
+        derive_rule: { type: file_exists, path: 'pyproject.toml' }
+      - id: persistence_layer
+        name_cn: "持久化层 (sqlite 集合)"
+        name_en: "Persistence layer"
+        derive_rule: { type: file_exists, path: 'backend/data' }
+      - id: tushare_cache_isolation
+        name_cn: "Tushare 缓存隔离"
+        name_en: "Tushare cache isolation"
+        derive_rule: { type: file_exists, path: 'backend/data/tushare_cache.sqlite' }
+      - id: celery_redis
+        name_cn: "Celery + Redis 异步队列"
+        name_en: "Celery + Redis async queue"
+        derive_rule: { type: file_exists, path: 'backend/app/tasks/celery_app.py' }
+      # 论文 §3.2.2 - Computer-Use Agent Infrastructure (Anthropic Computer Use, OSWorld)
+      - id: computer_use_agent
+        name_cn: "Computer-Use Agent (GUI 操作)"
+        name_en: "Computer-Use Agent (GUI ops)"
         derive_rule: { type: manual }
-      - id: few_shot_library
-        name_cn: "Few-shot 示例库"
-        name_en: "Few-shot library"
+      # 论文 §3.2.5 - Browser Evaluation Environments (WebArena, BrowserGym)
+      - id: browser_eval_env
+        name_cn: "浏览器评测环境"
+        name_en: "Browser eval environment"
         derive_rule: { type: manual }
-      - id: prompt_caching
-        name_cn: "Prompt 缓存"
-        name_en: "Prompt caching"
+      # 论文 §3.2.7 - Sandbox Abstraction Layers (SWE-ReX, K8s Agent Sandbox)
+      - id: sandbox_abstraction
+        name_cn: "沙箱抽象层"
+        name_en: "Sandbox abstraction"
         derive_rule: { type: manual }
-      - id: ctx_compression
-        name_cn: "上下文压缩"
-        name_en: "Context compression"
+      # 论文 §3.3 - Threat Model and Sandbox Escape (SandboxEscapeBench)
+      - id: sandbox_escape_defense
+        name_cn: "沙箱逃逸防御"
+        name_en: "Sandbox escape defense"
         derive_rule: { type: manual }
 
   # ============================================================
-  # 02 Tools & Function Calling (8 项,预期 5 lit)
+  # 02 Tool Interface & Protocol (8 项,预期 5 lit) §4
   # ============================================================
-  - id: tools_function
+  - id: tool
     capabilities:
       - id: tool_registry
         name_cn: "Tool Registry"
@@ -79,11 +96,153 @@ dimensions:
         name_cn: "并行 tool calls"
         name_en: "Parallel tool calls"
         derive_rule: { type: manual }
+      # 论文 §4.3 - Tool-Augmented Training and Integration (Gorilla, ToolLLM, Toolformer)
+      - id: tool_augmented_training
+        name_cn: "Tool-augmented 训练 / 微调"
+        name_en: "Tool-augmented training"
+        derive_rule: { type: manual }
+      # 论文 §4.4 - Scalability and Session Management
+      - id: tool_session_management
+        name_cn: "工具会话扩展管理"
+        name_en: "Tool session management"
+        derive_rule: { type: manual }
 
   # ============================================================
-  # 03 Orchestration / Multi-Agent (9 项,预期 6 lit)
+  # 03 Context & Memory Management (22 项,预期 ~9 lit) §5
+  # group: short_term / mid_term / long_term (子分组仅 yaml 内部,UI 不暴露)
   # ============================================================
-  - id: orchestration
+  - id: context
+    capabilities:
+      # ---- short_term (9 项) ----
+      - id: multi_tier_signature
+        group: short_term
+        name_cn: "多层级签名"
+        name_en: "Multi-tier signature"
+        derive_rule: { type: code_grep, pattern: 'tier:\s*Tier', path_glob: 'backend/app/services/llm_*.py' }
+      - id: constrained_schema
+        group: short_term
+        name_cn: "输出 Schema 约束"
+        name_en: "Constrained schema"
+        derive_rule: { type: code_grep, pattern: 'response_format', path_glob: 'backend/app/services/openai_client.py' }
+      - id: skills_bundle
+        group: short_term
+        name_cn: "Skills bundle (17-component)"
+        name_en: "Skills bundle"
+        derive_rule: { type: file_exists, path: 'backend/app/skills/financial_research' }
+      - id: per_task_registry
+        group: short_term
+        name_cn: "Per-task plan registry"
+        name_en: "Per-task plan registry"
+        derive_rule: { type: code_grep, pattern: 'plan_registry', path_glob: 'backend/app/agents/**' }
+      - id: max_tokens_calibration
+        group: short_term
+        name_cn: "max_tokens per-model 校准"
+        name_en: "max_tokens calibration"
+        derive_rule: { type: code_grep, pattern: 'max_tokens', path_glob: 'backend/app/services/openai_client.py' }
+      - id: prompt_versioning
+        group: short_term
+        name_cn: "Prompt 版本化"
+        name_en: "Prompt Versioning"
+        derive_rule: { type: manual }
+      - id: few_shot_library
+        group: short_term
+        name_cn: "Few-shot 示例库"
+        name_en: "Few-shot library"
+        derive_rule: { type: manual }
+      - id: prompt_caching
+        group: short_term
+        name_cn: "Prompt 缓存"
+        name_en: "Prompt caching"
+        derive_rule: { type: manual }
+      - id: ctx_compression
+        group: short_term
+        name_cn: "上下文压缩"
+        name_en: "Context compression"
+        derive_rule: { type: manual }
+      # ---- long_term — memory (5 项 manual) ----
+      - id: long_term_memory
+        group: long_term
+        name_cn: "长期记忆"
+        name_en: "Long-term memory"
+        derive_rule: { type: manual }
+      - id: semantic_memory
+        group: long_term
+        name_cn: "语义记忆"
+        name_en: "Semantic memory"
+        derive_rule: { type: manual }
+      - id: cross_user_cache
+        group: long_term
+        name_cn: "跨用户缓存"
+        name_en: "Cross-user cache"
+        derive_rule: { type: manual }
+      - id: episodic_memory
+        group: long_term
+        name_cn: "情景记忆"
+        name_en: "Episodic memory"
+        derive_rule: { type: manual }
+      - id: memory_compression
+        group: long_term
+        name_cn: "记忆压缩"
+        name_en: "Memory compression"
+        derive_rule: { type: manual }
+      # ---- long_term — RAG (8 项) ----
+      - id: milvus_3_collection
+        group: long_term
+        name_cn: "Milvus 3 collection schema"
+        name_en: "Milvus 3 collection"
+        derive_rule: { type: code_grep, pattern: 'create_collection', path_glob: 'backend/app/services/milvus_*.py' }
+      - id: embedding_cache
+        group: long_term
+        name_cn: "Embedding + 缓存"
+        name_en: "Embedding + cache"
+        derive_rule: { type: file_exists, path: 'backend/app/services/embedding_service.py' }
+      - id: corpus_ingest
+        group: long_term
+        name_cn: "13 真 corpus ingest"
+        name_en: "13 corpus ingest"
+        derive_rule: { type: manual }
+      - id: bocha_web
+        group: long_term
+        name_cn: "Bocha 网络搜索"
+        name_en: "Bocha web search"
+        derive_rule: { type: file_exists, path: 'backend/app/services/bocha_client.py' }
+      - id: kb_reliability
+        group: long_term
+        name_cn: "KB reliability layer"
+        name_en: "KB reliability"
+        derive_rule: { type: file_exists, path: 'backend/app/services/reliable_kb_service.py' }
+      - id: reranker
+        group: long_term
+        name_cn: "Reranker"
+        name_en: "Reranker"
+        derive_rule: { type: manual }
+      - id: hybrid_search
+        group: long_term
+        name_cn: "稠密 + 稀疏混合检索"
+        name_en: "Hybrid search"
+        derive_rule: { type: manual }
+      - id: query_decomposition
+        group: long_term
+        name_cn: "Query 分解"
+        name_en: "Query decomposition"
+        derive_rule: { type: manual }
+      # 论文 §5.6 - Long-Horizon Techniques: Keeping Agents Coherent Over 100+ Turns
+      - id: long_horizon_coherence
+        group: long_term
+        name_cn: "100+ 轮长程一致性"
+        name_en: "100+ turn coherence"
+        derive_rule: { type: manual }
+      # 论文 §5.7 - Context Drift and the Limits of Current Approaches
+      - id: context_drift_detection
+        group: long_term
+        name_cn: "上下文漂移检测"
+        name_en: "Context drift detection"
+        derive_rule: { type: manual }
+
+  # ============================================================
+  # 04 Lifecycle & Orchestration (10 项,预期 6 lit) §6
+  # ============================================================
+  - id: lifecycle
     capabilities:
       - id: langgraph_skeleton
         name_cn: "LangGraph 骨架"
@@ -105,10 +264,14 @@ dimensions:
         name_cn: "SSE 流式"
         name_en: "SSE streaming"
         derive_rule: { type: code_grep, pattern: 'EventSource|StreamingResponse', path_glob: 'backend/app/router/**' }
-      - id: sqlite_saver
-        name_cn: "SqliteSaver checkpoint"
-        name_en: "SqliteSaver"
+      - id: session_checkpoint
+        name_cn: "Session checkpoint (SqliteSaver)"
+        name_en: "Session checkpoint"
         derive_rule: { type: code_grep, pattern: 'SqliteSaver', path_glob: 'backend/app/orchestration/**' }
+      - id: langgraph_retry
+        name_cn: "LangGraph retry edge"
+        name_en: "LangGraph retry"
+        derive_rule: { type: code_grep, pattern: 'add_edge.*retry|conditional_edges', path_glob: 'backend/app/orchestration/**' }
       - id: plan_and_execute
         name_cn: "Plan-and-Execute pattern"
         name_en: "Plan-and-Execute"
@@ -121,129 +284,80 @@ dimensions:
         name_cn: "Agent handoff"
         name_en: "Agent handoff"
         derive_rule: { type: manual }
+      # 论文 §6.4 - Full Lifecycle Pipeline from Issue to Pull Request (OpenAI Symphony)
+      - id: issue_to_pr_pipeline
+        name_cn: "Issue → PR 全链路"
+        name_en: "Issue → PR full lifecycle"
+        derive_rule: { type: manual }
 
   # ============================================================
-  # 04 Memory (6 项,预期 1 lit) ⚠ 弱项
+  # 05 Observability & Operations (9 项,预期 5 lit) §7
   # ============================================================
-  - id: memory
+  - id: observability
     capabilities:
-      - id: session_checkpoint
-        name_cn: "Session checkpoint"
-        name_en: "Session (SqliteSaver)"
-        derive_rule: { type: code_grep, pattern: 'SqliteSaver', path_glob: 'backend/app/orchestration/**' }
-      - id: long_term_memory
-        name_cn: "长期记忆"
-        name_en: "Long-term memory"
+      - id: trace_service
+        name_cn: "TraceService"
+        name_en: "TraceService"
+        derive_rule: { type: code_grep, pattern: 'TraceService|trace_id', path_glob: 'backend/app/services/eval_*.py' }
+      - id: latency_p95
+        name_cn: "p95 latency 监控"
+        name_en: "p95 latency monitoring"
         derive_rule: { type: manual }
-      - id: semantic_memory
-        name_cn: "语义记忆"
-        name_en: "Semantic memory"
+      - id: harness_board
+        name_cn: "项目 Harness Board (本工具)"
+        name_en: "Harness Board"
+        derive_rule: { type: file_exists, path: 'dashboard/server.py' }
+      - id: tier_router
+        name_cn: "Tier Router (3 层)"
+        name_en: "Tier Router"
+        derive_rule: { type: file_exists, path: 'backend/app/services/tier_router.py' }
+      - id: pricing_table
+        name_cn: "Pricing 静态表"
+        name_en: "Pricing"
+        derive_rule: { type: file_exists, path: 'backend/app/services/pricing.py' }
+      - id: cost_budget
+        name_cn: "Cost budget"
+        name_en: "Cost budget"
+        derive_rule: { type: file_exists, path: 'backend/app/services/cost_budget.py' }
+      - id: model_caching
+        name_cn: "Model response 缓存"
+        name_en: "Model caching"
         derive_rule: { type: manual }
-      - id: cross_user_cache
-        name_cn: "跨用户缓存"
-        name_en: "Cross-user cache"
+      - id: fallback_router
+        name_cn: "Fallback router"
+        name_en: "Fallback router"
         derive_rule: { type: manual }
-      - id: episodic_memory
-        name_cn: "情景记忆"
-        name_en: "Episodic memory"
+      - id: cost_alert
+        name_cn: "Cost 预警"
+        name_en: "Cost alerting"
         derive_rule: { type: manual }
-      - id: memory_compression
-        name_cn: "记忆压缩"
-        name_en: "Memory compression"
+      # 论文 §7.5 - Toward Unified Observability (cross-system trace correlation)
+      - id: unified_observability
+        name_cn: "跨系统统一可观测"
+        name_en: "Unified observability"
         derive_rule: { type: manual }
-
-  # ============================================================
-  # 05 RAG / Knowledge (8 项,预期 5 lit)
-  # ============================================================
-  - id: rag_knowledge
-    capabilities:
-      - id: milvus_3_collection
-        name_cn: "Milvus 3 collection schema"
-        name_en: "Milvus 3 collection"
-        derive_rule: { type: code_grep, pattern: 'create_collection', path_glob: 'backend/app/services/milvus_*.py' }
-      - id: embedding_cache
-        name_cn: "Embedding + 缓存"
-        name_en: "Embedding + cache"
-        derive_rule: { type: file_exists, path: 'backend/app/services/embedding_service.py' }
-      - id: corpus_ingest
-        name_cn: "13 真 corpus ingest"
-        name_en: "13 corpus ingest"
-        derive_rule: { type: manual }
-      - id: bocha_web
-        name_cn: "Bocha 网络搜索"
-        name_en: "Bocha web search"
-        derive_rule: { type: file_exists, path: 'backend/app/services/bocha_client.py' }
-      - id: kb_reliability
-        name_cn: "KB reliability layer"
-        name_en: "KB reliability"
-        derive_rule: { type: file_exists, path: 'backend/app/services/reliable_kb_service.py' }
-      - id: reranker
-        name_cn: "Reranker"
-        name_en: "Reranker"
-        derive_rule: { type: manual }
-      - id: hybrid_search
-        name_cn: "稠密 + 稀疏混合检索"
-        name_en: "Hybrid search"
-        derive_rule: { type: manual }
-      - id: query_decomposition
-        name_cn: "Query 分解"
-        name_en: "Query decomposition"
+      # 论文 §11.5 / §12.3 - Trace-Native Evaluation (traces as primary scoring artifact)
+      - id: trace_native_eval
+        name_cn: "Trace-native evaluation"
+        name_en: "Trace-native eval"
         derive_rule: { type: manual }
 
   # ============================================================
-  # 06 Guardrails & Auto-Repair (7 项,预期 4 lit)
+  # 06 Verification & Evaluation (7 项,预期 5 lit) §8
   # ============================================================
-  - id: guardrails
-    capabilities:
-      - id: constrained_router
-        name_cn: "Constrained LLM Router"
-        name_en: "Constrained Router"
-        derive_rule: { type: code_grep, pattern: 'constrained', path_glob: 'backend/app/agents/research_planner.py' }
-      - id: pydantic_schema
-        name_cn: "Pydantic schema 验证"
-        name_en: "Pydantic schema"
-        derive_rule: { type: code_grep, pattern: 'BaseModel', path_glob: 'backend/app/agents/**' }
-      - id: langgraph_retry
-        name_cn: "LangGraph retry edge"
-        name_en: "LangGraph retry"
-        derive_rule: { type: code_grep, pattern: 'add_edge.*retry|conditional_edges', path_glob: 'backend/app/orchestration/**' }
-      - id: per_step_critic
-        name_cn: "Per-step Critic"
-        name_en: "Per-step Critic"
-        derive_rule: { type: file_exists, path: 'backend/app/agents/critic_subagents' }
-      - id: adversarial_test
-        name_cn: "对抗测试"
-        name_en: "Adversarial testing"
-        derive_rule: { type: manual }
-      - id: pii_redaction
-        name_cn: "PII 脱敏"
-        name_en: "PII redaction"
-        derive_rule: { type: manual }
-      - id: hallucination_check
-        name_cn: "幻觉检测"
-        name_en: "Hallucination check"
-        derive_rule: { type: manual }
-
-  # ============================================================
-  # 07 Eval & Observability (9 项,预期 6 lit)
-  # ============================================================
-  - id: eval_observability
+  - id: verification
     capabilities:
       - id: eval_runner
         name_cn: "EvalRunner"
         name_en: "EvalRunner"
         derive_rule: { type: file_exists, path: 'backend/app/services/eval_runner.py' }
-      - id: trace_service
-        name_cn: "TraceService"
-        name_en: "TraceService"
-        derive_rule: { type: code_grep, pattern: 'TraceService|trace_id', path_glob: 'backend/app/services/eval_*.py' }
       - id: llm_judge
         name_cn: "LLM-as-Judge"
         name_en: "LLM-as-Judge"
         derive_rule: { type: file_exists, path: 'backend/app/services/judge.py' }
       - id: golden_cases
-        name_cn: "12 golden cases"
-        name_en: "12 golden cases"
+        name_cn: "12+ golden cases"
+        name_en: "12+ golden cases"
         derive_rule: { type: code_grep, pattern: 'golden', path_glob: 'backend/tests/**' }
       - id: cassette_l2
         name_cn: "L2 Cassette VCR"
@@ -257,45 +371,72 @@ dimensions:
         name_cn: "A/B testing"
         name_en: "A/B testing"
         derive_rule: { type: manual }
-      - id: latency_p95
-        name_cn: "p95 latency 监控"
-        name_en: "p95 latency monitoring"
+      - id: adversarial_test
+        name_cn: "对抗测试"
+        name_en: "Adversarial testing"
         derive_rule: { type: manual }
-      - id: dashboard
-        name_cn: "项目 Harness Board(本工具)"
-        name_en: "Harness Board"
-        derive_rule: { type: file_exists, path: 'dashboard/server.py' }
+      # 论文 §8.3 - Pre-execution Readiness Validation
+      - id: pre_execution_readiness
+        name_cn: "执行前就绪校验"
+        name_en: "Pre-execution readiness"
+        derive_rule: { type: manual }
+      # 论文 §12.3 - Failure Attribution from Traces (cross-layer diagnosis)
+      - id: failure_attribution
+        name_cn: "失败溯因 / 跨层归因"
+        name_en: "Failure attribution"
+        derive_rule: { type: manual }
 
   # ============================================================
-  # 08 Cost & Routing (7 项,预期 4 lit)
+  # 07 Governance & Security (6 项,预期 3-4 lit) §9
   # ============================================================
-  - id: cost_routing
+  - id: governance
     capabilities:
-      - id: tier_router
-        name_cn: "Tier Router (3 层)"
-        name_en: "Tier Router"
-        derive_rule: { type: file_exists, path: 'backend/app/services/tier_router.py' }
-      - id: pricing_table
-        name_cn: "Pricing 静态表"
-        name_en: "Pricing"
-        derive_rule: { type: file_exists, path: 'backend/app/services/pricing.py' }
-      - id: cost_budget
-        name_cn: "Cost budget"
-        name_en: "Cost budget"
-        derive_rule: { type: file_exists, path: 'backend/app/services/cost_budget.py' }
-      - id: max_tokens_calibration
-        name_cn: "max_tokens per-model 校准"
-        name_en: "max_tokens calibration"
-        derive_rule: { type: code_grep, pattern: 'max_tokens', path_glob: 'backend/app/services/openai_client.py' }
-      - id: model_caching
-        name_cn: "Model response 缓存"
-        name_en: "Model caching"
+      - id: constrained_router
+        name_cn: "Constrained LLM Router"
+        name_en: "Constrained Router"
+        derive_rule: { type: code_grep, pattern: 'constrained', path_glob: 'backend/app/agents/research_planner.py' }
+      - id: pydantic_schema
+        name_cn: "Pydantic schema 验证"
+        name_en: "Pydantic schema"
+        derive_rule: { type: code_grep, pattern: 'BaseModel', path_glob: 'backend/app/agents/**' }
+      - id: per_step_critic
+        name_cn: "Per-step Critic"
+        name_en: "Per-step Critic"
+        derive_rule: { type: file_exists, path: 'backend/app/agents/critic_subagents' }
+      - id: auth
+        name_cn: "Auth 鉴权"
+        name_en: "Auth"
+        derive_rule: { type: file_exists, path: 'backend/app/router/auth_router.py' }
+      - id: pii_redaction
+        name_cn: "PII 脱敏"
+        name_en: "PII redaction"
         derive_rule: { type: manual }
-      - id: fallback_router
-        name_cn: "Fallback router"
-        name_en: "Fallback router"
+      - id: hallucination_check
+        name_cn: "幻觉检测"
+        name_en: "Hallucination check"
         derive_rule: { type: manual }
-      - id: cost_alert
-        name_cn: "Cost 预警"
-        name_en: "Cost alerting"
+      # 论文 §9.2 - Lifecycle Hooks (PreToolUse / PostToolUse / SessionStart 等)
+      - id: lifecycle_hooks
+        name_cn: "生命周期 hook (Pre/Post tool, Session)"
+        name_en: "Lifecycle hooks"
+        derive_rule: { type: manual }
+      # 论文 §9.4 - Declarative Constitutions (Anthropic Constitution, OpenAI Model Spec)
+      - id: declarative_constitution
+        name_cn: "声明式 Constitution"
+        name_en: "Declarative constitution"
+        derive_rule: { type: manual }
+      # 论文 §9.5 - Audit Infrastructure (immutable trace + identity binding)
+      - id: audit_infrastructure
+        name_cn: "审计基础设施"
+        name_en: "Audit infrastructure"
+        derive_rule: { type: manual }
+      # 论文 §9.6 - Agent Security Landscape (prompt injection / goal hijack / data leakage)
+      - id: agent_security_landscape
+        name_cn: "Agent 安全全景 (注入 / 劫持 / 泄露)"
+        name_en: "Agent security landscape"
+        derive_rule: { type: manual }
+      # 论文 §11.2 - Capability-Control Tradeoff (per-action authority gate)
+      - id: capability_control_gate
+        name_cn: "Capability-Control 授权 gate"
+        name_en: "Capability-control gate"
         derive_rule: { type: manual }

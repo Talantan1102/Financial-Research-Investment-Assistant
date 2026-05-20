@@ -7,36 +7,36 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
 
 
-def test_snapshot_has_8_layers() -> None:
+def test_snapshot_has_7_layers() -> None:
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
-    assert len(snap.layers) == 8
+    assert len(snap.layers) == 7
     assert {L.id for L in snap.layers} == {
-        "prompt_context",
-        "tools_function",
-        "orchestration",
-        "memory",
-        "rag_knowledge",
-        "guardrails",
-        "eval_observability",
-        "cost_routing",
+        "execution",
+        "tool",
+        "context",
+        "lifecycle",
+        "observability",
+        "verification",
+        "governance",
     }
 
 
-def test_snapshot_total_62() -> None:
+def test_snapshot_total_87() -> None:
+    """v0.9.7 ETCLOVG 总数 — 87 项(原 69 + 论文子层细分 18 项 manual)。"""
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
-    assert snap.total == 62
-    assert snap.total_lit + snap.total_wip + snap.total_todo == 62
+    assert snap.total == 87
+    assert snap.total_lit + snap.total_wip + snap.total_todo == 87
 
 
 def test_snapshot_lit_anchor_within_range() -> None:
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
-    assert 30 <= snap.total_lit <= 40, f"Lit {snap.total_lit} out of expected 35±5"
+    assert 36 <= snap.total_lit <= 48, f"Lit {snap.total_lit} out of expected 42±6"
 
 
 def test_snapshot_overrides_applied() -> None:
-    snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR, overrides={"memory.long_term_memory": "wip"})
-    mem = next(L for L in snap.layers if L.id == "memory")
-    target = next(c for c in mem.capabilities if c.id == "memory.long_term_memory")
+    snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR, overrides={"context.long_term_memory": "wip"})
+    ctx = next(L for L in snap.layers if L.id == "context")
+    target = next(c for c in ctx.capabilities if c.id == "context.long_term_memory")
     assert target.status == "wip"
 
 
@@ -46,7 +46,7 @@ def test_snapshot_to_dict_json_roundtrip() -> None:
     snap = build_snapshot(PROJECT_ROOT, CONFIG_DIR)
     d = snap.to_dict()
     s = json.dumps(d)
-    assert json.loads(s)["total"] == 62
+    assert json.loads(s)["total"] == 87
 
 
 def test_snapshot_to_dict_satisfies_typed_dict() -> None:

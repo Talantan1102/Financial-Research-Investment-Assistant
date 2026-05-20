@@ -101,13 +101,13 @@ type: user
 
 def test_layer_keyword_classification(main_dims: list[DimensionConfig]) -> None:
     """关键字归类:文本含 dim keywords → 命中该 dim,无命中 → META。"""
-    # dimensions.yaml.06 keywords = ["Schema", "Pydantic", "retry"]
-    text_06 = "Pydantic schema 验证 + retry edge"
-    assert classify_layer(text_06, main_dims) == "guardrails"
+    # ETCLOVG 07 governance keywords = ["Schema", "Pydantic", "auth", "guardrail"]
+    text_g = "Pydantic schema 验证 + auth"
+    assert classify_layer(text_g, main_dims) == "governance"
 
-    # dimensions.yaml.08 keywords = ["TierRouter", "pricing"]
-    text_08 = "TierRouter 3 层选 model"
-    assert classify_layer(text_08, main_dims) == "cost_routing"
+    # ETCLOVG 05 observability keywords = ["TraceService", "TierRouter", "pricing", "monitoring"]
+    text_o = "TierRouter 3 层选 model"
+    assert classify_layer(text_o, main_dims) == "observability"
 
     # 无 keyword → META
     text_no = "随便写点没 keyword 的"

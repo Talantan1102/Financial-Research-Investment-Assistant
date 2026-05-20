@@ -1,124 +1,139 @@
 # dashboard/config/dimensions.yaml
-# 8 维 LLM Harness + App Shell catch-all 路径路由
+# ETCLOVG 7 维主泳道 + catch_all 5 项(path_router fallback / D-view 代码地图)
 # 冲突解决:更具体的优先 (specificity = path_glob 去通配符后字符数)
+# 论文锚点: Li et al., Agent Harness Engineering: A Survey (2026), §2.3
 
 dimensions:
-  - id: prompt_context
+  - id: execution
     number: "01"
-    name_cn: "提示与上下文"
-    name_en: "Prompt & Context"
+    name_cn: "执行环境与沙箱"
+    name_en: "Execution Environment & Sandbox"
+    paths:
+      - "docker/**"
+      - "docker-compose.yml"
+      - ".github/**"
+      - "scripts/**"
+      - "backend/data/**"
+      - "backend/app/tasks/**"
+    keywords: ["sandbox", "docker", "celery"]
+
+  - id: tool
+    number: "02"
+    name_cn: "工具接口与协议"
+    name_en: "Tool Interface & Protocol"
+    paths:
+      - "backend/app/tools/**"
+      - "backend/app/mcp_server/**"
+      - "backend/app/services/tool_registry*.py"
+      - "backend/app/services/tushare_client*.py"
+      - "backend/app/services/bocha_client*.py"
+      - "backend/app/services/milvus_client*.py"
+      - "backend/app/services/pdf_parsers/**"
+    keywords: ["Protocol", "tool", "MCP"]
+
+  - id: context
+    number: "03"
+    name_cn: "上下文与记忆"
+    name_en: "Context & Memory Management"
     paths:
       - "backend/app/services/llm_*.py"
       - "backend/app/services/skills/**"
-    keywords: ["tier", "schema", "Skills"]
-
-  - id: tools_function
-    number: "02"
-    name_cn: "工具与函数调用"
-    name_en: "Tools & Function Calling"
-    paths:
-      - "backend/app/tools/**"
-      - "backend/app/services/tool_registry*.py"
-    keywords: ["Protocol", "tool"]
-
-  - id: orchestration
-    number: "03"
-    name_cn: "编排与多智能体"
-    name_en: "Orchestration / Multi-Agent"
-    paths:
-      - "backend/app/agents/**"
-      - "backend/app/orchestration/**"
-    keywords: ["LangGraph", "agent", "subgraph"]
-
-  - id: memory
-    number: "04"
-    name_cn: "记忆层"
-    name_en: "Memory"
-    paths:
-      - "backend/app/services/memory_*.py"
-      - "backend/app/services/checkpointer*.py"
-    keywords: ["Memory", "Saver", "checkpoint"]
-
-  - id: rag_knowledge
-    number: "05"
-    name_cn: "检索增强"
-    name_en: "RAG / Knowledge"
-    paths:
+      - "backend/app/skills/**"
       - "backend/app/services/milvus_*.py"
       - "backend/app/services/bocha_*.py"
       - "backend/app/services/kb_*.py"
       - "backend/app/services/corpus_*.py"
       - "backend/app/services/embedding_*.py"
-    keywords: ["embedding", "retrieve"]
+      - "backend/app/services/memory_*.py"
+      - "backend/app/kb/**"
+      - "backend/app/memory/**"
+      - "backend/claude_skills/**"
+    keywords: ["tier", "schema", "Skills", "embedding", "retrieve", "Memory"]
 
-  - id: guardrails
-    number: "06"
-    name_cn: "护栏与自修复"
-    name_en: "Guardrails & Auto-Repair"
+  - id: lifecycle
+    number: "04"
+    name_cn: "生命周期与编排"
+    name_en: "Lifecycle & Orchestration"
     paths:
-      - "backend/app/services/constrained_router*.py"
-      - "backend/app/services/critic*.py"
-      - "backend/app/services/validator*.py"
-    keywords: ["Schema", "Pydantic", "retry"]
+      - "backend/app/agents/**"
+      - "backend/app/orchestration/**"
+      - "backend/app/services/checkpointer*.py"
+      - "backend/app/service/deep_research_v2/**"
+    keywords: ["LangGraph", "agent", "subgraph", "checkpoint", "Saver"]
 
-  - id: eval_observability
-    number: "07"
-    name_cn: "评测与可观测"
-    name_en: "Eval & Observability"
+  - id: observability
+    number: "05"
+    name_cn: "可观测与运营"
+    name_en: "Observability & Operations"
     paths:
-      - "backend/app/services/eval_*.py"
       - "backend/app/services/trace*.py"
-      - "backend/app/services/judge*.py"
-      - "backend/app/services/recorder*.py"
       - "backend/app/services/monitoring/**"
-      - "backend/tests/**"
-    keywords: ["EvalRunner", "TraceService", "Judge", "golden"]
-
-  - id: cost_routing
-    number: "08"
-    name_cn: "成本与路由"
-    name_en: "Cost & Routing"
-    paths:
       - "backend/app/services/tier_router*.py"
       - "backend/app/services/pricing*.py"
       - "backend/app/services/cost_budget*.py"
       - "backend/app/services/quota*.py"
       - "backend/app/services/rate_limiter*.py"
-    keywords: ["TierRouter", "pricing"]
+      - "dashboard/**"
+    keywords: ["TraceService", "TierRouter", "pricing", "monitoring"]
 
-app_shell:
-  - id: frontend
-    name_cn: "前端"
+  - id: verification
+    number: "06"
+    name_cn: "验证与评测"
+    name_en: "Verification & Evaluation"
     paths:
-      - "frontend/src/**"
-  - id: backend
-    name_cn: "后端"
+      - "backend/app/services/eval_*.py"
+      - "backend/app/services/judge*.py"
+      - "backend/app/services/recorder*.py"
+      - "backend/tests/**"
+    keywords: ["EvalRunner", "Judge", "golden", "cassette"]
+
+  - id: governance
+    number: "07"
+    name_cn: "治理与安全"
+    name_en: "Governance & Security"
     paths:
-      - "backend/app/router/**"
-      - "backend/app/app_main.py"
-      - "backend/app/core/**"
-  - id: auth
-    name_cn: "鉴权"
-    paths:
+      - "backend/app/services/constrained_router*.py"
+      - "backend/app/services/critic*.py"
+      - "backend/app/services/validator*.py"
       - "backend/app/router/auth*.py"
       - "frontend/src/pages/auth/**"
       - "frontend/src/components/auth-guard/**"
       - "frontend/src/api/auth*"
       - "frontend/src/store/auth*"
-  - id: database
-    name_cn: "数据库"
+    keywords: ["Schema", "Pydantic", "auth", "guardrail"]
+
+catch_all:
+  - id: shell.frontend
+    name_cn: "前端外壳"
+    paths:
+      - "frontend/src/**"
+  - id: shell.backend_router
+    name_cn: "后端路由外壳"
+    paths:
+      - "backend/app/router/**"
+      - "backend/app/app_main.py"
+      - "backend/app/core/**"
+      - "backend/app/config/**"
+      - "backend/app/models/**"
+      - "backend/app/schemas/**"
+      - "backend/app/middleware/**"
+      - "backend/app/db/**"
+      - "backend/app/__init__.py"
+  - id: shell.database
+    name_cn: "数据库外壳"
     paths:
       - "backend/app/core/database.py"
       - "backend/app/router/database_router.py"
       - "backend/app/service/database_explorer.py"
       - "backend/data/*.sqlite"
       - "backend/data/*.db"
-  - id: connectors
-    name_cn: "外部数据连接器"
+  - id: shell.connectors
+    name_cn: "外部数据连接器外壳"
     paths:
-      - "backend/app/services/tushare_client*.py"
-      - "backend/app/services/bocha_client*.py"
-      - "backend/app/services/milvus_client*.py"
-  - id: infra
-    name_cn: "部署 / CI"
-    paths: ["docker*/**", ".github/**", "scripts/**", "pyproject.toml"]
+      - "backend/app/service/*_connector*.py"
+  - id: shell.infra
+    name_cn: "部署 / CI 外壳"
+    paths:
+      - "pyproject.toml"
+      - "uv.lock"
+      - "Makefile"

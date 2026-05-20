@@ -3,15 +3,18 @@
     <div class="hero-grid">
       <div>
         <div class="hero-meta reveal d1">
-          <span class="pill">v0.9.6 · workshop</span>
+          <span class="pill">Li et al. · ETCLOVG · 2026</span>
           <span>{{ today }} · {{ snap.total }} capabilities</span>
         </div>
         <h1 class="hero-title reveal d2">
-          所有<em>力气</em><br>
-          都留在<em class="cool">架子</em>上。
+          <em>Harness</em>,<br>
+          不是<em class="cool">模型</em>。
         </h1>
         <p class="hero-sub reveal d3">
-          Harness Board 是这个金融 agent 项目的 <span class="accent">项目复盘 + 知识沉淀工具</span>。8 维 × {{ snap.total }} capability <span class="accent-cool">网格</span>记录"我做到哪一步",DeepCard 写下 why / tradeoff / lesson,闪卡把它们 SRS 复习成肌肉记忆。
+          决定一个 agent 在生产里能不能跑稳的,是<span class="accent">包裹模型的那一层基础设施</span> —— 不是模型本身。 <em>Prompt</em>(2022) → <em class="cool">Context</em>(2025) → <em>Harness</em>(2026),工程重心正在迁移。
+        </p>
+        <p class="hero-sub reveal d3" style="margin-top: 12px;">
+          ETCLOVG 七层(执行/工具/上下文/生命周期/可观测/验证/治理)把这层外壳切成可施工的格子。这个金融 agent 项目把自己 {{ snap.total }} 项 capability 落格其上,看自己做到了哪一格 —— <span class="accent-cool">何处坚实、何处仅剩占位</span>。
         </p>
         <div class="hero-wips reveal d4">
           {% if wips %}
@@ -26,62 +29,61 @@
         </div>
       </div>
 
-      <!-- Fingerprint — 8-dim geometric signature -->
+      <!-- Fingerprint — ETCLOVG 7-spoke geometric signature (V3 iOS minimal) -->
       <div class="reveal d3">
         <div class="fingerprint">
           <svg viewBox="-160 -160 320 320" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <radialGradient id="fpglow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stop-color="#c89456" stop-opacity="0.18"/>
-                <stop offset="60%" stop-color="#c89456" stop-opacity="0.04"/>
-                <stop offset="100%" stop-color="#c89456" stop-opacity="0"/>
+                <stop offset="0%" stop-color="#5E5CE6" stop-opacity="0.10"/>
+                <stop offset="60%" stop-color="#5E5CE6" stop-opacity="0.02"/>
+                <stop offset="100%" stop-color="#5E5CE6" stop-opacity="0"/>
               </radialGradient>
             </defs>
             <!-- Background glow -->
             <circle cx="0" cy="0" r="140" fill="url(#fpglow)"/>
-            <!-- Concentric rings -->
-            <circle cx="0" cy="0" r="140" fill="none" stroke="#2a2018" stroke-width="1"/>
-            <circle cx="0" cy="0" r="100" fill="none" stroke="#2a2018" stroke-width="1" stroke-dasharray="2 4"/>
-            <circle cx="0" cy="0" r="60" fill="none" stroke="#2a2018" stroke-width="1"/>
+            <!-- Concentric rings (iOS hairline) -->
+            <circle cx="0" cy="0" r="140" fill="none" stroke="rgba(60,60,67,0.12)" stroke-width="0.8"/>
+            <circle cx="0" cy="0" r="100" fill="none" stroke="rgba(60,60,67,0.08)" stroke-width="0.8"/>
+            <circle cx="0" cy="0" r="60" fill="none" stroke="rgba(60,60,67,0.12)" stroke-width="0.8"/>
 
-            <!-- 8-dim spokes — Jinja derived from snap.layers -->
+            <!-- 7 ETCLOVG spokes (51.4° apart) — Jinja derived from snap.layers -->
             {% for layer in snap.layers %}
-              {% set angle = loop.index0 * 45 %}
+              {% set angle = loop.index0 * (360 / 7) %}
               {% set lit_n = [layer.lit, 5] | min %}
               {% set wip_n = [layer.wip, 5 - lit_n] | min %}
               {% set todo_n = 5 - lit_n - wip_n %}
-              {% set is_memory = (layer.id == 'memory') %}
+              {% set is_context = (layer.id == 'context') %}
               <g transform="rotate({{ angle }})">
-                <line x1="0" y1="-60" x2="0" y2="-140" stroke="#2a2018"/>
-                {# Dot positions: 5 slots at cy -80, -95, -110, -125, -140 #}
-                {# lit dots (green, r=5) #}
+                <line x1="0" y1="-60" x2="0" y2="-140" stroke="rgba(60,60,67,0.18)" stroke-width="0.7"/>
+                {# lit dots (iOS green r=4.5) #}
                 {% for i in range(lit_n) %}
-                  <circle cx="0" cy="{{ -80 - i * 15 }}" r="5" fill="#94b87a"/>
+                  <circle cx="0" cy="{{ -80 - i * 15 }}" r="4.5" fill="#34C759" opacity="0.85"/>
                 {% endfor %}
-                {# wip dots (orange, r=5) #}
+                {# wip dots (iOS orange r=4.5) #}
                 {% for i in range(wip_n) %}
-                  <circle cx="0" cy="{{ -80 - (lit_n + i) * 15 }}" r="5" fill="#d4824a"/>
+                  <circle cx="0" cy="{{ -80 - (lit_n + i) * 15 }}" r="4.5" fill="#FF9F0A" opacity="0.85"/>
                 {% endfor %}
-                {# todo dots (gray, r=3) #}
+                {# todo dots (light gray r=2.5) #}
                 {% for i in range(todo_n) %}
-                  <circle cx="0" cy="{{ -80 - (lit_n + wip_n + i) * 15 }}" r="3" fill="#6b5d49"/>
+                  <circle cx="0" cy="{{ -80 - (lit_n + wip_n + i) * 15 }}" r="2.5" fill="#C7C7CC"/>
                 {% endfor %}
-                {# Dimension number label — counter-rotated so text stays upright #}
+                {# Dimension number — context 维高光 indigo #}
                 <text
                   x="0" y="-150"
                   text-anchor="middle"
-                  font-family="'Geist Mono', 'JetBrains Mono', monospace"
+                  font-family="-apple-system, 'SF Mono', monospace"
                   font-size="9"
-                  fill="{{ '#c89456' if is_memory else '#7d6e58' }}"
+                  fill="{{ '#5E5CE6' if is_context else '#86868B' }}"
+                  font-weight="{{ '600' if is_context else '500' }}"
                   transform="rotate({{ -angle }} 0 -150)"
-                  letter-spacing="0.15em">{{ layer.number }}</text>
+                  letter-spacing="0.12em">{{ layer.number }}</text>
               </g>
             {% endfor %}
 
-            <!-- Center — dual ring (teal outer + amber inner) + italic H -->
-            <circle cx="0" cy="0" r="28" fill="none" stroke="#6f9494" stroke-width="0.8" opacity="0.7"/>
-            <circle cx="0" cy="0" r="22" fill="#1a1410" stroke="#c89456" stroke-width="1"/>
-            <text x="0" y="5" text-anchor="middle" font-family="Newsreader" font-weight="500" font-size="16" fill="#c89456" font-style="italic">H</text>
+            <!-- Center — single indigo ring + system H -->
+            <circle cx="0" cy="0" r="26" fill="#FFFFFF" stroke="#5E5CE6" stroke-width="1" opacity="0.95"/>
+            <text x="0" y="5" text-anchor="middle" font-family="-apple-system" font-weight="600" font-size="15" fill="#5E5CE6">H</text>
           </svg>
         </div>
         <div class="fingerprint-caption">

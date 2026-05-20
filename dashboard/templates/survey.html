@@ -1,23 +1,22 @@
-{# § 06 Survey · 外部 agent 项目 harness trick 调研。8 维度分组,trick 卡片. #}
+{# § 06 Survey · 外部 agent 项目 harness trick 调研。ETCLOVG 7 维度分组,trick 卡片. #}
 {% extends "base.html" %}
 {% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
 
 {% set DIM_SHORT = {
-  'prompt_context':     'prompt',
-  'tools_function':     'tools',
-  'orchestration':      'orch',
-  'memory':             'memory',
-  'rag_knowledge':      'rag',
-  'guardrails':         'guard',
-  'eval_observability': 'eval',
-  'cost_routing':       'cost'
+  'execution':     'exec',
+  'tool':          'tool',
+  'context':       'ctx',
+  'lifecycle':     'lc',
+  'observability': 'obs',
+  'verification':  'verif',
+  'governance':    'gov'
 } %}
 
 <div class="section-marker">
   <span class="sm-num">§ 06</span>
   <span class="sm-title">Survey · 外部 agent 项目 harness trick</span>
-  <span class="sm-desc">5 个开源项目 · 按 8 维度分组 · 每条带源锚点</span>
+  <span class="sm-desc">5 个开源项目 · 按 ETCLOVG 7 维度分组 · 每条带源锚点</span>
 </div>
 
 <div class="survey-summary">

@@ -46,26 +46,27 @@
 
 <script>
 (function () {
+  // ETCLOVG 7 维 — iOS Calm Minimal hues (context indigo 主色)
   const DIM_COLORS = {
-    prompt_context:    '#c89456',
-    tools_function:    '#6f9494',
-    orchestration:     '#94b87a',
-    memory:            '#d4824a',
-    rag_knowledge:     '#8db1b1',
-    guardrails:        '#a64545',
-    eval_observability:'#b9ad94',
-    cost_routing:      '#e5b079',
-    unknown:           '#7d6e58',
+    execution:    '#34C759',
+    tool:         '#007AFF',
+    context:      '#5E5CE6',
+    lifecycle:    '#FF9500',
+    observability:'#00C7BE',
+    verification: '#AF52DE',
+    governance:   '#FF2D55',
+    shell:        '#86868B',
+    unknown:      '#C7C7CC',
   };
   const DIM_ORDER = [
-    'prompt_context','tools_function','orchestration','memory',
-    'rag_knowledge','guardrails','eval_observability','cost_routing',
+    'execution','tool','context','lifecycle',
+    'observability','verification','governance',
   ];
 
   function gradeColor(grade) {
-    // grade 0→wip 颜色,5→lit;中间线性
-    const wip = [212, 130, 74];  // d4824a
-    const lit = [148, 184, 122]; // 94b87a
+    // grade 0→wip 颜色,5→lit;中间线性 (iOS orange → green)
+    const wip = [255, 159, 10];  // #FF9F0A
+    const lit = [52, 199, 89];   // #34C759
     const t = Math.max(0, Math.min(5, grade)) / 5;
     const c = wip.map((v, i) => Math.round(v + (lit[i] - v) * t));
     return 'rgb(' + c.join(',') + ')';
