@@ -5,46 +5,28 @@ Frontend (Task 5 frontend/src/api/auth.ts) is the ground truth:
 - Response shape: {access_token: str, token_type: str, user: UserInfo}
 
 Test strategy: mount auth_router on a minimal FastAPI app + override get_db
-with a tmp-path SQLite session. SQLAlchemy emulates postgresql.UUID on SQLite
-since UUID inherits from generic sqltypes.Uuid (verified at session start).
+with the shared db_session fixture (PG transaction rollback isolation).
 """
 
 from __future__ import annotations
 
-from collections.abc import Generator, Iterator
-from pathlib import Path
+from collections.abc import Iterator
 
 import pytest
-from app.core.database import Base, get_db
+from app.core.database import get_db
 from app.models.user import User  # noqa: F401  — register table on Base.metadata
 from app.router.auth_router import router as auth_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
-def db_engine(tmp_path: Path) -> Generator[Engine, None, None]:
-    """Per-test SQLite file. Each test gets isolated state."""
-    db_path = tmp_path / "test_auth.sqlite"
-    engine = create_engine(f"sqlite:///{db_path}")
-    Base.metadata.create_all(engine, tables=[User.__table__])
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture
-def client(db_engine: Engine) -> TestClient:
-    """Minimal FastAPI app with only auth_router + get_db override → SQLite."""
-    TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+def client(db_session: Session) -> TestClient:
+    """Minimal FastAPI app with only auth_router + get_db override → db_session."""
 
     def _override_get_db() -> Iterator[Session]:
-        db = TestingSession()
-        try:
-            yield db
-        finally:
-            db.close()
+        yield db_session
 
     test_app = FastAPI()
     test_app.include_router(auth_router)
@@ -75,7 +57,7 @@ def test_register_creates_user_and_returns_token(client: TestClient) -> None:
 
 
 def test_register_password_is_bcrypt_hashed_not_plaintext(
-    client: TestClient, db_engine: Engine
+    client: TestClient, db_session: Session
 ) -> None:
     """Verify password is stored as bcrypt hash, never plaintext."""
     res = client.post(
@@ -84,14 +66,13 @@ def test_register_password_is_bcrypt_hashed_not_plaintext(
     )
     assert res.status_code in (200, 201), res.text
 
-    TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
-    with TestingSession() as session:
-        user = session.query(User).filter(User.username == "hashcheck_t7").first()
-        assert user is not None
-        # bcrypt hashes start with $2b$ / $2a$ and are ~60 chars; never plaintext
-        assert user.hashed_password != "secret123"
-        assert user.hashed_password.startswith("$2")
-        assert len(user.hashed_password) >= 50
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.username == "hashcheck_t7").first()
+    assert user is not None
+    # bcrypt hashes start with $2b$ / $2a$ and are ~60 chars; never plaintext
+    assert user.hashed_password != "secret123"
+    assert user.hashed_password.startswith("$2")
+    assert len(user.hashed_password) >= 50
 
 
 # ---------------------------------------------------------------------------

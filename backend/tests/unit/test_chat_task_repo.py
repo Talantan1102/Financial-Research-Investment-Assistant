@@ -3,11 +3,9 @@
 # (task.id 实际是 UUID runtime,mypy 视为 Column[UUID])— 测试代码 silence。
 """ChatTaskRepo 单元测试 — 6 状态机 + Repo 方法集。
 
-测试策略:in-memory sqlite + 选择性 create_all(只建 users / chat_sessions /
-chat_tasks 三张表;chat_messages / long_term_memories 含 JSONB / ARRAY 这些
-PG-only 类型,sqlite 编译会炸 — Repo 不依赖这两张表,所以跳过)。
-sqlite 默认不强制 FK,因此 chat_tasks.initial_prompt_message_id 指向未建的
-chat_messages 表也没问题。
+测试策略:真 PG(industry_assistant_test) + async_session_factory fixture。
+pg_test_engine(session-scoped) 已在 session 开始时 create_all,
+每个 test 用唯一 UUID 保证行级隔离,无 cross-test 污染。
 
 覆盖 9 个 method + 状态机的核心转换路径。
 """
@@ -15,47 +13,22 @@ chat_messages 表也没问题。
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
 from datetime import datetime
 
 import pytest_asyncio
-from app.core.database import Base
 from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — 注册 users 表
 from app.services.chat_task_repo import ChatTaskRepo
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
-
-# Repo 真实使用的表(不含 PG-only JSONB/ARRAY 字段);保证 sqlite 编译通过
-_REQUIRED_TABLE_NAMES = ("users", "chat_sessions", "chat_tasks")
-
-
-def _selective_create_all(sync_conn: object) -> None:
-    tables = [Base.metadata.tables[name] for name in _REQUIRED_TABLE_NAMES]
-    Base.metadata.create_all(sync_conn, tables=tables)
-
-
-@pytest_asyncio.fixture
-async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    engine: AsyncEngine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
-    async with engine.begin() as conn:
-        await conn.run_sync(_selective_create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    yield factory
-    await engine.dispose()
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 @pytest_asyncio.fixture
 async def seeded_session(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
 ) -> uuid.UUID:
     """种一个 ChatSession 让 ChatTask 的 session_id FK 有对应行。"""
     sid = uuid.uuid4()
-    async with session_factory() as sess:
+    async with async_session_factory() as sess:
         sess.add(ChatSession(id=sid, user_id=None, title="t"))
         await sess.commit()
     return sid
@@ -67,21 +40,20 @@ async def seeded_session(
 
 
 async def test_create_queued_inserts_row(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
-    repo = ChatTaskRepo(session_factory)
-    user_id = uuid.uuid4()
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=user_id,
-        langgraph_thread_id=f"{user_id}:{seeded_session}",
+        user_id=None,  # nullable FK; PG enforces FK so we skip random UUID
+        langgraph_thread_id=f"t:{seeded_session}",
         initial_prompt_message_id=None,
     )
     assert task.status == "queued"
     assert task.session_id == seeded_session
-    assert task.user_id == user_id
-    assert task.langgraph_thread_id == f"{user_id}:{seeded_session}"
+    assert task.user_id is None
+    assert task.langgraph_thread_id == f"t:{seeded_session}"
     assert task.last_event_seq == 0
     assert task.started_at is None
 
@@ -92,13 +64,13 @@ async def test_create_queued_inserts_row(
 
 
 async def test_mark_running_sets_started_at(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t1",
         initial_prompt_message_id=None,
     )
@@ -117,13 +89,13 @@ async def test_mark_running_sets_started_at(
 
 
 async def test_mark_done_sets_finished_at_and_checkpoint(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -142,13 +114,13 @@ async def test_mark_done_sets_finished_at_and_checkpoint(
 
 
 async def test_mark_partial_keeps_checkpoint(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -166,13 +138,13 @@ async def test_mark_partial_keeps_checkpoint(
 
 
 async def test_mark_cancelled_no_checkpoint_needed(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -190,13 +162,13 @@ async def test_mark_cancelled_no_checkpoint_needed(
 
 
 async def test_mark_error_sets_error_message(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -214,9 +186,9 @@ async def test_mark_error_sets_error_message(
 
 
 async def test_get_by_id_returns_none_for_unknown(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     fetched = await repo.get_by_id(uuid.uuid4())
     assert fetched is None
 
@@ -227,14 +199,13 @@ async def test_get_by_id_returns_none_for_unknown(
 
 
 async def test_find_active_for_session_returns_queued_or_running(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
-    repo = ChatTaskRepo(session_factory)
-    user_id = uuid.uuid4()
+    repo = ChatTaskRepo(async_session_factory)
     t1 = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=user_id,
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -255,14 +226,14 @@ async def test_find_active_for_session_returns_queued_or_running(
 
 
 async def test_bump_seq_increments_last_event_seq(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     """Plan 2 用,Plan 1 先实现 + 测,避免 Plan 2 时翻 schema。"""
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -283,14 +254,14 @@ async def test_bump_seq_increments_last_event_seq(
 
 
 async def test_find_stale_running_tasks_returns_old_running(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     """status=running 且 started_at 早于 cutoff → 视为 stale。"""
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -303,7 +274,7 @@ async def test_find_stale_running_tasks_returns_old_running(
     from sqlalchemy import update
 
     old_time = datetime.utcnow() - timedelta(minutes=10)
-    async with session_factory() as sess:
+    async with async_session_factory() as sess:
         await sess.execute(
             update(ChatTask).where(ChatTask.id == task.id).values(started_at=old_time)
         )
@@ -316,14 +287,14 @@ async def test_find_stale_running_tasks_returns_old_running(
 
 
 async def test_find_stale_running_tasks_excludes_recent_running(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     """刚 mark_running 的 task(started_at < 5min ago)→ 不算 stale。"""
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -334,14 +305,14 @@ async def test_find_stale_running_tasks_excludes_recent_running(
 
 
 async def test_find_stale_running_tasks_excludes_done(
-    session_factory: async_sessionmaker[AsyncSession],
+    async_session_factory: async_sessionmaker[AsyncSession],
     seeded_session: uuid.UUID,
 ) -> None:
     """已完成 task 不算 stale。"""
-    repo = ChatTaskRepo(session_factory)
+    repo = ChatTaskRepo(async_session_factory)
     task = await repo.create_queued(
         session_id=str(seeded_session),
-        user_id=uuid.uuid4(),
+        user_id=None,  # nullable FK; PG enforces FK so we use None
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )

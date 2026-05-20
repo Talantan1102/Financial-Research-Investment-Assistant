@@ -4,7 +4,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     CheckConstraint,
     Column,
@@ -91,8 +90,8 @@ class ChatMessage(Base):
     role = Column(String(20), nullable=False)  # user, assistant, system
     content = Column(Text, nullable=False)
     thinking = Column(Text)  # 思考过程
-    references_data = Column(JSONB().with_variant(JSON, "sqlite"))  # 引用的文档
-    image_results = Column(JSONB().with_variant(JSON, "sqlite"))  # 图片搜索结果
+    references_data = Column(JSONB())  # 引用的文档
+    image_results = Column(JSONB())  # 图片搜索结果
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # === v0.9 NEW ===
@@ -104,7 +103,7 @@ class ChatMessage(Base):
     )  # text|tool_result|research_report
     research_report_id = Column(String(64), nullable=True)
     research_report_summary = Column(Text, nullable=True)
-    tool_call_data = Column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+    tool_call_data = Column(JSONB(), nullable=True)
     task_id = Column(
         UUID(as_uuid=True),
         ForeignKey("chat_tasks.id", ondelete="SET NULL"),

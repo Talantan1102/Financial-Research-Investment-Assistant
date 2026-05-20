@@ -27,7 +27,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [brainstorm 阶段每节 ~100 行,不做 spec dump](docs/claude-context/brainstorm-section-density.md) — code/prompt/trace/简历叙事推到 spec doc,chat 只对齐决策方向
 
 ### 测试 / DB
-- [测试 DB 分层策略](docs/claude-context/test-db-layered-strategy.md) — L0/L1 sqlite-override，L2.5 真 PG fixture 守护 serve path
+- [测试 DB 策略 — 全 PG](docs/claude-context/test-db-layered-strategy.md) — PR-A 2026-05-17 后:L0/L1/L2.5 都连真 PG,`db_session` fixture transaction rollback isolation
 - [容器化依赖 fixture 模式](docs/claude-context/pg-test-container-pattern.md) — session-scoped + 外部已起则复用 / 自起则负责拆
 
 ### v0.9.x 阶段性里程碑
@@ -87,6 +87,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 
 ### Chat Session Title LLM 异步生成(2026-05-17 ship 完)
 - [chat session title LLM 异步生成 ship](docs/claude-context/chat-session-title-llm-generation-done.md) — 20 字截断 → Celery 异步 LLM 副产品模式 + title_source 三态防覆盖 + sidebar `...` 菜单 + inline rename / 15 task ship,异步副产品模式可复用
+
+### PG-only Migration(2026-05-17 PR-A ship,PR-B/C/D 待)
+- [PR-A landed](docs/claude-context/pg-only-migration-pr-a-landed.md) — 删主 ORM 30+ with_variant + L0/L1 测试切真 PG + 19 个 unit test 文件迁 db_session / 0 regression / spec § 4 PR-A
 
 ## 设计稿与实施计划
 

@@ -206,7 +206,7 @@ async def start_report(
     本 endpoint 只创建 row, 不调用 LLM / orchestration.
     """
     report_id = str(uuid4())
-    # SQLAlchemy + SQLite/with_variant: user.id 是 UUID 实例 (PG) 或 str (SQLite via with_variant).
+    # SQLAlchemy + PG-only: user.id 是 UUID 实例.
     # 直接传给 column 即可.
     user_id_val: UUID | str | None = user.id
     r = ResearchReport(

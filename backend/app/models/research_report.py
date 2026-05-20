@@ -8,7 +8,6 @@
 
 类型选型:
 - 生产 = PostgreSQL,使用 JSONB / UUID native 类型
-- 单元测试 = sqlite in-memory,通过 with_variant 降级为 JSON / String(36)
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -34,7 +33,7 @@ class ResearchReport(Base):
     # FK → users.id (UUID(as_uuid=True) in production)
     # nullable=True 允许 anon / pre-auth 流程
     user_id = Column(
-        UUID(as_uuid=True).with_variant(String(36), "sqlite"),
+        UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
@@ -45,8 +44,8 @@ class ResearchReport(Base):
     target_ts_code = Column(String(16), nullable=True, index=True)
     status = Column(String(16), nullable=False)  # streaming|completed|failed
 
-    # InvestmentDueDiligenceReport 完整 JSON(PG = JSONB,sqlite = JSON)
-    report_json = Column(JSONB().with_variant(JSON(), "sqlite"), nullable=False)
+    # InvestmentDueDiligenceReport 完整 JSON
+    report_json = Column(JSONB(), nullable=False)
 
     # 成本(LLM 调用累计 ¥)
     cost = Column(Numeric(10, 2), nullable=False, default=Decimal("0"))
@@ -61,7 +60,7 @@ class ResearchReport(Base):
     # chat→research 升级链路溯源 (E13/E14)
     # ON DELETE SET NULL: 删 chat session 时保留研报记录
     source_chat_session_id = Column(
-        UUID(as_uuid=True).with_variant(String(36), "sqlite"),
+        UUID(as_uuid=True),
         ForeignKey("chat_sessions.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
