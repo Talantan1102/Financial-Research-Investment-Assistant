@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 
 def test_db_session_is_postgres(db_session: Session) -> None:
     """fixture 提供的 session 连的是真 PG,不是 sqlite。"""
-    dialect = db_session.bind.dialect.name
+    bind = db_session.bind
+    assert bind is not None
+    dialect = bind.dialect.name
     assert dialect == "postgresql", f"db_session expected postgresql, got {dialect}"
 
 
