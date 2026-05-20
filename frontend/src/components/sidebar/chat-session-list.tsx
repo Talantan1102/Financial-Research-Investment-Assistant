@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
 import {
@@ -8,6 +8,7 @@ import {
 import type { ChatSession } from '@/types/chat'
 import { Skeleton } from '@/components/states/Skeleton'
 import { EmptyState } from '@/components/states/EmptyState'
+import { Icon } from '@/components/shared/Icon'
 import styles from '@/styles/app-shell.module.scss'
 
 export interface ChatSessionListProps {
@@ -37,16 +38,65 @@ function formatTime(iso: string): string {
   return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
 }
 
+interface RenameInputProps {
+  initialValue: string
+  onSubmit: (newValue: string) => void
+  onCancel: () => void
+}
+
+function RenameInput({ initialValue, onSubmit, onCancel }: RenameInputProps) {
+  const [v, setV] = useState(initialValue)
+  const ref = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    ref.current?.focus()
+    ref.current?.select()
+  }, [])
+
+  function onKey(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      onSubmit(v)
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      onCancel()
+    }
+  }
+
+  return (
+    <input
+      ref={ref}
+      data-testid="rename-input"
+      className={styles.renameInput}
+      value={v}
+      onChange={(e) => setV(e.target.value)}
+      onKeyDown={onKey}
+      onBlur={onCancel}
+      onClick={(e) => e.stopPropagation()}
+    />
+  )
+}
+
 export function ChatSessionList({ query = '' }: ChatSessionListProps) {
   const snap = useSnapshot(chatSessionsState)
   const navigate = useNavigate()
   const params = useParams<{ session_id?: string }>()
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
 
   useEffect(() => {
     if (snap.status === 'idle') {
       chatSessionsActions.loadSessions().catch(() => {})
     }
   }, [snap.status])
+
+  useEffect(() => {
+    function onDocClick() {
+      setOpenMenuId(null)
+    }
+    if (openMenuId) document.addEventListener('click', onDocClick)
+    return () => document.removeEventListener('click', onDocClick)
+  }, [openMenuId])
 
   const groups = useMemo(() => {
     const filtered = query
@@ -65,6 +115,14 @@ export function ChatSessionList({ query = '' }: ChatSessionListProps) {
     for (const s of filtered) acc[dateGroupOf(s.last_active_at)].push(s)
     return acc
   }, [snap.sessions, query])
+
+  function handleRenameSubmit(id: string, newTitle: string, originalTitle: string) {
+    const trimmed = newTitle.trim()
+    if (trimmed && trimmed !== originalTitle) {
+      void chatSessionsActions.renameSession(id, trimmed)
+    }
+    setEditingId(null)
+  }
 
   if (snap.status === 'loading') {
     return (
@@ -99,10 +157,54 @@ export function ChatSessionList({ query = '' }: ChatSessionListProps) {
               <div
                 key={s.id}
                 className={`${styles.session} ${params.session_id === s.id ? styles.active : ''}`}
-                onClick={() => navigate(`/chat/${s.id}`)}
+                onClick={() => {
+                  if (editingId === s.id) return
+                  navigate(`/chat/${s.id}`)
+                }}
                 data-testid={`session-item-${s.id}`}
               >
-                <div className={styles.sessionTitle}>{s.title}</div>
+                <div className={styles.sessionRow}>
+                  {editingId === s.id ? (
+                    <RenameInput
+                      initialValue={s.title}
+                      onSubmit={(v) => handleRenameSubmit(s.id, v, s.title)}
+                      onCancel={() => setEditingId(null)}
+                    />
+                  ) : (
+                    <div className={styles.sessionTitle}>{s.title}</div>
+                  )}
+                  <button
+                    type="button"
+                    aria-label="more"
+                    className={styles.sessionMoreBtn}
+                    data-testid={`session-more-${s.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setOpenMenuId(openMenuId === s.id ? null : s.id)
+                    }}
+                  >
+                    <Icon name="more-horizontal" size={14} />
+                  </button>
+                  {openMenuId === s.id ? (
+                    <div
+                      className={styles.sessionMenu}
+                      onClick={(e) => e.stopPropagation()}
+                      data-testid={`session-menu-${s.id}`}
+                    >
+                      <button
+                        type="button"
+                        className={styles.sessionMenuItem}
+                        data-testid={`session-rename-${s.id}`}
+                        onClick={() => {
+                          setEditingId(s.id)
+                          setOpenMenuId(null)
+                        }}
+                      >
+                        重命名
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 {s.last_msg_preview ? (
                   <div className={styles.sessionPreview}>{s.last_msg_preview}</div>
                 ) : null}

@@ -225,3 +225,73 @@
 .userName { font-size: 14px; font-weight: 600; color: var(--ios-label); }
 .userRole { font-size: 12px; color: var(--ios-label-secondary); }
 .userChev { color: var(--ios-label-tertiary); }
+
+/* ── Session rename / more / menu ────────────────── */
+.sessionRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+}
+
+.sessionMoreBtn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--ios-label-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s;
+
+  .session:hover & { opacity: 1; }
+  &:hover { background: var(--ios-surface-hover); color: var(--ios-label); }
+}
+
+.sessionMenu {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  background: var(--ios-surface);
+  border-radius: 8px;
+  box-shadow: var(--ios-shadow);
+  padding: 4px;
+  z-index: 100;
+  min-width: 120px;
+}
+
+.sessionMenuItem {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--ios-label);
+  font-size: 13px;
+  text-align: left;
+  border-radius: 6px;
+  cursor: pointer;
+
+  &:hover { background: var(--ios-surface-hover); }
+}
+
+.renameInput {
+  flex: 1;
+  font-family: var(--ios-font);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ios-label);
+  border: 1px solid var(--ios-blue);
+  border-radius: 4px;
+  padding: 2px 6px;
+  background: var(--ios-surface);
+  outline: none;
+  min-width: 0;
+
+  &:focus { box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12); }
+}
