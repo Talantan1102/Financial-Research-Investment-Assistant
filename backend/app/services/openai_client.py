@@ -47,12 +47,21 @@ class _OpenAIAdapter:
         self._model = model
 
     def chat(self, prompt: str, model: str, schema: object) -> _Raw:  # noqa: ANN001
-        r = self._client.chat.completions.create(
-            model=model or self._model,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-            max_tokens=8000,
-        )
+        # schema=None → 纯文本调用(如 chat-title 异步生成);schema 非空 → JSON 模式。
+        # DashScope 当 response_format=json_object 时要求 prompt 含 "json" 字,
+        # 不该强加给纯文本任务。
+        common = {
+            "model": model or self._model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 8000,
+        }
+        if schema is None:
+            r = self._client.chat.completions.create(**common)  # type: ignore[call-overload]
+        else:
+            r = self._client.chat.completions.create(  # type: ignore[call-overload]
+                **common,
+                response_format={"type": "json_object"},
+            )
         return _Raw(
             content=r.choices[0].message.content or "",
             prompt_tokens=r.usage.prompt_tokens if r.usage else 0,
