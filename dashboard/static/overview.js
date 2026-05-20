@@ -1,14 +1,16 @@
 // V3 cytoscape 鸟瞰 — 节点点击 → V2 modal。spec § 5.3。
 (function () {
+  // ETCLOVG 7 维 — iOS Calm Minimal hues (context indigo 为高光维)
   const DIM_COLORS = {
-    prompt_context:    '#c89456',  // amber 主
-    tools_function:    '#6f9494',  // teal 次
-    orchestration:     '#94b87a',  // lit sage
-    memory:            '#d4824a',  // wip terracotta
-    rag_knowledge:     '#8db1b1',  // teal-glow
-    guardrails:        '#a64545',  // danger 暗砖
-    eval_observability:'#b9ad94',  // fg-dim
-    cost_routing:      '#e5b079',  // amber-glow
+    execution:    '#34C759',  // iOS Green
+    tool:         '#007AFF',  // iOS Blue
+    context:      '#5E5CE6',  // iOS Indigo (主色,高光)
+    lifecycle:    '#FF9500',  // iOS Orange
+    observability:'#00C7BE',  // iOS Mint
+    verification: '#AF52DE',  // iOS Purple
+    governance:   '#FF2D55',  // iOS Pink/Red
+    shell:        '#86868B',  // iOS Gray (catch_all)
+    unknown:      '#C7C7CC',  // iOS Gray light
   };
 
   let cy = null;
@@ -19,7 +21,8 @@
 
   function confidenceBorder(c) {
     // todo → wip → lit 渐变,跟 chip dots 一致
-    const stops = ['#4a3f33', '#6b5d49', '#7d6e58', '#b9ad94', '#94b87a', '#c89456'];
+    // iOS soft gradient: gray → mint → indigo
+    const stops = ['#C7C7CC', '#86868B', '#6E6E73', '#00C7BE', '#34C759', '#5E5CE6'];
     return stops[Math.max(0, Math.min(5, c || 0))];
   }
 

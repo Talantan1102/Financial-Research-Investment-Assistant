@@ -1,74 +1,111 @@
-/* dashboard/static/style.css — Quiet Workshop design language
-   Phase 1: :root tokens + baseline + grain overlay + reveal animations
+/* dashboard/static/style.css — iOS Calm Minimal design language (V3)
+   spec § 4A. Light Mode Only; single indigo accent; system font stack.
+   2026-05-20 ETCLOVG migration: replaced Quiet Workshop tokens.
    ================================================================== */
 
 /* =========================================================
-   Design tokens
+   Design tokens — iOS Calm Minimal
    ========================================================= */
 :root {
-  /* Warm ink palette */
-  --ink:        #0c0908;
-  --ink-2:      #14100c;
-  --paper:      #1a1410;
-  --paper-2:    #221b15;
-  --hair:       rgba(235, 227, 212, 0.08);
-  --hair-2:     rgba(235, 227, 212, 0.04);
+  /* Neutrals — light first */
+  --bg:           #F5F5F7;
+  --bg-2:         #EFEFF2;
+  --surface:      #FFFFFF;
+  --surface-2:    #FBFBFD;
+  --hair:         rgba(60, 60, 67, 0.12);
+  --hair-2:       rgba(60, 60, 67, 0.06);
 
   /* Text */
-  --fg:         #ebe3d4;
-  --fg-dim:     #b9ad94;
-  --fg-mute:    #7d6e58;
-  --fg-faint:   #4a3f33;
+  --fg:           #1D1D1F;
+  --fg-dim:       #3A3A3C;
+  --fg-mute:      #6E6E73;
+  --fg-faint:     #86868B;
+  --fg-quat:      #C7C7CC;
 
-  /* Dual accent — warm amber × cool patina teal (complementary, both desaturated) */
-  --amber:       #c89456;
-  --amber-glow:  #e5b079;
-  --amber-deep:  #8a5f30;
-  --amber-soft:  rgba(200,148,86,0.12);
+  /* Single accent — iOS Indigo */
+  --accent:       #5E5CE6;
+  --accent-glow:  rgba(94, 92, 230, 0.20);
+  --accent-deep:  #4845C2;
+  --accent-soft:  rgba(94, 92, 230, 0.08);
 
-  --teal:        #6f9494;
-  --teal-glow:   #8db1b1;
-  --teal-deep:   #3f5e5e;
-  --teal-soft:   rgba(111,148,148,0.13);
+  /* Compat aliases — V2 callers still use --amber / --teal until full sweep */
+  --amber:        #5E5CE6;
+  --amber-glow:   rgba(94, 92, 230, 0.20);
+  --amber-deep:   #4845C2;
+  --amber-soft:   rgba(94, 92, 230, 0.08);
+  --teal:         #6E6E73;
+  --teal-glow:    #86868B;
+  --teal-deep:    #3A3A3C;
+  --teal-soft:    rgba(110, 110, 115, 0.08);
 
-  /* Status — sand / clay / dust / brick */
-  --lit:        #94b87a;
-  --lit-bg:     rgba(148,184,122,0.10);
-  --wip:        #d4824a;
-  --wip-bg:     rgba(212,130,74,0.12);
-  --todo:       #6b5d49;
-  --todo-bg:    transparent;
-  --danger:     #a64545;
+  /* Surface compat (V2 calls --ink / --paper) */
+  --ink:          #F5F5F7;
+  --ink-2:        #FBFBFD;
+  --paper:        #FFFFFF;
+  --paper-2:      #FBFBFD;
 
-  /* Typography */
-  --display:   'Newsreader', 'Source Han Serif SC', 'Noto Serif SC', Georgia, serif;
-  --serif-cn:  'Source Han Serif SC', 'Noto Serif SC', 'Newsreader', Georgia, serif;
-  --sans:      'Manrope', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
-  --mono:      'Geist Mono', ui-monospace, "SF Mono", Menlo, monospace;
+  /* Status — iOS soft */
+  --lit:          #34C759;
+  --lit-bg:       rgba(52, 199, 89, 0.10);
+  --wip:          #FF9F0A;
+  --wip-bg:       rgba(255, 159, 10, 0.10);
+  --todo:         #C7C7CC;
+  --todo-bg:      transparent;
+  --danger:       #FF3B30;
 
-  /* 8-dim colors */
-  --dim-prompt:  #9b8cd4;
-  --dim-tools:   #6fb3d4;
-  --dim-orch:    #c89456;
-  --dim-memory:  #d4af6c;
-  --dim-rag:     #94b87a;
-  --dim-guard:   #c97b7b;
-  --dim-eval:    #b89764;
-  --dim-cost:    #c98aa9;
+  /* Typography — system stack */
+  --display:   -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", system-ui, sans-serif;
+  --serif-cn:  -apple-system, "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+  --sans:      -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+  --mono:      "SF Mono", "Geist Mono", ui-monospace, Menlo, monospace;
+
+  /* Radius */
+  --radius-sm:    8px;
+  --radius-md:    12px;
+  --radius-lg:    16px;
+  --radius-pill:  22px;
+
+  /* Shadow */
+  --shadow-1:     0 1px 2px rgba(0,0,0,0.04), 0 0 0 0.5px rgba(0,0,0,0.05);
+  --shadow-2:     0 4px 16px rgba(0,0,0,0.08), 0 0 0 0.5px rgba(0,0,0,0.05);
+  --shadow-modal: 0 16px 48px rgba(0,0,0,0.16), 0 0 0 0.5px rgba(0,0,0,0.08);
+
+  /* Backdrop */
+  --blur-strong: blur(20px) saturate(180%);
+  --blur-soft:   blur(12px) saturate(150%);
+
+  /* 7 ETCLOVG dim hues — soft pastel,统一明度,避免抢戏 */
+  --dim-execution:    #34C759;   /* iOS Green   - sandbox 稳定感 */
+  --dim-tool:         #007AFF;   /* iOS Blue    - 工具/协议 */
+  --dim-context:      #5E5CE6;   /* iOS Indigo  - 主色,context 高光 */
+  --dim-lifecycle:    #FF9500;   /* iOS Orange  - 编排活力 */
+  --dim-observability: #00C7BE;  /* iOS Mint    - 观测 */
+  --dim-verification: #AF52DE;   /* iOS Purple  - 验证 */
+  --dim-governance:   #FF2D55;   /* iOS Pink/Red - 治理紧迫感 */
+
+  /* V2 legacy 8-dim alias map → 渐变到新 7 hue (Plan 3 后续 sweep) */
+  --dim-prompt:  var(--dim-context);
+  --dim-tools:   var(--dim-tool);
+  --dim-orch:    var(--dim-lifecycle);
+  --dim-memory:  var(--dim-context);
+  --dim-rag:     var(--dim-context);
+  --dim-guard:   var(--dim-governance);
+  --dim-eval:    var(--dim-verification);
+  --dim-cost:    var(--dim-observability);
 }
 
 /* =========================================================
-   Global baseline
+   Global baseline — Light Mode only
    ========================================================= */
 * { box-sizing: border-box; }
 
 html, body {
   margin: 0; padding: 0;
-  background: var(--ink); color: var(--fg);
+  background: var(--bg); color: var(--fg);
   font-family: var(--sans);
-  font-size: 15.5px;
-  line-height: 1.68;
-  letter-spacing: 0.005em;
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -76,15 +113,7 @@ html, body {
 /* Leave space for nav-rail */
 body { padding-left: 80px; }
 
-/* Subtle paper grain overlay */
-body::before {
-  content: '';
-  position: fixed; inset: 0;
-  pointer-events: none;
-  z-index: 100;
-  opacity: 0.035;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>");
-}
+/* iOS Calm Minimal: 删除 V2 grain overlay (违背极简原则) */
 
 /* =========================================================
    Section frame — .board (main container) + .stage (mockup section)
@@ -119,12 +148,21 @@ body::before {
 }
 
 /* =========================================================
-   Dot helpers + 8-dim colors
+   Dot helpers + 7 ETCLOVG dim colors (V2 8-dim alias preserved)
    ========================================================= */
 .dot {
   width: 6px; height: 6px; border-radius: 50%;
   display: inline-block;
 }
+/* ETCLOVG 7 维 */
+.dot-execution    { background: var(--dim-execution); }
+.dot-tool         { background: var(--dim-tool); }
+.dot-context      { background: var(--dim-context); }
+.dot-lifecycle    { background: var(--dim-lifecycle); }
+.dot-observability { background: var(--dim-observability); }
+.dot-verification { background: var(--dim-verification); }
+.dot-governance   { background: var(--dim-governance); }
+/* V2 alias — 渐变到新 token,模板逐步换 class */
 .dot-prompt  { background: var(--dim-prompt); }
 .dot-tools   { background: var(--dim-tools); }
 .dot-orch    { background: var(--dim-orch); }
@@ -399,18 +437,9 @@ body::before {
 }
 .layer:hover { border-color: rgba(200,148,86,0.25); }
 
-.layer .numeral {
-  position: absolute;
-  top: -8px; right: 14px;
-  font-family: var(--display);
-  font-weight: 600;
-  font-size: 86px;
-  color: var(--paper-2);
-  line-height: 1;
-  pointer-events: none;
-  font-variation-settings: "opsz" 60;
-  user-select: none;
-}
+/* iOS Calm Minimal: numeral 水印删除(违背极简) - 保留 selector 但 display:none
+   避免模板内引用 .numeral 时空白 */
+.layer .numeral { display: none; }
 .layer .l-eyebrow {
   font-family: var(--mono); font-size: 10px;
   color: var(--fg-mute);
@@ -1086,16 +1115,9 @@ body::before {
   margin: 0 0 14px;
 }
 
+/* iOS Calm Minimal: drop-cap 删除(违背极简,无 serif 字体) */
 .story-card .body p:first-of-type::first-letter {
-  font-family: var(--display);
-  font-weight: 400;
-  font-size: 56px;
-  line-height: 0.85;
-  float: left;
-  margin: 6px 10px 0 -2px;
-  color: var(--amber);
-  font-style: italic;
-  font-variation-settings: "opsz" 60;
+  /* no-op */
 }
 
 .story-card .body strong {
