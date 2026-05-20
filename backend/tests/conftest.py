@@ -329,7 +329,29 @@ def db_session(pg_test_engine: Engine) -> Iterator[Session]:
     `join_transaction_mode="create_savepoint"` 让 session.commit() 走
     SAVEPOINT release 而不是真 commit outer transaction — 否则 test 调
     db_session.commit() 会持久化到 PG,跨 test 累积污染数据。
+
+    Setup 阶段先 TRUNCATE 所有 public schema 表(独立 connection 真 commit)
+    清除之前 async-fixture test 留下的累积数据。pg_async_session_factory
+    显式不走 rollback isolation,数据会落 PG,后续 db_session test 必须先清。
     """
+    from sqlalchemy import text
+
+    # Step 1: Truncate all application tables on a separate connection.
+    # This MUST happen on its own connection with explicit commit — if done
+    # inside the outer transaction below, the rollback at the end would
+    # restore the data we just cleared.
+    with pg_test_engine.connect() as truncate_conn:
+        tables = [
+            row[0]
+            for row in truncate_conn.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+            )
+        ]
+        if tables:
+            truncate_conn.execute(text(f"TRUNCATE TABLE {', '.join(tables)} CASCADE"))
+            truncate_conn.commit()
+
+    # Step 2: Open outer transaction + Session with SAVEPOINT mode for this test.
     connection = pg_test_engine.connect()
     try:
         transaction = connection.begin()
