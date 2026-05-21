@@ -1,5 +1,3 @@
-import { CloseCircleOutlined, SendOutlined, ThunderboltOutlined } from '@ant-design/icons'
-import { Button } from 'antd'
 import {
   useCallback,
   useEffect,
@@ -9,6 +7,7 @@ import {
 } from 'react'
 import { useSnapshot } from 'valtio'
 import { currentChatState } from '@/store/current-chat'
+import { Icon } from '@/components/shared/Icon'
 import styles from '@/styles/chat.module.scss'
 
 export interface InputAreaProps {
@@ -22,8 +21,8 @@ export interface InputAreaProps {
   onCancel?: (taskId: string) => void
 }
 
-const MIN_HEIGHT = 44
-const MAX_HEIGHT = 240
+const MIN_HEIGHT = 24
+const MAX_HEIGHT = 140
 const MAX_CHARS = 4000
 
 export function InputArea(props: InputAreaProps) {
@@ -31,7 +30,8 @@ export function InputArea(props: InputAreaProps) {
   const [pasteWarn, setPasteWarn] = useState<string | null>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const snap = useSnapshot(currentChatState)
-  const streaming = snap.streaming_phase !== 'idle'
+  const streaming =
+    snap.streaming_phase !== 'idle' || snap.streamingStatus === 'streaming'
   const messages = snap.messages ?? []
   const hasContext = messages.length > 0
 
@@ -93,58 +93,67 @@ export function InputArea(props: InputAreaProps) {
     [send],
   )
 
+  const onCancelClick = () => {
+    if (snap.active_task_id && props.onCancel) {
+      void props.onCancel(snap.active_task_id)
+    } else {
+      props.onAbort?.()
+    }
+  }
+
   return (
-    <div className={styles.inputArea} data-session={props.sessionId ?? ''}>
-      <textarea
-        ref={taRef}
-        data-testid="input-textarea"
-        className={styles.inputTextarea}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={onKey}
-        placeholder={
-          streaming ? '正在生成中...' : '问点什么 (Enter 发送, Shift+Enter 换行)'
-        }
-        rows={1}
-      />
-      <div className={styles.inputActions}>
-        {!streaming && hasContext ? (
-          <Button
-            icon={<ThunderboltOutlined />}
-            onClick={() => props.onEscalate?.()}
-            aria-label="Escalate"
-          >
-            ⚡ 升级到深度研究
-          </Button>
-        ) : null}
+    <div data-session={props.sessionId ?? ''}>
+      <div className={styles.composer}>
+        <div className={styles.composerInput}>
+          {!streaming && hasContext ? (
+            <button
+              type="button"
+              className={styles.escalateBtn}
+              onClick={() => props.onEscalate?.()}
+              aria-label="升级到深度研究"
+              title="升级到深度研究"
+            >
+              <Icon name="plus-circle" size={18} />
+            </button>
+          ) : null}
+          <textarea
+            ref={taRef}
+            data-testid="input-textarea"
+            className={styles.inputTextarea}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={onKey}
+            placeholder={
+              streaming ? '正在生成中...' : '问点什么 (Enter 发送, Shift+Enter 换行)'
+            }
+            rows={1}
+          />
+        </div>
         {streaming ? (
-          <Button
-            danger
-            icon={<CloseCircleOutlined />}
-            onClick={() => {
-              // Plan 3:有 active_task_id + onCancel → 真 backend cancel(partial commit);
-              // 否则 fallback onAbort(纯前端 abort,worker 继续跑完)
-              if (snap.active_task_id && props.onCancel) {
-                props.onCancel(snap.active_task_id)
-              } else {
-                props.onAbort?.()
-              }
-            }}
+          <button
+            type="button"
+            className={styles.cancelBtn}
+            onClick={onCancelClick}
             aria-label="停止生成"
+            title="停止生成"
           >
-            停止生成
-          </Button>
+            <Icon name="stop" size={14} />
+          </button>
         ) : (
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
+          <button
+            type="button"
+            className={styles.sendBtn}
             onClick={send}
             disabled={!value.trim()}
             aria-label="发送"
+            title="发送"
           >
-            发送
-          </Button>
+            <Icon name="arrow-up" size={16} />
+          </button>
         )}
+      </div>
+      <div className={styles.inputHint}>
+        <kbd>Enter</kbd> 发送 · <kbd>⇧</kbd> + <kbd>Enter</kbd> 换行 · <kbd>⌘</kbd> + <kbd>K</kbd> 停止
       </div>
       {value.length > MAX_CHARS / 8 ? (
         <div

@@ -87,9 +87,23 @@ vitest + playwright 已 self-contained 不依赖 backend, 后续可加到 GitHub
 - run: cd frontend && npm run test:e2e
 ```
 
-## Design tokens
+## 设计语言
 
-双 theme(B 端 banking 深色 / C 端 retail 浅色)tokens 在 `src/themes/`, 设计规范 + 配色 / typography / spacing 详见 [docs/design-tokens.md](../docs/design-tokens.md).
+iOS 简约淡雅风(2026-05-20 起;先前 AlphaScout Editorial × Terminal 已废弃)。
+
+- **字体栈**:`-apple-system, "SF Pro Text", "SF Pro Display", "PingFang SC", "Helvetica Neue", system-ui, sans-serif`
+- **配色锚**:iOS systemBlue(`#007aff`)/ systemGray 阶 / 大圆角(12-16px)/ 微妙阴影 / 毛玻璃 backdrop-blur
+- **核心特征**:
+  - 消息气泡(user iOS 蓝靠右 / AI 灰白靠左)
+  - 胶囊输入框(22px radius)+ 圆形发送按钮
+  - 毛玻璃 TopBar / InputRegion(`backdrop-filter: blur(20px)` + solid fallback)
+  - SF Symbols 风 SVG icon(`components/shared/Icon.tsx`,20 个 icon)
+- **Token 入口**:
+  - `styles/tokens.css` → `--ios-*` namespace(CSS Module 消费)+ `--as-*` legacy fallback(non-chat 页 e.g. research detail)
+  - `themes/tokens-retail.ts` → antd ConfigProvider(retail · `/chat/*` + 默认 route)
+  - `themes/tokens-banking.ts` → antd ConfigProvider(banking · `/monitoring`/`credit-report` — 不动)
+- **状态系统**:`components/states/` — EmptyState / Skeleton / ErrorState / LoadingDots
+- **Spec & Plan**:`docs/superpowers/specs/2026-05-20-frontend-ios-polish-design.md` + `docs/superpowers/plans/2026-05-20-frontend-ios-polish-plan.md`
 
 ## Page mapping
 

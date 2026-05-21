@@ -1,6 +1,6 @@
-import { LoadingOutlined } from '@ant-design/icons'
 import { useSnapshot } from 'valtio'
 import { currentChatState } from '@/store/current-chat'
+import { LoadingDots } from '@/components/states/LoadingDots'
 import styles from '@/styles/chat.module.scss'
 
 const PHASE_LABEL: Record<string, string> = {
@@ -23,7 +23,7 @@ export function StreamingIndicator() {
       data-testid="streaming-indicator-bar"
       data-phase={snap.streaming_phase}
     >
-      <LoadingOutlined spin />
+      <LoadingDots ariaLabel="streaming" />
       <span>{label}</span>
     </div>
   )
