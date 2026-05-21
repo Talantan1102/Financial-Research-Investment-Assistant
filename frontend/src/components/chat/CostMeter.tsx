@@ -1,4 +1,3 @@
-import { DollarOutlined, DownOutlined, RightOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useSnapshot } from 'valtio'
 import { currentChatState } from '@/store/current-chat'
@@ -14,23 +13,29 @@ export function CostMeter() {
   }
   const fmt = (n: number) => `$${n.toFixed(n < 0.01 ? 4 : 3)}`
   return (
-    <div className={styles.costMeter} data-testid="cost-meter">
-      <DollarOutlined />
-      <span className={styles.costTotal}>{fmt(total_usd)}</span>
+    <div className={styles.costStrip} data-testid="cost-meter">
+      <span className={styles.costPill}>
+        <span className={styles.dot} />
+        已耗 <span className={styles.v}>{fmt(total_usd)}</span>
+      </span>
+      {open && (
+        <>
+          <span className={styles.costPill}>
+            Chat: <span className={styles.v}>{fmt(chat_usd)}</span>
+          </span>
+          <span className={styles.costPill}>
+            Research: <span className={styles.v}>{fmt(research_usd)}</span>
+          </span>
+        </>
+      )}
       <button
         type="button"
         className={styles.costToggle}
         onClick={() => setOpen((v) => !v)}
         aria-label="详情"
       >
-        {open ? <DownOutlined /> : <RightOutlined />}
+        {open ? '▲' : '▼'}
       </button>
-      {open ? (
-        <div className={styles.costBreakdown}>
-          <span>Chat: {fmt(chat_usd)}</span>
-          <span>Research: {fmt(research_usd)}</span>
-        </div>
-      ) : null}
     </div>
   )
 }
