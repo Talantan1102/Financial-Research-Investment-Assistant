@@ -107,17 +107,6 @@ def vcr_config() -> dict[str, object]:
     }
 
 
-@pytest.fixture
-def tmp_eval_db(tmp_path: Path) -> Path:
-    """L0/L1 fixture — fresh SQLite file per test, auto-cleaned by tmp_path.
-
-    SQLite path modeling: every test that touches TraceService / EvalRecorder
-    must accept this fixture and pass it as db_path. Sharing a global db is
-    forbidden — Plan B's feedback_test_env_modeling lesson.
-    """
-    return tmp_path / "eval.sqlite"
-
-
 # ---------------------------------------------------------------------------
 # v0.7 Milvus container fixture (promoted to global scope in v0.8.1 Task 5
 # so both tests/integration/ and tests/e2e/ can use it — pytest does not

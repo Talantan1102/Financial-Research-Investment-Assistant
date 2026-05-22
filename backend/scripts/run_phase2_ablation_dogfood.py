@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import subprocess
 import sys
 from collections import defaultdict
@@ -38,16 +37,13 @@ def main() -> int:
         print("       Hint: source backend/.env or export DASHSCOPE_API_KEY=...")
         return 1
 
-    db_path = Path("backend/data/eval_phase2_dogfood.db")
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-
     # Lazy import (heavy)
+    from app.core.database import SessionLocal
     from app.eval.dd_report_production_factory import (
         build_dd_report_production_factory,
         build_pairing_judge,
         build_supports_judge,
     )
-    from app.services.eval_recorder import EvalRecorder
     from eval.dd_report.ablation.runner import AblationRunner
     from eval.dd_report.ablation.variants import AblationVariant
     from eval.dd_report.golden.ground_truth_loader import GroundTruthLoader
@@ -59,7 +55,9 @@ def main() -> int:
     from eval.dd_report.metrics.prediction_metric import PredictionMetric
     from eval.dd_report.metrics.risk_pairing_metric import RiskPairingMetric
 
-    EvalRecorder(db_path).init_schema()
+    # PR-B PG-only: 用 PG SessionLocal 替代旧 sqlite db_path。
+    # dogfood 写入 backtest_runs / eval_results 表(已 ORM 化)。
+    session_factory = SessionLocal
 
     cases_path = Path("backend/eval/dd_report/golden/backtest_cases.jsonl")
     sanity_cases = [
@@ -107,7 +105,7 @@ def main() -> int:
         swapper=swapper,
         tushare_inner=tushare_inner,
         kb_inner=kb_inner,
-        db_path=db_path,
+        session_factory=session_factory,
         production_factory=production_factory,
         metric_registry=metric_registry,
         ground_truth_loader=gtl,
@@ -125,7 +123,7 @@ def main() -> int:
     )
 
     print("\n=== Ablation 4x5 矩阵 ===")
-    _print_ablation_matrix(db_path, git_sha)
+    _print_ablation_matrix(session_factory, git_sha)
 
     failed = [r for r in results if r.status == "failed"]
     if failed:
@@ -147,22 +145,23 @@ def _row_to_case(d: dict[str, Any]) -> Any:
     )
 
 
-def _print_ablation_matrix(db: Path, git_sha: str) -> None:
-    with sqlite3.connect(db) as con:
-        con.row_factory = sqlite3.Row
-        rows = con.execute(
-            "SELECT ablation_variant, metric_summary_json FROM backtest_runs "
-            "WHERE git_sha = ? AND status = 'completed'",
-            (git_sha,),
-        ).fetchall()
+def _print_ablation_matrix(session_factory: Any, git_sha: str) -> None:
+    from app.services.trace_models import BacktestRunRow
+
+    with session_factory() as session:
+        rows = (
+            session.query(BacktestRunRow)
+            .filter(BacktestRunRow.git_sha == git_sha, BacktestRunRow.status == "completed")
+            .all()
+        )
     by_variant: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for r in rows:
-        if not r["metric_summary_json"]:
+        if not r.metric_summary_json:
             continue
-        m = json.loads(r["metric_summary_json"])
+        m = json.loads(r.metric_summary_json)
         for k, v in m.items():
             if v is not None:
-                by_variant[r["ablation_variant"]][k].append(float(v))
+                by_variant[str(r.ablation_variant)][k].append(float(v))
     header = ["Variant", "M1", "M2", "M3", "M4", "M5"]
     print(
         f"{header[0]:<20} | {header[1]:>6} | {header[2]:>6} | "

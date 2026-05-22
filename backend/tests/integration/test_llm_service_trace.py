@@ -2,7 +2,7 @@
 call writes one span; LLMResponse.request_id matches the span's request_id.
 """
 
-from pathlib import Path
+import contextlib
 
 from app.services.llm_mock_client import MockLLMClient
 from app.services.llm_service import LLMService
@@ -11,10 +11,9 @@ from app.services.trace_service import TraceService
 
 def test_chat_writes_one_span_per_call(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
     svc = LLMService(client=mock_llm_client, trace_service=trace)
 
     r = svc.chat(prompt="What is the price of 600519.SH?", tier="fast")
@@ -30,11 +29,10 @@ def test_chat_writes_one_span_per_call(
 
 def test_chat_without_trace_service_writes_nothing(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
     """Plan B contract: trace_service=None → zero side effects."""
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
     svc = LLMService(client=mock_llm_client)  # no trace_service
 
     r = svc.chat(prompt="What is the price of 600519.SH?", tier="fast")
@@ -45,10 +43,9 @@ def test_chat_without_trace_service_writes_nothing(
 
 def test_chat_with_explicit_request_id_uses_it(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
     svc = LLMService(client=mock_llm_client, trace_service=trace)
 
     r1 = svc.chat(prompt="What is the price of 600519.SH?", tier="fast", request_id="req-foo")

@@ -1,30 +1,18 @@
-"""BacktestRunner skeleton tests — Phase 1 Task 1.6.
+"""BacktestRunner skeleton tests — Phase 1 Task 1.6 (ORM/PG path).
 
 spec § 4.1 / § 5.1 / § 5.3
 """
 
 from __future__ import annotations
 
-import sqlite3
+import contextlib
 from datetime import date
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 
-@pytest.fixture
-def tmp_db(tmp_path: Path) -> Path:
-    """初始化包含 backtest_runs 表的临时 sqlite."""
-    from app.services.eval_recorder import EvalRecorder
-
-    db = tmp_path / "eval.sqlite"
-    rec = EvalRecorder(db_path=db)
-    rec.init_schema()
-    return db
-
-
-def test_backtest_runner_init(tmp_db: Path) -> None:
+def test_backtest_runner_init(db_session) -> None:
     """BacktestRunner 接受必要依赖."""
     from eval.dd_report.backtest_runner import BacktestRunner
     from eval.dd_report.llm_swapper import LLMSwapper
@@ -34,13 +22,14 @@ def test_backtest_runner_init(tmp_db: Path) -> None:
         swapper=swapper,
         tushare_inner=MagicMock(),
         kb_inner=MagicMock(),
-        db_path=tmp_db,
+        session_factory=lambda: contextlib.nullcontext(db_session),
     )
     assert runner is not None
 
 
-def test_backtest_runner_writes_run_row(tmp_db: Path) -> None:
+def test_backtest_runner_writes_run_row(db_session) -> None:
     """run_one 完成后 backtest_runs 表写入一行 status='completed'."""
+    from app.services.trace_models import BacktestRunRow
     from eval.dd_report.backtest_runner import BacktestCase, BacktestRunner
     from eval.dd_report.llm_swapper import LLMSwapper
 
@@ -51,7 +40,7 @@ def test_backtest_runner_writes_run_row(tmp_db: Path) -> None:
         swapper=LLMSwapper(api_key="test"),
         tushare_inner=MagicMock(),
         kb_inner=MagicMock(),
-        db_path=tmp_db,
+        session_factory=lambda: contextlib.nullcontext(db_session),
         pipeline=pipeline_mock,
     )
 
@@ -70,19 +59,16 @@ def test_backtest_runner_writes_run_row(tmp_db: Path) -> None:
 
     assert run_id
 
-    with sqlite3.connect(tmp_db) as con:
-        con.row_factory = sqlite3.Row
-        row = con.execute("SELECT * FROM backtest_runs WHERE run_id = ?", (run_id,)).fetchone()
-
+    row = db_session.get(BacktestRunRow, run_id)
     assert row is not None
-    assert row["status"] == "completed"
-    assert row["case_count"] == 1
-    assert row["git_sha"] == "abc1234"
-    assert row["ablation_variant"] == "V0_baseline"
-    assert row["llm_model"] == "deepseek-v4-flash"
+    assert row.status == "completed"
+    assert row.case_count == 1
+    assert row.git_sha == "abc1234"
+    assert row.ablation_variant == "V0_baseline"
+    assert row.llm_model == "deepseek-v4-flash"
 
 
-def test_backtest_runner_calls_pipeline_with_adapters(tmp_db: Path) -> None:
+def test_backtest_runner_calls_pipeline_with_adapters(db_session) -> None:
     """pipeline.run 收到包装好的 tushare_adapter + kb_adapter + evaluator_client."""
     from eval.dd_report.backtest_runner import BacktestCase, BacktestRunner
     from eval.dd_report.llm_swapper import LLMSwapper
@@ -94,7 +80,7 @@ def test_backtest_runner_calls_pipeline_with_adapters(tmp_db: Path) -> None:
         swapper=LLMSwapper(api_key="test"),
         tushare_inner=MagicMock(),
         kb_inner=MagicMock(),
-        db_path=tmp_db,
+        session_factory=lambda: contextlib.nullcontext(db_session),
         pipeline=pipeline_mock,
     )
 
@@ -119,7 +105,7 @@ def test_backtest_runner_calls_pipeline_with_adapters(tmp_db: Path) -> None:
     assert kwargs["evaluator_client"].model == "qwen-plus"
 
 
-def test_backtest_run_passes_leak_detector_with_clean_data(tmp_db: Path) -> None:
+def test_backtest_run_passes_leak_detector_with_clean_data(db_session) -> None:
     """跑一个 case, 用 LeakDetector 审查 tushare/kb 返回行无 leak."""
     from datetime import date
     from unittest.mock import MagicMock
@@ -142,7 +128,7 @@ def test_backtest_run_passes_leak_detector_with_clean_data(tmp_db: Path) -> None
         swapper=LLMSwapper(api_key="test"),
         tushare_inner=tushare_inner,
         kb_inner=kb_inner,
-        db_path=tmp_db,
+        session_factory=lambda: contextlib.nullcontext(db_session),
         pipeline=pipeline,
     )
 
@@ -167,11 +153,10 @@ def test_backtest_run_passes_leak_detector_with_clean_data(tmp_db: Path) -> None
     detector.assert_no_leaks(leaks)
 
 
-def test_backtest_run_fails_leak_detector_with_polluted_data(tmp_db: Path) -> None:
+def test_backtest_run_fails_leak_detector_with_polluted_data() -> None:
     """如果数据带 leak, detector 必须 catch."""
     from datetime import date
 
-    import pytest
     from eval.dd_report.leak_detector import LeakDetector
 
     detector = LeakDetector(cut_off=date(2024, 6, 30))

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
+
+from sqlalchemy.orm import Session
 
 from eval.dd_report.ablation.variants import (
     AblationVariant,
@@ -34,7 +36,7 @@ class AblationRunner:
     swapper: LLMSwapper
     tushare_inner: Any
     kb_inner: Any
-    db_path: Path
+    session_factory: Callable[[], AbstractContextManager[Session]]
     production_factory: Callable[..., Any]
     metric_registry: MetricRegistry = field(default_factory=lambda: MetricRegistry([]))
     ground_truth_loader: Any | None = None
@@ -64,7 +66,7 @@ class AblationRunner:
                 swapper=self.swapper,
                 tushare_inner=self.tushare_inner,
                 kb_inner=self.kb_inner,
-                db_path=self.db_path,
+                session_factory=self.session_factory,
                 pipeline=pipeline_adapter,
                 metric_registry=self.metric_registry,
                 ground_truth_loader=self.ground_truth_loader,

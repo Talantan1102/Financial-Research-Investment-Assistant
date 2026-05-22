@@ -10,7 +10,7 @@ asyncio.run() inside EvalRunner.run_one (Pattern B).
 
 from __future__ import annotations
 
-from pathlib import Path
+import contextlib
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -104,13 +104,11 @@ def _make_case(case_id: str) -> GoldenCase:
 
 def test_llm_service_sut_tool_correctness_is_none(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
     """Backward-compat: bare LLMService SUT → JudgeScores.tool_correctness is None."""
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
-    recorder = EvalRecorder(db_path=tmp_eval_db)
-    recorder.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
+    recorder = EvalRecorder(session_factory=lambda: contextlib.nullcontext(db_session))
 
     sut_llm = LLMService(client=mock_llm_client, trace_service=trace)
     judge_llm = LLMService(client=mock_llm_client)
@@ -128,13 +126,11 @@ def test_llm_service_sut_tool_correctness_is_none(
 
 def test_chat_agent_sut_tool_correctness_is_not_none(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
     """ChatAgent SUT: tool_calls passed to Judge → JudgeScores.tool_correctness is not None."""
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
-    recorder = EvalRecorder(db_path=tmp_eval_db)
-    recorder.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
+    recorder = EvalRecorder(session_factory=lambda: contextlib.nullcontext(db_session))
 
     # Build ChatAgent stack (mirrors test_chat_agent_e2e_mock.py)
     svc = LLMService(client=mock_llm_client)

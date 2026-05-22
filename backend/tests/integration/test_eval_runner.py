@@ -3,7 +3,7 @@
 One golden case → SUT → trace → Judge → EvalResult written. Verify each step.
 """
 
-from pathlib import Path
+import contextlib
 
 from app.services.eval_models import GoldenCase
 from app.services.eval_recorder import EvalRecorder
@@ -16,12 +16,10 @@ from app.services.trace_service import TraceService
 
 def test_run_one_case_writes_eval_result(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
-    recorder = EvalRecorder(db_path=tmp_eval_db)
-    recorder.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
+    recorder = EvalRecorder(session_factory=lambda: contextlib.nullcontext(db_session))
 
     sut_llm = LLMService(client=mock_llm_client, trace_service=trace)
     judge_llm = LLMService(client=mock_llm_client)
@@ -53,12 +51,10 @@ def test_run_one_case_writes_eval_result(
 
 def test_run_many_cases(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
-    recorder = EvalRecorder(db_path=tmp_eval_db)
-    recorder.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
+    recorder = EvalRecorder(session_factory=lambda: contextlib.nullcontext(db_session))
     sut_llm = LLMService(client=mock_llm_client, trace_service=trace)
     judge = Judge(llm=LLMService(client=mock_llm_client), judge_tier="balanced")
     runner = EvalRunner(sut=sut_llm, judge=judge, trace_service=trace, recorder=recorder)

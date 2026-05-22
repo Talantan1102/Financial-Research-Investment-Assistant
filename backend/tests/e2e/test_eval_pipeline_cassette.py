@@ -4,8 +4,8 @@ This proves the entire pipeline (SUT call → trace → judge call → recorder)
 works against the real LLM behavior. Slow on first record, fast on replay.
 """
 
+import contextlib
 import os
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -100,12 +100,10 @@ def real_adapter() -> _Adapter:
 @pytest.mark.vcr
 def test_one_case_real_llm_real_judge(
     real_adapter: _Adapter,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
-    recorder = EvalRecorder(db_path=tmp_eval_db)
-    recorder.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
+    recorder = EvalRecorder(session_factory=lambda: contextlib.nullcontext(db_session))
 
     sut = LLMService(client=real_adapter, trace_service=trace)
     judge_llm = LLMService(client=real_adapter)

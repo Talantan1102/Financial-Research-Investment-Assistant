@@ -95,6 +95,24 @@ class EvalResult(BaseModel):
     )
 
 
+class BacktestRun(BaseModel):
+    """Pydantic model paired with BacktestRunRow ORM.
+
+    Mirrors the backtest_runs table schema. extra=forbid + frozen per repo convention.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: str
+    created_at: str  # ISO datetime string (matches legacy pattern)
+    case_count: int = Field(ge=0)
+    metric_summary_json: str | None = None
+    status: str
+    git_sha: str | None = None
+    ablation_variant: str | None = None
+    llm_model: str | None = None
+
+
 GoldenCategory = Literal[
     "single_tool_call",
     "chat_multi_turn",

@@ -12,7 +12,7 @@ switches to the 5-dim template and the fixture returns a non-null score.
 
 from __future__ import annotations
 
-from pathlib import Path
+import contextlib
 from typing import Any
 
 from app.agents.analyst import Analyst
@@ -143,13 +143,11 @@ def _make_research_case() -> GoldenCase:
 
 def test_research_agent_sut_report_markdown_quality_not_none(
     mock_llm_client: MockLLMClient,
-    tmp_eval_db: Path,
+    db_session,
 ) -> None:
     """ResearchAgent SUT path: report_markdown_quality and tool_correctness both scored."""
-    trace = TraceService(db_path=tmp_eval_db)
-    trace.init_schema()
-    recorder = EvalRecorder(db_path=tmp_eval_db)
-    recorder.init_schema()
+    trace = TraceService(session_factory=lambda: contextlib.nullcontext(db_session))
+    recorder = EvalRecorder(session_factory=lambda: contextlib.nullcontext(db_session))
 
     svc = LLMService(client=mock_llm_client)
     agent = _build_research_agent(svc)

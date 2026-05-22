@@ -18,15 +18,16 @@ Phase 2 扩展:
 from __future__ import annotations
 
 import json
-import sqlite3
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
-from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
-from app.services.eval_models import EvalResult, JudgeScores
+from app.services.eval_models import BacktestRun, EvalResult, JudgeScores
 from app.services.eval_recorder import EvalRecorder
+from sqlalchemy.orm import Session
 
 from eval.dd_report.kb_backtest_adapter import KBBacktestAdapter
 from eval.dd_report.leak_detector import LeakDetector
@@ -78,7 +79,7 @@ class BacktestRunner:
         swapper: LLMSwapper,
         tushare_inner: Any,
         kb_inner: Any,
-        db_path: Path,
+        session_factory: Callable[[], AbstractContextManager[Session]],
         pipeline: PipelineProtocol | None = None,
         metric_registry: MetricRegistry | None = None,
         ground_truth_loader: Any | None = None,
@@ -88,13 +89,12 @@ class BacktestRunner:
         self._swapper = swapper
         self._tushare_inner = tushare_inner
         self._kb_inner = kb_inner
-        self._db_path = db_path
         self._pipeline = pipeline
         self._metric_registry = metric_registry or MetricRegistry([])
         self._ground_truth = ground_truth_loader
         self._kb_lookup = kb_lookup
         self._enable_leak_detection = enable_leak_detection
-        self._recorder = EvalRecorder(db_path)
+        self._recorder = EvalRecorder(session_factory)
 
     def run_one(
         self,
@@ -253,23 +253,18 @@ class BacktestRunner:
         llm_model: str,
         metric_summary_json: str | None,
     ) -> None:
-        with sqlite3.connect(self._db_path) as con:
-            con.execute(
-                "INSERT INTO backtest_runs "
-                "(run_id, created_at, case_count, metric_summary_json, status, "
-                "git_sha, ablation_variant, llm_model) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    run_id,
-                    created_at,
-                    case_count,
-                    metric_summary_json,
-                    status,
-                    git_sha,
-                    ablation_variant,
-                    llm_model,
-                ),
+        self._recorder.write_backtest_run(
+            BacktestRun(
+                run_id=run_id,
+                created_at=created_at,
+                case_count=case_count,
+                metric_summary_json=metric_summary_json,
+                status=status,
+                git_sha=git_sha,
+                ablation_variant=ablation_variant,
+                llm_model=llm_model,
             )
+        )
 
 
 def _aggregate_summary_json(results: list[MetricResult]) -> str | None:
