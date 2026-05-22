@@ -69,3 +69,10 @@ backend/data/
 
 # Harness Board sqlite (派生重建,不进 git)
 backend/data/board.db
+
+# Celery beat scheduler 持久化文件 (启动时自动重建)
+backend/celerybeat-schedule.db
+celerybeat-schedule.db
+
+# Claude Code 旧 worktree 管理副产物
+.claire/
