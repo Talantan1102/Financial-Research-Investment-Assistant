@@ -175,11 +175,3 @@ class DeepCardRepo:
             new_data["prefill_source"] = "hybrid"
         updated = DeepCard.model_validate(new_data)
         self.upsert(updated)
-
-    def mark_ai_drafted(self, cap_id: str, field_name: str) -> None:  # noqa: ARG002
-        """AI 草拟单字段成功后调:prefill_source = llm (覆盖 manual)。field_name 留作未来 per-field 状态扩展。"""
-        card = self.get(cap_id) or DeepCard(cap_id=cap_id)
-        new_data = card.model_dump()
-        new_data["prefill_source"] = "llm"
-        new_data["prefill_at"] = datetime.now(UTC).isoformat()
-        self.upsert(DeepCard.model_validate(new_data))

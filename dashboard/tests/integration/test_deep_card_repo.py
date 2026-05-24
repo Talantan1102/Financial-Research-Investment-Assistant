@@ -80,14 +80,3 @@ def test_get_all_returns_all(tmp_path: Path) -> None:
     repo.upsert(DeepCard(cap_id="b"))
     cards = repo.get_all()
     assert {c.cap_id for c in cards} == {"a", "b"}
-
-
-def test_mark_ai_drafted_sets_llm(tmp_path: Path) -> None:
-    conn = open_db(tmp_path / "t.db")
-    repo = DeepCardRepo(conn)
-    repo.upsert(DeepCard(cap_id="x", prefill_source="manual"))
-    repo.mark_ai_drafted("x", "what")
-    got = repo.get("x")
-    assert got is not None
-    assert got.prefill_source == "llm"
-    assert got.prefill_at is not None

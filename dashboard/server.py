@@ -104,7 +104,6 @@ async def index(request: Request) -> HTMLResponse:
             dc = deep_cards_by_id.get(c["id"])
             # TypedDict 不支持动态 key,但 chip 模板用 dict access 兼容
             c["completion_level"] = completion_level_or_none(dc)  # type: ignore[typeddict-unknown-key]
-            c["confidence"] = dc.srs_state.confidence if dc else 0  # type: ignore[typeddict-unknown-key]
 
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
     # App Shell 第 9 行 mini stat
@@ -382,7 +381,6 @@ async def post_admin_milvus_reindex(_request: Request) -> JSONResponse:
                 "dimension": (card.cap_id.split(".", 1)[0] if "." in card.cap_id else ""),
                 "name_cn": name_cn,
                 "status": "lit",
-                "confidence": card.srs_state.confidence,
             }
         )
     if texts:
@@ -472,7 +470,6 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
         "name_cn": cfg.name_cn,
         "status": derived_status,
         "dimension": cfg.dimension,
-        "confidence": card.srs_state.confidence if card else 0,
     }
 
     content_fields: list[dict[str, object]] = []
