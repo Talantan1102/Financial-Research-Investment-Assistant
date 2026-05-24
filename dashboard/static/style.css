@@ -2414,6 +2414,9 @@ details[open] .decision-note-toggle::before {
 
 .field-body { font-size: 14px; line-height: 1.6; color: #1C1C1E; }
 .field-empty { color: #C7C7CC; font-size: 12px; font-style: italic; }
+
+.cap-detail-loading { padding: 24px; color: #86868B; font-size: 13px; text-align: center; }
+.cap-detail-error { padding: 24px; color: #B22222; font-size: 13px; }
 .markdown-fallback { font-family: inherit; white-space: pre-wrap; background: rgba(60,60,67,0.03); padding: 8px 12px; border-radius: 6px; }
 
 .decisions-list { padding-left: 18px; font-size: 13px; color: #6E6E73; }
@@ -2468,14 +2471,43 @@ details[open] .decision-note-toggle::before {
 /* ============================================================
  * Plan 3 Task 2 — Topology homepage
  * ============================================================ */
-.topology-block { padding: 24px 0 40px; }
+.topology-block { padding: 48px 0 60px; }
 .topology-svg {
-  max-width: 880px;
-  margin: 30px auto 20px;
+  max-width: 920px;
+  margin: 24px auto 0;
   display: block;
   width: 100%;
   height: auto;
 }
+
+.topology-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 0 4px;
+  font-size: 12px;
+  color: #86868B;
+}
+.topology-meta .meta-paper {
+  font-family: -apple-system, 'SF Pro Text', sans-serif;
+}
+.topology-meta .meta-paper em {
+  font-style: italic;
+  color: #1C1C1E;
+  font-weight: 500;
+}
+.topology-meta .meta-stats {
+  display: inline-flex;
+  gap: 16px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+}
+.topology-meta .meta-total { color: #1C1C1E; font-weight: 500; }
+.topology-meta .meta-lit  { color: #34C759; }
+.topology-meta .meta-wip  { color: #FF9F0A; }
+.topology-meta .meta-todo { color: #C7C7CC; }
 .topology-box {
   cursor: pointer;
   transition: transform 0.18s, filter 0.18s;

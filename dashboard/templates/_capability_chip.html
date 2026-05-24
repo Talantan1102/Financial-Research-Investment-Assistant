@@ -1,14 +1,10 @@
-{# Plan 2 Task 5 — 三色 chip + 右键菜单 + 单击就地展开 #}
+{# 三色 chip + 右键菜单 + 单击就地展开(JS fetch,不依赖 htmx)#}
 {% set status = c.status|default('todo') %}
 <button
   type="button"
   class="cap-chip cap-chip--{{ status }}"
   data-cap-id="{{ c.id }}"
   data-status="{{ status }}"
-  hx-get="/cap/{{ c.id }}/expand"
-  hx-target="#detail-{{ c.id }}"
-  hx-swap="innerHTML"
-  hx-trigger="click[ctrlKey === false]"
   onclick="window.harness?.toggleExpand?.('{{ c.id }}')"
   oncontextmenu="return window.harness?.showContextMenu?.(event, '{{ c.id }}') ?? true">
   <span class="cap-dot dot-{{ status }}"></span>

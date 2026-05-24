@@ -41,15 +41,12 @@ class ConnLine:
 
 
 CONNECTIONS: tuple[ConnLine, ...] = (
-    ConnLine("governance", "tool", "cross_cut"),
+    # G/O cross-cut → 每个走 1 条到中段中央(C),代表横切语义,避免 6 条乱
     ConnLine("governance", "context", "cross_cut"),
-    ConnLine("governance", "lifecycle", "cross_cut"),
-    ConnLine("observability", "tool", "cross_cut"),
     ConnLine("observability", "context", "cross_cut"),
-    ConnLine("observability", "lifecycle", "cross_cut"),
-    ConnLine("tool", "execution", "runtime"),
+    # 中段三件套 → E 底盘:仅 C 走 1 条(visual representative),T/L 通过相邻关系暗示
     ConnLine("context", "execution", "runtime"),
-    ConnLine("lifecycle", "execution", "runtime"),
+    # V 旁路 → L
     ConnLine("verification", "lifecycle", "bypass"),
 )
 

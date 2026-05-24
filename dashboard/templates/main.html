@@ -1,37 +1,20 @@
-{# Plan 3 Task 2 — 首页:hero 简文 + ETCLOVG Topology 关系图 #}
+{# 首页:ETCLOVG Topology 关系图 (论文 §2.3) + 顶部 meta strip + In flux WIPs #}
 {% extends "base.html" %}
 {% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
 
-<section class="hero-block">
-  <div class="stage">
-    <div class="hero-meta reveal d1">
-      <span class="pill">Li et al. · ETCLOVG · 2026</span>
-      <span>{{ today }} · {{ snap.total }} capabilities · {{ snap.total_lit }} lit / {{ snap.total_wip }} wip / {{ snap.total_todo }} todo</span>
-    </div>
-    <h1 class="hero-title reveal d2">
-      <em>Harness</em>,<br>
-      不是<em class="cool">模型</em>。
-    </h1>
-    <p class="hero-sub reveal d3">
-      <em>Prompt</em>(2022) → <em class="cool">Context</em>(2025) → <em>Harness</em>(2026),
-      工程重心正在迁移。下图是论文 §2.3 的 ETCLOVG 7 模块关系 — <span class="accent">点任意模块进入详情</span>。
-    </p>
-  </div>
-</section>
-
 <section class="topology-block">
   <div class="stage">
+    <div class="topology-meta">
+      <span class="meta-paper">Li et al. · <em>Agent Harness Engineering: A Survey</em> · 2026 · §2.3</span>
+      <span class="meta-stats">
+        <span class="meta-total">{{ snap.total }} capabilities</span>
+        <span class="meta-lit">{{ snap.total_lit }} lit</span>
+        <span class="meta-wip">{{ snap.total_wip }} wip</span>
+        <span class="meta-todo">{{ snap.total_todo }} todo</span>
+      </span>
+    </div>
     {% include "_topology_diagram.html" %}
-    <p class="topology-caption">
-      <span class="caption-tag">G · 治理</span> +
-      <span class="caption-tag">O · 可观测</span> 横切所有层 ·
-      <span class="caption-tag">T · 工具</span> /
-      <span class="caption-tag">C · 上下文</span> /
-      <span class="caption-tag">L · 生命周期</span> 是每一步的三件套 ·
-      <span class="caption-tag">V · 验证</span> 离线旁路 ·
-      <span class="caption-tag">E · 执行环境</span> 底盘 chassis
-    </p>
   </div>
 </section>
 

@@ -15,9 +15,9 @@
     {% for c, (ax, ay), (bx, by) in topology_endpoints %}
       <line x1="{{ ax }}" y1="{{ ay }}" x2="{{ bx }}" y2="{{ by }}"
             class="edge edge-{{ c.type }}"
-            stroke="rgba(94,92,230,0.40)"
+            stroke="rgba(94,92,230,0.32)"
             stroke-width="1"
-            stroke-dasharray="{{ '4 3' if c.type == 'cross_cut' else ('2 2' if c.type == 'bypass' else 'none') }}"
+            stroke-dasharray="{{ '5 4' if c.type == 'cross_cut' else ('2 3' if c.type == 'bypass' else 'none') }}"
             marker-end="url(#arrowhead)"/>
     {% endfor %}
   </g>
@@ -34,24 +34,24 @@
                 fill="white"
                 stroke="rgba(60,60,67,0.18)"
                 stroke-width="1"/>
-          <text x="{{ m.x + 12 }}" y="{{ m.y + 26 }}"
+          <text x="{{ m.x + 14 }}" y="{{ m.y + 25 }}"
                 class="box-letter"
                 font-family="'Geist Mono', monospace"
-                font-size="18"
+                font-size="16"
                 font-weight="600"
                 fill="#5E5CE6">{{ m.letter }}</text>
-          <text x="{{ m.x + 36 }}" y="{{ m.y + 22 }}"
+          <text x="{{ m.x + 36 }}" y="{{ m.y + 23 }}"
                 class="box-name"
                 font-family="-apple-system, 'SF Pro Text', sans-serif"
-                font-size="13"
+                font-size="12"
                 font-weight="500"
                 fill="#1C1C1E">{{ m.name_cn }}</text>
-          <text x="{{ m.x + m.width - 8 }}" y="{{ m.y + 14 }}"
+          <text x="{{ m.x + m.width - 10 }}" y="{{ m.y + 15 }}"
                 class="box-anchor"
                 text-anchor="end"
                 font-family="-apple-system, sans-serif"
-                font-size="9"
-                fill="#86868B">{{ m.paper_section }}</text>
+                font-size="8"
+                fill="#A8A8AE">{{ m.paper_section }}</text>
           {% if m.height >= 60 and m.total > 0 %}
             {% set bar_y = m.y + m.height - 14 %}
             {% set bar_x = m.x + 10 %}
@@ -86,9 +86,4 @@
     {% endfor %}
   </g>
 
-  <g class="topology-legend">
-    <text x="590" y="305" text-anchor="end"
-          font-family="-apple-system, sans-serif" font-size="9"
-          fill="#86868B">— cross-cut · ⋯ bypass · → runtime</text>
-  </g>
 </svg>
