@@ -183,7 +183,6 @@ class RefreshPipeline:
                         "dimension": (card.cap_id.split(".", 1)[0] if "." in card.cap_id else ""),
                         "name_cn": name_cn,
                         "status": "lit",
-                        "confidence": card.srs_state.confidence,
                     }
                 )
             if texts:
