@@ -1,15 +1,18 @@
-<span class="chip {{ c.status }}"
-      id="cap-{{ c.id|replace('.', '-') }}"
-      title="{{ c.id }}"
-      hx-get="/capability/{{ c.id }}/edit"
-      hx-target="this"
-      hx-swap="outerHTML">
-  {{ c.name_cn }}
-  {% set cf = c.confidence if c.confidence is defined else 0 %}
-  {% if cf and cf > 0 %}
-    <span class="conf-dots" aria-label="confidence {{ cf }}/5">
-      {% for i in range(cf) %}<i></i>{% endfor %}
-    </span>
-  {% endif %}
-  {% if c.derived_status != c.status %}<span class="stale-mark" aria-hidden="true">·</span>{% endif %}
-</span>
+{# Plan 2 Task 5 — 三色 chip + 右键菜单 + 单击就地展开 #}
+{% set status = c.status|default('todo') %}
+<button
+  type="button"
+  class="cap-chip cap-chip--{{ status }}"
+  data-cap-id="{{ c.id }}"
+  data-status="{{ status }}"
+  hx-get="/cap/{{ c.id }}/expand"
+  hx-target="#detail-{{ c.id }}"
+  hx-swap="innerHTML"
+  hx-trigger="click[ctrlKey === false]"
+  onclick="window.harness?.toggleExpand?.('{{ c.id }}')"
+  oncontextmenu="return window.harness?.showContextMenu?.(event, '{{ c.id }}') ?? true">
+  <span class="cap-dot dot-{{ status }}"></span>
+  <span class="cap-name">{{ c.name_cn }}</span>
+  <span class="cap-en">{{ c.name_en }}</span>
+  <span class="cap-status status--{{ status }}">{{ {'lit':'已实现','wip':'开发中','todo':'未开发'}.get(status, status) }}</span>
+</button>
