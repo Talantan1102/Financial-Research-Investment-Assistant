@@ -2868,3 +2868,49 @@ details[open] .decision-note-toggle::before {
 
 .decisions-list { padding-left: 18px; font-size: 13px; color: #6E6E73; }
 .decisions-list code { font-family: 'Geist Mono', monospace; font-size: 12px; background: rgba(94,92,230,0.08); padding: 1px 6px; border-radius: 4px; color: #5E5CE6; }
+
+/* Plan 2 Task 8 — markdown rendered content typography */
+.markdown-body { font-size: 14px; line-height: 1.7; color: #1C1C1E; }
+.markdown-body h1, .markdown-body h2, .markdown-body h3 { margin-top: 16px; margin-bottom: 8px; font-weight: 600; }
+.markdown-body h1 { font-size: 18px; }
+.markdown-body h2 { font-size: 16px; }
+.markdown-body h3 { font-size: 14px; }
+.markdown-body p { margin: 8px 0; }
+.markdown-body ul, .markdown-body ol { padding-left: 24px; margin: 8px 0; }
+.markdown-body li { margin: 4px 0; }
+.markdown-body code { font-family: 'Geist Mono', monospace; font-size: 12px; background: rgba(60,60,67,0.05); padding: 1px 6px; border-radius: 4px; }
+.markdown-body pre { background: rgba(60,60,67,0.04); padding: 12px 16px; border-radius: 8px; overflow-x: auto; font-size: 12px; }
+.markdown-body pre code { background: transparent; padding: 0; }
+.markdown-body img { max-width: 100%; border-radius: 8px; margin: 8px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.markdown-body table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13px; }
+.markdown-body th, .markdown-body td { padding: 6px 10px; border: 1px solid rgba(60,60,67,0.10); }
+.markdown-body th { background: rgba(60,60,67,0.04); font-weight: 600; }
+.markdown-body blockquote { padding: 8px 14px; border-left: 3px solid #5E5CE6; background: rgba(94,92,230,0.05); margin: 12px 0; }
+.markdown-body .mermaid { background: rgba(245,245,247,0.6); padding: 12px; border-radius: 8px; margin: 12px 0; text-align: center; }
+
+/* Plan 2 Task 9 — screenshot uploader */
+.screenshot-uploader { display: inline-flex; align-items: center; gap: 12px; margin: 6px 0; }
+.upload-btn {
+  background: rgba(94,92,230,0.10); color: #5E5CE6;
+  border: 1px dashed rgba(94,92,230,0.4); border-radius: 6px;
+  padding: 6px 12px; font: inherit; font-size: 12px;
+  cursor: pointer;
+}
+.upload-btn:hover { background: rgba(94,92,230,0.18); }
+.upload-status { font-size: 11px; color: #86868B; font-family: 'Geist Mono', monospace; }
+.upload-status--ok  { color: #1B7A33; }
+.upload-status--err { color: #B22222; }
+
+/* Plan 2 Task 10 — nav-rail 7 维临时入口 (Plan 3 重做主 nav 时替换) */
+.nav-sep { width: 60%; margin: 12px auto; border: 0; border-top: 1px solid rgba(60,60,67,0.08); }
+.nav-modules { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; align-items: center; }
+.nav-mod {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  font-family: 'Geist Mono', monospace; font-size: 14px; font-weight: 600;
+  color: #86868B;
+  text-decoration: none;
+}
+.nav-mod:hover { background: rgba(94,92,230,0.08); color: #5E5CE6; }
+.nav-mod.active { background: #5E5CE6; color: white; }
