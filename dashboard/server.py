@@ -418,6 +418,37 @@ async def _try_milvus_related(cap_id: str, k: int) -> tuple[list[dict[str, objec
         return None, f"milvus_error:{e}"
 
 
+async def post_screenshot(request: Request) -> JSONResponse:
+    """图上传 endpoint。Plan 2 Task 9。"""
+    from dashboard.derive.screenshot_repo import UploadError, save_screenshot
+
+    cap_id = request.path_params["cap_id"]
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "read"):
+        return JSONResponse({"error": "no file uploaded"}, status_code=400)
+
+    try:
+        content = await upload.read()
+        result = save_screenshot(
+            DASHBOARD_ROOT,
+            cap_id,
+            content,
+            upload.content_type or "",
+            upload.filename or "image.png",
+        )
+    except UploadError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    return JSONResponse(
+        {
+            "path": result.rel_path,
+            "markdown": result.markdown,
+            "git_hint": result.git_hint,
+        }
+    )
+
+
 async def post_admin_milvus_reindex(_request: Request) -> JSONResponse:
     """全量 reindex — 显式触发 DeepCard → Milvus embedding 同步。"""
     if MILVUS_HOST is None:
@@ -789,6 +820,7 @@ app = Starlette(
         Route("/survey", survey_view),
         Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
         Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
+        Route("/cap/{cap_id}/screenshot", post_screenshot, methods=["POST"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
         Route(
