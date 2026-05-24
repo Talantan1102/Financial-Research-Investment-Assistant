@@ -2,7 +2,11 @@
 
 **作者**:Talantan1102
 **起草**:2026-05-24
-**状态**:Spec — Plan 1 + Plan 2 + Plan 3 ship 2026-05-24(首页 Topology 关系图 / 退役 overview-decisions-survey / 清 SrsState-Flashcard-TemplateKind + graph_builder;/story 改造留 Plan 4)
+**状态**:✅ 全 4 plan ship 2026-05-24 — 框架重做完成
+- Plan 1:flashcards 整条退役 + ai_draft cleanup(PR #83)
+- Plan 2:DeepCard v2 schema + 模块页 /m/{dim} + 三色 chip + 右键 + 就地展开 + 图上传(PR #84)
+- Plan 3:Topology 首页 + 退役 overview/decisions/survey + 清类型 + CSS 瘦身(PR #85)
+- Plan 4:/story 改造为 skill 接口占位(textarea + render)
 **类型**:Refactor / IA 全洗 + 数据 schema 改 + UI 全新
 **参考论文**:Li et al., *Agent Harness Engineering: A Survey*, 2026
 **关联前序**:`docs/superpowers/specs/2026-05-20-harness-board-etclovg-migration-design.md`(7 维迁移已 ship,本 spec 在其上 reframe IA + 数据 model)
