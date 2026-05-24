@@ -1,0 +1,45 @@
+{# Plan 2 Task 4 — 模块页主结构 #}
+{% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
+{% block content %}
+
+<div class="module-page" data-dim-id="{{ dim.id }}">
+  <nav class="breadcrumb">
+    <a href="/">首页</a>
+    <span class="sep">/</span>
+    <span class="current">{{ dim.number }} {{ dim.name_cn }}</span>
+  </nav>
+
+  <header class="module-head">
+    <h1>
+      <span class="num">{{ dim.number }}</span>
+      {{ dim.name_cn }}
+      <span class="en">{{ dim.name_en }}</span>
+    </h1>
+    <div class="module-stats">
+      <span class="stat stat-lit">{{ layer.lit }} lit</span>
+      <span class="stat stat-wip">{{ layer.wip }} wip</span>
+      <span class="stat stat-todo">{{ layer.todo }} todo</span>
+      <span class="stat-total">/ {{ layer.total }}</span>
+      <span class="stat-pct">{{ "%.0f"|format((layer.lit / layer.total * 100) if layer.total else 0) }}%</span>
+    </div>
+  </header>
+
+  <section class="capabilities">
+    <ol class="cap-list">
+      {% for c in layer.capabilities %}
+        <li class="cap-item" id="cap-{{ c.id }}">
+          {% include "_capability_chip.html" %}
+          <div class="cap-detail" id="detail-{{ c.id }}" hidden></div>
+        </li>
+      {% endfor %}
+    </ol>
+  </section>
+</div>
+
+{% include "_context_menu.html" %}
+
+<script src="/static/inline-expand.js?v={{ asset_v }}" defer></script>
+<script src="/static/context-menu.js?v={{ asset_v }}" defer></script>
+<script src="/static/render-field.js?v={{ asset_v }}" defer></script>
+{% endblock %}

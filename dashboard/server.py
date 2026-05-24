@@ -130,6 +130,40 @@ async def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "main.html", ctx)
 
 
+async def module_page_view(request: Request) -> HTMLResponse:
+    """模块页 — 单维度 capability 列表。Plan 2 Task 4。"""
+    dim_id = request.path_params["dim_id"]
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    dim = next((d for d in main_dims if d.id == dim_id), None)
+    if dim is None:
+        return HTMLResponse(f"unknown dim_id: {dim_id}", status_code=404)
+
+    conn = open_db(DB_PATH)
+    try:
+        snap_repo = SnapshotRepo(conn)
+        snap = snap_repo.get_latest()
+        if snap is None:
+            override_repo = OverrideRepo(conn)
+            overrides = override_repo.get_all()
+            snapshot = build_snapshot(PROJECT_ROOT, CONFIG_DIR, overrides=overrides)
+            snap = snapshot.to_dict()
+            snap_repo.save(snap["refreshed_at"], snap)
+    finally:
+        conn.close()
+
+    layer = next((L for L in snap["layers"] if L["id"] == dim_id), None)
+    if layer is None:
+        return HTMLResponse(f"no layer data for dim_id: {dim_id}", status_code=404)
+
+    ctx = {
+        "request": request,
+        "dim": dim,
+        "layer": layer,
+        "asset_v": ASSET_VERSION,
+    }
+    return cast(HTMLResponse, templates.TemplateResponse("_module_page.html", ctx))
+
+
 async def decisions_view(request: Request) -> HTMLResponse:
     """GET /decisions — render 全部决策卡 + filter UI(client JS)。"""
     decisions = extract_all()
@@ -725,6 +759,7 @@ async def lifespan(_app: Starlette) -> AsyncIterator[None]:
 app = Starlette(
     routes=[
         Route("/", index),
+        Route("/m/{dim_id}", module_page_view),
         Route("/healthz", healthz),
         Route("/decisions", decisions_view),
         Route("/decisions/{decision_id}/note", post_decision_note, methods=["POST"]),
