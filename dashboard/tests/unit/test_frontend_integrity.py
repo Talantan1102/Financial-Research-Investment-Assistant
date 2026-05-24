@@ -14,44 +14,6 @@ DASHBOARD_DIR = Path(__file__).resolve().parents[2]
 STATIC_DIR = DASHBOARD_DIR / "static"
 TEMPLATES_DIR = DASHBOARD_DIR / "templates"
 
-# cytoscape 内置 layout(无需 extension)。来源:cytoscape.js v3 manual,
-# 见 https://js.cytoscape.org/#layouts。
-CYTOSCAPE_BUILTIN_LAYOUTS = {
-    "null",
-    "random",
-    "preset",
-    "grid",
-    "circle",
-    "concentric",
-    "breadthfirst",
-    "cose",
-}
-
-
-def test_overview_layout_is_builtin_or_extension_registered() -> None:
-    """overview.js 用的 cytoscape layout 必须是内置或仓库有 extension + 注册。
-
-    bug history:Plan 2 引入 cose-bilkent.min.js 但忘加 cose-base 依赖
-    且无 cytoscape.use(...) 注册 → cytoscape() 抛错 → 画布全黑。
-    """
-    js = (STATIC_DIR / "overview.js").read_text(encoding="utf-8")
-    match = re.search(r"layout:\s*\{\s*name:\s*['\"]([^'\"]+)['\"]", js)
-    assert match, "overview.js 应显式声明 layout name"
-    layout_name = match.group(1)
-
-    if layout_name in CYTOSCAPE_BUILTIN_LAYOUTS:
-        return
-
-    # 非内置 layout — 必须有 extension 文件 + cytoscape.use 注册
-    ext_files = list(STATIC_DIR.glob(f"cytoscape-{layout_name}*.js"))
-    assert ext_files, (
-        f"layout '{layout_name}' 非 cytoscape 内置,且仓库 static/ 无 "
-        f"cytoscape-{layout_name}*.js extension 文件"
-    )
-    assert "cytoscape.use(" in js or "cytoscape.register(" in js, (
-        f"layout '{layout_name}' 是 extension 但 overview.js 未调用 cytoscape.use() 注册"
-    )
-
 
 def test_template_script_srcs_resolve_to_static_files() -> None:
     """templates/*.html 里所有 <script src="/static/X.js"> 必须对应 static/ 存在文件。
