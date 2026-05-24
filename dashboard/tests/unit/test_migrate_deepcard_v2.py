@@ -44,7 +44,7 @@ def _load_payload(db_path: Path, cap_id: str) -> dict[str, object]:
     conn = sqlite3.connect(db_path)
     row = conn.execute("SELECT payload FROM deep_cards WHERE cap_id = ?", (cap_id,)).fetchone()
     conn.close()
-    return json.loads(row[0])  # type: ignore[no-any-return]
+    return json.loads(row[0])
 
 
 def test_migrate_v1_becomes_v2(db_with_v1_cards: Path) -> None:

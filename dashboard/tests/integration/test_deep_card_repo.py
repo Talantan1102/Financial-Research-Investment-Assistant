@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from dashboard.derive.deep_card_types import AlternativeItem, DeepCard
 from dashboard.state.db import open_db
 from dashboard.state.repositories import DeepCardRepo
@@ -64,8 +66,6 @@ def test_update_field_manual_to_manual(tmp_path: Path) -> None:
 
 
 def test_update_field_unknown_raises(tmp_path: Path) -> None:
-    import pytest
-
     conn = open_db(tmp_path / "t.db")
     repo = DeepCardRepo(conn)
     repo.upsert(DeepCard(cap_id="x"))
@@ -80,3 +80,31 @@ def test_get_all_returns_all(tmp_path: Path) -> None:
     repo.upsert(DeepCard(cap_id="b"))
     cards = repo.get_all()
     assert {c.cap_id for c in cards} == {"a", "b"}
+
+
+def test_update_field_scenario(tmp_path: Path) -> None:
+    conn = open_db(tmp_path / "t.db")
+    repo = DeepCardRepo(conn)
+    repo.upsert(DeepCard(cap_id="x", schema_version=2))
+    repo.update_field("x", "scenario", "this solves Y")
+    got = repo.get("x")
+    assert got is not None
+    assert got.scenario == "this solves Y"
+
+
+def test_update_field_screenshots(tmp_path: Path) -> None:
+    conn = open_db(tmp_path / "t.db")
+    repo = DeepCardRepo(conn)
+    repo.upsert(DeepCard(cap_id="x", schema_version=2))
+    repo.update_field("x", "screenshots", ["screenshots/x/a.png", "screenshots/x/b.png"])
+    got = repo.get("x")
+    assert got is not None
+    assert got.screenshots == ["screenshots/x/a.png", "screenshots/x/b.png"]
+
+
+def test_update_field_unknown_raises_v2(tmp_path: Path) -> None:
+    conn = open_db(tmp_path / "t.db")
+    repo = DeepCardRepo(conn)
+    repo.upsert(DeepCard(cap_id="x"))
+    with pytest.raises(KeyError):
+        repo.update_field("x", "not_a_field", "value")
