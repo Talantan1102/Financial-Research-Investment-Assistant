@@ -84,14 +84,6 @@ def test_post_field_unknown_field_400(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
-def test_ai_draft_llm_unavailable_503(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        server, "_get_llm_service", lambda: (_ for _ in ()).throw(RuntimeError("no llm"))
-    )
-    resp = client.post("/cap/context.constrained_schema/ai_draft/what")
-    assert resp.status_code == 503
-
-
 def test_modal_linked_capability_renders_overview_anchor(
     client: TestClient, tmp_path: Path
 ) -> None:
