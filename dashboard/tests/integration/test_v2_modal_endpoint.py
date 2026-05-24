@@ -1,4 +1,4 @@
-"""V2 modal endpoint (GET /cap/{id})。Plan 1 Task 11。"""
+"""V2 cap expand endpoint (GET /cap/{id}/expand)。Plan 1 Task 11 → Plan 2 Task 7 route rename。"""
 
 from __future__ import annotations
 
@@ -26,31 +26,29 @@ def test_modal_returns_html(client: TestClient, tmp_path: Path) -> None:
     DeepCardRepo(conn).upsert(
         DeepCard(
             cap_id="context.skills_bundle",
-            what="Anthropic Skills bundle 17 件",
-            why="progressive disclosure",
+            scenario="this is the scenario",
         )
     )
-    resp = client.get("/cap/context.skills_bundle")
+    resp = client.get("/cap/context.skills_bundle/expand")
     assert resp.status_code == 200
     body = resp.text
-    assert "Anthropic Skills bundle" in body
-    assert "progressive disclosure" in body
-    assert 'class="deep-card"' in body
-    assert "data-modal-content" in body
+    assert "this is the scenario" in body
+    assert "cap-detail-inner" in body
 
 
 def test_modal_unknown_cap_returns_404(client: TestClient) -> None:
-    resp = client.get("/cap/nonexistent.cap")
+    resp = client.get("/cap/nonexistent.cap/expand")
     assert resp.status_code == 404
 
 
 def test_modal_known_cap_no_deep_card(client: TestClient) -> None:
-    """cap 在 yaml 但无 DeepCard → 显示 'AI 草拟' 按钮 / '(未填)' 引导。"""
-    resp = client.get("/cap/context.constrained_schema")
+    """cap 在 yaml 但无 DeepCard → 显示 6 字段空框架。"""
+    resp = client.get("/cap/context.constrained_schema/expand")
     assert resp.status_code == 200
     body = resp.text
-    assert "AI 草拟" in body
-    assert "(未填)" in body
+    assert "需求场景" in body
+    assert "设计方案" in body
+    assert "(待填)" in body
 
 
 def test_post_field_updates_deep_card(client: TestClient, tmp_path: Path) -> None:
@@ -84,21 +82,14 @@ def test_post_field_unknown_field_400(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
-def test_modal_linked_capability_renders_overview_anchor(
-    client: TestClient, tmp_path: Path
-) -> None:
-    """Plan 2 Task 10:linked_capabilities 渲染为 /overview#cap_{id} 跳转链接。"""
-    db = tmp_path / "board.db"
-    conn = open_db(db)
-    DeepCardRepo(conn).upsert(
-        DeepCard(
-            cap_id="context.skills_bundle",
-            what="Anthropic Skills bundle 17 件",
-            linked_capabilities=["context.cross_user_cache", "lifecycle.langgraph_skeleton"],
-        )
-    )
-    resp = client.get("/cap/context.skills_bundle")
+def test_expand_shows_6_fields(client: TestClient) -> None:
+    """Plan 2 Task 7: expand fragment contains all 6 field sections."""
+    resp = client.get("/cap/context.skills_bundle/expand")
     assert resp.status_code == 200
     body = resp.text
-    assert "/overview#cap_context.cross_user_cache" in body
-    assert "/overview#cap_lifecycle.langgraph_skeleton" in body
+    assert "需求场景" in body
+    assert "设计方案" in body
+    assert "Tradeoff" in body
+    assert "方案点评" in body
+    assert "实现效果" in body
+    assert "决策记录" in body

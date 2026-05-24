@@ -517,13 +517,15 @@ async def post_field_update(request: Request) -> HTMLResponse:
     return _render_deep_card_field(cap_id, field)
 
 
-async def deep_card_modal(request: Request) -> HTMLResponse:
-    """GET /cap/{cap_id} — V2 模块深读 modal HTML 片段(htmx swap into overlay)。"""
+async def cap_expand(request: Request) -> HTMLResponse:
+    """单击 capability chip — 返回 6 字段 inline fragment。Plan 2 Task 7。"""
     cap_id = request.path_params["cap_id"]
-    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    cfg = next((c for c in caps_cfg if c.id == cap_id), None)
+    cfg = next(
+        (c for c in load_capabilities(CONFIG_DIR / "capabilities.yaml") if c.id == cap_id),
+        None,
+    )
     if cfg is None:
-        return HTMLResponse(f"<div class='error'>cap not found: {cap_id}</div>", status_code=404)
+        return HTMLResponse(f"unknown cap: {cap_id}", status_code=404)
 
     conn = open_db(DB_PATH)
     try:
@@ -539,28 +541,8 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
         "dimension": cfg.dimension,
     }
 
-    content_fields: list[dict[str, object]] = []
-    for f in (
-        "what",
-        "why",
-        "alternatives",
-        "chosen_alternative",
-        "tradeoff",
-        "lessons_learned",
-    ):
-        value = getattr(card, f, None) if card else None
-        prov = card.provenance.get(f) if (card and card.provenance) else None
-        content_fields.append(
-            {
-                "field": f,
-                "value": value,
-                "provenance": prov,
-                "source": card.prefill_source if card else "manual",
-            }
-        )
-    template = templates.get_template("_deep_card_modal.html")
-    html = template.render(cap=cap, deep_card=card, content_fields=content_fields)
-    return HTMLResponse(html)
+    ctx = {"request": request, "cap": cap, "card": card}
+    return cast(HTMLResponse, templates.TemplateResponse("_deep_card_inline.html", ctx))
 
 
 def _extract_commit_times_for_caps(caps_cfg: list[object]) -> dict[str, str]:
@@ -805,7 +787,7 @@ app = Starlette(
         Route("/api/overview/graph.json", overview_graph_json),
         Route("/story", story_view),
         Route("/survey", survey_view),
-        Route("/cap/{cap_id}", deep_card_modal, methods=["GET"]),
+        Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
         Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),

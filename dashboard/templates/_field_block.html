@@ -1,0 +1,25 @@
+{# Plan 2 Task 7 — 单字段块 (可复用):label + markdown render + 编辑按钮 #}
+<section class="field-block field-{{ c.field_id }}{% if not c.enabled %} field-disabled{% endif %}"
+         data-field="{{ c.field_id }}">
+  <header class="field-head">
+    <span class="field-label">§ {{ c.label }}</span>
+    {% if c.enabled %}
+      <button type="button"
+              class="field-edit-btn"
+              onclick="window.harness?.editField?.('{{ c.id }}', '{{ c.field_id }}')">
+        ✎ 编辑
+      </button>
+    {% else %}
+      <span class="field-disabled-hint">(状态切到 lit 时启用)</span>
+    {% endif %}
+  </header>
+  <div class="field-body markdown-body"
+       id="field-{{ c.id }}-{{ c.field_id }}"
+       data-raw-markdown="{{ c.value|default('') }}">
+    {% if c.value %}
+      <pre class="markdown-fallback">{{ c.value }}</pre>
+    {% else %}
+      <p class="field-empty">(待填)</p>
+    {% endif %}
+  </div>
+</section>
