@@ -27,7 +27,7 @@ from dashboard.derive.path_router import load_dimensions
 from dashboard.derive.refresh_pipeline import RefreshPipeline
 from dashboard.derive.seed_ingest import SeedIngestService
 from dashboard.derive.snapshot_builder import build_snapshot
-from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
+from dashboard.derive.types import CapabilityStatus, SnapshotDict
 from dashboard.state.db import open_db
 from dashboard.state.keyword_recommender import recommend_by_keyword
 from dashboard.state.repositories import (
@@ -477,64 +477,13 @@ def _extract_commit_times_for_caps(caps_cfg: list[object]) -> dict[str, str]:
 
 
 async def story_view(request: Request) -> HTMLResponse:
-    """V4 故事时间线主页 — 三段式卡片流。spec § 5.4。"""
-    from dashboard.derive.story_builder import build_story_cards
+    """故事页 — Plan 4 改造:textarea + 客户端 marked + mermaid render。
 
-    qp = request.query_params
-    dims = qp.getlist("dim")
-    selected_dims: set[str] | None = set(dims) if dims else None
-    time_after = qp.get("after") or None
-    time_before = qp.get("before") or None
-    order = qp.get("order", "asc")
-
-    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-
-    # 抽 commit_time(可缓存,Plan 3 改为后台 job;Plan 2 每次现抽)
-    commit_times = _extract_commit_times_for_caps(list(caps_cfg))
-
-    snap = _get_or_build_snapshot()
-    all_caps: list[Capability] = []
-    for layer in snap["layers"]:
-        for cd in layer["capabilities"]:
-            all_caps.append(
-                Capability(
-                    id=cd["id"],
-                    dimension=cd["dimension"],
-                    name_cn=cd["name_cn"],
-                    name_en=cd["name_en"],
-                    status=cd["status"],
-                    derived_status=cd["derived_status"],
-                )
-            )
-
-    conn = open_db(DB_PATH)
-    try:
-        cards = DeepCardRepo(conn).get_all()
-    finally:
-        conn.close()
-
-    stories = build_story_cards(
-        all_caps,
-        cards,
-        commit_times=commit_times,
-        filter_dimensions=selected_dims,
-        time_after=time_after,
-        time_before=time_before,
-        order=order,
-    )
-    template = templates.get_template("story.html")
-    return HTMLResponse(
-        template.render(
-            stories=stories,
-            dimensions=main_dims,
-            selected_dims=selected_dims or set(),
-            time_after=time_after,
-            time_before=time_before,
-            order=order,
-            active_nav="story",
-        )
-    )
+    不再调用 story_builder(已退役)。skill 接入留后续:
+    在 textarea 旁加按钮触发 POST /story/generate → 返回 markdown 填 textarea。
+    """
+    ctx = {"request": request, "asset_v": ASSET_VERSION}
+    return cast(HTMLResponse, templates.TemplateResponse("story.html", ctx))
 
 
 async def related_capabilities(request: Request) -> JSONResponse:

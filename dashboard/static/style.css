@@ -2517,3 +2517,75 @@ details[open] .decision-note-toggle::before {
 }
 
 .hero-wips-block { padding: 8px 0 24px; }
+
+/* ============================================================
+ * Plan 4 Task 1 — /story page (textarea + render)
+ * ============================================================ */
+.story-block { padding: 36px 0 60px; }
+
+.story-head { margin-bottom: 28px; }
+.story-head h1 {
+  font-family: 'Newsreader', 'Noto Serif SC', serif;
+  font-size: 36px; font-weight: 500;
+  margin: 0 0 8px;
+  color: #1C1C1E;
+}
+.story-sub { color: #86868B; font-size: 14px; max-width: 640px; line-height: 1.7; }
+
+.story-editor { margin-bottom: 22px; }
+.story-label {
+  display: block; font-size: 11px;
+  font-family: 'Geist Mono', monospace;
+  text-transform: uppercase; letter-spacing: 0.10em;
+  color: #86868B;
+  margin-bottom: 6px;
+}
+.story-input {
+  width: 100%; min-height: 200px;
+  padding: 14px 18px;
+  border: 1px solid rgba(60,60,67,0.18);
+  border-radius: 10px;
+  background: white;
+  font: inherit; font-family: 'Geist Mono', 'SF Mono', monospace;
+  font-size: 13px; line-height: 1.6;
+  color: #1C1C1E;
+  resize: vertical;
+  transition: border-color 0.18s;
+}
+.story-input:focus {
+  outline: none;
+  border-color: #5E5CE6;
+  box-shadow: 0 0 0 3px rgba(94,92,230,0.12);
+}
+
+.story-output { margin-bottom: 28px; }
+.story-output-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 8px;
+}
+.story-output-label {
+  font-family: 'Geist Mono', monospace; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.10em;
+  color: #86868B;
+}
+.story-output-hint { font-size: 11px; color: #C7C7CC; font-family: 'Geist Mono', monospace; }
+.story-render {
+  min-height: 200px;
+  padding: 18px 22px;
+  background: rgba(245,245,247,0.6);
+  border-radius: 12px;
+  border: 1px solid rgba(60,60,67,0.06);
+}
+.story-placeholder { color: #C7C7CC; font-style: italic; font-size: 13px; }
+
+.story-help {
+  margin-top: 30px;
+  padding: 18px 22px;
+  border-left: 3px solid #5E5CE6;
+  background: rgba(94,92,230,0.04);
+  border-radius: 0 8px 8px 0;
+}
+.story-help h4 { margin: 0 0 8px; font-size: 13px; color: #5E5CE6; font-weight: 600; }
+.story-help ul { padding-left: 20px; margin: 0; }
+.story-help li { font-size: 12px; line-height: 1.7; color: #6E6E73; margin: 3px 0; }
+.story-help code { font-family: 'Geist Mono', monospace; font-size: 11px; background: rgba(94,92,230,0.10); padding: 1px 6px; border-radius: 4px; color: #5E5CE6; }

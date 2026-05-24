@@ -1,60 +1,59 @@
-{# V4 故事时间线 — 三段式卡片流 + filter pill + drop cap。spec § 5.4。 #}
+{# Plan 4 Task 1 — /story 改造:textarea + render area (marked + mermaid client-side) #}
 {% extends "base.html" %}
 {% block nav %}{% include "_board_nav.html" %}{% endblock %}
 {% block content %}
 
-{% set DIM_SHORT = {
-  'execution':     'exec',
-  'tool':          'tool',
-  'context':       'ctx',
-  'lifecycle':     'lc',
-  'observability': 'obs',
-  'verification':  'verif',
-  'governance':    'gov'
-} %}
+<section class="story-block">
+  <div class="stage">
+    <header class="story-head">
+      <h1>故事</h1>
+      <p class="story-sub">
+        从故事生成 skill 拿到 markdown,粘到下方。支持 mermaid sequenceDiagram(用户视角时序图)。
+      </p>
+    </header>
 
-<div class="section-marker">
-  <span class="sm-num">§ 03</span>
-  <span class="sm-title">Story · 三段式时间线</span>
-  <span class="sm-desc">书页排版 · drop cap · why / what / lessons 三切</span>
-</div>
+    <div class="story-editor">
+      <label class="story-label" for="story-input">skill 输出 markdown</label>
+      <textarea id="story-input"
+                class="story-input"
+                placeholder="把 skill 输出的 markdown 粘到这里 …
 
-<form method="get" class="story-filter">
-  <div class="filter-row">
-    <span class="filter-label">维度</span>
-    {% for d in dimensions %}
-      {% set short = DIM_SHORT.get(d.id, d.id) %}
-      <label class="pill{% if d.id in selected_dims %} active{% endif %}">
-        <input type="checkbox" name="dim" value="{{ d.id }}"
-          {% if d.id in selected_dims %}checked{% endif %} hidden>
-        <span class="dot dot-{{ short }}"></span>{{ d.name_cn }}
-      </label>
-    {% endfor %}
-  </div>
-  <div class="filter-row">
-    <span class="filter-label">时间窗</span>
-    <input type="date" name="after" value="{{ time_after or '' }}" class="filter-date">
-    <span class="filter-sep">~</span>
-    <input type="date" name="before" value="{{ time_before or '' }}" class="filter-date">
-    <select name="order" class="filter-select">
-      <option value="asc" {% if order == 'asc' %}selected{% endif %}>正序</option>
-      <option value="desc" {% if order == 'desc' %}selected{% endif %}>倒序</option>
-    </select>
-    <button type="submit" class="filter-apply">应用</button>
-  </div>
-</form>
+支持 mermaid 代码块,例如:
 
-{% if stories %}
-  <div class="story-rail">
-    {% for sc in stories %}
-      {% set sc_index = loop.index %}
-      {% include "_story_card.html" %}
-    {% endfor %}
-  </div>
-{% else %}
-  <div class="empty-state">
-    暂无 DeepCard 内容 — 先到 <a href="/">网格</a> 给一些 cap 填 DeepCard
-  </div>
-{% endif %}
+&#96;&#96;&#96;mermaid
+sequenceDiagram
+  User->>Planner: 提问 X
+  Planner->>Tool: 拉数据
+  Tool-->>Planner: 返回
+  Planner->>Writer: 生成 answer
+  Writer-->>User: 答案
+&#96;&#96;&#96;
+"
+                spellcheck="false"
+                aria-label="markdown 输入"></textarea>
+    </div>
 
+    <div class="story-output">
+      <header class="story-output-head">
+        <span class="story-output-label">渲染结果</span>
+        <span class="story-output-hint">实时 render — marked + mermaid</span>
+      </header>
+      <div id="story-out" class="story-render markdown-body" aria-live="polite">
+        <p class="story-placeholder">粘 markdown 后,渲染结果会显示在这里。</p>
+      </div>
+    </div>
+
+    <aside class="story-help">
+      <h4>skill 调用提示</h4>
+      <ul>
+        <li>本看板不直接调 skill — 在 Claude Code 或 CLI 内调你的故事 skill,把 markdown 输出粘回来即可</li>
+        <li>支持任何 marked.js 兼容的 markdown(标题、列表、code block、表格、引用、图片)</li>
+        <li>mermaid:用 <code>```mermaid</code> 代码块,前端 mermaid.js 自动渲染流程图 / 时序图</li>
+        <li>面试讲 capability 时:用户视角 → sequenceDiagram 是天然载体(scenario → planner → tool → critic → writer)</li>
+      </ul>
+    </aside>
+  </div>
+</section>
+
+<script src="/static/story.js?v={{ asset_v }}" defer></script>
 {% endblock %}
