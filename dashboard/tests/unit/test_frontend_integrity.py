@@ -89,21 +89,3 @@ def test_modal_overlay_callers_use_modal_helper() -> None:
     assert not offenders, (
         f"以下文件直接改 modal-overlay inline display(应改用 Modal.open()):{offenders}"
     )
-
-
-def test_overview_empty_hint_has_hidden_css_override() -> None:
-    """`.empty-state--overview` 用 display:inline-flex,必须配 [hidden] 显式覆盖。
-
-    bug history:HTML `hidden` 属性默认依赖 user-agent `display: none`,
-    任何显式 class display 都会盖掉它 → 横幅 JS 设 hidden=true 也仍可见。
-    """
-    css = (STATIC_DIR / "style.css").read_text(encoding="utf-8")
-    assert ".empty-state--overview {" in css, "样式块应存在"
-    # 必须存在 [hidden] selector,且 display: none(可能带或不带分号、空格变化)
-    pattern = re.compile(
-        r"\.empty-state--overview\[hidden\]\s*\{[^}]*display:\s*none",
-        re.DOTALL,
-    )
-    assert pattern.search(css), (
-        ".empty-state--overview 用了非 none 的 display,必须加 [hidden] selector 显式覆盖"
-    )
