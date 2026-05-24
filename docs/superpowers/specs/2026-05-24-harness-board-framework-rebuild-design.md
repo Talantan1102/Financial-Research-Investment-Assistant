@@ -2,7 +2,7 @@
 
 **作者**:Talantan1102
 **起草**:2026-05-24
-**状态**:Spec(待 plan 拆分)
+**状态**:Spec — Plan 1 ship 2026-05-24(flashcards 整条退役;DeepCard schema migration 留 Plan 2)
 **类型**:Refactor / IA 全洗 + 数据 schema 改 + UI 全新
 **参考论文**:Li et al., *Agent Harness Engineering: A Survey*, 2026
 **关联前序**:`docs/superpowers/specs/2026-05-20-harness-board-etclovg-migration-design.md`(7 维迁移已 ship,本 spec 在其上 reframe IA + 数据 model)
