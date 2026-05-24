@@ -5,7 +5,7 @@
 Usage:
     uv run --project backend python -m app.scripts.seed_deep_cards \\
         --seed dashboard/data/deep_cards_seed.jsonl \\
-        --db backend/data/board.db [--force] [--regenerate-flashcards]
+        --db backend/data/board.db [--force]
 """
 
 from __future__ import annotations
@@ -18,8 +18,6 @@ from pathlib import Path
 
 from dashboard.derive.deep_card_types import DeepCard
 from dashboard.derive.seed_ingest import SeedIngestService
-from dashboard.state.db import open_db
-from dashboard.state.repositories import DeepCardRepo, FlashcardRepo, regenerate_flashcards_for
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -45,7 +43,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="upsert 覆盖已存在 cap_id(默认 insert-if-missing 保护手动编辑)",
     )
-    parser.add_argument("--regenerate-flashcards", action="store_true")
     args = parser.parse_args(argv)
 
     seed_arg = Path(args.seed)
@@ -67,26 +64,6 @@ def main(argv: list[str] | None = None) -> int:
         f"overwritten={result.overwritten}, total_seed={result.total_seed}"
     )
 
-    if args.regenerate_flashcards:
-        # 复用 Plan 3 原逻辑 — 对所有刚被写入的 cap_id 重生成
-        from dashboard.derive.capability_resolver import load_capabilities
-
-        caps = load_capabilities(config_dir / "capabilities.yaml")
-        name_by_id = {c.id: c.name_cn for c in caps}
-        conn = open_db(db_path)
-        try:
-            dc_repo = DeepCardRepo(conn)
-            fc_repo = FlashcardRepo(conn)
-            for card in dc_repo.get_all():
-                regenerate_flashcards_for(
-                    card.cap_id,
-                    dc_repo=dc_repo,
-                    fc_repo=fc_repo,
-                    cap_name_cn=name_by_id.get(card.cap_id, card.cap_id),
-                )
-            print(f"Regenerated flashcards: {len(fc_repo.get_all())}")
-        finally:
-            conn.close()
     return 0
 
 
