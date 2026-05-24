@@ -542,27 +542,6 @@ async def story_view(request: Request) -> HTMLResponse:
     )
 
 
-async def survey_view(request: Request) -> HTMLResponse:
-    """§ 06 Survey — 5 个外部 agent 项目的 harness trick 调研结果,按 8 维度分组。
-
-    数据源 dashboard/data/external_agent_survey.jsonl,server 启动时 lru_cache 一次。
-    """
-    from dashboard.derive.survey_loader import group_by_dimension, load_survey, repo_summary
-
-    survey_path = DASHBOARD_ROOT / "data" / "external_agent_survey.jsonl"
-    tricks = load_survey(str(survey_path))
-    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    template = templates.get_template("survey.html")
-    return HTMLResponse(
-        template.render(
-            dimensions=main_dims,
-            tricks_by_dim=group_by_dimension(tricks),
-            repos=repo_summary(tricks),
-            active_nav="survey",
-        )
-    )
-
-
 async def related_capabilities(request: Request) -> JSONResponse:
     """GET /cap/{cap_id}/related?k=5 — 相关 cap 推荐 (Milvus 真路径 / keyword fallback)。"""
     cap_id = request.path_params["cap_id"]
@@ -616,7 +595,6 @@ app = Starlette(
         Route("/healthz", healthz),
         Route("/refresh", post_refresh, methods=["GET"]),
         Route("/story", story_view),
-        Route("/survey", survey_view),
         Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
         Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
         Route("/cap/{cap_id}/screenshot", post_screenshot, methods=["POST"]),
