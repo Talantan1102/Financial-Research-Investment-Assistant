@@ -1,0 +1,15 @@
+{# Plan 2 Task 9 — 单字段编辑时的图上传组件 #}
+<div class="screenshot-uploader" data-cap-id="{{ cap_id }}" data-field="{{ field_id }}">
+  <input type="file"
+         id="upload-{{ cap_id }}-{{ field_id }}"
+         class="upload-input"
+         accept="image/png,image/jpeg,image/gif,image/webp"
+         onchange="window.harness?.uploadScreenshot?.(this, '{{ cap_id }}', '{{ field_id }}')"
+         hidden>
+  <button type="button"
+          class="upload-btn"
+          onclick="document.getElementById('upload-{{ cap_id }}-{{ field_id }}').click()">
+    📷 上传图(≤ 500KB · png/jpg/gif/webp)
+  </button>
+  <span class="upload-status" id="status-{{ cap_id }}-{{ field_id }}"></span>
+</div>

@@ -83,7 +83,7 @@ def test_post_override_invalidates_and_swaps() -> None:
         )
         assert r.status_code == 200
         body = r.text
-        assert 'class="chip wip"' in body
+        assert "cap-chip--wip" in body
         # invalidate 验证:再 GET /,snapshot 含新 wip
         r2 = client.get("/")
         assert "context.long_term_memory" in r2.text  # capability 出现在页面
@@ -102,8 +102,8 @@ def test_post_override_clear_sentinel() -> None:
         assert r.status_code == 200
         body = r.text
         # clear 后回到 derived 状态(context.long_term_memory derive 是 todo,因 derive_rule type=manual)
-        assert 'class="chip todo"' in body
-        assert "stale-mark" not in body  # 派生 == status,无 stale
+        assert "cap-chip--todo" in body
+        # new chip template has no stale-mark
 
 
 def test_post_override_unknown_cap_id_returns_404_no_write() -> None:

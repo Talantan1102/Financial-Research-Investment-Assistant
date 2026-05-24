@@ -71,6 +71,15 @@ class DeepCard(BaseModel):
     srs_state: SrsState = Field(default_factory=SrsState)
     # 防幻觉
     provenance: dict[str, FieldProvenance] = Field(default_factory=dict)
+    # ----- v2 schema (Plan 2 framework rebuild) -----
+    schema_version: int = 1  # 1 = legacy 自由 JSON;2 = 6 字段固化
+    scenario: str | None = None
+    design: str | None = None
+    review: str | None = None
+    decisions_extracted_ids: list[str] = Field(default_factory=list)
+    decisions_user_notes: list[str] = Field(default_factory=list)
+    evidence: str | None = None
+    screenshots: list[str] = Field(default_factory=list)
     # 元
     prefill_source: PrefillSource = "manual"
     prefill_at: datetime | None = None

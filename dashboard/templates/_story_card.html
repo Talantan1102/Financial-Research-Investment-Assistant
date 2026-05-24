@@ -10,8 +10,8 @@
       {% endif %}
     </span>
     <a class="cap-link"
-       href="/cap/{{ sc.cap_id }}"
-       hx-get="/cap/{{ sc.cap_id }}"
+       href="/m/{{ sc.dimension }}#cap-{{ sc.cap_id }}"
+       hx-get="/cap/{{ sc.cap_id }}/expand"
        hx-target="#modal-overlay"
        hx-swap="innerHTML"
        onclick="if(window.Modal)Modal.open();">

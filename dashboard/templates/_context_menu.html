@@ -1,0 +1,30 @@
+{# Plan 2 Task 6 — 右键菜单 (3 状态切换 + 复制锚点链接) #}
+<div id="context-menu" class="ctx-menu" hidden role="menu" aria-hidden="true" data-cap-id="">
+  <button class="ctx-item ctx-item--lit"
+          type="button"
+          hx-post="/cap/__CAP__/status"
+          hx-vals='{"status":"lit"}'
+          data-status="lit">
+    <span class="ctx-dot dot-lit"></span> 标为已实现
+  </button>
+  <button class="ctx-item ctx-item--wip"
+          type="button"
+          hx-post="/cap/__CAP__/status"
+          hx-vals='{"status":"wip"}'
+          data-status="wip">
+    <span class="ctx-dot dot-wip"></span> 标为开发中
+  </button>
+  <button class="ctx-item ctx-item--todo"
+          type="button"
+          hx-post="/cap/__CAP__/status"
+          hx-vals='{"status":"todo"}'
+          data-status="todo">
+    <span class="ctx-dot dot-todo"></span> 标为未开发
+  </button>
+  <hr>
+  <button class="ctx-item ctx-item--anchor"
+          type="button"
+          onclick="window.harness?.copyAnchor?.()">
+    📋 复制锚点链接
+  </button>
+</div>

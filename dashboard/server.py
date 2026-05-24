@@ -130,6 +130,40 @@ async def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(request, "main.html", ctx)
 
 
+async def module_page_view(request: Request) -> HTMLResponse:
+    """模块页 — 单维度 capability 列表。Plan 2 Task 4。"""
+    dim_id = request.path_params["dim_id"]
+    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
+    dim = next((d for d in main_dims if d.id == dim_id), None)
+    if dim is None:
+        return HTMLResponse(f"unknown dim_id: {dim_id}", status_code=404)
+
+    conn = open_db(DB_PATH)
+    try:
+        snap_repo = SnapshotRepo(conn)
+        snap = snap_repo.get_latest()
+        if snap is None:
+            override_repo = OverrideRepo(conn)
+            overrides = override_repo.get_all()
+            snapshot = build_snapshot(PROJECT_ROOT, CONFIG_DIR, overrides=overrides)
+            snap = snapshot.to_dict()
+            snap_repo.save(snap["refreshed_at"], snap)
+    finally:
+        conn.close()
+
+    layer = next((L for L in snap["layers"] if L["id"] == dim_id), None)
+    if layer is None:
+        return HTMLResponse(f"no layer data for dim_id: {dim_id}", status_code=404)
+
+    ctx = {
+        "request": request,
+        "dim": dim,
+        "layer": layer,
+        "asset_v": ASSET_VERSION,
+    }
+    return cast(HTMLResponse, templates.TemplateResponse("_module_page.html", ctx))
+
+
 async def decisions_view(request: Request) -> HTMLResponse:
     """GET /decisions — render 全部决策卡 + filter UI(client JS)。"""
     decisions = extract_all()
@@ -263,6 +297,39 @@ async def post_override(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+async def post_status(request: Request) -> HTMLResponse:
+    """右键菜单切状态。Plan 2 Task 6;原 /capability/{id}/override 简化版。"""
+    cap_id = request.path_params["cap_id"]
+    form = await request.form()
+    status = form.get("status", "")
+    if status not in {"lit", "wip", "todo"}:
+        return HTMLResponse(f"invalid status: {status}", status_code=400)
+
+    conn = open_db(DB_PATH)
+    try:
+        OverrideRepo(conn).upsert(cap_id, cast(CapabilityStatus, status), reason="right-click")
+        SnapshotRepo(conn).invalidate()
+    finally:
+        conn.close()
+
+    cfg = next(
+        (c for c in load_capabilities(CONFIG_DIR / "capabilities.yaml") if c.id == cap_id),
+        None,
+    )
+    if cfg is None:
+        return HTMLResponse(f"unknown cap: {cap_id}", status_code=404)
+    chip_ctx = {
+        "request": request,
+        "c": {
+            "id": cfg.id,
+            "name_cn": cfg.name_cn,
+            "name_en": cfg.name_en,
+            "status": status,
+        },
+    }
+    return cast(HTMLResponse, templates.TemplateResponse("_capability_chip.html", chip_ctx))
+
+
 async def post_refresh(_request: Request) -> StreamingResponse:
     """SSE 5-step pipeline。spec § 2.1 / § 2.4。
 
@@ -349,6 +416,40 @@ async def _try_milvus_related(cap_id: str, k: int) -> tuple[list[dict[str, objec
     except Exception as e:  # noqa: BLE001
         logger.warning("Milvus related fallback: %s", e)
         return None, f"milvus_error:{e}"
+
+
+async def post_screenshot(request: Request) -> JSONResponse:
+    """图上传 endpoint。Plan 2 Task 9。"""
+    from starlette.datastructures import UploadFile as StarletteUploadFile
+
+    from dashboard.derive.screenshot_repo import UploadError, save_screenshot
+
+    cap_id = request.path_params["cap_id"]
+    form = await request.form()
+    upload_raw = form.get("file")
+    if not isinstance(upload_raw, StarletteUploadFile):
+        return JSONResponse({"error": "no file uploaded"}, status_code=400)
+    upload: StarletteUploadFile = upload_raw
+
+    try:
+        content = await upload.read()
+        result = save_screenshot(
+            DASHBOARD_ROOT,
+            cap_id,
+            content,
+            upload.content_type or "",
+            upload.filename or "image.png",
+        )
+    except UploadError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    return JSONResponse(
+        {
+            "path": result.rel_path,
+            "markdown": result.markdown,
+            "git_hint": result.git_hint,
+        }
+    )
 
 
 async def post_admin_milvus_reindex(_request: Request) -> JSONResponse:
@@ -450,13 +551,15 @@ async def post_field_update(request: Request) -> HTMLResponse:
     return _render_deep_card_field(cap_id, field)
 
 
-async def deep_card_modal(request: Request) -> HTMLResponse:
-    """GET /cap/{cap_id} — V2 模块深读 modal HTML 片段(htmx swap into overlay)。"""
+async def cap_expand(request: Request) -> HTMLResponse:
+    """单击 capability chip — 返回 6 字段 inline fragment。Plan 2 Task 7。"""
     cap_id = request.path_params["cap_id"]
-    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    cfg = next((c for c in caps_cfg if c.id == cap_id), None)
+    cfg = next(
+        (c for c in load_capabilities(CONFIG_DIR / "capabilities.yaml") if c.id == cap_id),
+        None,
+    )
     if cfg is None:
-        return HTMLResponse(f"<div class='error'>cap not found: {cap_id}</div>", status_code=404)
+        return HTMLResponse(f"unknown cap: {cap_id}", status_code=404)
 
     conn = open_db(DB_PATH)
     try:
@@ -472,28 +575,8 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
         "dimension": cfg.dimension,
     }
 
-    content_fields: list[dict[str, object]] = []
-    for f in (
-        "what",
-        "why",
-        "alternatives",
-        "chosen_alternative",
-        "tradeoff",
-        "lessons_learned",
-    ):
-        value = getattr(card, f, None) if card else None
-        prov = card.provenance.get(f) if (card and card.provenance) else None
-        content_fields.append(
-            {
-                "field": f,
-                "value": value,
-                "provenance": prov,
-                "source": card.prefill_source if card else "manual",
-            }
-        )
-    template = templates.get_template("_deep_card_modal.html")
-    html = template.render(cap=cap, deep_card=card, content_fields=content_fields)
-    return HTMLResponse(html)
+    ctx = {"request": request, "cap": cap, "card": card}
+    return cast(HTMLResponse, templates.TemplateResponse("_deep_card_inline.html", ctx))
 
 
 def _extract_commit_times_for_caps(caps_cfg: list[object]) -> dict[str, str]:
@@ -725,6 +808,7 @@ async def lifespan(_app: Starlette) -> AsyncIterator[None]:
 app = Starlette(
     routes=[
         Route("/", index),
+        Route("/m/{dim_id}", module_page_view),
         Route("/healthz", healthz),
         Route("/decisions", decisions_view),
         Route("/decisions/{decision_id}/note", post_decision_note, methods=["POST"]),
@@ -737,7 +821,9 @@ app = Starlette(
         Route("/api/overview/graph.json", overview_graph_json),
         Route("/story", story_view),
         Route("/survey", survey_view),
-        Route("/cap/{cap_id}", deep_card_modal, methods=["GET"]),
+        Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
+        Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
+        Route("/cap/{cap_id}/screenshot", post_screenshot, methods=["POST"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
         Route(

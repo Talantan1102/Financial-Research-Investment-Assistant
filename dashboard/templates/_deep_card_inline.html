@@ -1,0 +1,39 @@
+{# Plan 2 Task 7 — inline expand 6 字段视图 #}
+<div class="cap-detail-inner">
+  <header class="cap-detail-head">
+    <span class="cap-detail-id">{{ cap.id }}</span>
+    <span class="cap-detail-status status--{{ cap.status }}">{{ cap.status }}</span>
+    <span class="cap-detail-dim">§ {{ cap.dimension }}</span>
+  </header>
+
+  {% set fields = [
+    ('scenario',   '需求场景',    card.scenario if card else None,   true),
+    ('design',     '设计方案',    card.design if card else None,     true),
+    ('tradeoff',   'Tradeoff',    card.tradeoff if card else None,   true),
+    ('review',     '方案点评',    card.review if card else None,     true),
+    ('evidence',   '实现效果',    card.evidence if card else None,   cap.status == 'lit'),
+  ] %}
+
+  {% for fid, label, value, enabled in fields %}
+    {% set c = {'id': cap.id, 'field_id': fid, 'label': label, 'value': value, 'enabled': enabled} %}
+    {% include "_field_block.html" %}
+  {% endfor %}
+
+  <section class="field-block field-decisions">
+    <header class="field-head">
+      <span class="field-label">§ 决策记录</span>
+      <span class="field-meta">{{ (card.decisions_extracted_ids|length if card else 0) }} 派生 · {{ (card.decisions_user_notes|length if card else 0) }} note</span>
+    </header>
+    <div class="field-body">
+      {% if card and card.decisions_extracted_ids %}
+        <ul class="decisions-list">
+          {% for did in card.decisions_extracted_ids %}
+            <li>◇ <code>{{ did }}</code></li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="field-empty">(暂无关联决策 — 后续从 spec/plan 自动抽取)</p>
+      {% endif %}
+    </div>
+  </section>
+</div>

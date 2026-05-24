@@ -75,3 +75,29 @@ def test_srs_state_defaults() -> None:
     assert s.repetition == 0
     assert s.last_reviewed_at is None
     assert s.next_review_at is None
+
+
+def test_deepcard_accepts_v2_fields() -> None:
+    card = DeepCard(
+        cap_id="x.y",
+        schema_version=2,
+        scenario="why this exists",
+        design="how it works",
+        tradeoff="A vs B",
+        review="pros and cons",
+        decisions_extracted_ids=["dec_001"],
+        decisions_user_notes=["my note"],
+        evidence="proof of work",
+        screenshots=["screenshots/x.y/foo.png"],
+    )
+    assert card.schema_version == 2
+    assert card.scenario == "why this exists"
+    assert card.screenshots == ["screenshots/x.y/foo.png"]
+
+
+def test_deepcard_v2_fields_default_safe() -> None:
+    card = DeepCard(cap_id="x.y")
+    assert card.schema_version == 1
+    assert card.scenario is None
+    assert card.screenshots == []
+    assert card.decisions_extracted_ids == []
