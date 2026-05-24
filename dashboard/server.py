@@ -8,7 +8,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -25,7 +25,6 @@ logger = logging.getLogger(__name__)
 from dashboard.derive.app_shell_stat import compute_app_shell_stat
 from dashboard.derive.capability_resolver import load_capabilities, resolve_status
 from dashboard.derive.decision_extractor import extract_all, resolve_memory_path
-from dashboard.derive.deep_card_types import Flashcard
 from dashboard.derive.path_router import load_dimensions
 from dashboard.derive.refresh_pipeline import RefreshPipeline
 from dashboard.derive.seed_ingest import SeedIngestService
@@ -36,10 +35,8 @@ from dashboard.state.keyword_recommender import recommend_by_keyword
 from dashboard.state.repositories import (
     DecisionNoteRepo,
     DeepCardRepo,
-    FlashcardRepo,
     OverrideRepo,
     SnapshotRepo,
-    regenerate_flashcards_for,
 )
 
 MILVUS_HOST = os.getenv("HARNESS_BOARD_MILVUS_HOST")
@@ -107,7 +104,6 @@ async def index(request: Request) -> HTMLResponse:
             dc = deep_cards_by_id.get(c["id"])
             # TypedDict 不支持动态 key,但 chip 模板用 dict access 兼容
             c["completion_level"] = completion_level_or_none(dc)  # type: ignore[typeddict-unknown-key]
-            c["confidence"] = dc.srs_state.confidence if dc else 0  # type: ignore[typeddict-unknown-key]
 
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
     # App Shell 第 9 行 mini stat
@@ -385,7 +381,6 @@ async def post_admin_milvus_reindex(_request: Request) -> JSONResponse:
                 "dimension": (card.cap_id.split(".", 1)[0] if "." in card.cap_id else ""),
                 "name_cn": name_cn,
                 "status": "lit",
-                "confidence": card.srs_state.confidence,
             }
         )
     if texts:
@@ -435,24 +430,6 @@ def _render_deep_card_field(cap_id: str, field_name: str) -> HTMLResponse:
     return HTMLResponse(html)
 
 
-def _regenerate_flashcards_if_known(cap_id: str) -> None:
-    """V2 编辑或 AI 草拟后触发闪卡重生成。cap 未在 yaml 中时静默跳过(不阻塞编辑)。"""
-    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    cfg = next((c for c in caps_cfg if c.id == cap_id), None)
-    if cfg is None:
-        return
-    conn = open_db(DB_PATH)
-    try:
-        regenerate_flashcards_for(
-            cap_id,
-            dc_repo=DeepCardRepo(conn),
-            fc_repo=FlashcardRepo(conn),
-            cap_name_cn=cfg.name_cn,
-        )
-    finally:
-        conn.close()
-
-
 async def post_field_update(request: Request) -> HTMLResponse:
     """POST /cap/{cap_id}/field/{field} — V2 inline 编辑保存。"""
     cap_id = request.path_params["cap_id"]
@@ -470,95 +447,6 @@ async def post_field_update(request: Request) -> HTMLResponse:
         DeepCardRepo(conn).update_field(cap_id, field, value_raw.strip())
     finally:
         conn.close()
-    _regenerate_flashcards_if_known(cap_id)
-    return _render_deep_card_field(cap_id, field)
-
-
-async def post_ai_draft(request: Request) -> HTMLResponse:
-    """POST /cap/{cap_id}/ai_draft/{field} — V2 AI 草拟单字段。"""
-    from dashboard.derive.deep_card_types import DeepCard
-    from dashboard.derive.llm_prefill_prompt import (
-        PrefillRequest,
-        SingleFieldPrefillResponse,
-        build_single_field_prefill_prompt,
-    )
-    from dashboard.derive.provenance import verify_quote_in_source
-
-    cap_id = request.path_params["cap_id"]
-    field = request.path_params["field"]
-    if field not in {
-        "what",
-        "why",
-        "alternatives",
-        "chosen_alternative",
-        "tradeoff",
-        "lessons_learned",
-    }:
-        return HTMLResponse(f"field not draftable: {field}", status_code=400)
-    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    cfg = next((c for c in caps_cfg if c.id == cap_id), None)
-    if cfg is None:
-        return HTMLResponse("cap not found", status_code=404)
-
-    try:
-        llm: object = _get_llm_service()
-    except Exception as e:
-        return HTMLResponse(f"LLM unavailable: {e}", status_code=503)
-
-    # 取已有 linked_specs / memories(Plan 2 可 enrich,Plan 1 仅用现有)
-    conn = open_db(DB_PATH)
-    try:
-        repo = DeepCardRepo(conn)
-        existing = repo.get(cap_id)
-    finally:
-        conn.close()
-    linked_specs = list(existing.linked_specs) if existing else []
-    linked_memories = list(existing.linked_memories) if existing else []
-
-    req = PrefillRequest(
-        cap_id=cap_id,
-        cap_name_cn=cfg.name_cn,
-        linked_spec_paths=linked_specs,
-        linked_memory_paths=linked_memories,
-        decisions_summary=[],
-    )
-    prompt = build_single_field_prefill_prompt(req, field_name=field)
-    try:
-        resp = llm.chat(  # type: ignore[attr-defined]
-            prompt=prompt, tier="balanced", schema=SingleFieldPrefillResponse
-        )
-    except Exception as e:
-        return HTMLResponse(f"LLM error: {e}", status_code=502)
-
-    parsed_raw = getattr(resp, "parsed", None)
-    if isinstance(parsed_raw, SingleFieldPrefillResponse):
-        parsed = parsed_raw
-    else:
-        parsed = SingleFieldPrefillResponse.model_validate_json(resp.content)
-    if not parsed.provenance.quote:
-        return HTMLResponse("LLM gave up (no quote)", status_code=422)
-    check = verify_quote_in_source(
-        parsed.provenance.quote, parsed.provenance.source, base_dir=PROJECT_ROOT
-    )
-    if not check.ok:
-        return HTMLResponse(f"provenance 校验失败:{check.reason}", status_code=422)
-
-    # 写入字段 + provenance + 标 prefill_source = llm
-    conn = open_db(DB_PATH)
-    try:
-        repo = DeepCardRepo(conn)
-        repo.update_field(cap_id, field, parsed.value)
-        card = repo.get(cap_id)
-        assert card is not None
-        new_prov = dict(card.provenance)
-        new_prov[field] = parsed.provenance
-        new_data = card.model_dump()
-        new_data["provenance"] = {k: v.model_dump() for k, v in new_prov.items()}
-        new_data["prefill_source"] = "llm"
-        repo.upsert(DeepCard.model_validate(new_data))
-    finally:
-        conn.close()
-    _regenerate_flashcards_if_known(cap_id)
     return _render_deep_card_field(cap_id, field)
 
 
@@ -582,7 +470,6 @@ async def deep_card_modal(request: Request) -> HTMLResponse:
         "name_cn": cfg.name_cn,
         "status": derived_status,
         "dimension": cfg.dimension,
-        "confidence": card.srs_state.confidence if card else 0,
     }
 
     content_fields: list[dict[str, object]] = []
@@ -821,190 +708,9 @@ async def related_capabilities(request: Request) -> JSONResponse:
     return JSONResponse(payload, headers={"X-Milvus-Status": "fallback"})
 
 
-async def flashcards_today(request: Request) -> HTMLResponse:  # noqa: ARG001
-    """V5 每日复习入口 — 新卡 ≤5 + 到期 ≤20。spec § 5.5。"""
-    from datetime import UTC, datetime
-
-    conn = open_db(DB_PATH)
-    try:
-        all_fcs = FlashcardRepo(conn).get_all()
-    finally:
-        conn.close()
-
-    now = datetime.now(UTC)
-    new_cards: list[Flashcard] = [f for f in all_fcs if f.srs_state.repetition == 0][:5]
-    due: list[Flashcard] = [
-        f
-        for f in all_fcs
-        if f.srs_state.repetition > 0
-        and f.srs_state.next_review_at is not None
-        and f.srs_state.next_review_at <= now
-    ][:20]
-
-    today_cards = new_cards + due
-    template = templates.get_template("flashcards.html")
-    return HTMLResponse(
-        template.render(
-            today_cards=today_cards,
-            active_nav="flashcards",
-        )
-    )
-
-
-async def post_flashcard_review(request: Request) -> HTMLResponse:
-    """V5 单卡 0-5 自评 → SM-2 → 新 srs_state 落库。spec § 5.5。"""
-    from dashboard.derive.srs import schedule_next_review
-
-    flashcard_id = request.path_params["flashcard_id"]
-    form = await request.form()
-    grade_raw = form.get("grade", "")
-    if not isinstance(grade_raw, str):
-        return HTMLResponse("invalid grade", status_code=400)
-    try:
-        grade = int(grade_raw)
-    except ValueError:
-        return HTMLResponse("invalid grade", status_code=400)
-    if not 0 <= grade <= 5:
-        return HTMLResponse("grade must be 0..5", status_code=400)
-
-    conn = open_db(DB_PATH)
-    try:
-        repo = FlashcardRepo(conn)
-        fc = repo.get(flashcard_id)
-        if fc is None:
-            return HTMLResponse("flashcard not found", status_code=404)
-        new_state = schedule_next_review(fc.srs_state, grade=grade)
-        updated = fc.model_copy(
-            update={
-                "srs_state": new_state,
-                "last_reviewed_at": new_state.last_reviewed_at,
-            }
-        )
-        repo.upsert(updated)
-    finally:
-        conn.close()
-
-    assert new_state.next_review_at is not None
-    return HTMLResponse(
-        (
-            f"<div class='flashcard flashcard-reviewed' data-fc-reviewed='1'>"
-            f"✅ 已复习 → 下次:{new_state.next_review_at.date()} "
-            f"(conf={grade})"
-            f"</div>"
-        ),
-        headers={"X-Reviewed": "1"},
-    )
-
-
-def _compute_streak_days(review_dates: list[date]) -> int:
-    """连续复习天数 — 从今天往前数,直到第一个 gap。"""
-    if not review_dates:
-        return 0
-    unique = sorted(set(review_dates), reverse=True)
-    today = datetime.now(UTC).date()
-    streak = 0
-    expected = today
-    for d in unique:
-        if d == expected:
-            streak += 1
-            expected = expected - timedelta(days=1)
-        elif d == expected + timedelta(days=1):
-            # 今天没复习但昨天复习了 — streak 从昨天起算
-            if streak == 0:
-                expected = d
-                streak = 1
-                expected = expected - timedelta(days=1)
-            else:
-                break
-        else:
-            break
-    return streak
-
-
-async def flashcards_stats_json(_request: Request) -> JSONResponse:
-    """Plan 3 — flashcards_stats.html 的数据 endpoint。"""
-    conn = open_db(DB_PATH)
-    try:
-        fcs = FlashcardRepo(conn).get_all()
-    finally:
-        conn.close()
-
-    total = len(fcs)
-    if total == 0:
-        return JSONResponse(
-            {
-                "total": 0,
-                "today": 0,
-                "avg_confidence": 0.0,
-                "streak_days": 0,
-                "timeline": [],
-                "scatter": [],
-            }
-        )
-
-    today_utc = datetime.now(UTC).date()
-    reviewed = [f for f in fcs if f.srs_state.last_reviewed_at is not None]
-    today_count = sum(
-        1
-        for f in reviewed
-        if f.srs_state.last_reviewed_at and f.srs_state.last_reviewed_at.date() == today_utc
-    )
-
-    # 平均 confidence(只算已复习过的;空则 0)
-    if reviewed:
-        avg_conf = round(sum(f.srs_state.confidence for f in reviewed) / len(reviewed), 2)
-    else:
-        avg_conf = 0.0
-
-    # 连续天数
-    streak = _compute_streak_days(
-        [f.srs_state.last_reviewed_at.date() for f in reviewed if f.srs_state.last_reviewed_at]
-    )
-
-    # 时间线:过去 30 天,每个 reviewed flashcard 一个点
-    cutoff = today_utc - timedelta(days=30)
-    timeline = []
-    for f in reviewed:
-        if f.srs_state.last_reviewed_at is None:
-            continue
-        d = f.srs_state.last_reviewed_at.date()
-        if d < cutoff:
-            continue
-        timeline.append({"date": d.isoformat(), "grade": f.srs_state.confidence})
-    timeline.sort(key=lambda x: str(x["date"]))
-
-    # 散点:每卡 (dim, conf);dim 由 cap_id 前缀派生 — 跟 capabilities.yaml 维度一致
-    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    cap_to_dim = {c.id: c.dimension for c in caps_cfg}
-    scatter = []
-    for f in fcs:
-        dim = cap_to_dim.get(f.cap_id, "unknown")
-        scatter.append({"dim": dim, "conf": f.srs_state.confidence})
-
-    return JSONResponse(
-        {
-            "total": total,
-            "today": today_count,
-            "avg_confidence": avg_conf,
-            "streak_days": streak,
-            "timeline": timeline,
-            "scatter": scatter,
-        }
-    )
-
-
-async def flashcards_stats(_request: Request) -> HTMLResponse:  # noqa: ARG001
-    """V5 学习统计页 — 只 render 静态壳,数据 JS 拉 /api/flashcards/stats.json。"""
-    template = templates.get_template("flashcards_stats.html")
-    return HTMLResponse(template.render(active_nav="flashcards"))
-
-
 @asynccontextmanager
 async def lifespan(_app: Starlette) -> AsyncIterator[None]:
-    """startup:db DeepCard 数 < seed 总数时 insert-if-missing 跑一次。
-
-    spec § 2.5。不删除任何 row,保护 SRS flashcard 进度。
-    """
+    """startup:db DeepCard 数 < seed 总数时 insert-if-missing 跑一次。spec § 2.5。"""
     try:
         SeedIngestService(
             seed_path=SEED_PATH,
@@ -1034,15 +740,6 @@ app = Starlette(
         Route("/cap/{cap_id}", deep_card_modal, methods=["GET"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
-        Route("/cap/{cap_id}/ai_draft/{field}", post_ai_draft, methods=["POST"]),
-        Route("/flashcards/today", flashcards_today),
-        Route("/flashcards/stats", flashcards_stats),
-        Route("/api/flashcards/stats.json", flashcards_stats_json),
-        Route(
-            "/flashcards/{flashcard_id:path}/review",
-            post_flashcard_review,
-            methods=["POST"],
-        ),
         Route(
             "/admin/milvus/reindex",
             post_admin_milvus_reindex,

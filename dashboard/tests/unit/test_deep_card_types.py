@@ -1,4 +1,4 @@
-"""DeepCard / Flashcard / Provenance 类型验证。Plan 1 Task 1。"""
+"""DeepCard / SrsState / Provenance 类型验证。Plan 1 Task 1。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from dashboard.derive.deep_card_types import (
     CodeAnchor,
     DeepCard,
     FieldProvenance,
-    Flashcard,
     SrsState,
 )
 
@@ -76,14 +75,3 @@ def test_srs_state_defaults() -> None:
     assert s.repetition == 0
     assert s.last_reviewed_at is None
     assert s.next_review_at is None
-
-
-def test_flashcard_minimal() -> None:
-    f = Flashcard(
-        id="01.constrained_schema::tradeoff",
-        cap_id="01.constrained_schema",
-        template_kind="tradeoff",
-        question="什么 tradeoff?",
-        answer="选 schema",
-    )
-    assert f.srs_state.confidence == 0

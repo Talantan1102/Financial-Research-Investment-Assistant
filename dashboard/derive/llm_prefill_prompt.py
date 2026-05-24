@@ -39,7 +39,10 @@ class PrefillResponse(BaseModel):
 
 
 class SingleFieldPrefillResponse(BaseModel):
-    """AI 草拟单字段 — POST /cap/{id}/ai_draft/{name} 用。"""
+    """AI 草拟单字段 — 通过 backend/app/scripts/prefill_deep_cards CLI 批量调用。
+
+    (原 POST /cap/{id}/ai_draft/{name} endpoint 已在 Plan 1 退役)
+    """
 
     model_config = ConfigDict(extra="forbid")
     value: str
