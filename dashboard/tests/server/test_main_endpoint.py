@@ -71,8 +71,8 @@ def test_get_refresh_returns_sse_event_stream() -> None:
             assert "event: done" in body
 
 
-def test_index_shows_app_shell_row() -> None:
-    """Plan 3 Task 2 — 首页含 Topology hero 和 7 模块链接(App Shell 行已退役至模块页)。"""
+def test_index_shows_topology_hero() -> None:
+    """Plan 3 Task 2 — 首页含 Topology hero 和 7 模块链接。"""
     with TestClient(app) as client:
         r = client.get("/")
         body = r.text
