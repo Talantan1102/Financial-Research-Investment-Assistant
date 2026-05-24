@@ -1,4 +1,4 @@
-"""DeepCard / SrsState / Provenance 类型验证。Plan 1 Task 1。"""
+"""DeepCard / Provenance 类型验证。Plan 1 Task 1。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from dashboard.derive.deep_card_types import (
     CodeAnchor,
     DeepCard,
     FieldProvenance,
-    SrsState,
 )
 
 
@@ -20,7 +19,6 @@ def test_deep_card_minimal_fields() -> None:
     assert card.cap_id == "01.constrained_schema"
     assert card.what is None
     assert card.alternatives == []
-    assert card.srs_state.confidence == 0
     assert card.prefill_source == "manual"
 
 
@@ -44,7 +42,6 @@ def test_deep_card_full_fields_roundtrip() -> None:
         provenance={
             "what": FieldProvenance(quote="LLM 输出强制走", source="docs/.../design.md#§2"),
         },
-        srs_state=SrsState(confidence=3, ef=2.5, interval=4, repetition=2),
         prefill_source="hybrid",
     )
     dumped = card.model_dump_json()
@@ -65,16 +62,6 @@ def test_chosen_alternative_must_match_one_of_alternatives() -> None:
         chosen_alternative="B",  # 不匹配 — Plan 1 仅 Pydantic 不报,Plan 3 闪卡生成时再校验
     )
     assert card.chosen_alternative == "B"
-
-
-def test_srs_state_defaults() -> None:
-    s = SrsState()
-    assert s.confidence == 0
-    assert s.ef == 2.5
-    assert s.interval == 0
-    assert s.repetition == 0
-    assert s.last_reviewed_at is None
-    assert s.next_review_at is None
 
 
 def test_deepcard_accepts_v2_fields() -> None:

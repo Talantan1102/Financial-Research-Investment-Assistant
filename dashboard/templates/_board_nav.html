@@ -1,8 +1,8 @@
-{# Left nav-rail — 5 view entries + bottom refresh button #}
+{# Left nav-rail — home + story + refresh #}
 <nav class="nav-rail">
   <div class="brand-mark">H.</div>
 
-  <a href="/" class="nav-item{% if active_nav == 'grid' %} active{% endif %}" title="网格">
+  <a href="/" class="nav-item{% if active_nav == 'grid' %} active{% endif %}" title="首页 Topology">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <rect x="3" y="3" width="7" height="7"/>
       <rect x="14" y="3" width="7" height="7"/>
@@ -12,54 +12,12 @@
     Grid
   </a>
 
-  <a href="/overview" class="nav-item{% if active_nav == 'overview' %} active{% endif %}" title="鸟瞰">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
-      <circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>
-      <circle cx="12" cy="12" r="2"/>
-      <path d="M8 6L12 12M16 6L12 12M8 18L12 12M16 18L12 12"/>
-    </svg>
-    Map
-  </a>
-
   <a href="/story" class="nav-item{% if active_nav == 'story' %} active{% endif %}" title="故事">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
       <path d="M4 4h14a2 2 0 0 1 2 2v14M4 4v15a2 2 0 0 0 2 2h14M4 4l4 4M9 9h7M9 13h7M9 17h4"/>
     </svg>
     Story
   </a>
-
-  <a href="/decisions" class="nav-item{% if active_nav == 'decisions' %} active{% endif %}" title="决策">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <path d="M12 3v18M5 7l7-4 7 4M5 7v10l7 4 7-4V7"/>
-    </svg>
-    Forge
-  </a>
-
-  <a href="/survey" class="nav-item{% if active_nav == 'survey' %} active{% endif %}" title="外部 agent 项目调研">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <circle cx="11" cy="11" r="7"/>
-      <path d="M16.5 16.5L21 21M11 7v8M7 11h8"/>
-    </svg>
-    Survey
-  </a>
-
-  <hr class="nav-sep">
-  <div class="nav-modules" title="7 模块页(临时入口,Plan 3 主导航替代)">
-    {% for dim_id, letter, name in [
-      ('execution',     'E', '执行'),
-      ('tool',          'T', '工具'),
-      ('context',       'C', '上下文'),
-      ('lifecycle',     'L', '生命周期'),
-      ('observability', 'O', '可观测'),
-      ('verification',  'V', '验证'),
-      ('governance',    'G', '治理'),
-    ] %}
-      <a href="/m/{{ dim_id }}" class="nav-mod{% if active_nav == 'm.' ~ dim_id %} active{% endif %}" title="{{ name }}">
-        {{ letter }}
-      </a>
-    {% endfor %}
-  </div>
 
   <div class="nav-bottom">
     <button id="refresh-btn" class="refresh-btn" title="一键全量刷新" aria-label="全量刷新">

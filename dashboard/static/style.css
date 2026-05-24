@@ -162,15 +162,6 @@ body { padding-left: 80px; }
 .dot-observability { background: var(--dim-observability); }
 .dot-verification { background: var(--dim-verification); }
 .dot-governance   { background: var(--dim-governance); }
-/* V2 alias — 渐变到新 token,模板逐步换 class */
-.dot-prompt  { background: var(--dim-prompt); }
-.dot-tools   { background: var(--dim-tools); }
-.dot-orch    { background: var(--dim-orch); }
-.dot-memory  { background: var(--dim-memory); }
-.dot-rag     { background: var(--dim-rag); }
-.dot-guard   { background: var(--dim-guard); }
-.dot-eval    { background: var(--dim-eval); }
-.dot-cost    { background: var(--dim-cost); }
 
 /* =========================================================
    Keyframe animations
@@ -359,261 +350,10 @@ body { padding-left: 80px; }
 }
 .hero-wips a:hover { color: var(--teal); border-bottom-color: var(--teal); }
 
-/* =========================================================
-   Phase 2: Fingerprint
-   ========================================================= */
-.fingerprint {
-  width: 320px; height: 320px;
-  position: relative;
-}
-.fingerprint svg { width: 100%; height: 100%; }
-.fingerprint-caption {
-  margin-top: 12px;
-  font-family: var(--mono); font-size: 10px;
-  color: var(--fg-faint);
-  letter-spacing: 0.18em; text-transform: uppercase;
-  text-align: center;
-}
-.fingerprint-caption strong { color: var(--amber); font-weight: 500; }
 
-/* =========================================================
-   Phase 3: Layer stack + chip + view-toggle + kanban
-   ========================================================= */
 
-/* ---- view-toggle ---- */
-.view-toggle {
-  display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--hair);
-  margin-bottom: 32px;
-}
-.view-tab {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 10px 20px 9px;
-  text-decoration: none;
-  color: var(--fg-mute);
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  border-bottom: 2px solid transparent;
-  transition: color 200ms, border-color 200ms;
-}
-.view-tab:hover { color: var(--teal); border-bottom-color: var(--teal-soft); }
-.view-tab.active { color: var(--amber); border-bottom-color: var(--amber); }
-.tab-num {
-  font-family: var(--display);
-  font-style: italic;
-  font-size: 15px;
-  font-weight: 400;
-  letter-spacing: 0;
-}
-.tab-name { text-transform: uppercase; letter-spacing: 0.14em; }
 
-/* ---- layer-stack 12-col asymmetric grid ---- */
-.layer-stack {
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
-  gap: 20px;
-}
-.layer:nth-child(1)  { grid-column: span 7; }
-.layer:nth-child(2)  { grid-column: span 5; }
-.layer:nth-child(3)  { grid-column: span 4; }
-.layer:nth-child(4)  { grid-column: span 4; }
-.layer:nth-child(5)  { grid-column: span 4; }
-.layer:nth-child(6)  { grid-column: span 6; }
-.layer:nth-child(7)  { grid-column: span 6; }
-.layer:nth-child(8)  { grid-column: span 12; }
 
-.layer {
-  position: relative;
-  background: var(--paper);
-  border: 1px solid var(--hair);
-  border-radius: 4px;
-  padding: 22px 22px 18px;
-  overflow: hidden;
-  transition: border-color 240ms;
-}
-.layer:hover { border-color: rgba(200,148,86,0.25); }
-
-/* iOS Calm Minimal: numeral 水印删除(违背极简) - 保留 selector 但 display:none
-   避免模板内引用 .numeral 时空白 */
-.layer .numeral { display: none; }
-.layer .l-eyebrow {
-  font-family: var(--mono); font-size: 10px;
-  color: var(--fg-mute);
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  display: flex; align-items: center; gap: 10px;
-}
-.layer .l-eyebrow .dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-.layer .l-title {
-  margin: 8px 0 6px;
-  font-family: var(--display); font-weight: 400;
-  font-size: 24px; line-height: 1.22;
-  color: var(--fg);
-  font-variation-settings: "opsz" 48;
-  letter-spacing: -0.005em;
-}
-.layer .l-title .en {
-  display: block;
-  font-family: var(--display); font-style: italic;
-  font-size: 13px; color: var(--fg-mute);
-  font-weight: 300;
-  margin-top: 4px;
-  letter-spacing: 0.01em;
-}
-.layer .l-stat {
-  font-family: var(--mono); font-size: 11px;
-  color: var(--fg-mute);
-  margin: 14px 0 12px;
-  letter-spacing: 0.05em;
-  display: flex; align-items: center; gap: 8px;
-}
-.layer .l-stat .bar {
-  flex: 1;
-  height: 2px;
-  background: var(--hair);
-  position: relative;
-  overflow: hidden;
-}
-.layer .l-stat .bar i {
-  position: absolute; left: 0; top: 0; bottom: 0;
-  background: var(--lit);
-  transition: width 800ms cubic-bezier(0.22,1,0.36,1);
-}
-.layer .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-
-/* ---- chip — capability ---- */
-.chip {
-  position: relative;
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 4px 9px;
-  font-family: var(--mono); font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  border-radius: 2px;
-  cursor: pointer;
-  transition: transform 200ms, box-shadow 200ms, border-color 200ms, color 200ms;
-  border: 1px solid;
-  white-space: nowrap;
-}
-.chip.lit {
-  background: var(--lit-bg);
-  color: var(--lit);
-  border-color: rgba(148,184,122,0.30);
-}
-.chip.wip {
-  background: var(--wip-bg);
-  color: var(--wip);
-  border-color: rgba(212,130,74,0.35);
-}
-.chip.wip::after {
-  content: '';
-  position: absolute; top: 50%; right: -3px;
-  width: 4px; height: 4px; border-radius: 50%;
-  background: var(--wip);
-  transform: translateY(-50%);
-  box-shadow: 0 0 8px var(--wip);
-  animation: blink 1.6s ease-in-out infinite;
-}
-.chip.todo {
-  background: transparent;
-  color: var(--fg-mute);
-  border-color: var(--fg-faint);
-  border-style: dashed;
-}
-.chip:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 14px -6px rgba(0,0,0,0.6);
-  border-color: var(--amber);
-  color: var(--amber);
-}
-.chip .conf-dots {
-  display: inline-flex; gap: 1px;
-  opacity: 0.6;
-}
-.chip .conf-dots i {
-  width: 3px; height: 3px;
-  background: currentColor;
-  border-radius: 50%;
-  display: inline-block;
-}
-.chip .stale-mark {
-  color: var(--amber);
-  font-size: 14px;
-  line-height: 1;
-  opacity: 0.7;
-}
-@keyframes blink {
-  0%, 100% { opacity: 1; transform: translateY(-50%) scale(1); }
-  50%       { opacity: 0.35; transform: translateY(-50%) scale(0.6); }
-}
-
-/* Dimension dot colors */
-.dot-prompt  { background: #9b8cd4; }
-.dot-tools   { background: #6fb3d4; }
-.dot-orch    { background: #c89456; }
-.dot-memory  { background: #d4af6c; }
-.dot-rag     { background: #94b87a; }
-.dot-guard   { background: #c97b7b; }
-.dot-eval    { background: #b89764; }
-.dot-cost    { background: #c98aa9; }
-
-/* ---- kanban ---- */
-.kanban {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
-}
-.kanban-col {
-  background: var(--paper);
-  border: 1px solid var(--hair);
-  border-radius: 4px;
-  padding: 0;
-  overflow: hidden;
-}
-.kanban-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--hair);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-.kanban-head-label { color: var(--fg-mute); }
-.kanban-head-count {
-  font-family: var(--display);
-  font-style: italic;
-  font-size: 14px;
-  color: var(--amber);
-  font-weight: 400;
-  letter-spacing: 0;
-}
-.kanban-todo .kanban-head-label  { color: var(--fg-mute); }
-.kanban-doing .kanban-head-label { color: var(--wip); }
-.kanban-done .kanban-head-label  { color: var(--lit); }
-.kanban-body {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 16px;
-}
-.kanban-empty {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg-faint);
-  margin: 0;
-  font-style: italic;
-}
 
 /* ---- edit-select inline fallback ---- */
 .edit-select-form {
@@ -644,55 +384,7 @@ body { padding-left: 80px; }
 }
 .edit-select-form button:hover { background: var(--amber-deep); color: var(--ink); }
 
-/* =========================================================
-   Phase 4: overview frame + story rail + filter pill
-   ========================================================= */
-
-/* ---- Overview section ---- */
-.overview-section {
-  padding-top: 32px;
-}
-
-.overview-frame {
-  background: radial-gradient(ellipse 80% 60% at 50% 50%, var(--paper-2) 0%, var(--ink) 80%);
-  border: 1px solid var(--hair);
-  border-radius: 4px;
-  padding: 32px;
-  position: relative;
-  overflow: hidden;
-}
-
-.overview-toolbar {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 24px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg-mute);
-  letter-spacing: 0.05em;
-  flex-wrap: wrap;
-}
-
-.ov-label {
-  color: var(--fg-dim);
-  letter-spacing: 0.08em;
-}
-
-.ovsep {
-  color: var(--fg-faint);
-  margin: 0 4px;
-}
-
-.ov-count {
-  margin-left: auto;
-  color: var(--fg-faint);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.08em;
-}
-
-/* ---- Pill — shared between overview toolbar + story filter ---- */
+/* ---- Pill — shared between story filter ---- */
 .pill {
   padding: 4px 10px;
   border: 1px solid var(--hair);
@@ -722,51 +414,6 @@ body { padding-left: 80px; }
   color: var(--amber);
   border-color: var(--amber-deep);
   background: var(--amber-soft);
-}
-
-/* ---- Overview canvas ---- */
-.overview-canvas {
-  width: 100%;
-  height: 70vh;
-  position: relative;
-}
-
-/* ---- Overview tooltip ---- */
-.overview-tooltip {
-  position: fixed;
-  background: var(--paper-2);
-  border: 1px solid var(--hair);
-  border-radius: 4px;
-  padding: 8px 12px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--fg-dim);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-  pointer-events: none;
-  z-index: 50;
-  max-width: 240px;
-  line-height: 1.5;
-}
-
-/* ---- Overview empty-state floating bar ---- */
-.empty-state--overview {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 14px;
-  background: var(--amber-soft);
-  border: 1px solid var(--amber-deep);
-  border-radius: 999px;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--amber);
-  margin-bottom: 20px;
-}
-
-/* [hidden] 显式覆盖,优先级高于上面的 display:inline-flex */
-.empty-state--overview[hidden] {
-  display: none;
 }
 
 /* ---- Empty state minimal ---- */
@@ -815,99 +462,6 @@ body { padding-left: 80px; }
 
 .empty-cta:hover {
   background: var(--amber-soft);
-}
-
-/* ---- Overview legend ---- */
-.overview-legend {
-  position: absolute;
-  bottom: 24px;
-  right: 24px;
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--fg-mute);
-  display: flex;
-  gap: 14px;
-  letter-spacing: 0.05em;
-}
-
-.lg-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-.swatch.lit-glow {
-  background: var(--dim-memory);
-  box-shadow: 0 0 6px var(--dim-memory);
-}
-
-.swatch.wip-clay {
-  background: var(--wip);
-}
-
-.swatch.todo-dashed {
-  background: transparent;
-  border: 1px dashed var(--fg-faint);
-  border-radius: 50%;
-}
-
-/* ---- Overview fallback grid ---- */
-.overview-fallback-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 20px;
-  padding-top: 8px;
-}
-
-.dim-block {
-  background: var(--paper);
-  border: 1px solid var(--hair);
-  border-radius: 4px;
-  padding: 22px 22px 18px;
-  transition: border-color 240ms;
-}
-
-.dim-block:hover {
-  border-color: rgba(200,148,86,0.25);
-}
-
-.dim-block-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.dim-block-num {
-  font-family: var(--display);
-  font-weight: 400;
-  font-size: 22px;
-  font-style: italic;
-  color: var(--amber);
-  font-variation-settings: "opsz" 48;
-  line-height: 1;
-}
-
-.dim-block-name {
-  font-family: var(--display);
-  font-weight: 400;
-  font-size: 18px;
-  color: var(--fg);
-  font-variation-settings: "opsz" 36;
-}
-
-.dim-block-caps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 /* ---- Story section ---- */
@@ -2521,10 +2075,6 @@ details[open] .decision-note-toggle::before {
   color: var(--ink);
 }
 
-.empty-state--overview {
-  margin-bottom: 18px;
-}
-
 /* --- Error state --- */
 .error-state {
   display: flex;
@@ -2914,3 +2464,56 @@ details[open] .decision-note-toggle::before {
 }
 .nav-mod:hover { background: rgba(94,92,230,0.08); color: #5E5CE6; }
 .nav-mod.active { background: #5E5CE6; color: white; }
+
+/* ============================================================
+ * Plan 3 Task 2 — Topology homepage
+ * ============================================================ */
+.topology-block { padding: 24px 0 40px; }
+.topology-svg {
+  max-width: 880px;
+  margin: 30px auto 20px;
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.topology-box {
+  cursor: pointer;
+  transition: transform 0.18s, filter 0.18s;
+}
+.topology-box .box-rect {
+  transition: stroke 0.18s, fill 0.18s;
+}
+.topology-box:hover .box-rect {
+  stroke: #5E5CE6;
+  stroke-width: 1.5;
+  fill: rgba(94,92,230,0.04);
+}
+.topology-box:hover { filter: drop-shadow(0 2px 4px rgba(94,92,230,0.15)); }
+
+.topology-box--governance .box-rect,
+.topology-box--observability .box-rect { fill: rgba(94,92,230,0.06); }
+.topology-box--execution .box-rect { fill: rgba(245,245,247,0.6); }
+
+.topology-link { text-decoration: none; outline: none; }
+.topology-link:focus .box-rect { stroke: #5E5CE6; stroke-width: 2; }
+
+.topology-caption {
+  text-align: center;
+  font-size: 12px;
+  color: #86868B;
+  margin: 12px auto 0;
+  max-width: 760px;
+  line-height: 1.8;
+}
+.caption-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  background: rgba(60,60,67,0.05);
+  border-radius: 10px;
+  margin: 0 2px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: #1C1C1E;
+}
+
+.hero-wips-block { padding: 8px 0 24px; }

@@ -22,9 +22,7 @@ from starlette.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
-from dashboard.derive.app_shell_stat import compute_app_shell_stat
 from dashboard.derive.capability_resolver import load_capabilities, resolve_status
-from dashboard.derive.decision_extractor import extract_all, resolve_memory_path
 from dashboard.derive.path_router import load_dimensions
 from dashboard.derive.refresh_pipeline import RefreshPipeline
 from dashboard.derive.seed_ingest import SeedIngestService
@@ -33,7 +31,6 @@ from dashboard.derive.types import Capability, CapabilityStatus, SnapshotDict
 from dashboard.state.db import open_db
 from dashboard.state.keyword_recommender import recommend_by_keyword
 from dashboard.state.repositories import (
-    DecisionNoteRepo,
     DeepCardRepo,
     OverrideRepo,
     SnapshotRepo,
@@ -106,9 +103,16 @@ async def index(request: Request) -> HTMLResponse:
             c["completion_level"] = completion_level_or_none(dc)  # type: ignore[typeddict-unknown-key]
 
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
-    # App Shell 第 9 行 mini stat
-    _main_dims, catch_all_dims = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    app_shell = compute_app_shell_stat(PROJECT_ROOT, catch_all_dims)
+
+    # Plan 3 Task 2 — Topology data
+    from dashboard.derive.topology_layout import (
+        connection_endpoints,
+        layout_with_progress,
+    )
+
+    topology_modules = layout_with_progress(snap["layers"])
+    topology_endpoints = connection_endpoints({m.dim_id: m for m in topology_modules})
+
     ctx: dict[str, object] = {
         "today": _today_label(),
         "snap": snap,
@@ -116,7 +120,8 @@ async def index(request: Request) -> HTMLResponse:
         "view_mode": view_mode,
         "active_view": view_mode,  # M3:同 view_mode("d" 或 "b"),decisions 用独立 route 不走这
         "active_nav": "grid",
-        "app_shell": app_shell,
+        "topology_modules": topology_modules,
+        "topology_endpoints": topology_endpoints,
     }
     if view_mode == "b":
         # Pre-compute Kanban lists (Risk 5 mitigation: avoid jinja list.append)
@@ -164,137 +169,8 @@ async def module_page_view(request: Request) -> HTMLResponse:
     return cast(HTMLResponse, templates.TemplateResponse("_module_page.html", ctx))
 
 
-async def decisions_view(request: Request) -> HTMLResponse:
-    """GET /decisions — render 全部决策卡 + filter UI(client JS)。"""
-    decisions = extract_all()
-    memory_path = resolve_memory_path()
-    # snap + wips 复用(base.html / _hero.html 需要)
-    snap = _get_or_build_snapshot()
-    wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
-    # 读 note 持久化
-    conn = open_db(DB_PATH)
-    try:
-        note_repo = DecisionNoteRepo(conn)
-        note_lookup = note_repo.get_all()
-    finally:
-        conn.close()
-    # 加载 main_dims for filter chip(layer 列)
-    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    return templates.TemplateResponse(
-        request,
-        "decisions.html",
-        {
-            "today": _today_label(),
-            "snap": snap,
-            "wips": wips,
-            "decisions": decisions,
-            "note_lookup": note_lookup,
-            "main_dims": main_dims,
-            "active_view": "decisions",
-            "active_nav": "decisions",
-            "memory_path_warning": memory_path is None,
-        },
-    )
-
-
-async def post_decision_note(request: Request) -> HTMLResponse:
-    """upsert decision note + 返回新 form HTML(htmx swap)。"""
-    decision_id = request.path_params["decision_id"]
-    form = await request.form()
-    note_raw = form.get("note", "")
-    if not isinstance(note_raw, str):
-        return HTMLResponse("invalid form", status_code=400)
-    conn = open_db(DB_PATH)
-    try:
-        DecisionNoteRepo(conn).upsert(decision_id, note_raw)
-    finally:
-        conn.close()
-    return _render_decision_note_form(decision_id, note_raw)
-
-
-async def delete_decision_note(request: Request) -> HTMLResponse:
-    """clear decision note + 返回空 form HTML。"""
-    decision_id = request.path_params["decision_id"]
-    conn = open_db(DB_PATH)
-    try:
-        DecisionNoteRepo(conn).delete(decision_id)
-    finally:
-        conn.close()
-    return _render_decision_note_form(decision_id, "")
-
-
-def _render_decision_note_form(decision_id: str, note: str) -> HTMLResponse:
-    """Render decision-note form HTML(用于 POST/DELETE htmx swap response)。
-
-    模板内容跟 _decision_card.html 内的 form 部分一致 — 共享单一 source of truth
-    在 _decision_note_form.html partial 里。
-    """
-    template = templates.get_template("_decision_note_form.html")
-    html = template.render(decision_id=decision_id, note=note)
-    return HTMLResponse(html)
-
-
 async def healthz(_request: Request) -> JSONResponse:
     return JSONResponse({"ok": True})
-
-
-async def edit_capability(request: Request) -> HTMLResponse:
-    """返回 chip 替换为 edit select 的 HTML 片段(htmx swap source)。"""
-    cap_id = request.path_params["cap_id"]
-    # 从 capabilities.yaml 拿到这个 capability 的元数据(name_cn 用于 select 头)
-    caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    target = next((c for c in caps if c.id == cap_id), None)
-    if target is None:
-        return HTMLResponse(f"capability {cap_id} not found", status_code=404)
-    template = templates.get_template("_edit_select.html")
-    html = template.render(c=target)
-    return HTMLResponse(html)
-
-
-async def post_override(request: Request) -> HTMLResponse:
-    """upsert override 或 clear (sentinel __clear__) + invalidate snapshot + 返回新 chip HTML。"""
-    cap_id = request.path_params["cap_id"]
-    form = await request.form()
-    status_raw = form.get("status", "")
-    if not isinstance(status_raw, str):
-        return HTMLResponse("invalid form", status_code=400)
-    if status_raw != "__clear__" and status_raw not in ("lit", "wip", "todo"):
-        return HTMLResponse(f"invalid status: {status_raw}", status_code=400)
-
-    # Validate cap_id BEFORE touching DB (fix: write-before-validate orphan row bug)
-    caps = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    target_cfg = next((c for c in caps if c.id == cap_id), None)
-    if target_cfg is None:
-        return HTMLResponse(f"capability {cap_id} not found", status_code=404)
-
-    conn = open_db(DB_PATH)
-    try:
-        override_repo = OverrideRepo(conn)
-        if status_raw == "__clear__":
-            override_repo.delete(cap_id)
-        else:
-            override_repo.upsert(cap_id, cast(CapabilityStatus, status_raw), reason="via UI")
-        # invalidate snapshot,下次 GET / 重 build
-        SnapshotRepo(conn).invalidate()
-        # 重新读 override(可能刚 delete)
-        overrides = override_repo.get_all()
-    finally:
-        conn.close()
-
-    # 重 resolve 这一个 capability,渲染新 chip
-    derived = resolve_status(target_cfg, PROJECT_ROOT)
-    final_status = overrides.get(cap_id, derived)
-    cap = Capability(
-        id=target_cfg.id,
-        dimension=target_cfg.dimension,
-        name_cn=target_cfg.name_cn,
-        name_en=target_cfg.name_en,
-        status=final_status,
-        derived_status=derived,
-    )
-    template = templates.get_template("_capability_chip.html")
-    html = template.render(c=cap)
-    return HTMLResponse(html)
 
 
 async def post_status(request: Request) -> HTMLResponse:
@@ -661,104 +537,6 @@ async def story_view(request: Request) -> HTMLResponse:
     )
 
 
-async def survey_view(request: Request) -> HTMLResponse:
-    """§ 06 Survey — 5 个外部 agent 项目的 harness trick 调研结果,按 8 维度分组。
-
-    数据源 dashboard/data/external_agent_survey.jsonl,server 启动时 lru_cache 一次。
-    """
-    from dashboard.derive.survey_loader import group_by_dimension, load_survey, repo_summary
-
-    survey_path = DASHBOARD_ROOT / "data" / "external_agent_survey.jsonl"
-    tricks = load_survey(str(survey_path))
-    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    template = templates.get_template("survey.html")
-    return HTMLResponse(
-        template.render(
-            dimensions=main_dims,
-            tricks_by_dim=group_by_dimension(tricks),
-            repos=repo_summary(tricks),
-            active_nav="survey",
-        )
-    )
-
-
-async def overview_view(request: Request) -> HTMLResponse:
-    """V3 鸟瞰主页 — 渲染含 cytoscape 容器,数据由 /api/overview/graph.json 拉。"""
-    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    template = templates.get_template("overview.html")
-    html = template.render(
-        dimensions=main_dims,
-        total_nodes=len(caps_cfg),
-        active_nav="overview",
-    )
-    return HTMLResponse(html)
-
-
-async def overview_graph_json(request: Request) -> JSONResponse:
-    """V3 cytoscape 数据源。支持 ?dim=memory,prompt_context / ?status=lit / ?low_conf=1。"""
-    from dashboard.derive.graph_builder import build_graph_payload
-
-    qp = request.query_params
-    filter_dims: set[str] | None = (
-        {x for x in qp.get("dim", "").split(",") if x} if qp.get("dim") else None
-    )
-    filter_statuses: set[str] | None = (
-        {x for x in qp.get("status", "").split(",") if x} if qp.get("status") else None
-    )
-    only_low_conf = qp.get("low_conf") == "1"
-
-    snap = _get_or_build_snapshot()
-    all_caps: list[Capability] = []
-    for layer in snap["layers"]:
-        for c_dict in layer["capabilities"]:
-            all_caps.append(
-                Capability(
-                    id=c_dict["id"],
-                    dimension=c_dict["dimension"],
-                    name_cn=c_dict["name_cn"],
-                    name_en=c_dict["name_en"],
-                    status=c_dict["status"],
-                    derived_status=c_dict["derived_status"],
-                )
-            )
-
-    conn = open_db(DB_PATH)
-    try:
-        cards = DeepCardRepo(conn).get_all()
-    finally:
-        conn.close()
-
-    payload = build_graph_payload(
-        all_caps,
-        cards,
-        filter_dimensions=filter_dims,
-        filter_statuses=filter_statuses,
-        only_low_confidence=only_low_conf,
-    )
-    return JSONResponse(payload)
-
-
-async def overview_fallback(request: Request) -> HTMLResponse:
-    """V3 cytoscape 加载失败兜底 — 维度卡片墙。"""
-    main_dims, _ = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    caps_cfg = load_capabilities(CONFIG_DIR / "capabilities.yaml")
-    by_dim: dict[str, list[dict[str, str]]] = {d.id: [] for d in main_dims}
-    for c in caps_cfg:
-        by_dim.setdefault(c.dimension, []).append({"id": c.id, "name_cn": c.name_cn})
-    dims_with_caps = [
-        {
-            "id": d.id,
-            "number": d.number,
-            "name_cn": d.name_cn,
-            "capabilities": by_dim.get(d.id, []),
-        }
-        for d in main_dims
-    ]
-    template = templates.get_template("overview_fallback.html")
-    return HTMLResponse(template.render(dimensions_with_caps=dims_with_caps, active_nav="overview"))
-
-
 async def related_capabilities(request: Request) -> JSONResponse:
     """GET /cap/{cap_id}/related?k=5 — 相关 cap 推荐 (Milvus 真路径 / keyword fallback)。"""
     cap_id = request.path_params["cap_id"]
@@ -810,17 +588,8 @@ app = Starlette(
         Route("/", index),
         Route("/m/{dim_id}", module_page_view),
         Route("/healthz", healthz),
-        Route("/decisions", decisions_view),
-        Route("/decisions/{decision_id}/note", post_decision_note, methods=["POST"]),
-        Route("/decisions/{decision_id}/note", delete_decision_note, methods=["DELETE"]),
-        Route("/capability/{cap_id}/edit", edit_capability),
-        Route("/capability/{cap_id}/override", post_override, methods=["POST"]),
         Route("/refresh", post_refresh, methods=["GET"]),
-        Route("/overview", overview_view),
-        Route("/overview/fallback", overview_fallback),
-        Route("/api/overview/graph.json", overview_graph_json),
         Route("/story", story_view),
-        Route("/survey", survey_view),
         Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
         Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
         Route("/cap/{cap_id}/screenshot", post_screenshot, methods=["POST"]),
