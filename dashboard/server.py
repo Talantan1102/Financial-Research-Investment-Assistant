@@ -22,7 +22,6 @@ from starlette.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
-from dashboard.derive.app_shell_stat import compute_app_shell_stat
 from dashboard.derive.capability_resolver import load_capabilities, resolve_status
 from dashboard.derive.path_router import load_dimensions
 from dashboard.derive.refresh_pipeline import RefreshPipeline
@@ -104,9 +103,6 @@ async def index(request: Request) -> HTMLResponse:
             c["completion_level"] = completion_level_or_none(dc)  # type: ignore[typeddict-unknown-key]
 
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
-    # App Shell 第 9 行 mini stat
-    _main_dims, catch_all_dims = load_dimensions(CONFIG_DIR / "dimensions.yaml")
-    app_shell = compute_app_shell_stat(PROJECT_ROOT, catch_all_dims)
 
     # Plan 3 Task 2 — Topology data
     from dashboard.derive.topology_layout import (
@@ -124,7 +120,6 @@ async def index(request: Request) -> HTMLResponse:
         "view_mode": view_mode,
         "active_view": view_mode,  # M3:同 view_mode("d" 或 "b"),decisions 用独立 route 不走这
         "active_nav": "grid",
-        "app_shell": app_shell,
         "topology_modules": topology_modules,
         "topology_endpoints": topology_endpoints,
     }
