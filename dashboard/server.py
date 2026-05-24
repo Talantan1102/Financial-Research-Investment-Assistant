@@ -109,6 +109,16 @@ async def index(request: Request) -> HTMLResponse:
     # App Shell 第 9 行 mini stat
     _main_dims, catch_all_dims = load_dimensions(CONFIG_DIR / "dimensions.yaml")
     app_shell = compute_app_shell_stat(PROJECT_ROOT, catch_all_dims)
+
+    # Plan 3 Task 2 — Topology data
+    from dashboard.derive.topology_layout import (
+        connection_endpoints,
+        layout_with_progress,
+    )
+
+    topology_modules = layout_with_progress(snap["layers"])
+    topology_endpoints = connection_endpoints({m.dim_id: m for m in topology_modules})
+
     ctx: dict[str, object] = {
         "today": _today_label(),
         "snap": snap,
@@ -117,6 +127,8 @@ async def index(request: Request) -> HTMLResponse:
         "active_view": view_mode,  # M3:同 view_mode("d" 或 "b"),decisions 用独立 route 不走这
         "active_nav": "grid",
         "app_shell": app_shell,
+        "topology_modules": topology_modules,
+        "topology_endpoints": topology_endpoints,
     }
     if view_mode == "b":
         # Pre-compute Kanban lists (Risk 5 mitigation: avoid jinja list.append)

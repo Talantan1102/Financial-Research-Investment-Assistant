@@ -2914,3 +2914,56 @@ details[open] .decision-note-toggle::before {
 }
 .nav-mod:hover { background: rgba(94,92,230,0.08); color: #5E5CE6; }
 .nav-mod.active { background: #5E5CE6; color: white; }
+
+/* ============================================================
+ * Plan 3 Task 2 — Topology homepage
+ * ============================================================ */
+.topology-block { padding: 24px 0 40px; }
+.topology-svg {
+  max-width: 880px;
+  margin: 30px auto 20px;
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.topology-box {
+  cursor: pointer;
+  transition: transform 0.18s, filter 0.18s;
+}
+.topology-box .box-rect {
+  transition: stroke 0.18s, fill 0.18s;
+}
+.topology-box:hover .box-rect {
+  stroke: #5E5CE6;
+  stroke-width: 1.5;
+  fill: rgba(94,92,230,0.04);
+}
+.topology-box:hover { filter: drop-shadow(0 2px 4px rgba(94,92,230,0.15)); }
+
+.topology-box--governance .box-rect,
+.topology-box--observability .box-rect { fill: rgba(94,92,230,0.06); }
+.topology-box--execution .box-rect { fill: rgba(245,245,247,0.6); }
+
+.topology-link { text-decoration: none; outline: none; }
+.topology-link:focus .box-rect { stroke: #5E5CE6; stroke-width: 2; }
+
+.topology-caption {
+  text-align: center;
+  font-size: 12px;
+  color: #86868B;
+  margin: 12px auto 0;
+  max-width: 760px;
+  line-height: 1.8;
+}
+.caption-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  background: rgba(60,60,67,0.05);
+  border-radius: 10px;
+  margin: 0 2px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  color: #1C1C1E;
+}
+
+.hero-wips-block { padding: 8px 0 24px; }

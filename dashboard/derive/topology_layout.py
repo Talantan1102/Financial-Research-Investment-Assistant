@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -72,7 +74,7 @@ class ModuleProgress:
         return int((self.lit / self.total) * 100) if self.total else 0
 
 
-def layout_with_progress(snap_layers: list[dict]) -> list[ModuleProgress]:  # type: ignore[type-arg]
+def layout_with_progress(snap_layers: Sequence[Any]) -> list[ModuleProgress]:
     """合并 MODULES 几何 + snapshot 进度。"""
     by_id = {L["id"]: L for L in snap_layers}
     out: list[ModuleProgress] = []

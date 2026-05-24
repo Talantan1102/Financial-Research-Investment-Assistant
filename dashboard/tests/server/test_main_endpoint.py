@@ -15,38 +15,49 @@ def test_index_renders() -> None:
         r = client.get("/")
         assert r.status_code == 200
         body = r.text
-        # Hero
+        # Hero (Plan 3 Task 2 — Topology homepage)
         assert "hero-title" in body
-        # 7 layer 卡片(ETCLOVG 新结构使用 class="layer")
-        assert body.count('class="layer"') >= 7
-        # 三态 chip
-        assert "lit" in body and "todo" in body
+        # Topology SVG present
+        assert "topology-svg" in body
+        assert 'viewBox="0 0 600 320"' in body
+        # 7 module links
+        for dim_id in [
+            "execution",
+            "tool",
+            "context",
+            "lifecycle",
+            "observability",
+            "verification",
+            "governance",
+        ]:
+            assert f'href="/m/{dim_id}"' in body
         # 计数
-        assert "/87" in body or "87" in body  # total appears somewhere
+        assert "87" in body  # total appears somewhere
 
 
 def test_view_d_default() -> None:
-    """无 query 默认 D 视图,有 layer-stack 和 Tab nav。"""
+    """Plan 3 Task 2 — 首页默认渲染 Topology SVG(D/B 视图切换已退役)。"""
     with TestClient(app) as client:
         r = client.get("/")
         assert r.status_code == 200
         body = r.text
-        assert 'class="layer-stack"' in body
-        assert "Kanban" in body  # tab nav B view
-        assert "维度" in body  # tab nav D view
+        assert "topology-svg" in body
+        assert "topology-box" in body
+        # old D-view layer-stack / Kanban tab 已退役
+        assert 'class="layer-stack"' not in body
+        assert 'class="kanban"' not in body
 
 
 def test_view_b_renders_kanban() -> None:
-    """?view=b 渲染 Kanban 三列。"""
+    """Plan 3 Task 2 — ?view=b 不再渲染 Kanban;首页统一 Topology。"""
     with TestClient(app) as client:
         r = client.get("/?view=b")
         assert r.status_code == 200
         body = r.text
-        assert 'class="layer-stack"' not in body  # 不显 D 视图
-        assert 'class="kanban"' in body
-        assert "kanban-todo" in body  # todo 列
-        assert "kanban-doing" in body
-        assert "kanban-done" in body
+        # Topology 始终渲染
+        assert "topology-svg" in body
+        # 旧 kanban 已退役
+        assert 'class="kanban"' not in body
 
 
 def test_get_edit_returns_select() -> None:
@@ -142,12 +153,12 @@ def test_get_refresh_returns_sse_event_stream() -> None:
 
 
 def test_index_shows_app_shell_row() -> None:
-    """主视图含 App Shell 第 9 行。"""
+    """Plan 3 Task 2 — 首页含 Topology hero 和 7 模块链接(App Shell 行已退役至模块页)。"""
     with TestClient(app) as client:
         r = client.get("/")
         body = r.text
-        assert 'class="app-shell-row"' in body
-        assert "09" in body  # app shell number
-        assert "App Shell" in body
-        # 6 项至少出现一项(具体名称随 dimensions.yaml,只验"前端"在 yaml 默认配置中)
-        assert "前端" in body
+        assert "hero-title" in body
+        assert "topology-svg" in body
+        # All 7 paper section anchors rendered
+        for sec in ["§ 3", "§ 4", "§ 5", "§ 6", "§ 7", "§ 8", "§ 9"]:
+            assert sec in body
