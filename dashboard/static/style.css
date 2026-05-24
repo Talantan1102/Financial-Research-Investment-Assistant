@@ -2805,3 +2805,26 @@ details[open] .decision-note-toggle::before {
 .module-stats .stat-pct { color: #5E5CE6; margin-left: 8px; font-weight: 600; }
 
 .cap-list { padding: 0; list-style: none; }
+
+/* Plan 2 Task 6 — 右键菜单 */
+.ctx-menu {
+  position: absolute;
+  z-index: 1000;
+  min-width: 180px;
+  padding: 6px;
+  background: white;
+  border: 1px solid rgba(60,60,67,0.12);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.12);
+}
+.ctx-menu[hidden] { display: none; }
+.ctx-menu hr { margin: 4px 8px; border: 0; border-top: 1px solid rgba(60,60,67,0.10); }
+.ctx-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 12px;
+  background: transparent; border: 0; border-radius: 6px;
+  font: inherit; font-size: 13px; color: #1C1C1E;
+  text-align: left; cursor: pointer;
+}
+.ctx-item:hover { background: rgba(94,92,230,0.08); }
+.ctx-dot { width: 8px; height: 8px; border-radius: 50%; }

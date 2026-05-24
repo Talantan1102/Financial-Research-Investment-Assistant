@@ -297,6 +297,39 @@ async def post_override(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
+async def post_status(request: Request) -> HTMLResponse:
+    """右键菜单切状态。Plan 2 Task 6;原 /capability/{id}/override 简化版。"""
+    cap_id = request.path_params["cap_id"]
+    form = await request.form()
+    status = form.get("status", "")
+    if status not in {"lit", "wip", "todo"}:
+        return HTMLResponse(f"invalid status: {status}", status_code=400)
+
+    conn = open_db(DB_PATH)
+    try:
+        OverrideRepo(conn).upsert(cap_id, cast(CapabilityStatus, status), reason="right-click")
+        SnapshotRepo(conn).invalidate()
+    finally:
+        conn.close()
+
+    cfg = next(
+        (c for c in load_capabilities(CONFIG_DIR / "capabilities.yaml") if c.id == cap_id),
+        None,
+    )
+    if cfg is None:
+        return HTMLResponse(f"unknown cap: {cap_id}", status_code=404)
+    chip_ctx = {
+        "request": request,
+        "c": {
+            "id": cfg.id,
+            "name_cn": cfg.name_cn,
+            "name_en": cfg.name_en,
+            "status": status,
+        },
+    }
+    return cast(HTMLResponse, templates.TemplateResponse("_capability_chip.html", chip_ctx))
+
+
 async def post_refresh(_request: Request) -> StreamingResponse:
     """SSE 5-step pipeline。spec § 2.1 / § 2.4。
 
@@ -773,6 +806,7 @@ app = Starlette(
         Route("/story", story_view),
         Route("/survey", survey_view),
         Route("/cap/{cap_id}", deep_card_modal, methods=["GET"]),
+        Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
         Route("/cap/{cap_id}/related", related_capabilities, methods=["GET"]),
         Route("/cap/{cap_id}/field/{field}", post_field_update, methods=["POST"]),
         Route(
