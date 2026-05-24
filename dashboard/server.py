@@ -420,13 +420,16 @@ async def _try_milvus_related(cap_id: str, k: int) -> tuple[list[dict[str, objec
 
 async def post_screenshot(request: Request) -> JSONResponse:
     """图上传 endpoint。Plan 2 Task 9。"""
+    from starlette.datastructures import UploadFile as StarletteUploadFile
+
     from dashboard.derive.screenshot_repo import UploadError, save_screenshot
 
     cap_id = request.path_params["cap_id"]
     form = await request.form()
-    upload = form.get("file")
-    if upload is None or not hasattr(upload, "read"):
+    upload_raw = form.get("file")
+    if not isinstance(upload_raw, StarletteUploadFile):
         return JSONResponse({"error": "no file uploaded"}, status_code=400)
+    upload: StarletteUploadFile = upload_raw
 
     try:
         content = await upload.read()
