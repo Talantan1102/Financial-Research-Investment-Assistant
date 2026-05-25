@@ -25,7 +25,7 @@ dimensions:
       - id: venv_isolation
         name_cn: "uv venv 隔离"
         name_en: "uv venv isolation"
-        derive_rule: { type: file_exists, path: 'pyproject.toml' }
+        derive_rule: { type: file_exists, path: 'uv.lock' }
       - id: persistence_layer
         name_cn: "持久化层 (sqlite 集合)"
         name_en: "Persistence layer"
@@ -33,7 +33,7 @@ dimensions:
       - id: tushare_cache_isolation
         name_cn: "Tushare 缓存隔离"
         name_en: "Tushare cache isolation"
-        derive_rule: { type: file_exists, path: 'backend/data/tushare_cache.sqlite' }
+        derive_rule: { type: file_exists, path: 'backend/app/services/tushare_cache.py' }
       - id: celery_redis
         name_cn: "Celery + Redis 异步队列"
         name_en: "Celery + Redis async queue"
@@ -77,17 +77,17 @@ dimensions:
         name_en: "DI mock/real toggle"
         derive_rule: { type: code_grep, pattern: 'MOCK|TUSHARE_MODE|BOCHA_MODE', path_glob: 'backend/app/services/*_factory.py' }
       - id: reliability_layer
-        name_cn: "Reliability layer (5 件)"
+        name_cn: "Reliability layer (circuit/retry/timeout/cb/quota)"
         name_en: "Reliability (circuit/retry/timeout/cb/quota)"
         derive_rule: { type: file_exists, path: 'backend/app/services/circuit_breaker.py' }
       - id: financial_tools
-        name_cn: "8 个金融工具"
-        name_en: "8 financial tools"
+        name_cn: "11+ 金融工具"
+        name_en: "11+ financial tools"
         derive_rule: { type: code_grep, pattern: 'class\s+\w+\(Tool\)', path_glob: 'backend/app/tools/get_*.py' }
       - id: mcp_bridge
         name_cn: "MCP 协议适配"
         name_en: "MCP bridge"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/app/services/mcp_client.py' }
       - id: tool_versioning
         name_cn: "工具版本化"
         name_en: "Tool versioning"
@@ -105,7 +105,7 @@ dimensions:
       - id: tool_session_management
         name_cn: "工具会话扩展管理"
         name_en: "Tool session management"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/app/services/tool_result_cache.py' }
 
   # ============================================================
   # 03 Context & Memory Management (22 项,预期 ~9 lit) §5
@@ -153,7 +153,7 @@ dimensions:
         group: short_term
         name_cn: "Prompt 缓存"
         name_en: "Prompt caching"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/app/memory/prompt_cache.py' }
       - id: ctx_compression
         group: short_term
         name_cn: "上下文压缩"
@@ -162,14 +162,14 @@ dimensions:
       # ---- long_term — memory (5 项 manual) ----
       - id: long_term_memory
         group: long_term
-        name_cn: "长期记忆"
+        name_cn: "长期记忆 (C.5 hierarchical)"
         name_en: "Long-term memory"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/app/memory' }
       - id: semantic_memory
         group: long_term
-        name_cn: "语义记忆"
+        name_cn: "语义记忆 (RRF v2 hybrid)"
         name_en: "Semantic memory"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/app/memory/retriever.py' }
       - id: cross_user_cache
         group: long_term
         name_cn: "跨用户缓存"
@@ -177,14 +177,14 @@ dimensions:
         derive_rule: { type: manual }
       - id: episodic_memory
         group: long_term
-        name_cn: "情景记忆"
+        name_cn: "情景记忆 (recall_memory)"
         name_en: "Episodic memory"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'recall_memory|chat_memory_episodes', path_glob: 'backend/app/memory/**' }
       - id: memory_compression
         group: long_term
-        name_cn: "记忆压缩"
+        name_cn: "记忆压缩 (skip_gate + batch_extractor)"
         name_en: "Memory compression"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'skip_gate|batch_extractor', path_glob: 'backend/app/memory/**' }
       # ---- long_term — RAG (8 项) ----
       - id: milvus_3_collection
         group: long_term
@@ -223,9 +223,9 @@ dimensions:
         derive_rule: { type: manual }
       - id: query_decomposition
         group: long_term
-        name_cn: "Query 分解"
+        name_cn: "Query 分解 (ResearchPlanner)"
         name_en: "Query decomposition"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/app/agents/research_planner.py' }
       # 论文 §5.6 - Long-Horizon Techniques: Keeping Agents Coherent Over 100+ Turns
       - id: long_horizon_coherence
         group: long_term
@@ -265,9 +265,9 @@ dimensions:
         name_en: "SSE streaming"
         derive_rule: { type: code_grep, pattern: 'EventSource|StreamingResponse', path_glob: 'backend/app/router/**' }
       - id: session_checkpoint
-        name_cn: "Session checkpoint (SqliteSaver)"
+        name_cn: "Session checkpoint (AsyncPostgresSaver)"
         name_en: "Session checkpoint"
-        derive_rule: { type: code_grep, pattern: 'SqliteSaver', path_glob: 'backend/app/orchestration/**' }
+        derive_rule: { type: code_grep, pattern: 'AsyncPostgresSaver|SqliteSaver', path_glob: 'backend/app/orchestration/**' }
       - id: langgraph_retry
         name_cn: "LangGraph retry edge"
         name_en: "LangGraph retry"
@@ -275,15 +275,15 @@ dimensions:
       - id: plan_and_execute
         name_cn: "Plan-and-Execute pattern"
         name_en: "Plan-and-Execute"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/app/agents/plan_template.py' }
       - id: human_in_the_loop
-        name_cn: "Human-in-the-loop"
+        name_cn: "Human-in-the-loop (Escalation)"
         name_en: "Human-in-the-loop"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'escalat', path_glob: 'backend/app/agents/**' }
       - id: agent_handoff
-        name_cn: "Agent handoff"
+        name_cn: "Agent handoff (supervisor + cross-graph)"
         name_en: "Agent handoff"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: '_route_after_planner|EscalationPacket', path_glob: 'backend/app/agents/**' }
       # 论文 §6.4 - Full Lifecycle Pipeline from Issue to Pull Request (OpenAI Symphony)
       - id: issue_to_pr_pipeline
         name_cn: "Issue → PR 全链路"
@@ -320,9 +320,9 @@ dimensions:
         name_en: "Cost budget"
         derive_rule: { type: file_exists, path: 'backend/app/services/cost_budget.py' }
       - id: model_caching
-        name_cn: "Model response 缓存"
-        name_en: "Model caching"
-        derive_rule: { type: manual }
+        name_cn: "Tool result 缓存 (ToolResultCache)"
+        name_en: "Tool result caching"
+        derive_rule: { type: file_exists, path: 'backend/app/services/tool_result_cache.py' }
       - id: fallback_router
         name_cn: "Fallback router"
         name_en: "Fallback router"
@@ -356,25 +356,25 @@ dimensions:
         name_en: "LLM-as-Judge"
         derive_rule: { type: file_exists, path: 'backend/app/services/judge.py' }
       - id: golden_cases
-        name_cn: "12+ golden cases"
-        name_en: "12+ golden cases"
+        name_cn: "146+ golden cases"
+        name_en: "146+ golden cases"
         derive_rule: { type: code_grep, pattern: 'golden', path_glob: 'backend/tests/**' }
       - id: cassette_l2
         name_cn: "L2 Cassette VCR"
         name_en: "L2 Cassette"
         derive_rule: { type: code_grep, pattern: 'vcr_config|LLM_MODE', path_glob: 'backend/tests/**' }
       - id: test_suite
-        name_cn: "289+ pytest"
-        name_en: "289+ tests"
+        name_cn: "1520+ pytest"
+        name_en: "1520+ tests"
         derive_rule: { type: file_exists, path: 'backend/tests' }
       - id: ab_testing
-        name_cn: "A/B testing"
+        name_cn: "A/B / Ablation testing (V0-V3)"
         name_en: "A/B testing"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'AblationVariant|AblationRunner', path_glob: 'backend/**' }
       - id: adversarial_test
-        name_cn: "对抗测试"
+        name_cn: "对抗测试 (投毒 30 case + chaos)"
         name_en: "Adversarial testing"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'adversarial|投毒|chaos', path_glob: 'backend/tests/**' }
       # 论文 §8.3 - Pre-execution Readiness Validation
       - id: pre_execution_readiness
         name_cn: "执行前就绪校验"
@@ -412,9 +412,9 @@ dimensions:
         name_en: "PII redaction"
         derive_rule: { type: manual }
       - id: hallucination_check
-        name_cn: "幻觉检测"
+        name_cn: "幻觉检测 (evidence_quote + bull/bear debate)"
         name_en: "Hallucination check"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'evidence_quote|hallucin', path_glob: 'backend/app/**' }
       # 论文 §9.2 - Lifecycle Hooks (PreToolUse / PostToolUse / SessionStart 等)
       - id: lifecycle_hooks
         name_cn: "生命周期 hook (Pre/Post tool, Session)"
@@ -427,14 +427,14 @@ dimensions:
         derive_rule: { type: manual }
       # 论文 §9.5 - Audit Infrastructure (immutable trace + identity binding)
       - id: audit_infrastructure
-        name_cn: "审计基础设施"
+        name_cn: "审计基础设施 (mcp_tool_call_log + TraceSpanRow)"
         name_en: "Audit infrastructure"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'mcp_tool_call_log|TraceSpanRow', path_glob: 'backend/**' }
       # 论文 §9.6 - Agent Security Landscape (prompt injection / goal hijack / data leakage)
       - id: agent_security_landscape
-        name_cn: "Agent 安全全景 (注入 / 劫持 / 泄露)"
+        name_cn: "Agent 安全全景 (injection_classifier 4 入口)"
         name_en: "Agent security landscape"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/app/memory/injection_classifier.py' }
       # 论文 §11.2 - Capability-Control Tradeoff (per-action authority gate)
       - id: capability_control_gate
         name_cn: "Capability-Control 授权 gate"
