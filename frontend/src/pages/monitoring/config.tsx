@@ -5,7 +5,6 @@ import {
   Form,
   Input,
   InputNumber,
-  message,
   Modal,
   Select,
   Skeleton,
@@ -189,7 +188,7 @@ export default function MonitoringConfig() {
   const handleModalOk = () => {
     // v1.0: customers endpoint retired — backend CRUD not available.
     // Fail loud so the user knows this is not silently succeeding.
-    void message.error(
+    void window.$app.message.error(
       "客户管理接口已在 v1.0 中退役，暂不支持添加/编辑操作。请联系管理员。",
     );
     setModalOpen(false);
@@ -198,7 +197,7 @@ export default function MonitoringConfig() {
 
   const handleDelete = (_id: string, name: string) => {
     // v1.0: customers endpoint retired — backend CRUD not available.
-    void message.error(
+    void window.$app.message.error(
       `无法删除客户「${name}」：v1.0 客户管理接口已退役，请联系管理员。`,
     );
   };
@@ -215,7 +214,7 @@ export default function MonitoringConfig() {
     // Simulate save delay — backend PATCH /api/monitoring/config not in v0.8.3 scope
     await new Promise<void>((resolve) => setTimeout(resolve, 600));
     console.info("[MonitoringConfig] global config (frontend-only):", vals);
-    void message.info("配置已保存（当前版本仅前端生效，重启后恢复默认值）");
+    void window.$app.message.info("配置已保存（当前版本仅前端生效，重启后恢复默认值）");
     setGlobalSaving(false);
   };
 
@@ -233,7 +232,7 @@ export default function MonitoringConfig() {
       delete next[rule];
       return next;
     });
-    void message.success(`${rule} 阈值已重置为默认值`);
+    void window.$app.message.success(`${rule} 阈值已重置为默认值`);
   };
 
   // ── Customer table columns ──
@@ -728,7 +727,7 @@ export default function MonitoringConfig() {
           style: { backgroundColor: TOKEN.accentRed, borderColor: TOKEN.accentRed },
         }}
         styles={{ body: { padding: "20px 24px" } }}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form<CustomerFormValues>
           form={customerForm}

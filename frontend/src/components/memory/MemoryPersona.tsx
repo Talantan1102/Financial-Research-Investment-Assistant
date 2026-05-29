@@ -1,4 +1,4 @@
-import { Alert, Button, Input, message, Modal, Popconfirm, Spin } from 'antd'
+import { Alert, Button, Input, Modal, Popconfirm, Spin } from 'antd'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
@@ -90,10 +90,10 @@ export default function MemoryPersona({ initialData }: MemoryPersonaProps = {}) 
       setAddText('')
       setAddModalOpen(false)
       await refresh()
-      void message.success('已添加')
+      void window.$app.message.success('已添加')
     } catch (err) {
       const msg = err instanceof Error ? err.message : '未知错误'
-      void message.error(`添加失败: ${msg}`)
+      void window.$app.message.error(`添加失败: ${msg}`)
     } finally {
       setAdding(false)
     }
@@ -107,14 +107,14 @@ export default function MemoryPersona({ initialData }: MemoryPersonaProps = {}) 
       setEditingId(null)
       if (item.source === 'agent' && updated.source === 'user') {
         setRecentlyUpgradedId(updated.id)
-        void message.success('已迁到你的声明区')
+        void window.$app.message.success('已迁到你的声明区')
         if (upgradeTimerRef.current !== null) clearTimeout(upgradeTimerRef.current)
         upgradeTimerRef.current = setTimeout(() => setRecentlyUpgradedId(null), 1500)
       }
       await refresh()
     } catch (err) {
       const msg = err instanceof Error ? err.message : '未知错误'
-      void message.error(`保存失败: ${msg}`)
+      void window.$app.message.error(`保存失败: ${msg}`)
     }
   }
 
@@ -122,10 +122,10 @@ export default function MemoryPersona({ initialData }: MemoryPersonaProps = {}) 
     try {
       await deletePersonaItem(id)
       await refresh()
-      void message.success('已删除')
+      void window.$app.message.success('已删除')
     } catch (err) {
       const msg = err instanceof Error ? err.message : '未知错误'
-      void message.error(`删除失败: ${msg}`)
+      void window.$app.message.error(`删除失败: ${msg}`)
     }
   }
 

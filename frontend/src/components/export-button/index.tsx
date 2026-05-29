@@ -11,7 +11,7 @@
  * the browser print dialog is the v0.9.x decision.
  */
 
-import { Button, message, Space } from 'antd'
+import { Button, Space } from 'antd'
 import { CopyOutlined, FilePdfOutlined } from '@ant-design/icons'
 import { reportToMarkdown } from '@/utils/report-to-markdown'
 import type { ReportDetail } from '@/api/reports'
@@ -33,14 +33,14 @@ export default function ExportButton({ report }: Props) {
     )
     try {
       await navigator.clipboard.writeText(md)
-      message.success('Markdown 已复制到剪贴板')
+      window.$app.message.success('Markdown 已复制到剪贴板')
     } catch {
-      message.error('复制失败,可能浏览器不支持 clipboard API')
+      window.$app.message.error('复制失败,可能浏览器不支持 clipboard API')
     }
   }
 
   const handlePrintPDF = () => {
-    message.info('请在浏览器对话框中选择"另存为 PDF"', 1.5)
+    window.$app.message.info('请在浏览器对话框中选择"另存为 PDF"', 1.5)
     setTimeout(() => window.print(), 1200)
   }
 

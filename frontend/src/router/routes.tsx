@@ -11,6 +11,7 @@ import MemoryPage from '@/pages/memory'
 import MonitoringIndex from '@/pages/monitoring'
 import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
+import PortfolioPage from '@/pages/portfolio'
 import ReportsListPage from '@/pages/reports'
 import ResearchDetailPage from '@/pages/research/Detail'
 import ResearchListPage from '@/pages/research/List'
@@ -38,7 +39,7 @@ export const routes: IRouteObject[] = [
   { path: '/research', Component: ResearchListPage },
   { path: '/research/new', Component: ResearchNew },
   { path: '/research/:id', Component: ResearchDetailPage },
-  { path: '/portfolio', element: <div data-testid="portfolio-stub">Portfolio (todo)</div> },
+  { path: '/portfolio', Component: PortfolioPage },
   { path: '/knowledge', Component: KnowledgePage },
   { path: '/monitoring', Component: MonitoringIndex },
   { path: '/monitoring/:cid/alert/:aid', Component: AlertDetail },

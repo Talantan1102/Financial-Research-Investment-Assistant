@@ -5,7 +5,6 @@ import {
   Col,
   Empty,
   Input,
-  message,
   Row,
   Skeleton,
   Space,
@@ -166,7 +165,7 @@ export default function MonitoringIndex() {
       setSignals(s);
     } catch (err) {
       console.error("[MonitoringIndex] refresh error:", err);
-      void message.error("加载监控信号失败，请检查登录状态或稍后重试");
+      void window.$app.message.error("加载监控信号失败，请检查登录状态或稍后重试");
     } finally {
       setLoading(false);
     }
@@ -211,14 +210,14 @@ export default function MonitoringIndex() {
     setScanning(true);
     try {
       const { status } = await triggerRefresh();
-      void message.success(`检测周期已入队 (${status})`);
+      void window.$app.message.success(`检测周期已入队 (${status})`);
       // Optimistic: refresh after brief delay
       setTimeout(() => {
         void refresh();
       }, 1500);
     } catch (err) {
       console.error("[MonitoringIndex] triggerRefresh error:", err);
-      void message.error("触发扫描失败，请重试");
+      void window.$app.message.error("触发扫描失败，请重试");
     } finally {
       setScanning(false);
     }

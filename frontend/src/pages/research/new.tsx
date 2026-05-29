@@ -44,7 +44,6 @@ import {
   Select,
   Typography,
   Input,
-  message,
   Collapse,
 } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
@@ -78,7 +77,6 @@ import Markdown from '@/components/markdown'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
-const { Panel } = Collapse
 
 // ── Design tokens (aligned with monitoring page) ──────────────────────────────
 const TOKEN = {
@@ -438,7 +436,7 @@ export default function ResearchNew() {
               message: err.message,
             })
           } else {
-            void message.error(`提交失败：${err.message}`)
+            void window.$app.message.error(`提交失败：${err.message}`)
             setProgressError({
               type: 'agent_crash',
               message: err.message,
@@ -564,37 +562,39 @@ export default function ResearchNew() {
             size="small"
             style={{ borderColor: TOKEN.borderColor, backgroundColor: TOKEN.pageBg }}
             defaultActiveKey={[]}
-          >
-            <Panel
-              header={
-                <span style={{ fontSize: 12, color: TOKEN.textSecondary, fontWeight: 600 }}>
-                  技术细节 — 5-agent 架构 + Critic 评分
-                </span>
-              }
-              key="tech"
-            >
-              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                {/* Agent pipeline */}
-                <div style={{ flex: '0 0 200px', minWidth: 180 }}>
-                  <AgentStatusSidebar
-                    agentStates={agentStates}
-                    style={{ border: 'none', padding: 0, borderRadius: 0, minWidth: 'unset' }}
-                  />
-                </div>
-                {/* 6-dim Critic scores (shown after critic aggregate fires) */}
-                {criticScores && (
-                  <div style={{ flex: 1, minWidth: 220 }}>
-                    <CostLatencyMetrics
-                      costCny={costCny}
-                      latencyMs={latencyMs}
-                      criticScores={criticScores}
-                      style={{ border: 'none', padding: 0, borderRadius: 0 }}
-                    />
+            items={[
+              {
+                key: 'tech',
+                label: (
+                  <span style={{ fontSize: 12, color: TOKEN.textSecondary, fontWeight: 600 }}>
+                    技术细节 — 5-agent 架构 + Critic 评分
+                  </span>
+                ),
+                children: (
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    {/* Agent pipeline */}
+                    <div style={{ flex: '0 0 200px', minWidth: 180 }}>
+                      <AgentStatusSidebar
+                        agentStates={agentStates}
+                        style={{ border: 'none', padding: 0, borderRadius: 0, minWidth: 'unset' }}
+                      />
+                    </div>
+                    {/* 6-dim Critic scores (shown after critic aggregate fires) */}
+                    {criticScores && (
+                      <div style={{ flex: 1, minWidth: 220 }}>
+                        <CostLatencyMetrics
+                          costCny={costCny}
+                          latencyMs={latencyMs}
+                          criticScores={criticScores}
+                          style={{ border: 'none', padding: 0, borderRadius: 0 }}
+                        />
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </Panel>
-          </Collapse>
+                ),
+              },
+            ]}
+          />
 
           {/* Cancel / retry button */}
           <div style={{ paddingBottom: 16 }}>

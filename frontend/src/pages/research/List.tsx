@@ -208,7 +208,7 @@ export default function ResearchListPage() {
         open={newModalOpen}
         onCancel={() => setNewModalOpen(false)}
         footer={null}
-        destroyOnClose
+        destroyOnHidden
         width={520}
       >
         <p style={{ color: '#6b7c93', marginBottom: 16 }}>

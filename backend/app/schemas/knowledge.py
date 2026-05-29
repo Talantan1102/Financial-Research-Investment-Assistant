@@ -1,10 +1,22 @@
 """知识库相关 Schema"""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 # ============ 知识库 Schema ============
+
+
+class _UTCAwareDatetimeMixin(BaseModel):
+    """Serialize naive UTC datetimes with explicit +00:00 offset so clients parse correctly."""
+
+    # check_fields=False: serializer 定义在无字段的 mixin 上,字段由子类
+    # (KnowledgeBaseResponse / DocumentResponse) 提供,故关闭定义期字段校验。
+    @field_serializer("created_at", "updated_at", check_fields=False)
+    def _ser_dt(self, v: datetime) -> str:
+        if v.tzinfo is None:
+            v = v.replace(tzinfo=UTC)
+        return v.isoformat()
 
 
 class KnowledgeBaseCreate(BaseModel):
@@ -21,7 +33,7 @@ class KnowledgeBaseUpdate(BaseModel):
     description: str | None = Field(None, description="知识库描述")
 
 
-class KnowledgeBaseResponse(BaseModel):
+class KnowledgeBaseResponse(_UTCAwareDatetimeMixin):
     """知识库响应"""
 
     id: str = Field(..., description="知识库ID")
@@ -38,7 +50,7 @@ class KnowledgeBaseResponse(BaseModel):
 # ============ 文档 Schema ============
 
 
-class DocumentResponse(BaseModel):
+class DocumentResponse(_UTCAwareDatetimeMixin):
     """文档响应"""
 
     id: str = Field(..., description="文档ID")

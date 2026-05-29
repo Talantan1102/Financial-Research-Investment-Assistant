@@ -7,7 +7,6 @@ import {
   Form,
   Input,
   Upload,
-  message,
   Popconfirm,
   Tag,
   Empty,
@@ -117,11 +116,11 @@ export default function KnowledgePage() {
   const handleCreateKb = async (values: { name: string; description?: string }) => {
     try {
       await knowledgeActions.createKnowledgeBase(values.name, values.description)
-      message.success('知识库创建成功')
+      window.$app.message.success('知识库创建成功')
       setCreateModalOpen(false)
       form.resetFields()
     } catch (error: any) {
-      message.error(error?.response?.data?.detail || '创建失败')
+      window.$app.message.error(error?.response?.data?.detail || '创建失败')
     }
   }
 
@@ -129,21 +128,21 @@ export default function KnowledgePage() {
     if (!editingKb) return
     try {
       await knowledgeActions.updateKnowledgeBase(editingKb.id, values.name, values.description)
-      message.success('知识库更新成功')
+      window.$app.message.success('知识库更新成功')
       setEditModalOpen(false)
       setEditingKb(null)
       editForm.resetFields()
     } catch (error: any) {
-      message.error(error?.response?.data?.detail || '更新失败')
+      window.$app.message.error(error?.response?.data?.detail || '更新失败')
     }
   }
 
   const handleDeleteKb = async (kbId: string) => {
     try {
       await knowledgeActions.deleteKnowledgeBase(kbId)
-      message.success('知识库删除成功')
+      window.$app.message.success('知识库删除成功')
     } catch (error: any) {
-      message.error(error?.response?.data?.detail || '删除失败')
+      window.$app.message.error(error?.response?.data?.detail || '删除失败')
     }
   }
 
@@ -194,7 +193,7 @@ export default function KnowledgePage() {
   // 查看切片
   const handleViewChunks = (doc: KBDocument) => {
     if (doc.status !== 'completed') {
-      message.warning('文档尚未处理完成')
+      window.$app.message.warning('文档尚未处理完成')
       return
     }
     setSelectedDoc({ id: doc.id, filename: doc.filename })
@@ -211,9 +210,9 @@ export default function KnowledgePage() {
     if (!currentKnowledgeBase) return
     try {
       await knowledgeActions.deleteDocument(currentKnowledgeBase.id, docId)
-      message.success('文档删除成功')
+      window.$app.message.success('文档删除成功')
     } catch (error: any) {
-      message.error(error?.response?.data?.detail || '删除失败')
+      window.$app.message.error(error?.response?.data?.detail || '删除失败')
     }
   }
 

@@ -9,7 +9,7 @@
  *  - Fields aligned to backend ReportListItem: target_name, cost, investment_recommendation.
  *  - Fail-loud: errors are surfaced via antd message.error, not silently swallowed.
  */
-import { Card, Empty, Spin, Table, Tag, message } from 'antd'
+import { Card, Empty, Spin, Table, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { listReports, type ReportListItem } from '@/api/reports'
 import ReportDetailModal from './ReportDetailModal'
@@ -35,7 +35,7 @@ export function ReportsListPage() {
         const msg =
           err instanceof Error ? err.message : String(err)
         setError(msg)
-        void message.error(`加载研报列表失败: ${msg}`)
+        void window.$app.message.error(`加载研报列表失败: ${msg}`)
       })
       .finally(() => {
         if (alive) setLoading(false)
