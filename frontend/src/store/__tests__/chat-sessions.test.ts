@@ -13,7 +13,7 @@ const session = (id: string, lastActive: string): ChatSession => ({
   user_id: null,
   title: `chat ${id}`,
   created_at: '2026-05-09T00:00:00Z',
-  last_active_at: lastActive,
+  updated_at: lastActive,
   message_count: 0,
   last_msg_preview: null,
 })
@@ -44,7 +44,7 @@ describe('chatSessionsStore', () => {
     chatSessionsActions.upsertSession(session('a', '2026-05-09T02:00:00Z'))
     const s = snapshot(chatSessionsState)
     expect(s.sessions).toHaveLength(1)
-    expect(s.sessions[0].last_active_at).toBe('2026-05-09T02:00:00Z')
+    expect(s.sessions[0].updated_at).toBe('2026-05-09T02:00:00Z')
   })
 
   it('removeSession drops by id', () => {
@@ -69,7 +69,7 @@ describe('renameSession action', () => {
         user_id: null,
         title: 'old',
         created_at: '2026-05-17T00:00:00Z',
-        last_active_at: '2026-05-17T00:00:00Z',
+        updated_at: '2026-05-17T00:00:00Z',
         message_count: 0,
         last_msg_preview: null,
       },

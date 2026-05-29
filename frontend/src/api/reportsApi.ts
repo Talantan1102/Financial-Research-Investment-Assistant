@@ -1,43 +1,31 @@
-export interface ResearchReportSummary {
-  id: string
-  title: string
-  source_chat_session_id: string | null
-  created_at: string
-  cost_usd: number
+/**
+ * TOMBSTONE — this file is intentionally broken to prevent re-use.
+ *
+ * reportsApi.ts was a zombie client with three bugs:
+ *   1. Wrong path: /api/v0/reports (backend prefix is /reports) → 404
+ *   2. Raw fetch without Authorization header → 401
+ *   3. Ghost schema fields (title, cost_usd, content_md) not in backend → TypeError
+ *
+ * Use @/api/reports instead (axios request client, correct schema, auto-auth).
+ *
+ * This file is kept as a tombstone so TypeScript will error loudly at any
+ * remaining import site rather than silently re-introducing the bugs.
+ */
+
+// Deliberately export nothing useful. Any import of this file is a mistake.
+export type ResearchReportSummary = never
+export type ResearchReportDetail = never
+
+export function listReports(): never {
+  throw new Error(
+    '[reportsApi] REMOVED: use listReports from @/api/reports instead. ' +
+    'This file was a zombie client hitting /api/v0/reports without auth.',
+  )
 }
 
-export interface ResearchReportDetail extends ResearchReportSummary {
-  content_md: string
-  metadata: Record<string, unknown>
-}
-
-const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
-
-function apiUrl(path: string): string {
-  const base = (API_BASE ?? '').replace(/\/$/, '')
-  return `${base}${path}`
-}
-
-export async function listReports(params?: {
-  source_chat_session_id?: string
-  limit?: number
-}): Promise<ResearchReportSummary[]> {
-  const url = new URL(apiUrl('/api/v0/reports'), 'http://localhost')
-  if (params?.source_chat_session_id) {
-    url.searchParams.set('source_chat_session_id', params.source_chat_session_id)
-  }
-  if (params?.limit !== undefined) {
-    url.searchParams.set('limit', String(params.limit))
-  }
-  const path = url.pathname + url.search
-  const res = await fetch(apiUrl(path))
-  if (!res.ok) throw new Error(`listReports failed: ${res.status}`)
-  const json = (await res.json()) as { items: ResearchReportSummary[] } | ResearchReportSummary[]
-  return Array.isArray(json) ? json : json.items
-}
-
-export async function getReport(id: string): Promise<ResearchReportDetail> {
-  const res = await fetch(apiUrl(`/api/v0/reports/${encodeURIComponent(id)}`))
-  if (!res.ok) throw new Error(`getReport failed: ${res.status}`)
-  return res.json() as Promise<ResearchReportDetail>
+export function getReport(_id: string): never {
+  throw new Error(
+    '[reportsApi] REMOVED: use getReport from @/api/reports instead. ' +
+    'This file was a zombie client hitting /api/v0/reports/{id} without auth.',
+  )
 }

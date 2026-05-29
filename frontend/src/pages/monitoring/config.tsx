@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  Alert as AntAlert,
   Button,
   Form,
   Input,
@@ -26,13 +27,10 @@ import {
   TeamOutlined,
 } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import {
-  createCustomer,
-  deleteCustomer,
-  getConfig,
-  listCustomers,
-  updateCustomer,
-} from "@/api/monitoring";
+// NOTE: v1.0 backend retired the customers / config endpoints (Task 13).
+// Customer CRUD is no longer wired to the backend on this page.
+// The global config / thresholds sections below are frontend-only (no backend
+// persistence) and remain as a UI stub until the backend re-exposes them.
 import type { MonitoringConfig, MonitoringCustomer } from "@/types/monitoring";
 
 // ── Design tokens (aligned with monitoring index page) ──
@@ -145,17 +143,11 @@ export default function MonitoringConfig() {
   const [thresholdOverrides, setThresholdOverrides] = useState<ThresholdOverrides>({});
 
   // ── Data fetch ──
+  // NOTE: v1.0 backend retired customers/config endpoints; no backend fetch here.
+  // pageLoading is set false immediately; customer list and config stay as stubs.
   const refresh = useCallback(async () => {
-    try {
-      const [c, cfg] = await Promise.all([listCustomers(), getConfig()]);
-      setCustomers(c);
-      setConfig(cfg);
-    } catch (err) {
-      console.error("[MonitoringConfig] refresh error:", err);
-      void message.error("配置加载失败");
-    } finally {
-      setPageLoading(false);
-    }
+    setPageLoading(false);
+    // Customers and config start empty — that is expected in v1.0.
   }, []);
 
   useEffect(() => {
@@ -194,51 +186,21 @@ export default function MonitoringConfig() {
     setModalOpen(true);
   };
 
-  const handleModalOk = async () => {
-    let vals: CustomerFormValues;
-    try {
-      vals = await customerForm.validateFields();
-    } catch {
-      return; // form validation failed, antd shows inline errors
-    }
-    setModalLoading(true);
-    try {
-      if (editingCustomer) {
-        await updateCustomer(editingCustomer.id, vals);
-        void message.success("客户信息已更新");
-      } else {
-        await createCustomer(vals);
-        void message.success("客户添加成功");
-      }
-      setModalOpen(false);
-      customerForm.resetFields();
-      await refresh();
-    } catch (err) {
-      console.error("[MonitoringConfig] modal save error:", err);
-      void message.error("保存失败，请重试");
-    } finally {
-      setModalLoading(false);
-    }
+  const handleModalOk = () => {
+    // v1.0: customers endpoint retired — backend CRUD not available.
+    // Fail loud so the user knows this is not silently succeeding.
+    void message.error(
+      "客户管理接口已在 v1.0 中退役，暂不支持添加/编辑操作。请联系管理员。",
+    );
+    setModalOpen(false);
+    customerForm.resetFields();
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    Modal.confirm({
-      title: `删除客户「${name}」？`,
-      content: "删除后该客户的所有扫描记录和告警将保留，但不再参与未来扫描。",
-      okText: "确认删除",
-      okType: "danger",
-      cancelText: "取消",
-      onOk: async () => {
-        try {
-          await deleteCustomer(id);
-          void message.success("已删除");
-          await refresh();
-        } catch (err) {
-          console.error("[MonitoringConfig] delete error:", err);
-          void message.error("删除失败");
-        }
-      },
-    });
+  const handleDelete = (_id: string, name: string) => {
+    // v1.0: customers endpoint retired — backend CRUD not available.
+    void message.error(
+      `无法删除客户「${name}」：v1.0 客户管理接口已退役，请联系管理员。`,
+    );
   };
 
   // ── Global config save (frontend-only display; PATCH endpoint not in v0.8.3) ──
@@ -489,9 +451,18 @@ export default function MonitoringConfig() {
         <Typography.Text
           style={{ fontSize: 13, color: TOKEN.textTertiary, display: "block", marginTop: 4 }}
         >
-          管理监控客户列表、扫描参数和信号阈值
+          扫描参数和信号阈值（前端配置，重启后恢复默认值）
         </Typography.Text>
       </div>
+
+      {/* ── v1.0 migration notice ── */}
+      <AntAlert
+        type="warning"
+        showIcon
+        message="客户管理功能正在重构"
+        description="v1.0 已退役客户 CRUD 接口，监控标的改由「持仓」页管理。全局配置与阈值调整仅前端生效，后端接口将在后续版本补全。"
+        style={{ marginBottom: 16 }}
+      />
 
       {pageLoading ? (
         <div

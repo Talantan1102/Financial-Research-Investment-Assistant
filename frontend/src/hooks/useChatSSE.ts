@@ -85,6 +85,9 @@ async function consumeStream(
   res: Response,
   signal: AbortSignal,
   typewriter: Typewriter,
+  /** Called each time a valid SSE frame is parsed. Used by the idle watchdog
+   *  (chat-send-02) to reset the no-frames timer on every received event. */
+  onFrame?: () => void,
 ): Promise<{ doneSeen: boolean }> {
   const reader = res.body?.getReader()
   if (!reader) return { doneSeen: false }
@@ -110,6 +113,8 @@ async function consumeStream(
       buffer = buffer.slice(idx + SSE_FRAME_DELIMITER.length)
       const ev = parseFrame(frame)
       if (ev) {
+        // Notify caller (idle watchdog) that a frame arrived.
+        onFrame?.()
         if (ev.type === 'token') {
           // Plan 2 dogfood root cause: backend SSE event JSON payload 没 seq 字段
           // (`{type:token, text, content}`),`ev.seq` = undefined → `undefined > 0`
@@ -151,6 +156,15 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
   // === NEW (2026-05-17): delayed sidebar refetch timer ref for cleanup on unmount ===
   const titleRefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Bug chat-send-02 (watchdog): if no SSE frame arrives within this many ms
+  // the stream is considered hung; we abort + reset UI so the user can retry.
+  // Value chosen to be longer than typical first-token latency (~30-60s) but
+  // short enough to avoid an indefinite wait when the backend hangs silently.
+  const STREAM_IDLE_TIMEOUT_MS = 90_000
+
+  // Ref to the current idle watchdog timer so we can cancel it on each frame.
+  const idleWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const typewriter = useTypewriter({
     onChar: (ch) => {
       currentChatState.streamingDraft += ch
@@ -172,6 +186,11 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         clearTimeout(titleRefetchTimerRef.current)
         titleRefetchTimerRef.current = null
       }
+      // Clear idle watchdog on unmount.
+      if (idleWatchdogRef.current !== null) {
+        clearTimeout(idleWatchdogRef.current)
+        idleWatchdogRef.current = null
+      }
     }
   }, [options.sessionId])
 
@@ -187,6 +206,26 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
       currentChatActions.beginStreaming()
 
       let doneSeen = false
+
+      // Bug chat-send-02 (watchdog): arm an idle watchdog that fires if no SSE
+      // frame arrives (or the POST itself doesn't resolve) within the timeout.
+      // Each received SSE frame resets the timer via resetIdleWatchdog().
+      // On fire: abort the request AND reset UI so the user is not stuck.
+      const armIdleWatchdog = () => {
+        if (idleWatchdogRef.current !== null) clearTimeout(idleWatchdogRef.current)
+        idleWatchdogRef.current = setTimeout(() => {
+          idleWatchdogRef.current = null
+          ac.abort()
+          currentChatActions.resetStreaming()
+        }, STREAM_IDLE_TIMEOUT_MS)
+      }
+      const clearIdleWatchdog = () => {
+        if (idleWatchdogRef.current !== null) {
+          clearTimeout(idleWatchdogRef.current)
+          idleWatchdogRef.current = null
+        }
+      }
+      armIdleWatchdog()
 
       try {
         const res = await fetchImpl(buildChatPostUrl(), {
@@ -213,6 +252,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             streamRes,
             ac.signal,
             typewriterRef.current,
+            armIdleWatchdog,
           )
           doneSeen = result.doneSeen
         } else {
@@ -221,10 +261,13 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             res,
             ac.signal,
             typewriterRef.current,
+            armIdleWatchdog,
           )
           doneSeen = result.doneSeen
         }
 
+        // Stream completed normally — clear the idle watchdog.
+        clearIdleWatchdog()
         // Flush any remaining typewriter chars so the persisted assistant
         // message captures the full token stream (dispatchEvent('done') already
         // ran flushDraftAsMessage with whatever streamingDraft had at the time;
@@ -232,6 +275,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         // RAF loop is async, so chars may still be queued. Drain them here.)
         typewriterRef.current.flush()
       } catch {
+        clearIdleWatchdog()
         if (ac.signal.aborted) return
       }
 
@@ -268,6 +312,12 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
 
   const abort = useCallback(() => {
     abortRef.current?.abort()
+    // Bug chat-send-02: abort must reset the UI to idle so the user can send
+    // another message. Previously abort() only triggered the AbortController
+    // without touching any store state, leaving streamingStatus stuck at
+    // 'streaming' forever when the abort path was reached before active_task_id
+    // was set (POST still pending) or when the backend never sent a done frame.
+    currentChatActions.resetStreaming()
   }, [])
 
   const status = useCallback(
@@ -320,9 +370,11 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
     } catch {
       // 失败也 reset UI(用户感知 cancel 了)
     }
-    // worker emit cancelled event 会让 streaming → idle;但 abort 已经截了 SSE,
-    // 主动 reset 让前端立刻响应
-    currentChatActions.setActiveTaskId(null)
+    // Bug chat-send-02 follow-up: cancelTask previously only cleared
+    // active_task_id but left streamingStatus at 'streaming'. Use the same
+    // resetStreaming() action so cancel always brings the UI back to idle,
+    // regardless of whether the cancelled SSE frame arrives or not.
+    currentChatActions.resetStreaming()
   }, [])
 
   // Plan 3 Task 7: retry from checkpoint。POST /chat/retry/{tid} → 新 task_id

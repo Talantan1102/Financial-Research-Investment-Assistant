@@ -449,7 +449,18 @@ async def _stream_research(req: ResearchRequest, user: _AnonUser, graph: Any) ->
     except Exception as e:
         # v0.9.x: 之前 swallow 异常成 error event,backend log 看不到根因 → 现在 log
         logger.exception("_stream_research astream_events raised: %s", e)
-        err = ResearchStreamEvent(type="error", data={"message": str(e)})
+        # Bug research-bug-3: str(e) leaks raw Python exception text (e.g.
+        # "Expecting value: line 1 column 1 (char 0)" for JSONDecodeError) to
+        # the frontend timeline. Internal detail goes to logger.exception above
+        # (fail loud in logs); the user-facing message is a safe business copy.
+        # The raw detail is kept in the 'detail' field for debug tooling only.
+        err = ResearchStreamEvent(
+            type="error",
+            data={
+                "message": "尽调过程出错，请稍后重试",
+                "detail": str(e),
+            },
+        )
         yield f"data: {err.model_dump_json()}\n\n"
 
 

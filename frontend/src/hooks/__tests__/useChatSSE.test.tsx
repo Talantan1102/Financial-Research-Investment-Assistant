@@ -18,7 +18,7 @@ function makeSession(id: string): ChatSession {
     user_id: null,
     title: 'mock',
     created_at: '2026-05-16T00:00:00Z',
-    last_active_at: '2026-05-16T00:00:00Z',
+    updated_at: '2026-05-16T00:00:00Z',
     message_count: 0,
     last_msg_preview: null,
   }
