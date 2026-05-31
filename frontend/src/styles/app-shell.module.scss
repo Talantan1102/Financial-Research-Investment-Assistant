@@ -3,11 +3,17 @@
   background: var(--ios-bg-grouped);
   display: flex;
   flex-direction: column;
+  /* border-box: width:100% 含 padding,避免 padding 撑到列宽外溢出
+     (popover 唤起垂直滚动条缩窄列宽时尤其明显)。 */
+  box-sizing: border-box;
   padding: 14px 12px;
   gap: 14px;
   border-right: 1px solid var(--ios-separator);
   height: 100%;
-  width: var(--ios-sidebar-w);
+  /* 填充自身 grid sidebar 列(app-shell grid = 240px)。原 var(--ios-sidebar-w)=280px
+     与 grid 240 不一致,会溢出 40px 致水平可滚动 — popover 的 scrollIntoView 触发
+     滚动后内容左偏被裁。box-sizing 全局 border-box,padding 含在 100% 内。 */
+  width: 100%;
 }
 
 .brandRow {
@@ -197,6 +203,67 @@
 
   &:hover { background: var(--ios-surface-hover); }
   svg { width: 18px; height: 18px; color: var(--ios-blue); flex-shrink: 0; }
+}
+
+/* ── History section header ──────────────────────── */
+.historyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 0 2px;
+  flex-shrink: 0;
+}
+.historyLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ios-label-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.historyCollapseBtn {
+  width: 22px; height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--ios-label-tertiary);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 5px;
+  transition: background 0.12s, color 0.12s;
+  padding: 0;
+
+  &:hover { background: var(--ios-surface-hover); color: var(--ios-label-secondary); }
+}
+
+/* ── User popover content ────────────────────────── */
+.userPopoverContent {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 160px;
+}
+.userPopoverItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--ios-label);
+  font-size: 14px;
+  font-weight: 400;
+  text-decoration: none;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  transition: background 0.1s;
+
+  &:hover { background: var(--ios-surface-hover); }
+  svg { color: var(--ios-blue); flex-shrink: 0; }
+
+  &:last-child svg { color: var(--ios-red, #ff3b30); }
+  &:last-child:hover { color: var(--ios-red, #ff3b30); }
 }
 
 /* ── User panel ────────────────────────────────────── */

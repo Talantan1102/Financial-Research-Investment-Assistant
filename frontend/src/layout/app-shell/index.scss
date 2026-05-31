@@ -9,6 +9,9 @@
   width: 100%;
 
   &__top-bar { grid-area: top; }
-  &__sidebar { grid-area: sidebar; overflow-y: auto; }
+  /* overflow-x: hidden 显式禁水平滚动 — 仅设 overflow-y:auto 时 CSS 会把
+     overflow-x 隐式算成 auto,sidebar 内容偶尔溢出(如 popover scrollIntoView)
+     就能水平滚动致内容左偏被裁。垂直滚动保留。 */
+  &__sidebar { grid-area: sidebar; overflow-y: auto; overflow-x: hidden; }
   &__main    { grid-area: main; overflow-y: auto; }
 }
