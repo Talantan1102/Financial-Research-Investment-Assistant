@@ -1,92 +1,67 @@
 """C70 regression — a research report stuck at 'streaming' is rescued to 'failed'.
 
-When _stream_research raises mid-stream (after the row was created at 'streaming'),
-the except block must open a FRESH session and UPDATE the row to 'failed' so it
-doesn't sit at 'streaming' forever.
+When the final persist ``db.commit()`` raises, ``_stream_research_with_persist``
+must roll back the tainted session and open a FRESH ``SessionLocal`` to flip the
+row to 'failed' (no stale-scanner covers research_reports, so otherwise it stays
+'streaming' forever).
 
-The rescue intentionally uses a separate connection, so this test commits the row
-to the real test DB (it cannot use the savepoint-isolated db_session fixture, whose
-uncommitted row would be invisible to the fresh rescue session) and cleans it up.
+Pure-unit: the rescue uses a separate connection, so rather than fight the
+savepoint-isolated db_session fixture we mock the persist db + the fresh rescue
+session and assert the rescue UPDATE is issued and committed.
 """
 
 from __future__ import annotations
 
 import asyncio
-import uuid
-from typing import Any
+from collections.abc import AsyncIterator
+from decimal import Decimal
+from typing import Any, cast
+from unittest.mock import MagicMock
 
+import app.router.reports as reports_mod
 import pytest
-from app.core.database import Base, SessionLocal, engine
-from app.models.research_report import ResearchReport
-
-pytestmark = pytest.mark.integration
 
 
-class _FakeReq:
-    """Minimal request stand-in for _stream_research_with_persist."""
+def test_c70_commit_failure_opens_fresh_session_and_marks_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # report stub — only .id / .status / .report_json / .cost / .request_id touched
+    report = MagicMock()
+    report.id = "c70-test-id"
+    report.cost = Decimal("0")
 
-    target_name: str = "x"
-    target_ts_code: str = "000001.SZ"
-    user_message: str = "test"
-    enable_web_search: bool = False
-    enable_kb_search: bool = False
+    # persist db whose final commit() raises (rollback is a recorded no-op)
+    db = MagicMock()
+    db.commit.side_effect = RuntimeError("simulated persist commit failure")
 
+    # fresh rescue session (what SessionLocal() returns in the except path)
+    rescue = MagicMock()
+    monkeypatch.setattr(reports_mod, "SessionLocal", lambda: rescue)
 
-def test_c70_stuck_row_rescued_on_stream_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    Base.metadata.create_all(bind=engine)
-    report_id = f"c70-{uuid.uuid4().hex[:8]}"
+    async def _fake_stream(*_a: Any, **_kw: Any) -> AsyncIterator[str]:
+        yield 'data: {"type":"done","data":{"request_id":"req-c70"}}\n\n'
 
-    # Seed the 'streaming' row with a real committed session (the rescue uses a
-    # separate connection and must be able to see it).
-    setup = SessionLocal()
-    try:
-        setup.add(
-            ResearchReport(
-                id=report_id,
-                user_id="u-c70",
-                status="streaming",
-                target_name="x",
-                target_ts_code="000001.SZ",
-                request_id="req-c70",
-            )
-        )
-        setup.commit()
-    finally:
-        setup.close()
+    monkeypatch.setattr(reports_mod, "_stream_research", _fake_stream)
 
-    from app.router import reports as reports_mod
+    async def _run() -> None:
+        async for _ in reports_mod._stream_research_with_persist(
+            req=cast(Any, MagicMock()),
+            user=cast(Any, MagicMock()),
+            graph=None,
+            report=cast(Any, report),
+            db=cast(Any, db),
+        ):
+            pass
 
-    async def _boom_stream(*_a: Any, **_kw: Any) -> Any:
-        raise RuntimeError("stream boom")
-        yield  # pragma: no cover — makes this an async generator
+    asyncio.run(_run())
 
-    monkeypatch.setattr(reports_mod, "_stream_research", _boom_stream)
-
-    persist_db = SessionLocal()
-    try:
-
-        async def _drive() -> None:
-            async for _ in reports_mod._stream_research_with_persist(
-                report_id=report_id,
-                req=_FakeReq(),
-                db=persist_db,
-                user_id="u-c70",
-            ):
-                pass
-
-        asyncio.run(_drive())
-    finally:
-        persist_db.close()
-
-    verify = SessionLocal()
-    try:
-        row = verify.get(ResearchReport, report_id)
-        assert row is not None
-        assert row.status == "failed"  # rescued, not stuck at 'streaming'
-    finally:
-        # This test commits to the real test DB (no savepoint isolation) — clean up.
-        stale = verify.get(ResearchReport, report_id)
-        if stale is not None:
-            verify.delete(stale)
-            verify.commit()
-        verify.close()
+    # The tainted persist session was rolled back...
+    db.rollback.assert_called_once()
+    # ...and a FRESH session issued the rescue UPDATE + committed + closed it.
+    rescue.execute.assert_called_once()
+    sql = str(rescue.execute.call_args.args[0])
+    assert "status = 'failed'" in sql
+    assert "status = 'streaming'" in sql  # only rescue rows still streaming
+    assert rescue.execute.call_args.args[1] == {"id": "c70-test-id"}
+    rescue.commit.assert_called_once()
+    rescue.close.assert_called_once()
