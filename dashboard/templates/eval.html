@@ -1,0 +1,144 @@
+{# 评估体系 — 子系统 × 评估层级 覆盖矩阵。
+   论文 §8 Verification & Evaluation;"没有评估就没有优化"。
+   数据 SSOT: dashboard/config/eval_system.yaml(改 yaml → 刷新即更新)。 #}
+{% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
+{% block content %}
+
+{% set SYM = {'covered': '●', 'partial': '◐', 'gap': '○'} %}
+{% set LABEL = {'covered': '已覆盖', 'partial': '部分', 'gap': '缺口'} %}
+
+<div class="section-marker">
+  <span class="sm-num">§ 08</span>
+  <span class="sm-title">评估体系</span>
+  <span class="sm-desc">Verification &amp; Evaluation · 没有评估就没有优化</span>
+</div>
+
+<section class="eval-intro">
+  <p class="eval-tagline">没有评估就没有优化。</p>
+  <p class="eval-lead">
+    一张<strong>子系统 × 评估层级</strong>覆盖矩阵 — 一眼看出整个项目哪里还没被评估盯住。
+    锚点:Li et al., <em>Agent Harness Engineering: A Survey</em> (2026) ·
+    <span class="accent">§8 Verification &amp; Evaluation</span>。
+  </p>
+</section>
+
+{# summary 条 — 覆盖率 + 三态计数 #}
+<div class="eval-summary">
+  <div class="eval-summary-pct">
+    <span class="esp-num">{{ summary.coverage_pct }}%</span>
+    <span class="esp-label">覆盖率</span>
+  </div>
+  <div class="eval-summary-bar" role="img"
+       aria-label="覆盖率 {{ summary.coverage_pct }}%">
+    <span class="esb-fill" style="width: {{ summary.coverage_pct }}%"></span>
+  </div>
+  <div class="eval-summary-counts">
+    <span class="esc esc--covered">{{ summary.covered }} 有</span>
+    <span class="esc esc--partial">{{ summary.partial }} 部分</span>
+    <span class="esc esc--gap">{{ summary.gap }} 缺口</span>
+    <span class="esc esc--total">/ {{ summary.total }} 格</span>
+  </div>
+</div>
+
+{# legend #}
+<div class="eval-legend">
+  <span class="el-item"><span class="eval-dot eval-dot--covered">●</span> 已覆盖 <span class="el-hint">运行中评估守护</span></span>
+  <span class="el-item"><span class="eval-dot eval-dot--partial">◐</span> 部分 <span class="el-hint">有基建但缺口明确</span></span>
+  <span class="el-item"><span class="eval-dot eval-dot--gap">○</span> 缺口 <span class="el-hint">该层级实质空白</span></span>
+</div>
+
+{# 矩阵 — 横向可滚动 #}
+<div class="eval-matrix-scroll">
+  <table class="eval-matrix">
+    <thead>
+      <tr>
+        <th class="eval-corner" scope="col">
+          <span class="ec-row">子系统</span>
+          <span class="ec-col">评估层级 ›</span>
+        </th>
+        {% for layer in matrix.layers %}
+          <th class="eval-col-head" scope="col">
+            <span class="ech-cn">{{ layer.name_cn }}</span>
+            <span class="ech-en">{{ layer.name_en }}</span>
+            <span class="ech-desc">{{ layer.desc }}</span>
+            <span class="ech-cov">{{ summary.covered_by_layer[layer.id] }}/{{ matrix.subsystems|length }} covered</span>
+          </th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for sub in matrix.subsystems %}
+        <tr>
+          <th class="eval-row-head" scope="row">
+            <span class="erh-cn">{{ sub.name_cn }}</span>
+            <span class="erh-en">{{ sub.name_en }}</span>
+          </th>
+          {% for layer in matrix.layers %}
+            {% set cell = sub.cells[layer.id] %}
+            <td class="eval-cell eval-cell--{{ cell.status }}">
+              <button type="button"
+                      class="eval-cell-btn"
+                      hx-get="/eval/cell/{{ sub.id }}/{{ layer.id }}"
+                      hx-target="#eval-detail"
+                      hx-swap="innerHTML show:#eval-detail:top"
+                      aria-label="{{ sub.name_cn }} {{ layer.name_cn }} — {{ LABEL[cell.status] }}">
+                <span class="eval-dot eval-dot--{{ cell.status }}" aria-hidden="true">{{ SYM[cell.status] }}</span>
+                {% if cell.methods %}
+                  <span class="eval-cell-chips">
+                    {% for m in cell.methods[:3] %}
+                      <span class="eval-chip eval-chip--mini">{{ m }}</span>
+                    {% endfor %}
+                    {% if cell.methods|length > 3 %}
+                      <span class="eval-chip eval-chip--more">+{{ cell.methods|length - 3 }}</span>
+                    {% endif %}
+                  </span>
+                {% else %}
+                  <span class="eval-cell-gaphint">待补</span>
+                {% endif %}
+              </button>
+            </td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# 详情面板 — 点格子 htmx swap 进来 #}
+<div id="eval-detail" class="eval-detail">
+  <div class="eval-detail-placeholder">
+    点上方任意格子 — 看该子系统在该层级的方法 / 代码证据 / 缺口。
+  </div>
+</div>
+
+{# 底部小卡 — 评估底座 #}
+<section class="eval-base">
+  <h3 class="eval-base-h">评估底座</h3>
+  <p class="eval-base-sub">所有层级的评估共享这套横切设施 →
+    <a href="/m/verification">§6 验证与评测</a></p>
+  <div class="eval-base-grid">
+    <div class="eval-base-card">
+      <span class="ebc-name">EvalRunner</span>
+      <span class="ebc-desc">golden case 批跑 · SUT 可注入</span>
+    </div>
+    <div class="eval-base-card">
+      <span class="ebc-name">Judge</span>
+      <span class="ebc-desc">LLM-as-judge · rubric 打分</span>
+    </div>
+    <div class="eval-base-card">
+      <span class="ebc-name">GoldenCase</span>
+      <span class="ebc-desc">标注样本 · 差分对照基准</span>
+    </div>
+    <div class="eval-base-card">
+      <span class="ebc-name">TraceService</span>
+      <span class="ebc-desc">结构化 span · 在线可观测</span>
+    </div>
+    <div class="eval-base-card">
+      <span class="ebc-name">LangSmith</span>
+      <span class="ebc-desc">全链路图/LLM trace 已接(P0)· 数据集/实验对比规划中</span>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
