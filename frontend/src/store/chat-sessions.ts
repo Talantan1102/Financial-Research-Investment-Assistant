@@ -116,13 +116,15 @@ export const chatSessionsActions = {
     }
   },
   /**
-   * Used by /chat landing page to avoid accumulating empty sessions on each
-   * navigation. Reuses the first untouched empty shell (message_count === 0,
-   * default title) if one exists; otherwise creates a new one.
+   * Shared by the /chat landing page and the sidebar "新对话" button to avoid
+   * accumulating empty sessions. Reuses the first untouched empty shell
+   * (message_count === 0, default title) if one exists; otherwise creates a new
+   * one. This means clicking "新对话" while already sitting on an empty chat
+   * stays on that chat instead of spawning a duplicate.
    *
    * SSOT: "新对话" matches backend chats.py DEFAULT_CHAT_TITLE constant.
    */
-  async getOrCreateLanding(): Promise<ChatSession> {
+  async getOrCreateEmptyChat(): Promise<ChatSession> {
     if (chatSessionsState.status !== 'loaded') {
       try {
         await chatSessionsActions.loadSessions()

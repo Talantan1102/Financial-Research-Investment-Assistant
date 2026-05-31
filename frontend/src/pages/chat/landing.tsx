@@ -8,7 +8,7 @@ export function ChatLandingPage() {
   useEffect(() => {
     let cancelled = false
     chatSessionsActions
-      .getOrCreateLanding()
+      .getOrCreateEmptyChat()
       .then((s) => {
         if (!cancelled) navigate(`/chat/${s.id}`, { replace: true })
       })

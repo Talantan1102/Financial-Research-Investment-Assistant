@@ -151,3 +151,120 @@ describe('chatSessionsStore + chatApi', () => {
     expect(s.sessions.map((x) => x.id)).toContain('new-id')
   })
 })
+
+describe('getOrCreateEmptyChat action', () => {
+  beforeEach(() => chatSessionsActions.reset())
+
+  // Registers a POST /api/v0/chats handler that records how many times it is
+  // hit and returns a freshly-created session. Lets each test assert whether
+  // createChat (the only POST to this endpoint) fired — the "reuse empty shell"
+  // path must hit it 0 times. server.resetHandlers() in vitest.setup.ts clears
+  // this between tests so the counter never leaks.
+  const stubCreateChat = (): { count: number } => {
+    const calls = { count: 0 }
+    server.use(
+      http.post(`${API_BASE}/api/v0/chats`, () => {
+        calls.count += 1
+        return HttpResponse.json({
+          id: 'created-id',
+          user_id: null,
+          title: '新对话',
+          created_at: '2026-05-20T00:00:00Z',
+          updated_at: '2026-05-20T00:00:00Z',
+          message_count: 0,
+          last_msg_preview: null,
+        })
+      }),
+    )
+    return calls
+  }
+
+  const emptyShell = (id: string): ChatSession => ({
+    id,
+    user_id: null,
+    title: '新对话', // SSOT: matches backend chats.py DEFAULT_CHAT_TITLE
+    created_at: '2026-05-20T00:00:00Z',
+    updated_at: '2026-05-20T00:00:00Z',
+    message_count: 0,
+    last_msg_preview: null,
+  })
+
+  it('reuses an existing empty shell and does NOT call createChat', async () => {
+    // setSessions flips status to 'loaded', so getOrCreateEmptyChat skips the
+    // loadSessions branch and inspects the list directly.
+    chatSessionsActions.setSessions([emptyShell('empty-1')])
+    const calls = stubCreateChat()
+
+    const result = await chatSessionsActions.getOrCreateEmptyChat()
+
+    expect(result.id).toBe('empty-1')
+    expect(calls.count).toBe(0) // reused, no duplicate creation
+    const s = snapshot(chatSessionsState)
+    expect(s.sessions.map((x) => x.id)).toEqual(['empty-1'])
+  })
+
+  it('does NOT reuse a session with messages — creates a new one', async () => {
+    chatSessionsActions.setSessions([
+      { ...emptyShell('busy-1'), title: '新对话', message_count: 3 },
+    ])
+    const calls = stubCreateChat()
+
+    const result = await chatSessionsActions.getOrCreateEmptyChat()
+
+    expect(result.id).toBe('created-id')
+    expect(calls.count).toBe(1)
+    const s = snapshot(chatSessionsState)
+    expect(s.sessions.map((x) => x.id)).toContain('created-id')
+  })
+
+  it('does NOT reuse a renamed empty session — title must match default', async () => {
+    chatSessionsActions.setSessions([
+      { ...emptyShell('renamed-1'), title: '我的研究', message_count: 0 },
+    ])
+    const calls = stubCreateChat()
+
+    const result = await chatSessionsActions.getOrCreateEmptyChat()
+
+    expect(result.id).toBe('created-id')
+    expect(calls.count).toBe(1)
+  })
+
+  it('creates a new chat when the list is empty but already loaded', async () => {
+    chatSessionsActions.setSessions([]) // loaded, empty list
+    const calls = stubCreateChat()
+
+    const result = await chatSessionsActions.getOrCreateEmptyChat()
+
+    expect(result.id).toBe('created-id')
+    expect(calls.count).toBe(1)
+  })
+
+  it('loads sessions first when status is not loaded, then reuses empty shell', async () => {
+    // status starts 'idle' (after reset) → must GET /api/v0/chats before judging.
+    let listed = 0
+    server.use(
+      http.get(`${API_BASE}/api/v0/chats`, () => {
+        listed += 1
+        return HttpResponse.json([
+          {
+            id: 'fetched-empty',
+            user_id: null,
+            title: '新对话',
+            created_at: '2026-05-20T00:00:00Z',
+            updated_at: '2026-05-20T00:00:00Z',
+            message_count: 0,
+            last_msg_preview: null,
+          },
+        ])
+      }),
+    )
+    const calls = stubCreateChat()
+
+    expect(snapshot(chatSessionsState).status).toBe('idle')
+    const result = await chatSessionsActions.getOrCreateEmptyChat()
+
+    expect(listed).toBe(1) // loadSessions ran because status !== 'loaded'
+    expect(result.id).toBe('fetched-empty')
+    expect(calls.count).toBe(0) // reused the fetched shell, no creation
+  })
+})
