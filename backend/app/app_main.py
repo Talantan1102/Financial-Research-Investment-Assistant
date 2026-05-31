@@ -453,9 +453,9 @@ from app.router.chat import (
 from app.router.escalate import (  # noqa: E402
     get_chat_session_repo as esc_get_chat_repo,
 )
-from app.router.escalate import (
-    get_escalation_record_repo as esc_get_repo,
-)
+
+# C43: escalate.get_escalation_record_repo is now re-exported from chat, so the
+# single chat_get_repo override below covers both routers — no esc_get_repo dup.
 from app.router.escalate import (
     get_research_agent as esc_get_agent,
 )
@@ -466,7 +466,6 @@ from app.router.escalate import (
 app.dependency_overrides[chats_router_module.get_repo] = _override_or_fallback("chat_session_repo")
 app.dependency_overrides[chat_get_extractor] = _override_or_fallback("escalation_extractor")
 app.dependency_overrides[chat_get_repo] = _override_or_fallback("escalation_record_repo")
-app.dependency_overrides[esc_get_repo] = _override_or_fallback("escalation_record_repo")
 app.dependency_overrides[esc_get_agent] = _override_or_fallback("research_agent")
 app.dependency_overrides[esc_get_chat_repo] = _override_or_fallback("chat_session_repo")
 app.dependency_overrides[esc_get_rpt_repo] = _override_or_fallback("research_report_repo")

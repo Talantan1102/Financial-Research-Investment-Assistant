@@ -338,6 +338,7 @@ class Analyst(Agent):
                 valuations=vals,
                 assumptions=assumptions,
                 company_narrative=company_narrative,
+                request_id=state.request_id,  # C26: span linkage
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("v1.x A5a: OutlierDiagnosisAgent 失败 (silent): %s", e)

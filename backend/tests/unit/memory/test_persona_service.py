@@ -348,7 +348,9 @@ def test_sync_to_working_block_upserts_existing() -> None:
 
     service._sync_to_working_block(user_id=user_id)
 
-    assert "## 你声明的" in existing_block.content
+    # C24: now a pg_insert ... on_conflict_do_update upsert (no read-then-mutate),
+    # so the existing ORM object is not modified — assert the upsert + commit ran.
+    session.execute.assert_called()
     session.commit.assert_called()
 
 
@@ -377,7 +379,8 @@ def test_sync_to_working_block_inserts_new() -> None:
 
     service._sync_to_working_block(user_id=uuid4())
 
-    session.add.assert_called()
+    # C24: pg_insert upsert via session.execute() — add() is no longer used.
+    session.execute.assert_called()
     session.commit.assert_called()
 
 

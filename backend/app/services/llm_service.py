@@ -7,6 +7,7 @@ LLMService itself never branches on LLM_MODE.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from datetime import UTC, datetime
@@ -21,6 +22,8 @@ from app.services.pricing import compute_cost
 from app.services.tier_router import TierRouter
 from app.services.trace_models import Span
 from app.services.trace_service import TraceService
+
+logger = logging.getLogger(__name__)
 
 
 class ChatCompletionRaw(Protocol):
@@ -137,5 +140,10 @@ class LLMService:
                 ended_at=ended_at,
                 error=None,
             )
-            self._trace.write_span(span)
+            # C27: span write is auxiliary observability — a trace/DB failure must
+            # NEVER break the primary LLM call. Log loudly, do not propagate.
+            try:
+                self._trace.write_span(span)
+            except Exception:
+                logger.warning("TraceService.write_span failed (non-fatal)", exc_info=True)
         return response

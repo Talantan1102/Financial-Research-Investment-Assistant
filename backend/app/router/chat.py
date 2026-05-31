@@ -26,9 +26,9 @@ last_event_id-based SSE reconnect (spec § 4.6 / G1 industrial problem).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-import traceback
 import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, Literal
@@ -157,28 +157,11 @@ class StreamEvent(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Stub User — v0 anonymous auth (real JWT auth lives in auth_router)
+# Stub User — v0 anonymous auth. C44: single source in auth_helpers (chat.py
+# previously kept a byte-for-byte duplicate); re-export so the Depends usages
+# below resolve to the shared definitions and future auth changes propagate.
 # ---------------------------------------------------------------------------
-
-
-class _AnonUser:
-    """Minimal user object for v0 anonymous access."""
-
-    id: str = "anonymous"
-
-    def __init__(self) -> None:
-        self.id = "anonymous"
-
-
-def get_current_user() -> _AnonUser:
-    """v0 stub: every request is treated as anonymous.
-
-    Real auth is preserved in app.router.auth_router (OAuth2 + JWT).  This
-    stub is replaced by a proper dependency once auth integration is wired
-    into the new router in a future task.
-    """
-    return _AnonUser()
-
+from app.router.auth_helpers import _AnonUser, get_current_user  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Graph singleton — built once at lifespan startup, stored on app.state.chat_graph
@@ -457,7 +440,11 @@ async def _stream_chat(
             persona_pg_factory = _build_async_pg_session_factory_or_none()
             if persona_pg_factory is not None:
                 user_uuid = user.id if isinstance(user.id, UUID) else UUID(str(user.id))
-                populate_persona_on_session_start(persona_pg_factory, user_id=user_uuid)
+                # C14: populate_persona_on_session_start runs ~6 blocking PG queries +
+                # commit; offload off the event loop so it doesn't stall concurrent SSE.
+                await asyncio.to_thread(
+                    populate_persona_on_session_start, persona_pg_factory, user_id=user_uuid
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning("populate_persona_on_session_start failed: %s", exc)
 
@@ -504,10 +491,18 @@ async def _stream_chat(
                     )
         except Exception as exc:
             graph_error = exc
+            # C30: log full context server-side (was Rule-5 invisible); NEVER leak
+            # the traceback / internal paths to the SSE client.
+            logger.exception(
+                "Graph error in _stream_chat request_id=%s session_id=%s: %s",
+                request_id,
+                req.session_id,
+                exc,
+            )
             error_event = StreamEvent(
                 type="error",
                 seq=next_seq(),
-                data={"message": str(exc), "traceback": traceback.format_exc()},
+                data={"message": "Internal error; please retry", "request_id": request_id},
             )
             yield (
                 f"event: {error_event.type}\n"
@@ -612,6 +607,7 @@ async def _stream_chat(
             chat_history_summary=final_state.get("history_summary"),
             history=history_dicts,
             cached_tool_results=cached_tool_results,
+            request_id=request_id,  # C26: span linkage to the originating request
         )
         rec = await record_repo.create_draft(
             session_id=req.session_id,

@@ -19,11 +19,16 @@ Why not in app.services strict tier?
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from openai import OpenAI
 
 from app.config.llm_config import LLMConfig
 from app.services.llm_service import LLMService
+from app.services.tier_router import V0_DEFAULT_MODEL  # C45: SSOT for default model
+
+if TYPE_CHECKING:
+    from app.services.trace_service import TraceService
 
 
 class _Raw:
@@ -69,15 +74,26 @@ class _OpenAIAdapter:
         )
 
 
-def build_llm_service_from_env() -> LLMService:
+def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLMService:
     """Construct an LLMService backed by a real OpenAI-compatible endpoint.
 
     Reads API credentials from environment via LLMConfig (DASHSCOPE_API_KEY /
     LLM_BASE_URL).  Used by the HTTP chat router and TushareClient to inject
     into MockTushareService.
+
+    C27: wires a TraceService so LLMService.chat actually persists spans
+    (cost/latency) — every factory caller (chat router, monitoring/memory Celery
+    tasks, eval) gets observability. Defaults to TraceService(SessionLocal); span
+    writes are best-effort and never break the LLM call.
+    C45: default model comes from the canonical tier_router.V0_DEFAULT_MODEL (SSOT).
     """
     config = LLMConfig()
-    model = os.getenv("MOCK_TUSHARE_MODEL", "deepseek-v4-flash")
+    model = os.getenv("MOCK_TUSHARE_MODEL", V0_DEFAULT_MODEL)
     raw_client = OpenAI(api_key=config.api_key, base_url=config.base_url)
     adapter = _OpenAIAdapter(client=raw_client, model=model)
-    return LLMService(client=adapter)
+    if trace_service is None:
+        from app.core.database import SessionLocal
+        from app.services.trace_service import TraceService as _TraceService
+
+        trace_service = _TraceService(SessionLocal)
+    return LLMService(client=adapter, trace_service=trace_service)

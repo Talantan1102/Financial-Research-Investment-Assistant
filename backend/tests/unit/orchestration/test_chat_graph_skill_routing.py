@@ -21,13 +21,15 @@ def _make_state(**plan_kwargs) -> ChatState:
 
 
 def test_route_load_skill():
+    # C6: must pass skill_loader_available=True to get skill routing
     s = _make_state(load_skill="risk_assessment")
-    assert _route_after_planner(s) == "skill_load_node"
+    assert _route_after_planner(s, skill_loader_available=True) == "skill_load_node"
 
 
 def test_route_load_resource():
+    # C6: must pass skill_loader_available=True to get resource routing
     s = _make_state(load_resource={"skill": "x", "ref": "resources/x.yaml"})
-    assert _route_after_planner(s) == "resource_load_node"
+    assert _route_after_planner(s, skill_loader_available=True) == "resource_load_node"
 
 
 def test_route_tool_call():
