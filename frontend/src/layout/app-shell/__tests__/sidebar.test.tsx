@@ -13,11 +13,11 @@ describe('<Sidebar>', () => {
     expect(getByTestId('sidebar-search-input')).toBeInTheDocument()
   })
 
-  it('renders 4 child sections: chat-session-list, new-chat-button, page-nav, user-panel', () => {
+  it('renders main sections: chat-session-list, new-chat-button, history-toggle, user-panel', () => {
     const { getByTestId } = renderWithProviders(<Sidebar />)
     expect(getByTestId('sidebar-new-chat-button')).toBeInTheDocument()
     expect(getByTestId('sidebar-chat-session-list')).toBeInTheDocument()
-    expect(getByTestId('sidebar-page-nav')).toBeInTheDocument()
+    expect(getByTestId('sidebar-history-toggle')).toBeInTheDocument()
     expect(getByTestId('sidebar-user-panel')).toBeInTheDocument()
   })
 })

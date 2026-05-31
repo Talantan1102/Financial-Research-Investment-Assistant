@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Alert as AntAlert,
   Button,
+  Card,
   Form,
   Input,
   InputNumber,
@@ -12,6 +13,7 @@ import {
   Switch,
   Table,
   Tabs,
+  Tag,
   TimePicker,
   Tooltip,
   Typography,
@@ -31,77 +33,6 @@ import dayjs, { type Dayjs } from "dayjs";
 // The global config / thresholds sections below are frontend-only (no backend
 // persistence) and remain as a UI stub until the backend re-exposes them.
 import type { MonitoringConfig, MonitoringCustomer } from "@/types/monitoring";
-
-// ── Design tokens (aligned with monitoring index page) ──
-const TOKEN = {
-  pageBg: "#faf9f7",
-  cardBg: "#ffffff",
-  borderColor: "#e8e4dc",
-  textPrimary: "#1a1d21",
-  textSecondary: "#5d6875",
-  textTertiary: "#8a96a3",
-  accentRed: "#c0392b",
-  accentYellow: "#b8860b",
-  accentGreen: "#27875a",
-  monoFont: '"SF Mono", "JetBrains Mono", Consolas, monospace',
-} as const;
-
-// ── Section wrapper — replaces Antd Card for lighter visual ──
-interface SectionProps {
-  title: string;
-  subtitle?: string;
-  icon: React.ReactNode;
-  extra?: React.ReactNode;
-  children: React.ReactNode;
-}
-
-function Section({ title, subtitle, icon, extra, children }: SectionProps) {
-  return (
-    <div
-      style={{
-        backgroundColor: TOKEN.cardBg,
-        border: `1px solid ${TOKEN.borderColor}`,
-        borderRadius: 8,
-        overflow: "hidden",
-      }}
-    >
-      {/* section header */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "14px 20px",
-          borderBottom: `1px solid ${TOKEN.borderColor}`,
-          backgroundColor: "#f7f5f1",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ color: TOKEN.accentRed, fontSize: 15 }}>{icon}</span>
-          <div>
-            <div
-              style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: TOKEN.textPrimary,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              {title}
-            </div>
-            {subtitle && (
-              <div style={{ fontSize: 12, color: TOKEN.textTertiary, marginTop: 1 }}>
-                {subtitle}
-              </div>
-            )}
-          </div>
-        </div>
-        {extra && <div>{extra}</div>}
-      </div>
-      <div style={{ padding: "16px 20px" }}>{children}</div>
-    </div>
-  );
-}
 
 // ── Customer CRUD form values ──
 interface CustomerFormValues {
@@ -124,14 +55,15 @@ interface GlobalFormValues {
 type ThresholdOverrides = Record<string, Record<string, number | null>>;
 
 export default function MonitoringConfig() {
-  const [customers, setCustomers] = useState<MonitoringCustomer[]>([]);
-  const [config, setConfig] = useState<MonitoringConfig | null>(null);
+  // v1.0 退役客户 CRUD 端点后,这些 state 恒初始值(不再 set),仅用于渲染退役占位 UI
+  const [customers] = useState<MonitoringCustomer[]>([]);
+  const [config] = useState<MonitoringConfig | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
 
   // Customer modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<MonitoringCustomer | null>(null);
-  const [modalLoading, setModalLoading] = useState(false);
+  const [modalLoading] = useState(false);
   const [customerForm] = Form.useForm<CustomerFormValues>();
 
   // Global config form
@@ -243,9 +175,9 @@ export default function MonitoringConfig() {
       key: "name",
       width: 130,
       render: (name: string) => (
-        <span style={{ fontWeight: 500, color: TOKEN.textPrimary, fontSize: 13 }}>
+        <Typography.Text strong style={{ fontSize: 13 }}>
           {name}
-        </span>
+        </Typography.Text>
       ),
     },
     {
@@ -254,16 +186,9 @@ export default function MonitoringConfig() {
       key: "ts_code",
       width: 120,
       render: (code: string) => (
-        <span
-          style={{
-            fontFamily: TOKEN.monoFont,
-            fontSize: 12,
-            color: TOKEN.textSecondary,
-            letterSpacing: "0.04em",
-          }}
-        >
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {code}
-        </span>
+        </Typography.Text>
       ),
     },
     {
@@ -272,7 +197,9 @@ export default function MonitoringConfig() {
       key: "industry",
       width: 120,
       render: (industry: string) => (
-        <span style={{ fontSize: 13, color: TOKEN.textSecondary }}>{industry}</span>
+        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
+          {industry}
+        </Typography.Text>
       ),
     },
     {
@@ -282,12 +209,7 @@ export default function MonitoringConfig() {
       width: 70,
       align: "center",
       render: (enabled: boolean) => (
-        <Switch
-          size="small"
-          checked={enabled}
-          disabled
-          style={{ cursor: "default" }}
-        />
+        <Switch size="small" checked={enabled} disabled style={{ cursor: "default" }} />
       ),
     },
     {
@@ -301,7 +223,6 @@ export default function MonitoringConfig() {
               size="small"
               icon={<EditOutlined />}
               onClick={() => openEdit(record)}
-              style={{ borderColor: TOKEN.borderColor, color: TOKEN.textSecondary }}
             />
           </Tooltip>
           <Tooltip title="删除">
@@ -309,9 +230,7 @@ export default function MonitoringConfig() {
               size="small"
               danger
               icon={<DeleteOutlined />}
-              onClick={() => {
-                void handleDelete(record.id, record.name);
-              }}
+              onClick={() => { void handleDelete(record.id, record.name); }}
             />
           </Tooltip>
         </Space>
@@ -324,38 +243,22 @@ export default function MonitoringConfig() {
   const thresholdTabItems = Object.keys(thresholds).map((rule) => {
     const defaults = thresholds[rule];
     const overrides = thresholdOverrides[rule] ?? {};
+    const hasOverrides = Object.keys(overrides).length > 0;
     return {
       key: rule,
       label: (
-        <span
-          style={{
-            fontSize: 13,
-            color: overrides && Object.keys(overrides).length > 0
-              ? TOKEN.accentRed
-              : TOKEN.textSecondary,
-          }}
-        >
-          {rule}
-        </span>
+        <Space size={4}>
+          <span style={{ fontSize: 13 }}>{rule}</span>
+          {hasOverrides && <Tag color="warning" style={{ fontSize: 11, margin: 0 }}>已覆盖</Tag>}
+        </Space>
       ),
       children: (
         <div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              marginBottom: 12,
-            }}
-          >
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
             <Button
               size="small"
               icon={<RedoOutlined />}
               onClick={() => handleThresholdReset(rule)}
-              style={{
-                borderColor: TOKEN.borderColor,
-                color: TOKEN.textSecondary,
-                fontSize: 12,
-              }}
             >
               重置为默认值
             </Button>
@@ -373,48 +276,30 @@ export default function MonitoringConfig() {
               const isOverridden = overrideVal !== undefined && overrideVal !== null;
               return (
                 <div key={k}>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: isOverridden ? TOKEN.accentRed : TOKEN.textTertiary,
-                      marginBottom: 4,
-                      fontFamily: TOKEN.monoFont,
-                      letterSpacing: "0.02em",
-                    }}
-                  >
-                    {k}
+                  <div style={{ marginBottom: 4 }}>
+                    <Typography.Text
+                      type={isOverridden ? "warning" : "secondary"}
+                      style={{ fontSize: 12 }}
+                    >
+                      {k}
+                    </Typography.Text>
                     {isOverridden && (
-                      <span
-                        style={{
-                          marginLeft: 6,
-                          fontSize: 10,
-                          color: TOKEN.accentRed,
-                          backgroundColor: "rgba(192,57,43,0.08)",
-                          padding: "1px 5px",
-                          borderRadius: 3,
-                        }}
-                      >
+                      <Tag color="warning" style={{ marginLeft: 6, fontSize: 10 }}>
                         已覆盖
-                      </span>
+                      </Tag>
                     )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <InputNumber
                       size="small"
                       value={displayVal}
-                      style={{ width: 120, fontFamily: TOKEN.monoFont, fontSize: 12 }}
+                      style={{ width: 120, fontSize: 12 }}
                       onChange={(v) => handleThresholdChange(rule, k, v)}
                       placeholder={String(defaultVal)}
                     />
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: TOKEN.textTertiary,
-                        fontFamily: TOKEN.monoFont,
-                      }}
-                    >
+                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
                       默认: {defaultVal}
-                    </span>
+                    </Typography.Text>
                   </div>
                 </div>
               );
@@ -426,30 +311,13 @@ export default function MonitoringConfig() {
   });
 
   return (
-    <div
-      style={{
-        padding: 24,
-        backgroundColor: TOKEN.pageBg,
-        minHeight: "100%",
-      }}
-    >
+    <div style={{ padding: 16 }}>
       {/* ── Page header ── */}
-      <div style={{ marginBottom: 20 }}>
-        <Typography.Title
-          level={4}
-          style={{
-            margin: 0,
-            fontSize: 20,
-            fontWeight: 600,
-            color: TOKEN.textPrimary,
-            letterSpacing: "-0.01em",
-          }}
-        >
+      <div style={{ marginBottom: 16 }}>
+        <Typography.Title level={4} style={{ margin: 0 }}>
           监控配置
         </Typography.Title>
-        <Typography.Text
-          style={{ fontSize: 13, color: TOKEN.textTertiary, display: "block", marginTop: 4 }}
-        >
+        <Typography.Text type="secondary" style={{ fontSize: 13 }}>
           扫描参数和信号阈值（前端配置，重启后恢复默认值）
         </Typography.Text>
       </div>
@@ -464,41 +332,36 @@ export default function MonitoringConfig() {
       />
 
       {pageLoading ? (
-        <div
-          style={{
-            backgroundColor: TOKEN.cardBg,
-            border: `1px solid ${TOKEN.borderColor}`,
-            borderRadius: 8,
-            padding: 24,
-          }}
-        >
+        <Card>
           {[1, 2, 3, 4].map((i) => (
             <Skeleton key={i} active paragraph={{ rows: 2 }} style={{ marginBottom: 16 }} />
           ))}
-        </div>
+        </Card>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
           {/* ── Section 1: Customer list CRUD ── */}
-          <Section
-            title="客户列表"
-            subtitle={`共 ${customers.length.toString()} 位客户`}
-            icon={<TeamOutlined />}
+          <Card
+            title={
+              <Space>
+                <TeamOutlined />
+                <span>客户列表</span>
+                <Typography.Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>
+                  共 {customers.length.toString()} 位客户
+                </Typography.Text>
+              </Space>
+            }
             extra={
               <Button
                 type="primary"
                 size="small"
                 icon={<PlusOutlined />}
                 onClick={openAdd}
-                style={{
-                  backgroundColor: TOKEN.accentRed,
-                  borderColor: TOKEN.accentRed,
-                  fontSize: 12,
-                }}
               >
                 添加客户
               </Button>
             }
+            size="small"
           >
             <Table<MonitoringCustomer>
               rowKey="id"
@@ -507,40 +370,29 @@ export default function MonitoringConfig() {
               size="small"
               pagination={customers.length > 15 ? { pageSize: 15, showSizeChanger: false } : false}
               scroll={{ x: 560 }}
-              style={{ fontSize: 13 }}
               locale={{
                 emptyText: (
-                  <div
-                    style={{
-                      padding: "32px 0",
-                      textAlign: "center",
-                      color: TOKEN.textTertiary,
-                      fontSize: 13,
-                    }}
-                  >
+                  <Typography.Text type="secondary" style={{ fontSize: 13 }}>
                     暂无监控客户，点击「添加客户」开始配置
-                  </div>
+                  </Typography.Text>
                 ),
               }}
-              onRow={() => ({
-                style: { transition: "background 0.12s" },
-                onMouseEnter: (e) => {
-                  (e.currentTarget as HTMLTableRowElement).style.backgroundColor =
-                    "rgba(192,57,43,0.025)";
-                },
-                onMouseLeave: (e) => {
-                  (e.currentTarget as HTMLTableRowElement).style.backgroundColor = "";
-                },
-              })}
             />
-          </Section>
+          </Card>
 
           {/* ── Section 2: Global config ── */}
-          <Section
-            title="全局配置"
-            subtitle="扫描调度与成本控制参数"
-            icon={<SettingOutlined />}
+          <Card
+            title={
+              <Space>
+                <SettingOutlined />
+                <span>全局配置</span>
+              </Space>
+            }
+            size="small"
           >
+            <Typography.Text type="secondary" style={{ fontSize: 13, display: "block", marginBottom: 16 }}>
+              扫描调度与成本控制参数
+            </Typography.Text>
             <Form<GlobalFormValues>
               form={globalForm}
               layout="vertical"
@@ -555,11 +407,7 @@ export default function MonitoringConfig() {
                 }}
               >
                 <Form.Item
-                  label={
-                    <span style={{ fontSize: 13, color: TOKEN.textSecondary }}>
-                      每日扫描时间
-                    </span>
-                  }
+                  label="每日扫描时间"
                   name="scan_time"
                   rules={[{ required: true, message: "请选择扫描时间" }]}
                   style={{ marginBottom: 14 }}
@@ -573,11 +421,7 @@ export default function MonitoringConfig() {
                 </Form.Item>
 
                 <Form.Item
-                  label={
-                    <span style={{ fontSize: 13, color: TOKEN.textSecondary }}>
-                      每日 Cost Cap (CNY)
-                    </span>
-                  }
+                  label="每日 Cost Cap (CNY)"
                   name="daily_budget_cny"
                   rules={[{ required: true, message: "请填写每日预算" }]}
                   style={{ marginBottom: 14 }}
@@ -587,7 +431,7 @@ export default function MonitoringConfig() {
                     max={1000}
                     step={1}
                     precision={0}
-                    addonBefore="¥"
+                    prefix="¥"
                     style={{ width: "100%" }}
                   />
                 </Form.Item>
@@ -602,11 +446,7 @@ export default function MonitoringConfig() {
                 }}
               >
                 <Form.Item
-                  label={
-                    <span style={{ fontSize: 13, color: TOKEN.textSecondary }}>
-                      黄色预警发邮件
-                    </span>
-                  }
+                  label="黄色预警发邮件"
                   name="yellow_email"
                   valuePropName="checked"
                   style={{ marginBottom: 14 }}
@@ -615,38 +455,21 @@ export default function MonitoringConfig() {
                 </Form.Item>
 
                 <Form.Item
-                  label={
-                    <span style={{ fontSize: 13, color: TOKEN.textSecondary }}>
-                      Escalation 最大并发
-                    </span>
-                  }
+                  label="Escalation 最大并发"
                   name="escalation_concurrent"
                   rules={[{ required: true, message: "请设置并发上限" }]}
                   style={{ marginBottom: 14 }}
                 >
-                  <InputNumber
-                    min={1}
-                    max={5}
-                    precision={0}
-                    style={{ width: "100%" }}
-                  />
+                  <InputNumber min={1} max={5} precision={0} style={{ width: "100%" }} />
                 </Form.Item>
               </div>
 
               {/* Row 3: email recipients */}
               <Form.Item
-                label={
-                  <span style={{ fontSize: 13, color: TOKEN.textSecondary }}>
-                    邮件接收人
-                  </span>
-                }
+                label="邮件接收人"
                 name="recipients"
                 style={{ marginBottom: 16 }}
-                extra={
-                  <span style={{ fontSize: 11, color: TOKEN.textTertiary }}>
-                    输入邮箱地址后按 Enter 添加，支持多人
-                  </span>
-                }
+                extra="输入邮箱地址后按 Enter 添加，支持多人"
               >
                 <Select
                   mode="tags"
@@ -660,73 +483,52 @@ export default function MonitoringConfig() {
               <Form.Item style={{ marginBottom: 0 }}>
                 <Button
                   type="primary"
-                  onClick={() => {
-                    void handleGlobalSave();
-                  }}
+                  onClick={() => { void handleGlobalSave(); }}
                   loading={globalSaving}
-                  style={{
-                    backgroundColor: TOKEN.accentRed,
-                    borderColor: TOKEN.accentRed,
-                    fontSize: 13,
-                  }}
                 >
                   保存配置
                 </Button>
               </Form.Item>
             </Form>
-          </Section>
+          </Card>
 
           {/* ── Section 3: Signal threshold config ── */}
-          <Section
-            title="信号阈值配置"
-            subtitle="各 Rule 的触发阈值，修改后仅前端生效（v0.8.3 backend read-only）"
-            icon={<SettingOutlined />}
+          <Card
+            title={
+              <Space>
+                <SettingOutlined />
+                <span>信号阈值配置</span>
+              </Space>
+            }
+            size="small"
           >
+            <Typography.Text type="secondary" style={{ fontSize: 13, display: "block", marginBottom: 16 }}>
+              各 Rule 的触发阈值，修改后仅前端生效（v0.8.3 backend read-only）
+            </Typography.Text>
             {Object.keys(thresholds).length === 0 ? (
-              <div
-                style={{
-                  padding: "24px 0",
-                  textAlign: "center",
-                  color: TOKEN.textTertiary,
-                  fontSize: 13,
-                }}
-              >
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>
                 暂无阈值配置数据
-              </div>
+              </Typography.Text>
             ) : (
-              <Tabs
-                items={thresholdTabItems}
-                size="small"
-                style={{ color: TOKEN.textSecondary }}
-              />
+              <Tabs items={thresholdTabItems} size="small" />
             )}
-          </Section>
+          </Card>
         </div>
       )}
 
       {/* ── Add / Edit Customer Modal ── */}
       <Modal
         open={modalOpen}
-        title={
-          <span style={{ fontSize: 15, fontWeight: 600, color: TOKEN.textPrimary }}>
-            {editingCustomer ? "编辑客户" : "添加客户"}
-          </span>
-        }
+        title={editingCustomer ? "编辑客户" : "添加客户"}
         width={480}
         onCancel={() => {
           setModalOpen(false);
           customerForm.resetFields();
         }}
-        onOk={() => {
-          void handleModalOk();
-        }}
+        onOk={() => { void handleModalOk(); }}
         okText={editingCustomer ? "保存" : "添加"}
         cancelText="取消"
         confirmLoading={modalLoading}
-        okButtonProps={{
-          style: { backgroundColor: TOKEN.accentRed, borderColor: TOKEN.accentRed },
-        }}
-        styles={{ body: { padding: "20px 24px" } }}
         destroyOnHidden
       >
         <Form<CustomerFormValues>
@@ -736,7 +538,7 @@ export default function MonitoringConfig() {
         >
           <Form.Item
             name="ts_code"
-            label={<span style={{ fontSize: 13, color: TOKEN.textSecondary }}>股票代码</span>}
+            label="股票代码"
             rules={[
               { required: true, message: "请输入股票代码" },
               {
@@ -748,14 +550,13 @@ export default function MonitoringConfig() {
           >
             <Input
               placeholder="600519.SH"
-              style={{ fontFamily: TOKEN.monoFont, letterSpacing: "0.04em" }}
               disabled={!!editingCustomer}
             />
           </Form.Item>
 
           <Form.Item
             name="name"
-            label={<span style={{ fontSize: 13, color: TOKEN.textSecondary }}>客户名 / 股票简称</span>}
+            label="客户名 / 股票简称"
             rules={[{ required: true, message: "请输入客户名" }]}
             style={{ marginBottom: 14 }}
           >
@@ -764,7 +565,7 @@ export default function MonitoringConfig() {
 
           <Form.Item
             name="industry"
-            label={<span style={{ fontSize: 13, color: TOKEN.textSecondary }}>行业</span>}
+            label="行业"
             rules={[{ required: true, message: "请输入行业" }]}
             style={{ marginBottom: 14 }}
           >
@@ -773,7 +574,7 @@ export default function MonitoringConfig() {
 
           <Form.Item
             name="enabled"
-            label={<span style={{ fontSize: 13, color: TOKEN.textSecondary }}>启用监控</span>}
+            label="启用监控"
             valuePropName="checked"
             style={{ marginBottom: 0 }}
           >

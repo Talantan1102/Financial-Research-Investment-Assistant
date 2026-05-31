@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { ChatSessionList } from '@/components/sidebar/chat-session-list'
 import { NewChatButton } from '@/components/sidebar/new-chat-button'
-import { PageNav } from '@/components/sidebar/page-nav'
 import { UserPanel } from '@/components/sidebar/user-panel'
 import { Icon } from '@/components/shared/Icon'
 import styles from '@/styles/app-shell.module.scss'
@@ -28,11 +27,14 @@ export function Sidebar() {
 
       <NewChatButton />
 
+      <div className={styles.historyHeader}>
+        <span className={styles.historyLabel}>对话历史</span>
+      </div>
+
       <div className={styles.sessionsScroll}>
         <ChatSessionList query={query} />
       </div>
 
-      <PageNav />
       <UserPanel />
     </div>
   )

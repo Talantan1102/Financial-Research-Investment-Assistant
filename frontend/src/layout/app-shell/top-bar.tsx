@@ -5,7 +5,12 @@ import { chatSessionsState } from '@/store/chat-sessions'
 import { Icon } from '@/components/shared/Icon'
 import styles from '@/styles/app-shell.module.scss'
 
-export function TopBar() {
+interface TopBarProps {
+  sidebarCollapsed: boolean
+  onToggleSidebar: () => void
+}
+
+export function TopBar({ sidebarCollapsed, onToggleSidebar }: TopBarProps) {
   const params = useParams<{ session_id?: string }>()
   const sessionId = params.session_id
   const snap = useSnapshot(currentChatState)
@@ -19,6 +24,15 @@ export function TopBar() {
 
   return (
     <div className={styles.topbar} data-testid="app-topbar">
+      <button
+        className={styles.iconBtn}
+        aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+        title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
+        onClick={onToggleSidebar}
+        data-testid="sidebar-toggle-btn"
+      >
+        <Icon name="panel-left" />
+      </button>
       <div className={styles.topbarTitleWrap}>
         <div className={styles.topbarTitle}>{title}</div>
         <div className={styles.topbarSub}>{sub}</div>
