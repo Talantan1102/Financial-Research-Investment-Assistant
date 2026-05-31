@@ -168,7 +168,13 @@ class _BacktestKbService:
                         },
                     )
                 )
-            # else: silently skip unknown types
+            else:
+                # C42: unknown type is a programming/adapter error; fail loud so
+                # corrupted ablation metrics surface immediately (Rule 4).
+                raise TypeError(
+                    f"_BacktestKbService: unexpected KB adapter result type"
+                    f" {type(item).__name__!r}: {item!r}"
+                )
         return hits
 
 

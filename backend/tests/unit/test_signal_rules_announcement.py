@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from unittest.mock import AsyncMock, Mock
 
 import pandas as pd
@@ -122,3 +124,58 @@ async def test_llm_parse_failure_returns_green(subject, thresholds):
     result = await rule.evaluate(subject, tushare, Mock(), llm, thresholds)
     assert result.level == SignalLevel.GREEN
     assert "解析失败" in result.explanation
+
+
+# ---------------------------------------------------------------------------
+# C13: regression — asyncio.to_thread wraps the blocking llm.chat call
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_c13_llm_chat_does_not_block_event_loop(subject, thresholds):
+    """C13: evaluate must not block the event loop while waiting for llm.chat.
+
+    Strategy: make llm.chat block a threading.Event until a *concurrent*
+    coroutine sets it. If asyncio.to_thread is missing, the synchronous block
+    stalls the loop and the concurrent coroutine never runs → Event never set
+    → the whole test hangs (or asyncio.wait_for raises TimeoutError). With
+    asyncio.to_thread the block runs off the loop thread, the concurrent
+    coroutine can run and set the event, and evaluate completes normally.
+    """
+    # Gate that the blocking llm.chat will wait on.
+    gate = threading.Event()
+
+    parsed_result = AnnouncementClassification(
+        type=AnnouncementType.EARNINGS_DISCLOSURE,
+        score=0.85,
+        reasoning="巨亏",
+    )
+
+    def _blocking_chat(**kwargs):  # noqa: ARG001
+        # Block until gate is set — represents a long-running HTTP round-trip.
+        gate.wait(timeout=5.0)
+        response = Mock()
+        response.parsed = parsed_result
+        return response
+
+    llm = Mock()
+    llm.chat = _blocking_chat
+
+    tushare = _mock_tushare_with_anns([{"title": "Q3 巨亏公告", "content": "净利润-80%"}])
+
+    # Concurrently release the gate after a short yield so the loop can
+    # schedule both tasks. If the loop is blocked, this never runs.
+    async def _release_gate():
+        await asyncio.sleep(0)  # yield to let evaluate start
+        gate.set()
+
+    result, _ = await asyncio.gather(
+        asyncio.wait_for(rule_evaluate_task(subject, tushare, llm, thresholds), timeout=5.0),
+        _release_gate(),
+    )
+    assert result.level == SignalLevel.RED
+
+
+async def rule_evaluate_task(subject, tushare, llm, thresholds):
+    """Helper to isolate the rule.evaluate call for asyncio.gather."""
+    return await AnnouncementRule().evaluate(subject, tushare, Mock(), llm, thresholds)

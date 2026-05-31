@@ -128,3 +128,33 @@ def test_disclaimer_appears_in_output() -> None:
     md = render_investment_dd_report_markdown(minimal_valid_report())
     assert "AI 模型" in md
     assert "投资决策" in md
+
+
+# ── C48: duplicate footnote dedup ────────────────────────────────────────────
+
+
+def test_no_duplicate_footnote_definitions_when_same_chunk_cited_in_multiple_sections() -> None:
+    """C48: a chunk_id cited in two sections must produce exactly one [^id]: definition."""
+    report = minimal_valid_report()
+    # Override evidence so two sections share the same chunk_id "shared_chunk::0"
+    report.target_overview.evidence = ["shared_chunk::0"]
+    report.legal_qualification.evidence = ["shared_chunk::0"]
+
+    md = render_investment_dd_report_markdown(report)
+
+    # Exactly one footnote definition for the shared chunk_id
+    definition_line = "[^shared_chunk::0]: shared_chunk::0"
+    assert md.count(definition_line) == 1, (
+        f"Expected exactly 1 footnote definition for shared_chunk::0, "
+        f"got {md.count(definition_line)}"
+    )
+
+
+def test_multiple_unique_footnotes_all_present() -> None:
+    """C48: unique chunk_ids from multiple sections are all emitted once."""
+    report = minimal_valid_report()
+    md = render_investment_dd_report_markdown(report)
+    # Fixture uses maotai_2024::0 through ::5 in different sections
+    for i in range(6):
+        definition = f"[^maotai_2024::{i}]: maotai_2024::{i}"
+        assert md.count(definition) == 1, f"Expected exactly 1 definition for maotai_2024::{i}"

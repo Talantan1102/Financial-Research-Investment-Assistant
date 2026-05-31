@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio  # C13: needed for asyncio.to_thread around blocking LLM call
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -100,7 +101,11 @@ class AnnouncementRule(SignalRule):
             )
         )
 
-        response = llm.chat(prompt=prompt, tier="fast", schema=AnnouncementClassification)
+        # C13: llm.chat is sync; wrap in to_thread so it doesn't block the event loop
+        # during asyncio.gather fan-out across all 5 rules in SignalDetector.detect.
+        response = await asyncio.to_thread(
+            llm.chat, prompt=prompt, tier="fast", schema=AnnouncementClassification
+        )
         parsed = response.parsed
         if not isinstance(parsed, AnnouncementClassification):
             return SignalResult(

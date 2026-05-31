@@ -196,7 +196,9 @@ describe('useChatSSE — Plan 1: 断流后改一次性 history reload', () => {
     expect(s.streamingDraft).toBe('')
   })
 
-  it('does not throw and leaves status untouched if GET /chats/:id fails', async () => {
+  // C68: double-failure (stream error + getChat error) must surface 'error' status,
+  // NOT leave the UI stuck at 'reconnecting' indefinitely.
+  it('C68: double-failure surfaces error status — not stuck at reconnecting', async () => {
     server.use(
       http.post(`${API_BASE}/api/v0/chat`, () =>
         sseResponse([{ type: 'token', seq: 1, content: 'A' }]),
@@ -212,8 +214,11 @@ describe('useChatSSE — Plan 1: 断流后改一次性 history reload', () => {
     await act(async () => {
       await result.current.sendMessage('hi')
     })
-    // Silent failure — should not loop / throw; reconnecting status persists.
-    expect(snapshot(currentChatState).streamingStatus).toBe('reconnecting')
+    // C68 fix: double-failure dispatches an error event → status='error', not stuck.
+    await waitFor(() => {
+      expect(snapshot(currentChatState).streamingStatus).toBe('error')
+    })
+    expect(snapshot(currentChatState).errorMessage).toBeTruthy()
   })
 })
 

@@ -9,7 +9,7 @@
  */
 
 import { Anchor, Typography } from 'antd'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown' // C31: use hardened renderer (strips <script>)
 import type { InvestmentDueDiligenceReport } from '@/types/research'
 import styles from './index.module.scss'
 
@@ -91,7 +91,7 @@ export default function ReportCanvas({ report }: Props) {
             <div
               className={styles.markdown}
               dangerouslySetInnerHTML={{
-                __html: marked.parse(renderSectionData(s.data)) as string,
+                __html: renderMarkdown(renderSectionData(s.data)),
               }}
             />
           </section>

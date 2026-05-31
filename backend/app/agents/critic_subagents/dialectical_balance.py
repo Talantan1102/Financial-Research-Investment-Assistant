@@ -70,6 +70,7 @@ class DialecticalBalanceScorer(Agent):
                         score=10.0,
                         evidence="skip (no debate trace or advocate全失败)",
                         sub_agent_request_id=state.request_id,
+                        is_skip=True,  # C18: excluded from overall_score
                     )
                 },
                 span_metadata={"agent": self.name, "dimension": self.dimension, "skipped": True},

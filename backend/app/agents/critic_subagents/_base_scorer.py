@@ -88,12 +88,24 @@ def _build_context(state: ResearchState) -> str:
 def _parse_score(
     content: str, *, dimension: CriticDimension, request_id: str
 ) -> CriticDimensionScore:
+    """Parse LLM JSON output into a CriticDimensionScore.
+
+    C22: Fail loud with context on any parse error rather than letting a bare
+    JSONDecodeError / KeyError propagate through the LangGraph Send-API node
+    and abort the entire 8-scorer subgraph.
+    """
     cleaned = re.sub(r"^```(?:json)?\s*", "", content.strip(), flags=re.MULTILINE)
     cleaned = re.sub(r"\s*```\s*$", "", cleaned)
-    data = json.loads(cleaned)
-    return CriticDimensionScore(
-        dimension=dimension,
-        score=float(data["score"]),
-        evidence=str(data.get("evidence", "")),
-        sub_agent_request_id=request_id,
-    )
+    try:
+        data = json.loads(cleaned)
+        return CriticDimensionScore(
+            dimension=dimension,
+            score=float(data["score"]),
+            evidence=str(data.get("evidence", "")),
+            sub_agent_request_id=request_id,
+        )
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"_parse_score failed for dimension={dimension!r} "
+            f"request_id={request_id!r}: {exc!r}; raw={content!r}"
+        ) from exc

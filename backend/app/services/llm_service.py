@@ -63,7 +63,7 @@ class LLMService:
         self._tier_router = tier_router or TierRouter.from_default_v0_config()
         self._trace = trace_service
         self._budget = cost_budget
-        self._span_counter: int = 0
+        # C69: _span_counter removed — was shared mutable state, non-atomic increment
         if os.getenv("LLM_MODE") == "none":
             raise RuntimeError(
                 "LLMService instantiated under LLM_MODE=none — L0 unit tests "
@@ -117,9 +117,9 @@ class LLMService:
             request_id=request_id,
         )
         if self._trace is not None:
-            self._span_counter += 1
+            # C69: use uuid4 fragment per call — stateless, no shared counter
             span = Span(
-                span_id=f"{request_id}-llm-{self._span_counter}",
+                span_id=f"{request_id}-llm-{uuid4().hex[:8]}",
                 request_id=request_id,
                 parent_id=parent_span_id,
                 name="LLMService.chat",

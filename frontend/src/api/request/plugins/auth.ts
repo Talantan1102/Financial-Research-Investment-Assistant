@@ -4,10 +4,8 @@
  * - response: 401 时清 localStorage auth + 跳 /login
  *   例外: login/register 自身的 401 不清 token(让页面自己 catch 显示错误)
  */
-import { getAuthToken } from '../../auth-token'
+import { getAuthToken, AUTH_STORAGE_KEY } from '../../auth-token' // C67: import SSOT key
 import { IRequestPlugin } from './plugin'
-
-const AUTH_STORAGE_KEY = 'auth'
 
 // 这些 endpoint 的 401 属于"密码错误",不应清掉已登录用户的 token
 const AUTH_NO_CLEAR_PATHS = ['/auth/login', '/auth/register']

@@ -29,6 +29,11 @@ BANNED_APIS: Final[frozenset[str]] = frozenset(
         "eval",
         "exec",
         "__import__",
+        # C33: file-read/sandbox-escape builtins missing from original set
+        "open",
+        "compile",
+        "importlib.import_module",
+        "ctypes.CDLL",
     }
 )
 

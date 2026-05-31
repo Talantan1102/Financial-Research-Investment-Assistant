@@ -1,4 +1,5 @@
 import * as authApi from '@/api/auth'
+import { AUTH_STORAGE_KEY } from '@/api/auth-token' // C67: import SSOT key
 import { proxy, subscribe } from 'valtio'
 
 export interface UserInfo {
@@ -14,8 +15,6 @@ interface AuthState {
   user: UserInfo | null
   isLoggedIn: boolean
 }
-
-const AUTH_STORAGE_KEY = 'auth'
 
 // 从 localStorage 加载初始状态
 function loadAuthState(): AuthState {

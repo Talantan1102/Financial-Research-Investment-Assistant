@@ -168,3 +168,137 @@ def test_pdfparser_factory_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PDF_PARSER_MODE", "bogus")
     with pytest.raises(ValueError, match="Unknown PDF_PARSER_MODE"):
         build_pdf_parser_from_env()
+
+
+# ---------------------------------------------------------------------------
+# C29: tempfile.mkdtemp() cleanup tests
+# ---------------------------------------------------------------------------
+
+
+class _FakeProcSuccess:
+    """Subprocess stub that succeeds and writes a content_list artifact."""
+
+    returncode = 0
+
+    def __init__(self, out_root: Path, stem: str, blocks: list) -> None:
+        self._out_root = out_root
+        self._stem = stem
+        self._blocks = blocks
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        import json as _json
+
+        # Write the artifact that parse() will read
+        auto_dir = self._out_root / self._stem / "auto"
+        auto_dir.mkdir(parents=True, exist_ok=True)
+        (auto_dir / f"{self._stem}_content_list.json").write_text(
+            _json.dumps(self._blocks, ensure_ascii=False), encoding="utf-8"
+        )
+        return (b"", b"")
+
+
+class _FakeProcFailure:
+    """Subprocess stub that exits non-zero (simulates CLI failure)."""
+
+    returncode = 1
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return (b"", b"stderr: something went wrong")
+
+
+@pytest.mark.asyncio
+async def test_c29_tmpdir_cleaned_on_success(tmp_path: Path) -> None:
+    """C29: mkdtemp temp dir is removed after successful parse (no _OUT_ROOT)."""
+    import tempfile
+
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\nfake")
+
+    blocks = [{"type": "text", "text": "intro", "page_idx": 0}]
+
+    captured_tmp: list[Path] = []
+
+    original_mkdtemp = tempfile.mkdtemp
+
+    def fake_mkdtemp(**kwargs):
+        d = original_mkdtemp(**kwargs)
+        captured_tmp.append(Path(d))
+        return d
+
+    async def fake_subprocess_exec(*args, **kwargs):
+        # The temp dir was already created by parse(); find it from captured_tmp
+        assert captured_tmp, "mkdtemp should have been called by now"
+        return _FakeProcSuccess(captured_tmp[-1], "doc", blocks)
+
+    with (
+        patch("app.services.pdf_parsers.mineru._OUT_ROOT", None),
+        patch("app.services.pdf_parsers.mineru.tempfile.mkdtemp", side_effect=fake_mkdtemp),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_subprocess_exec),
+    ):
+        parser = MineruParser()
+        doc = await parser.parse(pdf_path)
+
+    assert len(doc.sections) >= 1
+    # All temp dirs created during this test must have been cleaned up
+    for td in captured_tmp:
+        assert not td.exists(), f"temp dir {td} was not cleaned up after success"
+
+
+@pytest.mark.asyncio
+async def test_c29_tmpdir_cleaned_on_failure(tmp_path: Path) -> None:
+    """C29: mkdtemp temp dir is removed even when parse() raises (no _OUT_ROOT)."""
+    import tempfile
+
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\nfake")
+
+    captured_tmp: list[Path] = []
+
+    original_mkdtemp = tempfile.mkdtemp
+
+    def fake_mkdtemp(**kwargs):
+        d = original_mkdtemp(**kwargs)
+        captured_tmp.append(Path(d))
+        return d
+
+    async def fake_subprocess_exec(*args, **kwargs):
+        return _FakeProcFailure()
+
+    with (
+        patch("app.services.pdf_parsers.mineru._OUT_ROOT", None),
+        patch("app.services.pdf_parsers.mineru.tempfile.mkdtemp", side_effect=fake_mkdtemp),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_subprocess_exec),
+    ):
+        parser = MineruParser()
+        with pytest.raises(RuntimeError, match="mineru CLI failed"):
+            await parser.parse(pdf_path)
+
+    # Temp dir must be cleaned up even after a failure
+    for td in captured_tmp:
+        assert not td.exists(), f"temp dir {td} was not cleaned up after failure"
+
+
+@pytest.mark.asyncio
+async def test_c29_caller_out_root_preserved(tmp_path: Path) -> None:
+    """C29: when _OUT_ROOT is supplied by caller, it must NOT be deleted."""
+    caller_out = tmp_path / "caller_owned_out"
+    caller_out.mkdir()
+
+    pdf_path = tmp_path / "doc.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\nfake")
+
+    blocks = [{"type": "text", "text": "body", "page_idx": 0}]
+
+    async def fake_subprocess_exec(*args, **kwargs):
+        return _FakeProcSuccess(caller_out, "doc", blocks)
+
+    with (
+        patch("app.services.pdf_parsers.mineru._OUT_ROOT", caller_out),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_subprocess_exec),
+    ):
+        parser = MineruParser()
+        doc = await parser.parse(pdf_path)
+
+    assert len(doc.sections) >= 1
+    # The caller-supplied directory must still exist
+    assert caller_out.exists(), "_OUT_ROOT must not be deleted by MineruParser"

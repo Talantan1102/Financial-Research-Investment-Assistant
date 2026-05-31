@@ -16,6 +16,7 @@ spec ref:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -190,9 +191,9 @@ class LLMRouterFallback:
     """Constrained-LLM fallback for router decisions when rules miss.
 
     Calls LLMService.chat(tier='balanced') + JSON output (constrained-router pattern,
-    aligned with PR #39 ResearchPlanner). LLMService.chat is sync, so .decide() is
-    sync too; the ``async def`` form is preserved for forward-compat with potential
-    LLMService async transition.
+    aligned with PR #39 ResearchPlanner). LLMService.chat is sync; C16: .decide()
+    offloads it via asyncio.to_thread so the router LLM round-trip does NOT block the
+    chat event loop (this node sits on the SSE path: context → router → planner).
 
     Invalid output(JSON parse fail / schema invalid / chat exception)falls back to
     ["memory"] per spec § 11 末尾 #7 (d).
@@ -204,7 +205,8 @@ class LLMRouterFallback:
     async def decide(self, query: str) -> RouterDecision:
         prompt = _LLM_ROUTER_PROMPT_TEMPLATE.format(query=query)
         try:
-            resp = self._llm.chat(prompt=prompt, tier="balanced")
+            # C16: offload the blocking sync LLM round-trip off the event loop.
+            resp = await asyncio.to_thread(self._llm.chat, prompt=prompt, tier="balanced")
         except Exception as e:  # noqa: BLE001 — LLM transient failure 全部 fallback
             logger.warning("LLMRouterFallback chat failed: %s — fallback to memory", e)
             return RouterDecision(

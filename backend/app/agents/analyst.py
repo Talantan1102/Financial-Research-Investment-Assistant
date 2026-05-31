@@ -35,13 +35,9 @@ from app.agents.valuation_helpers.industry_defaults import (
     normalize_industry,
 )
 from app.services.llm_response import Tier
-from app.skills.financial_research import load_skill
+from app.skills.financial_research import _SOP_TEXT  # C62: single SSOT for SOP text
 
 logger = logging.getLogger(__name__)
-
-# Module-level skill load — methodology + references parsed once at import time.
-_SKILL_BUNDLE = load_skill()
-_SOP_TEXT = _SKILL_BUNDLE.composed_sop()
 
 _BASE_SYSTEM_PROMPT = """你是金融研究助手 analyst。
 
@@ -248,14 +244,23 @@ class Analyst(Agent):
         )
 
     def _maybe_run_debate(self, state: ResearchState) -> DebateTrace | None:
-        """v1.x A5b: 跑 bull/bear 2 轮 debate, 任何失败 graceful → None."""
+        """v1.x A5b: 跑 bull/bear 2 轮 debate, LLM/数据失败 graceful → None。
+
+        C19: 编程 / asyncio 错误(TypeError / AttributeError / RuntimeError /
+        ImportError)不 swallow — 直接 re-raise 暴露根因。仅 LLM / 数据层异常
+        静默降级(与 _maybe_compute_valuation_analysis 保持对称收窄原则)。
+        """
         try:
             bull = BullAdvocate(llm=self._llm)
             bear = BearAdvocate(llm=self._llm)
             orchestrator = DebateOrchestrator(bull=bull, bear=bear)
             return orchestrator.run(state)
+        except (TypeError, AttributeError, ImportError, RuntimeError):
+            # C19: 编程错误 / asyncio 错误不允许 swallow — 暴露根因
+            raise
         except Exception as e:  # noqa: BLE001
-            logger.warning("v1.x A5b: DebateOrchestrator 失败 (silent): %s", e)
+            # C19: 使用 logger.exception 保留完整 traceback (Rule 5)
+            logger.exception("v1.x A5b: DebateOrchestrator 失败 (graceful skip): %s", e)
             return None
 
     def _maybe_compute_valuation_analysis(self, state: ResearchState) -> ValuationAnalysis | None:
@@ -434,10 +439,11 @@ class Analyst(Agent):
         else:
             industry_pe_avg = industry_pe_median = pe
 
-        # PB: 单点 fallback (信号弱 — 没真行业可比 tool)
-        # 用 daily_basic.pb 自身 ±5% 作 bracket
-        industry_pb_avg = pb * 1.0
-        industry_pb_median = pb * 1.0
+        # PB: 无真行业可比 tool — 给 0 占位，让 compute_pb_value 自然 skip
+        # (同 EV/EBITDA 处理方式，避免 self-referential tautology 消除 cross-check 信号)
+        # C7: pb*1.0 tautology 删除; 0 → InsufficientDataForModelError → lens skip
+        industry_pb_avg = 0.0
+        industry_pb_median = 0.0
 
         # EV/EBITDA: 同样信号弱;tushare 缺 EBITDA 真值,让 EV-EBITDA 自然 skip
         # 给 0 占位 → compute_ev_ebitda_value raise InsufficientDataForModelError
@@ -449,9 +455,13 @@ class Analyst(Agent):
         total_liab = _safe_float(balance_sheet, "total_liab")
         net_debt: float
         debt_to_equity: float
-        if total_assets is not None and total_liab is not None and total_assets > total_liab > 0:
+        # C7: 修正 — 原 guard `total_assets > total_liab > 0` 把负净资产(资不抵债)公司
+        # 路由到 else 分支并设 debt_to_equity=0.0，让 WACC 低估风险。
+        # 新逻辑: 仅要求 total_liab > 0;若 equity <= 0 则 d/e = float('inf')，
+        # compute_company_wacc 内部的 not isfinite 守卫会 raise → DCF skip (正确行为)。
+        if total_assets is not None and total_liab is not None and total_liab > 0:
             equity = total_assets - total_liab
-            debt_to_equity = total_liab / equity if equity > 0 else 0.0
+            debt_to_equity = total_liab / equity if equity > 0 else float("inf")
             # net_debt = total_liab - cash (cash 不直接暴露 → 用 total_liab 作上界 approx)
             net_debt = total_liab
         else:

@@ -119,7 +119,7 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
     from app.mcp_server.tools.memory._common import (
         Timer,
         build_db_session,
-        build_memory_from_env,
+        get_memory,  # C50: use singleton to avoid per-call connection leak
         infer_entity_types,
         write_tool_call_log,
     )
@@ -165,6 +165,25 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
                         f"(pattern={pattern_id}, confidence={conf:.2f}) — "
                         f"refusing graph write (algorithm depth patch #2 part a)"
                     )
+                # C51: also screen agent-supplied evidence_quote and reasoning —
+                # contract in injection_classifier.PromptInjectionDetectedError
+                # docstring lists all three fields; previously only episode_text
+                # was checked, leaving a gap if reasoning/evidence_quote are ever
+                # rendered back into a system prompt.
+                is_inj, conf, pattern_id = is_prompt_injection(validated.evidence_quote)
+                if is_inj:
+                    raise PromptInjectionDetectedError(
+                        f"evidence_quote flagged as prompt injection "
+                        f"(pattern={pattern_id}, confidence={conf:.2f}) — "
+                        f"refusing graph write (algorithm depth patch #2 part a)"
+                    )
+                is_inj, conf, pattern_id = is_prompt_injection(validated.reasoning)
+                if is_inj:
+                    raise PromptInjectionDetectedError(
+                        f"reasoning flagged as prompt injection "
+                        f"(pattern={pattern_id}, confidence={conf:.2f}) — "
+                        f"refusing graph write (algorithm depth patch #2 part a)"
+                    )
                 if not evidence_quote_in_episode(validated.evidence_quote, episode_text):
                     raise EvidenceNotFoundError(
                         f"evidence_quote {validated.evidence_quote!r} not a "
@@ -189,7 +208,7 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
                 content["valid_from"] = datetime.fromisoformat(content["valid_from"])
             content.setdefault("valid_from", datetime.now(UTC))
 
-            memory = build_memory_from_env()
+            memory = get_memory()  # C50: singleton, not a fresh instance per call
             edge = await memory.archival_memory_insert(
                 user_id=validated.user_id,
                 content=content,

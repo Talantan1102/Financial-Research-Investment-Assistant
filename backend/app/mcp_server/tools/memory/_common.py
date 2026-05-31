@@ -16,11 +16,34 @@ the same factory.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+# C50: module-level lazy singleton — avoids creating a new HierarchicalMemory
+# (+ MilvusClient + embedder) on every tool call. The MCP server runs as a
+# long-lived stdio process; without this, connections accumulate indefinitely.
+_MEMORY_INSTANCE: Any = None
+_MEMORY_LOCK = threading.Lock()
+
+
+def get_memory() -> Any:
+    """Return the process-level HierarchicalMemory singleton.
+
+    Double-checked locking: the instance is created once on first call and
+    reused for the lifetime of the MCP server process.  Use
+    ``build_memory_from_env()`` directly only when a fresh instance is needed
+    (e.g. in tests that need isolated state).
+    """
+    global _MEMORY_INSTANCE  # noqa: PLW0603
+    if _MEMORY_INSTANCE is None:  # fast-path without lock
+        with _MEMORY_LOCK:
+            if _MEMORY_INSTANCE is None:  # re-check under lock
+                _MEMORY_INSTANCE = build_memory_from_env()
+    return _MEMORY_INSTANCE
 
 
 def build_memory_from_env() -> Any:
