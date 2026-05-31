@@ -74,6 +74,7 @@ def save_screenshot(
     rel_path = f"screenshots/{safe_cap}/{out_path.name}"
     return UploadResult(
         rel_path=rel_path,
-        markdown=f"![{safe_name}]({rel_path})",
+        # 绝对路径 /screenshots/... 才能被 server 的 /screenshots mount serve(相对路径在 /m/ 页会解析错)
+        markdown=f"![{safe_name}](/{rel_path})",
         git_hint=f"git add dashboard/{rel_path}",
     )

@@ -2,7 +2,7 @@
 
 LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
 
-**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ **Harness Board Review Mode**(复合型项目知识工具 — 底座 DeepCard + 5 视图 V1 网格 / V2 模块深读 / V3 系统鸟瞰 / V4 故事时间线 / V5 闪卡 SRS,Milvus 相关推荐 + LLM L2 一次性 prefill + 35 张 hand-curated seed)
+**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ **Harness Board**(复合型项目知识工具 — 按论文 ETCLOVG 7 维 × 87 capability 把本项目逐条拆解展示,DeepCard 深读卡 + 3 视图 Topology 关系图 `/` / 模块页 `/m/{dim}` / 故事时间线 `/story`,Milvus 相关推荐 + 34 张 hand-curated seed)
 
 ## 三个使用模式
 
@@ -247,11 +247,11 @@ make beat       # Celery beat - 30min cycle / 16:30 daily / 02:00 cleanup
 | `uv run poe test-all` | 包含 L3 真 LLM eval(烧钱) |
 | `uv run poe trace-view` | 打开 trace 查看器 |
 | `uv run poe eval` | 跑 golden case 评测 |
-| `make board` | 起 Harness Board(localhost:8910,自动 `open`)+ 5 视图(/ 网格 / /overview 鸟瞰 / /story 故事 / /flashcards/today 闪卡 / /decisions 决策) |
-| `make board-test` | 跑 dashboard/ 测试套(181 项,Plan 1+2+3 累计) |
+| `make board` | 起 Harness Board(localhost:8910,自动 `open`)+ 3 视图(`/` Topology 关系图 / `/m/{dim}` 模块页 / `/story` 故事时间线) |
+| `make board-test` | 跑 dashboard/ 测试套 |
 | `make board-stop` | lsof port-scoped kill 8910 |
 | `make board-refresh` | curl -X POST /refresh,显式 invalidate snapshot cache |
-| `uv run python -m app.scripts.seed_deep_cards --seed dashboard/data/deep_cards_seed.jsonl --db backend/data/board.db --regenerate-flashcards` | 一键载入 35 张 hand-curated DeepCard + 触发闪卡重生成 |
+| `uv run python -m app.scripts.seed_deep_cards --seed dashboard/data/deep_cards_seed.jsonl --db backend/data/board.db` | 载入 hand-curated DeepCard(server 启动时也会自动 insert-if-missing) |
 | `uv run python -m app.scripts.prefill_deep_cards --caps <ids> --db backend/data/board.db` | LLM batch prefill DeepCard(需 OPENAI_API_KEY) |
 
 ## 测试分层
@@ -325,14 +325,14 @@ financial-research-assistant/
 │       ├── api/                 # typed fetch clients
 │       ├── types/               # TS schema per module
 │       └── components/markdown/ # 共享 markdown 渲染
-├── dashboard/                   # Harness Board M3(dev meta-tool,sibling 顶级目录)
-│   ├── server.py                # Starlette + Jinja(GET / + /healthz + /decisions + edit + override + refresh + note POST/DELETE)
-│   ├── derive/                  # path_router / capability_resolver / snapshot_builder / app_shell_stat / decision_extractor(纯函数)
-│   ├── state/                   # sqlite + SnapshotRepo + OverrideRepo + DecisionNoteRepo(全量替换 + upsert/DELETE × 2)
-│   ├── config/{dimensions,capabilities}.yaml  # 8 维 + 62 capability + 5 类 derive_rule
-│   ├── templates/               # base / main / decisions / _hero / _d_view / _b_view / _view_toggle / _app_shell / _capability_chip / _edit_select / _decision_card / _decision_filter / _decision_note_form
-│   ├── static/{style.css,htmx.min.js,decisions-filter.js}
-│   └── tests/                   # 65 测试,mypy strict 清洁(含 test files)
+├── dashboard/                   # Harness Board(dev meta-tool,sibling 顶级目录)
+│   ├── server.py                # Starlette + Jinja(GET / + /m/{dim} + /story + /cap/{id}/{expand,status,field,screenshot,related} + /refresh + /docs·/screenshots mount)
+│   ├── derive/                  # path_router / capability_resolver / snapshot_builder / topology_layout / story_builder / decision_extractor / refresh_pipeline(纯函数)
+│   ├── state/                   # sqlite + SnapshotRepo + OverrideRepo + DeepCardRepo + Milvus collection
+│   ├── config/{dimensions,capabilities}.yaml  # ETCLOVG 7 维 + 87 capability + 5 类 derive_rule
+│   ├── templates/               # base / main / _board_nav / _topology_diagram / _module_page / _capability_chip / _deep_card_inline / _field_block / story / _story_card
+│   ├── static/{style.css,htmx.min.js,marked.min.js,inline-expand,context-menu,render-field,modal,toast,refresh-panel,screenshot-upload}.js
+│   └── tests/                   # unit / integration / e2e,mypy strict 清洁(含 test files)
 ├── Makefile                     # board / board-stop / board-test / board-refresh
 ├── docs/
 │   ├── superpowers/{specs,plans}/  # 设计文档 + 实施计划(每版本一份)

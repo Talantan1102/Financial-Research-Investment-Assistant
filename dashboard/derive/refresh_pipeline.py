@@ -55,28 +55,68 @@ class RefreshPipeline:
     # ---- 单 step 实现(下任务陆续补齐)----
 
     def _chip_resolve_step(self) -> StepEvent:
-        """全量 resolve 62 cap;失败抛 → 上层包 status=error。"""
+        """全量 resolve 全部 cap;失败抛 → 上层包 status=error。
+
+        附带漂移校验(fail-loud,反"虚假新鲜感"):统计 lit-但-无 DeepCard 的能力数 +
+        DeepCard code_anchor 指向已不存在文件/越界行的数量,显示到 refresh 面板。
+        """
         from dashboard.derive.capability_resolver import load_capabilities, resolve_status
 
         t0 = time.perf_counter()
         caps = load_capabilities(self.config_dir / "capabilities.yaml")
         lit = wip = todo = 0
+        lit_ids: set[str] = set()
         for c in caps:
             s = resolve_status(c, self.project_root)
             if s == "lit":
                 lit += 1
+                lit_ids.add(c.id)
             elif s == "wip":
                 wip += 1
             else:
                 todo += 1
+        drift = self._drift_suffix(lit_ids)
         dt = int((time.perf_counter() - t0) * 1000)
         return StepEvent(
             step="chip_resolve",
             status="done",
             label=_LABELS["chip_resolve"],
-            detail=f"{len(caps)} chip · {lit} lit / {wip} wip / {todo} todo",
+            detail=f"{len(caps)} chip · {lit} lit / {wip} wip / {todo} todo{drift}",
             duration_ms=dt,
         )
+
+    def _drift_suffix(self, lit_ids: set[str]) -> str:
+        """lit-无卡 数 + code_anchor 失效数 → ' · ⚠ N lit 无卡 · M 锚点漂移' 或 ' · ✓ 无漂移'。
+
+        任何异常都吞成空串,不让漂移校验拖垮 critical 的 chip_resolve step。
+        """
+        try:
+            from dashboard.state.db import open_db
+            from dashboard.state.repositories import DeepCardRepo
+
+            conn = open_db(self.db_path)
+            try:
+                cards = DeepCardRepo(conn).get_all()
+            finally:
+                conn.close()
+            carded = {c.cap_id for c in cards}
+            lit_no_card = len(lit_ids - carded)
+            broken = 0
+            for card in cards:
+                for a in card.code_anchors:
+                    p = self.project_root / a.file
+                    # 短路:文件不存在就不 open(避免 open 缺失文件);存在则查行号越界
+                    if not p.exists() or a.line > sum(1 for _ in p.open(errors="ignore")):
+                        broken += 1
+            parts = []
+            if lit_no_card:
+                parts.append(f"⚠ {lit_no_card} lit 无卡")
+            if broken:
+                parts.append(f"⚠ {broken} 锚点漂移")
+            return " · " + " · ".join(parts) if parts else " · ✓ 无漂移"
+        except Exception as e:  # noqa: BLE001
+            logger.warning("drift check skipped: %s", e)
+            return ""
 
     def _seed_ingest_step(self) -> StepEvent:
         from dashboard.derive.seed_ingest import SeedIngestService

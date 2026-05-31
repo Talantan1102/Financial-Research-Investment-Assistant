@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root{
+    --bg:#F5F5F7; --surface:#FFFFFF; --ink:#1D1D1F; --mute:#86868B; --faint:#C7C7CC;
+    --indigo:#5E5CE6; --indigo-soft:rgba(94,92,230,0.10); --green:#34C759; --amber:#FF9F0A;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{background:var(--bg); font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",system-ui,sans-serif;}
+  #stage{width:900px; height:362px; background:var(--bg); padding:26px 34px 0; position:relative;}
+  .title{font-size:19px; font-weight:600; color:var(--ink); letter-spacing:-0.01em;}
+  .subtitle{font-size:13px; color:var(--mute); margin-top:4px;}
+  .pipeline{display:flex; align-items:center; justify-content:space-between; margin-top:34px; position:relative;}
+  .node{
+    width:142px; height:72px; background:var(--surface); border-radius:16px;
+    border:1.5px solid #ECECEE; box-shadow:0 1px 3px rgba(0,0,0,0.05);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+    transition:all .25s ease; position:relative; z-index:2;
+  }
+  .node .nm{font-size:14.5px; font-weight:600; color:var(--ink);}
+  .node .role{font-size:12.5px; color:var(--mute);}
+  .node.done{border-color:var(--green); }
+  .node .check{display:none;}
+  .node.done .check{display:flex; position:absolute; top:-8px; right:-8px; width:20px; height:20px; background:var(--green); border-radius:50%; color:#fff; font-size:12px; display:flex; align-items:center; justify-content:center;}
+  .node.active{border-color:var(--indigo); box-shadow:0 0 0 4px var(--indigo-soft), 0 6px 18px rgba(94,92,230,0.22); transform:translateY(-3px);}
+  .node.active .nm{color:var(--indigo);}
+  .arrow{flex:1; height:2px; margin:0 -2px; background:var(--faint); position:relative; z-index:1;}
+  .arrow.lit{background:linear-gradient(90deg,var(--indigo),var(--indigo)); box-shadow:0 0 8px rgba(94,92,230,0.5);}
+  .arrow::after{content:''; position:absolute; right:-1px; top:-4px; border-left:7px solid var(--faint); border-top:5px solid transparent; border-bottom:5px solid transparent;}
+  .arrow.lit::after{border-left-color:var(--indigo);}
+  /* fan-outs */
+  .fan{position:absolute; display:flex; gap:8px; opacity:0; transition:opacity .25s ease; z-index:2;}
+  .fan.show{opacity:1;}
+  .fan .chip{background:var(--surface); border:1.5px solid #ECECEE; border-radius:10px; padding:7px 11px; font-size:12px; color:var(--mute); box-shadow:0 1px 2px rgba(0,0,0,0.04); transition:all .2s;}
+  .fan .chip.lit{border-color:var(--indigo); color:var(--indigo); background:var(--indigo-soft);}
+  #toolfan{left:170px; top:200px;}
+  #scorefan{right:8px; top:198px; flex-wrap:wrap; width:300px; justify-content:flex-end;}
+  #scorefan .chip{padding:6px 8px; font-size:11px;}
+  .fanlabel{position:absolute; font-size:11px; color:var(--mute);}
+  .connector{position:absolute; width:1.5px; background:var(--faint); z-index:0; opacity:0; transition:opacity .25s;}
+  .connector.show{opacity:1; background:var(--indigo);}
+  /* caption */
+  .caption{position:absolute; left:34px; right:34px; bottom:30px; background:var(--surface); border-radius:14px; padding:16px 20px; box-shadow:0 1px 3px rgba(0,0,0,0.05); display:flex; align-items:center; gap:14px;}
+  .step-badge{min-width:30px; height:30px; border-radius:9px; background:var(--indigo); color:#fff; font-size:14px; font-weight:600; display:flex; align-items:center; justify-content:center;}
+  .step-badge.fin{background:var(--green);}
+  .cap-text{font-size:14.5px; color:var(--ink); line-height:1.5;}
+  .cap-text b{color:var(--indigo);}
+  .progress{position:absolute; left:34px; right:34px; bottom:14px; height:3px; background:#E8E8EA; border-radius:2px;}
+  .progress .fill{height:100%; background:var(--indigo); border-radius:2px; transition:width .25s ease; width:0;}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="title">5-Agent 研报编排流程</div>
+  <div class="subtitle">LangGraph StateGraph · 一个问题如何流过 5 个 agent 变成研报</div>
+
+  <div class="pipeline">
+    <div class="node" id="n0"><span class="nm">Planner</span><span class="role">拆解任务</span><span class="check">✓</span></div>
+    <div class="arrow" id="a0"></div>
+    <div class="node" id="n1"><span class="nm">DataCollector</span><span class="role">并发拉数据</span><span class="check">✓</span></div>
+    <div class="arrow" id="a1"></div>
+    <div class="node" id="n2"><span class="nm">Analyst</span><span class="role">分析</span><span class="check">✓</span></div>
+    <div class="arrow" id="a2"></div>
+    <div class="node" id="n3"><span class="nm">Writer</span><span class="role">写研报</span><span class="check">✓</span></div>
+    <div class="arrow" id="a3"></div>
+    <div class="node" id="n4"><span class="nm">Critic</span><span class="role">评分把关</span><span class="check">✓</span></div>
+  </div>
+
+  <div class="connector" id="tc" style="left:240px; top:122px; height:78px;"></div>
+  <div class="fan" id="toolfan">
+    <div class="chip" data-t>股票行情</div><div class="chip" data-t>财报</div><div class="chip" data-t>新闻公告</div><div class="chip" data-t>估值</div>
+  </div>
+
+  <div class="connector" id="sc" style="right:78px; top:122px; height:78px;"></div>
+  <div class="fan" id="scorefan">
+    <div class="chip" data-s>事实性</div><div class="chip" data-s>逻辑</div><div class="chip" data-s>完整性</div><div class="chip" data-s>估值一致</div>
+    <div class="chip" data-s>风险</div><div class="chip" data-s>多空</div><div class="chip" data-s>语境</div><div class="chip" data-s>辩证</div>
+  </div>
+
+  <div class="caption">
+    <div class="step-badge" id="badge">1</div>
+    <div class="cap-text" id="captext"></div>
+  </div>
+  <div class="progress"><div class="fill" id="pfill"></div></div>
+</div>
+
+<script>
+  const FRAMES = [
+    {active:'n0', done:[], lit:[], caption:'用户问题进来 → <b>Planner</b> 把它拆解成几个子任务(查行情/查财报/估值…)。'},
+    {active:'n1', done:['n0'], lit:['a0'], caption:'<b>DataCollector</b> 接手,准备并发去拉各路数据。', tools:'show'},
+    {active:'n1', done:['n0'], lit:['a0'], caption:'用 asyncio.gather <b>同时</b>拉股票/财报/新闻/估值 —— 不是一个个串行等。', tools:'lit'},
+    {active:'n2', done:['n0','n1'], lit:['a1'], caption:'数据汇齐 → <b>Analyst</b> 做财务/技术/风险分析。', tools:'done'},
+    {active:'n3', done:['n0','n1','n2'], lit:['a2'], caption:'<b>Writer</b> 把分析写成结构化研报(强制 JSON,字段固定)。'},
+    {active:'n4', done:['n0','n1','n2','n3'], lit:['a3'], caption:'<b>Critic</b> 把关:通过 Send fan-out 拆成多个打分子任务。', scorers:'show'},
+    {active:'n4', done:['n0','n1','n2','n3'], lit:['a3'], caption:'8 个 scorer <b>并行</b>从事实性/逻辑/风险/多空…多维度打分。', scorers:'lit'},
+    {active:null, done:['n0','n1','n2','n3','n4'], lit:[], caption:'分数汇总 → 不达标自动退回重写,达标 → <b>终稿研报</b>。', scorers:'done', fin:true},
+  ];
+  function setFrame(i){
+    const f = FRAMES[i];
+    for(let k=0;k<5;k++){
+      const n=document.getElementById('n'+k);
+      n.classList.toggle('active', f.active==='n'+k);
+      n.classList.toggle('done', f.done.includes('n'+k));
+    }
+    for(let k=0;k<4;k++){
+      document.getElementById('a'+k).classList.toggle('lit', (f.lit||[]).includes('a'+k));
+    }
+    // tools
+    const tf=document.getElementById('toolfan'), tc=document.getElementById('tc');
+    tf.classList.toggle('show', !!f.tools); tc.classList.toggle('show', f.tools==='show'||f.tools==='lit');
+    tf.querySelectorAll('[data-t]').forEach(c=>c.classList.toggle('lit', f.tools==='lit'));
+    // scorers
+    const sf=document.getElementById('scorefan'), sc=document.getElementById('sc');
+    sf.classList.toggle('show', !!f.scorers); sc.classList.toggle('show', f.scorers==='show'||f.scorers==='lit');
+    sf.querySelectorAll('[data-s]').forEach(c=>c.classList.toggle('lit', f.scorers==='lit'));
+    // caption + progress
+    document.getElementById('captext').innerHTML=f.caption;
+    const badge=document.getElementById('badge');
+    badge.textContent = f.fin?'✓':(i+1); badge.classList.toggle('fin', !!f.fin);
+    document.getElementById('pfill').style.width = ((i+1)/FRAMES.length*100)+'%';
+  }
+  window.setFrame=setFrame; window.FRAME_COUNT=FRAMES.length;
+  setFrame(0);
+</script>
+</body>
+</html>

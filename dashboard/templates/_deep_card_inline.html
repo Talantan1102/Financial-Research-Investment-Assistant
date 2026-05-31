@@ -1,38 +1,117 @@
-{# Plan 2 Task 7 — inline expand 6 字段视图 #}
+{# 就地展开卡 — 忠实渲染 DeepCard 真实内容(what/why/候选方案/tradeoff/踩坑/指标/代码锚点/截图/关联/决策)。
+   注:数据是 v1 字段(what/why/alternatives/...),早期模板误读 v2 空字段(scenario/design/...)导致全显"(待填)"。#}
 <div class="cap-detail-inner">
   <header class="cap-detail-head">
     <span class="cap-detail-id">{{ cap.id }}</span>
-    <span class="cap-detail-status status--{{ cap.status }}">{{ cap.status }}</span>
+    <span class="cap-detail-status status--{{ cap.status }}">{{ {'lit':'已实现','wip':'开发中','todo':'未开发'}.get(cap.status, cap.status) }}</span>
     <span class="cap-detail-dim">§ {{ cap.dimension }}</span>
   </header>
 
+  {# --- 文本字段(markdown 渲染 + 可就地编辑) --- #}
   {% set fields = [
-    ('scenario',   '需求场景',    card.scenario if card else None,   true),
-    ('design',     '设计方案',    card.design if card else None,     true),
-    ('tradeoff',   'Tradeoff',    card.tradeoff if card else None,   true),
-    ('review',     '方案点评',    card.review if card else None,     true),
-    ('evidence',   '实现效果',    card.evidence if card else None,   cap.status == 'lit'),
+    ('what',            '这是什么 · What',     card.what if card else None,            true),
+    ('why',             '为什么需要 · Why',    card.why if card else None,             true),
+    ('tradeoff',        '取舍 · Tradeoff',     card.tradeoff if card else None,        true),
+    ('lessons_learned', '踩坑沉淀 · Lessons',  card.lessons_learned if card else None, true),
   ] %}
-
   {% for fid, label, value, enabled in fields %}
-    {% set c = {'id': cap.id, 'field_id': fid, 'label': label, 'value': value, 'enabled': enabled} %}
+    {% set c = {'id': cap.id, 'field_id': fid, 'label': label, 'value': value, 'enabled': enabled, 'status': cap.status} %}
     {% include "_field_block.html" %}
   {% endfor %}
 
+  {# --- 候选方案(结构化,选定项高亮) --- #}
+  {% if card and card.alternatives %}
+  <section class="field-block field-alternatives">
+    <header class="field-head"><span class="field-label">§ 候选方案 · Alternatives</span></header>
+    <div class="field-body">
+      <ul class="alt-list">
+        {% for alt in card.alternatives %}
+          <li class="alt-item{% if alt.name == card.chosen_alternative %} alt-chosen{% endif %}">
+            <span class="alt-name">{{ alt.name }}{% if alt.name == card.chosen_alternative %}<span class="alt-badge">✓ 选定</span>{% endif %}</span>
+            <span class="alt-tradeoff">{{ alt.brief_tradeoff }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+  {% endif %}
+
+  {# --- 量化结果 --- #}
+  {% if card and card.metrics %}
+  <section class="field-block field-metrics">
+    <header class="field-head"><span class="field-label">§ 量化结果 · Metrics</span></header>
+    <div class="field-body">
+      <ul class="metric-list">
+        {% for k, v in card.metrics.items() %}
+          <li class="metric-chip"><span class="metric-k">{{ k }}</span><span class="metric-v">{{ v }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+  {% endif %}
+
+  {# --- 代码锚点 --- #}
+  {% if card and card.code_anchors %}
+  <section class="field-block field-anchors">
+    <header class="field-head"><span class="field-label">§ 代码锚点 · Code</span></header>
+    <div class="field-body">
+      <ul class="anchor-list">
+        {% for a in card.code_anchors %}
+          <li class="anchor-item"><code class="anchor-loc">{{ a.file }}:{{ a.line }}</code>{% if a.note %}<span class="anchor-note">{{ a.note }}</span>{% endif %}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </section>
+  {% endif %}
+
+  {# --- 图示(动态原理图 / 截图,图文混排) --- #}
+  {% if card and card.screenshots %}
+  <section class="field-block field-screenshots">
+    <header class="field-head"><span class="field-label">§ 图示 · Visuals</span></header>
+    <div class="field-body shots">
+      {% for s in card.screenshots %}<img class="shot-img{% if s.endswith(('.gif', '.webp', '.apng')) %} shot-img--diagram{% endif %}" src="/{{ s }}" alt="{{ cap.id }} 图示" loading="lazy" decoding="async">{% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# --- 关联(spec / 能力 / memory,溯源链) --- #}
+  {% if card and (card.linked_specs or card.linked_capabilities or card.linked_memories) %}
+  <section class="field-block field-links">
+    <header class="field-head"><span class="field-label">§ 关联 · Links</span></header>
+    <div class="field-body links-grid">
+      {% if card.linked_specs %}
+        <div class="link-row"><span class="link-kind">spec</span>
+          {% for sp in card.linked_specs %}<a class="link-pill" href="/{{ sp }}" target="_blank" rel="noopener">{{ sp.split('/')[-1] }}</a>{% endfor %}
+        </div>
+      {% endif %}
+      {% if card.linked_capabilities %}
+        <div class="link-row"><span class="link-kind">cap</span>
+          {% for lc in card.linked_capabilities %}<a class="link-pill" href="/m/{{ lc.split('.')[0] }}#cap-{{ lc }}">{{ lc }}</a>{% endfor %}
+        </div>
+      {% endif %}
+      {% if card.linked_memories %}
+        <div class="link-row"><span class="link-kind">memory</span>
+          {% for m in card.linked_memories %}<span class="link-pill link-static">{{ m }}</span>{% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}
+
+  {# --- 决策记录 --- #}
   <section class="field-block field-decisions">
     <header class="field-head">
-      <span class="field-label">§ 决策记录</span>
-      <span class="field-meta">{{ (card.decisions_extracted_ids|length if card else 0) }} 派生 · {{ (card.decisions_user_notes|length if card else 0) }} note</span>
+      <span class="field-label">§ 决策记录 · Decisions</span>
+      <span class="field-meta">{{ (card.decisions_extracted_ids|length if card else 0) }} 派生 · {{ (card.linked_decisions|length if card else 0) }} 关联</span>
     </header>
     <div class="field-body">
-      {% if card and card.decisions_extracted_ids %}
+      {% if card and (card.decisions_extracted_ids or card.linked_decisions) %}
         <ul class="decisions-list">
-          {% for did in card.decisions_extracted_ids %}
-            <li>◇ <code>{{ did }}</code></li>
-          {% endfor %}
+          {% for did in card.decisions_extracted_ids %}<li>◇ <code>{{ did }}</code></li>{% endfor %}
+          {% for did in card.linked_decisions %}<li>◆ <code>{{ did }}</code></li>{% endfor %}
         </ul>
       {% else %}
-        <p class="field-empty">(暂无关联决策 — 后续从 spec/plan 自动抽取)</p>
+        <p class="field-empty field-empty--todo">(暂无关联决策 — 后续从 spec/plan 自动抽取)</p>
       {% endif %}
     </div>
   </section>
