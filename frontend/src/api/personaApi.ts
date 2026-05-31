@@ -1,3 +1,5 @@
+import { getAuthToken } from './auth-token'
+
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 const BASE = '/api/v0/persona'
 
@@ -21,9 +23,14 @@ export interface PersonaListResponse {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken()
   const res = await fetch(apiUrl(path), {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init?.headers as Record<string, string> ?? {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '')

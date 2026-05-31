@@ -112,7 +112,7 @@ export function ChatSessionList({ query = '' }: ChatSessionListProps) {
       上周: [],
       更早: [],
     }
-    for (const s of filtered) acc[dateGroupOf(s.last_active_at)].push(s)
+    for (const s of filtered) acc[dateGroupOf(s.updated_at)].push(s)
     return acc
   }, [snap.sessions, query])
 
@@ -202,6 +202,20 @@ export function ChatSessionList({ query = '' }: ChatSessionListProps) {
                       >
                         重命名
                       </button>
+                      <button
+                        type="button"
+                        className={styles.sessionMenuItem}
+                        data-testid={`session-delete-${s.id}`}
+                        style={{ color: 'var(--ios-destructive, #ff3b30)' }}
+                        onClick={() => {
+                          setOpenMenuId(null)
+                          chatSessionsActions.deleteSession(s.id).then(() => {
+                            if (params.session_id === s.id) navigate('/chat', { replace: true })
+                          }).catch(() => {})
+                        }}
+                      >
+                        删除
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -209,7 +223,7 @@ export function ChatSessionList({ query = '' }: ChatSessionListProps) {
                   <div className={styles.sessionPreview}>{s.last_msg_preview}</div>
                 ) : null}
                 <div className={styles.sessionMeta}>
-                  {formatTime(s.last_active_at)} · {s.message_count} turns
+                  {formatTime(s.updated_at)} · {s.message_count} turns
                 </div>
               </div>
             ))}

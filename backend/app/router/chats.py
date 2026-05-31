@@ -45,12 +45,14 @@ def _to_view(s: Any, message_count: int = 0, preview: str = "") -> ChatSessionVi
     )
 
 
+@router.get("")
 @router.get("/")
 async def list_chats(repo: ChatSessionRepo = Depends(get_repo)) -> list[ChatSessionView]:
     sessions = await repo.list_for_user("anonymous")  # C.6 will switch to JWT user
     return [_to_view(s) for s in sessions]
 
 
+@router.post("")
 @router.post("/")
 async def create_chat(
     req: CreateChatRequest,

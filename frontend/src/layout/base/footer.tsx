@@ -1,6 +1,6 @@
 import { authActions, authState } from '@/store/auth'
 import { LogoutOutlined, UserOutlined } from '@ant-design/icons'
-import { Avatar, Dropdown, message } from 'antd'
+import { Avatar, Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
@@ -12,7 +12,7 @@ export function Footer() {
 
   const handleLogout = () => {
     authActions.logout()
-    message.success('已退出登录')
+    window.$app.message.success('已退出登录')
     navigate('/login')
   }
 

@@ -71,7 +71,7 @@ describe('SSE event types', () => {
       user_id: null,
       title: 't',
       created_at: '2026-05-09T00:00:00Z',
-      last_active_at: '2026-05-09T00:00:00Z',
+      updated_at: '2026-05-09T00:00:00Z',
       message_count: 0,
       last_msg_preview: null,
     }

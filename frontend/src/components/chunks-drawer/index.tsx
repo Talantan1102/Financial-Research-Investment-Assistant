@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Drawer, Spin, Empty, Tag, Typography, message } from 'antd'
+import { Drawer, Spin, Empty, Tag, Typography } from 'antd'
 import { FileTextOutlined } from '@ant-design/icons'
 import * as knowledgeApi from '@/api/knowledge'
 import type { ChunkInfo } from '@/api/knowledge'
@@ -39,7 +39,7 @@ export default function ChunksDrawer({
       setChunks(res.data.chunks)
       setTotalCount(res.data.chunk_count)
     } catch (error: any) {
-      message.error(error?.response?.data?.detail || '获取切片失败')
+      window.$app.message.error(error?.response?.data?.detail || '获取切片失败')
       setChunks([])
     } finally {
       setLoading(false)

@@ -74,4 +74,15 @@ class MCPClient:
         # MCP returns list of content; we expect first to be TextContent with JSON
         first = resp.content[0] if resp.content else None
         text = first.text if isinstance(first, TextContent) else "{}"
-        return json.loads(text)
+        # fail-loud: 工具返回空 / 非 JSON content 时返回明确 error,而非裸 json.loads 崩溃
+        # (上层 agent 据此生成"工具失败"提示,而非整个 chat 链路抛 JSONDecodeError)。
+        if not text or not text.strip():
+            return {"error": f"tool '{name}' returned empty content", "tool": name}
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            return {
+                "error": f"tool '{name}' returned non-JSON: {exc}",
+                "raw": text[:200],
+                "tool": name,
+            }

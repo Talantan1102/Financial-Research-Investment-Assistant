@@ -161,6 +161,21 @@ export const currentChatActions = {
         currentChatState.toolEvents.push(ev)
     }
   },
+  /** Reset UI to idle regardless of current streaming state.
+   *
+   * Called by useChatSSE abort() and cancelTask() so that any UI-initiated
+   * stop (abort fallback or explicit cancel) always brings the UI back to a
+   * usable idle state — even if the active_task_id was never set (POST still
+   * pending) or if the backend never sent a terminal done/error frame.
+   */
+  resetStreaming() {
+    currentChatState.streamingStatus = 'idle'
+    currentChatState.active_task_id = null
+    currentChatState.streaming_phase = 'idle'
+    currentChatState.streaming_phase_label = undefined
+    currentChatState.streamingDraft = ''
+    currentChatState.errorMessage = null
+  },
   setStreamingPhase(phase: StreamingPhase, label?: string) {
     currentChatState.streaming_phase = phase
     currentChatState.streaming_phase_label = label

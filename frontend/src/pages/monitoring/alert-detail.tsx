@@ -8,7 +8,6 @@ import {
   Skeleton,
   Tag,
   Tooltip,
-  message,
 } from "antd";
 import {
   ArrowLeftOutlined,
@@ -268,20 +267,20 @@ export default function AlertDetail() {
     setCopying(true);
     try {
       await navigator.clipboard.writeText(window.location.href);
-      void message.success("链接已复制");
+      void window.$app.message.success("链接已复制");
     } catch {
-      void message.error("复制失败，请手动复制地址栏链接");
+      void window.$app.message.error("复制失败，请手动复制地址栏链接");
     } finally {
       setCopying(false);
     }
   };
 
   const handleRescan = () => {
-    void message.info("请返回列表页触发重新扫描");
+    void window.$app.message.info("请返回列表页触发重新扫描");
   };
 
   const handleMarkRead = () => {
-    void message.success("已标记为已读");
+    void window.$app.message.success("已标记为已读");
   };
 
   // ── Loading state ──

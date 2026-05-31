@@ -5,12 +5,9 @@ import {
   Col,
   Empty,
   Input,
-  message,
   Row,
-  Select,
   Skeleton,
   Space,
-  Switch,
   Table,
   Tag,
   Tooltip,
@@ -25,17 +22,11 @@ import {
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import {
-  listAlerts,
-  listCustomers,
-  listRuns,
-  triggerScan,
+  listSignals,
+  triggerRefresh,
+  type SignalSummary,
 } from "@/api/monitoring";
-import type {
-  AlertLevel,
-  MonitoringAlert,
-  MonitoringCustomer,
-  MonitoringRun,
-} from "@/types/monitoring";
+import type { AlertLevel } from "@/types/monitoring";
 
 // ── Design tokens (aligned with Perplexity Finance / 同花顺, v0.8.3-pre) ──
 const TOKEN = {
@@ -163,27 +154,18 @@ function AlertDot({ level }: { level: AlertLevel }) {
 
 // ── Main page component ──
 export default function MonitoringIndex() {
-  const [customers, setCustomers] = useState<MonitoringCustomer[]>([]);
-  const [alerts, setAlerts] = useState<MonitoringAlert[]>([]);
-  const [runs, setRuns] = useState<MonitoringRun[]>([]);
+  const [signals, setSignals] = useState<SignalSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [search, setSearch] = useState("");
-  const [industryFilter, setIndustryFilter] = useState<string | undefined>();
-  const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
 
   const refresh = useCallback(async () => {
     try {
-      const [c, a, r] = await Promise.all([
-        listCustomers(),
-        listAlerts(),
-        listRuns(),
-      ]);
-      setCustomers(c);
-      setAlerts(a);
-      setRuns(r);
+      const s = await listSignals(50);
+      setSignals(s);
     } catch (err) {
       console.error("[MonitoringIndex] refresh error:", err);
+      void window.$app.message.error("加载监控信号失败，请检查登录状态或稍后重试");
     } finally {
       setLoading(false);
     }
@@ -198,134 +180,46 @@ export default function MonitoringIndex() {
     return () => clearInterval(timer);
   }, [refresh]);
 
-  // ── Derived stats ──
+  // ── Derived stats from signals ──
   const stats = useMemo(() => {
     const since24h = Date.now() - 24 * 3600 * 1000;
-    const recent = alerts.filter(
-      (a) => new Date(a.created_at).getTime() > since24h,
+    const recent = signals.filter(
+      (s) => s.created_at && new Date(s.created_at).getTime() > since24h,
     );
-    const todayStr = new Date().toDateString();
-    const todayRuns = runs.filter(
-      (r) => new Date(r.started_at).toDateString() === todayStr,
-    );
+    const distinctTsCodes = new Set(signals.map((s) => s.ts_code));
     return {
-      total: customers.length,
-      todayScans: todayRuns.length,
-      yellow24h: recent.filter((a) => a.alert_level === "yellow").length,
-      red24h: recent.filter((a) => a.alert_level === "red").length,
+      total: distinctTsCodes.size,
+      todayScans: signals.length,
+      yellow24h: recent.filter((s) => s.alert_level === "yellow").length,
+      red24h: recent.filter((s) => s.alert_level === "red").length,
     };
-  }, [customers, alerts, runs]);
+  }, [signals]);
 
-  // ── Per-customer highest alert level (last 24h) ──
-  const customerLevelMap = useMemo(() => {
-    const since24h = Date.now() - 24 * 3600 * 1000;
-    const recent = alerts.filter(
-      (a) => new Date(a.created_at).getTime() > since24h,
-    );
-    const PRIORITY: Record<AlertLevel, number> = { green: 0, yellow: 1, red: 2 };
-    const m: Record<string, AlertLevel> = {};
-    for (const a of recent) {
-      const cur = m[a.customer_id];
-      if (!cur || PRIORITY[a.alert_level] > PRIORITY[cur]) {
-        m[a.customer_id] = a.alert_level;
-      }
-    }
-    return m;
-  }, [alerts]);
-
-  // ── Per-customer latest scan time ──
-  const customerLatestRunMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    for (const r of runs) {
-      const cur = m[r.customer_id];
-      if (!cur || r.started_at > cur) {
-        m[r.customer_id] = r.started_at;
-      }
-    }
-    return m;
-  }, [runs]);
-
-  // ── 24h alert count per customer ──
-  const customerAlertCountMap = useMemo(() => {
-    const since24h = Date.now() - 24 * 3600 * 1000;
-    const m: Record<string, number> = {};
-    for (const a of alerts) {
-      if (new Date(a.created_at).getTime() > since24h) {
-        m[a.customer_id] = (m[a.customer_id] ?? 0) + 1;
-      }
-    }
-    return m;
-  }, [alerts]);
-
-  // ── Latest alert ID per customer (for navigation to detail page) ──
-  const customerLatestAlertIdMap = useMemo(() => {
-    const idMap: Record<string, string> = {};
-    const tsMap: Record<string, string> = {};
-    for (const a of alerts) {
-      const curTs = tsMap[a.customer_id];
-      if (!curTs || a.created_at > curTs) {
-        tsMap[a.customer_id] = a.created_at;
-        idMap[a.customer_id] = a.id;
-      }
-    }
-    return idMap;
-  }, [alerts]);
-
-  // ── Industry options ──
-  const industryOptions = useMemo(() => {
-    const set = new Set(customers.map((c) => c.industry));
-    return Array.from(set).map((i) => ({ value: i, label: i }));
-  }, [customers]);
-
-  // ── Filtered customer list ──
+  // ── Filtered signals list ──
   const filtered = useMemo(() => {
-    return customers
-      .filter(
-        (c) =>
-          !search ||
-          c.name.toLowerCase().includes(search.toLowerCase()) ||
-          c.ts_code.toLowerCase().includes(search.toLowerCase()),
-      )
-      .filter((c) => !industryFilter || c.industry === industryFilter)
-      .filter((c) => {
-        if (statusFilter === "enabled") return c.enabled;
-        if (statusFilter === "disabled") return !c.enabled;
-        return true;
-      });
-  }, [customers, search, industryFilter, statusFilter]);
+    return signals.filter(
+      (s) =>
+        !search ||
+        s.ts_code.toLowerCase().includes(search.toLowerCase()) ||
+        s.detail_status.toLowerCase().includes(search.toLowerCase()),
+    );
+  }, [signals, search]);
 
-  // ── Scan all filtered customers ──
+  // ── Trigger detection cycle for current user ──
   const handleScanAll = async () => {
-    if (filtered.length === 0) {
-      void message.warning("没有符合条件的客户");
-      return;
-    }
     setScanning(true);
     try {
-      await triggerScan(filtered.map((c) => c.id));
-      void message.success(`已触发 ${filtered.length.toString()} 位客户扫描`);
+      const { status } = await triggerRefresh();
+      void window.$app.message.success(`检测周期已入队 (${status})`);
       // Optimistic: refresh after brief delay
       setTimeout(() => {
         void refresh();
-      }, 800);
+      }, 1500);
     } catch (err) {
-      console.error("[MonitoringIndex] triggerScan error:", err);
-      void message.error("触发扫描失败，请重试");
+      console.error("[MonitoringIndex] triggerRefresh error:", err);
+      void window.$app.message.error("触发扫描失败，请重试");
     } finally {
       setScanning(false);
-    }
-  };
-
-  const handleScanOne = async (customerId: string) => {
-    try {
-      await triggerScan([customerId]);
-      void message.success("已触发单客户扫描");
-      setTimeout(() => {
-        void refresh();
-      }, 800);
-    } catch (err) {
-      console.error("[MonitoringIndex] triggerScanOne error:", err);
-      void message.error("触发扫描失败");
     }
   };
 
@@ -341,19 +235,22 @@ export default function MonitoringIndex() {
     });
   };
 
-  // ── Table columns ──
-  const columns: ColumnsType<MonitoringCustomer> = [
+  // ── Table columns (v1.0: signal-centric) ──
+  const columns: ColumnsType<SignalSummary> = [
     {
-      title: "客户名",
-      dataIndex: "name",
-      key: "name",
-      width: 140,
-      render: (name: string, record: MonitoringCustomer) => (
+      title: "标的代码",
+      dataIndex: "ts_code",
+      key: "ts_code",
+      width: 130,
+      render: (code: string, record: SignalSummary) => (
         <Link
-          to={`/monitoring/${record.id}`}
+          to={`/monitoring/${record.id}/alert/${record.id}`}
           style={{
             color: TOKEN.textPrimary,
             fontWeight: 500,
+            fontFamily: TOKEN.monoFont,
+            fontSize: 13,
+            letterSpacing: "0.04em",
             transition: "color 0.15s",
           }}
           onMouseEnter={(e) => {
@@ -363,34 +260,23 @@ export default function MonitoringIndex() {
             (e.currentTarget as HTMLAnchorElement).style.color = TOKEN.textPrimary;
           }}
         >
-          {name}
+          {code}
         </Link>
       ),
     },
     {
-      title: "代码",
-      dataIndex: "ts_code",
-      key: "ts_code",
-      width: 110,
-      render: (code: string) => (
-        <span
-          style={{
-            fontFamily: TOKEN.monoFont,
-            fontSize: 12,
-            color: TOKEN.textSecondary,
-            letterSpacing: "0.04em",
-          }}
-        >
-          {code}
-        </span>
-      ),
+      title: "预警等级",
+      dataIndex: "alert_level",
+      key: "alert_level",
+      width: 100,
+      render: (level: AlertLevel) => <AlertDot level={level} />,
     },
     {
-      title: "行业",
-      dataIndex: "industry",
-      key: "industry",
+      title: "详情状态",
+      dataIndex: "detail_status",
+      key: "detail_status",
       width: 120,
-      render: (industry: string) => (
+      render: (status: string) => (
         <Tag
           style={{
             borderColor: TOKEN.borderColor,
@@ -400,29 +286,16 @@ export default function MonitoringIndex() {
             borderRadius: 4,
           }}
         >
-          {industry}
+          {status}
         </Tag>
       ),
     },
     {
-      title: "状态",
-      dataIndex: "enabled",
-      key: "enabled",
-      width: 80,
-      render: (enabled: boolean) => (
-        <Switch
-          size="small"
-          checked={enabled}
-          disabled
-          style={{ cursor: "default" }}
-        />
-      ),
-    },
-    {
-      title: "最新扫描",
-      key: "latest_run",
-      width: 130,
-      render: (_: unknown, record: MonitoringCustomer) => (
+      title: "生成时间",
+      dataIndex: "created_at",
+      key: "created_at",
+      width: 140,
+      render: (ts: string | null) => (
         <span
           style={{
             fontFamily: TOKEN.monoFont,
@@ -430,79 +303,30 @@ export default function MonitoringIndex() {
             color: TOKEN.textTertiary,
           }}
         >
-          {formatTime(customerLatestRunMap[record.id])}
+          {formatTime(ts ?? undefined)}
         </span>
       ),
-    },
-    {
-      title: "预警等级",
-      key: "alert_level",
-      width: 100,
-      render: (_: unknown, record: MonitoringCustomer) => {
-        const level: AlertLevel = customerLevelMap[record.id] ?? "green";
-        return <AlertDot level={level} />;
-      },
-    },
-    {
-      title: "24h 告警",
-      key: "alert_count",
-      width: 90,
-      align: "center" as const,
-      render: (_: unknown, record: MonitoringCustomer) => {
-        const count = customerAlertCountMap[record.id] ?? 0;
-        if (count === 0)
-          return (
-            <span style={{ color: TOKEN.textTertiary, fontFamily: TOKEN.monoFont }}>
-              0
-            </span>
-          );
-        const level = customerLevelMap[record.id] ?? "green";
-        const latestAlertId = customerLatestAlertIdMap[record.id];
-        const inner = (
-          <span
-            style={{
-              fontFamily: TOKEN.monoFont,
-              fontWeight: 600,
-              color: LEVEL_COLOR[level],
-            }}
-          >
-            {count}
-          </span>
-        );
-        if (!latestAlertId) return inner;
-        return (
-          <Tooltip title="查看最新 Alert 详情">
-            <Link
-              to={`/monitoring/${record.id}/alert/${latestAlertId}`}
-              style={{ textDecoration: "none" }}
-            >
-              {inner}
-            </Link>
-          </Tooltip>
-        );
-      },
     },
     {
       title: "操作",
       key: "action",
       width: 100,
-      render: (_: unknown, record: MonitoringCustomer) => (
-        <Tooltip title="立即扫描此客户">
-          <Button
-            size="small"
-            icon={<SyncOutlined />}
-            onClick={() => {
-              void handleScanOne(record.id);
-            }}
+      render: (_: unknown, record: SignalSummary) => (
+        <Tooltip title="查看 Alert 详情">
+          <Link
+            to={`/monitoring/${record.id}/alert/${record.id}`}
             style={{
-              borderColor: TOKEN.borderColor,
-              color: TOKEN.textSecondary,
               fontSize: 12,
-              willChange: "transform",
+              color: TOKEN.textSecondary,
+              border: `1px solid ${TOKEN.borderColor}`,
+              borderRadius: 4,
+              padding: "2px 8px",
+              textDecoration: "none",
+              transition: "color 0.15s",
             }}
           >
-            扫描
-          </Button>
+            详情
+          </Link>
         </Tooltip>
       ),
     },
@@ -562,7 +386,7 @@ export default function MonitoringIndex() {
         <Col xs={24} sm={12} lg={6}>
           <StatCard
             icon={<TeamOutlined />}
-            label="总客户数"
+            label="监控标的数"
             value={stats.total}
             loading={loading}
           />
@@ -570,7 +394,7 @@ export default function MonitoringIndex() {
         <Col xs={24} sm={12} lg={6}>
           <StatCard
             icon={<ThunderboltOutlined />}
-            label="今日扫描次数"
+            label="信号总数"
             value={stats.todayScans}
             loading={loading}
           />
@@ -610,29 +434,10 @@ export default function MonitoringIndex() {
         }}
       >
         <Input.Search
-          placeholder="搜索客户名 / ts_code"
+          placeholder="搜索标的代码 / 详情状态"
           allowClear
           onChange={(e) => setSearch(e.target.value)}
-          style={{ width: 220 }}
-          size="middle"
-        />
-        <Select
-          placeholder="行业"
-          allowClear
-          style={{ width: 140 }}
-          options={industryOptions}
-          onChange={(v: string | undefined) => setIndustryFilter(v)}
-          size="middle"
-        />
-        <Select
-          defaultValue="all"
-          style={{ width: 110 }}
-          options={[
-            { value: "all", label: "全部状态" },
-            { value: "enabled", label: "已启用" },
-            { value: "disabled", label: "已禁用" },
-          ]}
-          onChange={(v: "all" | "enabled" | "disabled") => setStatusFilter(v)}
+          style={{ width: 240 }}
           size="middle"
         />
         <Space style={{ marginLeft: "auto" }}>
@@ -642,7 +447,7 @@ export default function MonitoringIndex() {
             onClick={() => {
               void handleScanAll();
             }}
-            disabled={scanning || filtered.length === 0}
+            disabled={scanning}
             style={{
               backgroundColor: TOKEN.accentRed,
               borderColor: TOKEN.accentRed,
@@ -663,7 +468,7 @@ export default function MonitoringIndex() {
       </div>
 
       {/* ── Table ── */}
-      {loading && customers.length === 0 ? (
+      {loading && signals.length === 0 ? (
         // Loading skeleton
         <div
           style={{
@@ -678,7 +483,7 @@ export default function MonitoringIndex() {
           ))}
         </div>
       ) : filtered.length === 0 && !loading ? (
-        // Empty state
+        // Empty state — neutral wording; no dead link to /config
         <div
           style={{
             backgroundColor: TOKEN.cardBg,
@@ -691,9 +496,9 @@ export default function MonitoringIndex() {
           <Empty
             description={
               <span style={{ color: TOKEN.textTertiary, fontSize: 14 }}>
-                {customers.length === 0
-                  ? "暂无监控客户，请前往配置页添加"
-                  : "没有匹配的客户，请调整筛选条件"}
+                {signals.length === 0
+                  ? "暂无监控信号数据，点击「立即扫描全部」触发检测周期"
+                  : "没有匹配的信号，请调整搜索条件"}
               </span>
             }
           />
@@ -707,13 +512,13 @@ export default function MonitoringIndex() {
             overflow: "hidden",
           }}
         >
-          <Table<MonitoringCustomer>
+          <Table<SignalSummary>
             rowKey="id"
             columns={columns}
             dataSource={filtered}
             size="middle"
             pagination={{ pageSize: 20, showSizeChanger: false }}
-            scroll={{ x: 900 }}
+            scroll={{ x: 600 }}
             onRow={(record) => ({
               style: {
                 transition: "background 0.15s",
@@ -726,7 +531,7 @@ export default function MonitoringIndex() {
                 (e.currentTarget as HTMLTableRowElement).style.backgroundColor =
                   "";
               },
-              "data-customer-id": record.id,
+              "data-signal-id": record.id,
             })}
             locale={{
               emptyText: (

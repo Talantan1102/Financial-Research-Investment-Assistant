@@ -164,10 +164,10 @@ export type SSEEventType = SSEEvent['type']
 
 export interface ChatSession {
   id: string
-  user_id: string | null
+  user_id?: string | null
   title: string
-  created_at: string
-  last_active_at: string
+  created_at?: string
+  updated_at: string
   message_count: number
   last_msg_preview: string | null
 }

@@ -7,7 +7,7 @@
  *
  * spec § 9 视图 3 + § 11 末尾 #8 用户回路 first-class hook (一键否决).
  */
-import { Button, Empty, Popconfirm, Spin, Switch, Table, Tag, message } from 'antd'
+import { Button, Empty, Popconfirm, Spin, Switch, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useState } from 'react'
 import {
@@ -116,10 +116,10 @@ export default function MemoryAuditLog() {
   const handleInvalidate = async (edgeId: string) => {
     try {
       await invalidateMemoryEdge(edgeId)
-      message.success('已否决, 该 edge 不会再影响后续 retrieval')
+      window.$app.message.success('已否决, 该 edge 不会再影响后续 retrieval')
       setReloadKey((k) => k + 1)
     } catch (e) {
-      message.error(`否决失败: ${String((e as Error)?.message ?? e)}`)
+      window.$app.message.error(`否决失败: ${String((e as Error)?.message ?? e)}`)
     }
   }
 

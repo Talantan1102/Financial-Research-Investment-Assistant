@@ -6,7 +6,7 @@
  *  - className?: 额外 wrapper class
  */
 
-import { Button, Input, message } from 'antd'
+import { Button, Input } from 'antd'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { reportActions } from '@/store/report'
@@ -25,7 +25,7 @@ export default function ResearchEntry({ onSuccess, className }: Props) {
   const handleStart = async () => {
     const name = targetName.trim()
     if (!name) {
-      message.warning('请输入目标名称')
+      window.$app.message.warning('请输入目标名称')
       return
     }
     setStarting(true)
@@ -41,7 +41,7 @@ export default function ResearchEntry({ onSuccess, className }: Props) {
       }
     } catch (err) {
       console.error('[ResearchEntry] startReport failed:', err)
-      message.error('启动研报失败,请稍后重试')
+      window.$app.message.error('启动研报失败,请稍后重试')
     } finally {
       setStarting(false)
     }

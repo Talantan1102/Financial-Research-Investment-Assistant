@@ -181,7 +181,7 @@ describe('report store — startStreaming SSE pipeline', () => {
         request_id: 'rid-final',
         report_json: { abstract: 'ok' },
       },
-    } as Awaited<ReturnType<typeof reportsApi.getReport>>)
+    } as unknown as Awaited<ReturnType<typeof reportsApi.getReport>>)
 
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(

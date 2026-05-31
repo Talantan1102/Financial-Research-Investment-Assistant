@@ -1,11 +1,11 @@
 /**
  * frontend/src/store/chat-sessions.ts
  *
- * Multi-chat list state. Sorted by last_active_at desc.
+ * Multi-chat list state. Sorted by updated_at desc.
  */
 
 import { proxy } from 'valtio'
-import { createChat, listChats, renameChat } from '@/api/chatApi'
+import { createChat, deleteChat, listChats, renameChat } from '@/api/chatApi'
 import type { ChatSession } from '@/types/chat'
 
 export type ChatSessionsStatus = 'idle' | 'loading' | 'loaded' | 'error'
@@ -25,9 +25,10 @@ const INITIAL: ChatSessionsState = {
 export const chatSessionsState = proxy<ChatSessionsState>({ ...INITIAL })
 
 function activityTs(s: ChatSession): string {
-  // backend chats router 返 `updated_at` 不返 `last_active_at`;为新建 session
-  // 排到列表顶部,优先取 last_active_at 兜底 updated_at。
-  return s.last_active_at || (s as { updated_at?: string }).updated_at || ''
+  // backend chats router 返 `updated_at` — 排序时直接使用。
+  // unshift(新建 session 顶置)在 upsertSession 中处理,避免 naive UTC 字符串
+  // 排序偏差问题。
+  return s.updated_at
 }
 
 function sortDesc(a: ChatSession, b: ChatSession): number {
@@ -65,6 +66,21 @@ export const chatSessionsActions = {
       (s) => s.id !== id,
     )
   },
+  async deleteSession(id: string): Promise<void> {
+    // Optimistic: remove from list immediately, rollback on failure (fail-loud).
+    const prev = [...chatSessionsState.sessions]
+    const idx = chatSessionsState.sessions.findIndex((s) => s.id === id)
+    if (idx < 0) return
+    chatSessionsState.sessions = chatSessionsState.sessions.filter(
+      (s) => s.id !== id,
+    )
+    try {
+      await deleteChat(id)
+    } catch (e) {
+      chatSessionsState.sessions = prev
+      throw e
+    }
+  },
   reset() {
     chatSessionsState.sessions = []
     chatSessionsState.status = 'idle'
@@ -98,5 +114,27 @@ export const chatSessionsActions = {
       chatSessionsState.sessions[idx].title = prevTitle // rollback
       throw e
     }
+  },
+  /**
+   * Used by /chat landing page to avoid accumulating empty sessions on each
+   * navigation. Reuses the first untouched empty shell (message_count === 0,
+   * default title) if one exists; otherwise creates a new one.
+   *
+   * SSOT: "新对话" matches backend chats.py DEFAULT_CHAT_TITLE constant.
+   */
+  async getOrCreateLanding(): Promise<ChatSession> {
+    if (chatSessionsState.status !== 'loaded') {
+      try {
+        await chatSessionsActions.loadSessions()
+      } catch {
+        // loadSessions failed — fall through to create a fresh session
+        return chatSessionsActions.createAndAdd()
+      }
+    }
+    const empty = chatSessionsState.sessions.find(
+      (s) => s.message_count === 0 && s.title === '新对话',
+    )
+    if (empty) return empty
+    return chatSessionsActions.createAndAdd()
   },
 }

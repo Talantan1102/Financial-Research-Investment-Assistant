@@ -318,6 +318,16 @@ export const reportActions = {
 
             if (eventType === 'error') {
               reportState.streaming.active = false
+              // Bug research-bug-2: error branch must be symmetric with done —
+              // the backend already wrote status='failed' in DB when it emitted
+              // the error event; re-fetch here so snap.current.status flips to
+              // 'failed' immediately, triggering the failed view in Detail.tsx
+              // without requiring a manual page reload.
+              try {
+                await reportActions.fetchDetail(reportId)
+              } catch (e) {
+                console.error('fetchDetail after error failed:', e)
+              }
               return
             }
           }
@@ -340,6 +350,14 @@ export const reportActions = {
           message: `连接错误:${(e as Error).message}`,
           timestamp: Date.now(),
         })
+        // Bug research-bug-2 (connection-error path): best-effort re-fetch to
+        // sync DB status so Detail.tsx can show the failed view. Mirrors the
+        // SSE error-event fix above — any termination path should refresh DB.
+        try {
+          await reportActions.fetchDetail(reportId)
+        } catch {
+          /* noop — already pushed an error progress entry; ignore secondary failure */
+        }
       } finally {
         // 该 stream 结束(done / error / 自然结束):清 controller ref
         if (_streamController === controller) {

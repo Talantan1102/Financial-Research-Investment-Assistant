@@ -1,6 +1,6 @@
 import { authActions } from '@/store/auth'
 import { LockOutlined, MailOutlined, UserOutlined } from '@ant-design/icons'
-import { Button, Form, Input, message } from 'antd'
+import { Button, Form, Input } from 'antd'
 import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import styles from './login.module.scss'
@@ -22,10 +22,10 @@ export default function RegisterPage() {
     setLoading(true)
     try {
       await authActions.register(values.username, values.password, values.email)
-      message.success('注册成功')
+      window.$app.message.success('注册成功')
       navigate(from, { replace: true })
     } catch (error: any) {
-      message.error(error?.response?.data?.detail || '注册失败')
+      window.$app.message.error(error?.response?.data?.detail || '注册失败')
     } finally {
       setLoading(false)
     }

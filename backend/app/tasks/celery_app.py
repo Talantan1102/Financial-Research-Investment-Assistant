@@ -8,7 +8,12 @@ from __future__ import annotations
 import os
 
 from celery import Celery
+from dotenv import load_dotenv
 from kombu import Queue
+
+# worker 进程不经过 app_main.py 的 load_dotenv(),必须自行加载 backend/.env,
+# 否则 worker 内所有 LLM 调用缺 DASHSCOPE_API_KEY 致 401。对齐 app_main.py:11。
+load_dotenv()
 
 CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/1")
 CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/2")
@@ -27,6 +32,10 @@ celery_app = Celery(
 )
 
 celery_app.conf.update(
+    # worker 内 run_chat 通过 MCP stdio subprocess 拉起工具服务,asyncio
+    # create_subprocess 需要真实 stderr.fileno()。Celery 默认 redirect_stdouts
+    # 把 sys.stderr 换成无 fileno() 的 LoggingProxy → subprocess 创建崩溃。关掉。
+    worker_redirect_stdouts=False,
     # Spec § 5.2:acks_late + max_tasks_per_child 防泄漏 + prefetch=1 不丢
     task_acks_late=True,
     worker_max_tasks_per_child=100,

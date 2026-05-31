@@ -33,18 +33,20 @@ const REL_COLORS: Record<string, string> = {
 export default function MemoryTimeline() {
   const [edges, setEdges] = useState<TimelineEdge[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [filterRel, setFilterRel] = useState<string | null>(null)
   const [filterEntity, setFilterEntity] = useState('')
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setError(null)
     fetchMemoryTimeline()
       .then((data) => {
         if (!cancelled) setEdges(data.items)
       })
-      .catch(() => {
-        /* leave empty */
+      .catch((e) => {
+        if (!cancelled) setError(String((e as Error)?.message ?? e))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -92,6 +94,14 @@ export default function MemoryTimeline() {
       <div data-testid="memory-timeline-loading" style={{ padding: 24 }}>
         <Spin size="large" />
       </div>
+    )
+
+  if (error)
+    return (
+      <Empty
+        data-testid="memory-timeline-error"
+        description={`加载失败: ${error}`}
+      />
     )
 
   if (edges.length === 0)

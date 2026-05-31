@@ -93,7 +93,7 @@ def doc_to_response(doc: Document) -> DocumentResponse:
 
 async def process_document(document_id: str, file_path: str, kb_name: str, db_session_factory):
     """后台处理文档（使用 DocMind 解析、向量化、存储到ES）"""
-    from service.docmind_service import process_document_with_docmind
+    from app.service.docmind_service import process_document_with_docmind
 
     # 创建新的数据库会话
     db = db_session_factory()
@@ -359,7 +359,7 @@ async def upload_document(
     db.refresh(doc)
 
     # 获取数据库会话工厂
-    from core.database import SessionLocal
+    from app.core.database import SessionLocal
 
     # 在后台处理文档
     background_tasks.add_task(process_document, str(doc.id), file_path, kb.name, SessionLocal)
@@ -412,7 +412,7 @@ async def get_document_chunks(
     db: Session = Depends(get_db),
 ):
     """获取文档的所有切片"""
-    from service.milvus_service import get_milvus_service
+    from app.service.milvus_service import get_milvus_service
 
     try:
         kb_uuid = UUID(kb_id)

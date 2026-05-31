@@ -122,10 +122,20 @@ function buildTimelineEntries(
       }
       // Per-scorer events fold into Critic state but don't pollute timeline
     } else if (evt.type === 'error') {
+      // Bug research-bug-3 (defensive): never render raw exception text from
+      // evt.message directly. Backend now sends a sanitized user-facing message,
+      // but as a second layer of defence we check for known raw-exception
+      // patterns (Python error suffixes) and fall back to a generic copy.
+      const rawMsg = evt.message ?? ''
+      const isSafeMsg =
+        rawMsg.length > 0 &&
+        !rawMsg.match(/line \d+ column \d+/) &&
+        !rawMsg.match(/Traceback \(most recent call last\)/) &&
+        !rawMsg.match(/File ".*", line \d+/)
       entries.push({
         elapsedSec,
         agentLabel: 'System',
-        summary: `❌ ${evt.message}`,
+        summary: `❌ ${isSafeMsg ? rawMsg : '尽调过程出错，请稍后重试'}`,
         done: true,
       })
     }

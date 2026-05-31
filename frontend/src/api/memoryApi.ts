@@ -15,6 +15,7 @@ import type {
   TimelineFilters,
   TimelineResponse,
 } from '@/types/memory'
+import { getAuthToken } from './auth-token'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 const BASE = '/api/v0/memory'
@@ -25,7 +26,13 @@ function apiUrl(path: string): string {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(apiUrl(path), init)
+  const token = getAuthToken()
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> ?? {}),
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  }
+  const res = await fetch(apiUrl(path), { ...init, headers })
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status}: ${text || res.statusText}`)
