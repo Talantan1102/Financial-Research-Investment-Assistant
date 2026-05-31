@@ -90,3 +90,60 @@ def test_critic_step_aggregates_5(
     assert isinstance(report, CriticReport)
     n_dims = len(report.dimensions)
     assert n_dims == 5
+
+
+# ── C18: aggregate_scores skip-sentinel filtering ────────────────────────────
+
+
+def _make_dim(dim: str, score: float, *, is_skip: bool = False) -> CriticDimensionScore:
+    """Build a CriticDimensionScore (C18: is_skip is now a real field on the model)."""
+    return CriticDimensionScore(
+        dimension=cast(CriticDimension, dim),
+        score=score,
+        evidence="skip" if is_skip else "e",
+        sub_agent_request_id="r",
+        is_skip=is_skip,
+    )
+
+
+def test_aggregate_scores_excludes_skip_dims() -> None:
+    """C18: 6 real dims (6.0) + 2 skip dims (10.0) → overall_score == 6.0."""
+    real_dims = [
+        _make_dim(d, 6.0)
+        for d in (
+            "factuality",
+            "coverage",
+            "insight",
+            "structure",
+            "conciseness",
+            "input_context_appropriateness",
+        )
+    ]
+    skip_dims = [
+        _make_dim("valuation_consistency", 10.0, is_skip=True),
+        _make_dim("dialectical_balance", 10.0, is_skip=True),
+    ]
+    report = aggregate_scores(real_dims + skip_dims, summary="test")
+    # All 8 dims must appear in the report
+    assert len(report.dimensions) == 8
+    # overall_score must exclude the 10.0 skip sentinels
+    assert report.overall_score == pytest.approx(6.0)
+
+
+def test_aggregate_scores_all_skip_yields_zero() -> None:
+    """C18: when every dim is skipped, overall_score falls back to 0.0."""
+    dims = [
+        _make_dim(d, 10.0, is_skip=True) for d in ("valuation_consistency", "dialectical_balance")
+    ]
+    report = aggregate_scores(dims, summary="all skip")
+    assert len(report.dimensions) == 2
+    assert report.overall_score == pytest.approx(0.0)
+
+
+def test_aggregate_scores_no_skip_unchanged() -> None:
+    """C18: when no dims are skipped, behaviour is identical to pre-fix mean."""
+    dims = [
+        _make_dim(d, 8.0) for d in ("factuality", "coverage", "insight", "structure", "conciseness")
+    ]
+    report = aggregate_scores(dims, summary="ok")
+    assert report.overall_score == pytest.approx(8.0)

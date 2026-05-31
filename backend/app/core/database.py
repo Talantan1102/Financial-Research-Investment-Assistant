@@ -10,7 +10,9 @@ from sqlalchemy.orm import sessionmaker
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
 POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
-POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres123")
+# C37: no silent known-password fallback. Tests set this via pytest_configure;
+# CI/docker-compose/.env supply it; a real deploy must too (KeyError if unset).
+POSTGRES_PASSWORD = os.environ["POSTGRES_PASSWORD"]
 POSTGRES_DB = os.getenv("POSTGRES_DB", "industry_assistant")
 
 DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"

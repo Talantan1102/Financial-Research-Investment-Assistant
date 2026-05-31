@@ -14,6 +14,7 @@ import type {
   CreateChatRequest,
   SendChatMessageRequest,
 } from '@/types/chat'
+import { getAuthToken } from './auth-token' // C66: SSOT auth header for bare-fetch callers
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 
@@ -22,8 +23,16 @@ function apiUrl(path: string): string {
   return `${base}${path}`
 }
 
+// C66: shared helper — mirrors monitoring.ts authHeader() pattern
+function getAuthHeaders(): Record<string, string> {
+  const token = getAuthToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 export async function listChats(): Promise<ChatSession[]> {
-  const res = await fetch(apiUrl('/api/v0/chats'))
+  const res = await fetch(apiUrl('/api/v0/chats'), {
+    headers: { ...getAuthHeaders() },
+  })
   if (!res.ok) throw new Error(`listChats failed: ${res.status}`)
   return res.json() as Promise<ChatSession[]>
 }
@@ -33,7 +42,7 @@ export async function createChat(
 ): Promise<ChatSession> {
   const res = await fetch(apiUrl('/api/v0/chats'), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(req),
   })
   if (!res.ok) throw new Error(`createChat failed: ${res.status}`)
@@ -41,7 +50,9 @@ export async function createChat(
 }
 
 export async function getChat(id: string): Promise<ChatDetail> {
-  const res = await fetch(apiUrl(`/api/v0/chats/${encodeURIComponent(id)}`))
+  const res = await fetch(apiUrl(`/api/v0/chats/${encodeURIComponent(id)}`), {
+    headers: { ...getAuthHeaders() },
+  })
   if (!res.ok) throw new Error(`getChat failed: ${res.status}`)
   return res.json() as Promise<ChatDetail>
 }
@@ -49,6 +60,7 @@ export async function getChat(id: string): Promise<ChatDetail> {
 export async function deleteChat(id: string): Promise<void> {
   const res = await fetch(apiUrl(`/api/v0/chats/${encodeURIComponent(id)}`), {
     method: 'DELETE',
+    headers: { ...getAuthHeaders() },
   })
   if (!res.ok && res.status !== 204) {
     throw new Error(`deleteChat failed: ${res.status}`)
@@ -110,7 +122,7 @@ export function buildEscalateUrl(): string {
 export async function cancelChatTask(taskId: string): Promise<void> {
   const res = await fetch(
     apiUrl(`/api/v0/chat/cancel/${encodeURIComponent(taskId)}`),
-    { method: 'POST' },
+    { method: 'POST', headers: { ...getAuthHeaders() } },
   )
   if (!res.ok && res.status !== 202) {
     throw new Error(`cancel failed: ${res.status}`)
@@ -132,7 +144,7 @@ export interface RetryChatResponse {
 export async function retryChatTask(taskId: string): Promise<RetryChatResponse> {
   const res = await fetch(
     apiUrl(`/api/v0/chat/retry/${encodeURIComponent(taskId)}`),
-    { method: 'POST' },
+    { method: 'POST', headers: { ...getAuthHeaders() } },
   )
   if (!res.ok) {
     throw new Error(`retry failed: ${res.status}`)
@@ -157,7 +169,7 @@ export async function confirmEscalation(
 ): Promise<ConfirmEscalationResult> {
   const res = await fetch(buildEscalateUrl(), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify(args),
   })
   if (!res.ok) throw new Error(`escalate failed: ${res.status}`)
@@ -168,7 +180,7 @@ export async function confirmEscalation(
 export async function renameChat(id: string, title: string): Promise<void> {
   const resp = await fetch(apiUrl(`/api/v0/chats/${encodeURIComponent(id)}`), {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     body: JSON.stringify({ title }),
   })
   if (!resp.ok) {

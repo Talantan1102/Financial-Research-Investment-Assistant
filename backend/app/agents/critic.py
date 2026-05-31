@@ -61,8 +61,18 @@ class Critic(Agent):
 
 
 def aggregate_scores(dims: list[CriticDimensionScore], *, summary: str = "") -> CriticReport:
-    """Compute overall_score = mean(dim scores)."""
+    """Compute overall_score = mean(dim scores), excluding skip-sentinel dims.
+
+    C18: ValuationConsistencyScorer and DialecticalBalanceScorer return
+    score=10.0 with is_skip=True when their optional feature (A5a/A5b) was not
+    run.  Including those 10.0s would inflate the reported overall_score.
+    We use getattr so this is forward-compatible even before schemas.py adds
+    the is_skip field (the field defaults False once added; until then every dim
+    is treated as active, which is the pre-fix behaviour).
+    """
     if not dims:
         return CriticReport(dimensions=[], overall_score=0.0, summary_markdown=summary)
-    overall = sum(d.score for d in dims) / len(dims)
+    # C18: filter out skip-sentinel dims; keep all dims in the report for display
+    active = [d for d in dims if not getattr(d, "is_skip", False)]
+    overall = 0.0 if not active else sum(d.score for d in active) / len(active)
     return CriticReport(dimensions=dims, overall_score=overall, summary_markdown=summary)

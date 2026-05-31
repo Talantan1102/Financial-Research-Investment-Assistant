@@ -17,6 +17,7 @@ and ``success: bool`` (not ok: bool).  _sig() serialises the dict for stable has
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from typing import TYPE_CHECKING, Final
@@ -83,7 +84,9 @@ class InSessionMemory:
             return state.history_summary or ""
         old = state.history[: -self._recent_k]
         prompt = _build_summarize_prompt(old, state.history_summary)
-        resp = self._llm.chat(prompt=prompt, tier="fast", schema=None)
+        # C15: offload the blocking sync LLM round-trip off the event loop so
+        # summarization on every turn doesn't stall the SSE stream.
+        resp = await asyncio.to_thread(self._llm.chat, prompt=prompt, tier="fast", schema=None)
         return resp.content.strip()
 
     async def load_for_turn(self, session_id: str) -> ChatState:

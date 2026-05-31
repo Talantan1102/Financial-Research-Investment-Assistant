@@ -7,6 +7,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.agents.escalation_protocol import (
     ChatDerivedSignals,
     EscalationPacket,
@@ -123,6 +125,7 @@ class EscalationExtractor:
         chat_history_summary: str | None,
         history: list[dict[str, Any]],
         cached_tool_results: list[dict[str, Any]],
+        request_id: str | None = None,  # C26: thread originating request for span linkage
     ) -> EscalationPacket:
         now_iso = datetime.now(UTC).isoformat()
         prompt = _EXTRACTOR_PROMPT_TEMPLATE.format(
@@ -133,7 +136,7 @@ class EscalationExtractor:
             cached_block=_format_cached_tools(cached_tool_results),
             now_iso=now_iso,
         )
-        resp = self._llm.chat(prompt=prompt, tier="fast", schema=None)
+        resp = self._llm.chat(prompt=prompt, tier="fast", schema=None, request_id=request_id)
 
         try:
             data = json.loads(resp.content)
@@ -157,7 +160,9 @@ class EscalationExtractor:
 
         try:
             return EscalationPacket.model_validate(data)
-        except Exception as e:
+        except ValidationError as e:
+            # C61: narrow to ValidationError — genuine schema mismatch → minimal fallback;
+            # TypeError/AttributeError (structurally malformed data) must propagate loudly.
             logger.warning("EscalationExtractor: Pydantic validation failed: %s", e)
             return self._minimal_fallback(
                 chat_session_id,

@@ -82,3 +82,32 @@ def test_strategy_keyword_only_not_skipped() -> None:
     )
     skip, _ = should_skip_extraction(ep)
     assert skip is False
+
+
+# ---- C64 regression: SSOT for _TS_CODE_RE ----
+
+
+def test_ts_code_embedded_in_free_text_not_skipped() -> None:
+    """C64: skip_gate should detect ts_code embedded mid-sentence (word-boundary match).
+
+    Verifies that the shared SEARCH_TS_CODE_RE (word-boundary) correctly triggers
+    even when the ts_code is surrounded by other characters.
+    """
+    ep = _make_episode(
+        user_message="看看 600519.SH 怎么样",
+        agent_response="ok",
+    )
+    skip, _ = should_skip_extraction(ep)
+    # ts_code in free text → high-signal → not skipped
+    assert skip is False
+
+
+def test_skip_gate_ts_code_re_is_registry_ssot() -> None:
+    """C64: skip_gate._TS_CODE_RE must be the same object as registry.SEARCH_TS_CODE_RE.
+
+    Single-owner check: only one definition of the search-variant regex.
+    """
+    from app.memory import skip_gate
+    from app.memory.registry import SEARCH_TS_CODE_RE
+
+    assert skip_gate._TS_CODE_RE is SEARCH_TS_CODE_RE

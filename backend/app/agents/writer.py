@@ -42,15 +42,11 @@ from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
 from app.agents.schemas import Recommendation, ResearchState, StepResult
 from app.services.llm_response import Tier
-from app.skills.financial_research import load_skill
+from app.skills.financial_research import _SOP_TEXT  # C62: single SSOT for SOP text
 from app.skills.financial_research.scripts import (
     classify_recommendation,
     compute_position_size_pct,
 )
-
-# Module-level skill load — methodology + references parsed once at import time.
-_SKILL_BUNDLE = load_skill()
-_SOP_TEXT = _SKILL_BUNDLE.composed_sop()
 
 # v0.8.5 — narrative footer sentinel for idempotent post_process. Use HTML
 # comment so markdown rendering hides it; LLM quoting the visible text

@@ -9,7 +9,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -27,10 +27,16 @@ from app.services.monitoring.signal_detector import SignalDetector
 from app.services.monitoring.signal_rules.announcement import AnnouncementRule
 from app.services.monitoring.signal_rules.base import SignalLevel
 from app.services.monitoring.signal_rules.cash_flow import CashFlowRule
+from app.services.monitoring.signal_rules.defaults import DEFAULT_THRESHOLDS
 from app.services.monitoring.signal_rules.financial_ratio import FinancialRatioRule
 from app.services.monitoring.signal_rules.price_anomaly import PriceAnomalyRule
 from app.services.monitoring.signal_rules.shareholder_count import ShareholderCountRule
 from app.tasks.celery_app import celery_app
+
+if TYPE_CHECKING:
+    from app.services.bocha_factory import BochaService
+    from app.services.llm_service import LLMService
+    from app.services.tushare_service import TushareService
 
 _logger = logging.getLogger(__name__)
 
@@ -51,6 +57,27 @@ def _build_detector() -> SignalDetector:
             ShareholderCountRule(),
         ]
     )
+
+
+def _build_tushare() -> TushareService:
+    """Hook 点:测试 patch。SignalRule.evaluate 需要真实 tushare 数据源。"""
+    from app.services.tushare_factory import build_tushare_service
+
+    return build_tushare_service()
+
+
+def _build_bocha() -> BochaService:
+    """Hook 点:测试 patch。announcement rule 走 Bocha web search。"""
+    from app.services.bocha_factory import build_bocha_service_from_env
+
+    return build_bocha_service_from_env()
+
+
+def _build_llm() -> LLMService:
+    """Hook 点:测试 patch。announcement rule 用 LLM 判断公告语义。"""
+    from app.services.openai_client import build_llm_service_from_env
+
+    return build_llm_service_from_env()
 
 
 def _build_writer():
@@ -117,29 +144,50 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
         for s in subjects:
             unique_codes.setdefault(s.ts_code, s)
 
-        # 并发跑 SignalDetector(per ts_code,5 个 rule 并发在 detector 内)
+        # 并发跑 SignalDetector(per ts_code,semaphore cap=5;每个 detector 内
+        # 5 个 rule 也并发)。C1: detect 需要 (subject, tushare, bocha, llm,
+        # thresholds) 五个参数 — 之前只传 1 个,每次都 TypeError。
+        tushare = _build_tushare()
+        bocha = _build_bocha()
+        llm = _build_llm()
         sem = asyncio.Semaphore(5)
 
-        async def _scan(ts_code: str, sample_subject: MonitoringSubject):
+        async def _scan(sample_subject: MonitoringSubject) -> tuple[SignalLevel, list]:
             async with sem:
-                return await detector.detect(sample_subject)
+                return await detector.detect(
+                    sample_subject, tushare, bocha, llm, DEFAULT_THRESHOLDS
+                )
 
-        tasks = [_scan(c, sub) for c, sub in unique_codes.items()]
+        codes = list(unique_codes.keys())
+        raw_results = await asyncio.gather(
+            *(_scan(unique_codes[c]) for c in codes), return_exceptions=True
+        )
         results_by_code: dict[str, tuple[SignalLevel, list]] = {}
-        for code, fut in zip(unique_codes.keys(), tasks):
-            try:
-                level, signals = await fut
-                results_by_code[code] = (level, signals)
-            except Exception as exc:
-                _logger.error("detect failed for %s: %s", code, exc)
-                results_by_code[code] = (SignalLevel.GREEN, [])
+        for code, res in zip(codes, raw_results):
+            if isinstance(res, BaseException):
+                # Fail-loud (hard rule 4): 不写 GREEN sentinel(那正是把整个监控
+                # 黑洞伪装成干净扫描的 bug)。记带 traceback 的错误并跳过该 code;
+                # 其 subject 在下面循环里被跳过,下一轮 cycle 自然重扫。
+                _logger.error("detect failed for %s: %s", code, res, exc_info=res)
+                continue
+            results_by_code[code] = res
+
+        if codes and not results_by_code:
+            # 所有 code 全失败 → 系统性故障,绝不能标 success 静默吞掉。
+            raise RuntimeError(
+                f"detection_cycle: all {len(codes)} ts_codes failed detection "
+                "(see logged tracebacks) — refusing to mark cycle as success"
+            )
 
         # 展开到 (user_id, ts_code) 维度,写 runs / signals / alerts
         per_user_runs: dict[str, str] = {}  # user_id → run_id
 
         from app.tasks.monitoring import generate_detail_card  # local import for testability
 
+        alert_ids_to_enqueue: list[str] = []
         for subject in subjects:
+            if subject.ts_code not in results_by_code:
+                continue  # detect failed for this code (logged above) — skip, no silent GREEN
             level, signals = results_by_code[subject.ts_code]
 
             # 每 user 一行 run(同 cycle_id 内复用)
@@ -169,7 +217,7 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
                     raw_data_ref=sig.raw_data_ref,
                 )
 
-            # 标红 → 写 alert + enqueue generate_detail_card
+            # 标红 → 写 alert;enqueue 推迟到 commit 之后(C28)
             if level in (SignalLevel.YELLOW, SignalLevel.RED):
                 alert = alert_repo.create(
                     run_id=run_id,
@@ -177,9 +225,8 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
                     ts_code=subject.ts_code,
                     alert_level=level.value,
                     report_json={},
-                )
-                session.flush()
-                generate_detail_card.delay(alert.id)
+                )  # create() 已 flush → alert.id 可用,无需额外 flush
+                alert_ids_to_enqueue.append(alert.id)
 
             # 顺手刷新 Position.last_quote_price/at(spec § 4.5 + portfolio decision 3)
             quote = _resolve_quote_from_signals(signals)
@@ -198,7 +245,15 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
             run_repo.mark_finished(run_id, status="success")
 
         session.commit()
-        return {"cycle_id": cycle_id, "subjects": len(subjects), "alerts_enqueued": "see logs"}
+        # C28: 只在 commit 成功后才 enqueue,避免"任务已排队但 alert 行被 rollback
+        # 删掉"的孤儿任务(那种任务到达 worker 后 get(alert_id) 返 None 静默 no-op)。
+        for alert_id in alert_ids_to_enqueue:
+            generate_detail_card.delay(alert_id)
+        return {
+            "cycle_id": cycle_id,
+            "subjects": len(subjects),
+            "alerts_enqueued": len(alert_ids_to_enqueue),
+        }
 
     except Exception as exc:
         session.rollback()
@@ -227,6 +282,14 @@ async def _run_generate_detail_card(alert_id: str) -> dict[str, Any]:
     writer = _build_writer()
 
     try:
+        # C28 idempotency: acks_late 重投递 / commit-后-rollback 孤儿任务可能让同一
+        # alert_id 被处理多次。已 READY 的不重跑昂贵的 LLM writer,也不覆盖结果。
+        existing = alert_repo.get(alert_id)
+        if existing is None:
+            return {"alert_id": alert_id, "status": "not_found"}
+        if existing.detail_status == DetailStatus.READY:
+            return {"alert_id": alert_id, "status": "already_ready"}
+
         result = await writer.alert_writer(alert_id)  # returns {"json": ..., "markdown": ...}
         alert_repo.update_detail(
             alert_id,
@@ -251,9 +314,13 @@ async def _run_generate_detail_card(alert_id: str) -> dict[str, Any]:
 
 @celery_app.task(name="app.tasks.monitoring.daily_full_scan")
 def daily_full_scan() -> dict[str, Any]:
-    """16:30 工作日收盘后兜底全量(等价于 detection_cycle 但 trigger_type='daily')."""
-    detection_cycle.apply()
-    return {"status": "queued daily full scan"}
+    """16:30 工作日收盘后兜底全量 — 异步派发 detection_cycle 到 worker。
+
+    C59: 之前用 detection_cycle.apply()(同步在本 worker 内跑,阻塞到 300s soft
+    limit),且 return 'queued' 是谎言。改成 .delay() 真正入队,返回真实 task_id。
+    """
+    task = detection_cycle.delay()
+    return {"status": "dispatched", "task_id": task.id}
 
 
 @celery_app.task(name="app.tasks.monitoring.cleanup_old")

@@ -7,6 +7,7 @@ LLMService itself never branches on LLM_MODE.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from datetime import UTC, datetime
@@ -21,6 +22,8 @@ from app.services.pricing import compute_cost
 from app.services.tier_router import TierRouter
 from app.services.trace_models import Span
 from app.services.trace_service import TraceService
+
+logger = logging.getLogger(__name__)
 
 
 class ChatCompletionRaw(Protocol):
@@ -63,7 +66,7 @@ class LLMService:
         self._tier_router = tier_router or TierRouter.from_default_v0_config()
         self._trace = trace_service
         self._budget = cost_budget
-        self._span_counter: int = 0
+        # C69: _span_counter removed — was shared mutable state, non-atomic increment
         if os.getenv("LLM_MODE") == "none":
             raise RuntimeError(
                 "LLMService instantiated under LLM_MODE=none — L0 unit tests "
@@ -117,9 +120,9 @@ class LLMService:
             request_id=request_id,
         )
         if self._trace is not None:
-            self._span_counter += 1
+            # C69: use uuid4 fragment per call — stateless, no shared counter
             span = Span(
-                span_id=f"{request_id}-llm-{self._span_counter}",
+                span_id=f"{request_id}-llm-{uuid4().hex[:8]}",
                 request_id=request_id,
                 parent_id=parent_span_id,
                 name="LLMService.chat",
@@ -137,5 +140,10 @@ class LLMService:
                 ended_at=ended_at,
                 error=None,
             )
-            self._trace.write_span(span)
+            # C27: span write is auxiliary observability — a trace/DB failure must
+            # NEVER break the primary LLM call. Log loudly, do not propagate.
+            try:
+                self._trace.write_span(span)
+            except Exception:
+                logger.warning("TraceService.write_span failed (non-fatal)", exc_info=True)
         return response

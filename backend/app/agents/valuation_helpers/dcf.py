@@ -109,11 +109,18 @@ def compute_growth_trajectory(
             assert historical_avg is not None
             start = historical_avg
     elif scenario == "bull":
+        # C8: 原 max(signals)*1.2 对负增速倒置 — bull 会 worse than base。
+        # 改为偏离 terminal 的 deviation scaling:
+        # start = terminal + deviation_from_terminal * _BULL_MULTIPLIER
+        # 保证 bull[0] > base[0] > bear[0] 无论增速正负。
         signals = [g for g in (historical_avg, forecast_growth) if g is not None]
-        start = max(signals) * _BULL_MULTIPLIER
+        deviation = max(signals) - industry_terminal
+        start = industry_terminal + deviation * _BULL_MULTIPLIER
     elif scenario == "bear":
+        # C8: 同上，bear 用 min deviation。
         signals = [g for g in (historical_avg, forecast_growth) if g is not None]
-        start = min(signals) * _BEAR_MULTIPLIER
+        deviation = min(signals) - industry_terminal
+        start = industry_terminal + deviation * _BEAR_MULTIPLIER
     else:
         # Literal 已收口,但 runtime defensive
         raise ValueError(f"invalid scenario: {scenario!r}")

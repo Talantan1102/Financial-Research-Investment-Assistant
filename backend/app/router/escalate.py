@@ -37,8 +37,9 @@ ESCALATION_CONFIDENCE_THRESHOLD_DEFAULT = 0.7
 def get_confidence_threshold() -> float:
     """Read ESCALATION_CONFIDENCE_THRESHOLD env var, fall back to default.
 
-    Invalid env values (not parseable as float) silently fall back to the
-    default — operator typos shouldn't break the router.
+    Invalid env values (not parseable as float) fall back to the default but
+    log a warning (C47) — an operator typo shouldn't break the router, but it
+    must not silently run escalation gating at the wrong threshold either.
     """
     raw = os.getenv("ESCALATION_CONFIDENCE_THRESHOLD")
     if raw is None:
@@ -46,6 +47,11 @@ def get_confidence_threshold() -> float:
     try:
         return float(raw)
     except ValueError:
+        logger.warning(
+            "Invalid ESCALATION_CONFIDENCE_THRESHOLD=%r (not a float); using default %.2f",
+            raw,
+            ESCALATION_CONFIDENCE_THRESHOLD_DEFAULT,
+        )
         return ESCALATION_CONFIDENCE_THRESHOLD_DEFAULT
 
 
@@ -55,8 +61,9 @@ class EscalateRequest(BaseModel):
     user_edits: list[FieldEdit] = Field(default_factory=list)
 
 
-def get_escalation_record_repo() -> EscalationRecordRepo:
-    raise RuntimeError("EscalationRecordRepo dependency not configured")
+# C43: SSOT — get_escalation_record_repo is defined once in chat.py; re-export it
+# here so app_main needs only one dependency_override (not two identical stubs).
+from app.router.chat import get_escalation_record_repo  # noqa: E402
 
 
 def get_research_agent() -> ResearchAgent:

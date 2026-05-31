@@ -86,3 +86,40 @@ def test_tool_def_names_match_expected() -> None:
         assert mod.TOOL_DEF.name == expected_name, (
             f"{mod_path}.TOOL_DEF.name={mod.TOOL_DEF.name!r}, expected {expected_name!r}"
         )
+
+
+# C75: orphan MCP adapter get_financials.py was deleted — financial_statements
+# (statement='income') already covers GetFinancialsTool.  These two guards
+# prevent accidental re-introduction and confirm the income path still exists.
+
+
+def test_orphan_mcp_get_financials_adapter_is_deleted() -> None:
+    """C75: app.mcp_server.tools.get_financials must NOT exist (deleted orphan).
+
+    The module was never registered in _CHAT_TOOL_MODULES and duplicated the
+    'income' branch of financial_statements.py — SSOT violation.
+    """
+    import importlib
+
+    import pytest
+
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("app.mcp_server.tools.get_financials")
+
+
+def test_financial_statements_income_path_uses_get_financials_tool() -> None:
+    """C75: financial_statements.py statement='income' still dispatches to GetFinancialsTool.
+
+    Confirms the only registered income path is intact after the orphan deletion.
+    """
+    import importlib
+    import inspect
+
+    mod = importlib.import_module("app.mcp_server.tools.financial_statements")
+    source = inspect.getsource(mod.handle)
+    assert "GetFinancialsTool" in source, (
+        "financial_statements.handle must still import GetFinancialsTool for income path"
+    )
+    assert 'statement == "income"' in source, (
+        "financial_statements.handle must still have an income branch"
+    )

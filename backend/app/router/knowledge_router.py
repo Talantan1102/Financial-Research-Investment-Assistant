@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.knowledge import Document, KnowledgeBase
 from app.models.user import User
+from app.router._upload_utils import ALLOWED_EXTENSIONS, get_file_extension  # C72: shared SSOT
 from app.router.auth_router import get_current_user_required
 from app.schemas.knowledge import (
     DocumentResponse,
@@ -25,42 +26,6 @@ router = APIRouter(prefix="/knowledge-bases", tags=["知识库管理"])
 # 文件上传目录
 UPLOAD_DIR = "/tmp/knowledge_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# 支持的文件类型
-ALLOWED_EXTENSIONS = {
-    # 文档类型
-    ".pdf",
-    ".docx",
-    ".doc",
-    ".txt",
-    ".md",
-    ".html",
-    ".xlsx",
-    ".xls",
-    ".pptx",
-    ".ppt",
-    # 图片类型
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".webp",
-    ".bmp",
-    # 代码/数据类型
-    ".py",
-    ".js",
-    ".ts",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".xml",
-    ".csv",
-}
-
-
-def get_file_extension(filename: str) -> str:
-    """获取文件扩展名"""
-    return os.path.splitext(filename)[1].lower()
 
 
 def kb_to_response(kb: KnowledgeBase) -> KnowledgeBaseResponse:
@@ -91,8 +56,10 @@ def doc_to_response(doc: Document) -> DocumentResponse:
     )
 
 
-async def process_document(document_id: str, file_path: str, kb_name: str, db_session_factory):
+async def process_document(document_id: str, file_path: str, kb_id: str, db_session_factory):
     """后台处理文档（使用 DocMind 解析、向量化、存储到ES）"""
+    # C73: kb_id (UUID string) replaced kb_name as the collection identifier so
+    # two users with identically-named KBs get distinct Milvus collections.
     from app.service.docmind_service import process_document_with_docmind
 
     # 创建新的数据库会话
@@ -108,8 +75,9 @@ async def process_document(document_id: str, file_path: str, kb_name: str, db_se
         db.commit()
 
         try:
-            # 使用知识库名称作为ES索引名
-            index_name = f"kb_{kb_name}".lower().replace(" ", "_")
+            # C73: use KB UUID (globally unique) as the collection name to prevent
+            # cross-user collection collisions when two users share a KB display name.
+            index_name = f"kb_{kb_id}".replace("-", "_")
 
             # 使用 DocMind 处理文档
             result = process_document_with_docmind(
@@ -322,13 +290,20 @@ async def upload_document(
     # 验证文件类型
     ext = get_file_extension(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
+        # C72: sorted() for deterministic error messages (same as attachment_router)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件类型: {ext}，支持的类型: {', '.join(ALLOWED_EXTENSIONS)}",
+            detail=f"不支持的文件类型: {ext}，支持的类型: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
     # 保存文件到临时目录
-    file_path = os.path.join(UPLOAD_DIR, f"{kb_uuid}_{file.filename}")
+    # C4: strip directory components (incl. ../) from client-supplied name before
+    # joining to UPLOAD_DIR — prevents path traversal writes/reads/deletes.
+    safe_name = os.path.basename(file.filename or "upload")
+    file_path = os.path.join(UPLOAD_DIR, f"{kb_uuid}_{safe_name}")
+    # C4: defense-in-depth — reject if the resolved path escapes UPLOAD_DIR
+    if not os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR) + os.sep):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的文件名")
     try:
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
@@ -362,7 +337,8 @@ async def upload_document(
     from app.core.database import SessionLocal
 
     # 在后台处理文档
-    background_tasks.add_task(process_document, str(doc.id), file_path, kb.name, SessionLocal)
+    # C73: pass str(kb.id) (UUID) instead of kb.name to avoid cross-user collection collisions
+    background_tasks.add_task(process_document, str(doc.id), file_path, str(kb.id), SessionLocal)
 
     return DocumentUploadResponse(
         id=str(doc.id),
@@ -444,7 +420,8 @@ async def get_document_chunks(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文档尚未处理完成")
 
     # 从 Milvus 获取切片
-    collection_name = f"kb_{kb.name}".lower().replace(" ", "_")
+    # C73: use KB UUID to derive the collection name (matches process_document)
+    collection_name = f"kb_{kb.id}".replace("-", "_")
     print(f"[get_document_chunks] 查询切片: collection={collection_name}, filename={doc.filename}")
 
     try:

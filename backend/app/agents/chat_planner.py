@@ -309,7 +309,10 @@ class ChatPlanner(Agent):
     async def run(self, state: ChatState) -> dict[str, Any]:
         """Plan one chat turn: call LLM, filter hallucinated tools, emit Plan."""
         prompt = await self._build_chat_prompt(state)
-        resp = self._llm.chat(prompt=prompt, tier="balanced", schema=None)
+        # C26: thread request_id so the LLM span links to the originating request.
+        resp = self._llm.chat(
+            prompt=prompt, tier="balanced", schema=None, request_id=state.request_id
+        )
 
         try:
             data = json.loads(resp.content)

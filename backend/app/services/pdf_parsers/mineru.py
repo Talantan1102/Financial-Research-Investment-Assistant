@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import tempfile
 from io import StringIO
 from pathlib import Path
@@ -35,34 +36,49 @@ class MineruParser:
             os.environ["MINERU_MODEL_DIR"] = model_dir
 
     async def parse(self, pdf_path: Path) -> ParsedDocument:
-        out_root = _OUT_ROOT or Path(tempfile.mkdtemp(prefix="mineru_v07_"))
+        # C29: track tmp_dir only when we own it (caller-supplied _OUT_ROOT must NOT be deleted).
+        # Copy the module global into a local so mypy can narrow it across the branch.
+        out_override = _OUT_ROOT
+        tmp_dir: Path | None
+        out_root: Path
+        if out_override is None:
+            tmp_dir = Path(tempfile.mkdtemp(prefix="mineru_v07_"))
+            out_root = tmp_dir
+        else:
+            tmp_dir = None
+            out_root = out_override
         out_root.mkdir(parents=True, exist_ok=True)
 
-        proc = await asyncio.create_subprocess_exec(
-            "mineru",
-            "-p",
-            str(pdf_path),
-            "-o",
-            str(out_root),
-            "-b",
-            "pipeline",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            raise RuntimeError(
-                f"mineru CLI failed (exit {proc.returncode}): "
-                f"stderr={stderr.decode('utf-8', errors='replace')[-500:]}"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "mineru",
+                "-p",
+                str(pdf_path),
+                "-o",
+                str(out_root),
+                "-b",
+                "pipeline",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"mineru CLI failed (exit {proc.returncode}): "
+                    f"stderr={stderr.decode('utf-8', errors='replace')[-500:]}"
+                )
 
-        stem = pdf_path.stem
-        content_list_path = out_root / stem / "auto" / f"{stem}_content_list.json"
-        if not content_list_path.exists():
-            raise RuntimeError(f"mineru output missing: {content_list_path}")
+            stem = pdf_path.stem
+            content_list_path = out_root / stem / "auto" / f"{stem}_content_list.json"
+            if not content_list_path.exists():
+                raise RuntimeError(f"mineru output missing: {content_list_path}")
 
-        blocks = json.loads(content_list_path.read_text(encoding="utf-8"))
-        return self._blocks_to_parsed_doc(blocks)
+            blocks = json.loads(content_list_path.read_text(encoding="utf-8"))
+            return self._blocks_to_parsed_doc(blocks)
+        finally:
+            # C29: clean up only the temp dir we created; never touch caller-owned _OUT_ROOT
+            if tmp_dir is not None:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
 
     @staticmethod
     def _blocks_to_parsed_doc(blocks: list[dict[str, Any]]) -> ParsedDocument:

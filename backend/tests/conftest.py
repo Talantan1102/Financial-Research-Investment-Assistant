@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session, sessionmaker
 # so we explicitly re-export from `tests.conftest_celery` to register the
 # fixtures into this conftest's scope.
 from tests.conftest_celery import celery_worker_subprocess, redis_url  # noqa: F401, E402
+from tests.pg_test_defaults import PG_PASSWORD_DEFAULT  # noqa: E402
 
 LLMMode = Literal["none", "mock", "cassette", "live"]
 
@@ -38,6 +39,13 @@ def pytest_configure(config: pytest.Config) -> None:
     """
     os.environ.setdefault("LLM_MODE", "none")
     os.environ["POSTGRES_DB"] = "industry_assistant_test"
+    # C37: production reads POSTGRES_PASSWORD with no fallback (fail-fast). Tests
+    # supply the throwaway default here, before any app.core.database import.
+    # setdefault so CI's explicit env still wins.
+    os.environ.setdefault("POSTGRES_PASSWORD", PG_PASSWORD_DEFAULT)
+    # C5: tests spinning up the app via TestClient(lifespan) need a JWT secret so
+    # assert_jwt_secret_configured() passes (a throwaway value is fine for tests).
+    os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-not-for-prod")
 
 
 @pytest.fixture
@@ -245,7 +253,7 @@ def pg_test_container() -> Iterator[dict[str, object]]:
     host = os.environ.get("POSTGRES_HOST", "127.0.0.1")
     port = int(os.environ.get("POSTGRES_PORT", "5432"))
     user = os.environ.get("POSTGRES_USER", "postgres")
-    password = os.environ.get("POSTGRES_PASSWORD", "postgres123")
+    password = os.environ.get("POSTGRES_PASSWORD", PG_PASSWORD_DEFAULT)
     test_db = "industry_assistant_test"
 
     started_by_us = False

@@ -29,10 +29,11 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.agents.schemas import ResearchRequest
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.models.research_report import ResearchReport
 from app.models.user import User
 from app.router.auth_helpers import _AnonUser
@@ -386,5 +387,27 @@ async def _stream_research_with_persist(
             report.cost = report.cost or Decimal("0")  # type: ignore[assignment]
         db.commit()
     except Exception:
+        # C70: db.commit() failed; rollback the tainted session first, then
+        # rescue the row via a *fresh* SessionLocal so it does not stay
+        # status='streaming' forever (no stale-scanner covers research_reports).
         logger.exception("Failed to persist research report %s after stream", report.id)
         db.rollback()
+        try:
+            rescue_db = SessionLocal()
+            try:
+                rescue_db.execute(
+                    text(
+                        "UPDATE research_reports"
+                        " SET status = 'failed'"
+                        " WHERE id = :id AND status = 'streaming'"
+                    ),
+                    {"id": report.id},
+                )
+                rescue_db.commit()
+            finally:
+                rescue_db.close()
+        except Exception:
+            logger.exception(
+                "Rescue UPDATE also failed for research report %s; row may be stuck 'streaming'",
+                report.id,
+            )

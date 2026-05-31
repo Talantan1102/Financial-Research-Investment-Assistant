@@ -26,7 +26,9 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from app.agents.chat_planner import ChatPlanner
 from app.agents.responder import Responder
@@ -34,6 +36,7 @@ from app.agents.schemas import GraphState, ToolCall, ToolResult
 from app.services.tool_result_cache import CacheHit, ToolResultCache
 from app.skills.script_schemas import SkillScriptArgs, SkillScriptRef
 from app.skills.skill_executor import SkillExecutor
+from app.tools.base import ToolNotFoundError  # C52: use public exception instead of private _tools
 from app.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -62,6 +65,7 @@ async def tool_node(
     user_id: str | None = None,
     skill_executor: SkillExecutor | None = None,  # Plan 2b: execute_script branch
     sse_emit: Callable[[dict[str, Any]], None] | None = None,  # Plan 2b: SSE events
+    trace_service: Any | None = None,  # C56: optional TraceService for tool spans
 ) -> dict[str, Any]:
     """Execute tool_calls per plan. Parallel if plan.parallelizable.
 
@@ -76,6 +80,9 @@ async def tool_node(
       - Dispatches script_calls via skill_executor.execute().
       - Emits skill_execute_start / skill_execute_end / skill_execute_error SSE events.
 
+    C56: Accepts optional ``trace_service`` (TraceService) to write one span per tool
+      dispatch. write_span is sync+commits, so it runs in asyncio.to_thread.
+
     Args:
         state:          Current LangGraph GraphState.
         registry:       Injected ToolRegistry instance.
@@ -83,6 +90,9 @@ async def tool_node(
         user_id:        Override user id for cache namespacing (defaults to state.user_id).
         skill_executor: Optional SkillExecutor for execute_script branch (Plan 2b).
         sse_emit:       Optional SSE emit callback for skill_execute events (Plan 2b).
+        trace_service:  Optional TraceService; when provided writes one ``tool.*`` span per
+                        dispatched call (including failures). Forward from graph builders via
+                        functools.partial.
 
     Returns:
         ``{"tool_results": [ToolResult, ...]}`` accumulating prior results.
@@ -92,10 +102,30 @@ async def tool_node(
     # --- existing tool_calls branch ---
     if state.plan is not None and state.plan.tool_calls:
         user = user_id or state.user_id
-        coroutines = [_dispatch_one(tc, registry, cache, user) for tc in state.plan.tool_calls]
+        coroutines = [
+            _dispatch_one(tc, registry, cache, user, trace_service, state.request_id)
+            for tc in state.plan.tool_calls
+        ]
 
         if state.plan.parallelizable:
-            results = list(await asyncio.gather(*coroutines, return_exceptions=False))
+            # C17: return_exceptions=True so asyncio.CancelledError (BaseException) from
+            # Celery worker revocation does not abort siblings and re-raise uncaught into
+            # the graph node; each BaseException becomes a ToolResult(success=False).
+            raw = await asyncio.gather(*coroutines, return_exceptions=True)
+            for tc, item in zip(state.plan.tool_calls, raw):
+                if isinstance(item, BaseException):
+                    results.append(
+                        ToolResult(
+                            tool_name=tc.tool_name,
+                            args=tc.args,
+                            output=None,
+                            success=False,
+                            error=f"{type(item).__name__}: {item}",
+                            latency_ms=0,
+                        )
+                    )
+                else:
+                    results.append(item)
         else:
             for c in coroutines:
                 results.append(await c)
@@ -187,17 +217,24 @@ async def _dispatch_one(
     registry: ToolRegistry,
     cache: ToolResultCache,
     user_id: str,
+    trace_service: Any | None = None,  # C56: optional TraceService
+    request_id: str | None = None,  # C56: used for span request_id
 ) -> ToolResult:
     """Single tool dispatch: cache lookup → execute → error wrap.
 
     B3: delegates to cache.get_or_compute; HIT sets cached=True.
     C2: any exception from cache/tool is caught and returned as success=False.
+    C52: uses public ToolNotFoundError from registry.get() instead of private _tools peek.
+    C56: when trace_service is provided, writes one tool.* span per dispatch.
     """
     started = time.perf_counter()
+    started_dt = datetime.now(tz=UTC)
 
-    tool = registry.get(tc.tool_name) if tc.tool_name in registry._tools else None
-    if tool is None:
-        return ToolResult(
+    # C52: use public registry.get() + ToolNotFoundError instead of registry._tools peek
+    try:
+        tool = registry.get(tc.tool_name)
+    except ToolNotFoundError:
+        tr = ToolResult(
             tool_name=tc.tool_name,
             args=tc.args,
             output=None,
@@ -205,6 +242,8 @@ async def _dispatch_one(
             error=f"tool '{tc.tool_name}' not registered",
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
+        await _maybe_write_span(trace_service, tc, tr, started_dt, request_id)
+        return tr
 
     async def _compute() -> dict[str, Any]:
         validated = tool.args_schema.model_validate(tc.args)
@@ -217,7 +256,7 @@ async def _dispatch_one(
             args=tc.args,
             compute_fn=_compute,
         )
-        return ToolResult(
+        tr = ToolResult(
             tool_name=tc.tool_name,
             args=tc.args,
             output=result,
@@ -228,7 +267,7 @@ async def _dispatch_one(
         )
     except Exception as e:  # C2: tool failure → record, don't re-raise
         logger.exception("tool %s failed", tc.tool_name)
-        return ToolResult(
+        tr = ToolResult(
             tool_name=tc.tool_name,
             args=tc.args,
             output=None,
@@ -236,6 +275,44 @@ async def _dispatch_one(
             error=str(e),
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
+
+    await _maybe_write_span(trace_service, tc, tr, started_dt, request_id)  # C56
+    return tr
+
+
+async def _maybe_write_span(
+    trace_service: Any | None,
+    tc: ToolCall,
+    tr: ToolResult,
+    started_dt: datetime,
+    request_id: str | None,
+) -> None:
+    """C56: Write one tool.* span to TraceService if trace_service is provided.
+
+    write_span is synchronous+commits, so it runs in asyncio.to_thread to avoid
+    blocking the event loop.
+    """
+    if trace_service is None:
+        return
+    from app.services.trace_models import Span  # local import avoids circular at module level
+
+    ended_dt = datetime.now(tz=UTC)
+    span = Span(
+        span_id=f"{request_id or 'unknown'}-tool-{tc.tool_name}-{uuid4().hex[:8]}",
+        request_id=request_id or "unknown",
+        parent_id=None,
+        name=f"tool.{tc.tool_name}",
+        inputs=dict(tc.args),
+        outputs=dict(tr.output) if tr.output else {},
+        metadata={"latency_ms": tr.latency_ms, "cached": tr.cached},
+        started_at=started_dt,
+        ended_at=ended_dt,
+        error=tr.error,
+    )
+    try:
+        await asyncio.to_thread(trace_service.write_span, span)
+    except Exception:  # noqa: BLE001
+        logger.warning("trace span write failed for tool %s", tc.tool_name, exc_info=True)
 
 
 async def responder_node(state: GraphState, *, responder: Responder) -> dict[str, Any]:

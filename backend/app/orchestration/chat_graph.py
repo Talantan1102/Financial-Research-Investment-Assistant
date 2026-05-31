@@ -61,12 +61,16 @@ def _approx_tokens(text: str) -> int:
 
 def _route_after_planner(
     state: ChatState,
+    *,
+    # C6: bound via partial in build_chat_graph so skill/resource nodes are only
+    # targeted when they are actually registered in the graph.
+    skill_loader_available: bool = False,
 ) -> Literal["tool_node", "responder_node", "skill_load_node", "resource_load_node"]:
     if state.plan is None:
         return "responder_node"
-    if state.plan.load_skill:
+    if skill_loader_available and state.plan.load_skill:
         return "skill_load_node"
-    if state.plan.load_resource:
+    if skill_loader_available and state.plan.load_resource:
         return "resource_load_node"
     if state.plan.direct_response or not state.plan.tool_calls:
         return "responder_node"
@@ -236,7 +240,13 @@ def build_chat_graph(
         edge_map["skill_load_node"] = "skill_load_node"
         edge_map["resource_load_node"] = "resource_load_node"
 
-    g.add_conditional_edges("planner_node", _route_after_planner, edge_map)
+    # C6: partial binds skill_loader_available so _route_after_planner never
+    # returns a node name that isn't registered in edge_map (avoids KeyError).
+    g.add_conditional_edges(
+        "planner_node",
+        partial(_route_after_planner, skill_loader_available=skill_loader is not None),
+        edge_map,
+    )
     g.add_edge("tool_node", "responder_node")
 
     if skill_loader is not None:

@@ -175,10 +175,30 @@ class TestVectorSearch:
         assert results == []
 
 
+def _make_sess_with_node_id(node_id: str) -> MagicMock:
+    """Helper: return a mock Session whose execute().fetchone() returns (node_id,)."""
+    sess = MagicMock()
+    mock_result = MagicMock()
+    mock_result.fetchone = MagicMock(return_value=(node_id,))
+    sess.execute = MagicMock(return_value=mock_result)
+    return sess
+
+
+def _make_sess_no_node() -> MagicMock:
+    """Helper: mock Session whose execute().fetchone() returns None (unknown label)."""
+    sess = MagicMock()
+    mock_result = MagicMock()
+    mock_result.fetchone = MagicMock(return_value=None)
+    sess.execute = MagicMock(return_value=mock_result)
+    return sess
+
+
 class TestGraphTraverse:
     @pytest.mark.asyncio
     async def test_2_hop_traversal(self) -> None:
-        sess = MagicMock()
+        # C9: session must return a node_id from PG lookup before AGE is called
+        nid = str(uuid4())
+        sess = _make_sess_with_node_id(nid)
         age_executor = MagicMock()
         # AGE returns empty list - no row data parsing needed for this test
         age_executor.cypher = AsyncMock(return_value=[])
@@ -196,6 +216,9 @@ class TestGraphTraverse:
         cypher_str = age_executor.cypher.call_args.args[1]
         assert "MATCH" in cypher_str
         assert "*1..2" in cypher_str
+        # C9: Cypher now uses node_id, not entity_label/user_id
+        assert f"node_id: '{nid}'" in cypher_str
+        assert "entity_label" not in cypher_str
         assert results == []
 
     @pytest.mark.asyncio
@@ -213,7 +236,8 @@ class TestGraphTraverse:
     @pytest.mark.asyncio
     async def test_default_rel_types_uses_all(self) -> None:
         """rel_types=None → 全部 11 类传到 AGE 参数."""
-        sess = MagicMock()
+        # C9: session must return a node_id so we reach the AGE call
+        sess = _make_sess_with_node_id(str(uuid4()))
         age_executor = MagicMock()
         age_executor.cypher = AsyncMock(return_value=[])
         await graph_traverse(
@@ -230,7 +254,8 @@ class TestGraphTraverse:
 
     @pytest.mark.asyncio
     async def test_age_executor_none_returns_empty(self) -> None:
-        """AGE 不可用时(executor=None) → 空 list, 不报错."""
+        """AGE 不可用时(executor=None) → 空 list, 不报错. PG lookup skipped."""
+        # age_executor=None returns [] before the PG node_id lookup
         sess = MagicMock()
         results = await graph_traverse(
             sess,
@@ -240,11 +265,14 @@ class TestGraphTraverse:
             hops=1,
         )
         assert results == []
+        # PG lookup should NOT have been called (executor=None exits early)
+        sess.execute.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_age_executor_raises_returns_empty(self) -> None:
         """AGE 调用 raise (e.g., extension not installed) → fallback 空 list."""
-        sess = MagicMock()
+        # C9: need node_id to reach the AGE call
+        sess = _make_sess_with_node_id(str(uuid4()))
         age_executor = MagicMock()
         age_executor.cypher = AsyncMock(side_effect=Exception("AGE not loaded"))
         results = await graph_traverse(
@@ -255,6 +283,23 @@ class TestGraphTraverse:
             hops=2,
         )
         assert results == []
+
+    @pytest.mark.asyncio
+    async def test_unknown_label_returns_empty_without_calling_age(self) -> None:
+        """C9: label not in PG chat_memory_nodes → return [] without calling AGE."""
+        sess = _make_sess_no_node()
+        age_executor = MagicMock()
+        age_executor.cypher = AsyncMock(return_value=[{"some": "data"}])
+
+        results = await graph_traverse(
+            sess,
+            age_executor=age_executor,
+            user_id=uuid4(),
+            start_label="NonexistentEntity",
+            hops=2,
+        )
+        assert results == []
+        age_executor.cypher.assert_not_awaited()
 
 
 class TestFormatEdgesMetaForRrf:

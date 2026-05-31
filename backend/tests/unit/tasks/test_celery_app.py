@@ -44,3 +44,20 @@ def test_celery_app_eager_when_env_set(monkeypatch: pytest.MonkeyPatch) -> None:
     module = sys.modules["app.tasks.celery_app"]
     importlib.reload(module)
     assert module.celery_app.conf.task_always_eager is True
+
+
+def test_generate_session_title_routes_to_llm_queue() -> None:
+    """C74: generate_session_title makes a real llm.chat call and must route to llm queue.
+
+    Consistent with generate_detail_card; default queue is reserved for non-LLM work.
+    """
+    from app.tasks.celery_app import celery_app
+
+    routes = celery_app.conf.task_routes or {}
+    task_name = "app.tasks.title_generation.generate_session_title"
+    assert task_name in routes, (
+        f"{task_name} must have an explicit route entry (C74: LLM tasks belong on the llm queue)"
+    )
+    assert routes[task_name]["queue"] == "llm", (
+        f"{task_name} must route to 'llm' queue, got {routes[task_name]['queue']!r}"
+    )

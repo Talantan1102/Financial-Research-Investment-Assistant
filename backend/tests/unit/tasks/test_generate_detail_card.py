@@ -106,7 +106,10 @@ def test_generate_detail_card_llm_failure_after_retries_sets_failed(db_session: 
 
 
 def test_generate_detail_card_idempotent_on_retry(db_session: Session) -> None:
-    """重复跑同一 alert_id 不会 corrupt state(spec § 5.2 acks_late requires idempotency)."""
+    """C28: acks_late 重投递时,已 READY 的 alert 不重跑昂贵的 LLM writer。
+
+    第二次调用应在幂等 guard 处短路,writer.alert_writer 只被 await 一次。
+    """
     alert_id = _make_alert(db_session)
 
     mock_writer = MagicMock()
@@ -119,8 +122,10 @@ def test_generate_detail_card_idempotent_on_retry(db_session: Session) -> None:
         from app.tasks.monitoring import generate_detail_card
 
         generate_detail_card.apply(args=[alert_id]).get()
-        generate_detail_card.apply(args=[alert_id]).get()  # 第二次 — 同 UPDATE
+        second = generate_detail_card.apply(args=[alert_id]).get()  # 第二次 — 应短路
 
     alerts = db_session.query(MonitoringAlert).filter_by(id=alert_id).all()
     assert len(alerts) == 1  # 还是同一行
     assert alerts[0].detail_status == DetailStatus.READY
+    assert mock_writer.alert_writer.await_count == 1  # 第二次没再跑 LLM
+    assert second["status"] == "already_ready"
