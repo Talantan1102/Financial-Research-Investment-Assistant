@@ -124,3 +124,46 @@ async def test_concurrent_serialization(customer, signals) -> None:
     # 第二次调用应等到第一次完成后才开始(间隔 ≥ 0.04)
     assert len(call_log) == 2
     assert call_log[1] - call_log[0] >= 0.04
+
+
+@pytest.mark.asyncio
+async def test_gate2_non_budget_error_propagates(customer, signals) -> None:
+    """C21: Gate 2 只吞 BudgetExceeded;其他异常必须冒泡,不能伪装成 DAILY_BUDGET_EXCEEDED。"""
+
+    class _BoomBudget:
+        def assert_under_limit(self) -> None:
+            raise ValueError("unexpected bug")
+
+        def track(self, cost: float) -> None:  # pragma: no cover — never reached
+            pass
+
+    coord = EscalationCoordinator(
+        graph=_fake_graph("x"),
+        daily_budget=_BoomBudget(),  # type: ignore[arg-type]
+        per_call_cap_cny=1.0,
+        concurrent_limit=1,
+        recent_dedup_check=lambda cid, d: False,
+    )
+    with pytest.raises(ValueError, match="unexpected bug"):
+        await coord.escalate(customer, signals, run_id="r1")
+
+
+@pytest.mark.asyncio
+async def test_graph_failure_logged_and_marked_failed(
+    customer, signals, caplog: pytest.LogCaptureFixture
+) -> None:
+    """C21: graph 失败 → FAILED + 留 exception 日志(不再静默吞掉,hard rules 4+5)。"""
+    fake = MagicMock()
+    fake.ainvoke = AsyncMock(side_effect=RuntimeError("graph boom"))
+    coord = EscalationCoordinator(
+        graph=fake,
+        daily_budget=CostBudget(limit_cny=10.0),
+        per_call_cap_cny=1.0,
+        concurrent_limit=1,
+        recent_dedup_check=lambda cid, d: False,
+    )
+    with caplog.at_level("ERROR"):
+        result = await coord.escalate(customer, signals, run_id="r1")
+    assert result.status == EscalationStatus.FAILED
+    assert "graph boom" in (result.error or "")
+    assert any("escalation failed" in r.message for r in caplog.records)

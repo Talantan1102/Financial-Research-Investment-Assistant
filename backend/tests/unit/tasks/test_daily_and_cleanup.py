@@ -20,21 +20,26 @@ def celery_eager(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CELERY_TASK_EAGER_PROPAGATES", "1")
 
 
-def test_daily_full_scan_calls_detection_cycle(db_session: Session) -> None:
+def test_daily_full_scan_dispatches_detection_cycle(db_session: Session) -> None:
+    """C59: daily_full_scan 应异步 .delay() 派发(不 .apply() 同步阻塞 worker),
+    并返回真实 task_id。"""
     called = []
+    task_id = str(uuid4())
 
-    def _fake(*args, **kwargs):
+    def _fake_delay(*args, **kwargs):
         called.append(True)
         from celery.result import EagerResult
 
-        return EagerResult(str(uuid4()), {}, "SUCCESS")
+        return EagerResult(task_id, {}, "SUCCESS")
 
-    with patch("app.tasks.monitoring.detection_cycle.apply", side_effect=_fake):
+    with patch("app.tasks.monitoring.detection_cycle.delay", side_effect=_fake_delay):
         from app.tasks.monitoring import daily_full_scan
 
-        daily_full_scan.apply().get()
+        res = daily_full_scan.apply().get()
 
     assert len(called) == 1
+    assert res["status"] == "dispatched"
+    assert res["task_id"] == task_id
 
 
 def test_cleanup_old_deletes_runs_older_than_7_days(db_session: Session) -> None:
