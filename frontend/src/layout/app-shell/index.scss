@@ -7,11 +7,19 @@
     'sidebar main';
   height: 100vh;
   width: 100%;
+  /* sidebar 左右折叠动效 — grid-template-columns transition */
+  transition: grid-template-columns 0.22s cubic-bezier(0.4, 0, 0.2, 1);
 
   &__top-bar { grid-area: top; }
   /* overflow-x: hidden 显式禁水平滚动 — 仅设 overflow-y:auto 时 CSS 会把
      overflow-x 隐式算成 auto,sidebar 内容偶尔溢出(如 popover scrollIntoView)
-     就能水平滚动致内容左偏被裁。垂直滚动保留。 */
+     就能水平滚动致内容左偏被裁。垂直滚动保留。
+     列宽折叠为 0 时 overflow:hidden 同时裁掉 sidebar 内容,无需额外 visibility 控制。 */
   &__sidebar { grid-area: sidebar; overflow-y: auto; overflow-x: hidden; }
   &__main    { grid-area: main; overflow-y: auto; }
+
+  /* 整个 sidebar 收起:sidebar 列宽 → 0,main 自动占满全宽 */
+  &--sidebar-collapsed {
+    grid-template-columns: 0 1fr;
+  }
 }

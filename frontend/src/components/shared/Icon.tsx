@@ -6,6 +6,7 @@ type IconName =
   | 'export' | 'edit' | 'more-horizontal' | 'close'
   | 'user-circle' | 'document' | 'bell' | 'book' | 'chart'
   | 'tool' | 'sparkle' | 'rocket' | 'log-out'
+  | 'panel-left'
 
 const PATHS: Record<IconName, string> = {
   'plus':         '<path d="M8 3v10M3 8h10" stroke-width="2.4"/>',
@@ -31,6 +32,8 @@ const PATHS: Record<IconName, string> = {
   'sparkle':      '<path d="M10 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>',
   'rocket':       '<path d="M14 6l-8 8M14 6h-4M14 6v4M6 14l-3 3M10 10l4 4"/>',
   'log-out':      '<path d="M11 3H5a2 2 0 00-2 2v10a2 2 0 002 2h6M15 11l4-4-4-4M19 7H9"/>',
+  /* sidebar toggle: two vertical bars (panel) + indent arrow */
+  'panel-left':   '<path d="M3 4h14v12H3z M7 4v12" stroke-width="1.6"/><path d="M12 8l-3 4 3 4" stroke-width="1.5"/>',
 }
 
 export interface IconProps {
@@ -48,7 +51,7 @@ export function Icon({ name, size = 16, style, className, ...rest }: IconProps) 
                   name === 'book' || name === 'chart' || name === 'tool' ||
                   name === 'sparkle' || name === 'rocket' || name === 'arrow-up' ||
                   name === 'bell' || name === 'more-horizontal' ||
-                  name === 'log-out' ? '0 0 20 20' : '0 0 16 16'
+                  name === 'log-out' || name === 'panel-left' ? '0 0 20 20' : '0 0 16 16'
   return (
     <svg
       width={size} height={size} viewBox={viewBox}
