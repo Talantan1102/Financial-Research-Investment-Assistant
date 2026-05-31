@@ -127,6 +127,26 @@ def _sample_similarity(
     return score_similarity(judge, old=recorded, new=live.content)
 
 
+def _classify_drift(sims: list[int], threshold: int = SIMILARITY_THRESHOLD) -> str:
+    """Drift verdict from 1+ similarity samples (pure — unit-tested).
+
+    - 'DRIFT'       — a strict MAJORITY of samples are below threshold.
+    - 'UNCONFIRMED' — the only sample is below threshold and could not be
+                      re-confirmed (resamples infra-failed); treated as an
+                      infra-skip, never a silent OK.
+    - 'OK'          — otherwise (first sample passed, or one-off noise out-voted).
+
+    `sims[0]` is always the first (mandatory) sample; later entries are
+    confirmation resamples drawn only when sims[0] < threshold.
+    """
+    below = [s for s in sims if s < threshold]
+    if len(sims) >= 2 and 2 * len(below) > len(sims):
+        return "DRIFT"
+    if sims[0] < threshold and len(sims) < 2:
+        return "UNCONFIRMED"
+    return "OK"
+
+
 def main() -> int:
     cassettes = sorted(CASSETTES_ROOT.rglob("*.yaml"))
     if not cassettes:
@@ -171,17 +191,16 @@ def main() -> int:
                 if extra is not None:
                     sims.append(extra)
 
-        below = [s for s in sims if s < SIMILARITY_THRESHOLD]
         # DRIFT only on a strict MAJORITY of clean samples below threshold. A lone
         # sub-threshold sample we couldn't re-confirm (resamples infra-failed) is
         # UNCONFIRMED, not drift — counted as an infra-skip so a flaky-API night
-        # can't masquerade as a code regression.
-        confirmed_drift = len(sims) >= 2 and 2 * len(below) > len(sims)
+        # can't masquerade as a code regression. (Verdict logic: _classify_drift.)
+        verdict = _classify_drift(sims)
         resampled = f" (resampled {sims})" if len(sims) > 1 else ""
-        if confirmed_drift:
+        if verdict == "DRIFT":
             print(f"DRIFT sim={sims[0]}/10 cassette={rel}{resampled}")
             drifts.append(str(rel))
-        elif sims[0] < SIMILARITY_THRESHOLD and len(sims) < 2:
+        elif verdict == "UNCONFIRMED":
             print(f"UNCONFIRMED sim={sims[0]}/10 cassette={rel} (resamples unavailable)")
             infra_skips.append(str(rel))
         else:

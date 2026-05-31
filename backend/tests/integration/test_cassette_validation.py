@@ -6,6 +6,7 @@ Doesn't actually call the drift script's main() — that requires live LLM key.
 
 from typing import Any
 
+import pytest
 from app.services.llm_service import LLMService
 
 from tests.eval import cassette_validation as cv
@@ -66,3 +67,21 @@ def test_score_similarity_zero() -> None:
     svc = _make_svc("0")
     sim = cv.score_similarity(svc, old="x", new="y")
     assert sim == 0
+
+
+@pytest.mark.parametrize(
+    "sims,expected",
+    [
+        ([9], "OK"),  # first sample passes, no resample
+        ([8], "OK"),  # exactly at threshold counts as OK
+        ([5, 9, 10], "OK"),  # one-off low out-voted by two highs (the false-positive case)
+        ([7, 7, 9], "DRIFT"),  # strict majority (2 of 3) below threshold
+        ([4, 5, 3], "DRIFT"),  # genuine drift: every sample low
+        ([5, 4], "DRIFT"),  # two independent lows = drift
+        ([5, 9], "OK"),  # 1 low + 1 high → no majority → OK
+        ([5], "UNCONFIRMED"),  # lone low, resamples unavailable → infra-skip, not drift
+    ],
+)
+def test_classify_drift_verdict(sims: list[int], expected: str) -> None:
+    """Resample-majority verdict — encodes the truth table the drift fix relies on."""
+    assert cv._classify_drift(sims) == expected
