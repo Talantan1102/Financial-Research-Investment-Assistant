@@ -26,13 +26,13 @@ def test_modal_returns_html(client: TestClient, tmp_path: Path) -> None:
     DeepCardRepo(conn).upsert(
         DeepCard(
             cap_id="context.skills_bundle",
-            scenario="this is the scenario",
+            what="this is the what text",
         )
     )
     resp = client.get("/cap/context.skills_bundle/expand")
     assert resp.status_code == 200
     body = resp.text
-    assert "this is the scenario" in body
+    assert "this is the what text" in body
     assert "cap-detail-inner" in body
 
 
@@ -42,13 +42,14 @@ def test_modal_unknown_cap_returns_404(client: TestClient) -> None:
 
 
 def test_modal_known_cap_no_deep_card(client: TestClient) -> None:
-    """cap 在 yaml 但无 DeepCard → 显示 6 字段空框架。"""
+    """cap 在 yaml 但无 DeepCard → 渲染字段标签 + 状态感知空态文案。"""
     resp = client.get("/cap/context.constrained_schema/expand")
     assert resp.status_code == 200
     body = resp.text
-    assert "需求场景" in body
-    assert "设计方案" in body
-    assert "(待填)" in body
+    assert "这是什么" in body
+    assert "为什么需要" in body
+    # 空字段按 cap 状态分叉文案(lit→文档待补 / todo→尚未实现 / wip→开发中),不再统一"(待填)"
+    assert ("文档待补" in body) or ("尚未实现" in body) or ("开发中" in body)
 
 
 def test_post_field_updates_deep_card(client: TestClient, tmp_path: Path) -> None:
@@ -82,14 +83,13 @@ def test_post_field_unknown_field_400(client: TestClient) -> None:
     assert resp.status_code == 400
 
 
-def test_expand_shows_6_fields(client: TestClient) -> None:
-    """Plan 2 Task 7: expand fragment contains all 6 field sections."""
+def test_expand_shows_text_fields(client: TestClient) -> None:
+    """expand fragment 含 4 个文本字段 + 决策记录(真实 v1 字段渲染)。"""
     resp = client.get("/cap/context.skills_bundle/expand")
     assert resp.status_code == 200
     body = resp.text
-    assert "需求场景" in body
-    assert "设计方案" in body
-    assert "Tradeoff" in body
-    assert "方案点评" in body
-    assert "实现效果" in body
+    assert "这是什么" in body
+    assert "为什么需要" in body
+    assert "取舍" in body
+    assert "踩坑沉淀" in body
     assert "决策记录" in body

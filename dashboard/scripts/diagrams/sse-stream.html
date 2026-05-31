@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><style>
+  :root{--bg:#F5F5F7;--surface:#FFFFFF;--ink:#1D1D1F;--mute:#86868B;--faint:#C7C7CC;--indigo:#5E5CE6;--indigo-soft:rgba(94,92,230,0.10);--green:#34C759;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{background:var(--bg);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","PingFang SC",system-ui,sans-serif;}
+  #stage{width:900px;height:506px;background:var(--bg);padding:28px 32px;position:relative;}
+  .title{font-size:19px;font-weight:600;color:var(--ink);letter-spacing:-0.01em;}
+  .subtitle{font-size:13px;color:var(--mute);margin-top:4px;}
+  .cols{display:flex;gap:26px;margin-top:24px;align-items:flex-start;}
+  /* backend */
+  .backend{width:300px;}
+  .blabel{font-size:12px;color:var(--mute);margin-bottom:10px;font-weight:500;}
+  .agent{display:flex;align-items:center;gap:10px;background:var(--surface);border:1.5px solid #ECECEE;border-radius:12px;padding:11px 14px;margin-bottom:9px;box-shadow:0 1px 2px rgba(0,0,0,0.04);transition:all .25s;}
+  .agent .dot{width:9px;height:9px;border-radius:50%;background:var(--faint);transition:all .25s;}
+  .agent .anm{font-size:13.5px;font-weight:600;color:var(--ink);}
+  .agent .ph{margin-left:auto;font-size:11px;color:var(--faint);}
+  .agent.run{border-color:var(--indigo);box-shadow:0 0 0 3px var(--indigo-soft);}
+  .agent.run .dot{background:var(--indigo);box-shadow:0 0 7px var(--indigo);}
+  .agent.run .anm{color:var(--indigo);} .agent.run .ph{color:var(--indigo);}
+  .agent.fin .dot{background:var(--green);} .agent.fin .ph{color:var(--green);}
+  /* wire */
+  .wire{flex:0 0 70px;display:flex;flex-direction:column;align-items:center;padding-top:60px;}
+  .wire .lab{font-size:11px;color:var(--mute);writing-mode:horizontal-tb;transform:rotate(0);white-space:nowrap;}
+  .wire .pkt{margin-top:10px;width:34px;height:18px;border-radius:6px;background:var(--indigo);opacity:0;transition:all .3s;}
+  .wire .pkt.fly{opacity:1;}
+  .wire .arr{margin-top:8px;color:var(--faint);font-size:18px;}
+  /* phone / chat */
+  .phone{flex:1;background:var(--surface);border-radius:20px;box-shadow:0 2px 10px rgba(0,0,0,0.07);padding:16px 16px 14px;min-height:340px;}
+  .phead{display:flex;align-items:center;gap:8px;padding-bottom:11px;border-bottom:1px solid #F0F0F2;margin-bottom:11px;}
+  .phead .av{width:24px;height:24px;border-radius:7px;background:var(--indigo);}
+  .phead .pt{font-size:13px;font-weight:600;color:var(--ink);}
+  .userq{background:var(--indigo);color:#fff;font-size:13px;border-radius:13px 13px 4px 13px;padding:9px 13px;margin:0 0 12px auto;max-width:78%;width:fit-content;}
+  .ev{display:flex;align-items:center;gap:9px;font-size:13px;color:var(--ink);padding:8px 11px;background:#F7F7F9;border-radius:11px 11px 11px 4px;margin-bottom:8px;max-width:88%;opacity:0;transform:translateY(6px);transition:all .3s;}
+  .ev.show{opacity:1;transform:none;}
+  .ev .ico{width:18px;text-align:center;}
+  .ev .tag{margin-left:auto;font-size:10px;color:var(--mute);background:#fff;border:1px solid #ECECEE;border-radius:5px;padding:1px 6px;}
+  .ev.done2{background:rgba(52,199,89,0.08);} .ev.done2 .tag{color:var(--green);}
+  .caption{position:absolute;left:32px;right:32px;bottom:26px;background:var(--surface);border-radius:14px;padding:14px 18px;box-shadow:0 1px 3px rgba(0,0,0,0.05);display:flex;align-items:center;gap:13px;}
+  .step-badge{min-width:28px;height:28px;border-radius:8px;background:var(--indigo);color:#fff;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center;}
+  .step-badge.fin{background:var(--green);}
+  .cap-text{font-size:14px;color:var(--ink);line-height:1.5;} .cap-text b{color:var(--indigo);}
+  .progress{position:absolute;left:32px;right:32px;bottom:13px;height:3px;background:#E8E8EA;border-radius:2px;}
+  .progress .fill{height:100%;background:var(--indigo);border-radius:2px;transition:width .25s;width:0;}
+</style></head><body>
+<div id="stage">
+  <div class="title">SSE 流式进度</div>
+  <div class="subtitle">FastAPI StreamingResponse · 后端每个 agent 节点跑完,就推一帧给前端 — 用户不用干等</div>
+  <div class="cols">
+    <div class="backend">
+      <div class="blabel">后端 5-agent 流程</div>
+      <div class="agent" id="b0"><span class="dot"></span><span class="anm">Planner</span><span class="ph">拆解</span></div>
+      <div class="agent" id="b1"><span class="dot"></span><span class="anm">DataCollector</span><span class="ph">拉数据</span></div>
+      <div class="agent" id="b2"><span class="dot"></span><span class="anm">Analyst</span><span class="ph">分析</span></div>
+      <div class="agent" id="b3"><span class="dot"></span><span class="anm">Writer</span><span class="ph">写研报</span></div>
+      <div class="agent" id="b4"><span class="dot"></span><span class="anm">Critic</span><span class="ph">评分</span></div>
+    </div>
+    <div class="wire"><span class="lab">SSE 单向流</span><div class="pkt" id="pkt"></div><span class="arr">→</span></div>
+    <div class="phone">
+      <div class="phead"><span class="av"></span><span class="pt">前端 · 用户看到的</span></div>
+      <div class="userq">帮我分析一下贵州茅台</div>
+      <div class="ev" id="e0"><span class="ico">📋</span><span>已拆解任务:查行情/财报/估值</span><span class="tag">plan</span></div>
+      <div class="ev" id="e1"><span class="ico">📊</span><span>正在并发拉取数据…</span><span class="tag">data_progress</span></div>
+      <div class="ev" id="e2"><span class="ico">🔍</span><span>财务+技术+风险分析完成</span><span class="tag">insight</span></div>
+      <div class="ev" id="e3"><span class="ico">✍️</span><span>研报草稿生成中…</span><span class="tag">writing</span></div>
+      <div class="ev" id="e4"><span class="ico">✅</span><span>8 维评分把关通过</span><span class="tag">scoring</span></div>
+      <div class="ev" id="e5"><span class="ico">📄</span><span><b>研报已生成</b> — 估值/风险/建议</span><span class="tag">done</span></div>
+    </div>
+  </div>
+  <div class="caption"><div class="step-badge" id="badge">1</div><div class="cap-text" id="captext"></div></div>
+  <div class="progress"><div class="fill" id="pfill"></div></div>
+</div>
+<script>
+  const F=[
+    {run:null,done:[],evs:0,cap:'研报要跑 <b>30 秒+</b>,如果前端一直转圈干等,体验很差。'},
+    {run:0,done:[],evs:1,cap:'<b>Planner</b> 跑完 → 立刻推一帧 <b>plan</b> 事件,前端马上显示"已拆解任务"。',pkt:1},
+    {run:1,done:[0],evs:2,cap:'<b>DataCollector</b> 跑完 → 推 <b>data_progress</b>,用户看到"正在拉数据"。',pkt:1},
+    {run:2,done:[0,1],evs:3,cap:'<b>Analyst</b> 跑完 → 推 <b>insight</b>,分析进度实时可见。',pkt:1},
+    {run:3,done:[0,1,2],evs:4,cap:'<b>Writer</b> 跑完 → 推草稿进度。每帧都是一次 HTTP 流写入。',pkt:1},
+    {run:4,done:[0,1,2,3],evs:5,cap:'<b>Critic</b> 跑完 → 推评分结果。',pkt:1},
+    {run:null,done:[0,1,2,3,4],evs:6,cap:'终稿一次性流完 → 关闭连接。全程 <b>单向 HTTP 流(SSE)</b>,不用 WebSocket 全双工的复杂度。',fin:true},
+  ];
+  function setFrame(i){
+    const f=F[i];
+    for(let k=0;k<5;k++){const a=document.getElementById('b'+k);a.classList.toggle('run',f.run===k);a.classList.toggle('fin',f.done.includes(k));}
+    for(let k=0;k<6;k++){const e=document.getElementById('e'+k);e.classList.toggle('show',k<f.evs);e.classList.toggle('done2',k===5&&f.evs>5);}
+    document.getElementById('pkt').classList.toggle('fly',!!f.pkt);
+    document.getElementById('captext').innerHTML=f.cap;
+    const b=document.getElementById('badge');b.textContent=f.fin?'✓':(i+1);b.classList.toggle('fin',!!f.fin);
+    document.getElementById('pfill').style.width=((i+1)/F.length*100)+'%';
+  }
+  window.setFrame=setFrame;window.FRAME_COUNT=F.length;setFrame(0);
+</script></body></html>

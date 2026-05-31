@@ -56,13 +56,10 @@
   </div>
   {% endif %}
 
-  {% if sc.linked_specs or sc.linked_decisions %}
+  {% if sc.linked_specs %}
   <div class="story-card-footer">
     {% for sp in sc.linked_specs %}
-      <a href="/{{ sp }}" target="_blank" class="link-tag">{{ sp.split('/')[-1] }}</a>
-    {% endfor %}
-    {% for did in sc.linked_decisions %}
-      <a href="/decisions#dec_{{ did }}" class="link-tag">{{ did }}</a>
+      <a href="/{{ sp }}" target="_blank" rel="noopener" class="link-tag">{{ sp.split('/')[-1] }}</a>
     {% endfor %}
   </div>
   {% endif %}

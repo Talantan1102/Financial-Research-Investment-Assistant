@@ -41,7 +41,7 @@
         );
       }
 
-      window.harness?.toast?.('截图已上传');
+      window.Toast?.show({ type: 'success', msg: '截图已上传' });
     } catch (e) {
       setStatus(`错误:${e.message}`, true);
     } finally {

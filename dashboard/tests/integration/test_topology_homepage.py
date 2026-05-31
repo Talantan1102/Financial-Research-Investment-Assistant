@@ -58,7 +58,7 @@ def test_homepage_includes_status_bars(client: TestClient) -> None:
     body = resp.text
     assert "#34C759" in body
     assert "#FF9F0A" in body
-    assert "#C7C7CC" in body
+    assert "#AEAEB2" in body  # todo 段提深(原 #C7C7CC 太浅,"未开发"视觉隐身)
 
 
 def test_homepage_no_old_views(client: TestClient) -> None:

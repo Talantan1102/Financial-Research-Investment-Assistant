@@ -1,5 +1,5 @@
 # dashboard/config/capabilities.yaml
-# 单一真源 — 69 项 capability + derive_rule (ETCLOVG 7 维)
+# 单一真源 — 87 项 capability + derive_rule (ETCLOVG 7 维)
 # 5 类 derive_rule: code_grep / file_exists / spec_section / memory_frontmatter / manual
 # 论文锚点: Li et al., Agent Harness Engineering: A Survey (2026)
 

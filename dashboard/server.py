@@ -104,6 +104,23 @@ async def index(request: Request) -> HTMLResponse:
 
     wips = [c for layer in snap["layers"] for c in layer["capabilities"] if c["status"] == "wip"]
 
+    # 下一步 ›:按成熟度(lit/total)升序排维度,各取首个 todo cap → "最该补的方向"。J1 前瞻。
+    next_gaps: list[dict[str, object]] = []
+    for layer in snap["layers"]:
+        todos = [c for c in layer["capabilities"] if c["status"] == "todo"]
+        if todos:
+            next_gaps.append(
+                {
+                    "dim_id": layer["id"],
+                    "name_cn": layer["name_cn"],
+                    "lit": layer["lit"],
+                    "total": layer["total"],
+                    "cap": todos[0],
+                }
+            )
+    next_gaps.sort(key=lambda g: (g["lit"] / g["total"]) if g["total"] else 0.0)  # type: ignore[operator]
+    next_gaps = next_gaps[:4]
+
     # Plan 3 Task 2 — Topology data
     from dashboard.derive.topology_layout import (
         connection_endpoints,
@@ -117,6 +134,7 @@ async def index(request: Request) -> HTMLResponse:
         "today": _today_label(),
         "snap": snap,
         "wips": wips,
+        "next_gaps": next_gaps,
         "view_mode": view_mode,
         "active_view": view_mode,  # M3:同 view_mode("d" 或 "b"),decisions 用独立 route 不走这
         "active_nav": "grid",
@@ -604,6 +622,17 @@ app = Starlette(
             "/static",
             StaticFiles(directory=str(DASHBOARD_ROOT / "static")),
             name="static",
+        ),
+        # 只读暴露 docs/(让 DeepCard 的 linked_specs 可点开)+ screenshots/(让上传图可显示)
+        Mount(
+            "/docs",
+            StaticFiles(directory=str(PROJECT_ROOT / "docs")),
+            name="docs",
+        ),
+        Mount(
+            "/screenshots",
+            StaticFiles(directory=str(DASHBOARD_ROOT / "screenshots")),
+            name="screenshots",
         ),
     ],
     lifespan=lifespan,

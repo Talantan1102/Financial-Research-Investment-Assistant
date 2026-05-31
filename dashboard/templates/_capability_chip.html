@@ -1,18 +1,18 @@
-{# Plan 2 Task 5 — 三色 chip + 右键菜单 + 单击就地展开 #}
+{# 三色 chip + 右键菜单 + 单击就地展开。注:展开由 inline-expand.js 用 fetch+getElementById 完成,
+   不用 htmx hx-target(cap id 含点号,#detail-x.y 会被当 id+class 选择器解析,永远匹配不到)。#}
 {% set status = c.status|default('todo') %}
 <button
   type="button"
   class="cap-chip cap-chip--{{ status }}"
   data-cap-id="{{ c.id }}"
   data-status="{{ status }}"
-  hx-get="/cap/{{ c.id }}/expand"
-  hx-target="#detail-{{ c.id }}"
-  hx-swap="innerHTML"
-  hx-trigger="click[ctrlKey === false]"
+  aria-expanded="false"
+  title="单击展开深读卡 · 右键改状态"
   onclick="window.harness?.toggleExpand?.('{{ c.id }}')"
   oncontextmenu="return window.harness?.showContextMenu?.(event, '{{ c.id }}') ?? true">
   <span class="cap-dot dot-{{ status }}"></span>
   <span class="cap-name">{{ c.name_cn }}</span>
   <span class="cap-en">{{ c.name_en }}</span>
   <span class="cap-status status--{{ status }}">{{ {'lit':'已实现','wip':'开发中','todo':'未开发'}.get(status, status) }}</span>
+  <span class="cap-caret" aria-hidden="true">⌄</span>
 </button>
