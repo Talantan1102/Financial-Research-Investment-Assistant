@@ -66,13 +66,19 @@ class RealTushareService:
         self._cache = cache
         self._rl = rate_limiter
 
-    async def _call_cached(self, api_name: str, params: dict[str, Any]) -> pd.DataFrame:
-        cached = await self._cache.get(api_name, params)
+    async def _call_cached(
+        self, api_name: str, params: dict[str, Any], fields: str | None = None
+    ) -> pd.DataFrame:
+        # fields 必须作为 client.call 的独立参数(→ 请求 body 顶层 "fields"),不能塞进 params:
+        # Tushare 会忽略 params 里的未知键 fields,导致字段投影失效(返回全字段)。
+        # fields 并入 cache key,避免"有投影 / 无投影"两种结果在同一 (api,params) 下串味。
+        cache_params = params if fields is None else {**params, "__fields__": fields}
+        cached = await self._cache.get(api_name, cache_params)
         if cached is not None:
             return cached
         await self._rl.acquire()
-        df = await self._client.call(api_name, params)
-        await self._cache.set(api_name, params, df, ttl_s=classify_ttl(api_name))
+        df = await self._client.call(api_name, params, fields=fields)
+        await self._cache.set(api_name, cache_params, df, ttl_s=classify_ttl(api_name))
         return df
 
     async def get_daily(self, *, ts_code: str, start: str, end: str) -> pd.DataFrame:
@@ -159,11 +165,12 @@ class RealTushareService:
         start = self._n_years_ago(years_back)
         history = await self._call_cached(
             "daily_basic",
-            {"ts_code": ts_code, "start_date": start, "end_date": end, "fields": "pe"},
+            {"ts_code": ts_code, "start_date": start, "end_date": end},
+            fields="pe",
         )
         if current_pe is None:
             latest = await self._call_cached(
-                "daily_basic", {"ts_code": ts_code, "trade_date": end, "fields": "pe"}
+                "daily_basic", {"ts_code": ts_code, "trade_date": end}, fields="pe"
             )
             # 不能 silent fallback 0.0:那会让 percentile 算出"PE 处于 0% 分位",
             # 看起来像"史上最便宜"的伪买入信号.调用方必须显式处理空数据.
@@ -195,12 +202,15 @@ class RealTushareService:
         return await self._call_cached("forecast", params)
 
     async def get_dividend_history(self, *, ts_code: str, years_back: int = 5) -> pd.DataFrame:
-        end = self._today_yyyymmdd()
+        # Tushare `dividend` 接口**没有** ann_date_start/ann_date_end 这类区间参数
+        # (官方只有单值 ann_date / record_date / ex_date 等),原实现传它们会被静默忽略
+        # → 实际拉回该股全量分红历史、years_back 完全失效(近 N 年统计口径全错)。
+        # 改为仅按 ts_code 拉取,再在客户端按公告日 ann_date 裁剪近 years_back 年。
         start = self._n_years_ago(years_back)
-        return await self._call_cached(
-            "dividend",
-            {"ts_code": ts_code, "ann_date_start": start, "ann_date_end": end},
-        )
+        df = await self._call_cached("dividend", {"ts_code": ts_code})
+        if not df.empty and "ann_date" in df.columns:
+            df = df[df["ann_date"].notna() & (df["ann_date"].astype(str) >= start)]
+        return df
 
     async def get_holder_change(self, *, ts_code: str, years_back: int = 2) -> pd.DataFrame:
         """股东户数变化 — wraps existing stk_holdernumber API with date range."""

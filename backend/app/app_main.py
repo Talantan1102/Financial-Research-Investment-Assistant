@@ -95,6 +95,15 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
 
         Base.metadata.create_all(bind=engine)
         logger.info("PostgreSQL 表初始化完成")
+        # create_all 只建缺失的表,从不给已存在的表 ADD COLUMN。补齐 ORM 已声明、
+        # 但表建立时(docker/init-db/01-init.sql 或更早的 create_all)还没有的列 ——
+        # 否则 chat_sessions.message_count / last_msg_preview、chat_messages.message_type
+        # 等缺列会让对应 INSERT/SELECT 直接 500(新对话/加载会话失败)。
+        from app.scripts.reconcile_schema import reconcile_columns
+
+        _reconciled = reconcile_columns(engine)
+        if _reconciled:
+            logger.info("schema reconcile 补齐 %d 个缺失列: %s", len(_reconciled), _reconciled)
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "PostgreSQL 表初始化跳过(可能 PG 未启动): %s — "

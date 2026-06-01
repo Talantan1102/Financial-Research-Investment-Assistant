@@ -30,7 +30,7 @@ _COLLECTION_FILTER_FIELDS: dict[str, set[str]] = {
 class KbHit(BaseModel):
     chunk_id: str
     chunk_text: str
-    similarity: float  # 1 - cosine distance,[0, 1]
+    similarity: float  # 余弦相似度([-1,1],越大越相似;Milvus COSINE 的 distance 即此值)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -118,7 +118,12 @@ class MilvusKbSearchService:
         out: list[KbHit] = []
         for row in rows:
             distance = float(row.pop("distance", 0.0))
-            similarity = max(0.0, 1.0 - distance)  # cosine distance to similarity
+            # Milvus COSINE 度量下,search 返回的 distance 字段**本身就是余弦相似度**
+            # ([-1,1],越大越相似),不是 L2 那种"越小越近"的距离。原实现
+            # `max(0.0, 1.0 - distance)` 把方向彻底搞反(完全相同向量 cos=1 → 0.0 当最差,
+            # 正交 cos=0 → 1.0 当最好),导致 sort(reverse=True) 返回**最不相关**的 chunk、
+            # threshold 过滤方向也反。直接用 distance 即正确的相似度。
+            similarity = distance
             chunk_id = str(row.pop("chunk_id", ""))
             chunk_text = str(row.pop("chunk_text", ""))
             out.append(
