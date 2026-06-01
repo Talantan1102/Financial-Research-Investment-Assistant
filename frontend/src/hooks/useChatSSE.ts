@@ -303,7 +303,15 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             currentChatActions.setSession(sessionId, fresh.messages)
           }
         } catch {
-          // Silent — leave streamingStatus as reconnecting; next user action will retry.
+          // C68: double-failure (stream error + getChat error) — surface error instead
+          // of leaving streamingStatus stuck at 'reconnecting' indefinitely.
+          if (!ac.signal.aborted) {
+            currentChatActions.dispatchEvent({
+              type: 'error',
+              seq: currentChatState.last_seq + 1,
+              error: '连接断开，请重试。',
+            })
+          }
         }
       }
     },

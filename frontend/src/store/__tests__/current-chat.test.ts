@@ -90,4 +90,33 @@ describe('currentChatStore', () => {
     })
     expect(snapshot(currentChatState).streamingStatus).toBe('error')
   })
+
+  // C32: beginStreaming must reset last_seq so 2nd+ messages don't dedup their events
+  it('C32: beginStreaming resets last_seq — second message in session receives all events', () => {
+    currentChatActions.setSession('s1', [])
+
+    // First message: drive seq 1-3
+    currentChatActions.beginStreaming()
+    currentChatActions.dispatchEvent({ type: 'token', seq: 1, content: 'A' })
+    currentChatActions.dispatchEvent({ type: 'token', seq: 2, content: 'B' })
+    currentChatActions.dispatchEvent({ type: 'token', seq: 3, content: 'C' })
+    currentChatActions.dispatchEvent({ type: 'done', seq: 4 })
+    expect(snapshot(currentChatState).last_seq).toBe(4)
+
+    // Second message: beginStreaming must reset last_seq to 0
+    currentChatActions.beginStreaming()
+    expect(snapshot(currentChatState).last_seq).toBe(0)
+
+    // seq 1-3 again — must NOT be deduped
+    currentChatActions.dispatchEvent({ type: 'token', seq: 1, content: 'X' })
+    currentChatActions.dispatchEvent({ type: 'token', seq: 2, content: 'Y' })
+    currentChatActions.dispatchEvent({ type: 'token', seq: 3, content: 'Z' })
+    currentChatActions.dispatchEvent({ type: 'done', seq: 4 })
+
+    const s = snapshot(currentChatState)
+    // streamingStatus back to idle after done
+    expect(s.streamingStatus).toBe('idle')
+    // The second message's draft was flushed into messages
+    expect(s.messages.at(-1)?.content).toBe('XYZ')
+  })
 })

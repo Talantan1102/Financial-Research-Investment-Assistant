@@ -51,6 +51,9 @@ celery_app.conf.update(
     # Routing:llm 标记 task → llm 队列(per-task 装饰器也可,但全局映射更清晰)
     task_routes={
         "app.tasks.monitoring.generate_detail_card": {"queue": "llm"},
+        # C74: title_generation makes a real llm.chat call → must share the llm queue
+        # (consistent with generate_detail_card; default queue is for non-LLM work)
+        "app.tasks.title_generation.generate_session_title": {"queue": "llm"},
         # C.5 Plan 2B memory tasks
         "app.tasks.memory.extract_session_episodes_async": {"queue": "memory_llm"},
         "app.tasks.memory.reconcile_pending_milvus": {"queue": "memory_llm"},

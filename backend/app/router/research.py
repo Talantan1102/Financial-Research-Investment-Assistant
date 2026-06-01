@@ -270,6 +270,11 @@ _RESEARCH_GRAPH_LOCK: asyncio.Lock | None = None
 # v0.8.5 D6 evaluation pipeline replaces this with proper sqlite persistence.
 _RUN_RESULTS_CACHE: dict[str, dict[str, Any]] = {}
 
+# C40: anchor to __file__ so the path is CWD-independent regardless of where
+# uvicorn / pytest / poe commands are invoked from.
+# backend/app/router/research.py → parents[2] == backend/
+_RESEARCH_DB_PATH: Path = Path(__file__).resolve().parents[2] / "data" / "research.sqlite"
+
 
 def _get_graph_lock() -> asyncio.Lock:
     """Return the module-level asyncio.Lock, creating it lazily inside the event loop."""
@@ -595,7 +600,7 @@ async def list_research_runs(
 
     TODO(Task 7 dogfood): remove mock fallback once real runs are stored.
     """
-    db_path = Path("backend/data/research.sqlite")
+    db_path = _RESEARCH_DB_PATH  # C40: __file__-relative, not CWD-relative
     real_runs = _read_research_runs_from_sqlite(db_path, limit=limit)
     if real_runs:
         return real_runs
@@ -625,7 +630,7 @@ async def get_research_report(run_id: str) -> Any:
         return cached
 
     # 2. Fall back to sqlite checkpoint scan (past runs from before MemorySaver).
-    db_path = Path("backend/data/research.sqlite")
+    db_path = _RESEARCH_DB_PATH  # C40: __file__-relative, not CWD-relative
     try:
         if db_path.exists():
             import sqlite3

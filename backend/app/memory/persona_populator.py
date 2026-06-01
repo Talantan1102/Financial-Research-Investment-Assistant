@@ -22,10 +22,14 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+# C65/C63: PERSONA_BLOCK_NAME and token budget imported from working_blocks (SSOT).
+from app.memory.working_blocks import BLOCK_DEFAULTS, PERSONA_BLOCK_NAME
+
 logger = logging.getLogger(__name__)
 
-PERSONA_BLOCK_NAME: str = "persona"
-PERSONA_MAX_TOKENS: int = 500
+# C63: keep the public name so callers importing PERSONA_MAX_TOKENS are unaffected,
+# but derive the value from BLOCK_DEFAULTS so tuning BLOCK_DEFAULTS stays in sync.
+PERSONA_MAX_TOKENS: int = BLOCK_DEFAULTS[PERSONA_BLOCK_NAME]
 # 中文 ≈ 1.33 tokens/char, 留 buffer 取 1.4
 _TOKEN_PER_CHAR_RATIO: float = 1.4
 

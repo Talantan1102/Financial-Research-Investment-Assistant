@@ -67,9 +67,11 @@ class ResearchAgent:
             request_id=request_id,
         )
         if state_overrides:
-            for k, v in state_overrides.items():
-                if hasattr(initial, k):
-                    setattr(initial, k, v)
+            # C58: use model_validate for revalidating reconstruction so that
+            # Pydantic field constraints (e.g. planner_retry_count le=2) are
+            # enforced.  setattr / model_copy(update=...) both bypass validators.
+            valid_overrides = {k: v for k, v in state_overrides.items() if hasattr(initial, k)}
+            initial = ResearchState.model_validate({**initial.model_dump(), **valid_overrides})
         final: dict[str, Any] = await self._graph.ainvoke(initial.model_dump(), config=config)
 
         # plan may come back as dict or ResearchPlan instance
@@ -131,9 +133,9 @@ class ResearchAgent:
             request_id=request_id,
         )
         if state_overrides:
-            for k, v in state_overrides.items():
-                if hasattr(initial, k):
-                    setattr(initial, k, v)
+            # C58: revalidating reconstruction (mirrors run() above)
+            valid_overrides = {k: v for k, v in state_overrides.items() if hasattr(initial, k)}
+            initial = ResearchState.model_validate({**initial.model_dump(), **valid_overrides})
 
         final_state: dict[str, Any] = {}
         async for chunk in self._graph.astream_events(

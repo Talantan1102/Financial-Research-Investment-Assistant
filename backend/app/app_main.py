@@ -48,7 +48,7 @@ def _async_pg_url() -> str:
     prefix is SQLAlchemy-only and is rejected by psycopg_pool.AsyncConnectionPool.
     """
     user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "postgres123")
+    password = os.environ["POSTGRES_PASSWORD"]  # C37: no silent known-password fallback
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     db = os.getenv("POSTGRES_DB", "industry_assistant")
@@ -62,7 +62,7 @@ def _sqlalchemy_async_pg_url() -> str:
     to select the psycopg3 backend over psycopg2.
     """
     user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "postgres123")
+    password = os.environ["POSTGRES_PASSWORD"]  # C37: no silent known-password fallback
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     db = os.getenv("POSTGRES_DB", "industry_assistant")
@@ -79,6 +79,12 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     """应用生命周期管理"""
     # 启动时执行
     logger.info("应用启动中...")
+
+    # C5: fail-fast if JWT secret is unset / a known-insecure default. Done here
+    # (serving path) rather than at import so tests/eval/CLI are unaffected.
+    from app.core.security import assert_jwt_secret_configured
+
+    assert_jwt_secret_configured()
 
     # 创建所有数据表（如果不存在）— 移入 lifespan 避免 import-time PG 硬依赖
     # (v0.9.x feedback_serve_path_no_ci_coverage)。本地无 PG 时仅 warn,不阻塞启动。
@@ -361,6 +367,15 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
             logger.info("Plan 2 Redis async client 已关闭")
         except Exception as e:  # noqa: BLE001
             logger.warning("Plan 2 Redis async client 关闭失败: %s", e)
+    # C20: close the LangGraph checkpointer's psycopg3 AsyncConnectionPool — the
+    # caller owns its lifecycle (make_postgres_checkpointer docstring); leaking it
+    # exhausts/hangs connections on every restart.
+    if getattr(app.state, "chat_checkpointer", None) is not None:
+        try:
+            await app.state.chat_checkpointer.conn.close()
+            logger.info("LangGraph PG checkpointer pool 已关闭")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("LangGraph PG checkpointer pool 关闭失败: %s", e)
 
 
 app = FastAPI(
@@ -371,12 +386,25 @@ app = FastAPI(
 )
 
 # 添加 CORS 中间件
+# C38: `Access-Control-Allow-Origin: *` + credentials is spec-invalid (browsers
+# reject it) and a forward-looking hole. Drive origins from CORS_ORIGINS env
+# (comma-separated); default to the local dev frontends. Never combine "*" with
+# credentials.
+_cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()] or [
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+if "*" in _cors_origins:
+    raise RuntimeError(
+        "CORS_ORIGINS must not contain '*' while allow_credentials=True "
+        "(invalid per the CORS spec); list explicit origins."
+    )
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有源，生产环境中应该设置具体的源
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],  # 允许所有方法
-    allow_headers=["*"],  # 允许所有头
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 注册路由
@@ -396,12 +424,9 @@ app.include_router(memory_router)  # C.5 — /api/v0/memory (cross-session memor
 app.include_router(persona_router)  # persona-ui — /api/v0/persona (Tier 1 persona items)
 
 
-# Dependency override: chats router's get_repo reads from app.state at request time
-def _get_chat_session_repo() -> ChatSessionRepo:
-    return app.state.chat_session_repo
-
-
-app.dependency_overrides[chats_router_module.get_repo] = _get_chat_session_repo
+# C39: chats router's get_repo override is registered below alongside the other
+# Plan-3 overrides, via _override_or_fallback so a failed PG init raises a clear
+# RuntimeError instead of leaking None (typed ChatSessionRepo) into handlers.
 
 
 # === Plan 3 dependency overrides (T11) ===
@@ -428,9 +453,9 @@ from app.router.chat import (
 from app.router.escalate import (  # noqa: E402
     get_chat_session_repo as esc_get_chat_repo,
 )
-from app.router.escalate import (
-    get_escalation_record_repo as esc_get_repo,
-)
+
+# C43: escalate.get_escalation_record_repo is now re-exported from chat, so the
+# single chat_get_repo override below covers both routers — no esc_get_repo dup.
 from app.router.escalate import (
     get_research_agent as esc_get_agent,
 )
@@ -438,9 +463,9 @@ from app.router.escalate import (
     get_research_report_repo as esc_get_rpt_repo,
 )
 
+app.dependency_overrides[chats_router_module.get_repo] = _override_or_fallback("chat_session_repo")
 app.dependency_overrides[chat_get_extractor] = _override_or_fallback("escalation_extractor")
 app.dependency_overrides[chat_get_repo] = _override_or_fallback("escalation_record_repo")
-app.dependency_overrides[esc_get_repo] = _override_or_fallback("escalation_record_repo")
 app.dependency_overrides[esc_get_agent] = _override_or_fallback("research_agent")
 app.dependency_overrides[esc_get_chat_repo] = _override_or_fallback("chat_session_repo")
 app.dependency_overrides[esc_get_rpt_repo] = _override_or_fallback("research_report_repo")

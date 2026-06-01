@@ -63,27 +63,35 @@ jobs:
         run: uv run python -m backend.tests.eval.cassette_validation
 
       - name: Dependency security audit
-        # Every CVE suppressed below is UNREACHABLE in our usage and carries a
-        # documented re-eval trigger. pip-audit still FAILS the build on any other
-        # (new / reachable / fixable) vuln — targeted risk-acceptance, not a
-        # disabled gate. idna CVE-2026-45409 is deliberately NOT listed: it was
-        # actually fixed by pinning idna>=3.15 (now 3.17) via
-        # [tool.uv] constraint-dependencies in pyproject.toml.
+        # idna CVE-2026-45409 is FIXED in the lockfile (bumped 3.13 -> 3.17 via
+        # `uv lock --upgrade-package idna`); only un-fixable / non-applicable
+        # vulns are ignored below. Re-evaluate the ignore list quarterly.
         #
         # GHSA-69w3-r845-3855 (CVE-2026-1839): transformers Trainer RCE — we use
-        #   transformers only via mineru[core] for PDF inference, never the Trainer
-        #   class. Attack surface 0. Re-eval when mineru bumps transformers >=5.0.
-        # PYSEC-2025-217 (CVE-2025-14929): transformers X-CLIP checkpoint-conversion
-        #   deserialization RCE — same mineru-only path; we never convert X-CLIP
-        #   checkpoints. No 4.x fix exists (needs transformers 5.0). Re-eval when
-        #   mineru bumps transformers >=5.0.
-        # PYSEC-2026-161 (CVE-2026-48710): starlette BadHost host-header path auth
-        #   bypass — our auth is cryptographic JWT (app/core/security.py), never
-        #   request.url.path-derived, so unreachable. Upstream fix (starlette 1.0.1)
-        #   is blocked: mineru -> gradio caps starlette <1.0. Re-eval when gradio
-        #   (via mineru) permits starlette >=1.0.1.
+        # transformers only via mineru[core] for PDF inference, never the Trainer
+        # class, so attack surface is 0. Ignore until mineru bumps transformers
+        # to >=5.0 upstream.
+        #
+        # PYSEC-2025-217 (ZDI-CAN-28308): transformers X-CLIP checkpoint-conversion
+        # deserialization RCE — triggered only by running the checkpoint conversion
+        # script on an untrusted .bin. We never convert checkpoints (transformers is
+        # pulled transitively via mineru[core] for PDF inference only); attack surface
+        # is 0. No fixed version published as of 2026-06-01.
+        #
+        # PYSEC-2026-161: starlette Host-header URL reconstruction → auth bypass,
+        # but ONLY when auth depends on the reconstructed URL path. Our auth is pure
+        # JWT Bearer (Authorization header, see core/security.py); it never derives
+        # identity from the request path or Host header, so this is not applicable.
+        # The fix (starlette 1.0.1) is unreachable anyway — fastapi 0.136 / mcp 1.27 /
+        # gradio 6.8 all pin starlette <1.0. Lift when those upstreams support 1.x.
+        #
+        # --skip-editable: `uv sync` installs the project itself editable; pip-audit
+        # otherwise tries (and fails) to look it up on PyPI and exits non-zero with
+        # "Dependency not found on PyPI". The local package has no third-party deps
+        # of its own to audit, so skipping it is correct.
         run: >-
           uv run pip-audit
+          --skip-editable
           --ignore-vuln GHSA-69w3-r845-3855
           --ignore-vuln PYSEC-2025-217
           --ignore-vuln PYSEC-2026-161

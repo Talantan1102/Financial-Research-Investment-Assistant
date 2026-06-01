@@ -496,3 +496,61 @@ def test_safe_float_edge_cases() -> None:
     assert _safe_float({"x": float("nan")}, "x") is None
     assert _safe_float({"x": 0}, "x") == 0.0
     assert _safe_float({"x": "1.5"}, "x") == 1.5  # str-coercible OK
+
+
+# ---------------------------------------------------------------------------
+# C7 regression: PB comparable tautology + insolvent firm debt_to_equity
+# ---------------------------------------------------------------------------
+
+
+def test_pb_comparables_are_zero_not_self_referential() -> None:
+    """C7 regression: industry_pb_avg/median must be 0.0 (lens skipped),
+    not pb*1.0 (self-referential tautology that kills cross-check signal)."""
+    tool_results = [
+        _tr("get_stock_quote", {"price": 1800.0, "change_pct": 1.0, "volume": 100.0}),
+        _tr("get_daily_basic", {"pe": 25.0, "pb": 8.0, "total_mv": 22000000.0}),
+        _tr("get_financials", {"revenue": 1.0e9, "net_profit": 5.0e8, "roe": 30.0}),
+        _tr(
+            "get_balance_sheet",
+            {"total_assets": 1.0e8, "total_liab": 2.0e7},
+        ),
+    ]
+    state = _make_state(tool_results=tool_results)
+    analyst = _make_analyst()
+    inputs = analyst._build_valuation_inputs_from_state(state)
+
+    assert inputs is not None
+    # C7: both PB comparables must be 0 so the PB lens skips via
+    # InsufficientDataForModelError (same as EV/EBITDA placeholder).
+    assert inputs.industry_pb_avg == 0.0, "C7: pb_avg must be 0 (lens skip)"
+    assert inputs.industry_pb_median == 0.0, "C7: pb_median must be 0 (lens skip)"
+
+
+def test_insolvent_firm_gets_inf_debt_to_equity() -> None:
+    """C7 regression: total_liab > total_assets (negative equity/insolvent) must
+    yield debt_to_equity=float('inf'), so compute_company_wacc raises
+    InsufficientDataForModelError and DCF is skipped (not silently lowered WACC)."""
+    import math
+
+    tool_results = [
+        _tr("get_stock_quote", {"price": 1800.0, "change_pct": 1.0, "volume": 100.0}),
+        _tr("get_daily_basic", {"pe": 25.0, "pb": 8.0, "total_mv": 22000000.0}),
+        _tr("get_financials", {"revenue": 1.0e9, "net_profit": 5.0e8, "roe": 30.0}),
+        _tr(
+            "get_balance_sheet",
+            {
+                "total_assets": 5.0e7,  # assets < liab → insolvent
+                "total_liab": 1.0e8,  # liab > assets
+            },
+        ),
+    ]
+    state = _make_state(tool_results=tool_results)
+    analyst = _make_analyst()
+    inputs = analyst._build_valuation_inputs_from_state(state)
+
+    assert inputs is not None
+    # C7: insolvent company must have infinite d/e, not 0 (which would under-state risk)
+    assert not math.isfinite(inputs.debt_to_equity), (
+        "C7: insolvent firm (liab > assets) must get debt_to_equity=inf, "
+        "not 0.0 (which yields a spuriously low WACC)"
+    )

@@ -118,3 +118,75 @@ def test_critic_dimension_v1x_a5b_adds_dialectical_balance() -> None:
         sub_agent_request_id="req-001",
     )
     assert score.dimension == "dialectical_balance"
+
+
+# ---------------------------------------------------------------------------
+# C62 regression: format_valuation_block SSOT + _SOP_TEXT export
+# ---------------------------------------------------------------------------
+
+
+def test_format_valuation_block_bull_includes_dcf_bull() -> None:
+    """C62: bull side should include dcf_bull value."""
+    from app.agents.debate_schemas import format_valuation_block
+    from app.agents.investment_dd_schema import ValuationAnalysis
+    from app.agents.schemas import ResearchState
+
+    va = ValuationAnalysis(
+        narrative="x",
+        pe_value=1500.0,
+        dcf_base=1400.0,
+        dcf_bull=1700.0,
+        dcf_bear=1100.0,
+    )
+    state = ResearchState(
+        user_id="u", session_id="s", user_message="m", request_id="r", valuation_analysis=va
+    )
+    block = format_valuation_block(state, side="bull")
+    assert "DCF bull: 1,700.00" in block
+    assert "DCF bear: 1,100.00" in block  # bull side also shows bear for comparison
+    assert "PE 理论价: 1,500.00" in block
+
+
+def test_format_valuation_block_bear_highlights_severity() -> None:
+    """C62: bear side should include SEVERE warning when consistency is severe."""
+    from app.agents.debate_schemas import format_valuation_block
+    from app.agents.investment_dd_schema import ValuationAnalysis
+    from app.agents.schemas import ResearchState
+
+    va = ValuationAnalysis(
+        narrative="x",
+        pe_value=1500.0,
+        dcf_bear=900.0,
+        valuation_consistency="severe",
+    )
+    state = ResearchState(
+        user_id="u", session_id="s", user_message="m", request_id="r", valuation_analysis=va
+    )
+    block = format_valuation_block(state, side="bear")
+    assert "SEVERE" in block
+    assert "DCF bear: 900.00" in block
+
+
+def test_format_valuation_block_returns_empty_for_none_analysis() -> None:
+    """C62: when valuation_analysis is None, returns empty string."""
+    from app.agents.debate_schemas import format_valuation_block
+    from app.agents.schemas import ResearchState
+
+    state = ResearchState(user_id="u", session_id="s", user_message="m", request_id="r")
+    assert format_valuation_block(state, side="bull") == ""
+    assert format_valuation_block(state, side="bear") == ""
+
+
+def test_sop_text_is_single_ssot_shared_between_analyst_and_writer() -> None:
+    """C62: analyst._SOP_TEXT and writer._SOP_TEXT must be the same object as
+    financial_research._SOP_TEXT (single source of truth)."""
+    from app.agents import analyst as analyst_mod
+    from app.agents import writer as writer_mod
+    from app.skills.financial_research import _SOP_TEXT as _PKG_SOP
+
+    assert analyst_mod._SOP_TEXT is _PKG_SOP, (
+        "C62: analyst._SOP_TEXT must be the same object as financial_research._SOP_TEXT"
+    )
+    assert writer_mod._SOP_TEXT is _PKG_SOP, (
+        "C62: writer._SOP_TEXT must be the same object as financial_research._SOP_TEXT"
+    )

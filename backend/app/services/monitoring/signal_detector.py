@@ -43,11 +43,17 @@ class SignalDetector:
                 rule_thresh = thresholds_per_rule.get(rule.name, {})
                 return await rule.evaluate(subject, tushare, bocha, llm, rule_thresh)
             except Exception as exc:
-                _logger.warning("signal rule %s failed: %s", rule.name, exc)
+                # Fail-loud (project hard rule 4 — No-Silent-Fallback): a rule
+                # that errors must NOT be downgraded to GREEN. A GREEN sentinel
+                # here suppresses real alerts and turns a data/LLM outage into a
+                # clean-looking scan. Surface as RED so the YELLOW/RED alert gate
+                # fires a visible alert + detail card for this position, and log
+                # the traceback so the operator can diagnose the failing rule.
+                _logger.error("signal rule %s failed: %s", rule.name, exc, exc_info=True)
                 return SignalResult(
                     rule_name=rule.name,
-                    level=SignalLevel.GREEN,
-                    explanation=f"error: {exc}",
+                    level=SignalLevel.RED,
+                    explanation=f"rule error (surfaced as RED for visibility): {exc}",
                 )
 
         results = await asyncio.gather(*(_safe(r) for r in self._rules))

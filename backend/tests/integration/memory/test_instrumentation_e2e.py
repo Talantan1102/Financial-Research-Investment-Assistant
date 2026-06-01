@@ -119,8 +119,8 @@ def test_log_retrieval_hit_inserts_row(
     assert str(row[0]) == str(log_id)
     assert str(row[1]) == str(user_id)
     assert row[2] == "我对茅台的看法"
-    # p90 计算: 2 个 sample (10, 20), idx = int(2 * 0.9) = 1 → ages[1] = 20.0
-    assert row[3] is not None and 19.0 < row[3] < 21.0
+    # p90 计算 (C49 fix): 2 个 sample (10, 20), idx = int((2-1) * 0.9) = 0 → ages[0] = 10.0
+    assert row[3] is not None and 9.0 < row[3] < 11.0
     assert row[4] == 120
 
 

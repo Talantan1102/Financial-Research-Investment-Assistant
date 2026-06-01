@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import date
 from enum import StrEnum
@@ -10,11 +11,13 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from app.services.cost_budget import CostBudget
+from app.services.cost_budget import BudgetExceeded, CostBudget
 from app.services.monitoring.signal_rules.base import (
     MonitoringCustomer,
     SignalResult,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class EscalationStatus(StrEnum):
@@ -55,12 +58,20 @@ class EscalationCoordinator:
     ) -> EscalationResult:
         # Gate 1: daily dedup
         if self._recent_dedup(customer.id, date.today()):
+            _logger.info("escalation deduped customer=%s run_id=%s", customer.id, run_id)
             return EscalationResult(status=EscalationStatus.DAILY_DEDUP)
 
-        # Gate 2: daily budget
+        # Gate 2: daily budget — narrow to BudgetExceeded only. A bare `except
+        # Exception` here masked any error (e.g. a bug in assert_under_limit) as a
+        # false DAILY_BUDGET_EXCEEDED; non-budget errors must propagate (fail-loud).
         try:
             self._daily_budget.assert_under_limit()
-        except Exception:
+        except BudgetExceeded:
+            _logger.warning(
+                "escalation gate2 daily budget exceeded customer=%s run_id=%s",
+                customer.id,
+                run_id,
+            )
             return EscalationResult(status=EscalationStatus.DAILY_BUDGET_EXCEEDED)
 
         # Gate 3: concurrent limit (semaphore serializes simultaneous calls)
@@ -81,16 +92,32 @@ class EscalationCoordinator:
                 # Gate 4: per-call cap (post-hoc, after pipeline ran)
                 if cost > self._per_call_cap:
                     self._daily_budget.track(cost)
+                    _logger.warning(
+                        "escalation per-call cap exceeded customer=%s run_id=%s cost=%.4f cap=%.4f",
+                        customer.id,
+                        run_id,
+                        cost,
+                        self._per_call_cap,
+                    )
                     return EscalationResult(
                         status=EscalationStatus.BUDGET_PER_CALL_EXCEEDED,
                         cost_cny=cost,
                     )
 
                 self._daily_budget.track(cost)
+                _logger.info(
+                    "escalation success customer=%s run_id=%s cost=%.4f",
+                    customer.id,
+                    run_id,
+                    cost,
+                )
                 return EscalationResult(
                     status=EscalationStatus.SUCCESS,
                     deep_dive=deep_dive,
                     cost_cny=cost,
                 )
             except Exception as exc:
+                # Fail-loud: graph/LLM/network failures must leave an audit trail,
+                # not silently collapse to FAILED with no log (hard rules 4 + 5).
+                _logger.exception("escalation failed customer=%s run_id=%s", customer.id, run_id)
                 return EscalationResult(status=EscalationStatus.FAILED, error=str(exc))

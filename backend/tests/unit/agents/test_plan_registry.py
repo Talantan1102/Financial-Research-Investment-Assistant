@@ -1,13 +1,11 @@
-"""Guard test — plan_registry deprecation status.
+"""Tombstone guard — plan_registry deleted in C71 code-review fix.
 
-v1.x: plan_registry.py is archive-only (no live import). Tasks 1.4
-(planner rewrite) and this task verified no `from app.agents.plan_registry`
-or `import plan_registry` remains in the app/ tree. This test pins that
-invariant — any reintroduction will fail CI.
+C71: PlanId was only referenced by the self-declared-deprecated plan_registry.py.
+Both have been removed. These tests pin the deletion invariant — any
+re-introduction of plan_registry or PlanId will fail CI.
 
-If you genuinely need plan_registry's old PLAN_REGISTRY data, copy what you
-need into the new home (plan_template.py) — do NOT re-import from the
-deprecated module.
+If you genuinely need the old PLAN_REGISTRY data, copy it into plan_template.py
+— do NOT recreate plan_registry.py or re-add PlanId to schemas.
 """
 
 from __future__ import annotations
@@ -16,19 +14,33 @@ import pathlib
 
 
 def test_plan_registry_not_imported_in_app() -> None:
+    """No app module may import the deleted plan_registry."""
     app_root = pathlib.Path(__file__).resolve().parents[3] / "app"
     offenders = []
     for py in app_root.rglob("*.py"):
         text = py.read_text(encoding="utf-8")
         if "from app.agents.plan_registry" in text or "import plan_registry" in text:
             offenders.append(str(py.relative_to(app_root)))
-    assert not offenders, f"plan_registry deprecated but still imported by: {offenders}"
+    assert not offenders, f"plan_registry deleted (C71) but still imported by: {offenders}"
 
 
-def test_plan_registry_module_marked_deprecated() -> None:
-    """The deprecation banner must remain in the module docstring."""
-    import app.agents.plan_registry as pr
+def test_plan_registry_file_deleted() -> None:
+    """Physical file must not exist — guards accidental re-creation."""  # C71
+    plan_registry_path = (
+        pathlib.Path(__file__).resolve().parents[3] / "app" / "agents" / "plan_registry.py"
+    )
+    assert not plan_registry_path.exists(), (
+        "plan_registry.py was deleted in C71 but has been re-created; "
+        "move the required content to plan_template.py instead"
+    )
 
-    docstring = pr.__doc__ or ""
-    assert "DEPRECATED" in docstring
-    assert "v1.x" in docstring
+
+def test_plan_id_not_in_schemas() -> None:
+    """PlanId Literal removed from schemas.py — import must fail."""  # C71
+    import importlib
+
+    schemas = importlib.import_module("app.agents.schemas")
+    assert not hasattr(schemas, "PlanId"), (
+        "PlanId was removed from schemas.py in C71 but has been re-added; "
+        "InvestmentObjective covers the same domain for live callers"
+    )

@@ -141,3 +141,45 @@ def test_jieba_tokenize_mixed_zh_en() -> None:
     parts = set(tokens.split())
     assert "茅台" in parts
     assert "600519" in parts or "600519.SH" in parts
+
+
+# ---- C64: SEARCH_TS_CODE_RE exported and semantically distinct from _TS_CODE_RE ----
+
+
+def test_search_ts_code_re_exported() -> None:
+    """C64: SEARCH_TS_CODE_RE must be importable from registry (single owner)."""
+    from app.memory.registry import SEARCH_TS_CODE_RE
+
+    assert SEARCH_TS_CODE_RE is not None
+
+
+def test_search_ts_code_re_matches_embedded_code() -> None:
+    """C64: search-variant matches a ts_code embedded in free text."""
+    from app.memory.registry import SEARCH_TS_CODE_RE
+
+    assert SEARCH_TS_CODE_RE.search("看看 600519.SH 怎么样") is not None
+
+
+def test_validation_ts_code_re_requires_standalone() -> None:
+    """C64: validation regex (_TS_CODE_RE) must NOT match code embedded in text.
+
+    The full-string anchored pattern (^...$ via match/fullmatch) should fail
+    against free text, while search-variant succeeds.
+    """
+    from app.memory.registry import _TS_CODE_RE as _VALIDATION_RE
+    from app.memory.registry import SEARCH_TS_CODE_RE
+
+    text_with_embedded = "看看 600519.SH 怎么样"
+    # validation regex: does NOT match (anchored ^ ... $)
+    assert _VALIDATION_RE.match(text_with_embedded) is None
+    # search regex: DOES match
+    assert SEARCH_TS_CODE_RE.search(text_with_embedded) is not None
+
+
+def test_validation_ts_code_re_matches_bare_code() -> None:
+    """Validation regex still recognizes a bare standalone ts_code."""
+    from app.memory.registry import _TS_CODE_RE as _VALIDATION_RE
+
+    assert _VALIDATION_RE.match("600519.SH") is not None
+    assert _VALIDATION_RE.match("000858.SZ") is not None
+    assert _VALIDATION_RE.match("123456.BJ") is not None

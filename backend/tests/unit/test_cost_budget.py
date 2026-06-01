@@ -53,3 +53,34 @@ def test_from_env_default_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("EVAL_COST_LIMIT_CNY", raising=False)
     b = CostBudget.from_env()
     assert b.limit_cny == 20.0  # spec § 5 default
+
+
+# C46: malformed env var must raise a context-rich ValueError naming the variable
+
+
+def test_from_env_malformed_raises_with_var_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-numeric value raises ValueError mentioning EVAL_COST_LIMIT_CNY (C46)."""
+    monkeypatch.setenv("EVAL_COST_LIMIT_CNY", "abc")
+    with pytest.raises(ValueError, match="EVAL_COST_LIMIT_CNY"):
+        CostBudget.from_env()
+
+
+def test_from_env_malformed_dollar_prefix_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Currency-prefixed string '$20' also raises with context (C46)."""
+    monkeypatch.setenv("EVAL_COST_LIMIT_CNY", "$20")
+    with pytest.raises(ValueError, match="EVAL_COST_LIMIT_CNY"):
+        CostBudget.from_env()
+
+
+def test_from_env_malformed_message_contains_raw_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Error message includes the offending value so operators can diagnose quickly (C46)."""
+    monkeypatch.setenv("EVAL_COST_LIMIT_CNY", "not_a_number")
+    with pytest.raises(ValueError, match="not_a_number"):
+        CostBudget.from_env()
+
+
+def test_from_env_valid_numeric_parses_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Valid numeric string still produces a CostBudget with that limit (C46 non-regression)."""
+    monkeypatch.setenv("EVAL_COST_LIMIT_CNY", "42.5")
+    b = CostBudget.from_env()
+    assert b.limit_cny == pytest.approx(42.5)

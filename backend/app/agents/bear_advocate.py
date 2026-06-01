@@ -16,34 +16,13 @@ import logging
 from typing import Any
 
 from app.agents.base import Agent
-from app.agents.debate_schemas import AdvocateOutput
+from app.agents.debate_schemas import AdvocateOutput, format_valuation_block  # C62: shared SSOT
 from app.agents.schemas import ResearchState, StepResult
 from app.services.llm_response import Tier
 
 __all__ = ["BearAdvocate"]
 
 logger = logging.getLogger(__name__)
-
-
-def _format_valuation_block(state: ResearchState) -> str:
-    """state.valuation_analysis 已有时,把估值数字注入 prompt(Bear 优先引 dcf_bear + outlier_diagnosis)."""
-    va = state.valuation_analysis
-    if va is None:
-        return ""
-    lines: list[str] = []
-    if va.pe_value is not None:
-        lines.append(f"  - PE 理论价: {va.pe_value:,.2f}")
-    if va.dcf_base is not None:
-        lines.append(f"  - DCF base: {va.dcf_base:,.2f}")
-    if va.dcf_bear is not None:
-        lines.append(f"  - DCF bear: {va.dcf_bear:,.2f}")
-    if va.outlier_diagnosis is not None:
-        lines.append(f"  - outlier diagnosis: {va.outlier_diagnosis.narrative}")
-    if va.valuation_consistency == "severe":
-        lines.append("  - cross-check severity: SEVERE (打架信号, bear 应利用)")
-    if not lines:
-        return ""
-    return "\n估值数据(A5a cross-check):\n" + "\n".join(lines) + "\n"
 
 
 _PROMPT_ROUND_1 = """你是看空投资者(30% 看空立场), 专门为「{target}」找最有力的看空论据。
@@ -103,7 +82,7 @@ class BearAdvocate(Agent):
         prompt = _PROMPT_ROUND_1.format(
             target=state.target_ts_code or "未知标的",
             user_message=state.user_message,
-            valuation_block=_format_valuation_block(state),
+            valuation_block=format_valuation_block(state, side="bear"),
         )
         return self._call_llm(prompt, request_id=state.request_id)
 
@@ -119,7 +98,7 @@ class BearAdvocate(Agent):
         prompt = _PROMPT_ROUND_2.format(
             target=state.target_ts_code or "未知标的",
             user_message=state.user_message,
-            valuation_block=_format_valuation_block(state),
+            valuation_block=format_valuation_block(state, side="bear"),
             bull_v1_arguments=bull_args,
             bull_v1_strongest=bull_v1.strongest_argument,
         )

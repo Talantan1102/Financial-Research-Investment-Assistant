@@ -109,9 +109,11 @@ class EvalRecorder:
     def read(self, eval_id: str) -> EvalResult:
         with self._session_factory() as session:
             row = session.get(EvalResultRow, eval_id)
-        if row is None:
-            raise LookupError(f"no eval_result with eval_id={eval_id!r}")
-        return self._row_to_result(row)
+            # C11: None-check + DTO conversion INSIDE the session block — row detaches
+            # on `with` exit (expire_on_commit), so reads must happen while attached.
+            if row is None:
+                raise LookupError(f"no eval_result with eval_id={eval_id!r}")
+            return self._row_to_result(row)
 
     def query(self, filters: dict[str, Any]) -> list[EvalResult]:
         """Query eval_results by ORM-whitelisted filter keys."""
@@ -125,7 +127,8 @@ class EvalRecorder:
             for k, v in filters.items():
                 stmt = stmt.filter(getattr(EvalResultRow, k) == v)
             rows = stmt.all()
-        return [self._row_to_result(r) for r in rows]
+            # C11: convert INSIDE the session block (rows detach on `with` exit).
+            return [self._row_to_result(r) for r in rows]
 
     @staticmethod
     def _row_to_result(row: EvalResultRow) -> EvalResult:

@@ -45,12 +45,12 @@ async def test_executor_runs_simple_script_returns_json(fake_skills_root, tmp_pa
 
 @pytest.mark.asyncio
 async def test_executor_cwd_isolated_to_workdir(fake_skills_root, tmp_path):
+    # C33 banned open(); this test only needs to observe the script's cwd, so
+    # report os.getcwd() directly (the marker-file write was incidental).
     ref = _write_script(
         fake_skills_root,
         "writefile.py",
-        "import json, sys, os\n"
-        "open('marker.txt', 'w').write('here')\n"
-        "print(json.dumps({'cwd': os.getcwd()}))\n",
+        "import json, sys, os\nprint(json.dumps({'cwd': os.getcwd()}))\n",
     )
     ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
     result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
@@ -162,3 +162,53 @@ async def test_executor_rejects_script_with_banned_api(fake_skills_root, tmp_pat
     assert result.ok is False
     assert result.error.kind == "safety_scan_rejected"
     assert "os.system" in result.error.message
+
+
+# C34 — exit-0 with empty stdout must yield ok=False (stdout_invalid_json)
+# rather than crash with pydantic ValidationError.
+
+
+@pytest.mark.asyncio
+async def test_executor_exit0_empty_stdout_returns_error(fake_skills_root, tmp_path):
+    """Script exits 0 but writes nothing to stdout → ok=False, not ValidationError."""
+    ref = _write_script(
+        fake_skills_root,
+        "silent_exit.py",
+        "import sys\n# intentionally writes no stdout\nsys.exit(0)\n",
+    )
+    ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
+    result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
+    assert result.ok is False
+    assert result.error.kind == "stdout_invalid_json"
+    assert "no stdout" in result.error.message
+
+
+@pytest.mark.asyncio
+async def test_executor_exit0_nonjson_stdout_returns_error(fake_skills_root, tmp_path):
+    """Script exits 0 with non-JSON output → ok=False, kind stdout_invalid_json."""
+    ref = _write_script(
+        fake_skills_root,
+        "plain_text.py",
+        "print('this is not JSON at all')\n",
+    )
+    ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
+    result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
+    assert result.ok is False
+    assert result.error.kind == "stdout_invalid_json"
+
+
+# C60 — get_running_loop() must not emit DeprecationWarning on Python 3.10+.
+
+
+@pytest.mark.asyncio
+@pytest.mark.filterwarnings("error::DeprecationWarning")
+async def test_executor_no_event_loop_deprecation_warning(fake_skills_root, tmp_path):
+    """asyncio.get_running_loop() must be used (no DeprecationWarning in 3.10+)."""
+    ref = _write_script(
+        fake_skills_root,
+        "echo2.py",
+        "import json, sys\ndata = json.load(sys.stdin)\nprint(json.dumps({'echoed': data}))\n",
+    )
+    ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
+    result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={"x": 1}))
+    assert result.ok is True

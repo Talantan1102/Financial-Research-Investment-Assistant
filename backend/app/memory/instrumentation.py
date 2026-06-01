@@ -52,8 +52,9 @@ def _compute_p90_valid_from_age_days(
     if not ages:
         return None
     sorted_ages = sorted(ages)
-    idx = int(len(sorted_ages) * 0.9)
-    idx = min(idx, len(sorted_ages) - 1)
+    # C49: use (n-1)*0.9 to avoid overshoot: n=10→idx8 (P90), n=100→idx89 (P90)
+    idx = int((len(sorted_ages) - 1) * 0.9)
+    idx = min(idx, len(sorted_ages) - 1)  # guard (no-op after fix, kept as safety)
     return sorted_ages[idx]
 
 

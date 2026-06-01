@@ -10,12 +10,8 @@ Plan 2 extractor + Plan 5 batch_extractor 都调用. 契约 § 5 函数签名.
 
 from __future__ import annotations
 
-import re
-
 from app.memory.models import ChatMemoryEpisode
-
-# ts_code 6 数字 + .SH/.SZ/.BJ 后缀
-_TS_CODE_RE = re.compile(r"\b\d{6}\.(SH|SZ|BJ)\b")
+from app.memory.registry import SEARCH_TS_CODE_RE as _TS_CODE_RE  # C64: SSOT in registry
 
 # metric 关键词(对齐 spec 附录 A 白名单 + 中文常用)
 _METRIC_KEYWORDS: frozenset[str] = frozenset(

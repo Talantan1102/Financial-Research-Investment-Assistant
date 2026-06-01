@@ -165,7 +165,9 @@ class SkillExecutor:
         stdin_blob = json.dumps(args.payload).encode("utf-8")
 
         try:
-            stdout_b, stderr_b = await asyncio.get_event_loop().run_in_executor(
+            # C60: get_event_loop() deprecated in 3.10+; get_running_loop() is correct
+            # inside an async def (loop is always running here).
+            stdout_b, stderr_b = await asyncio.get_running_loop().run_in_executor(
                 None,
                 lambda: proc.communicate(input=stdin_blob, timeout=timeout_s),
             )
@@ -211,8 +213,24 @@ class SkillExecutor:
                 ),
             )
 
+        # C34: empty stdout on exit-0 → error result to avoid model_validator crash
+        if not stdout_text.strip():
+            return SkillExecutionResult(
+                ok=False,
+                stdout_json=None,
+                stderr_text=stderr_text,
+                exit_code=proc.returncode,
+                elapsed_s=elapsed,
+                skill_name=ref.skill_name,
+                script_path=ref.script_path,
+                error=SkillExecutionError(
+                    kind="stdout_invalid_json",
+                    message="script exited 0 but produced no stdout",
+                ),
+            )
+
         try:
-            stdout_json = json.loads(stdout_text) if stdout_text.strip() else None
+            stdout_json = json.loads(stdout_text)
         except json.JSONDecodeError as exc:
             return SkillExecutionResult(
                 ok=False,

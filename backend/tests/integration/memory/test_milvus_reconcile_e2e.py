@@ -187,6 +187,36 @@ def test_reconcile_clears_pending_on_success(pg_memory_fixture: dict[str, Any]) 
     assert _count_pending(pg_memory_fixture) == initial - 1
 
 
+def test_reconcile_insert_payload_includes_user_id_and_rel_type(
+    pg_memory_fixture: dict[str, Any],
+) -> None:
+    """C57: the Milvus insert payload must carry user_id + rel_type (the collection
+    schema requires both). The old impl sent only {edge_id, embedding}, so every
+    real retry failed schema validation and silently exhausted MAX_RECONCILE_RETRIES.
+    The prior success test masked this because MagicMock.insert accepts any payload.
+    """
+    engine = pg_memory_fixture["engine"]
+    SessionLocal = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+    user_id, session_id = _seed_user_session(pg_memory_fixture)
+    _edge_id, _pid = _seed_pending(pg_memory_fixture, user_id, session_id)
+
+    fake_embed = AsyncMock(return_value=[0.01] * 1024)
+    fake_milvus = MagicMock()
+    fake_milvus.insert = MagicMock(return_value=None)
+
+    reconcile_pending_milvus_inserts(
+        session_factory=SessionLocal,
+        embed_fn=fake_embed,
+        milvus_client=fake_milvus,
+    )
+    fake_milvus.insert.assert_called_once()
+    data = fake_milvus.insert.call_args.kwargs["data"][0]
+    assert data["user_id"] == str(user_id)
+    assert data["rel_type"] == "HOLDS"
+    assert "embedding" in data
+    assert data["edge_id"] == str(_edge_id)
+
+
 def test_reconcile_increments_retry_count_on_failure(
     pg_memory_fixture: dict[str, Any],
 ) -> None:

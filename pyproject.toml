@@ -104,18 +104,6 @@ packages = ["backend"]
 
 [tool.uv]
 managed = true
-# Security floor for a TRANSITIVE dep flagged by the nightly pip-audit gate.
-# idna is not imported directly; constrained here so `uv lock` can't silently
-# regress it below the patched version. Re-evaluate when an upstream direct dep
-# (requests / httpx / email-validator) bumps it on its own.
-#
-# NOTE: starlette PYSEC-2026-161 (BadHost) is NOT pinned here — forcing
-# starlette>=1.0.1 makes the kb extra unsatisfiable (mineru → gradio caps
-# starlette <1.0). It is instead risk-accepted via --ignore-vuln in nightly.yml
-# (unreachable: our auth is cryptographic JWT, not request.url.path-based).
-constraint-dependencies = [
-    "idna>=3.15",  # CVE-2026-45409 — pulled via requests / httpx / email-validator
-]
 
 [tool.ruff]
 line-length = 100

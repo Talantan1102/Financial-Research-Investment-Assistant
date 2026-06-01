@@ -8,9 +8,32 @@ from jose import JWTError, jwt
 from pydantic import BaseModel
 
 # JWT 配置
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-super-secret-key-change-in-production")
+# C5: a dev/test default is allowed at import time (tests/eval/CLI don't serve auth),
+# but the serving app MUST call assert_jwt_secret_configured() at startup so a real
+# deployment can never sign/verify tokens with a publicly-known key.
+_INSECURE_JWT_DEFAULT = "insecure-dev-default-change-me"
+_KNOWN_INSECURE_JWT = frozenset(
+    {_INSECURE_JWT_DEFAULT, "your-super-secret-key-change-in-production"}
+)
+SECRET_KEY = os.getenv("JWT_SECRET_KEY") or _INSECURE_JWT_DEFAULT
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
+
+
+def assert_jwt_secret_configured() -> None:
+    """C5 fail-fast guard for the serving app (call from lifespan startup).
+
+    Raises if JWT_SECRET_KEY is unset or a known-insecure default — otherwise the
+    server would silently sign/accept JWTs with a publicly-known key, letting an
+    attacker forge tokens for any user. Read at call time so env loaded via
+    load_dotenv() before startup is respected.
+    """
+    raw = os.getenv("JWT_SECRET_KEY")
+    if not raw or raw in _KNOWN_INSECURE_JWT:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is unset or uses a known-insecure default — set a unique "
+            "random secret (e.g. `openssl rand -hex 32`) before starting the server."
+        )
 
 
 class Token(BaseModel):

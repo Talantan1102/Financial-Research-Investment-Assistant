@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from app.memory.persona_service import PersonaService
+from app.memory.working_blocks import PERSONA_BLOCK_NAME
 
 if TYPE_CHECKING:
     from app.memory.models import (
@@ -114,7 +115,8 @@ class HierarchicalMemory:
         returns None (MCP tool caller handles None for persona path).
         """
         # Task 17: persona block — route to PersonaService, skip legacy path
-        if block_name == "persona":
+        # C65: use PERSONA_BLOCK_NAME constant (SSOT in working_blocks.py).
+        if block_name == PERSONA_BLOCK_NAME:
             self._persona_service.apply_agent_append(user_id=user_id, content=content)
             return None
 
@@ -191,7 +193,8 @@ class HierarchicalMemory:
         returns None (MCP tool caller handles None for persona path).
         """
         # Task 17: persona block — route to PersonaService, skip legacy path
-        if block_name == "persona":
+        # C65: use PERSONA_BLOCK_NAME constant (SSOT in working_blocks.py).
+        if block_name == PERSONA_BLOCK_NAME:
             self._persona_service.apply_agent_replace(
                 user_id=user_id, old_content=old_content, new_content=new_content
             )

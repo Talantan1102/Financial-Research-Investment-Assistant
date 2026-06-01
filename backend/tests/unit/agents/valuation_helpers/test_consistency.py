@@ -54,21 +54,37 @@ def test_consistency_ignores_zero_values() -> None:
 
 
 def test_consistency_threshold_boundary_15pct() -> None:
-    """边界:CV = 15.0% → 取 ">= 0.15" 严格归 moderate"""
+    """C23 regression: 样本 CV 略过 15% 阈值 → moderate (样本方差 n-1)。
+
+    对 2 个对称值, 样本 std = |a - b| / sqrt(2)。取 sample CV=15.5%(略高于 15%
+    阈值,避开恰在边界时 `cv < 0.15` 的浮点不确定),验证归属 moderate 而非 consistent。
+    """
+    import math
+
     from app.agents.valuation_helpers.consistency import analyze_consistency
 
-    # mean=1000, std=150 → CV=15%
-    # 构造 [850, 1150]: mean=1000, var=((850-1000)^2 + (1150-1000)^2)/2=22500, std=150
-    result = analyze_consistency({"pe": 850.0, "dcf_base": 1150.0})
+    # mean=1000, sample CV=15.5% → sample_std=155, d = std*sqrt(2) (2 对称值)
+    d = 155 * math.sqrt(2)
+    v1 = 1000.0 - d / 2
+    v2 = 1000.0 + d / 2
+    result = analyze_consistency({"pe": v1, "dcf_base": v2})
     assert result == "moderate"
 
 
 def test_consistency_threshold_boundary_30pct() -> None:
-    """边界:CV = 30.0% → 取 ">= 0.30" 严格归 severe"""
+    """C23 regression: 样本 CV 略过 30% 阈值 → severe (样本方差 n-1)。
+
+    取 sample CV=30.5%(略高于 30% 阈值,避开浮点边界不确定),验证归 severe。
+    """
+    import math
+
     from app.agents.valuation_helpers.consistency import analyze_consistency
 
-    # mean=1000, std=300 → CV=30%
-    result = analyze_consistency({"pe": 700.0, "dcf_base": 1300.0})
+    # mean=1000, sample CV=30.5% → sample_std=305, d = std*sqrt(2)
+    d = 305 * math.sqrt(2)
+    v1 = 1000.0 - d / 2
+    v2 = 1000.0 + d / 2
+    result = analyze_consistency({"pe": v1, "dcf_base": v2})
     assert result == "severe"
 
 
@@ -81,6 +97,20 @@ def test_consistency_ignores_nan_inf_values() -> None:
         {"pe": 1500, "pb": math.nan, "ev_ebitda": math.inf, "dcf_base": 1600}
     )
     assert result == "consistent"
+
+
+def test_consistency_c23_population_vs_sample_reclassification() -> None:
+    """C23 regression: pe=880, dcf=1120 — population CV≈12% (consistent) but
+    sample CV≈17% (moderate). After fix should be 'moderate'."""
+    from app.agents.valuation_helpers.consistency import analyze_consistency
+
+    # pop_std = sqrt(((880-1000)^2 + (1120-1000)^2) / 2) = sqrt(14400) = 120 → pop_CV=12%
+    # sample_std = sqrt(((880-1000)^2 + (1120-1000)^2) / 1) = sqrt(28800) ≈ 169.7 → CV≈17%
+    result = analyze_consistency({"pe": 880.0, "dcf_base": 1120.0})
+    assert result == "moderate", (
+        "C23: 2-lens divergence near 15% boundary must use sample variance; "
+        "pe=880/dcf=1120 should be 'moderate' not 'consistent'"
+    )
 
 
 def test_consistency_only_one_valid_after_filter_returns_none() -> None:

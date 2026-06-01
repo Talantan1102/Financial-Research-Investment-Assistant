@@ -295,3 +295,102 @@ async def test_archival_search_logs_to_retrieval_logs_table(
     assert "bm25" in rb
     assert "vector" in rb
     assert "graph" in rb
+
+
+# ---------------------------------------------------------------------------
+# C9: graph_traverse PG node_id lookup — regression tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_graph_traverse_pg_resolves_node_id_before_age(
+    pg_memory_fixture: dict[str, Any],
+    pg_memory_session_factory: Callable[[], Any],
+) -> None:
+    """C9 regression: graph_traverse must look up node_id from PG and pass it to
+    AGE Cypher — not filter on entity_label/user_id which don't exist on AGE nodes.
+
+    With a real PG node seeded, graph_traverse should call age_executor.cypher
+    with a Cypher string that contains node_id from PG, not entity_label.
+    """
+    from app.memory.models import ChatMemoryNode
+    from app.memory.retriever import graph_traverse
+
+    user_id = uuid4()
+    session_id = uuid4()
+    _seed_user_session(pg_memory_fixture["engine"], user_id, session_id)
+
+    # Seed a ChatMemoryNode directly in PG
+    sess = pg_memory_session_factory()
+    try:
+        node = ChatMemoryNode(
+            user_id=user_id,
+            entity_type="Stock",
+            entity_label="贵州茅台",
+            search_tokens="贵州茅台",
+        )
+        sess.add(node)
+        sess.commit()
+        expected_node_id = str(node.node_id)
+    finally:
+        sess.close()
+
+    # Mock AGE executor — returns empty (AGE not running in CI)
+    age_executor = MagicMock()
+    age_executor.cypher = AsyncMock(return_value=[])
+
+    # Use a fresh session for the query
+    sess2 = pg_memory_session_factory()
+    try:
+        results = await graph_traverse(
+            sess2,
+            age_executor=age_executor,
+            user_id=user_id,
+            start_label="贵州茅台",
+            hops=2,
+        )
+    finally:
+        sess2.close()
+
+    # AGE was called with node_id (not entity_label), and params contain no uid
+    age_executor.cypher.assert_awaited_once()
+    cypher_str = age_executor.cypher.call_args.args[1]
+    cypher_params = age_executor.cypher.call_args.args[2]
+
+    assert f"node_id: '{expected_node_id}'" in cypher_str, (
+        f"Cypher should contain node_id='{expected_node_id}', got: {cypher_str!r}"
+    )
+    assert "entity_label" not in cypher_str, "Cypher must not filter on entity_label (not in AGE)"
+    assert "user_id" not in cypher_params, "AGE params must not include user_id (PG-layer scoping)"
+    assert results == []  # AGE mock returned empty
+
+
+@pytest.mark.asyncio
+async def test_graph_traverse_unknown_label_returns_empty_no_age_call(
+    pg_memory_fixture: dict[str, Any],
+    pg_memory_session_factory: Callable[[], Any],
+) -> None:
+    """C9 regression: unknown entity_label → [] without calling AGE."""
+    from app.memory.retriever import graph_traverse
+
+    user_id = uuid4()
+    session_id = uuid4()
+    _seed_user_session(pg_memory_fixture["engine"], user_id, session_id)
+
+    age_executor = MagicMock()
+    age_executor.cypher = AsyncMock(return_value=[{"some": "data"}])
+
+    sess = pg_memory_session_factory()
+    try:
+        results = await graph_traverse(
+            sess,
+            age_executor=age_executor,
+            user_id=user_id,
+            start_label="DoesNotExistLabel_xyz",
+            hops=1,
+        )
+    finally:
+        sess.close()
+
+    assert results == []
+    age_executor.cypher.assert_not_awaited()

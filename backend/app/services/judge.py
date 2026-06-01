@@ -136,21 +136,37 @@ class Judge:
                                (None, default), behaviour is identical to v0.
         """
         prompt = build_judge_prompt(case, sut_response, trace_summary, tool_calls, report_markdown)
-        r = self._llm.chat(prompt=prompt, tier=self._tier)
-        raw = json.loads(r.content)
+        # C10: pass schema to enable JSON mode so the adapter uses response_format
+        r = self._llm.chat(prompt=prompt, tier=self._tier, schema={"type": "object"})
+        # C10: wrap json.loads so a non-JSON reply raises ValueError with context
+        # instead of a bare JSONDecodeError that would crash the whole eval run.
+        try:
+            raw = json.loads(r.content)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Judge LLM returned non-JSON: {r.content!r}") from exc
+
+        # C10: wrap required-key access so a missing dim raises descriptively.
+        def _get_dim(block: dict[str, Any], dim: str) -> Any:
+            try:
+                return block[dim]
+            except (KeyError, TypeError) as exc:
+                raise ValueError(
+                    f"Judge response missing expected key {dim!r}; raw={r.content!r}"
+                ) from exc
+
         rmq_block = raw.get("report_markdown_quality")
         report_markdown_quality: float | None = (
             rmq_block["score"] if rmq_block is not None else None
         )
         scores = JudgeScores(
-            factuality=raw["factuality"]["score"],
-            factuality_evidence=raw["factuality"]["evidence"],
-            tool_correctness=raw["tool_correctness"]["score"],
-            tool_correctness_evidence=raw["tool_correctness"]["evidence"],
-            coverage=raw["coverage"]["score"],
-            coverage_evidence=raw["coverage"]["evidence"],
-            structure=raw["structure"]["score"],
-            structure_evidence=raw["structure"]["evidence"],
+            factuality=_get_dim(_get_dim(raw, "factuality"), "score"),
+            factuality_evidence=_get_dim(_get_dim(raw, "factuality"), "evidence"),
+            tool_correctness=_get_dim(_get_dim(raw, "tool_correctness"), "score"),
+            tool_correctness_evidence=_get_dim(_get_dim(raw, "tool_correctness"), "evidence"),
+            coverage=_get_dim(_get_dim(raw, "coverage"), "score"),
+            coverage_evidence=_get_dim(_get_dim(raw, "coverage"), "evidence"),
+            structure=_get_dim(_get_dim(raw, "structure"), "score"),
+            structure_evidence=_get_dim(_get_dim(raw, "structure"), "evidence"),
             report_markdown_quality=report_markdown_quality,
         )
         meta = {

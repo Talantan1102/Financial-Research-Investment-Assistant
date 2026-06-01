@@ -205,8 +205,11 @@ class PathBRunner:
                             episode_id=target_eid,
                         )
                         inserted_in_chunk += 1
-                    except Exception as exc:  # noqa: BLE001
-                        _logger.warning("archival_insert failed in path_b: %s", exc)
+                    except Exception as exc:  # noqa: BLE001 — one bad edge must not drop the rest
+                        # C3: was a silent warning that hid the KeyError/AttributeError
+                        # contract bugs. Log with traceback so real insert failures
+                        # (Milvus/AGE/DB down) are diagnosable, and still record them.
+                        _logger.error("archival_insert failed in path_b: %s", exc, exc_info=True)
                         insert_errors.append({"error": str(exc)[:300]})
 
                 inserted_total += inserted_in_chunk
@@ -266,29 +269,106 @@ def _uuid(val: Any) -> UUID:
     return UUID(str(val))
 
 
+# Well-known implicit graph-root entity. The extractor prompt fixes the user's
+# label+type to "User" ("User: 固定 'User'") and does NOT re-list it in `entities`,
+# so edges sourced at the user (e.g. User HOLDS Stock) carry no co-extracted entity
+# to resolve the type from — default it here.
+_USER_ENTITY = "User"
+
+
+def _coerce_dt(val: Any) -> datetime:
+    """Coerce an ISO-8601 string (or datetime) to a tz-aware datetime (UTC if naive)."""
+    dt = val if isinstance(val, datetime) else datetime.fromisoformat(str(val))
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
+def _entity_type_map(entities: Any) -> dict[str, str]:
+    """Build {entity_label: entity_type} from co-extracted entities (pydantic or dict)."""
+    out: dict[str, str] = {}
+    for ent in entities or []:
+        if hasattr(ent, "entity_label"):
+            out[ent.entity_label] = ent.entity_type
+        elif isinstance(ent, dict) and "entity_label" in ent:
+            out[ent["entity_label"]] = ent.get("entity_type", "")
+    return out
+
+
 def _coerce_edges(extracted: Any) -> list[dict[str, Any]]:
     """Accept both shapes for cross-turn extractor return:
 
     - dict {"entities": [...], "edges": [...]} (legacy mock / pre-§17 shape)
     - list[ExtractionOutput] (per shared contract § 17 A2 (4) final)
 
-    Returns flat list of edge dicts (each is the JSON shape passed to
-    archival_memory_insert as `content`).
+    Returns flat list of edge dicts in the EXACT shape archival_memory_insert
+    reads as `content`: rel_type / source_entity_type / source_label /
+    target_entity_type / target_label / valid_from(datetime) / valid_to / ...
+
+    C3: ExtractedEdge only carries source_label/target_label and str valid_from;
+    the *_entity_type keys come from the co-extracted entities (discarded by the
+    old impl → KeyError) and valid_from must be a datetime (old str → AttributeError
+    on .isoformat()). Both are injected/coerced here, at the boundary. Edges whose
+    entity types can't be resolved or whose dates are unparseable are skipped+logged
+    (fail-loud, not silently dropped into a half-written batch).
     """
+    # Normalize to (entities, edges) groups regardless of input shape.
+    groups: list[tuple[Any, Any]] = []
     if isinstance(extracted, dict):
-        return list(extracted.get("edges") or [])
-    if isinstance(extracted, list):
-        out: list[dict[str, Any]] = []
+        groups.append((extracted.get("entities"), extracted.get("edges")))
+    elif isinstance(extracted, list):
         for item in extracted:
-            # Pydantic ExtractionOutput → has .edges (list of ExtractedEdge)
-            edges = getattr(item, "edges", None)
-            if edges is None and isinstance(item, dict):
-                edges = item.get("edges") or []
-            for edge in edges or []:
-                # Convert pydantic ExtractedEdge to dict for downstream consumer
-                if hasattr(edge, "model_dump"):
-                    out.append(edge.model_dump())
-                elif isinstance(edge, dict):
-                    out.append(edge)
-        return out
-    return []
+            ents = getattr(item, "entities", None)
+            edgs = getattr(item, "edges", None)
+            if isinstance(item, dict):
+                ents = item.get("entities") if ents is None else ents
+                edgs = item.get("edges") if edgs is None else edgs
+            groups.append((ents, edgs))
+    else:
+        return []
+
+    out: list[dict[str, Any]] = []
+    for entities, edges in groups:
+        type_map = _entity_type_map(entities)
+        for edge in edges or []:
+            if hasattr(edge, "model_dump"):
+                ed: dict[str, Any] = edge.model_dump()
+            elif isinstance(edge, dict):
+                ed = dict(edge)
+            else:
+                continue
+
+            src_label = ed.get("source_label")
+            tgt_label = ed.get("target_label")
+            src_type = ed.get("source_entity_type") or type_map.get(src_label or "")
+            tgt_type = ed.get("target_entity_type") or type_map.get(tgt_label or "")
+            # "User" is the implicit root entity (not re-listed in entities) — default its type.
+            if not src_type and src_label == _USER_ENTITY:
+                src_type = _USER_ENTITY
+            if not tgt_type and tgt_label == _USER_ENTITY:
+                tgt_type = _USER_ENTITY
+            if not src_type or not tgt_type:
+                _logger.error(
+                    "path_b _coerce_edges: cannot resolve entity_type for edge "
+                    "%s -> %s (src_type=%r tgt_type=%r) — skipping",
+                    src_label,
+                    tgt_label,
+                    src_type,
+                    tgt_type,
+                )
+                continue
+            ed["source_entity_type"] = src_type
+            ed["target_entity_type"] = tgt_type
+
+            try:
+                ed["valid_from"] = _coerce_dt(ed.get("valid_from"))
+                if ed.get("valid_to") is not None:
+                    ed["valid_to"] = _coerce_dt(ed.get("valid_to"))
+            except (ValueError, TypeError) as exc:
+                _logger.error(
+                    "path_b _coerce_edges: unparseable valid_from/valid_to %r/%r: %s — skipping",
+                    ed.get("valid_from"),
+                    ed.get("valid_to"),
+                    exc,
+                )
+                continue
+            out.append(ed)
+    return out

@@ -189,6 +189,10 @@ class DatabaseExplorer:
             raise ValueError("Only SELECT queries are allowed")
 
         # 禁止危险关键字
+        # C35: a leading SELECT is not safe by itself — PG file-read / privilege
+        # functions (pg_read_file, COPY, dblink, pg_shadow ...) are SELECT-able and
+        # enable arbitrary file read / credential exfil. Block them, and block any
+        # UNION (UNION-based injection), not just write DDL/DML.
         dangerous_keywords = [
             "INSERT",
             "UPDATE",
@@ -199,6 +203,14 @@ class DatabaseExplorer:
             "TRUNCATE",
             "GRANT",
             "REVOKE",
+            "COPY",
+            "PG_READ_FILE",
+            "PG_LS_DIR",
+            "PG_WRITE_FILE",
+            "PG_SHADOW",
+            "PG_AUTHID",
+            "DBLINK",
+            "UNION",
         ]
         for keyword in dangerous_keywords:
             if keyword in sql_clean:

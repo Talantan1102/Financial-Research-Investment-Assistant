@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -41,13 +41,17 @@ class StockQuoteTool(Tool):
         if self._tushare is None:
             raise ToolError("tushare not configured — cannot fetch daily data")
 
-        today = datetime.now().strftime("%Y%m%d")
-        # Fetch last 3 days to ensure at least one trading day is included
+        # C54: use a 5-day window so weekends/holidays always yield at least one trading day.
+        # The comment originally said "last 3 days" but start=today,end=today was a zero-width
+        # window on non-trading days.  sort_values + iloc[0] below picks the most recent row.
+        now = datetime.now()
+        start = (now - timedelta(days=5)).strftime("%Y%m%d")
+        end = now.strftime("%Y%m%d")
         try:
             df = await self._tushare.get_daily(
                 ts_code=validated.ts_code,
-                start=today,
-                end=today,
+                start=start,
+                end=end,
             )
         except Exception as exc:
             raise ToolError(f"get_daily failed: {exc}") from exc

@@ -15,11 +15,45 @@ spec ref: 2026-05-16-v1.x-bull-bear-debate-design.md § 9
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-__all__ = ["AdvocateOutput", "DebateTrace"]
+if TYPE_CHECKING:
+    from app.agents.schemas import ResearchState
+
+__all__ = ["AdvocateOutput", "DebateTrace", "format_valuation_block"]
+
+
+def format_valuation_block(state: ResearchState, side: Literal["bull", "bear"]) -> str:
+    """C62: 单一 SSOT — bull/bear 共享估值 block 注入函数，通过 side 控制差异。
+
+    bull 侧: pe_value / dcf_base / dcf_bull / outlier_diagnosis
+    bear 侧: pe_value / dcf_base / dcf_bear / outlier_diagnosis / severity warning
+    """
+    va = state.valuation_analysis
+    if va is None:
+        return ""
+    lines: list[str] = []
+    if va.pe_value is not None:
+        lines.append(f"  - PE 理论价: {va.pe_value:,.2f}")
+    if va.dcf_base is not None:
+        lines.append(f"  - DCF base: {va.dcf_base:,.2f}")
+    if side == "bull":
+        if va.dcf_bull is not None:
+            lines.append(f"  - DCF bull: {va.dcf_bull:,.2f}")
+        if va.dcf_bear is not None:
+            lines.append(f"  - DCF bear: {va.dcf_bear:,.2f}")
+    else:  # bear
+        if va.dcf_bear is not None:
+            lines.append(f"  - DCF bear: {va.dcf_bear:,.2f}")
+        if va.valuation_consistency == "severe":
+            lines.append("  - cross-check severity: SEVERE (打架信号, bear 应利用)")
+    if va.outlier_diagnosis is not None:
+        lines.append(f"  - outlier diagnosis: {va.outlier_diagnosis.narrative}")
+    if not lines:
+        return ""
+    return "\n估值数据(A5a cross-check):\n" + "\n".join(lines) + "\n"
 
 
 class AdvocateOutput(BaseModel):
