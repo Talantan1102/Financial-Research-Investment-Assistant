@@ -1,7 +1,11 @@
 """知识库管理路由"""
 
+import asyncio
+import logging
 import os
+import re
 import shutil
+import uuid as _uuid
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
@@ -23,9 +27,91 @@ from app.schemas.knowledge import (
 
 router = APIRouter(prefix="/knowledge-bases", tags=["知识库管理"])
 
+logger = logging.getLogger(__name__)
+
 # 文件上传目录
 UPLOAD_DIR = "/tmp/knowledge_uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# 直读为文本的扩展名(其余走 pdf/docx 解析或二进制兜底)
+_TEXT_EXTENSIONS = {
+    "txt",
+    "md",
+    "markdown",
+    "json",
+    "csv",
+    "py",
+    "js",
+    "ts",
+    "jsx",
+    "tsx",
+    "yaml",
+    "yml",
+    "xml",
+    "log",
+    "html",
+    "htm",
+}
+
+
+def _extract_text(file_path: str, filename: str) -> str:
+    """从上传文件抽取纯文本。txt/code 直读;pdf 走 pdfplumber;docx 走 python-docx。"""
+    ext = os.path.splitext(filename)[1].lower().lstrip(".")
+    if ext in _TEXT_EXTENSIONS:
+        with open(file_path, "rb") as f:
+            raw = f.read()
+        # utf-8 优先,gb18030 兜中文遗留编码;都失败再用 replace 出可见替换符
+        # (不放 latin-1:它对任意字节都不抛错,会把中文硬解成 mojibake 污染 embedding)。
+        for enc in ("utf-8", "gb18030"):
+            try:
+                return raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return raw.decode("utf-8", errors="replace")
+    if ext == "pdf":
+        import pdfplumber
+
+        parts: list[str] = []
+        with pdfplumber.open(file_path) as pdf:
+            for page in pdf.pages:
+                t = page.extract_text() or ""
+                if t.strip():
+                    parts.append(t)
+        return "\n\n".join(parts)
+    if ext in ("docx", "doc"):
+        import docx
+
+        d = docx.Document(file_path)
+        return "\n".join(p.text for p in d.paragraphs if p.text.strip())
+    # 兜底:按文本读
+    with open(file_path, "rb") as f:
+        return f.read().decode("utf-8", errors="replace")
+
+
+def _chunk_text(text: str, chunk_size: int = 600, overlap: int = 80) -> list[str]:
+    """段落感知的简单切块:按空行切段,贪心打包到 ~chunk_size;超长段硬切。"""
+    text = text.strip()
+    if not text:
+        return []
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    chunks: list[str] = []
+    buf = ""
+    for p in paras:
+        if len(buf) + len(p) + 1 <= chunk_size:
+            buf = f"{buf}\n{p}".strip()
+        else:
+            if buf:
+                chunks.append(buf)
+                buf = ""
+            if len(p) <= chunk_size:
+                buf = p
+            else:
+                step = max(chunk_size - overlap, 1)
+                for i in range(0, len(p), step):
+                    chunks.append(p[i : i + chunk_size])
+    if buf:
+        chunks.append(buf)
+    return chunks
 
 
 def kb_to_response(kb: KnowledgeBase) -> KnowledgeBaseResponse:
@@ -57,46 +143,66 @@ def doc_to_response(doc: Document) -> DocumentResponse:
 
 
 async def process_document(document_id: str, file_path: str, kb_id: str, db_session_factory):
-    """后台处理文档（使用 DocMind 解析、向量化、存储到ES）"""
-    # C73: kb_id (UUID string) replaced kb_name as the collection identifier so
-    # two users with identically-named KBs get distinct Milvus collections.
-    from app.service.docmind_service import process_document_with_docmind
+    """后台处理文档：解析 → 分块 → qwen embed → Milvus(kb_{kb_id})。
 
-    # 创建新的数据库会话
+    v1.x 修复：原实现 import `app.service.docmind_service`，该模块依赖**未声明**的
+    `alibabacloud_docmind_api20220711` SDK，import 即 ModuleNotFoundError，后台任务
+    一进来就抛错、文档永久卡 "pending" 且不向用户暴露（违反 fail-loud）。改走本地
+    pdfplumber/直读解析 + EMBEDDING_MODE(qwen) + MilvusService.insert_documents，
+    写入与 get_document_chunks 一致的 `kb_{kb_id}` collection。错误写入
+    doc.error_message 让前端可见。
+    """
+    from app.service.milvus_service import get_milvus_service
+    from app.services.embedding_factory import build_embedding_service_from_env
+
     db = db_session_factory()
     try:
-        # 获取文档记录
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
             return
 
-        # 更新状态为处理中
         doc.status = "processing"
         db.commit()
 
         try:
-            # C73: use KB UUID (globally unique) as the collection name to prevent
-            # cross-user collection collisions when two users share a KB display name.
+            # C73: KB UUID 作为 collection 名，避免同名 KB 跨用户撞 collection。
             index_name = f"kb_{kb_id}".replace("-", "_")
 
-            # 使用 DocMind 处理文档
-            result = process_document_with_docmind(
-                file_path=file_path,
-                file_name=doc.filename,
-                index_name=index_name,
-            )
+            # 解析是阻塞 IO(pdfplumber/文件读),放线程池避免堵 async 事件循环。
+            text = await asyncio.to_thread(_extract_text, file_path, doc.filename)
+            chunks = _chunk_text(text)
+            if not chunks:
+                raise ValueError("未能从文档提取到任何文本内容")
 
-            if result["success"]:
-                doc.status = "completed"
-                doc.chunk_count = result["document_count"]
-                doc.error_message = None
-            else:
-                doc.status = "failed"
-                doc.error_message = result["message"]
+            embedder = build_embedding_service_from_env()
+            vectors = await embedder.embed(chunks)  # 已是 async(内部 to_thread 调 dashscope)
 
-        except Exception as e:
+            documents = [
+                {
+                    "id": str(_uuid.uuid4()),
+                    "doc_id": str(doc.id),
+                    "kb_id": str(kb_id),
+                    "filename": doc.filename,
+                    "content": chunk,
+                    "chunk_index": i,
+                    "vector": vector,
+                }
+                for i, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True))
+            ]
+            # get_milvus_service() 首调会 connect、insert/flush 都是阻塞 pymilvus RPC,
+            # 一并放线程池,避免摄取大文档时堵塞整个 FastAPI 事件循环。
+            milvus = await asyncio.to_thread(get_milvus_service)
+            count = await asyncio.to_thread(milvus.insert_documents, index_name, documents)
+
+            doc.status = "completed"
+            doc.chunk_count = count
+            doc.error_message = None
+            logger.info("KB ingest done doc=%s chunks=%d collection=%s", doc.id, count, index_name)
+
+        except Exception as e:  # noqa: BLE001 — 错误隔离 + fail-loud 写库
+            logger.exception("KB ingest failed doc=%s", document_id)
             doc.status = "failed"
-            doc.error_message = str(e)
+            doc.error_message = f"{type(e).__name__}: {e}"
 
         db.commit()
 
