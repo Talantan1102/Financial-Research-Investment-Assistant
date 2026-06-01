@@ -35,8 +35,22 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # 直读为文本的扩展名(其余走 pdf/docx 解析或二进制兜底)
 _TEXT_EXTENSIONS = {
-    "txt", "md", "markdown", "json", "csv", "py", "js", "ts",
-    "jsx", "tsx", "yaml", "yml", "xml", "log", "html", "htm",
+    "txt",
+    "md",
+    "markdown",
+    "json",
+    "csv",
+    "py",
+    "js",
+    "ts",
+    "jsx",
+    "tsx",
+    "yaml",
+    "yml",
+    "xml",
+    "log",
+    "html",
+    "htm",
 }
 
 
@@ -183,9 +197,7 @@ async def process_document(document_id: str, file_path: str, kb_id: str, db_sess
             doc.status = "completed"
             doc.chunk_count = count
             doc.error_message = None
-            logger.info(
-                "KB ingest done doc=%s chunks=%d collection=%s", doc.id, count, index_name
-            )
+            logger.info("KB ingest done doc=%s chunks=%d collection=%s", doc.id, count, index_name)
 
         except Exception as e:  # noqa: BLE001 — 错误隔离 + fail-loud 写库
             logger.exception("KB ingest failed doc=%s", document_id)
