@@ -96,6 +96,12 @@
                 {% else %}
                   <span class="eval-cell-gaphint">待补</span>
                 {% endif %}
+                {% if cell.todo %}
+                  <span class="eval-cell-todo"
+                        title="有补缺口计划 {{ cell.todo | selectattr('done') | list | length }}/{{ cell.todo|length }}">
+                    📋 {{ cell.todo | selectattr('done') | list | length }}/{{ cell.todo|length }}
+                  </span>
+                {% endif %}
               </button>
             </td>
           {% endfor %}
@@ -111,6 +117,33 @@
     点上方任意格子 — 看该子系统在该层级的方法 / 代码证据 / 缺口。
   </div>
 </div>
+
+{# 组件级评估学习路径 — 跨子系统的有序学习旅程(数据自 learning_path)#}
+{% if matrix.learning_path %}
+<section class="eval-path">
+  <h3 class="eval-path-h">组件级评估 · 学习路径</h3>
+  <p class="eval-path-sub">从入门到能动手的有序旅程,横跨 planner / 检索 / critic。
+    点上方矩阵格看每个零件现状,照这条路一步步补;约 2-3 周(兼职粒度)。</p>
+  <ol class="eval-path-steps">
+    {% for step in matrix.learning_path %}
+      {% set _k = 'do' if '动手' in step.kind else 'read' %}
+      <li class="eval-path-step">
+        <div class="eps-head">
+          <span class="eps-title">{{ step.title }}</span>
+          {% if step.kind %}<span class="eps-kind eps-kind--{{ _k }}">{{ step.kind }}</span>{% endif %}
+          {% if step.est %}<span class="eps-est">{{ step.est }}</span>{% endif %}
+        </div>
+        <p class="eps-what">{{ step.what }}</p>
+        {% if step.maps %}
+          <div class="eps-maps">
+            {% for m in step.maps %}<span class="eps-map-chip">{{ m }}</span>{% endfor %}
+          </div>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+{% endif %}
 
 {# 底部小卡 — 评估底座 #}
 <section class="eval-base">

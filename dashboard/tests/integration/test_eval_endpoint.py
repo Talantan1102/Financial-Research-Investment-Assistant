@@ -88,6 +88,53 @@ def test_eval_cell_expand_gap(client: TestClient) -> None:
     assert "pytest.mark.skip" in body
 
 
+def test_eval_cell_renders_method_cards(client: TestClient) -> None:
+    # 评估方法不再是裸 tag — 应渲染白话卡片:family 标签 + how + 样例三段(输入/期望/判定)
+    body = client.get("/eval/cell/memory/component").text
+    assert "怎么评 · 配样例" in body  # section 提示
+    assert "eval-method" in body  # 卡片 class
+    assert "输入" in body and "期望" in body and "判定" in body  # 样例三段 key
+    # 至少一个 family 中文标签出现
+    assert any(
+        fam in body
+        for fam in ["确定性离线", "替身隔离", "LLM 评判", "录放回放", "端到端", "回归鲁棒"]
+    )
+
+
+def test_eval_cell_renders_multi_case_samples(client: TestClient) -> None:
+    # chat.agent 用 golden-case,天然多类 case(短/带工具/技能/升级/重连)→ 应渲染 cases 列表
+    body = client.get("/eval/cell/chat/agent").text
+    assert "eval-method-cases" in body
+
+
+def test_eval_cell_renders_todo(client: TestClient) -> None:
+    # kb.component 带 RAGAS 检索评估 TODO — 详情面板应渲染「计划 · TODO」+ 任务文案
+    resp = client.get("/eval/cell/kb/component")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "计划 · TODO" in body
+    assert "RAGAS" in body
+    assert "~1.5d" in body  # 工期估计 chip
+    assert "0/6" in body  # done/total 计数
+
+
+def test_eval_matrix_shows_todo_badge(client: TestClient) -> None:
+    # 矩阵页 kb 行应有 TODO 角标(不点开也能在看板上看到)
+    body = client.get("/eval").text
+    assert "eval-cell-todo" in body
+
+
+def test_eval_renders_learning_path(client: TestClient) -> None:
+    # /eval 页应渲染「组件级评估 · 学习路径」区块 + 各步骤
+    body = client.get("/eval").text
+    assert "组件级评估 · 学习路径" in body
+    assert "eval-path-step" in body
+    assert "第 0 步" in body and "第 7 步" in body
+    # 步骤里的关联格 chip + 工具关键词
+    assert "对话 Agent·组件级" in body
+    assert "DeepEval" in body or "RAGAS" in body
+
+
 def test_eval_cell_unknown_subsystem_404(client: TestClient) -> None:
     resp = client.get("/eval/cell/nope/component")
     assert resp.status_code == 404
