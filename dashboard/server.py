@@ -555,6 +555,51 @@ async def story_view(request: Request) -> HTMLResponse:
     )
 
 
+EVAL_SYSTEM_PATH = CONFIG_DIR / "eval_system.yaml"
+
+
+async def eval_view(request: Request) -> HTMLResponse:
+    """GET /eval — 子系统 × 评估层级 覆盖矩阵。数据驱动自 eval_system.yaml。
+
+    论文 §8 Verification & Evaluation;"没有评估就没有优化"。
+    纯渲染:不依赖 DB / snapshot,只读 yaml(SSOT)。
+    """
+    from dashboard.derive.eval_matrix import load_eval_matrix, matrix_summary
+
+    matrix = load_eval_matrix(EVAL_SYSTEM_PATH)
+    summary = matrix_summary(matrix)
+    template = templates.get_template("eval.html")
+    return HTMLResponse(
+        template.render(
+            matrix=matrix,
+            summary=summary,
+            active_nav="eval",
+        )
+    )
+
+
+async def eval_cell_expand(request: Request) -> HTMLResponse:
+    """GET /eval/cell/{subsystem}/{layer} — 单格展开 fragment(htmx swap)。"""
+    from dashboard.derive.eval_matrix import load_eval_matrix
+
+    subsystem_id = request.path_params["subsystem"]
+    layer_id = request.path_params["layer"]
+
+    matrix = load_eval_matrix(EVAL_SYSTEM_PATH)
+    layer = next((layer for layer in matrix.layers if layer.id == layer_id), None)
+    if layer is None:
+        return HTMLResponse(f"unknown layer: {layer_id}", status_code=404)
+    subsystem = next((s for s in matrix.subsystems if s.id == subsystem_id), None)
+    if subsystem is None:
+        return HTMLResponse(f"unknown subsystem: {subsystem_id}", status_code=404)
+    cell = subsystem.cells.get(layer_id)
+    if cell is None:
+        return HTMLResponse(f"no cell for {subsystem_id}/{layer_id}", status_code=404)
+
+    template = templates.get_template("_eval_cell_detail.html")
+    return HTMLResponse(template.render(subsystem=subsystem, layer=layer, cell=cell))
+
+
 async def related_capabilities(request: Request) -> JSONResponse:
     """GET /cap/{cap_id}/related?k=5 — 相关 cap 推荐 (Milvus 真路径 / keyword fallback)。"""
     cap_id = request.path_params["cap_id"]
@@ -608,6 +653,8 @@ app = Starlette(
         Route("/healthz", healthz),
         Route("/refresh", post_refresh, methods=["GET"]),
         Route("/story", story_view),
+        Route("/eval", eval_view),
+        Route("/eval/cell/{subsystem}/{layer}", eval_cell_expand, methods=["GET"]),
         Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
         Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
         Route("/cap/{cap_id}/screenshot", post_screenshot, methods=["POST"]),

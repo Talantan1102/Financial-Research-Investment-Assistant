@@ -1,0 +1,597 @@
+# dashboard/config/eval_system.yaml
+# ============================================================================
+# 评估体系覆盖矩阵 — 子系统 × 评估层级
+# ----------------------------------------------------------------------------
+# 论文锚点: Li et al., Agent Harness Engineering: A Survey (2026),
+#           §8 Verification & Evaluation。
+#
+#   "没有评估就没有优化"  (No evaluation, no optimization.)
+#   一个能力如果没有任何层级的评估守护,它的"能用"只是侥幸;
+#   这张矩阵一眼看出整个项目哪里还没被评估盯住。
+#
+# 这是一份**可编辑的活文档** (SSOT):
+#   改这个 yaml → 刷新 /eval 页面即更新,页面不写回。
+#   evidence 路径是真实代码扫描结果;status 取值只允许
+#   covered / partial / gap,非法值会在 derive/eval_matrix.py fail loud。
+# ============================================================================
+
+# 列 = 4 个评估层级 (从单元到在线,粒度由细到粗)
+layers:
+  - id: component
+    name_cn: "组件级"
+    name_en: "Component"
+    desc: "单元级 — 切块/向量/检索/单工具正确性的离线指标(recall@k, nDCG, precision)"
+
+  - id: agent
+    name_cn: "智能体级"
+    name_en: "Agent"
+    desc: "单 agent 输出正确性 — LLM 评判 / golden case"
+
+  - id: system
+    name_cn: "系统级"
+    name_en: "System"
+    desc: "端到端任务成功率 — e2e golden / 回测 / 差分对照"
+
+  - id: regression
+    name_cn: "回归监控"
+    name_en: "Regression & Online"
+    desc: "回归套件 / 在线监控 / 鲁棒性(混沌·投毒·漂移)"
+
+# 行 = 7 个子系统;每行有 4 个 cell,key = layer id。
+# cell.status ∈ {covered, partial, gap}
+#   covered  = 该层级有真实、运行中的评估守护
+#   partial  = 有基础设施/部分覆盖,但有明确缺口(skip / 未接线 / 未跑)
+#   gap      = 该层级实质空白
+subsystems:
+  # --------------------------------------------------------------------------
+  - id: kb
+    name_cn: "知识库检索"
+    name_en: "Knowledge Base Retrieval"
+    summary: >-
+      组件级（单元/集成）覆盖扎实：chunker、embedding、milvus client、search
+      service、ingest pipeline、cache 均有专项 L0/L1 测试；但 KB 检索质量的离线
+      IR 指标（recall@k / nDCG / MRR）完全缺位，系统级回测中 KB 仅以 time-travel
+      过滤 adapter 身份参与 DD 报告 backtest，无独立检索召回 ground-truth 评估，
+      回归/监控层对 KB 也无任何覆盖。
+    cells:
+      component:
+        status: partial
+        methods:
+          - unit-test
+          - integration-test
+          - cassette-replay
+        evidence:
+          - backend/tests/unit/test_chunkers.py
+          - backend/tests/unit/test_kb_search_service.py
+          - backend/tests/unit/test_embedding_service.py
+          - backend/tests/unit/test_milvus_client.py
+          - backend/tests/unit/test_ingest_pipeline.py
+          - backend/tests/unit/test_chunk_embed_cache.py
+          - backend/tests/unit/test_reliable_kb_service.py
+          - backend/tests/unit/kb/test_chunk_schema_publish_date.py
+          - backend/tests/unit/test_kb_factory.py
+          - backend/tests/integration/test_milvus_container.py
+          - backend/tests/e2e/test_kb_search_cassette.py
+          - backend/tests/e2e/test_ingest_cassette.py
+        gap: >-
+          组件功能正确性有覆盖，但无 chunking 质量离线指标（chunk size 分布、
+          oversize rate）、无 embedding 召回 ground-truth 对比（qwen v3 vs BGE
+          无 A/B 数据）、无 top_k/threshold 参数调优实验；
+          docs/claude-context/kb-eval-gaps.md 明确记录这些缺口推迟到 v0.8。
+      agent:
+        status: partial
+        methods:
+          - cassette-replay
+          - llm-judge
+        evidence:
+          - backend/tests/e2e/test_kb_search_cassette.py
+          - backend/tests/e2e/memory/test_memory_kb_routing_cassette.py
+          - backend/tests/integration/memory/test_kb_routing_e2e.py
+          - backend/tests/eval/dd_report/test_citation_metric.py
+        gap: >-
+          KB 在 agent 层的评估只有 routing 正确性（memory vs kb vs both 路由）和
+          citation 精准率（report 引用 chunk 是否支撑论点），没有专门针对 KB 检索
+          agent 输出质量的独立 golden case 集；citation_metric 是 DD 报告评估的
+          一部分，非 KB 子系统独立 judge。
+      system:
+        status: partial
+        methods:
+          - backtest
+          - ablation
+          - e2e-cassette
+        evidence:
+          - backend/eval/dd_report/kb_backtest_adapter.py
+          - backend/eval/dd_report/ablation/variants.py
+          - backend/eval/dd_report/ablation/null_adapters.py
+          - backend/tests/eval/dd_report/test_kb_backtest_adapter.py
+          - backend/tests/eval/dd_report/test_ablation_variants.py
+        gap: >-
+          KB 在系统级仅通过 KBBacktestAdapter（time-travel 过滤）和 V1_NO_RAG
+          ablation 变量间接参与 DD 报告 backtest，验证的是「有 KB 比无 KB 分数高」
+          而非 KB 检索召回率本身；没有以 query→relevant chunk 为粒度的端到端检索
+          recall 评估。
+      regression:
+        status: gap
+        methods: []
+        evidence: []
+        gap: >-
+          无 KB 检索专项回归测试套件、无在线检索召回监控、无 embedding 漂移检测、
+          无 chunk schema 变更守护；docs/claude-context/kb-eval-gaps.md 的 sketch
+          中提到 scripts/eval_kb_retrieval.py 和 tests/eval/results/kb_retrieval/
+          占位，但均未实现。
+
+  # --------------------------------------------------------------------------
+  - id: chat
+    name_cn: "对话 Agent"
+    name_en: "Chat Agent"
+    summary: >-
+      组件级和系统级测试覆盖较充分(单元测试覆盖 planner/runner/graph/SSE/
+      persistence 各层，差分 golden 守护 cancel/retry/active_task 三条路径)；
+      智能体级 Judge 基础设施存在但 golden_chat 5 个 JSON case 没有对应
+      test_*.py 驱动，实际未被执行，LLM-judge 质量评估停留在 infra 层；回归层
+      缺乏针对 chat agent 的混沌/投毒/漂移测试。
+    cells:
+      component:
+        status: covered
+        methods:
+          - unit-test
+          - mock-llm
+          - fixture-stub
+        evidence:
+          - backend/tests/unit/agents/test_chat_agent.py
+          - backend/tests/unit/agents/test_chat_planner.py
+          - backend/tests/unit/agents/test_chat_state.py
+          - backend/tests/unit/agents/test_chat_state_routing.py
+          - backend/tests/unit/orchestration/test_chat_graph_v0_9.py
+          - backend/tests/unit/orchestration/test_chat_graph_skill_routing.py
+          - backend/tests/unit/test_chat_graph.py
+          - backend/tests/unit/test_chat_planner.py
+          - backend/tests/unit/test_chat_runner.py
+          - backend/tests/unit/test_chat_finalize.py
+          - backend/tests/unit/test_chat_cancel_bus.py
+          - backend/tests/unit/test_chat_event_bus.py
+          - backend/tests/unit/services/test_chat_session_repo.py
+          - backend/tests/unit/test_chat_task_repo.py
+          - backend/tests/unit/test_chat_task_model.py
+          - backend/tests/unit/router/test_chat_sse_events.py
+        gap: ""
+      agent:
+        status: partial
+        methods:
+          - llm-as-judge
+          - golden-case
+          - cassette
+        evidence:
+          - backend/tests/eval/golden_chat/golden_chat_short.json
+          - backend/tests/eval/golden_chat/golden_chat_medium_with_tools.json
+          - backend/tests/eval/golden_chat/golden_chat_skill_driven.json
+          - backend/tests/eval/golden_chat/golden_chat_escalation_handoff.json
+          - backend/tests/eval/golden_chat/golden_chat_multi_chat_reconnect.json
+          - backend/tests/eval/golden_chat/conftest.py
+          - backend/tests/integration/test_eval_runner_chat_agent_sut.py
+          - backend/app/services/judge.py
+          - backend/tests/fixtures/cassettes/test_chat_agent_cassette/test_chat_agent_stock_quote_end_to_end.yaml
+        gap: >-
+          golden_chat/ 目录下 5 个 JSON case 有 judge_rubric 和 fixture loader，
+          但目录中无 test_*.py，没有任何测试函数实际用 EvalRunner+Judge 执行这些
+          case；L2 cassette test 被 @pytest.mark.skip 跳过（等待 e2e cassette
+          重录）。
+      system:
+        status: partial
+        methods:
+          - differential-golden
+          - sse-integration
+          - persistence-integration
+          - cancel-retry-integration
+        evidence:
+          - backend/tests/integration/test_chat_differential_golden.py
+          - backend/tests/integration/test_chat_router_sse.py
+          - backend/tests/integration/test_chat_persistence_plan1.py
+          - backend/tests/integration/test_chat_cancel_retry.py
+          - backend/tests/integration/test_chat_inflight_l2.py
+          - backend/tests/integration/agents/test_chat_planner_self_managed_e2e.py
+          - backend/tests/integration/memory/test_persona_chat_planner_e2e.py
+          - backend/tests/e2e/test_chat_title_e2e.py
+          - backend/tests/integration/test_chat_agent_e2e_mock.py
+        gap: >-
+          chat_title_e2e 依赖 serve 进程 + docker，CI 中 skip；无真实多轮对话
+          端到端成功率回测；escalation → research_graph 跨子系统路径缺乏 e2e
+          覆盖。
+      regression:
+        status: partial
+        methods:
+          - stale-scanner-L0
+          - cancel-bus-unit
+        evidence:
+          - backend/tests/unit/test_chat_stale_scanner.py
+          - backend/tests/unit/test_chat_cancel_bus.py
+        gap: >-
+          无针对 chat agent 的混沌注入、投毒、或 LLM 输出漂移检测；stale_scanner
+          覆盖自愈路径但不覆盖 agent 行为回归；无在线监控指标收集。
+
+  # --------------------------------------------------------------------------
+  - id: research
+    name_cn: "深度研报"
+    name_en: "Deep Research Report"
+    summary: >-
+      深度研报(DD report)的评估框架整体完整度较高，系统级回测 + 5 指标 + 4 变体
+      ablation 控制变量框架均已真实落地；最大短板是回归监控层——dd_report 专项
+      评估测试不在 PR CI testpaths 内，b1_differential 4 个端到端 golden case
+      全部带 pytest.mark.skip（v1.x A5b cassette 失效未重录），且 deep_research_v2
+      子模块完全没有专项测试覆盖。
+    cells:
+      component:
+        status: covered
+        methods:
+          - unit-test
+          - pydantic-schema-validation
+          - parse-function-test
+          - data-adapter-test
+        evidence:
+          - backend/tests/eval/dd_report/test_numerical_metric.py
+          - backend/tests/eval/dd_report/test_citation_metric.py
+          - backend/tests/eval/dd_report/test_risk_pairing_metric.py
+          - backend/tests/eval/dd_report/test_prediction_metric.py
+          - backend/tests/eval/dd_report/test_composite_judge_metric.py
+          - backend/tests/eval/dd_report/test_metric_registry.py
+          - backend/tests/eval/dd_report/test_metric_scores_schema.py
+          - backend/tests/eval/dd_report/test_leak_detector.py
+          - backend/tests/eval/dd_report/test_llm_swapper.py
+          - backend/tests/eval/dd_report/test_ground_truth_loader.py
+          - backend/tests/eval/dd_report/test_tushare_backtest_adapter.py
+          - backend/tests/eval/dd_report/test_kb_backtest_adapter.py
+          - backend/tests/eval/dd_report/test_ablation_variants.py
+          - backend/tests/eval/dd_report/test_pipeline_adapter.py
+          - backend/tests/unit/agents/test_investment_dd_schema.py
+          - backend/tests/unit/agents/valuation_helpers/test_dcf.py
+          - backend/tests/unit/agents/valuation_helpers/test_pe.py
+          - backend/eval/dd_report/metrics/citation_metric.py
+          - backend/eval/dd_report/metrics/numerical_metric.py
+          - backend/eval/dd_report/metrics/risk_pairing_metric.py
+          - backend/eval/dd_report/metrics/prediction_metric.py
+          - backend/eval/dd_report/metrics/composite_judge_metric.py
+        gap: ""
+      agent:
+        status: partial
+        methods:
+          - LLM-as-judge
+          - cassette-replay
+          - golden-case
+          - mock-llm-e2e
+        evidence:
+          - backend/tests/eval/dd_report/test_composite_judge_metric.py
+          - backend/tests/eval/dd_report/cassettes/composite_judge_3llm.yaml
+          - backend/tests/eval/dd_report/cassettes/citation_supports_judge.yaml
+          - backend/tests/eval/dd_report/cassettes/risk_pairing_judge.yaml
+          - backend/tests/eval/dd_report/test_golden_cases_smoke.py
+          - backend/eval/dd_report/golden/backtest_cases.jsonl
+          - backend/tests/eval/golden_cases/b1_differential/test_b1_diff_balanced.py
+          - backend/tests/eval/golden_cases/b1_differential/test_b1_diff_aggressive_growth.py
+          - backend/tests/eval/golden_cases/b1_differential/test_b1_diff_capital_preservation.py
+          - backend/tests/integration/test_eval_runner_research_agent_sut.py
+          - backend/tests/integration/test_research_agent_e2e_mock.py
+          - backend/tests/fixtures/cassettes/test_research_agent_cassette/test_research_agent_maotai_fundamental.yaml
+        gap: >-
+          b1_differential 的全部 4 个端到端 golden case 均带 pytest.mark.skip
+          （v1.x A5b DebateOrchestrator 改完后 cassette 录音未跟进重录，注释说明
+          需 Mac 真 LLM 重录）；deep_research_v2 子模块（7 个 agent + graph）
+          完全没有专项 agent 级评估。
+      system:
+        status: covered
+        methods:
+          - backtest
+          - differential-ablation
+          - e2e-cassette
+          - leak-detection
+          - db-persistence
+        evidence:
+          - backend/eval/dd_report/backtest_runner.py
+          - backend/eval/dd_report/ablation/runner.py
+          - backend/eval/dd_report/ablation/variants.py
+          - backend/tests/eval/dd_report/test_backtest_runner.py
+          - backend/tests/eval/dd_report/test_backtest_runner_metric_wire.py
+          - backend/tests/eval/dd_report/test_ablation_runner.py
+          - backend/tests/fixtures/cassettes/test_b1_maotai_investment_dd_cassette/test_b1_maotai_investment_dd_e2e_cassette.yaml
+          - backend/tests/fixtures/cassettes/b1_differential/test_b1_diff_balanced/test_b1_balanced_茅台.yaml
+          - backend/tests/integration/test_writer_investment_dd.py
+          - backend/tests/integration/test_analyst_debate_integration.py
+          - backend/tests/integration/test_critic_subgraph_valuation_consistency_wired.py
+        gap: ""
+      regression:
+        status: partial
+        methods:
+          - cassette-drift-detection
+          - nightly-ci
+          - fail-soft-guard
+        evidence:
+          - backend/tests/eval/cassette_validation.py
+          - .github/workflows/nightly.yml
+          - .github/workflows/pr.yml
+        gap: >-
+          backend/tests/eval/dd_report/ 目录下所有 dd_report 专项 eval 测试不在
+          pytest testpaths（仅含 backend/tests），也不包含在任何 poe ci/eval 命令
+          中，意味着 M1-M5 metric 单元测试和 ablation 测试在 PR CI 中不会自动运行；
+          cassette drift 检测只针对通用 LLM cassette，不专门针对研报质量 metric 的
+          prompt 漂移；无专门的研报质量回归阈值告警机制（如 M5 < 6.0 自动开 issue）。
+
+  # --------------------------------------------------------------------------
+  - id: memory
+    name_cn: "跨会话记忆"
+    name_en: "Cross-Session Memory"
+    summary: >-
+      跨会话记忆子系统评估覆盖极为全面: 组件级单元测试(45+ 文件)、agent 级
+      LLM-judge + 50 golden + cassette 回放、系统级 bi-temporal 5-session
+      differential + e2e 全路径、以及混沌/投毒回归套件全部有真实文件支撑。唯一
+      薄弱点是在线生产监控仅有周报 SQL 定义, 缺乏真实 alert/drift 检测的运行时
+      接入证据。
+    cells:
+      component:
+        status: covered
+        methods:
+          - unit-test
+          - schema-validation
+          - deterministic-metric
+          - mock-llm
+        evidence:
+          - backend/tests/unit/memory/test_extractor.py
+          - backend/tests/unit/memory/test_conflict_resolver.py
+          - backend/tests/unit/memory/test_working_blocks.py
+          - backend/tests/unit/memory/test_rrf.py
+          - backend/tests/unit/memory/test_recall_search.py
+          - backend/tests/unit/memory/test_temporal_correctness_metric.py
+          - backend/tests/unit/memory/test_recall_precision_metric.py
+          - backend/tests/unit/memory/test_injection_classifier.py
+          - backend/tests/unit/memory/test_models.py
+          - backend/tests/unit/memory/test_protocol.py
+          - backend/eval/memory/temporal_correctness_metric.py
+          - backend/eval/memory/recall_precision_metric.py
+        gap: ""
+      agent:
+        status: covered
+        methods:
+          - llm-as-judge
+          - golden-case
+          - cassette-replay
+          - routing-accuracy
+        evidence:
+          - backend/eval/memory/c5_memory_golden.jsonl
+          - backend/eval/memory/cross_turn_extraction_golden.jsonl
+          - backend/eval/memory/eval_runner.py
+          - backend/eval/memory/faithful_answer_metric.py
+          - backend/eval/memory/routing_accuracy_metric.py
+          - backend/eval/memory/routing_accuracy_hook.py
+          - backend/eval/memory/routing_accuracy_seed.jsonl
+          - backend/tests/integration/memory/test_eval_runner_e2e.py
+          - backend/tests/e2e/memory/test_recall_full_path.py
+          - backend/tests/e2e/memory/test_path_b_cross_turn_cassette.py
+          - backend/tests/e2e/memory/test_memory_kb_routing_cassette.py
+          - backend/tests/e2e/memory/test_traverse_full_path.py
+        gap: ""
+      system:
+        status: covered
+        methods:
+          - e2e-differential
+          - bi-temporal-sequence
+          - integration-e2e
+          - threshold-gate-cli
+        evidence:
+          - backend/tests/e2e/memory/test_bi_temporal_differential.py
+          - backend/eval/memory/differential_holding_evolution.jsonl
+          - backend/tests/integration/memory/test_write_pipeline_hardening.py
+          - backend/tests/integration/memory/test_failure_matrix_e2e.py
+          - backend/tests/integration/memory/test_retriever_e2e.py
+          - backend/tests/integration/memory/test_conflict_resolver_e2e.py
+          - backend/tests/integration/memory/test_reconciliation_e2e.py
+          - backend/tests/integration/memory/test_milvus_reconcile_e2e.py
+          - backend/tests/integration/memory/test_kb_routing_e2e.py
+          - backend/eval/memory/eval_runner.py
+        gap: ""
+      regression:
+        status: partial
+        methods:
+          - chaos-test
+          - poison-attack-golden
+          - idempotency-constraint
+          - failure-matrix
+        evidence:
+          - backend/tests/e2e/memory/test_chaos_three_way_consistency.py
+          - backend/tests/e2e/memory/test_poison_attacks.py
+          - backend/eval/memory/poison_attacks_golden.jsonl
+          - backend/tests/integration/memory/test_failure_matrix.py
+          - backend/tests/integration/memory/test_failure_matrix_e2e.py
+          - backend/tests/integration/memory/test_idempotency_constraint_e2e.py
+          - backend/eval/memory/long_tail_monitor.py
+        gap: >-
+          长尾召回 weekly_report_sql 仅是 SQL 字符串定义, 没有找到真实在线 alert
+          触发或 drift 检测的运行时接入证据; 回归套件没有 CI nightly 调度配置证据。
+
+  # --------------------------------------------------------------------------
+  - id: monitoring
+    name_cn: "持仓监控"
+    name_en: "Portfolio Monitoring"
+    summary: >-
+      组件级和 agent 级覆盖扎实: 5 条信号规则各有专属单元测试、Celery 任务有
+      eager-mode 单元测试(共约 87 个 test 函数)、12 个 golden 用 handcrafted
+      DataFrame + mock LLM 做确定性回归。端到端有真实 Celery+Redis+PG 容器级
+      e2e 测试。回归监控是最大缺口: 没有 chaos/poison/drift 专项、无 TraceService
+      接入、无线上报警率/误报率指标跟踪。
+    cells:
+      component:
+        status: covered
+        methods:
+          - unit-test
+          - db-integration
+          - mock-injection
+          - pydantic-schema-validation
+        evidence:
+          - backend/tests/unit/test_monitoring_signal_detector.py
+          - backend/tests/unit/test_monitoring_escalation.py
+          - backend/tests/unit/test_monitoring_email_notifier.py
+          - backend/tests/unit/services/test_monitoring_repositories.py
+          - backend/tests/unit/services/test_monitoring_scope.py
+          - backend/tests/unit/models/test_monitoring_models.py
+          - backend/tests/unit/test_signal_rule_base.py
+          - backend/tests/unit/test_signal_rules_announcement.py
+          - backend/tests/unit/test_signal_rules_cash_flow.py
+          - backend/tests/unit/test_signal_rules_financial_ratio.py
+          - backend/tests/unit/test_signal_rules_price_anomaly.py
+          - backend/tests/unit/test_signal_rules_shareholder_count.py
+          - backend/tests/unit/tasks/test_detection_cycle.py
+          - backend/tests/unit/tasks/test_generate_detail_card.py
+          - backend/tests/unit/tasks/test_daily_and_cleanup.py
+          - backend/tests/integration/router/test_monitoring_refresh_endpoint.py
+          - backend/tests/integration/router/test_signals_endpoint.py
+        gap: ""
+      agent:
+        status: partial
+        methods:
+          - golden-case
+          - mock-llm
+          - handcrafted-dataframe
+        evidence:
+          - backend/tests/eval/test_b3_dogfood_golden.py
+        gap: >-
+          12 个 golden 全部用 mock LLM(AnnouncementClassification 硬注入),无
+          cassette 录制回放验证真实 LLM 对公告分类的输出质量;EscalationCoordinator
+          的 deep_dive 内容质量只靠 token 长度 proxy 断言
+          (test_deep_dive_section_under_2000_tokens),无 LLM-as-judge 对深度分析
+          文本的语义评分。
+      system:
+        status: partial
+        methods:
+          - e2e-celery-worker
+          - db-state-assertion
+        evidence:
+          - backend/tests/e2e/test_monitoring_engine_e2e.py
+        gap: >-
+          e2e 测试在 docker 不可用时整体 skip;alert 数量不作强断言('可能 0 或 1');
+          无差分对照(ablation/differential)测试验证 5 条规则组合带来的端到端召回率
+          vs 误报率;无针对 escalation 完整路径(发现 RED → 写 alert → 生成
+          deep_dive → 邮件通知)的端到端断言。
+      regression:
+        status: gap
+        methods: []
+        evidence: []
+        gap: >-
+          无 chaos/poison/drift 专项测试(现有 chaos 测试均属于 memory 子系统);无
+          TraceService 接入、无 Prometheus/指标埋点;无线上误报率/漏报率跟踪机制;无
+          阈值漂移检测或定期 backtesting 任务来守护信号规则在真实历史数据上的表现。
+
+  # --------------------------------------------------------------------------
+  - id: valuation
+    name_cn: "估值交叉验证"
+    name_en: "Valuation Cross-Check"
+    summary: >-
+      组件级和智能体级覆盖扎实：PE/PB/EV-EBITDA/DCF 四个 helper、ValuationCalculator
+      编排、IndustryModelRouter、OutlierDiagnosisAgent 均有 L0 单元测试，Critic 第
+      7 维 wire 守卫测试（L1）也完整。但系统级覆盖是硬缺口：唯一的全链路 e2e
+      cassette（B-1 茅台）和所有 4 个 differential golden case 均被
+      `pytest.mark.skip` 标记跳过，原因是 A5a/A5b schema 改动导致 cassette LLM
+      call 序列错位且未重录；回归/混沌层完全空白。
+    cells:
+      component:
+        status: covered
+        methods:
+          - unit-test
+          - boundary-test
+          - error-injection
+          - sensitivity-sanity
+        evidence:
+          - backend/tests/unit/agents/valuation_helpers/test_pe.py
+          - backend/tests/unit/agents/valuation_helpers/test_pb.py
+          - backend/tests/unit/agents/valuation_helpers/test_ev_ebitda.py
+          - backend/tests/unit/agents/valuation_helpers/test_dcf.py
+          - backend/tests/unit/agents/valuation_helpers/test_consistency.py
+          - backend/tests/unit/agents/valuation_helpers/test_exceptions.py
+          - backend/tests/unit/agents/test_valuation_calculator.py
+          - backend/tests/unit/agents/test_industry_model_router.py
+          - backend/tests/unit/agents/test_analyst_build_valuation_inputs.py
+        gap: ""
+      agent:
+        status: covered
+        methods:
+          - integration-test
+          - mock-llm
+          - wire-guard
+          - schema-constrained-llm-test
+        evidence:
+          - backend/tests/unit/agents/test_outlier_diagnosis_agent.py
+          - backend/tests/unit/agents/critic_subagents/test_valuation_consistency.py
+          - backend/tests/integration/test_analyst_valuation_integration.py
+          - backend/tests/integration/test_critic_subgraph_valuation_consistency_wired.py
+        gap: ""
+      system:
+        status: gap
+        methods: []
+        evidence: []
+        gap: >-
+          唯一的全链路 e2e cassette（backend/tests/e2e/test_b1_maotai_investment_dd_cassette.py）
+          和全部 4 个 differential golden case（tests/eval/golden_cases/b1_differential/）
+          均被 pytest.mark.skip 标记跳过，原因是 v1.x A5a/A5b 多模型 cross-check +
+          DebateOrchestrator 改动导致旧 cassette LLM call 序列错位，尚未重录；无任何
+          在 CI 中实际运行的端到端估值路径测试。
+      regression:
+        status: gap
+        methods: []
+        evidence: []
+        gap: >-
+          无针对估值子系统的回归测试套件、混沌测试、投毒测试或在线漂移监控；现有的
+          chaos/poison 测试（tests/e2e/memory/）属于记忆子系统，与估值无关。
+
+  # --------------------------------------------------------------------------
+  - id: debate
+    name_cn: "多空辩论"
+    name_en: "Bull/Bear Debate"
+    summary: >-
+      组件级和 agent 接线测试覆盖扎实(L0 单元 + L1 mock-LLM 集成全通), 但 L2
+      端到端 cassette 层和差分 golden case 全部被 pytest.mark.skip 封死(cassette
+      未含 AdvocateOutput 录音), 系统级和回归监控实质为 gap。
+    cells:
+      component:
+        status: covered
+        methods:
+          - unit-test
+          - schema-invariant
+          - mock-llm
+          - prompt-content-assertion
+          - fallback-path
+        evidence:
+          - backend/tests/unit/agents/test_bull_advocate.py
+          - backend/tests/unit/agents/test_bear_advocate.py
+          - backend/tests/unit/agents/test_debate_orchestrator.py
+          - backend/tests/unit/agents/test_debate_schemas.py
+          - backend/tests/unit/agents/critic_subagents/test_dialectical_balance.py
+          - backend/tests/unit/agents/test_writer_v1x_a5b_prompt.py
+          - backend/tests/unit/test_critic_subgraph.py
+        gap: ""
+      agent:
+        status: partial
+        methods:
+          - integration-test
+          - mock-llm-subgraph
+          - wire-guard
+        evidence:
+          - backend/tests/integration/test_analyst_debate_integration.py
+          - backend/tests/integration/test_critic_subgraph_dialectical_balance_wired.py
+        gap: >-
+          没有真实 LLM cassette 录音覆盖辩论路径; B1 e2e cassette 和 3 个差分
+          golden case 全带 pytest.mark.skip, 无法回放含 AdvocateOutput 的完整
+          agent 输出质量。
+      system:
+        status: gap
+        methods: []
+        evidence: []
+        gap: >-
+          test_b1_maotai_investment_dd_cassette.py 和 test_b1_diff_balanced/
+          aggressive_growth/capital_preservation 均 pytest.mark.skip, 原因是旧
+          cassette 无 AdvocateOutput 录音导致 LLM call 序列错位, 需重录后才能激活;
+          当前无任何运行中的端到端系统级测试覆盖辩论路径。
+      regression:
+        status: gap
+        methods: []
+        evidence: []
+        gap: >-
+          无 chaos/投毒/漂移测试针对辩论子系统; 唯一回归守卫是
+          test_critic_subgraph_dialectical_balance_wired.py 中的静态源码 grep
+          (检查 DialecticalBalanceScorer 出现在 router/research.py 和
+          critic_subgraph.py), 不覆盖行为回归。

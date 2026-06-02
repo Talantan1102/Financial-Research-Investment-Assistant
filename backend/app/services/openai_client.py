@@ -90,6 +90,13 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
     config = LLMConfig()
     model = os.getenv("MOCK_TUSHARE_MODEL", V0_DEFAULT_MODEL)
     raw_client = OpenAI(api_key=config.api_key, base_url=config.base_url)
+    # LangSmith 追踪(P0):LANGSMITH_TRACING=true 时把 client 包一层,自动把每次 LLM
+    # 调用的 prompt/completion/token/latency 作为 run 发到 LangSmith。包装锁在这个 DI
+    # 缝里 —— router / strict 层既不感知 openai 也不感知 langsmith;关时零开销。
+    if os.getenv("LANGSMITH_TRACING", "").strip().lower() in {"true", "1", "yes"}:
+        from langsmith.wrappers import wrap_openai
+
+        raw_client = wrap_openai(raw_client)
     adapter = _OpenAIAdapter(client=raw_client, model=model)
     if trace_service is None:
         from app.core.database import SessionLocal

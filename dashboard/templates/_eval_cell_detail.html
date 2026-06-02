@@ -1,0 +1,53 @@
+{# 评估矩阵单格展开 fragment — htmx swap 进 #eval-detail。
+   显示该格 status / methods / evidence(等宽代码路径) / gap。 #}
+{% set _sym = {'covered': '●', 'partial': '◐', 'gap': '○'} %}
+{% set _label = {'covered': '已覆盖', 'partial': '部分', 'gap': '缺口'} %}
+<div class="eval-detail-inner">
+  <header class="eval-detail-head">
+    <span class="eval-detail-cross">
+      <span class="ed-sub">{{ subsystem.name_cn }}</span>
+      <span class="ed-x">×</span>
+      <span class="ed-layer">{{ layer.name_cn }}</span>
+      <span class="ed-layer-en">{{ layer.name_en }}</span>
+    </span>
+    <span class="eval-dot eval-dot--{{ cell.status }}" aria-hidden="true">{{ _sym[cell.status] }}</span>
+    <span class="eval-status-tag eval-status-tag--{{ cell.status }}">{{ _label[cell.status] }}</span>
+  </header>
+
+  <p class="eval-detail-layerdesc">{{ layer.desc }}</p>
+
+  <section class="eval-detail-block">
+    <h4 class="eval-detail-h">评估方法</h4>
+    {% if cell.methods %}
+      <div class="eval-chips">
+        {% for m in cell.methods %}
+          <span class="eval-chip">{{ m }}</span>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="eval-detail-empty">— 该层级暂无评估方法</p>
+    {% endif %}
+  </section>
+
+  <section class="eval-detail-block">
+    <h4 class="eval-detail-h">证据 · 代码路径 <span class="eval-detail-count">{{ cell.evidence|length }}</span></h4>
+    {% if cell.evidence %}
+      <ul class="eval-evidence">
+        {% for path in cell.evidence %}
+          <li><code>{{ path }}</code></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="eval-detail-empty">— 无代码证据(该层级尚未落地)</p>
+    {% endif %}
+  </section>
+
+  <section class="eval-detail-block">
+    <h4 class="eval-detail-h">缺口</h4>
+    {% if cell.gap %}
+      <p class="eval-gap-text">{{ cell.gap }}</p>
+    {% else %}
+      <p class="eval-detail-empty eval-gap-none">— 无明确缺口,该层级已被评估守护</p>
+    {% endif %}
+  </section>
+</div>
