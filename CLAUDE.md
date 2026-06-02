@@ -22,7 +22,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [KB 评估缺口](docs/claude-context/kb-eval-gaps.md) — 当前 eval 是 agent 端到端 LLM-judge，缺 chunking/embedding/检索的离线指标；v0.8 调优 spec 是补口位置
 
 ### Agent / 对话评估方法论
-- [对话/工具型 Agent 评估方法论](docs/claude-context/conv-agent-evaluation-methods.md) — 外部调研沉淀:四层正交体系(A输出质量LLM-judge / B任务完成τ-bench+pass^k / C轨迹agentevals / D生产在线);完整研报 `docs/research/2026-06-02-conversational-agent-evaluation-survey.md`(6维方法+具体例子+22条校验)
+- [对话/工具型 Agent 评估方法论](docs/claude-context/conv-agent-evaluation-methods.md) — 外部调研沉淀:四个相互独立的角度(回答质量·用强模型当裁判 / 任务完成·比数据库终态 / 过程轨迹 / 生产在线);完整研报 `docs/research/2026-06-02-conversational-agent-evaluation-survey.md`(每法具体例子+来源+22条校验)
 
 ### 工程约定与 dep 管理
 - [重型 deps 走 optional extras](docs/claude-context/optional-extras-for-heavy-deps.md) — base 留 core，重型/可选进 `[project.optional-dependencies]`

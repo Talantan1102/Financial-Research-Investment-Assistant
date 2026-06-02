@@ -1,203 +1,203 @@
 # 对话 / 工具型 Agent 怎么评估 —— 方法论深度研报
 
 > 生成日期：2026-06-02
-> 方法：Workflow fan-out 联网调研（6 维并行 WebSearch/WebFetch）+ 22 条事实对抗校验（每条方法独立联网核实，标注 confirmed / partly）
+> 方法：Workflow fan-out 联网调研（六个方向并行 WebSearch/WebFetch）+ 22 条事实对抗校验（每条方法独立联网核实，标注 confirmed / partly）
 > 校验基线：全部 confirmed 或 partly（**无"完全错误"条目**）；partly 多为数字微调与个别张冠李戴，已在文中修正。
 
 ---
 
-## 0. 一句话地图
+## 一句话地图
 
-评估对话 / agent 不是单一指标，而是**四层正交**的体系：
+评估对话 / agent 不是单一指标，而是**四个相互独立的角度**，评估时按需取用：
 
-| 层 | 评什么 | 代表方法 | 判定形态 |
+| 角度 | 评什么 | 代表方法 | 判定形态 |
 |---|---|---|---|
-| **A. 输出质量** | 单条回答好不好 | LLM-as-judge（G-Eval / MT-Bench / AlpacaEval / Arena-Hard） | 1-5 分 / win rate / Elo |
-| **B. 任务完成** | 任务有没有真做成 | τ-bench / SWE-bench / WebArena / GAIA / BFCL | 终态匹配、pass@1、pass^k、resolve rate |
-| **C. 过程 / 轨迹** | 中间步骤对不对 | trajectory matching、step-level PRM、TRAJECT-Bench | 工具名 EM、参数匹配、冗余步骤、subset/superset |
-| **D. 生产 / 在线** | 上线后真实表现 | 用户反馈、隐式信号、在线 judge、guardrail、A/B、cassette 回归 | thumbs、retry 率、采样打分、拦截率、CI 红绿 |
+| **回答质量** | 单条回答好不好 | 用强模型当裁判（G-Eval / MT-Bench / AlpacaEval / Arena-Hard） | 打分 / 赢面 / Elo |
+| **任务完成** | 任务有没有真做成 | τ-bench / SWE-bench / WebArena / GAIA / 伯克利函数调用榜 | 终态匹配、成功率、连胜率、修复率 |
+| **过程轨迹** | 中间步骤对不对 | 轨迹结构比对、逐步奖励模型、TRAJECT-Bench | 工具名匹配、参数匹配、有无多余步骤 |
+| **生产在线** | 上线后真实表现 | 用户反馈、隐式信号、在线裁判、护栏、A/B、录制回放 | 点赞率、重试率、抽样打分、拦截率、CI 红绿 |
 
 贯穿全局的两条暗线：
-- **LLM-as-judge 的偏差**（position / verbosity / self-enhancement）与缓解（swap、长度去偏、CoT、多采样）。
-- **从"匹配输出"转向"校验环境终态副作用"**，并用 **pass^k**（连做 k 次都成功）取代单次 accuracy 来度量可靠性。
+- **"用强模型当裁判"会有系统性偏差**（偏好第一个答案 / 偏好长答案 / 偏好自己写的），必须用交换位置、长度去偏、强制推理、多次采样来缓解。
+- **趋势是从"匹配模型输出的文本"转向"校验环境最终被改成了什么状态"**，并用"连做 k 次都成功的概率"取代单次成功率来度量可靠性。
 
 ---
 
-## A 层 · LLM-as-a-Judge：用强模型当裁判
+## 角度一 · 用强模型当裁判（回答质量）
 
-核心范式两族：**直接打分**（绝对分）vs **成对比较**（相对赢面）。打分又分 reference-based（有标准答案，适合数学）/ reference-free（只给 rubric，适合开放对话）。共识：好的 judge 设计能让 GPT-4 与人类一致率达 **80–90%**，甚至高于人类彼此之间的一致率。
+核心范式两族：**直接打分**（绝对分）和 **成对比较**（两个答案比谁好）。打分又分"给标准答案"（适合数学）和"只给评分标准"（适合开放对话）。共识：好的裁判设计能让 GPT-4 与人类一致率达 **80–90%**，甚至高于人类彼此之间的一致率。
 
-### A1. G-Eval —— rubric 直接打分 + CoT + 概率加权 ✅ confirmed
+### G-Eval —— 按评分标准打分 + 自动推理 + 概率加权　✅ 已核实
 三步机制：
-1. **Auto-CoT**：把一条评估准则用 LLM 自动展开成结构化 evaluation steps。
-2. **form-filling**：judge 顺着 steps 推理后给一个 1-5 整数分。
-3. **概率加权**：不取整数，而取 LLM 对每个分数 token 的概率，算期望 `Σ p(sᵢ)·sᵢ`，把离散分变连续，缓解大量样本同分。
+1. **自动推理步骤**：把一条评分标准用大模型自动展开成结构化的评估步骤。
+2. **填表打分**：裁判顺着步骤推理后给一个 1-5 整数分。
+3. **概率加权**：不取整数，而取大模型对每个分数 token 的概率，算期望（各分数 × 其概率再求和），把离散分变连续，缓解"大量样本卡同一个分"。
 
-> **具体例子**：新闻原文 + 一条生成摘要，准则 = Coherence。judge 输出各分概率 `P(5)=0.6, P(4)=0.3, P(3)=0.1` → 加权分 `5×0.6+4×0.3+3×0.1 = 4.5`。在 SummEval 上 G-Eval-GPT-4 与人类的 Spearman 相关 **0.514**，大幅超过 ROUGE/BERTScore。
+> **具体例子**：新闻原文 + 一条生成摘要，评"连贯性"。裁判输出各分数的概率（给 5 分的概率 0.6、给 4 分 0.3、给 3 分 0.1）→ 加权分 = 5×0.6 + 4×0.3 + 3×0.1 = **4.5**。在摘要评估数据集 SummEval 上，这套方法与人类打分的相关系数 **0.514**，大幅超过 ROUGE、BERTScore 等老指标。
 >
-> ⚠️ 校验修正：SummEval 四个标准维度是 **coherence / consistency / fluency / relevance**，原文举例写的 "faithfulness" 不是其原始维度（应为 consistency）。机制与 0.514 数字均准确。
+> ⚠️ 校验修正：SummEval 的四个标准维度是连贯性 / 一致性 / 流畅性 / 相关性，原文举例里写的"忠实度"不是它的原始维度。机制与 0.514 数字均准确。
 
 来源：arxiv.org/abs/2303.16634 · confident-ai.com/blog/g-eval-the-definitive-guide
 
-### A2. MT-Bench single-answer grading（1-10 绝对分）✅ confirmed
-80 道 2 轮题、8 类。GPT-4 judge 先写理由再输出 `Rating: [[8]]`。数学/推理类走 **reference-guided grading**：先让 judge 独立生成参考解再对照评，把 math/reasoning 的误判率从 ~70% 降到 ~15%。
-> GPT-4 judge 与人类一致率（S2 去 tie）**85%**，高于人类彼此的 81%。
+### MT-Bench 绝对打分（1-10 分）　✅ 已核实
+80 道两轮题、八个类别。裁判（GPT-4）先写理由再输出"Rating: [[8]]"。数学和推理类走**给标准答案再打分**的模式：先让裁判自己独立解一遍当参考答案，再对照评，把这类题的误判率从约七成降到约一成五。
+> 裁判与人类的一致率（去掉平局后）**85%**，高于人类彼此之间的 81%。
 
-### A3. Pairwise + position-bias 缓解（Arena-Hard）⚠️ partly
-judge 同看 prompt + 答案 A + 答案 B 选谁赢，聚合成 win rate / Elo。
-- **swap & consistency** 去 position bias：交换 A/B 跑两遍，只有方向一致才算赢，否则判 tie。
-- Arena-Hard-Auto 用 5 档标签（A≫B / A>B / A≈B / B>A / B≫B），大胜扣更多分提升可分性。
+### Arena-Hard —— 成对比较 + 消除"偏好第一个答案"　⚠️ 部分需修正
+裁判同时看问题 + 答案甲 + 答案乙，选谁赢，聚合成赢面或 Elo 排名。
+- **交换位置取一致**消除位置偏好：把甲乙位置交换跑两遍，只有两遍方向一致才算赢，否则判平局。
+- 用五档标签（甲远胜 / 甲略胜 / 平 / 乙略胜 / 乙远胜），大胜比小胜拉开更多分，提升区分度。
 
-> **具体例子**：Arena-Hard = 500 道从 Chatbot Arena 挖的难题，候选 vs 基线 GPT-4-0314，judge = GPT-4-Turbo，每题 swap 跑 2 遍。MT-Bench 实测 position bias：交换位置后只有 **65% 一致**，GPT-4 约 30% 偏好第一位。
+> **具体例子**：Arena-Hard 用 500 道从竞技场挖来的难题，候选模型对打基线 GPT-4-0314，裁判是 GPT-4-Turbo，每题交换位置跑两遍。实测位置偏好：交换后只有 **65% 一致**，GPT-4 约有三成情况偏好排第一位的答案 —— 所以才需要"交换取一致"把不稳定的判定压成平局。
 >
-> ⚠️ 校验修正：与 Chatbot Arena 人类排名一致率官方是 **89.1%**（非 90.8%）；成本约 **$25/模型**（非 $20）。可分性 87.4% 准确。
+> ⚠️ 校验修正：与竞技场人类排名的一致率官方是 **89.1%**（不是 90.8%）；成本约 **每个模型 25 美元**（不是 20）。区分度 87.4% 准确。
 
-### A4. AlpacaEval 2.0 —— reference-based win rate + 长度去偏 ✅ confirmed
-805 条指令，候选 vs 固定参考（GPT-4-Turbo）算 win rate。**Length-Controlled (LC) win rate**：对 judge 偏好做逻辑回归，把"输出长度差"当协变量，条件在"长度无差异"上预测，剥离 verbosity bias。
-> LC 去偏后与 Chatbot Arena 的 Spearman 从 0.94 升到 **0.98**；跑完 < 3 分钟、< $10。
+### AlpacaEval 2.0 —— 对标准答案算赢面 + 长度去偏　✅ 已核实
+805 条指令，候选答案对打固定的参考答案（GPT-4-Turbo 写的）算赢面。**长度可控赢面**：对裁判的偏好做一次逻辑回归，把"两个答案的长度差"当成一个变量，再预测"假如长度一样大"的偏好，从而把"长答案天然占便宜"这个干扰剥离掉。
+> 长度去偏后，与竞技场人类排名的相关系数从 0.94 升到 **0.98**；全程跑完不到 3 分钟、花费不到 10 美元。
 
-### A5. Bias 缓解工具箱 ⚠️ partly
-叠加在上面方法之上的去偏组合：swap（位置）、length-controlled（冗长）、CoT-forcing（推理）、few-shot（一致性）、多采样投票（方差）。
-> **实测数字**：verbosity 攻击（"重复列表"）下 GPT-3.5 / Claude-v1 失败率 **91.3%**，GPT-4 仅 8.7%。self-enhancement：GPT-4 评自己高约 10%、Claude 偏好自己约 25%。
+### 裁判去偏工具箱　⚠️ 部分需修正
+叠加在上面方法之上的一组去偏手段：交换位置（治位置偏好）、长度去偏（治偏好长答案）、强制先写推理、给示例、多次采样投票（降方差）。
+> **实测数字**：用"重复列表"这种灌水攻击时，GPT-3.5 和 Claude-v1 被骗的比例高达 **91.3%**，GPT-4 只有 8.7%。"偏好自己写的"：GPT-4 给自己打分高约一成、Claude 偏好自己约两成半。
 >
-> ⚠️ 校验修正：(1) self-enhancement 原论文自陈"数据有限、未能证实"，应标"倾向"而非定论；(2) self-consistency / 多采样投票**不是** MT-Bench 论文方法，属外部叠加，引用时注明出处不同。
+> ⚠️ 校验修正：(1)"偏好自己"这点原论文自己说"数据有限、未能证实"，应当成倾向而非定论；(2) 多次采样投票**不是** MT-Bench 那篇论文提的方法，是别处的概念叠加进来的，引用时要注明出处不同。
 
 ---
 
-## B 层 · 任务完成 Benchmark：从"看输出"到"校验终态"
+## 角度二 · 任务完成 Benchmark（从"看输出"到"校验终态"）
 
-7 个主流 agentic benchmark，按评估范式分三类：静态结构匹配（BFCL/ToolBench）、多轮+状态校验（τ-bench/BFCL V3）、端到端任务完成（SWE-bench/WebArena/GAIA）。**核心趋势：评"环境最终状态/副作用"而非"模型输出文本"。**
+七个主流 agent benchmark，按评估方式分三类：静态结构匹配、多轮加状态校验、端到端任务完成。**核心趋势：评"环境最终被改成什么状态 / 产生了什么副作用"，而不是评"模型输出的文本"。**
 
-### B1. τ-bench（Sierra）—— 工具+用户+策略三方交互 ✅ confirmed
-给定初始 DB + 用户意图（LLM user-simulator 逐步透露需求）。agent 在 ReAct 循环里调工具改 DB，遵守 policy 文档。**评估不看对话文本，而是结束后比对 DB 终态 vs 标注 goal state**。
-- 创新指标 **pass^k**：同一 task 跑 k 次 i.i.d. 全部成功的概率（区别于 pass@k 的"至少一次"），度量可靠性。
+### τ-bench（Sierra）—— 工具 + 用户 + 规则三方交互　✅ 已核实
+给定初始数据库 + 用户意图（由大模型扮演用户、逐步透露需求）。agent 边调领域工具改数据库、边遵守政策文档。**评估不看对话文本，而是对话结束后比对数据库最终状态和标注的目标状态。**
+- 创新指标"连胜率"（论文写作 pass^k）：同一任务连做 k 次、k 次全部成功的概率，专门度量稳定性（区别于"至少成功一次"的成功率）。
 
-> **具体例子**：airline 域，用户说想改签。agent 须问清订单、识别票种、按 policy（如 basic economy 不可改签）拒绝或执行 `update_reservation`。评估 = 跑完比对 DB 终态。结果：GPT-4o retail pass@1 ~61%、airline ~35%；**retail pass^8 跌破 25%** —— 暴露"偶尔做对"vs"稳定做对"的巨大差距。
-> （2026-03 tau-knowledge：领先模型 pass@1 25.5%，但 Pass^4 仅 9.3%。）
+> **具体例子**：航司客服场景，用户说想改签。agent 必须问清订单号、识别票种、按政策（比如最低价经济舱不可改签）决定拒绝还是执行改签工具。评估 = 跑完比对数据库终态。结果：GPT-4o 在零售域单次成功率约 61%、航司域约 35%；但**零售域连做 8 次全成功的概率跌破 25%** —— 暴露"偶尔做对"和"稳定做对"的巨大差距。
+> （2026-03 的新版结果：领先模型单次通过率 25.5%，连做 4 次全过只剩 9.3%。）
 
-### B2. BFCL（Berkeley Function Calling Leaderboard）✅ confirmed
-单轮用 **AST 评估**：把模型输出的函数调用解析成抽象语法树，比对函数名、参数名、参数值/类型。另有 Executable（真跑）和 **Relevance Detection**（给无关工具看模型是否克制不调用）。V3 起加多轮 agentic，改 state-based 校验。
+### 伯克利函数调用排行榜　✅ 已核实
+单轮用**语法树比对**：把模型输出的函数调用解析成语法树，逐项比对函数名、参数名、参数值和类型。另有"真跑一遍看返回值"和**相关性检测**（给一堆无关工具，看模型是否克制、不乱调用）。新版本加入多轮，改成比对系统状态。
 
-> **具体例子（AST）**：prompt="2020 年加州最高税率"，函数 `calculate_tax(income, state, year)`，gold = `calculate_tax(state='CA', year=2020)`。模型若输出 `state='California', year='2020'` → 值不匹配（'California'≠'CA'）+ 类型不匹配（str '2020' ≠ int 2020）判错。
-> **Relevance 例**：只给 weather 工具却问数学题 → 模型不该调用任何函数，调用即扣分。
+> **具体例子（语法树比对）**：问"2020 年加州最高税率"，给函数 `calculate_tax(收入, 州, 年份)`，标准答案是 `州='CA', 年份=2020`。模型若输出 `州='California', 年份='2020'`，会因为值不符（'California' 不等于 'CA'）加类型不符（字符串 '2020' 不等于整数 2020）判错。
+> **相关性检测例子**：只给查天气的工具却问一道数学题，模型应该一个函数都不调，调了就扣分。
 
-### B3. ToolBench / ToolLLM（OpenBMB, ICLR'24 spotlight）✅ confirmed
-16464 个 RapidAPI 真实 API / 3451 tools / 49 类。用 **DFSDT**（深度优先搜索决策树）标注解路径。**ToolEval** 两指标：Pass Rate（限定预算内是否完成，ChatGPT 判）、Win Rate（两条解路径偏好比较，基线 ChatGPT-ReACT）。
-> ToolLLaMA+DFSDT 平均 Pass 66.7% / Win 67.3%，远超 Text-Davinci-003（22.6%/16.5%）。
+### ToolBench / ToolLLM（OpenBMB，ICLR'24 spotlight）　✅ 已核实
+收录 16464 个真实第三方 API（3451 个工具 / 49 类）。用深度优先搜索决策树来标注解题路径。评估器有两个指标：**完成率**（规定步数预算内有没有完成指令，由 ChatGPT 判）、**胜出率**（两条解题路径比谁更好，对标 ChatGPT 基线）。
+> 训练出的模型加搜索树，平均完成率 66.7% / 胜出率 67.3%，远超老模型。
 
-### B4. SWE-bench（Princeton, ICLR'24 oral）✅ confirmed
-每实例 = 真实 GitHub issue + 解决它的真实 PR（自带 FAIL_TO_PASS 单测）。**评估完全可执行**：应用模型 patch → 跑测试，要求 FAIL_TO_PASS 全转 PASS 且 PASS_TO_PASS 不回归，才判 resolved。SWE-bench Verified = OpenAI 雇 93 人筛出的 500 题干净子集。
-> **具体例子**：django 某 issue。agent 产出 diff patch → 应用后跑 PR 附带回归测试 FAIL→PASS 且全量不挂 → resolved/unresolved 布尔，聚合成 % Resolved。
-> ⚠️ 时效：原文举"60%+"偏低，2025 年底 Verified SOTA 已 ~88%（Claude Opus 4.x 级）。
+### SWE-bench（普林斯顿，ICLR'24 口头报告）　✅ 已核实
+每道题 = 一个真实 GitHub issue + 当初解决它的真实 PR（自带"改之前失败、改之后通过"的单元测试）。**评估完全可执行**：把模型产出的补丁打上去 → 跑测试，要求"原本失败的测试全部转通过"且"原本通过的测试不能挂"，两者都满足才算解决。其精校子集（Verified）是 OpenAI 雇 93 名开发者筛掉描述不清、测试过松的题后留下的 500 道。
+> **具体例子**：django 某个 issue。agent 产出一个代码补丁 → 打上后跑该 PR 附带的回归测试，从失败转通过且全量测试不挂 → 判"已解决"，聚合成"解决率"。
+> ⚠️ 时效：原文举例说"某 agent 60% 多"偏低，到 2025 年底精校子集的最好成绩已经约 88%（Claude Opus 4.x 级别）。
 
-### B5. WebArena（CMU, ICLR'24）✅ confirmed
-可自托管真实网站（电商 / 论坛 / **真实 GitLab** / CMS）+ 812 长程任务。**程序化 reward 函数**判功能正确：信息抽取类比对答案字符串，状态改变类查后端 state。
-> **具体例子**："在 GitLab 给 repo X 建名为 bug 的 issue 并指派给 Y" → 校验函数查 GitLab 后端确认 issue 存在且 assignee=Y。原论文 GPT-4 agent 仅 **14.41%**，人类 78.24%；2025 新方法（IBM CUGA ~61.7%）已升至 ~60%。
+### WebArena（CMU，ICLR'24）　✅ 已核实
+可自己部署的真实网站（电商 / 论坛 / **真实的 GitLab** / 内容管理后台）+ 812 道长程任务。**为每类任务手写一个可执行的校验函数**判功能是否真达成：信息查询类比对最终答案字符串，状态改变类则去查网站后端的真实状态。
+> **具体例子**："在 GitLab 给某仓库建一个名为 bug 的 issue 并指派给用户 Y" → 校验函数去查 GitLab 后端，确认这个 issue 真存在且负责人是 Y。原论文里最强的 GPT-4 智能体只有 **14.41%**，人类 78.24%；2025 年的新方法已升到约 60%。
 
-### B6. GAIA（Meta/HF/AutoGPT, ICLR'24）⚠️ partly
-466 题，3 级难度，每题唯一答案。用 **quasi exact match**（规整化后精确比对），不需 LLM judge。
-> 人类 92% vs GPT-4+plugins 仅 15%，凸显 agent 与人类差距。
-> ⚠️ 校验修正：原文"山峰海拔+论文图2"例子是杜撰的，论文真实 Level 2 样例是黄油脂肪含量题（ground truth +4.6）。答案格式不限于单数字，也可是少量词/逗号列表。
+### GAIA（Meta / HuggingFace / AutoGPT，ICLR'24）　⚠️ 部分需修正
+466 道题，三个难度等级，每题唯一答案。用**近似精确匹配**（规整化后逐字符比对），完全不需要大模型当裁判。
+> 人类做对 92%，而 GPT-4 加插件只有 15%，凸显智能体和人类的差距。
+> ⚠️ 校验修正：原文那个"某维基百科表格第三高山峰海拔 + 某论文图表数值"的例子是杜撰的，论文真实的中等难度样题是一道黄油脂肪含量的题（标准答案 +4.6）。答案格式也不限于单个数字，可以是少量词或逗号分隔的列表。
 
-### B7. AgentBench（清华, ICLR'24）⚠️ partly
-8 个差异化环境（OS / DB-SQL / 知识图谱 / 卡牌 / ALFWorld / WebShop / 浏览 / 谜题），各用环境特定指标，归一化汇总。
-> ⚠️ 校验修正：**DB 环境主指标是 success rate，不是 F1**（原文张冠李戴）。
+### AgentBench（清华，ICLR'24）　⚠️ 部分需修正
+8 个差异很大的环境（操作系统 / 数据库 SQL / 知识图谱 / 卡牌游戏 / 家务模拟 / 网购 / 网页浏览 / 推理谜题），各用贴合自己性质的指标，再归一化汇总。
+> ⚠️ 校验修正：**数据库环境的主指标是成功率，不是 F1**（原文张冠李戴）。
 
 ---
 
-## C 层 · 轨迹 / 过程评估：中间步骤对不对
+## 角度三 · 过程 / 轨迹评估（中间步骤对不对）
 
-三流派：确定性 trajectory matching（LangChain agentevals）、分解式指标（TRAJECT-Bench）、step/trajectory-level reward 模型（ToolPRMBench / Plan-RewardBench）。gold 轨迹缺失时 fallback 到 LLM-as-judge。
+三个流派：确定性的"轨迹结构比对"、把轨迹拆成多个维度的"分解式指标"、给每一步打分的"逐步奖励模型"。拿不到标准轨迹时，退回用大模型定性判断。
 
-### C1. Trajectory Matching（LangChain agentevals）⚠️ partly
-把 agent 输出和参考都格式化成 OpenAI message dict，用 `create_trajectory_match_evaluator(trajectory_match_mode=...)` 比对。四种模式 + 独立的 `tool_args_match_mode`（exact / ignore / subset / superset，可对特定工具传自定义比较函数）。纯规则、零 LLM、确定且便宜。
+### 轨迹结构比对（LangChain agentevals）　⚠️ 部分需修正
+把 agent 走过的消息序列和参考序列都格式化成统一格式，用规则比对，可以单独看工具集合、顺序、参数。纯规则、不用大模型、又快又便宜、结果确定。匹配松紧有四档，参数匹配另有"完全相等 / 只看工具名 / 子集 / 超集"几种。
 
-> **具体例子**：用户问 "weather in SF"，agent 调 `get_weather({city:'SF'})`，参考调 `get_weather({city:'San Francisco'})`。**strict 模式** → `{'score': False}`（'SF'≠'San Francisco' 精确不等）；改 `tool_args_match_mode='ignore'` 只校验工具名 → `True`。
+> **具体例子**：用户问"旧金山天气"，agent 调 `查天气({城市:'SF'})`，参考是 `查天气({城市:'San Francisco'})`。**最严格模式**直接判不通过（'SF' 不等于 'San Francisco'）；改成"只看工具名忽略参数"就通过。
 >
-> ⚠️ 校验修正（重要，方向曾说反）：**subset = 实际轨迹 ⊆ 参考（确保没调多余工具）；superset = 实际 ⊇ 参考（允许多调）**。"检测有无多余工具"应用 subset（要求实际不超出参考），不是反过来。
+> ⚠️ 校验修正（重要，曾经说反了）：要检测"agent 有没有调用参考之外的多余工具"，应该用**"子集"模式**（要求实际走过的工具是参考的子集、不许超出）；**"超集"模式**反而是允许 agent 比参考多调工具。别把两者搞反。
 
-### C2. 分解式轨迹指标（TRAJECT-Bench）✅
-把轨迹拆成多维：**Exact Match**（工具名序列，不看参数）、**Inclusion**（必需工具覆盖率）、**Tool Usage**（参数 schema/格式/值约束）、**Final Accuracy**。诊断四类失败：相似工具混淆、参数盲选、冗余调用、意图误判。
-> Claude-4 在 simple 变体 EM=0.846，harder 变体掉到 0.445 —— 定位弱点在 tool selection 与 parameter inference。
+### 分解式轨迹指标（TRAJECT-Bench）　✅
+把轨迹质量拆成几个可量化维度：**工具名序列对不对**（不看参数）、**必需工具的覆盖率**、**参数是否满足约束**、**最终答案对不对**。并诊断四类典型失败：混淆功能相近的工具、选对工具但忽略参数、保险式地多调工具、间接提问时误判意图。
+> 例如某模型在简单变体上工具名序列正确率 0.846，到困难变体掉到 0.445，从分数滑坡就能定位弱点在"选工具"和"填参数"。
 
-### C3. Step-level Process Reward（ToolPRMBench）✅
-把轨迹拆成单步决策点，PRM 在两个候选动作里选对的那个（二元判别）。错误类型：选错工具 / 参数错 / 该调工具却用自然语言回复 / 违反状态约束。
-> **具体例子**：要把文件复制到本地目录。Rejected = 直接用绝对路径 `cp`（违反"源和目的须在当前工作目录内"约束）；Chosen = 先 `cd` 再复制。PRM 须指向 Chosen。
+### 逐步奖励模型（ToolPRMBench）　✅
+把整条轨迹拆成一个个决策点，让奖励模型在两个候选动作里选出对的那个。能标注的错误类型：选错工具、参数错、该调工具时却用自然语言敷衍、违反状态约束。
+> **具体例子**：要把文件复制到当前目录。被否决的动作 = 直接用绝对路径复制（违反"源和目的都得在当前工作目录内"的约束）；被选中的动作 = 先切换目录再复制。奖励模型要能指向后者。
 
-### C4. τ-bench pass^k（可靠性）
-见 B1 —— 用结果状态匹配 + pass^k 把"是否**可靠地**调对工具/改对状态"量化，是轨迹评估里"一致性"维度的来源。
-
----
-
-## D 层 · 生产 / 在线评估：上线后闭环
-
-核心是"在真实流量上闭环"。**guardrail（每请求都跑、要快/确定、产生 block/allow）和 eval（批量/抽样诊断 drift）是两个不同执行层。**
-
-### D1. 用户显式反馈（thumbs / 星级）
-前端每条消息挂 thumbs，点击后把 score 绑到 trace_id（Langfuse/LangSmith 支持 NUMERIC/CATEGORICAL/BOOLEAN）。低分 trace flag 进 review 或回灌离线 dataset。**稀疏信号**（<5% 用户点），需配隐式信号。
-
-### D2. 隐式反馈（retry / 放弃 / 追问率）
-> **具体例子**：用户连发 "特斯拉财报怎么样" → "我是说最新一季毛利率" → 关闭会话。规则引擎判第二条为 retry（意图改写）、session 以 abandonment 收尾 → dashboard 显示"估值类 retry 率 18% vs 资讯类 6%"，定位短板。覆盖全量、无需用户配合，但有噪声。
-
-### D3. 在线 LLM-as-judge（按采样率打分）⚠️ partly
-配 evaluator：过滤条件 + 采样率（如 10-15% 控成本），把生产 trace 的 input/output/context 填进 judge prompt，score 写回 trace。失败 trace 自动入离线 dataset 成闭环。
-> **具体例子**：Arize Phoenix HallucinationEvaluator，输入三元组（问题、AI 回答、检索到的研报片段），judge 问"答案是否仅基于 reference、有无编造" → label ∈ {factual, hallucinated}。某条虚构了营收数字 → hallucinated，标红回灌。
-
-### D4. 实时 Guardrail / 幻觉拦截（每请求 block/allow）
-pre-LLM 拦越界 query（要快/确定，用规则/小分类器）；post-LLM 比对输出 claims 与检索 context，拦未 grounded 的幻觉。可用 RAGTruth 微调小模型做低延迟检测。
-> **具体例子**：用户问目标价，LLM 生成上下文里没有的 "$420" → groundedness guardrail 实时比对判 hallucinated → block，替换为"依据现有资料无法给出"。
-
-### D5. 线上 A/B（业务指标判定）⚠️ partly
-control vs treatment 随机分流，主指标（留存/会话长度/成功率）+ guardrail 指标（latency/error），power analysis 定样本量 + t-test/chi-square 判显著。
-> ⚠️ **代理指标陷阱**：单纯优化"留存/会话长度"可能让模型学会"黏住"而非"帮到"用户，需任务成功率兜底。
-
-### D6. 回归 eval：golden set + cassette ⚠️ partly
-两条腿：(1) **golden set**——从失败 trace 沉淀 (input, 期望判定)，CI 跑（RAGTruth 18k 条带 word-level 幻觉标注，可微调小模型逼近 GPT-4）；(2) **cassette**——录制一次真实 LLM/工具调用响应到磁盘，CI 回放不真打 API，保证确定性、零成本、无网络可测。
-> **具体例子**：把"估值 agent 对某 input 的工具调用序列"录成 cassette，CI 回放断言序列不变；序列变了 → CI 红灯阻止 regression。
+### 连胜率（可靠性维度）
+见前文 τ-bench 一节 —— 用"终态匹配 + 连做 k 次都成功的概率"把"是否**稳定地**调对工具、改对状态"量化，这是轨迹评估里"一致性"维度的来源。
 
 ---
 
-## E 专题 · RAG / 检索增强对话的评估
+## 角度四 · 生产 / 在线评估（上线后闭环）
 
-两个轴：**retrieval 质量**（context precision/recall）与 **generation 质量**（faithfulness/groundedness、answer relevance）。
+核心是"在真实流量上闭环"。要分清两个不同的执行层：**护栏**跑在每一个请求上、要快要确定、产生放行或拦截的动作；**评估**只是批量或抽样地诊断质量漂移。
 
-| 指标 | 测什么 | 例子 |
+### 用户显式反馈（点赞 / 星级）
+前端每条消息挂点赞按钮，点击后把分数绑到对应的那次调用记录上。低分记录被标记，进入人工复审或回灌到离线数据集。这是**稀疏信号**（不到 5% 的用户会点），通常配合隐式信号一起用。
+
+### 隐式反馈（重试率 / 放弃率 / 追问率）
+> **具体例子**：用户连发"特斯拉财报怎么样" → "我是说最新一季毛利率" → 关掉会话。规则引擎判第二条是重试（重新措辞 = 上一条没答好）、整段会话以放弃收尾 → 看板上显示"估值类问题重试率 18%，资讯类只有 6%"，立刻定位到短板。覆盖全量流量、不需用户配合，但信号有噪声。
+
+### 在线裁判（按抽样比例自动打分）　⚠️ 部分需修正
+配一个评估器：设过滤条件 + 抽样比例（比如只跑 10-15% 的流量控成本），把生产流量里的问题、回答、检索到的资料填进裁判提示词，打出的分自动写回这条记录。失败的记录自动进离线数据集，形成闭环。
+> **具体例子**：用 Arize Phoenix 的幻觉评估器，输入"问题 + AI 回答 + 检索到的研报片段"三元组，裁判问"答案是不是只基于这些资料、有没有编造" → 标签是"属实"或"幻觉"。某条回答虚构了一个营收数字 → 判幻觉、标红回灌。
+
+### 实时护栏 / 幻觉拦截（每个请求都跑，放行或拦截）
+分两层：**请求前**拦越界提问（要快要确定，用规则或小分类器）；**回答后**比对输出里的论断和检索资料，拦住没有依据的幻觉。可以用带标注的语料微调一个小模型做低延迟检测。
+> **具体例子**：用户问某只票目标价，模型生成了一个资料里根本没有的"目标价 420 美元" → 回答后的依据性护栏实时比对发现这句没有支撑 → 拦截，替换成"依据现有资料无法给出目标价"。
+
+### 线上 A/B 测试（用业务指标判定改动）　⚠️ 部分需修正
+把流量随机分到对照组和实验组，同时盯主指标（留存 / 会话长度 / 成功率）和护栏指标（延迟 / 报错率），先算样本量再做显著性检验。
+> ⚠️ **代理指标陷阱**：单纯优化"留存 / 会话变长"可能让模型学会"黏住用户"而不是"帮到用户"，必须配上任务成功率这类真实价值指标兜底。
+
+### 回归评估：金标准用例集 + 录制回放　⚠️ 部分需修正
+两条腿：**金标准用例集**——从失败记录里沉淀一批"输入 + 期望判定"，每次改动都对它跑一遍；**录制回放**——把一次真实的大模型 / 工具调用的请求和响应录到磁盘，持续集成里回放、不真打 API，保证结果确定、零成本、断网也能测。
+> **具体例子**：把"估值 agent 对某个输入的工具调用序列"录下来，持续集成里回放并断言序列不变；序列一旦变了就亮红灯，挡住退化合入。
+
+---
+
+## 专题 · 检索增强（RAG）对话的评估
+
+两个轴：**检索质量**（相关资料排得靠不靠前、覆盖全不全）和 **生成质量**（回答有没有依据、切不切题）。
+
+| 指标 | 测什么 | 具体例子 |
 |---|---|---|
-| **RAGAS Faithfulness** ✅ | 答案每个 claim 能否由 context 推断（NLI），分数=被支持claim数/总claim数 | Context 写 "born 14 March 1879"，答案说 "20th March 1879" → claim 出生德国✓、3月20日✗ → **faithfulness=1/2=0.5** |
-| **RAGAS Answer Relevancy** ✅ | 答案是否切题（不评对错）。反向生成：从答案反推 N 个问题，与原问题算 cosine 均值 | 答案漏掉首都 → 反推问题覆盖不全 → 分数下降 |
-| **Context Precision/Recall** ✅ | 检索端：相关 chunk 是否排前 / 是否覆盖全 | 相关 chunk 排第一 → Precision≈1.0；排第二 → ≈0.5 |
-| **TruLens RAG Triad** ✅ | Context Relevance + Groundedness + Answer Relevance 三维定位故障在检索还是生成 | Groundedness=0.6 → 约 40% 断言找不到支持 = 幻觉风险 |
-| **ALCE Citation Precision/Recall** ✅ | 行内 [1][2] 引用是否真支持其断言（NLI 逐句核对） | 句子引 [3][5]，[5] 移除后仍被支持 → [5] 计 precision 失分 |
-| **FACTS Grounding / FaithJudge** ⚠️ | 用人工标注幻觉当 ground truth，反过来评 judge 本身准不准；多 judge 集成降噪、few-shot 锚定 | 30k token 财报 + "总结营收驱动" → 两阶段 judge（是否答了请求 + 是否全 grounded）→ factuality 分 |
+| **RAGAS 依据性** ✅ | 答案里每个论断能否从检索资料推出，分数 = 被支持的论断数 / 总论断数 | 资料写"生于 1879 年 3 月 14 日"，答案说"3 月 20 日" → 论断"生于德国"✓、"3 月 20 日"✗ → **依据性 = 1/2 = 0.5** |
+| **RAGAS 切题度** ✅ | 答案是否切题（不评对错）。反向从答案推出几个问题，与原问题算相似度均值 | 答案漏掉首都 → 反推出的问题覆盖不全 → 分数下降 |
+| **检索精确率 / 召回率** ✅ | 相关资料是否排前 / 是否覆盖回答所需全部信息 | 相关片段排第一 → 精确率≈1.0；排第二 → ≈0.5 |
+| **TruLens 三件套** ✅ | 资料相关性 + 回答依据性 + 回答切题度，三维定位故障在检索还是生成 | 依据性 0.6 → 约四成论断找不到支撑 = 幻觉风险 |
+| **引用核对（ALCE）** ✅ | 答案里的行内引用是否真支持其论断，逐句核对 | 某句引了两条出处，删掉其中一条后句子仍被支持 → 那条引用算多余、扣精确率 |
+| **离线幻觉基准（FACTS / FaithJudge）** ⚠️ | 用人工标注的幻觉当标准答案，反过来评"裁判本身准不准"；多裁判集成降噪、给示例锚定 | 一份 3 万字财报 + "总结营收驱动" → 两阶段裁判（先判有没有答到点、再逐句判有没有依据）→ 给出可信度分 |
 
-结论：LLM judge 仍是当前最佳但远不完美，金融数字幻觉代价高，需 few-shot 锚定 + 多 judge 集成。
-
----
-
-## F · 贴合本项目（chat + MCP + LangGraph supervisor）的落地建议
-
-按"个人作品 / aggressive minimalism"定位，**优先级从高到低**：
-
-1. **【最低成本最高收益】** 现有 chat eval（端到端 LLM-judge）加两项：
-   - **pass^k 重复采样**（同一 golden case 跑 k 次看 Pass^k），守护 supervisor 路由 + 工具调用一致性 —— 直接呼应已有 differential golden / DD report V0-V3 ablation。
-   - **工具调用 state 断言**（τ-bench 思路）：给每个 golden case 标注"对话结束后期望的 DB/工具副作用终态"，评终态而非对话文本。
-
-2. **轨迹层接 LangChain agentevals**（轨迹天然是 LangGraph message+tool_call 序列）：
-   - `forced_tool` / slash command 必须命中某工具 → **strict/superset** 确定性回归（呼应当前 `feat/chat-command-system` 分支）。
-   - "agent 是否多调了 memory/kb 工具" → **subset 模式**量化多余步骤（呼应 memory vs kb routing）。
-   - 加一维 **BFCL Relevance/拒绝**：给不该触发工具的 query，考核 supervisor 是否克制不乱调用。
-
-3. **RAG/KB 离线指标**（补 `kb-eval-gaps` 卡缺口）：RAGAS retrieval 轴（context precision/recall）+ generation 轴（faithfulness）上 CI，无需大量人工标注。金融零容忍幻觉 → 优先 Faithfulness（claim 级）+ ALCE 式引用核对，复用 c5 Plan 4 已有的 evidence_quote 校验。
-
-4. **生产在线（低成本先行）**：前端 thumbs → Langfuse BOOLEAN score 绑 trace_id（几乎零成本拿金标）；session 级埋 retry/abandonment 隐式信号按 use case 分桶；RAG 链路把 groundedness 做 post-LLM guardrail（小模型保延迟）。**A/B 因个人作品流量不足，建议"架构留口子"而非现在实装。**
-
-5. **judge 去偏纪律**：金融报告易长 → 内建 position 双跑 + verbosity 去偏；警惕"judge 与被评 agent 同模型"的 self-enhancement bias，考虑换不同家模型当 judge。
+结论：用大模型当裁判仍是当前最好的办法但远不完美；金融数字幻觉代价高，需要给示例锚定 + 多裁判集成。
 
 ---
 
-## 附 · 关联项目知识卡
+## 贴合本项目（chat + MCP + LangGraph supervisor）的落地建议
 
-- `kb-eval-gaps.md` —— 现有 eval 缺 chunking/embedding/检索离线指标，本研报 E 节 + F.3 是补口位置。
-- `c5-plan4-mcp-tools-done.md` —— evidence_quote 校验机制，可复用做 ALCE 式引用核对。
-- `dd-report-eval-phase-2-landed.md` —— V0-V3 ablation，对应 F.1 的 pass^k / pairwise。
-- `chat-session-persistence-done.md` —— DB-as-truth，对应 D 节 trace 级在线评估。
+按"个人作品 / 克制主义"定位，**优先级从高到低**：
+
+1. **【最低成本、最高收益】** 现有 chat 评估（端到端用大模型当裁判）加两项：
+   - **连做多次看稳定性**：同一个金标准用例跑 k 次，看"k 次全成功的概率"，守护路由和工具调用的一致性 —— 正好接上已有的差分金标准测试和 DD 研报的 V0-V3 对照实验。
+   - **工具调用终态断言**（τ-bench 思路）：给每个金标准用例标注"对话结束后期望的数据库 / 工具副作用状态"，评终态而不是评对话文本。
+
+2. **过程轨迹层接 LangChain agentevals**（轨迹天然就是 LangGraph 的消息加工具调用序列）：
+   - "强制调用某工具 / 斜杠命令必须命中某工具"用**最严格模式**做确定性回归（正好是当前 chat 命令系统这条分支的需求）。
+   - "agent 是不是多调了记忆 / 知识库工具"用**子集模式**量化多余步骤（对应记忆与知识库的路由）。
+   - 再加一维**相关性 / 拒绝**：给一个本不该触发工具的问题，考核它是否克制、不乱调用。
+
+3. **检索 / 知识库的离线指标**（补已记录在案的"知识库评估缺口"）：用 RAGAS 的检索轴（精确率 / 召回率）加生成轴（依据性）上持续集成，不需要大量人工标注。金融对幻觉零容忍 → 优先做依据性（论断级）加引用核对，复用已有的引用原文校验机制。
+
+4. **生产在线（低成本先行）**：前端点赞写成一个分数绑到调用记录上（几乎零成本拿到金标准来源）；按问题类型分桶埋"重试 / 放弃"隐式信号；检索链路把依据性做成回答后的护栏（用小模型保延迟）。**A/B 测试因个人作品流量不足，建议只在架构上留口子、不现在实装。**
+
+5. **裁判去偏纪律**：金融报告天然偏长 → 一定要内建"交换位置双跑 + 长度去偏"；警惕"裁判和被评的 agent 是同一个模型"带来的偏好自己问题，可以考虑换另一家的模型当裁判。
+
+---
+
+## 关联项目知识卡
+
+- 知识库评估缺口卡（`kb-eval-gaps`）—— 现有评估缺切块 / 向量 / 检索的离线指标，本研报的检索专题和落地建议第三条是补口位置。
+- C.5 记忆工具卡（`c5-plan4-mcp-tools-done`）—— 已有的引用原文校验机制，可复用来做引用核对。
+- DD 研报评估卡（`dd-report-eval-phase-2-landed`）—— V0-V3 对照实验，对应落地建议第一条。
+- 会话持久化卡（`chat-session-persistence-done`）—— 数据库为准，对应在线评估里"按调用记录打分"。
