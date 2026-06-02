@@ -17,11 +17,37 @@
   <p class="eval-detail-layerdesc">{{ layer.desc }}</p>
 
   <section class="eval-detail-block">
-    <h4 class="eval-detail-h">评估方法</h4>
-    {% if cell.methods %}
-      <div class="eval-chips">
-        {% for m in cell.methods %}
-          <span class="eval-chip">{{ m }}</span>
+    <h4 class="eval-detail-h">评估方法
+      {% if methods_detail %}<span class="eval-detail-count">{{ methods_detail|length }}</span>{% endif %}
+      <span class="eval-method-hint">怎么评 · 配样例</span>
+    </h4>
+    {% if methods_detail %}
+      <div class="eval-methods">
+        {% for m in methods_detail %}
+          <article class="eval-method eval-method--{{ m.family }}">
+            <header class="eval-method-head">
+              <span class="eval-method-fam" title="{{ m.family_label }}">{{ m.family_label }}</span>
+              <span class="eval-method-name">{{ m.name_cn }}</span>
+              <span class="eval-method-en">{{ m.name_en }}</span>
+              <code class="eval-method-tag">{{ m.id }}</code>
+            </header>
+            <p class="eval-method-how">{{ m.how }}</p>
+            <div class="eval-method-sample">
+              <span class="ems-row ems-given"><span class="ems-k">输入</span>{{ m.sample.given }}</span>
+              <span class="ems-row ems-expect"><span class="ems-k">期望</span>{{ m.sample.expect }}</span>
+              <span class="ems-row ems-verdict"><span class="ems-k">判定</span>{{ m.sample.verdict }}</span>
+            </div>
+            {% if m.cases %}
+              <ul class="eval-method-cases">
+                {% for c in m.cases %}
+                  <li class="emc-item">
+                    <span class="emc-label">{{ c.label }}</span>
+                    <span class="emc-sample">{{ c.sample }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </article>
         {% endfor %}
       </div>
     {% else %}
@@ -50,4 +76,22 @@
       <p class="eval-detail-empty eval-gap-none">— 无明确缺口,该层级已被评估守护</p>
     {% endif %}
   </section>
+
+  {% if cell.todo %}
+    {% set _done = cell.todo | selectattr('done') | list | length %}
+    <section class="eval-detail-block">
+      <h4 class="eval-detail-h">计划 · TODO
+        <span class="eval-detail-count">{{ _done }}/{{ cell.todo|length }}</span>
+      </h4>
+      <ul class="eval-todo">
+        {% for t in cell.todo %}
+          <li class="eval-todo-item{% if t.done %} eval-todo-item--done{% endif %}">
+            <span class="eval-todo-box" aria-hidden="true">{{ '☑' if t.done else '☐' }}</span>
+            <span class="eval-todo-task">{{ t.task }}</span>
+            {% if t.est %}<span class="eval-todo-est">{{ t.est }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
 </div>

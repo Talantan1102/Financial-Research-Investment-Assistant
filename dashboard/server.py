@@ -597,7 +597,14 @@ async def eval_cell_expand(request: Request) -> HTMLResponse:
         return HTMLResponse(f"no cell for {subsystem_id}/{layer_id}", status_code=404)
 
     template = templates.get_template("_eval_cell_detail.html")
-    return HTMLResponse(template.render(subsystem=subsystem, layer=layer, cell=cell))
+    return HTMLResponse(
+        template.render(
+            subsystem=subsystem,
+            layer=layer,
+            cell=cell,
+            methods_detail=matrix.resolve_methods(cell),
+        )
+    )
 
 
 async def related_capabilities(request: Request) -> JSONResponse:
