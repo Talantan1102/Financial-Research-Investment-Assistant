@@ -135,6 +135,43 @@ def test_eval_renders_learning_path(client: TestClient) -> None:
     assert "DeepEval" in body or "RAGAS" in body
 
 
+def test_eval_links_to_dd_report(client: TestClient) -> None:
+    # /eval「深度报告」入口应链到深度研报评估报告
+    body = client.get("/eval").text
+    assert "深度报告" in body
+    assert 'href="/eval/report/deep-research-report-eval"' in body
+    assert "深度研报" in body
+
+
+def test_dd_report_page_renders(client: TestClient) -> None:
+    resp = client.get("/eval/report/deep-research-report-eval")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "深度研报" in body
+    # worked example 五段标签
+    assert "铺垫" in body and "怎么判分" in body
+    assert "好答" in body and "坏答" in body
+    # 关键维度 + benchmark + 对照本项目(白话名,不用 M1–M5 代号)+ 返回链接
+    assert "忠实度" in body and "预测可回测" in body
+    assert "DeepResearch Bench" in body
+    assert "三个模型当评委" in body
+    # 对照用白话名,不用 M1–M5 内部代号(代号的严格守卫在 test_report.py 的
+    # test_report_has_no_opaque_codes,直接扫报告字段、不受 nav SVG path 的 M1/M2 干扰)
+    assert "引用抽取核对" in body
+    assert 'href="/eval"' in body
+    # 来源真实链接
+    assert "arxiv.org/abs/2506.11763" in body
+
+
+def test_report_unknown_slug_404(client: TestClient) -> None:
+    assert client.get("/eval/report/does-not-exist").status_code == 404
+
+
+def test_report_bad_slug_400(client: TestClient) -> None:
+    # 路径穿越/非法字符 → 400(白名单拦截)或 404
+    assert client.get("/eval/report/..%2f..%2fetc").status_code in (400, 404)
+
+
 def test_eval_cell_unknown_subsystem_404(client: TestClient) -> None:
     resp = client.get("/eval/cell/nope/component")
     assert resp.status_code == 404

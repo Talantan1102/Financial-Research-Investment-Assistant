@@ -1,0 +1,110 @@
+{# 长文研究报告 — /eval/report/<slug>。数据 SSOT: dashboard/data/reports/<slug>.yaml。
+   服务端渲染(不依赖客户端 markdown):meta + summary + 叙事 section + 能力维度
+   (每个配 铺垫→问→好答→坏答→怎么判分)+ 评测基准速览 + 坑 + 对照本项目 + 来源。 #}
+{% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
+{% block content %}
+
+<article class="report">
+  <a class="report-back" href="/eval">‹ 返回评估体系</a>
+
+  <header class="report-head">
+    <h1 class="report-title">{{ report.title }}</h1>
+    {% if report.subtitle %}<p class="report-subtitle">{{ report.subtitle }}</p>{% endif %}
+    <p class="report-meta">
+      {% if report.date %}<span class="report-date">{{ report.date }}</span>{% endif %}
+      {% if report.basis %}<span class="report-basis">{{ report.basis }}</span>{% endif %}
+    </p>
+  </header>
+
+  <p class="report-summary">{{ report.summary }}</p>
+
+  {# 叙事 section #}
+  {% for s in report.sections %}
+    <section class="report-section">
+      <h3 class="report-h">{{ s.heading }}</h3>
+      {% if s.body %}<p class="report-body">{{ s.body }}</p>{% endif %}
+      {% if s.bullets %}
+        <ul class="report-bullets">
+          {% for b in s.bullets %}<li>{{ b }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+    </section>
+  {% endfor %}
+
+  {# 能力维度 — 每个配一个实例 #}
+  <section class="report-section">
+    <h3 class="report-h">{{ report.dimensions|length }} 个评估维度 · 每个配一个例子</h3>
+    <div class="report-dims">
+      {% for d in report.dimensions %}
+        <article class="report-dim">
+          <h4 class="rd-name">{{ d.name }}</h4>
+          <p class="rd-plain">{{ d.plain }}</p>
+          <div class="rd-example">
+            <div class="rd-row"><span class="rd-k">铺垫</span><span class="rd-v">{{ d.setup }}</span></div>
+            <div class="rd-row"><span class="rd-k">问</span><span class="rd-v">{{ d.question }}</span></div>
+            <div class="rd-row rd-good"><span class="rd-k">好答</span><span class="rd-v">{{ d.good }}</span></div>
+            <div class="rd-row rd-bad"><span class="rd-k">坏答</span><span class="rd-v">{{ d.bad }}</span></div>
+            <div class="rd-row rd-scored"><span class="rd-k">怎么判分</span><span class="rd-v">{{ d.scored }}</span></div>
+          </div>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+
+  {# 评测基准速览 #}
+  {% if report.benchmarks %}
+    <section class="report-section">
+      <h3 class="report-h">主流评测基准速览</h3>
+      <div class="report-benches">
+        {% for b in report.benchmarks %}
+          <article class="report-bench">
+            <h4 class="rb-name">{{ b.name }}</h4>
+            <p class="rb-what">{{ b.what }}</p>
+            <p class="rb-fit"><span class="rb-fit-k">对你的借鉴</span>{{ b.fit }}</p>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {# 坑 #}
+  {% if report.pitfalls %}
+    <section class="report-section">
+      <h3 class="report-h">最该记住的坑</h3>
+      <ul class="report-pitfalls">
+        {% for p in report.pitfalls %}<li>{{ p }}</li>{% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
+  {# 对照本项目 #}
+  {% if report.gaps %}
+    <section class="report-section">
+      <h3 class="report-h">对照本项目 · 现状与可补</h3>
+      <div class="report-gaps">
+        {% for g in report.gaps %}
+          <article class="report-gap">
+            <h4 class="rg-component">{{ g.component }}</h4>
+            <p class="rg-current"><span class="rg-k rg-k--now">现状</span>{{ g.current }}</p>
+            <p class="rg-suggestion"><span class="rg-k rg-k--add">可补</span>{{ g.suggestion }}</p>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {# 来源 #}
+  {% if report.sources %}
+    <section class="report-section">
+      <h3 class="report-h">来源(均经事实核查)<span class="report-count">{{ report.sources|length }}</span></h3>
+      <ul class="report-sources">
+        {% for s in report.sources %}
+          <li><a href="{{ s.url }}" target="_blank" rel="noopener noreferrer">{{ s.title }}</a></li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+</article>
+
+{% endblock %}

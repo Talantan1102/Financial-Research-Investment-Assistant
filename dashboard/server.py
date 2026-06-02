@@ -556,6 +556,9 @@ async def story_view(request: Request) -> HTMLResponse:
 
 
 EVAL_SYSTEM_PATH = CONFIG_DIR / "eval_system.yaml"
+REPORTS_DIR = DASHBOARD_ROOT / "data" / "reports"
+# slug 白名单:小写字母 / 数字 / 连字符 —— 挡路径穿越。
+_SLUG_OK: frozenset[str] = frozenset("abcdefghijklmnopqrstuvwxyz0123456789-")
 
 
 async def eval_view(request: Request) -> HTMLResponse:
@@ -576,6 +579,25 @@ async def eval_view(request: Request) -> HTMLResponse:
             active_nav="eval",
         )
     )
+
+
+async def report_view(request: Request) -> HTMLResponse:
+    """GET /eval/report/{slug} — 长文研究报告。数据驱动自 data/reports/<slug>.yaml。
+
+    纯渲染:不依赖 DB / snapshot,只读 yaml(SSOT)。slug 走白名单挡路径穿越。
+    """
+    from dashboard.derive.report import load_report
+
+    slug = request.path_params["slug"]
+    if not slug or set(slug) - _SLUG_OK:
+        return HTMLResponse(f"bad report slug: {slug!r}", status_code=400)
+    path = REPORTS_DIR / f"{slug}.yaml"
+    if not path.is_file():
+        return HTMLResponse(f"report not found: {slug}", status_code=404)
+
+    report = load_report(path)
+    template = templates.get_template("report.html")
+    return HTMLResponse(template.render(report=report, active_nav="eval"))
 
 
 async def eval_cell_expand(request: Request) -> HTMLResponse:
@@ -661,6 +683,7 @@ app = Starlette(
         Route("/refresh", post_refresh, methods=["GET"]),
         Route("/story", story_view),
         Route("/eval", eval_view),
+        Route("/eval/report/{slug}", report_view, methods=["GET"]),
         Route("/eval/cell/{subsystem}/{layer}", eval_cell_expand, methods=["GET"]),
         Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
         Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
