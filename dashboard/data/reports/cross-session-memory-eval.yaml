@@ -1,0 +1,138 @@
+# dashboard/data/reports/cross-session-memory-eval.yaml
+# ============================================================================
+# 研究报告:跨会话记忆怎么评估
+# ----------------------------------------------------------------------------
+# 来源:2026-06-02 上网调研(LongMemEval / LoCoMo / MemBench / MemoryAgentBench
+# + Zep / Mem0 / Letta 等 13 源 + 逐条事实核查)综合 + 对照本项目 C.5 记忆 eval。
+# 由 dashboard/derive/report.py 类型化加载,渲染于 /eval/report/<slug>。
+# ============================================================================
+slug: cross-session-memory-eval
+title: "跨会话记忆 · 怎么评估"
+subtitle: "用具体例子讲明白:6 个能力维度 × worked example,对照本项目 C.5 记忆 eval"
+meta:
+  date: "2026-06-02"
+  basis: "13 源调研(LongMemEval/LoCoMo/MemBench/MemoryAgentBench/Zep/Mem0/Letta)+ 逐条事实核查 + 对照 C.5"
+
+summary: >-
+  把"评跨会话记忆"想象成考一个跟了你一年的老管家。普通问答评估像开卷考:文章给你,问的事实就在眼前,
+  对就对、错就错。跨会话记忆评估是闭卷 + 跨时间的考:证据散在几十次旧对话里(还混着大量无关闲聊当干扰),
+  有的事后被推翻了,有的你根本没提过——这时正确答案是"我不知道"。一句话:普通 QA 评"读得准",
+  记忆评估评"记得对、想得通、还懂得忘和拒"。
+
+sections:
+  - heading: "为什么比普通 QA 难"
+    body: "四个难点,说人话:"
+    bullets:
+      - "信息散在多个 session——答一道题可能要同时用上第 3 次和第 31 次对话,中间隔几十次闲聊当干扰(LongMemEval 每题塞 ~115k token、30-40 个 session,只有 1-6 个是真证据)。"
+      - "有时间先后——'什么时候''过了多久''在某件事之前还是之后',答案藏在时间结构里,要把散落各处的日期拼出顺序。位置 ≠ 时间先后,模型经常排错。"
+      - "后面的话会推翻前面——5 月说买了 RAV4,8 月说卖了换 Model 3。只会'召回'的系统命中最早证据答 RAV4:召回成功了却答错了,因为没做'新旧仲裁'。这是最致命的一轴。"
+      - "有时该答'没提过'——历史里根本没出现的事,正确行为是承认不知道。差系统顺着假前提编 = 幻觉。"
+
+# 核心:6 个能力维度,每个配完整 worked example(铺垫→问→好答→坏答→怎么判分)
+dimensions:
+  - name: "① 单跳召回(记得住)"
+    plain: "某条事实在过去某次对话里明确说过,后来直接问,系统能不能精确捞回来——最基础的'记得住'。"
+    setup: "第2次对话里,用户问白酒板块时顺口说'我重仓了贵州茅台,大概 500 股',之后隔二十多次无关对话(大盘、黄金、债券)。"
+    question: "到第25次对话:'我重仓了什么股票?各多少股?'"
+    good: "贵州茅台(600519.SH),约 500 股。"
+    bad: "答不出(早被无关对话挤出窗口),或被干扰对话带偏答成'你重仓了五粮液'。"
+    scored: "本项目 Recall Precision(top-5 检索逐条 LLM-judge 判 yes/no,precision=相关数/检索数,目标 ≥0.7)。LongMemEval 里这类叫 single-session-user(单次对话里直接问过),用 GPT-4o 当裁判判答案对错。"
+  - name: "② 多跳推理(把几条拼起来)"
+    plain: "答案不在任何单条消息里,要把散在两次以上对话的事实拼起来才能算对。"
+    setup: "第4次对话:'我去年三季度建仓了宁德时代';第9次对话:'那只新能源龙头成本 180 没动';第14次对话:'我所有持仓里只有那只新能源还浮亏'。"
+    question: "到第20次对话:'我现在唯一浮亏那只票,是什么时候建仓的?'"
+    good: "宁德时代,2024 三季度——要把'唯一浮亏=新能源龙头=宁德时代=去年三季度建仓'三条跨对话的事实串起来。"
+    bad: "只召回最近的第14次对话,答'你有只票浮亏',答不出建仓时间;或只命中一跳,答不出是哪只。"
+    scored: "本项目 archival_memory_traverse(沿图谱多跳)+ Recall Precision 看证据是否都召回,golden 用 expected_traverse_args 校验跳法。LoCoMo 单列 multi-hop,用 token-level F1。"
+  - name: "③ 时间推理(按时间结构作答)"
+    plain: "利用对话里的日期线索做排序、算时差、'最近一次是哪次'——答案藏在时间结构里,不是某句话本身。"
+    setup: "第1次对话(2024-11-15)'看好茅台未来三年';第6次对话(2025-01)'把仓位挪了一半到中证红利';第12次对话(2025-03)'红利又加了点'。"
+    question: "到第18次对话:'去年 11 月我对持仓表达过什么看法?'(时间窗 [2024-11-01, 11-30])"
+    good: "你 2024-11-15 说看好贵州茅台未来三年——只取落在窗内的观点,不能把 1 月挪仓、3 月加仓混进来。"
+    bad: "把后来 1 月/3 月的红利操作也一起答出来(没按时间窗过滤),或拿错 session 的日期。"
+    scored: "本项目 Temporal Correctness(纯确定性:判 valid_from≤窗末 AND (valid_to为空 OR valid_to≥窗首),correct/总数,目标 ≥0.95)。LoCoMo 的时间题人类 F1≈92,基线 LLM 只 20-30。"
+  - name: "④ 知识更新与矛盾消解(认出旧的作废了)"
+    plain: "用户后来的话推翻/覆盖了前面的话,要认出旧事实已作废、只报当前真值——跨会话记忆最难也最致命的一轴。"
+    setup: "第3次对话(1 月)'我清仓了银行股,全换成创业板 ETF';隔很多次后,第11次对话(4 月)'更新一下,创业板上周止盈了,现在主力是沪深300 指数增强'。"
+    question: "到第20次对话:'我现在的主力仓位是什么?'"
+    good: "沪深300 指数增强——1 月那条已被 4 月推翻,旧的'创业板 ETF'标记为失效,只报当前真值。"
+    bad: "答'创业板 ETF'(命中最早写入、却已过期的那条——只做单跳召回的系统最典型的死法);或把两个并列当都成立。"
+    scored: "本项目 Bi-temporal Differential(系统级,确定性断言:5-session 持仓演化,每 session 后查真 PG 断言老边被设 valid_to、新边 active、失效边不复活)。⚠ MemoryAgentBench 实测:多跳叠加矛盾消解时所有方法最高只有 ~6% 准确率。"
+  - name: "⑤ 克制弃答(没提过就说不知道)"
+    plain: "问的信息历史里从没出现过,正确答案是'你没提过/我不知道',测系统会不会顺着假前提编瞎话。"
+    setup: "整段历史聊过茅台、宁德时代、红利 ETF,但从没提过任何港股或加密货币。"
+    question: "到第22次对话:'我之前跟你说过我那笔比特币的成本价吗?'"
+    good: "你聊过 A 股那几只,但从没提过比特币,我没有这个信息——要不要现在告诉我?"
+    bad: "顺着假前提编:'你说过你的比特币成本价大约 4 万美元'——典型幻觉。"
+    scored: "LongMemEval 专设 30 道 false-premise 题单独算 abstention accuracy(LLM-judge 判有没有正确弃答)。⚠ 本项目目前没有独立弃答 golden——这是最明显的缺口。陷阱:无脑只答'我不知道'的 baseline 能蹭分,要同时看'该答答对没'和'该弃弃对没'。"
+  - name: "⑥ 偏好与人格一致(尊重用户画像)"
+    plain: "不是问硬事实,而是看回答有没有真正尊重用户反复表达过的偏好和风险画像。"
+    setup: "第1次对话'我是坚定价值投资者,讨厌追热点';第5次对话'别给我推概念股';第9次对话'我风险偏好低,回撤超 15% 睡不着'。"
+    question: "到第15次对话:'最近 AI 算力很火,帮我看看适合我的标的。'"
+    good: "记得你低风险+价值偏好、不碰题材股——聊 AI 算力时聚焦有现金流和护城河的龙头、提示回撤控制在 15% 内,而不是甩一串高波动概念小票。"
+    bad: "直接甩一串当下最热的 AI 概念小盘股,完全无视用户说过的价值+低风险偏好。"
+    scored: "LongMemEval 的 single-session-preference 题用 LLM-judge 判'有没有尊重偏好';Zep 报这一项提升最猛(+184%)。本项目靠 persona 注入间接覆盖,没有专门的偏好一致性 golden 打分。"
+
+benchmarks:
+  - name: "LongMemEval (arXiv 2410.10813, ICLR 2025)"
+    what: "500 道人工精修题,5 大能力(信息抽取/多 session 推理/时间推理/知识更新/弃答)× 7 题型操作化,其中 30 道 false-premise 弃答题;S 档 ~115k token(30-40 session)。主判分 GPT-4o LLM-judge(与人工 >97% 一致),非 exact-match。"
+    fit: "本项目最该对标的尺子——它的能力分层 + 按题型分项报数 + 30 道弃答题 + '间接提及'造题手法,直接补本项目弃答缺口和偏好维度。"
+  - name: "LoCoMo (arXiv 2402.17753, ACL 2024)"
+    what: "50 段超长多 session 对话(平均 ~19 session)、7512 道 QA:单跳36%/多跳14.6%/时间20.6%/对抗(弃答)24.9%。原生判分 token-level F1。"
+    fit: "对抗/弃答占近 1/4 的设计值得借鉴——学它'预存一个诱导性错答,看系统会不会咬钩'的造题法。但对话偏短易被长上下文硬塞打赢,别当唯一标准。"
+  - name: "MemBench / MemoryAgentBench"
+    what: "MemBench 合成多选题,测容量拐点(10k→100k token 准确率 0.647→0.489);MemoryAgentBench 用'增量多轮投喂'协议,四轴含矛盾消解(多跳矛盾全员最高 ~6%)。"
+    fit: "两个洞见:(1)'增量多轮投喂'更贴近真实 agent 攒信息,本项目跨 session golden 可学;(2)记忆量堆大会崩 + 复杂机制不一定打得过朴素检索——要压容量、拿朴素 RAG 当 baseline。"
+  - name: "Zep / Graphiti(bi-temporal 知识图谱)"
+    what: "和本项目 C.5 同源(PG + AGE 图 + bi-temporal 四字段)。借 LongMemEval 自评:时间 +48%、偏好 +184%、多 session +30%,但 single-session-assistant 倒退、knowledge-update 在小模型上反而略输。"
+    fit: "强弱分布最有参考性:它自承'存得下时间 ≠ 答得对更新'——别因为有了 valid_from/valid_to 就以为知识更新这一轴稳了,得专门用 differential golden 压它。"
+  - name: "Mem0 / Letta(MemGPT)"
+    what: "Mem0 主打三维评估(准确率 LLM-judge × p95 延迟 × 每查询 token);Letta 是 hierarchical self-managed 记忆鼻祖,本项目 C.5 分层正是 MemGPT-style。围绕 LoCoMo 的 Zep vs Mem0 论战(84%→58%/75%)是反面教材。"
+    fit: "记忆评估必须三维一起看——本项目 Plan 5 成本优化($0.025→$0.005)该配 token/延迟指标进 eval。论战教训:弃答题分子/分母怎么算能差 25 个点,算 abstention 要写清口径、跑多次报均值。"
+
+pitfalls:
+  - "最大误区:把'大海捞针(needle-in-haystack)'当记忆评估。NIAH 是静态文本塞句怪话再找出来;真记忆要处理间接埋入+跨 session+时序+推翻+弃答。判据:若'把整段历史直接喂 LLM'就能打赢你的记忆系统(Zep 实测 full-context 73% 反超 Mem0 68%),那 benchmark 太短,根本没压测记忆。"
+  - "只报一个总准确率会掩盖短板:基线 LLM 整体 F1≈40,但时间题 20-30、对抗题掉到 2。务必按能力维度分项报数。"
+  - "忽视弃答维度:系统天生倾向'强行答'。反向陷阱:无脑只答'我不知道'的 baseline 能靠不可答题蹭分,要同时看'该答答对没'和'该弃弃对没'。"
+  - "只做单跳召回的系统在知识更新题上最容易翻车:命中了最早证据却没识别它已被推翻。'召回成功' ≠ '答对'。"
+  - "厂商自评博客打折扣:Zep vs Mem0 那场 84%→58%/75% 的论战就是反面教材——LoCoMo 自己的指标是 F1,但厂商各自换成自选的 LLM-judge,分数根本不可比。横评要拆开按题型看、查清每个系统的配置。"
+  - "记忆量堆大会崩 + 复杂机制不一定更强:token 从 10k 堆到 100k 准确率可能不升反降。要压容量、拿朴素 RAG 当 baseline。"
+
+# 对照本项目 C.5 记忆 eval:现状 + 可补什么
+gaps:
+  - component: "Recall Precision(检索精度)"
+    current: "对 top-5 检索 fact 逐条 LLM-judge 算 precision,目标 ≥0.7。覆盖单跳召回。"
+    suggestion: "补 Recall@k(看该召回的证据漏没漏),把检索质量和生成质量彻底解耦;再补 multi-hop 子集对标 LongMemEval multi-session。"
+  - component: "Temporal Correctness(时间正确性)"
+    current: "确定性 check valid_from/valid_to 落没落进时间窗,目标 ≥0.95。"
+    suggestion: "目前只测'区间对不对',没测'事件先后排序/算时差'(LoCoMo/Zep 主打)。加几道排序/时差 golden,答案要拼多个日期。"
+  - component: "Faithful Answer(忠实度/抗幻觉)"
+    current: "拆 claim 逐条判 grounded + provenance substring oracle,目标 ≥0.85。"
+    suggestion: "忠实度防不住'该弃答时硬答'。新建独立 abstention golden 子集(对标 LongMemEval 30 道 false-premise),专放历史没提过的金融问题——本项目最明显的能力缺口。"
+  - component: "Routing Accuracy(路由准确率)"
+    current: "subset-match 选工具 ≥0.85;memory-vs-kb 三分类种子集只有 8 case(计划扩 50 未扩)。"
+    suggestion: "8 个 seed 统计上太小,优先扩到 50;每类加边界/歧义 case(如'跟我持仓相关的白酒行业政策'这种 both),跑多次报均值。"
+  - component: "Bi-temporal Differential(系统级 e2e)"
+    current: "5-session 持仓演化,确定性断言 active/invalidated/valid_to/qty。本项目最硬、对标 LongMemEval knowledge-update。"
+    suggestion: "加多跳冲突 case(对标 MemoryAgentBench 多跳矛盾全员崩到 ~6%):如'我浮亏那只票的建仓时间',中间该票被换过仓——看每跳取没取最新值。"
+  - component: "整体 eval_runner 维度覆盖"
+    current: "按 category 分发到各 metric;cross_turn golden 只被 unit test 消费、未进主管线打分。"
+    suggestion: "(1) 新增 abstention 和 preference-consistency 两个维度 golden(6 大维度里这两个最弱);(2) cross_turn golden 接进主管线;(3) 每个 metric 配 token/延迟成本数字(Plan 5 成果进 eval 当一等指标)。"
+
+sources:
+  - title: "LongMemEval: Benchmarking Chat Assistants on Long-Term Interactive Memory (ICLR 2025)"
+    url: "https://arxiv.org/abs/2410.10813"
+  - title: "LongMemEval 官方站(500 题 / 7 题型 / 5 能力 / 30 弃答)"
+    url: "https://xiaowu0162.github.io/long-mem-eval/"
+  - title: "LoCoMo: Evaluating Very Long-Term Conversational Memory of LLM Agents (ACL 2024)"
+    url: "https://arxiv.org/abs/2402.17753"
+  - title: "MemBench: More Comprehensive Evaluation on the Memory of LLM-based Agents"
+    url: "https://arxiv.org/abs/2506.21605"
+  - title: "MemoryAgentBench: Evaluating Memory via Incremental Multi-Turn Interactions"
+    url: "https://arxiv.org/abs/2507.05257"
+  - title: "Zep Is The New State of the Art In Agent Memory(bi-temporal 图谱)"
+    url: "https://blog.getzep.com/state-of-the-art-agent-memory/"
+  - title: "Lies, Damn Lies, & Statistics: Is Mem0 Really SOTA in Agent Memory?(LLM-judge 不可比论战)"
+    url: "https://blog.getzep.com/lies-damn-lies-statistics-is-mem0-really-sota-in-agent-memory/"
+  - title: "Letta Leaderboard: Benchmarking LLMs on Agentic Memory(MemGPT 分层)"
+    url: "https://www.letta.com/blog/letta-leaderboard"
