@@ -209,4 +209,6 @@ export interface CreateChatRequest {
 export interface SendChatMessageRequest {
   session_id: string
   content: string
+  forced_tool_name?: string
+  forced_tool_args?: Record<string, unknown>
 }
