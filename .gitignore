@@ -77,3 +77,6 @@ celerybeat-schedule.db
 # Claude Code 旧 worktree 管理副产物
 .claire/
 .playwright-mcp/
+
+# 本机联调用的 docker-compose 覆盖(镜像源/AGE 退化等),仅本地用,勿入库
+docker-compose.override.yml
