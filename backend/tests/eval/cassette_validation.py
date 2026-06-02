@@ -35,6 +35,14 @@ from app.services.llm_service import LLMService
 
 CASSETTES_ROOT = Path("backend/tests/fixtures/cassettes")
 SIMILARITY_THRESHOLD = 8  # 0-10 scale; spec § 4 says 0.8
+# Borderline cassettes get re-sampled before we declare drift. A single live
+# sample + single judge call is non-deterministic — a semantically-fine cassette
+# can score below threshold by chance (this was the nightly false-positive root
+# cause: a cassette passing ~11/12 nights then failing 1, a different cassette
+# each time). On a sub-threshold first sample, draw up to RESAMPLE_EXTRA more
+# INDEPENDENT samples and flag DRIFT only when a strict majority stay below
+# threshold. Genuine drift (all samples low) still fails; one-off noise does not.
+RESAMPLE_EXTRA = 2  # up to 3 total samples on the borderline path
 
 
 def _extract_first_interaction(cassette_path: Path) -> tuple[str, str, str] | None:
@@ -104,6 +112,41 @@ def score_similarity(judge_llm: LLMService, old: str, new: str, tier: Tier = "ba
     return min(10, max(0, int(digits[:2])))
 
 
+def _sample_similarity(
+    sut: LLMService, judge: LLMService, prompt: str, recorded: str
+) -> int | None:
+    """One fresh live call + judge comparison → 0-10 similarity.
+
+    Returns None on an infra-level APIStatusError (account / rate-limit / 5xx),
+    which is not real drift and must not count toward a drift verdict.
+    """
+    try:
+        live = sut.chat(prompt=prompt, tier="balanced")
+    except APIStatusError:
+        return None
+    return score_similarity(judge, old=recorded, new=live.content)
+
+
+def _classify_drift(sims: list[int], threshold: int = SIMILARITY_THRESHOLD) -> str:
+    """Drift verdict from 1+ similarity samples (pure — unit-tested).
+
+    - 'DRIFT'       — a strict MAJORITY of samples are below threshold.
+    - 'UNCONFIRMED' — the only sample is below threshold and could not be
+                      re-confirmed (resamples infra-failed); treated as an
+                      infra-skip, never a silent OK.
+    - 'OK'          — otherwise (first sample passed, or one-off noise out-voted).
+
+    `sims[0]` is always the first (mandatory) sample; later entries are
+    confirmation resamples drawn only when sims[0] < threshold.
+    """
+    below = [s for s in sims if s < threshold]
+    if len(sims) >= 2 and 2 * len(below) > len(sims):
+        return "DRIFT"
+    if sims[0] < threshold and len(sims) < 2:
+        return "UNCONFIRMED"
+    return "OK"
+
+
 def main() -> int:
     cassettes = sorted(CASSETTES_ROOT.rglob("*.yaml"))
     if not cassettes:
@@ -129,21 +172,39 @@ def main() -> int:
             print(f"SKIP {cassette}: no interactions")
             continue
         model, prompt, recorded = ext
+        rel = cassette.relative_to(CASSETTES_ROOT)
         try:
             live = sut.chat(prompt=prompt, tier="balanced")
         except APIStatusError as exc:
             # Account-level / rate-limit infra issues (Arrearage, InsufficientQuota,
             # 429 RateLimit, 503) are not real drift — skip and continue.
-            print(
-                f"SKIP {cassette.relative_to(CASSETTES_ROOT)}: live LLM unavailable ({exc.status_code} {type(exc).__name__})"
-            )
-            infra_skips.append(str(cassette.relative_to(CASSETTES_ROOT)))
+            print(f"SKIP {rel}: live LLM unavailable ({exc.status_code} {type(exc).__name__})")
+            infra_skips.append(str(rel))
             continue
-        sim = score_similarity(judge, old=recorded, new=live.content)
-        verdict = "OK" if sim >= SIMILARITY_THRESHOLD else "DRIFT"
-        print(f"{verdict} sim={sim}/10 cassette={cassette.relative_to(CASSETTES_ROOT)}")
-        if sim < SIMILARITY_THRESHOLD:
-            drifts.append(str(cassette.relative_to(CASSETTES_ROOT)))
+        sims = [score_similarity(judge, old=recorded, new=live.content)]
+
+        # Confirm a sub-threshold first sample with extra INDEPENDENT samples
+        # before declaring drift (see RESAMPLE_EXTRA note above).
+        if sims[0] < SIMILARITY_THRESHOLD:
+            for _ in range(RESAMPLE_EXTRA):
+                extra = _sample_similarity(sut, judge, prompt, recorded)
+                if extra is not None:
+                    sims.append(extra)
+
+        # DRIFT only on a strict MAJORITY of clean samples below threshold. A lone
+        # sub-threshold sample we couldn't re-confirm (resamples infra-failed) is
+        # UNCONFIRMED, not drift — counted as an infra-skip so a flaky-API night
+        # can't masquerade as a code regression. (Verdict logic: _classify_drift.)
+        verdict = _classify_drift(sims)
+        resampled = f" (resampled {sims})" if len(sims) > 1 else ""
+        if verdict == "DRIFT":
+            print(f"DRIFT sim={sims[0]}/10 cassette={rel}{resampled}")
+            drifts.append(str(rel))
+        elif verdict == "UNCONFIRMED":
+            print(f"UNCONFIRMED sim={sims[0]}/10 cassette={rel} (resamples unavailable)")
+            infra_skips.append(str(rel))
+        else:
+            print(f"OK sim={sims[0]}/10 cassette={rel}{resampled}")
 
     print(
         f"\nTotal cassettes: {len(cassettes)} | drifts: {len(drifts)} | "
