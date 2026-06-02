@@ -21,6 +21,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [KB Embedding 选型](docs/claude-context/kb-embedding-choice.md) — qwen text-embedding-v3 主力（1024d），BGE-M3 stub 留 v0.9；batch=10 / 同维互换不重建 collection
 - [KB 评估缺口](docs/claude-context/kb-eval-gaps.md) — 当前 eval 是 agent 端到端 LLM-judge，缺 chunking/embedding/检索的离线指标；v0.8 调优 spec 是补口位置
 
+### Agent / 对话评估方法论
+- [对话/工具型 Agent 评估方法论](docs/claude-context/conv-agent-evaluation-methods.md) — 外部调研沉淀:四个相互独立的角度(回答质量·用强模型当裁判 / 任务完成·比数据库终态 / 过程轨迹 / 生产在线);完整研报 `docs/research/2026-06-02-conversational-agent-evaluation-survey.md`(每法具体例子+来源+22条校验)
+
 ### 工程约定与 dep 管理
 - [重型 deps 走 optional extras](docs/claude-context/optional-extras-for-heavy-deps.md) — base 留 core，重型/可选进 `[project.optional-dependencies]`
 - [import 链假设要 smoke test 验](docs/claude-context/verify-import-chain-with-smoke-test.md) — spec 谈"X import 会 fail"必须先 `python -c "from X import"` 实测，grep 看不到 lazy/transitive/subprocess
