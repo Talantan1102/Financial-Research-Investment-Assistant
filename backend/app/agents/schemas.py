@@ -231,6 +231,10 @@ class ChatState(BaseModel):
     enable_web_search: bool = False
     enable_kb_search: bool = False
 
+    # === forced tool (slash command escape hatch) ===
+    forced_tool_name: str | None = None
+    forced_tool_args: dict[str, Any] | None = None
+
     # === Q4 E memory ===
     history: list[HistoryMessage] = Field(default_factory=list)
     history_summary: str | None = None

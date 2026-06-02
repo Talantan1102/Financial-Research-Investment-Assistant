@@ -114,6 +114,8 @@ class ChatRequest(BaseModel):
     message: str
     enable_web_search: bool = False  # v0 placeholder
     enable_kb_search: bool = False  # v0 placeholder
+    forced_tool_name: str | None = None  # slash command: force this MCP tool
+    forced_tool_args: dict[str, Any] | None = None  # args for the forced tool
 
 
 class StreamEvent(BaseModel):
