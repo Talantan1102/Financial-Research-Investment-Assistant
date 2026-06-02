@@ -256,8 +256,7 @@ def _parse_glossary(raw: object) -> dict[str, EvalMethod]:
                 sample=str(_require(c.get("sample"), f"{ctx}.cases[{i}].sample")),
             )
             for i, c in enumerate(cases_raw)
-            if isinstance(c, dict)
-            or _raise(f"eval_system.yaml: {ctx}.cases[{i}] 必须是 mapping")
+            if isinstance(c, dict) or _raise(f"eval_system.yaml: {ctx}.cases[{i}] 必须是 mapping")
         )
 
         glossary[str(mid)] = EvalMethod(
@@ -275,9 +274,7 @@ def _parse_glossary(raw: object) -> dict[str, EvalMethod]:
 def _parse_learning_path(raw: object) -> tuple[EvalLearningStep, ...]:
     """解析顶层 learning_path → EvalLearningStep 元组;title/what 缺失即 fail loud。"""
     if not isinstance(raw, list):
-        raise ValueError(
-            f"eval_system.yaml: learning_path 必须是 list,实得 {type(raw).__name__}"
-        )
+        raise ValueError(f"eval_system.yaml: learning_path 必须是 list,实得 {type(raw).__name__}")
     steps: list[EvalLearningStep] = []
     for i, item in enumerate(raw):
         ctx = f"learning_path[{i}]"
@@ -369,9 +366,7 @@ def load_eval_matrix(path: Path) -> EvalMatrix:
             )
 
     # 组件级评估学习路径(可选 top-level)— 跨子系统的有序学习旅程,不属于单个 cell。
-    learning_path = (
-        _parse_learning_path(data["learning_path"]) if data.get("learning_path") else ()
-    )
+    learning_path = _parse_learning_path(data["learning_path"]) if data.get("learning_path") else ()
 
     return EvalMatrix(
         layers=layers,

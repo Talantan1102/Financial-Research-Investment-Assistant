@@ -96,7 +96,8 @@ def test_eval_cell_renders_method_cards(client: TestClient) -> None:
     assert "输入" in body and "期望" in body and "判定" in body  # 样例三段 key
     # 至少一个 family 中文标签出现
     assert any(
-        fam in body for fam in ["确定性离线", "替身隔离", "LLM 评判", "录放回放", "端到端", "回归鲁棒"]
+        fam in body
+        for fam in ["确定性离线", "替身隔离", "LLM 评判", "录放回放", "端到端", "回归鲁棒"]
     )
 
 
