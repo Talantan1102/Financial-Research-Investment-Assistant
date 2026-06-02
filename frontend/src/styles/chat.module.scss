@@ -550,3 +550,45 @@
   border-left: 1px solid var(--ios-separator);
   margin-left: 4px;
 }
+
+.slashMenu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--ios-bg-secondary, #fff);
+  border: 1px solid var(--ios-separator, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 50;
+
+  :global([cmdk-item]) {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 8px 12px;
+    cursor: pointer;
+
+    &[data-selected='true'] {
+      background: var(--ios-bg-grouped, #f3f4f6);
+    }
+  }
+}
+
+.slashAlias {
+  font-family: var(--ios-font-mono, monospace);
+  font-weight: 600;
+}
+
+.slashLabel {
+  font-size: 13px;
+}
+
+.slashHint {
+  margin-left: auto;
+  opacity: 0.55;
+  font-size: 12px;
+}

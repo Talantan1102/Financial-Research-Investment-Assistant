@@ -42,6 +42,12 @@ Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
   get() { return (this as HTMLElement).style?.height ? parseInt((this as HTMLElement).style.height, 10) || 600 : 600 },
 })
 
+// cmdk (SlashCommandMenu) calls Element.scrollIntoView on the active item;
+// jsdom doesn't implement it. Stub as a no-op.
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {}
+}
+
 // antd responsive components (List, Grid, etc.) use window.matchMedia which
 // is not implemented in jsdom. Provide a no-op stub so antd doesn't throw.
 if (typeof window !== 'undefined' && !window.matchMedia) {
