@@ -112,7 +112,10 @@ def build_research_graph(
         collector:    DataCollector that executes tool calls in parallel.
         analyst:      Analyst that derives insights from tool results.
         writer:       Writer that synthesises the final research report.
-        critic:       Critic subagent that scores the report on 5 dimensions.
+        critic:       Critic subagent that scores the report on 8 dimensions
+                      (factuality / coverage / insight / structure / conciseness /
+                      input_context / valuation_consistency / dialectical_balance),
+                      fanned out via the Send API in the critic subgraph.
         checkpointer: Optional pre-constructed checkpointer (sync or async).
                       Pass ``None`` for a stateless in-memory graph (tests / eval).
                       For the production async streaming path use

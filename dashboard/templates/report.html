@@ -32,20 +32,20 @@
     </section>
   {% endfor %}
 
-  {# 能力维度 — 每个配一个实例 #}
+  {# 能力维度 / 派发范式 — 每个配一个实例(标签由 report.dim_labels 决定,默认评估体裁) #}
   <section class="report-section">
-    <h3 class="report-h">{{ report.dimensions|length }} 个评估维度 · 每个配一个例子</h3>
+    <h3 class="report-h">{% if report.dim_labels.section_title %}{{ report.dim_labels.section_title }}{% else %}{{ report.dimensions|length }} 个评估维度 · 每个配一个例子{% endif %}</h3>
     <div class="report-dims">
       {% for d in report.dimensions %}
         <article class="report-dim">
           <h4 class="rd-name">{{ d.name }}</h4>
           <p class="rd-plain">{{ d.plain }}</p>
           <div class="rd-example">
-            <div class="rd-row"><span class="rd-k">铺垫</span><span class="rd-v">{{ d.setup }}</span></div>
-            <div class="rd-row"><span class="rd-k">问</span><span class="rd-v">{{ d.question }}</span></div>
-            <div class="rd-row rd-good"><span class="rd-k">好答</span><span class="rd-v">{{ d.good }}</span></div>
-            <div class="rd-row rd-bad"><span class="rd-k">坏答</span><span class="rd-v">{{ d.bad }}</span></div>
-            <div class="rd-row rd-scored"><span class="rd-k">怎么判分</span><span class="rd-v">{{ d.scored }}</span></div>
+            <div class="rd-row"><span class="rd-k">{{ report.dim_labels.setup }}</span><span class="rd-v">{{ d.setup }}</span></div>
+            <div class="rd-row"><span class="rd-k">{{ report.dim_labels.question }}</span><span class="rd-v">{{ d.question }}</span></div>
+            <div class="rd-row rd-good"><span class="rd-k">{{ report.dim_labels.good }}</span><span class="rd-v">{{ d.good }}</span></div>
+            <div class="rd-row rd-bad"><span class="rd-k">{{ report.dim_labels.bad }}</span><span class="rd-v">{{ d.bad }}</span></div>
+            <div class="rd-row rd-scored"><span class="rd-k">{{ report.dim_labels.scored }}</span><span class="rd-v">{{ d.scored }}</span></div>
           </div>
         </article>
       {% endfor %}
@@ -55,7 +55,7 @@
   {# 评测基准速览 #}
   {% if report.benchmarks %}
     <section class="report-section">
-      <h3 class="report-h">主流评测基准速览</h3>
+      <h3 class="report-h">{% if report.benchmarks_title %}{{ report.benchmarks_title }}{% else %}主流评测基准速览{% endif %}</h3>
       <div class="report-benches">
         {% for b in report.benchmarks %}
           <article class="report-bench">
