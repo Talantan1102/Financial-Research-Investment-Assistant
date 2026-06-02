@@ -59,9 +59,12 @@ export function ChatPane({
   const displayMessages = pendingMessage ? [...messages, pendingMessage] : messages
 
   const onSend = useCallback(
-    (text: string) => {
+    (
+      text: string,
+      forced?: { forced_tool_name: string; forced_tool_args: Record<string, unknown> },
+    ) => {
       if (!sessionId) return
-      void sse.sendMessage(text)
+      void sse.sendMessage(text, forced)
     },
     [sessionId, sse],
   )
