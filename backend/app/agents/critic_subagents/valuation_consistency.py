@@ -98,6 +98,7 @@ class ValuationConsistencyScorer(Agent):
                 score=10.0,
                 evidence="single-lens skip (no cross-check applicable)",
                 sub_agent_request_id=request_id,
+                is_skip=True,  # C18: excluded from overall_score
             )
 
         if valuation_consistency == "consistent":

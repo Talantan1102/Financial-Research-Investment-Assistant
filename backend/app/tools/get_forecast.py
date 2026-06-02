@@ -64,18 +64,20 @@ class GetForecastTool(Tool):
         df = await self._tushare.get_forecast(ts_code=a.ts_code, period=a.period)
         if df.empty:
             return {"ts_code": a.ts_code, "error": "no data"}
-        # Pick latest period if multiple rows present. Tushare forecast 表
-        # column 含 `period` (quarter end YYYYMMDD) — desc 排序后 [0] 为最新.
-        # Fallback to ann_date if period 不在 (defensive — schema 漂移防御).
-        if "period" in df.columns and len(df) > 1:
-            df = df.sort_values("period", ascending=False)
+        # Pick latest report period if multiple rows present. 注意:Tushare forecast
+        # 接口里 `period` 是**入参名**,输出 DataFrame 的报告期字段叫 `end_date`
+        # (YYYYMMDD,季末)。原实现误用 `period` 作输出列 → 排序分支永不命中(退化到
+        # ann_date)、返回的 period 恒为空。改用 `end_date`。
+        # Fallback to ann_date if end_date 不在 (defensive — schema 漂移防御).
+        if "end_date" in df.columns and len(df) > 1:
+            df = df.sort_values("end_date", ascending=False)
         elif "ann_date" in df.columns and len(df) > 1:
             df = df.sort_values("ann_date", ascending=False)
         row = df.iloc[0]
         forecast_type = str(row.get("type", "") or "")
         return {
             "ts_code": a.ts_code,
-            "period": str(row.get("period", "")),
+            "period": str(row.get("end_date", "")),
             "type": forecast_type,
             "p_change_min": float(row.get("p_change_min", 0.0) or 0.0),
             "p_change_max": float(row.get("p_change_max", 0.0) or 0.0),

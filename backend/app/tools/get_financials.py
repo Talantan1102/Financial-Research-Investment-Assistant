@@ -30,8 +30,9 @@ class GetFinancialsTool(Tool):
 
     name = "get_financials"
     description = (
-        "Return revenue, net profit, ROE, and P/E for a given A-share "
-        "(ts_code). period: 'latest' | 'quarterly' | 'annual'."
+        "Return revenue, net profit, and ROE for a given A-share "
+        "(ts_code). period: 'latest' | 'quarterly' | 'annual'. "
+        "Note: pe is always 0.0; use get_daily_basic for P/E data."
     )
     args_schema = FinancialsArgs
 
@@ -55,15 +56,17 @@ class GetFinancialsTool(Tool):
             revenue = float(row.get("total_revenue", 0.0) or 0.0)
             net_profit = float(row.get("n_income_attr_p", 0.0) or 0.0)
 
-        # Extract financial ratios
+        # C55: read the correct fina_indicator columns.
+        # Previously: 'roe' was read from netprofit_margin (mislabeled) and 'pe' from eps (wrong).
+        # Fix: roe → fi_row['roe'] (tushare fina_indicator includes roe in both real and mock paths).
+        #      pe_ttm is NOT in fina_indicator; set pe=0.0 until sourced from daily_basic separately.
         roe: float = 0.0
         pe: float = 0.0
         if not fina_df.empty:
             fi_row = fina_df.sort_values("end_date", ascending=False).iloc[0]
-            # grossprofit_margin serves as proxy; roe not in fina_indicator columns—
-            # use netprofit_margin as best available approximation for roe proxy.
-            roe = float(fi_row.get("netprofit_margin", 0.0) or 0.0)
-            pe = float(fi_row.get("eps", 0.0) or 0.0)
+            roe = float(fi_row.get("roe", 0.0) or 0.0)
+            # pe_ttm is not in fina_indicator — callers should source it from get_daily_basic.
+            pe = 0.0
 
         return {
             "ts_code": validated.ts_code,

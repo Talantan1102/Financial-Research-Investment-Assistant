@@ -107,6 +107,7 @@ export const currentChatActions = {
   beginStreaming() {
     currentChatState.streamingStatus = 'streaming'
     currentChatState.streamingDraft = ''
+    currentChatState.last_seq = 0 // C32: reset seq so 2nd+ messages don't dedup all events
     currentChatState.errorMessage = null
   },
   resumeStreaming() {

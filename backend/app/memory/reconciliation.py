@@ -75,9 +75,12 @@ def reconcile_pending_milvus_inserts(
     failed = 0
     alerted = 0
     try:
+        # C57: must also SELECT user_id + rel_type — the Milvus edge collection
+        # schema (milvus_setup.py) requires both, so an insert missing them fails
+        # validation every retry and exhausts MAX_RECONCILE_RETRIES silently.
         rows = sess.execute(
             text(
-                """SELECT id, edge_id, edge_text, retry_count
+                """SELECT id, edge_id, edge_text, retry_count, user_id, rel_type
                    FROM pending_milvus_inserts
                    ORDER BY created_at ASC
                    LIMIT :lim"""
@@ -90,6 +93,8 @@ def reconcile_pending_milvus_inserts(
             edge_id = row[1]
             edge_text = row[2] or f"edge:{edge_id}"
             retry_count = int(row[3] or 0)
+            edge_user_id = row[4]
+            edge_rel_type = row[5]
             if retry_count >= MAX_RECONCILE_RETRIES:
                 logger.error(
                     "max_reconcile_retries_exceeded edge_id=%s retry_count=%d — manual triage",
@@ -105,7 +110,9 @@ def reconcile_pending_milvus_inserts(
                     data=[
                         {
                             "edge_id": str(edge_id),
+                            "user_id": str(edge_user_id) if edge_user_id is not None else "",
                             "embedding": embedding,
+                            "rel_type": edge_rel_type or "",
                         }
                     ],
                 )

@@ -99,8 +99,12 @@ STRATEGY_WHITELIST: dict[str, str] = {
     "eva": "EVA",
 }
 
-# === ts_code regex(6 数字 + .SH/.SZ/.BJ)===
+# === ts_code regexes ===
+# C64: two distinct patterns — validation (full-string) stays private;
+# search-in-text variant is exported so skip_gate.py can share the SSOT.
 _TS_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$")
+# Public: matches ts_code embedded in free text (word-boundary anchored)
+SEARCH_TS_CODE_RE = re.compile(r"\b\d{6}\.(SH|SZ|BJ)\b")
 
 
 def normalize_entity(entity_type: str, raw_label: str) -> tuple[str, bool]:

@@ -23,8 +23,12 @@ logger = logging.getLogger(__name__)
 
 # === 常量 ===
 
+# C65: single SSOT for the persona block name — imported by persona_service,
+# persona_populator, and hierarchical to avoid scattered literals.
+PERSONA_BLOCK_NAME: str = "persona"
+
 BLOCK_DEFAULTS: dict[str, int] = {
-    "persona": 500,  # spec § 7
+    PERSONA_BLOCK_NAME: 500,  # spec § 7
     "scratchpad": 1000,  # spec § 7
 }
 

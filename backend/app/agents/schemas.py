@@ -70,16 +70,8 @@ ToolName = Literal[
 ]
 
 
-# v0.8.5 — constrained-router plan_id catalog. Independent Literal from
-# InvestmentObjective (semantic separation): InvestmentObjective is the
-# user-facing investment goal; PlanId is the internal plan-template selector
-# the planner LLM picks from PLAN_REGISTRY.
-PlanId = Literal[
-    "capital_preservation",
-    "stable_growth",
-    "balanced",
-    "aggressive_growth",
-]
+# C71: PlanId removed — only referenced by deprecated plan_registry.py (deleted).
+# InvestmentObjective (above) covers the same 4-value domain for live callers.
 
 
 class SubtaskTemplate(BaseModel):
@@ -394,6 +386,10 @@ class CriticDimensionScore(BaseModel):
     score: float = Field(ge=0.0, le=10.0)
     evidence: str
     sub_agent_request_id: str
+    # C18: optional-feature scorers (A5a valuation cross-check / A5b debate) return a
+    # score=10.0 sentinel when their feature was not run. aggregate_scores excludes
+    # is_skip dims so those 10.0s don't inflate overall_score.
+    is_skip: bool = False
 
 
 class CriticReport(BaseModel):

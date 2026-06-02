@@ -52,8 +52,10 @@ async def async_session_factory(
     Isolation: repos use unique UUIDs per test; no cross-test row collisions.
     Engine is disposed on test teardown so connections are returned to PG.
     """
+    from tests.pg_test_defaults import PG_PASSWORD_DEFAULT  # C37: SSOT
+
     user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "postgres123")
+    password = os.getenv("POSTGRES_PASSWORD", PG_PASSWORD_DEFAULT)
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     db = os.getenv("POSTGRES_DB", "industry_assistant_test")

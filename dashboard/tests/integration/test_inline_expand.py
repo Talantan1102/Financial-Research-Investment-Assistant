@@ -22,11 +22,11 @@ def test_expand_returns_fragment(client: TestClient) -> None:
     assert resp.status_code == 200
     body = resp.text
     assert "cap-detail-inner" in body
-    assert "需求场景" in body
-    assert "设计方案" in body
-    assert "Tradeoff" in body
-    assert "方案点评" in body
-    assert "实现效果" in body
+    # 渲染真实 v1 字段(早期模板误读 v2 空字段导致全显"(待填)",已修)
+    assert "这是什么" in body
+    assert "为什么需要" in body
+    assert "取舍" in body
+    assert "踩坑沉淀" in body
     assert "决策记录" in body
 
 
@@ -35,9 +35,11 @@ def test_expand_unknown_cap_404(client: TestClient) -> None:
     assert resp.status_code == 404
 
 
-def test_expand_lit_status_shows_evidence_enabled(client: TestClient) -> None:
-    resp = client.get("/cap/execution.docker_compose/expand")
-    assert "field-evidence" in resp.text
+def test_expand_renders_editable_text_fields(client: TestClient) -> None:
+    # 文本字段(what/why/tradeoff/lessons)以可编辑 field-block 渲染
+    body = client.get("/cap/execution.docker_compose/expand").text
+    assert "field-what" in body
+    assert "field-edit-btn" in body
 
 
 def test_expand_with_existing_card_shows_content(client: TestClient, tmp_path: Path) -> None:
@@ -50,12 +52,11 @@ def test_expand_with_existing_card_shows_content(client: TestClient, tmp_path: P
     DeepCardRepo(conn).upsert(
         DeepCard(
             cap_id="execution.docker_compose",
-            schema_version=2,
-            scenario="this is the scenario text for testing",
+            what="this is the what text for testing",
         )
     )
     conn.close()
 
     resp = client.get("/cap/execution.docker_compose/expand")
     assert resp.status_code == 200
-    assert "this is the scenario text for testing" in resp.text
+    assert "this is the what text for testing" in resp.text

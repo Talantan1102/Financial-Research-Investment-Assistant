@@ -14,8 +14,15 @@
       不是<em class="cool">模型</em>。
     </h1>
     <p class="hero-sub reveal d3">
-      <em>Prompt</em>(2022) → <em class="cool">Context</em>(2025) → <em>Harness</em>(2026),
-      工程重心正在迁移。下图是论文 §2.3 的 ETCLOVG 7 模块关系 — <span class="accent">点任意模块进入详情</span>。
+      <em>Prompt</em>(2022) → <em class="cool">Context</em>(2025) → <em>Harness</em>(2026),工程重心正在迁移。
+    </p>
+    <p class="hero-project reveal d3">
+      本看板把一个<strong>金融研究 Agent 项目</strong>(LangGraph 多 agent 编排 · 股票/财报/估值工具链 · 跨会话记忆 · 评测可观测)
+      按论文 <strong>ETCLOVG</strong> 七个工程维度逐条拆解 —— <span class="accent">点任意模块,看它在本项目里怎么落地</span>。
+    </p>
+    <p class="hero-glossary reveal d3">
+      <b>ETCLOVG</b> ＝ <b>E</b> 执行环境 · <b>T</b> 工具 · <b>C</b> 上下文 · <b>L</b> 生命周期 · <b>O</b> 可观测 · <b>V</b> 验证 · <b>G</b> 治理
+      <span class="glossary-note">— 论文 §2.3 的 7 模块,下图是它们的概念关系(非本项目代码依赖图)</span>
     </p>
   </div>
 </section>
@@ -43,6 +50,29 @@
       {% for c in wips %}
         <a href="/m/{{ c.dimension }}#cap-{{ c.id }}">{{ c.name_cn }}</a>
       {% endfor %}
+    </div>
+  </div>
+</section>
+{% endif %}
+
+{% if next_gaps %}
+<section class="hero-next-block">
+  <div class="stage">
+    <div class="hero-next">
+      <div class="next-head">
+        <span class="label">下一步 ›</span>
+        <span class="next-hint">成熟度最低的维度 · 各取一个待建能力</span>
+      </div>
+      <ul class="next-list">
+        {% for g in next_gaps %}
+          <li>
+            <a href="/m/{{ g.dim_id }}#cap-{{ g.cap.id }}">
+              <span class="next-dim">{{ g.name_cn }} <span class="next-ratio">{{ g.lit }}/{{ g.total }}</span></span>
+              <span class="next-cap">{{ g.cap.name_cn }}</span>
+            </a>
+          </li>
+        {% endfor %}
+      </ul>
     </div>
   </div>
 </section>

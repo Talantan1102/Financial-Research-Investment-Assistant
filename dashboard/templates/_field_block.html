@@ -18,8 +18,12 @@
        data-raw-markdown="{{ c.value|default('') }}">
     {% if c.value %}
       <pre class="markdown-fallback">{{ c.value }}</pre>
+    {% elif c.status == 'lit' %}
+      <p class="field-empty field-empty--lit">已实现 · 文档待补</p>
+    {% elif c.status == 'wip' %}
+      <p class="field-empty field-empty--wip">开发中</p>
     {% else %}
-      <p class="field-empty">(待填)</p>
+      <p class="field-empty field-empty--todo">规划中 · 尚未实现</p>
     {% endif %}
   </div>
 </section>

@@ -57,7 +57,9 @@ def test_postgres_checkpointer_config_requires_conninfo() -> None:
 # L2 — real-PG smoke test
 # ---------------------------------------------------------------------------
 
-_PG_CONNINFO = "postgresql://postgres:postgres123@localhost:5432/industry_assistant"
+from tests.pg_test_defaults import PG_PASSWORD_DEFAULT  # C37: SSOT
+
+_PG_CONNINFO = f"postgresql://postgres:{PG_PASSWORD_DEFAULT}@localhost:5432/industry_assistant"
 # search_path is passed via conn_kwargs (not in URI) to avoid psycopg3's URI parser
 # rejecting the nested "=" inside "options=-csearch_path=...".
 # autocommit + prepare_threshold=0 match lcp's from_conn_string() defaults and are

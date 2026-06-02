@@ -56,6 +56,8 @@ async def test_blocks_subprocess_run(fake_skills_root, tmp_path):
 
 @pytest.mark.asyncio
 async def test_cannot_contaminate_skills_dir(fake_skills_root, tmp_path):
+    # C33: open() is now in BANNED_APIS — the script must be rejected before launch,
+    # so contamination is impossible by design (scan rejects, no subprocess runs).
     ref = _plant(
         fake_skills_root,
         "write_relative.py",
@@ -65,7 +67,8 @@ async def test_cannot_contaminate_skills_dir(fake_skills_root, tmp_path):
     )
     ex = SkillExecutor(skills_root=fake_skills_root, workdir_root=tmp_path / "wd")
     result = await ex.execute(ref=ref, args=SkillScriptArgs(payload={}))
-    assert result.ok is True
+    assert result.ok is False
+    assert result.error.kind == "safety_scan_rejected"
     contamination = list((fake_skills_root / "evil" / "scripts").glob("artifact.txt"))
     assert contamination == []
 

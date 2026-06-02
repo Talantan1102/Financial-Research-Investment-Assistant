@@ -2,10 +2,11 @@ import type { CSSProperties } from 'react'
 
 type IconName =
   | 'plus' | 'plus-circle' | 'search' | 'send' | 'stop' | 'arrow-up'
-  | 'chevron-right' | 'chevron-down' | 'check'
+  | 'chevron-right' | 'chevron-down' | 'chevron-up' | 'check'
   | 'export' | 'edit' | 'more-horizontal' | 'close'
   | 'user-circle' | 'document' | 'bell' | 'book' | 'chart'
-  | 'tool' | 'sparkle' | 'rocket'
+  | 'tool' | 'sparkle' | 'rocket' | 'log-out'
+  | 'panel-left'
 
 const PATHS: Record<IconName, string> = {
   'plus':         '<path d="M8 3v10M3 8h10" stroke-width="2.4"/>',
@@ -16,6 +17,7 @@ const PATHS: Record<IconName, string> = {
   'arrow-up':     '<path d="M10 14V6M6 10l4-4 4 4"/>',
   'chevron-right': '<path d="M6 4l4 4-4 4"/>',
   'chevron-down': '<path d="M4 6l4 4 4-4"/>',
+  'chevron-up':   '<path d="M4 10l4-4 4 4"/>',
   'check':        '<path d="M3 8l3 3 7-7"/>',
   'export':       '<path d="M10 13V3M6 8l4-5 4 5"/><path d="M4 14v2a1 1 0 001 1h10a1 1 0 001-1v-2"/>',
   'edit':         '<path d="M3 17h14M12 4l4 4-8 8H4v-4z"/>',
@@ -29,6 +31,9 @@ const PATHS: Record<IconName, string> = {
   'tool':         '<path d="M3 13L8 3l5 10M5 9h6"/>',
   'sparkle':      '<path d="M10 2l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>',
   'rocket':       '<path d="M14 6l-8 8M14 6h-4M14 6v4M6 14l-3 3M10 10l4 4"/>',
+  'log-out':      '<path d="M11 3H5a2 2 0 00-2 2v10a2 2 0 002 2h6M15 11l4-4-4-4M19 7H9"/>',
+  /* sidebar toggle: two vertical bars (panel) + indent arrow */
+  'panel-left':   '<path d="M3 4h14v12H3z M7 4v12" stroke-width="1.6"/><path d="M12 8l-3 4 3 4" stroke-width="1.5"/>',
 }
 
 export interface IconProps {
@@ -45,7 +50,8 @@ export function Icon({ name, size = 16, style, className, ...rest }: IconProps) 
                   name === 'export' || name === 'edit' || name === 'document' ||
                   name === 'book' || name === 'chart' || name === 'tool' ||
                   name === 'sparkle' || name === 'rocket' || name === 'arrow-up' ||
-                  name === 'bell' || name === 'more-horizontal' ? '0 0 20 20' : '0 0 16 16'
+                  name === 'bell' || name === 'more-horizontal' ||
+                  name === 'log-out' || name === 'panel-left' ? '0 0 20 20' : '0 0 16 16'
   return (
     <svg
       width={size} height={size} viewBox={viewBox}

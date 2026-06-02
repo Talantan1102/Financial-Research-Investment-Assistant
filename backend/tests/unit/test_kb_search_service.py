@@ -33,7 +33,7 @@ async def test_search_calls_embed_then_milvus() -> None:
                 "chunk_id": "d1::0",
                 "chunk_text": "找到",
                 "doc_id": "d1",
-                "distance": 0.05,
+                "distance": 0.95,
                 "pub_date": "2024-01-01",
                 "source_url": "u",
                 "source_type": "research",
@@ -57,7 +57,7 @@ async def test_search_calls_embed_then_milvus() -> None:
     assert len(hits) == 1
     assert isinstance(hits[0], KbHit)
     assert hits[0].chunk_text == "找到"
-    assert hits[0].similarity == pytest.approx(0.95)  # 1 - 0.05 cosine distance
+    assert hits[0].similarity == pytest.approx(0.95)  # Milvus COSINE: distance 即余弦相似度
 
 
 @pytest.mark.asyncio
@@ -133,20 +133,20 @@ async def test_search_threshold_filters_low_similarity_hits() -> None:
                 "chunk_id": "good",
                 "chunk_text": "x",
                 "doc_id": "d",
-                "distance": 0.1,
+                "distance": 0.9,
                 "pub_date": "",
                 "source_url": "",
                 "source_type": "research",
-            },  # similarity = 0.9
+            },  # similarity = 0.9 (COSINE: distance 即余弦相似度,越大越像)
             {
                 "chunk_id": "bad",
                 "chunk_text": "y",
                 "doc_id": "d",
-                "distance": 0.6,
+                "distance": 0.4,
                 "pub_date": "",
                 "source_url": "",
                 "source_type": "research",
-            },  # similarity = 0.4
+            },  # similarity = 0.4 (< threshold 0.5 → 被过滤)
         ]
     )
 

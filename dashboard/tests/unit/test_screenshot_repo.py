@@ -31,7 +31,9 @@ def test_save_screenshot_creates_file(tmp_path: Path) -> None:
     result = save_screenshot(tmp_path, "execution.docker_compose", content, "image/png", "arch.png")
     assert result.rel_path.startswith("screenshots/execution.docker_compose/")
     assert result.rel_path.endswith("-arch.png")
-    assert "(screenshots/execution.docker_compose/" in result.markdown
+    assert (
+        "(/screenshots/execution.docker_compose/" in result.markdown
+    )  # 绝对路径才能被 /screenshots mount serve
     assert (tmp_path / result.rel_path).exists()
 
 

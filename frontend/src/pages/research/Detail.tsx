@@ -23,7 +23,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Empty } from 'antd'
 import { useSnapshot } from 'valtio'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown' // C31: use hardened renderer (strips <script>)
 import dayjs from 'dayjs'
 import { reportState, reportActions } from '@/store/report'
 import type { ProgressEvent } from '@/store/report'
@@ -368,7 +368,7 @@ export default function ResearchDetailPage() {
                 <div
                   className={styles.streamingMarkdown}
                   dangerouslySetInnerHTML={{
-                    __html: marked.parse(liveMd) as string,
+                    __html: renderMarkdown(liveMd),
                   }}
                 />
               </section>

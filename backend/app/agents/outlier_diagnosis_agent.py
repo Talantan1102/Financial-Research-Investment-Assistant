@@ -60,6 +60,7 @@ class OutlierDiagnosisAgent:
         valuations: dict[str, float],
         assumptions: dict[str, dict[str, float]],
         company_narrative: str,
+        request_id: str | None = None,  # C26: span linkage to the originating request
     ) -> OutlierDiagnosis | None:
         """severe divergence diagnostic. 返 None on any LLM failure (不 retry)."""
         prompt = _PROMPT_TEMPLATE.format(
@@ -73,6 +74,7 @@ class OutlierDiagnosisAgent:
                 prompt=prompt,
                 schema=OutlierDiagnosis,
                 tier="balanced",
+                request_id=request_id,
             )
             # LLMService 自动 parse Pydantic schema 进 .parsed
             parsed = response.parsed

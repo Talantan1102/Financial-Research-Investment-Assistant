@@ -125,4 +125,8 @@ def load_skill() -> SkillBundle:
     )
 
 
-__all__ = ["SkillBundle", "load_skill"]
+# C62: module-level SOP_TEXT SSOT — analyst.py / writer.py import this directly
+# instead of each calling load_skill().composed_sop() independently.
+_SOP_TEXT: str = "\n\n".join(_METHODOLOGY[name] for name in _METHODOLOGY_ORDER)
+
+__all__ = ["SkillBundle", "load_skill", "_SOP_TEXT"]

@@ -37,7 +37,9 @@ def analyze_consistency(valuations: dict[str, float]) -> ConsistencyLevel | None
     if mean == 0:
         return None
 
-    variance = sum((v - mean) ** 2 for v in valid) / len(valid)
+    # C23: 使用样本方差 (n-1)，与金融学 CV 标准一致；
+    # len(valid) >= 2 已由上方 guard 保证，故 denominator >= 1。
+    variance = sum((v - mean) ** 2 for v in valid) / (len(valid) - 1)
     std = math.sqrt(variance)
     cv = std / mean
 

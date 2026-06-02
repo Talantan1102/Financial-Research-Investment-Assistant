@@ -220,11 +220,12 @@ def render_investment_dd_report_markdown(  # noqa: PLR0915
         for cond in ir.position_management_conditions:
             parts.append(f"  - {cond}")
 
-    # Footnotes
+    # Footnotes — C48: dedup by preserving first-occurrence order so a chunk_id
+    # cited in multiple sections produces exactly one [^id]: definition.
     if all_footnote_defs:
         parts.append("\n---\n")
         parts.append("**引用来源**\n")
-        parts.extend(all_footnote_defs)
+        parts.extend(dict.fromkeys(all_footnote_defs))
 
     # Bottom footer disclaimer
     parts.append(f"\n---\n\n> ⚠️ **免责声明**: {report.disclaimer}\n")

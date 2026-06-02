@@ -73,8 +73,10 @@ async def test_one_red_returns_red(subject: MonitoringSubject) -> None:
 
 
 @pytest.mark.asyncio
-async def test_rule_exception_caught_as_green(subject: MonitoringSubject) -> None:
-    """规则抛错不应阻塞其他 rule;该 rule 算 green + log."""
+async def test_rule_exception_surfaced_as_red(subject: MonitoringSubject) -> None:
+    """规则抛错不阻塞其他 rule,但必须 fail-loud:该 rule 算 RED(不是 GREEN),
+    overall 也 RED,使 alert gate 触发可见告警(hard rule 4 No-Silent-Fallback)。
+    旧行为(降级 GREEN)会把数据/LLM 故障伪装成干净扫描,静默吞掉真告警。"""
 
     class BoomRule(SignalRule):
         name = "boom"
@@ -91,6 +93,8 @@ async def test_rule_exception_caught_as_green(subject: MonitoringSubject) -> Non
 
     detector = SignalDetector(rules=[BoomRule(), _make_fake_rule("ok", SignalLevel.GREEN)])
     overall, results = await detector.detect(subject, MagicMock(), MagicMock(), MagicMock(), {})
-    assert overall == SignalLevel.GREEN
+    assert overall == SignalLevel.RED
     assert len(results) == 2
-    assert any(r.rule_name == "boom" and "error" in r.explanation.lower() for r in results)
+    boom = next(r for r in results if r.rule_name == "boom")
+    assert boom.level == SignalLevel.RED
+    assert "error" in boom.explanation.lower()

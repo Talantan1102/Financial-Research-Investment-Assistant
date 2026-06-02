@@ -16,6 +16,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any
 
+# C35 NOTE (gating re-registration): database_router is currently NOT mounted in
+# app_main. Before re-enabling it, this service must be refactored: (1) route LLM
+# calls through app.services LLMService (build_llm_service_from_env) instead of the
+# direct `from openai import OpenAI` below — no cassette coverage / hardcoded model /
+# real network in tests otherwise; (2) reuse the app engine (the per-request
+# create_engine in database_router leaks a connection pool); (3) drop the silent
+# `self.db_engine = None` init fallback (raise instead). The blocklist hardening above
+# is defense-in-depth that applies regardless.
 from openai import OpenAI
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -121,7 +129,16 @@ class Text2SQLService:
         "/*",
         "*/",
         ";--",
-        "UNION ALL SELECT",
+        # C35: block ANY UNION (not just "UNION ALL SELECT"), plus PG file-read /
+        # privilege functions that are SELECT-able and enable file read / cred exfil.
+        "UNION",
+        "COPY",
+        "PG_READ_FILE",
+        "PG_LS_DIR",
+        "PG_WRITE_FILE",
+        "PG_SHADOW",
+        "PG_AUTHID",
+        "DBLINK",
         "INFORMATION_SCHEMA",
         "SYS.",
         "SYSOBJECTS",

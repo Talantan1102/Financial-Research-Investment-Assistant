@@ -95,7 +95,9 @@ class TraceService:
             for k, v in filters.items():
                 stmt = stmt.filter(getattr(TraceSpanRow, k) == v)
             rows = stmt.all()
-        return [self._row_to_span(r) for r in rows]
+            # C11: convert INSIDE the session block — expire_on_commit detaches rows
+            # once the `with` exits, so attribute access here would raise DetachedInstanceError.
+            return [self._row_to_span(r) for r in rows]
 
     @staticmethod
     def _row_to_span(row: TraceSpanRow) -> Span:

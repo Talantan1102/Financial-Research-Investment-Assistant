@@ -29,7 +29,16 @@ class CostBudget:
     @classmethod
     def from_env(cls) -> CostBudget:
         raw = os.environ.get("EVAL_COST_LIMIT_CNY")
-        limit = float(raw) if raw else _DEFAULT_LIMIT_CNY
+        # C46: wrap parse so a malformed env var gives a context-rich error
+        if raw is not None:
+            try:
+                limit = float(raw)
+            except ValueError:
+                raise ValueError(
+                    f"EVAL_COST_LIMIT_CNY must be a numeric float, got {raw!r}"
+                ) from None
+        else:
+            limit = _DEFAULT_LIMIT_CNY
         return cls(limit_cny=limit)
 
     @property

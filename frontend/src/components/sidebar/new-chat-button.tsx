@@ -6,8 +6,8 @@ import styles from '@/styles/app-shell.module.scss'
 export function NewChatButton() {
   const navigate = useNavigate()
   async function handleClick() {
-    const created = await chatSessionsActions.createAndAdd()
-    navigate(`/chat/${created.id}`)
+    const session = await chatSessionsActions.getOrCreateEmptyChat()
+    navigate(`/chat/${session.id}`)
   }
   return (
     <button

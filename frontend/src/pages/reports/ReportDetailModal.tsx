@@ -11,7 +11,7 @@
  */
 import { Alert, Modal, Spin } from 'antd'
 import { useEffect, useState } from 'react'
-import { marked } from 'marked'
+import { renderMarkdown } from '@/utils/markdown' // C31: use hardened renderer (strips <script>)
 import { getReport, type ReportDetail } from '@/api/reports'
 import { reportToMarkdown } from '@/utils/report-to-markdown'
 
@@ -66,7 +66,7 @@ export default function ReportDetailModal({
     })
     return (
       <div
-        dangerouslySetInnerHTML={{ __html: marked.parse(md) as string }}
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(md) }}
       />
     )
   }

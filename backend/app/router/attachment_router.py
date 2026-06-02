@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.chat import ChatAttachment, ChatSession
 from app.models.user import User
+from app.router._upload_utils import ALLOWED_EXTENSIONS, get_file_extension  # C72: shared SSOT
 from app.router.auth_router import get_current_user_required
 from app.schemas.chat import AttachmentListResponse, AttachmentResponse
 
@@ -27,42 +28,6 @@ router = APIRouter(prefix="/attachments", tags=["聊天附件"])
 # 文件上传目录
 UPLOAD_DIR = "/tmp/chat_attachments"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# 支持的文件类型
-ALLOWED_EXTENSIONS = {
-    # 文档类型
-    ".pdf",
-    ".docx",
-    ".doc",
-    ".txt",
-    ".md",
-    ".html",
-    ".xlsx",
-    ".xls",
-    ".pptx",
-    ".ppt",
-    # 图片类型
-    ".jpg",
-    ".jpeg",
-    ".png",
-    ".gif",
-    ".webp",
-    ".bmp",
-    # 代码类型
-    ".py",
-    ".js",
-    ".ts",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".xml",
-    ".csv",
-}
-
-
-def get_file_extension(filename: str) -> str:
-    """获取文件扩展名"""
-    return os.path.splitext(filename)[1].lower()
 
 
 def attachment_to_response(att: ChatAttachment) -> AttachmentResponse:
@@ -177,16 +142,23 @@ async def upload_attachment(
     # 验证文件类型
     ext = get_file_extension(file.filename)
     if ext not in ALLOWED_EXTENSIONS:
+        # C72: sorted() for deterministic error messages (same as knowledge_router)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"不支持的文件类型: {ext}，支持的类型: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
         )
 
     # 生成唯一文件名
+    # C4: strip directory components (incl. ../) from client-supplied name before
+    # joining to UPLOAD_DIR — prevents path traversal writes/reads/deletes.
     import uuid
 
-    unique_filename = f"{uuid.uuid4()}_{file.filename}"
+    safe_name = os.path.basename(file.filename or "upload")
+    unique_filename = f"{uuid.uuid4()}_{safe_name}"
     file_path = os.path.join(UPLOAD_DIR, unique_filename)
+    # C4: defense-in-depth — reject if the resolved path escapes UPLOAD_DIR
+    if not os.path.abspath(file_path).startswith(os.path.abspath(UPLOAD_DIR) + os.sep):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无效的文件名")
 
     # 保存文件
     try:
@@ -215,7 +187,9 @@ async def upload_attachment(
     db.refresh(att)
 
     # 后台处理附件
-    from core.database import SessionLocal
+    # C2: was `from core.database import SessionLocal` — no top-level core/ package;
+    # source root is backend/ so the correct path is app.core.database.
+    from app.core.database import SessionLocal
 
     background_tasks.add_task(process_attachment, str(att.id), file_path, SessionLocal)
 

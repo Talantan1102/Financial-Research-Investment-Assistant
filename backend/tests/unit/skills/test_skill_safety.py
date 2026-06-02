@@ -103,3 +103,48 @@ def test_scan_invalid_python_raises():
     src = "this is not python !!"
     with pytest.raises(SafetyScanError, match="syntax"):
         scan_script_safety(src)
+
+
+# C33 — file-read / sandbox-escape APIs that were previously missing from BANNED_APIS
+
+
+def test_scan_rejects_open():
+    """open('/etc/passwd').read() must be rejected by the scanner."""
+    src = "data = open('/etc/passwd').read()\n"
+    with pytest.raises(SafetyScanError, match="open"):
+        scan_script_safety(src)
+
+
+def test_scan_rejects_open_write():
+    """open(..., 'w') file-write path must also be rejected."""
+    src = "open('/tmp/evil.txt', 'w').write('boom')\n"
+    with pytest.raises(SafetyScanError, match="open"):
+        scan_script_safety(src)
+
+
+def test_scan_rejects_compile():
+    """compile() can construct code objects from arbitrary strings — must be banned."""
+    src = "code = compile('import os', '<string>', 'exec')\n"
+    with pytest.raises(SafetyScanError, match="compile"):
+        scan_script_safety(src)
+
+
+def test_scan_rejects_importlib_import_module():
+    """importlib.import_module is an alternative __import__ vector."""
+    src = "import importlib\nimportlib.import_module('os')\n"
+    with pytest.raises(SafetyScanError, match="importlib.import_module"):
+        scan_script_safety(src)
+
+
+def test_scan_rejects_importlib_import_module_from_import():
+    """from importlib import import_module; import_module('os') must be caught."""
+    src = "from importlib import import_module\nimport_module('subprocess')\n"
+    with pytest.raises(SafetyScanError, match="importlib.import_module"):
+        scan_script_safety(src)
+
+
+def test_scan_rejects_ctypes_cdll():
+    """ctypes.CDLL can load native shared libraries — must be banned."""
+    src = "import ctypes\nlib = ctypes.CDLL('libc.so.6')\n"
+    with pytest.raises(SafetyScanError, match="ctypes.CDLL"):
+        scan_script_safety(src)

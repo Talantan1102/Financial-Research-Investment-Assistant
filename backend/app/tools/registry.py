@@ -101,6 +101,15 @@ class ToolRegistry:
                 error=str(e),
                 latency_ms=latency_ms,
             )
+        except Exception as e:  # C53: wrap unexpected errors; prevents gather cancellation
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            return ToolResult(
+                tool_name=call.tool_name,
+                args=call.args,
+                success=False,
+                error=f"unexpected error in {call.tool_name}: {e!r}",
+                latency_ms=latency_ms,
+            )
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         return ToolResult(

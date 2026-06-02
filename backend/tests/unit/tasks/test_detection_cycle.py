@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
@@ -11,6 +12,7 @@ from app.models.monitoring import (
     DetailStatus,
     MonitoringAlert,
     MonitoringRun,
+    MonitoringSignal,
 )
 from app.models.position import Position
 from app.models.user import User
@@ -22,6 +24,15 @@ from sqlalchemy.orm import Session
 def celery_eager(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CELERY_TASK_ALWAYS_EAGER", "1")
     monkeypatch.setenv("CELERY_TASK_EAGER_PROPAGATES", "1")
+
+
+@pytest.fixture(autouse=True)
+def _stub_service_builders(monkeypatch: pytest.MonkeyPatch) -> None:
+    """detect() 现需要 tushare/bocha/llm 三个真实依赖。单测里 stub 掉这三个 builder,
+    避免真连数据源(detector 本身在各 test 里被 _build_detector patch 替换)。"""
+    monkeypatch.setattr("app.tasks.monitoring._build_tushare", lambda: MagicMock())
+    monkeypatch.setattr("app.tasks.monitoring._build_bocha", lambda: MagicMock())
+    monkeypatch.setattr("app.tasks.monitoring._build_llm", lambda: MagicMock())
 
 
 def _make_user(session: Session) -> User:
@@ -184,3 +195,101 @@ def test_detection_cycle_updates_position_last_quote(
     refreshed = db_session.query(Position).filter_by(id=pos_id).one()
     assert refreshed.last_quote_price == Decimal("1500.0")
     assert refreshed.last_quote_at is not None
+
+
+class _StrictDetector:
+    """detect 的真实 5 参签名 — 守护 C1 回归:若生产端少传参数会 TypeError。
+
+    旧 bug 用 AsyncMock(accept *args) 把 detect(subject) 的 TypeError 完全遮住,
+    导致每只票永远 GREEN。这个 fake 用严格签名,生产端漏参数立刻炸。
+    """
+
+    async def detect(self, subject, tushare, bocha, llm, thresholds):
+        return (
+            SignalLevel.RED,
+            [SignalResult(rule_name="price_anomaly", level=SignalLevel.RED, explanation="-9%")],
+        )
+
+
+def test_detection_cycle_passes_five_args_and_enqueues_after_commit(
+    db_session: Session,
+) -> None:
+    """C1 回归:detect 收到全部 5 个参数(否则 _StrictDetector 抛 TypeError);
+    C28 回归:generate_detail_card 只在 commit 之后 enqueue。"""
+    user = _make_user(db_session)
+    _make_position(db_session, user, "600519.SH")
+    db_session.commit()
+
+    enqueued: list[str] = []
+
+    with (
+        patch("app.tasks.monitoring._build_detector", return_value=_StrictDetector()),
+        patch("app.tasks.monitoring._get_session", return_value=db_session),
+        patch(
+            "app.tasks.monitoring.generate_detail_card.delay",
+            side_effect=lambda aid, **k: enqueued.append(aid),
+        ),
+    ):
+        from app.tasks.monitoring import detection_cycle
+
+        result = detection_cycle.apply().get()
+
+    sigs = db_session.query(MonitoringSignal).filter_by(user_id=user.id).all()
+    assert len(sigs) == 1  # detect 真的跑了并写了 signal(不是被 TypeError 吞成空)
+    alerts = db_session.query(MonitoringAlert).filter_by(user_id=user.id).all()
+    assert len(alerts) == 1
+    assert len(enqueued) == 1 and enqueued[0] == alerts[0].id
+    assert result["alerts_enqueued"] == 1
+
+
+def test_detection_cycle_reraises_when_all_detects_fail(db_session: Session) -> None:
+    """C1 回归:detect 全部失败时,cycle 必须 fail-loud 抛错,而不是标 success。"""
+    user = _make_user(db_session)
+    _make_position(db_session, user, "600519.SH")
+    db_session.commit()
+
+    class _BoomDetector:
+        async def detect(self, subject, tushare, bocha, llm, thresholds):
+            raise RuntimeError("detect boom")
+
+    with (
+        patch("app.tasks.monitoring._build_detector", return_value=_BoomDetector()),
+        patch("app.tasks.monitoring._get_session", return_value=db_session),
+    ):
+        from app.tasks.monitoring import detection_cycle
+
+        with pytest.raises(RuntimeError):
+            detection_cycle.apply().get()
+
+
+def test_detection_cycle_runs_codes_concurrently(db_session: Session) -> None:
+    """C25 回归:多 ts_code 应并发跑(semaphore cap=5),不是逐个串行。"""
+    user = _make_user(db_session)
+    for i in range(10):
+        _make_position(db_session, user, f"60000{i}.SH")
+    db_session.commit()
+
+    class _ConcurrencyTracker:
+        def __init__(self) -> None:
+            self.current = 0
+            self.max_seen = 0
+
+        async def detect(self, subject, tushare, bocha, llm, thresholds):
+            self.current += 1
+            self.max_seen = max(self.max_seen, self.current)
+            await asyncio.sleep(0.02)
+            self.current -= 1
+            return (SignalLevel.GREEN, [])
+
+    tracker = _ConcurrencyTracker()
+
+    with (
+        patch("app.tasks.monitoring._build_detector", return_value=tracker),
+        patch("app.tasks.monitoring._get_session", return_value=db_session),
+    ):
+        from app.tasks.monitoring import detection_cycle
+
+        detection_cycle.apply().get()
+
+    assert tracker.max_seen > 1  # 真并发(旧 zip+await 串行只会是 1)
+    assert tracker.max_seen <= 5  # semaphore cap 生效

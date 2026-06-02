@@ -197,7 +197,8 @@ async def graph_traverse(
     On-demand, 不进 default search 因为需要 start_label 抽取(LLM call).
 
     Args:
-        session: sync SQLAlchemy Session(reserved for future PG meta join).
+        session: sync SQLAlchemy Session — used to resolve node_id from PG before
+            passing to AGE (AGE nodes only carry {node_id}, not entity_label/user_id).
         age_executor: AGE executor; None 或 cypher raise → fallback 空 list.
         start_label: 起点 entity_label, e.g. 'User' or '600519.SH'.
         hops: 1-3, 上限避免爆炸.
@@ -216,18 +217,32 @@ async def graph_traverse(
     if age_executor is None:
         return []
 
+    # C9: AGE nodes only store {node_id}; resolve node_id from PG first.
+    # User scoping + edge validity are enforced at the PG layer (only valid PG
+    # edges are mirrored into AGE), so no user_id/invalidated_at filters on AGE.
+    node_id_row = session.execute(
+        text(
+            "SELECT node_id FROM chat_memory_nodes "
+            "WHERE user_id = :uid AND entity_label = :label "
+            "LIMIT 1"
+        ),
+        {"uid": str(user_id), "label": start_label},
+    ).fetchone()
+    if node_id_row is None:
+        return []
+    node_id = str(node_id_row[0])
+
     cypher = (
-        "MATCH path = (start {entity_label: $label, user_id: $uid})"
+        f"MATCH path = (start {{node_id: '{node_id}'}}) "
         f"-[*1..{hops}]-(end) "
-        "WHERE all(e IN relationships(path) WHERE "
-        "type(e) IN $rel_types AND e.invalidated_at IS NULL) "
+        "WHERE all(e IN relationships(path) WHERE type(e) IN $rel_types) "
         "RETURN path LIMIT 20"
     )
     try:
         rows = await age_executor.cypher(
             "chat_memory",
             cypher,
-            {"label": start_label, "uid": str(user_id), "rel_types": rel_types_final},
+            {"rel_types": rel_types_final},
         )
     except Exception as exc:  # noqa: BLE001 — AGE absence is expected fallback
         logger.warning("graph_traverse: AGE cypher failed (fallback empty): %s", exc)

@@ -76,3 +76,4 @@ celerybeat-schedule.db
 
 # Claude Code 旧 worktree 管理副产物
 .claire/
+.playwright-mcp/

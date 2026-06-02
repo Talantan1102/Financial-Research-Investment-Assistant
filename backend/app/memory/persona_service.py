@@ -15,10 +15,14 @@ from typing import Literal, TypedDict
 from uuid import UUID, uuid4
 
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.memory.models import ChatMemoryPersonaItem, ChatMemoryWorkingBlock
 from app.memory.persona_items_md import render_items_to_markdown
+
+# C65/C63: import block constants from working_blocks (SSOT).
+from app.memory.working_blocks import BLOCK_DEFAULTS, PERSONA_BLOCK_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +87,16 @@ class PersonaService:
             raise
         finally:
             session.close()
-        self._sync_to_working_block(user_id=user_id)
+        # C24: primary write is durable; sync failure must not lie to the caller.
+        try:
+            self._sync_to_working_block(user_id=user_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "working_block sync failed post-commit (user_id=%s); "
+                "primary mutation durable, cache stale",
+                user_id,
+                exc_info=True,
+            )
         return item
 
     def update_item(self, *, user_id: UUID, item_id: UUID, text: str) -> ChatMemoryPersonaItem:
@@ -113,7 +126,16 @@ class PersonaService:
             raise
         finally:
             session.close()
-        self._sync_to_working_block(user_id=user_id)
+        # C24: primary write is durable; sync failure must not lie to the caller.
+        try:
+            self._sync_to_working_block(user_id=user_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "working_block sync failed post-commit (user_id=%s); "
+                "primary mutation durable, cache stale",
+                user_id,
+                exc_info=True,
+            )
         return item
 
     def delete_item(self, *, user_id: UUID, item_id: UUID) -> None:
@@ -133,7 +155,16 @@ class PersonaService:
             raise
         finally:
             session.close()
-        self._sync_to_working_block(user_id=user_id)
+        # C24: primary write is durable; sync failure must not lie to the caller.
+        try:
+            self._sync_to_working_block(user_id=user_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "working_block sync failed post-commit (user_id=%s); "
+                "primary mutation durable, cache stale",
+                user_id,
+                exc_info=True,
+            )
 
     # ----- agent write API (HierarchicalMemory.core_memory_* 转译) -----
 
@@ -170,7 +201,16 @@ class PersonaService:
             raise
         finally:
             session.close()
-        self._sync_to_working_block(user_id=user_id)
+        # C24: primary write is durable; sync failure must not lie to the caller.
+        try:
+            self._sync_to_working_block(user_id=user_id)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "working_block sync failed post-commit (user_id=%s); "
+                "primary mutation durable, cache stale",
+                user_id,
+                exc_info=True,
+            )
         return new_items
 
     def apply_agent_replace(
@@ -212,7 +252,16 @@ class PersonaService:
             session.close()
 
         if matched_target is not None:
-            self._sync_to_working_block(user_id=user_id)
+            # C24: primary write is durable; sync failure must not lie to the caller.
+            try:
+                self._sync_to_working_block(user_id=user_id)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "working_block sync failed post-commit (user_id=%s); "
+                    "primary mutation durable, cache stale",
+                    user_id,
+                    exc_info=True,
+                )
             return [matched_target]
 
         # fallback: 没命中 → append 一条新 agent item（含命中 user 区也走这）
@@ -271,39 +320,39 @@ class PersonaService:
         return int(max_pos) + 1
 
     def _sync_to_working_block(self, *, user_id: UUID) -> None:
-        """渲染 items → markdown → 写回 ChatMemoryWorkingBlock.persona.content.
+        """渲染 items → markdown → UPSERT ChatMemoryWorkingBlock.persona.content.
 
         保 ChatPlanner Phase 1 render_persona_markdown 路径不变；下次 session
         起手 frozen snapshot 时自动拿最新值。
 
-        # 已知 debt (v1 接受, scale 前修复):
-        # - 并发 insert race: working_blocks unique(user_id, block_name); 当前
-        #   read-then-write 模式两个并发 op 可能同 observe None 同时 add. 当前
-        #   dogfood 阶段 UI 单 tab + agent 单线程触发, 概率极低. Task 17 wire
-        #   agent 写后概率上升, scale 前换 pg_insert(...).on_conflict_do_update.
-        # - token_count 写 0 是 placeholder; 真实 token count 计算待集成 qwen
-        #   tokenizer (跟 kb chunking embedding 一致), v1 不阻塞 ChatPlanner 路径.
+        # C24: read-then-insert race fixed — now uses PG ON CONFLICT DO UPDATE
+        #   (same pattern as persona_populator.py), eliminating UniqueConstraintViolation
+        #   under concurrent persona ops.
+        # C63: max_tokens derived from BLOCK_DEFAULTS['persona'] (SSOT = working_blocks.py).
+        # C65: block_name uses PERSONA_BLOCK_NAME constant (SSOT = working_blocks.py).
+        # token_count written as 0 (placeholder; tiktoken integration deferred to v1.x).
         """
-
         markdown = self.render_to_markdown(user_id=user_id)
         sess = self._session_factory()
         try:
-            block = (
-                sess.query(ChatMemoryWorkingBlock)
-                .filter_by(user_id=user_id, block_name="persona")
-                .first()
-            )
-            if block is None:
-                block = ChatMemoryWorkingBlock(
+            # C24: upsert avoids read-then-insert UniqueConstraintViolation race.
+            # C63+C65: use BLOCK_DEFAULTS[PERSONA_BLOCK_NAME] and PERSONA_BLOCK_NAME.
+            # block_id provided explicitly since pg_insert does not invoke Python defaults.
+            sess.execute(
+                pg_insert(ChatMemoryWorkingBlock)
+                .values(
+                    block_id=uuid4(),
                     user_id=user_id,
-                    block_name="persona",
+                    block_name=PERSONA_BLOCK_NAME,
                     content=markdown,
-                    max_tokens=500,
+                    max_tokens=BLOCK_DEFAULTS[PERSONA_BLOCK_NAME],
                     token_count=0,
                 )
-                sess.add(block)
-            else:
-                block.content = markdown  # type: ignore[assignment]
+                .on_conflict_do_update(
+                    index_elements=["user_id", "block_name"],
+                    set_={"content": markdown},
+                )
+            )
             sess.commit()
         except Exception:
             sess.rollback()

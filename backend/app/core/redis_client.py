@@ -1,10 +1,14 @@
 """Redis 客户端"""
 
 import json
+import logging
 import os
 from typing import Any
 
 import redis
+
+# C36: replace print() with structured logger so failures are visible in Celery/uvicorn logs
+logger = logging.getLogger(__name__)
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
@@ -39,7 +43,7 @@ class RedisCache:
                 return json.loads(value)
             return None
         except Exception as e:
-            print(f"Redis get error: {e}")
+            logger.warning("Redis get error: %s", e, exc_info=True)
             return None
 
     def set(self, key: str, value: Any, expire: int = 3600) -> bool:
@@ -48,7 +52,7 @@ class RedisCache:
             self.client.setex(key, expire, json.dumps(value, ensure_ascii=False))
             return True
         except Exception as e:
-            print(f"Redis set error: {e}")
+            logger.warning("Redis set error: %s", e, exc_info=True)
             return False
 
     def delete(self, key: str) -> bool:
@@ -57,7 +61,7 @@ class RedisCache:
             self.client.delete(key)
             return True
         except Exception as e:
-            print(f"Redis delete error: {e}")
+            logger.warning("Redis delete error: %s", e, exc_info=True)
             return False
 
     def exists(self, key: str) -> bool:
@@ -65,7 +69,7 @@ class RedisCache:
         try:
             return bool(self.client.exists(key))
         except Exception as e:
-            print(f"Redis exists error: {e}")
+            logger.warning("Redis exists error: %s", e, exc_info=True)
             return False
 
     def set_session(self, session_id: str, data: dict, expire: int = 86400) -> bool:
@@ -90,7 +94,7 @@ class RedisCache:
             self.client.ltrim(key, 0, max_length - 1)
             return True
         except Exception as e:
-            print(f"Redis add_to_list error: {e}")
+            logger.warning("Redis add_to_list error: %s", e, exc_info=True)
             return False
 
     def get_list(self, key: str, start: int = 0, end: int = -1) -> list:
@@ -99,7 +103,7 @@ class RedisCache:
             items = self.client.lrange(key, start, end)
             return [json.loads(item) for item in items]
         except Exception as e:
-            print(f"Redis get_list error: {e}")
+            logger.warning("Redis get_list error: %s", e, exc_info=True)
             return []
 
 
