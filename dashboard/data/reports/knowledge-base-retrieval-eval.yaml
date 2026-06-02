@@ -1,0 +1,173 @@
+# dashboard/data/reports/knowledge-base-retrieval-eval.yaml
+# ============================================================================
+# 研究报告:知识库检索怎么评估
+# ----------------------------------------------------------------------------
+# 来源:2026-06-02 上网调研(BEIR / MTEB / MS MARCO / RGB + RAGAS / TruLens /
+# DeepEval / ranx 等 13 源 + 逐条事实核查)综合 + 对照本项目 KB 检索。
+# 由 dashboard/derive/report.py 类型化加载,渲染于 /eval/report/<slug>。
+# ============================================================================
+slug: knowledge-base-retrieval-eval
+title: "知识库检索 · 怎么评估"
+subtitle: "用能跟着算的例子讲明白:9 个维度 × worked example,对照本项目 KB 检索 + 看板 RAGAS TODO"
+meta:
+  date: "2026-06-02"
+  basis: "13 源调研(BEIR/MTEB/MS MARCO/RGB + RAGAS/TruLens/DeepEval/ranx)+ 逐条事实核查 + 对照本项目"
+
+summary: >-
+  把"评检索"想成考一个图书馆管理员:你给他一句话('找 2024 苹果 Q3 营收'),他从书库抱回几本书放你桌上。
+  评检索 = 评他抱回来的这摞书"对不对、全不全、有没有把最对的那本放最上面",完全不管你最后用这摞书写的
+  读书报告写得好不好——那是另一件事(评最终答案/生成)。两件事必须拆开:管理员书抱对了你照样能写错
+  (LLM 幻觉);他抱了一堆烂书你也可能凭旧知识蒙对(但不可靠)。本项目的 KB 检索就是这个图书管理员:
+  query → qwen 向量化 → Milvus 三个书架(研报/财报/政策)并发查 → 余弦相似度排序 → 取 top_k。现在的
+  评估几乎只验了"管理员跑没跑通"(功能 smoke),没验"他抱得对不对"(检索质量)。这页报告教你用具体例子
+  把"抱得对不对"算成分数。
+
+sections:
+  - heading: "为什么 KB 检索评估有讲究"
+    body: "几个坎,说人话:"
+    bullets:
+      - "算分前得先有'标准答案'——也就是 qrels:对每条 query,人工标好'书库里哪些 chunk 才是真相关的'。没这张表,recall/nDCG 一个都算不出来,只能拍脑袋。本项目恰恰一张都没标(看板 TODO 第一条还是 done:false)。"
+      - "chunk 怎么切直接改命:同一份财报,切成大段还是小段,会决定'答案那句话'是完整落在一个 chunk 里(能召回)还是被切成两半(谁都不全)——所以 chunk 边界本身就是被评对象。"
+      - "'找得全'(召回)和'排得对'(排序)是两件事:相关的书都抱回来了但乱堆,跟抱回来又放最上面,recall 一模一样、nDCG 天差地别。而 RAG 里只有最上面 top 几条进 prompt,排序错了等于没召回。"
+      - "检索好 ≠ 答得好:RGB 论文实测,该捞的 chunk 都捞到了,只要混进几篇主题极近的干扰,生成端照样被带偏;库里压根没答案时模型还硬编(最强模型也只有约 45% 肯说'我答不了')。"
+      - "领域漂移:在 MS MARCO/通用语料上排第一的 embedding,搬到中文金融研报/财报/政策上未必行(BEIR 核心发现:花哨 dense 向量在没见过的领域常打不过老土 BM25)。所以 qwen v3 在金融语料行不行,必须在自己领域标 qrels 重测,不能信通用榜。"
+
+# 核心:9 个评估维度,每个配能跟着算的 worked example(语料→query→好/坏检索器→算出指标值)
+dimensions:
+  - name: "① 召回@k(Recall@k)— 该捞的捞全了没"
+    plain: "真正相关的 chunk,有多少比例进了 top-k。漏召回是检索硬伤,top-k 里没有,生成端再强也救不回。"
+    setup: "kb_financial 5 个 chunk:D1 苹果 FY24 Q3 营收 858 亿+5%;D2 苹果 Q3 iPhone 营收 393 亿;D3 苹果总部在库比蒂诺;D4 三星 2024 营收约 2000 亿;D5 苹果 FY24 全年营收 3910 亿。qrels:问 Q3 总营收,真相关集只有 {D1}。"
+    question: "(query)苹果 2024 第三季度总营收多少"
+    good: "好检索器 top-3 = [D1, D2, D5]。Recall@3 = 捞回相关数/总相关数 = 1/1 = 1.00(D1 进来了)。"
+    bad: "差检索器 top-3 = [D5, D3, D2](被'营收''苹果'字面带偏,D1 漏了)。Recall@3 = 0/1 = 0.00。"
+    scored: "Recall@k = (top-k 内真相关数) / (qrels 里该 query 的相关总数)。只看在不在集合里,不看排第几——所以 recall 高不代表排序好,下一维度会暴露这点。"
+  - name: "② 精度@k(Precision@k)— 抱回来的干不干净"
+    plain: "top-k 里有多少比例是真相关的。精度低 = 一堆噪声 chunk 占了 prompt 名额、稀释信号。"
+    setup: "kb_research 5 个 chunk:D1 特斯拉 24Q4 营收 251 亿-8%;D2 特斯拉 2024 交付约 179 万辆;D3 比亚迪 2024 营收约 1070 亿首超特斯拉;D4 特斯拉总部在奥斯汀;D5 股市有风险。qrels:问营收,真相关集 {D1}。"
+    question: "(query)特斯拉 2024 年的营收是多少"
+    good: "好检索器 top-3 = [D1, D2, D3]。Precision@3 = 真相关数/3 = 1/3 ≈ 0.33(D1 对,D2 讲交付、D3 讲比亚迪都不是);Recall@3 = 1/1 = 1.0。"
+    bad: "差检索器 top-3 = [D4, D5, D3]。Precision@3 = 0/3 = 0.00,Recall@3 = 0(彻底漏了)。"
+    scored: "Precision@k = (top-k 内真相关数) / k。precision 关注'干净度',recall 关注'漏没漏',常此消彼长:好检索器 recall=1.0 但 precision 只 0.33,因为为了不漏把 D2/D3 也捞进来了。"
+  - name: "③ 排序质量 nDCG@k — 最对的有没有放最上面"
+    plain: "不只看相关项在不在 top-k,还看排第几——越相关越该靠前,靠后用 log 折损打折。BEIR/MTEB 官方主指标,因为下游只读最前面几条。"
+    setup: "书库 6 个 chunk(记作 D1~D6,这里只演示排序、内容省略)。qrels(标准答案):真相关的是 D1、D4、D6(相关度 gain=1),D2/D3/D5 不相关(gain=0)。"
+    question: "(query)公司 2023 年自由现金流多少"
+    good: "好检索器 top-5=[D1,D6,D2,D4,D3]。DCG@5 = 1/log2(2)+1/log2(3)+1/log2(5) = 1.000+0.631+0.431 = 2.062;理想 IDCG = 1.000+0.631+0.500 = 2.131;nDCG@5 = 2.062/2.131 = 0.967。"
+    bad: "差检索器 top-5=[D2,D3,D5,D1,D6]。DCG@5 = D1排第4:1/log2(5)=0.431 + D6排第5:1/log2(6)=0.387 = 0.818;nDCG@5 = 0.818/2.131 = 0.384。"
+    scored: "nDCG@k = DCG@k / IDCG@k,DCG = Σ(gain_i / log2(i+1))。关键:这两个检索器 Recall@5 都=1.0、Precision@5 都=0.6,完全分不出好坏!只有 nDCG(0.967 vs 0.384)把'相关项排前面'算了进去。这就是为什么必须看 nDCG。"
+  - name: "④ MRR — 第一条对不对(首命中位置)"
+    plain: "只看'第一个相关结果排第几',取倒数:排第1得1.0、第2得0.5、第4得0.25。适合每条 query 只有极少相关项、只看最上面一两条(MS MARCO 官方指标)。"
+    setup: "5 个 chunk D1..D5,qrels:真相关集只有 {D1}(单答案,典型财报事实问)。"
+    question: "(query)苹果 2024 第三季度总营收多少"
+    good: "好检索器 top-5=[D1,D2,D5,D3,D4],D1 排第 1 → RR = 1/1 = 1.0。"
+    bad: "差检索器 top-5=[D3,D2,D4,D1,D5],D1 排第 4 → RR = 1/4 = 0.25。"
+    scored: "MRR = (1/|Q|)·Σ(1/第一个相关结果的排名);排在 >k 位则记 0。两检索器 Recall@5 都=1.0(D1 都在前5),但 MRR 1.0 vs 0.25 拉开了——又一次证明只看召回会瞎。"
+  - name: "⑤ 上下文精度 Context Precision(RAGAS)— 用 LLM 判排序,不用人工 qrels"
+    plain: "RAGAS 取巧:不用预标 qrels,运行时让 LLM 逐 chunk 判'对回答有没有用(0/1)',再用 average-precision 把排序算进去。同批 chunk 换个顺序,分数就变。"
+    setup: "捞回 3 个 chunk(按排名):c1 讲账户暂停政策(无关,v=0);c2 直接回答(v=1);c3 讲审核时间线(v=1)。reference='可以几乎立刻收款,但需先验证身份才能完全激活'。"
+    question: "(query)我账户还在审核时能不能先收款"
+    good: "好检索器把直接答案 c2 排第一:[c2(1),c3(1),c1(0)]。P@1=1/1=1,P@2=2/2=1。AP = 只在相关位置取均值 = (1+1)/2 = 1.0。"
+    bad: "差检索器顺序 [c1(0),c2(1),c3(1)]。P@2=1/2=0.5,P@3=2/3≈0.667。AP = (0.5+0.667)/2 ≈ 0.583。"
+    scored: "Context Precision = Σ(P@k × v_k) / 相关项总数,v_k 是 LLM 给的 0/1。关键:好坏检索器捞回的 chunk 集合一模一样,只是顺序不同,分就 0.583 vs 1.0——纯 recall 看不出。代价:v_k 由 LLM 判会漂,想要确定性可用 IDBased/NonLLM 变体。"
+  - name: "⑥ 上下文召回 Context Recall(RAGAS)— 标准答案每条事实都被支撑了吗"
+    plain: "把标准答案拆成一条条原子陈述(claim),逐条查'捞回的 context 里有没有支撑'。衡量召回完整性(漏没漏信息),不管排序。"
+    setup: "reference='埃菲尔铁塔位于巴黎'(拆出 1 条 claim)。情形 A:context=['巴黎是法国的首都'];情形 B:context=['勃兰登堡门位于柏林']。"
+    question: "(query)埃菲尔铁塔在哪里"
+    good: "情形 A:claim'在巴黎'能被'巴黎是法国首都'间接支撑(LLM 判 attributed=1)→ Context Recall = 1/1 = 1.0。"
+    bad: "情形 B:context 讲柏林的门,claim 无支撑(attributed=0)→ Context Recall = 0/1 = 0.0。"
+    scored: "Context Recall = (被 context 支撑的 claim 数) / (reference 拆出的 claim 总数)。命门:拆 claim 的粗细会改变分母,所以标注质量直接决定可比性。它和 Context Precision 配成一对:一个管'漏没漏',一个管'排没排前'。"
+  - name: "⑦ chunking 质量 — 切块边界怎么影响召回"
+    plain: "chunk 切太大混入无关内容(精度掉),切太小把答案那句话切两半(召回崩)。chunk 边界本身就是被评对象,会让 recall/nDCG 随切法变。"
+    setup: "政策原文:'第十二条 上市公司应在会计年度结束后四个月内披露年度报告。第十三条 半年度报告应在上半年结束后两个月内披露。'本项目 ClauseChunkerForPolicy(按'第X条'切)→ C1=第十二条全文、C2=第十三条全文;对照 200 字硬切 → 把'年报披露时限'切断在边界。qrels:真相关={讲年报披露时限那条}。"
+    question: "(query)上市公司年度报告什么时候必须披露"
+    good: "clause 切法:C1 完整命中,Recall@1=1/1=1.0,Context Precision 高(chunk 干净、答案完整)。"
+    bad: "硬切法:答案被劈到两个残缺 chunk → 要么因信息残缺相似度不够没进 top-k(Recall 掉),要么召回了却混进半年报噪声(Precision 掉)。同 query 同 embedding,nDCG/recall 可能从 1.0 跌到 0.5。"
+    scored: "chunking 无单一公式:固定 qrels + 固定 embedding,只换 chunk 策略,对每套跑 recall@k/nDCG/Context Precision 看哪套高;另配 chunk size 分布(oversize/undersize rate)体检。本项目这些阈值都是拍的初值,无网格验证。"
+  - name: "⑧ embedding 选型 — qwen v3 在金融语料上到底行不行"
+    plain: "不同 embedding 把同一句话编成不同向量,直接决定相似度排序。通用榜第一不等于你领域第一(领域漂移),必须在自己的 qrels 上 A/B。"
+    setup: "同一套 30-50 条金融 qrels + 同一份 chunk 集合,只换 embedding:A=qwen text-embedding-v3(主力,1024d);B=BGE-M3(目前是 raise NotImplementedError 的 stub)。"
+    question: "(query)宁德时代新能源车装机量展望"
+    good: "在金融术语('装机量''碳酸锂''单吨净利')上更贴的模型把真相关 chunk 排前 → 平均 nDCG@10=0.78、Recall@10=0.91。"
+    bad: "领域不贴的模型被字面'新能源'带偏,把无关新能源新闻排前 → nDCG@10=0.55、Recall@10=0.70。差值 0.23 就是这次选型的硬收益。"
+    scored: "锁死 qrels 和 chunk,把 embedding 当唯一自变量,各跑全套 recall@k/nDCG/MRR,出一张分数对比表。MTEB Retrieval 子榜可做候选初筛,但因领域漂移,榜分不可直接迁移,务必自建金融 qrels 复测。"
+  - name: "⑨ 抗噪与该拒不拒(RGB)— 检索好 ≠ 答得好的压力测试"
+    plain: "把'检索质量'当可控自变量(混入多少噪声 chunk、库里有没有答案),测生成端扛不扛得住。recall@k 全绿也救不了这一关。"
+    setup: "给检索器 5 个 chunk(噪声比 0.6 = 3 篇干扰 + 2 篇有用):D1、D2 写着宁德时代 2024 Q4 的营收;D3 相关但只讲全年交付量(不含 Q4 营收);D4 主题极近但答案错位——讲的是 2023 Q4 营收(去年的,最容易混);D5 完全无关(行业新闻)。另设一道拒答题:把 D1、D2 抽走,5 篇全是不含答案的干扰。"
+    question: "(query)宁德时代 2024 年第四季度营收是多少?"
+    good: "抗噪题:好系统认出 D4 讲的是 2023 不是 2024,从 D1/D2 取出 2024 Q4 那个数 → Accuracy=1。拒答题:库里没这条时输出'知识库里没有这条数据,无法回答' → 计入拒答率(越高越好)。"
+    bad: "抗噪题:被 D4 的'2023 Q4'带偏,把去年的营收当今年答 → Accuracy=0。拒答题:库里没答案却硬编一个数字 → 不拒答。RGB 实测最强模型也只有约 45%(英)/43%(中)肯老实拒答,中文掉点更狠。"
+    scored: "Accuracy = exact-match 命中数/总数,按噪声比 {0,0.2,...,0.8} 画曲线看掉多少分;拒答率 = 全噪声时输出拒答句的比例。本项目是中文金融 KB,尤其要测'库里没这条公告时该不该拒答'——只看 recall 永远测不到的失效模式。"
+
+benchmarks:
+  - name: "BEIR (arXiv 2104.08663)"
+    what: "IR 检索 benchmark,18 数据集/9 类任务,只评检索不评生成。主指标 nDCG@10,辅 Recall@100。核心卖点是 zero-shot 跨领域泛化。"
+    fit: "借鉴它的核心结论:别只在一个领域、只看 recall 测;花哨 dense 向量在没见过的领域常打不过老土 BM25。本项目研报↔财报↔政策三领域应分别测、把 BM25 当强基线对照;金融子集 FiQA-2018 可参考其标注形态。"
+  - name: "MTEB (arXiv 2210.07316)"
+    what: "Embedding 模型基准+榜,8 任务/58 数据集/112 语言。Retrieval 子任务复用 BEIR 15 个数据集的 qrels,纯 cosine 排序算 nDCG@10/MRR/MAP/precision/recall。"
+    fit: "给本项目选 embedding(qwen v3 vs BGE-M3)做初筛——只看 Retrieval/Reranking 子榜的 nDCG@10,别看总榜平均。因领域漂移榜分不可直接信,务必在自建金融 qrels 上复测。"
+  - name: "MS MARCO (arXiv 1611.09268)"
+    what: "大规模 passage-ranking 数据集+协议,8.8M passage,官方指标 MRR@10(每 query 约 1 个相关项,稀疏二值标注)。"
+    fit: "提供最该照搬的最小范式:先标 qrels(哪怕二值),用 MRR@10 量化'第一条对不对'+ Recall@k 量化'漏没漏',把检索单独打分。本项目财报事实型单答案 query 尤其贴 MRR。"
+  - name: "RAGAS (Context Precision / Recall)"
+    what: "按单条样本算分的 RAG 指标框架,把检索侧(Context Precision/Recall)和生成侧(Faithfulness)显式拆开。默认用 LLM-judge 逐 chunk/逐 claim 判,另有 NonLLM/IDBased 确定性变体。"
+    fit: "本项目看板 KB·组件级 TODO 的直接落点:写 adapter 把 query→retrieved_ids+reference ids 适配成 EvaluationDataset,先用 IDBasedContextRecall/Precision(零 LLM、确定性)跑出第一条离线基线。Context Precision 对排序敏感,正好补 recall 看不到的排序质量。"
+  - name: "TruLens (RAG Triad) / DeepEval / Arize Phoenix"
+    what: "都把 RAG 拆成'检索侧'(Context Relevance / ContextualPrecision-Recall-Relevancy / DOCUMENT_RELEVANCE)和'生成侧'(Groundedness / Faithfulness)分别用 LLM-judge 打分。Phoenix 还能用 WikiQA 校验 judge 准不准(GPT-4 对人标 F1≈0.78)。"
+    fit: "借鉴'检索与生成分开评'的心智模型,以及'拿小人工标注集校验 judge 本身可不可信'的两层做法——别把 LLM-judge 当 ground truth。注意 TruLens Context Relevance 偏精度、抓不到漏召回。"
+  - name: "ranx / pytrec_eval / trec_eval"
+    what: "纯代码 IR 指标库,吃 qrels + ranked list 直接算 recall@k/nDCG/MRR/MAP,确定性、无 LLM、可复现。BEIR/MTEB 底层都用 pytrec_eval。"
+    fit: "本项目看板 TODO 第四条'ranx 或 ~30 行 numpy 算 recall@k/nDCG/MRR'的现成轮子。RAGAS 不直接给这几个经典 IR 指标,用 ranx 在同一 qrels 上补齐,固化成回归基线快照最省事。"
+
+pitfalls:
+  - "只看 recall 不看排序:相关 chunk 都进了 top-k 但顺序乱,recall 照样满分,而 RAG 只有最上面几条进 prompt——排序错了等于没召回。必须配 nDCG/MRR。"
+  - "检索和生成混评:本项目当前 eval 几乎全是端到端 LLM-judge + 间接 ablation,bug 出在'没捞到'还是'捞到了答歪了'分不清。两步必须各自打分。"
+  - "qrels 稀疏/不完整的假阴性:没标的 chunk 一律当不相关。Elastic 实测 BEIR top-10 标注覆盖率只有 5-15%,会系统性低估好检索器,且偏向词面匹配对语义检索不公平。自建 qrels 时同一 query 尽量多标几个真相关。"
+  - "拿通用榜分代表自己领域:MTEB/BEIR 平均分掩盖领域差异且多为英文。中文金融 KB 必须自建领域 qrels 复测,别信总榜第一。"
+  - "LLM-judge 当 ground truth:RAGAS/TruLens 的相关判定换模型/prompt/温度就漂,0.8 只是'这个 judge 这个 prompt 下的 0.8'。要锁定 judge 配置并用小人工标注集校准。"
+  - "chunk 边界耦合一切:per-chunk 二值判定对切法极敏感。评 chunking 时务必锁死 qrels 和 embedding,只动切法这一个变量。"
+  - "COSINE 方向坑(本项目踩过):Milvus COSINE 下 search 返回的 distance 本身就是相似度(越大越相似),原实现 1.0-distance 把方向搞反,会返回最不相关的 chunk。改前必须确认相似度方向(kb_search_service.py:120-126 已修)。"
+
+# 对照本项目 KB 检索:现状 + 可补什么(接住看板 KB·组件级那张 RAGAS TODO)
+gaps:
+  - component: "qrels 标注集(地基)"
+    current: "全仓 0 个 query→相关 chunk_id 标注;看板 KB·组件级 TODO 第一条'挑 30-50 条 query 人工标 relevant chunk_id(~1.5d)'仍 done:false。"
+    suggestion: "先做这一条——它是 chunking 网格、embedding A/B、top_k 调参所有后续实验的共同前置。挑覆盖三领域、覆盖单答案(财报事实→适合 MRR)和多答案(多跳→适合 Recall/nDCG)的 query,每条多标几个真相关 chunk 缓解假阴性。"
+  - component: "RAGAS adapter + IDBased 指标"
+    current: "backend 无 backend/eval/kb/ 目录(对比 backend/eval/memory/ 已有真实 recall_precision_metric.py);看板 TODO 第二、三条(写 adapter、接 IDBasedContextRecall/Precision)均 done:false。"
+    suggestion: "接住这两条 TODO:写 adapter 跑现有 MilvusKbSearchService.search,把 query→retrieved chunk_id + qrels 适配成 RAGAS EvaluationDataset,先用 IDBasedContextRecall/Precision(纯比 ID 集合、零 LLM、确定性)跑出第一条离线基线。"
+  - component: "经典 IR 指标 recall@k/nDCG/MRR"
+    current: "grep recall@k|ndcg|mrr|qrels 在 backend 源码 0 命中,仅在 yaml TODO/spec/卡片里以'待补'出现;看板 TODO 第四条 done:false。"
+    suggestion: "RAGAS 不直接给这几个经典 IR 指标,用 ranx(或 ~30 行 numpy)在同一 qrels 上补齐 recall@k/nDCG@10/MRR。这是跟 BEIR/MTEB/MS MARCO 可对话的通用语言,也是回归基线的快照内容。"
+  - component: "chunking 质量"
+    current: "semantic breakpoint_threshold=0.4、financial 800 token 上限均为拍的初值(semantic.py:32),无网格搜索/chunk size 分布验证。"
+    suggestion: "qrels 就位后锁死 embedding,只换三套 chunker 关键参数(breakpoint 阈值网格、financial token 上限、表格是否独立),对每套跑 recall@k/nDCG/Context Precision,另出 oversize/undersize rate 体检表,用数据定阈值替代拍脑袋。"
+  - component: "embedding 选型 A/B"
+    current: "qwen text-embedding-v3 主力(1024d),BGEEmbeddingService 是 raise NotImplementedError 的 stub,无同标注集对照;看板 TODO 第五条 done:false。"
+    suggestion: "先把 BGE-M3 stub 实现掉,锁死 qrels 和 chunk,把 embedding 当唯一自变量各跑全套 IR 指标,出一张 qwen v3 vs BGE-M3 分数对比表。务必在自建金融 qrels 上测(领域漂移),不能只信 MTEB 子榜。"
+  - component: "top_k / threshold 调参"
+    current: "search 暴露 top_k/threshold 但默认 top_k=5/threshold=None 是拍的(kb_search_service.py:68-69);看板 TODO 第六条 done:false。"
+    suggestion: "qrels+IR 指标就位后,扫 top_k∈{3,5,10}、threshold∈{None,0.3,0.5,...} 看 recall@k 与 precision@k 的权衡曲线定生产默认值;注意三 collection 并发查合并后再截 top_k,调参要看合并后整体表现。"
+  - component: "reranker baseline"
+    current: "v0.9 hybrid retrieval 计划接 reranker 但 search path 未 wire(grep rerank 仅命中 requirements.txt 依赖声明),无 baseline 不知收益。"
+    suggestion: "先用 qrels+nDCG 跑出无 reranker 基线,再 wire cross-encoder reranker 跑同一套,看 nDCG@10 提升多少对比延迟/成本——BEIR 结论是 reranking 最准但最贵,质量和成本一起摆桌上再决定。"
+  - component: "回归/监控层"
+    current: "yaml regression status=gap,methods/evidence 全空;scripts/eval_kb_retrieval.py + tests/eval/results/kb_retrieval/ 仅在 kb-eval-gaps.md sketch 提及,均未实现。"
+    suggestion: "把 IR 指标固化成回归套件:落地 scripts/eval_kb_retrieval.py + 基线快照、pin ragas/ranx 版本,接 nightly CI,设确定性阈值(recall@k 跌破基线即告警)+ embedding 漂移检测——补齐看板 regression 那两条 done:false 的 TODO。"
+
+sources:
+  - title: "BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of IR Models (18 数据集/9 任务/nDCG@10)"
+    url: "https://arxiv.org/abs/2104.08663"
+  - title: "MTEB: Massive Text Embedding Benchmark(8 任务/58 数据集/Retrieval 复用 BEIR)"
+    url: "https://arxiv.org/abs/2210.07316"
+  - title: "MS MARCO: Human Generated MAchine Reading COmprehension Dataset(8.8M passage/MRR@10)"
+    url: "https://arxiv.org/abs/1611.09268"
+  - title: "Benchmarking LLMs in Retrieval-Augmented Generation (RGB:噪声鲁棒/拒答/反事实)"
+    url: "https://arxiv.org/abs/2309.01431"
+  - title: "Context Precision(与 Context Recall)— RAGAS 官方指标文档(rank-aware AP 公式)"
+    url: "https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/context_precision/"
+  - title: "Ragas Metrics Explained: 三个 context 指标到底怎么算"
+    url: "https://saulius.io/blog/ragas-rag-evaluation-metrics-llm-judge"
+  - title: "RAG Triad — TruLens 官方核心概念(Context Relevance / Groundedness / Answer Relevance)"
+    url: "https://www.trulens.org/getting_started/core_concepts/rag_triad/"
+  - title: "Retrieval Evaluation — LlamaIndex(RetrieverEvaluator:hit_rate / MRR / precision / recall / nDCG)"
+    url: "https://docs.llamaindex.ai/en/stable/examples/evaluation/retrieval/retriever_eval/"
