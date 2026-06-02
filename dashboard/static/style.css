@@ -2943,3 +2943,122 @@ details[open] .decision-note-toggle::before {
 .field-upload-btn { background: rgba(94,92,230,0.08); color: #5E5CE6; font-size: 12px; padding: 5px 12px; border-radius: 8px; border: none; cursor: pointer; font-family: var(--sans); }
 .field-edit-bar .upload-status { font-size: 11px; color: #86868B; align-self: center; }
 .field-edit-bar .upload-status--err { color: #FF3B30; }
+
+/* ============================================================================
+   深度报告入口卡(/eval 页)+ 长文研究报告页(/eval/report/<slug>)
+   ============================================================================ */
+.eval-reports { max-width: 1100px; margin: 28px auto 0; padding: 0 32px; }
+.eval-reports-h {
+  font-size: 13px; font-weight: 600; color: var(--fg-dim);
+  margin: 0 0 10px; letter-spacing: 0.02em;
+}
+.eval-report-link {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px; margin-bottom: 10px;
+  background: var(--surface); border: 1px solid var(--hair);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-1);
+  text-decoration: none; transition: border-color .15s, transform .15s;
+}
+.eval-report-link:hover { border-color: var(--accent); transform: translateX(2px); }
+.erl-title { font-size: 15px; font-weight: 600; color: var(--fg); flex: none; }
+.erl-sub { font-size: 12px; color: var(--fg-mute); flex: 1 1 auto; line-height: 1.5; }
+.erl-arrow { font-size: 20px; color: var(--fg-faint); flex: none; }
+
+/* ---- 报告页 ---- */
+.report { max-width: 880px; margin: 0 auto; padding: 8px 32px 80px; }
+.report-back {
+  display: inline-block; margin: 4px 0 18px;
+  font-family: var(--mono); font-size: 12px; color: var(--fg-mute); text-decoration: none;
+}
+.report-back:hover { color: var(--accent); }
+.report-head { padding-bottom: 18px; margin-bottom: 22px; border-bottom: 1px solid var(--hair); }
+.report-title { font-size: 28px; font-weight: 700; color: var(--fg); margin: 0 0 8px; letter-spacing: -0.01em; }
+.report-subtitle { font-size: 15px; color: var(--fg-mute); margin: 0 0 12px; line-height: 1.6; }
+.report-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 0; }
+.report-date {
+  font-family: var(--mono); font-size: 11px; color: var(--accent-deep);
+  background: var(--accent-soft); padding: 2px 9px; border-radius: var(--radius-pill); flex: none;
+}
+.report-basis { font-size: 11px; color: var(--fg-faint); line-height: 1.6; }
+.report-summary {
+  font-size: 15px; color: var(--fg-dim); line-height: 1.8; margin: 0 0 8px;
+  padding: 16px 20px; background: var(--surface-2);
+  border-left: 3px solid var(--accent); border-radius: var(--radius-md);
+}
+.report-section { margin-top: 34px; }
+.report-h {
+  font-size: 17px; font-weight: 600; color: var(--fg); margin: 0 0 14px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--hair-2);
+  display: flex; align-items: baseline; gap: 8px;
+}
+.report-count {
+  font-family: var(--mono); font-size: 11px; color: var(--fg-faint);
+  background: rgba(60,60,67,0.05); padding: 0 7px; border-radius: var(--radius-sm);
+}
+.report-body { font-size: 14px; color: var(--fg-dim); line-height: 1.75; margin: 0 0 10px; }
+.report-bullets, .report-pitfalls {
+  margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 9px;
+}
+.report-bullets li, .report-pitfalls li { font-size: 13.5px; color: var(--fg-dim); line-height: 1.7; }
+
+/* 能力维度卡片 */
+.report-dims { display: flex; flex-direction: column; gap: 16px; }
+.report-dim {
+  padding: 16px 18px; background: var(--surface-2);
+  border: 1px solid var(--hair-2); border-radius: var(--radius-md);
+}
+.rd-name { font-size: 15px; font-weight: 600; color: var(--fg); margin: 0 0 6px; }
+.rd-plain { font-size: 13px; color: var(--fg-mute); line-height: 1.65; margin: 0 0 12px; }
+.rd-example {
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 12px 14px; background: var(--surface);
+  border: 1px solid var(--hair-2); border-radius: var(--radius-sm);
+}
+.rd-row { display: flex; gap: 10px; font-size: 13px; line-height: 1.65; color: var(--fg-dim); }
+.rd-k {
+  flex: none; width: 52px; font-size: 11px; font-weight: 600;
+  color: var(--fg-faint); font-family: var(--mono); padding-top: 1px; text-align: right;
+}
+.rd-v { flex: 1 1 auto; }
+.rd-good .rd-k { color: #1B7A33; }
+.rd-good { color: var(--fg-dim); }
+.rd-bad  .rd-k { color: #C2403B; }
+.rd-scored .rd-k { color: var(--accent-deep); }
+.rd-scored { color: var(--fg-mute); }
+
+/* 基准速览 */
+.report-benches { display: flex; flex-direction: column; gap: 12px; }
+.report-bench {
+  padding: 14px 16px; background: var(--surface-2);
+  border: 1px solid var(--hair-2); border-radius: var(--radius-md);
+}
+.rb-name { font-size: 14px; font-weight: 600; color: var(--fg); margin: 0 0 6px; }
+.rb-what { font-size: 13px; color: var(--fg-dim); line-height: 1.7; margin: 0 0 8px; }
+.rb-fit { font-size: 13px; color: var(--fg-mute); line-height: 1.7; margin: 0; }
+.rb-fit-k {
+  font-size: 10px; font-weight: 600; color: var(--accent-deep);
+  background: var(--accent-soft); padding: 1px 7px; border-radius: var(--radius-pill);
+  margin-right: 8px; white-space: nowrap;
+}
+
+/* 对照本项目 */
+.report-gaps { display: flex; flex-direction: column; gap: 12px; }
+.report-gap {
+  padding: 14px 16px; background: var(--surface-2);
+  border: 1px solid var(--hair-2); border-radius: var(--radius-md);
+}
+.rg-component { font-size: 14px; font-weight: 600; color: var(--fg); margin: 0 0 8px; }
+.rg-current, .rg-suggestion { font-size: 13px; line-height: 1.7; margin: 0 0 6px; color: var(--fg-dim); }
+.rg-suggestion { margin-bottom: 0; }
+.rg-k {
+  font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: var(--radius-pill);
+  margin-right: 8px; white-space: nowrap;
+}
+.rg-k--now { color: var(--fg-mute); background: rgba(60,60,67,0.07); }
+.rg-k--add { color: #1B7A33; background: var(--lit-bg); }
+
+/* 来源 */
+.report-sources { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 7px; }
+.report-sources li { font-size: 13px; line-height: 1.6; }
+.report-sources a { color: var(--accent); text-decoration: none; word-break: break-word; }
+.report-sources a:hover { text-decoration: underline; }
