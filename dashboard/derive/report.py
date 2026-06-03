@@ -70,6 +70,23 @@ class ReportSource:
 
 
 @dataclass(frozen=True)
+class DimLabels:
+    """worked-example 区的标签。
+
+    默认是"评估方法论"体裁(铺垫→问→好答→坏答→怎么判分)。"调研/综述"体裁
+    (如各派系怎么做某件事)可在 yaml 的 ``dimensions_meta`` 里覆盖,让区标题和
+    五行标签贴合内容。不填则与历史报告渲染完全一致(向后兼容)。
+    """
+
+    section_title: str = ""  # 空 = 模板回退到 "N 个评估维度 · 每个配一个例子"
+    setup: str = "铺垫"
+    question: str = "问"
+    good: str = "好答"
+    bad: str = "坏答"
+    scored: str = "怎么判分"
+
+
+@dataclass(frozen=True)
 class Report:
     slug: str
     title: str
@@ -79,6 +96,8 @@ class Report:
     summary: str
     sections: tuple[ReportSection, ...]
     dimensions: tuple[ReportDimension, ...]
+    dim_labels: DimLabels
+    benchmarks_title: str  # 空 = 模板回退到 "主流评测基准速览"(评估体裁默认)
     benchmarks: tuple[ReportBenchmark, ...]
     pitfalls: tuple[str, ...]
     gaps: tuple[ReportGap, ...]
@@ -161,6 +180,26 @@ def _parse_gaps(raw: object) -> tuple[ReportGap, ...]:
     )
 
 
+def _parse_dim_labels(raw: object) -> DimLabels:
+    """解析 ``dimensions_meta``(可选)。缺省即评估体裁默认标签。"""
+    if not raw:
+        return DimLabels()
+    if not isinstance(raw, dict):
+        raise ValueError("report yaml: dimensions_meta 必须是 mapping")
+    labels = raw.get("labels") or {}
+    if not isinstance(labels, dict):
+        raise ValueError("report yaml: dimensions_meta.labels 必须是 mapping")
+    base = DimLabels()
+    return DimLabels(
+        section_title=str(raw.get("title") or ""),
+        setup=str(labels.get("setup") or base.setup),
+        question=str(labels.get("question") or base.question),
+        good=str(labels.get("good") or base.good),
+        bad=str(labels.get("bad") or base.bad),
+        scored=str(labels.get("scored") or base.scored),
+    )
+
+
 def _parse_sources(raw: object) -> tuple[ReportSource, ...]:
     if not raw:
         return ()
@@ -200,6 +239,8 @@ def load_report(path: Path) -> Report:
         summary=str(_req(data.get("summary"), "summary")),
         sections=_parse_sections(data.get("sections")),
         dimensions=_parse_dimensions(data.get("dimensions")),
+        dim_labels=_parse_dim_labels(data.get("dimensions_meta")),
+        benchmarks_title=str(data.get("benchmarks_title") or ""),
         benchmarks=_parse_benchmarks(data.get("benchmarks")),
         pitfalls=tuple(str(p) for p in (data.get("pitfalls") or [])),
         gaps=_parse_gaps(data.get("gaps")),
