@@ -56,6 +56,13 @@ DIMENSION_REPORTS: dict[str, tuple[dict[str, str], ...]] = {
             "sub": "7 个派发设计决策,每个配真实场景 · 三大派系 + 学术理论,对照本项目编排 · 40+ 系统/论文调研 + 事实核查",
         },
     ),
+    "lifecycle": (
+        {
+            "slug": "chat-agent-loop-survey",
+            "title": "Chat 模式 Agent Loop · 怎么做",
+            "sub": "7 个 chat-loop 设计决策,每个配真实场景 · 原生工具调用循环 / plan-execute / workflow-vs-agent 主轴,对照本项目 chat 子图循环 · 9 路调研 + 63 条事实核查",
+        },
+    ),
 }
 
 templates = Jinja2Templates(directory=str(DASHBOARD_ROOT / "templates"))
