@@ -113,10 +113,15 @@ def test_report_has_no_opaque_codes(report: Report) -> None:
 # ---- 端点:报告页渲染 + /eval 列表 ------------------------------------------
 
 
-def test_eval_lists_dispatch_report(client: TestClient) -> None:
-    body = client.get("/eval").text
-    assert 'href="/eval/report/subagent-dispatch-survey"' in body
-    assert "子 agent 派发" in body
+def test_tool_dimension_page_lists_dispatch_report(client: TestClient) -> None:
+    """调研体裁:派发报告归到「工具」维度页(/m/tool),不再挂在评估页 /eval。"""
+    tool_body = client.get("/m/tool").text
+    assert 'href="/eval/report/subagent-dispatch-survey"' in tool_body
+    assert "子 agent 派发" in tool_body
+    assert "深度调研" in tool_body
+    # 评估页不应再列这份调研报告(它不是评估方法论)
+    eval_body = client.get("/eval").text
+    assert "subagent-dispatch-survey" not in eval_body
 
 
 def test_dispatch_report_page_renders(client: TestClient) -> None:

@@ -35,6 +35,20 @@
       {% endfor %}
     </ol>
   </section>
+
+  {# 深度调研 — 挂在本维度下的长文研报(数据自 server.DIMENSION_REPORTS)#}
+  {% if reports %}
+  <section class="eval-reports module-reports">
+    <h3 class="eval-reports-h">深度调研</h3>
+    {% for r in reports %}
+      <a class="eval-report-link" href="/eval/report/{{ r.slug }}">
+        <span class="erl-title">{{ r.title }}</span>
+        <span class="erl-sub">{{ r.sub }}</span>
+        <span class="erl-arrow">›</span>
+      </a>
+    {% endfor %}
+  </section>
+  {% endif %}
 </div>
 
 {% include "_context_menu.html" %}

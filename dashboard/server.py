@@ -45,6 +45,19 @@ CONFIG_DIR = DASHBOARD_ROOT / "config"
 DB_PATH = PROJECT_ROOT / "backend" / "data" / "board.db"
 SEED_PATH = DASHBOARD_ROOT / "data" / "deep_cards_seed.jsonl"
 
+# 维度页 → 挂在该 ETCLOVG 维度下的深度调研报告。
+# 「调研/综述」体裁(讲某件事*怎么做*)归到它论述的维度页,而非 /eval(那是评估方法论)。
+# 报告本体仍由 report_view 在 /eval/report/<slug> 渲染(genre-neutral),这里只是入口归位。
+DIMENSION_REPORTS: dict[str, tuple[dict[str, str], ...]] = {
+    "tool": (
+        {
+            "slug": "subagent-dispatch-survey",
+            "title": "子 agent 派发 · 怎么做",
+            "sub": "7 个派发设计决策,每个配真实场景 · 三大派系 + 学术理论,对照本项目编排 · 40+ 系统/论文调研 + 事实核查",
+        },
+    ),
+}
+
 templates = Jinja2Templates(directory=str(DASHBOARD_ROOT / "templates"))
 # 静态资源 cache buster — 用 static/ 目录所有 .js/.css 的最大 mtime,server 启动时算一次。
 # 资源文件改动后下次启动 hash 变化,浏览器(尤其 Safari)被迫重新拉取,绕开本地缓存。
@@ -182,6 +195,7 @@ async def module_page_view(request: Request) -> HTMLResponse:
         "request": request,
         "dim": dim,
         "layer": layer,
+        "reports": DIMENSION_REPORTS.get(dim_id, ()),
         "asset_v": ASSET_VERSION,
     }
     return cast(HTMLResponse, templates.TemplateResponse("_module_page.html", ctx))
