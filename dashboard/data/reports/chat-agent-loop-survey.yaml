@@ -1,0 +1,460 @@
+# dashboard/data/reports/chat-agent-loop-survey.yaml
+# ============================================================================
+# 研究报告:工业界在 chat 模式怎么做 agent loop
+# ----------------------------------------------------------------------------
+# 来源:2026-06-03 Workflow 9 路并行联网调研(canonical loop/ReAct / workflow-vs-
+# agent / OpenAI Agents SDK / LangGraph / 上下文工程·compaction / 流式·打断·
+# steering / 12-factor agents / 反思·自纠 / plan-execute·早期自治教训)+ 63 条
+# 承重结论逐条对抗式事实核查(confirmed 45 / partly+refuted 18,凡 partly 一律
+# 用更正版)+ 对照本项目自己的 chat 子图 agent loop。
+# 由 dashboard/derive/report.py 类型化加载,渲染于 /eval/report/<slug>。
+# 写作约定:不用读者无法对应的内部代号;厂商自报数字一律标注口径(官方/第三方
+# 博客/论文 + 数据集 + baseline);统计与机制全配大白话。
+# ============================================================================
+
+slug: chat-agent-loop-survey
+title: Chat 模式 Agent Loop · 怎么做
+subtitle: >-
+  用具体例子讲明白:7 个 chat-loop 设计决策 × 真实场景,横扫原生工具调用循环 / plan-execute / workflow-vs-agent 主轴 / 流式·打断·自纠三道 chat 特有约束,对照本项目自己的 chat
+  子图循环
+meta:
+  date: '2026-06-03'
+  basis: 9 路并行调研 + 63 条承重结论对抗式核查(confirmed 45 / 需修正 18,均用更正版)+ 对照本项目 chat 循环
+summary: >-
+  工业界今天做 chat 模式的 agent loop,本质就一句话(Anthropic 原话):agent 通常只是"LLM 在循环里基于环境反馈使用工具"。但真要在对话产品里跑稳,得在这个最小内核外面套三层判断。第一层是骨架选择:ReAct(边想边查边干)已被产品化成"原生工具调用循环"——模型吐出结构化
+  tool_use、运行时执行、把 tool_result 喂回,直到模型不再要工具(stop_reason=end_turn)就停;另有 plan-execute 这类"先出整张计划再照单执行"的研究循环。第二层是 workflow vs
+  agent 这条智识主线:能把步骤写死就别交给模型自驱,agent 只是复杂度最高档、不是默认项。第三层是 chat 特有的三道约束:流式投射循环中间态、人在环(审批门+中途打断/steering)、错误自纠。先约定几个高频词:循环 = 模型调工具→拿结果→再决策的反复过程;原生工具调用循环
+  = 模型直接 emit 结构化 tool_use 而非 prompt 里手写 Thought/Action 的今日标准形态;终止条件 = 这一轮何时停(无工具调用自然停 / 撞硬上限 / 烧到预算闸 / 回合边界);上下文工程 = 管理"每一轮窗口里到底装哪些
+  token"的持续取舍;steering = 不硬打断、在工具边界把用户新消息并进去改方向;护栏 = 危险操作执行前的"暂停-等批准-续跑"门。所有厂商/论文数字均标口径;凡对抗核查标 partly 的一律用更正版。
+sections:
+- heading: 最小内核:循环 + 环境反馈 + 增强版 LLM
+  body: >-
+    剥到最里层,chat agent 的 loop 没什么玄的。Anthropic《Building Effective Agents》(2024-12 工程博文,非学术论文)逐字定义:agent 通常只是 LLMs using tools
+    based on environmental feedback in a loop——刻意做得极简,文中也说实现 often straightforward。这个循环的灵魂是每一步都从环境拿真实反馈(原文叫 ground truth,如工具调用结果或代码执行结果)来判断走到哪了,而不是模型闭眼脑补。最小积木是
+    augmented LLM = 裸模型 + 检索 + 工具 + 记忆,所有复杂 agent 都在这块积木上叠。学术源头是 ReAct(Yao et al., 2022, ICLR 2023):让模型交替产出推理(规划/纠错)和行动(去环境拿信息),解决纯
+    CoT 不接触环境会幻觉、纯行动没规划两个极端。今天这套思想已被内化进模型训练、产品化成原生工具调用循环——不再靠 prompt 手写 Thought/Action,模型直接 emit 结构化 tool_use。
+  bullets:
+  - >-
+    Anthropic 极简定义:agent = LLM 在循环里基于环境反馈用工具;ground truth(工具/代码真实结果)是区别于纯生成的核心。注意这是 Anthropic 自家实用定义,非业界唯一标准。
+  - >-
+    ReAct 在交互决策任务上靠 1-2 个示例打赢专门训练的基线:ALFWorld 成功率 71% vs 模仿学习 BUTLER 37%(绝对 +34pp、2-shot、冻结 PaLM-540B),WebShop 40% vs 最佳 IL/RL
+    约 29% (+10pp、1-shot)。口径:学术论文数字非厂商商业指标,且 40% 仍远低于人类专家 59.6%。
+  - >-
+    ReAct 不是处处赢:纯多跳问答 HotpotQA exact match 上 ReAct 27.4% 反而略低于纯 CoT 29.4%,要把两者切换组合(ReAct↔CoT-SC)才到约 35.1%;论文自承最优是二者结合。这恰是
+    ReAct 非万能、要看任务类型的证据(限定 6-shot 未微调语境)。
+  - >-
+    样本效率口径要修正:ReAct 基线训练量是区间 10^3~10^5,不是统一的 9万-10万——ALFWorld 的 BUTLER 用 10^5,WebShop 的 IL/RL 基线只用约 1,012 条人标轨迹(10^3),别把整体一律说成
+    9万-10万。
+- heading: 主轴:workflow(控制流写死)vs agent(交给模型自驱)——这是贯穿全篇的智识主线
+  body: >-
+    理解工业界怎么取舍 loop,这条线最关键。Anthropic 用一句话划开二者:谁掌控执行步骤的编排权。Workflow = 工程师把步骤顺序写死在预定义代码路径里、LLM 在固定槽位干活;agent = 模型自己边走边决定下一步、调哪个工具。两者都归入上位概念
+    agentic systems,不是非黑即白。选哪个的判据不是谁更高级,而是任务是否 well-defined(定义清楚、步骤能否预先固化):定义清楚用 workflow(可预测、稳定),需要灵活应变+模型当场拍板+规模化才上 agent。核心建议是能简单就别复杂——先用单
+    prompt + 检索这种最简方案跑评估,简单方案不够用了才加多步 agentic 系统;还明确建议先直接用 LLM API(很多模式几行代码就能写)、别急着上框架(框架的抽象层会掩盖底层 prompt、难调试)。agent 的代价是更高成本和误差累积,要沙盒测透
+    + 加护栏。Anthropic 归纳了 5 种 workflow 模式(prompt chaining / routing / parallelization / orchestrator-workers / evaluator-optimizer),agent
+    单列为第 6 类、不算进这 5 种 workflow。
+  bullets:
+  - >-
+    判据 = 任务可预测性 / 是否 well-defined,不是谁高级。原文:workflow 给 well-defined 任务以可预测性和一致性,agent 在需要灵活+模型驱动决策+at scale 时才更优。
+  - >-
+    5 种 workflow:prompt chaining(拆固定步骤序列,可在步骤间加程序化 gate)、routing(先分类再分发到专用 prompt)、parallelization(Sectioning 拆独立子任务并行 / Voting
+    同任务多跑投票)、orchestrator-workers(中心 LLM 动态拆解+派 worker+综合,子任务数动态生成)、evaluator-optimizer(一个生成一个评审,循环精修)。
+  - agent 适用窗口很窄:开放式、步数无法预测、路径无法硬编码;且每步必须靠工具结果/代码执行这种 ground truth 校准。
+  - >-
+    先别上框架是 Anthropic 的明确主张(定性、非性能数字):many patterns can be implemented in a few lines of code;真用框架也要搞懂它底下生成了什么。
+- heading: 三种循环骨架:原生工具调用循环 / plan-execute 光谱 / 模型自驱(并对照早期全自治反面教材)
+  body: >-
+    工业界 chat 的 loop 落地有三类骨架。骨架一是事实标准:原生工具调用循环(Claude tool-use loop / OpenAI Agents SDK 都是这套)。Claude 文档把它描述成一个 keyed on stop_reason
+    的 while 循环——发请求带 tools→模型回 stop_reason=tool_use 加 tool_use 块→你的代码执行工具、包成 tool_result 喂回→只要还是 tool_use 就重复;遇到 end_turn(或
+    max_tokens/stop_sequence/refusal)退出。模型从不自己执行任何东西,只发结构化请求,你的代码跑、结果再流回。OpenAI Agents SDK 是同一套:一次 Runner.run = 对话里一个逻辑回合,内部按
+    LLM 输出三选一(final_output 停 / handoff 换 agent 继续 / tool calls 执行后回填再继续),受 max_turns 约束(默认 10、源码常量 DEFAULT_MAX_TURNS、传 None
+    关掉)。骨架二是 plan-execute 光谱:先一次性出整张计划再照单执行,省掉每步叫醒大模型——plan-and-execute(串行、可 re-plan)→ ReWOO(占位符变量去掉中间 LLM 调用)→ LLMCompiler(并行
+    DAG 最快);共同代价是临场纠偏能力下降,工具中途意外时要靠显式 re-plan 回路。骨架三是把多步循环内化进模型权重(OpenAI Deep Research 用 end-to-end RL 教进 o3 特化版,模型自主决定走几步),不靠外层
+    max_turns。早期全自治循环(AutoGPT/BabyAGI)是反面教材。
+  bullets:
+  - >-
+    原生工具调用循环终止信号(协议口径,非性能数字):stop_reason==tool_use 继续;end_turn 自然完成退出;max_tokens/stop_sequence/refusal 也退出但属应用需另行处理。工具分客户端执行(你驱动
+    while 循环)与服务端执行(Anthropic 内部自跑循环,达迭代上限默认 10 次返回 pause_turn 让你续跑)。
+  - >-
+    OpenAI Agents SDK 的 handoff 在底层是特殊 tool call(transfer_to_<agent>),新 agent 接管整段历史、仍在同一个 run 内;1 turn 官方定义 = 一次 AI invocation(含其触发的工具)。
+  - >-
+    plan-execute 三者数字(对照 ReAct,作者自报):ReWOO 在 HotpotQA 约 5x token 效率 + 4% 准确率(42.4%@~2000 tokens vs ReAct 40.8%@~10000);LLMCompiler
+    相对 ReAct 延迟最高 3.7x、成本最高 6.7x、准确率最高约 +9%(ICML 2024)。
+  - >-
+    反面教材有量化证据:AutoGPT 式全自治在 WebShop 真实购物任务上,Auto-GPT(GPT-4) 单独成功率仅 0.240(加外部意见 top5→0.320),失败模式是死循环/烧 API/缺记忆反复重规划。正面长循环案例
+    Voyager(Minecraft 终身学习)靠自动课程+技能库+迭代提示(每任务最多 4 轮、有上限不发散)。
+- heading: chat 模式让循环多了三道约束:流式投射 / 人在环(审批+打断) / 错误自纠
+  body: >-
+    批处理或通宵自治 agent 只看最终结果,交互式 chat 不行——用户在等,这就逼出三道额外约束。约束一是流式:把循环中间态(reasoning token、tool call 开始、tool result)拆成不同 SSE 事件边产边推,主要价值是改善感知响应性而非缩短总耗时(首
+    token 可亚秒级出现而整段仍需数秒)。Claude Agent SDK 把流式输入设为默认,因为只有它能让 agent 当长活进程、处理打断、弹权限请求;单条消息模式明确不支持图片/动态排队/实时打断/自然多轮——正是交互式四大刚需。约束二是人在环,分两类语义:硬打断(丢掉在跑的活)和软操控/steering(在工具边界把新消息并进去、保留已完成的工具结果),产品在往后者倾斜;以及审批门(危险操作执行前暂停-等批准-续跑)。约束三是错误自纠:工具报错当普通
+    observation 喂回(标 is_error),模型读到会自己纠正重试。
+  bullets:
+  - >-
+    流式归属要修正:perception shift 这个措辞和 0.4s/25s/8s 等数字出自第三方博客(Abstract Algorithms / Hashnode),不是 LangGraph 官方;8 秒弃用无实证(网页加载弃用研究多指向约
+    3s 且场景不同)。底层机制(TTFT 主导感知)有 Nielsen NN/g 经典阈值 0.1s/1s/10s 支撑,属通用 UX 原理。
+  - >-
+    steering 与打断分键位是主流做法,但 Cursor 1.4 口径要校正:Ctrl+Enter=立刻打断 agent 并马上发送(对);Alt+Enter=像以前一样排队(沿用旧 queue 语义)。把消息排到下一个 tool call
+    之后才跑是 1.4 的新默认 steering 行为,不是 Alt+Enter 的语义,别张冠李戴。
+  - >-
+    审批门有安全悖论:Anthropic 自报用户对权限请求批准率 93%(第一方自报、未披露方法学/样本),频繁提示导致审批疲劳、闭眼点同意反而更危险。Claude Code auto mode 用模型分类器自动化高频审批。
+  - >-
+    自纠的关键口径(贯穿全方向):自我反思/自改对纯推理任务并不可靠,真正稳的收益来自有外部 verifier 的场景。Reflexion 在 HumanEval pass@1 刷到 91%(对照 GPT-4 80%)靠的是单元测试当外部裁判;Self-Refine
+    在数学 GSM8K 几乎不涨。Huang et al.(ICLR 2024)实证:无外部反馈的纯自省纠错在 GSM8K 上不升反降。
+- heading: 社区与学术沉淀:12-factor 反对盲目长循环 / 上下文工程 / 反思 / 早期自治教训
+  body: >-
+    工业界的 loop 实践被几股社区+学术力量校准。HumanLayer《12-Factor Agents》的总论点:纯靠模型自驱的'给个 prompt + 一袋工具、循环到完成'不可靠,超过 10-20 轮就失控(上下文一长 agent
+    就迷路、反复死磕同一个坏方法);纯 loop 式 agent 质量普遍卡在 70-80%(作者定性观察、非 benchmark),而 80% 不够做面向客户的功能。它的对策是 own 三件套——Own your control flow(while
+    循环自己写、尤其要能在选了工具和真正调用之间打断恢复)、Own your context window、把 agent 做成 stateless reducer (state,event)->state;并主张 Small Focused
+    Agents(单 agent 限 3-10、最多 20 步)、用 tool call 联系人类。上下文管理上,Anthropic 把'喂什么进上下文'升级成 context engineering(自然演进自 prompt engineering):上下文是有限资源、有边际收益递减,每个
+    token 消耗注意力预算,堆太多会 context rot(token 越多召回越差,概念溯源自 Chroma 研究,远在窗口溢出前就发生)。长 horizon 三招:compaction(快撑爆时总结、用摘要开新窗)、structured
+    note-taking(NOTES.md/to-do 写窗口外)、多 agent。Cognition 反过来主张默认单线程+共享完整 trace、用专门(可微调小)模型压缩历史。
+  bullets:
+  - >-
+    12-factor 的核心诉求:能在 tool selection 与 tool invocation 之间中断并恢复,是作者对每个框架的头号需求;配合统一执行态与业务态(执行进度全从上下文推断、单一 source of truth),实现可暂停/可序列化/可恢复/可审计。
+  - >-
+    上下文工程定义(逐字):curating and maintaining the optimal set of tokens during LLM inference;关系是 prompt engineering 的 natural progression(不是
+    Anthropic 说的'升级成一等学科',那是意译)。
+  - >-
+    Compaction 是把接近窗口上限的对话总结后用摘要重开新窗,保留架构决策/未解决 bug/实现细节、丢冗余工具输出。Anthropic Compaction API(beta、opt-in、需 header compact-2026-01-12):默认
+    trigger 150,000 input tokens(最小 50,000),官方示例一次迭代处理 180k→压缩后续迭代剩 23k input tokens。注意 180k 仍被实际处理并单独计费。
+  - >-
+    防卡死不能指望模型自判'该停了',必须代码加确定性护栏:硬迭代上限(LangGraph recursion_limit 默认 25、按 super-step 计、inclusive,超抛 GraphRecursionError;LangChain
+    max_iterations)+ 原地打转检测(连续轮次语义相似度超阈值,社区常见约 85%,非官方)+ 完成判定/到顶如实上报。复利可靠性衰减是硬数学:每步 85% 可靠时 5 步只剩 44%、10 步 20%,即便 95%/步、10
+    步也只约 60%——这就是 chat 必须有界循环+人在环的根因。
+dimensions_meta:
+  title: 7 个 chat-loop 设计决策 · 每个配一个真实场景
+  labels:
+    setup: 场景
+    question: 怎么做
+    good: 好做法
+    bad: 翻车点
+    scored: 怎么判断 · 谁在用
+dimensions:
+- name: ① 循环骨架:ReAct 原生工具调用循环 vs plan-execute
+  plain: 先定 loop 的形状:是模型边想边调工具的 ReAct 式原生循环,还是先出整张计划再照单执行的 plan-execute。
+  setup: 金融助手要回答'宁德时代最新一季毛利率多少,和上季比变化趋势'——需要调财报工具、可能再调行情工具,步数不固定。
+  question: 这个对话该用哪种循环骨架?
+  good: >-
+    开放式、步数不可预测、用户中途可能改主意的交互式问答,用原生工具调用循环(模型 emit tool_use→运行时执行→tool_result 喂回→重复到 end_turn)。它是 ReAct 思想被内化进模型训练后的今日标准,Claude
+    tool-use loop / OpenAI Agents SDK 都是这套。需要省钱省时、步骤能预先想清的批量子任务(如固定多步研报流水线),才考虑 plan-execute(plan-and-execute/ReWOO/LLMCompiler)。
+  bad: >-
+    对交互式 chat 盲目套 plan-execute——计划先定死后,用户中途改主意或工具报错时纠偏能力弱(纯 plan-execute 不像 ReAct 每步重新观察),只能靠显式 re-plan 兜;反过来对能并行的批量工具调用还死守串行
+    ReAct,每个动作都叫醒大模型,白白慢且贵。
+  scored: >-
+    看任务可预测性 + 是否需要临场纠偏。原生循环靠 stop_reason 自然终止(端到端可用 τ-bench 式终态校验)。plan-execute 的收益用 token/延迟量化:ReWOO 在 HotpotQA 约 5x token
+    + 4% 准确率(vs ReAct 40.8%);LLMCompiler 延迟最高 3.7x、成本最高 6.7x、准确率最高约 +9%(ICML 2024)。谁在用:Claude tool-use loop、OpenAI Agents
+    SDK(原生循环);LangChain Plan-and-Execute、ReWOO、LLMCompiler(plan-execute)。
+- name: ② workflow-vs-agent:控制流写死还是交给模型自驱
+  plain: 决定这条对话的执行步骤由你的代码编排(workflow),还是让模型自己边走边决定(agent)。这是整个设计的智识主线。
+  setup: 产品里有两类请求:一类是'把这份研报按固定模板生成五段'(步骤清楚),一类是'帮我研究下这家公司值不值得投'(开放、步数说不准)。
+  question: 这两类各该走 workflow 还是 agent?
+  good: >-
+    判据是任务是否 well-defined,不是谁更高级。'按固定模板生成五段'步骤清楚→workflow(prompt chaining/routing,可预测稳定);'研究值不值得投'开放、步数无法预测、路径写不死→才上 agent。整体遵循能简单就别复杂:先单
+    prompt+检索跑评估,不够用了再加多步;先直接用 LLM API、别急着上框架。
+  bad: >-
+    把所有东西都做成自主 agent(把 workflow 也交给模型自驱)——成本更高、误差累积滚雪球;或反过来把开放式研究硬塞进写死的 workflow,模型在固定槽位施展不开。还有个常见坑:一上来就套框架,抽象层掩盖底层 prompt、难调试。
+  scored: >-
+    按 Anthropic 口径:workflow 给 well-defined 任务以可预测性/一致性,agent 在需要灵活+模型驱动决策+at scale 时才更优,agent 是用 latency/cost 换 task performance
+    的取舍。5 种 workflow 模式(prompt chaining/routing/parallelization/orchestrator-workers/evaluator-optimizer)是厂商自述分类计数、非 benchmark。谁在用:Anthropic《Building
+    Effective Agents》是这条主线的权威出处。
+- name: ③ 一轮的终止条件:自然停 + 硬上限 + 预算闸 + 回合边界
+  plain: 这一轮循环到底什么时候停——光靠'模型说答完了'不够,得叠几道闸防止无限跑。
+  setup: agent 在循环里反复调工具,某次工具一直报错,模型不死心一遍遍换参数重试,眼看要无限循环烧钱。
+  question: 这个循环靠什么停下来?
+  good: >-
+    四道闸叠加:(1)自然停——模型不再 emit 工具调用(原生循环 stop_reason=end_turn;LangGraph 看 AIMessage 有没有 tool_calls;Agents SDK 给 final_output),这是主路径、由模型自驱;(2)硬上限兜底——OpenAI
+    Agents SDK max_turns 默认 10、LangGraph recursion_limit 默认 25(按 super-step 计、inclusive),撞到报错而非放任;(3)预算闸——max_budget_usd 给开放式任务封顶;(4)回合边界——turn
+    内工具自动喂回不交还控制权,turn 之间才停下等用户。
+  bad: >-
+    只信模型自判终止——LLM 控制的退出条件经常永远为假,会反复死磕同一个坏方法爬不出来;或把硬上限设在错误层级(如设在 create_react_agent 参数而非 invoke 的 config 里)结果不生效仍报默认值;或忘了 super-step
+    是 inclusive 的(设 3 跑到第 3 步就报错)差 1 出错。
+  scored: >-
+    协议/配置口径,非性能数字。退出枚举:tool_use 继续,end_turn/max_tokens/stop_sequence/refusal 退出。硬上限:max_turns=10(源码 DEFAULT_MAX_TURNS,传 None
+    关闭)、recursion_limit=25(超抛 GraphRecursionError:'Recursion limit of 25 reached without hitting a stop condition');并行节点同一
+    super-step 只算 1 步。谁在用:Anthropic tool-use loop、OpenAI Agents SDK、LangGraph。
+- name: ④ 长循环上下文管理:append-only + 压缩 / compaction / 上下文工程
+  plain: 对话越聊越长、工具结果越堆越多,窗口会爆——必须主动管理每一轮装哪些 token,而不是无脑往后接。
+  setup: 一个研究类长会话跑了几十轮、调了一堆工具,输入 token 逼近窗口上限,再 append 下去就要溢出或性能下滑。
+  question: 长循环里怎么不让窗口当垃圾桶?
+  good: >-
+    把上下文当有限资源管理(context engineering):接近上限时做 compaction(总结对话、保留架构决策/未解决 bug/实现细节、丢冗余工具输出,用摘要重开新窗);关键信息写到窗口外(NOTES.md/to-do
+    这类 structured note-taking),需要时再捞回;子 agent 只回压缩后的摘要而非整段 trace。Anthropic Compaction API 可自动在 trigger(默认 150,000 input tokens)时触发。
+  bad: >-
+    历史 append-only 一直堆当多多益善——会 context rot(token 越多召回越差,远在窗口溢出前就发生),稀释注意力预算、性能下滑;还会 context poisoning(幻觉信息进上下文后被反复复用滚雪球)和
+    context distraction(被太多过去信息拖累、倾向复读历史而非重新推理)。
+  scored: >-
+    Compaction API(beta、opt-in、需 header compact-2026-01-12):默认 trigger 150,000 input tokens、最小 50,000;官方示例一次迭代 180k→后续迭代 23k
+    input tokens(但 180k 仍被处理并单独计费)。子 agent 摘要约 1,000-2,000 tokens(Anthropic 子 agent 架构博客举例、用 often,非 benchmark,且是通用子 agent
+    架构而非特指 Claude Code)。谁在用:Anthropic context engineering / Compaction API、Claude Agent SDK auto-compact、Cognition 单线程+专用压缩模型。
+- name: ⑤ chat 特有:流式把循环中间态实时投到 UI
+  plain: 交互式对话必须流式——把循环里'正在想/正在调工具/工具回来了'拆成事件边产边推,让用户从盯转圈变成看着 agent 边干边反馈。
+  setup: 用户问了个要调好几次工具、整段要二三十秒才出完的问题。
+  question: 这二三十秒里 UI 该怎么呈现?
+  good: >-
+    流式投射循环中间态:把 reasoning token、tool call 开始、tool result 拆成不同 SSE 事件,UI 渲染成'正在思考'文字 + 工具 spinner + 结果,首 token 亚秒级出现。把流式当架构决策而非事后开关——它是后面所有可打断/审批能力的前提(只有循环'一段段往外吐事件'才能中途插话)。Claude
+    Agent SDK 把流式输入设为默认承载所有交互能力。
+  bad: >-
+    算完再一次性返回——用户盯着转圈以为卡死;或把'8 秒弃用''降 80% 感知等待'这类第三方博客的示意数字当成实测性能指标去引用(这些非基准、8s 弃用无实证);或单条消息模式硬上交互式(它不支持图片/动态排队/实时打断/自然多轮)。
+  scored: >-
+    主要价值是感知响应性而非缩短总耗时(首 token 亚秒、整段仍需数秒)。底层机制 TTFT 主导感知有 Nielsen NN/g 经典阈值支撑(0.1s 即时/1s 不打断/10s 失去注意力),属通用 UX 原理非某框架独创。谁在用:Claude
+    Agent SDK(streaming input 默认)、LangGraph(astream_events 拆 token/on_tool_start/on_tool_end)、Vercel AI SDK。
+- name: ⑥ 人在环:工具审批门 + 中途打断 / steering
+  plain: 危险操作执行前要能停下来等人批,用户也要能在 agent 干活中途插话改方向——这俩是交互式特有的暂停能力。
+  setup: agent 准备调'下单/转账/发邮件'这类不可逆工具;同时用户看它跑偏了,想中途插一句'别买A、换B'。
+  question: 怎么让人安全地介入这个循环?
+  good: >-
+    审批门:危险/不可逆操作执行前暂停,把工具调用详情弹给用户,批/改/拒后再续(LangGraph interrupt()+Command(resume=...)、Claude Agent SDK permission_mode+canUseTool
+    回调、PreToolUse hook)。打断分两类:硬打断(丢在跑的活)和软操控/steering(不打断当前工具、在下一个 tool call 边界把新消息作为高优先级上下文并进去,保留已完成的工具结果)——产品在往 steering
+    倾斜。中途打断工程上要保留已完成工具结果+只跑剩余工具。
+  bad: >-
+    审批勾得太频繁→审批疲劳(用户批准率 93%、闭眼点同意反而更危险);或 LangGraph 里把非幂等副作用(扣款/写库)放在 interrupt() 之前——resume 时整个节点从头重跑、副作用会重复执行一遍;或打断后没排空脏数据就读新轮,读到被打断那轮的残留。
+  scored: >-
+    协议/产品口径。Cursor 1.4:Ctrl+Enter=立刻打断并发送、Alt+Enter=沿用旧排队语义(把消息排到下一个 tool call 之后跑是新默认 steering、不是 Alt+Enter)。Claude Agent
+    SDK 5 种 permission_mode(default/acceptEdits/plan/dontAsk/bypassPermissions,TS 另有 auto)。审批疲劳:批准率 93%(Anthropic 第一方自报、未披露方法学)。谁在用:Claude
+    Code、Cursor、ChatGPT agent、LangGraph、Strands。
+- name: ⑦ 错误与自纠:工具报错喂回 / 反思 / 防原地打转
+  plain: 循环里工具会报错、模型会跑偏——怎么让它自己纠正,又不至于无限原地打转。
+  setup: 工具调用因为参数缺失/服务 500 失败了,模型读到错误后该怎么办;万一它反复换参数还是不对呢?
+  question: 错误进了循环,靠什么自纠又不卡死?
+  good: >-
+    工具报错当普通 observation 喂回(tool_result 标 is_error,错误消息写成指导性的——说清错因+下一步,如'Rate limit exceeded. Retry after 60 seconds.'),模型读到会带修正重试
+    2-3 次再放弃道歉。跨轮失败可上 Reflexion(把失败写成自然语言反思存进记忆、下一轮带反思重试)。但必须叠确定性护栏防卡死:硬迭代上限 + 原地打转检测(连续轮次语义相似度超阈值即中断)+ 到顶如实上报。
+  bad: >-
+    指望模型空手自省纠正推理——无外部 verifier 时纯自省在推理任务上不升反降;或没有硬上限+打转检测,模型反复死磕同一个坏方法把预算烧光;或错误消息只写'failed'不给可操作上下文,模型不知下一步怎么改。
+  scored: >-
+    关键口径:自纠的稳收益来自外部 verifier。Reflexion HumanEval pass@1 91%(对照 GPT-4 80%)靠单元测试;Self-Refine 7 任务平均约 +20% 但数学 GSM8K 几乎不涨;Huang
+    et al.(ICLR 2024)证无外部反馈的纯自省在 GSM8K 不升反降。护栏:recursion_limit 默认 25、打转检测社区常见约 85% 相似度阈值(非官方)。谁在用:Anthropic tool-use(is_error)、Reflexion/Self-Refine、LangGraph/LangChain
+    护栏。
+benchmarks_title: 代表系统 / 方法 · 循环机制速览
+benchmarks:
+- name: ReAct(Reasoning+Acting,Yao et al. 2022, ICLR 2023)
+  what: >-
+    交替产出推理(规划/纠错)和行动(去环境拿信息),解决纯 CoT 幻觉、纯行动无规划两个极端。ALFWorld 71% vs 模仿学习 BUTLER 37%(+34pp、2-shot、PaLM-540B),WebShop 40% vs
+    最佳 IL/RL 约 29%(+10pp、1-shot);但 HotpotQA exact match 27.4% 略低于纯 CoT 29.4%,组合 ReAct↔CoT-SC 才约 35.1%。
+  fit: >-
+    chat agent loop 的学术内核。今天已被内化进模型训练、产品化成原生工具调用循环。引用数字要标:这是 PaLM-540B few-shot 学术数字、非当前 SOTA,且 40% 仍低于人类 59.6%。
+- name: Claude tool-use loop(原生工具调用循环,今日事实标准)
+  what: >-
+    keyed on stop_reason 的 while 循环:模型 emit tool_use→运行时执行→tool_result 喂回→重复到 end_turn 退出(max_tokens/stop_sequence/refusal
+    也退)。工具分客户端执行(你驱动循环)与服务端执行(Anthropic 内部循环、达上限默认 10 次返回 pause_turn 续跑)。
+  fit: chat 产品的默认骨架。模型从不自己执行任何东西,只发结构化请求、你的代码跑、结果流回。对应本项目 chat + MCP 工具调用的循环形态。
+- name: OpenAI Agents SDK(Runner.run + handoff)
+  what: >-
+    一次 run = 对话一个逻辑回合,内部按 LLM 输出三选一:final_output 停 / handoff 换 agent 继续 / tool calls 执行回填再继续;受 max_turns 约束(默认 10、源码 DEFAULT_MAX_TURNS、传
+    None 关)。handoff 是特殊 tool call(transfer_to_<agent>)、新 agent 接管整段历史、同一 run 内。
+  fit: >-
+    原生循环的另一权威实现。'1 turn=一次 AI invocation'的口径、handoff 换 agent 不另起 run,对设计多 agent 路由很直接。
+- name: LangGraph create_react_agent + recursion_limit + interrupt()
+  what: >-
+    把 ReAct 编译成两节点图(agent 调 LLM + tools 执行工具),条件边看 AIMessage 有无 tool_calls 决定回 tools 还是 END。recursion_limit 默认 25(按 super-step
+    计、inclusive)防死循环;interrupt()+Command(resume=) 做人在环(坑:resume 整节点从头重跑、要幂等)。create_react_agent 已 deprecated、推荐迁 create_agent,但回环机制不变。
+  fit: >-
+    显式图编排 vs 模型自驱循环的取舍样板:create_react_agent 是模型自驱封装(上手快),手写 StateGraph 是控制流写死(可控可观测)。对应本项目 LangGraph supervisor。
+- name: plan-execute 光谱:Plan-and-Execute / ReWOO / LLMCompiler
+  what: >-
+    先出整张计划再照单执行、省掉每步叫醒大模型。串行可 re-plan → ReWOO 用占位符变量(#E1/#E2)去掉中间 LLM 调用(HotpotQA 约 5x token+4% acc)→ LLMCompiler 并行任务 DAG(相对
+    ReAct 延迟最高 3.7x、成本最高 6.7x、准确率最高约 +9%,ICML 2024)。共同代价:临场纠偏弱、靠显式 re-plan。
+  fit: 适合步骤能预先想清、要省 token/提速的批量子任务;不适合用户会中途改主意的交互式 chat(纠偏弱)。
+- name: Anthropic context engineering + Compaction API
+  what: >-
+    把'喂什么进上下文'当一等设计:上下文是有限资源、有注意力预算、堆太多 context rot(token 越多召回越差,溯源自 Chroma)。长 horizon 三招 compaction/note-taking/多 agent。Compaction
+    API(beta opt-in)默认 trigger 150,000 input tokens(最小 50,000),示例 180k→23k。
+  fit: >-
+    长对话循环不爆窗口的标准解法。对应本项目长会话上下文管理:接近上限做摘要、关键信息写窗口外、子 agent 只回摘要(约 1,000-2,000 tokens)。
+- name: 12-Factor Agents(HumanLayer)
+  what: >-
+    反对盲目长循环:纯 loop 式质量卡 70-80%、超 10-20 轮失控。对策 own 三件套(control flow/context window/state)、Small Focused Agents(3-10、最多 20 步)、用
+    tool call 联系人类、把 agent 做成 stateless reducer。头号诉求:能在选了工具和真正调用之间打断恢复。
+  fit: 工程纪律总纲。把黑盒长循环换成可暂停/可序列化/可恢复/可审计的确定性工程,直接支撑终止条件+人在环两个决策。数字均为作者定性观察、非 benchmark。
+- name: Reflexion(跨轮反思,Shinn et al. NeurIPS 2023)
+  what: >-
+    做一遍→Evaluator 给信号→Self-Reflection 写成自然语言反思→存记忆→下一轮带反思重试,不改权重(verbal RL)。HumanEval pass@1 91%(对照 GPT-4 80%)、ALFWorld 约
+    6 轮后约 90%、HotpotQA 约 58% EM——收益随重试轮次累积、要给够预算。
+  fit: 循环里跨轮自纠的代表。但 91% 强依赖单元测试当外部裁判,拿不到标准答案时打折——错误自纠决策的正反两面。
+- name: Self-Refine + intrinsic self-correction 批判
+  what: >-
+    Self-Refine:同一模型轮流当生成/评审/改写、反复打磨同一稿,无外部 verifier;7 任务平均约 +20% 但数学 GSM8K 几乎不涨。Huang et al.(ICLR 2024)实证:无外部反馈的纯自省在 GSM8K
+    上不升反降,部分'自纠有效'是初始 prompt 太差的假象。
+  fit: 校准'何时该信自省、何时必须接外部 verifier'。设计 agent 纠错优先接工具报错/测试结果/环境信号,别指望空手自省纠推理。
+- name: AutoGPT / BabyAGI(反面教材)+ 复利可靠性衰减
+  what: >-
+    全自治 for 循环让 agent 无限自拆任务+自反馈:死循环、烧 API、缺记忆反复重规划、幻觉当事实、无法中途纠偏。Auto-GPT(GPT-4) 在 WebShop 仅 0.240 成功率。复利衰减硬数学:每步 85% 可靠→5
+    步 44%、10 步 20%(95%/步、10 步也只约 60%)。
+  fit: chat 必须有界循环+人在环的根因证据。正面长循环案例对照 Voyager:自动课程+技能库+迭代提示(每任务最多 4 轮、有上限不发散)。
+pitfalls:
+- >-
+  把'循环退出条件'只理解成 end_turn:原生工具调用循环里 stop_reason==tool_use 才继续,end_turn 是自然完成退出,但 max_tokens/stop_sequence/refusal 同样会退出(属应用需另行处理的非正常完成);服务端工具循环达上限返回
+  pause_turn 需续跑、不是 end_turn。这是协议口径、非性能数字,别漏掉非自然退出态。
+- >-
+  硬上限默认值记错:OpenAI Agents SDK max_turns 默认是 10(源码常量 DEFAULT_MAX_TURNS,部分二手博客说 5 是过时/错误,以源码为准);LangGraph recursion_limit 默认
+  25 且按 super-step 计、inclusive(设 3 跑到第 3 步就报错)、并行节点同一 super-step 只算 1 步。还有个高频坑:recursion_limit 要在 invoke/stream 的 config 里设,设在
+  create_react_agent 参数或 CLI 配置里不生效仍报 25。
+- >-
+  ReAct 数字的口径与归属:ALFWorld 71%/WebShop 40% 是 PaLM-540B few-shot 的 2022/2023 学术里程碑、非当前 SOTA;HotpotQA 上 ReAct 27.4% 反而略低于 CoT
+  29.4%(限 6-shot 未微调语境,微调后可反超);基线训练量是区间 10^3~10^5(ALFWorld BUTLER 10^5、WebShop 仅约 1,012 条人标轨迹),别统一说成'9万-10万'、会把 WebShop 基线高估约两个数量级。
+- >-
+  流式那几个数字几乎全是第三方博客示意值:perception shift 措辞、0.4s 首 token、25s 整体、8s 弃用、感知降 80% 都出自一篇社区博客(Abstract Algorithms / Hashnode),不是 LangGraph
+  官方、也非实测基准;8 秒弃用无实证(网页加载弃用研究多指向约 3s 且是不同场景)。能引用的是底层机制 TTFT 主导感知(Nielsen NN/g 经典阈值 0.1s/1s/10s)。
+- >-
+  Cursor 1.4 键位张冠李戴:Alt+Enter 是'像以前一样排队'(沿用旧 queue 语义),Ctrl+Enter 才是立刻打断并发送;把消息排到下一个 tool call 之后才跑是 1.4 的新默认 steering 行为、不是
+  Alt+Enter 的语义。这是 changelog 快照,后续版本默认可在 Settings→Chat→Queue messages 改,社区已报多个排队相关 bug。
+- >-
+  Claude Code auto mode 的 0.4%/17% 不是同一数据集:0.4% 误杀测自 n=10,000 真实内部流量,17% 漏放测自 n=52 人工策展的越权难例(从员工已拒绝/事后标记的会话里挑出),分母完全不同、不能当同一条流上的一组
+  FP/FN 权衡读。且'无第三方复现'已过时——独立 arXiv 压力测试在对抗/模糊授权工作负载上测得 FNR 约 70-81%、FPR 约 32%,约 36.8% 改状态的 file edit 完全绕过分类器,量级远差于厂商在良性流量上的数字。子
+  agent 压缩 1,000-2,000 tokens 是 Anthropic 通用子 agent 架构博客举例(用 often)、非特指 Claude Code、非 benchmark。
+gaps:
+- component: chat 循环骨架 = 单轮工具 + 应答(刻意不做多步重规划)
+  current: >-
+    本项目 chat 子图是 supervisor 拓扑:进来先过一个 context 节点(跨回合工具结果去重 + token 超阈值就 LLM 总结旧回合),再由 ChatPlanner 用受约束 LLM 产一个结构化 Plan(要调哪些工具/能否并行/要不要直接答/要不要加载技能/要不要升级),交给一条纯函数路由边(不调
+    LLM)决定走哪支。唯一的回环是“装载技能/资源后回到 planner 重评”;工具跑完直接到 responder 应答、不回 planner 看结果再决定下一步——是“规划→执行一轮工具→应答”的单轮,不是原生工具调用循环那种“看到
+    tool_result 再决定是否继续调”的多步回环。
+  suggestion: >-
+    这对金融问答的多数场景(查几个数据→综合答)够用、也最可控可测(对应业界 workflow 端、12-factor 的 own your control flow 纪律);但遇到“查了 A 才知道要查 B”的依赖型多跳就够不着。可坦诚标为能力边界,或给“工具→planner”加一条带硬上限的有界回边(对照决策③:自然停
+    + recursion_limit 安全网),把单轮升级成有界多步、而不是放开成无界自驱循环。
+- component: workflow vs agent:本项目落在 workflow 端的工程化
+  current: >-
+    ChatPlanner 把“决策”(LLM 填 Plan 字段)和“控制流执行”(纯函数路由边)解耦——控制流写死在 LangGraph 图里、LLM 只在固定槽位产结构化决策,还用工具白名单挡幻觉工具名。正对应 Anthropic“可预测任务用
+    workflow”和 12-factor 的 own your control flow。真正更 agentic 的多步自驱留给了“升级到深度研究”那条路径。
+  suggestion: >-
+    这条路线是对的(Anthropic 明确建议能简单就别上 agent、别急着上框架)。可补的是把“什么时候该从单轮 workflow 升级到多步 agent”做成显式判据写进 planner(现在升级触发偏深度研究意图);并对照决策②把“误差累积
+    + 成本”作为升级的代价显式标注,而非只看能力。
+- component: 一轮的终止与安全网(缺预算闸)
+  current: >-
+    自然终止 = planner 出 direct_response 或无 tool_calls 时直接走 responder;技能/资源装载回环的无限转由 LangGraph 的 recursion_limit 兜底(撞到抛错而非放任);escalation
+    是显式的“换条更重路径”出口(人类确认后升级到深度研究)。对应决策③的“自然停 + 硬上限”两道闸。
+  suggestion: >-
+    缺决策③里的“预算闸”——目前没有按累计 token/调用数/美元封顶的硬停;装载回环也只靠通用 recursion_limit、没有显式的装载次数上限。可加一条 per-turn 的 token 预算硬闸 + 显式技能装载计数上限,把“到顶如实上报”做成一等行为而非靠异常兜。
+- component: 长循环上下文管理(已有 compaction 雏形)
+  current: >-
+    context 节点做两件事:跨回合工具结果去重、token 超阈值就 LLM 总结旧回合只留最近 K 轮(把摘要 + 最近 K 轮喂下去)。这正是业界 compaction / 上下文工程的雏形——把上下文当有限预算管、而非 append-only
+    当垃圾桶。
+  suggestion: >-
+    对照 Anthropic context engineering:可把“喂什么”从“超阈值才压缩”前移成检索式选择(每轮按相关性挑装哪些工具结果/历史),并补 context rot 的度量(长会话召回是否下滑);关键信息写窗口外再按需捞回,而不是只在快爆时一次性总结。
+- component: 流式投射循环中间态(已到位)
+  current: >-
+    agent loop 在 Celery 独立进程里跑 LangGraph 的 astream_events,把循环每步拆成 token / 工具开始 / 工具结束 / plan 等事件 XADD 到 Redis Streams、前端经
+    SSE 消费;direct_response 这种没有 token 流的路径有 fallback 一次性补发。对应决策⑤把循环中间态实时投到 UI、且进程解耦 + DB 为准比单进程更稳。
+  suggestion: >-
+    决策⑤基本到位。可补的是“思考/reasoning”流(目前主要流 token 与工具事件,planner 的中间推理没单独投射);并把流式当成“后续可打断/审批”的承载层显式串起来(见下一条)。
+- component: 人在环:取消整轮 + 升级确认(缺逐工具审批 + 中途 steering)
+  current: >-
+    打断 = 经 Redis 发布订阅订阅 cancel 信号,graph 在每个事件之间检查取消标志、命中就停并走 partial commit(把已生成的部分落库、可从 checkpoint 续跑/重试);人在环的另一处是 escalation
+    的确认门(升级到深度研究前把待办 packet 弹给用户、可编辑字段、过置信度阈值才放行)。
+  suggestion: >-
+    当前 human-in-loop 是“取消整轮 + 升级确认”,对照决策⑥还缺两样:(1)逐工具审批门——本项目金融工具都是只读查询、风险低、可不做,但若将来加下单/写库类工具,执行前的暂停-批准-续跑是必须补的;(2)软 steering——现在打断是“取消整轮”(取消后重发≈从头),没有“不打断当前工具、在工具边界把新消息并进去改方向”的能力。两点都可坦诚标为能力边界。
+- component: 错误与自纠(单工具失败已容错,缺喂回重试回环)
+  current: >-
+    工具层:并发执行用“收集异常不抛”把单个工具异常裹成一条“失败结果”、不连累兄弟工具,失败如实记录交给 responder 措辞兜底(快速失败、不静默降级);planner 用白名单挡幻觉工具名;研报侧另有 critic 子图当质量门。
+  suggestion: >-
+    对照决策⑦:工具失败目前止于“记成失败结果让 responder 道歉”,没有“把 error 当 observation 喂回 planner 让它换工具/改参数重试”的自纠回环(因为是单轮骨架、见第一条 gap)。可在高价值路径加一条有界的“报错喂回
+    + 带修正重试 2-3 次”(对照 Claude tool-use 的 is_error 喂回);跨轮可借 Reflexion 思路——但要记住决策⑦的口径:自纠的稳收益来自外部裁判(本项目的工具返回 / 差分金标准正好可当裁判),别指望模型空手自省。
+sources:
+- title: >-
+    Building Effective AI Agents — Anthropic(agent/workflow 定义 + 5 种 workflow + ground truth + 沙盒护栏)
+  url: https://www.anthropic.com/research/building-effective-agents
+- title: Building Effective Agents — Anthropic Engineering(同文 engineering 路径,几行代码/先别上框架)
+  url: https://www.anthropic.com/engineering/building-effective-agents
+- title: >-
+    ReAct: Synergizing Reasoning and Acting in Language Models(arXiv 2210.03629, abstract)
+  url: https://arxiv.org/abs/2210.03629
+- title: >-
+    ReAct — Google Research Blog(ALFWorld 71/45/37、WebShop 40、HotpotQA 27.4/29.4/35.1 原始数字)
+  url: >-
+    https://research.google/blog/react-synergizing-reasoning-and-acting-in-language-models/
+- title: >-
+    How tool use works — Claude API Docs(原生工具调用 while 循环 + stop_reason 退出枚举 + pause_turn)
+  url: https://platform.claude.com/docs/en/agents-and-tools/tool-use/how-tool-use-works
+- title: Handle tool calls — Claude API Docs(is_error 喂回 + 指导性错误消息 + 重试 2-3 次)
+  url: https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls
+- title: >-
+    Running agents — OpenAI Agents SDK(agent loop 三终止条件 + final output 规则 + max_turns/MaxTurnsExceeded)
+  url: https://openai.github.io/openai-agents-python/running_agents/
+- title: openai-agents-python 源码 run_config.py(确认 DEFAULT_MAX_TURNS = 10)
+  url: >-
+    https://github.com/openai/openai-agents-python/blob/main/src/agents/run_config.py
+- title: Handoffs — OpenAI Agents SDK(handoff = transfer_to_<agent> 工具 + 接管历史)
+  url: https://openai.github.io/openai-agents-python/handoffs/
+- title: >-
+    Function calling — OpenAI API 指南(function_call/function_call_output/call_id 手动循环与终止)
+  url: https://developers.openai.com/api/docs/guides/function-calling
+- title: Introducing deep research — OpenAI(end-to-end RL 把多步浏览循环内化进 o3 特化版)
+  url: https://openai.com/index/introducing-deep-research/
+- title: create_react_agent — LangChain Reference(两节点图 + 条件边回环 + should_continue)
+  url: >-
+    https://reference.langchain.com/python/langgraph.prebuilt/chat_agent_executor/create_react_agent
+- title: >-
+    GRAPH_RECURSION_LIMIT — Docs by LangChain(默认 25 + super-step + inclusive + GraphRecursionError)
+  url: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+- title: Interrupts — Docs by LangChain(interrupt()+Command resume + 节点从头重跑要幂等)
+  url: https://docs.langchain.com/oss/python/langgraph/interrupts
+- title: Graph API — Docs by LangChain(super-step / BSP 计数口径,并行节点算 1 步)
+  url: https://docs.langchain.com/oss/python/langgraph/graph-api
+- title: >-
+    Effective context engineering for AI agents — Anthropic(context engineering 定义 + 注意力预算 + context rot + compaction/note-taking
+    + 子 agent 摘要)
+  url: >-
+    https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents
+- title: >-
+    Compaction — Claude API Docs(默认 trigger 150,000 / 最小 50,000 / 180k→23k 示例 / beta opt-in)
+  url: https://platform.claude.com/docs/en/build-with-claude/compaction
+- title: >-
+    Building agents with the Claude Agent SDK — Claude(gather→action→verify→repeat + auto-compact)
+  url: https://claude.com/blog/building-agents-with-the-claude-agent-sdk
+- title: Don't Build Multi-Agents — Cognition(单线程+共享完整 trace + 专用历史压缩模型)
+  url: https://cognition.ai/blog/dont-build-multi-agents
+- title: >-
+    How the agent loop works — Claude Code Docs(turn 内工具自动喂回不交还控制权 + error_during_execution)
+  url: https://code.claude.com/docs/en/agent-sdk/agent-loop
+- title: >-
+    Streaming Input (streaming vs single mode) — Claude Code Docs(流式默认 + 单条模式不支持打断/多轮)
+  url: https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode
+- title: >-
+    Permissions / permission modes — Claude Agent SDK Docs(5 种 permission_mode + canUseTool + TS auto)
+  url: https://code.claude.com/docs/en/agent-sdk/permissions
+- title: How we built Claude Code auto mode — Anthropic(批准率 93% + 分类器 0.4%/17% 含数据集口径)
+  url: https://www.anthropic.com/engineering/claude-code-auto-mode
+- title: Cursor 1.4 changelog(Ctrl+Enter 打断发送 / Alt+Enter 排队 / 新默认 steering)
+  url: https://cursor.com/changelog/1-4
+- title: Introducing ChatGPT agent — OpenAI(中途打断/接管 + 真实后果操作执行前确认 + Watch Mode)
+  url: https://openai.com/index/introducing-chatgpt-agent/
+- title: Interrupts — Strands Agents SDK(保留已完成工具结果 + resume 跳过模型调用只跑剩余工具)
+  url: https://strandsagents.com/docs/user-guide/concepts/interrupts/
+- title: 12-Factor Agents repo README(12 条 factor + 反对 loop until done + 70-80% 质量线)
+  url: https://github.com/humanlayer/12-factor-agents/blob/main/README.md
+- title: Factor 8 — Own your control flow(tool selection 与 invocation 之间打断恢复)
+  url: >-
+    https://github.com/humanlayer/12-factor-agents/blob/main/content/factor-08-own-your-control-flow.md
+- title: Factor 10 — Small, Focused Agents(单 agent 3-10、最多 20 步)
+  url: >-
+    https://github.com/humanlayer/12-factor-agents/blob/main/content/factor-10-small-focused-agents.md
+- title: brief-history-of-software.md — 12-factor(10-20 轮失控的核心论证)
+  url: >-
+    https://github.com/humanlayer/12-factor-agents/blob/main/content/brief-history-of-software.md
+- title: >-
+    Reflexion: Language Agents with Verbal Reinforcement Learning(arXiv 2303.11366,HumanEval 91%/ALFWorld 90%@6/HotpotQA 58%)
+  url: https://arxiv.org/abs/2303.11366
+- title: >-
+    Self-Refine: Iterative Refinement with Self-Feedback(arXiv 2303.17651,7 任务约 +20%、GSM8K 几乎不涨)
+  url: https://arxiv.org/abs/2303.17651
+- title: >-
+    Large Language Models Cannot Self-Correct Reasoning Yet(Huang et al. ICLR 2024,arXiv 2310.01798)
+  url: https://arxiv.org/abs/2310.01798
+- title: >-
+    ReWOO: Decoupling Reasoning from Observations(arXiv 2305.18323,占位符变量 + 5x token+4% acc)
+  url: https://arxiv.org/abs/2305.18323
+- title: >-
+    An LLM Compiler for Parallel Function Calling(arXiv 2312.04511,并行 DAG,延迟/成本/准确率 up to 3.7x/6.7x/+9%)
+  url: https://arxiv.org/abs/2312.04511
+- title: Plan-and-Execute Agents — LangChain Blog(三架构机制对比)
+  url: https://www.langchain.com/blog/planning-agents
+- title: >-
+    Auto-GPT for Online Decision Making(arXiv 2306.02224,WebShop Auto-GPT GPT-4 成功率 0.240)
+  url: https://ar5iv.labs.arxiv.org/html/2306.02224
+- title: 'Voyager: An Open-Ended Embodied Agent(arXiv 2305.16291,自动课程+技能库+迭代提示最多 4 轮)'
+  url: https://arxiv.org/abs/2305.16291
+- title: AutoGPT Got 100K Stars and Then What?(全自治失败模式 + 复利可靠性衰减 85%/步)
+  url: https://vibeagentmaking.com/blog/autogpt-got-100k-stars-and-then-what/
+- title: Streaming Agent Responses in LangGraph(第三方博客:perception shift 措辞 + TTFT 示意数字出处)
+  url: https://www.abstractalgorithms.dev/langgraph-streaming-agent-responses
+- title: >-
+    Context Engineering — LLM Memory and Retrieval(Weaviate 综述:滑动窗口/外置记忆/context poisoning/distraction)
+  url: https://weaviate.io/blog/context-engineering
