@@ -129,6 +129,51 @@ describe('<InputArea> Escalate button', () => {
   })
 })
 
+describe('<InputArea> slash commands', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+  })
+
+  it('shows the slash menu when input starts with "/"', async () => {
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" onSend={vi.fn()} />)
+    const ta = screen.getByRole('textbox')
+    await user.type(ta, '/qu')
+    expect(screen.getByText('/quote')).toBeInTheDocument()
+  })
+
+  it('selecting a command completes the textarea to "/alias "', async () => {
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" onSend={vi.fn()} />)
+    const ta = screen.getByRole('textbox')
+    await user.type(ta, '/qu')
+    await user.click(screen.getByText('/quote'))
+    expect(ta).toHaveValue('/quote ')
+  })
+
+  it('Enter on a forced-tool input calls onSend with forced tool payload', async () => {
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" onSend={onSend} />)
+    const ta = screen.getByRole('textbox')
+    await user.type(ta, '/quote 600519.SH{Enter}')
+    expect(onSend).toHaveBeenCalledWith('/quote 600519.SH', {
+      forced_tool_name: 'get_stock_quote',
+      forced_tool_args: { ts_code: '600519.SH' },
+    })
+  })
+
+  it('Enter while menu open selects instead of sending', async () => {
+    const onSend = vi.fn()
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" onSend={onSend} />)
+    const ta = screen.getByRole('textbox')
+    await user.type(ta, '/qu{Enter}')
+    expect(onSend).not.toHaveBeenCalled()
+    expect(ta).toHaveValue('/quote ')
+  })
+})
+
 describe('<InputArea> F10 placeholder', () => {
   beforeEach(() => {
     currentChatActions.reset()

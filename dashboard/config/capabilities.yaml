@@ -1,5 +1,5 @@
 # dashboard/config/capabilities.yaml
-# 单一真源 — 87 项 capability + derive_rule (ETCLOVG 7 维)
+# 单一真源 — 88 项 capability + derive_rule (ETCLOVG 7 维)
 # 5 类 derive_rule: code_grep / file_exists / spec_section / memory_frontmatter / manual
 # 论文锚点: Li et al., Agent Harness Engineering: A Survey (2026)
 
@@ -60,7 +60,7 @@ dimensions:
         derive_rule: { type: manual }
 
   # ============================================================
-  # 02 Tool Interface & Protocol (8 项,预期 5 lit) §4
+  # 02 Tool Interface & Protocol (9 项,预期 5 lit) §4
   # ============================================================
   - id: tool
     capabilities:
@@ -105,6 +105,11 @@ dimensions:
       - id: tool_session_management
         name_cn: "工具会话扩展管理"
         name_en: "Tool session management"
+        derive_rule: { type: manual }
+      # planned (2026-06-02) — spec: 2026-06-02-chat-command-system-design.md
+      - id: chat_slash_command
+        name_cn: "Chat 命令系统 (Slash + 气泡) [planned]"
+        name_en: "Chat command system (slash + bubble) [planned]"
         derive_rule: { type: manual }
 
   # ============================================================

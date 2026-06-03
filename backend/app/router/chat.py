@@ -114,6 +114,8 @@ class ChatRequest(BaseModel):
     message: str
     enable_web_search: bool = False  # v0 placeholder
     enable_kb_search: bool = False  # v0 placeholder
+    forced_tool_name: str | None = None  # slash command: force this MCP tool
+    forced_tool_args: dict[str, Any] | None = None  # args for the forced tool
 
 
 class StreamEvent(BaseModel):
@@ -996,4 +998,29 @@ async def chat_retry(
         "parent_task_id": str(old_task.id),
         "stream_url": f"/api/v0/chat/stream/{new_task.id}",
         "resumed_from_checkpoint": old_task.langgraph_checkpoint_id,
+    }
+
+
+@router.get("/api/v0/tools")
+async def list_chat_tools(request: Request) -> dict[str, Any]:
+    """List MCP chat-profile tools (name/description/inputSchema) for the slash menu.
+
+    Source of truth = the live MCP client's list_tools() — the 8 chat tools wired
+    to the chat agent. Returns 503 if the MCP subprocess isn't up.
+    """
+    mcp_client = getattr(request.app.state, "mcp_client", None)
+    if mcp_client is None:
+        raise HTTPException(
+            status_code=503, detail="tools unavailable — mcp_client not initialized"
+        )
+    tools = await mcp_client.list_tools()
+    return {
+        "tools": [
+            {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "inputSchema": t.get("inputSchema", {}),
+            }
+            for t in tools
+        ]
     }

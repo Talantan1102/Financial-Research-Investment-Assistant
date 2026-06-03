@@ -195,7 +195,10 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
   }, [options.sessionId])
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (
+      content: string,
+      forced?: { forced_tool_name: string; forced_tool_args: Record<string, unknown> },
+    ) => {
       const sessionId = sessionIdRef.current
       if (!sessionId) throw new Error('sendMessage: no active session')
       abortRef.current?.abort()
@@ -231,7 +234,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         const res = await fetchImpl(buildChatPostUrl(), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: sessionId, message: content }),
+          body: JSON.stringify({ session_id: sessionId, message: content, ...(forced ?? {}) }),
           signal: ac.signal,
         })
         if (!res.ok) throw new Error(`POST /api/v0/chat ${res.status}`)

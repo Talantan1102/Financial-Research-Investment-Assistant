@@ -42,7 +42,8 @@ describe('<ChatPane> integration with useChatSSE', () => {
     renderWithProviders(<ChatPane sessionId="s1" />)
     const ta = screen.getByRole('textbox')
     await user.type(ta, 'hi{Enter}')
-    expect(sendMessageMock).toHaveBeenCalledWith('hi')
+    // plain message → forced payload is undefined (slash commands pass a 2nd arg)
+    expect(sendMessageMock).toHaveBeenCalledWith('hi', undefined)
   })
 
   it('Cmd+K while streaming triggers abort', async () => {
