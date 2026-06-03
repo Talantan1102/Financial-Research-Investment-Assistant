@@ -1,7 +1,4 @@
-import asyncio
-
 import pytest
-
 from app.agents.schemas import ChatState
 
 pytestmark = pytest.mark.unit

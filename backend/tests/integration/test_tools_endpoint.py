@@ -1,8 +1,7 @@
 import pytest
+from app.router.chat import router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from app.router.chat import router
 
 pytestmark = pytest.mark.integration
 
