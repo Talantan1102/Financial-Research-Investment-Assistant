@@ -1,26 +1,11 @@
-"""L0 smoke: chat router _build_graph_singleton DI 替换为 HierarchicalMemory.
+"""L0 smoke: HierarchicalMemory 在 import time 满足 Memory Protocol.
 
-由于 _build_graph_singleton 真起 LLM client / Tushare client(env-driven),
-本 smoke test 仅验证 import path + memory 类型, 不真跑 graph.
-
-注: 真完整 DI 测试在 Task 10 的 manual smoke step.
+老 supervisor 图退役(Phase 7):chat router 的 _build_graph_singleton 随老图删除,
+原 test_chat_router_imports_hierarchical_memory(断言 singleton 实例化 HierarchicalMemory)
+一并移除 —— chat 现在由 chatloop worker 构 memory,不再在 router 层建图。
 """
 
 from __future__ import annotations
-
-import inspect
-
-
-def test_chat_router_imports_hierarchical_memory() -> None:
-    """chat router 不再 import InSessionMemory 主路径, 改 import HierarchicalMemory."""
-    import app.router.chat as chat_router_module
-
-    src = inspect.getsource(chat_router_module._build_graph_singleton)
-    assert "HierarchicalMemory" in src, (
-        "chat router _build_graph_singleton 必须 import + 实例化 HierarchicalMemory"
-    )
-    # InSessionMemory legacy import 可以仍留(Q4 E in-session dedup / summarize 仍需)
-    # 但 Memory Protocol 注入到 graph 的应是 HierarchicalMemory
 
 
 def test_hierarchical_memory_satisfies_protocol_at_import() -> None:

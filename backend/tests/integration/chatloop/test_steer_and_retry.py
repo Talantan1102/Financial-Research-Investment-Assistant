@@ -23,7 +23,6 @@ import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
@@ -32,10 +31,7 @@ from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — 注册 users 表
 from app.router.chat import (
     get_async_session_factory,
-    get_chat_graph,
     get_current_user,
-    get_escalation_extractor,
-    get_escalation_record_repo,
     get_redis_async,
 )
 from app.router.chat import router as chat_router
@@ -192,10 +188,7 @@ def _client(
 ) -> TestClient:
     app = FastAPI()
     app.include_router(chat_router)
-    app.dependency_overrides[get_chat_graph] = lambda: MagicMock()
     app.dependency_overrides[get_current_user] = lambda: _StubUser()
-    app.dependency_overrides[get_escalation_extractor] = lambda: None
-    app.dependency_overrides[get_escalation_record_repo] = lambda: None
     app.dependency_overrides[get_async_session_factory] = lambda: session_factory
     app.dependency_overrides[get_redis_async] = lambda: fake_redis_obj
     return TestClient(app, raise_server_exceptions=True)
