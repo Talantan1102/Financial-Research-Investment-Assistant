@@ -187,6 +187,35 @@ def test_tool_call_id_defaults_when_missing() -> None:
     assert result.tool_calls[0].id == "call_0"
 
 
+def test_empty_string_name_id_fragments_do_not_clobber() -> None:
+    """qwen 流式实测(L2 cassette):续片把 id/name 置为空串 "" 而非省略/null。
+
+    回归守护:空串续片不得覆盖首片已拿到的真实 id/name —— 否则下游
+    ChatLoopAgent._extract_tool_calls 抽到空工具名(本 task 录制时实测到 ['','','',''])。
+    """
+    asm = StreamAssembler()
+
+    # 首片:真实 id+name + arguments 开头
+    first = _make_tool_call_fragment(
+        index=0, id="call_abc", name="get_stock_quote", arguments=""
+    )
+    d0 = asm.feed(_make_chunk(tool_calls=[first]))
+    assert len(d0) == 1 and d0[0].tool_name == "get_stock_quote"
+
+    # 续片:id="" name="" (qwen 真实形状),只带 arguments 片段
+    for frag_args in ('{', '"ts_code": "600', '519.', 'SH"}'):
+        cont = _make_tool_call_fragment(index=0, id="", name="", arguments=frag_args)
+        dc = asm.feed(_make_chunk(tool_calls=[cont]))
+        # 续片不得再产 tool_call delta(name 已记录)
+        assert dc == []
+
+    result = asm.result()
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].id == "call_abc"
+    assert result.tool_calls[0].name == "get_stock_quote"
+    assert result.tool_calls[0].arguments == '{"ts_code": "600519.SH"}'
+
+
 # ---------------------------------------------------------------------------
 # usage / cached_tokens
 # ---------------------------------------------------------------------------

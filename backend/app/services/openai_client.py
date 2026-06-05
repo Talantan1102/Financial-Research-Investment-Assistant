@@ -111,9 +111,13 @@ class StreamAssembler:
                     frag_name = None
                     frag_args = ""
 
-                if frag_id is not None:
+                # qwen 流式契约(L2 cassette 实测):id/name 只在该 tool_call 的首片携带
+                # 非空值,后续延续片把 id/name 置为空串 "" 而非省略/null。空串不能覆盖
+                # 已拿到的真实 id/name(否则 name 被 "" 冲掉 → 下游抽不到工具名)。故按
+                # 真值(而非 is not None)判定:仅非空片更新 slot。
+                if frag_id:
                     slot["id"] = frag_id
-                if frag_name is not None:
+                if frag_name:
                     # name 首次到达时 emit tool_call delta
                     if slot["name"] is None:
                         emitted.append(StepDelta(kind="tool_call", tool_name=frag_name))
