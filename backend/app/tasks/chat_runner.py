@@ -183,7 +183,15 @@ async def run_chat_async(
     # per-turn 事件信封:LoopEvent → XADD + bump_seq(进度计数)
     seq_counter = SeqCounter()
 
+    # 已流出 token 累积器(spec § 4.3):取消若在 apply_step 前抛(state.messages
+    # 尚无最后 assistant content),partial 落库须靠这里累积的流出文本,否则恒空串。
+    emitted_tokens: list[str] = []
+
     async def _emit(event: LoopEvent) -> None:
+        if event.type == "token":
+            text = event.data.get("text")
+            if isinstance(text, str):
+                emitted_tokens.append(text)
         try:
             await bus.xadd_event(sid_uuid, task_id, _event_payload(event))
         except Exception as exc:  # noqa: BLE001
@@ -286,6 +294,7 @@ async def run_chat_async(
                 final_state=final_state,
                 cancelled=cancelled_by_user,
                 loop_error=loop_error,
+                emitted_text="".join(emitted_tokens),
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("finalize failed for task %s: %s", task_id, exc)
@@ -341,21 +350,25 @@ async def _finalize(
     final_state: ChatLoopState | None,
     cancelled: bool,
     loop_error: Exception | None,
+    emitted_text: str = "",
 ) -> None:
     """append assistant + mark task 状态(checkpoint 退役,统一 None)。
 
-    - cancelled:已流出文本(state.final_response 或最后 assistant content)落库标 partial
-      (仅展示,不是恢复点 — spec § 4.3);mark_partial(checkpoint=None)。
-    - error:assistant content = 已流出文本,status=error;mark_error。
+    - cancelled:已流出文本落库标 partial(仅展示,不是恢复点 — spec § 4.3);
+      mark_partial(checkpoint=None)。取消可能在 apply_step 之前抛(state.messages
+      尚无最后 assistant content),此时 final_state 的兜底链为空 → 用 emitted_text
+      (_emit 闭包累积的流出 token);两者取更长者,兼顾流出半截 vs 已折叠的整圈。
+    - error:assistant content = 已流出文本(同上兜底),status=error;mark_error。
     - success:final_response 兜底链 → status=done;mark_done(checkpoint=None)。
     """
     body = _final_text(final_state)
 
     if cancelled:
+        partial_body = body if len(body) >= len(emitted_text) else emitted_text
         await session_repo.append_message(
             session_id=session_id,
             role="assistant",
-            content=body,
+            content=partial_body,
             task_id=task_id,
             status="partial",
         )
@@ -363,10 +376,11 @@ async def _finalize(
         return
 
     if loop_error is not None:
+        error_body = body if len(body) >= len(emitted_text) else emitted_text
         await session_repo.append_message(
             session_id=session_id,
             role="assistant",
-            content=body,
+            content=error_body,
             task_id=task_id,
             status="error",
         )
