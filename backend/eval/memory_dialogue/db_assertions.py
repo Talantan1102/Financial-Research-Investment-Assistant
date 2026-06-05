@@ -30,20 +30,26 @@ class DbAssertionEngine:
     def __init__(self, session: Session, user_id: UUID) -> None:
         self._s = session
         self._user_id = user_id
-        self._count_snapshots: dict[tuple[str, str | None], int] = {}
+        self._count_snapshots: dict[tuple[str, str | tuple[str, ...] | None], int] = {}
 
     # ---- 查询基元 ----------------------------------------------------------
 
     def _edges(
-        self, rel_type: str | None = None, target_label: str | None = None
+        self,
+        rel_type: str | None = None,
+        target_label: str | list[str] | None = None,
     ) -> list[ChatMemoryEdge]:
+        # target_label 支持候选列表(2026-06-05 批量合写审稿发现):抽取器把
+        # Stock 规整成 ts_code(宁德时代→300750.SZ)、Industry 偶发漂移(白酒/白酒II),
+        # 脚本用人话写候选,匹配任一即视为同一实体。
         stmt = select(ChatMemoryEdge).where(ChatMemoryEdge.user_id == self._user_id)
         if rel_type:
             stmt = stmt.where(ChatMemoryEdge.rel_type == rel_type)
         if target_label:
+            labels = [target_label] if isinstance(target_label, str) else list(target_label)
             stmt = stmt.join(
                 ChatMemoryNode, ChatMemoryEdge.target_node_id == ChatMemoryNode.node_id
-            ).where(ChatMemoryNode.entity_label == target_label)
+            ).where(ChatMemoryNode.entity_label.in_(labels))
         return list(self._s.execute(stmt).scalars())
 
     @staticmethod
@@ -100,15 +106,21 @@ class DbAssertionEngine:
             "old_invalidated", ok, f"已作废 {len(ended)} 条(要求 ≥{min_count})"
         )
 
-    def snapshot_counts(self, rel_type: str, target_label: str | None = None) -> None:
-        self._count_snapshots[(rel_type, target_label)] = len(
+    @staticmethod
+    def _label_key(target_label: str | list[str] | None) -> str | tuple[str, ...] | None:
+        return tuple(target_label) if isinstance(target_label, list) else target_label
+
+    def snapshot_counts(
+        self, rel_type: str, target_label: str | list[str] | None = None
+    ) -> None:
+        self._count_snapshots[(rel_type, self._label_key(target_label))] = len(
             self._edges(rel_type, target_label)
         )
 
     def _check_fact_count_no_increase(
-        self, rel_type: str, target_label: str | None = None
+        self, rel_type: str, target_label: str | list[str] | None = None
     ) -> CheckResult:
-        key = (rel_type, target_label)
+        key = (rel_type, self._label_key(target_label))
         if key not in self._count_snapshots:
             return CheckResult(
                 "fact_count_no_increase", False, "未先 snapshot_counts,无基线"

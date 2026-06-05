@@ -168,3 +168,15 @@ def test_unknown_check_type_is_red_not_raise(seeded_user) -> None:
     r = engine.run_check(DbCheck(type="does_not_exist", params={}))
     assert not r.passed
     assert "未知断言类型" in r.detail
+
+
+def test_target_label_accepts_candidate_list(seeded_user) -> None:
+    """实体规整对策(批量合写审稿发现):抽取器把 Stock 规整成 ts_code、
+    Industry 偶发漂移(白酒/白酒II)。target_label 支持候选列表,匹配任一即可。"""
+    user_id, session = seeded_user
+    engine = DbAssertionEngine(session=session, user_id=user_id)
+    r = engine.run_check(DbCheck(
+        type="fact_active",
+        params={"rel_type": "EXPRESSED_VIEW", "target_label": ["白酒II", "白酒"], "value_contains": ["看多"]},
+    ))
+    assert r.passed, r.detail
