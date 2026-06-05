@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -502,3 +503,38 @@ def test_docs_memory_write_lists_three_actions():
 def test_tool_names_match_docs():
     assert MemorySearchTool(memory=FakeMemory()).name == "memory_search"
     assert MemoryWriteTool(memory=FakeMemory(), injection_classifier=FakeClassifier()).name == "memory_write"
+
+
+# ===========================================================================
+# bi-temporal 字段 —— archival_insert content 含 valid_from / valid_to
+# ===========================================================================
+
+
+async def test_archival_insert_content_has_bi_temporal_fields():
+    """_do_archival_insert 构造的 content 必须含 valid_from(datetime)与 valid_to(None)。
+
+    hierarchical.py:295 行起 archival_memory_insert 直接 content["valid_from"] 取值
+    (硬引用,无 .get 回退),缺字段会触发 KeyError。本测试守护该契约。
+    """
+    mem = FakeMemory()
+    tool = _write_tool(mem)
+    state = _state([{"role": "user", "content": "我买了茅台 500 股"}])
+    args = MemoryWriteArgs(
+        action="archival_insert",
+        content="用户持有贵州茅台",
+        evidence_quote="买了茅台 500 股",
+    )
+    await tool.run_with_state(args, state)
+    calls = mem.of("archival_memory_insert")
+    assert calls, "archival_memory_insert 未被调用"
+    content = calls[0]["content"]
+    # valid_from 须是 datetime 实例(带时区)
+    assert "valid_from" in content, "content 缺 valid_from 字段"
+    assert isinstance(content["valid_from"], datetime), (
+        f"valid_from 应为 datetime,实际是 {type(content['valid_from'])}"
+    )
+    # valid_to 须显式为 None(开放区间)
+    assert "valid_to" in content, "content 缺 valid_to 字段"
+    assert content["valid_to"] is None, (
+        f"valid_to 应为 None,实际是 {content['valid_to']}"
+    )

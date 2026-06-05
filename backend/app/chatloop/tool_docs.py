@@ -119,7 +119,8 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "  query(str,必填)—— 检索查询串。\n"
             "  scope(str,可选,枚举 archival|recall|graph,默认 archival)—— "
             "archival 长期事实库 / recall 近期对话回忆 / graph 关系图谱。\n"
-            "  k(int,可选,默认 5)—— 返回条数。\n"
+            "  k(int,可选,默认 5)—— 返回条数;scope=graph 时 k 无效,"
+            "遍历深度由系统控制(默认 2-hop)。\n"
             "示例:memory_search(query='用户持仓与风险偏好', scope='archival', k=5)。\n"
             "硬约束:query 非空。"
         ),

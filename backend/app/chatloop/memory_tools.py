@@ -36,6 +36,7 @@ HierarchicalMemory 实例与 is_prompt_injection 分类器。
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
 
@@ -268,6 +269,8 @@ class MemoryWriteTool(InProcessTool):
             "source_label": str(user_id),
             "target_entity_type": "Note",
             "target_label": args.content,
+            "valid_from": datetime.now(UTC),
+            "valid_to": None,
         }
         edge = await self._memory.archival_memory_insert(
             user_id=user_id,
