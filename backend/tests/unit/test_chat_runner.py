@@ -21,6 +21,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 import pytest_asyncio
 from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — 注册 users 表
@@ -30,6 +31,18 @@ from app.services.chat_task_repo import ChatTaskRepo
 from app.tasks.chat_runner import run_chat_async
 from fakeredis.aioredis import FakeRedis
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+# Phase 4 Task 4.2(换引擎):chat_runner 从 LangGraph 图切到裸 while ToolLoop。
+# run_chat_async 不再接 graph_factory(checkpoint 退役),本文件全部用例测的是
+# 退役的老图引擎(graph_factory + astream_events + aget_state checkpoint)。
+# 等效且更强的覆盖已迁到 tests/integration/chatloop/test_chat_runner_loop.py。
+# 整文件 skip,文件本身在 Phase 7(退役清理)随老图一并删除——本任务不删它,
+# 只 skip(spec § 5.3/§ 5.4)。
+pytestmark = pytest.mark.skip(
+    reason="old LangGraph chat engine retired in Phase 4 Task 4.2; "
+    "coverage moved to tests/integration/chatloop/test_chat_runner_loop.py; "
+    "file deleted in Phase 7 retire-cleanup"
+)
 
 
 @pytest_asyncio.fixture
