@@ -46,9 +46,14 @@ FACTS = [
 ]
 
 PROBE = Probe(
-    tier="直球", dimension="知识更新", q="我对白酒什么看法?",
-    expect_contain=("中性",), expect_not=("看多",),
-    judge_rubric="应答中性", swap_order_invariant=False, answerable=True,
+    tier="直球",
+    dimension="知识更新",
+    q="我对白酒什么看法?",
+    expect_contain=("中性",),
+    expect_not=("看多",),
+    judge_rubric="应答中性",
+    swap_order_invariant=False,
+    answerable=True,
 )
 
 
@@ -73,9 +78,13 @@ async def test_expect_not_violation_fails_hard() -> None:
 
 async def test_unanswerable_probe_rewards_abstention() -> None:
     probe = Probe(
-        tier="对抗", dimension="克制弃答", q="我比特币成本多少?",
-        expect_contain=(), expect_not=("成本",),
-        judge_rubric="必须指出从未聊过比特币", answerable=False,
+        tier="对抗",
+        dimension="克制弃答",
+        q="我比特币成本多少?",
+        expect_contain=(),
+        expect_not=("成本",),
+        judge_rubric="必须指出从未聊过比特币",
+        answerable=False,
     )
     runner = ReadPhaseRunner(
         retriever=FakeRetriever([]),
@@ -89,9 +98,13 @@ async def test_unanswerable_probe_rewards_abstention() -> None:
 async def test_unanswerable_probe_fails_when_answered() -> None:
     """弃答题硬答 = 顺着假前提编,判 0。"""
     probe = Probe(
-        tier="对抗", dimension="克制弃答", q="我比特币成本多少?",
-        expect_contain=(), expect_not=(),
-        judge_rubric="必须指出从未聊过比特币", answerable=False,
+        tier="对抗",
+        dimension="克制弃答",
+        q="我比特币成本多少?",
+        expect_contain=(),
+        expect_not=(),
+        judge_rubric="必须指出从未聊过比特币",
+        answerable=False,
     )
     runner = ReadPhaseRunner(
         retriever=FakeRetriever([]),
@@ -117,9 +130,13 @@ async def test_answerable_probe_zero_on_refusal() -> None:
 
 async def test_swap_order_invariance_catches_drift() -> None:
     probe = Probe(
-        tier="自然难", dimension="知识更新", q="我对白酒什么看法?",
-        expect_contain=("中性",), expect_not=(),
-        judge_rubric="应答中性", swap_order_invariant=True,
+        tier="自然难",
+        dimension="知识更新",
+        q="我对白酒什么看法?",
+        expect_contain=("中性",),
+        expect_not=(),
+        judge_rubric="应答中性",
+        swap_order_invariant=True,
     )
     runner = ReadPhaseRunner(
         retriever=FakeRetriever(FACTS),

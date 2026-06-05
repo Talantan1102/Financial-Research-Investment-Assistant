@@ -33,6 +33,7 @@ HierarchicalMemory 实例与 is_prompt_injection 分类器。
 - user_id 在合并 schema 里不出现(对齐 MCP 三原语:应用该当背景喂的不进工具参数);
   从 state.user_id 取,run_with_state 时转 UUID。
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -127,9 +128,7 @@ class MemorySearchTool(InProcessTool):
     def __init__(self, *, memory: Any) -> None:
         self._memory = memory
 
-    async def run_with_state(
-        self, args: BaseModel, state: ChatLoopState
-    ) -> dict[str, Any]:
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
         # 项目惯例(对齐 Tool.run):签名收 BaseModel,内部 narrow 回具体 args_schema。
         args = MemorySearchArgs.model_validate(args.model_dump())
         user_id = UUID(state.user_id)
@@ -163,7 +162,9 @@ class MemoryWriteTool(InProcessTool):
     """
 
     name = "memory_write"
-    description = "写入/更新用户记忆(action: core_append/core_replace/archival_insert,经注入分类器收口)。"
+    description = (
+        "写入/更新用户记忆(action: core_append/core_replace/archival_insert,经注入分类器收口)。"
+    )
     args_schema = MemoryWriteArgs
 
     def __init__(
@@ -177,9 +178,7 @@ class MemoryWriteTool(InProcessTool):
         self._classify = injection_classifier
         self._resolve_episode = episode_id_resolver
 
-    async def run_with_state(
-        self, args: BaseModel, state: ChatLoopState
-    ) -> dict[str, Any]:
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
         # 项目惯例(对齐 Tool.run):签名收 BaseModel,内部 narrow 回具体 args_schema。
         args = MemoryWriteArgs.model_validate(args.model_dump())
         # 0. 条件必填校验(fail loud 指导性错误,先于一切副作用)
@@ -200,7 +199,12 @@ class MemoryWriteTool(InProcessTool):
             block = await self._memory.core_memory_append(
                 user_id=user_id, block_name=args.block, content=args.content
             )
-            return {"action": "core_append", "block": args.block, "ok": True, "block_result": _to_serializable(block)}
+            return {
+                "action": "core_append",
+                "block": args.block,
+                "ok": True,
+                "block_result": _to_serializable(block),
+            }
 
         if args.action == "core_replace":
             block = await self._memory.core_memory_replace(
@@ -209,7 +213,12 @@ class MemoryWriteTool(InProcessTool):
                 old_content=args.old_content,
                 new_content=args.content,
             )
-            return {"action": "core_replace", "block": args.block, "ok": True, "block_result": _to_serializable(block)}
+            return {
+                "action": "core_replace",
+                "block": args.block,
+                "ok": True,
+                "block_result": _to_serializable(block),
+            }
 
         # archival_insert
         return await self._do_archival_insert(args, state, user_id)

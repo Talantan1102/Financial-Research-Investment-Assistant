@@ -11,6 +11,7 @@
 成本标注:--live 跑一次整套 golden ≈ 45+ 次 LLM 调用(普通 case 1 圈 + 序列 case 2 圈)。
 本模式不在 Task 6.2 跑(联调阶段由控制器跑);本任务只保证 dry 模式 + 单测绿。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -43,9 +44,7 @@ class FakeNoopHub:
     def schemas_for_llm(self) -> list[dict[str, Any]]:
         return self._real.schemas_for_llm()
 
-    async def dispatch(
-        self, calls: list[StepToolCall], state: ChatLoopState
-    ) -> list[ToolResult]:
+    async def dispatch(self, calls: list[StepToolCall], state: ChatLoopState) -> list[ToolResult]:
         results: list[ToolResult] = []
         for call in calls:
             if call.name == SEARCH_TOOLS_NAME and self._run_search:
@@ -94,9 +93,7 @@ def build_real_hub(singletons: Any) -> ToolHub:
     return hub
 
 
-async def run_case_live(
-    case: GoldenCase, singletons: Any, request_id: str
-) -> list[dict[str, Any]]:
+async def run_case_live(case: GoldenCase, singletons: Any, request_id: str) -> list[dict[str, Any]]:
     """跑单 case 的首轮选择,返回 [{"tool_name", "args"}, ...](已排除 search_tools)。
 
     - 序列 case(expected 含 tools_sequence_contains):max_steps=2 + search_tools 真跑;

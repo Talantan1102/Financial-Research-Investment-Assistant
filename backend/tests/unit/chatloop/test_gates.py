@@ -23,7 +23,10 @@ update_burned:
   15. fail_count 未达阈值(2 次)→ 不入 burned
   16. 幂等:重复调用 update_burned 不重复添加(set 天然)
 """
+
 from __future__ import annotations
+
+from typing import Any
 
 from app.chatloop.gates import GateConfig, check_gates, filter_burned, update_burned
 from app.chatloop.state import ChatLoopState, args_hash_of
@@ -52,14 +55,20 @@ def _make_state(
     )
 
 
-def _cfg(**kw) -> GateConfig:
-    defaults = {"max_steps": 12, "max_cny": 0.10, "max_tokens": 120_000, "burn_threshold": 3}
+def _cfg(**kw: Any) -> GateConfig:
+    defaults: dict[str, Any] = {
+        "max_steps": 12,
+        "max_cny": 0.10,
+        "max_tokens": 120_000,
+        "burn_threshold": 3,
+    }
     defaults.update(kw)
     return GateConfig(**defaults)
 
 
 def _make_call(name: str, args: dict) -> StepToolCall:
     import json
+
     return StepToolCall(id=f"{name}-id", name=name, arguments=json.dumps(args))
 
 
@@ -261,8 +270,8 @@ def test_filter_burned_partial_match():
     burned_sig = _sig("get_stock_quote", burned_args)
     state = _make_state(burned={burned_sig})
 
-    call1 = _make_call("get_stock_quote", burned_args)       # 被拒
-    call2 = _make_call("web_search", {"query": "茅台"})       # 放行
+    call1 = _make_call("get_stock_quote", burned_args)  # 被拒
+    call2 = _make_call("web_search", {"query": "茅台"})  # 放行
     call3 = _make_call("get_fin_data", {"ts_code": "600519.SH"})  # 放行
 
     allowed, rejected = filter_burned([call1, call2, call3], state)
@@ -306,8 +315,11 @@ def test_update_burned_adds_when_threshold_reached():
     # 记录 3 次失败
     for _ in range(3):
         state.ledger.record(
-            step=0, tool_name="get_stock_quote",
-            args=args, digest="err", success=False,
+            step=0,
+            tool_name="get_stock_quote",
+            args=args,
+            digest="err",
+            success=False,
         )
     update_burned(state, cfg)
     assert sig in state.burned_signatures
@@ -326,8 +338,11 @@ def test_update_burned_does_not_add_below_threshold():
     # 只记录 2 次失败
     for _ in range(2):
         state.ledger.record(
-            step=0, tool_name="get_stock_quote",
-            args=args, digest="err", success=False,
+            step=0,
+            tool_name="get_stock_quote",
+            args=args,
+            digest="err",
+            success=False,
         )
     update_burned(state, cfg)
     assert sig not in state.burned_signatures
@@ -345,8 +360,11 @@ def test_update_burned_idempotent():
     sig = _sig("get_stock_quote", args)
     for _ in range(5):
         state.ledger.record(
-            step=0, tool_name="get_stock_quote",
-            args=args, digest="err", success=False,
+            step=0,
+            tool_name="get_stock_quote",
+            args=args,
+            digest="err",
+            success=False,
         )
     update_burned(state, cfg)
     update_burned(state, cfg)

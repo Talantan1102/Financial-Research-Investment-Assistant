@@ -39,9 +39,8 @@ class SummarizerLLM(Protocol):
     Fake。避免 rebuild 直接依赖 LLMService 具体类。
     """
 
-    def chat(
-        self, prompt: str, tier: str = ..., schema: Any = ...
-    ) -> _SummaryResponse: ...
+    def chat(self, prompt: str, tier: str = ..., schema: Any = ...) -> _SummaryResponse: ...
+
 
 RECENT_TURNS: Final[int] = 4  # 最近 K 轮原文保留
 SUMMARIZE_THRESHOLD: Final[float] = 0.70  # 估算 token 超此比例触发压缩
@@ -129,9 +128,7 @@ def _split_turns(messages: list[ChatMessage]) -> list[_Turn]:
     return turns
 
 
-async def _load_context_row(
-    db: AsyncSession, session_uuid: uuid.UUID
-) -> ChatSessionContext | None:
+async def _load_context_row(db: AsyncSession, session_uuid: uuid.UUID) -> ChatSessionContext | None:
     return await db.get(ChatSessionContext, session_uuid)
 
 
@@ -181,9 +178,7 @@ def _estimate_turns_tokens(turns: list[_Turn], prior_summary: str | None) -> int
     return total
 
 
-async def _summarize(
-    llm: SummarizerLLM, old_turns: list[_Turn], prior_summary: str | None
-) -> str:
+async def _summarize(llm: SummarizerLLM, old_turns: list[_Turn], prior_summary: str | None) -> str:
     history_text = "\n\n".join(t.to_text() for t in old_turns)
     prompt = _SUMMARIZE_TEMPLATE.format(
         prior_summary=prior_summary or "(无)",
@@ -262,8 +257,7 @@ async def rebuild_context(
         llm is not None
         and turns
         and len(turns) > RECENT_TURNS
-        and _estimate_turns_tokens(turns, prior_summary)
-        > SUMMARIZE_THRESHOLD * token_budget
+        and _estimate_turns_tokens(turns, prior_summary) > SUMMARIZE_THRESHOLD * token_budget
     ):
         old_turns = turns[:-RECENT_TURNS]
         # 被总结的最后一条 message id = 老轮最后一条消息(水位)
@@ -275,14 +269,10 @@ async def rebuild_context(
         try:
             new_summary = await _summarize(llm, old_turns, prior_summary)
         except Exception as exc:  # noqa: BLE001 — 压缩失败降级,不破功能
-            logger.warning(
-                "rebuild_context: 跨 turn 压缩失败,降级为不压缩(全量轮): %s", exc
-            )
+            logger.warning("rebuild_context: 跨 turn 压缩失败,降级为不压缩(全量轮): %s", exc)
         else:
             if last_summarized_id is not None:
-                await _persist_summary(
-                    db, session_uuid, ctx_row, new_summary, last_summarized_id
-                )
+                await _persist_summary(db, session_uuid, ctx_row, new_summary, last_summarized_id)
             prior_summary = new_summary
             turns = turns[-RECENT_TURNS:]
 
@@ -291,9 +281,7 @@ async def rebuild_context(
     #    则全量轮产出(不截断,窗口大一点不破功能)。
     result: list[dict[str, Any]] = []
     if prior_summary:
-        result.append(
-            {"role": "system", "content": f"[对话摘要]\n{prior_summary}"}
-        )
+        result.append({"role": "system", "content": f"[对话摘要]\n{prior_summary}"})
     for t in turns:
         result.extend(t.to_messages())
 

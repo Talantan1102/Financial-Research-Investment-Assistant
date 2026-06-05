@@ -1,4 +1,5 @@
 """chatloop — 裸 while 工具调用循环包(spec § 1.1)。"""
+
 from app.chatloop.events import EventType, LoopEvent
 from app.chatloop.state import (
     ChatLoopState,

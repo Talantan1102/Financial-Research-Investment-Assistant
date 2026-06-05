@@ -3,6 +3,7 @@
 唯一有副作用的编排者:LLM 调用、工具分发、事件发射、取消/插话检查。
 判定逻辑全在纯函数模块(gates/context/state),本模块只编排。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -86,13 +87,9 @@ class ToolLoop:
         seq = self._seq_counter.next()
         if self._emit_fn is None:
             return
-        await self._emit_fn(
-            LoopEvent(type=type_, seq=seq, step=event_step, data=data)
-        )
+        await self._emit_fn(LoopEvent(type=type_, seq=seq, step=event_step, data=data))
 
-    def _make_on_delta(
-        self, step: int
-    ) -> Callable[[StepDelta], Awaitable[None]]:
+    def _make_on_delta(self, step: int) -> Callable[[StepDelta], Awaitable[None]]:
         """构造流式增量回调:content→token / reasoning→reasoning / tool_call→tool_call。
 
         回调内也检查 cancel_event(流中可断)。
@@ -137,14 +134,10 @@ class ToolLoop:
             if self._steer is not None:
                 for msg in await self._steer.pop_all():
                     state.messages.append({"role": "user", "content": msg})
-                    await self._emit(
-                        "steer_merged", state.step + 1, preview=msg[:80]
-                    )
+                    await self._emit("steer_merged", state.step + 1, preview=msg[:80])
 
             # 4. step_start(事件 step 与 data.step 同为即将执行的 1-based 步号)
-            await self._emit(
-                "step_start", state.step + 1, step=state.step + 1, max_steps=max_steps
-            )
+            await self._emit("step_start", state.step + 1, step=state.step + 1, max_steps=max_steps)
 
             # 5. 组窗口(纯函数)
             messages = assemble_context(state, self._deps)
@@ -183,9 +176,7 @@ class ToolLoop:
 
             # 10. 熔断收尾圈竟然还出 tool_calls?协议异常,fail loud
             if state.tool_choice == "none":
-                raise RuntimeError(
-                    "tool_choice=none 下模型仍产出 tool_calls — 协议违例"
-                )
+                raise RuntimeError("tool_choice=none 下模型仍产出 tool_calls — 协议违例")
 
             # 11. 烧签名过滤(rejected 的签名列表此处不直接用 —
             #     _merge_results 以 allowed 的 id 集合判定每个 call 是否放行)
@@ -196,9 +187,7 @@ class ToolLoop:
 
             # 13. 按原顺序合并 allowed 的 results 与 rejected 的熔断错误,
             #     再折叠 tool 消息(协议红线:每个 tool_call_id 都要有 tool 消息)
-            merged = self._merge_results(
-                step_result.tool_calls, allowed, results
-            )
+            merged = self._merge_results(step_result.tool_calls, allowed, results)
             state = apply_results(state, merged, step_result.tool_calls)
 
             # 14. 烧签名记账
@@ -253,9 +242,7 @@ class ToolLoop:
     # 熔断收尾:喂回系统指令 + tool_choice=none 收尾圈
     # ------------------------------------------------------------------
 
-    async def _force_conclude(
-        self, state: ChatLoopState, reason: str
-    ) -> ChatLoopState:
+    async def _force_conclude(self, state: ChatLoopState, reason: str) -> ChatLoopState:
         """撞闸后逼模型基于已有信息收尾(spec § 1.3)。"""
         state.halt_reason = reason
         state.messages.append(

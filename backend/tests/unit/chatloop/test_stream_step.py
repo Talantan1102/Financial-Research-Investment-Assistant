@@ -4,6 +4,7 @@ LLM_MODE 处理: conftest autouse 把 LLM_MODE=none;
 构造 LLMService 时 monkeypatch.setenv("LLM_MODE", "mock") 覆盖,
 与既有 test_analyst.py / test_agent_base.py 同款模式。
 """
+
 from __future__ import annotations
 
 import pytest
@@ -17,6 +18,7 @@ from app.services.trace_models import Span
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_step(
     content: str = "ok",

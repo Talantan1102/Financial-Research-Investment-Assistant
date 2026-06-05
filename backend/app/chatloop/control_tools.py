@@ -20,6 +20,7 @@
 state.user_id,spec § 3.3 判据)。Phase 4 worker 注入 ToolResultCache 实例
 (协议 get_raw(cache_key) -> str | None)。
 """
+
 from __future__ import annotations
 
 from typing import Any, Protocol
@@ -77,16 +78,12 @@ class OfferDeepResearchTool(InProcessTool):
     description = "提议把当前问题升级到深度研究子流程(信号工具,调用后本轮工具通道关闭)。"
     args_schema = OfferDeepResearchArgs
 
-    async def run_with_state(
-        self, args: BaseModel, state: ChatLoopState
-    ) -> dict[str, Any]:
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
         args = OfferDeepResearchArgs.model_validate(args.model_dump())
 
         # 幂等:同 turn 第二次调用被拒(state 已被前一次置位)
         if state.escalate_offered:
-            raise _fail(
-                "[已提议过] 本轮已发出升级提议,等待用户确认,请直接收尾。"
-            )
+            raise _fail("[已提议过] 本轮已发出升级提议,等待用户确认,请直接收尾。")
 
         # 置三个 state 字段:offered / reason / tool_choice 熔断(spec § 3.5)
         state.escalate_offered = True
@@ -114,9 +111,7 @@ class ReadCachedResultTool(InProcessTool):
     def __init__(self, *, cache: Any) -> None:
         self._cache = cache
 
-    async def run_with_state(
-        self, args: BaseModel, state: ChatLoopState
-    ) -> dict[str, Any]:
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
         args = ReadCachedResultArgs.model_validate(args.model_dump())
 
         # 跨用户防护:ref 必须以 user_id:: 命名空间开头(校验先于 cache 读取,
@@ -126,9 +121,7 @@ class ReadCachedResultTool(InProcessTool):
 
         raw = await self._cache.get_raw(args.ref)
         if raw is None:
-            raise _fail(
-                "[缓存不存在/已过期] 该 ref 无对应缓存,请直接重新调用原工具。"
-            )
+            raise _fail("[缓存不存在/已过期] 该 ref 无对应缓存,请直接重新调用原工具。")
 
         offset = max(0, args.offset)
         # limit<=0 回退到默认值(_DEFAULT_LIMIT=2000);调用方无需特判,省略 limit 与传 0 等效。

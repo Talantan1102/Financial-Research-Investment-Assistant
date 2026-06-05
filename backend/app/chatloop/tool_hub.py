@@ -9,6 +9,7 @@ gather 并行 + 缓存 + 指导性错误包装 + 台账记账 + tool_start/end �
   都包成 ToolResult(success=False) 返回;loop._merge_results 依赖此契约;
 - 返回的 results 与收到的 calls 严格等长且按序(loop._merge_results 用 iter 消费)。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -192,9 +193,7 @@ class ToolHub:
     # dispatch
     # ------------------------------------------------------------------
 
-    async def dispatch(
-        self, calls: list[StepToolCall], state: ChatLoopState
-    ) -> list[ToolResult]:
+    async def dispatch(self, calls: list[StepToolCall], state: ChatLoopState) -> list[ToolResult]:
         """并行分发 calls,返回与之等长按序的 ToolResult 列表。
 
         每个 call 走 _dispatch_one(自身全包不抛);外层 gather 不需要
@@ -208,9 +207,7 @@ class ToolHub:
         )
         return results
 
-    async def _dispatch_one(
-        self, call: StepToolCall, state: ChatLoopState
-    ) -> ToolResult:
+    async def _dispatch_one(self, call: StepToolCall, state: ChatLoopState) -> ToolResult:
         """单 call 协程 —— 全包不抛,任何路径都返回 ToolResult。
 
         外层 try 是双保险:理论上下面每条分支都自产 ToolResult,但若有未预料的
@@ -225,9 +222,7 @@ class ToolHub:
             self._safe_record(state, call.name, args, error, success=False, cache_key=None)
             return self._fail_result(call.name, args, error)
 
-    async def _dispatch_one_inner(
-        self, call: StepToolCall, state: ChatLoopState
-    ) -> ToolResult:
+    async def _dispatch_one_inner(self, call: StepToolCall, state: ChatLoopState) -> ToolResult:
         name = call.name
 
         # 1. parsed_args:坏 JSON → 指导性错误(工具名仍记账)
@@ -246,10 +241,7 @@ class ToolHub:
         # 2. 工具不存在 → 指导性错误
         tool = self._tools.get(name)
         if tool is None:
-            error = (
-                f"[未知工具] {name} 不存在。可用工具见列表;"
-                "若需参数细节可调 search_tools。"
-            )
+            error = f"[未知工具] {name} 不存在。可用工具见列表;若需参数细节可调 search_tools。"
             await self._emit_error(name, error, step=state.step)
             self._safe_record(state, name, args, error, success=False, cache_key=None)
             return self._fail_result(name, args, error)
@@ -327,9 +319,7 @@ class ToolHub:
             # 指导性错误只进事件流,worker 日志无痕迹;info 级一行 tool/error 前 120 字)。
             logger.info("tool dispatch failed: tool=%s error=%s", name, error[:120])
             await self._emit_error(name, error, step=state.step)
-            self._safe_record(
-                state, name, args, error, success=False, cache_key=cache_key
-            )
+            self._safe_record(state, name, args, error, success=False, cache_key=cache_key)
             return self._fail_result(name, args, error)
 
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -339,9 +329,7 @@ class ToolHub:
         await self._emit("tool_end", state.step, tool=name, digest=digest, cached=is_cache_hit)
 
         # 7. 记账(post-apply_step 契约:step=state.step)
-        self._safe_record(
-            state, name, args, digest, success=True, cache_key=cache_key
-        )
+        self._safe_record(state, name, args, digest, success=True, cache_key=cache_key)
 
         return ToolResult(
             tool_name=name,
@@ -368,14 +356,9 @@ class ToolHub:
         """
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():
-            error = (
-                "[参数校验失败] search_tools 需要 query(string)。"
-                "请传工具名或自然语言描述。"
-            )
+            error = "[参数校验失败] search_tools 需要 query(string)。请传工具名或自然语言描述。"
             await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
-            self._safe_record(
-                state, SEARCH_TOOLS_NAME, args, error, success=False, cache_key=None
-            )
+            self._safe_record(state, SEARCH_TOOLS_NAME, args, error, success=False, cache_key=None)
             return self._fail_result(SEARCH_TOOLS_NAME, args, error)
 
         await self._emit("tool_call", state.step, tool=SEARCH_TOOLS_NAME, args=args)
@@ -396,9 +379,7 @@ class ToolHub:
         await self._emit(
             "tool_end", state.step, tool=SEARCH_TOOLS_NAME, digest=digest, cached=False
         )
-        self._safe_record(
-            state, SEARCH_TOOLS_NAME, args, digest, success=True, cache_key=None
-        )
+        self._safe_record(state, SEARCH_TOOLS_NAME, args, digest, success=True, cache_key=None)
         return ToolResult(
             tool_name=SEARCH_TOOLS_NAME,
             args=args,
@@ -495,9 +476,7 @@ class ToolHub:
             )
 
     @staticmethod
-    def _fail_result(
-        tool_name: str, args: dict[str, Any], error: str
-    ) -> ToolResult:
+    def _fail_result(tool_name: str, args: dict[str, Any], error: str) -> ToolResult:
         return ToolResult(
             tool_name=tool_name,
             args=args,

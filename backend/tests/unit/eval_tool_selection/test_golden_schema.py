@@ -107,19 +107,17 @@ def test_skill_trigger_load_skill_names_are_real() -> None:
     real = _real_skill_names()
     assert real, "SkillLoader 未发现任何真实技能,清单对照失效"
     cases = load_golden(_SK_GOLDEN)
-    load_skill_cases = [
-        c for c in cases if c.expected.get("first_tool") == "load_skill"
-    ]
+    load_skill_cases = [c for c in cases if c.expected.get("first_tool") == "load_skill"]
     assert load_skill_cases, "skill_trigger 应有 load_skill 正例"
     for c in load_skill_cases:
         name = c.expected.get("args_contains", {}).get("name")
         assert name is not None, f"{c.case_id}: load_skill 正例须在 args_contains 给 name"
-        assert name in real, (
-            f"{c.case_id}: 技能名 {name!r} 不在真实清单 {sorted(real)} 内(防拼错)"
-        )
+        assert name in real, f"{c.case_id}: 技能名 {name!r} 不在真实清单 {sorted(real)} 内(防拼错)"
         # skill 字段(若给)应与 args.name 一致
         if c.skill is not None:
-            assert c.skill == name, f"{c.case_id}: skill 字段 {c.skill!r} 与 args.name {name!r} 不符"
+            assert c.skill == name, (
+                f"{c.case_id}: skill 字段 {c.skill!r} 与 args.name {name!r} 不符"
+            )
 
 
 def test_skill_trigger_has_positives_and_near_miss_negatives() -> None:
@@ -214,7 +212,9 @@ def test_score_abstain() -> None:
 
 
 def test_score_not_tools() -> None:
-    c = _case({"first_tool": "get_stock_quote", "not_tools": ["offer_deep_research"]}, bucket="升级")
+    c = _case(
+        {"first_tool": "get_stock_quote", "not_tools": ["offer_deep_research"]}, bucket="升级"
+    )
     assert score_case(c, [{"tool_name": "get_stock_quote", "args": {}}]).passed
     bad = score_case(
         c,
@@ -248,7 +248,9 @@ def test_score_sequence_subsequence() -> None:
 
 
 def test_aggregate_rel_irrel_split() -> None:
-    rel_pass = score_case(_case({"first_tool": "get_news"}), [{"tool_name": "get_news", "args": {}}])
+    rel_pass = score_case(
+        _case({"first_tool": "get_news"}), [{"tool_name": "get_news", "args": {}}]
+    )
     rel_fail = score_case(_case({"first_tool": "get_news"}), [])
     irrel_pass = score_case(_case({"first_tool": None}, bucket="弃权"), [])
     rep = aggregate([rel_pass, rel_fail, irrel_pass])

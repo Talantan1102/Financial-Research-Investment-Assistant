@@ -17,6 +17,7 @@ singleton vs per-turn 拆分(重要):
 RedisSteerSource 也在本模块:圈边界 RPOP 全部 pending 插话(spec § 4.3,List 不用
 pub/sub)。本任务实现读端;写端(POST /chat/steer)是 Task 4.3。
 """
+
 from __future__ import annotations
 
 import logging

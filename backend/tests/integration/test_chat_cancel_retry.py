@@ -155,9 +155,7 @@ async def test_post_retry_without_checkpoint_no_longer_422(
     enqueued: list[dict[str, Any]] = []
     from app.tasks import chat_runner
 
-    monkeypatch.setattr(
-        chat_runner, "enqueue_run_chat", lambda **kw: enqueued.append(kw)
-    )
+    monkeypatch.setattr(chat_runner, "enqueue_run_chat", lambda **kw: enqueued.append(kw))
 
     sid = uuid.uuid4()
     async with session_factory() as sess:

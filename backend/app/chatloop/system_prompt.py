@@ -12,6 +12,7 @@ persona / 技能清单走 ContextDeps 的独立段(同样会话内冻结)。
 
 长度:≤600 字(中文字符计),控制常驻 token。
 """
+
 from __future__ import annotations
 
 CHAT_SYSTEM_PROMPT = (

@@ -9,6 +9,7 @@
 InProcessTool 的实例调 run_with_state(args, state),否则走旧 tool.run(args)。
 两者都暴露 name / description / args_schema(schema_for_llm 复用),只是 run 入口不同。
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -29,9 +30,7 @@ class InProcessTool(Tool):
     """
 
     @abstractmethod
-    async def run_with_state(
-        self, args: BaseModel, state: ChatLoopState
-    ) -> dict[str, Any]:
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
         """执行工具,可读 state(user_id / messages / ledger ...)。"""
 
     async def run(self, args: BaseModel) -> dict[str, Any]:

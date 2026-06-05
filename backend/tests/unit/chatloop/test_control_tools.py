@@ -9,6 +9,7 @@
 - read_cached_result:offset+limit 分页;
 - 文档同步:TOOL_DOCS 参数与实现一致(轻断言)。
 """
+
 from __future__ import annotations
 
 import json
@@ -131,9 +132,7 @@ async def test_read_cached_result_offset_limit_pagination():
     content = "".join(str(i % 10) for i in range(5000))
     cache = FakeCache({ref: content})
     tool = ReadCachedResultTool(cache=cache)
-    out = await tool.run_with_state(
-        ReadCachedResultArgs(ref=ref, offset=100, limit=50), _state()
-    )
+    out = await tool.run_with_state(ReadCachedResultArgs(ref=ref, offset=100, limit=50), _state())
     assert out["offset"] == 100
     assert out["total_len"] == 5000
     assert out["content"] == content[100:150]
@@ -173,9 +172,7 @@ async def test_hub_dispatch_read_cached_result():
     hub = ToolHub()
     hub.register_inprocess([ReadCachedResultTool(cache=cache)])
     state = _state()
-    call = StepToolCall(
-        id="c1", name="read_cached_result", arguments=json.dumps({"ref": ref})
-    )
+    call = StepToolCall(id="c1", name="read_cached_result", arguments=json.dumps({"ref": ref}))
     results = await hub.dispatch([call], state)
     assert results[0].success is True
     assert results[0].output["content"] == "原文 ABC"

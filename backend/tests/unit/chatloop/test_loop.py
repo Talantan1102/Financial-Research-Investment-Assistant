@@ -15,6 +15,7 @@ loop 本身只编排副作用,判定逻辑在 gates/context/state 纯函数(单�
   9. burned:同签名失败 3 次后第 4 圈被 filter_burned 拒;
  10. 协议异常:tool_choice=none 仍给 tool_calls → RuntimeError。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -111,10 +112,7 @@ class FakeLLM:
                 await on_delta(StepDelta(kind="tool_call", text="", tool_name=tc.name))
             if step.content:
                 # 流式中途取消注入点:本圈是 cancel_at_round → 发 content 前 set
-                if (
-                    self._cancel_event is not None
-                    and self._cancel_at_round == cur_round
-                ):
+                if self._cancel_event is not None and self._cancel_at_round == cur_round:
                     self._cancel_event.set()
                 await on_delta(StepDelta(kind="content", text=step.content))
         return step
@@ -144,9 +142,7 @@ class FakeToolHub:
     def schemas_for_llm(self) -> list[dict]:
         return self._schemas
 
-    async def dispatch(
-        self, calls: list[StepToolCall], state: ChatLoopState
-    ) -> list[ToolResult]:
+    async def dispatch(self, calls: list[StepToolCall], state: ChatLoopState) -> list[ToolResult]:
         cur = self._round
         self.dispatched_calls.append(list(calls))
         if cur < len(self._side_effects) and self._side_effects[cur] is not None:
@@ -253,9 +249,7 @@ async def test_scenario_1_multihop():
     )
     hub = FakeToolHub(results_per_round=[[_ok_result("get_stock_quote", args)]])
     emit = _Collector()
-    loop = ToolLoop(
-        llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit
-    )
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit)
     state = await loop.run(_make_state())
 
     assert state.step == 2
@@ -392,7 +386,9 @@ async def test_scenario_5_escalation_circuit_breaker():
         ]
     )
     hub = FakeToolHub(
-        results_per_round=[[_ok_result("offer_deep_research", args, {"escalation_proposed": True})]],
+        results_per_round=[
+            [_ok_result("offer_deep_research", args, {"escalation_proposed": True})]
+        ],
         side_effects=[_set_escalate],
     )
     emit = _Collector()
@@ -429,9 +425,7 @@ async def test_scenario_6_steering():
     # 第 1 圈边界无插话,第 2 圈边界返回 ["先看负债率"]
     steer = FakeSteerSource(per_round=[[], ["先看负债率"]])
     emit = _Collector()
-    loop = ToolLoop(
-        llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit, steer_source=steer
-    )
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit, steer_source=steer)
     state = await loop.run(_make_state())
 
     # state.messages 含该 user 消息
@@ -444,9 +438,7 @@ async def test_scenario_6_steering():
     steer_idx = steer_msgs[0]
     # 位置在第 2 圈 assistant 之前:steer_idx 之后必有一条 assistant
     later_assistant = [
-        i
-        for i, m in enumerate(state.messages)
-        if i > steer_idx and m.get("role") == "assistant"
+        i for i, m in enumerate(state.messages) if i > steer_idx and m.get("role") == "assistant"
     ]
     assert later_assistant, "插话消息后应有第 2 圈 assistant 收尾"
     # steer_merged 事件
@@ -465,9 +457,7 @@ async def test_scenario_7a_cancel_preset_at_boundary():
     cancel.set()
     llm = FakeLLM([_step(content="不应被调用", finish_reason="stop")])
     hub = FakeToolHub(results_per_round=[])
-    loop = ToolLoop(
-        llm=llm, tool_hub=hub, context_deps=_deps(), cancel_event=cancel
-    )
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), cancel_event=cancel)
     with pytest.raises(CancelledByUser):
         await loop.run(_make_state())
     # 圈边界即抛,LLM 未被调用
@@ -492,9 +482,7 @@ async def test_scenario_7b_cancel_mid_stream():
         cancel_at_round=1,  # 第 2 圈(0-based round=1)
     )
     hub = FakeToolHub(results_per_round=[[_ok_result("get_stock_quote", args)]])
-    loop = ToolLoop(
-        llm=llm, tool_hub=hub, context_deps=_deps(), cancel_event=cancel
-    )
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), cancel_event=cancel)
     with pytest.raises(CancelledByUser):
         await loop.run(_make_state())
     # 第 1 圈正常跑完,第 2 圈流中抛
@@ -566,9 +554,18 @@ async def test_scenario_9_burned_signature_rejected():
     )
     hub = FakeToolHub(
         results_per_round=[
-            [_err_result("get_stock_quote", bad_args), _ok_result("get_news", {"ts_code": "000001.SH"})],
-            [_err_result("get_stock_quote", bad_args), _ok_result("get_news", {"ts_code": "000002.SH"})],
-            [_err_result("get_stock_quote", bad_args), _ok_result("get_news", {"ts_code": "000003.SH"})],
+            [
+                _err_result("get_stock_quote", bad_args),
+                _ok_result("get_news", {"ts_code": "000001.SH"}),
+            ],
+            [
+                _err_result("get_stock_quote", bad_args),
+                _ok_result("get_news", {"ts_code": "000002.SH"}),
+            ],
+            [
+                _err_result("get_stock_quote", bad_args),
+                _ok_result("get_news", {"ts_code": "000003.SH"}),
+            ],
             # 圈4:hub 只收到放行的陪跑 call(目标被 filter_burned 拒)
             [_ok_result("get_news", {"ts_code": "000004.SH"})],
         ]

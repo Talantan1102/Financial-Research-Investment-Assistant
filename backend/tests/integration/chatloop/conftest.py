@@ -26,9 +26,7 @@ def _ensure_chatloop_schema(pg_test_engine: Engine) -> Iterator[None]:
     """
     # pg_test_engine fixture body 已跑过 create_all;此处只做存在性 sanity。
     with pg_test_engine.connect() as conn:
-        exists = conn.execute(
-            text("SELECT to_regclass('public.chat_session_context')")
-        ).scalar()
+        exists = conn.execute(text("SELECT to_regclass('public.chat_session_context')")).scalar()
     assert exists == "chat_session_context", (
         "chat_session_context 表未建出 — 检查 app.models 是否 export ChatSessionContext"
     )

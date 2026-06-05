@@ -20,6 +20,7 @@ description 模板(spec § 3.1):[功能一句话]。何时用:[触发场景+金�
 in-process 工具(memory_*/load_skill/run_skill_script/offer_deep_research/
 read_cached_result)Phase 3 后续任务才注册实现,本模块只写文档与瘦 schema。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

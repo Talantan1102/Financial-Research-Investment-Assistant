@@ -7,6 +7,7 @@
 把清单产出收口到一个函数,意味着切两层只改这里(常驻名单 + 长尾走检索),
 context.py 的稳定前缀拼接、ContextDeps.skill_listing 注入点都不动。
 """
+
 from __future__ import annotations
 
 from typing import Protocol

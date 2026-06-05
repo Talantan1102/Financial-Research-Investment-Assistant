@@ -6,6 +6,7 @@
 
 仅 --live CLI 跑时调用(联调阶段);本任务不在 6.2 跑 --live。
 """
+
 from __future__ import annotations
 
 from typing import Any

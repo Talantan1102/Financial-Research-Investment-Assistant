@@ -47,7 +47,9 @@ def test_meta_and_dimensions(report: Report) -> None:
     names = " ".join(d.name for d in report.dimensions)
     # 覆盖窗口分区 / 大工具结果 / 压缩 / 协议红线 / 记忆注入 / token 计数 / 窗口外笔记
     assert "窗口分区" in names and "工具结果" in names and "压缩" in names
-    assert "协议红线" in names and "记忆注入" in names and "token" in names and "窗口外笔记" in names
+    assert (
+        "协议红线" in names and "记忆注入" in names and "token" in names and "窗口外笔记" in names
+    )
 
 
 def test_survey_genre_labels(report: Report) -> None:

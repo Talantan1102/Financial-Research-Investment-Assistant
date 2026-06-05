@@ -17,6 +17,7 @@
 模块化:核心逻辑在 ``eval.tool_selection._core``(golden loader / 评分 / 聚合 / 报告),
 技能触发 CLI(``eval.skill_trigger.eval_runner``)共享同一核心 + ``run_cli`` 入口。
 """
+
 from __future__ import annotations
 
 import sys

@@ -5,6 +5,7 @@
 
 注意:app.agents.schemas 另有同名 StepResult(LangGraph 状态容器),老图退役后消歧。
 """
+
 from __future__ import annotations
 
 import json
@@ -33,6 +34,7 @@ class StepToolCall(BaseModel):
 
 class StepDelta(BaseModel):
     """流式增量 — emit 给 SSE 的最小单元。"""
+
     kind: Literal["content", "reasoning", "tool_call"]
     text: str = ""
     tool_name: str | None = None  # kind=tool_call 且 name 首次到达时携带

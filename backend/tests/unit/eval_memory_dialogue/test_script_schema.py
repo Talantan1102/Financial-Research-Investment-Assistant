@@ -83,7 +83,10 @@ def test_real_script_viewpoint_baijiu_loads() -> None:
     """首段真脚本:结构合法 + 关键设计点在位。"""
     p = (
         Path(__file__).parent.parent.parent.parent
-        / "eval" / "memory_dialogue" / "scripts" / "viewpoint-baijiu.yaml"
+        / "eval"
+        / "memory_dialogue"
+        / "scripts"
+        / "viewpoint-baijiu.yaml"
     )
     s = load_script(p)
     assert s.family == "观点演化族"

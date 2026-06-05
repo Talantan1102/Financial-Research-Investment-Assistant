@@ -1,4 +1,5 @@
 """StepResult/StepDelta 纯数据类型测试 + ScriptedStepClient 测试(L0,无 I/O)。"""
+
 from __future__ import annotations
 
 import pytest
@@ -8,17 +9,32 @@ from app.services.llm_step import StepDelta, StepResult, StepToolCall
 # StepResult / StepToolCall — Step 1 tests
 # ---------------------------------------------------------------------------
 
+
 def test_step_result_natural_stop():
-    r = StepResult(content="茅台现价 1700 元", tool_calls=[], finish_reason="stop",
-                   prompt_tokens=100, completion_tokens=20, cached_tokens=80, cost_cny=0.001)
+    r = StepResult(
+        content="茅台现价 1700 元",
+        tool_calls=[],
+        finish_reason="stop",
+        prompt_tokens=100,
+        completion_tokens=20,
+        cached_tokens=80,
+        cost_cny=0.001,
+    )
     assert not r.tool_calls and r.finish_reason == "stop"
 
 
 def test_step_result_with_calls_parses_args():
-    r = StepResult(content="我查一下", finish_reason="tool_calls", prompt_tokens=1, completion_tokens=1,
-                   cached_tokens=0, cost_cny=0.0,
-                   tool_calls=[StepToolCall(id="c1", name="get_stock_quote",
-                                            arguments='{"ts_code": "600519.SH"}')])
+    r = StepResult(
+        content="我查一下",
+        finish_reason="tool_calls",
+        prompt_tokens=1,
+        completion_tokens=1,
+        cached_tokens=0,
+        cost_cny=0.0,
+        tool_calls=[
+            StepToolCall(id="c1", name="get_stock_quote", arguments='{"ts_code": "600519.SH"}')
+        ],
+    )
     assert r.tool_calls[0].parsed_args == {"ts_code": "600519.SH"}
 
 

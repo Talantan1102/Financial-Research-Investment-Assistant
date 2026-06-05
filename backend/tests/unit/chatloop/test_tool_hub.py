@@ -3,6 +3,7 @@
 覆盖:双后端注册顺序、dispatch 成功/未知工具/坏 JSON/异常/超时的指导性错误、
 等长按序、台账去重、并行性、事件序列、cache 注入、hub 不抛硬契约。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -75,7 +76,7 @@ class FakeInProcessTool(InProcessTool):
         self._output = output if output is not None else {"ok": True}
         self.call_count = 0
 
-    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:  # type: ignore[override]
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:
         self.call_count += 1
         return dict(self._output)
 
@@ -253,9 +254,7 @@ async def test_bad_json_args_guidance_error():
 
 async def test_tool_exception_wrapped_with_guidance():
     hub = ToolHub()
-    hub.register_inprocess(
-        [FakeTool("boom", raises=ToolError("backend 503"))]
-    )
+    hub.register_inprocess([FakeTool("boom", raises=ToolError("backend 503"))])
     state = _state()
     results = await hub.dispatch([_call("boom", {"ts_code": "X"})], state)
     r = results[0]
@@ -266,9 +265,7 @@ async def test_tool_exception_wrapped_with_guidance():
 
 async def test_timeout_guidance_error():
     hub = ToolHub()
-    hub.register_inprocess(
-        [FakeTool("slow", raises=TimeoutError())]
-    )
+    hub.register_inprocess([FakeTool("slow", raises=TimeoutError())])
     state = _state()
     results = await hub.dispatch([_call("slow", {"ts_code": "X"})], state)
     r = results[0]
@@ -473,29 +470,45 @@ async def test_shared_seq_counter_no_duplicate_seq():
 
     # ---- 极简 Fake LLM(单圈:call → done) ----
     class _SimpleLLM:
-        async def stream_step(self, *, messages, tools=None, tool_choice="auto",
-                              tier="balanced", request_id=None, on_delta=None):
+        async def stream_step(
+            self,
+            *,
+            messages,
+            tools=None,
+            tool_choice="auto",
+            tier="balanced",
+            request_id=None,
+            on_delta=None,
+        ):
             if on_delta:
-                tc = StepToolCall(id="tc1", name="get_stock_quote",
-                                  arguments='{"ts_code":"600519.SH"}')
+                tc = StepToolCall(
+                    id="tc1", name="get_stock_quote", arguments='{"ts_code":"600519.SH"}'
+                )
                 await on_delta(StepDelta(kind="tool_call", text="", tool_name=tc.name))
                 # 第二次调用返回收尾
             if not hasattr(self, "_called"):
                 self._called = True
                 return StepResult(
                     content="",
-                    tool_calls=[StepToolCall(id="tc1", name="get_stock_quote",
-                                            arguments='{"ts_code":"600519.SH"}')],
+                    tool_calls=[
+                        StepToolCall(
+                            id="tc1", name="get_stock_quote", arguments='{"ts_code":"600519.SH"}'
+                        )
+                    ],
                     finish_reason="tool_calls",
-                    prompt_tokens=10, completion_tokens=5,
-                    cached_tokens=0, cost_cny=0.001,
+                    prompt_tokens=10,
+                    completion_tokens=5,
+                    cached_tokens=0,
+                    cost_cny=0.001,
                 )
             return StepResult(
                 content="茅台 1600 元",
                 tool_calls=[],
                 finish_reason="stop",
-                prompt_tokens=10, completion_tokens=5,
-                cached_tokens=0, cost_cny=0.001,
+                prompt_tokens=10,
+                completion_tokens=5,
+                cached_tokens=0,
+                cost_cny=0.001,
             )
 
     # ---- 极简 Fake ToolHub(Protocol 实现,注入共享 counter) ----
@@ -522,7 +535,9 @@ async def test_shared_seq_counter_no_duplicate_seq():
         seq_counter=shared_counter,
     )
     state = ChatLoopState(
-        user_id="u1", session_id="s1", request_id="r1",
+        user_id="u1",
+        session_id="s1",
+        request_id="r1",
         messages=[{"role": "user", "content": "茅台"}],
     )
     await loop.run(state)
@@ -532,7 +547,7 @@ async def test_shared_seq_counter_no_duplicate_seq():
     # 严格递增 — 无重号、无乱序
     for i in range(1, len(seqs)):
         assert seqs[i] == seqs[i - 1] + 1, (
-            f"seq 不连续: 位置 {i-1}={seqs[i-1]}, 位置 {i}={seqs[i]}"
+            f"seq 不连续: 位置 {i - 1}={seqs[i - 1]}, 位置 {i}={seqs[i]}"
         )
 
 

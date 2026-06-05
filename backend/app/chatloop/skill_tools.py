@@ -26,6 +26,7 @@
 - run_skill_script 大输出"强制写缓存返回摘要+键"是 cache 注入时的事;本任务最小实现
   只做截断 + 标记,不强制接缓存(留 Phase 4 接 read_cached_result 取回链路)。
 """
+
 from __future__ import annotations
 
 import json
@@ -96,9 +97,7 @@ class LoadSkillTool(InProcessTool):
     def __init__(self, *, loader: Any) -> None:
         self._loader = loader
 
-    async def run_with_state(
-        self, args: BaseModel, state: ChatLoopState
-    ) -> dict[str, Any]:
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
         args = LoadSkillArgs.model_validate(args.model_dump())
 
         # 先取技能装载结果(SKILL.md 全文 + 资源清单);未知技能 → 指导错误
@@ -124,9 +123,7 @@ class LoadSkillTool(InProcessTool):
         # resource 非 None:工具层第一道路径防线(SkillLoader 物理层已守住,但工具层先拦截
         # 绝对路径与目录穿越,减少不必要的物理层调用并给出更清晰的指导错误)。
         if os.path.isabs(args.resource) or ".." in args.resource.split("/"):
-            raise _fail(
-                "[资源路径非法] 资源引用必须是技能目录内的相对路径。"
-            )
+            raise _fail("[资源路径非法] 资源引用必须是技能目录内的相对路径。")
 
         # 工具层第二道:校验该资源在清单内(一级深,越界给指导错误)
         if args.resource not in resource_listing:
@@ -140,9 +137,7 @@ class LoadSkillTool(InProcessTool):
         try:
             res: SkillResource = self._loader.load_resource(args.name, args.resource)
         except SkillLoaderError as e:
-            raise _fail(
-                f"[资源不存在] {args.resource} 在技能 {args.name} 中无法装载:{e}"
-            ) from e
+            raise _fail(f"[资源不存在] {args.resource} 在技能 {args.name} 中无法装载:{e}") from e
 
         return {
             "skill": args.name,
@@ -166,9 +161,7 @@ class RunSkillScriptTool(InProcessTool):
     def __init__(self, *, executor: Any) -> None:
         self._executor = executor
 
-    async def run_with_state(
-        self, args: BaseModel, state: ChatLoopState
-    ) -> dict[str, Any]:
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
         args = RunSkillScriptArgs.model_validate(args.model_dump())
 
         ref = SkillScriptRef(skill_name=args.skill, script_path=args.script)
@@ -176,9 +169,7 @@ class RunSkillScriptTool(InProcessTool):
 
         # executor 抛异常(超时类/其它)→ 映射指导错误。result.error 走结构化路径。
         try:
-            result: SkillExecutionResult = await self._executor.execute(
-                ref=ref, args=script_args
-            )
+            result: SkillExecutionResult = await self._executor.execute(ref=ref, args=script_args)
         except TimeoutError as e:  # asyncio.TimeoutError 是其别名(3.11+)
             raise _fail(f"[超时] 脚本执行超时:{e}") from e
 
@@ -208,9 +199,7 @@ class RunSkillScriptTool(InProcessTool):
         # 失败路径:按错误码区分超时类 vs 其它,均带三元组 output
         kind = result.error.kind if result.error is not None else "unknown"
         if kind in _TIMEOUT_KINDS:
-            raise self._fail_with_output(
-                f"[超时] 脚本执行超时(kind={kind})。", output
-            )
+            raise self._fail_with_output(f"[超时] 脚本执行超时(kind={kind})。", output)
 
         # 脚本逻辑失败(return_code != 0 等):模型能区分逻辑错并自纠
         # stderr_head 截断 180:ToolHub _ERR_MSG_LEN=200,留 20 字前缀余量

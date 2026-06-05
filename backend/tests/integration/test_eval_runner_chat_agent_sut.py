@@ -105,9 +105,7 @@ class FakeToolHub:
     def schemas_for_llm(self) -> list[dict]:
         return self._schemas
 
-    async def dispatch(
-        self, calls: list[StepToolCall], state: ChatLoopState
-    ) -> list[ToolResult]:
+    async def dispatch(self, calls: list[StepToolCall], state: ChatLoopState) -> list[ToolResult]:
         cur = self._round
         if cur < len(self._side_effects) and self._side_effects[cur] is not None:
             self._side_effects[cur](state)
@@ -275,9 +273,7 @@ def test_chat_loop_agent_escalate_offered() -> None:
         ],
         side_effects=[_set_escalate],
     )
-    agent = ChatLoopAgent(
-        llm=_sut_llm(scripted), tool_hub=hub, context_deps=_deps()
-    )
+    agent = ChatLoopAgent(llm=_sut_llm(scripted), tool_hub=hub, context_deps=_deps())
 
     out = asyncio.run(agent.run(user_input="帮我深度研究茅台", request_id="r-escalate"))
 
@@ -311,9 +307,7 @@ def test_chat_loop_agent_excludes_search_tools_from_tool_calls() -> None:
             [_ok_result("get_stock_quote", quote_args)],
         ]
     )
-    agent = ChatLoopAgent(
-        llm=_sut_llm(scripted), tool_hub=hub, context_deps=_deps()
-    )
+    agent = ChatLoopAgent(llm=_sut_llm(scripted), tool_hub=hub, context_deps=_deps())
 
     out = asyncio.run(agent.run(user_input="查一下 600519.SH 的股价", request_id="r-search"))
 
@@ -348,9 +342,7 @@ def test_chat_loop_agent_bad_json_args_fallback_to_empty() -> None:
             ]
         ]
     )
-    agent = ChatLoopAgent(
-        llm=_sut_llm(scripted), tool_hub=hub, context_deps=_deps()
-    )
+    agent = ChatLoopAgent(llm=_sut_llm(scripted), tool_hub=hub, context_deps=_deps())
 
     out = asyncio.run(agent.run(user_input="查一下股价", request_id="r-badjson"))
 

@@ -48,9 +48,7 @@ from pydantic import BaseModel, ConfigDict
 
 pytestmark = [pytest.mark.e2e]
 
-CASSETTE_DIR = (
-    Path(__file__).resolve().parent / "fixtures" / "cassettes" / "test_chatloop_cassette"
-)
+CASSETTE_DIR = Path(__file__).resolve().parent / "fixtures" / "cassettes" / "test_chatloop_cassette"
 # 注:vcr_cassette_dir 全局 fixture 把磁带落到 backend/tests/fixtures/cassettes/<module>/
 # (sanitize pre-commit hook 只覆盖该目录)。上方常量仅供 _skip_if_no_cassette 判存在。
 _FIXTURES_CASSETTE_DIR = (
@@ -139,7 +137,9 @@ def _build_chatloop_agent() -> ChatLoopAgent:
       OfferDeepResearchTool(升级语义须真执行);offer_deep_research 不给 Fake;
     - ContextDeps:真 CHAT_SYSTEM_PROMPT,persona/skill_listing/history 全空。
     """
-    llm = build_llm_service_from_env(trace_service=_NullTrace())
+    # _NullTrace 是只实现 write_span 的轻量测试替身;TraceService 是具体类(非
+    # Protocol),mypy 不认结构化等价,但运行时只调 write_span,故安全。
+    llm = build_llm_service_from_env(trace_service=_NullTrace())  # type: ignore[arg-type]
 
     hub = ToolHub()  # 无 emit / 无 cache(InProcessTool 不吃 cache;数据工具 Fake 不需缓存)
     fake_names = [n for n in (*CORE_TOOLS, *DEFERRED_TOOLS) if n != "offer_deep_research"]
@@ -243,9 +243,7 @@ async def test_chatloop_multi_hop() -> None:
     """多跳:对比茅台/五粮液毛利率 → 财务工具或 compare,终答含两家名字。"""
     _skip_if_no_cassette("test_chatloop_multi_hop")
     agent = _build_chatloop_agent()
-    out = await agent.run(
-        "对比贵州茅台和五粮液的最新毛利率", request_id="cassette-multi-hop"
-    )
+    out = await agent.run("对比贵州茅台和五粮液的最新毛利率", request_id="cassette-multi-hop")
 
     tool_names = [tc.tool_name for tc in out.tool_calls]
     assert tool_names, f"多跳应至少调一个业务工具,实得空:{tool_names!r}"

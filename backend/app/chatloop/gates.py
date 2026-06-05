@@ -3,6 +3,7 @@
 撞闸不是异常也不是静默截断:loop 拿到 halt reason 后走 force_conclude
 (逼模型基于已有信息收尾)并向用户如实上报(loop_halt 事件)。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,10 +14,10 @@ from app.services.llm_step import StepToolCall
 
 @dataclass(frozen=True)
 class GateConfig:
-    max_steps: int = 12          # 硬迭代上限(spec § 1.3:六只持仓场景约五圈,留一倍垫)
-    max_cny: float = 0.10        # 预算闸:每 turn 金额
-    max_tokens: int = 120_000    # 预算闸:每 turn token
-    burn_threshold: int = 3      # 同签名失败 N 次后烧掉
+    max_steps: int = 12  # 硬迭代上限(spec § 1.3:六只持仓场景约五圈,留一倍垫)
+    max_cny: float = 0.10  # 预算闸:每 turn 金额
+    max_tokens: int = 120_000  # 预算闸:每 turn token
+    burn_threshold: int = 3  # 同签名失败 N 次后烧掉
 
 
 def check_gates(state: ChatLoopState, cfg: GateConfig) -> str | None:

@@ -18,6 +18,7 @@ tool_calls 里(原始 arguments JSON 在那)。本 SUT 替代老 ChatAgent:
 - ToolCall.rationale 是老 plan 时代的必填字段,裸 while 下 assistant tool_calls 不带
   rationale,此处填空串(Judge 评的是 tool_name+args,rationale 非评分维度)。
 """
+
 from __future__ import annotations
 
 import json

@@ -3,6 +3,7 @@
 按预排剧本逐圈返回 StepResult,记录收到的 messages/tool_choice 供断言。
 与 MockLLMClient(fixture 驱动,服务于旧 chat() 接口)互补,不替代。
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

@@ -12,6 +12,7 @@
 - build_skill_listing(7 Fake 技能产出格式);
 - 文档同步:TOOL_DOCS load_skill / run_skill_script 参数与实现一致(轻断言)。
 """
+
 from __future__ import annotations
 
 import json
@@ -290,7 +291,9 @@ async def test_run_skill_script_success_triplet():
     )
     tool = RunSkillScriptTool(executor=executor)
     out = await tool.run_with_state(
-        RunSkillScriptArgs(skill="portfolio_risk", script="scripts/hhi.py", args={"weights": [0.5, 0.5]}),
+        RunSkillScriptArgs(
+            skill="portfolio_risk", script="scripts/hhi.py", args={"weights": [0.5, 0.5]}
+        ),
         _state(),
     )
     assert out["return_code"] == 0

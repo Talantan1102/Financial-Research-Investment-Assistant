@@ -10,6 +10,7 @@
 - 降级(改本体,幂等):老圈大 tool 消息 content 替换为 [全文已缓存 ref=...] + digest;
   协议红线:只改 content,绝不删消息、绝不动 role/tool_call_id。
 """
+
 from __future__ import annotations
 
 import json
@@ -103,9 +104,7 @@ def _last_round_boundary(messages: list[dict[str, Any]]) -> int:
     return len(messages)
 
 
-def _downgrade_old_tool_messages(
-    state: ChatLoopState, threshold: int
-) -> None:
+def _downgrade_old_tool_messages(state: ChatLoopState, threshold: int) -> None:
     """对 state.messages 中"老圈"大 tool 消息做降级(改本体,幂等)。
 
     保护名单(永不降级):
@@ -149,9 +148,7 @@ def _downgrade_old_tool_messages(
                     except (json.JSONDecodeError, ValueError):
                         args_dict = {}
                     if tool_name is not None:
-                        entry = state.ledger.find_success(
-                            tool_name=tool_name, args=args_dict
-                        )
+                        entry = state.ledger.find_success(tool_name=tool_name, args=args_dict)
                         if entry is not None:
                             cache_key = entry.cache_key
                     break
@@ -171,9 +168,7 @@ def _downgrade_old_tool_messages(
 # ---------------------------------------------------------------------------
 
 
-def assemble_context(
-    state: ChatLoopState, deps: ContextDeps
-) -> list[dict[str, Any]]:
+def assemble_context(state: ChatLoopState, deps: ContextDeps) -> list[dict[str, Any]]:
     """state → OpenAI messages。
 
     会先对 state.messages 做降级(改本体,幂等),再拼四区。
@@ -185,9 +180,7 @@ def assemble_context(
     result: list[dict[str, Any]] = []
 
     # 区一:稳定前缀区
-    result.append(
-        {"role": "system", "content": deps.system_message_content}
-    )
+    result.append({"role": "system", "content": deps.system_message_content})
 
     # 区二:历史区(rebuild 产物,透传)
     result.extend(deps.history_block)

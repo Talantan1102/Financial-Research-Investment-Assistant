@@ -58,12 +58,12 @@ def main(argv: list[str] | None = None) -> int:
         mark = "✓" if r.final_passed else "✗"
         print(f"[读侧 {mark}] ({r.probe.dimension}/{r.probe.tier}) {r.probe.q}")
         print(f"    答: {r.answer[:160]}")
-        print(f"    判: hard={r.hard_passed} judge={r.judge_passed} "
-              f"invariance={r.invariance_passed} | {r.detail[:200]}")
+        print(
+            f"    判: hard={r.hard_passed} judge={r.judge_passed} "
+            f"invariance={r.invariance_passed} | {r.detail[:200]}"
+        )
     if args.report == "json":
-        payload: dict[str, object] = {
-            f"{d}|{t}": v for (d, t), v in table.cells.items()
-        }
+        payload: dict[str, object] = {f"{d}|{t}": v for (d, t), v in table.cells.items()}
         payload["db_assertions"] = table.db_assertion_rate
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:

@@ -45,21 +45,34 @@ def seeded_user(pg_memory_session_factory: Callable[[], Any]):
     session.add_all([src, tgt])
     session.flush()
     ep = ChatMemoryEpisode(
-        user_id=user_id, session_id=chat_session_id, episode_index=1,
-        user_message_text="白酒我看多 就认提价权", agent_response_text="(记录观点)",
+        user_id=user_id,
+        session_id=chat_session_id,
+        episode_index=1,
+        user_message_text="白酒我看多 就认提价权",
+        agent_response_text="(记录观点)",
     )
     session.add(ep)
     session.flush()
     old = ChatMemoryEdge(
-        user_id=user_id, source_node_id=src.node_id, target_node_id=tgt.node_id,
-        rel_type="EXPRESSED_VIEW", valid_from=_utc("2025-01-06"), valid_to=_utc("2025-02-03"),
-        importance=0.9, properties={"stance": "看多", "horizon": "三年", "logic": "提价权"},
+        user_id=user_id,
+        source_node_id=src.node_id,
+        target_node_id=tgt.node_id,
+        rel_type="EXPRESSED_VIEW",
+        valid_from=_utc("2025-01-06"),
+        valid_to=_utc("2025-02-03"),
+        importance=0.9,
+        properties={"stance": "看多", "horizon": "三年", "logic": "提价权"},
         source_episode_id=ep.episode_id,
     )
     new = ChatMemoryEdge(
-        user_id=user_id, source_node_id=src.node_id, target_node_id=tgt.node_id,
-        rel_type="EXPRESSED_VIEW", valid_from=_utc("2025-02-03"), valid_to=None,
-        importance=0.9, properties={"stance": "看多", "horizon": "两年", "logic": "提价权"},
+        user_id=user_id,
+        source_node_id=src.node_id,
+        target_node_id=tgt.node_id,
+        rel_type="EXPRESSED_VIEW",
+        valid_from=_utc("2025-02-03"),
+        valid_to=None,
+        importance=0.9,
+        properties={"stance": "看多", "horizon": "两年", "logic": "提价权"},
         source_episode_id=ep.episode_id,
     )
     session.add_all([old, new])
@@ -73,20 +86,32 @@ def seeded_user(pg_memory_session_factory: Callable[[], Any]):
 def test_fact_active_green(seeded_user) -> None:
     user_id, session = seeded_user
     engine = DbAssertionEngine(session=session, user_id=user_id)
-    r = engine.run_check(DbCheck(
-        type="fact_active",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "value_contains": ["看多", "两年"]},
-    ))
+    r = engine.run_check(
+        DbCheck(
+            type="fact_active",
+            params={
+                "rel_type": "EXPRESSED_VIEW",
+                "target_label": "白酒",
+                "value_contains": ["看多", "两年"],
+            },
+        )
+    )
     assert r.passed, r.detail
 
 
 def test_fact_active_red_when_value_missing(seeded_user) -> None:
     user_id, session = seeded_user
     engine = DbAssertionEngine(session=session, user_id=user_id)
-    r = engine.run_check(DbCheck(
-        type="fact_active",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "value_contains": ["中性"]},
-    ))
+    r = engine.run_check(
+        DbCheck(
+            type="fact_active",
+            params={
+                "rel_type": "EXPRESSED_VIEW",
+                "target_label": "白酒",
+                "value_contains": ["中性"],
+            },
+        )
+    )
     assert not r.passed
     assert "中性" in r.detail
 
@@ -94,10 +119,12 @@ def test_fact_active_red_when_value_missing(seeded_user) -> None:
 def test_old_invalidated_green(seeded_user) -> None:
     user_id, session = seeded_user
     engine = DbAssertionEngine(session=session, user_id=user_id)
-    r = engine.run_check(DbCheck(
-        type="old_invalidated",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "min_count": 1},
-    ))
+    r = engine.run_check(
+        DbCheck(
+            type="old_invalidated",
+            params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "min_count": 1},
+        )
+    )
     assert r.passed, r.detail
 
 
@@ -105,20 +132,24 @@ def test_fact_count_snapshot_no_increase(seeded_user) -> None:
     user_id, session = seeded_user
     engine = DbAssertionEngine(session=session, user_id=user_id)
     engine.snapshot_counts(rel_type="EXPRESSED_VIEW", target_label="白酒")
-    r = engine.run_check(DbCheck(
-        type="fact_count_no_increase",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒"},
-    ))
+    r = engine.run_check(
+        DbCheck(
+            type="fact_count_no_increase",
+            params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒"},
+        )
+    )
     assert r.passed, r.detail
 
 
 def test_fact_count_no_increase_without_snapshot_is_red(seeded_user) -> None:
     user_id, session = seeded_user
     engine = DbAssertionEngine(session=session, user_id=user_id)
-    r = engine.run_check(DbCheck(
-        type="fact_count_no_increase",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒"},
-    ))
+    r = engine.run_check(
+        DbCheck(
+            type="fact_count_no_increase",
+            params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒"},
+        )
+    )
     assert not r.passed
     assert "基线" in r.detail or "snapshot" in r.detail
 
@@ -126,30 +157,46 @@ def test_fact_count_no_increase_without_snapshot_is_red(seeded_user) -> None:
 def test_invalidated_chain_intact(seeded_user) -> None:
     user_id, session = seeded_user
     engine = DbAssertionEngine(session=session, user_id=user_id)
-    ok = engine.run_check(DbCheck(
-        type="invalidated_chain_intact",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "expected_versions": 2},
-    ))
+    ok = engine.run_check(
+        DbCheck(
+            type="invalidated_chain_intact",
+            params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "expected_versions": 2},
+        )
+    )
     assert ok.passed, ok.detail
-    too_many = engine.run_check(DbCheck(
-        type="invalidated_chain_intact",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "expected_versions": 3},
-    ))
+    too_many = engine.run_check(
+        DbCheck(
+            type="invalidated_chain_intact",
+            params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "expected_versions": 3},
+        )
+    )
     assert not too_many.passed
 
 
 def test_valid_from_is_event_time(seeded_user) -> None:
     user_id, session = seeded_user
     engine = DbAssertionEngine(session=session, user_id=user_id)
-    ok = engine.run_check(DbCheck(
-        type="valid_from_is_event_time",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "expected_date": "2025-02-03"},
-    ))
+    ok = engine.run_check(
+        DbCheck(
+            type="valid_from_is_event_time",
+            params={
+                "rel_type": "EXPRESSED_VIEW",
+                "target_label": "白酒",
+                "expected_date": "2025-02-03",
+            },
+        )
+    )
     assert ok.passed, ok.detail
-    wrong = engine.run_check(DbCheck(
-        type="valid_from_is_event_time",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": "白酒", "expected_date": "2025-06-05"},
-    ))
+    wrong = engine.run_check(
+        DbCheck(
+            type="valid_from_is_event_time",
+            params={
+                "rel_type": "EXPRESSED_VIEW",
+                "target_label": "白酒",
+                "expected_date": "2025-06-05",
+            },
+        )
+    )
     assert not wrong.passed
     assert "录入时间" in wrong.detail
 
@@ -175,8 +222,14 @@ def test_target_label_accepts_candidate_list(seeded_user) -> None:
     Industry 偶发漂移(白酒/白酒II)。target_label 支持候选列表,匹配任一即可。"""
     user_id, session = seeded_user
     engine = DbAssertionEngine(session=session, user_id=user_id)
-    r = engine.run_check(DbCheck(
-        type="fact_active",
-        params={"rel_type": "EXPRESSED_VIEW", "target_label": ["白酒II", "白酒"], "value_contains": ["看多"]},
-    ))
+    r = engine.run_check(
+        DbCheck(
+            type="fact_active",
+            params={
+                "rel_type": "EXPRESSED_VIEW",
+                "target_label": ["白酒II", "白酒"],
+                "value_contains": ["看多"],
+            },
+        )
+    )
     assert r.passed, r.detail

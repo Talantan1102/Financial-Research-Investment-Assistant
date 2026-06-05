@@ -14,6 +14,7 @@
 成本标注:--live 跑一次整套 golden ≈ 一次一调,总量随 golden 条数线性增长。
 本任务不在 6.2 跑 --live;6.2 只保证 dry 模式 + 单测绿。
 """
+
 from __future__ import annotations
 
 import sys

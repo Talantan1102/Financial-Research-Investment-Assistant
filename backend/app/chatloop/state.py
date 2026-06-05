@@ -6,6 +6,7 @@
 - assistant(tool_calls) 后必须跟全部对应 tool 消息(apply_results 保证);
 - ToolLedger 不进 LLM 窗口,只进 state。
 """
+
 from __future__ import annotations
 
 import hashlib

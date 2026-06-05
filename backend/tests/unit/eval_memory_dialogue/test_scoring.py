@@ -10,8 +10,12 @@ from eval.memory_dialogue.write_phase import SessionCheckResult
 
 def _pr(dim: str, tier: str, passed: bool) -> ProbeResult:
     p = Probe(
-        tier=tier, dimension=dim, q="q",
-        expect_contain=(), expect_not=(), judge_rubric="r",
+        tier=tier,
+        dimension=dim,
+        q="q",
+        expect_contain=(),
+        expect_not=(),
+        judge_rubric="r",
     )
     return ProbeResult(p, "a", passed, passed, True, passed, "")
 
@@ -19,8 +23,10 @@ def _pr(dim: str, tier: str, passed: bool) -> ProbeResult:
 def test_table_groups_by_dimension_and_tier() -> None:
     table = build_score_table(
         probe_results=[
-            _pr("知识更新", "直球", True), _pr("知识更新", "直球", True),
-            _pr("知识更新", "对抗", False), _pr("克制弃答", "自然难", True),
+            _pr("知识更新", "直球", True),
+            _pr("知识更新", "直球", True),
+            _pr("知识更新", "对抗", False),
+            _pr("克制弃答", "自然难", True),
         ],
         write_results=[
             SessionCheckResult(1, "fact_active", True, ""),

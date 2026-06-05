@@ -38,6 +38,7 @@ live(--live,联调阶段跑,≈ 一次 45+ 次 LLM 调用):构造真件 ChatLoop
 
 --strict:任一桶低于阈值 exit 1(阈值见 ``THRESHOLDS``,拍脑袋初始值,注释说明待校准)。
 """
+
 from __future__ import annotations
 
 import json
@@ -107,9 +108,7 @@ def _validate_case(raw: dict[str, Any], seen_ids: set[str]) -> GoldenCase:
         _fail(f"{case_id}: expected 须为对象")
     present = [k for k in _EXPECTED_KEYS if k in expected]
     if not present:
-        _fail(
-            f"{case_id}: expected 至少含一键 {_EXPECTED_KEYS!r},实得 {sorted(expected)!r}"
-        )
+        _fail(f"{case_id}: expected 至少含一键 {_EXPECTED_KEYS!r},实得 {sorted(expected)!r}")
 
     bucket = raw["bucket"]
     if bucket not in VALID_BUCKETS:
@@ -160,8 +159,7 @@ def is_abstain_case(case: GoldenCase) -> bool:
     if exp.get("first_tool", "__MISSING__") is None:
         return True
     has_positive = (
-        exp.get("first_tool") not in (None, "__MISSING__")
-        or "tools_sequence_contains" in exp
+        exp.get("first_tool") not in (None, "__MISSING__") or "tools_sequence_contains" in exp
     )
     return not has_positive
 

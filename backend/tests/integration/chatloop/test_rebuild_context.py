@@ -131,20 +131,14 @@ async def _seed_turns(
     return ids
 
 
-async def _cleanup(
-    factory: async_sessionmaker[AsyncSession], session_id: uuid.UUID
-) -> None:
+async def _cleanup(factory: async_sessionmaker[AsyncSession], session_id: uuid.UUID) -> None:
     """pg_async_session_factory 无 rollback isolation,test 末显式清。"""
     async with factory() as sess:
         ctx = await sess.get(ChatSessionContext, session_id)
         if ctx is not None:
             await sess.delete(ctx)
         for m in (
-            (
-                await sess.execute(
-                    select(ChatMessage).where(ChatMessage.session_id == session_id)
-                )
-            )
+            (await sess.execute(select(ChatMessage).where(ChatMessage.session_id == session_id)))
             .scalars()
             .all()
         ):
@@ -175,9 +169,7 @@ async def test_empty_session_returns_empty_tuple(
     """空 session(无消息、无摘要)→ 空 tuple。"""
     try:
         async with async_factory() as db:
-            result = await rebuild_context(
-                str(seeded_session_id), db=db, llm=_FakeLLM()
-            )
+            result = await rebuild_context(str(seeded_session_id), db=db, llm=_FakeLLM())
         assert result == ()
     finally:
         await _cleanup(async_factory, seeded_session_id)
@@ -462,9 +454,7 @@ async def test_partial_and_error_assistant_rows_excluded(
             await sess.commit()
 
         async with async_factory() as db:
-            result = await rebuild_context(
-                str(seeded_session_id), db=db, llm=_FakeLLM()
-            )
+            result = await rebuild_context(str(seeded_session_id), db=db, llm=_FakeLLM())
 
         contents = [m["content"] for m in result]
         # done assistant 保留
@@ -520,9 +510,7 @@ async def test_orphan_user_turn_tolerated(
             await sess.commit()
 
         async with async_factory() as db:
-            result = await rebuild_context(
-                str(seeded_session_id), db=db, llm=_FakeLLM()
-            )
+            result = await rebuild_context(str(seeded_session_id), db=db, llm=_FakeLLM())
 
         contents = [m["content"] for m in result]
         assert "第一轮提问" in contents

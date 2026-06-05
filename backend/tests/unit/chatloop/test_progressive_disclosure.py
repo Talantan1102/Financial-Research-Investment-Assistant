@@ -8,6 +8,7 @@
 - 裸调指导:deferred 工具 ValidationError 错误文案含 search_tools 提示;
 - 文档完整性守卫:14 个全有非空 brief/doc、CORE+DEFERRED 并集=14 无重叠、金融 8 含"何时不用"。
 """
+
 from __future__ import annotations
 
 import asyncio

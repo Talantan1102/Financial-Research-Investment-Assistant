@@ -3,6 +3,7 @@
 两个 eval_runner.py 都只是薄封装:给定 default_golden 路径 + 标题,调 ``run_cli``。
 dry / live / strict 三态逻辑全在此处,零重复。
 """
+
 from __future__ import annotations
 
 import argparse

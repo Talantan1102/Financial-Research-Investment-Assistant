@@ -217,8 +217,7 @@ class LLMService:
         # 7. span (非致命)
         if self._trace is not None:
             tool_calls_summary = [
-                {"name": tc.name, "args": tc.arguments[:200]}
-                for tc in result.tool_calls
+                {"name": tc.name, "args": tc.arguments[:200]} for tc in result.tool_calls
             ]
             span = Span(
                 span_id=f"{request_id}-stream-{uuid4().hex[:8]}",

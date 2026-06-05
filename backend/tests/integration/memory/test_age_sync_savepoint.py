@@ -11,6 +11,7 @@ merge 会成功,断言"事务仍健康"同样成立(两种环境都有效)。
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import Any
 from uuid import uuid4
@@ -42,10 +43,9 @@ def _age_available(session: Any) -> bool:
 def test_age_failure_does_not_poison_outer_transaction(pg_session: Any) -> None:
     # 在同一事务里先做一个正常写入,模拟 archival_memory_insert 的事务上下文
     pg_session.execute(text("SELECT 1"))
-    try:
+    # AGE 不可用时预期抛;关键是下面外层事务必须仍可用
+    with contextlib.suppress(Exception):
         age_merge_node(session=pg_session, node_id=uuid4(), entity_type="User")
-    except Exception:  # noqa: BLE001
-        pass  # AGE 不可用时预期抛;关键是下面外层事务必须仍可用
     # 外层事务必须没被毒死:任何后续语句都应正常执行
     row = pg_session.execute(text("SELECT 42")).scalar()
     assert row == 42, "AGE 失败毒死了外层事务(InFailedSqlTransaction)"
@@ -65,43 +65,59 @@ async def test_archival_insert_succeeds_without_age(
     user_id, sess_id = uuid4(), uuid4()
     s.execute(
         text(
-            'INSERT INTO users (id, username, email, hashed_password, is_active) '
-            'VALUES (:i, :u, :e, :p, true)'
+            "INSERT INTO users (id, username, email, hashed_password, is_active) "
+            "VALUES (:i, :u, :e, :p, true)"
         ),
-        {'i': str(user_id), 'u': f'age5-{user_id.hex[:8]}',
-         'e': f'age5-{user_id.hex[:8]}@t.local', 'p': 'x'},
+        {
+            "i": str(user_id),
+            "u": f"age5-{user_id.hex[:8]}",
+            "e": f"age5-{user_id.hex[:8]}@t.local",
+            "p": "x",
+        },
     )
     s.execute(
-        text('INSERT INTO chat_sessions (id, user_id, title) VALUES (:s, :u, :t)'),
-        {'s': str(sess_id), 'u': str(user_id), 't': 'age5'},
+        text("INSERT INTO chat_sessions (id, user_id, title) VALUES (:s, :u, :t)"),
+        {"s": str(sess_id), "u": str(user_id), "t": "age5"},
     )
     s.commit()
     from app.memory.models import ChatMemoryEpisode
 
     ep = ChatMemoryEpisode(
-        user_id=user_id, session_id=sess_id, episode_index=1,
-        user_message_text='白酒看多 就认提价权', agent_response_text='',
+        user_id=user_id,
+        session_id=sess_id,
+        episode_index=1,
+        user_message_text="白酒看多 就认提价权",
+        agent_response_text="",
     )
     s.add(ep)
     s.commit()
 
     memory = HierarchicalMemory(
         pg_session_factory=pg_memory_session_factory,
-        age_executor=None, milvus_client=None, embed_service=None,
-        llm_extractor=None, llm_judge=None,
+        age_executor=None,
+        milvus_client=None,
+        embed_service=None,
+        llm_extractor=None,
+        llm_judge=None,
     )
     edge = await memory.archival_memory_insert(
         user_id=user_id,
         content={
-            'rel_type': 'EXPRESSED_VIEW',
-            'source_entity_type': 'User', 'source_label': 'User',
-            'target_entity_type': 'Industry', 'target_label': '白酒',
-            'valid_from': datetime(2025, 1, 6, tzinfo=UTC), 'valid_to': None,
-            'properties': {'stance': '看多'},
+            "rel_type": "EXPRESSED_VIEW",
+            "source_entity_type": "User",
+            "source_label": "User",
+            "target_entity_type": "Industry",
+            "target_label": "白酒",
+            "valid_from": datetime(2025, 1, 6, tzinfo=UTC),
+            "valid_to": None,
+            "properties": {"stance": "看多"},
         },
-        reasoning='test', importance=0.9,
-        evidence_quote='白酒看多 就认提价权',
-        episode_id=ep.episode_id,
+        reasoning="test",
+        importance=0.9,
+        evidence_quote="白酒看多 就认提价权",
+        # SA 2.0 Column[UUID] vs UUID interop debt(同 pyproject mypy overrides
+        # 的 C.5 memory 测试块);运行时 ep.episode_id 已是 UUID 标量。
+        episode_id=ep.episode_id,  # type: ignore[arg-type]
     )
-    assert edge is not None, '无 AGE 环境下 insert 不得失败(边镜像应降级)'
+    assert edge is not None, "无 AGE 环境下 insert 不得失败(边镜像应降级)"
     s.close()

@@ -32,6 +32,7 @@ estimate_tokens:
 协议红线:
   17. 降级后 assistant(tool_calls) 与 tool 消息配对完整(数量相等、id 对应)
 """
+
 from __future__ import annotations
 
 import json

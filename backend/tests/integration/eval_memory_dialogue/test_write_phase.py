@@ -60,13 +60,19 @@ def _fake_extractor(session_handle: Any):
             tgt = ChatMemoryNode(user_id=user_id, entity_type="Industry", entity_label="白酒")
             s.add_all([src, tgt])
             s.flush()
-            s.add(ChatMemoryEdge(
-                user_id=user_id, source_node_id=src.node_id, target_node_id=tgt.node_id,
-                rel_type="EXPRESSED_VIEW",
-                valid_from=datetime.combine(ss.date, datetime.min.time(), tzinfo=UTC),
-                valid_to=None, importance=0.9, properties={"stance": "看多"},
-                source_episode_id=ep_row[0],
-            ))
+            s.add(
+                ChatMemoryEdge(
+                    user_id=user_id,
+                    source_node_id=src.node_id,
+                    target_node_id=tgt.node_id,
+                    rel_type="EXPRESSED_VIEW",
+                    valid_from=datetime.combine(ss.date, datetime.min.time(), tzinfo=UTC),
+                    valid_to=None,
+                    importance=0.9,
+                    properties={"stance": "看多"},
+                    source_episode_id=ep_row[0],
+                )
+            )
         else:
             for e in s.query(ChatMemoryEdge).filter_by(user_id=user_id, valid_to=None):
                 e.valid_to = datetime.combine(ss.date, datetime.min.time(), tzinfo=UTC)
@@ -125,7 +131,9 @@ async def test_write_phase_runs_assertions_per_session(fresh_user, tmp_path: Pat
     p.write_text(_SCRIPT_GREEN, encoding="utf-8")
     script = load_script(p)
     runner = WritePhaseRunner(
-        session=session, user_id=user_id, chat_session_id=chat_session_id,
+        session=session,
+        user_id=user_id,
+        chat_session_id=chat_session_id,
         extract_session=_fake_extractor(session),
     )
     report = await runner.run(script)
@@ -147,7 +155,9 @@ async def test_write_phase_collects_red_not_raises(fresh_user, tmp_path: Path) -
     p = tmp_path / "s.yaml"
     p.write_text(_SCRIPT_RED, encoding="utf-8")
     runner = WritePhaseRunner(
-        session=session, user_id=user_id, chat_session_id=chat_session_id,
+        session=session,
+        user_id=user_id,
+        chat_session_id=chat_session_id,
         extract_session=_fake_extractor(session),
     )
     report = await runner.run(load_script(p))

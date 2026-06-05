@@ -220,9 +220,7 @@ async def test_golden_b_retry_whole_turn_rerun(
 
     # 原始 user 消息(POST /chat 形状:task 尚不存在,经 initial_prompt 关联)
     msg_repo = ChatSessionRepo(session_factory)
-    user_msg = await msg_repo.append_message(
-        session_id=str(sid), role="user", content="原始问题"
-    )
+    user_msg = await msg_repo.append_message(session_id=str(sid), role="user", content="原始问题")
 
     task_repo = ChatTaskRepo(session_factory)
     task1 = await task_repo.create_queued(

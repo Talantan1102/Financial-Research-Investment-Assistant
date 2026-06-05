@@ -157,9 +157,7 @@ async def _singletons(
     )
 
 
-async def _read_events(
-    redis: FakeRedis, sid: uuid.UUID, tid: uuid.UUID
-) -> list[dict[str, Any]]:
+async def _read_events(redis: FakeRedis, sid: uuid.UUID, tid: uuid.UUID) -> list[dict[str, Any]]:
     bus = ChatEventBus(redis)
     entries = await bus.xread_blocking(sid, tid, last_id="0", count=200, block_ms=10)
     return [payload for _id, payload in entries]
@@ -211,7 +209,8 @@ async def _seed_session_and_task(
     if with_user_msg is not None:
         # POST /chat 形状:task 尚不存在,user 行不带 task_id;经 initial_prompt 关联。
         m = await repo.append_message(session_id=str(sid), role="user", content=with_user_msg)
-        user_msg_id = m.id
+        # SA 2.0 Column[UUID] vs UUID interop debt;运行时 m.id 已是 UUID 标量。
+        user_msg_id = m.id  # type: ignore[assignment]
 
     task_repo = ChatTaskRepo(factory)
     task = await task_repo.create_queued(
@@ -256,17 +255,17 @@ async def test_steer_running_persists_and_enqueues(
     assert "message_id" in body
 
     # 落库:role=user, task_id=本 tid, content
-    msgs = await ChatSessionRepo(pg_async_session_factory).list_messages(
-        str(seeded["session_id"])
-    )
+    msgs = await ChatSessionRepo(pg_async_session_factory).list_messages(str(seeded["session_id"]))
     steer_rows = [m for m in msgs if m.role == "user" and m.content == "先看负债率"]
     assert len(steer_rows) == 1
     assert steer_rows[0].task_id == seeded["task_id"]
 
     # LPUSH:steer List 含一条
     key = steer_key(seeded["task_id"])
-    assert await fake_redis.llen(key) == 1
-    raw = await fake_redis.rpop(key)
+    # fakeredis.aioredis 方法 stub 声明 sync/async 联合返回(ResponseT),mypy 不认
+    # await;运行时是 awaitable。生产侧 redis 类型为 Any 故无此问题。
+    assert await fake_redis.llen(key) == 1  # type: ignore[misc]
+    raw = await fake_redis.rpop(key)  # type: ignore[misc]
     assert (raw.decode() if isinstance(raw, bytes) else raw) == "先看负债率"
 
 
@@ -340,13 +339,11 @@ async def test_steer_terminal_race_returns_false_and_deletes_row(
     assert resp.json()["merged"] is False
 
     # 落库行已删(避免与前端转新 turn 落库双行)
-    msgs = await ChatSessionRepo(pg_async_session_factory).list_messages(
-        str(seeded["session_id"])
-    )
+    msgs = await ChatSessionRepo(pg_async_session_factory).list_messages(str(seeded["session_id"]))
     assert all(m.content != "太晚了的插话" for m in msgs)
 
-    # steer List 未入队
-    assert await fake_redis.llen(steer_key(seeded["task_id"])) == 0
+    # steer List 未入队(fakeredis.aioredis stub 联合返回,await 加 ignore[misc])
+    assert await fake_redis.llen(steer_key(seeded["task_id"])) == 0  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -359,9 +356,7 @@ def test_steer_404_for_unknown_task(
     fake_redis: FakeRedis,
 ) -> None:
     client = _client(pg_async_session_factory, fake_redis)
-    resp = client.post(
-        f"/api/v0/chat/steer/{uuid.uuid4()}", json={"message": "x"}
-    )
+    resp = client.post(f"/api/v0/chat/steer/{uuid.uuid4()}", json={"message": "x"})
     assert resp.status_code == 404
 
 

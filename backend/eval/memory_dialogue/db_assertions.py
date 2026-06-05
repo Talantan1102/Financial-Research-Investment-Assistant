@@ -79,9 +79,7 @@ class DbAssertionEngine:
     ) -> CheckResult:
         active = [e for e in self._edges(rel_type, target_label) if self._is_active(e)]
         if not active:
-            return CheckResult(
-                "fact_active", False, f"无 active 的 {rel_type}→{target_label} 边"
-            )
+            return CheckResult("fact_active", False, f"无 active 的 {rel_type}→{target_label} 边")
         if value_contains:
             texts = [self._props_text(e) for e in active]
             missing = [v for v in value_contains if not any(v in t for t in texts)]
@@ -102,17 +100,13 @@ class DbAssertionEngine:
             if e.valid_to is not None or e.invalidated_at is not None
         ]
         ok = len(ended) >= min_count
-        return CheckResult(
-            "old_invalidated", ok, f"已作废 {len(ended)} 条(要求 ≥{min_count})"
-        )
+        return CheckResult("old_invalidated", ok, f"已作废 {len(ended)} 条(要求 ≥{min_count})")
 
     @staticmethod
     def _label_key(target_label: str | list[str] | None) -> str | tuple[str, ...] | None:
         return tuple(target_label) if isinstance(target_label, list) else target_label
 
-    def snapshot_counts(
-        self, rel_type: str, target_label: str | list[str] | None = None
-    ) -> None:
+    def snapshot_counts(self, rel_type: str, target_label: str | list[str] | None = None) -> None:
         self._count_snapshots[(rel_type, self._label_key(target_label))] = len(
             self._edges(rel_type, target_label)
         )
@@ -122,9 +116,7 @@ class DbAssertionEngine:
     ) -> CheckResult:
         key = (rel_type, self._label_key(target_label))
         if key not in self._count_snapshots:
-            return CheckResult(
-                "fact_count_no_increase", False, "未先 snapshot_counts,无基线"
-            )
+            return CheckResult("fact_count_no_increase", False, "未先 snapshot_counts,无基线")
         before = self._count_snapshots[key]
         now = len(self._edges(rel_type, target_label))
         return CheckResult(

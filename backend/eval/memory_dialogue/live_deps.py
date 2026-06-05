@@ -77,10 +77,8 @@ def _fact_to_text(session_factory: Any, edge: Any) -> str:
         s.close()
     status = "当前有效" if (edge.valid_to is None and edge.invalidated_at is None) else "已作废"
     props = ", ".join(f"{k}={v}" for k, v in (edge.properties or {}).items())
-    return (
-        f"[{status}] {edge.rel_type} → {target} ({props}) "
-        f"生效自 {edge.valid_from.date()}"
-        + (f" 至 {edge.valid_to.date()}" if edge.valid_to is not None else "")
+    return f"[{status}] {edge.rel_type} → {target} ({props}) 生效自 {edge.valid_from.date()}" + (
+        f" 至 {edge.valid_to.date()}" if edge.valid_to is not None else ""
     )
 
 
@@ -143,9 +141,8 @@ async def build_live_runners() -> tuple[Any, Any]:
 
     milvus_client: Any = None
     try:
-        from pymilvus import MilvusClient
-
         from app.memory.milvus_setup import ensure_chat_memory_edge_collection
+        from pymilvus import MilvusClient
 
         host = os.environ.get("MILVUS_HOST", "127.0.0.1")
         port = int(os.environ.get("MILVUS_PORT", "19530"))
@@ -195,12 +192,8 @@ async def build_live_runners() -> tuple[Any, Any]:
         setup.close()
     logger.info("eval live wiring: user=%s chat_session=%s", user_id, chat_session_id)
 
-    async def extract_session(
-        user_id: UUID, chat_session_id: UUID, ss: ScriptSession
-    ) -> None:
-        result = await path_b.run_for_session(
-            chat_session_id, trigger_reason="session_closed"
-        )
+    async def extract_session(user_id: UUID, chat_session_id: UUID, ss: ScriptSession) -> None:
+        result = await path_b.run_for_session(chat_session_id, trigger_reason="session_closed")
         logger.info(
             "path_b session %s: scanned=%s inserted=%s",
             ss.n,

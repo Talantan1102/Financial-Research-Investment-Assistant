@@ -9,6 +9,7 @@
 
 注意:usage 通常在最后一个 choices=[] 的 chunk 里(stream_options include_usage)。
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from app.services.openai_client import StreamAssembler
 # helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_chunk(
     content: str | None = None,
     reasoning: str | None = None,
@@ -28,7 +30,13 @@ def _make_chunk(
     usage=None,
 ) -> SimpleNamespace:
     """构造最小 OpenAI chunk。choices 空 + usage 非 None → usage-only chunk。"""
-    if usage is not None and content is None and reasoning is None and tool_calls is None and finish_reason is None:
+    if (
+        usage is not None
+        and content is None
+        and reasoning is None
+        and tool_calls is None
+        and finish_reason is None
+    ):
         # usage-only chunk: choices=[]
         return SimpleNamespace(choices=[], usage=usage)
 
@@ -158,7 +166,9 @@ def test_two_tools_assembled_by_index() -> None:
     assert d1[0].tool_name == "get_eps"
 
     # index=0: arguments 续片(no id/name)
-    tc0_cont = _make_tool_call_fragment(index=0, id=None, name=None, arguments='_code":"600519.SH"}')
+    tc0_cont = _make_tool_call_fragment(
+        index=0, id=None, name=None, arguments='_code":"600519.SH"}'
+    )
     d0c = asm.feed(_make_chunk(tool_calls=[tc0_cont]))
     # 续片不产 tool_call delta(name 已记录)
     assert d0c == []
@@ -196,14 +206,12 @@ def test_empty_string_name_id_fragments_do_not_clobber() -> None:
     asm = StreamAssembler()
 
     # 首片:真实 id+name + arguments 开头
-    first = _make_tool_call_fragment(
-        index=0, id="call_abc", name="get_stock_quote", arguments=""
-    )
+    first = _make_tool_call_fragment(index=0, id="call_abc", name="get_stock_quote", arguments="")
     d0 = asm.feed(_make_chunk(tool_calls=[first]))
     assert len(d0) == 1 and d0[0].tool_name == "get_stock_quote"
 
     # 续片:id="" name="" (qwen 真实形状),只带 arguments 片段
-    for frag_args in ('{', '"ts_code": "600', '519.', 'SH"}'):
+    for frag_args in ("{", '"ts_code": "600', "519.", 'SH"}'):
         cont = _make_tool_call_fragment(index=0, id="", name="", arguments=frag_args)
         dc = asm.feed(_make_chunk(tool_calls=[cont]))
         # 续片不得再产 tool_call delta(name 已记录)

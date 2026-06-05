@@ -3,6 +3,7 @@
 ToolLoop 主动发射这些事件;chat_runner 直接 XADD 进 Redis Streams,
 不再有 LangGraph astream_events 的节点名匹配适配层。
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal

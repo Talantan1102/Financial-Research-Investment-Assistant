@@ -18,6 +18,7 @@
 15. apply_results — success=False,error 字段进 content
 16. to_extractor_view — cache_key 为 None 时仍包含条目且 cache_id=None
 """
+
 from __future__ import annotations
 
 import pytest
@@ -66,8 +67,9 @@ def _make_step_result(
     )
 
 
-def _make_tool_call(call_id: str = "c1", name: str = "get_stock_quote",
-                    arguments: str = '{"ts_code":"600519.SH"}') -> StepToolCall:
+def _make_tool_call(
+    call_id: str = "c1", name: str = "get_stock_quote", arguments: str = '{"ts_code":"600519.SH"}'
+) -> StepToolCall:
     return StepToolCall(id=call_id, name=name, arguments=arguments)
 
 
@@ -121,12 +123,13 @@ def test_record_and_find_success():
     """record 后 find_success 能找到 success=True 的条目。"""
     ledger = ToolLedger()
     ledger.record(
-        step=0, tool_name="get_stock_quote",
-        args={"ts_code": "600519.SH"}, digest="price=1700", success=True,
+        step=0,
+        tool_name="get_stock_quote",
+        args={"ts_code": "600519.SH"},
+        digest="price=1700",
+        success=True,
     )
-    entry = ledger.find_success(
-        tool_name="get_stock_quote", args={"ts_code": "600519.SH"}
-    )
+    entry = ledger.find_success(tool_name="get_stock_quote", args={"ts_code": "600519.SH"})
     assert entry is not None
     assert entry.tool_name == "get_stock_quote"
     assert entry.success is True
@@ -136,12 +139,13 @@ def test_find_success_returns_none_for_failed_entry():
     """find_success 对 success=False 的条目返回 None。"""
     ledger = ToolLedger()
     ledger.record(
-        step=0, tool_name="get_stock_quote",
-        args={"ts_code": "600519.SH"}, digest="err", success=False,
+        step=0,
+        tool_name="get_stock_quote",
+        args={"ts_code": "600519.SH"},
+        digest="err",
+        success=False,
     )
-    result = ledger.find_success(
-        tool_name="get_stock_quote", args={"ts_code": "600519.SH"}
-    )
+    result = ledger.find_success(tool_name="get_stock_quote", args={"ts_code": "600519.SH"})
     assert result is None
 
 
@@ -174,8 +178,11 @@ def test_signature_set_filters_by_step():
     assert len(sigs_step1) == 1
     # step1 的签名与 step0 中同参数的 a 相同
     a_sig = LedgerEntry(
-        step=0, tool_name="a", args_hash=args_hash_of({"k": 1}),
-        digest="d", success=True,
+        step=0,
+        tool_name="a",
+        args_hash=args_hash_of({"k": 1}),
+        digest="d",
+        success=True,
     ).signature
     assert a_sig in sigs_step1
 
@@ -235,9 +242,7 @@ def test_apply_step_with_tool_calls_appends_correct_message():
     """有 tool_calls 时 assistant 消息含 tool_calls 键,格式符合 OpenAI。"""
     state = _make_state()
     tc = _make_tool_call("c1", "get_stock_quote", '{"ts_code":"600519.SH"}')
-    step = _make_step_result(
-        content="我查一下", finish_reason="tool_calls", tool_calls=[tc]
-    )
+    step = _make_step_result(content="我查一下", finish_reason="tool_calls", tool_calls=[tc])
     state = apply_step(state, step)
 
     last = state.messages[-1]
@@ -287,9 +292,7 @@ def test_apply_step_with_tool_calls_never_carries_reasoning():
     """含 tool_calls 的 assistant 消息也不含 reasoning 字段。"""
     state = _make_state()
     tc = _make_tool_call()
-    step = _make_step_result(
-        content="", finish_reason="tool_calls", tool_calls=[tc]
-    )
+    step = _make_step_result(content="", finish_reason="tool_calls", tool_calls=[tc])
     state = apply_step(state, step)
 
     last = state.messages[-1]
@@ -320,9 +323,7 @@ def test_apply_step_no_final_response_when_tool_calls():
     """有 tool_calls 时 final_response 不被设置。"""
     state = _make_state()
     tc = _make_tool_call()
-    step = _make_step_result(
-        content="我查一下", finish_reason="tool_calls", tool_calls=[tc]
-    )
+    step = _make_step_result(content="我查一下", finish_reason="tool_calls", tool_calls=[tc])
     state = apply_step(state, step)
     assert state.final_response is None
 
@@ -336,13 +337,19 @@ def test_apply_step_accumulates_budget():
     """连续两圈预算正确累计。"""
     state = _make_state()
     s1 = _make_step_result(
-        content="", finish_reason="tool_calls",
+        content="",
+        finish_reason="tool_calls",
         tool_calls=[_make_tool_call()],
-        prompt_tokens=100, completion_tokens=20, cost_cny=0.010,
+        prompt_tokens=100,
+        completion_tokens=20,
+        cost_cny=0.010,
     )
     s2 = _make_step_result(
-        content="done", finish_reason="stop",
-        prompt_tokens=200, completion_tokens=50, cost_cny=0.020,
+        content="done",
+        finish_reason="stop",
+        prompt_tokens=200,
+        completion_tokens=50,
+        cost_cny=0.020,
     )
     state = apply_step(state, s1)
     # apply_results 用空列表模拟(不影响预算计算)
@@ -364,9 +371,7 @@ def test_apply_results_appends_tool_messages_in_order():
     # 先 apply_step 以符合协议(有 assistant 消息在先)
     tc1 = _make_tool_call("c1", "get_stock_quote", '{"ts_code":"600519.SH"}')
     tc2 = _make_tool_call("c2", "web_search", '{"query":"茅台"}')
-    step = _make_step_result(
-        content="", finish_reason="tool_calls", tool_calls=[tc1, tc2]
-    )
+    step = _make_step_result(content="", finish_reason="tool_calls", tool_calls=[tc1, tc2])
     state = apply_step(state, step)
 
     r1 = _make_tool_result("get_stock_quote", success=True, output={"price": 1700})
@@ -409,9 +414,7 @@ def test_apply_results_error_result_content_format():
     """success=False 时 content 以 [ERROR] 开头。"""
     state = _make_state()
     tc = _make_tool_call("c1")
-    step = _make_step_result(
-        content="", finish_reason="tool_calls", tool_calls=[tc]
-    )
+    step = _make_step_result(content="", finish_reason="tool_calls", tool_calls=[tc])
     state = apply_step(state, step)
 
     r = _make_tool_result(success=False, error="ts_code 格式错误", output=None)
@@ -431,9 +434,7 @@ def test_apply_results_error_without_explicit_message():
     """error=None 的失败结果用 'unknown error' 兜底。"""
     state = _make_state()
     tc = _make_tool_call("c1")
-    step = _make_step_result(
-        content="", finish_reason="tool_calls", tool_calls=[tc]
-    )
+    step = _make_step_result(content="", finish_reason="tool_calls", tool_calls=[tc])
     state = apply_step(state, step)
 
     r = ToolResult(

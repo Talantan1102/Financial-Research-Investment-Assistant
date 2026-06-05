@@ -85,14 +85,22 @@ class ReadPhaseRunner:
         # 弃答纪律(先于裁判,确定性)
         if probe.answerable and refusal:
             return ProbeResult(
-                probe, answer, hard_passed=False, judge_passed=False,
-                invariance_passed=True, final_passed=False,
+                probe,
+                answer,
+                hard_passed=False,
+                judge_passed=False,
+                invariance_passed=True,
+                final_passed=False,
                 detail=f"可答题输出拒答形态(反蹭分判 0): {answer!r}",
             )
         if not probe.answerable and not refusal:
             return ProbeResult(
-                probe, answer, hard_passed=hard_ok, judge_passed=False,
-                invariance_passed=True, final_passed=False,
+                probe,
+                answer,
+                hard_passed=hard_ok,
+                judge_passed=False,
+                invariance_passed=True,
+                final_passed=False,
                 detail=f"弃答题未拒答(疑似顺着假前提编): {answer!r}",
             )
 
@@ -104,13 +112,15 @@ class ReadPhaseRunner:
             swapped_ok, _ = _hard_check(answer_swapped, probe)
             if not swapped_ok:
                 invariance_ok = False
-                inv_detail = (
-                    f";不变量失败: 倒序后答 {answer_swapped!r}(答案随检索顺序漂移)"
-                )
+                inv_detail = f";不变量失败: 倒序后答 {answer_swapped!r}(答案随检索顺序漂移)"
 
         final = hard_ok and judge_ok and invariance_ok
         return ProbeResult(
-            probe, answer, hard_passed=hard_ok, judge_passed=judge_ok,
-            invariance_passed=invariance_ok, final_passed=final,
+            probe,
+            answer,
+            hard_passed=hard_ok,
+            judge_passed=judge_ok,
+            invariance_passed=invariance_ok,
+            final_passed=final,
             detail=hard_detail + inv_detail,
         )

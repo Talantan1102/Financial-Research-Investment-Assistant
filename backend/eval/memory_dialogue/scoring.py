@@ -39,9 +39,7 @@ def format_score_table(table: ScoreTable) -> str:
         row_cells = [table.cell(dim, t) for t in VALID_TIERS]
         if all(total == 0 for _, total in row_cells):
             continue
-        row = f"{dim:<10}" + "".join(
-            f"{f'{p}/{t}' if t else '—':>10}" for p, t in row_cells
-        )
+        row = f"{dim:<10}" + "".join(f"{f'{p}/{t}' if t else '—':>10}" for p, t in row_cells)
         lines.append(row)
     db_p, db_t = table.db_assertion_rate
     lines.append("-" * 48)
