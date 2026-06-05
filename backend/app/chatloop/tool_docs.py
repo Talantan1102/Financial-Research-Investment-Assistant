@@ -12,6 +12,10 @@ description 模板(spec § 3.1):[功能一句话]。何时用:[触发场景+金�
 实测结论(冒烟 item 8):空 properties:{} 的瘦 schema 会被模型绕开。所以瘦条目
 保留必填参数名+类型(可直接调用),细节走 search_docs 检索的完整文档。
 
+注:search_tools 检索结果里出现 load_skill 等技能工具属正常 —— 技能触发主走
+稳定前缀的 L1 元数据清单,本模块的文档检索是补充召回(关键词命中即返回),
+不代表"应当装载技能",模型仍按 L1 清单的触发判据决策。
+
 参数名与 backend/app/mcp_server/tools/*.py 的真实 TOOL_DEF 逐字核对;
 in-process 工具(memory_*/load_skill/run_skill_script/offer_deep_research/
 read_cached_result)Phase 3 后续任务才注册实现,本模块只写文档与瘦 schema。
@@ -65,10 +69,11 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         brief="查 A 股财务三表(资产负债/现金流/利润)。问营收利润/偿债/现金流时用。",
         doc=(
             "查单只 A 股最新财务报表数据(三表合并,按 statement 路由)。\n"
-            "何时用:用户问营收、净利润、ROE、市盈率、资产负债、现金流、偿债能力等"
+            "何时用:用户问营收、净利润、ROE、当期市盈率快照、资产负债、现金流、偿债能力等"
             "基本面/财务数据时;触发词:营收、利润、ROE、负债、现金流、毛利、业绩。\n"
-            "何时不用:要实时股价 → get_stock_quote;要 PE 历史分位/资金流 → "
-            "get_market_indicators;要业绩'预告'(未出报表)→ get_corporate_actions"
+            "何时不用:要实时股价 → get_stock_quote;要 PE 历史分位/贵不贵/资金流 → "
+            "get_market_indicators(估值高低判断走它,本工具只给当期 PE 数值快照);"
+            "要业绩'预告'(未出报表)→ get_corporate_actions"
             "(action='forecast')。\n"
             "参数:\n"
             "  ts_code(str,必填)—— A 股代码,如 '600519.SH'。\n"
