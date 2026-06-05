@@ -33,12 +33,10 @@ from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
 from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
 from app.chatloop.tool_hub import EmitFn, ToolHub
 from app.memory.injection_classifier import is_prompt_injection
+from app.services.chat_steer_bus import steer_key
 from app.services.tool_result_cache import ToolResultCache
 
 logger = logging.getLogger(__name__)
-
-# steer List key(spec § 4.1 表:Redis chat:steer:{tid})。写端 Task 4.3。
-_STEER_KEY_PREFIX = "chat:steer:"
 
 
 # ---------------------------------------------------------------------------
@@ -218,13 +216,13 @@ def build_turn_components(
 class RedisSteerSource:
     """圈边界取插话:RPOP 循环把 List `chat:steer:{task_id}` 全部 pending 取出(FIFO)。
 
-    写端 LPUSH(POST /chat/steer)在 Task 4.3。用 RPOP 配 LPUSH = FIFO:
-    先到的插话先被并入。空 List → []。
+    写端 LPUSH(POST /chat/steer → ChatSteerBus.push)。用 RPOP 配 LPUSH = FIFO:
+    先到的插话先被并入。空 List → []。key 经 ``steer_key`` 与写端共享单一来源。
     """
 
     def __init__(self, redis: Any, task_id: UUID | str) -> None:
         self._redis = redis
-        self._key = f"{_STEER_KEY_PREFIX}{task_id}"
+        self._key = steer_key(task_id)
 
     async def pop_all(self) -> list[str]:
         out: list[str] = []

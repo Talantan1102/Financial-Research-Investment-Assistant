@@ -427,10 +427,16 @@ async def _emit_escalation(
     触发:final_state.escalate_offered。
     1. escalate_request{session_id, reason};
     2. EscalationExtractor.run(history=对话文本, cached_tool_results=ledger 视图)→ packet;
-    3. create_draft → escalate_packet_draft{draft_record_id, packet}。
+    3. create_draft → escalate_packet_draft{draft_record_id, packet};
+    4. **修法 A(spec § 4.3 升级事件次序):补发唯一终止 done**。escalate 时 loop 不发
+       done(loop.py 圈一/force_conclude 跳过),由本函数在 escalate_packet_draft 之后
+       发,保证升级 turn 的事件序 = ... escalate_request → escalate_packet_draft → done。
+       即便 extractor/draft 抛异常,done 也在 finally 兜底补发(否则前端永远等不到终止)。
     """
     if not final_state.escalate_offered:
         return
+
+    done_stop_reason = final_state.halt_reason or "natural"
 
     from app.agents.escalation_extractor import EscalationExtractor
     from app.services.escalation_record_repo import EscalationRecordRepo
@@ -471,27 +477,36 @@ async def _emit_escalation(
     extractor = EscalationExtractor(llm=llm)
     record_repo = EscalationRecordRepo(session_factory)
 
-    packet = await extractor.run(
-        chat_session_id=session_id,
-        chat_turn_count=len(history_dicts),
-        chat_history_summary=None,
-        history=history_dicts,
-        cached_tool_results=cached_tool_results,
-        request_id=str(task_id),
-    )
-    rec = await record_repo.create_draft(
-        session_id=session_id,
-        packet_draft=packet.model_dump(mode="json"),
-    )
-    await bus.xadd_event(
-        sid_uuid,
-        task_id,
-        {
-            "type": "escalate_packet_draft",
-            "draft_record_id": str(rec.id),
-            "packet": packet.model_dump(mode="json"),
-        },
-    )
+    try:
+        packet = await extractor.run(
+            chat_session_id=session_id,
+            chat_turn_count=len(history_dicts),
+            chat_history_summary=None,
+            history=history_dicts,
+            cached_tool_results=cached_tool_results,
+            request_id=str(task_id),
+        )
+        rec = await record_repo.create_draft(
+            session_id=session_id,
+            packet_draft=packet.model_dump(mode="json"),
+        )
+        await bus.xadd_event(
+            sid_uuid,
+            task_id,
+            {
+                "type": "escalate_packet_draft",
+                "draft_record_id": str(rec.id),
+                "packet": packet.model_dump(mode="json"),
+            },
+        )
+    finally:
+        # 修法 A:唯一终止 done 一定在升级链路尾部补发(即便 extractor/draft 抛,
+        # done 仍发,前端才能收尾;loop 在 escalate 时已跳过 done,故此处不会双发)。
+        await bus.xadd_event(
+            sid_uuid,
+            task_id,
+            {"type": "done", "stop_reason": done_stop_reason},
+        )
 
 
 # ---------------------------------------------------------------------------

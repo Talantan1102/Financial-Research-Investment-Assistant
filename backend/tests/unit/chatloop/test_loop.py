@@ -405,7 +405,11 @@ async def test_scenario_5_escalation_circuit_breaker():
     # 收尾自然停 → halt_reason natural(escalate 标志单独在 state.escalate_offered)
     assert state.halt_reason == "natural"
     assert state.step == 2
-    assert emit.of("done")[0].data["stop_reason"] == "natural"
+    # 修法 A(spec § 4.3):escalate_offered 时 loop **不发 done**,由 runner 在
+    # escalate_request + escalate_packet_draft 之后补发唯一终止 done。
+    assert emit.of("done") == []
+    # 但收尾 token / cost_update 等仍正常发(只是 done 让位给 runner)
+    assert "token" in emit.types()
 
 
 # ---------------------------------------------------------------------------

@@ -386,6 +386,101 @@ async def test_llm_raises_degrades_gracefully(
 
 
 @pytest.mark.asyncio
+async def test_partial_and_error_assistant_rows_excluded(
+    async_factory: async_sessionmaker[AsyncSession],
+    seeded_session_id: uuid.UUID,
+) -> None:
+    """spec § 4.3:partial / error 的 assistant 行不进历史窗口(只展示,非结晶终答)。
+
+    构造一个完整 turn(user + done assistant)+ 一个失败 turn(user + partial assistant)
+    + 一个 error turn(user + error assistant)。rebuild 应只带 done assistant,
+    partial / error 的 assistant content 不应出现在产出里(但其 user 仍保留)。
+    """
+    base = datetime(2026, 6, 5, 12, 0, 0)
+    try:
+        async with async_factory() as sess:
+            # 完整 turn(done)
+            sess.add(
+                ChatMessage(
+                    id=uuid.uuid4(),
+                    session_id=seeded_session_id,
+                    role="user",
+                    content="完整提问",
+                    created_at=base,
+                )
+            )
+            sess.add(
+                ChatMessage(
+                    id=uuid.uuid4(),
+                    session_id=seeded_session_id,
+                    role="assistant",
+                    content="完整结晶终答",
+                    status="done",
+                    created_at=base + timedelta(seconds=1),
+                )
+            )
+            # 失败 turn(partial assistant)
+            sess.add(
+                ChatMessage(
+                    id=uuid.uuid4(),
+                    session_id=seeded_session_id,
+                    role="user",
+                    content="被取消的提问",
+                    created_at=base + timedelta(seconds=2),
+                )
+            )
+            sess.add(
+                ChatMessage(
+                    id=uuid.uuid4(),
+                    session_id=seeded_session_id,
+                    role="assistant",
+                    content="半截被取消的输出",
+                    status="partial",
+                    created_at=base + timedelta(seconds=3),
+                )
+            )
+            # error turn(error assistant)
+            sess.add(
+                ChatMessage(
+                    id=uuid.uuid4(),
+                    session_id=seeded_session_id,
+                    role="user",
+                    content="出错的提问",
+                    created_at=base + timedelta(seconds=4),
+                )
+            )
+            sess.add(
+                ChatMessage(
+                    id=uuid.uuid4(),
+                    session_id=seeded_session_id,
+                    role="assistant",
+                    content="出错的残答",
+                    status="error",
+                    created_at=base + timedelta(seconds=5),
+                )
+            )
+            await sess.commit()
+
+        async with async_factory() as db:
+            result = await rebuild_context(
+                str(seeded_session_id), db=db, llm=_FakeLLM()
+            )
+
+        contents = [m["content"] for m in result]
+        # done assistant 保留
+        assert "完整结晶终答" in contents
+        # partial / error assistant content 被排除
+        assert "半截被取消的输出" not in contents
+        assert "出错的残答" not in contents
+        # 三个 user 提问仍保留(user 行不受 status 过滤)
+        assert "完整提问" in contents
+        assert "被取消的提问" in contents
+        assert "出错的提问" in contents
+    finally:
+        await _cleanup(async_factory, seeded_session_id)
+
+
+@pytest.mark.asyncio
 async def test_orphan_user_turn_tolerated(
     async_factory: async_sessionmaker[AsyncSession],
     seeded_session_id: uuid.UUID,

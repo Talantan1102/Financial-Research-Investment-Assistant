@@ -910,7 +910,77 @@ async def chat_cancel(
 
 
 # ---------------------------------------------------------------------------
-# Plan 3 Task 5: POST /api/v0/chat/retry/{task_id} — resume failed task
+# Phase 4 Task 4.3: POST /api/v0/chat/steer/{task_id} — 插话(steering)并入当前 turn
+# ---------------------------------------------------------------------------
+
+
+class SteerRequest(BaseModel):
+    message: str
+
+
+@router.post("/api/v0/chat/steer/{task_id}")
+async def chat_steer(
+    task_id: str,
+    body: SteerRequest,
+    pg_factory: Any | None = Depends(get_async_session_factory),
+    redis: AsyncRedis | None = Depends(get_redis_async),
+) -> dict[str, Any]:
+    """插话:streaming 中把新指令并入当前 turn(spec § 4.3 三步)。
+
+    ① 先落库 chat_messages(role=user, task_id=本 tid):崩溃/重跑不蒸发,且 retry
+       能查到该 turn 的全部插话(ChatMessage.task_id == 原 tid)合成 user_message;
+    ② task 处于 queued/running → LPUSH steer List(ChatSteerBus),worker 圈边界
+       RPOP 并入 messages 尾部 → SSE steer_merged。返回 ``{merged: True}``;
+    ③ 竞态兜底:task 已终态 → 不入队,把 ① 刚落的 user 行删除(同事务语义),
+       返回 ``{merged: False}``。前端(Phase 5)拿到 false 后走普通 sendMessage
+       (POST /chat 自己落库),避免双行(否则新 turn 入口会再落一次)。
+
+    Status codes:
+        - 200: ``{merged: bool, message_id?: str}``
+        - 404: invalid task_id (not UUID) OR task not found
+        - 503: PG / Redis unavailable
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(status_code=404, detail=f"invalid task_id: {task_id}") from exc
+
+    if pg_factory is None or redis is None:
+        raise HTTPException(
+            status_code=503,
+            detail="chat steer not available — PG or Redis unavailable",
+        )
+
+    task_repo = ChatTaskRepo(pg_factory)
+    task = await task_repo.get_by_id(task_uuid)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+
+    session_repo = ChatSessionRepo(pg_factory)
+
+    # ① 先落库(role=user,关联本 task,status 默认 done) — 崩溃/重跑不蒸发。
+    steer_msg = await session_repo.append_message(
+        session_id=str(task.session_id),
+        role="user",
+        content=body.message,
+        task_id=task_uuid,
+    )
+
+    if task.status in ("queued", "running"):
+        # ② LPUSH steer List(读端 RedisSteerSource 圈边界 RPOP 并入)
+        from app.services.chat_steer_bus import ChatSteerBus
+
+        steer_bus = ChatSteerBus(redis=redis)
+        await steer_bus.push(task_uuid, body.message)
+        return {"merged": True, "message_id": str(steer_msg.id)}
+
+    # ③ 竞态兜底:已终态 → 删掉刚落的行,前端转普通新 turn(自己落库,避免双行)。
+    await session_repo.delete_message(str(steer_msg.id))
+    return {"merged": False}
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 Task 4.3: POST /api/v0/chat/retry/{task_id} — 整 turn 重跑(checkpoint 退役)
 # ---------------------------------------------------------------------------
 
 
@@ -920,20 +990,26 @@ async def chat_retry(
     pg_factory: Any | None = Depends(get_async_session_factory),
     redis: AsyncRedis | None = Depends(get_redis_async),
 ) -> dict[str, str]:
-    """Retry failed/cancelled/partial task from LangGraph checkpoint.
+    """重试 failed/cancelled/partial task —— 整 turn 从头重跑(spec § 4.3)。
 
-    Spec § 5.4 Scenario D + § 6.4 retry 链:
-    - task.status 必须 ∈ {error, partial, cancelled}(done / running / queued 拒)
-    - task.langgraph_checkpoint_id 必须非空,否则 422(从头重跑要重发 prompt)
-    - 创建新 chat_tasks row,parent_task_id=旧 tid,initial_prompt_message_id 沿用
-    - enqueue Celery 带 resume_checkpoint_id,worker LangGraph 续跑
+    checkpoint 退役后(turn 原子语义):不再"恢复到第几圈",而是整 turn 重跑。
+    - task.status 必须 ∈ {error, partial, cancelled}(done / running / queued 拒);
+    - **不再有 "checkpoint 非空" 守卫**(worker 路径上 checkpoint 本就是坏的,
+      spec § 0.2);
+    - user_message = 原 turn 的 user 消息 + 该 turn 全部插话(行为不漂移,
+      spec § 4.3)。原 user 消息经 ``ChatTask.initial_prompt_message_id`` 关联
+      (POST /chat 落 user 行时 task 尚不存在,故走 task 的 initial_prompt 字段,
+      不是 ChatMessage.task_id);插话经 ``ChatMessage.task_id == 原 tid`` 关联
+      (POST /chat/steer 落库时带 task_id)。多条拼接:主消息 +
+      "\\n\\n(补充指令: ...)";
+    - 创建新 chat_tasks row,parent_task_id=旧 tid,initial_prompt_message_id 沿用;
+    - enqueue Celery 整 turn 重跑(resume_checkpoint_id=None;历史靠 rebuild_context
+      取到上一 turn 为止,partial/error 行不进窗口)。
 
     Status codes:
-        - 200: new task enqueued; body = {task_id, parent_task_id, stream_url,
-          resumed_from_checkpoint}
+        - 200: new task enqueued; body = {task_id, parent_task_id, stream_url}
         - 404: invalid task_id (not UUID) OR task not found
         - 409: task status ∉ retryable set
-        - 422: task has no langgraph_checkpoint_id (early failure before commit)
         - 503: PG / Redis unavailable
     """
     try:
@@ -960,14 +1036,13 @@ async def chat_retry(
                 "only error/partial/cancelled retryable"
             ),
         )
-    if not old_task.langgraph_checkpoint_id:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "cannot resume: task has no langgraph_checkpoint_id "
-                "(early failure before any checkpoint commit)"
-            ),
-        )
+
+    # 重建原 turn 的 user_message:原始 user 消息 + 该 turn 全部插话(时间序)。
+    session_repo = ChatSessionRepo(pg_factory)
+    user_message = await session_repo.rebuild_turn_user_message(
+        initial_prompt_message_id=old_task.initial_prompt_message_id,
+        task_id=old_task.id,
+    )
 
     # Create new task linked to old (parent_task_id chain; initial prompt msg sticky)
     new_task = await task_repo.create_queued(
@@ -986,10 +1061,9 @@ async def chat_retry(
         task_id=str(new_task.id),
         session_id=str(old_task.session_id),
         user_id=str(old_task.user_id) if old_task.user_id else "anonymous",
-        # resume 不需要新 user_message — graph 从 checkpoint state 续跑,
-        # 原始 user prompt 已经在 checkpoint 的 messages 里了。
-        user_message="",
-        resume_checkpoint_id=old_task.langgraph_checkpoint_id,
+        # 整 turn 重跑:user_message = 原消息 + 该 turn 插话;checkpoint 退役 → None。
+        user_message=user_message,
+        resume_checkpoint_id=None,
         parent_task_id=str(old_task.id),
     )
 
@@ -997,7 +1071,6 @@ async def chat_retry(
         "task_id": str(new_task.id),
         "parent_task_id": str(old_task.id),
         "stream_url": f"/api/v0/chat/stream/{new_task.id}",
-        "resumed_from_checkpoint": old_task.langgraph_checkpoint_id,
     }
 
 

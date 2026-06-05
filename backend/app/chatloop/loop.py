@@ -174,7 +174,11 @@ class ToolLoop:
             # 9. 闸一:自然停
             if not step_result.tool_calls:
                 state.halt_reason = state.halt_reason or "natural"
-                await self._emit("done", state.step, stop_reason=state.halt_reason)
+                # 修法 A(spec § 4.3 升级事件次序):escalate_offered 时 loop 不发 done,
+                # 由 runner 在 escalate_request + escalate_packet_draft 之后补发唯一终止 done。
+                # 非 escalate 时 loop 自己发 done(runner 不补,防双 done)。
+                if not state.escalate_offered:
+                    await self._emit("done", state.step, stop_reason=state.halt_reason)
                 return state
 
             # 10. 熔断收尾圈竟然还出 tool_calls?协议异常,fail loud
@@ -274,7 +278,10 @@ class ToolLoop:
             on_delta=self._make_on_delta(state.step + 1),
         )
         state = apply_step(state, step_result)
-        await self._emit("done", state.step, stop_reason=reason)
+        # 修法 A:撞闸后若 escalate 也已提议(边角:升级提议后下一圈又撞闸),
+        # done 仍交给 runner 唯一补发,避免与升级链路双 done。
+        if not state.escalate_offered:
+            await self._emit("done", state.step, stop_reason=reason)
         return state
 
 

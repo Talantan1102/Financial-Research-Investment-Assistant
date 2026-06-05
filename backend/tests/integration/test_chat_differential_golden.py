@@ -1,14 +1,15 @@
 # mypy: disable-error-code="arg-type"
-"""Plan 3 differential golden — spec § 8 守护新机制不破老路径。
+"""differential golden — spec § 5.2 守护 turn 原子语义不破老路径。
 
 3 cases:
 - Case A: cancel(partial content) vs complete(full content)— 终态对比
-- Case B: retry from checkpoint — parent_task_id 链 + enqueue 传 resume_checkpoint_id
+- Case B: retry 整 turn 重跑(Phase 4 Task 4.3,checkpoint 退役)— parent_task_id 链
+  + enqueue 收到 resume_checkpoint_id=None + user_message=原 turn 消息
 - Case C: 两轮 prompt + 第二轮 running — active_task_id 路径
 
-测试策略:用 Plan 1+2+3 已有 L1 fixture(in-memory sqlite + fakeredis + ChatTaskRepo
-+ direct DB seed),不真起 Celery worker。Case A/B 的 cancel/retry 通过直接 mark_*
-模拟 worker 行为;Case C 验 GET /chats/{sid} 返回 active_task_id。
+测试策略:用已有 L1 fixture(真 PG + fakeredis + ChatTaskRepo + direct DB seed),
+不真起 Celery worker。Case A/B 的 cancel/retry 通过直接 mark_* 模拟 worker 行为;
+Case C 验 GET /chats/{sid} 返回 active_task_id。
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
-from app.models.chat import ChatSession, ChatTask
+from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — registers users table
 from app.router.chat import (
     get_async_session_factory,
@@ -38,7 +39,6 @@ from app.services.chat_task_repo import ChatTaskRepo
 from fakeredis.aioredis import FakeRedis
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import update as sql_update
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -188,23 +188,23 @@ async def test_golden_a_cancel_vs_complete(
 
 
 # ---------------------------------------------------------------------------
-# Case B — Retry continues from checkpoint: parent_task_id 链
+# Case B — Retry 整 turn 重跑(checkpoint 退役): parent_task_id 链 + 原 turn 消息
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_golden_b_retry_continues_from_checkpoint(
+async def test_golden_b_retry_whole_turn_rerun(
     session_factory: async_sessionmaker[AsyncSession],
     fake_redis: FakeRedis,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Case B: task1 mark_error(checkpoint='ckpt-x') → POST /retry → task2 parent=task1
-    + enqueue 收到 resume_checkpoint_id='ckpt-x'。
+    """Case B(Phase 4 Task 4.3):task1 mark_error → POST /retry → task2 parent=task1
+    + enqueue 整 turn 重跑(resume_checkpoint_id=None,user_message=原 turn 消息)。
 
-    验证:
-    - retry endpoint 返回新 task_id + parent_task_id=task1.id + resumed_from_checkpoint
-    - enqueue_run_chat 被调用一次,kwargs.resume_checkpoint_id='ckpt-x'
-    - chat_tasks 中 task2.parent_task_id == task1.id (Plan 1 schema 守护)
+    验证(turn 原子语义,checkpoint 退役):
+    - retry endpoint 返回新 task_id + parent_task_id=task1.id,**不再有 resumed_from_checkpoint**
+    - enqueue_run_chat 被调用一次,kwargs.resume_checkpoint_id=None,user_message 含原消息
+    - chat_tasks 中 task2.parent_task_id == task1.id
     """
     enqueued: list[dict[str, Any]] = []
     from app.tasks import chat_runner
@@ -225,23 +225,21 @@ async def test_golden_b_retry_continues_from_checkpoint(
         sess.add(ChatSession(id=sid, user_id=None, title="t"))
         await sess.commit()
 
+    # 原始 user 消息(POST /chat 形状:task 尚不存在,经 initial_prompt 关联)
+    msg_repo = ChatSessionRepo(session_factory)
+    user_msg = await msg_repo.append_message(
+        session_id=str(sid), role="user", content="原始问题"
+    )
+
     task_repo = ChatTaskRepo(session_factory)
     task1 = await task_repo.create_queued(
         session_id=sid,
         user_id=None,
         langgraph_thread_id=f"u:{sid}",
-        initial_prompt_message_id=None,
+        initial_prompt_message_id=user_msg.id,
     )
     await task_repo.mark_running(task1.id)
     await task_repo.mark_error(task1.id, error_message="simulated crash")
-    # 模拟 finalize 写入 checkpoint
-    async with session_factory() as sess:
-        await sess.execute(
-            sql_update(ChatTask)
-            .where(ChatTask.id == task1.id)
-            .values(langgraph_checkpoint_id="ckpt-x")
-        )
-        await sess.commit()
 
     client = _chat_client(session_factory, fake_redis)
     resp = client.post(f"/api/v0/chat/retry/{task1.id}")
@@ -250,17 +248,18 @@ async def test_golden_b_retry_continues_from_checkpoint(
     task2_id = uuid.UUID(body["task_id"])
     assert task2_id != task1.id
     assert body["parent_task_id"] == str(task1.id)
-    assert body["resumed_from_checkpoint"] == "ckpt-x"
+    assert "resumed_from_checkpoint" not in body  # checkpoint 退役
 
     # task2 row + parent 链
     task2 = await task_repo.get_by_id(task2_id)
     assert task2 is not None
     assert task2.parent_task_id == task1.id
 
-    # enqueue 传了 resume_checkpoint_id
+    # enqueue 整 turn 重跑:checkpoint=None,user_message=原 turn 消息
     assert len(enqueued) == 1
-    assert enqueued[0]["resume_checkpoint_id"] == "ckpt-x"
+    assert enqueued[0]["resume_checkpoint_id"] is None
     assert enqueued[0]["task_id"] == str(task2_id)
+    assert "原始问题" in enqueued[0]["user_message"]
 
 
 # ---------------------------------------------------------------------------

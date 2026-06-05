@@ -142,11 +142,17 @@ async def _load_messages_after(
 
     水位过滤:summarized_upto 之前(含)的消息已被总结,排除——这是幂等的来源。
     用 created_at 做边界(取水位行的 created_at,只留严格更晚的),id 自身不可比序。
+
+    status 过滤(spec § 4.3 / § 4.2):排除 status ∈ (partial, error) 的行。partial
+    是取消时仅供展示的半截输出,error 是失败 turn 的残答——都不是结晶的历史终答,
+    重跑/续问时不该进上下文窗口(否则模型把半截当成上轮结论)。只留 done(默认)与
+    cancelled(整轮取消但若有 done 文本仍可作历史,实际取消落 partial,这里宽松保留)。
     """
     stmt = (
         select(ChatMessage)
         .where(ChatMessage.session_id == session_uuid)
         .where(ChatMessage.role.in_(("user", "assistant")))
+        .where(ChatMessage.status.notin_(("partial", "error")))
         .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
     )
     rows = list((await db.execute(stmt)).scalars().all())
