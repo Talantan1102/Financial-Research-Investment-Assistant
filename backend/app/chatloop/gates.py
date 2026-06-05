@@ -26,6 +26,8 @@ def check_gates(state: ChatLoopState, cfg: GateConfig) -> str | None:
     if state.budget_spent_cny >= cfg.max_cny or state.budget_spent_tokens >= cfg.max_tokens:
         return "budget"
     if state.step >= 2:
+        # 契约:ToolHub 记账用 post-apply_step 的 state.step(第 N 圈的调用记在 step=N);
+        # Task 2.4 ToolLoop 按此对齐
         cur = state.ledger.signature_set(state.step)
         prev = state.ledger.signature_set(state.step - 1)
         if cur and cur == prev:
@@ -40,11 +42,20 @@ def filter_burned(
 
     被拒的由 ToolHub 产出指导性错误结果喂回(不在本模块)。
     签名口径与 ToolLedger 一致: f"{tool_name}:{args_hash}"。
+
+    注:call.parsed_args 对坏 JSON 抛 ValueError(模型流式可能产出残缺 JSON)。
+    此时无法计算签名 → 放行进 allowed,让 ToolHub 的 schema 校验产出指导性错误
+    喂回模型,自纠回路接住(比在此处静默丢弃更安全)。
     """
     allowed: list[StepToolCall] = []
     rejected: list[str] = []
     for call in calls:
-        sig = f"{call.name}:{args_hash_of(call.parsed_args)}"
+        try:
+            sig = f"{call.name}:{args_hash_of(call.parsed_args)}"
+        except ValueError:
+            # 坏 JSON → 无法计算签名,放行交 ToolHub schema 校验产指导性错误
+            allowed.append(call)
+            continue
         if sig in state.burned_signatures:
             rejected.append(sig)
         else:

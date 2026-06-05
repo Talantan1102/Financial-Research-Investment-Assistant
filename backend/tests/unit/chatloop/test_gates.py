@@ -17,6 +17,7 @@ filter_burned:
   11. burned_signatures 为空 → 全部放行,被拒列表为空
   12. 调用命中 burned_signatures → 被剔除,返回被拒签名
   13. 部分命中(2 放行 1 被拒)
+  新增. 坏 JSON arguments → 放行进 allowed,rejected 为空(不炸穿 ToolLoop)
 update_burned:
   14. fail_count 达 burn_threshold → 签名进 burned_signatures
   15. fail_count 未达阈值(2 次)→ 不入 burned
@@ -272,6 +273,24 @@ def test_filter_burned_partial_match():
     allowed_names = {c.name for c in allowed}
     assert "web_search" in allowed_names
     assert "get_fin_data" in allowed_names
+
+
+# ---------------------------------------------------------------------------
+# 新增:坏 JSON arguments 的 call 放行进 allowed(不炸穿 ToolLoop)
+# ---------------------------------------------------------------------------
+
+
+def test_filter_burned_bad_json_call_passes_through():
+    """call.parsed_args 对坏 JSON 抛 ValueError → 放行进 allowed,rejected 为空。
+
+    模型流式可能产出残缺 JSON;filter_burned 不应炸穿 ToolLoop,
+    应交 ToolHub schema 校验产指导性错误喂回,由自纠回路接住。
+    """
+    state = _make_state(burned=set())
+    bad_call = StepToolCall(id="bad-id", name="get_stock_quote", arguments="{not json")
+    allowed, rejected = filter_burned([bad_call], state)
+    assert bad_call in allowed
+    assert rejected == []
 
 
 # ---------------------------------------------------------------------------
