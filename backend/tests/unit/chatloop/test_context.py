@@ -544,3 +544,30 @@ def test_downgrade_pairing_intact():
 
     actual_ids = {m["tool_call_id"] for m in tool_msgs}
     assert expected_ids == actual_ids
+
+
+# ---------------------------------------------------------------------------
+# 18. 前缀稳定:降级场景下第二圈前 K 条仍完全相同
+# ---------------------------------------------------------------------------
+
+
+def test_prefix_stability_with_prior_downgrade():
+    """前缀稳定测试的降级场景:第一圈发生了降级,第二圈 assemble 前 K 条仍完全相同。"""
+    deps = _make_deps(downgrade_char_threshold=1320)
+    big = "茅" * 1400
+    messages = [
+        {"role": "user", "content": "q"},
+        _tool_call_msg("c1", "get_stock_quote", {"ts_code": "600519.SH"}),
+        _tool_result_msg("c1", big),
+        _tool_call_msg("c2", "web_search", {"query": "test"}),
+        _tool_result_msg("c2", "small"),
+    ]
+    state = _make_state(messages=messages, step=2)
+    round1 = assemble_context(state, deps)
+    K = len(round1) - 1
+    assert "[全文已缓存" in state.messages[2]["content"], "setup: downgrade must fire"
+    state.messages.append({"role": "assistant", "content": "done"})
+    state.step = 3
+    round2 = assemble_context(state, deps)
+    for i in range(K):
+        assert round1[i] == round2[i], f"prefix mismatch at idx={i}"

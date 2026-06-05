@@ -29,7 +29,10 @@ _CJK_HIGH = "鿿"
 
 
 def estimate_tokens(text: str) -> int:
-    """CJK 字符按 1.65 字符/token,其余按 4 字符/token(qwen 官方口径,spec § 2.2)。"""
+    """CJK 字符按 1.65 字符/token,其余按 4 字符/token(qwen 官方口径,spec § 2.2)。
+
+    中文标点(,。等)在 CJK 区间外按 /4 计,轻微低估可接受(真实值走 usage 回填)。
+    """
     cjk = sum(1 for ch in text if _CJK_LOW <= ch <= _CJK_HIGH)
     other = len(text) - cjk
     return math.ceil(cjk / 1.65 + other / 4)
@@ -131,36 +134,31 @@ def _downgrade_old_tool_messages(
         # 内容长度检查
         if not isinstance(content, str) or len(content) <= threshold:
             continue
-        # 反查 assistant 消息,获取工具名
+        # 反查 assistant 消息,一次遍历同时获取工具名与 cache_key
         assistant_msg = _find_assistant_before_tool(messages, idx)
-        # 保护:load_skill 的 tool 消息
         tool_call_id = msg.get("tool_call_id")
         tool_name: str | None = None
+        cache_key: str | None = None
         if assistant_msg is not None:
             for tc in assistant_msg.get("tool_calls", []):
                 if tc.get("id") == tool_call_id:
                     tool_name = tc.get("function", {}).get("name")
-                    break
-        if tool_name == "load_skill":
-            continue
-
-        # 反查 cache_key
-        cache_key: str | None = None
-        if assistant_msg is not None and tool_name is not None:
-            # 找到对应 tool_call 的 arguments
-            for tc in assistant_msg.get("tool_calls", []):
-                if tc.get("id") == tool_call_id:
                     raw_args = tc.get("function", {}).get("arguments", "{}")
                     try:
                         args_dict = json.loads(raw_args)
                     except (json.JSONDecodeError, ValueError):
                         args_dict = {}
-                    entry = state.ledger.find_success(
-                        tool_name=tool_name, args=args_dict
-                    )
-                    if entry is not None:
-                        cache_key = entry.cache_key
+                    if tool_name is not None:
+                        entry = state.ledger.find_success(
+                            tool_name=tool_name, args=args_dict
+                        )
+                        if entry is not None:
+                            cache_key = entry.cache_key
                     break
+
+        # 保护:load_skill 的 tool 消息
+        if tool_name == "load_skill":
+            continue
 
         ref = cache_key if cache_key is not None else "n/a"
         digest = content[:200]
