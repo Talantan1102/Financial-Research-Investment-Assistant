@@ -84,6 +84,25 @@ def _fact_to_text(session_factory: Any, edge: Any) -> str:
     )
 
 
+class _FlatEmbedAdapter:
+    """冒烟发现:embedding_factory 的 embed(str) 返回批形态 [[floats]],
+    而 retriever.vector_search 期望平的 [floats](data=[query_vec] 再包一层),
+    导致 Milvus struct.error: required argument is not a float。
+    接口漂移在 wiring 层适配,不动双方。"""
+
+    def __init__(self, inner: Any) -> None:
+        self._inner = inner
+
+    def embed(self, text: str) -> Any:
+        v = self._inner.embed(text)
+        if isinstance(v, list) and v and isinstance(v[0], list) and isinstance(text, str):
+            return v[0]
+        return v
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
 class _BoundRetriever:
     """把 HierarchicalMemory.archival_memory_search 绑定到评估 user,产出文本化事实。"""
 
@@ -101,6 +120,7 @@ async def build_live_runners() -> tuple[Any, Any]:
     """构造 (write_runner, read_runner):真 PG + 真抽取 + 真冲突消解 + 真检索 + 真裁判。"""
     import os
 
+    import app.models.user  # noqa: F401 — 注册 users 表进 metadata,否则 memory 模型 FK 解析失败
     from app.core.database import SessionLocal
     from app.memory.conflict_resolver import ConflictResolver
     from app.memory.extractor import LLMExtractor
@@ -113,7 +133,7 @@ async def build_live_runners() -> tuple[Any, Any]:
     from eval.memory_dialogue.write_phase import WritePhaseRunner
 
     llm = build_llm_service_from_env()
-    embed = build_embedding_service_from_env()
+    embed = _FlatEmbedAdapter(build_embedding_service_from_env())
     extractor = LLMExtractor(llm_client=llm)
     judge = ConflictResolver(llm_client=llm)
 

@@ -47,6 +47,16 @@ def main(argv: list[str] | None = None) -> int:
         all_writes.extend(writes)
 
     table = build_score_table(all_probes, all_writes)
+    # 红灯明细(fail loud:每个红灯必须能指出写侧还是读侧、库里实际长什么样)
+    for w in all_writes:
+        mark = "✓" if w.passed else "✗"
+        print(f"[写侧 {mark}] session {w.after_session} 后 {w.check_type}: {w.detail}")
+    for r in all_probes:
+        mark = "✓" if r.final_passed else "✗"
+        print(f"[读侧 {mark}] ({r.probe.dimension}/{r.probe.tier}) {r.probe.q}")
+        print(f"    答: {r.answer[:160]}")
+        print(f"    判: hard={r.hard_passed} judge={r.judge_passed} "
+              f"invariance={r.invariance_passed} | {r.detail[:200]}")
     if args.report == "json":
         payload: dict[str, object] = {
             f"{d}|{t}": v for (d, t), v in table.cells.items()
