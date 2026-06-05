@@ -60,7 +60,8 @@ class DbAssertionEngine:
         handler = getattr(self, f"_check_{check.type}", None)
         if handler is None:
             return CheckResult(check.type, False, f"未知断言类型: {check.type}")
-        return handler(**check.params)  # type: ignore[no-any-return]
+        result: CheckResult = handler(**check.params)
+        return result
 
     # ---- 断言类型 ----------------------------------------------------------
 
