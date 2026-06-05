@@ -150,12 +150,17 @@ async def test_idempotent_double_insert_same_episode_raises_integrity(
 
 
 @pytest.mark.integration
-async def test_age_failure_rolls_back_pg(
+async def test_age_failure_degrades_pg_still_writes(
     pg_memory_fixture: dict[str, Any],
     pg_memory_session_factory: Callable[[], Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """AGE Cypher 失败 → PG 主事务 rollback (spec § 4 失败处理矩阵)."""
+    """AGE Cypher 失败 → 边镜像降级,PG 照常写入(政策变更,2026-06-05 冒烟发现 #5)。
+
+    原契约"AGE 失败 → PG rollback"(spec § 4 失败矩阵)在无 AGE 扩展的环境
+    (生产 industry_assistant 库连可装的 age 都没有)下等于所有写入永远失败。
+    新契约:PG 是 SSOT,AGE 镜像 best-effort——与节点镜像、Milvus outbox 同哲学。
+    """
     uid, sid = _seed_user_session(pg_memory_fixture)
 
     sess = pg_memory_session_factory()
@@ -192,26 +197,26 @@ async def test_age_failure_rolls_back_pg(
     mock_milvus = MagicMock()
     memory = _build_memory(pg_memory_session_factory, milvus=mock_milvus)
 
-    with pytest.raises(RuntimeError, match="AGE Cypher syntax"):
-        await memory.archival_memory_insert(
-            user_id=uid,
-            content={
-                "rel_type": "HOLDS",
-                "source_entity_type": "User",
-                "source_label": "User",
-                "target_entity_type": "Stock",
-                "target_label": "600519.SH",
-                "valid_from": datetime(2026, 5, 1, tzinfo=UTC),
-                "valid_to": None,
-                "properties": {},
-            },
-            reasoning="x",
-            importance=0.9,
-            evidence_quote="x",
-            episode_id=ep_id,
-        )
+    edge = await memory.archival_memory_insert(
+        user_id=uid,
+        content={
+            "rel_type": "HOLDS",
+            "source_entity_type": "User",
+            "source_label": "User",
+            "target_entity_type": "Stock",
+            "target_label": "600519.SH",
+            "valid_from": datetime(2026, 5, 1, tzinfo=UTC),
+            "valid_to": None,
+            "properties": {},
+        },
+        reasoning="x",
+        importance=0.9,
+        evidence_quote="x",
+        episode_id=ep_id,
+    )
+    assert edge is not None, "AGE 镜像失败不得阻断 PG 写入(降级语义)"
 
-    # Verify PG rolled back: no edge written
+    # Verify PG wrote the edge despite AGE mirror failure
     sess = pg_memory_session_factory()
     try:
         rows = (
@@ -219,11 +224,6 @@ async def test_age_failure_rolls_back_pg(
             .scalars()
             .all()
         )
-        assert len(rows) == 0
-        # episode also still extracted_at IS NULL
-        ep_row = sess.execute(
-            select(ChatMemoryEpisode).where(ChatMemoryEpisode.episode_id == ep_id)
-        ).scalar_one()
-        assert ep_row.extracted_at is None
+        assert len(rows) == 1
     finally:
         sess.close()

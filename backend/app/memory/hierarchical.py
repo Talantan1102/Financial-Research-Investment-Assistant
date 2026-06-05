@@ -424,14 +424,25 @@ class HierarchicalMemory:
 
             new_edge_id = cast(UUID, new_edge.edge_id)
 
-            # Step 7a: AGE same-txn Cypher CREATE — failure rolls back PG (spec § 4 失败矩阵)
-            age_create_edge(
-                session=session,
-                edge_id=new_edge_id,
-                source_node_id=src_node_id,
-                target_node_id=tgt_node_id,
-                rel_type=rel_type,
-            )
+            # Step 7a: AGE Cypher CREATE 边镜像 — best-effort(2026-06-05 冒烟发现 #5)。
+            # 原"failure rolls back PG"的原子语义在无 AGE 扩展的环境(生产
+            # industry_assistant 库连可装的 age 都没有)下等于"所有写入永远失败";
+            # PG 是 SSOT,镜像失败降级为 warning(与节点镜像、Milvus outbox 同哲学,
+            # age_sync 内部已用 SAVEPOINT 保证失败不毒事务)。
+            try:
+                age_create_edge(
+                    session=session,
+                    edge_id=new_edge_id,
+                    source_node_id=src_node_id,
+                    target_node_id=tgt_node_id,
+                    rel_type=rel_type,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "AGE edge mirror degraded (best-effort, PG 仍为 SSOT): %s; edge_id=%s",
+                    exc,
+                    new_edge_id,
+                )
 
             # Step 7b: Milvus outbox (separate semantics — failure absorbed via outbox)
             edge_text = build_edge_embed_text(

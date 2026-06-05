@@ -49,3 +49,59 @@ def test_age_failure_does_not_poison_outer_transaction(pg_session: Any) -> None:
     # 外层事务必须没被毒死:任何后续语句都应正常执行
     row = pg_session.execute(text("SELECT 42")).scalar()
     assert row == 42, "AGE 失败毒死了外层事务(InFailedSqlTransaction)"
+
+
+async def test_archival_insert_succeeds_without_age(
+    pg_memory_session_factory: Callable[[], Any],
+) -> None:
+    """冒烟发现 #5:生产库无 AGE 扩展,边镜像若坚持原子语义则所有写入永远失败。
+    修复后:AGE 边镜像降级为 best-effort(与节点镜像、Milvus outbox 同哲学),
+    PG 仍是 SSOT,无 AGE 环境下 insert 必须成功。"""
+    from datetime import UTC, datetime
+
+    from app.memory.hierarchical import HierarchicalMemory
+
+    s = pg_memory_session_factory()
+    user_id, sess_id = uuid4(), uuid4()
+    s.execute(
+        text(
+            'INSERT INTO users (id, username, email, hashed_password, is_active) '
+            'VALUES (:i, :u, :e, :p, true)'
+        ),
+        {'i': str(user_id), 'u': f'age5-{user_id.hex[:8]}',
+         'e': f'age5-{user_id.hex[:8]}@t.local', 'p': 'x'},
+    )
+    s.execute(
+        text('INSERT INTO chat_sessions (id, user_id, title) VALUES (:s, :u, :t)'),
+        {'s': str(sess_id), 'u': str(user_id), 't': 'age5'},
+    )
+    s.commit()
+    from app.memory.models import ChatMemoryEpisode
+
+    ep = ChatMemoryEpisode(
+        user_id=user_id, session_id=sess_id, episode_index=1,
+        user_message_text='白酒看多 就认提价权', agent_response_text='',
+    )
+    s.add(ep)
+    s.commit()
+
+    memory = HierarchicalMemory(
+        pg_session_factory=pg_memory_session_factory,
+        age_executor=None, milvus_client=None, embed_service=None,
+        llm_extractor=None, llm_judge=None,
+    )
+    edge = await memory.archival_memory_insert(
+        user_id=user_id,
+        content={
+            'rel_type': 'EXPRESSED_VIEW',
+            'source_entity_type': 'User', 'source_label': 'User',
+            'target_entity_type': 'Industry', 'target_label': '白酒',
+            'valid_from': datetime(2025, 1, 6, tzinfo=UTC), 'valid_to': None,
+            'properties': {'stance': '看多'},
+        },
+        reasoning='test', importance=0.9,
+        evidence_quote='白酒看多 就认提价权',
+        episode_id=ep.episode_id,
+    )
+    assert edge is not None, '无 AGE 环境下 insert 不得失败(边镜像应降级)'
+    s.close()
