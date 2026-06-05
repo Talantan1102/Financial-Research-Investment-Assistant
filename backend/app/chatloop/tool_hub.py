@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from app.agents.schemas import ToolResult
 from app.chatloop.events import EventType, LoopEvent, SeqCounter
+from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_docs import (
     CORE_TOOLS,
@@ -33,7 +34,7 @@ from app.chatloop.tool_docs import (
 )
 from app.services.llm_step import StepToolCall
 from app.services.tool_result_cache import CacheHit, ToolResultCache
-from app.tools.base import Tool
+from app.tools.base import Tool, ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +285,10 @@ class ToolHub:
 
         async def _compute() -> dict[str, Any]:
             validated = tool.args_schema.model_validate(args)
+            # InProcessTool(记忆/控制类,spec § 3.3)需要 turn 级 state(user_id /
+            # messages / ledger);其余 Tool 走纯 run(args)。唯一一处 isinstance 分支。
+            if isinstance(tool, InProcessTool):
+                return await tool.run_with_state(validated, state)
             return await tool.run(validated)
 
         is_cache_hit = False
@@ -402,10 +407,16 @@ class ToolHub:
     def _guidance_error(tool: Tool, exc: BaseException) -> str:
         """把执行期异常映射成指导性错误文案。
 
+        - 预格式化 ToolError(msg 以 "[" 开头,如 in-process 工具的 [参数缺失]/
+          [已拦截])→ 原样透出(不二次包 [执行失败],保证指导文案逐字到模型);
         - ValidationError → "[参数校验失败] {简述}。参数要求:{字段名列表}"
         - Timeout → "[超时] 稍后重试或换数据源"
         - 其它 → "[执行失败] {type}: {msg 截 200}"
         """
+        if isinstance(exc, ToolError):
+            msg = str(exc)
+            if msg.startswith("["):
+                return msg[:_ERR_MSG_LEN]
         if isinstance(exc, ValidationError):
             fields = ", ".join(tool.args_schema.model_fields.keys())
             brief = str(exc).splitlines()[0][:_ERR_MSG_LEN]
