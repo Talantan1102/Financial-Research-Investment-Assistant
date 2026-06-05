@@ -38,6 +38,13 @@ from app.services.tool_result_cache import ToolResultCache
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# 模块级常量:chat 技能目录(供测试及 _live_deps 等导入,避免路径重复声明)
+# ---------------------------------------------------------------------------
+from pathlib import Path as _Path
+
+# chat 模式 7 技能集目录:backend/claude_skills
+CHAT_SKILLS_ROOT: _Path = _Path(__file__).resolve().parent.parent.parent / "claude_skills"
 
 # ---------------------------------------------------------------------------
 # 重依赖单例容器
@@ -123,13 +130,23 @@ async def build_heavy_singletons(
 
         memory = build_memory_from_env()
 
-    # 4. SkillLoader / SkillExecutor(skills_root = backend/app/skills)
+    # 4. SkillLoader / SkillExecutor
+    #    目录分工:
+    #      backend/claude_skills  — chat 模式 7 技能集(data_analysis / deep_research /
+    #                               financial_analysis / market_data / risk_assessment /
+    #                               sector_analysis / web_research),SkillLoader 兼容格式;
+    #      backend/app/skills     — v0.8.5 深研 SOP 技能(financial_research + 框架代码),
+    #                               由 SkillBundle / load_skill 独立加载,不走 SkillLoader。
     from app.skills.skill_executor import SkillExecutor
     from app.skills.skill_loader import SkillLoader
 
     if skills_root is None:
-        # backend/app/skills —— 本模块在 backend/app/chatloop 下,parent.parent/skills
-        skills_root = Path(__file__).resolve().parent.parent / "skills"
+        # backend/claude_skills —— 本模块在 backend/app/chatloop 下:
+        #   Path(__file__).parent = backend/app/chatloop
+        #   .parent               = backend/app
+        #   .parent               = backend
+        #   / "claude_skills"     = backend/claude_skills
+        skills_root = Path(__file__).resolve().parent.parent.parent / "claude_skills"
     skills_root = Path(skills_root)
     if workdir_root is None:
         workdir_root = skills_root.parent / ".skill_workdirs"
@@ -235,6 +252,7 @@ class RedisSteerSource:
 
 
 __all__ = [
+    "CHAT_SKILLS_ROOT",
     "ChatLoopComponents",
     "HeavySingletons",
     "RedisSteerSource",

@@ -31,23 +31,23 @@ _SK_GOLDEN = _REPO_ROOT / "backend" / "eval" / "skill_trigger" / "golden.jsonl"
 
 # 条数下限(spec § 5.2 / § 3.2 追加):
 #   tool_selection ≥ 24(8 金融 + memory/kb 互斥 + 升级正反 + 延迟搜 + 弃权);
-#   skill_trigger:spec 规划口径是"7 技能 × ≥3 = 21+",但当前 skills_root **只有 1 个
-#   真实技能**(financial_research,见 SKILL.md / SkillLoader 实测)。本任务是离线
-#   评测、不创建技能,故按真实清单落地:financial_research 多措辞正例 + 近似负例,
-#   下限取 15(待新技能落地后随 golden 追加抬高)。
+#   skill_trigger:7 技能 × 3 = 21(2 正例 + 1 near-miss 负例),下限 21。
 _TS_FLOOR = 24
-_SK_FLOOR = 15
+_SK_FLOOR = 21
 
 
 # --- 真实技能清单(防拼错对照源)-------------------------------------------
 
 
 def _real_skill_names() -> set[str]:
-    """读真件 SkillLoader,返回 skills_root 下的真实技能 name 集合。"""
+    """读真件 SkillLoader,返回 CHAT_SKILLS_ROOT 下的真实技能 name 集合。
+
+    与 worker_wiring.CHAT_SKILLS_ROOT 共享同一路径常量,保证对照源与生产运行时一致。
+    """
+    from app.chatloop.worker_wiring import CHAT_SKILLS_ROOT
     from app.skills.skill_loader import SkillLoader
 
-    skills_root = _REPO_ROOT / "backend" / "app" / "skills"
-    loader = SkillLoader(skills_root=skills_root)
+    loader = SkillLoader(skills_root=CHAT_SKILLS_ROOT)
     return {m.name for m in loader.load_l1()}
 
 
