@@ -27,7 +27,7 @@ sessions:
       - a: "(分析当前几个高低切板块的位置与分歧;问用户自己有没有偏空的方向)"
       - u: "我有个板块是真不看好 消费 我看空消费"
       - a: "(回应;追问:看空消费是基于哪条逻辑——需求、估值还是别的?)"
-      - u: "需求起不来呗 大家都没钱花了 这逻辑我觉得短期翻不了身"
+      - u: "需求起不来呗 都没钱花 短期我看翻不了身"
       - a: "(复述确认:用户当前对消费板块持看空观点,逻辑是需求疲弱、短期难修复)"
       - u: "嗯就这意思 这个我盯了挺久了"
       - a: "(记录:看空消费,逻辑需求疲弱)"
@@ -70,7 +70,7 @@ sessions:
     turns:
       - u: "前段时间咱聊过的板块 我自己掳了一遍 有个地方我得改口"
       - a: "(请用户说明要改的是哪个判断)"
-      - u: "我那天说岔了 我看空的是医药 消费我没看空过 当时嘴瓢了"
+      - u: "诶不对 我那天说岔了把 我看空的明明是医药 消费我啥时候看空过。。嘴瓢了"
       - a: "(确认要点:用户澄清此前那句『看空消费』是口误说错板块;真正看空的对象是医药板块,消费从未看空)"
       - u: "对 消费我顶多算中性 真没看空 我盯的是集采那个事 那是医药"
       - a: "(复述确认:撤回此前看空消费的表述;改记为看空医药,逻辑集采压制;消费当前无看空观点)"
@@ -104,40 +104,40 @@ sessions:
     turns:
       - u: "银行张了一波了 这位置我有点犹豫了"
       - a: "(分析银行近期涨幅与股息率收敛、性价比变化)"
-      - u: "股息率被买下来了 我这底仓逻辑没原来那么硬了 先收成中性吧"
+      - u: "股息率都买下来了 这底仓逻辑没那么香了 先收成中性把"
       - a: "(确认观点演化:银行由看多转中性,原因股息率收敛、性价比下降;逻辑高股息不再支撑看多)"
       - u: "嗯 不看空 就是不像之前那么想拿了"
       - a: "(记录观点更新:银行由看多转为中性,原高股息逻辑因股息率收敛而弱化)"
 
 db_assertions:
-  # S1 后:口误那条被当成真观点写进图(看空消费)——抽取器该捕捉,这是后面要撤回的对象。
+  # 第1个session  后:口误那条被当成真观点写进图(看空消费)——抽取器该捕捉,这是后面要撤回的对象。
   - after: 1
     assert:
       - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 消费, value_contains: ["看空", "需求"]}
       - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 消费, expected_date: "2025-02-10"}
-  # S2 后:银行看多(后面走真演化的那条对照线)。
+  # 第2个session  后:银行看多(后面走真演化的那条对照线)。
   - after: 2
     assert:
       - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 银行, value_contains: ["看多", "高股息"]}
-  # S4 后:医药只是 STUDIED(研究过),此时还没有方向性观点——别提前把看空写上去。
+  # 第4个session  后:医药只是 STUDIED(研究过),此时还没有方向性观点——别提前把看空写上去。
   - after: 4
     assert:
       - {type: fact_active, rel_type: STUDIED, target_label: 医药, value_contains: ["集采"]}
       # 审稿必修:原 no_fact_written(EXPRESSED_VIEW) 在消费/银行观点已存在时必然误红;
       # 改为「本 session 不得给医药新增观点边」(基线快照=灌入前,医药此时应为 0)
       - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 医药}
-  # S6 后(撤回更正核心):看空消费这条是口误,被事务性撤回——当前不该有 active 的看空消费;
+  # 第6个session  后(撤回更正核心):看空消费这条是口误,被事务性撤回——当前不该有 active 的看空消费;
   #   看空医药立起来;银行看多不变。撤回 != 演化,所以消费侧不留「曾经看空」的合法历史版本。
   - after: 6
     assert:
       - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 医药, value_contains: ["看空", "集采"]}
       - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 银行, value_contains: ["看多"]}
       - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 消费, min_count: 1}
-  # S8 后(去重搭车):又确认一次消费没看空,纯复核不产生新事实——消费边数不得增。
+  # 第8个session  后(去重搭车):又确认一次消费没看空,纯复核不产生新事实——消费边数不得增。
   - after: 8
     assert:
       - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 消费}
-  # S9 后(真演化对照):银行看多→中性是基本面真变,旧版本留在作废链上可回溯(与消费口误撤回形成对照)。
+  # 第9个session  后(真演化对照):银行看多→中性是基本面真变,旧版本留在作废链上可回溯(与消费口误撤回形成对照)。
   - after: 9
     assert:
       - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 银行, value_contains: ["中性"]}
@@ -151,7 +151,7 @@ probes:
     q: "我曾经看空过消费吗?"
     expect_contain: []
     expect_not: ["看空"]
-    judge_rubric: "好答=没有/那是口误已更正/曾说错板块。坏答=把口误当历史观点翻出来,确认『你看空过消费』。轨迹是:S1 说看空消费实为口误,S6 已撤回并澄清真正看空的是医药——必须答出消费从未真正看空(或那是说岔了已纠正),不得把撤回的口误当作一段曾经成立的历史观点"
+    judge_rubric: "好答=没有/那是口误已更正/曾说错板块。坏答=把口误当历史观点翻出来,确认『你看空过消费』。轨迹是:第1次对话说的看空消费实为口误,第6次对话已撤回并澄清真正看空的是医药——必须答出消费从未真正看空(或那是说岔了已纠正),不得把撤回的口误当作一段曾经成立的历史观点"
   - tier: 直球
     dimension: 单跳召回
     q: "我现在看空的板块是哪个?"
