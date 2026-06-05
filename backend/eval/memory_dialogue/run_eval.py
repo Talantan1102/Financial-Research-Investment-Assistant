@@ -30,6 +30,9 @@ async def _run_one(script_path: Path) -> tuple[list, list]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     parser = argparse.ArgumentParser(description="对话流记忆评估 runner")
     parser.add_argument("--script", help="单段脚本 yaml 路径")
     parser.add_argument("--all", action="store_true", help="跑 scripts/ 全部")

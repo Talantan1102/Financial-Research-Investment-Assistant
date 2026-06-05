@@ -145,8 +145,13 @@ async def build_live_runners() -> tuple[Any, Any]:
     try:
         from pymilvus import MilvusClient
 
+        from app.memory.milvus_setup import ensure_chat_memory_edge_collection
+
         host = os.environ.get("MILVUS_HOST", "127.0.0.1")
         port = int(os.environ.get("MILVUS_PORT", "19530"))
+        # 冒烟发现:collection 由 app_main lifespan 幂等创建,独立 CLI 不走 lifespan
+        # → DescribeCollectionException。评估前显式 ensure(幂等,已存在则 no-op)。
+        ensure_chat_memory_edge_collection(host=host, port=port)
         milvus_client = MilvusClient(uri=f"http://{host}:{port}")
     except Exception as exc:  # noqa: BLE001
         logger.warning("eval live wiring: Milvus 不可用,向量路降级: %s", exc)
