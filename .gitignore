@@ -1,5 +1,6 @@
-# 个人 / 临时(不入库)
-.claude/
+# 个人 / 临时(不入库);.claude/skills/ 例外——项目级 skill 跟代码走(2026-06-05 起)
+.claude/*
+!.claude/skills/
 *.pre-v*.bak
 # 注:CLAUDE.md 历史上当个人笔记用,2026-05-07 起改作项目级共享上下文(跨机 git 同步入口),已入库
 
@@ -80,3 +81,6 @@ celerybeat-schedule.db
 
 # 本机联调用的 docker-compose 覆盖(镜像源/AGE 退化等),仅本地用,勿入库
 docker-compose.override.yml
+
+# 调研期克隆的第三方参考仓库(只读对照,不入库)
+reference_repo/
