@@ -10,6 +10,7 @@ import json
 
 import pytest
 from app.chatloop.events import LoopEvent, SeqCounter
+from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState, args_hash_of
 from app.chatloop.tool_hub import ToolHub
 from app.services.llm_step import StepToolCall
@@ -58,6 +59,27 @@ class FakeTool(Tool):
         return dict(self._output)
 
 
+class FakeInProcessTool(InProcessTool):
+    """记 run_with_state 调用次数的假 InProcessTool;可配固定 output。"""
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        output: dict | None = None,
+        description: str = "fake inprocess tool",
+    ) -> None:
+        self.name = name
+        self.description = description
+        self.args_schema = _QuoteArgs
+        self._output = output if output is not None else {"ok": True}
+        self.call_count = 0
+
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:  # type: ignore[override]
+        self.call_count += 1
+        return dict(self._output)
+
+
 class FakeRegistry:
     """最小 ToolRegistry 替身:持 dict[str, Tool],list_for_llm + get。"""
 
@@ -86,11 +108,12 @@ class _Collector:
 
 
 class FakeCache:
-    """get_or_compute 返回固定 (dict, HIT/MISS);记 cache_key 调用。"""
+    """get_or_compute 返回固定 (dict, HIT/MISS);记 cache_key 调用次数。"""
 
     def __init__(self, hit: CacheHit = CacheHit.HIT) -> None:
         self._hit = hit
         self.computed = False
+        self.call_count = 0  # get_or_compute 被调次数
 
     @staticmethod
     def cache_key(user_id: str, tool_name: str, args: dict) -> str:
@@ -99,6 +122,7 @@ class FakeCache:
         return ToolResultCache.cache_key(user_id, tool_name, args)
 
     async def get_or_compute(self, *, user_id, tool_name, args, compute_fn, ttl_seconds=None):
+        self.call_count += 1
         if self._hit == CacheHit.HIT:
             return {"cached": True}, CacheHit.HIT
         self.computed = True
@@ -510,3 +534,77 @@ async def test_shared_seq_counter_no_duplicate_seq():
         assert seqs[i] == seqs[i - 1] + 1, (
             f"seq 不连续: 位置 {i-1}={seqs[i-1]}, 位置 {i}={seqs[i]}"
         )
+
+
+# ---------------------------------------------------------------------------
+# InProcessTool 绕过 cache 与台账去重(状态变更工具不可缓存)
+# ---------------------------------------------------------------------------
+
+
+async def test_inprocess_tool_bypasses_cache_always_runs():
+    """InProcessTool 同参两次 dispatch → run_with_state 被调 2 次;cache(注入 Fake)零调用。
+
+    状态变更类工具(memory_write / offer_deep_research / load_skill)不可缓存:
+    同参缓存命中会导致 run_with_state 被跳过,状态更新静默丢失。
+    """
+    tool = FakeInProcessTool("memory_write", output={"written": True})
+    cache = FakeCache(hit=CacheHit.HIT)  # 若 InProcessTool 误走 cache 则 HIT 直返
+    hub = ToolHub(cache=cache)
+    hub.register_inprocess([tool])
+    state = _state()
+    args = {"ts_code": "600519.SH"}
+
+    # 第一次
+    r1 = await hub.dispatch([_call("memory_write", args)], state)
+    assert r1[0].success is True
+    assert tool.call_count == 1
+
+    # 第二次(同参)
+    r2 = await hub.dispatch([_call("memory_write", args)], state)
+    assert r2[0].success is True
+    # run_with_state 仍被调(共 2 次),cache 的 get_or_compute 从未被调
+    assert tool.call_count == 2
+    assert cache.call_count == 0  # InProcessTool 完全绕过 cache,get_or_compute 零调用
+
+
+async def test_registry_tool_still_uses_cache():
+    """回归:registry 后端只读工具(非 InProcessTool)仍走 cache。"""
+    reg_tool = FakeTool("get_stock_quote", output={"price": 1600})
+    cache = FakeCache(hit=CacheHit.HIT)
+    hub = ToolHub(cache=cache)
+    hub.register_registry(FakeRegistry([reg_tool]))
+    state = _state()
+    args = {"ts_code": "600519.SH"}
+
+    results = await hub.dispatch([_call("get_stock_quote", args)], state)
+    assert results[0].success is True
+    # cache HIT → tool.run 未被调(compute_fn 未执行)
+    assert reg_tool.call_count == 0
+    # cache_key 已写入台账
+    entry = state.ledger.entries[0]
+    assert entry.cache_key is not None
+
+
+async def test_inprocess_tool_not_deduped_by_ledger():
+    """InProcessTool 不被台账去重短路:同参第二次仍真执行,台账记两行。
+
+    memory_write 同参二次调用不应被 ledger find_success 短路——写入是业务意图。
+    台账仍两行(spinning 检测依赖完整轨迹)。
+    """
+    tool = FakeInProcessTool("memory_write", output={"written": True})
+    hub = ToolHub()
+    hub.register_inprocess([tool])
+    state = _state()
+    args = {"ts_code": "600519.SH"}
+
+    await hub.dispatch([_call("memory_write", args)], state)
+    assert tool.call_count == 1
+    assert len(state.ledger.entries) == 1
+
+    # 第二次同参
+    r2 = await hub.dispatch([_call("memory_write", args)], state)
+    assert r2[0].success is True
+    # 仍真执行(未被 ledger find_success 短路)
+    assert tool.call_count == 2
+    # 台账两行(轨迹完整,spinning 检测可用)
+    assert len(state.ledger.entries) == 2

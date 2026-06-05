@@ -473,10 +473,9 @@ async def test_escalation_unique_done_after_packet_draft(
     seeded = await _seed_session_and_task(pg_async_session_factory, status="running")
     tid = seeded["task_id"]
 
-    # offer_deep_research 是 mutate-state 控制工具;ToolResultCache 按 (user_id,
-    # tool_name, args) 缓存且 PG 不 rollback,故 reason 用 uuid 唯一化,避免与其它
-    # escalation 测试(同 user_id=None / 同 args)撞 cache HIT → escalate 不触发。
-    reason = f"需要深度尽调-{uuid.uuid4().hex[:8]}"
+    # offer_deep_research 是 InProcessTool(mutate-state 控制工具);修复后完全绕过
+    # ToolResultCache,同参重复调用也真执行,无需 uuid 唯一化。
+    reason = "需要深度尽调"
     llm = ScriptedStepClient(
         [
             _step(tool_calls=[_call("offer_deep_research", {"reason": reason})]),

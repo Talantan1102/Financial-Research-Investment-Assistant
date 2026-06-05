@@ -254,32 +254,46 @@ class ToolHub:
             self._safe_record(state, name, args, error, success=False, cache_key=None)
             return self._fail_result(name, args, error)
 
-        # 3. ledger 去重:同 (tool, args) 本 turn 已成功过 → 不重跑
-        hit = state.ledger.find_success(tool_name=name, args=args)
-        if hit is not None:
-            output = {
-                "cached_digest": hit.digest,
-                "note": "本轮已查过,结果同前(完整内容见 ref)",
-                "ref": hit.cache_key,
-            }
-            await self._emit("tool_end", state.step, tool=name, digest=hit.digest, cached=True)
-            # 去重命中也记一条台账(success,带原 cache_key),保持轨迹完整
-            self._safe_record(
-                state, name, args, hit.digest, success=True, cache_key=hit.cache_key
-            )
-            return ToolResult(
-                tool_name=name,
-                args=args,
-                success=True,
-                output=output,
-                latency_ms=0,
-            )
+        # 3. ledger 去重:同 (tool, args) 本 turn 已成功过 → 不重跑。
+        #    InProcessTool(记忆写入/控制/技能类)是状态变更工具,同参二次调用不代表
+        #    "已有结果可复用"——memory_write 重复写入是业务意图,offer_deep_research
+        #    重复触发需真执行以确保 escalate_offered 置位。台账去重短路仅对 registry
+        #    后端的只读 MCP 数据工具生效;InProcessTool 的幂等由工具自身管理。
+        is_inprocess = isinstance(tool, InProcessTool)
+        if not is_inprocess:
+            hit = state.ledger.find_success(tool_name=name, args=args)
+            if hit is not None:
+                output = {
+                    "cached_digest": hit.digest,
+                    "note": "本轮已查过,结果同前(完整内容见 ref)",
+                    "ref": hit.cache_key,
+                }
+                await self._emit("tool_end", state.step, tool=name, digest=hit.digest, cached=True)
+                # 去重命中也记一条台账(success,带原 cache_key),保持轨迹完整
+                self._safe_record(
+                    state, name, args, hit.digest, success=True, cache_key=hit.cache_key
+                )
+                return ToolResult(
+                    tool_name=name,
+                    args=args,
+                    success=True,
+                    output=output,
+                    latency_ms=0,
+                )
 
         # 4. tool_call(完整 args,spec § 5.1)+ tool_start
         await self._emit("tool_call", state.step, tool=name, args=args)
         await self._emit("tool_start", state.step, tool=name)
 
-        # 5. 执行(cache 注入则包一层 get_or_compute)
+        # 5. 执行:
+        #    - InProcessTool(记忆/技能/控制类)是状态变更或本地廉价操作,完全绕过
+        #      cache——同参缓存命中会导致 run_with_state 被跳过:
+        #        * offer_deep_research: escalate_offered 不置位 → 升级静默失败
+        #        * memory_write: 写入静默丢失
+        #        * load_skill: active_skill 不置位
+        #      cache_key=None(无缓存键),直接 run_with_state。
+        #    - MCP 只读数据工具(registry 后端)才吃 TTL 缓存(cache 注入则包一层
+        #      get_or_compute),cache_key 按 (user_id, tool_name, args) 生成。
         started = time.perf_counter()
         cache_key: str | None = None
 
@@ -293,7 +307,8 @@ class ToolHub:
 
         is_cache_hit = False
         try:
-            if self._cache is not None:
+            if self._cache is not None and not is_inprocess:
+                # 只读 MCP 数据工具走缓存
                 cache_key = ToolResultCache.cache_key(state.user_id, name, args)
                 output, cache_status = await self._cache.get_or_compute(
                     user_id=state.user_id,
@@ -303,6 +318,7 @@ class ToolHub:
                 )
                 is_cache_hit = cache_status == CacheHit.HIT
             else:
+                # InProcessTool 或无 cache 注入:直接执行,cache_key 保持 None
                 output = await _compute()
         except BaseException as e:  # noqa: BLE001 — hub 不抛:全包成指导性错误
             error = self._guidance_error(tool, e)
