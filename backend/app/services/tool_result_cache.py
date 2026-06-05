@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -58,7 +58,10 @@ class ToolResultCache:
     ) -> tuple[dict[str, Any], CacheHit]:
         ttl = ttl_seconds if ttl_seconds is not None else DEFAULT_TTL_BY_TOOL.get(tool_name, 300)
         key = self.cache_key(user_id, tool_name, args)
-        now = datetime.utcnow()
+        # expires_at 列是 DateTime(timezone=True),psycopg 读回 tz-aware;now 必须同为
+        # tz-aware,否则 row.expires_at > now 抛 "can't compare offset-naive and
+        # offset-aware datetimes"(旧 chat 图用 _NoOpCache 桩,从未触发;chatloop 首次真用)。
+        now = datetime.now(UTC)
 
         async with self._session_factory() as sess:
             row = (
