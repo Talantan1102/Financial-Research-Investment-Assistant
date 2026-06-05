@@ -115,7 +115,12 @@ def _event_payload(event: LoopEvent) -> dict[str, Any]:
     形状:{**event.data, "type", "seq", "step"}。token 事件保持双字段:
     data 里 text 与 content 同值(前端历史约定 TokenEvent.content,后端测试读 text)。
     """
-    payload: dict[str, Any] = {**event.data, "type": event.type, "seq": event.seq, "step": event.step}
+    payload: dict[str, Any] = {
+        **event.data,
+        "type": event.type,
+        "seq": event.seq,
+        "step": event.step,
+    }
     if event.type == "token" and "text" in payload:
         payload.setdefault("content", payload["text"])
     return payload
@@ -255,17 +260,13 @@ async def run_chat_async(
     except CancelledByUser:
         cancelled_by_user = True
         try:
-            await bus.xadd_event(
-                sid_uuid, task_id, {"type": "cancelled", "reason": "user_cancel"}
-            )
+            await bus.xadd_event(sid_uuid, task_id, {"type": "cancelled", "reason": "user_cancel"})
         except Exception as exc:  # noqa: BLE001
             logger.warning("xadd cancelled event failed for task %s: %s", task_id, exc)
     except Exception as exc:  # noqa: BLE001
         loop_error = exc
         try:
-            await bus.xadd_event(
-                sid_uuid, task_id, {"type": "error", "message": str(exc)[:500]}
-            )
+            await bus.xadd_event(sid_uuid, task_id, {"type": "error", "message": str(exc)[:500]})
         except Exception as inner:  # noqa: BLE001
             logger.warning("xadd error event failed for task %s: %s", task_id, inner)
     finally:
@@ -274,12 +275,21 @@ async def run_chat_async(
         with suppress(asyncio.CancelledError):
             await listener_task
 
-        # 终止事件:loop 已 emit done(成功路径),runner 不重复发 done。
-        # cancelled / error_done 由 runner 发(loop 抛异常未走到 emit done)。
+        # 唯一终止 done 的归属:escalate_offered 时 loop 跳过 done(loop.py 修法 A),
+        # 由下面的 _emit_escalation 在升级事件尾部补发唯一终止 done。故凡是会走
+        # _emit_escalation 的 turn,runner 的 finally 不能再发 error_done,否则双终止。
+        will_escalate = (
+            not cancelled_by_user and final_state is not None and bool(final_state.escalate_offered)
+        )
+
+        # 终止事件:loop 已 emit done(成功且非升级路径),runner 不重复发 done。
+        # cancelled / error_done 由 runner 发(loop 抛异常 / cancel 未走到 emit done)。
+        # will_escalate 路径的唯一终止 done 改由 _emit_escalation 补发,这里不发
+        # error_done(即便 loop_error 也提议了升级 —— extractor 失败有 try/finally done 兜)。
         try:
             if cancelled_by_user:
                 await bus.xadd_event(sid_uuid, task_id, {"type": "cancelled"})
-            elif loop_error is not None:
+            elif loop_error is not None and not will_escalate:
                 await bus.xadd_event(sid_uuid, task_id, {"type": "error_done"})
         except Exception as exc:  # noqa: BLE001
             logger.warning("terminal xadd failed for task %s: %s", task_id, exc)
@@ -305,8 +315,12 @@ async def run_chat_async(
         except Exception as exc:  # noqa: BLE001
             logger.debug("TTL refresh skipped for task %s: %s", task_id, exc)
 
-    # 升级后处理(成功路径 + offered):escalate_request + EscalationExtractor + draft
-    if not cancelled_by_user and loop_error is None and final_state is not None:
+    # 升级后处理(offered 即走,不再要求 loop_error is None):escalate_request +
+    # EscalationExtractor + draft + 唯一终止 done。条件与上面的 will_escalate 一致 ——
+    # _emit_escalation 内部仅在 final_state.escalate_offered 时真跑(否则早 return),
+    # 故非升级 turn 进来也无副作用;loop_error 也走是为了补发那条唯一终止 done
+    # (loop 在 escalate 时跳过 done,error_done 又被 will_escalate 挡掉)。
+    if not cancelled_by_user and final_state is not None:
         try:
             await _emit_escalation(
                 bus=bus,

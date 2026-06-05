@@ -149,9 +149,9 @@ class ScriptedStepClient:
                 # 分片流式发 content(模拟流中取消)
                 for idx, piece in enumerate(chunks):
                     await on_delta(StepDelta(kind="content", text=piece))
-                    if (
-                        self._cancel_mid_chunk is not None
-                        and self._cancel_mid_chunk == (cur_round, idx)
+                    if self._cancel_mid_chunk is not None and self._cancel_mid_chunk == (
+                        cur_round,
+                        idx,
                     ):
                         # 已流出本片 → 触发取消;下一片的 on_delta 圈首检查抛 CancelledByUser
                         await self._trigger_cancel()
@@ -225,9 +225,7 @@ async def _singletons(
     )
 
 
-async def _read_events(
-    redis: FakeRedis, sid: uuid.UUID, tid: uuid.UUID
-) -> list[dict[str, Any]]:
+async def _read_events(redis: FakeRedis, sid: uuid.UUID, tid: uuid.UUID) -> list[dict[str, Any]]:
     bus = ChatEventBus(redis)
     entries = await bus.xread_blocking(sid, tid, last_id="0", count=200, block_ms=10)
     return [payload for _id, payload in entries]
@@ -503,9 +501,13 @@ async def test_rebuild_history_injected_into_messages(
     sid = seeded_task["session_id"]
     async with pg_async_session_factory() as sess:
         for i in range(3):
-            sess.add(ChatMessage(id=uuid.uuid4(), session_id=sid, role="user", content=f"历史问题{i}"))
             sess.add(
-                ChatMessage(id=uuid.uuid4(), session_id=sid, role="assistant", content=f"历史回答{i}")
+                ChatMessage(id=uuid.uuid4(), session_id=sid, role="user", content=f"历史问题{i}")
+            )
+            sess.add(
+                ChatMessage(
+                    id=uuid.uuid4(), session_id=sid, role="assistant", content=f"历史回答{i}"
+                )
             )
         await sess.commit()
 
@@ -551,7 +553,12 @@ async def test_persona_render_failure_degrades_gracefully(
                 "INSERT INTO users (id, username, email, hashed_password, is_active) "
                 "VALUES (:i, :u, :e, :p, true)"
             ),
-            {"i": str(uid), "u": f"loop-{uid.hex[:8]}", "e": f"loop-{uid.hex[:8]}@t.local", "p": "x"},
+            {
+                "i": str(uid),
+                "u": f"loop-{uid.hex[:8]}",
+                "e": f"loop-{uid.hex[:8]}@t.local",
+                "p": "x",
+            },
         )
         sess.add(ChatSession(id=sid, user_id=uid, title="t"))
         await sess.commit()
@@ -670,3 +677,52 @@ async def test_loop_error_marks_error_and_emits_error_done(
     err = next(e for e in events if e.get("type") == "error")
     assert str(err.get("message", "")).startswith("boom")
     assert len(str(err.get("message", ""))) <= 500
+
+
+# ---------------------------------------------------------------------------
+# 9. 升级 turn 的唯一终止 done（Phase 7 Minor 修：will_escalate 守卫）
+# ---------------------------------------------------------------------------
+
+
+async def test_escalation_turn_emits_exactly_one_terminal_done(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+    seeded_task: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """升级 turn:loop 跳过 done(修法 A),done 由 _emit_escalation 在 draft 后补发。
+
+    Phase 7 Minor 修守护:终止事件恰一个 done、零 error_done(escalate 路径 runner
+    finally 不发 error_done,_emit_escalation 末尾补发唯一 done)。done 必须排在
+    escalate_request / escalate_packet_draft 之后(事件次序)。
+    """
+    llm = ScriptedStepClient(
+        [
+            _step(tool_calls=[_call("offer_deep_research", {"reason": "需要深度尽调"})]),
+            _step(content="已为你准备深度研究入口。", finish_reason="stop"),
+        ]
+    )
+    singletons = await _singletons(pg_async_session_factory, llm, tmp_path=tmp_path)
+    redis = FakeRedis(decode_responses=False)
+
+    await run_chat_async(
+        task_id=seeded_task["task_id"],
+        singletons=singletons,
+        session_factory=pg_async_session_factory,
+        redis=redis,
+        user_message="帮我深度研究茅台",
+        session_id=str(seeded_task["session_id"]),
+        user_id=seeded_task["user_id"],
+    )
+
+    events = await _read_events(redis, seeded_task["session_id"], seeded_task["task_id"])
+    types = [e.get("type") for e in events]
+
+    # 唯一终止 done,零 error_done(升级 turn runner finally 不发 error_done)
+    assert types.count("done") == 1
+    assert "error_done" not in types
+
+    # done 排在升级事件之后
+    assert "escalate_request" in types
+    assert "escalate_packet_draft" in types
+    assert types.index("done") > types.index("escalate_request")
+    assert types.index("done") > types.index("escalate_packet_draft")
