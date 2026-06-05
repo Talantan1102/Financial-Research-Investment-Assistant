@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 from app.agents.schemas import ToolResult
 from app.chatloop.context import ContextDeps, assemble_context
-from app.chatloop.events import EventType, LoopEvent
+from app.chatloop.events import EventType, LoopEvent, SeqCounter
 from app.chatloop.gates import GateConfig, check_gates, filter_burned, update_burned
 from app.chatloop.state import ChatLoopState, apply_results, apply_step
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
@@ -59,6 +59,7 @@ class ToolLoop:
         steer_source: SteerSourceProtocol | None = None,
         cancel_event: asyncio.Event | None = None,
         tier: str = "balanced",
+        seq_counter: SeqCounter | None = None,
     ) -> None:
         self._llm = llm
         self._tool_hub = tool_hub
@@ -70,7 +71,7 @@ class ToolLoop:
         self._tier = tier
         # 工具 schema 会话内恒定,turn 开始时取一次。
         self._schemas: list[dict[str, Any]] = tool_hub.schemas_for_llm()
-        self._seq = 0
+        self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
 
     # ------------------------------------------------------------------
     # 事件 / 增量发射
@@ -82,11 +83,11 @@ class ToolLoop:
         event_step 为位置-only(/ 之后才是 data),故 data 里可携带同名 ``step`` 键
         (如 step_start{step,max_steps})而不与事件级 step 冲突。
         """
-        self._seq += 1
+        seq = self._seq_counter.next()
         if self._emit_fn is None:
             return
         await self._emit_fn(
-            LoopEvent(type=type_, seq=self._seq, step=event_step, data=data)
+            LoopEvent(type=type_, seq=seq, step=event_step, data=data)
         )
 
     def _make_on_delta(

@@ -21,10 +21,10 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.agents.schemas import ToolResult
-from app.chatloop.events import EventType, LoopEvent
+from app.chatloop.events import EventType, LoopEvent, SeqCounter
 from app.chatloop.state import ChatLoopState
 from app.services.llm_step import StepToolCall
-from app.services.tool_result_cache import ToolResultCache
+from app.services.tool_result_cache import CacheHit, ToolResultCache
 from app.tools.base import Tool
 
 EmitFn = Callable[[LoopEvent], Awaitable[None]]
@@ -48,11 +48,12 @@ class ToolHub:
         *,
         emit: EmitFn | None = None,
         cache: ToolResultCache | None = None,
+        seq_counter: SeqCounter | None = None,
     ) -> None:
         self._tools: dict[str, Tool] = {}
         self._emit_fn = emit
         self._cache = cache
-        self._seq = 0
+        self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
 
     # ------------------------------------------------------------------
     # 注册
@@ -92,13 +93,13 @@ class ToolHub:
     async def _emit(self, type_: EventType, step: int, /, **data: Any) -> None:
         """构造 LoopEvent(带自增 seq 与当前 step)并发射;emit 为 None 时静默。
 
-        hub 自持 seq 计数;loop 的 seq 与 hub 的 seq 是两个序列(SSE 消费方按
-        到达顺序排,不依赖全局单调 seq——loop 与 hub 的事件不交叉编号)。
+        seq 由注入的 SeqCounter 产生;loop 与 hub 共享同一个实例时(Phase 4
+        chat_runner 负责注入),全局事件序号严格单调递增,前端按 last_seq 排序。
         """
-        self._seq += 1
+        seq = self._seq_counter.next()
         if self._emit_fn is None:
             return
-        await self._emit_fn(LoopEvent(type=type_, seq=self._seq, step=step, data=data))
+        await self._emit_fn(LoopEvent(type=type_, seq=seq, step=step, data=data))
 
     # ------------------------------------------------------------------
     # dispatch
@@ -112,13 +113,13 @@ class ToolHub:
         每个 call 走 _dispatch_one(自身全包不抛);外层 gather 不需要
         return_exceptions=True,但仍断言等长(fail loud 守护契约)。
         """
-        results = await asyncio.gather(
-            *(self._dispatch_one(call, state) for call in calls)
+        results: list[ToolResult] = list(
+            await asyncio.gather(*(self._dispatch_one(call, state) for call in calls))
         )
         assert len(results) == len(calls), (
             f"ToolHub.dispatch: results({len(results)}) 与 calls({len(calls)}) 长度不匹配"
         )
-        return list(results)
+        return results
 
     async def _dispatch_one(
         self, call: StepToolCall, state: ChatLoopState
@@ -195,15 +196,17 @@ class ToolHub:
             validated = tool.args_schema.model_validate(args)
             return await tool.run(validated)
 
+        is_cache_hit = False
         try:
             if self._cache is not None:
                 cache_key = ToolResultCache.cache_key(state.user_id, name, args)
-                output, _hit = await self._cache.get_or_compute(
+                output, cache_status = await self._cache.get_or_compute(
                     user_id=state.user_id,
                     tool_name=name,
                     args=args,
                     compute_fn=_compute,
                 )
+                is_cache_hit = cache_status == CacheHit.HIT
             else:
                 output = await _compute()
         except BaseException as e:  # noqa: BLE001 — hub 不抛:全包成指导性错误
@@ -218,7 +221,7 @@ class ToolHub:
         digest = self._digest(output)
 
         # 6. tool_end
-        await self._emit("tool_end", state.step, tool=name, digest=digest, cached=False)
+        await self._emit("tool_end", state.step, tool=name, digest=digest, cached=is_cache_hit)
 
         # 7. 记账(post-apply_step 契约:step=state.step)
         self._safe_record(
@@ -231,7 +234,7 @@ class ToolHub:
             success=True,
             output=output,
             latency_ms=latency_ms,
-            cached=False,
+            cached=is_cache_hit,
         )
 
     # ------------------------------------------------------------------

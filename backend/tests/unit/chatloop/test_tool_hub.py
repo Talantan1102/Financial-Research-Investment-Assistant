@@ -9,7 +9,7 @@ import asyncio
 import json
 
 import pytest
-from app.chatloop.events import LoopEvent
+from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.state import ChatLoopState, args_hash_of
 from app.chatloop.tool_hub import ToolHub
 from app.services.llm_step import StepToolCall
@@ -137,6 +137,13 @@ async def test_schemas_order_is_registration_order():
     hub.register_inprocess([FakeTool("c")])
     names = [s["function"]["name"] for s in hub.schemas_for_llm()]
     assert names == ["a", "b", "c"]
+
+
+async def test_register_duplicate_fails_loud():
+    hub = ToolHub()
+    hub.register_inprocess([FakeTool("dup")])
+    with pytest.raises(ValueError, match="dup"):
+        hub.register_inprocess([FakeTool("dup")])
 
 
 async def test_register_registry_merges_tools():
@@ -371,13 +378,20 @@ async def test_event_sequence_failure_uses_tool_error():
 
 
 async def test_cache_injection_records_cache_key():
+    emit = _Collector()
     cache = FakeCache(hit=CacheHit.HIT)
-    hub = ToolHub(cache=cache)
+    hub = ToolHub(emit=emit, cache=cache)
     hub.register_inprocess([FakeTool("get_stock_quote", output={"price": 1})])
     state = _state()
     args = {"ts_code": "600519.SH"}
     results = await hub.dispatch([_call("get_stock_quote", args)], state)
     assert results[0].success is True
+    # cache HIT 传播到 ToolResult.cached
+    assert results[0].cached is True
+    # cache HIT 传播到 tool_end 事件
+    end_events = emit.of("tool_end")
+    assert end_events, "应有 tool_end 事件"
+    assert end_events[0].data["cached"] is True
     entry = state.ledger.entries[0]
     expected_key = cache.cache_key("u1", "get_stock_quote", args)
     assert entry.cache_key == expected_key
@@ -412,3 +426,81 @@ async def test_dispatch_empty_calls_returns_empty():
     state = _state()
     results = await hub.dispatch([], state)
     assert results == []
+
+
+# ---------------------------------------------------------------------------
+# 共享 SeqCounter — loop 与 hub 注入同一实例,全局 seq 严格递增无重号
+# ---------------------------------------------------------------------------
+
+
+async def test_shared_seq_counter_no_duplicate_seq():
+    """同一 SeqCounter 注入 loop 与 hub,单 call 剧本收集两边全部事件,
+    断言 seq 全局严格递增无重号。"""
+    from app.chatloop.context import ContextDeps
+    from app.chatloop.loop import ToolLoop
+    from app.chatloop.state import ChatLoopState
+    from app.services.llm_step import StepDelta, StepResult, StepToolCall
+
+    # ---- 极简 Fake LLM(单圈:call → done) ----
+    class _SimpleLLM:
+        async def stream_step(self, *, messages, tools=None, tool_choice="auto",
+                              tier="balanced", request_id=None, on_delta=None):
+            if on_delta:
+                tc = StepToolCall(id="tc1", name="get_stock_quote",
+                                  arguments='{"ts_code":"600519.SH"}')
+                await on_delta(StepDelta(kind="tool_call", text="", tool_name=tc.name))
+                # 第二次调用返回收尾
+            if not hasattr(self, "_called"):
+                self._called = True
+                return StepResult(
+                    content="",
+                    tool_calls=[StepToolCall(id="tc1", name="get_stock_quote",
+                                            arguments='{"ts_code":"600519.SH"}')],
+                    finish_reason="tool_calls",
+                    prompt_tokens=10, completion_tokens=5,
+                    cached_tokens=0, cost_cny=0.001,
+                )
+            return StepResult(
+                content="茅台 1600 元",
+                tool_calls=[],
+                finish_reason="stop",
+                prompt_tokens=10, completion_tokens=5,
+                cached_tokens=0, cost_cny=0.001,
+            )
+
+    # ---- 极简 Fake ToolHub(Protocol 实现,注入共享 counter) ----
+    class _SimpleHub:
+        def __init__(self, emit_fn, seq_counter):
+            self._hub = ToolHub(emit=emit_fn, seq_counter=seq_counter)
+            self._hub.register_inprocess([FakeTool("get_stock_quote", output={"price": 1600})])
+
+        def schemas_for_llm(self):
+            return self._hub.schemas_for_llm()
+
+        async def dispatch(self, calls, state):
+            return await self._hub.dispatch(calls, state)
+
+    shared_counter = SeqCounter()
+    collector = _Collector()
+
+    hub = _SimpleHub(collector, shared_counter)
+    loop = ToolLoop(
+        llm=_SimpleLLM(),
+        tool_hub=hub,
+        context_deps=ContextDeps(system_prompt="助手", max_steps=12, max_cny=1.0),
+        emit=collector,
+        seq_counter=shared_counter,
+    )
+    state = ChatLoopState(
+        user_id="u1", session_id="s1", request_id="r1",
+        messages=[{"role": "user", "content": "茅台"}],
+    )
+    await loop.run(state)
+
+    seqs = [e.seq for e in collector.events]
+    assert seqs, "应有事件"
+    # 严格递增 — 无重号、无乱序
+    for i in range(1, len(seqs)):
+        assert seqs[i] == seqs[i - 1] + 1, (
+            f"seq 不连续: 位置 {i-1}={seqs[i-1]}, 位置 {i}={seqs[i]}"
+        )

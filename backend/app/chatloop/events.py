@@ -35,3 +35,15 @@ class LoopEvent(BaseModel):
     seq: int
     step: int
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class SeqCounter:
+    """跨发射方共享的单调事件序号 — 前端按单一 last_seq 严格排序,
+    loop 与 hub 必须共用一个实例(Phase 4 chat_runner 注入同一个)。"""
+
+    def __init__(self) -> None:
+        self._seq = 0
+
+    def next(self) -> int:
+        self._seq += 1
+        return self._seq
