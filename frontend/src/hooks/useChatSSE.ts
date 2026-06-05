@@ -26,6 +26,7 @@ import {
   cancelChatTask,
   getChat,
   retryChatTask,
+  steerChatTask,
   type ChatPostJsonResponse,
 } from '@/api/chatApi'
 import {
@@ -45,7 +46,10 @@ interface UseChatSSEOptions {
 }
 
 interface UseChatSSE {
-  sendMessage(content: string): Promise<void>
+  sendMessage(
+    content: string,
+    forced?: { forced_tool_name: string; forced_tool_args: Record<string, unknown> },
+  ): Promise<void>
   abort(): void
   status: () => string
   // Plan 2 Scenario B: 切 session 回来时如果 GET /chats/{sid} 返回 active_task_id,
@@ -201,6 +205,29 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
     ) => {
       const sessionId = sessionIdRef.current
       if (!sessionId) throw new Error('sendMessage: no active session')
+
+      // Phase 5 Task 5.2: streaming 中(有 active_task_id)发送 → 默认走 steering。
+      // merged=true:不开新 stream,不乐观 append(后端已落库,steer_merged 事件
+      //   会渲染插话系统气泡;输入框由 InputArea 自己已清空)。
+      // merged=false(竞态:turn 刚结束):fallthrough 到正常 sendMessage 走新 turn。
+      const activeTaskId = currentChatState.active_task_id
+      if (
+        activeTaskId &&
+        currentChatState.streamingStatus === 'streaming' &&
+        !forced
+      ) {
+        try {
+          const resp = await steerChatTask(activeTaskId, content)
+          if (resp.merged) {
+            // 已并入当前 turn — steer_merged 事件负责渲染插话气泡,这里不开新 stream。
+            return
+          }
+          // merged=false:竞态,turn 刚结束 → 落到下面走普通新 turn。
+        } catch {
+          // steer 失败(网络/4xx):降级走普通新 turn,不卡住用户。
+        }
+      }
+
       abortRef.current?.abort()
       const ac = new AbortController()
       abortRef.current = ac
