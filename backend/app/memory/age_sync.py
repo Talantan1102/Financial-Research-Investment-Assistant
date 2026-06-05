@@ -2,6 +2,12 @@
 
 spec § 4 Step 7: PG INSERT chat_memory_edges + AGE Cypher CREATE 必须 atomic.
 AGE 失败 → 整事务 rollback (失败处理矩阵 spec § 4 末尾).
+
+2026-06-05 对话流评估冒烟发现 #4:调用方(hierarchical)按"best-effort"语义
+catch 本模块抛出的异常继续往下走,但 cypher 语句失败已使 PG 事务 aborted,
+后续 INSERT 全灭于 InFailedSqlTransaction——catch Python 异常救不了 PG 事务。
+修法:AGE 语句一律跑在 SAVEPOINT(begin_nested)里,失败回滚到保存点后再
+raise(保持原 raise 契约),外层事务始终健康;无 AGE 扩展的环境因此可用。
 """
 
 from __future__ import annotations
@@ -54,7 +60,8 @@ def age_create_edge(
         $$) AS (r agtype)
     """
     try:
-        session.execute(text(cypher))
+        with session.begin_nested():  # SAVEPOINT: 失败不毒外层事务
+            session.execute(text(cypher))
     except Exception as exc:
         _logger.error(
             "AGE Cypher CREATE edge failed (edge_id=%s rel=%s): %s",
@@ -91,7 +98,8 @@ def age_merge_node(
         $$) AS (n agtype)
     """
     try:
-        session.execute(text(cypher))
+        with session.begin_nested():  # SAVEPOINT: 失败不毒外层事务
+            session.execute(text(cypher))
     except Exception as exc:
         _logger.error(
             "AGE Cypher MERGE node failed (node_id=%s type=%s): %s",
