@@ -14,7 +14,9 @@ import type {
   CostUpdateEvent,
   DoneEvent,
   ErrorEvent,
+  LoopHaltEvent,
   SSEEvent,
+  StepStartEvent,
   TokenEvent,
 } from '@/types/chat'
 
@@ -24,6 +26,13 @@ export interface CostBreakdown {
   chat_usd: number
   research_usd: number
   total_usd: number
+}
+
+// chatloop loop progress (spec § 5.1 step_start{step,max_steps}) — drives the
+// "第 N/M 步" hint in StreamingIndicator.
+export interface LoopProgress {
+  step: number
+  max_steps: number
 }
 
 export type StreamingPhase =
@@ -52,6 +61,11 @@ export interface CurrentChatState {
   errorMessage: string | null
   streaming_phase: StreamingPhase
   streaming_phase_label?: string
+  // chatloop loop progress + halt reason (spec § 5.1). loop_progress feeds the
+  // "第 N/M 步" indicator; halt_reason (non-natural) surfaces the halt banner
+  // ("已达执行上限(...)") and is kept after done so the banner persists.
+  loop_progress: LoopProgress | null
+  halt_reason: string | null
 }
 
 const INITIAL: CurrentChatState = {
@@ -67,6 +81,8 @@ const INITIAL: CurrentChatState = {
   errorMessage: null,
   streaming_phase: 'idle',
   streaming_phase_label: undefined,
+  loop_progress: null,
+  halt_reason: null,
 }
 
 export const currentChatState = proxy<CurrentChatState>({ ...INITIAL })
@@ -100,6 +116,8 @@ export const currentChatActions = {
     currentChatState.cost_breakdown = { chat_usd: 0, research_usd: 0, total_usd: 0 }
     currentChatState.toolEvents = []
     currentChatState.errorMessage = null
+    currentChatState.loop_progress = null
+    currentChatState.halt_reason = null
   },
   setActiveTaskId(taskId: string | null) {
     currentChatState.active_task_id = taskId
@@ -109,6 +127,9 @@ export const currentChatActions = {
     currentChatState.streamingDraft = ''
     currentChatState.last_seq = 0 // C32: reset seq so 2nd+ messages don't dedup all events
     currentChatState.errorMessage = null
+    // fresh turn — clear prior loop progress + halt banner
+    currentChatState.loop_progress = null
+    currentChatState.halt_reason = null
   },
   resumeStreaming() {
     // Like beginStreaming but preserves streamingDraft for F6 reconnect continuity
@@ -138,24 +159,77 @@ export const currentChatActions = {
 
     switch (ev.type) {
       case 'token':
-        currentChatState.streamingDraft += (ev as TokenEvent).content
+        // chatloop payload carries both `content` and `text`; prefer content.
+        currentChatState.streamingDraft +=
+          (ev as TokenEvent).content ?? (ev as TokenEvent).text ?? ''
+        // first token of the step → writing phase
+        currentChatState.streaming_phase = 'writing'
         break
-      case 'cost_update':
-        currentChatState.cost_so_far = (ev as CostUpdateEvent).cost_so_far
+      case 'reasoning':
+        // Minimal (spec § 5.1): keep reasoning in toolEvents for later UI; no
+        // separate reasoningDraft rendering yet.
         currentChatState.toolEvents.push(ev)
         break
-      case 'done':
+      case 'step_start': {
+        const e = ev as StepStartEvent
+        currentChatState.loop_progress = { step: e.step, max_steps: e.max_steps }
+        currentChatState.streaming_phase = 'thinking'
+        currentChatState.toolEvents.push(ev)
+        break
+      }
+      case 'tool_call':
+        currentChatState.streaming_phase = 'tool'
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'tool_start':
+        currentChatState.streaming_phase = 'tool'
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'tool_end':
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'tool_error':
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'steer_merged':
+        // System bubble rendered from this event (preview of merged instruction).
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'loop_halt':
+        // Keep the halt reason so MessageList/ChatPane can render the banner.
+        currentChatState.halt_reason = (ev as LoopHaltEvent).reason
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'cost_update':
+        // chatloop new shape: cny is cumulative spend (CNY). Keep using
+        // cost_so_far as the displayed running total.
+        currentChatState.cost_so_far = (ev as CostUpdateEvent).cny
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'done': {
+        const e = ev as DoneEvent
         flushDraftAsMessage()
         currentChatState.streamingStatus = 'idle'
+        currentChatState.streaming_phase = 'idle'
         // Plan 3 Task 7: terminal event → clear in-flight task tracker
         currentChatState.active_task_id = null
-        currentChatState.toolEvents.push(ev as DoneEvent)
+        currentChatState.loop_progress = null
+        // Preserve halt_reason banner only when the turn ended non-naturally.
+        if (e.stop_reason && e.stop_reason !== 'natural') {
+          currentChatState.halt_reason = e.stop_reason
+        } else {
+          currentChatState.halt_reason = null
+        }
+        currentChatState.toolEvents.push(e)
         break
+      }
       case 'error':
         currentChatState.streamingStatus = 'error'
+        currentChatState.streaming_phase = 'error'
         currentChatState.errorMessage = (ev as ErrorEvent).error
         // Plan 3 Task 7: terminal event → clear in-flight task tracker
         currentChatState.active_task_id = null
+        currentChatState.loop_progress = null
         currentChatState.toolEvents.push(ev as ErrorEvent)
         break
       default:
@@ -176,6 +250,8 @@ export const currentChatActions = {
     currentChatState.streaming_phase_label = undefined
     currentChatState.streamingDraft = ''
     currentChatState.errorMessage = null
+    currentChatState.loop_progress = null
+    currentChatState.halt_reason = null
   },
   setStreamingPhase(phase: StreamingPhase, label?: string) {
     currentChatState.streaming_phase = phase
@@ -194,5 +270,7 @@ export const currentChatActions = {
     currentChatState.errorMessage = null
     currentChatState.streaming_phase = INITIAL.streaming_phase
     currentChatState.streaming_phase_label = INITIAL.streaming_phase_label
+    currentChatState.loop_progress = INITIAL.loop_progress
+    currentChatState.halt_reason = INITIAL.halt_reason
   },
 }

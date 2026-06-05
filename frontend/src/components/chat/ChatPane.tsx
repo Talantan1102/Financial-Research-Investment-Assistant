@@ -10,7 +10,19 @@ import { useChatSSE } from '@/hooks/useChatSSE'
 import { currentChatState } from '@/store/current-chat'
 import { escalationState } from '@/store/escalation'
 import { EmptyState } from '@/components/states/EmptyState'
+import type { ChatMessage, SteerMergedEvent } from '@/types/chat'
 import styles from '@/styles/chat.module.scss'
+
+// chatloop loop_halt reason → 用户可读的中文短语(spec § 1.3 撞闸种类)。
+const HALT_REASON_LABEL: Record<string, string> = {
+  max_steps: '已达执行步数上限',
+  budget: '已达预算上限',
+  spinning: '检测到重复打转',
+}
+
+function haltReasonLabel(reason: string): string {
+  return HALT_REASON_LABEL[reason] ?? reason
+}
 
 export interface ChatPaneProps {
   sessionId?: string
@@ -56,7 +68,32 @@ export function ChatPane({
           created_at: new Date().toISOString(),
         }
       : null
-  const displayMessages = pendingMessage ? [...messages, pendingMessage] : messages
+
+  // Phase 5 Task 5.1: steer_merged 事件渲染为系统气泡("已并入指令: preview")。
+  // 后端落库的插话 user 消息 turn 结束后会随历史 reload 出现;streaming 期间先用
+  // 这些瞬时系统气泡给用户即时反馈(避免双气泡:历史 reload 走真消息,瞬时气泡只在
+  // toolEvents 里,reload setSession 会清空 toolEvents)。
+  const steerBubbles: ChatMessage[] = sessionId
+    ? (snap.toolEvents as readonly { type: string }[])
+        .filter((e): e is SteerMergedEvent => e.type === 'steer_merged')
+        .map((e, i) => ({
+          id: `__steer_merged_${i}__`,
+          session_id: sessionId,
+          role: 'system' as const,
+          content: `已并入指令: ${e.preview}`,
+          message_type: 'system' as const,
+          tool_call_data: null,
+          research_report_id: null,
+          research_report_summary: null,
+          created_at: new Date().toISOString(),
+        }))
+    : []
+
+  const displayMessages = [
+    ...messages,
+    ...steerBubbles,
+    ...(pendingMessage ? [pendingMessage] : []),
+  ]
 
   const onSend = useCallback(
     (
@@ -105,6 +142,15 @@ export function ChatPane({
           )}
         </div>
         <StreamingIndicator />
+        {snap.halt_reason ? (
+          <div
+            className={styles.haltBanner}
+            data-testid="loop-halt-banner"
+            role="status"
+          >
+            已达执行上限（{haltReasonLabel(snap.halt_reason)}），以下基于已查信息
+          </div>
+        ) : null}
       </section>
       <section role="region" aria-label="input" className={styles.inputRegion}>
         <div className={styles.inputContainer}>

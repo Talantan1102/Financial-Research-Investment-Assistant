@@ -171,6 +171,20 @@
   color: var(--ios-label);
   letter-spacing: -0.01em;
 }
+.toolCachedBadge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ios-blue);
+  background: var(--ios-blue-soft);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+.toolErrorHint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ios-label-secondary);
+}
 .toolStatus {
   font-size: 11px;
   color: var(--ios-green);
@@ -356,6 +370,21 @@
   .streamingIndicator {
     background: var(--ios-surface);
   }
+}
+.loopProgress {
+  margin-left: auto;
+  font-size: 11px;
+  font-family: var(--ios-font-mono);
+  color: var(--ios-label-tertiary);
+}
+.haltBanner {
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  border-radius: var(--ios-radius-md, 10px);
+  background: var(--ios-orange-soft, rgba(255, 149, 0, 0.12));
+  color: var(--ios-orange, #c93400);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .inputRegion {

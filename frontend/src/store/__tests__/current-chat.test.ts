@@ -48,13 +48,14 @@ describe('currentChatStore', () => {
     expect(s.streamingDraft).toBe('Hello')
   })
 
-  it('dispatchEvent: cost_update updates cost_so_far', () => {
+  it('dispatchEvent: cost_update updates cost_so_far from cny (chatloop shape)', () => {
     currentChatActions.setSession('s1', [])
     currentChatActions.dispatchEvent({
       type: 'cost_update',
       seq: 5,
-      cost_so_far: 0.0042,
-      tokens: { prompt: 100, completion: 50 },
+      cny: 0.0042,
+      tokens: 150,
+      cached_tokens: 30,
     })
     const s = snapshot(currentChatState)
     expect(s.cost_so_far).toBeCloseTo(0.0042)
@@ -118,5 +119,79 @@ describe('currentChatStore', () => {
     expect(s.streamingStatus).toBe('idle')
     // The second message's draft was flushed into messages
     expect(s.messages.at(-1)?.content).toBe('XYZ')
+  })
+})
+
+// Phase 5 Task 5.1: chatloop new event branches in dispatchEvent.
+describe('dispatchEvent — chatloop new events', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+    currentChatActions.setSession('s1', [])
+    currentChatActions.beginStreaming()
+  })
+
+  it('step_start sets loop_progress + thinking phase', () => {
+    currentChatActions.dispatchEvent({ type: 'step_start', seq: 1, step: 2, max_steps: 12 })
+    const s = snapshot(currentChatState)
+    expect(s.loop_progress).toEqual({ step: 2, max_steps: 12 })
+    expect(s.streaming_phase).toBe('thinking')
+  })
+
+  it('tool_call (hub shape {tool,args}) → tool phase + enters toolEvents', () => {
+    currentChatActions.dispatchEvent({ type: 'tool_call', seq: 1, tool: 'get_stock_quote', args: { ts_code: '601398.SH' } })
+    const s = snapshot(currentChatState)
+    expect(s.streaming_phase).toBe('tool')
+    expect(s.toolEvents.at(-1)?.type).toBe('tool_call')
+  })
+
+  it('tool_start → tool phase', () => {
+    currentChatActions.dispatchEvent({ type: 'tool_start', seq: 1, tool: 'get_stock_quote' })
+    expect(snapshot(currentChatState).streaming_phase).toBe('tool')
+  })
+
+  it('token sets writing phase', () => {
+    currentChatActions.dispatchEvent({ type: 'token', seq: 1, content: 'hi' })
+    expect(snapshot(currentChatState).streaming_phase).toBe('writing')
+  })
+
+  it('tool_error enters toolEvents (carries error + hint)', () => {
+    currentChatActions.dispatchEvent({ type: 'tool_error', seq: 1, tool: 't', error: 'rate limit', hint: '稍后再试' })
+    const last = snapshot(currentChatState).toolEvents.at(-1)
+    expect(last?.type).toBe('tool_error')
+  })
+
+  it('steer_merged enters toolEvents (preview)', () => {
+    currentChatActions.dispatchEvent({ type: 'steer_merged', seq: 1, preview: '看一下营收' })
+    const last = snapshot(currentChatState).toolEvents.at(-1)
+    expect(last?.type).toBe('steer_merged')
+  })
+
+  it('loop_halt stores halt_reason', () => {
+    currentChatActions.dispatchEvent({ type: 'loop_halt', seq: 1, reason: 'max_steps' })
+    expect(snapshot(currentChatState).halt_reason).toBe('max_steps')
+  })
+
+  it('done with non-natural stop_reason keeps halt_reason banner', () => {
+    currentChatActions.dispatchEvent({ type: 'token', seq: 1, content: 'partial answer' })
+    currentChatActions.dispatchEvent({ type: 'done', seq: 2, stop_reason: 'budget' })
+    const s = snapshot(currentChatState)
+    expect(s.streamingStatus).toBe('idle')
+    expect(s.halt_reason).toBe('budget')
+    expect(s.loop_progress).toBeNull()
+  })
+
+  it('done with natural stop_reason clears halt_reason', () => {
+    currentChatActions.dispatchEvent({ type: 'loop_halt', seq: 1, reason: 'spinning' })
+    currentChatActions.dispatchEvent({ type: 'done', seq: 2, stop_reason: 'natural' })
+    expect(snapshot(currentChatState).halt_reason).toBeNull()
+  })
+
+  it('out-of-order new events with seq <= last_seq are dropped (G1)', () => {
+    currentChatActions.dispatchEvent({ type: 'step_start', seq: 5, step: 1, max_steps: 12 })
+    // stale step_start (seq 3 <= 5) must NOT overwrite loop_progress
+    currentChatActions.dispatchEvent({ type: 'step_start', seq: 3, step: 99, max_steps: 99 })
+    const s = snapshot(currentChatState)
+    expect(s.last_seq).toBe(5)
+    expect(s.loop_progress).toEqual({ step: 1, max_steps: 12 })
   })
 })
