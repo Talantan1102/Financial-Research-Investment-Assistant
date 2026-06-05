@@ -34,7 +34,13 @@ import {
   currentChatState,
 } from '@/store/current-chat'
 import { chatSessionsActions } from '@/store/chat-sessions'
-import type { SSEEvent, TokenEvent } from '@/types/chat'
+import { escalationActions } from '@/store/escalation'
+import type {
+  EscalatePacketDraftEvent,
+  EscalateRequestEvent,
+  SSEEvent,
+  TokenEvent,
+} from '@/types/chat'
 import { useTypewriter } from './useTypewriter'
 
 interface UseChatSSEOptions {
@@ -92,6 +98,9 @@ async function consumeStream(
   /** Called each time a valid SSE frame is parsed. Used by the idle watchdog
    *  (chat-send-02) to reset the no-frames timer on every received event. */
   onFrame?: () => void,
+  /** Optional hook for side-channel event handling (e.g. escalation store wiring).
+   *  Called for every non-token SSE event after currentChatActions.dispatchEvent. */
+  onEvent?: (ev: SSEEvent) => void,
 ): Promise<{ doneSeen: boolean }> {
   const reader = res.body?.getReader()
   if (!reader) return { doneSeen: false }
@@ -133,7 +142,7 @@ async function consumeStream(
             if (typeof evSeq === 'number') {
               currentChatState.last_seq = evSeq
             }
-            typewriter.enqueue((ev as TokenEvent).content ?? '')
+            typewriter.enqueue((ev as TokenEvent).content ?? (ev as TokenEvent).text ?? '')
           }
         } else {
           if (ev.type === 'done' || ev.type === 'error') {
@@ -145,6 +154,7 @@ async function consumeStream(
             doneSeen = true
           }
           currentChatActions.dispatchEvent(ev)
+          onEvent?.(ev)
         }
       }
       idx = buffer.indexOf(SSE_FRAME_DELIMITER)
@@ -168,6 +178,28 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
 
   // Ref to the current idle watchdog timer so we can cancel it on each frame.
   const idleWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Escalation SSE wiring: intercept escalate_request and escalate_packet_draft
+  // events coming off the stream and drive the escalation store.  Kept in
+  // useChatSSE (not current-chat store) so current-chat stays decoupled from
+  // the escalation store.  Uses sessionIdRef so the callback never goes stale.
+  const handleEscalationEvent = useCallback((ev: SSEEvent) => {
+    const sid = sessionIdRef.current
+    if (!sid) return
+    if (ev.type === 'escalate_request') {
+      // Phase 1: agent signals it wants to escalate → open dialog shell (draft=null
+      // → spinner shown) so the user sees the dialog immediately.
+      const _ev = ev as EscalateRequestEvent
+      void _ev // reason field kept for future use; no action needed beyond openDialog
+      escalationActions.openDialog(sid)
+    } else if (ev.type === 'escalate_packet_draft') {
+      // Phase 2: backend has assembled the packet → populate draft + keep dialog open.
+      const { packet } = ev as EscalatePacketDraftEvent
+      escalationActions.setPacketDraft(packet)
+      // Ensure dialog is open (may have been dismissed by user and re-sent).
+      escalationActions.openDialog(sid)
+    }
+  }, [])
 
   const typewriter = useTypewriter({
     onChar: (ch) => {
@@ -283,6 +315,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             ac.signal,
             typewriterRef.current,
             armIdleWatchdog,
+            handleEscalationEvent,
           )
           doneSeen = result.doneSeen
         } else {
@@ -292,6 +325,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             ac.signal,
             typewriterRef.current,
             armIdleWatchdog,
+            handleEscalationEvent,
           )
           doneSeen = result.doneSeen
         }
@@ -345,7 +379,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         }
       }
     },
-    [fetchImpl],
+    [fetchImpl, handleEscalationEvent],
   )
 
   const abort = useCallback(() => {
@@ -386,6 +420,8 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
           streamRes,
           ac.signal,
           typewriterRef.current,
+          undefined,
+          handleEscalationEvent,
         )
         doneSeen = result.doneSeen
       } catch {
@@ -395,7 +431,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         typewriterRef.current.flush()
       }
     },
-    [fetchImpl],
+    [fetchImpl, handleEscalationEvent],
   )
 
   // Plan 3 Task 7: cancel in-flight task。POST /chat/cancel/{tid} → 202;

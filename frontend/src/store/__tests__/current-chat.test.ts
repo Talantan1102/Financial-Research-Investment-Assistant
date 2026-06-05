@@ -186,6 +186,14 @@ describe('dispatchEvent — chatloop new events', () => {
     expect(snapshot(currentChatState).halt_reason).toBeNull()
   })
 
+  it('done with stop_reason absent preserves existing halt_reason (loop_halt banner guard)', () => {
+    // loop_halt sets halt_reason; a bare done event (no stop_reason field) must
+    // NOT erase it — the banner should stay visible after the turn ends.
+    currentChatActions.dispatchEvent({ type: 'loop_halt', seq: 1, reason: 'max_steps' })
+    currentChatActions.dispatchEvent({ type: 'done', seq: 2 }) // no stop_reason
+    expect(snapshot(currentChatState).halt_reason).toBe('max_steps')
+  })
+
   it('out-of-order new events with seq <= last_seq are dropped (G1)', () => {
     currentChatActions.dispatchEvent({ type: 'step_start', seq: 5, step: 1, max_steps: 12 })
     // stale step_start (seq 3 <= 5) must NOT overwrite loop_progress

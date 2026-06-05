@@ -215,11 +215,14 @@ export const currentChatActions = {
         currentChatState.active_task_id = null
         currentChatState.loop_progress = null
         // Preserve halt_reason banner only when the turn ended non-naturally.
-        if (e.stop_reason && e.stop_reason !== 'natural') {
-          currentChatState.halt_reason = e.stop_reason
-        } else {
+        // stop_reason missing (field absent) → keep existing halt_reason so a
+        // prior loop_halt banner is not silently erased by an incomplete done event.
+        if (e.stop_reason === 'natural') {
           currentChatState.halt_reason = null
+        } else if (e.stop_reason) {
+          currentChatState.halt_reason = e.stop_reason
         }
+        // stop_reason absent → leave halt_reason unchanged
         currentChatState.toolEvents.push(e)
         break
       }
