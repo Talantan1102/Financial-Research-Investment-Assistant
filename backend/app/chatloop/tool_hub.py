@@ -323,6 +323,9 @@ class ToolHub:
         except BaseException as e:  # noqa: BLE001 — hub 不抛:全包成指导性错误
             error = self._guidance_error(tool, e)
             error = self._maybe_append_search_hint(name, e, error)
+            # worker 日志层面留一行(联调诊断:E2E 时模型靠降级掩盖工具失败,
+            # 指导性错误只进事件流,worker 日志无痕迹;info 级一行 tool/error 前 120 字)。
+            logger.info("tool dispatch failed: tool=%s error=%s", name, error[:120])
             await self._emit_error(name, error, step=state.step)
             self._safe_record(
                 state, name, args, error, success=False, cache_key=cache_key

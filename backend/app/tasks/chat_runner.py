@@ -54,6 +54,27 @@ _REDIS_SINGLETON: Any | None = None
 _MCP_CLIENT_SINGLETON: Any | None = None
 _MCP_CTX_SINGLETON: Any | None = None  # keep ctx ref alive — GC would tear down subprocess
 
+# 进程级常驻事件循环(E2E 实测修复,根因见 run_chat docstring)。
+# prefork 每子进程一个 loop,使 MCP stdio / redis.asyncio / httpx 等 loop-bound 单例
+# 跨 task 存活;之前每个 task 用 asyncio.run() 新建并关闭一个 loop,第二个 task 的
+# 新循环里复用第一个循环上构造的对象 → MCP stdio asyncgen 关闭崩坏 + redis 跨循环。
+_WORKER_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def _get_worker_loop() -> asyncio.AbstractEventLoop:
+    """惰性构造本 worker 子进程的常驻事件循环(进程级单例)。
+
+    不调 ``asyncio.set_event_loop`` —— 所有协程统一经 ``run_until_complete`` 驱动,
+    不依赖隐式 current-loop 解析。Celery prefork 单子进程内 task 串行执行,无并发
+    ``run_until_complete``,故复用同一 loop 安全;loop-bound 单例(MCP stdio 流 /
+    redis.asyncio 客户端 / LLMService 持的 AsyncOpenAI httpx)因此跨 task 存活,
+    不再每 task 新建循环导致跨循环使用崩坏。
+    """
+    global _WORKER_LOOP
+    if _WORKER_LOOP is None or _WORKER_LOOP.is_closed():
+        _WORKER_LOOP = asyncio.new_event_loop()
+    return _WORKER_LOOP
+
 
 async def _build_singletons_for_worker(session_factory: Any) -> Any:
     """Build (or reuse) the chatloop HeavySingletons for this worker process.
@@ -169,8 +190,11 @@ async def run_chat_async(
             async for _ in cancel_bus.subscribe_cancel(task_id):
                 cancel_event.set()
                 return
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("cancel listener exit for task %s: %s", task_id, exc)
+        except asyncio.CancelledError:
+            # 正常关闭路径:turn 收尾 listener_task.cancel();不是异常,不报。
+            raise
+        except Exception as exc:  # noqa: BLE001 — fail loud 进日志(曾吞 redis pubsub 跨循环错)
+            logger.warning("cancel listener error for task %s: %s", task_id, exc)
 
     listener_task = asyncio.create_task(_cancel_listener())
 
@@ -537,13 +561,22 @@ def run_chat(
     user_message: str,
     resume_checkpoint_id: str | None = None,
 ) -> None:
-    """Celery sync entry. Bridges to async via asyncio.run() + builds worker-side deps.
+    """Celery sync entry. Bridges to async via 进程级常驻 loop + builds worker-side deps.
 
     Production wiring:
     - singletons: _build_singletons_for_worker — MCP chat_tools subprocess +
       HeavySingletons(llm/registry/memory/loader/executor/cache), built once/process;
     - session_factory: _build_session_factory_for_worker;
     - redis: _build_redis_for_worker。
+
+    事件循环(E2E 实测修复):用 ``_get_worker_loop().run_until_complete(...)`` 而非
+    ``asyncio.run(...)``。后者每个 task 新建并关闭一个事件循环,但模块级单例
+    (MCP stdio 流 / redis.asyncio 客户端 / LLMService 持的 AsyncOpenAI httpx)在
+    第一个 task 的循环上构造;第二个 task 的新循环里复用这些 loop-bound 对象 →
+    MCP stdio asyncgen 关闭报错(an error occurred during closing of asynchronous
+    generator <stdio_client>)、redis RPOP/RPUSH 跨循环行为异常(steer 不生效)。
+    prefork 每子进程一个常驻 loop,使这些单例跨 task 存活;子进程内 task 串行,
+    无并发 run_until_complete。
 
     resume_checkpoint_id 透传(checkpoint 退役 → run_chat_async 忽略;retry 整 turn 重跑)。
     """
@@ -562,7 +595,7 @@ def run_chat(
             resume_checkpoint_id=resume_checkpoint_id,
         )
 
-    asyncio.run(_run())
+    _get_worker_loop().run_until_complete(_run())
 
 
 def enqueue_run_chat(
