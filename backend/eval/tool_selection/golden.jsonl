@@ -1,0 +1,28 @@
+{"case_id": "ts-quote-001", "category": "single_tool", "user_input": "贵州茅台现在多少钱?", "expected": {"first_tool": "get_stock_quote", "args_contains": {"ts_code": "600519.SH"}}, "bucket": "金融数据"}
+{"case_id": "ts-quote-002", "category": "single_tool", "user_input": "平安银行今天涨了还是跌了?", "expected": {"first_tool": "get_stock_quote", "args_contains": {"ts_code": "000001.SZ"}}, "bucket": "金融数据"}
+{"case_id": "ts-fin-001", "category": "single_tool", "user_input": "茅台去年的营收和净利润是多少?", "expected": {"first_tool": "get_financial_statements", "args_contains": {"ts_code": "600519.SH"}}, "bucket": "金融数据"}
+{"case_id": "ts-fin-002", "category": "single_tool", "user_input": "五粮液的现金流情况怎么样?", "expected": {"first_tool": "get_financial_statements", "args_contains": {"ts_code": "000858.SZ"}}, "bucket": "金融数据"}
+{"case_id": "ts-mktind-001", "category": "single_tool", "user_input": "茅台现在估值贵不贵?市盈率多少?", "expected": {"first_tool": "get_market_indicators", "args_contains": {"ts_code": "600519.SH"}}, "bucket": "金融数据"}
+{"case_id": "ts-mktind-mutex-001", "category": "mutex_boundary", "user_input": "茅台的 PE 现在在历史什么水位?", "expected": {"first_tool": "get_market_indicators", "not_tools": ["get_financial_statements"]}, "bucket": "金融数据"}
+{"case_id": "ts-corpact-001", "category": "single_tool", "user_input": "茅台这些年分红怎么样?", "expected": {"first_tool": "get_corporate_actions", "args_contains": {"ts_code": "600519.SH"}}, "bucket": "金融数据"}
+{"case_id": "ts-corpact-mutex-001", "category": "mutex_boundary", "user_input": "茅台有没有发业绩预告?", "expected": {"first_tool": "get_corporate_actions", "not_tools": ["get_financial_statements"]}, "bucket": "金融数据"}
+{"case_id": "ts-news-001", "category": "single_tool", "user_input": "茅台最近有什么新闻或者消息吗?", "expected": {"first_tool": "get_news"}, "bucket": "金融数据"}
+{"case_id": "ts-web-001", "category": "single_tool", "user_input": "帮我搜一下某公司借壳上市的最新外部进展", "expected": {"first_tool": "web_search"}, "bucket": "金融数据"}
+{"case_id": "ts-cmp-001", "category": "single_tool", "user_input": "帮我对比一下茅台和五粮液哪个更值得买?", "expected": {"first_tool": "compare_stocks"}, "bucket": "金融数据"}
+{"case_id": "ts-cmp-mutex-001", "category": "mutex_boundary", "user_input": "比较一下 600519.SH 和 000858.SZ 的基本面", "expected": {"first_tool": "compare_stocks", "not_tools": ["get_financial_statements"]}, "bucket": "金融数据"}
+{"case_id": "ts-kb-001", "category": "memory_kb", "user_input": "新能源车下乡政策对销量影响怎么看?", "expected": {"first_tool": "kb_search"}, "bucket": "知识库"}
+{"case_id": "ts-kb-002", "category": "memory_kb", "user_input": "最近有哪些关于白酒行业的研报观点?", "expected": {"first_tool": "kb_search"}, "bucket": "知识库"}
+{"case_id": "ts-kb-nearmiss-001", "category": "memory_kb", "user_input": "我之前研究白酒得出的结论是什么?", "expected": {"first_tool": "memory_search", "not_tools": ["kb_search"]}, "bucket": "记忆"}
+{"case_id": "ts-mem-001", "category": "memory_kb", "user_input": "我现在重仓了哪些股票?", "expected": {"first_tool": "memory_search"}, "bucket": "记忆"}
+{"case_id": "ts-mem-002", "category": "memory_kb", "user_input": "我的风险偏好是什么来着?", "expected": {"first_tool": "memory_search"}, "bucket": "记忆"}
+{"case_id": "ts-mem-nearmiss-001", "category": "memory_kb", "user_input": "现在 A 股市场整体的风险偏好如何?", "expected": {"not_tools": ["memory_search"]}, "bucket": "知识库"}
+{"case_id": "ts-esc-pos-001", "category": "escalation_pos", "user_input": "帮我全面研究一下宁德时代到底值不值得长期投资", "expected": {"first_tool": "offer_deep_research"}, "bucket": "升级"}
+{"case_id": "ts-esc-pos-002", "category": "escalation_pos", "user_input": "我想要一份茅台的深度尽调报告,多维度系统分析", "expected": {"first_tool": "offer_deep_research"}, "bucket": "升级"}
+{"case_id": "ts-esc-pos-003", "category": "escalation_pos", "user_input": "请系统性地调研一下光伏行业的投资逻辑并成稿", "expected": {"first_tool": "offer_deep_research"}, "bucket": "升级"}
+{"case_id": "ts-esc-neg-001", "category": "abstain_escalation", "user_input": "茅台现在贵不贵?", "expected": {"not_tools": ["offer_deep_research"]}, "bucket": "升级"}
+{"case_id": "ts-esc-neg-002", "category": "abstain_escalation", "user_input": "平安银行今天收盘多少?", "expected": {"first_tool": "get_stock_quote", "not_tools": ["offer_deep_research"]}, "bucket": "升级"}
+{"case_id": "ts-esc-neg-003", "category": "abstain_escalation", "user_input": "五粮液的 ROE 是多少?", "expected": {"not_tools": ["offer_deep_research"]}, "bucket": "升级"}
+{"case_id": "ts-defer-seq-001", "category": "deferred_search", "user_input": "帮我对比茅台、五粮液、泸州老窖这三只酒", "expected": {"tools_sequence_contains": ["search_tools", "compare_stocks"]}, "bucket": "金融数据"}
+{"case_id": "ts-defer-seq-002", "category": "deferred_search", "user_input": "查一下茅台近三个月的主力资金流向", "expected": {"tools_sequence_contains": ["search_tools", "get_market_indicators"]}, "bucket": "金融数据"}
+{"case_id": "ts-abstain-001", "category": "abstain", "user_input": "你好", "expected": {"first_tool": null}, "bucket": "弃权"}
+{"case_id": "ts-abstain-002", "category": "abstain", "user_input": "谢谢你,帮了大忙了!", "expected": {"first_tool": null}, "bucket": "弃权"}

@@ -1,0 +1,23 @@
+// 技能触发离线评测金标准 — schema 与 tool_selection/golden.jsonl 同构,额外带 skill 字段标注目标技能。
+// 重要现实约束(读 SkillLoader 实测,2026-06-05):skills_root=backend/app/skills 当前**只有一个真实技能** financial_research
+//   (description: A 股个股投资研究 SOP 包 — 11 维方法论 + 行业 benchmark + 评级/仓位决策助手;trigger=investment_due_diligence)。
+// spec § 3.4 规划的"7 个技能"尚未落地(本 Task 6.2 是离线评测,不创建技能;创建是后续任务)。
+// 因此 load_skill 正例的 args.name **全部锁定 financial_research**(test_golden_schema.py 用真实 SkillLoader 对照防拼错);
+//   "每技能≥3 golden 含 near-miss 负例"的口径以**当前真实技能清单**落地:financial_research 正例 ≥3 条(多措辞)+ 近似负例若干;
+//   新技能加进 skills_root 后,在此追加对应 golden 即可,test 的真实清单对照会自动扩容。
+{"case_id": "sk-finres-pos-001", "category": "skill_trigger", "user_input": "帮我对宁德时代做一次完整的投资尽调,按方法论系统评估", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_research"}}, "skill": "financial_research", "bucket": "技能"}
+{"case_id": "sk-finres-pos-002", "category": "skill_trigger", "user_input": "我想用一套标准研究流程给茅台打个投资评级,给个仓位建议", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_research"}}, "skill": "financial_research", "bucket": "技能"}
+{"case_id": "sk-finres-pos-003", "category": "skill_trigger", "user_input": "用个股研究的 11 维方法论帮我系统分析一下五粮液的基本面", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_research"}}, "skill": "financial_research", "bucket": "技能"}
+{"case_id": "sk-finres-pos-004", "category": "skill_trigger", "user_input": "请按投资研究 SOP 评估比亚迪是否值得买入并给出评级和建议仓位", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_research"}}, "skill": "financial_research", "bucket": "技能"}
+{"case_id": "sk-finres-pos-005", "category": "skill_trigger", "user_input": "对隆基绿能做一份个股投资研究,要覆盖偿债盈利成长各维度并给评级", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_research"}}, "skill": "financial_research", "bucket": "技能"}
+{"case_id": "sk-finres-nearmiss-001", "category": "skill_trigger_negative", "user_input": "茅台现在多少钱?", "expected": {"first_tool": "get_stock_quote", "not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-finres-nearmiss-002", "category": "skill_trigger_negative", "user_input": "茅台去年营收多少?帮我查个数就行", "expected": {"first_tool": "get_financial_statements", "not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-finres-nearmiss-003", "category": "skill_trigger_negative", "user_input": "茅台估值贵不贵?看下 PE 就好,别长篇大论", "expected": {"not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-finres-nearmiss-004", "category": "skill_trigger_negative", "user_input": "帮我全面深度研究一下整个新能源车行业的格局", "expected": {"not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-finres-nearmiss-005", "category": "skill_trigger_negative", "user_input": "我研究过哪些公司来着?", "expected": {"first_tool": "memory_search", "not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-finres-nearmiss-006", "category": "skill_trigger_negative", "user_input": "对比一下茅台和五粮液", "expected": {"first_tool": "compare_stocks", "not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-finres-pos-006", "category": "skill_trigger", "user_input": "按完整的尽职调查框架帮我评估一下海康威视该不该建仓", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_research"}}, "skill": "financial_research", "bucket": "技能"}
+{"case_id": "sk-finres-pos-007", "category": "skill_trigger", "user_input": "用行业 benchmark 对照,帮我系统研究招商银行并给出投资评级", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_research"}}, "skill": "financial_research", "bucket": "技能"}
+{"case_id": "sk-finres-pos-008", "category": "skill_trigger", "user_input": "想要一份标准化的个股研究,从基本面到估值再到评级和仓位,标的是中国平安", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_research"}}, "skill": "financial_research", "bucket": "技能"}
+{"case_id": "sk-finres-nearmiss-007", "category": "skill_trigger_negative", "user_input": "白酒行业最近有什么政策研报观点?", "expected": {"first_tool": "kb_search", "not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-finres-nearmiss-008", "category": "skill_trigger_negative", "user_input": "茅台最近有什么新闻?", "expected": {"first_tool": "get_news", "not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
