@@ -449,3 +449,15 @@ def test_apply_results_error_without_explicit_message():
     tool_msg = next(m for m in state.messages if m["role"] == "tool")
     assert "[ERROR]" in tool_msg["content"]
     assert "unknown error" in tool_msg["content"]
+
+
+# ---------------------------------------------------------------------------
+# 17. args_hash 嵌套 dict 键序无关(评审遗留 Minor)
+# ---------------------------------------------------------------------------
+
+
+def test_args_hash_nested_dict_key_order_independent():
+    """嵌套 dict 的键序不同不影响哈希结果。"""
+    h1 = args_hash_of({"outer": {"z": 3, "a": 1}, "x": 0})
+    h2 = args_hash_of({"x": 0, "outer": {"a": 1, "z": 3}})
+    assert h1 == h2
