@@ -15,10 +15,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 from app.core.database import Base, engine  # noqa: E402  (must follow load_dotenv)
-from app.orchestration.postgres_checkpointer import (  # noqa: E402
-    PostgresCheckpointerConfig,
-    make_postgres_checkpointer,
-)
 from app.router import chat as chat_router_module  # noqa: E402
 from app.router import chats as chats_router_module  # noqa: E402
 from app.router import escalate as escalate_router  # noqa: E402
@@ -38,21 +34,6 @@ from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover t
 # ---------------------------------------------------------------------------
 # Helper: build psycopg3-compatible async DATABASE_URL from env vars
 # ---------------------------------------------------------------------------
-
-
-def _async_pg_url() -> str:
-    """Return a psycopg3-compatible conninfo URI (plain postgresql://).
-
-    Note: psycopg3 / psycopg_pool use the libpq URI format (postgresql://)
-    NOT the SQLAlchemy driver format (postgresql+psycopg://).  The +psycopg
-    prefix is SQLAlchemy-only and is rejected by psycopg_pool.AsyncConnectionPool.
-    """
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.environ["POSTGRES_PASSWORD"]  # C37: no silent known-password fallback
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    db = os.getenv("POSTGRES_DB", "industry_assistant")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
 def _sqlalchemy_async_pg_url() -> str:
@@ -193,19 +174,10 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     except Exception as e:
         logger.error(f"定时任务调度器启动失败: {e}")
 
-    # === v0.9 chat additions ===
-
-    # 1. PG checkpointer for LangGraph (psycopg3 async pool)
-    _chat_checkpointer_ctx = None
-    try:
-        conninfo = _async_pg_url()
-        app.state.chat_checkpointer = await make_postgres_checkpointer(
-            PostgresCheckpointerConfig(conninfo=conninfo)
-        )
-        logger.info("LangGraph PG checkpointer 初始化完成")
-    except Exception as e:  # noqa: BLE001
-        app.state.chat_checkpointer = None
-        logger.warning("LangGraph PG checkpointer 初始化跳过: %s", e)
+    # === chat additions(chatloop 引擎)===
+    # 老 supervisor 图退役(Phase 7):chat 路径已完全跑在 chatloop ToolLoop 上,
+    # 由 Celery worker(app.tasks.chat_runner)驱动,不再在 web lifespan 构建
+    # LangGraph chat 图,也不再 wire PG checkpointer(turn 原子语义,checkpoint 退役)。
 
     # 2. MCP client subprocess — use as context manager
     _mcp_ctx = MCPClient.from_subprocess()
@@ -296,24 +268,9 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         app.state.redis_async = None
         logger.warning("Plan 2 Redis async client 初始化跳过: %s", e)
 
-    # 8. Chat graph singleton — wire AFTER MCP client + checkpointer are up.
-    # All chat tools come from MCP server subprocess (no in-process Tool register);
-    # raises if app.state.mcp_client is None (fail-fast — chat /chat endpoint
-    # cannot serve without tools).
-    try:
-        from app.router.chat import _build_graph_singleton
-
-        if app.state.mcp_client is None:
-            raise RuntimeError("MCP client unavailable — chat graph cannot wire tools")
-
-        app.state.chat_graph = await _build_graph_singleton(
-            mcp_client=app.state.mcp_client,
-            checkpointer=app.state.chat_checkpointer,
-        )
-        logger.info("Chat graph singleton 构建完成 (MCP-backed tools)")
-    except Exception as e:  # noqa: BLE001
-        app.state.chat_graph = None
-        logger.error("Chat graph singleton 构建失败 — /chat 路径将 503: %s", e)
+    # 8. (退役)Chat graph singleton —— 老 supervisor 图已退役;chat 现在由 Celery
+    #    worker(app.tasks.chat_runner)按 turn 懒构 chatloop 组件(MCP chat_tools
+    #    subprocess + HeavySingletons),web 进程不再持有 chat 图。
 
     # 9. Persona Editable UI Plan Task 6 — 一次性 backfill (幂等)
     # SessionLocal: app.core.database.SessionLocal (sync session factory, used by Celery tasks)
@@ -376,15 +333,6 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
             logger.info("Plan 2 Redis async client 已关闭")
         except Exception as e:  # noqa: BLE001
             logger.warning("Plan 2 Redis async client 关闭失败: %s", e)
-    # C20: close the LangGraph checkpointer's psycopg3 AsyncConnectionPool — the
-    # caller owns its lifecycle (make_postgres_checkpointer docstring); leaking it
-    # exhausts/hangs connections on every restart.
-    if getattr(app.state, "chat_checkpointer", None) is not None:
-        try:
-            await app.state.chat_checkpointer.conn.close()
-            logger.info("LangGraph PG checkpointer pool 已关闭")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("LangGraph PG checkpointer pool 关闭失败: %s", e)
 
 
 app = FastAPI(
