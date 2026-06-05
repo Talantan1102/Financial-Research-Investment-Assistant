@@ -77,3 +77,24 @@ def test_invalid_tier_fails_loud(tmp_path: Path) -> None:
     p.write_text(good.replace("tier: 直球", "tier: 入门"), encoding="utf-8")
     with pytest.raises(ValueError, match="tier"):
         load_script(p)
+
+
+def test_real_script_viewpoint_baijiu_loads() -> None:
+    """首段真脚本:结构合法 + 关键设计点在位。"""
+    p = (
+        Path(__file__).parent.parent.parent.parent
+        / "eval" / "memory_dialogue" / "scripts" / "viewpoint-baijiu.yaml"
+    )
+    s = load_script(p)
+    assert s.family == "观点演化族"
+    assert len(s.sessions) == 9
+    lengths = {sess.length for sess in s.sessions}
+    assert {"短", "中", "长"} <= lengths
+    tiers = {pr.tier for pr in s.probes}
+    assert tiers == {"直球", "自然难", "对抗"}
+    check_types = {c.type for g in s.db_assertions for c in g.checks}
+    assert "fact_active" in check_types and "old_invalidated" in check_types
+    assert "fact_count_no_increase" in check_types
+    assert "valid_from_is_event_time" in check_types and "invalidated_chain_intact" in check_types
+    assert any(pr.swap_order_invariant for pr in s.probes)
+    assert any(not pr.answerable for pr in s.probes)  # 含弃答题

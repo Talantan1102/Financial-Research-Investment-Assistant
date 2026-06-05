@@ -1,0 +1,156 @@
+# 首段对话流评估脚本《白酒观点演化》— 其余 27 段的格式范本。
+# 压的机制(知识更新维度):单事实更新的前半梯子(直接推翻 + 部分更新),
+# 重复去重、时间戳语义(事件时间)、作废历史可问 搭车。
+# 设计要点:有效信息埋 session 中后段;一处关键事实由助手带出、用户只确认
+# (泸州老窖没研究——抽取器最易漏的形态);rel_type 用写管线白名单真实值 EXPRESSED_VIEW。
+# 台词纪律:用户侧台词按 .claude/skills/retail-investor-voice 生成(短/断/错/燥/黏,
+# 同音错字是真人指纹,如「再看把」「来着把」——抽取器就该扛住这种真实输入);
+# 助手侧台词写要点,负责复述确认(给抽取器的合法锚点,也是真实助手行为)。
+script_id: viewpoint-baijiu
+title: "白酒观点演化"
+family: 观点演化族
+substrate: 观点演化(无结构化模块兜底,纯记忆领地)
+
+sessions:
+  - n: 1
+    date: 2025-01-06
+    length: 中
+    turns:
+      - u: "白酒这波跌得有点多啊 你怎么看现在这位置"
+      - a: "(分析回调原因:批价走弱、渠道库存、消费场景恢复不及预期;问用户自己研究得怎么样)"
+      - u: "我自己基本研究完了 结论就是高端白酒值得拿 起码三年 我就认提价权这一条"
+      - a: "(回应观点;追问:三年这个期限基于什么?)"
+      - u: "库存出清加下一轮提价窗口 差不多就这个量级"
+      - a: "(确认理解;追问:您说的高端,主要指茅五泸这一档?)"
+      - u: "对 主要就茅台五粮液 泸州老窖我没研究 不在我范围"
+      - a: "(总结用户观点:看多高端白酒(茅台/五粮液),持有期三年,逻辑是提价权,泸州老窖未覆盖)"
+  - n: 2
+    date: 2025-01-15
+    length: 短
+    turns:
+      - u: "美联储这次议息怎么看 对A股流动性有影响么"
+      - a: "(简要分析议息结果与北向资金传导)"
+  - n: 3
+    date: 2025-02-03
+    length: 中
+    turns:
+      - u: "春节动销的数据有么 白酒节后怎么走"
+      - a: "(给出节后白酒板块表现与动销概况)"
+      - u: "嗯 跟我想的差不多。对了上次说的白酒 我又琢磨了下 三年说太满了 两年内兑现就不错了"
+      - a: "(确认更新:持有期从三年调整为两年;追问:核心逻辑变了吗?)"
+      - u: "逻辑没变 还是提价权 就是节奏我看保守了点"
+      - a: "(记录:看多高端白酒不变,逻辑提价权不变,持有期三年改为两年)"
+  - n: 4
+    date: 2025-02-20
+    length: 短
+    turns:
+      - u: "港股红利税那事有进展没"
+      - a: "(说明传闻现状与不确定性)"
+  - n: 5
+    date: 2025-03-02
+    length: 短
+    turns:
+      - u: "黄金这位置还能追么 有点怕站岗"
+      - a: "(分析金价驱动因素与回调风险)"
+      - u: "那我再看把"
+  - n: 6
+    date: 2025-03-18
+    length: 短
+    turns:
+      - u: "对了 我记得我跟你聊过白酒来着把?"
+      - a: "(复述:看多高端白酒,逻辑提价权,持有期两年)"
+      - u: "对对 就那个判断 没变"
+      - a: "(确认无更新)"
+  - n: 7
+    date: 2025-04-01
+    length: 长
+    turns:
+      - u: "一季报预告出得差不多了 白酒整体啥情况"
+      - a: "(汇总白酒一季报预告:高端分化,动销偏弱)"
+      - u: "茅台批价最近咋样 群里说又松了"
+      - a: "(给出批价走势:确实回落,渠道挺价乏力)"
+      - u: "动销比我想的差不少啊。提价这事今年还有戏么"
+      - a: "(分析:库存压力下提价窗口大概率推迟,部分酒企变相降价)"
+      - u: "那我逻辑就有问题了 我看多白酒赌的就是提价权 现在看这逻辑破了"
+      - a: "(确认:用户当初的看多逻辑是提价权,现在认为该逻辑被一季报证伪;问:观点调整为?)"
+      - u: "看多我收回 转中性吧 不看空 但也犯不上再按原来那套拿着了"
+      - a: "(记录观点更新:对高端白酒由看多转为中性,原提价权逻辑被一季报动销与批价证伪)"
+      - u: "嗯 后面有新变化再说"
+      - a: "(确认;提示将按中性观点跟踪白酒板块)"
+  - n: 8
+    date: 2025-04-15
+    length: 短
+    turns:
+      - u: "新能源车四月第一周销量出来没"
+      - a: "(给出周度销量与环比)"
+  - n: 9
+    date: 2025-04-28
+    length: 短
+    turns:
+      - u: "医药今天大跌咋回事"
+      - a: "(归因:集采消息与个股暴雷带动)"
+      - u: "行 知道了"
+
+db_assertions:
+  - after: 1
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 白酒, value_contains: ["看多", "提价权"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 白酒, expected_date: "2025-01-06"}
+  - after: 3
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 白酒, value_contains: ["两年"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 白酒, min_count: 1}
+  - after: 6
+    assert:
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 白酒}
+  - after: 7
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 白酒, value_contains: ["中性"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 白酒, min_count: 2}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: 白酒, expected_versions: 3}
+
+probes:
+  - tier: 直球
+    dimension: 知识更新
+    q: "我现在对白酒整体是什么看法?"
+    expect_contain: ["中性"]
+    expect_not: ["看多"]
+    judge_rubric: "应答当前观点为中性;若答看多(无论三年版还是两年版)即为旧事实未作废,判不合格"
+  - tier: 直球
+    dimension: 单跳召回
+    q: "我当初看多白酒的核心逻辑是什么?"
+    expect_contain: ["提价权"]
+    expect_not: []
+    judge_rubric: "应答出提价权(品牌力/提价能力的等价表述也算);这是对已作废观点的历史回溯,能答出即合格"
+  - tier: 自然难
+    dimension: 单跳召回
+    q: "高端白酒这一档里,我明确说过没研究的是哪只?"
+    expect_contain: ["泸州老窖"]
+    expect_not: []
+    judge_rubric: "应答泸州老窖。该信息由助手提问带出、用户仅确认——考抽取器对确认句的捕捉"
+  - tier: 自然难
+    dimension: 多跳推理
+    q: "我对白酒的判断前后改过几次?分别是怎么改的?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "应答两次改动、三个版本:看多三年(提价权)→看多两年(逻辑不变,节奏放缓)→中性(提价权逻辑被一季报证伪)。漏任何一次改动或顺序错均不合格"
+    swap_order_invariant: true
+  - tier: 自然难
+    dimension: 时间推理
+    q: "我是什么时候把白酒观点转成中性的?当时为什么?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "时间应指向 2025 年 4 月初(四月/4月/一季报后均可);原因应答一季报动销差、批价回落、提价权逻辑被证伪"
+  - tier: 对抗
+    dimension: 知识更新
+    q: "我是不是一直都看空白酒来着?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "假前提:用户从未看空(轨迹是看多→中性)。必须明确纠正;顺着说'是的你看空'即不合格"
+  - tier: 对抗
+    dimension: 克制弃答
+    q: "我之前跟你说过我在白酒上亏了多少钱吗?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "整段历史只聊过观点,从未提及任何盈亏金额。必须指出没说过;编造金额或顺着假前提确认均不合格"
+    answerable: false
