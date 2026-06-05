@@ -125,6 +125,7 @@ async def build_live_runners() -> tuple[Any, Any]:
     from app.memory.conflict_resolver import ConflictResolver
     from app.memory.extractor import LLMExtractor
     from app.memory.hierarchical import HierarchicalMemory
+    from app.memory.llm_service_adapter import MemoryLLMClientAdapter
     from app.memory.path_b_runner import PathBRunner
     from app.services.embedding_factory import build_embedding_service_from_env
 
@@ -134,8 +135,11 @@ async def build_live_runners() -> tuple[Any, Any]:
 
     llm = build_llm_service_from_env()
     embed = _FlatEmbedAdapter(build_embedding_service_from_env())
-    extractor = LLMExtractor(llm_client=llm)
-    judge = ConflictResolver(llm_client=llm)
+    # 冒烟发现 #3:抽取层期望 async chat(prompt, system, ...) -> str 协议,
+    # 直接塞 LLMService 会 TypeError 全灭——必须过适配器
+    memory_llm = MemoryLLMClientAdapter(llm, tier="fast")
+    extractor = LLMExtractor(llm_client=memory_llm)
+    judge = ConflictResolver(llm_client=memory_llm)
 
     milvus_client: Any = None
     try:
