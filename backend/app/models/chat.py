@@ -169,6 +169,25 @@ class ChatTask(Base):
     )
 
 
+class ChatSessionContext(Base):
+    """跨 turn 派生状态 — 对话摘要与水位(spec § 4.1)。
+
+    只加新表不 ALTER 旧表(v0.9.x 无 alembic 约定);create_all 幂等建。
+    """
+
+    __tablename__ = "chat_session_context"
+
+    session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    history_summary = Column(Text, nullable=True)
+    # 已总结到的最后一条 message id(水位);水位之前的消息永不再次参与总结
+    summarized_upto = Column(UUID(as_uuid=True), nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class LongTermMemory(Base):
     """长期记忆模型"""
 
