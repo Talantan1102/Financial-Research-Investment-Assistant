@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -23,9 +24,18 @@ from pydantic import ValidationError
 from app.agents.schemas import ToolResult
 from app.chatloop.events import EventType, LoopEvent, SeqCounter
 from app.chatloop.state import ChatLoopState
+from app.chatloop.tool_docs import (
+    CORE_TOOLS,
+    DEFERRED_TOOLS,
+    TOOL_DOCS,
+    search_docs,
+    thin_schema,
+)
 from app.services.llm_step import StepToolCall
 from app.services.tool_result_cache import CacheHit, ToolResultCache
 from app.tools.base import Tool
+
+logger = logging.getLogger(__name__)
 
 EmitFn = Callable[[LoopEvent], Awaitable[None]]
 
@@ -33,6 +43,10 @@ EmitFn = Callable[[LoopEvent], Awaitable[None]]
 _DIGEST_LEN = 120  # tool_end 事件里的 digest 长度
 _LEDGER_DIGEST_LEN = 200  # 台账 digest 上限(LedgerEntry 自身也截 200,双保险)
 _ERR_MSG_LEN = 200
+
+# search_tools 内置工具名(殿后第 15 个,spec § 3.2)
+SEARCH_TOOLS_NAME = "search_tools"
+_SEARCH_TOOLS_K = 3  # search_docs top-k
 
 
 class ToolHub:
@@ -83,8 +97,80 @@ class ToolHub:
     # ------------------------------------------------------------------
 
     def schemas_for_llm(self) -> list[dict[str, Any]]:
-        """OpenAI function 格式,注册顺序。"""
-        return [tool.schema_for_llm() for tool in self._tools.values()]
+        """OpenAI function 格式,按渐进披露三组产出(spec § 3.2)。
+
+        顺序(位置偏置):CORE_TOOLS 序在前(完整 schema)→ DEFERRED_TOOLS 序
+        (瘦条目)→ 未在 TOOL_DOCS 的注册工具(完整 schema + warning,fail-safe)
+        → search_tools 殿后第 15 个。
+
+        仅产出"已注册"的工具:CORE/DEFERRED 列表里未注册的名字跳过(注册由
+        Phase 3 后续任务分批接通,本任务允许部分注册)。
+        """
+        out: list[dict[str, Any]] = []
+        emitted: set[str] = set()
+
+        # 1. 核心组:已注册的按 CORE_TOOLS 序给完整 schema(description 换 brief)
+        for name in CORE_TOOLS:
+            tool = self._tools.get(name)
+            if tool is None:
+                continue
+            out.append(self._core_schema(tool))
+            emitted.add(name)
+
+        # 2. 延迟组:已注册的按 DEFERRED_TOOLS 序给瘦条目
+        for name in DEFERRED_TOOLS:
+            if name not in self._tools:
+                continue
+            out.append(thin_schema(TOOL_DOCS[name]))
+            emitted.add(name)
+
+        # 3. fail-safe:注册了但不在 TOOL_DOCS / 不在两组里的工具 → 完整 schema + warning
+        for name, tool in self._tools.items():
+            if name in emitted or name == SEARCH_TOOLS_NAME:
+                continue
+            logger.warning(
+                "ToolHub.schemas_for_llm: 工具 %r 未在 TOOL_DOCS 分组里,"
+                "回退为完整 schema(请补 tool_docs 条目)",
+                name,
+            )
+            out.append(tool.schema_for_llm())
+
+        # 4. search_tools 殿后
+        out.append(self._search_tools_schema())
+        return out
+
+    @staticmethod
+    def _core_schema(tool: Tool) -> dict[str, Any]:
+        """核心组完整 schema:保留工具自身的参数,description 换成 ToolDoc.brief。"""
+        schema = tool.schema_for_llm()
+        doc = TOOL_DOCS.get(tool.name)
+        if doc is not None:
+            schema["function"]["description"] = doc.brief
+        return schema
+
+    @staticmethod
+    def _search_tools_schema() -> dict[str, Any]:
+        """内置 search_tools 的 schema(query string required)。"""
+        return {
+            "type": "function",
+            "function": {
+                "name": SEARCH_TOOLS_NAME,
+                "description": (
+                    "检索某个工具的完整使用文档(参数 schema/硬约束/示例/何时用)。"
+                    "裸调延迟工具参数报错时,先用本工具拿到目标工具的参数文档。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "工具名或自然语言描述(如 'compare_stocks' / '对比多只股票')",
+                        }
+                    },
+                    "required": ["query"],
+                },
+            },
+        }
 
     # ------------------------------------------------------------------
     # 事件
@@ -152,6 +238,10 @@ class ToolHub:
             self._safe_record(state, name, {}, error, success=False, cache_key=None)
             return self._fail_result(name, {}, error)
 
+        # 2a. search_tools 内置工具:不走 Tool 实例,直接检索文档
+        if name == SEARCH_TOOLS_NAME:
+            return await self._dispatch_search_tools(args, state)
+
         # 2. 工具不存在 → 指导性错误
         tool = self._tools.get(name)
         if tool is None:
@@ -211,6 +301,7 @@ class ToolHub:
                 output = await _compute()
         except BaseException as e:  # noqa: BLE001 — hub 不抛:全包成指导性错误
             error = self._guidance_error(tool, e)
+            error = self._maybe_append_search_hint(name, e, error)
             await self._emit_error(name, error, step=state.step)
             self._safe_record(
                 state, name, args, error, success=False, cache_key=cache_key
@@ -236,6 +327,72 @@ class ToolHub:
             latency_ms=latency_ms,
             cached=is_cache_hit,
         )
+
+    # ------------------------------------------------------------------
+    # search_tools 内置工具(渐进披露,spec § 3.2)
+    # ------------------------------------------------------------------
+
+    async def _dispatch_search_tools(
+        self, args: dict[str, Any], state: ChatLoopState
+    ) -> ToolResult:
+        """检索目标工具文档,top-k 拼成 {"docs": [{name, doc}...]} 返回。
+
+        - query 缺失/非字符串 → 指导性错误(仍记账);
+        - 命中工具名进 ledger.searched_docs(记账);
+        - 同 turn 重复检索同一工具 → 文档文本前加 "(本 turn 已检索过)" 仍返回。
+        本身不进 cache、不计预算、不做去重(检索是确定性纯函数,可重复调)。
+        """
+        query = args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            error = (
+                "[参数校验失败] search_tools 需要 query(string)。"
+                "请传工具名或自然语言描述。"
+            )
+            await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
+            self._safe_record(
+                state, SEARCH_TOOLS_NAME, args, error, success=False, cache_key=None
+            )
+            return self._fail_result(SEARCH_TOOLS_NAME, args, error)
+
+        await self._emit("tool_call", state.step, tool=SEARCH_TOOLS_NAME, args=args)
+        await self._emit("tool_start", state.step, tool=SEARCH_TOOLS_NAME)
+
+        hits = search_docs(query, k=_SEARCH_TOOLS_K)
+        docs: list[dict[str, str]] = []
+        for d in hits:
+            already = d.name in state.ledger.searched_docs
+            text = d.doc
+            if already:
+                text = f"(本 turn 已检索过)\n{text}"
+            docs.append({"name": d.name, "doc": text})
+            state.ledger.searched_docs.add(d.name)
+
+        output = {"docs": docs}
+        digest = self._digest(output)
+        await self._emit(
+            "tool_end", state.step, tool=SEARCH_TOOLS_NAME, digest=digest, cached=False
+        )
+        self._safe_record(
+            state, SEARCH_TOOLS_NAME, args, digest, success=True, cache_key=None
+        )
+        return ToolResult(
+            tool_name=SEARCH_TOOLS_NAME,
+            args=args,
+            success=True,
+            output=output,
+            latency_ms=0,
+        )
+
+    @staticmethod
+    def _maybe_append_search_hint(name: str, exc: BaseException, error: str) -> str:
+        """裸调延迟工具参数错(ValidationError)→ 追加 search_tools 指引(spec § 3.2)。"""
+        if (
+            isinstance(exc, ValidationError)
+            and name in TOOL_DOCS
+            and TOOL_DOCS[name].group == "deferred"
+        ):
+            return f"{error}。可调 search_tools('{name}') 获取参数文档"
+        return error
 
     # ------------------------------------------------------------------
     # 指导性错误文案(spec § 1.4 错误自纠)
@@ -320,4 +477,4 @@ class ToolHub:
         )
 
 
-__all__ = ["EmitFn", "ToolHub"]
+__all__ = ["SEARCH_TOOLS_NAME", "EmitFn", "ToolHub"]

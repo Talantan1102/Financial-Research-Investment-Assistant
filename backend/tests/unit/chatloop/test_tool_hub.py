@@ -131,12 +131,15 @@ def _state() -> ChatLoopState:
 # ---------------------------------------------------------------------------
 
 
-async def test_schemas_order_is_registration_order():
+async def test_schemas_unknown_tools_fail_safe_then_search_tools_last():
+    """Task 3.2 后:schemas_for_llm 按渐进披露分组。
+    未在 TOOL_DOCS 的工具(a/b/c)走 fail-safe 完整 schema,保持注册序,
+    search_tools 殿后(分组细节见 test_progressive_disclosure)。"""
     hub = ToolHub()
     hub.register_inprocess([FakeTool("a"), FakeTool("b")])
     hub.register_inprocess([FakeTool("c")])
     names = [s["function"]["name"] for s in hub.schemas_for_llm()]
-    assert names == ["a", "b", "c"]
+    assert names == ["a", "b", "c", "search_tools"]
 
 
 async def test_register_duplicate_fails_loud():
@@ -147,11 +150,14 @@ async def test_register_duplicate_fails_loud():
 
 
 async def test_register_registry_merges_tools():
+    """注册并入仍生效;schemas_for_llm 按分组重排:core(memory_search/
+    get_stock_quote)在前、deferred(get_news)其次、search_tools 殿后。"""
     hub = ToolHub()
     hub.register_inprocess([FakeTool("memory_search")])
     hub.register_registry(FakeRegistry([FakeTool("get_stock_quote"), FakeTool("get_news")]))
     names = [s["function"]["name"] for s in hub.schemas_for_llm()]
-    assert names == ["memory_search", "get_stock_quote", "get_news"]
+    # 三个工具都已并入(注册成功),CORE_TOOLS 序:get_stock_quote 在 memory_search 前
+    assert names == ["get_stock_quote", "memory_search", "get_news", "search_tools"]
 
 
 # ---------------------------------------------------------------------------
