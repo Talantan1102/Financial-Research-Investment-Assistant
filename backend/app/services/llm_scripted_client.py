@@ -11,6 +11,32 @@ from app.services.llm_step import StepDelta, StepResult
 
 
 class ScriptedStepClient:
+    """L1 测试用脚本化 LLM 客户端 — 按预排剧本逐圈返回 StepResult。
+
+    用法示例::
+
+        client = ScriptedStepClient(
+            steps=[
+                StepResult(
+                    content="",
+                    tool_calls=[StepToolCall(id="c1", name="search", arguments='{"q":"test"}')],
+                    finish_reason="tool_calls",
+                    prompt_tokens=10, completion_tokens=5, cached_tokens=0, cost_cny=0.001,
+                ),
+                StepResult(
+                    content="最终回答",
+                    tool_calls=[],
+                    finish_reason="stop",
+                    prompt_tokens=20, completion_tokens=10, cached_tokens=0, cost_cny=0.002,
+                ),
+            ]
+        )
+        # 第一圈返回 tool_calls,第二圈返回 stop — 两圈剧本覆盖完整 tool-use 循环。
+
+    ``received_messages`` 与 ``received_tool_choice`` 在每次 ``stream_chat`` 调用后
+    追加,可用于断言循环发出的 messages 和 tool_choice 是否符合预期。
+    """
+
     def __init__(self, steps: list[StepResult]) -> None:
         self._steps = list(steps)
         self.received_messages: list[list[dict]] = []

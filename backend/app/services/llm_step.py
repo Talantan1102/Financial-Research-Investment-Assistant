@@ -2,22 +2,26 @@
 
 降级路径(qwen 无原生 tool_calls 时)只换 stream_step 内部实现,
 本模块类型不变,循环及以上零改。
+
+注意:app.agents.schemas 另有同名 StepResult(LangGraph 状态容器),老图退役后消歧。
 """
 from __future__ import annotations
 
 import json
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class StepToolCall(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     id: str
     name: str
     arguments: str  # 原始 JSON 串(流式分片拼接产物)
 
     @property
-    def parsed_args(self) -> dict:
+    def parsed_args(self) -> dict[str, Any]:
         try:
             parsed = json.loads(self.arguments or "{}")
         except json.JSONDecodeError as e:
@@ -35,6 +39,8 @@ class StepDelta(BaseModel):
 
 
 class StepResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
     content: str
     tool_calls: list[StepToolCall]
     finish_reason: str  # stop | tool_calls | length | ...
