@@ -7,11 +7,12 @@ LLM_MODE 处理: conftest autouse 把 LLM_MODE=none;
 from __future__ import annotations
 
 import pytest
-from app.services.cost_budget import CostBudget
+from app.services.cost_budget import BudgetExceeded, CostBudget
 from app.services.llm_scripted_client import ScriptedStepClient
 from app.services.llm_service import LLMService
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
 from app.services.pricing import compute_cost
+from app.services.trace_models import Span
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -154,3 +155,55 @@ async def test_stream_step_on_delta_callback(monkeypatch: pytest.MonkeyPatch) ->
     assert len(received) >= 1
     assert received[0].kind == "content"
     assert received[0].text == "回答内容"
+
+
+async def test_stream_step_parent_span_id_propagated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """传入 parent_span_id 后,写入 TraceService 的 span.parent_id 与之一致。"""
+    step = _make_step("回答")
+    client = ScriptedStepClient([step])
+
+    # 构造 spy trace_service
+    written_spans: list[Span] = []
+
+    class _SpyTrace:
+        def write_span(self, span: Span) -> None:
+            written_spans.append(span)
+
+    monkeypatch.setenv("LLM_MODE", "mock")
+    svc = LLMService(
+        client=client,  # type: ignore[arg-type]
+        trace_service=_SpyTrace(),  # type: ignore[arg-type]
+    )
+
+    parent_id = "req-abc123-parent"
+    await svc.stream_step(
+        messages=[{"role": "user", "content": "hi"}],
+        parent_span_id=parent_id,
+    )
+
+    assert len(written_spans) == 1
+    assert written_spans[0].parent_id == parent_id
+
+
+async def test_stream_step_budget_exceeded_before_client_called(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """已超限的 CostBudget → stream_step 在调 client 前即抛 BudgetExceeded。
+
+    构造:limit=1.0,先 track 2.0 使 spent > limit,再调 stream_step。
+    断言:BudgetExceeded 被抛,client.received_messages 仍为空(client 未被调用)。
+    """
+    step = _make_step()
+    client = ScriptedStepClient([step])
+
+    budget = CostBudget(limit_cny=1.0)
+    budget.track(2.0)  # spent(2.0) > limit(1.0) → assert_under_limit 将抛出
+
+    monkeypatch.setenv("LLM_MODE", "mock")
+    svc = LLMService(client=client, cost_budget=budget)  # type: ignore[arg-type]
+
+    with pytest.raises(BudgetExceeded):
+        await svc.stream_step(messages=[{"role": "user", "content": "hi"}])
+
+    # client 未被调用
+    assert client.received_messages == []

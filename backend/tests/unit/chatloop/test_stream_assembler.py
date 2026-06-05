@@ -268,3 +268,40 @@ def test_result_cost_passed_through() -> None:
     asm.feed(_make_chunk(content="x"))
     result = asm.result(cost_cny=0.042)
     assert result.cost_cny == pytest.approx(0.042)
+
+
+# ---------------------------------------------------------------------------
+# function=None 空保护
+# ---------------------------------------------------------------------------
+
+
+def test_tool_call_fragment_function_none_no_error() -> None:
+    """首片 function=None(某些模型只带 index/type) → 不抛 AttributeError。
+
+    后续片带 function.name/arguments → 正常拼出完整 tool_call。
+    """
+    asm = StreamAssembler()
+
+    # 首片:function=None,只携带 id 和 index
+    first_frag = SimpleNamespace(index=0, id="c1", function=None)
+    d0 = asm.feed(_make_chunk(tool_calls=[first_frag]))
+    # 首片 function=None → 无 name → 不产 tool_call delta
+    assert d0 == []
+
+    # 后续片:携带 name + arguments
+    second_frag = SimpleNamespace(
+        index=0,
+        id=None,
+        function=SimpleNamespace(name="get_price", arguments='{"code":"600519"}'),
+    )
+    d1 = asm.feed(_make_chunk(tool_calls=[second_frag]))
+    # name 首次到达 → 产 tool_call delta
+    assert len(d1) == 1
+    assert d1[0].kind == "tool_call"
+    assert d1[0].tool_name == "get_price"
+
+    result = asm.result()
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0].id == "c1"
+    assert result.tool_calls[0].name == "get_price"
+    assert result.tool_calls[0].arguments == '{"code":"600519"}'

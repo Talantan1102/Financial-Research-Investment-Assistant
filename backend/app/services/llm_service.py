@@ -158,6 +158,7 @@ class LLMService:
         tool_choice: str = "auto",
         tier: Tier = "balanced",
         request_id: str | None = None,
+        parent_span_id: str | None = None,
         on_delta: Callable[[StepDelta], Awaitable[None]] | None = None,
     ) -> StepResult:
         """流式 chat-completion,返回聚合 StepResult。
@@ -185,6 +186,7 @@ class LLMService:
 
         # 4. 调用并拿聚合结果
         started_at = datetime.now(UTC)
+        started = time.perf_counter()
         result: StepResult = await client_stream(
             messages=messages,
             model=model,
@@ -192,6 +194,7 @@ class LLMService:
             tool_choice=tool_choice,
             on_delta=on_delta,
         )
+        latency_ms = int((time.perf_counter() - started) * 1000)
         ended_at = datetime.now(UTC)
 
         # 5. cost 回填(frozen — 用 model_copy)
@@ -220,7 +223,7 @@ class LLMService:
             span = Span(
                 span_id=f"{request_id}-stream-{uuid4().hex[:8]}",
                 request_id=request_id,
-                parent_id=None,
+                parent_id=parent_span_id,
                 name="LLMService.stream_step",
                 inputs={
                     "last_message": messages[-1] if messages else {},
@@ -235,6 +238,7 @@ class LLMService:
                     "completion_tokens": result.completion_tokens,
                     "cached_tokens": result.cached_tokens,
                     "cost_cny": result.cost_cny,
+                    "latency_ms": latency_ms,
                     "tier": tier,
                 },
                 started_at=started_at,

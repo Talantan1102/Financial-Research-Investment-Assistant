@@ -103,8 +103,13 @@ class StreamAssembler:
 
                 slot = self._frags[idx]
                 frag_id: str | None = frag.id
-                frag_name: str | None = frag.function.name
-                frag_args: str = frag.function.arguments or ""
+                fn = frag.function
+                if fn is not None:
+                    frag_name: str | None = fn.name
+                    frag_args: str = fn.arguments or ""
+                else:
+                    frag_name = None
+                    frag_args = ""
 
                 if frag_id is not None:
                     slot["id"] = frag_id
@@ -244,8 +249,8 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
     writes are best-effort and never break the LLM call.
     C45: default model comes from the canonical tier_router.V0_DEFAULT_MODEL (SSOT).
 
-    async_client: AsyncOpenAI は流式 stream_step 専用。LangSmith は sync client のみ
-    ラップ済み;async 流式は LangSmith 非対応のため直接 AsyncOpenAI を渡す。
+    async_client: AsyncOpenAI 专供流式 stream_step 使用。LangSmith 只包了 sync client,
+    async 流式暂不接 LangSmith,直接传入原生 AsyncOpenAI 实例。
     """
     config = LLMConfig()
     model = os.getenv("MOCK_TUSHARE_MODEL", V0_DEFAULT_MODEL)
