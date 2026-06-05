@@ -241,6 +241,44 @@ async def test_load_skill_unknown_skill_guidance():
     assert state.active_skill is None  # 失败不置位
 
 
+async def test_load_skill_resource_absolute_path_rejected():
+    """工具层路径防线:resource 为绝对路径 → [资源路径非法] 指导错误,不触达 loader。"""
+    loader = FakeSkillLoader(
+        skill_md={"portfolio_risk": "# 方法论"},
+        resource_names={"portfolio_risk": ["resources/concentration_rubric.md"]},
+    )
+    tool = LoadSkillTool(loader=loader)
+    state = _state()
+    with pytest.raises(ToolError) as exc:
+        await tool.run_with_state(
+            LoadSkillArgs(name="portfolio_risk", resource="/etc/passwd"),
+            state,
+        )
+    msg = str(exc.value)
+    assert "[资源路径非法]" in msg
+    # 绝对路径被拦截前不应调用 load_resource
+    assert ("load_resource", ("portfolio_risk", "/etc/passwd")) not in loader.calls
+
+
+async def test_load_skill_resource_path_traversal_rejected():
+    """工具层路径防线:resource 含 '..' 片段(目录穿越) → [资源路径非法] 指导错误,不触达 loader。"""
+    loader = FakeSkillLoader(
+        skill_md={"portfolio_risk": "# 方法论"},
+        resource_names={"portfolio_risk": ["resources/concentration_rubric.md"]},
+    )
+    tool = LoadSkillTool(loader=loader)
+    state = _state()
+    with pytest.raises(ToolError) as exc:
+        await tool.run_with_state(
+            LoadSkillArgs(name="portfolio_risk", resource="../../../secret.md"),
+            state,
+        )
+    msg = str(exc.value)
+    assert "[资源路径非法]" in msg
+    # 穿越路径被拦截前不应调用 load_resource
+    assert ("load_resource", ("portfolio_risk", "../../../secret.md")) not in loader.calls
+
+
 # ===========================================================================
 # run_skill_script
 # ===========================================================================

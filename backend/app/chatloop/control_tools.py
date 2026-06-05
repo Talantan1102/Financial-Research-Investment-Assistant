@@ -131,6 +131,7 @@ class ReadCachedResultTool(InProcessTool):
             )
 
         offset = max(0, args.offset)
+        # limit<=0 回退到默认值(_DEFAULT_LIMIT=2000);调用方无需特判,省略 limit 与传 0 等效。
         limit = args.limit if args.limit > 0 else _DEFAULT_LIMIT
         return {
             "ref": args.ref,

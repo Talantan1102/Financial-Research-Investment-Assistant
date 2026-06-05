@@ -306,7 +306,7 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "示例:run_skill_script(skill='portfolio_risk', script='hhi.py',"
             " args={'weights':[0.4,0.3,0.3]})。\n"
             "硬约束:失败回喂结构化三元组(stdout/stderr/return_code)+ 错误码"
-            "(超时/输出超限);大输出强制写缓存,返回摘要 + 缓存键(经 read_cached_result 取回)。"
+            "(超时/输出超限);大输出截断并带 stdout_truncated 标记(写缓存+取回键链路后续接入)。"
         ),
         thin_required={"skill": "string", "script": "string"},
     ),

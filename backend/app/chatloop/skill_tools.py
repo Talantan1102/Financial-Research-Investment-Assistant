@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -120,7 +121,14 @@ class LoadSkillTool(InProcessTool):
                 "resources": resource_listing,
             }
 
-        # resource 非 None:先校验该资源在清单内(一级深,越界给指导错误)
+        # resource 非 None:工具层第一道路径防线(SkillLoader 物理层已守住,但工具层先拦截
+        # 绝对路径与目录穿越,减少不必要的物理层调用并给出更清晰的指导错误)。
+        if os.path.isabs(args.resource) or ".." in args.resource.split("/"):
+            raise _fail(
+                "[资源路径非法] 资源引用必须是技能目录内的相对路径。"
+            )
+
+        # 工具层第二道:校验该资源在清单内(一级深,越界给指导错误)
         if args.resource not in resource_listing:
             listing_str = ", ".join(resource_listing) if resource_listing else "(无)"
             raise _fail(
@@ -205,7 +213,8 @@ class RunSkillScriptTool(InProcessTool):
             )
 
         # 脚本逻辑失败(return_code != 0 等):模型能区分逻辑错并自纠
-        stderr_head = result.stderr_text[:400]
+        # stderr_head 截断 180:ToolHub _ERR_MSG_LEN=200,留 20 字前缀余量
+        stderr_head = result.stderr_text[:180]
         raise self._fail_with_output(
             f"[脚本失败] return_code={result.exit_code}。stderr: {stderr_head}", output
         )
