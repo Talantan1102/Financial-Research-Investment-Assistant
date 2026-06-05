@@ -84,6 +84,30 @@ class ToolResultCache:
             await sess.commit()
             return new_result, status
 
+    async def get_raw(self, cache_key: str) -> str | None:
+        """Return the cached tool result for `cache_key` as a JSON string, or None.
+
+        read_cached_result (chatloop control tool) reads the full original tool
+        output by its cache_key — distinct from get_or_compute (which keys on
+        user/tool/args and recomputes on miss/expiry). Here the cache_key is the
+        already-known ref the model received in a downgrade placeholder, so we read
+        by primary key directly. Expired rows still return their content: the model
+        explicitly asked for this ref, and the content is the truthful last value
+        (staleness is the model's concern, not ours here).
+
+        Returns the `result` JSON column serialized with ensure_ascii=False so the
+        text fed back through the tool message matches the original (CJK readable).
+        """
+        async with self._session_factory() as sess:
+            row = (
+                await sess.execute(
+                    select(ToolResultCacheRow).where(ToolResultCacheRow.cache_key == cache_key)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return json.dumps(row.result, ensure_ascii=False, sort_keys=True)
+
     async def _upsert(
         self,
         sess: AsyncSession,
