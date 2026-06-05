@@ -1,0 +1,103 @@
+<svg viewBox="0 0 820 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="RL 数据集构造流水线:三类来源经四步加工产出三类训练数据">
+  <style>
+    .rdp-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .rdp-h { font-size: 13px; fill: #1D1D1F; font-weight: 600; }
+    .rdp-d { font-size: 11px; fill: #6E6E73; }
+    .rdp-tag { font-size: 10.5px; font-weight: 600; }
+    .rdp-arrow { stroke: #C7C7CC; stroke-width: 1.5; fill: none; marker-end: url(#rdp-head); }
+  </style>
+  <defs>
+    <marker id="rdp-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1,1 L7,4 L1,7" stroke="#C7C7CC" stroke-width="1.4" fill="none"/>
+    </marker>
+  </defs>
+
+  <g class="rdp-t">
+    <!-- 来源行 -->
+    <text x="40" y="30" class="rdp-tag" fill="#86868B">① 原料从哪来</text>
+    <rect x="40" y="42" width="236" height="66" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="56" y="66" class="rdp-h">公开题库 + 真实业务任务</text>
+    <text x="56" y="84" class="rdp-d">竞编题 / FinQA 数值题 / 自家工具调用日志</text>
+    <text x="56" y="99" class="rdp-d">(2023 年前竞赛题防污染,DeepSeek-R1)</text>
+
+    <rect x="292" y="42" width="236" height="66" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="308" y="66" class="rdp-h">强模型蒸馏</text>
+    <text x="308" y="84" class="rdp-d">Fin-R1:R1-671B 生成 6 万条金融 CoT,</text>
+    <text x="308" y="99" class="rdp-d">Qwen-72B 按 7 维过滤(过滤正确率 99.6% 自报)</text>
+
+    <rect x="544" y="42" width="236" height="66" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="560" y="66" class="rdp-h">合成环境 / 模拟器</text>
+    <text x="560" y="84" class="rdp-d">Kimi K2:真实 MCP 3000+ 与合成 20000+,</text>
+    <text x="560" y="99" class="rdp-d">模拟用户画像 + 工具模拟器跑多轮</text>
+
+    <!-- 汇流箭头 -->
+    <path d="M158,108 L158,138 L380,138" class="rdp-arrow" marker-end="none" stroke-dasharray="none"/>
+    <path d="M410,108 L410,150" class="rdp-arrow"/>
+    <path d="M662,108 L662,138 L440,138" stroke="#C7C7CC" stroke-width="1.5" fill="none"/>
+
+    <!-- 加工流水线 -->
+    <text x="40" y="178" class="rdp-tag" fill="#86868B">② 四步加工</text>
+    <rect x="40" y="190" width="168" height="58" rx="10" fill="#FBFBFD" stroke="rgba(94,92,230,0.35)"/>
+    <text x="54" y="213" class="rdp-h">去重 + 质量过滤</text>
+    <text x="54" y="231" class="rdp-d">双模型验证答案一致才留</text>
+    <rect x="232" y="190" width="168" height="58" rx="10" fill="#FBFBFD" stroke="rgba(94,92,230,0.35)"/>
+    <text x="246" y="213" class="rdp-h">难度分层</text>
+    <text x="246" y="231" class="rdp-d">按基座通过率筛「中间区间」题</text>
+    <rect x="424" y="190" width="168" height="58" rx="10" fill="#FBFBFD" stroke="rgba(94,92,230,0.35)"/>
+    <text x="438" y="213" class="rdp-h">可验证化</text>
+    <text x="438" y="231" class="rdp-d">答案进固定格式 / 配测试用例</text>
+    <rect x="616" y="190" width="164" height="58" rx="10" fill="#FBFBFD" stroke="rgba(94,92,230,0.35)"/>
+    <text x="630" y="213" class="rdp-h">去污染</text>
+    <text x="630" y="231" class="rdp-d">8-gram 重叠;改写式泄漏仍是盲区</text>
+    <path d="M208,219 L226,219" class="rdp-arrow"/>
+    <path d="M400,219 L418,219" class="rdp-arrow"/>
+    <path d="M592,219 L610,219" class="rdp-arrow"/>
+
+    <!-- 分流箭头 -->
+    <path d="M410,248 L410,272" class="rdp-arrow" marker-end="none"/>
+    <path d="M410,272 L158,272 L158,290" class="rdp-arrow"/>
+    <path d="M410,272 L410,290" class="rdp-arrow"/>
+    <path d="M410,272 L662,272 L662,290" class="rdp-arrow"/>
+
+    <!-- 三类产物 -->
+    <text x="40" y="284" class="rdp-tag" fill="#86868B">③ 三类训练数据(对应三种训法)</text>
+    <rect x="40" y="296" width="236" height="118" rx="10" fill="rgba(52,199,89,0.07)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="56" y="320" class="rdp-h" fill="#1B7A33">可验证任务集 → RLVR</text>
+    <text x="56" y="340" class="rdp-d">「题目 + 确定性验证器」成对出现:</text>
+    <text x="56" y="356" class="rdp-d">数学答案规则比对 / 代码跑测试用例 /</text>
+    <text x="56" y="372" class="rdp-d">逐条指令验证函数(Tülu 3 IFEval 式)</text>
+    <text x="56" y="392" class="rdp-d">Qwen3 推理 RL 只用 3995 个 query-</text>
+    <text x="56" y="407" class="rdp-d">verifier 对;RFT 几十~几百条可起步</text>
+
+    <rect x="292" y="296" width="236" height="118" rx="10" fill="rgba(94,92,230,0.07)" stroke="rgba(94,92,230,0.40)"/>
+    <text x="308" y="320" class="rdp-h" fill="#4845C2">偏好对 → DPO / RM 训练</text>
+    <text x="308" y="340" class="rdp-d">同 prompt 采一组回答按奖励排序:</text>
+    <text x="308" y="356" class="rdp-d">chosen 取 μ+2σ 高分样本,rejected 取</text>
+    <text x="308" y="372" class="rdp-d">μ−2σ 而非最低分 —— 取最高/最低配对</text>
+    <text x="308" y="392" class="rdp-d">随采样量增加性能反而下降</text>
+    <text x="308" y="407" class="rdp-d">(arXiv 2502.16825,反直觉但关键)</text>
+
+    <rect x="544" y="296" width="236" height="118" rx="10" fill="rgba(255,159,10,0.08)" stroke="rgba(255,159,10,0.45)"/>
+    <text x="560" y="320" class="rdp-h" fill="#B26A00">多轮工具轨迹 → agentic RL</text>
+    <text x="560" y="340" class="rdp-d">真实沙箱跑「真实性关键」场景(代码),</text>
+    <text x="560" y="356" class="rdp-d">工具模拟器跑长尾场景(Kimi K2 双轨);</text>
+    <text x="560" y="372" class="rdp-d">把可代码化的手算步骤换成代码片段</text>
+    <text x="560" y="392" class="rdp-d">造 code-augmented 轨迹(ReTool</text>
+    <text x="560" y="407" class="rdp-d">cold-start 造法)</text>
+
+    <!-- 底部两条横贯原则 -->
+    <rect x="40" y="438" width="360" height="100" rx="10" fill="rgba(255,59,48,0.05)" stroke="rgba(255,59,48,0.30)"/>
+    <text x="56" y="462" font-size="12.5" font-weight="600" fill="#C2403B">原则一:外部插入的 token 不进梯度</text>
+    <text x="56" y="482" class="rdp-d">检索段落 / 工具返回必须 mask 出 loss,只训模型自己</text>
+    <text x="56" y="497" class="rdp-d">生成的 token。Search-R1 消融:去掉 masking 平均 EM</text>
+    <text x="56" y="512" class="rdp-d">0.305 → 0.147(作者自报);verl 用增量分词保证</text>
+    <text x="56" y="527" class="rdp-d">只有 assistant token 进 loss mask</text>
+
+    <rect x="420" y="438" width="360" height="100" rx="10" fill="rgba(0,122,255,0.05)" stroke="rgba(0,122,255,0.30)"/>
+    <text x="436" y="462" font-size="12.5" font-weight="600" fill="#0A6CD6">原则二:两阶段难度课程</text>
+    <text x="436" y="482" class="rdp-d">阶段一「熵扩张」:大题集均匀分布,每题 8 条 rollout;</text>
+    <text x="436" y="497" class="rdp-d">阶段二「难题聚焦」:按低通过率筛出小难题集,每题</text>
+    <text x="436" y="512" class="rdp-d">64 条 rollout(竞编 RLVR,arXiv 2511.06307;</text>
+    <text x="436" y="527" class="rdp-d">GLM-4.5 同思路按难度维持 reward 方差)</text>
+  </g>
+</svg>

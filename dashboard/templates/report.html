@@ -24,6 +24,13 @@
     <section class="report-section">
       <h3 class="report-h">{{ s.heading }}</h3>
       {% if s.body %}<p class="report-body">{{ s.body }}</p>{% endif %}
+      {# 图例 — templates/figures/ 下的 svg server-side include 内联,继承站点 CSS 变量 #}
+      {% if s.figure %}
+        <figure class="report-figure">
+          {% include "figures/" ~ s.figure %}
+          {% if s.figure_caption %}<figcaption class="report-figcaption">{{ s.figure_caption }}</figcaption>{% endif %}
+        </figure>
+      {% endif %}
       {% if s.bullets %}
         <ul class="report-bullets">
           {% for b in s.bullets %}<li>{{ b }}</li>{% endfor %}

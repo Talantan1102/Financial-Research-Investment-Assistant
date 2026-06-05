@@ -1,0 +1,96 @@
+<svg viewBox="0 0 820 612" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="后训练升级决策树:提示词到 RAG 到 SFT 到 DPO 到 RL 的判别条件">
+  <style>
+    .ptdt-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .ptdt-q { font-size: 13px; fill: #1D1D1F; font-weight: 600; }
+    .ptdt-d { font-size: 11.5px; fill: #6E6E73; }
+    .ptdt-o { font-size: 13px; font-weight: 600; }
+    .ptdt-lab { font-size: 11px; fill: #86868B; }
+    .ptdt-box { fill: #FFFFFF; stroke: rgba(60,60,67,0.18); rx: 10; }
+    .ptdt-arrow { stroke: #C7C7CC; stroke-width: 1.5; fill: none; marker-end: url(#ptdt-head); }
+  </style>
+  <defs>
+    <marker id="ptdt-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1,1 L7,4 L1,7" stroke="#C7C7CC" stroke-width="1.4" fill="none"/>
+    </marker>
+  </defs>
+
+  <!-- 问题列 -->
+  <g class="ptdt-t">
+    <!-- Q1 -->
+    <rect x="40" y="16" width="340" height="56" rx="10" class="ptdt-box"/>
+    <text x="58" y="39" class="ptdt-q">提示词 + few-shot 调到位了吗?</text>
+    <text x="58" y="58" class="ptdt-d">先建 eval 基线再谈训练(OpenAI 双轴框架)</text>
+    <!-- O1 -->
+    <rect x="480" y="16" width="300" height="56" rx="10" fill="rgba(52,199,89,0.10)" stroke="rgba(52,199,89,0.45)"/>
+    <text x="498" y="39" class="ptdt-o" fill="#1B7A33">达标 → 停在提示词层</text>
+    <text x="498" y="58" class="ptdt-d">快 / 便宜 / 可逆,大多数需求到此为止</text>
+    <path d="M380,44 L472,44" class="ptdt-arrow"/>
+    <text x="408" y="38" class="ptdt-lab">能达标</text>
+
+    <!-- Q2 -->
+    <rect x="40" y="116" width="340" height="56" rx="10" class="ptdt-box"/>
+    <text x="58" y="139" class="ptdt-q">缺口是「知识」还是「行为」?</text>
+    <text x="58" y="158" class="ptdt-d">答不出私有事实 = 缺知识;不按要求做 = 行为缺口</text>
+    <!-- O2 -->
+    <rect x="480" y="116" width="300" height="56" rx="10" fill="rgba(0,122,255,0.08)" stroke="rgba(0,122,255,0.40)"/>
+    <text x="498" y="139" class="ptdt-o" fill="#0A6CD6">缺知识 → RAG / 检索增强</text>
+    <text x="498" y="158" class="ptdt-d">fine-tune 注入行为,不注入事实</text>
+    <path d="M380,144 L472,144" class="ptdt-arrow"/>
+    <text x="408" y="138" class="ptdt-lab">缺知识</text>
+    <path d="M210,72 L210,116" class="ptdt-arrow"/>
+    <text x="222" y="98" class="ptdt-lab">调不动了</text>
+
+    <!-- Q3 -->
+    <rect x="40" y="216" width="340" height="56" rx="10" class="ptdt-box"/>
+    <text x="58" y="239" class="ptdt-q">固定格式 / 风格 / 窄域流程,攒得出千条好示范?</text>
+    <text x="58" y="258" class="ptdt-d">模仿型行为缺口,示范数据可批量获得</text>
+    <!-- O3 -->
+    <rect x="480" y="216" width="300" height="56" rx="10" fill="rgba(94,92,230,0.08)" stroke="rgba(94,92,230,0.40)"/>
+    <text x="498" y="239" class="ptdt-o" fill="#4845C2">SFT(优先 LoRA)</text>
+    <text x="498" y="258" class="ptdt-d">学格式与流程;OOD 泛化弱是它的天花板</text>
+    <path d="M380,244 L472,244" class="ptdt-arrow"/>
+    <text x="416" y="238" class="ptdt-lab">攒得出</text>
+    <path d="M210,172 L210,216" class="ptdt-arrow"/>
+    <text x="222" y="198" class="ptdt-lab">行为缺口</text>
+
+    <!-- Q4 -->
+    <rect x="40" y="316" width="340" height="56" rx="10" class="ptdt-box"/>
+    <text x="58" y="339" class="ptdt-q">有成对「好 / 坏」偏好数据,要低成本对齐?</text>
+    <text x="58" y="358" class="ptdt-d">主观偏好难写规则,但比较容易标注</text>
+    <!-- O4 -->
+    <rect x="480" y="316" width="300" height="56" rx="10" fill="rgba(94,92,230,0.08)" stroke="rgba(94,92,230,0.40)"/>
+    <text x="498" y="339" class="ptdt-o" fill="#4845C2">DPO(轻量偏好优化)</text>
+    <text x="498" y="358" class="ptdt-d">2 份模型副本;难任务 PPO 峰值更强(ICML 2024)</text>
+    <path d="M380,344 L472,344" class="ptdt-arrow"/>
+    <text x="416" y="338" class="ptdt-lab">有偏好对</text>
+    <path d="M210,272 L210,316" class="ptdt-arrow"/>
+    <text x="222" y="298" class="ptdt-lab">SFT 后仍不够</text>
+
+    <!-- Q5 -->
+    <rect x="40" y="416" width="340" height="74" rx="10" class="ptdt-box"/>
+    <text x="58" y="438" class="ptdt-q">RL 三道门槛(全过才上,OpenAI RFT):</text>
+    <text x="58" y="457" class="ptdt-d">① 答案可验证,写得出 grader / 打分函数</text>
+    <text x="58" y="475" class="ptdt-d">② 基座非零成功率  ③ eval 分落在中间区间</text>
+    <!-- O5 -->
+    <rect x="480" y="416" width="300" height="74" rx="10" fill="rgba(175,82,222,0.08)" stroke="rgba(175,82,222,0.45)"/>
+    <text x="498" y="438" class="ptdt-o" fill="#8E37BE">RL / RFT(GRPO · PPO)</text>
+    <text x="498" y="457" class="ptdt-d">买的是可验证任务上的正确率与 OOD 泛化;</text>
+    <text x="498" y="475" class="ptdt-d">几十~几百条 prompt 即可起步(RFT 官方)</text>
+    <path d="M380,453 L472,453" class="ptdt-arrow"/>
+    <text x="412" y="447" class="ptdt-lab">三关全过</text>
+    <path d="M210,372 L210,416" class="ptdt-arrow"/>
+    <text x="222" y="398" class="ptdt-lab">偏好优化仍不够</text>
+  </g>
+
+  <!-- 底部警示带 -->
+  <g class="ptdt-t">
+    <rect x="40" y="522" width="360" height="70" rx="10" fill="rgba(255,59,48,0.06)" stroke="rgba(255,59,48,0.35)"/>
+    <text x="58" y="546" font-size="12.5" font-weight="600" fill="#C2403B">⛔ 基座 0% 成功率 → RFT 无法起步</text>
+    <text x="58" y="565" class="ptdt-d">「RL 放大已有能力,不凭空创造能力」</text>
+    <text x="58" y="582" class="ptdt-d">(OpenAI RFT use-cases 文档原话口径)</text>
+    <rect x="420" y="522" width="360" height="70" rx="10" fill="rgba(0,199,190,0.07)" stroke="rgba(0,199,190,0.40)"/>
+    <text x="438" y="546" font-size="12.5" font-weight="600" fill="#0A8A84">小模型要推理能力 → 先蒸馏,别直接 RL</text>
+    <text x="438" y="565" class="ptdt-d">同一 Qwen-32B 基座:蒸馏 AIME 72.6% vs 直接</text>
+    <text x="438" y="582" class="ptdt-d">大规模 RL 47.0%(DeepSeek-R1 Table 6)</text>
+  </g>
+</svg>

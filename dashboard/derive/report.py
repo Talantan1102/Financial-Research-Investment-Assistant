@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,13 +26,23 @@ def _req(value: object, ctx: str) -> object:
     return value
 
 
+# 图例文件名白名单:小写字母/数字/连字符 + .svg,挡路径穿越(模板按名 include)。
+_FIGURE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.svg$")
+
+
 @dataclass(frozen=True)
 class ReportSection:
-    """一段叙事:标题 + 正文 + 可选要点列表。"""
+    """一段叙事:标题 + 正文 + 可选图例 + 可选要点列表。
+
+    ``figure`` 是 ``dashboard/templates/figures/`` 下的 svg 文件名(server-side
+    include 内联进页面,继承站点 CSS 变量);空 = 该节无图。
+    """
 
     heading: str
     body: str
     bullets: tuple[str, ...] = ()
+    figure: str = ""
+    figure_caption: str = ""
 
 
 @dataclass(frozen=True)
@@ -116,11 +127,22 @@ def _parse_sections(raw: object) -> tuple[ReportSection, ...]:
         bullets_raw = s.get("bullets") or []
         if not isinstance(bullets_raw, list):
             raise ValueError(f"report yaml: sections[{i}].bullets 必须是 list")
+        figure = str(s.get("figure") or "")
+        if figure and not _FIGURE_NAME_RE.fullmatch(figure):
+            raise ValueError(
+                f"report yaml: sections[{i}].figure 非法文件名 {figure!r}"
+                "(仅小写字母/数字/连字符 + .svg)"
+            )
+        figure_caption = str(s.get("figure_caption") or "")
+        if figure_caption and not figure:
+            raise ValueError(f"report yaml: sections[{i}].figure_caption 需要先有 figure")
         out.append(
             ReportSection(
                 heading=str(_req(s.get("heading"), f"sections[{i}].heading")),
                 body=str(s.get("body") or ""),
                 bullets=tuple(str(b) for b in bullets_raw),
+                figure=figure,
+                figure_caption=figure_caption,
             )
         )
     return tuple(out)

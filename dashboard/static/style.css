@@ -3001,6 +3001,18 @@ details[open] .decision-note-toggle::before {
 }
 .report-bullets li, .report-pitfalls li { font-size: 13.5px; color: var(--fg-dim); line-height: 1.7; }
 
+/* 图例 — 叙事 section 配的内联 SVG 示意图(templates/figures/*.svg server-side include) */
+.report-figure {
+  margin: 14px 0 12px; padding: 18px 18px 12px;
+  background: var(--surface); border: 1px solid var(--hair-2);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-1);
+}
+.report-figure svg { display: block; width: 100%; height: auto; }
+.report-figcaption {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--hair-2);
+  font-family: var(--mono); font-size: 11px; color: var(--fg-mute); line-height: 1.6;
+}
+
 /* 能力维度卡片 */
 .report-dims { display: flex; flex-direction: column; gap: 16px; }
 .report-dim {
