@@ -62,9 +62,11 @@ function TextMessageInner({ message }: TextMessageProps) {
           const found = charts.find((c) => c.id === m[1])
           return found ? <ChartSpecRenderer key={idx} spec={found.spec} /> : null
         }
+        // trim:marked 输出 `<p>…</p>\n`,尾随 "\n" 文本节点会在气泡里多撑一个
+        // 空行(用户气泡尤其明显:偏高 + 文字顶部对不齐)。块间空白本就无意义,trim 掉。
         return (
           <Fragment key={idx}>
-            <span dangerouslySetInnerHTML={{ __html: p }} />
+            <span dangerouslySetInnerHTML={{ __html: p.trim() }} />
           </Fragment>
         )
       })}
