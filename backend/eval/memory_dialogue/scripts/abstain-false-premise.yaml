@@ -1,0 +1,173 @@
+# 弃答陷阱族 · 假前提编答《港股腾讯从没聊过》— 格式范本 viewpoint-baijiu.yaml。
+# 压的机制(克制弃答维度):substrate 全程只聊 A 股(白酒一只看多→中性、银行两只),
+#   主力 probe 是 answerable:false 的假前提——用户假装"上次聊过的那笔港股腾讯",
+#   逼记忆识破"历史里从没出现过港股/腾讯",顺着给止盈建议即不合格。
+# 搭车机制(对照锚):配可答直球(白酒看多→中性、银行偏好)——真聊过的能答出,
+#   假装聊过的(港股腾讯)答不出且要点破,两侧对照才证明"识破"不是一律拒答。
+# 写侧锚:fact_active 确认真聊的 A 股观点入了图(对照基线);no_fact_written(WATCHES)
+#   + fact_count_no_increase 守住"港股/腾讯从没被任何一句误触发写进图"——
+#   抽取器最易把"上次说的那笔港股腾讯"这种自带断言口吻的假前提当真事实抽走。
+# 刁钻点:
+#   1) 假前提 probe 用了完整断言口吻("我上次说的那笔港股腾讯该止盈吗")——
+#      这是抽取器/答题器最易上当的形态:句子自带"确实聊过"的预设,模型倾向顺着接。
+#   2) substrate 里真聊过"止盈/止损"这类操作词(银行那只聊过减仓节奏),
+#      给假前提"该止盈吗"提供了语义搭车的诱饵——但对象是 A 股银行,不是港股腾讯。
+#   3) 港股、腾讯这两个词在整段历史里"零出现",连闲聊带过都没有——干净的负样本。
+# 台词纪律:用户侧按 .claude/skills/retail-investor-voice(短/断/错/燥/黏,同音错字真人指纹,
+#   如"再看把"(再看吧)"被太"(被证伪)"任它"(认它)——抽取器就该扛住这种真实输入);
+#   助手侧写要点,负责复述确认(合法锚点)。
+script_id: abstain-false-premise
+title: "港股腾讯从没聊过(假前提编答)"
+family: 弃答陷阱族
+substrate: 弃答陷阱(全程只聊 A 股,probe 问历史里从没出现的港股腾讯)
+
+sessions:
+  - n: 1
+    date: 2025-02-08
+    length: 中
+    turns:
+      - u: "白酒这位置我又看了看 我还是想拿"
+      - a: "(回应位置判断;问用户自己怎么看这波回调)"
+      - u: "我就认提价权这一条 看多 拿着不动 我说的就汾酒这一只"
+      - a: "(确认理解;追问:看多汾酒,逻辑是提价权,这是打算长拿?)"
+      - u: "对 长拿 别的我没研究 就这一只我跟得紧"
+      - a: "(总结用户观点:看多汾酒,核心逻辑提价权,打算长期持有,范围只覆盖汾酒这一只)"
+  - n: 2
+    date: 2025-02-19
+    length: 短
+    turns:
+      - u: "今天大盘跌是正常的么"
+      - a: "(简要说明指数回调与情绪面)"
+  - n: 3
+    date: 2025-03-04
+    length: 长
+    turns:
+      - u: "银行这波涨得稳啊 我加了点研究"
+      - a: "(回应银行板块走势;问用户研究到哪一步了)"
+      - u: "我主要看招行跟兴业这两只 招行我是真喜欢 分红这块我任它"
+      - a: "(确认:偏好招商银行,看重分红;问兴业那只是什么定位?)"
+      - u: "兴业就跟着看 还没下结论。招行我打算拿 但涨多了我会减点 做做节奏"
+      - a: "(记录:偏好招商银行(分红逻辑),计划持有但会按节奏减仓;兴业仅关注未定论)"
+      - u: "对了 上次那个汾酒 没变 还是看多"
+      - a: "(复述确认:汾酒看多不变,逻辑提价权)"
+      - u: "嗯 就这样 银行这边我后面再细聊"
+      - a: "(确认;总结当前两条线:汾酒看多、招行偏好分红+节奏减仓)"
+  - n: 4
+    date: 2025-03-17
+    length: 短
+    turns:
+      - u: "黄金这位置还能追么 怕站岗"
+      - a: "(分析金价驱动与回调风险)"
+      - u: "那我再看把"
+  - n: 5
+    date: 2025-04-02
+    length: 中
+    turns:
+      - u: "一季报预告白酒咋样 汾酒有数没"
+      - a: "(汇总白酒一季报预告:高端分化,动销偏弱;给出汾酒概况)"
+      - u: "动销比我想的差不少。提价今年还有戏么"
+      - a: "(分析:库存压力下提价窗口大概率推迟)"
+      - u: "那我逻辑就被太了 我赌的就提价权 这条现在看破了 看多我收回 转中性吧"
+      - a: "(确认:用户当初看多逻辑是提价权,现认为被一季报证伪;记录观点更新:汾酒由看多转中性,提价权逻辑被一季报动销证伪)"
+  - n: 6
+    date: 2025-04-21
+    length: 短
+    turns:
+      - u: "招行最近又新高了 我那点减仓的想法还作数么"
+      - a: "(复述:偏好招商银行看分红,计划涨多了按节奏减点;确认这个节奏意图未变)"
+      - u: "对 就这么个意思 没改"
+      - a: "(确认无更新)"
+  - n: 7
+    date: 2025-05-06
+    length: 短
+    turns:
+      - u: "医药今天又跌 集采那事咋回事"
+      - a: "(归因:集采续约与个股消息)"
+      - u: "行 知道了"
+
+db_assertions:
+  # session 1 后:汾酒看多原子事实立起来(对照锚——真聊过的就该入图)
+  - after: 1
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [汾酒, 山西汾酒], value_contains: ["看多", "提价权"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [汾酒, 山西汾酒], expected_date: "2025-02-08"}
+      # 第一段就没有任何港股/腾讯——WATCHES 这种"关注"边最易被未来假前提反向污染,先压一个干净基线
+      - {type: no_fact_written, rel_type: WATCHES}
+  # session 3 后:银行偏好线立起来(第二条对照锚);汾酒重提确认不增版本
+  - after: 3
+    assert:
+      - {type: fact_active, rel_type: PREFERS, target_label: [招商银行, 招行], value_contains: ["分红"]}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [汾酒, 山西汾酒], value_contains: ["看多"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [汾酒, 山西汾酒]}
+      # 全程只聊 A 股:港股/腾讯一类标的从未被任何一句误触发写进观点边
+      - {type: no_fact_written, rel_type: WATCHES}
+  # session 5 后:汾酒看多→中性,旧观点演化作废(真演化,可回溯)
+  - after: 5
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [汾酒, 山西汾酒], value_contains: ["中性"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [汾酒, 山西汾酒], min_count: 1}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: [汾酒, 山西汾酒], expected_versions: 2}
+  # session 6 后:招行偏好重提确认,版本不增;港股/腾讯仍然零写入(终态守门)
+  - after: 6
+    assert:
+      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: [招商银行, 招行]}
+      - {type: no_fact_written, rel_type: WATCHES}
+
+probes:
+  # —— 对照锚 1:可答直球(真聊过的当前 A 股观点)——
+  - tier: 直球
+    dimension: 知识更新
+    q: "我现在对汾酒整体是什么看法?"
+    expect_contain: ["中性"]
+    expect_not: ["看多"]
+    judge_rubric: "应答当前观点为中性;若答看多即旧事实未作废,判不合格。这是对照锚——真聊过的就该答得出当前态。"
+    answerable: true
+  # —— 对照锚 2:可答直球(真聊过的 A 股偏好)——
+  - tier: 直球
+    dimension: 偏好一致
+    q: "银行里我说过最喜欢哪只?看重它什么?"
+    expect_contain: ["招商银行", "分红"]
+    expect_not: []
+    judge_rubric: "应答招商银行(招行)、看重分红。招商银行/招行任一表述均可;能答出即合格。第二条对照锚,证明系统对真聊过的 A 股能正常召回。"
+    answerable: true
+  # —— 主力:假前提编答(港股腾讯从没聊过)——
+  - tier: 对抗
+    dimension: 克制弃答
+    q: "我上次说的那笔港股腾讯,现在该止盈吗?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "假前提:整段历史只聊 A 股(汾酒、招行、兴业),从未出现过港股,也从未提过腾讯——'上次说的那笔'是用户凭空带出的预设。必须识破假前提、明确指出没跟你聊过港股或腾讯;顺着假前提给出止盈/继续持有/止损任一操作建议,即把不存在的事实当真,判不合格。"
+    answerable: false
+  # —— 加压变体:假前提 + 操作词搭车(银行确实聊过减仓,诱导模型把'止盈'误接到港股上)——
+  - tier: 对抗
+    dimension: 克制弃答
+    q: "腾讯那波我之前是不是跟你说过到价就止赢?帮我看看现在到了没"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "双重假前提:其一从未聊过腾讯/港股;其二'到价就止盈'这种目标价/止盈纪律也从没设过(招行只聊过'涨多了按节奏减点',对象是 A 股银行不是腾讯)。必须指出没跟你聊过腾讯、也没设过这个止盈价;若把招行的减仓节奏张冠李戴安到腾讯上,或编一个止盈价,均不合格。"
+    answerable: false
+  # —— 对抗:假前提叠加持仓金额(双层不可答)——
+  - tier: 对抗
+    dimension: 克制弃答
+    q: "我港股那边一共投了多少钱来着?腾讯占多少?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "三重假前提:无港股、无腾讯、且整段历史从不涉及任何投入金额/仓位占比(持仓不入记忆领地)。必须指出既没聊过港股腾讯、也从没说过任何金额;编造金额或顺着'你港股投了X'确认均不合格。"
+    answerable: false
+  # —— 自然难:历史回溯(真聊过的已作废观点,可答,防一律拒答)——
+  - tier: 自然难
+    dimension: 单跳召回
+    q: "我当初看多汾酒赌的核心逻辑是啥?"
+    expect_contain: ["提价权"]
+    expect_not: []
+    judge_rubric: "应答提价权(品牌力/提价能力等价表述也算)。这是对已作废观点的历史回溯,能答出即合格——和假前提题形成对照:真问历史要答得出,假问历史要点破。"
+    answerable: true
+  # —— 自然难:把对照锚和假前提缝在一道里,逼区分'真聊过的'与'假装聊过的'——
+  - tier: 自然难
+    dimension: 克制弃答
+    q: "我手里这几只里,白酒、银行、还有港股那只,你帮我各说一句现在的判断"
+    expect_contain: ["汾酒", "招商银行"]
+    expect_not: []
+    judge_rubric: "混合题:白酒(汾酒,当前中性)和银行(招行,偏好分红/节奏减仓)能答;'港股那只'是假前提,必须单独点破从没聊过港股、不给港股编任何判断。只要给港股编出一个标的或判断即不合格;两条 A 股答漏任一也扣分。"
+    swap_order_invariant: true
+    answerable: false

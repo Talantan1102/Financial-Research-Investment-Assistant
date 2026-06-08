@@ -1,0 +1,205 @@
+# 对话流评估脚本《一只创新药票的五次心路》— 时间事件族·跨 session 时序链段。
+# 压的机制(时间推理 × 多跳推理):对【同一只票】(恒瑞医药)做五阶段观点演化——
+#   建仓(看多·出海逻辑)→ 加仓(看多·BD 兑现加码)→ 动摇(中性偏多·拥挤度高)→
+#   减仓(中性·license-out 黄了)→ 退出(看空·逻辑破)。五个版本都落在【同一 target_label】上,
+#   每跳一个事件时间 valid_from,真实时序由事件日期串成一条链。业界难点形态:单事实更新好答,
+#   但"按时间先后把整条演变捋一遍"要求(甲)五段一段不漏、(乙)严格按事件时间排序、
+#   (丙)不能把最后一次"提及"(n12 群里闲聊式翻旧账,没改观点)当成最新状态——最新是 n10 的看空。
+# 搭车机制:链式作废历史五版本可回溯(invalidated_chain_intact expected_versions:5)、
+#   每段事件时间推理(valid_from_is_event_time)、加仓那段由助手复述带出用户只"对"一声确认
+#   (抽取器最易漏的确认句形态)、克制弃答(从没聊过买了几手/亏多少)、对抗假前提(把中间的动摇态当最新)。
+# 刁钻点:① 五段全压在同一 target_label,naive "取最近一条事实"只会拿到看空——但"捋演变"要的是整条链,
+#   抽取器必须保住中间三个被作废的版本不丢;② n12 是退出之后的一次纯闲聊翻旧账(没有新观点),
+#   若抽取器把"最后被提到的时间点"当成最新观点时间,会把退出时间答错(退出在 n10 / 9月,不是 n12 / 10月);
+#   ③ 动摇(n6)与减仓(n8)语义都偏"中性",但事件不同(一个是估值拥挤、一个是 license-out 落空),
+#   是相邻近义态,捋链时不得把两段并成一段;④ 关键的退出事件埋在长 session(n10)中后段,前面是批价/海外干扰流水。
+# 台词纪律:用户侧台词按 .claude/skills/retail-investor-voice 生成(短/断/错/燥/黏,
+#   同音错字是真人指纹,如「再看把」「来着把」「迟到肉」——只打在非断言关键词上,抽取器就该扛住);
+#   助手侧台词写要点 + 复述确认句(抽取器合法锚点,也是真实助手行为)。
+# 硬约束:substrate 是带日期的观点演化,不是持仓——口语里顺带提一句加减仓可以,断言绝不围绕股数/金额。
+script_id: time-sequence-chain
+title: "一只创新药票的五次心路"
+family: 时间事件族
+substrate: 带日期的观点演化(单标的跨 session 时序链;无结构化模块兜底,纯记忆领地)
+
+sessions:
+  - n: 1
+    date: 2025-03-05
+    length: 中
+    turns:
+      - u: "创新药这板块是不是该看一眼了 跌这么久了"
+      - a: "(分析创新药板块位置:集采出清、出海授权回暖;问用户自己研究到哪了)"
+      - u: "我研究完了 就买恒瑞 出海这条逻辑我认 国内集采的事它已经熬过来了"
+      - a: "(确认理解;追问:出海具体指 license-out 授权这块,还是自己出去卖?)"
+      - u: "授权出去 BD 那块 大药企接盘 首付款加里程碑 现金流能看到"
+      - a: "(总结用户观点:看多恒瑞医药,核心逻辑出海授权(license-out / BD 兑现),集采利空已出清;时点 2025-03-05)"
+  - n: 2
+    date: 2025-03-14
+    length: 短
+    turns:
+      - u: "美联储这次议息偏鹰么 对成长股压力大不大"
+      - a: "(简析议息基调与成长风格的扰动)"
+  - n: 3
+    date: 2025-03-26
+    length: 中
+    turns:
+      - u: "恒瑞那个 ADC 的授权是不是落地了 群里说签了个大的"
+      - a: "(给出该 license-out 交易进展:首付款规模与潜在里程碑)"
+      - u: "这不就兑现了么 我加了点 出海这逻辑现在更实了 我看多的底气更足"
+      - a: "(确认更新:看多恒瑞不变,授权落地后加仓,逻辑由出海预期变为出海兑现、看多确定性增强;追问:逻辑主线还是 BD 出海这条?)"
+      - u: "对 还是出海 就是从赌它能签 变成它真签了"
+      - a: "(记录:看多恒瑞医药,逻辑出海授权——由预期兑现升级为已落地,看多力度加码;时点 2025-03-26)"
+  - n: 4
+    date: 2025-04-08
+    length: 短
+    turns:
+      - u: "黄金这位置还能追不 有点怕站岗"
+      - a: "(分析金价驱动与追高风险)"
+      - u: "那我再看把"
+  - n: 5
+    date: 2025-04-21
+    length: 短
+    turns:
+      - u: "港股那边创新药 ETF 今晚跟不跟美股"
+      - a: "(说明隔夜映射传导与不确定性)"
+  - n: 6
+    date: 2025-05-09
+    length: 中
+    turns:
+      - u: "恒瑞这一个月张太快了 我有点拿不踏实"
+      - a: "(回顾这波涨幅与板块拥挤度;问是估值层面动摇还是出海逻辑变了)"
+      - u: "逻辑没破 出海还在 就是位置太高了 性价比不行 我心里开始打鼓了"
+      - a: "(确认:出海逻辑未破,顾虑转向估值拥挤、性价比走低,看多信心松动转为偏谨慎;追问:是要降看多力度,还是观望?)"
+      - u: "看多我先收着点 转成中性偏多吧 不像之前那么敢拍胸脯了"
+      - a: "(记录观点更新:对恒瑞由强看多转为中性偏多,原因估值贵、拥挤度高,出海逻辑本身未证伪;时点 2025-05-09)"
+  - n: 7
+    date: 2025-05-22
+    length: 短
+    turns:
+      - u: "新能源车五月第一周销量出了没"
+      - a: "(给出周度销量与环比)"
+  - n: 8
+    date: 2025-06-11
+    length: 中
+    turns:
+      - u: "恒瑞那个海外授权 是不是出岔子了 群里说对方退货了"
+      - a: "(核实该 license-out 进展:合作方终止 / 退回权益的传闻与影响)"
+      - u: "我研究了下 那个大的授权黄了 BD 兑现没我想的顺 我减了一半"
+      - a: "(确认:用户依据 license-out 落空的事实减仓;追问:观点是降到中性,还是更悲观?)"
+      - u: "降中性吧 不偏多了 出海这逻辑没全破 但兑现节奏明显不行了"
+      - a: "(记录观点更新:对恒瑞由中性偏多降为中性,原因核心 license-out 落空、BD 兑现节奏走弱,据此减仓一半;时点 2025-06-11)"
+  - n: 9
+    date: 2025-06-30
+    length: 短
+    turns:
+      - u: "港股红利税那事有进展没"
+      - a: "(说明传闻现状与不确定性)"
+      - u: "行 知道了"
+  - n: 10
+    date: 2025-09-03
+    length: 长
+    turns:
+      - u: "半年报出得差不多了 创新药整体啥情况 恒瑞我还揣着小半仓呢"
+      - a: "(汇总创新药半年报:出海授权分化,头部 BD 节奏放缓)"
+      - u: "海外那条线最近又咋样 我这票就指着这个"
+      - a: "(给出 license-out 行业进展:接盘方收紧、估值回归,头部公司授权落地不及预期)"
+      - u: "恒瑞自己的管线进度呢 后面还有能签出去的大品种没"
+      - a: "(说明其在研管线与潜在 BD 标的:短期缺乏可兑现的重磅授权催化)"
+      - u: "那我这逻辑就彻底没了啊 我买它赌的就是 BD 出海 现在大的黄了 后面又没接上 这逻辑我看是破了"
+      - a: "(确认:用户当初看多的核心是 BD 出海兑现,现该逻辑被'大授权落空+后续无重磅接力'证伪;追问:观点调整为?)"
+      - u: "看空吧 我承认我赌错了 剩的这点我清掉 不玩了"
+      - a: "(记录观点更新:对恒瑞医药由中性转为看空,出海授权逻辑被半年报与后续管线证伪,据此清仓退出;时点 2025-09-03)"
+      - u: "嗯 这只算翻篇了 后面有新东西再说"
+      - a: "(确认退出;提示将按看空/已退出状态归档恒瑞这条线)"
+  - n: 11
+    date: 2025-09-18
+    length: 短
+    turns:
+      - u: "医药今天又大跌 是不是集采还有第二刀"
+      - a: "(归因:集采节奏与板块情绪)"
+      - u: "哦 知道了"
+  - n: 12
+    date: 2025-10-15
+    length: 短
+    turns:
+      - u: "对了 恒瑞那票 我记得我跟你来回聊过好几轮来着把?"
+      - a: "(复述:您对恒瑞从看多出海一路走到看空退出,目前是已清仓的看空状态,没有新观点)"
+      - u: "对对 早翻篇了 就是感慨下 当初那么看好"
+      - a: "(确认无更新;恒瑞维持看空/已退出,不因本次翻旧账改动)"
+
+db_assertions:
+  - after: 1
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], value_contains: ["看多", "出海"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], expected_date: "2025-03-05"}
+  - after: 3
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], value_contains: ["看多"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], min_count: 1}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], expected_date: "2025-03-26"}
+  - after: 6
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], value_contains: ["中性"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], min_count: 2}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], expected_date: "2025-05-09"}
+  - after: 8
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], value_contains: ["中性"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], min_count: 3}
+  - after: 10
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], value_contains: ["看空"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], min_count: 4}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], expected_versions: 5}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], expected_date: "2025-09-03"}
+  - after: 12
+    assert:
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [恒瑞, 恒瑞医药], expected_date: "2025-09-03"}
+
+probes:
+  - tier: 直球
+    dimension: 知识更新
+    q: "我现在对恒瑞是什么看法?"
+    expect_contain: ["看空"]
+    expect_not: ["看多"]
+    judge_rubric: "应答当前观点为看空 / 已清仓退出。若答看多或中性(任何中间版本)即旧事实未作废、未沿链取最新,判不合格"
+  - tier: 直球
+    dimension: 单跳召回
+    q: "我当初看多恒瑞,赌的核心逻辑是什么?"
+    expect_contain: ["出海"]
+    expect_not: []
+    judge_rubric: "应答出海授权 / license-out / BD 兑现(等价表述均可);这是对已作废首版观点的历史回溯,能答出即合格"
+  - tier: 自然难
+    dimension: 时间推理
+    q: "把我对恒瑞这只票的看法演变 按时间先后捋一遍"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "必须按真实事件时序完整复述五个阶段且一段不漏:① 3月初建仓看多(赌出海授权)→ ② 3月底授权落地加仓、看多加码 → ③ 5月初转中性偏多(嫌涨太多、估值贵,逻辑未破)→ ④ 6月中授权黄了减仓、降中性 → ⑤ 9月初清仓看空(BD 出海逻辑被半年报+后续管线证伪)。漏任何一个中间环节(尤其②加仓 或 ③动摇/④减仓两个相邻中性态被并成一段)、或顺序错乱、或把最近一次提及(10月闲聊翻旧账)当成最新状态时间,均不合格"
+    swap_order_invariant: true
+  - tier: 自然难
+    dimension: 时间推理
+    q: "我是什么时候彻底把恒瑞看空清掉的?当时为什么?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "时间应指向 2025 年 9 月初(九月/9月/半年报后均可),不得答成 10 月那次闲聊翻旧账的时点;原因应答核心 license-out 大授权落空、后续无重磅 BD 接力,出海兑现逻辑被证伪。月份答错或原因缺失不合格"
+  - tier: 自然难
+    dimension: 多跳推理
+    q: "我对恒瑞的看法前后改过几次?中间那两次偏中性的是因为啥不一样?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "应答四次改动 / 五个版本;并能区分两个相邻中性态的不同诱因:中性偏多那次(5月)是嫌涨太多、估值拥挤、逻辑未破;降中性那次(6月)是核心 license-out 授权黄了、BD 兑现节奏走弱。把两次并成一次、或诱因互换均不合格"
+    swap_order_invariant: true
+  - tier: 对抗
+    dimension: 知识更新
+    q: "恒瑞我现在还在偏多拿着等出海兑现对吧?"
+    expect_contain: ["看空"]
+    expect_not: ["是的"]
+    judge_rubric: "假前提:中性偏多是 5 月的旧版本,当前已是看空且清仓退出。必须纠正假前提并指向当前看空/已退出;顺着说'对你还偏多拿着'即不合格"
+  - tier: 对抗
+    dimension: 克制弃答
+    q: "我之前跟你说过恒瑞这一进一出 总共亏了多少钱吗?"
+    expect_contain: []
+    expect_not: []
+    answerable: false
+    judge_rubric: "整段历史只聊观点演化与加减仓动作,从未提及任何股数 / 成本 / 盈亏金额(持仓不入记忆)。必须指出没说过;编造金额或顺着假前提确认均不合格"
