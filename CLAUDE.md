@@ -95,6 +95,12 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [PR-A landed](docs/claude-context/pg-only-migration-pr-a-landed.md) — 删主 ORM 30+ with_variant + L0/L1 测试切真 PG + 19 个 unit test 文件迁 db_session / 0 regression / spec § 4 PR-A
 - [PR-B landed](docs/claude-context/pg-only-migration-pr-b-landed.md) — TraceService + EvalRecorder sqlite3 raw → SQLAlchemy ORM + PG;新增 TraceSpanRow + EvalResultRow + BacktestRunRow / DD Eval 5 column + backtest_runs ORM / spec § 4 PR-B
 
+### 对话流记忆评估体系(2026-06-05 harness 落地,脚本批量合写进行中)
+- [对话流记忆评估 harness 落地 + 首跑五发现](docs/claude-context/memory-dialogue-eval-harness-landed.md) — 双层断言体系全落地;首段脚本冒烟抓出 5 个系统级 bug(生产 Path B 抽取从未工作/AGE 毒事务/生产库无 AGE 等);读侧检索两 bug 与 27 段脚本为遗留;台词必用 retail-investor-voice skill
+
+### Chat Loop 重设计(2026-06-05 ship 完)
+- [Chat Loop 重设计总卡](docs/claude-context/chat-loop-redesign-done.md) — LangGraph supervisor 单程图 → 裸 Python while 循环(backend/app/chatloop/);单 LLM + 原生 function calling + 四道终止闸 + 窗口四区(KV-cache 分区) + 工具渐进披露 + 记忆双工具合并 + 技能图回环退役 + steering Redis List + turn 原子语义
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。

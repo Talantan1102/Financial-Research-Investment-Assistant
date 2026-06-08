@@ -26,6 +26,7 @@ import {
   cancelChatTask,
   getChat,
   retryChatTask,
+  steerChatTask,
   type ChatPostJsonResponse,
 } from '@/api/chatApi'
 import {
@@ -33,7 +34,13 @@ import {
   currentChatState,
 } from '@/store/current-chat'
 import { chatSessionsActions } from '@/store/chat-sessions'
-import type { SSEEvent, TokenEvent } from '@/types/chat'
+import { escalationActions } from '@/store/escalation'
+import type {
+  EscalatePacketDraftEvent,
+  EscalateRequestEvent,
+  SSEEvent,
+  TokenEvent,
+} from '@/types/chat'
 import { useTypewriter } from './useTypewriter'
 
 interface UseChatSSEOptions {
@@ -45,7 +52,10 @@ interface UseChatSSEOptions {
 }
 
 interface UseChatSSE {
-  sendMessage(content: string): Promise<void>
+  sendMessage(
+    content: string,
+    forced?: { forced_tool_name: string; forced_tool_args: Record<string, unknown> },
+  ): Promise<void>
   abort(): void
   status: () => string
   // Plan 2 Scenario B: 切 session 回来时如果 GET /chats/{sid} 返回 active_task_id,
@@ -88,6 +98,9 @@ async function consumeStream(
   /** Called each time a valid SSE frame is parsed. Used by the idle watchdog
    *  (chat-send-02) to reset the no-frames timer on every received event. */
   onFrame?: () => void,
+  /** Optional hook for side-channel event handling (e.g. escalation store wiring).
+   *  Called for every non-token SSE event after currentChatActions.dispatchEvent. */
+  onEvent?: (ev: SSEEvent) => void,
 ): Promise<{ doneSeen: boolean }> {
   const reader = res.body?.getReader()
   if (!reader) return { doneSeen: false }
@@ -129,7 +142,7 @@ async function consumeStream(
             if (typeof evSeq === 'number') {
               currentChatState.last_seq = evSeq
             }
-            typewriter.enqueue((ev as TokenEvent).content ?? '')
+            typewriter.enqueue((ev as TokenEvent).content ?? (ev as TokenEvent).text ?? '')
           }
         } else {
           if (ev.type === 'done' || ev.type === 'error') {
@@ -141,6 +154,7 @@ async function consumeStream(
             doneSeen = true
           }
           currentChatActions.dispatchEvent(ev)
+          onEvent?.(ev)
         }
       }
       idx = buffer.indexOf(SSE_FRAME_DELIMITER)
@@ -164,6 +178,28 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
 
   // Ref to the current idle watchdog timer so we can cancel it on each frame.
   const idleWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Escalation SSE wiring: intercept escalate_request and escalate_packet_draft
+  // events coming off the stream and drive the escalation store.  Kept in
+  // useChatSSE (not current-chat store) so current-chat stays decoupled from
+  // the escalation store.  Uses sessionIdRef so the callback never goes stale.
+  const handleEscalationEvent = useCallback((ev: SSEEvent) => {
+    const sid = sessionIdRef.current
+    if (!sid) return
+    if (ev.type === 'escalate_request') {
+      // Phase 1: agent signals it wants to escalate → open dialog shell (draft=null
+      // → spinner shown) so the user sees the dialog immediately.
+      const _ev = ev as EscalateRequestEvent
+      void _ev // reason field kept for future use; no action needed beyond openDialog
+      escalationActions.openDialog(sid)
+    } else if (ev.type === 'escalate_packet_draft') {
+      // Phase 2: backend has assembled the packet → populate draft + keep dialog open.
+      const { packet } = ev as EscalatePacketDraftEvent
+      escalationActions.setPacketDraft(packet)
+      // Ensure dialog is open (may have been dismissed by user and re-sent).
+      escalationActions.openDialog(sid)
+    }
+  }, [])
 
   const typewriter = useTypewriter({
     onChar: (ch) => {
@@ -201,6 +237,29 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
     ) => {
       const sessionId = sessionIdRef.current
       if (!sessionId) throw new Error('sendMessage: no active session')
+
+      // Phase 5 Task 5.2: streaming 中(有 active_task_id)发送 → 默认走 steering。
+      // merged=true:不开新 stream,不乐观 append(后端已落库,steer_merged 事件
+      //   会渲染插话系统气泡;输入框由 InputArea 自己已清空)。
+      // merged=false(竞态:turn 刚结束):fallthrough 到正常 sendMessage 走新 turn。
+      const activeTaskId = currentChatState.active_task_id
+      if (
+        activeTaskId &&
+        currentChatState.streamingStatus === 'streaming' &&
+        !forced
+      ) {
+        try {
+          const resp = await steerChatTask(activeTaskId, content)
+          if (resp.merged) {
+            // 已并入当前 turn — steer_merged 事件负责渲染插话气泡,这里不开新 stream。
+            return
+          }
+          // merged=false:竞态,turn 刚结束 → 落到下面走普通新 turn。
+        } catch {
+          // steer 失败(网络/4xx):降级走普通新 turn,不卡住用户。
+        }
+      }
+
       abortRef.current?.abort()
       const ac = new AbortController()
       abortRef.current = ac
@@ -256,6 +315,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             ac.signal,
             typewriterRef.current,
             armIdleWatchdog,
+            handleEscalationEvent,
           )
           doneSeen = result.doneSeen
         } else {
@@ -265,6 +325,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             ac.signal,
             typewriterRef.current,
             armIdleWatchdog,
+            handleEscalationEvent,
           )
           doneSeen = result.doneSeen
         }
@@ -318,7 +379,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         }
       }
     },
-    [fetchImpl],
+    [fetchImpl, handleEscalationEvent],
   )
 
   const abort = useCallback(() => {
@@ -359,6 +420,8 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
           streamRes,
           ac.signal,
           typewriterRef.current,
+          undefined,
+          handleEscalationEvent,
         )
         doneSeen = result.doneSeen
       } catch {
@@ -368,7 +431,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         typewriterRef.current.flush()
       }
     },
-    [fetchImpl],
+    [fetchImpl, handleEscalationEvent],
   )
 
   // Plan 3 Task 7: cancel in-flight task。POST /chat/cancel/{tid} → 202;

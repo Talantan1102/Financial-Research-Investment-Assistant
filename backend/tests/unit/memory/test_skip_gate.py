@@ -111,3 +111,33 @@ def test_skip_gate_ts_code_re_is_registry_ssot() -> None:
     from app.memory.registry import SEARCH_TS_CODE_RE
 
     assert skip_gate._TS_CODE_RE is SEARCH_TS_CODE_RE
+
+
+# === 对话流评估冒烟发现(2026-06-05):真实散户口语全军覆没 ===
+# 散户说「看多/转中性/建仓/清了/割肉」而非白名单里的书面语「看好/持仓/卖出」,
+# 导致有效 session 被静默跳过(skipped_reason=no_relevant_keyword)、0 边入库。
+# 词源:.claude/skills/retail-investor-voice/references/corpus.md 黑话词典。
+
+
+def _ep(text: str) -> ChatMemoryEpisode:
+    return ChatMemoryEpisode(
+        user_id=uuid4(),
+        session_id=uuid4(),
+        episode_index=1,
+        user_message_text=text,
+        agent_response_text="",
+    )
+
+
+def test_colloquial_stance_words_not_skipped() -> None:
+    """散户口语观点表达不得被关键词门误杀。"""
+    cases = [
+        "我自己基本研究完了 结论就是高端白酒值得拿 起码三年 我就认提价权这一条",
+        "看多我收回 转中性吧 不看空 但也犯不上再按原来那套拿着了",
+        "那只新能源清了 换成沪深300指增了 这波操作我自己都服",
+        "亏麻了 割肉还是死扛 兄弟给个准话啊 被套两个月了",
+        "我上周建仓了一点 想抄底结果接了个飞刀 现在站岗呢",
+    ]
+    for text in cases:
+        skip, reason = should_skip_extraction(_ep(text))
+        assert not skip, f"口语被误杀: {text!r} (reason={reason})"

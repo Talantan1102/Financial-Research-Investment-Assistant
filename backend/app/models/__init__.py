@@ -12,7 +12,14 @@ from app.memory.models import (  # noqa: E402  (import after relative imports)
     ChatMemoryWorkingBlock,
 )
 
-from .chat import ChatAttachment, ChatMessage, ChatSession, ChatTask, LongTermMemory
+from .chat import (
+    ChatAttachment,
+    ChatMessage,
+    ChatSession,
+    ChatSessionContext,
+    ChatTask,
+    LongTermMemory,
+)
 from .escalation_record import EscalationRecord  # noqa: F401
 from .industry_data import CompanyData, IndustryStats, PolicyData
 from .knowledge import Document, KnowledgeBase
@@ -35,6 +42,7 @@ from .user import User
 __all__ = [
     "User",
     "ChatSession",
+    "ChatSessionContext",
     "ChatMessage",
     "ChatAttachment",
     "ChatTask",

@@ -16,6 +16,10 @@ export interface ToolCallData {
   status: 'running' | 'success' | 'error'
   result_summary?: string
   error_message?: string
+  // chatloop tool_error{hint}: actionable guidance shown alongside the error.
+  error_hint?: string
+  // chatloop tool_end{cached}: result served from the tool-result cache → ⚡ badge.
+  cached?: boolean
   started_at: string
   ended_at?: string
 }
@@ -31,38 +35,62 @@ export interface BaseEvent {
 
 export interface TokenEvent extends BaseEvent {
   type: 'token'
+  // chatloop backend payload carries both `text` and `content` (same value);
+  // `content` is the historical frontend field. `text` kept optional for
+  // direct backend-shape consumers / tests.
   content: string
+  text?: string
 }
 
-export interface PlanEvent extends BaseEvent {
-  type: 'plan'
-  plan: {
-    steps: Array<{
-      tool_name?: string
-      tool_args?: Record<string, unknown>
-      reasoning?: string
-    }>
-    parallelizable?: boolean
-  }
+export interface ReasoningEvent extends BaseEvent {
+  type: 'reasoning'
+  text: string
+}
+
+export interface StepStartEvent extends BaseEvent {
+  type: 'step_start'
+  step: number
+  max_steps: number
+}
+
+// chatloop emits `tool_call` twice with two shapes:
+//  - loop stream delta: { tool_name }  (name only, args not yet assembled)
+//  - hub pre-dispatch:   { tool, args } (full args, replaces the old plan event)
+// Both fields optional so the union accepts either; renderers prefer `tool`.
+export interface ToolCallEvent extends BaseEvent {
+  type: 'tool_call'
+  tool?: string
+  tool_name?: string
+  args?: Record<string, unknown>
 }
 
 export interface ToolStartEvent extends BaseEvent {
   type: 'tool_start'
-  tool_name: string
-  tool_args: Record<string, unknown>
-  call_id: string
+  tool: string
 }
 
 export interface ToolEndEvent extends BaseEvent {
   type: 'tool_end'
-  call_id: string
-  result: unknown
+  tool: string
+  digest?: string
+  cached?: boolean
 }
 
 export interface ToolErrorEvent extends BaseEvent {
   type: 'tool_error'
-  call_id: string
+  tool: string
   error: string
+  hint?: string
+}
+
+export interface SteerMergedEvent extends BaseEvent {
+  type: 'steer_merged'
+  preview: string
+}
+
+export interface LoopHaltEvent extends BaseEvent {
+  type: 'loop_halt'
+  reason: string
 }
 
 export interface SkillLoadEvent extends BaseEvent {
@@ -126,12 +154,17 @@ export interface EscalateErrorEvent extends BaseEvent {
 
 export interface CostUpdateEvent extends BaseEvent {
   type: 'cost_update'
-  cost_so_far: number
-  tokens: { prompt: number; completion: number }
+  // chatloop backend shape (spec § 5.1): cumulative CNY spend + token totals +
+  // cache-hit token count (first-class cache metric).
+  cny: number
+  tokens: number
+  cached_tokens: number
 }
 
 export interface DoneEvent extends BaseEvent {
   type: 'done'
+  // chatloop sets stop_reason: natural | max_steps | budget | spinning | ...
+  stop_reason?: string
 }
 
 export interface ErrorEvent extends BaseEvent {
@@ -141,10 +174,14 @@ export interface ErrorEvent extends BaseEvent {
 
 export type SSEEvent =
   | TokenEvent
-  | PlanEvent
+  | ReasoningEvent
+  | StepStartEvent
+  | ToolCallEvent
   | ToolStartEvent
   | ToolEndEvent
   | ToolErrorEvent
+  | SteerMergedEvent
+  | LoopHaltEvent
   | SkillLoadEvent
   | EscalateRequestEvent
   | EscalatePacketDraftEvent

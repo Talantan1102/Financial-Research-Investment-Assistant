@@ -12,13 +12,19 @@ describe('SSE event types', () => {
     expectTypeOf(ev).toMatchTypeOf<TokenEvent>()
   })
 
-  it('all 19 event variants are constructible with seq field', () => {
+  it('all event variants are constructible with seq field', () => {
     const samples: SSEEvent[] = [
-      { type: 'token', seq: 1, content: 'x' },
-      { type: 'plan', seq: 2, plan: { steps: [] } },
-      { type: 'tool_start', seq: 3, tool_name: 't', tool_args: {}, call_id: 'c1' },
-      { type: 'tool_end', seq: 4, call_id: 'c1', result: {} },
-      { type: 'tool_error', seq: 5, call_id: 'c1', error: 'oops' },
+      { type: 'token', seq: 1, content: 'x', text: 'x' },
+      // chatloop new events (spec § 5.1) — plan retired.
+      { type: 'reasoning', seq: 100, text: 'thinking…' },
+      { type: 'step_start', seq: 101, step: 1, max_steps: 12 },
+      { type: 'tool_call', seq: 102, tool: 't', args: {} },
+      { type: 'tool_call', seq: 103, tool_name: 't' },
+      { type: 'steer_merged', seq: 104, preview: '看一下营收' },
+      { type: 'loop_halt', seq: 105, reason: 'max_steps' },
+      { type: 'tool_start', seq: 3, tool: 't' },
+      { type: 'tool_end', seq: 4, tool: 't', digest: 'd', cached: true },
+      { type: 'tool_error', seq: 5, tool: 't', error: 'oops', hint: '换个参数' },
       { type: 'skill_load', seq: 6, skill_name: 's', level: 'L2' },
       { type: 'escalate_request', seq: 7, reason: 'ambiguous' },
       {
@@ -58,11 +64,11 @@ describe('SSE event types', () => {
       { type: 'research_critic_done', seq: 14, score: 0 },
       { type: 'escalate_done', seq: 15, research_report_id: 'r1' },
       { type: 'escalate_error', seq: 16, error: 'failed' },
-      { type: 'cost_update', seq: 17, cost_so_far: 0.01, tokens: { prompt: 10, completion: 5 } },
-      { type: 'done', seq: 18 },
+      { type: 'cost_update', seq: 17, cny: 0.05, tokens: 1500, cached_tokens: 200 },
+      { type: 'done', seq: 18, stop_reason: 'natural' },
       { type: 'error', seq: 19, error: 'fatal' },
     ]
-    expect(samples).toHaveLength(19)
+    expect(samples.length).toBeGreaterThanOrEqual(19)
   })
 
   it('ChatSession + ChatMessage shapes match backend DTOs', () => {

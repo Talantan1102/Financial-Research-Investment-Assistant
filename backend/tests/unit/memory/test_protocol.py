@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from uuid import uuid4
 
-import pytest
 from app.memory.protocol import Memory
 
 
@@ -66,29 +64,6 @@ def test_all_methods_first_param_is_user_id() -> None:
         assert params[1].name == "user_id", f"{name} 第二参数应是 user_id, 实际 {params[1].name}"
 
 
-def test_in_session_memory_satisfies_extended_protocol() -> None:
-    """PR #39 ship 的 InSessionMemory 通过 stub 满足扩展 Protocol(isinstance check)."""
-    from app.agents.in_session_memory import InSessionMemory
-
-    instance = InSessionMemory(llm=None)
-    assert isinstance(instance, Memory)
-
-
-async def test_in_session_memory_stubs_raise_not_implemented() -> None:
-    """InSessionMemory 的新 method stub 必须 raise NotImplementedError."""
-    from app.agents.in_session_memory import InSessionMemory
-
-    mem = InSessionMemory(llm=None)
-    uid = uuid4()
-    with pytest.raises(NotImplementedError):
-        await mem.get_working_blocks(uid)
-    with pytest.raises(NotImplementedError):
-        await mem.core_memory_append(uid, "persona", "x")
-    with pytest.raises(NotImplementedError):
-        await mem.archival_memory_insert(uid, {}, "r", 0.5, "ev", uuid4())
-    with pytest.raises(NotImplementedError):
-        await mem.archival_memory_search(uid, "q")
-    with pytest.raises(NotImplementedError):
-        await mem.write_episode(uid, uuid4(), 0, "u", "a")
-    with pytest.raises(NotImplementedError):
-        await mem.mark_episode_extracted(uuid4(), "agent", {})
+# 老 supervisor 图退役(Phase 7):InSessionMemory(agents.in_session_memory)随老图删除,
+# 对应的两条 isinstance / stub-raises 测试移除。HierarchicalMemory 满足本 Protocol 的
+# 守护见 test_router_di_swap.test_hierarchical_memory_satisfies_protocol_at_import。

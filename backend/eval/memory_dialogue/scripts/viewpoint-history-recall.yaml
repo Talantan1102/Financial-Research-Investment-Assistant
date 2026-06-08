@@ -1,0 +1,181 @@
+# 对话流评估脚本《创新药观点编年史》— 双时间线招牌:作废历史可问。
+# 压的机制(知识更新维度的「历史可回溯」面):创新药观点三次演化全程留作废链——
+# 看多出海逻辑 → 升级为重点方向 → 因集采预期转谨慎;两条旧版本都被作废但不删,
+# 好答须能引用已作废版本(我最早怎么看的 / 中间为什么升级),坏答=只答最新或否认有过历史。
+# 搭车机制:时间推理(每次转变的时点 2025-03 / 04 / 06),挂在历史叙事题里一起验。
+# 刁钻点:
+#   (1) 「升级为重点方向」这一跳逻辑没变、只是权重/定位升格——抽取器最易把它当重复去重吞掉,
+#       这里偏要它写成独立一版(invalidated_chain_intact expected_versions:3 守这个);
+#   (2) 「从头给我捋一遍」挂 swap_order_invariant——换问法/换顺序结论必须稳,考的是叙事完整性不是记忆某一句;
+#   (3) 一处关键事实(出海这条逻辑的来源是 BD 授权出海的卖点)由助手复述带出、用户只「对」一下确认——
+#       抽取器最易漏的确认句形态;
+#   (4) 对抗题埋假前提「我是不是一开始就看空创新药」——轨迹是看多→谨慎,从未看空,必须纠正不能顺。
+# 台词纪律:用户侧按 .claude/skills/retail-investor-voice 生成(短/断/错/燥/黏,
+# 同音错字是真人指纹,如「在看」「重点房向」——抽取器就该扛住这种真实输入);
+# 助手侧写要点,负责复述确认(给抽取器的合法锚点,也是真实助手行为)。
+# 硬约束:substrate 是观点演化,不把持仓事实当核心记忆;散户口语顺带提操作可以,断言绝不围绕持仓数量。
+script_id: viewpoint-history-recall
+title: "创新药观点编年史"
+family: 观点演化族
+substrate: 观点演化(无结构化模块兜底,纯记忆领地;持仓另有模块,不入记忆图)
+
+sessions:
+  - n: 1
+    date: 2025-02-10
+    length: 中
+    turns:
+      - u: "创新药这板块最近是不是有点东西 我想搞明白逻辑"
+      - a: "(梳理创新药当前驱动:license-out 出海放量、医保谈判温和、龙头管线兑现;问用户自己看到哪一层)"
+      - u: "我就盯一条 出海 国产创新药卖给海外大药企那种 BD 授权 这条我看多"
+      - a: "(回应:您看多创新药,核心是看出海/BD 授权这条逻辑?)"
+      - u: "对 就这条 别的管线我不懂 我只赌能卖出去的"
+      - a: "(确认理解;追问:这看法是覆盖整个创新药板块,还是只盯有出海大单的那几家?)"
+      - u: "先当整个板块看吧 出海是大方向 个股我后面再挑"
+      - a: "(总结用户观点:看多创新药板块,核心逻辑出海/BD 授权;个股暂未细分)"
+  - n: 2
+    date: 2025-02-21
+    length: 短
+    turns:
+      - u: "今晚非农数据几点出来啊 影响大不大 有点慌啊"
+      - a: "(给出公布时点与对美债美元的传导路径)"
+  - n: 3
+    date: 2025-03-06
+    length: 中
+    turns:
+      - u: "前两天又一家创新药出海大单 是不是验证我那个逻辑了"
+      - a: "(确认该 BD 授权落地;呼应用户出海逻辑)"
+      - u: "嗯 那这条我看更重了 创新药我准备当重点方向来跟 不是随便看看那种了"
+      - a: "(确认升级:出海逻辑不变,但创新药从一般看多升格为您的重点跟踪方向?)"
+      - u: "对 就这意思 逻辑没变 就是分量加重 重点房向了"
+      - a: "(记录:看多创新药、逻辑出海不变,定位由一般看多升级为重点方向)"
+  - n: 4
+    date: 2025-03-19
+    length: 短
+    turns:
+      - u: "中证白酒今天又绿了 这是要二次探底么"
+      - a: "(分析白酒回调成因与板块情绪)"
+      - u: "唉 在看吧"
+  - n: 5
+    date: 2025-04-02
+    length: 短
+    turns:
+      - u: "黄金破新高了 现在追站岗风险大不大"
+      - a: "(给出金价驱动与回调风险提示)"
+  - n: 6
+    date: 2025-04-14
+    length: 长
+    turns:
+      - u: "想跟你把创新药再过一遍 最近有点心里没底"
+      - a: "(复述用户已有观点:看多创新药、重点方向、核心逻辑出海;问哪里没底)"
+      - u: "对 就这个。但是吧 我看到风声 说创新药也要进国家集采那一类了"
+      - a: "(说明:确有创新药纳入集采的政策预期升温,对兑现节奏的影响)"
+      - u: "集采一进来 价格不就被摁死了 我出海那条还撑得住么"
+      - a: "(区分:集采主要压国内放量与定价,出海收入受影响相对小,但板块整体估值会被压制)"
+      - u: "那也悬 板块情绪先就蹦了 我重点方向这定位是不是得退一退"
+      - a: "(确认用户倾向:因集采预期,创新药从重点方向往回退;问退到什么程度)"
+      - u: "看多先收了 转谨慎吧 不是看空啊 就是不敢再当重点压了"
+      - a: "(确认更新:对创新药由看多/重点方向转为谨慎,触发因素是集采纳入预期;明确不是看空)"
+      - u: "出海逻辑我没否啊 还认 就是集采这盆冷水把我浇清醒了"
+      - a: "(记录:出海逻辑本身未被否定,但集采预期压制板块,综合观点转谨慎)"
+      - u: "嗯 行 后面集采细则出来再看"
+      - a: "(确认;提示将按谨慎观点跟踪,集采细则落地后复盘)"
+  - n: 7
+    date: 2025-04-29
+    length: 短
+    turns:
+      - u: "新能源车四月销量周报有么 换比怎样"
+      - a: "(给出周度销量与环比读数)"
+  - n: 8
+    date: 2025-05-12
+    length: 短
+    turns:
+      - u: "对了 我创新药那观点 现在记的还是谨慎吧?没记岔吧"
+      - a: "(复述:当前为谨慎,因集采预期;早前是看多/重点方向、逻辑出海)"
+      - u: "对对 就这样 没变"
+      - a: "(确认无更新)"
+  - n: 9
+    date: 2025-05-26
+    length: 短
+    turns:
+      - u: "港股通标的调整名单出了没 影响哪些"
+      - a: "(说明调整范围与受影响标的)"
+      - u: "行 知道了哈"
+  - n: 10
+    date: 2025-06-09
+    length: 中
+    turns:
+      - u: "集采细则落地了 我那谨慎是不是可以松一松"
+      - a: "(给出细则要点:温和于市场最悲观预期;问用户是否调整观点)"
+      - u: "细则比想的软 但我先不动 还是谨慎 等放量数据再说"
+      - a: "(确认无更新:维持谨慎,等待放量数据)"
+      - u: "你帮我记着 这一路怎么变的别给我搞丢了"
+      - a: "(确认:完整保留三段演化 看多出海→重点方向→谨慎,均可回溯)"
+
+db_assertions:
+  - after: 1
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 创新药, value_contains: ["看多", "出海"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 创新药, expected_date: "2025-02-10"}
+  - after: 3
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 创新药, value_contains: ["重点"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 创新药, min_count: 1}
+  - after: 6
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 创新药, value_contains: ["谨慎"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 创新药, min_count: 2}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: 创新药, expected_versions: 3}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 创新药, expected_date: "2025-04-14"}
+  - after: 8
+    assert:
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 创新药}
+  - after: 10
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 创新药, value_contains: ["谨慎"]}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: 创新药, expected_versions: 3}
+
+probes:
+  - tier: 直球
+    dimension: 单跳召回
+    q: "我最早是怎么看创新药的?"
+    expect_contain: ["看多", "出海"]
+    expect_not: ["谨慎"]
+    judge_rubric: "应答最初版本=看多创新药、逻辑是出海/BD 授权(卖给海外大药企的等价表述也算)。这是对已作废首版的历史回溯,只答当前谨慎即不合格——考的就是作废历史可问"
+  - tier: 直球
+    dimension: 知识更新
+    q: "我现在对创新药整体是什么态度?"
+    expect_contain: ["谨慎"]
+    expect_not: ["重点"]
+    judge_rubric: "应答当前为谨慎;若答看多或重点方向即旧事实未作废,判不合格"
+  - tier: 自然难
+    dimension: 单跳召回
+    q: "我把创新药从一般看多升成重点方向,是因为什么?"
+    expect_contain: ["出海"]
+    expect_not: []
+    judge_rubric: "应答:升级那一跳逻辑没变,仍是出海/BD 授权,只是又一家出海大单落地让用户加重了分量。能从已作废的中间版本里捞出这层即合格;若答成是因为集采(那是后一跳的事)则张冠李戴,不合格"
+  - tier: 自然难
+    dimension: 多跳推理
+    q: "把我创新药观点的变化从头给我捋一遍"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "应答两次改动、三个版本且顺序正确:看多/出海(整体板块)→ 升级为重点方向(逻辑不变,出海大单加重分量)→ 转谨慎(集采纳入预期压制,出海逻辑本身未否)。漏任何一版、顺序错、或把中间『重点方向』那版吞掉当重复都不合格"
+    swap_order_invariant: true
+  - tier: 自然难
+    dimension: 时间推理
+    q: "我是什么时候转谨慎的?当时为啥转的?"
+    expect_contain: ["集采"]
+    expect_not: []
+    judge_rubric: "时间应指向 2025 年 4 月中(四月/4月/集采风声起那会儿均可);原因应答创新药纳入集采的预期压制板块。时点答成 2 月(初始看多)或 3 月(升级)即时间线错位,不合格"
+  - tier: 对抗
+    dimension: 知识更新
+    q: "我是不是从一开始就看空创新药来着?"
+    expect_contain: []
+    expect_not: ["看空"]
+    judge_rubric: "假前提:用户从未看空(轨迹是看多→重点方向→谨慎,谨慎≠看空,且用户两度明确说『不是看空』)。必须纠正这个假前提;顺着说『对你一直看空』即不合格"
+  - tier: 对抗
+    dimension: 克制弃答
+    q: "我当时跟你说过我创新药这波赚了多少个点吗?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "整段历史只聊观点演化,从未提及任何盈亏/收益数字(持仓盈亏不在记忆领地)。必须指出没说过;编造点数或顺着假前提确认均不合格"
+    answerable: false

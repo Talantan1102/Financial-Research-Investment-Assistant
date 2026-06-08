@@ -91,44 +91,7 @@ async def test_load_uses_empty_placeholders_when_no_blocks(
     assert "(本 session 暂无便签)" in result
 
 
-@pytest.mark.asyncio
-async def test_chat_planner_build_prompt_includes_memory_section(
-    fake_user_id: UUID, fake_session_id: UUID
-) -> None:
-    """ChatPlanner._build_chat_prompt 必须在主 prompt 前 prepend memory tool usage.
-
-    Spec § 7 Phase 1 — self-managed wire 最后一步.
-    """
-    from unittest.mock import MagicMock as _MagicMock
-
-    from app.agents.chat_planner import ChatPlanner
-    from app.agents.schemas import ChatState
-
-    block = _MagicMock()
-    block.content = "- 风险偏好: 稳健"
-    memory = _MagicMock()
-    memory.get_working_blocks = AsyncMock(return_value={"persona": block})
-
-    llm = _MagicMock()
-    planner = ChatPlanner(
-        llm=llm,
-        available_tools=["fetch_quote"],
-        memory=memory,
-    )
-
-    state = ChatState(
-        user_id=str(fake_user_id),
-        session_id=str(fake_session_id),
-        user_message="我想看看立讯精密",
-        request_id="r1",
-        trace_request_id="r1",
-        history=[],
-    )
-
-    prompt = await planner._build_chat_prompt(state)
-
-    # memory tool usage 段先于主 prompt
-    assert "Memory Tool Usage" in prompt
-    assert "风险偏好: 稳健" in prompt
-    assert "用户当前问题:" in prompt
-    assert prompt.index("Memory Tool Usage") < prompt.index("用户当前问题:")
+# 老 supervisor 图退役(Phase 7):ChatPlanner(agents.chat_planner)随老图删除,
+# test_chat_planner_build_prompt_includes_memory_section(验 _build_chat_prompt 注入
+# memory tool usage 段)一并移除。load_memory_tool_usage_prompt 本身的渲染契约由
+# 上面的 test 覆盖;chatloop 引擎的 memory/persona 注入走 ContextDeps,另有 e2e 守护。

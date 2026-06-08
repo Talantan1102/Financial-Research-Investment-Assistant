@@ -1,0 +1,27 @@
+// 技能触发离线评测金标准 — schema 与 tool_selection/golden.jsonl 同构,额外带 skill 字段标注目标技能。
+// 重要:skills_root = backend/claude_skills,7 个 chat 技能:
+//   data_analysis / deep_research / financial_analysis / market_data /
+//   risk_assessment / sector_analysis / web_research
+// 每技能 2 正例(贴 description 触发词措辞)+ 1 near-miss 负例(共享关键词但语义属别的技能/工具);
+// 总计 21 条(7 × 3)。新技能加进 skills_root 后在此追加对应 golden 并抬高测试下限。
+{"case_id": "sk-data_analysis-pos-001", "category": "skill_trigger", "user_input": "帮我计算茅台过去60天的MA和RSI等技术指标", "expected": {"first_tool": "load_skill", "args_contains": {"name": "data_analysis"}}, "skill": "data_analysis", "bucket": "技能"}
+{"case_id": "sk-data_analysis-pos-002", "category": "skill_trigger", "user_input": "分析一下茅台和宁德时代价格走势的相关性,用60日数据算一下", "expected": {"first_tool": "load_skill", "args_contains": {"name": "data_analysis"}}, "skill": "data_analysis", "bucket": "技能"}
+{"case_id": "sk-data_analysis-nearmiss-001", "category": "skill_trigger_negative", "user_input": "茅台过去一个月股价走势如何?", "expected": {"not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-deep_research-pos-001", "category": "skill_trigger", "user_input": "帮我生成一份贵州茅台的综合深度研报,覆盖财务、估值和市场数据", "expected": {"first_tool": "load_skill", "args_contains": {"name": "deep_research"}}, "skill": "deep_research", "bucket": "技能"}
+{"case_id": "sk-deep_research-pos-002", "category": "skill_trigger", "user_input": "给我做一份白酒行业的深度行业研究报告", "expected": {"first_tool": "load_skill", "args_contains": {"name": "deep_research"}}, "skill": "deep_research", "bucket": "技能"}
+{"case_id": "sk-deep_research-nearmiss-001", "category": "skill_trigger_negative", "user_input": "茅台有没有最新研报?看看机构怎么说", "expected": {"not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-financial_analysis-pos-001", "category": "skill_trigger", "user_input": "帮我计算茅台的ROE、ROA和毛利率等财务比率", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_analysis"}}, "skill": "financial_analysis", "bucket": "技能"}
+{"case_id": "sk-financial_analysis-pos-002", "category": "skill_trigger", "user_input": "分析一下宁德时代的偿债能力,看看资产负债率和流动比率", "expected": {"first_tool": "load_skill", "args_contains": {"name": "financial_analysis"}}, "skill": "financial_analysis", "bucket": "技能"}
+{"case_id": "sk-financial_analysis-nearmiss-001", "category": "skill_trigger_negative", "user_input": "茅台今年净利润是多少?查个数就好", "expected": {"not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-market_data-pos-001", "category": "skill_trigger", "user_input": "茅台现在股价多少?今天涨跌幅怎么样", "expected": {"first_tool": "load_skill", "args_contains": {"name": "market_data"}}, "skill": "market_data", "bucket": "技能"}
+{"case_id": "sk-market_data-pos-002", "category": "skill_trigger", "user_input": "帮我查一下北向资金今天流入了多少,沪深港通情况", "expected": {"first_tool": "load_skill", "args_contains": {"name": "market_data"}}, "skill": "market_data", "bucket": "技能"}
+{"case_id": "sk-market_data-nearmiss-001", "category": "skill_trigger_negative", "user_input": "茅台估值高不高?帮我看看PE和PB", "expected": {"not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-risk_assessment-pos-001", "category": "skill_trigger", "user_input": "帮我评估一下宁德时代的投资风险等级,包括估值风险和财务风险", "expected": {"first_tool": "load_skill", "args_contains": {"name": "risk_assessment"}}, "skill": "risk_assessment", "bucket": "技能"}
+{"case_id": "sk-risk_assessment-pos-002", "category": "skill_trigger", "user_input": "检查一下比亚迪最近有哪些风险预警信号", "expected": {"first_tool": "load_skill", "args_contains": {"name": "risk_assessment"}}, "skill": "risk_assessment", "bucket": "技能"}
+{"case_id": "sk-risk_assessment-nearmiss-001", "category": "skill_trigger_negative", "user_input": "我的持仓最近波动很大,帮我看看整体仓位风险", "expected": {"not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-sector_analysis-pos-001", "category": "skill_trigger", "user_input": "分析一下白酒行业的龙头股有哪些,按市值排序", "expected": {"first_tool": "load_skill", "args_contains": {"name": "sector_analysis"}}, "skill": "sector_analysis", "bucket": "技能"}
+{"case_id": "sk-sector_analysis-pos-002", "category": "skill_trigger", "user_input": "对比银行和医药行业的ROE水平,看看哪个板块盈利能力更强", "expected": {"first_tool": "load_skill", "args_contains": {"name": "sector_analysis"}}, "skill": "sector_analysis", "bucket": "技能"}
+{"case_id": "sk-sector_analysis-nearmiss-001", "category": "skill_trigger_negative", "user_input": "白酒行业今天整体涨了多少?", "expected": {"not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}
+{"case_id": "sk-web_research-pos-001", "category": "skill_trigger", "user_input": "帮我搜一下茅台最近有什么公告,看看有没有重大事项", "expected": {"first_tool": "load_skill", "args_contains": {"name": "web_research"}}, "skill": "web_research", "bucket": "技能"}
+{"case_id": "sk-web_research-pos-002", "category": "skill_trigger", "user_input": "找一下新能源行业最近的新闻动态", "expected": {"first_tool": "load_skill", "args_contains": {"name": "web_research"}}, "skill": "web_research", "bucket": "技能"}
+{"case_id": "sk-web_research-nearmiss-001", "category": "skill_trigger_negative", "user_input": "白酒行业知识库里有什么研报观点?", "expected": {"first_tool": "kb_search", "not_tools": ["load_skill"]}, "skill": null, "bucket": "技能"}

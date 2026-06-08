@@ -43,6 +43,11 @@ def test_age_create_edge_valid_rel_type_proceeds() -> None:
         def execute(self, _stmt: object) -> None:
             return None
 
+        def begin_nested(self):  # noqa: ANN201 — SAVEPOINT 上下文(冒烟发现 #4 修复后接口)
+            from contextlib import nullcontext
+
+            return nullcontext()
+
     age_create_edge(
         session=_DummySession(),  # type: ignore[arg-type]
         edge_id=uuid4(),

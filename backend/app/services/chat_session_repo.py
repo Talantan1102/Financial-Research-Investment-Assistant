@@ -119,6 +119,69 @@ class ChatSessionRepo:
             )
             return list((await sess.execute(stmt)).scalars().all())
 
+    async def delete_message(self, message_id: str | uuid.UUID) -> None:
+        """删除一条 message(steer 竞态兜底:已终态 task 的插话刚落库即撤销)。
+
+        spec § 4.3 ③:merged=False 时把先行落库的插话行删掉,前端转普通新 turn
+        自己重新落库,避免双行。
+        """
+        mid = uuid.UUID(message_id) if isinstance(message_id, str) else message_id
+        async with self._sf() as sess:
+            row = await sess.get(ChatMessage, mid)
+            if row is not None:
+                await sess.delete(row)
+                await sess.commit()
+
+    async def rebuild_turn_user_message(
+        self,
+        *,
+        initial_prompt_message_id: uuid.UUID | None,
+        task_id: uuid.UUID,
+    ) -> str:
+        """重建一个 turn 的 user 输入(retry 用,spec § 4.3)。
+
+        = 原始 user 消息 + 该 turn 全部插话(steering),拼成单 user_message。
+
+        关联现状(读 POST /chat 与 POST /chat/steer 的落库形状):
+        - 原始 user 消息:POST /chat 落 user 行时 task 尚未创建,故 ChatMessage.task_id
+          为空;它经 ``ChatTask.initial_prompt_message_id`` 关联。本方法用传入的
+          ``initial_prompt_message_id`` 主键直取。
+        - 插话:POST /chat/steer 落库时带 ``task_id``,故经 ``ChatMessage.task_id ==
+          原 tid 且 role=user`` 查,按 created_at 升序。
+
+        拼接策略:主消息 + "\\n\\n(补充指令: <插话1>)" 逐条追加。无原始消息(早期失败
+        前甚至 user 行都没落)时,退化为只用插话;两者皆空返回空串(worker 仍会跑,
+        多半直答兜底)。
+        """
+        parts: list[str] = []
+
+        if initial_prompt_message_id is not None:
+            async with self._sf() as sess:
+                orig = await sess.get(ChatMessage, initial_prompt_message_id)
+                if orig is not None and orig.content:
+                    parts.append(str(orig.content))
+
+        async with self._sf() as sess:
+            stmt = (
+                select(ChatMessage)
+                .where(ChatMessage.task_id == task_id)
+                .where(ChatMessage.role == "user")
+                .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+            )
+            steer_rows = list((await sess.execute(stmt)).scalars().all())
+
+        main = parts[0] if parts else ""
+        steer_texts = [str(r.content) for r in steer_rows if r.content]
+        if not main and steer_texts:
+            # 无原始消息 → 第一条插话当主消息,其余作补充
+            main = steer_texts[0]
+            steer_texts = steer_texts[1:]
+
+        out = main
+        for s in steer_texts:
+            out = f"{out}\n\n(补充指令: {s})" if out else f"(补充指令: {s})"
+        return out
+
     async def rename_session(self, session_id: str, new_title: str) -> None:
         sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
         async with self._sf() as sess:

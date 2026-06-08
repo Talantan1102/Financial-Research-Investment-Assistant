@@ -50,13 +50,17 @@ def _build_path_b_runner() -> PathBRunner:
     from app.core.database import SessionLocal
     from app.memory.extractor import LLMExtractor
     from app.memory.hierarchical import HierarchicalMemory
+    from app.memory.llm_service_adapter import MemoryLLMClientAdapter
     from app.memory.path_b_runner import PathBRunner
     from app.services.embedding_factory import build_embedding_service_from_env
     from app.services.openai_client import build_llm_service_from_env
 
     llm = build_llm_service_from_env()
     embed = build_embedding_service_from_env()
-    extractor = LLMExtractor(llm_client=llm)
+    # 2026-06-05 对话流评估冒烟发现 #3:LLMExtractor 期望 async
+    # chat(prompt, system, ...) -> str 协议,直接塞 LLMService 会在真实 LLM 下
+    # TypeError 全灭(被 failure_matrix 吞成 retry 耗尽)——必须过适配器。
+    extractor = LLMExtractor(llm_client=MemoryLLMClientAdapter(llm, tier="fast"))
 
     # archival_insert_fn 走真 hierarchical (Plan 2A 8 step pipeline).
     # NOTE: AGE / Milvus client wiring 留 lifespan singleton; 本 path 简化为

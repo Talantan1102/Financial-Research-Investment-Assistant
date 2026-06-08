@@ -129,6 +129,36 @@ export async function cancelChatTask(taskId: string): Promise<void> {
   }
 }
 
+export interface SteerChatResponse {
+  merged: boolean
+  message_id?: string
+}
+
+/**
+ * Phase 4/5: POST /api/v0/chat/steer/{task_id} — 插话(steering)。
+ * streaming 中(task queued/running)发送新指令 → 后端先落库 chat_messages,
+ * 再 LPUSH steer List,worker 圈边界并入当前 turn → SSE steer_merged。
+ * 返回 {merged:true, message_id}。竞态(task 已终态)返回 {merged:false},
+ * 前端转普通新 turn(sendMessage)。
+ */
+export async function steerChatTask(
+  taskId: string,
+  message: string,
+): Promise<SteerChatResponse> {
+  const res = await fetch(
+    apiUrl(`/api/v0/chat/steer/${encodeURIComponent(taskId)}`),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ message }),
+    },
+  )
+  if (!res.ok) {
+    throw new Error(`steer failed: ${res.status}`)
+  }
+  return (await res.json()) as SteerChatResponse
+}
+
 export interface RetryChatResponse {
   task_id: string
   parent_task_id: string

@@ -96,6 +96,15 @@ export function ToolCallCard({ message }: ToolCallCardProps) {
           <Icon name="tool" size={14} aria-hidden />
         </div>
         <span className={styles.toolCardName}>{data.tool_name}</span>
+        {data.cached ? (
+          <span
+            className={styles.toolCachedBadge}
+            data-testid="tool-cached-badge"
+            title="结果来自缓存"
+          >
+            ⚡缓存
+          </span>
+        ) : null}
         <span className={styles.toolStatus}>
           <span className={styles.dot} />
           <span>{statusIcon}</span>
@@ -118,6 +127,11 @@ export function ToolCallCard({ message }: ToolCallCardProps) {
             <div className={styles.toolCardSection}>
               <strong>error:</strong>
               <pre>{data.error_message ?? '(unknown)'}</pre>
+              {data.error_hint ? (
+                <div className={styles.toolErrorHint} data-testid="tool-error-hint">
+                  <strong>hint:</strong> {data.error_hint}
+                </div>
+              ) : null}
               <button type="button" className={styles.retryBtn} aria-label="重试">
                 <Icon name="close" size={12} aria-hidden /> 重试
               </button>

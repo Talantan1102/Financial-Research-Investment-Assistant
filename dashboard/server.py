@@ -55,6 +55,18 @@ DIMENSION_REPORTS: dict[str, tuple[dict[str, str], ...]] = {
             "title": "子 agent 派发 · 怎么做",
             "sub": "7 个派发设计决策,每个配真实场景 · 三大派系 + 学术理论,对照本项目编排 · 40+ 系统/论文调研 + 事实核查",
         },
+        {
+            "slug": "periphery-wiring-survey",
+            "title": "Agent Loop 周边接线 · 怎么做",
+            "sub": "7 个接线设计决策,每个配真实场景 · 万物皆工具的判据与例外 / 工具数量治理 / 信号工具 / 记忆双轨 / 技能渐进披露,对照本项目 chat 重设计草案 · 12 路调研 + 40+ 条事实核查",
+        },
+    ),
+    "context": (
+        {
+            "slug": "context-engineering-survey",
+            "title": "Agent Loop 上下文工程 · 怎么做",
+            "sub": "7 个上下文工程设计决策,每个配真实场景 · KV-cache 前缀经济学 / 压缩与可回取 / 检索式记忆 / 中文 token 计数,对照本项目 chat 重设计草案 · 8 路调研 + 21 条事实核查",
+        },
     ),
     "lifecycle": (
         {

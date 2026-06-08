@@ -6,6 +6,8 @@ type: project
 
 ## v1.x DD report eval Phase 2 ship 完 (2026-05-17)
 
+> **更新 (2026-06-04)**:本卡部分 deferred 已完成 — production_factory 现已真接 `build_research_graph`(见下方 § How to apply / deferred #1)。dogfood 真实数字仍未跑(下方表仍为 TBD)。
+
 ### 做了什么
 
 **spec**: `docs/superpowers/specs/2026-05-17-dd-report-quality-eval-design.md` v1.1
@@ -60,7 +62,7 @@ Run: `uv run python backend/scripts/run_phase2_ablation_dogfood.py`
 - 新 ablation 变体加在 `AblationVariant` 枚举 + `build_pipeline_for_variant` 加 if branch
 - 新 metric 加在 `metrics/` 下实现 `MetricProtocol` + 注入 MetricRegistry + 扩 BacktestMetricScores schema 字段
 - M4 horizon 默认 90 天,Phase 3 可扩 180/365 走多 PredictionMetric instance 不同 horizon
-- T2.11 production_factory 当前用 SingleAgentPipeline fallback (V0 ≈ V2);真接生产 ResearchAgent 推 user follow-up,需要按 build_research_graph + 5 agents 模式 wire
+- ⚠️ **已更新 (2026-06-04)**:production_factory 已真接 `build_research_graph`(5 agent + 7 scorer + Critic,见 `backend/app/eval/dd_report_production_factory.py:329`)。V0 = 真 graph、V2 = SingleAgentPipeline、V3 = NoOpCritic 均为消融 by-design,**非 fallback**。原"V0 ≈ V2 / 推 user follow-up"说法作废。
 
 ### 撞到的工业问题 (Phase 2 implementation 撞实并 fix)
 
@@ -76,7 +78,7 @@ Run: `uv run python backend/scripts/run_phase2_ablation_dogfood.py`
 
 ### 已知 deferred (T2.11 dogfood + 真接生产 ResearchAgent)
 
-1. **真接 build_research_graph + 5 agents**:T2.11 production_factory 用 SingleAgentPipeline fallback (`app/eval/dd_report_production_factory.py`)。真接生产 pipeline 推 user follow-up,T2.8 已探索入口:`app/orchestration/research_graph.py::build_research_graph(planner, collector, analyst, writer, critic, *, checkpointer)`。
+1. ✅ **已完成 (2026-06-04 核查)** — ~~真接 build_research_graph + 5 agents~~:`backend/app/eval/dd_report_production_factory.py:329` 已用 `build_research_graph` 装配 planner/collector/analyst/writer/critic + 7 scorer,`backend/scripts/run_phase2_ablation_dogfood.py:101` 已调用。V0=真 graph、V2=SingleAgentPipeline、V3=NoOpCritic 均 by-design。(注:真 dogfood 数字仍未跑出 — 见 #2 + 三个 vacuous 输入 stub,详见 spec `docs/superpowers/specs/2026-06-04-deep-research-no-recommendation-and-eval-design.md`)
 2. **真 dogfood 4×8 ablation 数字**:dogfood script `backend/scripts/run_phase2_ablation_dogfood.py` ship 完;真跑需 OPENROUTER_API_KEY + TUSHARE_TOKEN + KB wire + 生产 pipeline。预算 ~28 RMB / 一轮。
 3. **康美 (600518.SH) 暴雷 case spike**:T2.5 留待 T2.11 dogfood 验,实际是否 cut_off=2024-06-30 后 180 天公告里有"退市/造假"关键词命中。
 4. **request_id collision (Phase 3 必修, 不只是 forward warning)** — Phase 2 ablation 模式

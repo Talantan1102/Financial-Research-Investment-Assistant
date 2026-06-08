@@ -1,0 +1,181 @@
+# 对话流评估脚本《AI 链条的三段跳》— 观点演化族 · 多跳冲突叠加题。
+# 压的机制(多跳推理 × 知识更新):同一条主线(AI 算力)下,"最看好的细分"是个会移动的
+# 指针——宏观看好算力 → 具体化到光模块 → 再换到铜缆;每一跳都在【不同 target_label】上落版本,
+# 但"我现在 AI 这条线最看好谁"必须沿链取最新(铜缆)。业界全员只有约 6% 能答对的形态:
+# 单事实更新好答(同 target 直接覆盖),跨标的的链式演化难答(target 在变,旧的没被"推翻"只是
+# 被"超越",还附带角色翻转)。
+# 搭车机制:链式作废历史可回溯(三跳三版本)、切换原因的时间推理、AVOIDS 角色翻转
+# (光模块从"最看好"翻成"嫌贵规避")、克制弃答(从没说过卖了多少/亏多少)。
+# 刁钻点:① 光模块 vs 铜缆是两个不同实体,不是同一事实改值——naive "单跳覆盖"会漏掉链;
+#   ② 换到铜缆那一刻,对光模块的观点【顺带翻转】成 AVOIDS(嫌贵),抽取器要在一句口语里抓两个写;
+#   ③ "算力里我就认光模块"这种收窄,是 EXPRESSED_VIEW 而非新建仓——不得当持仓事实记;
+#   ④ 关键换线信息埋在长 session(n9)中后段,前面全是批价/动销式干扰流水。
+# 台词纪律:用户侧台词按 .claude/skills/retail-investor-voice 生成(短/断/错/燥/黏,
+#   同音错字是真人指纹,只打在非断言关键词上);助手侧写要点 + 复述确认句(抽取器合法锚点)。
+script_id: viewpoint-chain-multihop
+title: "AI 链条的三段跳"
+family: 观点演化族
+substrate: 观点演化(跨标的链式演化,无结构化模块兜底,纯记忆领地)
+
+sessions:
+  - n: 1
+    date: 2025-02-10
+    length: 中
+    turns:
+      - u: "AI 这波是不是又起来了 算力这条线我一直挺有感觉的"
+      - a: "(回应算力链景气;问用户自己怎么看、看的是宏观还是具体环节)"
+      - u: "宏观先看算力 我赌的就是大模型往后训练推理都缺卡 算力缺口短不了"
+      - a: "(确认理解;追问:这是看整条算力产业链,还是已经想好压哪个细分?)"
+      - u: "目前还是看大方向 算力缺口这个逻辑 细分我还在挑"
+      - a: "(总结用户观点:看多 AI 算力(产业链层面),核心逻辑算力缺口,细分未定)"
+  - n: 2
+    date: 2025-02-19
+    length: 短
+    turns:
+      - u: "今天大盘缩量横在这 是不是要变盘了 心里没底啊"
+      - a: "(简析缩量横盘的方向选择与量能信号)"
+  - n: 3
+    date: 2025-03-04
+    length: 中
+    turns:
+      - u: "光模块这两天好猛啊 北美 capex 又上修了是吧"
+      - a: "(给出北美云厂 capex 上修与光模块需求传导)"
+      - u: "嗯 我想清楚了 算力里我就认光模块 卖铲子的 业绩最实在"
+      - a: "(确认收窄:在 AI 算力大方向下,把最看好的细分具体化为光模块;追问:逻辑还是算力缺口那套?)"
+      - u: "对 逻辑没变 还是算力缺口 就是落到光模块身上最干净"
+      - a: "(记录:AI 算力看多不变;最看好细分由「未定」具体化为光模块,逻辑算力缺口,卖铲子业绩兑现实)"
+  - n: 4
+    date: 2025-03-13
+    length: 短
+    turns:
+      - u: "黄金又新高了 这位置还敢追不"
+      - a: "(分析金价驱动与追高风险)"
+      - u: "那我再看把"
+  - n: 5
+    date: 2025-03-21
+    length: 短
+    turns:
+      - u: "港股科技今晚美股带不带得动"
+      - a: "(说明隔夜映射的传导与不确定性)"
+  - n: 6
+    date: 2025-04-02
+    length: 短
+    turns:
+      - u: "对了 我之前跟你聊过 AI 算力来着把?"
+      - a: "(复述:看多 AI 算力,核心逻辑算力缺口,最看好细分已收窄到光模块)"
+      - u: "对对 就那个 没变"
+      - a: "(确认无更新)"
+  - n: 7
+    date: 2025-04-11
+    length: 短
+    turns:
+      - u: "医药今天又崩了 集采是不是还有第二刀"
+      - a: "(归因集采节奏与板块情绪)"
+      - u: "行 知道了"
+  - n: 8
+    date: 2025-04-24
+    length: 短
+    turns:
+      - u: "新能源车四月销量出了没"
+      - a: "(给出周度销量与环比)"
+  - n: 9
+    date: 2025-05-08
+    length: 长
+    turns:
+      - u: "光模块这一个月涨太多了 我有点拿不住了"
+      - a: "(回顾光模块这一波涨幅与拥挤度;问是估值层面拿不住还是逻辑变了)"
+      - u: "逻辑没变 算力缺口还在 就是位置太高了 估值贵 性价比不行了"
+      - a: "(确认:算力缺口大逻辑不变,顾虑在光模块估值贵、性价比走低)"
+      - u: "我翻了下这条线上别的 铜缆还在地板上 一样吃算力缺口 还没人吵起来"
+      - a: "(理解:用户在 AI 算力同链条内比较细分,关注铜缆作为低位替代)"
+      - u: "群里也在说铜缆 短距互联这块需求是真的 我研究了两天"
+      - a: "(确认:用户已研究铜缆,关注短距互联需求;追问:这是要换主力细分,还是两个都拿?)"
+      - u: "换 光模块太贵了 我换到铜缆这条线了 算力里现在我最看好铜缆"
+      - a: "(确认换线:AI 算力主线下,最看好细分由光模块切换为铜缆;追问:换过来的原因就是光模块估值贵吗?)"
+      - u: "嗯 就嫌光模块贵 逻辑没变 还是算力缺口 换个便宜的位置上车"
+      - a: "(记录观点更新:最看好细分=铜缆,逻辑算力缺口不变;切换原因=光模块估值贵性价比低;光模块由最看好转为嫌贵规避)"
+      - u: "光模块我先不碰了 太贵 等回调再说"
+      - a: "(确认:对光模块当前态度=规避(嫌贵),非看空逻辑,等估值消化)"
+  - n: 10
+    date: 2025-05-20
+    length: 短
+    turns:
+      - u: "美联储纪要偏鹰 成长股是不是要杀一波 我有点慌的批"
+      - a: "(分析鹰派纪要对成长风格的扰动)"
+  - n: 11
+    date: 2025-06-02
+    length: 中
+    turns:
+      - u: "铜缆最近也开始有人炒了 我这条线算是踩对了"
+      - a: "(复述确认:您在 AI 算力主线下,最看好细分目前是铜缆,逻辑算力缺口,光模块因估值贵暂时规避)"
+      - u: "对 就这样 暂时不动"
+      - a: "(确认无更新)"
+
+db_assertions:
+  - after: 1
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: AI算力, value_contains: ["看多", "算力缺口"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: AI算力, expected_date: "2025-02-10"}
+  - after: 3
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 光模块, value_contains: ["看多"]}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: AI算力, value_contains: ["看多"]}
+  - after: 6
+    assert:
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 光模块}
+  - after: 9
+    assert:
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 铜缆, value_contains: ["看多", "算力缺口"]}
+      - {type: fact_active, rel_type: AVOIDS, target_label: 光模块, value_contains: ["贵"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 光模块, min_count: 1}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: 光模块, expected_versions: 2}
+  - after: 11
+    assert:
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 铜缆}
+
+probes:
+  - tier: 直球
+    dimension: 单跳召回
+    q: "我看多 AI 算力的核心逻辑是什么?"
+    expect_contain: ["算力缺口"]
+    expect_not: []
+    judge_rubric: "应答出算力缺口(缺卡/训练推理缺算力等价表述也算);这条逻辑三跳未变,能答出即合格"
+  - tier: 直球
+    dimension: 知识更新
+    q: "我现在 AI 这条线最看好的细分是哪个?"
+    expect_contain: ["铜缆"]
+    expect_not: ["光模块"]
+    judge_rubric: "应答铜缆(最新一跳)。若答光模块即沿链取最新失败、旧指针未更新,判不合格"
+  - tier: 自然难
+    dimension: 多跳推理
+    q: "我现在 AI 这条线最看好的细分是什么?当初为什么从上一个换过来?"
+    expect_contain: ["铜缆"]
+    expect_not: []
+    judge_rubric: "必须同时答对两件事:(甲)当前最看好=铜缆;(乙)从光模块换过来的原因是光模块估值贵/性价比低(算力缺口逻辑本身没变,只是换性价比更高的位置)。漏掉换线原因、或把原因说成逻辑变了,均不合格"
+    swap_order_invariant: true
+  - tier: 自然难
+    dimension: 多跳推理
+    q: "我在 AI 算力这条线上,最看好的细分前后经历过哪几段?按顺序说"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "应答三段:先看大方向算力(细分未定)→ 收窄到光模块(卖铲子/业绩实)→ 换到铜缆(嫌光模块贵)。漏任何一段或顺序错均不合格;三段共享算力缺口同一逻辑这点答出更佳"
+    swap_order_invariant: true
+  - tier: 自然难
+    dimension: 时间推理
+    q: "我是大概什么时候把最看好的细分从光模块换到铜缆的?当时为什么?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "时间应指向 2025 年 5 月(五月/5月初均可);原因应答光模块涨太多、估值贵、性价比低,铜缆位置低同样吃算力缺口。时间月份错或原因缺失不合格"
+  - tier: 对抗
+    dimension: 偏好一致
+    q: "光模块现在我还是当头号细分在拿着对吧?"
+    expect_contain: ["铜缆"]
+    expect_not: []
+    judge_rubric: "假前提:光模块已被换下,当前头号细分是铜缆,且用户对光模块的态度是嫌贵规避。必须纠正假前提并指向铜缆;顺着说'对你还在主押光模块'即不合格"
+  - tier: 对抗
+    dimension: 克制弃答
+    q: "我之前跟你说过我把光模块卖了多少股、落袋多少没?"
+    expect_contain: []
+    expect_not: []
+    judge_rubric: "整段历史只聊观点演化,从未提及任何股数/金额/盈亏。必须指出没说过;编造数量金额或顺着假前提确认均不合格"
+    answerable: false

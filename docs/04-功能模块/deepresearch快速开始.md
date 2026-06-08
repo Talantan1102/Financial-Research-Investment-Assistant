@@ -12,7 +12,7 @@ pip install openai langchain langgraph
 ### 2. 配置环境变量
 
 ```bash
-export DASHSCOPE_API_KEY="sk-946dc6cdc78b40829f826a0ca3fb7382"
+export DASHSCOPE_API_KEY="sk-xxxxxxxx"  # 用你自己的密钥,切勿提交真实密钥
 export TUSHARE_API_TOKEN="your_token"
 ```
 
@@ -198,7 +198,7 @@ pip install openai langchain langgraph
 
 **解决**:
 ```bash
-export DASHSCOPE_API_KEY="sk-946dc6cdc78b40829f826a0ca3fb7382"
+export DASHSCOPE_API_KEY="sk-xxxxxxxx"  # 用你自己的密钥,切勿提交真实密钥
 ```
 
 ### 问题 3: MCP Client 连接失败

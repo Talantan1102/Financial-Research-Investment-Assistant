@@ -69,9 +69,12 @@ def build_memory_from_env() -> Any:
     llm_judge: Any = None
     llm_extractor: Any = None
     try:
+        from app.memory.llm_service_adapter import MemoryLLMClientAdapter
         from app.services.openai_client import build_llm_service_from_env
 
-        llm = build_llm_service_from_env()
+        # 2026-06-05 对话流评估冒烟发现 #3:抽取层期望 async
+        # chat(prompt, system, ...) -> str 协议,直接塞 LLMService 会 TypeError 全灭。
+        llm = MemoryLLMClientAdapter(build_llm_service_from_env(), tier="fast")
         llm_judge = ConflictResolver(llm_client=llm)
         llm_extractor = LLMExtractor(llm_client=llm)
     except Exception as exc:  # noqa: BLE001

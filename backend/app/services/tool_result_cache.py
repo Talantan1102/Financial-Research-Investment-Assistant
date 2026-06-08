@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -58,7 +58,10 @@ class ToolResultCache:
     ) -> tuple[dict[str, Any], CacheHit]:
         ttl = ttl_seconds if ttl_seconds is not None else DEFAULT_TTL_BY_TOOL.get(tool_name, 300)
         key = self.cache_key(user_id, tool_name, args)
-        now = datetime.utcnow()
+        # expires_at 列是 DateTime(timezone=True),psycopg 读回 tz-aware;now 必须同为
+        # tz-aware,否则 row.expires_at > now 抛 "can't compare offset-naive and
+        # offset-aware datetimes"(旧 chat 图用 _NoOpCache 桩,从未触发;chatloop 首次真用)。
+        now = datetime.now(UTC)
 
         async with self._session_factory() as sess:
             row = (
@@ -83,6 +86,30 @@ class ToolResultCache:
             )
             await sess.commit()
             return new_result, status
+
+    async def get_raw(self, cache_key: str) -> str | None:
+        """Return the cached tool result for `cache_key` as a JSON string, or None.
+
+        read_cached_result (chatloop control tool) reads the full original tool
+        output by its cache_key — distinct from get_or_compute (which keys on
+        user/tool/args and recomputes on miss/expiry). Here the cache_key is the
+        already-known ref the model received in a downgrade placeholder, so we read
+        by primary key directly. Expired rows still return their content: the model
+        explicitly asked for this ref, and the content is the truthful last value
+        (staleness is the model's concern, not ours here).
+
+        Returns the `result` JSON column serialized with ensure_ascii=False so the
+        text fed back through the tool message matches the original (CJK readable).
+        """
+        async with self._session_factory() as sess:
+            row = (
+                await sess.execute(
+                    select(ToolResultCacheRow).where(ToolResultCacheRow.cache_key == cache_key)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return json.dumps(row.result, ensure_ascii=False, sort_keys=True)
 
     async def _upsert(
         self,

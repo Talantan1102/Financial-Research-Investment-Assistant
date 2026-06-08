@@ -17,6 +17,8 @@ export function StreamingIndicator() {
   const snap = useSnapshot(currentChatState)
   if (snap.streaming_phase === 'idle') return null
   const label = snap.streaming_phase_label ?? PHASE_LABEL[snap.streaming_phase] ?? ''
+  // chatloop step_start{step,max_steps} → "第 N/M 步" progress hint.
+  const progress = snap.loop_progress
   return (
     <div
       className={styles.streamingIndicator}
@@ -25,6 +27,11 @@ export function StreamingIndicator() {
     >
       <LoadingDots ariaLabel="streaming" />
       <span>{label}</span>
+      {progress ? (
+        <span className={styles.loopProgress} data-testid="loop-progress">
+          第 {progress.step}/{progress.max_steps} 步
+        </span>
+      ) : null}
     </div>
   )
 }

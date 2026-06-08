@@ -9,8 +9,10 @@ import {
   currentChatActions,
   currentChatState,
 } from '@/store/current-chat'
+import { escalationActions, escalationState } from '@/store/escalation'
 import * as chatSessionsStore from '@/store/chat-sessions'
 import type { ChatDetail, ChatMessage, ChatSession } from '@/types/chat'
+import type { EscalationPacket } from '@/types/escalation'
 
 function makeSession(id: string): ChatSession {
   return {
@@ -429,5 +431,89 @@ describe('useChatSSE — delayed refetch on SSE done', () => {
     // No done event seen — neither immediate nor delayed refetch fires
     expect(loadSessionsSpy).toHaveBeenCalledTimes(0)
     expect(delayedCallback).toBeNull()
+  })
+})
+
+const minimalPacket: EscalationPacket = {
+  explicit_task: {
+    raw_last_user_turn: 'analyze ICBC',
+    extracted_intent: 'single_stock_research',
+    target_ts_code: '601398.SH',
+    target_entity_name: 'ICBC',
+    user_extra_message: null,
+  },
+  chat_derived_signals: {
+    entities: [],
+    preferences: [],
+    open_questions: [],
+    inferred_persona: null,
+    extraction_confidence: 0.9,
+  },
+  known_facts: { tool_results: [] },
+  session_metadata: {
+    chat_session_id: 's1',
+    chat_turn_count: 2,
+    chat_history_summary: null,
+    user_confirmed_at: '',
+    user_edits: [],
+  },
+  missing_field_hints: [],
+}
+
+describe('useChatSSE — escalation SSE wiring', () => {
+  beforeEach(() => {
+    currentChatActions.reset()
+    currentChatActions.setSession('s1', [])
+    escalationActions.reset()
+    server.use(
+      http.get(`${API_BASE}/api/v0/chats`, () => MswHttpResponse.json([])),
+    )
+  })
+
+  it('escalate_request event opens escalation dialog (dialog_open=true, draft still null)', async () => {
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () =>
+        sseResponse([
+          { type: 'escalate_request', seq: 1, reason: 'needs_deep_research' },
+          { type: 'done', seq: 2 },
+        ]),
+      ),
+    )
+
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+    await act(async () => {
+      await result.current.sendMessage('分析工商银行')
+    })
+
+    await waitFor(() => {
+      expect(snapshot(escalationState).dialog_open).toBe(true)
+    })
+    // Draft not set yet — dialog shows spinner
+    expect(snapshot(escalationState).packet_draft).toBeNull()
+  })
+
+  it('escalate_packet_draft event populates packet_draft and keeps dialog_open', async () => {
+    server.use(
+      http.post(`${API_BASE}/api/v0/chat`, () =>
+        sseResponse([
+          { type: 'escalate_request', seq: 1, reason: 'needs_deep_research' },
+          { type: 'escalate_packet_draft', seq: 2, packet: minimalPacket },
+          { type: 'done', seq: 3 },
+        ]),
+      ),
+    )
+
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+    await act(async () => {
+      await result.current.sendMessage('分析工商银行')
+    })
+
+    await waitFor(() => {
+      expect(snapshot(escalationState).dialog_open).toBe(true)
+    })
+    const s = snapshot(escalationState)
+    expect(s.packet_draft).not.toBeNull()
+    expect(s.packet_draft?.explicit_task.target_ts_code).toBe('601398.SH')
+    expect(s.phase).toBe('draft')
   })
 })
