@@ -105,6 +105,13 @@ def filter_holding_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [e for e in edges if e.get("rel_type") not in HOLDING_REL_TYPES]
 
 
+def stamp_event_time(edge: dict[str, Any], event_dt: datetime) -> dict[str, Any]:
+    """用对话发生日(episode created_at)当 valid_from,修 LLM 把 valid_from
+    打成默认值的真信号(2026-06-08 对话流评估时间维度冒烟发现)。返回新 dict,不改入参。
+    """
+    return {**edge, "valid_from": event_dt}
+
+
 class PathBRunner:
     """Path B 编排器 — Celery task 调用入口在 app.tasks.memory."""
 
@@ -114,12 +121,15 @@ class PathBRunner:
         llm_extractor: _LLMExtractorLike,
         archival_insert_fn: ArchivalInsertFn,
         exclude_holdings: bool = False,
+        stamp_event_time_from_episode: bool = False,
     ) -> None:
         self._session_factory = session_factory
         self._extractor = llm_extractor
         self._archival_insert = archival_insert_fn
         # 策略 A:持仓陈述不入记忆图(默认关,保持现状;评估/启用持仓模块的部署开启)
         self._exclude_holdings = exclude_holdings
+        # 事件时间:用 episode created_at 当 valid_from(默认关;修 LLM 打默认时间戳)
+        self._stamp_event_time = stamp_event_time_from_episode
 
     async def run_for_session(
         self,
@@ -209,6 +219,12 @@ class PathBRunner:
                     target_eid: UUID = (
                         UUID(src_eid) if src_eid else _uuid(chunk.episodes[-1].episode_id)
                     )
+                    if self._stamp_event_time:
+                        target_ep = next(
+                            (e for e in chunk.episodes if _uuid(e.episode_id) == target_eid),
+                            chunk.episodes[-1],
+                        )
+                        edge = stamp_event_time(edge, _coerce_dt(target_ep.created_at))
                     try:
                         await self._archival_insert(
                             user_id=user_id_val,

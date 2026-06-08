@@ -166,6 +166,7 @@ async def build_live_runners() -> tuple[Any, Any]:
         llm_extractor=extractor,
         archival_insert_fn=memory.archival_memory_insert,
         exclude_holdings=True,  # 策略 A:评估期望持仓不入记忆图(持仓仲裁族)
+        stamp_event_time_from_episode=True,  # 事件时间:valid_from 取对话发生日(时间维度)
     )
 
     # 评估专用 user + chat session(每次跑新建,不污染真实数据)
