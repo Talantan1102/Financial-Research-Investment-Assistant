@@ -101,13 +101,14 @@ class WritePhaseRunner:
             if group:
                 for c in group.checks:
                     if c.type == "fact_count_no_increase":
+                        # target_label 可能是候选列表(实体规整对策)。直接传原值,
+                        # 由 snapshot_counts 内部 _label_key 统一规范化 key——
+                        # 此前用 str(list) 强转,与 run_check 的 tuple key 永不相等,
+                        # 误报"无基线"(2026-06-08 四族冒烟发现的 harness bug)。
+                        tl = c.params.get("target_label")
                         self._engine.snapshot_counts(
                             rel_type=str(c.params["rel_type"]),
-                            target_label=(
-                                str(c.params["target_label"])
-                                if c.params.get("target_label") is not None
-                                else None
-                            ),
+                            target_label=tl,  # type: ignore[arg-type]
                         )
             self._insert_episodes(ss)
             await self._extract(self._user_id, self._chat_session_id, ss)
