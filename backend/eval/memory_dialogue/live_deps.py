@@ -165,6 +165,7 @@ async def build_live_runners() -> tuple[Any, Any]:
         session_factory=SessionLocal,
         llm_extractor=extractor,
         archival_insert_fn=memory.archival_memory_insert,
+        exclude_holdings=True,  # 策略 A:评估期望持仓不入记忆图(持仓仲裁族)
     )
 
     # 评估专用 user + chat session(每次跑新建,不污染真实数据)

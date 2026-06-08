@@ -94,6 +94,17 @@ def _resolve_skip_gate() -> Callable[[ChatMemoryEpisode], tuple[bool, str]]:
     return cast(Callable[[ChatMemoryEpisode], tuple[bool, str]], fn)
 
 
+# 策略 A 持仓边界(2026-06-08 对话流评估持仓仲裁族冒烟驱动):持仓事实(持有/卖出)
+# 的唯一真相来源是持仓监控模块,口头持仓陈述不入记忆图,避免与模块形成双真相源。
+# 记忆只留观点/偏好/研究。开启后过滤掉这些 rel_type 的边。
+HOLDING_REL_TYPES = frozenset({"HOLDS", "SOLD"})
+
+
+def filter_holding_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """剔除持仓类边(策略 A),保留观点/偏好/研究类边。"""
+    return [e for e in edges if e.get("rel_type") not in HOLDING_REL_TYPES]
+
+
 class PathBRunner:
     """Path B 编排器 — Celery task 调用入口在 app.tasks.memory."""
 
@@ -102,10 +113,13 @@ class PathBRunner:
         session_factory: SessionFactory,
         llm_extractor: _LLMExtractorLike,
         archival_insert_fn: ArchivalInsertFn,
+        exclude_holdings: bool = False,
     ) -> None:
         self._session_factory = session_factory
         self._extractor = llm_extractor
         self._archival_insert = archival_insert_fn
+        # 策略 A:持仓陈述不入记忆图(默认关,保持现状;评估/启用持仓模块的部署开启)
+        self._exclude_holdings = exclude_holdings
 
     async def run_for_session(
         self,
@@ -184,6 +198,8 @@ class PathBRunner:
 
                 # 走 Plan 2A archival_memory_insert pipeline
                 edges_payload = _coerce_edges(extracted)
+                if self._exclude_holdings:
+                    edges_payload = filter_holding_edges(edges_payload)  # 策略 A:持仓不入图
                 facts_total += len(edges_payload)
                 user_id_val: UUID = _uuid(chunk.episodes[0].user_id)
                 inserted_in_chunk = 0
