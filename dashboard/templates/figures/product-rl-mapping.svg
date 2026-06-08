@@ -1,0 +1,103 @@
+<svg viewBox="0 0 820 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="本产品六个 LLM 调用面对应的后训练路线矩阵">
+  <style>
+    .pm-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .pm-hd { font-size: 12px; fill: #6E6E73; font-weight: 600; }
+    .pm-n { font-size: 12.5px; fill: #1D1D1F; font-weight: 600; }
+    .pm-d { font-size: 10.5px; fill: #6E6E73; }
+  </style>
+  <g class="pm-t">
+    <!-- 表头 -->
+    <text x="56" y="32" class="pm-hd">产品场景(真实组件)</text>
+    <text x="262" y="32" class="pm-hd">今天靠什么稳质量</text>
+    <text x="444" y="32" class="pm-hd">升级第一步</text>
+    <text x="624" y="32" class="pm-hd">什么时候轮到 RL</text>
+    <line x1="40" y1="42" x2="780" y2="42" stroke="rgba(60,60,67,0.18)" stroke-width="1"/>
+
+    <!-- 行1 估值数值核对 -->
+    <rect x="40" y="52" width="740" height="70" rx="9" fill="rgba(52,199,89,0.05)" stroke="rgba(52,199,89,0.30)"/>
+    <rect x="40" y="52" width="4" height="70" rx="2" fill="#34C759"/>
+    <text x="56" y="74" class="pm-n">估值数值核对</text>
+    <text x="56" y="92" class="pm-d">四模型估值交叉校验 +</text>
+    <text x="56" y="106" class="pm-d">分歧异常诊断 agent</text>
+    <text x="262" y="74" class="pm-d">估值是纯 Python 计算,LLM 只解读;</text>
+    <text x="262" y="92" class="pm-d">诊断走 schema 约束,失败返空不重试</text>
+    <text x="444" y="74" class="pm-d">把「财报→数值」对账攒成题集</text>
+    <text x="444" y="92" class="pm-d">(带容差的标准答案)</text>
+    <text x="624" y="74" class="pm-d">全产品最像 RLVR 的场景:数值</text>
+    <text x="624" y="92" class="pm-d">容差比对就是现成 grader,金融</text>
+    <text x="624" y="106" class="pm-d">数值题已有公开基准可参照</text>
+
+    <!-- 行2 工具调用规划 -->
+    <rect x="40" y="130" width="740" height="70" rx="9" fill="rgba(52,199,89,0.05)" stroke="rgba(52,199,89,0.30)"/>
+    <rect x="40" y="130" width="4" height="70" rx="2" fill="#34C759"/>
+    <text x="56" y="152" class="pm-n">工具调用规划</text>
+    <text x="56" y="170" class="pm-d">chat 主循环的 planner,</text>
+    <text x="56" y="184" class="pm-d">面对 15 个注册工具</text>
+    <text x="262" y="152" class="pm-d">严格 JSON schema + 工具白名单</text>
+    <text x="262" y="170" class="pm-d">过滤幻觉工具;失败降级直答</text>
+    <text x="444" y="152" class="pm-d">攒线上工具调用轨迹,蒸馏强模型</text>
+    <text x="444" y="170" class="pm-d">的规划轨迹先做 SFT</text>
+    <text x="624" y="152" class="pm-d">「该不该调/调哪个/参数对不对」</text>
+    <text x="624" y="170" class="pm-d">可终态校验当奖励;多轮信用分配</text>
+    <text x="624" y="184" class="pm-d">是难点(turn 级奖励参照)</text>
+
+    <!-- 行3 记忆抽取 -->
+    <rect x="40" y="208" width="740" height="70" rx="9" fill="rgba(94,92,230,0.05)" stroke="rgba(94,92,230,0.30)"/>
+    <rect x="40" y="208" width="4" height="70" rx="2" fill="#5E5CE6"/>
+    <text x="56" y="230" class="pm-n">记忆抽取 + 冲突判定</text>
+    <text x="56" y="248" class="pm-d">跨会话记忆的事实抽取与</text>
+    <text x="56" y="262" class="pm-d">四动作冲突裁决</text>
+    <text x="262" y="230" class="pm-d">轻量模型 + 关系白名单 + 重要度三档;</text>
+    <text x="262" y="248" class="pm-d">裁决失败保守兜底(宁多存不误删)</text>
+    <text x="444" y="230" class="pm-d">把 50 条评估金标扩充成训练集,</text>
+    <text x="444" y="248" class="pm-d">抽取结果可与数据库终态比对</text>
+    <text x="624" y="230" class="pm-d">schema 可验证、grader 好写,</text>
+    <text x="624" y="248" class="pm-d">但样本量离「几百条」门槛还差;</text>
+    <text x="624" y="262" class="pm-d">先攒数据再谈训</text>
+
+    <!-- 行4 研报生成 -->
+    <rect x="40" y="286" width="740" height="70" rx="9" fill="rgba(94,92,230,0.05)" stroke="rgba(94,92,230,0.30)"/>
+    <rect x="40" y="286" width="4" height="70" rx="2" fill="#5E5CE6"/>
+    <text x="56" y="308" class="pm-n">研报生成 + 七维评审</text>
+    <text x="56" y="326" class="pm-d">尽调报告 Writer,评审组</text>
+    <text x="56" y="340" class="pm-d">七维打分驱动重写</text>
+    <text x="262" y="308" class="pm-d">深档模型 + schema;评审分低触发</text>
+    <text x="262" y="326" class="pm-d">retry;最终建议由 Python 覆写兜底</text>
+    <text x="444" y="308" class="pm-d">评审 rubric 现成可改造成偏好对</text>
+    <text x="444" y="326" class="pm-d">(高分/低分版本),DPO 起步</text>
+    <text x="624" y="308" class="pm-d">只能 rubric/judge 当奖励 ——</text>
+    <text x="624" y="326" class="pm-d">hacking 风险最高的场景(长度、</text>
+    <text x="624" y="340" class="pm-d">谄媚),防御成本要先算进去</text>
+
+    <!-- 行5 多空辩论 -->
+    <rect x="40" y="364" width="740" height="70" rx="9" fill="#FBFBFD" stroke="rgba(60,60,67,0.14)"/>
+    <rect x="40" y="364" width="4" height="70" rx="2" fill="#C7C7CC"/>
+    <text x="56" y="386" class="pm-n">多空辩论双 agent</text>
+    <text x="56" y="404" class="pm-d">看多/看空两轮对抗,</text>
+    <text x="56" y="418" class="pm-d">为结论提供双面证据</text>
+    <text x="262" y="386" class="pm-d">两轮对抗 + schema 约束;一方失败</text>
+    <text x="262" y="404" class="pm-d">整体优雅降级跳过</text>
+    <text x="444" y="386" class="pm-d">维持提示词迭代</text>
+    <text x="624" y="386" class="pm-d">辩论质量难写 grader、多轮信用</text>
+    <text x="624" y="404" class="pm-d">分配成本高,ROI 排最后</text>
+
+    <!-- 行6 标题生成 -->
+    <rect x="40" y="442" width="740" height="56" rx="9" fill="#FBFBFD" stroke="rgba(60,60,67,0.14)"/>
+    <rect x="40" y="442" width="4" height="56" rx="2" fill="#C7C7CC"/>
+    <text x="56" y="464" class="pm-n">会话标题生成</text>
+    <text x="56" y="482" class="pm-d">聊天会话的异步起名</text>
+    <text x="262" y="464" class="pm-d">快档模型三次尝试,失败回退</text>
+    <text x="262" y="482" class="pm-d">前 20 字截断 —— 已是最优解</text>
+    <text x="444" y="464" class="pm-d">无</text>
+    <text x="624" y="464" class="pm-d">永远轮不到:低价值 + 有兜底,</text>
+    <text x="624" y="482" class="pm-d">训练任何东西都是浪费</text>
+
+    <!-- 图例 -->
+    <rect x="40" y="514" width="10" height="10" rx="3" fill="#34C759"/>
+    <text x="58" y="523" class="pm-d">有现成可验证奖励,最该开始攒数据</text>
+    <rect x="300" y="514" width="10" height="10" rx="3" fill="#5E5CE6"/>
+    <text x="318" y="523" class="pm-d">先 SFT / DPO 起步,RL 等数据齐</text>
+    <rect x="540" y="514" width="10" height="10" rx="3" fill="#C7C7CC"/>
+    <text x="558" y="523" class="pm-d">不值得训练,提示词层维持</text>
+  </g>
+</svg>

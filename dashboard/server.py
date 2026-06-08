@@ -60,6 +60,11 @@ DIMENSION_REPORTS: dict[str, tuple[dict[str, str], ...]] = {
             "title": "Agent Loop 周边接线 · 怎么做",
             "sub": "7 个接线设计决策,每个配真实场景 · 万物皆工具的判据与例外 / 工具数量治理 / 信号工具 / 记忆双轨 / 技能渐进披露,对照本项目 chat 重设计草案 · 12 路调研 + 40+ 条事实核查",
         },
+        {
+            "slug": "post-training-rl-survey",
+            "title": "LLM 后训练 · 什么时候必须上 RL,怎么落地",
+            "sub": "7 个后训练设计决策,每个配真实场景 · 提示词/SFT/DPO/RL 判别标准 / 数据集构造 / 奖励设计与 reward hacking 攻防 / 五层评估 / verl+sglang 工程落地,5 张图例 + 对照本项目 LLM 调用面三档路线 · 两轮调研 + 19 条承重结论逐条复核",
+        },
     ),
     "context": (
         {

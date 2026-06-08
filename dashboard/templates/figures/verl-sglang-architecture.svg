@@ -1,0 +1,119 @@
+<svg viewBox="0 0 820 648" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="verl HybridFlow 架构与 sglang rollout 数据闭环">
+  <style>
+    .va-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .va-h { font-size: 13px; fill: #1D1D1F; font-weight: 600; }
+    .va-d { font-size: 10.5px; fill: #6E6E73; }
+    .va-s { font-size: 11.5px; fill: #3A3A3C; }
+    .va-arrow { stroke: #C7C7CC; stroke-width: 1.5; fill: none; marker-end: url(#va-head); }
+  </style>
+  <defs>
+    <marker id="va-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1,1 L7,4 L1,7" stroke="#C7C7CC" stroke-width="1.4" fill="none"/>
+    </marker>
+    <marker id="va-head-i" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1,1 L7,4 L1,7" stroke="#5E5CE6" stroke-width="1.4" fill="none"/>
+    </marker>
+  </defs>
+
+  <g class="va-t">
+    <!-- 控制层 -->
+    <rect x="40" y="14" width="740" height="60" rx="10" fill="rgba(94,92,230,0.08)" stroke="rgba(94,92,230,0.45)"/>
+    <text x="58" y="38" class="va-h" fill="#4845C2">单控制器(single controller)— RL 算法控制流跑在一个进程里</text>
+    <text x="58" y="58" class="va-d">PPO / GRPO / DAPO 的主循环就是一段普通 Python;WorkerGroup 是远程多进程计算的本地代理(HybridFlow:控制流单进程 + 计算流多进程)</text>
+    <path d="M410,74 L410,100" class="va-arrow"/>
+
+    <!-- GPU 资源池 -->
+    <rect x="40" y="100" width="740" height="282" rx="12" fill="#FBFBFD" stroke="rgba(60,60,67,0.18)" stroke-dasharray="5 4"/>
+    <text x="58" y="124" class="va-d" font-weight="600">GPU 资源池(ResourcePool)— actor / rollout / ref 共置(colocate)同组 GPU 分时复用,这是省卡的关键也是 OOM 的根源</text>
+
+    <!-- ActorRolloutRef WorkerGroup -->
+    <rect x="58" y="138" width="462" height="228" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.16)"/>
+    <text x="74" y="160" class="va-h">ActorRolloutRef WorkerGroup(三合一)</text>
+
+    <rect x="74" y="176" width="186" height="80" rx="9" fill="rgba(94,92,230,0.07)" stroke="rgba(94,92,230,0.40)"/>
+    <text x="88" y="198" class="va-h" fill="#4845C2">训练态 actor</text>
+    <text x="88" y="216" class="va-d">FSDP / FSDP2 / Megatron 后端,</text>
+    <text x="88" y="231" class="va-d">前向 + 反向 + 梯度更新;</text>
+    <text x="88" y="246" class="va-d">可换后端不动控制逻辑</text>
+
+    <rect x="316" y="176" width="188" height="80" rx="9" fill="rgba(0,199,190,0.08)" stroke="rgba(0,199,190,0.45)"/>
+    <text x="330" y="198" class="va-h" fill="#0A8A84">推理态 rollout:sglang</text>
+    <text x="330" y="216" class="va-d">RadixAttention 前缀缓存 —— GRPO</text>
+    <text x="330" y="231" class="va-d">同 prompt 采 n 条共享前缀,天然吃</text>
+    <text x="330" y="246" class="va-d">缓存红利(无官方倍数,别编)</text>
+
+    <path d="M260,206 L310,206" stroke="#5E5CE6" stroke-width="1.5" fill="none" marker-end="url(#va-head-i)"/>
+    <path d="M310,226 L260,226" stroke="#5E5CE6" stroke-width="1.5" fill="none" marker-end="url(#va-head-i)"/>
+    <text x="74" y="280" class="va-d" fill="#4845C2" font-weight="600">↑ 3D-HybridEngine 权重重切分:训练态↔生成态零冗余切换,70B 上切换开销比两个基线低 71.2% / 89.1%(论文自报,16×A100)</text>
+
+    <rect x="74" y="296" width="430" height="52" rx="9" fill="#FBFBFD" stroke="rgba(60,60,67,0.14)"/>
+    <text x="88" y="318" class="va-h">reference 模型(KL 锚)</text>
+    <text x="88" y="336" class="va-d">算 KL 惩罚的参照;默认参数 offload 到 CPU,用时再上卡</text>
+
+    <!-- 右列: critic / reward -->
+    <rect x="544" y="138" width="216" height="104" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.16)" stroke-dasharray="4 3"/>
+    <text x="560" y="162" class="va-h" fill="#6E6E73">Critic worker(GRPO 可省)</text>
+    <text x="560" y="182" class="va-d">PPO 需要一个与策略同量级的价值</text>
+    <text x="560" y="197" class="va-d">网络;GRPO 用「组内均值/标准差」</text>
+    <text x="560" y="212" class="va-d">当 baseline,把整个 critic 省掉 ——</text>
+    <text x="560" y="227" class="va-d">显存与复杂度直接砍一块</text>
+
+    <rect x="544" y="258" width="216" height="108" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.16)"/>
+    <text x="560" y="282" class="va-h">Reward 计算</text>
+    <text x="560" y="302" class="va-d">规则验证器 = 普通函数/进程,</text>
+    <text x="560" y="317" class="va-d">不吃 GPU(数值对账、跑测试用例);</text>
+    <text x="560" y="332" class="va-d">只有神经 RM / 判官模型才占卡;</text>
+    <text x="560" y="347" class="va-d">金融慎用纯结果奖励(P&amp;L 随机)</text>
+
+    <!-- 数据闭环 -->
+    <text x="40" y="406" class="va-d" font-weight="600">一步 GRPO 的数据闭环(对应官方 Qwen3-8B 单机脚本:rollout.n=5 / gpu_memory_utilization=0.6 / kl_loss_coef=0.001 / adv_estimator=grpo)</text>
+    <rect x="40" y="418" width="126" height="62" rx="9" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="54" y="440" class="va-h">① 取一批 prompt</text>
+    <text x="54" y="458" class="va-d">train_batch_size=1024,</text>
+    <text x="54" y="472" class="va-d">含 query+verifier 对</text>
+    <rect x="196" y="418" width="136" height="62" rx="9" fill="rgba(0,199,190,0.08)" stroke="rgba(0,199,190,0.45)"/>
+    <text x="210" y="440" class="va-h" fill="#0A8A84">② sglang 采样</text>
+    <text x="210" y="458" class="va-d">每题生成 n=5 条回答</text>
+    <text x="210" y="472" class="va-d">(多轮则带工具调用)</text>
+    <rect x="362" y="418" width="130" height="62" rx="9" fill="rgba(52,199,89,0.08)" stroke="rgba(52,199,89,0.45)"/>
+    <text x="376" y="440" class="va-h" fill="#1B7A33">③ 验证器判分</text>
+    <text x="376" y="458" class="va-d">规则比对 / 跑测试,</text>
+    <text x="376" y="472" class="va-d">每条回答得 reward</text>
+    <rect x="522" y="418" width="136" height="62" rx="9" fill="rgba(94,92,230,0.08)" stroke="rgba(94,92,230,0.45)"/>
+    <text x="536" y="440" class="va-h" fill="#4845C2">④ 组内归一化</text>
+    <text x="536" y="458" class="va-d">advantage = (r − 组均值)</text>
+    <text x="536" y="472" class="va-d">/ 组标准差(GRPO)</text>
+    <rect x="688" y="418" width="92" height="62" rx="9" fill="rgba(94,92,230,0.08)" stroke="rgba(94,92,230,0.45)"/>
+    <text x="702" y="440" class="va-h" fill="#4845C2">⑤ 反向更新</text>
+    <text x="702" y="458" class="va-d">actor 梯度步</text>
+    <text x="702" y="472" class="va-d">(lr=1e-6)</text>
+    <path d="M166,449 L190,449" class="va-arrow"/>
+    <path d="M332,449 L356,449" class="va-arrow"/>
+    <path d="M492,449 L516,449" class="va-arrow"/>
+    <path d="M658,449 L682,449" class="va-arrow"/>
+    <path d="M734,480 L734,500 L264,500 L264,486" class="va-arrow"/>
+    <text x="60" y="514" class="va-d">⑥ 新权重同步回 rollout 引擎 —— sglang 逐参数(key-by-key)更新,慢于 vLLM 整批加载(社区 issue 口径,演进中;可调桶式批量更新缓解)</text>
+
+    <!-- 三坑 -->
+    <rect x="40" y="530" width="236" height="104" rx="10" fill="rgba(255,159,10,0.07)" stroke="rgba(255,159,10,0.40)"/>
+    <text x="54" y="552" font-size="12px" font-weight="600" fill="#B26A00">坑一:共置显存之争</text>
+    <text x="54" y="572" class="va-d">rollout 的 KV cache 与训练显存分时抢卡;</text>
+    <text x="54" y="587" class="va-d">gpu_memory_utilization 0.5–0.7 起步,</text>
+    <text x="54" y="602" class="va-d">配 param/optimizer offload + 梯度检查点;</text>
+    <text x="54" y="617" class="va-d">sglang 需关 TP 显存均衡检查的环境变量</text>
+
+    <rect x="292" y="530" width="236" height="104" rx="10" fill="rgba(255,59,48,0.06)" stroke="rgba(255,59,48,0.35)"/>
+    <text x="306" y="552" font-size="12px" font-weight="600" fill="#C2403B">坑二:rollout↔训练精度错位</text>
+    <text x="306" y="572" class="va-d">两套引擎 kernel 不同,log-prob 静默不一致,</text>
+    <text x="306" y="587" class="va-d">采样分布 ≠ 训练假设分布,轻则不稳重则崩;</text>
+    <text x="306" y="602" class="va-d">用截断重要性采样(TIS)校正,IS 权重必须</text>
+    <text x="306" y="617" class="va-d">detach;官方 rollout-diff 工具可检测散度</text>
+
+    <rect x="544" y="530" width="236" height="104" rx="10" fill="rgba(0,122,255,0.06)" stroke="rgba(0,122,255,0.35)"/>
+    <text x="558" y="552" font-size="12px" font-weight="600" fill="#0A6CD6">坑三:多轮工具调用雷区</text>
+    <text x="558" y="572" class="va-d">工具返回 token 必须 mask 出 loss(增量分词</text>
+    <text x="558" y="587" class="va-d">保证只训 assistant token);多轮 tool call</text>
+    <text x="558" y="602" class="va-d">实测当时只有 sglang + sync 模式可靠触发</text>
+    <text x="558" y="617" class="va-d">(2025-08 issue 口径,async 后续在修)</text>
+  </g>
+</svg>

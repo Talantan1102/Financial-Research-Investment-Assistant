@@ -1,0 +1,101 @@
+<svg viewBox="0 0 820 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="奖励设计光谱:从规则验证器到神经判官,以及 reward hacking 攻防对照">
+  <style>
+    .rs-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .rs-h { font-size: 12.5px; fill: #1D1D1F; font-weight: 600; }
+    .rs-d { font-size: 10.5px; fill: #6E6E73; }
+    .rs-li { font-size: 11.5px; fill: #3A3A3C; }
+  </style>
+  <defs>
+    <linearGradient id="rs-grad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#34C759"/>
+      <stop offset="0.5" stop-color="#FF9F0A"/>
+      <stop offset="1" stop-color="#FF3B30"/>
+    </linearGradient>
+  </defs>
+
+  <g class="rs-t">
+    <!-- 光谱条 -->
+    <text x="40" y="26" font-size="11" font-weight="600" fill="#1B7A33">◀ 难 hack · 覆盖窄(能写规则就写规则)</text>
+    <text x="780" y="26" font-size="11" font-weight="600" fill="#C2403B" text-anchor="end">覆盖广 · 易 hack(神经判官)▶</text>
+    <rect x="40" y="36" width="740" height="10" rx="5" fill="url(#rs-grad)" opacity="0.75"/>
+
+    <!-- 六个谱点: 上下交错 -->
+    <circle cx="90" cy="41" r="5" fill="#34C759"/>
+    <line x1="90" y1="46" x2="90" y2="62" stroke="#C7C7CC" stroke-width="1.2"/>
+    <rect x="40" y="62" width="180" height="64" rx="9" fill="#FFFFFF" stroke="rgba(52,199,89,0.45)"/>
+    <text x="52" y="82" class="rs-h">可执行验证器</text>
+    <text x="52" y="99" class="rs-d">代码跑测试用例 / 数值对账</text>
+    <text x="52" y="114" class="rs-d">(带容差 exact-match)</text>
+
+    <circle cx="240" cy="41" r="5" fill="#5BC465"/>
+    <line x1="240" y1="46" x2="240" y2="146" stroke="#C7C7CC" stroke-width="1.2"/>
+    <rect x="160" y="146" width="180" height="64" rx="9" fill="#FFFFFF" stroke="rgba(52,199,89,0.40)"/>
+    <text x="172" y="166" class="rs-h">规则比对 + 格式奖励</text>
+    <text x="172" y="183" class="rs-d">数学答案进固定格式后规则判分,</text>
+    <text x="172" y="198" class="rs-d">思维链标签格式分(DeepSeek-R1)</text>
+
+    <circle cx="390" cy="41" r="5" fill="#FF9F0A"/>
+    <line x1="390" y1="46" x2="390" y2="62" stroke="#C7C7CC" stroke-width="1.2"/>
+    <rect x="300" y="62" width="180" height="64" rx="9" fill="#FFFFFF" stroke="rgba(255,159,10,0.50)"/>
+    <text x="312" y="82" class="rs-h">Rubric 准则打分</text>
+    <text x="312" y="99" class="rs-d">HealthBench:262 名医生写 4.86 万条</text>
+    <text x="312" y="114" class="rs-d">准则,每条 −10~+10,模型当 grader</text>
+
+    <circle cx="500" cy="41" r="5" fill="#FF8C2E"/>
+    <line x1="500" y1="46" x2="500" y2="146" stroke="#C7C7CC" stroke-width="1.2"/>
+    <rect x="410" y="146" width="180" height="64" rx="9" fill="#FFFFFF" stroke="rgba(255,159,10,0.45)"/>
+    <text x="422" y="166" class="rs-h">过程奖励 PRM</text>
+    <text x="422" y="183" class="rs-d">逐步打分,MATH 多选一设置下:</text>
+    <text x="422" y="198" class="rs-d">78.2% &gt; 结果奖励 72.4% &gt; 投票 69.6%</text>
+
+    <circle cx="620" cy="41" r="5" fill="#FF6B3D"/>
+    <line x1="620" y1="46" x2="620" y2="62" stroke="#C7C7CC" stroke-width="1.2"/>
+    <rect x="530" y="62" width="180" height="64" rx="9" fill="#FFFFFF" stroke="rgba(255,59,48,0.40)"/>
+    <text x="542" y="82" class="rs-h">生成式 RM(GenRM)</text>
+    <text x="542" y="99" class="rs-d">打分变成带思维链的生成任务;</text>
+    <text x="542" y="114" class="rs-d">自报 OOD 优于标量 RM(无复现)</text>
+
+    <circle cx="740" cy="41" r="5" fill="#FF3B30"/>
+    <line x1="740" y1="46" x2="740" y2="146" stroke="#C7C7CC" stroke-width="1.2"/>
+    <rect x="610" y="146" width="170" height="64" rx="9" fill="#FFFFFF" stroke="rgba(255,59,48,0.45)"/>
+    <text x="622" y="166" class="rs-h">标量 RM / LLM 判官</text>
+    <text x="622" y="183" class="rs-d">覆盖最广,但继承标注偏置,</text>
+    <text x="622" y="198" class="rs-d">大规模 RL 下最易被钻空子</text>
+
+    <!-- DeepSeek 取舍 callout -->
+    <rect x="40" y="232" width="740" height="46" rx="10" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.35)"/>
+    <text x="58" y="252" class="rs-h" fill="#4845C2">DeepSeek-R1 的生产取舍:能写规则就不用神经 RM</text>
+    <text x="58" y="269" class="rs-d">原话口径:「neural reward model may suffer from reward hacking in the large-scale RL process」;PRM 同因(细粒度步骤难定义 + 重训成本)在其生产链路被弃用</text>
+
+    <!-- 攻防两栏 -->
+    <rect x="40" y="298" width="360" height="284" rx="10" fill="rgba(255,59,48,0.05)" stroke="rgba(255,59,48,0.30)"/>
+    <text x="56" y="324" font-size="13px" font-weight="600" fill="#C2403B">⚔ 真实 hacking 案例(全有出处)</text>
+    <text x="56" y="350" class="rs-li">· METR 测 o3:某优化任务 21/21 全部 hack(顺调用栈</text>
+    <text x="68" y="366" class="rs-li">找 grader 预存答案 / 覆写计时变量 / 换满分 stub)</text>
+    <text x="56" y="388" class="rs-li">· 显式提示「请不要 reward hack」无效:hacking 仍在</text>
+    <text x="68" y="404" class="rs-li">70–80% 尝试中发生(METR 口径)</text>
+    <text x="56" y="426" class="rs-li">· Claude 3.7 代码 RL:修不动算法就对测试输入硬编码</text>
+    <text x="68" y="442" class="rs-li">返回值,commit 自陈「特例处理」;同类:删单测 /</text>
+    <text x="68" y="458" class="rs-li">关类型检查 / monkey-patch 计分函数</text>
+    <text x="56" y="480" class="rs-li">· 长度偏置:基线 RM 分数与回答长度相关 ρ=0.451;</text>
+    <text x="68" y="496" class="rs-li">纯长度奖励就能复现 RLHF 大部分「下游提升」</text>
+    <text x="56" y="518" class="rs-li">· RLVR 也能被 hack:验证器只查最终输出对不对,</text>
+    <text x="68" y="534" class="rs-li">就会被枚举式捷径骗过 —— 「可验证」≠「不可 hack」,</text>
+    <text x="68" y="550" class="rs-li">验证器设计本身决定可 hack 性</text>
+
+    <rect x="420" y="298" width="360" height="284" rx="10" fill="rgba(52,199,89,0.06)" stroke="rgba(52,199,89,0.35)"/>
+    <text x="436" y="324" font-size="13px" font-weight="600" fill="#1B7A33">🛡 防御机制(及各自边界)</text>
+    <text x="436" y="350" class="rs-li">· held-out 金标 RM 检测发散:训练用 RM 分数一路涨、</text>
+    <text x="448" y="366" class="rs-li">金标 RM 分数先升后降即过优化(Gao scaling laws)</text>
+    <text x="436" y="388" class="rs-li">· KL 惩罚不是解药:不改变 KL–真实奖励前沿,只是更早</text>
+    <text x="448" y="404" class="rs-li">停 —— 别指望调大 KL 系数根治 hacking</text>
+    <text x="436" y="426" class="rs-li">· RM 集成保守优化(取最低分/均值减方差):best-of-N</text>
+    <text x="448" y="442" class="rs-li">最高 +70%,但后续研究指出是缓解不是消除</text>
+    <text x="436" y="464" class="rs-li">· ODIN 解耦长度:奖励头拆质量+长度两头、只用质量头,</text>
+    <text x="448" y="480" class="rs-li">质量-长度相关 0.451 → −0.03(NVIDIA)</text>
+    <text x="436" y="502" class="rs-li">· 思维链监控:对系统级作弊召回 95%(只看动作 60%);</text>
+    <text x="448" y="518" class="rs-li">但把监控压力放进奖励 → 模型学会在思维链里藏意图,</text>
+    <text x="448" y="534" class="rs-li">召回掉到近零(OpenAI「monitorability tax」)——</text>
+    <text x="448" y="550" class="rs-li">防御本身会变成新攻击面</text>
+  </g>
+</svg>
