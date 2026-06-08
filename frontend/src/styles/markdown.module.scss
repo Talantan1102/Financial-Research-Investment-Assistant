@@ -27,6 +27,20 @@
   background: transparent;
   padding: 0;
 
+  // marked 输出 `<p>…</p>\n`,TextMessage 用 inline <span> 包它。inline 上下文里
+  // 块级 <p> 后的尾随 "\n" 文本节点会多撑一个空行,加 markdownBody 给 p 的默认
+  // 下边距,导致用户气泡偏高、文字顶部对不齐(与 Analyst 气泡不一致)。把 span 设
+  // block 让尾随空白折叠,并清掉 p 外边距,使气泡贴合文字、垂直居中。
+  > span {
+    display: block;
+  }
+  p {
+    margin: 0;
+  }
+  p + p {
+    margin-top: 8px;
+  }
+
   // 用户气泡内若出现 markdown 链接,默认蓝色会在蓝底上看不清,改用白色下划线。
   a {
     color: #fff;
