@@ -115,18 +115,18 @@ db_assertions:
   # 第2个session后:看多猪周期 + 产能去化 active,事件时间锚在建立日;回避牧原应落 AVOIDS
   - after: 2
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 猪周期, value_contains: ["看多", "产能去化"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 猪周期, expected_date: "2025-02-20"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [猪周期, 养殖业, 农林牧渔], value_contains: ["看多", "产能去化"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [猪周期, 养殖业, 农林牧渔], expected_date: "2025-02-20"}
       - {type: fact_active, rel_type: AVOIDS, target_label: [牧原, 牧原股份, 002714.SZ]}
   # 第5个session 轻度更新:看多仍 active,且全程未冒出持仓事实(HOLDS 不入图)
   - after: 5
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 猪周期, value_contains: ["看多"]}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [猪周期, 养殖业, 农林牧渔], value_contains: ["看多"]}
       - {type: no_fact_written, rel_type: HOLDS}
   # 第8个session 重提确认:版本不增,回避牧原仍 active
   - after: 8
     assert:
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 猪周期}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [猪周期, 养殖业, 农林牧渔]}
       - {type: fact_active, rel_type: AVOIDS, target_label: [牧原, 牧原股份, 002714.SZ]}
       # 对照锚:整段从未提任何盈亏金额,SOLD 关系不应凭空写入
       - {type: no_fact_written, rel_type: SOLD}

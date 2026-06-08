@@ -119,31 +119,31 @@ db_assertions:
   # 第1个session后:看多 + 稀缺 active,事件时间锚在建立日
   - after: 1
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 酱酒, value_contains: ["看多", "稀缺"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 酱酒, expected_date: "2025-02-10"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II], value_contains: ["看多", "稀缺"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II], expected_date: "2025-02-10"}
   # 第3个session 第一次强化:仍是同一观点,去重不应新增版本
   - after: 3
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 酱酒, value_contains: ["看多"]}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 酱酒}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II], value_contains: ["看多"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II]}
   # 第6个session 第二次强化:重提确认,版本仍不增
   - after: 6
     assert:
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 酱酒}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II]}
   # 第7个session 气话当天:核心断言——情绪宣泄不得形成正式观点,且不得写成 AVOIDS(再也不碰)
   #   看多版本仍 active;气话不增 EXPRESSED_VIEW 版本;不得落 AVOIDS 关系
   - after: 7
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 酱酒, value_contains: ["看多"]}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 酱酒}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II], value_contains: ["看多"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II]}
       - {type: no_fact_written, rel_type: AVOIDS}
   # 第9个session(消解)后:确认看多仍 active,且气话没有被当成观点更新——
   # 审稿必修:原 chain_intact(expected_versions:1) 恒绿抓不住「气话误增一版/误作废」,
   # 改为延续基线的「版本数不得增加」,误增即红
   - after: 9
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 酱酒, value_contains: ["看多", "稀缺"]}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 酱酒}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II], value_contains: ["看多", "稀缺"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [酱酒, 白酒, 白酒II]}
       - {type: no_fact_written, rel_type: AVOIDS}
 
 probes:

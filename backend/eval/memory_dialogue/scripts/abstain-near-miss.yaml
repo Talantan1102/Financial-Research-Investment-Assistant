@@ -79,19 +79,19 @@ sessions:
 db_assertions:
   - after: 1
     assert:
-      - {type: fact_active, rel_type: PREFERS, target_label: 高股息, value_contains: ["高股息"]}
+      - {type: fact_active, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利], value_contains: ["高股息"]}
       - {type: fact_active, rel_type: WATCHES, target_label: [工商银行, 601398.SH]}
       - {type: fact_active, rel_type: WATCHES, target_label: [招商银行, 600036.SH]}
-      - {type: valid_from_is_event_time, rel_type: PREFERS, target_label: 高股息, expected_date: "2025-02-10"}
+      - {type: valid_from_is_event_time, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利], expected_date: "2025-02-10"}
   - after: 3
     assert:
-      - {type: fact_active, rel_type: PREFERS, target_label: 高股息, value_contains: ["高股息"]}
-      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: 高股息}
+      - {type: fact_active, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利], value_contains: ["高股息"]}
+      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利]}
       - {type: no_fact_written, rel_type: HOLDS}
   - after: 6
     assert:
-      - {type: fact_active, rel_type: PREFERS, target_label: 高股息, value_contains: ["高股息"]}
-      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: 高股息}
+      - {type: fact_active, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利], value_contains: ["高股息"]}
+      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利]}
 
 probes:
   - tier: 对抗

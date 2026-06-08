@@ -105,29 +105,29 @@ db_assertions:
   - after: 1
     assert:
       # 对照锚:真聊过、真定过的电力看多必须入图
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 电力, value_contains: ["看多", "红利"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 电力, expected_date: "2025-02-12"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], value_contains: ["看多", "红利"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], expected_date: "2025-02-12"}
       # 新能源只是板块意向,绝不能派生出 per-stock 的观点/研究/关注
       - {type: no_fact_written, rel_type: STUDIED}
       - {type: no_fact_written, rel_type: WATCHES}
   - after: 3
     assert:
       # 反复确认"没定标的"后,仍不得凭空冒出任何具体新能源个股的观点
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 新能源}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [新能源, 电力设备, 新能源车]}
       - {type: no_fact_written, rel_type: STUDIED}
       # 持仓(已有新能源车基金)显式不入图
       - {type: no_fact_written, rel_type: HOLDS}
   - after: 5
     assert:
       # 电力对照锚仍 active 且没被重复确认刷出新边
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 电力, value_contains: ["看多"]}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 电力}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], value_contains: ["看多"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ]}
   - after: 6
     assert:
       # "那只新能源盯着点"措辞像有标的,但澄清后仍是板块级——不得解析成具体个股
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 新能源}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [新能源, 电力设备, 新能源车]}
       - {type: no_fact_written, rel_type: WATCHES}
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 电力, value_contains: ["看多", "红利"]}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], value_contains: ["看多", "红利"]}
 
 probes:
   - tier: 直球

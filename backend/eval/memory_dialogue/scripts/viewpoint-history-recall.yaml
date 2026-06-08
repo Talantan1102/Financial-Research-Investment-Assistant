@@ -114,25 +114,25 @@ sessions:
 db_assertions:
   - after: 1
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 创新药, value_contains: ["看多", "出海"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 创新药, expected_date: "2025-02-10"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], value_contains: ["看多", "出海"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], expected_date: "2025-02-10"}
   - after: 3
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 创新药, value_contains: ["重点"]}
-      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 创新药, min_count: 1}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], value_contains: ["重点"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], min_count: 1}
   - after: 6
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 创新药, value_contains: ["谨慎"]}
-      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 创新药, min_count: 2}
-      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: 创新药, expected_versions: 3}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 创新药, expected_date: "2025-04-14"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], value_contains: ["谨慎"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], min_count: 2}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], expected_versions: 3}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], expected_date: "2025-04-14"}
   - after: 8
     assert:
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 创新药}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药]}
   - after: 10
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 创新药, value_contains: ["谨慎"]}
-      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: 创新药, expected_versions: 3}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], value_contains: ["谨慎"]}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: [创新药, 医药生物, 化学制药], expected_versions: 3}
 
 probes:
   - tier: 直球

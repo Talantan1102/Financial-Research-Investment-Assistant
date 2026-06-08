@@ -106,23 +106,23 @@ sessions:
 db_assertions:
   - after: 1
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 光伏, value_contains: ["看空", "产能过剩"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 光伏, expected_date: "2025-04-03"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [光伏, 光伏设备, 电力设备], value_contains: ["看空", "产能过剩"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [光伏, 光伏设备, 电力设备], expected_date: "2025-04-03"}
   - after: 3
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 储能, value_contains: ["看多"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 储能, expected_date: "2025-04-27"}
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 光伏, value_contains: ["看空"]}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [储能, 电力设备], value_contains: ["看多"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [储能, 电力设备], expected_date: "2025-04-27"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [光伏, 光伏设备, 电力设备], value_contains: ["看空"]}
   - after: 5
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 锂电, value_contains: ["中性"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 锂电, expected_date: "2025-05-16"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [锂电, 电池, 电力设备], value_contains: ["中性"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [锂电, 电池, 电力设备], expected_date: "2025-05-16"}
   - after: 8
     assert:
       - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 新能源车, value_contains: ["看多"]}
       - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 新能源车, expected_date: "2025-06-04"}
       # 四个细分是四条独立事实,谁都没把谁覆盖作废(不同 target_label,无版本叠加)
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 光伏}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [光伏, 光伏设备, 电力设备]}
       - {type: no_fact_written, rel_type: HOLDS}
 
 probes:

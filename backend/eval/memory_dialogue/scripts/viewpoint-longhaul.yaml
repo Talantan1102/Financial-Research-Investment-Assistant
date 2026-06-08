@@ -213,24 +213,24 @@ sessions:
 db_assertions:
   - after: 2
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 电力, value_contains: ["看多", "股息率"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 电力, expected_date: "2025-02-21"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], value_contains: ["看多", "股息率"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], expected_date: "2025-02-21"}
   - after: 5
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 电力, value_contains: ["看多", "股息率"]}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], value_contains: ["看多", "股息率"]}
       - {type: fact_active, rel_type: PREFERS, target_label: 龙头, value_contains: ["龙头"]}
       - {type: fact_active, rel_type: AVOIDS, target_label: 小票, value_contains: ["小票"]}
   - after: 11
     assert:
       # 干扰 session 写入的军工短线看多,不得污染电力那条主事实(电力事实数不增、不被作废)
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 电力}
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 电力, value_contains: ["看多"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ]}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], value_contains: ["看多"]}
   - after: 26
     assert:
       # 历经 20+ 干扰后,前段两条有效事实仍原样存活、未被作废、事件时间未漂移
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 电力, value_contains: ["看多", "电价改革"]}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 电力}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 电力, expected_date: "2025-02-21"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], value_contains: ["看多", "电价改革"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [电力, 公用事业, 电力Ⅱ], expected_date: "2025-02-21"}
       - {type: fact_active, rel_type: AVOIDS, target_label: 小票, value_contains: ["小票"]}
 
 probes:

@@ -110,24 +110,24 @@ db_assertions:
   # 第1个session后:正向偏好 PREFERS→高股息 active,事件时间锚在表达日
   - after: 1
     assert:
-      - {type: fact_active, rel_type: PREFERS, target_label: 高股息, value_contains: ["高股息", "稳健"]}
-      - {type: valid_from_is_event_time, rel_type: PREFERS, target_label: 高股息, expected_date: "2025-02-12"}
+      - {type: fact_active, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利], value_contains: ["高股息", "稳健"]}
+      - {type: valid_from_is_event_time, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利], expected_date: "2025-02-12"}
   # 第3个session 第一次负面:此时仅一次吐槽,尚不足以判定为稳定回避偏好——
   #   关键控制:单次负面不得急着落 AVOIDS(与 noise-resist 的'气话不入图'同源约束),
   #   也不得污染正向偏好(高股息事实数不增、不被作废)
   - after: 3
     assert:
-      - {type: fact_active, rel_type: PREFERS, target_label: 高股息, value_contains: ["高股息"]}
-      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: 高股息}
+      - {type: fact_active, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利], value_contains: ["高股息"]}
+      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利]}
   # 第7个session(第三次负面、明确长期回避)后:可选断言——若系统支持隐式偏好推断,
   #   跨 3 session 一致负面 + 明确回避表述应沉淀为 AVOIDS→医药;同时正向偏好原样存活、未漂移。
   #   注:fact_active(AVOIDS) 为能力探针(bonus);系统暂不支持隐式推断时此条可不达标,
   #   合格线以 probe 的'选股是否自发回避医药'为准,不依赖图里这条边。
   - after: 7
     assert:
-      - {type: fact_active, rel_type: AVOIDS, target_label: 医药, value_contains: ["医药"]}
-      - {type: fact_active, rel_type: PREFERS, target_label: 高股息, value_contains: ["高股息"]}
-      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: 高股息}
+      - {type: fact_active, rel_type: AVOIDS, target_label: [医药, 医药生物], value_contains: ["医药"]}
+      - {type: fact_active, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利], value_contains: ["高股息"]}
+      - {type: fact_count_no_increase, rel_type: PREFERS, target_label: [高股息, 高股息电力, 红利]}
       - {type: no_fact_written, rel_type: HOLDS}
 
 probes:

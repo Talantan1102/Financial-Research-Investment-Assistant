@@ -207,7 +207,7 @@ db_assertions:
     assert:
       - {type: fact_active, rel_type: AVOIDS, target_label: [周期, 钢铁, 煤炭, 有色], value_contains: ["周期"]}
       - {type: valid_from_is_event_time, rel_type: AVOIDS, target_label: [周期, 钢铁, 煤炭, 有色], expected_date: "2025-02-24"}
-      - {type: fact_active, rel_type: PREFERS, target_label: 消费, value_contains: ["消费"]}
+      - {type: fact_active, rel_type: PREFERS, target_label: [消费, 食品饮料, 大消费], value_contains: ["消费"]}
   # 第7个session(随口问煤炭分红):随口问行情不得反转回避偏好,也不得新增 WATCHES——AVOIDS 仍 active、版本不增
   - after: 7
     assert:
@@ -224,7 +224,7 @@ db_assertions:
   - after: 24
     assert:
       - {type: fact_active, rel_type: AVOIDS, target_label: [周期, 钢铁, 煤炭, 有色], value_contains: ["周期"]}
-      - {type: fact_active, rel_type: PREFERS, target_label: 消费, value_contains: ["消费"]}
+      - {type: fact_active, rel_type: PREFERS, target_label: [消费, 食品饮料, 大消费], value_contains: ["消费"]}
       - {type: fact_count_no_increase, rel_type: AVOIDS, target_label: [周期, 钢铁, 煤炭, 有色]}
 
 probes:

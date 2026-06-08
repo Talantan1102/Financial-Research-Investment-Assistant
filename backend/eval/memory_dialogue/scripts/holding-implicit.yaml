@@ -109,31 +109,31 @@ db_assertions:
   # 第1个session后:看多有色 active,事件时间锚在建立日;HOLDS 全程应空(纯观点段,无任何持仓边)
   - after: 1
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 有色, value_contains: ["看多", "涨价周期"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 有色, expected_date: "2025-02-12"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [有色, 有色金属, 工业金属], value_contains: ["看多", "涨价周期"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [有色, 有色金属, 工业金属], expected_date: "2025-02-12"}
       - {type: no_fact_written, rel_type: HOLDS}
   # 第3个session后(搭车核心一):"把仓位调了调"是持仓暗示——不得写成 HOLDS;
   #   同段研究结论入图(研究过/关注光伏);此时光伏尚无方向性观点,不得提前写看空
   - after: 3
     assert:
       - {type: no_fact_written, rel_type: HOLDS}
-      - {type: fact_active, rel_type: STUDIED, target_label: 光伏, value_contains: ["产能出清"]}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 光伏}
+      - {type: fact_active, rel_type: STUDIED, target_label: [光伏, 光伏设备, 电力设备], value_contains: ["产能出清"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [光伏, 光伏设备, 电力设备]}
   # 第5个session后(搭车核心二):"那只我处理掉了""加了点"两处持仓暗示——仍不得写 HOLDS;
   #   光伏由关注转看空(旧 STUDIED/无观点态被新看空覆盖,产生一次作废);有色看多维持不变
   - after: 5
     assert:
       - {type: no_fact_written, rel_type: HOLDS}
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 光伏, value_contains: ["看空", "产能出清"]}
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 有色, value_contains: ["看多"]}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 有色}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [光伏, 光伏设备, 电力设备], value_contains: ["看空", "产能出清"]}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [有色, 有色金属, 工业金属], value_contains: ["看多"]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [有色, 有色金属, 工业金属]}
   # 第7个session后(去重 + 持仓暗示再压一次):"清了一半左右"仍是模糊持仓暗示,不得结构化为 HOLDS;
   #   两条观点重提无更新,版本不增
   - after: 7
     assert:
       - {type: no_fact_written, rel_type: HOLDS}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 光伏}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 有色}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [光伏, 光伏设备, 电力设备]}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [有色, 有色金属, 工业金属]}
 
 probes:
   # 直球 · 持仓仲裁(核心弃答):问最近调了哪些仓——记忆只有模糊暗示无结构化持仓,应弃答并指路模块
