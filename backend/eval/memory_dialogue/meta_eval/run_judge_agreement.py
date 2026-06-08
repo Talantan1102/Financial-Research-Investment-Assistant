@@ -47,7 +47,7 @@ async def _run() -> int:
     print(format_report(report))
     if disagreements:
         print("\n分歧明细(改判分 rubric 的线索):")
-        for c, llm_pass in disagreements:
+        for c, _llm_pass in disagreements:
             kind = "裁判漏判(人过它没过)" if c["human_pass"] else "裁判误判(人没过它放水)"
             print(f"  [{kind}] {c['case_id']} ({c['dimension']}): {c['note']}")
     return 0
