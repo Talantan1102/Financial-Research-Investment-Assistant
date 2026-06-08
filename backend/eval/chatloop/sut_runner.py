@@ -41,8 +41,12 @@ async def run_scenarios(
     dispatch_mode: str = "noop",
     k: int = 1,
     max_steps: int | None = None,
+    system_prompt: str | None = None,
 ) -> list[SutResult]:
-    """构造真件,跑全部 scenarios × k 次,返回 SutResult 列表(per-case 错误隔离)。"""
+    """构造真件,跑全部 scenarios × k 次,返回 SutResult 列表(per-case 错误隔离)。
+
+    system_prompt: 覆盖系统提示词(prompt 消融用,如对照"加免责前/后");None=生产 CHAT_SYSTEM_PROMPT。
+    """
     # 延迟 import:dry / 单测路径零重依赖(无 PG/MCP/LLM)。
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -67,7 +71,7 @@ async def run_scenarios(
                 mcp_client=mcp_client,
             )
             deps = ContextDeps(
-                system_prompt=CHAT_SYSTEM_PROMPT,
+                system_prompt=system_prompt or CHAT_SYSTEM_PROMPT,
                 skill_listing=singletons.skill_listing,
             )
             for sc in scenarios:
