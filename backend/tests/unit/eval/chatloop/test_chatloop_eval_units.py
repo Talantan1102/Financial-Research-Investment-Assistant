@@ -9,11 +9,9 @@ import json
 from pathlib import Path
 
 import pytest
-
 from eval.chatloop.passk import pass1_rate, pass_power_k, passk_rate
 from eval.chatloop.scenario import load_scenarios
 from eval.chatloop.scorers import score_advice, score_behavior, score_disclaimer
-
 
 # --- pass^k 纯函数 ----------------------------------------------------------
 
