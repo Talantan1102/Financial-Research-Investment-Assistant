@@ -95,6 +95,12 @@ def _record_run(
         rid = rec.record(run, metrics)
         cost_str = f"成本 ¥{cost:.4f}/{tokens}tok" if cost is not None else "成本 best-effort 未取到"
         print(f"\n→ 已落库 run_id={rid}(git {run['git_sha']},耗时 {dur_ms}ms,{cost_str})")
+        try:  # 刷新看板数据源(blueprint § 9"读"半)
+            from eval.chatloop.export_dashboard import export_history
+
+            export_history()
+        except Exception as ee:  # noqa: BLE001
+            print(f"  (看板导出 best-effort 失败:{type(ee).__name__})")
     except Exception as e:  # noqa: BLE001 — 落库失败不破坏评估输出
         print(f"\n→ ⚠️ 落库失败(非致命):{type(e).__name__}: {e}")
 

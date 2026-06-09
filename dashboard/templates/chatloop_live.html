@@ -1,0 +1,61 @@
+{# 实时评估成绩单 — /eval/chatloop-live。数据源:dashboard/data/chatloop_eval_history.json
+   (backend eval.chatloop.export_dashboard 每次落库后刷新)。看板 PG-free,只读 JSON。 #}
+{% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
+{% block content %}
+
+<style>
+  .cl-trend { border-collapse: collapse; width: 100%; font-size: 0.85rem; margin-top: 0.5rem; }
+  .cl-trend th, .cl-trend td { border: 1px solid var(--rule, #d8d2c4); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  .cl-trend thead th { background: var(--surface-2, #efeae0); font-weight: 600; }
+  .cl-trend tbody tr:last-child td { font-weight: 600; }  /* 最新一行加粗 */
+  .cl-cfg code { font-size: 0.85em; }
+</style>
+
+<article class="report">
+  <a class="report-back" href="/eval">‹ 返回评估体系</a>
+  <header class="report-head">
+    <h1 class="report-title">Chat-Loop Agent 评估 · 实时成绩单</h1>
+    <p class="report-subtitle">从 <code>chatloop_eval_runs / _metrics</code> 落库数据直读;每次 run_eval 自动刷新。导出于 {{ sc.generated_at }}。方法论与诚实账见 <a href="/eval/report/chatloop-eval-scorecard">分析报告</a>。</p>
+  </header>
+
+  {% if not sc.runs %}
+    <p class="report-body">还没有评估跑记录。跑一次 <code>python -m eval.chatloop.run_eval --ci</code>(会自动落库 + 导出)后这里就有了。</p>
+  {% else %}
+  {% set L = sc.latest %}
+  <section class="report-section cl-cfg">
+    <h3 class="report-h">最近一次跑 · 全套配置</h3>
+    <ul class="report-bullets">
+      <li>时间 {{ sc.short_time(L) }} · git <code>{{ L.git_sha }}</code> · 模式 <b>{{ L.mode }}{% if L.dispatch %}/{{ L.dispatch }}{% endif %}</b> · {{ L.case_count }} case · 状态 {{ L.status }}</li>
+      <li>SUT 模型 <code>{{ L.sut_model }}</code>{% if L.judge_model %} · 裁判 <code>{{ L.judge_model }}</code>{% endif %}{% if L.simulator_model %} · 模拟器 <code>{{ L.simulator_model }}</code>{% endif %}{% if L.k %} · k={{ L.k }}{% endif %}</li>
+      <li>采样:SUT {{ L.sampling_json.sut.temperature if L.sampling_json and L.sampling_json.sut else '—' }}{% if L.sampling_json and L.sampling_json.judge %} · 裁判 temp={{ L.sampling_json.judge.temperature }}{% endif %}{% if L.sampling_json and L.sampling_json.simulator %} · 模拟器 temp={{ L.sampling_json.simulator.temperature }}{% endif %}</li>
+      <li>耗时 <b>{{ L.duration_ms }}ms</b> · 成本 <b>¥{{ '%.4f'|format(L.cost_cny) if L.cost_cny is not none else '—' }}</b> / {{ L.total_tokens }} tok · prompt_sha <code>{{ L.system_prompt_sha }}</code></li>
+      {% if L.thresholds_json %}<li>阈值:{{ L.thresholds_json }}</li>{% endif %}
+    </ul>
+  </section>
+
+  <section class="report-section">
+    <h3 class="report-h">历次趋势 · 共 {{ sc.runs|length }} 次跑(末行为最新)</h3>
+    <p class="report-body">每跑一次一行,看指标随 git 版本怎么变——这是"改了 prompt 有没有用"一眼可见的地方。</p>
+    <table class="cl-trend">
+      <thead>
+        <tr>
+          <th>时间</th><th>git</th><th>模式</th>
+          {% for k in sc.metric_keys %}<th>{{ sc.label(k) }}</th>{% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in sc.runs %}
+        <tr>
+          <td>{{ sc.short_time(run) }}</td>
+          <td><code>{{ run.git_sha }}</code></td>
+          <td>{{ run.mode }}</td>
+          {% for k in sc.metric_keys %}<td>{{ sc.cell(run, k) }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+</article>
+{% endblock %}
