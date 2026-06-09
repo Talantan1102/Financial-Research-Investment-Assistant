@@ -147,10 +147,21 @@ async def _run_grounding(scenarios: list, *, model: str) -> int:
 
     scored = sum(len(v) for v in by_diff.values())
     passed = sum(sum(v) for v in by_diff.values())
+    faiths = [res["faithfulness"] for _, _, res in rows]
+
+    def _at(thr: float) -> str:
+        c = sum(1 for f in faiths if f >= thr)
+        return f"{c}/{scored} ({c / scored:.0%})" if scored else "—"
+
+    poor = sum(1 for f in faiths if f <= 0.4)
+    mean_faith = sum(faiths) / len(faiths) if faiths else 0.0
     print("# chatloop 评估 — 行为④ grounding(real dispatch,裁判 " + model + ")\n")
     print(f"- 评分 case:{scored}(另 {len(errors)} 例 SUT 报错)")
-    print(f"- **grounding 通过率**:{passed}/{scored}" + (f" ({passed/scored:.0%})" if scored else ""))
-    print("\n| 难度 | 通过/总 |\n|---|---|")
+    print(f"- **严格通过率**(faith=1.0,所有 claim 都 ground):{_at(1.0)}")
+    print(f"- **宽松通过率**(faith≥0.8,容忍少量合理 hedge):{_at(0.8)}")
+    print(f"- 参考(faith≥0.6,大体 ground):{_at(0.6)}")
+    print(f"- 平均 faith:{mean_faith:.2f};**真·无证据作答(faith≤0.4):{poor}/{scored}**")
+    print("\n| 难度 | 严格通过/总 |\n|---|---|")
     for d in VALID_DIFFICULTY:
         v = by_diff.get(d, [])
         if v:
