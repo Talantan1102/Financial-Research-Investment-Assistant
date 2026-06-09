@@ -40,6 +40,7 @@ class Scenario:
     persona: str | None = None
     policy_refs: list[str] = field(default_factory=list)
     expected_answer: dict[str, Any] | None = None
+    intent_goal: str | None = None  # 多轮:模拟用户的总目标(逐轮挤牙膏达成)
 
     def to_ts_case(self) -> GoldenCase:
         """投影成 tool_selection.GoldenCase —— 复用其 score_case(行为①②③)。"""
@@ -103,6 +104,7 @@ def _validate(raw: dict[str, Any], seen: set[str]) -> Scenario:
         persona=raw.get("persona"),
         policy_refs=list(raw.get("policy_refs") or []),
         expected_answer=ea,
+        intent_goal=raw.get("intent_goal"),
     )
 
 
