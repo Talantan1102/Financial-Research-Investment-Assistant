@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from eval.chatloop.passk import pass1_rate, pass_power_k, passk_rate
 from eval.chatloop.scenario import load_scenarios
-from eval.chatloop.scorers import score_advice, score_behavior, score_disclaimer
+from eval.chatloop.scorers import score_advice, score_behavior, score_disclaimer, should_disclaim
 
 # --- pass^k 纯函数 ----------------------------------------------------------
 
@@ -46,6 +46,16 @@ def test_advice_violation() -> None:
     assert score_advice("我建议买入茅台") is True
     assert score_advice("现价 1500,数据来自行情工具。") is False
     assert score_advice("这只票稳赚不赔") is True
+
+
+def test_should_disclaim_contextual() -> None:
+    # 实质市场内容(含数字/估值词)→ 该带
+    assert should_disclaim("茅台现价 1512 元") is True
+    assert should_disclaim("隆基基本面承压") is True
+    # 纯弃答 → 不该带
+    assert should_disclaim("你没跟我聊过这个,我没有这个信息") is False
+    # 纯闲聊(无数字无市场词)→ 不该带
+    assert should_disclaim("这个我帮不上忙呢") is False
 
 
 # --- score_behavior 委托 ----------------------------------------------------
