@@ -33,8 +33,7 @@ def user_with_session(pg_memory_session_factory: Callable[[], Any]):
     s.rollback(); s.close()
 
 
-def test_bm25_recalls_chinese_after_search_tokens(user_with_session) -> None:
-    uid, s, ep_id = user_with_session
+def _seed_baijiu_view_edge(s, uid, ep_id) -> None:
     src = ChatMemoryNode(user_id=uid, entity_type="User", entity_label="User")
     tgt = ChatMemoryNode(user_id=uid, entity_type="Industry", entity_label="白酒")
     s.add_all([src, tgt]); s.flush()
@@ -47,5 +46,20 @@ def test_bm25_recalls_chinese_after_search_tokens(user_with_session) -> None:
         search_tokens=jieba_tokenize_for_search("EXPRESSED_VIEW 白酒 用户看多白酒 看多"),
     )
     s.commit()
+
+
+def test_bm25_recalls_chinese_after_search_tokens(user_with_session) -> None:
+    uid, s, ep_id = user_with_session
+    _seed_baijiu_view_edge(s, uid, ep_id)
     hits = bm25_search(s, user_id=uid, query="白酒", k=5)
     assert hits, "中文 query '白酒' 应召回该边(search_tokens 填了 jieba 切词)"
+
+
+def test_bm25_recalls_full_sentence_query(user_with_session) -> None:
+    """读侧真实 query 是整句,不是单词。jieba 切词后若用 plainto_tsquery(AND 全部词),
+    边里没有'现在/整体/看法'就零召回 —— 对话流评估读侧全红的最后一环。
+    BM25 应对长 query 走 OR 语义:任一关键词命中即召回,ts_rank + LIMIT 保精度。"""
+    uid, s, ep_id = user_with_session
+    _seed_baijiu_view_edge(s, uid, ep_id)
+    hits = bm25_search(s, user_id=uid, query="我现在对白酒整体是什么看法", k=5)
+    assert hits, "整句 query 应通过 OR 语义召回含'白酒'的边(plainto 的 AND 会零召回)"

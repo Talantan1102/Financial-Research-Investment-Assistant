@@ -1572,3 +1572,68 @@ git commit -m "feat(eval): 首段脚本端到端冒烟通过 — 首跑红绿解
 - 首个 session 的边疑似写到非「白酒」实体标签(实体规整),待查证——读侧别名一致机制的现实版
 - 弃答题在检索全空时躺赢,解读分数须连同检索健康度看(可考虑给弃答题加「检索非空」前置断言)
 - Milvus alias 测试(test_alias_points_to_v1)pre-existing 环境失败,与本分支无关
+
+### 检索层根因清账(2026-06-09 会话:读侧全红根因全修,TDD 守护)
+
+读侧「全红」拆出**四层**根因,逐层 TDD 修复(失败测试→看红→最小修→看绿):
+
+1. **建边没填 search_tokens** → `search_vector`(GENERATED)为空 → BM25 `@@` 永不匹配 → 中文零召回。
+   修:`hierarchical.py` 建 search_tokens 串,`conflict_resolver.apply_action` 加 `search_tokens` 参数透传。
+   守护:`test_bm25_chinese_recall.py::test_bm25_recalls_chinese_after_search_tokens`。
+2. **BM25 用 `plainto_tsquery`(整句切词后全 AND)** → 真实读侧 query 是整句(「我现在对白酒整体是什么看法」),
+   边的 search_tokens 不含「现在/整体/看法」→ AND 必零召回(单词「白酒」能召回是假象)。SQL 实测:整句 plainto=0,OR=5。
+   修:`retriever.bm25_search` 改 `to_tsquery` + `_tokens_to_or_tsquery`(lexeme 单引号转义、滤纯标点),OR 语义靠 `ts_rank`+`LIMIT` 保精度。
+   守护:`test_bm25_recalls_full_sentence_query` + `test_retriever.py` 断言 SQL 用 to_tsquery 不用 plainto。
+3. **向量 embed 契约错调**:`embed` 真契约是 `embed(list[str]) -> list[list[float]]`,`vector_search`/`milvus_outbox` 过去传 **bare string**
+   → 内部 `for i in range(0, len(texts), batch)` 按**字符**切片,长 query 返回多个子串向量 → `data=[多向量]` 形态错 → struct.error。
+   修:两处都 `embed([query])` 收 list、取 `[0]`,兼容 legacy 扁平返回(首元素非 list 时整体当向量)。`_EmbedServiceLike` 协议改对。
+   守护:`test_retriever.py::test_embed_called_with_list_and_milvus_gets_flat_vector` + `test_milvus_outbox_e2e.py::..._inserts_flat_vector`。
+4. **DetachedInstanceError**:`archival_memory_search` 内 `session.commit()`(生产 SessionLocal 默认 `expire_on_commit=True`)
+   先 expire 所有属性,再 `expunge` 返回失效+detached 对象,调用方一访问列属性即崩(测试 conftest 用 `expire_on_commit=False` 掩盖,只在生产/eval 暴露)。
+   修:search 的 session 显式 `expire_on_commit = False`。
+   守护:`test_retriever_e2e.py::test_archival_search_edges_readable_after_session_close`(用 `expire_on_commit=True` 工厂复现生产口径)。
+
+**端到端验证**(viewpoint-baijiu,真 PG+真 LLM,Milvus collection 本环境缺失→向量路降级 BM25-only):
+读侧从**全红**→ 2/7 绿(单跳召回直球 ✓「当初看多白酒核心逻辑」、克制弃答对抗 ✓「亏多少钱」正确拒答),
+DetachedInstanceError 消失、召回→渲染→判分链路打通。**剩 5 红已是写侧内容保真度信号,非检索 bug**:
+session 7 后 active 边仍是「看多」非「中性」(bi-temporal 机制对——3 版本链/2 作废 ✓,但抽取器没把「转中性」那轮读成中性 stance)→
+归属台词精修(任务八/五批)+ 断言值校准,不再是检索层问题。memory 全套件回归仅 1 失败(Milvus alias 环境),无回归。
+
+### 消融区分度实跑 + 裁判金标准扩样(2026-06-09 会话)
+
+**消融区分度 runner 落地**(元评估第四步从"工具就位"→"实跑可跑"):
+- `eval/memory_dialogue/ablation.py`:`separability_report`(读侧按维度×档、写侧按断言类型,逐 cell `separable()` + 方向解读)+ `format_separability_report`。5 单测守护。
+- `meta_eval/run_ablation.py` CLI:完整版 vs 削弱版,各新建独立 user 跑同一批脚本;`--ablation read/write/both` + `--glob` 子集 + `--skip-read`。
+- 两 knob 接在 `live_deps.build_live_runners`:写侧 `write_no_conflict_judge`(`HierarchicalMemory(llm_judge=None)`,已加 None 守卫降级 APPEND_NEW,`test_e2e_no_judge_degrades_to_append_new`)、读侧 `read_empty_retriever`(`_EmptyRetriever`)。
+- **读侧 demo(viewpoint-baijiu 单脚本)**:方向全对——单跳召回/直球 完整1/1→削弱0/1、克制弃答/对抗 1/1=1/1(关键正对照:记忆关不影响弃答)、写侧 old_invalidated 完整2/2→削弱0/2;但 n=1 Wilson 全重叠→0/12 separable。结论:机器跑通+方向正确,统计"可区分"须多脚本聚合(`--glob viewpoint-* --ablation write` 8 段聚合跑见 README §四)。
+
+**裁判金标准扩样 24→51**:multi-agent workflow(7 维度起草 + 对抗复核"标签可辩护性"防毒化金标准)产 25 条 + 手写 2 条底稿一致单跳召回。修正旧种子 #11 与底稿张冠李戴(三月新能源=阳光电源/120 非 180;180 属中际旭创/光模块/一月)。分布:单跳召回7/克制弃答10/偏好一致9/多跳6/知识更新7/时间6/持仓6,18 正 33 负(负例多=放水点边界)。**判分一致复测 51 条:agreement 1.000 / kappa 1.000 / 0 漏 0 误**,33 条放水点负例全被裁判抓出。
+
+### 任务八 / 机动段 lead(留待"双人定稿"用户审稿门)
+
+spec 要求 28 段脚本"双人定稿(Claude 草稿 + 用户审真实感)",**机动段 = dogfood 真实翻车案例**。本轮 dogfood 抓到的真翻车,正是机动段天然素材 + 任务八台词精修的主攻方向:
+- **观点演化写侧红 — 诊断纠正了根因(2026-06-09 dump 实证)**:先前推测「转中性抽取丢失 / 助手复述旁白淹没」。`_diag_viewpoint_edges.py` dump 全部 EXPRESSED_VIEW 边后**推翻该推测**,真相是:
+  1. **中性抽到了、是 active、事件时间对**(`白酒` 节点,from=2025-04-01,props.view=中性,reason="看多我收回 转中性")。抽取没漏、助手旁白没淹没。
+  2. **真根因=实体规整漂移**:看多三年→两年链落在 `白酒Ⅱ` 节点(结束于 2025-03-22),中性落在 `白酒` 节点——**两个不同 target node**。中性因此没去作废早先看多(不同实体≠冲突),bi-temporal 演化链断开 → `old_invalidated`/`invalidated_chain_intact`/`fact_active(中性)` 断言据此红。registry `normalize_entity` 对 Industry 是 passthrough(申万 registry 留 v1.x 未接),白酒/白酒Ⅱ/高端白酒 不归一。
+  3. **抽取非确定性**:本次 dump 中性是 active(写侧本应大面积绿),先前 eval 跑出来 active 是看多两年——**同脚本不同次抽取结果不同**,写侧红绿有 run-to-run 方差(评估可靠性问题:单跑不可靠,需多跑取多数或报方差)。
+  **对任务八/系统侧的指引(修正后)**:① 系统侧治本=Industry 实体归一(白酒↔白酒Ⅱ↔高端白酒 → 一个 canonical 节点,演化链才不断;需接申万 registry 或加 alias 映射);② 抽取非确定性=eval 改多跑聚合 / 报方差,别单跑下结论;③ 台词侧助手复述旁白虽非本案 deterministic 根因,但可能加剧方差,仍值得消噪。属写管线保真度 + 评估可靠性,非检索层。诊断脚本 `_diag_viewpoint_edges.py` 留作复诊工具。
+
+  **用户决策(2026-06-09)**:系统侧治本走**接申万 registry**(原 spec 留 v1.x,现提前)。
+  这是独立新子系统,按项目纪律先定最小化设计、用户过目再实现。粗设计:① 用已有
+  `app/data/tushare_client.py` + `tushare_cache.py` 调申万 `index_classify`(一/二/三级行业)
+  缓存成本地层级表;② `industry_registry.normalize_industry(label)`:自由文本 label →
+  申万 canonical(白酒Ⅱ 是申万二级正式名;高端白酒/白酒 等自由表述靠 alias + 模糊匹配
+  /已有 qwen embedding 归到白酒Ⅱ);③ 接进 `registry.normalize_entity` 的 Industry 分支
+  (当前 passthrough);④ TDD + 重跑 viewpoint 族验证演化链落同一节点、写侧红转绿。
+  抽取非确定性(eval 多跑聚合/报方差)作为配套,可同期或另起。台词消噪降为可选 nice-to-have。
+
+### 申万 registry 系统侧治本 — 已交付(2026-06-09)
+
+- **`app/memory/industry_registry.py`**:`normalize_industry(label) -> (canonical, audit_flag)`。归一顺序:直命中申万二级正式名 → alias 精确表(高端白酒/次高端/白酒→白酒Ⅱ 等)→ contains 词根模糊 → 认不出 passthrough+audit。申万全集优先 Tushare `index_classify(SW2021,L2)` 缓存,无 token 降级内置 `_SW_L2_SEED`(14 个常用二级,够评估)。
+- **接进 `registry.normalize_entity`**:Industry 分支从 passthrough 改调 `normalize_industry`(Sector 仍 passthrough,留后续)。7 单测(白酒系归一同 canonical / 申万正式名免 audit / 白酒≠医药不误并 / 生造行业 passthrough+audit)+ 既有 registry 测试改写为新行为。memory 全单测 rc=0 无回归,ruff+mypy 清。
+- **诊断复跑结论(重要,如实)**:申万归一**确实生效**(白酒Ⅱ 作为 canonical 出现、中性落白酒Ⅱ),但**是必要非充分**——单脚本重跑暴露**抽取非确定性是主导残留问题**:同一句「看多高端白酒」不同次被抽成 Industry白酒Ⅱ / Stock茅台五粮液 / 甚至整句「看多高端白酒」当实体,还有 valid_to=2027 这类幻觉日期。归一治不了实体**类型**漂移(Industry vs Stock)与整体抽取抖动。
+- **配套已加 `run_eval --repeat N`**:每段跑 N 次结果池化进同一分数表,通过率配 Wilson 区间——这是对**非确定系统**的唯一可信判法(单跑 1/1 不能下结论)。`--repeat 3 viewpoint-baijiu` 验证组合效果(写侧通过率稳定化)。
+
+**`--repeat 3` 量化判定(viewpoint-baijiu,2026-06-09)**:写侧聚合 **3/24 通过,Wilson 95% [0.04-0.31]**——3 次跑结构各不同(看多落 Stock600519 / Industry白酒Ⅱ / Concept提价权 互换,PREFERS 替代 EXPRESSED_VIEW,幻觉日期 2025-04-01至4-10,链长 1/2/2 版本飘)。**这正是 --repeat 的价值**:把单跑的脆判定换成带误差棒的可信率,诚实量化出"该系统在多会话观点演化场景的写侧保真度仅 ~12%"。评估在正确做它该做的事——量化系统最弱区,而非被单跑假象骗。
+
+**TODO⑤ 收口口径**:用户选的系统侧治本(接申万 registry)**已交付**且单测确定性证明归一正确、零回归;评估可靠性配套(--repeat 多跑取率)已落并量化出真实保真度。**真正的写侧天花板是抽取非确定性 + 实体类型/关系漂移**(看多被抽成 Stock/Industry/Concept、EXPRESSED_VIEW↔PREFERS、幻觉日期)——这属抽取器质量/prompt 工程(实体类型约束 + 输出确定性 + 日期不许编),数量级大于实体归一,是独立后续 spec。台词精修 27 段(spec「双人定稿」用户审稿门)与机动段(用此 dogfood 真翻车做素材)留用户协作。

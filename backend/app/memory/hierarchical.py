@@ -370,6 +370,12 @@ class HierarchicalMemory:
                     action=ConflictAction.APPEND_NEW,
                     reasoning="no existing edge",
                 )
+            elif self._llm_judge is None:
+                # 无裁判 = 不做冲突消解,一律追加(防御性正确 + 元评估写侧消融削弱版)
+                verdict = ConflictVerdict(
+                    action=ConflictAction.APPEND_NEW,
+                    reasoning="no llm_judge (conflict resolution disabled)",
+                )
             else:
                 new_summary = (
                     f"{rel_type} {src_type} {src_label} → "
@@ -549,6 +555,11 @@ class HierarchicalMemory:
 
         t0 = time.time()
         session = self._pg_session_factory()
+        # 生产 SessionLocal 默认 expire_on_commit=True:下面 commit(log_retrieval_hit)
+        # 会 expire 已加载边的所有属性,再 expunge 返回的就是失效+detached 对象,
+        # 调用方一访问列属性就 DetachedInstanceError。置 False 保证 commit 后列值留存,
+        # expunge 后边可脱离 session 安全读(读路径不依赖会话内对象新鲜度)。
+        session.expire_on_commit = False
         try:
             # 路径 1: BM25 (sync)
             bm25_hits: list[dict[str, Any]] = []

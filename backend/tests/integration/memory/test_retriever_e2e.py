@@ -211,6 +211,45 @@ async def test_archival_search_user_isolation(
 
 
 @pytest.mark.asyncio
+async def test_archival_search_edges_readable_after_session_close(
+    pg_memory_fixture: dict[str, Any],
+    pg_memory_session_factory: Callable[[], Any],
+) -> None:
+    """生产 SessionLocal 默认 expire_on_commit=True:archival_memory_search 内
+    session.commit() 会 expire 所有属性,随后 expunge 把已失效对象 detach,
+    调用方再访问 edge.target_node_id 触发 lazy refresh → DetachedInstanceError
+    (对话流评估读侧拿到边却渲染崩溃的根因)。search 必须保证返回的边脱离
+    session 后列属性仍可读 —— 用 expire_on_commit=True 工厂复现生产口径。"""
+    from sqlalchemy.orm import sessionmaker
+
+    user_id = uuid4()
+    session_id = uuid4()
+    _seed_user_session(pg_memory_fixture["engine"], user_id, session_id)
+    _seed_test_edges(
+        pg_memory_session_factory,
+        user_id,
+        session_id,
+        [{"label": "茅台", "rel_type": "HOLDS", "imp": 0.9, "days_old": 10}],
+    )
+
+    # 模拟生产:expire_on_commit=True
+    engine = pg_memory_fixture["engine"]
+    prod_like = sessionmaker(bind=engine, future=True, expire_on_commit=True)
+    memory = _make_memory(lambda: prod_like())
+
+    results = await memory.archival_memory_search(user_id, query="茅台", k=3)
+    assert len(results) >= 1
+    edge = results[0]
+    # 以下访问在 search 的 session 关闭之后发生 —— 不得抛 DetachedInstanceError
+    _ = str(edge.target_node_id)
+    _ = edge.rel_type
+    _ = edge.valid_from
+    _ = edge.valid_to
+    _ = edge.invalidated_at
+    _ = edge.properties
+
+
+@pytest.mark.asyncio
 async def test_archival_search_with_mock_vector(
     pg_memory_fixture: dict[str, Any],
     pg_memory_session_factory: Callable[[], Any],

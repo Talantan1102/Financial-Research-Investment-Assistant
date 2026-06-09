@@ -97,8 +97,28 @@ class _BoundRetriever:
         return [_fact_to_text(self._session_factory, e) for e in edges]
 
 
-async def build_live_runners() -> tuple[Any, Any]:
-    """构造 (write_runner, read_runner):真 PG + 真抽取 + 真冲突消解 + 真检索 + 真裁判。"""
+class _EmptyRetriever:
+    """读侧消融:永远返回空检索结果,模拟"记忆全失"削弱版。
+
+    用来验证评估区分度——可答题应因拿不到事实而掉分,克制弃答题不应掉分。
+    """
+
+    async def search(self, query: str, k: int = 5) -> list[Any]:
+        return []
+
+
+async def build_live_runners(
+    *,
+    write_no_conflict_judge: bool = False,
+    read_empty_retriever: bool = False,
+) -> tuple[Any, Any]:
+    """构造 (write_runner, read_runner):真 PG + 真抽取 + 真冲突消解 + 真检索 + 真裁判。
+
+    消融 knob(元评估第四步区分度实跑):
+    - write_no_conflict_judge=True:HierarchicalMemory 不接 llm_judge → 无冲突消解,
+      所有冲突默认 APPEND_NEW → 旧版不作废、版本链不成形(削弱写侧)。
+    - read_empty_retriever=True:读阶段用空检索器 → 生成拿不到事实(削弱读侧)。
+    """
     import os
 
     import app.models.user  # noqa: F401 — 注册 users 表进 metadata,否则 memory 模型 FK 解析失败
@@ -143,7 +163,8 @@ async def build_live_runners() -> tuple[Any, Any]:
         milvus_client=milvus_client,
         embed_service=embed,
         llm_extractor=extractor,
-        llm_judge=judge,
+        # 消融:不接 judge → 写管线无冲突消解,冲突一律 APPEND_NEW(削弱版)
+        llm_judge=None if write_no_conflict_judge else judge,
     )
     path_b = PathBRunner(
         session_factory=SessionLocal,
@@ -193,8 +214,11 @@ async def build_live_runners() -> tuple[Any, Any]:
         chat_session_id=chat_session_id,
         extract_session=extract_session,
     )
+    retriever = (
+        _EmptyRetriever() if read_empty_retriever else _BoundRetriever(memory, SessionLocal, user_id)
+    )
     read_runner = ReadPhaseRunner(
-        retriever=_BoundRetriever(memory, SessionLocal, user_id),
+        retriever=retriever,
         generator=LiveGenerator(llm),
         judge=LiveJudge(llm),
     )
