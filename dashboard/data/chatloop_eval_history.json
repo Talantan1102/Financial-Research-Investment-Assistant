@@ -1,0 +1,213 @@
+{
+  "generated_at": "2026-06-09T16:31:41",
+  "latest": {
+    "run_id": "90f9e7a7206943ac",
+    "created_at": "2026-06-09T16:10:19",
+    "git_sha": "b13c9eb",
+    "mode": "ci",
+    "dispatch": "noop",
+    "sut_model": "deepseek-v4-flash",
+    "judge_model": null,
+    "simulator_model": null,
+    "k": 1,
+    "max_steps": 1,
+    "max_turns": null,
+    "case_count": 2,
+    "duration_ms": 23363,
+    "cost_cny": 0.0021184000000000003,
+    "total_tokens": 8330,
+    "system_prompt_sha": "a1f5999fcf96",
+    "sampling_json": {
+      "sut": {
+        "top_k": "provider-default",
+        "top_p": "provider-default",
+        "temperature": "provider-default"
+      }
+    },
+    "thresholds_json": {
+      "RelAcc": 0.8,
+      "IrrelAcc": 0.7
+    },
+    "status": "ok",
+    "metrics": {
+      "routing_tool/RelAcc": {
+        "value": 0.0,
+        "num": 0,
+        "den": 2
+      },
+      "abstain/IrrelAcc": {
+        "value": null,
+        "num": 0,
+        "den": 0
+      },
+      "policy/disclaimer_compliance": {
+        "value": 0.0,
+        "num": 0,
+        "den": 2
+      },
+      "policy/advice_violations": {
+        "value": 0.0,
+        "num": 0,
+        "den": 2
+      }
+    }
+  },
+  "runs": [
+    {
+      "run_id": "a1c951c54dfc4bd3",
+      "created_at": "2026-06-09T16:07:09",
+      "git_sha": "b13c9eb",
+      "mode": "ci",
+      "dispatch": "noop",
+      "sut_model": "deepseek-v4-flash",
+      "judge_model": null,
+      "simulator_model": null,
+      "k": 1,
+      "max_steps": 1,
+      "max_turns": null,
+      "case_count": 3,
+      "duration_ms": 33858,
+      "cost_cny": 0.0032718,
+      "total_tokens": 0,
+      "system_prompt_sha": "a1f5999fcf96",
+      "sampling_json": {
+        "sut": {
+          "top_k": "provider-default",
+          "top_p": "provider-default",
+          "temperature": "provider-default"
+        }
+      },
+      "thresholds_json": {
+        "RelAcc": 0.8,
+        "IrrelAcc": 0.7
+      },
+      "status": "ok",
+      "metrics": {
+        "routing_tool/RelAcc": {
+          "value": 0.0,
+          "num": 0,
+          "den": 3
+        },
+        "abstain/IrrelAcc": {
+          "value": null,
+          "num": 0,
+          "den": 0
+        },
+        "policy/disclaimer_compliance": {
+          "value": 1.0,
+          "num": 2,
+          "den": 2
+        },
+        "policy/advice_violations": {
+          "value": 0.0,
+          "num": 0,
+          "den": 3
+        }
+      }
+    },
+    {
+      "run_id": "60b07610aff94538",
+      "created_at": "2026-06-09T16:08:04",
+      "git_sha": "b13c9eb",
+      "mode": "ci",
+      "dispatch": "noop",
+      "sut_model": "deepseek-v4-flash",
+      "judge_model": null,
+      "simulator_model": null,
+      "k": 1,
+      "max_steps": 1,
+      "max_turns": null,
+      "case_count": 3,
+      "duration_ms": 37227,
+      "cost_cny": 0.0035232,
+      "total_tokens": 0,
+      "system_prompt_sha": "a1f5999fcf96",
+      "sampling_json": {
+        "sut": {
+          "top_k": "provider-default",
+          "top_p": "provider-default",
+          "temperature": "provider-default"
+        }
+      },
+      "thresholds_json": {
+        "RelAcc": 0.8,
+        "IrrelAcc": 0.7
+      },
+      "status": "ok",
+      "metrics": {
+        "routing_tool/RelAcc": {
+          "value": 0.0,
+          "num": 0,
+          "den": 3
+        },
+        "abstain/IrrelAcc": {
+          "value": null,
+          "num": 0,
+          "den": 0
+        },
+        "policy/disclaimer_compliance": {
+          "value": 0.5,
+          "num": 1,
+          "den": 2
+        },
+        "policy/advice_violations": {
+          "value": 0.0,
+          "num": 0,
+          "den": 3
+        }
+      }
+    },
+    {
+      "run_id": "90f9e7a7206943ac",
+      "created_at": "2026-06-09T16:10:19",
+      "git_sha": "b13c9eb",
+      "mode": "ci",
+      "dispatch": "noop",
+      "sut_model": "deepseek-v4-flash",
+      "judge_model": null,
+      "simulator_model": null,
+      "k": 1,
+      "max_steps": 1,
+      "max_turns": null,
+      "case_count": 2,
+      "duration_ms": 23363,
+      "cost_cny": 0.0021184000000000003,
+      "total_tokens": 8330,
+      "system_prompt_sha": "a1f5999fcf96",
+      "sampling_json": {
+        "sut": {
+          "top_k": "provider-default",
+          "top_p": "provider-default",
+          "temperature": "provider-default"
+        }
+      },
+      "thresholds_json": {
+        "RelAcc": 0.8,
+        "IrrelAcc": 0.7
+      },
+      "status": "ok",
+      "metrics": {
+        "routing_tool/RelAcc": {
+          "value": 0.0,
+          "num": 0,
+          "den": 2
+        },
+        "abstain/IrrelAcc": {
+          "value": null,
+          "num": 0,
+          "den": 0
+        },
+        "policy/disclaimer_compliance": {
+          "value": 0.0,
+          "num": 0,
+          "den": 2
+        },
+        "policy/advice_violations": {
+          "value": 0.0,
+          "num": 0,
+          "den": 2
+        }
+      }
+    }
+  ]
+}
