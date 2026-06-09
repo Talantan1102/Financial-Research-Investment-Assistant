@@ -390,6 +390,16 @@ class HierarchicalMemory:
             src_node_id = cast(UUID, src_node.node_id)
             tgt_node_id = cast(UUID, tgt_node.node_id)
 
+            # BM25 检索:建边时填 search_tokens(jieba 切词),否则 search_vector 为空、
+            # 中文 query 零召回(2026-06-08 对话流评估读侧全红根因之一)
+            from app.memory.registry import jieba_tokenize_for_search
+
+            _search_text = " ".join(
+                [rel_type, src_label, tgt_label, reasoning or ""]
+                + [str(v) for v in properties.values()]
+            )
+            search_tokens = jieba_tokenize_for_search(_search_text)
+
             # Step 6: apply
             new_edge = apply_action(
                 session=session,
@@ -405,6 +415,7 @@ class HierarchicalMemory:
                 importance=importance,
                 reasoning=reasoning,
                 properties=properties,
+                search_tokens=search_tokens,
             )
 
             if new_edge is None:
