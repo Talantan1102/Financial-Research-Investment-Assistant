@@ -41,9 +41,10 @@ class UserSimulator:
             "你在扮演一个中国散户股民,正跟一个金融助手多轮聊天。\n"
             f"你的真实目标(别一次性倒出来,也别把这句原文说给助手):{self._goal}\n"
             f"你的说话风格/人设:{self._persona}\n"
-            "规则:像真人那样口语、简短、一次只说一小部分;一开始说得含糊点逼助手追问;"
-            "助手问了你再补;不要替助手查数据、不要自己报答案;"
-            f"当目标基本满足或问不下去,只回复 {_STOP} 这一个词。\n\n"
+            "规则:像真人那样口语、简短、一次只说一小部分;一开始说得含糊点逼助手追问;助手问了你再补;"
+            "不要替助手查数据、不要自己报答案;不要把上面这句目标原文说给助手。\n"
+            f"**何时收尾**:你不是来刁难的。回顾你的目标——如果助手已经把你目标要的核心信息都给到了"
+            f"(该问的问了、都答了),就别再硬找问题,直接只回 {_STOP} 这一个词;只有还差关键信息时才继续追问。\n\n"
             "已经发生的对话:\n" + (convo or "(还没开始,请说你的第一句)") + "\n\n"
             f"请只输出你接下来对助手说的一句话(或 {_STOP}):"
         )
@@ -53,7 +54,7 @@ class UserSimulator:
             model=self._model,
             messages=[{"role": "user", "content": self._prompt(transcript)}],
             max_tokens=200,
-            temperature=0.7,
+            temperature=0.4,
         )
         return (r.choices[0].message.content or "").strip()
 
@@ -150,4 +151,66 @@ async def run_multiturn(
     return out
 
 
-__all__ = ["UserSimulator", "run_one_multiturn", "run_multiturn"]
+class MultiTurnJudge:
+    """多轮目标达成裁判(独立模型):看对话结束时助手有没有把用户目标要的核心信息给到。"""
+
+    def __init__(self, model: str = "qwen-plus") -> None:
+        from openai import AsyncOpenAI
+
+        from app.config.llm_config import LLMConfig
+
+        cfg = LLMConfig()
+        self._client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
+        self._model = model
+
+    async def goal_met(self, goal: str, transcript: list[dict[str, Any]]) -> tuple[bool, str]:
+        convo = "\n".join(f"用户:{t['user']}\n助手:{str(t['assistant'])[:400]}" for t in transcript)
+        prompt = (
+            "评估一段多轮对话:助手最终有没有把用户目标要的核心信息给到。"
+            "只看对话结束时的结果,不纠结过程。\n\n"
+            f"用户目标:{goal}\n\n对话:\n{convo}\n\n"
+            "回答:第一行只写 yes 或 no(目标核心信息是否达成);第二行一句话理由。"
+        )
+        r = await self._client.chat.completions.create(
+            model=self._model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=120,
+            temperature=0,
+        )
+        out = (r.choices[0].message.content or "").strip()
+        met = out.lower().lstrip().startswith("yes")
+        reason = out.split("\n", 1)[1].strip() if "\n" in out else ""
+        return met, reason
+
+
+async def score_multiturn(
+    scenario: Scenario, transcript: list[dict[str, Any]], judge: MultiTurnJudge
+) -> dict[str, Any]:
+    """多轮评分:目标达成(裁判)+ 跨轮政策合规(确定性)+ 效率。"""
+    from eval.chatloop.scorers import score_advice, score_disclaimer, should_disclaim
+
+    if not transcript:
+        return {"goal_met": False, "goal_reason": "空对话", "advice_violations": 0,
+                "disclaimer_req": 0, "disclaimer_ok": 0, "turns": 0, "total_tools": 0}
+    met, reason = await judge.goal_met(scenario.intent_goal or scenario.user_input, transcript)
+    advice_viol = sum(1 for t in transcript if score_advice(str(t["assistant"])))
+    disc_req = [t for t in transcript if should_disclaim(str(t["assistant"]))]
+    disc_ok = sum(1 for t in disc_req if score_disclaimer(str(t["assistant"])))
+    return {
+        "goal_met": met,
+        "goal_reason": reason,
+        "advice_violations": advice_viol,
+        "disclaimer_req": len(disc_req),
+        "disclaimer_ok": disc_ok,
+        "turns": len(transcript),
+        "total_tools": sum(len(t["tools"]) for t in transcript),
+    }
+
+
+__all__ = [
+    "UserSimulator",
+    "MultiTurnJudge",
+    "run_one_multiturn",
+    "run_multiturn",
+    "score_multiturn",
+]

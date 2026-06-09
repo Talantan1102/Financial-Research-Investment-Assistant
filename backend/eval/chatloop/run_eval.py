@@ -195,11 +195,14 @@ async def _run_grounding(scenarios: list, *, model: str) -> int:
 
 
 async def _run_multiturn(scenarios: list, *, model: str, max_turns: int) -> int:
-    """多轮对话:模拟用户 × agent,打印 transcript(本切片只验能跑通)。"""
-    from eval.chatloop.multiturn import run_multiturn
+    """多轮对话:模拟用户 × agent,打印 transcript + 评分(目标达成/政策/效率)。"""
+    from eval.chatloop.multiturn import MultiTurnJudge, run_multiturn, score_multiturn
 
     results = await run_multiturn(scenarios, simulator_model=model, max_turns=max_turns)
-    print(f"# chatloop 评估 — 多轮对话(模拟用户 {model},max_turns={max_turns})\n")
+    by_case = {s.case_id: s for s in scenarios}
+    judge = MultiTurnJudge(model=model)
+    print(f"# chatloop 评估 — 多轮对话(模拟用户+裁判 {model},max_turns={max_turns})\n")
+    scores: list[dict] = []
     for r in results:
         print(f"## {r['case_id']}  目标:{str(r.get('goal', ''))[:70]}")
         if r.get("error"):
@@ -208,12 +211,21 @@ async def _run_multiturn(scenarios: list, *, model: str, max_turns: int) -> int:
         for i, t in enumerate(r["turns"], 1):
             tools = ("  | 工具:" + ",".join(t["tools"])) if t["tools"] else ""
             print(f"  [第{i}轮] 用户:{t['user']}")
-            print(f"          助手:{str(t['assistant'])[:220]}{tools}")
+            print(f"          助手:{str(t['assistant'])[:200]}{tools}")
         end = "用户喊停" if r.get("stopped_by_user") else "到轮数上限"
-        print(f"  → 共 {len(r['turns'])} 轮({end})\n")
-    n_turns = [len(r["turns"]) for r in results if not r.get("error")]
-    if n_turns:
-        print(f"- {len(results)} 个多轮场景,平均 {sum(n_turns) / len(n_turns):.1f} 轮/场景")
+        sm = await score_multiturn(by_case[r["case_id"]], r["turns"], judge)
+        scores.append(sm)
+        print(
+            f"  → {len(r['turns'])} 轮({end})| 目标达成:{'✓' if sm['goal_met'] else '✗'}"
+            f"({sm['goal_reason'][:40]})| 方向性违例:{sm['advice_violations']}"
+            f"| 免责 {sm['disclaimer_ok']}/{sm['disclaimer_req']} | 工具 {sm['total_tools']}\n"
+        )
+    if scores:
+        n = len(scores)
+        print(f"- **目标达成率**:{sum(s['goal_met'] for s in scores)}/{n}")
+        print(f"- 跨轮方向性违例:{sum(s['advice_violations'] for s in scores)} 例")
+        print(f"- 用户主动喊停:{sum(1 for r in results if r.get('stopped_by_user'))}/{len(results)}(其余顶到轮数上限)")
+        print(f"- 平均 {sum(s['turns'] for s in scores) / n:.1f} 轮、{sum(s['total_tools'] for s in scores) / n:.0f} 工具/场景")
     return 0
 
 
