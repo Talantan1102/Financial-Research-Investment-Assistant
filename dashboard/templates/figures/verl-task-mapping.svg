@@ -1,0 +1,88 @@
+<svg viewBox="0 0 820 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="单对话轮+多工具步任务在 verl 里的载体映射与 rollout 状态机">
+  <style>
+    .vtm-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .vtm-h { font-size: 13px; fill: #1D1D1F; font-weight: 600; }
+    .vtm-d { font-size: 10.5px; fill: #6E6E73; }
+    .vtm-m { font-size: 10.5px; fill: #4845C2; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+    .vtm-arrow { stroke: #C7C7CC; stroke-width: 1.5; fill: none; marker-end: url(#vtm-head); }
+  </style>
+  <defs>
+    <marker id="vtm-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1,1 L7,4 L1,7" stroke="#C7C7CC" stroke-width="1.4" fill="none"/>
+    </marker>
+  </defs>
+
+  <g class="vtm-t">
+    <!-- 左:你的概念 → 右:verl 载体 -->
+    <text x="40" y="26" font-size="11" font-weight="600" fill="#86868B">你的概念</text>
+    <text x="470" y="26" font-size="11" font-weight="600" fill="#86868B">verl 里的载体</text>
+
+    <rect x="40" y="36" width="360" height="50" rx="9" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="56" y="57" class="vtm-h">一个金融问题(单对话轮)</text>
+    <text x="56" y="74" class="vtm-d">"宁王这季比去年同期赚得多少"</text>
+    <rect x="470" y="36" width="310" height="50" rx="9" fill="rgba(94,92,230,0.07)" stroke="rgba(94,92,230,0.35)"/>
+    <text x="486" y="57" class="vtm-h">parquet 一行的 prompt(chat messages)</text>
+    <text x="486" y="74" class="vtm-m">data.return_raw_chat=True</text>
+    <path d="M400,61 L462,61" class="vtm-arrow"/>
+
+    <rect x="40" y="96" width="360" height="50" rx="9" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="56" y="117" class="vtm-h">agent 循环调工具取数→算→核对</text>
+    <text x="56" y="134" class="vtm-d">多工具步(这一步不是多轮对话!)</text>
+    <rect x="470" y="96" width="310" height="50" rx="9" fill="rgba(0,199,190,0.08)" stroke="rgba(0,199,190,0.40)"/>
+    <text x="486" y="117" class="vtm-h">ToolAgentLoop 状态机(一条 rollout)</text>
+    <text x="486" y="134" class="vtm-m">agent_name=tool_agent</text>
+    <path d="M400,121 L462,121" class="vtm-arrow"/>
+
+    <rect x="40" y="156" width="360" height="50" rx="9" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="56" y="177" class="vtm-h">财务取数工具(读 cassette)</text>
+    <text x="56" y="194" class="vtm-d">入参 hash → 冻结快照,零网络确定性</text>
+    <rect x="470" y="156" width="310" height="50" rx="9" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="486" y="177" class="vtm-h">BaseTool 子类</text>
+    <text x="486" y="194" class="vtm-m">multi_turn.tool_config_path</text>
+    <path d="M400,181 L462,181" class="vtm-arrow"/>
+
+    <rect x="40" y="216" width="360" height="50" rx="9" fill="rgba(52,199,89,0.06)" stroke="rgba(52,199,89,0.35)"/>
+    <text x="56" y="237" class="vtm-h" fill="#1B7A33">oracle:tushare 真值 ±1% 比对</text>
+    <text x="56" y="254" class="vtm-d">纯规则,不走神经 RM、不走 judge</text>
+    <rect x="470" y="216" width="310" height="50" rx="9" fill="rgba(52,199,89,0.08)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="486" y="237" class="vtm-h" fill="#1B7A33">reward manager 的 compute_score</text>
+    <text x="486" y="254" class="vtm-d">不在 tool 里!落轨迹末有效 token</text>
+    <path d="M400,241 L462,241" class="vtm-arrow"/>
+
+    <!-- 下半:rollout 状态机 -->
+    <text x="40" y="300" font-size="11" font-weight="600" fill="#86868B">一条 rollout 内部:ToolAgentLoop 状态机(模型不再调工具 = 给最终答案 = 结束)</text>
+
+    <rect x="40" y="314" width="120" height="56" rx="9" fill="#FBFBFD" stroke="rgba(94,92,230,0.35)"/>
+    <text x="100" y="338" class="vtm-h" text-anchor="middle">PENDING</text>
+    <text x="100" y="356" class="vtm-d" text-anchor="middle">拼 prompt</text>
+
+    <rect x="200" y="314" width="140" height="56" rx="9" fill="rgba(94,92,230,0.08)" stroke="rgba(94,92,230,0.40)"/>
+    <text x="270" y="334" class="vtm-h" text-anchor="middle">GENERATING</text>
+    <text x="270" y="350" class="vtm-d" text-anchor="middle">模型吐一段</text>
+    <text x="270" y="364" class="vtm-d" text-anchor="middle">loss_mask=1</text>
+
+    <rect x="380" y="314" width="160" height="56" rx="9" fill="rgba(0,199,190,0.08)" stroke="rgba(0,199,190,0.40)"/>
+    <text x="460" y="334" class="vtm-h" text-anchor="middle">PROCESSING_TOOLS</text>
+    <text x="460" y="350" class="vtm-d" text-anchor="middle">执行工具,返回拼回</text>
+    <text x="460" y="364" class="vtm-d" text-anchor="middle">工具 token loss_mask=0</text>
+
+    <rect x="580" y="314" width="120" height="56" rx="9" fill="rgba(52,199,89,0.08)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="640" y="338" class="vtm-h" text-anchor="middle" fill="#1B7A33">TERMINATED</text>
+    <text x="640" y="356" class="vtm-d" text-anchor="middle">不再调工具</text>
+
+    <path d="M160,342 L196,342" class="vtm-arrow"/>
+    <path d="M340,342 L376,342" class="vtm-arrow"/>
+    <path d="M540,342 L576,342" class="vtm-arrow"/>
+    <!-- 回环 GENERATING -->
+    <path d="M460,370 L460,392 L270,392 L270,372" class="vtm-arrow"/>
+    <text x="320" y="408" class="vtm-d">还要调工具 → 回到 GENERATING(循环)</text>
+
+    <!-- reward 落点 -->
+    <rect x="40" y="430" width="660" height="44" rx="9" fill="rgba(52,199,89,0.05)" stroke="rgba(52,199,89,0.30)"/>
+    <text x="56" y="452" class="vtm-h" fill="#1B7A33">结束后 → reward manager 解码整条 response 成文本 → 你的 compute_score 抽最终答案 + oracle 比对</text>
+    <text x="56" y="468" class="vtm-d">标量写到 reward_tensor[i, valid_response_length-1](outcome reward 落末 token,正好契合"整条轨迹一个 oracle 分")</text>
+
+    <text x="40" y="500" class="vtm-d" font-style="italic">核心区分:这里的"多步"是工具调用步(rollout 内部),不是多轮对话。verl 的 "multi-turn rollout" 指前者。</text>
+    <text x="40" y="520" class="vtm-d" font-style="italic">来源:verl ToolAgentLoop @main + reward_manager/naive.py;配置键经核验区证实(2026-06-09)。</text>
+  </g>
+</svg>

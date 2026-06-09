@@ -1,0 +1,48 @@
+<svg viewBox="0 0 820 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="verl 多步工具 RL 五大实现坑与规避动作">
+  <style>
+    .vpm-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .vpm-h { font-size: 12.5px; fill: #1D1D1F; font-weight: 600; }
+    .vpm-d { font-size: 10.5px; fill: #6E6E73; }
+    .vpm-m { font-size: 10px; fill: #4845C2; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+  </style>
+  <g class="vpm-t">
+    <text x="40" y="26" font-size="11" font-weight="600" fill="#86868B">五大坑(按"踩了会让你最久找不到原因"排序)+ 规避动作</text>
+
+    <!-- 坑1 版本断层 -->
+    <rect x="40" y="38" width="740" height="68" rx="10" fill="rgba(255,159,10,0.07)" stroke="rgba(255,159,10,0.40)"/>
+    <rect x="40" y="38" width="5" height="68" rx="2" fill="#FF9F0A"/>
+    <text x="58" y="60" class="vpm-h" fill="#B26A00">坑一 · 版本断层(照抄半年前博客必崩)</text>
+    <text x="58" y="80" class="vpm-d">volcengine/verl 已迁 verl-project/verl;main 删了经典 BaseTool 范例(在 v0.5.0 tag);execute 返回类型 v0.5 与 main 不同</text>
+    <text x="58" y="98" class="vpm-d">规避:<tspan class="vpm-m">pin 一个 tag(建议 v0.8.0)</tspan>,所有键以那个 tag 的 rollout.yaml/base_tool.py 为唯一真相,别混 v0.5 文档与 main 源码</text>
+
+    <!-- 坑2 默认不调工具 -->
+    <rect x="40" y="116" width="740" height="68" rx="10" fill="rgba(255,59,48,0.06)" stroke="rgba(255,59,48,0.35)"/>
+    <rect x="40" y="116" width="5" height="68" rx="2" fill="#FF3B30"/>
+    <text x="58" y="138" class="vpm-h" fill="#C2403B">坑二 · 默认根本不调工具("sglang 只有 sync 能调"的真相)</text>
+    <text x="58" y="158" class="vpm-d">默认 agent loop 是 single_turn_agent,不带 agent_name 就静默走单轮、根本不进 tool 分支(这才是 #2986 的真因,不是 async 不行)</text>
+    <text x="58" y="176" class="vpm-d">规避:每行 <tspan class="vpm-m">agent_name=tool_agent</tspan> + <tspan class="vpm-m">mode=async</tspan> + <tspan class="vpm-m">return_raw_chat=True</tspan>;跑 1-step smoke 确认 tool 真被调起</text>
+
+    <!-- 坑3 mismatch+TIS -->
+    <rect x="40" y="194" width="740" height="68" rx="10" fill="rgba(255,59,48,0.06)" stroke="rgba(255,59,48,0.35)"/>
+    <rect x="40" y="194" width="5" height="68" rx="2" fill="#FF3B30"/>
+    <text x="58" y="216" class="vpm-h" fill="#C2403B">坑三 · 长轨迹 rollout↔训练精度错位(最玄学:loss 正常、reward 突然崩)</text>
+    <text x="58" y="236" class="vpm-d">sglang(bf16)与训练引擎逐 token log-prob 静默不一致,沿多步长轨迹累乘(Length Trap);多步工具轨迹天然长,正中此坑</text>
+    <text x="58" y="254" class="vpm-d">规避:必开截断重要性采样 <tspan class="vpm-m">rollout_is=token + threshold=2.0 + calculate_log_probs=true</tspan>;IS 权重必须 detach;cassette 替代不了它</text>
+
+    <!-- 坑4 credit assignment 退化 -->
+    <rect x="40" y="272" width="740" height="68" rx="10" fill="rgba(255,159,10,0.07)" stroke="rgba(255,159,10,0.40)"/>
+    <rect x="40" y="272" width="5" height="68" rx="2" fill="#FF9F0A"/>
+    <text x="58" y="294" class="vpm-h" fill="#B26A00">坑四 · 纯结果奖励训成"停止调工具"(verl 原生只给末 token 标量)</text>
+    <text x="58" y="314" class="vpm-d">turn-level 中间奖励配置开不出来、要改源码或换 GiGPO fork;纯 outcome 下"调工具"和"不调直接蒙对"拿相同 advantage,工具调用率会归零</text>
+    <text x="58" y="332" class="vpm-d">规避(最省事):compute_score 里加<tspan class="vpm-m"> 硬门控</tspan>——没真调工具就给答案,即便蒙对也判低分。纯配置,不改 advantage</text>
+
+    <!-- 坑5 LoRA+sglang -->
+    <rect x="40" y="350" width="740" height="68" rx="10" fill="rgba(0,122,255,0.06)" stroke="rgba(0,122,255,0.35)"/>
+    <rect x="40" y="350" width="5" height="68" rx="2" fill="#007AFF"/>
+    <text x="58" y="372" class="vpm-h" fill="#0A6CD6">坑五 · LoRA + sglang 权重同步 bug(你正是这规模)</text>
+    <text x="58" y="392" class="vpm-d">LoRA 适配器在 sglang 后端的 weight sync 有已知 bug(#4065);loss masking 对工具返回 token 是默认行为,无单独开关(这条是利好)</text>
+    <text x="58" y="410" class="vpm-d">规避:在你 pin 的版本上<tspan class="vpm-m"> 专门验 LoRA→sglang weight sync 正确性</tspan>;纯文本多轮设 return_multi_modal_inputs=False 避维度 bug</text>
+
+    <text x="40" y="448" class="vpm-d" font-style="italic">全部坑均带 verl issue 号与版本口径,详见施工配方原文;演进中的标了时间点(2026-06-09)。</text>
+  </g>
+</svg>

@@ -1,0 +1,154 @@
+"""本产品 RL 落地设计研报的 loader / 图例 / 可读性 / 端点 / 体裁测试。
+
+RL 三部曲第三部(设计/落地体裁),挂工具维度页(/m/tool)。带 4 张图例,
+服务端 include 内联。纯净增文件。
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+import pytest
+from starlette.testclient import TestClient
+
+from dashboard.derive.report import Report, load_report
+
+REPORTS_DIR = Path(__file__).parent.parent.parent / "data" / "reports"
+FIGURES_DIR = Path(__file__).parent.parent.parent / "templates" / "figures"
+DESIGN_REPORT = REPORTS_DIR / "rl-product-landing-design.yaml"
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
+    from dashboard import server
+
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "board.db")
+    return TestClient(server.app)
+
+
+@pytest.fixture
+def report() -> Report:
+    return load_report(DESIGN_REPORT)
+
+
+# ---- loader / 内容完整性 ----------------------------------------------------
+
+
+def test_meta_and_dimensions(report: Report) -> None:
+    assert report.slug == "rl-product-landing-design"
+    assert "落地设计" in report.title
+    assert report.date == "2026-06-09"
+    assert len(report.dimensions) == 7
+    for d in report.dimensions:
+        assert d.name and d.plain and d.setup and d.question and d.good and d.bad and d.scored
+    names = " ".join(d.name for d in report.dimensions)
+    assert "适合 RL" in names and "两轨" in names and "反向生成" in names
+    assert "物理隔离" in names and "打分阶梯" in names and "任务形态" in names
+
+
+def test_design_genre_labels(report: Report) -> None:
+    assert report.dim_labels.section_title == "7 个设计决策 · 每个配一个真实判断"
+    assert report.dim_labels.setup == "场景"
+    assert report.dim_labels.good == "好判断"
+    assert report.dim_labels.bad == "翻车点"
+    # 评估体裁默认词不应泄漏
+    assert report.dim_labels.scored != "怎么判分"
+    assert report.benchmarks_title == "本产品资产 · RL 复用度速览"
+
+
+def test_figures_declared_and_files_exist(report: Report) -> None:
+    figures = [s.figure for s in report.sections if s.figure]
+    assert len(figures) == 4
+    assert "rl-two-track.svg" in figures
+    assert "oracle-inversion-pipeline.svg" in figures
+    assert "deterministic-oracle-boundary.svg" in figures
+    assert "rl-minimal-pilot.svg" in figures
+    for s in report.sections:
+        if s.figure:
+            svg = FIGURES_DIR / s.figure
+            assert svg.is_file(), f"图例文件缺失: {s.figure}"
+            assert "<svg" in svg.read_text(encoding="utf-8")
+            assert s.figure_caption, f"图例缺 caption: {s.figure}"
+
+
+def test_benchmarks_and_gaps_point_to_real_assets(report: Report) -> None:
+    bnames = " ".join(b.name for b in report.benchmarks)
+    assert "估值数学层" in bnames and "tushare 缓存" in bnames
+    assert "组合判官" in bnames or "评估资产" in bnames
+    assert len(report.pitfalls) >= 8
+    # gaps = 就绪度审计落点,大白话本仓组件
+    comps = " ".join(g.component for g in report.gaps)
+    assert "oracle 接入" in comps and "工具接入" in comps
+    assert "训练环境" in comps and "确定性边界" in comps
+
+
+def test_sources_link_internal_docs_and_trilogy(report: Report) -> None:
+    assert report.sources
+    urls = " ".join(s.url for s in report.sources)
+    # 就绪度审计 + 施工底稿 + 三部曲前两部 + RL 判别奠基论文
+    assert "docs/research/2026-06-09-rl-readiness-audit.md" in urls
+    assert "docs/research/2026-06-09-verl-multistep-tool-rl-recipe.md" in urls
+    assert "/eval/report/post-training-rl-survey" in urls
+    assert "/eval/report/verl-multistep-tool-rl" in urls
+    assert "arxiv.org/abs/2501.17161" in urls
+
+
+# ---- 可读性守卫 -------------------------------------------------------------
+
+_OPAQUE = [
+    re.compile(r"(?<![A-Za-z])S\d"),
+    re.compile(r"c5-golden"),
+    re.compile(r"Metric\s*\d"),
+    re.compile(r"正确答案\s*X"),
+]
+
+
+def _report_text(r: Report) -> str:
+    parts: list[str] = [r.summary]
+    for s in r.sections:
+        parts.append(s.heading + s.body + s.figure_caption + " ".join(s.bullets))
+    for d in r.dimensions:
+        parts.append(f"{d.name} {d.plain} {d.setup} {d.question} {d.good} {d.bad} {d.scored}")
+    for b in r.benchmarks:
+        parts.append(b.name + b.what + b.fit)
+    parts.extend(r.pitfalls)
+    for g in r.gaps:
+        parts.append(g.component + g.current + g.suggestion)
+    return "\n".join(parts)
+
+
+def test_report_has_no_opaque_codes(report: Report) -> None:
+    text = _report_text(report)
+    for pat in _OPAQUE:
+        m = pat.search(text)
+        assert m is None, f"报告含读者无法对应的代号: {m.group(0)!r}"
+
+
+# ---- 端点:报告页渲染(图例内联)+ 维度页列表 ----------------------------
+
+
+def test_tool_dimension_page_lists_report(client: TestClient) -> None:
+    tool_body = client.get("/m/tool").text
+    assert 'href="/eval/report/rl-product-landing-design"' in tool_body
+    assert "落地设计" in tool_body
+    assert "深度调研" in tool_body
+    eval_body = client.get("/eval").text
+    assert "rl-product-landing-design" not in eval_body
+
+
+def test_report_page_renders_with_figures(client: TestClient) -> None:
+    resp = client.get("/eval/report/rl-product-landing-design")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "两轨" in body and "oracle" in body and "物理隔离" in body
+    assert "pass@k" in body
+    # 4 个 figure 容器,4 张 svg 命名空间前缀在场
+    assert body.count('class="report-figure"') == 4
+    for ns in ("tt-", "oip-", "dob-", "mp-"):
+        assert ns in body, f"图例 svg 未内联: 命名空间 {ns} 缺失"
+    assert body.count('class="report-figcaption"') == 4
+    assert "好判断" in body and "翻车点" in body
+    assert "7 个设计决策" in body
+    assert "评估维度" not in body and "怎么判分" not in body
+    assert 'href="/eval"' in body

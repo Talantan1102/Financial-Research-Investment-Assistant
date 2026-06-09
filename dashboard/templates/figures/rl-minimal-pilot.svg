@@ -1,0 +1,68 @@
+<svg viewBox="0 0 820 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="最小 RL 试点:单工具数值取数 + 就绪度对照 + 胶水清单">
+  <style>
+    .mp-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .mp-h { font-size: 12.5px; fill: #1D1D1F; font-weight: 600; }
+    .mp-d { font-size: 10.5px; fill: #6E6E73; }
+    .mp-k { font-size: 10.5px; fill: #3A3A3C; }
+  </style>
+  <g class="mp-t">
+    <!-- 推荐试点 -->
+    <rect x="40" y="38" width="740" height="74" rx="10" fill="rgba(52,199,89,0.07)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="58" y="60" class="mp-h" fill="#1B7A33">推荐第一个试点:单工具数值取数 + 确定性 ±容差奖励</text>
+    <text x="58" y="80" class="mp-d">任务:给"查某股某期某财务指标"的问题,policy 学(a)选对 get_financials(b)填对股票代码/报告期(c)抽出正确数值</text>
+    <text x="58" y="98" class="mp-d">奖励 = 工具选对(process)+ 数值对 tushare ±1%。明确避开:对话状态机、记忆/技能类工具、judge 层、调 LLM 的分叉</text>
+
+    <!-- 就绪度对照表 -->
+    <text x="40" y="138" class="mp-h">就绪度对照(四块阻抗全在这条线上最低)</text>
+    <rect x="40" y="148" width="740" height="132" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.16)"/>
+    <line x1="40" y1="174" x2="780" y2="174" stroke="rgba(60,60,67,0.12)"/>
+    <text x="56" y="166" class="mp-d" font-weight="600">缺口</text>
+    <text x="300" y="166" class="mp-d" font-weight="600">现状</text>
+    <text x="630" y="166" class="mp-d" font-weight="600">能否直接接</text>
+
+    <text x="56" y="194" class="mp-k">工具入口</text>
+    <text x="300" y="194" class="mp-d">Tool.run 已 async/dict/OpenAI-schema</text>
+    <rect x="628" y="183" width="64" height="16" rx="8" fill="rgba(255,159,10,0.15)"/>
+    <text x="660" y="195" class="mp-d" text-anchor="middle" fill="#B26A00">部分(偏能)</text>
+
+    <text x="56" y="218" class="mp-k">cassette</text>
+    <text x="300" y="218" class="mp-d">tushare 缓存 = 入参 hash→快照,现成</text>
+    <rect x="628" y="207" width="64" height="16" rx="8" fill="rgba(52,199,89,0.18)"/>
+    <text x="660" y="219" class="mp-d" text-anchor="middle" fill="#1B7A33">近零胶水</text>
+
+    <text x="56" y="242" class="mp-k">真值</text>
+    <text x="300" y="242" class="mp-d">工具选择 golden 是确定性 JSON,零转换</text>
+    <rect x="628" y="231" width="64" height="16" rx="8" fill="rgba(52,199,89,0.18)"/>
+    <text x="660" y="243" class="mp-d" text-anchor="middle" fill="#1B7A33">直接</text>
+
+    <text x="56" y="266" class="mp-k">oracle/算式</text>
+    <text x="300" y="266" class="mp-d">估值器纯 CPU 确定性、浮点逐位可复现</text>
+    <rect x="628" y="255" width="64" height="16" rx="8" fill="rgba(52,199,89,0.18)"/>
+    <text x="660" y="267" class="mp-d" text-anchor="middle" fill="#1B7A33">是</text>
+
+    <!-- 胶水清单 -->
+    <rect x="40" y="296" width="450" height="180" rx="10" fill="#FBFBFD" stroke="rgba(60,60,67,0.16)"/>
+    <text x="56" y="318" class="mp-h">胶水清单(按工作量从小到大)</text>
+    <text x="56" y="340" class="mp-k">1. tool_to_verl_yaml(~10 行)—— 风险最低先做</text>
+    <text x="56" y="360" class="mp-k">2. 复用 tushare 缓存当 cassette 后端(近零)</text>
+    <text x="56" y="380" class="mp-k">3. BaseTool adapter(~30 行/工具 + 注入)</text>
+    <text x="56" y="400" class="mp-k">4. 真值快照固化器(中)</text>
+    <text x="56" y="420" class="mp-k">5. verl_oracle_reward.py 裸容差版(~50–100 行)</text>
+    <text x="56" y="440" class="mp-k">6. 独立训练 venv + 复制 ~5 个 oracle 源文件</text>
+    <text x="56" y="462" class="mp-d">总量小,无一块零胶水但都不大</text>
+
+    <!-- 阻塞 + 绕法 -->
+    <rect x="506" y="296" width="274" height="180" rx="10" fill="rgba(255,159,10,0.07)" stroke="rgba(255,159,10,0.40)"/>
+    <text x="522" y="318" class="mp-h" fill="#B26A00">唯一真阻塞 + 干净绕法</text>
+    <text x="522" y="340" class="mp-d">dd_report eval 正被另一会话重构</text>
+    <text x="522" y="356" class="mp-d">(prediction_metric / ground_truth_loader</text>
+    <text x="522" y="372" class="mp-d">已删、MetricInputs 字段在动)→ 砸到</text>
+    <text x="522" y="388" class="mp-d">数值真值胶水。</text>
+    <text x="522" y="412" class="mp-d" font-weight="600" fill="#B26A00">绕法:</text>
+    <text x="522" y="430" class="mp-d">试点 reward 用裸数值 ±容差自包含</text>
+    <text x="522" y="446" class="mp-d">实现,不 import numerical_metric/</text>
+    <text x="522" y="462" class="mp-d">MetricInputs → 先跑通工具选择+取数线</text>
+
+    <text x="40" y="492" class="mp-d" font-style="italic">动手前必跑 smoke:独立 venv 能 import oracle / mock 模式确认工具不触网 / 1-step 确认工具被调起。证据见就绪度审计。</text>
+  </g>
+</svg>

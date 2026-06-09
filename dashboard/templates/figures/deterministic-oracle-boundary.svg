@@ -1,0 +1,71 @@
+<svg viewBox="0 0 820 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="确定性 oracle 边界:哪些金融子任务能当 RL 奖励、哪些必须排除">
+  <style>
+    .dob-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .dob-h { font-size: 12.5px; fill: #1D1D1F; font-weight: 600; }
+    .dob-d { font-size: 10.5px; fill: #6E6E73; }
+    .dob-k { font-size: 11px; fill: #3A3A3C; font-weight: 600; }
+  </style>
+  <g class="dob-t">
+    <text x="40" y="26" font-size="11" font-weight="600" fill="#86868B">命门:RL 奖励必须确定性可复现。本产品真值分两半,只有左半可当奖励(file:line 证据见审计)</text>
+
+    <!-- 左:可验证 -->
+    <rect x="40" y="40" width="370" height="378" rx="12" fill="rgba(52,199,89,0.06)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="58" y="66" class="dob-h" fill="#1B7A33">✅ 有确定性真值 → 可直接当 RL 奖励</text>
+
+    <rect x="58" y="80" width="334" height="58" rx="8" fill="#FFFFFF" stroke="rgba(52,199,89,0.30)"/>
+    <text x="72" y="100" class="dob-k">估值算式(DCF/PE/PB/EV-EBITDA/一致性)</text>
+    <text x="72" y="118" class="dob-d">纯 Python 算术,输入 ValuationInputs;</text>
+    <text x="72" y="132" class="dob-d">浮点逐位实测可复现 ← 离 RL 最近的一块</text>
+
+    <rect x="58" y="146" width="334" height="50" rx="8" fill="#FFFFFF" stroke="rgba(52,199,89,0.30)"/>
+    <text x="72" y="166" class="dob-k">数值取数准确率(营收/净利 ±1%)</text>
+    <text x="72" y="184" class="dob-d">tushare 元值(需快照固化);仅 4 指标</text>
+
+    <rect x="58" y="204" width="334" height="50" rx="8" fill="#FFFFFF" stroke="rgba(52,199,89,0.30)"/>
+    <text x="72" y="224" class="dob-k">工具选择 / 路由(first_tool + args)</text>
+    <text x="72" y="242" class="dob-d">golden expected JSON,零转换;process reward</text>
+
+    <rect x="58" y="262" width="334" height="50" rx="8" fill="#FFFFFF" stroke="rgba(52,199,89,0.30)"/>
+    <text x="72" y="282" class="dob-k">弃权检测(该不该答)</text>
+    <text x="72" y="300" class="dob-d">golden bool,确定性</text>
+
+    <rect x="58" y="320" width="334" height="50" rx="8" fill="#FFFFFF" stroke="rgba(52,199,89,0.30)"/>
+    <text x="72" y="340" class="dob-k">记忆抽取边(持仓 qty/avg_cost 等)</text>
+    <text x="72" y="358" class="dob-d">expected_edges JSON,结构化数值精确匹配</text>
+
+    <text x="58" y="392" class="dob-d" font-weight="600">"取数"层本身(网络 tushare)不在边界内,</text>
+    <text x="58" y="408" class="dob-d">必须 cassette/快照固化后才进。</text>
+
+    <!-- 右:必须排除 -->
+    <rect x="430" y="40" width="350" height="378" rx="12" fill="rgba(255,59,48,0.05)" stroke="rgba(255,59,48,0.35)"/>
+    <text x="448" y="66" class="dob-h" fill="#C2403B">❌ 无确定性真值 → 必须排除出 RL 奖励</text>
+
+    <rect x="448" y="80" width="314" height="44" rx="8" fill="#FFFFFF" stroke="rgba(255,59,48,0.25)"/>
+    <text x="462" y="100" class="dob-k">grounding / 是否基于数据</text>
+    <text x="462" y="116" class="dob-d">LLM judge,指向句非数值</text>
+
+    <rect x="448" y="132" width="314" height="44" rx="8" fill="#FFFFFF" stroke="rgba(255,59,48,0.25)"/>
+    <text x="462" y="152" class="dob-k">报告质量 / 引用 / 风险配对</text>
+    <text x="462" y="168" class="dob-d">LLM-judge cassette</text>
+
+    <rect x="448" y="184" width="314" height="44" rx="8" fill="#FFFFFF" stroke="rgba(255,59,48,0.25)"/>
+    <text x="462" y="204" class="dob-k">分歧异常诊断叙事</text>
+    <text x="462" y="220" class="dob-d">调 LLM,非确定 + 网络副作用</text>
+
+    <rect x="448" y="236" width="314" height="44" rx="8" fill="#FFFFFF" stroke="rgba(255,59,48,0.25)"/>
+    <text x="462" y="256" class="dob-k">分析师洞察 / 多空辩论</text>
+    <text x="462" y="272" class="dob-d">全调 LLM</text>
+
+    <rect x="448" y="288" width="314" height="44" rx="8" fill="#FFFFFF" stroke="rgba(255,59,48,0.25)"/>
+    <text x="462" y="308" class="dob-k">预测方向 / 是否命中</text>
+    <text x="462" y="324" class="dob-d">逻辑确定但事后 K 线,且 loader 此刻被重构删了</text>
+
+    <rect x="448" y="346" width="314" height="58" rx="8" fill="rgba(255,59,48,0.06)" stroke="rgba(255,59,48,0.30)"/>
+    <text x="462" y="366" class="dob-k" fill="#C2403B">为什么不能混进来</text>
+    <text x="462" y="384" class="dob-d">judge 引入噪声 + 成本 + 不可复现,</text>
+    <text x="462" y="398" class="dob-d">毒化 RL 信号 → 走分析类轨,别进 reward</text>
+
+    <text x="40" y="442" class="dob-d" font-style="italic">边界一句话:reward 画在"结构化可程序校验的层",绝不算在"自然语言质量/grounding/叙事"上。</text>
+    <text x="40" y="462" class="dob-d" font-style="italic">估值器实测纯/可复现,而 OutlierDiagnosis/Analyst/debate 都调 LLM —— oracle 边界卡在 ValuationResult 那层,叙事踢出去。</text>
+  </g>
+</svg>

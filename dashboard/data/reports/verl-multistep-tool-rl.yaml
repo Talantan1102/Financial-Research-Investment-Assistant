@@ -1,0 +1,273 @@
+# dashboard/data/reports/verl-multistep-tool-rl.yaml
+# ============================================================================
+# 研究报告:verl + sglang 多步工具 RL · 施工配方
+# ----------------------------------------------------------------------------
+# 来源:2026-06-09 Workflow 7 路并行深读 verl 实现细节(端到端配置 / oracle 奖励
+# 接入 / loss masking / credit assignment / 任务形态与环境 / 工具-RL 先例 /
+# mismatch 坑)+ 3 路对 verl 当前文档(verl-project/verl @main,实测 2026-06-09)
+# 独立核验高风险配置 claim(3/3 confirmed)。完整施工底稿(914 行,含可照抄的
+# config 片段 + reward function 代码骨架)在
+# docs/research/2026-06-09-verl-multistep-tool-rl-recipe.md。
+# 体裁:施工/how-to(挂 tool 维度深度调研区,锚 tool_augmented_training)。
+# 写作约定:不用读者无法对应的内部代号;verl 配置键/接口标版本口径;数字标
+# 来源(论文/厂商自报/baseline);凡核验区证实的以核验区为准。
+# ============================================================================
+
+slug: verl-multistep-tool-rl
+title: verl 多步工具 RL · 施工配方
+subtitle: >-
+  接着「工业界后训练怎么做」往下一层:把"单对话轮 + 多工具步 + 确定性 oracle 奖励"这个确切形态,从 survey 的"知道有这回事"挖到"照着写 config 和 reward function"的颗粒度;7 个施工决策 × 真实落点,对照 verl 当前版本(已核验)
+meta:
+  date: '2026-06-09'
+  basis: 7 路并行深读 verl 实现 + 3 路核验当前 verl 文档(3/3 confirmed)+ 6 个工具-RL 先例;完整施工底稿见 docs/research
+summary: >-
+  这份是给"要照着写代码的工程师"看的,不是综述。前置认知先立住:你要训的形态是单对话轮(一个金融问题)+ 多工具步(agent 循环调财务工具取数→算→交叉核对)+ 最终答案可验证(纯 Python 估值器 / tushare 真值当 oracle,数值容差比对)——注意"多步"是工具调用步、不是多轮对话,verl 说的 multi-turn rollout 指前者。三件最该先记住的事:① oracle 走 reward
+  manager 的 compute_score、不走 tool,终局 outcome reward 落在轨迹最后一个有效 token;② 工具返回 token 自动 loss-mask(模型自己生成的=进 loss,工具/用户返回的=不进),delta-based tokenization 默认行为、无单独开关;③ 多步长轨迹的 rollout 引擎与训练引擎精度会沿 token 累乘错位,必开截断重要性采样(TIS),否则"loss
+  正常、reward 玄学崩"。先约定几个词:rollout = 训练时让当前模型在线生成回答的采样;oracle = 给定输入产出确定性真值的参考实现(这里就是纯 Python 估值器);reward manager = verl 里逐样本算奖励的层;compute_score = 你写的那个奖励函数;BaseTool = verl 工具的基类。所有 verl 配置键/接口标了取数版本(verl 版本敏感,repo 从
+  volcengine/verl 迁到 verl-project/verl,工具系统在 v0.6→v0.8 间重构过);凡核验区独立核过当前 verl 的事实优先采信,未核到的明标。
+sections:
+- heading: 任务形态:"单对话轮 + 多工具步 + oracle 奖励"在 verl 里长什么样
+  body: >-
+    先把整条链路定形。你的"一个金融问题"= parquet 一行的 prompt(chat messages);"agent 循环调工具取数→算→核对"= verl 的 ToolAgentLoop 状态机驱动的一条 rollout;"财务取数工具"= 一个 BaseTool 子类;"oracle 验最终答案"= reward manager 层的一个 compute_score 函数。rollout 内部是个四态状态机:拼
+    prompt → 模型吐一段(这些 token 进 loss)→ 解析出工具调用、执行、把返回拼回消息(工具 token 不进 loss)→ 若模型还要调工具就回到生成、若不再调工具就结束(模型不再调工具 = 它给最终答案了)。轨迹结束后,reward manager 把整条多步 response 解码成一个纯文本字符串交给你的 compute_score——注意它给的是整条轨迹文本、不是只有最后一句,你得自己从里面抽最终答案。这个"单轮问题
+    + 内部多步工具循环"正是 verl 的 tool_agent loop 为之设计的形态,直接可建。
+  figure: verl-task-mapping.svg
+  figure_caption: >-
+    任务载体映射 + rollout 状态机:左(你的概念)→ 右(verl 载体);下半是一条 rollout 内部的 ToolAgentLoop 四态机,模型不再调工具即结束、reward manager 接手解码打分。配置键经核验区证实。
+  bullets:
+  - >-
+    四个必备开关(AgentLoop 工具路径,缺一不调工具):rollout.name=sglang + rollout.mode=async + data.return_raw_chat=True + 数据集每行带 agent_name=tool_agent(或 rollout.agent.default_agent_loop=tool_agent)。默认 agent loop 是 single_turn_agent、不是 tool_agent——这是最易踩的静默坑。
+  - >-
+    终止条件(源码精确列表):模型解析后没有工具调用 → 结束(= 给最终答案);或撞 max_assistant_turns / max_user_turns;或 response 长度超限。你的 reward 靶子因此始终是"一个最终答案",干净无歧义——这也是为什么单对话轮形态比多轮对话好训。
+  - >-
+    "多步" vs "多轮对话"是领域最坑的术语二义:你要的是"单对话轮 + 多工具步",verl 的 multi-turn rollout 指工具步那根轴。多轮对话(追问/上下文)主要靠 SFT 教、很少进结果奖励 RL,且更多出现在评估(τ-bench)而非训练奖励里。
+- heading: 端到端配置:版本断层警告 + 必备开关
+  body: >-
+    照抄前先读这条版本断层警告:volcengine/verl 已整体迁到 verl-project/verl,当前 main 分支已删除经典的多轮工具范例目录(run script + 工具配置 + 示例工具类全不在 main 了),它们完整存在于 v0.5.0 tag;而 config schema 真值、新的无状态工具装饰器路径在 main/v0.8.0。"配置键随版本迁移"踩坑全来自混用
+    v0.5 文档示例和 main 源码。强烈建议锁定一个明确 tag(v0.8.0 工具系统已新架构且 release 稳定),所有键以那个 tag 的 rollout.yaml / base_tool.py 为唯一真相。配置上最容易记错的三处:多轮是嵌套块、真正生效的是 multi_turn.enable(别照抄裸 multi_turn:
+    True 简写);工具配置键是 multi_turn.tool_config_path(核验区裁决:文档里的 tool_kwargs.tools_config_file 在当前 schema 中 0 命中、是 stale);工具响应最大长度默认只有 256,财务返回容易被截断、务必调大。
+  bullets:
+  - >-
+    有状态工具(要从数据集注入 oracle 真值/cassette 名)必须走 BaseTool + tool_config_path,它有 create/release 生命周期和 tools_kwargs 注入通道;无状态纯计算工具可用新的函数装饰器,但它不接 tools_kwargs 注入——你要按样本喂 cassette 名,只能用 BaseTool。
+  - >-
+    一条训练样本(parquet 一行)的关键字段:prompt(金融问题 + system 说明可用工具)、agent_name=tool_agent(路由到工具循环)、reward_model.ground_truth(轨迹级 oracle 真值锚,你的 tushare 标准答案放这)、extra_info.tools_kwargs.<工具名>.create_kwargs(把这条样本用哪个
+    cassette / 哪个股票代码 / 容差注进工具的官方通道)。
+  - >-
+    工具的入参 schema 用 OpenAI function 格式(function.name 必须 == 模型 tool-call 名 == tools_kwargs 的 key);本项目工具的 schema 已经是这个格式,转 verl 的 tool_schema YAML 约十行胶水。
+- heading: oracle 奖励怎么接:走 reward manager,不走 tool
+  body: >-
+    这是最关键的一节,也是最容易接错的地方:你的纯 Python oracle(算估值 / 比对 tushare 真值)要包成一个模块级函数 compute_score(data_source, solution_str, ground_truth, extra_info=None),放进一个 .py 文件,配置里指 custom_reward_function 的 path + name。verl 用 importlib
+    按文件路径动态加载它,由 reward manager 在每条样本 rollout 解码后逐条同步调用,返回一个标量(或带 score 键的 dict),写到该样本最后一个有效 token。三步:先从整条轨迹文本里正则抽出最终答案(让 policy 用固定锚点格式输出、裁尾部避免中间步数字误命中),再调你的确定性 oracle 拿真值、归一化后比容差,最后返回
+    score(命中 1.0 / 否则 0.0)+ 其余诊断键(进日志当 metric)。关 reward_model.enable 让奖励只来自你的规则函数(不是神经奖励模型),reward_manager 用 naive(串行逐样本)——纯 CPU 算估值 + cassette 回放,串行无瓶颈。
+  figure: verl-oracle-reward-flow.svg
+  figure_caption: >-
+    oracle 奖励数据流:真值经 ground_truth 进 reward、cassette 名经 create_kwargs 进 tool;轨迹结束后整条 response 解码成 solution_str 交给 compute_score(抽答案 → oracle 比对 → 返回),标量落末 token。接口签名/调用时序经核验区证实。
+  bullets:
+  - >-
+    compute_score 的 solution_str 是整条多步轨迹 response 解码后的纯文本(含各步生成,工具返回 token 被 mask 但仍在解码文本里),不是最后一句——抽最终答案是你自己的职责,verl 还塞了 num_turns 给你判断走了几轮。
+  - >-
+    一个会坑你很久的静默行为:reward function 内部抛异常会被 verl 静默吞掉、降级成全 0,训练不崩但 reward 全零。调试期务必看 stdout 的 "Error in reward_fn:" 打印,或自己 catch 返回 0 更可控。
+  - >-
+    奖励是确定性纯规则的最大价值是结构上规避 reward hacking——但"可验证"不等于"不可钻":只查最终数字,模型可能不真调工具、直接蒙一个常见数。配合下一节的硬门控(没调工具就给答案即便蒙对也判低分)堵这个。
+- heading: loss masking 与 credit assignment:一个默认就对、一个要自己想清楚
+  body: >-
+    loss masking 是好消息:多轮工具开启后,只有模型自己生成的 token 进损失函数、工具和用户返回的 token 自动被 mask,这是 delta-based tokenization 的默认行为,没有单独开关、你不用操心(机制:每生成一条新消息,只对"加了这条"和"没加这条"两次序列化的差异部分分词,模型生成的那段给 loss_mask=1、工具返回给
+    0)。还自带一个 tokenization 一致性自检(默认 strict),首次接新模型保持默认跑几步、grep 日志看有没有不一致告警。credit assignment 是要自己想清楚的硬骨头:verl 原生只把一个标量 outcome reward 放在轨迹最后一个有效 token 上,turn 级中间奖励(调对工具/参数合法/中间取数正确)配置开不出来——要么改源码、要么换
+    fork。纯结果奖励在多步任务上有个实锤的退化:模型会"逐渐停止调工具",因为"调工具"和"不调直接蒙对"拿到相同的轨迹级 advantage、而调工具有 token 成本,梯度上反被压。
+  bullets:
+  - >-
+    防"停止调工具"退化,按工程代价从低到高:① 在 compute_score 里加硬门控(没真调工具就给答案即便蒙对也判低分)——纯配置、不改源码,起步首选;② 把中间信号(工具执行 +、中间取数命中 +)揉进末 token 标量返回 dict;③ 真要 turn 级信用分配再换 GiGPO fork(但它的 step 信号靠"重复状态分组",金融取数任务状态若不重复会退化成空,需自评)。
+  - >-
+    自定义工具时务必走 verl 的"加工具返回消息"接口写返回、别自己往 token 序列里拼字符串,否则绕过按角色的 mask、工具 token 漏进 loss。
+  - >-
+    已知 tokenization 坑:某些模型(思考型)渲染时会剥掉内部 reasoning 导致跨轮 delta 不准,系统兜底用固定底座对话;命中一致性告警时先看是不是这类良性差异,别误判成自己 config 错。
+- heading: 五大实现坑 + 工具-RL 先例可借的做法
+  body: >-
+    把最容易"踩了找不到原因"的坑集中收口(详见配图)。除了前面说的版本断层、默认不调工具、长轨迹精度错位、credit assignment 退化、LoRA+sglang 权重同步 bug 这五个,落地清单还有几条硬约束:锁一个 verl tag 当唯一真相;纯文本多轮设 return_multi_modal_inputs=False 避维度
+    bug;显存共置时 gpu_memory_utilization 先 0.5–0.7;跑 1-step smoke 确认工具真被调起 + grep tokenization 告警。先例方面,这次挖到一个比金融推理蒸馏近得多的参照:有一个金融问答 RL 环境用的就是"二值 + 数值容差归一化"奖励、靠归一化而非神经判官——几乎是本项目要做的事本身,它点明真正的工程量是"数值/单位归一化器"(去千分位、统一百分比/小数、括号负号),别用裸字符串精确匹配(有工作实锤精确匹配当奖励会诱导模型刷超长答案钻空子)。
+  figure: verl-pitfall-map.svg
+  figure_caption: >-
+    五大坑按"踩了最久找不到原因"排序,每条配 verl issue 号与规避动作:版本断层 / 默认不调工具 / 长轨迹精度错位 / 纯结果奖励退化 / LoRA+sglang 权重同步。演进中的标了时间点。
+  bullets:
+  - >-
+    取数→答 outcome-only 母板(建在 verl 上的检索增强 RL):纯结果奖励、不加格式奖励、不用神经 RM;检索返回 token 的 loss masking 与你的工具返回 masking 同一回事,verl 已内建。报相对强基线 7B +26%(论文自报,跨多个问答集)。
+  - >-
+    代码工具 RL(你的"纯 Python 估值器"正是这条线):规则化结果奖励,执行报错结构化回灌让 agent 学重试/换工具——正是"交叉核对"链路要的自纠错;报工具 RL 相对纯文本 RL 在精确计算任务上增益极大(某数学基准 67% vs 40%,论文自报)。
+  - >-
+    冷启动取舍:多家做法是先 SFT 教会"何时插工具→取数→核对"再 RL;但若基座已会调工具、且在你任务上有非零成功率,可跳 SFT 直接 RL——这个该不该跳用 pass@k 测,不靠"感觉模型会调工具"判断(详见本产品落地设计报告)。
+- heading: 落到本项目:能不能直接接 + 最小可行配置
+  body: >-
+    把这份通用配方焊到本项目,最后一段是代码就绪度审计(单列在「本产品 RL 落地设计」报告,这里给结论)。好消息是 RL 这类任务的四块硬前提本项目都有现成或近现成的:oracle(纯 Python 估值器实测浮点逐位可复现)、可重放环境(已有 tushare 缓存层就是 verl 想要的"入参 hash → 快照"形态)、多步工具底座(chatloop
+    的工具入口已 async/dict/OpenAI-schema)、单机 LoRA 规模(7B/8B)。没有任何一块能零胶水直接接,但胶水总量小(工具 adapter 约 30 行、reward 函数约 50–100 行、其余更小)。单机起步参照:社区实测 3B 规模 LoRA GRPO 约 6 小时、约 40 美元跑出可观提升(自报,任务不同别照搬数字)。
+  bullets:
+  - >-
+    起步配置骨架(单节点,照 verl 官方 8B 脚本):advantage 估计器 grpo、每题采样 5、显存占用率 0.6、KL 损失系数 0.001、学习率 1e-6、动态批 + 序列打包;多轮工具再加 mode=async + multi_turn.enable + tool_config_path + 数据集 agent_name。LoRA 确切键名本次未逐字核到、需查
+    verl 的 model 配置 lora 段,别照猜的键名写。
+  - >-
+    动手前必跑的 smoke:独立训练 venv 能 import oracle 源文件(verl/sglang 要 Linux+CUDA、必须独立于后端环境,但 oracle 增量极小);用 mock 模式确认工具入口形状与不触网;1-step 确认工具真被调起。
+  - >-
+    完整可照抄的 config 片段、reward function 代码骨架、cassette 工具类骨架、版本敏感键速查表,都在施工底稿 docs/research/2026-06-09-verl-multistep-tool-rl-recipe.md;本报告是它的导航版。
+dimensions_meta:
+  title: 7 个施工决策 · 每个配一个真实落点
+  labels:
+    setup: 场景
+    question: 怎么做
+    good: 好做法
+    bad: 翻车点
+    scored: 怎么判断 · 谁在用
+dimensions:
+- name: ① 多轮路径选型:AgentLoop vs sglang 原生
+  plain: verl 有两套多轮工具 rollout 路径、配置键不同,先选对再谈别的。
+  setup: 要给"单金融问题 + 多工具步 + oracle 奖励"搭 rollout,文档里看到 multi_turn.enable 又看到 agent loop,不知走哪条。
+  question: 走哪条多轮路径?
+  good: >-
+    走 AgentLoop / tool_agent 路径(rollout.mode=async + data.return_raw_chat=True + 数据集 agent_name=tool_agent),它就是为"agent 循环调工具取数→算→核对"设计的、是当前主线。老的 sglang 原生多轮路径(rollout.multi_turn.enable + 不强制 async)是 v0.4–v0.5 主力,新项目别用。
+  bad: >-
+    照抄裸 multi_turn: True 简写(真正生效的是 multi_turn.enable);或忘了数据集写 agent_name、默认走 single_turn_agent 根本不调工具还以为是"sglang 只能 sync"的 bug;或混 v0.5 文档示例和 main 源码导致键名对不上。
+  scored: >-
+    判据 = 是否要"模型自驱多步工具循环"(要 → AgentLoop)。跑 1-step smoke 确认工具真被调起。谁在用:verl 官方 GSM8K 工具调用例子、Search-R1 / ReTool(均建在 verl 上)走 AgentLoop 路径。
+- name: ② oracle 接哪层:reward manager,不是 tool
+  plain: 确定性 oracle 该包成 reward function、挂在 reward manager,不是塞进工具里。
+  setup: 有个纯 Python 函数能算估值 / 比对 tushare 真值,想让它给 RL 当奖励。
+  question: 这个 oracle 包成什么、挂哪?
+  good: >-
+    包成模块级 compute_score(data_source, solution_str, ground_truth, extra_info),用 custom_reward_function.path/name 挂载;关 reward_model.enable(奖励只来自规则函数、不是神经 RM);reward_manager 用 naive 串行。tushare 真值经 reward_model.ground_truth 进样本,cassette
+    名经 tools_kwargs.create_kwargs 进工具。
+  bad: >-
+    把 oracle 塞进工具的 execute 里当 step reward——verl 把工具返回的那个 reward 当场丢弃(有 open issue),传不到训练;或返回值忘了带 score 键(dict 只取 score["score"]);或 reward fn 抛异常被静默降级成全 0 还不知道(盯 stdout Error in reward_fn:)。
+  scored: >-
+    判据 = 奖励是不是"整条轨迹一个确定性分"(是 → reward manager 末 token 标量)。谁在用:verl GSM8K 范例的 compute_score、金融问答 RL 环境的二值容差奖励(reward 与工具通道分离)。
+- name: ③ 工具返回 loss masking:默认就对,但要会验
+  plain: 多步轨迹里只训模型自己生成的 token、工具返回不进 loss——默认行为,但接自定义工具时容易漏。
+  setup: 多步工具轨迹里既有模型生成又有工具返回,担心模型去学复读工具输出。
+  question: masking 要不要手动开、怎么验?
+  good: >-
+    不用单独开——delta-based tokenization 默认就把模型生成 token 置 loss_mask=1、工具/用户返回置 0。自定义工具走 verl 的"加工具返回消息"接口写返回(别自己拼 token 序列)。首次接新模型保持默认 strict 自检跑几步、grep 日志看 tokenization 一致性告警。
+  bad: >-
+    自己往 input_ids 里拼工具返回字符串、绕过按角色的 mask,工具 token 漏进 loss、模型学复读工具输出;或一上来把自检设 disable,把真实的 tokenization mismatch(如 tool_calls 被清空)也跳过、训出来才发现。
+  scored: >-
+    判据 = grep "Inconsistent tokenization" 告警是否清。检索增强 RL 的检索 token masking 消融:去掉 masking 平均精确匹配从 0.305 掉到 0.147(论文自报)。谁在用:Search-R1 / verl 多轮内建。
+- name: ④ credit assignment:trajectory 起步 + 硬门控防退化
+  plain: verl 原生只给末 token 一个标量;多步任务想给中间奖励、或防"停止调工具",要选对落地路线。
+  setup: agent 调 5 个工具最后算错了不知哪步错;且纯结果奖励训着训着工具调用率往零掉。
+  question: 中间信用怎么给、退化怎么防?
+  good: >-
+    起步 trajectory-only(配置即可);防退化最省事的是在 compute_score 里加硬门控——没真调工具取数就给答案、即便蒙对也判低分,纯规则不改源码。想要弱中间信号就把"调对工具/参数合法"揉进末 token 标量返回 dict。真要 step 级才换 GiGPO fork。
+  bad: >-
+    指望配置开出 turn 级奖励(开不出来、要改源码);或迷信某些 API 名(工具返回的 reward、交互系统的 per-turn 分都"算了不用",别被名字骗);或不加任何门控用纯 outcome RL、训成"不调工具直接蒙"。
+  scored: >-
+    判据 = 训练中工具调用率是否稳住不归零。turn 级中间奖励实锤(某搜索任务 +16.6 分 vs 纯结果奖励,验证集自报);纯结果奖励退化"逐渐停止调工具"有论文实锤。谁在用:MT-GRPO(turn 级)、GiGPO(step 级 fork)。
+- name: ⑤ 长轨迹精度错位:必开截断重要性采样
+  plain: 多步长轨迹下 rollout 引擎与训练引擎逐 token 精度差会累乘,不校正会"loss 正常、reward 突然崩"。
+  setup: 训着训着 loss 看着正常,但 gradient norm 突刺后 reward 崩,查不出原因。
+  question: 这种玄学崩怎么防?
+  good: >-
+    必开截断重要性采样(rollout_is=token + threshold=2.0 + calculate_log_probs=true);重要性权重必须从计算图剥离(detach,数学要求);用 rollout-diff 类工具检测逐 token log-prob 散度。长轨迹优先 token 级(避免序列级在长 CoT 上塌掉的 Length Trap)。
+  bad: >-
+    以为 cassette 回放消除了不确定性就不用校正——cassette 固定的是工具文本返回、不是引擎算的 token log-prob,精度错位照样在;或照抄旧版扁平键名(版本敏感、新版是嵌套结构);或忘了 detach 引入虚假梯度偏置。
+  scored: >-
+    判据 = 监控 rollout 重要性权重均值(偏离 1 太多报警)、有效样本数、KL、gradient norm 突刺。实测同模型 bf16 vs fp16 有 35% token 超 0.01 漂移阈值(社区口径)。谁在用:verl 官方 rollout 校正机制。
+- name: ⑥ 环境可重放:cassette 自建,verl 不原生
+  plain: 训练要确定性可重放,但 verl 没有原生 cassette 层——你在工具的 execute 里自己读快照。
+  setup: 财务工具依赖外部数据,同 query 今天明天返回不同,但 RL 训练要求环境可重放。
+  question: 怎么让工具返回确定可重放?
+  good: >-
+    在 BaseTool 的 execute 里按"工具入参的稳定 hash → 快照文件"读;每条轨迹用哪个 cassette 通过 create_kwargs 注入(随数据行走);录制阶段打真 API dump 快照、训练阶段只读零网络。本项目已有的 tushare 缓存层就是这个形态(主键 = api 名 + 参数 hash),近零胶水可直接复用。
+  bad: >-
+    指望 verl 提供 cassette(它只给你两个干净注入点、不给录制/回放层);或用 pytest 的 VCR 回放(绑 pytest+httpx 拦截、脱不了);或快照 key 忘剔 token / 跨 pandas 版本反序列化失败。
+  scored: >-
+    判据 = 工具 execute 能脱 pytest 裸读快照、同一调用必命中同一快照。谁在用:本项目 tushare 缓存(现成"入参 hash → DataFrame");金融问答 RL 环境的工具通道与 reward 通道分离。
+- name: ⑦ 单机 LoRA + 版本锁定:把试错成本压到最低
+  plain: 单机多卡 + LoRA 是验证"RL 对我的任务有没有用"的最小可行配置;但 verl 版本必须先锁。
+  setup: 一台 8 卡机,想给 7B/8B 模型验证 oracle 奖励带不带来真实提升。
+  question: 第一周该跑成什么样?
+  good: >-
+    锁一个 verl tag(建议 v0.8.0)当唯一真相;从官方 8B 单节点脚本起步(grpo + 每题采 5 + 显存 0.6 + KL 1e-3 + lr 1e-6);显存吃紧上 LoRA + 参数卸载;先在单步任务看验证奖励爬坡再加多工具。社区参照 3B LoRA GRPO 约 6 小时 / 40 美元。
+  bad: >-
+    上来就 14B 全参(官方无 14B 单机示例、显存大概率爆);或照抄半年前博客的配置键(多轮/校正键随版本迁移快);或没在 pin 的版本上专门验 LoRA→sglang 权重同步(有已知 bug)就开训。
+  scored: >-
+    判据 = 1-step smoke 通过(工具被调起 + tokenization 告警清)+ 验证奖励持续爬坡。起步配置取自 verl 官方示例脚本;吞吐口径 1.53–20.57 倍(论文,随算法/模型)。谁在用:Search-R1 / ReTool / 字节自家 DAPO 演示。
+benchmarks_title: 工具-RL 先例 · 可借做法速览
+benchmarks:
+- name: 金融问答 RL 环境(最近,几乎是本项目本身)
+  what: >-
+    奖励 = 二值 + 数值容差归一化(命中 1.0 否则 0.0),靠"先归一化(去千分位/统一百分比/括号负号/单位)再比容差"省掉 LLM-judge;reward 通道与工具通道分离;工具侧加硬约束(必须指定股票代码+报告期)逼精确取数。来源为厂商博客、数字自报、非同行评审。
+  fit: >-
+    容差归一化层是你 oracle 的核心工程量、别用裸精确匹配;工具通道走 cassette 回放、reward 通道连确定性估值器,正是本项目该走的分离架构。
+- name: 检索增强 RL(取数→答 outcome-only 母板,建在 verl 上)
+  what: >-
+    纯 outcome 奖励(精确匹配)、不加格式奖励、不用神经 RM;检索返回 token 的 loss masking 与你的工具返回 masking 同一回事;检索服务独立解耦。报相对强基线 7B +26% / 3B +20%(平均跨多个问答集,论文自报)。
+  fit: "取数→答 + outcome-only + 工具返回 masking,直接是你单工具数值取数试点的母板;检索服务解耦 → 你的 cassette 服务可同样独立起本地。"
+- name: 代码工具 RL（你的纯 Python 估值器就是这条线）
+  what: >-
+    规则化结果奖励(对/错正负分,可选不可执行罚但默认关——过罚会诱导简化代码退化);代码/工具返回 token masking + KL 取 0;执行报错结构化回传让模型学重试。报某数学基准 67%(工具 RL)vs 40%(纯文本 RL)(论文自报)。
+  fit: 执行报错回灌 = 你"交叉核对"链路要的自纠错;工具 RL 相对纯文本 RL 在精确计算任务增益极大,正中靶心。
+- name: turn 级 / step 级信用分配(防"停止调工具")
+  what: >-
+    turn 级方法给中间信号(工具执行/中间取数质量 + 最终 outcome 加权),报某搜索任务比纯结果奖励 +16.6 分(验证集自报);step 级方法靠"重复状态分组"做更细信用,报某具身任务 +13 个点(论文自报)。
+  fit: >-
+    起步用硬门控(配置即可)代替它们;真到瓶颈再考虑 turn 级。注意 step 级靠重复状态,金融取数任务状态若不重复会退化成空、需自评。
+- name: 蒸馏冷启动(SFT 教会调工具再 RL)
+  what: >-
+    多家做法是先用几百条成功轨迹 SFT 教"何时插工具→取数→核对"再 RL,避免纯 RL 冷启探索不到工具调用;若基座已会调工具且非零成功率可跳 SFT。
+  fit: 你的 cassette 成功轨迹正是现成 SFT 数据源;该不该跳 SFT 用 pass@k 测、不靠感觉判断(详见落地设计报告)。
+pitfalls:
+- 照抄半年前博客配置必崩——verl 版本敏感,repo 迁了、main 删了经典工具范例;锁一个 tag 当唯一真相,别混 v0.5 文档与 main 源码。
+- 默认 agent loop 是 single_turn_agent,数据集不写 agent_name 就静默不调工具(这才是"sglang 只有 sync 能调"的真因);跑 1-step smoke 确认工具真被调起。
+- oracle 塞进工具当 step reward 会被 verl 当场丢弃,必须走 reward manager 的 compute_score;reward fn 抛异常被静默降级成全 0,盯 stdout 打印。
+- 长多步轨迹的 rollout↔训练精度错位会沿 token 累乘("loss 正常、reward 玄学崩"),必开截断重要性采样且权重要 detach;cassette 替代不了它。
+- 纯结果奖励多步会训成"停止调工具"(调工具和蒙对拿相同 advantage),起步就在 compute_score 加硬门控(没调工具就判低分)。
+- 工具返回 token 必须走按角色 mask 的接口写、别自己拼 token 序列,否则漏进 loss 学复读工具输出。
+- 工具响应最大长度默认仅 256、财务返回易被截断;multi_turn 真正生效的是 .enable、工具配置键是 multi_turn.tool_config_path(文档里 tool_kwargs.tools_config_file 是 stale)。
+- LoRA + sglang 权重同步有已知 bug,你正是这规模,务必在 pin 的版本上专门验;纯文本多轮设 return_multi_modal_inputs=False 避维度 bug。
+- 别拿裸字符串精确匹配当奖励(诱导刷超长答案钻空子),用数值容差 + 单位归一化;吞吐数字别单甩"20×"(那是论文上界,完整口径 1.53–20.57 倍随算法/模型)。
+gaps:
+- component: oracle 接入(reward function)
+  current: 本项目纯 Python 估值器实测浮点逐位可复现,是近乎理想的确定性 oracle;但没有模块级 compute_score、numerical 比对内核吃结构化 dict 而非整条轨迹文本。
+  suggestion: >-
+    新写约 50–100 行 verl_oracle_reward.py:从 solution_str 抽最终答案 + 数值容差归一化(去千分位/统一单位)+ 返回带 score 键 dict;起步用裸容差自包含实现,先不复用现有多指标比对类(它的依赖正被另一会话重构),等其落定再接。
+- component: 工具接入(BaseTool adapter)
+  current: chatloop 工具入口已 async / 入参 Pydantic / 返回 dict / schema 已是 OpenAI function 格式、数据层 mock-cache-cassette 解耦经 e2e 守护——阻抗低。
+  suggestion: >-
+    写约 30 行/工具的 BaseTool adapter:补 create/release 生命周期 + dict 转 ToolResponse + 经 create_kwargs 注入 cassette 名/容差;schema 转 verl YAML 约十行。RL 试点只取无状态数值工具,避开依赖整个对话状态的记忆/技能类工具(硬墙)。
+- component: 可重放环境(cassette)
+  current: 已有 tushare 缓存层 = "api 名 + 参数 hash → 缓存 DataFrame",几乎就是 verl 想要的"入参 hash → 快照"形态;另有 VCR 录制的 tushare 真实回放,但绑 pytest 不可脱。
+  suggestion: >-
+    直接复用 tushare 缓存当 cassette 后端(execute 里按入参取、miss 落真 API 预热),免写索引器;注意缓存存的是序列化 DataFrame、verl 进程 pandas 版本要对齐;覆盖面目前窄(几只票×几个接口),扩量随数据集一起做。
+- component: 训练环境
+  current: 估值数学层零第三方依赖、orchestrator 层仅 + 一个数据校验库,实测可在独立进程 import;但 verl/sglang 要 Linux+CUDA+多卡,与后端运行环境是两套不兼容的依赖宇宙。
+  suggestion: >-
+    训练 venv 独立,塞约 5 个 oracle 源文件 + 数据校验库即可(增量极小、无 CUDA 冲突);PYTHONPATH 指向后端目录;落地前按本项目"import 链假设要 smoke test 验"的约定,实跑一次 oracle import 确认依赖链成立。
+sources:
+- title: HybridFlow / verl 论文(EuroSys 2025)
+  url: https://arxiv.org/abs/2409.19256
+- title: verl 仓库(volcengine/verl 已迁 verl-project/verl)
+  url: https://github.com/verl-project/verl
+- title: verl 文档 · 多轮 rollout 与增量分词 loss masking
+  url: https://verl.readthedocs.io/en/latest/sglang_multiturn/multiturn.html
+- title: verl 文档 · AgentLoop / agentic RL 两必填项
+  url: https://verl.readthedocs.io/en/latest/start/agentic_rl.html
+- title: verl 文档 · 自定义 reward function 接口
+  url: https://verl.readthedocs.io/en/latest/preparation/reward_function.html
+- title: verl 文档 · rollout 与训练引擎错位校正数学(TIS)
+  url: https://verl.readthedocs.io/en/latest/algo/rollout_corr_math.html
+- title: verl 文档 · LoRA 上跑 PPO/GRPO
+  url: https://verl.readthedocs.io/en/latest/advance/ppo_lora.html
+- title: verl 官方 GRPO 单机示例脚本(Qwen3-8B)
+  url: https://github.com/verl-project/verl/blob/main/examples/grpo_trainer/run_qwen3_8b_fsdp.sh
+- title: Search-R1(检索增强 RL,取数→答 outcome-only)
+  url: https://arxiv.org/abs/2503.09516
+- title: ReTool(代码工具 RL)
+  url: https://arxiv.org/abs/2504.11536
+- title: ToRL(工具集成 RL)
+  url: https://arxiv.org/abs/2503.23383
+- title: ToolRL(工具调用 RL 奖励设计)
+  url: https://arxiv.org/abs/2504.13958
+- title: MT-GRPO(turn 级中间奖励 + 退化实锤)
+  url: https://arxiv.org/html/2505.11821v1
+- title: GiGPO(step 级信用分配 fork)
+  url: https://arxiv.org/abs/2505.10978
+- title: Snorkel FinQA RL 环境(金融数值容差奖励,厂商博客)
+  url: https://snorkel.ai/blog/building-finqa-an-open-rl-environment-for-financial-reasoning-agents/
+- title: 本项目施工底稿 · verl 多步工具 RL 实现配方(914 行,含可照抄 config/code)
+  url: docs/research/2026-06-09-verl-multistep-tool-rl-recipe.md

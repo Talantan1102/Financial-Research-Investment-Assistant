@@ -65,6 +65,16 @@ DIMENSION_REPORTS: dict[str, tuple[dict[str, str], ...]] = {
             "title": "LLM 后训练 · 什么时候必须上 RL,怎么落地",
             "sub": "7 个后训练设计决策,每个配真实场景 · 提示词/SFT/DPO/RL 判别标准 / 数据集构造 / 奖励设计与 reward hacking 攻防 / 五层评估 / verl+sglang 工程落地,5 张图例 + 对照本项目 LLM 调用面三档路线 · 两轮调研 + 19 条承重结论逐条复核",
         },
+        {
+            "slug": "verl-multistep-tool-rl",
+            "title": "verl 多步工具 RL · 施工配方",
+            "sub": "RL 三部曲第二部 · 7 个施工决策,每个配真实落点 · 单对话轮+多工具步+oracle奖励在 verl 里怎么搭 / oracle 接 reward manager / loss masking / credit assignment / 五大坑,3 张图例 · 7 路深读 + 3/3 核验当前 verl",
+        },
+        {
+            "slug": "rl-product-landing-design",
+            "title": "本产品 RL 落地设计 · 两轨 / 数据生成 / 就绪度",
+            "sub": "RL 三部曲第三部 · 7 个设计决策,每个配真实判断 · 两轨结构与奖励物理隔离 / oracle 反向数据生成 / 确定性 oracle 边界 / 分析类打分阶梯 / 最小试点,4 张图例 · 6 路代码就绪度审计(file:line 证据)",
+        },
     ),
     "context": (
         {

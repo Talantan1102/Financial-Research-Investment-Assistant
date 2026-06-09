@@ -1,0 +1,84 @@
+<svg viewBox="0 0 820 510" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="oracle 反向数据生成流水线与 K2 自然外衣混合">
+  <style>
+    .oip-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .oip-h { font-size: 12.5px; fill: #1D1D1F; font-weight: 600; }
+    .oip-d { font-size: 10.5px; fill: #6E6E73; }
+    .oip-arrow { stroke: #5E5CE6; stroke-width: 1.6; fill: none; marker-end: url(#oip-head); }
+  </style>
+  <defs>
+    <marker id="oip-head" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M1,1 L8,4.5 L1,8" stroke="#5E5CE6" stroke-width="1.5" fill="none"/>
+    </marker>
+  </defs>
+
+  <g class="oip-t">
+    <text x="40" y="26" font-size="11" font-weight="600" fill="#86868B">核心:反着生成 —— 先采输入 → oracle 算答案 → 再围着答案套题(答案是副产品,不用人标)</text>
+
+    <!-- 步骤条 -->
+    <rect x="40" y="42" width="150" height="92" rx="10" fill="#FFFFFF" stroke="rgba(94,92,230,0.35)"/>
+    <text x="56" y="64" class="oip-h">① 采真实输入</text>
+    <text x="56" y="84" class="oip-d">tushare 全市场</text>
+    <text x="56" y="99" class="oip-d">分层采(跨行业/</text>
+    <text x="56" y="114" class="oip-d">市值/期间),</text>
+    <text x="56" y="129" class="oip-d">旧期间防污染</text>
+
+    <rect x="214" y="42" width="150" height="92" rx="10" fill="rgba(52,199,89,0.07)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="230" y="64" class="oip-h" fill="#1B7A33">② oracle 算 gold</text>
+    <text x="230" y="84" class="oip-d">纯 Python 估值器 /</text>
+    <text x="230" y="99" class="oip-d">numerical_metric</text>
+    <text x="230" y="114" class="oip-d">确定性算出真值,</text>
+    <text x="230" y="129" class="oip-d">零标注</text>
+
+    <rect x="388" y="42" width="150" height="92" rx="10" fill="rgba(0,199,190,0.08)" stroke="rgba(0,199,190,0.40)"/>
+    <text x="404" y="64" class="oip-h" fill="#0A8A84">③ 反向套题</text>
+    <text x="404" y="84" class="oip-d">K2 式自然外衣:</text>
+    <text x="404" y="99" class="oip-d">retail-investor-</text>
+    <text x="404" y="114" class="oip-d">voice 把(输入,gold)</text>
+    <text x="404" y="129" class="oip-d">包成口语问法</text>
+
+    <rect x="562" y="42" width="150" height="92" rx="10" fill="#FFFFFF" stroke="rgba(94,92,230,0.35)"/>
+    <text x="578" y="64" class="oip-h">④ 反抽校验</text>
+    <text x="578" y="84" class="oip-d">从自然问句反抽</text>
+    <text x="578" y="99" class="oip-d">(代码/期间/字段),</text>
+    <text x="578" y="114" class="oip-d">确认仍映射 gold,</text>
+    <text x="578" y="129" class="oip-d">跑偏则弃</text>
+
+    <path d="M190,88 L210,88" class="oip-arrow"/>
+    <path d="M364,88 L384,88" class="oip-arrow"/>
+    <path d="M538,88 L558,88" class="oip-arrow"/>
+
+    <!-- 难度分桶 -->
+    <rect x="40" y="158" width="672" height="86" rx="10" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.35)"/>
+    <text x="56" y="180" class="oip-h" fill="#4845C2">⑤ 难度分桶(难度是跑出来的,不是拍脑袋定的)</text>
+    <text x="56" y="200" class="oip-d">基座对每题采 n 次 → oracle 打分 → 分桶:全对(太易无信号)/ 全错(太难或污染无信号)/ 中间(金矿,留作 RL)</text>
+    <text x="56" y="218" class="oip-d">这一步本身就是 pass@k 测量——同一个动作既给难度分桶,又回答"能不能跳 SFT"(基座有非零成功率才能直接 RL)</text>
+    <text x="56" y="236" class="oip-d">关键:GRPO 要每个 prompt 的 n 条 rollout 里至少蒙对一条才有梯度;pass@k≈0 的题 RL 学不动,该先 SFT 或缩短任务</text>
+    <path d="M376,134 L376,154" class="oip-arrow"/>
+
+    <!-- 一份三用 -->
+    <rect x="40" y="268" width="220" height="72" rx="9" fill="rgba(52,199,89,0.06)" stroke="rgba(52,199,89,0.35)"/>
+    <text x="150" y="292" class="oip-h" text-anchor="middle" fill="#1B7A33">pass@k 测量集</text>
+    <text x="150" y="312" class="oip-d" text-anchor="middle">决定能不能跳 SFT</text>
+    <text x="150" y="328" class="oip-d" text-anchor="middle">/ RL 该不该上</text>
+
+    <rect x="300" y="268" width="220" height="72" rx="9" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.35)"/>
+    <text x="410" y="292" class="oip-h" text-anchor="middle" fill="#4845C2">RL 训练 prompt 集</text>
+    <text x="410" y="312" class="oip-d" text-anchor="middle">构造方式完全一样</text>
+    <text x="410" y="328" class="oip-d" text-anchor="middle">(中间难度带)</text>
+
+    <rect x="560" y="268" width="152" height="72" rx="9" fill="#FBFBFD" stroke="rgba(60,60,67,0.18)"/>
+    <text x="636" y="292" class="oip-h" text-anchor="middle">eval 集</text>
+    <text x="636" y="312" class="oip-d" text-anchor="middle">切 dev/unseen</text>
+    <text x="636" y="328" class="oip-d" text-anchor="middle">+ 8-gram 去污</text>
+
+    <text x="40" y="362" class="oip-h" fill="#4845C2">建一次,三用 —— 解锁"能不能跳 SFT / RL 该不该上 / 训练数据从哪来"三个问题</text>
+
+    <!-- 边界提醒 -->
+    <rect x="40" y="378" width="740" height="50" rx="9" fill="rgba(255,59,48,0.05)" stroke="rgba(255,59,48,0.30)"/>
+    <text x="58" y="400" class="oip-h" fill="#C2403B">边界:只放有 oracle 的(取数+算数,答案是数字/布尔)</text>
+    <text x="58" y="418" class="oip-d">"该用 DCF 还是 PE""护城河强不强"没确定性真值,塞进来只能退化成 judge、污染整个集子 → 走分析类轨</text>
+
+    <text x="40" y="452" class="oip-d" font-style="italic">两种数据法各归各位:计算类轨 = oracle 反向脊梁 + K2 自然外衣;分析类轨 = 纯 K2 合成 + rubric 标签。</text>
+    <text x="40" y="472" class="oip-d" font-style="italic">"没验证集"不是障碍——可验证任务的验证集是 oracle 的副产品,几小时到一两天的事,不是几周。</text>
+  </g>
+</svg>
