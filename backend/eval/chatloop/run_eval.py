@@ -26,6 +26,79 @@ _DEFAULT_GOLDEN = Path(__file__).resolve().parent / "golden" / "scenarios.jsonl"
 _MULTITURN_GOLDEN = Path(__file__).resolve().parent / "golden" / "multiturn.jsonl"
 
 
+def _record_run(
+    *,
+    mode: str,
+    metrics: list[dict],
+    started_at,  # datetime
+    golden_path: Path,
+    case_count: int,
+    dispatch: str | None = None,
+    k: int | None = None,
+    max_steps: int | None = None,
+    max_turns: int | None = None,
+    judge_model: str | None = None,
+    simulator_model: str | None = None,
+    thresholds: dict | None = None,
+    status: str = "ok",
+) -> None:
+    """落库:run 配置(含采样/耗时/成本/git_sha/prompt_sha)+ 指标行。失败不炸评估。"""
+    from datetime import datetime
+
+    try:
+        from app.services.tier_router import V0_DEFAULT_MODEL
+        from eval.chatloop.recorder import (
+            ChatloopEvalRecorder,
+            git_sha,
+            new_run_id,
+            now_iso,
+            prompt_sha,
+        )
+
+        rec = ChatloopEvalRecorder()
+        dur_ms = int((datetime.now() - started_at).total_seconds() * 1000)
+        cost, tokens = rec.cost_tokens_since(started_at)
+        sampling: dict = {
+            "sut": {"temperature": "provider-default", "top_p": "provider-default",
+                    "top_k": "provider-default"}
+        }
+        if judge_model:
+            sampling["judge"] = {"temperature": 0.0, "top_p": "default", "top_k": "default"}
+        if simulator_model:
+            sampling["simulator"] = {"temperature": 0.4, "top_p": "default", "top_k": "default"}
+        run = {
+            "run_id": new_run_id(),
+            "created_at": now_iso(),
+            "git_sha": git_sha(),
+            "mode": mode,
+            "dispatch": dispatch,
+            "sut_model": V0_DEFAULT_MODEL,
+            "judge_model": judge_model,
+            "simulator_model": simulator_model,
+            "k": k,
+            "max_steps": max_steps,
+            "max_turns": max_turns,
+            "golden_file": str(golden_path),
+            "case_count": case_count,
+            "system_prompt_sha": prompt_sha(),
+            "thresholds_json": thresholds,
+            "sampling_json": sampling,
+            "duration_ms": dur_ms,
+            "cost_cny": cost,
+            "total_tokens": tokens,
+            "status": status,
+            "config_json": {"mode": mode, "dispatch": dispatch, "k": k,
+                            "max_steps": max_steps, "max_turns": max_turns,
+                            "judge_model": judge_model, "simulator_model": simulator_model,
+                            "golden": str(golden_path)},
+        }
+        rid = rec.record(run, metrics)
+        cost_str = f"成本 ¥{cost:.4f}/{tokens}tok" if cost is not None else "成本 best-effort 未取到"
+        print(f"\n→ 已落库 run_id={rid}(git {run['git_sha']},耗时 {dur_ms}ms,{cost_str})")
+    except Exception as e:  # noqa: BLE001 — 落库失败不破坏评估输出
+        print(f"\n→ ⚠️ 落库失败(非致命):{type(e).__name__}: {e}")
+
+
 def main(argv: list[str] | None = None) -> int:
     import logging
 
@@ -51,10 +124,13 @@ def main(argv: list[str] | None = None) -> int:
         scenarios = scenarios[: args.limit]
 
     if args.multiturn:
-        return asyncio.run(_run_multiturn(scenarios, model=args.judge_model, max_turns=args.max_turns))
+        return asyncio.run(
+            _run_multiturn(scenarios, model=args.judge_model, max_turns=args.max_turns,
+                           golden_path=golden_path)
+        )
 
     if args.grounding:
-        return asyncio.run(_run_grounding(scenarios, model=args.judge_model))
+        return asyncio.run(_run_grounding(scenarios, model=args.judge_model, golden_path=golden_path))
 
     if not args.ci and not args.offline:
         by_diff: dict[str, int] = defaultdict(int)
@@ -66,15 +142,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     k = args.k if args.offline else 1
-    return asyncio.run(_run(scenarios, k=k, dispatch=args.dispatch, offline=args.offline))
+    return asyncio.run(
+        _run(scenarios, k=k, dispatch=args.dispatch, offline=args.offline, golden_path=golden_path)
+    )
 
 
-async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool) -> int:
+async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool, golden_path: Path) -> int:
+    from datetime import datetime
+
     from eval.chatloop.passk import pass_power_k
     from eval.chatloop.scorers import BehaviorScore, score_behavior
     from eval.chatloop.sut_runner import run_scenarios
     from eval.tool_selection._core import is_abstain_case
 
+    started_at = datetime.now()
     results = await run_scenarios(scenarios, dispatch_mode=dispatch, k=k)
 
     runs_by_case: dict[str, list] = defaultdict(list)
@@ -116,17 +197,50 @@ async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool) -> int:
     passk = pass_power_k(per_run_pass) if (offline and k > 1) else None
     title = "chatloop 评估 — 离线 live(pass^k)" if offline else "chatloop 评估 — 确定性闸(noop)"
     print(format_scorecard(scores, title=title, passk=passk, errors=errors or None))
+
+    # --- 落库 ---
+    from eval.chatloop.passk import pass1_rate, passk_rate
+    from eval.tool_selection._core import IRRELACC_THRESHOLD, RELACC_THRESHOLD
+
+    layer = "offline" if offline else "ci"
+    rel = [s for s in scores if not s.is_abstain]
+    abst = [s for s in scores if s.is_abstain]
+    dreq = [s for s in scores if s.disclaimer_required]
+
+    def _m(beh: str, met: str, num: int, den: int) -> dict:
+        return {"behavior": beh, "layer": layer, "metric": met,
+                "value": (num / den) if den else None, "numerator": num, "denominator": den}
+
+    metrics = [
+        _m("routing_tool", "RelAcc", sum(s.tool_passed for s in rel), len(rel)),
+        _m("abstain", "IrrelAcc", sum(s.tool_passed for s in abst), len(abst)),
+        _m("policy", "disclaimer_compliance", sum(s.disclaimer_present for s in dreq), len(dreq)),
+        _m("policy", "advice_violations", sum(s.advice_violation for s in scores), len(scores)),
+    ]
+    if passk:
+        metrics.append({"behavior": "reliability", "layer": "offline", "metric": "passk",
+                        "value": passk_rate(passk),
+                        "numerator": sum(1 for v in passk.values() if v.passk),
+                        "denominator": len(passk)})
+        metrics.append({"behavior": "reliability", "layer": "offline", "metric": "pass1",
+                        "value": pass1_rate(passk), "numerator": None, "denominator": None})
+    _record_run(mode=("offline" if offline else "ci"), metrics=metrics, started_at=started_at,
+                golden_path=golden_path, case_count=len(scenarios), dispatch=dispatch, k=k,
+                max_steps=(None if offline else 1),
+                thresholds={"RelAcc": RELACC_THRESHOLD, "IrrelAcc": IRRELACC_THRESHOLD})
     return 0
 
 
-async def _run_grounding(scenarios: list, *, model: str) -> int:
+async def _run_grounding(scenarios: list, *, model: str, golden_path: Path) -> int:
     """行为④:real dispatch → 每个实质回答跑 grounding 裁判 → 报分 + 导出待标扩充集。"""
     import json
+    from datetime import datetime
 
     from eval.chatloop.grounding_scorer import GroundingJudge, score_grounding_pass
     from eval.chatloop.scenario import VALID_DIFFICULTY
     from eval.chatloop.sut_runner import run_scenarios
 
+    started_at = datetime.now()
     results = await run_scenarios(scenarios, dispatch_mode="real", k=1)
     by_case = {s.case_id: s for s in scenarios}
     judge = GroundingJudge(model=model)
@@ -191,13 +305,30 @@ async def _run_grounding(scenarios: list, *, model: str) -> int:
         for row in expansion:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"\n→ 已导出 {len(expansion)} 条待标扩充集:{out_path}")
+
+    # --- 落库 ---
+    strict = sum(1 for f in faiths if f >= 1.0)
+    lenient = sum(1 for f in faiths if f >= 0.8)
+    metrics = [
+        {"behavior": "grounding", "layer": "offline", "metric": "strict_faith",
+         "value": (strict / scored) if scored else None, "numerator": strict, "denominator": scored},
+        {"behavior": "grounding", "layer": "offline", "metric": "lenient_faith_0.8",
+         "value": (lenient / scored) if scored else None, "numerator": lenient, "denominator": scored},
+    ]
+    _record_run(mode="grounding", metrics=metrics, started_at=started_at, golden_path=golden_path,
+                case_count=len(scenarios), dispatch="real", judge_model=model,
+                status=("partial" if errors else "ok"),
+                thresholds={"strict_faith": 1.0, "lenient_faith": 0.8})
     return 0
 
 
-async def _run_multiturn(scenarios: list, *, model: str, max_turns: int) -> int:
+async def _run_multiturn(scenarios: list, *, model: str, max_turns: int, golden_path: Path) -> int:
     """多轮对话:模拟用户 × agent,打印 transcript + 评分(目标达成/政策/效率)。"""
+    from datetime import datetime
+
     from eval.chatloop.multiturn import MultiTurnJudge, run_multiturn, score_multiturn
 
+    started_at = datetime.now()
     results = await run_multiturn(scenarios, simulator_model=model, max_turns=max_turns)
     by_case = {s.case_id: s for s in scenarios}
     judge = MultiTurnJudge(model=model)
@@ -222,10 +353,23 @@ async def _run_multiturn(scenarios: list, *, model: str, max_turns: int) -> int:
         )
     if scores:
         n = len(scores)
-        print(f"- **目标达成率**:{sum(s['goal_met'] for s in scores)}/{n}")
-        print(f"- 跨轮方向性违例:{sum(s['advice_violations'] for s in scores)} 例")
+        goal = sum(s["goal_met"] for s in scores)
+        adv = sum(s["advice_violations"] for s in scores)
+        print(f"- **目标达成率**:{goal}/{n}")
+        print(f"- 跨轮方向性违例:{adv} 例")
         print(f"- 用户主动喊停:{sum(1 for r in results if r.get('stopped_by_user'))}/{len(results)}(其余顶到轮数上限)")
         print(f"- 平均 {sum(s['turns'] for s in scores) / n:.1f} 轮、{sum(s['total_tools'] for s in scores) / n:.0f} 工具/场景")
+        # --- 落库 ---
+        metrics = [
+            {"behavior": "multiturn", "layer": "offline", "metric": "goal_met",
+             "value": goal / n, "numerator": goal, "denominator": n},
+            {"behavior": "multiturn", "layer": "offline", "metric": "advice_violations",
+             "value": float(adv), "numerator": adv, "denominator": n},
+        ]
+        _record_run(mode="multiturn", metrics=metrics, started_at=started_at,
+                    golden_path=golden_path, case_count=len(scenarios), dispatch="real",
+                    max_turns=max_turns, judge_model=model, simulator_model=model,
+                    status=("partial" if any(r.get("error") for r in results) else "ok"))
     return 0
 
 
