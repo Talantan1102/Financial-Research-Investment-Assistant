@@ -90,6 +90,7 @@ async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool) -> int:
                 tool_passed=False,
                 tool_detail="SUT 全程报错",
                 disclaimer_present=False,
+                disclaimer_required=False,
                 advice_violation=False,
             )
         scores.append(rep)
