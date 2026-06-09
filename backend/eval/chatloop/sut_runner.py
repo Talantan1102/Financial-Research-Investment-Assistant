@@ -24,6 +24,9 @@ from eval.chatloop.scenario import Scenario
 
 logger = logging.getLogger(__name__)
 
+# 评测固定 user_id —— 必须是合法 UUID(memory_search 等按 UUID 解析;"eval" 会炸)。
+_EVAL_USER_ID = "00000000-0000-4000-8000-000000000001"
+
 
 @dataclass(frozen=True)
 class SutResult:
@@ -32,6 +35,7 @@ class SutResult:
     tool_calls: list[dict[str, Any]]
     response_text: str
     escalate_offered: bool
+    evidence: str = ""  # real dispatch:agent 看到的工具返回(grounding 判依据)
     error: str | None = None
 
 
@@ -54,6 +58,8 @@ async def run_scenarios(
     from app.chatloop.context import ContextDeps
     from app.chatloop.eval_agent import ChatLoopAgent
     from app.chatloop.gates import GateConfig
+    from app.chatloop.loop import ToolLoop
+    from app.chatloop.state import ChatLoopState
     from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
     from app.chatloop.worker_wiring import build_heavy_singletons
     from app.services.mcp_client import MCPClient
@@ -89,23 +95,37 @@ async def run_scenarios(
                             if dispatch_mode == "real"
                             else FakeNoopHub(real_hub, run_search_tools_live=is_seq)
                         )
-                        agent = ChatLoopAgent(
+                        # 直接跑 ToolLoop(而非 ChatLoopAgent.run)以保留 final 状态 → 抽 evidence
+                        state = ChatLoopState(
+                            user_id=_EVAL_USER_ID,
+                            session_id=rid,
+                            request_id=rid,
+                            messages=[{"role": "user", "content": sc.user_input}],
+                        )
+                        toolloop = ToolLoop(
                             llm=singletons.llm,
                             tool_hub=hub,
                             context_deps=deps,
                             gate_cfg=GateConfig(max_steps=steps),
                         )
-                        out = await agent.run(sc.user_input, rid)
+                        final = await toolloop.run(state)
+                        resp = final.final_response or ChatLoopAgent._last_assistant_content(final)
+                        tcs = ChatLoopAgent._extract_tool_calls(final)
+                        evidence = "\n".join(
+                            str(m.get("content", ""))
+                            for m in final.messages
+                            if m.get("role") == "tool"
+                        )
                         results.append(
                             SutResult(
                                 case_id=sc.case_id,
                                 run_idx=run_idx,
                                 tool_calls=[
-                                    {"tool_name": tc.tool_name, "args": tc.args}
-                                    for tc in out.tool_calls
+                                    {"tool_name": tc.tool_name, "args": tc.args} for tc in tcs
                                 ],
-                                response_text=out.response_text,
-                                escalate_offered=out.escalate_offered,
+                                response_text=resp,
+                                escalate_offered=final.escalate_offered,
+                                evidence=evidence,
                             )
                         )
                     except Exception as e:  # noqa: BLE001 — per-case 隔离,fail loud 但不炸整跑

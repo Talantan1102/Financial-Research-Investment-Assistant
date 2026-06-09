@@ -33,11 +33,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--golden", default=str(_DEFAULT_GOLDEN))
     p.add_argument("--ci", action="store_true", help="确定性闸:noop k=1")
     p.add_argument("--offline", action="store_true", help="离线层:noop k 次 + pass^k")
+    p.add_argument("--grounding", action="store_true", help="行为④:real dispatch + grounding 裁判")
     p.add_argument("--k", type=int, default=5, help="pass^k 次数(仅 --offline)")
     p.add_argument("--dispatch", choices=["noop", "real"], default="noop")
+    p.add_argument("--judge-model", default="qwen-plus", help="grounding 裁判模型(独立于 SUT)")
+    p.add_argument("--limit", type=int, default=0, help="只跑前 N 条(0=全部,调试用)")
     args = p.parse_args(argv)
 
     scenarios = load_scenarios(Path(args.golden))
+    if args.limit > 0:
+        scenarios = scenarios[: args.limit]
+
+    if args.grounding:
+        return asyncio.run(_run_grounding(scenarios, model=args.judge_model))
 
     if not args.ci and not args.offline:
         by_diff: dict[str, int] = defaultdict(int)
@@ -99,6 +107,70 @@ async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool) -> int:
     passk = pass_power_k(per_run_pass) if (offline and k > 1) else None
     title = "chatloop 评估 — 离线 live(pass^k)" if offline else "chatloop 评估 — 确定性闸(noop)"
     print(format_scorecard(scores, title=title, passk=passk, errors=errors or None))
+    return 0
+
+
+async def _run_grounding(scenarios: list, *, model: str) -> int:
+    """行为④:real dispatch → 每个实质回答跑 grounding 裁判 → 报分 + 导出待标扩充集。"""
+    import json
+
+    from eval.chatloop.grounding_scorer import GroundingJudge, score_grounding_pass
+    from eval.chatloop.scenario import VALID_DIFFICULTY
+    from eval.chatloop.sut_runner import run_scenarios
+
+    results = await run_scenarios(scenarios, dispatch_mode="real", k=1)
+    by_case = {s.case_id: s for s in scenarios}
+    judge = GroundingJudge(model=model)
+
+    by_diff: dict[str, list[bool]] = defaultdict(list)
+    rows: list[tuple] = []
+    errors: list[tuple[str, str]] = []
+    expansion: list[dict] = []
+    for r in results:
+        sc = by_case[r.case_id]
+        if r.error:
+            errors.append((r.case_id, r.error))
+            continue
+        res = await score_grounding_pass(r.response_text, r.evidence, judge)
+        rows.append((r.case_id, sc.difficulty, res))
+        by_diff[sc.difficulty].append(bool(res["pass"]))
+        expansion.append(
+            {
+                "id": f"exp-{r.case_id}",
+                "问题": sc.user_input,
+                "证据": (r.evidence or "")[:1500],
+                "回答": (r.response_text or "")[:1500],
+                "label": "",
+                "critique": "",
+            }
+        )
+
+    scored = sum(len(v) for v in by_diff.values())
+    passed = sum(sum(v) for v in by_diff.values())
+    print("# chatloop 评估 — 行为④ grounding(real dispatch,裁判 " + model + ")\n")
+    print(f"- 评分 case:{scored}(另 {len(errors)} 例 SUT 报错)")
+    print(f"- **grounding 通过率**:{passed}/{scored}" + (f" ({passed/scored:.0%})" if scored else ""))
+    print("\n| 难度 | 通过/总 |\n|---|---|")
+    for d in VALID_DIFFICULTY:
+        v = by_diff.get(d, [])
+        if v:
+            print(f"| {d} | {sum(v)}/{len(v)} |")
+    fails = [(c, d, res) for c, d, res in rows if not res["pass"]]
+    if fails:
+        print("\n## 未通过(疑似编/越证据)")
+        for c, d, res in fails:
+            print(f"- `{c}` [{d}]: faith={res['faithfulness']:.2f} abstain={res['abstain']}")
+    if errors:
+        print("\n## SUT 报错")
+        for c, e in errors:
+            print(f"- `{c}`: {e}")
+
+    out_path = Path(__file__).resolve().parent / "calibration" / "grounding_expansion.jsonl"
+    with out_path.open("w", encoding="utf-8") as f:
+        f.write("// 真实 grounding 输出(real dispatch),供扩充校准集:填 label/critique。数据为 mock 行情口径。\n")
+        for row in expansion:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(f"\n→ 已导出 {len(expansion)} 条待标扩充集:{out_path}")
     return 0
 
 
