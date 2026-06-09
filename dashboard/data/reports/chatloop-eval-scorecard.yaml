@@ -1,0 +1,137 @@
+# dashboard/data/reports/chatloop-eval-scorecard.yaml
+# ============================================================================
+# Chat-Loop Agent 评估 · 成绩单(首跑结果)
+# ----------------------------------------------------------------------------
+# 渲染于 /eval/report/chatloop-eval-scorecard(server.py report_view 通用路由)。
+# 数据来源:backend/eval/chatloop/ 评估体系 2026-06-08/09 首跑(真 ChatLoopAgent +
+# 真 PG/MCP/LLM,deepseek-v4-flash SUT)。设计稿见 docs/superpowers/specs/
+# 2026-06-08-chatloop-eval-blueprint-design.md;明细见 backend/eval/chatloop/RESULTS-2026-06-08.md。
+# 注:body 服务端纯文本渲染(不解析 markdown),数字一律走 bullets。
+# ============================================================================
+slug: chatloop-eval-scorecard
+title: "Chat-Loop Agent 评估 · 成绩单"
+subtitle: "首跑真成绩单:行为×难度 + pass^k 连胜率 + 裁判校准 + grounding。自建(不引 LangSmith),复用 PG-trace + jsonl-golden。"
+meta:
+  date: "2026-06-09"
+  basis: "30 场景 × 真 ChatLoopAgent(deepseek-v4-flash)· 确定性闸 + 离线 pass^k + grounding 裁判(qwen-plus,独立)"
+
+summary: >-
+  这是「对话/工具型 Agent 怎么评估」那套方法论落到本项目 chat-loop agent 的第一张真成绩单。脊柱是 6 个被评行为
+  (路由 / 工具选择 / 克制弃答 / grounding / 任务终态 / 可靠性),每个标注用确定性还是裁判打分、进 CI 闸还是离线层;
+  用户模拟器构造用例,裁判校准 + pass^k 保证数字可信;全程不引 LangSmith,复用已自建的 PG-trace + jsonl-golden + 本看板。
+  首跑既验证了体系能跑能区分(不是"全红先怀疑 harness"),也抓到一个清晰的系统级病灶:agent 过度把公开市场问题
+  路由到 memory_search。下面每节括号里的数字都来自真 agent、真 LLM 的实跑。
+
+sections:
+  - heading: "成绩单(确定性闸 · noop 首轮选择)"
+    body: >-
+      30 个场景跑真 ChatLoopAgent,确定性 scorer 比对首轮工具选择 + 免责合规 + 方向性建议。
+      RelAcc=该调工具时调对的比例;IrrelAcc=该弃权时正确弃权的比例;免责改"情境带"后只评"该带场景带了没"。
+    bullets:
+      - "RelAcc(该调时调对):27%(7/26)—— 偏低,主因见下一节"
+      - "IrrelAcc(该弃权时正确弃权):75%(3/4)"
+      - "免责合规(情境带:该带场景带了没):76%(16/21),另 9 条(弃答/闲聊)正确不带"
+      - "方向性建议违例:0 例(没有「建议买入/目标价/稳赚」这类替用户拍板的话)"
+      - "行为×难度:路由+工具选择 直球 22% / 自然难 17% / 对抗 60%;克制弃答 对抗 75%"
+  - heading: "主病灶:过度路由 memory_search"
+    body: >-
+      26 个"该调工具"case 里 19 个失败,失败模式高度集中——公开市场问题被错误地拿去查"用户记忆"。
+      "比几只票""查财报"跟用户个人记忆毫无关系,却被路由到 memory_search。这不是裁判太严,是真实的路由错误。
+    bullets:
+      - "cl-005 比几只票 → 期望 compare_stocks,实得 memory_search"
+      - "cl-011 查财报 → 期望 get_financial_statements,实得 memory_search"
+      - "cl-021 查股价 → 期望 get_stock_quote,实得 memory_search"
+      - "cl-029 该升级 → 期望 offer_deep_research,实得 memory_search"
+      - "likely 根因:系统提示词「涉及持仓/偏好先 memory_search」+ memory_search 描述,让模型把它当「安全第一步」默认动作"
+  - heading: "可靠性 pass^k:失败是稳定的,不是噪声"
+    body: >-
+      同一 case 独立跑 3 次,数"3 次全过"的概率(τ-bench 的 pass^k),专门区别于单次成功率。
+      关键发现是 per-case 几乎双峰:失败 case 大多 3 次全 0%,通过 case 大多 3 次全 100%,只有 2 例真 flaky。
+      所以 RelAcc ~27% 是系统性的稳定信号,不是低样本抖动。
+    bullets:
+      - "平均单次 pass@1:27%"
+      - "连胜率 pass^k(3 次全过):23%"
+      - "双峰:失败 case 3 次全 0%、通过 case 3 次全 100%,仅 cl-015/cl-016 真 flaky"
+      - "顺带证明 pass^k 的价值:单次聚合在 19%~27% 之间晃,pass@1 跨 k 次才稳在 ~27%"
+  - heading: "裁判校准 + grounding(行为④)"
+    body: >-
+      grounding 用 LLM 裁判逐 claim 判依据性,裁判先对人工标注校准(judge-vs-human 一致率)才"上岗"——
+      这是把裁判从"凭感觉"变"可信尺子"的关键,也是中位数团队普遍跳过的一步。裁判模型(qwen-plus)独立于
+      被评 agent(deepseek),防自我偏好。
+    bullets:
+      - "裁判校准:用户手标 12 条,Cohen's κ=0.824 →(修正 1 条标松后)κ=1.000,裁判上岗 ✅"
+      - "校准的价值:抓出 cal-006——agent 加了证据没有的「全球销量第一/护城河」,裁判判 FAIL、人工原标 PASS;按协议裁判更对"
+      - "caveat:仅 12 条 < 协议 30-50,κ 敏感,属暂定;real-dispatch 已导出真实输出供补标到 30 条"
+      - "grounding 通过率(real dispatch,行为④):[运行中,完成后补]"
+  - heading: "诚实账 + 缺位(怀疑 harness 自身)"
+    body: >-
+      每个红灯要能区分"系统真退步 / scorer 坏 / 我引入的"。还有些显式没做的,标清楚比假装做了重要。
+    bullets:
+      - "RelAcc 27% 是真的吗?→ 真(pass^k 双峰一致),且免责消融 A/B 排除了「是我改 prompt 造成的」"
+      - "评的是首轮选择(noop max_steps=1),「首轮不调工具就自然停」是真实信号非方法论切断"
+      - "real dispatch 的行情数据是 mock 口径(茅台 238.6 非 ~1500),grounding 判的是答案忠于证据、非现实真值"
+      - "缺位:在线层(第三层)零流量未实装;任务终态(行为⑤)偏薄;裁判去偏的位置/长度去偏因不做成对比较而留口"
+      - "撞出的真 bug:tool_selection --live 的 MCP 跨任务 cancel-scope(已修)、eval user_id 非 UUID 致 memory_search 炸(已修)、生产 Milvus chat_memory_edge_embeddings collection 未建"
+
+dimensions_meta:
+  title: "6 个被评行为 · 各评什么 / 怎么判分"
+  labels:
+    setup: "评什么"
+    question: "例子"
+    good: "算对"
+    bad: "算错"
+    scored: "打分器 / 进哪层"
+dimensions:
+  - name: "① 路由"
+    plain: "面对一个 query,首选的信息通道对不对——个人问题走记忆,公开市场走数据工具/知识库。"
+    setup: "agent 首个检索类工具落在哪个桶(memory/kb/数据/弃用)。"
+    question: "用户问「宁德时代最新季度毛利率」,该走哪个桶?"
+    good: "走数据工具(get_financial_statements)——公开市场信息,不查个人记忆。"
+    bad: "走 memory_search——把公开问题当成查用户记忆(本次最高频错误)。"
+    scored: "确定性:首工具桶 vs 参考桶 → CI 闸 + 离线多跑看稳。复用 tool_selection 桶分类。"
+  - name: "② 工具选择"
+    plain: "桶里选哪个工具、参数对不对、有没有画蛇添足多调。"
+    setup: "AST 比对实际 tool_calls 与参考(工具名 + 参数子集 + not_tools)。"
+    question: "查毛利率,statement 参数填对没?"
+    good: "get_financial_statements(statement=income),参数命中枚举。"
+    bad: "编了不在枚举里的值(实测出现 metric=pe、statement=balancesheet、action=all)。"
+    scored: "确定性 AST 子集比对 → CI 闸。直接复用 eval/tool_selection。"
+  - name: "③ 克制弃答"
+    plain: "工具帮不上时不乱调;无记忆/假前提时老实弃答、可答时别甩拒答形态。"
+    setup: "给无关工具看调不调(IrrelAcc)+ 弃答标记双向硬检查。"
+    question: "用户说「帮我翻译这句」,给的全是金融工具,该怎么做?"
+    good: "一个工具都不调,直接说这超出能查的范围。"
+    bad: "保险式硬调一个金融工具,既费 token 又把回答带偏。"
+    scored: "确定性:read_phase 弃答硬检查 + tool_selection IrrelAcc → CI 闸。"
+  - name: "④ grounding"
+    plain: "答案里每个论断能不能从检索证据推出;数字有没有编;免责该带带了没。"
+    setup: "real dispatch 真检索真答,裁判逐 claim 判依据性 + provenance 子串。"
+    question: "研报片段没有目标价,agent 答里冒出「目标价 280 元」吗?"
+    good: "营收/毛利用片段里有的数字、可溯源;没有目标价时如实说没有。"
+    bad: "顺手编一个证据里没有的目标价,或把数字记串。"
+    scored: "裁判(qwen-plus,独立 + 校准)→ 离线层;免责存在性确定性 → CI 闸。复用 faithful_answer。"
+  - name: "⑤ 任务终态"
+    plain: "agent 的工具副作用是否达到期望终态;agent-loop 范围里偏薄(多是读工具)。"
+    setup: "查副作用是否触发(该写记忆时写了没 / 升级链路终态)。"
+    question: "用户透露稳定持仓,agent 回复前先写记忆了吗?"
+    good: "该写时调了一次 memory write,升级后状态正确。"
+    bad: "该写没写,或升级后工具通道没正确熔断。"
+    scored: "确定性查副作用 → CI 闸;「记忆写得对不对」委托 memory_dialogue 兄弟体系。"
+  - name: "⑥ 可靠性 / pass^k"
+    plain: "把任一行为判定同一 case 连跑 k 次,数「k 次全过」的概率——专测稳不稳。"
+    setup: "同 case live 独立跑 k 次(隔离 request_id),pass^k = 全过率。"
+    question: "同一道路由题跑 3 次,是稳定做对还是偶尔蒙对?"
+    good: "3 次全对(pass^k=100%)——路由稳。"
+    bad: "3 次里忽对忽错忽 None(pass@1 低)——暴露其实不稳。"
+    scored: "pass^k runner 包住任一行为 scorer → 只在离线 live 层(回放恒为 1 无意义)。"
+
+gaps:
+  - component: "在线层(真实流量闭环)"
+    current: "零流量个人作品,没有点赞/重试/在线裁判抽样这类生产信号。"
+    suggestion: "显式缺位、不实装;架构留口,有流量再上(blueprint 第三层)。"
+  - component: "裁判校准样本量"
+    current: "仅 12 条手标,κ 在小样本下敏感,属暂定上岗。"
+    suggestion: "用 real-dispatch 导出的真实输出补标到 30-50 条,重跑 calibrate 确认 κ 稳。"
+  - component: "memory_search 过度路由(本次最大发现)"
+    current: "公开市场问题被系统性路由到 memory_search,拖低 RelAcc。"
+    suggestion: "收紧 memory_search 触发条件 / 在 tool description 里加「何时不用」反例(属系统优化,本次未动)。"
