@@ -23,6 +23,7 @@ from eval.chatloop.report import format_dry, format_scorecard
 from eval.chatloop.scenario import load_scenarios
 
 _DEFAULT_GOLDEN = Path(__file__).resolve().parent / "golden" / "scenarios.jsonl"
+_MULTITURN_GOLDEN = Path(__file__).resolve().parent / "golden" / "multiturn.jsonl"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,15 +35,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ci", action="store_true", help="确定性闸:noop k=1")
     p.add_argument("--offline", action="store_true", help="离线层:noop k 次 + pass^k")
     p.add_argument("--grounding", action="store_true", help="行为④:real dispatch + grounding 裁判")
+    p.add_argument("--multiturn", action="store_true", help="多轮:模拟用户 × agent(spec § 5)")
+    p.add_argument("--max-turns", type=int, default=5, help="多轮最大轮数")
     p.add_argument("--k", type=int, default=5, help="pass^k 次数(仅 --offline)")
     p.add_argument("--dispatch", choices=["noop", "real"], default="noop")
     p.add_argument("--judge-model", default="qwen-plus", help="grounding 裁判模型(独立于 SUT)")
     p.add_argument("--limit", type=int, default=0, help="只跑前 N 条(0=全部,调试用)")
     args = p.parse_args(argv)
 
-    scenarios = load_scenarios(Path(args.golden))
+    golden_path = Path(args.golden)
+    if args.multiturn and args.golden == str(_DEFAULT_GOLDEN):
+        golden_path = _MULTITURN_GOLDEN  # --multiturn 默认走多轮 golden
+    scenarios = load_scenarios(golden_path)
     if args.limit > 0:
         scenarios = scenarios[: args.limit]
+
+    if args.multiturn:
+        return asyncio.run(_run_multiturn(scenarios, model=args.judge_model, max_turns=args.max_turns))
 
     if args.grounding:
         return asyncio.run(_run_grounding(scenarios, model=args.judge_model))
@@ -182,6 +191,29 @@ async def _run_grounding(scenarios: list, *, model: str) -> int:
         for row in expansion:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"\n→ 已导出 {len(expansion)} 条待标扩充集:{out_path}")
+    return 0
+
+
+async def _run_multiturn(scenarios: list, *, model: str, max_turns: int) -> int:
+    """多轮对话:模拟用户 × agent,打印 transcript(本切片只验能跑通)。"""
+    from eval.chatloop.multiturn import run_multiturn
+
+    results = await run_multiturn(scenarios, simulator_model=model, max_turns=max_turns)
+    print(f"# chatloop 评估 — 多轮对话(模拟用户 {model},max_turns={max_turns})\n")
+    for r in results:
+        print(f"## {r['case_id']}  目标:{str(r.get('goal', ''))[:70]}")
+        if r.get("error"):
+            print(f"  [报错] {r['error']}\n")
+            continue
+        for i, t in enumerate(r["turns"], 1):
+            tools = ("  | 工具:" + ",".join(t["tools"])) if t["tools"] else ""
+            print(f"  [第{i}轮] 用户:{t['user']}")
+            print(f"          助手:{str(t['assistant'])[:220]}{tools}")
+        end = "用户喊停" if r.get("stopped_by_user") else "到轮数上限"
+        print(f"  → 共 {len(r['turns'])} 轮({end})\n")
+    n_turns = [len(r["turns"]) for r in results if not r.get("error")]
+    if n_turns:
+        print(f"- {len(results)} 个多轮场景,平均 {sum(n_turns) / len(n_turns):.1f} 轮/场景")
     return 0
 
 
