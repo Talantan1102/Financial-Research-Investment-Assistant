@@ -44,7 +44,6 @@ def _make_inputs(report: dict[str, Any], kb: dict[str, str]) -> MetricInputs:
             target_name="茅台",
             cut_off_date=date(2024, 6, 30),
         ),
-        ground_truth=None,
         tushare_adapter=None,
         kb_lookup=_fake_kb_lookup(kb),
         evaluator_clients={},

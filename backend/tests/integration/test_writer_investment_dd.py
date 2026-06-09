@@ -112,15 +112,14 @@ def stub_report_json() -> str:
                 "overall_risk_level": "low",
                 "evidence": ["c1::4"],
             },
-            "investment_recommendation": {
-                "narrative": "建议增持。",
-                "recommendation": "recommend_overweight",
-                "recommended_position_size_pct": 5.0,
-                "recommended_holding_period": "medium_term",
-                "recommended_entry_price_range": {"low": 10.0, "high": 11.0},
-                "recommended_stop_loss_price": 9.0,
-                "estimated_target_price_range": {"low": 13.0, "high": 15.0},
-                "position_management_conditions": [],
+            "investment_synthesis": {
+                "narrative": "综合研判:基本面稳健,估值合理。",
+                "key_judgment_factors": ["成长能否持续"],
+                "valuation_context": "当前价位于内在价值区间内。",
+                "bull_case": ["基本面稳健"],
+                "bear_case": ["估值对增长敏感"],
+                "strongest_bull_point": "基本面稳健",
+                "strongest_bear_point": "估值对增长敏感",
                 "evidence": ["c1::5"],
             },
         }
@@ -153,17 +152,9 @@ def test_writer_emits_investment_report(stub_report_json: str) -> None:
     report = sr.state_update["investment_report"]
     assert isinstance(report, InvestmentDueDiligenceReport)
     assert report.request_id == "req-test-write-001"  # writer overwrites
-    # v0.8.5 — post_process_writer_output overrides LLM-emitted recommendation.
-    # The stub report carries no `roe` / `revenue_yoy` numeric fields so
-    # classify_recommendation falls through to the recommend_hold fallback.
-    # The 5 valid literals are still allowed; deterministic helper picks one.
-    assert report.investment_recommendation.recommendation in {
-        "recommend_buy",
-        "recommend_overweight",
-        "recommend_hold",
-        "recommend_underweight",
-        "recommend_sell",
-    }
+    # 去推荐后 § 6 为 InvestmentSynthesis(无评级/仓位);只校验综合研判 narrative 在。
+    assert isinstance(report.investment_synthesis.narrative, str)
+    assert report.investment_synthesis.narrative
 
 
 def test_writer_passes_schema_to_llm(stub_report_json: str) -> None:

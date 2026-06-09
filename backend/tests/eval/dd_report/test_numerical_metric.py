@@ -35,7 +35,6 @@ def _make_inputs(report: dict[str, Any], adapter: Any) -> MetricInputs:
             target_name="茅台",
             cut_off_date=date(2024, 6, 30),
         ),
-        ground_truth=None,
         tushare_adapter=adapter,
         kb_lookup=None,
         evaluator_clients={},

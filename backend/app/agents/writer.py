@@ -3,26 +3,16 @@
 v0.8.3: adds alert_writer mode — when state.mode == "alert_deep_dive" the writer
 produces a PortfolioWarningReport instead of an InvestmentDueDiligenceReport.
 
-v0.8.4: build_investment_dd_prompt is conditioned on all 6 input fields:
-  - investment_objective → § 5 risk framing + § 6 recommendation tone
-  - investment_horizon   → § 6 recommended_holding_period guidance
-  - risk_tolerance       → § 6 position-size hint + entry/stop constraints
-  - client_total_aum     → § 6 position size CNY anchor
-  - client_existing_position → § 6 加/持/减 decision framing
-  - target_ts_code       → data anchor throughout
+v0.8.4: build_investment_dd_prompt is conditioned on the 6 input fields. 去推荐
+改造(2026-06-04)后,investment_objective / horizon / risk_tolerance / aum /
+existing_position 只用于校准 § 6 综合研判的"研究重心"(多空侧重、关键判断变量),
+不再驱动评级 / 仓位 / 止损;target_ts_code 仍为全局 data anchor。
 
-v0.8.5: prompt appended with composed_sop() (11 methodology dimensions). § 6
-recommendation enum + recommended_position_size_pct are now overridden by a
-deterministic Python helper post_process_writer_output() — the LLM no longer
-gets the final say on those two fields. Skill bundle scripts
-(compute_position_size_pct + classify_recommendation) are the single source of
-truth.
-
-v0.8.5 Task 9 forward concerns wired into prompt + post-process:
-  1. valuation_analysis.pe_historical_percentile_value (numeric 0-1 sibling)
-  2. financial_analysis.debt_ratio_assessment (Literal[健康/一般/警戒/高风险])
-  3. post_process_writer_output appends deterministic narrative footer that
-     announces Python override of recommendation + position pct.
+去推荐改造: § 6 由 InvestmentRecommendation(评级/仓位/目标价)改为
+InvestmentSynthesis(综合研判:多空两面 + 估值背景,不下买卖结论)。
+post_process_writer_output 不再覆盖评级/仓位,仅保留 A5a 估值 cross-check 覆盖
++ A5b 多空辩论注入。推荐引擎脚本(classify_recommendation /
+compute_position_size_pct)已下线。
 
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md § 3 / § 5.3
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.5-constrained-router-design.md § Task 5
@@ -32,7 +22,6 @@ spec ref: docs/superpowers/plans/2026-05-05-v0.8.5-constrained-router-implementa
 from __future__ import annotations
 
 import asyncio
-import re
 from datetime import datetime
 from typing import Any
 
@@ -40,66 +29,38 @@ from app.agents.base import Agent
 from app.agents.investment_dd_renderer import render_investment_dd_report_markdown
 from app.agents.investment_dd_schema import InvestmentDueDiligenceReport
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
-from app.agents.schemas import Recommendation, ResearchState, StepResult
+from app.agents.schemas import ResearchState, StepResult
 from app.services.llm_response import Tier
 from app.skills.financial_research import _SOP_TEXT  # C62: single SSOT for SOP text
-from app.skills.financial_research.scripts import (
-    classify_recommendation,
-    compute_position_size_pct,
-)
-
-# v0.8.5 — narrative footer sentinel for idempotent post_process. Use HTML
-# comment so markdown rendering hides it; LLM quoting the visible text
-# "Python 决定论修正" cannot accidentally trip the idempotent skip check.
-_FOOTER_SENTINEL = "<!-- v0.8.5-pyoverride-v1 -->"
-
 
 # ---------------------------------------------------------------------------
-# Investment-objective–specific § 6 framing blocks
+# Investment-objective–specific § 6 research-focus framing blocks
+# 去推荐后:只校准"研究重心"(多空侧重 / 关键判断变量),不再产出评级/仓位/止损。
 # ---------------------------------------------------------------------------
 
 _OBJECTIVE_SECTION6_GUIDANCE: dict[str, str] = {
     "capital_preservation": (
-        "投资目标为 capital_preservation(保本保值):§ 6 建议必须保守——"
-        "recommendation 优先选 recommend_hold / recommend_underweight / recommend_sell;"
-        "recommended_position_size_pct 不超过风险容忍度上限的 60%;"
-        "recommended_stop_loss_price 必须比建议入场价低不超过 5%;"
-        "position_management_conditions 至少含 1 条止损触发条件。"
-        "§ 6 narrative 必须明确提及 capital_preservation 目标(如'基于您保本保值的投资目标' / "
-        "'capital_preservation 客户应优先保障本金安全'等)以及客户的保守型风险承受度。"
+        "客户投资目标为 capital_preservation(保本保值):§ 6 综合研判应把研究重心放在下行风险与本金安全——"
+        "bear_case(下行情形 / 估值过高风险 / 回撤可能)必须充分呈现;"
+        "key_judgment_factors 应突出'什么情况下本金会受损'。"
+        "narrative 必须明确提及 capital_preservation 目标,但**不得**给出买卖评级 / 目标价 / 建议仓位 / 止损位。"
     ),
     "stable_growth": (
-        "投资目标为 stable_growth(稳健增长):§ 6 建议取中性偏多——"
-        "recommendation 可选 recommend_buy / recommend_overweight / recommend_hold;"
-        "recommended_position_size_pct 按中等风险容忍度计算;"
-        "stop_loss 距入场价 8-12%;"
-        "position_management_conditions 至少含 1 条分批建仓 + 1 条止损条件。"
-        "§ 6 narrative 必须明确提及 stable_growth 目标(如'基于您稳健增长的投资目标'等)。"
+        "客户投资目标为 stable_growth(稳健增长):§ 6 综合研判应兼顾增长驱动与风险防御——"
+        "bull_case 与 bear_case 均衡呈现,key_judgment_factors 覆盖'增长能否持续'与'主要下行变量'。"
+        "narrative 必须明确提及 stable_growth 目标,但**不得**给出买卖评级 / 目标价 / 建议仓位。"
     ),
     "balanced": (
-        "投资目标为 balanced(均衡配置):§ 6 建议平衡收益与风险——"
-        "recommendation 可选全档位(根据研究结论决定);"
-        "recommended_position_size_pct 按 risk_tolerance 正常计算;"
-        "stop_loss 距入场价 8-15%;"
-        "position_management_conditions 覆盖加仓 / 减仓 / 止损三类。"
-        "§ 6 narrative 必须明确提及 balanced 均衡配置目标(如'基于您 balanced 均衡型的投资目标' / "
-        "'均衡配置策略下建议兼顾成长与防御'等)以及客户的 moderate 风险承受度。"
+        "客户投资目标为 balanced(均衡配置):§ 6 综合研判应对等呈现多空两面——"
+        "bull_case 与 bear_case 篇幅相当,key_judgment_factors 兼顾成长与防御。"
+        "narrative 必须明确提及 balanced 均衡配置目标,但**不得**给出买卖评级 / 目标价 / 建议仓位。"
     ),
     "aggressive_growth": (
-        "投资目标为 aggressive_growth(激进成长):§ 6 建议可偏进取——"
-        "recommendation 可选 recommend_buy / recommend_overweight(若研究结论支持);"
-        "recommended_position_size_pct 按 risk_tolerance 上限计算;"
-        "stop_loss 可设在入场价 12-20% 以下(成长型允许更大波动容忍);"
-        "position_management_conditions 至少含 1 条上涨目标价分批减仓条件。"
-        "§ 6 narrative 必须明确提及 aggressive_growth 目标(如'基于您激进成长的投资目标' / "
-        "'aggressive_growth 客户可追求高成长弹性'等)以及客户的高风险容忍度。"
+        "客户投资目标为 aggressive_growth(激进成长):§ 6 综合研判应把研究重心放在成长弹性与驱动因素——"
+        "bull_case(成长驱动 / 行业空间 / 弹性来源)充分呈现,但仍须客观给出 bear_case(系统性 / 行业颠覆风险);"
+        "key_judgment_factors 突出'成长能否兑现'。"
+        "narrative 必须明确提及 aggressive_growth 目标,但**不得**给出买卖评级 / 目标价 / 建议仓位。"
     ),
-}
-
-_HORIZON_HOLDING_PERIOD_HINT: dict[str, str] = {
-    "short_term": "recommended_holding_period 选 short_term",
-    "medium_term": "recommended_holding_period 选 medium_term",
-    "long_term": "recommended_holding_period 选 long_term",
 }
 
 
@@ -108,7 +69,7 @@ def _format_user_preferences(state: ResearchState) -> str:
 
     v0.9 — when chat_extracted_preferences is non-empty, injects a section
     that instructs the LLM to honor user-expressed preferences (horizon,
-    risk_tolerance, etc.) in the investment_recommendation narrative.
+    risk_tolerance, etc.) in the § 6 综合研判 narrative.
     """
     if not state.chat_extracted_preferences:
         return ""
@@ -229,18 +190,17 @@ def _format_debate_block(state: ResearchState) -> str:
         f"  strongest: {bull.strongest_argument}\n\n"
         f"看空 (Bear):\n{bear_block}\n"
         f"  strongest: {bear.strongest_argument}\n\n"
-        f"**§ 6 投资建议 narrative 要求**:必须显式列举 **≥ 2 条 bull arguments + ≥ 2 条 bear arguments**;\n"
-        f"必须基于 strongest_bull + strongest_bear 综合给最终推荐。**禁止只挑一面之词**\n"
+        f"**§ 6 综合研判 narrative 要求**:必须显式列举 **≥ 2 条 bull arguments + ≥ 2 条 bear arguments**;\n"
+        f"必须基于 strongest_bull + strongest_bear 综合呈现两面研判(**不下买卖结论**)。**禁止只挑一面之词**\n"
         f"(打架 = signal, narrative 必须诚实双向论证)。\n"
     )
 
 
 def _build_section6_constraint_block(state: ResearchState) -> str:
-    """Build § 6 constraint block conditioned on all 6 input fields.
+    """Build § 6 综合研判 constraint block conditioned on client context.
 
-    v0.8.5 — uses skill bundle compute_position_size_pct to derive the prompt-
-    side hint number. Final value is overridden in post_process_writer_output(),
-    so this is purely a narrative anchor.
+    去推荐改造:客户背景只用于校准研究重心(bull/bear 侧重、关键判断变量),
+    不再驱动仓位 / 止损 / 目标价等 prescriptive 数字。
     """
     objective = state.investment_objective or "balanced"
     risk_tolerance = state.risk_tolerance or "moderate"
@@ -248,50 +208,34 @@ def _build_section6_constraint_block(state: ResearchState) -> str:
     client_total_aum = state.client_total_aum or 0.0
     existing_position = state.client_existing_position
 
-    # Compute suggested position size pct (prompt narrative anchor only — final
-    # value is set deterministically in post_process_writer_output).
-    suggested_pct_buy = compute_position_size_pct(
-        recommendation="recommend_buy",
-        risk_tolerance=risk_tolerance,
-        market_cap_cny=1_000_000_000_000.0,  # default large-cap anchor
-    )
-
     objective_block = _OBJECTIVE_SECTION6_GUIDANCE.get(
         objective, _OBJECTIVE_SECTION6_GUIDANCE["balanced"]
-    )
-    horizon_hint = _HORIZON_HOLDING_PERIOD_HINT.get(
-        investment_horizon, _HORIZON_HOLDING_PERIOD_HINT["medium_term"]
     )
 
     existing_str = (
         f"- client_existing_position(现有持仓): {existing_position:,.0f} CNY"
         if existing_position is not None
-        else "- client_existing_position: 无现有持仓(新建仓)"
+        else "- client_existing_position: 无现有持仓"
     )
 
     return f"""
-## § 6 投资建议约束(必须严格遵守)
+## § 6 综合研判约束(必须严格遵守)
 
-**客户背景**:
+**客户背景**(仅用于校准研究重心,**不**用于生成买卖指令):
 - investment_objective: {objective}
-- investment_horizon: {investment_horizon}  → {horizon_hint}
+- investment_horizon: {investment_horizon}
 - risk_tolerance: {risk_tolerance}
 - client_total_aum(客户总资产管理规模): {client_total_aum:,.0f} CNY
 {existing_str}
 
-**仓位计算规则**:
-- recommended_position_size_pct 是占 client_total_aum 的百分比
-- buy 建议下,{risk_tolerance} 风险容忍度对应建议仓位上限约 {suggested_pct_buy:.1f}%
-- 对应绝对金额约 {client_total_aum * suggested_pct_buy / 100:,.0f} CNY
-- 非 buy 建议(hold / sell)应相应调低仓位
-
-**目标特定指令**:
+**研究重心指令**:
 {objective_block}
 
-**价格区间约束**:
-- recommended_entry_price_range 和 recommended_stop_loss_price 必须基于 Insights 中的实际价格数据
-- estimated_target_price_range 必须与研究结论一致(不能凭空填高目标价)
-- 所有价格字段不能为 0.0(若数据缺失请声明"建议补充行情数据")
+**去推荐硬约束**:
+- § 6 是"综合研判":呈现多空两面(bull_case / bear_case)+ 估值背景(valuation_context)+ 关键判断变量(key_judgment_factors)。
+- **禁止**输出买卖评级 / 建议仓位 / 目标价 / 建议入场价 / 止损位 / 加减仓触发条件。
+- valuation_context 只描述"当前价相对 § 3 内在价值区间的位置"(呼应估值,非目标价建议)。
+- 关键判断变量留给读者自行决策,不替客户下结论。
 """
 
 
@@ -377,15 +321,14 @@ _SYSTEM_PROMPT_BASE = """你是专业投资研究分析师。
     "overall_risk_level": "low|medium|high|very_high",
     "evidence": ["<chunk_id>"]
   },
-  "investment_recommendation": {
-    "narrative": "<200-400 字综合建议>",
-    "recommendation": "recommend_buy|recommend_overweight|recommend_hold|recommend_underweight|recommend_sell",
-    "recommended_position_size_pct": 5.0,
-    "recommended_holding_period": "short_term|medium_term|long_term",
-    "recommended_entry_price_range": {"low": 0.0, "high": 0.0},
-    "recommended_stop_loss_price": 0.0,
-    "estimated_target_price_range": {"low": 0.0, "high": 0.0},
-    "position_management_conditions": ["<条件>"],
+  "investment_synthesis": {
+    "narrative": "<200-400 字综合研判:综合投资逻辑与估值背景,不给买卖评级/目标价/仓位>",
+    "key_judgment_factors": ["<影响判断的关键变量,留给读者自行决策>"],
+    "valuation_context": "<呼应 § 3 估值区间的研判,如'当前价位于内在价值区间下沿',或 null>",
+    "bull_case": ["<看多论据>"],
+    "bear_case": ["<看空论据>"],
+    "strongest_bull_point": "<最强看多点或 null>",
+    "strongest_bear_point": "<最强看空点或 null>",
     "evidence": ["<chunk_id>"]
   }
 }
@@ -492,147 +435,27 @@ def build_investment_dd_prompt(state: ResearchState) -> str:
 
 
 # ---------------------------------------------------------------------------
-# v0.8.5 post-processing — deterministic override of LLM-generated
-# recommendation + position size. Skill bundle scripts are the single source
-# of truth for these two fields.
+# 去推荐改造后的 post-processing —— 不再覆盖评级/仓位;仅保留 A5a 估值 cross-check
+# 覆盖 + A5b 多空辩论注入 § 6 综合研判。
 # ---------------------------------------------------------------------------
-
-
-# v0.8.5 forward concern 1 — regex fallback for pe_historical_percentile str.
-# Captures the first numeric (int or decimal) followed by 0+ whitespace and
-# "分位" (e.g. "近 5 年 30 分位" → "30", "30.5 分位" → "30.5"). Returns the
-# normalised float in [0.0, 1.0] or None on no match.
-_PE_PERCENTILE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)\s*分位")
-
-
-def _parse_pe_percentile_str(s: str | None) -> float | None:
-    """Best-effort regex parse of '近 5 年 30 分位' → 0.30.
-
-    Returns None when no '<num> 分位' substring is found, allowing the caller
-    to apply its own default (typically 0.5 for missing data). Defensive
-    against LLM outputs that mix half-numerals or missing 分位 token.
-    """
-    if not s:
-        return None
-    m = _PE_PERCENTILE_PATTERN.search(s)
-    if m is None:
-        return None
-    try:
-        raw = float(m.group(1))
-    except ValueError:
-        return None
-    # Treat values >1 as percentage (e.g. "30 分位" → 30 → 0.30); values ≤1
-    # already normalized (e.g. "0.3 分位" → 0.3).
-    pct = raw / 100.0 if raw > 1.0 else raw
-    if 0.0 <= pct <= 1.0:
-        return pct
-    return None
-
-
-def _extract_metrics_from_llm_report(report: dict[str, Any]) -> dict[str, Any]:
-    """Extract metrics dict consumed by classify_recommendation.
-
-    Resolution order for ``pe_percentile``:
-      1. ``valuation_analysis.pe_historical_percentile_value`` (v0.8.5 numeric)
-      2. regex parse of ``valuation_analysis.pe_historical_percentile`` str
-         (e.g. "近 5 年 30 分位" → 0.30)
-      3. 0.5 (中位) — missing/unparseable, neither buy nor sell red-line.
-
-    Other fields the schema does not guarantee (``roe``, ``revenue_yoy``, etc.)
-    fall through to defaults causing classify_recommendation to drop to its
-    ``recommend_hold`` fallback rule. The deterministic override is what
-    matters: the LLM cannot talk the recommendation up via narrative alone.
-    """
-    fa: dict[str, Any] = report.get("financial_analysis") or {}
-    va: dict[str, Any] = fa.get("valuation_analysis") or {}
-    overview: dict[str, Any] = report.get("target_overview") or {}
-
-    # v0.8.5 forward concern 1 — numeric > regex > 0.5 fallback chain.
-    # bool subclass guard: Python bool is int subclass (isinstance(True, int) == True),
-    # so without this guard pe_historical_percentile_value=True (LLM bug) would pass
-    # the 0.0 <= 1.0 <= 1.0 range check and silently misroute to sell red-line.
-    pe_pct: float
-    pe_numeric = va.get("pe_historical_percentile_value")
-    if (
-        isinstance(pe_numeric, int | float)
-        and not isinstance(pe_numeric, bool)
-        and 0.0 <= float(pe_numeric) <= 1.0
-    ):
-        pe_pct = float(pe_numeric)
-    else:
-        parsed = _parse_pe_percentile_str(va.get("pe_historical_percentile"))
-        pe_pct = parsed if parsed is not None else 0.5
-
-    return {
-        "pe_percentile": pe_pct,
-        "roe": fa.get("roe") or 0.0,
-        "revenue_yoy": fa.get("revenue_yoy") or 0.0,
-        "net_profit_yoy": fa.get("net_profit_yoy") or 0.0,
-        # 1 万亿 CNY large-cap 中位 default — 避免 missing data 误触发 small-cap haircut
-        # (`or` 对 0.0 也 fallback, 但真"market_cap=0"极罕见; 跟 writer.py:114 prompt-side
-        # default 1e12 anchor 一致).
-        "market_cap_cny": overview.get("current_market_cap") or 1_000_000_000_000.0,
-        "forecast_signal": fa.get("forecast_signal") or "neutral",
-        # v0.8.5 forward concern 3 — debt_ratio_assessment now schema-real.
-        "asset_liability_warning": fa.get("debt_ratio_assessment") in {"警戒", "高风险"},
-    }
 
 
 def post_process_writer_output(
     state: ResearchState, llm_report: InvestmentDueDiligenceReport
 ) -> InvestmentDueDiligenceReport:
-    """Override LLM-generated recommendation + position_size with deterministic Python.
+    """去推荐后 § 6 的确定性后处理。
 
-    v0.8.5 single source of truth for § 6:
-      - investment_recommendation.recommendation → classify_recommendation(metrics)
-      - investment_recommendation.recommended_position_size_pct →
-            compute_position_size_pct(rec, risk_tol, market_cap)
-      - narrative footer appended announcing the override (forward concern 2).
-        This guarantees the LLM-narrative number cannot drift from the final
-        Python-decided number. v0.9 will replace this with a 2nd LLM rewrite
-        for fluency; v0.8.5 keeps it deterministic and idempotent.
+    - 不再用 Python 覆盖评级 / 仓位(推荐引擎已下线)。
+    - A5a:若 Analyst 算出 multi-model cross-check 结果,以 state 覆盖 LLM 占位
+      (Calculator+Router+OutlierDiagnosis 是 single source of truth)。
+    - A5b:若跑了 bull/bear debate,把 final 论据注入 § 6 InvestmentSynthesis。
 
-    All other fields (prices, holding_period, evidence) remain LLM-authored.
-    Pure function — idempotent on a fixed (state, llm_report) pair.
+    纯函数 — 对固定 (state, llm_report) 幂等。
     """
-    report_dict = llm_report.model_dump()
-    metrics = _extract_metrics_from_llm_report(report_dict)
-    classified_rec: Recommendation = classify_recommendation(metrics)
-    market_cap = float(metrics.get("market_cap_cny") or 0.0)
-    risk_tolerance = state.risk_tolerance or "moderate"
-    pct = compute_position_size_pct(
-        recommendation=classified_rec,
-        risk_tolerance=risk_tolerance,
-        market_cap_cny=market_cap,
-    )
-
-    # v0.8.5 forward concern 2 — narrative footer announcing Python override.
-    # Idempotency guard uses HTML comment sentinel _FOOTER_SENTINEL (markdown-
-    # invisible) so an LLM-narrative that quotes the visible "Python 决定论修正"
-    # phrase cannot accidentally trip the skip check.
-    base_narrative = (llm_report.investment_recommendation.narrative or "").rstrip()
-    if _FOOTER_SENTINEL not in base_narrative:
-        narrative_with_footer = (
-            f"{base_narrative}\n\n"
-            f"---\n"
-            f"{_FOOTER_SENTINEL}\n"
-            f"📊 Python 决定论修正: 评级 = {classified_rec}, 仓位 = {pct:.2f}%"
-            f" (基于客户 risk_tolerance={risk_tolerance} + 市值数据 + skill bundle 规则)。"
-        ).strip()
-    else:
-        narrative_with_footer = base_narrative
-
-    new_recommendation = llm_report.investment_recommendation.model_copy(
-        update={
-            "recommendation": classified_rec,
-            "recommended_position_size_pct": pct,
-            "narrative": narrative_with_footer,
-        }
-    )
-    report_updates: dict[str, Any] = {"investment_recommendation": new_recommendation}
+    report_updates: dict[str, Any] = {}
 
     # v1.x A5a: 若 Analyst 算出了 multi-model cross-check 结果,覆盖 LLM 占位。
-    # Python 决定论 — Calculator+Router+OutlierDiagnosis 是 single source of truth,
+    # Calculator+Router+OutlierDiagnosis 是 single source of truth,
     # LLM 在 financial_analysis.valuation_analysis 写的数字一律以 state 为准。
     if state.valuation_analysis is not None:
         new_financial = llm_report.financial_analysis.model_copy(
@@ -640,7 +463,7 @@ def post_process_writer_output(
         )
         report_updates["financial_analysis"] = new_financial
 
-    # v1.x A5b: 若 Analyst 跑了 bull/bear debate,拷 final 论据进 InvestmentRecommendation。
+    # v1.x A5b: 若 Analyst 跑了 bull/bear debate,拷 final 论据进 InvestmentSynthesis。
     # rounds_completed=2 用 v2 (debate 完整收敛),rounds_completed=1 fallback 用 v1。
     if state.debate_trace is not None:
         if state.debate_trace.rounds_completed == 2:
@@ -659,9 +482,11 @@ def post_process_writer_output(
             debate_updates["strongest_bear_point"] = bear_final.strongest_argument
 
         if debate_updates:
-            new_recommendation = new_recommendation.model_copy(update=debate_updates)
-            report_updates["investment_recommendation"] = new_recommendation
+            new_synthesis = llm_report.investment_synthesis.model_copy(update=debate_updates)
+            report_updates["investment_synthesis"] = new_synthesis
 
+    if not report_updates:
+        return llm_report
     return llm_report.model_copy(update=report_updates)
 
 
@@ -706,8 +531,7 @@ class Writer(Agent):
                 "generated_at": datetime.now(),
             }
         )
-        # v0.8.5 — post-process: deterministic Python overrides for § 6
-        # recommendation + recommended_position_size_pct.
+        # 去推荐后:post-process 仅做 A5a 估值覆盖 + A5b 多空辩论注入 § 6 综合研判。
         report = post_process_writer_output(state, report)
 
         markdown = render_investment_dd_report_markdown(report)

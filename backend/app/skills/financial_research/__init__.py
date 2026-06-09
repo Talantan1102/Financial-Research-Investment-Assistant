@@ -1,9 +1,12 @@
 """Financial research skill bundle — references + deterministic helpers.
 
 Loader for the financial_research skill bundle. Exposes ``load_skill()``
-returning a ``SkillBundle`` containing 11 methodology markdowns, 3 reference
-files (industry benchmarks JSON + recommendation rules YAML + position size
-rules YAML), and the scripts namespace (3 deterministic helpers).
+returning a ``SkillBundle`` containing 11 methodology markdowns, 1 reference
+file (industry benchmarks JSON), and the scripts namespace
+(``lookup_industry_benchmark``).
+
+去推荐改造(2026-06-04):recommendation_rules / position_size_rules 两个 YAML 与
+classify_recommendation / compute_position_size_pct 两个脚本已下线。
 
 Module-level loads happen once at import time — Python's GIL makes this
 thread-safe for read-only consumers. Pure read-only by design.
@@ -16,8 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-
-import yaml
 
 from app.skills.financial_research import scripts as _scripts
 
@@ -53,7 +54,8 @@ _METHODOLOGY: dict[str, str] = _load_methodology()
 
 
 # ---------------------------------------------------------------------------
-# References — JSON + 2 YAML loaded as parsed Python objects.
+# References — industry benchmarks JSON loaded as parsed Python object.
+# 去推荐后:recommendation_rules / position_size_rules 两个 YAML 已下线。
 # ---------------------------------------------------------------------------
 
 _REFERENCES_DIR = Path(__file__).parent / "references"
@@ -63,16 +65,8 @@ def _load_references() -> dict[str, Any]:
     industry_benchmarks: dict[str, Any] = json.loads(
         (_REFERENCES_DIR / "industry_benchmarks.json").read_text(encoding="utf-8")
     )
-    recommendation_rules: dict[str, Any] = yaml.safe_load(
-        (_REFERENCES_DIR / "recommendation_rules.yaml").read_text(encoding="utf-8")
-    )
-    position_size_rules: dict[str, Any] = yaml.safe_load(
-        (_REFERENCES_DIR / "position_size_rules.yaml").read_text(encoding="utf-8")
-    )
     return {
         "industry_benchmarks": industry_benchmarks,
-        "recommendation_rules": recommendation_rules,
-        "position_size_rules": position_size_rules,
     }
 
 
@@ -90,12 +84,10 @@ class SkillBundle:
 
     Attributes:
         methodology: ``{name: markdown_text}`` for 11 methodology dimensions.
-        references: ``{name: parsed_obj}`` for 3 reference files
-            (``industry_benchmarks`` dict, ``recommendation_rules`` dict,
-            ``position_size_rules`` dict).
+        references: ``{name: parsed_obj}`` for 1 reference file
+            (``industry_benchmarks`` dict).
         scripts: The ``app.skills.financial_research.scripts`` ModuleType
-            (``classify_recommendation`` / ``compute_position_size_pct`` /
-            ``lookup_industry_benchmark`` exposed as attributes).
+            (``lookup_industry_benchmark`` exposed as attribute).
     """
 
     methodology: dict[str, str]

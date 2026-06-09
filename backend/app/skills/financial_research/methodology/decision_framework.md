@@ -1,84 +1,35 @@
-## § 4 投资决策框架 (Decision Framework)
+## § 4 综合研判框架 (Synthesis Framework)
 
-## § 4.1 5 档评级触发逻辑 (Recommendation)
+> 去推荐改造(2026-06-04):本框架从"投资决策(评级/仓位)"重定位为"综合研判"。
+> 报告不再输出买卖评级、建议仓位、目标价、止损位等 prescriptive 内容;§ 6 改为
+> 陈列多空两面 + 估值背景 + 关键判断变量,把决策留给读者。
 
-**关键约定** — Writer 必须调 Python helper, **不要让 LLM 自己算评级**:
+## § 4.1 如何组织 § 6 综合研判
 
-```python
-from app.skills.financial_research import load_skill
+§ 6 不下买卖结论,而是把研究结论组织成可供读者自行判断的材料:
 
-bundle = load_skill()
-recommendation = bundle.scripts.classify_recommendation(metrics_dict)
-# returns Literal: "recommend_buy" | "recommend_overweight" | "recommend_hold" |
-#                  "recommend_underweight" | "recommend_sell"
-```
+- **多空两面 (bull_case / bear_case)**:基于 A5b 多空辩论的 final 论据,各列 ≥ 2 条;
+  打架本身是 signal,必须诚实双向呈现,禁止只挑一面之词。
+- **关键判断变量 (key_judgment_factors)**:列出"决定这笔投资成败"的少数几个变量
+  (如成长能否兑现、估值能否消化、政策/竞争格局变化),留给读者自行权衡。
+- **估值背景 (valuation_context)**:呼应 § 3 估值区间("它值多少"),描述当前价相对
+  内在价值区间的位置(如"当前价位于内在价值区间下沿");这是研判,**不是**目标价建议。
 
-`metrics_dict` 字段 (Analyst 在 evidence 阶段填):
-- `pe_percentile`: 0..1 (来自 `get_pe_history`).
-- `roe`: e.g. 0.18 (来自 `get_financials`).
-- `revenue_yoy`, `net_profit_yoy`: e.g. 0.12.
-- `forecast_signal`: `"positive" | "neutral" | "negative"` (来自 `get_forecast`).
-- `pledge_ratio`: 0..1 (来自 `get_holder_change`).
-- `asset_liability_warning`: bool.
+## § 4.2 研究重心按客户目标校准(不驱动买卖指令)
 
-**5 档触发条件** (见 `references/recommendation_rules.yaml`, Python 侧 `_PRIORITY` hard-coded 评估顺序):
+客户的 investment_objective / risk_tolerance 只用来校准**研究重心**,不再驱动评级或仓位:
 
-| 评级 | 触发逻辑 (any_of / all_of) |
-|---|---|
-| **recommend_sell** | PE 分位 > 0.90 OR forecast_signal == negative OR 质押比例 > 0.60 OR asset_liability_warning |
-| **recommend_buy** | PE 分位 < 0.30 AND ROE > 0.15 AND 营收 / 净利双升 (双 yoy > 0) |
-| **recommend_overweight** | forecast_signal == positive OR (4 项条件中 ≥ 3 项满足) |
-| **recommend_underweight** | PE 分位 > 0.70 OR 营收 yoy < 0 OR 净利润 yoy < 0 |
-| **recommend_hold** | fallback (估值合理 + 财务健康 + 无明显催化也无明显风险) |
+- **capital_preservation(保本保值)**:充分呈现下行风险 / 回撤情形的 bear_case;
+  key_judgment_factors 突出"什么情况下本金会受损"。
+- **stable_growth(稳健增长)**:兼顾增长驱动与风险防御,多空均衡。
+- **balanced(均衡配置)**:多空两面对等呈现。
+- **aggressive_growth(激进成长)**:充分呈现成长驱动的 bull_case,但仍须客观给出 bear_case。
 
-优先级评估顺序 (Python `_PRIORITY` 列表, 不可被 YAML 改写): sell → buy → overweight → underweight → hold.
+## § 4.3 为什么去推荐
 
-## § 4.2 仓位计算公式 (Position Sizing)
-
-**关键约定** — Writer 必须调 helper, **不要让 LLM 算百分比**:
-
-```python
-position_pct = bundle.scripts.compute_position_size_pct(
-    recommendation=recommendation,        # 来自 § 4.1 classify
-    risk_tolerance="moderate",            # 来自 user persona
-    market_cap_cny=8e10,                  # 来自 get_stock_quote / daily_basic
-)
-# returns float (e.g. 12.0 = 12% 仓位)
-```
-
-**公式** (见 `references/position_size_rules.yaml`):
-
-```
-position_pct = base_pct[rec] × risk_multiplier[tol] × small_cap_factor
-其中 small_cap_factor = small_cap_haircut (0.7) if market_cap < 500 亿 else 1.0
-最终 capped at max_position_pct (30%)
-```
-
-`base_pct` 表 (按评级):
-- recommend_buy = 15%
-- recommend_overweight = 10%
-- recommend_hold = 5%
-- recommend_underweight = 2%
-- recommend_sell = 0%
-
-`risk_multiplier` 表 (按 user persona):
-- conservative = 0.5x
-- moderate = 1.0x
-- balanced = 1.2x
-- aggressive = 1.6x
-- very_aggressive = 2.0x
-
-例: recommend_buy + moderate + 1000 亿大市值 → 15 × 1.0 × 1.0 = 15%.
-例: recommend_overweight + aggressive + 200 亿小市值 → 10 × 1.6 × 0.7 = 11.2%.
-
-## § 4.3 为什么用 Python helper 而不让 LLM 算
-
-1. **可复现性**: 同一份 evidence 永远得同一份评级 / 仓位 — 不受 LLM temperature / sampling 影响.
-2. **审计性**: YAML 规则是 spec 的一部分, 可 review / version / diff; LLM 自由发挥则黑箱.
-3. **avoiding hallucination**: LLM 算百分比经常算错 (10% × 1.6 = 写成 18% 是常见错), Python 算保正确.
-4. **行业 benchmark 引用**: `lookup_industry_benchmark(industry, indicator)` 保数据契约一致, methodology 阈值 = references 数值.
-
-**写入 narrative 的标准句式**:
-- "综合 {N} 维评估, 给出评级: **{recommendation}** (触发条件: [关键满足项列表])."
-- "结合用户风险偏好 ({tolerance}) 与市值规模 ({market_cap_cny} 元), 建议仓位: **{position_pct}%**."
-- "如 user 风险偏好 / 市值发生变化, 仓位将自动调整 (Python 决定论)."
+1. **合规**:`DEFAULT_DISCLAIMER` 本就声明"不构成投资建议或具体买卖指令";去掉评级/仓位让
+   报告定位与免责声明自洽。
+2. **贴主流深度研究评估**:通用深度研究基准(DeepResearch Bench / RACE 等)评的是*研究质量*
+   (全面性 / 深度 / 引用 / 数值),而非*投资押注*。
+3. **估值仍在**:"它值多少"作为分析结论保留在 § 3 ValuationAnalysis(A5a 多模型 cross-check);
+   去掉的只是"建议你买/卖多少"这层 prescriptive 动作。

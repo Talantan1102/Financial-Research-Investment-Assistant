@@ -1,4 +1,4 @@
-"""BacktestMetricScores — Phase 2 5-metric per-case score schema.
+"""BacktestMetricScores — Phase 2 per-case score schema(去推荐后 4 metric).
 
 spec § 4.2 / § 5.2
 
@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class BacktestMetricScores(BaseModel):
-    """5 metric per-case scores. 序列化到 eval_results.metric_scores_json 列."""
+    """4 metric per-case scores. 序列化到 eval_results.metric_scores_json 列."""
 
     model_config = ConfigDict(extra="ignore")
 
@@ -32,10 +32,7 @@ class BacktestMetricScores(BaseModel):
     # M3 Risk-mitigation pairing (spec § 4.2)
     m3_risk_pairing_score: float = Field(ge=0.0, le=1.0)
 
-    # M4 Investment prediction (spec § 4.2) — 全 nullable: cut_off 之后真实数据缺失时为 None
-    m4_recommendation_direction_correct: bool | None = None
-    m4_target_price_hit: bool | None = None
-    m4_risk_flag_realized_rate: float | None = Field(default=None, ge=0.0, le=1.0)
+    # 去推荐改造(2026-06-04):预测回测(原 M4 方向/目标价命中/风险预警)整把尺子下线。
 
     # M5 Multi-LLM consensus (spec § 4.3)
     m5_composite_mean: float = Field(ge=0.0, le=10.0)

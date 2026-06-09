@@ -88,7 +88,7 @@ class OutlierDiagnosis(BaseModel):
 class ValuationAnalysis(BaseModel):
     """估值分析子模块(FinancialAnalysis § 3 新增)。
 
-    v0.8.5: pe_historical_percentile_value (numeric for classify_recommendation)
+    v0.8.5: pe_historical_percentile_value (历史百分位数值化,分析信息)
     v1.x A5a: + 多模型 cross-check (PE/PB/EV-EBITDA/DCF) + router + outlier diagnosis
     """
 
@@ -249,35 +249,33 @@ class RiskAssessment(BaseModel):
     )
 
 
-class InvestmentRecommendation(BaseModel):
-    """§ 6 投资建议(5 档卖方研报标准化术语)。"""
+class InvestmentSynthesis(BaseModel):
+    """§ 6 综合研判 — 陈列多空逻辑与估值背景,呈现两面、不下买卖结论。
+
+    去推荐改造(2026-06-04):报告定位从"尽调建议"转为"深度研究",移除买卖评级 /
+    建议仓位 / 目标价 / 入场价 / 止损位等 prescriptive 字段;A5b 多空辩论成为本节主体。
+    估值区间("它值多少")仍在 § 3 ValuationAnalysis,此处只做研判呼应。
+    """
 
     model_config = ConfigDict(extra="ignore")
 
-    narrative: str = Field(description="200-400 字综合建议")
-    recommendation: Literal[
-        "recommend_buy",
-        "recommend_overweight",
-        "recommend_hold",
-        "recommend_underweight",
-        "recommend_sell",
-    ] = Field(description="投资建议评级")
-    recommended_position_size_pct: float = Field(
-        description="建议仓位占 client_total_aum 的百分比(%)"
+    narrative: str = Field(
+        description="200-400 字综合研判:综合投资逻辑与估值背景,不给买卖评级/目标价/仓位"
     )
-    recommended_holding_period: Literal["short_term", "medium_term", "long_term"] = Field(
-        description="建议持有期限"
+    key_judgment_factors: list[str] = Field(
+        default_factory=list,
+        description="影响判断的关键变量(留给读者自行决策,非买卖指令)",
     )
-    recommended_entry_price_range: PriceRange = Field(description="建议买入价格区间")
-    recommended_stop_loss_price: float = Field(description="建议止损价格")
-    estimated_target_price_range: PriceRange = Field(description="目标价格区间(estimated 降权)")
-    position_management_conditions: list[str] = Field(description="加仓/减仓触发条件(空 list 也行)")
+    valuation_context: str | None = Field(
+        default=None,
+        description="呼应 § 3 估值区间的研判,如'当前价位于内在价值区间下沿'(描述,非目标价建议)",
+    )
     evidence: list[str] = Field(
         default_factory=list,
         description="引用的 chunk_id 列表(允许空 — Critic factuality scorer 扣分代替 schema 强制)",
     )
 
-    # v1.x A5b: bull/bear debate final v2
+    # v1.x A5b: bull/bear debate final v2(去推荐后为本节主体)
     bull_case: list[str] = Field(
         default_factory=list,
         max_length=5,
@@ -318,7 +316,7 @@ class InvestmentDueDiligenceReport(BaseModel):
     financial_analysis: FinancialAnalysis
     industry_analysis: IndustryAnalysis
     risk_assessment: RiskAssessment
-    investment_recommendation: InvestmentRecommendation
+    investment_synthesis: InvestmentSynthesis
 
     # 免责声明
     disclaimer: str = Field(default=DEFAULT_DISCLAIMER, description="AI 辅助生成免责声明")

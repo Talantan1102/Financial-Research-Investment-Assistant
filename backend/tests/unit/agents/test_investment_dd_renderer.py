@@ -1,15 +1,18 @@
-"""Unit tests for investment_dd_renderer (v0.8.4)."""
+"""Unit tests for investment_dd_renderer (v0.8.4).
+
+去推荐改造(2026-06-04):§ 6 标题由 "投资建议" 改为 "综合研判",
+渲染 narrative / valuation_context / key_judgment_factors / bull/bear,
+不再渲染评级 label(_RECOMMENDATION_ZH 已下线)。
+"""
 
 from __future__ import annotations
 
 from app.agents.investment_dd_renderer import (
-    _RECOMMENDATION_ZH,
     _RISK_LEVEL_ZH,
     _SEVERITY_ZH,
     render_investment_dd_report_markdown,
 )
 from app.agents.investment_dd_schema import (
-    InvestmentRecommendation,
     RiskAssessment,
     RiskItem,
 )
@@ -26,7 +29,9 @@ def test_renders_all_six_sections() -> None:
     assert "## § 3 财务分析" in md
     assert "## § 4 行业分析" in md
     assert "## § 5 风险评估" in md
-    assert "## § 6 投资建议" in md
+    # 去推荐:§ 6 由 "投资建议" 改为 "综合研判"
+    assert "## § 6 综合研判" in md
+    assert "## § 6 投资建议" not in md
 
 
 def test_disclaimer_appears_top_and_bottom() -> None:
@@ -50,24 +55,22 @@ def test_evidence_footnotes_rendered() -> None:
     assert "[^maotai_2024::5]: maotai_2024::5" in md
 
 
-def test_recommendation_label_zh() -> None:
+def test_synthesis_renders_two_sided_and_judgment_factors() -> None:
+    """综合研判:多空两面 + 估值背景 + 关键判断变量,不出现买卖评级 / 目标价。"""
     report = minimal_valid_report()
     md = render_investment_dd_report_markdown(report)
-    # Fixture uses recommend_overweight
-    assert "增持" in md
-
-
-def test_recommendation_zh_covers_all_literals() -> None:
-    """_RECOMMENDATION_ZH must cover every Literal value."""
-    from typing import get_args
-
-    field = InvestmentRecommendation.model_fields["recommendation"]
-    literal_values = set(get_args(field.annotation))
-    assert literal_values == set(_RECOMMENDATION_ZH.keys()), (
-        f"_RECOMMENDATION_ZH out of sync: "
-        f"missing={literal_values - set(_RECOMMENDATION_ZH.keys())}, "
-        f"extra={set(_RECOMMENDATION_ZH.keys()) - literal_values}"
-    )
+    # narrative 出现
+    assert report.investment_synthesis.narrative in md
+    # 多空两面 section
+    assert "看多论据(Bull)" in md
+    assert "看空论据(Bear)" in md
+    # 估值背景 + 关键判断变量
+    assert "估值研判" in md
+    assert "关键判断变量" in md
+    assert "高端白酒需求景气度" in md
+    # 去推荐:不渲染买卖评级 label
+    assert "增持" not in md
+    assert "买入" not in md
 
 
 def test_risk_level_zh_covers_all_literals() -> None:

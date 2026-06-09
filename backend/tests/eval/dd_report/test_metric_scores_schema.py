@@ -1,11 +1,15 @@
-"""BacktestMetricScores Pydantic schema — Phase 2 T2.0."""
+"""BacktestMetricScores Pydantic schema — Phase 2 T2.0.
+
+去推荐改造(2026-06-04):预测回测(原 M4 方向/目标价命中/风险预警)整把尺子下线,
+schema 现在只覆盖 M1/M2/M3/M5 四把尺子。
+"""
 
 from __future__ import annotations
 
 from eval.dd_report.metric_scores import BacktestMetricScores
 
 
-def test_schema_accepts_all_5_metric_scores() -> None:
+def test_schema_accepts_all_metric_scores() -> None:
     s = BacktestMetricScores(
         m1_citation_precision=0.92,
         m1_citation_recall=0.85,
@@ -13,33 +17,12 @@ def test_schema_accepts_all_5_metric_scores() -> None:
         m2_numerical_total=20,
         m2_numerical_correct=18,
         m3_risk_pairing_score=0.71,
-        m4_recommendation_direction_correct=True,
-        m4_target_price_hit=False,
-        m4_risk_flag_realized_rate=0.50,
         m5_composite_mean=7.6,
         m5_composite_majority=8.0,
         m5_composite_disagreement_max=2.0,
     )
     j = s.model_dump_json()
     assert "m1_citation_precision" in j
-
-
-def test_schema_allows_partial_m4_none_when_not_applicable() -> None:
-    s = BacktestMetricScores(
-        m1_citation_precision=1.0,
-        m1_citation_recall=1.0,
-        m2_numerical_accuracy=1.0,
-        m2_numerical_total=0,
-        m2_numerical_correct=0,
-        m3_risk_pairing_score=1.0,
-        m4_recommendation_direction_correct=None,
-        m4_target_price_hit=None,
-        m4_risk_flag_realized_rate=None,
-        m5_composite_mean=8.0,
-        m5_composite_majority=8.0,
-        m5_composite_disagreement_max=0.0,
-    )
-    assert s.m4_recommendation_direction_correct is None
 
 
 def test_details_json_round_trips() -> None:
@@ -50,9 +33,6 @@ def test_details_json_round_trips() -> None:
         m2_numerical_total=2,
         m2_numerical_correct=1,
         m3_risk_pairing_score=0.5,
-        m4_recommendation_direction_correct=True,
-        m4_target_price_hit=False,
-        m4_risk_flag_realized_rate=0.0,
         m5_composite_mean=5.0,
         m5_composite_majority=5.0,
         m5_composite_disagreement_max=1.0,
@@ -77,9 +57,6 @@ def test_eval_result_persists_metric_scores_json(db_session) -> None:
         m2_numerical_total=10,
         m2_numerical_correct=8,
         m3_risk_pairing_score=0.7,
-        m4_recommendation_direction_correct=None,
-        m4_target_price_hit=None,
-        m4_risk_flag_realized_rate=None,
         m5_composite_mean=7.5,
         m5_composite_majority=8.0,
         m5_composite_disagreement_max=1.0,

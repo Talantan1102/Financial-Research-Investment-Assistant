@@ -33,7 +33,6 @@ def _make_inputs(report: dict[str, Any]) -> MetricInputs:
     return MetricInputs(
         report=report,
         case_meta=CaseMeta("bt-test", "600519.SH", "茅台", date(2024, 6, 30)),
-        ground_truth=None,
         tushare_adapter=None,
         kb_lookup=None,
         evaluator_clients={},

@@ -39,7 +39,6 @@ class AblationRunner:
     session_factory: Callable[[], AbstractContextManager[Session]]
     production_factory: Callable[..., Any]
     metric_registry: MetricRegistry = field(default_factory=lambda: MetricRegistry([]))
-    ground_truth_loader: Any | None = None
     kb_lookup: Any | None = None
     enable_leak_detection: bool = False
 
@@ -69,7 +68,6 @@ class AblationRunner:
                 session_factory=self.session_factory,
                 pipeline=pipeline_adapter,
                 metric_registry=self.metric_registry,
-                ground_truth_loader=self.ground_truth_loader,
                 kb_lookup=self.kb_lookup,
                 enable_leak_detection=self.enable_leak_detection,
             )

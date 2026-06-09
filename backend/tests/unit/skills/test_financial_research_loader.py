@@ -44,10 +44,10 @@ def test_methodology_files_non_empty() -> None:
         assert len(text) >= 150, f"{name} too short: {len(text)} chars"
 
 
-def test_references_contain_3_files() -> None:
-    """All 3 expected reference names load successfully."""
+def test_references_contain_only_industry_benchmarks() -> None:
+    """去推荐改造后:recommendation_rules / position_size_rules 已下线,仅剩 industry_benchmarks。"""
     bundle = load_skill()
-    expected = {"industry_benchmarks", "recommendation_rules", "position_size_rules"}
+    expected = {"industry_benchmarks"}
     assert set(bundle.references.keys()) == expected
 
 
@@ -60,12 +60,13 @@ def test_industry_benchmarks_has_default_fallback() -> None:
     assert "资产负债率_健康" in default_profile
 
 
-def test_scripts_namespace_exposes_3_helpers() -> None:
-    """The scripts ModuleType exposes the 3 deterministic helper names."""
+def test_scripts_namespace_exposes_only_lookup_helper() -> None:
+    """去推荐改造后:classify_recommendation / compute_position_size_pct 已下线,
+    scripts namespace 仅暴露 lookup_industry_benchmark。"""
     bundle = load_skill()
-    assert hasattr(bundle.scripts, "classify_recommendation")
-    assert hasattr(bundle.scripts, "compute_position_size_pct")
     assert hasattr(bundle.scripts, "lookup_industry_benchmark")
+    assert not hasattr(bundle.scripts, "classify_recommendation")
+    assert not hasattr(bundle.scripts, "compute_position_size_pct")
 
 
 def test_composed_sop_returns_concatenated_string() -> None:
@@ -124,10 +125,11 @@ def test_skill_manifest_yaml_front_matter() -> None:
     assert front_matter["name"] == "financial_research"
     assert front_matter["version"] == "0.8.5"
 
-    # component_count 必须跟实际 loaded 一致 (11 methodology + 3 references + 3 scripts = 17).
+    # 去推荐改造后:component_count 必须跟实际 loaded 一致
+    # (11 methodology + 1 reference + 1 script helper = 13).
     bundle = load_skill()
     actual_count = (
-        len(bundle.methodology) + len(bundle.references) + 3  # 3 helpers in scripts namespace
+        len(bundle.methodology) + len(bundle.references) + 1  # lookup_industry_benchmark only
     )
     assert front_matter["component_count"] == actual_count, (
         f"component_count drift: manifest says {front_matter['component_count']}, "

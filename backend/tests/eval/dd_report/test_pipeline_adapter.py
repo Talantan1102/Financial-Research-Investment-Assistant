@@ -12,9 +12,8 @@ from app.agents.investment_dd_schema import (
     FinancialAnalysis,
     IndustryAnalysis,
     InvestmentDueDiligenceReport,
-    InvestmentRecommendation,
+    InvestmentSynthesis,
     LegalQualification,
-    PriceRange,
     RiskAssessment,
     TargetOverview,
     ValuationAnalysis,
@@ -61,15 +60,11 @@ def _make_fake_report(target_name: str, target_ts_code: str) -> InvestmentDueDil
             valuation_risk=[],
             overall_risk_level="medium",
         ),
-        investment_recommendation=InvestmentRecommendation(
-            narrative="...",
-            recommendation="recommend_hold",
-            recommended_position_size_pct=5.0,
-            recommended_holding_period="medium_term",
-            recommended_entry_price_range=PriceRange(low=1400, high=1500),
-            recommended_stop_loss_price=1300,
-            estimated_target_price_range=PriceRange(low=1600, high=1700),
-            position_management_conditions=[],
+        investment_synthesis=InvestmentSynthesis(
+            narrative="综合研判综述",
+            key_judgment_factors=[],
+            bull_case=[],
+            bear_case=[],
         ),
     )
 
