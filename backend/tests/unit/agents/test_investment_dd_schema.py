@@ -1,12 +1,16 @@
-"""Unit tests for InvestmentDueDiligenceReport Pydantic schema (v0.8.4)."""
+"""Unit tests for InvestmentDueDiligenceReport Pydantic schema (v0.8.4).
+
+去推荐改造(2026-06-04):§ 6 InvestmentRecommendation → InvestmentSynthesis
+(综合研判:多空两面 + 估值背景 + 关键判断变量,不下买卖结论)。
+评级/仓位/目标价/止损位等 prescriptive 字段与对应测试已下线。
+"""
 
 from __future__ import annotations
 
 import pytest
 from app.agents.investment_dd_schema import (
     InvestmentDueDiligenceReport,
-    InvestmentRecommendation,
-    PriceRange,
+    InvestmentSynthesis,
     RiskAssessment,
     RiskItem,
     TargetOverview,
@@ -14,28 +18,39 @@ from app.agents.investment_dd_schema import (
 from pydantic import ValidationError
 
 
-def test_recommendation_enum_values() -> None:
-    """recommendation 枚举必须是 5 档卖方研报标准化术语。"""
-    valid = [
-        "recommend_buy",
-        "recommend_overweight",
-        "recommend_hold",
-        "recommend_underweight",
-        "recommend_sell",
-    ]
-    for v in valid:
-        rec = InvestmentRecommendation(
-            narrative="...",
-            recommendation=v,  # type: ignore[arg-type]
-            recommended_position_size_pct=5.0,
-            recommended_holding_period="medium_term",
-            recommended_entry_price_range=PriceRange(low=100.0, high=110.0),
-            recommended_stop_loss_price=90.0,
-            estimated_target_price_range=PriceRange(low=120.0, high=140.0),
-            position_management_conditions=["市场系统性回调 5% 时加仓"],
-            evidence=["chunk_001"],
-        )
-        assert rec.recommendation == v
+def test_investment_synthesis_two_sided_fields() -> None:
+    """综合研判呈现多空两面 + 估值背景 + 关键判断变量,不含买卖评级。"""
+    syn = InvestmentSynthesis(
+        narrative="基本面稳健,估值处历史中低位;需关注高端需求与估值消化。",
+        key_judgment_factors=["高端白酒需求景气度", "估值能否消化"],
+        valuation_context="当前价位于内在价值区间下沿。",
+        bull_case=["高端龙头护城河深", "现金流质量高"],
+        bear_case=["估值对需求波动敏感"],
+        strongest_bull_point="高端定价权稳",
+        strongest_bear_point="需求若降速估值难撑",
+        evidence=["chunk_001"],
+    )
+    assert syn.narrative
+    assert syn.bull_case == ["高端龙头护城河深", "现金流质量高"]
+    assert syn.bear_case == ["估值对需求波动敏感"]
+    assert syn.key_judgment_factors == ["高端白酒需求景气度", "估值能否消化"]
+    assert syn.valuation_context == "当前价位于内在价值区间下沿。"
+    # 去推荐:综合研判里没有买卖评级 / 目标价 / 仓位字段
+    assert not hasattr(syn, "recommendation")
+    assert not hasattr(syn, "recommended_position_size_pct")
+    assert not hasattr(syn, "estimated_target_price_range")
+
+
+def test_investment_synthesis_optional_fields_default_empty() -> None:
+    """只给 narrative 时,多空/判断变量/估值背景应默认空,不抛错。"""
+    syn = InvestmentSynthesis(narrative="只有综述,其它留空。")
+    assert syn.key_judgment_factors == []
+    assert syn.bull_case == []
+    assert syn.bear_case == []
+    assert syn.valuation_context is None
+    assert syn.strongest_bull_point is None
+    assert syn.strongest_bear_point is None
+    assert syn.evidence == []
 
 
 def test_evidence_accepts_empty_list() -> None:
@@ -46,18 +61,11 @@ def test_evidence_accepts_empty_list() -> None:
     breaks the dogfood pipeline. Schema relaxed; Critic factuality scorer
     detects missing evidence and lowers the score instead.
     """
-    rec = InvestmentRecommendation(
-        narrative="...",
-        recommendation="recommend_hold",
-        recommended_position_size_pct=5.0,
-        recommended_holding_period="medium_term",
-        recommended_entry_price_range=PriceRange(low=100.0, high=110.0),
-        recommended_stop_loss_price=90.0,
-        estimated_target_price_range=PriceRange(low=120.0, high=140.0),
-        position_management_conditions=[],
+    syn = InvestmentSynthesis(
+        narrative="综合研判综述。",
         evidence=[],  # ← schema accepts empty; Critic scorer handles
     )
-    assert rec.evidence == []
+    assert syn.evidence == []
 
 
 def test_main_report_has_disclaimer_field() -> None:
@@ -76,7 +84,9 @@ def test_minimal_valid_report() -> None:
 
     r = minimal_valid_report()
     assert r.target_name == "贵州茅台酒股份有限公司"
-    assert r.investment_recommendation.recommendation == "recommend_overweight"
+    # 去推荐:主报告字段为 investment_synthesis,呈现综合研判 narrative
+    assert r.investment_synthesis.narrative
+    assert r.investment_synthesis.bull_case
 
 
 def test_overall_risk_level_enum_strict() -> None:
@@ -127,28 +137,6 @@ def test_empty_evidence_in_target_overview_accepted() -> None:
     """TargetOverview evidence 允许空(同上,软约束 + Critic 评分扣分)。"""
     overview = TargetOverview(narrative="x", main_business="y", evidence=[])
     assert overview.evidence == []
-
-
-def test_recommendation_enum_strict() -> None:
-    """recommendation 必须是 5 档之一,非法值必拒。"""
-    with pytest.raises(ValidationError):
-        InvestmentRecommendation(
-            narrative="x",
-            recommendation="maybe",  # type: ignore[arg-type]
-            recommended_position_size_pct=5.0,
-            recommended_holding_period="medium_term",
-            recommended_entry_price_range=PriceRange(low=100.0, high=110.0),
-            recommended_stop_loss_price=90.0,
-            estimated_target_price_range=PriceRange(low=120.0, high=140.0),
-            position_management_conditions=[],
-            evidence=["c1::0"],
-        )
-
-
-def test_price_range_accepts_valid_low_high() -> None:
-    """PriceRange: low < high 是业务约束 — 只验证类型可实例化。"""
-    pr = PriceRange(low=100.0, high=200.0)
-    assert pr.low < pr.high
 
 
 def test_investment_report_target_ts_code_stored() -> None:

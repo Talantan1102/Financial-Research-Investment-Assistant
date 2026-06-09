@@ -46,13 +46,11 @@ def main() -> int:
     )
     from eval.dd_report.ablation.runner import AblationRunner
     from eval.dd_report.ablation.variants import AblationVariant
-    from eval.dd_report.golden.ground_truth_loader import GroundTruthLoader
     from eval.dd_report.llm_swapper import LLMSwapper
     from eval.dd_report.metrics.base import MetricRegistry
     from eval.dd_report.metrics.citation_metric import CitationMetric
     from eval.dd_report.metrics.composite_judge_metric import CompositeJudgeMetric
     from eval.dd_report.metrics.numerical_metric import NumericalMetric
-    from eval.dd_report.metrics.prediction_metric import PredictionMetric
     from eval.dd_report.metrics.risk_pairing_metric import RiskPairingMetric
 
     # PR-B PG-only: 用 PG SessionLocal 替代旧 sqlite db_path。
@@ -87,13 +85,11 @@ def main() -> int:
         def kb_lookup(_cid: Any) -> Any:  # noqa: ANN401 — stub for deferred KB wire
             return None
 
-    gtl = GroundTruthLoader(inner=tushare_inner)
     metric_registry = MetricRegistry(
         [
             CitationMetric(judge=build_supports_judge(eval_client)),
             NumericalMetric(),
             RiskPairingMetric(judge=build_pairing_judge(eval_client)),
-            PredictionMetric(),
             CompositeJudgeMetric(),
         ]
     )
@@ -108,7 +104,6 @@ def main() -> int:
         session_factory=session_factory,
         production_factory=production_factory,
         metric_registry=metric_registry,
-        ground_truth_loader=gtl,
         kb_lookup=kb_lookup,
         enable_leak_detection=True,
     )
@@ -162,16 +157,16 @@ def _print_ablation_matrix(session_factory: Any, git_sha: str) -> None:
         for k, v in m.items():
             if v is not None:
                 by_variant[str(r.ablation_variant)][k].append(float(v))
-    header = ["Variant", "M1", "M2", "M3", "M4", "M5"]
+    header = ["Variant", "M1", "M2", "M3", "M5"]
     print(
         f"{header[0]:<20} | {header[1]:>6} | {header[2]:>6} | "
-        f"{header[3]:>6} | {header[4]:>6} | {header[5]:>6}"
+        f"{header[3]:>6} | {header[4]:>6}"
     )
     for v in ("V0_baseline", "V1_no_rag", "V2_no_multi_agent", "V3_no_critic"):
         _scores = by_variant.get(v, {})
         print(
             f"{v:<20} | {_avg(_scores, 'm1_citation'):>6} | {_avg(_scores, 'm2_numerical'):>6} | "
-            f"{_avg(_scores, 'm3_risk_pairing'):>6} | {_avg(_scores, 'm4_prediction'):>6} | "
+            f"{_avg(_scores, 'm3_risk_pairing'):>6} | "
             f"{_avg(_scores, 'm5_composite'):>6}"
         )
 

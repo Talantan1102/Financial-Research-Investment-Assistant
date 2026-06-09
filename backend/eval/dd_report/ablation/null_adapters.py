@@ -15,9 +15,8 @@ from app.agents.investment_dd_schema import (
     FinancialAnalysis,
     IndustryAnalysis,
     InvestmentDueDiligenceReport,
-    InvestmentRecommendation,
+    InvestmentSynthesis,
     LegalQualification,
-    PriceRange,
     RiskAssessment,
     TargetOverview,
     ValuationAnalysis,
@@ -101,15 +100,8 @@ def _minimal_stub(target_name: str, target_ts_code: str) -> InvestmentDueDiligen
             valuation_risk=[],
             overall_risk_level="medium",
         ),
-        investment_recommendation=InvestmentRecommendation(
+        investment_synthesis=InvestmentSynthesis(
             narrative="(stub)",
-            recommendation="recommend_hold",
-            recommended_position_size_pct=0.0,
-            recommended_holding_period="medium_term",
-            recommended_entry_price_range=PriceRange(low=0, high=0),
-            recommended_stop_loss_price=0,
-            estimated_target_price_range=PriceRange(low=0, high=0),
-            position_management_conditions=[],
         ),
         disclaimer=DEFAULT_DISCLAIMER,
     )

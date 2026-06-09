@@ -20,9 +20,8 @@ from app.agents.investment_dd_schema import (
     FinancialAnalysis,
     IndustryAnalysis,
     InvestmentDueDiligenceReport,
-    InvestmentRecommendation,
+    InvestmentSynthesis,
     LegalQualification,
-    PriceRange,
     RiskAssessment,
     TargetOverview,
     ValuationAnalysis,
@@ -204,15 +203,10 @@ def _build_minimal_report_fixture(
             valuation_risk=[],
             overall_risk_level="medium",
         ),
-        investment_recommendation=InvestmentRecommendation(
-            narrative="LLM 建议综述",
-            recommendation="recommend_buy",
-            recommended_position_size_pct=10.0,
-            recommended_holding_period="medium_term",
-            recommended_entry_price_range=PriceRange(low=1500.0, high=1800.0),
-            recommended_stop_loss_price=1400.0,
-            estimated_target_price_range=PriceRange(low=2000.0, high=2200.0),
-            position_management_conditions=["分批建仓"],
+        investment_synthesis=InvestmentSynthesis(
+            narrative="LLM 综合研判综述",
+            key_judgment_factors=["需求景气度"],
+            valuation_context="当前价位于内在价值区间下沿。",
         ),
     )
 

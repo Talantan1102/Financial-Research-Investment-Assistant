@@ -10,10 +10,10 @@ cassette test (test_b1_maotai_investment_dd_cassette.py). It establishes the
 "neutral" baseline against which capital_preservation and aggressive_growth
 cases are compared.
 
-Acceptance criteria (spec § 7):
-  1. recommended_position_size_pct in [5%, 15%] (均衡型适度仓位)
-  2. report markdown 均衡提及成长 + 风险两方面
-  3. InputContextAppropriatenessScorer score ≥ 8.5 (= 0.85 normalized)
+Acceptance criteria (去推荐改造后):
+  1. § 6 为综合研判(investment_synthesis,无评级/仓位/目标价字段)
+  2. report markdown 均衡提及成长 + 风险两方面(研究重心均衡)
+  3. 4 个 required dim(财务/估值/行业/风险)全覆盖;InputContextAppropriatenessScorer 已接线
 
 Note: This case reuses the same cassette as the main e2e B1 test (or we create
 a new cassette with the 6th scorer's judge call appended). We create a fresh
@@ -22,10 +22,9 @@ cassette here so the 6th scorer's LLM call is included.
 Cassette:  backend/tests/fixtures/cassettes/b1_differential/
            test_b1_diff_balanced/<cassette>.yaml
 
-Record:  unset all_proxy https_proxy http_proxy
-         uv run pytest backend/tests/eval/golden_cases/b1_differential/
-                       test_b1_diff_balanced.py
-                       --record-mode=once -v
+Record (需有效 DASHSCOPE_API_KEY): unset http_proxy https_proxy all_proxy;
+         VCR_RECORD_MODE=once python -m pytest
+         backend/tests/eval/golden_cases/b1_differential/test_b1_diff_balanced.py -v
 
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md § 7
 """
@@ -40,19 +39,13 @@ from tests.eval.golden_cases.b1_differential._graph_builder import build_b1_diff
 
 pytestmark = [
     pytest.mark.vcr,
-    pytest.mark.skip(
-        reason="v1.x A5b 在 Analyst hot path 加 DebateOrchestrator 4 advocate LLM call;"
-        "旧 cassette 无 AdvocateOutput 录音,导致 LLM call 序列错位。"
-        "需 Mac 真 LLM 重录 cassette 才能恢复。"
-        "spec ref: 2026-05-16-v1.x-bull-bear-debate-design.md § 11.3"
-    ),
 ]
 
 _THREAD_ID = "b1-diff-balanced-test-1"
 
 # balanced case 应均衡提及成长 + 风险
 _KEYWORDS_GROWTH = ["成长", "增长", "盈利", "营收", "投资回报", "回报", "价值"]
-_KEYWORDS_RISK = ["风险", "估值", "止损", "波动", "关注", "谨慎"]
+_KEYWORDS_RISK = ["风险", "估值", "波动", "关注", "谨慎"]
 
 
 @pytest.fixture
@@ -65,13 +58,12 @@ def b1_diff_balanced_graph(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
 async def test_b1_balanced_茅台(  # noqa: N802
     b1_diff_balanced_graph,
 ) -> None:
-    """balanced + medium_term + moderate → 中等仓位 + 均衡提及成长/风险 + scorer ≥ 8.5。
+    """balanced + medium_term + moderate → 研究重心均衡 + 均衡提及成长/风险。
 
-    This is the baseline case. The report should be well-balanced:
-    - Not too aggressive (position not > 15%)
-    - Not too conservative (position not < 5%)
-    - Both growth potential and risk considerations mentioned
-    - InputContextAppropriatenessScorer ≥ 8.5
+    去推荐改造后的基线 case。报告应均衡呈现:
+    - § 6 综合研判呈现(已无评级/仓位/目标价)
+    - 成长与风险两方面均被提及(研究重心均衡)
+    - 4 required dim 全覆盖;InputContextAppropriatenessScorer 已接线
     """
     initial = ResearchState(
         user_id="test",
@@ -96,12 +88,10 @@ async def test_b1_balanced_茅台(  # noqa: N802
     report = final_state.investment_report
     assert isinstance(report, InvestmentDueDiligenceReport)
 
-    # ── 2. position_size ∈ [5%, 15%] (均衡型适度仓位) ─────────────────────────
-    position_pct = report.investment_recommendation.recommended_position_size_pct
-    assert 5.0 <= position_pct <= 15.0, (
-        f"balanced + moderate → position_size should be in [5%, 15%], "
-        f"got {position_pct:.1f}%. Writer prompt conditioning not working."
-    )
+    # ── 2. 去推荐:§ 6 = 综合研判(评级/仓位/目标价字段已从 schema 移除)──────────
+    #    差异化不再靠仓位/评级数字,改由「研究重心」体现(见下方关键词 + InputContext)。
+    syn = report.investment_synthesis
+    assert syn.narrative, "§ 6 综合研判 narrative 必须非空"
 
     # ── 3. markdown 均衡提及成长 + 风险 ────────────────────────────────────────
     assert final_state.report_markdown is not None
@@ -129,8 +119,7 @@ async def test_b1_balanced_茅台(  # noqa: N802
     assert covered == dim_keywords, f"required dims missing: {dim_keywords - covered}"
 
     # ── 5. InputContextAppropriatenessScorer sanity ───────────────────────────
-    # v0.8.5 baseline 7.5 在 v1.x A4 下不再硬阈值;真差异化已由
-    # position_size + growth/risk 关键词 + dim coverage 守。
+    # 去推荐后真差异化由 growth/risk 关键词 + dim coverage 守(不再有 position_size)。
     assert final_state.critic_report is not None, "Critic must produce a CriticReport"
     ic_score = final_state.critic_report.get_score("input_context_appropriateness")
     assert ic_score is not None and 0.0 <= ic_score <= 10.0

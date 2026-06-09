@@ -1,9 +1,9 @@
 """L1 — Analyst _maybe_run_debate hook + Writer post_process 拷 debate fields (v1.x A5b).
 
-Phase 2 Task 5 wire 测试:
+Phase 2 Task 5 wire 测试(去推荐改造后 § 6 = InvestmentSynthesis 综合研判):
 1. Analyst.step() 调 _maybe_run_debate, state_update 含 debate_trace
 2. Analyst.step() _maybe_run_debate 返 None → state_update 不含 debate_trace key
-3. Writer.post_process_writer_output rounds_completed=2 → 拷 v2 进 InvestmentRecommendation
+3. Writer.post_process_writer_output rounds_completed=2 → 拷 v2 进 InvestmentSynthesis
 4. Writer.post_process_writer_output rounds_completed=1 → fallback 拷 v1
 5. state.debate_trace=None → bull_case/bear_case 仍 default empty
 
@@ -20,9 +20,8 @@ from app.agents.investment_dd_schema import (
     FinancialAnalysis,
     IndustryAnalysis,
     InvestmentDueDiligenceReport,
-    InvestmentRecommendation,
+    InvestmentSynthesis,
     LegalQualification,
-    PriceRange,
     RiskAssessment,
     TargetOverview,
     ValuationAnalysis,
@@ -91,7 +90,7 @@ def test_analyst_step_skips_debate_when_orchestrator_returns_none() -> None:
 
 
 def test_writer_post_process_copies_debate_fields_when_v2_present() -> None:
-    """rounds_completed=2 → InvestmentRecommendation 拷 v2 4 字段."""
+    """rounds_completed=2 → InvestmentSynthesis 拷 v2 4 字段."""
     from app.agents.schemas import ResearchState
     from app.agents.writer import post_process_writer_output
 
@@ -119,10 +118,10 @@ def test_writer_post_process_copies_debate_fields_when_v2_present() -> None:
     minimal_report = _build_minimal_report_fixture()
 
     out = post_process_writer_output(state, minimal_report)
-    assert out.investment_recommendation.bull_case == list(bull_v2.arguments)
-    assert out.investment_recommendation.bear_case == list(bear_v2.arguments)
-    assert out.investment_recommendation.strongest_bull_point == bull_v2.strongest_argument
-    assert out.investment_recommendation.strongest_bear_point == bear_v2.strongest_argument
+    assert out.investment_synthesis.bull_case == list(bull_v2.arguments)
+    assert out.investment_synthesis.bear_case == list(bear_v2.arguments)
+    assert out.investment_synthesis.strongest_bull_point == bull_v2.strongest_argument
+    assert out.investment_synthesis.strongest_bear_point == bear_v2.strongest_argument
 
 
 def test_writer_post_process_uses_v1_when_rounds_completed_1() -> None:
@@ -153,10 +152,10 @@ def test_writer_post_process_uses_v1_when_rounds_completed_1() -> None:
     minimal_report = _build_minimal_report_fixture()
     out = post_process_writer_output(state, minimal_report)
 
-    assert out.investment_recommendation.bull_case == list(bull_v1.arguments)
-    assert out.investment_recommendation.bear_case == list(bear_v1.arguments)
-    assert out.investment_recommendation.strongest_bull_point == bull_v1.strongest_argument
-    assert out.investment_recommendation.strongest_bear_point == bear_v1.strongest_argument
+    assert out.investment_synthesis.bull_case == list(bull_v1.arguments)
+    assert out.investment_synthesis.bear_case == list(bear_v1.arguments)
+    assert out.investment_synthesis.strongest_bull_point == bull_v1.strongest_argument
+    assert out.investment_synthesis.strongest_bear_point == bear_v1.strongest_argument
 
 
 def test_writer_post_process_no_debate_keeps_empty_fields() -> None:
@@ -175,10 +174,10 @@ def test_writer_post_process_no_debate_keeps_empty_fields() -> None:
     )
     minimal_report = _build_minimal_report_fixture()
     out = post_process_writer_output(state, minimal_report)
-    assert out.investment_recommendation.bull_case == []
-    assert out.investment_recommendation.bear_case == []
-    assert out.investment_recommendation.strongest_bull_point is None
-    assert out.investment_recommendation.strongest_bear_point is None
+    assert out.investment_synthesis.bull_case == []
+    assert out.investment_synthesis.bear_case == []
+    assert out.investment_synthesis.strongest_bull_point is None
+    assert out.investment_synthesis.strongest_bear_point is None
 
 
 def _build_minimal_report_fixture() -> InvestmentDueDiligenceReport:
@@ -224,14 +223,9 @@ def _build_minimal_report_fixture() -> InvestmentDueDiligenceReport:
             valuation_risk=[],
             overall_risk_level="medium",
         ),
-        investment_recommendation=InvestmentRecommendation(
-            narrative="LLM 建议综述",
-            recommendation="recommend_buy",
-            recommended_position_size_pct=10.0,
-            recommended_holding_period="medium_term",
-            recommended_entry_price_range=PriceRange(low=1500.0, high=1800.0),
-            recommended_stop_loss_price=1400.0,
-            estimated_target_price_range=PriceRange(low=2000.0, high=2200.0),
-            position_management_conditions=["分批建仓"],
+        investment_synthesis=InvestmentSynthesis(
+            narrative="LLM 综合研判综述",
+            key_judgment_factors=["需求景气度"],
+            valuation_context="当前价位于内在价值区间下沿。",
         ),
     )

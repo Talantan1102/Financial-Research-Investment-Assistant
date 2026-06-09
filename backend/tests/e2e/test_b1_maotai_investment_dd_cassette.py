@@ -37,7 +37,7 @@ from typing import Any
 try:
     from dotenv import load_dotenv as _load_dotenv
 
-    _load_dotenv(Path(__file__).parents[2] / ".env")
+    _load_dotenv(Path(__file__).parents[3] / ".env")  # 仓库根 .env(去推荐前误写成 parents[2]=backend/)
 except ImportError:
     pass  # dotenv not installed — env vars must be set manually
 
@@ -67,12 +67,6 @@ from pydantic import BaseModel, Field
 
 pytestmark = [
     pytest.mark.vcr,
-    pytest.mark.skip(
-        reason="v1.x A5a + A5b 持续累积 schema 改变(多模型 cross-check + "
-        "DebateOrchestrator 4 advocate LLM call),旧 cassette 无对应录音,"
-        "LLM call 序列错位。需 Mac 真 LLM 重录 cassette 才能恢复。"
-        "spec ref: 2026-05-16-v1.x-bull-bear-debate-design.md § 11.3"
-    ),
 ]
 
 
@@ -371,21 +365,15 @@ async def test_b1_maotai_investment_dd_e2e_cassette(b1_graph: Any) -> None:
     assert report.financial_analysis is not None
     assert report.industry_analysis is not None
     assert report.risk_assessment is not None
-    assert report.investment_recommendation is not None
+    assert report.investment_synthesis is not None
 
     # 4. Evidence non-empty per section (schema min_length=1 enforces this too)
     assert len(report.target_overview.evidence) >= 1
     assert len(report.financial_analysis.evidence) >= 1
-    assert len(report.investment_recommendation.evidence) >= 1
+    assert len(report.investment_synthesis.evidence) >= 1
 
-    # 5. recommendation is a valid enum value (5 档卖方研报标准)
-    assert report.investment_recommendation.recommendation in {
-        "recommend_buy",
-        "recommend_overweight",
-        "recommend_hold",
-        "recommend_underweight",
-        "recommend_sell",
-    }
+    # 5. 去推荐改造:§ 6 综合研判 narrative 非空(已无评级/仓位/目标价字段)
+    assert report.investment_synthesis.narrative
 
     # 6. disclaimer field exists and non-empty
     assert report.disclaimer

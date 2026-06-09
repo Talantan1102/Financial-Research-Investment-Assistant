@@ -208,6 +208,15 @@ def build_b1_diff_graph(monkeypatch: pytest.MonkeyPatch) -> Any:
     Returns:
         Compiled LangGraph ready for .ainvoke(initial_state, config=config).
     """
+    # 录制时加载仓库根 .env 拿真 DASHSCOPE_API_KEY(replay 时缺省 placeholder 即可)。
+    try:
+        from pathlib import Path as _Path
+
+        from dotenv import load_dotenv as _load_dotenv
+
+        _load_dotenv(_Path(__file__).parents[5] / ".env")
+    except ImportError:
+        pass
     monkeypatch.setenv(
         "DASHSCOPE_API_KEY",
         os.environ.get("DASHSCOPE_API_KEY") or "sk-replay-placeholder",

@@ -11,14 +11,6 @@ from app.agents.investment_dd_schema import (
     RiskItem,
 )
 
-_RECOMMENDATION_ZH: dict[str, str] = {
-    "recommend_buy": "买入",
-    "recommend_overweight": "增持",
-    "recommend_hold": "持有",
-    "recommend_underweight": "减持",
-    "recommend_sell": "卖出",
-}
-
 _RISK_LEVEL_ZH: dict[str, str] = {
     "low": "低",
     "medium": "中",
@@ -27,12 +19,6 @@ _RISK_LEVEL_ZH: dict[str, str] = {
 }
 
 _SEVERITY_ZH: dict[str, str] = {"low": "低", "medium": "中", "high": "高"}
-
-_HOLDING_PERIOD_ZH: dict[str, str] = {
-    "short_term": "短期(<6个月)",
-    "medium_term": "中期(6-24个月)",
-    "long_term": "长期(>24个月)",
-}
 
 
 def _render_evidence_footnotes(chunk_ids: list[str]) -> tuple[str, list[str]]:
@@ -195,30 +181,30 @@ def render_investment_dd_report_markdown(  # noqa: PLR0915
     parts.append(_render_risk_items(ra.event_risk, "事件风险"))
     parts.append(_render_risk_items(ra.valuation_risk, "估值风险"))
 
-    # § 6 InvestmentRecommendation
-    ir = report.investment_recommendation
-    inline_refs, defs = _render_evidence_footnotes(ir.evidence)
+    # § 6 InvestmentSynthesis(综合研判 — 去推荐:多空两面 + 估值背景,不下买卖结论)
+    syn = report.investment_synthesis
+    inline_refs, defs = _render_evidence_footnotes(syn.evidence)
     all_footnote_defs.extend(defs)
-    parts.append("\n## § 6 投资建议\n")
-    parts.append(f"{ir.narrative}{inline_refs}\n")
-    rec_zh = _RECOMMENDATION_ZH.get(ir.recommendation, ir.recommendation)
-    parts.append(f"**投资建议:{rec_zh}**\n")
-    parts.append(f"- 建议仓位:{ir.recommended_position_size_pct:.1f}% of AUM")
-    period_zh = _HOLDING_PERIOD_ZH.get(ir.recommended_holding_period, ir.recommended_holding_period)
-    parts.append(f"- 建议持有期:{period_zh}")
-    parts.append(
-        f"- 建议买入价格区间:{ir.recommended_entry_price_range.low:.2f} ~ "
-        f"{ir.recommended_entry_price_range.high:.2f}"
-    )
-    parts.append(f"- 止损价格:{ir.recommended_stop_loss_price:.2f}")
-    parts.append(
-        f"- 目标价格区间(estimated):{ir.estimated_target_price_range.low:.2f} ~ "
-        f"{ir.estimated_target_price_range.high:.2f}"
-    )
-    if ir.position_management_conditions:
-        parts.append("- 仓位管理条件:")
-        for cond in ir.position_management_conditions:
-            parts.append(f"  - {cond}")
+    parts.append("\n## § 6 综合研判\n")
+    parts.append(f"{syn.narrative}{inline_refs}\n")
+    if syn.valuation_context:
+        parts.append(f"- 估值研判:{syn.valuation_context}")
+    if syn.key_judgment_factors:
+        parts.append("- 关键判断变量:")
+        for factor in syn.key_judgment_factors:
+            parts.append(f"  - {factor}")
+    if syn.bull_case:
+        parts.append("\n### 看多论据(Bull)")
+        for arg in syn.bull_case:
+            parts.append(f"- {arg}")
+        if syn.strongest_bull_point:
+            parts.append(f"  - **最强看多**:{syn.strongest_bull_point}")
+    if syn.bear_case:
+        parts.append("\n### 看空论据(Bear)")
+        for arg in syn.bear_case:
+            parts.append(f"- {arg}")
+        if syn.strongest_bear_point:
+            parts.append(f"  - **最强看空**:{syn.strongest_bear_point}")
 
     # Footnotes — C48: dedup by preserving first-occurrence order so a chunk_id
     # cited in multiple sections produces exactly one [^id]: definition.

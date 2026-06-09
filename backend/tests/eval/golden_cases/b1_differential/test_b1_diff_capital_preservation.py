@@ -5,19 +5,18 @@
   horizon    = long_term
   tolerance  = conservative
 
-Acceptance criteria (spec § 7):
-  1. recommended_position_size_pct ≤ 10% (保本型客户不高仓位)
-  2. recommendation in ["recommend_hold", "recommend_overweight"] (不强烈买/卖)
-  3. report markdown 含保本/稳健/防御类关键词
-  4. InputContextAppropriatenessScorer score ≥ 8.5 (= 0.85 normalized)
+Acceptance criteria (去推荐改造后):
+  1. § 6 为综合研判(investment_synthesis,无评级/仓位/目标价字段)
+  2. report markdown 含保本/稳健/防御/下行保护类关键词(研究重心偏下行风险)
+  3. 4 个 required dim(财务/估值/行业/风险)全覆盖(客观底稿层一致)
+  4. InputContextAppropriatenessScorer 已接线(分数在 [0,10])
 
 Cassette:  backend/tests/fixtures/cassettes/b1_differential/
            test_b1_diff_capital_preservation/<cassette>.yaml
 
-Record:  unset all_proxy https_proxy http_proxy
-         uv run pytest backend/tests/eval/golden_cases/b1_differential/
-                       test_b1_diff_capital_preservation.py
-                       --record-mode=once -v
+Record (需有效 DASHSCOPE_API_KEY): unset http_proxy https_proxy all_proxy;
+         VCR_RECORD_MODE=once python -m pytest
+         backend/tests/eval/golden_cases/b1_differential/test_b1_diff_capital_preservation.py -v
 
 spec ref: docs/superpowers/specs/2026-05-04-v0.8.4-b1-single-deep-design.md § 7
 """
@@ -32,12 +31,6 @@ from tests.eval.golden_cases.b1_differential._graph_builder import build_b1_diff
 
 pytestmark = [
     pytest.mark.vcr,
-    pytest.mark.skip(
-        reason="v1.x A5b 在 Analyst hot path 加 DebateOrchestrator 4 advocate LLM call;"
-        "旧 cassette 无 AdvocateOutput 录音,导致 LLM call 序列错位。"
-        "需 Mac 真 LLM 重录 cassette 才能恢复。"
-        "spec ref: 2026-05-16-v1.x-bull-bear-debate-design.md § 11.3"
-    ),
 ]
 
 _THREAD_ID = "b1-diff-capital-preservation-test-1"
@@ -65,14 +58,12 @@ def b1_diff_capital_preservation_graph(monkeypatch: pytest.MonkeyPatch):  # noqa
 async def test_b1_capital_preservation_茅台(  # noqa: N802
     b1_diff_capital_preservation_graph,
 ) -> None:
-    """capital_preservation + long_term + conservative → 低仓位 + 持有/增持 + 保本关键词。
+    """capital_preservation + long_term + conservative → 研究重心偏下行风险 + 保本关键词。
 
-    Differential assertion: compared to balanced or aggressive_growth case,
-    the capital_preservation case must show:
-    - Lower position_size_pct (≤ 10%)
-    - Risk-averse recommendation (hold or overweight, never strong buy)
-    - Explicit reference to capital preservation language
-    - InputContextAppropriatenessScorer ≥ 8.5 (report truly conditions on input)
+    去推荐改造后差异化(对比 balanced / aggressive_growth):
+    - § 6 综合研判呈现(已无评级/仓位/目标价)
+    - 研究重心偏防御:markdown 含保本 / 防御 / 下行保护等关键词
+    - 4 required dim 全覆盖;InputContextAppropriatenessScorer 已接线
     """
     initial = ResearchState(
         user_id="test",
@@ -97,18 +88,10 @@ async def test_b1_capital_preservation_茅台(  # noqa: N802
     report = final_state.investment_report
     assert isinstance(report, InvestmentDueDiligenceReport)
 
-    # ── 2. position_size ≤ 10% (保本型 conservative) ─────────────────────────
-    position_pct = report.investment_recommendation.recommended_position_size_pct
-    assert position_pct <= 10.0, (
-        f"capital_preservation + conservative → position_size must be ≤ 10%, "
-        f"got {position_pct:.1f}%. Writer prompt conditioning not working."
-    )
-
-    # ── 3. recommendation != strong buy (capital_preservation ≠ aggressive) ─────
-    recommendation = report.investment_recommendation.recommendation
-    assert recommendation != "recommend_buy", (
-        f"capital_preservation client should not get strong buy, got {recommendation}"
-    )
+    # ── 2. 去推荐:§ 6 = 综合研判(评级/仓位/目标价字段已从 schema 移除)──────────
+    #    差异化不再靠仓位/评级数字,改由「研究重心」体现(见下方关键词 + InputContext)。
+    syn = report.investment_synthesis
+    assert syn.narrative, "§ 6 综合研判 narrative 必须非空"
 
     # ── 4. markdown 含保本/稳健/防御关键词 ──────────────────────────────────────
     assert final_state.report_markdown is not None
@@ -132,10 +115,8 @@ async def test_b1_capital_preservation_茅台(  # noqa: N802
     }
     assert covered == dim_keywords, f"required dims missing: {dim_keywords - covered}"
 
-    # ── 6. InputContextAppropriatenessScorer sanity(v1.x LLM judge 不稳定阈值)─
-    # v0.8.5 baseline 8.5 在 v1.x A4 下不稳定(SOP 退出 + plan 层不分叉, narrative
-    # 差异化全推 Writer prompt + position_size deterministic helper)。此处仅
-    # sanity check scorer wired in。真差异化已由 keyword/position_size/dim coverage 守。
+    # ── 6. InputContextAppropriatenessScorer sanity ───────────────────────────
+    # 去推荐后真差异化由 研究重心关键词 + dim coverage 守(不再有 position_size)。
     assert final_state.critic_report is not None, "Critic must produce a CriticReport"
     ic_score = final_state.critic_report.get_score("input_context_appropriateness")
     assert ic_score is not None and 0.0 <= ic_score <= 10.0

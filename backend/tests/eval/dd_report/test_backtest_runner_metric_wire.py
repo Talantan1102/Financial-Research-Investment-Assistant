@@ -72,9 +72,10 @@ class _DummyPipeline:
                 "event_risk": [],
                 "valuation_risk": [],
             },
-            "investment_recommendation": {
-                "recommendation": "recommend_hold",
-                "estimated_target_price_range": {"low": 1400, "high": 1600},
+            "investment_synthesis": {
+                "narrative": "综合研判综述",
+                "bull_case": [],
+                "bear_case": [],
             },
         }
 
@@ -104,7 +105,7 @@ def test_run_one_writes_backtest_runs_and_eval_results(db_session) -> None:
                 _ConstMetric("m3_risk_pairing", 0.7),
                 _ConstMetric("m5_composite", 8.0),
             ]
-        ),  # M4 skipped (ground_truth=None)
+        ),  # 去推荐:M4 预测回测整把尺子已下线
     )
     case = BacktestCase(
         case_id=f"bt-{uuid4().hex[:8]}",

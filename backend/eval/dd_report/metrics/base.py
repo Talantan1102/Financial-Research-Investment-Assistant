@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Protocol
 
-from eval.dd_report.golden.ground_truth_loader import GroundTruthLoader
 from eval.dd_report.llm_swapper import EvaluatorClient
 from eval.dd_report.tushare_backtest_adapter import TushareBacktestAdapter
 
@@ -42,7 +41,6 @@ class MetricInputs:
 
     report: dict[str, Any]  # InvestmentDueDiligenceReport.model_dump() 形态
     case_meta: CaseMeta
-    ground_truth: GroundTruthLoader | None
     tushare_adapter: TushareBacktestAdapter | None
     kb_lookup: Callable[[str], dict[str, Any] | None] | None  # chunk_id -> chunk
     evaluator_clients: dict[str, EvaluatorClient]  # "deepseek-v4-flash": client, ...
@@ -70,5 +68,5 @@ class MetricRegistry:
             seen.add(m.name)
 
     def compute_all(self, inputs: MetricInputs) -> list[MetricResult]:
-        """Compute all metrics; callers MUST filter MetricResult.value is None before aggregating (M4 returns None when post-cut-off data is absent)."""
+        """Compute all metrics; callers MUST filter MetricResult.value is None before aggregating (a metric returns None when its inputs are absent)."""
         return [m.compute(inputs) for m in self.metrics]
