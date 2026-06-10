@@ -85,6 +85,13 @@ jobs:
         # The fix (starlette 1.0.1) is unreachable anyway — fastapi 0.136 / mcp 1.27 /
         # gradio 6.8 all pin starlette <1.0. Lift when those upstreams support 1.x.
         #
+        # CVE-2026-34993 / CVE-2026-47265: aiohttp ≤3.13 — CookieJar.load() 反序列化
+        # 不可信输入 RCE / 跨域重定向泄漏 per-request cookie。两者都是 aiohttp **客户端
+        # 用法**漏洞；本项目一方代码零 aiohttp import（仅 vcrpy 测试桩传依赖），攻击面 0。
+        # 修复版 3.14.0 删除了 AsyncStreamReaderMixin，会崩 vcrpy 8.1.1（已是最新）的
+        # aiohttp stubs（所有 cassette 测试 setup 报错）。等 vcrpy 支持 aiohttp 3.14 后
+        # 升级并解除这两条豁免。
+        #
         # --skip-editable: `uv sync` installs the project itself editable; pip-audit
         # otherwise tries (and fails) to look it up on PyPI and exits non-zero with
         # "Dependency not found on PyPI". The local package has no third-party deps
@@ -95,6 +102,8 @@ jobs:
           --ignore-vuln GHSA-69w3-r845-3855
           --ignore-vuln PYSEC-2025-217
           --ignore-vuln PYSEC-2026-161
+          --ignore-vuln CVE-2026-34993
+          --ignore-vuln CVE-2026-47265
 
       - name: Open issue on failure
         if: failure()
