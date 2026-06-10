@@ -37,17 +37,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--script", help="单段脚本 yaml 路径")
     parser.add_argument("--all", action="store_true", help="跑 scripts/ 全部")
     parser.add_argument("--report", choices=["text", "json"], default="text")
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        help="每段脚本跑 N 次取通过率(治抽取非确定性:单跑红绿会飘,多跑聚合稳)",
+    )
     args = parser.parse_args(argv)
 
     if not args.all and not args.script:
         parser.error("需要 --script <路径> 或 --all")
+    if args.repeat < 1:
+        parser.error("--repeat 必须 ≥ 1")
 
     paths = sorted(SCRIPTS_DIR.glob("*.yaml")) if args.all else [Path(args.script)]
     all_probes, all_writes = [], []
     for p in paths:
-        probes, writes = asyncio.run(_run_one(p))
-        all_probes.extend(probes)
-        all_writes.extend(writes)
+        # 抽取非确定性:同脚本不同次抽取结果不同,写侧红绿有 run-to-run 方差。
+        # --repeat N 把每段跑 N 次、结果池化进同一张分数表,通过率配 Wilson 区间
+        # 后才是对非确定系统的可信判定(单跑 1/1 不能下结论)。
+        for _ in range(args.repeat):
+            probes, writes = asyncio.run(_run_one(p))
+            all_probes.extend(probes)
+            all_writes.extend(writes)
 
     table = build_score_table(all_probes, all_writes)
     # 红灯明细(fail loud:每个红灯必须能指出写侧还是读侧、库里实际长什么样)

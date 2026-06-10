@@ -46,11 +46,16 @@ class TestBm25Search:
         results = bm25_search(sess, user_id=user_id, query="茅台", k=10)
         assert len(results) == 1
         assert "edge_id" in results[0]
-        # 校验 SQL 包含 plainto_tsquery + invalidated_at IS NULL filter
+        # 校验 SQL 用 to_tsquery(OR 语义) + invalidated_at IS NULL filter。
+        # plainto_tsquery 把整句切词后全 AND,长 query 必零召回 → 改 to_tsquery + |。
         call_args = sess.execute.call_args
         sql_str = str(call_args[0][0])
-        assert "plainto_tsquery" in sql_str
+        assert "to_tsquery" in sql_str
+        assert "plainto_tsquery" not in sql_str
         assert "invalidated_at IS NULL" in sql_str
+        # 切词后的 query 串走 OR 算符
+        bound_q = call_args[0][1]["q"]
+        assert "|" in bound_q or " " not in bound_q.strip()
 
     def test_empty_query_returns_empty_list(self) -> None:
         sess = MagicMock()
@@ -104,6 +109,32 @@ class TestVectorSearch:
         assert results[0]["edge_id"] == eid
         embed_service.embed.assert_awaited_once()
         milvus_client.search.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_embed_called_with_list_and_milvus_gets_flat_vector(self) -> None:
+        """embed 真契约是 embed(list[str]) -> list[list[float]]。vector_search 过去
+        传 bare string,embed 内部按字符切片,长 query 返回多个子串向量 →
+        data=[多向量] 形态错 → struct.error(读侧向量路全失败根因)。
+        必须 embed([query]) 收 list,并取 [0] 得单条 flat 向量喂 Milvus。"""
+        embed_service = MagicMock()
+        embed_service.embed = AsyncMock(return_value=[[0.1] * 1024])  # 真契约形态
+        milvus_client = MagicMock()
+        milvus_client.search = MagicMock(return_value=[[]])
+        sess = MagicMock()
+
+        await vector_search(
+            sess,
+            milvus_client=milvus_client,
+            embed_service=embed_service,
+            user_id=uuid4(),
+            query="茅台白酒整体怎么看",
+            k=5,
+        )
+        embed_service.embed.assert_awaited_once_with(["茅台白酒整体怎么看"])
+        data_arg = milvus_client.search.call_args.kwargs["data"]
+        assert len(data_arg) == 1, "Milvus data 应是单条向量列表"
+        assert len(data_arg[0]) == 1024, "向量应是 flat 1024 维,不是嵌套/多条"
+        assert all(isinstance(x, float) for x in data_arg[0])
 
     @pytest.mark.asyncio
     async def test_empty_query_returns_empty(self) -> None:

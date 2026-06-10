@@ -13,14 +13,67 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from app.memory.extraction_guards import is_stance_phrase_label, sanitize_edge
 from app.memory.registry import REL_TYPES
 
 _logger = logging.getLogger(__name__)
+
+
+def _latest_turn_date(turns: list[dict[str, Any]]) -> datetime:
+    """chunk 的"现在"=最晚一个 turn 的对话日期,作幻觉 valid_to 的越界基准。"""
+    dates: list[datetime] = []
+    for t in turns:
+        raw = str(t.get("created_at") or "")
+        try:
+            dates.append(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+        except (ValueError, TypeError):
+            continue
+    return max(dates) if dates else datetime.now(UTC)
+
+
+def _build_output_tolerant(
+    parsed: dict[str, Any],
+    *,
+    episode_date: datetime,
+    session_id: UUID,
+) -> ExtractionOutput:
+    """逐边/逐实体容错构造 ExtractionOutput:一条坏边/脏实体丢弃留痕,不毁整批。
+
+    对话流评估写侧根因之一:pydantic 对 list 是 all-or-nothing,一条非法 rel_type
+    让整 chunk 抽取全灭、事实尽失。改成逐元素校验 + 后校验护栏(脏 label 丢弃、
+    幻觉 valid_to 重置)。
+    """
+    good_entities: list[ExtractedEntity] = []
+    for e in parsed.get("entities", []) or []:
+        try:
+            good_entities.append(ExtractedEntity.model_validate(e))
+        except ValidationError as exc:
+            _logger.warning("extract_facts drop bad entity (session=%s): %s", session_id, exc)
+
+    good_edges: list[ExtractedEdge] = []
+    for raw_edge in parsed.get("edges", []) or []:
+        if not isinstance(raw_edge, dict):
+            continue
+        if is_stance_phrase_label(str(raw_edge.get("target_label", ""))):
+            _logger.warning(
+                "extract_facts drop stance-phrase label (session=%s): %s",
+                session_id,
+                raw_edge.get("target_label"),
+            )
+            continue
+        sanitized = sanitize_edge(raw_edge, episode_date=episode_date)
+        try:
+            good_edges.append(ExtractedEdge.model_validate(sanitized))
+        except ValidationError as exc:
+            _logger.warning("extract_facts drop bad edge (session=%s): %s", session_id, exc)
+
+    return ExtractionOutput(entities=good_entities, edges=good_edges)
 
 
 # ===== importance 三档常量 (spec § 11 算法补丁 #3) =====
@@ -111,10 +164,28 @@ Relationship types: HOLDS / WATCHES / PREFERS / AVOIDS / EXPRESSED_VIEW / SOLD /
 
 # 规则
 - 只抽用户**显式表达**的事实
-- "我之前 X 但现在 Y" → 抽两条 edge:
-  - 第一条 valid_from=之前, valid_to=now()
-  - 第二条 valid_from=now()
 - 不确定标 importance=0.2
+
+# 实体类型与关系裁决(必须照此判,别自由发挥)
+## target 实体类型怎么选(看用户表态的主体粒度)
+- 用户对一个行业/板块的看法 → target 用 Industry(申万二级,如"白酒"→"白酒Ⅱ")
+- 用户对一只具体个股的看法 → target 用 Stock(ts_code)
+- 用户只说板块(如"高端白酒")时,【不要替他补】具体个股(茅台/五粮液只是举例,不单独建观点边)
+- 逻辑/主题(如"提价权")放进该观点边的 properties.logic,【不要】单独建一条边
+## 关系怎么选(照表挑,别随机)
+- 有方向词(看多/看空/中性/高估/低估)+具体对象 → EXPRESSED_VIEW
+- 跨标的的风格/策略偏好(喜欢价值/高股息) → PREFERS
+- 不碰/排斥某类 → AVOIDS;关注但没下判断 → WATCHES;研究过 → STUDIED;持仓 → HOLDS;卖出 → SOLD
+- "看多白酒"【必为 EXPRESSED_VIEW,绝不可标 PREFERS】
+## entity_label 形态
+- 必须是名词性实体(如 白酒Ⅱ / 600519.SH),【禁】"看多/看空/买入…"开头的整句谓词短语
+
+# 日期纪律(必须遵守)
+- 每个 episode 的【对话日期】已在输入里给出,valid_from 必须等于对应对话日期,【不许假设/编造日期】
+- 观点未结束时 valid_to 必须为 null
+- "我之前 X 但现在 Y"(同一对象观点演化)→ 抽两条 edge:
+  - 旧的一条 valid_to = 说出"现在 Y"那 turn 的对话日期
+  - 新的一条 valid_from = 说出"现在 Y"那 turn 的对话日期、valid_to=null
 
 # 输出 JSON schema
 {
@@ -271,8 +342,9 @@ class LLMExtractor:
             )
             raise ValueError(f"invalid JSON from cross-turn extraction LLM: {exc}") from exc
 
-        # Plan 2B: 1 chunk → 1 ExtractionOutput
-        return [ExtractionOutput.model_validate(parsed)]
+        # Plan 2B: 1 chunk → 1 ExtractionOutput;逐边容错 + 后校验护栏
+        chunk_now = _latest_turn_date(turns)
+        return [_build_output_tolerant(parsed, episode_date=chunk_now, session_id=session_id)]
 
 
 def _build_cross_turn_user_prompt(
@@ -282,10 +354,14 @@ def _build_cross_turn_user_prompt(
 ) -> str:
     """构造 5 turn 滑动窗口 prompt 输入 — 让 LLM 跨 turn 抽完整 fact."""
     lines: list[str] = [f"# Cross-turn dialogue chunk (session_id={session_id})"]
-    lines.append("最近 N turn 对话 (按时间序), 抽出跨 turn 完整事实:")
+    lines.append("最近 N turn 对话 (按时间序), 抽出跨 turn 完整事实。")
+    lines.append("每个 turn 标了【对话日期】,valid_from 必须用对应对话日期,不许编造:")
     for t in turns:
+        # 对话日期注入:抽取器据此钉 valid_from,杜绝幻觉日期(取 created_at 的日期部分)
+        created = str(t.get("created_at") or "")
+        dialogue_date = created[:10] if created else "(未知)"
         lines.append(
-            f"- episode_id={t.get('episode_id')} idx={t.get('episode_index')}"
+            f"- episode_id={t.get('episode_id')} idx={t.get('episode_index')} 对话日期={dialogue_date}"
             f"\n  User: {t.get('user_message', '')}"
             f"\n  Agent: {t.get('agent_response', '') or '(no response)'}"
         )

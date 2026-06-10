@@ -44,7 +44,8 @@ class _AgeExecutorLike(Protocol):
 
 
 class _EmbedServiceLike(Protocol):
-    def embed(self, text: str) -> Any: ...  # may return list[float] or awaitable
+    # 真契约:收 list[str],返 list[list[float]](可能是 awaitable)。
+    def embed(self, texts: list[str]) -> Any: ...
 
 
 # ============================================================
@@ -74,23 +75,40 @@ def bm25_search(
     if not query or not query.strip():
         return []
     query_tokens = jieba_tokenize_for_search(query)
-    if not query_tokens.strip():
+    or_query = _tokens_to_or_tsquery(query_tokens)
+    if not or_query:
         return []
+    # plainto_tsquery 把切词后所有词 AND —— 整句 query("我现在对白酒整体是什么看法")
+    # 里大多数词不在边的 search_tokens 中,AND 必零召回(读侧全红根因之一)。
+    # 改 to_tsquery + OR:任一关键词命中即召回,ts_rank + LIMIT 保精度。
     sql = text(
         """
         SELECT edge_id, rel_type, importance, valid_from, valid_to,
-               ts_rank(search_vector, plainto_tsquery('simple', :q)) AS bm25_score
+               ts_rank(search_vector, to_tsquery('simple', :q)) AS bm25_score
         FROM chat_memory_edges
         WHERE user_id = :uid
           AND invalidated_at IS NULL
-          AND search_vector @@ plainto_tsquery('simple', :q)
+          AND search_vector @@ to_tsquery('simple', :q)
         ORDER BY bm25_score DESC
         LIMIT :k
         """
     )
-    result = session.execute(sql, {"q": query_tokens, "uid": str(user_id), "k": k})
+    result = session.execute(sql, {"q": or_query, "uid": str(user_id), "k": k})
     rows = result.fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+def _tokens_to_or_tsquery(query_tokens: str) -> str:
+    """jieba 切词串 → to_tsquery 的 OR 表达式 `'tok1' | 'tok2' | ...`。
+
+    每个 lexeme 单引号包裹(内部单引号双写转义),规避 tsquery 特殊算符
+    (& | ! ( ) : * 等)导致的 syntax error;纯标点 token 过滤掉。
+    """
+    toks = [t for t in query_tokens.split() if any(c.isalnum() for c in t)]
+    if not toks:
+        return ""
+    quoted = ["'" + t.replace("'", "''") + "'" for t in toks]
+    return " | ".join(quoted)
 
 
 # ============================================================
@@ -119,16 +137,22 @@ async def vector_search(
     """
     if not query or not query.strip():
         return []
-    embed_call = embed_service.embed(query)
+    query_text = query.strip()
+    # embed 的真契约是 embed(list[str]) -> list[list[float]](embedding_service)。
+    # 过去传 bare string,embed 内部 `for i in range(0, len(texts), batch)` 把字符串
+    # 按字符切片,长 query 返回多个子串向量 → data=[多向量] 形态错 → struct.error
+    # (对话流评估读侧向量路全失败根因)。必须裹成单元素 list 再取 [0]。
+    embed_call = embed_service.embed([query_text])
     if inspect.isawaitable(embed_call):
-        query_vec = await embed_call
+        embed_result = await embed_call
     else:
-        query_vec = embed_call
-    # embed 单 query 可能返回批形态 [[float,...]](embedding_factory 的接口),Milvus
-    # search data=[query_vec] 需要平的 [float,...],否则 struct.error: not a float
-    # (2026-06-08 对话流评估读侧向量路全失败根因)。在此统一归一,兼容 sync/async。
-    if query_vec and isinstance(query_vec[0], list):
-        query_vec = query_vec[0]
+        embed_result = embed_call
+    if not embed_result:
+        return []
+    # 真契约返回 [[float,...]] → 取 [0] 得单条 flat 向量;
+    # 兼容 legacy/mock 直接返回扁平 [float,...](首元素是 float,非 list)。
+    first = embed_result[0]
+    query_vec = first if isinstance(first, list) else embed_result
 
     # Milvus 多租户 filter
     filter_expr = f'user_id == "{user_id}"'

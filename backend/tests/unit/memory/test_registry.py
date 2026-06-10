@@ -112,12 +112,18 @@ def test_normalize_entity_strategy_dcf() -> None:
     assert audit_flag is False
 
 
-def test_normalize_entity_industry_passthrough() -> None:
-    """申万 registry 不在 Plan 1B 范围, 走 passthrough + audit_flag(下游 v1.x 接 registry)."""
+def test_normalize_entity_industry_normalizes_via_shenwan() -> None:
+    """接申万 registry(2026-06-09):Industry 不再 passthrough,白酒系归一到申万 canonical。
+    这是对话流评估写侧根因修复——白酒/白酒Ⅱ/高端白酒 必须落同一节点,演化链才不断。"""
     label, audit_flag = normalize_entity("Industry", "白酒")
-    assert label == "白酒"
-    # 当前没接申万 registry, 走 audit_flag 提示后续补
-    assert audit_flag is True
+    assert label == "白酒Ⅱ"
+    assert audit_flag is False
+    # 自由文本变体也归一
+    assert normalize_entity("Industry", "高端白酒")[0] == "白酒Ⅱ"
+    assert normalize_entity("Industry", "白酒Ⅱ")[0] == "白酒Ⅱ"
+    # 认不出的行业仍 passthrough + audit
+    unknown, ua = normalize_entity("Industry", "生造行业ZZZ")
+    assert unknown == "生造行业ZZZ" and ua is True
 
 
 # ---- jieba_tokenize_for_search ----

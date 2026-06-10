@@ -141,8 +141,15 @@ def normalize_entity(entity_type: str, raw_label: str) -> tuple[str, bool]:
             return label, True
         return normalized, False
 
-    if entity_type in ("Industry", "Sector"):
-        # 申万 registry 留 v1.x; 当前 passthrough + audit_flag
+    if entity_type == "Industry":
+        # 接申万 registry(2026-06-09):自由文本行业标签 → 申万 canonical,
+        # 修对话流评估写侧根因(白酒/白酒Ⅱ/高端白酒 落同一节点,演化链不断)。
+        from app.memory.industry_registry import normalize_industry
+
+        return normalize_industry(label)
+
+    if entity_type == "Sector":
+        # Sector(申万一级粒度)暂仍 passthrough + audit_flag(留后续接一级 registry)
         return label, True
 
     if entity_type == "Concept":

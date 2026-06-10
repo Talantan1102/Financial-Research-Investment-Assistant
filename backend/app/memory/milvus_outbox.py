@@ -108,8 +108,16 @@ async def try_milvus_insert(
     rel_type_str = cast(str, edge.rel_type)
 
     try:
-        embed_call = embed_service.embed(edge_text)
-        embedding = await _maybe_await(embed_call)
+        # embed 真契约:embed(list[str]) -> list[list[float]]。传 bare string 会被
+        # 内部 `for i in range(0, len(texts), batch)` 按字符切片,长文本返回多个子串
+        # 向量,插入形态错 → 毒化向量写入。裹成单元素 list 再取 [0]。
+        embed_call = embed_service.embed([edge_text])
+        embed_result = await _maybe_await(embed_call)
+        if not embed_result:
+            raise RuntimeError("embed returned empty result")
+        first = embed_result[0]
+        # 真契约 [[float,...]] → 取 [0];兼容 legacy/mock 扁平 [float,...]。
+        embedding = first if isinstance(first, list) else embed_result
     except Exception as exc:  # noqa: BLE001  intentional outbox absorb
         _logger.warning(
             "milvus outbox: embed failed for edge_id=%s: %s",

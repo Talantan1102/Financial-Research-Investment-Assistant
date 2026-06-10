@@ -333,3 +333,100 @@ async def test_e2e_no_op_does_not_insert(
         assert ep_row.extraction_metadata["edge_count"] == 0
     finally:
         sess.close()
+
+
+@pytest.mark.integration
+async def test_e2e_no_judge_degrades_to_append_new(
+    pg_memory_fixture: dict[str, Any],
+    pg_memory_session_factory: Callable[[], Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """llm_judge=None(写侧消融削弱版):遇到冲突边不得崩,降级 APPEND_NEW ——
+    旧边保持 active(valid_to/invalidated_at 不动),新边独立追加 → 两条共存。
+    这是元评估区分度实跑的写侧 knob,也是防御性正确:无裁判=不做冲突消解。"""
+    _patch_age_noop(monkeypatch)
+    uid, sid = _seed_user_session(pg_memory_fixture)
+
+    sess = pg_memory_session_factory()
+    try:
+        un = ChatMemoryNode(user_id=uid, entity_type="User", entity_label="User")
+        sn = ChatMemoryNode(user_id=uid, entity_type="Stock", entity_label="600519.SH")
+        ep = ChatMemoryEpisode(
+            user_id=uid,
+            session_id=sid,
+            episode_index=0,
+            user_message_text="买了茅台",
+            source_kind="chat_turn",
+        )
+        sess.add_all([un, sn, ep])
+        sess.flush()
+        existing = ChatMemoryEdge(
+            user_id=uid,
+            source_node_id=un.node_id,
+            target_node_id=sn.node_id,
+            rel_type="HOLDS",
+            valid_from=datetime(2024, 8, 1, tzinfo=UTC),
+            source_episode_id=ep.episode_id,
+            importance=0.9,
+            reasoning="买入",
+        )
+        sess.add(existing)
+        sess.commit()
+        ep_id = ep.episode_id
+        existing_id = existing.edge_id
+    finally:
+        sess.close()
+
+    # 关键:llm_judge=None
+    embed = AsyncMock()
+    embed.embed.return_value = [0.1] * 1024
+    memory = HierarchicalMemory(
+        pg_session_factory=pg_memory_session_factory,
+        age_executor=None,
+        milvus_client=MagicMock(),
+        embed_service=embed,
+        llm_extractor=LLMExtractor(llm_client=AsyncMock()),
+        llm_judge=None,
+    )
+
+    # 冲突边(同三元组、不同 valid_from)——有 judge 时会 update_validity,无 judge 应 append
+    await memory.archival_memory_insert(
+        user_id=uid,
+        content={
+            "rel_type": "HOLDS",
+            "source_entity_type": "User",
+            "source_label": "User",
+            "target_entity_type": "Stock",
+            "target_label": "600519.SH",
+            "valid_from": datetime(2026, 3, 31, tzinfo=UTC),
+            "valid_to": None,
+            "properties": {},
+        },
+        reasoning="无裁判降级",
+        importance=0.9,
+        evidence_quote="x",
+        episode_id=ep_id,
+    )
+
+    sess = pg_memory_session_factory()
+    try:
+        old = sess.execute(
+            select(ChatMemoryEdge).where(ChatMemoryEdge.edge_id == existing_id)
+        ).scalar_one()
+        # 旧边没被冲突消解动过:仍 active
+        assert old.valid_to is None
+        assert old.invalidated_at is None
+        # 两条 HOLDS 共存(削弱版不作废旧版,版本链不成形)
+        rows = (
+            sess.execute(
+                select(ChatMemoryEdge).where(
+                    ChatMemoryEdge.user_id == uid,
+                    ChatMemoryEdge.rel_type == "HOLDS",
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+    finally:
+        sess.close()

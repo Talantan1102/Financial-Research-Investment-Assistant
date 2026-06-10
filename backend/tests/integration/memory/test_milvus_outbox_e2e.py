@@ -141,6 +141,41 @@ async def test_try_milvus_insert_success_no_outbox(
 
 
 @pytest.mark.integration
+async def test_try_milvus_insert_embeds_with_list_and_inserts_flat_vector(
+    pg_memory_fixture: dict[str, Any],
+    pg_memory_session_factory: Callable[[], Any],
+) -> None:
+    """embed 真契约 embed(list[str]) -> list[list[float]]。outbox 过去传 bare string,
+    长 edge_text 按字符切片返回多个子串向量,插入的 embedding 形态错 → struct/维度错,
+    毒化向量写入。必须 embed([edge_text]) 收 list,并取 [0] 插入单条 flat 向量。"""
+    user_uuid, edge, sess = _make_user_session_episode_edge(
+        pg_memory_fixture, pg_memory_session_factory
+    )
+    try:
+        mock_milvus = MagicMock()
+        mock_milvus.insert = MagicMock()
+        mock_embed = AsyncMock()
+        mock_embed.embed.return_value = [[0.1] * 1024]  # 真契约形态
+
+        ok = await try_milvus_insert(
+            session=sess,
+            milvus_client=mock_milvus,
+            embed_service=mock_embed,
+            edge=edge,
+            edge_text="HOLDS User → Stock 600519.SH 用户长期持有贵州茅台逻辑是消费升级",
+        )
+        assert ok is True
+        mock_embed.embed.assert_awaited_once_with(
+            ["HOLDS User → Stock 600519.SH 用户长期持有贵州茅台逻辑是消费升级"]
+        )
+        inserted = mock_milvus.insert.call_args.kwargs["data"][0]["embedding"]
+        assert len(inserted) == 1024, "插入的应是单条 flat 1024 维向量,不是嵌套"
+        assert all(isinstance(x, float) for x in inserted)
+    finally:
+        sess.close()
+
+
+@pytest.mark.integration
 async def test_try_milvus_insert_failure_falls_through_to_outbox(
     pg_memory_fixture: dict[str, Any],
     pg_memory_session_factory: Callable[[], Any],
