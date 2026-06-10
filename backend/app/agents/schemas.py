@@ -42,14 +42,6 @@ RiskTolerance = Literal[
     "very_aggressive",
 ]
 
-Recommendation = Literal[
-    "recommend_buy",
-    "recommend_overweight",
-    "recommend_hold",
-    "recommend_underweight",
-    "recommend_sell",
-]
-
 # v0.8.5 — full tool catalog (5 existing + 8 new). Used by PLAN_REGISTRY's
 # required_tools field type constraint so the planner can only choose from
 # registered tool names.

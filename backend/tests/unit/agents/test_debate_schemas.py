@@ -81,24 +81,17 @@ def test_debate_trace_rounds_bounded_0_to_2() -> None:
         DebateTrace(total_cost_cny=0.0, total_latency_ms=0, rounds_completed=-1)
 
 
-def test_investment_recommendation_v1x_a5b_new_fields() -> None:
-    from app.agents.investment_dd_schema import InvestmentRecommendation, PriceRange
+def test_investment_synthesis_v1x_a5b_new_fields() -> None:
+    from app.agents.investment_dd_schema import InvestmentSynthesis
 
-    rec = InvestmentRecommendation(
-        recommendation="recommend_hold",
-        recommended_position_size_pct=5.0,
+    syn = InvestmentSynthesis(
         narrative="x",
-        recommended_holding_period="medium_term",
-        recommended_entry_price_range=PriceRange(low=10.0, high=20.0),
-        recommended_stop_loss_price=9.0,
-        estimated_target_price_range=PriceRange(low=18.0, high=25.0),
-        position_management_conditions=[],
         evidence=[],
     )
-    assert rec.bull_case == []
-    assert rec.bear_case == []
-    assert rec.strongest_bull_point is None
-    assert rec.strongest_bear_point is None
+    assert syn.bull_case == []
+    assert syn.bear_case == []
+    assert syn.strongest_bull_point is None
+    assert syn.strongest_bear_point is None
 
 
 def test_research_state_v1x_a5b_debate_trace_field() -> None:

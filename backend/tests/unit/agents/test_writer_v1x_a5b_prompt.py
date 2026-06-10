@@ -35,7 +35,8 @@ def test_prompt_no_debate_trace_omits_block() -> None:
 
     prompt = build_investment_dd_prompt(_mk_state(None))
     assert "v1.x A5b debate" not in prompt
-    assert "bull_case" not in prompt
+    # 去推荐后 JSON 模板的 § 6 综合研判含 "bull_case" 占位,故改判 debate-block 专属标记
+    assert "Bull/Bear advocate" not in prompt
 
 
 def test_prompt_rounds_completed_2_includes_v2() -> None:

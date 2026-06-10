@@ -82,7 +82,6 @@ class BacktestRunner:
         session_factory: Callable[[], AbstractContextManager[Session]],
         pipeline: PipelineProtocol | None = None,
         metric_registry: MetricRegistry | None = None,
-        ground_truth_loader: Any | None = None,
         kb_lookup: Any | None = None,
         enable_leak_detection: bool = False,
     ) -> None:
@@ -91,7 +90,6 @@ class BacktestRunner:
         self._kb_inner = kb_inner
         self._pipeline = pipeline
         self._metric_registry = metric_registry or MetricRegistry([])
-        self._ground_truth = ground_truth_loader
         self._kb_lookup = kb_lookup
         self._enable_leak_detection = enable_leak_detection
         self._recorder = EvalRecorder(session_factory)
@@ -152,7 +150,6 @@ class BacktestRunner:
                 inputs = MetricInputs(
                     report=report,
                     case_meta=case_meta,
-                    ground_truth=self._ground_truth,
                     tushare_adapter=tushare_adapter,
                     kb_lookup=self._kb_lookup,
                     evaluator_clients=m5_clients,
@@ -282,13 +279,12 @@ def _to_backtest_metric_scores(results: list[MetricResult]) -> BacktestMetricSco
         field name 仍是 m1_citation_recall 保 spec 一致
       - M2/M3/M5 value 可能是 0.0 (legitimate zero); 用 explicit `is None` check
         而非 `or` short-circuit (`0.0 or 1.0 == 1.0` 会 silently inflate)
-      - M4 sub-fields legitimately nullable (no post-cut-off data)
+      - 去推荐改造(2026-06-04):预测回测(原 M4)已下线
     """
     by_name = {r.name: r for r in results}
     m1 = by_name.get("m1_citation")
     m2 = by_name.get("m2_numerical")
     m3 = by_name.get("m3_risk_pairing")
-    m4 = by_name.get("m4_prediction")
     m5 = by_name.get("m5_composite")
     return BacktestMetricScores(
         m1_citation_precision=(m1.details.get("precision", 1.0) if m1 else 1.0),
@@ -297,9 +293,6 @@ def _to_backtest_metric_scores(results: list[MetricResult]) -> BacktestMetricSco
         m2_numerical_total=(m2.details.get("total", 0) if m2 else 0),
         m2_numerical_correct=(m2.details.get("correct", 0) if m2 else 0),
         m3_risk_pairing_score=(m3.value if m3 and m3.value is not None else 1.0),
-        m4_recommendation_direction_correct=(m4.details.get("direction_correct") if m4 else None),
-        m4_target_price_hit=(m4.details.get("target_price_hit") if m4 else None),
-        m4_risk_flag_realized_rate=(m4.details.get("risk_flag_realized_rate") if m4 else None),
         # M5: prefer details["mean"] (set by CompositeJudgeMetric); fall back to
         # m5.value so stub/const metrics used in tests still map correctly.
         m5_composite_mean=(

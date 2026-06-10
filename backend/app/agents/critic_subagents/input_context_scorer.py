@@ -4,11 +4,11 @@
 investment_horizon / risk_tolerance / client_total_aum / target_ts_code /
 client_existing_position)进行了差异化定制,而非输出 generic boilerplate。
 
-判断标准:
-  - differential(得分高): 报告显式引用投资目标/期限/风险偏好,仓位建议与
-    客户 AUM 和风险等级匹配,关键词体现 client-specific 定制
+判断标准(去推荐改造后):
+  - differential(得分高): 报告显式引用投资目标/期限/风险偏好,§ 6 综合研判的
+    研究重心(多空侧重 / 关键判断变量)与客户目标贴合,关键词体现 client-specific 定制
   - generic boilerplate(得分低): 报告内容与任何客户通用,不提及 input 字段
-    的具体值,或 § 6 仓位建议与客户特征明显不符
+    的具体值,或 § 6 研究重心与客户目标明显不符
 
 scale: 0–10(与其他 5 个维度一致);acceptance threshold = 8.5(≡ 0.85 normalized)
 """
@@ -41,11 +41,13 @@ _INPUT_CONTEXT_PROMPT = """你是金融研究助手 critic_input_context_scorer�
 
 # 评分标准 — 什么算"真正 differential"(高分)
 
-## 核心维度 1: § 6 仓位与持有期
-- recommended_position_size_pct 与 risk_tolerance 匹配
-  (conservative → ≤10%; moderate/balanced → 5%-20%; aggressive/very_aggressive → >10%)
-- recommended_holding_period 与 investment_horizon 一致
-  (short_term → short_term; medium_term → medium_term; long_term → long_term)
+## 核心维度 1: § 6 综合研判的研究重心(去推荐:不再有仓位/持有期建议)
+- bull_case / bear_case 的侧重与 investment_objective 贴合
+  (capital_preservation → 充分呈现下行风险/回撤的 bear_case;
+   aggressive_growth → 充分呈现成长驱动的 bull_case,但仍客观给出 bear_case;
+   stable_growth / balanced → 多空两面均衡呈现)
+- key_judgment_factors(关键判断变量)体现客户目标关注点
+  (保本 → "什么情况下本金受损";成长 → "成长能否兑现")
 
 ## 核心维度 2: 投资目标关键词
 - 报告明确提及 investment_objective 对应的核心目标关键词
@@ -62,19 +64,20 @@ _INPUT_CONTEXT_PROMPT = """你是金融研究助手 critic_input_context_scorer�
 - 注意:overall_risk_level 字段(low/medium/high)是对标的客观风险的评级,
   与客户风险偏好无关,不应作为 differential 的判断依据。
 
-## 核心维度 4: § 6 投资建议 narrative
+## 核心维度 4: § 6 综合研判 narrative
 - narrative 明确引用客户的投资目标和风险承受度进行解释
-  (如"基于您 aggressive_growth + very_aggressive 的特征..." 或类似表述)
+  (如"基于您 aggressive_growth + very_aggressive 的特征..." 或类似表述);
+  注意:narrative 不应出现买卖评级 / 目标价 / 建议仓位(去推荐后属越界)
 
 # 评分标准 — 什么算"generic boilerplate"(低分)
-- § 6 仓位建议不论 risk_tolerance 都推荐相同百分比
+- § 6 综合研判的多空侧重不论 investment_objective 都一样(保本客户也不强调下行风险)
 - 报告没有提及 investment_objective 对应的关键词,或关键词与目标明显不符
   (如 capital_preservation 客户的报告全文强调高成长/高弹性)
-- § 6 持有期建议与 investment_horizon 相反或无关
+- key_judgment_factors 与客户目标无关或缺失
 - § 5 narrative 对所有客户叙述方式相同,未针对风险偏好调整叙述角度
-- § 6 投资建议 narrative 中完全不提 investment_objective 或 risk_tolerance
+- § 6 综合研判 narrative 中完全不提 investment_objective 或 risk_tolerance
 
-# 报告关键章节(§ 5 风险评估 + § 6 投资建议 + 报告开头摘要)
+# 报告关键章节(§ 5 风险评估 + § 6 综合研判 + 报告开头摘要)
 # 注:只提供关键章节用于评分,以节约 token
 {report_excerpt}
 
@@ -113,7 +116,7 @@ class InputContextAppropriatenessScorer(Agent):
             ),
             # Pass only the report excerpt (§5 + §6 + header) to avoid token overflow.
             # The judge prompt only needs to evaluate:
-            #   1. position_size_pct and holding_period (§ 6)
+            #   1. 多空侧重 / 关键判断变量是否贴合客户目标 (§ 6)
             #   2. investment_objective keywords (§ 6 narrative)
             #   3. risk framing (§ 5 narrative)
             # Truncating to 3000 chars covers §5 and §6 in full.
@@ -135,12 +138,12 @@ class InputContextAppropriatenessScorer(Agent):
 def _extract_report_excerpt(report_markdown: str) -> str:
     """Extract the most relevant sections for input_context scoring.
 
-    Keeps § 5 (risk assessment) and § 6 (investment recommendation) in full,
+    Keeps § 5 (risk assessment) and § 6 (综合研判) in full,
     plus the first 400 chars of the report header/overview for context.
     Limits total excerpt to ~3000 chars to prevent token overflow in judge call.
 
-    The judge needs §5 (risk narrative framing) and §6 (position_size, holding_period,
-    recommendation narrative) — these are the sections most sensitive to the 6 input fields.
+    The judge needs §5 (risk narrative framing) and §6 (多空侧重 / 关键判断变量 /
+    综合研判 narrative) — these are the sections most sensitive to the 6 input fields.
     """
     if not report_markdown or report_markdown == "(empty)":
         return "(empty)"

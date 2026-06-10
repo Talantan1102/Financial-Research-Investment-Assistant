@@ -559,11 +559,18 @@ def _read_research_runs_from_sqlite(db_path: Path, limit: int = 50) -> list[Rese
                 target_name = str(report.get("target_name", ""))
                 target_ts_code = str(report.get("target_ts_code", ""))
                 generated_at = str(report.get("generated_at", ""))
-                rec = report.get("investment_recommendation") or {}
-                if not isinstance(rec, dict):
-                    rec = rec.model_dump() if hasattr(rec, "model_dump") else {}
-                recommendation = str(rec.get("recommendation", ""))
-                narrative = str(rec.get("narrative", ""))
+                # 去推荐后 § 6 为 investment_synthesis(无评级);legacy 报告 fallback 读旧字段。
+                syn = (
+                    report.get("investment_synthesis")
+                    or report.get("investment_recommendation")
+                    or {}
+                )
+                if not isinstance(syn, dict):
+                    syn = syn.model_dump() if hasattr(syn, "model_dump") else {}
+                recommendation = str(
+                    syn.get("recommendation", "")
+                )  # 去推荐后恒为 ""(仅 legacy 有值)
+                narrative = str(syn.get("narrative", ""))
                 tldr = narrative[:80] + ("…" if len(narrative) > 80 else "")
                 results.append(
                     ResearchRunSummary(

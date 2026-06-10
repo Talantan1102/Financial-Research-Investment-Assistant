@@ -59,7 +59,7 @@ class ReportListItem(BaseModel):
     status: str
     cost: float
     created_at: datetime
-    investment_recommendation: str | None  # 从 report_json 提取(可能 None — streaming 中)
+    investment_recommendation: str | None  # legacy 评级;去推荐后新报告恒为 None(仅历史报告有值)
 
 
 class ReportListResponse(BaseModel):
@@ -99,11 +99,11 @@ class ReportStartResponse(BaseModel):
 
 
 def _extract_recommendation(report_json: Any) -> str | None:
-    """从 report_json 里挖 investment_recommendation.recommendation 字段.
+    """从 report_json 里挖 investment_recommendation.recommendation 字段(legacy).
 
-    InvestmentDueDiligenceReport schema 形如:
-      {"investment_recommendation": {"recommendation": "Buy/Hold/Sell", ...}, ...}
-    streaming 中 report_json 可能空 dict 或缺 key, 返回 None.
+    去推荐改造(2026-06-04)后,新报告 § 6 为 investment_synthesis(无评级字段),
+    此处对新报告将返回 None;仅历史报告(去推荐前生成)仍能挖出旧评级。
+    streaming 中 report_json 可能空 dict 或缺 key, 同样返回 None.
     """
     if not isinstance(report_json, dict):
         return None
