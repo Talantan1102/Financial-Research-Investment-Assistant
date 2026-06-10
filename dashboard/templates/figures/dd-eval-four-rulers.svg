@@ -1,0 +1,81 @@
+<svg viewBox="0 0 820 650" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="四把尺子在同一份茅台研报上各自取材、独立算分的图解:引用核对、数值核对、风险配对、多模型评委,每把都给出具体算式">
+  <style>
+    .ddfr-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .ddfr-h { font-size: 13px; fill: #1D1D1F; font-weight: 600; }
+    .ddfr-d { font-size: 11px; fill: #6E6E73; }
+    .ddfr-tag { font-size: 10.5px; font-weight: 600; }
+    .ddfr-score { font-size: 12px; font-weight: 600; }
+  </style>
+
+  <g class="ddfr-t">
+    <!-- 报告解剖 -->
+    <text x="40" y="28" class="ddfr-tag" fill="#86868B">被打分的对象:一份「贵州茅台 · 截止 2024-06-30」六节研报</text>
+    <rect x="40" y="40" width="740" height="92" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <rect x="58" y="56" width="106" height="24" rx="6" fill="rgba(94,92,230,0.08)"/>
+    <text x="78" y="72" class="ddfr-d" fill="#4845C2">公司概览</text>
+    <rect x="176" y="56" width="106" height="24" rx="6" fill="rgba(94,92,230,0.08)"/>
+    <text x="196" y="72" class="ddfr-d" fill="#4845C2">合规资质</text>
+    <rect x="294" y="56" width="106" height="24" rx="6" fill="rgba(52,199,89,0.10)"/>
+    <text x="314" y="72" class="ddfr-d" fill="#1B7A33">财务分析</text>
+    <rect x="412" y="56" width="106" height="24" rx="6" fill="rgba(94,92,230,0.08)"/>
+    <text x="432" y="72" class="ddfr-d" fill="#4845C2">行业分析</text>
+    <rect x="530" y="56" width="106" height="24" rx="6" fill="rgba(255,159,10,0.12)"/>
+    <text x="550" y="72" class="ddfr-d" fill="#B26A00">风险评估</text>
+    <rect x="648" y="56" width="106" height="24" rx="6" fill="rgba(94,92,230,0.08)"/>
+    <text x="668" y="72" class="ddfr-d" fill="#4845C2">综合研判</text>
+    <text x="58" y="102" class="ddfr-d">每节 = 叙述句 + 句后挂的知识库引用切块列表(引用核对的取材)</text>
+    <text x="58" y="119" class="ddfr-d">财务分析节带关键指标表(数值核对的取材);风险评估节分市场/成长/事件/估值四桶(风险配对的取材)</text>
+
+    <!-- 尺子 ① 引用核对 -->
+    <text x="40" y="160" class="ddfr-tag" fill="#86868B">四把尺子 · 各自取材,互相独立,失分都能追到具体句子</text>
+    <rect x="40" y="172" width="370" height="216" rx="10" fill="rgba(94,92,230,0.05)" stroke="rgba(94,92,230,0.40)"/>
+    <text x="56" y="196" class="ddfr-h" fill="#4845C2">尺子一 · 引用核对:引的是不是真的</text>
+    <text x="56" y="218" class="ddfr-d">财务分析节写「上半年营收 834.5 亿元、同比增</text>
+    <text x="56" y="233" class="ddfr-d">长约 18%」,句后挂了 3 条知识库切块引用。</text>
+    <text x="56" y="255" class="ddfr-d">逐条按编号查库 + 小评委判「这段切块支撑这句</text>
+    <text x="56" y="270" class="ddfr-d">话吗」:3 条里 2 条支撑 → 引对率 2/3 ≈ 0.67</text>
+    <text x="56" y="292" class="ddfr-d">六节里 5 节带引用 → 覆盖率 5/6 ≈ 0.83</text>
+    <text x="56" y="314" class="ddfr-score" fill="#4845C2">得分 = 两率的调和平均 ≈ 0.74</text>
+    <text x="56" y="336" class="ddfr-d">查无此块(编造引用)、切块查到但不支撑,</text>
+    <text x="56" y="351" class="ddfr-d">分别记入失分日志,能定位到具体哪条引用</text>
+    <text x="56" y="373" class="ddfr-d">拔掉知识库的消融变体,这把尺子先塌</text>
+
+    <!-- 尺子 ② 数值核对 -->
+    <rect x="430" y="172" width="350" height="216" rx="10" fill="rgba(52,199,89,0.05)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="446" y="196" class="ddfr-h" fill="#1B7A33">尺子二 · 数值核对:数字对不对</text>
+    <text x="446" y="218" class="ddfr-d">取材:财务分析节的关键指标表,目前核四类:</text>
+    <text x="446" y="233" class="ddfr-d">营业收入 / 净利润 / 资产负债率 / 净资产收益率</text>
+    <text x="446" y="255" class="ddfr-d">「营业收入 834.5 亿元」→ 中文数字归一</text>
+    <text x="446" y="270" class="ddfr-d">(亿/万/% 折成基础单位)→ 对 tushare 真值,</text>
+    <text x="446" y="285" class="ddfr-d">容差 ±1%:|写的 − 真值| ÷ 真值 ≤ 0.01 算对</text>
+    <text x="446" y="307" class="ddfr-score" fill="#1B7A33">本例 4 项可核、3 项过 → 得分 0.75</text>
+    <text x="446" y="329" class="ddfr-d">错项进日志:指标名 / 写的值 / 真值 / 报告期,</text>
+    <text x="446" y="344" class="ddfr-d">一眼看出是抄错、算错还是编了数</text>
+    <text x="446" y="366" class="ddfr-d">这是"机器硬核对",不经过大模型软判</text>
+
+    <!-- 尺子 ③ 风险配对 -->
+    <rect x="40" y="408" width="370" height="216" rx="10" fill="rgba(255,159,10,0.06)" stroke="rgba(255,159,10,0.45)"/>
+    <text x="56" y="432" class="ddfr-h" fill="#B26A00">尺子三 · 风险配对:风险都给交代了吗</text>
+    <text x="56" y="454" class="ddfr-d">取材:风险评估节四桶(市场/成长/事件/估值)。</text>
+    <text x="56" y="476" class="ddfr-d">本例共列 5 条风险:4 条写了缓解措施,且评委</text>
+    <text x="56" y="491" class="ddfr-d">判这些缓解"对得上、不是空话";1 条(白酒税</text>
+    <text x="56" y="506" class="ddfr-d">改风险)只提风险没给任何应对</text>
+    <text x="56" y="528" class="ddfr-score" fill="#B26A00">得分 = 有效配对 ÷ 总风险 = 4/5 = 0.80</text>
+    <text x="56" y="550" class="ddfr-d">没配缓解的条目记入未配对日志;缓解写了但</text>
+    <text x="56" y="565" class="ddfr-d">被评委判无效(答非所问)的,单独记一类</text>
+    <text x="56" y="587" class="ddfr-d">防的是"风险清单罗列完就完事"的偷懒报告</text>
+
+    <!-- 尺子 ④ 多模型评委 -->
+    <rect x="430" y="408" width="350" height="216" rx="10" fill="rgba(0,122,255,0.05)" stroke="rgba(0,122,255,0.35)"/>
+    <text x="446" y="432" class="ddfr-h" fill="#0A6CD6">尺子四 · 多模型评委:整体像好报告吗</text>
+    <text x="446" y="454" class="ddfr-d">取材:整份报告(截断 4000 字)。三个不同源</text>
+    <text x="446" y="469" class="ddfr-d">评委按同一评分提示各打 1-10 分:</text>
+    <text x="446" y="491" class="ddfr-score" fill="#0A6CD6">8 / 7 / 8 → 均值 7.7,中位数 8</text>
+    <text x="446" y="513" class="ddfr-d">分歧 = 最高 − 最低 = 1 ≤ 2 → 共识可信,</text>
+    <text x="446" y="528" class="ddfr-d">不触发人工复核</text>
+    <text x="446" y="550" class="ddfr-d">分歧 &gt; 2 → 标记送人工审计;均值 ≤ 4 →</text>
+    <text x="446" y="565" class="ddfr-d">标记低质量,推给改进循环</text>
+    <text x="446" y="587" class="ddfr-d">单个评委挂掉记 5 分中性 + 失败计数,</text>
+    <text x="446" y="602" class="ddfr-d">一家罢工不拖垮三家共识</text>
+  </g>
+</svg>
