@@ -567,7 +567,9 @@ def _read_research_runs_from_sqlite(db_path: Path, limit: int = 50) -> list[Rese
                 )
                 if not isinstance(syn, dict):
                     syn = syn.model_dump() if hasattr(syn, "model_dump") else {}
-                recommendation = str(syn.get("recommendation", ""))  # 去推荐后恒为 ""(仅 legacy 有值)
+                recommendation = str(
+                    syn.get("recommendation", "")
+                )  # 去推荐后恒为 ""(仅 legacy 有值)
                 narrative = str(syn.get("narrative", ""))
                 tldr = narrative[:80] + ("…" if len(narrative) > 80 else "")
                 results.append(

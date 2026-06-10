@@ -70,12 +70,18 @@ async def _run(labels: Path, model: str, threshold: float) -> int:
     for cid, hp, jp, res in details:
         ok = "✓" if hp == jp else "✗"
         note = "弃答" if res["abstain"] else f"faith={res['faithfulness']:.2f}"
-        print(f"| {cid} | {'pass' if hp else 'fail'} | {'pass' if jp else 'fail'} | {ok} | {note} |")
+        print(
+            f"| {cid} | {'pass' if hp else 'fail'} | {'pass' if jp else 'fail'} | {ok} | {note} |"
+        )
 
     print()
     print(f"- 一致率(observed agreement):{po:.0%}")
     print(f"- **Cohen's κ:{kappa:.3f}**(阈值 {threshold})")
-    verdict = "✅ 裁判可上岗" if kappa >= threshold else "🔴 裁判暂不上岗(改裁判 prompt 或复核人工标注后重跑)"
+    verdict = (
+        "✅ 裁判可上岗"
+        if kappa >= threshold
+        else "🔴 裁判暂不上岗(改裁判 prompt 或复核人工标注后重跑)"
+    )
     print(f"- 结论:**{verdict}**")
     if len(rows) < 30:
         print(f"- ⚠️ 仅 {len(rows)} 条,低于协议建议的 30-50;κ 置信度有限,补标后重跑更稳。")
@@ -84,8 +90,10 @@ async def _run(labels: Path, model: str, threshold: float) -> int:
     if disagree:
         print("\n## 分歧明细(校准的价值所在)")
         for cid, hp, jp, res in disagree:
-            print(f"- `{cid}`:人工={'pass' if hp else 'fail'} / 裁判={'pass' if jp else 'fail'}"
-                  f"(faith={res['faithfulness']:.2f},abstain={res['abstain']})")
+            print(
+                f"- `{cid}`:人工={'pass' if hp else 'fail'} / 裁判={'pass' if jp else 'fail'}"
+                f"(faith={res['faithfulness']:.2f},abstain={res['abstain']})"
+            )
 
     return 0 if kappa >= threshold else 2
 

@@ -29,9 +29,7 @@ def wilson_interval(passed: int, total: int, z: float = _Z95) -> tuple[float, fl
     return (max(0.0, center - half), min(1.0, center + half))
 
 
-def separable(
-    a_passed: int, a_total: int, b_passed: int, b_total: int, z: float = _Z95
-) -> bool:
+def separable(a_passed: int, a_total: int, b_passed: int, b_total: int, z: float = _Z95) -> bool:
     """两个版本的通过率能否被高置信区分(Wilson 区间不重叠)。
 
     区分度(separability)的逐对判定:消融实验里完整版 vs 削弱版,区间不重叠

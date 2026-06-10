@@ -82,8 +82,6 @@ def _fact_to_text(session_factory: Any, edge: Any) -> str:
     )
 
 
-
-
 class _BoundRetriever:
     """把 HierarchicalMemory.archival_memory_search 绑定到评估 user,产出文本化事实。"""
 

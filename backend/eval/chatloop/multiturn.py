@@ -25,9 +25,8 @@ class UserSimulator:
     """LLM 扮的散户用户:给定目标+人设,逐轮产出下一句(或 ###STOP###)。"""
 
     def __init__(self, goal: str, persona: str | None, model: str = "qwen-plus") -> None:
-        from openai import AsyncOpenAI
-
         from app.config.llm_config import LLMConfig
+        from openai import AsyncOpenAI
 
         cfg = LLMConfig()
         self._client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
@@ -72,6 +71,7 @@ async def run_one_multiturn(
     from app.chatloop.gates import GateConfig
     from app.chatloop.loop import ToolLoop
     from app.chatloop.state import ChatLoopState
+
     from eval.tool_selection._live import build_real_hub
 
     goal = scenario.intent_goal or scenario.user_input
@@ -121,13 +121,12 @@ async def run_multiturn(
     max_turns: int = 5,
 ) -> list[dict[str, Any]]:
     """构造真件(MCP async with 包整批)+ 逐场景跑多轮(per-case 错误隔离)。"""
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
     from app.app_main import _sqlalchemy_async_pg_url
     from app.chatloop.context import ContextDeps
     from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
     from app.chatloop.worker_wiring import build_heavy_singletons
     from app.services.mcp_client import MCPClient
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     engine = create_async_engine(_sqlalchemy_async_pg_url(), future=True)
     sf = async_sessionmaker(engine, expire_on_commit=False)
@@ -145,7 +144,9 @@ async def run_multiturn(
                     )
                 except Exception as e:  # noqa: BLE001 — per-case 隔离
                     logger.exception("multiturn %s failed", sc.case_id)
-                    out.append({"case_id": sc.case_id, "error": f"{type(e).__name__}: {e}", "turns": []})
+                    out.append(
+                        {"case_id": sc.case_id, "error": f"{type(e).__name__}: {e}", "turns": []}
+                    )
     finally:
         await engine.dispose()
     return out
@@ -155,9 +156,8 @@ class MultiTurnJudge:
     """多轮目标达成裁判(独立模型):看对话结束时助手有没有把用户目标要的核心信息给到。"""
 
     def __init__(self, model: str = "qwen-plus") -> None:
-        from openai import AsyncOpenAI
-
         from app.config.llm_config import LLMConfig
+        from openai import AsyncOpenAI
 
         cfg = LLMConfig()
         self._client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
@@ -190,8 +190,15 @@ async def score_multiturn(
     from eval.chatloop.scorers import score_advice, score_disclaimer, should_disclaim
 
     if not transcript:
-        return {"goal_met": False, "goal_reason": "空对话", "advice_violations": 0,
-                "disclaimer_req": 0, "disclaimer_ok": 0, "turns": 0, "total_tools": 0}
+        return {
+            "goal_met": False,
+            "goal_reason": "空对话",
+            "advice_violations": 0,
+            "disclaimer_req": 0,
+            "disclaimer_ok": 0,
+            "turns": 0,
+            "total_tools": 0,
+        }
     met, reason = await judge.goal_met(scenario.intent_goal or scenario.user_input, transcript)
     advice_viol = sum(1 for t in transcript if score_advice(str(t["assistant"])))
     disc_req = [t for t in transcript if should_disclaim(str(t["assistant"]))]

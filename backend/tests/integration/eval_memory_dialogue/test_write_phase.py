@@ -165,7 +165,7 @@ async def test_write_phase_collects_red_not_raises(fresh_user, tmp_path: Path) -
     assert any("中性" in r.detail for r in report.results)
 
 
-_SCRIPT_LIST_LABEL = '''
+_SCRIPT_LIST_LABEL = """
 script_id: write-list-label
 title: "候选列表 count 断言"
 family: 观点演化族
@@ -181,7 +181,7 @@ db_assertions:
       - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [钢铁, 黑色金属]}
 probes:
   - {tier: 直球, dimension: 知识更新, q: "占位", expect_contain: [], expect_not: [], judge_rubric: "占位"}
-'''
+"""
 
 
 async def test_count_no_increase_with_list_label_has_baseline(fresh_user, tmp_path: Path) -> None:
@@ -190,13 +190,15 @@ async def test_count_no_increase_with_list_label_has_baseline(fresh_user, tmp_pa
     回归:write_phase snapshot 曾用 str(list) 当 key,run_check 用 tuple,key 不匹配
     →'未先 snapshot_counts,无基线'误红(2026-06-08 四族冒烟发现的 harness bug)。"""
     user_id, chat_session_id, session = fresh_user
-    p = tmp_path / 's.yaml'
-    p.write_text(_SCRIPT_LIST_LABEL, encoding='utf-8')
+    p = tmp_path / "s.yaml"
+    p.write_text(_SCRIPT_LIST_LABEL, encoding="utf-8")
     runner = WritePhaseRunner(
-        session=session, user_id=user_id, chat_session_id=chat_session_id,
+        session=session,
+        user_id=user_id,
+        chat_session_id=chat_session_id,
         extract_session=_fake_extractor(session),
     )
     report = await runner.run(load_script(p))
-    detail = ' '.join(r.detail for r in report.results)
-    assert '无基线' not in detail, f'候选列表 count 断言丢了基线: {detail}'
+    detail = " ".join(r.detail for r in report.results)
+    assert "无基线" not in detail, f"候选列表 count 断言丢了基线: {detail}"
     assert report.all_passed, [r.detail for r in report.results if not r.passed]

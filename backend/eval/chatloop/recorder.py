@@ -18,10 +18,9 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+from app.core.database import Base, SessionLocal, engine
 from sqlalchemy import Column, Float, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
-
-from app.core.database import Base, SessionLocal, engine
 
 
 class ChatloopEvalRunRow(Base):
