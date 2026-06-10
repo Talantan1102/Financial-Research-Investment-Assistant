@@ -124,6 +124,11 @@ async def vector_search(
         query_vec = await embed_call
     else:
         query_vec = embed_call
+    # embed 单 query 可能返回批形态 [[float,...]](embedding_factory 的接口),Milvus
+    # search data=[query_vec] 需要平的 [float,...],否则 struct.error: not a float
+    # (2026-06-08 对话流评估读侧向量路全失败根因)。在此统一归一,兼容 sync/async。
+    if query_vec and isinstance(query_vec[0], list):
+        query_vec = query_vec[0]
 
     # Milvus 多租户 filter
     filter_expr = f'user_id == "{user_id}"'

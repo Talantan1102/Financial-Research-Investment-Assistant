@@ -233,3 +233,39 @@ def test_target_label_accepts_candidate_list(seeded_user) -> None:
         )
     )
     assert r.passed, r.detail
+
+
+def test_fact_active_value_matches_reasoning(seeded_user) -> None:
+    """偏好 value 空兜底:态度词在 reasoning 时,value_contains 也应命中(冒烟发现)。"""
+    user_id, session = seeded_user
+    from app.memory.models import ChatMemoryEdge, ChatMemoryEpisode, ChatMemoryNode
+
+    src = session.query(ChatMemoryNode).filter_by(user_id=user_id, entity_label="User").first()
+    ep = session.query(ChatMemoryEpisode).filter_by(user_id=user_id).first()
+    tgt = ChatMemoryNode(user_id=user_id, entity_type="Strategy", entity_label="杠杆")
+    session.add(tgt)
+    session.flush()
+    # properties 空,态度词只在 reasoning
+    session.add(
+        ChatMemoryEdge(
+            user_id=user_id,
+            source_node_id=src.node_id,
+            target_node_id=tgt.node_id,
+            rel_type="AVOIDS",
+            valid_from=_utc("2025-02-10"),
+            valid_to=None,
+            importance=0.9,
+            properties={},
+            reasoning="用户明确不碰高杠杆和衍生品",
+            source_episode_id=ep.episode_id,
+        )
+    )
+    session.commit()
+    engine = DbAssertionEngine(session=session, user_id=user_id)
+    r = engine.run_check(
+        DbCheck(
+            type="fact_active",
+            params={"rel_type": "AVOIDS", "target_label": "杠杆", "value_contains": ["不碰"]},
+        )
+    )
+    assert r.passed, r.detail

@@ -148,6 +148,7 @@ def apply_action(
     importance: float,
     reasoning: str,
     properties: dict[str, Any],
+    search_tokens: str = "",
 ) -> ChatMemoryEdge | None:
     """spec § 4 Step 6 — apply 4-action with bi-temporal correctness.
 
@@ -198,6 +199,7 @@ def apply_action(
         importance=importance,
         reasoning=reasoning,
         properties=properties,
+        search_tokens=search_tokens or None,  # BM25 检索:jieba 切词,空则 NULL
     )
     session.add(new_edge)
     session.flush()

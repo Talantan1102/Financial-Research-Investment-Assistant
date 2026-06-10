@@ -124,7 +124,7 @@ db_assertions:
     assert:
       - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [宁德时代, 300750.SZ], value_contains: ["看多", "储能"]}
       - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [宁德时代, 300750.SZ], min_count: 1}
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 新能源}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [新能源, 电力设备, 新能源车]}
   - after: 6
     assert:
       - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [宁德时代, 300750.SZ], value_contains: ["看多"]}

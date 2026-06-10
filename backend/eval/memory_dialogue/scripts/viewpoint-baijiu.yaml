@@ -94,20 +94,20 @@ sessions:
 db_assertions:
   - after: 1
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 白酒, value_contains: ["看多", "提价权"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 白酒, expected_date: "2025-01-06"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [白酒, 白酒II, 白酒Ⅱ, 高端白酒], value_contains: ["看多", "提价权"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [白酒, 白酒II, 白酒Ⅱ, 高端白酒], expected_date: "2025-01-06"}
   - after: 3
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 白酒, value_contains: ["两年"]}
-      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 白酒, min_count: 1}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [白酒, 白酒II, 白酒Ⅱ, 高端白酒], value_contains: ["两年"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [白酒, 白酒II, 白酒Ⅱ, 高端白酒], min_count: 1}
   - after: 6
     assert:
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 白酒}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [白酒, 白酒II, 白酒Ⅱ, 高端白酒]}
   - after: 7
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 白酒, value_contains: ["中性"]}
-      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 白酒, min_count: 2}
-      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: 白酒, expected_versions: 3}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [白酒, 白酒II, 白酒Ⅱ, 高端白酒], value_contains: ["中性"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [白酒, 白酒II, 白酒Ⅱ, 高端白酒], min_count: 2}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: [白酒, 白酒II, 白酒Ⅱ, 高端白酒], expected_versions: 3}
 
 probes:
   - tier: 直球

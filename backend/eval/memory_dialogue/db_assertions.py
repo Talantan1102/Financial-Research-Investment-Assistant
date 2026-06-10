@@ -58,7 +58,13 @@ class DbAssertionEngine:
 
     @staticmethod
     def _props_text(e: ChatMemoryEdge) -> str:
-        return " ".join(str(v) for v in (e.properties or {}).values())
+        # 兼看 reasoning(2026-06-08 冒烟发现:抽取器对 AVOIDS/PREFERS 只建边、
+        # 态度词没进 properties,但常落在 reasoning。value_contains 兼看 reasoning
+        # 兜底——根治需产品侧抽取填 properties,见冒烟发现卡)。
+        vals = [str(v) for v in (e.properties or {}).values()]
+        if e.reasoning:
+            vals.append(str(e.reasoning))
+        return " ".join(vals)
 
     # ---- 分发 --------------------------------------------------------------
 

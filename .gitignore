@@ -84,3 +84,4 @@ docker-compose.override.yml
 
 # 调研期克隆的第三方参考仓库(只读对照,不入库)
 reference_repo/
+backend/eval/memory_dialogue/smoke_logs/

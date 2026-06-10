@@ -82,25 +82,6 @@ def _fact_to_text(session_factory: Any, edge: Any) -> str:
     )
 
 
-class _FlatEmbedAdapter:
-    """冒烟发现:embedding_factory 的 embed(str) 返回批形态 [[floats]],
-    而 retriever.vector_search 期望平的 [floats](data=[query_vec] 再包一层),
-    导致 Milvus struct.error: required argument is not a float。
-    接口漂移在 wiring 层适配,不动双方。"""
-
-    def __init__(self, inner: Any) -> None:
-        self._inner = inner
-
-    def embed(self, text: str) -> Any:
-        v = self._inner.embed(text)
-        if isinstance(v, list) and v and isinstance(v[0], list) and isinstance(text, str):
-            return v[0]
-        return v
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._inner, name)
-
-
 class _BoundRetriever:
     """把 HierarchicalMemory.archival_memory_search 绑定到评估 user,产出文本化事实。"""
 
@@ -132,7 +113,8 @@ async def build_live_runners() -> tuple[Any, Any]:
     from eval.memory_dialogue.write_phase import WritePhaseRunner
 
     llm = build_llm_service_from_env()
-    embed = _FlatEmbedAdapter(build_embedding_service_from_env())
+    # 批形态归一已根治在 retriever.vector_search,这里直接用原始 embed
+    embed = build_embedding_service_from_env()
     # 冒烟发现 #3:抽取层期望 async chat(prompt, system, ...) -> str 协议,
     # 直接塞 LLMService 会 TypeError 全灭——必须过适配器
     memory_llm = MemoryLLMClientAdapter(llm, tier="fast")
@@ -165,6 +147,8 @@ async def build_live_runners() -> tuple[Any, Any]:
         session_factory=SessionLocal,
         llm_extractor=extractor,
         archival_insert_fn=memory.archival_memory_insert,
+        exclude_holdings=True,  # 策略 A:评估期望持仓不入记忆图(持仓仲裁族)
+        stamp_event_time_from_episode=True,  # 事件时间:valid_from 取对话发生日(时间维度)
     )
 
     # 评估专用 user + chat session(每次跑新建,不污染真实数据)

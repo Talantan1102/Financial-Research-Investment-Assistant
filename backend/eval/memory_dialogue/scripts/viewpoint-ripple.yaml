@@ -109,8 +109,8 @@ db_assertions:
   # 原子观点在 session 1 落地:看好 + 周期反转(value 取短词,抗规整)
   - after: 1
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 半导体, value_contains: ["看好", "周期反转"]}
-      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: 半导体, expected_date: "2025-02-10"}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [半导体, 电子, 半导体设备], value_contains: ["看好", "周期反转"]}
+      - {type: valid_from_is_event_time, rel_type: EXPRESSED_VIEW, target_label: [半导体, 电子, 半导体设备], expected_date: "2025-02-10"}
   # session 3:派生计划落地——加科技仓位的倾向,用 PREFERS→Strategy 语义("科技加仓"=策略)
   - after: 3
     assert:
@@ -121,14 +121,14 @@ db_assertions:
   # session 6:重提旧事但无更新,事实数不应增长
   - after: 6
     assert:
-      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: 半导体}
+      - {type: fact_count_no_increase, rel_type: EXPRESSED_VIEW, target_label: [半导体, 电子, 半导体设备]}
       - {type: fact_count_no_increase, rel_type: PREFERS, target_label: 科技加仓}
   # session 7:原子观点被推翻——看好转中性,旧观点作废
   - after: 7
     assert:
-      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: 半导体, value_contains: ["中性"]}
-      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: 半导体, min_count: 1}
-      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: 半导体, expected_versions: 2}
+      - {type: fact_active, rel_type: EXPRESSED_VIEW, target_label: [半导体, 电子, 半导体设备], value_contains: ["中性"]}
+      - {type: old_invalidated, rel_type: EXPRESSED_VIEW, target_label: [半导体, 电子, 半导体设备], min_count: 1}
+      - {type: invalidated_chain_intact, rel_type: EXPRESSED_VIEW, target_label: [半导体, 电子, 半导体设备], expected_versions: 2}
   # session 8(涟漪传播断言核心):原子观点已作废,派生计划理应联动作废/挂红。
   # 期望:科技加仓这条 PREFERS 边也被标作废(min_count:1 的派生作废)。
   # **当前系统大概率不做这种跨标签的派生联动 → 此条预期红灯,是真信号(见 design_notes)**
