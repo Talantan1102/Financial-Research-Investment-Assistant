@@ -1,0 +1,88 @@
+<svg viewBox="0 0 820 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="把纯 Python oracle 包成 verl reward function 的数据流">
+  <style>
+    .vor-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .vor-h { font-size: 12.5px; fill: #1D1D1F; font-weight: 600; }
+    .vor-d { font-size: 10.5px; fill: #6E6E73; }
+    .vor-m { font-size: 10px; fill: #4845C2; font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+    .vor-arrow { stroke: #C7C7CC; stroke-width: 1.5; fill: none; marker-end: url(#vor-head); }
+  </style>
+  <defs>
+    <marker id="vor-head" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M1,1 L7,4 L1,7" stroke="#C7C7CC" stroke-width="1.4" fill="none"/>
+    </marker>
+  </defs>
+
+  <g class="vor-t">
+    <text x="40" y="26" font-size="11" font-weight="600" fill="#86868B">数据怎么进 / 真值怎么进 / oracle 怎么算 / 标量怎么落</text>
+
+    <!-- parquet 一行,两个注入通道 -->
+    <rect x="40" y="40" width="300" height="120" rx="10" fill="#FBFBFD" stroke="rgba(60,60,67,0.18)"/>
+    <text x="56" y="62" class="vor-h">parquet 一行(一个任务)</text>
+    <rect x="56" y="74" width="268" height="36" rx="7" fill="rgba(52,199,89,0.07)" stroke="rgba(52,199,89,0.35)"/>
+    <text x="68" y="90" class="vor-m">reward_model.ground_truth</text>
+    <text x="68" y="104" class="vor-d">tushare 标准答案(真值锚)→ 进 reward</text>
+    <rect x="56" y="116" width="268" height="36" rx="7" fill="rgba(0,199,190,0.08)" stroke="rgba(0,199,190,0.40)"/>
+    <text x="68" y="132" class="vor-m">tools_kwargs.create_kwargs</text>
+    <text x="68" y="146" class="vor-d">cassette 名/股票代码 → 进工具</text>
+
+    <!-- rollout -->
+    <rect x="380" y="40" width="180" height="120" rx="10" fill="rgba(0,199,190,0.06)" stroke="rgba(0,199,190,0.35)"/>
+    <text x="396" y="62" class="vor-h" fill="#0A8A84">rollout(工具循环)</text>
+    <text x="396" y="84" class="vor-d">BaseTool.execute() 里</text>
+    <text x="396" y="100" class="vor-d">按入参 hash 读 cassette</text>
+    <text x="396" y="116" class="vor-d">快照,零网络确定性;</text>
+    <text x="396" y="132" class="vor-d">step reward 给 0(真奖励</text>
+    <text x="396" y="148" class="vor-d">不在这层)</text>
+    <path d="M324,134 L376,110" class="vor-arrow"/>
+
+    <!-- 整条 response 解码 -->
+    <rect x="600" y="40" width="180" height="120" rx="10" fill="#FFFFFF" stroke="rgba(60,60,67,0.18)"/>
+    <text x="616" y="62" class="vor-h">轨迹结束</text>
+    <text x="616" y="84" class="vor-d">reward manager 把整条</text>
+    <text x="616" y="100" class="vor-d">多步 response 解码成</text>
+    <text x="616" y="116" class="vor-m">solution_str(纯文本)</text>
+    <text x="616" y="138" class="vor-d">⚠️ 是整条轨迹文本,</text>
+    <text x="616" y="152" class="vor-d">不是只有最后一句</text>
+    <path d="M560,100 L596,100" class="vor-arrow"/>
+
+    <!-- compute_score 核心盒 -->
+    <rect x="40" y="200" width="740" height="150" rx="12" fill="rgba(52,199,89,0.05)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="56" y="224" class="vor-h" fill="#1B7A33">你的 compute_score(data_source, solution_str, ground_truth, extra_info) —— 在 reward manager 层,不在 tool</text>
+
+    <rect x="56" y="238" width="220" height="96" rx="8" fill="#FFFFFF" stroke="rgba(60,60,67,0.16)"/>
+    <text x="70" y="259" class="vor-h">① 抽最终答案</text>
+    <text x="70" y="278" class="vor-d">从 solution_str 尾部正则抓</text>
+    <text x="70" y="293" class="vor-d">锚点(&lt;answer&gt;…&lt;/answer&gt;);</text>
+    <text x="70" y="308" class="vor-d">裁尾部避免中间步数字</text>
+    <text x="70" y="323" class="vor-d">误命中</text>
+
+    <rect x="290" y="238" width="220" height="96" rx="8" fill="#FFFFFF" stroke="rgba(60,60,67,0.16)"/>
+    <text x="304" y="259" class="vor-h">② oracle 比对</text>
+    <text x="304" y="278" class="vor-d">truth = get_tushare_truth(</text>
+    <text x="304" y="293" class="vor-d">  ground_truth) ← cassette</text>
+    <text x="304" y="308" class="vor-d">归一化(去千分位/统一单位)</text>
+    <text x="304" y="323" class="vor-d">|pred−truth|/|truth| ≤ 1%</text>
+
+    <rect x="524" y="238" width="240" height="96" rx="8" fill="rgba(52,199,89,0.08)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="538" y="259" class="vor-h" fill="#1B7A33">③ 返回</text>
+    <text x="538" y="278" class="vor-d">{"score": 1.0 if 命中 else 0.0,</text>
+    <text x="538" y="293" class="vor-d"> "rel_err":…, "format_ok":…}</text>
+    <text x="538" y="308" class="vor-d">只有 score 进梯度,</text>
+    <text x="538" y="323" class="vor-d">其余进日志当 metric</text>
+
+    <path d="M276,286 L288,286" class="vor-arrow"/>
+    <path d="M510,286 L522,286" class="vor-arrow"/>
+
+    <!-- 落点 + 坑 -->
+    <rect x="40" y="366" width="370" height="50" rx="9" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.35)"/>
+    <text x="56" y="387" class="vor-h" fill="#4845C2">标量落点</text>
+    <text x="56" y="404" class="vor-m">reward_tensor[i, valid_response_length-1]</text>
+
+    <rect x="420" y="366" width="360" height="50" rx="9" fill="rgba(255,59,48,0.05)" stroke="rgba(255,59,48,0.30)"/>
+    <text x="436" y="387" class="vor-h" fill="#C2403B">⚠️ 静默吞异常坑</text>
+    <text x="436" y="404" class="vor-d">reward fn 抛异常被静默降级成全 0,盯 stdout 的 Error 打印</text>
+
+    <text x="40" y="442" class="vor-d" font-style="italic">关键:oracle 走 compute_score(reward manager),不走 tool。tushare 真值经 ground_truth,cassette 名经 create_kwargs。</text>
+    <text x="40" y="462" class="vor-d" font-style="italic">配置:custom_reward_function.path/name + reward_model.enable=False(关神经 RM)+ reward_manager=naive。核验区证实。</text>
+  </g>
+</svg>
