@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# 项目用 npm（package-lock.json），pnpm 锁文件是误生成的副产品
+pnpm-lock.yaml
+pnpm-workspace.yaml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

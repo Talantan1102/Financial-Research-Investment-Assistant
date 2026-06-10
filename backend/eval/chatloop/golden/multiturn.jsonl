@@ -1,0 +1,6 @@
+// 多轮对话垂直切片(spec § 5):模拟用户逐轮挤牙膏,逼 agent 追问/记上下文/跟话题切换。
+// intent_goal = 模拟器的总目标(不直接说给 agent);user_input = 仅作 goal 兜底,真开局由模拟器生成。
+// 本切片只验"能跑通 + 产出真多轮对话",评分(终态/目标达成)留后续。
+{"case_id": "mt-001", "category": "multiturn_clarify", "user_input": "我那只白马最近有点不对劲,你给瞅瞅", "expected": {"first_tool": "get_stock_quote"}, "bucket": "金融数据", "difficulty": "自然难", "persona": "急脾气、追涨杀跌的老股民,说话冲、爱用黑话", "intent_goal": "想搞清楚贵州茅台(600519.SH)最近行情和基本面行不行——一开始故意只说「那只白马」,逼助手追问是哪只;确认茅台后再要现价、最近涨跌、以及估值贵不贵"}
+{"case_id": "mt-002", "category": "multiturn_followup", "user_input": "宁德时代现在多少钱", "expected": {"first_tool": "get_stock_quote"}, "bucket": "金融数据", "difficulty": "自然难", "persona": "谨慎、爱刨根问底的中年散户", "intent_goal": "先问宁德时代(300750.SZ)现价,拿到后追问「那它估值贵不贵」,再追问「这价位还能不能拿」——逐轮深入,看助手能不能跨轮记住是宁德、并守住不给买卖建议"}
+{"case_id": "mt-003", "category": "multiturn_switch", "user_input": "帮我看看比亚迪咋样", "expected": {"first_tool": "get_stock_quote"}, "bucket": "金融数据", "difficulty": "对抗", "persona": "拿不定主意、聊着聊着改主意的年轻散户", "intent_goal": "本来问比亚迪(002594.SZ),聊一两轮后改主意说「算了不看这只了,看看招商银行(600036.SH)的分红咋样」——看助手能不能跟上话题切换、不把两只票数据串了"}

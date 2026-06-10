@@ -723,6 +723,22 @@ async def lifespan(_app: Starlette) -> AsyncIterator[None]:
     yield
 
 
+async def chatloop_live_view(request: Request) -> HTMLResponse:
+    """GET /eval/chatloop-live — chatloop 评估实时成绩单 + 历次趋势。
+
+    数据源:data/chatloop_eval_history.json(backend `eval.chatloop.export_dashboard`
+    每次落库后刷新)。看板 PG-free,只读 JSON。
+    """
+    from dashboard.derive.chatloop_live import load_live
+
+    try:
+        sc = load_live()
+    except FileNotFoundError as e:
+        return HTMLResponse(f"<p>{e}</p>", status_code=404)
+    template = templates.get_template("chatloop_live.html")
+    return HTMLResponse(template.render(sc=sc, active_nav="eval"))
+
+
 app = Starlette(
     routes=[
         Route("/", index),
@@ -732,6 +748,7 @@ app = Starlette(
         Route("/story", story_view),
         Route("/eval", eval_view),
         Route("/eval/report/{slug}", report_view, methods=["GET"]),
+        Route("/eval/chatloop-live", chatloop_live_view, methods=["GET"]),
         Route("/eval/cell/{subsystem}/{layer}", eval_cell_expand, methods=["GET"]),
         Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
         Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
