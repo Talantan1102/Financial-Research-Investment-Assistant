@@ -52,8 +52,6 @@ async def run_scenarios(
     system_prompt: 覆盖系统提示词(prompt 消融用,如对照"加免责前/后");None=生产 CHAT_SYSTEM_PROMPT。
     """
     # 延迟 import:dry / 单测路径零重依赖(无 PG/MCP/LLM)。
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
     from app.app_main import _sqlalchemy_async_pg_url
     from app.chatloop.context import ContextDeps
     from app.chatloop.eval_agent import ChatLoopAgent
@@ -63,6 +61,8 @@ async def run_scenarios(
     from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
     from app.chatloop.worker_wiring import build_heavy_singletons
     from app.services.mcp_client import MCPClient
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
     from eval.tool_selection._live import FakeNoopHub, build_real_hub
 
     engine = create_async_engine(_sqlalchemy_async_pg_url(), future=True)

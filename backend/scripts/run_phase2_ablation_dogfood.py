@@ -158,10 +158,7 @@ def _print_ablation_matrix(session_factory: Any, git_sha: str) -> None:
             if v is not None:
                 by_variant[str(r.ablation_variant)][k].append(float(v))
     header = ["Variant", "M1", "M2", "M3", "M5"]
-    print(
-        f"{header[0]:<20} | {header[1]:>6} | {header[2]:>6} | "
-        f"{header[3]:>6} | {header[4]:>6}"
-    )
+    print(f"{header[0]:<20} | {header[1]:>6} | {header[2]:>6} | {header[3]:>6} | {header[4]:>6}")
     for v in ("V0_baseline", "V1_no_rag", "V2_no_multi_agent", "V3_no_critic"):
         _scores = by_variant.get(v, {})
         print(

@@ -16,8 +16,16 @@ from eval.memory.faithful_answer_metric import faithful_answer
 
 # 弃答标记(与 read_phase REFUSAL_MARKERS 同源)
 REFUSAL_MARKERS: tuple[str, ...] = (
-    "没有这个信息", "没跟我聊过", "没有跟我聊过", "没聊过", "没提过", "没说过",
-    "无法回答", "没有相关", "不知道", "没有找到",
+    "没有这个信息",
+    "没跟我聊过",
+    "没有跟我聊过",
+    "没聊过",
+    "没提过",
+    "没说过",
+    "无法回答",
+    "没有相关",
+    "不知道",
+    "没有找到",
 )
 
 
@@ -39,9 +47,8 @@ class GroundingJudge:
     """二元 grounding 裁判 —— AsyncOpenAI 直连,模型独立可配。"""
 
     def __init__(self, model: str = "qwen-plus") -> None:
-        from openai import AsyncOpenAI
-
         from app.config.llm_config import LLMConfig
+        from openai import AsyncOpenAI
 
         cfg = LLMConfig()
         self._client = AsyncOpenAI(api_key=cfg.api_key, base_url=cfg.base_url)
@@ -67,7 +74,7 @@ class GroundingJudge:
         return [
             re.sub(r"^[\s\-\d.、)]+", "", ln).strip()
             for ln in out.splitlines()
-            if ln.strip() and "无" != ln.strip()
+            if ln.strip() and ln.strip() != "无"
         ]
 
     async def is_grounded(self, claim: str, facts: list[dict[str, Any]]) -> bool:

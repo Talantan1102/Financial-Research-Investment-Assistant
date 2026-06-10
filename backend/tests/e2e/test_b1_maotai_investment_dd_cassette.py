@@ -37,7 +37,9 @@ from typing import Any
 try:
     from dotenv import load_dotenv as _load_dotenv
 
-    _load_dotenv(Path(__file__).parents[3] / ".env")  # 仓库根 .env(去推荐前误写成 parents[2]=backend/)
+    _load_dotenv(
+        Path(__file__).parents[3] / ".env"
+    )  # 仓库根 .env(去推荐前误写成 parents[2]=backend/)
 except ImportError:
     pass  # dotenv not installed — env vars must be set manually
 

@@ -48,6 +48,7 @@ def test_format_contains_no_aggregate_total() -> None:
 
 def test_wilson_interval_basic() -> None:
     from eval.memory_dialogue.scoring import wilson_interval
+
     # 全通过但样本小 → 区间宽,下界明显 <1(小样本不该自信)
     lo, hi = wilson_interval(3, 3)
     assert 0.0 <= lo < 1.0 and hi == 1.0 or hi <= 1.0
@@ -65,19 +66,22 @@ def test_format_shows_error_bars() -> None:
     from eval.memory_dialogue.script_schema import Probe
 
     def _pr(dim, tier, ok):
-        p = Probe(tier=tier, dimension=dim, q='q', expect_contain=(), expect_not=(), judge_rubric='r')
-        return ProbeResult(p, 'a', ok, ok, True, ok, '')
+        p = Probe(
+            tier=tier, dimension=dim, q="q", expect_contain=(), expect_not=(), judge_rubric="r"
+        )
+        return ProbeResult(p, "a", ok, ok, True, ok, "")
 
-    table = build_score_table([_pr('知识更新', '直球', True), _pr('知识更新', '直球', False)], [])
+    table = build_score_table([_pr("知识更新", "直球", True), _pr("知识更新", "直球", False)], [])
     out = format_score_table(table)
     # 误差棒:置信区间应出现(方括号或 ± 形式)
-    assert '95%' in out or '[' in out
-    assert '总分' not in out  # 仍无聚合总分
+    assert "95%" in out or "[" in out
+    assert "总分" not in out  # 仍无聚合总分
 
 
 def test_cluster_se_by_script() -> None:
     """session/脚本级聚类标准误:同脚本多题不是独立样本,按脚本聚类。"""
     from eval.memory_dialogue.scoring import cluster_standard_error
+
     # 两个脚本,脚本内强相关(一个全过一个全挂)→ 聚类 SE 应明显大于朴素 SE
     clusters = [[True, True, True], [False, False, False]]
     se = cluster_standard_error(clusters)
@@ -88,6 +92,7 @@ def test_cluster_se_by_script() -> None:
 
 def test_separable_distinguishes_clear_gap() -> None:
     from eval.memory_dialogue.scoring import separable
+
     # 完整版 vs 残废版差距明显 → 可高置信区分
     assert separable(10, 10, 0, 10) is True
     # 接近 + 小样本 → 区间重叠,分不开
