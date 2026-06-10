@@ -47,6 +47,7 @@ def _record_run(
 
     try:
         from app.services.tier_router import V0_DEFAULT_MODEL
+
         from eval.chatloop.recorder import (
             ChatloopEvalRecorder,
             git_sha,
@@ -59,8 +60,11 @@ def _record_run(
         dur_ms = int((datetime.now() - started_at).total_seconds() * 1000)
         cost, tokens = rec.cost_tokens_since(started_at)
         sampling: dict = {
-            "sut": {"temperature": "provider-default", "top_p": "provider-default",
-                    "top_k": "provider-default"}
+            "sut": {
+                "temperature": "provider-default",
+                "top_p": "provider-default",
+                "top_k": "provider-default",
+            }
         }
         if judge_model:
             sampling["judge"] = {"temperature": 0.0, "top_p": "default", "top_k": "default"}
@@ -87,13 +91,21 @@ def _record_run(
             "cost_cny": cost,
             "total_tokens": tokens,
             "status": status,
-            "config_json": {"mode": mode, "dispatch": dispatch, "k": k,
-                            "max_steps": max_steps, "max_turns": max_turns,
-                            "judge_model": judge_model, "simulator_model": simulator_model,
-                            "golden": str(golden_path)},
+            "config_json": {
+                "mode": mode,
+                "dispatch": dispatch,
+                "k": k,
+                "max_steps": max_steps,
+                "max_turns": max_turns,
+                "judge_model": judge_model,
+                "simulator_model": simulator_model,
+                "golden": str(golden_path),
+            },
         }
         rid = rec.record(run, metrics)
-        cost_str = f"成本 ¥{cost:.4f}/{tokens}tok" if cost is not None else "成本 best-effort 未取到"
+        cost_str = (
+            f"成本 ¥{cost:.4f}/{tokens}tok" if cost is not None else "成本 best-effort 未取到"
+        )
         print(f"\n→ 已落库 run_id={rid}(git {run['git_sha']},耗时 {dur_ms}ms,{cost_str})")
         try:  # 刷新看板数据源(blueprint § 9"读"半)
             from eval.chatloop.export_dashboard import export_history
@@ -131,12 +143,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.multiturn:
         return asyncio.run(
-            _run_multiturn(scenarios, model=args.judge_model, max_turns=args.max_turns,
-                           golden_path=golden_path)
+            _run_multiturn(
+                scenarios, model=args.judge_model, max_turns=args.max_turns, golden_path=golden_path
+            )
         )
 
     if args.grounding:
-        return asyncio.run(_run_grounding(scenarios, model=args.judge_model, golden_path=golden_path))
+        return asyncio.run(
+            _run_grounding(scenarios, model=args.judge_model, golden_path=golden_path)
+        )
 
     if not args.ci and not args.offline:
         by_diff: dict[str, int] = defaultdict(int)
@@ -214,8 +229,14 @@ async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool, golden_
     dreq = [s for s in scores if s.disclaimer_required]
 
     def _m(beh: str, met: str, num: int, den: int) -> dict:
-        return {"behavior": beh, "layer": layer, "metric": met,
-                "value": (num / den) if den else None, "numerator": num, "denominator": den}
+        return {
+            "behavior": beh,
+            "layer": layer,
+            "metric": met,
+            "value": (num / den) if den else None,
+            "numerator": num,
+            "denominator": den,
+        }
 
     metrics = [
         _m("routing_tool", "RelAcc", sum(s.tool_passed for s in rel), len(rel)),
@@ -224,16 +245,37 @@ async def _run(scenarios: list, *, k: int, dispatch: str, offline: bool, golden_
         _m("policy", "advice_violations", sum(s.advice_violation for s in scores), len(scores)),
     ]
     if passk:
-        metrics.append({"behavior": "reliability", "layer": "offline", "metric": "passk",
-                        "value": passk_rate(passk),
-                        "numerator": sum(1 for v in passk.values() if v.passk),
-                        "denominator": len(passk)})
-        metrics.append({"behavior": "reliability", "layer": "offline", "metric": "pass1",
-                        "value": pass1_rate(passk), "numerator": None, "denominator": None})
-    _record_run(mode=("offline" if offline else "ci"), metrics=metrics, started_at=started_at,
-                golden_path=golden_path, case_count=len(scenarios), dispatch=dispatch, k=k,
-                max_steps=(None if offline else 1),
-                thresholds={"RelAcc": RELACC_THRESHOLD, "IrrelAcc": IRRELACC_THRESHOLD})
+        metrics.append(
+            {
+                "behavior": "reliability",
+                "layer": "offline",
+                "metric": "passk",
+                "value": passk_rate(passk),
+                "numerator": sum(1 for v in passk.values() if v.passk),
+                "denominator": len(passk),
+            }
+        )
+        metrics.append(
+            {
+                "behavior": "reliability",
+                "layer": "offline",
+                "metric": "pass1",
+                "value": pass1_rate(passk),
+                "numerator": None,
+                "denominator": None,
+            }
+        )
+    _record_run(
+        mode=("offline" if offline else "ci"),
+        metrics=metrics,
+        started_at=started_at,
+        golden_path=golden_path,
+        case_count=len(scenarios),
+        dispatch=dispatch,
+        k=k,
+        max_steps=(None if offline else 1),
+        thresholds={"RelAcc": RELACC_THRESHOLD, "IrrelAcc": IRRELACC_THRESHOLD},
+    )
     return 0
 
 
@@ -275,7 +317,6 @@ async def _run_grounding(scenarios: list, *, model: str, golden_path: Path) -> i
         )
 
     scored = sum(len(v) for v in by_diff.values())
-    passed = sum(sum(v) for v in by_diff.values())
     faiths = [res["faithfulness"] for _, _, res in rows]
 
     def _at(thr: float) -> str:
@@ -307,7 +348,9 @@ async def _run_grounding(scenarios: list, *, model: str, golden_path: Path) -> i
 
     out_path = Path(__file__).resolve().parent / "calibration" / "grounding_expansion.jsonl"
     with out_path.open("w", encoding="utf-8") as f:
-        f.write("// 真实 grounding 输出(real dispatch),供扩充校准集:填 label/critique。数据为 mock 行情口径。\n")
+        f.write(
+            "// 真实 grounding 输出(real dispatch),供扩充校准集:填 label/critique。数据为 mock 行情口径。\n"
+        )
         for row in expansion:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
     print(f"\n→ 已导出 {len(expansion)} 条待标扩充集:{out_path}")
@@ -316,15 +359,34 @@ async def _run_grounding(scenarios: list, *, model: str, golden_path: Path) -> i
     strict = sum(1 for f in faiths if f >= 1.0)
     lenient = sum(1 for f in faiths if f >= 0.8)
     metrics = [
-        {"behavior": "grounding", "layer": "offline", "metric": "strict_faith",
-         "value": (strict / scored) if scored else None, "numerator": strict, "denominator": scored},
-        {"behavior": "grounding", "layer": "offline", "metric": "lenient_faith_0.8",
-         "value": (lenient / scored) if scored else None, "numerator": lenient, "denominator": scored},
+        {
+            "behavior": "grounding",
+            "layer": "offline",
+            "metric": "strict_faith",
+            "value": (strict / scored) if scored else None,
+            "numerator": strict,
+            "denominator": scored,
+        },
+        {
+            "behavior": "grounding",
+            "layer": "offline",
+            "metric": "lenient_faith_0.8",
+            "value": (lenient / scored) if scored else None,
+            "numerator": lenient,
+            "denominator": scored,
+        },
     ]
-    _record_run(mode="grounding", metrics=metrics, started_at=started_at, golden_path=golden_path,
-                case_count=len(scenarios), dispatch="real", judge_model=model,
-                status=("partial" if errors else "ok"),
-                thresholds={"strict_faith": 1.0, "lenient_faith": 0.8})
+    _record_run(
+        mode="grounding",
+        metrics=metrics,
+        started_at=started_at,
+        golden_path=golden_path,
+        case_count=len(scenarios),
+        dispatch="real",
+        judge_model=model,
+        status=("partial" if errors else "ok"),
+        thresholds={"strict_faith": 1.0, "lenient_faith": 0.8},
+    )
     return 0
 
 
@@ -363,19 +425,43 @@ async def _run_multiturn(scenarios: list, *, model: str, max_turns: int, golden_
         adv = sum(s["advice_violations"] for s in scores)
         print(f"- **目标达成率**:{goal}/{n}")
         print(f"- 跨轮方向性违例:{adv} 例")
-        print(f"- 用户主动喊停:{sum(1 for r in results if r.get('stopped_by_user'))}/{len(results)}(其余顶到轮数上限)")
-        print(f"- 平均 {sum(s['turns'] for s in scores) / n:.1f} 轮、{sum(s['total_tools'] for s in scores) / n:.0f} 工具/场景")
+        print(
+            f"- 用户主动喊停:{sum(1 for r in results if r.get('stopped_by_user'))}/{len(results)}(其余顶到轮数上限)"
+        )
+        print(
+            f"- 平均 {sum(s['turns'] for s in scores) / n:.1f} 轮、{sum(s['total_tools'] for s in scores) / n:.0f} 工具/场景"
+        )
         # --- 落库 ---
         metrics = [
-            {"behavior": "multiturn", "layer": "offline", "metric": "goal_met",
-             "value": goal / n, "numerator": goal, "denominator": n},
-            {"behavior": "multiturn", "layer": "offline", "metric": "advice_violations",
-             "value": float(adv), "numerator": adv, "denominator": n},
+            {
+                "behavior": "multiturn",
+                "layer": "offline",
+                "metric": "goal_met",
+                "value": goal / n,
+                "numerator": goal,
+                "denominator": n,
+            },
+            {
+                "behavior": "multiturn",
+                "layer": "offline",
+                "metric": "advice_violations",
+                "value": float(adv),
+                "numerator": adv,
+                "denominator": n,
+            },
         ]
-        _record_run(mode="multiturn", metrics=metrics, started_at=started_at,
-                    golden_path=golden_path, case_count=len(scenarios), dispatch="real",
-                    max_turns=max_turns, judge_model=model, simulator_model=model,
-                    status=("partial" if any(r.get("error") for r in results) else "ok"))
+        _record_run(
+            mode="multiturn",
+            metrics=metrics,
+            started_at=started_at,
+            golden_path=golden_path,
+            case_count=len(scenarios),
+            dispatch="real",
+            max_turns=max_turns,
+            judge_model=model,
+            simulator_model=model,
+            status=("partial" if any(r.get("error") for r in results) else "ok"),
+        )
     return 0
 
 

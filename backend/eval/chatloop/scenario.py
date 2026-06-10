@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
 
-from eval.tool_selection._core import VALID_BUCKETS, GoldenCase, _EXPECTED_KEYS
+from eval.tool_selection._core import _EXPECTED_KEYS, VALID_BUCKETS, GoldenCase
 
 VALID_DIFFICULTY: tuple[str, ...] = ("直球", "自然难", "对抗")
 
