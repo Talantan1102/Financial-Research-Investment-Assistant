@@ -4,9 +4,11 @@ Tests the score_similarity pure function via a hand-crafted fake LLMService.
 Doesn't actually call the drift script's main() — that requires live LLM key.
 """
 
+import json
 from typing import Any
 
 import pytest
+import yaml
 from app.services.llm_service import LLMService
 
 from tests.eval import cassette_validation as cv
@@ -85,3 +87,52 @@ def test_score_similarity_zero() -> None:
 def test_classify_drift_verdict(sims: list[int], expected: str) -> None:
     """Resample-majority verdict — encodes the truth table the drift fix relies on."""
     assert cv._classify_drift(sims) == expected
+
+
+# ---------------------------------------------------------------------------
+# _extract_first_interaction skip paths — one bad cassette must not crash the
+# nightly sweep (2026-06 root cause: chat-loop SSE streaming cassettes made
+# json.loads blow up and the whole drift job exit 1 before finishing).
+# ---------------------------------------------------------------------------
+
+
+def _write_cassette(tmp_path: Any, response_body: Any) -> Any:
+    data = {
+        "interactions": [
+            {
+                "request": {
+                    "body": json.dumps(
+                        {"model": "m", "messages": [{"role": "user", "content": "你好"}]}
+                    )
+                },
+                "response": {"body": {"string": response_body}},
+            }
+        ]
+    }
+    p = tmp_path / "c.yaml"
+    p.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+    return p
+
+
+def test_extract_skips_sse_streaming_cassette(tmp_path: Any) -> None:
+    """chat-loop streaming cassettes (SSE `data:` chunks) are skipped, not crashed on."""
+    sse = 'data: {"choices":[{"delta":{"content":null,"role":"assistant"}}]}\n\ndata: [DONE]\n'
+    assert cv._extract_first_interaction(_write_cassette(tmp_path, sse)) is None
+
+
+def test_extract_skips_non_json_body(tmp_path: Any) -> None:
+    assert cv._extract_first_interaction(_write_cassette(tmp_path, "<html>oops</html>")) is None
+
+
+def test_extract_skips_empty_content(tmp_path: Any) -> None:
+    """Tool-call-only responses (content null/empty) carry no text to drift-compare."""
+    body = json.dumps({"choices": [{"message": {"content": None, "tool_calls": []}}]})
+    assert cv._extract_first_interaction(_write_cassette(tmp_path, body)) is None
+
+
+def test_extract_returns_plain_text_response(tmp_path: Any) -> None:
+    body = json.dumps({"choices": [{"message": {"content": "茅台行情如下"}}]})
+    ext = cv._extract_first_interaction(_write_cassette(tmp_path, body))
+    assert ext is not None
+    model, prompt, recorded = ext
+    assert (model, prompt, recorded) == ("m", "你好", "茅台行情如下")

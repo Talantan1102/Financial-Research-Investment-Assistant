@@ -48,9 +48,11 @@ RESAMPLE_EXTRA = 2  # up to 3 total samples on the borderline path
 def _extract_first_interaction(cassette_path: Path) -> tuple[str, str, str] | None:
     """Returns (model, prompt, recorded_response) or None if cassette is empty/unsupported.
 
-    Only handles LLM-shaped cassettes (OpenAI-compatible chat.completions response).
-    Non-LLM cassettes (e.g. Bocha search API) are skipped — drift detection for
-    those uses different signal types and lives outside this validator.
+    Only handles LLM-shaped cassettes (OpenAI-compatible NON-streaming
+    chat.completions response with text content). Skipped: non-LLM cassettes
+    (e.g. Bocha search API), SSE streaming cassettes (chat-loop tool-call
+    rounds), and empty-content responses — drift detection for those uses
+    different signal types and lives outside this validator.
     """
     data = yaml.safe_load(cassette_path.read_text(encoding="utf-8"))
     if not data or "interactions" not in data or not data["interactions"]:
@@ -62,11 +64,25 @@ def _extract_first_interaction(cassette_path: Path) -> tuple[str, str, str] | No
     msgs = body.get("messages", [])
     prompt = msgs[-1]["content"] if msgs else ""
     resp_str = first["response"]["body"]["string"]
-    resp_obj = json.loads(resp_str)
+    if isinstance(resp_str, str) and resp_str.lstrip().startswith("data:"):
+        # SSE streaming cassette (chat-loop tool-call rounds). Replaying the
+        # prompt WITHOUT the tool schema makes the live model answer in full
+        # text while the recording is a tool-call round (often empty content)
+        # — a guaranteed false DRIFT. Tool-call drift needs a tool-sequence
+        # signal, which lives outside this prompt→text validator.
+        return None
+    try:
+        resp_obj = json.loads(resp_str)
+    except (json.JSONDecodeError, TypeError):
+        # Unparseable body — not an OpenAI chat.completions cassette. One bad
+        # cassette must not crash the whole nightly drift sweep.
+        return None
     # Skip non-LLM cassettes (no `choices` key — e.g. search APIs)
     if "choices" not in resp_obj:
         return None
     recorded = resp_obj["choices"][0]["message"]["content"]
+    if not recorded:
+        return None
     return model, prompt, recorded
 
 
@@ -169,7 +185,7 @@ def main() -> int:
     for cassette in cassettes:
         ext = _extract_first_interaction(cassette)
         if ext is None:
-            print(f"SKIP {cassette}: no interactions")
+            print(f"SKIP {cassette}: no replayable text interaction")
             continue
         model, prompt, recorded = ext
         rel = cassette.relative_to(CASSETTES_ROOT)
