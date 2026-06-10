@@ -61,7 +61,10 @@ def _signature(raw: str) -> str:
 def main() -> None:
     config = LLMConfig()
     client = OpenAI(api_key=config.api_key, base_url=config.base_url)
-    print(f"模型={V0_DEFAULT_MODEL}\n判定:期望从 PREFERS→Stock 纠正为 EXPRESSED_VIEW→白酒Ⅱ(Industry)\n" + "=" * 70)
+    print(
+        f"模型={V0_DEFAULT_MODEL}\n判定:期望从 PREFERS→Stock 纠正为 EXPRESSED_VIEW→白酒Ⅱ(Industry)\n"
+        + "=" * 70
+    )
     for name, sys_prompt in VARIANTS:
         print(f"\n### {name}")
         sigs = []

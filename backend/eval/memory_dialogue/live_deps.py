@@ -213,7 +213,9 @@ async def build_live_runners(
         extract_session=extract_session,
     )
     retriever = (
-        _EmptyRetriever() if read_empty_retriever else _BoundRetriever(memory, SessionLocal, user_id)
+        _EmptyRetriever()
+        if read_empty_retriever
+        else _BoundRetriever(memory, SessionLocal, user_id)
     )
     read_runner = ReadPhaseRunner(
         retriever=retriever,

@@ -26,25 +26,43 @@ def test_rejects_future_valid_to() -> None:
 
 
 def test_rejects_unparseable_valid_to() -> None:
-    edge = {"rel_type": "EXPRESSED_VIEW", "target_label": "白酒Ⅱ",
-            "valid_from": "2025-01-06", "valid_to": "假设2025-04-15",
-            "importance": 0.9, "reasoning": "x", "source_label": "User"}
+    edge = {
+        "rel_type": "EXPRESSED_VIEW",
+        "target_label": "白酒Ⅱ",
+        "valid_from": "2025-01-06",
+        "valid_to": "假设2025-04-15",
+        "importance": 0.9,
+        "reasoning": "x",
+        "source_label": "User",
+    }
     out = sanitize_edge(edge, episode_date=_ep())
     assert out["valid_to"] is None
 
 
 def test_keeps_valid_to_in_window() -> None:
-    edge = {"rel_type": "EXPRESSED_VIEW", "target_label": "白酒Ⅱ",
-            "valid_from": "2025-01-06", "valid_to": "2025-02-03",  # 合理:对话日附近
-            "importance": 0.9, "reasoning": "x", "source_label": "User"}
+    edge = {
+        "rel_type": "EXPRESSED_VIEW",
+        "target_label": "白酒Ⅱ",
+        "valid_from": "2025-01-06",
+        "valid_to": "2025-02-03",  # 合理:对话日附近
+        "importance": 0.9,
+        "reasoning": "x",
+        "source_label": "User",
+    }
     out = sanitize_edge(edge, episode_date=_ep(2025, 2, 3))
     assert out["valid_to"] == "2025-02-03"  # 合理日期不动
 
 
 def test_keeps_null_valid_to() -> None:
-    edge = {"rel_type": "EXPRESSED_VIEW", "target_label": "白酒Ⅱ",
-            "valid_from": "2025-01-06", "valid_to": None,
-            "importance": 0.9, "reasoning": "x", "source_label": "User"}
+    edge = {
+        "rel_type": "EXPRESSED_VIEW",
+        "target_label": "白酒Ⅱ",
+        "valid_from": "2025-01-06",
+        "valid_to": None,
+        "importance": 0.9,
+        "reasoning": "x",
+        "source_label": "User",
+    }
     out = sanitize_edge(edge, episode_date=_ep())
     assert out["valid_to"] is None
 
@@ -73,18 +91,46 @@ def test_build_output_tolerant_keeps_good_drops_bad() -> None:
             {"entity_type": "NotAType", "entity_label": "x", "properties": {}},  # 非法类型
         ],
         "edges": [
-            {"rel_type": "EXPRESSED_VIEW", "source_label": "User", "target_label": "白酒Ⅱ",
-             "valid_from": "2025-04-01", "valid_to": None, "importance": 0.9,
-             "reasoning": "看多收回转中性", "properties": {"view": "中性"}},  # 好边
-            {"rel_type": "NOT_A_REL", "source_label": "User", "target_label": "白酒Ⅱ",
-             "valid_from": "2025-04-01", "valid_to": None, "importance": 0.9,
-             "reasoning": "x", "properties": {}},  # 非法关系 → 丢
-            {"rel_type": "EXPRESSED_VIEW", "source_label": "User", "target_label": "看多高端白酒",
-             "valid_from": "2025-04-01", "valid_to": None, "importance": 0.9,
-             "reasoning": "x", "properties": {}},  # 脏 label → 丢
-            {"rel_type": "EXPRESSED_VIEW", "source_label": "User", "target_label": "白酒Ⅱ",
-             "valid_from": "2025-04-01", "valid_to": "2027-04-01", "importance": 0.9,
-             "reasoning": "x", "properties": {}},  # 幻觉 valid_to → 被重置 null
+            {
+                "rel_type": "EXPRESSED_VIEW",
+                "source_label": "User",
+                "target_label": "白酒Ⅱ",
+                "valid_from": "2025-04-01",
+                "valid_to": None,
+                "importance": 0.9,
+                "reasoning": "看多收回转中性",
+                "properties": {"view": "中性"},
+            },  # 好边
+            {
+                "rel_type": "NOT_A_REL",
+                "source_label": "User",
+                "target_label": "白酒Ⅱ",
+                "valid_from": "2025-04-01",
+                "valid_to": None,
+                "importance": 0.9,
+                "reasoning": "x",
+                "properties": {},
+            },  # 非法关系 → 丢
+            {
+                "rel_type": "EXPRESSED_VIEW",
+                "source_label": "User",
+                "target_label": "看多高端白酒",
+                "valid_from": "2025-04-01",
+                "valid_to": None,
+                "importance": 0.9,
+                "reasoning": "x",
+                "properties": {},
+            },  # 脏 label → 丢
+            {
+                "rel_type": "EXPRESSED_VIEW",
+                "source_label": "User",
+                "target_label": "白酒Ⅱ",
+                "valid_from": "2025-04-01",
+                "valid_to": "2027-04-01",
+                "importance": 0.9,
+                "reasoning": "x",
+                "properties": {},
+            },  # 幻觉 valid_to → 被重置 null
         ],
     }
     out = _build_output_tolerant(parsed, episode_date=_ep(2025, 4, 1), session_id=uuid4())

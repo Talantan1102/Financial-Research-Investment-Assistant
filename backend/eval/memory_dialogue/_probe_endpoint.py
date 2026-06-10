@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from typing import Any
 
 from app.config.llm_config import LLMConfig
 from app.memory.extractor import _EXTRACTION_SYSTEM_PROMPT
@@ -26,7 +27,7 @@ USER_MSG = "我自己基本研究完了 结论就是高端白酒值得拿 起码
 AGENT_MSG = "(总结用户观点:看多高端白酒,核心逻辑提价权,持有期三年)"
 USER_PROMPT = f"# Episode\n当前对话日期=2025-01-06\nUser: {USER_MSG}\nAgent: {AGENT_MSG}"
 
-CONFIGS = [
+CONFIGS: list[tuple[str, dict[str, Any]]] = [
     ("默认(现状,无温/无json)", {}),
     ("低温0.1", {"temperature": 0.1}),
     ("低温0.1+json_object", {"temperature": 0.1, "response_format": {"type": "json_object"}}),
@@ -62,7 +63,7 @@ def main() -> None:
         parse_ok = 0
         sigs: list[str] = []
         api_err = None
-        for i in range(N):
+        for _ in range(N):
             try:
                 r = client.chat.completions.create(
                     model=V0_DEFAULT_MODEL,

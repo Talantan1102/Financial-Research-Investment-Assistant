@@ -11,7 +11,9 @@ from app.memory.industry_registry import normalize_industry
 
 def test_baijiu_variants_normalize_to_same_canonical() -> None:
     """白酒 / 白酒Ⅱ / 白酒II / 高端白酒 / 次高端白酒 → 同一 canonical(演化链不断的前提)。"""
-    canon = {normalize_industry(x)[0] for x in ["白酒", "白酒Ⅱ", "白酒II", "高端白酒", "次高端白酒"]}
+    canon = {
+        normalize_industry(x)[0] for x in ["白酒", "白酒Ⅱ", "白酒II", "高端白酒", "次高端白酒"]
+    }
     assert len(canon) == 1, f"白酒系应归一到一个 canonical,实得 {canon}"
 
 

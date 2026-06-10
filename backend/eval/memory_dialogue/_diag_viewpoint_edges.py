@@ -17,9 +17,7 @@ async def main() -> None:
     from eval.memory_dialogue.script_schema import load_script
 
     write_runner, _ = await build_live_runners()
-    script = load_script(
-        Path(__file__).parent / "scripts" / "viewpoint-baijiu.yaml"
-    )
+    script = load_script(Path(__file__).parent / "scripts" / "viewpoint-baijiu.yaml")
     await write_runner.run(script)
 
     from app.core.database import SessionLocal
@@ -47,9 +45,7 @@ async def main() -> None:
         ).fetchall()
         print(f"\n=== user {uid} 的 EXPRESSED_VIEW 边({len(rows)} 条)===")
         for r in rows:
-            status = (
-                "作废" if r.invalidated_at else ("结束" if r.valid_to else "★active")
-            )
+            status = "作废" if r.invalidated_at else ("结束" if r.valid_to else "★active")
             props = r.properties or {}
             print(
                 f"[{status:>7}] → {r.tgt} | from={str(r.valid_from)[:10]} "
@@ -57,11 +53,7 @@ async def main() -> None:
                 f"| props={props} | reason={(r.reasoning or '')[:60]}"
             )
         # 专门看有没有「中性」
-        neutral = [
-            r
-            for r in rows
-            if "中性" in str(r.properties) or "中性" in (r.reasoning or "")
-        ]
+        neutral = [r for r in rows if "中性" in str(r.properties) or "中性" in (r.reasoning or "")]
         print(f"\n含「中性」的边:{len(neutral)} 条", "→ 抽到了" if neutral else "→ 根本没抽出")
     finally:
         s.close()
