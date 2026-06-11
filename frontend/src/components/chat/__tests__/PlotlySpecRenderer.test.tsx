@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import { PlotlySpecRenderer, type PlotlySpec } from '../PlotlySpecRenderer'
+import { PlotlySpecRenderer } from '../PlotlySpecRenderer'
+import type { PlotlySpec } from '@/types/chat'
 
 // plotly.js-dist-min 在 jsdom 跑不起来 → mock 掉;factory 返回一个占位 Plot 组件。
 vi.mock('plotly.js-dist-min', () => ({ default: {} }))

@@ -1,18 +1,9 @@
 import createPlotlyComponent from 'react-plotly.js/factory'
 import Plotly from 'plotly.js-dist-min'
+import type { PlotlySpec } from '@/types/chat'
 
 // 用 factory + 预构建 dist-min(避开全量 plotly.js 的 mapbox-gl exotic subdep)。
 const Plot = createPlotlyComponent(Plotly)
-
-export interface PlotlyFigure {
-  data: Record<string, unknown>[]
-  layout?: Record<string, unknown>
-}
-
-export interface PlotlySpec {
-  type: 'plotly'
-  figure: PlotlyFigure
-}
 
 export interface PlotlySpecRendererProps {
   spec: PlotlySpec

@@ -43,5 +43,9 @@ dispatch→apply_results 之间被剥离,绝不进 LLM 上下文。沙箱底座�
 
 - 图不跨 reload 持久化(reload 从 PG 拉消息无 chart);持仓/日线/行业数据工具未接
   (部分示例端到端不通,见 spec § 9);DockerExecutorBackend;会话内有状态 kernel。
+- 沙箱 AST 黑名单残余口子(spec § 10 已标注可被绕过):review 已补 `os.popen`/`os.fdopen`
+  封堵任意 shell 执行;`pathlib.Path(...).read_text()` 这类文件读仍可绕过(现有 AST
+  resolver 不解析"Call 结果上的方法调用")—— 单用户作品 + 断网兜底下风险低,留作硬化
+  follow-up(要么扩 resolver,要么 ban `pathlib` import)。
 
 相关:[[chat-loop-redesign-done]] [[v0.9-skill-loader-l1-l2-l3a-landed]] [[optional-extras-for-heavy-deps]]
