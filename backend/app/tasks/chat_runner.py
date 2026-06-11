@@ -339,6 +339,24 @@ async def run_chat_async(
         except Exception as exc:  # noqa: BLE001
             logger.debug("TTL refresh skipped for task %s: %s", task_id, exc)
 
+        # Path A 写 episode + 触发 Path B 抽取(干净成功轮;纯副作用,fail-soft 双保险)。
+        # 回复与持久化已在前完成,本块失败绝不影响 turn。钩子内部已守卫 + fail-soft。
+        try:
+            from app.tasks.chat_memory_hook import persist_episode_and_trigger
+
+            await persist_episode_and_trigger(
+                singletons.memory,
+                session_id=session_id,
+                user_id=user_id,
+                user_message=user_message,
+                agent_response="".join(emitted_tokens),
+                cancelled=cancelled_by_user,
+                loop_error=loop_error,
+                final_state=final_state,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("chat memory hook failed task=%s: %s", task_id, exc)
+
     # 升级后处理(offered 即走,不再要求 loop_error is None):escalate_request +
     # EscalationExtractor + draft + 唯一终止 done。条件与上面的 will_escalate 一致 ——
     # _emit_escalation 内部仅在 final_state.escalate_offered 时真跑(否则早 return),
