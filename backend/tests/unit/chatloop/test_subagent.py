@@ -152,3 +152,81 @@ async def test_spawn_one_returns_ok_result() -> None:
     assert result.steps_used == 2
     # 子循环事件带 lane=subtask_id
     assert all(ev.data.get("lane") == "sub-0" for ev in events if ev.type != "done")
+
+
+class _PerChildFakeLLM:
+    """按 request_id 给每个子循环独立脚本 —— 并发 gather 下脚本不串(子 request_id 唯一)。
+
+    单一共享 list 在 asyncio.gather 下 pop(0) 会被并发交错(子循环间偷步 →
+    同签名连调触发 spinning),非确定性。子循环 request_id = parent::sub::sub-{i},
+    天然唯一,按它路由即隔离。
+    """
+
+    def __init__(self, per_child: list[list[StepResult]]) -> None:
+        # request_id 形如 r1::sub::sub-0,取末尾 index 路由到对应脚本
+        self._scripts = {f"sub-{i}": list(s) for i, s in enumerate(per_child)}
+
+    async def stream_step(self, **kwargs: Any) -> StepResult:
+        rid = str(kwargs.get("request_id", ""))
+        key = rid.rsplit("::", 1)[-1]
+        return self._scripts[key].pop(0)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_three_parallel_rolls_budget_and_emits() -> None:
+    # 三个子任务各跑两圈(查→答),各自独立脚本(并发隔离)
+    per_child = [
+        [
+            _step(tool_calls=[_call("get_stock_quote", {"ts_code": f"x{i}"})]),
+            _step(content="结论 1700。", finish_reason="stop"),
+        ]
+        for i in range(3)
+    ]
+    llm = _PerChildFakeLLM(per_child)
+    events: list[LoopEvent] = []
+
+    async def _emit(ev: LoopEvent) -> None:
+        events.append(ev)
+
+    factory = SubagentFactory(
+        llm=llm, registry=_FakeRegistry(), cache=None, emit=_emit,
+        seq_counter=SeqCounter(), gate_cfg=GateConfig(), audit_repo=None,
+    )
+    parent = _parent_state()
+    reqs = [SubtaskRequest(goal=f"查{i}", target=f"t{i}") for i in range(3)]
+    results = await factory.dispatch(reqs, parent)
+
+    assert len(results) == 3
+    assert all(r.status == "ok" for r in results)
+    # 预算回滚进父 state(3 个子循环各烧了 token/钱)
+    assert parent.budget_spent_tokens > 0
+    assert parent.budget_spent_cny > 0
+    # dispatch_start / dispatch_end 各一次
+    assert sum(1 for e in events if e.type == "dispatch_start") == 1
+    assert sum(1 for e in events if e.type == "dispatch_end") == 1
+
+
+@pytest.mark.asyncio
+async def test_dispatch_one_child_fails_others_survive() -> None:
+    # sub-2 脚本为空 → 首圈 pop 抛 IndexError → 子循环异常包成 failed;sub-0/1 正常作答。
+    # (并发隔离:用 per-child 脚本,故 failed 落在确定的那个子任务上,断言不抖)
+    ok_pair = [
+        _step(tool_calls=[_call("get_stock_quote", {"ts_code": "x"})]),
+        _step(content="ok", finish_reason="stop"),
+    ]
+    llm = _PerChildFakeLLM([list(ok_pair), list(ok_pair), []])  # sub-2 空脚本 → failed
+
+    async def _emit(ev: LoopEvent) -> None:
+        pass
+
+    factory = SubagentFactory(
+        llm=llm, registry=_FakeRegistry(), cache=None, emit=_emit,
+        seq_counter=SeqCounter(), gate_cfg=GateConfig(), audit_repo=None,
+    )
+    results = await factory.dispatch(
+        [SubtaskRequest(goal="a"), SubtaskRequest(goal="b"), SubtaskRequest(goal="c")],
+        _parent_state(),
+    )
+    assert len(results) == 3  # 永远回 N 份,不抛
+    assert any(r.status == "failed" for r in results)
+    assert any(r.status == "ok" for r in results)

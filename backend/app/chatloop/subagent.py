@@ -7,6 +7,7 @@ dispatch_subagents(禁串门 + 禁递归)。
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
@@ -164,6 +165,46 @@ class SubagentFactory:
             status=status, gap_note=gap, tokens_spent=final.budget_spent_tokens,
             cost_cny=final.budget_spent_cny, steps_used=final.step, tier=CHILD_TIER,
         )
+
+    async def dispatch(
+        self, subtasks: list[SubtaskRequest], parent: ChatLoopState
+    ) -> list[SubagentResult]:
+        n = len(subtasks)
+        # 预算切片:给整批 = 当轮剩余 × FRACTION,均分到每个子循环
+        remaining_cny = max(0.0, self._gate_cfg.max_cny - parent.budget_spent_cny)
+        remaining_tokens = max(0, self._gate_cfg.max_tokens - parent.budget_spent_tokens)
+        child_cny = max(CHILD_MIN_CNY, (remaining_cny * CHILD_BUDGET_FRACTION) / n)
+        child_tokens = max(5_000, int((remaining_tokens * CHILD_BUDGET_FRACTION) / n))
+
+        await self._emit_plain(
+            "dispatch_start", parent.step,
+            n=n, subtasks=[{"subtask_id": f"sub-{i}", "goal": s.goal[:60]}
+                           for i, s in enumerate(subtasks)],
+        )
+        results: list[SubagentResult] = await asyncio.gather(
+            *(self.spawn_one(req, parent, subtask_id=f"sub-{i}",
+                             child_cny=child_cny, child_tokens=child_tokens)
+              for i, req in enumerate(subtasks))
+        )
+        # 预算回滚进父 state(ChatLoopState 字段可变)
+        for r in results:
+            parent.budget_spent_cny += r.cost_cny
+            parent.budget_spent_tokens += r.tokens_spent
+        # 审计落库(best-effort)
+        if self._audit is not None:
+            try:
+                self._audit.record_batch(parent=parent, subtasks=subtasks, results=results)
+            except Exception:  # noqa: BLE001 — 留痕非致命
+                pass
+        await self._emit_plain(
+            "dispatch_end", parent.step,
+            n=n, results=[{"subtask_id": r.subtask_id, "status": r.status} for r in results],
+        )
+        return results
+
+    async def _emit_plain(self, type_: str, step: int, /, **data: Any) -> None:
+        seq = self._seq.next()
+        await self._emit(LoopEvent(type=type_, seq=seq, step=step, data=data))  # type: ignore[arg-type]
 
 
 __all__ = [
