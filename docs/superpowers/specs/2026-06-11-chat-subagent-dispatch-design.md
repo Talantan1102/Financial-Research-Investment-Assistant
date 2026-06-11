@@ -304,7 +304,13 @@ YAGNI，且都是诚实的能力边界，不是遗漏：
 
 ## 十四、开放问题（实施期定）
 
-- 个数上限确切值（6 还是 8）与分批策略的具体阈值。
-- 预算切片占当轮总预算的比例（固定比例 vs 按 N 动态）。
-- `dispatch_subagents` 归核心组还是延迟组（影响主循环是否默认看见它的完整 schema）。
-- `scenario_type` 是 LLM 标注还是 harness 按子任务形状推断。
+- 个数上限确切值（实施定为 8）与分批策略的具体阈值。
+- 预算切片占当轮总预算的比例（实施定为剩余预算 × 0.6 均分到每个子循环，单子循环下限 ¥0.005）。
+- ~~`dispatch_subagents` 归核心组还是延迟组~~ **已由浏览器 e2e 实测定为核心组**：deferred 下模型逐只串行查、从不扇出，且 thin 条目不暴露 subtasks 项结构（goal/target/…）无从填；升 core 后完整 schema 常驻，模型按指示即正确扇出。与 run_python 同款 verify 驱动修正。
+- `scenario_type` 是 LLM 标注还是 harness 按子任务形状推断（实施暂留 NULL，审计行已落，分类后补）。
+
+## 十五、实施落地补记（2026-06-11）
+
+- **留痕收敛为审计表**：B 档原设想"span 树 + 审计表"；实测发现 chat turn 现状是每圈一个 `parent_id=None` 的扁平 span（`TraceTree.from_spans` 要求单根，当前 chat turn 已拼不成树），真要成树需先给整个 turn 建根 span（独立重构）。故本期留痕 = 审计表 `subagent_dispatch_runs`（每子循环完整输入/输出/工具调用/成本永久落 PG，可查可断言），span 树成树留 follow-up。
+- **前端 lane 可见性修正**：DispatchLanes 初挂在 messagesRegion 末尾会溢出被输入框遮挡，移入可滚动 chatContainer + 自包含卡片样式后正常显示（e2e 实测三条并行进度条可见）。
+- **e2e 实测结果**：浏览器发"派 3 子助手查茅台/五粮液/宁德"→ dispatch 扇出 3 子循环并发 → 前端渲染 3 条 lane（带实时取数计数）→ 审计表落 3×3=9 行（3 批次）→ 主 AI 综合。
