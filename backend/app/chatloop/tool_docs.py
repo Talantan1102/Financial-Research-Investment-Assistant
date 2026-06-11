@@ -331,8 +331,13 @@ TOOL_DOCS: dict[str, ToolDoc] = {
     ),
     "run_python": ToolDoc(
         name="run_python",
-        group="deferred",
-        brief="执行 Python 做数值计算/画交互分析图(plotly)。需二次计算或可视化时用。",
+        # core 组:run_python 的正确调用依赖 code 参数里的输出契约(必须 print 一个含
+        # result/figures 的 JSON)。该契约只能经"常驻完整 schema"传达 —— 放 deferred 组
+        # 时模型只看到 thin 条目(剥了参数 description),裸调即写出不符契约的代码
+        # (实测:stdout_invalid_json + 幻觉图片链接)。故升 core,契约随 code 参数
+        # description 常驻可见(verify 浏览器实测驱动的修正)。
+        group="core",
+        brief="写 Python 做计算/画交互图(plotly)。需二次计算或可视化时用。",
         doc=(
             "执行 LLM 当场写的 Python 脚本:数值计算 + 用 plotly 画交互式数据分析图。\n"
             "何时用:用户要的不是单点查询,而是要对数据做二次计算(相关性/增速/加权/"
@@ -353,7 +358,7 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态(变量不跨调用保留);"
             "可用 pandas/numpy/plotly;超时 30s;图必须用 plotly(matplotlib 写文件会失败)。"
         ),
-        thin_required={"code": "string"},
+        thin_required=None,  # core 组:常驻完整 schema,不走 thin 条目
     ),
 }
 
@@ -369,6 +374,7 @@ CORE_TOOLS: list[str] = [
     "memory_search",
     "load_skill",
     "offer_deep_research",
+    "run_python",
 ]
 
 DEFERRED_TOOLS: list[str] = [
@@ -380,7 +386,6 @@ DEFERRED_TOOLS: list[str] = [
     "memory_write",
     "run_skill_script",
     "read_cached_result",
-    "run_python",
 ]
 
 

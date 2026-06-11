@@ -111,8 +111,8 @@ def test_tool_docs_count_is_15():
 def test_core_and_deferred_partition_15_no_overlap():
     core = set(CORE_TOOLS)
     deferred = set(DEFERRED_TOOLS)
-    assert len(CORE_TOOLS) == 6
-    assert len(DEFERRED_TOOLS) == 9
+    assert len(CORE_TOOLS) == 7
+    assert len(DEFERRED_TOOLS) == 8
     assert core & deferred == set()
     assert core | deferred == set(TOOL_DOCS.keys())
 

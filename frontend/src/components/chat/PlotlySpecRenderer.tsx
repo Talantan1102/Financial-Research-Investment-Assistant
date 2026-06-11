@@ -22,10 +22,15 @@ export function PlotlySpecRenderer({ spec }: PlotlySpecRendererProps) {
       </div>
     )
   }
+  // figure 来自 valtio store(reactive/只读)。plotly 绘制时会就地 mutate(归一化
+  // trace/layout,如写 line.color),直接传只读对象会抛 "Cannot assign to read only
+  // property" 并被 react-plotly 静默吞掉 → 空图。深拷成普通可变对象再交给 plotly;
+  // structuredClone 拷不了 valtio proxy,用 JSON 往返(figure 本就 JSON 可序列化)。
+  const figure = JSON.parse(JSON.stringify(spec.figure)) as typeof spec.figure
   return (
     <Plot
-      data={spec.figure.data}
-      layout={{ autosize: true, ...(spec.figure.layout ?? {}) }}
+      data={figure.data}
+      layout={{ autosize: true, ...(figure.layout ?? {}) }}
       config={{ displaylogo: false, responsive: true }}
       style={{ width: '100%', height: 320 }}
       useResizeHandler

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState
@@ -24,8 +24,20 @@ _STDERR_FEEDBACK_LEN = 500  # 回喂模型自纠的 stderr 截断
 
 
 class CodeInterpreterArgs(BaseModel):
-    code: str
-    data: dict[str, Any] | None = None
+    code: str = Field(
+        description=(
+            "完整 Python 脚本。可选地从 sys.stdin 读 data(json.load)。脚本必须把结果 "
+            "print 成一个 JSON,含两键:result(给用户的结论)与 figures(plotly 图的 "
+            ".to_dict() 列表,可空)。例:"
+            "import json,plotly.graph_objects as go; "
+            "fig=go.Figure(); fig.add_scatter(x=[1,2,3],y=[4,5,6]); "
+            "print(json.dumps({'result':'已画','figures':[fig.to_dict()]}))。"
+            "硬约束:用 plotly(非 matplotlib);别输出图片链接或 markdown 图;无网络无文件。"
+        )
+    )
+    data: dict[str, Any] | None = Field(
+        default=None, description="喂给脚本 stdin 的 JSON(把现有数据传进来);无则不传。"
+    )
 
 
 class CodeInterpreterTool(InProcessTool):
