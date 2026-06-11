@@ -34,6 +34,9 @@ _BURNED_REJECT_ERROR = "该调用已连续失败 3 次被熔断,请换方法或�
 # 分发前预算余量不足时,为本圈每个工具调用喂回的指导文案(不带 [ERROR],apply_results 会加)。
 _BUDGET_SKIP_ERROR = "预算余量不足,本轮工具未执行;请基于已有信息作答,不要再调用工具"
 
+# 分发前插话到达时,为被取消的本轮工具调用喂回的占位文案(不带 [ERROR],apply_results 会加)。
+_STEER_INTERRUPT_ERROR = "用户插话,本轮工具未执行,请结合新指令重新决定"
+
 # 撞闸原因 → 给模型看的人话短语(事件层 reason/stop_reason 仍用 raw 码做看板归因)。
 _HALT_REASON_TEXT = {
     "max_steps": "已达步数上限",
@@ -220,6 +223,23 @@ class ToolLoop:
                 state = apply_results(state, skipped, step_result.tool_calls)
                 return await self._force_conclude(state, "budget")
 
+            # 11.6 ⑤ 分发前插话检查点:LLM 已决定本轮工具但尚未 dispatch 时,
+            #      若此刻有插话到达 → 取消本轮工具批(占位守协议红线)、并入插话、
+            #      回圈首让模型结合新指令重新决定。把改方向型插话的延迟从"整圈"
+            #      缩到"当前 LLM 流"那段,并立省一整批可能已不需要的工具。
+            #      圈首 pop_all 保留(管上一圈工具执行期间到达的插话),两点互补。
+            if self._steer is not None:
+                steers = await self._steer.pop_all()
+                if steers:
+                    interrupted = [
+                        self._steer_interrupted_result(c) for c in step_result.tool_calls
+                    ]
+                    state = apply_results(state, interrupted, step_result.tool_calls)
+                    for msg in steers:
+                        state.messages.append({"role": "user", "content": msg})
+                        await self._emit("steer_merged", state.step + 1, preview=msg[:80])
+                    continue
+
             # 12. 工具分发(hub 负责 gather/缓存/记账/tool_start/tool_end)
             results = await self._tool_hub.dispatch(allowed, state)
 
@@ -354,6 +374,22 @@ class ToolLoop:
             success=False,
             output=None,
             error=_BUDGET_SKIP_ERROR,
+            latency_ms=0,
+        )
+
+    @staticmethod
+    def _steer_interrupted_result(call: StepToolCall) -> ToolResult:
+        """分发前插话到达时,为被取消的工具调用产出的占位结果(守协议红线)。"""
+        try:
+            args = call.parsed_args
+        except ValueError:
+            args = {}
+        return ToolResult(
+            tool_name=call.name,
+            args=args,
+            success=False,
+            output=None,
+            error=_STEER_INTERRUPT_ERROR,
             latency_ms=0,
         )
 
