@@ -32,12 +32,12 @@ from app.chatloop.gates import GateConfig
 from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
 from app.chatloop.skill_listing import build_skill_listing
 from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
-from app.skills.executor_backend import SkillExecutorBackend
 from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
 from app.chatloop.tool_hub import EmitFn, ToolHub
 from app.memory.injection_classifier import is_prompt_injection
 from app.services.chat_steer_bus import steer_key
 from app.services.tool_result_cache import ToolResultCache
+from app.skills.executor_backend import SkillExecutorBackend
 
 logger = logging.getLogger(__name__)
 
