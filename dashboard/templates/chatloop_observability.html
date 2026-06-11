@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <title>Chatloop 运行时可观测性</title>
+  <style>
+    body { font-family: -apple-system, "Segoe UI", sans-serif; margin: 32px; color: #1a1d21; }
+    h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 28px; color: #5d6875; }
+    .empty { padding: 24px; background: #fbf4f2; border: 1px solid #e8b4a8; border-radius: 8px; }
+    table { border-collapse: collapse; width: 100%; max-width: 780px; font-size: 13px; }
+    th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #eee; }
+    .bar { height: 6px; background: #1d4ed8; border-radius: 3px; }
+    .cards { display: flex; gap: 16px; flex-wrap: wrap; }
+    .card { border: 1px solid #e8e4dc; border-radius: 8px; padding: 14px 18px; min-width: 130px; }
+    .v { font-size: 18px; font-weight: 700; font-family: ui-monospace, monospace; }
+    .k { font-size: 11px; color: #8a96a3; text-transform: uppercase; letter-spacing: .05em; }
+  </style>
+</head>
+<body>
+  <h1>Chatloop 运行时可观测性 · 最近 {{ window }}</h1>
+  {% if agg is none %}
+    <div class="empty">后端未连接或暂无数据 —— 请确认后端在线(BACKEND_BASE_URL)。</div>
+  {% else %}
+    <h2>每轮均值 / 缓存命中率</h2>
+    <div class="cards">
+      <div class="card"><div class="k">KV-cache 命中率</div>
+        <div class="v">{{ '%.0f' % (agg.cache_hit_rate * 100) }}%</div></div>
+      <div class="card"><div class="k">模型 vs 工具</div>
+        <div class="v">{{ '%.0f' % (agg.model_share * 100) }}% / {{ '%.0f' % ((1 - agg.model_share) * 100) }}%</div></div>
+      <div class="card"><div class="k">每轮均价</div>
+        <div class="v">¥{{ '%.4f' % agg.avg_cost_cny }}</div></div>
+      <div class="card"><div class="k">每轮耗时</div>
+        <div class="v">{{ '%.1f' % (agg.avg_wall_ms / 1000) }}s</div></div>
+      <div class="card"><div class="k">每轮调用</div>
+        <div class="v">{{ '%.1f' % agg.avg_llm_calls }}模型 / {{ '%.1f' % agg.avg_tool_calls }}工具</div></div>
+      <div class="card"><div class="k">样本轮数</div>
+        <div class="v">{{ agg.turn_count }}</div></div>
+    </div>
+
+    <h2>最慢工具(按 p95 排序)</h2>
+    {% set maxp95 = ((agg.tool_latency | map(attribute='p95_ms') | list | max) or 1) if agg.tool_latency else 1 %}
+    <table>
+      <tr><th>工具</th><th>调用数</th><th>p50</th><th>p95</th><th>p95 分布</th><th>成功率</th><th>缓存率</th></tr>
+      {% for t in agg.tool_latency %}
+      <tr>
+        <td>{{ t.tool_name }}</td>
+        <td>{{ t.calls }}</td>
+        <td>{{ '%.0f' % t.p50_ms }}ms</td>
+        <td>{{ '%.0f' % t.p95_ms }}ms</td>
+        <td><div class="bar" style="width: {{ (t.p95_ms / maxp95 * 200) | round }}px"></div></td>
+        <td>{{ '%.0f' % (t.success_rate * 100) }}%</td>
+        <td>{{ '%.0f' % (t.cache_hit_rate * 100) }}%</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+</body>
+</html>

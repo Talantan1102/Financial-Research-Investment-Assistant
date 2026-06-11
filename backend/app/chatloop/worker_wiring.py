@@ -70,6 +70,7 @@ class HeavySingletons:
     skill_listing: str  # L1 元数据清单(进稳定前缀,会话内冻结)
     gate_cfg: GateConfig
     session_factory: Any = None  # async_sessionmaker —— get_portfolio_positions 查 positions 用
+    trace: Any = None  # TraceService —— ToolHub 写工具 span 用
 
 
 @dataclass
@@ -170,6 +171,12 @@ async def build_heavy_singletons(
         logger.warning("build_skill_listing 失败,降级空清单: %s", exc)
         skill_listing = "## 可用技能"
 
+    # TraceService —— ToolHub 写工具 span(与 LLM span 落同一张 trace_spans 表)
+    from app.core.database import SessionLocal
+    from app.services.trace_service import TraceService
+
+    trace = TraceService(SessionLocal)
+
     return HeavySingletons(
         llm=llm,
         registry=registry,
@@ -180,6 +187,7 @@ async def build_heavy_singletons(
         skill_listing=skill_listing,
         gate_cfg=GateConfig(),
         session_factory=session_factory,
+        trace=trace,
     )
 
 
@@ -202,7 +210,9 @@ def build_turn_components(
     "turn 开始建 episode"链路(见 chat_runner / 报告),传 None → MemoryWriteTool 用
     默认 resolver(archival_insert 返回指导错误而非静默丢;core_append/replace 不受影响)。
     """
-    hub = ToolHub(emit=emit, cache=singletons.cache, seq_counter=seq_counter)
+    hub = ToolHub(
+        emit=emit, cache=singletons.cache, seq_counter=seq_counter, trace=singletons.trace
+    )
     hub.register_registry(singletons.registry)
 
     memory_write_kwargs: dict[str, Any] = {
