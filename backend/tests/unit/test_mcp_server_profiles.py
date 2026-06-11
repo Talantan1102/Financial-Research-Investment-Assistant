@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 
-def test_chat_tools_profile_has_eight_tools() -> None:
+def test_chat_tools_profile_has_nine_tools() -> None:
     from app.mcp_server.server import build_server
 
     s = build_server(profile="chat_tools")
@@ -23,6 +23,7 @@ def test_chat_tools_profile_has_eight_tools() -> None:
         "web_search",
         "kb_search",
         "compare_stocks",
+        "get_daily",  # charting: A 股日线时序(K线/走势/归一化/回撤取数)
     }
 
 
