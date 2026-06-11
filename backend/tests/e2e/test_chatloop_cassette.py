@@ -125,6 +125,11 @@ _FAKE_RESULTS: dict[str, dict[str, Any]] = {
     "memory_write": {"ok": True},
     "run_skill_script": {"stdout": "", "stderr": "", "return_code": 0},
     "read_cached_result": {"content": "", "total_len": 0, "offset": 0},
+    # run_python(#143)/dispatch_subagents(本 PR)升 core 后,harness 按 CORE+DEFERRED
+    # 全量造 fake;这 3 条主路径 cassette 录于二者之前、不会调它们(VCR 按 path 匹配,
+    # 不受新增工具 schema 影响),fake 占位即可、永不被调用。
+    "run_python": {"result": {}, "figures": []},
+    "dispatch_subagents": {"dispatched": 0, "results": []},
 }
 
 

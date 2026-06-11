@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from app.chatloop.events import SeqCounter
 from app.chatloop.gates import GateConfig
 from app.chatloop.worker_wiring import HeavySingletons, build_turn_components
@@ -29,7 +28,7 @@ async def test_run_python_registered(tmp_path: Path) -> None:
         memory=object(),
         loader=object(),
         executor=SkillExecutor(skills_root=tmp_path / "s", workdir_root=tmp_path / "wd"),
-        cache=None,
+        cache=None,  # type: ignore[arg-type]
         skill_listing="## 可用技能",
         gate_cfg=GateConfig(),
     )

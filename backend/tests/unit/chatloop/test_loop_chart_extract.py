@@ -67,6 +67,7 @@ async def test_figures_emitted_as_chart_events_and_stripped() -> None:
     assert chart_events[0].data["chart_id"] == "req-1-2-0-0"
     assert chart_events[1].data["chart_id"] == "req-1-2-0-1"
     # figures 已从 LLM 可见的 output 剥离,替换成计数标记
+    assert results[0].output is not None
     assert "figures" not in results[0].output
     assert results[0].output["charts_rendered"] == 2
     assert results[0].output["result"] == {"corr": 0.8}
@@ -89,5 +90,6 @@ async def test_empty_figures_no_events_no_marker() -> None:
     ]
     await loop._extract_and_emit_charts(results, _State())  # type: ignore[arg-type]
     assert [e for e in events if e.type == "chart"] == []
+    assert results[0].output is not None
     assert "figures" not in results[0].output
     assert "charts_rendered" not in results[0].output

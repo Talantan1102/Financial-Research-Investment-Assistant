@@ -1,7 +1,7 @@
-"""trace-view — read SQLite spans table and pretty-print a TraceTree.
+"""trace-view — read spans (PG) and pretty-print a TraceTree.
 
 Usage:
-    uv run python scripts/trace_view.py --db backend/data/eval.sqlite --request-id req-foo
+    uv run python scripts/trace_view.py --request-id req-foo
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ _BACKEND = Path(__file__).parent.parent / "backend"
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
+from app.core.database import SessionLocal  # noqa: E402
 from app.services.trace_models import Span, TraceTree  # noqa: E402
 from app.services.trace_service import TraceService  # noqa: E402
 
@@ -46,15 +47,11 @@ def _format_span(span: Span, depth: int, prefix: str, is_last: bool, lines: list
 
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--db", type=Path, default=Path("backend/data/eval.sqlite"))
     p.add_argument("--request-id", required=True)
     args = p.parse_args(argv)
 
-    if not args.db.exists():
-        print(f"ERROR: db not found: {args.db}", file=sys.stderr)
-        return 2
-
-    svc = TraceService(db_path=args.db)
+    # PR-B: TraceService 迁到 PG(SessionLocal),不再读 sqlite 文件。
+    svc = TraceService(session_factory=SessionLocal)
     try:
         tree = svc.get_trace(args.request_id)
     except LookupError as e:

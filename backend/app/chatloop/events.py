@@ -27,6 +27,8 @@ EventType = Literal[
     "cost_update",
     "done",
     "error",
+    "dispatch_start",
+    "dispatch_end",
 ]
 
 

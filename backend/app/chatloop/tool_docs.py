@@ -329,6 +329,36 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         ),
         thin_required={"ref": "string"},
     ),
+    "dispatch_subagents": ToolDoc(
+        name="dispatch_subagents",
+        # core 组:dispatch 的正确调用依赖 subtasks 数组项的结构(goal/target/output_hint/
+        # boundary)。该结构只能经"常驻完整 schema"传达 —— 放 deferred 组时模型只看到 thin
+        # 条目(subtasks:array,无项结构),既不知怎么填、又因不显眼而默认走串行单工具
+        # (实测浏览器 e2e:deferred 下模型逐只串行查、从不扇出)。故升 core,项结构随
+        # 完整 schema 常驻可见(spec §14 开放问题"核心 vs 延迟"由 e2e 实测定为核心)。
+        group="core",
+        brief="多标的横向对比/多源广度检索/逐只持仓体检时,把这些互不依赖的只读子任务并发派给子助手分头查、收回摘要由你综合(比自己逐只串行快)。",
+        doc=(
+            "把一组互不依赖、各自只用查的子任务一次性并发派给若干只读子助手,"
+            "收回每个子助手的结论摘要,由你综合成最终回答。\n"
+            "何时用:多标的横向对比(茅台五粮液宁德比一比)、多信息源广度检索"
+            "(KB+新闻+泛网)、逐只持仓体检——这类'N 个同构独立的只读小任务'。\n"
+            "何时不用:① 单个事实查询(直接调对应工具即可,别扇出);"
+            "② 子任务之间有先后依赖(B 要先看 A 的产出,如先估值再辩论)——"
+            "那种留给主循环逐圈串行,别派;③ 要做整份尽调 → 改用 offer_deep_research。\n"
+            "参数:\n"
+            "  reason(str,必填)—— 为什么要扇出的一句话。\n"
+            "  subtasks(array,必填)—— 子任务列表(最多 8 个),每项:\n"
+            "    goal(str,必填)、target(str,可选,ts_code/源标识)、"
+            "output_hint(str,可选,想要的产出形状)、boundary(str,可选,边界)。\n"
+            "示例:dispatch_subagents(reason='对比三只白酒', subtasks=["
+            "{'goal':'查茅台现价与营收增速','target':'600519.SH'},"
+            "{'goal':'查五粮液现价与营收增速','target':'000858.SZ'}])。\n"
+            "硬约束:子助手只读、看不到主对话、互不通信;超过 8 个请分批派;"
+            "子助手不会再派子助手、也不会升级深度研究。"
+        ),
+        thin_required=None,  # core 组:常驻完整 schema,不走 thin 条目
+    ),
     "run_python": ToolDoc(
         name="run_python",
         # core 组:run_python 的正确调用依赖 code 参数里的输出契约(必须 print 一个含
@@ -348,12 +378,12 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "run_skill_script。\n"
             "参数:\n"
             " - code(str,必填)—— 完整 Python 脚本。从 sys.stdin 读 data(json.load),"
-            "把结果 print 成一个 JSON:{\"result\": <可序列化结论>, \"figures\": "
+            '把结果 print 成一个 JSON:{"result": <可序列化结论>, "figures": '
             "[<plotly fig.to_dict()>, ...]}。figures 可空。\n"
             " - data(object,可选)—— 喂给脚本 stdin 的 JSON(把现有工具拿到的数据传进来)。\n"
             "示例:run_python(code='import sys,json,plotly.express as px; "
-            "d=json.load(sys.stdin); fig=px.line(d[\"rows\"]); "
-            "print(json.dumps({\"result\":\"ok\",\"figures\":[fig.to_dict()]}))', "
+            'd=json.load(sys.stdin); fig=px.line(d["rows"]); '
+            'print(json.dumps({"result":"ok","figures":[fig.to_dict()]}))\', '
             "data={'rows': [...]})。\n"
             "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态(变量不跨调用保留);"
             "可用 pandas/numpy/plotly;超时 30s;图必须用 plotly(matplotlib 写文件会失败)。"
@@ -375,6 +405,7 @@ CORE_TOOLS: list[str] = [
     "load_skill",
     "offer_deep_research",
     "run_python",
+    "dispatch_subagents",
 ]
 
 DEFERRED_TOOLS: list[str] = [
