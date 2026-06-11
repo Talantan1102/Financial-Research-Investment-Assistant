@@ -844,15 +844,16 @@ git commit -m "feat(chatloop): chart 事件 — figures 抽出发事件并剥离
 - Create: `frontend/src/components/chat/PlotlySpecRenderer.tsx`
 - Test: `frontend/src/components/chat/__tests__/PlotlySpecRenderer.test.tsx`
 
-- [ ] **Step 1: 装依赖**
+- [ ] **Step 1: 装依赖**(⚠ 实施期发现:不能用全量 `plotly.js`)
 
-> 前端包管理走 Windows pnpm + http 代理(见用户记忆 understand-anything 工具链条目的 pnpm 约定)。
+> 全量 `plotly.js` 会拉 `mapbox-gl@0.32.1` 的 git 型 exotic subdep,pnpm v11 默认 `blockExoticSubdeps` 拒绝,且该 git 子依赖要连 GitHub(本网络不通)。pnpm 的 `auto-install-peers`(默认开)会自动拉 react-plotly.js 的 `plotly.js` peer → 触发同样问题。
+> **解法**:用预构建单包 `plotly.js-dist-min` + react-plotly.js 的 `factory`(bundler 推荐做法),并关掉 auto-install-peers。
 
-Run:
+Run(Windows pnpm,走 npmmirror):
 ```bash
-cd frontend && pnpm add react-plotly.js plotly.js && pnpm add -D @types/react-plotly.js
+cd frontend && pnpm add react-plotly.js plotly.js-dist-min --registry https://registry.npmmirror.com --config.auto-install-peers=false && pnpm add -D @types/react-plotly.js --registry https://registry.npmmirror.com
 ```
-Expected: 三个包写入 package.json
+Expected:`plotly.js-dist-min` + `react-plotly.js` + `@types/react-plotly.js` 写入 package.json;`node -e "require.resolve('react-plotly.js/factory')"` 与 `node -e "require.resolve('plotly.js-dist-min')"` 都解析成功。(已在实施期由 orchestrator 装好。)
 
 - [ ] **Step 2: 写失败测试**
 
@@ -863,9 +864,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { PlotlySpecRenderer } from '../PlotlySpecRenderer'
 import type { PlotlySpec } from '@/types/chat'
 
-// plotly.js 在 jsdom 跑不起来,mock react-plotly.js 为占位 div(只验数据透传/兜底分支)。
-vi.mock('react-plotly.js', () => ({
-  default: ({ data }: { data: unknown[] }) => (
+// plotly.js-dist-min 在 jsdom 跑不起来 → mock 掉;factory 返回一个占位 Plot
+// 组件(只验数据透传/兜底分支)。组件用 createPlotlyComponent(Plotly) 在模块顶层建 Plot。
+vi.mock('plotly.js-dist-min', () => ({ default: {} }))
+vi.mock('react-plotly.js/factory', () => ({
+  default: () => ({ data }: { data: unknown[] }) => (
     <div data-testid="plot" data-traces={String((data ?? []).length)} />
   ),
 }))
@@ -894,8 +897,12 @@ Expected: FAIL — 找不到模块 `../PlotlySpecRenderer`
 
 ```tsx
 // frontend/src/components/chat/PlotlySpecRenderer.tsx
-import Plot from 'react-plotly.js'
+import createPlotlyComponent from 'react-plotly.js/factory'
+import Plotly from 'plotly.js-dist-min'
 import type { PlotlySpec } from '@/types/chat'
+
+// 用 factory + 预构建 dist-min(避开全量 plotly.js 的 mapbox-gl exotic subdep)。
+const Plot = createPlotlyComponent(Plotly)
 
 export interface PlotlySpecRendererProps {
   spec: PlotlySpec
