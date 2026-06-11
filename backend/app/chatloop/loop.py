@@ -15,7 +15,13 @@ from typing import Any, Protocol
 from app.agents.schemas import ToolResult
 from app.chatloop.context import ContextDeps, assemble_context
 from app.chatloop.events import EventType, LoopEvent, SeqCounter
-from app.chatloop.gates import GateConfig, check_gates, filter_burned, update_burned
+from app.chatloop.gates import (
+    GateConfig,
+    budget_margin_exhausted,
+    check_gates,
+    filter_burned,
+    update_burned,
+)
 from app.chatloop.state import ChatLoopState, apply_results, apply_step, turn_summary
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
 
@@ -24,6 +30,17 @@ logger = logging.getLogger(__name__)
 # 烧签名后被拒调用喂回模型的指导性错误文案(协议红线:rejected 也要有 tool 消息)。
 # apply_results 对 success=False 的结果产出 "[ERROR] {error}",故此处不带 [ERROR] 前缀。
 _BURNED_REJECT_ERROR = "该调用已连续失败 3 次被熔断,请换方法或基于已有信息作答"
+
+# 分发前预算余量不足时,为本圈每个工具调用喂回的指导文案(不带 [ERROR],apply_results 会加)。
+_BUDGET_SKIP_ERROR = "预算余量不足,本轮工具未执行;请基于已有信息作答,不要再调用工具"
+
+# 撞闸原因 → 给模型看的人话短语(事件层 reason/stop_reason 仍用 raw 码做看板归因)。
+_HALT_REASON_TEXT = {
+    "max_steps": "已达步数上限",
+    "budget": "已达预算上限",
+    "spinning": "检测到原地重复调用",
+    "repeated_failures": "检测到连续多次工具失败",
+}
 
 
 class CancelledByUser(Exception):  # noqa: N818 — 设计契约固定此名(对齐 asyncio.CancelledError 语义)
@@ -194,6 +211,15 @@ class ToolLoop:
             #     _merge_results 以 allowed 的 id 集合判定每个 call 是否放行)
             allowed, _rejected = filter_burned(step_result.tool_calls, state)
 
+            # 11.5 ④(b) 分发前预算预检:本圈 LLM 成本已入账,若余量不足则整轮跳过工具、
+            #      直接收尾——避免单圈重型工具(+随后又一轮 LLM)把预算炸穿。
+            #      给每个 tool_call 回预算指导占位,守住协议红线(每个 id 必有 tool 消息)。
+            if budget_margin_exhausted(state, self._gate_cfg):
+                await self._emit("loop_halt", state.step, reason="budget")
+                skipped = [self._budget_skipped_result(c) for c in step_result.tool_calls]
+                state = apply_results(state, skipped, step_result.tool_calls)
+                return await self._force_conclude(state, "budget")
+
             # 12. 工具分发(hub 负责 gather/缓存/记账/tool_start/tool_end)
             results = await self._tool_hub.dispatch(allowed, state)
 
@@ -315,6 +341,22 @@ class ToolLoop:
             latency_ms=0,
         )
 
+    @staticmethod
+    def _budget_skipped_result(call: StepToolCall) -> ToolResult:
+        """预算余量不足时,为被跳过的工具调用产出的指导性占位结果。"""
+        try:
+            args = call.parsed_args
+        except ValueError:
+            args = {}
+        return ToolResult(
+            tool_name=call.name,
+            args=args,
+            success=False,
+            output=None,
+            error=_BUDGET_SKIP_ERROR,
+            latency_ms=0,
+        )
+
     # ------------------------------------------------------------------
     # 熔断收尾:喂回系统指令 + tool_choice=none 收尾圈
     # ------------------------------------------------------------------
@@ -322,11 +364,12 @@ class ToolLoop:
     async def _force_conclude(self, state: ChatLoopState, reason: str) -> ChatLoopState:
         """撞闸后逼模型基于已有信息收尾(spec § 1.3)。"""
         state.halt_reason = reason
+        reason_text = _HALT_REASON_TEXT.get(reason, reason)
         state.messages.append(
             {
                 "role": "user",
                 "content": (
-                    f"(系统:已达执行上限({reason}),请基于已有信息直接给出最终回答,"
+                    f"(系统:已达执行上限({reason_text}),请基于已有信息直接给出最终回答,"
                     "不要再调用任何工具。)"
                 ),
             }

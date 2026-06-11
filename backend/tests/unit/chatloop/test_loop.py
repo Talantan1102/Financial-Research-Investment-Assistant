@@ -361,7 +361,8 @@ async def test_scenario_4_max_steps_force_conclude():
     assert llm.received_tool_choice[-1] == "none"
     # final 消息含系统收尾指令(在 force_conclude 里 append 的 user 消息)
     user_contents = [m["content"] for m in state.messages if m.get("role") == "user"]
-    assert any("已达执行上限" in c and "max_steps" in c for c in user_contents)
+    assert any("已达执行上限" in c and "已达步数上限" in c for c in user_contents)
+    assert all("max_steps" not in c for c in user_contents)  # raw 码不出现在给模型的文案里
     # done{stop_reason: max_steps}
     assert emit.of("done")[0].data["stop_reason"] == "max_steps"
     # 只分发了 2 圈(force_conclude 圈不分发工具)
@@ -675,3 +676,54 @@ async def test_done_event_carries_turn_summary():
     assert cost.data["step_prompt_tokens"] == 1000
     assert cost.data["step_completion_tokens"] == 50
     assert cost.data["step_cost_cny"] == 0.01
+
+
+# ---------------------------------------------------------------------------
+# ④(b) 分发前预算预检:余量不足整轮跳过工具直接收尾
+# ---------------------------------------------------------------------------
+
+
+async def test_budget_margin_skips_dispatch_and_concludes():
+    """本圈 LLM 成本把余量打到不足 → 整轮工具被跳过,直接 force_conclude。"""
+    args = {"ts_code": "600519.SH"}
+    llm = FakeLLM(
+        [
+            # 入账后 spent=0.09,剩 0.01 < 0.02(0.10*0.2)→ 余量不足
+            _step(tool_calls=[_call("get_stock_quote", args)], cost_cny=0.09),
+            _step(content="预算紧张,基于已有信息:茅台估值偏高。", finish_reason="stop"),
+        ]
+    )
+    hub = FakeToolHub(results_per_round=[])  # dispatch 不应被调用
+    emit = _Collector()
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit)
+    state = await loop.run(_make_state())
+
+    assert hub.dispatched_calls == []  # 整轮工具被跳过
+    halts = emit.of("loop_halt")
+    assert len(halts) == 1 and halts[0].data["reason"] == "budget"
+    # 协议红线:assistant(tool_calls) 后每个 tool_call_id 都有 tool 消息
+    tool_msgs = [m for m in state.messages if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["content"].startswith("[ERROR]") and "预算" in tool_msgs[0]["content"]
+    # 走 force_conclude:终圈 tool_choice=none,done.stop_reason=budget
+    assert llm.received_tool_choice[-1] == "none"
+    assert state.halt_reason == "budget"
+    assert emit.of("done")[0].data["stop_reason"] == "budget"
+
+
+async def test_budget_sufficient_dispatches_normally():
+    args = {"ts_code": "600519.SH"}
+    llm = FakeLLM(
+        [
+            _step(tool_calls=[_call("get_stock_quote", args)], cost_cny=0.001),
+            _step(content="茅台 1600 元。", finish_reason="stop"),
+        ]
+    )
+    hub = FakeToolHub(results_per_round=[[_ok_result("get_stock_quote", args)]])
+    emit = _Collector()
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit)
+    state = await loop.run(_make_state())
+
+    assert len(hub.dispatched_calls) == 1  # 正常分发
+    assert emit.of("loop_halt") == []
+    assert state.halt_reason == "natural"
