@@ -14,7 +14,7 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from app.skills.script_schemas import (
     SkillExecutionError,
@@ -128,6 +128,43 @@ class SkillExecutor:
         run_id = uuid.uuid4().hex[:8]
         with make_skill_workdir(run_id=run_id, root=self._workdir_root) as wd:
             return await self._run_subprocess(ref, script_full, args, wd, timeout)
+
+    async def execute_source(
+        self,
+        *,
+        source: str,
+        payload: dict[str, Any],
+        timeout_s: int | None = None,
+    ) -> SkillExecutionResult:
+        """执行 LLM 当场写的内联源码(代码解释器用)。
+
+        复用 execute() 的全套沙箱(scan_script_safety / rlimit / 断网 env 白名单 /
+        workdir / stdin-payload / stdout-JSON / 超时 SIGKILL),区别只在源从字符串来:
+        先 AST 扫描内联源码,再写进一次性 workdir 的临时 .py,走同一个 _run_subprocess。
+        """
+        from app.skills.skill_safety import SafetyScanError, scan_script_safety  # noqa: PLC0415
+
+        timeout = min(timeout_s or self._default_timeout_s, self._max_timeout_s)
+        # 合成 ref —— execute_source 不读磁盘脚本,ref 仅用于结果的 skill_name/script_path
+        # 标识字段(SkillScriptRef 校验 script_path 必须以 'scripts/' 开头)。
+        ref = SkillScriptRef(skill_name="_interpreter", script_path="scripts/interp.py")
+
+        try:
+            scan_script_safety(source)
+        except SafetyScanError as exc:
+            return _err_result(
+                ref,
+                exit_code=-1,
+                err=SkillExecutionError(kind="safety_scan_rejected", message=str(exc)),
+            )
+
+        run_id = uuid.uuid4().hex[:8]
+        with make_skill_workdir(run_id=run_id, root=self._workdir_root) as wd:
+            script_full = wd / "interp.py"
+            script_full.write_text(source, encoding="utf-8")
+            return await self._run_subprocess(
+                ref, script_full, SkillScriptArgs(payload=payload), wd, timeout
+            )
 
     async def _run_subprocess(
         self,
