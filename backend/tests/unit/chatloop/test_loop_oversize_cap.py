@@ -58,6 +58,7 @@ async def test_oversize_with_ref_is_truncated() -> None:
     await loop._extract_and_emit_charts(results, st)
 
     out = results[0].output
+    assert isinstance(out, dict)
     assert out["ref"] == "u:query_kb:abc"
     assert "truncated_digest" in out and "read_cached_result" in out["note"]
     assert out["original_chars"] > 200
@@ -112,6 +113,8 @@ async def test_figures_not_counted_toward_size() -> None:
         )
     ]
     await loop._extract_and_emit_charts(results, st)
-    assert results[0].output["result"] == {"corr": 0.8}
-    assert results[0].output["charts_rendered"] == 1
-    assert "truncated_digest" not in results[0].output
+    out = results[0].output
+    assert isinstance(out, dict)
+    assert out["result"] == {"corr": 0.8}
+    assert out["charts_rendered"] == 1
+    assert "truncated_digest" not in out
