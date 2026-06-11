@@ -33,7 +33,9 @@ if TYPE_CHECKING:
 
 _logger = logging.getLogger(__name__)
 
-_VALID_TRIGGER_REASONS = frozenset({"session_closed", "idle_30min", "new_session_started"})
+_VALID_TRIGGER_REASONS = frozenset(
+    {"session_closed", "idle_30min", "new_session_started", "post_turn"}
+)
 
 
 def _build_path_b_runner() -> PathBRunner:
