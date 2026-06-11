@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from app.chatloop.code_interpreter_tool import CodeInterpreterArgs, CodeInterpreterTool
 from app.skills.script_schemas import SkillExecutionError, SkillExecutionResult
 from app.tools.base import ToolError

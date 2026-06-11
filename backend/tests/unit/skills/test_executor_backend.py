@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from app.skills.executor_backend import SkillExecutorBackend
 from app.skills.skill_executor import SkillExecutor
 

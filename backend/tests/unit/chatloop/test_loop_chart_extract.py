@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from app.agents.schemas import ToolResult
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.loop import ToolLoop

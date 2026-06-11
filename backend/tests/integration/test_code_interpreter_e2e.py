@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from app.chatloop.code_interpreter_tool import CodeInterpreterArgs, CodeInterpreterTool
 from app.skills.executor_backend import SkillExecutorBackend
 from app.skills.skill_executor import SkillExecutor
