@@ -98,6 +98,19 @@ class ToolLedger(BaseModel):
         """同签名累计失败次数(烧签名判据)。"""
         return sum(1 for e in self.entries if e.signature == signature and not e.success)
 
+    def trailing_failure_count(self) -> int:
+        """从台账末尾往回数连续 success=False 的条数(跨签名乱试判据)。
+
+        任意一次成功即截断计数。被烧签名拒绝的调用不进台账,故不污染此计数;
+        只有真分发并失败的调用计入——抓的是"一直在失败",不是"调用频率"。
+        """
+        count = 0
+        for entry in reversed(self.entries):
+            if entry.success:
+                break
+            count += 1
+        return count
+
     def to_extractor_view(self) -> list[dict[str, Any]]:
         """升级物料:仅 success 条目 → [{"tool_name", "summary", "cache_id"}]。
 
@@ -137,7 +150,7 @@ class ChatLoopState(BaseModel):
     completion_tokens_total: int = 0
     cached_tokens_total: int = 0
     burned_signatures: set[str] = Field(default_factory=set)
-    halt_reason: str | None = None  # natural|max_steps|budget|spinning|escalate
+    halt_reason: str | None = None  # natural|max_steps|budget|spinning|repeated_failures|escalate
     escalate_offered: bool = False
     escalate_reason: str | None = None
     tool_choice: str = "auto"  # 升级熔断时被置 "none"(spec § 3.5)
