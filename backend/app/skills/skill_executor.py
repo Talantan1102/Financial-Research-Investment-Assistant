@@ -56,9 +56,22 @@ STDERR_MAX_BYTES: Final[int] = 2048
 # Whitelist for the subprocess env — everything else dropped (S6).
 _ENV_WHITELIST: Final[frozenset[str]] = frozenset({"PATH", "LANG", "LC_ALL", "LC_CTYPE"})
 
+# 强制单线程 BLAS/OpenMP —— numpy/pandas/plotly 的 OpenBLAS 默认按 CPU 核数起线程,
+# 每线程预留一块内存 arena,在 256MB RLIMIT_AS 下直接 OOM("OpenBLAS error: Memory
+# allocation still failed")。锁成单线程既守住内存上限又让数值结果确定性可复现。
+# 对纯计算技能脚本(DCF 等)无副作用;代码解释器(run_python)靠它才能在沙箱里跑通。
+_SANDBOX_THREAD_ENV: Final[dict[str, str]] = {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+}
+
 
 def _minimal_env() -> dict[str, str]:
-    return {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
+    env = {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
+    env.update(_SANDBOX_THREAD_ENV)
+    return env
 
 
 class SkillExecutor:
