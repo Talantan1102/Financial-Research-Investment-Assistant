@@ -71,12 +71,19 @@ class FakeNoopHub:
 def build_real_hub(singletons: Any) -> ToolHub:
     """用 HeavySingletons 造一个真 ToolHub(全工具表 + 真 tool_docs schema)。
 
-    与 worker_wiring.build_turn_components 同款注册:registry(MCP)+ 6 个 in-process。
+    与 worker_wiring.build_turn_components 同款注册:registry(MCP)+ in-process 工具。
+    含 run_python(CodeInterpreterTool)与 get_portfolio_positions —— 否则模型在评测里
+    看不到这两个工具,run_python/持仓计算类 golden 无从触发(选择行为不可信)。
+    dispatch_subagents 略去:它需要 turn 级 SubagentFactory(emit/seq_counter),评测
+    hub 无此上下文,且无 golden 用例评派发;不影响计算/数据工具的选择评测。
     emit=None(评测不发 SSE)。
     """
+    from app.chatloop.code_interpreter_tool import CodeInterpreterTool
     from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
+    from app.chatloop.portfolio_tool import GetPortfolioPositionsTool
     from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
     from app.memory.injection_classifier import is_prompt_injection
+    from app.skills.executor_backend import SkillExecutorBackend
 
     hub = ToolHub(emit=None, cache=singletons.cache)
     hub.register_registry(singletons.registry)
@@ -88,6 +95,8 @@ def build_real_hub(singletons: Any) -> ToolHub:
             RunSkillScriptTool(executor=singletons.executor),
             OfferDeepResearchTool(),
             ReadCachedResultTool(cache=singletons.cache),
+            CodeInterpreterTool(backend=SkillExecutorBackend(singletons.executor)),
+            GetPortfolioPositionsTool(session_factory=singletons.session_factory),
         ]
     )
     return hub
