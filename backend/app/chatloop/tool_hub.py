@@ -18,7 +18,9 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -35,6 +37,7 @@ from app.chatloop.tool_docs import (
 )
 from app.services.llm_step import StepToolCall
 from app.services.tool_result_cache import CacheHit, ToolResultCache
+from app.services.trace_models import Span
 from app.tools.base import Tool, ToolError
 
 logger = logging.getLogger(__name__)
@@ -70,6 +73,7 @@ class ToolHub:
         seq_counter: SeqCounter | None = None,
         progressive: bool = True,
         tool_timeout_s: float = DEFAULT_TOOL_TIMEOUT_S,
+        trace: Any = None,  # TraceService | None —— 写工具 span(可观测性);None 则不写
     ) -> None:
         self._tools: dict[str, Tool] = {}
         self._emit_fn = emit
@@ -77,6 +81,7 @@ class ToolHub:
         self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
         self._progressive = progressive
         self._tool_timeout_s = tool_timeout_s
+        self._trace = trace
 
     # ------------------------------------------------------------------
     # 注册
@@ -236,15 +241,54 @@ class ToolHub:
 
         外层 try 是双保险:理论上下面每条分支都自产 ToolResult,但若有未预料的
         异常(如 emit 回调自身抛),也兜成 success=False,绝不向 dispatch/loop 冒泡。
+
+        dispatch 后写一条工具 span(覆盖所有返回路径:坏 JSON / 未知工具 / 缓存命中 /
+        成功 / 失败 / search_tools),span 写入非致命。
         """
+        started_at = datetime.now(UTC)
         try:
-            return await self._dispatch_one_inner(call, state)
+            result = await self._dispatch_one_inner(call, state)
         except BaseException as e:  # noqa: BLE001 — hub 不抛硬契约:双保险兜底
             # 尽力记账(用工具名),但记账失败也不能抛
             args = self._safe_parsed_args(call)
             error = f"[执行失败] {type(e).__name__}: {str(e)[:_ERR_MSG_LEN]}"
             self._safe_record(state, call.name, args, error, success=False, cache_key=None)
-            return self._fail_result(call.name, args, error)
+            result = self._fail_result(call.name, args, error)
+        self._write_tool_span(state, result, started_at)
+        return result
+
+    def _write_tool_span(
+        self, state: ChatLoopState, result: ToolResult, started_at: datetime
+    ) -> None:
+        """每次工具调用写一条 span(同 request_id)。trace=None 不写;写失败非致命。
+
+        隐私:inputs 只放参数 key 名、outputs 留空 —— 不落工具结果/参数值原文。
+        """
+        if self._trace is None:
+            return
+        try:
+            span = Span(
+                span_id=f"{state.request_id}-tool-{uuid4().hex[:8]}",
+                request_id=state.request_id,
+                parent_id=None,
+                name=f"tool:{result.tool_name}",
+                inputs={"arg_keys": sorted(result.args.keys())},
+                outputs={},
+                metadata={
+                    "kind": "tool",
+                    "tool_name": result.tool_name,
+                    "latency_ms": int(result.latency_ms),
+                    "cached": bool(result.cached),
+                    "success": bool(result.success),
+                    "step": state.step,
+                },
+                started_at=started_at,
+                ended_at=datetime.now(UTC),
+                error=None if result.success else result.error,
+            )
+            self._trace.write_span(span)
+        except Exception:  # noqa: BLE001 — 观测写入非致命,绝不打断工具调用
+            logger.warning("tool span write failed (non-fatal)", exc_info=True)
 
     async def _dispatch_one_inner(self, call: StepToolCall, state: ChatLoopState) -> ToolResult:
         name = call.name

@@ -89,10 +89,12 @@ def _render_subtask(req: SubtaskRequest) -> str:
 
 
 def build_child_tool_hub(
-    registry: Any, *, emit: Any, seq_counter: SeqCounter, cache: Any
+    registry: Any, *, emit: Any, seq_counter: SeqCounter, cache: Any, trace: Any = None
 ) -> ToolHub:
     """构造子循环的只读 hub(flat schema,只挂只读白名单工具)。"""
-    hub = ToolHub(emit=emit, cache=cache, seq_counter=seq_counter, progressive=False)
+    hub = ToolHub(
+        emit=emit, cache=cache, seq_counter=seq_counter, progressive=False, trace=trace
+    )
     hub.register_subset(registry, READONLY_SUBAGENT_TOOLS)
     return hub
 
