@@ -65,11 +65,13 @@ class ToolHub:
         emit: EmitFn | None = None,
         cache: ToolResultCache | None = None,
         seq_counter: SeqCounter | None = None,
+        progressive: bool = True,
     ) -> None:
         self._tools: dict[str, Tool] = {}
         self._emit_fn = emit
         self._cache = cache
         self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
+        self._progressive = progressive
 
     # ------------------------------------------------------------------
     # 注册
@@ -94,6 +96,20 @@ class ToolHub:
                 raise ValueError(f"duplicate tool name: {name}")
             self._tools[name] = registry.get(name)
 
+    def register_subset(self, registry: Any, names: list[str]) -> None:
+        """只注册 registry 中指定名字的工具(子循环只读子集用)。重名 fail loud。
+
+        registry 须暴露 list_for_llm()(取可用名)与 get(name)(取 Tool 实例)。
+        不在 registry 中的名字静默跳过(白名单与实际可用工具求交集)。
+        """
+        available = {s["function"]["name"] for s in registry.list_for_llm()}
+        for name in names:
+            if name not in available:
+                continue
+            if name in self._tools:
+                raise ValueError(f"duplicate tool name: {name}")
+            self._tools[name] = registry.get(name)
+
     # ------------------------------------------------------------------
     # schema
     # ------------------------------------------------------------------
@@ -108,6 +124,9 @@ class ToolHub:
         仅产出"已注册"的工具:CORE/DEFERRED 列表里未注册的名字跳过(注册由
         Phase 3 后续任务分批接通,本任务允许部分注册)。
         """
+        # 子循环用 flat 模式:全部已注册工具出完整 schema,无渐进披露/无 search_tools。
+        if not self._progressive:
+            return [self._tools[name].schema_for_llm() for name in self._tools]
         out: list[dict[str, Any]] = []
         emitted: set[str] = set()
 
