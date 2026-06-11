@@ -177,7 +177,9 @@ async def test_next_episode_index_increments(
 
     assert await hier_memory.next_episode_index(session_uuid) == 0
 
-    await hier_memory.write_episode(user_uuid, session_uuid, 0, "我重仓茅台", "已记录你的持仓偏好。")
+    await hier_memory.write_episode(
+        user_uuid, session_uuid, 0, "我重仓茅台", "已记录你的持仓偏好。"
+    )
     assert await hier_memory.next_episode_index(session_uuid) == 1
 
     await hier_memory.write_episode(user_uuid, session_uuid, 1, "还有五粮液", "好的。")
