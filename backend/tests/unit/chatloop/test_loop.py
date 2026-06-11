@@ -424,7 +424,9 @@ async def test_scenario_6_steering():
     )
     hub = FakeToolHub(results_per_round=[[_ok_result("get_stock_quote", args)]])
     # 第 1 圈边界无插话,第 2 圈边界返回 ["先看负债率"]
-    steer = FakeSteerSource(per_round=[[], ["先看负债率"]])
+    # 每个有工具的圈现在调 pop_all 两次(圈首 + 分发前)。
+    # 调用序:圈1圈首[] / 圈1分发前[] / 圈2圈首["先看负债率"](原意=圈2边界注入)。
+    steer = FakeSteerSource(per_round=[[], [], ["先看负债率"]])
     emit = _Collector()
     loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit, steer_source=steer)
     state = await loop.run(_make_state())
@@ -726,4 +728,62 @@ async def test_budget_sufficient_dispatches_normally():
 
     assert len(hub.dispatched_calls) == 1  # 正常分发
     assert emit.of("loop_halt") == []
+    assert state.halt_reason == "natural"
+
+
+# ---------------------------------------------------------------------------
+# ⑤ 分发前插话检查点:改方向型插话立取消工具批 + 重规划
+# ---------------------------------------------------------------------------
+
+
+async def test_steer_predispatch_cancels_batch_and_replans():
+    """LLM 出 tool_calls 后、dispatch 前到达插话 → 取消本轮工具批 + 并入插话 + 重规划。"""
+    args = {"ts_code": "600519.SH"}
+    llm = FakeLLM(
+        [
+            _step(tool_calls=[_call("get_stock_quote", args)]),  # 圈1:决定调工具
+            _step(content="好的,只看高端白酒。", finish_reason="stop"),  # 圈2:重规划后收尾
+        ]
+    )
+    hub = FakeToolHub(results_per_round=[])  # dispatch 不应被调用(批被取消)
+    # 调用序:圈1圈首[] / 圈1分发前["只看高端,别碰区域酒"] / 圈2圈首(越界→[])
+    steer = FakeSteerSource(per_round=[[], ["只看高端,别碰区域酒"]])
+    emit = _Collector()
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit, steer_source=steer)
+    state = await loop.run(_make_state())
+
+    assert hub.dispatched_calls == []  # 本轮工具批被取消,未 dispatch
+    # 协议红线:被取消的 tool_call 有占位 tool 消息
+    tool_msgs = [m for m in state.messages if m.get("role") == "tool"]
+    assert len(tool_msgs) == 1
+    assert tool_msgs[0]["content"].startswith("[ERROR]") and "未执行" in tool_msgs[0]["content"]
+    # 插话并入 + 事件
+    assert any(
+        m.get("role") == "user" and m.get("content") == "只看高端,别碰区域酒"
+        for m in state.messages
+    )
+    merged = emit.of("steer_merged")
+    assert len(merged) == 1 and merged[0].data["preview"] == "只看高端,别碰区域酒"
+    # 重规划:LLM 被调用两次,最终 natural 收尾
+    assert len(llm.received_tool_choice) == 2
+    assert state.halt_reason == "natural"
+
+
+async def test_no_steer_predispatch_dispatches_normally():
+    """分发前无插话 → 正常 dispatch(回归)。"""
+    args = {"ts_code": "600519.SH"}
+    llm = FakeLLM(
+        [
+            _step(tool_calls=[_call("get_stock_quote", args)]),
+            _step(content="茅台 1600 元。", finish_reason="stop"),
+        ]
+    )
+    hub = FakeToolHub(results_per_round=[[_ok_result("get_stock_quote", args)]])
+    steer = FakeSteerSource(per_round=[])  # 所有 pop_all 越界→[]
+    emit = _Collector()
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit, steer_source=steer)
+    state = await loop.run(_make_state())
+
+    assert len(hub.dispatched_calls) == 1  # 正常分发
+    assert emit.of("steer_merged") == []
     assert state.halt_reason == "natural"
