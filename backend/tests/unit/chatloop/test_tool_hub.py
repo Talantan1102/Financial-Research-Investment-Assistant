@@ -68,16 +68,20 @@ class FakeInProcessTool(InProcessTool):
         name: str,
         *,
         output: dict | None = None,
+        sleep: float = 0.0,
         description: str = "fake inprocess tool",
     ) -> None:
         self.name = name
         self.description = description
         self.args_schema = _QuoteArgs
         self._output = output if output is not None else {"ok": True}
+        self._sleep = sleep
         self.call_count = 0
 
     async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:
         self.call_count += 1
+        if self._sleep:
+            await asyncio.sleep(self._sleep)
         return dict(self._output)
 
 
@@ -623,3 +627,45 @@ async def test_inprocess_tool_not_deduped_by_ledger():
     assert tool.call_count == 2
     # 台账两行(轨迹完整,spinning 检测可用)
     assert len(state.ledger.entries) == 2
+
+
+# ---------------------------------------------------------------------------
+# ③ 工具超时(数据工具单次超时,in-process 豁免)
+# ---------------------------------------------------------------------------
+
+
+async def test_data_tool_timeout_returns_guidance_error():
+    """数据工具单次执行超时 → success=False + [超时] 指导性错误(落进现有映射)。"""
+    hub = ToolHub(tool_timeout_s=0.05)
+    hub.register_registry(FakeRegistry([FakeTool("slow_quote", sleep=0.3)]))
+    state = _state()
+    [res] = await hub.dispatch([_call("slow_quote", {"ts_code": "x"})], state)
+    assert res.success is False
+    assert res.error is not None and res.error.startswith("[超时]")
+
+
+async def test_inprocess_tool_exempt_from_timeout():
+    """in-process(状态变更/本地)豁免超时:即便耗时超阈值也不被打断。"""
+    hub = ToolHub(tool_timeout_s=0.05)
+    hub.register_inprocess([FakeInProcessTool("mem_write", sleep=0.3, output={"ok": True})])
+    state = _state()
+    [res] = await hub.dispatch([_call("mem_write", {"ts_code": "x"})], state)
+    assert res.success is True
+    assert res.output == {"ok": True}
+
+
+async def test_data_tool_under_timeout_succeeds_and_isolates():
+    """同圈一快一慢(均不超时)→ 各自独立返回,互不影响(per-call 隔离)。"""
+    hub = ToolHub(tool_timeout_s=0.5)
+    hub.register_registry(
+        FakeRegistry([
+            FakeTool("fast", sleep=0.0, output={"v": 1}),
+            FakeTool("slowish", sleep=0.05, output={"v": 2}),
+        ])
+    )
+    state = _state()
+    r1, r2 = await hub.dispatch(
+        [_call("fast", {"ts_code": "a"}), _call("slowish", {"ts_code": "b"})], state
+    )
+    assert (r1.success, r1.output) == (True, {"v": 1})
+    assert (r2.success, r2.output) == (True, {"v": 2})

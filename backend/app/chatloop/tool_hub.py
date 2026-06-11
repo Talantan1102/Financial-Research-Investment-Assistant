@@ -50,6 +50,9 @@ _ERR_MSG_LEN = 200
 SEARCH_TOOLS_NAME = "search_tools"
 _SEARCH_TOOLS_K = 3  # search_docs top-k
 
+# 数据工具单次执行超时(in-process 豁免);超时落进 _guidance_error 的 [超时] 映射。
+DEFAULT_TOOL_TIMEOUT_S = 30.0
+
 
 class ToolHub:
     """统一工具分发层 —— 双后端(in-process Tool + MCP via ToolRegistry)。
@@ -65,11 +68,13 @@ class ToolHub:
         emit: EmitFn | None = None,
         cache: ToolResultCache | None = None,
         seq_counter: SeqCounter | None = None,
+        tool_timeout_s: float = DEFAULT_TOOL_TIMEOUT_S,
     ) -> None:
         self._tools: dict[str, Tool] = {}
         self._emit_fn = emit
         self._cache = cache
         self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
+        self._tool_timeout_s = tool_timeout_s
 
     # ------------------------------------------------------------------
     # 注册
@@ -299,18 +304,28 @@ class ToolHub:
 
         is_cache_hit = False
         try:
-            if self._cache is not None and not is_inprocess:
-                # 只读 MCP 数据工具走缓存
-                cache_key = ToolResultCache.cache_key(state.user_id, name, args)
-                output, cache_status = await self._cache.get_or_compute(
-                    user_id=state.user_id,
-                    tool_name=name,
-                    args=args,
-                    compute_fn=_compute,
+            if not is_inprocess:
+                # 数据工具(MCP 只读):单次执行超时保护(超时 → TimeoutError → [超时] 指导错误)。
+                # cache 注入则走缓存(命中跳过 compute),否则直跑;两者都受 wait_for 约束。
+                async def _run_data_tool() -> dict[str, Any]:
+                    nonlocal is_cache_hit, cache_key
+                    if self._cache is not None:
+                        cache_key = ToolResultCache.cache_key(state.user_id, name, args)
+                        out, cache_status = await self._cache.get_or_compute(
+                            user_id=state.user_id,
+                            tool_name=name,
+                            args=args,
+                            compute_fn=_compute,
+                        )
+                        is_cache_hit = cache_status == CacheHit.HIT
+                        return out
+                    return await _compute()
+
+                output = await asyncio.wait_for(
+                    _run_data_tool(), timeout=self._tool_timeout_s
                 )
-                is_cache_hit = cache_status == CacheHit.HIT
             else:
-                # InProcessTool 或无 cache 注入:直接执行,cache_key 保持 None
+                # InProcessTool(状态变更/本地)豁免超时:直接执行,cache_key 保持 None
                 output = await _compute()
         except BaseException as e:  # noqa: BLE001 — hub 不抛:全包成指导性错误
             error = self._guidance_error(tool, e)
