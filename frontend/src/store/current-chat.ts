@@ -11,6 +11,7 @@
 import { proxy } from 'valtio'
 import type {
   ChatMessage,
+  ChartEvent,
   CostUpdateEvent,
   DoneEvent,
   ErrorEvent,
@@ -191,6 +192,24 @@ export const currentChatActions = {
       case 'tool_error':
         currentChatState.toolEvents.push(ev)
         break
+      case 'chart': {
+        const e = ev as ChartEvent
+        if (currentChatState.session_id) {
+          currentChatState.messages.push({
+            id: `local-chart-${e.chart_id}`,
+            session_id: currentChatState.session_id,
+            role: 'assistant',
+            content: '',
+            message_type: 'chart',
+            tool_call_data: null,
+            research_report_id: null,
+            research_report_summary: null,
+            created_at: new Date().toISOString(),
+            chart_spec: { type: 'plotly', figure: e.figure },
+          })
+        }
+        break
+      }
       case 'steer_merged':
         // System bubble rendered from this event (preview of merged instruction).
         currentChatState.toolEvents.push(ev)
