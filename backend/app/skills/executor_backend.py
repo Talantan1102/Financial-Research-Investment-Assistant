@@ -30,9 +30,7 @@ class SkillExecutorBackend:
     async def run_code(
         self, *, source: str, data: dict[str, Any], timeout_s: int
     ) -> SkillExecutionResult:
-        return await self._executor.execute_source(
-            source=source, payload=data, timeout_s=timeout_s
-        )
+        return await self._executor.execute_source(source=source, payload=data, timeout_s=timeout_s)
 
 
 __all__ = ["ExecutorBackend", "SkillExecutorBackend"]

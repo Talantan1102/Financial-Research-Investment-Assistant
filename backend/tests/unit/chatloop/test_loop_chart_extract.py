@@ -23,8 +23,11 @@ def _make_loop(events: list[LoopEvent]) -> ToolLoop:
             return []
 
     return ToolLoop(
-        llm=object(), tool_hub=_Hub(), context_deps=object(),
-        emit=_emit, seq_counter=SeqCounter(),
+        llm=object(),
+        tool_hub=_Hub(),
+        context_deps=object(),
+        emit=_emit,
+        seq_counter=SeqCounter(),
     )
 
 
@@ -41,12 +44,18 @@ async def test_figures_emitted_as_chart_events_and_stripped() -> None:
     fig_b = {"data": [{"type": "bar"}], "layout": {}}
     results = [
         ToolResult(
-            tool_name="run_python", args={}, success=True,
-            output={"result": {"corr": 0.8}, "figures": [fig_a, fig_b]}, latency_ms=5,
+            tool_name="run_python",
+            args={},
+            success=True,
+            output={"result": {"corr": 0.8}, "figures": [fig_a, fig_b]},
+            latency_ms=5,
         ),
         ToolResult(
-            tool_name="get_stock_quote", args={}, success=True,
-            output={"price": 100}, latency_ms=5,
+            tool_name="get_stock_quote",
+            args={},
+            success=True,
+            output={"price": 100},
+            latency_ms=5,
         ),
     ]
 
@@ -71,8 +80,11 @@ async def test_empty_figures_no_events_no_marker() -> None:
     loop = _make_loop(events)
     results = [
         ToolResult(
-            tool_name="run_python", args={}, success=True,
-            output={"result": 1, "figures": []}, latency_ms=5,
+            tool_name="run_python",
+            args={},
+            success=True,
+            output={"result": 1, "figures": []},
+            latency_ms=5,
         )
     ]
     await loop._extract_and_emit_charts(results, _State())  # type: ignore[arg-type]
