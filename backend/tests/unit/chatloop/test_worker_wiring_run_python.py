@@ -28,7 +28,7 @@ async def test_run_python_registered(tmp_path: Path) -> None:
         memory=object(),
         loader=object(),
         executor=SkillExecutor(skills_root=tmp_path / "s", workdir_root=tmp_path / "wd"),
-        cache=None,
+        cache=None,  # type: ignore[arg-type]
         skill_listing="## 可用技能",
         gate_cfg=GateConfig(),
     )

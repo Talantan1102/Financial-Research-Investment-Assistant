@@ -24,7 +24,8 @@ async def test_run_python_produces_plotly_figure(tmp_path: Path) -> None:
         "print(json.dumps({'result': {'n': len(d['x'])}, 'figures': [fig.to_dict()]}))\n"
     )
     out = await tool.run_with_state(
-        CodeInterpreterArgs(code=code, data={"x": [1, 2, 3], "y": [4, 5, 6]}), state=None
+        CodeInterpreterArgs(code=code, data={"x": [1, 2, 3], "y": [4, 5, 6]}),
+        state=None,  # type: ignore[arg-type]
     )
     assert out["result"] == {"n": 3}
     assert len(out["figures"]) == 1
@@ -40,5 +41,6 @@ async def test_run_python_network_banned(tmp_path: Path) -> None:
 
     with pytest.raises(ToolError):
         await tool.run_with_state(
-            CodeInterpreterArgs(code="import requests; requests.get('http://x')"), state=None
+            CodeInterpreterArgs(code="import requests; requests.get('http://x')"),
+            state=None,  # type: ignore[arg-type]
         )

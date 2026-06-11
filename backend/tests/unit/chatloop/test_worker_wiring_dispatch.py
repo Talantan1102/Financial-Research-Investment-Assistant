@@ -25,7 +25,7 @@ def _singletons() -> HeavySingletons:
         memory=object(),
         loader=object(),
         executor=object(),
-        cache=None,
+        cache=None,  # type: ignore[arg-type]
         skill_listing="",
         gate_cfg=GateConfig(),
     )

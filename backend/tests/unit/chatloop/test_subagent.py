@@ -67,7 +67,7 @@ def test_subagent_result_status_literal() -> None:
             target=None,
             summary="",
             evidence_refs=[],
-            status="bogus",
+            status="bogus",  # type: ignore[arg-type]
             gap_note=None,
             tokens_spent=0,
             cost_cny=0.0,
