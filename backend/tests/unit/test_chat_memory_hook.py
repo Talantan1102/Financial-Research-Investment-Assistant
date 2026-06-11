@@ -107,3 +107,16 @@ async def test_fail_soft_when_enqueue_raises() -> None:
     wrote = await persist_episode_and_trigger(mem, enqueue=enq, **_kw())
     assert wrote is True
     assert len(mem.episodes) == 1
+
+
+def test_enqueue_episode_extraction_passes_post_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """默认 enqueue 必须以 (session_id, "post_turn") 调真 Celery .delay(防 trigger 档漂移)。"""
+    import app.tasks.memory as memory_mod
+    from app.tasks.chat_memory_hook import enqueue_episode_extraction
+
+    calls: list[tuple[Any, ...]] = []
+    monkeypatch.setattr(
+        memory_mod.extract_session_episodes_async, "delay", lambda *a: calls.append(a)
+    )
+    enqueue_episode_extraction("sess-123")
+    assert calls == [("sess-123", "post_turn")]

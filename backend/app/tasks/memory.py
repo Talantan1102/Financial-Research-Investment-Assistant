@@ -93,10 +93,11 @@ def _build_path_b_runner() -> PathBRunner:
 def extract_session_episodes_async(session_id: str, trigger_reason: str) -> dict[str, Any]:
     """Path B end-of-session 兜底批 trigger.
 
-    trigger_reason 三档:
+    trigger_reason 四档:
     - 'session_closed': WebSocket / chat 路由收到 close
     - 'idle_30min': idle watchdog beat 探测
     - 'new_session_started': 同 user 起新 session, 旧 session 触发批
+    - 'post_turn': chat 轮末 fire-and-forget(per-turn 即时触发,见 chat_memory_hook)
     """
     if trigger_reason not in _VALID_TRIGGER_REASONS:
         raise ValueError(
