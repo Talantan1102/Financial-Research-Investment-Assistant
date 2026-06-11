@@ -6,7 +6,7 @@
 - search_docs:关键词评分检索(中文 2-gram + 工具名直查 + k 截断);
 - search_tools dispatch:返回 docs、searched_docs 记账、重复检索带标记;
 - 裸调指导:deferred 工具 ValidationError 错误文案含 search_tools 提示;
-- 文档完整性守卫:14 个全有非空 brief/doc、CORE+DEFERRED 并集=14 无重叠、金融 8 含"何时不用"。
+- 文档完整性守卫:15 个全有非空 brief/doc、CORE+DEFERRED 并集=15 无重叠、金融 8 含"何时不用"。
 """
 
 from __future__ import annotations
@@ -104,15 +104,15 @@ def _call(name: str, args: dict) -> StepToolCall:
 # ---------------------------------------------------------------------------
 
 
-def test_tool_docs_count_is_14():
-    assert len(TOOL_DOCS) == 14
+def test_tool_docs_count_is_15():
+    assert len(TOOL_DOCS) == 15
 
 
-def test_core_and_deferred_partition_14_no_overlap():
+def test_core_and_deferred_partition_15_no_overlap():
     core = set(CORE_TOOLS)
     deferred = set(DEFERRED_TOOLS)
     assert len(CORE_TOOLS) == 6
-    assert len(DEFERRED_TOOLS) == 8
+    assert len(DEFERRED_TOOLS) == 9
     assert core & deferred == set()
     assert core | deferred == set(TOOL_DOCS.keys())
 
@@ -256,13 +256,13 @@ async def test_schemas_for_llm_groups_core_full_deferred_thin_search_last():
     schemas = hub.schemas_for_llm()
     names = [s["function"]["name"] for s in schemas]
 
-    # 总数 = 14 + search_tools = 15
-    assert len(names) == 15
+    # 总数 = 15 + search_tools = 16
+    assert len(names) == 16
     # search_tools 殿后
     assert names[-1] == "search_tools"
     # core 6 在前(顺序 = CORE_TOOLS)
     assert names[: len(CORE_TOOLS)] == CORE_TOOLS
-    # 紧接 deferred 8(顺序 = DEFERRED_TOOLS)
+    # 紧接 deferred 9(顺序 = DEFERRED_TOOLS)
     assert names[len(CORE_TOOLS) : len(CORE_TOOLS) + len(DEFERRED_TOOLS)] == DEFERRED_TOOLS
 
 

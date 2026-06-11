@@ -43,7 +43,7 @@ class ToolDoc:
 
 
 # ---------------------------------------------------------------------------
-# 14 个工具文档(8 金融 + 2 记忆 + 2 技能 + 升级 + 取回)
+# 15 个工具文档(8 金融 + 2 记忆 + 2 技能 + 升级 + 取回 + 代码解释器)
 # ---------------------------------------------------------------------------
 
 TOOL_DOCS: dict[str, ToolDoc] = {
@@ -329,6 +329,32 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         ),
         thin_required={"ref": "string"},
     ),
+    "run_python": ToolDoc(
+        name="run_python",
+        group="deferred",
+        brief="执行 Python 做数值计算/画交互分析图(plotly)。需二次计算或可视化时用。",
+        doc=(
+            "执行 LLM 当场写的 Python 脚本:数值计算 + 用 plotly 画交互式数据分析图。\n"
+            "何时用:用户要的不是单点查询,而是要对数据做二次计算(相关性/增速/加权/"
+            "统计)或要一张图(趋势/对比/分布)。触发词:画图、趋势图、对比图、算一下、"
+            "相关性、占比、分布。\n"
+            "何时不用:能被单个数据工具直接回答的(查现价→get_stock_quote,查财报→"
+            "get_financial_statements)别绕到 run_python;跑预审技能脚本(如 DCF)→ "
+            "run_skill_script。\n"
+            "参数:\n"
+            " - code(str,必填)—— 完整 Python 脚本。从 sys.stdin 读 data(json.load),"
+            "把结果 print 成一个 JSON:{\"result\": <可序列化结论>, \"figures\": "
+            "[<plotly fig.to_dict()>, ...]}。figures 可空。\n"
+            " - data(object,可选)—— 喂给脚本 stdin 的 JSON(把现有工具拿到的数据传进来)。\n"
+            "示例:run_python(code='import sys,json,plotly.express as px; "
+            "d=json.load(sys.stdin); fig=px.line(d[\"rows\"]); "
+            "print(json.dumps({\"result\":\"ok\",\"figures\":[fig.to_dict()]}))', "
+            "data={'rows': [...]})。\n"
+            "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态(变量不跨调用保留);"
+            "可用 pandas/numpy/plotly;超时 30s;图必须用 plotly(matplotlib 写文件会失败)。"
+        ),
+        thin_required={"code": "string"},
+    ),
 }
 
 
@@ -354,6 +380,7 @@ DEFERRED_TOOLS: list[str] = [
     "memory_write",
     "run_skill_script",
     "read_cached_result",
+    "run_python",
 ]
 
 
