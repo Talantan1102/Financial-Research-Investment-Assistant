@@ -5,11 +5,10 @@ from __future__ import annotations
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from app.router.observability_router import router
 from app.services.trace_models import TraceSpanRow
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 def _seed(db_session) -> None:
@@ -34,7 +33,7 @@ def _seed(db_session) -> None:
 def _client(db_session) -> TestClient:
     import app.router.observability_router as mod
 
-    mod._SESSION_FACTORY = lambda: nullcontext(db_session)  # 测试缝
+    mod._SESSION_FACTORY = lambda: nullcontext(db_session)  # type: ignore[assignment]  # 测试缝
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)

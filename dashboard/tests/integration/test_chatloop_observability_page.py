@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import dashboard.derive.observability as obs
 from starlette.testclient import TestClient
 
+import dashboard.derive.observability as obs
 from dashboard.server import app
 
 _FAKE = {

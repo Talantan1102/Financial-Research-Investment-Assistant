@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
-
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_hub import ToolHub
 from app.services.llm_step import StepToolCall
+from pydantic import BaseModel
 
 
 class _CapturingTrace:

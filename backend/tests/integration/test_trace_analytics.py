@@ -31,16 +31,30 @@ def _span(db_session, *, span_id, request_id, name, metadata, secs_ago=10, dur_m
 def test_aggregate_tool_and_model(db_session) -> None:
     # 两条 model span(同一 request),两条 tool span(get_quote 慢、search 快+缓存)
     _span(
-        db_session, span_id="s1", request_id="r1", name="LLMService.stream_step",
-        metadata={"prompt_tokens": 1000, "completion_tokens": 50,
-                  "cached_tokens": 800, "cost_cny": 0.04, "latency_ms": 3000},
+        db_session,
+        span_id="s1",
+        request_id="r1",
+        name="LLMService.stream_step",
+        metadata={
+            "prompt_tokens": 1000,
+            "completion_tokens": 50,
+            "cached_tokens": 800,
+            "cost_cny": 0.04,
+            "latency_ms": 3000,
+        },
     )
     _span(
-        db_session, span_id="s2", request_id="r1", name="tool:get_quote",
+        db_session,
+        span_id="s2",
+        request_id="r1",
+        name="tool:get_quote",
         metadata={"kind": "tool", "latency_ms": 8000, "cached": False, "success": True},
     )
     _span(
-        db_session, span_id="s3", request_id="r1", name="tool:search_kb",
+        db_session,
+        span_id="s3",
+        request_id="r1",
+        name="tool:search_kb",
         metadata={"kind": "tool", "latency_ms": 200, "cached": True, "success": True},
     )
     db_session.flush()
