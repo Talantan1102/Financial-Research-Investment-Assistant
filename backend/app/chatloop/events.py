@@ -18,6 +18,7 @@ EventType = Literal[
     "tool_start",
     "tool_end",
     "tool_error",
+    "chart",
     "skill_load",
     "steer_merged",
     "loop_halt",

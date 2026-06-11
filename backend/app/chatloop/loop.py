@@ -188,12 +188,40 @@ class ToolLoop:
             # 13. 按原顺序合并 allowed 的 results 与 rejected 的熔断错误,
             #     再折叠 tool 消息(协议红线:每个 tool_call_id 都要有 tool 消息)
             merged = self._merge_results(step_result.tool_calls, allowed, results)
+            await self._extract_and_emit_charts(merged, state)
             state = apply_results(state, merged, step_result.tool_calls)
 
             # 14. 烧签名记账
             update_burned(state, self._gate_cfg)
 
             # 15. 回到圈首
+
+    # ------------------------------------------------------------------
+    # 图抽取:figures 发 chart 事件并剥离出 LLM 上下文(spec § 5)
+    # ------------------------------------------------------------------
+
+    async def _extract_and_emit_charts(
+        self, results: list[ToolResult], state: ChatLoopState
+    ) -> None:
+        """把工具输出里的 figures 抽出发 chart 事件,并从 output 剥离(spec § 5)。
+
+        figure JSON 可达数 KB,绝不进 LLM 上下文(窗口铁律)—— 图只走 chart 事件
+        旁路渲染到前端;LLM 侧 output 的 figures 被替换为 charts_rendered 计数。
+        chart_id 确定性:{request_id}-{step}-{结果序}-{图序}(无随机,可复现)。
+        """
+        for ridx, r in enumerate(results):
+            if not (r.success and isinstance(r.output, dict)):
+                continue
+            figures = r.output.get("figures")
+            if not isinstance(figures, list) or not figures:
+                # 无图:把空 figures 键也清掉,保持 LLM 侧 output 干净
+                r.output.pop("figures", None)
+                continue
+            for fidx, fig in enumerate(figures):
+                chart_id = f"{state.request_id}-{state.step}-{ridx}-{fidx}"
+                await self._emit("chart", state.step, chart_id=chart_id, figure=fig)
+            r.output.pop("figures", None)
+            r.output["charts_rendered"] = len(figures)
 
     # ------------------------------------------------------------------
     # 结果合并:allowed→真实 result,rejected→熔断错误,按原顺序对齐
