@@ -30,6 +30,7 @@ from app.chatloop.control_tools import OfferDeepResearchTool, ReadCachedResultTo
 from app.chatloop.events import SeqCounter
 from app.chatloop.gates import GateConfig
 from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
+from app.chatloop.portfolio_tool import GetPortfolioPositionsTool
 from app.chatloop.skill_listing import build_skill_listing
 from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
 from app.chatloop.subagent import DispatchSubagentsTool, SubagentFactory
@@ -68,6 +69,7 @@ class HeavySingletons:
     cache: ToolResultCache
     skill_listing: str  # L1 元数据清单(进稳定前缀,会话内冻结)
     gate_cfg: GateConfig
+    session_factory: Any = None  # async_sessionmaker —— get_portfolio_positions 查 positions 用
 
 
 @dataclass
@@ -177,6 +179,7 @@ async def build_heavy_singletons(
         cache=cache,
         skill_listing=skill_listing,
         gate_cfg=GateConfig(),
+        session_factory=session_factory,
     )
 
 
@@ -231,6 +234,7 @@ def build_turn_components(
             ReadCachedResultTool(cache=singletons.cache),
             CodeInterpreterTool(backend=SkillExecutorBackend(singletons.executor)),
             DispatchSubagentsTool(factory=subagent_factory),
+            GetPortfolioPositionsTool(session_factory=singletons.session_factory),
         ]
     )
 

@@ -381,11 +381,47 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "参数:code(str,必填)= 完整脚本;data(object,可选)= 喂进来的数据 JSON。\n"
             "示例:run_python(code='import plotly.graph_objects as go; fig=go.Figure(); "
             "fig.add_bar(x=data[\"names\"], y=data[\"vals\"]); result=\"已画\"', "
-            "data={'names':['茅台','五粮液'],'vals':[241,197]})。\n"
+            "data={'names':['股票A','股票B'],'vals':[241,197]})。\n"
             "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态;可用 pandas/numpy/plotly;"
             "超时 30s;图必须用 plotly。画复杂图/要统一风格与配色 → 先 load_skill('charting')。"
         ),
         thin_required=None,  # core 组:常驻完整 schema,不走 thin 条目
+    ),
+    "get_daily": ToolDoc(
+        name="get_daily",
+        group="deferred",
+        brief="查 A 股日线 K 线序列(OHLC·成交量·时间段)。要看走势/画 K 线/算相关性回撤时用。",
+        doc=(
+            "查单只 A 股指定日期范围的日线 K 线序列(开高低收+成交量+涨跌幅)。\n"
+            "何时用:用户要看价格走势、画 K 线图、需要历史价格序列做相关性/回撤/归一化对比;"
+            "触发词:K 线、走势、历史价格、日线、回撤、近一年。\n"
+            "何时不用:只要最新现价 → get_stock_quote;要 PE/估值 → get_market_indicators;"
+            "要财务 → get_financial_statements。\n"
+            "参数:ts_code(str,必填,'600519.SH')、start(str,必填,YYYYMMDD)、"
+            "end(str,必填,YYYYMMDD)。\n"
+            "返回:列式数组 {ts_code, count, dates[], open[], high[], low[], close[], vol[], "
+            "pct_chg[]} —— 可直接喂 run_python 的 go.Candlestick(x=dates, open=..., ...) 或折线。\n"
+            "示例:get_daily(ts_code='600519.SH', start='20250101', end='20250601')。\n"
+            "硬约束:ts_code 带后缀;日期 YYYYMMDD;单次最多返回最近 260 个交易日(超出截断)。"
+        ),
+        thin_required={"ts_code": "string", "start": "string", "end": "string"},
+    ),
+    "get_portfolio_positions": ToolDoc(
+        name="get_portfolio_positions",
+        group="deferred",
+        brief="查用户当前持仓(股数/成本/市值/浮盈)。问'我的持仓'或要画持仓占比图时用。",
+        doc=(
+            "返回当前用户的全部持仓:每只的数量/均价/成本/已实现损益/现价/市值/浮盈,"
+            "外加 total_market_value。user_id 由系统从会话自动取,模型无需也不能传。\n"
+            "何时用:用户问'我现在持有什么/持仓情况/仓位',或要画持仓行业/个股占比饼图、"
+            "treemap、市值分布时(用 positions[].market_value 画)。\n"
+            "何时不用:查别的股票数据 → get_stock_quote 等;不是问自己持仓的别调。\n"
+            "参数:include_silenced(bool,可选,默认 false,是否含静默仓位)。\n"
+            "返回:{total_count, total_market_value, positions:[{ts_code, name, quantity, "
+            "avg_cost, total_cost, realized_pnl, last_quote_price, market_value, unrealized_pnl}]}。\n"
+            "硬约束:只返回当前用户自己的持仓;无持仓时 positions 为空数组(别硬画空图)。"
+        ),
+        thin_required={},  # 无必填参数
     ),
 }
 
@@ -414,6 +450,8 @@ DEFERRED_TOOLS: list[str] = [
     "memory_write",
     "run_skill_script",
     "read_cached_result",
+    "get_daily",
+    "get_portfolio_positions",
 ]
 
 

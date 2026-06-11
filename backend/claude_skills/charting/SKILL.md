@@ -102,11 +102,69 @@ fig.add_bar(x=data["names"], y=data["pct"], row=1, col=2)
 fig.update_layout(showlegend=False)
 ```
 
-**K线**
+**K线**(数据来自 `get_daily`,它返回列式 dates/open/high/low/close/vol)
 ```python
-fig = go.Figure(go.Candlestick(x=data["dates"], open=data["o"], high=data["h"],
-                               low=data["l"], close=data["c"],
+fig = go.Figure(go.Candlestick(x=data["dates"], open=data["open"], high=data["high"],
+                               low=data["low"], close=data["close"],
                                increasing_line_color="#FF3B30", decreasing_line_color="#34C759"))
+fig.update_layout(title="日K线", xaxis_rangeslider_visible=False)
+```
+
+**收盘价走势 / 归一化多股对比**(比涨跌幅比绝对价更有意义;各股先 `get_daily` 取 close)
+```python
+import plotly.graph_objects as go
+fig = go.Figure()
+for name, closes in data["series"].items():          # {"茅台":[...close...], "五粮液":[...]}
+    base = closes[0]
+    fig.add_scatter(x=data["dates"], y=[c / base * 100 for c in closes], mode="lines", name=name)
+fig.update_layout(title="区间涨跌对比(归一化=100)", yaxis_title="相对净值")
+```
+
+**估值分位带**(PE 历史 + 分位线;数据来自 `get_market_indicators` 的 pe_history)
+```python
+import plotly.graph_objects as go
+fig = go.Figure()
+fig.add_scatter(x=data["dates"], y=data["pe"], mode="lines", name="PE", line=dict(color="#5E5CE6"))
+for q, lbl in [(data["pe_min"], "最低"), (data["pe_median"], "中位"), (data["pe_max"], "最高")]:
+    fig.add_hline(y=q, line_dash="dash", annotation_text=lbl)
+fig.update_layout(title="PE 历史分位")
+```
+
+**回撤曲线**(从 close 序列算 drawdown)
+```python
+import plotly.graph_objects as go
+closes = data["close"]; peak = closes[0]; dd = []
+for c in closes:
+    peak = max(peak, c); dd.append((c / peak - 1) * 100)
+fig = go.Figure(go.Scatter(x=data["dates"], y=dd, fill="tozeroy", line=dict(color="#FF3B30")))
+fig.update_layout(title="区间最大回撤(%)", yaxis_title="回撤%")
+```
+
+**瀑布图**(现金流/利润构成,研报常用)
+```python
+fig = go.Figure(go.Waterfall(
+    x=data["items"],                                  # ["营收","成本","费用","净利"]
+    measure=data["measure"],                          # ["absolute","relative","relative","total"]
+    y=data["vals"],
+    increasing=dict(marker_color="#FF3B30"), decreasing=dict(marker_color="#34C759"),
+    totals=dict(marker_color="#5E5CE6")))
+fig.update_layout(title="利润构成")
+```
+
+**treemap**(持仓/板块市值占比;数据来自 `get_portfolio_positions` 的 market_value)
+```python
+fig = go.Figure(go.Treemap(labels=data["names"], parents=[""] * len(data["names"]),
+                           values=data["market_value"], textinfo="label+value+percent root"))
+fig.update_layout(title="持仓市值分布")
+```
+
+**雷达图**(多维基本面对比)
+```python
+import plotly.graph_objects as go
+fig = go.Figure()
+for name, vals in data["series"].items():             # {"茅台":[roe,毛利,增速,...]}
+    fig.add_trace(go.Scatterpolar(r=vals, theta=data["dims"], fill="toself", name=name))
+fig.update_layout(title="多维对比", polar=dict(radialaxis=dict(visible=True)))
 ```
 
 ## 常见问题怎么解(踩过的坑)
@@ -120,5 +178,13 @@ fig = go.Figure(go.Candlestick(x=data["dates"], open=data["o"], high=data["h"],
 - **横轴标签重叠**:类别多时 `fig.update_xaxes(tickangle=-30)`。
 - **多图**:要画多张就用 `figures = [fig1, fig2]`,执行器逐张渲染。
 
+## 数据怎么来(先取数,再画)
+沙箱无网络,所以**画图前先用数据工具取数**,再把值放进 run_python 的 `data` 参数:
+- **K线 / 走势 / 归一化对比 / 相关性 / 回撤** → `get_daily(ts_code, start, end)`,返回列式 dates/open/high/low/close/vol/pct_chg。
+- **持仓饼图 / treemap / 市值分布** → `get_portfolio_positions`,用 positions[].market_value / name。
+- **多标的对比柱状 / 散点** → `compare_stocks` 或多次 `get_stock_quote`。
+- **财务趋势 / 瀑布(利润构成)** → `get_financial_statements`(多期多调几次)。
+- **估值分位带 / 估值散点** → `get_market_indicators`(daily_basic 取 PE/PB、pe_history 取历史分位)。
+
 ## 硬约束
-沙箱无网络、无文件(`open` 禁)、无状态;只用 plotly(非 matplotlib);超时 30s。需要先有数据时,先调数据工具(get_stock_quote / compare_stocks / get_financial_statements 等)拿到值,再把值放进 `data` 参数或直接写进 code 里画。
+沙箱无网络、无文件(`open` 禁)、无状态;只用 plotly(非 matplotlib);超时 30s。
