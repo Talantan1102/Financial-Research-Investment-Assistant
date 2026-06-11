@@ -127,8 +127,13 @@ class SubagentFactory:
         return _wrapped
 
     async def spawn_one(
-        self, req: SubtaskRequest, parent: ChatLoopState, *, subtask_id: str,
-        child_cny: float = CHILD_MIN_CNY, child_tokens: int = 20_000,
+        self,
+        req: SubtaskRequest,
+        parent: ChatLoopState,
+        *,
+        subtask_id: str,
+        child_cny: float = CHILD_MIN_CNY,
+        child_tokens: int = 20_000,
     ) -> SubagentResult:
         child_state = ChatLoopState(
             user_id=parent.user_id,
@@ -137,27 +142,44 @@ class SubagentFactory:
             messages=[{"role": "user", "content": _render_subtask(req)}],
         )
         child_hub = build_child_tool_hub(
-            self._registry, emit=self._lane_emit(subtask_id),
-            seq_counter=self._seq, cache=self._cache,
+            self._registry,
+            emit=self._lane_emit(subtask_id),
+            seq_counter=self._seq,
+            cache=self._cache,
         )
         deps = ContextDeps(
-            system_prompt=CHILD_SYSTEM_PROMPT, persona_block="", skill_listing="",
-            history_block=(), max_steps=CHILD_MAX_STEPS, max_cny=child_cny,
+            system_prompt=CHILD_SYSTEM_PROMPT,
+            persona_block="",
+            skill_listing="",
+            history_block=(),
+            max_steps=CHILD_MAX_STEPS,
+            max_cny=child_cny,
         )
         loop = ToolLoop(
-            llm=self._llm, tool_hub=child_hub, context_deps=deps,
+            llm=self._llm,
+            tool_hub=child_hub,
+            context_deps=deps,
             gate_cfg=GateConfig(
                 max_steps=CHILD_MAX_STEPS, max_cny=child_cny, max_tokens=child_tokens
             ),
-            emit=self._lane_emit(subtask_id), seq_counter=self._seq, tier=CHILD_TIER,
+            emit=self._lane_emit(subtask_id),
+            seq_counter=self._seq,
+            tier=CHILD_TIER,
         )
         try:
             final = await loop.run(child_state)
         except Exception as exc:  # noqa: BLE001 — fail loud,包成 failed 结果不抛
             return SubagentResult(
-                subtask_id=subtask_id, target=req.target, summary="",
-                evidence_refs=[], status="failed", gap_note=f"子循环异常:{exc}",
-                tokens_spent=0, cost_cny=0.0, steps_used=0, tier=CHILD_TIER,
+                subtask_id=subtask_id,
+                target=req.target,
+                summary="",
+                evidence_refs=[],
+                status="failed",
+                gap_note=f"子循环异常:{exc}",
+                tokens_spent=0,
+                cost_cny=0.0,
+                steps_used=0,
+                tier=CHILD_TIER,
             )
         status: Literal["ok", "partial", "failed"] = (
             "ok" if final.halt_reason in (None, "natural") else "partial"
@@ -165,10 +187,16 @@ class SubagentFactory:
         refs = [e.cache_key for e in final.ledger.entries if e.cache_key]
         gap = None if status == "ok" else f"子循环未自然收尾({final.halt_reason})"
         return SubagentResult(
-            subtask_id=subtask_id, target=req.target,
-            summary=final.final_response or "", evidence_refs=refs,
-            status=status, gap_note=gap, tokens_spent=final.budget_spent_tokens,
-            cost_cny=final.budget_spent_cny, steps_used=final.step, tier=CHILD_TIER,
+            subtask_id=subtask_id,
+            target=req.target,
+            summary=final.final_response or "",
+            evidence_refs=refs,
+            status=status,
+            gap_note=gap,
+            tokens_spent=final.budget_spent_tokens,
+            cost_cny=final.budget_spent_cny,
+            steps_used=final.step,
+            tier=CHILD_TIER,
         )
 
     async def dispatch(
@@ -182,14 +210,24 @@ class SubagentFactory:
         child_tokens = max(5_000, int((remaining_tokens * CHILD_BUDGET_FRACTION) / n))
 
         await self._emit_plain(
-            "dispatch_start", parent.step,
-            n=n, subtasks=[{"subtask_id": f"sub-{i}", "goal": s.goal[:60]}
-                           for i, s in enumerate(subtasks)],
+            "dispatch_start",
+            parent.step,
+            n=n,
+            subtasks=[
+                {"subtask_id": f"sub-{i}", "goal": s.goal[:60]} for i, s in enumerate(subtasks)
+            ],
         )
         results: list[SubagentResult] = await asyncio.gather(
-            *(self.spawn_one(req, parent, subtask_id=f"sub-{i}",
-                             child_cny=child_cny, child_tokens=child_tokens)
-              for i, req in enumerate(subtasks))
+            *(
+                self.spawn_one(
+                    req,
+                    parent,
+                    subtask_id=f"sub-{i}",
+                    child_cny=child_cny,
+                    child_tokens=child_tokens,
+                )
+                for i, req in enumerate(subtasks)
+            )
         )
         # 预算回滚进父 state(ChatLoopState 字段可变)
         for r in results:
@@ -200,8 +238,10 @@ class SubagentFactory:
             with contextlib.suppress(Exception):
                 self._audit.record_batch(parent=parent, subtasks=subtasks, results=results)
         await self._emit_plain(
-            "dispatch_end", parent.step,
-            n=n, results=[{"subtask_id": r.subtask_id, "status": r.status} for r in results],
+            "dispatch_end",
+            parent.step,
+            n=n,
+            results=[{"subtask_id": r.subtask_id, "status": r.status} for r in results],
         )
         return results
 
@@ -244,8 +284,12 @@ class DispatchSubagentsTool(InProcessTool):
         return {
             "dispatched": len(results),
             "results": [
-                {"target": r.target or r.subtask_id, "status": r.status,
-                 "summary": r.summary, "gap": r.gap_note}
+                {
+                    "target": r.target or r.subtask_id,
+                    "status": r.status,
+                    "summary": r.summary,
+                    "gap": r.gap_note,
+                }
                 for r in results
             ],
         }

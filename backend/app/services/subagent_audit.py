@@ -31,7 +31,11 @@ class SubagentAuditRepo:
         self._session_factory = session_factory or _default_session_factory
 
     def record_batch(
-        self, *, parent: Any, subtasks: list[Any], results: list[Any],
+        self,
+        *,
+        parent: Any,
+        subtasks: list[Any],
+        results: list[Any],
         scenario_type: str | None = None,
     ) -> None:
         batch_id = f"{parent.request_id}::batch"
@@ -45,8 +49,12 @@ class SubagentAuditRepo:
                         turn_id=parent.session_id,
                         scenario_type=scenario_type,
                         subtask_id=res.subtask_id,
-                        goal_packet={"goal": req.goal, "target": req.target,
-                                     "output_hint": req.output_hint, "boundary": req.boundary},
+                        goal_packet={
+                            "goal": req.goal,
+                            "target": req.target,
+                            "output_hint": req.output_hint,
+                            "boundary": req.boundary,
+                        },
                         tool_scope=list(getattr(res, "tool_scope", []))
                         or list(READONLY_SUBAGENT_TOOLS),
                         result_summary=res.summary,

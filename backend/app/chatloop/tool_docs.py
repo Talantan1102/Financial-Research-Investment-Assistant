@@ -378,12 +378,12 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "run_skill_script。\n"
             "参数:\n"
             " - code(str,必填)—— 完整 Python 脚本。从 sys.stdin 读 data(json.load),"
-            "把结果 print 成一个 JSON:{\"result\": <可序列化结论>, \"figures\": "
+            '把结果 print 成一个 JSON:{"result": <可序列化结论>, "figures": '
             "[<plotly fig.to_dict()>, ...]}。figures 可空。\n"
             " - data(object,可选)—— 喂给脚本 stdin 的 JSON(把现有工具拿到的数据传进来)。\n"
             "示例:run_python(code='import sys,json,plotly.express as px; "
-            "d=json.load(sys.stdin); fig=px.line(d[\"rows\"]); "
-            "print(json.dumps({\"result\":\"ok\",\"figures\":[fig.to_dict()]}))', "
+            'd=json.load(sys.stdin); fig=px.line(d["rows"]); '
+            'print(json.dumps({"result":"ok","figures":[fig.to_dict()]}))\', '
             "data={'rows': [...]})。\n"
             "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态(变量不跨调用保留);"
             "可用 pandas/numpy/plotly;超时 30s;图必须用 plotly(matplotlib 写文件会失败)。"

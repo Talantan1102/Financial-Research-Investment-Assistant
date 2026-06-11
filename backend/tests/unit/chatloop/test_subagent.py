@@ -63,9 +63,16 @@ def test_subagent_result_status_literal() -> None:
     # 非法 status 被 Pydantic 拒
     with pytest.raises(ValueError):
         SubagentResult(
-            subtask_id="x", target=None, summary="", evidence_refs=[],
-            status="bogus", gap_note=None, tokens_spent=0, cost_cny=0.0,
-            steps_used=0, tier="fast",
+            subtask_id="x",
+            target=None,
+            summary="",
+            evidence_refs=[],
+            status="bogus",
+            gap_note=None,
+            tokens_spent=0,
+            cost_cny=0.0,
+            steps_used=0,
+            tier="fast",
         )
 
 
@@ -74,8 +81,13 @@ def test_subagent_result_status_literal() -> None:
 
 def _step(content: str = "", tool_calls=None, finish_reason: str = "tool_calls") -> StepResult:
     return StepResult(
-        content=content, tool_calls=tool_calls or [], finish_reason=finish_reason,
-        prompt_tokens=10, completion_tokens=5, cached_tokens=0, cost_cny=0.001,
+        content=content,
+        tool_calls=tool_calls or [],
+        finish_reason=finish_reason,
+        prompt_tokens=10,
+        completion_tokens=5,
+        cached_tokens=0,
+        cost_cny=0.001,
     )
 
 
@@ -126,27 +138,36 @@ class _FakeRegistry:
 
 def _parent_state() -> ChatLoopState:
     return ChatLoopState(
-        user_id="u1", session_id="s1", request_id="r1",
+        user_id="u1",
+        session_id="s1",
+        request_id="r1",
         messages=[{"role": "user", "content": "比一比"}],
-        budget_spent_cny=0.0, budget_spent_tokens=0,
+        budget_spent_cny=0.0,
+        budget_spent_tokens=0,
     )
 
 
 @pytest.mark.asyncio
 async def test_spawn_one_returns_ok_result() -> None:
     # 子循环:第1圈调 get_stock_quote,第2圈自然停作答
-    llm = _FakeLLM([
-        _step(tool_calls=[_call("get_stock_quote", {"ts_code": "600519.SH"})]),
-        _step(content="茅台现价 1700,估值偏高。", finish_reason="stop"),
-    ])
+    llm = _FakeLLM(
+        [
+            _step(tool_calls=[_call("get_stock_quote", {"ts_code": "600519.SH"})]),
+            _step(content="茅台现价 1700,估值偏高。", finish_reason="stop"),
+        ]
+    )
     events: list[LoopEvent] = []
 
     async def _emit(ev: LoopEvent) -> None:
         events.append(ev)
 
     factory = SubagentFactory(
-        llm=llm, registry=_FakeRegistry(), cache=None,
-        emit=_emit, seq_counter=SeqCounter(), gate_cfg=GateConfig(),
+        llm=llm,
+        registry=_FakeRegistry(),
+        cache=None,
+        emit=_emit,
+        seq_counter=SeqCounter(),
+        gate_cfg=GateConfig(),
         audit_repo=None,
     )
     req = SubtaskRequest(goal="查茅台", target="600519.SH")
@@ -195,8 +216,13 @@ async def test_dispatch_three_parallel_rolls_budget_and_emits() -> None:
         events.append(ev)
 
     factory = SubagentFactory(
-        llm=llm, registry=_FakeRegistry(), cache=None, emit=_emit,
-        seq_counter=SeqCounter(), gate_cfg=GateConfig(), audit_repo=None,
+        llm=llm,
+        registry=_FakeRegistry(),
+        cache=None,
+        emit=_emit,
+        seq_counter=SeqCounter(),
+        gate_cfg=GateConfig(),
+        audit_repo=None,
     )
     parent = _parent_state()
     reqs = [SubtaskRequest(goal=f"查{i}", target=f"t{i}") for i in range(3)]
@@ -226,8 +252,13 @@ async def test_dispatch_one_child_fails_others_survive() -> None:
         pass
 
     factory = SubagentFactory(
-        llm=llm, registry=_FakeRegistry(), cache=None, emit=_emit,
-        seq_counter=SeqCounter(), gate_cfg=GateConfig(), audit_repo=None,
+        llm=llm,
+        registry=_FakeRegistry(),
+        cache=None,
+        emit=_emit,
+        seq_counter=SeqCounter(),
+        gate_cfg=GateConfig(),
+        audit_repo=None,
     )
     results = await factory.dispatch(
         [SubtaskRequest(goal="a"), SubtaskRequest(goal="b"), SubtaskRequest(goal="c")],
@@ -248,9 +279,18 @@ class _StubFactory:
     async def dispatch(self, subtasks, parent):
         self.called_with = (subtasks, parent)
         return [
-            SubagentResult(subtask_id=f"sub-{i}", target=s.target, summary=f"摘要{i}",
-                           evidence_refs=[], status="ok", gap_note=None,
-                           tokens_spent=100, cost_cny=0.001, steps_used=2, tier="fast")
+            SubagentResult(
+                subtask_id=f"sub-{i}",
+                target=s.target,
+                summary=f"摘要{i}",
+                evidence_refs=[],
+                status="ok",
+                gap_note=None,
+                tokens_spent=100,
+                cost_cny=0.001,
+                steps_used=2,
+                tier="fast",
+            )
             for i, s in enumerate(subtasks)
         ]
 
@@ -261,8 +301,10 @@ async def test_dispatch_tool_returns_synthesizable_dict() -> None:
     tool = DispatchSubagentsTool(factory=factory)
     args = DispatchSubagentsArgs(
         reason="比三只票",
-        subtasks=[SubtaskRequest(goal="查茅台", target="600519.SH"),
-                  SubtaskRequest(goal="查五粮液", target="000858.SZ")],
+        subtasks=[
+            SubtaskRequest(goal="查茅台", target="600519.SH"),
+            SubtaskRequest(goal="查五粮液", target="000858.SZ"),
+        ],
     )
     out = await tool.run_with_state(args, _parent_state())
     assert out["dispatched"] == 2
@@ -283,4 +325,5 @@ async def test_dispatch_tool_rejects_over_cap() -> None:
     too_many = [SubtaskRequest(goal=f"g{i}") for i in range(MAX_SUBAGENTS + 1)]
     with pytest.raises(ToolError):
         await tool.run_with_state(
-            DispatchSubagentsArgs(reason="x", subtasks=too_many), _parent_state())
+            DispatchSubagentsArgs(reason="x", subtasks=too_many), _parent_state()
+        )

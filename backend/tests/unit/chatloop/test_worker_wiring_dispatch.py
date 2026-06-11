@@ -20,8 +20,14 @@ class _StubRegistry:
 
 def _singletons() -> HeavySingletons:
     return HeavySingletons(
-        llm=object(), registry=_StubRegistry(), memory=object(), loader=object(),
-        executor=object(), cache=None, skill_listing="", gate_cfg=GateConfig(),
+        llm=object(),
+        registry=_StubRegistry(),
+        memory=object(),
+        loader=object(),
+        executor=object(),
+        cache=None,
+        skill_listing="",
+        gate_cfg=GateConfig(),
     )
 
 
