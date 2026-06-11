@@ -723,6 +723,27 @@ class HierarchicalMemory:
         finally:
             session.close()
 
+    async def next_episode_index(self, session_id: UUID) -> int:
+        """返回该 session 下一个 episode_index(max+1;空 session 为 0)。
+
+        DB 有唯一约束 (session_id, episode_index);本方法不加锁,单用户顺序聊天
+        无并发,罕见并发由唯一约束 + 上层 fail-soft 兜。
+        """
+        from sqlalchemy import func
+
+        from app.memory.models import ChatMemoryEpisode
+
+        session = self._pg_session_factory()
+        try:
+            max_idx = (
+                session.query(func.max(ChatMemoryEpisode.episode_index))
+                .filter(ChatMemoryEpisode.session_id == session_id)
+                .scalar()
+            )
+            return 0 if max_idx is None else int(max_idx) + 1
+        finally:
+            session.close()
+
     async def get_unextracted_episodes(
         self, user_id: UUID, limit: int = 100
     ) -> list[ChatMemoryEpisode]:

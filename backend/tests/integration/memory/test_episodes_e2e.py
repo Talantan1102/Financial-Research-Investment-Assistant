@@ -165,3 +165,22 @@ async def test_get_unextracted_user_isolation(
     pA_ids = {e.episode_id for e in pendingA}
     assert epA.episode_id in pA_ids
     assert epB.episode_id not in pA_ids
+
+
+@pytest.mark.integration
+async def test_next_episode_index_increments(
+    hier_memory: HierarchicalMemory, pg_memory_fixture: dict[str, Any]
+) -> None:
+    """next_episode_index: 空 session → 0;每写一条递增(供 chat 轮末写 episode 用)。"""
+    user_uuid = _make_user(pg_memory_fixture)
+    session_uuid = _make_session(pg_memory_fixture, user_uuid)
+
+    assert await hier_memory.next_episode_index(session_uuid) == 0
+
+    await hier_memory.write_episode(
+        user_uuid, session_uuid, 0, "我重仓茅台", "已记录你的持仓偏好。"
+    )
+    assert await hier_memory.next_episode_index(session_uuid) == 1
+
+    await hier_memory.write_episode(user_uuid, session_uuid, 1, "还有五粮液", "好的。")
+    assert await hier_memory.next_episode_index(session_uuid) == 2
