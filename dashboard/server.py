@@ -739,6 +739,24 @@ async def chatloop_live_view(request: Request) -> HTMLResponse:
     return HTMLResponse(template.render(sc=sc, active_nav="eval"))
 
 
+async def chatloop_observability_view(request: Request) -> HTMLResponse:
+    """GET /eval/chatloop-observability — chatloop 运行时可观测性聚合(实时拉后端 API)。
+
+    数据源:后端只读聚合 API（BACKEND_BASE_URL）。后端不可达 → 降级占位,不崩页。
+    """
+    from dashboard.derive.observability import load_aggregates
+
+    backend = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
+    window = request.query_params.get("window", "7d")
+    try:
+        agg = load_aggregates(backend, window)
+    except Exception as e:  # noqa: BLE001 — 后端不可达降级,不崩页
+        logger.warning("observability fetch failed: %s", e)
+        agg = None
+    template = templates.get_template("chatloop_observability.html")
+    return HTMLResponse(template.render(agg=agg, window=window, active_nav="eval"))
+
+
 app = Starlette(
     routes=[
         Route("/", index),
@@ -749,6 +767,7 @@ app = Starlette(
         Route("/eval", eval_view),
         Route("/eval/report/{slug}", report_view, methods=["GET"]),
         Route("/eval/chatloop-live", chatloop_live_view, methods=["GET"]),
+        Route("/eval/chatloop-observability", chatloop_observability_view, methods=["GET"]),
         Route("/eval/cell/{subsystem}/{layer}", eval_cell_expand, methods=["GET"]),
         Route("/cap/{cap_id}/expand", cap_expand, methods=["GET"]),
         Route("/cap/{cap_id}/status", post_status, methods=["POST"]),
