@@ -331,11 +331,9 @@ TOOL_DOCS: dict[str, ToolDoc] = {
     ),
     "run_python": ToolDoc(
         name="run_python",
-        # core 组:run_python 的正确调用依赖 code 参数里的输出契约(必须 print 一个含
-        # result/figures 的 JSON)。该契约只能经"常驻完整 schema"传达 —— 放 deferred 组
-        # 时模型只看到 thin 条目(剥了参数 description),裸调即写出不符契约的代码
-        # (实测:stdout_invalid_json + 幻觉图片链接)。故升 core,契约随 code 参数
-        # description 常驻可见(verify 浏览器实测驱动的修正)。
+        # core 组:run_python 的正确调用依赖 code 参数里的输出契约。放 deferred 组时模型
+        # 只看到 thin 条目(剥了参数 description),裸调即写出不符契约的代码(实测)。故升
+        # core,契约随 code 参数 description 常驻可见(verify 浏览器实测驱动)。
         group="core",
         brief="写 Python 做计算/画交互图(plotly)。需二次计算或可视化时用。",
         doc=(
@@ -346,17 +344,16 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "何时不用:能被单个数据工具直接回答的(查现价→get_stock_quote,查财报→"
             "get_financial_statements)别绕到 run_python;跑预审技能脚本(如 DCF)→ "
             "run_skill_script。\n"
-            "参数:\n"
-            " - code(str,必填)—— 完整 Python 脚本。从 sys.stdin 读 data(json.load),"
-            "把结果 print 成一个 JSON:{\"result\": <可序列化结论>, \"figures\": "
-            "[<plotly fig.to_dict()>, ...]}。figures 可空。\n"
-            " - data(object,可选)—— 喂给脚本 stdin 的 JSON(把现有工具拿到的数据传进来)。\n"
-            "示例:run_python(code='import sys,json,plotly.express as px; "
-            "d=json.load(sys.stdin); fig=px.line(d[\"rows\"]); "
-            "print(json.dumps({\"result\":\"ok\",\"figures\":[fig.to_dict()]}))', "
-            "data={'rows': [...]})。\n"
-            "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态(变量不跨调用保留);"
-            "可用 pandas/numpy/plotly;超时 30s;图必须用 plotly(matplotlib 写文件会失败)。"
+            "写法契约(执行器自动捕获,别 print):\n"
+            " - 数据在变量 data(dict)里,直接用,不用读 stdin;\n"
+            " - 把图赋给 fig(单张)或 figures(plotly Figure 列表),结论赋给 result;\n"
+            " - 不要 print、不要返回图片链接/markdown 图 —— 执行器自动序列化并套统一 iOS 主题。\n"
+            "参数:code(str,必填)= 完整脚本;data(object,可选)= 喂进来的数据 JSON。\n"
+            "示例:run_python(code='import plotly.graph_objects as go; fig=go.Figure(); "
+            "fig.add_bar(x=data[\"names\"], y=data[\"vals\"]); result=\"已画\"', "
+            "data={'names':['茅台','五粮液'],'vals':[241,197]})。\n"
+            "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态;可用 pandas/numpy/plotly;"
+            "超时 30s;图必须用 plotly。画复杂图/要统一风格与配色 → 先 load_skill('charting')。"
         ),
         thin_required=None,  # core 组:常驻完整 schema,不走 thin 条目
     ),

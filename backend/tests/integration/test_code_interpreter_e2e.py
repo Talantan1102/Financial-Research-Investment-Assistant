@@ -17,12 +17,11 @@ pytest.importorskip("plotly")  # 未装 code-interpreter extra 则跳过
 async def test_run_python_produces_plotly_figure(tmp_path: Path) -> None:
     executor = SkillExecutor(skills_root=tmp_path / "s", workdir_root=tmp_path / "wd")
     tool = CodeInterpreterTool(backend=SkillExecutorBackend(executor))
+    # 新契约(wrapper 模式):data 是命名空间变量,赋 fig/result,不 print。
     code = (
-        "import sys, json\n"
         "import plotly.express as px\n"
-        "d = json.load(sys.stdin)\n"
-        "fig = px.line(x=d['x'], y=d['y'])\n"
-        "print(json.dumps({'result': {'n': len(d['x'])}, 'figures': [fig.to_dict()]}))\n"
+        "fig = px.line(x=data['x'], y=data['y'])\n"
+        "result = {'n': len(data['x'])}\n"
     )
     out = await tool.run_with_state(
         CodeInterpreterArgs(code=code, data={"x": [1, 2, 3], "y": [4, 5, 6]}), state=None
@@ -31,6 +30,7 @@ async def test_run_python_produces_plotly_figure(tmp_path: Path) -> None:
     assert len(out["figures"]) == 1
     fig = out["figures"][0]
     assert "data" in fig and "layout" in fig  # plotly figure 形状
+    assert fig["layout"].get("template")  # harness 自动套了 iOS 主题
 
 
 @pytest.mark.asyncio
