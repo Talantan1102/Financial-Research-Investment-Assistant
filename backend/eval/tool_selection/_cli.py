@@ -49,7 +49,24 @@ def run_cli(argv: list[str] | None, *, default_golden: str, title: str) -> int:
         return 0
 
     # --- live 模式 ---
-    return asyncio.run(_run_live(cases, title, strict=args.strict))
+    return _run_live_blocking(cases, title, strict=args.strict)
+
+
+def _run_live_blocking(cases: list, title: str, *, strict: bool) -> int:
+    """在常驻 loop 上跑 live —— 不用 asyncio.run(根因同 chat_runner)。
+
+    build_eval_singletons 起 MCP stdio 子进程,其 stdio_client/ClientSession 用 anyio
+    task group,cancel scope 绑在进入它的 task 上,且 __aenter__ 被泄漏(不在同处
+    __aexit__)。``asyncio.run`` 在主协程结束后会 _cancel_all_tasks + shutdown_asyncgens,
+    把这个泄漏挂在 yield 处的 MCP stdio asyncgen 在 shutdown task 里 athrow →
+    RuntimeError: "Attempted to exit cancel scope in a different task than it was entered
+    in"(与 chat_runner 当年踩的 'MCP stdio asyncgen 关闭崩坏' 同根)。
+
+    故沿用生产 worker 同款生命周期:常驻 loop + run_until_complete,**不** shutdown_asyncgens、
+    **不** close —— 进程随即退出,OS 回收 MCP 子进程(与 worker SIGKILL 子进程一致)。
+    """
+    loop = asyncio.new_event_loop()
+    return loop.run_until_complete(_run_live(cases, title, strict=strict))
 
 
 async def _run_live(cases: list, title: str, *, strict: bool) -> int:
@@ -61,7 +78,13 @@ async def _run_live(cases: list, title: str, *, strict: bool) -> int:
     scores = []
     for i, case in enumerate(cases):
         tool_calls = await run_case_live(case, singletons, request_id=f"eval-{i}")
-        scores.append(score_case(case, tool_calls))
+        score = score_case(case, tool_calls)
+        scores.append(score)
+        names = [tc["tool_name"] for tc in tool_calls]
+        verdict = "PASS" if score.passed else "FAIL"
+        # 逐 case 轨迹:看模型实际选了哪些工具(seq 评分受 search_tools 排除影响,
+        # 故 PASS/FAIL 仅供参考,真行为看 seq 本身)。
+        print(f"  [{verdict}] {case.case_id}: {case.user_input[:30]} -> {names}", flush=True)
 
     rep = aggregate(scores)
     failures = assert_thresholds(rep)
