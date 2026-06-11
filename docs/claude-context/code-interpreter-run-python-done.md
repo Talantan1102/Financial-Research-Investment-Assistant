@@ -39,6 +39,21 @@ dispatch→apply_results 之间被剥离,绝不进 LLM 上下文。沙箱底座�
    抬内存,而是 `_minimal_env` 注入 `OPENBLAS/OMP/MKL/NUMEXPR_NUM_THREADS=1`(单线程既
    守内存又确定性,对纯计算技能脚本无副作用)。e2e 真子进程测试抓出,mock 测试不可能复现。
 
+## 端到端 verify(真浏览器跑全栈)抓出的两个坑——只有真跑才暴露
+
+3. **deferred 组 = 工具不可用**:run_python 起初放 deferred 组,模型只看到 thin 条目
+   (`thin_schema` 剥了参数 description),裸调时根本不知道"脚本须 print 一个含
+   result/figures 的 JSON"→ 写出不符契约的代码(`stdout_invalid_json` + 幻觉一个
+   `plotly.com` 图片链接 + "运行环境限制"道歉)。**教训:输出契约是用对工具的前提的工具
+   不能放 deferred**。修法:升 core(契约随 code 参数 description 常驻可见),brief 保持
+   ≤80 不塞契约。单测过了但 agent 实跑全错——LLM-judge 端到端跑不出这个。
+4. **valtio 只读对象喂 plotly 会空图**:figure 经 chart 事件进 valtio store 变
+   reactive/只读;plotly 绘制时就地 mutate(归一化 `line.color` 等)→ 抛
+   `Cannot assign to read only property 'color'`,且被 react-plotly **静默吞掉**
+   (无 console error)→ `.js-plotly-plot` 容器在但 0 子节点、不画。修法:
+   `PlotlySpecRenderer` 用 `JSON.parse(JSON.stringify(figure))` 深拷成可变对象再交 plotly
+   (`structuredClone` 拷不了 valtio proxy)。**单测 mock 了 plotly 永远抓不到——必须真浏览器跑**。
+
 ## 已知留口(follow-up)
 
 - 图不跨 reload 持久化(reload 从 PG 拉消息无 chart);持仓/日线/行业数据工具未接
