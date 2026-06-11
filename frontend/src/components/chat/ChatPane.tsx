@@ -141,9 +141,9 @@ export function ChatPane({
               onRetry={sse.retryTask}
             />
           )}
+          <DispatchLanes />
         </div>
         <StreamingIndicator />
-        <DispatchLanes />
         {snap.halt_reason ? (
           <div
             className={styles.haltBanner}
