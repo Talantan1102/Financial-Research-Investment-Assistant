@@ -32,10 +32,12 @@ from app.chatloop.gates import GateConfig
 from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
 from app.chatloop.skill_listing import build_skill_listing
 from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
+from app.chatloop.subagent import DispatchSubagentsTool, SubagentFactory
 from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
 from app.chatloop.tool_hub import EmitFn, ToolHub
 from app.memory.injection_classifier import is_prompt_injection
 from app.services.chat_steer_bus import steer_key
+from app.services.subagent_audit import SubagentAuditRepo
 from app.services.tool_result_cache import ToolResultCache
 from app.skills.executor_backend import SkillExecutorBackend
 
@@ -207,6 +209,18 @@ def build_turn_components(
     if episode_id_resolver is not None:
         memory_write_kwargs["episode_id_resolver"] = episode_id_resolver
 
+    # 子 agent 派发 factory(per-turn:闭包持 turn 级 emit/seq_counter;
+    # spawn 子循环复用同一 registry/cache,留痕走 SubagentAuditRepo)。
+    subagent_factory = SubagentFactory(
+        llm=singletons.llm,
+        registry=singletons.registry,
+        cache=singletons.cache,
+        emit=emit,
+        seq_counter=seq_counter,
+        gate_cfg=singletons.gate_cfg,
+        audit_repo=SubagentAuditRepo(),
+    )
+
     hub.register_inprocess(
         [
             MemorySearchTool(memory=singletons.memory),
@@ -216,6 +230,7 @@ def build_turn_components(
             OfferDeepResearchTool(),
             ReadCachedResultTool(cache=singletons.cache),
             CodeInterpreterTool(backend=SkillExecutorBackend(singletons.executor)),
+            DispatchSubagentsTool(factory=subagent_factory),
         ]
     )
 
