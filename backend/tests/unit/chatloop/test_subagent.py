@@ -10,8 +10,16 @@ import pytest
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.gates import GateConfig
 from app.chatloop.state import ChatLoopState
-from app.chatloop.subagent import SubagentFactory, SubagentResult, SubtaskRequest
+from app.chatloop.subagent import (
+    MAX_SUBAGENTS,
+    DispatchSubagentsArgs,
+    DispatchSubagentsTool,
+    SubagentFactory,
+    SubagentResult,
+    SubtaskRequest,
+)
 from app.services.llm_step import StepResult, StepToolCall
+from app.tools.base import ToolError
 
 
 def test_subtask_request_minimal() -> None:
@@ -230,3 +238,51 @@ async def test_dispatch_one_child_fails_others_survive() -> None:
     assert len(results) == 3  # 永远回 N 份,不抛
     assert any(r.status == "failed" for r in results)
     assert any(r.status == "ok" for r in results)
+
+
+# ── Task 5: DispatchSubagentsTool 护栏 ─────────────────────────────────────
+
+
+class _StubFactory:
+    def __init__(self) -> None:
+        self.called_with = None
+
+    async def dispatch(self, subtasks, parent):
+        self.called_with = (subtasks, parent)
+        return [
+            SubagentResult(subtask_id=f"sub-{i}", target=s.target, summary=f"摘要{i}",
+                           evidence_refs=[], status="ok", gap_note=None,
+                           tokens_spent=100, cost_cny=0.001, steps_used=2, tier="fast")
+            for i, s in enumerate(subtasks)
+        ]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_tool_returns_synthesizable_dict() -> None:
+    factory = _StubFactory()
+    tool = DispatchSubagentsTool(factory=factory)
+    args = DispatchSubagentsArgs(
+        reason="比三只票",
+        subtasks=[SubtaskRequest(goal="查茅台", target="600519.SH"),
+                  SubtaskRequest(goal="查五粮液", target="000858.SZ")],
+    )
+    out = await tool.run_with_state(args, _parent_state())
+    assert out["dispatched"] == 2
+    assert out["results"][0]["summary"] == "摘要0"
+    assert out["results"][0]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_tool_rejects_empty() -> None:
+    tool = DispatchSubagentsTool(factory=_StubFactory())
+    with pytest.raises(ToolError):
+        await tool.run_with_state(DispatchSubagentsArgs(reason="x", subtasks=[]), _parent_state())
+
+
+@pytest.mark.asyncio
+async def test_dispatch_tool_rejects_over_cap() -> None:
+    tool = DispatchSubagentsTool(factory=_StubFactory())
+    too_many = [SubtaskRequest(goal=f"g{i}") for i in range(MAX_SUBAGENTS + 1)]
+    with pytest.raises(ToolError):
+        await tool.run_with_state(
+            DispatchSubagentsArgs(reason="x", subtasks=too_many), _parent_state())

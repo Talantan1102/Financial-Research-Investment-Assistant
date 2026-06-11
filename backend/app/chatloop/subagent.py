@@ -16,9 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.chatloop.context import ContextDeps
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.gates import GateConfig
+from app.chatloop.inprocess import InProcessTool
 from app.chatloop.loop import ToolLoop
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_hub import ToolHub
+from app.tools.base import ToolError
 
 # ── 护栏常量 ──────────────────────────────────────────────────────────────
 MAX_SUBAGENTS = 8  # 个数上限(spec §4.2);超出让模型分批派
@@ -207,6 +209,47 @@ class SubagentFactory:
         await self._emit(LoopEvent(type=type_, seq=seq, step=step, data=data))  # type: ignore[arg-type]
 
 
+# ── DispatchSubagentsTool —— InProcessTool 包装 factory + 护栏 ──────────────
+
+
+def _fail(error: str) -> ToolError:
+    return ToolError(error)
+
+
+class DispatchSubagentsArgs(BaseModel):
+    reason: str
+    subtasks: list[SubtaskRequest]
+
+
+class DispatchSubagentsTool(InProcessTool):
+    name = "dispatch_subagents"
+    description = (
+        "把一组互不依赖、各自只用查的子任务并发派给只读子助手,收回每个的摘要。"
+        "多标的对比/多源检索/逐只持仓体检时用;有先后依赖的任务别用(留主循环串行)。"
+    )
+    args_schema = DispatchSubagentsArgs
+
+    def __init__(self, *, factory: Any) -> None:
+        self._factory = factory
+
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
+        args = DispatchSubagentsArgs.model_validate(args.model_dump())
+        n = len(args.subtasks)
+        if n == 0:
+            raise _fail("[无子任务] subtasks 为空,无可派发。")
+        if n > MAX_SUBAGENTS:
+            raise _fail(f"[子任务过多] 一次最多 {MAX_SUBAGENTS} 个(给了 {n}),请分批派发。")
+        results = await self._factory.dispatch(args.subtasks, state)
+        return {
+            "dispatched": len(results),
+            "results": [
+                {"target": r.target or r.subtask_id, "status": r.status,
+                 "summary": r.summary, "gap": r.gap_note}
+                for r in results
+            ],
+        }
+
+
 __all__ = [
     "CHILD_BUDGET_FRACTION",
     "CHILD_MAX_STEPS",
@@ -215,6 +258,8 @@ __all__ = [
     "CHILD_TIER",
     "MAX_SUBAGENTS",
     "READONLY_SUBAGENT_TOOLS",
+    "DispatchSubagentsArgs",
+    "DispatchSubagentsTool",
     "SubagentFactory",
     "SubagentResult",
     "SubtaskRequest",
