@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from app.agents.schemas import ToolResult
+from app.chatloop.context import ContextDeps
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.loop import ToolLoop
 
@@ -25,7 +26,7 @@ def _make_loop(events: list[LoopEvent]) -> ToolLoop:
     return ToolLoop(
         llm=object(),
         tool_hub=_Hub(),
-        context_deps=object(),
+        context_deps=ContextDeps(system_prompt="s"),
         emit=_emit,
         seq_counter=SeqCounter(),
     )

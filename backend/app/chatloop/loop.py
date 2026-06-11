@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
@@ -16,6 +18,8 @@ from app.chatloop.events import EventType, LoopEvent, SeqCounter
 from app.chatloop.gates import GateConfig, check_gates, filter_burned, update_burned
 from app.chatloop.state import ChatLoopState, apply_results, apply_step
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
+
+logger = logging.getLogger(__name__)
 
 # 烧签名后被拒调用喂回模型的指导性错误文案(协议红线:rejected 也要有 tool 消息)。
 # apply_results 对 success=False 的结果产出 "[ERROR] {error}",故此处不带 [ERROR] 前缀。
@@ -213,15 +217,50 @@ class ToolLoop:
             if not (r.success and isinstance(r.output, dict)):
                 continue
             figures = r.output.get("figures")
-            if not isinstance(figures, list) or not figures:
+            if isinstance(figures, list) and figures:
+                for fidx, fig in enumerate(figures):
+                    chart_id = f"{state.request_id}-{state.step}-{ridx}-{fidx}"
+                    await self._emit("chart", state.step, chart_id=chart_id, figure=fig)
+                r.output.pop("figures", None)
+                r.output["charts_rendered"] = len(figures)
+            else:
                 # 无图:把空 figures 键也清掉,保持 LLM 侧 output 干净
                 r.output.pop("figures", None)
-                continue
-            for fidx, fig in enumerate(figures):
-                chart_id = f"{state.request_id}-{state.step}-{ridx}-{fidx}"
-                await self._emit("chart", state.step, chart_id=chart_id, figure=fig)
-            r.output.pop("figures", None)
-            r.output["charts_rendered"] = len(figures)
+            # ② 超大结果截断(figures 已剥,量真正进窗口的体积)
+            self._cap_oversized_output(r, state)
+
+    def _cap_oversized_output(self, r: ToolResult, state: ChatLoopState) -> None:
+        """超阈值且能取回(有 cache ref)的 dict 结果 → 换成 digest+ref;取不回的不截。
+
+        安全不变量:绝不截断取不回的内容(无 cache ref 则保留全文 + log 警告)。
+        in-process 工具 / load_skill cache_key 恒为 None → 自动豁免;无需识别工具类型。
+        """
+        threshold = self._deps.oversize_result_char_threshold
+        try:
+            serialized = json.dumps(r.output, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return
+        if len(serialized) <= threshold:
+            return
+        entry = state.ledger.find_success(tool_name=r.tool_name, args=r.args)
+        cache_key = entry.cache_key if entry is not None else None
+        if cache_key is None:
+            logger.warning(
+                "oversize tool output without cache ref, kept intact: tool=%s chars=%d",
+                r.tool_name,
+                len(serialized),
+            )
+            return
+        # ToolResult 是 frozen,但 output dict 可变 —— 原地 clear+update(同既有 figures 剥离手法)
+        r.output.clear()
+        r.output.update(
+            {
+                "truncated_digest": serialized[:600],
+                "note": "结果过大已截断,完整内容见 ref,需要更多可调 read_cached_result 取回",
+                "ref": cache_key,
+                "original_chars": len(serialized),
+            }
+        )
 
     # ------------------------------------------------------------------
     # 结果合并:allowed→真实 result,rejected→熔断错误,按原顺序对齐
