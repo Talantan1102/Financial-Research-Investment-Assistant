@@ -241,6 +241,8 @@ class ToolLoop:
         安全不变量:绝不截断取不回的内容(无 cache ref 则保留全文 + log 警告)。
         in-process 工具 / load_skill cache_key 恒为 None → 自动豁免;无需识别工具类型。
         """
+        if not isinstance(r.output, dict):
+            return
         threshold = self._deps.oversize_result_char_threshold
         try:
             serialized = json.dumps(r.output, ensure_ascii=False)
