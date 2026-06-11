@@ -26,3 +26,8 @@
 {"case_id": "ts-defer-seq-002", "category": "deferred_search", "user_input": "查一下茅台近三个月的主力资金流向", "expected": {"tools_sequence_contains": ["search_tools", "get_market_indicators"]}, "bucket": "金融数据"}
 {"case_id": "ts-abstain-001", "category": "abstain", "user_input": "你好", "expected": {"first_tool": null}, "bucket": "弃权"}
 {"case_id": "ts-abstain-002", "category": "abstain", "user_input": "谢谢你,帮了大忙了!", "expected": {"first_tool": null}, "bucket": "弃权"}
+{"case_id": "ts-pyint-001", "category": "single_tool", "user_input": "帮我把这两组数画成对比折线图:A=[1094,1241,1476,1645,1709],B=[662,739,832,891,920]", "expected": {"first_tool": "run_python"}, "bucket": "金融数据"}
+{"case_id": "ts-pyint-002", "category": "single_tool", "user_input": "算一下这两列日收益率的相关系数:x=[0.01,-0.02,0.03,0.005],y=[0.012,-0.018,0.025,0.004]", "expected": {"first_tool": "run_python"}, "bucket": "金融数据"}
+{"case_id": "ts-pyint-003", "category": "single_tool", "user_input": "我的持仓市值是 茅台12万、五粮液8万、宁德6万,画个饼图看占比", "expected": {"first_tool": "run_python"}, "bucket": "金融数据"}
+{"case_id": "ts-pyint-neg-001", "category": "mutex_boundary", "user_input": "茅台现在多少钱?", "expected": {"first_tool": "get_stock_quote", "not_tools": ["run_python"]}, "bucket": "金融数据"}
+{"case_id": "ts-pyint-neg-002", "category": "mutex_boundary", "user_input": "茅台的资产负债率是多少?", "expected": {"first_tool": "get_financial_statements", "not_tools": ["run_python"]}, "bucket": "金融数据"}
