@@ -21,6 +21,7 @@ async def test_execute_source_ok_returns_stdout_json(executor: SkillExecutor) ->
         source="result = data['a'] + data['b']", payload={"a": 2, "b": 3}
     )
     assert res.ok is True
+    assert res.stdout_json is not None
     assert res.stdout_json["result"] == 5
     assert res.stdout_json["figures"] == []
 

@@ -16,4 +16,5 @@ async def test_backend_run_code_delegates_to_execute_source(tmp_path: Path) -> N
     # 新契约(wrapper 模式):data 是命名空间变量,赋 result 即可。
     res = await backend.run_code(source="result = data['x'] * 10", data={"x": 4}, timeout_s=10)
     assert res.ok is True
+    assert res.stdout_json is not None
     assert res.stdout_json["result"] == 40

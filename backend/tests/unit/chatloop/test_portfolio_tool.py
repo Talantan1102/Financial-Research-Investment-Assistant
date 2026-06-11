@@ -62,7 +62,7 @@ async def test_positions_serialized_with_market_value() -> None:
         )
     ]
     tool = GetPortfolioPositionsTool(session_factory=_factory(rows))
-    out = await tool.run_with_state(PortfolioPositionsArgs(), state=_State())
+    out = await tool.run_with_state(PortfolioPositionsArgs(), state=_State())  # type: ignore[arg-type]
     assert out["total_count"] == 1
     p = out["positions"][0]
     assert p["ts_code"] == "600519.SH"
@@ -74,6 +74,6 @@ async def test_positions_serialized_with_market_value() -> None:
 @pytest.mark.asyncio
 async def test_positions_empty() -> None:
     tool = GetPortfolioPositionsTool(session_factory=_factory([]))
-    out = await tool.run_with_state(PortfolioPositionsArgs(), state=_State())
+    out = await tool.run_with_state(PortfolioPositionsArgs(), state=_State())  # type: ignore[arg-type]
     assert out["total_count"] == 0
     assert out["positions"] == []

@@ -23,6 +23,7 @@ async def test_data_injected_as_namespace_var(executor: SkillExecutor) -> None:
         source="result = data['x'] + data['y']", payload={"x": 1, "y": 2}
     )
     assert res.ok is True
+    assert res.stdout_json is not None
     assert res.stdout_json["result"] == 3
     assert res.stdout_json["figures"] == []
 
@@ -32,6 +33,7 @@ async def test_user_print_does_not_break_contract(executor: SkillExecutor) -> No
     # 用户 print 调试 → 被吞,不污染契约 JSON
     res = await executor.execute_source(source="print('debugging...'); result = 42", payload={})
     assert res.ok is True
+    assert res.stdout_json is not None
     assert res.stdout_json["result"] == 42
     assert "debugging" in res.stdout_json.get("stdout", "")
 
@@ -60,6 +62,7 @@ async def test_assign_fig_captured_and_themed(executor: SkillExecutor) -> None:
     )
     res = await executor.execute_source(source=code, payload={"names": ["A", "B"], "vals": [3, 5]})
     assert res.ok is True, res.error
+    assert res.stdout_json is not None
     figs = res.stdout_json["figures"]
     assert len(figs) == 1
     assert "data" in figs[0] and "layout" in figs[0]
@@ -76,6 +79,7 @@ async def test_assign_figures_list(executor: SkillExecutor) -> None:
     )
     res = await executor.execute_source(source=code, payload={})
     assert res.ok is True, res.error
+    assert res.stdout_json is not None
     assert len(res.stdout_json["figures"]) == 2
 
 
@@ -89,5 +93,6 @@ async def test_legacy_print_json_fallback(executor: SkillExecutor) -> None:
     )
     res = await executor.execute_source(source=code, payload={})
     assert res.ok is True, res.error
+    assert res.stdout_json is not None
     assert len(res.stdout_json["figures"]) == 1
     assert res.stdout_json["result"] == "legacy"
