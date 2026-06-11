@@ -30,6 +30,7 @@ from app.chatloop.state import (
     apply_results,
     apply_step,
     args_hash_of,
+    turn_summary,
 )
 from app.services.llm_step import StepResult, StepToolCall
 
@@ -462,3 +463,43 @@ def test_args_hash_nested_dict_key_order_independent():
     h1 = args_hash_of({"outer": {"z": 3, "a": 1}, "x": 0})
     h2 = args_hash_of({"x": 0, "outer": {"a": 1, "z": 3}})
     assert h1 == h2
+
+
+# ---------------------------------------------------------------------------
+# ⑦ token 拆分累计 + turn_summary 账单
+# ---------------------------------------------------------------------------
+
+
+def test_apply_step_accumulates_token_breakdown():
+    """apply_step 累计 prompt/completion/cached;turn_summary 算出命中率。"""
+    st = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
+    apply_step(
+        st,
+        _make_step_result(
+            finish_reason="tool_calls",
+            tool_calls=[_make_tool_call()],
+            prompt_tokens=1000,
+            completion_tokens=100,
+            cached_tokens=800,
+        ),
+    )
+    apply_step(
+        st,
+        _make_step_result(
+            finish_reason="stop", prompt_tokens=2000, completion_tokens=50, cached_tokens=1900
+        ),
+    )
+    assert st.prompt_tokens_total == 3000
+    assert st.completion_tokens_total == 150
+    assert st.cached_tokens_total == 2700
+    s = turn_summary(st)
+    assert s["llm_calls"] == 2
+    assert s["prompt_tokens"] == 3000 and s["cached_tokens"] == 2700
+    assert s["cache_hit_rate"] == round(2700 / 3000, 3)
+
+
+def test_turn_summary_zero_prompt_no_div_zero():
+    """无任何 LLM 调用时 cache_hit_rate=0,不除零。"""
+    st = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
+    assert turn_summary(st)["cache_hit_rate"] == 0.0
+    assert turn_summary(st)["llm_calls"] == 0

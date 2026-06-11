@@ -57,6 +57,7 @@ class ContextDeps:
     max_steps: int = 12
     max_cny: float = 0.10
     downgrade_char_threshold: int = 1320
+    oversize_result_char_threshold: int = 4000  # 单条工具结果进窗口的字符上限(超则截断+回指针)
 
     def __post_init__(self) -> None:
         # frozen dataclass 用 object.__setattr__ 也不可改;tuple 是 immutable,

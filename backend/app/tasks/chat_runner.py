@@ -35,7 +35,7 @@ from app.chatloop.context import ContextDeps
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.loop import CancelledByUser, ToolLoop
 from app.chatloop.rebuild import rebuild_context
-from app.chatloop.state import ChatLoopState
+from app.chatloop.state import ChatLoopState, turn_summary
 from app.services.chat_event_bus import ChatEventBus
 from app.services.chat_session_repo import ChatSessionRepo
 from app.services.chat_task_repo import ChatTaskRepo
@@ -543,7 +543,7 @@ async def _emit_escalation(
         await bus.xadd_event(
             sid_uuid,
             task_id,
-            {"type": "done", "stop_reason": done_stop_reason},
+            {"type": "done", "stop_reason": done_stop_reason, **turn_summary(final_state)},
         )
 
 
