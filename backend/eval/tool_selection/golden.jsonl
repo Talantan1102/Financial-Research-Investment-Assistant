@@ -31,3 +31,5 @@
 {"case_id": "ts-pyint-003", "category": "single_tool", "user_input": "我的持仓市值是 茅台12万、五粮液8万、宁德6万,画个饼图看占比", "expected": {"first_tool": "run_python"}, "bucket": "金融数据"}
 {"case_id": "ts-pyint-neg-001", "category": "mutex_boundary", "user_input": "茅台现在多少钱?", "expected": {"first_tool": "get_stock_quote", "not_tools": ["run_python"]}, "bucket": "金融数据"}
 {"case_id": "ts-pyint-neg-002", "category": "mutex_boundary", "user_input": "茅台的资产负债率是多少?", "expected": {"first_tool": "get_financial_statements", "not_tools": ["run_python"]}, "bucket": "金融数据"}
+{"case_id": "ts-dispatch-001", "category": "fan_out", "user_input": "茅台、五粮液、宁德这三只,每只都帮我把现价、最新财报要点、近期新闻凑一块儿,再横向比一比", "expected": {"first_tool": "dispatch_subagents"}, "bucket": "金融数据"}
+{"case_id": "ts-dispatch-neg-001", "category": "mutex_boundary", "user_input": "茅台和五粮液哪个估值低一点?", "expected": {"first_tool": "compare_stocks", "not_tools": ["dispatch_subagents"]}, "bucket": "金融数据"}
