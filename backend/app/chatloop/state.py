@@ -133,6 +133,9 @@ class ChatLoopState(BaseModel):
     step: int = 0
     budget_spent_cny: float = 0.0
     budget_spent_tokens: int = 0
+    prompt_tokens_total: int = 0
+    completion_tokens_total: int = 0
+    cached_tokens_total: int = 0
     burned_signatures: set[str] = Field(default_factory=set)
     halt_reason: str | None = None  # natural|max_steps|budget|spinning|escalate
     escalate_offered: bool = False
@@ -185,6 +188,10 @@ def apply_step(state: ChatLoopState, step_result: StepResult) -> ChatLoopState:
     state.step += 1
     state.budget_spent_tokens += step_result.prompt_tokens + step_result.completion_tokens
     state.budget_spent_cny += step_result.cost_cny
+    # ⑦ token 拆分累计(解锁 KV-cache 命中率 = cached/prompt;budget_spent_tokens 语义不动)
+    state.prompt_tokens_total += step_result.prompt_tokens
+    state.completion_tokens_total += step_result.completion_tokens
+    state.cached_tokens_total += step_result.cached_tokens
 
     if step_result.finish_reason == "stop" and not step_result.tool_calls:
         state.final_response = step_result.content
@@ -227,3 +234,21 @@ def apply_results(
         )
 
     return state
+
+
+def turn_summary(state: ChatLoopState) -> dict[str, Any]:
+    """turn 级账单:成本/调用数/token 拆分/KV-cache 命中率(done 事件 data 用,⑦)。
+
+    cache_hit_rate = cached_tokens / prompt_tokens(prompt=0 时取 0,不除零)。
+    llm_calls = state.step(每圈一次 LLM);tool_calls = 台账条数。
+    """
+    p = state.prompt_tokens_total
+    return {
+        "cost_cny": round(state.budget_spent_cny, 4),
+        "llm_calls": state.step,
+        "tool_calls": len(state.ledger.entries),
+        "prompt_tokens": p,
+        "completion_tokens": state.completion_tokens_total,
+        "cached_tokens": state.cached_tokens_total,
+        "cache_hit_rate": round(state.cached_tokens_total / p, 3) if p else 0.0,
+    }

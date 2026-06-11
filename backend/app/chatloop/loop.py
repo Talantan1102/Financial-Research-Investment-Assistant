@@ -16,7 +16,7 @@ from app.agents.schemas import ToolResult
 from app.chatloop.context import ContextDeps, assemble_context
 from app.chatloop.events import EventType, LoopEvent, SeqCounter
 from app.chatloop.gates import GateConfig, check_gates, filter_burned, update_burned
-from app.chatloop.state import ChatLoopState, apply_results, apply_step
+from app.chatloop.state import ChatLoopState, apply_results, apply_step, turn_summary
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
 
 logger = logging.getLogger(__name__)
@@ -166,6 +166,9 @@ class ToolLoop:
                 cny=state.budget_spent_cny,
                 tokens=state.budget_spent_tokens,
                 cached_tokens=step_result.cached_tokens,
+                step_cost_cny=step_result.cost_cny,
+                step_prompt_tokens=step_result.prompt_tokens,
+                step_completion_tokens=step_result.completion_tokens,
             )
 
             # 9. 闸一:自然停
@@ -175,7 +178,10 @@ class ToolLoop:
                 # 由 runner 在 escalate_request + escalate_packet_draft 之后补发唯一终止 done。
                 # 非 escalate 时 loop 自己发 done(runner 不补,防双 done)。
                 if not state.escalate_offered:
-                    await self._emit("done", state.step, stop_reason=state.halt_reason)
+                    await self._emit(
+                        "done", state.step,
+                        stop_reason=state.halt_reason, **turn_summary(state),
+                    )
                 return state
 
             # 10. 熔断收尾圈竟然还出 tool_calls?协议异常,fail loud
@@ -335,7 +341,7 @@ class ToolLoop:
         # 修法 A:撞闸后若 escalate 也已提议(边角:升级提议后下一圈又撞闸),
         # done 仍交给 runner 唯一补发,避免与升级链路双 done。
         if not state.escalate_offered:
-            await self._emit("done", state.step, stop_reason=reason)
+            await self._emit("done", state.step, stop_reason=reason, **turn_summary(state))
         return state
 
 

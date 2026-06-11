@@ -637,3 +637,33 @@ async def test_partial_burned_merge_order():
     assert not tool_msgs[1]["content"].startswith("[ERROR]")
     # hub 只收到 good
     assert hub.dispatched_calls[0] == [good]
+
+
+# ---------------------------------------------------------------------------
+# ⑦ done 带 turn 汇总 + cost_update 单圈 delta
+# ---------------------------------------------------------------------------
+
+
+async def test_done_event_carries_turn_summary():
+    """直答 turn → done.data 含成本/调用数/命中率;cost_update 含单圈 delta。"""
+    llm = FakeLLM(
+        [_step(content="你好。", finish_reason="stop",
+               prompt_tokens=1000, completion_tokens=50, cached_tokens=800, cost_cny=0.01)]
+    )
+    hub = FakeToolHub(results_per_round=[])
+    emit = _Collector()
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit)
+    state = await loop.run(_make_state())
+
+    done = emit.of("done")[-1]
+    assert done.data["stop_reason"] == "natural"
+    assert done.data["llm_calls"] == state.step == 1
+    assert done.data["tool_calls"] == 0
+    assert done.data["prompt_tokens"] == 1000
+    assert done.data["cached_tokens"] == 800
+    assert done.data["cache_hit_rate"] == round(800 / 1000, 3)
+
+    cost = emit.of("cost_update")[-1]
+    assert cost.data["step_prompt_tokens"] == 1000
+    assert cost.data["step_completion_tokens"] == 50
+    assert cost.data["step_cost_cny"] == 0.01
