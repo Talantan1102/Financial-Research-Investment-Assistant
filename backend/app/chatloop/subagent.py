@@ -8,6 +8,7 @@ dispatch_subagents(禁串门 + 禁递归)。
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal
 
@@ -158,7 +159,9 @@ class SubagentFactory:
                 evidence_refs=[], status="failed", gap_note=f"子循环异常:{exc}",
                 tokens_spent=0, cost_cny=0.0, steps_used=0, tier=CHILD_TIER,
             )
-        status: str = "ok" if final.halt_reason in (None, "natural") else "partial"
+        status: Literal["ok", "partial", "failed"] = (
+            "ok" if final.halt_reason in (None, "natural") else "partial"
+        )
         refs = [e.cache_key for e in final.ledger.entries if e.cache_key]
         gap = None if status == "ok" else f"子循环未自然收尾({final.halt_reason})"
         return SubagentResult(
@@ -192,12 +195,10 @@ class SubagentFactory:
         for r in results:
             parent.budget_spent_cny += r.cost_cny
             parent.budget_spent_tokens += r.tokens_spent
-        # 审计落库(best-effort)
+        # 审计落库(best-effort,留痕非致命)
         if self._audit is not None:
-            try:
+            with contextlib.suppress(Exception):
                 self._audit.record_batch(parent=parent, subtasks=subtasks, results=results)
-            except Exception:  # noqa: BLE001 — 留痕非致命
-                pass
         await self._emit_plain(
             "dispatch_end", parent.step,
             n=n, results=[{"subtask_id": r.subtask_id, "status": r.status} for r in results],
