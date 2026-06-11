@@ -647,8 +647,16 @@ async def test_partial_burned_merge_order():
 async def test_done_event_carries_turn_summary():
     """直答 turn → done.data 含成本/调用数/命中率;cost_update 含单圈 delta。"""
     llm = FakeLLM(
-        [_step(content="你好。", finish_reason="stop",
-               prompt_tokens=1000, completion_tokens=50, cached_tokens=800, cost_cny=0.01)]
+        [
+            _step(
+                content="你好。",
+                finish_reason="stop",
+                prompt_tokens=1000,
+                completion_tokens=50,
+                cached_tokens=800,
+                cost_cny=0.01,
+            )
+        ]
     )
     hub = FakeToolHub(results_per_round=[])
     emit = _Collector()

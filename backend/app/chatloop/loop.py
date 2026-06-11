@@ -179,8 +179,10 @@ class ToolLoop:
                 # 非 escalate 时 loop 自己发 done(runner 不补,防双 done)。
                 if not state.escalate_offered:
                     await self._emit(
-                        "done", state.step,
-                        stop_reason=state.halt_reason, **turn_summary(state),
+                        "done",
+                        state.step,
+                        stop_reason=state.halt_reason,
+                        **turn_summary(state),
                     )
                 return state
 

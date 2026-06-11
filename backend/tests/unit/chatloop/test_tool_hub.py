@@ -658,10 +658,12 @@ async def test_data_tool_under_timeout_succeeds_and_isolates():
     """同圈一快一慢(均不超时)→ 各自独立返回,互不影响(per-call 隔离)。"""
     hub = ToolHub(tool_timeout_s=0.5)
     hub.register_registry(
-        FakeRegistry([
-            FakeTool("fast", sleep=0.0, output={"v": 1}),
-            FakeTool("slowish", sleep=0.05, output={"v": 2}),
-        ])
+        FakeRegistry(
+            [
+                FakeTool("fast", sleep=0.0, output={"v": 1}),
+                FakeTool("slowish", sleep=0.05, output={"v": 2}),
+            ]
+        )
     )
     state = _state()
     r1, r2 = await hub.dispatch(

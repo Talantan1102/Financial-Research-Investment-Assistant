@@ -321,9 +321,7 @@ class ToolHub:
                         return out
                     return await _compute()
 
-                output = await asyncio.wait_for(
-                    _run_data_tool(), timeout=self._tool_timeout_s
-                )
+                output = await asyncio.wait_for(_run_data_tool(), timeout=self._tool_timeout_s)
             else:
                 # InProcessTool(状态变更/本地)豁免超时:直接执行,cache_key 保持 None
                 output = await _compute()

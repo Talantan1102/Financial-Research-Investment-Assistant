@@ -473,10 +473,22 @@ def test_args_hash_nested_dict_key_order_independent():
 def test_apply_step_accumulates_token_breakdown():
     """apply_step 累计 prompt/completion/cached;turn_summary 算出命中率。"""
     st = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
-    apply_step(st, _make_step_result(finish_reason="tool_calls", tool_calls=[_make_tool_call()],
-                                     prompt_tokens=1000, completion_tokens=100, cached_tokens=800))
-    apply_step(st, _make_step_result(finish_reason="stop",
-                                     prompt_tokens=2000, completion_tokens=50, cached_tokens=1900))
+    apply_step(
+        st,
+        _make_step_result(
+            finish_reason="tool_calls",
+            tool_calls=[_make_tool_call()],
+            prompt_tokens=1000,
+            completion_tokens=100,
+            cached_tokens=800,
+        ),
+    )
+    apply_step(
+        st,
+        _make_step_result(
+            finish_reason="stop", prompt_tokens=2000, completion_tokens=50, cached_tokens=1900
+        ),
+    )
     assert st.prompt_tokens_total == 3000
     assert st.completion_tokens_total == 150
     assert st.cached_tokens_total == 2700
