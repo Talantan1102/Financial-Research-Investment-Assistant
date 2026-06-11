@@ -28,7 +28,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.chatloop.gates import GateConfig, check_gates, filter_burned, update_burned
+from app.chatloop.gates import (
+    GateConfig,
+    budget_margin_exhausted,
+    check_gates,
+    filter_burned,
+    update_burned,
+)
 from app.chatloop.state import ChatLoopState, args_hash_of
 from app.services.llm_step import StepToolCall
 
@@ -371,3 +377,64 @@ def test_update_burned_idempotent():
     # set 天然去重,只存在一次
     count = sum(1 for s in state.burned_signatures if s == sig)
     assert count == 1
+
+
+# ---------------------------------------------------------------------------
+# ④(a) repeated_failures — 跨签名连续失败
+# ---------------------------------------------------------------------------
+
+
+def test_check_gates_repeated_failures_across_signatures():
+    """换参数硬试:5 圈签名各不同(避开 spinning/burn),连续失败 → repeated_failures。"""
+    state = _make_state(step=5)
+    for i in range(5):
+        state.ledger.record(
+            step=i + 1, tool_name="query_kb", args={"symbol": f"x{i}"}, digest="err", success=False
+        )
+    cfg = _cfg(max_consecutive_failures=5)
+    assert check_gates(state, cfg) == "repeated_failures"
+
+
+def test_check_gates_repeated_failures_reset_on_success():
+    state = _make_state(step=5)
+    for i in range(4):
+        state.ledger.record(
+            step=i + 1, tool_name="query_kb", args={"symbol": f"x{i}"}, digest="err", success=False
+        )
+    state.ledger.record(
+        step=5, tool_name="query_kb", args={"symbol": "ok"}, digest="ok", success=True
+    )
+    cfg = _cfg(max_consecutive_failures=5)
+    assert check_gates(state, cfg) is None
+
+
+def test_check_gates_repeated_failures_below_threshold():
+    state = _make_state(step=4)
+    for i in range(4):
+        state.ledger.record(
+            step=i + 1, tool_name="query_kb", args={"symbol": f"x{i}"}, digest="err", success=False
+        )
+    cfg = _cfg(max_consecutive_failures=5)
+    assert check_gates(state, cfg) is None
+
+
+# ---------------------------------------------------------------------------
+# ④(b) budget_margin_exhausted — 分发前预算余量判定
+# ---------------------------------------------------------------------------
+
+
+def test_budget_margin_exhausted_by_cny():
+    # 上限 0.10,余量阈值 = 0.10*0.2 = 0.02;已花 0.085 → 剩 0.015 < 0.02 → True
+    state = _make_state(budget_cny=0.085)
+    assert budget_margin_exhausted(state, _cfg(max_cny=0.10)) is True
+
+
+def test_budget_margin_exhausted_by_tokens():
+    # 上限 120000,阈值 24000;已花 119000 → 剩 1000 < 24000 → True
+    state = _make_state(budget_tokens=119_000)
+    assert budget_margin_exhausted(state, _cfg(max_tokens=120_000)) is True
+
+
+def test_budget_margin_sufficient():
+    state = _make_state(budget_cny=0.05, budget_tokens=50_000)
+    assert budget_margin_exhausted(state, _cfg()) is False

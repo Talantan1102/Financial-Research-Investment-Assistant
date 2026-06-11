@@ -150,7 +150,7 @@ class ChatLoopState(BaseModel):
     completion_tokens_total: int = 0
     cached_tokens_total: int = 0
     burned_signatures: set[str] = Field(default_factory=set)
-    halt_reason: str | None = None  # natural|max_steps|budget|spinning|escalate
+    halt_reason: str | None = None  # natural|max_steps|budget|spinning|repeated_failures|escalate
     escalate_offered: bool = False
     escalate_reason: str | None = None
     tool_choice: str = "auto"  # 升级熔断时被置 "none"(spec § 3.5)

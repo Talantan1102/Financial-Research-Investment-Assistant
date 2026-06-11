@@ -18,6 +18,8 @@ class GateConfig:
     max_cny: float = 0.10  # 预算闸:每 turn 金额
     max_tokens: int = 120_000  # 预算闸:每 turn token
     burn_threshold: int = 3  # 同签名失败 N 次后烧掉
+    max_consecutive_failures: int = 5  # 跨签名尾部连续失败 N 次 → repeated_failures(乱试)
+    budget_dispatch_margin_ratio: float = 0.2  # 分发前预检:剩余低于上限此比例 → 跳过整轮工具
 
 
 def check_gates(state: ChatLoopState, cfg: GateConfig) -> str | None:
@@ -33,6 +35,9 @@ def check_gates(state: ChatLoopState, cfg: GateConfig) -> str | None:
         prev = state.ledger.signature_set(state.step - 1)
         if cur and cur == prev:
             return "spinning"
+    if state.ledger.trailing_failure_count() >= cfg.max_consecutive_failures:
+        # 跨签名连续失败(换参数硬试):打转闸/烧签名都漏检的乱试模式
+        return "repeated_failures"
     return None
 
 
@@ -74,3 +79,17 @@ def update_burned(state: ChatLoopState, cfg: GateConfig) -> None:
     for sig in all_sigs:
         if state.ledger.fail_count(sig) >= cfg.burn_threshold:
             state.burned_signatures.add(sig)
+
+
+def budget_margin_exhausted(state: ChatLoopState, cfg: GateConfig) -> bool:
+    """分发前预检:剩余预算(cny 或 token 任一)低于安全余量 → True。
+
+    用在"本圈 LLM 成本已入账、即将分发工具"的点上:据最新预算决定是否还要再起
+    一轮工具(工具执行 + 又一轮 LLM)。预留的余量(上限 * ratio)给收尾那次 LLM 调用。
+    """
+    cny_remaining = cfg.max_cny - state.budget_spent_cny
+    tokens_remaining = cfg.max_tokens - state.budget_spent_tokens
+    return (
+        cny_remaining < cfg.max_cny * cfg.budget_dispatch_margin_ratio
+        or tokens_remaining < cfg.max_tokens * cfg.budget_dispatch_margin_ratio
+    )
