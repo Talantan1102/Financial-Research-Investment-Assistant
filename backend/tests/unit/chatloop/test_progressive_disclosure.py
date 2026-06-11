@@ -112,8 +112,8 @@ def test_tool_docs_count_is_16():
 def test_core_and_deferred_partition_no_overlap():
     core = set(CORE_TOOLS)
     deferred = set(DEFERRED_TOOLS)
-    assert len(CORE_TOOLS) == 7
-    assert len(DEFERRED_TOOLS) == 9  # +dispatch_subagents
+    assert len(CORE_TOOLS) == 8  # +dispatch_subagents(2026-06-11 e2e 实测定为核心)
+    assert len(DEFERRED_TOOLS) == 8
     assert core & deferred == set()
     assert core | deferred == set(TOOL_DOCS.keys())
 

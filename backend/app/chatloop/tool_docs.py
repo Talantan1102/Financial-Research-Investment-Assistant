@@ -331,8 +331,13 @@ TOOL_DOCS: dict[str, ToolDoc] = {
     ),
     "dispatch_subagents": ToolDoc(
         name="dispatch_subagents",
-        group="deferred",
-        brief="把一组互不依赖、各自只用查的子任务并发派给只读子助手并收回摘要。多标的对比/多源检索/逐只持仓体检时用。",
+        # core 组:dispatch 的正确调用依赖 subtasks 数组项的结构(goal/target/output_hint/
+        # boundary)。该结构只能经"常驻完整 schema"传达 —— 放 deferred 组时模型只看到 thin
+        # 条目(subtasks:array,无项结构),既不知怎么填、又因不显眼而默认走串行单工具
+        # (实测浏览器 e2e:deferred 下模型逐只串行查、从不扇出)。故升 core,项结构随
+        # 完整 schema 常驻可见(spec §14 开放问题"核心 vs 延迟"由 e2e 实测定为核心)。
+        group="core",
+        brief="多标的横向对比/多源广度检索/逐只持仓体检时,把这些互不依赖的只读子任务并发派给子助手分头查、收回摘要由你综合(比自己逐只串行快)。",
         doc=(
             "把一组互不依赖、各自只用查的子任务一次性并发派给若干只读子助手,"
             "收回每个子助手的结论摘要,由你综合成最终回答。\n"
@@ -352,7 +357,7 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "硬约束:子助手只读、看不到主对话、互不通信;超过 8 个请分批派;"
             "子助手不会再派子助手、也不会升级深度研究。"
         ),
-        thin_required={"subtasks": "array"},
+        thin_required=None,  # core 组:常驻完整 schema,不走 thin 条目
     ),
     "run_python": ToolDoc(
         name="run_python",
@@ -400,6 +405,7 @@ CORE_TOOLS: list[str] = [
     "load_skill",
     "offer_deep_research",
     "run_python",
+    "dispatch_subagents",
 ]
 
 DEFERRED_TOOLS: list[str] = [
@@ -411,7 +417,6 @@ DEFERRED_TOOLS: list[str] = [
     "memory_write",
     "run_skill_script",
     "read_cached_result",
-    "dispatch_subagents",
 ]
 
 
