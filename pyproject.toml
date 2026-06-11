@@ -95,6 +95,12 @@ kb = [
     "langchain-text-splitters>=0.3.0",
 ]
 
+# 代码解释器(run_python)绘图依赖 —— numpy/pandas 已在 base,只需 plotly。
+# 装:pip install -e '.[code-interpreter]'(国内走清华镜像 -i https://pypi.tuna.tsinghua.edu.cn/simple)
+code-interpreter = [
+    "plotly>=5.17",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
