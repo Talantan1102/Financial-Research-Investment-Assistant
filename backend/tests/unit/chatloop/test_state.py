@@ -503,3 +503,29 @@ def test_turn_summary_zero_prompt_no_div_zero():
     st = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
     assert turn_summary(st)["cache_hit_rate"] == 0.0
     assert turn_summary(st)["llm_calls"] == 0
+
+
+# ---------------------------------------------------------------------------
+# ④(a) trailing_failure_count — 跨签名连续失败计数
+# ---------------------------------------------------------------------------
+
+
+def test_trailing_failure_count_counts_tail_failures():
+    ledger = ToolLedger()
+    ledger.record(step=1, tool_name="a", args={"x": 1}, digest="", success=False)
+    ledger.record(step=2, tool_name="a", args={"x": 2}, digest="", success=True)
+    ledger.record(step=3, tool_name="a", args={"x": 3}, digest="", success=False)
+    ledger.record(step=4, tool_name="a", args={"x": 4}, digest="", success=False)
+    # 末尾两条失败,中间成功截断计数
+    assert ledger.trailing_failure_count() == 2
+
+
+def test_trailing_failure_count_zero_when_tail_success():
+    ledger = ToolLedger()
+    ledger.record(step=1, tool_name="a", args={"x": 1}, digest="", success=False)
+    ledger.record(step=2, tool_name="a", args={"x": 2}, digest="", success=True)
+    assert ledger.trailing_failure_count() == 0
+
+
+def test_trailing_failure_count_empty_ledger():
+    assert ToolLedger().trailing_failure_count() == 0
