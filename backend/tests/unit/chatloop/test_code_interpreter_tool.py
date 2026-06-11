@@ -23,15 +23,25 @@ class _FakeBackend:
 
 def _ok(stdout: dict[str, Any]) -> SkillExecutionResult:
     return SkillExecutionResult(
-        ok=True, stdout_json=stdout, stderr_text="", exit_code=0,
-        elapsed_s=0.1, skill_name="_interpreter", script_path="scripts/interp.py",
+        ok=True,
+        stdout_json=stdout,
+        stderr_text="",
+        exit_code=0,
+        elapsed_s=0.1,
+        skill_name="_interpreter",
+        script_path="scripts/interp.py",
     )
 
 
 def _err(kind: str, stderr: str) -> SkillExecutionResult:
     return SkillExecutionResult(
-        ok=False, stdout_json=None, stderr_text=stderr, exit_code=1,
-        elapsed_s=0.1, skill_name="_interpreter", script_path="scripts/interp.py",
+        ok=False,
+        stdout_json=None,
+        stderr_text=stderr,
+        exit_code=1,
+        elapsed_s=0.1,
+        skill_name="_interpreter",
+        script_path="scripts/interp.py",
         error=SkillExecutionError(kind=kind, message="x"),
     )
 
@@ -40,7 +50,9 @@ def _err(kind: str, stderr: str) -> SkillExecutionResult:
 async def test_ok_returns_result_and_figures() -> None:
     backend = _FakeBackend(_ok({"result": {"corr": 0.83}, "figures": [{"data": [], "layout": {}}]}))
     tool = CodeInterpreterTool(backend=backend)
-    out = await tool.run_with_state(CodeInterpreterArgs(code="print('x')", data={"k": 1}), state=None)
+    out = await tool.run_with_state(
+        CodeInterpreterArgs(code="print('x')", data={"k": 1}), state=None
+    )
     assert out["result"] == {"corr": 0.83}
     assert out["figures"] == [{"data": [], "layout": {}}]
     assert backend.calls[0]["data"] == {"k": 1}
