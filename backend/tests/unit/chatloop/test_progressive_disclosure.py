@@ -104,15 +104,16 @@ def _call(name: str, args: dict) -> StepToolCall:
 # ---------------------------------------------------------------------------
 
 
-def test_tool_docs_count_is_15():
-    assert len(TOOL_DOCS) == 15
+def test_tool_docs_count_is_16():
+    # 16 = 原 15 + dispatch_subagents(2026-06-11 chat 内子 agent 派发,进延迟组)
+    assert len(TOOL_DOCS) == 16
 
 
-def test_core_and_deferred_partition_15_no_overlap():
+def test_core_and_deferred_partition_no_overlap():
     core = set(CORE_TOOLS)
     deferred = set(DEFERRED_TOOLS)
     assert len(CORE_TOOLS) == 7
-    assert len(DEFERRED_TOOLS) == 8
+    assert len(DEFERRED_TOOLS) == 9  # +dispatch_subagents
     assert core & deferred == set()
     assert core | deferred == set(TOOL_DOCS.keys())
 
@@ -218,9 +219,13 @@ def test_thin_schema_no_required_tool_has_empty_properties():
 
 
 def test_search_docs_compare_in_top3():
+    # 对比类查询应召回对比能力工具。2026-06-11 起 dispatch_subagents(多标的并发扇出)
+    # 与 compare_stocks(2-5 只内联对比)同为对比工具,二者命中其一即满足召回意图。
     results = search_docs("对比 茅台 五粮液", k=3)
     names = [d.name for d in results]
-    assert "compare_stocks" in names
+    assert {"compare_stocks", "dispatch_subagents"} & set(names), (
+        f"对比类查询未召回任何对比工具: {names}"
+    )
 
 
 def test_search_docs_memory_preference():
@@ -256,8 +261,8 @@ async def test_schemas_for_llm_groups_core_full_deferred_thin_search_last():
     schemas = hub.schemas_for_llm()
     names = [s["function"]["name"] for s in schemas]
 
-    # 总数 = 15 + search_tools = 16
-    assert len(names) == 16
+    # 总数 = 16 + search_tools = 17(+dispatch_subagents)
+    assert len(names) == 17
     # search_tools 殿后
     assert names[-1] == "search_tools"
     # core 6 在前(顺序 = CORE_TOOLS)

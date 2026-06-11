@@ -329,6 +329,31 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         ),
         thin_required={"ref": "string"},
     ),
+    "dispatch_subagents": ToolDoc(
+        name="dispatch_subagents",
+        group="deferred",
+        brief="把一组互不依赖、各自只用查的子任务并发派给只读子助手并收回摘要。多标的对比/多源检索/逐只持仓体检时用。",
+        doc=(
+            "把一组互不依赖、各自只用查的子任务一次性并发派给若干只读子助手,"
+            "收回每个子助手的结论摘要,由你综合成最终回答。\n"
+            "何时用:多标的横向对比(茅台五粮液宁德比一比)、多信息源广度检索"
+            "(KB+新闻+泛网)、逐只持仓体检——这类'N 个同构独立的只读小任务'。\n"
+            "何时不用:① 单个事实查询(直接调对应工具即可,别扇出);"
+            "② 子任务之间有先后依赖(B 要先看 A 的产出,如先估值再辩论)——"
+            "那种留给主循环逐圈串行,别派;③ 要做整份尽调 → 改用 offer_deep_research。\n"
+            "参数:\n"
+            "  reason(str,必填)—— 为什么要扇出的一句话。\n"
+            "  subtasks(array,必填)—— 子任务列表(最多 8 个),每项:\n"
+            "    goal(str,必填)、target(str,可选,ts_code/源标识)、"
+            "output_hint(str,可选,想要的产出形状)、boundary(str,可选,边界)。\n"
+            "示例:dispatch_subagents(reason='对比三只白酒', subtasks=["
+            "{'goal':'查茅台现价与营收增速','target':'600519.SH'},"
+            "{'goal':'查五粮液现价与营收增速','target':'000858.SZ'}])。\n"
+            "硬约束:子助手只读、看不到主对话、互不通信;超过 8 个请分批派;"
+            "子助手不会再派子助手、也不会升级深度研究。"
+        ),
+        thin_required={"subtasks": "array"},
+    ),
     "run_python": ToolDoc(
         name="run_python",
         # core 组:run_python 的正确调用依赖 code 参数里的输出契约(必须 print 一个含
@@ -386,6 +411,7 @@ DEFERRED_TOOLS: list[str] = [
     "memory_write",
     "run_skill_script",
     "read_cached_result",
+    "dispatch_subagents",
 ]
 
 
