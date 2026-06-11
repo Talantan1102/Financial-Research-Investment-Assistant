@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
 import { CostMeter } from './CostMeter'
+import { DispatchLanes } from './DispatchLanes'
 import { InputArea } from './InputArea'
 import { MessageList } from './MessageList'
 import { StreamingIndicator } from './StreamingIndicator'
@@ -140,6 +141,7 @@ export function ChatPane({
               onRetry={sse.retryTask}
             />
           )}
+          <DispatchLanes />
         </div>
         <StreamingIndicator />
         {snap.halt_reason ? (

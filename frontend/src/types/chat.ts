@@ -73,11 +73,16 @@ export interface ToolCallEvent extends BaseEvent {
   tool?: string
   tool_name?: string
   args?: Record<string, unknown>
+  // dispatch_subagents: child-loop tool events carry lane=subtask_id.
+  lane?: string
 }
 
 export interface ToolStartEvent extends BaseEvent {
   type: 'tool_start'
   tool: string
+  // dispatch_subagents: child-loop tool events carry lane=subtask_id so the
+  // frontend can route progress into the matching DispatchLane.
+  lane?: string
 }
 
 export interface ToolEndEvent extends BaseEvent {
@@ -85,6 +90,7 @@ export interface ToolEndEvent extends BaseEvent {
   tool: string
   digest?: string
   cached?: boolean
+  lane?: string
 }
 
 export interface ToolErrorEvent extends BaseEvent {
@@ -92,6 +98,22 @@ export interface ToolErrorEvent extends BaseEvent {
   tool: string
   error: string
   hint?: string
+  lane?: string
+}
+
+// dispatch_subagents fan-out lifecycle (spec 2026-06-11 §5.1). dispatch_start
+// announces the N child subtasks; dispatch_end carries each child's terminal
+// status. Child-loop tool events in between carry lane=subtask_id.
+export interface DispatchStartEvent extends BaseEvent {
+  type: 'dispatch_start'
+  n: number
+  subtasks: { subtask_id: string; goal: string }[]
+}
+
+export interface DispatchEndEvent extends BaseEvent {
+  type: 'dispatch_end'
+  n: number
+  results: { subtask_id: string; status: 'ok' | 'partial' | 'failed' }[]
 }
 
 // chatloop run_python 产图:每张 figure 一帧,旁路渲染成独立 chart 消息。
@@ -198,6 +220,8 @@ export type SSEEvent =
   | ToolStartEvent
   | ToolEndEvent
   | ToolErrorEvent
+  | DispatchStartEvent
+  | DispatchEndEvent
   | ChartEvent
   | SteerMergedEvent
   | LoopHaltEvent

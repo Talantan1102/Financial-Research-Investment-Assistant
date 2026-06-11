@@ -13,11 +13,14 @@ import type {
   ChatMessage,
   ChartEvent,
   CostUpdateEvent,
+  DispatchEndEvent,
+  DispatchStartEvent,
   DoneEvent,
   ErrorEvent,
   LoopHaltEvent,
   SSEEvent,
   StepStartEvent,
+  ToolEndEvent,
   TokenEvent,
 } from '@/types/chat'
 
@@ -34,6 +37,16 @@ export interface CostBreakdown {
 export interface LoopProgress {
   step: number
   max_steps: number
+}
+
+// dispatch_subagents fan-out: one lane per child subtask. dispatch_start seeds
+// the lanes (status=running, toolCount=0); each child tool_end{lane} increments
+// the matching lane's toolCount; dispatch_end stamps each lane's terminal status.
+export interface DispatchLane {
+  subtask_id: string
+  goal: string
+  toolCount: number
+  status: 'running' | 'ok' | 'partial' | 'failed'
 }
 
 export type StreamingPhase =
@@ -67,6 +80,9 @@ export interface CurrentChatState {
   // ("已达执行上限(...)") and is kept after done so the banner persists.
   loop_progress: LoopProgress | null
   halt_reason: string | null
+  // dispatch_subagents fan-out progress — N parallel child-loop lanes. Empty
+  // when no dispatch is in flight; reset on every cleanup path.
+  dispatchLanes: DispatchLane[]
 }
 
 const INITIAL: CurrentChatState = {
@@ -84,6 +100,7 @@ const INITIAL: CurrentChatState = {
   streaming_phase_label: undefined,
   loop_progress: null,
   halt_reason: null,
+  dispatchLanes: [],
 }
 
 export const currentChatState = proxy<CurrentChatState>({ ...INITIAL })
@@ -119,6 +136,7 @@ export const currentChatActions = {
     currentChatState.errorMessage = null
     currentChatState.loop_progress = null
     currentChatState.halt_reason = null
+    currentChatState.dispatchLanes = []
   },
   setActiveTaskId(taskId: string | null) {
     currentChatState.active_task_id = taskId
@@ -131,6 +149,8 @@ export const currentChatActions = {
     // fresh turn — clear prior loop progress + halt banner
     currentChatState.loop_progress = null
     currentChatState.halt_reason = null
+    // fresh turn — drop any prior fan-out lanes
+    currentChatState.dispatchLanes = []
   },
   resumeStreaming() {
     // Like beginStreaming but preserves streamingDraft for F6 reconnect continuity
@@ -186,10 +206,36 @@ export const currentChatActions = {
         currentChatState.streaming_phase = 'tool'
         currentChatState.toolEvents.push(ev)
         break
-      case 'tool_end':
+      case 'tool_end': {
+        // dispatch_subagents: child-loop tool_end carries lane=subtask_id →
+        // bump the matching lane's取数 counter.
+        const laneId = (ev as ToolEndEvent).lane
+        if (laneId) {
+          const lane = currentChatState.dispatchLanes.find((l) => l.subtask_id === laneId)
+          if (lane) lane.toolCount += 1
+        }
         currentChatState.toolEvents.push(ev)
         break
+      }
       case 'tool_error':
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'dispatch_start':
+        currentChatState.dispatchLanes = (ev as DispatchStartEvent).subtasks.map((s) => ({
+          subtask_id: s.subtask_id,
+          goal: s.goal,
+          toolCount: 0,
+          status: 'running',
+        }))
+        currentChatState.toolEvents.push(ev)
+        break
+      case 'dispatch_end':
+        for (const r of (ev as DispatchEndEvent).results) {
+          const lane = currentChatState.dispatchLanes.find(
+            (l) => l.subtask_id === r.subtask_id,
+          )
+          if (lane) lane.status = r.status
+        }
         currentChatState.toolEvents.push(ev)
         break
       case 'chart': {
@@ -274,6 +320,7 @@ export const currentChatActions = {
     currentChatState.errorMessage = null
     currentChatState.loop_progress = null
     currentChatState.halt_reason = null
+    currentChatState.dispatchLanes = []
   },
   setStreamingPhase(phase: StreamingPhase, label?: string) {
     currentChatState.streaming_phase = phase
@@ -294,5 +341,6 @@ export const currentChatActions = {
     currentChatState.streaming_phase_label = INITIAL.streaming_phase_label
     currentChatState.loop_progress = INITIAL.loop_progress
     currentChatState.halt_reason = INITIAL.halt_reason
+    currentChatState.dispatchLanes = []
   },
 }

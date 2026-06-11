@@ -35,6 +35,7 @@ from .news import BiddingInfo, IndustryNews, NewsCollectionTask
 from .position import Position
 from .research import ResearchCheckpoint
 from .research_report import ResearchReport
+from .subagent_dispatch import SubagentDispatchRun  # noqa: F401
 from .tool_result_cache import ToolResultCacheRow  # noqa: F401
 from .trade import Trade, TradeType
 from .user import User
@@ -73,4 +74,6 @@ __all__ = [
     "ChatMemoryWorkingBlock",
     # c5 memory Plan 5 audit
     "ChatMemoryCalibrationRun",
+    # chat 子 agent 派发审计(2026-06-11)
+    "SubagentDispatchRun",
 ]
