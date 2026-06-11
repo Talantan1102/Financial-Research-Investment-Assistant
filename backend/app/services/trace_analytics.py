@@ -38,6 +38,7 @@ SELECT
 FROM trace_spans
 WHERE started_at >= now() - (:interval)::interval
   AND (name = 'LLMService.stream_step' OR name LIKE 'tool:%')
+  AND request_id NOT LIKE '%::sub::%'
 """)
 
 _CACHE_SQL = text("""
@@ -45,6 +46,7 @@ SELECT COALESCE(sum((metadata->>'cached_tokens')::numeric), 0) AS cached,
        COALESCE(sum((metadata->>'prompt_tokens')::numeric), 0) AS prompt
 FROM trace_spans
 WHERE name = 'LLMService.stream_step' AND started_at >= now() - (:interval)::interval
+  AND request_id NOT LIKE '%::sub::%'
 """)
 
 _TURN_SQL = text("""
@@ -57,6 +59,7 @@ WITH per_req AS (
   FROM trace_spans
   WHERE started_at >= now() - (:interval)::interval
     AND (name = 'LLMService.stream_step' OR name LIKE 'tool:%')
+    AND request_id NOT LIKE '%::sub::%'
   GROUP BY request_id
 )
 SELECT COALESCE(avg(cost), 0) AS avg_cost,

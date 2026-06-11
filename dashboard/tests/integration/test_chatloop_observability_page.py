@@ -48,3 +48,15 @@ def test_page_degrades_when_backend_down(monkeypatch) -> None:
     resp = TestClient(app).get("/eval/chatloop-observability")
     assert resp.status_code == 200
     assert "未连接" in resp.text or "暂无数据" in resp.text
+
+
+def test_page_no_500_when_all_p95_zero(monkeypatch) -> None:
+    # 工具调用全是缓存/去重命中(p95_ms=0)时不得 div-by-zero 500。
+    fake = {
+        **_FAKE,
+        "tool_latency": [{**_FAKE["tool_latency"][0], "p50_ms": 0, "p95_ms": 0, "max_ms": 0}],
+    }
+    monkeypatch.setattr(obs, "load_aggregates", lambda *a, **k: fake)
+    resp = TestClient(app).get("/eval/chatloop-observability")
+    assert resp.status_code == 200
+    assert "get_quote" in resp.text

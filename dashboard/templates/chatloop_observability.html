@@ -38,7 +38,7 @@
     </div>
 
     <h2>最慢工具(按 p95 排序)</h2>
-    {% set maxp95 = (agg.tool_latency | map(attribute='p95_ms') | list | max) if agg.tool_latency else 1 %}
+    {% set maxp95 = ((agg.tool_latency | map(attribute='p95_ms') | list | max) or 1) if agg.tool_latency else 1 %}
     <table>
       <tr><th>工具</th><th>调用数</th><th>p50</th><th>p95</th><th>p95 分布</th><th>成功率</th><th>缓存率</th></tr>
       {% for t in agg.tool_latency %}

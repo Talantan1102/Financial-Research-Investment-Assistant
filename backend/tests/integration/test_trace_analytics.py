@@ -83,3 +83,28 @@ def test_invalid_window_raises(db_session) -> None:
         raise AssertionError("should raise")
     except ValueError:
         pass
+
+
+def test_subagent_spans_excluded_from_turn_aggregates(db_session) -> None:
+    # 一个主 turn(r1)+ 一个子循环(r1::sub::sub-0)的模型 span。
+    _span(
+        db_session,
+        span_id="m1",
+        request_id="r1",
+        name="LLMService.stream_step",
+        metadata={"prompt_tokens": 100, "cached_tokens": 0, "cost_cny": 0.01, "latency_ms": 2000},
+    )
+    _span(
+        db_session,
+        span_id="m2",
+        request_id="r1::sub::sub-0",
+        name="LLMService.stream_step",
+        metadata={"prompt_tokens": 50, "cached_tokens": 0, "cost_cny": 0.005, "latency_ms": 500},
+    )
+    db_session.flush()
+
+    agg = ChatloopTraceAnalytics(lambda: nullcontext(db_session)).aggregate("7d")
+
+    # 子循环不算独立 turn,也不并入模型耗时聚合。
+    assert agg.turn_count == 1
+    assert round(agg.model_ms) == 2000
