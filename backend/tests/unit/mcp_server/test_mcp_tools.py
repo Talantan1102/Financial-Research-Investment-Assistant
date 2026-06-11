@@ -41,6 +41,7 @@ def test_build_server_lists_exactly_8_tools() -> None:
         "web_search",
         "kb_search",
         "compare_stocks",
+        "get_daily",
     }
     assert names == expected, f"Expected {expected}, got {names}"
 
@@ -58,6 +59,7 @@ def test_each_tool_module_exports_tool_def_and_handle() -> None:
         "app.mcp_server.tools.web_search",
         "app.mcp_server.tools.kb_search",
         "app.mcp_server.tools.compare_stocks",
+        "app.mcp_server.tools.get_daily",
     ]
     for mod_path in modules:
         mod = importlib.import_module(mod_path)

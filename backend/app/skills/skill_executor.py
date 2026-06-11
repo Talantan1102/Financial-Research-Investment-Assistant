@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import os
@@ -72,6 +73,83 @@ def _minimal_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k in _ENV_WHITELIST}
     env.update(_SANDBOX_THREAD_ENV)
     return env
+
+
+# 代码解释器(run_python)的可信 wrapper(spec § 3.2)。execute_source 把用户码写进
+# user_code.py,把本 wrapper 写进 interp.py 跑。wrapper 做四件事:
+#   1. 设默认 plotly 模板 'ios' —— 用户建的图自动套统一风格(固定画图风格);
+#   2. 把 data 注入命名空间 —— 用户码直接用 `data` 变量(不用读 stdin);
+#   3. 捕获用户 print 调试输出 —— 不污染 stdout(否则破坏契约 JSON);
+#   4. 跑完从命名空间抓 fig/figures/result,序列化成契约 JSON;三重兜底见 spec § 3.3。
+# wrapper 本身是可信代码(不经 AST 扫描),故可用 exec/open;用户码仍被 scan 禁掉这些。
+# __IOS_B64__ / __DATA_B64__ 由 execute_source base64 注入(base64 纯 ASCII,免一切引号坑)。
+_WRAPPER_SRC: Final[str] = """\
+import sys, io, json, base64
+
+_IOS_LAYOUT = json.loads(base64.b64decode("__IOS_B64__").decode("utf-8"))
+_DATA = json.loads(base64.b64decode("__DATA_B64__").decode("utf-8"))
+
+# 1. 套 iOS 默认模板(plotly 缺失则跳过,纯计算仍可跑)
+try:
+    import plotly.io as _pio
+    import plotly.graph_objects as _go
+    _pio.templates["ios"] = _go.layout.Template(layout=_IOS_LAYOUT)
+    _pio.templates.default = "ios"
+except Exception:
+    pass
+
+# 2. data 注入 + 3. 捕获用户 stdout
+_ns = {"data": _DATA}
+_buf = io.StringIO()
+_real = sys.stdout
+sys.stdout = _buf
+try:
+    with open("user_code.py", "r", encoding="utf-8") as _f:
+        _src = _f.read()
+    exec(compile(_src, "user_code.py", "exec"), _ns)
+finally:
+    sys.stdout = _real
+
+
+def _figd(f):
+    if isinstance(f, dict):
+        return f
+    if hasattr(f, "to_dict"):
+        return f.to_dict()
+    return None
+
+
+# 4. 抓 fig/figures/result
+_figs = _ns.get("figures")
+if _figs is None and "fig" in _ns:
+    _figs = [_ns["fig"]]
+_result = _ns.get("result")
+
+# 三重兜底:命名空间没图 → 解析被吞 stdout 里最后一个含 figures 的合法 JSON(旧式 print 契约)
+if not _figs:
+    for _line in reversed(_buf.getvalue().splitlines()):
+        _line = _line.strip()
+        if not _line.startswith("{"):
+            continue
+        try:
+            _obj = json.loads(_line)
+        except Exception:
+            continue
+        if isinstance(_obj, dict) and _obj.get("figures"):
+            _figs = _obj.get("figures")
+            if _result is None:
+                _result = _obj.get("result")
+            break
+
+_out = []
+for _f in (_figs or []):
+    _d = _figd(_f)
+    if _d is not None:
+        _out.append(_d)
+
+print(json.dumps({"result": _result, "figures": _out, "stdout": _buf.getvalue()[:500]},
+                 default=str, ensure_ascii=False))
+"""
 
 
 class SkillExecutor:
@@ -149,12 +227,14 @@ class SkillExecutor:
         payload: dict[str, Any],
         timeout_s: int | None = None,
     ) -> SkillExecutionResult:
-        """执行 LLM 当场写的内联源码(代码解释器用)。
+        """执行 LLM 当场写的内联源码(代码解释器 run_python 用)。
 
-        复用 execute() 的全套沙箱(scan_script_safety / rlimit / 断网 env 白名单 /
-        workdir / stdin-payload / stdout-JSON / 超时 SIGKILL),区别只在源从字符串来:
-        先 AST 扫描内联源码,再写进一次性 workdir 的临时 .py,走同一个 _run_subprocess。
+        wrapper 模式(spec § 3):scan 用户码 → 写 user_code.py → 写可信 wrapper(interp.py)
+        → 跑 wrapper。wrapper 自动:套 iOS plotly 主题 / 注入 data 变量 / 捕获用户 print /
+        从命名空间抓 fig|figures|result 序列化(三重兜底)。模型不用记 print(JSON) 契约。
+        沙箱(scan_script_safety / rlimit / 断网 env / workdir / 超时 SIGKILL)全复用。
         """
+        from app.skills.plotly_theme import ios_template_layout  # noqa: PLC0415
         from app.skills.skill_safety import SafetyScanError, scan_script_safety  # noqa: PLC0415
 
         timeout = min(timeout_s or self._default_timeout_s, self._max_timeout_s)
@@ -162,6 +242,7 @@ class SkillExecutor:
         # 标识字段(SkillScriptRef 校验 script_path 必须以 'scripts/' 开头)。
         ref = SkillScriptRef(skill_name="_interpreter", script_path="scripts/interp.py")
 
+        # 只扫**用户码**(open/subprocess/os.popen… 仍禁);wrapper 是可信代码不扫。
         try:
             scan_script_safety(source)
         except SafetyScanError as exc:
@@ -171,12 +252,23 @@ class SkillExecutor:
                 err=SkillExecutionError(kind="safety_scan_rejected", message=str(exc)),
             )
 
+        # base64 注入 iOS 主题与 data(纯 ASCII,免一切引号/转义坑)
+        ios_b64 = base64.b64encode(json.dumps(ios_template_layout()).encode("utf-8")).decode(
+            "ascii"
+        )
+        data_b64 = base64.b64encode(json.dumps(payload, default=str).encode("utf-8")).decode(
+            "ascii"
+        )
+        wrapper = _WRAPPER_SRC.replace("__IOS_B64__", ios_b64).replace("__DATA_B64__", data_b64)
+
         run_id = uuid.uuid4().hex[:8]
         with make_skill_workdir(run_id=run_id, root=self._workdir_root) as wd:
-            script_full = wd / "interp.py"
-            script_full.write_text(source, encoding="utf-8")
+            (wd / "user_code.py").write_text(source, encoding="utf-8")
+            interp = wd / "interp.py"
+            interp.write_text(wrapper, encoding="utf-8")
+            # payload 仍喂 stdin(向后兼容旧式 json.load(sys.stdin) 的用户码)
             return await self._run_subprocess(
-                ref, script_full, SkillScriptArgs(payload=payload), wd, timeout
+                ref, interp, SkillScriptArgs(payload=payload), wd, timeout
             )
 
     async def _run_subprocess(

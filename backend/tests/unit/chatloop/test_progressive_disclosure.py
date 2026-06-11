@@ -6,7 +6,7 @@
 - search_docs:关键词评分检索(中文 2-gram + 工具名直查 + k 截断);
 - search_tools dispatch:返回 docs、searched_docs 记账、重复检索带标记;
 - 裸调指导:deferred 工具 ValidationError 错误文案含 search_tools 提示;
-- 文档完整性守卫:15 个全有非空 brief/doc、CORE+DEFERRED 并集=15 无重叠、金融 8 含"何时不用"。
+- 文档完整性守卫:17 个全有非空 brief/doc、CORE+DEFERRED 并集=17 无重叠、金融 8 含"何时不用"。
 """
 
 from __future__ import annotations
@@ -104,16 +104,17 @@ def _call(name: str, args: dict) -> StepToolCall:
 # ---------------------------------------------------------------------------
 
 
-def test_tool_docs_count_is_16():
-    # 16 = 原 15 + dispatch_subagents(2026-06-11 chat 内子 agent 派发,进延迟组)
-    assert len(TOOL_DOCS) == 16
+def test_tool_docs_count_is_18():
+    # 18 = 原 15 + dispatch_subagents(#144 chat 内子 agent 派发)
+    #      + get_daily + get_portfolio_positions(charting 数据工具)
+    assert len(TOOL_DOCS) == 18
 
 
 def test_core_and_deferred_partition_no_overlap():
     core = set(CORE_TOOLS)
     deferred = set(DEFERRED_TOOLS)
-    assert len(CORE_TOOLS) == 8  # +dispatch_subagents(2026-06-11 e2e 实测定为核心)
-    assert len(DEFERRED_TOOLS) == 8
+    assert len(CORE_TOOLS) == 8  # +dispatch_subagents(e2e 实测定为核心)
+    assert len(DEFERRED_TOOLS) == 10  # +get_daily +get_portfolio_positions
     assert core & deferred == set()
     assert core | deferred == set(TOOL_DOCS.keys())
 
@@ -261,11 +262,11 @@ async def test_schemas_for_llm_groups_core_full_deferred_thin_search_last():
     schemas = hub.schemas_for_llm()
     names = [s["function"]["name"] for s in schemas]
 
-    # 总数 = 16 + search_tools = 17(+dispatch_subagents)
-    assert len(names) == 17
+    # 总数 = 18 TOOL_DOCS + search_tools = 19
+    assert len(names) == 19
     # search_tools 殿后
     assert names[-1] == "search_tools"
-    # core 6 在前(顺序 = CORE_TOOLS)
+    # core 在前(顺序 = CORE_TOOLS)
     assert names[: len(CORE_TOOLS)] == CORE_TOOLS
     # 紧接 deferred 9(顺序 = DEFERRED_TOOLS)
     assert names[len(CORE_TOOLS) : len(CORE_TOOLS) + len(DEFERRED_TOOLS)] == DEFERRED_TOOLS

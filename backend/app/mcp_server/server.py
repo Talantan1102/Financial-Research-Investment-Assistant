@@ -40,6 +40,7 @@ _CHAT_TOOL_MODULES = [
     "app.mcp_server.tools.web_search",
     "app.mcp_server.tools.kb_search",
     "app.mcp_server.tools.compare_stocks",
+    "app.mcp_server.tools.get_daily",
 ]
 
 _KNOWN_PROFILES = ("chat_tools", "memory")

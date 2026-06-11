@@ -361,11 +361,9 @@ TOOL_DOCS: dict[str, ToolDoc] = {
     ),
     "run_python": ToolDoc(
         name="run_python",
-        # core 组:run_python 的正确调用依赖 code 参数里的输出契约(必须 print 一个含
-        # result/figures 的 JSON)。该契约只能经"常驻完整 schema"传达 —— 放 deferred 组
-        # 时模型只看到 thin 条目(剥了参数 description),裸调即写出不符契约的代码
-        # (实测:stdout_invalid_json + 幻觉图片链接)。故升 core,契约随 code 参数
-        # description 常驻可见(verify 浏览器实测驱动的修正)。
+        # core 组:run_python 的正确调用依赖 code 参数里的输出契约。放 deferred 组时模型
+        # 只看到 thin 条目(剥了参数 description),裸调即写出不符契约的代码(实测)。故升
+        # core,契约随 code 参数 description 常驻可见(verify 浏览器实测驱动)。
         group="core",
         brief="写 Python 做计算/画交互图(plotly)。需二次计算或可视化时用。",
         doc=(
@@ -376,19 +374,54 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "何时不用:能被单个数据工具直接回答的(查现价→get_stock_quote,查财报→"
             "get_financial_statements)别绕到 run_python;跑预审技能脚本(如 DCF)→ "
             "run_skill_script。\n"
-            "参数:\n"
-            " - code(str,必填)—— 完整 Python 脚本。从 sys.stdin 读 data(json.load),"
-            '把结果 print 成一个 JSON:{"result": <可序列化结论>, "figures": '
-            "[<plotly fig.to_dict()>, ...]}。figures 可空。\n"
-            " - data(object,可选)—— 喂给脚本 stdin 的 JSON(把现有工具拿到的数据传进来)。\n"
-            "示例:run_python(code='import sys,json,plotly.express as px; "
-            'd=json.load(sys.stdin); fig=px.line(d["rows"]); '
-            'print(json.dumps({"result":"ok","figures":[fig.to_dict()]}))\', '
-            "data={'rows': [...]})。\n"
-            "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态(变量不跨调用保留);"
-            "可用 pandas/numpy/plotly;超时 30s;图必须用 plotly(matplotlib 写文件会失败)。"
+            "写法契约(执行器自动捕获,别 print):\n"
+            " - 数据在变量 data(dict)里,直接用,不用读 stdin;\n"
+            " - 把图赋给 fig(单张)或 figures(plotly Figure 列表),结论赋给 result;\n"
+            " - 不要 print、不要返回图片链接/markdown 图 —— 执行器自动序列化并套统一 iOS 主题。\n"
+            "参数:code(str,必填)= 完整脚本;data(object,可选)= 喂进来的数据 JSON。\n"
+            "示例:run_python(code='import plotly.graph_objects as go; fig=go.Figure(); "
+            'fig.add_bar(x=data["names"], y=data["vals"]); result="已画"\', '
+            "data={'names':['股票A','股票B'],'vals':[241,197]})。\n"
+            "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态;可用 pandas/numpy/plotly;"
+            "超时 30s;图必须用 plotly。画复杂图/要统一风格与配色 → 先 load_skill('charting')。"
         ),
         thin_required=None,  # core 组:常驻完整 schema,不走 thin 条目
+    ),
+    "get_daily": ToolDoc(
+        name="get_daily",
+        group="deferred",
+        brief="查 A 股日线 K 线序列(OHLC·成交量·时间段)。要看走势/画 K 线/算相关性回撤时用。",
+        doc=(
+            "查单只 A 股指定日期范围的日线 K 线序列(开高低收+成交量+涨跌幅)。\n"
+            "何时用:用户要看价格走势、画 K 线图、需要历史价格序列做相关性/回撤/归一化对比;"
+            "触发词:K 线、走势、历史价格、日线、回撤、近一年。\n"
+            "何时不用:只要最新现价 → get_stock_quote;要 PE/估值 → get_market_indicators;"
+            "要财务 → get_financial_statements。\n"
+            "参数:ts_code(str,必填,'600519.SH')、start(str,必填,YYYYMMDD)、"
+            "end(str,必填,YYYYMMDD)。\n"
+            "返回:列式数组 {ts_code, count, dates[], open[], high[], low[], close[], vol[], "
+            "pct_chg[]} —— 可直接喂 run_python 的 go.Candlestick(x=dates, open=..., ...) 或折线。\n"
+            "示例:get_daily(ts_code='600519.SH', start='20250101', end='20250601')。\n"
+            "硬约束:ts_code 带后缀;日期 YYYYMMDD;单次最多返回最近 260 个交易日(超出截断)。"
+        ),
+        thin_required={"ts_code": "string", "start": "string", "end": "string"},
+    ),
+    "get_portfolio_positions": ToolDoc(
+        name="get_portfolio_positions",
+        group="deferred",
+        brief="查用户当前持仓(股数/成本/市值/浮盈)。问'我的持仓'或要画持仓占比图时用。",
+        doc=(
+            "返回当前用户的全部持仓:每只的数量/均价/成本/已实现损益/现价/市值/浮盈,"
+            "外加 total_market_value。user_id 由系统从会话自动取,模型无需也不能传。\n"
+            "何时用:用户问'我现在持有什么/持仓情况/仓位',或要画持仓行业/个股占比饼图、"
+            "treemap、市值分布时(用 positions[].market_value 画)。\n"
+            "何时不用:查别的股票数据 → get_stock_quote 等;不是问自己持仓的别调。\n"
+            "参数:include_silenced(bool,可选,默认 false,是否含静默仓位)。\n"
+            "返回:{total_count, total_market_value, positions:[{ts_code, name, quantity, "
+            "avg_cost, total_cost, realized_pnl, last_quote_price, market_value, unrealized_pnl}]}。\n"
+            "硬约束:只返回当前用户自己的持仓;无持仓时 positions 为空数组(别硬画空图)。"
+        ),
+        thin_required={},  # 无必填参数
     ),
 }
 
@@ -417,6 +450,8 @@ DEFERRED_TOOLS: list[str] = [
     "memory_write",
     "run_skill_script",
     "read_cached_result",
+    "get_daily",
+    "get_portfolio_positions",
 ]
 
 

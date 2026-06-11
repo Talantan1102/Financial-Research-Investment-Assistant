@@ -1,0 +1,82 @@
+"""MCP tool adapter — get_daily(A股日线 OHLC 时序,解锁 K线/走势/相关性/回撤)。
+
+Exports:
+  TOOL_DEF  — mcp.types.Tool metadata(server.py list_tools 聚合)
+  handle()  — async dispatch(server.py call_tool 聚合)
+
+返回**列式**紧凑结构(dates/open/high/low/close/vol/pct_chg 各一数组),可直接喂
+plotly go.Candlestick(x=dates, open=..., ...) 或折线;比 list-of-dict 省 token。
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from mcp.types import TextContent, Tool
+
+TOOL_DEF = Tool(
+    name="get_daily",
+    description=(
+        "Daily OHLC candlestick series for one A-share over a date range. "
+        "Args: ts_code (e.g. '600519.SH'), start/end (YYYYMMDD). "
+        "Returns columnar arrays: dates, open, high, low, close, vol, pct_chg."
+    ),
+    inputSchema={
+        "type": "object",
+        "properties": {
+            "ts_code": {"type": "string", "description": "A-share code, e.g. '600519.SH'"},
+            "start": {"type": "string", "description": "start date YYYYMMDD"},
+            "end": {"type": "string", "description": "end date YYYYMMDD"},
+        },
+        "required": ["ts_code", "start", "end"],
+    },
+)
+
+# 单次返回的最大行数(防时间序列过长撑爆上下文;超出取最近 N 个交易日)。
+_MAX_ROWS = 260
+
+
+def _round_list(series: Any, ndigits: int = 2) -> list:
+    out = []
+    for v in series:
+        try:
+            out.append(round(float(v), ndigits))
+        except (TypeError, ValueError):
+            out.append(None)
+    return out
+
+
+def _format_daily(df: Any, ts_code: str) -> dict[str, Any]:
+    """DataFrame → 列式紧凑 dict(纯函数,可单测,不碰网络/LLM)。"""
+    if df is None or getattr(df, "empty", True):
+        return {"ts_code": ts_code, "count": 0, "dates": []}
+    df = df.sort_values("trade_date")
+    if len(df) > _MAX_ROWS:
+        df = df.tail(_MAX_ROWS)
+    out: dict[str, Any] = {
+        "ts_code": ts_code,
+        "count": int(len(df)),
+        "dates": [str(d) for d in df["trade_date"].tolist()],
+        "open": _round_list(df["open"]),
+        "high": _round_list(df["high"]),
+        "low": _round_list(df["low"]),
+        "close": _round_list(df["close"]),
+    }
+    if "vol" in df.columns:
+        out["vol"] = _round_list(df["vol"], 0)
+    if "pct_chg" in df.columns:
+        out["pct_chg"] = _round_list(df["pct_chg"])
+    return out
+
+
+async def handle(args: dict[str, Any]) -> list[TextContent]:
+    from app.services.tushare_factory import build_tushare_service
+
+    ts_code = args["ts_code"]
+    start = args["start"]
+    end = args["end"]
+    tushare = build_tushare_service()
+    df = await tushare.get_daily(ts_code=ts_code, start=start, end=end)
+    payload = _format_daily(df, ts_code)
+    return [TextContent(type="text", text=json.dumps(payload, ensure_ascii=False, default=str))]

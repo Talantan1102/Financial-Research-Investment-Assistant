@@ -14,8 +14,11 @@ def test_run_python_in_core_group() -> None:
 
 
 def test_run_python_code_param_carries_output_contract() -> None:
-    # 契约在 code 参数 description 里(常驻完整 schema 可见),提到 figures + JSON。
+    # 新契约(wrapper 模式)在 code 参数 description 里常驻可见:赋 fig/figures/result、
+    # 数据在 data 变量、别 print。
     schema = CodeInterpreterArgs.model_json_schema()
     code_desc = schema["properties"]["code"].get("description", "")
     assert "figures" in code_desc
-    assert "JSON" in code_desc or "json" in code_desc
+    assert "fig" in code_desc
+    assert "result" in code_desc
+    assert "data" in code_desc
