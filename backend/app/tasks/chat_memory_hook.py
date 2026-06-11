@@ -45,9 +45,7 @@ def _should_persist(
         return False
     if not (user_message and user_message.strip()):
         return False
-    if not (agent_response and agent_response.strip()):
-        return False
-    return True
+    return bool(agent_response and agent_response.strip())
 
 
 async def persist_episode_and_trigger(
