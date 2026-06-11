@@ -26,17 +26,18 @@ _STDERR_FEEDBACK_LEN = 500  # 回喂模型自纠的 stderr 截断
 class CodeInterpreterArgs(BaseModel):
     code: str = Field(
         description=(
-            "完整 Python 脚本。可选地从 sys.stdin 读 data(json.load)。脚本必须把结果 "
-            "print 成一个 JSON,含两键:result(给用户的结论)与 figures(plotly 图的 "
-            ".to_dict() 列表,可空)。例:"
-            "import json,plotly.graph_objects as go; "
-            "fig=go.Figure(); fig.add_scatter(x=[1,2,3],y=[4,5,6]); "
-            "print(json.dumps({'result':'已画','figures':[fig.to_dict()]}))。"
-            "硬约束:用 plotly(非 matplotlib);别输出图片链接或 markdown 图;无网络无文件。"
+            "完整 Python 脚本。数据在变量 data(dict)里,直接用,不用读 stdin。"
+            "把图赋给 fig(单张)或 figures(plotly Figure 列表),结论赋给 result。"
+            "不要 print、不要返回图片链接/markdown 图——执行器自动序列化并套统一主题。例:"
+            "import plotly.graph_objects as go; "
+            "fig=go.Figure(); fig.add_bar(x=data['names'], y=data['vals']); result='已画'。"
+            "硬约束:用 plotly(非 matplotlib);无网络无文件;画复杂图/要统一风格先 "
+            "load_skill('charting')。"
         )
     )
     data: dict[str, Any] | None = Field(
-        default=None, description="喂给脚本 stdin 的 JSON(把现有数据传进来);无则不传。"
+        default=None,
+        description="喂给脚本的数据 JSON(把现有工具拿到的数据传进来),脚本里用变量 data 取;无则不传。",
     )
 
 

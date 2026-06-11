@@ -16,14 +16,13 @@ def executor(tmp_path: Path) -> SkillExecutor:
 
 @pytest.mark.asyncio
 async def test_execute_source_ok_returns_stdout_json(executor: SkillExecutor) -> None:
-    src = (
-        "import sys, json\n"
-        "d = json.load(sys.stdin)\n"
-        "print(json.dumps({'result': d['a'] + d['b']}))\n"
+    # 新契约(wrapper 模式):data 是命名空间变量,赋 result 即可,不用 print。
+    res = await executor.execute_source(
+        source="result = data['a'] + data['b']", payload={"a": 2, "b": 3}
     )
-    res = await executor.execute_source(source=src, payload={"a": 2, "b": 3})
     assert res.ok is True
-    assert res.stdout_json == {"result": 5}
+    assert res.stdout_json["result"] == 5
+    assert res.stdout_json["figures"] == []
 
 
 @pytest.mark.asyncio
