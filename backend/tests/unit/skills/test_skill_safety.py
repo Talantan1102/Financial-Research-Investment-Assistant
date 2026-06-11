@@ -48,6 +48,13 @@ def test_scan_rejects_os_system():
         scan_script_safety(src)
 
 
+def test_scan_rejects_os_popen():
+    # 代码解释器 review 补:os.popen 是 os.system 的兄弟,同样任意 shell 执行。
+    src = "import os\nos.popen('id').read()\n"
+    with pytest.raises(SafetyScanError, match="os.popen"):
+        scan_script_safety(src)
+
+
 def test_scan_rejects_subprocess_run():
     src = "import subprocess\nsubprocess.run(['ls'])\n"
     with pytest.raises(SafetyScanError, match="subprocess.run"):

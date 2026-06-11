@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { VariableSizeList, type ListChildComponentProps } from 'react-window'
 import { useScrollStick } from './useScrollStick'
 import type { ChatMessage } from '@/types/chat'
+import { ChartMessage } from './ChartMessage'
 import { ResearchReportCard } from './ResearchReportCard'
 import { SystemMessage } from './SystemMessage'
 import { TextMessage } from './TextMessage'
@@ -31,6 +32,8 @@ function MessageRouter({
     switch (message.message_type) {
       case 'tool_call':
         return <ToolCallCard message={message} />
+      case 'chart':
+        return <ChartMessage message={message} />
       case 'research_report':
         return <ResearchReportCard message={message} onContinueAsk={onContinueAsk} />
       case 'system':

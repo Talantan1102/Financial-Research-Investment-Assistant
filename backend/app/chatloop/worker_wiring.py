@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from app.chatloop.code_interpreter_tool import CodeInterpreterTool
 from app.chatloop.control_tools import OfferDeepResearchTool, ReadCachedResultTool
 from app.chatloop.events import SeqCounter
 from app.chatloop.gates import GateConfig
@@ -36,6 +37,7 @@ from app.chatloop.tool_hub import EmitFn, ToolHub
 from app.memory.injection_classifier import is_prompt_injection
 from app.services.chat_steer_bus import steer_key
 from app.services.tool_result_cache import ToolResultCache
+from app.skills.executor_backend import SkillExecutorBackend
 
 logger = logging.getLogger(__name__)
 
@@ -213,6 +215,7 @@ def build_turn_components(
             RunSkillScriptTool(executor=singletons.executor),
             OfferDeepResearchTool(),
             ReadCachedResultTool(cache=singletons.cache),
+            CodeInterpreterTool(backend=SkillExecutorBackend(singletons.executor)),
         ]
     )
 

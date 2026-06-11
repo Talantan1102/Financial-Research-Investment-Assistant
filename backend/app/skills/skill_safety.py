@@ -8,6 +8,8 @@ from typing import Final
 BANNED_APIS: Final[frozenset[str]] = frozenset(
     {
         "os.system",
+        "os.popen",  # 任意 shell 命令执行(os.system 的兄弟,代码解释器 review 补)
+        "os.fdopen",
         "subprocess.Popen",
         "subprocess.call",
         "subprocess.run",

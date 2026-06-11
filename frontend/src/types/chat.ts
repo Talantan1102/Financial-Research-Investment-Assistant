@@ -8,7 +8,7 @@
 
 import type { EscalationPacket } from './escalation'
 
-export type MessageType = 'text' | 'tool_call' | 'tool_result' | 'research_report' | 'escalation' | 'system'
+export type MessageType = 'text' | 'tool_call' | 'tool_result' | 'research_report' | 'escalation' | 'system' | 'chart'
 
 export interface ToolCallData {
   tool_name: string
@@ -27,6 +27,17 @@ export interface ToolCallData {
 export interface ChartSpec {
   type: 'echarts'
   option: Record<string, unknown>
+}
+
+// run_python 产出的 plotly 交互图(经 chart SSE 事件旁路渲染,figure 不进 LLM 上下文)。
+export interface PlotlyFigure {
+  data: Record<string, unknown>[]
+  layout?: Record<string, unknown>
+}
+
+export interface PlotlySpec {
+  type: 'plotly'
+  figure: PlotlyFigure
 }
 
 export interface BaseEvent {
@@ -81,6 +92,13 @@ export interface ToolErrorEvent extends BaseEvent {
   tool: string
   error: string
   hint?: string
+}
+
+// chatloop run_python 产图:每张 figure 一帧,旁路渲染成独立 chart 消息。
+export interface ChartEvent extends BaseEvent {
+  type: 'chart'
+  chart_id: string
+  figure: PlotlyFigure
 }
 
 export interface SteerMergedEvent extends BaseEvent {
@@ -180,6 +198,7 @@ export type SSEEvent =
   | ToolStartEvent
   | ToolEndEvent
   | ToolErrorEvent
+  | ChartEvent
   | SteerMergedEvent
   | LoopHaltEvent
   | SkillLoadEvent
@@ -228,6 +247,8 @@ export interface ChatMessage {
   // 老消息可能为 null/缺失 — optional 即可。
   task_id?: string | null
   status?: ChatMessageStatus
+  // run_python 产出的交互图(message_type='chart');由 chart SSE 事件构造的本地消息携带。
+  chart_spec?: PlotlySpec
 }
 
 export interface ChatDetail {

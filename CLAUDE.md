@@ -101,6 +101,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### Chat Loop 重设计(2026-06-05 ship 完)
 - [Chat Loop 重设计总卡](docs/claude-context/chat-loop-redesign-done.md) — LangGraph supervisor 单程图 → 裸 Python while 循环(backend/app/chatloop/);单 LLM + 原生 function calling + 四道终止闸 + 窗口四区(KV-cache 分区) + 工具渐进披露 + 记忆双工具合并 + 技能图回环退役 + steering Redis List + turn 原子语义
 
+### 代码解释器(2026-06-11 ship 完)
+- [run_python 代码解释器 ship](docs/claude-context/code-interpreter-run-python-done.md) — LLM 写 Python→复用 SkillExecutor 沙箱(execute_source 内联入口)→plotly 交互图;figures 走 chart 事件不进上下文;ExecutorBackend 留 Docker 口;两坑(plotly 用 dist-min/factory 避 mapbox / 沙箱 OpenBLAS 单线程避 OOM)
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。
