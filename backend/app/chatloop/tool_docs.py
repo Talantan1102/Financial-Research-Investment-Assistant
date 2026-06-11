@@ -380,7 +380,7 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             " - 不要 print、不要返回图片链接/markdown 图 —— 执行器自动序列化并套统一 iOS 主题。\n"
             "参数:code(str,必填)= 完整脚本;data(object,可选)= 喂进来的数据 JSON。\n"
             "示例:run_python(code='import plotly.graph_objects as go; fig=go.Figure(); "
-            "fig.add_bar(x=data[\"names\"], y=data[\"vals\"]); result=\"已画\"', "
+            'fig.add_bar(x=data["names"], y=data["vals"]); result="已画"\', '
             "data={'names':['股票A','股票B'],'vals':[241,197]})。\n"
             "硬约束:沙箱无网络、无文件读写(open 被禁)、无状态;可用 pandas/numpy/plotly;"
             "超时 30s;图必须用 plotly。画复杂图/要统一风格与配色 → 先 load_skill('charting')。"

@@ -8,7 +8,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from app.skills.skill_executor import SkillExecutor
 
 
@@ -20,7 +19,9 @@ def executor(tmp_path: Path) -> SkillExecutor:
 @pytest.mark.asyncio
 async def test_data_injected_as_namespace_var(executor: SkillExecutor) -> None:
     # 模型不用读 stdin —— data 直接是命名空间变量
-    res = await executor.execute_source(source="result = data['x'] + data['y']", payload={"x": 1, "y": 2})
+    res = await executor.execute_source(
+        source="result = data['x'] + data['y']", payload={"x": 1, "y": 2}
+    )
     assert res.ok is True
     assert res.stdout_json["result"] == 3
     assert res.stdout_json["figures"] == []
@@ -29,9 +30,7 @@ async def test_data_injected_as_namespace_var(executor: SkillExecutor) -> None:
 @pytest.mark.asyncio
 async def test_user_print_does_not_break_contract(executor: SkillExecutor) -> None:
     # 用户 print 调试 → 被吞,不污染契约 JSON
-    res = await executor.execute_source(
-        source="print('debugging...'); result = 42", payload={}
-    )
+    res = await executor.execute_source(source="print('debugging...'); result = 42", payload={})
     assert res.ok is True
     assert res.stdout_json["result"] == 42
     assert "debugging" in res.stdout_json.get("stdout", "")
@@ -59,9 +58,7 @@ async def test_assign_fig_captured_and_themed(executor: SkillExecutor) -> None:
         "fig.add_bar(x=data['names'], y=data['vals'])\n"
         "result = '已画'\n"
     )
-    res = await executor.execute_source(
-        source=code, payload={"names": ["A", "B"], "vals": [3, 5]}
-    )
+    res = await executor.execute_source(source=code, payload={"names": ["A", "B"], "vals": [3, 5]})
     assert res.ok is True, res.error
     figs = res.stdout_json["figures"]
     assert len(figs) == 1

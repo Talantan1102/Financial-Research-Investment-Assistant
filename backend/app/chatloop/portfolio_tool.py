@@ -73,7 +73,11 @@ class GetPortfolioPositionsTool(InProcessTool):
             )
 
         total_mv = round(sum(p["market_value"] for p in positions if p["market_value"]), 2)
-        return {"total_count": len(positions), "total_market_value": total_mv, "positions": positions}
+        return {
+            "total_count": len(positions),
+            "total_market_value": total_mv,
+            "positions": positions,
+        }
 
 
 __all__ = ["PortfolioPositionsArgs", "GetPortfolioPositionsTool"]

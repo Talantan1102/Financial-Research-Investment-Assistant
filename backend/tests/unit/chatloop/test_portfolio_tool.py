@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.chatloop.portfolio_tool import GetPortfolioPositionsTool, PortfolioPositionsArgs
 
 
@@ -52,8 +51,14 @@ class _State:
 async def test_positions_serialized_with_market_value() -> None:
     rows = [
         _FakePos(
-            ts_code="600519.SH", name="贵州茅台", quantity=100, avg_cost=1500,
-            total_cost=150000, realized_pnl=0, last_quote_price=1700, is_silenced=False,
+            ts_code="600519.SH",
+            name="贵州茅台",
+            quantity=100,
+            avg_cost=1500,
+            total_cost=150000,
+            realized_pnl=0,
+            last_quote_price=1700,
+            is_silenced=False,
         )
     ]
     tool = GetPortfolioPositionsTool(session_factory=_factory(rows))

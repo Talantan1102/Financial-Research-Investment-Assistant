@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-
 from app.mcp_server.tools.get_daily import TOOL_DEF, _format_daily
 
 

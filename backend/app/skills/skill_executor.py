@@ -83,7 +83,7 @@ def _minimal_env() -> dict[str, str]:
 #   4. 跑完从命名空间抓 fig/figures/result,序列化成契约 JSON;三重兜底见 spec § 3.3。
 # wrapper 本身是可信代码(不经 AST 扫描),故可用 exec/open;用户码仍被 scan 禁掉这些。
 # __IOS_B64__ / __DATA_B64__ 由 execute_source base64 注入(base64 纯 ASCII,免一切引号坑)。
-_WRAPPER_SRC: Final[str] = '''\
+_WRAPPER_SRC: Final[str] = """\
 import sys, io, json, base64
 
 _IOS_LAYOUT = json.loads(base64.b64decode("__IOS_B64__").decode("utf-8"))
@@ -149,7 +149,7 @@ for _f in (_figs or []):
 
 print(json.dumps({"result": _result, "figures": _out, "stdout": _buf.getvalue()[:500]},
                  default=str, ensure_ascii=False))
-'''
+"""
 
 
 class SkillExecutor:
@@ -253,12 +253,12 @@ class SkillExecutor:
             )
 
         # base64 注入 iOS 主题与 data(纯 ASCII,免一切引号/转义坑)
-        ios_b64 = base64.b64encode(
-            json.dumps(ios_template_layout()).encode("utf-8")
-        ).decode("ascii")
-        data_b64 = base64.b64encode(
-            json.dumps(payload, default=str).encode("utf-8")
-        ).decode("ascii")
+        ios_b64 = base64.b64encode(json.dumps(ios_template_layout()).encode("utf-8")).decode(
+            "ascii"
+        )
+        data_b64 = base64.b64encode(json.dumps(payload, default=str).encode("utf-8")).decode(
+            "ascii"
+        )
         wrapper = _WRAPPER_SRC.replace("__IOS_B64__", ios_b64).replace("__DATA_B64__", data_b64)
 
         run_id = uuid.uuid4().hex[:8]
