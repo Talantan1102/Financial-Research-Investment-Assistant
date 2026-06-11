@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
-
 from app.chatloop.tool_hub import ToolHub
 from app.tools.base import Tool
+from pydantic import BaseModel
 
 
 class _QuoteArgs(BaseModel):

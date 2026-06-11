@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from app.chatloop.events import SeqCounter
 from app.chatloop.gates import GateConfig
 from app.chatloop.worker_wiring import HeavySingletons, build_turn_components

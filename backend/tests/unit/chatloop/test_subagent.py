@@ -6,7 +6,6 @@ import json
 from typing import Any
 
 import pytest
-
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.gates import GateConfig
 from app.chatloop.state import ChatLoopState
@@ -101,9 +100,8 @@ class _FakeRegistry:
     """子 hub 用:暴露一个 get_stock_quote 只读工具。"""
 
     def __init__(self) -> None:
-        from pydantic import BaseModel
-
         from app.tools.base import Tool
+        from pydantic import BaseModel
 
         class _A(BaseModel):
             ts_code: str
