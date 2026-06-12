@@ -34,3 +34,37 @@ export interface PositionRead {
 export function listPositions() {
   return request.get<PositionRead[]>('/portfolio/positions')
 }
+
+export type TimeRange = '1m' | '3m' | '6m' | '1y' | '3y'
+
+export interface AttributionBreakdown {
+  total_pct: number
+  by_class: Record<string, number>
+  stock_breakdown: { market: number; sector_excess: number; idiosyncratic: number }
+  contributions: { ts_code: string; asset_class: string; contrib_pct: number }[]
+}
+
+export interface OverviewRead {
+  total_value: number
+  today_pct: number
+  ytd_pct: number
+  attribution: AttributionBreakdown
+  structure: { by_class: Record<string, number>; by_sector: Record<string, number>; as_of: string | null }
+  narrative: string
+}
+
+export interface TrendRead {
+  dates: string[]
+  portfolio: number[]
+  benchmark: number[]
+  cumulative: number
+  range: TimeRange
+}
+
+export function getOverview() {
+  return request.get<OverviewRead>('/portfolio/overview')
+}
+
+export function getTrend(range: TimeRange) {
+  return request.get<TrendRead>('/portfolio/overview/trend', { params: { range } })
+}
