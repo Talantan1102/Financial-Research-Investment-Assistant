@@ -8,8 +8,16 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from app.router.auth_router import get_current_user_required
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+_OWNER = uuid4()
+
+
+class _U:
+    def __init__(self, uid: object) -> None:
+        self.id = uid
 
 
 @pytest.fixture
@@ -24,7 +32,7 @@ def app_with_chats():
     fake_session = SimpleNamespace(
         id=fake_id,
         title="test",
-        user_id="anonymous",
+        user_id=_OWNER,
         updated_at=datetime.utcnow(),
         message_count=0,
         last_msg_preview="",
@@ -40,6 +48,7 @@ def app_with_chats():
     repo.find_active_task_for_session = AsyncMock(return_value=None)
 
     app.dependency_overrides[get_repo] = lambda: repo
+    app.dependency_overrides[get_current_user_required] = lambda: _U(_OWNER)
     return app, repo, fake_id
 
 
