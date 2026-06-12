@@ -6,7 +6,6 @@ C.6 chat 子系统接真 auth 后,会话列表/CRUD 必须按 user.id 隔离。
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
 
 import pytest
 from app.router.auth_router import get_current_user_required
@@ -36,7 +35,12 @@ def _make_user(factory: object) -> uuid.UUID:
                     "INSERT INTO users (id, username, email, hashed_password, is_active) "
                     "VALUES (:id, :u, :e, :p, true)"
                 ),
-                {"id": str(uid), "u": f"iso_{uid.hex[:8]}", "e": f"{uid.hex[:8]}@t.local", "p": "x"},
+                {
+                    "id": str(uid),
+                    "u": f"iso_{uid.hex[:8]}",
+                    "e": f"{uid.hex[:8]}@t.local",
+                    "p": "x",
+                },
             )
             await sess.commit()
 

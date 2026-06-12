@@ -20,9 +20,9 @@ import pytest
 import pytest_asyncio
 from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — registers users table
+from app.router.auth_router import get_current_user_required
 from app.router.chat import (
     get_async_session_factory,
-    get_current_user,
     get_redis_async,
 )
 from app.router.chat import router as chat_router
@@ -30,25 +30,37 @@ from app.services.chat_task_repo import ChatTaskRepo
 from fakeredis.aioredis import FakeRedis
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
 )
 
+_STUB_UID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
+
 
 class _StubUser:
     def __init__(self) -> None:
-        self.id = "test-user"
+        self.id = _STUB_UID
 
 
-@pytest.fixture
-def session_factory(
+@pytest_asyncio.fixture
+async def session_factory(
     pg_async_session_factory: async_sessionmaker[AsyncSession],
 ) -> async_sessionmaker[AsyncSession]:
     """Alias to global pg_async_session_factory — real PG, no sqlite.
 
-    PR-A T15: replaced sqlite+aiosqlite (broke on JSONB after with_variant removal).
+    C.6: 顺手插 stub user 行(sessions/tasks user_id=_STUB_UID 的 FK 前提)。
     """
+    async with pg_async_session_factory() as sess:
+        await sess.execute(
+            text(
+                "INSERT INTO users (id, username, email, hashed_password, is_active) "
+                "VALUES (:id, :u, :e, :p, true) ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": str(_STUB_UID), "u": "stub_test_user", "e": "stub@t.local", "p": "x"},
+        )
+        await sess.commit()
     return pg_async_session_factory
 
 
@@ -65,7 +77,7 @@ def _client(
 ) -> TestClient:
     app = FastAPI()
     app.include_router(chat_router)
-    app.dependency_overrides[get_current_user] = lambda: _StubUser()
+    app.dependency_overrides[get_current_user_required] = lambda: _StubUser()
     app.dependency_overrides[get_async_session_factory] = lambda: session_factory
     app.dependency_overrides[get_redis_async] = lambda: fake_redis_obj
     return TestClient(app, raise_server_exceptions=True)
@@ -99,7 +111,7 @@ async def test_post_retry_failed_task_enqueues_whole_turn_rerun(
     # Seed session + 原始 user 消息 + error task(initial_prompt 关联)
     sid = uuid.uuid4()
     async with session_factory() as sess:
-        sess.add(ChatSession(id=sid, user_id=None, title="t"))
+        sess.add(ChatSession(id=sid, user_id=_STUB_UID, title="t"))
         await sess.commit()
 
     from app.services.chat_session_repo import ChatSessionRepo
@@ -110,7 +122,7 @@ async def test_post_retry_failed_task_enqueues_whole_turn_rerun(
     task_repo = ChatTaskRepo(session_factory)
     old_task = await task_repo.create_queued(
         session_id=sid,
-        user_id=None,
+        user_id=_STUB_UID,
         langgraph_thread_id=f"u:{sid}",
         initial_prompt_message_id=user_msg.id,
     )
@@ -159,12 +171,12 @@ async def test_post_retry_without_checkpoint_no_longer_422(
 
     sid = uuid.uuid4()
     async with session_factory() as sess:
-        sess.add(ChatSession(id=sid, user_id=None, title="t"))
+        sess.add(ChatSession(id=sid, user_id=_STUB_UID, title="t"))
         await sess.commit()
     task_repo = ChatTaskRepo(session_factory)
     old_task = await task_repo.create_queued(
         session_id=sid,
-        user_id=None,
+        user_id=_STUB_UID,
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )
@@ -185,12 +197,12 @@ async def test_post_retry_running_task_returns_409(
     """status=running 不能 retry(正在跑)。"""
     sid = uuid.uuid4()
     async with session_factory() as sess:
-        sess.add(ChatSession(id=sid, user_id=None, title="t"))
+        sess.add(ChatSession(id=sid, user_id=_STUB_UID, title="t"))
         await sess.commit()
     task_repo = ChatTaskRepo(session_factory)
     task = await task_repo.create_queued(
         session_id=sid,
-        user_id=None,
+        user_id=_STUB_UID,
         langgraph_thread_id="t",
         initial_prompt_message_id=None,
     )

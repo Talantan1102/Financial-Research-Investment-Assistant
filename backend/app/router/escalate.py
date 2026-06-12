@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,8 @@ from app.agents.escalation_confidence import compute_confidence
 from app.agents.escalation_protocol import EscalationPacket, FieldEdit
 from app.agents.research_agent import ResearchAgent
 from app.agents.schemas import ResearchState
+from app.models.user import User
+from app.router.auth_router import get_current_user_required
 from app.services.chat_session_repo import ChatSessionRepo
 from app.services.escalation_record_repo import EscalationRecordRepo
 from app.services.research_report_repo import ResearchReportRepo
@@ -162,12 +164,18 @@ def packet_to_research_state(
 @router.post("/escalate")
 async def escalate(
     req: EscalateRequest,
+    user: User = Depends(get_current_user_required),
     record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
     research_agent: ResearchAgent = Depends(get_research_agent),
     chat_session_repo: ChatSessionRepo = Depends(get_chat_session_repo),
     research_report_repo: ResearchReportRepo = Depends(get_research_report_repo),
 ) -> StreamingResponse:
     """Receive confirmed packet, persist diff, invoke ResearchAgent, stream events."""
+    # C.6: 校验 chat 会话归属(防匿名升级 + 防往他人会话写研报消息)。
+    _csid = req.packet_confirmed.session_metadata.chat_session_id
+    _sess = await chat_session_repo.get_session(str(_csid))
+    if _sess is None or str(_sess.user_id) != str(user.id):
+        raise HTTPException(status_code=404, detail="chat session not found")
 
     async def _stream() -> AsyncIterator[str]:
         seq = {"n": 0}

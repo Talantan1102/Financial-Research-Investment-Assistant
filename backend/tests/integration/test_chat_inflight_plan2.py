@@ -23,9 +23,9 @@ import pytest
 import pytest_asyncio
 from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — registers users table
+from app.router.auth_router import get_current_user_required
 from app.router.chat import (
     get_async_session_factory,
-    get_current_user,
     get_redis_async,
 )
 from app.router.chat import (
@@ -36,25 +36,38 @@ from app.services.chat_task_repo import ChatTaskRepo
 from fakeredis.aioredis import FakeRedis
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
 )
 
+_STUB_UID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
+
 
 class _StubUser:
     def __init__(self) -> None:
-        self.id = "test-user"
+        self.id = _STUB_UID
 
 
-@pytest.fixture
-def session_factory(
+@pytest_asyncio.fixture
+async def session_factory(
     pg_async_session_factory: async_sessionmaker[AsyncSession],
 ) -> async_sessionmaker[AsyncSession]:
     """Alias to global pg_async_session_factory — real PG, no sqlite.
 
     PR-A T15: replaced sqlite+aiosqlite (broke on JSONB after with_variant removal).
+    C.6: 顺手插 stub user 行(sessions/tasks user_id=_STUB_UID 的 FK 前提)。
     """
+    async with pg_async_session_factory() as sess:
+        await sess.execute(
+            text(
+                "INSERT INTO users (id, username, email, hashed_password, is_active) "
+                "VALUES (:id, :u, :e, :p, true) ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": str(_STUB_UID), "u": "stub_test_user", "e": "stub@t.local", "p": "x"},
+        )
+        await sess.commit()
     return pg_async_session_factory
 
 
@@ -71,12 +84,12 @@ async def seeded_running_task(
 ) -> dict[str, Any]:
     sid = uuid.uuid4()
     async with session_factory() as sess:
-        sess.add(ChatSession(id=sid, user_id=None, title="t"))
+        sess.add(ChatSession(id=sid, user_id=_STUB_UID, title="t"))
         await sess.commit()
     task_repo = ChatTaskRepo(session_factory)
     task = await task_repo.create_queued(
         session_id=sid,
-        user_id=None,
+        user_id=_STUB_UID,
         langgraph_thread_id=f"anon:{sid}",
         initial_prompt_message_id=None,
     )
@@ -91,7 +104,7 @@ def _client(
     """Build FastAPI TestClient with chat router + DI overrides."""
     app = FastAPI()
     app.include_router(chat_router)
-    app.dependency_overrides[get_current_user] = lambda: _StubUser()
+    app.dependency_overrides[get_current_user_required] = lambda: _StubUser()
     app.dependency_overrides[get_async_session_factory] = lambda: session_factory
     app.dependency_overrides[get_redis_async] = lambda: fake_redis_obj
     return TestClient(app, raise_server_exceptions=True)
@@ -212,7 +225,7 @@ async def test_post_chat_with_redis_enqueues_and_returns_task_id(
     # Seed session
     sid = uuid.uuid4()
     async with session_factory() as sess:
-        sess.add(ChatSession(id=sid, user_id=None, title="t"))
+        sess.add(ChatSession(id=sid, user_id=_STUB_UID, title="t"))
         await sess.commit()
 
     client = _client(session_factory, fake_redis)
