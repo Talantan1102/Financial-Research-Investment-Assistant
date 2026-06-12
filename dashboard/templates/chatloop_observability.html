@@ -1,58 +1,126 @@
-<!doctype html>
-<html lang="zh">
-<head>
-  <meta charset="utf-8" />
-  <title>Chatloop 运行时可观测性</title>
-  <style>
-    body { font-family: -apple-system, "Segoe UI", sans-serif; margin: 32px; color: #1a1d21; }
-    h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 28px; color: #5d6875; }
-    .empty { padding: 24px; background: #fbf4f2; border: 1px solid #e8b4a8; border-radius: 8px; }
-    table { border-collapse: collapse; width: 100%; max-width: 780px; font-size: 13px; }
-    th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #eee; }
-    .bar { height: 6px; background: #1d4ed8; border-radius: 3px; }
-    .cards { display: flex; gap: 16px; flex-wrap: wrap; }
-    .card { border: 1px solid #e8e4dc; border-radius: 8px; padding: 14px 18px; min-width: 130px; }
-    .v { font-size: 18px; font-weight: 700; font-family: ui-monospace, monospace; }
-    .k { font-size: 11px; color: #8a96a3; text-transform: uppercase; letter-spacing: .05em; }
-  </style>
-</head>
-<body>
-  <h1>Chatloop 运行时可观测性 · 最近 {{ window }}</h1>
-  {% if agg is none %}
-    <div class="empty">后端未连接或暂无数据 —— 请确认后端在线(BACKEND_BASE_URL)。</div>
-  {% else %}
-    <h2>每轮均值 / 缓存命中率</h2>
-    <div class="cards">
-      <div class="card"><div class="k">KV-cache 命中率</div>
-        <div class="v">{{ '%.0f' % (agg.cache_hit_rate * 100) }}%</div></div>
-      <div class="card"><div class="k">模型 vs 工具</div>
-        <div class="v">{{ '%.0f' % (agg.model_share * 100) }}% / {{ '%.0f' % ((1 - agg.model_share) * 100) }}%</div></div>
-      <div class="card"><div class="k">每轮均价</div>
-        <div class="v">¥{{ '%.4f' % agg.avg_cost_cny }}</div></div>
-      <div class="card"><div class="k">每轮耗时</div>
-        <div class="v">{{ '%.1f' % (agg.avg_wall_ms / 1000) }}s</div></div>
-      <div class="card"><div class="k">每轮调用</div>
-        <div class="v">{{ '%.1f' % agg.avg_llm_calls }}模型 / {{ '%.1f' % agg.avg_tool_calls }}工具</div></div>
-      <div class="card"><div class="k">样本轮数</div>
-        <div class="v">{{ agg.turn_count }}</div></div>
-    </div>
+{# Chatloop 运行时可观测性 — /eval/chatloop-observability。
+   数据源:后端只读聚合 API(BACKEND_BASE_URL)。后端不可达 → 降级占位,不崩页。 #}
+{% extends "base.html" %}
+{% block nav %}{% include "_board_nav.html" %}{% endblock %}
+{% block content %}
 
-    <h2>最慢工具(按 p95 排序)</h2>
-    {% set maxp95 = ((agg.tool_latency | map(attribute='p95_ms') | list | max) or 1) if agg.tool_latency else 1 %}
-    <table>
-      <tr><th>工具</th><th>调用数</th><th>p50</th><th>p95</th><th>p95 分布</th><th>成功率</th><th>缓存率</th></tr>
-      {% for t in agg.tool_latency %}
-      <tr>
-        <td>{{ t.tool_name }}</td>
-        <td>{{ t.calls }}</td>
-        <td>{{ '%.0f' % t.p50_ms }}ms</td>
-        <td>{{ '%.0f' % t.p95_ms }}ms</td>
-        <td><div class="bar" style="width: {{ (t.p95_ms / maxp95 * 200) | round }}px"></div></td>
-        <td>{{ '%.0f' % (t.success_rate * 100) }}%</td>
-        <td>{{ '%.0f' % (t.cache_hit_rate * 100) }}%</td>
-      </tr>
+<style>
+  .obs-windows { display: flex; gap: 6px; margin-top: 2px; }
+  .obs-win {
+    font-family: var(--mono); font-size: 11px; padding: 3px 11px; border-radius: var(--radius-pill);
+    text-decoration: none; color: var(--fg-mute); border: 1px solid var(--hair);
+  }
+  .obs-win:hover { color: var(--accent); border-color: var(--accent-deep); }
+  .obs-win.on { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent-deep); }
+
+  .obs-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(156px, 1fr)); gap: 14px; }
+  .obs-card {
+    background: var(--surface); border: 1px solid var(--hair); border-radius: var(--radius-md);
+    box-shadow: var(--shadow-1); padding: 15px 17px;
+  }
+  .obs-k {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 500; color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 9px;
+  }
+  .obs-v { font-family: var(--mono); font-size: 23px; font-weight: 700; color: var(--fg); line-height: 1.05; }
+  .obs-v .u { font-size: 12.5px; color: var(--fg-mute); font-weight: 500; }
+
+  .obs-tbl { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .obs-tbl th {
+    text-align: left; padding: 8px 10px; font-family: var(--mono); font-size: 10.5px; font-weight: 600;
+    color: var(--fg-mute); background: var(--surface-2); border-bottom: 1px solid var(--hair);
+    text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+  }
+  .obs-tbl td { padding: 9px 10px; border-bottom: 1px solid var(--hair-2); color: var(--fg-dim); }
+  .obs-tbl td.num { font-family: var(--mono); white-space: nowrap; }
+  .obs-tbl tbody tr:hover td { background: var(--surface-2); }
+  .obs-tool { font-weight: 600; color: var(--fg); }
+  .obs-bar-wrap { width: 150px; height: 6px; background: var(--hair-2); border-radius: 3px; overflow: hidden; }
+  .obs-bar { height: 100%; background: var(--accent); border-radius: 3px; }
+
+  .obs-empty {
+    padding: 20px 22px; background: var(--wip-bg); border: 1px solid var(--wip);
+    border-radius: var(--radius-md); color: var(--fg-dim); font-size: 14px; line-height: 1.6;
+  }
+</style>
+
+<article class="report">
+  <a class="report-back" href="/eval">‹ 返回评估体系</a>
+  <header class="report-head">
+    <h1 class="report-title">Chatloop 运行时可观测性</h1>
+    <p class="report-subtitle">
+      每次模型调用与工具调用都落一条 trace span,这里把它们聚合成「慢在哪、贵在哪、缓存命中多少」。
+      数据来自后端 <code>/observability/chatloop/aggregates</code>;工具 span 在 chat 真跑过后逐步累积。
+    </p>
+    <div class="obs-windows">
+      {% for w in ['1d', '7d', '30d'] %}
+        <a class="obs-win {{ 'on' if w == window else '' }}" href="?window={{ w }}">最近 {{ w }}</a>
       {% endfor %}
+    </div>
+  </header>
+
+  {% if agg is none %}
+    <div class="obs-empty">
+      后端未连接或暂无数据 —— 请确认后端在线(<code>BACKEND_BASE_URL</code>)。
+      工具 span 在 chat 跑过之后才会累积。
+    </div>
+  {% else %}
+  <section class="report-section">
+    <h3 class="report-h">每轮均值 <span class="report-count">缓存命中 · 模型 vs 工具</span></h3>
+    <div class="obs-cards">
+      <div class="obs-card">
+        <div class="obs-k">KV-cache 命中率</div>
+        <div class="obs-v">{{ '%.0f' % (agg.cache_hit_rate * 100) }}<span class="u">%</span></div>
+      </div>
+      <div class="obs-card">
+        <div class="obs-k">模型 / 工具 耗时</div>
+        <div class="obs-v">{{ '%.0f' % (agg.model_share * 100) }}<span class="u">% / {{ '%.0f' % ((1 - agg.model_share) * 100) }}%</span></div>
+      </div>
+      <div class="obs-card">
+        <div class="obs-k">每轮均价</div>
+        <div class="obs-v"><span class="u">¥</span>{{ '%.4f' % agg.avg_cost_cny }}</div>
+      </div>
+      <div class="obs-card">
+        <div class="obs-k">每轮耗时</div>
+        <div class="obs-v">{{ '%.1f' % (agg.avg_wall_ms / 1000) }}<span class="u">s</span></div>
+      </div>
+      <div class="obs-card">
+        <div class="obs-k">每轮调用</div>
+        <div class="obs-v">{{ '%.1f' % agg.avg_llm_calls }}<span class="u">模型</span> · {{ '%.1f' % agg.avg_tool_calls }}<span class="u">工具</span></div>
+      </div>
+      <div class="obs-card">
+        <div class="obs-k">样本轮数</div>
+        <div class="obs-v">{{ agg.turn_count }}</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="report-section">
+    <h3 class="report-h">最慢工具 <span class="report-count">按 p95 排序</span></h3>
+    {% if not agg.tool_latency %}
+      <p class="report-body">窗口内还没有工具调用记录 —— 跑几轮带工具的 chat 后这里就有了。</p>
+    {% else %}
+    {% set maxp95 = ((agg.tool_latency | map(attribute='p95_ms') | list | max) or 1) %}
+    <table class="obs-tbl">
+      <thead>
+        <tr><th>工具</th><th>调用</th><th>p50</th><th>p95</th><th>p95 分布</th><th>成功率</th><th>缓存率</th></tr>
+      </thead>
+      <tbody>
+        {% for t in agg.tool_latency %}
+        <tr>
+          <td class="obs-tool">{{ t.tool_name }}</td>
+          <td class="num">{{ t.calls }}</td>
+          <td class="num">{{ '%.0f' % t.p50_ms }}ms</td>
+          <td class="num">{{ '%.0f' % t.p95_ms }}ms</td>
+          <td><div class="obs-bar-wrap"><div class="obs-bar" style="width: {{ (t.p95_ms / maxp95 * 100) | round(1) }}%"></div></div></td>
+          <td class="num">{{ '%.0f' % (t.success_rate * 100) }}%</td>
+          <td class="num">{{ '%.0f' % (t.cache_hit_rate * 100) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
+    {% endif %}
+  </section>
   {% endif %}
-</body>
-</html>
+</article>
+{% endblock %}
