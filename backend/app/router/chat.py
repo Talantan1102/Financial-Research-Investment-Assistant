@@ -111,6 +111,9 @@ class ChatRequest(BaseModel):
 # below resolve to the shared definitions and future auth changes propagate.
 # ---------------------------------------------------------------------------
 from app.models.user import User  # noqa: E402  (C.6 真 auth user 类型)
+from app.router.auth_helpers import (  # noqa: E402, F401 — re-export:research_router/测试仍引用此 v0 stub
+    get_current_user,
+)
 from app.router.auth_router import get_current_user_required  # noqa: E402  (C.6 真 auth)
 
 # ---------------------------------------------------------------------------
