@@ -17,8 +17,16 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from app.router.auth_router import get_current_user_required
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+_OWNER = uuid.uuid4()
+
+
+class _U:
+    def __init__(self, uid: uuid.UUID) -> None:
+        self.id = uid
 
 
 @pytest.fixture
@@ -33,7 +41,7 @@ def app_with_chats_rename():
     fake_session = SimpleNamespace(
         id=fake_id,
         title="旧标题",
-        user_id="anonymous",
+        user_id=_OWNER,
         updated_at=datetime.utcnow(),
         message_count=0,
         last_msg_preview="",
@@ -41,7 +49,7 @@ def app_with_chats_rename():
     updated_session = SimpleNamespace(
         id=fake_id,
         title="新标题",
-        user_id="anonymous",
+        user_id=_OWNER,
         updated_at=datetime.utcnow(),
         message_count=0,
         last_msg_preview="",
@@ -54,6 +62,7 @@ def app_with_chats_rename():
     repo.find_active_task_for_session = AsyncMock(return_value=None)
 
     app.dependency_overrides[get_repo] = lambda: repo
+    app.dependency_overrides[get_current_user_required] = lambda: _U(_OWNER)
     return app, repo, fake_id
 
 
