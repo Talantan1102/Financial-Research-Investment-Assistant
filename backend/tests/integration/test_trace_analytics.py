@@ -113,12 +113,18 @@ def test_subagent_spans_excluded_from_turn_aggregates(db_session) -> None:
 def test_aggregate_explicit_range(db_session) -> None:
     # 范围内一条(~2 天前),范围外一条(~9 天前,大延迟)
     _span(
-        db_session, span_id="r-in", request_id="rr1", name="tool:get_quote",
+        db_session,
+        span_id="r-in",
+        request_id="rr1",
+        name="tool:get_quote",
         metadata={"kind": "tool", "latency_ms": 800, "cached": False, "success": True},
         secs_ago=2 * 86400 + 100,
     )
     _span(
-        db_session, span_id="r-out", request_id="rr2", name="tool:get_quote",
+        db_session,
+        span_id="r-out",
+        request_id="rr2",
+        name="tool:get_quote",
         metadata={"kind": "tool", "latency_ms": 9000, "cached": False, "success": True},
         secs_ago=9 * 86400,
     )
@@ -147,22 +153,39 @@ def test_aggregate_from_gt_to_raises(db_session) -> None:
 def test_daily_buckets(db_session) -> None:
     # 今天:1 模型 + 1 工具;昨天:1 模型(无工具);子循环一条(应排除)
     _span(
-        db_session, span_id="d1", request_id="t-today", name="LLMService.stream_step",
-        metadata={"prompt_tokens": 1000, "cached_tokens": 700, "cost_cny": 0.02, "latency_ms": 2000},
+        db_session,
+        span_id="d1",
+        request_id="t-today",
+        name="LLMService.stream_step",
+        metadata={
+            "prompt_tokens": 1000,
+            "cached_tokens": 700,
+            "cost_cny": 0.02,
+            "latency_ms": 2000,
+        },
         secs_ago=120,
     )
     _span(
-        db_session, span_id="d2", request_id="t-today", name="tool:kb_search",
+        db_session,
+        span_id="d2",
+        request_id="t-today",
+        name="tool:kb_search",
         metadata={"kind": "tool", "latency_ms": 3000, "cached": False, "success": True},
         secs_ago=120,
     )
     _span(
-        db_session, span_id="d3", request_id="t-yday", name="LLMService.stream_step",
+        db_session,
+        span_id="d3",
+        request_id="t-yday",
+        name="LLMService.stream_step",
         metadata={"prompt_tokens": 500, "cached_tokens": 250, "cost_cny": 0.01, "latency_ms": 1500},
         secs_ago=86400 + 120,
     )
     _span(
-        db_session, span_id="d4", request_id="t-today::sub::sub-0", name="LLMService.stream_step",
+        db_session,
+        span_id="d4",
+        request_id="t-today::sub::sub-0",
+        name="LLMService.stream_step",
         metadata={"prompt_tokens": 9999, "cached_tokens": 0, "cost_cny": 9.0, "latency_ms": 9},
         secs_ago=120,
     )

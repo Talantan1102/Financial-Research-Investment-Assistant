@@ -69,9 +69,7 @@ def test_aggregates_accepts_from_to(db_session) -> None:
     # 范围取 [昨天, 今天],避开 UTC/本地日界差(seed 的 span 在 ~now)
     frm = (date.today() - timedelta(days=1)).isoformat()
     to = date.today().isoformat()
-    resp = _client(db_session).get(
-        f"/api/v0/observability/chatloop/aggregates?from={frm}&to={to}"
-    )
+    resp = _client(db_session).get(f"/api/v0/observability/chatloop/aggregates?from={frm}&to={to}")
     assert resp.status_code == 200
     assert any(t["tool_name"] == "get_quote" for t in resp.json()["tool_latency"])
 
