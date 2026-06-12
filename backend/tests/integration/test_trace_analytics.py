@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from app.services.trace_analytics import ChatloopTraceAnalytics
 from app.services.trace_models import TraceSpanRow
@@ -108,3 +108,76 @@ def test_subagent_spans_excluded_from_turn_aggregates(db_session) -> None:
     # 子循环不算独立 turn,也不并入模型耗时聚合。
     assert agg.turn_count == 1
     assert round(agg.model_ms) == 2000
+
+
+def test_aggregate_explicit_range(db_session) -> None:
+    # 范围内一条(~2 天前),范围外一条(~9 天前,大延迟)
+    _span(
+        db_session, span_id="r-in", request_id="rr1", name="tool:get_quote",
+        metadata={"kind": "tool", "latency_ms": 800, "cached": False, "success": True},
+        secs_ago=2 * 86400 + 100,
+    )
+    _span(
+        db_session, span_id="r-out", request_id="rr2", name="tool:get_quote",
+        metadata={"kind": "tool", "latency_ms": 9000, "cached": False, "success": True},
+        secs_ago=9 * 86400,
+    )
+    db_session.flush()
+
+    analytics = ChatloopTraceAnalytics(lambda: nullcontext(db_session))
+    today = date.today()
+    agg = analytics.aggregate(start=today - timedelta(days=4), end=today)
+
+    tools = {t.tool_name: t for t in agg.tool_latency}
+    assert "get_quote" in tools
+    assert tools["get_quote"].calls == 1
+    assert tools["get_quote"].max_ms < 1000
+
+
+def test_aggregate_from_gt_to_raises(db_session) -> None:
+    analytics = ChatloopTraceAnalytics(lambda: nullcontext(db_session))
+    today = date.today()
+    try:
+        analytics.aggregate(start=today, end=today - timedelta(days=1))
+        raise AssertionError("should raise")
+    except ValueError:
+        pass
+
+
+def test_daily_buckets(db_session) -> None:
+    # 今天:1 模型 + 1 工具;昨天:1 模型(无工具);子循环一条(应排除)
+    _span(
+        db_session, span_id="d1", request_id="t-today", name="LLMService.stream_step",
+        metadata={"prompt_tokens": 1000, "cached_tokens": 700, "cost_cny": 0.02, "latency_ms": 2000},
+        secs_ago=120,
+    )
+    _span(
+        db_session, span_id="d2", request_id="t-today", name="tool:kb_search",
+        metadata={"kind": "tool", "latency_ms": 3000, "cached": False, "success": True},
+        secs_ago=120,
+    )
+    _span(
+        db_session, span_id="d3", request_id="t-yday", name="LLMService.stream_step",
+        metadata={"prompt_tokens": 500, "cached_tokens": 250, "cost_cny": 0.01, "latency_ms": 1500},
+        secs_ago=86400 + 120,
+    )
+    _span(
+        db_session, span_id="d4", request_id="t-today::sub::sub-0", name="LLMService.stream_step",
+        metadata={"prompt_tokens": 9999, "cached_tokens": 0, "cost_cny": 9.0, "latency_ms": 9},
+        secs_ago=120,
+    )
+    db_session.flush()
+
+    analytics = ChatloopTraceAnalytics(lambda: nullcontext(db_session))
+    today = datetime.now(UTC).date()  # 日桶按 UTC 切,断言也用 UTC 当天
+    days = analytics.daily(today - timedelta(days=3), today)
+    by = {d.date: d for d in days}
+
+    yday = today - timedelta(days=1)
+    assert today in by and yday in by
+    assert by[today].turns == 1  # 子循环不算 turn
+    assert by[today].tool_calls == 1
+    assert by[today].p95_ms is not None and by[today].p95_ms >= 3000 - 1
+    assert abs(by[today].cache_hit_rate - 0.7) < 1e-6
+    assert by[yday].p95_ms is None  # 昨天无工具 span
+    assert by[today].cost_cny < 1.0  # 子循环 9.0 被排除
