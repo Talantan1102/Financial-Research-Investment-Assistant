@@ -3,7 +3,8 @@
 build_overview(session, *, user_id) -> dict
   1. 读持仓(PositionService)
   2. 对每只持仓按 asset_class 取当日涨跌
-     - stock: get_index_daily(沪深300) 取市场涨跌 + get_sector_daily 取板块 + get_daily 取个股涨跌
+     - stock: get_index_daily(沪深300) 取市场涨跌 + get_sector_daily 取板块;
+              MVP: 个股当日涨跌用其板块涨跌近似(beta≈1),不调 get_daily
      - fund_otc / fund_etf: get_fund_nav 取净值涨跌
      - bond / gold / cash: today_pct = 0.0 (兜底)
   3. compute_daily_attribution -> AttributionResult
@@ -77,32 +78,6 @@ async def _get_sector_info(
         return None, None
 
 
-async def _get_stock_pct(
-    tushare: Any, ts_code: str, trade_date_end: str, fallback_pct: float | None
-) -> float:
-    """取个股当日涨跌幅;失败用 fallback_pct(板块),再失败返回 0.0。"""
-    try:
-        df = await tushare.get_daily(
-            ts_code=ts_code,
-            start=_lookback_str(10),
-            end=trade_date_end,
-        )
-        if df is None or getattr(df, "empty", True):
-            return fallback_pct if fallback_pct is not None else 0.0
-        df = df.sort_values("trade_date")
-        # pct_chg 列直接由 Tushare 提供;若缺列则用 close/pre_close 算
-        if "pct_chg" in df.columns:
-            return float(df.iloc[-1]["pct_chg"])
-        if "close" in df.columns and "pre_close" in df.columns:
-            last = df.iloc[-1]
-            prev_close = float(last["pre_close"])
-            if prev_close > 0:
-                return round((float(last["close"]) / prev_close - 1.0) * 100, 4)
-        return fallback_pct if fallback_pct is not None else 0.0
-    except Exception:
-        return fallback_pct if fallback_pct is not None else 0.0
-
-
 async def _get_fund_pct(tushare: Any, ts_code: str, trade_date_end: str) -> float:
     """取基金净值当日涨跌幅;失败返回 0.0。"""
     try:
@@ -162,9 +137,8 @@ async def build_overview(session: Session, *, user_id: object) -> dict:
             sector_name, sector_pct = await _get_sector_info(
                 tushare, pos.ts_code, trade_date_end
             )
-            today_pct = await _get_stock_pct(
-                tushare, pos.ts_code, trade_date_end, fallback_pct=sector_pct
-            )
+            # MVP: 个股当日涨跌用其板块涨跌近似(beta≈1),不调 get_daily(mock 端 LLM 背书、慢);real 端可后续接真 get_daily
+            today_pct = sector_pct if sector_pct is not None else 0.0
             holdings.append(
                 HoldingDaily(
                     ts_code=pos.ts_code,
