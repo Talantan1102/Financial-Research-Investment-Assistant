@@ -198,9 +198,10 @@ def test_daily_buckets(db_session) -> None:
 
     yday = today - timedelta(days=1)
     assert today in by and yday in by
-    assert by[today].turns == 1  # 子循环不算 turn
-    assert by[today].tool_calls == 1
-    assert by[today].p95_ms is not None and by[today].p95_ms >= 3000 - 1
-    assert abs(by[today].cache_hit_rate - 0.7) < 1e-6
+    d_today = by[today]
+    assert d_today.turns == 1  # 子循环不算 turn
+    assert d_today.tool_calls == 1
+    assert d_today.p95_ms is not None and d_today.p95_ms >= 3000 - 1
+    assert d_today.cache_hit_rate is not None and abs(d_today.cache_hit_rate - 0.7) < 1e-6
     assert by[yday].p95_ms is None  # 昨天无工具 span
-    assert by[today].cost_cny < 1.0  # 子循环 9.0 被排除
+    assert d_today.cost_cny < 1.0  # 子循环 9.0 被排除
