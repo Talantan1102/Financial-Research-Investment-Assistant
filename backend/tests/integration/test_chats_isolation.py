@@ -45,7 +45,7 @@ def _make_user(factory: object) -> uuid.UUID:
             )
             await sess.commit()
 
-    asyncio.get_event_loop().run_until_complete(_ins())
+    asyncio.run(_ins())
     return uid
 
 
@@ -119,7 +119,7 @@ def _make_session_task(factory: object, owner: uuid.UUID) -> uuid.UUID:
         )
         return task.id
 
-    return asyncio.get_event_loop().run_until_complete(_mk())
+    return asyncio.run(_mk())
 
 
 def test_chat_task_endpoint_idor_blocked(pg_async_session_factory: object) -> None:
