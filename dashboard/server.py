@@ -744,7 +744,7 @@ async def chatloop_observability_view(request: Request) -> HTMLResponse:
 
     数据源:后端只读聚合 / 逐日 API(BACKEND_BASE_URL)。任一不可达 → 该块降级,不崩页。
     """
-    from datetime import date, timedelta
+    from datetime import UTC, date, datetime, timedelta
 
     from dashboard.derive.calendar import build_calendar
     from dashboard.derive.observability import load_aggregates, load_daily
@@ -754,7 +754,7 @@ async def chatloop_observability_view(request: Request) -> HTMLResponse:
     metric = qp.get("metric", "cost")
     if metric not in ("cost", "turns", "p95", "cache"):
         metric = "cost"
-    today = date.today()
+    today = datetime.now(UTC).date()  # 与 SQL 的 UTC 日桶一致
 
     def _parse(s: str | None, default: date) -> date:
         try:
@@ -783,7 +783,13 @@ async def chatloop_observability_view(request: Request) -> HTMLResponse:
     template = templates.get_template("chatloop_observability.html")
     return HTMLResponse(
         template.render(
-            agg=agg, cal=cal, metric=metric, sel_from=sel_from, sel_to=sel_to, active_nav="eval"
+            agg=agg,
+            cal=cal,
+            metric=metric,
+            sel_from=sel_from,
+            sel_to=sel_to,
+            today=today,
+            active_nav="eval",
         )
     )
 

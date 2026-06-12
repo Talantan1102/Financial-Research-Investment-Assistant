@@ -91,6 +91,16 @@ def test_calendar_renders(monkeypatch) -> None:
     assert "metric=cost" in resp.text
 
 
+def test_today_shortcut_points_to_today(monkeypatch) -> None:
+    from datetime import UTC, datetime
+
+    _stub_both(monkeypatch)
+    resp = TestClient(app).get("/eval/chatloop-observability")
+    today = datetime.now(UTC).date().isoformat()
+    # 「今天」快捷链接应指向当天,而不是当前选区的止日
+    assert f"?from={today}&to={today}&metric=" in resp.text
+
+
 def test_calendar_degrades_when_daily_down(monkeypatch) -> None:
     monkeypatch.setattr(obs, "load_aggregates", lambda *a, **k: _FAKE)
 

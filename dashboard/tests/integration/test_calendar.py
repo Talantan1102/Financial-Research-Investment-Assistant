@@ -60,3 +60,18 @@ def test_href_single_to_range_then_range_to_single() -> None:
     # 当前是区间 → 点任一天 D 应重置为单天 [D, D]
     assert "from=2026-06-10" in by2[date(2026, 6, 10)].href
     assert "to=2026-06-10" in by2[date(2026, 6, 10)].href
+
+
+def test_default_range_first_click_resets_to_single() -> None:
+    # spec 真实入口:默认是 7 天「区间」→ 第一次点任一天应重置为「单天」(起点)
+    cal = build_calendar(
+        days=_days({"2026-06-10": 1.0}),
+        cal_from=date(2026, 6, 1),
+        cal_to=date(2026, 6, 14),
+        metric="cost",
+        sel_from=date(2026, 6, 8),
+        sel_to=date(2026, 6, 14),  # 默认 7 天区间
+    )
+    by = {c.date: c for wk in cal.weeks for c in wk.cells if c.date}
+    assert "from=2026-06-10" in by[date(2026, 6, 10)].href
+    assert "to=2026-06-10" in by[date(2026, 6, 10)].href
