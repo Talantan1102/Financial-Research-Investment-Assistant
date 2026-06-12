@@ -1,11 +1,13 @@
-"""auth_helpers 解耦后行为不变.
+"""auth_helpers: _AnonUser + get_current_user(C.6 接真 JWT 后)。
 
-Task 2: 把 _AnonUser + get_current_user 从 chat.py 抽到 auth_helpers.py。
-本 test 验证解耦后 implementation 与 chat.py 原版完全一致。
+get_current_user 现为 async 依赖:委托 auth_router.get_current_user 校验 Bearer token,
+有真 User 则直通、无/无效 token 回退 _AnonUser。本 test 验匿名回退侧;真 User 直通侧
+见 test_auth_helpers_real_auth.py。
 """
 
 from __future__ import annotations
 
+import pytest
 from app.router.auth_helpers import _AnonUser, get_current_user
 
 
@@ -16,20 +18,22 @@ def test_anon_user_default_id_is_anonymous() -> None:
 
 
 def test_anon_user_class_attr_is_anonymous() -> None:
-    """class-level id attribute 也是 'anonymous'(chat.py 原版同时声明 class attr 和 __init__ 赋值)。"""
+    """class-level id attribute 也是 'anonymous'。"""
     assert _AnonUser.id == "anonymous"
 
 
-def test_get_current_user_returns_anon_user_instance() -> None:
-    """get_current_user() 是 sync function,无参,返回 _AnonUser 实例。"""
-    user = get_current_user()
+@pytest.mark.asyncio
+async def test_get_current_user_falls_back_to_anon_when_no_token() -> None:
+    """get_current_user 是 async 依赖;无真 user(无/无效 token)→ 回退 _AnonUser。"""
+    user = await get_current_user(real_user=None)
     assert isinstance(user, _AnonUser)
     assert user.id == "anonymous"
 
 
-def test_get_current_user_returns_fresh_instance_each_call() -> None:
-    """每次调用返回新 _AnonUser 实例(stub 不缓存)。"""
-    u1 = get_current_user()
-    u2 = get_current_user()
+@pytest.mark.asyncio
+async def test_get_current_user_returns_fresh_anon_each_call() -> None:
+    """无 token 每次回退新 _AnonUser 实例(不缓存)。"""
+    u1 = await get_current_user(real_user=None)
+    u2 = await get_current_user(real_user=None)
     assert u1 is not u2
     assert u1.id == u2.id == "anonymous"
