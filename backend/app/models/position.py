@@ -56,7 +56,14 @@ class Position(Base):
     # v1.x 静默仓位口子(spec § 7)
     is_silenced = Column(Boolean, nullable=False, default=False)
 
+    # 资产类型:stock / fund_etf(场内ETF) / fund_otc(场外基金) / bond / gold / cash
+    asset_class = Column(String(32), nullable=False, default="stock", server_default="stock")
+
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __init__(self, **kwargs: object) -> None:
+        kwargs.setdefault("asset_class", "stock")
+        super().__init__(**kwargs)
 
     user = relationship("User", backref="positions")
 

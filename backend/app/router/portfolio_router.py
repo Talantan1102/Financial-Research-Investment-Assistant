@@ -166,6 +166,10 @@ async def onboarding(
                 note=tc.note,
             )
             created_trades.append(trade)
+            # 透传 asset_class → Position(默认 "stock",保持老调用零变化)
+            pos = pos_svc.get(user_id=str(user.id), ts_code=tc.ts_code)  # type: ignore[arg-type]
+            if pos is not None:
+                pos.asset_class = tc.asset_class  # type: ignore[assignment]
         db.commit()
     except PortfolioError as exc:
         db.rollback()

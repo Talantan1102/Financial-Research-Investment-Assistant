@@ -26,6 +26,7 @@ class TradeCreate(BaseModel):
     price: Decimal = Field(gt=Decimal("0"))
     trade_date: date
     note: str | None = None
+    asset_class: str = "stock"
 
 
 class TradeUpdate(BaseModel):
@@ -80,6 +81,7 @@ class PositionRead(BaseModel):
     last_quote_price: Decimal | None
     last_quote_at: datetime | None
     is_silenced: bool
+    asset_class: str
 
 
 class OnboardingRequest(BaseModel):
