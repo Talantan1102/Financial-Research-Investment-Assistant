@@ -409,6 +409,43 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         ),
         thin_required={"ts_code": "string", "start": "string", "end": "string"},
     ),
+    "get_index_daily": ToolDoc(
+        name="get_index_daily",
+        group="deferred",
+        brief="查指数当日涨跌(沪深300等)。问大盘/指数今天多少时用。",
+        doc="查指数日线与当日涨跌幅。ts_code 如 000300.SH(沪深300)。",
+        thin_required={"ts_code": "string", "start_date": "string", "end_date": "string"},
+    ),
+    "get_fund_nav": ToolDoc(
+        name="get_fund_nav",
+        group="deferred",
+        brief="查基金类型和净值涨跌,看不穿底层持仓。组合里基金部分的涨跌用它。",
+        doc=(
+            "查基金类型与每日净值涨跌(场内ETF/场外基金)。\n"
+            "何时用:用户组合里有基金仓位,要看该基金今日涨跌/净值;触发词:基金、ETF、净值、基金涨跌。\n"
+            "何时不用:查 A 股 → get_stock_quote;查指数 → get_index_daily。\n"
+            "注意:本工具只取净值层面涨跌,不穿透基金底层持仓(底层只到季报、滞后)。\n"
+            "参数:ts_code(str,必填,基金代码如 110011.OF)、start_date(YYYYMMDD)、end_date(YYYYMMDD)。\n"
+            "示例:get_fund_nav(ts_code='110011.OF', start_date='20261101', end_date='20261114')。"
+        ),
+        thin_required={"ts_code": "string", "start_date": "string", "end_date": "string"},
+    ),
+    "get_sector_daily": ToolDoc(
+        name="get_sector_daily",
+        group="deferred",
+        brief="查个股所属申万行业 + 该板块当日涨跌幅。持仓监控看板块表现时用。",
+        doc=(
+            "查某只个股所属申万一级行业 + 该行业指数当日涨跌幅。\n"
+            "何时用:用户持仓里有某只股票,想知道它所在板块今天涨跌了多少;"
+            "触发词:板块、行业、板块涨跌、行业指数、白酒板块、银行板块。\n"
+            "何时不用:查指数本身 → get_index_daily;查个股涨跌 → get_stock_quote。\n"
+            "参数:ts_code(str,必填,个股代码如 600519.SH)、trade_date(str,必填,YYYYMMDD)。\n"
+            "返回:{industry, index_code, pct_chg};若行业未配置则 pct_chg=null + note 说明。\n"
+            "示例:get_sector_daily(ts_code='600519.SH', trade_date='20261114')。\n"
+            "硬约束:ts_code 带交易所后缀;trade_date 必须是真实交易日,否则返回空。"
+        ),
+        thin_required={"ts_code": "string", "trade_date": "string"},
+    ),
     "get_portfolio_positions": ToolDoc(
         name="get_portfolio_positions",
         group="deferred",
@@ -455,6 +492,9 @@ DEFERRED_TOOLS: list[str] = [
     "read_cached_result",
     "get_daily",
     "get_portfolio_positions",
+    "get_index_daily",
+    "get_fund_nav",
+    "get_sector_daily",
 ]
 
 

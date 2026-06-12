@@ -104,17 +104,16 @@ def _call(name: str, args: dict) -> StepToolCall:
 # ---------------------------------------------------------------------------
 
 
-def test_tool_docs_count_is_18():
-    # 18 = 原 15 + dispatch_subagents(#144 chat 内子 agent 派发)
-    #      + get_daily + get_portfolio_positions(charting 数据工具)
-    assert len(TOOL_DOCS) == 18
+def test_tool_docs_count_is_21():
+    # 21 = 18 + 持仓总览取数工具(get_index_daily + get_fund_nav + get_sector_daily)
+    assert len(TOOL_DOCS) == 21
 
 
 def test_core_and_deferred_partition_no_overlap():
     core = set(CORE_TOOLS)
     deferred = set(DEFERRED_TOOLS)
     assert len(CORE_TOOLS) == 8  # +dispatch_subagents(e2e 实测定为核心)
-    assert len(DEFERRED_TOOLS) == 10  # +get_daily +get_portfolio_positions
+    assert len(DEFERRED_TOOLS) == 13  # +get_index_daily +get_fund_nav +get_sector_daily
     assert core & deferred == set()
     assert core | deferred == set(TOOL_DOCS.keys())
 
@@ -262,8 +261,8 @@ async def test_schemas_for_llm_groups_core_full_deferred_thin_search_last():
     schemas = hub.schemas_for_llm()
     names = [s["function"]["name"] for s in schemas]
 
-    # 总数 = 18 TOOL_DOCS + search_tools = 19
-    assert len(names) == 19
+    # 总数 = 21 TOOL_DOCS + search_tools = 22
+    assert len(names) == 22
     # search_tools 殿后
     assert names[-1] == "search_tools"
     # core 在前(顺序 = CORE_TOOLS)

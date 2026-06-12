@@ -260,6 +260,17 @@ module = [
 ]
 ignore_errors = true
 
+# v1.x 持仓总览引擎 — 同 app.models.* / monitoring 那套 SA 2.0 Column[T] interop
+# debt:快照 repo 给 Column[T] 属性赋标量值;Celery 任务把 Position 的 Column 属性
+# 传给期望标量(int/float/UUID)的 repo。修法同样是 mapped_column 迁移,deferred
+# to dedicated SA 2.0 sweep。
+[[tool.mypy.overrides]]
+module = [
+    "app.services.position_snapshot_repo",
+    "app.tasks.portfolio_snapshot",
+]
+ignore_errors = true
+
 # C.5 cross-session memory tests — same SA 2.0 Column[T] interop debt as
 # the v1.0 monitoring block above. Tests construct ORM models (AgeNode,
 # Episode, etc.) and pass their `.id` (Column[UUID] per mypy) to functions

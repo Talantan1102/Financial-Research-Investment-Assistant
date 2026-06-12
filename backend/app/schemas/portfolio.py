@@ -26,6 +26,7 @@ class TradeCreate(BaseModel):
     price: Decimal = Field(gt=Decimal("0"))
     trade_date: date
     note: str | None = None
+    asset_class: str = "stock"
 
 
 class TradeUpdate(BaseModel):
@@ -80,6 +81,7 @@ class PositionRead(BaseModel):
     last_quote_price: Decimal | None
     last_quote_at: datetime | None
     is_silenced: bool
+    asset_class: str = "stock"
 
 
 class OnboardingRequest(BaseModel):
@@ -95,3 +97,24 @@ class OnboardingResponse(BaseModel):
 
     trades: list[TradeRead]
     positions: list[PositionRead]
+
+
+class OverviewRead(BaseModel):
+    """GET /portfolio/overview 出参。"""
+
+    total_value: float
+    today_pct: float
+    ytd_pct: float
+    attribution: dict
+    structure: dict
+    narrative: str
+
+
+class TrendRead(BaseModel):
+    """GET /portfolio/overview/trend 出参。"""
+
+    dates: list[str]
+    portfolio: list[float]
+    benchmark: list[float]
+    cumulative: float
+    range: str
