@@ -13,6 +13,26 @@
   .obs-win:hover { color: var(--accent); border-color: var(--accent-deep); }
   .obs-win.on { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent-deep); }
 
+  .obs-metric { display: flex; gap: 6px; margin-top: 4px; }
+  .obs-metric a {
+    font-family: var(--mono); font-size: 11px; padding: 3px 10px; border-radius: var(--radius-pill);
+    text-decoration: none; color: var(--fg-mute); border: 1px solid var(--hair);
+  }
+  .obs-metric a:hover { color: var(--accent); border-color: var(--accent-deep); }
+  .obs-metric a.on { background: var(--accent-soft); color: var(--accent-deep); border-color: var(--accent-deep); }
+  .obs-quick { margin-top: 8px; font-size: 11px; }
+  .obs-quick a { font-family: var(--mono); color: var(--fg-mute); text-decoration: none; margin-right: 10px; }
+  .obs-quick a:hover { color: var(--accent); }
+  .obs-cal { display: flex; flex-direction: column; gap: 3px; margin-top: 10px; }
+  .obs-cal-row { display: flex; gap: 3px; }
+  .obs-cell { width: 15px; height: 15px; border-radius: 3px; background: var(--hair-2); display: block; }
+  .obs-cell.l1 { background: var(--accent-soft); }
+  .obs-cell.l2 { background: rgba(94, 92, 230, 0.32); }
+  .obs-cell.l3 { background: rgba(94, 92, 230, 0.60); }
+  .obs-cell.l4 { background: var(--accent); }
+  .obs-cell.sel { outline: 2px solid var(--accent-deep); outline-offset: 1px; }
+  .obs-cell.pad { background: transparent; }
+
   .obs-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(156px, 1fr)); gap: 14px; }
   .obs-card {
     background: var(--surface); border: 1px solid var(--hair); border-radius: var(--radius-md);
@@ -52,11 +72,39 @@
       每次模型调用与工具调用都落一条 trace span,这里把它们聚合成「慢在哪、贵在哪、缓存命中多少」。
       数据来自后端 <code>/observability/chatloop/aggregates</code>;工具 span 在 chat 真跑过后逐步累积。
     </p>
-    <div class="obs-windows">
-      {% for w in ['1d', '7d', '30d'] %}
-        <a class="obs-win {{ 'on' if w == window else '' }}" href="?window={{ w }}">最近 {{ w }}</a>
+    <div class="obs-metric">
+      {% set labels = {'cost': '花费', 'turns': '调用量', 'p95': 'p95 耗时', 'cache': '命中率'} %}
+      {% for m, lab in labels.items() %}
+        <a class="{{ 'on' if m == metric else '' }}"
+           href="?from={{ sel_from }}&to={{ sel_to }}&metric={{ m }}">{{ lab }}</a>
       {% endfor %}
     </div>
+    <div class="obs-quick">
+      <span style="color: var(--fg-faint);">快捷:</span>
+      <a href="?from={{ sel_to }}&to={{ sel_to }}&metric={{ metric }}">今天</a>
+      <a href="?metric={{ metric }}">近 7 天</a>
+    </div>
+    {% if cal %}
+    <div class="obs-cal" data-testid="obs-cal">
+      {% for wk in cal.weeks %}
+      <div class="obs-cal-row">
+        {% for c in wk.cells %}
+          {% if c.date is none %}
+            <span class="obs-cell pad"></span>
+          {% else %}
+            <a class="obs-cell l{{ c.intensity }} {{ 'sel' if c.in_sel else '' }}" href="{{ c.href }}"
+               title="{{ c.date }}{% if not c.empty %} · {{ '%.2f' % c.value }}{% endif %}"></a>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <p class="report-body" style="margin-top: 8px;">日历数据暂不可用。</p>
+    {% endif %}
+    <p class="report-subtitle" style="margin-top: 8px; font-size: 13px;">
+      已选 <code>{{ sel_from }}</code> — <code>{{ sel_to }}</code>(点起点、再点止选一段)
+    </p>
   </header>
 
   {% if agg is none %}

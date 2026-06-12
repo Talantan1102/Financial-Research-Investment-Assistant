@@ -1,4 +1,4 @@
-"""看板可观测性页 —— stub 后端聚合返回正常渲染;后端不可达走降级。"""
+"""看板可观测性页 —— stub 后端聚合/逐日;渲染、降级、日历。"""
 
 from __future__ import annotations
 
@@ -31,9 +31,28 @@ _FAKE = {
     "turn_count": 5,
 }
 
+_DAILY = {
+    "days": [
+        {
+            "date": "2026-06-10",
+            "cost_cny": 0.04,
+            "turns": 5,
+            "model_calls": 12,
+            "tool_calls": 8,
+            "p95_ms": 4200,
+            "cache_hit_rate": 0.7,
+        },
+    ]
+}
+
+
+def _stub_both(monkeypatch, agg=_FAKE, daily=_DAILY) -> None:
+    monkeypatch.setattr(obs, "load_aggregates", lambda *a, **k: agg)
+    monkeypatch.setattr(obs, "load_daily", lambda *a, **k: daily)
+
 
 def test_page_renders_aggregates(monkeypatch) -> None:
-    monkeypatch.setattr(obs, "load_aggregates", lambda *a, **k: _FAKE)
+    _stub_both(monkeypatch)
     resp = TestClient(app).get("/eval/chatloop-observability")
     assert resp.status_code == 200
     assert "get_quote" in resp.text
@@ -45,6 +64,7 @@ def test_page_degrades_when_backend_down(monkeypatch) -> None:
         raise OSError("connection refused")
 
     monkeypatch.setattr(obs, "load_aggregates", _boom)
+    monkeypatch.setattr(obs, "load_daily", _boom)
     resp = TestClient(app).get("/eval/chatloop-observability")
     assert resp.status_code == 200
     assert "未连接" in resp.text or "暂无数据" in resp.text
@@ -56,7 +76,27 @@ def test_page_no_500_when_all_p95_zero(monkeypatch) -> None:
         **_FAKE,
         "tool_latency": [{**_FAKE["tool_latency"][0], "p50_ms": 0, "p95_ms": 0, "max_ms": 0}],
     }
-    monkeypatch.setattr(obs, "load_aggregates", lambda *a, **k: fake)
+    _stub_both(monkeypatch, agg=fake)
     resp = TestClient(app).get("/eval/chatloop-observability")
     assert resp.status_code == 200
     assert "get_quote" in resp.text
+
+
+def test_calendar_renders(monkeypatch) -> None:
+    _stub_both(monkeypatch)
+    resp = TestClient(app).get("/eval/chatloop-observability?metric=cost")
+    assert resp.status_code == 200
+    assert "obs-cal" in resp.text  # 日历容器
+    assert "?from=" in resp.text  # 某格的选择链接
+    assert "metric=cost" in resp.text
+
+
+def test_calendar_degrades_when_daily_down(monkeypatch) -> None:
+    monkeypatch.setattr(obs, "load_aggregates", lambda *a, **k: _FAKE)
+
+    def _boom(*a, **k):
+        raise OSError("down")
+
+    monkeypatch.setattr(obs, "load_daily", _boom)
+    resp = TestClient(app).get("/eval/chatloop-observability")
+    assert resp.status_code == 200  # 日历挂了也不崩
