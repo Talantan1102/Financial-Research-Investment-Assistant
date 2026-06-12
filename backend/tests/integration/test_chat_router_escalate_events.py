@@ -74,8 +74,8 @@ def mock_record_repo():
 
 def _build_app_with_mocks(extractor_mock, repo_mock):
     """Build a minimal app with all chat-router deps overridden."""
+    from app.router.auth_router import get_current_user_required
     from app.router.chat import (
-        get_current_user,
         get_escalation_extractor,
         get_escalation_record_repo,
         router,
@@ -87,7 +87,7 @@ def _build_app_with_mocks(extractor_mock, repo_mock):
     app.dependency_overrides[get_escalation_extractor] = lambda: extractor_mock
     app.dependency_overrides[get_escalation_record_repo] = lambda: repo_mock
     # Stub out the user dep so the router can be instantiated
-    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="test-user")
+    app.dependency_overrides[get_current_user_required] = lambda: SimpleNamespace(id="test-user")
     return app
 
 

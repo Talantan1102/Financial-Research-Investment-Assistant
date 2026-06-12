@@ -29,9 +29,9 @@ import pytest_asyncio
 from app.chatloop.worker_wiring import build_heavy_singletons
 from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — 注册 users 表
+from app.router.auth_router import get_current_user_required
 from app.router.chat import (
     get_async_session_factory,
-    get_current_user,
     get_redis_async,
 )
 from app.router.chat import router as chat_router
@@ -44,6 +44,7 @@ from app.tasks.chat_runner import run_chat_async
 from fakeredis.aioredis import FakeRedis
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 # ---------------------------------------------------------------------------
@@ -168,9 +169,26 @@ async def _read_events(redis: FakeRedis, sid: uuid.UUID, tid: uuid.UUID) -> list
 # ---------------------------------------------------------------------------
 
 
+_STUB_UID = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
+
+
 class _StubUser:
     def __init__(self) -> None:
-        self.id = "test-user"
+        self.id = _STUB_UID
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _ensure_stub_user(pg_async_session_factory: async_sessionmaker[AsyncSession]) -> None:
+    """C.6: 插 stub user 行(sessions/tasks user_id=_STUB_UID 的 FK 前提)。"""
+    async with pg_async_session_factory() as sess:
+        await sess.execute(
+            text(
+                "INSERT INTO users (id, username, email, hashed_password, is_active) "
+                "VALUES (:id, :u, :e, :p, true) ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": str(_STUB_UID), "u": "stub_test_user", "e": "stub@t.local", "p": "x"},
+        )
+        await sess.commit()
 
 
 @pytest_asyncio.fixture
@@ -186,7 +204,7 @@ def _client(
 ) -> TestClient:
     app = FastAPI()
     app.include_router(chat_router)
-    app.dependency_overrides[get_current_user] = lambda: _StubUser()
+    app.dependency_overrides[get_current_user_required] = lambda: _StubUser()
     app.dependency_overrides[get_async_session_factory] = lambda: session_factory
     app.dependency_overrides[get_redis_async] = lambda: fake_redis_obj
     return TestClient(app, raise_server_exceptions=True)
@@ -201,7 +219,7 @@ async def _seed_session_and_task(
     """建 session + (可选)原始 user 消息 + task(initial_prompt 关联),mark 到目标态。"""
     sid = uuid.uuid4()
     async with factory() as sess:
-        sess.add(ChatSession(id=sid, user_id=None, title="t"))
+        sess.add(ChatSession(id=sid, user_id=_STUB_UID, title="t"))
         await sess.commit()
 
     repo = ChatSessionRepo(factory)
@@ -215,7 +233,7 @@ async def _seed_session_and_task(
     task_repo = ChatTaskRepo(factory)
     task = await task_repo.create_queued(
         session_id=sid,
-        user_id=None,
+        user_id=_STUB_UID,
         langgraph_thread_id=f"u:{sid}",
         initial_prompt_message_id=user_msg_id,
     )
@@ -302,7 +320,7 @@ async def test_steer_merged_into_running_turn_end_to_end(
         redis=fake_redis,
         user_message="我持有茅台吗",
         session_id=str(seeded["session_id"]),
-        user_id=None,
+        user_id=_STUB_UID,
     )
 
     # 第 2 圈(index 1)收到的 messages 应含插话(并入到尾部动态区/轨迹区)
@@ -479,7 +497,7 @@ async def test_escalation_unique_done_after_packet_draft(
         redis=fake_redis,
         user_message="帮我深度研究茅台",
         session_id=str(seeded["session_id"]),
-        user_id=None,
+        user_id=_STUB_UID,
     )
 
     events = await _read_events(fake_redis, seeded["session_id"], tid)
@@ -520,7 +538,7 @@ async def test_non_escalate_turn_single_done(
         redis=fake_redis,
         user_message="你好",
         session_id=str(seeded["session_id"]),
-        user_id=None,
+        user_id=_STUB_UID,
     )
 
     events = await _read_events(fake_redis, seeded["session_id"], tid)
