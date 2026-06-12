@@ -56,6 +56,8 @@ class TushareService(Protocol):
         self, *, ts_code: str, start_date: str, end_date: str
     ) -> pd.DataFrame: ...
     async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame: ...
+    async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame: ...
+    async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame: ...
 
     # Mock implementations should override aclose() as a no-op or handle their own cleanup.
     async def aclose(self) -> None: ...
@@ -248,6 +250,22 @@ class RealTushareService:
 
     async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame:
         return await self._call_cached("fund_basic", {"ts_code": ts_code})
+
+    async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame:
+        # fields 投影:只取 ts_code,name,industry(减少传输量)
+        return await self._call_cached(
+            "stock_basic",
+            {"ts_code": ts_code},
+            fields="ts_code,name,industry",
+        )
+
+    async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
+        # tushare sw_daily — 申万行业指数当日行情
+        # 积分不足时降级使用 index_daily(通用行情);此处保持真实接口
+        return await self._call_cached(
+            "sw_daily",
+            {"ts_code": index_code, "trade_date": trade_date},
+        )
 
     async def aclose(self) -> None:
         await self._client.aclose()

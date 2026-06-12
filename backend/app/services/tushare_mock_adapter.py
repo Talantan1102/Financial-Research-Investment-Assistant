@@ -236,6 +236,22 @@ class LegacyMockTushareAdapter:
             "market": ["O"],
         })
 
+    async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame:
+        # deterministic:固定返回白酒行业(贵州茅台)
+        return pd.DataFrame({
+            "ts_code": [ts_code],
+            "name": ["贵州茅台"],
+            "industry": ["白酒"],
+        })
+
+    async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
+        # deterministic:固定 -3.0% 当日涨跌
+        return pd.DataFrame({
+            "ts_code": [index_code],
+            "trade_date": [trade_date],
+            "pct_chg": [-3.0],
+        })
+
     async def aclose(self) -> None:
         """No-op: legacy MockTushareService has no connections to close."""
         pass
