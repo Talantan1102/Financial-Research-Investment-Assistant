@@ -81,7 +81,7 @@ class PositionRead(BaseModel):
     last_quote_price: Decimal | None
     last_quote_at: datetime | None
     is_silenced: bool
-    asset_class: str
+    asset_class: str = "stock"
 
 
 class OnboardingRequest(BaseModel):

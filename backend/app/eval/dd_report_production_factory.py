@@ -123,6 +123,24 @@ class _BacktestTushareService:
     async def get_money_flow(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         return pd.DataFrame()
 
+    # 持仓总览新增的取数方法 — 回测适配器不提供市场/基金/板块数据,返回空
+    async def get_index_daily(
+        self, *, ts_code: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    async def get_fund_nav(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
+        return pd.DataFrame()
+
     async def aclose(self) -> None:
         pass
 
