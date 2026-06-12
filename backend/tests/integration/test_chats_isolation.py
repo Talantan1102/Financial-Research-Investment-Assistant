@@ -1,3 +1,4 @@
+# mypy: disable-error-code="arg-type, return-value"
 """chats.py 用户隔离回归:无 token 401 / A·B 各看各 / 越权 404(IDOR 堵死)。
 
 C.6 chat 子系统接真 auth 后,会话列表/CRUD 必须按 user.id 隔离。
