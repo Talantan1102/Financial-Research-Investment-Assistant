@@ -60,3 +60,28 @@ def test_response_leaks_no_span_content(db_session) -> None:
 def test_invalid_window_400(db_session) -> None:
     resp = _client(db_session).get("/api/v0/observability/chatloop/aggregates?window=99y")
     assert resp.status_code == 400
+
+
+def test_aggregates_accepts_from_to(db_session) -> None:
+    _seed(db_session)
+    from datetime import date, timedelta
+
+    # 范围取 [昨天, 今天],避开 UTC/本地日界差(seed 的 span 在 ~now)
+    frm = (date.today() - timedelta(days=1)).isoformat()
+    to = date.today().isoformat()
+    resp = _client(db_session).get(f"/api/v0/observability/chatloop/aggregates?from={frm}&to={to}")
+    assert resp.status_code == 200
+    assert any(t["tool_name"] == "get_quote" for t in resp.json()["tool_latency"])
+
+
+def test_daily_endpoint(db_session) -> None:
+    _seed(db_session)
+    from datetime import date, timedelta
+
+    frm = (date.today() - timedelta(days=3)).isoformat()
+    to = date.today().isoformat()
+    resp = _client(db_session).get(f"/api/v0/observability/chatloop/daily?from={frm}&to={to}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "days" in body and isinstance(body["days"], list)
+    assert "secret_arg" not in resp.text and "茅台" not in resp.text

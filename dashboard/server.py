@@ -740,21 +740,58 @@ async def chatloop_live_view(request: Request) -> HTMLResponse:
 
 
 async def chatloop_observability_view(request: Request) -> HTMLResponse:
-    """GET /eval/chatloop-observability — chatloop 运行时可观测性聚合(实时拉后端 API)。
+    """GET /eval/chatloop-observability — chatloop 运行时可观测性(日历热力图 + 任意范围)。
 
-    数据源:后端只读聚合 API（BACKEND_BASE_URL）。后端不可达 → 降级占位,不崩页。
+    数据源:后端只读聚合 / 逐日 API(BACKEND_BASE_URL)。任一不可达 → 该块降级,不崩页。
     """
-    from dashboard.derive.observability import load_aggregates
+    from datetime import UTC, date, datetime, timedelta
+
+    from dashboard.derive.calendar import build_calendar
+    from dashboard.derive.observability import load_aggregates, load_daily
 
     backend = os.getenv("BACKEND_BASE_URL", "http://localhost:8000")
-    window = request.query_params.get("window", "7d")
+    qp = request.query_params
+    metric = qp.get("metric", "cost")
+    if metric not in ("cost", "turns", "p95", "cache"):
+        metric = "cost"
+    today = datetime.now(UTC).date()  # 与 SQL 的 UTC 日桶一致
+
+    def _parse(s: str | None, default: date) -> date:
+        try:
+            return date.fromisoformat(s) if s else default
+        except ValueError:
+            return default
+
+    sel_to = _parse(qp.get("to"), today)
+    sel_from = _parse(qp.get("from"), today - timedelta(days=6))
+    if sel_from > sel_to:
+        sel_from, sel_to = sel_to, sel_from
+    cal_from, cal_to = today - timedelta(days=90), today
+
     try:
-        agg = load_aggregates(backend, window)
+        agg = load_aggregates(backend, frm=sel_from.isoformat(), to=sel_to.isoformat())
     except Exception as e:  # noqa: BLE001 — 后端不可达降级,不崩页
-        logger.warning("observability fetch failed: %s", e)
+        logger.warning("observability aggregates fetch failed: %s", e)
         agg = None
+    try:
+        daily = load_daily(backend, cal_from.isoformat(), cal_to.isoformat())
+        cal = build_calendar(daily["days"], cal_from, cal_to, metric, sel_from, sel_to)
+    except Exception as e:  # noqa: BLE001 — 日历挂了也不崩
+        logger.warning("observability daily fetch failed: %s", e)
+        cal = None
+
     template = templates.get_template("chatloop_observability.html")
-    return HTMLResponse(template.render(agg=agg, window=window, active_nav="eval"))
+    return HTMLResponse(
+        template.render(
+            agg=agg,
+            cal=cal,
+            metric=metric,
+            sel_from=sel_from,
+            sel_to=sel_to,
+            today=today,
+            active_nav="eval",
+        )
+    )
 
 
 app = Starlette(
