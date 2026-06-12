@@ -50,3 +50,25 @@ def compute_daily_attribution(holdings: list[HoldingDaily]) -> AttributionResult
         stock_breakdown={"market": round(market, 6), "sector_excess": round(sector_excess, 6), "idiosyncratic": round(idio, 6)},
         contributions=contributions,
     )
+
+
+@dataclass
+class DailySnap:
+    date: str
+    holdings: dict[str, tuple[int, float]]   # ts_code -> (qty, price)
+
+
+def compute_twr(snaps: list[DailySnap]) -> dict:
+    """时间加权链式收益:用每日'期初持仓'估值算当日纯市场收益,剔除加减仓。"""
+    snaps = sorted(snaps, key=lambda s: s.date)
+    daily: list[float] = []
+    cum = 1.0
+    for prev, cur in zip(snaps, snaps[1:]):
+        # 用 prev(期初)的持仓数量,分别按 prev、cur 当日价估值
+        base = sum(qty * prev.holdings[c][1] for c, (qty, _) in prev.holdings.items())
+        nowv = sum(qty * cur.holdings.get(c, (0, prev.holdings[c][1]))[1]
+                   for c, (qty, _) in prev.holdings.items())
+        r = (nowv / base - 1.0) if base else 0.0
+        daily.append(round(r, 10))
+        cum *= (1.0 + r)
+    return {"daily": daily, "cumulative": round(cum - 1.0, 10)}
