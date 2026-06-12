@@ -409,6 +409,13 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         ),
         thin_required={"ts_code": "string", "start": "string", "end": "string"},
     ),
+    "get_index_daily": ToolDoc(
+        name="get_index_daily",
+        group="deferred",
+        brief="查指数当日涨跌(沪深300等)。问大盘/指数今天多少时用。",
+        doc="查指数日线与当日涨跌幅。ts_code 如 000300.SH(沪深300)。",
+        thin_required={"ts_code": "string", "start_date": "string", "end_date": "string"},
+    ),
     "get_portfolio_positions": ToolDoc(
         name="get_portfolio_positions",
         group="deferred",
@@ -455,6 +462,7 @@ DEFERRED_TOOLS: list[str] = [
     "read_cached_result",
     "get_daily",
     "get_portfolio_positions",
+    "get_index_daily",
 ]
 
 

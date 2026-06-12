@@ -209,6 +209,16 @@ class LegacyMockTushareAdapter:
             }
         )
 
+    async def get_index_daily(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        # deterministic:两日,当日 -0.80%
+        return pd.DataFrame({
+            "ts_code": [ts_code, ts_code],
+            "trade_date": ["20261113", "20261114"],
+            "close": [4000.0, 3968.0],
+            "pre_close": [4010.0, 4000.0],
+            "pct_chg": [-0.25, -0.80],
+        })
+
     async def aclose(self) -> None:
         """No-op: legacy MockTushareService has no connections to close."""
         pass
