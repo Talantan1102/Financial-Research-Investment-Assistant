@@ -572,3 +572,86 @@ def test_prefix_stability_with_prior_downgrade():
     round2 = assemble_context(state, deps)
     for i in range(K):
         assert round1[i] == round2[i], f"prefix mismatch at idx={i}"
+
+
+# ---------------------------------------------------------------------------
+# ① 上下文压力安全阀
+# ---------------------------------------------------------------------------
+
+
+def test_estimate_messages_tokens():
+    """总量估算 helper:content + tool_calls 文本均计入,缺 content 不报错。"""
+    from app.chatloop.context import _estimate_messages_tokens
+
+    msgs = [
+        {"role": "system", "content": "你好世界"},
+        _tool_call_msg("c1", "query_kb", {"q": "abcd"}),
+        _tool_result_msg("c1", "result text here"),
+    ]
+    n = _estimate_messages_tokens(msgs)
+    assert n > 0
+    # content=None / 缺 content 不报错,返回 0
+    assert _estimate_messages_tokens([{"role": "user"}]) == 0
+
+
+def _three_old_plus_recent() -> list[dict]:
+    """三条中等老圈 tool 消息(每条 600 字符 < 1320 降级线)+ 一圈最近的(受保护)。"""
+    return [
+        {"role": "user", "content": "q"},
+        _tool_call_msg("a1", "query_kb", {"i": 1}),
+        _tool_result_msg("a1", "甲" * 600),
+        _tool_call_msg("a2", "query_kb", {"i": 2}),
+        _tool_result_msg("a2", "乙" * 600),
+        _tool_call_msg("a3", "query_kb", {"i": 3}),
+        _tool_result_msg("a3", "丙" * 600),
+        _tool_call_msg("z1", "query_kb", {"i": 99}),
+        _tool_result_msg("z1", "最近" * 300),  # 最近一圈
+    ]
+
+
+def test_pressure_valve_off_by_default():
+    """max_context_tokens 默认 0 = 安全阀关闭:中等消息全不降级。"""
+    state = _make_state(messages=_three_old_plus_recent(), step=4)
+    deps = _make_deps(persona_block="", skill_listing="")  # 不传 max_context_tokens
+    assemble_context(state, deps)
+    assert state.messages[2]["content"] == "甲" * 600
+    assert state.context_pressure_passes == 0
+    assert state.context_pressure_floor_hit is False
+
+
+def test_pressure_valve_squeezes_old_rounds():
+    """窗口设极小 → 安全阀启动,逐级榨老圈;最近一圈全文保护。"""
+    state = _make_state(messages=_three_old_plus_recent(), step=4)
+    deps = ContextDeps(
+        system_prompt="sys",
+        max_context_tokens=600,
+        context_pressure_ratio=0.85,
+    )
+    assemble_context(state, deps)
+    # 老圈中等消息被降级
+    assert state.messages[2]["content"].startswith("[全文已缓存")
+    assert state.messages[4]["content"].startswith("[全文已缓存")
+    assert state.messages[6]["content"].startswith("[全文已缓存")
+    # 最近一圈全文保护
+    assert "最近" * 300 in state.messages[8]["content"]
+    assert state.context_pressure_passes > 0
+
+
+def test_pressure_valve_floor_hit_best_effort():
+    """只有最近一圈一条超大消息、老圈无可榨 → 收紧到底仍超 → floor_hit,不抛异常。"""
+    messages = [
+        {"role": "user", "content": "q"},
+        _tool_call_msg("z1", "query_kb", {"i": 1}),
+        _tool_result_msg("z1", "巨" * 5000),  # 最近一圈,永久保护
+    ]
+    state = _make_state(messages=messages, step=1)
+    deps = ContextDeps(
+        system_prompt="sys",
+        max_context_tokens=100,
+        context_pressure_ratio=0.85,
+    )
+    result = assemble_context(state, deps)
+    assert isinstance(result, list)
+    # 最近一圈全文未动
+    assert "巨" * 5000 in state.messages[2]["content"]
+    assert state.context_pressure_floor_hit is True

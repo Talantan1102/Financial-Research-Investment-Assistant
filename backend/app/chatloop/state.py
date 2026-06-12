@@ -156,6 +156,9 @@ class ChatLoopState(BaseModel):
     tool_choice: str = "auto"  # 升级熔断时被置 "none"(spec § 3.5)
     active_skill: str | None = None  # 活跃技能方法论不降级(spec § 3.4)
     downgraded_msg_indices: set[int] = Field(default_factory=set)  # turn 内降级幂等标记
+    # ① 上下文压力安全阀:本圈按总量收紧降级跑了几轮(0=未触发);榨到下限仍超目标(best-effort)
+    context_pressure_passes: int = 0
+    context_pressure_floor_hit: bool = False
     final_response: str | None = None  # = 最后一条 assistant content
 
     model_config = ConfigDict(arbitrary_types_allowed=True)

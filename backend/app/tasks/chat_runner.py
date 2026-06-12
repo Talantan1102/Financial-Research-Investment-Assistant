@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from contextlib import suppress
 from typing import Any
@@ -259,6 +260,7 @@ async def run_chat_async(
         history_block=history_block,
         max_steps=components.gate_cfg.max_steps,
         max_cny=components.gate_cfg.max_cny,
+        max_context_tokens=int(os.getenv("CHATLOOP_MAX_CONTEXT_TOKENS", "100000")),
     )
 
     state = ChatLoopState(

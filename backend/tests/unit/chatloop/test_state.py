@@ -529,3 +529,11 @@ def test_trailing_failure_count_zero_when_tail_success():
 
 def test_trailing_failure_count_empty_ledger():
     assert ToolLedger().trailing_failure_count() == 0
+
+
+def test_context_pressure_fields_default():
+    from app.chatloop.state import ChatLoopState
+
+    st = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
+    assert st.context_pressure_passes == 0
+    assert st.context_pressure_floor_hit is False

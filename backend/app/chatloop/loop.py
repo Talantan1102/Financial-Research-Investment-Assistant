@@ -166,6 +166,15 @@ class ToolLoop:
             # 5. 组窗口(纯函数)
             messages = assemble_context(state, self._deps)
 
+            # 5.1 上下文压力安全阀触发 → 发事件(喂⑦看板,可观测/可归因)
+            if state.context_pressure_passes > 0:
+                await self._emit(
+                    "context_pressure",
+                    state.step + 1,
+                    passes=state.context_pressure_passes,
+                    floor_hit=state.context_pressure_floor_hit,
+                )
+
             # 6. 单 LLM 流式调用
             step_result: StepResult = await self._llm.stream_step(
                 messages=messages,
