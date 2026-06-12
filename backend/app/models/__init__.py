@@ -33,6 +33,7 @@ from .monitoring import (
 )
 from .news import BiddingInfo, IndustryNews, NewsCollectionTask
 from .position import Position
+from .position_snapshot import PositionSnapshot  # noqa: F401
 from .research import ResearchCheckpoint
 from .research_report import ResearchReport
 from .subagent_dispatch import SubagentDispatchRun  # noqa: F401
@@ -76,4 +77,6 @@ __all__ = [
     "ChatMemoryCalibrationRun",
     # chat 子 agent 派发审计(2026-06-11)
     "SubagentDispatchRun",
+    # portfolio 每日持仓快照(Task 2)
+    "PositionSnapshot",
 ]
