@@ -28,6 +28,7 @@ TOOL_DEF = Tool(
 
 async def handle(args: dict[str, Any]) -> list[TextContent]:
     from app.tools.get_sector_daily import GetSectorDailyTool, SectorDailyArgs
+
     tool = GetSectorDailyTool()
     result = await tool.run(SectorDailyArgs.model_validate(args))
     return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]

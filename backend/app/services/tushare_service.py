@@ -236,7 +236,9 @@ class RealTushareService:
             {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
         )
 
-    async def get_index_daily(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    async def get_index_daily(
+        self, *, ts_code: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
         return await self._call_cached(
             "index_daily",  # tushare 真实 API
             {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},

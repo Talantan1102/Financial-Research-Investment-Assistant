@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pandas as pd
 from pydantic import BaseModel
 
 from app.tools.base import Tool
@@ -28,31 +27,31 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _INDUSTRY_TO_SW: dict[str, str] = {
-    "白酒": "801120.SI",       # 食品饮料(白酒归属)
+    "白酒": "801120.SI",  # 食品饮料(白酒归属)
     "食品饮料": "801120.SI",
     "银行": "801780.SI",
-    "新能源": "801200.SI",     # 电力设备(含新能源)
+    "新能源": "801200.SI",  # 电力设备(含新能源)
     "电力设备": "801200.SI",
-    "半导体": "801080.SI",     # 电子
+    "半导体": "801080.SI",  # 电子
     "电子": "801080.SI",
-    "医药": "801150.SI",       # 医药生物
+    "医药": "801150.SI",  # 医药生物
     "医药生物": "801150.SI",
     "生物医药": "801150.SI",
     "汽车": "801880.SI",
     "计算机": "801750.SI",
     "传媒": "801760.SI",
     "通信": "801770.SI",
-    "军工": "801740.SI",       # 国防军工
+    "军工": "801740.SI",  # 国防军工
     "国防军工": "801740.SI",
     "钢铁": "801040.SI",
     "煤炭": "801050.SI",
     "有色金属": "801020.SI",
-    "化工": "801030.SI",       # 基础化工
+    "化工": "801030.SI",  # 基础化工
     "基础化工": "801030.SI",
     "建筑材料": "801710.SI",
     "建筑装饰": "801720.SI",
     "房地产": "801180.SI",
-    "商业贸易": "801200.SI",   # 商贸零售
+    "商业贸易": "801200.SI",  # 商贸零售
     "商贸零售": "801200.SI",
     "家用电器": "801110.SI",
     "纺织服装": "801130.SI",
@@ -73,8 +72,8 @@ _INDUSTRY_TO_SW: dict[str, str] = {
 
 
 class SectorDailyArgs(BaseModel):
-    ts_code: str         # 个股代码,如 "600519.SH"
-    trade_date: str      # YYYYMMDD,查询当日
+    ts_code: str  # 个股代码,如 "600519.SH"
+    trade_date: str  # YYYYMMDD,查询当日
 
 
 def _format_sector(
@@ -104,6 +103,7 @@ class GetSectorDailyTool(Tool):
     def __init__(self, tushare: TushareService | None = None) -> None:
         if tushare is None:
             from app.services.tushare_factory import build_tushare_service
+
             tushare = build_tushare_service()
         self._tushare = tushare
 
@@ -122,9 +122,7 @@ class GetSectorDailyTool(Tool):
             return _format_sector(industry, None, None)
 
         # 3. 取行业指数当日涨跌
-        df = await self._tushare.get_sw_index_daily(
-            index_code=index_code, trade_date=a.trade_date
-        )
+        df = await self._tushare.get_sw_index_daily(index_code=index_code, trade_date=a.trade_date)
         if df is None or df.empty:
             return _format_sector(industry, index_code, None)
 

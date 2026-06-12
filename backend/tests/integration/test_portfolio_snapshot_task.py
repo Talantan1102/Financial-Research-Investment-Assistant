@@ -15,10 +15,9 @@ from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
-
 from app.models.position import Position
 from app.models.position_snapshot import PositionSnapshot
-from app.services.position_snapshot_repo import PositionSnapshotRepo
+
 from tests.unit._helpers import make_user
 
 
@@ -51,10 +50,12 @@ def _run_task_with_session(db_session):
     """Call the task implementation with an injected session (no broker)."""
     from app.tasks.portfolio_snapshot import _run_snapshot
 
-    with patch("app.tasks.portfolio_snapshot._get_session", return_value=db_session):
-        # _run_snapshot must NOT close our test session, so we patch close to no-op
-        with patch.object(db_session, "close"):
-            return _run_snapshot()
+    # _run_snapshot must NOT close our test session, so we patch close to no-op
+    with (
+        patch("app.tasks.portfolio_snapshot._get_session", return_value=db_session),
+        patch.object(db_session, "close"),
+    ):
+        return _run_snapshot()
 
 
 def test_snapshot_writes_market_value_from_last_quote_price(db_session):
@@ -82,7 +83,9 @@ def test_snapshot_writes_market_value_from_last_quote_price(db_session):
 def test_snapshot_falls_back_to_avg_cost_when_no_quote(db_session):
     """When last_quote_price is None, market_value falls back to avg_cost * quantity."""
     user = make_user(db_session)
-    _make_position(db_session, user, "110011.OF", 10000, 2.5, last_quote_price=None, asset_class="fund_otc")
+    _make_position(
+        db_session, user, "110011.OF", 10000, 2.5, last_quote_price=None, asset_class="fund_otc"
+    )
 
     today = datetime.date.today()
     _run_task_with_session(db_session)
@@ -105,9 +108,7 @@ def test_snapshot_skips_zero_quantity_positions(db_session):
     _run_task_with_session(db_session)
 
     count = (
-        db_session.query(PositionSnapshot)
-        .filter_by(user_id=user.id, ts_code="000001.SZ")
-        .count()
+        db_session.query(PositionSnapshot).filter_by(user_id=user.id, ts_code="000001.SZ").count()
     )
     assert count == 0
 
@@ -121,9 +122,7 @@ def test_snapshot_idempotent_upsert(db_session):
     _run_task_with_session(db_session)
 
     count = (
-        db_session.query(PositionSnapshot)
-        .filter_by(user_id=user.id, ts_code="600519.SH")
-        .count()
+        db_session.query(PositionSnapshot).filter_by(user_id=user.id, ts_code="600519.SH").count()
     )
     assert count == 1
 
@@ -144,9 +143,7 @@ def test_snapshot_handles_multiple_users_and_positions(db_session):
     assert result["count"] == 2
 
     snap_a = (
-        db_session.query(PositionSnapshot)
-        .filter_by(user_id=user_a.id, snapshot_date=today)
-        .all()
+        db_session.query(PositionSnapshot).filter_by(user_id=user_a.id, snapshot_date=today).all()
     )
     snap_b_active = (
         db_session.query(PositionSnapshot)
@@ -154,9 +151,7 @@ def test_snapshot_handles_multiple_users_and_positions(db_session):
         .all()
     )
     snap_b_zero = (
-        db_session.query(PositionSnapshot)
-        .filter_by(user_id=user_b.id, ts_code="000001.SZ")
-        .all()
+        db_session.query(PositionSnapshot).filter_by(user_id=user_b.id, ts_code="000001.SZ").all()
     )
 
     assert len(snap_a) == 1

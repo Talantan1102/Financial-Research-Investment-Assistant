@@ -209,48 +209,60 @@ class LegacyMockTushareAdapter:
             }
         )
 
-    async def get_index_daily(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+    async def get_index_daily(
+        self, *, ts_code: str, start_date: str, end_date: str
+    ) -> pd.DataFrame:
         # deterministic:两日,当日 -0.80%
-        return pd.DataFrame({
-            "ts_code": [ts_code, ts_code],
-            "trade_date": ["20261113", "20261114"],
-            "close": [4000.0, 3968.0],
-            "pre_close": [4010.0, 4000.0],
-            "pct_chg": [-0.25, -0.80],
-        })
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code, ts_code],
+                "trade_date": ["20261113", "20261114"],
+                "close": [4000.0, 3968.0],
+                "pre_close": [4010.0, 4000.0],
+                "pct_chg": [-0.25, -0.80],
+            }
+        )
 
     async def get_fund_nav(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         # deterministic:两日净值,当日 -1.0%
-        return pd.DataFrame({
-            "ts_code": [ts_code, ts_code],
-            "nav_date": ["20261113", "20261114"],
-            "unit_nav": [2.500, 2.475],
-        })
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code, ts_code],
+                "nav_date": ["20261113", "20261114"],
+                "unit_nav": [2.500, 2.475],
+            }
+        )
 
     async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame:
         # deterministic:股票型示例基金
-        return pd.DataFrame({
-            "ts_code": [ts_code],
-            "name": ["示例基金"],
-            "fund_type": ["股票型"],
-            "market": ["O"],
-        })
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code],
+                "name": ["示例基金"],
+                "fund_type": ["股票型"],
+                "market": ["O"],
+            }
+        )
 
     async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame:
         # deterministic:固定返回白酒行业(贵州茅台)
-        return pd.DataFrame({
-            "ts_code": [ts_code],
-            "name": ["贵州茅台"],
-            "industry": ["白酒"],
-        })
+        return pd.DataFrame(
+            {
+                "ts_code": [ts_code],
+                "name": ["贵州茅台"],
+                "industry": ["白酒"],
+            }
+        )
 
     async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
         # deterministic:固定 -3.0% 当日涨跌
-        return pd.DataFrame({
-            "ts_code": [index_code],
-            "trade_date": [trade_date],
-            "pct_chg": [-3.0],
-        })
+        return pd.DataFrame(
+            {
+                "ts_code": [index_code],
+                "trade_date": [trade_date],
+                "pct_chg": [-3.0],
+            }
+        )
 
     async def aclose(self) -> None:
         """No-op: legacy MockTushareService has no connections to close."""

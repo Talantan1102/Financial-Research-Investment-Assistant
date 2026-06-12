@@ -16,17 +16,15 @@ from collections.abc import Iterator
 from decimal import Decimal
 
 import pytest
+from app.core.database import get_db
+from app.models.position import Position
+from app.models.position_snapshot import PositionSnapshot
+from app.models.user import User
+from app.router.auth_router import get_current_user_required
+from app.router.portfolio_router import router as portfolio_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-
-from app.core.database import get_db
-from app.models.user import User
-from app.models.position import Position
-from app.models.position_snapshot import PositionSnapshot
-from app.router.auth_router import get_current_user_required
-from app.router.portfolio_router import router as portfolio_router
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -177,6 +175,7 @@ def test_trend_benchmark_filled(client_with_user: tuple[TestClient, User]) -> No
 
 def test_overview_unauthenticated(db_session: Session) -> None:
     """不带 auth 覆盖时应返回 401。"""
+
     def _override_get_db() -> Iterator[Session]:
         yield db_session
 

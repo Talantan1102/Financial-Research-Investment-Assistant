@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
-from app.tools.get_fund_nav import _format_fund_nav
 from app.mcp_server.tools.get_fund_nav import TOOL_DEF
+from app.tools.get_fund_nav import _format_fund_nav
 
 
 def test_format_fund_nav_latest_and_type() -> None:
-    nav = pd.DataFrame({
-        "ts_code": ["110011.OF", "110011.OF"],
-        "nav_date": ["20261113", "20261114"],
-        "unit_nav": [2.500, 2.475],
-    })
+    nav = pd.DataFrame(
+        {
+            "ts_code": ["110011.OF", "110011.OF"],
+            "nav_date": ["20261113", "20261114"],
+            "unit_nav": [2.500, 2.475],
+        }
+    )
     out = _format_fund_nav(nav, "110011.OF", fund_type="股票型", fund_name="某白酒主题")
     assert out["fund_type"] == "股票型"
     assert out["latest"]["unit_nav"] == 2.475
@@ -27,11 +29,13 @@ def test_format_fund_nav_empty_returns_none_latest() -> None:
 
 
 def test_format_fund_nav_has_honesty_note() -> None:
-    nav = pd.DataFrame({
-        "ts_code": ["110011.OF", "110011.OF"],
-        "nav_date": ["20261113", "20261114"],
-        "unit_nav": [2.500, 2.475],
-    })
+    nav = pd.DataFrame(
+        {
+            "ts_code": ["110011.OF", "110011.OF"],
+            "nav_date": ["20261113", "20261114"],
+            "unit_nav": [2.500, 2.475],
+        }
+    )
     out = _format_fund_nav(nav, "110011.OF", fund_type="股票型", fund_name="某白酒主题")
     assert "as_of_note" in out
     assert "净值" in out["as_of_note"]

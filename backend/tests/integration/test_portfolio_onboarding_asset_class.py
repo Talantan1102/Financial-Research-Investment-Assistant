@@ -9,14 +9,11 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-import pytest
-from sqlalchemy.orm import Session
-
-from app.models.position import Position
-from app.models.trade import Trade, TradeType
+from app.models.trade import TradeType
 from app.models.user import User
 from app.services.position_service import PositionService
 from app.services.trade_service import TradeService
+from sqlalchemy.orm import Session
 
 
 def _make_user(session: Session) -> User:

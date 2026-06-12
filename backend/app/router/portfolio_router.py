@@ -34,9 +34,10 @@ from app.schemas.portfolio import (
     PositionRead,
     TradeCreate,
     TradeRead,
-    TrendRead,
     TradeUpdate,
+    TrendRead,
 )
+from app.services.portfolio_analytics import DailySnap, compute_twr
 from app.services.portfolio_exceptions import (
     ExpiredDeletionError,
     ImmutableTradeError,
@@ -44,7 +45,6 @@ from app.services.portfolio_exceptions import (
 )
 from app.services.portfolio_narrator import narrate_today
 from app.services.portfolio_overview_service import build_overview
-from app.services.portfolio_analytics import compute_twr, DailySnap
 from app.services.position_service import PositionService
 from app.services.position_snapshot_repo import PositionSnapshotRepo
 from app.services.trade_service import TradeService
@@ -229,9 +229,7 @@ async def get_overview(
                     int(row.quantity),
                     float(row.market_price),
                 )
-            snaps_list = [
-                DailySnap(date=d, holdings=h) for d, h in sorted(by_date_ytd.items())
-            ]
+            snaps_list = [DailySnap(date=d, holdings=h) for d, h in sorted(by_date_ytd.items())]
             if len(snaps_list) >= 2:
                 twr_ytd = compute_twr(snaps_list)
                 ytd_pct = round(twr_ytd["cumulative"] * 100, 4)
@@ -257,9 +255,7 @@ async def get_trend(
     uid = _uid(user)
 
     # --- 组合收益曲线 ---
-    rows = PositionSnapshotRepo(db).list_range(
-        user_id=uid, start_date=start, end_date=end
-    )
+    rows = PositionSnapshotRepo(db).list_range(user_id=uid, start_date=start, end_date=end)
     by_date: dict[str, dict] = {}
     for row in rows:
         by_date.setdefault(str(row.snapshot_date), {})[row.ts_code] = (
@@ -292,9 +288,7 @@ async def get_trend(
             if dates:
                 # 对齐:只取与组合 dates 重叠的交易日
                 date_set = set(dates)
-                bench_filtered = [
-                    (d, p) for d, p in zip(bench_dates, pct_series) if d in date_set
-                ]
+                bench_filtered = [(d, p) for d, p in zip(bench_dates, pct_series) if d in date_set]
                 # 若没有重叠(如快照间隔与交易日不匹配),则用完整序列
                 if not bench_filtered:
                     bench_filtered = list(zip(bench_dates, pct_series))

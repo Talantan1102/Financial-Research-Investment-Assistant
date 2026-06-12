@@ -6,9 +6,9 @@ def test_twr_excludes_position_changes() -> None:
     # 第1天→第2天:持仓不变,价从100→110,日收益+10%
     # 第2天→第3天:期初(第2天)持仓在第3天估值得日收益;即便第3天加了仓也不算进收益
     snaps = [
-        DailySnap(date="20261112", holdings={"A": (100, 100.0)}),   # (qty, price)
+        DailySnap(date="20261112", holdings={"A": (100, 100.0)}),  # (qty, price)
         DailySnap(date="20261113", holdings={"A": (100, 110.0)}),
-        DailySnap(date="20261114", holdings={"A": (200, 99.0)}),    # 加了100股 + 价跌到99
+        DailySnap(date="20261114", holdings={"A": (200, 99.0)}),  # 加了100股 + 价跌到99
     ]
     twr = compute_twr(snaps)
     # day1 收益 = 110/100-1 = +0.10

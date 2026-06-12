@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 
 
 class FundNavArgs(BaseModel):
-    ts_code: str       # 如 "110011.OF"
-    start_date: str    # YYYYMMDD
+    ts_code: str  # 如 "110011.OF"
+    start_date: str  # YYYYMMDD
     end_date: str
 
 
@@ -51,12 +51,15 @@ def _format_fund_nav(
 
 class GetFundNavTool(Tool):
     name = "get_fund_nav"
-    description = "查基金类型与每日净值涨跌(场内/场外基金)。组合里基金部分的涨跌用它。看不穿底层持仓。"
+    description = (
+        "查基金类型与每日净值涨跌(场内/场外基金)。组合里基金部分的涨跌用它。看不穿底层持仓。"
+    )
     args_schema = FundNavArgs
 
     def __init__(self, tushare: TushareService | None = None) -> None:
         if tushare is None:
             from app.services.tushare_factory import build_tushare_service
+
             tushare = build_tushare_service()
         self._tushare = tushare
 

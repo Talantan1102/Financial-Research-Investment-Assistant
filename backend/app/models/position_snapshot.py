@@ -1,6 +1,18 @@
 import datetime
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, Index
+
+from sqlalchemy import (
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
+
 from app.core.database import Base
 
 
@@ -8,7 +20,9 @@ class PositionSnapshot(Base):
     __tablename__ = "position_snapshots"
 
     id = Column(String(36), primary_key=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     ts_code = Column(String(10), nullable=False, index=True)
     asset_class = Column(String(32), nullable=False, default="stock")
     snapshot_date = Column(Date, nullable=False, index=True)

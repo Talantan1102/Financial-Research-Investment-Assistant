@@ -67,9 +67,7 @@ async def _get_sector_info(
         if index_code is None:
             return industry, None
 
-        df = await tushare.get_sw_index_daily(
-            index_code=index_code, trade_date=trade_date
-        )
+        df = await tushare.get_sw_index_daily(index_code=index_code, trade_date=trade_date)
         if df is None or getattr(df, "empty", True):
             return industry, None
 
@@ -126,22 +124,23 @@ async def build_overview(session: Session, *, user_id: object) -> dict:
 
     for pos in positions:
         qty = float(pos.quantity)
-        price = float(pos.last_quote_price) if pos.last_quote_price is not None else float(pos.avg_cost)
+        price = (
+            float(pos.last_quote_price) if pos.last_quote_price is not None else float(pos.avg_cost)
+        )
         market_value = qty * price
         if market_value <= 0:
             continue
 
         ac = str(pos.asset_class) if pos.asset_class else "stock"
+        ts_code = str(pos.ts_code)
 
         if ac == "stock":
-            sector_name, sector_pct = await _get_sector_info(
-                tushare, pos.ts_code, trade_date_end
-            )
+            sector_name, sector_pct = await _get_sector_info(tushare, ts_code, trade_date_end)
             # MVP: 个股当日涨跌用其板块涨跌近似(beta≈1),不调 get_daily(mock 端 LLM 背书、慢);real 端可后续接真 get_daily
             today_pct = sector_pct if sector_pct is not None else 0.0
             holdings.append(
                 HoldingDaily(
-                    ts_code=pos.ts_code,
+                    ts_code=ts_code,
                     asset_class=ac,
                     market_value=market_value,
                     today_pct=today_pct,
@@ -152,10 +151,10 @@ async def build_overview(session: Session, *, user_id: object) -> dict:
             )
 
         elif ac in ("fund_otc", "fund_etf"):
-            today_pct = await _get_fund_pct(tushare, pos.ts_code, trade_date_end)
+            today_pct = await _get_fund_pct(tushare, ts_code, trade_date_end)
             holdings.append(
                 HoldingDaily(
-                    ts_code=pos.ts_code,
+                    ts_code=ts_code,
                     asset_class=ac,
                     market_value=market_value,
                     today_pct=today_pct,
@@ -166,7 +165,7 @@ async def build_overview(session: Session, *, user_id: object) -> dict:
             # bond / gold / cash 等 — today_pct = 0.0, 不拆板块
             holdings.append(
                 HoldingDaily(
-                    ts_code=pos.ts_code,
+                    ts_code=ts_code,
                     asset_class=ac,
                     market_value=market_value,
                     today_pct=0.0,
@@ -185,13 +184,9 @@ async def build_overview(session: Session, *, user_id: object) -> dict:
     if total_mv > 0:
         for h in holdings:
             ratio = h.market_value / total_mv
-            by_class[h.asset_class] = round(
-                by_class.get(h.asset_class, 0.0) + ratio, 6
-            )
+            by_class[h.asset_class] = round(by_class.get(h.asset_class, 0.0) + ratio, 6)
             if h.asset_class == "stock" and h.sector:
-                by_sector[h.sector] = round(
-                    by_sector.get(h.sector, 0.0) + ratio, 6
-                )
+                by_sector[h.sector] = round(by_sector.get(h.sector, 0.0) + ratio, 6)
 
     # as_of: 基金季报披露日占位,实际业务需接基金底层数据,此处标注说明
     as_of: str | None = "季报日未接入(基金底层持仓滞后,本版本不穿透)"

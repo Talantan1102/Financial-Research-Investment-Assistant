@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 
-
 # ---------------------------------------------------------------------------
 # 红线词(输出前过一遍兜底检查)
 # ---------------------------------------------------------------------------
@@ -42,11 +41,15 @@ def _build_user_message(attribution: dict, persona_note: str | None) -> str:
         mkt = breakdown.get("market", 0.0)
         sec = breakdown.get("sector_excess", 0.0)
         idio = breakdown.get("idiosyncratic", 0.0)
-        lines.append(f"股票三层拆解 — 大盘贡献:{mkt:+.2f}%,板块超额:{sec:+.2f}%,个股自身:{idio:+.2f}%")
+        lines.append(
+            f"股票三层拆解 — 大盘贡献:{mkt:+.2f}%,板块超额:{sec:+.2f}%,个股自身:{idio:+.2f}%"
+        )
 
     if contributions:
         top = contributions[0]
-        lines.append(f"拖累/贡献最大的持仓:{top.get('ts_code','')}  贡献:{top.get('contrib_pct', 0.0):+.2f}%")
+        lines.append(
+            f"拖累/贡献最大的持仓:{top.get('ts_code', '')}  贡献:{top.get('contrib_pct', 0.0):+.2f}%"
+        )
 
     if persona_note:
         lines.append(f"用户在意点:{persona_note}")

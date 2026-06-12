@@ -28,7 +28,8 @@ TOOL_DEF = Tool(
 
 
 async def handle(args: dict[str, Any]) -> list[TextContent]:
-    from app.tools.get_fund_nav import GetFundNavTool, FundNavArgs
+    from app.tools.get_fund_nav import FundNavArgs, GetFundNavTool
+
     tool = GetFundNavTool()
     result = await tool.run(FundNavArgs.model_validate(args))
     return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]

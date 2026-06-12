@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import pandas as pd
-from app.tools.get_index_daily import _format_index_daily, IndexDailyArgs
 from app.mcp_server.tools.get_index_daily import TOOL_DEF
+from app.tools.get_index_daily import _format_index_daily
 
 
 def test_format_index_daily_computes_pct_change() -> None:
-    df = pd.DataFrame({
-        "trade_date": ["20261113", "20261114"],
-        "close": [4000.0, 3968.0],
-        "pre_close": [4010.0, 4000.0],
-        "pct_chg": [-0.25, -0.80],
-    })
+    df = pd.DataFrame(
+        {
+            "trade_date": ["20261113", "20261114"],
+            "close": [4000.0, 3968.0],
+            "pre_close": [4010.0, 4000.0],
+            "pct_chg": [-0.25, -0.80],
+        }
+    )
     out = _format_index_daily(df, "000300.SH")
     assert out["ts_code"] == "000300.SH"
     assert out["latest"]["trade_date"] == "20261114"
-    assert out["latest"]["pct_chg"] == -0.80   # 当日涨跌幅(%)
+    assert out["latest"]["pct_chg"] == -0.80  # 当日涨跌幅(%)
 
 
 def test_format_index_daily_empty() -> None:

@@ -29,6 +29,7 @@ TOOL_DEF = Tool(
 
 async def handle(args: dict[str, Any]) -> list[TextContent]:
     from app.tools.get_index_daily import GetIndexDailyTool, IndexDailyArgs
+
     tool = GetIndexDailyTool()
     result = await tool.run(IndexDailyArgs.model_validate(args))
     return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]

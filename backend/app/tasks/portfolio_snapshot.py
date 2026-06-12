@@ -34,14 +34,14 @@ def _run_snapshot() -> dict[str, Any]:
     count = 0
 
     try:
-        positions = (
-            session.query(Position)
-            .filter(Position.quantity > 0)
-            .all()
-        )
+        positions = session.query(Position).filter(Position.quantity > 0).all()
 
         for pos in positions:
-            price = float(pos.last_quote_price) if pos.last_quote_price is not None else float(pos.avg_cost)
+            price = (
+                float(pos.last_quote_price)
+                if pos.last_quote_price is not None
+                else float(pos.avg_cost)
+            )
             market_value = pos.quantity * price
 
             repo.upsert(

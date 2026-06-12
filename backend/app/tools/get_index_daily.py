@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 
 class IndexDailyArgs(BaseModel):
-    ts_code: str          # 如 "000300.SH"(沪深300)
-    start_date: str       # YYYYMMDD
+    ts_code: str  # 如 "000300.SH"(沪深300)
+    start_date: str  # YYYYMMDD
     end_date: str
 
 
@@ -48,6 +48,7 @@ class GetIndexDailyTool(Tool):
     def __init__(self, tushare: TushareService | None = None) -> None:
         if tushare is None:
             from app.services.tushare_factory import build_tushare_service
+
             tushare = build_tushare_service()
         self._tushare = tushare
 
