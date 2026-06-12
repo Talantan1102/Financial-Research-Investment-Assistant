@@ -56,10 +56,11 @@ dimensions:
     name_en: "Lifecycle & Orchestration"
     paths:
       - "backend/app/agents/**"
+      - "backend/app/chatloop/**"
       - "backend/app/orchestration/**"
       - "backend/app/services/checkpointer*.py"
       - "backend/app/service/deep_research_v2/**"
-    keywords: ["LangGraph", "agent", "subgraph", "checkpoint", "Saver"]
+    keywords: ["LangGraph", "agent", "subgraph", "checkpoint", "Saver", "chatloop", "ToolLoop", "gate"]
 
   - id: observability
     number: "05"

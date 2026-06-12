@@ -1,0 +1,374 @@
+# dashboard/data/reports/chatloop-runtime-optimization-survey.yaml
+# ============================================================================
+# 研究报告:Chat Runtime 优化地图 —— 按场景指出我们的问题 × 工业界怎么解
+# ----------------------------------------------------------------------------
+# 来源:2026-06-10 两路并行工作 ——
+#   (1) 本仓库 chatloop runtime 深度代码审读(backend/app/chatloop/ 全模块,
+#       8 个维度逐一过,每条结论带 file:line 证据);
+#   (2) Workflow 5 角度联网调研(104 个 agent / 22 个来源 / 107 条 claim 抽取 /
+#       25 条承重结论三票对抗核查全部通过)+ 流式中断/steering 角度首轮证据不足,
+#       补一轮定向调研(Claude Code 官方文档 / OpenAI Agents SDK / LangGraph
+#       Platform / Realtime API / Devin,一手二手分开标)。
+# 由 dashboard/derive/report.py 类型化加载,渲染于 /eval/report/<slug>,
+# 入口挂「生命周期与编排」维度页 /m/lifecycle。
+# 写作约定:不用读者无法对应的内部代号;厂商数字一律标注口径(官方文档/工程
+# 博客/论文/社区,一手还是二手);每个要点配贴近本项目业务的例子;
+# 我们自己的问题一律给 file:line 证据,不空对空。
+# ============================================================================
+
+slug: chatloop-runtime-optimization-survey
+title: Chat Runtime 优化地图 · 我们的问题 × 工业界方案
+subtitle: >-
+  按真实场景指出本项目 chatloop(裸 while 循环 runtime)的 7 个优化决策点:每个先给我们代码里的问题(file:line 证据),再给工业界的解法与具体例子(Claude
+  Code / Anthropic API / OpenAI Agents SDK / LangGraph / Manus),最后落到取舍建议
+meta:
+  date: '2026-06-10'
+  basis: >-
+    本仓库 chatloop 全模块代码审读(8 维度,每条带 file:line)+ 5 角度联网调研(22 来源 / 25 条承重结论三票对抗核查全过)+
+    steering 角度定向补调研(一手官方文档为主)
+summary: >-
+  先说一个让人安心的结论:本项目 chatloop 的骨架方向跟工业界头部 runtime 高度同构——OpenAI Agents SDK 的 runner
+  本质就是同一个显式循环(调模型→有工具就执行并追加结果→回到第 1 步→无工具调用即终止),Manus 的工程博客也把 KV-cache
+  命中率奉为生产 agent 第一指标、明确反对运行中动态增删工具定义——这两条分别印证了我们"裸 Python while 循环"和"窗口四区 +
+  工具渐进披露"的核心选择,是工业设计而非妥协。甚至在终止控制上我们反而领先:OpenAI Agents SDK 开箱只有 max_turns(默认
+  10 轮)一道硬闸,LangGraph 只有 recursion_limit(默认 25 步),都没有按金额计的预算闸和打转检测,而我们有四道。但代码审读
+  + 调研对照下来,有七个决策点存在真实缺口,按风险排:① 上下文只有"老工具消息摘要降级"一层防线,没有 token 溢出硬防护和整段历史的
+  compaction(压缩重开)——Anthropic 已把这件事做成 API 级能力,实测能把峰值上下文砍约一半;② 工具结果进消息窗口前没有大小硬限制——Claude
+  Code 给所有工具响应设 25,000 token 默认上限;③ 工具并行执行没有超时,单个工具卡住整圈冻结——OpenAI SDK 默认把超时变成可回喂模型的错误消息;④
+  打转闸只比对"连续两圈调用签名完全相同",参数缓慢漂移的死循环漏检,且预算闸在圈首检查、单圈可超支;⑤ 用户插话只在圈边界合并,Claude
+  Code 是"工具调用边界"注入粒度更细,且它的 Esc 硬中断/Enter 软插话是两条明确分开的通道;⑥ 升级深度研报是"信号工具 +
+  数据包交付",没有真正的子 agent 上下文隔离——Anthropic 的模式是子 agent 独立窗口干活、只回传一两千 token 的浓缩摘要;⑦
+  KV-cache 命中率有原始数据(cached_tokens)但从未度量,稳定前缀这个核心设计假设处于"没有评估就没有优化"状态,turn
+  级聚合指标(总成本/耗时/调用数)也缺。每个决策点下面给场景、我们的问题、工业界做法、翻车点、取舍建议。
+sections:
+- heading: 总纲:这次优化地图怎么画出来的
+  body: >-
+    方法是"两头夹":一头从代码出发——把 backend/app/chatloop/ 的 loop / context / gates / tool_hub /
+    state / control_tools 逐模块审读,按 8 个维度(上下文管理 / 工具可靠性 / 终止控制 / 流式中断 / 渐进披露 / 子任务编排 /
+    性能成本 / 可观测性)列出现状与缺口,每条结论必须落到 file:line,防止"感觉有问题"式的空泛批评;另一头从工业界出发——5
+    个角度并行联网调研,抽出 107 条候选结论,挑 25 条承重的做三票对抗核查(每条派三个独立核查 agent 专门尝试推翻,两票以上推翻即杀),25
+    条全部存活;其中"流式与中断"角度首轮证据不足,又补了一轮只认官方文档的定向调研。两头对上的交叉点,就是下面 7 个决策点。
+  bullets:
+  - >-
+    先记三个本报告高频引用的工业界事实。其一,Anthropic 已把"上下文快满时让模型把旧对话总结成摘要、用摘要重开"做成了 API 级能力(beta
+    版,2026 年 1 月口径):默认窗口到 15 万 token 触发,服务端自动完成,还配套一个更轻的"清掉旧工具结果、保留最近 3 个"的选项(默认
+    10 万 token 触发);官方 cookbook 在一个 33 万 token 语料的检索 agent 上实测,两种方式都把峰值上下文砍掉约一半(一手,单次
+    demo 数据非受控实验)。
+  - >-
+    其二,Manus 工程博客(一手,自报口径)的账:agent 每圈只产出少量决策文字、却要把越来越长的历史整个喂回去,他们实测输入输出 token
+    比约 100:1,而厂商对逐字相同前缀的缓存折扣约十倍($0.30 vs $3 每百万 token,Claude Sonnet 当时价目)——所以
+    KV-cache 命中率是"生产 agent 单一最重要指标",压缩策略必须可恢复(扔掉的内容要能按指针取回),文件系统当无限外置记忆。
+  - >-
+    其三,OpenAI Agents SDK 官方文档(一手)把 runner 循环写得明明白白:"调当前 agent 的模型→看响应:最终输出→返回;交接→换
+    agent;工具调用→执行工具、把结果追加进对话、回到第 1 步"。这就是我们 loop.py 的 while 循环。裸循环不是落后,是头部 SDK 的本体。
+- heading: 我们已经领先的部分:先别自我怀疑
+  body: >-
+    调研里有个反直觉发现:终止与循环控制这块,主流框架的开箱水平比我们想象的粗糙得多。OpenAI Agents SDK 唯一的硬闸是 max_turns(Python/JS
+    默认 10,超限抛异常,可设 None 关掉),按"轮"计数,不看 token 不看钱;LangGraph 是 recursion_limit(默认
+    25 步),文档把撞限解读为"通常是图逻辑里的意外死循环"——也就是说它的死循环检测就是"跑满 25 步再说"。两家都没有按金额计的预算闸,也没有重复调用模式检测。我们的四道终止闸(步数上限
+    / 金额与 token 双预算 / 连续两圈签名一致的打转检测 / 模型自然停)在 gates.py 里全部落地,撞闸后还有"关工具通道逼模型基于已有信息收尾"的强制收尾路径(loop.py:245-272)。这块的问题不是缺,是闸本身还有两个精度缺陷(见决策点④)。
+  bullets:
+  - >-
+    同样被验证的还有两个核心设计:窗口四区(稳定前缀区逐字节恒定吃缓存折扣、动态状态压到尾部)与 Manus 三铁律(前缀稳定 / 只追加不回改 /
+    显式缓存断点)完全一致;工具渐进披露(核心组全量 schema + 延迟组瘦条目 + search_tools 兜底检索)与 Anthropic
+    的 just-in-time 检索建议("保留轻量标识符、运行时按需加载")同路。
+  - >-
+    Manus 对渐进披露有个更激进的提醒:连"动态增删工具定义"都反对(击穿 KV-cache,且模型会对历史里引用过的已删工具困惑),他们用解码时
+    logits masking 约束动作选择。我们的瘦条目方案没有动 schema 列表本身的稳定性,方向对;但要警惕未来"按对话动态筛工具"的诱惑——那会撞上同一个坑。
+- heading: 决策点速览:七个缺口,按风险排序
+  body: >-
+    下面"7 个运行时优化决策"区每个决策点展开讲。这里先给一张速览,方便对照自己关心的场景跳读。排序逻辑:先排"会让用户直接看到故障"的(溢出
+    / 卡死),再排"悄悄烧钱或跑偏"的(预算时序 / 打转漏检 / 缓存假设未验证),最后排体验与架构演进项(插话粒度 / 子 agent)。
+  bullets:
+  - '① 上下文溢出与压缩:只有单条工具消息的摘要降级,没有整段历史 compaction 和 token 硬上限 → 极长对话会发出超模型窗口的请求。'
+  - '② 工具结果体积:结果进窗口前没有大小硬限制 → 一次知识库全量命中能把窗口炸穿。Claude Code 的默认是 25,000 token 上限。'
+  - '③ 工具超时:并行 gather 没有 timeout → 单个数据源卡住,整圈冻结,用户面对无限转圈。'
+  - '④ 终止闸精度:打转检测只查"连续两圈签名全同",参数漂移漏检;预算闸圈首检查,单圈可超支。'
+  - '⑤ 插话与中断:steering 只在圈边界合并;取消与最终落库之间有竞态。Claude Code 是工具调用边界注入 + Esc/Enter 双通道。'
+  - '⑥ 子 agent 隔离:升级深度研报只是信号工具,无独立上下文窗口的子任务模式。Anthropic 模式:子 agent 干活、只回浓缩摘要。'
+  - '⑦ 度量缺口:KV-cache 命中率从未计算(cached_tokens 字段在但没人看),turn 级成本/耗时/调用数聚合缺失。'
+- heading: 卡片约定
+  body: >-
+    每个决策点五行:场景(贴本项目业务的具体情境)/ 我们的问题(代码现状 + file:line 证据)/ 工业界做法(谁、怎么做、来源口径)/
+    翻车点(我们或业界已知的坑)/ 怎么取舍(落到本项目的建议,标注做与不做的判据)。所有厂商数字标口径;凡二手来源(社区
+    issue / 博客逆向)单独注明,不与官方文档混用。
+dimensions_meta:
+  title: 7 个运行时优化决策 · 每个配真实场景与 file:line 证据
+  labels:
+    setup: 场景
+    question: 我们的问题
+    good: 工业界做法
+    bad: 翻车点
+    scored: 怎么取舍 · 落到本项目
+dimensions:
+- name: ① 上下文溢出与压缩:窗口快满了怎么办
+  plain: >-
+    我们的窗口四区设计解决了"每圈请求怎么排布才吃缓存折扣",但没回答另一个问题:对话越聊越长、窗口逼近模型上限时,谁来压缩、压缩成什么样、丢掉的内容还能不能找回来。
+  setup: >-
+    一个用户从"宁德时代三季报怎么样"聊起,八九个来回里查了财报、做了对比、调了知识库,每圈工具结果几千到几万字。再加上跨 turn
+    历史,某一圈组装出来的请求悄悄超过了模型上下文窗口——请求直接报错,用户看到的是莫名其妙的失败。
+  question: >-
+    现在只有一层防线:老圈的大工具消息(超 1320 字符)会被降级成"[全文已缓存 ref=...] + 200 字摘要"(context.py:107-163,幂等、不删消息、保护失败消息和最近一圈)。但没有
+    token 总量的硬上限检查——token 估算逻辑(context.py:32-39,CJK 按 1.65 字符/token)只用于成本估算,不防溢出;跨
+    turn 历史的压缩要到"软阈值 70%"才触发且摘要只有 400 字(rebuild.py:45-46),单个深度研究 turn 的工具结果就能有数万字,压缩杯水车薪。
+  good: >-
+    Anthropic 把这件事做成了 API 级能力(一手,官方文档,beta 口径 2026-01):服务端 compaction 在窗口到阈值(默认
+    15 万 token,最低可设 5 万)时自动让模型把之前的消息总结成一个类型化的 compaction 块,后续请求自动丢弃块之前的全部消息,还处理跨边界的工具调用配对;更轻的一档是
+    tool-result clearing(默认 10 万 token 触发,清旧工具结果、保留最近 3 个、保留工具调用记录本身)。官方 cookbook
+    在 33 万 token 语料的检索 agent 上实测:不管理时峰值 33.5 万 token(其中 96.3% 是文件读取结果),compaction
+    降到约 17 万、clearing 约 17.3 万——都砍了约一半。Manus 的自建版原则(一手,工程博客):压缩必须可恢复(restorable)——扔正文留指针,需要时按指针取回;放不下的搬进文件系统当无限外置记忆。我们的摘要降级("ref=...
+    可取回")正是这个思路,只是只盖住了"单条工具消息"这一种膨胀源。
+  bad: >-
+    两个方向各有坑。依赖服务端 compaction 的坑:它是 Claude API 专属 beta,我们主力是 qwen(DashScope),直接外包此路不通,只能借设计自建;且
+    Anthropic 文档自述存在工具调用摘要失败、摘要要用同款模型、压缩本身额外计费等限制。自建的坑:压缩时机选错——在窗口中段贸然总结会把用户第三轮说的"我只看新能源,白酒别推"这类约束总结丢,后面模型推荐贵州茅台,用户体感是"它忘了我说过的话"。
+  scored: >-
+    分三步走,从便宜到贵:第一步(必做,小改)给 assemble_context 加 token 总量预估检查,超阈值时把降级阈值动态调低、扩大降级范围——纯防御,不引入新摘要逻辑;第二步(该做)把
+    rebuild 的跨 turn 压缩从"400 字一刀切"改成 Anthropic clearing 同款的"清旧工具结果、保留最近 N 个、保留调用记录",这比"重新总结整段历史"便宜且不易丢约束;第三步(看
+    dogfood 数据再决定)才是完整 compaction——只有当监控显示真实对话经常逼近窗口时才值得,别为想象中的百轮对话提前付复杂度。
+- name: ② 工具结果体积:一次检索命中全量文档怎么办
+  plain: >-
+    工具结果是窗口膨胀的最大单一来源(Anthropic cookbook 实测案例里占 96.3%),但我们的工具结果进消息窗口这条路上没有任何大小闸门。
+  setup: >-
+    模型调知识库检索查"白酒行业政策",检索配置或语料异常,返回了全量政策文档拼接——几十万字符的结果被原样 json.dumps 进消息列表,下一圈请求直接把窗口炸穿;就算没炸穿,这一圈
+    的 token 费也是平时的几十倍。
+  question: >-
+    tool_hub 拿到工具结果后直接序列化进 ToolResult、进 state.messages(tool_hub.py:326、state.py:211-219),全程无大小检查;digest
+    只是事件流里的 120 字展示摘要,不限制本体。各工具自律不一:run_skill_script 的 stdout 截 1320 字符(skill_tools.py:49),检索类工具没有一致的截断策略。对照:context.py
+    的降级阈值是 1320 字符,但那是"下一圈才生效"的事后补救,本圈这条巨型消息原样发出。
+  good: >-
+    Anthropic 的工具写作指南(一手,工程博客)讲得很直白:工具响应应该实现分页、范围选择、过滤、截断,并带合理的默认值;Claude Code
+    的做法是给所有工具响应设默认 25,000 token 上限。也就是说闸门设在"结果进上下文之前"的统一关口,而不是指望每个工具自律。配套思路是
+    Manus/Anthropic 共识的"可恢复":截断时给指针(文件路径/缓存 ref),模型需要时再按指针取回片段,而不是把全文塞回来。
+  bad: >-
+    在工具内部各自截断(而不是统一关口)的坑:每个新工具都要重新记得这件事,漏一个就是事故,且各工具阈值不一导致行为不可预期;另一个坑是截断不留指针——模型发现结果被截、又没有取回手段,就会重调同一工具甚至换参数硬试,反而烧更多。
+  scored: >-
+    这是七个决策点里性价比最高的:在 tool_hub 的统一分发出口(所有工具结果的必经之路)加一道大小闸,超阈值(建议对齐降级机制的缓存路径,直接走"存全文
+    + 回指针和摘要")。改动小、覆盖所有现有和未来工具、和已有的 ref 取回机制天然衔接。阈值别拍脑袋:先用 trace 数据看一眼现有工具结果的体积分布再定。
+- name: ③ 工具超时:一个数据源卡住,整圈跟着冻结
+  plain: >-
+    我们的工具是 asyncio.gather 并行执行,这很好——但 gather 没有 timeout,意味着整圈的延迟由最慢(或卡死)的那个工具决定,且没有下限保护。
+  setup: >-
+    行情数据源网络抖动,一个查价工具的 HTTP 请求挂起不返回。模型这圈同时调了三个工具,另两个早就回来了,但 gather 要等齐——用户盯着转圈等了两分钟,最后靠
+    Celery 任务级超时兜底,整个 turn 报废,前两个工具的结果也陪葬。
+  question: >-
+    tool_hub.py:196-208 的 asyncio.gather 无 timeout 参数;个别客户端自带超时(如 bocha_client.py:42),但没有
+    runtime 层的统一上限——又是"指望每个工具自律"的结构。错误处理本身倒是完备:dispatch 双层包装保证绝不抛异常,错误映射成带指导的文案回喂模型(tool_hub.py:406-427,含"[超时]
+    稍后重试或换数据源"这条——但讽刺的是,没有统一超时机制,这条文案基本只有客户端自带超时的工具才触发得到)。
+  good: >-
+    OpenAI Agents SDK(一手,官方文档)的设计可以直接抄:异步工具默认 timeout_behavior="error_as_result"——超时不抛异常、不崩
+    run,而是把一条超时消息回传给模型让它自己恢复(换数据源/跳过/基于已有信息回答),需要硬失败的场景才选 raise_exception。工具错误同理:默认有
+    default_tool_error_function 把错误回传模型,显式传 None 才改为抛出。Anthropic 的补充(一手):回传的错误文案要给"具体可执行的改进建议",不要不透明错误码或
+    traceback——这点我们的指导性错误映射已经做到了。
+  bad: >-
+    加超时的经典坑是"超时后重试,却没搞清原操作到底完成没有":对有副作用的工具(记忆写入类),超时不等于失败,盲目重试会写两份。我们的工具分两类(状态变更的
+    InProcessTool 绕过去重、其余走 ledger 去重,tool_hub.py:249-274),加超时时要让"超时的状态变更工具"明确标记为结果未知,而不是当失败重试。
+  scored: >-
+    必做且便宜:给每个工具调用包 asyncio.wait_for(单工具粒度,不是整个 gather 粒度——否则一个慢工具会把同圈快工具的结果也丢掉),超时走已有的"[超时]"指导性错误路径回喂模型。阈值分级:行情/检索类
+    30 秒级,记忆写入类更短。对状态变更工具,超时结果标"未知"并提示模型勿盲目重试。
+- name: ④ 终止闸精度:打转漏检与预算闸时序
+  plain: >-
+    四道终止闸的覆盖面业界领先(见"我们已经领先的部分"),但其中两道有精度缺陷:打转闸的检测窗口太窄,预算闸的检查时机太晚。
+  setup: >-
+    场景一:模型给一只港股估值,数据源没这只票,它换着参数硬试——圈 3 查 query_kb(symbol='09988.HK'),圈 4 查
+    query_kb(symbol='9988'),圈 5 查 query_kb(symbol='BABA')……每圈签名都不同,打转闸(连续两圈签名集合完全一致才触发,gates.py:29-35)一次都不响,直到烧满
+    12 步上限。场景二:某圈模型发起一次重型深度检索,单圈成本就超过了剩余预算——但预算闸在圈首检查(loop.py:128),本圈照常执行完,钱已经花出去了。
+  question: >-
+    打转闸:gates.py:32-35 按(工具名, 参数哈希)的集合比对,只看"连续两圈完全相同",参数漂移式死循环漏检;且不区分"重复但每次都成功"(可能合理)与"重复且连续失败"(肯定有问题)——后者有烧签名机制兜底(同签名失败
+    3 次熔断,gates.py:39-76),但跨签名的连续失败没有全局上限,模型可以"参数校验失败→改个参数→又失败"地耗到步数上限。预算闸:apply_step
+    在工具执行后才累计花费(loop.py:156-157),闸检查在下一圈圈首——单圈超支无法拦截。另外强制收尾的提示文案不带终止原因(loop.py:251-254),模型不知道自己是因为超步数、超预算还是打转被叫停,收尾措辞可能与实情不符。
+  good: >-
+    这块工业界框架层帮不上忙——调研确认 OpenAI Agents SDK 与 LangGraph 都没有 doom-loop 启发式检测和 token/成本级预算闸(一手,官方文档;开源界也没调研到成熟正例,这是真空地带)。可借鉴的是相邻领域的做法:Anthropic
+    多 agent 研究系统(一手,工程博客)提到早期翻车"陷入搜索不存在来源的死循环",解法是 prompt 里写死难度→预算映射 + lead 语义判停;LangGraph
+    文档把撞 recursion_limit 直接解读为死循环信号,提示这类闸的真正价值是"事后诊断指标"而不只是保险丝。
+  bad: >-
+    把打转检测做得太激进的坑:深度研究类任务本来就需要"同一工具换参数多查几轮"(查 5 家公司财报就是 5 次同工具不同参数),按"同工具调用频率"一刀切会误杀正常行为。检测信号要用"连续失败"或"结果高度重复"这类质量信号,而不是单纯的调用模式。
+  scored: >-
+    三个小改,都不需要新框架:(a) 给"跨签名连续失败"加全局计数,连续 N 次工具失败(不管签名)即触发强制收尾——这抓的是"乱试"而非"多查",误杀风险低;(b)
+    预算闸下沉一道:工具分发前预检剩余预算,低于安全余量时跳过重型工具(给模型回"[预算不足] 请基于已有信息作答");(c) 强制收尾文案参数化终止原因——一行改动,让模型的收尾措辞与实情一致,也让
+    loop_halt 事件可直接用于看板归因。打转闸本体(连续两圈全同)保持现状,它抓的"原地踏步"模式和烧签名互补,不必追求全能。
+- name: ⑤ 插话与中断:用户想中途改方向,要等多久
+  plain: >-
+    我们的 steering(Redis List 软插话)和取消(Pub/Sub 硬中断)双通道结构与业界一致,差距在注入粒度和边界语义:插话只在圈边界合并,取消与落库之间有竞态。
+  setup: >-
+    用户问了"分析一下白酒板块",模型开始跑五圈循环。第二圈刚开始,用户补了一句"只看高端白酒,别带区域酒企"。这条插话进了 Redis List,但要等第二圈整圈跑完(LLM
+    流式输出 + 三个工具执行,可能几十秒)才在第三圈圈首被合并(loop.py:133-137)——这几十秒里模型可能已经把区域酒企的数据全查了一遍,token
+    白烧,用户看着它在错误方向上越走越远。
+  question: >-
+    插话注入点:pop_all() 只在圈首(loop.py:135),圈内(尤其工具执行完、下一次 LLM 调用前)没有第二个检查点。取消竞态:cancel_event
+    在圈边界和流式 delta 间检查(loop.py:100,120),但"LLM 返回完毕、apply_step 已执行、工具未启动"的缝隙里取消,partial
+    落库取 final_response 或已发 token 两条逻辑有断裂(chat_runner.py:405)——取消时机不同,用户看到的"中断后留下了什么"不一致。
+  good: >-
+    Claude Code(一手,官方文档"Interrupt and steer"一节)是这个交互的标杆,两条通道语义切得很清楚:Esc 硬中断——立即停,正在跑的工具调用直接取消,等新指令;Enter
+    软插话——不打断当前工具,消息排队,"当前动作一完成、决定下一步之前"读到并调整。注意它的软插话注入粒度是工具调用边界(turn 内),比我们的圈边界细一档。LangGraph
+    Platform(一手,官方文档)把"run 进行中用户又发消息"抽象成四种策略可选:enqueue(排队,默认)/ reject(拒收)/ interrupt(停当前、保留已做进度、新输入接上)/
+    rollback(停且整体回滚删除旧 run)。OpenAI Realtime(一手)在语音场景做到了最完整的"中断后状态对齐":取消生成 + truncate
+    截掉未播放音频 + 回写用户实际听到的位置,保证模型对"对方听到了哪半句"的认知与现实一致。
+  bad: >-
+    Claude Code 自己的 GitHub issues(二手,但反映真实交互坑)暴露了两个值得我们提前防的:一是排队插话在 turn 边界才消费,"等读到时
+    agent 已经在错误方向上干了一大段"(正是我们圈边界粒度会遇到的同款抱怨,有用户专门提 feature request 要优先通道);二是"中断"与"队列"两机制交互未定义清楚——有排队消息时按
+    Esc,行为变成了"把排队消息退回输入框"而非取消任务,用户懵了。我们的 Esc(cancel)与 Redis List 并存,同款交互(有未消费插话时用户点取消)的语义现在是未定义的。
+  scored: >-
+    第一步把插话检查点加密到工具边界:工具 gather 返回后、组装下一次 LLM 请求前加一次 pop_all()——改动只在 loop 主干几行,把插话延迟从"整圈"缩到"当前
+    LLM 输出 + 工具执行中较短的那段"。流式 delta 中途注入(打断正在生成的输出)不建议做——业界也只有语音场景(Realtime VAD)这么干,文本场景
+    Claude Code 同样是边界注入。第二步把"有未消费插话时取消"的语义显式定义(建议:取消即丢弃插话并在事件流标注,前端可提示)。取消竞态修法:partial
+    落库统一以"已发射 token"为准,不依赖 final_response 是否已写入。
+- name: ⑥ 子 agent 与上下文隔离:深度任务怎么不挤占主循环
+  plain: >-
+    主循环遇到"值得开深度研报"的问题时,现在的机制是信号工具(offer_deep_research)+ 升级物料交付——这解决了"主循环别自己硬扛",但没有解决"中等重量任务在主循环里挤占步数与预算"。
+  setup: >-
+    用户问"对比一下白酒前五名的现金流质量"。这不到深度研报的量级,但要查 5 家公司各 2-3 个工具调用——在单循环里要烧十几步,撞 12
+    步上限是常态,撞闸后强制收尾,用户拿到半截分析。要么升级成深度研报(等几分钟,杀鸡用牛刀),要么残废——中间没有第三档。
+  question: >-
+    chatloop 是单层 while 循环,无子任务机制:offer_deep_research 只置标志 + 熔断工具通道(control_tools.py:74-96),实际研报在另一条
+    Celery 链路跑;主循环里没有"派一个带独立上下文的子任务、拿摘要回来继续"的形态(loop.py:116-196 线性结构)。另外升级标志的置位无事务保证,工具执行中途取消可能导致升级被跳过(tool_hub.py:251-253
+    的注释自己承认这点)。
+  good: >-
+    两个已验证的工业模式,都和裸循环兼容、不需要图框架:(a) Anthropic 子 agent 隔离模式(一手,工程博客 + Claude Code
+    文档):子 agent 在干净的独立上下文窗口里干聚焦任务,向主 agent 只回传浓缩摘要(典型一两千 token),原始过程上下文不回流——主窗口不被中间过程污染,等于变相扩容;(b)
+    OpenAI 的 agent.as_tool()(一手,官方文档):把子 agent 封装成一个普通工具调用,不交接控制权,主循环视角里它就是一次"调用成本较高的工具",审批/事件流完全复用工具的既有通道。对我们来说,(b) 的形态最顺:加一个"子任务工具",内部起一次独立的小循环(自带步数/预算子闸),结果以摘要 + 缓存 ref 回主循环。
+  bad: >-
+    多 agent 的经典翻车都在"派过头":Anthropic 自报早期 orchestrator"为一个简单问题 spawn 了 50 个 subagent";Cognition
+    的著名反例是两个并行子 agent 各自做了互相矛盾的隐含假设、产物拼不起来。我们如果做,要守住:只做一层(子任务不得再派子任务)、只用于读类任务(查数/检索/打分,产物天然可摘要),写类任务(成文)留在主循环或走完整研报链路。
+  scored: >-
+    这是七项里改动最大的,放最后做,且要等真实信号:先在看板上统计"撞步数上限的 turn 占比"和这些 turn 的问题类型——如果"中等重量对比/多标的查询"确实高频撞闸,再上"子任务工具";如果数据说明撞闸的多是乱试型(决策点④的问题),先修闸的精度就够。升级标志的事务性小修(置位与工具结果返回绑定)可以单独先做。
+- name: ⑦ 度量缺口:核心设计假设处于未验证状态
+  plain: >-
+    窗口四区的全部价值建立在"稳定前缀真的吃到了缓存折扣"这个假设上——而我们有原始数据(每次 LLM 调用返回的 cached_tokens)却从未算过命中率。这个项目自己的格言"没有评估就没有优化",runtime 自身没有做到。
+  setup: >-
+    某次重构不小心把一个会变的字段(比如当前日期)排进了稳定前缀区,从此每圈全价计费。因为没有命中率监控,这个回归静默存在了一个月,多花的钱没人知道——这正是
+    Manus 把命中率当"第一指标"盯的原因:它对前缀的任何不稳定零容忍,且坏了不报错、只悄悄变贵。
+  question: >-
+    三层缺口,由近及远:(a) StepResult 带 cached_tokens(llm_step.py:51)、cost_update 事件也透传(loop.py:164),但没人计算命中率
+    = cached_tokens / prompt_tokens,没有任何告警或看板;(b) 没有 turn 级聚合指标——done 事件只带 stop_reason(loop.py:174),单
+    turn 总成本/总耗时/LLM 调用数/工具调用数要前端自己从事件流里攒,trace 有 span 但无现成聚合;(c) token 估算系数(CJK
+    1.65 字符/token)没有用实际值回校的反馈回路,预算闸建立在可能漂移的估算上。另有一个已知的设计内损耗:尾部动态区("第 N/M 步,预算剩
+    ¥x.xx")每圈变化,按四区设计这是刻意安排(变化压到最尾部,牺牲最小)——但这个"牺牲到底多大"同样没量过。
+  good: >-
+    Manus(一手):KV-cache 命中率是生产 agent 单一最重要指标,直接决定延迟与成本,缓存与全价价差约十倍。Anthropic compaction
+    文档(一手)专门讲了缓存协同:在 compaction 块上设 cache_control 断点以最大化命中率——说明头部厂商把"压缩"与"缓存命中"当一对必须协同设计的指标。业界对
+    turn 级聚合也有现成形态可抄:OpenAI Agents SDK 的 run result 自带 usage 汇总,LangGraph 的 run
+    粒度对应我们的 turn 粒度。
+  bad: >-
+    度量的坑是"装了不看":命中率仪表板做出来没人订阅告警,等于没做。最小可用的形态不是看板,是回归断言——把"稳定前缀区在同 turn 内逐字节恒定"写成单元测试(对
+    assemble_context 连续两圈的输出做前缀 diff),缓存回归在 CI 就被抓住,比线上监控更早。
+  scored: >-
+    必做且最便宜的一组:(a) done 事件加 turn 汇总字段(总成本/总 token/LLM 调用数/工具调用数/缓存命中率)——数据全在 state
+    里,纯属拼装;(b) 加"稳定前缀逐字节恒定"的回归测试;(c) cost_update 里带上单圈 delta(现在只有累计值),让"哪一圈工具结果膨胀"可归因。token
+    估算回校(用每次真实 usage 反推系数)做成周期性离线任务即可,不必实时。这组做完,决策点①③④⑥的"等数据再决定"才有数据可等。
+benchmarks_title: 代表性 runtime · 本报告引用的机制速览
+benchmarks:
+- name: OpenAI Agents SDK(Python/JS)
+  what: >-
+    显式 runner 循环(调模型→工具→追加→重来,自然停=有期望类型输出且无工具调用);max_turns 默认 10 是唯一硬闸;工具错误默认回喂模型(default_tool_error_function),超时默认
+    error_as_result;agent.as_tool() 子 agent 不交接控制权;human-in-the-loop 用"turn 末待审批集合 +
+    可序列化 state 重入"。
+  fit: >-
+    与我们同构度最高的参照系:循环骨架、错误回喂、信号式收尾全部对得上。工具超时(决策点③)和子任务工具(决策点⑥)直接抄它的形态即可。
+- name: Anthropic Claude API(compaction / tool-result clearing)
+  what: >-
+    服务端 compaction(beta):窗口到阈值自动摘要重开,类型化 compaction 块 + 自动丢弃旧消息 + cache_control
+    断点协同;tool-result clearing:清旧工具结果保留最近 3 个。官方 cookbook 实测两者都把峰值上下文砍约一半(单次 demo 口径)。
+  fit: >-
+    我们主力模型是 qwen,服务端能力用不上,但它的设计是决策点①自建时的图纸:分层(先清工具结果,再整段压缩)、可恢复、与缓存断点协同。
+- name: Claude Code(终端 agent)
+  what: >-
+    Esc 硬中断(取消当前工具调用)+ Enter 软插话(工具调用边界注入,不打断当前动作)双通道;双击 Esc 回滚到 checkpoint;所有工具响应默认
+    25,000 token 上限;子 agent 默认全新上下文、不见主对话历史。
+  fit: >-
+    决策点②(工具结果统一上限)和⑤(插话注入粒度、中断与队列的交互语义)的直接标杆;它自己 issues 里的交互坑(插话延迟、Esc 与队列冲突)是我们的免费教训。
+- name: LangGraph / LangGraph Platform
+  what: >-
+    recursion_limit 默认 25 当死循环保险丝;interrupt() + checkpointer + Command(resume) 的暂停恢复(注意恢复是节点级重放,interrupt
+    前的代码会重跑);Platform 侧 double-texting 四策略:enqueue / reject / interrupt / rollback。
+  fit: >-
+    double-texting 四策略是决策点⑤"取消与插话语义要显式定义"的最好词汇表——我们现状等于 enqueue,取消等于 rollback 的弱化版,值得把语义表写进
+    spec。图框架本体我们已退役,不回头。
+- name: Manus(context engineering 工程博客)
+  what: >-
+    KV-cache 命中率 = 生产 agent 第一指标(输入输出比约 100:1,缓存价差约十倍);三铁律:前缀稳定 / 只追加不回改 / 显式缓存断点;反对动态增删工具定义,用
+    logits masking 约束动作;压缩必须可恢复,文件系统当无限外置记忆。
+  fit: >-
+    窗口四区的理论靠山,也是决策点⑦的鞭策:它把命中率当第一指标"盯",我们连算都还没算。logits masking 需要推理侧控制,API 场景用不上,渐进披露维持现状即可。
+pitfalls:
+- >-
+  最大的元坑:把这份地图当 backlog 一口气全做。七个决策点里只有②(工具结果上限)③(工具超时)⑦(度量)是"现在就做、改动小"的;①的完整
+  compaction 和⑥的子任务工具都标了"等数据再决定"——先把⑦的度量做出来,才知道①⑥值不值得做。
+- >-
+  工具结果截断不留取回指针:模型发现结果被截又拿不回全文,会重调同一工具硬试,截断省下的 token 加倍烧回去。截断必须配 ref(我们已有缓存取回机制,衔接即可)。
+- >-
+  给整个 asyncio.gather 加超时而不是单工具加:一个慢工具超时会把同圈其他已完成工具的结果一起丢掉,惩罚扩大化。超时粒度必须是单工具。
+- >-
+  打转检测按"同工具调用频率"一刀切:深度研究本来就要同工具换参数查多家公司,频率信号误杀正常行为。用"连续失败"质量信号,不用调用模式信号。
+- >-
+  对有副作用的工具(记忆写入类)把超时当失败盲目重试:超时不等于没执行,重试可能写两份。超时的状态变更工具要标"结果未知"。
+- >-
+  插话做成流式中途注入(打断正在生成的输出):文本场景业界无人这么做(Claude Code 也是边界注入),复杂度换不来体验,语音场景(VAD)才需要。
+- >-
+  压缩/摘要丢用户约束:历史压缩最容易丢"我只看新能源别推白酒"这类早期约束,用户体感是"它忘了我"。压缩 prompt 要显式要求保留用户偏好与禁忌项,且这类内容本应走记忆系统而非依赖原文留存。
+- >-
+  KV-cache 回归只靠线上监控:命中率掉了是滞后信号,钱已多花。"稳定前缀逐字节恒定"写成 CI 回归测试,比看板更早抓住。
+- >-
+  服务端 compaction 是 Claude API 专属 beta 且自述有工具摘要失败/同模型限制/额外计费——多 provider 架构(我们是 qwen 主力)只能借设计自建,别误以为有现成接口。
+gaps:
+- component: 上下文组装(assemble_context / rebuild)
+  current: 单条大工具消息摘要降级(1320 字符阈值)已落地;无 token 总量硬防护;跨 turn 压缩 400 字一刀切。
+  suggestion: >-
+    三步走:token 总量预估检查 + 动态降级(必做)→ 跨 turn 改"清旧工具结果保留最近 N 个"(该做)→ 完整 compaction(等⑦的数据)。
+- component: 工具分发(tool_hub.dispatch)
+  current: 并行 gather 无超时;结果无大小硬限制;错误映射与烧签名熔断已完备。
+  suggestion: >-
+    统一出口加结果大小闸(超限走"存全文 + 回指针")+ 单工具 asyncio.wait_for 超时(走已有"[超时]"指导错误路径);状态变更工具超时标"结果未知"。
+- component: 终止闸(gates / force_conclude)
+  current: 四道闸覆盖面业界领先;打转闸只查连续两圈全同;预算闸圈首检查;强制收尾不带终止原因。
+  suggestion: >-
+    跨签名连续失败全局计数 + 工具分发前预算预检(低于余量跳过重型工具)+ 收尾文案参数化终止原因(一行改动)。
+- component: steering 与取消(chat_steer_bus / cancel)
+  current: 插话圈边界合并;取消在圈边界与 delta 间检查;"有未消费插话时取消"语义未定义;partial 落库两条逻辑有断裂。
+  suggestion: >-
+    插话检查点加密到工具边界(工具返回后、下次 LLM 调用前 pop_all);用 LangGraph double-texting 词汇表显式定义取消×插话语义;partial
+    统一以已发射 token 为准。
+- component: 升级与子任务(control_tools / escalation)
+  current: 信号工具 + 物料交付链路已通;无独立上下文子任务;升级标志置位无事务保证;中等重量任务挤占主循环步数。
+  suggestion: >-
+    标志置位事务性小修先做;"子任务工具"(独立小循环 + 摘要回传,只读类、只一层)等看板出"撞步数上限 turn 占比"数据再决策。
+- component: 度量与观测(events / trace)
+  current: cached_tokens 有数据无人算命中率;done 事件无 turn 汇总;cost_update 只有累计无单圈 delta;token 估算系数无回校。
+  suggestion: >-
+    done 加 turn 汇总(成本/token/调用数/命中率)+ 稳定前缀 CI 回归测试 + cost_update 带单圈 delta;估算系数离线周期回校。这组是其它决策点"等数据"的前置,最先做。
+sources:
+- title: Manus — Context Engineering for AI Agents:Lessons from Building Manus(一手,工程博客)
+  url: https://manus.im/blog/Context-Engineering-for-AI-Agents-Lessons-from-Building-Manus
+- title: Anthropic — Effective context engineering for AI agents(一手,工程博客)
+  url: https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents
+- title: Anthropic — Compaction(服务端上下文压缩,一手,官方文档,beta)
+  url: https://platform.claude.com/docs/en/build-with-claude/compaction
+- title: Anthropic Cookbook — Tool use context engineering(33 万 token 语料实测,一手)
+  url: https://platform.claude.com/cookbook/tool-use-context-engineering-context-engineering-tools
+- title: Anthropic — Writing tools for agents(含 Claude Code 25K token 工具响应上限,一手)
+  url: https://www.anthropic.com/engineering/writing-tools-for-agents
+- title: Anthropic — How we built our multi-agent research system(一手,工程博客)
+  url: https://www.anthropic.com/engineering/multi-agent-research-system
+- title: Claude Code — How Claude Code works(Interrupt and steer 一节,一手,官方文档)
+  url: https://code.claude.com/docs/en/how-claude-code-works
+- title: Claude Code — Subagents(独立上下文,一手,官方文档)
+  url: https://code.claude.com/docs/en/sub-agents
+- title: OpenAI Agents SDK(Python)— Tools(错误处理 / as_tool,一手,官方文档)
+  url: https://openai.github.io/openai-agents-python/tools/
+- title: OpenAI Agents SDK(Python)— Running agents(max_turns / 终止规则,一手,官方文档)
+  url: https://openai.github.io/openai-agents-python/running_agents/
+- title: OpenAI Agents SDK(JS)— Running agents(runner 循环原文,一手,官方文档)
+  url: https://openai.github.io/openai-agents-js/guides/running-agents/
+- title: OpenAI Agents SDK(JS)— Human in the loop(interruptions / state 重入,一手,官方文档)
+  url: https://openai.github.io/openai-agents-js/guides/human-in-the-loop/
+- title: OpenAI — Realtime conversations(VAD 打断 / truncate 状态对齐,一手,官方文档)
+  url: https://developers.openai.com/api/docs/guides/realtime-conversations
+- title: LangGraph — GRAPH_RECURSION_LIMIT(默认 25 / 死循环解读,一手,官方文档)
+  url: https://docs.langchain.com/oss/python/langgraph/errors/GRAPH_RECURSION_LIMIT
+- title: LangGraph — Interrupts(interrupt / Command resume / 节点级重放,一手,官方文档)
+  url: https://docs.langchain.com/oss/python/langgraph/interrupts
+- title: LangGraph Platform — Double-texting 四策略(一手,官方文档)
+  url: https://docs.langchain.com/langgraph-platform/double-texting
+- title: Claude Code GitHub issue #30492 — 排队插话延迟的 feature request(二手,社区)
+  url: https://github.com/anthropics/claude-code/issues/30492
+- title: Claude Code GitHub issue #16905 — Esc 与排队消息的交互坑(二手,社区)
+  url: https://github.com/anthropics/claude-code/issues/16905
