@@ -95,3 +95,47 @@ def test_idor_blocked_get_rename_delete(
     assert cb.delete(f"/api/v0/chats/{sid_a}").status_code == 404
     # A 自己仍可访问
     assert ca.get(f"/api/v0/chats/{sid_a}").status_code == 200
+
+
+def _make_session_task(factory: object, owner: uuid.UUID) -> uuid.UUID:
+    """建一个归属 owner 的 session + queued task,返回 task_id(供任务型端点 IDOR 测)。"""
+    import asyncio
+
+    from app.models.chat import ChatSession
+    from app.services.chat_task_repo import ChatTaskRepo
+
+    sid = uuid.uuid4()
+
+    async def _mk() -> uuid.UUID:
+        async with factory() as sess:  # type: ignore[operator]
+            sess.add(ChatSession(id=sid, user_id=owner, title="A"))
+            await sess.commit()
+        task = await ChatTaskRepo(factory).create_queued(
+            session_id=sid,
+            user_id=owner,
+            langgraph_thread_id="t",
+            initial_prompt_message_id=None,
+        )
+        return task.id
+
+    return asyncio.get_event_loop().run_until_complete(_mk())
+
+
+def test_chat_task_endpoint_idor_blocked(pg_async_session_factory: object) -> None:
+    """任务型端点(cancel)归属校验:B 不能 cancel A 的 task → 404。"""
+    from app.router.chat import get_async_session_factory, get_redis_async
+    from app.router.chat import router as chat_router
+    from fakeredis.aioredis import FakeRedis
+
+    a = _U(_make_user(pg_async_session_factory))
+    b = _U(_make_user(pg_async_session_factory))
+    task_id = _make_session_task(pg_async_session_factory, a.id)
+
+    fr = FakeRedis(decode_responses=False)
+    app = FastAPI()
+    app.include_router(chat_router)
+    app.dependency_overrides[get_async_session_factory] = lambda: pg_async_session_factory
+    app.dependency_overrides[get_redis_async] = lambda: fr
+    app.dependency_overrides[get_current_user_required] = lambda: b  # B,非 owner A
+    client = TestClient(app, raise_server_exceptions=True)
+    assert client.post(f"/api/v0/chat/cancel/{task_id}").status_code == 404
