@@ -19,8 +19,8 @@ def test_build_server_returns_server_instance() -> None:
     assert isinstance(s, Server)
 
 
-def test_build_server_lists_exactly_10_tools() -> None:
-    """The aggregated registry must contain exactly the 10 expected tool names.
+def test_build_server_lists_exactly_11_tools() -> None:
+    """The aggregated registry must contain exactly the 11 expected tool names.
 
     We introspect via s._mcp_tool_registry (attached by build_server() for
     testing) rather than calling the SDK's list_tools() handler directly,
@@ -43,12 +43,13 @@ def test_build_server_lists_exactly_10_tools() -> None:
         "compare_stocks",
         "get_daily",
         "get_index_daily",
+        "get_fund_nav",
     }
     assert names == expected, f"Expected {expected}, got {names}"
 
 
 def test_each_tool_module_exports_tool_def_and_handle() -> None:
-    """Each of the 10 chat-profile tool modules exports TOOL_DEF + handle()."""
+    """Each of the 11 chat-profile tool modules exports TOOL_DEF + handle()."""
     import importlib
 
     modules = [
@@ -62,6 +63,7 @@ def test_each_tool_module_exports_tool_def_and_handle() -> None:
         "app.mcp_server.tools.compare_stocks",
         "app.mcp_server.tools.get_daily",
         "app.mcp_server.tools.get_index_daily",
+        "app.mcp_server.tools.get_fund_nav",
     ]
     for mod_path in modules:
         mod = importlib.import_module(mod_path)

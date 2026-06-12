@@ -134,6 +134,7 @@ _FAKE_RESULTS: dict[str, dict[str, Any]] = {
     "get_daily": {"ts_code": "600519.SH", "count": 0, "dates": [], "close": []},
     "get_portfolio_positions": {"total_count": 0, "positions": [], "total_market_value": 0.0},
     "get_index_daily": {"ts_code": "000300.SH", "count": 0, "latest": None},
+    "get_fund_nav": {"ts_code": "110011.OF", "fund_type": None, "latest": None},
 }
 
 

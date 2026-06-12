@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 
-def test_chat_tools_profile_has_ten_tools() -> None:
+def test_chat_tools_profile_has_eleven_tools() -> None:
     from app.mcp_server.server import build_server
 
     s = build_server(profile="chat_tools")
@@ -25,6 +25,7 @@ def test_chat_tools_profile_has_ten_tools() -> None:
         "compare_stocks",
         "get_daily",  # charting: A 股日线时序(K线/走势/归一化/回撤取数)
         "get_index_daily",  # 指数当日涨跌(沪深300 等)
+        "get_fund_nav",  # 基金类型与净值涨跌
     }
 
 

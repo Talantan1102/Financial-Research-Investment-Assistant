@@ -8,7 +8,7 @@ from app.services.mcp_client import MCPClient
 
 @pytest.mark.asyncio
 async def test_mcp_client_lists_chat_profile_tools():
-    """Boot mcp_server in subprocess; client lists all 10 chat-profile tools."""
+    """Boot mcp_server in subprocess; client lists all 11 chat-profile tools."""
     async with MCPClient.from_subprocess() as client:
         tools = await client.list_tools()
         names = {t["name"] for t in tools}
@@ -23,4 +23,5 @@ async def test_mcp_client_lists_chat_profile_tools():
             "compare_stocks",
             "get_daily",  # charting: A 股日线时序(K线/走势/归一化/回撤取数)
             "get_index_daily",  # 指数当日涨跌(沪深300 等)
+            "get_fund_nav",  # 基金类型与净值涨跌
         }

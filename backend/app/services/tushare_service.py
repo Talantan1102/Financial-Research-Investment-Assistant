@@ -52,6 +52,10 @@ class TushareService(Protocol):
     async def get_index_daily(
         self, *, ts_code: str, start_date: str, end_date: str
     ) -> pd.DataFrame: ...
+    async def get_fund_nav(
+        self, *, ts_code: str, start_date: str, end_date: str
+    ) -> pd.DataFrame: ...
+    async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame: ...
 
     # Mock implementations should override aclose() as a no-op or handle their own cleanup.
     async def aclose(self) -> None: ...
@@ -235,6 +239,15 @@ class RealTushareService:
             "index_daily",  # tushare 真实 API
             {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
         )
+
+    async def get_fund_nav(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        return await self._call_cached(
+            "fund_nav",
+            {"ts_code": ts_code, "start_date": start_date, "end_date": end_date},
+        )
+
+    async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame:
+        return await self._call_cached("fund_basic", {"ts_code": ts_code})
 
     async def aclose(self) -> None:
         await self._client.aclose()

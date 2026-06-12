@@ -219,6 +219,23 @@ class LegacyMockTushareAdapter:
             "pct_chg": [-0.25, -0.80],
         })
 
+    async def get_fund_nav(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        # deterministic:两日净值,当日 -1.0%
+        return pd.DataFrame({
+            "ts_code": [ts_code, ts_code],
+            "nav_date": ["20261113", "20261114"],
+            "unit_nav": [2.500, 2.475],
+        })
+
+    async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame:
+        # deterministic:股票型示例基金
+        return pd.DataFrame({
+            "ts_code": [ts_code],
+            "name": ["示例基金"],
+            "fund_type": ["股票型"],
+            "market": ["O"],
+        })
+
     async def aclose(self) -> None:
         """No-op: legacy MockTushareService has no connections to close."""
         pass

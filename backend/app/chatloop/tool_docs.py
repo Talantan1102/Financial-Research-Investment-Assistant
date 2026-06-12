@@ -416,6 +416,20 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         doc="查指数日线与当日涨跌幅。ts_code 如 000300.SH(沪深300)。",
         thin_required={"ts_code": "string", "start_date": "string", "end_date": "string"},
     ),
+    "get_fund_nav": ToolDoc(
+        name="get_fund_nav",
+        group="deferred",
+        brief="查基金类型和净值涨跌,看不穿底层持仓。组合里基金部分的涨跌用它。",
+        doc=(
+            "查基金类型与每日净值涨跌(场内ETF/场外基金)。\n"
+            "何时用:用户组合里有基金仓位,要看该基金今日涨跌/净值;触发词:基金、ETF、净值、基金涨跌。\n"
+            "何时不用:查 A 股 → get_stock_quote;查指数 → get_index_daily。\n"
+            "注意:本工具只取净值层面涨跌,不穿透基金底层持仓(底层只到季报、滞后)。\n"
+            "参数:ts_code(str,必填,基金代码如 110011.OF)、start_date(YYYYMMDD)、end_date(YYYYMMDD)。\n"
+            "示例:get_fund_nav(ts_code='110011.OF', start_date='20261101', end_date='20261114')。"
+        ),
+        thin_required={"ts_code": "string", "start_date": "string", "end_date": "string"},
+    ),
     "get_portfolio_positions": ToolDoc(
         name="get_portfolio_positions",
         group="deferred",
@@ -463,6 +477,7 @@ DEFERRED_TOOLS: list[str] = [
     "get_daily",
     "get_portfolio_positions",
     "get_index_daily",
+    "get_fund_nav",
 ]
 
 
