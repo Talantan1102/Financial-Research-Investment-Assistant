@@ -39,6 +39,22 @@ def estimate_tokens(text: str) -> int:
     return math.ceil(cjk / 1.65 + other / 4)
 
 
+def _estimate_messages_tokens(messages: list[dict[str, Any]]) -> int:
+    """粗估一组 OpenAI messages 的总 token(content + tool_calls 文本)。
+
+    只用于安全阀的"逼近窗口"判定,不要求精确(真实值走 usage 回填)。
+    """
+    total = 0
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, str):
+            total += estimate_tokens(content)
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function", {})
+            total += estimate_tokens(f"{fn.get('name', '')}{fn.get('arguments', '')}")
+    return total
+
+
 # ---------------------------------------------------------------------------
 # ContextDeps
 # ---------------------------------------------------------------------------
@@ -58,6 +74,9 @@ class ContextDeps:
     max_cny: float = 0.10
     downgrade_char_threshold: int = 1320
     oversize_result_char_threshold: int = 4000  # 单条工具结果进窗口的字符上限(超则截断+回指针)
+    max_context_tokens: int = 0  # 0 = 安全阀关闭;chat_runner 传模型窗口实际值
+    context_pressure_ratio: float = 0.85  # 拼完总量超 ratio*window 启动收紧
+    downgrade_floor_threshold: int = 200  # 收紧时降级阈值下限(最近一圈仍永久保护)
 
     def __post_init__(self) -> None:
         # frozen dataclass 用 object.__setattr__ 也不可改;tuple 是 immutable,
@@ -169,15 +188,8 @@ def _downgrade_old_tool_messages(state: ChatLoopState, threshold: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def assemble_context(state: ChatLoopState, deps: ContextDeps) -> list[dict[str, Any]]:
-    """state → OpenAI messages。
-
-    会先对 state.messages 做降级(改本体,幂等),再拼四区。
-    纯函数语义:除降级与 downgraded_msg_indices 记账外无其它副作用。
-    """
-    # 1. 降级(改本体)
-    _downgrade_old_tool_messages(state, deps.downgrade_char_threshold)
-
+def _assemble_regions(state: ChatLoopState, deps: ContextDeps) -> list[dict[str, Any]]:
+    """四区拼装(不含降级)——纯读 state.messages。"""
     result: list[dict[str, Any]] = []
 
     # 区一:稳定前缀区
@@ -193,5 +205,39 @@ def assemble_context(state: ChatLoopState, deps: ContextDeps) -> list[dict[str, 
     remaining = max(0.0, deps.max_cny - state.budget_spent_cny)
     tail_content = f"(第 {state.step + 1}/{deps.max_steps} 步,预算剩 ¥{remaining:.2f}。)"
     result.append({"role": "user", "content": tail_content})
+
+    return result
+
+
+def assemble_context(state: ChatLoopState, deps: ContextDeps) -> list[dict[str, Any]]:
+    """state → OpenAI messages。
+
+    先按基准阈值降级,再拼四区;若 max_context_tokens>0 且总量逼近窗口,
+    逐级调小降级阈值多榨老圈(最近一圈永久全文保护),榨到下限仍超则
+    best-effort 照发并置 context_pressure_floor_hit。
+    纯函数语义:除降级、downgraded_msg_indices、压力信号记账外无其它副作用。
+    """
+    # 重置本圈压力信号
+    state.context_pressure_passes = 0
+    state.context_pressure_floor_hit = False
+
+    threshold = deps.downgrade_char_threshold
+    _downgrade_old_tool_messages(state, threshold)
+    result = _assemble_regions(state, deps)
+
+    # 安全阀:总量逼近窗口时逐级收紧降级(最近一圈始终保护)
+    if deps.max_context_tokens > 0:
+        target = int(deps.context_pressure_ratio * deps.max_context_tokens)
+        while (
+            _estimate_messages_tokens(result) > target
+            and threshold > deps.downgrade_floor_threshold
+        ):
+            threshold = max(deps.downgrade_floor_threshold, threshold // 2)
+            _downgrade_old_tool_messages(state, threshold)
+            result = _assemble_regions(state, deps)
+            state.context_pressure_passes += 1
+        if _estimate_messages_tokens(result) > target:
+            # 榨干所有老圈到下限仍超目标(大窗口下几乎不可能)→ best-effort 照发
+            state.context_pressure_floor_hit = True
 
     return result

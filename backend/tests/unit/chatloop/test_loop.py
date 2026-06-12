@@ -787,3 +787,66 @@ async def test_no_steer_predispatch_dispatches_normally():
     assert len(hub.dispatched_calls) == 1  # 正常分发
     assert emit.of("steer_merged") == []
     assert state.halt_reason == "natural"
+
+
+# ---------------------------------------------------------------------------
+# ① 上下文压力安全阀:触发即发 context_pressure 事件
+# ---------------------------------------------------------------------------
+
+
+def _seeded_old_rounds() -> list[dict]:
+    """预置多条中等老圈 tool 消息(每条 600 字符 < 1320 降级线)。"""
+    big = "数" * 600
+
+    def _ac(cid: str) -> dict:
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {"id": cid, "type": "function", "function": {"name": "query_kb", "arguments": "{}"}}
+            ],
+        }
+
+    return [
+        {"role": "user", "content": "分析白酒板块"},
+        _ac("a1"),
+        {"role": "tool", "tool_call_id": "a1", "content": big},
+        _ac("a2"),
+        {"role": "tool", "tool_call_id": "a2", "content": big},
+        _ac("a3"),
+        {"role": "tool", "tool_call_id": "a3", "content": big},
+    ]
+
+
+async def test_context_pressure_event_emitted():
+    """窗口极小 + 多条中等老圈消息 → 第一圈 assemble 触发收紧 → 发 context_pressure。"""
+    state = ChatLoopState(
+        user_id="u1", session_id="s1", request_id="r1", messages=_seeded_old_rounds()
+    )
+    llm = FakeLLM([_step(content="基于已查信息作答。", finish_reason="stop")])
+    hub = FakeToolHub(results_per_round=[])
+    emit = _Collector()
+    deps = ContextDeps(
+        system_prompt="你是金融助手",
+        max_steps=12,
+        max_cny=0.10,
+        max_context_tokens=600,
+        context_pressure_ratio=0.85,
+    )
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=deps, emit=emit)
+    await loop.run(state)
+
+    pressure = emit.of("context_pressure")
+    assert pressure, "应发 context_pressure 事件"
+    assert pressure[0].data.get("passes", 0) > 0
+    assert "floor_hit" in pressure[0].data
+
+
+async def test_no_context_pressure_event_when_off():
+    """max_context_tokens=0(默认)→ 安全阀关闭,无 context_pressure 事件(回归)。"""
+    llm = FakeLLM([_step(content="直接作答。", finish_reason="stop")])
+    hub = FakeToolHub(results_per_round=[])
+    emit = _Collector()
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit)
+    await loop.run(_make_state())
+    assert emit.of("context_pressure") == []

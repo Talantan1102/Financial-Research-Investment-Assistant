@@ -29,6 +29,7 @@ EventType = Literal[
     "error",
     "dispatch_start",
     "dispatch_end",
+    "context_pressure",
 ]
 
 
