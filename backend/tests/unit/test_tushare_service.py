@@ -97,6 +97,18 @@ async def test_get_disclosure_date_dispatches(
     assert fake.calls[-1][0] == "disclosure_date"
 
 
+@pytest.mark.asyncio
+async def test_get_trade_cal_dispatches(
+    service: tuple[RealTushareService, FakeTushareClient],
+) -> None:
+    svc, fake = service
+    await svc.get_trade_cal(start="20260101", end="20260131")
+    assert fake.calls[-1][0] == "trade_cal"
+    assert fake.calls[-1][1]["start_date"] == "20260101"
+    assert fake.calls[-1][1]["end_date"] == "20260131"
+    assert fake.calls[-1][1]["exchange"] == "SSE"
+
+
 def test_protocol_runtime_check(
     cache: TushareCache,
 ) -> None:

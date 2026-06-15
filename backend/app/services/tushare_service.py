@@ -58,6 +58,7 @@ class TushareService(Protocol):
     async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame: ...
     async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame: ...
     async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame: ...
+    async def get_trade_cal(self, *, start: str, end: str) -> pd.DataFrame: ...
 
     # Mock implementations should override aclose() as a no-op or handle their own cleanup.
     async def aclose(self) -> None: ...
@@ -267,6 +268,14 @@ class RealTushareService:
         return await self._call_cached(
             "sw_daily",
             {"ts_code": index_code, "trade_date": trade_date},
+        )
+
+    async def get_trade_cal(self, *, start: str, end: str) -> pd.DataFrame:
+        # 交易日历:日期由调用方显式传入,本方法不读墙上时钟(确定性,可 cassette/可 RL)。
+        # tushare trade_cal 默认 exchange=SSE(沪),A 股沪深同历,取 SSE 即可。
+        return await self._call_cached(
+            "trade_cal",
+            {"exchange": "SSE", "start_date": start, "end_date": end},
         )
 
     async def aclose(self) -> None:
