@@ -44,6 +44,7 @@ _CHAT_TOOL_MODULES = [
     "app.mcp_server.tools.get_index_daily",
     "app.mcp_server.tools.get_fund_nav",
     "app.mcp_server.tools.get_sector_daily",
+    "app.mcp_server.tools.trade_cal",
 ]
 
 _KNOWN_PROFILES = ("chat_tools", "memory")

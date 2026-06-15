@@ -136,6 +136,7 @@ _FAKE_RESULTS: dict[str, dict[str, Any]] = {
     "get_index_daily": {"ts_code": "000300.SH", "count": 0, "latest": None},
     "get_fund_nav": {"ts_code": "110011.OF", "fund_type": None, "latest": None},
     "get_sector_daily": {"industry": None, "pct_chg": None},
+    "trade_cal": {"action": "latest", "query_date": "20260615", "result_date": "20260612"},
 }
 
 
