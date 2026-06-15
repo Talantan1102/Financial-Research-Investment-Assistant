@@ -255,12 +255,12 @@ class LegacyMockTushareAdapter:
         )
 
     async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
-        # deterministic:固定 -3.0% 当日涨跌
+        # deterministic:固定 -3.0% 当日涨跌(列名对齐真实 sw_daily:pct_change,非 pct_chg)
         return pd.DataFrame(
             {
                 "ts_code": [index_code],
                 "trade_date": [trade_date],
-                "pct_chg": [-3.0],
+                "pct_change": [-3.0],
             }
         )
 
