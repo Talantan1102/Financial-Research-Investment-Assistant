@@ -56,9 +56,7 @@ def _shift(ymd: str, days: int) -> str:
 
 
 def _open_dates(df: Any) -> list[str]:
-    return sorted(
-        str(r["cal_date"]) for r in df.to_dict("records") if int(r["is_open"]) == 1
-    )
+    return sorted(str(r["cal_date"]) for r in df.to_dict("records") if int(r["is_open"]) == 1)
 
 
 async def handle(args: dict[str, Any]) -> list[TextContent]:
@@ -74,7 +72,9 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
         qdate = args.get("date")
         if not qdate:
             return _err("[参数校验失败] is_open/latest/prev/next 需要 date(YYYYMMDD)")
-        df = await tushare.get_trade_cal(start=_shift(qdate, -_WINDOW_DAYS), end=_shift(qdate, _WINDOW_DAYS))
+        df = await tushare.get_trade_cal(
+            start=_shift(qdate, -_WINDOW_DAYS), end=_shift(qdate, _WINDOW_DAYS)
+        )
         opens = _open_dates(df)
         if action == "is_open":
             return _ok({"action": action, "date": qdate, "is_open": qdate in opens})
@@ -90,7 +90,9 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
             )
         if action == "prev":  # 严格早于 qdate
             lt = [d for d in opens if d < qdate]
-            return _ok({"action": action, "query_date": qdate, "result_date": max(lt) if lt else None})
+            return _ok(
+                {"action": action, "query_date": qdate, "result_date": max(lt) if lt else None}
+            )
         gt = [d for d in opens if d > qdate]  # next:严格晚于 qdate
         return _ok({"action": action, "query_date": qdate, "result_date": min(gt) if gt else None})
 

@@ -78,7 +78,9 @@ class ContextDeps:
     max_context_tokens: int = 0  # 0 = 安全阀关闭;chat_runner 传模型窗口实际值
     context_pressure_ratio: float = 0.85  # 拼完总量超 ratio*window 启动收紧
     downgrade_floor_threshold: int = 200  # 收紧时降级阈值下限(最近一圈仍永久保护)
-    reference_date: date | None = None  # 会话参考日期:生产=今天 / eval·RL=冻结 as-of;None=不注入(向后兼容)
+    reference_date: date | None = (
+        None  # 会话参考日期:生产=今天 / eval·RL=冻结 as-of;None=不注入(向后兼容)
+    )
 
     def __post_init__(self) -> None:
         # frozen dataclass 用 object.__setattr__ 也不可改;tuple 是 immutable,

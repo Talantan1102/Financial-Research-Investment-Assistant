@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from app.mcp_server.tools.trade_cal import handle
 
 
