@@ -55,6 +55,11 @@ def _shift(ymd: str, days: int) -> str:
     return d.strftime("%Y%m%d")
 
 
+def _bad_ymd(s: Any) -> bool:
+    """非 8 位纯数字 YYYYMMDD(含 None / 带分隔符 / 非串)→ True。"""
+    return not (isinstance(s, str) and len(s) == 8 and s.isdigit())
+
+
 def _open_dates(df: Any) -> list[str]:
     return sorted(str(r["cal_date"]) for r in df.to_dict("records") if int(r["is_open"]) == 1)
 
@@ -70,8 +75,8 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
 
     if action in _SINGLE:
         qdate = args.get("date")
-        if not qdate:
-            return _err("[参数校验失败] is_open/latest/prev/next 需要 date(YYYYMMDD)")
+        if _bad_ymd(qdate):
+            return _err("[参数校验失败] is_open/latest/prev/next 需要 date(8 位 YYYYMMDD)")
         df = await tushare.get_trade_cal(
             start=_shift(qdate, -_WINDOW_DAYS), end=_shift(qdate, _WINDOW_DAYS)
         )
@@ -98,8 +103,8 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
 
     # range: count / list
     start, end = args.get("start"), args.get("end")
-    if not start or not end:
-        return _err("[参数校验失败] count/list 需要 start 与 end(YYYYMMDD)")
+    if _bad_ymd(start) or _bad_ymd(end):
+        return _err("[参数校验失败] count/list 需要 start 与 end(8 位 YYYYMMDD)")
     df = await tushare.get_trade_cal(start=start, end=end)
     opens = _open_dates(df)
     if action == "count":

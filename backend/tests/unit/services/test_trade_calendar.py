@@ -26,6 +26,12 @@ def test_normal_weekday_open():
     assert int(df.iloc[0]["is_open"]) == 1
 
 
+def test_2024_chuxi_closed():
+    # 除夕(2024 春节首个休市日,周五)休市 —— code review 补的边界
+    df = build_calendar_df("20240209", "20240209")
+    assert int(df.iloc[0]["is_open"]) == 0
+
+
 def test_columns_and_pretrade_seed():
     # 区间起点前的最近交易日要被"种子化",元旦后第一个交易日 pretrade 指向 2025-12-31。
     df = build_calendar_df("20251231", "20260105")

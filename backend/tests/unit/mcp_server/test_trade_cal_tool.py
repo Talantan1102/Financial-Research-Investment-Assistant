@@ -65,3 +65,12 @@ async def test_missing_param_guidance():
 async def test_bad_action():
     r = await _call({"action": "nope"})
     assert "参数校验失败" in r.get("error", "")
+
+
+@pytest.mark.asyncio
+async def test_malformed_date_guidance():
+    # 带分隔符 / 非数字日期 → 指导性错误,不抛未捕获 ValueError
+    r = await _call({"action": "is_open", "date": "2026-06-15"})
+    assert "参数校验失败" in r.get("error", "")
+    r2 = await _call({"action": "count", "start": "abc", "end": "20260101"})
+    assert "参数校验失败" in r2.get("error", "")
