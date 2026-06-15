@@ -30,6 +30,7 @@ import logging
 import os
 import uuid
 from contextlib import suppress
+from datetime import date
 from typing import Any
 
 from app.chatloop.context import ContextDeps
@@ -261,6 +262,7 @@ async def run_chat_async(
         max_steps=components.gate_cfg.max_steps,
         max_cny=components.gate_cfg.max_cny,
         max_context_tokens=int(os.getenv("CHATLOOP_MAX_CONTEXT_TOKENS", "100000")),
+        reference_date=date.today(),  # 生产=今天;eval/RL 另传冻结 as-of
     )
 
     state = ChatLoopState(
