@@ -71,7 +71,9 @@ async def _get_sector_info(
         if df is None or getattr(df, "empty", True):
             return industry, None
 
-        return industry, float(df.iloc[0]["pct_chg"])
+        # 申万 sw_daily 涨跌幅列名是 pct_change(不是 pct_chg)
+        col = "pct_change" if "pct_change" in df.columns else "pct_chg"
+        return industry, float(df.iloc[0][col])
     except Exception:
         return None, None
 
