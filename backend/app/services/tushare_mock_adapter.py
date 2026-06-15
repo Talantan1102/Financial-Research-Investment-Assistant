@@ -264,6 +264,12 @@ class LegacyMockTushareAdapter:
             }
         )
 
+    async def get_trade_cal(self, *, start: str, end: str) -> pd.DataFrame:
+        # 交易日历是确定性历法,绝不走 LLM 生成(见 mock-tushare-adapter-is-llm-backed)。
+        from app.services.trade_calendar import build_calendar_df
+
+        return build_calendar_df(start, end)
+
     async def aclose(self) -> None:
         """No-op: legacy MockTushareService has no connections to close."""
         pass
