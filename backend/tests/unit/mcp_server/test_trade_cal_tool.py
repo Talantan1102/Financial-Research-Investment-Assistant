@@ -126,8 +126,18 @@ async def test_window_n_trading_days():
     assert r["trading_days"] == 20
     assert r["end"] == "20260616"
     assert r["start"] == "20260520"
+    assert r["anchor_is_open"] is True  # 6/16 周二开市
+    assert "truncated_by_history" not in r  # 历史充足,不该标记截断
     c = await _call({"action": "count", "start": r["start"], "end": r["end"]})
     assert c["count"] == 20
+
+
+@pytest.mark.asyncio
+async def test_window_6m_resolves_month_lookback():
+    # 走 _minus_months 路径:6/16 − 6 月 = 12/16(2025,周二开市,无需顺延)
+    r = await _call({"action": "window", "anchor": "20260616", "lookback": "6m"})
+    assert r["start"] == "20251216"
+    assert r["end"] == "20260616"
 
 
 @pytest.mark.asyncio
