@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 from app.chatloop.state import ChatLoopState
@@ -73,10 +74,13 @@ class ContextDeps:
     max_steps: int = 12
     max_cny: float = 0.10
     downgrade_char_threshold: int = 1320
-    oversize_result_char_threshold: int = 4000  # 单条工具结果进窗口的字符上限(超则截断+回指针)
+    oversize_result_char_threshold: int = 24000  # 单条工具结果进窗口的字符上限(超则截断+回指针);一年日线序列 ~15k 字不再误截,见 spec 2026-06-16-runpython-large-data-channel
     max_context_tokens: int = 0  # 0 = 安全阀关闭;chat_runner 传模型窗口实际值
     context_pressure_ratio: float = 0.85  # 拼完总量超 ratio*window 启动收紧
     downgrade_floor_threshold: int = 200  # 收紧时降级阈值下限(最近一圈仍永久保护)
+    reference_date: date | None = (
+        None  # 会话参考日期:生产=今天 / eval·RL=冻结 as-of;None=不注入(向后兼容)
+    )
 
     def __post_init__(self) -> None:
         # frozen dataclass 用 object.__setattr__ 也不可改;tuple 是 immutable,
@@ -201,9 +205,14 @@ def _assemble_regions(state: ChatLoopState, deps: ContextDeps) -> list[dict[str,
     # 区三:本 turn 轨迹区
     result.extend(state.messages)
 
-    # 区四:尾部动态区
+    # 区四:尾部动态区(会话级动态;reference_date 在则前置"今天",不破坏稳定前缀 KV-cache)
     remaining = max(0.0, deps.max_cny - state.budget_spent_cny)
-    tail_content = f"(第 {state.step + 1}/{deps.max_steps} 步,预算剩 ¥{remaining:.2f}。)"
+    if deps.reference_date is not None:
+        rd = deps.reference_date
+        today = f"今天 {rd.isoformat()} 周{'一二三四五六日'[rd.weekday()]}。"
+    else:
+        today = ""
+    tail_content = f"({today}第 {state.step + 1}/{deps.max_steps} 步,预算剩 ¥{remaining:.2f}。)"
     result.append({"role": "user", "content": tail_content})
 
     return result

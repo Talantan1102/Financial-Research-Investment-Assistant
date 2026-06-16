@@ -381,7 +381,9 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             " - 数据在变量 data(dict)里,直接用,不用读 stdin;\n"
             " - 把图赋给 fig(单张)或 figures(plotly Figure 列表),结论赋给 result;\n"
             " - 不要 print、不要返回图片链接/markdown 图 —— 执行器自动序列化并套统一 iOS 主题。\n"
-            "参数:code(str,必填)= 完整脚本;data(object,可选)= 喂进来的数据 JSON。\n"
+            "参数:code(str,必填)= 完整脚本;data(object,可选)= 小数据 JSON 直接喂;"
+            "data_refs(object,可选)= {变量名: 工具结果 ref} —— 大数据(日线序列等)按引用喂,"
+            "执行器自动灌完整数据进 data[变量名],别把长数组手抄进 data。\n"
             "示例:run_python(code='import plotly.graph_objects as go; fig=go.Figure(); "
             'fig.add_bar(x=data["names"], y=data["vals"]); result="已画"\', '
             "data={'names':['股票A','股票B'],'vals':[241,197]})。\n"
@@ -463,6 +465,30 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         ),
         thin_required={},  # 无必填参数
     ),
+    "trade_cal": ToolDoc(
+        name="trade_cal",
+        group="deferred",
+        brief="查 A 股交易日历(某天开市吗/最近交易日/区间交易日)。算相对日期、定 trade_date 时用。",
+        doc=(
+            "查 A 股交易日历(沪深同历)。\n"
+            "何时用:用户说相对时间(近一年/上季度/最近)需换算成交易日;周末/节假日要找最近一个"
+            "开市日;给其它工具填 trade_date/start/end 前确认是真实交易日;算区间内有多少个交易日。\n"
+            "何时不用:已知确切交易日直接用;查行情/财务走对应数据工具。\n"
+            "参数:\n"
+            "  action(str,必填,枚举)—— window(相对区间一次解析,**优先用**)/is_open(某天是否开市)/"
+            "latest(≤该日的最近交易日)/prev(上一交易日)/next(下一交易日)/count(区间交易日数)/"
+            "list(区间交易日列表)。\n"
+            "  anchor + lookback(window 用)—— anchor=今天(YYYYMMDD,见尾部动态区);"
+            "lookback=周期码 1y/6m/3m/1m/30d/20td/ytd。一次返回 {start,end,trading_days,anchor_is_open}。\n"
+            "  date(str,条件必填)—— is_open/latest/prev/next 用,YYYYMMDD;相对查询时传'今天'。\n"
+            "  start/end(str,条件必填)—— count/list 用,YYYYMMDD。\n"
+            "示例:trade_cal(action='window', anchor='20260616', lookback='1y') / "
+            "trade_cal(action='latest', date='20260614')。\n"
+            "硬约束:date/anchor 一律显式传(工具不假设'今天');算相对区间(近一年/近N月/年初至今)"
+            "**优先用 window 一次拿全,别 is_open+latest 拆成多次调**;list 最多返回最近 260 个交易日。"
+        ),
+        thin_required={"action": "string"},
+    ),
 }
 
 
@@ -495,6 +521,7 @@ DEFERRED_TOOLS: list[str] = [
     "get_index_daily",
     "get_fund_nav",
     "get_sector_daily",
+    "trade_cal",
 ]
 
 

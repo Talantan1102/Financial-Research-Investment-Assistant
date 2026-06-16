@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import date
 
 from app.chatloop.context import ContextDeps, assemble_context, estimate_tokens
 from app.chatloop.state import ChatLoopState, ToolLedger
@@ -83,6 +84,23 @@ def _make_deps(
         max_cny=max_cny,
         downgrade_char_threshold=downgrade_char_threshold,
     )
+
+
+def test_reference_date_injected_in_tail():
+    # 注入参考日期 → 尾部动态区前置"今天 YYYY-MM-DD 周X"
+    state = _make_state()
+    deps = ContextDeps(system_prompt="x", reference_date=date(2026, 6, 15))
+    tail = assemble_context(state, deps)[-1]["content"]
+    assert "今天 2026-06-15" in tail
+    assert "周一" in tail  # 2026-06-15 是周一
+
+
+def test_reference_date_none_keeps_tail_backward_compatible():
+    # 不传 reference_date(默认 None)→ 尾部不含"今天",老行为不变
+    state = _make_state()
+    deps = ContextDeps(system_prompt="x")
+    tail = assemble_context(state, deps)[-1]["content"]
+    assert "今天" not in tail
 
 
 def _tool_call_msg(call_id: str, name: str, args: dict) -> dict:
