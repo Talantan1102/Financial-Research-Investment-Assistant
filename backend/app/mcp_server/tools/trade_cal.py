@@ -1,6 +1,6 @@
 """MCP tool — trade_cal(A 股交易日历:开市判断 / 最近交易日 / 区间交易日)。
 
-六动作:is_open / latest / prev / next / count / list。
+七动作:is_open / latest / prev / next / count / list / window(相对区间一次解析)。
 日期一律由参数显式传入,handle 内绝不读 datetime.now()(确定性,可 cassette / 可 RL)。
 单日动作按 date 取 ±15 天窗口(覆盖最长节假日缺口)在日历上解析;区间动作用 start/end。
 
@@ -123,6 +123,7 @@ async def _handle_window(tushare: Any, args: dict[str, Any]) -> list[TextContent
     if kind == "td":  # 计数型:从 end 倒数 N 个交易日
         df = await tushare.get_trade_cal(start=_shift(anchor, -(n * 2 + 30)), end=anchor)
         opens = _open_dates(df)
+        # 防御:get_trade_cal 已按 end=anchor 截断,此处再兜一层(API 若回 anchor+1 也不污染)
         le = [d for d in opens if d <= anchor]
         if not le:
             return _err("[数据为空] 该区间无交易日")
@@ -136,17 +137,18 @@ async def _handle_window(tushare: Any, args: dict[str, Any]) -> list[TextContent
             return _err("[数据为空] 该区间无交易日")
         start, end, trading_days = opens[0], opens[-1], len(opens)
 
-    return _ok(
-        {
-            "action": "window",
-            "anchor": anchor,
-            "lookback": args.get("lookback"),
-            "start": start,
-            "end": end,
-            "trading_days": trading_days,
-            "anchor_is_open": anchor in opens,
-        }
-    )
+    payload = {
+        "action": "window",
+        "anchor": anchor,
+        "lookback": args.get("lookback"),
+        "start": start,
+        "end": end,
+        "trading_days": trading_days,
+        "anchor_is_open": anchor in opens,
+    }
+    if kind == "td" and trading_days < n:  # 历史不足 N:不报错,但标记让调用方可感知
+        payload["truncated_by_history"] = True
+    return _ok(payload)
 
 
 async def handle(args: dict[str, Any]) -> list[TextContent]:
