@@ -85,3 +85,21 @@ docker-compose.override.yml
 # 调研期克隆的第三方参考仓库(只读对照,不入库)
 reference_repo/
 backend/eval/memory_dialogue/smoke_logs/
+
+# README screenshot tooling (local only)
+scripts/_auth.json
+_readme_preview.html
+docs/_readme_render_full.png
+docs/_readme_part_*.png
+scripts/shoot_readme.mjs
+scripts/shoot_preview.mjs
+scripts/render_readme.py
+docs/_slice_*.png
+scripts/shoot_slices.mjs
+scripts/shoot_v2.mjs
+scripts/inspect_dom.mjs
+scripts/shoot_chart.mjs
+scripts/shoot_01.mjs
+docs/_view_*.png
+scripts/shoot_board.mjs
+scripts/shoot_fix.mjs

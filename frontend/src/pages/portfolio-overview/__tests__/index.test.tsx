@@ -24,16 +24,6 @@ vi.mock('@/api/portfolio', () => ({
         narrative: '今天主要是白酒砸的。',
       },
     }),
-  getTrend: () =>
-    Promise.resolve({
-      data: {
-        dates: ['1', '2'],
-        portfolio: [0.01],
-        benchmark: [0.005],
-        cumulative: 0.032,
-        range: '1m',
-      },
-    }),
 }))
 
 describe('PortfolioOverviewPage', () => {

@@ -1,395 +1,235 @@
-# 金融研投助手
+# AlphaScout · 通用金融 Agent 平台
 
-LLM 应用 portfolio 项目 — 把多 agent 编排、上下文工程、结构化输出、评测可观测在一个金融研究场景里跑通。
+> 把「多智能体编排 + 上下文工程 + 结构化输出 + 评估可观测」在一个真实的 A 股研投场景里完整跑通的 LLM 应用作品。
+>
+> 你用大白话提问 —— agent 自己规划、调真实行情/财务数据、现写 Python 画图、交叉验证、给出可追溯到每一个数字的判断。
 
-**当前版本**:v1.0(持仓监控 — Trade SoT + Position materialized + 5 endpoints + 三态机 service guard)+ **Harness Board**(复合型项目知识工具 — 按论文 ETCLOVG 7 维 × 87 capability 把本项目逐条拆解展示,DeepCard 深读卡 + 3 视图 Topology 关系图 `/` / 模块页 `/m/{dim}` / 故事时间线 `/story`,Milvus 相关推荐 + 34 张 hand-curated seed)
+<p>
+<img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white">
+<img alt="React 19" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
+<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white">
+<img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-1.x-1C3C3C">
+<img alt="PostgreSQL" src="https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white">
+<img alt="Milvus" src="https://img.shields.io/badge/Milvus-向量库-00A1EA">
+<img alt="License MIT" src="https://img.shields.io/badge/License-MIT-green">
+</p>
 
-## 三个使用模式
+**导航**　·　[这是什么](#这是什么)　·　[界面预览](#界面预览)　·　[快速开始](#快速开始)　·　[技术要点](#技术要点粗粒度)　·　[更大的愿景](#更大的愿景)　·　[项目结构](#项目结构)　·　[测试与质量](#测试与质量)
 
-| 模式 | 路径 | 说明 |
-|---|---|---|
-| **投资标的尽调 (B-1)** | `/research` | 5-agent 流程(Planner constrained router 4 选 1 → DataCollector → Analyst horizon-conditioned → Writer 6 字段驱动 + Python helper 决定论修正 → Critic 7 维评分 含 plan_correctness),产出 `InvestmentDueDiligenceReport` Pydantic schema;6 字段 form(ts_code + horizon + objective + risk_tolerance + 持仓 + 机构类型);LangGraph self-correcting retry edge(plan_correctness < 8.5 且 retry_count < 2 → 回 planner 重选,max 2 轮硬上限) |
-| **对话模式 (Chat)** | `/chat` | ChatAgent + planner + tool registry,自然语言问答 + 工具调用(行情/财务/web/KB) |
-| **持仓预警 (Monitoring, B-3)** | `/monitoring` | 5 SignalRule 并发评分 → 红色 alert 触发 5-agent deep_dive escalation → 邮件通知;支持手动 + cron 触发 |
+---
 
-## 架构
+## 这是什么
 
-```
-                    ┌──────────────────────────────────────────────────────────┐
-                    │ FastAPI + LangGraph 1.x orchestration                    │
-                    │   ├─ ResearchAgent (5-agent + Critic 7-dim subgraph + retry edge) │
-                    │   │    InvestmentDueDiligenceReport schema (v0.8.4)      │
-                    │   │    Planner(constrained router 4-id Literal) → Analyst(horizon-conditioned) │
-                    │   │    Writer(6 sections + Python helpers 决定论修正)    │
-                    │   │    Critic(7 scorer 含 plan_correctness LLM-as-judge) │
-                    │   │    Self-correcting retry edge(plan_correctness < 8.5 → 回 planner, max 2 轮) │
-                    │   │    financial_research/ skill bundle(17 components — Anthropic Skills 模式) │
-                    │   ├─ ChatAgent     (planner + tool registry)             │
-                    │   └─ MonitoringService (signal + escalation)             │
-                    └──────────────────────────────────────────────────────────┘
-                                          │
-   ┌──────────────────────────────────────┼──────────────────────────────────────┐
-   │ 横切服务 (app/services/) — 全部 Protocol + Real/Mock + factory             │
-   ├──────────────────────────────────────┼──────────────────────────────────────┤
-   │ LLMService   │ TushareService  │ BochaService     │ KBService              │
-   │ (OpenAI 兼容) │ (13 接口 + 缓存)│ (Web 搜索 + 4 reliability) │ (Milvus 向量库) │
-   │ TraceService │ EvalRunner      │ Judge            │ EmailNotifier (B-3)    │
-   │ CostBudget   │ TierRouter      │ RateLimiter      │ CircuitBreaker          │
-   └──────────────────────────────────────────────────────────────────────────────┘
-                                          │
-                              ┌───────────┴───────────┐
-                              │ sqlite (本地持久化)    │
-                              │  ├─ tushare_cache     │
-                              │  ├─ monitoring        │
-                              │  └─ eval / trace      │
-                              └────────────────────────┘
-```
+**AlphaScout** 是一个面向中国 A 股研究场景的 AI 研投助手。它的目标不是再做一个「自然语言查数据库」的接口，而是把一个**资深研究员的完整工作流**——从查行情、读三表、算估值、追资金、对比行业，到写出有数据支撑、可逐条追溯的研究判断——交给一个能自主规划、自主调工具、自我纠错的 agent 来完成。
 
-**关键模式**:
-- **Protocol+Real+Mock+factory**(全 9 次应用):`build_*_service_from_env()` 读 `*_MODE=real|mock` 切换。CI 全 mock,production 切 real。
-- **VCR cassette e2e**:LLM/Tushare/Bocha 的真调用录成 yaml,replay 0.81s 跑 36 个 endpoint × 5 ts_code。代理 host 在录制时被 scrub 成官方 host(repo 不暴露代理 URL)。
-- **mypy strict**:`app/services/*` `app/agents/*` `app/orchestration/*` 全 strict 通过。legacy `app/service/`(单数)mypy ignore_errors。
-- **commit-msg layer 标记**:fix 类 commit body 必须含 `原因 layer: <impl|plan|spec>`(pre-commit hook 强制),溯源 bug 起源。
-- **Constrained LLM router (v0.8.5)**:Planner 不自由生成 ResearchPlan,LLM 仅在 4 个 hardcode plan_id Literal(`capital_preservation` / `balanced` / `aggressive_growth` / `event_driven`)中四选一 + rationale ≤200 字符;subtask templates hardcode 在 `plan_registry`,LLM 不参与生成,保证 plan deterministic + golden case 可写。
-- **Anthropic Skills bundle (v0.8.5)**:`backend/app/agents/research/financial_research/` 17 components — 11 .md methodology(solvency / profitability / growth / cashflow_quality / valuation / industry / shareholder_governance / short_term_capital_flow / event_driven / risk_factors / decision_framework)+ 3 references(industry_benchmarks.json + recommendation_rules.yaml + position_size_rules.yaml)+ 3 Python helpers(`compute_position_size` / `classify_recommendation` / `lookup_industry_benchmark`,纯函数 deterministic)。Writer 调 Python helper 算 recommendation + position_size_pct,LLM 仅生成 narrative,footer 标 "Python 决定论修正"。
-- **Self-correcting retry edge (v0.8.5)**:LangGraph `add_conditional_edges`,plan_correctness < 8.5 AND retry_count < 2 → 回 `research_planner_node` 收 critic feedback 重选,max 2 轮硬上限,防 LLM judgment 错或 ambiguous case。
+它同时是一个 **LLM 应用的工程深度作品**：在一个场景里把当下最关键的几件工程问题都认真撞了一遍——多步工具调用如何不失控、金融幻觉如何防住、长期记忆如何跨会话、质量如何可评估可观测。
 
-## 版本演进
-
-| 版本 | 关键交付 | PR |
-|---|---|---|
-| v0 | LangGraph chat agent skeleton + 2 agents + 3 tools + SSE | #6 |
-| v0.5 | Research mode 5-agent + Critic Send API subgraph + 7-event SSE | #7 |
-| v0.6 | Bocha web 搜索接入 + ReliableBochaService(4 reliability layers) | #8 |
-| v0.7 | KB Search + Milvus + 13 篇真 corpus ingest | #9 |
-| v0.8.1 | Token-plan 重构 + v0.7 收尾 cassette | #10 |
-| v0.8.2 | Credit investigation report schema + Writer 重构 + B-1 茅台 e2e | #11 |
-| v0.8.3-pre | 项目个人化 + legacy 标识 + 设计语言对齐 | #12 |
-| v0.8.3 | Tushare 真接 8 接口 + B-3 持仓预警引擎(signal + escalation + email + 3 前端页) | #13 |
-| v0.8.4 | B-1 投资标的尽调极致 polish:InvestmentDueDiligenceReport + 产品定位 reframe(2 persona 共享底座)+ 5-agent prompt 改造 + 3 differential golden + /research 前端完整 user journey | #16 |
-| **v0.8.5** | **Constrained LLM router(plan_id 4 选 1 schema enum)+ 17-component financial_research Anthropic Skills bundle + 第 7 critic plan_correctness + LangGraph self-correcting retry edge max 2 + tool inventory 5→13 + Writer 调 Python helper 替代 LLM 算数字** | #19 |
-| **v0.9 (Plan 1)** | **Chat backend foundation: LangGraph supervisor topology + MCP single-mode tool layer + PG-persisted chat state + 5 chat REST endpoints + 6 MCP tools + in-session memory Protocol DI** | feat/v0.9-chat-c1c2 |
-| **v0.9 (Plan 3)** | **Escalation channel (chat→research handoff): EscalationPacket 4-class schema + EscalationExtractor + escalate SSE endpoint + escalation_records PG table + research prompt upgrades + bidirectional report link** | feat/v0.9-chat-c1c2 |
-
-### v0.9 Chat Mode (backend foundation, Plan 1 of 5)
-
-Production-style chat agent with LangGraph supervisor topology + MCP single-mode tool layer + PG-persisted state.
-
-- **Endpoints:**
-  - `POST /api/v0/chat` — SSE streaming chat (19 event types: token / plan / tool_start / tool_end / cost_update / done / error / + Plan 2-3 extensions)
-  - `POST /api/v0/chat/escalate` — SSE chat→research handoff (Plan 3); streams `escalate_request` → `escalate_packet_draft` → `research_*` events → `escalate_done`
-  - `POST /api/v0/chats` — create new chat session
-  - `GET /api/v0/chats/` — list user's chat sessions
-  - `GET /api/v0/chats/{session_id}` — get session + messages
-  - `DELETE /api/v0/chats/{session_id}` — delete session
-
-- **6 MCP tools** (via stdio subprocess, `backend/app/mcp_server/`):
-  - `get_stock_quote` (tushare A-share daily price)
-  - `get_financials` (tushare financials)
-  - `get_news` (tushare news)
-  - `web_search` (Bocha)
-  - `kb_search` (Milvus)
-  - `compare_stocks` (composite — quote + financials for 2-5 stocks)
-
-- **Persistence (PG):**
-  - Business tables in `public` schema (chat_sessions, chat_messages, tool_result_cache)
-  - LangGraph checkpoints in `langgraph_checkpoints` schema (AsyncPostgresSaver)
-
-- **In-session memory (Q4 E):** tool-result dedup + token-guard summarization via `Memory` Protocol DI (extensible to D MemGPT in C.5)
-
-- **Env vars:** Existing `DATABASE_URL` + `DASHSCOPE_API_KEY` + `DASHSCOPE_BASE_URL` — no new vars
-
-### Escalation Channel — Plan 3 (chat → research handoff)
-
-User-explicit-confirm pattern: LLM extracts signals from chat history → user reviews/edits → research pipeline runs with chat-derived context.
-
-- **Endpoint:** `POST /api/v0/chat/escalate` — SSE, accepts `{session_id, confirmed_packet?}`
-- **SSE event flow:** `escalate_request` → `escalate_packet_draft` (LLM-extracted `EscalationPacket`) → `research_planner_done` / `research_analyst_done` / `research_writer_done` / `research_critic_done` / `research_tool_start` / `research_tool_end` → `escalate_done` (or `escalate_error`)
-- **EscalationPacket schema** (`backend/app/agents/escalation_protocol.py`): 4-class structure — `ExplicitTask` / `ChatDerivedSignals` (entities + preferences + known_tool_results) / `KnownFacts` / `SessionMetadata` + `MissingFieldHint` list
-- **PG table `escalation_records`:** `packet_draft` / `packet_confirmed` / `user_edits` jsonb columns — captures LLM→user diffs for prompt-tuning trace
-- **Bidirectional link:** `research_reports.source_chat_session_id` FK (ON DELETE SET NULL) + `ChatMessage(message_type="research_report")` double-write — report appears in chat history
-- **Research prompts upgraded:** `ResearchPlanner` / `Analyst` / `Writer` honor chat-derived entities / preferences / known tool results
-- **Failure rollback (E4):** research crash OR double-write failure → `escalate_error` SSE + `escalation_records.status=failed`
-- **Plan 4 (TODO):** `<EscalationConfirmDialog>` frontend UI consuming `escalate_packet_draft` event
-
-- **Plan 1 carryover (TODO before Plan 2 ship):**
-  - MCP tool wiring into planner runtime ToolRegistry (currently legacy in-process tools wired)
-  - Real `ToolResultCache` injection (currently `_NoOpCache` stub)
-  - PG schema migration formalization (v0.9 columns added via manual ALTER during smoke; future via alembic in v1.x)
-
-### Skill Loader (L1 + L2 + L3a)
-
-The chat agent's `ChatPlanner` discovers skills via progressive disclosure:
-
-| Layer | Content | When loaded |
-|---|---|---|
-| L1 | name + description (≤ 512 chars) | session start, every planner prompt |
-| L2 | full SKILL.md body | planner emits `{"action": "load_skill", "name": "X"}` |
-| L3a | resource files (yaml/json/md) | auto when SKILL.md links to `resources/...`, or on `{"action": "load_resource", ...}` |
-| L3b | scripts/*.py executable | NOT IMPLEMENTED in v0.9 — see Plan 2b |
-
-Caps:
-- L3a resource: **50kB hard cap per file** (rejects with `ResourceTooLargeError`)
-- Nested ref depth: **≤ 2** (SKILL.md → resource → resource is rejected)
-- Resource path: must stay under `<skill>/resources/` (path-traversal blocked)
-
-7 skills are L1-discoverable: `data_analysis`, `deep_research`, `financial_analysis`, `market_data`, `risk_assessment`, `sector_analysis`, `web_research`. `risk_assessment` is the L3a demo — its `resources/risk_thresholds.yaml` carries quantitative cuts referenced by SKILL.md.
-
-SSE event `skill_load` is emitted at L2 and L3a load points with `{name, level, size_tokens, [ref]}` payload.
-
-### Skill Scripts (L3b sandbox)
-
-The chat agent can execute Anthropic-style skill scripts (`backend/claude_skills/<skill>/scripts/X.py`)
-through a sandboxed `SkillExecutor`.
-
-| Surface | Guarantee |
+| 你能用它做什么 | 入口 |
 |---|---|
-| Filesystem | `cwd` is a fresh tmp dir under `backend/data/skill_workdir/`, cleaned up after run |
-| Memory | RLIMIT_AS cap of 256MB (configurable) |
-| CPU / wall | 30s default / 5min max; SIGKILL on overrun |
-| Environment | only `PATH`/`LANG`/`LC_*` passed through; no `DASHSCOPE_API_KEY` |
-| Banned APIs | `os.system`, `subprocess.*`, `socket.socket`, `urlopen`, `requests.*`, `httpx.*`, `eval`, `exec`, `__import__` rejected by static AST scan |
-| stdout/stderr | stderr truncated to 2kB; stdout must be valid JSON |
+| **对话研投** — 用大白话问，agent 自己取数、画图、给判断 | 对话页 |
+| **深度尽调** — 一键生成一份多智能体协作的投资标的尽调报告 | 研报页 |
+| **持仓总览** — 今天涨跌「怎么来的」，用大白话归因到每只股票 | 持仓页 |
+| **持仓预警** — 盘中自动扫描异常信号，红色告警触发深度调查 + 邮件 | 监控页 |
+| **跨会话记忆** — 跨对话记住你是谁、偏好什么、聊过什么 | 记忆页 |
+| **知识库问答** — 研报 / 财报 / 政策切块入库，对话里随取随用 | 知识库页 |
+| **Harness Board** — 把这个项目本身按 7 个工程维度逐条拆给你看的研发看板 | 独立看板 |
 
-Demo: `backend/claude_skills/financial_analysis/scripts/calculate_dcf.py`
+---
 
-## 技术栈
+## 界面预览
 
-| 层级 | 技术 |
+**对话研投 —— 一句话提问，agent 自己规划 → 调真实数据 → 现写 Python 画图 → 给判断**
+
+![对话研投 + 代码解释器画图](docs/screenshots/02-chat-chart.png)
+
+**结构化分析 —— 每一个数字都来自工具调用，可追溯、可复核**
+
+![结构化估值分析报告](docs/screenshots/01-chat-analysis.png)
+
+**持仓总览 —— 今天这账「怎么来的」，用大白话归因 + 资产分布一图看清**
+
+![持仓总览与归因](docs/screenshots/06-portfolio.png)
+
+**Harness Board —— 把这个项目按 7 个工程维度逐条拆解、追踪、评估的研发看板**
+
+| 工程维度全景图 | 评估体系看板 |
 |---|---|
-| LLM | OpenAI 兼容协议(默认阿里云百炼 Qwen,可切 OpenAI / DeepSeek / 任意兼容端点) |
-| 编排 | LangGraph 1.x(Pydantic state + Send API + subgraph) |
-| 数据 | Tushare Pro(13 接口:8 base + 5 v0.8.5 财务/估值/资金信号)+ Bocha Web 搜索 + Milvus 向量库 |
-| 持久化 | sqlite(monitoring / cache / trace / eval) + PostgreSQL(用户/会话,可选) + Redis(可选) |
-| 后端 | FastAPI + httpx async + APScheduler(B-3 cron) |
-| 前端 | React 18 + Vite + Antd 5 + TypeScript strict |
-| 测试 | pytest + pytest-recording(VCR) + mypy strict + ruff |
-| 包管理 | uv(不用 conda) |
+| ![Harness Board 关系图](docs/screenshots/08-board-topology.png) | ![评估体系](docs/screenshots/11-board-eval.png) |
 
-## Quickstart
+---
 
-> 以下命令假设终端 cwd = 项目根目录。
+## 快速开始
 
-### Prerequisites
+> 下面命令默认终端在**项目根目录**。默认全部走 mock，**不烧钱**；想接真数据时改一个环境变量即可。
+
+### 环境要求
 
 - Python 3.11+
-- Node.js 20+(前端)
-- [uv](https://docs.astral.sh/uv/):`curl -LsSf https://astral.sh/uv/install.sh | sh`
-- (可选)Docker Desktop — 仅在用 PostgreSQL/Milvus 时需要
+- Node.js 20+（前端）
+- [uv](https://docs.astral.sh/uv/) 包管理器：`curl -LsSf https://astral.sh/uv/install.sh | sh`
+- （可选）Docker Desktop —— 只有用到 PostgreSQL / Redis / Milvus 时才需要
 
 ### 安装
 
-**完整安装**(推荐 — 含 KB feature):
-
 ```bash
+# 后端依赖（含开发工具 + 知识库 feature）
 uv sync --extra dev --extra kb
-uv run pre-commit install --install-hooks
-uv run pre-commit install --hook-type commit-msg
-cp backend/.env.example backend/.env  # 然后编辑 DASHSCOPE_API_KEY、TUSHARE_TOKEN 等
+
+# 配置环境变量：填入 LLM key、（可选）真数据 token
+cp backend/.env.example backend/.env   # 然后编辑
+
+# 前端依赖
 cd frontend && npm install && cd ..
 ```
 
-**精简安装**(磁盘紧张 / 不需要 KB 检索 + ingest 的开发场景,如 Codespaces 32GB):
-
-```bash
-uv sync --extra dev
-# /knowledge-bases CRUD 仍可用(KB metadata 操作不依赖重型 ML deps)
-# 只有 KB 检索(milvus 向量搜索)+ ingest(PDF 切片)在 agent 运行时调用会 ImportError
-# 这种模式适合做 #3.5 类纯 DB / cache 等不碰 KB 检索的开发工作
-```
-
-KB feature 需要 ~5-8 GB ML libs(mineru / torch / cuda 等)。如果你不会用到 KB 检索或 ingest 工作流,可以走精简安装节省空间。
+> 磁盘紧张、不需要知识库检索时，可用精简安装 `uv sync --extra dev`（知识库的向量检索/入库会缺重型 ML 依赖，其余功能照常）。
 
 ### 启动
 
 ```bash
-# Terminal 1 — 后端(端口 8000,API 文档 /docs)
-unset all_proxy https_proxy http_proxy
+# 终端 1 —— 后端（端口 8000，API 文档在 /docs）
 uv run poe serve
 
-# Terminal 2 — 前端(端口 5173)
+# 终端 2 —— 前端（端口 5173）
 cd frontend && npm run dev
-
-# (可选)Terminal 0 — Postgres 数据库(legacy auth / news / session router 需要;仅 chat / research / monitoring 路径无需启)
-docker compose up -d postgres
-
-# (可选)Terminal 0 — Milvus / Redis(KB / 持久会话用)
-./start-services.sh start
 ```
 
-默认 `*_MODE=mock`,**不烧钱**;切 `TUSHARE_MODE=real` / `BOCHA_MODE=real` 走真接入。
+打开 <http://localhost:5173> 就能进对话页。试着问一句：
 
-> v0.9.x:`uv run poe serve` 启动时若 PG 未起,只会 log warning 不再硬 crash(graceful degradation)。依赖 PG 的 router(auth/news/session/database)调用时会报 500;其余路由(chat / research / monitoring / KB)正常工作。
+> **「贵州茅台现在估值贵不贵？看下最新股价、PE、PB，结合白酒行业给个判断。」**
 
-### v1.0 监控引擎部署(2026-05-08 起)
+agent 会自己去查交易日历、拉行情和估值指标、写一段 Python 算 PE 历史分位并画图，最后给出一份可追溯的判断——就是上面预览图里的样子。
 
-监控引擎从 v0.8.3 进程内 APScheduler 迁到 Celery + Redis 异步任务系统,部署模型变化:
+### 接真实数据（可选）
 
-```
-docker-compose up postgres redis  # infra(已有)
-# 应用层 3 个进程:
-make backend    # web (FastAPI) - HTTP only
-make worker     # Celery worker - detection / LLM 详情卡
-make beat       # Celery beat - 30min cycle / 16:30 daily / 02:00 cleanup
-```
+默认 `*_MODE=mock`。把对应开关改成 `real` 并填 key，即可接入真实数据源：
 
-调度时区:Asia/Shanghai。盘内时段(周一到周五 9:30-15:30 每 30 分钟)自动 detection cycle。
-
-### 常用命令(uv + poe)
-
-| 命令 | 作用 |
+| 环境变量 | 作用 |
 |---|---|
-| `uv run poe serve` | 启后端(uvicorn,hot reload,port 8000) |
-| `uv run poe lint` | ruff format check + ruff check + mypy strict |
-| `uv run poe format` | ruff 自动格式化 |
-| `uv run poe ci` | 本地模拟 PR CI(lint + L0+L1+L2 测试) |
-| `uv run poe test` | L0 unit + L1 integration + L2 cassette(不含 slow / live) |
-| `uv run poe test-all` | 包含 L3 真 LLM eval(烧钱) |
-| `uv run poe trace-view` | 打开 trace 查看器 |
-| `uv run poe eval` | 跑 golden case 评测 |
-| `make board` | 起 Harness Board(localhost:8910,自动 `open`)+ 3 视图(`/` Topology 关系图 / `/m/{dim}` 模块页 / `/story` 故事时间线) |
-| `make board-test` | 跑 dashboard/ 测试套 |
-| `make board-stop` | lsof port-scoped kill 8910 |
-| `make board-refresh` | curl -X POST /refresh,显式 invalidate snapshot cache |
-| `uv run python -m app.scripts.seed_deep_cards --seed dashboard/data/deep_cards_seed.jsonl --db backend/data/board.db` | 载入 hand-curated DeepCard(server 启动时也会自动 insert-if-missing) |
-| `uv run python -m app.scripts.prefill_deep_cards --caps <ids> --db backend/data/board.db` | LLM batch prefill DeepCard(需 OPENAI_API_KEY) |
-
-## 测试分层
-
-| Layer | LLM mode | 速度 | 何时跑 |
-|---|---|---|---|
-| **L0 unit** (`backend/tests/unit/`) | none | <5s | 每次保存,每个 PR |
-| **L1 integration** (`backend/tests/integration/`) | mock(deterministic) | <30s | 每个 PR |
-| **L2 e2e** (`backend/tests/e2e/`) | cassette(replay) | <2min | 每个 PR |
-| **L3 eval** (`backend/tests/eval/`) | live(真 API,烧钱) | 5-15min | nightly + 手动 |
-
-**当前状态**(v0.8.5):L0-L2 全 PASS,mypy strict + ruff clean。L3 含 4 differential golden case + B-1 茅台 e2e cassette。
-
-## 环境变量
-
-`backend/.env`(基于 `.env.example`,本地不进 git):
-
-| 变量 | 必需 | 说明 |
-|---|---|---|
-| `DASHSCOPE_API_KEY` | ✅ | LLM API key(阿里百炼 / OpenAI 兼容);B-1 /research 路由必需 |
-| `DASHSCOPE_BASE_URL` | ❌ | 默认 `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `KB_MODE` | ❌ | `mock`(默认)或 `real`;real 模式需 Milvus 启动 |
-| `TUSHARE_MODE` | ❌ | `mock`(默认)或 `real` |
-| `TUSHARE_TOKEN` | real 需要 | Tushare Pro token |
-| `TUSHARE_BASE_URL` | ❌ | 默认 `http://api.tushare.pro`,自定义代理可覆盖 |
-| `BOCHA_MODE` | ❌ | `mock`(默认)或 `real` |
-| `BOCHA_API_KEY` | real 需要 | Bocha Web 搜索 key |
-| `EMAIL_MODE` | ❌ | `mock`(默认)或 `real` |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | real 需要 | SMTP 配置(465 SSL 或 587 STARTTLS) |
-| `MONITORING_SCHEDULER_ENABLED` | ❌ | `false`(默认)或 `true`,APScheduler cron 启动开关 |
-| `MONITORING_DOGFOOD_CUSTOMERS` | ❌ | dogfood 客户 ts_code 列表(逗号分隔) |
-| `MONITORING_DAILY_BUDGET_CNY` | ❌ | 日 LLM 预算上限,默认 10 CNY |
+| `DASHSCOPE_API_KEY` | LLM key（阿里百炼 / 任意 OpenAI 兼容端点）—— **对话与研报必需** |
+| `TUSHARE_MODE=real` + `TUSHARE_TOKEN` | 真实 A 股行情 / 财务数据 |
+| `KB_MODE=real` | 知识库向量检索（需启动 Milvus） |
+| `BOCHA_MODE=real` + `BOCHA_API_KEY` | 真实 Web 搜索 |
+| `EMAIL_MODE=real` + SMTP 配置 | 持仓预警邮件通知 |
 
 完整列表见 `backend/.env.example`。
+
+### 进阶组件（按需启动）
+
+```bash
+docker compose up -d postgres redis     # 会话持久化 / 跨会话记忆 / 监控调度
+./start-services.sh start                # Milvus / Redis（知识库、记忆向量检索）
+make worker && make beat                 # 持仓监控的异步任务 + 定时调度（Celery）
+make board                               # 启动 Harness Board 研发看板（端口 8910）
+```
+
+---
+
+## 技术要点（粗粒度）
+
+### 架构总览
+
+```
+            React 前端（对话优先 · 流式 SSE · 行情卡 / 工具卡 / 交互图表）
+                                  │
+                          FastAPI（async）
+                                  │
+   ┌──────────────┬───────────────┼───────────────┬──────────────┐
+   │  对话引擎     │   深度尽调     │   持仓监控     │  跨会话记忆   │ 知识库
+   │ (裸 while     │ (多智能体      │ (信号规则 +    │ (分层记忆 +   │ (按类型
+   │  循环 + 原生   │  + 审查回炉)   │  深度调查      │  双时间线      │  切块 +
+   │  function     │               │  + 邮件)       │  知识图谱)     │  向量检索)
+   │  calling)     │               │               │               │
+   └──────────────┴───────────────┴───────────────┴──────────────┘
+                                  │
+       横切服务（统一「接口 + 真实现 / Mock 实现 + 工厂」，靠环境变量切换）
+       LLM · Tushare 行情财务 · Web 搜索 · 向量库 · Trace 追踪 · 评估 · 成本预算
+                                  │
+       PostgreSQL（业务 + 会话 + 图谱）   Redis（缓存 / 取消信号 / Celery）   Milvus（向量）
+```
+
+### 几个值得一说的设计
+
+| 技术点 | 一句话说清 |
+|---|---|
+| **裸循环对话引擎** | 不堆重框架：一个 Python `while` 循环 + 模型原生 function calling 跑多步工具调用。**四道终止闸**防止 agent 失控空转；上下文按区域切分以贴合 KV-cache；工具**渐进披露**（先给类别再展开具体工具）省掉大量 token。 |
+| **代码解释器** | agent 可以现写 Python 丢进沙箱执行，用 Plotly 画交互图。图表走独立通道渲染、不进上下文（省 token）。预览里那张茅台 PE 区间图就是这么来的。 |
+| **多智能体深度尽调** | 规划 → 取数 → 分析 → 写作 → 审查 五个角色分工；审查官按 7 个维度打分，不合格**自动打回重做**（最多 2 轮硬上限）。规划阶段用「约束式路由」——模型只能在几个预置方案里四选一，保证结果可控、可写测试。 |
+| **金融幻觉防御** | 财务数据必须来自工具调用，禁止模型自行编造；写作强制标注 `[来源: 工具名]`；估值、建仓比例等数字由**确定性 Python 函数**算，模型只负责叙述。错一个 PE 在金融里是会出事的，所以这条是底线。 |
+| **跨会话长期记忆** | 借鉴 MemGPT 的分层记忆 + Zep 的双时间线知识图谱：跨对话记住你是谁、风险偏好、聊过什么；读取用「图谱 + 向量 + 时间感知排序」三路混合召回。 |
+| **持仓监控** | 5 条信号规则盘中并发扫描（财务恶化 / 现金流 / 股东户数骤降 / 负面公告 / 异动），红色告警触发多智能体深度调查并发邮件；外加成本、并发、去重、事后核账四道闸。 |
+| **真假可切换** | 所有外部依赖都是「接口 + 真实现 / Mock 实现 + 工厂」模式，一个环境变量切换。CI 全程 mock 离线、零成本；本地按需接真。 |
+| **评估可观测** | 分层测试（单元 / 集成 / 录像回放 / 真模型）+ LLM 当裁判 + trace 查看器；外加一个 **Harness Board** 把整个项目按 ETCLOVG 七个工程维度（执行 / 工具 / 上下文 / 生命周期 / 可观测 / 验证 / 治理）逐条拆解、追踪完成度、做离线评估。 |
+| **工程纪律** | 核心模块 `mypy --strict` 全过、`ruff` 清洁；外部调用录成「录像带」回放、录制时自动脱敏；fix 类提交强制标注「问题出在哪一层」便于溯源。 |
+
+### 技术栈
+
+| 层 | 选型 |
+|---|---|
+| LLM | OpenAI 兼容协议（默认阿里云百炼 Qwen / DeepSeek，可切任意兼容端点） |
+| 编排 | 裸 Python 对话循环（chatloop）+ LangGraph 1.x（深度尽调子图、检查点） |
+| 数据 | Tushare Pro（行情 / 三表 / 估值 / 资金信号）+ Bocha Web 搜索 + Milvus 向量库 |
+| 异步 | Celery + Redis（持仓监控检测 / 详情卡生成 / 定时调度） |
+| 持久化 | PostgreSQL（业务 / 会话 / 知识图谱）+ Redis + Milvus |
+| 后端 | FastAPI + httpx async |
+| 前端 | React 19 + Vite + Ant Design 5 + TypeScript strict + valtio |
+| 质量 | pytest + pytest-recording(VCR) + mypy strict + ruff + uv |
+
+---
+
+## 更大的愿景
+
+AlphaScout 这个仓库是整个构想里的**应用层**。它本身已经能独立跑通，但它背后还有一个更大的「数据飞轮」设想：
+
+> **用应用本身生产训练数据，再用训练出的模型反哺应用。**
+>
+> 应用既是产品，也是 Sandbox 环境：把多步工具调用的白盒轨迹沉淀成训练数据 → 三阶段合成放大 → 用 GRPO 训练金融场景特化的工具调用模型 → 部署回应用提升能力。其中「合成 + 训练」部分在独立仓库，本仓库不含。
+
+完整叙事（业务背景、三大模块、面试向 STAR 复盘）见 [`docs/project-story.md`](docs/project-story.md)。
+
+---
 
 ## 项目结构
 
 ```
-financial-research-assistant/
+.
 ├── backend/
 │   ├── app/
-│   │   ├── agents/              # 7 agent + portfolio_warning schema/renderer + credit_report
-│   │   │   └── research/financial_research/  # v0.8.5 Anthropic Skills bundle (17 components)
-│   │   │       ├── methodology/  # 11 .md (solvency / profitability / growth / ... / decision_framework)
-│   │   │       ├── references/   # industry_benchmarks.json + recommendation_rules.yaml + position_size_rules.yaml
-│   │   │       └── helpers/      # compute_position_size / classify_recommendation / lookup_industry_benchmark
-│   │   ├── orchestration/       # LangGraph 装配(research_graph / chat_graph)
-│   │   ├── services/            # 横切服务(全 Protocol + Real/Mock + factory)
-│   │   │   ├── monitoring/      # B-3 v0.8.3 — signal_rules / escalation / scheduler / notifications
-│   │   │   ├── tushare_*.py     # client + cache + service + factory + mock_adapter
-│   │   │   ├── bocha_*.py       # client + reliable + factory
-│   │   │   ├── kb_*.py / milvus_client.py / embedding_*
-│   │   │   └── llm_service.py / trace_service.py / eval_runner.py / judge.py / cost_budget.py
-│   │   ├── tools/               # tool registry(行情/财务/web/KB)
-│   │   ├── router/              # FastAPI routers(chat / research / monitoring / kb / auth)
-│   │   ├── core/database.py     # PG ORM + monitoring.sqlite 启动初始化
-│   │   ├── scripts/             # init_monitoring_tables / ingest CLI
-│   │   ├── kb/ingest/           # PDF 解析 + chunking + embedding pipeline
-│   │   ├── service/             # legacy mock(单数,mypy ignore)
-│   │   └── app_main.py          # FastAPI entry + lifespan(可选 scheduler)
-│   ├── tests/
-│   │   ├── unit/                # L0 — 411+ tests
-│   │   ├── integration/         # L1 — 61 tests
-│   │   ├── e2e/                 # L2 — cassette replay
-│   │   ├── eval/                # L3 — golden cases + LLM-as-judge
-│   │   └── fixtures/cassettes/  # VCR yaml(host scrubbed)
-│   └── data/                    # sqlite(gitignored)
-├── frontend/
-│   └── src/
-│       ├── pages/{chat,research(/research history·/research/new 6-字段 form·/research/:id D 输出),monitoring,knowledge,news,...}
-│       ├── api/                 # typed fetch clients
-│       ├── types/               # TS schema per module
-│       └── components/markdown/ # 共享 markdown 渲染
-├── dashboard/                   # Harness Board(dev meta-tool,sibling 顶级目录)
-│   ├── server.py                # Starlette + Jinja(GET / + /m/{dim} + /story + /cap/{id}/{expand,status,field,screenshot,related} + /refresh + /docs·/screenshots mount)
-│   ├── derive/                  # path_router / capability_resolver / snapshot_builder / topology_layout / story_builder / decision_extractor / refresh_pipeline(纯函数)
-│   ├── state/                   # sqlite + SnapshotRepo + OverrideRepo + DeepCardRepo + Milvus collection
-│   ├── config/{dimensions,capabilities}.yaml  # ETCLOVG 7 维 + 87 capability + 5 类 derive_rule
-│   ├── templates/               # base / main / _board_nav / _topology_diagram / _module_page / _capability_chip / _deep_card_inline / _field_block / story / _story_card
-│   ├── static/{style.css,htmx.min.js,marked.min.js,inline-expand,context-menu,render-field,modal,toast,refresh-panel,screenshot-upload}.js
-│   └── tests/                   # unit / integration / e2e,mypy strict 清洁(含 test files)
-├── Makefile                     # board / board-stop / board-test / board-refresh
-├── docs/
-│   ├── superpowers/{specs,plans}/  # 设计文档 + 实施计划(每版本一份)
-│   ├── project-story.md / .html    # 项目故事(求职 / 面试用)
-│   └── ...
-├── scripts/                     # check_cassette_sanitize.py / trace_view CLI / 等
-├── pyproject.toml               # uv + poe + ruff + mypy 配置
-├── WORKING_AGREEMENT.md         # commit message 规范、fix layer 标记规则
-└── README.md
+│   │   ├── chatloop/        # 裸循环对话引擎（工具调用 / 终止闸 / 上下文分区）
+│   │   ├── agents/          # 多智能体深度尽调 + 估值交叉验证 + 多空辩论
+│   │   ├── orchestration/   # LangGraph 装配（尽调子图 / 检查点）
+│   │   ├── services/        # 横切服务（接口 + 真/Mock + 工厂）：LLM / Tushare / KB / 记忆 / 监控 / 评估
+│   │   ├── router/          # FastAPI 路由（对话 / 研报 / 监控 / 记忆 / 持仓 / 知识库 / 认证）
+│   │   └── app_main.py      # 入口 + lifespan
+│   └── tests/               # 分层：unit / integration / e2e(录像) / eval(真模型)
+├── frontend/                # React 前端（对话 / 研报 / 持仓 / 监控 / 记忆 / 知识库）
+├── dashboard/               # Harness Board 研发看板（独立服务）
+├── docs/                    # 设计文档 / 项目故事 / 截图
+│   ├── superpowers/         # 每个版本的设计评审(spec) + 实施计划(plan)
+│   └── claude-context/      # 长期工程上下文卡片
+├── docker-compose.yml       # PostgreSQL / Redis / Milvus
+└── Makefile                 # board / worker / beat 等
 ```
 
-## 工作约定
+---
 
-- **fix commit body 必须含 `原因 layer: <impl|plan|spec>`** — pre-commit `commit-msg` hook 强制(WORKING_AGREEMENT § 3)
-- **每个非平凡决策必须按"业界 alternatives + tradeoff + 量化评估"三维评估**(spec § 决策格式四件套)
-- **测试 cwd = 项目根目录**:`uv run pytest backend/tests/...` 而非 `cd backend && pytest`
-- **不在公开文档(spec / README / PR / 简历 / 博客)写"代理 / 闲鱼"等数据采购渠道**
-- 完整规范见 [WORKING_AGREEMENT.md](WORKING_AGREEMENT.md)
+## 测试与质量
 
-## 文档导航
-
-| 文档 | 内容 |
-|---|---|
-| [WORKING_AGREEMENT.md](WORKING_AGREEMENT.md) | commit / fix 规范 + feedback SLA |
-| [docs/superpowers/specs/](docs/superpowers/specs/) | 每版本设计文档(决策四件套格式) |
-| [docs/superpowers/plans/](docs/superpowers/plans/) | 每版本实施计划(task-by-task checkbox) |
-| [docs/project-story.md](docs/project-story.md) | 项目故事(求职 / 面试用) |
-| `.claude/projects/.../memory/` | Claude session 跨会话记忆(协作约定 / 教训沉淀) |
-
-## v0.9 chat mode (C.1 + C.2)
-
-Chat-first dashboard with production-style multi-turn LLM agent + escalation channel to deep research.
-
-**Architecture:**
-- Backend: FastAPI + LangGraph 1.x supervisor (context_node → planner → tool/responder), 6 tools via MCP stdio, AsyncPostgresSaver checkpointer
-- Skill L1/L2/L3 progressive disclosure (description / SKILL.md / resources+scripts)
-- Escalation: chat → user explicit confirm (4-class EscalationPacket) → ResearchAgent
-- Frontend: React 19 + valtio stores + useChatSSE hook + AppShell + ChatPane + EscalationConfirmDialog
-
-**Endpoints:**
-- `POST /api/v0/chat` — chat SSE (NEW v0.9)
-- `POST /api/v0/chat/escalate` — escalate to research SSE (NEW v0.9)
-- `GET /api/v0/chats` — multi-chat list (NEW v0.9)
-
-**Run:**
 ```bash
-docker compose up -d postgres redis
-cd backend && uv run uvicorn app.app_main:app --port 8000 &
-cd frontend && npm run dev   # http://localhost:5173/chat
+uv run poe test       # 单元 + 集成 + 录像回放（不含真模型，秒级，PR 必跑）
+uv run poe lint       # ruff format check + ruff check + mypy strict
+uv run poe eval       # golden case 评估
+make board-test       # 研发看板测试套
 ```
 
-**Tests:**
-- L0 unit / L1 integration: `cd backend && uv run pytest tests/`
-- Frontend vitest: `cd frontend && npm test`
-- Golden differential: `cd backend && uv run pytest tests/eval/`
+| 层 | LLM | 速度 | 何时跑 |
+|---|---|---|---|
+| 单元 | 无 | <5s | 每次保存 |
+| 集成 | mock（确定性） | <30s | 每个 PR |
+| 录像回放 | cassette 回放 | <2min | 每个 PR |
+| 真模型评估 | 真 API（烧钱） | 分钟级 | 手动 / nightly |
 
-See `docs/claude-context/v0.9-chat-c1c2-architecture.md` for the long-form architecture card.
+---
 
 ## 许可证
 
@@ -397,4 +237,4 @@ MIT License
 
 ## 免责声明
 
-本系统提供的所有数据和分析仅供参考,不构成投资建议。投资有风险,入市需谨慎。
+本系统提供的所有数据与分析**仅供学习研究参考，不构成任何投资建议**。本项目为个人技术作品，非持牌投资顾问。投资有风险，入市需谨慎。
