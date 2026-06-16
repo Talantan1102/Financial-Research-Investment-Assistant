@@ -35,8 +35,6 @@ export function listPositions() {
   return request.get<PositionRead[]>('/portfolio/positions')
 }
 
-export type TimeRange = '1m' | '3m' | '6m' | '1y' | '3y'
-
 export interface AttributionBreakdown {
   total_pct: number
   by_class: Record<string, number>
@@ -53,18 +51,6 @@ export interface OverviewRead {
   narrative: string
 }
 
-export interface TrendRead {
-  dates: string[]
-  portfolio: number[]
-  benchmark: number[]
-  cumulative: number
-  range: TimeRange
-}
-
 export function getOverview() {
   return request.get<OverviewRead>('/portfolio/overview')
-}
-
-export function getTrend(range: TimeRange) {
-  return request.get<TrendRead>('/portfolio/overview/trend', { params: { range } })
 }
