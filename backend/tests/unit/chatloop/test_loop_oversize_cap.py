@@ -118,3 +118,30 @@ async def test_figures_not_counted_toward_size() -> None:
     assert out["result"] == {"corr": 0.8}
     assert out["charts_rendered"] == 1
     assert "truncated_digest" not in out
+
+
+async def test_default_oversize_threshold_is_24000() -> None:
+    # ① 默认阈值抬到 24000(一年单序列 ~15k 字不再误截)
+    assert ContextDeps(system_prompt="s").oversize_result_char_threshold == 24000
+
+
+async def test_midsize_series_not_truncated_at_default() -> None:
+    # 介于旧阈值(4000)与新阈值(24000)之间的结果,在默认阈值下不截断
+    events: list[LoopEvent] = []
+    loop = _loop(events, threshold=ContextDeps(system_prompt="s").oversize_result_char_threshold)
+    st = _state()
+    args = {"ts_code": "600519.SH"}
+    st.ledger.record(
+        step=1,
+        tool_name="get_daily",
+        args=args,
+        digest="d",
+        success=True,
+        cache_key="u::get_daily::k",
+    )
+    series = {"close": list(range(2000))}  # 序列化约 1 万字,> 4000 但 < 24000
+    results = [
+        ToolResult(tool_name="get_daily", args=args, success=True, output=series, latency_ms=5)
+    ]
+    await loop._extract_and_emit_charts(results, st)
+    assert "truncated_digest" not in results[0].output  # 默认阈值下不截
