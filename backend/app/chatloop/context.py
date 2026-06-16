@@ -74,7 +74,7 @@ class ContextDeps:
     max_steps: int = 12
     max_cny: float = 0.10
     downgrade_char_threshold: int = 1320
-    oversize_result_char_threshold: int = 4000  # 单条工具结果进窗口的字符上限(超则截断+回指针)
+    oversize_result_char_threshold: int = 24000  # 单条工具结果进窗口的字符上限(超则截断+回指针);一年日线序列 ~15k 字不再误截,见 spec 2026-06-16-runpython-large-data-channel
     max_context_tokens: int = 0  # 0 = 安全阀关闭;chat_runner 传模型窗口实际值
     context_pressure_ratio: float = 0.85  # 拼完总量超 ratio*window 启动收紧
     downgrade_floor_threshold: int = 200  # 收紧时降级阈值下限(最近一圈仍永久保护)
