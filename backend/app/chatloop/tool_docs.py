@@ -381,7 +381,9 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             " - 数据在变量 data(dict)里,直接用,不用读 stdin;\n"
             " - 把图赋给 fig(单张)或 figures(plotly Figure 列表),结论赋给 result;\n"
             " - 不要 print、不要返回图片链接/markdown 图 —— 执行器自动序列化并套统一 iOS 主题。\n"
-            "参数:code(str,必填)= 完整脚本;data(object,可选)= 喂进来的数据 JSON。\n"
+            "参数:code(str,必填)= 完整脚本;data(object,可选)= 小数据 JSON 直接喂;"
+            "data_refs(object,可选)= {变量名: 工具结果 ref} —— 大数据(日线序列等)按引用喂,"
+            "执行器自动灌完整数据进 data[变量名],别把长数组手抄进 data。\n"
             "示例:run_python(code='import plotly.graph_objects as go; fig=go.Figure(); "
             'fig.add_bar(x=data["names"], y=data["vals"]); result="已画"\', '
             "data={'names':['股票A','股票B'],'vals':[241,197]})。\n"

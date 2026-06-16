@@ -242,7 +242,9 @@ def build_turn_components(
             RunSkillScriptTool(executor=singletons.executor),
             OfferDeepResearchTool(),
             ReadCachedResultTool(cache=singletons.cache),
-            CodeInterpreterTool(backend=SkillExecutorBackend(singletons.executor)),
+            CodeInterpreterTool(
+                backend=SkillExecutorBackend(singletons.executor), cache=singletons.cache
+            ),
             DispatchSubagentsTool(factory=subagent_factory),
             GetPortfolioPositionsTool(session_factory=singletons.session_factory),
         ]
