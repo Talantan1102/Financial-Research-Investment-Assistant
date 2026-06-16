@@ -294,12 +294,12 @@ body { padding-left: 80px; }
 }
 .hero-title {
   font-family: var(--display);
-  font-weight: 380;
-  font-size: clamp(52px, 7.6vw, 100px);
-  line-height: 0.98;
-  letter-spacing: -0.02em;
+  font-weight: 420;
+  font-size: clamp(34px, 4.4vw, 54px);
+  line-height: 1.1;
+  letter-spacing: -0.015em;
   color: var(--fg);
-  font-variation-settings: "opsz" 72;
+  font-variation-settings: "opsz" 48;
   margin: 0;
 }
 .hero-title em {
