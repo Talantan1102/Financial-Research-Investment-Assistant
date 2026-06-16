@@ -82,9 +82,7 @@ class CodeInterpreterTool(InProcessTool):
             "elapsed_s": round(result.elapsed_s, 2),
         }
 
-    async def _resolve_refs(
-        self, refs: dict[str, str], state: ChatLoopState
-    ) -> dict[str, Any]:
+    async def _resolve_refs(self, refs: dict[str, str], state: ChatLoopState) -> dict[str, Any]:
         """按 ref 从缓存还原完整结构化数据(服务端,不经 LLM);带 user 命名空间防越权。"""
         if self._cache is None:
             raise ToolError("[执行失败:no_cache] data_refs 不可用(未注入缓存)。")
