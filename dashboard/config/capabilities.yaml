@@ -6,7 +6,7 @@
 dimensions:
 
   # ============================================================
-  # 01 Execution Environment & Sandbox (7 项,预期 6-7 lit) §3
+  # 01 Execution Environment & Sandbox (12 项,预期 6-7 lit) §3
   # ============================================================
   - id: execution
     capabilities:
@@ -52,15 +52,20 @@ dimensions:
       - id: sandbox_abstraction
         name_cn: "沙箱抽象层"
         name_en: "Sandbox abstraction"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'class ExecutorBackend\(Protocol\)', path_glob: 'backend/app/skills/executor_backend.py' }
       # 论文 §3.3 - Threat Model and Sandbox Escape (SandboxEscapeBench)
       - id: sandbox_escape_defense
         name_cn: "沙箱逃逸防御"
         name_en: "Sandbox escape defense"
         derive_rule: { type: manual }
+      # 沙箱化代码解释器 (run_python: LLM 写 Python → SkillExecutor 沙箱执行),#143
+      - id: code_interpreter
+        name_cn: "代码解释器 (run_python)"
+        name_en: "Code interpreter (run_python)"
+        derive_rule: { type: code_grep, pattern: 'name = "run_python"', path_glob: 'backend/app/chatloop/code_interpreter_tool.py' }
 
   # ============================================================
-  # 02 Tool Interface & Protocol (9 项,预期 5 lit) §4
+  # 02 Tool Interface & Protocol (13 项,预期 5 lit) §4
   # ============================================================
   - id: tool
     capabilities:
@@ -81,8 +86,8 @@ dimensions:
         name_en: "Reliability (circuit/retry/timeout/cb/quota)"
         derive_rule: { type: file_exists, path: 'backend/app/services/circuit_breaker.py' }
       - id: financial_tools
-        name_cn: "8 个金融工具"
-        name_en: "8 financial tools"
+        name_cn: "11 个金融工具"
+        name_en: "11 financial tools"
         derive_rule: { type: code_grep, pattern: 'class\s+\w+\(Tool\)', path_glob: 'backend/app/tools/get_*.py' }
       - id: mcp_bridge
         name_cn: "MCP 协议适配"
@@ -95,7 +100,7 @@ dimensions:
       - id: parallel_tool_calls
         name_cn: "并行 tool calls"
         name_en: "Parallel tool calls"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'asyncio\.gather', path_glob: 'backend/app/chatloop/tool_hub.py' }
       # 论文 §4.3 - Tool-Augmented Training and Integration (Gorilla, ToolLLM, Toolformer)
       - id: tool_augmented_training
         name_cn: "Tool-augmented 训练 / 微调"
@@ -111,9 +116,19 @@ dimensions:
         name_cn: "Chat 命令系统 (Slash + 气泡) [planned]"
         name_en: "Chat command system (slash + bubble) [planned]"
         derive_rule: { type: manual }
+      # 代码解释器 run_python 也作为对外工具登记 (tool 维),#143
+      - id: code_interpreter
+        name_cn: "代码解释器 (run_python)"
+        name_en: "Code interpreter (run_python)"
+        derive_rule: { type: file_exists, path: 'backend/app/chatloop/code_interpreter_tool.py' }
+      # 只读子 agent 并发扇出 dispatch_subagents — chat 编排原语,#144
+      - id: subagent_dispatch
+        name_cn: "只读子 agent 并发扇出 (dispatch_subagents)"
+        name_en: "Read-only subagent fan-out"
+        derive_rule: { type: code_grep, pattern: 'name\s*=\s*"dispatch_subagents"', path_glob: 'backend/app/chatloop/subagent.py' }
 
   # ============================================================
-  # 03 Context & Memory Management (22 项,预期 ~9 lit) §5
+  # 03 Context & Memory Management (26 项,预期 ~9 lit) §5
   # group: short_term / mid_term / long_term (子分组仅 yaml 内部,UI 不暴露)
   # ============================================================
   - id: context
@@ -131,7 +146,7 @@ dimensions:
         derive_rule: { type: code_grep, pattern: 'response_format', path_glob: 'backend/app/services/openai_client.py' }
       - id: skills_bundle
         group: short_term
-        name_cn: "Skills bundle (17-component)"
+        name_cn: "Skills bundle (13-component)"
         name_en: "Skills bundle"
         derive_rule: { type: file_exists, path: 'backend/app/skills/financial_research' }
       - id: per_task_registry
@@ -163,13 +178,19 @@ dimensions:
         group: short_term
         name_cn: "上下文压缩"
         name_en: "Context compression"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: '_downgrade_old_tool_messages|max_context_tokens', path_glob: 'backend/app/chatloop/context.py' }
+      # 单条工具结果超阈值换 digest+cache ref 可回取 (#145),与整窗压缩正交
+      - id: oversized_result_guard
+        group: short_term
+        name_cn: "超大工具结果回指针护栏"
+        name_en: "Oversized tool-result guard"
+        derive_rule: { type: code_grep, pattern: '_cap_oversized_output|oversize_result_char_threshold', path_glob: 'backend/app/chatloop/**' }
       # ---- long_term — memory (5 项 manual) ----
       - id: long_term_memory
         group: long_term
         name_cn: "长期记忆"
         name_en: "Long-term memory"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'persist_episode_and_trigger|extract_session_episodes_async', path_glob: 'backend/app/tasks/**' }
       - id: semantic_memory
         group: long_term
         name_cn: "语义记忆"
@@ -184,12 +205,18 @@ dimensions:
         group: long_term
         name_cn: "情景记忆"
         name_en: "Episodic memory"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'persist_episode_and_trigger|next_episode_index', path_glob: 'backend/app/tasks/chat_memory_hook.py' }
       - id: memory_compression
         group: long_term
         name_cn: "记忆压缩"
         name_en: "Memory compression"
         derive_rule: { type: manual }
+      # 记忆写侧准入边界 + 抽取后保真护栏 (#139/#141)
+      - id: memory_write_admission
+        group: long_term
+        name_cn: "记忆写侧准入与保真护栏"
+        name_en: "Memory write admission & fidelity guards"
+        derive_rule: { type: code_grep, pattern: 'filter_holding_edges|HOLDING_REL_TYPES', path_glob: 'backend/app/memory/path_b_runner.py' }
       # ---- long_term — RAG (8 项) ----
       - id: milvus_3_collection
         group: long_term
@@ -245,14 +272,14 @@ dimensions:
         derive_rule: { type: manual }
 
   # ============================================================
-  # 04 Lifecycle & Orchestration (10 项,预期 6 lit) §6
+  # 04 Lifecycle & Orchestration (14 项,预期 6 lit) §6
   # ============================================================
   - id: lifecycle
     capabilities:
       - id: langgraph_skeleton
         name_cn: "LangGraph 骨架"
         name_en: "LangGraph skeleton"
-        derive_rule: { type: code_grep, pattern: 'StateGraph', path_glob: 'backend/app/agents/**' }
+        derive_rule: { type: code_grep, pattern: 'StateGraph', path_glob: 'backend/app/orchestration/**' }
       - id: typed_state
         name_cn: "Typed State (Pydantic)"
         name_en: "Typed State"
@@ -277,6 +304,11 @@ dimensions:
         name_cn: "LangGraph retry edge"
         name_en: "LangGraph retry"
         derive_rule: { type: code_grep, pattern: 'add_edge.*retry|conditional_edges', path_glob: 'backend/app/orchestration/**' }
+      # chat 编排新核:裸 Python while 工具调用循环 (#127 退役 LangGraph supervisor)
+      - id: chat_tool_loop
+        name_cn: "Chat 裸 while 工具调用循环 (ToolLoop)"
+        name_en: "Bare-while tool-calling loop (ToolLoop)"
+        derive_rule: { type: code_grep, pattern: 'class ToolLoop', path_glob: 'backend/app/chatloop/loop.py' }
       - id: plan_and_execute
         name_cn: "Plan-and-Execute pattern"
         name_en: "Plan-and-Execute"
@@ -284,11 +316,21 @@ dimensions:
       - id: human_in_the_loop
         name_cn: "Human-in-the-loop"
         name_en: "Human-in-the-loop"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'steer_merged|_steer_interrupted_result', path_glob: 'backend/app/chatloop/**' }
       - id: agent_handoff
         name_cn: "Agent handoff"
         name_en: "Agent handoff"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'class SubagentFactory|def spawn_one', path_glob: 'backend/app/chatloop/subagent.py' }
+      # 对话循环多道终止闸 (#127/#148):打转/烧签名/连续失败/预算/步数
+      - id: chat_termination_gates
+        name_cn: "对话循环多道终止闸 (打转/烧签名/连续失败/预算/步数)"
+        name_en: "Chat-loop termination gates"
+        derive_rule: { type: code_grep, pattern: 'def check_gates|repeated_failures', path_glob: 'backend/app/chatloop/gates.py' }
+      # 只读扇出子 agent 派发 (#144) — 与 agent_handoff 互补,更精准刻画只读扇出+五护栏
+      - id: subagent_dispatch
+        name_cn: "只读扇出子 agent 派发 (dispatch_subagents)"
+        name_en: "Read-only fan-out subagent dispatch"
+        derive_rule: { type: code_grep, pattern: 'class SubagentFactory|def spawn_one', path_glob: 'backend/app/chatloop/subagent.py' }
       # 论文 §6.4 - Full Lifecycle Pipeline from Issue to Pull Request (OpenAI Symphony)
       - id: issue_to_pr_pipeline
         name_cn: "Issue → PR 全链路"
@@ -296,7 +338,7 @@ dimensions:
         derive_rule: { type: manual }
 
   # ============================================================
-  # 05 Observability & Operations (9 项,预期 5 lit) §7
+  # 05 Observability & Operations (13 项,预期 5 lit) §7
   # ============================================================
   - id: observability
     capabilities:
@@ -307,7 +349,7 @@ dimensions:
       - id: latency_p95
         name_cn: "p95 latency 监控"
         name_en: "p95 latency monitoring"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'percentile_cont|p95_ms', path_glob: 'backend/app/services/trace_analytics.py' }
       - id: harness_board
         name_cn: "项目 Harness Board (本工具)"
         name_en: "Harness Board"
@@ -340,15 +382,25 @@ dimensions:
       - id: unified_observability
         name_cn: "跨系统统一可观测"
         name_en: "Unified observability"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'LLMService\.stream_step', path_glob: 'backend/app/services/trace_analytics.py' }
       # 论文 §11.5 / §12.3 - Trace-Native Evaluation (traces as primary scoring artifact)
       - id: trace_native_eval
         name_cn: "Trace-native evaluation"
         name_en: "Trace-native eval"
         derive_rule: { type: manual }
+      # chatloop 运行时聚合面板 (#152):工具 span + LLM span 同表跨请求聚合
+      - id: chatloop_runtime_aggregates
+        name_cn: "Chatloop 运行时聚合面板"
+        name_en: "Chatloop runtime aggregates"
+        derive_rule: { type: file_exists, path: 'backend/app/services/trace_analytics.py' }
+      # 对话级成本账单 + KV-cache 命中率 (#145)
+      - id: turn_cost_billing
+        name_cn: "对话级成本账单 + KV-cache 命中率"
+        name_en: "Per-turn cost billing + KV-cache hit rate"
+        derive_rule: { type: code_grep, pattern: 'def turn_summary|cache_hit_rate', path_glob: 'backend/app/chatloop/state.py' }
 
   # ============================================================
-  # 06 Verification & Evaluation (7 项,预期 5 lit) §8
+  # 06 Verification & Evaluation (11 项,预期 5 lit) §8
   # ============================================================
   - id: verification
     capabilities:
@@ -361,25 +413,25 @@ dimensions:
         name_en: "LLM-as-Judge"
         derive_rule: { type: file_exists, path: 'backend/app/services/judge.py' }
       - id: golden_cases
-        name_cn: "12+ golden cases"
-        name_en: "12+ golden cases"
-        derive_rule: { type: code_grep, pattern: 'golden', path_glob: 'backend/tests/**' }
+        name_cn: "Golden 行为参照集 (多子系统数百条)"
+        name_en: "Golden behavior reference set"
+        derive_rule: { type: code_grep, pattern: 'golden', path_glob: 'backend/eval/**' }
       - id: cassette_l2
         name_cn: "L2 Cassette VCR"
         name_en: "L2 Cassette"
         derive_rule: { type: code_grep, pattern: 'vcr_config|LLM_MODE', path_glob: 'backend/tests/**' }
       - id: test_suite
-        name_cn: "289+ pytest"
-        name_en: "289+ tests"
+        name_cn: "分层 pytest 测试体系 (L0/L1/L2/L3, 2000+ 测试函数)"
+        name_en: "Layered pytest suite (2000+ tests)"
         derive_rule: { type: file_exists, path: 'backend/tests' }
       - id: ab_testing
         name_cn: "A/B testing"
         name_en: "A/B testing"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'prompt 消融|system_prompt_sha|system_prompt:\s*str\s*\|\s*None', path_glob: 'backend/eval/chatloop/*.py' }
       - id: adversarial_test
         name_cn: "对抗测试"
         name_en: "Adversarial testing"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: '"difficulty":\s*"对抗"', path_glob: 'backend/eval/chatloop/golden/*.jsonl' }
       # 论文 §8.3 - Pre-execution Readiness Validation
       - id: pre_execution_readiness
         name_cn: "执行前就绪校验"
@@ -389,10 +441,20 @@ dimensions:
       - id: failure_attribution
         name_cn: "失败溯因 / 跨层归因"
         name_en: "Failure attribution"
-        derive_rule: { type: manual }
+        derive_rule: { type: file_exists, path: 'backend/eval/chatloop/RESULTS-2026-06-08.md' }
+      # 对话 Agent 评估成绩单 (#135):pass^k + 裁判校准 + 多轮模拟
+      - id: chatloop_eval_scorecard
+        name_cn: "对话Agent评估成绩单 (pass^k + 裁判校准 + 多轮)"
+        name_en: "Chat-agent eval scorecard (pass^k + calibration + multiturn)"
+        derive_rule: { type: code_grep, pattern: 'def pass_power_k|class UserSimulator|chatloop_eval_runs', path_glob: 'backend/eval/chatloop/*.py' }
+      # 裁判元评估 (#139):judge-vs-human 一致率 kappa + 重测稳定性
+      - id: judge_meta_eval
+        name_cn: "裁判元评估 (一致率 kappa + 重测稳定性)"
+        name_en: "Judge meta-evaluation (kappa + stability)"
+        derive_rule: { type: code_grep, pattern: 'def compute_agreement|cohen|kappa', path_glob: 'backend/eval/memory_dialogue/meta_eval/*.py' }
 
   # ============================================================
-  # 07 Governance & Security (6 项,预期 3-4 lit) §9
+  # 07 Governance & Security (11 项,预期 3-4 lit) §9
   # ============================================================
   - id: governance
     capabilities:
@@ -419,7 +481,7 @@ dimensions:
       - id: hallucination_check
         name_cn: "幻觉检测"
         name_en: "Hallucination check"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'def score_disclaimer|def score_advice', path_glob: 'backend/eval/chatloop/*.py' }
       # 论文 §9.2 - Lifecycle Hooks (PreToolUse / PostToolUse / SessionStart 等)
       - id: lifecycle_hooks
         name_cn: "生命周期 hook (Pre/Post tool, Session)"
@@ -434,7 +496,7 @@ dimensions:
       - id: audit_infrastructure
         name_cn: "审计基础设施"
         name_en: "Audit infrastructure"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'subagent_dispatch_runs', path_glob: 'backend/app/models/*.py' }
       # 论文 §9.6 - Agent Security Landscape (prompt injection / goal hijack / data leakage)
       - id: agent_security_landscape
         name_cn: "Agent 安全全景 (注入 / 劫持 / 泄露)"
@@ -444,4 +506,4 @@ dimensions:
       - id: capability_control_gate
         name_cn: "Capability-Control 授权 gate"
         name_en: "Capability-control gate"
-        derive_rule: { type: manual }
+        derive_rule: { type: code_grep, pattern: 'READONLY_SUBAGENT_TOOLS', path_glob: 'backend/app/chatloop/subagent.py' }
