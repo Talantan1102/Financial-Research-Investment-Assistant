@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from app.chatloop.code_interpreter_tool import CodeInterpreterArgs, CodeInterpreterTool
 from app.chatloop.state import ChatLoopState
 from app.tools.base import ToolError
@@ -56,7 +55,9 @@ async def test_data_refs_merges_with_inline_data() -> None:
     cache = _FakeCache({"u1::get_daily::abc": json.dumps({"close": [9.0]})})
     backend = _FakeBackend()
     tool = CodeInterpreterTool(backend=backend, cache=cache)  # type: ignore[arg-type]
-    args = CodeInterpreterArgs(code="result=1", data={"k": 1}, data_refs={"m": "u1::get_daily::abc"})
+    args = CodeInterpreterArgs(
+        code="result=1", data={"k": 1}, data_refs={"m": "u1::get_daily::abc"}
+    )
     await tool.run_with_state(args, _state())
     assert backend.last_data == {"k": 1, "m": {"close": [9.0]}}
 
