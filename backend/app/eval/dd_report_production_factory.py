@@ -141,6 +141,9 @@ class _BacktestTushareService:
     async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
         return pd.DataFrame()
 
+    async def get_trade_cal(self, *, start: str, end: str) -> pd.DataFrame:
+        return pd.DataFrame()
+
     async def aclose(self) -> None:
         pass
 
