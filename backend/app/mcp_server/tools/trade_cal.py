@@ -12,6 +12,8 @@ Exports:
 from __future__ import annotations
 
 import json
+import re
+from calendar import monthrange
 from datetime import date, timedelta
 from typing import Any
 
@@ -19,9 +21,38 @@ from mcp.types import TextContent, Tool
 
 _SINGLE = {"is_open", "latest", "prev", "next"}
 _RANGE = {"count", "list"}
-_ACTIONS = sorted(_SINGLE | _RANGE)
+_WINDOW = {"window"}
+_ACTIONS = sorted(_SINGLE | _RANGE | _WINDOW)
 _WINDOW_DAYS = 15  # 单日动作回看/前看窗口(覆盖最长节假日缺口)
 _LIST_CAP = 260
+
+_LOOKBACK_RE = re.compile(r"^(\d+)(y|m|d|td)$")
+
+
+def _parse_lookback(code: Any) -> tuple[str, int]:
+    """周期码 → (kind, n)。'ytd' 返回 ('ytd', 0);Ny/Nm/Nd/Ntd 返回 (单位, N)。非法抛 ValueError。"""
+    if code == "ytd":
+        return ("ytd", 0)
+    m = _LOOKBACK_RE.match(code if isinstance(code, str) else "")
+    if not m or int(m.group(1)) <= 0:
+        raise ValueError(f"非法 lookback: {code!r}(形如 1y/6m/30d/20td/ytd)")
+    return (m.group(2), int(m.group(1)))
+
+
+def _minus_months(ymd: str, n: int) -> str:
+    """anchor 减 N 个月;日溢出夹到目标月末(如 3/31 −1 月 → 2/28)。"""
+    y, mo, d = int(ymd[:4]), int(ymd[4:6]), int(ymd[6:8])
+    total = y * 12 + (mo - 1) - n
+    ny, nm = divmod(total, 12)
+    nm += 1
+    last = monthrange(ny, nm)[1]
+    return date(ny, nm, min(d, last)).strftime("%Y%m%d")
+
+
+def _minus_years(ymd: str, n: int) -> str:
+    """anchor 减 N 年(复用月回退,闰日 2/29 自动夹到 2/28)。"""
+    return _minus_months(ymd, n * 12)
+
 
 TOOL_DEF = Tool(
     name="trade_cal",

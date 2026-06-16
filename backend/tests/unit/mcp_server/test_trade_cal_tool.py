@@ -74,3 +74,30 @@ async def test_malformed_date_guidance():
     assert "参数校验失败" in r.get("error", "")
     r2 = await _call({"action": "count", "start": "abc", "end": "20260101"})
     assert "参数校验失败" in r2.get("error", "")
+
+
+def test_parse_lookback_valid():
+    from app.mcp_server.tools.trade_cal import _parse_lookback
+
+    assert _parse_lookback("1y") == ("y", 1)
+    assert _parse_lookback("6m") == ("m", 6)
+    assert _parse_lookback("30d") == ("d", 30)
+    assert _parse_lookback("20td") == ("td", 20)
+    assert _parse_lookback("ytd") == ("ytd", 0)
+
+
+def test_parse_lookback_invalid():
+    from app.mcp_server.tools.trade_cal import _parse_lookback
+
+    for bad in ["", "0y", "abc", "y", "1ytd", "-3m", None]:
+        with pytest.raises(ValueError):
+            _parse_lookback(bad)
+
+
+def test_minus_months_and_years_clamp():
+    from app.mcp_server.tools.trade_cal import _minus_months, _minus_years
+
+    assert _minus_years("20260616", 1) == "20250616"
+    assert _minus_years("20240229", 1) == "20230228"  # 闰日夹到 2/28
+    assert _minus_months("20260616", 6) == "20251216"
+    assert _minus_months("20260331", 1) == "20260228"  # 日溢出夹到月末(2026 非闰)
