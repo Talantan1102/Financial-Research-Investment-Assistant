@@ -101,3 +101,49 @@ def test_minus_months_and_years_clamp():
     assert _minus_years("20240229", 1) == "20230228"  # 闰日夹到 2/28
     assert _minus_months("20260616", 6) == "20251216"
     assert _minus_months("20260331", 1) == "20260228"  # 日溢出夹到月末(2026 非闰)
+
+
+@pytest.mark.asyncio
+async def test_window_1y():
+    r = await _call({"action": "window", "anchor": "20260616", "lookback": "1y"})
+    assert r["start"] == "20250616"
+    assert r["end"] == "20260616"
+    assert r["anchor_is_open"] is True
+    c = await _call({"action": "count", "start": "20250616", "end": "20260616"})
+    assert r["trading_days"] == c["count"]
+
+
+@pytest.mark.asyncio
+async def test_window_ytd_snaps_forward_past_holiday():
+    r = await _call({"action": "window", "anchor": "20260616", "lookback": "ytd"})
+    assert r["start"] == "20260105"  # 0101/0102 元旦休 + 周末 → 顺延到 1/5
+    assert r["end"] == "20260616"
+
+
+@pytest.mark.asyncio
+async def test_window_n_trading_days():
+    r = await _call({"action": "window", "anchor": "20260616", "lookback": "20td"})
+    assert r["trading_days"] == 20
+    assert r["end"] == "20260616"
+    assert r["start"] == "20260520"
+    c = await _call({"action": "count", "start": r["start"], "end": r["end"]})
+    assert c["count"] == 20
+
+
+@pytest.mark.asyncio
+async def test_window_anchor_on_weekend():
+    r = await _call({"action": "window", "anchor": "20260620", "lookback": "1y"})  # 6/20 周六
+    assert r["anchor_is_open"] is False
+    assert r["end"] == "20260618"  # 6/19 端午休、6/20 周六 → 最近交易日 6/18
+
+
+@pytest.mark.asyncio
+async def test_window_bad_lookback():
+    r = await _call({"action": "window", "anchor": "20260616", "lookback": "xy"})
+    assert "参数校验失败" in r.get("error", "")
+
+
+@pytest.mark.asyncio
+async def test_window_missing_anchor():
+    r = await _call({"action": "window", "lookback": "1y"})
+    assert "参数校验失败" in r.get("error", "")

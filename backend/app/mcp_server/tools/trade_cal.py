@@ -58,7 +58,8 @@ TOOL_DEF = Tool(
     name="trade_cal",
     description=(
         "A-share trading calendar. action one of: is_open/latest/prev/next (need `date`), "
-        "count/list (need `start`+`end`). Dates YYYYMMDD. Pass today explicitly for relative queries."
+        "count/list (need `start`+`end`), window (need `anchor`+`lookback`, resolves a "
+        "relative window in one call). Dates YYYYMMDD. Pass today explicitly for relative queries."
     ),
     inputSchema={
         "type": "object",
@@ -67,6 +68,8 @@ TOOL_DEF = Tool(
             "date": {"type": "string", "description": "YYYYMMDD (single-date actions)"},
             "start": {"type": "string", "description": "YYYYMMDD (range actions)"},
             "end": {"type": "string", "description": "YYYYMMDD (range actions)"},
+            "anchor": {"type": "string", "description": "YYYYMMDD (window action: today/as-of)"},
+            "lookback": {"type": "string", "description": "window action: 1y/6m/30d/20td/ytd"},
         },
         "required": ["action"],
     },
@@ -95,14 +98,68 @@ def _open_dates(df: Any) -> list[str]:
     return sorted(str(r["cal_date"]) for r in df.to_dict("records") if int(r["is_open"]) == 1)
 
 
+def _resolve_raw_start(anchor: str, kind: str, n: int) -> str:
+    """日历型周期(y/m/d/ytd)的 raw_start(尚未顺延到交易日)。td 不走此函数。"""
+    if kind == "ytd":
+        return anchor[:4] + "0101"
+    if kind == "y":
+        return _minus_years(anchor, n)
+    if kind == "m":
+        return _minus_months(anchor, n)
+    if kind == "d":
+        return _shift(anchor, -n)
+    raise ValueError(f"unexpected calendar kind: {kind}")
+
+
+async def _handle_window(tushare: Any, args: dict[str, Any]) -> list[TextContent]:
+    anchor = args.get("anchor")
+    if _bad_ymd(anchor):
+        return _err("[参数校验失败] window 需要 anchor(8 位 YYYYMMDD)")
+    try:
+        kind, n = _parse_lookback(args.get("lookback"))
+    except ValueError:
+        return _err("[参数校验失败] lookback 形如 1y/6m/30d/20td/ytd")
+
+    if kind == "td":  # 计数型:从 end 倒数 N 个交易日
+        df = await tushare.get_trade_cal(start=_shift(anchor, -(n * 2 + 30)), end=anchor)
+        opens = _open_dates(df)
+        le = [d for d in opens if d <= anchor]
+        if not le:
+            return _err("[数据为空] 该区间无交易日")
+        window = le[-n:]
+        start, end, trading_days = window[0], le[-1], len(window)
+    else:  # 日历型:raw_start 顺延到首个交易日
+        raw_start = _resolve_raw_start(anchor, kind, n)
+        df = await tushare.get_trade_cal(start=raw_start, end=anchor)
+        opens = _open_dates(df)
+        if not opens:
+            return _err("[数据为空] 该区间无交易日")
+        start, end, trading_days = opens[0], opens[-1], len(opens)
+
+    return _ok(
+        {
+            "action": "window",
+            "anchor": anchor,
+            "lookback": args.get("lookback"),
+            "start": start,
+            "end": end,
+            "trading_days": trading_days,
+            "anchor_is_open": anchor in opens,
+        }
+    )
+
+
 async def handle(args: dict[str, Any]) -> list[TextContent]:
     from app.services.tushare_factory import build_tushare_service
 
     action = args.get("action")
-    if action not in _SINGLE and action not in _RANGE:
+    if action not in _ACTIONS:
         return _err(f"[参数校验失败] action 必须是 {_ACTIONS} 之一")
 
     tushare = build_tushare_service()
+
+    if action in _WINDOW:
+        return await _handle_window(tushare, args)
 
     if action in _SINGLE:
         qdate = args.get("date")
