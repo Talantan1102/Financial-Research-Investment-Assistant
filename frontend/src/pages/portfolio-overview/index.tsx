@@ -1,29 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Alert, Card, Col, Row, Segmented, Spin, Statistic } from 'antd'
+import { Alert, Card, Col, Row, Spin, Statistic } from 'antd'
 import Chart from '@/components/chart'
-import {
-  getOverview,
-  getTrend,
-  type OverviewRead,
-  type TrendRead,
-  type TimeRange,
-} from '@/api/portfolio'
+import { getOverview, type OverviewRead } from '@/api/portfolio'
 import { pnlColor } from '@/utils/pnl-color'
-import { structurePie, trendLine } from './charts'
-
-const RANGES: TimeRange[] = ['1m', '3m', '6m', '1y', '3y']
-const RANGE_LABEL: Record<TimeRange, string> = {
-  '1m': '近1月',
-  '3m': '近3月',
-  '6m': '近半年',
-  '1y': '近1年',
-  '3y': '近3年',
-}
+import { structurePie } from './charts'
 
 export default function PortfolioOverviewPage() {
   const [ov, setOv] = useState<OverviewRead | null>(null)
-  const [trend, setTrend] = useState<TrendRead | null>(null)
-  const [range, setRange] = useState<TimeRange>('1m')
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -31,12 +14,6 @@ export default function PortfolioOverviewPage() {
       .then((r) => setOv(r.data))
       .catch((e: unknown) => setErr(String(e)))
   }, [])
-
-  useEffect(() => {
-    getTrend(range)
-      .then((r) => setTrend(r.data))
-      .catch(() => {})
-  }, [range])
 
   if (err) {
     return (
@@ -140,26 +117,6 @@ export default function PortfolioOverviewPage() {
           >
             基金按最新季报(截至 {ov.structure.as_of})拆，之后可能已调仓。
           </p>
-        )}
-      </Card>
-
-      {/* 复盘：区间选择器 + 折线图 */}
-      <Card title="这阵子 vs 沪深300">
-        <Segmented
-          value={range}
-          onChange={(v) => setRange(v as TimeRange)}
-          options={RANGES.map((r) => ({ label: RANGE_LABEL[r], value: r }))}
-          style={{ marginBottom: 12 }}
-        />
-        {trend && (
-          <Chart
-            config={trendLine(
-              trend.dates,
-              trend.portfolio,
-              trend.benchmark,
-              trend.cumulative,
-            )}
-          />
         )}
       </Card>
     </div>
