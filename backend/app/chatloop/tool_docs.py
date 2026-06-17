@@ -406,8 +406,11 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "end(str,必填,YYYYMMDD)。\n"
             "返回:列式数组 {ts_code, count, dates[], open[], high[], low[], close[], vol[], "
             "pct_chg[]} —— 可直接喂 run_python 的 go.Candlestick(x=dates, open=..., ...) 或折线。\n"
+            "长区间(超过约一年)结果过大时改回 {ts_code, count, summary{...}, ref}:完整序列已缓存,"
+            "在 run_python 里用 data_refs={变量名: ref} 一次灌进沙箱算全量(年化/波动/回撤等),"
+            "不要分段多次取、不要拿 summary 估算。\n"
             "示例:get_daily(ts_code='600519.SH', start='20250101', end='20250601')。\n"
-            "硬约束:ts_code 带后缀;日期 YYYYMMDD;单次最多返回最近 260 个交易日(超出截断)。"
+            "硬约束:ts_code 带后缀;日期 YYYYMMDD;长区间一次取全(不再只给最近一年)。"
         ),
         thin_required={"ts_code": "string", "start": "string", "end": "string"},
     ),
