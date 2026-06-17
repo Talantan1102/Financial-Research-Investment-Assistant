@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from collections import defaultdict
 from datetime import date
@@ -42,8 +43,9 @@ async def run_passk(
     concurrency: int = 6,
     as_of: str = "20260617",
     max_steps: int = 18,
+    answers_path: Path | None = None,
 ) -> dict[str, Any]:
-    """跑 cases × k,返回 {pass1, by_bucket, per_case}。并发共享一个 MCP + singletons。"""
+    """跑 cases × k,返回 {pass1, by_bucket, per_case};answers_path 给则落盘答案供离线重判。"""
     from app.app_main import _sqlalchemy_async_pg_url
     from app.chatloop.context import ContextDeps
     from app.chatloop.eval_agent import ChatLoopAgent
@@ -61,6 +63,7 @@ async def run_passk(
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     sem = asyncio.Semaphore(concurrency)
     per_run: dict[str, list[bool]] = defaultdict(list)  # case_id -> [k 次 pass]
+    answers: dict[str, str] = {}  # case_id -> 末次 agent 答案(供离线重判)
 
     try:
         async with MCPClient.from_subprocess(profile="chat_tools") as mcp_client:
@@ -73,7 +76,7 @@ async def run_passk(
                 reference_date=_as_of_date(as_of),
             )
 
-            async def run_one(c: case.ComputationCase, run_idx: int) -> tuple[str, bool]:
+            async def run_one(c: case.ComputationCase, run_idx: int) -> tuple[str, bool, str]:
                 rid = f"qg-{c.case_id}-{run_idx}"
                 async with sem:
                     try:
@@ -96,18 +99,22 @@ async def run_passk(
                         ok = judge.judge(
                             c.gold, c.gold_shape, c.tolerance, answer or "", _candidate_names(c)
                         )
-                        return (c.case_id, bool(ok))
+                        return (c.case_id, bool(ok), answer or "")
                     except Exception:  # noqa: BLE001 — per-case 隔离
                         logger.exception("case %s run %d 失败", c.case_id, run_idx)
-                        return (c.case_id, False)
+                        return (c.case_id, False, "")
 
             tasks = [run_one(c, i) for c in cases for i in range(k)]
             for fut in asyncio.as_completed(tasks):
-                cid, ok = await fut
+                cid, ok, ans = await fut
                 per_run[cid].append(ok)
+                if ans:
+                    answers[cid] = ans
     finally:
         await engine.dispose()
 
+    if answers_path is not None:
+        _dump_answers(cases, per_run, answers, answers_path)
     return _aggregate(cases, per_run)
 
 
@@ -131,9 +138,34 @@ def _aggregate(cases: list[case.ComputationCase], per_run: dict[str, list[bool]]
     }
 
 
+def _dump_answers(
+    cases: list[case.ComputationCase],
+    per_run: dict[str, list[bool]],
+    answers: dict[str, str],
+    path: Path,
+) -> None:
+    """落盘 {case_id, difficulty, indicator, gold_shape, gold, passed, answer} 供离线重判。"""
+    by_id = {c.case_id: c for c in cases}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for cid, runs in per_run.items():
+            c = by_id[cid]
+            rec = {
+                "case_id": cid,
+                "difficulty": c.difficulty,
+                "indicator": c.indicator,
+                "gold_shape": c.gold_shape,
+                "gold": c.gold,
+                "passed": any(runs),
+                "answer": answers.get(cid, ""),
+            }
+            f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+
+
 async def _main(jsonl: Path, k: int, concurrency: int) -> None:
     cases = case.load_jsonl(jsonl)
-    res = await run_passk(cases, k=k, concurrency=concurrency)
+    answers_path = jsonl.parent / "passk_answers.jsonl"
+    res = await run_passk(cases, k=k, concurrency=concurrency, answers_path=answers_path)
     print(f"=== pass@{k}: {res['pass_at_k']} ===")
     for bucket, v in res["by_bucket"].items():
         print(f"  {bucket:24s} {v['pass']}/{v['total']}  ({v['rate']})")
