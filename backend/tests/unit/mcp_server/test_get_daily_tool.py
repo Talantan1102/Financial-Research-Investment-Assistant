@@ -36,3 +36,41 @@ def test_tool_def_shape() -> None:
     assert TOOL_DEF.name == "get_daily"
     req = TOOL_DEF.inputSchema["required"]
     assert "ts_code" in req and "start" in req and "end" in req
+
+
+def test_format_daily_no_tail_returns_full_range() -> None:
+    # 旧 _MAX_ROWS=260 会把 300 行 tail 到 260;去 cap 后应原样返回全部
+    n = 300
+    df = pd.DataFrame(
+        {
+            "trade_date": [f"2025{i:04d}" for i in range(1, n + 1)],  # 唯一且可排序即可
+            "open": [10.0] * n,
+            "high": [11.0] * n,
+            "low": [9.0] * n,
+            "close": [10.0 + i * 0.01 for i in range(n)],
+            "vol": [1000] * n,
+            "pct_chg": [0.1] * n,
+        }
+    )
+    out = _format_daily(df, "600519.SH")
+    assert out["count"] == n
+    assert len(out["close"]) == n  # 不再被 tail 到 260
+
+
+def test_format_daily_summary_fields() -> None:
+    df = pd.DataFrame(
+        {
+            "trade_date": ["20250101", "20250102", "20250103"],
+            "open": [10.0, 10.1, 10.2],
+            "high": [10.5, 12.0, 10.3],
+            "low": [9.5, 9.0, 9.8],
+            "close": [10.0, 11.0, 10.5],
+            "vol": [1, 2, 3],
+            "pct_chg": [0.0, 10.0, -4.5],
+        }
+    )
+    s = _format_daily(df, "600519.SH")["summary"]
+    assert s["count"] == 3
+    assert s["date_start"] == "20250101" and s["date_end"] == "20250103"
+    assert s["first_close"] == 10.0 and s["last_close"] == 10.5
+    assert s["period_high"] == 12.0 and s["period_low"] == 9.0
