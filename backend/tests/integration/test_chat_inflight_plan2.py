@@ -25,7 +25,7 @@ from app.models.chat import ChatSession
 from app.models.user import User  # noqa: F401 — registers users table
 from app.router.chat import (
     get_async_session_factory,
-    get_current_user,
+    get_current_user_required,
     get_redis_async,
 )
 from app.router.chat import (
@@ -91,7 +91,7 @@ def _client(
     """Build FastAPI TestClient with chat router + DI overrides."""
     app = FastAPI()
     app.include_router(chat_router)
-    app.dependency_overrides[get_current_user] = lambda: _StubUser()
+    app.dependency_overrides[get_current_user_required] = lambda: _StubUser()
     app.dependency_overrides[get_async_session_factory] = lambda: session_factory
     app.dependency_overrides[get_redis_async] = lambda: fake_redis_obj
     return TestClient(app, raise_server_exceptions=True)

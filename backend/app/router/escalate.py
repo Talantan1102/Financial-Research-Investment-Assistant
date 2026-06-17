@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,9 @@ from app.agents.escalation_confidence import compute_confidence
 from app.agents.escalation_protocol import EscalationPacket, FieldEdit
 from app.agents.research_agent import ResearchAgent
 from app.agents.schemas import ResearchState
+from app.models.user import User
+from app.router.auth_helpers import owns_resource
+from app.router.auth_router import get_current_user_required
 from app.services.chat_session_repo import ChatSessionRepo
 from app.services.escalation_record_repo import EscalationRecordRepo
 from app.services.research_report_repo import ResearchReportRepo
@@ -159,15 +162,45 @@ def packet_to_research_state(
     return state
 
 
+async def _session_owned_by(
+    chat_session_repo: ChatSessionRepo, session_id: str, user: User
+) -> bool:
+    """True iff ``session_id`` resolves to a chat session owned by ``user``.
+
+    非 UUID / 不存在的 session_id 一律 False(get_session 内部 uuid.UUID() 解析)。
+    """
+    try:
+        sess = await chat_session_repo.get_session(session_id)
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return sess is not None and owns_resource(sess.user_id, user)
+
+
 @router.post("/escalate")
 async def escalate(
     req: EscalateRequest,
+    user: User = Depends(get_current_user_required),
     record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
     research_agent: ResearchAgent = Depends(get_research_agent),
     chat_session_repo: ChatSessionRepo = Depends(get_chat_session_repo),
     research_report_repo: ResearchReportRepo = Depends(get_research_report_repo),
 ) -> StreamingResponse:
-    """Receive confirmed packet, persist diff, invoke ResearchAgent, stream events."""
+    """Receive confirmed packet, persist diff, invoke ResearchAgent, stream events.
+
+    数据隔离:draft record 的会话 + packet 指定的 chat_session_id 都必须属于当前
+    用户(record 本身无 user_id,归属经 session_id → chat_sessions.user_id)。
+    防越权触发研报/改记录 + 防把 assistant 消息注入他人会话。不符一律 404。
+    """
+    record = await record_repo.get(req.draft_record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="escalation record not found")
+    candidate_sids = {
+        str(record.session_id),
+        str(req.packet_confirmed.session_metadata.chat_session_id),
+    }
+    for sid in candidate_sids:
+        if not await _session_owned_by(chat_session_repo, sid, user):
+            raise HTTPException(status_code=404, detail="escalation record not found")
 
     async def _stream() -> AsyncIterator[str]:
         seq = {"n": 0}

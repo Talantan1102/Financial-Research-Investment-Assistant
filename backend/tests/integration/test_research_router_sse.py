@@ -54,7 +54,8 @@ _research_mod = importlib.import_module("app.router.research")
 ResearchRequest = _research_mod.ResearchRequest
 ResearchStreamEvent = _research_mod.ResearchStreamEvent
 get_research_graph = _research_mod.get_research_graph
-get_current_user_dep = importlib.import_module("app.router.chat").get_current_user
+# research 路由依赖 auth_helpers.get_current_user(chat.py 不再 re-export 它)。
+get_current_user_dep = importlib.import_module("app.router.auth_helpers").get_current_user
 
 # ---------------------------------------------------------------------------
 # Fixtures dir — shared with e2e and chat router tests

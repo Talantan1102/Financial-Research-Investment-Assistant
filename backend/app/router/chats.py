@@ -8,6 +8,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.models.user import User
+from app.router.auth_helpers import owns_resource
+from app.router.auth_router import get_current_user_required
 from app.services.chat_session_repo import ChatSessionRepo
 
 router = APIRouter(prefix="/api/v0/chats", tags=["chats-v0.9"])
@@ -47,8 +50,11 @@ def _to_view(s: Any, message_count: int = 0, preview: str = "") -> ChatSessionVi
 
 @router.get("")
 @router.get("/")
-async def list_chats(repo: ChatSessionRepo = Depends(get_repo)) -> list[ChatSessionView]:
-    sessions = await repo.list_for_user("anonymous")  # C.6 will switch to JWT user
+async def list_chats(
+    user: User = Depends(get_current_user_required),
+    repo: ChatSessionRepo = Depends(get_repo),
+) -> list[ChatSessionView]:
+    sessions = await repo.list_for_user(str(user.id))
     return [_to_view(s) for s in sessions]
 
 
@@ -56,21 +62,28 @@ async def list_chats(repo: ChatSessionRepo = Depends(get_repo)) -> list[ChatSess
 @router.post("/")
 async def create_chat(
     req: CreateChatRequest,
+    user: User = Depends(get_current_user_required),
     repo: ChatSessionRepo = Depends(get_repo),
 ) -> ChatSessionView:
-    s = await repo.create_session(user_id="anonymous", title=req.title)
+    s = await repo.create_session(user_id=str(user.id), title=req.title)
     return _to_view(s)
 
 
 @router.get("/{session_id}")
-async def get_chat(session_id: str, repo: ChatSessionRepo = Depends(get_repo)) -> dict[str, Any]:
+async def get_chat(
+    session_id: str,
+    user: User = Depends(get_current_user_required),
+    repo: ChatSessionRepo = Depends(get_repo),
+) -> dict[str, Any]:
     """Get one session with messages + active_task_id (if a chat_task is in_flight).
 
     Plan 1 Task 7: 新增 active_task_id 字段(null 或 chat_task.id str)。每条 message
     携带 task_id + status,方便前端展示 task-level 状态(Plan 2 会扩展 stream URL)。
+
+    数据隔离:会话不存在或不属于当前用户 → 统一 404(防越权 + 防枚举)。
     """
     s = await repo.get_session(session_id)
-    if not s:
+    if not s or not owns_resource(s.user_id, user):
         raise HTTPException(404, "session not found")
     msgs = await repo.list_messages(session_id)
     active_task = await repo.find_active_task_for_session(uuid.UUID(session_id))
@@ -97,11 +110,12 @@ async def get_chat(session_id: str, repo: ChatSessionRepo = Depends(get_repo)) -
 async def rename_chat(
     session_id: str,
     req: RenameChatRequest,
+    user: User = Depends(get_current_user_required),
     repo: ChatSessionRepo = Depends(get_repo),
 ) -> ChatSessionView:
     """User-driven rename. Sets title_source='user_renamed' (terminal) via repo."""
     s = await repo.get_session(session_id)
-    if not s:
+    if not s or not owns_resource(s.user_id, user):
         raise HTTPException(404, "session not found")
     await repo.rename_session(session_id, req.title)
     updated = await repo.get_session(session_id)
@@ -110,6 +124,13 @@ async def rename_chat(
 
 
 @router.delete("/{session_id}")
-async def delete_chat(session_id: str, repo: ChatSessionRepo = Depends(get_repo)) -> dict[str, str]:
+async def delete_chat(
+    session_id: str,
+    user: User = Depends(get_current_user_required),
+    repo: ChatSessionRepo = Depends(get_repo),
+) -> dict[str, str]:
+    s = await repo.get_session(session_id)
+    if not s or not owns_resource(s.user_id, user):
+        raise HTTPException(404, "session not found")
     await repo.delete_session(session_id)
     return {"status": "deleted"}

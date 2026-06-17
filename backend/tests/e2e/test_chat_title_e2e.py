@@ -72,20 +72,31 @@ def serve_base_url() -> str:
 
 def test_first_round_triggers_llm_title_generation(serve_base_url: str, celery_worker_subprocess):
     """端到端: 创建 session → 发首条 user 消息 → 等异步 task → title != '新对话'."""
+    import uuid
+
     import requests
 
+    # 0. 注册用户拿 JWT(数据隔离:chat 端点强制登录,匿名会 401)
+    uname = f"title-e2e-{uuid.uuid4().hex[:8]}"
+    reg = requests.post(
+        f"{serve_base_url}/auth/register",
+        json={"username": uname, "password": "secret123", "email": f"{uname}@test.com"},
+    )
+    reg.raise_for_status()
+    headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+
     # 1. 创建 session
-    resp = requests.post(f"{serve_base_url}/api/v0/chats/", json={})
+    resp = requests.post(f"{serve_base_url}/api/v0/chats/", json={}, headers=headers)
     resp.raise_for_status()
     session = resp.json()
     sid = session["id"]
     assert session["title"] == "新对话"
 
     # 2. 发用户消息 → 触发 chat_runner Celery task (Plan 2 enqueue path)
-    #    POST /api/v0/chat with session_id + message (anonymous user, no auth needed)
     resp = requests.post(
         f"{serve_base_url}/api/v0/chat",
         json={"session_id": sid, "message": "贵州茅台最近怎么样?"},
+        headers=headers,
     )
     resp.raise_for_status()
 
@@ -93,7 +104,7 @@ def test_first_round_triggers_llm_title_generation(serve_base_url: str, celery_w
     deadline = time.time() + 30
     title = "新对话"
     while time.time() < deadline:
-        resp = requests.get(f"{serve_base_url}/api/v0/chats/{sid}")
+        resp = requests.get(f"{serve_base_url}/api/v0/chats/{sid}", headers=headers)
         data = resp.json()
         title = data["session"]["title"]
         if title != "新对话":

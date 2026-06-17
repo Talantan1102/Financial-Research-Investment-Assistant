@@ -17,13 +17,19 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from app.router.auth_router import get_current_user_required
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+_OWNER_ID = uuid.uuid4()
 
 
 @pytest.fixture
 def app_with_chats_rename():
-    """Minimal FastAPI app wiring chats router with a mock repo."""
+    """Minimal FastAPI app wiring chats router with a mock repo.
+
+    Auth is overridden to the session owner (forced-login happy path).
+    """
     from app.router.chats import get_repo, router
 
     app = FastAPI()
@@ -33,7 +39,7 @@ def app_with_chats_rename():
     fake_session = SimpleNamespace(
         id=fake_id,
         title="旧标题",
-        user_id="anonymous",
+        user_id=_OWNER_ID,
         updated_at=datetime.utcnow(),
         message_count=0,
         last_msg_preview="",
@@ -41,7 +47,7 @@ def app_with_chats_rename():
     updated_session = SimpleNamespace(
         id=fake_id,
         title="新标题",
-        user_id="anonymous",
+        user_id=_OWNER_ID,
         updated_at=datetime.utcnow(),
         message_count=0,
         last_msg_preview="",
@@ -54,6 +60,7 @@ def app_with_chats_rename():
     repo.find_active_task_for_session = AsyncMock(return_value=None)
 
     app.dependency_overrides[get_repo] = lambda: repo
+    app.dependency_overrides[get_current_user_required] = lambda: SimpleNamespace(id=_OWNER_ID)
     return app, repo, fake_id
 
 

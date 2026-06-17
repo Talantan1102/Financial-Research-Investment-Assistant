@@ -110,7 +110,9 @@ class ChatRequest(BaseModel):
 # previously kept a byte-for-byte duplicate); re-export so the Depends usages
 # below resolve to the shared definitions and future auth changes propagate.
 # ---------------------------------------------------------------------------
-from app.router.auth_helpers import _AnonUser, get_current_user  # noqa: E402
+from app.models.user import User  # noqa: E402
+from app.router.auth_helpers import owns_resource  # noqa: E402
+from app.router.auth_router import get_current_user_required  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # PG session factory helper(供 session-start persona populate 用)
@@ -155,7 +157,7 @@ _persona_populated_sessions: set[str] = set()
 """
 
 
-async def _maybe_populate_persona_on_session_start(user: _AnonUser, session_id: str) -> None:
+async def _maybe_populate_persona_on_session_start(user: User, session_id: str) -> None:
     """首轮 session 把 portfolio 蒸馏进 working_blocks(persona)。
 
     老 inline SSE path(_stream_chat)在 turn 开头跑这个 hook;chatloop 换引擎后
@@ -212,7 +214,7 @@ def _coerce_user_uuid(user_id: Any) -> UUID | None:
 @router.post("/api/v0/chat", response_model=None)
 async def chat(
     req: ChatRequest,
-    user: _AnonUser = Depends(get_current_user),
+    user: User = Depends(get_current_user_required),
     pg_factory: Any | None = Depends(get_async_session_factory),
     redis: AsyncRedis | None = Depends(get_redis_async),
 ) -> dict[str, str]:
@@ -240,11 +242,17 @@ async def chat(
 
     from app.tasks.chat_runner import enqueue_run_chat
 
-    # 首轮 session 把 portfolio 蒸馏进 working_blocks(persona)。best-effort。
-    await _maybe_populate_persona_on_session_start(user, req.session_id)
-
     session_repo = ChatSessionRepo(pg_factory)
     task_repo = ChatTaskRepo(pg_factory)
+
+    # 数据隔离:只能往属于自己的会话发消息(会话须先经 POST /api/v0/chats 创建;
+    # append_message 的 FK 本就要求会话存在,这里把越权/不存在统一收成 404)。
+    session = await session_repo.get_session(req.session_id)
+    if session is None or not owns_resource(session.user_id, user):
+        raise HTTPException(status_code=404, detail="session not found")
+
+    # 首轮 session 把 portfolio 蒸馏进 working_blocks(persona)。best-effort。
+    await _maybe_populate_persona_on_session_start(user, req.session_id)
 
     user_msg = await session_repo.append_message(
         session_id=req.session_id,
@@ -294,6 +302,7 @@ async def chat(
 async def chat_stream(
     task_id: str,
     request: Request,
+    user: User = Depends(get_current_user_required),
     last_event_id: str = "0",
     pg_factory: Any | None = Depends(get_async_session_factory),
     redis: AsyncRedis | None = Depends(get_redis_async),
@@ -330,7 +339,8 @@ async def chat_stream(
 
     task_repo = ChatTaskRepo(pg_factory)
     task = await task_repo.get_by_id(task_uuid)
-    if task is None:
+    # 数据隔离:任务不存在或不属于当前用户 → 统一 404(防越权 + 防枚举)。
+    if task is None or not owns_resource(task.user_id, user):
         raise HTTPException(status_code=404, detail=f"task {task_id} not found")
 
     session_id_uuid = task.session_id  # ChatTask.session_id is UUID
@@ -383,6 +393,7 @@ async def chat_stream(
 @router.post("/api/v0/chat/cancel/{task_id}", status_code=202)
 async def chat_cancel(
     task_id: str,
+    user: User = Depends(get_current_user_required),
     pg_factory: Any | None = Depends(get_async_session_factory),
     redis: AsyncRedis | None = Depends(get_redis_async),
 ) -> dict[str, str]:
@@ -410,7 +421,8 @@ async def chat_cancel(
 
     task_repo = ChatTaskRepo(pg_factory)
     task = await task_repo.get_by_id(task_uuid)
-    if task is None:
+    # 数据隔离:任务不存在或不属于当前用户 → 统一 404(防越权 + 防枚举)。
+    if task is None or not owns_resource(task.user_id, user):
         raise HTTPException(status_code=404, detail=f"task {task_id} not found")
 
     # Inline import: ChatCancelBus → redis.asyncio import; defer to runtime to
@@ -439,6 +451,7 @@ class SteerRequest(BaseModel):
 async def chat_steer(
     task_id: str,
     body: SteerRequest,
+    user: User = Depends(get_current_user_required),
     pg_factory: Any | None = Depends(get_async_session_factory),
     redis: AsyncRedis | None = Depends(get_redis_async),
 ) -> dict[str, Any]:
@@ -470,7 +483,8 @@ async def chat_steer(
 
     task_repo = ChatTaskRepo(pg_factory)
     task = await task_repo.get_by_id(task_uuid)
-    if task is None:
+    # 数据隔离:任务不存在或不属于当前用户 → 统一 404(防越权 + 防枚举)。
+    if task is None or not owns_resource(task.user_id, user):
         raise HTTPException(status_code=404, detail=f"task {task_id} not found")
 
     session_repo = ChatSessionRepo(pg_factory)
@@ -504,6 +518,7 @@ async def chat_steer(
 @router.post("/api/v0/chat/retry/{task_id}")
 async def chat_retry(
     task_id: str,
+    user: User = Depends(get_current_user_required),
     pg_factory: Any | None = Depends(get_async_session_factory),
     redis: AsyncRedis | None = Depends(get_redis_async),
 ) -> dict[str, str]:
@@ -542,7 +557,8 @@ async def chat_retry(
 
     task_repo = ChatTaskRepo(pg_factory)
     old_task = await task_repo.get_by_id(task_uuid)
-    if old_task is None:
+    # 数据隔离:任务不存在或不属于当前用户 → 统一 404(防越权 + 防枚举)。
+    if old_task is None or not owns_resource(old_task.user_id, user):
         raise HTTPException(status_code=404, detail=f"task {task_id} not found")
 
     if old_task.status not in ("error", "partial", "cancelled"):
