@@ -14,3 +14,9 @@ def test_get_daily_doc_steers_to_data_refs_not_chunking() -> None:
 
 def test_system_prompt_has_longwindow_ref_rule() -> None:
     assert "data_refs" in CHAT_SYSTEM_PROMPT  # 长窗口指标走引用算全量的规矩在位
+
+
+def test_system_prompt_return_caliber_and_alignment_rule() -> None:
+    # 日收益类指标用 pct_chg + 多序列按交易日对齐(相关桶口径修复)
+    assert "pct_chg" in CHAT_SYSTEM_PROMPT
+    assert "对齐" in CHAT_SYSTEM_PROMPT
