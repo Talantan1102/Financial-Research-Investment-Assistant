@@ -146,3 +146,40 @@ async def test_midsize_series_not_truncated_at_default() -> None:
     ]
     await loop._extract_and_emit_charts(results, st)
     assert "truncated_digest" not in results[0].output  # 默认阈值下不截
+
+
+async def test_oversize_with_summary_preserves_summary() -> None:
+    events: list[LoopEvent] = []
+    loop = _loop(events, threshold=200)
+    st = _state()
+    args = {"ts_code": "600519.SH", "start": "20230101", "end": "20260101"}
+    summary = {
+        "ts_code": "600519.SH",
+        "count": 725,
+        "date_start": "20230101",
+        "date_end": "20260101",
+        "first_close": 1678.0,
+        "last_close": 1502.0,
+        "period_high": 1900.0,
+        "period_low": 1402.0,
+    }
+    big = {"summary": summary, "close": list(range(2000))}  # 远超 200 字
+    st.ledger.record(
+        step=1,
+        tool_name="get_daily",
+        args=args,
+        digest="d",
+        success=True,
+        cache_key="u::get_daily::abc",
+    )
+    results = [
+        ToolResult(tool_name="get_daily", args=args, success=True, output=big, latency_ms=5)
+    ]
+    await loop._extract_and_emit_charts(results, st)
+    out = results[0].output
+    assert isinstance(out, dict)
+    assert out["summary"] == summary  # 信息卡存活
+    assert out["ref"] == "u::get_daily::abc"
+    assert "data_refs" in out["note"]
+    assert "truncated_digest" not in out  # 有 summary 就不用粗暴 600 字 digest
+    assert "close" not in out  # 完整数组换出
