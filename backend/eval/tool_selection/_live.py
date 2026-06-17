@@ -95,7 +95,9 @@ def build_real_hub(singletons: Any) -> ToolHub:
             RunSkillScriptTool(executor=singletons.executor),
             OfferDeepResearchTool(),
             ReadCachedResultTool(cache=singletons.cache),
-            CodeInterpreterTool(backend=SkillExecutorBackend(singletons.executor)),
+            CodeInterpreterTool(
+                backend=SkillExecutorBackend(singletons.executor), cache=singletons.cache
+            ),
             GetPortfolioPositionsTool(session_factory=singletons.session_factory),
         ]
     )
