@@ -16,7 +16,7 @@ from pathlib import Path
 
 from eval.question_gen import case, intents, legality, operators, stock_pool
 
-_AS_OF_DEFAULT = "20260617"
+_AS_OF_DEFAULT = "20260612"  # 钉到已落定的历史交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
 _OUT_DEFAULT = Path(__file__).resolve().parent / "data" / "computation_cases.jsonl"
 
 # 容差(承 caliber-freeze;gold 存百分数,故对百分数比)
