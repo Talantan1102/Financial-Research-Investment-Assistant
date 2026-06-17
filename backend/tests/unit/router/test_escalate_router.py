@@ -5,11 +5,15 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from app.router.auth_router import get_current_user_required
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+_OWNER_ID = uuid.uuid4()
 
 
 @pytest.fixture
@@ -41,7 +45,7 @@ def fake_packet_dict():
     }
 
 
-def _build_app(repo, research_agent=None) -> FastAPI:
+def _build_app(repo, research_agent=None, *, auth_user_id=_OWNER_ID, owner_id=_OWNER_ID) -> FastAPI:
     from unittest.mock import AsyncMock, MagicMock
 
     from app.router.escalate import (
@@ -65,9 +69,13 @@ def _build_app(repo, research_agent=None) -> FastAPI:
 
         research_agent.run_streaming = _fake_streaming
 
-    # Stub chat_session_repo: append_message is a no-op
+    # 数据隔离:draft record 经 session_id 归属;默认 record + session 都归 owner_id。
+    repo.get = AsyncMock(return_value=SimpleNamespace(session_id=uuid.uuid4()))
+
+    # Stub chat_session_repo: append_message no-op;get_session 返回 owner 持有的会话。
     stub_chat_repo = MagicMock()
     stub_chat_repo.append_message = AsyncMock(return_value=None)
+    stub_chat_repo.get_session = AsyncMock(return_value=SimpleNamespace(user_id=owner_id))
 
     # Stub research_report_repo: create_from_sut_output returns a fake row
     stub_rpt_row = MagicMock()
@@ -81,6 +89,7 @@ def _build_app(repo, research_agent=None) -> FastAPI:
     app.dependency_overrides[get_research_agent] = lambda: research_agent
     app.dependency_overrides[get_chat_session_repo] = lambda: stub_chat_repo
     app.dependency_overrides[get_research_report_repo] = lambda: stub_rpt_repo
+    app.dependency_overrides[get_current_user_required] = lambda: SimpleNamespace(id=auth_user_id)
     return app
 
 
@@ -140,3 +149,48 @@ def test_escalate_endpoint_invalid_packet_returns_422(fake_packet_dict):
     }
     r = client.post("/api/v0/chat/escalate", json=payload)
     assert r.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Data isolation — escalate rejects cross-user records/sessions (404) + needs auth
+# ---------------------------------------------------------------------------
+
+
+def test_escalate_404_when_session_not_owned(fake_packet_dict):
+    """draft record 的会话归 owner,但认证为另一个用户 → 404,且不触发研报。"""
+    repo = AsyncMock()
+    repo.record_confirmation = AsyncMock(return_value=None)
+    app = _build_app(repo, auth_user_id=uuid.uuid4())  # different from owner
+    client = TestClient(app)
+
+    payload = {
+        "draft_record_id": str(uuid.uuid4()),
+        "packet_confirmed": fake_packet_dict,
+        "user_edits": [],
+    }
+    r = client.post("/api/v0/chat/escalate", json=payload)
+    assert r.status_code == 404
+    repo.record_confirmation.assert_not_awaited()
+
+
+def test_escalate_401_without_auth(fake_packet_dict):
+    """No token → get_current_user_required → 401."""
+    from app.core.database import get_db
+
+    repo = AsyncMock()
+    app = _build_app(repo)
+    app.dependency_overrides.pop(get_current_user_required, None)
+
+    def _dummy_db():
+        yield None
+
+    app.dependency_overrides[get_db] = _dummy_db
+    client = TestClient(app)
+
+    payload = {
+        "draft_record_id": str(uuid.uuid4()),
+        "packet_confirmed": fake_packet_dict,
+        "user_edits": [],
+    }
+    r = client.post("/api/v0/chat/escalate", json=payload)
+    assert r.status_code == 401

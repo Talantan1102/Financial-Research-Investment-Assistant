@@ -18,9 +18,12 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from app.router.auth_router import get_current_user_required
 from app.services.eval_models import SUTOutput
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+_OWNER_ID = uuid.uuid4()
 
 # ---------------------------------------------------------------------------
 # SSE helper
@@ -105,12 +108,17 @@ def _build_app(record_repo, research_agent, chat_repo, rpt_repo):
         router as escalate_router,
     )
 
+    # 数据隔离:record + session 都归 _OWNER_ID,认证为同一人(e2e 链路正常)。
+    record_repo.get = AsyncMock(return_value=SimpleNamespace(session_id=uuid.uuid4()))
+    chat_repo.get_session = AsyncMock(return_value=SimpleNamespace(user_id=_OWNER_ID))
+
     app = FastAPI()
     app.include_router(escalate_router)
     app.dependency_overrides[get_escalation_record_repo] = lambda: record_repo
     app.dependency_overrides[get_research_agent] = lambda: research_agent
     app.dependency_overrides[get_chat_session_repo] = lambda: chat_repo
     app.dependency_overrides[get_research_report_repo] = lambda: rpt_repo
+    app.dependency_overrides[get_current_user_required] = lambda: SimpleNamespace(id=_OWNER_ID)
     return app
 
 
