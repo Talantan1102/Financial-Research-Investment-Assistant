@@ -73,4 +73,4 @@ def test_format_daily_summary_fields() -> None:
     assert s["count"] == 3
     assert s["date_start"] == "20250101" and s["date_end"] == "20250103"
     assert s["first_close"] == 10.0 and s["last_close"] == 10.5
-    assert s["period_high"] == 12.0 and s["period_low"] == 9.0
+    assert "period_high" not in s and "period_low" not in s  # 刻意不放,避免错误回撤捷径

@@ -58,8 +58,8 @@ def _summary(df: Any, ts_code: str) -> dict[str, Any]:
         "date_end": dates[-1],
         "first_close": round(float(close.iloc[0]), 2),
         "last_close": round(float(close.iloc[-1]), 2),
-        "period_high": round(float(df["high"].max()), 2),
-        "period_low": round(float(df["low"].min()), 2),
+        # 刻意不放 period_high/period_low:会诱导 agent 拿(最低-最高)/最高当最大回撤,
+        # 但最大回撤是路径依赖的峰谷,须按完整收盘序列逐日算(见 system_prompt 纪律)。
     }
 
 
