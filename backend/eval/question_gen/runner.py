@@ -17,7 +17,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from eval.question_gen import case, judge, stock_pool
+from eval.question_gen import case, judge, judge_llm, stock_pool
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,7 @@ async def run_passk(
                 skill_listing=singletons.skill_listing,
                 reference_date=_as_of_date(as_of),
             )
+            complete = judge_llm.make_complete()  # 复杂档(排序/筛选)LLM 抽取判分
 
             async def run_one(c: case.ComputationCase, run_idx: int) -> tuple[str, bool, str]:
                 rid = f"qg-{c.case_id}-{run_idx}"
@@ -96,9 +97,14 @@ async def run_passk(
                         answer = final.final_response or ChatLoopAgent._last_assistant_content(
                             final
                         )
-                        ok = judge.judge(
-                            c.gold, c.gold_shape, c.tolerance, answer or "", _candidate_names(c)
-                        )
+                        if c.gold_shape in ("ranking", "set"):
+                            ok = await judge_llm.judge_structured(
+                                c, answer or "", complete=complete
+                            )
+                        else:
+                            ok = judge.judge(
+                                c.gold, c.gold_shape, c.tolerance, answer or "", _candidate_names(c)
+                            )
                         return (c.case_id, bool(ok), answer or "")
                     except Exception:  # noqa: BLE001 — per-case 隔离
                         logger.exception("case %s run %d 失败", c.case_id, run_idx)
