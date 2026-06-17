@@ -95,6 +95,13 @@ DIMENSION_REPORTS: dict[str, tuple[dict[str, str], ...]] = {
             "sub": "按真实场景指出本项目 chatloop(裸 while 循环 runtime)的 7 个优化决策点:每个先给我们代码里的问题(file:line 证据),再给工业界解法(Claude Code / Anthropic API / OpenAI Agents SDK / LangGraph / Manus)· 22 来源 / 25 条承重结论三票对抗核查全过",
         },
     ),
+    "verification": (
+        {
+            "slug": "verification-question-gates",
+            "title": "验证集出题的两道闸 · 难度 × 真实性",
+            "sub": "反向出题保证「有可信答案」却不挑题——出完题要过两道正交的闸:难度闸(链长 / 组合算子 / 数据量 / 日期 / 干扰 5 旋钮分档 + pass@k 实测标定)× 真实性闸(合法配对 + 股票池约束 / 意图锚定 / 裁判 + 流量对齐 三层)· 对照本仓 indicator_oracle / 口径冻死 / window / B-harness(pass@1 5/6)· 承 RL 三部曲 §③④ 下游",
+        },
+    ),
 }
 
 templates = Jinja2Templates(directory=str(DASHBOARD_ROOT / "templates"))

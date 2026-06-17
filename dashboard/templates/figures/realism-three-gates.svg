@@ -1,0 +1,81 @@
+<svg viewBox="0 0 820 408" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="真实性闸:三层闸从硬到软 + 真实性≠自然度">
+  <style>
+    .rg-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .rg-h { font-size: 11.5px; fill: #1D1D1F; font-weight: 600; }
+    .rg-d { font-size: 9.5px; fill: #6E6E73; }
+    .rg-m { font-size: 11px; fill: #86868B; font-weight: 600; }
+    .rg-arrow { stroke: #5E5CE6; stroke-width: 1.6; fill: none; marker-end: url(#rg-head); }
+  </style>
+  <defs>
+    <marker id="rg-head" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M1,1 L8,4.5 L1,8" stroke="#5E5CE6" stroke-width="1.5" fill="none"/>
+    </marker>
+  </defs>
+  <g class="rg-t">
+    <text x="20" y="22" class="rg-m">笛卡尔积保证「有可信答案」却不挑题 —— 一大半合法但荒谬;三层闸从硬到软,尽量生成时就挡掉</text>
+
+    <!-- Box 1: 笛卡尔积 -->
+    <rect x="20" y="34" width="148" height="158" rx="10" fill="rgba(255,59,48,0.05)" stroke="rgba(255,59,48,0.38)"/>
+    <text x="34" y="55" class="rg-h" fill="#C2403B">笛卡尔积</text>
+    <text x="34" y="73" class="rg-d">股票×指标×窗口×算子</text>
+    <text x="34" y="95" class="rg-d" fill="#C2403B">含大量荒谬:</text>
+    <text x="34" y="112" class="rg-d">· ST股 × 茅台 相关</text>
+    <text x="34" y="128" class="rg-d">· CAGR × 20 天</text>
+    <text x="34" y="144" class="rg-d">· 白酒 × 光伏 相关</text>
+    <text x="34" y="160" class="rg-d">· 上市3月 × 近5年</text>
+    <text x="34" y="180" class="rg-d" font-style="italic">不筛 → 污染 pass@k</text>
+
+    <!-- Box 2: 闸① -->
+    <rect x="178" y="34" width="148" height="158" rx="10" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.32)"/>
+    <text x="192" y="55" class="rg-h" fill="#4845C2">闸① 生成约束</text>
+    <text x="192" y="71" class="rg-d" font-style="italic">硬规则 · 挡在出生前</text>
+    <text x="192" y="93" class="rg-d">· 指标×窗口合法矩阵</text>
+    <text x="192" y="109" class="rg-d">(CAGR只配≥2年…)</text>
+    <text x="192" y="125" class="rg-d">· 股票池(300/持仓)</text>
+    <text x="192" y="141" class="rg-d">· 数据可得 ≥ 窗口</text>
+    <text x="192" y="157" class="rg-d">· 相关只在同组配</text>
+    <text x="192" y="180" class="rg-d" fill="#C2403B">− 砍掉绝大多数荒谬</text>
+
+    <!-- Box 3: 闸② -->
+    <rect x="336" y="34" width="148" height="158" rx="10" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.32)"/>
+    <text x="350" y="55" class="rg-h" fill="#4845C2">闸② 意图锚定</text>
+    <text x="350" y="71" class="rg-d" font-style="italic">换出发点 · 主闸</text>
+    <text x="350" y="93" class="rg-d">从真实用户 job 出:</text>
+    <text x="350" y="109" class="rg-d">尽调/体检/风险/配对</text>
+    <text x="350" y="125" class="rg-d">每题 = 一个真实 job</text>
+    <text x="350" y="148" class="rg-d" fill="#1B7A33">→ 真实性「天生」就有</text>
+    <text x="350" y="180" class="rg-d" font-style="italic">需求侧,非供给侧</text>
+
+    <!-- Box 4: 闸③ -->
+    <rect x="494" y="34" width="148" height="158" rx="10" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.32)"/>
+    <text x="508" y="55" class="rg-h" fill="#4845C2">闸③ 事后软筛</text>
+    <text x="508" y="71" class="rg-d" font-style="italic">兜残余</text>
+    <text x="508" y="93" class="rg-d">· 强模型真实性裁判</text>
+    <text x="508" y="109" class="rg-d">「真人会问吗 1-5」</text>
+    <text x="508" y="125" class="rg-d">· 真实流量分布对齐</text>
+    <text x="508" y="141" class="rg-d">(按频率加权)</text>
+    <text x="508" y="180" class="rg-d" font-style="italic">流量是金标准</text>
+
+    <!-- Box 5: 真实题 -->
+    <rect x="652" y="34" width="148" height="158" rx="10" fill="rgba(52,199,89,0.07)" stroke="rgba(52,199,89,0.42)"/>
+    <text x="666" y="55" class="rg-h" fill="#1B7A33">真实题</text>
+    <text x="666" y="73" class="rg-d">有人会问</text>
+    <text x="666" y="99" class="rg-d">→ 喂下游难度闸</text>
+    <text x="666" y="115" class="rg-d">→ 再铺满难度谱</text>
+    <text x="666" y="141" class="rg-d">→ 既真实又中高难</text>
+    <text x="666" y="157" class="rg-d" font-weight="600" fill="#1B7A33">= RL 金矿</text>
+
+    <path d="M168,113 L176,113" class="rg-arrow"/>
+    <path d="M326,113 L334,113" class="rg-arrow"/>
+    <path d="M484,113 L492,113" class="rg-arrow"/>
+    <path d="M642,113 L650,113" class="rg-arrow"/>
+
+    <!-- 真实性 ≠ 自然度 -->
+    <rect x="20" y="208" width="780" height="74" rx="10" fill="rgba(0,199,190,0.06)" stroke="rgba(0,199,190,0.38)"/>
+    <text x="36" y="231" class="rg-h" fill="#0A8A84">真实性 ≠ 自然度(两层别混,叠在不同位置)</text>
+    <text x="36" y="252" class="rg-d" font-size="10">意图(上游 · 本闸:有没有人问)→ 组合形状 → 措辞(下游 · retail-investor-voice:像不像人话)→ 反抽校验(守 gold,RL §④)</text>
+    <text x="36" y="270" class="rg-d" font-size="10">措辞再自然,「ST股 × 茅台 相关性」也是没人问的题 —— 自然度挡不住「意图层就荒谬」的题</text>
+
+    <text x="20" y="304" class="rg-d" font-style="italic">闸自己也要验:人工抽检 50 道「像不像真人会问」+(有日志时)跟真实 query 做覆盖比对,别凭空造需求。</text>
+  </g>
+</svg>

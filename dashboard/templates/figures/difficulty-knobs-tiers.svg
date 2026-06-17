@@ -1,0 +1,87 @@
+<svg viewBox="0 0 820 452" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="难度闸:5 个结构旋钮分档 + pass@k 双标定">
+  <style>
+    .dk-t { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+    .dk-h { font-size: 12px; fill: #1D1D1F; font-weight: 600; }
+    .dk-d { font-size: 10px; fill: #6E6E73; }
+    .dk-m { font-size: 11px; fill: #86868B; font-weight: 600; }
+    .dk-arrow { stroke: #5E5CE6; stroke-width: 1.6; fill: none; marker-end: url(#dk-head); }
+  </style>
+  <defs>
+    <marker id="dk-head" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M1,1 L8,4.5 L1,8" stroke="#5E5CE6" stroke-width="1.5" fill="none"/>
+    </marker>
+  </defs>
+  <g class="dk-t">
+    <text x="40" y="22" class="dk-m">难度不在数学(oracle 秒算),在 agent 的活链 —— 靠题型模板的 5 个旋钮分档,拧得越多越难</text>
+
+    <!-- 5 旋钮 -->
+    <rect x="40" y="34" width="138" height="64" rx="9" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.30)"/>
+    <text x="53" y="53" class="dk-h" font-size="11.5">① 链长</text>
+    <text x="53" y="71" class="dk-d">几股×几指标×几窗口</text>
+    <text x="53" y="88" class="dk-d" fill="#4845C2">→ 取数/算步数翻倍</text>
+
+    <rect x="186" y="34" width="138" height="64" rx="9" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.30)"/>
+    <text x="199" y="53" class="dk-h" font-size="11.5">② 组合算子</text>
+    <text x="199" y="71" class="dk-d">排序/筛选/聚合/对比</text>
+    <text x="199" y="88" class="dk-d" fill="#4845C2">→ 多套一层逻辑</text>
+
+    <rect x="332" y="34" width="138" height="64" rx="9" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.30)"/>
+    <text x="345" y="53" class="dk-h" font-size="11.5">③ 数据规模</text>
+    <text x="345" y="71" class="dk-d">多股 × 多年</text>
+    <text x="345" y="88" class="dk-d" fill="#4845C2">→ 撑爆上下文/翻页</text>
+
+    <rect x="478" y="34" width="138" height="64" rx="9" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.30)"/>
+    <text x="491" y="53" class="dk-h" font-size="11.5">④ 日期弯绕</text>
+    <text x="491" y="71" class="dk-d">上季度/财报前后</text>
+    <text x="491" y="88" class="dk-d" fill="#4845C2">→ 窗口要推算</text>
+
+    <rect x="624" y="34" width="138" height="64" rx="9" fill="rgba(94,92,230,0.06)" stroke="rgba(94,92,230,0.30)"/>
+    <text x="637" y="53" class="dk-h" font-size="11.5">⑤ 干扰歧义</text>
+    <text x="637" y="71" class="dk-d">无关信息/股名</text>
+    <text x="637" y="88" class="dk-d" fill="#4845C2">→ 要先消歧</text>
+
+    <path d="M401,100 L401,118" class="dk-arrow"/>
+    <text x="412" y="114" class="dk-d">拧几个 → 哪一档</text>
+
+    <!-- 三档 -->
+    <rect x="40" y="124" width="233" height="118" rx="10" fill="rgba(52,199,89,0.06)" stroke="rgba(52,199,89,0.40)"/>
+    <text x="56" y="146" class="dk-h" fill="#1B7A33">简单 · 拧 0 个旋钮</text>
+    <text x="56" y="166" class="dk-d">~3 步 · agent ≈ 90%+</text>
+    <text x="56" y="186" class="dk-d">例:茅台近一年涨多少?</text>
+    <text x="56" y="210" class="dk-d" font-weight="600" fill="#1D1D1F">gold = 一个数</text>
+    <text x="56" y="228" class="dk-d">判:|答 − gold| &lt; 容差</text>
+
+    <rect x="293" y="124" width="233" height="118" rx="10" fill="rgba(255,159,10,0.08)" stroke="rgba(255,159,10,0.45)"/>
+    <text x="309" y="146" class="dk-h" fill="#B26B00">中等 · 拧 1 个旋钮</text>
+    <text x="309" y="166" class="dk-d">~6-10 步 · ≈ 50-80%</text>
+    <text x="309" y="186" class="dk-d">例:茅台×五粮液相关性</text>
+    <text x="309" y="200" class="dk-d">(= 2 股 + 对齐)</text>
+    <text x="309" y="222" class="dk-d" font-weight="600" fill="#1D1D1F">gold = 数 / 排名</text>
+
+    <rect x="546" y="124" width="233" height="118" rx="10" fill="rgba(255,59,48,0.05)" stroke="rgba(255,59,48,0.40)"/>
+    <text x="562" y="146" class="dk-h" fill="#C2403B">复杂 · 拧 2-3 个旋钮</text>
+    <text x="562" y="166" class="dk-d">~15-30 步 · ≈ 20-50%</text>
+    <text x="562" y="186" class="dk-d">例:4 只里涨幅&gt;0 且回撤&lt;20%</text>
+    <text x="562" y="200" class="dk-d">(= 4 股×2 指标 + 筛选)</text>
+    <text x="562" y="222" class="dk-d" font-weight="600" fill="#1D1D1F">gold = 集合(可能空集)</text>
+
+    <!-- 双标定 + 断崖 -->
+    <rect x="40" y="262" width="739" height="106" rx="10" fill="rgba(94,92,230,0.05)" stroke="rgba(94,92,230,0.30)"/>
+    <text x="56" y="285" class="dk-h" fill="#4845C2">双标定:结构复杂度只是先验猜测,真实 pass@k 才是这只 agent 的真难度</text>
+    <text x="56" y="307" class="dk-d">先验:按旋钮分档出题(还要设配额,如 40% 简单 / 40% 中等 / 20% 复杂,别让题挤在简单档)</text>
+    <text x="56" y="325" class="dk-d">后验:跑 B-harness 拿每档真实 pass@k → 用实测重贴「真难度」标签,照出战力断崖</text>
+    <text x="56" y="349" class="dk-d" font-weight="600" fill="#C2403B">断崖:正确率从 90% → 50% → 20% 的那个档,就是 RL 的黄金打击带(太易没信号、太难没梯度)</text>
+
+    <!-- 迷你 pass@k 柱 -->
+    <rect x="624" y="282" width="22" height="46" rx="2" fill="rgba(52,199,89,0.55)"/>
+    <rect x="660" y="296" width="22" height="32" rx="2" fill="rgba(255,159,10,0.6)"/>
+    <rect x="696" y="312" width="22" height="16" rx="2" fill="rgba(255,59,48,0.55)"/>
+    <text x="635" y="340" class="dk-d" text-anchor="middle" font-size="9">简</text>
+    <text x="671" y="340" class="dk-d" text-anchor="middle" font-size="9">中</text>
+    <text x="707" y="340" class="dk-d" text-anchor="middle" font-size="9">复</text>
+    <text x="730" y="300" class="dk-d" font-size="9">pass@k</text>
+    <text x="730" y="313" class="dk-d" font-size="9">↓ 断崖</text>
+
+    <text x="40" y="392" class="dk-d" font-style="italic">同一台 oracle 套不同复杂度模板就出不同难度的题 —— 难度是「给 agent 的活链」设计的,不是给 oracle 的。</text>
+  </g>
+</svg>
