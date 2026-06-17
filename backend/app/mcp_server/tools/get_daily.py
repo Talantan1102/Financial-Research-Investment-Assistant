@@ -33,10 +33,6 @@ TOOL_DEF = Tool(
     },
 )
 
-# 单次返回的最大行数(防时间序列过长撑爆上下文;超出取最近 N 个交易日)。
-_MAX_ROWS = 260
-
-
 def _round_list(series: Any, ndigits: int = 2) -> list:
     out = []
     for v in series:
@@ -47,16 +43,35 @@ def _round_list(series: Any, ndigits: int = 2) -> list:
     return out
 
 
+def _summary(df: Any, ts_code: str) -> dict[str, Any]:
+    """从**完整** df 现算紧凑信息卡;超大截断后由 ToolLoop 保留(见 spec § 4.1/4.2)。
+
+    去 cap 后长区间真取全量,完整序列过大会被换出上下文——这张卡是 agent 留在
+    上下文里能核对范围/直接答简单问题的依据,体积小、廉价。
+    """
+    dates = [str(d) for d in df["trade_date"].tolist()]
+    close = df["close"]
+    return {
+        "ts_code": ts_code,
+        "count": int(len(df)),
+        "date_start": dates[0],
+        "date_end": dates[-1],
+        "first_close": round(float(close.iloc[0]), 2),
+        "last_close": round(float(close.iloc[-1]), 2),
+        "period_high": round(float(df["high"].max()), 2),
+        "period_low": round(float(df["low"].min()), 2),
+    }
+
+
 def _format_daily(df: Any, ts_code: str) -> dict[str, Any]:
     """DataFrame → 列式紧凑 dict(纯函数,可单测,不碰网络/LLM)。"""
     if df is None or getattr(df, "empty", True):
         return {"ts_code": ts_code, "count": 0, "dates": []}
     df = df.sort_values("trade_date")
-    if len(df) > _MAX_ROWS:
-        df = df.tail(_MAX_ROWS)
     out: dict[str, Any] = {
         "ts_code": ts_code,
         "count": int(len(df)),
+        "summary": _summary(df, ts_code),
         "dates": [str(d) for d in df["trade_date"].tolist()],
         "open": _round_list(df["open"]),
         "high": _round_list(df["high"]),
