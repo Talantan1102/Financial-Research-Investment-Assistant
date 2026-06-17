@@ -61,6 +61,7 @@ async def test_oversize_with_ref_is_truncated() -> None:
     assert isinstance(out, dict)
     assert out["ref"] == "u:query_kb:abc"
     assert "truncated_digest" in out and "read_cached_result" in out["note"]
+    assert "data_refs" in out["note"]  # 计算优先走 data_refs(大数据一次灌沙箱,不分页耗预算)
     assert out["original_chars"] > 200
     assert "chunks" not in out  # 原文已换出
 

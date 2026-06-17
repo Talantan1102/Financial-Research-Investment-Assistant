@@ -321,7 +321,11 @@ class ToolLoop:
         r.output.update(
             {
                 "truncated_digest": serialized[:600],
-                "note": "结果过大已截断,完整内容见 ref,需要更多可调 read_cached_result 取回",
+                "note": (
+                    "结果过大已截断,完整数据已缓存(见 ref)。要对它做计算,"
+                    "用 run_python 传 data_refs={变量名: 上面的 ref} 把完整数据一次灌进沙箱算全量——"
+                    "别用 read_cached_result 分页翻取(大数据翻页会耗尽预算);只想看少量原文才用 read_cached_result。"
+                ),
                 "ref": cache_key,
                 "original_chars": len(serialized),
             }
