@@ -169,3 +169,14 @@ def test_position_market_value():
 
 def test_position_pnl():
     assert operators.position_pnl(100, 50.0, 40.0) == 1000.0
+
+
+def test_portfolio_weights_and_hhi():
+    import pytest
+
+    w = operators.portfolio_weights([10000.0, 20000.0, 30000.0])
+    assert abs(sum(w) - 1.0) < 1e-9
+    assert abs(w[0] - 1 / 6) < 1e-9
+    assert abs(operators.portfolio_hhi(w) - (1 + 4 + 9) / 36) < 1e-9
+    with pytest.raises(ValueError):
+        operators.portfolio_weights([0.0, 0.0])
