@@ -42,7 +42,7 @@ async def run_passk(
     k: int = 1,
     concurrency: int = 6,
     as_of: str = "20260612",  # 钉到已落定交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
-    max_steps: int = 18,  # get_daily 去 cap 后长窗口一次取全,18 步够用(治标的 26 已回退)
+    max_steps: int = 28,  # 放宽:让 5 股排序/筛选这类重活有余量,把"预算天花板"从能力测量里剥掉(生产仍 12)
     answers_path: Path | None = None,
 ) -> dict[str, Any]:
     """跑 cases × k,返回 {pass1, by_bucket, per_case};answers_path 给则落盘答案供离线重判。"""

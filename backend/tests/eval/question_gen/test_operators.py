@@ -11,8 +11,13 @@ from eval.question_gen.operators import (
 
 
 def _stock(close=None, dates=None, pct_chg=None):
+    close = close or []
+    if pct_chg is None and len(close) >= 2:
+        # 涨幅/回撤/CAGR 现走复权路径(pct_chg 累乘);非拆股数据从 close 反推 pct_chg,
+        # 累乘回去是同一条路径 → 预期值不变。首根置 0(adjusted_path 跳过)。
+        pct_chg = [0.0] + [(close[i] / close[i - 1] - 1.0) * 100.0 for i in range(1, len(close))]
     return {
-        "close": close or [],
+        "close": close,
         "dates": dates or [],
         "pct_chg": pct_chg or [],
     }
@@ -44,6 +49,22 @@ def test_single_cagr():
 def test_single_unknown_raises():
     with pytest.raises(ValueError):
         single("夏普", _stock(close=[100.0, 110.0]))
+
+
+def test_single_return_split_immune():
+    # 拆股(1拆2)那天 raw close 腰斩(110->55)但非真跌;复权口径用 pct_chg 累乘剔除假跳变。
+    raw_close = [100.0, 110.0, 55.0, 60.5]  # 第3天 1拆2
+    pct = [0.0, 10.0, 0.0, 10.0]  # 拆股日涨跌幅 0%
+    s = _stock(close=raw_close, pct_chg=pct)
+    # 复权:涨10% → 拆股 → 涨10% = +21%(不是 raw 比值的 -39.5%)
+    assert single("涨幅", s) == pytest.approx(0.21)
+    assert raw_close[-1] / raw_close[0] - 1 == pytest.approx(-0.395)  # 对照:raw 会误算成暴跌
+
+
+def test_single_drawdown_split_immune():
+    # 同样拆股序列:复权回撤为 0(全程上涨),raw close 会误报 50% 回撤(拆股当假跌)
+    s = _stock(close=[100.0, 110.0, 55.0, 60.5], pct_chg=[0.0, 10.0, 0.0, 10.0])
+    assert single("回撤", s) == pytest.approx(0.0)
 
 
 # ---- rank_by ----

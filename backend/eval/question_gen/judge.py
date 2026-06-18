@@ -31,13 +31,18 @@ def nums(text: str) -> list[float]:
 def hit_scalar(text: str, gold: float, tol: dict) -> bool:
     """text 里是否有任一数命中 gold(按绝对值语义)。
 
-    tol = {"kind": "rel"|"abs", "value": float}
+    tol = {"kind": "rel"|"abs"|"rel_mult", "value": float}
       abs: abs(abs(n) - abs(gold)) <= tol.value
       rel: abs(abs(n) - abs(gold)) <= tol.value * abs(gold)
+      rel_mult: 比"价格变成几倍"(1+涨幅/100)的相对误差 —— 接近零的涨幅/CAGR 不被放大。
+               signed 比较(方向算数);等价于 abs(n - gold) <= value * abs(100 + gold)。
     任一 n 命中即 True。
     """
     kind = tol["kind"]
     value = tol["value"]
+    if kind == "rel_mult":
+        gm = 1.0 + gold / 100.0
+        return any(abs((1.0 + n / 100.0) - gm) <= value * abs(gm) for n in nums(text))
     target = abs(gold)
     threshold = value if kind == "abs" else value * target
     return any(abs(abs(n) - target) <= threshold for n in nums(text))
