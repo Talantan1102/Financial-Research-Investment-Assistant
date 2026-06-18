@@ -43,6 +43,7 @@ async def run_passk(
     concurrency: int = 6,
     as_of: str = "20260612",  # 钉到已落定交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
     max_steps: int = 28,  # 放宽:让 5 股排序/筛选这类重活有余量,把"预算天花板"从能力测量里剥掉(生产仍 12)
+    model: str | None = None,
     answers_path: Path | None = None,
 ) -> dict[str, Any]:
     """跑 cases × k,返回 {pass1, by_bucket, per_case};answers_path 给则落盘答案供离线重判。"""
@@ -92,6 +93,7 @@ async def run_passk(
                             tool_hub=build_real_hub(singletons),
                             context_deps=deps,
                             gate_cfg=GateConfig(max_steps=max_steps),
+                            model=model,
                         )
                         final = await toolloop.run(state)
                         answer = final.final_response or ChatLoopAgent._last_assistant_content(
@@ -120,7 +122,7 @@ async def run_passk(
         await engine.dispose()
 
     if answers_path is not None:
-        _dump_answers(cases, per_run, answers, answers_path)
+        _dump_answers(cases, per_run, answers, answers_path, model)
     return _aggregate(cases, per_run)
 
 
@@ -144,13 +146,43 @@ def _aggregate(cases: list[case.ComputationCase], per_run: dict[str, list[bool]]
     }
 
 
+def _compare_table(per_model: dict[str, dict]) -> dict:
+    """{model: run_passk 结果} → {models, buckets, rows{model: {总分, 各桶 rate}}}。"""
+    buckets = sorted({b for r in per_model.values() for b in r["by_bucket"]})
+    rows: dict[str, dict] = {}
+    for m, r in per_model.items():
+        row: dict[str, float | None] = {"总分": r["pass_at_k"]["rate"]}
+        for b in buckets:
+            row[b] = r["by_bucket"].get(b, {}).get("rate")
+        rows[m] = row
+    return {"models": list(per_model), "buckets": buckets, "rows": rows}
+
+
+async def run_compare(
+    cases: list[case.ComputationCase],
+    models: list[str],
+    *,
+    k: int = 1,
+    concurrency: int = 5,
+    as_of: str = "20260612",
+) -> dict:
+    """对每个 model 跑一遍 run_passk,汇成"模型×桶"对比表。"""
+    per_model: dict[str, dict] = {}
+    for m in models:
+        per_model[m] = await run_passk(
+            cases, k=k, concurrency=concurrency, as_of=as_of, model=m
+        )
+    return _compare_table(per_model)
+
+
 def _dump_answers(
     cases: list[case.ComputationCase],
     per_run: dict[str, list[bool]],
     answers: dict[str, str],
     path: Path,
+    model: str | None = None,
 ) -> None:
-    """落盘 {case_id, difficulty, indicator, gold_shape, gold, passed, answer} 供离线重判。"""
+    """落盘 {case_id, difficulty, indicator, gold_shape, gold, passed, answer, model} 供离线重判。"""
     by_id = {c.case_id: c for c in cases}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -164,6 +196,7 @@ def _dump_answers(
                 "gold": c.gold,
                 "passed": any(runs),
                 "answer": answers.get(cid, ""),
+                "model": model,
             }
             f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
 
@@ -177,6 +210,23 @@ async def _main(jsonl: Path, k: int, concurrency: int) -> None:
         print(f"  {bucket:24s} {v['pass']}/{v['total']}  ({v['rate']})")
 
 
+async def _main_compare(jsonl: Path, k: int, concurrency: int, models: list[str]) -> None:
+    cases = case.load_jsonl(jsonl)
+    t = await run_compare(cases, models, k=k, concurrency=concurrency)
+    buckets = t["buckets"]
+    # 表头
+    header = f"{'模型':<20s}  {'总分':>6s}" + "".join(f"  {b:>14s}" for b in buckets)
+    print(header)
+    print("-" * len(header))
+    for m in t["models"]:
+        row = t["rows"][m]
+        cols = f"{m:<20s}  {row['总分']:>6.3f}"
+        for b in buckets:
+            v = row[b]
+            cols += f"  {v:>14.3f}" if v is not None else f"  {'N/A':>14s}"
+        print(cols)
+
+
 if __name__ == "__main__":
     import sys
 
@@ -187,4 +237,10 @@ if __name__ == "__main__":
     )
     _k = int(sys.argv[2]) if len(sys.argv) > 2 else 1
     _conc = int(sys.argv[3]) if len(sys.argv) > 3 else 6
-    asyncio.run(_main(_path, _k, _conc))
+
+    if "--compare" in sys.argv:
+        _idx = sys.argv.index("--compare")
+        _models = sys.argv[_idx + 1].split(",")
+        asyncio.run(_main_compare(_path, _k, _conc, _models))
+    else:
+        asyncio.run(_main(_path, _k, _conc))
