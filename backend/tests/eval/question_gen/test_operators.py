@@ -161,3 +161,11 @@ def test_financial_lookup_none_and_unknown():
     assert operators.financial_lookup("营收", {"revenue": nan}) is None
     with pytest.raises(ValueError):
         operators.financial_lookup("未知", {})
+
+
+def test_position_market_value():
+    assert operators.position_market_value(100, 50.0) == 5000.0
+
+
+def test_position_pnl():
+    assert operators.position_pnl(100, 50.0, 40.0) == 1000.0

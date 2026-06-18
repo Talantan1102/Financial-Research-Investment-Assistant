@@ -80,10 +80,26 @@ def q_financial(name: str, indicator: str, period_label: str) -> str:
     raise ValueError(f"未知财报指标:{indicator!r}")
 
 
+INTENT_POSITION = "position_calc"
+
+
+def q_position_value(name: str, qty: int, trade_date: str) -> str:
+    """单仓市值题面。"""
+    d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
+    return f"某账户持有{name}{qty}股,以{d}的收盘价计算,这笔持仓的市值是多少元?"
+
+
+def q_position_pnl(name: str, qty: int, cost: float, trade_date: str) -> str:
+    """单仓浮动盈亏题面。"""
+    d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
+    return f"某账户持有{name}{qty}股、成本价{cost}元/股,以{d}的收盘价计算,这笔持仓的浮动盈亏是多少元?"
+
+
 __all__ = [
     "INTENT",
     "INTENT_SNAPSHOT",
     "INTENT_FINANCIAL",
+    "INTENT_POSITION",
     "q_single",
     "q_dual",
     "q_corr",
@@ -91,4 +107,6 @@ __all__ = [
     "q_filter",
     "q_snapshot",
     "q_financial",
+    "q_position_value",
+    "q_position_pnl",
 ]

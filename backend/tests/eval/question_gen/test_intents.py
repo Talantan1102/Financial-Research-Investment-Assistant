@@ -122,3 +122,12 @@ def test_q_financial_unknown_raises():
 
     with pytest.raises(ValueError):
         intents.q_financial("贵州茅台", "未知", "2024年年报")
+
+
+def test_q_position_value_and_pnl():
+    from eval.question_gen import intents
+
+    qv = intents.q_position_value("贵州茅台", 100, "20260612")
+    assert "贵州茅台" in qv and "100股" in qv and "市值" in qv
+    qp = intents.q_position_pnl("贵州茅台", 100, 85.0, "20260612")
+    assert "成本价" in qp and "浮动盈亏" in qp
