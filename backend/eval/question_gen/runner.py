@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import sys
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -113,11 +114,23 @@ async def run_passk(
                         return (c.case_id, False, "")
 
             tasks = [run_one(c, i) for c in cases for i in range(k)]
-            for fut in asyncio.as_completed(tasks):
+            total = len(tasks)
+            n_pass = 0
+            tag = model or "default"
+            is_tty = sys.stderr.isatty()
+            for done, fut in enumerate(asyncio.as_completed(tasks), start=1):
                 cid, ok, ans = await fut
                 per_run[cid].append(ok)
                 if ans:
                     answers[cid] = ans
+                n_pass += int(ok)
+                # 进度:终端用 \r 实时刷新;非终端(写日志)每 10 题一行,带模型名区分对比跑
+                if is_tty:
+                    print(f"\r[{tag}] {done}/{total} 通过 {n_pass}", end="", file=sys.stderr, flush=True)
+                elif done % 10 == 0 or done == total:
+                    print(f"[{tag}] 进度 {done}/{total} 通过 {n_pass}", file=sys.stderr, flush=True)
+            if is_tty:
+                print("", file=sys.stderr)
     finally:
         await engine.dispose()
 
