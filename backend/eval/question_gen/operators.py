@@ -18,6 +18,14 @@ _DRAWDOWN_NAMES = {"回撤"}
 _VOL_NAMES = {"波动"}
 _CAGR_NAMES = {"CAGR", "cagr"}
 
+# 行情快照指标 -> daily_basic 列名(直取,非计算)。换手率/股息率 tushare 已是百分数,不再 scale。
+_SNAPSHOT_COLUMNS: dict[str, str] = {
+    "PE": "pe",
+    "PB": "pb",
+    "换手率": "turnover_rate",
+    "股息率": "dv_ratio",
+}
+
 
 def single(indicator: str, data: dict, *, years: float = 1.0) -> float:
     """单股单指标派发到 oracle。
@@ -79,4 +87,15 @@ def _satisfies(value: float, op: str, threshold: float) -> bool:
     raise ValueError(f"未知比较符:{op!r}")
 
 
-__all__ = ["single", "correlation_pair", "rank_by", "filter_by"]
+def snapshot_lookup(indicator: str, snap: dict) -> float:
+    """行情快照取数:指标名 -> 直取 daily_basic 字段值。未知指标 raise ValueError。
+
+    snap 形状: {"pe": float, "pb": float, "turnover_rate": float, "dv_ratio": float}。
+    """
+    col = _SNAPSHOT_COLUMNS.get(indicator)
+    if col is None:
+        raise ValueError(f"未知快照指标:{indicator!r}")
+    return float(snap[col])
+
+
+__all__ = ["single", "correlation_pair", "rank_by", "filter_by", "snapshot_lookup"]
