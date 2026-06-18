@@ -18,6 +18,7 @@ Why not in app.services strict tier?
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
@@ -31,6 +32,54 @@ from app.services.tier_router import V0_DEFAULT_MODEL  # C45: SSOT for default m
 
 if TYPE_CHECKING:
     from app.services.trace_service import TraceService
+
+
+# ---------------------------------------------------------------------------
+# 模型无关兼容垫片(承 2026-06-18 排查:非 deepseek 模型在 chatloop 里栽在 dashscope
+# 的模型专属要求上)。两道 qwen3 专属坑(live 实测):
+#   ① qwen3 是思考模型 → 不传 enable_thinking=false 直接 400;
+#   ② tool_call 的 function.arguments 必须是合法 JSON(deepseek 容空串,qwen3 严)。
+# 这俩对非 qwen3 模型无害(extra_body 仅 qwen3 传;args 合法化对所有模型安全)。
+# ---------------------------------------------------------------------------
+
+
+def _extra_body_for(model: str) -> dict[str, Any]:
+    """qwen3 思考模型需显式关思考;非 qwen3 不传(避免传它们不认的参数)。"""
+    if model.startswith("qwen3"):
+        return {"enable_thinking": False}
+    return {}
+
+
+def _valid_json_args(s: Any) -> bool:
+    if not isinstance(s, str) or not s.strip():
+        return False
+    try:
+        json.loads(s)
+    except (ValueError, TypeError):
+        return False
+    return True
+
+
+def _sanitize_tool_args(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把 assistant tool_call 的 arguments 兜底成合法 JSON(空/坏 → "{}");其余消息原样。
+
+    严格模型(qwen3)要求 function.arguments 合法 JSON;把空/坏 arguments 原样回灌请求会 400。
+    """
+    out: list[dict[str, Any]] = []
+    for m in messages:
+        tcs = m.get("tool_calls")
+        if not tcs:
+            out.append(m)
+            continue
+        new_tcs = []
+        for tc in tcs:
+            fn = tc.get("function") or {}
+            if _valid_json_args(fn.get("arguments")):
+                new_tcs.append(tc)
+            else:
+                new_tcs.append({**tc, "function": {**fn, "arguments": "{}"}})
+        out.append({**m, "tool_calls": new_tcs})
+    return out
 
 
 class _Raw:
@@ -183,15 +232,19 @@ class _OpenAIAdapter:
         # schema=None → 纯文本调用(如 chat-title 异步生成);schema 非空 → JSON 模式。
         # DashScope 当 response_format=json_object 时要求 prompt 含 "json" 字,
         # 不该强加给纯文本任务。
-        common = {
-            "model": model or self._model,
+        model = model or self._model
+        common: dict[str, Any] = {
+            "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 8000,
         }
+        eb = _extra_body_for(model)
+        if eb:
+            common["extra_body"] = eb
         if schema is None:
-            r = self._client.chat.completions.create(**common)  # type: ignore[call-overload]
+            r = self._client.chat.completions.create(**common)
         else:
-            r = self._client.chat.completions.create(  # type: ignore[call-overload]
+            r = self._client.chat.completions.create(
                 **common,
                 response_format={"type": "json_object"},
             )
@@ -220,13 +273,17 @@ class _OpenAIAdapter:
                 "_OpenAIAdapter.stream_chat 需要 AsyncOpenAI 实例 "
                 "(build_llm_service_from_env 已配) — 直接构造 _OpenAIAdapter 时请传入 async_client"
             )
+        model = model or self._model
         kwargs: dict[str, Any] = {
-            "model": model or self._model,
-            "messages": messages,
+            "model": model,
+            "messages": _sanitize_tool_args(messages),
             "stream": True,
             "stream_options": {"include_usage": True},
             "max_tokens": 8000,
         }
+        eb = _extra_body_for(model)
+        if eb:
+            kwargs["extra_body"] = eb
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice
