@@ -95,11 +95,27 @@ def q_position_pnl(name: str, qty: int, cost: float, trade_date: str) -> str:
     return f"某账户持有{name}{qty}股、成本价{cost}元/股,以{d}的收盘价计算,这笔持仓的浮动盈亏是多少元?"
 
 
+INTENT_PORTFOLIO = "portfolio_calc"
+
+
+def q_portfolio_weight(basket_desc: str, target_name: str, trade_date: str) -> str:
+    """组合权重题面;basket_desc 形如 "贵州茅台100股、五粮液200股"。"""
+    d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
+    return f"某账户持有{basket_desc},以{d}的收盘价计算,{target_name}的持仓市值占整个组合的比例是百分之多少?"
+
+
+def q_portfolio_hhi(basket_desc: str, trade_date: str) -> str:
+    """组合 HHI 题面。"""
+    d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
+    return f"某账户持有{basket_desc},以{d}的收盘价计算,该组合的持仓集中度指数HHI(各持仓市值权重的平方和)是多少?"
+
+
 __all__ = [
     "INTENT",
     "INTENT_SNAPSHOT",
     "INTENT_FINANCIAL",
     "INTENT_POSITION",
+    "INTENT_PORTFOLIO",
     "q_single",
     "q_dual",
     "q_corr",
@@ -109,4 +125,6 @@ __all__ = [
     "q_financial",
     "q_position_value",
     "q_position_pnl",
+    "q_portfolio_weight",
+    "q_portfolio_hhi",
 ]

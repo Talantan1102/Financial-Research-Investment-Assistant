@@ -131,3 +131,12 @@ def test_q_position_value_and_pnl():
     assert "贵州茅台" in qv and "100股" in qv and "市值" in qv
     qp = intents.q_position_pnl("贵州茅台", 100, 85.0, "20260612")
     assert "成本价" in qp and "浮动盈亏" in qp
+
+
+def test_q_portfolio_weight_and_hhi():
+    from eval.question_gen import intents
+
+    qw = intents.q_portfolio_weight("贵州茅台100股、五粮液200股", "贵州茅台", "20260612")
+    assert "贵州茅台100股" in qw and "占" in qw and "百分之" in qw
+    qh = intents.q_portfolio_hhi("贵州茅台100股、五粮液200股", "20260612")
+    assert "HHI" in qh

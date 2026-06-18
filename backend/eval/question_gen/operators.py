@@ -137,6 +137,19 @@ def position_pnl(qty: float, close: float, cost: float) -> float:
     return float(qty) * (float(close) - float(cost))
 
 
+def portfolio_weights(market_values: list[float]) -> list[float]:
+    """各持仓市值 → 权重(占比,和为 1)。总市值 ≤0 raise ValueError。"""
+    total = sum(market_values)
+    if total <= 0:
+        raise ValueError("组合总市值须为正")
+    return [mv / total for mv in market_values]
+
+
+def portfolio_hhi(weights: list[float]) -> float:
+    """持仓集中度 HHI = Σ(w_i²)。"""
+    return sum(w * w for w in weights)
+
+
 __all__ = [
     "single",
     "correlation_pair",
@@ -146,4 +159,6 @@ __all__ = [
     "financial_lookup",
     "position_market_value",
     "position_pnl",
+    "portfolio_weights",
+    "portfolio_hhi",
 ]
