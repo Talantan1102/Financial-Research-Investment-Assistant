@@ -33,6 +33,7 @@ TOOL_DEF = Tool(
     },
 )
 
+
 def _round_list(series: Any, ndigits: int = 2) -> list:
     out = []
     for v in series:
