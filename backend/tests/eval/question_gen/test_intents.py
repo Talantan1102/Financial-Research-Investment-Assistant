@@ -105,3 +105,20 @@ def test_q_snapshot_unknown_indicator_raises():
 
     with pytest.raises(ValueError):
         intents.q_snapshot("贵州茅台", "未知", "20260612")
+
+
+def test_q_financial_ratio_and_amount():
+    from eval.question_gen import intents
+
+    q_roe = intents.q_financial("贵州茅台", "ROE", "2024年年报")
+    assert "贵州茅台" in q_roe and "2024年年报" in q_roe and "ROE" in q_roe
+    q_rev = intents.q_financial("贵州茅台", "营收", "2024年年报")
+    assert "营业收入" in q_rev and "亿元" in q_rev
+
+
+def test_q_financial_unknown_raises():
+    import pytest
+    from eval.question_gen import intents
+
+    with pytest.raises(ValueError):
+        intents.q_financial("贵州茅台", "未知", "2024年年报")
