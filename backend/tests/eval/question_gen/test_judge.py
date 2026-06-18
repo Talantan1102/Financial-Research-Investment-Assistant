@@ -110,3 +110,19 @@ def test_judge_set_single_selected():
     answer = "只有茅台满足条件"
     candidate = ["茅台", "五粮液"]
     assert judge(gold, "set", {"kind": "abs", "value": 0.0}, answer, candidate) is True
+
+
+# ---- judge: 快照 scalar(行情快照取数题) ----
+
+
+def test_judge_snapshot_pe_scalar():
+    # 快照 PE：gold=25.3，答案含 "25.3" 命中（rel 1%）
+    tol = {"kind": "rel", "value": 0.01}
+    assert judge(25.3, "scalar", tol, "茅台当日市盈率约为 25.3 倍", ["贵州茅台"]) is True
+    assert judge(25.3, "scalar", tol, "市盈率约 30 倍", ["贵州茅台"]) is False
+
+
+def test_judge_snapshot_dv_ratio_percent():
+    # 股息率：gold=2.0(%)，答案 "2.0%" 命中
+    tol = {"kind": "rel", "value": 0.02}
+    assert judge(2.0, "scalar", tol, "股息率约 2.0%", ["贵州茅台"]) is True
