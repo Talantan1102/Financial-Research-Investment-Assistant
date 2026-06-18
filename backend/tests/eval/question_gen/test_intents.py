@@ -140,3 +140,14 @@ def test_q_portfolio_weight_and_hhi():
     assert "贵州茅台100股" in qw and "占" in qw and "百分之" in qw
     qh = intents.q_portfolio_hhi("贵州茅台100股、五粮液200股", "20260612")
     assert "HHI" in qh
+
+
+def test_q_valuation():
+    from eval.question_gen import intents
+
+    q = intents.q_valuation("贵州茅台", "PE理论价", "白酒", "贵州茅台、五粮液", "2024年年报")
+    assert "贵州茅台" in q and "白酒" in q and "市盈率" in q and "理论价" in q
+    import pytest
+
+    with pytest.raises(ValueError):
+        intents.q_valuation("x", "未知", "白酒", "a、b", "2024年年报")
