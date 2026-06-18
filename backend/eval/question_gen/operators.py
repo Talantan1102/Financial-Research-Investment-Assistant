@@ -22,17 +22,23 @@ _CAGR_NAMES = {"CAGR", "cagr"}
 def single(indicator: str, data: dict, *, years: float = 1.0) -> float:
     """单股单指标派发到 oracle。
 
-    涨幅/回撤/CAGR 走复权价格路径(由 pct_chg 累乘,剔除拆股假跳变);
-    波动 -> annual_volatility(pct_chg);未知指标 raise ValueError。
+    涨幅 -> interval_return(close);回撤 -> max_drawdown(close);
+    波动 -> annual_volatility(pct_chg);CAGR -> cagr(close, years);
+    未知指标 raise ValueError。
+
+    口径备注:涨幅/回撤/CAGR 用**不复权收盘价比值**(= 价格回报,与 agent 自然算法一致)。
+    试过改 pct_chg 累乘的"复权路径"修拆股,但那是**含分红的总回报**,与价格回报差一个
+    股息率(工行实测 6.87pp),把所有分红股错开 → 已回退。拆股票(比亚迪等)在不复权下
+    回撤/涨幅会偏,作为已知基准限制(详见 pre-RL 基线文档)。
     """
     if indicator in _RETURN_NAMES:
-        return indicator_oracle.interval_return(indicator_oracle.adjusted_path(data["pct_chg"]))
+        return indicator_oracle.interval_return(data["close"])
     if indicator in _DRAWDOWN_NAMES:
-        return indicator_oracle.max_drawdown(indicator_oracle.adjusted_path(data["pct_chg"]))
+        return indicator_oracle.max_drawdown(data["close"])
     if indicator in _VOL_NAMES:
         return indicator_oracle.annual_volatility(data["pct_chg"])
     if indicator in _CAGR_NAMES:
-        return indicator_oracle.cagr(indicator_oracle.adjusted_path(data["pct_chg"]), years)
+        return indicator_oracle.cagr(data["close"], years)
     raise ValueError(f"未知指标:{indicator!r}")
 
 
