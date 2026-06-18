@@ -110,12 +110,30 @@ def q_portfolio_hhi(basket_desc: str, trade_date: str) -> str:
     return f"某账户持有{basket_desc},以{d}的收盘价计算,该组合的持仓集中度指数HHI(各持仓市值权重的平方和)是多少?"
 
 
+INTENT_VALUATION = "valuation_calc"
+
+_VALUATION_LABELS = {"PE理论价": ("市盈率", "每股收益"), "PB理论价": ("市净率", "每股净资产")}
+
+
+def q_valuation(name: str, indicator: str, sector: str, peer_names: str, period_label: str) -> str:
+    """估值算式题面;明示可比篮子(板块成员)。未知指标 raise ValueError。"""
+    spec = _VALUATION_LABELS.get(indicator)
+    if spec is None:
+        raise ValueError(f"未知估值指标:{indicator!r}")
+    mult, base = spec
+    return (
+        f"以{sector}板块({peer_names})的平均与中位{mult}为可比倍数,"
+        f"用{name}{period_label}的{base}反推,{name}的{mult}估值理论价是多少元/股?"
+    )
+
+
 __all__ = [
     "INTENT",
     "INTENT_SNAPSHOT",
     "INTENT_FINANCIAL",
     "INTENT_POSITION",
     "INTENT_PORTFOLIO",
+    "INTENT_VALUATION",
     "q_single",
     "q_dual",
     "q_corr",
@@ -127,4 +145,5 @@ __all__ = [
     "q_position_pnl",
     "q_portfolio_weight",
     "q_portfolio_hhi",
+    "q_valuation",
 ]
