@@ -168,6 +168,62 @@ async def build_financial_cases(tushare, as_of: str, period_end: str, period_lab
     return out
 
 
+_POSITION_TOL = {"kind": "rel", "value": 0.005}
+
+
+async def _fetch_close(tushare, ts_code: str, trade_date: str) -> float | None:
+    """取 daily_basic 某交易日收盘价;无/空 则 None。"""
+    df = await tushare.get_daily_basic(ts_code=ts_code, trade_date=trade_date)
+    if len(df) == 0 or "close" not in df.columns:
+        return None
+    val = df.iloc[0]["close"]
+    if val is None or (isinstance(val, float) and val != val):
+        return None
+    return float(val)
+
+
+async def build_position_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
+    """单仓持仓量(简单档):合成 qty/cost(确定性)+ 真收盘价。close 缺则跳过该股。"""
+    out: list[case.ComputationCase] = []
+    for i, st in enumerate(stock_pool.POOL):
+        close = await _fetch_close(tushare, st.ts_code, as_of)
+        if close is None:
+            continue
+        qty = 100 * (i + 1)
+        cost = round(close * 0.85, 2)
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"市值-{st.ts_code}"),
+                intent=intents.INTENT_POSITION,
+                difficulty="简单",
+                question=intents.q_position_value(st.name, qty, as_of),
+                stocks=[st.ts_code],
+                indicator="单仓市值",
+                window="snapshot",
+                gold=round(operators.position_market_value(qty, close), 2),
+                gold_shape="scalar",
+                tolerance=_POSITION_TOL,
+                meta={"trade_date": as_of, "qty": qty, "close": close},
+            )
+        )
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"浮盈-{st.ts_code}"),
+                intent=intents.INTENT_POSITION,
+                difficulty="简单",
+                question=intents.q_position_pnl(st.name, qty, cost, as_of),
+                stocks=[st.ts_code],
+                indicator="单仓浮盈",
+                window="snapshot",
+                gold=round(operators.position_pnl(qty, close, cost), 2),
+                gold_shape="scalar",
+                tolerance=_POSITION_TOL,
+                meta={"trade_date": as_of, "qty": qty, "cost": cost, "close": close},
+            )
+        )
+    return out
+
+
 async def generate(
     as_of: str = _AS_OF_DEFAULT, out_path: Path = _OUT_DEFAULT
 ) -> list[case.ComputationCase]:
@@ -262,6 +318,9 @@ async def generate(
 
     # ---- 财报取数(简单档,2024 年年报;用 as_of 查询确保已披露)----
     cases.extend(await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid))
+
+    # ---- 单仓持仓量(简单档)----
+    cases.extend(await build_position_cases(tushare, as_of, cid))
 
     # ---- 中等档 ----
     for st in stock_pool.POOL:
