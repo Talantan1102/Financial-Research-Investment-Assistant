@@ -32,6 +32,15 @@ _TOL_DUAL = {"kind": "rel", "value": 0.02}  # 双指标(回撤+波动)统一取�
 _WINDOW_YEARS = {"3m": 0.25, "1y": 1.0, "3y": 3.0}
 _PCT_INDICATORS = {"涨幅", "回撤", "波动", "CAGR"}  # gold ×100 存百分数
 
+_SNAPSHOT_INDICATORS = ("PE", "PB", "换手率", "股息率")
+_SNAPSHOT_TOL = {
+    "PE": {"kind": "rel", "value": 0.01},
+    "PB": {"kind": "rel", "value": 0.01},
+    "换手率": {"kind": "rel", "value": 0.02},
+    "股息率": {"kind": "rel", "value": 0.02},
+}
+_SNAPSHOT_COLS = ("pe", "pb", "turnover_rate", "dv_ratio")
+
 
 async def _resolve_window(as_of: str, code: str) -> tuple[str, str]:
     """调 trade_cal 的 window 动作把周期码解析成确定的 (start, end)。"""
@@ -58,6 +67,44 @@ async def _fetch(tushare, ts_code: str, start: str, end: str) -> dict:
 def _scale(indicator: str, value: float) -> float:
     """%-指标 ×100 存成百分数(与 agent 答法一致);相关不变。"""
     return value * 100.0 if indicator in _PCT_INDICATORS else value
+
+
+async def _fetch_snapshot(tushare, ts_code: str, trade_date: str) -> dict:
+    """取真 tushare daily_basic 的某交易日一行 → {pe, pb, turnover_rate, dv_ratio}。"""
+    df = await tushare.get_daily_basic(ts_code=ts_code, trade_date=trade_date)
+    if len(df) == 0:
+        raise RuntimeError(f"daily_basic 无数据:{ts_code} @ {trade_date}")
+    row = df.iloc[0]
+    return {col: float(row[col]) for col in _SNAPSHOT_COLS}
+
+
+async def build_snapshot_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
+    """行情快照取数(简单档,无窗口):每只股取 as_of 当日 daily_basic → 4 个直取指标。
+
+    tushare 依赖注入(可塞 stub 单测);cid 是 case_id 生成器 callable。
+    gold = 直取字段值(换手率/股息率 tushare 已是百分数,不 scale)。
+    """
+    out: list[case.ComputationCase] = []
+    for st in stock_pool.POOL:
+        snap = await _fetch_snapshot(tushare, st.ts_code, as_of)
+        for ind in _SNAPSHOT_INDICATORS:
+            gold = operators.snapshot_lookup(ind, snap)
+            out.append(
+                case.ComputationCase(
+                    case_id=cid(f"快照{ind}-{st.ts_code}"),
+                    intent=intents.INTENT_SNAPSHOT,
+                    difficulty="简单",
+                    question=intents.q_snapshot(st.name, ind, as_of),
+                    stocks=[st.ts_code],
+                    indicator=ind,
+                    window="snapshot",
+                    gold=gold,
+                    gold_shape="scalar",
+                    tolerance=_SNAPSHOT_TOL[ind],
+                    meta={"trade_date": as_of, "as_of": as_of},
+                )
+            )
+    return out
 
 
 async def generate(
@@ -148,6 +195,9 @@ async def generate(
                 meta=meta("3y"),
             )
         )
+
+    # ---- 行情快照取数(简单档,无窗口)----
+    cases.extend(await build_snapshot_cases(tushare, as_of, cid))
 
     # ---- 中等档 ----
     for st in stock_pool.POOL:
