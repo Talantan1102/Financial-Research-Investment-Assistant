@@ -84,6 +84,7 @@ class ToolLoop:
         steer_source: SteerSourceProtocol | None = None,
         cancel_event: asyncio.Event | None = None,
         tier: str = "balanced",
+        model: str | None = None,
         seq_counter: SeqCounter | None = None,
     ) -> None:
         self._llm = llm
@@ -94,6 +95,7 @@ class ToolLoop:
         self._steer = steer_source
         self._cancel = cancel_event
         self._tier = tier
+        self._model = model
         # 工具 schema 会话内恒定,turn 开始时取一次。
         self._schemas: list[dict[str, Any]] = tool_hub.schemas_for_llm()
         self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
@@ -181,6 +183,7 @@ class ToolLoop:
                 tools=self._schemas,
                 tool_choice=state.tool_choice,
                 tier=self._tier,
+                model=self._model,
                 request_id=state.request_id,
                 on_delta=self._make_on_delta(state.step + 1),
             )
@@ -433,6 +436,7 @@ class ToolLoop:
             tools=self._schemas,
             tool_choice="none",
             tier=self._tier,
+            model=self._model,
             request_id=state.request_id,
             on_delta=self._make_on_delta(state.step + 1),
         )
