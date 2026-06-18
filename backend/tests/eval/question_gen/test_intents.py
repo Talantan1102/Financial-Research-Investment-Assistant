@@ -88,3 +88,20 @@ def test_q_filter():
     assert "涨幅为正" in out
     assert "20%" in out
     assert "茅台、五粮液" in out
+
+
+def test_q_snapshot_renders_date_and_label():
+    from eval.question_gen import intents
+
+    q = intents.q_snapshot("贵州茅台", "PE", "20260612")
+    assert "贵州茅台" in q
+    assert "2026年06月12日" in q
+    assert "市盈率" in q
+
+
+def test_q_snapshot_unknown_indicator_raises():
+    import pytest
+    from eval.question_gen import intents
+
+    with pytest.raises(ValueError):
+        intents.q_snapshot("贵州茅台", "未知", "20260612")

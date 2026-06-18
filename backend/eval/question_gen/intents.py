@@ -9,6 +9,15 @@ from __future__ import annotations
 
 INTENT = "stock_study"
 
+INTENT_SNAPSHOT = "snapshot_quote"
+
+_SNAPSHOT_LABELS = {
+    "PE": "市盈率(PE)",
+    "PB": "市净率(PB)",
+    "换手率": "换手率",
+    "股息率": "股息率",
+}
+
 
 def q_single(indicator: str, name: str, window_cn: str) -> str:
     """单股单指标题面;未知 indicator raise ValueError。
@@ -48,4 +57,22 @@ def q_filter(names: list[str], window_cn: str) -> str:
     return f"{joined}这几只里,最近{window_cn}涨幅为正、且最大回撤小于20%的有哪几只?"
 
 
-__all__ = ["INTENT", "q_single", "q_dual", "q_corr", "q_rank", "q_filter"]
+def q_snapshot(name: str, indicator: str, trade_date: str) -> str:
+    """行情快照取数题面;trade_date 形如 "20260612" → "2026年06月12日"。未知指标 raise ValueError。"""
+    label = _SNAPSHOT_LABELS.get(indicator)
+    if label is None:
+        raise ValueError(f"未知快照指标:{indicator!r}")
+    d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
+    return f"{name}在{d}的{label}是多少?"
+
+
+__all__ = [
+    "INTENT",
+    "INTENT_SNAPSHOT",
+    "q_single",
+    "q_dual",
+    "q_corr",
+    "q_rank",
+    "q_filter",
+    "q_snapshot",
+]
