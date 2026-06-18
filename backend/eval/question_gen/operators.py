@@ -127,4 +127,23 @@ def financial_lookup(indicator: str, snap: dict) -> float | None:
     return val / 1e8 if unit == "yi" else val
 
 
-__all__ = ["single", "correlation_pair", "rank_by", "filter_by", "snapshot_lookup", "financial_lookup"]
+def position_market_value(qty: float, close: float) -> float:
+    """单仓市值 = 数量 × 收盘价。"""
+    return float(qty) * float(close)
+
+
+def position_pnl(qty: float, close: float, cost: float) -> float:
+    """单仓浮动盈亏 = 数量 × (收盘价 − 成本价)。"""
+    return float(qty) * (float(close) - float(cost))
+
+
+__all__ = [
+    "single",
+    "correlation_pair",
+    "rank_by",
+    "filter_by",
+    "snapshot_lookup",
+    "financial_lookup",
+    "position_market_value",
+    "position_pnl",
+]
