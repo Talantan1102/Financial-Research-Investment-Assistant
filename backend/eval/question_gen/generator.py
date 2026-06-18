@@ -70,12 +70,12 @@ def _scale(indicator: str, value: float) -> float:
 
 
 async def _fetch_snapshot(tushare, ts_code: str, trade_date: str) -> dict:
-    """取真 tushare daily_basic 的某交易日一行 → {pe, pb, turnover_rate, dv_ratio}。"""
+    """取真 tushare daily_basic 的某交易日一行 → {pe, pb, turnover_rate, dv_ratio}(值可能为 None/NaN)。"""
     df = await tushare.get_daily_basic(ts_code=ts_code, trade_date=trade_date)
     if len(df) == 0:
         raise RuntimeError(f"daily_basic 无数据:{ts_code} @ {trade_date}")
     row = df.iloc[0]
-    return {col: float(row[col]) for col in _SNAPSHOT_COLS}
+    return {col: row[col] for col in _SNAPSHOT_COLS}
 
 
 async def build_snapshot_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
@@ -89,6 +89,8 @@ async def build_snapshot_cases(tushare, as_of: str, cid) -> list[case.Computatio
         snap = await _fetch_snapshot(tushare, st.ts_code, as_of)
         for ind in _SNAPSHOT_INDICATORS:
             gold = operators.snapshot_lookup(ind, snap)
+            if gold is None:  # 该股该指标无值(如亏损股无 PE),跳过
+                continue
             out.append(
                 case.ComputationCase(
                     case_id=cid(f"快照{ind}-{st.ts_code}"),

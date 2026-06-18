@@ -40,3 +40,21 @@ def test_build_snapshot_cases_pe_gold_and_question():
     assert pe.gold == 25.0
     assert "市盈率" in pe.question
     assert len(pe.stocks) == 1
+
+
+class _StubTushareNullPE:
+    """PE 为 None 的亏损股 stub。"""
+
+    async def get_daily_basic(self, *, ts_code, trade_date=None):
+        return pd.DataFrame([{"pe": None, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}])
+
+
+def test_build_snapshot_cases_skips_null_field():
+    from eval.question_gen import stock_pool
+
+    cases = asyncio.run(
+        generator.build_snapshot_cases(_StubTushareNullPE(), "20260612", lambda tag: f"qg-{tag}")
+    )
+    # 每股 PE 为 None 被跳过 → 每股 3 个指标
+    assert len(cases) == len(stock_pool.POOL) * 3
+    assert all(c.indicator != "PE" for c in cases)
