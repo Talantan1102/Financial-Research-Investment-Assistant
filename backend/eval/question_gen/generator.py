@@ -122,30 +122,30 @@ def _select_period_row(df, end_date: str):
     return None if len(rows) == 0 else rows.iloc[0]
 
 
-async def _fetch_financial(tushare, ts_code: str, end_date: str) -> dict:
-    """取 fina_indicator + income,按 end_date 选行 → 合并 snap dict(值可能 None/NaN)。"""
-    fi = await tushare.get_fina_indicator(ts_code=ts_code, end_date=end_date)
-    inc = await tushare.get_income(ts_code=ts_code, end_date=end_date)
+async def _fetch_financial(tushare, ts_code: str, query_date: str, period_end: str) -> dict:
+    """取 fina_indicator + income(用 query_date 查,确保目标期已披露),按 period_end 选行。"""
+    fi = await tushare.get_fina_indicator(ts_code=ts_code, end_date=query_date)
+    inc = await tushare.get_income(ts_code=ts_code, end_date=query_date)
     snap: dict = {}
-    frow = _select_period_row(fi, end_date)
+    frow = _select_period_row(fi, period_end)
     if frow is not None:
         for c in _FINA_COLS:
             snap[c] = frow[c] if c in fi.columns else None
-    irow = _select_period_row(inc, end_date)
+    irow = _select_period_row(inc, period_end)
     if irow is not None:
         for c in _INCOME_COLS:
             snap[c] = irow[c] if c in inc.columns else None
     return snap
 
 
-async def build_financial_cases(tushare, period_end: str, period_label: str, cid) -> list[case.ComputationCase]:
-    """财报取数(简单档):每股取 period_end 期的 fina_indicator/income → 5 个直取指标。
+async def build_financial_cases(tushare, as_of: str, period_end: str, period_label: str, cid) -> list[case.ComputationCase]:
+    """财报取数(简单档):用 as_of 查询(确保目标期已披露),取 period_end 期的 5 个直取指标。
 
-    tushare 依赖注入;空值指标跳过(承波1a)。营收/净利 gold 已是亿元。
+    tushare 依赖注入;空值/缺期指标跳过。营收/净利 gold 已是亿元。
     """
     out: list[case.ComputationCase] = []
     for st in stock_pool.POOL:
-        snap = await _fetch_financial(tushare, st.ts_code, period_end)
+        snap = await _fetch_financial(tushare, st.ts_code, as_of, period_end)
         for ind in _FINANCIAL_INDICATORS:
             gold = operators.financial_lookup(ind, snap)
             if gold is None:
@@ -260,8 +260,8 @@ async def generate(
     # ---- 行情快照取数(简单档,无窗口)----
     cases.extend(await build_snapshot_cases(tushare, as_of, cid))
 
-    # ---- 财报取数(简单档,2024 年年报)----
-    cases.extend(await build_financial_cases(tushare, "20241231", "2024年年报", cid))
+    # ---- 财报取数(简单档,2024 年年报;用 as_of 查询确保已披露)----
+    cases.extend(await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid))
 
     # ---- 中等档 ----
     for st in stock_pool.POOL:
