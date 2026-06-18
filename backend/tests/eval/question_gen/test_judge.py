@@ -126,3 +126,18 @@ def test_judge_snapshot_dv_ratio_percent():
     # 股息率：gold=2.0(%)，答案 "2.0%" 命中
     tol = {"kind": "rel", "value": 0.02}
     assert judge(2.0, "scalar", tol, "股息率约 2.0%", ["贵州茅台"]) is True
+
+
+# ---- judge: 财报取数 scalar(营收/净利/财务比率) ----
+
+
+def test_judge_financial_revenue_yi():
+    # 营收 gold=1709(亿),答案 "约1709亿元" 命中(rel 1%)
+    tol = {"kind": "rel", "value": 0.01}
+    assert judge(1709.0, "scalar", tol, "2024 年营业收入约 1709 亿元", ["贵州茅台"]) is True
+    assert judge(1709.0, "scalar", tol, "约 1500 亿元", ["贵州茅台"]) is False
+
+
+def test_judge_financial_roe_percent():
+    tol = {"kind": "rel", "value": 0.01}
+    assert judge(34.46, "scalar", tol, "ROE 约 34.46%", ["贵州茅台"]) is True
