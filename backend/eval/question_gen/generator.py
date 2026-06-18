@@ -41,6 +41,11 @@ _SNAPSHOT_TOL = {
 }
 _SNAPSHOT_COLS = ("pe", "pb", "turnover_rate", "dv_ratio")
 
+_FINANCIAL_INDICATORS = ("ROE", "资产负债率", "毛利率", "营收", "净利")
+_FINANCIAL_TOL = {ind: {"kind": "rel", "value": 0.01} for ind in _FINANCIAL_INDICATORS}
+_FINA_COLS = ("roe", "debt_to_assets", "grossprofit_margin")
+_INCOME_COLS = ("revenue", "n_income")
+
 
 async def _resolve_window(as_of: str, code: str) -> tuple[str, str]:
     """调 trade_cal 的 window 动作把周期码解析成确定的 (start, end)。"""
@@ -104,6 +109,60 @@ async def build_snapshot_cases(tushare, as_of: str, cid) -> list[case.Computatio
                     gold_shape="scalar",
                     tolerance=_SNAPSHOT_TOL[ind],
                     meta={"trade_date": as_of, "as_of": as_of},
+                )
+            )
+    return out
+
+
+def _select_period_row(df, end_date: str):
+    """从多期历史 DataFrame 里选 end_date 匹配的那一行;无则 None。"""
+    if len(df) == 0 or "end_date" not in df.columns:
+        return None
+    rows = df[df["end_date"].astype(str) == end_date]
+    return None if len(rows) == 0 else rows.iloc[0]
+
+
+async def _fetch_financial(tushare, ts_code: str, end_date: str) -> dict:
+    """取 fina_indicator + income,按 end_date 选行 → 合并 snap dict(值可能 None/NaN)。"""
+    fi = await tushare.get_fina_indicator(ts_code=ts_code, end_date=end_date)
+    inc = await tushare.get_income(ts_code=ts_code, end_date=end_date)
+    snap: dict = {}
+    frow = _select_period_row(fi, end_date)
+    if frow is not None:
+        for c in _FINA_COLS:
+            snap[c] = frow[c] if c in fi.columns else None
+    irow = _select_period_row(inc, end_date)
+    if irow is not None:
+        for c in _INCOME_COLS:
+            snap[c] = irow[c] if c in inc.columns else None
+    return snap
+
+
+async def build_financial_cases(tushare, period_end: str, period_label: str, cid) -> list[case.ComputationCase]:
+    """财报取数(简单档):每股取 period_end 期的 fina_indicator/income → 5 个直取指标。
+
+    tushare 依赖注入;空值指标跳过(承波1a)。营收/净利 gold 已是亿元。
+    """
+    out: list[case.ComputationCase] = []
+    for st in stock_pool.POOL:
+        snap = await _fetch_financial(tushare, st.ts_code, period_end)
+        for ind in _FINANCIAL_INDICATORS:
+            gold = operators.financial_lookup(ind, snap)
+            if gold is None:
+                continue
+            out.append(
+                case.ComputationCase(
+                    case_id=cid(f"财报{ind}-{st.ts_code}"),
+                    intent=intents.INTENT_FINANCIAL,
+                    difficulty="简单",
+                    question=intents.q_financial(st.name, ind, period_label),
+                    stocks=[st.ts_code],
+                    indicator=ind,
+                    window=period_label,
+                    gold=gold,
+                    gold_shape="scalar",
+                    tolerance=_FINANCIAL_TOL[ind],
+                    meta={"period_end": period_end, "period_label": period_label},
                 )
             )
     return out
@@ -200,6 +259,9 @@ async def generate(
 
     # ---- 行情快照取数(简单档,无窗口)----
     cases.extend(await build_snapshot_cases(tushare, as_of, cid))
+
+    # ---- 财报取数(简单档,2024 年年报)----
+    cases.extend(await build_financial_cases(tushare, "20241231", "2024年年报", cid))
 
     # ---- 中等档 ----
     for st in stock_pool.POOL:
