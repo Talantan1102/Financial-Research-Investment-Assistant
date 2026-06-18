@@ -3,7 +3,6 @@
 import asyncio
 
 import pandas as pd
-
 from eval.question_gen import generator, intents
 
 
@@ -11,9 +10,7 @@ class _StubTushare:
     """固定返回一行 daily_basic 的 stub -- 确定性,仅供测生成逻辑,非真值 oracle。"""
 
     async def get_daily_basic(self, *, ts_code, trade_date=None):
-        return pd.DataFrame(
-            [{"pe": 25.0, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}]
-        )
+        return pd.DataFrame([{"pe": 25.0, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}])
 
 
 def _run():

@@ -1,7 +1,6 @@
 """legality 纯函数确定性单测。"""
 
 import pytest
-
 from eval.question_gen.legality import LEGAL, WINDOWS, is_legal, window_cn
 
 

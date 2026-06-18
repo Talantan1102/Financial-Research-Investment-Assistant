@@ -92,7 +92,9 @@ def q_position_value(name: str, qty: int, trade_date: str) -> str:
 def q_position_pnl(name: str, qty: int, cost: float, trade_date: str) -> str:
     """单仓浮动盈亏题面。"""
     d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
-    return f"某账户持有{name}{qty}股、成本价{cost}元/股,以{d}的收盘价计算,这笔持仓的浮动盈亏是多少元?"
+    return (
+        f"某账户持有{name}{qty}股、成本价{cost}元/股,以{d}的收盘价计算,这笔持仓的浮动盈亏是多少元?"
+    )
 
 
 INTENT_PORTFOLIO = "portfolio_calc"

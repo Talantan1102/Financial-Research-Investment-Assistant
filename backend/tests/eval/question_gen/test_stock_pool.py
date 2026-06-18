@@ -1,7 +1,6 @@
 """stock_pool 确定性单测：纯函数，不依赖网络/DB/LLM。"""
 
 import pytest
-
 from eval.question_gen.stock_pool import POOL, by_sector, get, sectors_with_at_least
 
 

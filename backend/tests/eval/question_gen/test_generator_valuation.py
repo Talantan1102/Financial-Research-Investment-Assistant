@@ -3,7 +3,6 @@
 import asyncio
 
 import pandas as pd
-
 from eval.question_gen import generator, intents, stock_pool
 
 
@@ -17,7 +16,9 @@ class _StubVal:
 
 def _run():
     return asyncio.run(
-        generator.build_valuation_cases(_StubVal(), "20260612", "20241231", "2024年年报", lambda t: f"qg-{t}")
+        generator.build_valuation_cases(
+            _StubVal(), "20260612", "20241231", "2024年年报", lambda t: f"qg-{t}"
+        )
     )
 
 

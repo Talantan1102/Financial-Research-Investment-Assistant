@@ -1,7 +1,6 @@
 """intents 确定性单测：纯字符串拼接，手写数据，不依赖网络/DB/LLM。"""
 
 import pytest
-
 from eval.question_gen.intents import (
     INTENT,
     q_corr,

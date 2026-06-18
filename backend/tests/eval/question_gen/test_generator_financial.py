@@ -3,7 +3,6 @@
 import asyncio
 
 import pandas as pd
-
 from eval.question_gen import generator, intents, stock_pool
 
 
@@ -11,21 +10,41 @@ class _StubTushare:
     """fina_indicator / income 都返回多期历史(含 20241231),验生成器按 end_date 选行。"""
 
     async def get_fina_indicator(self, *, ts_code, end_date=None):
-        return pd.DataFrame([
-            {"end_date": "20250930", "roe": 99.9, "debt_to_assets": 99.9, "grossprofit_margin": 99.9},
-            {"end_date": "20241231", "roe": 34.46, "debt_to_assets": 16.4, "grossprofit_margin": 91.2},
-        ])
+        return pd.DataFrame(
+            [
+                {
+                    "end_date": "20250930",
+                    "roe": 99.9,
+                    "debt_to_assets": 99.9,
+                    "grossprofit_margin": 99.9,
+                },
+                {
+                    "end_date": "20241231",
+                    "roe": 34.46,
+                    "debt_to_assets": 16.4,
+                    "grossprofit_margin": 91.2,
+                },
+            ]
+        )
 
     async def get_income(self, *, ts_code, end_date=None):
-        return pd.DataFrame([
-            {"end_date": "20250930", "revenue": 1.0, "n_income": 1.0},
-            {"end_date": "20241231", "revenue": 170_900_000_000.0, "n_income": 86_000_000_000.0},
-        ])
+        return pd.DataFrame(
+            [
+                {"end_date": "20250930", "revenue": 1.0, "n_income": 1.0},
+                {
+                    "end_date": "20241231",
+                    "revenue": 170_900_000_000.0,
+                    "n_income": 86_000_000_000.0,
+                },
+            ]
+        )
 
 
 def _run():
     return asyncio.run(
-        generator.build_financial_cases(_StubTushare(), "20260612", "20241231", "2024年年报", lambda tag: f"qg-{tag}")
+        generator.build_financial_cases(
+            _StubTushare(), "20260612", "20241231", "2024年年报", lambda tag: f"qg-{tag}"
+        )
     )
 
 

@@ -3,7 +3,6 @@
 import asyncio
 
 import pandas as pd
-
 from eval.question_gen import generator, intents
 
 
@@ -13,7 +12,9 @@ class _StubClose:
 
 
 def _run():
-    return asyncio.run(generator.build_portfolio_cases(_StubClose(), "20260612", lambda t: f"qg-{t}"))
+    return asyncio.run(
+        generator.build_portfolio_cases(_StubClose(), "20260612", lambda t: f"qg-{t}")
+    )
 
 
 def test_build_portfolio_cases_count_and_values():
