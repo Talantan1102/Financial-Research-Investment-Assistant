@@ -12,8 +12,12 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import statistics
 from pathlib import Path
 
+from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+from app.agents.valuation_helpers.pb import compute_pb_value
+from app.agents.valuation_helpers.pe import compute_pe_value
 from eval.question_gen import case, intents, legality, operators, stock_pool
 
 _AS_OF_DEFAULT = "20260612"  # 钉到已落定的历史交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
@@ -281,6 +285,101 @@ async def build_portfolio_cases(tushare, as_of: str, cid) -> list[case.Computati
     return out
 
 
+_VALUATION_TOL = {"kind": "rel", "value": 0.01}
+
+
+def _finite_positive(val) -> float | None:
+    """None/NaN/<=0 -> None;否则 float。"""
+    if val is None:
+        return None
+    f = float(val)
+    if f != f or f <= 0:  # NaN 或 <=0
+        return None
+    return f
+
+
+async def build_valuation_cases(
+    tushare, as_of: str, period_end: str, period_label: str, cid
+) -> list[case.ComputationCase]:
+    """估值算式(中等档):板块同行聚合 PE/PB(avg+median)+ 个股 eps/bps -> 理论价。
+
+    题面明示可比篮子;eps/bps 缺或 compute 抛 InsufficientDataForModelError -> 跳过。
+    """
+    out: list[case.ComputationCase] = []
+    for sector, members in stock_pool.by_sector().items():
+        if len(members) < 2:
+            continue
+        pes: list[float] = []
+        pbs: list[float] = []
+        info: dict = {}
+        for m in members:
+            db = await tushare.get_daily_basic(ts_code=m.ts_code, trade_date=as_of)
+            fi = await tushare.get_fina_indicator(ts_code=m.ts_code, end_date=as_of)
+            frow = _select_period_row(fi, period_end)
+            pe = _finite_positive(db.iloc[0]["pe"]) if len(db) and "pe" in db.columns else None
+            pb = _finite_positive(db.iloc[0]["pb"]) if len(db) and "pb" in db.columns else None
+            eps = None
+            bps = None
+            if frow is not None:
+                eps = float(frow["eps"]) if "eps" in fi.columns and frow["eps"] is not None else None
+                bps = float(frow["bps"]) if "bps" in fi.columns and frow["bps"] is not None else None
+            info[m.ts_code] = {"name": m.name, "eps": eps, "bps": bps}
+            if pe is not None:
+                pes.append(pe)
+            if pb is not None:
+                pbs.append(pb)
+        peer_names = "、".join(m.name for m in members)
+        pe_avg = statistics.mean(pes) if len(pes) >= 2 else None
+        pe_med = statistics.median(pes) if len(pes) >= 2 else None
+        pb_avg = statistics.mean(pbs) if len(pbs) >= 2 else None
+        pb_med = statistics.median(pbs) if len(pbs) >= 2 else None
+        for m in members:
+            d = info[m.ts_code]
+            # PE 理论价
+            if pe_avg is not None and d["eps"] is not None and d["eps"] == d["eps"]:
+                try:
+                    gold = compute_pe_value(eps=d["eps"], industry_pe_avg=pe_avg, industry_pe_median=pe_med)
+                    out.append(
+                        case.ComputationCase(
+                            case_id=cid(f"PE理论价-{m.ts_code}"),
+                            intent=intents.INTENT_VALUATION,
+                            difficulty="中等",
+                            question=intents.q_valuation(m.name, "PE理论价", sector, peer_names, period_label),
+                            stocks=[m.ts_code],
+                            indicator="PE理论价",
+                            window=period_label,
+                            gold=round(gold, 4),
+                            gold_shape="scalar",
+                            tolerance=_VALUATION_TOL,
+                            meta={"板块": sector, "period_end": period_end},
+                        )
+                    )
+                except InsufficientDataForModelError:
+                    pass
+            # PB 理论价
+            if pb_avg is not None and d["bps"] is not None and d["bps"] == d["bps"]:
+                try:
+                    gold = compute_pb_value(book_value_per_share=d["bps"], industry_pb_avg=pb_avg, industry_pb_median=pb_med)
+                    out.append(
+                        case.ComputationCase(
+                            case_id=cid(f"PB理论价-{m.ts_code}"),
+                            intent=intents.INTENT_VALUATION,
+                            difficulty="中等",
+                            question=intents.q_valuation(m.name, "PB理论价", sector, peer_names, period_label),
+                            stocks=[m.ts_code],
+                            indicator="PB理论价",
+                            window=period_label,
+                            gold=round(gold, 4),
+                            gold_shape="scalar",
+                            tolerance=_VALUATION_TOL,
+                            meta={"板块": sector, "period_end": period_end},
+                        )
+                    )
+                except InsufficientDataForModelError:
+                    pass
+    return out
+
+
 async def generate(
     as_of: str = _AS_OF_DEFAULT, out_path: Path = _OUT_DEFAULT
 ) -> list[case.ComputationCase]:
@@ -381,6 +480,9 @@ async def generate(
 
     # ---- 组合权重 + HHI(中等档)----
     cases.extend(await build_portfolio_cases(tushare, as_of, cid))
+
+    # ---- 估值算式 PE/PB 理论价(中等档,2024 年报 + 板块同行可比)----
+    cases.extend(await build_valuation_cases(tushare, as_of, "20241231", "2024年年报", cid))
 
     # ---- 中等档 ----
     for st in stock_pool.POOL:
