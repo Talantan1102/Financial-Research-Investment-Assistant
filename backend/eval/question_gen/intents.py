@@ -18,6 +18,11 @@ _SNAPSHOT_LABELS = {
     "股息率": "股息率",
 }
 
+INTENT_FINANCIAL = "financial_report"
+
+_FINANCIAL_RATIO_LABELS = {"ROE": "ROE", "资产负债率": "资产负债率", "毛利率": "销售毛利率"}
+_FINANCIAL_AMOUNT_LABELS = {"营收": "营业收入", "净利": "净利润"}
+
 
 def q_single(indicator: str, name: str, window_cn: str) -> str:
     """单股单指标题面;未知 indicator raise ValueError。
@@ -66,13 +71,24 @@ def q_snapshot(name: str, indicator: str, trade_date: str) -> str:
     return f"{name}在{d}的{label}是多少?"
 
 
+def q_financial(name: str, indicator: str, period_label: str) -> str:
+    """财报取数题面。比率类问"是多少?"(%);金额类问"是多少亿元?"。未知指标 raise ValueError。"""
+    if indicator in _FINANCIAL_RATIO_LABELS:
+        return f"{name}{period_label}的{_FINANCIAL_RATIO_LABELS[indicator]}是多少?"
+    if indicator in _FINANCIAL_AMOUNT_LABELS:
+        return f"{name}{period_label}的{_FINANCIAL_AMOUNT_LABELS[indicator]}是多少亿元?"
+    raise ValueError(f"未知财报指标:{indicator!r}")
+
+
 __all__ = [
     "INTENT",
     "INTENT_SNAPSHOT",
+    "INTENT_FINANCIAL",
     "q_single",
     "q_dual",
     "q_corr",
     "q_rank",
     "q_filter",
     "q_snapshot",
+    "q_financial",
 ]
