@@ -87,15 +87,19 @@ def _satisfies(value: float, op: str, threshold: float) -> bool:
     raise ValueError(f"未知比较符:{op!r}")
 
 
-def snapshot_lookup(indicator: str, snap: dict) -> float:
-    """行情快照取数:指标名 -> 直取 daily_basic 字段值。未知指标 raise ValueError。
+def snapshot_lookup(indicator: str, snap: dict) -> float | None:
+    """行情快照取数:指标名 -> 直取 daily_basic 字段值。
 
-    snap 形状: {"pe": float, "pb": float, "turnover_rate": float, "dv_ratio": float}。
+    字段缺失(如亏损股无 PE,tushare 返回 None/NaN)→ 返回 None(调用方应跳过)。
+    未知指标 raise ValueError。
     """
     col = _SNAPSHOT_COLUMNS.get(indicator)
     if col is None:
         raise ValueError(f"未知快照指标:{indicator!r}")
-    return float(snap[col])
+    val = snap.get(col)
+    if val is None or (isinstance(val, float) and val != val):  # None 或 NaN
+        return None
+    return float(val)
 
 
 __all__ = ["single", "correlation_pair", "rank_by", "filter_by", "snapshot_lookup"]

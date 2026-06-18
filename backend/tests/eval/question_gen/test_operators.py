@@ -124,3 +124,16 @@ def test_snapshot_lookup_unknown_raises():
 
     with pytest.raises(ValueError):
         operators.snapshot_lookup("未知指标", {"pe": 1.0})
+
+
+def test_snapshot_lookup_none_for_missing_value():
+    # 亏损股 PE 为 None → 返回 None(不抛)
+    assert (
+        operators.snapshot_lookup("PE", {"pe": None, "pb": 5.0, "turnover_rate": 1.0, "dv_ratio": 0.0})
+        is None
+    )
+    nan = float("nan")
+    assert (
+        operators.snapshot_lookup("PB", {"pe": 1.0, "pb": nan, "turnover_rate": 1.0, "dv_ratio": 0.0})
+        is None
+    )
