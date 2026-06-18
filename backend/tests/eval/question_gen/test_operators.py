@@ -1,7 +1,6 @@
 """operators 确定性单测：纯函数，手写数据，不依赖网络/DB/LLM。"""
 
 import pytest
-
 from eval.question_gen import operators
 from eval.question_gen.operators import (
     correlation_pair,
@@ -129,19 +128,28 @@ def test_snapshot_lookup_unknown_raises():
 def test_snapshot_lookup_none_for_missing_value():
     # 亏损股 PE 为 None → 返回 None(不抛)
     assert (
-        operators.snapshot_lookup("PE", {"pe": None, "pb": 5.0, "turnover_rate": 1.0, "dv_ratio": 0.0})
+        operators.snapshot_lookup(
+            "PE", {"pe": None, "pb": 5.0, "turnover_rate": 1.0, "dv_ratio": 0.0}
+        )
         is None
     )
     nan = float("nan")
     assert (
-        operators.snapshot_lookup("PB", {"pe": 1.0, "pb": nan, "turnover_rate": 1.0, "dv_ratio": 0.0})
+        operators.snapshot_lookup(
+            "PB", {"pe": 1.0, "pb": nan, "turnover_rate": 1.0, "dv_ratio": 0.0}
+        )
         is None
     )
 
 
 def test_financial_lookup_ratio_direct():
-    snap = {"roe": 34.46, "debt_to_assets": 16.4, "grossprofit_margin": 91.2,
-            "revenue": 170_900_000_000.0, "n_income": 86_000_000_000.0}
+    snap = {
+        "roe": 34.46,
+        "debt_to_assets": 16.4,
+        "grossprofit_margin": 91.2,
+        "revenue": 170_900_000_000.0,
+        "n_income": 86_000_000_000.0,
+    }
     assert operators.financial_lookup("ROE", snap) == 34.46
     assert operators.financial_lookup("资产负债率", snap) == 16.4
     assert operators.financial_lookup("毛利率", snap) == 91.2

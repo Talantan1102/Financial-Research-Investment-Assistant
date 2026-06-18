@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from eval.question_gen.judge import hit_scalar, judge, nums
 
-
 # ---- nums ----
 
 

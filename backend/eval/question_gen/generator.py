@@ -18,9 +18,12 @@ from pathlib import Path
 from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
 from app.agents.valuation_helpers.pb import compute_pb_value
 from app.agents.valuation_helpers.pe import compute_pe_value
+
 from eval.question_gen import case, intents, legality, operators, stock_pool
 
-_AS_OF_DEFAULT = "20260612"  # 钉到已落定的历史交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
+_AS_OF_DEFAULT = (
+    "20260612"  # 钉到已落定的历史交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
+)
 _OUT_DEFAULT = Path(__file__).resolve().parent / "data" / "computation_cases.jsonl"
 
 # 容差(承 caliber-freeze;gold 存百分数,故对百分数比)
@@ -142,7 +145,9 @@ async def _fetch_financial(tushare, ts_code: str, query_date: str, period_end: s
     return snap
 
 
-async def build_financial_cases(tushare, as_of: str, period_end: str, period_label: str, cid) -> list[case.ComputationCase]:
+async def build_financial_cases(
+    tushare, as_of: str, period_end: str, period_label: str, cid
+) -> list[case.ComputationCase]:
     """财报取数(简单档):用 as_of 查询(确保目标期已披露),取 period_end 期的 5 个直取指标。
 
     tushare 依赖注入;空值/缺期指标跳过。营收/净利 gold 已是亿元。
@@ -321,8 +326,12 @@ async def build_valuation_cases(
             eps = None
             bps = None
             if frow is not None:
-                eps = float(frow["eps"]) if "eps" in fi.columns and frow["eps"] is not None else None
-                bps = float(frow["bps"]) if "bps" in fi.columns and frow["bps"] is not None else None
+                eps = (
+                    float(frow["eps"]) if "eps" in fi.columns and frow["eps"] is not None else None
+                )
+                bps = (
+                    float(frow["bps"]) if "bps" in fi.columns and frow["bps"] is not None else None
+                )
             info[m.ts_code] = {"name": m.name, "eps": eps, "bps": bps}
             if pe is not None:
                 pes.append(pe)
@@ -336,15 +345,24 @@ async def build_valuation_cases(
         for m in members:
             d = info[m.ts_code]
             # PE 理论价
-            if pe_avg is not None and d["eps"] is not None and d["eps"] == d["eps"]:
+            if (
+                pe_avg is not None
+                and pe_med is not None
+                and d["eps"] is not None
+                and d["eps"] == d["eps"]
+            ):
                 try:
-                    gold = compute_pe_value(eps=d["eps"], industry_pe_avg=pe_avg, industry_pe_median=pe_med)
+                    gold = compute_pe_value(
+                        eps=d["eps"], industry_pe_avg=pe_avg, industry_pe_median=pe_med
+                    )
                     out.append(
                         case.ComputationCase(
                             case_id=cid(f"PE理论价-{m.ts_code}"),
                             intent=intents.INTENT_VALUATION,
                             difficulty="中等",
-                            question=intents.q_valuation(m.name, "PE理论价", sector, peer_names, period_label),
+                            question=intents.q_valuation(
+                                m.name, "PE理论价", sector, peer_names, period_label
+                            ),
                             stocks=[m.ts_code],
                             indicator="PE理论价",
                             window=period_label,
@@ -357,15 +375,26 @@ async def build_valuation_cases(
                 except InsufficientDataForModelError:
                     pass
             # PB 理论价
-            if pb_avg is not None and d["bps"] is not None and d["bps"] == d["bps"]:
+            if (
+                pb_avg is not None
+                and pb_med is not None
+                and d["bps"] is not None
+                and d["bps"] == d["bps"]
+            ):
                 try:
-                    gold = compute_pb_value(book_value_per_share=d["bps"], industry_pb_avg=pb_avg, industry_pb_median=pb_med)
+                    gold = compute_pb_value(
+                        book_value_per_share=d["bps"],
+                        industry_pb_avg=pb_avg,
+                        industry_pb_median=pb_med,
+                    )
                     out.append(
                         case.ComputationCase(
                             case_id=cid(f"PB理论价-{m.ts_code}"),
                             intent=intents.INTENT_VALUATION,
                             difficulty="中等",
-                            question=intents.q_valuation(m.name, "PB理论价", sector, peer_names, period_label),
+                            question=intents.q_valuation(
+                                m.name, "PB理论价", sector, peer_names, period_label
+                            ),
                             stocks=[m.ts_code],
                             indicator="PB理论价",
                             window=period_label,
