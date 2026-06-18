@@ -21,11 +21,12 @@ _OUT_DEFAULT = Path(__file__).resolve().parent / "data" / "computation_cases.jso
 
 # 容差(承 caliber-freeze;gold 存百分数,故对百分数比)
 _TOL = {
-    "涨幅": {"kind": "rel", "value": 0.005},
+    # 涨幅/CAGR 可能接近零 → rel_mult(比"价格变成几倍",接近零不被相对误差放大)
+    "涨幅": {"kind": "rel_mult", "value": 0.005},
     "回撤": {"kind": "rel", "value": 0.005},
     "波动": {"kind": "rel", "value": 0.02},
     "相关": {"kind": "abs", "value": 0.01},
-    "CAGR": {"kind": "rel", "value": 0.01},
+    "CAGR": {"kind": "rel_mult", "value": 0.01},
 }
 _TOL_DUAL = {"kind": "rel", "value": 0.02}  # 双指标(回撤+波动)统一取较松的
 _WINDOW_YEARS = {"3m": 0.25, "1y": 1.0, "3y": 3.0}

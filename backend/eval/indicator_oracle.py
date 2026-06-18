@@ -6,7 +6,8 @@ spec: docs/superpowers/specs/2026-06-16-computation-caliber-freeze-design.md
 冻结口径(全模块一致):
 - 收益率 = tushare pct_chg ÷ 100(第一根参照窗口前一天;别用 close 比值——M1 0.018 的根);
 - 窗口 = 调用方传入(method B:用 agent 实际 get_daily 数据,窗口同源);
-- 不复权(get_daily 默认);年化 √252;标准差 ddof=1;分位 < 不插值。
+- 涨幅/回撤/CAGR 走**复权路径**(adjusted_path:pct_chg 累乘,剔除拆股/除息假跳变);
+  波动/相关直接用 pct_chg;年化 √252;标准差 ddof=1;分位 < 不插值。
 返回值口径:涨幅/回撤/波动/CAGR 为**分数**(×100 得 %);相关无量纲;分位 ∈ [0,1]。
 """
 
@@ -15,6 +16,21 @@ from __future__ import annotations
 import numpy as np
 
 _TRADING_DAYS = 252
+
+
+def adjusted_path(pct_chg: list[float]) -> list[float]:
+    """从日涨跌幅(tushare %-值)累乘出复权价格路径,剔除拆股/除息的假跳变。
+
+    基准 1.0;首根 pct_chg 参照窗口前一天(窗外),故从次日起累乘,
+    使 path[i]/path[0] = 窗内 d0 收盘 → di 收盘的真实(含送转/分红)累计收益。
+    返回序列长度与输入一致。涨幅/回撤/CAGR 都改吃这条路径(不复权 close 在拆股票上会算错)。
+    """
+    if not pct_chg:
+        raise ValueError("adjusted_path 需非空 pct_chg")
+    path = [1.0]
+    for r in pct_chg[1:]:
+        path.append(path[-1] * (1.0 + r / 100.0))
+    return path
 
 
 def interval_return(close: list[float]) -> float:

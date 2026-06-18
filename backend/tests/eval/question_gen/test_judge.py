@@ -34,6 +34,20 @@ def test_hit_scalar_rel_within_two_percent():
     assert hit_scalar("19.86", 19.79, {"kind": "rel", "value": 0.02}) is True
 
 
+def test_hit_scalar_rel_mult_near_zero_hits():
+    # 涨幅 -0.164% vs agent -0.16%:比"价格倍数"(0.99836 vs 0.9984),接近零不放大 → 命中。
+    assert hit_scalar("近三个月涨幅 -0.16%", -0.164, {"kind": "rel_mult", "value": 0.005}) is True
+    # 对照:纯相对误差会误杀(|0.16-0.164|/0.164 ≈ 2.4% > 0.5%)。
+    assert hit_scalar("涨幅 -0.16%", -0.164, {"kind": "rel", "value": 0.005}) is False
+
+
+def test_hit_scalar_rel_mult_large_keeps_precision_and_sign():
+    # 大涨幅仍按倍数卡精度:gold 50%,agent 49.6% → 倍数 1.496 vs 1.5,相对差 0.27% <= 0.5% → 命中。
+    assert hit_scalar("涨幅 49.6%", 50.0, {"kind": "rel_mult", "value": 0.005}) is True
+    # 方向反了不命中:gold +50%,答案 -50%。
+    assert hit_scalar("跌了 -50%", 50.0, {"kind": "rel_mult", "value": 0.005}) is False
+
+
 def test_hit_scalar_miss_when_far():
     assert hit_scalar("结果 -8.0", -10.63, {"kind": "abs", "value": 0.5}) is False
 

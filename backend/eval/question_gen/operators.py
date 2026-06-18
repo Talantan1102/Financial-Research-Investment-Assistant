@@ -22,18 +22,17 @@ _CAGR_NAMES = {"CAGR", "cagr"}
 def single(indicator: str, data: dict, *, years: float = 1.0) -> float:
     """单股单指标派发到 oracle。
 
-    涨幅 -> interval_return(close);回撤 -> max_drawdown(close);
-    波动 -> annual_volatility(pct_chg);CAGR -> cagr(close, years);
-    未知指标 raise ValueError。
+    涨幅/回撤/CAGR 走复权价格路径(由 pct_chg 累乘,剔除拆股假跳变);
+    波动 -> annual_volatility(pct_chg);未知指标 raise ValueError。
     """
     if indicator in _RETURN_NAMES:
-        return indicator_oracle.interval_return(data["close"])
+        return indicator_oracle.interval_return(indicator_oracle.adjusted_path(data["pct_chg"]))
     if indicator in _DRAWDOWN_NAMES:
-        return indicator_oracle.max_drawdown(data["close"])
+        return indicator_oracle.max_drawdown(indicator_oracle.adjusted_path(data["pct_chg"]))
     if indicator in _VOL_NAMES:
         return indicator_oracle.annual_volatility(data["pct_chg"])
     if indicator in _CAGR_NAMES:
-        return indicator_oracle.cagr(data["close"], years)
+        return indicator_oracle.cagr(indicator_oracle.adjusted_path(data["pct_chg"]), years)
     raise ValueError(f"未知指标:{indicator!r}")
 
 
