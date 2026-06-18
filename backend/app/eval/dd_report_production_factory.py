@@ -120,6 +120,10 @@ class _BacktestTushareService:
     async def get_holder_change(self, *, ts_code: str, years_back: int = 2) -> pd.DataFrame:
         return pd.DataFrame()
 
+    async def get_trade_cal(self, *, start: str, end: str) -> pd.DataFrame:
+        # TushareBacktestAdapter has no trade calendar; empty DataFrame (tools handle gracefully).
+        return pd.DataFrame()
+
     async def get_money_flow(self, *, ts_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         return pd.DataFrame()
 

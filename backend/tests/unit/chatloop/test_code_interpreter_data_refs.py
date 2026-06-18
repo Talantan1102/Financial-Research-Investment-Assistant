@@ -43,7 +43,7 @@ def _state() -> ChatLoopState:
 async def test_data_refs_resolves_full_payload() -> None:
     cache = _FakeCache({"u1::get_daily::abc": json.dumps({"close": [1.0, 2.0, 3.0]})})
     backend = _FakeBackend()
-    tool = CodeInterpreterTool(backend=backend, cache=cache)  # type: ignore[arg-type]
+    tool = CodeInterpreterTool(backend=backend, cache=cache)
     args = CodeInterpreterArgs(code="result=1", data_refs={"m": "u1::get_daily::abc"})
     await tool.run_with_state(args, _state())
     assert backend.last_data is not None
@@ -54,7 +54,7 @@ async def test_data_refs_resolves_full_payload() -> None:
 async def test_data_refs_merges_with_inline_data() -> None:
     cache = _FakeCache({"u1::get_daily::abc": json.dumps({"close": [9.0]})})
     backend = _FakeBackend()
-    tool = CodeInterpreterTool(backend=backend, cache=cache)  # type: ignore[arg-type]
+    tool = CodeInterpreterTool(backend=backend, cache=cache)
     args = CodeInterpreterArgs(
         code="result=1", data={"k": 1}, data_refs={"m": "u1::get_daily::abc"}
     )
@@ -65,7 +65,7 @@ async def test_data_refs_merges_with_inline_data() -> None:
 @pytest.mark.asyncio
 async def test_data_refs_cross_user_rejected() -> None:
     cache = _FakeCache({"u2::get_daily::abc": json.dumps({"close": [1.0]})})
-    tool = CodeInterpreterTool(backend=_FakeBackend(), cache=cache)  # type: ignore[arg-type]
+    tool = CodeInterpreterTool(backend=_FakeBackend(), cache=cache)
     args = CodeInterpreterArgs(code="result=1", data_refs={"m": "u2::get_daily::abc"})
     with pytest.raises(ToolError, match="无权访问"):
         await tool.run_with_state(args, _state())
@@ -74,7 +74,7 @@ async def test_data_refs_cross_user_rejected() -> None:
 @pytest.mark.asyncio
 async def test_data_refs_missing_rejected() -> None:
     cache = _FakeCache({})
-    tool = CodeInterpreterTool(backend=_FakeBackend(), cache=cache)  # type: ignore[arg-type]
+    tool = CodeInterpreterTool(backend=_FakeBackend(), cache=cache)
     args = CodeInterpreterArgs(code="result=1", data_refs={"m": "u1::get_daily::gone"})
     with pytest.raises(ToolError, match="缓存不存在"):
         await tool.run_with_state(args, _state())
