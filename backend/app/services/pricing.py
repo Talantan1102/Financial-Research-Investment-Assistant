@@ -39,6 +39,11 @@ _TABLE: dict[str, ModelPrice] = {
         input_per_1k_cny=DEEPSEEK_V32_INPUT_CNY_PER_1K,
         output_per_1k_cny=DEEPSEEK_V32_OUTPUT_CNY_PER_1K,
     ),
+    # qwen 系列 — DashScope 官方定价(2026-06)
+    "qwen-plus": ModelPrice(input_per_1k_cny=0.0008, output_per_1k_cny=0.002),
+    "qwen-max": ModelPrice(input_per_1k_cny=0.004, output_per_1k_cny=0.012),
+    "qwen2.5-7b-instruct": ModelPrice(input_per_1k_cny=0.0001, output_per_1k_cny=0.0002),
+    "qwen3-8b": ModelPrice(input_per_1k_cny=0.0001, output_per_1k_cny=0.0002),
 }
 
 

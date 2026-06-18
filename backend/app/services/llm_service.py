@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
+from app.services import model_registry
 from app.services.cost_budget import CostBudget
 from app.services.llm_response import LLMResponse, Tier
 from app.services.llm_step import StepDelta, StepResult
@@ -80,6 +81,7 @@ class LLMService:
         self,
         prompt: str,
         tier: Tier = "fast",
+        model: str | None = None,
         schema: dict[str, Any] | type[BaseModel] | None = None,
         request_id: str | None = None,
         parent_span_id: str | None = None,
@@ -94,7 +96,10 @@ class LLMService:
             client_schema = schema.model_json_schema()
         else:
             client_schema = schema  # dict | None
-        model = self._tier_router.resolve(tier)
+        if model is not None:
+            model = model_registry.dashscope_id(model)  # registry key → dashscope id(不在清单 raise)
+        else:
+            model = self._tier_router.resolve(tier)
         if request_id is None:
             request_id = f"req-{uuid4().hex[:12]}"
         started_at = datetime.now(UTC)
@@ -157,6 +162,7 @@ class LLMService:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str = "auto",
         tier: Tier = "balanced",
+        model: str | None = None,
         request_id: str | None = None,
         parent_span_id: str | None = None,
         on_delta: Callable[[StepDelta], Awaitable[None]] | None = None,
@@ -172,7 +178,10 @@ class LLMService:
             self._budget.assert_under_limit()
 
         # 2. model + request_id
-        model = self._tier_router.resolve(tier)
+        if model is not None:
+            model = model_registry.dashscope_id(model)  # registry key → dashscope id(不在清单 raise)
+        else:
+            model = self._tier_router.resolve(tier)
         if request_id is None:
             request_id = f"req-{uuid4().hex[:12]}"
 
