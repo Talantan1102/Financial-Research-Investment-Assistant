@@ -26,6 +26,15 @@ _SNAPSHOT_COLUMNS: dict[str, str] = {
     "股息率": "dv_ratio",
 }
 
+# 财报取数指标 -> (字段, 单位)。ratio 直取(%);yi 元→亿(÷1e8)。
+_FINANCIAL_SPEC: dict[str, tuple[str, str]] = {
+    "ROE": ("roe", "ratio"),
+    "资产负债率": ("debt_to_assets", "ratio"),
+    "毛利率": ("grossprofit_margin", "ratio"),
+    "营收": ("revenue", "yi"),
+    "净利": ("n_income", "yi"),
+}
+
 
 def single(indicator: str, data: dict, *, years: float = 1.0) -> float:
     """单股单指标派发到 oracle。
@@ -102,4 +111,20 @@ def snapshot_lookup(indicator: str, snap: dict) -> float | None:
     return float(val)
 
 
-__all__ = ["single", "correlation_pair", "rank_by", "filter_by", "snapshot_lookup"]
+def financial_lookup(indicator: str, snap: dict) -> float | None:
+    """财报取数:指标名 -> 字段值(营收/净利 元→亿)。
+
+    字段缺失(None/NaN)→ 返回 None(调用方跳过)。未知指标 raise ValueError。
+    """
+    spec = _FINANCIAL_SPEC.get(indicator)
+    if spec is None:
+        raise ValueError(f"未知财报指标:{indicator!r}")
+    col, unit = spec
+    val = snap.get(col)
+    if val is None or (isinstance(val, float) and val != val):  # None 或 NaN
+        return None
+    val = float(val)
+    return val / 1e8 if unit == "yi" else val
+
+
+__all__ = ["single", "correlation_pair", "rank_by", "filter_by", "snapshot_lookup", "financial_lookup"]
