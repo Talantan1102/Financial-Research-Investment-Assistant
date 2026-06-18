@@ -2,6 +2,7 @@
 
 import pytest
 
+from eval.question_gen import operators
 from eval.question_gen.operators import (
     correlation_pair,
     filter_by,
@@ -108,3 +109,18 @@ def test_correlation_pair_perfect_positive():
     a = _stock(dates=dates, pct_chg=[1.0, 2.0, -1.0, 3.0])
     b = _stock(dates=dates, pct_chg=[2.0, 4.0, -2.0, 6.0])  # b = 2a
     assert correlation_pair(a, b) == pytest.approx(1.0)
+
+
+def test_snapshot_lookup_maps_each_indicator():
+    snap = {"pe": 25.3, "pb": 8.1, "turnover_rate": 1.5, "dv_ratio": 2.0}
+    assert operators.snapshot_lookup("PE", snap) == 25.3
+    assert operators.snapshot_lookup("PB", snap) == 8.1
+    assert operators.snapshot_lookup("换手率", snap) == 1.5
+    assert operators.snapshot_lookup("股息率", snap) == 2.0
+
+
+def test_snapshot_lookup_unknown_raises():
+    import pytest
+
+    with pytest.raises(ValueError):
+        operators.snapshot_lookup("未知指标", {"pe": 1.0})
