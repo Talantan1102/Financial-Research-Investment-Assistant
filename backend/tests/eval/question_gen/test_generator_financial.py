@@ -25,7 +25,7 @@ class _StubTushare:
 
 def _run():
     return asyncio.run(
-        generator.build_financial_cases(_StubTushare(), "20241231", "2024年年报", lambda tag: f"qg-{tag}")
+        generator.build_financial_cases(_StubTushare(), "20260612", "20241231", "2024年年报", lambda tag: f"qg-{tag}")
     )
 
 
