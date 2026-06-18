@@ -224,6 +224,63 @@ async def build_position_cases(tushare, as_of: str, cid) -> list[case.Computatio
     return out
 
 
+async def build_portfolio_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
+    """组合权重 + HHI(中等档):按板块构造合成篮子(qty 100,200,...)+ 真收盘价。
+
+    任一成员 close 缺则跳过该板块(保权重口径一致)。
+    """
+    out: list[case.ComputationCase] = []
+    for sector, members in stock_pool.by_sector().items():
+        if len(members) < 2:
+            continue
+        mvs: list[float] = []
+        descs: list[str] = []
+        ok = True
+        for j, m in enumerate(members):
+            close = await _fetch_close(tushare, m.ts_code, as_of)
+            if close is None:
+                ok = False
+                break
+            qty = 100 * (j + 1)
+            mvs.append(qty * close)
+            descs.append(f"{m.name}{qty}股")
+        if not ok or len(mvs) < 2:
+            continue
+        weights = operators.portfolio_weights(mvs)
+        basket = "、".join(descs)
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"权重-{sector}"),
+                intent=intents.INTENT_PORTFOLIO,
+                difficulty="中等",
+                question=intents.q_portfolio_weight(basket, members[0].name, as_of),
+                stocks=[m.ts_code for m in members],
+                indicator="持仓权重",
+                window="snapshot",
+                gold=round(weights[0] * 100, 4),
+                gold_shape="scalar",
+                tolerance={"kind": "rel", "value": 0.01},
+                meta={"trade_date": as_of, "板块": sector},
+            )
+        )
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"HHI-{sector}"),
+                intent=intents.INTENT_PORTFOLIO,
+                difficulty="中等",
+                question=intents.q_portfolio_hhi(basket, as_of),
+                stocks=[m.ts_code for m in members],
+                indicator="HHI",
+                window="snapshot",
+                gold=round(operators.portfolio_hhi(weights), 4),
+                gold_shape="scalar",
+                tolerance={"kind": "rel", "value": 0.02},
+                meta={"trade_date": as_of, "板块": sector},
+            )
+        )
+    return out
+
+
 async def generate(
     as_of: str = _AS_OF_DEFAULT, out_path: Path = _OUT_DEFAULT
 ) -> list[case.ComputationCase]:
@@ -321,6 +378,9 @@ async def generate(
 
     # ---- 单仓持仓量(简单档)----
     cases.extend(await build_position_cases(tushare, as_of, cid))
+
+    # ---- 组合权重 + HHI(中等档)----
+    cases.extend(await build_portfolio_cases(tushare, as_of, cid))
 
     # ---- 中等档 ----
     for st in stock_pool.POOL:
