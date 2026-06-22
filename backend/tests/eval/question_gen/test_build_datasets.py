@@ -3,13 +3,10 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pandas as pd
-import pytest
-
 from eval.question_gen.build_datasets import build_datasets
-from eval.question_gen.stock_pool import Stock
 
 
 # ---- Mock _resolve_window so tests don't need trade_cal / DB ----
@@ -29,14 +26,34 @@ class _MockTushare:
     def __init__(self, constituents: list[dict]):
         self._constituents = constituents  # list of {ts_code, name, sector, list_date?}
 
-    async def get_index_weight(self, *, index_code, trade_date):
+    async def get_index_weight(
+        self,
+        *,
+        index_code,
+        trade_date=None,
+        start_date=None,
+        end_date=None,
+    ):
+        ref_date = trade_date or end_date or "20260612"
         return pd.DataFrame({
             "index_code": [index_code] * len(self._constituents),
             "con_code": [c["ts_code"] for c in self._constituents],
-            "trade_date": [trade_date] * len(self._constituents),
+            "trade_date": [ref_date] * len(self._constituents),
         })
 
-    async def get_stock_basic(self, *, ts_code):
+    async def get_stock_basic(self, *, ts_code=None):
+        if ts_code is None:
+            # Bulk fetch: return all constituents
+            rows = [
+                {
+                    "ts_code": c["ts_code"],
+                    "name": c["name"],
+                    "industry": c["sector"],
+                    "list_date": c.get("list_date", "20010101"),
+                }
+                for c in self._constituents
+            ]
+            return pd.DataFrame(rows) if rows else pd.DataFrame()
         for c in self._constituents:
             if c["ts_code"] == ts_code:
                 return pd.DataFrame([{

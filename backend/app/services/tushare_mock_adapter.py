@@ -244,13 +244,25 @@ class LegacyMockTushareAdapter:
             }
         )
 
-    async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame:
-        # deterministic:固定返回白酒行业(贵州茅台)
+    async def get_stock_basic(self, *, ts_code: str | None = None) -> pd.DataFrame:
+        # deterministic stub.
+        # ts_code=None → 返回5只示例股票(模拟批量拉取所有在市股);
+        # ts_code 指定 → 返回该股单行(原有行为,向后兼容).
+        if ts_code is None:
+            return pd.DataFrame(
+                {
+                    "ts_code": ["600519.SH", "000858.SZ", "000568.SZ", "600036.SH", "601398.SH"],
+                    "name": ["贵州茅台", "五粮液", "泸州老窖", "招商银行", "工商银行"],
+                    "industry": ["白酒", "白酒", "白酒", "银行", "银行"],
+                    "list_date": ["20010827", "19980427", "19941118", "20020409", "20061027"],
+                }
+            )
         return pd.DataFrame(
             {
                 "ts_code": [ts_code],
                 "name": ["贵州茅台"],
                 "industry": ["白酒"],
+                "list_date": ["20010827"],
             }
         )
 
@@ -270,8 +282,17 @@ class LegacyMockTushareAdapter:
 
         return build_calendar_df(start, end)
 
-    async def get_index_weight(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
-        # deterministic stub: 返回5只中证800成分股示例
+    async def get_index_weight(
+        self,
+        *,
+        index_code: str,
+        trade_date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> pd.DataFrame:
+        # deterministic stub: 返回5只中证800成分股示例.
+        # trade_date / start_date / end_date 参数接受但忽略(stub 不区分日期).
+        ref_date = trade_date or end_date or "20260529"
         return pd.DataFrame(
             {
                 "index_code": [index_code] * 5,
@@ -282,7 +303,7 @@ class LegacyMockTushareAdapter:
                     "600036.SH",
                     "601398.SH",
                 ],
-                "trade_date": [trade_date] * 5,
+                "trade_date": [ref_date] * 5,
                 "weight": [2.5, 1.8, 1.2, 1.5, 2.0],
             }
         )
