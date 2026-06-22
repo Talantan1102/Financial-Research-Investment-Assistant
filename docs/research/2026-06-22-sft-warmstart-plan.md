@@ -1,6 +1,6 @@
 # SFT 热启动可执行方案(chatloop 工具调用 agent → GRPO)
 
-> 由 SFT 调研 workflow(4 路并行 web 调研 + 读项目代码 + 合成)产出。基座 Qwen3-8B-Instruct,路线 SFT 热启动 → GRPO + indicator_oracle 可验证奖励。术语见正文。
+> 由 SFT 调研 workflow(4 路并行 web 调研 + 读项目代码 + 合成)产出。**基座 Qwen3-8B-Thinking(见下「决策更新」——优先级高于正文里的 no-think / Instruct 表述)**,路线 SFT 热启动 → GRPO + indicator_oracle 可验证奖励。术语见正文。
 
 ## 已确认的项目事实(研究 agent 读代码核验)
 
@@ -8,6 +8,20 @@
 - assistant 消息**无 reasoning/`<think>`**(`state.py:176`)→ 轨迹 think-free。
 - collect 模式 `downgrade_char_threshold=10**9`(`runner.py:90`)→ 保留完整工具输出(SFT 好,但序列长)。
 - `data_refs`:run_python 按短 ref 引用缓存数据,非内联数组(`loop.py:299` 大输出换 digest+ref)。
+
+## 决策更新(2026-06-22,据业务场景重定 — 优先级高于下方 ⑤ 存疑点)
+
+业务定调:本项目是**金融指标计算 agent**,核心难点 = run_python 写对算法;踩过的 badcase 全是**推理性口径错**(回撤路径依赖 / 复权口径 / 多序列对齐),不是格式错;且为个人作品,**延迟/成本非约束**。据此两个关键决策,**明确不走"省事"默认**:
+
+**决策 A — 开 think,基座换 Thinking。** 理由:① 算指标要先想清楚口径/公式/路径依赖,边想边写才不犯口径错;② 失败模式是推理错——不带 think 会复刻捷径,带 think 能"等一下,回撤得扫累计序列"纠回来;③ **RLVR 只放大已有推理链,不带 think 模式无推理草稿可放大 → 算法正确性的 RL 天花板被结构性锁死**;④ 作品要体现技术深度,延迟非约束,"省事"三理由(简单/快/数据现成)对本项目全是弱理由。
+- **基座**:Qwen3-8B-**Thinking**-2507(或 hybrid 开 thinking),非 Instruct 支。
+- **SFT 数据要带推理草稿**:deepseek-v4-flash 不带 think,**换思考型最强 teacher**(承「用最强模型标注 SFT」决策:DeepSeek-R1 / Qwen3-Thinking / 更强推理模型)。**teacher 必须在 chatloop 内产轨迹**(格式与 qwen3-8b 上场一致);Qwen3-Thinking 经 dashscope `enable_thinking=true` 可直接接,DeepSeek-R1 要先确认工具调用可用。
+- **走 R1 配方**:少量高质量推理轨迹**冷启**(把"先想再动手"格式种进去),真正的推理质量靠 **GRPO 长出来**(RLVR 放大推理链)——所以 think 的数据成本没想象中吓人。
+- **不带 think 版降为对照组**,用来量化 think 带来的算法正确性提升(本身是有深度的实验结论)。
+
+**决策 B — SFT 采集对齐推理形态(开降级,不是关)。** 之前 collect 设 `downgrade_char_threshold=10**9` 关降级=保全完整行情内联,会造成"训练整串内联 / 推理 `data_refs` 短引用"的**形态错位**(用 A 课本复习拿 B 课本考)。修正:**采 SFT 数据时降级开着、跟真推理一致**——训练样本里也是"短引用+摘要",模型学的就是"看编号 → 写 run_python 用编号"。**这要改 Task 3 collect 的默认值**(不再设 10**9,改用推理同款阈值)。think + 形态对齐两件事一起满足。
+
+> 影响:下方 ① 的「数据格式」「训哪几轮」「SFT→RL 交接」凡涉及 no-think 的论断,按本决策读作"带 think";②「已有 vs 还要补」里"轨迹无 think"由优势改为"要重采带 think 轨迹";③ 步骤清单的"采数据"改为"用思考型 teacher 采、降级开着"。
 
 ## ① 具体 SFT 配方
 
@@ -56,8 +70,8 @@ LR **1e-4**(LoRA)/ rank **16~32** alpha **32~64** / epochs **2~3**(宁少勿多)
 1 采数据(collect, k5~8)→ 2 拒绝采样筛(join 留 passed)→ 3 过程清洗 → 4 去重 → 5 长度分布 → 6 数独立轨迹数(不足回 1)→ 7 对齐 chat template → 8 写 tokenize+labels(渲一条肉眼验,标"GRPO 复用")→ 9 切 hold-out → 10 小规模冒烟 → 11 搭 verl → 12 正式 SFT(LoRA)→ 13 选 checkpoint(Pass@64+泛化 loss+熵,非 train loss)→ 14 组内方差体检 → 15(并行)base 直接 GRPO 对照组 → 16 交接 GRPO(checkpoint 直通,复用 mask)。
 
 ## ⑤ 仍存疑、需你定的点
-1. **轨迹无 think 够不够**(最大存疑):run_python"为什么这么算"没被监督,可能封顶代码质量。ReTool/R1 cold-start 都带 CoT。**需定**:要不要补 think(deepseek 重跑保留 reasoning)?建议先无 think 跑通,对照组加"带 think"版对比。
-2. **collect 关降级 → 序列极长 + 训练/推理形态错位**(高风险):完整行情内联 → 单条破万 token;而推理时大输出走 `data_refs` 短引用。**开训前必须定死训练用哪种形态、且与 chatloop 推理一致**。
+1. ~~轨迹无 think 够不够~~ → **✅ 已定(决策 A)**:据业务场景(算指标是推理活、失败模式是口径错、RL 上限需推理草稿)**决定开 think**,基座换 Thinking,SFT 用思考型 teacher 采带推理轨迹,不带 think 降为对照组。
+2. ~~collect 关降级 → 形态错位~~ → **✅ 已定(决策 B)**:**采 SFT 数据时降级开着、与推理一致**(`data_refs` 短引用形态),改 Task 3 collect 默认值,不再设 10**9。
 3. **141 道幸存者偏差**:deepseek 通过的偏简单,难题轨迹缺失,SFT 喂不进难题能力。**需定**:要不要更强 teacher 啃难题补轨迹(注意 teacher 天花板)。
 4. **LoRA vs 全参**:先 LoRA,跑通看 Pass@64 决定要不要全参重跑。
 5. **GRPO 奖励要不要拆多档**(ToolRL 风格):奖励 schema 现在定能少返工。
