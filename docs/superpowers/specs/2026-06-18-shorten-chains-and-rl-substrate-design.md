@@ -60,7 +60,7 @@ gold 端(冻结 oracle + 同源 `meta.window_dates`,已核验 `generator.py:87`)
   - **坑二**:撞闸后注入的"(系统:已达上限…)"是 harness 拐杖(`loop.py:419-448`),绝不能进 SFT → **只收 `halt_reason=="natural"`** + 导出白名单 regex 兜底。
   - **坑三**:ledger 不是轨迹,抽 args 只信 messages。
 - **两道闸**:① 判对(逐 run,收紧容差复判防蒙对);② 过程干净(`halt_reason==natural` ∧ 全 entry success ∧ 无尾部失败/熔断/打转 ∧ 步数≤桶理想)→ `cleanliness_score`,同 case 多干净 run 留最高分一条。
-- **来源**:**主力 = deepseek 通过的真实轨迹**(89.4%,最强"会用工具"行为);不用 qwen3-8b 自蒸馏;不凭空造(oracle 无工具序列、人工编 args 易漂移);可小批量人工从 deepseek 多 run 里精选拼接。**量化**:141×k=5,每题≤2 条 → ~200–280 条干净样本。
+- **来源(用户决策:用最强模型标注)**:SFT 种子质量 = 热启动质量,**不在源头将就**。用**当前能跑通本 harness 的最强模型**生成轨迹——具体模型在采集步(落地第 3 步)前钉死,经**模型切换模块的 registry** 配(这正是该模块的第一个真用处;接前沿模型只需在 registry 加一条 + 其 API key)。约束:轨迹**必须经本 harness 的工具/循环产出**(格式要跟 qwen3-8b 推理时面对的一致);**不**用 qwen3-8b 自蒸馏;**不**凭空造(oracle 无工具序列、人工编 args 易漂移)。两道闸(判对+过程干净)筛选同样适用。**量化**:k=5,每题≤2 条 → ~200–280 条干净样本。
 - **导出格式**:标准 OpenAI 多轮 `{messages, tools(快照), meta{case_id,difficulty,indicator,reference_date,source_model,n_steps,cleanliness_score}}`;**带 system 但剥掉尾部动态区**(步数/预算提示会教模型依赖)、**带 tools 快照**、`meta` **不含 gold/passed**。
 
 ## ③ Benchmark 完整性(红线)
