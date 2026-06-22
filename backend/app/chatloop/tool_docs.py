@@ -410,9 +410,11 @@ TOOL_DOCS: dict[str, ToolDoc] = {
             "在 run_python 里用 data_refs={变量名: ref} 一次灌进沙箱算全量(年化/波动/回撤等),"
             "不要分段多次取、不要拿 summary 估算。\n"
             "示例:get_daily(ts_code='600519.SH', start='20250101', end='20250601')。\n"
-            "硬约束:ts_code 带后缀;日期 YYYYMMDD;长区间一次取全(不再只给最近一年)。"
+            "硬约束:ts_code 带后缀;日期 YYYYMMDD;长区间一次取全(不再只给最近一年)。\n"
+            "可传 anchor+lookback(日历型,如 1y/6m/3m/ytd)让工具自己定窗口,免先调 trade_cal;"
+            "过去 N 个交易日(td)仍需先 trade_cal。"
         ),
-        thin_required={"ts_code": "string", "start": "string", "end": "string"},
+        thin_required={"ts_code": "string"},
     ),
     "get_index_daily": ToolDoc(
         name="get_index_daily",
