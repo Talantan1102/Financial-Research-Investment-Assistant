@@ -1,3 +1,11 @@
 node_modules/
 # 根 .gitignore 的 build/ 规则会误伤本目录的 build 工具链,这里重新纳入
 !build/
+# 一次性生成/验证脚本与截图(引绝对路径,不入仓)
+_*.workflow.js
+_verify.js
+_shot*.js
+_shots/
+_catmeta.json
+_fanout.workflow.js
+_patch.workflow.js

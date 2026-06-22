@@ -1,0 +1,1437 @@
+<section class="category" id="cat-memory" data-icon="🧠" data-title="跨会话记忆系统">
+<header class="cat-header">
+  <span class="cat-icon">🧠</span>
+  <div><h2><span class="cat-no">03</span>跨会话记忆系统</h2></div>
+</header>
+<p class="cat-desc">这一组带你拆开 AlphaScout 的「跨会话记忆」系统:为什么一个 AI 助手光靠上下文窗口记不住老用户、一条偏好如何被抽取存档又在下次对话里被想起、为什么记忆必须同时区分「事情发生的时间」和「系统知道的时间」,以及写入冲突消解、三路混合检索、个人记忆 vs 市场知识的分流、三套存储库的一致性这些工程硬骨头。从零基础类比讲起,逐步深入到真实算法与一致性设计。</p>
+
+<article class="question-card" id="memory-q1">
+  <div class="q-header"><span class="q-num">Q1</span><h3 class="q-title">先打个基础:一个 AI 助手为什么需要"跨会话记忆"?它的上下文窗口不是已经能记住对话了吗?两者差在哪?</h3><span class="q-diff" title="难度 2/5">★★☆☆☆</span></div>
+  <div class="q-tags"><span class="tag">跨会话记忆</span><span class="tag">上下文窗口</span><span class="tag">持久化</span><span class="tag">基础概念</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题看着像"送分题",其实面试官在确认一件事:你是否真的分得清"模型当下读进去的那段文字"和"系统长期替用户保管的信息"。很多人把大模型当成一个"会记事的人",其实它每次回答都是从零开始读一遍材料——这个误解会让你后面所有关于记忆系统的设计都站不稳。所以面试官想看到:</p>
+    <ul>
+      <li><strong>追问:</strong>上下文窗口到底"记"到什么时候为止?换一个新会话、或者过了一周再回来,它还在吗?(考你知不知道窗口的边界是"单次会话")</li>
+      <li><strong>追问:</strong>那为什么不干脆把所有历史聊天记录每次都塞回窗口里,不就"永远记得"了?(考你懂不懂容量和成本这两道现实墙)</li>
+      <li><strong>追问:</strong>如果要做持久记忆,信息该存在哪、什么时候再拿出来?(把概念引向工程实现:落库 + 按需检索回填)</li>
+      <li><strong>追问:</strong>在你的项目里,这个"长期记忆层"是怎么接进聊天主流程的?(考你有没有真做过,而不是背概念)</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把最核心的一句话说清楚:<strong>上下文窗口不是"记忆",它是"当下摊在桌上的一摞材料"</strong>。</p>
+
+    <h5>上下文窗口 = 桌上摊开的草稿纸</h5>
+    <p>大模型回答问题的方式,是把"这一轮要参考的所有文字"——系统设定、你这次会话里说过的每句话、它自己刚回的话——一股脑读进去,然后接着往下写。这一摞文字就是上下文窗口。它有两个关键性质:</p>
+    <p>第一,它是<strong>临时的</strong>。就像你在草稿纸上演算,这张纸只在你这次坐下办事时有用;你起身离开(关掉会话)、或者换一张新纸(开一个新会话),上面写的东西就不在新纸上了。模型本身不会偷偷把旧纸收进抽屉——它没有抽屉。</p>
+    <p>第二,它是<strong>有限的</strong>。草稿纸再大也有边,写满了就得擦掉早先的内容腾地方。所以哪怕在同一次会话里,聊得太久,最早那几句也会被挤出窗口。</p>
+
+    <h5>那"跨会话记忆"要解决的是什么?</h5>
+    <p>是这种场景:用户上周跟你说过"我只想买低风险的标的",这周他换了个会话重新进来问"帮我看看这只股票"。这时候上周那张草稿纸早扔了,窗口里干干净净,模型根本不知道他偏好低风险。如果你想让助手"记得这个人",这条信息就必须<strong>在会话结束后还活着</strong>——它得被搬到对话流程之外的地方存起来,也就是落到一个<strong>数据库</strong>里。下次对话开场,系统再主动去库里把相关的几条捞出来,拼回新的草稿纸上,模型才"想得起来"。</p>
+    <p>所以两者的本质区别,不是"记得多 vs 记得少",而是<strong>"活在单次会话里" vs "活在会话之外的长期存储里"</strong>。窗口管不到会话边界以外,这是它的能力天花板,不是调大尺寸能解决的。</p>
+
+    <h5>那不能把历史全塞回窗口吗?——两道现实墙</h5>
+    <p>有人会想:既然落库再捞回来麻烦,我每次开会话就把这个用户过去所有聊天记录原样塞进窗口,不就永远记得了?两道墙拦住这条路:</p>
+    <p><strong>第一道墙:装不下。</strong>窗口大小有上限,一个老用户聊了几百轮,原样回放根本超出窗口容量。</p>
+    <p><strong>第二道墙:烧钱。</strong>模型按读进去的文字量(token)收费,每一轮都把全部历史重读一遍,成本会随历史线性膨胀,而且大部分内容跟当前这句话毫不相关,纯属浪费。</p>
+    <p>所以正确做法不是"回放全部",而是<strong>"抽取 + 按需检索"</strong>:对话过程中把零散闲聊里真正有价值的事实(比如"偏好低风险")抽出来、结构化地存进库;下次只把跟当前问题相关的少量条目捞回窗口。在本项目里,回填给模型的"个人画像"只占大约 500 token 的预算,而不是整段历史——这正是为了绕开上面两道墙。</p>
+
+    <h5>在本项目里它叫什么</h5>
+    <p>这套长期记忆层叫<strong>分层记忆(HierarchicalMemory)</strong>。它通过一个统一接口——<strong>记忆协议(Memory Protocol)</strong>——挂进聊天主循环,替换掉原来那个只在单次会话内有效的<strong>会话内记忆(InSessionMemory)</strong>。"统一接口"的好处是:主循环只认这套接口,底下换成"只记当下"还是"跨会话持久"两种实现,主循环代码一行不用改。具体存进去、再想起来的完整机制,见本类第 2 题;为什么底层用 MemGPT × Zep 杂交,见本类第 3 题。本题只需站稳"窗口管不过会话边界、记忆库才能跨边界"这个地基。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>用一段教学伪代码对比两种"记忆"。注意看:只靠窗口时,新会话开场窗口是空的;接上持久记忆后,系统会先去库里捞回相关条目再开聊。</p>
+    <pre><code class="language-python"># ===== 场景:用户上周说过"我偏好低风险",这周换新会话再进来 =====
+
+# 【方案 A】只靠上下文窗口
+def chat_window_only(session, user_msg):
+    # 窗口里只有"本次会话"说过的话,新会话开场 = 一摞空材料
+    window = session.messages          # 上周那次会话的内容,这里根本不在
+    window.append(user_msg)            # 把这句话也摊到草稿纸上
+    return model(window)               # 模型只看得到当下这摞,记不起"低风险"
+
+# 【方案 B】接上持久记忆层(本项目做法)
+def chat_with_memory(session, user_id, user_msg, memory):
+    window = session.messages
+
+    # 开场先去"文件柜"里,按当前这句话捞回少量相关旧事实
+    # 不是回放全部历史,只取最相关的几条(本项目个人画像约 500 token)
+    recalled = memory.archival_memory_search(user_id, query=user_msg, k=5)
+    window = inject_persona(window, recalled)   # 把捞回的事实拼回草稿纸开头
+
+    window.append(user_msg)
+    answer = model(window)                       # 现在模型看得到"偏好低风险"了
+
+    # 会话过程中,把这轮里值得长期记住的事实抽出来、存回柜子
+    # 关一会话也不丢,下次还能捞 —— 这就是"跨会话"的关键动作
+    memory.write_episode(user_id, session.id, user_msg, answer)
+    return answer
+</code></pre>
+    <p><strong>推演:</strong>假设用户历史里攒了 300 轮对话。方案 A 想"记得",只能把 300 轮全塞回窗口——可能直接超出窗口上限装不下,就算装得下,每轮也要为这一大坨历史重复付 token 费,而当前问题真正用得上的可能就一句"偏好低风险"。方案 B 只捞回约 500 token 的相关画像拼进去,既不爆窗口、又把每轮的检索回填成本压到很小一块,模型照样"记得你"。一句话:方案 B 用"抽取后按需捞"换掉了"原样全回放"。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择:独立持久记忆层</th><th class="th-vllm">替代方案:只靠上下文窗口记</th></tr></thead>
+      <tbody>
+        <tr><td>能否跨会话/跨天</td><td>能。信息落库,换会话/换天捞回来</td><td>不能。会话一关就清空,新会话从零开始</td></tr>
+        <tr><td>长历史容量</td><td>不受窗口限制,库里随便存,按需取少量</td><td>受窗口上限卡死,老用户历史装不下</td></tr>
+        <tr><td>每轮 token 成本</td><td>只回填相关少量条目(画像约 500 token)</td><td>想记得就得每轮重读全部历史,成本随历史涨</td></tr>
+        <tr><td>实现复杂度</td><td>高。要额外建写入管线 + 检索管线两条</td><td>零。模型自带窗口,什么都不用做</td></tr>
+        <tr><td>信息形态</td><td>抽取后的关键事实,结构化、可检索</td><td>原始聊天记录,杂、长、难精确取用</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>只靠窗口绝不是"差方案",它有真实优点——零实现成本、零额外延迟,而且在<strong>单次连续会话</strong>内它完全够用,本来就该让它管"当下这轮的上下文"。它唯一的死穴是管不过会话边界、也装不下长历史。我们要做的产品是"持续陪用户、记得他长期偏好的投研助手",这个需求天然落在窗口能力之外,所以才额外建一层持久记忆——代价是要多写两条管线:把对话里的事实抽出来存进库的<strong>写入管线</strong>,和下次对话按需把相关事实捞回来的<strong>检索管线</strong>。这两条管线正是本分类后面几道题要拆的内容。换句话说:窗口管"短期当下",记忆库管"长期跨会话",两者不是替代关系,而是分工。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="arrI" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="arrG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#1f6e5e"/>
+        </marker>
+        <marker id="arrR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#bf3f26"/>
+        </marker>
+      </defs>
+      <text x="450" y="30" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" font-weight="bold" fill="#2f4d8a">窗口 = 断崖内(临时)  ·  记忆库 = 跨断崖(持久)</text>
+
+      <!-- 会话边界:断崖虚线 -->
+      <line x1="450" y1="55" x2="450" y2="300" stroke="#85806f" stroke-width="2" stroke-dasharray="7 6"/>
+      <text x="450" y="318" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">⟵ 会话边界(断崖):窗口跨不过去 ⟶</text>
+
+      <!-- Session A -->
+      <rect x="40" y="60" width="350" height="195" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="215" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="bold" fill="#2f4d8a">会话 A(上周)</text>
+      <text x="215" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">上下文窗口 = 一摞消息</text>
+      <rect x="70" y="115" width="290" height="26" rx="6" fill="#ffffff" stroke="#2f4d8a" stroke-width="1"/>
+      <text x="82" y="132" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">用户:我只想买低风险的标的</text>
+      <rect x="70" y="148" width="290" height="26" rx="6" fill="#ffffff" stroke="#2f4d8a" stroke-width="1"/>
+      <text x="82" y="165" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">助手:好的,我记下了</text>
+      <!-- 会话关闭被划掉 -->
+      <line x1="70" y1="190" x2="360" y2="232" stroke="#bf3f26" stroke-width="2"/>
+      <line x1="360" y1="190" x2="70" y2="232" stroke="#bf3f26" stroke-width="2"/>
+      <text x="215" y="247" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">会话一关,这摞窗口被清空</text>
+
+      <!-- Session B -->
+      <rect x="510" y="60" width="350" height="195" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="685" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="bold" fill="#2f4d8a">会话 B(这周·新窗口)</text>
+      <text x="685" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">开场窗口本是空的</text>
+      <rect x="540" y="115" width="290" height="26" rx="6" fill="#faeae4" stroke="#bf3f26" stroke-width="1.2"/>
+      <text x="552" y="132" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">↑ 从柜里捞回:偏好低风险</text>
+      <rect x="540" y="148" width="290" height="26" rx="6" fill="#ffffff" stroke="#2f4d8a" stroke-width="1"/>
+      <text x="552" y="165" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">用户:帮我看看这只股票</text>
+      <text x="685" y="200" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">→ 模型这才"记得"他偏好低风险</text>
+      <text x="685" y="220" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">(只回填相关少量条目,约 500 token)</text>
+
+      <!-- 文件柜:持久记忆库 -->
+      <rect x="300" y="340" width="300" height="110" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.8"/>
+      <text x="450" y="364" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="bold" fill="#1f6e5e">持久记忆库(文件柜·数据库)</text>
+      <rect x="330" y="378" width="240" height="26" rx="6" fill="#ffffff" stroke="#1f6e5e" stroke-width="1"/>
+      <text x="342" y="395" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">卡片:用户 偏好 低风险</text>
+      <text x="450" y="426" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">抽取后的关键事实 · 跨会话/跨天都在</text>
+
+      <!-- A 结束 -> 入柜(松绿) -->
+      <path d="M215 255 C215 300 330 320 380 345" fill="none" stroke="#1f6e5e" stroke-width="2" marker-end="url(#arrG)"/>
+      <text x="250" y="300" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">①会话结束:抽取事实入柜</text>
+
+      <!-- 柜 -> B 开场捞回(朱砂) -->
+      <path d="M570 360 C660 330 670 250 660 180" fill="none" stroke="#bf3f26" stroke-width="2" marker-end="url(#arrR)"/>
+      <text x="620" y="335" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#bf3f26">②下次开场:按需捞回拼进窗口</text>
+
+      <!-- 图例 -->
+      <text x="40" y="356" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">图例:</text>
+      <line x1="80" y1="352" x2="110" y2="352" stroke="#1f6e5e" stroke-width="2" marker-end="url(#arrG)"/>
+      <text x="115" y="356" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">写入</text>
+      <line x1="160" y1="352" x2="190" y2="352" stroke="#bf3f26" stroke-width="2" marker-end="url(#arrR)"/>
+      <text x="195" y="356" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#bf3f26">检索回填</text>
+    </svg>
+    <figcaption>图 03-1 · 怎么看:中间竖虚线是"会话边界(断崖)",上下文窗口只活在断崖一侧、会话一关就被划掉(朱砂叉);底部文件柜是持久记忆库,会话 A 结束时把"偏好低风险"抽成一张卡片入柜(松绿①),会话 B 开场再按当前问题把它捞回新窗口(朱砂②)。一句话:窗口跨不过断崖,记忆库才能。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>上下文窗口是"单次会话内摊在桌上的草稿纸":临时(会话一关就清空)、有限(写满挤掉旧内容),本质是<strong>会话内</strong>记忆,跨不过会话边界。</li>
+      <li>跨会话记忆解决的是"这个用户上周/去年说过什么":信息必须落到对话流程之外的<strong>持久存储(数据库)</strong>,下次再主动捞回拼进提示词。</li>
+      <li>不能把历史全塞回窗口——两道墙:装不下(超窗口上限)、烧钱(每轮重读全部历史);所以只存<strong>抽取后的关键事实</strong>、按需检索少量回填。</li>
+      <li>本项目里这层叫<strong>分层记忆(HierarchicalMemory)</strong>,通过<strong>记忆协议(Memory Protocol)</strong>挂进聊天主循环,替换掉只在单会话有效的<strong>会话内记忆(InSessionMemory)</strong>,两种实现可互换。</li>
+      <li>窗口与记忆库是分工不是替代:前者管短期当下,后者管长期跨会话——代价是要多建写入与检索两条管线(见本类第 2、3 题)。</li>
+    </ul>
+    <p class="one-liner">一句话速记:窗口=会话内的临时草稿纸,记忆库=会话外的归档文件柜;窗口跨不过会话边界,持久记忆才让助手"换天也记得你"。</p>
+    <p class="src-note">参考:<code>docs/claude-context/c5-cross-session-memory-done.md</code>、<code>docs/claude-context/c5-plan1b-business-foundation-done.md</code>、<code>backend/app/memory/protocol.py</code>、<code>backend/app/memory/hierarchical.py</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="memory-q2">
+  <div class="q-header"><span class="q-num">Q2</span><h3 class="q-title">你的记忆系统大体长什么样?拿"用户去年说过他偏好低风险"举例,这条信息怎么被存下来、又在下一次对话里被想起来?</h3><span class="q-diff" title="难度 3/5">★★★☆☆</span></div>
+  <div class="q-tags"><span class="tag">记忆系统架构</span><span class="tag">抽取</span><span class="tag">检索</span><span class="tag">写读两管线</span><span class="tag">三库镜像</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>面试官想确认你不是把"记忆"理解成"把聊天记录原样存数据库,下次全读出来"。能不能讲清"写"和"读"是两条独立管线、中间存的是被提炼过的结构化事实而不是原话,是这道题的分水岭。我会用一个具体例子("偏好低风险")逼你把整条链路从头走到尾,看你哪一环讲不下去。</p>
+    <ul>
+      <li><strong>追问:</strong>为什么不直接存原话?存了原话下次不也能读出来吗?(逼你说清"结构化事实"相比"原始文本"在检索和回填时的优势)</li>
+      <li><strong>追问:</strong>一条"偏好低风险"到底被存成了什么数据结构?字段有哪些?</li>
+      <li><strong>追问:</strong>下次对话开场,系统怎么知道该把这条而不是别的几百条记忆塞进窗口?</li>
+      <li><strong>追问:</strong>同一条记忆为什么要在三个不同的数据库里各存一份?不冗余吗?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>核心一句话:<strong>我的记忆系统不存对话,存"被抽出来的事实"</strong>。它拆成两条管线 —— 写的时候把对话提炼成结构化事实存进库,读的时候按当前问题再把相关事实捞回来。两条管线在时间上是错开的:写发生在你说完话之后,读发生在下一次会话开场或遇到具体问题时。</p>
+
+    <h5>写:把一句口语抽成一张"事实卡片"</h5>
+    <p>用户说"我偏好低风险",这是一句口语。写入侧有个叫 <code>LLMExtractor</code> 的环节,职责就是把口语翻译成一条结构化的"边"(edge)。这条边长这样:<strong>主体 = 用户,关系类型 = PREFERS(偏好),客体 = 低风险</strong>,再附上两个元信息 —— 一个重要性档位(强表态记 0.9 高,顺带提一句记 0.2 低),一个时间戳(这句话是哪天说的)。注意"低风险"被规范成一个名词性实体,而不是"我偏好低风险"这一整句话 —— 因为名词才好被后续按对象去匹配和遍历。</p>
+    <p>这条边最终落进关系库 PostgreSQL 的 <code>chat_memory_edges</code> 表(全量事实在这里,是主真相源),同时镜像一份进图库 Apache AGE、再镜像一份进向量库 Milvus。一份数据、三处副本,后面讲为什么。</p>
+
+    <h5>读:开场画像 + 临场检索</h5>
+    <p>读分两层。<strong>第一层是开场画像</strong>:下一次对话一开始,<code>persona_populator</code> 会扫这个用户当前还生效的几类边 —— 持仓(HOLDS)、偏好(PREFERS)、回避(AVOIDS)、关注(WATCHES),把它们拼成一段约 500 tokens 的"用户画像",直接塞进上下文窗口。所以模型还没等你开口,就已经"知道"你偏好低风险了。<strong>第二层是临场检索</strong>:你问了具体问题(比如"帮我看看这只票"),系统再用三路混合检索(<code>archival_memory_search</code>)去捞跟当前问题更相关的细粒度记忆。开场画像管"你是谁"的常驻底色,临场检索管"这次问题"的精准补充。</p>
+
+    <h5>为什么一份数据要三处镜像</h5>
+    <p>因为同一条事实有三种查法,各有所长:PG 擅长"按用户、按关系类型精确捞全量"(开场画像那几条 SQL 就是),AGE 擅长"顺着关系往下遍历"(比如从用户走到他持仓的股票再走到所属行业),Milvus 擅长"按语义相似找"(你问的词跟存的词不完全一样也能召回)。三库不是重复造轮子,是同一条边在三个角度各放一个副本,各自负责一种查询模式。三库之间怎么保证写一半崩了不脏,是另一道题(见本类第 8 题)。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>把"偏好低风险"这条信息,从写到读完整走一遍。下面是教学伪代码,只画逻辑骨架,真实实现里抽取走 LLM、落库分三处事务。</p>
+    <pre><code class="language-python"># ===== 写管线:一句口语 -> 一条结构化的边 =====
+user_says = "我偏好低风险"
+
+# 1) LLMExtractor 把口语抽成结构化的边(主体-关系-客体 + 元信息)
+edge = {
+    "rel_type":    "PREFERS",       # 关系类型:偏好(不是看多/持仓)
+    "source":      "User",          # 主体固定是用户
+    "target":      "低风险",         # 客体抽成名词性实体,不是整句谓词
+    "importance":  0.9,             # 强表态 -> 高档(0.9 / 0.5 / 0.2 三选一)
+    "valid_from":  "2025-06-20",    # 时间戳 = 说这话那天,不许编造
+    "valid_to":    None,            # 还没被推翻,所以"至今有效"
+}
+
+# 2) 同一条边落进三处,各自擅长一种查法
+pg.insert(edge)             # 关系库:全量事实 + 主真相源
+age.create_edge(edge)       # 图库:供"顺关系遍历"
+milvus.insert(embed(edge))  # 向量库:供"按语义相似找",1024 维
+
+# ===== 读管线(下一次对话,可能隔了很久) =====
+# 3) 开场:扫 4 类还生效的边,拼成 ~500 tokens 画像塞进窗口
+persona = persona_populator(user_id)   # 只看 valid_to 为空(仍生效)的边
+# persona 里这一行: "### 偏好方法(PREFERS)\n- 低风险"
+window = system_prompt + persona + user_new_question
+
+# 4) 遇到具体问题再三路混合检索,捞更细的相关记忆
+hits = archival_memory_search(user_new_question)   # 图 / 向量 / 全文 三路融合
+</code></pre>
+    <p><strong>推演:</strong>假设用户去年说了 1 句"偏好低风险",今年又陆续聊了 200 轮别的。整段塞回方案要把这 200 轮全读进窗口(假设上万 tokens),模型还得自己在噪声里翻出那句话。我的方案:那 1 句被抽成 1 条边存着,今年开场时 <code>persona_populator</code> 只把这条(连同持仓/回避/关注共 4 类、合计约 500 tokens)拼进窗口 —— 模型一眼就看到"该用户 PREFERS 低风险",省掉了上万 tokens 的翻找。写入主路径是 <code>archival_memory_insert</code> 的 8 步 pipeline。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择:抽取 + 检索</th><th class="th-vllm">替代方案:整段对话塞回</th></tr></thead>
+      <tbody>
+        <tr><td>窗口占用</td><td>只回填挑出的几条,开场画像约 500 tokens 封顶</td><td>历史越长占用越大,迟早撑爆窗口</td></tr>
+        <tr><td>Token 成本</td><td>常驻成本固定、可控</td><td>每轮都把全部历史重算一遍,线性烧钱</td></tr>
+        <tr><td>信噪比</td><td>喂给模型的是被提炼的关键事实,重点突出</td><td>关键那句淹在海量寒暄里,模型要自己找</td></tr>
+        <tr><td>细节保真</td><td>抽取可能漏抽 / 抽错,有信息损失风险</td><td>原话全在,零损失</td></tr>
+        <tr><td>实现复杂度</td><td>要写抽取、冲突消解、三路检索,工程量大</td><td>极简,拼字符串即可</td></tr>
+        <tr><td>可控性</td><td>事实结构化后能审计、能改、能按关系遍历</td><td>一坨文本,改不动也查不动</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>整段塞回真有它的好 —— 实现简单到几乎不用写代码,而且零信息损失,你说过的每个字都还在。在对话很短、或者就想做个玩具 demo 时,它完全够用,硬上抽取管线反而是过度工程。我们仍选抽取 + 检索,是因为这是个会长期陪用户的金融助手:历史会无限增长,而窗口和预算不会。一旦对话攒到几百轮,整段塞回要么爆窗口、要么烧光预算、要么把关键偏好淹没在噪声里。我们用"抽取可能漏 / 检索可能召回不全"这个代价,换"成本可控 + 信噪比高 + 事实可治理"—— 而那个代价正是后面几道题在专门治理的(冲突消解见本类第 5 题、三路融合排序见本类第 6 题)。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body">
+    <figure class="diagram">
+      <svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg" role="img">
+        <defs>
+          <marker id="ar-q2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#2f4d8a"/>
+          </marker>
+          <marker id="ar-q2g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#1f6e5e"/>
+          </marker>
+        </defs>
+
+        <text x="20" y="28" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="bold" fill="#2f4d8a">写管线:把口语抽成事实卡片,镜像进三库</text>
+
+        <!-- 聊天气泡 -->
+        <rect x="20" y="50" width="150" height="56" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+        <text x="95" y="74" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26" text-anchor="middle">用户(去年):</text>
+        <text x="95" y="94" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#bf3f26" text-anchor="middle">"我偏好低风险"</text>
+
+        <!-- LLMExtractor 漏斗 -->
+        <path d="M200 56 L320 56 L290 90 L290 100 L230 100 L230 90 Z" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="260" y="74" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="bold" fill="#2f4d8a" text-anchor="middle">LLMExtractor</text>
+        <text x="260" y="90" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f" text-anchor="middle">抽取漏斗</text>
+        <line x1="170" y1="78" x2="198" y2="78" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q2)"/>
+
+        <!-- 结构化卡片 -->
+        <rect x="360" y="44" width="200" height="80" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="460" y="64" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="bold" fill="#2f4d8a" text-anchor="middle">结构化的边(事实卡片)</text>
+        <text x="372" y="84" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">用户 —PREFERS→ 低风险</text>
+        <text x="372" y="102" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">importance=0.9 · 时间戳=2025-06</text>
+        <text x="372" y="118" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">valid_to=null(至今有效)</text>
+        <line x1="320" y1="70" x2="358" y2="78" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q2)"/>
+
+        <!-- 三个抽屉 -->
+        <text x="700" y="38" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f" text-anchor="middle">同一条边,三处镜像</text>
+        <rect x="600" y="46" width="200" height="34" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="700" y="68" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a" text-anchor="middle">PG 关系表(全量·主真相源)</text>
+        <rect x="600" y="86" width="200" height="34" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+        <text x="700" y="108" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e" text-anchor="middle">AGE 图(供按关系遍历)</text>
+        <rect x="600" y="126" width="200" height="34" rx="8" fill="#f0ede4" stroke="#a8761f" stroke-width="1.5"/>
+        <text x="700" y="148" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#a8761f" text-anchor="middle">Milvus 向量(供语义相似·1024维)</text>
+        <line x1="560" y1="78" x2="598" y2="64" stroke="#2f4d8a" stroke-width="1.4" marker-end="url(#ar-q2)"/>
+        <line x1="560" y1="86" x2="598" y2="100" stroke="#2f4d8a" stroke-width="1.4" marker-end="url(#ar-q2)"/>
+        <line x1="560" y1="94" x2="598" y2="140" stroke="#2f4d8a" stroke-width="1.4" marker-end="url(#ar-q2)"/>
+
+        <!-- 分隔线 -->
+        <line x1="20" y1="200" x2="880" y2="200" stroke="#85806f" stroke-width="1" stroke-dasharray="5 4"/>
+        <text x="20" y="228" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="bold" fill="#1f6e5e">读管线(下一次会话,可能隔了一年):卡片被想起来</text>
+
+        <!-- 三库 -->
+        <rect x="40" y="252" width="180" height="34" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="130" y="274" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a" text-anchor="middle">PG / AGE / Milvus 抽屉</text>
+
+        <!-- persona_populator -->
+        <rect x="320" y="240" width="190" height="58" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+        <text x="415" y="262" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="bold" fill="#1f6e5e" text-anchor="middle">persona_populator</text>
+        <text x="415" y="280" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e" text-anchor="middle">扫 4 类生效边:HOLDS/PREFERS</text>
+        <text x="415" y="294" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e" text-anchor="middle">/AVOIDS/WATCHES</text>
+        <line x1="220" y1="269" x2="318" y2="269" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#ar-q2g)"/>
+
+        <!-- 500 token 画像 -->
+        <rect x="560" y="240" width="160" height="58" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+        <text x="640" y="262" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="bold" fill="#bf3f26" text-anchor="middle">用户画像 ~500 tokens</text>
+        <text x="640" y="282" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#bf3f26" text-anchor="middle">"偏好:低风险"</text>
+        <line x1="510" y1="269" x2="558" y2="269" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#ar-q2g)"/>
+
+        <!-- 上下文窗口 -->
+        <rect x="740" y="232" width="140" height="74" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="810" y="258" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="bold" fill="#2f4d8a" text-anchor="middle">新会话</text>
+        <text x="810" y="276" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="bold" fill="#2f4d8a" text-anchor="middle">上下文窗口</text>
+        <text x="810" y="294" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f" text-anchor="middle">模型一眼看到</text>
+        <line x1="720" y1="269" x2="738" y2="269" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q2)"/>
+
+        <!-- 临场检索补充 -->
+        <rect x="320" y="330" width="400" height="40" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.4"/>
+        <text x="520" y="354" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f" text-anchor="middle">遇到具体问题再补:三路混合检索 archival_memory_search(图/向量/全文)</text>
+        <line x1="130" y1="286" x2="130" y2="350" stroke="#85806f" stroke-width="1.4"/>
+        <line x1="130" y1="350" x2="318" y2="350" stroke="#85806f" stroke-width="1.4" marker-end="url(#ar-q2)"/>
+        <line x1="720" y1="350" x2="800" y2="350" stroke="#85806f" stroke-width="1.4"/>
+        <line x1="800" y1="350" x2="800" y2="308" stroke="#85806f" stroke-width="1.4" marker-end="url(#ar-q2)"/>
+
+        <!-- 强调便签 -->
+        <rect x="40" y="400" width="820" height="48" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.2"/>
+        <text x="450" y="421" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="bold" fill="#bf3f26" text-anchor="middle">关键:存进窗口的是被挑出来的「卡片」,不是整本聊天记录</text>
+        <text x="450" y="440" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f" text-anchor="middle">抽取 → 存档 → (下次)检索 → 回填提示词</text>
+
+        <!-- 图例 -->
+        <rect x="20" y="455" width="14" height="10" rx="2" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="40" y="464" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">主结构/存储</text>
+        <rect x="135" y="455" width="14" height="10" rx="2" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="155" y="464" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">读侧回忆</text>
+        <rect x="240" y="455" width="14" height="10" rx="2" fill="#faeae4" stroke="#bf3f26"/>
+        <text x="260" y="464" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">关键强调</text>
+        <rect x="345" y="455" width="14" height="10" rx="2" fill="#f0ede4" stroke="#85806f"/>
+        <text x="365" y="464" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">次要/临场补充</text>
+      </svg>
+      <figcaption>图 03-2 · 怎么看:上半是写管线(气泡→漏斗→卡片→三库镜像),下半是读管线(开场扫 4 类边拼 500-token 画像进窗口,临场再三路检索补细)。记住朱砂便签那句:存的是卡片,不是整段对话。</figcaption>
+    </figure>
+  </div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>记忆不是"存对话",是分写、读两条管线:写时抽成结构化事实,读时按需检索回填。</li>
+      <li>写入侧 LLMExtractor 把"我偏好低风险"抽成一条边:用户 —PREFERS→ 低风险,带重要性档位 + 时间戳,落进 PG 并镜像到 AGE 和 Milvus。</li>
+      <li>读取侧分两层:开场 persona_populator 扫 4 类生效边(HOLDS/PREFERS/AVOIDS/WATCHES)拼约 500 tokens 画像进窗口;临场再三路混合检索捞细节。</li>
+      <li>一份数据三处镜像各擅长一种查法:PG 精确捞全量、AGE 顺关系遍历、Milvus 语义相似 —— 不是冗余,是同一事实的三个查询角度。</li>
+      <li>选抽取 + 检索而非整段塞回:用"可能漏抽 / 召回不全"的代价,换成本可控 + 信噪比高 + 事实可治理。</li>
+    </ul>
+    <p class="one-liner">一句话速记:写时把对话提炼成"用户 —PREFERS→ 低风险"这张卡片存进三库,读时开场把卡片拼成画像、临场再检索补细 —— 模型看到的永远是挑出来的少量事实,不是整本聊天记录。</p>
+    <p class="src-note">参考:<code>backend/app/memory/extractor.py</code>、<code>backend/app/memory/persona_populator.py</code>、<code>docs/claude-context/c5-plan2a-write-pipeline-core-done.md</code>、<code>docs/claude-context/c5-plan3-read-pipeline-done.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="memory-q3">
+  <div class="q-header"><span class="q-num">Q3</span><h3 class="q-title">你为什么用 MemGPT 分层记忆 × Zep 双时态图杂交,而不是单纯照搬其中一个?各取了什么、丢了什么?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">MemGPT</span><span class="tag">Zep / Graphiti</span><span class="tag">架构杂交</span><span class="tag">选型权衡</span><span class="tag">双时态图</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题面试官不在乎你背没背过 MemGPT 和 Zep 这两个名字,而是想看你<strong>能不能把别人的论文拆开,只拿对你场景有用的零件,再说清代价</strong>。能背名字的人很多,能讲清"哪块取自谁、为什么不照搬整套、缝合处多付了什么"的人才是做过架构决策的。一个常见的失败回答是"我两个都用了,所以更强"——这是堆料,不是设计。</p>
+    <ul>
+      <li><strong>追问:</strong>如果只用纯 MemGPT,你的金融场景具体会在哪个 query 上崩?给个例子。</li>
+      <li><strong>追问:</strong>Zep 默认绑 Neo4j,你换成了 PG + Apache AGE,这个替换不是免费的,你付了什么代价?</li>
+      <li><strong>追问:</strong>"杂交"听起来很美,但缝合层是要维护的。多出来的复杂度最后落在哪几个地方?</li>
+      <li><strong>追问:</strong>除了这两家,你还掺了别的来源吗?为什么不是纯粹的二选一拼装?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把两套东西讲成大白话。<strong>MemGPT(也叫 Letta,2023 年)</strong>解决的是"接口"问题:它把记忆当成一块<strong>分层的、可读写的存储</strong>,然后让 AI 自己拿工具去管它——就像给一个人一个会自动翻页的笔记本,桌面上摊开的那页是工作记忆,翻进去的旧页是归档,人自己决定写哪、查哪。我们直接照搬了它这套交互范式:给 agent 6 个记忆工具(往工作区追加/替换、往归档区写入/检索/沿关系走、回看历史对话),工作区还分了页——人设区 500 token、草稿区 1000 token,写满了自动把旧行翻进归档。</p>
+    <p>但 MemGPT 原版的归档是<strong>一堆扁平文本块</strong>——一条条独立的句子,谁也不认识谁。这在我们的场景里是致命的。</p>
+
+    <h5>金融场景的硬需求:态度会随时间演化</h5>
+    <p>散户对一只股票的看法不是一个静态标签,而是一条时间线:去年重仓茅台 → 三月加仓 → 五月清仓 → 后来又说"我当时记错了,没全卖"。如果归档只是扁平文本,这四句话躺在一起,系统根本不知道哪句作废了、哪句是最新的、哪句是对哪句的更正。你问"他现在还拿茅台吗",检索回来四条互相打架的文本,没法回答。</p>
+
+    <h5>从 Zep / Graphiti(2025)取后端:双时态知识图谱</h5>
+    <p>所以归档层我们换成了 <strong>Zep 那套双时态知识图谱</strong>:记忆不是文本块,而是<strong>带时间属性的"实体—关系"</strong>。"用户—持有→茅台"是一条边,这条边上挂着两组时间:事情<em>真实发生</em>的区间(几月持到几月),和系统<em>知道</em>这件事的时间。这样"卖出"就表现为给旧的"持有"边盖上一个失效时间、再长出一条新边,而不是把旧记忆删掉。历史可回溯、当前可查询,"态度演化"被结构化地表达出来了。(双时态本身是下一道题专讲,这里只说它是我们换后端的理由——见本类第 4 题。)</p>
+
+    <h5>但我们没照搬 Zep 的存储:PG + Apache AGE,不上 Neo4j</h5>
+    <p>Zep 默认把图存在 Neo4j 里。我们没跟——项目本来就有一套 PostgreSQL 基建(持仓、公告、会话都在上面),再为记忆单独引一个 Neo4j 是额外的运维负担。我们的做法是:<strong>PG 表存全量事实数据 + B 树索引(真正干检索/范围查询的活),Apache AGE 这个 PG 扩展只镜像一份图拓扑给 Cypher 多跳遍历用</strong>。这样绕开了 AGE 的一个已知短板——它的 agtype 索引能力弱,不适合扛全量查询。代价是图镜像写入只能做成"尽力而为":AGE 不可用时降级成告警,PG 始终是唯一真相源(这块的一致性是第 8 题的主题)。</p>
+
+    <h5>还掺了第三方风味——所以不是简单二选一</h5>
+    <p>真正落地时还借了两味:写入冲突谁覆盖谁,用的是 <strong>mem0 风格的 LLM 当裁判</strong>(覆盖/更新/并存,详见第 5 题);每条记忆都挂一个 <strong>provenance 证据外键</strong>(Anthropic Citations 风格,指回原始对话原文),防止 agent 凭空编。所以最终架构是"MemGPT 接口 + Zep 图后端 + PG/AGE 存储 + mem0 裁判 + Citations 溯源"五味缝合,不是把任何一家整套搬过来。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>用"用户清仓茅台"这个动作,对比扁平文本(纯 MemGPT)和双时态图(我们)各自怎么记。</p>
+    <pre><code class="language-python"># ① 纯 MemGPT 风格:归档是扁平文本块,新事实直接追加
+archival = [
+    "用户重仓茅台",          # 去年写的
+    "用户三月加仓茅台",      # 三月写的
+    "用户清仓了茅台",        # 五月写的 —— 但旧的两条还躺在这
+]
+# 问"他现在还拿茅台吗?" → 检索回 3 条互相矛盾的文本,
+# 系统不知道哪条最新、哪条作废,只能把矛盾甩给上层 LLM 猜
+
+# ② 我们的双时态图:态度演化变成"边的失效 + 新边",历史不删
+edge_old = {
+    "rel": "持有", "src": "用户", "tgt": "茅台",
+    "valid_from": "2025-06", "valid_to": "2026-05",  # 真实持有区间
+    "invalidated_at": "now()",   # 系统在五月那次对话里"知道"它作废了
+}
+edge_new = {
+    "rel": "已卖出", "src": "用户", "tgt": "茅台",
+    "valid_from": "2026-05", "valid_to": None,       # ongoing
+    "invalidated_at": None,                          # 当前有效
+}
+# 问"他现在还拿茅台吗?" → 只取 invalidated_at IS NULL 的当前快照,
+# 干净答出"已卖出";要回溯历史也能把旧边翻出来,什么都没丢
+
+# ③ 接口层照搬 MemGPT:agent 自己拿工具写,不是后台偷偷记
+#    insert 时强制带 evidence_quote(Citations 风溯源),找不到原文 substring 就拒写
+archival_memory_insert(content=edge_new, evidence_quote="我上个月把茅台都卖了")
+</code></pre>
+    <p><strong>推演:</strong>同一句"我把茅台卖了",纯 MemGPT 留下 3 条扁平文本、当前态度需要 LLM 现场猜;我们这边变成 1 条边盖失效章 + 1 条新边,"现在拿不拿"是一次 <code>invalidated_at IS NULL</code> 的确定性查询。接口照搬自 MemGPT 的 6 个工具(工作区 persona 500 / scratchpad 1000 token 分页),后端换成 Zep 双时态图,存储落在 PG + AGE(图拓扑)+ Milvus(1024 维向量),没有一处是整套搬来的。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(杂交)</th><th class="th-vllm">替代方案(纯 MemGPT vs 纯 Zep)</th></tr></thead>
+      <tbody>
+        <tr><td>交互范式</td><td>照搬 MemGPT:6 个工具 agent 自管 + 工作区分页</td><td>纯 MemGPT 同样好,且更省事;纯 Zep 缺这套 agent 自管工具语义,要自己补</td></tr>
+        <tr><td>归档表达力</td><td>Zep 双时态图,态度演化结构化可查</td><td>纯 MemGPT 扁平文本表达不了"卖出作废哪条";纯 Zep 在这点最强</td></tr>
+        <tr><td>时间维度</td><td>真实时间 × 系统知道时间,双轴</td><td>纯 MemGPT 时间维度弱;纯 Zep 双时态是它的招牌</td></tr>
+        <tr><td>存储落地</td><td>PG + AGE(复用已有基建,绕开 agtype 索引弱)</td><td>纯 Zep 默认绑 Neo4j,多一套独立运维</td></tr>
+        <tr><td>溯源 / 防编造</td><td>每条边挂 provenance 外键(Citations 风)</td><td>两家原版都不以此为核心卖点,需自加</td></tr>
+        <tr><td>代价</td><td>缝合层多、要扛 AGE 索引弱 + 三库一致性</td><td>纯方案缝合少、上手快,但各缺一块短板补不上</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>纯 MemGPT 的优势是真实存在的——agent 自管接口设计优雅、上手快,如果我们的记忆只是"用户偏好低风险"这类静态标签,扁平归档完全够用,杂交就是过度工程。纯 Zep 的双时态图也确实是它最硬的本事,我们后端几乎是站在它肩膀上。我们仍选杂交,是因为金融场景同时卡住了这两家的短板:既需要 MemGPT 那种"让 agent 用工具显式管记忆"的可控接口,又需要 Zep 那种"态度随时间演化"的结构化后端——任何一家整套搬来都会缺另一块。代价我们认:多出的缝合层、AGE 索引弱要靠 PG 扛主查询、三库写入要做一致性兜底(第 8 题)。这是一笔"用工程复杂度换表达力"的明账,不是堆料。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body">
+    <figure class="diagram">
+      <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+        <defs>
+          <marker id="q3-arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 Z" fill="#2f4d8a"/>
+          </marker>
+          <marker id="q3-arr-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 Z" fill="#bf3f26"/>
+          </marker>
+        </defs>
+
+        <!-- 上层:MemGPT 接口层 -->
+        <rect x="30" y="36" width="840" height="150" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="50" y="62" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="bold" fill="#2f4d8a">上层 · MemGPT 接口层</text>
+        <text x="50" y="82" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">取:分层 + agent 自管 6 工具 + 工作区分页 ｜ 丢:它原版的扁平文本归档</text>
+
+        <!-- 6 个工具方块 -->
+        <g font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#2f4d8a" text-anchor="middle">
+          <rect x="52"  y="98" width="125" height="66" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.3"/>
+          <text x="114" y="124">core 工作区</text><text x="114" y="142" font-size="10" fill="#85806f">append / replace</text>
+          <rect x="190" y="98" width="125" height="66" rx="8" fill="#fff" stroke="#2f4d8a"/>
+          <text x="252" y="124">archival 归档</text><text x="252" y="142" font-size="10" fill="#85806f">insert</text>
+          <rect x="328" y="98" width="125" height="66" rx="8" fill="#fff" stroke="#2f4d8a"/>
+          <text x="390" y="124">archival 归档</text><text x="390" y="142" font-size="10" fill="#85806f">search</text>
+          <rect x="466" y="98" width="125" height="66" rx="8" fill="#fff" stroke="#2f4d8a"/>
+          <text x="528" y="124">archival 归档</text><text x="528" y="142" font-size="10" fill="#85806f">traverse 多跳</text>
+          <rect x="604" y="98" width="125" height="66" rx="8" fill="#fff" stroke="#2f4d8a"/>
+          <text x="666" y="124">recall 回看</text><text x="666" y="142" font-size="10" fill="#85806f">历史对话</text>
+          <rect x="742" y="98" width="106" height="66" rx="8" fill="#f0ede4" stroke="#85806f"/>
+          <text x="795" y="120">工作区分页</text><text x="795" y="137" font-size="9.5" fill="#85806f">persona 500</text><text x="795" y="151" font-size="9.5" fill="#85806f">scratch 1000</text>
+        </g>
+
+        <!-- 缝合线 + 三张补丁标签 -->
+        <line x1="450" y1="186" x2="450" y2="236" stroke="#bf3f26" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#q3-arr-red)"/>
+        <text x="462" y="214" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="bold" fill="#bf3f26">缝合层(自建)</text>
+        <g font-family="Noto Sans SC, sans-serif" font-size="10" text-anchor="middle">
+          <rect x="80"  y="198" width="190" height="34" rx="8" fill="#f0ede4" stroke="#a8761f"/>
+          <text x="175" y="219" fill="#a8761f">补丁① mem0 风 LLM 冲突消解</text>
+          <rect x="630" y="198" width="200" height="34" rx="8" fill="#f0ede4" stroke="#a8761f"/>
+          <text x="730" y="219" fill="#a8761f">补丁② Citations 风 provenance 外键</text>
+        </g>
+
+        <!-- 下层:Zep 双时态图后端 -->
+        <rect x="30" y="248" width="840" height="208" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+        <text x="50" y="274" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="bold" fill="#1f6e5e">下层 · Zep 双时态图后端</text>
+        <text x="50" y="294" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">取:实体—关系图 + 双时态(态度演化可查)｜ 丢:它默认绑的 Neo4j</text>
+
+        <!-- 实体关系图:态度演化 -->
+        <g font-family="Noto Sans SC, sans-serif" text-anchor="middle">
+          <rect x="80" y="330" width="92" height="48" rx="8" fill="#fff" stroke="#1f6e5e" stroke-width="1.3"/>
+          <text x="126" y="359" font-size="12" fill="#1f6e5e">用户</text>
+
+          <rect x="360" y="312" width="120" height="46" rx="8" fill="#f0ede4" stroke="#85806f" stroke-dasharray="4 3"/>
+          <text x="420" y="332" font-size="11" fill="#85806f">茅台(旧:持有)</text>
+          <text x="420" y="349" font-size="9" fill="#bf3f26">valid_to 已盖章·失效</text>
+
+          <rect x="360" y="378" width="120" height="46" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.3"/>
+          <text x="420" y="398" font-size="11" fill="#bf3f26">茅台(新:已卖出)</text>
+          <text x="420" y="415" font-size="9" fill="#1f6e5e">invalidated_at IS NULL</text>
+
+          <!-- 边 -->
+          <line x1="172" y1="348" x2="358" y2="335" stroke="#85806f" stroke-width="1.3" marker-end="url(#q3-arr)" stroke-dasharray="4 3"/>
+          <text x="262" y="330" font-size="9.5" fill="#85806f">持有 25/06–26/05</text>
+          <line x1="172" y1="360" x2="358" y2="398" stroke="#bf3f26" stroke-width="1.5" marker-end="url(#q3-arr-red)"/>
+          <text x="262" y="392" font-size="9.5" fill="#bf3f26">已卖出 26/05–</text>
+
+          <!-- 当前快照查询 -->
+          <rect x="560" y="348" width="290" height="56" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+          <text x="705" y="372" font-size="11" fill="#1f6e5e">查"现在还拿茅台吗?"</text>
+          <text x="705" y="392" font-size="10" fill="#85806f">→ 只取当前有效边,确定性答"已卖出"</text>
+          <line x1="480" y1="401" x2="558" y2="392" stroke="#1f6e5e" stroke-width="1.3" marker-end="url(#q3-arr)"/>
+        </g>
+
+        <!-- 存储补丁 -->
+        <rect x="80" y="432" width="700" height="18" rx="8" fill="#f0ede4" stroke="#a8761f"/>
+        <text x="430" y="445" font-family="Noto Sans SC, sans-serif" font-size="10" text-anchor="middle" fill="#a8761f">补丁③ 存储 = PG(全量+B树索引) + Apache AGE(只存图拓扑) + Milvus 1024d ，替掉 Neo4j ，复用已有基建</text>
+
+        <!-- 图例 -->
+        <g font-family="Noto Sans SC, sans-serif" font-size="9.5">
+          <rect x="30" y="470" width="14" height="11" rx="3" fill="#faeae4" stroke="#bf3f26"/><text x="49" y="479" fill="#85806f">朱砂=当前有效/我们选择</text>
+          <rect x="220" y="470" width="14" height="11" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/><text x="239" y="479" fill="#85806f">松绿=Zep 后端</text>
+          <rect x="360" y="470" width="14" height="11" rx="3" fill="#e9eef8" stroke="#2f4d8a"/><text x="379" y="479" fill="#85806f">靛蓝=MemGPT 接口</text>
+          <rect x="520" y="470" width="14" height="11" rx="3" fill="#f0ede4" stroke="#85806f"/><text x="539" y="479" fill="#85806f">灰=失效/替代</text>
+          <rect x="660" y="470" width="14" height="11" rx="3" fill="#f0ede4" stroke="#a8761f"/><text x="679" y="479" fill="#85806f">赭=第三方补丁</text>
+        </g>
+      </svg>
+      <figcaption>图 03-3 · 怎么看:上层照搬 MemGPT 的 6 工具自管接口(丢掉它的扁平归档),下层换成 Zep 双时态图(丢掉它的 Neo4j),中间一条缝合线挂三张补丁——mem0 冲突消解、Citations 溯源、PG+AGE 替 Neo4j。右下"已卖出"的边盖失效章、长新边,就是"态度演化可查"的核心机制。</figcaption>
+    </figure>
+  </div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>不是二选一,是拆零件:</strong>接口取自 MemGPT(6 工具 agent 自管 + 工作区分页),后端取自 Zep(双时态实体关系图),再掺 mem0 冲突消解 + Citations 溯源两味。</li>
+      <li><strong>丢掉 MemGPT 的扁平归档:</strong>金融场景里"态度随时间演化"用扁平文本表达不了——卖出后旧的"持有"该作废却没法标记,当前态度只能让 LLM 现场猜。</li>
+      <li><strong>丢掉 Zep 的 Neo4j:</strong>用 PG + Apache AGE 复用已有基建,PG 扛全量查询、AGE 只存图拓扑给 Cypher 用,绕开 AGE agtype 索引弱。</li>
+      <li><strong>代价讲明:</strong>缝合层多、要靠 PG 扛主查询、三库(PG/AGE/Milvus)写入一致性要兜底——这是用工程复杂度换表达力的明账。</li>
+      <li><strong>纯方案不是稻草人:</strong>静态偏好标签场景纯 MemGPT 就够,杂交反而是过度工程;我们选杂交只因金融场景同时卡住两家短板。</li>
+    </ul>
+    <p class="one-liner">一句话速记:MemGPT 借接口、Zep 借时间、自己换存储——拿双方长板,认下缝合的账。</p>
+    <p class="src-note">参考:<code>docs/claude-context/c5-cross-session-memory-done.md</code> · <code>docs/claude-context/c5-plan1a-foundation-schema-done.md</code> · <code>backend/app/memory/hierarchical.py</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="memory-q4">
+  <div class="q-header"><span class="q-num">Q4</span><h3 class="q-title">什么是双时态(bi-temporal)?为什么记忆系统必须区分"事件发生的时间"和"系统知道这件事的时间"?不区分会出什么问题?</h3><span class="q-diff" title="难度 5/5">★★★★★</span></div>
+  <div class="q-tags"><span class="tag">双时态</span><span class="tag">bi-temporal</span><span class="tag">时间建模</span><span class="tag">金融审计</span><span class="tag">数据结构</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这是记忆这一类里最硬的一题。面试官想确认:你做记忆系统时,是把时间当成一个"最后更新于"的简单戳子,还是真把它当成一个建模问题来设计。"双时态"在数据库学界是个有名字、有出处的概念(Snodgrass 1993),不是我临时编的口号。面试官会顺着往下挖:</p>
+    <ul>
+      <li><strong>追问:</strong>同样是"这条记忆不再为真了",用户把茅台卖了,和用户说"你记错了我从没买过茅台",在你库里是同一种操作吗?如果不是,差在哪个字段?</li>
+      <li><strong>追问:</strong>如果只用一个时间戳会怎样?具体举一个它答不出来的查询。</li>
+      <li><strong>追问:</strong>为什么金融场景对这个比聊天机器人更敏感?合规、归因到底卡在哪?</li>
+      <li><strong>追问:</strong>代价呢?双时态写起来更麻烦,你凭什么觉得值?</li>
+    </ul>
+    <p>能把"两套时间各管一件事、盖错字段就等于在撒谎"讲清楚,这题就稳了。</p>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先说人话。一条记忆里其实藏着两个完全不同的"时间问题":一个是<strong>现实问题</strong>——这件事在真实世界里从什么时候开始为真、到什么时候不再为真;另一个是<strong>系统问题</strong>——我这个系统是从什么时候才录入这条记录的、又是从什么时候把它划掉的。双时态(bi-temporal)的意思就是:这两套时间各记各的,谁也不替谁说话。</p>
+
+    <h5>四个时间字段,两套各管两头</h5>
+    <p>具体到我们存关系的边表(<code>chat_memory_edges</code>),每条边落了 4 个时间字段,正好两套、每套一头一尾:</p>
+    <ul>
+      <li><strong>真实世界这一套:</strong><code>valid_from</code> / <code>valid_to</code>——这件事在现实里何时开始为真、何时停止为真。比如"用户持有茅台"这条事实,从 5 月 1 日成立,到 6 月 10 日卖出截止。</li>
+      <li><strong>系统记录这一套:</strong><code>recorded_at</code> / <code>invalidated_at</code>——系统何时把这条录进库(默认就是录入那一刻 <code>now()</code>)、何时把它作废。</li>
+    </ul>
+
+    <h5>关键全在"两种不再为真"的区分</h5>
+    <p>一条旧记忆"不再为真",现实里有两种截然不同的原因,而双时态用两个不同的字段把它们分开:</p>
+    <p><strong>第一种:现实演化了。</strong>用户真的把茅台卖了。注意——他过去确实持有过,这段历史是真实发生的、不该被抹掉。所以我们做的是给旧边盖上 <code>valid_to = 新事实的 valid_from</code>(这件事的现实有效期到此为止),再插一条新边接上。旧记录原封不动地留在历史里,它只是"过期"了,不是"错"了。这对应冲突动作里的 <code>UPDATE_VALIDITY</code>。</p>
+    <p><strong>第二种:系统当初记错了。</strong>用户澄清"我从来没买过茅台,你记错了"。这时旧记录是<strong>错误信息</strong>,现实里它从一开始就不该为真。我们做的是给旧边盖 <code>invalidated_at = now()</code>(系统在此刻意识到这条作废了),但<strong>绝不动 valid_to</strong>——因为现实里它根本没有一个"曾经为真的有效期"可言。这对应 <code>CONTRADICT_EXISTING</code>。</p>
+    <p>一句话:<strong>横轴(现实)管"事实变没变",纵轴(系统)管"我记错没记错"。盖错字段,就等于在向未来的查询撒一个谎。</strong></p>
+
+    <h5>为什么这正是金融场景的命门</h5>
+    <p>双时态最值钱的地方,是它能回答一类"时间旅行"查询:<em>"系统在 5 月 1 日那天,以为这个用户持有什么?"</em> 这种问题在合规、复盘、归因里天天要问。监管要追责时问的是"你当时基于什么信息给的建议",而不是"你现在知道什么"。只有同时留着两套时间,你才能把时钟拨回 5 月 1 日,看到系统当时的认知快照。而且,把"曾经真实但已过期"和"压根就是错的"分开,正是合规与归因的分水岭——前者是正常的历史,后者是要被标记、被排除、甚至要留证据说明"我们错了并已纠正"的事故。混在一起,这两件事就再也分不开了。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面这段教学伪代码,演示同一条旧记忆碰到两种"不再为真"时,系统分别动哪个字段。注意两个分支只差一行,但语义天差地别。</p>
+    <pre><code class="language-python"># 库里已有一条旧边:用户 --持有--> 茅台
+old_edge = {
+    "rel": "持有", "target": "茅台",
+    "valid_from": "2026-05-01", "valid_to": None,        # 现实里:从 5/1 起为真,还没截止
+    "recorded_at": "2026-05-01", "invalidated_at": None, # 系统里:5/1 录入,未作废
+}
+
+def apply(old, new_fact_date, reason):
+    if reason == "现实演化":
+        # 用户真把茅台卖了 —— 旧事实是"过期",不是"错"
+        # 只盖横轴:现实有效期到新事实开始那天截止;纵轴一个字不动
+        old["valid_to"] = new_fact_date          # 5/1 持有 < valid_to < 6/10 卖出
+        # old["invalidated_at"] 保持 None —— 这条记录依然是"真实发生过的历史"
+        insert_new_edge(rel="卖出", valid_from=new_fact_date)  # 新边接续
+
+    elif reason == "系统记错":
+        # 用户澄清"我从没买过茅台" —— 旧记录是错误信息
+        # 只盖纵轴:系统此刻把它作废;横轴 valid_to 绝不动
+        old["invalidated_at"] = now()            # 系统在"此刻"意识到记错了
+        # old["valid_to"] 保持 None —— 现实里它根本没有"曾为真的有效期"
+        insert_new_edge(rel="未持有", valid_from=new_fact_date)
+</code></pre>
+    <p><strong>推演:</strong>假设两种情况都发生在 6 月 10 日。<em>现实演化</em>分支后,旧边变成 <code>valid_from=5/1, valid_to=6/10, invalidated_at=None</code>——它告诉未来的查询"用户在 5/1 到 6/10 之间确实持有过茅台";<em>系统记错</em>分支后,旧边变成 <code>valid_from=5/1, valid_to=None, invalidated_at=6/10</code>——它告诉查询"这条是 6/10 被作废的错误记录,别采信,但保留它好让审计看到我们纠过错"。现在把时钟拨回 5 月 7 日做审计:第一种情况里系统当时<strong>合理地</strong>以为用户持有茅台(因为那时事实确实成立),第二种情况里系统当时<strong>错误地</strong>以为持有(那条记录还没被作废,但其实从头就是错的)。<strong>只有 4 个字段都在,这两种"5/7 的认知"才区分得开。</strong></p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(双时态 4 字段)</th><th class="th-vllm">替代方案(单时间戳)</th></tr></thead>
+      <tbody>
+        <tr><td>表结构 / 写入</td><td>4 个时间字段,写入要按冲突类型分别填 valid_to 或 invalidated_at,逻辑重(见本类第 5 题)</td><td>1 个 updated_at,结构简单、写入快、谁都会用</td></tr>
+        <tr><td>"何时为真"</td><td>横轴 valid_from / valid_to 精确表达现实有效期</td><td>表达不了——一个戳子既是现实时间又是系统时间,两者一旦不等就只能丢一个</td></tr>
+        <tr><td>"系统何时知道"</td><td>纵轴 recorded_at / invalidated_at 独立记录系统认知</td><td>同上,无法回答"5/1 那天系统以为啥"</td></tr>
+        <tr><td>事实变了 vs 记错了</td><td>两个独立字段,语义彻底分离</td><td>混为一谈——都表现为"那条记录被改了",分不清</td></tr>
+        <tr><td>历史可追溯</td><td>每次变化是新增一条边 + 标两套时间,旧记录留存</td><td>就地覆盖,历史被抹掉,时间旅行无从谈起</td></tr>
+        <tr><td>金融审计 / 合规</td><td>能复盘"当时基于什么信息";错误与过期可分别处置</td><td>合规和归因失据,这是硬伤</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>单时间戳绝不是稻草人——它真的更简单、写入更快,对一个"只要记住用户口味、记错了改掉就行"的休闲聊天助手,它完全够用,多两套时间反而是过度设计。它输的只在一个点上:一个戳子没法同时回答"现实里何时为真"和"系统何时知道"这两个问题,而这两个问题在金融场景里恰恰都得回答。我们选双时态,是因为这个项目的查询里真有"系统在某天以为用户持有什么""这条是过期还是当初就错"这类需求;为此我们认下两笔代价:写入逻辑要按冲突类型分叉(填 valid_to 还是 invalidated_at),存储和查询都更重。换个不碰合规的产品,我会毫不犹豫地用单时间戳。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="q4arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="q4arrowred" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#bf3f26"/>
+        </marker>
+        <marker id="q4arrowgreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#1f6e5e"/>
+        </marker>
+      </defs>
+
+      <text x="450" y="30" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="18" font-weight="700" fill="#2f4d8a">双时态:两套时间各管一件事</text>
+      <text x="450" y="52" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">同一条旧边"不再为真",两种原因盖不同的字段</text>
+
+      <!-- 中间这条旧边 -->
+      <rect x="350" y="78" width="200" height="56" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="450" y="102" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">旧边:用户 —持有→ 茅台</text>
+      <text x="450" y="122" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">valid_from=5/1 · valid_to=空 · invalidated_at=空</text>
+
+      <!-- 左分支箭头 -->
+      <path d="M350,110 C250,118 200,140 175,168" fill="none" stroke="#bf3f26" stroke-width="2" marker-end="url(#q4arrowred)"/>
+      <text x="232" y="138" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#bf3f26">场景一:用户卖了</text>
+
+      <!-- 右分支箭头 -->
+      <path d="M550,110 C650,118 700,140 725,168" fill="none" stroke="#a8761f" stroke-width="2" marker-end="url(#q4arrow)" style="marker-end:url(#q4arrowgreen)"/>
+      <text x="668" y="138" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#a8761f">场景二:用户说"你记错了"</text>
+
+      <!-- 左:现实演化 -->
+      <rect x="40" y="172" width="320" height="180" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+      <text x="200" y="196" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#bf3f26">现实演化 · 盖横轴</text>
+      <text x="60" y="220" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">真实世界时间轴(valid_from → valid_to)</text>
+      <line x1="60" y1="236" x2="340" y2="236" stroke="#85806f" stroke-width="1.5" marker-end="url(#q4arrow)" style="marker-end:url(#q4arrowred)"/>
+      <line x1="120" y1="231" x2="120" y2="241" stroke="#bf3f26" stroke-width="2"/>
+      <text x="120" y="256" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#bf3f26">5/1 持有</text>
+      <line x1="270" y1="231" x2="270" y2="241" stroke="#bf3f26" stroke-width="2"/>
+      <text x="270" y="256" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#bf3f26">6/10 valid_to</text>
+      <text x="60" y="288" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">动作:valid_to = 6/10,接一条新边</text>
+      <text x="60" y="308" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">invalidated_at 不动 → 旧边是"真历史"</text>
+      <text x="60" y="332" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#85806f">含义:曾经真实,现已过期</text>
+
+      <!-- 右:系统记错 -->
+      <rect x="540" y="172" width="320" height="180" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="700" y="196" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#1f6e5e">系统记错 · 盖纵轴</text>
+      <text x="560" y="220" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">系统记录时间轴(recorded_at → invalidated_at)</text>
+      <line x1="700" y1="232" x2="700" y2="312" stroke="#85806f" stroke-width="1.5" marker-end="url(#q4arrow)" style="marker-end:url(#q4arrowgreen)"/>
+      <line x1="695" y1="240" x2="705" y2="240" stroke="#1f6e5e" stroke-width="2"/>
+      <text x="715" y="244" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">5/1 recorded_at</text>
+      <line x1="695" y1="300" x2="705" y2="300" stroke="#1f6e5e" stroke-width="2"/>
+      <text x="715" y="304" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">6/10 invalidated_at</text>
+      <text x="560" y="332" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">动作:invalidated_at = now();valid_to 不动</text>
+
+      <!-- 底部:审计查询 -->
+      <rect x="40" y="378" width="820" height="106" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="450" y="402" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#a8761f">把时钟拨回 5/7 做审计 —— 两套时间都在,才答得出</text>
+      <text x="60" y="428" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">场景一:5/7 时系统合理地以为持有(那时现实确实成立)</text>
+      <text x="60" y="450" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">场景二:5/7 时系统错误地以为持有(记录还没被作废,但从头就错)</text>
+      <text x="60" y="474" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#85806f">单时间戳:两种情况都只是"那条被改过",再也分不开</text>
+
+      <!-- 图例 -->
+      <rect x="600" y="416" width="14" height="14" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="620" y="427" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">横轴=现实(事实变了)</text>
+      <rect x="600" y="438" width="14" height="14" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="620" y="449" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">纵轴=系统(记错了)</text>
+    </svg>
+    <figcaption>图 03-4 · 怎么看:中间是同一条旧边,左右两个场景都让它"不再为真",但场景一只盖横轴 valid_to(现实演化,旧边仍是真历史),场景二只盖纵轴 invalidated_at(系统记错,横轴一字不动)。底部说明:正因两套时间各留各的,才能把时钟拨回 5/7,分清系统当时是"合理地"还是"错误地"以为用户持有——单时间戳两种情况会糊成一团。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>双时态 = 一条记忆同记两套时间:真实世界(valid_from / valid_to,这件事现实里何时为真)和系统记录(recorded_at / invalidated_at,系统何时录入 / 何时作废),共 4 个字段。</li>
+      <li>关键在区分两种"不再为真":现实演化(用户真卖了)只盖横轴 valid_to,旧记录仍是真历史;系统记错(用户澄清)只盖纵轴 invalidated_at,横轴一字不动。盖错字段=对未来的查询撒谎。</li>
+      <li>不区分(单时间戳)就答不出"系统在某天以为用户持有什么"这类时间旅行查询,也分不开"错误记录"和"曾真实但已过期"——金融合规与归因正卡在这里。</li>
+      <li>每次变化是新增一条边 + 标两套时间,而非就地覆盖,所以用户对某只股票态度的演化链可完整追溯。</li>
+      <li>代价是写入要按冲突类型分叉填 valid_to 或 invalidated_at(见本类第 5 题),存储查询都更重;不碰合规的产品用单时间戳更划算。</li>
+    </ul>
+    <p class="one-liner">一句话速记:横轴管"事实变没变",纵轴管"我记错没记错",两套时间各留各的,才能把时钟拨回过去看清系统当时的认知。</p>
+    <p class="src-note">参考:<code>backend/app/memory/models.py</code>(chat_memory_edges 4 时间字段)、<code>backend/app/memory/conflict_resolver.py</code>(UPDATE_VALIDITY 盖 valid_to / CONTRADICT_EXISTING 盖 invalidated_at)、<code>docs/claude-context/c5-plan2a-write-pipeline-core-done.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="memory-q5">
+  <div class="q-header"><span class="q-num">Q5</span><h3 class="q-title">你的记忆写入是 8 步 pipeline + 4 种冲突动作:当一条新记忆和旧记忆矛盾时,系统怎么决定覆盖、更新、还是并存?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">写入管线</span><span class="tag">冲突消解</span><span class="tag">LLM 当裁判</span><span class="tag">兜底设计</span><span class="tag">幂等</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题表面问"流程怎么走",真正想看的是:你有没有意识到"矛盾"其实有好几种,而且每种该用完全不同的处理方式。一个只会 <code>UPDATE</code> 覆盖旧值的人,和一个能讲清"卖了股票"和"系统记错了"是两码事的人,设计水平差一个档次。面试官在探这几件事:</p>
+    <ul>
+      <li><strong>追问:</strong>"用户去年说看好某只股票,今天说不看好了"——这是覆盖旧记录,还是新增一条?为什么?这两种处理在审计上有什么差别?</li>
+      <li><strong>追问:</strong>判断该覆盖还是并存,你是写规则(if-else)还是交给大模型?各自的代价是什么?</li>
+      <li><strong>追问:</strong>大模型这次抽风,返回了一个你枚举里没有的动作,或者干脆超时了,整条聊天会崩吗?你怎么兜?</li>
+      <li><strong>追问:</strong>同一句话被系统重复处理两次(比如重试),会不会存进去两条一模一样的记忆?怎么防?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把"写一条记忆"这件事拆开。它不是简单的"<code>INSERT</code> 一行",而是一条 8 步流水线。一句对话进来后大致是:① 先把这一轮原始对话存成"事件原文"(我们叫 episode,留底用);② 从里面抽出/规整实体(谁、跟谁、什么关系);③ 去库里捞出"同一组关系当前还生效的旧记录",最多取 5 条来比对;④ <strong>让大模型当裁判,判这条新记忆和旧记录是什么关系</strong>;⑤ 按裁判结果落库;⑥ 把这条边镜像到图数据库和向量库;⑦/⑧ 标记这条对话"已经抽取过了"。这道题的灵魂在第 ④⑤ 两步——冲突消解。</p>
+
+    <h5>为什么"矛盾"不能一律覆盖</h5>
+    <p>想象用户两句话:去年"我买了 A 股票",今年"我把 A 卖了"。如果你简单地把"持有"覆盖成"清仓",那"他曾经持有过"这段历史就被抹掉了。可在投资场景里,这段历史恰恰是有价值的——复盘、审计、解释"系统当时为什么给你推 A"都要靠它。所以关键洞察是:<strong>"卖了"不是"我记错了",它是现实本身变了。</strong>这两种"矛盾"在数据上必须分开记。</p>
+
+    <h5>四种冲突动作(枚举固定四个)</h5>
+    <p>我们让大模型把每次矛盾归到四类之一,落库的 SQL 各不相同:</p>
+    <ul>
+      <li><strong>更新有效期(update_validity)——现实演化了。</strong>"买了→卖了"属于这类。做法:把旧记录的"有效期截止时间"(<code>valid_to</code>)填成新记录的生效时间,然后<strong>插入</strong>一条新记录。旧的没删,只是被标成"这段时间之前有效"。</li>
+      <li><strong>作废纠错(contradict_existing)——系统当初记错了。</strong>用户澄清"我从没买过 A,你搞错了"属于这类。做法:把旧记录的"作废时间"(<code>invalidated_at</code>)填成现在,再插一条新记录。注意它动的是<strong>另一个字段</strong>——表示"这条记录从来就不该存在",而不是"它曾经对过"。</li>
+      <li><strong>独立并存(append_new)——根本不矛盾。</strong>"看好 A"和"看好 B"是两回事,直接插新记录,旧的一动不动。</li>
+      <li><strong>完全重复(no_op)——啥也别写。</strong>同一句话又说了一遍,跳过,不制造冗余。</li>
+    </ul>
+    <p>这里有个贯穿全局的设计:<strong>三种要写的动作,最后都是"新增一条边",而不是就地改写旧边。</strong>旧边永远留在库里,只是被打上"有效期到此为止"或"已作废"的标记。这样整条记忆的演化链就完整保存下来了——这正是配合双时态设计的地方(双时态本身见本类第 4 题,这里只用到它的两个字段)。</p>
+
+    <h5>为什么裁判用大模型,而不是写 if-else</h5>
+    <p>"区分'卖了'和'记错了'"本质是个语义理解题,规则很难穷举——同样一句"我不看好 A 了",可能是观点变了(更新有效期),也可能是在纠正你之前的误记(作废)。这种细微差别正是大模型擅长、规则不擅长的。代价是每次写入多一次大模型调用,以及落库 SQL 变复杂。</p>
+
+    <h5>兜底:大模型靠不住时,保守新增</h5>
+    <p>大模型会失败:调用超时、返回的 JSON 解析不出、或者返回一个枚举里没有的动作名。我们的处理是<strong>一律退回到"独立并存(append_new)"</strong>,而不是抛异常打断用户聊天。理由是"保守、不丢信息":并存最多让库里多一条冗余,后续还能靠审计和校正修;但如果因为裁判失灵就把整轮对话搞崩,体验代价大得多。这叫 fail-safe(失败时倒向安全的一侧)。</p>
+
+    <h5>防重复:一把幂等锁</h5>
+    <p>同一句对话如果被系统重复处理(重试、并发),会不会存进两条一样的记忆?靠数据库一个 5 列联合唯一约束挡:<code>(对话原文ID + 起点 + 终点 + 关系类型 + 生效时间)</code> 必须唯一。同一段对话、同一组关系、同一个生效时间,数据库层面就不允许出现第二条。这让整条写入是<strong>幂等</strong>的——跑一次和跑两次,结果一样。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>用伪代码把冲突消解这一段走一遍。注意大模型只负责"判类别",真正改数据库的是后面那个 <code>apply_action</code>,职责分得很干净:</p>
+    <pre><code class="language-python"># ① 捞出"同一组关系当前还生效的旧边",最多 5 条
+#    only 取 invalidated_at 为空(没被作废)的,按生效时间倒序
+existing = query_current_edges(src, rel, tgt, limit=5)
+
+# ② 没有旧边 → 根本谈不上冲突,直接当"新增"处理,省一次大模型调用
+if not existing:
+    verdict = APPEND_NEW
+else:
+    # ③ 让大模型当裁判:给它新事实 + 旧边摘要,它只回四选一
+    try:
+        verdict = llm_judge(new_fact, existing)      # 回 update_validity / contradict / append / no_op
+    except Exception:
+        # ④ 兜底:大模型调用失败 → 保守新增,绝不打断聊天
+        verdict = APPEND_NEW
+    # (返回 JSON 解析不出、或动作不在四个枚举里 → 同样退回 APPEND_NEW)
+
+# ⑤ 按裁判结果落库,四种动作 SQL 各不同
+def apply_action(verdict, existing, new_fact):
+    if verdict == NO_OP:
+        return None                                  # 完全重复,什么都不写
+
+    if verdict == UPDATE_VALIDITY:                   # 现实演化:旧边"有效期"封口
+        set_valid_to(existing, new_fact.valid_from)  # 动 valid_to
+    elif verdict == CONTRADICT_EXISTING:             # 系统记错:旧边"作废"
+        set_invalidated_at(existing, now())          # 动的是另一个字段 invalidated_at
+
+    # 三种要写的动作,最后都是【插入一条新边】,旧边从不就地删改 → 历史保全
+    return insert_new_edge(new_fact)
+</code></pre>
+    <p><strong>推演:</strong>假设库里有旧边"用户—持有—A 股票,生效于 2025-06,至今有效(<code>valid_to</code> 为空)"。今天用户说"我把 A 卖了"。① 捞出这 1 条旧边;③ 大模型判定为 <code>update_validity</code>(现实演化,不是记错);⑤ <code>apply_action</code> 把旧边 <code>valid_to</code> 填成今天(2026-06),再插一条新边"用户—持有—A,有效期 2026-06 起、已结束"。结果库里是<strong>两条</strong>边:一条记"2025-06 到 2026-06 持有过",一条记"现在已清仓"。复盘时整段持仓历史一目了然。如果当时大模型超时了,verdict 退回 <code>append_new</code>,旧边不动、只多插一条新边——信息没丢,只是少了"封口"这一笔,后续校正能补。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(四动作冲突消解)</th><th class="th-vllm">替代方案(新事实直接覆盖旧值)</th></tr></thead>
+      <tbody>
+        <tr><td>实现复杂度</td><td>每次写入多一次大模型调用 + 四种落库 SQL + 双字段语义</td><td>极简,一条 <code>UPDATE</code> 就完事</td></tr>
+        <tr><td>能否区分"演化"vs"记错"</td><td>能。update_validity 与 contradict_existing 各动一个字段,语义分明</td><td>不能。两者都被压成"新值盖旧值",信息合一抹平</td></tr>
+        <tr><td>历史可审计</td><td>旧边永不删改,只标"有效期/作废",演化链完整可回溯</td><td>覆盖即抹历史,复盘/审计无据可查</td></tr>
+        <tr><td>独立信息会不会误删</td><td>"看好 A"和"看好 B"判为并存,各留各的</td><td>若匹配键设松,可能误把不相关的旧值覆盖掉</td></tr>
+        <tr><td>大模型失灵时</td><td>退回保守新增,不丢信息、不打断聊天</td><td>无此问题(本就不依赖大模型),但代价是上面那些能力全没有</td></tr>
+        <tr><td>写入延迟 / 成本</td><td>多一跳大模型(已用小模型 + 无旧边时跳过裁判压成本)</td><td>零额外开销,最快最省</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>直接覆盖绝不是个蠢方案——它实现最简、延迟最低、零大模型成本,对"只要最新值、不在乎历史"的场景(比如一个临时的用户偏好开关)完全够用,工程上反而更稳。它真正的短板只在我们这个特定场景里才致命:投资助手要对"系统当时为什么这么建议"负责,历史和"演化 vs 纠错"的区分是刚需,而覆盖写把这些能力一次性抹平了。所以我们愿意为它付出"每次写入多一跳大模型 + 双时态 SQL 复杂度"的代价,并专门配了 fail-safe 新增来兜大模型失灵——本质是拿工程复杂度换"可审计、可演化"。如果哪天发现绝大多数关系根本不需要历史,把直接覆盖作为快路径、只对关键关系走四动作,会是更省的折中。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img" font-family="Noto Sans SC, sans-serif">
+      <defs>
+        <marker id="ah-q5" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#2f4d8a"/></marker>
+        <marker id="ah-q5-red" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#bf3f26"/></marker>
+        <marker id="ah-q5-grn" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#1f6e5e"/></marker>
+      </defs>
+
+      <!-- 输入框 -->
+      <rect x="20" y="40" width="200" height="70" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="120" y="68" text-anchor="middle" font-size="13" fill="#2f4d8a" font-weight="bold">输入</text>
+      <text x="120" y="88" text-anchor="middle" font-size="11" fill="#2f4d8a">新事实 +</text>
+      <text x="120" y="103" text-anchor="middle" font-size="11" fill="#2f4d8a">最多 5 条当前生效旧边</text>
+
+      <!-- 裁判菱形 -->
+      <polygon points="430,75 540,135 430,195 320,135" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+      <text x="430" y="128" text-anchor="middle" font-size="13" fill="#bf3f26" font-weight="bold">大模型裁判</text>
+      <text x="430" y="148" text-anchor="middle" font-size="11" fill="#bf3f26">判属哪种矛盾</text>
+      <line x1="220" y1="80" x2="338" y2="118" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#ah-q5)"/>
+
+      <!-- 四条出边到四个结果盒 -->
+      <!-- 1 update_validity -->
+      <rect x="600" y="20" width="280" height="70" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="612" y="42" font-size="12" fill="#2f4d8a" font-weight="bold">① 更新有效期 · 现实演化</text>
+      <text x="612" y="60" font-size="10.5" fill="#85806f">旧边 valid_to = 新边生效时间</text>
+      <text x="612" y="77" font-size="10.5" fill="#1f6e5e">+ 插一条新边</text>
+      <line x1="500" y1="105" x2="598" y2="62" stroke="#2f4d8a" stroke-width="1.3" marker-end="url(#ah-q5)"/>
+
+      <!-- 2 contradict -->
+      <rect x="600" y="105" width="280" height="70" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="612" y="127" font-size="12" fill="#2f4d8a" font-weight="bold">② 作废纠错 · 系统记错</text>
+      <text x="612" y="145" font-size="10.5" fill="#85806f">旧边 invalidated_at = now()</text>
+      <text x="612" y="162" font-size="10.5" fill="#1f6e5e">+ 插一条新边</text>
+      <line x1="512" y1="130" x2="598" y2="135" stroke="#2f4d8a" stroke-width="1.3" marker-end="url(#ah-q5)"/>
+
+      <!-- 3 append_new -->
+      <rect x="600" y="190" width="280" height="62" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="612" y="212" font-size="12" fill="#1f6e5e" font-weight="bold">③ 独立并存 · 不矛盾</text>
+      <text x="612" y="232" font-size="10.5" fill="#1f6e5e">只插一条新边(旧边不动)</text>
+      <line x1="500" y1="165" x2="598" y2="212" stroke="#1f6e5e" stroke-width="1.3" marker-end="url(#ah-q5-grn)"/>
+
+      <!-- 4 no_op -->
+      <rect x="600" y="267" width="280" height="58" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <text x="612" y="289" font-size="12" fill="#85806f" font-weight="bold">④ 完全重复 · NO_OP</text>
+      <text x="612" y="309" font-size="10.5" fill="#85806f">丢弃,什么都不写</text>
+      <line x1="445" y1="190" x2="598" y2="290" stroke="#85806f" stroke-width="1.3" marker-end="url(#ah-q5)"/>
+
+      <!-- 共性标注 -->
+      <text x="430" y="232" text-anchor="middle" font-size="11" fill="#1f6e5e">①②③ 都"新增边",从不就地删改旧边 → 历史全留</text>
+
+      <!-- fail-safe 红色 fallback -->
+      <rect x="320" y="290" width="220" height="60" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-dasharray="5 3"/>
+      <text x="430" y="313" text-anchor="middle" font-size="11.5" fill="#bf3f26" font-weight="bold">兜底 fail-safe</text>
+      <text x="430" y="332" text-anchor="middle" font-size="10.5" fill="#bf3f26">大模型失败 / 返回非法</text>
+      <line x1="430" y1="195" x2="430" y2="288" stroke="#bf3f26" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ah-q5-red)"/>
+      <line x1="540" y1="312" x2="700" y2="252" stroke="#bf3f26" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#ah-q5-red)"/>
+      <text x="600" y="300" text-anchor="middle" font-size="10.5" fill="#bf3f26">默认退回 ③ 并存</text>
+
+      <!-- 幂等锁 -->
+      <rect x="20" y="420" width="860" height="90" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <rect x="40" y="445" width="34" height="28" rx="5" fill="#a8761f"/>
+      <rect x="48" y="437" width="18" height="16" rx="8" fill="none" stroke="#a8761f" stroke-width="3"/>
+      <text x="92" y="455" font-size="13" fill="#a8761f" font-weight="bold">幂等锁:5 列联合唯一约束</text>
+      <text x="92" y="478" font-size="11" fill="#85806f">(对话原文ID + 起点 + 终点 + 关系类型 + 生效时间) 必须唯一</text>
+      <text x="92" y="496" font-size="11" fill="#85806f">→ 同段对话、同组关系、同一生效时间,绝不被重抽成两条;跑一次=跑两次</text>
+
+      <!-- 图例 -->
+      <text x="20" y="540" font-size="10.5" fill="#85806f">图例:</text>
+      <rect x="62" y="531" width="14" height="11" rx="3" fill="#e9eef8" stroke="#2f4d8a"/><text x="82" y="540" font-size="10.5" fill="#2f4d8a">主结构</text>
+      <rect x="140" y="531" width="14" height="11" rx="3" fill="#faeae4" stroke="#bf3f26"/><text x="160" y="540" font-size="10.5" fill="#bf3f26">裁判/兜底</text>
+      <rect x="232" y="531" width="14" height="11" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/><text x="252" y="540" font-size="10.5" fill="#1f6e5e">命中/保守</text>
+      <rect x="324" y="531" width="14" height="11" rx="3" fill="#f0ede4" stroke="#85806f"/><text x="344" y="540" font-size="10.5" fill="#85806f">次要/丢弃</text>
+    </svg>
+    <figcaption>图 03-5 · 怎么看:新事实 + 最多 5 条旧边进大模型裁判(红菱形),四条出边落到四种动作;①②③ 都靠"新增边"保住历史,④ 直接丢弃;红色虚线是大模型失灵时默认退回"并存"的兜底;底部金色锁是 5 列幂等唯一约束,防同一段对话被重抽成两条。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>"矛盾"不止一种:"卖了"是现实演化、"记错了"是系统纠错、"两回事"是独立并存、"又说一遍"是完全重复——四种各有不同处理,这是整道题的核心洞察。</li>
+      <li>四种动作落到 SQL:更新有效期动 <code>valid_to</code>、作废纠错动 <code>invalidated_at</code>(两个字段语义严格分开)、独立并存只插新边、完全重复啥也不写。</li>
+      <li>三种要写的动作<strong>都靠新增边、从不就地删改旧边</strong>,所以记忆的整条演化链永久保留,可复盘可审计——这是它比"直接覆盖"强的根本。</li>
+      <li>裁判交给大模型(语义题规则难穷举),但配 fail-safe:失败/返回非法一律退回"保守新增",不丢信息也不打断聊天。</li>
+      <li>一把 5 列联合唯一约束保幂等,同段对话同组关系不会被重复抽成两条。</li>
+    </ul>
+    <p class="one-liner">一句话速记:大模型判这条新记忆是"演化/记错/无关/重复"四选一,前三种都新增边留住历史、绝不就地覆盖,大模型失灵就保守追加兜底。</p>
+    <p class="src-note">参考:<code>backend/app/memory/conflict_resolver.py</code>、<code>backend/app/memory/hierarchical.py</code>、<code>backend/app/memory/models.py</code>、<code>docs/claude-context/c5-plan2a-write-pipeline-core-done.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="memory-q6">
+  <div class="q-header"><span class="q-num">Q6</span><h3 class="q-title">读取侧你用了图 / 向量 / 全文三路混合检索 + RRF v2 时间感知排序:三路怎么融合成一个排序?为什么排序要"感知时间"?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">混合检索</span><span class="tag">RRF</span><span class="tag">时间感知排序</span><span class="tag">向量/图/全文</span><span class="tag">名次倒数融合</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>面试官在探的是:你懂不懂"召回靠多路、排序靠融合"这套现代检索的标准打法,而不是无脑堆一个向量库就完事。三路检索各有盲区——全文查得到精确词但不懂语义,向量懂语义但漏精确词,图能顺关系链但要先知道从哪个点出发。能把它们融成一个排序,而且融合时还考虑了"记忆会过期"这个领域特性,才算把这道题答到点子上。</p>
+    <ul>
+      <li><strong>追问:</strong>三路的原始打分量纲都不一样(全文是 BM25 分,向量是余弦距离),你怎么把它们放在一起比?</li>
+      <li><strong>追问:</strong>RRF 公式里那个常数 k=60 是干嘛的?调大调小会怎样?</li>
+      <li><strong>追问:</strong>为什么时间衰减要"分级"?给持仓和给一句临时观点用同一个衰减速度不行吗?</li>
+      <li><strong>追问:</strong>衰减为什么不一路降到零?降到零有什么坏处?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先说召回。一条记忆(比如"用户持有贵州茅台")在三个地方各有一份索引:全文走 PostgreSQL 的倒排索引,中文先用 jieba 切词再做 BM25 打分,擅长精确命中——股票代码、专有名词;向量走 Milvus,用 qwen v3 把句子压成 1024 维向量做语义相似,擅长"换了个说法也能找到";图走 AGE 的 Cypher 多跳遍历,擅长顺着关系链走(从"用户"走到"持仓"再走到"这只股票所在行业")。图这一路比较重,需要先确定从哪个节点出发,所以默认搜索不带它,只有专门的遍历工具触发时才走。</p>
+
+    <h5>三路怎么合成一个排序:RRF 只看名次</h5>
+    <p>关键难点是:三路吐出来的分数压根不能直接比。BM25 分可能是几点几,向量距离是 0 到 1 之间,数量级、方向、分布全不一样。硬要加权相加,就得先做"量纲对齐"(归一化),而归一化本身又很脆——一条噪声极值就能把整列分数压扁。</p>
+    <p>RRF(Reciprocal Rank Fusion,名次倒数融合)的聪明之处是:<strong>我不看你的原始分,只看你排第几名</strong>。每一路把自己的结果排好序后,某条记忆排第 1 名就贡献 1/(k+1),排第 2 名贡献 1/(k+2),以此类推。一条记忆在三路里的"名次倒数"全加起来,就是它的基础分。这样三路天然就站在同一把尺子上了,根本不用对齐量纲。常数 k(这里取 60,是业界经典默认值)起"压平头部"的作用:k 越大,第 1 名和第 2 名的差距越小,融合越温和,对单路把某条偶然排到第一这种噪声更稳。</p>
+
+    <h5>为什么还要"感知时间":记忆有保质期</h5>
+    <p>光按名次融合还不够。市场知识可以是"客观对错",但用户记忆是"会过期的事实"。一年前说"我看好新能源",今天还按原样顶上来,既不准也烦人。所以基础分之外再乘两个权重:</p>
+    <p>第一个是<strong>重要性权重</strong>,把抽取时打的重要性分映射成三档(0.9→0.95、0.5→0.75、0.2→0.6)。注意低重要性映射到 0.6 而不是 0,故意不把它压死,保住长尾。</p>
+    <p>第二个是<strong>时间衰减</strong>:<code>time_decay = 0.5 + 0.5 × exp(−Δt/τ)</code>。Δt 是这条记忆"上次为真"到现在隔了多少天,越旧值越小。这里有两个领域设计:其一,<strong>τ(衰减时间尺度)按关系类型分级</strong>——持仓(HOLDS/SOLD)给 365 天,偏好(PREFERS/AVOIDS/WATCHES)给 180 天,观点(EXPRESSED_VIEW/STUDIED)给 90 天。背后的常识是"持仓比一句临时观点更耐放":你买了的股票半年后大概率还拿着,但你三个月前随口说的一句看法,早就不一定算数了。其二,衰减<strong>不归零</strong>,设了 0.5 的地板——再老的事实最多降到一半权重也不会消失,保住长尾召回和审计价值(谁说过什么仍查得到)。还有个细节:已经"作废过"的历史边,用它的失效时间(valid_to)而不是起始时间当衰减锚点,因为"最近一次为真的时间"才是更准的新鲜度参考。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面这段伪代码把"三路名次倒数 → 乘重要性 → 乘时间衰减 → 取前 5"的逻辑走一遍,省掉数据库和向量库的细节,只看排序怎么算出来。</p>
+    <pre><code class="language-python"># 三路各自已经排好序,每条结果带 edge_id(同一条记忆在多路里 id 相同)
+bm25_hits   = [a, b, c]      # 全文:精确命中,a 排第 1
+vector_hits = [b, d, a]      # 向量:语义相似,b 排第 1
+graph_hits  = []             # 图遍历默认不走,这里为空
+
+K = 60                       # 压平头部的常数,越大融合越温和
+
+# 第 1 步:名次倒数累加。只看"排第几",不碰各路原始分 —— 免量纲对齐
+base = defaultdict(float)
+for one_path in [bm25_hits, vector_hits, graph_hits]:
+    for rank, edge in enumerate(one_path, start=1):  # rank 从 1 开始
+        base[edge.id] += 1.0 / (K + rank)            # 排得越靠前,加得越多
+
+# 第 2 步:每条记忆再乘两个权重 —— 重要性 × 时间衰减
+final = {}
+for edge_id, base_score in base.items():
+    meta = edges_meta[edge_id]                       # 关系类型/重要性/时间
+
+    # 重要性映射成三档,低档故意保到 0.6 不压死,留长尾
+    imp = {0.9: 0.95, 0.5: 0.75, 0.2: 0.6}.get(meta.importance, 0.75)
+
+    # 时间衰减:越旧越小,但有 0.5 地板不归零
+    # τ 按关系类型分级:持仓最耐放,观点最快过期
+    tau = {"HOLDS": 365, "PREFERS": 180, "EXPRESSED_VIEW": 90}.get(
+        meta.rel_type, 180)
+    # 已作废的历史事实,用"上次为真的时间"当锚点更准
+    ref = meta.valid_to or meta.valid_from
+    days = (now - ref).days
+    decay = 0.5 + 0.5 * exp(-days / tau)             # 落在 [0.5, 1.0]
+
+    final[edge_id] = base_score * imp * decay        # 三者相乘 = 最终分
+
+top5 = sorted(final, key=final.get, reverse=True)[:5]
+</code></pre>
+    <p><strong>推演:</strong>看记忆 a 和 b。a 在全文里排第 1(1/61≈0.0164)、在向量里排第 3(1/63≈0.0159),基础分≈0.0323;b 在向量排第 1、全文排第 2,基础分≈0.0327,两者几乎打平。现在引入时间:假设 a 是一条"持仓"(τ=365),60 天前的,decay=0.5+0.5×exp(−60/365)≈0.924;b 是一条"观点"(τ=90),同样 60 天前,decay=0.5+0.5×exp(−60/90)≈0.756。再设两者重要性都是 0.9(权重 0.95)。最终 a≈0.0323×0.95×0.924≈0.0284,b≈0.0327×0.95×0.756≈0.0235。<strong>结论:名次上几乎平手的两条,因为"持仓比观点耐放",老持仓 a 反超临时观点 b 排到前面</strong>——这正是"感知时间"想要的效果。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(三路 RRF 融合)</th><th class="th-vllm">替代方案(单路向量检索)</th></tr></thead>
+      <tbody>
+        <tr><td>精确词命中</td><td>全文路兜底:股票代码、术语、缩写都能精确命中</td><td>向量对短代码/专名不敏感,"600519"这种容易漏</td></tr>
+        <tr><td>关系链查询</td><td>图遍历路可顺持仓→行业→相关股多跳走</td><td>查不了关系,只能找"长得像"的单条</td></tr>
+        <tr><td>量纲对齐</td><td>只看名次,三路天然同尺,免归一化</td><td>单路无此问题,但也享受不到多路互补</td></tr>
+        <tr><td>新旧区分</td><td>时间衰减分级 τ,持仓 365/偏好 180/观点 90 天</td><td>纯相似度不分新旧,一年前的旧话照样顶上来</td></tr>
+        <tr><td>抗噪</td><td>单路偶发噪声被另两路名次稀释,更稳</td><td>单点失效无人兜底,一次坏召回直接影响结果</td></tr>
+        <tr><td>实现/维护成本</td><td>要维护三套索引 + 一致性(见本类第 8 题),融合权重也要调</td><td>一套索引,实现最简单,上手快</td></tr>
+      </tbody>
+    </table>
+    <p>公允裁决:单路向量真不是稻草人——它实现最省事,一套 Milvus 就能跑,语义召回也确实是这几年检索的主力,对很多纯语义场景够用。我们仍选三路,是因为这个场景的特性顶在脸上:用户记忆里全是股票代码、术语这类<strong>精确词</strong>,向量恰恰对它们最钝;而且记忆是<strong>会过期的事实</strong>,需要按新旧区别对待。这两点单路向量都补不上。代价就是要多养两套索引和它们之间的一致性,以及融合那几个权重得调——我们认为这笔成本换来的召回质量和"不把一年前的旧话当真"是值得的。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body">
+    <figure class="diagram">
+      <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img" font-family="Noto Sans SC, sans-serif">
+        <defs>
+          <marker id="q6arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2f4d8a"/></marker>
+          <marker id="q6arrowred" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#bf3f26"/></marker>
+        </defs>
+
+        <text x="450" y="26" text-anchor="middle" font-size="17" font-weight="bold" fill="#2f4d8a">三路混合检索 → RRF v2 时间感知排序</text>
+
+        <!-- 三条泳道 -->
+        <!-- 全文 -->
+        <rect x="30" y="50" width="250" height="150" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="155" y="74" text-anchor="middle" font-size="14" font-weight="bold" fill="#2f4d8a">全文 BM25(精确词)</text>
+        <rect x="50" y="86" width="210" height="26" rx="8" fill="#e9eef8" stroke="#2f4d8a"/><text x="60" y="104" font-size="11" fill="#2f4d8a">#1  记忆 a · 持有茅台</text>
+        <rect x="50" y="118" width="210" height="26" rx="8" fill="#e9eef8" stroke="#2f4d8a"/><text x="60" y="136" font-size="11" fill="#2f4d8a">#2  记忆 b · 看好新能源</text>
+        <rect x="50" y="150" width="210" height="26" rx="8" fill="#e9eef8" stroke="#2f4d8a"/><text x="60" y="168" font-size="11" fill="#2f4d8a">#3  记忆 c · …</text>
+
+        <!-- 向量 -->
+        <rect x="30" y="212" width="250" height="150" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="155" y="236" text-anchor="middle" font-size="14" font-weight="bold" fill="#2f4d8a">向量 Milvus(语义)</text>
+        <rect x="50" y="248" width="210" height="26" rx="8" fill="#e9eef8" stroke="#2f4d8a"/><text x="60" y="266" font-size="11" fill="#2f4d8a">#1  记忆 b · 看好新能源</text>
+        <rect x="50" y="280" width="210" height="26" rx="8" fill="#e9eef8" stroke="#2f4d8a"/><text x="60" y="298" font-size="11" fill="#2f4d8a">#2  记忆 d · …</text>
+        <rect x="50" y="312" width="210" height="26" rx="8" fill="#e9eef8" stroke="#2f4d8a"/><text x="60" y="330" font-size="11" fill="#2f4d8a">#3  记忆 a · 持有茅台</text>
+
+        <!-- 图 -->
+        <rect x="30" y="374" width="250" height="80" rx="8" fill="#f0ede4" stroke="#85806f" stroke-dasharray="5 3"/>
+        <text x="155" y="398" text-anchor="middle" font-size="14" font-weight="bold" fill="#85806f">图 AGE(关系遍历)</text>
+        <text x="155" y="420" text-anchor="middle" font-size="11" fill="#85806f">默认不走 · 由遍历工具按需触发</text>
+        <text x="155" y="438" text-anchor="middle" font-size="11" fill="#85806f">(顺持仓→行业→相关股)</text>
+
+        <!-- 汇入 RRF 漏斗 -->
+        <line x1="280" y1="125" x2="360" y2="230" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#q6arrow)"/>
+        <line x1="280" y1="287" x2="360" y2="248" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#q6arrow)"/>
+        <line x1="280" y1="414" x2="360" y2="266" stroke="#85806f" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#q6arrow)"/>
+
+        <!-- RRF 漏斗 -->
+        <path d="M360,215 L520,215 L470,275 L410,275 Z" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+        <text x="440" y="238" text-anchor="middle" font-size="13" font-weight="bold" fill="#1f6e5e">RRF 漏斗</text>
+        <text x="440" y="258" text-anchor="middle" font-size="12" fill="#1f6e5e">Σ 1/(60+名次)</text>
+        <text x="440" y="295" text-anchor="middle" font-size="10" fill="#85806f">只看名次,不看原始分 → 免量纲对齐</text>
+
+        <!-- 漏斗出口 → 两个乘法齿轮 -->
+        <line x1="440" y1="275" x2="440" y2="320" stroke="#1f6e5e" stroke-width="1.5" marker-end="url(#q6arrow)"/>
+
+        <!-- 齿轮 1:重要性 -->
+        <circle cx="440" cy="358" r="34" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+        <text x="440" y="350" text-anchor="middle" font-size="12" font-weight="bold" fill="#bf3f26">× 重要性</text>
+        <text x="440" y="366" text-anchor="middle" font-size="9" fill="#bf3f26">0.9/0.5/0.2</text>
+        <text x="440" y="378" text-anchor="middle" font-size="9" fill="#bf3f26">→0.95/0.75/0.6</text>
+
+        <line x1="474" y1="358" x2="556" y2="358" stroke="#bf3f26" stroke-width="1.5" marker-end="url(#q6arrowred)"/>
+        <text x="515" y="350" text-anchor="middle" font-size="11" fill="#bf3f26">×</text>
+
+        <!-- 齿轮 2:时间衰减 -->
+        <circle cx="592" cy="358" r="36" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+        <text x="592" y="354" text-anchor="middle" font-size="12" font-weight="bold" fill="#bf3f26">× 时间衰减</text>
+        <text x="592" y="370" text-anchor="middle" font-size="9" fill="#bf3f26">越旧越降权</text>
+
+        <!-- 衰减曲线 + 地板 -->
+        <rect x="650" y="300" width="220" height="120" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="760" y="318" text-anchor="middle" font-size="11" font-weight="bold" fill="#2f4d8a">decay = 0.5 + 0.5·exp(−Δt/τ)</text>
+        <!-- 坐标轴 -->
+        <line x1="668" y1="408" x2="858" y2="408" stroke="#85806f" stroke-width="1"/>
+        <line x1="668" y1="328" x2="668" y2="408" stroke="#85806f" stroke-width="1"/>
+        <text x="662" y="332" text-anchor="end" font-size="9" fill="#85806f">1.0</text>
+        <text x="662" y="392" text-anchor="end" font-size="9" fill="#85806f">0.5</text>
+        <!-- 衰减曲线(从 1.0 衰到接近 0.5) -->
+        <path d="M668,330 Q720,360 770,378 T858,388" fill="none" stroke="#1f6e5e" stroke-width="2"/>
+        <!-- 0.5 地板线 -->
+        <line x1="668" y1="388" x2="858" y2="388" stroke="#bf3f26" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <text x="858" y="402" text-anchor="end" font-size="9" fill="#bf3f26">地板 0.5 · 不归零</text>
+        <text x="763" y="424" text-anchor="middle" font-size="9" fill="#85806f">τ 分级:持仓365 / 偏好180 / 观点90 天</text>
+
+        <!-- 最终输出 -->
+        <line x1="592" y1="394" x2="592" y2="470" stroke="#bf3f26" stroke-width="1.5" marker-end="url(#q6arrowred)"/>
+        <rect x="330" y="478" width="524" height="62" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+        <text x="592" y="500" text-anchor="middle" font-size="13" font-weight="bold" fill="#bf3f26">最终分 = Σ1/(60+名次) × 重要性 × 时间衰减 → top-5</text>
+        <text x="592" y="522" text-anchor="middle" font-size="11" fill="#85806f">名次平手时,"持仓比观点耐放" → 老持仓反超临时观点</text>
+
+        <!-- 图例 -->
+        <rect x="30" y="478" width="270" height="62" rx="8" fill="#ffffff" stroke="#85806f" stroke-dasharray="3 2"/>
+        <text x="42" y="496" font-size="10" font-weight="bold" fill="#2f4d8a">图例</text>
+        <rect x="42" y="504" width="14" height="10" fill="#e9eef8" stroke="#2f4d8a"/><text x="62" y="513" font-size="9" fill="#2f4d8a">检索结果</text>
+        <rect x="130" y="504" width="14" height="10" fill="#e2f0eb" stroke="#1f6e5e"/><text x="150" y="513" font-size="9" fill="#1f6e5e">融合</text>
+        <rect x="200" y="504" width="14" height="10" fill="#faeae4" stroke="#bf3f26"/><text x="220" y="513" font-size="9" fill="#bf3f26">加权/输出</text>
+        <rect x="42" y="522" width="14" height="10" fill="#f0ede4" stroke="#85806f" stroke-dasharray="3 2"/><text x="62" y="531" font-size="9" fill="#85806f">按需/次要(图遍历默认不走)</text>
+      </svg>
+      <figcaption>图 03-6 · 怎么看:左侧三条泳道是三路检索各自吐出的带名次结果(图遍历是虚线=默认不走),汇入绿色 RRF 漏斗只按名次倒数融合;出口串两个朱砂齿轮——先乘重要性、再乘时间衰减(右侧曲线触到 0.5 地板不归零);最终相乘取 top-5,名次平手时持仓凭"更耐放"反超临时观点。</figcaption>
+    </figure>
+  </div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>三路各补一块盲区:全文补精确词、向量补语义、图补关系链(图较重,默认不走,按需触发)。</li>
+      <li>RRF 融合只看名次不看原始分:三路结果天然同尺,免去脆弱的量纲归一化,对单路偶发噪声也更稳。</li>
+      <li>最终分 = Σ1/(60+名次) × 重要性权重 × 时间衰减,三个因子相乘。常数 k=60 起压平头部、稳住排序的作用。</li>
+      <li>排序"感知时间"是因为记忆会过期:衰减按关系类型分级 τ(持仓 365 / 偏好 180 / 观点 90 天),体现"持仓比一句临时观点更耐放"。</li>
+      <li>衰减设 0.5 地板不归零,老事实最多降一半权重而不消失,保住长尾召回与审计价值;历史边用失效时间当锚点更准。</li>
+    </ul>
+    <p class="one-liner">一句话速记:三路召回各补盲区,RRF 按名次免对齐地融成一排,再乘"重要性×时间衰减"让会过期的记忆按新旧让位——持仓比临时观点更耐放。</p>
+    <p class="src-note">参考:<code>backend/app/memory/rrf.py</code>、<code>backend/app/memory/retriever.py</code>、<code>docs/claude-context/c5-plan3-read-pipeline-done.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="memory-q7">
+  <div class="q-header"><span class="q-num">Q7</span><h3 class="q-title">一句话进来,你怎么判断该查"用户的个人记忆"还是"市场知识库"?路由判错了怎么兜底?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">检索路由</span><span class="tag">触发词分类</span><span class="tag">LLM 兜底</span><span class="tag">记忆 vs 知识库</span><span class="tag">瀑布式决策</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题表面问"怎么分流",其实面试官想看你<strong>有没有在"准确率"和"成本/延迟"之间做过真实权衡</strong>。一个助手收到"帮我看看我的持仓"和"最近半导体行业的研报怎么说",这两句话该去的地方完全不同:前者要翻用户自己的个人记忆(持仓、偏好、说过的话),后者要查公开的市场知识库(研报、财报、政策、新闻)。最省事的做法是两边都查,但那样每句话都要多打一次检索,贵且慢。所以面试官想确认你是不是<strong>用便宜的手段解决了大多数情况、只把难的留给贵的手段</strong>。</p>
+    <ul>
+      <li><strong>追问:</strong>那"基于我的持仓推荐几只股票"这种又要个人记忆、又要市场数据的混合句,你怎么处理?(考你有没有 both 这一类)</li>
+      <li><strong>追问:</strong>规则匹配判错了、或者句子模棱两可,系统会怎样?会不会就直接答错?(考兜底设计)</li>
+      <li><strong>追问:</strong>两路结果都拿回来后,怎么防止模型把"用户的个人偏好"当成"市场客观事实"来对冲?(考结果回填的纪律)</li>
+      <li><strong>追问:</strong>为什么默认兜底是查记忆而不是查知识库?这个默认方向是拍脑袋还是有依据?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>核心是一个<strong>三层瀑布式路由</strong>:一句话进来,先用最便宜的手段试着判断,判不了再往下交给更贵的手段,最后还判不了就走一个安全的默认值。这三层在代码里就是一个函数 <code>decide_retrieval_targets</code>,它的输出永远是三选一:<code>['memory']</code>(只查个人记忆)、<code>['kb']</code>(只查市场知识库)、或 <code>['both']</code>(两边都查)。</p>
+
+    <h5>第一层:规则触发词(零延迟、零 LLM 成本)</h5>
+    <p>大多数句子其实一眼就能定向。系统维护三份小清单:<strong>记忆类触发词 13 个</strong>(我 / 我的 / 上次 / 之前 / 持仓 / 偏好 / 看好 / 看空 / 态度…),<strong>知识库类触发词 11 个</strong>(研报 / 财报 / 公告 / 政策 / 市场 / 板块 / 新闻 / 宏观…),还有 <strong>both 类正则 6 条</strong>(像"基于我.*推荐""结合我.*""根据我.*分析")。这一层是纯字符串/正则匹配,不调任何模型,所以零成本零延迟。它的判断优先级很关键:</p>
+    <ul>
+      <li><strong>both 正则最高</strong>——因为"基于我的持仓推荐"里既有"我"(记忆词)又是混合意图,必须先被 both 正则抓走,否则"我"会把它误判成纯记忆;</li>
+      <li><strong>其次是双类命中</strong>——一句话里同时出现记忆词和知识库词(比如"我的消费板块偏好"里"偏好"是记忆词、"板块"是知识库词),判 both;</li>
+      <li><strong>再次是单类命中</strong>——只命中一类就走那一类;</li>
+      <li><strong>都没命中</strong>就返回空,把球踢给第二层。</li>
+    </ul>
+
+    <h5>第二层:LLM 兜底(只处理边界句)</h5>
+    <p>规则没命中的,往往是没有明显关键词、但语义上有倾向的边界句。这时才调一次小模型(<code>LLMRouterFallback</code>),让它用受约束的 JSON 格式直接吐出 <code>retrieval_targets</code> 三选一加一句理由。这是典型的"<strong>precision 高的规则先行、贵的 LLM 兜边界</strong>"瀑布设计——不让 LLM 沾大多数句子,只让它干规则干不了的脏活。</p>
+
+    <h5>第三层:默认兜底 = 查记忆</h5>
+    <p>三种情况会落到最底层默认值:LLM 调用报错、LLM 输出的 JSON 解析/校验失败、或者规则没命中且根本没配 LLM。这三种一律返回 <code>['memory']</code>。<strong>为什么默认偏记忆而不是知识库?</strong>因为这是个"个人化助手",绝大多数对话都围绕用户自己的上下文展开,判不准时偏向用户自己的持仓/偏好,比偏向一堆无关研报要安全得多。</p>
+
+    <h5>结果回填:两段贴标签,防混淆</h5>
+    <p>路由只决定"查哪里",查回来的结果还要正确地塞进给模型的提示词。两路结果会被显式切成 <strong>[用户上下文]</strong> 和 <strong>[市场知识]</strong> 两段,各贴标签,并附一句 disclaimer:个人偏好只是背景、不是投资结论,公开信息客观、和偏好相互独立——"用户偏好白马股 + 该股近期跑输大盘"是个 trade-off,不是矛盾。没有这个区隔,模型很容易把"用户喜欢白马"当成"市场事实",硬去对冲掉真实行情。(路由→检索这一步怎么把多路结果排成一个序,见本类第 6 题。)</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面是三层瀑布的教学伪代码,只保留逻辑骨架。注意三层是"短路"的——上一层能定就不进下一层。</p>
+    <pre><code class="language-python"># 三份触发词清单(数量锁死:记忆13 / 知识库11 / both正则6)
+MEMORY_WORDS = ["我", "我的", "上次", "持仓", "偏好", "看好", "看空", ...]   # 13 个
+KB_WORDS     = ["研报", "财报", "公告", "政策", "市场", "板块", ...]          # 11 个
+BOTH_PATTERNS = [r"基于我.*推荐", r"结合我.*", r"根据我.*分析", ...]          # 6 条正则
+
+def rule_match(query):
+    # 第一层:纯字符串/正则,零 LLM 成本
+    # 优先级 1:both 正则最高 —— 防"我"这个记忆词把混合句遮蔽成纯记忆
+    if any(re.search(p, query) for p in BOTH_PATTERNS):
+        return ["both"]
+    hit_mem = any(w in query for w in MEMORY_WORDS)
+    hit_kb  = any(w in query for w in KB_WORDS)
+    # 优先级 2:两类都命中 → 混合意图
+    if hit_mem and hit_kb:
+        return ["both"]
+    # 优先级 3:只命中一类 → 走那一类
+    if hit_mem:
+        return ["memory"]
+    if hit_kb:
+        return ["kb"]
+    return None          # 都没命中:把球交给下一层
+
+async def decide_retrieval_targets(query, llm_fallback):
+    decided = rule_match(query)
+    if decided is not None:        # 第一层定了就短路返回,不碰 LLM
+        return decided
+    if llm_fallback is not None:   # 第二层:只有边界句才花这一次模型调用
+        return await llm_fallback.decide(query)   # 内部:报错/解析失败 → ['memory']
+    # 第三层:连 LLM 都没有 → 安全默认值
+    return ["memory"]              # 个人化助手,判不准时偏向用户自己的上下文
+</code></pre>
+    <p><strong>推演:</strong>拿四句话走一遍——<br>
+    ① "我上次说的那只票现在怎么样"→ 命中记忆词"我/上次",第一层直接出 <code>['memory']</code>,零模型调用;<br>
+    ② "最近有什么半导体行业的研报"→ 命中知识库词"研报",出 <code>['kb']</code>;<br>
+    ③ "基于我的持仓推荐几只低估值的"→ both 正则"基于我.*推荐"先抓,出 <code>['both']</code>(若没这条正则,"我"会把它误判成纯记忆);<br>
+    ④ "帮我捋一下思路"→ 三份清单都不命中,落到第二层 LLM 判,假如这次 LLM 返回的 JSON 解析失败,就兜底成 <code>['memory']</code>。这样四句话里有三句零成本搞定,只有第四句花了一次模型调用,这就是瀑布省钱的地方。整套路由准确率目标是 ≥ 0.85(50 条 golden case 衡量)。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择:触发词分类 + LLM 兜底</th><th class="th-vllm">替代方案:不分流,每句两边都查</th></tr></thead>
+      <tbody>
+        <tr><td>实现复杂度</td><td>要维护三份触发词清单 + 优先级 + LLM 兜底,代码更多</td><td>最省心,不用判断、不会漏,几乎没有路由逻辑</td></tr>
+        <tr><td>每句成本/延迟</td><td>大多数句子零成本(纯规则),只有边界句花一次小模型</td><td>每句都打两套检索(向量+图),延迟与成本翻倍</td></tr>
+        <tr><td>结果质量</td><td>定向检索,回填的都是相关上下文</td><td>无关那一路会塞进噪声,稀释提示词、增加模型混淆风险</td></tr>
+        <tr><td>判错风险</td><td>存在——清单漏词或边界句会判错</td><td>不存在"判错",因为根本不判</td></tr>
+        <tr><td>兜底/纠偏</td><td>默认查记忆 + 提示词 [用户上下文]/[市场知识] 区隔,双保险</td><td>不需要兜底,但需要更强的提示词去抑制无关那路的干扰</td></tr>
+        <tr><td>维护负担</td><td>触发词清单要随业务词汇演进而维护</td><td>几乎零维护</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>"全查"绝不是稻草人,它实现最简单、永远不会因为路由判错而漏查,在检索量小、单次检索很便宜的系统里是完全合理的默认。它真正的代价不在"对不对",而在<strong>每句话都付双倍的检索成本和延迟,还把无关那一路的噪声塞进提示词</strong>——这在一个把检索结果直接拼进上下文的 chat 系统里会持续稀释信噪比。我们之所以仍选分流,是因为这个产品里常见问句的方向其实很好认(出现"我/持仓/偏好"几乎必是记忆,出现"研报/政策/板块"几乎必是知识库),用一层零成本的规则就能把大多数句子一眼定向,把贵的 LLM 只留给真正模糊的边界句。代价是要维护清单、判错有风险——所以我们没有裸奔,而是配了"默认偏记忆 + 提示词显式区隔"这套双保险:判错方向时偏向用户自己的上下文最安全,回填时贴标签让模型不会把个人偏好误当市场事实。本质上是用"可控的判错风险 + 一点维护成本"换"翻倍的成本延迟 + 噪声"。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="ar-q7" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="ar-q7-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#1f6e5e"/>
+        </marker>
+        <marker id="ar-q7-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#85806f"/>
+        </marker>
+      </defs>
+
+      <!-- 入口 -->
+      <rect x="330" y="18" width="240" height="42" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="450" y="44" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" fill="#3a3a3a">一句话进来(用户问题)</text>
+      <line x1="450" y1="60" x2="450" y2="86" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q7)"/>
+
+      <!-- 第一层:规则 -->
+      <rect x="250" y="88" width="400" height="118" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="2"/>
+      <text x="450" y="110" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="bold" fill="#2f4d8a">第一层 · 规则触发词(零 LLM 成本)</text>
+      <text x="450" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#3a3a3a">记忆词 13 个 · 知识库词 11 个 · both 正则 6 条</text>
+      <text x="450" y="154" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#a8761f">优先级:both 正则 &gt; 双类命中 &gt; 单类 &gt; 未命中</text>
+      <text x="450" y="176" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">"我/持仓/偏好…" → memory   "研报/政策/板块…" → kb</text>
+      <text x="450" y="194" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">"基于我.*推荐 / 结合我.*" → both</text>
+
+      <!-- 命中 → 三出口 -->
+      <text x="178" y="232" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">命中 → 分流</text>
+      <line x1="300" y1="206" x2="150" y2="252" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#ar-q7-green)"/>
+      <line x1="420" y1="206" x2="320" y2="252" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#ar-q7-green)"/>
+      <line x1="480" y1="206" x2="490" y2="252" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#ar-q7-green)"/>
+
+      <rect x="60" y="254" width="170" height="40" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.6"/>
+      <text x="145" y="279" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#1f6e5e">['memory'] 个人记忆</text>
+
+      <rect x="245" y="254" width="170" height="40" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.6"/>
+      <text x="330" y="279" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#1f6e5e">['kb'] 市场知识库</text>
+
+      <rect x="430" y="254" width="150" height="40" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.6"/>
+      <text x="505" y="279" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#1f6e5e">['both'] 两边都查</text>
+
+      <!-- 未命中 → 第二层 -->
+      <text x="700" y="222" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">未命中 → 下漏</text>
+      <line x1="650" y1="160" x2="760" y2="160" stroke="#85806f" stroke-width="1.6" stroke-dasharray="5 4"/>
+      <line x1="760" y1="160" x2="760" y2="244" stroke="#85806f" stroke-width="1.6" marker-end="url(#ar-q7-gray)"/>
+
+      <rect x="650" y="246" width="220" height="78" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="2"/>
+      <text x="760" y="270" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#2f4d8a">第二层 · LLM 兜底</text>
+      <text x="760" y="290" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3a3a3a">受约束 JSON,只判边界句</text>
+      <text x="760" y="308" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#3a3a3a">输出 memory / kb / both</text>
+
+      <!-- LLM 报错 → 第三层 -->
+      <line x1="760" y1="324" x2="760" y2="356" stroke="#bf3f26" stroke-width="1.6" marker-end="url(#ar-q7)"/>
+      <text x="760" y="346" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#bf3f26">报错 / 解析失败 / 无 LLM</text>
+      <rect x="630" y="358" width="260" height="46" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="2"/>
+      <text x="760" y="386" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#bf3f26">第三层 · 默认兜底 ['memory']</text>
+
+      <!-- 出口 → 回填提示词 -->
+      <line x1="330" y1="294" x2="330" y2="430" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q7)"/>
+      <line x1="145" y1="294" x2="145" y2="430" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q7)"/>
+
+      <rect x="70" y="432" width="500" height="108" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="320" y="455" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#3a3a3a">回填提示词 · 两段显式区隔(top-5 hits,chunk 截断 240 字)</text>
+      <rect x="86" y="466" width="220" height="60" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.4"/>
+      <text x="196" y="488" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1f6e5e">[用户上下文]</text>
+      <text x="196" y="508" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3a3a3a">个人事实,只作背景</text>
+      <rect x="330" y="466" width="220" height="60" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.4"/>
+      <text x="440" y="488" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#2f4d8a">[市场知识]</text>
+      <text x="440" y="508" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3a3a3a">公开信息,客观独立</text>
+
+      <!-- 图例 -->
+      <rect x="600" y="432" width="290" height="108" rx="8" fill="#ffffff" stroke="#85806f" stroke-width="1.2"/>
+      <text x="615" y="452" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="bold" fill="#3a3a3a">图例</text>
+      <rect x="615" y="460" width="16" height="12" rx="3" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.4"/>
+      <text x="638" y="470" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3a3a3a">主结构(判断层)</text>
+      <rect x="615" y="478" width="16" height="12" rx="3" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.4"/>
+      <text x="638" y="488" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3a3a3a">命中 / 正向出口</text>
+      <rect x="615" y="496" width="16" height="12" rx="3" fill="#faeae4" stroke="#bf3f26" stroke-width="1.4"/>
+      <text x="638" y="506" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3a3a3a">默认兜底(偏记忆)</text>
+      <line x1="615" y1="520" x2="635" y2="520" stroke="#85806f" stroke-width="1.6" stroke-dasharray="5 4"/>
+      <text x="642" y="524" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#3a3a3a">未命中 → 往下一层漏</text>
+    </svg>
+    <figcaption>图 03-7 · 怎么看:一句话从顶部落下,先撞"规则层"筛网,命中就按 memory/kb/both 三个绿出口分流;没命中往右下漏到"LLM 兜底"判边界;LLM 报错再漏到底层朱砂盒"默认 ['memory']"。出口后两路结果被切成 [用户上下文] / [市场知识] 两段贴标签回填,防止个人偏好被当成市场事实。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>三层瀑布,便宜的先上:</strong>规则触发词(零成本)→ LLM 兜底(只判边界句)→ 默认查记忆。大多数句子第一层就定向,LLM 只碰真正模糊的。</li>
+      <li><strong>三份清单 + 优先级是关键:</strong>记忆词 13 / 知识库词 11 / both 正则 6;both 正则优先级最高,防"我"这类记忆词把混合句遮蔽。</li>
+      <li><strong>兜底默认偏记忆:</strong>LLM 报错、解析失败、或没配 LLM,一律 <code>['memory']</code>——个人化助手判不准时偏向用户自己的上下文最安全。</li>
+      <li><strong>回填要贴标签:</strong>两路结果切成 [用户上下文] / [市场知识] 两段,附 disclaimer,让模型不把"用户偏好白马"误当"市场事实"。</li>
+      <li><strong>对比全查:</strong>全查不会漏但每句双倍成本+噪声;分流用可控判错风险换成本和信噪比,再用"默认+区隔"双保险兜住。</li>
+    </ul>
+    <p class="one-liner">一句话速记:规则一眼定向、LLM 兜边界、判不准就默认查记忆,两路结果分段贴标签防混淆。</p>
+    <p class="src-note">参考:<code>backend/app/memory/memory_kb_router.py</code>、<code>backend/app/chatloop/system_prompt.py</code>、<code>docs/claude-context/c5-plan6-memory-kb-routing-done.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="memory-q8">
+  <div class="q-header"><span class="q-num">Q8</span><h3 class="q-title">记忆同时落在图数据库、向量库、关系库三个地方,写到一半崩了怎么保证不脏?一致性怎么做?</h3><span class="q-diff" title="难度 5/5">★★★★★</span></div>
+  <div class="q-tags"><span class="tag">三方一致性</span><span class="tag">事务原子性</span><span class="tag">发件箱模式</span><span class="tag">周期对账</span><span class="tag">幂等去重</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题在探:你把一份数据拆到三个互不知情的存储里之后,有没有真正想清楚"半路崩溃"会留下什么烂摊子。很多人答得出"用事务",但三个库不是一个事务能管的——关系库有事务、图库勉强能搭、向量库根本不进事务。面试官想看你怎么分层:哪些必须强一致、哪些可以"先欠着稍后补",以及补的时候怎么不补出重复、补漏的怎么被发现。</p>
+    <ul>
+      <li><strong>追问:</strong>为什么不干脆把三个写操作都塞进一个分布式事务(2PC)?代价是什么?</li>
+      <li><strong>追问:</strong>向量库写失败你"吞掉异常不回滚",那这条记忆岂不是查不到了?最终怎么补回来?</li>
+      <li><strong>追问:</strong>对账作业重放时,同一条边被插了两次怎么办?靠什么保证幂等?</li>
+      <li><strong>追问:</strong>你说图库和关系库同事务,可万一生产环境根本装不上图库扩展呢?你的契约怎么改?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先说清楚为什么是三个库。同一条记忆(比如"用户去年把某只股票清仓了")要被三种方式查到:关系库存全量事实、当主真相源;图库存它的拓扑关系(用户—持有—某股票,便于做多跳遍历);向量库存它的语义向量(便于用"模糊语义"召回)。三种查法各有长板,所以一份数据落三处。坏处就是:写到第二步崩了,三处会对不上——脏数据。</p>
+
+    <h5>核心思路:按"能不能等"把三处分成两档</h5>
+    <p>关键判断是:哪些必须当场一起成功、哪些可以晚一点补上。我们把关系库和图库划为"必须当场一起对"——因为图拓扑是真相源的一部分,边的数据和边的拓扑不能一个有一个没有。向量库划为"可以晚点补"——向量只是为了语义检索,晚几分钟补上,顶多是这几分钟里这条记忆模糊搜不到,但事实本身一点没丢,因为关系库里它是完整的。</p>
+
+    <h5>第一档:关系库 + 图库,捆进同一个事务</h5>
+    <p>关系库的 INSERT(写这条边的事实)和图库的建边命令,放进同一把"锁"里——要么一起提交,要么一起回滚。如果图库那条命令失败了,整个事务回滚,这条记忆当作没写过,交给上层重试。这样关系库和图库永远不会出现"一个有一个没有"。这里有个铁律:关系库是唯一真相源,图库是它的镜像。</p>
+
+    <h5>第二档:向量库走"发件箱"(outbox),做最终一致</h5>
+    <p>向量库故意不进上面那个事务。我们先内联试着写一次向量;一旦失败(嵌入服务挂了 / 向量库连不上),我们不抛异常、绝不回滚关系库,而是把"这条边待补向量"记成一行,塞进一张叫 <code>pending_milvus_inserts</code> 的发件箱表里,然后让主事务正常提交。这就是发件箱模式:把"待办的副作用"和主数据写在同一个数据库事务里持久化下来,保证主数据成功的同时"待办"一定不丢,稍后由后台慢慢兑现。</p>
+
+    <h5>崩溃恢复:周期对账 + 幂等键兜底</h5>
+    <p>光记下待办还不够,得有人去兑现、还得有人去发现"该写却没写"的漂移态。这就是对账(reconciliation)作业,它周期跑两件事:一是扫发件箱表,逐条重试"嵌入+写向量",成功就删行、失败就把重试次数加一、超过 3 次就告警留人工排查;二是反向扫描,找出"关系库写完了但向量还挂在发件箱 / 一段对话标记说抽过了但其实没抽完"这类不一致,修回去。</p>
+    <p>最后一道保险是<strong>幂等</strong>:对账重放、上层重试,都可能让同一条边被写第二次。我们靠一个由 5 个字段组成的唯一键(来源对话、来源节点、目标节点、关系类型、生效时间)来防重——同一条边再插也只会撞唯一约束被挡掉,不会插出重复。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面这段伪代码把"主事务强一致 + 向量库发件箱兜底"这一拍画出来。注意看异常处理:图库失败让整事务崩;向量库失败只是默默记一笔发件箱,绝不影响关系库提交。</p>
+    <pre><code class="language-python"># 写入一条记忆边:主事务把"关系库 + 图库"捆死,向量库走发件箱
+def write_memory_edge(edge):
+    txn = pg.begin()                       # 开一个关系库事务
+    try:
+        pg.insert("chat_memory_edges", edge)   # 第1档:写事实(主真相源)
+        age_create_edge(txn, edge)             # 第1档:同事务建图边
+        # 走到这里:关系库 + 图库 在同一把锁里,要么都成、要么都回滚
+
+        # 第2档:向量库内联试一次,但它"不进上面这把锁"
+        ok = try_milvus_insert(txn, edge)      # 嵌入 + 写向量
+        if not ok:
+            # 失败了:不抛、不回滚!只把"待补向量"写进发件箱表
+            # 这一行 INSERT 跟上面的事实写在同一个事务里,所以绝不会丢
+            enqueue_milvus_insert(txn, edge)   # 写 pending_milvus_inserts
+
+        txn.commit()                       # 关系库 + 图库 + 发件箱 一起落地
+    except AgeCypherError:                  # 图库建边失败 = 真相源不完整
+        txn.rollback()                     # 整事务回滚,这条边当没写过
+        raise                              # 交给上层重试
+
+# 后台对账作业:周期扫发件箱,把欠的向量补上(幂等键防重复)
+def reconcile_pending_milvus():
+    rows = pg.select("pending_milvus_inserts", order_by="created_at", limit=200)
+    for row in rows:
+        if row.retry_count >= 3:           # 试满 3 次还不行
+            alert("max_reconcile_retries_exceeded")  # 告警,留行做人工排查
+            continue
+        try:
+            vec = embed(row.edge_text)      # 重新嵌入
+            milvus_insert(vec, row.edge_id) # 重新写向量(唯一键挡住重复)
+            pg.delete(row)                  # 补上了,删掉发件箱行
+        except Exception as e:
+            row.retry_count += 1            # 这轮又挂,计数+1 下轮再试
+</code></pre>
+    <p><strong>推演:</strong>假设写到"向量库这一步"机器断电。关系库的事实 + 图库的边已经在同一事务里提交了(主真相源完整),发件箱里也留了一行"待补向量"。机器重启后,对账作业每轮最多捞 200 行,捞到这条、重新嵌入、写向量、删行——补齐。整个过程里这条记忆<strong>从没脏过</strong>:期间它在关系库完整可查、在图库能遍历,只是"模糊语义搜"短暂搜不到。若对账连试 3 次都失败(比如向量库长时间宕),第 4 次不再盲试,直接告警让人介入。这套"主事务 + 发件箱 + 周期对账 + 幂等键"被 4 个混沌测试场景覆盖(向量库发件箱、进程重启、重复抽取、空操作回滚)。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(三库分工 + 发件箱/对账)</th><th class="th-vllm">替代方案(全放一个库)</th></tr></thead>
+      <tbody>
+        <tr><td>一致性难度</td><td>关系库+图库强一致、向量库最终一致,要写对账</td><td>天然原子,单库事务自带,不操心一致性</td></tr>
+        <tr><td>查询能力</td><td>图遍历 + 语义向量 + 全文,三种长板都拿到</td><td>只有这一个库擅长的那种查法,另两种要么没要么很弱</td></tr>
+        <tr><td>崩溃半写</td><td>主真相源永不半写;向量短暂滞后,对账补齐</td><td>不存在跨库半写问题(根本没跨库)</td></tr>
+        <tr><td>去重</td><td>5 列幂等唯一键,重放/重试不出重复</td><td>单事务天然不会重复写</td></tr>
+        <tr><td>工程成本</td><td>多出对账作业 + 容错矩阵 + 混沌测试,运维更重</td><td>几乎零额外一致性代码</td></tr>
+        <tr><td>真实环境韧性</td><td>图库装不上也能降级(图边 best-effort,关系库兜底)</td><td>单点:这个库不擅长的查询直接没法做</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>单库方案真的更省心——一个事务就把原子性给了你,没有发件箱、没有对账、没有混沌测试这一堆活。如果记忆只需要一种查法,我会毫不犹豫选单库。但记忆系统恰恰要三种查法同时在线:图遍历找关系、向量找语义、全文兜底,没有任何单一存储能把这三件事都做好。所以我们用三库分工换查询能力,代价是把跨库一致性这块硬骨头自己啃下来——并且把代价压到最小:只让真正必须强一致的关系库+图库共事务,向量库这种"晚补无伤大雅"的退到最终一致,再用幂等键堵住重放。这个取舍在真实环境还被验证过一次:生产库装不上图库扩展、图镜像从未真正跑起来,于是契约直接改成"关系库是唯一真相源、图边降级为尽力而为"——三库分工的好处之一,正是它本来就能优雅降级,而不是整个系统瘫掉。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="q8arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="q8arrowD" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#85806f"/>
+        </marker>
+        <marker id="q8arrowG" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#1f6e5e"/>
+        </marker>
+      </defs>
+
+      <!-- 主事务框 -->
+      <rect x="30" y="40" width="430" height="190" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="2.5"/>
+      <text x="48" y="66" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#bf3f26">同一个关系库事务（同一把锁）</text>
+      <text x="48" y="86" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">败则整体回滚 · 关系库 = 唯一真相源</text>
+
+      <rect x="58" y="104" width="170" height="92" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="2"/>
+      <text x="143" y="134" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#2f4d8a">关系库 PG</text>
+      <text x="143" y="156" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">INSERT 边事实</text>
+      <text x="143" y="176" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">全量·主真相源</text>
+
+      <rect x="262" y="104" width="170" height="92" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="2"/>
+      <text x="347" y="134" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#2f4d8a">图库 AGE</text>
+      <text x="347" y="156" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">Cypher 建边</text>
+      <text x="347" y="176" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">图拓扑·镜像</text>
+
+      <line x1="228" y1="150" x2="262" y2="150" stroke="#2f4d8a" stroke-width="2" marker-end="url(#q8arrow)"/>
+
+      <!-- 向量库 + 发件箱(框外,虚线) -->
+      <rect x="540" y="44" width="150" height="86" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="2"/>
+      <text x="615" y="74" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#85806f">发件箱表</text>
+      <text x="615" y="94" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">pending_milvus</text>
+      <text x="615" y="112" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">_inserts</text>
+
+      <rect x="730" y="44" width="140" height="86" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="2"/>
+      <text x="800" y="78" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#2f4d8a">向量库 Milvus</text>
+      <text x="800" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">语义检索·最终一致</text>
+
+      <!-- 虚线:主框 → 发件箱(失败不回滚) -->
+      <path d="M460 110 L538 86" stroke="#85806f" stroke-width="2" stroke-dasharray="6 4" fill="none" marker-end="url(#q8arrowD)"/>
+      <text x="470" y="80" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">写向量失败 →</text>
+      <text x="470" y="96" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">记一笔·不回滚 PG</text>
+
+      <!-- 发件箱 → 向量库(对账兑现) -->
+      <path d="M690 87 L728 87" stroke="#1f6e5e" stroke-width="2" fill="none" marker-end="url(#q8arrowG)"/>
+
+      <!-- 对账齿轮 -->
+      <rect x="30" y="290" width="600" height="160" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="2.5"/>
+      <text x="50" y="318" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#1f6e5e">⚙ 周期对账作业 reconciliation（崩溃恢复）</text>
+
+      <rect x="56" y="338" width="262" height="92" rx="8" fill="#ffffff" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="187" y="364" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#1f6e5e">扫发件箱·重试补向量</text>
+      <text x="187" y="386" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">成功删行 / 失败 retry+1</text>
+      <text x="187" y="406" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">超 3 次告警 · 每轮 ≤200 行</text>
+
+      <rect x="340" y="338" width="270" height="92" rx="8" fill="#ffffff" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="475" y="364" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#1f6e5e">扫漂移态·修不一致</text>
+      <text x="475" y="386" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">PG 写完但向量还 pending</text>
+      <text x="475" y="406" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">/ 对话未标抽取完</text>
+
+      <!-- 发件箱 → 对账(虚线下行) -->
+      <path d="M615 130 L615 200 L187 200 L187 336" stroke="#1f6e5e" stroke-width="1.6" stroke-dasharray="5 4" fill="none" marker-end="url(#q8arrowG)"/>
+      <text x="230" y="218" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">后台周期捞取</text>
+
+      <!-- 幂等锁 -->
+      <rect x="656" y="290" width="214" height="160" rx="8" fill="#f0ede4" stroke="#a8761f" stroke-width="2.5"/>
+      <text x="763" y="318" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#a8761f">🔒 幂等唯一键</text>
+      <text x="763" y="346" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">5 列:来源对话+来源节点</text>
+      <text x="763" y="366" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">+目标节点+关系类型</text>
+      <text x="763" y="386" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">+生效时间</text>
+      <text x="763" y="414" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#a8761f">重放/重试不插重复</text>
+
+      <!-- 警示便签 -->
+      <rect x="30" y="486" width="840" height="54" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8" stroke-dasharray="4 3"/>
+      <text x="50" y="510" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#bf3f26">⚠ 真实环境教训</text>
+      <text x="50" y="530" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#85806f">生产库装不上图库扩展 → 图镜像从未真跑;图边曾"毒死"整事务(改用保存点)→ 契约改为：关系库 = 唯一真相源,图边降级为尽力而为。</text>
+
+      <!-- 图例 -->
+      <text x="50" y="234" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">实线 = 同事务强一致 · 虚线 = 最终一致(可滞后)</text>
+    </svg>
+    <figcaption>图 03-8 · 怎么看:朱砂大框内 关系库+图库 同事务强一致(败则整体回滚);向量库在框外,失败只写灰色发件箱表、绝不回滚——靠下方松绿齿轮周期对账补齐,右侧 ochre 幂等键防止补的时候插重复;底部红签是真实环境逼出的契约改写。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>分层是核心:关系库+图库属"必须当场一起对",捆进同一事务、败则整体回滚;向量库属"可以晚点补",退到最终一致。关系库是唯一真相源。</li>
+      <li>向量库走发件箱模式:写失败不抛不回滚,只把"待补"记进 pending 表(跟主数据同事务持久化),保证主数据成功的同时待办绝不丢。</li>
+      <li>崩溃恢复靠周期对账:扫发件箱重试补向量(成功删行/失败重试+1/超 3 次告警,每轮 ≤200 行),外加反向扫描"该写没写"的漂移态修回去。</li>
+      <li>幂等唯一键(5 列)是最后一道保险:对账重放、上层重试都不会插出重复边。整套被 4 个混沌测试场景守护。</li>
+      <li>真实环境会打脸:生产装不上图库扩展、图边曾毒死整事务——三库分工的好处之一就是能优雅降级,契约顺势改成"图边尽力而为、关系库兜底"。</li>
+    </ul>
+    <p class="one-liner">一句话速记:必须强一致的(关系库+图库)捆一个事务,能晚补的(向量库)走发件箱+周期对账,幂等键防重放——半写永远脏不到真相源。冲突合并细节见本类第 5 题,读取检索见本类第 6 题。</p>
+    <p class="src-note">参考:<code>backend/app/memory/milvus_outbox.py</code>、<code>backend/app/memory/reconciliation.py</code>、<code>docs/claude-context/c5-plan2a-write-pipeline-core-done.md</code></p>
+  </div></div>
+</article>
+</section>
