@@ -481,6 +481,7 @@ async def test_shared_seq_counter_no_duplicate_seq():
             tools=None,
             tool_choice="auto",
             tier="balanced",
+            model=None,
             request_id=None,
             on_delta=None,
         ):

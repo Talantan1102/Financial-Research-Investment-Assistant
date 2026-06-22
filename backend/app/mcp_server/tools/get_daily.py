@@ -6,6 +6,11 @@ Exports:
 
 返回**列式**紧凑结构(dates/open/high/low/close/vol/pct_chg 各一数组),可直接喂
 plotly go.Candlestick(x=dates, open=..., ...) 或折线;比 list-of-dict 省 token。
+
+日期范围两种传法:
+  1. 显式:start + end (YYYYMMDD)
+  2. 相对窗口:anchor + lookback (日历型 1y/6m/3m/ytd),工具自己定窗口,无需先调 trade_cal。
+     交易日计数型(如 20td)不支持内联解析,仍需先调 trade_cal action=window。
 """
 
 from __future__ import annotations
@@ -19,22 +24,46 @@ TOOL_DEF = Tool(
     name="get_daily",
     description=(
         "Daily OHLC candlestick series for one A-share over a date range. "
-        "Args: ts_code (e.g. '600519.SH'), start/end (YYYYMMDD). "
+        "Provide either start+end (YYYYMMDD), or anchor+lookback (calendar window like "
+        "1y/6m/3m/ytd — resolves the window itself, no need to call trade_cal first). "
+        "Trading-day-count lookbacks (e.g. 20td) still require trade_cal action=window first. "
         "Returns columnar arrays: dates, open, high, low, close, vol, pct_chg."
     ),
     inputSchema={
         "type": "object",
         "properties": {
             "ts_code": {"type": "string", "description": "A-share code, e.g. '600519.SH'"},
-            "start": {"type": "string", "description": "start date YYYYMMDD"},
-            "end": {"type": "string", "description": "end date YYYYMMDD"},
+            "start": {"type": "string", "description": "start date YYYYMMDD (use with end)"},
+            "end": {"type": "string", "description": "end date YYYYMMDD (use with start)"},
+            "anchor": {
+                "type": "string",
+                "description": "as-of date YYYYMMDD (use with lookback for calendar window)",
+            },
+            "lookback": {
+                "type": "string",
+                "description": "calendar window code: 1y/6m/3m/30d/ytd (use with anchor)",
+            },
         },
-        "required": ["ts_code", "start", "end"],
+        "required": ["ts_code"],
     },
 )
 
-# 单次返回的最大行数(防时间序列过长撑爆上下文;超出取最近 N 个交易日)。
-_MAX_ROWS = 260
+def _err(msg: str) -> list[TextContent]:
+    return [TextContent(type="text", text=json.dumps({"error": msg}, ensure_ascii=False))]
+
+
+def _resolve_range(args: dict[str, Any]) -> tuple[str, str]:
+    """显式 start+end 优先;否则用 anchor+lookback(日历型)解析。都没有则抛 ValueError。"""
+    if args.get("start") and args.get("end"):
+        return args["start"], args["end"]
+    anchor, lookback = args.get("anchor"), args.get("lookback")
+    if anchor and lookback:
+        from app.mcp_server.tools.trade_cal import resolve_calendar_window
+        return resolve_calendar_window(anchor, lookback)
+    raise ValueError(
+        "需要 start+end,或 anchor+lookback(日历型 1y/6m/3m/ytd 自动定窗);"
+        "过去 N 个交易日(td)请先用 trade_cal action=window"
+    )
 
 
 def _round_list(series: Any, ndigits: int = 2) -> list:
@@ -47,16 +76,35 @@ def _round_list(series: Any, ndigits: int = 2) -> list:
     return out
 
 
+def _summary(df: Any, ts_code: str) -> dict[str, Any]:
+    """从**完整** df 现算紧凑信息卡;超大截断后由 ToolLoop 保留(见 spec § 4.1/4.2)。
+
+    去 cap 后长区间真取全量,完整序列过大会被换出上下文——这张卡是 agent 留在
+    上下文里能核对范围/直接答简单问题的依据,体积小、廉价。
+    """
+    dates = [str(d) for d in df["trade_date"].tolist()]
+    close = df["close"]
+    return {
+        "ts_code": ts_code,
+        "count": int(len(df)),
+        "date_start": dates[0],
+        "date_end": dates[-1],
+        "first_close": round(float(close.iloc[0]), 2),
+        "last_close": round(float(close.iloc[-1]), 2),
+        # 刻意不放 period_high/period_low:会诱导 agent 拿(最低-最高)/最高当最大回撤,
+        # 但最大回撤是路径依赖的峰谷,须按完整收盘序列逐日算(见 system_prompt 纪律)。
+    }
+
+
 def _format_daily(df: Any, ts_code: str) -> dict[str, Any]:
     """DataFrame → 列式紧凑 dict(纯函数,可单测,不碰网络/LLM)。"""
     if df is None or getattr(df, "empty", True):
         return {"ts_code": ts_code, "count": 0, "dates": []}
     df = df.sort_values("trade_date")
-    if len(df) > _MAX_ROWS:
-        df = df.tail(_MAX_ROWS)
     out: dict[str, Any] = {
         "ts_code": ts_code,
         "count": int(len(df)),
+        "summary": _summary(df, ts_code),
         "dates": [str(d) for d in df["trade_date"].tolist()],
         "open": _round_list(df["open"]),
         "high": _round_list(df["high"]),
@@ -74,8 +122,10 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
     from app.services.tushare_factory import build_tushare_service
 
     ts_code = args["ts_code"]
-    start = args["start"]
-    end = args["end"]
+    try:
+        start, end = _resolve_range(args)
+    except ValueError as e:
+        return _err(str(e))
     tushare = build_tushare_service()
     df = await tushare.get_daily(ts_code=ts_code, start=start, end=end)
     payload = _format_daily(df, ts_code)

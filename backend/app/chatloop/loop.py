@@ -84,6 +84,7 @@ class ToolLoop:
         steer_source: SteerSourceProtocol | None = None,
         cancel_event: asyncio.Event | None = None,
         tier: str = "balanced",
+        model: str | None = None,
         seq_counter: SeqCounter | None = None,
     ) -> None:
         self._llm = llm
@@ -94,6 +95,7 @@ class ToolLoop:
         self._steer = steer_source
         self._cancel = cancel_event
         self._tier = tier
+        self._model = model
         # 工具 schema 会话内恒定,turn 开始时取一次。
         self._schemas: list[dict[str, Any]] = tool_hub.schemas_for_llm()
         self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
@@ -181,6 +183,7 @@ class ToolLoop:
                 tools=self._schemas,
                 tool_choice=state.tool_choice,
                 tier=self._tier,
+                model=self._model,
                 request_id=state.request_id,
                 on_delta=self._make_on_delta(state.step + 1),
             )
@@ -317,15 +320,22 @@ class ToolLoop:
             )
             return
         # ToolResult 是 frozen,但 output dict 可变 —— 原地 clear+update(同既有 figures 剥离手法)
+        summary = r.output.get("summary")
         r.output.clear()
-        r.output.update(
-            {
-                "truncated_digest": serialized[:600],
-                "note": "结果过大已截断,完整内容见 ref,需要更多可调 read_cached_result 取回",
-                "ref": cache_key,
-                "original_chars": len(serialized),
-            }
-        )
+        capped: dict[str, Any] = {
+            "note": (
+                "结果过大已截断,完整数据已缓存(见 ref)。要对它做计算,"
+                "用 run_python 传 data_refs={变量名: 上面的 ref} 把完整数据一次灌进沙箱算全量——"
+                "别用 read_cached_result 分页翻取(大数据翻页会耗尽预算);只想看少量原文才用 read_cached_result。"
+            ),
+            "ref": cache_key,
+            "original_chars": len(serialized),
+        }
+        if isinstance(summary, dict):
+            capped["summary"] = summary  # 工具自带信息卡 → 存活,优于粗暴 digest
+        else:
+            capped["truncated_digest"] = serialized[:600]
+        r.output.update(capped)
 
     # ------------------------------------------------------------------
     # 结果合并:allowed→真实 result,rejected→熔断错误,按原顺序对齐
@@ -426,6 +436,7 @@ class ToolLoop:
             tools=self._schemas,
             tool_choice="none",
             tier=self._tier,
+            model=self._model,
             request_id=state.request_id,
             on_delta=self._make_on_delta(state.step + 1),
         )

@@ -6,7 +6,8 @@ spec: docs/superpowers/specs/2026-06-16-computation-caliber-freeze-design.md
 冻结口径(全模块一致):
 - 收益率 = tushare pct_chg ÷ 100(第一根参照窗口前一天;别用 close 比值——M1 0.018 的根);
 - 窗口 = 调用方传入(method B:用 agent 实际 get_daily 数据,窗口同源);
-- 不复权(get_daily 默认);年化 √252;标准差 ddof=1;分位 < 不插值。
+- 涨幅/回撤/CAGR 用不复权 close 比值(= 价格回报,与 agent 自然算法一致;复权累乘是含分红的
+  总回报,会与价格回报差一个股息率,故不用);波动/相关用 pct_chg;年化 √252;ddof=1;分位 < 不插值。
 返回值口径:涨幅/回撤/波动/CAGR 为**分数**(×100 得 %);相关无量纲;分位 ∈ [0,1]。
 """
 

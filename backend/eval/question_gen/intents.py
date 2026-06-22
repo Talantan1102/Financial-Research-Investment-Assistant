@@ -1,0 +1,51 @@
+"""题面模板层 —— 个股/配对研究意图的中文问题文案(纯字符串拼接,无依赖)。
+
+spec: docs/superpowers/specs/2026-06-17-question-gen-mvp-design.md
+operators 层给计算派发;本层只负责把"指标×股票×窗口"组装成自然语言题面。
+入参 window_cn 已是中文(调用方传 legality.window_cn 的结果,如 "近一年"),模板直接拼。
+"""
+
+from __future__ import annotations
+
+INTENT = "stock_study"
+
+
+def q_single(indicator: str, name: str, window_cn: str) -> str:
+    """单股单指标题面;未知 indicator raise ValueError。
+
+    涨幅/回撤/波动 按 window_cn 填窗口;CAGR 固定"最近三年"(需 >=2 年才有意义)。
+    """
+    if indicator == "涨幅":
+        return f"{name}最近{window_cn}涨了多少?"
+    if indicator == "回撤":
+        return f"{name}最近{window_cn}的最大回撤是多少?"
+    if indicator == "波动":
+        return f"{name}最近{window_cn}的年化波动率是多少?"
+    if indicator == "CAGR":
+        return f"{name}最近三年的复合年化收益率(CAGR)是多少?"
+    raise ValueError(f"未知指标:{indicator!r}")
+
+
+def q_dual(name: str, window_cn: str) -> str:
+    """单股双指标题面:回撤 + 波动一并问。"""
+    return f"{name}最近{window_cn}的最大回撤和年化波动率分别是多少?"
+
+
+def q_corr(name_a: str, name_b: str, window_cn: str) -> str:
+    """两股日收益率相关性题面。"""
+    return f"{name_a}和{name_b}最近{window_cn}的日收益率相关性是多少?"
+
+
+def q_rank(sector: str, names: list[str], window_cn: str) -> str:
+    """板块内多只排序题面:涨幅最高前三。"""
+    joined = "、".join(names)
+    return f"{sector}板块这几只({joined})里,最近{window_cn}涨幅最高的前三只是哪几只?"
+
+
+def q_filter(names: list[str], window_cn: str) -> str:
+    """多只多条件筛选题面:涨幅为正且最大回撤小于 20%。"""
+    joined = "、".join(names)
+    return f"{joined}这几只里,最近{window_cn}涨幅为正、且最大回撤小于20%的有哪几只?"
+
+
+__all__ = ["INTENT", "q_single", "q_dual", "q_corr", "q_rank", "q_filter"]

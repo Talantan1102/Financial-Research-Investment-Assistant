@@ -157,3 +157,30 @@ async def test_window_bad_lookback():
 async def test_window_missing_anchor():
     r = await _call({"action": "window", "lookback": "1y"})
     assert "参数校验失败" in r.get("error", "")
+
+
+# ── resolve_calendar_window 纯函数 ──────────────────────────────────────────
+
+def test_resolve_calendar_window_1y():
+    from app.mcp_server.tools.trade_cal import resolve_calendar_window
+
+    assert resolve_calendar_window("20260616", "1y") == ("20250616", "20260616")
+
+
+def test_resolve_calendar_window_6m():
+    from app.mcp_server.tools.trade_cal import resolve_calendar_window
+
+    assert resolve_calendar_window("20260616", "6m") == ("20251216", "20260616")
+
+
+def test_resolve_calendar_window_ytd():
+    from app.mcp_server.tools.trade_cal import resolve_calendar_window
+
+    assert resolve_calendar_window("20260616", "ytd") == ("20260101", "20260616")
+
+
+def test_resolve_calendar_window_td_raises():
+    from app.mcp_server.tools.trade_cal import resolve_calendar_window
+
+    with pytest.raises(ValueError, match="td"):
+        resolve_calendar_window("20260616", "20td")

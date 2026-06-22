@@ -81,6 +81,7 @@ class FakeLLM:
     ) -> None:
         self._steps = list(steps)
         self.received_tool_choice: list[str] = []
+        self.received_model: list[str | None] = []
         self.received_messages: list[list[dict]] = []
         self.received_tools: list[object] = []
         self._round = 0
@@ -94,12 +95,14 @@ class FakeLLM:
         tools=None,
         tool_choice="auto",
         tier="balanced",
+        model=None,
         request_id=None,
         on_delta=None,
     ) -> StepResult:
         if not self._steps:
             raise AssertionError("FakeLLM 剧本已耗尽 — 剧本步数与循环圈数不符")
         self.received_tool_choice.append(tool_choice)
+        self.received_model.append(model)
         self.received_messages.append([dict(m) for m in messages])
         self.received_tools.append(tools)
         cur_round = self._round
@@ -850,3 +853,19 @@ async def test_no_context_pressure_event_when_off():
     loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit)
     await loop.run(_make_state())
     assert emit.of("context_pressure") == []
+
+async def test_model_passthrough_to_stream_step() -> None:
+    # ToolLoop(model="qwen-max") → 透传给 stream_step
+    llm = FakeLLM([_step(content="答案", finish_reason="stop")])
+    hub = FakeToolHub(results_per_round=[])
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), model="qwen-max")
+    await loop.run(_make_state())
+    assert llm.received_model == ["qwen-max"]
+
+
+async def test_no_model_passes_none() -> None:
+    llm = FakeLLM([_step(content="答案", finish_reason="stop")])
+    hub = FakeToolHub(results_per_round=[])
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps())
+    await loop.run(_make_state())
+    assert llm.received_model == [None]

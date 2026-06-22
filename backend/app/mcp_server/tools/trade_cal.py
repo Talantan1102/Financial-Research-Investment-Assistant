@@ -111,6 +111,21 @@ def _resolve_raw_start(anchor: str, kind: str, n: int) -> str:
     raise ValueError(f"unexpected calendar kind: {kind}")
 
 
+def resolve_calendar_window(anchor: str, lookback: str) -> tuple[str, str]:
+    """日历型相对窗口 → (raw_start, anchor) 纯解析(不查日历)。
+
+    仅支持日历型 lookback(y/m/d/ytd);交易日计数型 td 需查日历倒数,不在纯路径,抛 ValueError。
+    raw_start 未顺延到首个交易日,但 get_daily(start=raw_start, end=anchor) 取回的 K 线与
+    trade_cal.window 顺延后的窗口逐根相同(raw_start 与首个交易日之间本无交易日)。
+    """
+    if _bad_ymd(anchor):
+        raise ValueError("anchor 需 8 位 YYYYMMDD")
+    kind, n = _parse_lookback(lookback)
+    if kind == "td":
+        raise ValueError("td(交易日计数)需查日历,请用 trade_cal action=window")
+    return _resolve_raw_start(anchor, kind, n), anchor
+
+
 async def _handle_window(tushare: Any, args: dict[str, Any]) -> list[TextContent]:
     anchor = args.get("anchor")
     if _bad_ymd(anchor):

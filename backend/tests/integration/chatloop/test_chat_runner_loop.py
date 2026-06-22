@@ -127,6 +127,7 @@ class ScriptedStepClient:
         tools: Any = None,
         tool_choice: str = "auto",
         tier: str = "balanced",
+        model: Any = None,
         request_id: Any = None,
         on_delta: Any = None,
     ) -> StepResult:
