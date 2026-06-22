@@ -104,6 +104,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### 代码解释器(2026-06-11 ship 完)
 - [run_python 代码解释器 ship](docs/claude-context/code-interpreter-run-python-done.md) — LLM 写 Python→复用 SkillExecutor 沙箱(execute_source 内联入口)→plotly 交互图;figures 走 chart 事件不进上下文;ExecutorBackend 留 Docker 口;两坑(plotly 用 dist-min/factory 避 mapbox / 沙箱 OpenBLAS 单线程避 OOM)
 
+### 项目面试通关手册(2026-06-22 ship 完)
+- [AlphaScout 项目面试通关手册 ship](docs/claude-context/project-interview-manual-done.md) — 自包含单文件 HTML(`interview-manual/`)13 类 67 题 67 图,面试官深挖本项目题库;7 facet + 决策对比(不稻草人)+ 教学伪代码 + 原创 SVG;Workflow 多 agent 研究→撰写→双裁判(≥92,本仓代码核验)→ getBBox 自检;三坑(Chrome MCP 卡死改 Playwright / 裁判循环漏 critical / 共享 checkout 并发清文件)
+
 ## 设计稿与实施计划
 
 `docs/superpowers/specs/` 和 `docs/superpowers/plans/` 是更详细的决策评估和任务拆分。本仓库的设计语言：spec 评决策、plan 推实施、claude-context 沉淀长期 working memory。

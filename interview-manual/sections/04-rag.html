@@ -1,0 +1,930 @@
+<section class="category" id="cat-rag" data-icon="📚" data-title="知识库与 RAG">
+<header class="cat-header">
+  <span class="cat-icon">📚</span>
+  <div><h2><span class="cat-no">04</span>知识库与 RAG</h2></div>
+</header>
+<p class="cat-desc">这一组聚焦 AlphaScout 的知识库摄取与检索(RAG)链路:金融文档怎么切块、用什么 embedding 入向量库、中文场景的工程坑,以及评估体系还缺什么。从「为什么不能一刀切」这类入门取舍,逐步深入到 embedding 选型权衡、离线评估缺口,最后到「什么时候根本不该用 RAG」的边界判断。</p>
+
+<article class="question-card" id="rag-q1">
+  <div class="q-header"><span class="q-num">Q1</span><h3 class="q-title">你的知识库切块按类型路由:研报走语义切、财报走章节切、政策走条款切。为什么不能用一个固定大小一刀切?</h3><span class="q-diff" title="难度 3/5">★★★☆☆</span></div>
+  <div class="q-tags"><span class="tag">切块策略</span><span class="tag">类型路由</span><span class="tag">RAG 摄取</span><span class="tag">中文金融语料</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>面试官想看的不是"你会不会用 splitter",而是你有没有意识到:<strong>切块的好坏取决于语料长什么样,而不同语料长得不一样</strong>。一刀切是任何 RAG demo 的默认起点,愿意为它加一层路由,说明你真去看过文档的形态、并且为"切碎会损失什么"算过账。这是从"会调库"到"懂权衡"的分水岭。</p>
+    <ul>
+      <li><strong>追问:</strong>固定大小切块到底会切坏什么?对研报、财报、政策各举一个具体的坏例子。</li>
+      <li><strong>追问:</strong>既然要按类型分,为什么不干脆三类都用最聪明的"语义切"?统一成语义切不就也对齐内容了吗?</li>
+      <li><strong>追问:</strong>多写两套 chunker 是有成本的(代码、维护、加新语料类型),这笔账你怎么算划算的?</li>
+      <li><strong>追问:</strong>路由的"钥匙"是什么?如果来一份没标类型的文档,你的系统会怎样?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>切块(chunking)是 RAG 摄取阶段的第一步:把一份长文档剁成若干小段,每段单独算向量、单独检索。检索时命中哪一段,就把哪一段塞进上下文给模型。所以<strong>一段的边界划在哪,直接决定了"被检索到的那块信息完不完整"</strong>。如果一刀切,把一句话、一张表、一个完整论点从中间劈开,检索回来的就是半截信息,模型只能瞎猜另一半。</p>
+
+    <h5>三类语料的"形态"根本不同</h5>
+    <p>关键洞察:文档不是无差别的字符流,它有<strong>结构</strong>,而三类金融语料的结构来源不一样:</p>
+    <ul>
+      <li><strong>研报</strong>是连续叙述(分析师写的一段段论证),段落之间没有显式分隔符,边界只能<strong>靠语义判断</strong>——哪里话题转了,哪里就该切。</li>
+      <li><strong>财报</strong>经过 MinerU(PDF 解析器)处理后,<strong>已经被识别出明确的章节</strong>("管理层讨论""主要会计数据"…),而且<strong>表格特别多</strong>,表格是高密度的结构化信息。</li>
+      <li><strong>政策</strong>有<strong>天然的条款边界</strong>("第十二条""第三款"),这是法规体裁自带的、肉眼可见的分割线。</li>
+    </ul>
+    <p>形态不同,最合适的切法就不同。所以系统在 <code>router.py</code> 里用一个 <code>chunker_for(source_type)</code> 当分发器:看文档的 <code>source_type</code> 字段(research / financial / policy 三选一),把它送进对应的 chunker;不认识的类型直接报错,不允许"裸奔"。</p>
+
+    <h5>三套 chunker 各自的机制</h5>
+    <p><strong>研报 — 语义切(SemanticChunkerForResearch):</strong>在每个章节里按中文句末标点(。?!)拆成句子;少于 5 句的小章节不折腾,直接合成一块;5 句以上才请 embedding 服务把每句变成向量,算<strong>相邻两句的 cosine 距离</strong>(1 − 余弦相似度,值越大说明话题跳得越远),距离超过阈值 0.4 的地方就划一刀。最后兜底:任何一块超过 800 token,再用递归字符切强行打散,防止单块过大。</p>
+    <p><strong>财报 — 章节切(SectionChunkerForFinancial):</strong>顺着 MinerU 给出的章节走,一章一块(超 800 token 才二次切)。最关键的一条:<strong>每张表单独成块,绝不进 splitter</strong>。表格信息密度高,被字符切刀劈开就会丢上下文(行头和数据被拆散,数字就没了意义)。</p>
+    <p><strong>政策 — 条款切(ClauseChunkerForPolicy):</strong>把全文拼起来,用正则按"第X条/第X款"这类天然边界一刀刀切,<strong>不做语义切、不加 overlap、不设大小下限</strong>。短到 500 token 以下的小条款也独立保留——因为对法规来说,"一条就是一个完整语义单元",拆开或合并都会破坏检索的可引用性。</p>
+    <p>为什么政策不也上语义切?因为<strong>边界已经白送了</strong>:再去给每句话算 embedding 才能找边界,既是过度工程,又额外烧一次次 embedding 调用的钱,换不来任何收益。这正是"按形态选策略"的反面教材——好的工程是用最省的手段达到目的。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面这段伪代码把"路由 + 三种切法的核心差异"压成一个骨架,看清逻辑怎么分叉就够,真实实现里还有 token 上限兜底等细节。</p>
+    <pre><code class="language-python"># 一个分发器,按文档自带的类型标签选 chunker
+def chunker_for(source_type):
+    if source_type == "research":   return semantic_chunk   # 研报:语义切
+    if source_type == "financial":  return section_chunk    # 财报:章节切 + 表格独立
+    if source_type == "policy":     return clause_chunk     # 政策:条款切
+    raise ValueError("未知类型,不允许裸奔")   # 没标类型就报错,而不是默默一刀切
+
+# 研报:靠"话题跳了多远"找边界
+def semantic_chunk(section):
+    sents = split_sentences(section)            # 按 。?! 拆句
+    if len(sents) &lt; 5:                          # 太短不折腾,整段一块
+        return [join(sents)]
+    vecs = embed(sents)                         # 每句算一个向量(花钱的一步)
+    chunks, buf = [], []
+    for i, s in enumerate(sents):
+        buf.append(s)
+        # 相邻两句"语义距离" = 1 - 余弦相似度;跳得太远就在这切一刀
+        if i &lt; len(sents)-1 and distance(vecs[i], vecs[i+1]) &gt; 0.4:
+            chunks.append(join(buf)); buf = []
+    return chunks + ([join(buf)] if buf else [])
+
+# 财报:顺章节走,但表格"另起炉灶",绝不进字符切刀
+def section_chunk(doc):
+    chunks = [sec.text for sec in doc.sections]
+    chunks += [tbl.markdown for tbl in doc.tables]   # 每张表独立成块
+    return chunks
+
+# 政策:边界是白送的,正则一刀刀切,不算 embedding
+def clause_chunk(doc):
+    full = join(doc.sections)
+    return regex_split(full, r"第[一二三四五六七八九十0-9]+条|第…+款")
+</code></pre>
+    <p><strong>推演:</strong>假设一段研报有 8 句,前 5 句讲"营收增长",第 6 句话锋一转聊"原材料涨价风险"。语义切会在第 5、6 句之间量到一个大距离(比如 0.55 &gt; 0.4),正好在话题转折处划一刀——检索"营收"时拿到干净的前 5 句,不会混进风险段。换成固定 600 字一刀切,这一刀大概率落在某句话中间,把"营收同比增长 23%"拦腰截断,检索回来只剩"营收同比增长",数字丢了。再看财报:一张含 12 行的利润表,语义切/字符切都会把它劈成两三块,行头和数据分家;章节切让它整张保留,检索"净利润"时一次拿到完整表。政策那份:8 个条款本就 8 条清晰边界,正则切一次成型,0 次 embedding 调用;若硬上语义切,等于为 8 条都跑一遍逐句 embedding,纯属白烧钱。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr><th>维度</th><th class="th-sgl">我们的选择(类型路由:研报语义 / 财报章节 / 政策条款)</th><th class="th-vllm">替代方案(固定大小一刀切:全走递归字符切 500/50)</th></tr></thead>
+    <tbody>
+      <tr><td>研报连续叙述</td><td>语义距离找话题转折处下刀,块内语义自洽</td><td>固定字数硬切,大概率从句子中间断,语义割裂</td></tr>
+      <tr><td>财报表格</td><td>整表独立成块,信息密度高的部分完整保留</td><td>表格被字符切刀劈碎,行头与数据分家,数字失去意义</td></tr>
+      <tr><td>政策条款</td><td>顺天然边界切,一条一块、可整条引用</td><td>无视"第X条"边界,一条被切成两半或两条粘成一块</td></tr>
+      <tr><td>成本</td><td>政策/财报零 embedding,只研报花句向量,花在刀刃上</td><td>零 embedding,全程纯字符,确实最省</td></tr>
+      <tr><td>实现/维护</td><td>约 250 行、3 个子类继承同一抽象基类,加新语料要写新子类</td><td>一个 splitter 全包,几乎零维护</td></tr>
+      <tr><td>定位</td><td>按内容形态选最合适策略——senior 信号</td><td>能跑通的 demo 形态</td></tr>
+    </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>固定大小切块不是稻草人,它有真实优点——零 embedding 成本、一份代码全语料通吃、几乎不用维护,对"语料同质且无结构"的场景(比如一堆纯文本博客)它就是正确答案,上路由反而是过度设计。我们仍选类型路由,是因为<strong>金融语料恰恰是异质且强结构</strong>的:研报靠语义、财报有表格、政策有条款,三种结构被同一把固定刀切坏的方式各不相同,而损失的都是检索质量(半截句子、碎表格、断条款)。多写约 250 行换来的是"每类语料都按它本来的样子被切"。需要补充诚实的一点:阈值 0.4 是初值(标注"调研后再调",代码里还没看到自动调优),800 token 上限是否偏碎,这些参数是否最优<strong>目前缺离线指标来验</strong>——见本类第 4 题。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="按类型路由的切块分发图" font-family="Noto Sans SC, sans-serif">
+      <defs>
+        <marker id="rq1-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2f4d8a"/></marker>
+        <marker id="rq1-arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#bf3f26"/></marker>
+        <marker id="rq1-arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1f6e5e"/></marker>
+        <marker id="rq1-arr-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#85806f"/></marker>
+      </defs>
+
+      <!-- 入口:一份带类型标签的 PDF -->
+      <rect x="24" y="232" width="150" height="92" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="99" y="262" text-anchor="middle" font-size="13" fill="#3a3630">一份文档(PDF)</text>
+      <text x="99" y="286" text-anchor="middle" font-size="11" fill="#85806f">自带标签</text>
+      <text x="99" y="308" text-anchor="middle" font-size="12" fill="#bf3f26" font-weight="bold">source_type</text>
+
+      <!-- 路由器 -->
+      <rect x="214" y="238" width="150" height="80" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="2"/>
+      <text x="289" y="270" text-anchor="middle" font-size="13" fill="#bf3f26" font-weight="bold">chunker_for()</text>
+      <text x="289" y="292" text-anchor="middle" font-size="11" fill="#7a3320">路由分发器</text>
+      <line x1="174" y1="278" x2="210" y2="278" stroke="#85806f" stroke-width="2" marker-end="url(#rq1-arr-gray)"/>
+
+      <!-- 三条分叉线 -->
+      <path d="M364,256 C404,256 404,118 444,118" fill="none" stroke="#bf3f26" stroke-width="2" marker-end="url(#rq1-arr-red)"/>
+      <path d="M364,278 C404,278 404,278 444,278" fill="none" stroke="#2f4d8a" stroke-width="2" marker-end="url(#rq1-arr)"/>
+      <path d="M364,300 C404,300 404,438 444,438" fill="none" stroke="#1f6e5e" stroke-width="2" marker-end="url(#rq1-arr-green)"/>
+      <text x="406" y="150" text-anchor="middle" font-size="10" fill="#bf3f26">research</text>
+      <text x="406" y="266" text-anchor="middle" font-size="10" fill="#2f4d8a">financial</text>
+      <text x="406" y="406" text-anchor="middle" font-size="10" fill="#1f6e5e">policy</text>
+
+      <!-- 研报分支:语义距离折线 -->
+      <rect x="444" y="54" width="430" height="128" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8"/>
+      <text x="460" y="76" font-size="12" fill="#bf3f26" font-weight="bold">研报 → 语义切</text>
+      <text x="460" y="94" font-size="10" fill="#7a3320">连续叙述,边界靠语义判断</text>
+      <!-- 句向量序列点 -->
+      <circle cx="478" cy="150" r="4" fill="#bf3f26"/><circle cx="528" cy="148" r="4" fill="#bf3f26"/><circle cx="578" cy="152" r="4" fill="#bf3f26"/><circle cx="628" cy="120" r="4" fill="#bf3f26"/><circle cx="678" cy="124" r="4" fill="#bf3f26"/>
+      <!-- 相邻句距离折线 -->
+      <polyline points="478,150 528,148 578,152 628,120 678,124" fill="none" stroke="#a8761f" stroke-width="1.8"/>
+      <!-- 阈值线 0.4 -->
+      <line x1="468" y1="134" x2="690" y2="134" stroke="#85806f" stroke-width="1" stroke-dasharray="4 3"/>
+      <text x="700" y="138" font-size="10" fill="#85806f">阈值 0.4</text>
+      <!-- 切点:距离冲过阈值处 -->
+      <line x1="603" y1="108" x2="603" y2="168" stroke="#bf3f26" stroke-width="2" stroke-dasharray="3 2"/>
+      <text x="603" y="106" text-anchor="middle" font-size="9" fill="#bf3f26">distance&gt;0.4 切此</text>
+      <text x="780" y="150" font-size="10" fill="#7a3320">相邻句</text>
+      <text x="780" y="164" font-size="10" fill="#7a3320">cosine 距离</text>
+
+      <!-- 财报分支:section 块 + table 独立 -->
+      <rect x="444" y="216" width="430" height="124" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.8"/>
+      <text x="460" y="238" font-size="12" fill="#2f4d8a" font-weight="bold">财报 → 章节切</text>
+      <text x="460" y="256" font-size="10" fill="#41506f">MinerU 已切好章节,表格多</text>
+      <rect x="466" y="272" width="80" height="48" rx="6" fill="#fff" stroke="#2f4d8a" stroke-width="1.2"/>
+      <text x="506" y="300" text-anchor="middle" font-size="10" fill="#2f4d8a">章节 A</text>
+      <rect x="558" y="272" width="80" height="48" rx="6" fill="#fff" stroke="#2f4d8a" stroke-width="1.2"/>
+      <text x="598" y="300" text-anchor="middle" font-size="10" fill="#2f4d8a">章节 B</text>
+      <!-- 表格独立框,松绿强调"完整保留" -->
+      <rect x="652" y="268" width="120" height="56" rx="6" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="2"/>
+      <text x="712" y="290" text-anchor="middle" font-size="10" fill="#1f6e5e" font-weight="bold">📊 表格</text>
+      <text x="712" y="306" text-anchor="middle" font-size="9" fill="#1f6e5e">独立成块</text>
+      <text x="712" y="318" text-anchor="middle" font-size="9" fill="#1f6e5e">不进 splitter</text>
+      <text x="788" y="296" font-size="9" fill="#41506f">一章</text>
+      <text x="788" y="308" font-size="9" fill="#41506f">一块</text>
+
+      <!-- 政策分支:条款正则边界 -->
+      <rect x="444" y="372" width="430" height="124" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.8"/>
+      <text x="460" y="394" font-size="12" fill="#1f6e5e" font-weight="bold">政策 → 条款切</text>
+      <text x="460" y="412" font-size="10" fill="#2f5a4f">天然边界,正则一刀成型,0 次 embedding</text>
+      <rect x="466" y="426" width="118" height="52" rx="6" fill="#fff" stroke="#1f6e5e" stroke-width="1.2"/>
+      <text x="525" y="448" text-anchor="middle" font-size="10" fill="#1f6e5e">第十二条 …</text>
+      <text x="525" y="466" text-anchor="middle" font-size="9" fill="#2f5a4f">一条一块</text>
+      <line x1="592" y1="426" x2="592" y2="478" stroke="#1f6e5e" stroke-width="2"/>
+      <rect x="600" y="426" width="118" height="52" rx="6" fill="#fff" stroke="#1f6e5e" stroke-width="1.2"/>
+      <text x="659" y="448" text-anchor="middle" font-size="10" fill="#1f6e5e">第三款 …</text>
+      <text x="659" y="466" text-anchor="middle" font-size="9" fill="#2f5a4f">无 overlap</text>
+      <text x="730" y="446" font-size="9" fill="#2f5a4f">正则切线</text>
+      <text x="730" y="460" font-size="9" fill="#2f5a4f">第X条/款</text>
+
+      <!-- 底部统一兜底标注 -->
+      <rect x="214" y="510" width="660" height="34" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.2" stroke-dasharray="5 3"/>
+      <text x="544" y="531" text-anchor="middle" font-size="11" fill="#5a554a">统一兜底:研报/财报任一块超 <tspan fill="#a8761f" font-weight="bold">800 token</tspan> → 递归字符切强切,防单块过大</text>
+
+      <!-- 图例 -->
+      <rect x="24" y="372" width="16" height="12" rx="3" fill="#faeae4" stroke="#bf3f26"/><text x="46" y="382" font-size="10" fill="#3a3630">语义/我们重点切法</text>
+      <rect x="24" y="392" width="16" height="12" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/><text x="46" y="402" font-size="10" fill="#3a3630">完整保留(表/条款)</text>
+      <rect x="24" y="412" width="16" height="12" rx="3" fill="#e9eef8" stroke="#2f4d8a"/><text x="46" y="422" font-size="10" fill="#3a3630">章节结构</text>
+    </svg>
+    <figcaption>图 04-1 · 怎么看:最左一份文档带着 <strong>source_type</strong> 标签进入中间的 <code>chunker_for()</code> 路由器(朱砂),路由器照标签把它分到右边三条分支。<strong>研报分支</strong>(上)画的是把每句变成向量后量"相邻句的语义距离"(ochre 折线),折线冲过虚线 <strong>0.4 阈值</strong>的地方就划一刀(朱砂竖线)——刀落在话题转折处,而不是固定字数处。<strong>财报分支</strong>(中)顺着 MinerU 的章节走,关键是那张被松绿框单独圈出的<strong>表格"独立成块、不进 splitter"</strong>,避免高密度信息被切碎。<strong>政策分支</strong>(下)直接按"第X条/第X款"的天然边界正则切,一条一块、零 embedding。底部那条灰虚线是<strong>统一兜底</strong>:研报/财报任一块超 800 token 就再用字符切强切。一句话:同一把固定刀切坏三类语料的方式各不相同,所以三类各用一把称手的刀。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>切块决定检索质量:</strong>边界划错=检索回半截句子/碎表格/断条款,模型只能瞎补另一半,这是 RAG 摄取阶段的源头损失。</li>
+      <li><strong>三类语料形态根本不同:</strong>研报连续叙述(靠语义找边界)、财报有明确章节+多表格、政策有"第X条"天然边界——同一把固定刀切坏它们的方式各异。</li>
+      <li><strong>策略要配形态:</strong>研报语义切、财报章节切+表格独立、政策条款切;政策不上语义切是因为边界白送,硬切是过度工程还白烧 embedding 钱。</li>
+      <li><strong>路由不是免费的:</strong>约 250 行、3 子类继承同一基类,换来"每类按本来样子被切";固定大小切块对同质无结构语料才是正解,不是稻草人。</li>
+      <li><strong>诚实的缺口:</strong>阈值 0.4 与 800 上限是否最优,目前缺离线指标来验——见本类第 4 题;中文计 token 的坑见本类第 3 题。</li>
+    </ul>
+    <p class="one-liner">一句话速记:文档有结构,而三类金融语料的结构来源不一样,一把固定刀切坏它们各有各的坏法,所以按类型路由,各用一把称手的刀。</p>
+    <p class="src-note">参考:<code>backend/app/kb/chunkers/router.py</code> · <code>backend/app/kb/chunkers/semantic.py</code> · <code>backend/app/kb/chunkers/section.py</code> · <code>backend/app/kb/chunkers/clause.py</code> · <code>docs/claude-context/kb-chunking-strategy.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="rag-q2">
+  <div class="q-header"><span class="q-num">Q2</span><h3 class="q-title">Embedding 你为什么选 qwen text-embedding-v3 当主力而不是 BGE-M3?"同维互换不重建 collection"是什么工程考量?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">embedding 选型</span><span class="tag">同 vendor 复用</span><span class="tag">Milvus 维度约束</span><span class="tag">在线 API vs 本地模型</span><span class="tag">可演进性</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>面试官表面问"你选了哪个 embedding 模型",其实在看两件事。第一,你做技术选型时,看的是不是只有"哪个榜单分数高"——榜单分数高的那个(BGE-M3)你恰恰没用,这就逼你说出"分数之外还有什么更重要的工程成本"。第二,"同维互换不重建 collection"是个很具体的钩子,只有真把向量库跑起来、踩过 schema 锁死的人才答得出来。背榜单的人到这里会卡壳。</p>
+    <ul>
+      <li><strong>追问:</strong>既然 BGE-M3 中文金融榜单更强,你不用它,是不是把性能让给了省事?这个权衡你怎么向团队解释?</li>
+      <li><strong>追问:</strong>"换 embedding 模型必须重建向量库"——这个 breaking change 到底卡在哪一层?为什么不是改个配置就行?</li>
+      <li><strong>追问:</strong>"复用 reliability"具体复用了什么?如果直接调 SDK 不走你那条链,会少掉哪些保护?</li>
+      <li><strong>追问:</strong>真到 v0.9 要切 BGE-M3,你的切换动作是什么?能不能不停服?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把 embedding 这一步在系统里的位置说清楚。上一题(见本类第 1 题)把文档按类型切成了一块块文本,这一步要把每一块文本变成一串数字(向量),后面检索时拿用户问题的向量去跟这些块的向量比"谁离得近"。模型就是干"文本→向量"这个翻译的。选模型,本质是在选这个翻译器,而翻译器一旦定下,后面整个向量库都是按它的输出格式建的。</p>
+
+    <h5>第一层:为什么是 qwen v3 而不是榜单更强的 BGE-M3</h5>
+    <p>核心不是分数,是"同 vendor 复用"。这个项目在更早的阶段就攒下了一套调用大模型的"可靠性四件套":限速器(防止把厂商接口打爆被封)、成本预算(花到上限自动刹车)、自动重试(网络抖一下不至于整批失败)、脱敏(日志里别把密钥漏出去)。qwen 的 embedding 接口跟项目里聊天用的大模型是同一家厂商(阿里 dashscope)、同一把密钥 <code>DASHSCOPE_API_KEY</code>。所以 embedding 调用顺着同一条服务链走,这四件套白捡——不用为 embedding 单独再搭一套限速和预算。这句话在简历叙事里很关键:之前辛苦攒的可靠性层,到这一步真正被第二个场景复用上了,不是摆设。</p>
+    <p>那 BGE-M3 输在哪?它不是不好,而是要"本地起一个 GPU 服务"。在当前阶段,为了一个 embedding 模型去拉一台 GPU、做模型部署运维,成本和这一阶段的目标不匹配。它真正的强项——原生支持"稠密+稀疏+多向量"的混合检索——是个更后面阶段才吃得上的红利,所以被有意推迟,而不是被否掉。OpenAI 的 text-embedding-3 则直接出局:跨厂商,前面那套可靠性复用全丢,而且它是多语言通才、中文不专项,放在中文研报/财报/政策这种场景没有额外好处。</p>
+
+    <h5>第二层:维度为什么是 collection 的硬约束</h5>
+    <p>向量库(Milvus)里,一张表(collection)在创建时就要写死"我存的向量是多少维的",这个维度跟它上面建的索引(比如 HNSW 这种近邻图)是绑死的。维度就像水管口径:你建表时声明了 1024,这张表所有的向量、整个索引结构都按 1024 铺好了。后来想塞一个 1536 维的向量进去,口径对不上,塞不进去——不是报个错那么简单,是这张表的索引根本没法容纳。</p>
+    <p>这就引出"同维互换"为什么值钱。qwen v3 的输出维度是可选的 {64,128,256,512,768,1024}(实测 1536 会被接口拒,1024 已是它的上限),我选了 1024;而 BGE-M3 默认也正好是 1024。两边同维,意味着将来从 qwen 切到 BGE-M3,这三张表(研报 / 财报 / 政策)的结构原封不动,只需要把所有文本块拿出来用新模型重新算一遍向量、写回去(reingest)。表不用动,服务可以平滑过渡。</p>
+    <p>反过来想象一下不同维的代价:如果新模型是 1536 或 3072 维,口径变了,你必须把三张表全删了重建(drop &amp; recreate),再全量重灌。这中间向量库是空的,检索是瞎的,没有平滑迁移路径。所以"同维"看着像个巧合,实际把"换模型=伤筋动骨的破坏性变更"降级成了"换模型=重算一遍数据"。这是个能省掉一次大手术的工程考量。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>看两段逻辑就懂了。第一段:切换模型为什么不该直接 new 一个类,而是改环境变量、让工厂去读;第二段:维度对不上时,向量库会在哪一步把你拦下来。</p>
+    <pre><code class="language-python"># 切 backend 的正确姿势:改 .env 里的 EMBEDDING_MODE,不要在业务代码里直接 new 类
+# 工厂读环境变量决定造哪个翻译器,业务代码只认 "EmbeddingService" 这个统一接口
+def build_embedding_service_from_env():
+    mode = os.getenv("EMBEDDING_MODE", "qwen")   # 默认走 qwen,这是当前主力
+    if mode == "qwen":
+        # 同一把密钥 DASHSCOPE_API_KEY,顺着同一条服务链走 → 限速/预算/重试/脱敏白捡
+        return QwenEmbeddingService(api_key=os.environ["DASHSCOPE_API_KEY"])
+    if mode == "bge_local":
+        # 当前是占位实现,真调用会 raise,提示这是后续阶段才做的本地 GPU 部署
+        return BGEEmbeddingService()
+    raise ValueError(f"未知的 EMBEDDING_MODE: {mode!r}")
+
+# 两个翻译器都声明自己是 1024 维 —— 这就是"同维"的源头
+QwenEmbeddingService.dimension = 1024   # 选 1024(可选到 64,实测 1536 被拒)
+BGEEmbeddingService.dimension = 1024    # 默认也 1024 → 同维
+
+# 向量库这一侧:维度在建表时就写死,塞错维度直接被拦
+def upsert(collection_dim: int, vector: list[float]):
+    if len(vector) != collection_dim:
+        # 这一刀拦在写入口:口径对不上,索引压根容不下,不是改配置能绕过的
+        raise DimensionMismatch(f"表是 {collection_dim} 维,来的向量是 {len(vector)} 维")
+    # 同维才能走到这:表不动,只是把这一块的向量重新写进去
+    milvus.insert(vector)
+</code></pre>
+    <p><strong>推演:</strong>假设全量灌一次知识库,约 13 份文档、切成几百到上千块,每块算一次向量。开发期反复灌同一批数据时,有个缓存兜底(键是"文本+模型+维度"的哈希),命中率约 80%,意味着大部分块不必重复调接口。整批接口调用按文档量级估算成本约 ¥0.14–0.35。调接口时还有个实测坑:文档说一批能传 25 条,实际 11 条以上就被拒,所以一批最多 10 条(<code>_QWEN_MAX_BATCH=10</code>),<code>embed()</code> 内部会自动把大列表切成 10 条一批发出去。将来切 BGE-M3,因为同是 1024 维,这三张表(研报/财报/政策)不删不重建,只是把这几百上千块拿新模型重算一遍写回——一次"重灌",不是一次"重建"。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(qwen text-embedding-v3 · API · 1024)</th><th class="th-vllm">替代方案(BGE-M3 · 本地 · 1024)</th></tr></thead>
+      <tbody>
+        <tr><td>中文金融语料表现</td><td>C-MTEB 中文金融子集表现强,够用</td><td>同样强,普遍被认为更接近这一子集的领先水平</td></tr>
+        <tr><td>可靠性层复用</td><td>同厂商同密钥,限速/预算/重试/脱敏全部白捡</td><td>本地模型,这套保护得自己另搭一份</td></tr>
+        <tr><td>部署成本</td><td>调个接口即可,无新依赖、无新机器</td><td>要起一台 GPU 服务 + 模型部署运维</td></tr>
+        <tr><td>混合检索能力</td><td>只出稠密向量(单一维度的语义匹配)</td><td>原生稠密+稀疏+多向量,是混合检索的价值点</td></tr>
+        <tr><td>维度 / 迁移代价</td><td>选 1024,与 BGE-M3 同维,将来切换只需重灌</td><td>默认 1024,与当前主力同维,无缝接得上</td></tr>
+        <tr><td>调用约束</td><td>有限流(一批≤10)、按量计费,接口稳定性看厂商</td><td>本地无限流、延迟可控、可微调,代价是自己运维</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>BGE-M3 不是被打败,是被排期。它的两大真本事——中文金融语料上更领先、原生支持稠密+稀疏的混合检索——都是实打实的优势,后续阶段正是冲着这两点才要切它。但在当前这一阶段,目标是"先把生产级的向量检索跑通",而不是"把检索质量调到极致"。为这个目标去背一台 GPU 服务和一套独立可靠性层,投入产出不划算。qwen v3 用"同厂商复用 + 无新依赖 + 严控范围"赢下当前;而我提前把维度对齐到 1024,等于给 BGE-M3 留好了无缝接入的口子——所以这不是二选一的牺牲,是先后顺序的安排。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg" role="img" font-family="Noto Sans SC, sans-serif">
+      <defs>
+        <marker id="ar-q2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="ar-q2-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#bf3f26"/>
+        </marker>
+      </defs>
+
+      <text x="20" y="30" font-size="17" font-weight="bold" fill="#2f4d8a">同维互换:换翻译器,向量库这张表不用动</text>
+
+      <!-- 中间:Milvus collection 框 -->
+      <rect x="350" y="70" width="200" height="150" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="2"/>
+      <text x="450" y="98" font-size="13" font-weight="bold" fill="#2f4d8a" text-anchor="middle">Milvus collection</text>
+      <text x="450" y="120" font-size="12" fill="#2f4d8a" text-anchor="middle">三张表:研报/财报/政策</text>
+      <rect x="372" y="135" width="156" height="32" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+      <text x="450" y="156" font-size="13" font-weight="bold" fill="#bf3f26" text-anchor="middle">schema 锁死 dim=1024</text>
+      <text x="450" y="190" font-size="11" fill="#85806f" text-anchor="middle">维度与 HNSW 索引绑死</text>
+      <text x="450" y="207" font-size="11" fill="#85806f" text-anchor="middle">建表时写死,口径不可变</text>
+
+      <!-- 左:qwen 1024 箭头插进去 -->
+      <rect x="40" y="110" width="160" height="56" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+      <text x="120" y="135" font-size="13" font-weight="bold" fill="#bf3f26" text-anchor="middle">qwen v3(主力)</text>
+      <text x="120" y="155" font-size="12" fill="#bf3f26" text-anchor="middle">输出 1024 维 ✓</text>
+      <line x1="200" y1="138" x2="348" y2="138" stroke="#2f4d8a" stroke-width="2" marker-end="url(#ar-q2)"/>
+
+      <!-- 右:BGE-M3 1024 箭头插进去 -->
+      <rect x="700" y="110" width="160" height="56" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="780" y="135" font-size="13" font-weight="bold" fill="#1f6e5e" text-anchor="middle">BGE-M3(留后续)</text>
+      <text x="780" y="155" font-size="12" fill="#1f6e5e" text-anchor="middle">默认 1024 维 ✓</text>
+      <line x1="700" y1="138" x2="552" y2="138" stroke="#2f4d8a" stroke-width="2" marker-end="url(#ar-q2)"/>
+
+      <text x="450" y="248" font-size="12" fill="#1f6e5e" text-anchor="middle" font-weight="bold">两边同维 → 表不动,只需 reingest 重算 vector</text>
+
+      <!-- 反例红叉 -->
+      <rect x="40" y="278" width="200" height="56" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="140" y="302" font-size="12" font-weight="bold" fill="#85806f" text-anchor="middle">若新模型 1536 / 3072 维</text>
+      <text x="140" y="322" font-size="11" fill="#85806f" text-anchor="middle">口径对不上,被框挡住 ✗</text>
+      <line x1="240" y1="306" x2="345" y2="306" stroke="#bf3f26" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#ar-q2-red)"/>
+      <line x1="352" y1="296" x2="372" y2="316" stroke="#bf3f26" stroke-width="3"/>
+      <line x1="372" y1="296" x2="352" y2="316" stroke="#bf3f26" stroke-width="3"/>
+      <text x="600" y="302" font-size="12" fill="#bf3f26" font-weight="bold">必须 drop &amp; recreate 全部 3 张表</text>
+      <text x="600" y="320" font-size="11" fill="#bf3f26">+ 全量 reingest,无平滑迁移路径</text>
+
+      <!-- reliability 复用链 -->
+      <rect x="40" y="368" width="820" height="78" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="60" y="392" font-size="13" font-weight="bold" fill="#2f4d8a">同 vendor 复用链(选 qwen 的核心动机):</text>
+      <rect x="60" y="405" width="90" height="30" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.2"/>
+      <text x="105" y="425" font-size="12" fill="#bf3f26" text-anchor="middle">embed()</text>
+      <line x1="150" y1="420" x2="183" y2="420" stroke="#2f4d8a" stroke-width="2" marker-end="url(#ar-q2)"/>
+      <rect x="185" y="405" width="110" height="30" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.2"/>
+      <text x="240" y="425" font-size="12" fill="#2f4d8a" text-anchor="middle">同服务链</text>
+      <line x1="295" y1="420" x2="328" y2="420" stroke="#2f4d8a" stroke-width="2" marker-end="url(#ar-q2)"/>
+      <rect x="330" y="405" width="525" height="30" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.2"/>
+      <text x="592" y="425" font-size="12" fill="#1f6e5e" text-anchor="middle">限速器 · 成本预算 · 自动重试 · 脱敏(同密钥 DASHSCOPE_API_KEY,白捡)</text>
+    </svg>
+    <figcaption>图 04-2 · 怎么看:中间那张表建好就把维度写死了(朱砂框),qwen 和 BGE-M3 都输出 1024 维,两根箭头都能插进同一张表,所以换模型只需重算向量、表不动;左下红叉是反例——一旦新模型维度不同,箭头被框挡住,只能把三张表全删重建。底部一条是选 qwen 的真正动机:embedding 调用顺着同一条服务链走,把限速/预算/重试/脱敏白捡下来。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>选 qwen v3 当主力,赢点不是榜单分数,而是"同厂商同密钥",让 embedding 调用顺着已有服务链走,限速/预算/重试/脱敏四件套白捡——这是之前攒的可靠性层第一次被第二个场景真正复用。</li>
+      <li>BGE-M3 不是被否,是被排期:它中文金融更强、原生支持混合检索,但要起 GPU 服务,与当前"先跑通生产级检索"的目标不匹配,留作后续。</li>
+      <li>向量库的维度在建表时就和索引绑死,是硬约束;换一个不同维的模型不是改配置,而是把表全删重建的破坏性变更。</li>
+      <li>我把 qwen 的维度对齐到 1024,正好和 BGE-M3 默认同维——于是"换模型"从"删表重建三张表"降级成"只重算一遍向量",给后续切换留好了无缝口子。</li>
+      <li>切换动作是改环境变量让工厂去造对应翻译器,而不是在业务代码里直接 new 类;业务代码只认统一接口,这是同一套"接口+工厂+环境开关"模式的又一次复用。</li>
+    </ul>
+    <p class="one-liner">一句话速记:选 qwen 是为了白捡同厂商的可靠性,对齐 1024 维是为了让以后换 BGE-M3 只需重灌、不必拆库。</p>
+    <p class="src-note">参考:<code>backend/app/services/embedding_service.py</code> · <code>backend/app/services/embedding_factory.py</code> · <code>docs/claude-context/kb-embedding-choice.md</code> · <code>docs/superpowers/specs/2026-05-02-v0.7-kb-search-milvus-design.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="rag-q3">
+  <div class="q-header"><span class="q-num">Q3</span><h3 class="q-title">中文切块有什么坑?为什么要用中文分隔符 + tiktoken 计 token,而不是直接按字符数切?</h3><span class="q-diff" title="难度 3/5">★★★☆☆</span></div>
+  <div class="q-tags"><span class="tag">中文 NLP</span><span class="tag">tokenizer</span><span class="tag">切块</span><span class="tag">tiktoken</span><span class="tag">分隔符</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题表面问"切块",其实在探你有没有踩过中文文本处理的两个经典坑:一是分隔符,二是计数单位。很多人直接抄 LangChain 的 <code>RecursiveCharacterTextSplitter</code> 默认配置就上,而那套默认是给英文调的——分隔符是英文标点、size 按字符卡,搬到中文上两头都漏风。面试官想看你能不能把"为什么默认配置在中文上失效"讲清楚,而不是背 API。</p>
+    <ul>
+      <li><strong>追问:</strong>LangChain 默认分隔符切中文会出什么具体后果?切点会落在哪?</li>
+      <li><strong>追问:</strong>既然已经按字符切了,为什么还要再引一个 tiktoken 算 token?这两道卡口是互斥还是配合?</li>
+      <li><strong>追问:</strong>你用 <code>cl100k_base</code> 当 tokenizer,但你的 embedding 是 qwen 的,这俩不是一家的,误差怎么办?为什么不直接用 qwen 自己的分词器?</li>
+      <li><strong>追问:</strong>如果哪天想把 <code>cl100k_base</code> 换成更准的 encoder,有什么风险?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>切块的目标是:把长文档切成一段段大小可控、边界干净的小块,每块送去算 embedding 再入库检索。"大小可控"和"边界干净"是两个独立的要求,中文在这两点上都和英文不一样,所以默认配置会同时在两处翻车。</p>
+
+    <h5>坑一:分隔符——英文标点切不到中文句末</h5>
+    <p>递归切块器的工作方式是:给它一串"分隔符优先级列表",它先试最高优先级的分隔符切;如果切出来的块还是太大,就降一级换下一个分隔符再切,层层回退。LangChain 默认列表是英文那一套——双换行、英文句号 <code>.</code>、空格。问题是中文一句话结尾是句号"。"(全角),不是英文点"."。一段中文研报里几乎匹配不到英文句号,切块器没地方下刀,只能一路回退到最低优先级的"空字符串",也就是<strong>硬按长度从字中间砍断</strong>。结果就是"宁德时代营收同比……"被从"营"和"收"中间劈开,语义碎掉,检索时这一块谁都对不上。</p>
+    <p>修法很直接:把分隔符列表换成中文的。项目里用的是 <code>["\n\n", "。", "\n", "?", "!", ";", " ", ""]</code> 这 8 个,从段落空行 → 中文句号 → 单换行 → 问号叹号分号 → 空格 → 空串,按这个优先级递归回退。这样它会<strong>优先在段落和句号处断</strong>,只有实在没办法了才硬切。</p>
+
+    <h5>坑二:计数单位——字符数 ≠ token 数</h5>
+    <p>embedding 模型吃的是 token,不是字符,它有 token 上限。可中文"1 个字 ≈ 1.33 个 token"(项目实测口径),英文反过来一个 token 能盖好几个字母。如果你直接拿"字符数"当 chunk 大小的标尺,就等于拿一把刻度错位的尺子去量 token 预算:量出来的块要么偏大、撑爆 embedding 上限被截断;要么偏小、浪费上下文窗口。错位幅度大约 ±33%,不是小数。</p>
+    <p>所以项目里是<strong>两道卡口配合</strong>,不是二选一:字符切块器先用 <code>chunk_size=600</code> 字符给一个<strong>粗粒度边界</strong>(它的活是"在哪断"),然后 base.py 里的 <code>count_tokens()</code> 用 tiktoken 真去数这块有多少 token,做<strong>最终是否超 800 token 的判定</strong>(它的活是"够不够大、超没超")。一个管边界,一个管预算。</p>
+
+    <h5>为什么用 tiktoken 的 cl100k_base</h5>
+    <p>这里有个看似别扭的点:embedding 用的是 qwen,token 却用 OpenAI 系的 <code>cl100k_base</code> 来数。原因是<strong>需要一个稳定、可复现、本地能算的 token 估计值</strong>来卡 <code>chunk_size_max</code>。<code>cl100k_base</code> 对 qwen 分词只是个近似(误差约 ±20%),但它离线、确定、零网络开销,拿来当"卡上限的标尺"足够了——切块阶段要的是一个一致的度量,不是精确到个位的 token 数。真正的 embedding 分词在 dashscope 服务端用它自己的 tokenizer(见本类第 2 题),那是另一回事。</p>
+    <p>关键告诫:<strong>这个 encoder 一旦定下就别换</strong>。每个 chunk 入库时都把 <code>count_tokens()</code> 算出的值写进 <code>tokens</code> 字段。你换个 encoder,所有历史 chunk 的 <code>tokens</code> 字段口径就全变了、和新块对不齐,等于污染了整库的元数据。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面这段伪代码对比"光按字符切"和"两道卡口配合"的差别。注意字符切块器只负责给边界,真正判超限的是 token 计数。</p>
+    <pre><code class="language-python"># 同一段中文研报,400 字。中文约 1.33 token/字 => 真实 token ≈ 532
+
+# 做法 A:只按字符切,拿字符数当 token 预算的标尺(错误)
+#   英文默认分隔符在中文里匹配不到 => 一路回退到硬切,切点落在字中间
+splitter_wrong = RecursiveCharacterTextSplitter(
+    chunk_size=800,            # 把 800 当"token 上限"直接拿来卡字符 —— 单位错位
+    separators=[".", "\n\n"],  # 英文标点,中文文本里几乎切不到句末
+)
+# 结果:这 400 字(≈532 token)被当成"才 400,没超 800"留成一整块,
+#       而真实 token 已逼近上限;且断点劈在"宁德时代营|收"字中间
+
+# 做法 B:中文分隔符给边界 + tiktoken 数 token 做兜底判定(项目做法)
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=600,            # 字符上的粗粒度边界(600 字 ≈ 800 token)
+    chunk_overlap=50,          # 相邻块留 50 字重叠,防句子被边界一刀两断
+    separators=["\n\n", "。", "\n", "?", "!", ";", " ", ""],  # 优先段落、句号处断
+)
+rough_chunks = splitter.split_text(text)   # 第一道:在哪断
+
+CHUNK_TOKEN_MAX = 800
+for chunk in rough_chunks:
+    n = count_tokens(chunk)                 # 第二道:tiktoken cl100k_base 真数 token
+    if n > CHUNK_TOKEN_MAX:                 # 超限才二次强切,字符边界没法替它判这个
+        chunk = force_resplit(chunk)        # 兜底:再切到 800 token 以内
+    # 把 n 写进 chunk.tokens 入库 —— 所以 encoder 一旦定就不能换,否则历史值失真
+</code></pre>
+    <p><strong>推演:</strong>一段 400 字的中文,真实 token ≈ 400 × 1.33 ≈ <strong>532</strong>。做法 A 把它当"才 400 字,离 800 还远"留成整块,实际 token 已经逼近上限、留给后续摘要的余量被吃光,而且断点还劈在字中间;做法 B 先在句号处给干净边界,再用 <code>count_tokens()</code> 实测 532 &lt; 800 放行——边界对齐了,预算也算准了。错位的那 ±33% 正是 A 翻车、B 不翻车的来源。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(中文分隔符 + tiktoken token 感知切)</th><th class="th-vllm">替代方案(纯按字符数切)</th></tr></thead>
+      <tbody>
+        <tr><td>实现复杂度</td><td>多引一个 tiktoken 依赖 + 一道 token 兜底判定</td><td>最简,一个字符切块器搞定,零额外依赖</td></tr>
+        <tr><td>切点是否干净</td><td>优先在段落 / 中文句号处断,语义完整</td><td>英文默认分隔符匹配不到句末,硬切劈在字中间</td></tr>
+        <tr><td>大小是否对齐 embedding 预算</td><td>token 实测判超限,真实预算对齐</td><td>字符当标尺,中文 ±33% 错位,块偏大撑爆 / 偏小浪费</td></tr>
+        <tr><td>可复现性</td><td>cl100k_base 离线确定,同输入恒同输出</td><td>同样确定,但量错的是错位后的数</td></tr>
+        <tr><td>token 估计精度</td><td>cl100k_base 对 qwen 约 ±20% 近似,但作上限标尺够用</td><td>不估 token,直接没这层判断</td></tr>
+        <tr><td>长期维护成本</td><td>encoder 锁死不能换,否则历史 tokens 字段失真</td><td>没这负担,但代价是从头就量不准</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>纯按字符切真有它的好——实现最省、零依赖、对纯英文或不在乎 token 预算的场景完全够用,而且字符数本身也是确定可复现的,不能说它"不准"得一无是处。它真正的问题是<strong>用错了标尺去量中文的 token 预算</strong>:中文 1 字 ≈ 1.33 token,拿字符卡 size 会让真实 token 飘 ±33%,加上英文默认分隔符在中文里几乎切不到句末。我们多付的代价就两条:引入 tiktoken、且 <code>cl100k_base</code> 对 qwen 只是 ±20% 近似;换来的是切点对齐语义、大小对齐 embedding 的 token 预算、且整库口径可复现。对一个中文金融语料库,这笔账划算——所以我们选 token 感知切,但保留字符切块器做粗粒度边界,两者配合而非取代。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 520" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="ar-q3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#2f4d8a"/>
+        </marker>
+      </defs>
+      <style>
+        .t{font-family:"Noto Sans SC, sans-serif";}
+        .lbl{font-family:"Noto Sans SC, sans-serif";font-size:13px;fill:#2f4d8a;}
+        .sm{font-family:"Noto Sans SC, sans-serif";font-size:11px;fill:#85806f;}
+      </style>
+
+      <text x="20" y="30" class="t" font-size="16" fill="#2f4d8a" font-weight="bold">两套度量错位:分隔符 × 计数单位</text>
+
+      <!-- 上半:英文默认分隔符,切点落在字中间 -->
+      <text x="20" y="64" class="t" font-size="13" fill="#bf3f26" font-weight="bold">坑一 · 英文默认分隔符切中文</text>
+      <rect x="20" y="76" width="600" height="56" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+      <text x="36" y="110" class="t" font-size="18" fill="#333">宁德时代营</text>
+      <text x="146" y="110" class="t" font-size="18" fill="#333">收同比增长。储能装机量</text>
+      <!-- 红色竖线穿过字中间 -->
+      <line x1="142" y1="80" x2="142" y2="128" stroke="#bf3f26" stroke-width="2.5" stroke-dasharray="4 3"/>
+      <line x1="135" y1="88" x2="149" y2="118" stroke="#bf3f26" stroke-width="2.5"/>
+      <line x1="149" y1="88" x2="135" y2="118" stroke="#bf3f26" stroke-width="2.5"/>
+      <text x="636" y="100" class="sm" fill="#bf3f26">匹配不到中文句号</text>
+      <text x="636" y="118" class="sm" fill="#bf3f26">回退硬切 → 劈在"营|收"字中间</text>
+
+      <!-- 下半:中文分隔符,干净落在句号后 -->
+      <text x="20" y="166" class="t" font-size="13" fill="#1f6e5e" font-weight="bold">修法 · 中文分隔符切</text>
+      <rect x="20" y="178" width="600" height="56" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="36" y="212" class="t" font-size="18" fill="#333">宁德时代营收同比增长。</text>
+      <text x="266" y="212" class="t" font-size="18" fill="#333">储能装机量翻倍。</text>
+      <!-- 绿色竖线落在句号后 -->
+      <line x1="258" y1="182" x2="258" y2="230" stroke="#1f6e5e" stroke-width="2.5"/>
+      <circle cx="258" cy="206" r="5" fill="#1f6e5e"/>
+      <text x="636" y="200" class="sm" fill="#1f6e5e">优先在 "。" 段落处断</text>
+      <text x="636" y="218" class="sm" fill="#1f6e5e">切点干净 → 语义完整</text>
+
+      <!-- 换算尺:字符刻度 vs token 刻度错开 1.33 倍 -->
+      <text x="20" y="282" class="t" font-size="13" fill="#a8761f" font-weight="bold">坑二 · 同一段中文,两把尺错位 1.33×</text>
+
+      <!-- 字符尺 -->
+      <text x="20" y="318" class="lbl" fill="#85806f">字符数</text>
+      <line x1="100" y1="328" x2="700" y2="328" stroke="#85806f" stroke-width="2"/>
+      <g stroke="#85806f" stroke-width="1.5">
+        <line x1="100" y1="322" x2="100" y2="334"/>
+        <line x1="250" y1="322" x2="250" y2="334"/>
+        <line x1="400" y1="322" x2="400" y2="334"/>
+        <line x1="550" y1="322" x2="550" y2="334"/>
+        <line x1="700" y1="322" x2="700" y2="334"/>
+      </g>
+      <text x="92" y="350" class="sm">0</text>
+      <text x="238" y="350" class="sm">200</text>
+      <text x="388" y="350" class="sm">400</text>
+      <text x="540" y="350" class="sm">600 字</text>
+      <text x="690" y="350" class="sm">800</text>
+
+      <!-- token 尺(同一段文字,刻度被 1.33 拉伸) -->
+      <text x="20" y="408" class="lbl" fill="#2f4d8a">token 数</text>
+      <line x1="100" y1="418" x2="700" y2="418" stroke="#2f4d8a" stroke-width="2"/>
+      <g stroke="#2f4d8a" stroke-width="1.5">
+        <line x1="100" y1="412" x2="100" y2="424"/>
+        <line x1="212" y1="412" x2="212" y2="424"/>
+        <line x1="325" y1="412" x2="325" y2="424"/>
+        <line x1="550" y1="412" x2="550" y2="424"/>
+      </g>
+      <text x="92" y="440" class="sm" fill="#2f4d8a">0</text>
+      <text x="200" y="440" class="sm" fill="#2f4d8a">200</text>
+      <text x="313" y="440" class="sm" fill="#2f4d8a">400</text>
+      <text x="525" y="440" class="sm" fill="#bf3f26" font-weight="bold">800 token 上限</text>
+
+      <!-- 600字 → 800token 对齐虚线 -->
+      <line x1="550" y1="334" x2="550" y2="412" stroke="#bf3f26" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar-q3)"/>
+      <rect x="600" y="360" width="288" height="50" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1"/>
+      <text x="614" y="382" class="sm" fill="#2f4d8a">600 字符 这一刀,落在 token 尺上</text>
+      <text x="614" y="400" class="sm" fill="#bf3f26" font-weight="bold">≈ 800 token = 真正的上限</text>
+
+      <!-- 结论条 -->
+      <rect x="20" y="466" width="868" height="40" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1"/>
+      <text x="36" y="491" class="t" font-size="13" fill="#333">字符切块器给"在哪断"的粗边界(600 字);tiktoken 数 token 做"超没超 800"的最终判定 —— 一个管边界,一个管预算。</text>
+
+      <!-- 图例 -->
+      <rect x="700" y="76" width="14" height="14" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="720" y="88" class="sm">错切 / 上限</text>
+      <rect x="700" y="178" width="14" height="14" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="720" y="190" class="sm">命中 / 干净</text>
+    </svg>
+    <figcaption>图 04-3 · 怎么看:上半两行是同一句中文——英文分隔符切到字中间(红叉),换中文分隔符后干净落在句号后(绿点)。下半两把尺子是同一段文字的"字符刻度"和"token 刻度",错开 1.33 倍;600 字符这一刀落到 token 尺上正好≈800 token 上限,这就是为什么不能只看字符数。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>中文切块两个坑:分隔符(LangChain 默认英文标点切不到中文句末,会硬切在字中间)和计数单位(中文 1 字 ≈ 1.33 token,按字符卡 size 会让真实 token 预算飘 ±33%)。</li>
+      <li>修分隔符:换成中文 separators 列表 <code>["\n\n", "。", "\n", "?", "!", ";", " ", ""]</code>,按优先级递归回退,优先在段落和句号处断。</li>
+      <li>修计数:字符切块器用 600 字符给粗粒度边界,tiktoken <code>count_tokens()</code> 实测 token 做"超没超 800"的最终判定——两道卡口配合,不是二选一。</li>
+      <li>tiktoken 用 <code>cl100k_base</code> 是为了一个离线、确定、可复现的 token 估计来卡上限;它对 qwen 只是 ±20% 近似,但当标尺够用。embedding 真正的分词在 dashscope 端(见本类第 2 题)。</li>
+      <li>这个 encoder 锁死不能换:每个 chunk 的 <code>tokens</code> 字段都是它算的,换 encoder 会让整库历史口径失真。</li>
+    </ul>
+    <p class="one-liner">一句话速记:中文切块要换两把尺——分隔符换中文(否则切在字中间),size 换 token(否则字符数和真实预算错位 1.33 倍)。</p>
+    <p class="src-note">参考:<code>backend/app/kb/chunkers/base.py</code>(count_tokens / cl100k_base)、<code>docs/claude-context/kb-chunking-strategy.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="rag-q4">
+  <div class="q-header"><span class="q-num">Q4</span><h3 class="q-title">你的知识库评估目前只有 agent 端到端的 LLM 裁判,缺少切块 / embedding / 检索的离线指标。为什么这是个缺口?该怎么补?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">评估体系</span><span class="tag">离线指标</span><span class="tag">检索质量</span><span class="tag">IR 指标</span><span class="tag">评估缺口</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题面试官不是在问"你会不会写 eval",而是在看你<strong>有没有意识到端到端评估的盲区</strong>——能不能区分"评最终效果"和"定位是哪个组件坏了"这两件根本不同的事。会做 RAG 的人很多,知道 RAG 链路是<em>切块 → embedding → 检索 → 生成</em>四段串联、每段都能独立量化的人才是真正调过系统的人。</p>
+    <ul>
+      <li><strong>追问:</strong>你现在端到端的分数掉了 10 分,你怎么知道是切块切碎了、embedding 选错了,还是检索 top_k 设小了?</li>
+      <li><strong>追问:</strong>离线指标要建 ground-truth(每条 query 标相关 chunk),这个标注成本不低,为什么还值得做?光靠端到端不行吗?</li>
+      <li><strong>追问:</strong>你说要算 recall@k / mrr / ndcg@k,这三个分别衡量什么?为什么不只看 recall?</li>
+      <li><strong>追问:</strong>如果暂时没精力建完整标注集,有没有低成本的 sanity check 能先把明显的坑兜住?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先说现状。我这套知识库的评估,目前<strong>只有一层</strong>:端到端的 LLM 裁判(LLM-as-Judge)。具体说,<code>eval_runner.py</code> 拿一批标注好的 golden case(<code>golden_set_v0.jsonl</code>),喂给被测系统(整个 agent),跑完拿到回答和工具调用轨迹,再让一个强模型当裁判去判"这个回答对不对、该调的工具调没调"。它评的是 agent <strong>最末端的输出文本</strong>。</p>
+
+    <h5>为什么这是个缺口:黑盒分数无法定位到层</h5>
+    <p>问题在于,RAG 是一条流水线:用户问题先切块入库、再 embedding 成向量、检索时按相似度召回、最后把召回的片段塞给大模型生成答案。<strong>端到端 eval 把这四段全揉进一个分数里。</strong>分数掉了,你只知道"系统变差了",却不知道是哪一段的锅——是切块把财报表格切碎了导致召回片段不完整?是 embedding 模型对中文金融语料召不准?还是检索 top_k 设太小漏了关键段?黑盒分数<strong>不可定位、不可做控制变量实验</strong>。</p>
+    <p>更具体地说,有一串参数我现在<strong>压根没人验过</strong>:语义切块的距离阈值 0.4 是不是最优、财报 chunk 800 token 上限是不是切得太碎、qwen text-embedding-v3 和 BGE-M3 谁召回更好、<code>KbSearchService.search</code> 的默认 <code>top_k=5</code> / <code>threshold=None</code> 是直接拍的、v0.9 计划接的 reranker 到底有没有正收益。这些都是<strong>组件级</strong>的问题,端到端 eval 一个都答不了。(阈值 0.4 / 800 上限是本类<em>第 1 题</em>路由策略的产物;qwen vs BGE-M3 见本类<em>第 2 题</em>。)</p>
+
+    <h5>这个缺口是有意为之,不是忘了</h5>
+    <p>要讲清楚一点:这不是疏忽。早期版本里已经塞了 Milvus 部署、三个服务接口、整条入库链路、一份样本语料,如果再加上检索调优的完整评估通路,工作量直接爆掉。所以当时<strong>显式</strong>把"检索调优 + 离线指标"推迟到下一个版本,因为它需要一套能每晚跑的基线(nightly baseline)才有意义。识别缺口并主动划定边界,本身就是工程判断。</p>
+
+    <h5>该怎么补:补一层分层离线指标</h5>
+    <p>补法分四步。<strong>第一步,建 ground-truth</strong>:每条 query 人工或半自动(让 LLM 先标、人复核)标出"哪些 chunk_id 是真正相关的"——这正是当前没做、成本所在的那部分。<strong>第二步,算离线 IR 指标</strong>:</p>
+    <ul>
+      <li><strong>recall@k</strong>:相关 chunk 有没有进 top-k。衡量"漏没漏"。</li>
+      <li><strong>mrr</strong>(平均倒数排名):第一个相关 chunk 排在第几名,越靠前越好。衡量"准不准"。</li>
+      <li><strong>ndcg@k</strong>:考虑相关度分级 + 位置折扣的综合排序质量。衡量"排得好不好"。</li>
+      <li>外加 <strong>chunk 尺寸分布</strong>(oversize/undersize rate):看切块健康度,有没有大量 &lt;100 token 的碎片或卡在 800 上限的巨块。</li>
+    </ul>
+    <p>只看 recall 不够:recall 高但相关 chunk 全排在第 5 名(mrr 低),实际上下文窗口只塞前 2 段就漏了。三个指标互补。<strong>第三步,写实验脚本</strong>(<code>scripts/eval_kb_retrieval.py</code>),固定 query 集 × {切块配置 × embedding 配置 × top_k} 做<strong>网格搜索</strong>。<strong>第四步,结果落盘</strong>到 <code>tests/eval/results/kb_retrieval/</code>,可重现、可对比。</p>
+    <p>关键:离线指标和端到端 eval <strong>不是替代关系,是互补</strong>。离线指标负责<strong>定位到组件</strong>(哪段坏了、哪个配置更好),端到端 eval 负责<strong>验最终任务效果</strong>(召回准了答案是不是真变好)。两层都要。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面是离线检索评估的核心循环——教学伪代码,看清楚"网格怎么跑、指标怎么算"即可,不是源码:</p>
+    <pre><code class="language-python"># ground-truth: 每条 query 标注哪些 chunk_id 真正相关(这一步最贵,是当前缺的)
+gold = [
+    {"query": "贵州茅台 2024 毛利率",          "relevant": {"chunk_812", "chunk_815"}},
+    {"query": "上市公司分红比例监管要求",         "relevant": {"chunk_1203"}},
+    # ... 几十条覆盖研报/财报/政策三类语料
+]
+
+def recall_at_k(retrieved, relevant, k):
+    # 前 k 个里命中了多少相关 chunk / 一共有多少相关 chunk —— 衡量"漏没漏"
+    hit = len(set(retrieved[:k]) &amp; relevant)
+    return hit / len(relevant)
+
+def mrr(retrieved, relevant):
+    # 第一个相关 chunk 排在第几名,取倒数 —— 排第 1 得 1.0,排第 5 得 0.2
+    for rank, cid in enumerate(retrieved, start=1):
+        if cid in relevant:
+            return 1.0 / rank
+    return 0.0   # top-k 里一个相关的都没有
+
+# 关键:把切块/embedding/top_k 当"自变量"做网格,而不是只跑一套默认配置
+for chunker_th in [0.3, 0.4, 0.5, 0.6]:     # 语义切块距离阈值(默认 0.4 待验)
+    for emb in ["qwen_v3", "bge_m3"]:        # embedding A/B(本类第 2 题的对比对象)
+        reingest(chunker_th, emb)            # 改了切块/embedding 必须重新入库重算向量
+        for k in [3, 5, 10]:                 # 检索 top_k(默认 5 是拍的)
+            scores = []
+            for case in gold:
+                got = kb_search(case["query"], top_k=k)   # 返回 chunk_id 列表
+                scores.append((recall_at_k(got, case["relevant"], k),
+                               mrr(got, case["relevant"])))
+            record(chunker_th, emb, k, mean(scores))       # 落盘 -> 画 recall heatmap
+</code></pre>
+    <p><strong>推演:</strong>假设跑出来 <code>top_k=5</code> 时 qwen 的 recall@5 = 0.72、BGE-M3 = 0.78,而把切块阈值从 0.4 调到 0.5 后 qwen 的 recall@5 升到 0.81——这一下就<strong>定位</strong>了:原来切得太碎(0.4 切边界太频繁)才是主因,换 embedding 反而是次要因素。这种结论端到端 eval 永远给不出,它只会告诉你"换了配置答案分数从 71 涨到 79",但说不清功劳是切块还是 embedding 的。这就是分层指标的价值:<strong>把一个黑盒分数拆成可归因的若干条曲线</strong>。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(现状 + 计划补的)</th><th class="th-vllm">替代方案(端到端 eval vs 分层离线指标)</th></tr></thead>
+      <tbody>
+        <tr><td>评估对象</td><td>离线指标评单层(切块/embedding/检索),端到端评最终答案,两层并存</td><td>纯端到端只评最终答案文本 + 工具调用</td></tr>
+        <tr><td>可定位性</td><td>分数掉了能归因到具体某一层、某个配置</td><td>黑盒,坏了不知道是哪段的锅</td></tr>
+        <tr><td>控制变量实验</td><td>能做阈值网格 / embedding A/B / top_k 曲线</td><td>做不了——改一个参数答案变了,功劳说不清</td></tr>
+        <tr><td>可重现性</td><td>IR 指标确定性强,固定 query 集每次结果一致</td><td>LLM 裁判有抖动,同一回答评分可能漂</td></tr>
+        <tr><td>标注成本</td><td>高:要给每条 query 标相关 chunk_id(当前缺口所在)</td><td>低:只需标"问题→期望答案",无需 chunk 级标注</td></tr>
+        <tr><td>贴近真实任务</td><td>离线指标≠最终效果,召回高不代表答案好</td><td>直接评最终任务,最贴近用户真实体验</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>端到端 eval 绝不是该被替换掉的废物,它有两个真实优势——<em>不需要 chunk 级标注</em>(标注成本低很多)、<em>直接对齐真实任务</em>(召回再准,如果生成环节没用上,用户拿到的还是烂答案,这只有端到端能抓)。所以它必须保留,作为"最终效果"的守门员。但它的代价是黑盒:无法定位、无法做控制变量。分层离线指标恰好补上这两点,代价是要先付 ground-truth 标注的成本——这正是当前还没做的原因,不是不知道要做,而是上一个版本 scope 已满,主动推迟了。<strong>正确答案是两者并存:离线指标定位组件、端到端验最终效果。</strong>谁也替不了谁。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="ar-q4" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+          <path d="M0,0 L7,3.2 L0,6.4 Z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="ar-q4g" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
+          <path d="M0,0 L7,3.2 L0,6.4 Z" fill="#85806f"/>
+        </marker>
+      </defs>
+
+      <text x="30" y="34" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="700" fill="#2f4d8a">同一条 RAG 流水线,两种评估视角</text>
+
+      <!-- ===== 上半:端到端黑盒 ===== -->
+      <text x="30" y="66" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#85806f">① 现状:端到端 LLM 裁判 — 只在最末端挂一个分数</text>
+
+      <!-- 大黑盒包住整条管线 -->
+      <rect x="40" y="80" width="700" height="86" rx="8" fill="none" stroke="#85806f" stroke-width="2" stroke-dasharray="6 4"/>
+      <text x="50" y="100" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">坏了不知哪段</text>
+
+      <g font-family="Noto Sans SC, sans-serif" font-size="12" fill="#2f4d8a">
+        <rect x="58" y="108" width="110" height="42" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="113" y="125" text-anchor="middle">切块</text>
+        <text x="113" y="141" text-anchor="middle" font-size="10" fill="#85806f">chunking</text>
+
+        <rect x="208" y="108" width="110" height="42" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="263" y="125" text-anchor="middle">embedding</text>
+        <text x="263" y="141" text-anchor="middle" font-size="10" fill="#85806f">向量化</text>
+
+        <rect x="358" y="108" width="110" height="42" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="413" y="125" text-anchor="middle">检索</text>
+        <text x="413" y="141" text-anchor="middle" font-size="10" fill="#85806f">top_k 召回</text>
+
+        <rect x="508" y="108" width="110" height="42" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="563" y="125" text-anchor="middle">生成</text>
+        <text x="563" y="141" text-anchor="middle" font-size="10" fill="#85806f">LLM 答案</text>
+      </g>
+      <line x1="168" y1="129" x2="206" y2="129" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q4)"/>
+      <line x1="318" y1="129" x2="356" y2="129" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q4)"/>
+      <line x1="468" y1="129" x2="506" y2="129" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q4)"/>
+
+      <line x1="640" y1="129" x2="690" y2="129" stroke="#85806f" stroke-width="1.6" marker-end="url(#ar-q4g)"/>
+      <rect x="694" y="106" width="180" height="46" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <text x="784" y="124" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">LLM 裁判</text>
+      <text x="784" y="142" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">一个黑盒分数</text>
+
+      <!-- 分隔 -->
+      <line x1="30" y1="196" x2="870" y2="196" stroke="#85806f" stroke-width="1" stroke-dasharray="2 4"/>
+
+      <!-- ===== 下半:分层探针 ===== -->
+      <text x="30" y="224" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#bf3f26">② 要补的:每段出口挂离线探针 — 坏了能定位到层</text>
+
+      <g font-family="Noto Sans SC, sans-serif" font-size="12" fill="#2f4d8a">
+        <rect x="58" y="244" width="110" height="42" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="113" y="269" text-anchor="middle">切块</text>
+
+        <rect x="358" y="244" width="110" height="42" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="413" y="269" text-anchor="middle">检索</text>
+
+        <rect x="508" y="244" width="110" height="42" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="563" y="269" text-anchor="middle">生成</text>
+      </g>
+
+      <!-- embedding A/B 分叉 -->
+      <rect x="208" y="226" width="110" height="32" rx="8" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="263" y="247" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">qwen v3</text>
+      <rect x="208" y="272" width="110" height="32" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <text x="263" y="293" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">BGE-M3</text>
+      <text x="263" y="320" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#a8761f">A/B 分叉</text>
+
+      <line x1="168" y1="265" x2="206" y2="248" stroke="#2f4d8a" stroke-width="1.4" marker-end="url(#ar-q4)"/>
+      <line x1="168" y1="265" x2="206" y2="288" stroke="#2f4d8a" stroke-width="1.4" marker-end="url(#ar-q4)"/>
+      <line x1="318" y1="248" x2="356" y2="262" stroke="#2f4d8a" stroke-width="1.4" marker-end="url(#ar-q4)"/>
+      <line x1="318" y1="288" x2="356" y2="268" stroke="#2f4d8a" stroke-width="1.4" marker-end="url(#ar-q4)"/>
+      <line x1="468" y1="265" x2="506" y2="265" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#ar-q4)"/>
+
+      <!-- 切块探针 -->
+      <line x1="113" y1="286" x2="113" y2="318" stroke="#1f6e5e" stroke-width="1.4" marker-end="url(#ar-q4g)"/>
+      <rect x="40" y="320" width="150" height="48" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="115" y="339" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">chunk 尺寸分布</text>
+      <text x="115" y="357" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">over/undersize 率</text>
+
+      <!-- 检索探针 -->
+      <line x1="413" y1="286" x2="413" y2="318" stroke="#1f6e5e" stroke-width="1.4" marker-end="url(#ar-q4g)"/>
+      <rect x="338" y="320" width="150" height="48" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="413" y="339" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">recall@k / mrr</text>
+      <text x="413" y="357" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">ndcg@k</text>
+
+      <!-- 生成探针 = 端到端裁判仍在 -->
+      <line x1="563" y1="286" x2="563" y2="318" stroke="#85806f" stroke-width="1.4" marker-end="url(#ar-q4g)"/>
+      <rect x="508" y="320" width="150" height="48" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <text x="583" y="339" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">端到端裁判</text>
+      <text x="583" y="357" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">验最终效果(保留)</text>
+
+      <!-- 右侧 heatmap 缩略图:目标产出 -->
+      <text x="700" y="240" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#a8761f">目标产出</text>
+      <text x="700" y="256" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">切块×embedding×top_k</text>
+      <text x="700" y="270" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">recall heatmap</text>
+      <g>
+        <rect x="700" y="278" width="30" height="26" fill="#e2f0eb" stroke="#fff"/>
+        <rect x="730" y="278" width="30" height="26" fill="#9ecdbf" stroke="#fff"/>
+        <rect x="760" y="278" width="30" height="26" fill="#1f6e5e" stroke="#fff"/>
+        <rect x="700" y="304" width="30" height="26" fill="#9ecdbf" stroke="#fff"/>
+        <rect x="730" y="304" width="30" height="26" fill="#1f6e5e" stroke="#fff"/>
+        <rect x="760" y="304" width="30" height="26" fill="#9ecdbf" stroke="#fff"/>
+        <rect x="700" y="330" width="30" height="26" fill="#f0ede4" stroke="#fff"/>
+        <rect x="730" y="330" width="30" height="26" fill="#9ecdbf" stroke="#fff"/>
+        <rect x="760" y="330" width="30" height="26" fill="#e2f0eb" stroke="#fff"/>
+      </g>
+      <text x="700" y="372" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">深=召回高,一眼挑最优格</text>
+
+      <!-- ground-truth 前提条 -->
+      <rect x="40" y="400" width="820" height="40" rx="8" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="56" y="425" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">前提(当前缺口所在):先给每条 query 标注「哪些 chunk_id 相关」的 ground-truth,所有离线指标才算得出 — 这是要付的标注成本</text>
+
+      <!-- 图例 -->
+      <text x="40" y="472" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#85806f">图例</text>
+      <rect x="40" y="482" width="16" height="14" rx="3" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="62" y="494" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">流水线节点</text>
+      <rect x="160" y="482" width="16" height="14" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="182" y="494" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">离线指标探针(可定位)</text>
+      <rect x="350" y="482" width="16" height="14" rx="3" fill="#f0ede4" stroke="#85806f"/>
+      <text x="372" y="494" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">黑盒/端到端</text>
+      <rect x="490" y="482" width="16" height="14" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="512" y="494" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">需先付的成本/对比对象</text>
+
+      <text x="40" y="526" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">两层互补:① 黑盒分数只告诉你「变差了」,② 探针告诉你「哪一层、哪个配置变差了」。生成那段的端到端裁判始终保留。</text>
+    </svg>
+    <figcaption>图 04-4 · 怎么看:上半是现状——整条管线被一个端到端黑盒罩住,坏了不知哪段;下半是要补的——每段出口挂离线探针(切块看尺寸分布、检索看 recall@k/mrr/ndcg@k、embedding 做 A/B 分叉),右侧网格热力图是目标产出。底部朱砂条提醒:这一切的前提是先建 ground-truth 标注,这正是当前缺口所在。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>缺口本质是"不可定位":</strong>端到端 LLM 裁判把切块/embedding/检索/生成揉成一个黑盒分数,分数掉了说不清是哪一层的锅,也做不了控制变量实验。</li>
+      <li><strong>补法是加一层分层离线指标:</strong>建 ground-truth(每 query 标相关 chunk_id)→ 算 recall@k / mrr / ndcg@k + chunk 尺寸分布 → 网格脚本跑「切块×embedding×top_k」→ 结果落盘画 recall 热力图。</li>
+      <li><strong>三个 IR 指标互补:</strong>recall 看漏没漏、mrr 看相关项排第几、ndcg 看整体排序质量,只看 recall 会被"召回了但排很后"骗过去。</li>
+      <li><strong>两层不是替代是互补:</strong>离线指标定位组件、可重现、能网格搜索;端到端 eval 不需 chunk 级标注、直接对齐真实任务。决策对比里端到端的两个优势必须承认,正确答案是并存。</li>
+      <li><strong>缺口是主动推迟不是疏忽:</strong>上个版本 scope 已塞满 Milvus + 入库链路,检索调优 + nightly 基线被显式推到下一版——识别并划定边界本身是工程判断。低成本兜底:手写 query 肉眼看 top_k 命中、看 embedding 缓存命中率(~80%+)、看 chunk token 直方图有没有大量碎片或卡上限。</li>
+    </ul>
+    <p class="one-liner">一句话速记:端到端 eval 只告诉你"系统坏了",分层离线指标(recall@k/mrr/ndcg@k + chunk 尺寸)才告诉你"哪一层、哪个配置坏了"——前者验效果、后者定位,代价是先建 ground-truth 标注。</p>
+    <p class="src-note">参考:<code>docs/claude-context/kb-eval-gaps.md</code>、<code>docs/claude-context/kb-chunking-strategy.md</code>、<code>docs/claude-context/kb-embedding-choice.md</code>、<code>backend/app/services/kb_search_service.py</code>(默认 top_k=5 / threshold=None)、<code>backend/tests/eval/</code>(现有端到端 golden eval)</p>
+  </div></div>
+</article>
+
+<article class="question-card" id="rag-q5">
+  <div class="q-header"><span class="q-num">Q5</span><h3 class="q-title">RAG 和"直接把长文档塞进上下文"之间你怎么权衡?什么时候其实不该用 RAG?</h3><span class="q-diff" title="难度 3/5">★★★☆☆</span></div>
+  <div class="q-tags"><span class="tag">RAG vs 长上下文</span><span class="tag">权衡取舍</span><span class="tag">语料规模</span><span class="tag">成本</span><span class="tag">检索</span></div>
+
+  <div class="q-block block-exam">
+    <h4>🎯 考察点分析</h4>
+    <div class="block-body">
+      <p>这道题问的是<strong>判断力</strong>,不是"你会不会搭 RAG"。如今上下文窗口动辄几十万 token,确实有不少场景"直接把整篇喂进去"又简单又准。面试官想看你能不能讲清楚:RAG 是为了解决什么问题才存在的?它带来了哪些<strong>额外代价</strong>?以及——什么时候该克制,别上 RAG。能主动说出"这种情况我不上 RAG"的候选人,比一上来就背切块/embedding/检索流程的,段位高一截。</p>
+      <ul>
+        <li><strong>追问:</strong>你的知识库到底多大?这个量级塞得进上下文吗?(逼你给出真实规模数字,而不是空谈)</li>
+        <li><strong>追问:</strong>除了"塞不下",RAG 还能做到长上下文直塞做不到的什么事?(看你能不能答出按来源/字段过滤、缓存复用,而不是只会说"省 token")</li>
+        <li><strong>追问:</strong>RAG 引入了哪些新的出错环节?这些环节你测了吗?(把成本算全,别只讲好处)</li>
+        <li><strong>追问:</strong>给你一个只有两三篇短文档的需求,你还上向量库吗?(考你会不会过度设计)</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="q-block block-theory">
+    <h4>📚 原理讲解</h4>
+    <div class="block-body">
+      <p>先把两条路线讲明白。<strong>长上下文直塞</strong>:把整篇(或整批)文档原文塞进模型这一次对话的输入里,让模型自己在里面找答案。<strong>RAG</strong>(检索增强生成):提前把文档切成小块、每块算一个"语义指纹"(embedding 向量)存进向量库;用户提问时,先把问题也转成向量,去库里捞出最相关的几块,只把这几块喂给模型。一个是"全量端上桌",一个是"按需点菜"。</p>
+
+      <h5>RAG 的存在前提:语料根本装不进上下文</h5>
+      <p>我们这个金融研究助手,真实业务规模的假设是 <strong>1000 到 10000 篇文档</strong>,每篇切成 200 到 500 个小块,合起来是 <strong>20 万到 500 万个向量</strong>。这个量级,任何上下文窗口都装不下——哪怕窗口再大十倍也没用。所以这里 RAG 不是"可选优化",是"不先检索就没法干活"的硬约束。这是判断要不要上 RAG 的第一个锚点:<strong>语料总量塞不塞得进。</strong></p>
+
+      <h5>RAG 真正多出来的能力:按字段过滤,只命中相关子集</h5>
+      <p>我们的语料分三种来源:券商研报、公司财报、监管政策。用户问"招商证券对某公司怎么看",这只该去研报里找;问"某公司三季度营收多少",只该去财报里找;问"某项补贴政策",只该去政策里找。我们把三种来源放进三个独立的"库"(collection),每条记录还带着发布机构、发布日期、公司代码这类标签。检索时可以先按这些标签<strong>过滤</strong>,只在相关子集里捞。长上下文直塞做不到这种过滤——它要么把所有东西一锅端进去(token 爆炸、注意力还被无关内容稀释),要么得另写一套规则在外面先挑文档。这是第二个锚点:<strong>是否需要按来源/属性过滤。</strong></p>
+
+      <h5>成本结构:一次性摊销 + 双层缓存 vs 每次全量重付</h5>
+      <p>RAG 把"算向量入库"做成<strong>一次性</strong>开销:一篇文档入库一次,之后无数次提问都复用。而且我们在两层都加了缓存——算向量这一步有本地缓存(开发期反复跑,命中率约 80%,等于省掉绝大部分重复计算);查询这一层有 LRU 缓存(容量 1000、有效期 1 小时),高频重复的问题第二次问基本是免费的。反观长上下文直塞:每问一次,整篇文档的 token 都要<strong>重新付一遍费</strong>,而且喂得越长、响应越慢、模型注意力越被稀释。这是第三个锚点:<strong>同一批文档会不会被反复查。</strong></p>
+
+      <h5>但 RAG 不是免费午餐:它新增三层出错环节</h5>
+      <p>这是回答里最容易被忽略、却最能体现判断力的部分。上了 RAG,你就引入了三个原本不存在的失败面:① <strong>切块边界</strong>切得好不好(切碎了关键信息就召不回);② <strong>embedding 召回</strong>准不准(语义指纹捕捉得对不对);③ <strong>检索调参</strong>(取前几个、相似度阈值卡多少)。这三层在我们项目里恰恰还缺独立的离线评估(这块怎么补,见本类第 4 题)。所以 RAG 的复杂度,只有在语料规模/复用频次撑得起时才划算。</p>
+    </div>
+  </div>
+
+  <div class="q-block block-example">
+    <h4>💻 示例讲解</h4>
+    <div class="block-body">
+      <p>用一段决策伪代码,把"先判断、再选路线"的逻辑走一遍。注意它不是真实源码,只是把判断锚点显式化:</p>
+      <pre><code class="language-python">def 选择回答策略(语料):
+    总_token = 估算总token(语料)            # 全部文档加起来多大
+    篇数     = len(语料.文档)
+    会反复查 = 语料.是否长期复用            # 这批文档以后还会被问很多次吗
+    要按来源过滤 = 语料.来源数 &gt; 1          # 研报/财报/政策 这种多源场景
+
+    # 锚点一:总量塞得进 且 就一两篇 且 一次性 —— 直接塞,别上重型方案
+    if 总_token &lt; 上下文上限 and 篇数 &lt;= 2 and not 会反复查:
+        return 长上下文直塞(语料)          # 不切块、不建库,实现最简单也最准
+
+    # 锚点二:结构有天然边界 且 需要全文连贯推理(如逐条对照整份政策)
+    #         切碎反而丢上下文 —— 这种也别切,整篇塞
+    if 需要全文连贯推理(语料) and 总_token &lt; 上下文上限:
+        return 长上下文直塞(语料)
+
+    # 否则:语料大 / 多源要过滤 / 高复用 —— RAG 不可替代
+    return RAG检索(语料)                   # 切块→算向量入库→按标签过滤→取前k块
+</code></pre>
+      <p><strong>推演:</strong>两边各代一组数。<em>场景 A</em>:用户上传一份 8 页的政策原文,只想就这一份逐条问。整篇约 1 万 token,远小于窗口,就 1 篇、还要逐条连贯对照——走<strong>左路直塞</strong>:零建库成本、不会因切碎丢上下文,答得又快又准。<em>场景 B</em>:我们的真实知识库,1k–10k 篇、20 万–500 万个向量,三种来源要分开查——这个量级根本塞不进任何窗口,必须走<strong>右路 RAG</strong>:入库一次性摊销,查询命中 LRU 缓存时几乎零成本,还能按"只查研报、且发布机构=招商证券"精确过滤。判断标准全在那三个锚点:总量、是否多源过滤、复用频次。</p>
+    </div>
+  </div>
+
+  <div class="q-block block-vs">
+    <h4>⚖️ 决策对比</h4>
+    <div class="block-body">
+      <table class="vs-table">
+        <thead><tr><th>维度</th><th class="th-sgl">我们的选择(语料大时上 RAG)</th><th class="th-vllm">替代方案(长上下文直塞整篇)</th></tr></thead>
+        <tbody>
+          <tr><td>能承载的语料规模</td><td>20 万–500 万向量也能扛(先检索再喂)</td><td>受窗口硬限,总量超出就直接做不了</td></tr>
+          <tr><td>能否按来源/字段过滤</td><td>三个库 + 标签过滤,只命中相关子集</td><td>做不到,要么全塞要么外挂一套挑选规则</td></tr>
+          <tr><td>成本模型</td><td>入库一次性摊销 + 算向量缓存(命中≈80%)+ 查询 LRU 缓存(1000/1h)</td><td>每次提问整篇 token 重新付费,越长越慢、注意力越稀释</td></tr>
+          <tr><td>实现复杂度</td><td>切块/embedding/向量库一整套,重</td><td>把原文拼进 prompt 即可,极轻</td></tr>
+          <tr><td>新增失败面</td><td>切块边界 + 召回质量 + 检索调参 三层(且当前缺离线评估)</td><td>没有这三层,出错点少</td></tr>
+          <tr><td>全文连贯推理</td><td>切碎后跨块推理会丢上下文,是弱项</td><td>整篇在场,逐条对照式推理是强项</td></tr>
+        </tbody>
+      </table>
+      <p><strong>公允裁决:</strong>长上下文直塞绝不是"落后方案",在它的射程内反而更优:<strong>语料总量塞得进、就一两篇、一次性不复用、或需要逐条连贯对照</strong>时,直塞不引入切块/召回/检索三层失败面,不把有天然结构的内容切碎,实现还最简单——这种情况硬上 RAG 才是过度设计(同我们"政策有天然条款边界就不做语义切""财报表格不进切分器"的克制一脉相承:天然装得下/不能切碎的,就别上重型方案)。我们之所以仍以 RAG 为主力,纯粹是被真实规模逼的:1k–10k 篇、上百万向量的多源金融语料,塞不进任何窗口、又必须按来源精确过滤、还要被反复查询——这三条同时成立,RAG 才不可替代。判断的本质不是"谁更先进",而是<strong>对着语料规模、是否需过滤、复用频次、是否需全文连贯这四把尺子量一量</strong>。</p>
+    </div>
+  </div>
+
+  <div class="q-block block-diagram">
+    <h4>🖼️ 图解</h4>
+    <div class="block-body">
+      <figure class="diagram">
+        <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+          <defs>
+            <marker id="rq5-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#2f4d8a"/>
+            </marker>
+            <marker id="rq5-arrow-grn" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#1f6e5e"/>
+            </marker>
+            <marker id="rq5-arrow-red" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L8,3 L0,6 Z" fill="#bf3f26"/>
+            </marker>
+          </defs>
+
+          <text x="450" y="28" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="700" fill="#2f4d8a">RAG vs 长上下文直塞 · 一道判断闸口分两条路</text>
+
+          <!-- 判断节点 -->
+          <polygon points="450,52 630,118 450,184 270,118" fill="#faeae4" stroke="#bf3f26" stroke-width="2"/>
+          <text x="450" y="105" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#bf3f26">语料塞得进上下文?</text>
+          <text x="450" y="126" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#bf3f26">且 仅一两篇 &amp; 一次性?</text>
+          <text x="450" y="146" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">(或需整篇连贯推理)</text>
+
+          <!-- 是 -> 左路 -->
+          <text x="305" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#1f6e5e">是</text>
+          <path d="M340,160 L210,212" stroke="#1f6e5e" stroke-width="2" fill="none" marker-end="url(#rq5-arrow-grn)"/>
+          <!-- 否 -> 右路 -->
+          <text x="595" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">否</text>
+          <path d="M560,160 L690,212" stroke="#2f4d8a" stroke-width="2" fill="none" marker-end="url(#rq5-arrow)"/>
+
+          <!-- 左路:长上下文直塞 -->
+          <rect x="40" y="222" width="320" height="44" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.6"/>
+          <text x="200" y="249" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#1f6e5e">左路 · 长上下文直塞</text>
+
+          <rect x="70" y="286" width="260" height="46" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.4"/>
+          <text x="200" y="306" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">整篇原文 → 直接进模型</text>
+          <text x="200" y="324" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">不切块 · 不建库 · 不过滤</text>
+          <path d="M200,266 L200,284" stroke="#1f6e5e" stroke-width="2" fill="none" marker-end="url(#rq5-arrow-grn)"/>
+
+          <rect x="70" y="352" width="260" height="64" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.4"/>
+          <text x="200" y="375" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#1f6e5e">优:实现最简单 · 不丢全文上下文</text>
+          <text x="200" y="397" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#85806f">代价:每次问整篇 token 重付</text>
+          <text x="200" y="411" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#85806f">越长越慢 · 注意力被稀释</text>
+          <path d="M200,332 L200,350" stroke="#1f6e5e" stroke-width="2" fill="none" marker-end="url(#rq5-arrow-grn)"/>
+
+          <!-- 右路:RAG 流水线 -->
+          <rect x="540" y="222" width="320" height="44" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.6"/>
+          <text x="700" y="249" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#2f4d8a">右路 · RAG(语料大/多源/高复用)</text>
+
+          <rect x="560" y="286" width="280" height="34" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.3"/>
+          <text x="700" y="307" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#2f4d8a">① 文档切块 → 算向量入库(一次性)</text>
+          <path d="M700,266 L700,284" stroke="#2f4d8a" stroke-width="2" fill="none" marker-end="url(#rq5-arrow)"/>
+
+          <rect x="560" y="332" width="280" height="48" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.3"/>
+          <text x="700" y="352" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#2f4d8a">② 三库 + 标签过滤(研报/财报/政策)</text>
+          <text x="700" y="370" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">按机构/日期/公司码 只命中相关子集</text>
+          <path d="M700,320 L700,330" stroke="#2f4d8a" stroke-width="2" fill="none" marker-end="url(#rq5-arrow)"/>
+
+          <rect x="560" y="392" width="280" height="48" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.4"/>
+          <text x="700" y="412" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1f6e5e">③ query 过 LRU 缓存 → 取前 k 块进模型</text>
+          <text x="700" y="430" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">可缓存 · 可过滤 · 可扩到百万级向量</text>
+          <path d="M700,380 L700,390" stroke="#1f6e5e" stroke-width="2" fill="none" marker-end="url(#rq5-arrow-grn)"/>
+
+          <!-- RAG 多出来的代价提示条 -->
+          <rect x="60" y="468" width="780" height="56" rx="8" fill="#faeae4" stroke="#a8761f" stroke-width="1.6"/>
+          <text x="80" y="490" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#a8761f">RAG 多出来的三层失败面(代价提示,语料不够大时别上):</text>
+          <text x="90" y="512" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">① 切块边界质量</text>
+          <text x="350" y="512" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">② embedding 召回质量</text>
+          <text x="650" y="512" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">③ 检索 top_k/阈值调参</text>
+
+          <!-- 图例 -->
+          <rect x="60" y="538" width="14" height="11" rx="2" fill="#e9eef8" stroke="#2f4d8a"/>
+          <text x="80" y="547" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">主结构/RAG</text>
+          <rect x="190" y="538" width="14" height="11" rx="2" fill="#e2f0eb" stroke="#1f6e5e"/>
+          <text x="210" y="547" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">命中/正向</text>
+          <rect x="310" y="538" width="14" height="11" rx="2" fill="#faeae4" stroke="#bf3f26"/>
+          <text x="330" y="547" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">判断闸/代价</text>
+          <rect x="445" y="538" width="14" height="11" rx="2" fill="#f0ede4" stroke="#85806f"/>
+          <text x="465" y="547" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">次要/弱化</text>
+        </svg>
+        <figcaption>图 04-5 · 怎么看:从顶上的菱形闸口出发——"塞得进 &amp; 一两篇 &amp; 一次性(或需整篇连贯推理)"走左绿路直塞,简单但每次全量付费;否则走右靛蓝路 RAG,一次性入库 + 三库标签过滤 + 查询缓存,能扩到百万级。底部琥珀条是 RAG 额外背上的三层失败面,语料不够大时这正是"别上 RAG"的理由。</figcaption>
+      </figure>
+    </div>
+  </div>
+
+  <div class="q-block block-summary">
+    <h4>📌 总结</h4>
+    <div class="block-body">
+      <ul class="takeaways">
+        <li><strong>RAG 是被规模逼出来的:</strong>1k–10k 篇、20 万–500 万向量塞不进任何窗口,必须先检索再喂,这时 RAG 不是优化是刚需。</li>
+        <li><strong>RAG 多出长上下文做不到的两件事:</strong>按来源/标签过滤只命中相关子集(三库 + 机构/日期/公司码),以及入库一次性摊销 + 算向量缓存(≈80%)+ 查询 LRU 缓存(1000/1h)。</li>
+        <li><strong>三种情况别上 RAG:</strong>① 总量塞得进、就一两篇短文;② 有天然结构、需整篇连贯推理(切碎反丢上下文);③ 一次性不复用,建索引摊销不回来。</li>
+        <li><strong>RAG 的代价要算进去:</strong>它新增切块边界、召回质量、检索调参三层失败面,而这三层当前还缺离线评估(见本类第 4 题),复杂度只在规模/复用撑得起时才划算。</li>
+        <li><strong>判断锚点就四把尺子:</strong>语料规模、是否需过滤、复用频次、是否需全文连贯——量一量再决定,而非默认上 RAG。</li>
+      </ul>
+      <p class="one-liner">一句话速记:语料塞得进且就一两篇一次性就直塞,装不下/要分来源过滤/要反复查才上 RAG——别为两篇文档建一座向量库。</p>
+      <p class="src-note">参考:<code>docs/claude-context/kb-chunking-strategy.md</code>、<code>docs/superpowers/specs/2026-05-02-v0.7-kb-search-milvus-design.md</code>、<code>docs/superpowers/plans/2026-05-02-v0.7-kb-search-milvus.md</code></p>
+    </div>
+  </div>
+</article>
+</section>

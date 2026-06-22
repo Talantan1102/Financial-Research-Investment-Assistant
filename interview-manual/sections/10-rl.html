@@ -1,0 +1,785 @@
+<section class="category" id="cat-rl" data-icon="🎯" data-title="RL 准备与工具可靠性">
+<header class="cat-header">
+  <span class="cat-icon">🎯</span>
+  <div><h2><span class="cat-no">10</span>RL 准备与工具可靠性</h2></div>
+</header>
+<p class="cat-desc">这一类讲的是一个反直觉的工程判断:当弱模型在某类任务上能力骤降,到底是模型不会算,还是工具在背后悄悄使绊子?作者用「反向出题 + 多次采样通过率」搭了一套评测台,先把工具坑挖干净,再决定强化学习该往哪打。从「怎么证明断崖是工具问题」一路到「怎么攒一批干净的训练料」,每一步都是先量化、再定靶、最后划清「修工具」和「上 RL」各自的边界。</p>
+
+<article class="question-card" id="rl-q1">
+  <div class="q-header"><span class="q-num">Q1</span><h3 class="q-title">你的结论是"先修工具比直接上强化学习更对症"。你怎么论证那个能力断崖是工具问题、而不是模型能力问题?</h3><span class="q-diff" title="难度 3/5">★★★☆☆</span></div>
+  <div class="q-tags"><span class="tag">评测方法论</span><span class="tag">工具可靠性</span><span class="tag">RL前置判断</span><span class="tag">断崖归因</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题表面问"工具 vs 模型",其实在探一件事:你会不会在掏出强化学习这把重武器之前,先把"问题到底出在哪"诊断清楚。很多人一看到指标低就喊"上 RL 训练",但强化学习又贵又慢,如果真凶其实是一行代码,那就是拿火箭筒打蚊子。面试官想确认你具备的是<strong>归因能力</strong>,而不是堆资源的本能。</p>
+    <ul>
+      <li><strong>追问:</strong>你凭什么说断崖"卡在取数、不卡在计算"?这两个假设你是怎么掰开、各自怎么证伪的?</li>
+      <li><strong>追问:</strong>如果改了一行代码后那一桶没满分、只升到 60%,你的结论会变吗?为什么"单改一行就整桶满分"是强证据?</li>
+      <li><strong>追问:</strong>你怎么排除"是你给的预算(步数)太少、模型其实算得来,只是没时间算完"这种混淆因素?</li>
+      <li><strong>追问:</strong>有没有踩过归因错的坑?你是怎么发现归错了的?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先说背景。我们要给一个"能算金融指标的对话 agent"做体检:给它一只股票、一段时间,让它算年化收益、波动、最大回撤这些数。问题来了——如果体检分数不理想,你怎么知道是<strong>模型不会算</strong>,还是<strong>工具没把料喂齐</strong>?这两件事的修法天差地别:前者要重新训练模型(强化学习就是干这个的),后者改代码就行。</p>
+
+    <h5>第一步:别看总分,要分桶看</h5>
+    <p>总分是一团浆糊。一个 70 分,可能是每道题都 70 分(均匀的能力短板),也可能是九成题满分、一成题零分(局部塌方)。这两种长得一样但病因完全不同。所以我们做了两件事:一是<strong>反向出题</strong>——不靠人手攒题,而是先用确定的数据算出标准答案,再倒推出题目,这样每道题都有一个可对照的"金标准";二是<strong>多次采样通过率</strong>(业内叫 pass@k,同一题让 agent 独立答 k 次,看通过率),把偶发抖动平滑掉。然后把题按<strong>"难度 × 指标"</strong>切成一格一格,让断崖自己浮出来。</p>
+
+    <h5>第二步:看断崖落在哪一格</h5>
+    <p>结果非常干净:绝大多数格子都在 70%~93% 的绿区,唯独一格刺眼地红——<strong>需要近三年长窗口数据的年化收益(CAGR)那一桶,只有 13%</strong>。注意这个分布的形状:不是"越难越差"的斜坡(那才像能力问题),而是<strong>单格孤立塌方</strong>。同样是"算指标",1 年窗口的波动、回撤、涨幅全是绿的,凭什么换成 3 年窗口、换成 CAGR 就单独崩?能力是不会这么挑窗口长度的。</p>
+
+    <h5>第三步:把"算不算得来"和"取不取得齐"掰成两个假设</h5>
+    <p>这是整套论证的枢纽。我把断崖拆成两句话对立的假设:</p>
+    <ul>
+      <li><strong>假设甲(能力问题):</strong>模型不会算长窗口的 CAGR。</li>
+      <li><strong>假设乙(工具问题):</strong>模型会算,但取数工具根本没把三年的数据给齐。</li>
+    </ul>
+    <p>怎么分辨?去摸取数工具的代码。真凶是 <code>get_daily</code> 里写死的一行:不管你问几年,它最多只悄悄返回最近约一年的数据,更早的<strong>静默丢弃</strong>(连个警告都不给)。这一下两个现象全解释通了:agent 拿不到三年数据,只能笨办法分多次按子区间取,每段把一整年灌进上下文,步数烧光、死在最后一步开算之前;更阴险的是,粗心的 agent 没察觉"问三年只给了一年",直接拿一年当三年算,<strong>错且不自知</strong>。这不是"不会算",是"压根没拿到该算的料"。</p>
+
+    <h5>第四步:做判决性实验,让证据自己说话</h5>
+    <p>光有理论还不够,得有一刀切的实验。我把那行静默截断删掉(让长区间真取全量),<strong>别的什么都不动</strong>,重跑同一套题。结果:CAGR/3 年那一桶从 13% 直接拉到 100%,而且全题集<strong>零个"算不出指标"</strong>。这就是决定性证据——<strong>如果是模型能力问题,单改一行取数代码绝不可能让整桶从 13% 跳到满分</strong>。能力是训练出来的,改一行 I/O 代码改不动模型一丝一毫。它能跳满,只能说明:模型本来就会算,之前缺的只是料。假设乙成立,假设甲被证伪。</p>
+
+    <h5>为什么这就够下"先修工具"的结论</h5>
+    <p>因为这把"能不能算"这个伪缺口清掉了。修完之后再看残留的失败,已经不是"不会算",而是"调工具时漏个参数、取错股票代码、报错就放弃"这类<strong>工具调用可靠性</strong>问题——那才是真正该留给强化学习的靶子(这部分见本类第 4 题)。先修工具是一行代码的低成本高确定性杠杆;不修就上 RL,等于让算力去填一个工具坑制造出来的假能力缺口。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面这段伪代码不是真实实现,只是把"分桶 → 找孤立红格 → 做判决性实验"这条诊断逻辑走一遍,看清证据是怎么逼出结论的。</p>
+    <pre><code class="language-python"># 一、按「窗口长度 × 指标」分桶跑 pass@k,让断崖自己暴露
+def diagnose(questions):
+    buckets = {}
+    for q in questions:
+        # 同一题独立采样 k 次,通过率平滑掉偶发抖动
+        rate = pass_at_k(agent_answer, q, gold=q.gold, k=8)
+        # 关键:按「窗口长度」和「指标」二维归桶,而不是只看一个总分
+        buckets[(q.window, q.metric)] = rate
+    return buckets
+
+before = diagnose(all_questions)
+# 观察到的形状:只有一格孤立塌方,不是越难越差的斜坡
+# {(1y, '涨幅'): 0.89, (1y, '波动'): 0.93, (1y, '回撤'): 0.87,
+#  (3y, 'CAGR'): 0.13}   ← 单格刺眼的红
+
+# 二、把两个假设掰开:断崖卡在「算」还是卡在「取」?
+#   甲 能力问题:模型不会算 3 年 CAGR
+#   乙 工具问题:模型会算,但取数工具没把 3 年数据给齐
+# 摸代码 → 取数工具里一行静默截断:不管问几年,只悄悄返回最近约 1 年
+def get_daily(ts_code, start, end):
+    df = fetch(ts_code, start, end)
+    return df.tail(260)   # ← 真凶:超出部分静默丢弃,agent 不知情
+
+# 三、判决性实验:只删这一行,别的都不动,重跑同一套题
+def get_daily_fixed(ts_code, start, end):
+    return fetch(ts_code, start, end)   # 长区间真取全量,不再 tail
+
+after = diagnose(all_questions)
+# {(3y, 'CAGR'): 1.00}  ← 同一桶从 0.13 跳到满分,且全题集 0 个「算不出」
+
+# 四、下判决:能力问题不可能被「改一行取数」治好
+assert before[('3y','CAGR')] == 0.13 and after[('3y','CAGR')] == 1.00
+# → 改的是 I/O,不是模型权重;整桶满分只能解释为「本来就会算,之前缺料」
+#   结论:断崖是工具问题,先修工具;能力缺口很小,RL 别急着上
+</code></pre>
+    <p><strong>推演:</strong>关键不在代码多巧,而在这组对照数字。修复前:CAGR/3 年桶 13%,而同样难度的 1 年窗口指标在 70%~93%——<strong>同是"算指标",只有长窗口那格塌</strong>,这本身已经把矛头指向"窗口越长越取不齐",而非"算法不会"。修复后:那一桶 13% → 100%,全题集 0 个"算不出指标"。一行取数代码就能让整桶满分,这个因果链对"能力问题"是致命的——你没法用改 I/O 的方式给模型涨能力。所以下"先修工具"的结论,靠的不是直觉,是这组能复现的判决性数字。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(先修工具)</th><th class="th-vllm">替代方案(不分析直接上 RL)</th></tr></thead>
+      <tbody>
+        <tr><td>对症性</td><td>分桶诊断指向"取数",改一行让整桶满分,精准命中根因</td><td>不定位就训练,可能把算力花在工具坑造出的假能力缺口上</td></tr>
+        <tr><td>成本</td><td>一行代码 vs 一轮训练,改完即验、当天见效</td><td>RL 训练贵、采样多、信号慢,跑一轮成本高、周期长</td></tr>
+        <tr><td>确定性</td><td>确定性可修的 I/O bug,改前改后可复现对照</td><td>RL 收敛与否、能否定位静默截断这类系统根因,都不确定</td></tr>
+        <tr><td>根因定位</td><td>静默截断这种系统性坑,代码层一眼可见、可证伪</td><td>RL 是黑箱优化,改不动数据通路,无法定位"料没给齐"</td></tr>
+        <tr><td>对 RL 的影响</td><td>先清掉"能不能算"伪缺口,RL 才好瞄准真靶子(可靠性)</td><td>真伪缺口混在一起,RL 目标被污染,靶子打偏</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>直接上 RL 并非没有道理——如果断崖真是均匀分布的能力短板(每桶都差不多低),那确实没有便宜的工具补丁可打,强化学习反而是正路,它擅长在反复试错中把"多步把活干稳"这种难以用规则写死的能力磨出来。替代方案的合理内核在于:<strong>有些能力缺口确实只有训练才能补</strong>。我们之所以仍先修工具,不是否定 RL,而是诊断结果明确告诉我们:这次的断崖是单格孤立塌方、改一行就满分,是个确定性工具 bug,不是能力缺口。把这个伪缺口先清掉,RL 之后才不会把宝贵算力浪费在填坑上——所以正确顺序是"先修工具把『能不能算』解决,再让 RL 瞄准『能不能稳』",而非二选一。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body">
+    <figure class="diagram">
+      <svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg" role="img">
+        <defs>
+          <marker id="rlq1-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+            <path d="M0,0 L8,3 L0,6 Z" fill="#a8761f"/>
+          </marker>
+        </defs>
+        <text x="450" y="28" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="bold" fill="#2f4d8a">「难度 × 指标」通过率热力图:断崖是单格孤立塌方</text>
+
+        <!-- 左图标题:修复前 -->
+        <text x="225" y="58" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#85806f">修复前(静默截断 260 行还在)</text>
+
+        <!-- 左图:纵轴标签 -->
+        <text x="58" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">3 年窗口</text>
+        <text x="58" y="170" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">1 年窗口</text>
+
+        <!-- 左图 1年窗口行:四个绿格 -->
+        <rect x="80" y="148" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="114" y="172" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">89%</text>
+        <rect x="152" y="148" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="186" y="172" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">93%</text>
+        <rect x="224" y="148" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="258" y="172" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">87%</text>
+        <rect x="296" y="148" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="330" y="172" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">70%</text>
+
+        <!-- 左图 3年窗口行:只有 CAGR 那格红,其余无题(灰) -->
+        <rect x="80" y="98" width="68" height="42" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="114" y="122" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">—</text>
+        <rect x="152" y="98" width="68" height="42" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="186" y="122" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">—</text>
+        <rect x="224" y="98" width="68" height="42" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="258" y="122" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">—</text>
+        <rect x="296" y="98" width="68" height="42" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="2.5"/>
+        <text x="330" y="118" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#bf3f26">13%</text>
+        <text x="330" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#bf3f26">CAGR</text>
+
+        <!-- 左图 横轴指标标签 -->
+        <text x="114" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">涨幅</text>
+        <text x="186" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">波动</text>
+        <text x="258" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">回撤</text>
+        <text x="330" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">CAGR</text>
+
+        <!-- 左图诊断标注 -->
+        <text x="225" y="240" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">单格孤立的红 = 不是「越难越差」的能力斜坡</text>
+
+        <!-- 中间箭头 + 判决性实验标注 -->
+        <line x1="392" y1="118" x2="500" y2="118" stroke="#a8761f" stroke-width="2.5" marker-end="url(#rlq1-arrow)"/>
+        <rect x="396" y="58" width="108" height="44" rx="8" fill="#f0ede4" stroke="#a8761f"/>
+        <text x="450" y="76" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="bold" fill="#a8761f">只改取数一行</text>
+        <text x="450" y="93" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#a8761f">删静默截断·别的不动</text>
+
+        <!-- 右图标题:修复后 -->
+        <text x="675" y="58" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#1f6e5e">修复后(长区间真取全量)</text>
+
+        <!-- 右图纵轴 -->
+        <text x="508" y="120" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">3 年窗口</text>
+        <text x="508" y="170" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">1 年窗口</text>
+
+        <!-- 右图 1年窗口行(不变,绿) -->
+        <rect x="530" y="148" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="564" y="172" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">89%</text>
+        <rect x="602" y="148" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="636" y="172" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">93%</text>
+        <rect x="674" y="148" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="708" y="172" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">87%</text>
+        <rect x="746" y="148" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="780" y="172" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">70%</text>
+
+        <!-- 右图 3年窗口行:CAGR 那格变满绿 100% -->
+        <rect x="530" y="98" width="68" height="42" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="564" y="122" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">—</text>
+        <rect x="602" y="98" width="68" height="42" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="636" y="122" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">—</text>
+        <rect x="674" y="98" width="68" height="42" rx="8" fill="#f0ede4" stroke="#85806f"/>
+        <text x="708" y="122" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">—</text>
+        <rect x="746" y="98" width="68" height="42" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="2.5"/>
+        <text x="780" y="118" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#1f6e5e">100%</text>
+        <text x="780" y="132" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9" fill="#1f6e5e">CAGR</text>
+
+        <!-- 右图横轴 -->
+        <text x="564" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">涨幅</text>
+        <text x="636" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">波动</text>
+        <text x="708" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">回撤</text>
+        <text x="780" y="206" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">CAGR</text>
+
+        <!-- 右图判决标注 -->
+        <text x="675" y="240" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">同一格 13% → 100%,全题集 0 个「算不出」</text>
+
+        <!-- 底部判决推理框 -->
+        <rect x="80" y="276" width="740" height="120" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="100" y="302" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="bold" fill="#2f4d8a">判决逻辑:为什么这证明是工具问题、不是能力问题</text>
+        <text x="100" y="328" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#2f4d8a">① 形状:断崖是单格孤立塌方,不是「越难越差」的斜坡 —— 能力不会单挑长窗口那一格崩。</text>
+        <text x="100" y="352" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#2f4d8a">② 掰假设:「算不算得来」 vs 「取不取得齐」 —— 摸代码定位到取数工具静默丢弃早年数据。</text>
+        <text x="100" y="376" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">③ 判决:只改一行 I/O,整桶 13%→100% —— 改 I/O 改不动模型权重,能力问题绝不可能被这样治好。</text>
+
+        <!-- 图例 -->
+        <rect x="80" y="418" width="16" height="14" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="102" y="430" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">绿=通过(命中)</text>
+        <rect x="218" y="418" width="16" height="14" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+        <text x="240" y="430" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">红=断崖塌方</text>
+        <rect x="350" y="418" width="16" height="14" rx="3" fill="#f0ede4" stroke="#85806f"/>
+        <text x="372" y="430" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">灰=该窗口无此指标题</text>
+        <line x1="540" y1="425" x2="568" y2="425" stroke="#a8761f" stroke-width="2.5" marker-end="url(#rlq1-arrow)"/>
+        <text x="576" y="430" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">判决性实验:只改一行,别的不动</text>
+      </svg>
+      <figcaption>图 10-1 · 怎么看:左右两张同结构热力图,只有 CAGR/3 年那一格在变。左图它孤零零地红(13%)、四周全绿,说明断崖不是均匀的能力短板而是单格塌方;只删取数工具一行静默截断,右图同一格变满绿(100%)。一行 I/O 改动能让整桶满分,正是"工具问题、非能力问题"的判决性视觉证据。</figcaption>
+    </figure>
+  </div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>别看总分,要分桶。</strong>按"难度 × 指标"切格跑多次采样通过率,断崖会自己暴露;单格孤立塌方和均匀短板形状不同、病因不同。</li>
+      <li><strong>把"算不算得来"和"取不取得齐"掰成两个假设。</strong>这是归因的枢纽——前者是能力问题该上 RL,后者是工具问题改代码即可。</li>
+      <li><strong>用判决性实验下结论。</strong>只删取数工具一行静默截断、别的不动,那一桶 13% → 100% 且全题集 0 个"算不出";改一行 I/O 不可能给模型涨能力,所以这是工具问题的铁证。</li>
+      <li><strong>先修工具是低成本高确定性杠杆。</strong>一行代码 vs 一轮训练;先把"能不能算"这个伪缺口清掉,RL 才不会把算力浪费在工具坑制造的假缺口上。</li>
+      <li><strong>诊断纪律:</strong>某桶突然整桶崩,先用当前数据重算标准答案比对漂移,再怀疑代码——曾误把提升归因于一句提示文案,摸代码发现那条路从未触发,真因是那行静默上限。</li>
+    </ul>
+    <p class="one-liner">一句话速记:断崖是"取不齐"不是"算不来"——分桶让它孤立现形,改一行 I/O 就整桶满分,这是工具 bug 的判决性证据,该先修工具再谈 RL。</p>
+    <p class="src-note">参考:<code>docs/research/2026-06-17-pre-rl-tooling-baseline.md</code>、<code>docs/superpowers/specs/2026-06-17-longwindow-data-compact-fetch-design.md</code>、<code>backend/app/mcp_server/tools/get_daily.py</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="rl-q2">
+  <div class="q-header"><span class="q-num">Q2</span><h3 class="q-title">RL 前的基线:某个指标桶从 13% 拉到 100%,你是怎么定位到真凶(取数工具的静默截断)的?为什么"agent 预防性分段取数"不是坏习惯而是被逼的?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">静默截断</span><span class="tag">根因定位</span><span class="tag">上下文预算</span><span class="tag">取数工具</span><span class="tag">分段取数</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这是一道根因定位题,披着"调参提分"的皮。我们用反向出题给计算型金融场景打分(为什么这条路能把"工具问题"和"模型能力问题"分开,见本类第 1 题),发现专门考"近三年走势"的那一桶——年化收益率(CAGR,一笔投资每年平均涨多少)——分数低得离谱,只有 13%。面试官真正想看的是:你面对一个低分桶,是<strong>顺手加点预算把数字刷上去</strong>,还是<strong>钻进去找到那一行写死的代码</strong>;尤其想看你能不能把一个看起来像"agent 笨"的现象(它老爱把数据拆成好几段去取),翻译成"工具有缺陷,agent 是被逼的"。这考的是根因定位的纪律,不是调参手感。</p>
+    <ul>
+      <li><strong>追问:</strong>你怎么确定瓶颈在"取不到数据",而不是"算不来 CAGR"?分桶分数能告诉你什么?</li>
+      <li><strong>追问:</strong>"静默截断"为什么比报错的截断更危险?它埋了几种坑?</li>
+      <li><strong>追问:</strong>你上一轮把这个桶从 13% 提到 40%,归因对了吗?后来怎么发现归因错了?</li>
+      <li><strong>追问:</strong>修完之后你把步数预算从 26 退回 18,分数还是满的——这一步是为了证明什么?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先说现象。所有低分都集中在一类题上:要看<strong>近三年</strong>数据才能算的指标(CAGR 全是三年窗口)。而只看一年的指标(波动率、回撤、涨幅)分数都在七成以上。这个分布本身就是一条线索:断崖<strong>不在"算不算得来"</strong>(agent 拿到数据就算得对),而在<strong>"取不取得齐三年的数据"</strong>。换句话说,瓶颈在<strong>取数</strong>,不在<strong>计算</strong>。</p>
+
+    <h5>真凶:取数工具里写死的一行 260 上限</h5>
+    <p>顺着"取数"摸进取数工具 <code>get_daily</code>(给一只股票一段日期,返回每天的开高低收),发现它里头写死了一行:<code>_MAX_ROWS = 260</code>——单次最多返回 260 行,大约一年的交易日。超出的部分用 <code>df.tail(260)</code> 只留最近的,<strong>更早的悄悄丢掉,不报错</strong>。后果是:不管你请求几年,它最多只回最近一年。这就是"静默截断"——它不是拒绝你、也不告诉你被砍了,而是默默给你一份缺斤少两的数据,封皮上还写着"已成交"。</p>
+
+    <h5>这一行同时埋了三个坑</h5>
+    <p>第一,<strong>静默正确性坑</strong>:粗心的 agent 没察觉"我问了三年它只给了一年",直接拿一年的数据当三年算 CAGR,<strong>错且不自知</strong>——这是最阴的,因为它不崩、不报错,就是悄悄算错。第二,<strong>逼出分段</strong>:稍微细心的 agent 发现拿回来的不够,只能换策略——既然单次拿不到三年,那就<strong>分多次按子区间取</strong>:第一年一段、第二年一段、第三年一段。第三,<strong>烧光预算</strong>:每段把整整一年(约 260 行、约 1.5 万字)倒进对话上下文,三段下来上下文堆满、循环步数烧光——<strong>还没凑齐数据,就先撞上终止闸,死在最后那一步计算之前</strong>。题目本该走到 <code>run_python</code> 把数据灌进沙箱算 CAGR,可它根本没机会跑到那一步。</p>
+
+    <h5>"预防性分段不是坏习惯,是被逼的"</h5>
+    <p>这里要替 agent 正名。模型分段取数,看着像它"养成了个坏习惯"——明明能一次取完偏要拆成三次。但真相是:<strong>单次物理上就拿不到三年</strong>,分段是它在工具约束下唯一能凑齐数据的办法。把它当坏习惯去改提示词("别分段、一次取完")是<strong>治标</strong>:你让它别分段,它一次取回来的还是只有一年,数据照样不全。根因是那一行 260 上限。这一点很重要,因为它决定了你该改提示词还是改工具。</p>
+
+    <h5>曾经的弯路:把功劳记错给了文案改写</h5>
+    <p>诚实地说,我上一轮归因错过。当时把这个桶从 13% 提到 40%,记功记在"改了截断的提示文案、引导 agent 去取缓存"上。后来摸代码才发现:<code>get_daily</code> 自己先把数据 cap 到 260 行(约 1.5 万字),而那条文案是绑在"<strong>超大结果</strong>截断阈值 24000 字"上触发的——一年的数据才 1.5 万字,<strong>永远够不着 24000 这条线</strong>,所以那条文案对这条路<strong>从未触发</strong>。40% 那次提升几乎全部来自另一个动作:把步数预算从 18 调到 26(多给几个回合,容下那些被逼出来的分段拼装)。那也是治标——多给回合只是让它有空间把分段勉强拼起来,既没堵住静默算错,分段本身还在继续烧上下文。这段弯路本身就是答案的一部分:<strong>分桶分数会骗你,只有摸到那一行代码才算定位到真凶</strong>。</p>
+
+    <h5>真正的修法:改取数契约,让分段"无利可图"</h5>
+    <p>落地的修法(函数名都是真的)是改取数契约本身:① 删掉 260 静默上限,长区间<strong>真取全量</strong>存进缓存;② 数据太大时,进对话的不再是几万字原始数组,而是一张紧凑信息卡 <code>_summary</code>(首末收盘、区间天数)外加一个<strong>取货单号 <code>ref</code></strong>;③ agent 凭这个单号,经代码解释器里的 <code>_resolve_refs</code> 把<strong>完整序列一次性</strong>灌进沙箱算全量——单号校验必须以 <code>{user_id}::</code> 开头,防止越权取别人的缓存。这样一来分段彻底无利可图:你就算分十段去问,每段回的也只是一张信息卡 + 单号,<strong>拿不到更多原始数据</strong>,反而是凭单号一步取全量最划算。该桶 <strong>13% → 100%</strong>;而且步数预算退回 18,仍然 0 空答——证明这回的提分不靠加预算。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>用伪代码对比修复前后,重点看那一行 260 上限怎么连锁出整条死亡链路:</p>
+    <pre><code class="language-python"># ===== 修复前:取数工具里写死的一行,静默砍三年为一年 =====
+_MAX_ROWS = 260                      # 约一年交易日
+
+def get_daily(ts_code, start, end):
+    df = tushare.daily(ts_code, start, end)   # 真去取了三年
+    if len(df) &gt; _MAX_ROWS:
+        df = df.tail(_MAX_ROWS)       # 悄悄只留最近一年,不报错、不提示
+    return to_columns(df)            # 封皮写着"成交",其实缺斤少两
+
+# agent 侧:发现拿回的不够三年,只能被逼分段(不是它笨,是工具拿不到)
+seg1 = get_daily(code, "2023", "2024")   # 第一年 ~1.5万字 倒进上下文
+seg2 = get_daily(code, "2024", "2025")   # 第二年 ~1.5万字 又涨一截
+seg3 = get_daily(code, "2025", "2026")   # 第三年 …上下文触顶、步数烧光
+run_python(merge(seg1, seg2, seg3))      # ← 撞终止闸,根本走不到这一步
+
+# ===== 修复后:删上限,真取全量进缓存;太大只回"信息卡 + 取货单号" =====
+def get_daily(ts_code, start, end):
+    df = tushare.daily(ts_code, start, end)   # 不再 cap,三年全量
+    out = {"summary": _summary(df), "dates": ..., "close": ...}
+    return out                       # 完整版随后被缓存按 (user_id, 工具, 参数) 整份存下
+
+# 进上下文那份若超大(三年 ~4.2万字 &gt; 24000 阈值)→ 自动换成信息卡 + ref
+#   {"summary": {首末收盘, 区间天数}, "ref": "u123::get_daily::..."}
+
+# agent 一步凭单号取全量算完(分段无利可图:分十次也只拿到 ref)
+run_python(code="cagr(close)", data_refs={"px": "u123::get_daily::..."})
+#   服务端 _resolve_refs 校验 ref 以 {user_id}:: 开头防越权 → 取回完整序列灌进沙箱
+</code></pre>
+    <p><strong>推演:</strong>修复前,一道三年 CAGR 题:第 1 步取第一年(约 1.5 万字),第 2 步第二年,第 3 步第三年——三段约 4.2 万字把上下文堆满、把 18 步的预算烧光,在该跑 <code>run_python</code> 之前就撞了终止闸,记为空答;就算侥幸跑到,粗心 agent 还可能拿截下的一年当三年算,错且不自知。修复后,工具一次回三年全量进缓存,进对话的只是一张信息卡 + 一个单号,agent <strong>一步</strong> <code>run_python</code> 凭单号把整三年灌进沙箱算 CAGR。这个桶 13% → 100%,且步数退回 18 仍 0 空答。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择(修掉静默截断 · 改取数契约)</th><th class="th-vllm">替代方案(加大步数预算刷分 vs 修掉静默截断)</th></tr></thead>
+      <tbody>
+        <tr><td>该桶分数</td><td>CAGR 13% → <strong>100%</strong>,0 空答</td><td>步数 18→26 只到 <strong>40%</strong>,分段仍在烧回合</td></tr>
+        <tr><td>静默算错(拿一年当三年)</td><td>根上堵住:工具回的就是全量,不存在"缺斤少两还不自知"</td><td>没堵:截断照旧存在,粗心 agent 照样算错</td></tr>
+        <tr><td>上下文爆炸</td><td>进对话只剩信息卡 + 单号,原始几万字不进上下文</td><td>没解:每段整年数据仍倒进上下文,只是多给回合扛着</td></tr>
+        <tr><td>被逼分段</td><td>分段无利可图(分十次也只拿到 ref),自然消停</td><td>没解:分段是工具逼的,加预算只是让它有空间拼</td></tr>
+        <tr><td>治标 vs 治本</td><td>一刀同堵三个连锁后果</td><td>只缓解"回合不够"一个,且归因易记错(我踩过)</td></tr>
+        <tr><td>爆炸半径</td><td>这个取数工具只有 chat 在用,改契约影响面小</td><td>加预算是全局旋钮,所有题都多烧 token / 算力</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>加大步数预算<strong>确实有用、也确实最省事</strong>——它不动一行业务代码,扭一个旋钮就把这桶从 13% 抬到了 40%,作为"先止血看看天花板在哪"的探针完全合理,这不是稻草人。我没选它当终局,是因为它<strong>只缓解了链条上的一环</strong>(回合不够),却把另外两环——静默算错、上下文爆炸——原封不动地留着;而且它会误导归因:我上一轮就差点把功劳全记给一条从未触发的文案,直到摸进代码才发现真凶是那一行 260 上限。改取数契约更重,但它<strong>一刀同时堵掉了被逼分段、上下文爆炸、静默算错三个连锁后果</strong>,且因为这个取数工具只有 chat 在用、爆炸半径小,改起来反而干净。一个佐证收口:修完之后把步数预算退回 18,分数还是满的、0 空答——这恰恰证明<strong>这回的提分不靠加预算</strong>,真凶被拔掉了。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+<svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+  <defs>
+    <marker id="ah-rlq2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2f4d8a"/>
+    </marker>
+    <marker id="ah-rlq2-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#bf3f26"/>
+    </marker>
+    <marker id="ah-rlq2-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f6e5e"/>
+    </marker>
+    <marker id="ah-rlq2-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#85806f"/>
+    </marker>
+  </defs>
+
+  <!-- ===== 上泳道:修复前 死亡链路 ===== -->
+  <text x="40" y="38" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#bf3f26">修复前 · 一道三年 CAGR 题的死亡链路</text>
+
+  <!-- 步骤格子 -->
+  <rect x="40" y="56" width="150" height="58" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+  <text x="115" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#bf3f26">第1步 取第一年</text>
+  <text x="115" y="99" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#bf3f26">~1.5万字灌入上下文</text>
+
+  <rect x="230" y="56" width="150" height="58" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+  <text x="305" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#bf3f26">第2步 取第二年</text>
+  <text x="305" y="99" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#bf3f26">上下文又涨一截</text>
+
+  <rect x="420" y="56" width="150" height="58" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8"/>
+  <text x="495" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#bf3f26">第3步 取第三年</text>
+  <text x="495" y="99" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#bf3f26">触顶 · 步数预算耗尽</text>
+
+  <!-- 撞终止闸 -->
+  <rect x="610" y="56" width="150" height="58" rx="8" fill="#bf3f26" stroke="#bf3f26" stroke-width="1.5"/>
+  <text x="685" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#ffffff">✖ 撞终止闸</text>
+  <text x="685" y="99" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#ffffff">空答 · 算之前就死</text>
+
+  <!-- run_python 灰格 从未执行 -->
+  <rect x="790" y="56" width="86" height="58" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.3" stroke-dasharray="5 3"/>
+  <text x="833" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#85806f">run_python</text>
+  <text x="833" y="99" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#85806f">(灰 · 从未执行)</text>
+
+  <line x1="190" y1="85" x2="228" y2="85" stroke="#bf3f26" stroke-width="1.5" marker-end="url(#ah-rlq2-red)"/>
+  <line x1="380" y1="85" x2="418" y2="85" stroke="#bf3f26" stroke-width="1.5" marker-end="url(#ah-rlq2-red)"/>
+  <line x1="570" y1="85" x2="608" y2="85" stroke="#bf3f26" stroke-width="1.8" marker-end="url(#ah-rlq2-red)"/>
+  <line x1="760" y1="85" x2="788" y2="85" stroke="#85806f" stroke-width="1.3" stroke-dasharray="5 3" marker-end="url(#ah-rlq2-gray)"/>
+
+  <!-- 上下文占用条:随步骤变长 -->
+  <text x="40" y="148" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">上下文占用条 →</text>
+  <rect x="150" y="138" width="726" height="16" rx="4" fill="#f0ede4" stroke="#85806f" stroke-width="0.8"/>
+  <rect x="150" y="138" width="200" height="16" rx="4" fill="#a8761f" opacity="0.5"/>
+  <rect x="350" y="138" width="220" height="16" fill="#bf3f26" opacity="0.55"/>
+  <rect x="570" y="138" width="306" height="16" rx="4" fill="#bf3f26" opacity="0.85"/>
+  <text x="868" y="150" text-anchor="end" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#ffffff" font-weight="700">满</text>
+
+  <!-- 真凶标注 -->
+  <text x="40" y="186" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#bf3f26">真凶:取数工具 _MAX_ROWS = 260(约一年)→ 问三年只回最近一年,余者静默 tail 丢弃 → 逼出分段</text>
+
+  <!-- 分隔线 -->
+  <line x1="40" y1="208" x2="876" y2="208" stroke="#85806f" stroke-width="1" stroke-dasharray="3 3"/>
+
+  <!-- ===== 下泳道:修复后 ===== -->
+  <text x="40" y="240" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#1f6e5e">修复后 · 删 260 上限,只回信息卡 + 取货单号</text>
+
+  <!-- 取数工具 -->
+  <rect x="40" y="262" width="210" height="78" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+  <text x="145" y="286" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#1f6e5e">get_daily(三年)真取全量</text>
+  <text x="145" y="306" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">完整序列整份进缓存</text>
+  <text x="145" y="324" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">按 (user_id, 工具, 参数) 存</text>
+
+  <!-- 信息卡 + ref 进上下文 -->
+  <rect x="300" y="262" width="210" height="78" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+  <text x="405" y="286" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#2f4d8a">进上下文 = 信息卡 + 单号</text>
+  <text x="405" y="306" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#2f4d8a">_summary:首末收盘 / 天数</text>
+  <text x="405" y="324" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#a8761f">ref = {user_id}:: 开头(防越权)</text>
+
+  <!-- 一步 run_python 凭单号取全量 -->
+  <rect x="560" y="262" width="210" height="78" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.8"/>
+  <text x="665" y="286" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#1f6e5e">一步 run_python 凭单号</text>
+  <text x="665" y="306" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">_resolve_refs 校验+取回全量</text>
+  <text x="665" y="324" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">完整三年灌进沙箱算 CAGR</text>
+
+  <!-- 命中 -->
+  <rect x="800" y="272" width="76" height="58" rx="8" fill="#1f6e5e" stroke="#1f6e5e" stroke-width="1.5"/>
+  <text x="838" y="298" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#ffffff">✔ 命中</text>
+  <text x="838" y="316" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#ffffff">0 空答</text>
+
+  <line x1="250" y1="301" x2="298" y2="301" stroke="#1f6e5e" stroke-width="1.5" marker-end="url(#ah-rlq2-green)"/>
+  <line x1="510" y1="301" x2="558" y2="301" stroke="#1f6e5e" stroke-width="1.5" marker-end="url(#ah-rlq2-green)"/>
+  <line x1="770" y1="301" x2="798" y2="301" stroke="#1f6e5e" stroke-width="1.8" marker-end="url(#ah-rlq2-green)"/>
+
+  <!-- 修复后 上下文条:几乎不占 -->
+  <text x="40" y="372" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">上下文占用条 →</text>
+  <rect x="150" y="362" width="726" height="16" rx="4" fill="#f0ede4" stroke="#85806f" stroke-width="0.8"/>
+  <rect x="150" y="362" width="70" height="16" rx="4" fill="#1f6e5e" opacity="0.6"/>
+  <text x="230" y="374" font-family="Noto Sans SC, sans-serif" font-size="9.5" fill="#1f6e5e">只剩信息卡 + 单号,几万字原始数据不进上下文</text>
+
+  <!-- 分段无利可图 标注 -->
+  <text x="40" y="406" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">分段无利可图:分十次也只拿到 ref,凭单号一步取全量最划算 → 被逼分段 / 上下文爆炸 / 静默算错 三坑同堵</text>
+
+  <!-- 结果对照 -->
+  <rect x="40" y="426" width="400" height="38" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.2"/>
+  <text x="240" y="450" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#bf3f26">弯路(治标):步数 18→26 → 仅 40%(分段仍烧)</text>
+  <rect x="460" y="426" width="416" height="38" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.4"/>
+  <text x="668" y="450" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#1f6e5e">修真凶:13% → 100%,步数退回 18 仍 0 空答</text>
+
+  <!-- 图例 -->
+  <line x1="40" y1="500" x2="76" y2="500" stroke="#bf3f26" stroke-width="1.8"/>
+  <text x="82" y="504" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">朱砂 = 修复前死亡链路 / 治标弯路</text>
+  <line x1="320" y1="500" x2="356" y2="500" stroke="#1f6e5e" stroke-width="1.8"/>
+  <text x="362" y="504" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">松绿 = 修复后命中路径</text>
+  <rect x="560" y="492" width="16" height="16" rx="3" fill="#a8761f" opacity="0.85"/>
+  <text x="582" y="504" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">ochre = 取货单号 ref / 防越权命名空间</text>
+</svg>
+    <figcaption>图 10-2 · 怎么看:上泳道是修复前——为算一道三年 CAGR,agent 被逼第 1/2/3 步逐年分段取数,上下文条一截截涨满、步数预算烧光,第 3 步就撞终止闸记空答,本该在末尾的 run_python(灰格虚线)从未执行。下泳道是修复后——取数工具一次取三年全量进缓存,进对话的只剩一张信息卡 + 一个取货单号(ochre),agent 一步 run_python 凭单号把整三年灌进沙箱算完即命中;上下文条几乎不占。两条泳道长度对比一目了然:不是 agent 笨,是那一行 260 上限把三年掐成一年逼出了分段。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>分桶分布先把"取数 vs 计算"分开:</strong>低分全压在"近三年窗口"题、一年窗口题都正常,说明断崖在"取不齐三年数据",不在"算不来 CAGR"——顺着取数摸,才摸到那一行 260 上限。</li>
+      <li><strong>静默截断一行埋三坑:</strong>不报错地把三年砍成一年——① 粗心 agent 拿一年当三年算,错且不自知;② 细心 agent 被逼分段;③ 每段整年数据倒进上下文,烧光步数,算之前就撞终止闸。</li>
+      <li><strong>"预防性分段"是被逼的不是坏习惯:</strong>单次物理上拿不到三年,分段是工具约束下唯一能凑齐的办法;改提示词让它"别分段"是治标,根因是那一行上限。</li>
+      <li><strong>归因要摸到代码才算数:</strong>上一轮把 13%→40% 记功给一条从未触发的文案,实则全靠步数 18→26(治标);唯有进代码看到 get_daily 先 cap 到 260,才定位到真凶。</li>
+      <li><strong>修契约一刀堵三坑,加预算只缓解一环:</strong>删上限取全量进缓存、只回信息卡 + 取货单号(校验 {user_id}:: 防越权),分段无利可图;该桶 13%→100%,且步数退回 18 仍 0 空答,证明提分不靠加预算。</li>
+    </ul>
+    <p class="one-liner">一句话速记:低分桶集中在长窗口题 → 摸到取数工具写死的 260 静默上限 → 它逼出分段、烧光预算、还埋静默算错;删上限取全量进缓存、只回信息卡 + 取货单号,一刀同堵三坑,13%→100% 且不靠加预算。</p>
+    <p class="src-note">参考:<code>backend/app/mcp_server/tools/get_daily.py</code>、<code>backend/app/chatloop/code_interpreter_tool.py</code>、<code>backend/app/chatloop/loop.py</code>、<code>docs/research/2026-06-17-pre-rl-tooling-baseline.md</code>、<code>docs/superpowers/specs/2026-06-17-longwindow-data-compact-fetch-design.md</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="rl-q3">
+  <div class="q-header"><span class="q-num">Q3</span><h3 class="q-title">采集 SFT 训练料:为什么轨迹要隔离标准答案、关掉降级、只收自然终止的?这三个坑各是什么?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">SFT轨迹采集</span><span class="tag">答案泄漏隔离</span><span class="tag">降级污染</span><span class="tag">自然终止</span><span class="tag">热启动种子</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题表面问"怎么收数据",实际在探:你有没有真正理解监督热启动(在强化学习之前,先用一批高质量样例把模型"喂"到会用工具的水平)<strong>到底要让模型学什么</strong>。监督学习有个朴素而残酷的特性——你喂进去什么,它就照着学什么,包括你不想让它学的东西。所以会区分两种候选人:一种把"收数据"当成"把对话记下来存盘",另一种知道每一条原始轨迹里都埋着会把模型带歪的污染源,采集本身就是一道清洗工序。</p>
+    <ul>
+      <li><strong>追问:</strong>如果标准答案跟着轨迹一起喂给模型,模型会学到什么"看起来对、实则有害"的行为?为什么这比单纯过拟合更隐蔽?</li>
+      <li><strong>追问:</strong>"关掉降级"这一步——降级机制本来是为了什么存在的?为什么在线上是优化、在采集时却是污染源?这说明同一段逻辑的"对错"是相对目标而言的。</li>
+      <li><strong>追问:</strong>为什么不直接拿标准答案 + 人工编一段工具调用,造出"理想轨迹"来喂?为什么非得让真模型真跑一遍?</li>
+      <li><strong>追问:</strong>种子轨迹该用强模型还是弱模型自己生成?这个选择对后续强化学习的天花板意味着什么?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把场景说清楚:我们有一个评测系统(harness),它会让模型在多轮对话里反复调金融数据工具(取行情、查交易日历、跑 Python 算指标),最后给出一个数值或排序答案。模型每一步的发言、每一次工具调用、工具返回的结果,都自然地堆在一条标准的多轮对话记录(messages)里。这条记录天生就是合法的训练料结构——不用我们另造格式。问题在于:<strong>直接把它存下来当训练料,会带进三类污染</strong>。</p>
+
+    <h5>坑一:降级污染——上下文组装会把老工具输出"就地缩水"</h5>
+    <p>线上有个省钱机制:对话越滚越长,早几轮调工具拿到的大段结果(比如一年的日线行情,上万字)会被<strong>就地替换成一个占位符</strong>,免得每轮都把它重新塞进上下文烧 token。评测里这个降级阈值默认是 <strong>1320 字</strong>,一年日线必然超标、必然被换掉。这在线上是优化;但如果我们照着这份"被缩过水"的对话记录去存训练料,模型学到的就是一条<strong>工具结果残缺</strong>的脏样本——它会看到"调了工具,然后结果不见了,凭空就接着算"。这是教模型幻觉。所以采集时要把这个降级<strong>关掉</strong>,让大段工具输出原样落盘。</p>
+
+    <h5>坑二:拐杖污染——撞步数闸后注入的那句"系统提示"不是模型行为</h5>
+    <p>模型如果一直绕、撞到步数上限,评测系统会<strong>替它注入一句话</strong>,大意是"(系统:已达执行上限,请基于已有信息直接给出最终回答)",逼它收尾。这句话是 harness 的<strong>拐杖</strong>,不是模型自己的自然发言。如果它进了监督训练料,模型就会学到"撞墙时等系统来推我一把"——这是把急救措施当成正常套路在教。所以只收<strong>自然终止</strong>(模型自己判断完事了、主动给答案)的轨迹,撞闸退出的整条丢掉;导出时再用一道白名单正则兜底,把任何带系统注入文案的样本扫掉。</p>
+
+    <h5>坑三:轨迹只信对话记录,不信工具账本</h5>
+    <p>系统里另有一份"工具调用账本(ledger)",但它为了省空间,只存了参数的<strong>哈希值</strong>——不可逆。你想知道这条轨迹真正取了哪只股票、哪个时间窗口,从账本里捞不回来,只能去<strong>对话记录里解析工具调用的参数原文</strong>。这条坑提醒的是:轨迹的唯一真相源是 messages,别图省事去读那份给监控用的账本。</p>
+
+    <h5>为什么标准答案必须物理隔离</h5>
+    <p>原来的评测脚本图方便,把标准答案(gold)写进了<strong>每一行</strong>记录里。这对算分没问题,但对采训练料是致命泄漏:监督学习会一视同仁地学你喂的所有字段,标准答案在场,模型学到的就成了<strong>"怎么偷看答案",而不是"怎么一步步把题解出来"</strong>。落地做法是<strong>产物物理分离</strong>——轨迹文件(trajectories_raw.jsonl)里只有干净轨迹、绝无答案;答案和判分结果另存一个文件(judgements.jsonl)。两份文件物理隔开,训练侧只能拿到前者。</p>
+
+    <p>清完污染还不够,得过两道筛选闸才算"可用种子":<strong>第一道判对</strong>(对同一道题反复采样、收紧容差复判,防止蒙对的样本混进来);<strong>第二道判过程干净</strong>(自然终止 ∧ 所有工具调用都成功 ∧ 没有尾部失败/熔断/原地打转 ∧ 步数不超过这道题该有的理想步数)。过了就给一个干净度分数(cleanliness_score),同一道题如果有多条干净轨迹,只留分最高的那一条。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面这段伪代码把"采集即清洗"的流程走一遍。注意三个坑各对应一行很轻的处理——不去改模型循环本身,只在采集入口拧几个旋钮。</p>
+    <pre><code class="language-python"># 采集模式:让最强模型真跑一遍这道题,边跑边清洗
+def collect_one(case, strong_model):
+    # 【坑一·关降级】给依赖传一个大到不可能触发的阈值,
+    #   让大段工具输出原样留在对话里,不被缩成占位符
+    deps = build_deps(downgrade_char_threshold=10**9)
+
+    # 真模型 + 真工具 + 真循环跑一遍,拿到完整最终状态
+    final = run_loop(case, strong_model, deps)
+
+    # 【坑二·只收自然终止】撞步数闸退出的整条丢掉
+    if final.halt_reason != "natural":
+        return None
+
+    # 第一道闸:判对(收紧容差,防蒙对)
+    if not judge_strict(final.answer, gold=load_gold(case)):
+        return None
+
+    # 第二道闸:过程干净打分(工具全成功 / 无尾部失败熔断打转 / 步数达标)
+    score = cleanliness(final)            # 越高越干净
+    if score is None:
+        return None
+
+    # 【坑三·只信对话记录】取数区间/股票代码从 messages 的
+    #   工具调用参数里解析,绝不读那份只存哈希的账本(ledger)
+    meta = parse_args_from_messages(final.messages)
+    meta.update(source_model=strong_model.name,
+                n_steps=final.n_steps,
+                cleanliness_score=score)   # meta 里【没有】gold / passed
+
+    # 【答案隔离】轨迹和答案落到两个物理隔开的文件
+    return Sample(messages=final.messages, meta=meta), \
+           Judgement(case_id=case.id, gold=load_gold(case), passed=True)
+
+# 出口:同一道题多条干净轨迹,只留干净度最高的一条
+best = max(samples_of_case, key=lambda s: s.meta["cleanliness_score"])
+</code></pre>
+    <p><strong>推演:</strong>对每道题采样 <strong>k=5</strong> 次、每题最多保留 2 条,跑完整套题预计产出约 <strong>200~280 条</strong>干净样本。导出的 meta 只带 source_model / n_steps / cleanliness_score,<strong>绝不带 gold/passed</strong>。降级阈值线上默认 1320 字、采集时拧到 10**9,这一行之差就是"工具结果完整"和"残缺脏样本"的分界。种子用<strong>当前能跑通本系统的最强模型</strong>生成,经模型切换模块的注册表挂上去——这正是那个模块第一个真正的用处:换更强的老师只需在注册表加一条配置。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择:完整干净轨迹</th><th class="th-vllm">替代方案:只落每题最后一次答案</th></tr></thead>
+      <tbody>
+        <tr><td>模型学到什么</td><td>从空白到答案的<strong>整条调工具解题示范</strong></td><td>只有最终答案,<strong>解题过程全丢</strong>,没有可学的示范</td></tr>
+        <tr><td>工程量</td><td>大:要趟三个坑(关降级 / 剔系统注入 / 只信对话记录)+ 两道筛选闸</td><td>极小:把最后一行答案存盘即可</td></tr>
+        <tr><td>答案泄漏</td><td>产物物理分离,轨迹文件里<strong>绝无标准答案</strong></td><td>答案本身就是数据,<strong>等于直接喂答案</strong></td></tr>
+        <tr><td>样本合法性</td><td>标准多轮对话结构<strong>天生合法</strong>,可直接喂监督训练</td><td>单条答案不是多轮交互,<strong>撑不起工具编排的学习</strong></td></tr>
+        <tr><td>用途</td><td>能当强化学习前的监督热启动<strong>地基</strong></td><td>顶多当一份答案表,无法热启动</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>替代方案不是没道理——它最省事,而且如果你的目标真就只是"留一份答案对照表",它完全够用,清洗那三个坑反而是浪费。它的真正短板只在我们的目标上才暴露:监督热启动要让模型学的是"<strong>怎么一步步调工具把题解出来</strong>"这个过程示范,只留最终答案恰好把这个过程整个丢掉了,等于没有任何可学的东西。我们明知道趟三个坑 + 两道闸工程量更大,仍然这么选,是因为换来的是结构天生合法的标准多轮训练料、并且隔离了答案泄漏——这是强化学习之前监督热启动的地基,省不得。另一处权衡是种子来源:宁可用最强模型当老师,也不用弱模型自蒸馏、更不凭空人工编(标准答案里没有工具序列、手编参数容易跟真实取数漂移),因为<strong>热启动的质量直接决定后续强化学习能爬到的天花板</strong>,源头不能将就。(基线怎么定靶子见本类第 2 题,工具修好后强化学习瞄准什么见本类第 4 题。)</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body">
+    <figure class="diagram">
+      <svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg" role="img">
+        <defs>
+          <marker id="rlq3-arrow" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#2f4d8a"/>
+          </marker>
+          <marker id="rlq3-arrow-red" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#bf3f26"/>
+          </marker>
+        </defs>
+
+        <text x="450" y="26" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="16" font-weight="700" fill="#2f4d8a">轨迹清洗流水线:原始多轮对话 → 三道闸 → 物理分流</text>
+
+        <!-- 入口 -->
+        <rect x="20" y="60" width="120" height="80" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+        <text x="80" y="92" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">原始对话</text>
+        <text x="80" y="110" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">messages</text>
+        <text x="80" y="128" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">(含污染)</text>
+        <line x1="140" y1="100" x2="178" y2="100" stroke="#2f4d8a" stroke-width="2" marker-end="url(#rlq3-arrow)"/>
+
+        <!-- 闸一 关降级 -->
+        <rect x="180" y="58" width="150" height="84" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="255" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">闸一 · 关降级</text>
+        <text x="255" y="103" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">阈值 1320 → 10⁹</text>
+        <text x="255" y="121" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">占位符 → 还原完整</text>
+        <text x="255" y="137" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">工具输出</text>
+        <line x1="330" y1="100" x2="368" y2="100" stroke="#2f4d8a" stroke-width="2" marker-end="url(#rlq3-arrow)"/>
+
+        <!-- 闸二 剔拐杖 -->
+        <rect x="370" y="58" width="160" height="84" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="450" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">闸二 · 剔拐杖</text>
+        <text x="450" y="103" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">✂ 剪掉「系统:已达上限」</text>
+        <text x="450" y="121" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">只放行</text>
+        <text x="450" y="137" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">halt = natural</text>
+        <line x1="530" y1="100" x2="568" y2="100" stroke="#2f4d8a" stroke-width="2" marker-end="url(#rlq3-arrow)"/>
+
+        <!-- 闸三 判对+干净打分 -->
+        <rect x="570" y="58" width="170" height="84" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+        <text x="655" y="82" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">闸三 · 判对+干净</text>
+        <text x="655" y="103" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">复判防蒙对 + 过程干净</text>
+        <text x="655" y="121" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#a8761f">给 cleanliness 分</text>
+        <text x="655" y="137" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#a8761f">同题留最高分</text>
+
+        <!-- 分流器 -->
+        <polygon points="780,100 815,80 850,100 815,120" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+        <text x="815" y="104" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#bf3f26">分流</text>
+        <line x1="740" y1="100" x2="778" y2="100" stroke="#2f4d8a" stroke-width="2" marker-end="url(#rlq3-arrow)"/>
+
+        <!-- 分流向下两条 -->
+        <line x1="815" y1="120" x2="815" y2="150" stroke="#1f6e5e" stroke-width="2"/>
+        <line x1="815" y1="150" x2="300" y2="150" stroke="#1f6e5e" stroke-width="2"/>
+        <line x1="300" y1="150" x2="300" y2="218" stroke="#1f6e5e" stroke-width="2" marker-end="url(#rlq3-arrow)"/>
+        <line x1="815" y1="150" x2="660" y2="150" stroke="#bf3f26" stroke-width="2"/>
+        <line x1="660" y1="150" x2="660" y2="218" stroke="#bf3f26" stroke-width="2" marker-end="url(#rlq3-arrow-red)"/>
+
+        <!-- 出口左:轨迹无 gold -->
+        <rect x="150" y="220" width="300" height="100" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="2"/>
+        <text x="300" y="248" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#1f6e5e">trajectories_raw.jsonl</text>
+        <text x="300" y="272" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1f6e5e">完整干净轨迹 · 标准多轮结构</text>
+        <text x="300" y="293" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1f6e5e">meta: source_model / n_steps / cleanliness</text>
+        <text x="300" y="312" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#1f6e5e">✔ 绝无 gold —— 训练侧吃这份</text>
+
+        <!-- 出口右:judgements 锁住 gold -->
+        <rect x="510" y="220" width="300" height="100" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="2"/>
+        <text x="660" y="248" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#bf3f26">🔒 judgements.jsonl</text>
+        <text x="660" y="272" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">gold / passed 关在这里</text>
+        <text x="660" y="293" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">只给离线判分用</text>
+        <text x="660" y="312" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#bf3f26">✘ 物理隔开,防答案泄漏</text>
+
+        <!-- 坑三旁注 -->
+        <rect x="150" y="350" width="660" height="50" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+        <text x="480" y="372" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#85806f">坑三 · 贯穿全程:取数区间/股票代码只从 messages 的工具调用参数解析</text>
+        <text x="480" y="391" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">那份「工具账本 ledger」只存参数哈希、不可逆,不能当轨迹真相源</text>
+
+        <!-- 图例 -->
+        <rect x="150" y="418" width="14" height="14" rx="3" fill="#e9eef8" stroke="#2f4d8a"/>
+        <text x="170" y="430" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">清洗闸</text>
+        <rect x="250" y="418" width="14" height="14" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+        <text x="270" y="430" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">放行/干净轨迹</text>
+        <rect x="390" y="418" width="14" height="14" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+        <text x="410" y="430" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">剔除/答案锁区</text>
+        <rect x="540" y="418" width="14" height="14" rx="3" fill="#f0ede4" stroke="#85806f"/>
+        <text x="560" y="430" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">次要/注意事项</text>
+      </svg>
+      <figcaption>图 10-3 · 怎么看:原始对话从左进,依次过「关降级 → 剔拐杖 → 判对+干净打分」三道闸;出口的分流器把数据物理劈成两份——绿色轨迹文件(无答案,训练侧吃这份)和红锁答案文件(gold 关在里头只给判分用)。坑三贯穿全程:抽真实参数只信对话记录,不信那份只存哈希的工具账本。</figcaption>
+    </figure>
+  </div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>监督学习"喂什么学什么",所以采集训练料本质是一道清洗工序,不是单纯存盘。</li>
+      <li>三个坑各对应一道轻处理:关降级(阈值 1320→10⁹,让工具输出原样落盘)、只收自然终止(撞闸丢掉 + 白名单正则剔系统注入)、抽真实参数只信对话记录不信工具账本。</li>
+      <li>标准答案必须物理隔离:轨迹文件绝无 gold,答案/判分另存一个文件,否则模型学的是"偷看答案"而非"解题轨迹"。</li>
+      <li>两道筛选闸——判对(复判防蒙对)+ 过程干净(自然终止∧工具全成功∧无尾部失败∧步数达标)给干净度分,同题只留最高分一条。</li>
+      <li>种子用最强模型当老师(经模型切换模块注册表挂),不弱模型自蒸馏、不人工编;预计 k=5 产出约 200~280 条干净样本,因为热启动质量决定强化学习天花板。</li>
+    </ul>
+    <p class="one-liner">一句话速记:轨迹采集是清洗——关降级补全工具输出、剔拐杖只留自然终止、参数只信对话记录,再把答案物理锁进另一个文件,喂给模型的才是"解题示范"而不是"偷看答案"。</p>
+    <p class="src-note">参考:<code>docs/superpowers/specs/2026-06-18-shorten-chains-and-rl-substrate-design.md</code>、<code>docs/superpowers/plans/2026-06-18-shorten-chains-first-batch.md</code>、<code>backend/app/chatloop/context.py</code>、<code>backend/app/chatloop/loop.py</code></p>
+  </div></div>
+</article>
+
+<article class="question-card" id="rl-q4">
+  <div class="q-header"><span class="q-num">Q4</span><h3 class="q-title">工具修好之后,为什么强化学习该瞄准"工具调用可靠性 / 多步编排"而不是"计算能力"?这个靶子是怎么定出来的?</h3><span class="q-diff" title="难度 4/5">★★★★☆</span></div>
+  <div class="q-tags"><span class="tag">RL 目标定义</span><span class="tag">多步编排</span><span class="tag">工具调用可靠性</span><span class="tag">靶子定法</span><span class="tag">数据驱动决策</span></div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>面试官问这道题,想看的不是"你知道 RL 能优化 agent",而是<strong>你怎么把一个模糊的"上 RL"诉求,收敛成一个具体、可学、有信号的训练目标</strong>。很多人一说强化学习就奔着"让模型更聪明、算得更准"去——这恰恰是这道题想戳破的误区。真正的好答案要证明:你是<strong>先把残留失败逐条读完、做完定性分类,再反推出靶子</strong>,而不是拍脑袋选了个时髦的方向。</p>
+    <ul>
+      <li><strong>追问:</strong>你凭什么说"计算能力没有可学的缺口"?拿什么数据支撑这个判断?</li>
+      <li><strong>追问:</strong>"漏参就放弃""取错代码"这些,为什么不能继续用 prompt 和工具兜底,非得上 RL?</li>
+      <li><strong>追问:</strong>残留失败里有几个是容差边界、判分抖动,你为什么把它们排除出 RL 靶子?不排除会怎样?</li>
+      <li><strong>追问:</strong>RL "擅长可靠编排"是凭感觉说的吗?为什么这类问题正好对上 RL 的强项?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把背景对齐(细节见本类第 1、第 2 题):我们给"算指标"这类金融任务建了一套自动出题 + 多次重试评测,先发现一个能力断崖——CAGR(年化增长率)那一桶只有 13% 通过。查下来真凶是取数工具的静默截断,不是模型不会算。<strong>工具修好后,这一桶从 13% 直接拉到 100%,整套题的通过率从原始 96/141(68%)升到 126/141(89.4%)</strong>。</p>
+    <p>关键的一句话先说在前面:<strong>不是"修完工具就没 RL 什么事了",而是更准的——先修工具把"能不能算"解决掉,RL 该瞄准"能不能稳"。</strong>这道题的核心就是回答:那个"稳"的靶子,是怎么从数据里读出来的。</p>
+
+    <h5>靶子是逐条读残留读出来的,不是拍脑袋选的</h5>
+    <p>修完工具还剩 15 个失败。我们没有立刻去猜该学什么,而是把这 15 个<strong>一条一条读完、定性归类</strong>。读完发现一个反直觉的事实:<strong>全题集 0 个"算不出"</strong>——只要 agent 拿到了正确数据,指标全都算得对。所以失败压根不是能力缺口,而是 agent 把工具链<strong>跑歪、跑断</strong>了。具体长这样:</p>
+    <ul>
+      <li><strong>漏 anchor 参数、报错就放弃(~4 个):</strong>调交易日历工具时漏了一个必填参数,工具报错说"缺 anchor 无法继续",agent <strong>看懂了这个错误,却不重试</strong>,直接放弃。这不是不会算,是不会从一个可恢复的错误里爬出来。</li>
+      <li><strong>取错股票代码(~1 个):</strong>问的是工商银行(601398)的涨幅,agent 却去取了中国银行(601988)的数据。算法没问题,喂进去的"主语"错了。</li>
+      <li><strong>不照交易日历窗口取数(~2 个):</strong>把某个日历日当"三个月前",而标准答案是按交易日历对齐的那一天,两边窗口差几天对不齐,结果就偏。</li>
+    </ul>
+    <p>把这三类放一起看,共同点非常清楚:<strong>漏参、取错代码、不照窗口、报错就放弃——全是多步编排没跑稳,没有一个是不会算指标。</strong>一句话总结这个洞察:<strong>agent 有知识(它看懂了错误),缺的是可靠性。</strong></p>
+
+    <h5>为什么"能力"不该是靶子,"可靠性"才是</h5>
+    <p>RL 是用奖励信号去学一套策略。<strong>哪里有可学的缺口,信号才有去处</strong>。计算这块已经 0 失败,等于这块没有缺口可学,拿 RL 去学"把指标算对"是在浪费训练信号——奖励永远是满分,模型学不到任何新东西。</p>
+    <p>而"漏参重试、取对代码、照窗口取数"这些恰恰是<strong>一整套"可靠地把工具链跑完"的策略问题</strong>:多步、有状态、每步的对错要到链路末端才结算。这正是 RL 最擅长的形态——它学的不是单点知识,而是<strong>跨多步的稳定行为序列</strong>。所以靶子要从靶心的"计算能力"外移到中环的"多步编排可靠性"。</p>
+
+    <h5>还要把"不该 RL 修的"剔出去</h5>
+    <p>剩下约 4 个残留是另一回事:窗口边界刚好顶破很紧的容差、或者 LLM 判分在边界上抖动。这些<strong>不是 agent 行为的问题,是工具口径和评测尺子本身的问题</strong>。我们明确把它们标成"非 RL 目标"。为什么要专门剔?因为如果不剔,你会拿 RL 去"修评测本身"——奖励信号被噪声毒化,模型学到的是怎么迎合一把抖动的尺子,而不是怎么把活干稳。这一步对应本类第 3 题讲的"奖励必须确定性可复现":能用 RL 学的可靠性问题,和工具/评测口径问题,必须分清。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>用一段教学伪代码演示"靶子是怎么从残留里定出来的"——核心是<strong>先分类、再判断每一类该归谁管</strong>,而不是上来就训:</p>
+    <pre><code class="language-python"># 输入:工具修好后剩下的 15 个失败,每个是一条完整轨迹
+residual_failures = load_failures(after_tool_fix=True)  # len == 15
+
+buckets = {"计算能力": [], "编排可靠性": [], "评测口径": []}
+
+for f in residual_failures:
+    # 第一刀:agent 拿到正确数据后,指标算错了吗?
+    if f.got_correct_data and f.metric_wrong:
+        buckets["计算能力"].append(f)        # 真·能力缺口 → 实际命中 0 条
+
+    # 第二刀:是 agent 自己把工具链跑歪/跑断的吗?
+    #   漏参报错却不重试 / 取错股票代码 / 不照交易日历窗口对齐
+    elif f.is_orchestration_fumble():
+        buckets["编排可靠性"].append(f)      # ~7 条:这才是 RL 能学的
+
+    # 第三刀:是尺子本身的问题?(顶破紧容差 / 判分边界抖动)
+    else:
+        buckets["评测口径"].append(f)        # ~4 条:修工具/容差,别拿 RL 修
+
+# 定靶:只有"agent 行为可学 且 奖励能确定性复现"的那一桶,才进 RL
+rl_target = buckets["编排可靠性"]            # 漏参重试 / 取对代码 / 照窗口取数
+
+assert len(buckets["计算能力"]) == 0         # 计算没缺口 → 拿 RL 学算指标是浪费信号
+assert buckets["评测口径"] not in rl_target  # 口径问题进了靶子会毒化奖励
+</code></pre>
+    <p><strong>推演:</strong>15 个残留过完这三刀——计算能力桶命中 <strong>0 条</strong>(这是定靶最硬的证据,直接否掉"RL 学算指标");编排可靠性桶约 <strong>7 条</strong>(漏 anchor 报错就放弃 ~4 + 取错股票代码 ~1 + 不照窗口取数 ~2),全是有状态的多步行为,正好是 RL 的强项;评测口径桶约 <strong>4 条</strong>被明确剔出。靶子由此落定:<strong>RL 瞄准这 ~7 条代表的"多步编排可靠性",而不是空空的"计算能力"。</strong></p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr><th>维度</th><th class="th-sgl">我们的选择:RL 学稳定编排</th><th class="th-vllm">替代方案:RL 学把指标算对</th></tr></thead>
+    <tbody>
+      <tr><td>有没有可学的缺口</td><td>残留 ~7 条全是编排没跑稳,缺口实打实</td><td>修工具后全题集 <strong>0 个"算不出"</strong>,计算这块没缺口</td></tr>
+      <tr><td>训练信号利用</td><td>奖励落在"链路有没有可靠跑完",有梯度可学</td><td>奖励永远满分,信号被浪费,学不到东西</td></tr>
+      <tr><td>对不对 RL 的强项</td><td>多步、有状态的可靠行为序列,正是 RL 擅长的</td><td>单点算术,prompt/工具早就能搞定,杀鸡用牛刀</td></tr>
+      <tr><td>解法是系统性还是打地鼠</td><td>学的是一整套"可靠跑完工具链"的策略,系统解</td><td>(同我方,替代方案此处无优势)</td></tr>
+      <tr><td>会不会误伤评测口径</td><td>容差/判分抖动 ~4 条已剔出靶子,信号干净</td><td>容易把口径问题也当能力练,毒化奖励</td></tr>
+    </tbody></table>
+    <p><strong>公允裁决:</strong>替代方案"让 RL 把指标算对"并非全无道理——如果残留里真有一批"数据对了但算错"的失败,那它就是正解,毕竟算术也是可程序校验、奖励确定性最好的一块(这点本类第 3 题展开)。它输就输在<strong>前提不成立</strong>:我们把 15 个残留逐条读完,计算能力桶命中 0 条,这块根本没有缺口给它学。而<strong>继续用 prompt/工具去兜底每一个 fumble,本轮已经反复自伤过</strong>——"data_refs 规矩""摘要捷径"这些单点补丁都曾引入新桶的回归,单测拦不住,堆得越多越脆,这是典型的打地鼠。RL 学的是<strong>一整套可靠编排策略</strong>,是对症的系统性解法,所以靶子最终落在"多步编排可靠性"而不是"计算能力"。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="rlq4-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+          <path d="M0,0 L9,5 L0,10 z" fill="#bf3f26"/>
+        </marker>
+      </defs>
+      <text x="450" y="34" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="19" font-weight="700" fill="#2f4d8a">残留 15 个失败的分类靶环 · 靶子从「计算」外移到「编排」</text>
+
+      <!-- 三层同心环 -->
+      <!-- 最外圈:非 RL 目标(灰) -->
+      <circle cx="420" cy="310" r="218" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <!-- 中环:多步编排可靠性(橙/朱砂高亮)-->
+      <circle cx="420" cy="310" r="150" fill="#faeae4" stroke="#bf3f26" stroke-width="2.5"/>
+      <!-- 靶心:计算能力(绿,已清空) -->
+      <circle cx="420" cy="310" r="78" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="2"/>
+
+      <!-- 靶心文字 -->
+      <text x="420" y="296" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#1f6e5e">计算能力</text>
+      <text x="420" y="318" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="22" font-weight="700" fill="#1f6e5e">0 个</text>
+      <text x="420" y="338" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">(已清空 · 没缺口可学)</text>
+
+      <!-- 中环标题 -->
+      <text x="420" y="205" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#bf3f26">多步编排可靠性 = RL 靶子</text>
+
+      <!-- 中环三类失败(带计数) -->
+      <text x="280" y="262" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">漏 anchor</text>
+      <text x="280" y="278" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">报错就放弃</text>
+      <text x="280" y="296" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#bf3f26">~4</text>
+
+      <text x="560" y="262" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">取错</text>
+      <text x="560" y="278" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">股票代码</text>
+      <text x="560" y="296" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#bf3f26">~1</text>
+
+      <text x="420" y="406" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">不照交易日历窗口取数</text>
+      <text x="420" y="424" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#bf3f26">~2</text>
+
+      <!-- 最外圈:非 RL 目标 -->
+      <text x="420" y="100" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#85806f">非 RL 目标 = 容差边界 + 判分抖动  ~4</text>
+      <text x="420" y="119" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">(口径/尺子问题 · 拿 RL 修会毒化奖励)</text>
+
+      <!-- 准星:压在橙环上 -->
+      <g>
+        <circle cx="420" cy="160" r="22" fill="none" stroke="#a8761f" stroke-width="2.5"/>
+        <line x1="420" y1="132" x2="420" y2="188" stroke="#a8761f" stroke-width="2.5"/>
+        <line x1="392" y1="160" x2="448" y2="160" stroke="#a8761f" stroke-width="2.5"/>
+      </g>
+
+      <!-- 旁注:agent 有知识,缺的是可靠性 -->
+      <rect x="650" y="138" width="232" height="62" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="766" y="164" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">agent 有知识(看懂错误),</text>
+      <text x="766" y="184" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">缺的是可靠性</text>
+      <line x1="649" y1="169" x2="446" y2="161" stroke="#bf3f26" stroke-width="1.8" marker-end="url(#rlq4-arrow)"/>
+
+      <!-- 底部说明:靶子外移 -->
+      <line x1="200" y1="500" x2="640" y2="500" stroke="#2f4d8a" stroke-width="2" marker-end="url(#rlq4-arrow)"/>
+      <text x="200" y="492" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1f6e5e">靶心(计算)已清空</text>
+      <text x="640" y="492" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#bf3f26">靶子外移到中环(编排)</text>
+
+      <!-- 图例 -->
+      <rect x="40" y="520" width="16" height="12" rx="2" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.2"/>
+      <text x="62" y="530" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">绿=已解决</text>
+      <rect x="160" y="520" width="16" height="12" rx="2" fill="#faeae4" stroke="#bf3f26" stroke-width="1.2"/>
+      <text x="182" y="530" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#bf3f26">橙=RL 靶子</text>
+      <rect x="290" y="520" width="16" height="12" rx="2" fill="#f0ede4" stroke="#85806f" stroke-width="1.2"/>
+      <text x="312" y="530" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">灰=非 RL 目标</text>
+      <text x="445" y="530" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#a8761f">✛ 准星 = RL 该瞄的环</text>
+    </svg>
+    <figcaption>图 10-4 · 怎么看:三层同心环把 15 个残留按"归谁管"分层——绿色靶心(计算能力)已清空、0 个失败,说明 RL 学算指标没缺口可学;橙色中环列了三类带计数的编排 fumble(漏参放弃 ~4 / 取错代码 ~1 / 不照窗口 ~2),这是 RL 的真靶子;灰色外圈的容差/判分抖动 ~4 个被剔出(口径问题不该 RL 修)。准星压在橙环上,旁注点题:agent 有知识,缺的是可靠性。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>靶子是读出来的,不是选出来的:</strong>把修复后残留的 15 个失败逐条定性,发现 0 个"算不出",问题全在 agent 把工具链跑歪/跑断——这才反推出"该学可靠性"。</li>
+      <li><strong>计算没缺口,学它是浪费信号:</strong>工具修好后 CAGR 桶 13%→100%、整体 96/141→126/141,只要数据对,指标都算得对;RL 学算指标奖励永远满分,学不到东西。</li>
+      <li><strong>编排可靠性正中 RL 强项:</strong>漏参重试、取对代码、照窗口对齐都是有状态的多步行为序列,RL 学的是一整套"可靠跑完工具链"的策略,是系统解,不是单点补丁。</li>
+      <li><strong>把口径问题剔出靶子:</strong>容差边界、判分抖动 ~4 个明确标"非 RL 目标"——拿 RL 去修评测尺子会毒化奖励,能 RL 学的可靠性和工具/口径问题必须分清。</li>
+      <li><strong>一句话定调:</strong>先修工具把"能不能算"解决掉,RL 该瞄准"能不能稳"。</li>
+    </ul>
+    <p class="one-liner">一句话速记:残留 0 个"算不出"、全是编排 fumble——所以 RL 瞄"稳",不瞄"算"。</p>
+    <p class="src-note">参考:<code>docs/research/2026-06-17-pre-rl-tooling-baseline.md</code>、<code>docs/research/2026-06-09-rl-readiness-audit.md</code></p>
+  </div></div>
+</article>
+</section>
