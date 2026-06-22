@@ -103,3 +103,11 @@ scripts/shoot_01.mjs
 docs/_view_*.png
 scripts/shoot_board.mjs
 scripts/shoot_fix.mjs
+
+# scratch / 工具残留(不入库)
+/al_b64.txt
+/tal_b64.txt
+/ts_doc2.html
+/ts_md/
+/.understand-anything/
+interview-manual/_shots/
