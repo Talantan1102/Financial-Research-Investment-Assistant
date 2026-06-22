@@ -96,10 +96,16 @@ def test_resolve_range_anchor_lookback():
 
 
 def test_resolve_range_td_raises():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="td"):
         _resolve_range({"anchor": "20260616", "lookback": "20td"})
 
 
 def test_resolve_range_missing_raises():
     with pytest.raises(ValueError):
         _resolve_range({"ts_code": "600519.SH"})
+
+
+def test_resolve_range_partial_start_raises():
+    # 只给 start、没 end 也没 anchor+lookback → 落通用错误(提示需 start+end 或 anchor+lookback)
+    with pytest.raises(ValueError):
+        _resolve_range({"ts_code": "600519.SH", "start": "20250101"})
