@@ -46,8 +46,15 @@ async def run_passk(
     max_steps: int = 28,  # 放宽:让 5 股排序/筛选这类重活有余量,把"预算天花板"从能力测量里剥掉(生产仍 12)
     model: str | None = None,
     answers_path: Path | None = None,
+    collect_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """跑 cases × k,返回 {pass1, by_bucket, per_case};answers_path 给则落盘答案供离线重判。"""
+    """跑 cases × k,返回 {pass1, by_bucket, per_case};answers_path 给则落盘答案供离线重判。
+
+    collect_dir 给则开启采集模式:
+      - 关闭 context downgrade(保留完整工具输出供 SFT)
+      - 写 collect_dir/trajectories_raw.jsonl(仅含轨迹,无 gold)
+      - 写 collect_dir/judgements.jsonl(含 gold,与轨迹文件物理隔离)
+    """
     from app.app_main import _sqlalchemy_async_pg_url
     from app.chatloop.context import ContextDeps
     from app.chatloop.eval_agent import ChatLoopAgent
@@ -61,11 +68,14 @@ async def run_passk(
 
     from eval.tool_selection._live import build_real_hub
 
+    collect = collect_dir is not None
+
     engine = create_async_engine(_sqlalchemy_async_pg_url(), future=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     sem = asyncio.Semaphore(concurrency)
     per_run: dict[str, list[bool]] = defaultdict(list)  # case_id -> [k 次 pass]
     answers: dict[str, str] = {}  # case_id -> 末次 agent 答案(供离线重判)
+    trajectories: list[dict] = []
 
     try:
         async with MCPClient.from_subprocess(profile="chat_tools") as mcp_client:
@@ -76,10 +86,14 @@ async def run_passk(
                 system_prompt=CHAT_SYSTEM_PROMPT,
                 skill_listing=singletons.skill_listing,
                 reference_date=_as_of_date(as_of),
+                # 采集模式关闭 context downgrade,保留完整工具输出供 SFT;正常模式维持原阈值
+                downgrade_char_threshold=10**9 if collect else 1320,
             )
             complete = judge_llm.make_complete()  # 复杂档(排序/筛选)LLM 抽取判分
 
-            async def run_one(c: case.ComputationCase, run_idx: int) -> tuple[str, bool, str]:
+            async def run_one(
+                c: case.ComputationCase, run_idx: int
+            ) -> tuple[str, bool, str, dict | None]:
                 rid = f"qg-{c.case_id}-{run_idx}"
                 async with sem:
                     try:
@@ -108,10 +122,20 @@ async def run_passk(
                             ok = judge.judge(
                                 c.gold, c.gold_shape, c.tolerance, answer or "", _candidate_names(c)
                             )
-                        return (c.case_id, bool(ok), answer or "")
+                        # 采集模式:从 final 提取轨迹 slim dict(不含 gold/passed)
+                        traj: dict | None = None
+                        if collect:
+                            traj = {
+                                "case_id": c.case_id,
+                                "model": model,
+                                "messages": final.messages,
+                                "n_steps": final.step,
+                                "halt_reason": final.halt_reason,
+                            }
+                        return (c.case_id, bool(ok), answer or "", traj)
                     except Exception:  # noqa: BLE001 — per-case 隔离
                         logger.exception("case %s run %d 失败", c.case_id, run_idx)
-                        return (c.case_id, False, "")
+                        return (c.case_id, False, "", None)
 
             tasks = [run_one(c, i) for c in cases for i in range(k)]
             total = len(tasks)
@@ -119,10 +143,12 @@ async def run_passk(
             tag = model or "default"
             is_tty = sys.stderr.isatty()
             for done, fut in enumerate(asyncio.as_completed(tasks), start=1):
-                cid, ok, ans = await fut
+                cid, ok, ans, traj = await fut
                 per_run[cid].append(ok)
                 if ans:
                     answers[cid] = ans
+                if traj is not None:
+                    trajectories.append(traj)
                 n_pass += int(ok)
                 # 进度:终端用 \r 实时刷新;非终端(写日志)每 10 题一行,带模型名区分对比跑
                 if is_tty:
@@ -136,6 +162,12 @@ async def run_passk(
 
     if answers_path is not None:
         _dump_answers(cases, per_run, answers, answers_path, model)
+    # 采集模式:轨迹与判定写入独立文件(物理隔离 gold)
+    if collect:
+        assert collect_dir is not None  # mypy narrowing
+        collect_dir.mkdir(parents=True, exist_ok=True)
+        _dump_trajectories(trajectories, collect_dir / "trajectories_raw.jsonl")
+        _dump_answers(cases, per_run, answers, collect_dir / "judgements.jsonl", model)
     return _aggregate(cases, per_run)
 
 
@@ -211,6 +243,18 @@ def _dump_answers(
                 "answer": answers.get(cid, ""),
                 "model": model,
             }
+            f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
+
+
+def _dump_trajectories(records: list[dict], path: Path) -> None:
+    """落盘轨迹 jsonl(每行一条记录)。
+
+    records 只含 {case_id, model, messages, n_steps, halt_reason} — 严禁混入 gold/passed。
+    path 的父目录自动创建。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False, default=str) + "\n")
 
 
