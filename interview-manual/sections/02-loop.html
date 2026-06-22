@@ -1,0 +1,1700 @@
+<section class="category" id="cat-loop" data-icon="🔁" data-title="Chat Loop 引擎">
+<header class="cat-header">
+  <span class="cat-icon">🔁</span>
+  <div><h2><span class="cat-no">02</span>Chat Loop 引擎</h2></div>
+</header>
+<p class="cat-desc">这一类考察候选人对 AlphaScout 对话引擎的理解——它从一张 LangGraph supervisor 单程图,被重新设计成一个手写的 Python while 工具调用循环。8 道题按难度从易到难排:先从「对话式 AI 为什么要来回好几轮」这种零基础概念讲起,再走到为什么退役框架、四道终止闸、上下文窗口的 KV-cache 经济学、工具渐进披露、对话中途插话的原子性,最后落到不用框架直接对接原生 function calling 踩过的工程坑。重点不是「知道有这些机制」,而是能讲清每个决策的收益、代价和被否决的替代方案。</p>
+<article class="question-card" id="loop-q1">
+  <div class="q-header">
+    <span class="q-num">Q1</span>
+    <h3 class="q-title">先打个基础:一个对话式 AI 助手回答用户问题,为什么常常需要"来回好几轮"(模型想一下 → 调个工具 → 看结果 → 再想)?为什么不能"问一次就答完"?</h3>
+    <span class="q-diff" title="难度 2/5">★★☆☆☆</span>
+  </div>
+  <div class="q-tags">
+    <span class="tag">对话 agent</span>
+    <span class="tag">循环动机</span>
+    <span class="tag">依赖型多跳</span>
+    <span class="tag">工具调用</span>
+    <span class="tag">基础概念</span>
+  </div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这是 Chat Loop 这一类的入门题,面试官不指望你背架构,而是想确认一件最基础的事:<strong>你是否真的理解"为什么 agent 要循环"这个出发点</strong>。很多候选人一上来就背"LangGraph、while 循环、状态机",但被追一句"那不循环行不行"就答不上来。一个想清楚了的人,会从一个<em>具体的问题</em>讲起——这个问题为什么"问一次答不完",从而自然推出"必须来回好几轮"。</p>
+    <ul>
+      <li><strong>追问:</strong>你能不能举一个"问一次就答完"完全够用的例子?(探你是否知道循环不是处处都需要,简单问题一圈就停了)</li>
+      <li><strong>追问:</strong>那为什么有些问题就是一圈不够?到底卡在哪?(探你能否说出"下一步要做什么,取决于上一步查到了什么"——也就是依赖型多跳)</li>
+      <li><strong>追问:</strong>"来回好几轮"这个"轮",程序事先知道要转几圈吗?(探你是否理解圈数不是写死的,而是模型边看边定)</li>
+      <li><strong>追问:</strong>如果工具调用报错了,一问一答的做法会怎样?循环又有什么不一样?(探你是否看到循环顺带解决了"看着错误自己改"的问题)</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把"对话 agent"这个词拆开。这里说的"助手",不是只会聊天的那种,而是<strong>能动手去查数据、能调用外部工具</strong>的助手——比如查一只股票现在多少钱、调出一份持仓清单、读一份财报。"工具"你就理解成"助手会用的一个个小程序",每个工具能干一件具体的事(查行情、查持仓、查财报……),模型自己不知道这些实时数据,得靠调工具去问。</p>
+
+    <h5>先看一个一圈就够的简单问题</h5>
+    <p>用户问:"茅台现在多少钱?" 助手心里想:这个我不知道,得查行情 → 调一次"查行情"工具 → 拿到 1680 元 → 直接告诉用户。<strong>一来一回,完事。</strong>这种问题确实"问一次就答完"——因为答案只依赖<em>一次</em>查询,助手一开始就知道要查什么。</p>
+
+    <h5>再看一个一圈远远不够的问题</h5>
+    <p>用户问:"我持仓里跌得最惨的那只,它最新财报怎么样?" 这句话里藏了一个<strong>先后依赖</strong>:</p>
+    <ol>
+      <li>助手得先<strong>查到你的持仓清单</strong>,看清里面到底有哪几只股票、各自跌了多少;</li>
+      <li>看完才知道——哦,跌得最惨的是"宁德时代";</li>
+      <li><em>这时候</em>才知道下一步要去查谁:查"宁德时代"的财报;</li>
+      <li>拿到财报数据,才能动笔回答。</li>
+    </ol>
+    <p>关键就在第 3 步:<strong>"接下来要查谁",在第 1 步查出来之前,谁都不知道</strong>——程序不知道,模型也不知道,因为答案就藏在第 1 步的返回结果里。我们给它起个名字叫<strong>"依赖型多跳":查了 A 才知道要查 B</strong>。这种任务,你没法在一开始就把所有查询步骤一次写完,因为后面的步骤要<em>看着前面的结果</em>才能决定。</p>
+
+    <div class="callout"><strong>一个特别好用的日常类比:查资料写报告的人。</strong>你不会闭着眼睛一口气把报告写完。你是:先想"我要查什么" → 去图书馆借一本书(调一个工具) → 翻完发现还缺一个数据 → <em>根据刚翻到的内容</em>再借一本 → 直到材料够了,才动笔写。"再借哪一本",取决于"上一本翻到了什么"。对话 agent 的循环,就是把这个"想 → 查 → 看 → 再想"的过程搬给了模型。</div>
+
+    <h5>那"循环"到底是什么?</h5>
+    <p>循环的本质,就是给模型装一个<strong>"想 → 做 → 看 → 再想"的反馈回路</strong>:</p>
+    <ul>
+      <li><strong>想</strong>:模型说"我想调'查持仓'这个工具";</li>
+      <li><strong>做</strong>:程序<em>真的</em>去把这个工具调一遍;</li>
+      <li><strong>看</strong>:程序把工具返回的结果(持仓清单)<strong>喂回给模型</strong>;</li>
+      <li><strong>再想</strong>:模型看完结果,再决定——是收尾回答了,还是接着调下一个工具(查那只跌得最惨的财报)。</li>
+    </ul>
+    <p>这一圈"调一次模型 → 执行工具",我们叫一个<strong>圈(iteration)</strong>。一个问题可能转一圈就停,也可能转好几圈,直到模型觉得"材料够了"才生成最终回答。</p>
+
+    <h5>对比一下"问一次就答完"的老做法</h5>
+    <p>本项目早期的旧架构,就是典型的"一问一答骨架":模型<em>一次性</em>出一份计划(要调哪几个工具)→ 程序把这些工具批量执行 → <em>另一个</em>模型拿结果合成回答。听起来也有工具,但有个致命点:<strong>工具的结果根本不回到出计划那个模型手里</strong>。也就是说,模型是"蒙着眼睛把整盘棋一次下完"的,它够不着"看到结果再决定下一步"这种需要回看的任务。简单问题它能凑合,碰上依赖型多跳就抓瞎了。</p>
+
+    <p>(这一题只讲"为什么需要这个环"。环里面一圈的数据到底怎么流、"单 LLM 既决策又说话"是什么意思,见本类第 2 题;环怎么停下来、有哪几道终止条件,见本类第 4 题。)</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面用最精简的伪代码,把"问一次就答完"和"循环"摆在一起,你一眼能看出区别在哪。</p>
+    <pre><code class="language-python"># ① 一问一答:一条直线,工具结果不回模型,够不着依赖型多跳
+def answer_once(question):
+    plan = model.make_plan(question)      # 模型蒙着眼一次性出全部计划
+    results = run_all_tools(plan.tools)   # 工具批量执行
+    return other_model.write(results)     # 另一个模型合成回答 —— 到此结束,没有"再看一眼"
+
+
+# ② 循环:给模型装一个"想 → 做 → 看 → 再想"的反馈回路
+def answer_with_loop(question):
+    state = [question]                    # 对话上下文,会越攒越多
+    while True:                           # 这个 while 就是"环"
+        step = model.think(state)         # 想:模型看着目前所有信息,决定下一步
+        if step.is_final_answer:          # 看够了 → 收尾,跳出环(简单问题这里一圈就停)
+            return step.text
+        # 否则模型要求调工具(比如先"查持仓")
+        result = run_tool(step.tool_call) # 做:程序真去把工具调一遍
+        state.append(result)              # 看:把结果喂回去,下一圈模型就能"看到"它
+        # 回到 while 顶部 —— 再想:基于刚查到的持仓,决定接下来查谁的财报
+</code></pre>
+    <p><strong>推演:</strong>拿"我持仓里跌得最惨的那只财报怎么样"走一遍循环——<br>
+    第 1 圈:模型想"先查持仓" → 调"查持仓"工具 → 拿到清单(发现宁德时代跌最惨) → 喂回。<br>
+    第 2 圈:模型这才知道要查谁,想"查宁德时代财报" → 调"查财报"工具 → 拿到财报 → 喂回。<br>
+    第 3 圈:模型觉得材料够了 → 直接给出最终回答,跳出环。<br>
+    注意:<strong>程序事先并不知道这题要转几圈</strong>,因为"第 2 圈查谁"是第 1 圈的结果决定的。本项目里给这个圈数留了个上限作参考——一个"六只持仓挨个分析"的场景大约要转 5 圈,代码里把硬上限设成 12,留了一倍的垫(防止万一转不停)。换成上面那个一问一答版本,它在第 1 步就把计划定死了,根本走不到"看到持仓再决定查谁"这一步。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr><th>维度</th><th class="th-sgl">我们的选择(循环 / 边看边定)</th><th class="th-vllm">替代方案(一问一答 / 单次 prompt→response)</th></tr></thead>
+    <tbody>
+      <tr><td>依赖型多跳(查了 A 才知道查 B)</td><td>能。结果喂回模型,下一圈据此决定查谁</td><td>不能。计划一次定死,看不到工具结果</td></tr>
+      <tr><td>圈数是否事先确定</td><td>不确定,模型边看边定,够了自然停</td><td>确定,就一来一回</td></tr>
+      <tr><td>工具报错怎么办</td><td>把错误也喂回去,模型能看着错误自己改了重试</td><td>只能道歉。模型根本没机会看到错误</td></tr>
+      <tr><td>延迟(用户等多久)</td><td>较高。多转一圈就多等一次模型+工具</td><td>低。只调一次模型链路</td></tr>
+      <tr><td>成本是否可预测</td><td>较难预测,圈数不定;靠上限闸兜底封顶</td><td>可预测,固定调用次数</td></tr>
+      <tr><td>实现复杂度</td><td>要自己写循环、管上下文、设终止条件</td><td>简单,一条直线</td></tr>
+    </tbody></table>
+    <p><strong>公允裁决:</strong>一问一答并不是"差方案",它在三件事上是实打实的赢家——延迟低、成本可预测、实现简单。对"茅台现在多少钱"这类一查就完的问题,它甚至和循环效果一样(循环碰到这种问题也是一圈就自然停,几乎没多花)。它真正够不着的,只有两类场景:一是依赖型多跳(下一步依赖上一步的结果),二是工具报错时的自我纠正(看着错误改了重试)。我们的判断很简单:<strong>简单问题循环也是一圈就停,代价可以忽略;而复杂问题没有循环就根本做不了。</strong>既然两头都要兼顾,统一用循环、再用一道上限闸把"万一转不停"的成本风险兜住,是更划算的买卖。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="一问一答与循环的对比图">
+      <defs>
+        <marker id="loopq1-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="loopq1-arr-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#bf3f26"/>
+        </marker>
+        <marker id="loopq1-arr-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#1f6e5e"/>
+        </marker>
+      </defs>
+      <style>
+        .lq1-t  { font-family:"Noto Sans SC", sans-serif; }
+        .lq1-h  { font-family:"Noto Sans SC", sans-serif; font-weight:700; }
+      </style>
+
+      <!-- ===== 左侧:一问一答 ===== -->
+      <text x="40" y="40" class="lq1-h" font-size="17" fill="#85806f">一问一答:一条直线,中间不回看</text>
+
+      <rect x="40" y="70" width="120" height="56" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="100" y="103" class="lq1-t" font-size="13" fill="#3a382f" text-anchor="middle">用户问</text>
+
+      <rect x="200" y="70" width="120" height="56" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="260" y="95" class="lq1-t" font-size="13" fill="#3a382f" text-anchor="middle">模型出计划</text>
+      <text x="260" y="113" class="lq1-t" font-size="11" fill="#85806f" text-anchor="middle">(一次定死)</text>
+
+      <rect x="200" y="150" width="120" height="50" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="260" y="180" class="lq1-t" font-size="12" fill="#3a382f" text-anchor="middle">工具批量执行</text>
+
+      <rect x="40" y="220" width="280" height="50" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="180" y="243" class="lq1-t" font-size="12" fill="#3a382f" text-anchor="middle">另一个模型合成回答 → 结束</text>
+      <text x="180" y="260" class="lq1-t" font-size="11" fill="#bf3f26" text-anchor="middle">✗ 工具结果从不回到出计划的模型</text>
+
+      <line x1="160" y1="98" x2="196" y2="98" stroke="#85806f" stroke-width="1.6" marker-end="url(#loopq1-arr)"/>
+      <line x1="260" y1="126" x2="260" y2="146" stroke="#85806f" stroke-width="1.6" marker-end="url(#loopq1-arr)"/>
+      <line x1="260" y1="200" x2="260" y2="216" stroke="#85806f" stroke-width="1.6" marker-end="url(#loopq1-arr)"/>
+
+      <text x="40" y="320" class="lq1-t" font-size="12" fill="#85806f">够不着"查了持仓,才知道</text>
+      <text x="40" y="340" class="lq1-t" font-size="12" fill="#85806f">要查哪只财报"——下一步</text>
+      <text x="40" y="360" class="lq1-t" font-size="12" fill="#85806f">依赖上一步的结果,它看不到。</text>
+
+      <!-- 分隔线 -->
+      <line x1="460" y1="60" x2="460" y2="400" stroke="#d8d3c4" stroke-width="1.5" stroke-dasharray="4 4"/>
+
+      <!-- ===== 右侧:循环 ===== -->
+      <text x="500" y="40" class="lq1-h" font-size="17" fill="#bf3f26">循环:想 → 做 → 看 → 再想(一个环)</text>
+
+      <!-- 想 -->
+      <rect x="560" y="80" width="150" height="56" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8"/>
+      <text x="635" y="105" class="lq1-h" font-size="14" fill="#bf3f26" text-anchor="middle">想</text>
+      <text x="635" y="123" class="lq1-t" font-size="11" fill="#7a3b2a" text-anchor="middle">下一步调啥工具?</text>
+
+      <!-- 做 -->
+      <rect x="745" y="190" width="135" height="56" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.6"/>
+      <text x="812" y="215" class="lq1-h" font-size="14" fill="#2f4d8a" text-anchor="middle">做</text>
+      <text x="812" y="233" class="lq1-t" font-size="11" fill="#2f4d8a" text-anchor="middle">程序真去调工具</text>
+
+      <!-- 看 -->
+      <rect x="560" y="300" width="150" height="56" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.6"/>
+      <text x="635" y="325" class="lq1-h" font-size="14" fill="#1f6e5e" text-anchor="middle">看</text>
+      <text x="635" y="343" class="lq1-t" font-size="11" fill="#185a4d" text-anchor="middle">结果喂回模型</text>
+
+      <!-- 够了 → 答 -->
+      <rect x="500" y="190" width="120" height="56" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.6"/>
+      <text x="560" y="215" class="lq1-h" font-size="13" fill="#3a382f" text-anchor="middle">够了 → 答</text>
+      <text x="560" y="233" class="lq1-t" font-size="11" fill="#85806f" text-anchor="middle">跳出环,收尾</text>
+
+      <!-- 环箭头:想→做 -->
+      <path d="M710,118 C760,135 790,160 810,186" fill="none" stroke="#bf3f26" stroke-width="1.8" marker-end="url(#loopq1-arr-red)"/>
+      <!-- 做→看 -->
+      <path d="M790,246 C760,285 720,300 712,318" fill="none" stroke="#2f4d8a" stroke-width="1.8" marker-end="url(#loopq1-arr)"/>
+      <!-- 看→想(回到顶,闭环) -->
+      <path d="M600,300 C560,250 575,180 600,140" fill="none" stroke="#1f6e5e" stroke-width="1.8" marker-end="url(#loopq1-arr-green)"/>
+      <!-- 想→够了→答(出口) -->
+      <path d="M620,232 L626,222" fill="none" stroke="#85806f" stroke-width="0"/>
+      <path d="M635,136 C620,160 610,175 605,186" fill="none" stroke="#85806f" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#loopq1-arr)"/>
+
+      <!-- 环上标注具体例子 -->
+      <text x="635" y="395" class="lq1-t" font-size="11.5" fill="#7a3b2a" text-anchor="middle">第1圈:查持仓 → 看到宁德跌最惨</text>
+      <text x="635" y="413" class="lq1-t" font-size="11.5" fill="#185a4d" text-anchor="middle">第2圈:才知道查宁德财报 → 第3圈够了收尾</text>
+
+      <!-- 图例 -->
+      <text x="40" y="445" class="lq1-h" font-size="12" fill="#3a382f">图例:</text>
+      <rect x="92" y="436" width="14" height="12" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="112" y="446" class="lq1-t" font-size="11" fill="#3a382f">想(模型决策)</text>
+      <rect x="222" y="436" width="14" height="12" rx="3" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="242" y="446" class="lq1-t" font-size="11" fill="#3a382f">做(程序调工具)</text>
+      <rect x="362" y="436" width="14" height="12" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="382" y="446" class="lq1-t" font-size="11" fill="#3a382f">看(结果回喂)</text>
+    </svg>
+    <figcaption>图 2-1 · 怎么看:<strong>左边</strong>是"一问一答",一条直线从上往下走完就结束,工具结果(灰色)从不回到出计划的模型——所以它够不着"看到持仓再决定查谁"。<strong>右边</strong>是"循环",三个彩色框连成一个<strong>环</strong>:模型"想"要调什么(朱砂)→ 程序"做"(靛蓝,真去调工具)→ 把结果"看"一眼喂回(松绿)→ 回到"想"开始下一圈;什么时候觉得够了,就从"想"走灰色虚线出口"答"。"圈(iteration)"就是环转的一圈;"下一步依赖上一步"就体现在:第 2 圈查谁,是第 1 圈查到的持仓决定的。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>循环的根本动机是"依赖型多跳":查了 A 才知道要查 B。</strong>下一步要做什么,藏在上一步的结果里,所以非得"看到结果再决定下一步"——这正是一问一答做不到的。</li>
+      <li><strong>循环 = 给模型装一个"想 → 做 → 看 → 再想"的反馈回路。</strong>模型说想调工具,程序真去调,把结果喂回去,模型看完再决定收尾还是继续。转一圈叫一个 iteration。</li>
+      <li><strong>圈数不是写死的,是模型边看边定。</strong>简单问题(茅台多少钱)一圈就自然停;复杂问题(六只持仓挨个分析)可能要转五圈左右,程序事先并不知道。</li>
+      <li><strong>一问一答不是稻草人。</strong>它延迟低、成本可预测、实现简单,简单问题完全够用;它只够不着两类场景——依赖型多跳,和工具报错时"看着错误自己改"。</li>
+      <li><strong>我们的取舍:</strong>统一用循环(简单问题反正一圈就停,没多花),再用一道上限闸兜住"万一转不停"的成本风险。</li>
+    </ul>
+    <p class="one-liner">一句话速记:复杂问题的"下一步"藏在"上一步的结果"里,程序事先不知道要调几次,只能让模型边看结果边定——这就是为什么要循环。</p>
+    <p class="src-note">参考:<code>docs/superpowers/specs/2026-06-05-chat-loop-redesign-design.md</code> · <code>docs/claude-context/chat-loop-redesign-done.md</code> · <code>backend/app/chatloop/gates.py</code></p>
+  </div></div>
+</article>
+<article class="question-card" id="loop-q2">
+  <div class="q-header">
+    <span class="q-num">Q2</span>
+    <h3 class="q-title">你这个对话引擎的主循环,一轮对话(turn)里到底怎么转?从组装上下文、调一次大模型、到执行工具、再回到模型,数据是怎么流动的?"单 LLM 既决策又说话"是什么意思?</h3>
+    <span class="q-diff" title="难度 3/5">★★★☆☆</span>
+  </div>
+  <div class="q-tags">
+    <span class="tag">主循环解剖</span>
+    <span class="tag">单 LLM</span>
+    <span class="tag">数据流</span>
+    <span class="tag">turn 结构</span>
+    <span class="tag">决策与表达合一</span>
+  </div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>上一题(本类第 1 题)讲的是"为什么要来回好几轮"的<em>动机</em>;这一题面试官把镜头怼到环的<strong>内部</strong>——你说要循环,那一圈到底是哪几步、顺序为什么是这个、数据从哪进哪出。这是在分辨两类候选人:一类只会背"Agent 就是一个 while 循环",一类真能把循环画成一张<strong>数据流图</strong>、说清"谁是真相、谁是投影、谁 append 回谁"。能不能把"单 LLM 既决策又说话"讲透,是这道题的分水岭——它考的是你有没有意识到,这一个看似简单的设计,其实是把旧架构里两个分工的模型<strong>合并</strong>掉的结果。</p>
+    <ul>
+      <li><strong>追问:</strong>你说每圈都"组上下文",那这个上下文是新攒的还是历史累加的?上一圈工具查到的东西,下一圈模型看得到吗?(探你是否真懂"单一真相 + 每圈投影")</li>
+      <li><strong>追问:</strong>"既决策又说话"——程序怎么知道这次模型是在"决策"还是在"说话"?你靠什么判据分叉?(探你能否落到"带不带 tool_calls"这个具体信号上,而不是含糊其辞)</li>
+      <li><strong>追问:</strong>循环什么时候停?是你数圈数数到几就停,还是模型自己决定?(探你是否理解"自然停"是模型不再要工具,而非外部计数)</li>
+      <li><strong>追问:</strong>turn 和你说的"圈"是一回事吗?(探术语精度:turn=一问一答=一个异步任务;圈=turn 内 while 的一次迭代)</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把两个词钉死,后面全靠它俩区分,讲错一个整段就乱:</p>
+    <ul>
+      <li><strong>turn(一轮对话)</strong>:一条用户消息进来 → 一个最终回答出去,这<em>整个过程</em>叫一个 turn。它对应后台一个独立的异步任务(Celery task)。用户视角看到的"我问了一句、它答了一段",就是一个 turn。</li>
+      <li><strong>圈(iteration)</strong>:一个 turn <em>内部</em>,那个 <code>while</code> 循环转一次,叫一圈。一个 turn 可能转 1 圈(简单问题,模型张嘴就答),也可能转 5 圈(复杂问题,查了又查)。</li>
+    </ul>
+    <div class="callout">一句话:<strong>turn 是外面看到的"一问一答",圈是里面藏着的"想一下/查一下"的每一次。</strong>一个 turn 套着 N 圈。</div>
+
+    <h5>循环本体:一个裸 while,每圈固定这几拍</h5>
+    <p>主循环就是一个 <code>async def run()</code> 里的 <code>while True</code>(在 <code>loop.py</code> 里,本体约 200 行)。它不是什么神秘的框架调度,就是老老实实一拍接一拍走。一圈的节拍(删掉枝节,留主干):</p>
+    <ol>
+      <li><strong>取消检查</strong>:看用户有没有按"停"。有就在<em>圈边界</em>干净地中断(为什么必须在圈边界、不能半路砍,见本类第 7 题的 turn 原子语义)。</li>
+      <li><strong>终止闸判定</strong>:一组纯谓词,问"该不该停了"(花超预算了?转太多圈了?在原地打转?)。该停就逼模型用手头信息收个尾。四道闸为什么是四道,见本类第 4 题。</li>
+      <li><strong>并入插话</strong>:把用户中途补的话塞进来(见本类第 7 题)。</li>
+      <li><strong>组窗口</strong>:把当前状态投影成一份发给模型的消息数组(<code>assemble_context</code>)。这一步是纯函数,不碰任何外部 I/O。窗口怎么切四个区、怎么省 token,见本类第 5 题——本题只说它"把状态投影成消息"。</li>
+      <li><strong>单次流式调 LLM</strong>:<code>stream_step</code>,把窗口、可用工具的说明书一起发给<em>一个</em>模型,流式拿回结果。</li>
+      <li><strong>折叠输出</strong>:<code>apply_step</code> 把模型这圈吐的内容写回状态。</li>
+      <li><strong>分叉判定</strong>:模型这次<em>带没带 tool_calls</em>?
+        <ul>
+          <li>没带 → 它不想再调工具了,这段 content 就是<strong>最终答案</strong>,自然停,turn 结束;</li>
+          <li>带了 → 程序去执行这些工具(<code>dispatch</code>),把结果折叠回状态(<code>apply_results</code>),<strong>回到圈首</strong>,让模型下一圈带着工具结果再想。</li>
+        </ul>
+      </li>
+    </ol>
+
+    <h5>数据流的"单一真相":一切围着 state.messages 转</h5>
+    <p>这是整道题最该答漂亮的地方。整个循环的<strong>唯一真相(single source of truth)</strong>是一个东西:<code>state.messages</code>——一个 OpenAI 格式的消息列表(<code>list[dict]</code>,每条带 <code>role</code>:system / user / assistant / tool)。它就是这个 turn 到目前为止发生过的一切的账本。</p>
+    <p>围着它转的有两类动作,分清楚很关键:</p>
+    <ul>
+      <li><strong>投影(读)</strong>:每圈 <code>assemble_context</code> 把状态<em>投影</em>成发给模型的消息数组。注意是"投影"不是"就是"——它会按窗口策略裁剪、降级老内容(细节见本类第 5 题),但底稿来自 <code>state.messages</code>。投影是<em>只读</em>的派生品,不改真相。</li>
+      <li><strong>追加(写)</strong>:模型回的 assistant 消息、工具回的 tool 消息,都 <code>append</code> 回 <code>state.messages</code> 的尾部。下一圈再投影时,这些新尾巴自然就一起发出去了。</li>
+    </ul>
+    <div class="callout">所以"上一圈查到的东西下一圈看得到吗?"——<strong>看得到</strong>。因为工具结果作为 tool 消息 append 进了真相账本,下一圈投影会把它带上。这正是"查了 A 才知道要查 B"能跑通的物理基础:每一圈模型看到的都是<em>截至此刻的完整轨迹</em>。</div>
+
+    <h5>"单 LLM 既决策又说话":两个模型合并成一个</h5>
+    <p>这句话的分量,要对照旧架构才看得出来。<strong>旧架构是两个模型分工</strong>:一个叫 planner,专门"出计划"(决定调哪些工具);另一个叫 responder,专门"措辞"(把工具结果合成人话)。两次 LLM 调用,各管一摊。</p>
+    <p><strong>新架构把这俩合并成一个</strong>。同一个模型,在循环里同时干两件事:</p>
+    <ul>
+      <li><strong>决策</strong>:这一步要不要调工具、调哪个、传什么参数;</li>
+      <li><strong>表达</strong>:直接生成给用户看的那段文字。</li>
+    </ul>
+    <p>而且它在<em>同一次流式回复里二选一</em>:要么吐 <code>tool_calls</code>(我要调工具,你去执行),要么吐最终文字(我想好了,这是答案)。<strong>判据就是这次回复带不带 tool_calls</strong>——这是程序区分"它在决策"还是"它在收尾"的全部依据,简单到一个布尔判断:</p>
+    <ul>
+      <li>带 <code>tool_calls</code> → 程序去执行工具、继续循环(它在<em>决策</em>);</li>
+      <li>不带、<code>finish_reason == "stop"</code> → 这段 content 落定为 <code>final_response</code>,自然停(它在<em>表达</em>)。</li>
+    </ul>
+    <p>"决策与表达合一",说的就是这件事:不再有"谁负责想、谁负责说"的分工,一个脑子从头管到尾。至于"为什么"要这样合并、合并的整体收益,那是架构决策题(见本类第 3 题);本题只负责把"合一长什么样、靠什么判据分叉"讲清楚。</p>
+
+    <h5>纯函数核 + 不纯壳:为什么这么分</h5>
+    <p>顺带提一个让这个循环好测的设计:有副作用的活(调 LLM、分发工具、发事件)<strong>只</strong>集中在 <code>loop.py</code> 这个"壳"里;判定逻辑(终止闸、窗口组装、状态折叠)全是<strong>零 I/O 的纯函数</strong>。好处是:闸该不该停、窗口怎么投影、状态怎么折叠,这些都能脱离任何运行时环境(不用起数据库、不用连模型)直接拿假数据单测。壳薄、核纯,这是它好维护的根。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>把一圈的骨架抽出来(教学伪代码,保留真实函数名当锚点,删掉预算/插话/熔断等枝节——那些归别的题)。看清楚"<strong>真相 → 投影 → 单 LLM → 二选一</strong>"这条主线就够了。</p>
+
+    <pre><code class="language-python">async def run(state):
+    while True:
+        # ① 终止闸:纯谓词，问"该不该停了"(预算/圈数/打转)
+        if (halt := check_gates(state)):
+            return force_conclude(state, halt)   # 逼模型用手头信息收尾
+
+        # ② 投影:把"真相账本"state.messages 组装成发给模型的窗口
+        #    这是只读派生，不改 state.messages 本身
+        messages = assemble_context(state)
+
+        # ③ 单 LLM 一次流式调用：既决策又说话，二者合一
+        step = await llm.stream_step(messages=messages, tools=schemas)
+
+        # ④ 折叠输出：把模型这圈吐的 assistant 消息 append 回真相账本，step += 1
+        state = apply_step(state, step)
+
+        # ⑤ 分叉判据 = 带不带 tool_calls
+        if not step.tool_calls:
+            # 不带 → 它在"表达"：这段就是最终答案，自然停，turn 结束
+            return state                          # final_response 已落定
+
+        # 带 → 它在"决策"：去执行工具，结果作为 tool 消息 append 回真相账本
+        results = await tool_hub.dispatch(step.tool_calls, state)
+        state = apply_results(state, results)     # tool 消息进 state.messages
+
+        # 回圈首 → 下一圈投影会带上刚 append 的 tool 结果，模型据此再想一步</code></pre>
+
+    <p><strong>推演:</strong>假设用户问"我持仓里那几只票最近财报怎么样"。<strong>第 1 圈</strong>:模型看不到持仓清单,于是吐一个 <code>tool_calls</code>(查持仓)——这是<em>决策</em>;程序执行,把"持仓=贵州茅台、宁德时代"作为 tool 消息 append 进 <code>state.messages</code>。<strong>第 2 圈</strong>:投影把这条新尾巴带上,模型现在<em>看到</em>了具体是哪两只票,于是再吐 <code>tool_calls</code>(查这两家财报)——又一次<em>决策</em>;结果再 append 回去。<strong>第 3 圈</strong>:模型攒齐了信息,这次<em>不带</em> tool_calls 了,直接吐一段总结文字——这是<em>表达</em>,<code>finish_reason=="stop"</code>,自然停。这一个 turn 转了 <strong>3 圈、调了 3 次 LLM</strong>(每圈恰好一次,turn 账单里 <code>llm_calls</code> 就等于圈数 <code>step</code>)。三圈用的是<strong>同一个模型</strong>,没有"换人合成"——这就是"单 LLM 既决策又说话"在一条真实数据流上的样子。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr>
+      <th>维度</th>
+      <th class="th-sgl">我们的选择(单 LLM 在循环里决策+表达合一)</th>
+      <th class="th-vllm">替代方案(planner / responder 两个模型分工(旧架构))</th>
+    </tr></thead>
+    <tbody>
+      <tr><td>谁决策、谁说话</td><td>同一个模型,一次回复里二选一(吐 tool_calls 或吐答案)</td><td>planner 出计划、responder 措辞,两次 LLM 各管一摊</td></tr>
+      <tr><td>工具结果是否回模型</td><td>结果 append 回真相账本,下一圈模型看得到 → 支持依赖型多跳</td><td>结果不回 planner,planner 蒙眼一次定全部 → 够不着"查 A 才知道查 B"</td></tr>
+      <tr><td>分叉判据</td><td>带不带 tool_calls,一个布尔,程序无需猜</td><td>计划阶段就分好了路由,但路由对"还要不要再查"无感</td></tr>
+      <tr><td>推理过程的流式</td><td>原生流式,模型边想边吐,前端实时看到</td><td>真正推理在 planner 一次算完,流式靠补发 hack 假装</td></tr>
+      <tr><td>简单问题的调用次数</td><td>最少 1 圈(模型张嘴就答)</td><td>固定两次(planner + responder),哪怕不需要工具 ✓(它在"次数封顶"上更可预测)</td></tr>
+      <tr><td>参数保真度</td><td>一个脑子兼顾决策与措辞,参数可能回退,靠工具 schema 强约束 + 喂回校验 + 离线评测兜</td><td>planner 专职出参,职责单一,结构化程度天然更高 ✓(它的真实优点)</td></tr>
+    </tbody></table>
+    <p><strong>公允裁决:</strong>两个模型分工不是稻草人,它有两处真优点——<em>职责单一</em>:planner 只管出结构化参数、不分心措辞,参数保真度天然更稳;<em>次数可预测</em>:固定两次 LLM,成本上限好估。我们合并成单 LLM,确实付出了代价:决策与表达挤在一个脑子里,工具参数的保真度可能回退。我们不是无视这个代价,而是用三道防线接住它——工具 schema 强约束(参数格式硬卡)、分发前对参数做校验并把错误<em>喂回</em>让模型自己改、再用工具选择的离线评测长期守护。换来的是分工架构<em>结构上拿不到</em>的东西:工具结果回得到模型、依赖型多跳跑得通、推理过程真流式而非补发假装。当替代方案的"职责单一"优势,抵不过它"工具结果不回模型"这个结构性硬伤时,这笔账就该这么算。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img" font-family="Noto Sans SC, sans-serif">
+      <defs>
+        <marker id="q2-ar-i" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="q2-ar-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#bf3f26"/>
+        </marker>
+        <marker id="q2-ar-g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#1f6e5e"/>
+        </marker>
+      </defs>
+
+      <text x="20" y="28" font-size="15" font-weight="bold" fill="#2f4d8a">一圈的数据流 · 真相→投影→单 LLM→二选一</text>
+
+      <!-- center truth -->
+      <rect x="320" y="56" width="260" height="58" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8"/>
+      <text x="450" y="82" font-size="13" font-weight="bold" fill="#bf3f26" text-anchor="middle">state.messages(单一真相)</text>
+      <text x="450" y="101" font-size="11" fill="#85806f" text-anchor="middle">OpenAI 格式消息账本 · 本 turn 全部轨迹</text>
+
+      <!-- 1. assemble_context projection -->
+      <rect x="320" y="156" width="260" height="46" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="450" y="176" font-size="12" fill="#2f4d8a" text-anchor="middle">① assemble_context 投影(纯函数)</text>
+      <text x="450" y="193" font-size="11" fill="#85806f" text-anchor="middle">只读派生 → 一份发给模型的 messages</text>
+
+      <line x1="450" y1="114" x2="450" y2="154" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#q2-ar-i)"/>
+      <text x="540" y="140" font-size="11" fill="#2f4d8a" text-anchor="middle">投影(读)</text>
+
+      <!-- 2. single LLM -->
+      <rect x="320" y="240" width="260" height="58" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.8"/>
+      <text x="450" y="266" font-size="13" font-weight="bold" fill="#1f6e5e" text-anchor="middle">② 单 LLM(流式)</text>
+      <text x="450" y="285" font-size="11" fill="#1f6e5e" text-anchor="middle">既决策又说话 · 同一次回复二选一</text>
+
+      <line x1="450" y1="202" x2="450" y2="238" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#q2-ar-i)"/>
+
+      <!-- fork diamond -->
+      <path d="M450,330 L500,365 L450,400 L400,365 Z" fill="#f0ede4" stroke="#a8761f" stroke-width="1.8"/>
+      <text x="450" y="362" font-size="12" font-weight="bold" fill="#a8761f" text-anchor="middle">分叉</text>
+      <text x="450" y="379" font-size="10" fill="#a8761f" text-anchor="middle">带 tool_calls?</text>
+
+      <line x1="450" y1="298" x2="450" y2="328" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#q2-ar-g)"/>
+
+      <!-- branch A: tool_calls → dispatch -->
+      <rect x="600" y="342" width="270" height="46" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="735" y="362" font-size="12" fill="#2f4d8a" text-anchor="middle">③A 带 → dispatch 执行工具</text>
+      <text x="735" y="379" font-size="11" fill="#85806f" text-anchor="middle">tool 结果 append 回真相账本</text>
+      <line x1="500" y1="365" x2="598" y2="365" stroke="#2f4d8a" stroke-width="1.6" marker-end="url(#q2-ar-i)"/>
+      <text x="548" y="356" font-size="11" fill="#2f4d8a" text-anchor="middle">决策</text>
+
+      <!-- loop-back arrow from branch A up to truth -->
+      <path d="M735,342 C735,150 660,118 580,92" fill="none" stroke="#1f6e5e" stroke-width="1.8" marker-end="url(#q2-ar-g)"/>
+      <text x="775" y="210" font-size="11" fill="#1f6e5e" text-anchor="middle">append(写)</text>
+      <text x="775" y="226" font-size="11" fill="#1f6e5e" text-anchor="middle">回圈首再想</text>
+
+      <!-- branch B: no tool_calls → natural stop -->
+      <rect x="120" y="342" width="240" height="46" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="240" y="362" font-size="12" fill="#3a3a3a" text-anchor="middle">③B 不带 → 自然停</text>
+      <text x="240" y="379" font-size="11" fill="#85806f" text-anchor="middle">content = final_response,turn 结束</text>
+      <line x1="400" y1="365" x2="362" y2="365" stroke="#85806f" stroke-width="1.6" marker-end="url(#q2-ar-i)"/>
+      <text x="385" y="356" font-size="11" fill="#85806f" text-anchor="middle">表达</text>
+
+      <!-- gates note -->
+      <rect x="120" y="240" width="150" height="58" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.2" stroke-dasharray="4 3"/>
+      <text x="195" y="263" font-size="11" fill="#85806f" text-anchor="middle">圈首还有</text>
+      <text x="195" y="280" font-size="11" fill="#85806f" text-anchor="middle">取消/四道闸</text>
+      <text x="195" y="294" font-size="10" fill="#85806f" text-anchor="middle">(本类第 4、7 题)</text>
+
+      <!-- legend -->
+      <rect x="120" y="455" width="660" height="70" rx="8" fill="#ffffff" stroke="#d8d2c4" stroke-width="1"/>
+      <text x="140" y="478" font-size="11" font-weight="bold" fill="#85806f">图例</text>
+      <rect x="140" y="490" width="16" height="12" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="164" y="500" font-size="11" fill="#3a3a3a">单一真相账本</text>
+      <rect x="290" y="490" width="16" height="12" rx="3" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="314" y="500" font-size="11" fill="#3a3a3a">纯函数/编排步</text>
+      <rect x="450" y="490" width="16" height="12" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="474" y="500" font-size="11" fill="#3a3a3a">单 LLM / 写回</text>
+      <rect x="600" y="490" width="16" height="12" rx="3" fill="#f0ede4" stroke="#a8761f"/>
+      <text x="624" y="500" font-size="11" fill="#3a3a3a">分叉 / 自然停</text>
+      <text x="140" y="518" font-size="11" fill="#85806f">绿色回环 = 工具结果 append 回真相、回圈首,让模型"看一步结果再决定下一步"</text>
+    </svg>
+    <figcaption>图 2-2 · 怎么看:从中间朱砂色的 <code>state.messages</code>(真相账本)起步,顺箭头往下读一圈。<strong>投影(读)</strong>=把账本组装成发给模型的窗口,不改账本本身;模型这次回复走到黄色<strong>分叉</strong>菱形——这正是"决策与表达合一"的形:带 tool_calls 就往右(决策,去执行工具),不带就往左(表达,这段就是最终答案)。右边那条绿色<strong>回环</strong>是关键:工具结果 <strong>append(写)</strong> 回真相账本、回到圈首,下一圈模型就能看到刚查到的东西——"查 A 才知道查 B"就靠这条回环跑通。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>主循环=一个裸 while,每圈固定节拍</strong>:取消检查 → 终止闸 → 并入插话 → 组窗口投影 → 单次流式调 LLM → 折叠输出 → 带 tool_calls 就执行工具再回圈首、不带就自然停。</li>
+      <li><strong>数据流只有一个真相:<code>state.messages</code></strong>。每圈把它<em>投影</em>成发给模型的消息(只读派生);模型的 assistant 消息、工具的 tool 消息都 <em>append</em> 回它。下一圈连同新尾巴一起再发——所以上一圈查到的,下一圈一定看得到。</li>
+      <li><strong>"单 LLM 既决策又说话"=两个模型合并成一个</strong>:旧架构 planner 出计划、responder 措辞分两次调;新架构一个模型在循环里既决定要不要/调哪个工具,又直接生成给用户的文字。</li>
+      <li><strong>决策与表达的判据=带不带 tool_calls</strong>:带→去执行、继续循环(决策);不带且 stop→content 落定为最终答案、自然停(表达)。停不停是模型自己决定的,不是外部数圈数。</li>
+      <li><strong>turn ≠ 圈</strong>:turn=一问一答=一个异步任务;圈=turn 内 while 的一次迭代;每圈恰好一次 LLM(turn 账单里 llm_calls 就等于圈数)。</li>
+    </ul>
+    <p class="one-liner">一句话速记:一个真相账本(state.messages)+ 一个既决策又说话的模型 + 一个"带不带工具调用"的分叉,循环到模型不再要工具为止。</p>
+    <p class="src-note">参考:<code>backend/app/chatloop/loop.py</code> · <code>backend/app/chatloop/state.py</code> · <code>backend/app/chatloop/context.py</code></p>
+  </div></div>
+</article>
+<article class="question-card" id="loop-q3">
+  <div class="q-header">
+    <span class="q-num">Q3</span>
+    <h3 class="q-title">你为什么把 chat loop 从 LangGraph supervisor 单程图退役成裸 Python while 循环?这个决策的收益和代价各是什么?</h3>
+    <span class="q-diff" title="难度 4/5">★★★★☆</span>
+  </div>
+  <div class="q-tags">
+    <span class="tag">架构迁移</span>
+    <span class="tag">框架退役</span>
+    <span class="tag">裸 while 循环</span>
+    <span class="tag">自有控制流</span>
+    <span class="tag">turn 原子语义</span>
+  </div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题问的是"为什么换框架",不是"换成什么"——它表面上是个技术选型题,底下藏着对一个工程师判断力的三重检验。第一,你是被框架的功能清单牵着走,还是真把每一项功能对照自己的场景算了笔账:这个 checkpoint、这个 interrupt 原语,在我的循环里到底有没有人用?第二,你能不能诚实地说出代价——退役一个跑得好好的框架是破坏性动作,不是免费午餐,只谈收益不谈代价的人多半没真做过迁移。第三,也是最关键的,你拿出来的"我不选框架"的论据,是不是真正击中了框架存在的理由,还是在打稻草人(把对方说得一无是处)。</p>
+    <ul>
+      <li><strong>追问:</strong>LangGraph 自带 checkpoint、interrupt、事件透出、状态管理这四样,你一个裸 while 怎么补上?还是说你根本不需要补?</li>
+      <li><strong>追问:</strong>"中间圈的 checkpoint 没有消费者"——这句话什么意思?为什么它能反过来证明裸 while 是对的?</li>
+      <li><strong>追问:</strong>破坏性替换、没有新旧并存期,万一切过去发现行为退化了怎么办?你怎么保证回归面可控?</li>
+      <li><strong>追问:</strong>多圈循环每圈都要调一次大模型,成本和延迟会不会反而比原来"两次大模型搞定"的单程图更差?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把旧架构说清楚,不然没法谈"换"。旧的 chat 是一张<strong>单程图</strong>:第一个大模型(规划者)读完用户问题,一次性吐出一份结构化的"我要查这几样东西"的计划;然后一段纯函数路由把计划分发出去;工具批量执行;最后第二个大模型(应答者)拿着工具结果合成回答。注意一个致命特征:<strong>工具结果不回流给规划者</strong>。计划在第一步就定死了,后面只是照单执行。这是一条直线,不是一个圈。</p>
+
+    <h5>为什么要换:七个够不着的缺口</h5>
+    <p>这条直线在七个地方对不齐"一个像样的工具型 agent 该有的样子"。我把它们列出来,因为这七条才是真正的迁移动机——不是"while 比图时髦":</p>
+    <ul>
+      <li><strong>依赖型多跳够不着。</strong>"先查持仓清单,看到里面有哪几只股票,才知道接下来该查谁的财报"——这种"查了 A 才知道要查 B"的链路,单程图天生做不到,因为计划在看到 A 的结果之前就已经定死了。</li>
+      <li><strong>没有预算闸。</strong>没法按 token 或金额封一个硬上限,烧多少算多少。</li>
+      <li><strong>上下文只会"超阈值就压缩",不会"按需检索式地选"。</strong>窗口满了就一刀切地砍,没有"这一圈我只把相关的捞进来"的能力。</li>
+      <li><strong>推理过程没有真流式。</strong>旧的"直接回答"路径是靠事后补发文字 hack 出来的假流式,用户看到的不是模型真的在边想边说。</li>
+      <li><strong>打断只能取消整轮。</strong>用户想"插一句话改个方向"是做不到的,要么忍着等完,要么整轮取消重来。</li>
+      <li><strong>没有审批门的挂载点。</strong>"这步动作危险,先让用户确认"这种闸没地方插。</li>
+      <li><strong>工具报错只能让应答者道歉,没有自纠回路。</strong>查错了就是查错了,模型没机会"看到报错→改参数→重试"。</li>
+    </ul>
+    <p>这七条的共同点是:它们全都需要"模型看到中间结果后,再决定下一步"。而单程图的本质就是"下一步在看到中间结果之前就定死了"。所以这不是修修补补能解决的——它要的是一个<strong>能回头的圈</strong>,而不是一条直线。</p>
+
+    <h5>骨架怎么选:三个候选 × 三面镜子</h5>
+    <p>确定要"圈"之后,圈有好几种盖法,我摆了三个候选,用三面镜子各照一遍:</p>
+    <ul>
+      <li><strong>裸 Python while 纯正派</strong>——控制流百分之百自己写,不依赖任何框架。</li>
+      <li><strong>LangGraph 双节点回环</strong>——继续用框架,但把单程图收敛成一个"规划↔工具"来回跳的回环。</li>
+      <li><strong>事件溯源 + reducer</strong>——更重的一套,把每个状态变化当事件存下来、用归约函数推演当前态。</li>
+    </ul>
+    <p>三面镜子是:<strong>可行性</strong>(能不能落地)、<strong>研报对齐</strong>(跟业界主流 agent 循环的做法是否一致)、<strong>作品价值</strong>(这是个面试作品,要不要把"控制流我自己掌控"这件事讲透)。最后定的是裸 while。事件溯源太重、收益用不上;LangGraph 双节点回环留着框架但其实没用上框架的好处;裸 while 在"控制流百分之百自有 + 可读性 + 能讲清楚的作品叙事"上三面通吃。</p>
+
+    <h5>压垮 LangGraph 的那根稻草:turn 原子语义</h5>
+    <p>很多人会问:就算要做成圈,为什么不用框架的圈?毕竟 LangGraph 自带 checkpoint(断点续跑)、interrupt(暂停人工介入)、事件透出、状态管理这四样,听起来都很有用。这里有个关键洞察,也是整个决策的承重墙——<strong>turn 原子语义</strong>。</p>
+    <div class="callout"><strong>什么是 turn 原子语义?</strong>一个 turn,就是"用户发一条消息 → 系统给出一个最终回答"这一整段。我把它定义成<strong>不可分割的原子</strong>:重试 = 整个 turn 从头重跑,不存在"恢复到第几圈接着跑";运行中插话 = 并入当前这个 turn,而不是排成下一个新问题。</div>
+    <p>这条语义一立,framework 的四项职能就<strong>逐项失效</strong>:</p>
+    <ol>
+      <li><strong>checkpoint 结构性失效。</strong>框架的 checkpoint 是为"跑到一半挂了,从断点续上"准备的。但既然我的重试规则就是"整 turn 重跑",那"每圈存一个检查点"这件事<strong>压根没有消费者</strong>——没有任何代码会去读"第 3 圈的检查点"然后从那儿接着跑。一个没人读的功能,就是死重量。更扎心的是:生产环境的 worker 路径,现状本来就是 <code>checkpointer=None</code>(检查点没真正接上),这套机制一直是半接通的摆设。</li>
+      <li><strong>控制流被收回。</strong>图的核心价值是"它替你管节点之间怎么跳"。但我现在要的就是百分之百自己管跳转(为了那七个缺口),框架替我管反而碍事。</li>
+      <li><strong>事件透出改成循环主动发射。</strong>原来靠框架在节点边界吐事件;现在循环自己在该发的地方主动发,更直、更可控。</li>
+      <li><strong>interrupt 原语用不上。</strong>框架的暂停-恢复原语,在"整 turn 重跑、插话并入"的语义下没有用武之地。</li>
+    </ol>
+    <p>注意这个论证的方向:<strong>不是"我讨厌框架所以退役它",而是"turn 原子语义一旦成立,框架这四项职能各自失去了消费者,退役只是承认既成事实"。</strong>反过来,正因为没有"恢复到第几圈"这回事,裸 while 的合理性被坐实了——它不需要在每圈留检查点这个负担。这是这道题的题眼。</p>
+
+    <h5>收益:不只是"少个依赖"</h5>
+    <p>真正的收益里,最值得讲的是一个连带的"简化红利"。旧架构里,要拿到"这一轮最终跑出来的状态",得做三个动作的拼接:从事件流里捞特定的结束信号、按节点名匹配、再异步查一次图的状态。三个接缝,任何一个错位都是 bug。换成裸 while 之后,<code>final = await loop.run(state)</code> 一个函数返回值就是最终状态——<strong>三个接缝一起消失</strong>,那个为了假装流式而补发文字的 hack 也跟着删掉了。这种"换了骨架,顺手干掉一堆历史接缝"的红利,是评估迁移收益时最该看重、却最容易被忽略的部分。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>用最精简的伪代码把"直线 vs 圈"的结构差异摆出来,你一眼就能看出为什么单程图够不着依赖型多跳。先看旧的单程图:</p>
+<pre><code class="language-python"># 旧:单程图 —— 一条直线,计划在看到结果前就定死
+async def old_supervisor(question):
+    plan = await planner_llm(question)        # 大模型①:一次性出全部计划
+    results = []
+    for call in plan.tool_calls:              # 照单执行,不回头
+        results.append(await run_tool(call))
+    answer = await responder_llm(question, results)  # 大模型②:合成回答
+    return answer
+    # 致命点:results 永远不回流给 planner —— "查了A才知道查B" 做不到
+</code></pre>
+    <p>再看裸 while 的圈。注意它把"规划"和"应答"合并成同一个模型,在循环里既决策又说话(这块机制属于本类第 2 题,这里只点到为止),关键是<strong>工具结果回流、模型据此决定下一步</strong>:</p>
+<pre><code class="language-python"># 新:裸 while —— 一个圈,结果回流,模型看了再定下一步
+async def tool_loop(state):
+    while True:
+        messages = assemble_context(state)            # 每圈现组窗口(纯函数)
+        step = await llm.stream_step(messages, tools) # 单模型:既决策又说话
+        state = apply_step(state, step)
+        if not step.tool_calls:                        # 模型不再要工具 → 自然停
+            return finalize(state)                     # ← 返回值就是 final_state
+        if halt := check_gates(state):                 # 四道闸封顶(成本/步数兜底)
+            return await force_conclude(state, halt)
+        results = await dispatch(step.tool_calls)      # 执行工具
+        state = apply_results(state, results)          # 结果折叠回 state,下一圈模型能看见
+        # ↑ 回到 while 顶 —— 模型看到 results 后,自己决定要不要再查、查什么
+</code></pre>
+    <p><strong>推演:</strong>"监控六只持仓"这个典型场景,旧图是固定两次大模型(规划 + 应答);裸 while 大约转五圈、留了一倍垫到上限 12 圈才硬停。表面看"五圈五次大模型 vs 两次",成本似乎涨了。但实际不是这么算的:① 旧图的两次里,规划那次必须把"该查什么"全猜对——猜不对就只能给个差答案,而裸 while 用多花的几圈换来了"依赖型多跳能真的查对";② 简单问题(比如"茅台今天涨了吗")裸 while 一圈就自然停,跟单程图成本相当,不会平白多烧;③ 多圈的成本上限被<strong>四道闸封顶</strong>(本类第 4 题细讲),最坏情况有硬天花板。所以"多圈一定更贵"是个错觉:贵的部分买到了正确性,便宜的场景一圈就走,最坏情况有闸兜底。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr><th>维度</th><th class="th-sgl">我们的选择(裸 Python while 自有控制流)</th><th class="th-vllm">替代方案(保留 LangGraph supervisor 图,含技能子图回环)</th></tr></thead>
+    <tbody>
+      <tr><td>依赖型多跳</td><td>结果回流,模型看了 A 再决定查 B,天然支持</td><td>单程图做不到;要支持得自己在框架里搭回环,等于绕开框架核心抽象</td></tr>
+      <tr><td>断点续跑(checkpoint)</td><td>turn 原子=整 turn 重跑,根本不需要中间检查点</td><td>框架自带,但在"整 turn 重跑"语义下<strong>没有消费者</strong>;生产路径本就 <code>checkpointer=None</code> 半接通</td></tr>
+      <tr><td>控制流归属</td><td>百分之百自有,一个 while 一眼读懂,作品叙事讲得清</td><td>交给框架管节点跳转,省了搭建,但藏在框架黑盒里、可读性差</td></tr>
+      <tr><td>取最终状态</td><td>函数返回值直接就是 final_state,零接缝</td><td>需"事件流捞结束信号 + 节点名匹配 + 异步再查状态"三接缝拼</td></tr>
+      <tr><td>暂停/人工介入(interrupt)</td><td>插话靠自己的 steering 机制,turn 内并入(本类第 7 题)</td><td>框架有 interrupt 原语,但在本项目语义下用不上</td></tr>
+      <tr><td>迁移代价</td><td>破坏性替换、无并存期、回归面大,靠分期 + 差分锁行为 + 录真实对话兜底</td><td>不迁移就零代价,但七个缺口一个都补不上</td></tr>
+    </tbody></table>
+    <p><strong>公允裁决:</strong>LangGraph 的好处是真实且不该被抹黑的——它自带 checkpoint、interrupt、事件透出、状态管理这一整套,在"需要断点续跑、需要复杂多分支编排、团队要统一心智模型"的场景里,自己手搓这些是给自己挖坑。如果我的 turn 是<strong>可以恢复到中途</strong>的(比如一个跑几十分钟、中间可能崩的长任务),那 checkpoint 立刻就有消费者,这道题的答案可能就反过来了。我不选它,前提非常具体:我的 turn 是<strong>原子的</strong>——重试整轮重跑、插话并入当前轮——这条语义一旦成立,框架那四项职能就各自失去了消费者,留着只是死重量,还白白把控制流锁进黑盒,牺牲了我最看重的可读性和"控制流自己掌控"的作品叙事。换句话说,我不是嫌框架差,而是我的场景恰好把框架最值钱的部分用不上了。至于迁移代价(破坏性替换、回归面大),我是用<strong>分期实施</strong>压住的:前几期纯新增、不碰现有路径,最后一期才切换;用<strong>差分金标准</strong>锁住行为(切换前后同一批问题答案对比);再用<strong>重录真实对话流</strong>把 mock 测不出来的协议细节兜住。这样它从"破坏性大爆炸"降级成"可回退的渐进切换"。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="ar-q3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="ar-q3-grn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#1f6e5e"/>
+        </marker>
+        <marker id="ar-q3-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#bf3f26"/>
+        </marker>
+      </defs>
+      <style>text{font-family:"Noto Sans SC, sans-serif";}</style>
+
+      <text x="20" y="26" font-size="15" font-weight="700" fill="#2f4d8a">前后对比 + LangGraph 四项职能各自失效的原因</text>
+
+      <!-- ===== 左栏:旧单程图(直线) ===== -->
+      <text x="40" y="58" font-size="12.5" font-weight="700" fill="#85806f">旧:单程图(一条直线)</text>
+      <rect x="30" y="70" width="150" height="40" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <text x="105" y="88" font-size="11" font-weight="700" fill="#85806f" text-anchor="middle">规划者 大模型①</text>
+      <text x="105" y="103" font-size="10" fill="#85806f" text-anchor="middle">一次出全部计划</text>
+      <rect x="30" y="128" width="150" height="34" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <text x="105" y="149" font-size="11" fill="#85806f" text-anchor="middle">纯函数路由</text>
+      <rect x="30" y="180" width="150" height="34" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <text x="105" y="201" font-size="11" fill="#85806f" text-anchor="middle">工具批量执行</text>
+      <rect x="30" y="232" width="150" height="40" rx="8" fill="#f0ede4" stroke="#85806f"/>
+      <text x="105" y="250" font-size="11" font-weight="700" fill="#85806f" text-anchor="middle">应答者 大模型②</text>
+      <text x="105" y="265" font-size="10" fill="#85806f" text-anchor="middle">合成回答</text>
+      <line x1="105" y1="110" x2="105" y2="128" stroke="#85806f" stroke-width="1.5" marker-end="url(#ar-q3)"/>
+      <line x1="105" y1="162" x2="105" y2="180" stroke="#85806f" stroke-width="1.5" marker-end="url(#ar-q3)"/>
+      <line x1="105" y1="214" x2="105" y2="232" stroke="#85806f" stroke-width="1.5" marker-end="url(#ar-q3)"/>
+      <!-- 结果不回流 标注 -->
+      <path d="M40 250 C12 200, 12 120, 38 92" fill="none" stroke="#bf3f26" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#ar-q3-red)"/>
+      <text x="14" y="320" font-size="10" fill="#bf3f26">✗ 工具结果</text>
+      <text x="14" y="333" font-size="10" fill="#bf3f26">  不回规划者</text>
+      <text x="14" y="346" font-size="10" fill="#bf3f26">  ⇒ 多跳够不着</text>
+
+      <!-- ===== 中栏:裸 while(圈) ===== -->
+      <text x="250" y="58" font-size="12.5" font-weight="700" fill="#bf3f26">新:裸 while(一个圈)</text>
+      <rect x="250" y="80" width="160" height="36" rx="8" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="330" y="102" font-size="11" font-weight="700" fill="#bf3f26" text-anchor="middle">组窗口 + 单模型</text>
+      <rect x="250" y="150" width="160" height="36" rx="8" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="330" y="166" font-size="11" fill="#bf3f26" text-anchor="middle">还要工具?执行</text>
+      <text x="330" y="180" font-size="10" fill="#bf3f26" text-anchor="middle">不要 → 自然停</text>
+      <rect x="250" y="220" width="160" height="36" rx="8" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="330" y="242" font-size="11" fill="#bf3f26" text-anchor="middle">结果折叠回 state</text>
+      <line x1="330" y1="116" x2="330" y2="150" stroke="#bf3f26" stroke-width="1.6" marker-end="url(#ar-q3-red)"/>
+      <line x1="330" y1="186" x2="330" y2="220" stroke="#bf3f26" stroke-width="1.6" marker-end="url(#ar-q3-red)"/>
+      <!-- 回流箭头:结果回到顶,模型再决定 -->
+      <path d="M410 238 C470 238, 470 98, 412 98" fill="none" stroke="#1f6e5e" stroke-width="1.8" marker-end="url(#ar-q3-grn)"/>
+      <text x="430" y="172" font-size="10" font-weight="700" fill="#1f6e5e">结果回流</text>
+      <text x="430" y="186" font-size="10" fill="#1f6e5e">看了再决定</text>
+      <text x="252" y="282" font-size="10" fill="#1f6e5e">✓ 整 turn 一个原子:重试=整轮重跑</text>
+
+      <!-- ===== 右栏:四项职能失效气泡 ===== -->
+      <text x="560" y="58" font-size="12.5" font-weight="700" fill="#2f4d8a">LangGraph 四项职能 → 逐项失效</text>
+      <!-- checkpoint -->
+      <rect x="560" y="72" width="320" height="52" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="572" y="90" font-size="11" font-weight="700" fill="#2f4d8a">① checkpoint(断点续跑)</text>
+      <text x="572" y="106" font-size="10" fill="#85806f">✗ turn 原子=整轮重跑,中间圈检查点无消费者</text>
+      <text x="572" y="119" font-size="10" fill="#85806f">  且生产路径本就 checkpointer=None(半接通)</text>
+      <!-- 控制流 -->
+      <rect x="560" y="132" width="320" height="40" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="572" y="150" font-size="11" font-weight="700" fill="#2f4d8a">② 控制流(管节点跳转)</text>
+      <text x="572" y="165" font-size="10" fill="#85806f">✗ 要的就是 100% 自有,框架代管反碍事</text>
+      <!-- 事件 -->
+      <rect x="560" y="180" width="320" height="40" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="572" y="198" font-size="11" font-weight="700" fill="#2f4d8a">③ 事件透出</text>
+      <text x="572" y="213" font-size="10" fill="#85806f">✗ 改成循环在该发处主动发射,更直更可控</text>
+      <!-- interrupt -->
+      <rect x="560" y="228" width="320" height="40" rx="8" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="572" y="246" font-size="11" font-weight="700" fill="#2f4d8a">④ interrupt(暂停人工介入)</text>
+      <text x="572" y="261" font-size="10" fill="#85806f">✗ 插话靠自有 steering 并入当前轮,原语用不上</text>
+
+      <!-- 简化红利条 -->
+      <rect x="560" y="290" width="320" height="56" rx="8" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="572" y="308" font-size="11" font-weight="700" fill="#1f6e5e">✓ 简化红利:取最终状态</text>
+      <text x="572" y="324" font-size="10" fill="#1f6e5e">旧:事件捞结束信号 + 节点名匹配 + 异步再查 = 3 接缝</text>
+      <text x="572" y="338" font-size="10" fill="#1f6e5e">新:final = await loop.run(state) 返回值即终态,接缝全消</text>
+
+      <!-- 底部图例 -->
+      <line x1="40" y1="380" x2="60" y2="380" stroke="#85806f" stroke-width="2"/>
+      <text x="66" y="384" font-size="10" fill="#85806f">灰=旧/被替代(单程图)</text>
+      <line x1="240" y1="380" x2="260" y2="380" stroke="#bf3f26" stroke-width="2"/>
+      <text x="266" y="384" font-size="10" fill="#bf3f26">朱砂=我们的选择(裸 while)</text>
+      <line x1="500" y1="380" x2="520" y2="380" stroke="#1f6e5e" stroke-width="2"/>
+      <text x="526" y="384" font-size="10" fill="#1f6e5e">松绿=正向收益/结果回流</text>
+      <line x1="720" y1="380" x2="740" y2="380" stroke="#2f4d8a" stroke-width="2"/>
+      <text x="746" y="384" font-size="10" fill="#2f4d8a">靛蓝=框架职能</text>
+
+      <!-- 一句话承重墙 -->
+      <rect x="40" y="404" width="840" height="34" rx="8" fill="#f0ede4" stroke="#a8761f"/>
+      <text x="60" y="425" font-size="11" fill="#a8761f">承重墙:turn 原子语义一旦成立 → 四项职能各失消费者 → 退役只是承认既成事实(不是嫌框架差)</text>
+    </svg>
+    <figcaption>图 2-3 · 怎么看:左栏灰色是旧的"单程图",一条从上往下的直线,红色虚线标出它的死穴——工具结果不回规划者,所以"查了 A 才知道查 B"的多跳够不着。中栏朱砂色是新的裸 while,绿色那根回流箭头是关键:结果折叠回状态、绕回循环顶,模型看了再决定下一步。右栏四个靛蓝框是 LangGraph 自带的四项职能,每个框下面写着它在本项目里失效的原因;底下绿框是顺手拿到的"简化红利"。最底那条 ochre 横条是整道题的承重墙——"turn 原子语义"(一个 turn 是不可分割的整体,重试就整轮重跑)一旦立住,框架那四项职能就各自没人用了,退役它不是因为它差,而是它的本事在这个场景里恰好用不上。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>动机是七个缺口,不是赶时髦。</strong>依赖型多跳、预算闸、检索式上下文、真流式、插话改向、审批门、错误自纠——这七条全都要"模型看到中间结果再定下一步",而单程图的本质恰恰是"下一步在看到结果前就定死",修不动,只能换成能回头的圈。</li>
+      <li><strong>退役框架的承重墙是 turn 原子语义。</strong>重试=整轮重跑、插话=并入当前轮,这条语义一立,LangGraph 的 checkpoint / 控制流 / 事件 / interrupt 四项职能各自失去消费者(checkpoint 尤其,生产路径本就 <code>checkpointer=None</code> 半接通)。退役是承认既成事实,不是打稻草人。</li>
+      <li><strong>收益里最值钱的是简化红利。</strong>取最终状态从"三接缝拼接"变成一个函数返回值,假流式 hack 顺手删掉——迁移收益要算这种连带账,不只是"少个依赖"。</li>
+      <li><strong>代价诚实摆出:破坏性替换、回归面大。</strong>用分期实施(前几期纯新增、最后一期才切)+ 差分金标准锁行为 + 重录真实对话流,把大爆炸降级成可回退的渐进切换。多圈成本顾虑则由四道闸封顶 + 简单问题一圈自然停兜底。</li>
+      <li><strong>裁决是场景特定的。</strong>如果我的 turn 可以恢复到中途(长任务),checkpoint 立刻有消费者,答案会反过来——所以这是个有前提的决策,不是"框架一律不如手搓"的口号。</li>
+    </ul>
+    <p class="one-liner">一句话速记:不是嫌 LangGraph 差,而是 turn 一旦"原子化",它最值钱的 checkpoint/interrupt 全失去消费者,留着只剩死重量——于是退役成一个能让结果回流、控制流百分之百自有的裸 while 圈。</p>
+    <p class="src-note">参考:<code>docs/superpowers/specs/2026-06-05-chat-loop-redesign-design.md</code> · <code>docs/claude-context/chat-loop-redesign-done.md</code> · <code>backend/app/chatloop/loop.py</code></p>
+  </div></div>
+</article>
+<article class="question-card" id="loop-q4">
+  <div class="q-header">
+    <span class="q-num">Q4</span>
+    <h3 class="q-title">你的循环有"四道终止闸",为什么需要四道而不是一道?各拦什么情况?</h3>
+    <span class="q-diff" title="难度 4/5">★★★★☆</span>
+  </div>
+  <div class="q-tags">
+    <span class="tag">终止闸</span>
+    <span class="tag">预算闸</span>
+    <span class="tag">打转检测</span>
+    <span class="tag">烧签名</span>
+    <span class="tag">连续失败连</span>
+  </div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题表面问"你有几道闸",真正在探的是:你有没有把"agent 跑不停"这个抽象问题<strong>拆成几种不同的失效模式</strong>,还是只会用一个 <code>for i in range(N)</code> 兜底。一个只设了步数上限的人,和一个为每类坏情况都画过一道防线的人,对"自主循环到底哪里会出事"的理解深度差很远。面试官会顺着往下挖:</p>
+    <ul>
+      <li><strong>追问:</strong>步数上限本来就能兜底任何死循环,你为什么还要另外三道?它们各自能比步数上限"早多久"止损?</li>
+      <li><strong>追问:</strong>"打转"(同样工具同样参数反复调)和"乱试"(每次换个参数硬碰)是两回事吗?你怎么分别抓?</li>
+      <li><strong>追问:</strong>检测打转你是让模型自己反省"我是不是在重复",还是用外部规则判?为什么?</li>
+      <li><strong>追问:</strong>撞了闸之后你是直接抛异常截断、还是有别的处理?用户会看到什么?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把场景说清楚:这是一个"模型想一下 → 调个工具 → 看结果 → 再想"的循环(主循环怎么转见本类第 2 题)。理想情况下,模型查够了数据自己就停下来开始作答——这条<strong>自然停</strong>是主路径,占绝大多数 turn。问题在于剩下那一小撮 turn:模型可能<strong>停不下来</strong>。而"停不下来"不是一种病,是<strong>四种病</strong>,每种的病灶和早期症状都不一样。用一道闸去拦四种病,等于不管什么病都拖到"烧满 12 圈"才送急诊。</p>
+
+    <h5>四种失效模式,四道闸各管一种</h5>
+    <p>我把它们按"圈首判定顺序"列出来——每圈开头,在花钱调模型之前,先依次过一遍这几道闸:</p>
+    <ul>
+      <li><strong>① 自然停</strong>:这一圈模型没再要求调工具(<code>not tool_calls</code>),说明它准备直接作答了。这是正常出口,不是"闸",是循环的主路径。展开讲见本类第 2 题。</li>
+      <li><strong>② 硬迭代上限</strong>(<code>max_steps=12</code>):拦"怎么都停不下来的死循环"。这是最后一道兜底,数值上算过:六只持仓的监控场景大约五圈就够,留了一倍垫。它是别的闸全失灵时的保险丝。</li>
+      <li><strong>③ 预算闸</strong>(<code>max_cny</code> 或 <code>max_tokens</code> 任一超):拦"按钱/token 封顶"。防的是<strong>少数几圈就把成本炸穿</strong>——比如某一圈塞进一个巨大上下文,步数还没到 12,钱已经花光了。步数和花钱不是一回事,所以要单独一道。</li>
+      <li><strong>④ 打转检测</strong>(spinning):拦"原地踏步"——连续两圈,模型发起的工具调用<strong>签名集完全相同</strong>(同样的工具、同样的参数)。这种死循环步数和预算都还远没到顶,但它已经在做无用功了,越早掐越省。</li>
+    </ul>
+
+    <h5>加强项一:烧签名(burn)——同一个错误别死磕</h5>
+    <p>打转闸抓的是"两圈完全一样"。但有种更隐蔽的:模型并不是每圈都重复,而是某一个具体调用<strong>反复失败</strong>(比如老用一个查不到的代码)。我给每个 <code>(工具, 参数哈希)</code> 签名记一个失败计数,失败累计到 <code>burn_threshold=3</code> 次,这个签名就被<strong>"烧掉"</strong>:之后模型再发同一个签名,直接在分发前被拒,并喂回一句"该调用已连续失败 3 次被熔断,请换方法"。这不是终止整个循环,而是<strong>定点封杀一条死路</strong>,把模型从这条路上推开。</p>
+    <div class="callout">这里有个反直觉的细节:如果模型流式吐出的 JSON 参数是残缺的、算不出签名,我<strong>不</strong>在这一步丢弃它,而是放行,交给下游工具的 schema 校验产出一条指导性错误喂回模型。在这里静默吞掉反而更危险——模型不知道发生了什么。坏参数这一环属于 function calling 工程坑,展开见本类第 8 题。</div>
+
+    <h5>加强项二:连续失败连(repeated_failures)——抓"换参数硬试"</h5>
+    <p>后续一次精度修补又补了个洞:有一种乱试,打转闸和烧签名都拦不住。设想模型这样查:<code>query_kb(09988.HK)</code> ❌ → <code>query_kb(9988)</code> ❌ → <code>query_kb(BABA)</code> ❌。每圈参数都不一样,所以<strong>签名集永远不重复</strong>(打转闸不响),也没有<strong>哪个单签名失败到 3 次</strong>(烧签名不响)——但它显然在瞎试。我加了一道<strong>跨签名</strong>的闸:从台账末尾往回数连续 <code>success=False</code> 的条数,达到 <code>max_consecutive_failures=5</code> 就 halt。门槛比烧签名(3)宽一档,因为"连续失败 5 次"是更强的"这条线索走不通"信号。</p>
+
+    <h5>加强项三:分发前预算预检(budget_margin_exhausted)</h5>
+    <p>预算闸③是"已经超了才停",但有个时序问题:这一圈 LLM 成本入账后,余量可能只够再调一次模型、不够"再跑一批工具 + 又一轮模型"了。所以在<strong>分发工具之前</strong>再做一次预检:剩余预算低于上限的 <code>budget_dispatch_margin_ratio=0.2</code>(20%),就整轮跳过工具、直接收尾,把留下的那 20% 余量专门留给收尾那次 LLM 调用。这是"花超之前先刹车",而不是"撞墙了再算账"。</p>
+
+    <h5>两个贯穿全篇的设计决策</h5>
+    <p><strong>打转检测靠外部裁判,不靠模型自省。</strong>我没让模型每圈自问"我是不是在重复";而是用台账(ToolLedger)记录的签名集指纹做<strong>确定性比对</strong>,零 LLM 调用。调研里一个结论很硬:没有外部反馈的纯自省,在推理任务上不升反降——模型自查自己有没有打转,本身就不可靠。指纹比对是确定性的,它说重复就是真重复。</p>
+    <p><strong>撞闸不抛异常、不静默截断,而是逼模型收尾 + 如实上报。</strong>任何一道闸触发,走的都是 <code>_force_conclude</code>:往对话里塞一句系统消息"已达执行上限,请基于已有信息直接作答",并把 <code>tool_choice</code> 钉成 <code>none</code>(这一圈不许再调工具),让模型用手头已有的信息给出一个最终回答。同时发一个 <code>loop_halt</code> 事件向看板和用户如实归因。撞闸的原因有<strong>两套口径</strong>:事件层给前端看板看的是机器码(<code>max_steps</code> / <code>budget</code> / <code>spinning</code> / <code>repeated_failures</code>),喂给模型的系统消息用映射表翻成中文人话("已达预算上限"等)——机器要归因、模型要看懂,两边别将就。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面这段伪代码把"圈首一串闸"的判定顺序和撞闸去向画出来。真实实现里判定逻辑全在零 I/O 的纯函数 <code>check_gates</code> 里,循环本体只负责编排:</p>
+    <pre><code class="language-python"># 圈首:在花钱调模型之前,依次过闸(顺序固定)
+def check_gates(state, cfg):
+    # ② 硬迭代上限:最后兜底的保险丝
+    if state.step &gt;= cfg.max_steps:           # 12
+        return "max_steps"
+
+    # ③ 预算闸:钱或 token 任一超顶就停(少数几圈也可能炸穿)
+    if (state.budget_spent_cny &gt;= cfg.max_cny       # 0.10 元
+            or state.budget_spent_tokens &gt;= cfg.max_tokens):  # 120k
+        return "budget"
+
+    # ④ 打转:连续两圈"工具+参数"签名集完全相同 = 原地踏步
+    if state.step &gt;= 2:                        # 有两圈才能比
+        cur  = state.ledger.signature_set(state.step)
+        prev = state.ledger.signature_set(state.step - 1)
+        if cur and cur == prev:
+            return "spinning"
+
+    # 加强:跨签名尾部连续失败(每圈换参数硬试,上面两道都漏检)
+    if state.ledger.trailing_failure_count() &gt;= cfg.max_consecutive_failures:  # 5
+        return "repeated_failures"
+
+    return None   # 全过 → 放行,正常调模型
+
+
+# 循环本体:撞闸不抛异常,逼模型收尾
+halt = check_gates(state, cfg)
+if halt:
+    await emit("loop_halt", reason=halt)      # 机器码给看板归因
+    return await force_conclude(state, halt)  # 中文人话喂模型 + tool_choice=none 收尾
+</code></pre>
+    <p><strong>推演:</strong>假设模型陷入"换参数硬试"——查阿里港股代码,<code>09988.HK</code> ❌ → <code>9988</code> ❌ → <code>BABA</code> ❌ → <code>09988</code> ❌ → <code>0700</code> ❌。看四道闸怎么反应:步数才到 5,<code>max_steps=12</code> 不响;假设每圈很轻,预算远没到顶,预算闸不响;每圈参数都不同,签名集永不重复,<strong>打转闸不响</strong>;没有哪个单签名失败满 3 次,<strong>烧签名也不响</strong>。但<strong>连续失败连</strong>数到第 5 条 <code>success=False</code> 就 halt——精准抓住了前三道都漏检的乱试。如果只有一道 <code>max_steps=12</code>,这个 turn 会白白再烧 7 圈、多花一倍 token 才停。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr><th>维度</th><th class="th-sgl">我们的选择(四道闸 + 三加强)</th><th class="th-vllm">替代方案(单一 max-steps 上限)</th></tr></thead>
+    <tbody>
+      <tr><td>实现成本</td><td>多写 4~5 个纯谓词 + 一套台账签名记账</td><td>一行 <code>if step &gt;= N</code>,最简单</td></tr>
+      <tr><td>打转(原地踏步)</td><td>spinning 闸第 2 圈就掐</td><td>白跑满 12 圈才停</td></tr>
+      <tr><td>乱试(换参数硬试)</td><td>连续失败连第 5 次失败就停</td><td>白跑满 12 圈才停</td></tr>
+      <tr><td>单圈成本超支</td><td>预算闸 + 分发前预检,花超之前刹车</td><td>步数没到就拦不住,钱可能先烧光</td></tr>
+      <tr><td>定点死磕</td><td>烧签名封单条死路,把模型推开换方法</td><td>无,只能整体硬停</td></tr>
+      <tr><td>撞闸体验</td><td>逼模型基于已有信息收尾 + 如实上报原因</td><td>(通常)直接截断,用户拿到半截</td></tr>
+    </tbody></table>
+    <p><strong>公允裁决:</strong>单一 max-steps 上限<strong>真的有它的好</strong>——一行代码、零状态、永远不会误杀,而且它能兜住<em>任何</em>死循环(这也是为什么它仍是我的第②道闸保险丝)。如果这是个低频、低成本、人盯着的脚本,我也会只写它。它的代价只在<strong>规模化、自动化、要花钱</strong>的场景才暴露:打转、乱试、单圈超支这三种坏情况,它都得拖到上限才止损——既烧钱又拖延迟,而且用户拿到的是被硬截断的半截回答。我没有用更激进的方案(比如按每个工具的成本模型选择性跳过"只跳重型工具")——因为我没有可靠的每工具成本模型,那是 YAGNI;预算不足时我的选择是整轮工具都不分发,简单且可证。四道闸 + 三加强不是为了炫技,是因为<strong>"停不下来"本就是四种病,一道闸治不了四种病</strong>。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="arrPass" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 Z" fill="#1f6e5e"/>
+        </marker>
+        <marker id="arrHalt" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 Z" fill="#bf3f26"/>
+        </marker>
+        <marker id="arrLoop" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+          <path d="M0,0 L9,4.5 L0,9 Z" fill="#2f4d8a"/>
+        </marker>
+      </defs>
+
+      <text x="20" y="28" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="700" fill="#2f4d8a">圈首关卡链:每圈调模型之前,依次过闸(顺序固定)</text>
+
+      <!-- 入口 -->
+      <rect x="30" y="55" width="150" height="40" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="105" y="80" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#2f4d8a">while 圈首</text>
+
+      <!-- 闸节点纵列 (左侧) -->
+      <!-- ②max_steps -->
+      <rect x="30" y="125" width="220" height="46" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="140" y="146" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">② 硬迭代上限?step≥12</text>
+      <text x="140" y="163" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">兜底保险丝:怎么都停不下来</text>
+
+      <!-- ③budget -->
+      <rect x="30" y="195" width="220" height="46" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="140" y="216" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">③ 预算?cny≥0.1 或 tok≥120k</text>
+      <text x="140" y="233" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">少数几圈大上下文把钱炸穿</text>
+
+      <!-- ④spinning -->
+      <rect x="30" y="265" width="220" height="46" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="140" y="286" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">④ 打转?连续两圈签名集相同</text>
+      <text x="140" y="303" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">同工具同参数反复调(原地踏步)</text>
+
+      <!-- 连续失败连 -->
+      <rect x="30" y="335" width="220" height="46" rx="8" fill="#e9eef8" stroke="#a8761f" stroke-width="1.5"/>
+      <text x="140" y="356" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#a8761f">加强·连续失败?尾部连失≥5</text>
+      <text x="140" y="373" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">09988→9988→BABA 换参数硬试</text>
+
+      <!-- 放行 → 调LLM -->
+      <rect x="30" y="410" width="220" height="44" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="140" y="431" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#1f6e5e">全过 → 调 LLM(花钱这一圈)</text>
+      <text x="140" y="448" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">再分发前还有:烧签名过滤 + 预算预检</text>
+
+      <!-- 串联箭头(放行向下) -->
+      <line x1="105" y1="95" x2="120" y2="125" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#arrPass)"/>
+      <line x1="140" y1="171" x2="140" y2="195" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#arrPass)"/>
+      <line x1="140" y1="241" x2="140" y2="265" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#arrPass)"/>
+      <line x1="140" y1="311" x2="140" y2="335" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#arrPass)"/>
+      <line x1="140" y1="381" x2="140" y2="410" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#arrPass)"/>
+      <text x="152" y="189" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">不触发↓放行</text>
+
+      <!-- force_conclude 节点 (右侧) -->
+      <rect x="560" y="215" width="300" height="120" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8"/>
+      <text x="710" y="243" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#bf3f26">撞闸 → force_conclude</text>
+      <text x="710" y="268" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">不抛异常、不静默截断</text>
+      <text x="710" y="289" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">① 塞系统消息"请基于已有信息作答"</text>
+      <text x="710" y="308" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">② tool_choice=none,收尾这一圈不调工具</text>
+      <text x="710" y="327" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">③ 发 loop_halt 事件如实归因</text>
+
+      <!-- 各闸触发 → force_conclude -->
+      <line x1="250" y1="148" x2="560" y2="235" stroke="#bf3f26" stroke-width="1.4" marker-end="url(#arrHalt)"/>
+      <line x1="250" y1="218" x2="560" y2="255" stroke="#bf3f26" stroke-width="1.4" marker-end="url(#arrHalt)"/>
+      <line x1="250" y1="288" x2="560" y2="280" stroke="#bf3f26" stroke-width="1.4" marker-end="url(#arrHalt)"/>
+      <line x1="250" y1="358" x2="560" y2="305" stroke="#bf3f26" stroke-width="1.4" marker-end="url(#arrHalt)"/>
+      <text x="360" y="150" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#bf3f26">触发→收尾</text>
+
+      <!-- 调LLM 没工具 = 自然停 / 有工具 = 回圈首 -->
+      <rect x="560" y="395" width="300" height="74" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="710" y="420" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#1f6e5e">① 自然停(主路径):模型没要工具</text>
+      <text x="710" y="440" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">正常出口,直接作答 → done</text>
+      <text x="710" y="458" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">(展开见本类第 2 题)</text>
+      <line x1="250" y1="432" x2="560" y2="432" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#arrPass)"/>
+
+      <!-- 有工具 → 回圈首 -->
+      <path d="M560,415 C440,415 360,120 200,95" fill="none" stroke="#2f4d8a" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#arrLoop)"/>
+      <text x="395" y="108" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">还要工具 → 执行后回圈首(下一圈再过闸)</text>
+
+      <!-- 图例 -->
+      <rect x="560" y="490" width="300" height="56" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1"/>
+      <line x1="575" y1="508" x2="600" y2="508" stroke="#1f6e5e" stroke-width="2" marker-end="url(#arrPass)"/>
+      <text x="608" y="512" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">放行/命中正常路</text>
+      <line x1="575" y1="530" x2="600" y2="530" stroke="#bf3f26" stroke-width="2" marker-end="url(#arrHalt)"/>
+      <text x="608" y="534" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">撞闸 → 收尾</text>
+      <text x="735" y="512" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#a8761f">ochre=后补加强闸</text>
+      <text x="735" y="534" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">蓝虚线=回圈首</text>
+    </svg>
+    <figcaption>图 2-4 · 怎么看:从左上"while 圈首"沿<strong>绿箭头</strong>一道道往下过闸,每道闸"不触发就放行进下一道",全过了才到底部绿框<strong>调 LLM</strong>(这才花钱)。任何一道闸触发,就拐<strong>红箭头</strong>去右侧 <code>force_conclude</code>——不是报错崩掉,而是逼模型用手头信息收尾、并如实上报原因。调完模型若没再要工具就是<strong>自然停</strong>(闸①,正常出口);若还要工具,执行后沿<strong>蓝虚线回圈首</strong>,下一圈重新过闸。"签名"=工具名+参数的指纹,用它做确定性比对来判打转/乱试,全程零 LLM 调用。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>"agent 停不下来"不是一种病而是四种:死循环、超预算、原地打转、定点死磕——一道闸治不了四种,所以分治:max_steps 兜底、预算闸封顶、spinning 抓打转、烧签名封单条死路。</li>
+      <li>后补两道精度闸堵了缝:<strong>连续失败连</strong>(尾部连失≥5)抓"换参数硬试"的乱试——前面所有闸都漏检它;<strong>分发前预算预检</strong>(剩余&lt;20%)在花超之前刹车,而非撞墙再算账。</li>
+      <li>打转/乱试用<strong>台账签名指纹做确定性裁判</strong>,不靠模型自省——调研结论:无外部反馈的纯自省在推理任务上不升反降。</li>
+      <li>撞闸<strong>不抛异常、不静默截断</strong>,而是 force_conclude 逼模型基于已有信息收尾 + 发事件如实归因;归因有两套口径:机器码给看板、中文人话给模型。</li>
+      <li>替代的单 max-steps 不是稻草人——它简单、永不误杀、能兜任何死循环,所以仍是第②道闸;只是另外三种坏情况它都得烧满 12 圈才止损。</li>
+    </ul>
+    <p class="one-liner">一句话速记:停不下来是四种病,四道闸 + 三加强各治一种,且打转靠指纹不靠模型自查。</p>
+    <p class="src-note">参考:<code>backend/app/chatloop/gates.py</code> · <code>backend/app/chatloop/loop.py</code> · <code>docs/superpowers/specs/2026-06-11-chatloop-termination-gate-precision-design.md</code></p>
+  </div></div>
+</article>
+<article class="question-card" id="loop-q5">
+  <div class="q-header">
+    <span class="q-num">Q5</span>
+    <h3 class="q-title">"窗口四区"(KV-cache 分区)是怎么切的?为什么这样切能省 token、省钱,还能稳住 prefix cache 命中?</h3>
+    <span class="q-diff" title="难度 5/5">★★★★★</span>
+  </div>
+  <div class="q-tags">
+    <span class="tag">窗口四区</span>
+    <span class="tag">KV-cache</span>
+    <span class="tag">稳定前缀</span>
+    <span class="tag">省 token</span>
+    <span class="tag">位置工程</span>
+  </div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这题是整个对话引擎里最"省钱见真章"的一题。面试官想确认:你知不知道大模型计费里有个隐藏的便宜口子(请求前缀如果逐字节没变,这部分输入按大约两折计费),以及你有没有把对话上下文的物理布局当成一门"工程"来设计——而不是每轮随手把所有东西拼成一坨发出去。能答到"为什么动态状态要赶到尾部"这一层,就说明你真的理解了缓存命中的机制,而不是背名词。</p>
+    <ul>
+      <li><strong>追问:</strong>这个"便宜口子"到底是怎么触发的?为什么一个字变了整段折扣就没了?</li>
+      <li><strong>追问:</strong>"每轮都变"的状态(比如第几步、预算还剩多少)你放哪了?为什么不能图省事塞进开头?</li>
+      <li><strong>追问:</strong>大窗口模型其实很少真撑爆,那省这点 token 到底省的是什么钱?</li>
+      <li><strong>追问:</strong>老的大工具结果占地方,你直接删掉不就完了?为什么要费劲做"可逆降级"?</li>
+      <li><strong>追问:</strong>你怎么知道这套设计真的生效了、缓存真命中了?有没有数字盯着?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先讲清楚那个"便宜口子"。我们用的模型(阿里云 DashScope 上的 qwen)有一个<strong>隐式 KV-cache</strong>:你这一次请求开头的那一段文字,如果跟上一次请求开头<strong>逐字节完全一样</strong>,模型内部就能把上次算过的中间结果直接复用,不用重算。复用的代价是——这段命中的输入,大约只按正常输入价的<strong>两折</strong>收钱。这是白送的折扣,但有一条铁律:<strong>从第一个变化的字节开始,后面全部作废</strong>。哪怕你只在开头第三行改了一个数字,这行之后的所有内容缓存全废,折扣拿不到了。八路外部调研全票点名这一条,它是整个设计的地基。</p>
+
+    <h5>一轮对话里,上下文长什么样</h5>
+    <p>每"圈"(模型想一次 + 可能调一次工具,叫一个 step)结束后,我们要把当前对话状态投影成一个发给模型的消息数组。如果随手拼,会发现一个尴尬:既有从头到尾都不变的东西(角色设定、工具清单),也有每圈都在变的东西(现在第几步、预算还剩几毛)。这两类混在一起,就等于每圈都在前缀里埋了个会变的字,缓存天天作废。</p>
+    <p>所以我们按"哪些恒定、哪些在变",把上下文从上到下切成四个连续区段,顺序刻意安排成"越往上越稳、越往下越动":</p>
+    <ul>
+      <li><strong>区一 · 稳定前缀区(逐字节恒定)</strong>:一条 system 消息,里面是角色定位、工具使用纪律、用什么时候查记忆/查知识库的启发式、人格设定的稳定部分、技能元数据清单、以及全部工具的 schema。这些东西一个 turn 里从头到尾<strong>一个字都不变</strong>,就是为了吃满那个两折折扣。</li>
+      <li><strong>区二 · 历史区</strong>:上文的压缩摘要 + 最近 4 个 turn 的原文。压缩边界一旦定好,这一圈一圈也是稳的。</li>
+      <li><strong>区三 · 本 turn 轨迹区(只增不改)</strong>:这一轮里,模型说的话、它发起的工具调用、工具返回的结果,一对一对地往后<strong>追加(append-only)</strong>。注意是"只在末尾加",前面已经写下的内容不动——这样区三本身对前面区段也是稳定前缀。</li>
+      <li><strong>区四 · 尾部动态区(每圈重写)</strong>:整个上下文里唯一每圈都重写的一小段,就放在最末尾。内容是一条 user 消息:<code>(今天 2026-06-22 周日。第 3/12 步,预算剩 ¥0.07。)</code>,如果用户中途插了话,也并到这里(插话怎么进来归本类第 7 题)。</li>
+    </ul>
+
+    <div class="callout">
+      <strong>核心招式:动态状态绝不进前缀。</strong>步数、预算这种每圈都变的数字,要是放在开头,从那个字起前面所有缓存全废。把它们全部赶到<strong>最末尾</strong>,每圈就只有这一小段没命中(miss),前面长长的几千上万字全部命中折扣。而且末尾恰好是模型注意力召回最强的位置——既省了钱,又把"当前要紧的状态"摆在了模型最看得见的地方,一举两得。这叫位置工程。
+    </div>
+
+    <h5>参考日期为什么也在尾部</h5>
+    <p>"今天是哪天"这个信息,直觉上像个稳定设定,会想塞进开头。但它在评估和强化学习场景下要被冻结成某个历史 as-of 日期,生产里又是真实今天——一旦它进了稳定前缀,不同会话/不同模式前缀就不一致,缓存白破。所以它被刻意放在区四尾部最前面,跟着动态状态一起走。</p>
+
+    <h5>省钱省的不只是"别溢出"</h5>
+    <p>很多人以为上下文优化就是防止撑爆窗口。但现在窗口动辄几十万 token,真溢出是低频事件。真正的钱漏在别处:窗口装得下的时候,你每转一圈,都会把前面那几千字的老工具结果<strong>原样、全价</strong>再发一遍。一轮对话转五六圈,同一份大结果就被<strong>全价计费五六次</strong>。这才是日常账单的大头。</p>
+    <p>于是有两道互补的"少花钱"机制:</p>
+    <ol>
+      <li><strong>老圈大工具结果降级(可逆,不是删除)</strong>:超过基准阈值(1320 字符)的老圈工具结果,content 被换成 <code>[全文已缓存 ref=...] + 200 字摘要</code>。全文没丢,还在结果缓存(ToolResultCache)里,模型想看可以用专门的工具按 ref 取回。协议红线很硬:<strong>只改 content,绝不删消息、绝不动 role 和 tool_call_id</strong>——因为 assistant(发起调用)和 tool(返回结果)是配对的,切破配对模型直接报 400。还有保护名单:最近一圈永远全文、失败消息永不降级、加载技能的结果永不降级。</li>
+      <li><strong>总量压力安全阀(只在真挤时才收紧)</strong>:拼完估算总量如果超过窗口的 0.85,就把降级阈值逐级减半(1320 → 660 → 330 → 200),多榨几圈老结果,直到落回安全线。阈值每轮严格减半,从 1320 榨到下限 200 最多约 3 轮就到底,不会死循环。平时不触发,所以正常对话该全文还是全文。</li>
+    </ol>
+
+    <h5>怎么证明它真生效了</h5>
+    <p>两道保险。其一,一条 CI 回归测试死守稳定前缀:断言连续两圈组装出来的区一 system 消息<strong>逐字节相同</strong>。谁哪天手滑往角色设定或人格里塞了个时间戳、计数器之类会变的东西,这条测试立刻变红,赶在它上线悄悄毁掉两折缓存之前就拦下来。其二,缓存命中率被当成一等指标:每圈把模型回传的输入 token 总数和其中命中缓存的 token 数累加,turn 结束算 <code>命中率 = 命中 token / 输入 token</code>。这个数字是验证"窗口四区稳定前缀"这套设计到底有没有生效的<strong>唯一硬证据</strong>。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>下面是组装逻辑的教学版伪代码,只保留"四区怎么拼 + 动态状态怎么赶到尾部"这条主线:</p>
+    <pre><code class="language-python">def assemble_context(state, deps):
+    # ---- 先做可逆降级:老圈大工具结果换成「摘要 + ref」----
+    # 注意:只改 content,绝不删消息、绝不动 role/tool_call_id
+    downgrade_old_tool_messages(state, threshold=1320)
+
+    msgs = []
+
+    # 区一 · 稳定前缀区:一个 turn 里逐字节恒定 → 吃 KV-cache 两折
+    #   角色 + 工具纪律 + 人格稳定部分 + 技能清单 + 工具 schema
+    msgs.append({"role": "system", "content": deps.system_message_content})
+
+    # 区二 · 历史区:摘要 + 最近 4 个 turn 原文(压缩边界后也稳)
+    msgs.extend(deps.history_block)
+
+    # 区三 · 本 turn 轨迹区:这一轮的 assistant / tool 消息,只往末尾追加
+    msgs.extend(state.messages)
+
+    # 区四 · 尾部动态区:整个上下文里唯一每圈重写的一小段,放最末尾
+    #   步数、预算每圈都变 —— 绝不能放前面,否则前缀缓存从此全废
+    #   参考日期也放这里前置,刻意不进稳定前缀
+    remaining = deps.max_cny - state.budget_spent_cny
+    tail = f"(今天 {today_str}。第 {state.step + 1}/{deps.max_steps} 步,"
+    tail += f"预算剩 ¥{remaining:.2f}。)"
+    msgs.append({"role": "user", "content": tail})
+
+    # ---- 安全阀:总量逼近窗口才逐级收紧(阈值减半,最近一圈永保护)----
+    while estimate_tokens(msgs) &gt; 0.85 * deps.window and threshold &gt; 200:
+        threshold = max(200, threshold // 2)   # 1320 → 660 → 330 → 200
+        downgrade_old_tool_messages(state, threshold)
+        msgs = reassemble_regions(state, deps)
+
+    return msgs
+</code></pre>
+    <p><strong>推演:</strong>假设一轮对话稳定前缀区是 6000 token(工具 schema 占大头),前几圈攒下来的历史和轨迹有 4000 token,每圈尾部动态区约 30 token。某一圈发出去时输入约 10030 token。因为前 10000 token 逐字节没变,命中缓存按两折计:命中部分 ≈ 10000 × 0.2 = 2000 的等效计费,只有尾部那 30 token 全价 miss。命中率 ≈ 10000 / 10030 ≈ 0.997。<strong>反例</strong>:如果把"第 3 步/预算 ¥0.07"这行错误地塞进开头第二行,那么从这行起后面 10000 token 全部 miss,这一圈就得按全价 10000+ 计,折扣彻底拿不到——而且这种事在线上是悄无声息的,只有那条逐字节断言的 CI 测试能提前抓住它。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr><th>维度</th><th class="th-sgl">我们的选择(四区分治 + 可逆降级)</th><th class="th-vllm">替代方案(每轮把整窗重新拼接)</th></tr></thead>
+    <tbody>
+      <tr><td>动态状态位置</td><td>步数/预算/参考日期全部赶到尾部一小段</td><td>散落在请求各处,跟稳定内容混着</td></tr>
+      <tr><td>KV-cache 命中</td><td>前缀逐字节恒定,几千 token 命中两折</td><td>前缀每圈都变,折扣基本拿不到</td></tr>
+      <tr><td>老工具结果</td><td>超阈值降级成「摘要 + ref」,全文留缓存可取回</td><td>原样全价重发,转五六圈被计费五六次</td></tr>
+      <tr><td>撑爆窗口风险</td><td>总量过 0.85 启动安全阀逐级收紧</td><td>中等个头消息合谋撑爆 → 整 turn 报错</td></tr>
+      <tr><td>实现复杂度</td><td>需要分区、降级表、压力阀、CI 守护</td><td>一行 join,简单直白</td></tr>
+      <tr><td>可观测性</td><td>命中率当一等指标,生效与否有数字</td><td>没有抓手,省没省钱全靠猜</td></tr>
+    </tbody></table>
+    <p><strong>公允裁决:</strong>替代方案不是稻草人,它真有好处——实现极简、没有任何隐藏不变量要维护、永远不会因为"切破配对"或"前缀漂移"出 bug。如果是个一两轮就结束、工具结果都很小的对话,它完全够用,我们没必要上这套。但我们这个引擎一轮要转好几圈、工具经常吐回上万字的行情/财务数据。在这种工作负载下,"每轮重拼"会让同一份大结果被全价计费五六次,还把唾手可得的两折折扣整轮丢掉,日常账单直接翻几倍。复杂度的代价是真实的,我们用三条硬不变量把它框住(绝不删消息、最近一圈永远全文、降级永远留 ref 可取回),再加一条 CI 逐字节断言兜底,把"省钱"做成了一个有数字、可回归的工程,而不是一句口号。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="窗口四区分区与 KV-cache 命中边界,以及把动态状态塞进前缀的反例">
+      <defs>
+        <marker id="q5arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="q5arrowRed" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#bf3f26"/>
+        </marker>
+      </defs>
+
+      <text x="30" y="34" font-family="Noto Sans SC, sans-serif" font-size="19" font-weight="700" fill="#2f4d8a">一次请求的四区布局 · 上稳下动</text>
+
+      <!-- 区一 -->
+      <rect x="30" y="52" width="560" height="74" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.6"/>
+      <text x="48" y="80" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#2f4d8a">区一 · 稳定前缀区</text>
+      <text x="48" y="104" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3a3a3a">system:角色 + 工具纪律 + 人格稳定部分 + 技能清单 + 工具 schema</text>
+      <text x="48" y="120" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">一个 turn 里逐字节恒定</text>
+
+      <!-- 区二 -->
+      <rect x="30" y="134" width="560" height="60" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.6"/>
+      <text x="48" y="160" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#2f4d8a">区二 · 历史区</text>
+      <text x="48" y="182" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3a3a3a">上文压缩摘要 + 最近 4 个 turn 原文(压缩边界后稳定)</text>
+
+      <!-- 区三 -->
+      <rect x="30" y="202" width="560" height="74" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.6"/>
+      <text x="48" y="228" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#2f4d8a">区三 · 本 turn 轨迹区</text>
+      <text x="48" y="250" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3a3a3a">assistant(tool_calls) / tool 消息对,逐圈往末尾追加</text>
+      <text x="48" y="266" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">只增不改 → 对前面区段也是稳定前缀</text>
+
+      <!-- 区四 -->
+      <rect x="30" y="284" width="560" height="68" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8"/>
+      <text x="48" y="310" font-family="Noto Sans SC, sans-serif" font-size="14" font-weight="700" fill="#bf3f26">区四 · 尾部动态区(每圈重写)</text>
+      <text x="48" y="332" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3a3a3a">(今天 2026-06-22 周日。第 3/12 步,预算剩 ¥0.07。)+ 插话</text>
+      <text x="48" y="348" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#a8761f">每圈唯一变化的一小段</text>
+
+      <!-- KV-cache 命中边界竖线 -->
+      <line x1="610" y1="52" x2="610" y2="276" stroke="#1f6e5e" stroke-width="2.4"/>
+      <rect x="624" y="120" width="246" height="44" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.4"/>
+      <text x="636" y="140" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#1f6e5e">区一~区三:逐字节恒定</text>
+      <text x="636" y="157" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#1f6e5e">→ 命中 KV-cache,按两折计费</text>
+      <line x1="610" y1="284" x2="610" y2="352" stroke="#bf3f26" stroke-width="2.4"/>
+      <rect x="624" y="296" width="246" height="44" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.4"/>
+      <text x="636" y="316" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#bf3f26">区四:每圈只 miss 这一小段</text>
+      <text x="636" y="333" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">全价,但只有几十 token</text>
+
+      <line x1="590" y1="200" x2="622" y2="142" stroke="#1f6e5e" stroke-width="1.4" marker-end="url(#q5arrow)" opacity="0.7"/>
+      <line x1="590" y1="318" x2="622" y2="318" stroke="#bf3f26" stroke-width="1.4" marker-end="url(#q5arrowRed)"/>
+
+      <!-- 反例小图 -->
+      <text x="30" y="400" font-family="Noto Sans SC, sans-serif" font-size="16" font-weight="700" fill="#bf3f26">反例:把「第 N 步/预算」错塞进前缀</text>
+      <rect x="30" y="414" width="420" height="100" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.4"/>
+      <text x="46" y="438" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#3a3a3a">区一 system:…工具 schema…</text>
+      <rect x="46" y="448" width="388" height="22" rx="6" fill="#faeae4" stroke="#bf3f26" stroke-width="1.4"/>
+      <text x="56" y="463" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#bf3f26">第 3 步,预算 ¥0.07  ← 每圈变一个字</text>
+      <rect x="46" y="478" width="388" height="24" rx="6" fill="#f0ede4" stroke="#85806f" stroke-width="1.2" stroke-dasharray="4 3"/>
+      <text x="56" y="494" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#85806f">…后面所有内容:缓存从此全废,全价重算</text>
+
+      <line x1="460" y1="460" x2="540" y2="460" stroke="#bf3f26" stroke-width="2" marker-end="url(#q5arrowRed)"/>
+      <rect x="548" y="430" width="322" height="64" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.6"/>
+      <text x="564" y="454" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#bf3f26">一个变化字节,折扣全丢</text>
+      <text x="564" y="474" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#3a3a3a">CI 逐字节断言会立刻变红,</text>
+      <text x="564" y="489" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#3a3a3a">赶在线上悄悄毁掉缓存之前拦下</text>
+
+      <!-- 图例 -->
+      <rect x="548" y="404" width="14" height="14" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="568" y="416" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">命中</text>
+      <rect x="616" y="404" width="14" height="14" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="636" y="416" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#bf3f26">每圈变/全价</text>
+      <rect x="722" y="404" width="14" height="14" rx="3" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="742" y="416" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#2f4d8a">恒定结构</text>
+    </svg>
+    <figcaption>图 2-5 · 怎么看:左边四个横条从上到下就是发给模型的一次请求,越往上越稳、越往下越动。绿色竖线右侧标注的是"KV-cache 命中边界"——区一到区三逐字节没变,这部分输入命中缓存按约两折计费(KV-cache:模型把上次算过的开头中间结果存起来直接复用);只有最底下朱砂色的区四每圈重写,全价但只有几十字。下半张反例图说明:一旦把"第几步/预算"这种每圈变的字塞进开头,从那个字起后面全部缓存作废,折扣整段丢光,所以这类东西必须待在尾部。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>窗口按"哪些恒定、哪些每圈变"切成四区,顺序上稳下动:稳定前缀区 → 历史区 → 本 turn 轨迹区 → 尾部动态区。</li>
+      <li>铁律是"动态状态绝不进前缀":步数、预算、参考日期全赶到末尾,前面几千 token 逐字节恒定吃满两折折扣,每圈只 miss 尾部几十字,且尾部恰是召回最强位。</li>
+      <li>真正省的钱不是防溢出,而是不让同一份大工具结果原样全价重发五六次:超阈值老结果降级成"摘要 + ref"(可逆,全文留缓存),总量过 0.85 才启动安全阀逐级收紧。</li>
+      <li>三条硬不变量兜底:绝不删消息、最近一圈永远全文、降级永远留 ref;切破 assistant→tool 配对模型会报 400。</li>
+      <li>一条 CI 逐字节断言守住前缀不漂移 + 缓存命中率当一等指标,让"省钱"成为有数字、可回归的工程。</li>
+    </ul>
+    <p class="one-liner">一句话速记:把每圈会变的那点状态全赶到末尾,前面长长一段逐字节不动,就能整段命中两折缓存——动态状态进了前缀,折扣就全废。</p>
+    <p class="src-note">参考:<code>backend/app/chatloop/context.py:1-252</code> · <code>backend/app/chatloop/state.py:255-270</code></p>
+  </div></div>
+</article>
+<article class="question-card" id="loop-q6">
+  <div class="q-header">
+    <span class="q-num">Q6</span>
+    <h3 class="q-title">工具渐进披露:为什么不一次把所有工具塞给模型?分档依据是什么?</h3>
+    <span class="q-diff" title="难度 4/5">★★★★☆</span>
+  </div>
+  <div class="q-tags">
+    <span class="tag">工具渐进披露</span>
+    <span class="tag">瘦 schema</span>
+    <span class="tag">按需文档检索</span>
+    <span class="tag">常驻 token 纪律</span>
+    <span class="tag">裸调自纠</span>
+  </div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题表面在问"工具怎么暴露给模型",真正想确认的是:你有没有把"工具描述"当成一项<strong>占着上下文窗口、每一轮都要重发的常驻成本</strong>来管理。很多人把工具一股脑塞进 prompt,从不算这笔账。面试官想看你能不能把"描述要写得厚才好用"和"常驻 token 要省"这对矛盾拆开,并给出一个能随工具数量增长而不爆的方案。</p>
+    <ul>
+      <li><strong>追问:</strong>每多一个工具,常驻成本到底涨在哪?为什么"叠了 KV-cache 命中"之后这笔开销还是省不掉?(考你是否理解工具 schema 是稳定前缀的一部分,见本类第 5 题)</li>
+      <li><strong>追问:</strong>你按什么标准把工具分进"核心组"和"延迟组"?给我一个具体例子,说说为什么某个工具进了延迟组。</li>
+      <li><strong>追问:</strong>延迟组只给了名字和一句话,模型看不到完整参数怎么调?如果它瞎调、参数填错了,系统怎么把它接住、引导它自己补全?</li>
+      <li><strong>追问:</strong>你自己也承认 14 个工具其实"不够多、不值得上这套机制"。那你为什么还要做?这笔账靠什么成立?(考你敢不敢诚实标注代价,而不是吹方案完美)</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先说清楚要省的是哪块钱。一轮对话里,发给大模型的请求由两部分组成:一是<strong>对话内容</strong>(系统提示、历史消息、工具返回的结果),二是<strong>工具清单</strong>(每个工具的名字、用途描述、参数定义,也就是 schema)。这道题只管第二块——工具清单这块怎么省。对话内容那块怎么省是本类第 5 题的事。</p>
+    <p>关键认知:工具清单是<strong>稳定前缀</strong>的一部分。它在一次会话里绝不增删、绝不改动,每一圈调模型时原封不动重发一遍。好处是它能被 KV-cache 命中、不重复计费推理;但坏处是它<strong>始终占着上下文窗口的固定一块</strong>,工具越多这块越大,挤占的是真正该留给对话和数据的空间。所以"工具描述写得越厚越好用"和"常驻块要尽量薄"是直接打架的。</p>
+
+    <h5>核心思路:把工具分三档,厚文档挪到"按需"那一档</h5>
+    <p>解法是不把所有工具平等对待,而是分成三组(组的成员在一次会话里固定不变):</p>
+    <ul>
+      <li><strong>核心组(完整 schema)</strong>:高频用的数据工具 + 控制关键的工具。这些给<strong>完整的参数定义</strong>常驻,但把冗长的用途说明换成一句精炼的"触发描述"(brief),既能直接调、又不臃肿。事实卡列的核心组是:查行情、查财报、查知识库、查用户记忆、装载技能方法论、提议升级深度研究这几个。</li>
+      <li><strong>延迟组(瘦条目)</strong>:低频工具。只露一行"瘦标签"——名字 + 一句话触发描述 + <strong>必填参数的名字和类型</strong>,把可选参数、枚举取值、示例、硬约束统统剥掉。一个瘦条目大约 30–60 token(量级估计来自设计文档),比完整 schema 薄一大截。</li>
+      <li><strong>search_tools(殿后一个内置工具)</strong>:一个"按需取文档"的工具。模型想用某个延迟工具又不确定怎么填参数,就调它,把目标工具的<strong>完整使用文档</strong>(参数 schema + 硬约束 + 示例 + 何时用/何时不用)检索出来。</li>
+    </ul>
+
+    <div class="callout">
+      <p><strong>厚文档为什么能"零常驻"?</strong>因为 search_tools 检索回来的完整文档是以<strong>工具返回结果</strong>(tool_result)的形式追加进对话消息的——它进的是"对话内容"那一块,而且是 append-only、只在用到时才出现。它<strong>完全不碰工具清单那一块</strong>,所以不会破坏 KV-cache 的稳定前缀。这样一来,描述可以写得要多厚有多厚(放进按需文档里),而常驻块只付一行瘦标签的钱。一对矛盾就这么解开了。</p>
+    </div>
+
+    <h5>瘦条目为什么不能是"空壳"</h5>
+    <p>有个反直觉的实测教训:延迟组的瘦条目,参数部分<strong>不能写成空的</strong>(空 properties)。冒烟测试里发现,如果瘦条目连必填参数名都不给、参数是个空对象,模型干脆<strong>绕开这个工具不调</strong>——它觉得"这工具我不知道怎么用,算了"。所以瘦条目必须保留必填参数的名字和类型,让模型<strong>能直接试着调一次</strong>;那些细节(可选参数、枚举、约束)才推给 search_tools 按需取。这是"薄到能省钱"和"薄到模型还认得它是个能用的工具"之间的那条线。</p>
+
+    <h5>裸调自纠:模型直接调延迟工具调错了,怎么接住</h5>
+    <p>模型不一定老老实实先查文档。它可能看着瘦标签就<strong>直接调延迟工具(裸调)</strong>,结果参数填错了。这时系统的处理是:派发器拿<strong>真实的完整 schema</strong>去校验,校验失败 → 在报错信息后面追加一句指引"可以调 search_tools('某工具') 获取参数文档" → 下一圈模型就自己去查文档、补全参数再调一次。整个回路不需要人工兜底,模型在错误反馈里自己学会了正确用法。</p>
+
+    <p>最后,这套机制还配了一条<strong>增长纪律</strong>:加新能力前先问它是哪一类——只有"新数据源"才配占一个工具名额;"方法论"进技能(约 100 token 的元数据常驻,正文按需装载);"确定性计算"写成技能脚本(零工具名额)。这跟技能的渐进披露(元数据常驻 + 正文按需)是对称结构,本题只聚焦工具、不展开技能,技能那条线见本类第 3 题。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>用伪代码看清"产出工具清单"和"裸调被接住"这两件事怎么走。先看组装工具清单——三组按顺序拼,位置上把高频的放前面:</p>
+    <pre><code class="language-python"># 每一圈调模型前,产出固定的工具清单(会话内绝不变 → 稳定前缀)
+def schemas_for_llm(tools):
+    out = []
+    # 1) 核心组:完整参数定义,但描述换成一句精炼 brief(能直接调 + 不臃肿)
+    for name in CORE_TOOLS:          # 高频数据工具 + 控制关键工具
+        out.append(core_schema(tools[name]))   # 完整 schema,description = brief
+
+    # 2) 延迟组:只露"瘦标签" = 名字 + brief + 必填参数名/类型
+    for name in DEFERRED_TOOLS:      # 低频工具
+        out.append(thin_schema(name))          # 剥掉可选参数/枚举/示例/约束
+
+    # 3) search_tools 殿后:一把"按需取完整文档"的钥匙
+    out.append(search_tools_schema())
+    return out
+
+def thin_schema(name):
+    doc = TOOL_DOCS[name]
+    # 关键:必填参数名+类型一定要留 —— 空壳会被模型绕开(冒烟实测教训)
+    props = {p: {"type": t} for p, t in doc.thin_required.items()}
+    return {"name": name, "description": doc.brief,
+            "parameters": {"properties": props, "required": list(props)}}
+</code></pre>
+    <p>再看模型<strong>裸调延迟工具、参数填错</strong>时,系统怎么把它引回正轨:</p>
+    <pre><code class="language-python"># 模型看着瘦标签直接调了延迟工具,但参数不全/类型错
+def dispatch(name, args, state):
+    try:
+        return tools[name].run(args)          # 拿真实完整 schema 去校验
+    except ValidationError as exc:
+        error = guidance_error(name, exc)     # "[参数校验失败] 缺 metric ..."
+        # 若是延迟组工具裸调失败 → 追加一句指引,让它下一圈自己补文档
+        if TOOL_DOCS[name].group == "deferred":
+            error += f"。可调 search_tools('{name}') 获取参数文档"
+        return fail_result(name, error)       # 回喂给模型 → 下一圈它自己 search_tools
+
+# 同一 turn 内已检索过的文档记台账,重复检索回缓存、不重复算
+def search_tools(query, state):
+    hits = search_docs(query, k=3)            # BM25/关键词确定性检索,零 LLM 调用
+    for d in hits:
+        if d.name in state.ledger.searched_docs:
+            d.doc = "(本 turn 已检索过)\n" + d.doc
+        state.ledger.searched_docs.add(d.name)
+    return {"docs": hits}                      # 完整文档以 tool_result 进 messages(append-only)
+</code></pre>
+    <p><strong>推演:</strong>假设设计基线是 6 个核心组(完整 schema)+ 8 个延迟组(瘦条目)+ search_tools,共 14+1 个工具。一个瘦条目约 30–60 token,8 个延迟工具的常驻总成本约 240–480 token;假如它们都铺成完整 schema,每个可能是几百 token,8 个就是上千 token,而且<strong>每一圈都重发</strong>。真正能体现价值的是增长:当工具从 14 涨到 40,大头都进延迟组只占一行瘦标签,常驻块总共只涨约 1.5K token——这才是这套机制的卖点。代价也算给你看:延迟组工具每个 turn 第一次用时,要么裸调失败补一圈、要么先 search_tools 一圈,多一次模型往返。所以诚实地说,14 个工具其实<strong>低于</strong>这套机制工业上"值得做"的阈值;这笔账是靠"工具必然会增长"的产品预期才成立的。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr><th>维度</th><th class="th-sgl">我们的选择(三档渐进披露)</th><th class="th-vllm">替代方案(一次性把全量工具塞进 prompt)</th></tr></thead>
+    <tbody>
+      <tr><td>常驻 token</td><td>核心组付完整 schema、延迟组只付一行瘦标签;厚文档零常驻、按需进对话</td><td>每个工具的完整 schema 都常驻,随工具数线性涨,且每圈重发</td></tr>
+      <tr><td>随工具增长</td><td>新增大多进延迟组,14→40 常驻块只涨约 1.5K token</td><td>14→40 常驻块成倍膨胀,持续挤占窗口</td></tr>
+      <tr><td>模型选错率</td><td>常驻面板只露一句话触发描述,语义重叠工具不在同一屏争抢注意力</td><td>几十个完整描述同屏,语义相近的工具更容易选错(记忆类同族工具是最高危混淆区)</td></tr>
+      <tr><td>厂商工具上限</td><td>常驻 14+1,贴着"单次不超过 20 个工具"的红线但不破</td><td>工具一多就逼近甚至突破上限,被迫做取舍</td></tr>
+      <tr><td>首次使用延迟</td><td>延迟组工具每 turn 首用要多一圈(裸调补救或先查文档)</td><td>所有工具直接可调,无额外往返</td></tr>
+      <tr><td>描述能写多厚</td><td>厚文档放按需检索里,想多厚多厚不花常驻</td><td>想写厚就得常驻付费,只能在"好用"和"省钱"之间二选一</td></tr>
+    </tbody></table>
+    <p><strong>公允裁决:</strong>替代方案不是稻草人,它有两个真实优点——<strong>实现简单</strong>(一把梭,没有分组/检索/自纠这些机关),以及<strong>无首用延迟</strong>(任何工具拿来就能调,不必多一圈)。如果你的工具数量稳定在十来个、而且预期不会增长,替代方案反而是更克制、更划算的选择——这正是我们诚实标注的那条线:14 个工具其实没到这套机制"值得"的阈值。我们仍然选三档,赌的是<strong>这是个工具会持续增长的产品</strong>(数据源、技能、计算会越加越多)。当工具规模真的上去、常驻块和选错率都开始失控时,提前铺好的这套结构就能扛住增长而不需要推倒重来;此刻多付的那点首用往返,是为将来留的余量。这笔账只在"必然增长"的预期下成立,我们把它明明白白记在账上,而不是假装方案在任何规模下都最优。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="三档抽屉工具暴露 + 裸调自纠回路">
+      <defs>
+        <marker id="ar-q6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#85806f"/>
+        </marker>
+        <marker id="ar-q6r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#bf3f26"/>
+        </marker>
+        <marker id="ar-q6g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#1f6e5e"/>
+        </marker>
+      </defs>
+
+      <text x="30" y="34" font-family="Noto Sans SC, sans-serif" font-size="18" font-weight="700" fill="#2f4d8a">常驻工具清单(稳定前缀 · 会话内绝不增删)</text>
+
+      <!-- 抽屉1 核心组 -->
+      <rect x="30" y="52" width="380" height="118" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="48" y="78" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#2f4d8a">抽屉 1 · 核心组(6)— 完整 schema 常驻</text>
+      <text x="48" y="100" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#444">高频数据 + 控制关键工具,参数定义齐全可直接调</text>
+      <text x="48" y="122" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#555">查行情 · 查财报 · 查知识库 · 查用户记忆</text>
+      <text x="48" y="142" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#555">装载技能方法论 · 提议升级深度研究</text>
+      <text x="48" y="162" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#a8761f">描述只留一句精炼 brief(省常驻)</text>
+
+      <!-- 抽屉2 延迟组 -->
+      <rect x="30" y="184" width="380" height="118" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="48" y="210" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#85806f">抽屉 2 · 延迟组(8)— 只露"瘦标签"</text>
+      <text x="48" y="232" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#444">低频工具:名字 + 一句话 + 必填参数名/类型</text>
+      <text x="48" y="254" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#555">剥掉:可选参数 · 枚举取值 · 示例 · 硬约束</text>
+      <rect x="48" y="266" width="344" height="26" rx="6" fill="#fff" stroke="#85806f" stroke-width="1"/>
+      <text x="58" y="284" font-family="Geist Mono, monospace" font-size="11" fill="#555">get_market_indicators(ts_code, metric)  ≈30-60 token/个</text>
+
+      <!-- 抽屉3 search_tools -->
+      <rect x="30" y="316" width="380" height="80" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="48" y="342" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#1f6e5e">抽屉 3 · search_tools(殿后第 15 个)</text>
+      <text x="48" y="364" font-family="Noto Sans SC, sans-serif" font-size="12" fill="#444">一把钥匙:关键词检索(零 LLM),取出某工具完整文档</text>
+      <text x="48" y="386" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#555">参数 schema + 硬约束 + 示例 + 何时用/不用</text>
+
+      <!-- 完整文档去向 -->
+      <line x1="410" y1="356" x2="500" y2="356" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#ar-q6g)"/>
+      <rect x="500" y="316" width="372" height="80" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="518" y="342" font-family="Noto Sans SC, sans-serif" font-size="13.5" font-weight="700" fill="#1f6e5e">完整文档 → 以 tool_result 进对话消息</text>
+      <text x="518" y="364" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#444">append-only · 零常驻 · 不碰工具清单 · 不破 KV-cache</text>
+      <text x="518" y="386" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#a8761f">厚描述全放这里 → 想写多厚写多厚</text>
+
+      <!-- 裸调自纠回路 -->
+      <text x="500" y="78" font-family="Noto Sans SC, sans-serif" font-size="15" font-weight="700" fill="#bf3f26">裸调自纠回路</text>
+      <rect x="500" y="92" width="372" height="40" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+      <text x="518" y="116" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#444">① 模型看瘦标签 → 直接裸调延迟工具(参数填错)</text>
+
+      <line x1="686" y1="132" x2="686" y2="150" stroke="#bf3f26" stroke-width="1.6" marker-end="url(#ar-q6r)"/>
+      <rect x="500" y="150" width="372" height="40" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+      <text x="518" y="174" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#444">② 派发器拿真实 schema 校验 ✗ → 追加指引</text>
+
+      <line x1="686" y1="190" x2="686" y2="208" stroke="#bf3f26" stroke-width="1.6" marker-end="url(#ar-q6r)"/>
+      <rect x="500" y="208" width="372" height="40" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.5"/>
+      <text x="518" y="232" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#444">③ "可调 search_tools('×') 取参数文档"</text>
+
+      <line x1="686" y1="248" x2="686" y2="316" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#ar-q6g)"/>
+      <text x="694" y="284" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">④ 下一圈模型自己查文档 → 补全重调 ✓</text>
+
+      <!-- 图例 -->
+      <rect x="30" y="430" width="842" height="106" rx="8" fill="#fbfaf7" stroke="#d8d2c4" stroke-width="1"/>
+      <text x="46" y="454" font-family="Noto Sans SC, sans-serif" font-size="12.5" font-weight="700" fill="#333">怎么读:</text>
+      <rect x="46" y="466" width="16" height="12" rx="3" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="68" y="476" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#444">核心组(完整 schema 常驻)</text>
+      <rect x="262" y="466" width="16" height="12" rx="3" fill="#f0ede4" stroke="#85806f"/>
+      <text x="284" y="476" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#444">延迟组(瘦标签,很薄)</text>
+      <rect x="470" y="466" width="16" height="12" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="492" y="476" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#444">按需检索/命中(走对话消息)</text>
+      <rect x="700" y="466" width="16" height="12" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="722" y="476" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#444">裸调自纠(朱砂)</text>
+      <text x="46" y="502" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#555">左侧三个抽屉 = 每圈都重发的常驻清单,只占名字+必填参数的钱;右侧厚文档只在用到时才进对话,零常驻。</text>
+      <text x="46" y="522" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#555">"瘦标签不能是空壳"——必填参数名留着,模型才认得它能用;细节才推给 search_tools 按需取。</text>
+    </svg>
+    <figcaption>图 2-6 · 怎么看:左列三个抽屉是"常驻工具清单",会话里每圈原样重发;抽屉越往下越薄(完整→瘦标签→一把钥匙)。"稳定前缀"=不增删的固定开头,能被缓存命中(详见本类第 5 题)。"瘦标签"=只给名字和必填参数的精简条目。右侧厚文档由 search_tools 按需取出、当成工具结果贴进对话,不占常驻。朱砂回路=模型乱调被校验接住、引导它自己补文档。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li>工具清单是稳定前缀的一部分,每圈重发、始终占窗口;"描述写得厚才好用"和"常驻要省"是直接打架的矛盾。</li>
+      <li>三档解开矛盾:核心组(高频/控制关键)给完整 schema;延迟组(低频)只给名字+必填参数的瘦标签;厚文档放 search_tools 按需检索,以工具结果进对话、零常驻、不破缓存。</li>
+      <li>瘦标签不能是空壳——实测空参数会被模型绕开;必须留必填参数名+类型,让它至少能直接试调一次。</li>
+      <li>裸调自纠是兜底:模型直接调延迟工具参数错 → 真实 schema 校验失败 → 追加"先 search_tools"指引 → 下一圈自己补全,无需人工兜底。</li>
+      <li>诚实标注:14 个工具其实没到这套机制"值得"的工业阈值,代价是延迟组首用多一圈往返;这笔账只在"工具必然增长"(14→40 常驻只涨约 1.5K token)的产品预期下成立。</li>
+    </ul>
+    <p class="one-liner">一句话速记:工具分三档——高频给完整、低频给瘦标签、厚文档按需取,常驻块只付名字钱,赌的是"工具会增长"。</p>
+    <p class="src-note">参考:<code>backend/app/chatloop/tool_docs.py</code> · <code>backend/app/chatloop/tool_hub.py</code> · <code>backend/app/chatloop/state.py</code> · <code>docs/superpowers/specs/2026-06-05-chat-loop-redesign-design.md</code></p>
+  </div></div>
+</article>
+<article class="question-card" id="loop-q7">
+  <div class="q-header">
+    <span class="q-num">Q7</span>
+    <h3 class="q-title">用户在 agent 跑到一半插话,你怎么做到不破坏状态?讲讲 steering(Redis List)和 turn 原子语义。</h3>
+    <span class="q-diff" title="难度 5/5">★★★★★</span>
+  </div>
+  <div class="q-tags">
+    <span class="tag">插话 steering</span>
+    <span class="tag">Redis List vs pub/sub</span>
+    <span class="tag">turn 原子性</span>
+    <span class="tag">FIFO 队列</span>
+    <span class="tag">取消 vs 插话</span>
+  </div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题在探一件最容易翻车的事:<strong>并发改写共享状态</strong>。agent 正在一圈圈地「想 → 调工具 → 看结果」,这时用户在对话框里又敲了一句话(比如「别看区域酒,只看高端白酒」)。这句话从一个完全独立的 HTTP 请求进来,而 agent 正在另一个进程里跑着、还在往前端吐字。面试官想看的是:你有没有想清楚<strong>这句插话什么时候、在哪个安全点被读进来,读进来之后怎么动状态才不会把正在进行的这一轮搞坏</strong>。这是典型的「两个执行流碰同一份数据」问题,工业界的事故大半出在这里。</p>
+    <ul>
+      <li><strong>追问:</strong>插话信号为什么走 Redis List 而取消信号走 pub/sub?同样是「外面给跑着的 agent 递个信号」,凭什么用两种不同的原语?</li>
+      <li><strong>追问:</strong>插话到达时,这一圈大模型已经决定了要调三个工具,你是让它把工具跑完再读插话,还是当场作废?作废的话,大模型协议里「assistant 发起的每个 tool_call 都必须有一条对应的 tool 结果消息」这条红线你怎么守住?</li>
+      <li><strong>追问:</strong>「turn 原子」到底原子在哪?如果 agent 跑到第五圈崩了,中间那四圈的状态去哪了?用户点「重试」会发生什么?</li>
+      <li><strong>追问:</strong>你这套占位结果会不会污染「连续失败就熔断」那道闸?为什么不会?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先把背景对齐。一次完整的「用户问一句 → agent 转好几圈 → 给出最终答复」,我们叫一个 <strong>turn</strong>(一轮)。agent 在一个 turn 内部会循环很多圈:每圈调一次大模型决定干啥、执行一批工具、把结果喂回去再转下一圈。<strong>插话(steering)</strong>就是:用户在这个 turn 还没跑完时,又补了一句话,希望并入当前这轮、改变 agent 接下来的走向——而不是等它跑完、当成下一个全新问题。</p>
+
+    <h5>第一层:为什么插话用 Redis List,取消却用 pub/sub</h5>
+    <p>这是全题最值钱的判断。两个信号看起来都是「外面往跑着的 agent 递个东西」,但<strong>对「丢不丢得起」的容忍度天差地别</strong>。</p>
+    <p>pub/sub(发布订阅)是<strong>「最多送达一次」</strong>:发的那一瞬间,如果没人正趴在频道上听,这条消息就永远没了。问题是——agent 在流式吐字的那几秒里<strong>根本不在听频道</strong>(它在一圈一圈跑循环、在往前端推 token)。用户偏偏最爱在这几秒里插话。如果用 pub/sub,这句插话就当场蒸发了。</p>
+    <p>而插话的语义要求是 <strong>「必须并入当前 turn,一句都不能丢」</strong>。所以它得用 Redis List 这种<strong>持久化队列</strong>:用户那条话先 <code>LPUSH</code> 进队列<strong>存着</strong>(不管 agent 此刻在不在听),agent 跑到圈与圈之间的安全边界时,主动 <code>RPOP</code> 把队列里攒着的全部取出来。存着 + 主动取 = 必达,绝不漏。</p>
+    <div class="callout">
+      <strong>取消为什么反而可以用 pub/sub?</strong> 因为取消「丢得起」——万一这次取消信号没被听到,用户看 agent 还在转,<strong>再点一次取消就是了</strong>,代价是多等一两秒。插话丢了却补不回来:用户以为自己改了方向,agent 却照旧在错方向上烧钱跑完。<strong>丢失容忍度不同,就该分用两种原语</strong>,而不是图省事一刀切。这是「按可靠性需求选原语」的典型决策。
+    </div>
+    <p>顺带说一个常被忽略的细节:<code>LPUSH</code>(从头进)配 <code>RPOP</code>(从尾出)= <strong>FIFO 先进先出</strong>,先到的插话先并入,顺序不乱。队列 key 是 <code>chat:steer:{task_id}</code>,<strong>每个 turn 一个全新的 task_id</strong>,带 1 小时 TTL——这一点在最后一层会解释为什么重要。</p>
+
+    <h5>第二层:两个检查点,各管一种插话</h5>
+    <p>光有队列还不够,关键是 <strong>在循环的哪几个点去 RPOP</strong>。我们在一圈里放了<strong>两个</strong>检查点,各管一段时间窗里到达的插话:</p>
+    <ol>
+      <li><strong>圈首检查点</strong>:管「上一圈的工具批正在执行的那几秒里」到达的插话。工具跑完、要进新一圈时,先把这期间攒的插话取出来并入。</li>
+      <li><strong>分发前检查点</strong>:管「本圈大模型已经决定好要调哪些工具、但还没真正派发执行」的那个瞬间到达的插话。这是后来专门补的一个点。</li>
+    </ol>
+    <p>为什么要补第二个点?设想用户的插话是「改方向」型——大模型这一圈刚决定要去查五份区域酒的财报,用户此刻说「别看区域酒」。如果只有圈首检查点,这五个工具会<strong>先吭哧吭哧全跑完</strong>(几秒 + 真金白银的 token),下一圈圈首才读到插话,发现「白跑了」。加上分发前检查点后,延迟从<strong>「整整一圈」缩到「当前这次大模型流」那一小段</strong>,而且<strong>立省一整批已经不需要的工具</strong>。</p>
+
+    <h5>第三层:分发前插话到达,怎么「取消批 + 重规划」还不破协议</h5>
+    <p>这是最考验功底的地方。分发前检查点发现有插话时,本圈那批工具<strong>一个都不执行了</strong>。但这里埋着一条大模型的<strong>协议红线</strong>:assistant 那条消息里如果发起了 N 个 tool_call,那么接下来的消息里<strong>每一个 tool_call_id 都必须配一条 tool 结果消息</strong>,缺一条下次请求就报错。工具明明没跑,哪来的结果?</p>
+    <p>解法是给每个被取消的工具<strong>补一条占位结果</strong>,内容是固定一句话:<em>「用户插话,本轮工具未执行,请结合新指令重新决定」</em>。这样既守住了「每个 id 都有 tool 消息」的红线,又如实告诉大模型「这批没跑、你重新想」。然后把用户的插话作为一条新的 user 消息追加到消息列表尾部,<code>continue</code> 回到圈首,让大模型结合新指令<strong>从头决定这一圈干啥</strong>。</p>
+
+    <h5>第四层:为什么这套操作「不破坏状态」</h5>
+    <p>核心在一句话:<strong>消息列表是 append-only 的单一真相,插话只往尾部追加,从不回改任何已有消息</strong>。插话进来无非两个动作——尾部追加一条 user 消息、给被取消的工具补几条占位 tool 消息。已经存在的消息一个字都不动。所以不存在「两个执行流改同一个字段打架」的经典并发坑。</p>
+    <div class="callout">
+      还有个精妙的不变量:<strong>占位结果不进台账(ledger)</strong>。台账只由真正的工具派发(<code>ToolHub.dispatch</code>)来记。占位结果是循环自己造的、绕过了派发,所以它<strong>不会被计入「连续失败次数」</strong>,也就<strong>不会误触发「连续多次失败就熔断」那道闸</strong>(那道闸见本类第 4 题)。如果占位被当成「失败」记进台账,用户多插几句话就可能把 agent 误熔断——这个坑被这条不变量挡住了。
+    </div>
+
+    <h5>第五层:turn 原子语义——崩了就整轮重来,不留半拉子</h5>
+    <p>最后回答「turn 原子」。原子的意思是:<strong>一个 turn 要么完整跑完落库,要么就当它没发生过</strong>,中间那些圈的状态<strong>不持久化、崩溃即弃</strong>。具体三条:</p>
+    <ul>
+      <li><strong>取消</strong>:已经流到前端的文字会落库,但只标成「partial(半截)」<strong>仅供展示</strong>,不是恢复点——下次不会从这半截接着跑。</li>
+      <li><strong>重试</strong>:整个 turn <strong>从头重跑</strong>。输入是「原始那句 user 消息 + 这个 turn 期间并入的全部插话」。这里有个便宜:工具结果有缓存,重跑时工具大多<strong>缓存命中</strong>,真正要重新花钱的只有大模型调用本身。</li>
+      <li><strong>不留中间态</strong>:循环跑到第五圈的那个内部状态对象,根本不写库,进程崩了就丢。这恰恰是「原子」的实现方式——没有半拉子状态可供恢复,自然就不会从一个不一致的点接着跑。</li>
+    </ul>
+    <p>这也回答了「为什么不打断当前 turn / 重启对话」里那个最隐蔽的坑:因为 steer 队列的 key 带着 task_id、<strong>每个 turn 一个新 key</strong>、还有 1 小时 TTL,所以取消之后队列里万一残留的插话会<strong>自然过期、绝不会泄漏到下一个 turn</strong>。业界有名的「插话串台」事故,根源往往是跨 turn 复用同一个队列——我们每 turn 换新 key,从结构上就不复用,这类问题压根不存在。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>先看写读两端怎么用 List 凑出「不可丢 + FIFO」。写端在那个独立的 HTTP 请求里,读端在 agent 的循环里:</p>
+    <pre><code class="language-python"># 写端(独立 HTTP 请求收到用户插话):LPUSH 存着 + 刷 TTL,不管 agent 在不在听
+async def push(self, task_id, message):
+    key = f"chat:steer:{task_id}"        # 每个 turn 一个新 key,1h TTL
+    await self._redis.lpush(key, message.encode())   # 头插
+    await self._redis.expire(key, 3600)              # 每次写都刷,turn 内不过期
+
+# 读端(agent 循环里):RPOP 循环,把攒着的全部尾取出来 = FIFO
+async def pop_all(self):
+    out = []
+    while True:
+        raw = await self._redis.rpop(self._key)   # 尾取
+        if raw is None:                            # 空了就停
+            break
+        out.append(raw.decode())
+    return out                          # LPUSH 头进 + RPOP 尾出 = 先到先并入</code></pre>
+
+    <p>再看循环主体里那<strong>两个检查点</strong>,重点是分发前那个「取消批 + 重规划」怎么守住协议红线:</p>
+    <pre><code class="language-python">while True:
+    # 检查点一(圈首):并入「上一圈工具执行期间」到达的插话
+    for msg in await self._steer.pop_all():
+        state.messages.append({"role": "user", "content": msg})   # 只往尾部追加
+
+    step = await self._llm.stream_step(messages, tools)   # 调一次大模型
+    state = apply_step(state, step)
+
+    if not step.tool_calls:          # 大模型不再要工具 → 自然收尾(见本类第 4 题)
+        return state
+
+    # 检查点二(分发前):大模型已决定工具、但还没派发执行 —— 此刻有插话?
+    steers = await self._steer.pop_all()
+    if steers:
+        # 给每个本该执行的工具补「占位结果」,守住协议红线:
+        # assistant 发起的每个 tool_call_id 都必须有一条 tool 消息,缺一条下次就 400
+        interrupted = [_steer_interrupted_result(c) for c in step.tool_calls]
+        state = apply_results(state, interrupted, step.tool_calls)  # 折叠 tool 消息
+        for msg in steers:
+            state.messages.append({"role": "user", "content": msg})  # 并入插话
+        continue        # 原工具批一个没跑,回圈首让大模型结合新指令重新决定
+
+    results = await self._tool_hub.dispatch(step.tool_calls, state)  # 才真正派发
+    # 注意:占位结果走的是上面那条 apply_results 旁路,不经 dispatch,
+    #       所以不记台账 → 不污染「连续失败」计数 → 不会误触发熔断闸</code></pre>
+
+    <p><strong>推演:</strong>用一个真实场景算笔账。用户问「帮我看看白酒板块」,agent 第三圈刚决定要并发查 <strong>6 家区域酒</strong>的财报(假设每个工具约 1.5 秒、整批约 1.5 秒墙钟 + 一笔不小的 token),就在这 1.5 秒的窗口里用户插话「<em>区域酒别看了,只盯高端白酒</em>」。<strong>若只有圈首检查点</strong>:这 6 个查询全跑完、结果喂回大模型、再转一圈才读到插话——<strong>整整一圈白烧 + 6 次工具调用白做</strong>。<strong>加上分发前检查点</strong>:插话在「大模型刚出 tool_calls、dispatch 之前」就被抓到,6 个工具<strong>一个都不发</strong>,直接给 6 条占位 + 并入插话 + 回圈首重想,代价<strong>仅为多花一次大模型调用</strong>(重新决定该查谁),省下整批工具的钱和时间。代价我们也认:如果插话是「追加」型(「<em>顺便也看下负债率</em>」),这套逻辑同样会把刚决定的 6 个工具批取消、多花一轮大模型重新决定——结果正确,只是多一次调用,因为我们<strong>没有便宜的办法在 dispatch 前区分「改方向」和「追加」这两类插话</strong>。这是清醒认下的折中,不是没看见。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table"><thead><tr><th>维度</th><th class="th-sgl">我们的选择(Redis List 持久化 + 双检查点 + turn 原子)</th><th class="th-vllm">替代方案(打断当前 turn、把插话当全新问题重新排队)</th></tr></thead>
+    <tbody>
+      <tr><td>插话会不会丢</td><td>List 持久化,agent 不在听也存着,圈边界 RPOP 必达,一句不丢</td><td>若用 pub/sub 通知打断,流式那几秒发的插话直接蒸发;改用排队又落到下一个 turn</td></tr>
+      <tr><td>「改方向」型插话的延迟</td><td>分发前检查点抓住,延迟仅「当前大模型流」那一小段,立省整批工具</td><td>当前 turn 在错方向上走完才被处理,或要硬打断 + 丢掉这一轮已有上下文</td></tr>
+      <tr><td>状态会不会被改坏</td><td>消息列表 append-only,只追加、从不回改;无并发改同一字段的坑</td><td>「打断 + 重启」要清理半截状态,清不干净就是脏状态;或丢上下文从头来</td></tr>
+      <tr><td>上下文连续性</td><td>插话并入同一个 turn,原始问题 + 工具结果 + 新指令在同一上下文里</td><td>当全新问题排队 → 丢掉本轮已查到的资料,大模型得从零重建背景</td></tr>
+      <tr><td>跨 turn 串台风险</td><td>每 turn 新 key + TTL,残留插话自然过期,结构上不复用队列,零泄漏</td><td>跨 turn 复用队列是业界有名的插话串台事故源头</td></tr>
+      <tr><td>实现复杂度</td><td>要写双检查点 + 占位结果 + 守协议红线 + 重试整 turn 重跑,不轻</td><td>「当全新问题排队」实现最简单,几乎不用碰循环内部</td></tr>
+    </tbody></table>
+    <p><strong>公允裁决:</strong>「打断当前 turn、把插话当全新问题排队」这个替代方案是真有它的好——<strong>实现极简</strong>,几乎不用动循环内部,语义也最直白(一句话 = 一个问题),对绝大多数「我说完了再问下一个」的用户毫无问题。它绝不是稻草人。我们仍不选,核心理由是<strong>对话式投研里「插话」常常是想纠偏正在进行的这一轮</strong>(「别看区域酒」就是要砍掉正在跑的查询),而不是开一个新话题。把它当全新问题排队,会导致两种糟糕结果:要么 agent 在错方向上走完一整轮、token 白烧;要么硬打断后丢掉本轮已经查到的全部上下文,大模型从零重建。我们用 Redis List(不可丢)+ 双检查点(改方向尽早止损)+ 取消批重规划(守协议)+ turn 原子(崩了整轮干净重跑、并入全部插话、工具走缓存只重花大模型钱),把「并入当前轮且不破坏状态」这件难事做扎实。代价我们认两条:<strong>追加型插话也会触发整批工具重规划、多一次大模型调用</strong>(无法廉价区分改方向 vs 追加);以及<strong>实现比「排队」重得多</strong>。这两笔账我们觉得花得值——对照取消信号「丢得起、用户会再点一次」就敢用 pub/sub,正是同一套「按可靠性需求选方案」的判断在两个场景的不同落点。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 620" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="q7arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="q7arrowred" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#bf3f26"/>
+        </marker>
+        <marker id="q7arrowgreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#1f6e5e"/>
+        </marker>
+      </defs>
+
+      <text x="450" y="26" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="700" fill="#2f4d8a">插话(steering)的旅程:存着 → 安全点取出 → 取消批重规划</text>
+
+      <!-- 上半:时间轴泳道 —— pub/sub 会丢 vs List 存着 -->
+      <text x="40" y="58" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">① worker 在 t0–t8 流式吐字(不在监听频道)</text>
+
+      <!-- worker 时间轴条 -->
+      <rect x="40" y="70" width="700" height="34" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="56" y="91" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#2f4d8a">worker 流式输出 token …………………………………………………………… 圈边界</text>
+      <line x1="40" y1="120" x2="760" y2="120" stroke="#85806f" stroke-width="1"/>
+      <text x="40" y="135" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">t0</text>
+      <text x="350" y="135" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#bf3f26">t3 用户插话「别看区域酒」</text>
+      <text x="700" y="135" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">t8</text>
+      <line x1="360" y1="104" x2="360" y2="150" stroke="#bf3f26" stroke-width="2" stroke-dasharray="4 3"/>
+
+      <!-- 两条路径:pub/sub 丢 vs List 存 -->
+      <rect x="40" y="156" width="340" height="56" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="56" y="178" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#85806f">若用 pub/sub(最多一次):此刻没人听</text>
+      <text x="56" y="200" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#bf3f26">✗ 插话当场蒸发,永远找不回</text>
+
+      <rect x="400" y="156" width="340" height="56" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="416" y="178" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#1f6e5e">改用 Redis List:LPUSH 入队存着</text>
+      <text x="416" y="200" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#1f6e5e">✓ 持久化待并入,圈边界 RPOP 必达</text>
+
+      <line x1="210" y1="150" x2="210" y2="156" stroke="#85806f" stroke-width="1.5" marker-end="url(#q7arrow)"/>
+      <line x1="570" y1="150" x2="570" y2="156" stroke="#1f6e5e" stroke-width="1.5" marker-end="url(#q7arrowgreen)"/>
+
+      <!-- 右侧 key 说明 -->
+      <rect x="756" y="70" width="124" height="142" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.5"/>
+      <text x="818" y="92" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#85806f">steer 队列 key</text>
+      <text x="818" y="114" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">chat:steer:</text>
+      <text x="818" y="129" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">{task_id}</text>
+      <text x="818" y="151" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">每 turn 一个新 id</text>
+      <text x="818" y="166" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">TTL 3600s(1h)</text>
+      <text x="818" y="188" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">残留自然过期</text>
+      <text x="818" y="203" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#1f6e5e">不跨 turn 泄漏</text>
+
+      <!-- 分隔线 -->
+      <line x1="40" y1="234" x2="860" y2="234" stroke="#85806f" stroke-width="1" stroke-dasharray="3 4"/>
+
+      <!-- 下半:分发前检查点放大 —— 取消批 + 重规划 -->
+      <text x="40" y="258" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#2f4d8a">② 放大「分发前检查点」:大模型已出 tool_calls,dispatch 之前抓到插话</text>
+
+      <!-- A: LLM 出了一批 tool_calls -->
+      <rect x="40" y="272" width="200" height="92" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="140" y="294" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#2f4d8a">本圈 LLM 决定的工具批</text>
+      <text x="56" y="316" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">tool_call #1 查 A 酒财报</text>
+      <text x="56" y="334" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">tool_call #2 查 B 酒财报</text>
+      <text x="56" y="352" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">…… 共 6 个(还没派发)</text>
+
+      <!-- 决策菱形:有插话? -->
+      <path d="M 320 318 L 380 288 L 440 318 L 380 348 Z" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8"/>
+      <text x="380" y="314" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#bf3f26">pop_all()</text>
+      <text x="380" y="330" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#bf3f26">有插话?</text>
+      <line x1="240" y1="318" x2="318" y2="318" stroke="#2f4d8a" stroke-width="2" marker-end="url(#q7arrow)"/>
+
+      <!-- 否 → 正常派发 -->
+      <text x="395" y="378" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">否</text>
+      <rect x="320" y="384" width="120" height="40" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="380" y="408" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#1f6e5e">照常 dispatch 6 工具</text>
+      <line x1="380" y1="348" x2="380" y2="384" stroke="#1f6e5e" stroke-width="2" marker-end="url(#q7arrowgreen)"/>
+
+      <!-- 是 → 取消批 + 补占位 -->
+      <text x="450" y="312" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#bf3f26">是</text>
+      <rect x="470" y="272" width="390" height="92" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.8"/>
+      <text x="486" y="294" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="700" fill="#bf3f26">取消整批 + 给每个工具补占位 tool 消息</text>
+      <text x="486" y="315" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">每个 tool_call_id ← 占位结果(守协议红线:</text>
+      <text x="486" y="331" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">「用户插话,本轮工具未执行,请重新决定」)</text>
+      <text x="486" y="352" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">占位走旁路 → 不进台账 → 不污染熔断闸</text>
+      <line x1="440" y1="312" x2="470" y2="305" stroke="#bf3f26" stroke-width="2" marker-end="url(#q7arrowred)"/>
+
+      <!-- 并入插话 + continue -->
+      <rect x="470" y="384" width="390" height="56" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="486" y="406" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#2f4d8a">把插话 append 进 messages(只追加,不回改)</text>
+      <text x="486" y="426" font-family="Noto Sans SC, sans-serif" font-size="11.5" font-weight="700" fill="#2f4d8a">continue 回圈首 → 模型结合新指令重新决定</text>
+      <line x1="665" y1="364" x2="665" y2="384" stroke="#2f4d8a" stroke-width="2" marker-end="url(#q7arrow)"/>
+      <path d="M 470 412 C 250 412 250 472 245 472" fill="none" stroke="#2f4d8a" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#q7arrow)"/>
+      <text x="250" y="464" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">回到圈首(原 6 工具没跑)</text>
+
+      <!-- 底部:turn 原子横幅 -->
+      <rect x="40" y="492" width="820" height="50" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="2"/>
+      <text x="450" y="513" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" font-weight="700" fill="#1f6e5e">turn 原子:中间圈状态不持久化,崩了就当没发生 · 重试=整 turn 重跑(原问题 + 全部插话)</text>
+      <text x="450" y="532" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">工具结果走缓存命中,真实重花的只有大模型调用 —— 没有半拉子状态可恢复,自然不会从不一致点接着跑</text>
+
+      <!-- legend -->
+      <text x="40" y="572" font-family="Noto Sans SC, sans-serif" font-size="11" font-weight="700" fill="#2f4d8a">图例:</text>
+      <rect x="88" y="563" width="16" height="12" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="110" y="573" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">插话触发的关键动作</text>
+      <rect x="278" y="563" width="16" height="12" rx="3" fill="#e9eef8" stroke="#2f4d8a"/>
+      <text x="300" y="573" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">循环主干 / 数据流</text>
+      <rect x="468" y="563" width="16" height="12" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="490" y="573" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">正向 / 必达 / 原子保证</text>
+      <rect x="668" y="563" width="16" height="12" rx="3" fill="#f0ede4" stroke="#85806f"/>
+      <text x="690" y="573" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">被丢弃 / 弱信号 / key 元信息</text>
+
+      <text x="40" y="600" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">注:取消信号走 pub/sub(丢得起,用户会再点);插话走 List(不可丢,必并入)—— 同是递信号,按「丢失容忍度」分用两种原语。</text>
+    </svg>
+    <figcaption>图 2-7 · 怎么看:<strong>上半</strong>是时间轴——worker 在流式吐字的几秒里压根不在听频道,用户偏在 t3 插话;走 pub/sub 这句当场就丢(灰框✗),改用 Redis List 先 <code>LPUSH</code> 存着(绿框✓),等 agent 到圈边界再 <code>RPOP</code> 取。<code>LPUSH</code>=从队列头塞、<code>RPOP</code>=从队尾取,合起来就是「先到先并入」。<strong>下半</strong>放大那个最关键的「分发前检查点」:大模型已经决定要调 6 个工具、但还没真派发的瞬间,若发现有插话,就<strong>整批取消</strong>,给每个工具补一句占位话(守住「每个工具调用都得有结果」的协议红线),把插话追加进对话、回到圈首让模型重新想——原来那 6 个工具一个没跑、白烧的钱省下了。占位结果走旁路、不记台账,所以不会把「连续失败熔断」那道闸带歪(见本类第 4 题)。<strong>底部绿条</strong>是 turn 原子:中间状态不存库,崩了整轮干净重来,重试时工具走缓存、只重花大模型的钱。
+    </figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>插话 vs 取消,按「丢得起吗」分原语</strong>:插话必须并入当前 turn、一句不能丢,用 Redis List 持久化(写端 <code>LPUSH</code>+TTL,读端 <code>RPOP</code> 循环 = FIFO),agent 不在听也存着;取消丢得起(用户会再点一次),才敢用「最多一次」的 pub/sub。</li>
+      <li><strong>两个检查点各管一段窗口</strong>:圈首管「上一圈工具执行期间」的插话;分发前管「大模型已出工具、还没派发」的插话。后者把改方向型插话的延迟从「整圈」缩到「当前大模型流」,立省一整批已不需要的工具。</li>
+      <li><strong>取消批 + 重规划还不破协议</strong>:被取消的每个工具补一条占位 tool 消息(守住「每个 tool_call_id 必有 tool 消息」红线),并入插话、<code>continue</code> 回圈首重想;占位走旁路、不进台账,所以不污染「连续失败熔断」那道闸(见本类第 4 题)。</li>
+      <li><strong>不破坏状态 = append-only</strong>:消息列表是单一真相,插话只往尾部追加、从不回改已有消息,从结构上避开了「两个执行流改同一字段」的并发坑。</li>
+      <li><strong>turn 原子</strong>:中间圈状态不持久化、崩溃即弃;重试是整 turn 从头重跑(原问题 + 全部并入的插话),工具走缓存命中、真实重花只有大模型调用;每 turn 换新 key + TTL,残留插话自然过期、不跨 turn 串台。</li>
+    </ul>
+    <p class="one-liner">一句话速记:插话不可丢 → 走 Redis List 存着、圈边界必达;两个检查点尽早止损;取消批补占位守协议红线、只追加不回改;turn 原子,崩了整轮干净重来。</p>
+    <p class="src-note">参考:<code>backend/app/services/chat_steer_bus.py</code> · <code>backend/app/chatloop/worker_wiring.py</code> · <code>backend/app/chatloop/loop.py</code></p>
+  </div></div>
+</article>
+<article class="question-card" id="loop-q8">
+  <div class="q-header">
+    <span class="q-num">Q8</span>
+    <h3 class="q-title">用原生 function calling 而不是框架的 tool 抽象,你踩过哪些坑?(qwen3 关思考、tool_call 参数合法化、非 deepseek 模型兼容)</h3>
+    <span class="q-diff" title="难度 4/5">★★★★☆</span>
+  </div>
+
+  <div class="q-tags">
+    <span class="tag">原生 function calling</span>
+    <span class="tag">qwen3 关思考</span>
+    <span class="tag">参数合法化</span>
+    <span class="tag">流式分片拼接</span>
+    <span class="tag">cassette 真录</span>
+  </div>
+
+  <div class="q-block block-exam"><h4>🎯 考察点分析</h4><div class="block-body">
+    <p>这道题是上一题(为什么退役框架)的"还账"环节。退役框架之后,模型那一层"脏活"就得自己接——面试官想确认:你是真的把协议跑通过、知道每个模型的怪脾气长什么样,还是只在 PPT 上喊"裸接更可控"。能讲出具体的报错码、具体哪个字段坏了、怎么发现的,才说明手是脏的。</p>
+    <ul>
+      <li><strong>追问:</strong>所谓"框架会掩盖协议细节",到底掩盖了哪些?你举一个框架替你扛了、你裸接后得自己扛的具体例子。</li>
+      <li><strong>追问:</strong>你这些兼容补丁,是看文档加的还是跑出来加的?如果是跑出来的,你拿什么环境复现?为什么单元测试里的 mock 抓不到?</li>
+      <li><strong>追问:</strong>给 qwen3 加的 <code>enable_thinking=false</code>、给所有模型加的参数合法化——你怎么保证这些补丁不会反过来把原本好好的 deepseek 搞坏?</li>
+      <li><strong>追问:</strong>既然这么麻烦,当初为什么不干脆只支持 deepseek 一个模型,或者退回去用框架?</li>
+    </ul>
+  </div></div>
+
+  <div class="q-block block-theory"><h4>📚 原理讲解</h4><div class="block-body">
+    <p>先说清楚"原生 function calling"是什么意思。OpenAI 定了一套通用协议:你在请求里塞一个 <code>tools=[...]</code> 把工具的名字、参数长啥样告诉模型;模型如果决定调工具,它回的那一坨数据里 <code>finish_reason</code> 会是 <code>tool_calls</code>,并且带上"调哪个工具、参数是什么"。现在所有主流国产模型(deepseek、qwen3、…)都兼容这套协议。我们的对话引擎就是<strong>直接对着这套协议收发</strong>——自己拼请求、自己读模型回的字段,中间不夹 LangChain / LangGraph 那层"工具抽象"。</p>
+
+    <p>框架的工具抽象帮你做三件事:统一写工具定义、自动把模型回的 tool_call 解析成对象、抹平不同厂商的协议差异。听起来很香。但代价是:这三件事一旦出 bug,你看到的是框架内部的报错,真正的协议细节被它包在里面,你既看不见也调不动。我们退役框架(见本类第 3 题),换来的是控制流百分百自有——代价就是这层"抹平差异"得自己来。下面三道坑,全是这层抹平里漏出来的。</p>
+
+    <h5>坑一:qwen3 是"思考模型",不关思考直接 400</h5>
+    <p>qwen3 这类模型默认会先"想一段"(reasoning)再回答。问题是:在阿里云 dashscope 这个端点上,如果你用 function calling 又没显式把思考关掉,它直接回你一个 <code>400 Bad Request</code>——请求都进不去。deepseek 没这毛病,所以同一套代码,从 deepseek 切到 qwen3 当场就栽。</p>
+    <p>修法很轻:发请求前看一眼模型名,如果是 qwen3 开头,就在请求体里塞一个 <code>extra_body={"enable_thinking": False}</code>;不是 qwen3 就<strong>什么都不塞</strong>。这个"不是 qwen3 就不塞"很关键——别的模型不认这个参数,你硬塞反而把它们弄 400。一个补丁,不能为了救一个模型把另一个搞坏。</p>
+
+    <h5>坑二:回灌的 tool_call 参数必须是合法 JSON</h5>
+    <p>多轮对话里,上一轮模型调过的工具调用,这一轮要原样塞回消息历史给模型看(它得知道"我刚才调了啥、拿到啥结果")。工具调用里有个 <code>arguments</code> 字段,是个 JSON 字符串。deepseek 很宽松:就算这个字符串是空的(<code>""</code>)它也照收。qwen3 严:你把空串或者半截坏 JSON 回灌进去,它认为这不是合法 JSON,又是一个 400。</p>
+    <p>修法:回灌之前过一道"合法化"——逐个检查每个工具调用的 <code>arguments</code>,只要不是合法 JSON(空串、坏串都算),就兜底成 <code>"{}"</code>(一个合法的空对象),其余消息原样不动。妙处在于:<strong>合法 JSON 谁都收</strong>,所以这道补丁对 deepseek 也完全无害——它本来就能收合法 JSON。这就是"补丁要对所有模型安全"的范例。</p>
+    <div class="callout">注意区分两个不同环节(见本类第 4 题的"工具签名校验")。那边管的是"模型把工具名拼错了、参数对不上签名"——属于语义校验,放行后交给 schema 判。本题这道合法化管的是更底层的"这串字符还算不算 JSON"——属于回灌请求前的格式兜底。一个判签名、一个保 JSON,别混。</div>
+
+    <h5>坑三:流式续片里 name="" 把已拿到的工具名冲掉了</h5>
+    <p>这道是最阴的,也最能说明"为什么必须真录"。模型回工具调用时是<strong>流式分片</strong>的:工具名、参数会拆成好几个小片陆续吐出来,我们这边有个状态机(StreamAssembler)按片的序号(index)一片片攒起来。契约是:工具的 id 和 name <strong>只在该工具调用的第一片里携带</strong>,后面的续片只补参数。</p>
+    <p>坑在哪?qwen 的续片里,name 字段不是省略、也不是 null,而是给你一个<strong>空串 <code>""</code></strong>。如果拼接逻辑写成"只要字段不是 null 就拿来覆盖",那第二片的 <code>""</code> 就会把第一片攒到的真工具名冲掉——结果下游拿到一个空名字,根本不知道该调哪个工具。修法是把判定从"不是 null"改成"是真值"(空串视为假),只让非空的片更新槽位。这一个字的区别(<code>is not None</code> → 真值判断),不录真 API 永远想不到。</p>
+    <div class="callout"><strong>方法论硬骨头:</strong>这个 bug 用 mock 测试一辈子也复现不出来——因为 mock 是你自己捏的,你不会捏出一个"name 是空串而非 null"的续片,你压根不知道协议会这么干。只有把真 API 的响应<strong>录成 cassette</strong>(把真实往返存下来当回归基线),再回放,才暴露得出来。这也是项目里一条铁律:谈某个接口的行为,必须先录 cassette 核实,不能只看文档拍脑袋。</div>
+
+    <p>顺带一提流式还得拿两样东西:一是<strong>流式 usage</strong>——开 <code>stream_options={"include_usage": True}</code>,流结束时能拿到这轮花了多少 token,喂给预算闸;二是<strong>缓存命中数</strong>——从 usage 里的 <code>cached_tokens</code> 读出来,知道有多少 token 命中了 prefix cache(这块省钱机制见本类第 5 题)。reasoning 和正文是两条独立的增量流,而且 assistant 消息回灌时<strong>绝不带 reasoning 字段</strong>——这是状态层的红线,带了会污染下一轮上下文。</p>
+  </div></div>
+
+  <div class="q-block block-example"><h4>💻 示例讲解</h4><div class="block-body">
+    <p>把三道坑的修法浓缩成发请求前的两道"垫片"+ 收响应时的一道"防覆盖",看逻辑怎么走(伪代码,真实函数名做锚点):</p>
+    <pre><code class="language-python"># ── 发请求前:两道兼容垫片 ──────────────────────────
+def extra_body_for(model):
+    # 坑①:qwen3 是思考模型,不关思考会 400;别的模型不认这参数,不能塞
+    if model.startswith("qwen3"):
+        return {"enable_thinking": False}
+    return {}                       # 非 qwen3 → 什么都不加
+
+def sanitize_tool_args(messages):
+    # 坑②:回灌的 tool_call 参数必须是合法 JSON,空/坏 → 兜底 "{}"
+    for m in messages:
+        for tc in m.get("tool_calls", []):
+            args = tc["function"]["arguments"]
+            if not valid_json(args):      # 空串 / 半截坏 JSON 都算不合法
+                tc["function"]["arguments"] = "{}"   # 合法 JSON 谁都收 → 对所有模型安全
+    return messages
+
+# 发请求:垫片只在该加的地方加,deepseek 走过去等于无操作
+kwargs = {"model": model, "messages": sanitize_tool_args(messages),
+          "stream": True, "stream_options": {"include_usage": True}}
+if extra_body_for(model):                 # 仅 qwen3 命中
+    kwargs["extra_body"] = extra_body_for(model)
+
+# ── 收响应时:流式分片防覆盖(坑③)────────────────────
+slot = {"id": None, "name": None, "arguments": ""}
+for frag in tool_call_fragments:          # 同一 index 的片陆续到达
+    if frag.id:                           # 真值判断,不是 "is not None"
+        slot["id"] = frag.id              # 空串 "" 是假 → 不覆盖,保住首片的真值
+    if frag.name:
+        slot["name"] = frag.name          # ← 坑③ 修在这:续片的 name="" 进不来
+    slot["arguments"] += (frag.arguments or "")   # 参数跨片拼接
+</code></pre>
+    <p><strong>推演:</strong>设一轮对话从 deepseek 切到 qwen3。① 请求出门:<code>extra_body_for("qwen3-...")</code> 命中,塞 <code>enable_thinking=false</code>——不塞就是 1 次 400,整轮废掉。② 历史里有一个上轮的工具调用,<code>arguments</code> 是空串:<code>sanitize</code> 把它改成 <code>"{}"</code>——不改又是 1 次 400。③ 模型回 3 个流式片:第 1 片带 <code>name="get_quote"</code>,第 2、3 片 <code>name=""</code> 只补参数。旧逻辑会被第 2 片的 <code>""</code> 冲成空名→下游抽不到工具→这一轮静默调错。三道坑各拦一处,任何一道漏掉,这轮 qwen3 对话就崩在不同位置。而这三个补丁对 deepseek 全是"无操作或无害",所以一套代码两个模型都能跑。</p>
+  </div></div>
+
+  <div class="q-block block-vs"><h4>⚖️ 决策对比</h4><div class="block-body">
+    <table class="vs-table">
+      <thead><tr><th>维度</th><th class="th-sgl">我们的选择:裸接原生 function calling</th><th class="th-vllm">替代方案:框架(LangChain / LangGraph)的 tool 抽象层</th></tr></thead>
+      <tbody>
+        <tr><td>工具定义 & 解析</td><td>自己拼 <code>tools=</code>、自己读 <code>finish_reason</code> 和 tool_call 字段</td><td>统一工具定义、自动解析 tool_call,上手快、样板少</td></tr>
+        <tr><td>厂商差异谁来抹</td><td>差异全落到自己头上,三道坑得自己填</td><td>框架替你抹平 provider 差异,常见模型开箱即用</td></tr>
+        <tr><td>协议细节可见性</td><td>每个字段、每个 400 都在自己手里,可调可加日志</td><td>细节被包在框架内部,出锅常是框架内部报错,难定位</td></tr>
+        <tr><td>新模型支持成本</td><td>新模型的怪脾气要逐个录 cassette、加垫片(本题就是)</td><td>框架升级跟上后大多自动可用,但要等它跟上</td></tr>
+        <tr><td>控制流主权</td><td>循环、终止闸、降级路径百分百自有,与状态层解耦</td><td>控制流嵌在框架的图/链里,改行为受框架约束</td></tr>
+        <tr><td>退路</td><td>留了降级口:若原生 FC 不达预期,内部可退到 JSON 约束输出,循环及以上不动</td><td>退路同样依赖框架是否提供对应能力</td></tr>
+      </tbody>
+    </table>
+    <p><strong>公允裁决:</strong>框架的工具抽象不是稻草人——它确实能让你少写大量样板、开箱兼容主流模型、新人上手快;如果目标是"快速把一个多工具 agent 跑起来",它是更省事的选择,本题这三道坑它大概率替你扛了。我们仍然裸接,是因为这个项目的目标恰恰相反:要的是控制流百分百自有、协议层每个字节透明可调、模型可热切换的兼容垫片掌握在自己手里,而且这些坑一旦填好就是<strong>叙事资产</strong>(面试时讲得出"我怎么用 cassette 抓出空串覆盖")。换句话说,框架省的是当下的力气,裸接换的是长期的主权和理解深度——与本项目"框架最小化、可读性、叙事优先于框架便利"的取向一致。代价我们认:每接一个新模型,就得再录一次真 API、再加几片垫片。</p>
+  </div></div>
+
+  <div class="q-block block-diagram"><h4>🖼️ 图解</h4><div class="block-body"><figure class="diagram">
+    <svg viewBox="0 0 900 560" xmlns="http://www.w3.org/2000/svg" role="img">
+      <defs>
+        <marker id="ar-q8" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#2f4d8a"/>
+        </marker>
+        <marker id="ar-q8-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#bf3f26"/>
+        </marker>
+        <marker id="ar-q8-grn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="#1f6e5e"/>
+        </marker>
+      </defs>
+
+      <text x="450" y="28" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="17" font-weight="700" fill="#2f4d8a">裸接原生 function calling 的三道坑与垫片</text>
+      <text x="450" y="48" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">框架抽象会把这些字段细节包起来掩盖;只有自己裸接 + 真录 cassette 才暴露</text>
+
+      <!-- 起点 -->
+      <rect x="375" y="70" width="150" height="40" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="450" y="95" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="13" fill="#2f4d8a">组装一轮请求(切到 qwen3)</text>
+
+      <!-- 坑① -->
+      <line x1="450" y1="110" x2="450" y2="140" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#ar-q8)"/>
+      <rect x="320" y="140" width="260" height="44" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.3"/>
+      <text x="450" y="159" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#bf3f26" font-weight="700">坑① qwen3 没关思考</text>
+      <text x="450" y="176" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">请求直接 400,根本进不去</text>
+      <!-- 修法① -->
+      <line x1="580" y1="162" x2="640" y2="162" stroke="#1f6e5e" stroke-width="1.5" marker-end="url(#ar-q8-grn)"/>
+      <rect x="640" y="140" width="240" height="44" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.3"/>
+      <text x="760" y="159" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1f6e5e" font-weight="700">垫片:看模型名注入</text>
+      <text x="760" y="176" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">enable_thinking:false(仅 qwen3)</text>
+
+      <!-- 坑② -->
+      <line x1="450" y1="184" x2="450" y2="214" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#ar-q8)"/>
+      <rect x="320" y="214" width="260" height="44" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.3"/>
+      <text x="450" y="233" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#bf3f26" font-weight="700">坑② 回灌的 tool_call 参数空/坏</text>
+      <text x="450" y="250" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#85806f">qwen3 嫌不是合法 JSON,又 400</text>
+      <!-- 修法② -->
+      <line x1="580" y1="236" x2="640" y2="236" stroke="#1f6e5e" stroke-width="1.5" marker-end="url(#ar-q8-grn)"/>
+      <rect x="640" y="214" width="240" height="44" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.3"/>
+      <text x="760" y="233" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1f6e5e" font-weight="700">垫片:参数合法化</text>
+      <text x="760" y="250" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11" fill="#1f6e5e">空/坏 → "{}"(对所有模型安全)</text>
+
+      <!-- 发出去 -->
+      <line x1="450" y1="258" x2="450" y2="292" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#ar-q8)"/>
+      <rect x="355" y="292" width="190" height="38" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.5"/>
+      <text x="450" y="316" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#2f4d8a">请求发出 · 流式响应回来</text>
+
+      <!-- 坑③ 流式分片区 -->
+      <line x1="450" y1="330" x2="450" y2="360" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#ar-q8)"/>
+      <rect x="150" y="360" width="600" height="120" rx="8" fill="#f0ede4" stroke="#85806f" stroke-width="1.3"/>
+      <text x="170" y="382" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#bf3f26" font-weight="700">坑③ StreamAssembler 按 index 攒分片:id/name 只首片带,续片 name=""</text>
+
+      <!-- 三片 -->
+      <rect x="172" y="396" width="150" height="62" rx="8" fill="#e9eef8" stroke="#2f4d8a" stroke-width="1.3"/>
+      <text x="247" y="416" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#2f4d8a" font-weight="700">首片(index=0)</text>
+      <text x="247" y="433" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">name="get_quote" ✓</text>
+      <text x="247" y="449" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">args 起头片段</text>
+
+      <line x1="322" y1="427" x2="362" y2="427" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#ar-q8)"/>
+      <rect x="362" y="396" width="150" height="62" rx="8" fill="#faeae4" stroke="#bf3f26" stroke-width="1.3"/>
+      <text x="437" y="416" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#bf3f26" font-weight="700">续片 name=""</text>
+      <text x="437" y="433" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#bf3f26">旧逻辑会用"" 冲掉真名</text>
+      <text x="437" y="449" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#85806f">只补 args 片段</text>
+
+      <line x1="512" y1="427" x2="552" y2="427" stroke="#2f4d8a" stroke-width="1.5" marker-end="url(#ar-q8)"/>
+      <rect x="552" y="396" width="180" height="62" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.3"/>
+      <text x="642" y="416" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="11.5" fill="#1f6e5e" font-weight="700">修法:真值判断</text>
+      <text x="642" y="433" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">空串视为假 → 不覆盖</text>
+      <text x="642" y="449" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="10.5" fill="#1f6e5e">保住 "get_quote"</text>
+
+      <!-- 结果 -->
+      <line x1="450" y1="480" x2="450" y2="508" stroke="#1f6e5e" stroke-width="1.6" marker-end="url(#ar-q8-grn)"/>
+      <rect x="300" y="508" width="300" height="38" rx="8" fill="#e2f0eb" stroke="#1f6e5e" stroke-width="1.5"/>
+      <text x="450" y="532" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12.5" fill="#1f6e5e" font-weight="700">三坑各拦一处 → qwen3 / deepseek 一套代码都跑通</text>
+
+      <!-- 图例 -->
+      <rect x="150" y="70" width="14" height="14" rx="3" fill="#faeae4" stroke="#bf3f26"/>
+      <text x="170" y="82" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">坑/失败点</text>
+      <rect x="150" y="92" width="14" height="14" rx="3" fill="#e2f0eb" stroke="#1f6e5e"/>
+      <text x="170" y="104" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">垫片/修法</text>
+      <rect x="150" y="114" width="14" height="14" rx="3" fill="#f0ede4" stroke="#85806f"/>
+      <text x="170" y="126" font-family="Noto Sans SC, sans-serif" font-size="10" fill="#85806f">协议现场</text>
+    </svg>
+    <figcaption>图 2-8 · 怎么看:从上往下是一轮请求的生命周期。左列灰框是"坑"(协议现场出问题的地方),右侧绿框是对应的"垫片/修法"。坑①坑②在请求出门<strong>前</strong>拦截(否则当场 400);坑③在响应回来<strong>后</strong>的流式拼接里。底部那行绿框是终态:三个补丁分别对 deepseek "无操作或无害",所以一套代码能同时喂两个模型。术语白话:<strong>400</strong>=请求格式不合规、服务器直接拒收;<strong>流式分片</strong>=模型把工具名和参数拆成好几小块陆续吐;<strong>cassette</strong>=把真 API 的一次真实往返录下来当回归基线。</figcaption>
+  </figure></div></div>
+
+  <div class="q-block block-summary"><h4>📌 总结</h4><div class="block-body">
+    <ul class="takeaways">
+      <li><strong>裸接的代价就是这三道坑:</strong>qwen3 不关思考 400、回灌参数空/坏 JSON 400、流式续片 <code>name=""</code> 冲掉真工具名。框架会把它们包起来掩盖,自己裸接才暴露——这正是退役框架后要自己付的账。</li>
+      <li><strong>补丁要"救一个不害另一个":</strong><code>enable_thinking</code> 仅 qwen3 注入(别的模型不认),参数合法化对所有模型安全(合法 JSON 谁都收)。这是兼容垫片的设计纪律,不是顺手写写。</li>
+      <li><strong>cassette 真录是不可替代的回归面:</strong>空串覆盖 bug 用 mock 永远复现不出来——你不会捏出"name 是空串而非 null"的片,因为你不知道协议会这么干。铁律:谈接口行为先录 cassette 核实,别只看文档。</li>
+      <li><strong>这些垫片服务于"模型可热切换":</strong>有了它们,对话引擎在非 deepseek 模型上不栽在厂商专属要求上;换模型只改配置,内核循环不动。</li>
+      <li><strong>区分环节别混:</strong>本题的参数合法化是"回灌前保 JSON 合法",与第 4 题的"工具签名校验"(判模型有没有拼错工具名/参数)是两回事;还留了降级口——原生 FC 不达预期可退 JSON 约束输出,循环及以上不动。</li>
+    </ul>
+    <p class="one-liner">一句话速记:退役框架换来控制流主权,代价是模型协议的脏活自己扛——三道坑(关思考 / 参数合法化 / 流式防覆盖),靠真录 cassette 一个个抓出来填平。</p>
+    <p class="src-note">参考:<code>backend/app/services/openai_client.py</code> · <code>backend/app/chatloop/state.py</code> · <code>docs/claude-context/chat-loop-redesign-done.md</code></p>
+  </div></div>
+</article>
+</section>
