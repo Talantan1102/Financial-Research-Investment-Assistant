@@ -14,29 +14,51 @@
 
 | 文件 | 改动 |
 | --- | --- |
-| `backend/app/mcp_server/tools/trade_cal.py` | 把 window 解析(`:114-151`)抽成可复用纯函数 `resolve_window(anchor, lookback) -> (start,end)` |
-| `backend/app/mcp_server/tools/get_daily.py` | 加可选 `anchor+lookback`(给了则 resolve_window 再取数);其余不动 |
+| `backend/app/mcp_server/tools/trade_cal.py` | 加公开纯函数 `resolve_calendar_window(anchor, lookback) -> (start,end)`(组合现有 `_parse_lookback`+`_resolve_raw_start`,日历型 only;**不动** `_handle_window`) |
+| `backend/app/mcp_server/tools/get_daily.py` | `start/end` 改可选 + 加 `anchor+lookback`(日历型走 resolve_calendar_window;td → 报错引导先用 trade_cal);其余不动 |
 | `backend/app/chatloop/tool_docs.py` | get_daily 文档补一句"可传 anchor+lookback 让工具自己定窗口,免先调 trade_cal" |
 | `backend/eval/question_gen/runner.py` | run_one 返回带 final state;采集模式关降级 + 落 trajectories_raw(无 gold)+ judgements(gold 隔离) |
 | `backend/tests/...` | 各 task 配套 |
 
 ---
 
-### Task 1: 抽 trade_cal 窗口解析为共享纯函数
+### Task 1: trade_cal 加公开纯函数 resolve_calendar_window
 
-**Files:** Modify `backend/app/mcp_server/tools/trade_cal.py`;Test `backend/tests/unit/mcp_server/test_trade_cal_tool.py`(已存在 window 测试,加共享函数测试)
+**Files:** Modify `backend/app/mcp_server/tools/trade_cal.py`;Test `backend/tests/unit/mcp_server/test_trade_cal_tool.py`
 
-- [ ] **Step 1: 读** `trade_cal.py:114-151`(现 window action 的解析逻辑:anchor + lookback 周期码 → (start,end))。
-- [ ] **Step 2: 写失败测试** —— 直接测新纯函数:
+**背景(已核验真实代码):** 完整窗口解析 `_handle_window`(`:114-151`)**要查日历 I/O**(顺延到真实交易日 / `td` 倒数 N 交易日),**不是纯函数**。但日历型 lookback(y/m/d/ytd)的起点是纯计算——`_parse_lookback`(`:32`)与 `_resolve_raw_start`(`:101`)已存在且纯。本 task 只新增一个**组合这两个现成纯函数**的公开纯函数给 get_daily 复用,**不碰 `_handle_window`**(其测试保持绿)。
+
+- [ ] **Step 1: 写失败测试**
 ```python
-from app.mcp_server.tools.trade_cal import resolve_window
-def test_resolve_window_1y():
-    s, e = resolve_window("20260616", "1y")
-    assert e == "20260616" and s == "20250616"  # 与现 window action 同结果(对照现有 test_trade_cal 的 window 用例)
+import pytest
+from app.mcp_server.tools.trade_cal import resolve_calendar_window
+def test_resolve_calendar_window_1y():
+    assert resolve_calendar_window("20260616", "1y") == ("20250616", "20260616")
+def test_resolve_calendar_window_ytd():
+    assert resolve_calendar_window("20260616", "ytd") == ("20260101", "20260616")
+def test_resolve_calendar_window_td_raises():
+    with pytest.raises(ValueError):
+        resolve_calendar_window("20260616", "20td")
 ```
-- [ ] **Step 3: 实现** —— 把 `:114-151` 的解析体抽成模块级 `def resolve_window(anchor: str, lookback: str) -> tuple[str, str]`(纯函数,不碰 I/O);原 window action 的 handle 改为调它。**行为逐字不变**(原 window 测试必须仍绿)。
-- [ ] **Step 4: 跑** `pytest tests/unit/mcp_server/test_trade_cal_tool.py -q` → 既有 window 测试 + 新测试全绿。
-- [ ] **Step 5: 提交** `refactor(trade_cal): window 解析抽成共享纯函数 resolve_window`
+- [ ] **Step 2: 跑测试确认失败**(`ImportError`)。
+- [ ] **Step 3: 实现** —— 在 trade_cal.py 加(复用现有私有纯函数,零重复、不碰 `_handle_window`):
+```python
+def resolve_calendar_window(anchor: str, lookback: str) -> tuple[str, str]:
+    """日历型相对窗口 → (raw_start, anchor) 纯解析(不查日历)。
+
+    仅支持日历型 lookback(y/m/d/ytd);交易日计数型 td 需查日历倒数,不在纯路径,抛 ValueError。
+    raw_start 未顺延到首个交易日,但 get_daily(start=raw_start, end=anchor) 取回的 K 线与
+    trade_cal.window 顺延后的窗口逐根相同(raw_start 与首个交易日之间本无交易日)。
+    """
+    if _bad_ymd(anchor):
+        raise ValueError("anchor 需 8 位 YYYYMMDD")
+    kind, n = _parse_lookback(lookback)
+    if kind == "td":
+        raise ValueError("td(交易日计数)需查日历,请用 trade_cal action=window")
+    return _resolve_raw_start(anchor, kind, n), anchor
+```
+- [ ] **Step 4: 跑** `pytest tests/unit/mcp_server/test_trade_cal_tool.py -q`(经 WSL fria-venv,见文末)→ 新测试 + 既有全绿。
+- [ ] **Step 5: 提交** `feat(trade_cal): 加公开纯函数 resolve_calendar_window(日历型窗口纯解析)`
 
 ---
 
@@ -44,19 +66,31 @@ def test_resolve_window_1y():
 
 **Files:** Modify `backend/app/mcp_server/tools/get_daily.py`、`backend/app/chatloop/tool_docs.py`;Test `backend/tests/unit/mcp_server/test_get_daily_tool.py`
 
-- [ ] **Step 1: 写失败测试**(纯函数层,不打网络)—— 断言"给 anchor+lookback 时,handle 解析出的 (start,end) 等于 resolve_window 的结果"(抽一个 `_resolve_range(args)->(start,end)` 纯函数单测,或对 handle 的参数解析做薄单测):
+**口径说明:** 日历型窗口下 `get_daily(start=raw_start, end=anchor)` 与 gold 走 `trade_cal.window` 顺延后的窗口取回**逐根相同的 K 线**(见 Task 1),指标计算与 gold 一致,gold 不变。
+
+- [ ] **Step 1: 写失败测试**(纯函数层,不打网络):
 ```python
-def test_get_daily_anchor_lookback_resolves_window():
-    s, e = _resolve_range({"anchor": "20260616", "lookback": "1y"})
-    assert (s, e) == ("20250616", "20260616")
-def test_get_daily_explicit_start_end_unchanged():
-    s, e = _resolve_range({"start": "20250101", "end": "20251231"})
-    assert (s, e) == ("20250101", "20251231")
+import pytest
+from app.mcp_server.tools.get_daily import _resolve_range
+def test_resolve_range_explicit():
+    assert _resolve_range({"start": "20250101", "end": "20251231"}) == ("20250101", "20251231")
+def test_resolve_range_anchor_lookback():
+    assert _resolve_range({"anchor": "20260616", "lookback": "1y"}) == ("20250616", "20260616")
+def test_resolve_range_td_raises():
+    with pytest.raises(ValueError):
+        _resolve_range({"anchor": "20260616", "lookback": "20td"})
+def test_resolve_range_missing_raises():
+    with pytest.raises(ValueError):
+        _resolve_range({"ts_code": "600519.SH"})
 ```
 - [ ] **Step 2: 跑测试确认失败。**
-- [ ] **Step 3: 实现** —— get_daily inputSchema 加可选 `anchor`/`lookback`;handle 里:`if 给了 anchor+lookback: start,end = trade_cal.resolve_window(anchor,lookback)` 否则用 `start/end`(都没给 → 报错指导文案)。其余取数/格式化不变。tool_docs 的 get_daily 文档补一句"也可传 anchor+lookback 让工具自己定窗口,免先调 trade_cal"。
+- [ ] **Step 3: 实现**
+  - inputSchema:`start`/`end` 从 `required` 移除(改 optional),加 `anchor`/`lookback`;`required` 只留 `ts_code`;描述补"二选一:显式 start+end,或 anchor+lookback(日历型 1y/6m/3m/ytd 自动定窗,免先调 trade_cal)"。
+  - 加纯函数 `_resolve_range(args)`:显式 `start`+`end` 优先;否则 `anchor`+`lookback` 走 `trade_cal.resolve_calendar_window`;都没有 → `raise ValueError`。
+  - handle 改为 `try: start,end = _resolve_range(args) except ValueError as e: return _err(str(e))`(加一个与 trade_cal 同形的 `_err`),其余 `_format_daily` 不变。
+  - tool_docs.py 的 get_daily 文档补一句"可传 anchor+lookback(日历型)让工具自己定窗口,免先调 trade_cal;过去 N 个交易日(td)仍需先 trade_cal"。
 - [ ] **Step 4: 跑** get_daily 单测 + 既有回归全绿。
-- [ ] **Step 5: 提交** `feat(get_daily): 内联 anchor+lookback 窗口(免先调 trade_cal)`
+- [ ] **Step 5: 提交** `feat(get_daily): start/end 可选 + 内联 anchor+lookback 窗口(免先调 trade_cal)`
 
 ---
 
@@ -94,7 +128,15 @@ def test_get_daily_explicit_start_end_unchanged():
 
 **口径零漂移**:窗口解析(Task 1/2)复用 trade_cal 现有同源逻辑,gold 不变。
 
-**类型一致**:`resolve_window` 返回 `tuple[str,str]`,get_daily 的 `_resolve_range` 复用同签名。
+**类型一致**:`resolve_calendar_window` 与 `_resolve_range` 均返回 `tuple[str,str]`;get_daily 经 `_resolve_range` 调 `resolve_calendar_window`。
+
+## 运行环境(subagent 必读)
+
+测试经 WSL fria-venv 跑,从仓库根:
+```
+wsl bash -lc "source /home/administrator/fria-venv/bin/activate && cd /mnt/d/mys/Financial-Research-Investment-Assistant/backend && source .env && python -m pytest tests/unit/mcp_server/test_trade_cal_tool.py -q"
+```
+git 操作走 Windows PowerShell(仓库是 LF,提交前确认无 CRLF 污染)。
 
 ---
 
