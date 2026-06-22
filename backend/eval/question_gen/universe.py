@@ -13,7 +13,6 @@ from typing import Any
 
 from eval.question_gen.stock_pool import Stock
 
-
 _CSI800_CODE = "000906.SH"
 
 

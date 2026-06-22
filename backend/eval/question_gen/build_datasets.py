@@ -12,9 +12,9 @@ import random
 from pathlib import Path
 from typing import Any
 
-from eval.question_gen import generator, stock_pool
-from eval.question_gen.universe import load_csi800
+from eval.question_gen import generator
 from eval.question_gen.split import split_by_stock
+from eval.question_gen.universe import load_csi800
 
 _AS_OF_DEFAULT = "20260612"
 _DATA_DIR = Path(__file__).resolve().parent / "data"
