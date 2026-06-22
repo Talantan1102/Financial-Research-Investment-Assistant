@@ -132,11 +132,11 @@ def test_resolve_range_missing_raises():
 
 ## 运行环境(subagent 必读)
 
-测试经 WSL fria-venv 跑,从仓库根:
+测试经 WSL fria-venv 跑。**`.env` 在仓库根、是 `KEY=val` 格式,要 `set -a` 才进 os.environ**(否则 `KeyError: POSTGRES_PASSWORD`):
 ```
-wsl bash -lc "source /home/administrator/fria-venv/bin/activate && cd /mnt/d/mys/Financial-Research-Investment-Assistant/backend && source .env && python -m pytest tests/unit/mcp_server/test_trade_cal_tool.py -q"
+wsl bash -lc "source /home/administrator/fria-venv/bin/activate && cd /mnt/d/mys/Financial-Research-Investment-Assistant && set -a && source .env && set +a && cd backend && python -m pytest <测试路径> -q"
 ```
-git 操作走 Windows PowerShell(仓库是 LF,提交前确认无 CRLF 污染)。
+退出码 0 = 全绿(`wsl` 启动有一行 localhost/NAT 告警是噪声,忽略)。git 操作走 Windows PowerShell(仓库是 LF,提交前确认无 CRLF 污染:`git diff --cached --stat` 看行数不异常)。
 
 ---
 
