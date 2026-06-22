@@ -18,6 +18,23 @@ _DRAWDOWN_NAMES = {"回撤"}
 _VOL_NAMES = {"波动"}
 _CAGR_NAMES = {"CAGR", "cagr"}
 
+# 行情快照指标 -> daily_basic 列名(直取,非计算)。换手率/股息率 tushare 已是百分数,不再 scale。
+_SNAPSHOT_COLUMNS: dict[str, str] = {
+    "PE": "pe",
+    "PB": "pb",
+    "换手率": "turnover_rate",
+    "股息率": "dv_ratio",
+}
+
+# 财报取数指标 -> (字段, 单位)。ratio 直取(%);yi 元→亿(÷1e8)。
+_FINANCIAL_SPEC: dict[str, tuple[str, str]] = {
+    "ROE": ("roe", "ratio"),
+    "资产负债率": ("debt_to_assets", "ratio"),
+    "毛利率": ("grossprofit_margin", "ratio"),
+    "营收": ("revenue", "yi"),
+    "净利": ("n_income", "yi"),
+}
+
 
 def single(indicator: str, data: dict, *, years: float = 1.0) -> float:
     """单股单指标派发到 oracle。
@@ -79,4 +96,69 @@ def _satisfies(value: float, op: str, threshold: float) -> bool:
     raise ValueError(f"未知比较符:{op!r}")
 
 
-__all__ = ["single", "correlation_pair", "rank_by", "filter_by"]
+def snapshot_lookup(indicator: str, snap: dict) -> float | None:
+    """行情快照取数:指标名 -> 直取 daily_basic 字段值。
+
+    字段缺失(如亏损股无 PE,tushare 返回 None/NaN)→ 返回 None(调用方应跳过)。
+    未知指标 raise ValueError。
+    """
+    col = _SNAPSHOT_COLUMNS.get(indicator)
+    if col is None:
+        raise ValueError(f"未知快照指标:{indicator!r}")
+    val = snap.get(col)
+    if val is None or (isinstance(val, float) and val != val):  # None 或 NaN
+        return None
+    return float(val)
+
+
+def financial_lookup(indicator: str, snap: dict) -> float | None:
+    """财报取数:指标名 -> 字段值(营收/净利 元→亿)。
+
+    字段缺失(None/NaN)→ 返回 None(调用方跳过)。未知指标 raise ValueError。
+    """
+    spec = _FINANCIAL_SPEC.get(indicator)
+    if spec is None:
+        raise ValueError(f"未知财报指标:{indicator!r}")
+    col, unit = spec
+    val = snap.get(col)
+    if val is None or (isinstance(val, float) and val != val):  # None 或 NaN
+        return None
+    val = float(val)
+    return val / 1e8 if unit == "yi" else val
+
+
+def position_market_value(qty: float, close: float) -> float:
+    """单仓市值 = 数量 × 收盘价。"""
+    return float(qty) * float(close)
+
+
+def position_pnl(qty: float, close: float, cost: float) -> float:
+    """单仓浮动盈亏 = 数量 × (收盘价 − 成本价)。"""
+    return float(qty) * (float(close) - float(cost))
+
+
+def portfolio_weights(market_values: list[float]) -> list[float]:
+    """各持仓市值 → 权重(占比,和为 1)。总市值 ≤0 raise ValueError。"""
+    total = sum(market_values)
+    if total <= 0:
+        raise ValueError("组合总市值须为正")
+    return [mv / total for mv in market_values]
+
+
+def portfolio_hhi(weights: list[float]) -> float:
+    """持仓集中度 HHI = Σ(w_i²)。"""
+    return sum(w * w for w in weights)
+
+
+__all__ = [
+    "single",
+    "correlation_pair",
+    "rank_by",
+    "filter_by",
+    "snapshot_lookup",
+    "financial_lookup",
+    "position_market_value",
+    "position_pnl",
+    "portfolio_weights",
+    "portfolio_hhi",
+]

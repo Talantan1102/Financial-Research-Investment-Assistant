@@ -1,7 +1,6 @@
 """intents 确定性单测：纯字符串拼接，手写数据，不依赖网络/DB/LLM。"""
 
 import pytest
-
 from eval.question_gen.intents import (
     INTENT,
     q_corr,
@@ -88,3 +87,66 @@ def test_q_filter():
     assert "涨幅为正" in out
     assert "20%" in out
     assert "茅台、五粮液" in out
+
+
+def test_q_snapshot_renders_date_and_label():
+    from eval.question_gen import intents
+
+    q = intents.q_snapshot("贵州茅台", "PE", "20260612")
+    assert "贵州茅台" in q
+    assert "2026年06月12日" in q
+    assert "市盈率" in q
+
+
+def test_q_snapshot_unknown_indicator_raises():
+    import pytest
+    from eval.question_gen import intents
+
+    with pytest.raises(ValueError):
+        intents.q_snapshot("贵州茅台", "未知", "20260612")
+
+
+def test_q_financial_ratio_and_amount():
+    from eval.question_gen import intents
+
+    q_roe = intents.q_financial("贵州茅台", "ROE", "2024年年报")
+    assert "贵州茅台" in q_roe and "2024年年报" in q_roe and "ROE" in q_roe
+    q_rev = intents.q_financial("贵州茅台", "营收", "2024年年报")
+    assert "营业收入" in q_rev and "亿元" in q_rev
+
+
+def test_q_financial_unknown_raises():
+    import pytest
+    from eval.question_gen import intents
+
+    with pytest.raises(ValueError):
+        intents.q_financial("贵州茅台", "未知", "2024年年报")
+
+
+def test_q_position_value_and_pnl():
+    from eval.question_gen import intents
+
+    qv = intents.q_position_value("贵州茅台", 100, "20260612")
+    assert "贵州茅台" in qv and "100股" in qv and "市值" in qv
+    qp = intents.q_position_pnl("贵州茅台", 100, 85.0, "20260612")
+    assert "成本价" in qp and "浮动盈亏" in qp
+
+
+def test_q_portfolio_weight_and_hhi():
+    from eval.question_gen import intents
+
+    qw = intents.q_portfolio_weight("贵州茅台100股、五粮液200股", "贵州茅台", "20260612")
+    assert "贵州茅台100股" in qw and "占" in qw and "百分之" in qw
+    qh = intents.q_portfolio_hhi("贵州茅台100股、五粮液200股", "20260612")
+    assert "HHI" in qh
+
+
+def test_q_valuation():
+    from eval.question_gen import intents
+
+    q = intents.q_valuation("贵州茅台", "PE理论价", "白酒", "贵州茅台、五粮液", "2024年年报")
+    assert "贵州茅台" in q and "白酒" in q and "市盈率" in q and "理论价" in q
+    import pytest
+
+    with pytest.raises(ValueError):
+        intents.q_valuation("x", "未知", "白酒", "a、b", "2024年年报")

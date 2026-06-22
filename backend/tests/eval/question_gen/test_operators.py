@@ -1,7 +1,7 @@
 """operators 确定性单测：纯函数，手写数据，不依赖网络/DB/LLM。"""
 
 import pytest
-
+from eval.question_gen import operators
 from eval.question_gen.operators import (
     correlation_pair,
     filter_by,
@@ -108,3 +108,83 @@ def test_correlation_pair_perfect_positive():
     a = _stock(dates=dates, pct_chg=[1.0, 2.0, -1.0, 3.0])
     b = _stock(dates=dates, pct_chg=[2.0, 4.0, -2.0, 6.0])  # b = 2a
     assert correlation_pair(a, b) == pytest.approx(1.0)
+
+
+def test_snapshot_lookup_maps_each_indicator():
+    snap = {"pe": 25.3, "pb": 8.1, "turnover_rate": 1.5, "dv_ratio": 2.0}
+    assert operators.snapshot_lookup("PE", snap) == 25.3
+    assert operators.snapshot_lookup("PB", snap) == 8.1
+    assert operators.snapshot_lookup("换手率", snap) == 1.5
+    assert operators.snapshot_lookup("股息率", snap) == 2.0
+
+
+def test_snapshot_lookup_unknown_raises():
+    import pytest
+
+    with pytest.raises(ValueError):
+        operators.snapshot_lookup("未知指标", {"pe": 1.0})
+
+
+def test_snapshot_lookup_none_for_missing_value():
+    # 亏损股 PE 为 None → 返回 None(不抛)
+    assert (
+        operators.snapshot_lookup(
+            "PE", {"pe": None, "pb": 5.0, "turnover_rate": 1.0, "dv_ratio": 0.0}
+        )
+        is None
+    )
+    nan = float("nan")
+    assert (
+        operators.snapshot_lookup(
+            "PB", {"pe": 1.0, "pb": nan, "turnover_rate": 1.0, "dv_ratio": 0.0}
+        )
+        is None
+    )
+
+
+def test_financial_lookup_ratio_direct():
+    snap = {
+        "roe": 34.46,
+        "debt_to_assets": 16.4,
+        "grossprofit_margin": 91.2,
+        "revenue": 170_900_000_000.0,
+        "n_income": 86_000_000_000.0,
+    }
+    assert operators.financial_lookup("ROE", snap) == 34.46
+    assert operators.financial_lookup("资产负债率", snap) == 16.4
+    assert operators.financial_lookup("毛利率", snap) == 91.2
+
+
+def test_financial_lookup_amount_to_yi():
+    snap = {"revenue": 170_900_000_000.0, "n_income": 86_000_000_000.0}
+    assert operators.financial_lookup("营收", snap) == 1709.0
+    assert operators.financial_lookup("净利", snap) == 860.0
+
+
+def test_financial_lookup_none_and_unknown():
+    import pytest
+
+    assert operators.financial_lookup("ROE", {"roe": None}) is None
+    nan = float("nan")
+    assert operators.financial_lookup("营收", {"revenue": nan}) is None
+    with pytest.raises(ValueError):
+        operators.financial_lookup("未知", {})
+
+
+def test_position_market_value():
+    assert operators.position_market_value(100, 50.0) == 5000.0
+
+
+def test_position_pnl():
+    assert operators.position_pnl(100, 50.0, 40.0) == 1000.0
+
+
+def test_portfolio_weights_and_hhi():
+    import pytest
+
+    w = operators.portfolio_weights([10000.0, 20000.0, 30000.0])
+    assert abs(sum(w) - 1.0) < 1e-9
+    assert abs(w[0] - 1 / 6) < 1e-9
+    assert abs(operators.portfolio_hhi(w) - (1 + 4 + 9) / 36) < 1e-9
+    with pytest.raises(ValueError):
+        operators.portfolio_weights([0.0, 0.0])

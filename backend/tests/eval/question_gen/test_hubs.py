@@ -34,9 +34,10 @@ def test_scale_pct_vs_corr() -> None:
 
 def test_candidate_names_resolves_and_skips_unknown() -> None:
     assert runner._candidate_names(_case("x", "简单", "涨幅", ["600519.SH"])) == ["贵州茅台"]
-    assert runner._candidate_names(
-        _case("y", "中等", "相关", ["600519.SH", "000858.SZ"])
-    ) == ["贵州茅台", "五粮液"]
+    assert runner._candidate_names(_case("y", "中等", "相关", ["600519.SH", "000858.SZ"])) == [
+        "贵州茅台",
+        "五粮液",
+    ]
     # 未知 ts_code 被跳过,不抛
     assert runner._candidate_names(_case("z", "简单", "涨幅", ["BAD.XX"])) == []
 

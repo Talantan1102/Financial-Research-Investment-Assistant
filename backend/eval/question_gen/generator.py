@@ -12,11 +12,18 @@ from __future__ import annotations
 import asyncio
 import itertools
 import json
+import statistics
 from pathlib import Path
+
+from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
+from app.agents.valuation_helpers.pb import compute_pb_value
+from app.agents.valuation_helpers.pe import compute_pe_value
 
 from eval.question_gen import case, intents, legality, operators, stock_pool
 
-_AS_OF_DEFAULT = "20260612"  # 钉到已落定的历史交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
+_AS_OF_DEFAULT = (
+    "20260612"  # 钉到已落定的历史交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
+)
 _OUT_DEFAULT = Path(__file__).resolve().parent / "data" / "computation_cases.jsonl"
 
 # 容差(承 caliber-freeze;gold 存百分数,故对百分数比)
@@ -31,6 +38,20 @@ _TOL = {
 _TOL_DUAL = {"kind": "rel", "value": 0.02}  # 双指标(回撤+波动)统一取较松的
 _WINDOW_YEARS = {"3m": 0.25, "1y": 1.0, "3y": 3.0}
 _PCT_INDICATORS = {"涨幅", "回撤", "波动", "CAGR"}  # gold ×100 存百分数
+
+_SNAPSHOT_INDICATORS = ("PE", "PB", "换手率", "股息率")
+_SNAPSHOT_TOL = {
+    "PE": {"kind": "rel", "value": 0.01},
+    "PB": {"kind": "rel", "value": 0.01},
+    "换手率": {"kind": "rel", "value": 0.02},
+    "股息率": {"kind": "rel", "value": 0.02},
+}
+_SNAPSHOT_COLS = ("pe", "pb", "turnover_rate", "dv_ratio")
+
+_FINANCIAL_INDICATORS = ("ROE", "资产负债率", "毛利率", "营收", "净利")
+_FINANCIAL_TOL = {ind: {"kind": "rel", "value": 0.01} for ind in _FINANCIAL_INDICATORS}
+_FINA_COLS = ("roe", "debt_to_assets", "grossprofit_margin")
+_INCOME_COLS = ("revenue", "n_income")
 
 
 async def _resolve_window(as_of: str, code: str) -> tuple[str, str]:
@@ -58,6 +79,334 @@ async def _fetch(tushare, ts_code: str, start: str, end: str) -> dict:
 def _scale(indicator: str, value: float) -> float:
     """%-指标 ×100 存成百分数(与 agent 答法一致);相关不变。"""
     return value * 100.0 if indicator in _PCT_INDICATORS else value
+
+
+async def _fetch_snapshot(tushare, ts_code: str, trade_date: str) -> dict:
+    """取真 tushare daily_basic 的某交易日一行 → {pe, pb, turnover_rate, dv_ratio}(值可能为 None/NaN)。"""
+    df = await tushare.get_daily_basic(ts_code=ts_code, trade_date=trade_date)
+    if len(df) == 0:
+        raise RuntimeError(f"daily_basic 无数据:{ts_code} @ {trade_date}")
+    row = df.iloc[0]
+    return {col: row[col] for col in _SNAPSHOT_COLS}
+
+
+async def build_snapshot_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
+    """行情快照取数(简单档,无窗口):每只股取 as_of 当日 daily_basic → 4 个直取指标。
+
+    tushare 依赖注入(可塞 stub 单测);cid 是 case_id 生成器 callable。
+    gold = 直取字段值(换手率/股息率 tushare 已是百分数,不 scale)。
+    """
+    out: list[case.ComputationCase] = []
+    for st in stock_pool.POOL:
+        snap = await _fetch_snapshot(tushare, st.ts_code, as_of)
+        for ind in _SNAPSHOT_INDICATORS:
+            gold = operators.snapshot_lookup(ind, snap)
+            if gold is None:  # 该股该指标无值(如亏损股无 PE),跳过
+                continue
+            out.append(
+                case.ComputationCase(
+                    case_id=cid(f"快照{ind}-{st.ts_code}"),
+                    intent=intents.INTENT_SNAPSHOT,
+                    difficulty="简单",
+                    question=intents.q_snapshot(st.name, ind, as_of),
+                    stocks=[st.ts_code],
+                    indicator=ind,
+                    window="snapshot",
+                    gold=gold,
+                    gold_shape="scalar",
+                    tolerance=_SNAPSHOT_TOL[ind],
+                    meta={"trade_date": as_of, "as_of": as_of},
+                )
+            )
+    return out
+
+
+def _select_period_row(df, end_date: str):
+    """从多期历史 DataFrame 里选 end_date 匹配的那一行;无则 None。"""
+    if len(df) == 0 or "end_date" not in df.columns:
+        return None
+    rows = df[df["end_date"].astype(str) == end_date]
+    return None if len(rows) == 0 else rows.iloc[0]
+
+
+async def _fetch_financial(tushare, ts_code: str, query_date: str, period_end: str) -> dict:
+    """取 fina_indicator + income(用 query_date 查,确保目标期已披露),按 period_end 选行。"""
+    fi = await tushare.get_fina_indicator(ts_code=ts_code, end_date=query_date)
+    inc = await tushare.get_income(ts_code=ts_code, end_date=query_date)
+    snap: dict = {}
+    frow = _select_period_row(fi, period_end)
+    if frow is not None:
+        for c in _FINA_COLS:
+            snap[c] = frow[c] if c in fi.columns else None
+    irow = _select_period_row(inc, period_end)
+    if irow is not None:
+        for c in _INCOME_COLS:
+            snap[c] = irow[c] if c in inc.columns else None
+    return snap
+
+
+async def build_financial_cases(
+    tushare, as_of: str, period_end: str, period_label: str, cid
+) -> list[case.ComputationCase]:
+    """财报取数(简单档):用 as_of 查询(确保目标期已披露),取 period_end 期的 5 个直取指标。
+
+    tushare 依赖注入;空值/缺期指标跳过。营收/净利 gold 已是亿元。
+    """
+    out: list[case.ComputationCase] = []
+    for st in stock_pool.POOL:
+        snap = await _fetch_financial(tushare, st.ts_code, as_of, period_end)
+        for ind in _FINANCIAL_INDICATORS:
+            gold = operators.financial_lookup(ind, snap)
+            if gold is None:
+                continue
+            out.append(
+                case.ComputationCase(
+                    case_id=cid(f"财报{ind}-{st.ts_code}"),
+                    intent=intents.INTENT_FINANCIAL,
+                    difficulty="简单",
+                    question=intents.q_financial(st.name, ind, period_label),
+                    stocks=[st.ts_code],
+                    indicator=ind,
+                    window=period_label,
+                    gold=gold,
+                    gold_shape="scalar",
+                    tolerance=_FINANCIAL_TOL[ind],
+                    meta={"period_end": period_end, "period_label": period_label},
+                )
+            )
+    return out
+
+
+_POSITION_TOL = {"kind": "rel", "value": 0.005}
+
+
+async def _fetch_close(tushare, ts_code: str, trade_date: str) -> float | None:
+    """取 daily_basic 某交易日收盘价;无/空 则 None。"""
+    df = await tushare.get_daily_basic(ts_code=ts_code, trade_date=trade_date)
+    if len(df) == 0 or "close" not in df.columns:
+        return None
+    val = df.iloc[0]["close"]
+    if val is None or (isinstance(val, float) and val != val):
+        return None
+    return float(val)
+
+
+async def build_position_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
+    """单仓持仓量(简单档):合成 qty/cost(确定性)+ 真收盘价。close 缺则跳过该股。"""
+    out: list[case.ComputationCase] = []
+    for i, st in enumerate(stock_pool.POOL):
+        close = await _fetch_close(tushare, st.ts_code, as_of)
+        if close is None:
+            continue
+        qty = 100 * (i + 1)
+        cost = round(close * 0.85, 2)
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"市值-{st.ts_code}"),
+                intent=intents.INTENT_POSITION,
+                difficulty="简单",
+                question=intents.q_position_value(st.name, qty, as_of),
+                stocks=[st.ts_code],
+                indicator="单仓市值",
+                window="snapshot",
+                gold=round(operators.position_market_value(qty, close), 2),
+                gold_shape="scalar",
+                tolerance=_POSITION_TOL,
+                meta={"trade_date": as_of, "qty": qty, "close": close},
+            )
+        )
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"浮盈-{st.ts_code}"),
+                intent=intents.INTENT_POSITION,
+                difficulty="简单",
+                question=intents.q_position_pnl(st.name, qty, cost, as_of),
+                stocks=[st.ts_code],
+                indicator="单仓浮盈",
+                window="snapshot",
+                gold=round(operators.position_pnl(qty, close, cost), 2),
+                gold_shape="scalar",
+                tolerance=_POSITION_TOL,
+                meta={"trade_date": as_of, "qty": qty, "cost": cost, "close": close},
+            )
+        )
+    return out
+
+
+async def build_portfolio_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
+    """组合权重 + HHI(中等档):按板块构造合成篮子(qty 100,200,...)+ 真收盘价。
+
+    任一成员 close 缺则跳过该板块(保权重口径一致)。
+    """
+    out: list[case.ComputationCase] = []
+    for sector, members in stock_pool.by_sector().items():
+        if len(members) < 2:
+            continue
+        mvs: list[float] = []
+        descs: list[str] = []
+        ok = True
+        for j, m in enumerate(members):
+            close = await _fetch_close(tushare, m.ts_code, as_of)
+            if close is None:
+                ok = False
+                break
+            qty = 100 * (j + 1)
+            mvs.append(qty * close)
+            descs.append(f"{m.name}{qty}股")
+        if not ok or len(mvs) < 2:
+            continue
+        weights = operators.portfolio_weights(mvs)
+        basket = "、".join(descs)
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"权重-{sector}"),
+                intent=intents.INTENT_PORTFOLIO,
+                difficulty="中等",
+                question=intents.q_portfolio_weight(basket, members[0].name, as_of),
+                stocks=[m.ts_code for m in members],
+                indicator="持仓权重",
+                window="snapshot",
+                gold=round(weights[0] * 100, 4),
+                gold_shape="scalar",
+                tolerance={"kind": "rel", "value": 0.01},
+                meta={"trade_date": as_of, "板块": sector},
+            )
+        )
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"HHI-{sector}"),
+                intent=intents.INTENT_PORTFOLIO,
+                difficulty="中等",
+                question=intents.q_portfolio_hhi(basket, as_of),
+                stocks=[m.ts_code for m in members],
+                indicator="HHI",
+                window="snapshot",
+                gold=round(operators.portfolio_hhi(weights), 4),
+                gold_shape="scalar",
+                tolerance={"kind": "rel", "value": 0.02},
+                meta={"trade_date": as_of, "板块": sector},
+            )
+        )
+    return out
+
+
+_VALUATION_TOL = {"kind": "rel", "value": 0.01}
+
+
+def _finite_positive(val) -> float | None:
+    """None/NaN/<=0 -> None;否则 float。"""
+    if val is None:
+        return None
+    f = float(val)
+    if f != f or f <= 0:  # NaN 或 <=0
+        return None
+    return f
+
+
+async def build_valuation_cases(
+    tushare, as_of: str, period_end: str, period_label: str, cid
+) -> list[case.ComputationCase]:
+    """估值算式(中等档):板块同行聚合 PE/PB(avg+median)+ 个股 eps/bps -> 理论价。
+
+    题面明示可比篮子;eps/bps 缺或 compute 抛 InsufficientDataForModelError -> 跳过。
+    """
+    out: list[case.ComputationCase] = []
+    for sector, members in stock_pool.by_sector().items():
+        if len(members) < 2:
+            continue
+        pes: list[float] = []
+        pbs: list[float] = []
+        info: dict = {}
+        for m in members:
+            db = await tushare.get_daily_basic(ts_code=m.ts_code, trade_date=as_of)
+            fi = await tushare.get_fina_indicator(ts_code=m.ts_code, end_date=as_of)
+            frow = _select_period_row(fi, period_end)
+            pe = _finite_positive(db.iloc[0]["pe"]) if len(db) and "pe" in db.columns else None
+            pb = _finite_positive(db.iloc[0]["pb"]) if len(db) and "pb" in db.columns else None
+            eps = None
+            bps = None
+            if frow is not None:
+                eps = (
+                    float(frow["eps"]) if "eps" in fi.columns and frow["eps"] is not None else None
+                )
+                bps = (
+                    float(frow["bps"]) if "bps" in fi.columns and frow["bps"] is not None else None
+                )
+            info[m.ts_code] = {"name": m.name, "eps": eps, "bps": bps}
+            if pe is not None:
+                pes.append(pe)
+            if pb is not None:
+                pbs.append(pb)
+        peer_names = "、".join(m.name for m in members)
+        pe_avg = statistics.mean(pes) if len(pes) >= 2 else None
+        pe_med = statistics.median(pes) if len(pes) >= 2 else None
+        pb_avg = statistics.mean(pbs) if len(pbs) >= 2 else None
+        pb_med = statistics.median(pbs) if len(pbs) >= 2 else None
+        for m in members:
+            d = info[m.ts_code]
+            # PE 理论价
+            if (
+                pe_avg is not None
+                and pe_med is not None
+                and d["eps"] is not None
+                and d["eps"] == d["eps"]
+            ):
+                try:
+                    gold = compute_pe_value(
+                        eps=d["eps"], industry_pe_avg=pe_avg, industry_pe_median=pe_med
+                    )
+                    out.append(
+                        case.ComputationCase(
+                            case_id=cid(f"PE理论价-{m.ts_code}"),
+                            intent=intents.INTENT_VALUATION,
+                            difficulty="中等",
+                            question=intents.q_valuation(
+                                m.name, "PE理论价", sector, peer_names, period_label
+                            ),
+                            stocks=[m.ts_code],
+                            indicator="PE理论价",
+                            window=period_label,
+                            gold=round(gold, 4),
+                            gold_shape="scalar",
+                            tolerance=_VALUATION_TOL,
+                            meta={"板块": sector, "period_end": period_end},
+                        )
+                    )
+                except InsufficientDataForModelError:
+                    pass
+            # PB 理论价
+            if (
+                pb_avg is not None
+                and pb_med is not None
+                and d["bps"] is not None
+                and d["bps"] == d["bps"]
+            ):
+                try:
+                    gold = compute_pb_value(
+                        book_value_per_share=d["bps"],
+                        industry_pb_avg=pb_avg,
+                        industry_pb_median=pb_med,
+                    )
+                    out.append(
+                        case.ComputationCase(
+                            case_id=cid(f"PB理论价-{m.ts_code}"),
+                            intent=intents.INTENT_VALUATION,
+                            difficulty="中等",
+                            question=intents.q_valuation(
+                                m.name, "PB理论价", sector, peer_names, period_label
+                            ),
+                            stocks=[m.ts_code],
+                            indicator="PB理论价",
+                            window=period_label,
+                            gold=round(gold, 4),
+                            gold_shape="scalar",
+                            tolerance=_VALUATION_TOL,
+                            meta={"板块": sector, "period_end": period_end},
+                        )
+                    )
+                except InsufficientDataForModelError:
+                    pass
+    return out
 
 
 async def generate(
@@ -148,6 +497,21 @@ async def generate(
                 meta=meta("3y"),
             )
         )
+
+    # ---- 行情快照取数(简单档,无窗口)----
+    cases.extend(await build_snapshot_cases(tushare, as_of, cid))
+
+    # ---- 财报取数(简单档,2024 年年报;用 as_of 查询确保已披露)----
+    cases.extend(await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid))
+
+    # ---- 单仓持仓量(简单档)----
+    cases.extend(await build_position_cases(tushare, as_of, cid))
+
+    # ---- 组合权重 + HHI(中等档)----
+    cases.extend(await build_portfolio_cases(tushare, as_of, cid))
+
+    # ---- 估值算式 PE/PB 理论价(中等档,2024 年报 + 板块同行可比)----
+    cases.extend(await build_valuation_cases(tushare, as_of, "20241231", "2024年年报", cid))
 
     # ---- 中等档 ----
     for st in stock_pool.POOL:

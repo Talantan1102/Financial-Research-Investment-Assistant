@@ -214,9 +214,7 @@ async def run_compare(
     """对每个 model 跑一遍 run_passk,汇成"模型×桶"对比表。"""
     per_model: dict[str, dict] = {}
     for m in models:
-        per_model[m] = await run_passk(
-            cases, k=k, concurrency=concurrency, as_of=as_of, model=m
-        )
+        per_model[m] = await run_passk(cases, k=k, concurrency=concurrency, as_of=as_of, model=m)
     return _compare_table(per_model)
 
 
