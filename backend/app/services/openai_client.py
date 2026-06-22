@@ -206,6 +206,7 @@ class StreamAssembler:
             completion_tokens=completion_tokens,
             cached_tokens=cached_tokens,
             cost_cny=cost_cny,
+            reasoning="".join(self.reasoning_parts),
         )
 
 

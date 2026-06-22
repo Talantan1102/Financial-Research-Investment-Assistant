@@ -673,3 +673,70 @@ def test_pressure_valve_floor_hit_best_effort():
     # 最近一圈全文未动
     assert "巨" * 5000 in state.messages[2]["content"]
     assert state.context_pressure_floor_hit is True
+
+
+# ---------------------------------------------------------------------------
+# reasoning_content 剥离投影(承 2026-06-22 think 进轨迹 + 投影剥离 feature)
+# ---------------------------------------------------------------------------
+
+
+def test_assemble_context_strips_reasoning_from_llm_projection():
+    """LLM 投影结果不含 reasoning_content 键(投影时剥离)。"""
+    messages = [
+        {"role": "user", "content": "问题"},
+        {
+            "role": "assistant",
+            "content": "答案",
+            "reasoning_content": "先想了很多很多",
+        },
+    ]
+    state = _make_state(messages=messages)
+    deps = _make_deps()
+
+    result = assemble_context(state, deps)
+
+    # LLM 投影里的 assistant 消息不含 reasoning_content
+    assistant_msgs = [m for m in result if m.get("role") == "assistant"]
+    for msg in assistant_msgs:
+        assert "reasoning_content" not in msg, (
+            "reasoning_content 出现在 LLM 投影中,违反'不回送 LLM'红线"
+        )
+
+
+def test_assemble_context_state_messages_not_mutated():
+    """assemble_context 投影剥离操作在副本上进行,state.messages 本体的 reasoning_content 不变。"""
+    messages = [
+        {"role": "user", "content": "问题"},
+        {
+            "role": "assistant",
+            "content": "答案",
+            "reasoning_content": "推理过程保留在轨迹中",
+        },
+    ]
+    state = _make_state(messages=messages)
+    deps = _make_deps()
+
+    assemble_context(state, deps)
+
+    # state.messages 本体必须保留 reasoning_content
+    assert state.messages[1].get("reasoning_content") == "推理过程保留在轨迹中", (
+        "assemble_context 误删了 state.messages 本体的 reasoning_content"
+    )
+
+
+def test_assemble_context_no_reasoning_backward_compat():
+    """不含 reasoning_content 的消息(普通 deepseek 模型路径)无任何变化。"""
+    messages = [
+        {"role": "user", "content": "问题"},
+        {"role": "assistant", "content": "普通回答"},
+    ]
+    state = _make_state(messages=messages)
+    deps = _make_deps()
+
+    result = assemble_context(state, deps)
+
+    assistant_msgs = [m for m in result if m.get("role") == "assistant"]
+    assert len(assistant_msgs) == 1
+    assert assistant_msgs[0]["content"] == "普通回答"
+    # 向后兼容:原有键集合不变
+    assert set(assistant_msgs[0].keys()) == {"role", "content"}

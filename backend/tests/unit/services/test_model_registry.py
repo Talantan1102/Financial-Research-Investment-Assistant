@@ -6,6 +6,7 @@ def test_allowed_and_dashscope_id():
     assert not mr.is_allowed("gpt-4")
     assert mr.dashscope_id("qwen2.5-7b") == "qwen2.5-7b-instruct"
     assert mr.dashscope_id("deepseek-v4-flash") == "deepseek-v4-flash"
+    assert mr.dashscope_id("qwen3.7-max") == "qwen3.7-max"
 
 
 def test_size_and_availability():
@@ -13,6 +14,9 @@ def test_size_and_availability():
     assert mr.spec("qwen-max").size == "large"
     assert mr.spec("qwen3-8b").available is True
     assert mr.spec("qwen2.5-7b").available is False  # 403 未开通
+    assert mr.spec("qwen3.7-max").size == "large"
+    assert mr.spec("qwen3.7-max").available is True
+    assert mr.spec("qwen3.7-max").supports_tools is True
 
 
 def test_available_keys_excludes_unavailable():
@@ -20,6 +24,7 @@ def test_available_keys_excludes_unavailable():
     assert "qwen3-8b" in keys
     assert "qwen2.5-7b" not in keys
     assert "deepseek-v4-flash" in keys
+    assert "qwen3.7-max" in keys
 
 
 def test_spec_unknown_raises():

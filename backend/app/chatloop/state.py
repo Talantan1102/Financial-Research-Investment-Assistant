@@ -2,7 +2,9 @@
 
 设计红线:
 - messages 是 OpenAI 格式 list[dict],single source of truth;
-- assistant 消息绝不携带 reasoning 字段(只 role/content/tool_calls);
+- assistant 消息携带 role/content/tool_calls;
+  思考模型回传 reasoning_content 时额外写入轨迹(SFT 监督目标),
+  但 context.py 在投影到 LLM 窗口时会剥离该字段,确保不回送 LLM;
 - assistant(tool_calls) 后必须跟全部对应 tool 消息(apply_results 保证);
 - ToolLedger 不进 LLM 窗口,只进 state。
 """
@@ -173,18 +175,25 @@ def apply_step(state: ChatLoopState, step_result: StepResult) -> ChatLoopState:
     """LLM 一圈输出折叠进 state。
 
     - append assistant 消息(content + tool_calls,OpenAI 回传格式;
-      无 tool_calls 时不带该键;绝不携带 reasoning);
+      无 tool_calls 时不带该键);
+    - 若 step_result.reasoning 非空,写入 assistant_msg["reasoning_content"]
+      供 SFT 轨迹收集;context.py 的 assemble_context 在投影到 LLM 窗口时会剥离该字段,
+      确保 reasoning_content 进轨迹但不回送 LLM;
     - step+1;
     - 预算累计(completion+prompt tokens, cost);
     - finish_reason=="stop" 且无 tool_calls → final_response=content。
 
     返回 state(原地更新后返回同对象,调用方只用返回值)。
     """
-    # 构建 assistant 消息,绝不携带 reasoning
+    # 构建 assistant 消息
     assistant_msg: dict[str, Any] = {
         "role": "assistant",
         "content": step_result.content,
     }
+
+    # 思考模型的推理过程:写入轨迹(SFT 监督目标),投影时由 assemble_context 剥离
+    if step_result.reasoning:
+        assistant_msg["reasoning_content"] = step_result.reasoning
 
     if step_result.tool_calls:
         # 转成 OpenAI tool_calls 格式
