@@ -15,7 +15,7 @@
 
 **决策 A — 开 think,基座换 Thinking。** 理由:① 算指标要先想清楚口径/公式/路径依赖,边想边写才不犯口径错;② 失败模式是推理错——不带 think 会复刻捷径,带 think 能"等一下,回撤得扫累计序列"纠回来;③ **RLVR 只放大已有推理链,不带 think 模式无推理草稿可放大 → 算法正确性的 RL 天花板被结构性锁死**;④ 作品要体现技术深度,延迟非约束,"省事"三理由(简单/快/数据现成)对本项目全是弱理由。
 - **基座**:Qwen3-8B-**Thinking**-2507(或 hybrid 开 thinking),非 Instruct 支。
-- **SFT 数据要带推理草稿**:deepseek-v4-flash 不带 think,**换思考型最强 teacher**(承「用最强模型标注 SFT」决策:DeepSeek-R1 / Qwen3-Thinking / 更强推理模型)。**teacher 必须在 chatloop 内产轨迹**(格式与 qwen3-8b 上场一致);Qwen3-Thinking 经 dashscope `enable_thinking=true` 可直接接,DeepSeek-R1 要先确认工具调用可用。
+- **SFT 数据要带推理草稿**:deepseek-v4-flash 不带 think,**换思考型最强 teacher → 定为 `qwen3.7-max`**(承「用最强模型标注 SFT」;经 dashscope `enable_thinking=true`,已探针验证 reasoning+工具调用 OK;同 Qwen3 家族→think 格式零转码;比 qwen3-max 更新一代)。注意旧 `qwen-max` 是老代不带 think,**不能用**。teacher 必须在 chatloop 内产轨迹(格式与 qwen3-8b 上场一致);采集时用 system prompt **把 teacher 思考引导成中文**(默认可能英文)。前置 harness 改动见 `2026-06-22-capture-think-for-sft-design.md`(保留 think 进轨迹 + 剥离不回灌)。
 - **走 R1 配方**:少量高质量推理轨迹**冷启**(把"先想再动手"格式种进去),真正的推理质量靠 **GRPO 长出来**(RLVR 放大推理链)——所以 think 的数据成本没想象中吓人。
 - **不带 think 版降为对照组**,用来量化 think 带来的算法正确性提升(本身是有深度的实验结论)。
 

@@ -1,6 +1,6 @@
 # 设计:harness 保留 think(采进轨迹)+ 剥离历史 think(不回灌上下文)
 
-> 为 SFT 开 think 的前置改动。teacher = qwen3-max(开 think,`reasoning_content` 走单独字段,已探针验证)。基座 Qwen3-8B-Thinking。承 `2026-06-22-sft-warmstart-plan.md` 决策 A。
+> 为 SFT 开 think 的前置改动。teacher = **qwen3.7-max**(开 think,`reasoning_content` 走单独字段,已探针验证 reasoning+工具调用均 OK;比 qwen3-max 更新一代)。基座 Qwen3-8B-Thinking。承 `2026-06-22-sft-warmstart-plan.md` 决策 A。
 
 ## 目标 / 一句话
 
@@ -58,4 +58,4 @@
 1. StepResult 加字段 + StreamAssembler.result 回填(+ 单测 1)。
 2. apply_step 存 reasoning_content(+ 单测 2,改 docstring)。
 3. assemble_context 投影剥离(+ 单测 3,强调操作副本不动本体)。
-4. 全回归(测试 4)+ 把 qwen3-max 加进 model_registry(teacher 可选)。live 验(测试 5)留 tushare 恢复。
+4. 全回归(测试 4)+ 把 qwen3.7-max 加进 model_registry(teacher,带价;注意它和旧 `qwen-max`/无 think 不同)。live 验(测试 5)留 tushare 恢复。
