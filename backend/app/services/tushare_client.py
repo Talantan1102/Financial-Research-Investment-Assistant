@@ -8,6 +8,7 @@ without env override (memory feedback_cassette_host_in_match_on).
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -35,12 +36,16 @@ class TushareClient:
         base_url: str = "http://api.tushare.pro",
         timeout_s: float = 30.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        max_retries: int = 3,
+        retry_backoff_s: float = 0.5,
     ) -> None:
         if not token:
             raise ValueError("token must not be empty")
         self._token = token
         self.base_url = base_url
         self._client = httpx.AsyncClient(timeout=timeout_s, transport=transport)
+        self._max_retries = max(1, max_retries)
+        self._retry_backoff_s = retry_backoff_s
 
     async def call(
         self,
@@ -56,11 +61,23 @@ class TushareClient:
         if fields is not None:
             body["fields"] = fields
 
-        try:
-            resp = await self._client.post(self.base_url, json=body)
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise TushareNetworkError(f"network error calling {api_name}: {exc}") from exc
+        # 瞬时网络错误退避重试(大批量取数时代理偶发抖动不应整批崩)
+        last_exc: httpx.HTTPError | None = None
+        resp: httpx.Response | None = None
+        for attempt in range(self._max_retries):
+            try:
+                resp = await self._client.post(self.base_url, json=body)
+                resp.raise_for_status()
+                last_exc = None
+                break
+            except httpx.HTTPError as exc:
+                last_exc = exc
+                if attempt < self._max_retries - 1:
+                    await asyncio.sleep(self._retry_backoff_s * (2**attempt))
+        if last_exc is not None or resp is None:
+            raise TushareNetworkError(
+                f"network error calling {api_name} after {self._max_retries} attempts: {last_exc}"
+            ) from last_exc
 
         payload = resp.json()
         code = payload.get("code")
