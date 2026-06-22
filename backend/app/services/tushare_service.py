@@ -59,6 +59,7 @@ class TushareService(Protocol):
     async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame: ...
     async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame: ...
     async def get_trade_cal(self, *, start: str, end: str) -> pd.DataFrame: ...
+    async def get_index_weight(self, *, index_code: str, trade_date: str) -> pd.DataFrame: ...
 
     # Mock implementations should override aclose() as a no-op or handle their own cleanup.
     async def aclose(self) -> None: ...
@@ -276,6 +277,13 @@ class RealTushareService:
         return await self._call_cached(
             "trade_cal",
             {"exchange": "SSE", "start_date": start, "end_date": end},
+        )
+
+    async def get_index_weight(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
+        # tushare index_weight API: index_code + trade_date → con_code, weight 等
+        return await self._call_cached(
+            "index_weight",
+            {"index_code": index_code, "trade_date": trade_date},
         )
 
     async def aclose(self) -> None:

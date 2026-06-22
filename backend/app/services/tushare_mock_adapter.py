@@ -270,6 +270,23 @@ class LegacyMockTushareAdapter:
 
         return build_calendar_df(start, end)
 
+    async def get_index_weight(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
+        # deterministic stub: 返回5只中证800成分股示例
+        return pd.DataFrame(
+            {
+                "index_code": [index_code] * 5,
+                "con_code": [
+                    "600519.SH",
+                    "000858.SZ",
+                    "000568.SZ",
+                    "600036.SH",
+                    "601398.SH",
+                ],
+                "trade_date": [trade_date] * 5,
+                "weight": [2.5, 1.8, 1.2, 1.5, 2.0],
+            }
+        )
+
     async def aclose(self) -> None:
         """No-op: legacy MockTushareService has no connections to close."""
         pass
