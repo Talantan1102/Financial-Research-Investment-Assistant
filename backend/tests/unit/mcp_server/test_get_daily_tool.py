@@ -35,7 +35,10 @@ def test_format_daily_empty() -> None:
 def test_tool_def_shape() -> None:
     assert TOOL_DEF.name == "get_daily"
     req = TOOL_DEF.inputSchema["required"]
-    assert "ts_code" in req and "start" in req and "end" in req
+    # 新 schema: ts_code 是唯一必填;start/end/anchor/lookback 均可选
+    assert req == ["ts_code"]
+    props = TOOL_DEF.inputSchema["properties"]
+    assert "anchor" in props and "lookback" in props
 
 
 def test_format_daily_no_tail_returns_full_range() -> None:
@@ -74,3 +77,29 @@ def test_format_daily_summary_fields() -> None:
     assert s["date_start"] == "20250101" and s["date_end"] == "20250103"
     assert s["first_close"] == 10.0 and s["last_close"] == 10.5
     assert "period_high" not in s and "period_low" not in s  # 刻意不放,避免错误回撤捷径
+
+
+# ---------------------------------------------------------------------------
+# _resolve_range 纯函数测试
+# ---------------------------------------------------------------------------
+
+import pytest
+from app.mcp_server.tools.get_daily import _resolve_range
+
+
+def test_resolve_range_explicit():
+    assert _resolve_range({"start": "20250101", "end": "20251231"}) == ("20250101", "20251231")
+
+
+def test_resolve_range_anchor_lookback():
+    assert _resolve_range({"anchor": "20260616", "lookback": "1y"}) == ("20250616", "20260616")
+
+
+def test_resolve_range_td_raises():
+    with pytest.raises(ValueError):
+        _resolve_range({"anchor": "20260616", "lookback": "20td"})
+
+
+def test_resolve_range_missing_raises():
+    with pytest.raises(ValueError):
+        _resolve_range({"ts_code": "600519.SH"})
