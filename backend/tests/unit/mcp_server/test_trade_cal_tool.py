@@ -167,6 +167,12 @@ def test_resolve_calendar_window_1y():
     assert resolve_calendar_window("20260616", "1y") == ("20250616", "20260616")
 
 
+def test_resolve_calendar_window_6m():
+    from app.mcp_server.tools.trade_cal import resolve_calendar_window
+
+    assert resolve_calendar_window("20260616", "6m") == ("20251216", "20260616")
+
+
 def test_resolve_calendar_window_ytd():
     from app.mcp_server.tools.trade_cal import resolve_calendar_window
 
@@ -176,5 +182,5 @@ def test_resolve_calendar_window_ytd():
 def test_resolve_calendar_window_td_raises():
     from app.mcp_server.tools.trade_cal import resolve_calendar_window
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="td"):
         resolve_calendar_window("20260616", "20td")
