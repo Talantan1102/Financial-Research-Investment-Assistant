@@ -4,8 +4,10 @@
 
 ## 决策
 
-**RL 基座 = Qwen3-8B-Instruct**(HuggingFace 上的 post-trained `Qwen3-8B`,非 `-Base`)。
-路线:**instruct 基座 → SFT 热启动(本仓的干净轨迹底料)→ GRPO(verl-agent)+ indicator_oracle 可验证奖励**。
+**RL 基座 = Qwen3-8B**(HuggingFace 上的 post-trained `Qwen3-8B`,非 `-Base`)。
+路线:**post-trained 基座 → SFT 热启动(本仓的干净轨迹底料)→ GRPO(verl-agent)+ indicator_oracle 可验证奖励**。
+
+> **⚠️ 决策更新(2026-06-22 晚,据业务场景):本文初版写"Instruct(no-think)"是图省事,已纠正为开 think。** 业务=金融指标计算,难点 run_python 算法、badcase 是推理性口径错、RLVR 上限需推理草稿、个人作品延迟非约束 → **改用 Qwen3-8B-Thinking(开 think),SFT 用思考型 teacher 采带推理轨迹,不带 think 降为对照组**。详见 `2026-06-22-sft-warmstart-plan.md` 的「决策更新」。下文 ②「从 instruct 起跑」仍成立(Thinking 也是 post-trained,非裸 base),只是落到 think 支。
 
 ## 调研结论(带来源)
 
