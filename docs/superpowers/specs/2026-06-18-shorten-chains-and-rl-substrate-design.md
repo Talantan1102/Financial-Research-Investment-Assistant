@@ -104,3 +104,10 @@ gold 端(冻结 oracle + 同源 `meta.window_dates`,已核验 `generator.py:87`)
 - 冻结口径 oracle(**勿在生产工具 import**):`eval/indicator_oracle.py:49-62`
 - tool_calls 抽取范式(只信 messages):`app/chatloop/eval_agent.py:84-106`
 - 基线诊断(残留=工具可靠性):`docs/research/2026-06-17-pre-rl-tooling-baseline.md:62-82`
+
+## 决策更新(2026-06-18,brainstorm 复盘后)
+
+- **提案 1 `get_daily_batch` 砍掉**。理由:① 工具原子性——批量取数虽是业界(尤其金融数据 tushare/Bloomberg)常态、也能站在"对齐 correctness"上,但本项目里它**主要价值落在"少调几次让弱模型少出错"**,这接近用工具绕过模型的编排弱点;② 若 RL 目标包含"教模型编排多步取数",把链改短反而**删掉了该训练信号**。结论:多股票题继续 N 次 `get_daily`,把"编排"留给 RL 学。
+- **判分连续距离(原 `score.py`)推到 RL 阶段**。理由:它是 **reward shaping(RL 的奖励信号),不是 SFT 料**;当前先做 SFT 热启动,连续奖励等 RL 真正开跑再做(纯测量、零副作用,推迟无损失)。
+- **保留**:提案 2(get_daily 内联 anchor+lookback,去的是"管线杂活"非考点)+ 轨迹采集(SFT 种子)。
+- 落地见 `docs/superpowers/plans/2026-06-18-shorten-chains-first-batch.md`(4 task)。
