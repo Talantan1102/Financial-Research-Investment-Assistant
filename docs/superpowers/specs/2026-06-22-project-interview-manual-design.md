@@ -29,16 +29,20 @@
 | 1 | **题目** | `q-title` | 面试官深挖口吻,非"什么是 X"。例:"你为什么把 chat loop 从 LangGraph supervisor 改成裸 Python while 循环?这个决策的收益和代价是什么?" |
 | 2 | **考察点 + 追问** | `block-exam` | 面试官在探什么(真做过 vs 简历包装 / 懂不懂代价)+ 2-4 个追问 |
 | 3 | **原理讲解** | `block-theory` | 机制 + 数据结构 + why,带 `<h5>` 小标题分层 |
-| 4 | **示例 / 推演** | `block-example` | 真实代码片段或架构 + **带具体数字的推演** |
+| 4 | **示例 / 推演** | `block-example` | **教学用伪代码 / 精简代码**(讲清逻辑怎么走,非还原源码;关键步骤配中文注释)+ **带具体数字的推演** |
 | 5 | **决策对比** | `block-vs` | ⚖️ **你为什么没选另一个方案** 或 与业界标准做法对比,表格 + 公允裁决,绝不稻草人 |
 | 6 | **原创图解** | `block-diagram` | 内联 SVG,一图一意,画真实机制 |
 | 7 | **总结** | `block-summary` | 3-5 速记 + 一句话记忆钩 + 真实来源(指向本仓 spec/代码 path 或 context 卡) |
 
 题卡另带:难度星级(★1-5)、3-5 个 tag。`block-vs` 表头随题灵活——对手可以是"被否决的架构"或"业界默认做法"。
 
-## ③ 13 大类完整题目清单(61 题)
+**难度梯度(用户决策):核心 flagship 板块(Chat Loop / 记忆 / 评估)覆盖易→难**——每类前 1-2 题是基础/中级入门题(假设读者对该主题没概念,从零讲、多用类比),再逐级爬到该领域最硬的题。因此 flagship 各扩到 ~8 题。非 flagship 板块以中-难为主,但每类至少留一个可入门的切入点。
 
-> 每题给:id · 题面(面试官口吻)· 决策对比对手 · 主要来源(研究阶段必读)。难度后续在撰写时定。
+**示例代码(用户决策):贴教学伪代码,目的是帮读者理解逻辑**,不堆源码细节;关键步骤配中文注释;可保留真实函数/概念名当锚点但点到为止。
+
+## ③ 13 大类完整题目清单(~67 题)
+
+> 每题给:id · 题面(面试官口吻)· 决策对比对手 · 主要来源(研究阶段必读)。flagship 三类标了难度梯度;其余难度在撰写时定。
 
 ### 01 · 项目总览与架构（overview，4 题）
 - `overview-q1` AlphaScout 是什么?请从产品三支柱(深度研究 / 持仓监控 / 对话)和整体架构讲起。｜对比:单体 chatbot vs 多支柱架构｜来源:`v1-use-case-classification.md`、`product-minimalism-default.md`
@@ -46,21 +50,25 @@
 - `overview-q3` 整个系统的技术栈与数据流:一条用户消息从前端到落库经过哪些组件?｜对比:框架编排 vs 自有控制流｜来源:`chat-loop-redesign-done.md`、`chat-session-persistence-done.md`
 - `overview-q4` 项目里你最自豪 / 最难的技术点是什么?为什么难?｜对比:候选人自选 highlight｜来源:flagship 三类自选
 
-### 02 · Chat Loop 引擎（loop，6 题，flagship）
-- `loop-q1` 为什么把 chat loop 从 LangGraph supervisor 单程图退役成裸 Python while 循环?收益与代价各是什么?｜对比:LangGraph supervisor 图 vs 裸循环｜来源:`chat-loop-redesign-done.md`、`2026-06-05-chat-loop-redesign-design.md`
-- `loop-q2` 你的循环有"四道终止闸",为什么需要四道而不是一道?各拦什么?｜对比:单一 max-steps vs 多道闸｜来源:`2026-06-11-chatloop-termination-gate-precision-design.md`
-- `loop-q3` "窗口四区"(KV-cache 分区)是怎么切的?为什么这样切能省 token / 省钱、还能稳住 prefix cache?｜对比:整窗重拼 vs 分区固定前缀｜来源:`chat-loop-redesign-done.md`、`2026-06-12-chatloop-context-pressure-valve-design.md`
-- `loop-q4` 工具渐进披露:为什么不一次把所有工具塞给模型?分档依据是什么?｜对比:全量工具 vs 渐进披露｜来源:`tool_docs.py`、`2026-06-11-chatloop-tool-guardrails-and-metrics-design.md`
-- `loop-q5` steering(Redis List)+ turn 原子语义:用户在 agent 跑到一半插话,怎么不破坏状态?｜对比:打断重启 vs steering 注入｜来源:`2026-06-11-chatloop-steering-predispatch-checkpoint-design.md`
-- `loop-q6` 用原生 function calling 而非框架的 tool 抽象,你踩过哪些坑?(qwen3 关思考 / tool_call args 合法化 / 非 deepseek 兼容)｜对比:框架 tool 层 vs 裸 OpenAI function calling｜来源:`openai_client` 提交 `26fdcc86`
+### 02 · Chat Loop 引擎（loop，8 题，flagship · 难度梯度 易→难）
+- `loop-q1`（★★）先打基础:对话式 AI 为什么常要"来回好几轮"(模型想→调工具→看结果→再想),不能问一次答完?｜对比:一问一答 vs 循环｜来源:`chat-loop-redesign-done.md`
+- `loop-q2`（★★★）你的主循环一轮(turn)里数据怎么转?"单 LLM 既决策又说话"是什么意思?｜对比:planner/responder 两模型分工 vs 单 LLM｜来源:`2026-06-05-chat-loop-redesign-design.md`、`backend/app/chatloop/loop.py`
+- `loop-q3`（★★★★）为什么把 chat loop 从 LangGraph supervisor 单程图退役成裸 Python while 循环?收益与代价?｜对比:LangGraph supervisor 图 vs 裸循环｜来源:`chat-loop-redesign-done.md`、`2026-06-05-chat-loop-redesign-design.md`
+- `loop-q4`（★★★★）"四道终止闸"为什么要四道而不是一道?各拦什么?｜对比:单一 max-steps vs 多道闸｜来源:`2026-06-11-chatloop-termination-gate-precision-design.md`
+- `loop-q5`（★★★★★）"窗口四区"(KV-cache 分区)怎么切?为什么省 token、还稳住 prefix cache?｜对比:整窗重拼 vs 分区固定前缀｜来源:`2026-06-12-chatloop-context-pressure-valve-design.md`
+- `loop-q6`（★★★★）工具渐进披露:为什么不一次把所有工具塞给模型?分档依据?｜对比:全量工具 vs 渐进披露｜来源:`tool_docs.py`、`2026-06-11-chatloop-tool-guardrails-and-metrics-design.md`
+- `loop-q7`（★★★★★）steering(Redis List)+ turn 原子语义:用户跑到一半插话怎么不破坏状态?｜对比:打断重启 vs steering 注入｜来源:`2026-06-11-chatloop-steering-predispatch-checkpoint-design.md`
+- `loop-q8`（★★★★）原生 function calling 而非框架 tool 抽象,踩了哪些坑?(qwen3 关思考 / 参数合法化 / 非 deepseek 兼容)｜对比:框架 tool 层 vs 裸 function calling｜来源:`openai_client` 提交 `26fdcc86`
 
-### 03 · 跨会话记忆系统（memory，6 题，flagship）
-- `memory-q1` 为什么用 MemGPT 分层 × Zep 双时态图杂交,而不是单纯抄其中一个?各取了什么、丢了什么?｜对比:纯 MemGPT vs 纯 Zep vs 杂交｜来源:`c5-cross-session-memory-done.md`
-- `memory-q2` 双时态(bi-temporal)是什么?为什么记忆系统必须区分"事件发生时间"和"系统获知时间"?不区分会怎样?｜对比:单时间戳 vs 双时态｜来源:`c5-plan2a-write-pipeline-core-done.md`
-- `memory-q3` 8 步写入 pipeline + 4 动作冲突消解:新记忆和旧记忆矛盾时怎么办?｜对比:覆盖写 vs 冲突消解四动作｜来源:`c5-plan2a-write-pipeline-core-done.md`
-- `memory-q4` 读取侧 3-way 混合检索 + RRF v2 时间感知排序:怎么把图 / 向量 / 全文三路融合?为什么排序要感知时间?｜对比:单路向量检索 vs 三路 RRF｜来源:`c5-plan3-read-pipeline-done.md`
-- `memory-q5` memory vs KB 路由:怎么判断一句话该查"用户上下文"还是"市场知识"?路由错了怎么兜底?｜对比:不分流全查 vs 触发词分类+LLM fallback｜来源:`c5-plan6-memory-kb-routing-done.md`
-- `memory-q6` AGE 图 + Milvus + PG 三方存储,写入崩在中间怎么不脏?一致性怎么保证?｜对比:单库 vs 三方 + reconciliation｜来源:`c5-plan1a-foundation-schema-done.md`、`memory-dialogue-eval-harness-landed.md`(AGE 毒事务教训)
+### 03 · 跨会话记忆系统（memory，8 题，flagship · 难度梯度 易→难）
+- `memory-q1`（★★）先打基础:AI 为什么需要"跨会话记忆"?上下文窗口不是已经能记住对话吗?两者差在哪?｜对比:上下文窗口 vs 持久记忆｜来源:`c5-cross-session-memory-done.md`
+- `memory-q2`（★★★）你的记忆系统大体长什么样?"用户去年说他偏好低风险"怎么被存下、又在下次对话被想起?｜对比:整段对话塞回 vs 抽取+检索｜来源:`c5-cross-session-memory-done.md`、`c5-plan1b-business-foundation-done.md`
+- `memory-q3`（★★★★）为什么用 MemGPT 分层 × Zep 双时态图杂交,而不是单纯抄其中一个?各取了什么、丢了什么?｜对比:纯 MemGPT vs 纯 Zep vs 杂交｜来源:`c5-cross-session-memory-done.md`
+- `memory-q4`（★★★★★）双时态(bi-temporal)是什么?为什么记忆系统必须区分"事件发生时间"和"系统获知时间"?不区分会怎样?｜对比:单时间戳 vs 双时态｜来源:`c5-plan2a-write-pipeline-core-done.md`
+- `memory-q5`（★★★★）8 步写入 pipeline + 4 动作冲突消解:新记忆和旧记忆矛盾时怎么办?｜对比:覆盖写 vs 冲突消解四动作｜来源:`c5-plan2a-write-pipeline-core-done.md`
+- `memory-q6`（★★★★）读取侧 3-way 混合检索 + RRF v2 时间感知排序:怎么把图 / 向量 / 全文三路融合?为什么排序要感知时间?｜对比:单路向量检索 vs 三路 RRF｜来源:`c5-plan3-read-pipeline-done.md`
+- `memory-q7`（★★★★）memory vs KB 路由:怎么判断一句话该查"用户上下文"还是"市场知识"?路由错了怎么兜底?｜对比:不分流全查 vs 触发词分类+LLM fallback｜来源:`c5-plan6-memory-kb-routing-done.md`
+- `memory-q8`（★★★★★）AGE 图 + Milvus + PG 三方存储,写入崩在中间怎么不脏?一致性怎么保证?｜对比:单库 vs 三方 + reconciliation｜来源:`c5-plan1a-foundation-schema-done.md`、`memory-dialogue-eval-harness-landed.md`(AGE 毒事务教训)
 
 ### 04 · 知识库与 RAG（rag，5 题）
 - `rag-q1` 类型路由切块:研报走 semantic、财报走 section、政策走 clause,为什么不能一刀切?｜对比:固定 size 切块 vs 类型路由｜来源:`kb-chunking-strategy.md`
@@ -95,13 +103,15 @@
 - `persist-q4` 6 状态任务生命周期 + stale scanner 自愈:任务怎么不会永远卡在中间态?｜对比:无状态机 vs 6 态 + 扫描自愈｜来源:`chat-session-persistence-done.md`
 - `persist-q5` 你沉淀过一条教训"第 n 轮修复 = phase1 重做",这是什么意思?systematic debugging 在这里教了你什么?｜对比:打补丁 vs 重做第一阶段｜来源:`chat-session-persistence-done.md`(`feedback_n_round_fix_means_phase1_redo`)
 
-### 09 · Agent 评估方法论（eval，6 题，flagship）
-- `eval-q1` 对话 / 工具型 Agent 怎么评估?你用了哪四个相互独立的角度?为什么要独立?｜对比:单一 LLM-judge vs 四角度｜来源:`conv-agent-evaluation-methods.md`、`2026-06-02-conversational-agent-evaluation-survey.md`
-- `eval-q2` 反向出题 + pass@k:怎么自动造金融计算题、怎么判分?为什么是反向?｜对比:人工出题 vs 反向生成 + oracle｜来源:`2026-06-17-question-gen-mvp-design.md`、`exhaustive-axis-not-seed-list`
-- `eval-q3` LLM-judge 的坑:set/ranking 自由文本判分、judge 抽取抖动,你怎么治?｜对比:正则判分 vs LLM 抽取判分｜来源:`pre-rl-tooling-baseline.md`
-- `eval-q4` DD 报告质量 eval:5 个 metric + V0-V3 ablation 控制变量,为什么要 ablation?｜对比:单分打分 vs 消融控制变量｜来源:`dd-report-eval-phase-2-landed.md`
-- `eval-q5` 记忆对话 eval:双层断言体系怎么搭?首跑就抓出 5 个系统级 bug(生产 Path B 抽取从未工作 / AGE 毒事务等),说明了什么?｜对比:端到端断言 vs 双层(终态+轨迹)｜来源:`memory-dialogue-eval-harness-landed.md`
-- `eval-q6` eval gold 随实时数据漂移、复权≠价格回报,这两个口径坑你怎么发现和钉死的?｜对比:as_of=今天 vs 钉死交易日;复权 vs 价格回报｜来源:`eval-gold-staleness-live-data`、`eval-adjusted-vs-price-return`
+### 09 · Agent 评估方法论（eval，8 题，flagship · 难度梯度 易→难）
+- `eval-q1`（★★）先打基础:对话/工具型 AI agent 为什么"评估"比传统软件测试难?不能写几个单测断言就完?｜对比:单元测试断言 vs agent 评估｜来源:`conv-agent-evaluation-methods.md`
+- `eval-q2`（★★★）你大体怎么给这种 agent 打分?"答得好不好"这种主观东西怎么变成可比的数字?｜对比:人工主观看 vs 可量化指标｜来源:`conv-agent-evaluation-methods.md`、`2026-06-02-conversational-agent-evaluation-survey.md`
+- `eval-q3`（★★★★）对话/工具型 Agent 你用了哪四个相互独立的评估角度?为什么要独立?｜对比:单一 LLM-judge vs 四角度｜来源:`conv-agent-evaluation-methods.md`、`2026-06-02-conversational-agent-evaluation-survey.md`
+- `eval-q4`（★★★★）反向出题 + pass@k:怎么自动造金融计算题、怎么判分?为什么是反向?｜对比:人工出题 vs 反向生成 + oracle｜来源:`2026-06-17-question-gen-mvp-design.md`、`exhaustive-axis-not-seed-list`
+- `eval-q5`（★★★★）LLM-judge 的坑:set/ranking 自由文本判分、judge 抽取抖动,你怎么治?｜对比:正则判分 vs LLM 抽取判分｜来源:`pre-rl-tooling-baseline.md`
+- `eval-q6`（★★★★）DD 报告质量 eval:5 个 metric + V0-V3 ablation 控制变量,为什么要 ablation?｜对比:单分打分 vs 消融控制变量｜来源:`dd-report-eval-phase-2-landed.md`
+- `eval-q7`（★★★★★）记忆对话 eval:双层断言体系怎么搭?首跑就抓出 5 个系统级 bug(生产 Path B 抽取从未工作 / AGE 毒事务等),说明了什么?｜对比:端到端断言 vs 双层(终态+轨迹)｜来源:`memory-dialogue-eval-harness-landed.md`
+- `eval-q8`（★★★★）eval gold 随实时数据漂移、复权≠价格回报,这两个口径坑你怎么发现和钉死的?｜对比:as_of=今天 vs 钉死交易日;复权 vs 价格回报｜来源:`eval-gold-staleness-live-data`、`eval-adjusted-vs-price-return`
 
 ### 10 · RL 准备与工具可靠性（rl，4 题）
 - `rl-q1` 你的结论是"先修工具比上 RL 更对症",怎么论证断崖是工具问题而非模型能力问题?｜对比:直接上 RL vs 先修工具｜来源:`2026-06-17-pre-rl-tooling-baseline.md`
@@ -127,7 +137,7 @@
 - `frontend-q3` persona 可编辑 UI:双轨语义 + atomic 操作 + 升级动画,用户改画像怎么不和系统自动学习打架?｜对比:只读画像 vs 可编辑双轨｜来源:`persona-editable-ui-done.md`
 - `frontend-q4` 研发看板(Harness Board review mode):为什么给自己的项目做一个知识沉淀工具?DeepCard + 5 视图怎么联动?｜对比:README 文档 vs 交互看板｜来源:`harness-board-review-mode-done.md`
 
-**合计:4+6+6+5+5+4+4+5+6+4+4+4+4 = 61 题。**
+**合计:4+8+8+5+5+4+4+5+8+4+4+4+4 = 67 题**(flagship 三类各 8 题、含难度梯度;其余不变)。
 
 ## ④ 内容准确性策略(本手册最关键的质量杠杆)
 
@@ -148,7 +158,9 @@
 ## ⑥ 内容铁律
 
 - **不用内部代号**:题面 / 正文绝不出现 `B-3`/`C.5`/`A5a`/`L3a`/`#118` 这类代号(面试官看不懂),一律自解释中文名。HTML 锚点 id(`loop-q1`)是内部标识不算。
+- **正文不塞 `spec § X.X` 章节号引用**:把内容用大白话讲出来即可,来源统一放每题末尾 src-note;正文里"(spec § 0.1)"这种内部味要清掉。
 - **面试官口吻**:题目是深挖追问,不是"什么是 X"。
+- **示例贴教学伪代码**:目的是帮读者看懂逻辑怎么走,不堆源码细节;关键步骤配中文注释;真实函数/概念名可当锚点但点到为止。难度低的题代码更短更白。
 - **数字全部来自真实 spec / 代码**,不可手搓;无据标"量级估计"。
 - **决策对比绝不稻草人**:被否决的方案也给公允评价,说清它好在哪、我们为什么仍不选。
 - **每题一图**,画真实机制(窗口四区 / 8 步写入 / 双时态图 / 任务状态机 / 四道闸……),非装饰。
