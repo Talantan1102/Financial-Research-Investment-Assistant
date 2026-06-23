@@ -28,6 +28,11 @@ INTENT_FINANCIAL_VERIFY = "financial_verify"
 # 财报核对的核对项中文名(营收/净利);题面里嵌"声称值"让助手取真财报核对。
 _VERIFY_LABELS = {"营收": "营收", "净利": "净利润"}
 
+INTENT_TREND_SIGNAL = "trend_signal"
+
+# 异动信号(同比增速)指标中文名 -> 题面用增速标签。
+_TREND_LABELS = {"营收同比": "营收同比增速", "净利同比": "净利润同比增速"}
+
 
 def q_single(indicator: str, name: str, window_cn: str) -> str:
     """单股单指标题面;未知 indicator raise ValueError。
@@ -90,6 +95,11 @@ def q_verify(name: str, indicator_label: str, claimed: float, period_label: str)
     return f"有人说{name}{period_label}{indicator_label}{claimed}亿,对不对?以财报为准。"
 
 
+def q_trend(name: str, indicator_label: str, period_label: str) -> str:
+    """异动信号(同比增速)题面;indicator_label 取 _TREND_LABELS 的值(如"营收同比增速")。"""
+    return f"{name}{period_label}的{indicator_label}是百分之多少?"
+
+
 INTENT_POSITION = "position_calc"
 
 
@@ -144,6 +154,7 @@ __all__ = [
     "INTENT_SNAPSHOT",
     "INTENT_FINANCIAL",
     "INTENT_FINANCIAL_VERIFY",
+    "INTENT_TREND_SIGNAL",
     "INTENT_POSITION",
     "INTENT_PORTFOLIO",
     "INTENT_VALUATION",
@@ -155,6 +166,7 @@ __all__ = [
     "q_snapshot",
     "q_financial",
     "q_verify",
+    "q_trend",
     "q_position_value",
     "q_position_pnl",
     "q_portfolio_weight",

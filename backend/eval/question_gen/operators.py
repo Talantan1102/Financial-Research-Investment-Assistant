@@ -35,6 +35,12 @@ _FINANCIAL_SPEC: dict[str, tuple[str, str]] = {
     "净利": ("n_income", "yi"),
 }
 
+# 异动信号(同比增速)指标 -> fina_indicator 预算字段(直取,已是百分数)。
+_TREND_COLUMNS: dict[str, str] = {
+    "营收同比": "q_sales_yoy",
+    "净利同比": "netprofit_yoy",
+}
+
 
 def single(indicator: str, data: dict, *, years: float = 1.0) -> float:
     """单股单指标派发到 oracle。
@@ -127,6 +133,21 @@ def financial_lookup(indicator: str, snap: dict) -> float | None:
     return val / 1e8 if unit == "yi" else val
 
 
+def trend_lookup(indicator: str, snap: dict) -> float | None:
+    """异动信号(同比增速)取数:指标名 -> 直取 fina_indicator 预算字段(已是百分数)。
+
+    营收同比 -> q_sales_yoy;净利同比 -> netprofit_yoy。
+    字段缺失(None/NaN)→ 返回 None(调用方跳过)。未知指标 raise ValueError。
+    """
+    col = _TREND_COLUMNS.get(indicator)
+    if col is None:
+        raise ValueError(f"未知异动指标:{indicator!r}")
+    val = snap.get(col)
+    if val is None or (isinstance(val, float) and val != val):  # None 或 NaN
+        return None
+    return float(val)
+
+
 def financial_verify_real(indicator: str, snap: dict) -> float | None:
     """财报核对的真值取数:直取真实营收/净利(元→亿,复用 financial_lookup 字段口径)。
 
@@ -167,6 +188,7 @@ __all__ = [
     "filter_by",
     "snapshot_lookup",
     "financial_lookup",
+    "trend_lookup",
     "financial_verify_real",
     "position_market_value",
     "position_pnl",

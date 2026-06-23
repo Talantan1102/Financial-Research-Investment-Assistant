@@ -50,12 +50,16 @@ _SNAPSHOT_COLS = ("pe", "pb", "turnover_rate", "dv_ratio")
 
 _FINANCIAL_INDICATORS = ("ROE", "资产负债率", "毛利率", "营收", "净利")
 _FINANCIAL_TOL = {ind: {"kind": "rel", "value": 0.01} for ind in _FINANCIAL_INDICATORS}
-_FINA_COLS = ("roe", "debt_to_assets", "grossprofit_margin")
+_FINA_COLS = ("roe", "debt_to_assets", "grossprofit_margin", "q_sales_yoy", "netprofit_yoy")
 _INCOME_COLS = ("revenue", "n_income")
 
 # 财报核对:只核对金额类(营收/净利),容差 ±1%
 _VERIFY_INDICATORS = ("营收", "净利")
 _VERIFY_TOL = {"kind": "rel", "value": 0.01}
+
+# 异动信号(同比增速):营收/净利同比,gold 直取预算字段(%),容差 ±1%
+_TREND_INDICATORS = ("营收同比", "净利同比")
+_TREND_TOL = {"kind": "rel", "value": 0.01}
 
 
 async def _resolve_window(as_of: str, code: str) -> tuple[str, str]:
@@ -234,6 +238,48 @@ async def build_verify_cases(
                         "period_label": period_label,
                         "claimed": claimed,
                     },
+                )
+            )
+    return out
+
+
+async def build_trend_cases(
+    tushare,
+    as_of: str,
+    period_end: str,
+    period_label: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
+    """异动信号(中等档):营收同比 + 净利同比,gold 直取 fina_indicator 预算字段(%)。
+
+    结构同 build_financial_cases:复用 _fetch_financial 取 fina_indicator 行
+    (q_sales_yoy/netprofit_yoy 已并入 _FINA_COLS,一并落进 snap);按 period_end 选行。
+    tushare 依赖注入;空值/缺期指标跳过。gold 已是百分数,容差 ±1%。
+    pool 默认全局 POOL,可注入子集。
+    """
+    out: list[case.ComputationCase] = []
+    for st in pool:
+        snap = await _fetch_financial(tushare, st.ts_code, as_of, period_end)
+        for ind in _TREND_INDICATORS:
+            gold = operators.trend_lookup(ind, snap)
+            if gold is None:
+                continue
+            out.append(
+                case.ComputationCase(
+                    case_id=cid(f"异动{ind}-{st.ts_code}"),
+                    intent=intents.INTENT_TREND_SIGNAL,
+                    difficulty="中等",
+                    question=intents.q_trend(
+                        st.name, intents._TREND_LABELS[ind], period_label
+                    ),
+                    stocks=[st.ts_code],
+                    indicator=ind,
+                    window=period_label,
+                    gold=gold,
+                    gold_shape="scalar",
+                    tolerance=_TREND_TOL,
+                    meta={"period_end": period_end, "period_label": period_label},
                 )
             )
     return out
@@ -599,6 +645,9 @@ async def generate(
 
     # ---- 财报核对(简单档,2024 年年报;题面嵌声称值,gold 取真实营收/净利)----
     cases.extend(await build_verify_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool))
+
+    # ---- 异动信号(中等档,2024 年年报;营收/净利同比,gold 取预算 yoy 字段)----
+    cases.extend(await build_trend_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool))
 
     # ---- 单仓持仓量(简单档)----
     cases.extend(await build_position_cases(tushare, as_of, cid, pool=pool))
