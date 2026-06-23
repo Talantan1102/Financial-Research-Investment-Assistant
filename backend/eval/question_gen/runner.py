@@ -86,8 +86,10 @@ async def run_passk(
                 system_prompt=CHAT_SYSTEM_PROMPT,
                 skill_listing=singletons.skill_listing,
                 reference_date=_as_of_date(as_of),
-                # 采集模式关闭 context downgrade,保留完整工具输出供 SFT;正常模式维持原阈值
-                downgrade_char_threshold=10**9 if collect else 1320,
+                # Decision B:采集模式也用推理同款阈值(降级开着)——轨迹形态 = 推理时
+                # data_refs 短引用形态,避免训练(整串内联)/推理(短引用)分布错位。
+                # 见 docs/research/2026-06-22-sft-warmstart-plan.md 决策 B。
+                downgrade_char_threshold=1320,
             )
             complete = judge_llm.make_complete()  # 复杂档(排序/筛选)LLM 抽取判分
 

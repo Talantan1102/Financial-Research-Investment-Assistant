@@ -44,6 +44,8 @@ _TABLE: dict[str, ModelPrice] = {
     "qwen-max": ModelPrice(input_per_1k_cny=0.004, output_per_1k_cny=0.012),
     "qwen2.5-7b-instruct": ModelPrice(input_per_1k_cny=0.0001, output_per_1k_cny=0.0002),
     "qwen3-8b": ModelPrice(input_per_1k_cny=0.0001, output_per_1k_cny=0.0002),
+    # 估计值,旗舰思考模型,待核实真实单价(DashScope 官网未见 qwen3.7-max 独立定价页)
+    "qwen3.7-max": ModelPrice(input_per_1k_cny=0.006, output_per_1k_cny=0.024),
 }
 
 

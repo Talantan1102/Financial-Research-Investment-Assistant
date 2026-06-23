@@ -537,3 +537,61 @@ def test_context_pressure_fields_default():
     st = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
     assert st.context_pressure_passes == 0
     assert st.context_pressure_floor_hit is False
+
+
+# ---------------------------------------------------------------------------
+# reasoning 轨迹存储(承 2026-06-22 think 进轨迹 + 投影剥离 feature)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_step_reasoning_stored_in_assistant_msg():
+    """StepResult 含非空 reasoning → assistant 消息含 reasoning_content 字段(SFT 轨迹目标)。"""
+    state = _make_state()
+    step = StepResult(
+        content="最终回答",
+        tool_calls=[],
+        finish_reason="stop",
+        prompt_tokens=100,
+        completion_tokens=20,
+        cached_tokens=0,
+        cost_cny=0.001,
+        reasoning="先想了一大堆",
+    )
+    state = apply_step(state, step)
+
+    last = state.messages[-1]
+    assert last["role"] == "assistant"
+    assert last["reasoning_content"] == "先想了一大堆"
+
+
+def test_apply_step_empty_reasoning_no_key():
+    """StepResult.reasoning == ''(默认)→ assistant 消息无 reasoning_content 键(向后兼容)。"""
+    state = _make_state()
+    step = _make_step_result(content="普通回答", finish_reason="stop")
+    state = apply_step(state, step)
+
+    last = state.messages[-1]
+    assert "reasoning_content" not in last
+    # 既有断言:只含 role + content
+    assert set(last.keys()) == {"role", "content"}
+
+
+def test_apply_step_reasoning_with_tool_calls():
+    """含 tool_calls + reasoning → assistant 消息同时含 reasoning_content 与 tool_calls。"""
+    state = _make_state()
+    tc = _make_tool_call()
+    step = StepResult(
+        content="",
+        tool_calls=[tc],
+        finish_reason="tool_calls",
+        prompt_tokens=100,
+        completion_tokens=20,
+        cached_tokens=0,
+        cost_cny=0.001,
+        reasoning="工具调用前的推理",
+    )
+    state = apply_step(state, step)
+
+    last = state.messages[-1]
+    assert last["reasoning_content"] == "工具调用前的推理"
+    assert "tool_calls" in last

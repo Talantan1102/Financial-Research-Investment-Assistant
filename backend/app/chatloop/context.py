@@ -192,8 +192,23 @@ def _downgrade_old_tool_messages(state: ChatLoopState, threshold: int) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _strip_reasoning(msg: dict[str, Any]) -> dict[str, Any]:
+    """返回剥离 reasoning_content 的消息副本(原消息不变)。
+
+    仅 assistant 消息会携带 reasoning_content;其它 role 直接返回原对象(零拷贝优化)。
+    """
+    if "reasoning_content" not in msg:
+        return msg
+    return {k: v for k, v in msg.items() if k != "reasoning_content"}
+
+
 def _assemble_regions(state: ChatLoopState, deps: ContextDeps) -> list[dict[str, Any]]:
-    """四区拼装(不含降级)——纯读 state.messages。"""
+    """四区拼装(不含降级)——纯读 state.messages。
+
+    区三投影时剥离 reasoning_content:该字段存于轨迹(SFT 监督目标),
+    但不回送 LLM(Qwen3 推理模型在历史消息中丢弃 <think> 内容,回送无意义且浪费 token)。
+    剥离操作在副本上进行,state.messages 本体不变。
+    """
     result: list[dict[str, Any]] = []
 
     # 区一:稳定前缀区
@@ -202,8 +217,8 @@ def _assemble_regions(state: ChatLoopState, deps: ContextDeps) -> list[dict[str,
     # 区二:历史区(rebuild 产物,透传)
     result.extend(deps.history_block)
 
-    # 区三:本 turn 轨迹区
-    result.extend(state.messages)
+    # 区三:本 turn 轨迹区(reasoning_content 剥离投影,轨迹本体不变)
+    result.extend(_strip_reasoning(msg) for msg in state.messages)
 
     # 区四:尾部动态区(会话级动态;reference_date 在则前置"今天",不破坏稳定前缀 KV-cache)
     remaining = max(0.0, deps.max_cny - state.budget_spent_cny)

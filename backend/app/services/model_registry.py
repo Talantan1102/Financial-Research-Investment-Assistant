@@ -27,6 +27,7 @@ _MODELS: tuple[ModelSpec, ...] = (
         "qwen2.5-7b", "qwen2.5-7b-instruct", "small", False, False
     ),  # 403 未开通;开通后改 True/True
     ModelSpec("qwen3-8b", "qwen3-8b", "small", True, True),
+    ModelSpec("qwen3.7-max", "qwen3.7-max", "large", True, True),  # 思考旗舰;SFT teacher model
 )
 _BY_KEY = {m.key: m for m in _MODELS}
 

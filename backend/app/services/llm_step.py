@@ -50,3 +50,4 @@ class StepResult(BaseModel):
     completion_tokens: int
     cached_tokens: int  # KV-cache 命中(一等观测指标,spec § 2.4)
     cost_cny: float
+    reasoning: str = ""  # 思考模型的推理过程(qwen3.7-max 等);默认空 → 非思考模型无行为变化
