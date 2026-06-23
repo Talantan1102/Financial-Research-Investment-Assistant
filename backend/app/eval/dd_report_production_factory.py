@@ -135,7 +135,17 @@ class _BacktestTushareService:
     async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame:
         return pd.DataFrame()
 
-    async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame:
+    async def get_stock_basic(self, *, ts_code: str | None = None) -> pd.DataFrame:
+        return pd.DataFrame()
+
+    async def get_index_weight(
+        self,
+        *,
+        index_code: str,
+        trade_date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> pd.DataFrame:
         return pd.DataFrame()
 
     async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame:

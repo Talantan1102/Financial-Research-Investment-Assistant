@@ -90,14 +90,20 @@ async def _fetch_snapshot(tushare, ts_code: str, trade_date: str) -> dict:
     return {col: row[col] for col in _SNAPSHOT_COLS}
 
 
-async def build_snapshot_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
+async def build_snapshot_cases(
+    tushare,
+    as_of: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
     """行情快照取数(简单档,无窗口):每只股取 as_of 当日 daily_basic → 4 个直取指标。
 
     tushare 依赖注入(可塞 stub 单测);cid 是 case_id 生成器 callable。
     gold = 直取字段值(换手率/股息率 tushare 已是百分数,不 scale)。
+    pool 默认全局 POOL，可注入子集。
     """
     out: list[case.ComputationCase] = []
-    for st in stock_pool.POOL:
+    for st in pool:
         snap = await _fetch_snapshot(tushare, st.ts_code, as_of)
         for ind in _SNAPSHOT_INDICATORS:
             gold = operators.snapshot_lookup(ind, snap)
@@ -146,14 +152,20 @@ async def _fetch_financial(tushare, ts_code: str, query_date: str, period_end: s
 
 
 async def build_financial_cases(
-    tushare, as_of: str, period_end: str, period_label: str, cid
+    tushare,
+    as_of: str,
+    period_end: str,
+    period_label: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
 ) -> list[case.ComputationCase]:
     """财报取数(简单档):用 as_of 查询(确保目标期已披露),取 period_end 期的 5 个直取指标。
 
     tushare 依赖注入;空值/缺期指标跳过。营收/净利 gold 已是亿元。
+    pool 默认全局 POOL，可注入子集。
     """
     out: list[case.ComputationCase] = []
-    for st in stock_pool.POOL:
+    for st in pool:
         snap = await _fetch_financial(tushare, st.ts_code, as_of, period_end)
         for ind in _FINANCIAL_INDICATORS:
             gold = operators.financial_lookup(ind, snap)
@@ -191,10 +203,18 @@ async def _fetch_close(tushare, ts_code: str, trade_date: str) -> float | None:
     return float(val)
 
 
-async def build_position_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
-    """单仓持仓量(简单档):合成 qty/cost(确定性)+ 真收盘价。close 缺则跳过该股。"""
+async def build_position_cases(
+    tushare,
+    as_of: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
+    """单仓持仓量(简单档):合成 qty/cost(确定性)+ 真收盘价。close 缺则跳过该股。
+
+    pool 默认全局 POOL，可注入子集。
+    """
     out: list[case.ComputationCase] = []
-    for i, st in enumerate(stock_pool.POOL):
+    for i, st in enumerate(pool):
         close = await _fetch_close(tushare, st.ts_code, as_of)
         if close is None:
             continue
@@ -233,13 +253,19 @@ async def build_position_cases(tushare, as_of: str, cid) -> list[case.Computatio
     return out
 
 
-async def build_portfolio_cases(tushare, as_of: str, cid) -> list[case.ComputationCase]:
+async def build_portfolio_cases(
+    tushare,
+    as_of: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
     """组合权重 + HHI(中等档):按板块构造合成篮子(qty 100,200,...)+ 真收盘价。
 
     任一成员 close 缺则跳过该板块(保权重口径一致)。
+    pool 默认全局 POOL，可注入子集。
     """
     out: list[case.ComputationCase] = []
-    for sector, members in stock_pool.by_sector().items():
+    for sector, members in stock_pool.by_sector(pool).items():
         if len(members) < 2:
             continue
         mvs: list[float] = []
@@ -304,14 +330,20 @@ def _finite_positive(val) -> float | None:
 
 
 async def build_valuation_cases(
-    tushare, as_of: str, period_end: str, period_label: str, cid
+    tushare,
+    as_of: str,
+    period_end: str,
+    period_label: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
 ) -> list[case.ComputationCase]:
     """估值算式(中等档):板块同行聚合 PE/PB(avg+median)+ 个股 eps/bps -> 理论价。
 
     题面明示可比篮子;eps/bps 缺或 compute 抛 InsufficientDataForModelError -> 跳过。
+    pool 默认全局 POOL，可注入子集。
     """
     out: list[case.ComputationCase] = []
-    for sector, members in stock_pool.by_sector().items():
+    for sector, members in stock_pool.by_sector(pool).items():
         if len(members) < 2:
             continue
         pes: list[float] = []
@@ -410,11 +442,20 @@ async def build_valuation_cases(
 
 
 async def generate(
-    as_of: str = _AS_OF_DEFAULT, out_path: Path = _OUT_DEFAULT
+    as_of: str = _AS_OF_DEFAULT,
+    out_path: Path = _OUT_DEFAULT,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+    tushare=None,
 ) -> list[case.ComputationCase]:
-    from app.services.tushare_factory import build_tushare_service
+    """完整出题管线。
 
-    tushare = build_tushare_service()
+    pool 默认全局 POOL，可注入子集（build_datasets 分 train/val/test 用）。
+    tushare 可注入（测试用）；不传则从工厂构建。
+    """
+    if tushare is None:
+        from app.services.tushare_factory import build_tushare_service
+
+        tushare = build_tushare_service()
     cases: list[case.ComputationCase] = []
     seq = itertools.count(1)
 
@@ -439,7 +480,7 @@ async def generate(
         return m
 
     # ---- 简单档(scalar)----
-    for st in stock_pool.POOL:
+    for st in pool:
         wcn = legality.window_cn
         # 涨幅 × 3 窗口
         for w in ("3m", "1y", "3y"):
@@ -499,22 +540,26 @@ async def generate(
         )
 
     # ---- 行情快照取数(简单档,无窗口)----
-    cases.extend(await build_snapshot_cases(tushare, as_of, cid))
+    cases.extend(await build_snapshot_cases(tushare, as_of, cid, pool=pool))
 
     # ---- 财报取数(简单档,2024 年年报;用 as_of 查询确保已披露)----
-    cases.extend(await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid))
+    cases.extend(
+        await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool)
+    )
 
     # ---- 单仓持仓量(简单档)----
-    cases.extend(await build_position_cases(tushare, as_of, cid))
+    cases.extend(await build_position_cases(tushare, as_of, cid, pool=pool))
 
     # ---- 组合权重 + HHI(中等档)----
-    cases.extend(await build_portfolio_cases(tushare, as_of, cid))
+    cases.extend(await build_portfolio_cases(tushare, as_of, cid, pool=pool))
 
     # ---- 估值算式 PE/PB 理论价(中等档,2024 年报 + 板块同行可比)----
-    cases.extend(await build_valuation_cases(tushare, as_of, "20241231", "2024年年报", cid))
+    cases.extend(
+        await build_valuation_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool)
+    )
 
     # ---- 中等档 ----
-    for st in stock_pool.POOL:
+    for st in pool:
         # 双指标(回撤+波动) × 1y → multi_scalar
         d = await data(st.ts_code, "1y")
         gold_dual: dict[str, float] = {
@@ -537,7 +582,7 @@ async def generate(
             )
         )
     # 相关(同板块两两) × 1y
-    for sector, members in stock_pool.by_sector().items():
+    for sector, members in stock_pool.by_sector(pool).items():
         for a, b in itertools.combinations(members, 2):
             da, db = await data(a.ts_code, "1y"), await data(b.ts_code, "1y")
             gold = operators.correlation_pair(da, db)
@@ -558,8 +603,8 @@ async def generate(
             )
 
     # ---- 复杂档(ranking / set)----
-    by_sec = stock_pool.by_sector()
-    for sector in stock_pool.sectors_with_at_least(3):
+    by_sec = stock_pool.by_sector(pool)
+    for sector in stock_pool.sectors_with_at_least(3, pool=pool):
         members = by_sec[sector]
         names = [m.name for m in members]
         for w in ("3m", "1y", "3y"):

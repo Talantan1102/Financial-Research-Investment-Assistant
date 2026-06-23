@@ -56,9 +56,17 @@ class TushareService(Protocol):
         self, *, ts_code: str, start_date: str, end_date: str
     ) -> pd.DataFrame: ...
     async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame: ...
-    async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame: ...
+    async def get_stock_basic(self, *, ts_code: str | None = None) -> pd.DataFrame: ...
     async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame: ...
     async def get_trade_cal(self, *, start: str, end: str) -> pd.DataFrame: ...
+    async def get_index_weight(
+        self,
+        *,
+        index_code: str,
+        trade_date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> pd.DataFrame: ...
 
     # Mock implementations should override aclose() as a no-op or handle their own cleanup.
     async def aclose(self) -> None: ...
@@ -254,12 +262,18 @@ class RealTushareService:
     async def get_fund_basic(self, *, ts_code: str) -> pd.DataFrame:
         return await self._call_cached("fund_basic", {"ts_code": ts_code})
 
-    async def get_stock_basic(self, *, ts_code: str) -> pd.DataFrame:
-        # fields 投影:只取 ts_code,name,industry(减少传输量)
+    async def get_stock_basic(self, *, ts_code: str | None = None) -> pd.DataFrame:
+        # fields 投影:取 ts_code,name,industry,list_date(减少传输量)
+        # ts_code=None → 拉取所有在市股票(list_status="L"),供 load_csi800 批量一次性调用
+        params: dict[str, Any] = {}
+        if ts_code is not None:
+            params["ts_code"] = ts_code
+        else:
+            params["list_status"] = "L"
         return await self._call_cached(
             "stock_basic",
-            {"ts_code": ts_code},
-            fields="ts_code,name,industry",
+            params,
+            fields="ts_code,name,industry,list_date",
         )
 
     async def get_sw_index_daily(self, *, index_code: str, trade_date: str) -> pd.DataFrame:
@@ -277,6 +291,25 @@ class RealTushareService:
             "trade_cal",
             {"exchange": "SSE", "start_date": start, "end_date": end},
         )
+
+    async def get_index_weight(
+        self,
+        *,
+        index_code: str,
+        trade_date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> pd.DataFrame:
+        # tushare index_weight API: index_code + trade_date / start_date+end_date
+        # trade_date 优先(精确查单日);start_date+end_date 查区间(用于拉最近一次再平衡)
+        params: dict[str, Any] = {"index_code": index_code}
+        if trade_date is not None:
+            params["trade_date"] = trade_date
+        if start_date is not None:
+            params["start_date"] = start_date
+        if end_date is not None:
+            params["end_date"] = end_date
+        return await self._call_cached("index_weight", params)
 
     async def aclose(self) -> None:
         await self._client.aclose()
