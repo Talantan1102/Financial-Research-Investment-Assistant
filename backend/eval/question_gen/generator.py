@@ -443,21 +443,28 @@ async def build_portfolio_advanced_cases(
     cid,
     pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
 ) -> list[case.ComputationCase]:
-    """账户真实收益 TWR + 赚钱来源三层归因(难档,复杂,requires_run_python)。
+    """账户真实收益 TWR(按板块) + 赚钱来源三层归因(跨板块,难档,复杂,requires_run_python)。
 
-    对每个 ≥2 成员的板块合成一篮(qty 第 j 只 = 100*(j+1)),出两道:
-      (A) TWR:取各股最近 3 连续交易日 close,qty 全程不变(无加减仓 → 纯市场 TWR);
+      (A) TWR:对每个 ≥2 成员的板块合成一篮(qty 第 j 只 = 100*(j+1)),取各股最近 3 连续
+          交易日 close,qty 全程不变(无加减仓 → 纯市场 TWR);
           gold = compute_twr(snaps)["cumulative"]*100(百分数),scalar。
-      (B) 三层归因:today_pct = as_of 当日 pct_chg;基准用篮子内等权均值
-          (sector_pct = 同板块成员等权,market_pct = 全篮等权,冻进题面避免引指数接口);
+      (B) 三层归因(单道,跨板块):从前 2 个「≥2 成员」板块各取前 2 只凑一篮(≤4 仓),
+          这样三层都非平凡——market_pct = 全篮等权、各 sector_pct = 各自板块对内等权
+          (≠ market → 行业超额非 0)、idio = 个股 − 所属板块。
+          today_pct = as_of 当日 pct_chg;基准冻进题面避免引指数接口;
           gold = compute_daily_attribution(holdings).stock_breakdown(三标签),multi_scalar。
+          凑不出「≥2 板块 × ≥2 成员」则跳过归因题(只出 TWR,不报错)。
 
     任一成员取价不足 3 根 / 无数据则跳过该板块(保口径一致)。
     pool 默认全局 POOL,可注入子集。
     """
     start, end = await _resolve_window(as_of, _TWR_LOOKBACK)
     out: list[case.ComputationCase] = []
-    for sector, members in stock_pool.by_sector(pool).items():
+    by_sec = stock_pool.by_sector(pool)
+    # 跨板块归因篮子:按板块出现顺序收集「≥2 成员」板块,取前 2 个、各前 2 只。
+    attr_basket: list[stock_pool.Stock] = []
+
+    for sector, members in by_sec.items():
         if len(members) < 2:
             continue
         # 每只股的末 3 根 bar(date, close, pct_chg)
@@ -480,7 +487,7 @@ async def build_portfolio_advanced_cases(
         ref_dates = [r[0] for r in bars[members[0].ts_code]]
         d0, d2 = ref_dates[0], ref_dates[-1]
 
-        # ---- (A) TWR ----
+        # ---- (A) TWR(按板块) ----
         snaps = [
             DailySnap(
                 date=ref_dates[i],
@@ -506,43 +513,67 @@ async def build_portfolio_advanced_cases(
             )
         )
 
-        # ---- (B) 三层归因 ----
-        today_pct = {m.ts_code: bars[m.ts_code][-1][2] for m in members}
-        last_close = {m.ts_code: bars[m.ts_code][-1][1] for m in members}
-        # 基准:全篮等权 = market_pct;同板块成员等权 = sector_pct(本篮单板块 → 二者相等,
-        # 但保留通用口径:按 sector 分组取等权,虽此处篮内同板块)。
-        market_pct = statistics.mean(today_pct.values())
-        sector_members_pct = [today_pct[m.ts_code] for m in members]  # 同篮同板块
-        sector_pct = statistics.mean(sector_members_pct)
-        holdings = [
-            HoldingDaily(
-                ts_code=m.ts_code,
-                asset_class="stock",
-                market_value=qty_of[m.ts_code] * last_close[m.ts_code],
-                today_pct=today_pct[m.ts_code],
-                sector=sector,
-                sector_pct=sector_pct,
-                market_pct=market_pct,
+        # 攒跨板块归因篮子:前 2 个「≥2 成员」板块,各前 2 只成员。
+        if len(attr_basket) < 4:
+            attr_basket.extend(members[:2])
+
+    # ---- (B) 三层归因(单道,跨板块) ----
+    attr_sectors = {st.sector for st in attr_basket}
+    if len(attr_sectors) >= 2:
+        # 篮内 qty 按全局顺序 100*(j+1);末日 close + 当日 pct_chg 取该股的末根 bar。
+        member_bars: dict[str, list[tuple[str, float, float]]] = {}
+        ok = True
+        for st in attr_basket:
+            rows = await _fetch_recent_bars(tushare, st.ts_code, start, end, _TWR_DAYS)
+            if len(rows) < _TWR_DAYS:
+                ok = False
+                break
+            member_bars[st.ts_code] = rows
+        if ok:
+            qty_of2 = {st.ts_code: 100 * (j + 1) for j, st in enumerate(attr_basket)}
+            today_pct = {st.ts_code: member_bars[st.ts_code][-1][2] for st in attr_basket}
+            last_close = {st.ts_code: member_bars[st.ts_code][-1][1] for st in attr_basket}
+            descs2 = [f"{st.name}{qty_of2[st.ts_code]}股" for st in attr_basket]
+            basket2 = "、".join(descs2)
+            # market_pct = 全篮等权;sector_pct = 各自板块内成员等权(跨板块 → 二者不等)。
+            market_pct = statistics.mean(today_pct.values())
+            sector_pct_of: dict[str, float] = {}
+            for sec in attr_sectors:
+                vals = [today_pct[st.ts_code] for st in attr_basket if st.sector == sec]
+                sector_pct_of[sec] = statistics.mean(vals)
+            holdings = [
+                HoldingDaily(
+                    ts_code=st.ts_code,
+                    asset_class="stock",
+                    market_value=qty_of2[st.ts_code] * last_close[st.ts_code],
+                    today_pct=today_pct[st.ts_code],
+                    sector=st.sector,
+                    sector_pct=sector_pct_of[st.sector],
+                    market_pct=market_pct,
+                )
+                for st in attr_basket
+            ]
+            attr_gold = compute_daily_attribution(holdings).stock_breakdown
+            out.append(
+                case.ComputationCase(
+                    case_id=cid("归因-跨板块"),
+                    intent=intents.INTENT_PORTFOLIO,
+                    difficulty="复杂",
+                    question=intents.q_portfolio_attribution(basket2, as_of),
+                    stocks=[st.ts_code for st in attr_basket],
+                    indicator="收益归因",
+                    window="snapshot",
+                    gold=attr_gold,
+                    gold_shape="multi_scalar",
+                    tolerance=_PORTFOLIO_ADV_TOL,
+                    meta={
+                        "板块": sorted(attr_sectors),
+                        "trade_date": as_of,
+                        "as_of": as_of,
+                    },
+                    requires_run_python=True,
+                )
             )
-            for m in members
-        ]
-        attr_gold = compute_daily_attribution(holdings).stock_breakdown
-        out.append(
-            case.ComputationCase(
-                case_id=cid(f"归因-{sector}"),
-                intent=intents.INTENT_PORTFOLIO,
-                difficulty="复杂",
-                question=intents.q_portfolio_attribution(basket, as_of),
-                stocks=[m.ts_code for m in members],
-                indicator="收益归因",
-                window="snapshot",
-                gold=attr_gold,
-                gold_shape="multi_scalar",
-                tolerance=_PORTFOLIO_ADV_TOL,
-                meta={"板块": sector, "trade_date": as_of, "as_of": as_of},
-                requires_run_python=True,
-            )
-        )
     return out
 
 

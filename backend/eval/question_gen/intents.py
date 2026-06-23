@@ -145,11 +145,12 @@ def q_portfolio_twr(basket_desc: str, d0: str, d2: str) -> str:
 
 
 def q_portfolio_attribution(basket_desc: str, trade_date: str) -> str:
-    """赚钱来源三层归因题面;口径(大盘/行业/beta=1)冻进题面。"""
+    """赚钱来源三层归因题面;篮子跨板块,口径(大盘/行业/beta=1)冻进题面。"""
     d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
     return (
-        f"某账户持有{basket_desc},{d}当日,把整体涨跌拆成大盘、行业超额、个股三块各是多少?"
-        f"(口径:大盘=这批票等权均值,行业=同板块这几只等权均值,beta取1)"
+        f"某账户持有{basket_desc}(横跨多个板块),{d}当日,"
+        f"把整体涨跌拆成大盘、行业超额、个股三块各是多少?"
+        f"(口径:大盘=全篮这几只票等权均值,行业=各股所属板块内这几只等权均值,beta取1)"
     )
 
 
