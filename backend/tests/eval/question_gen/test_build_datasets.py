@@ -71,7 +71,16 @@ class _MockTushare:
                 )
         return pd.DataFrame()
 
-    async def get_daily_basic(self, *, ts_code, trade_date=None):
+    async def get_daily_basic(self, *, ts_code, trade_date=None, start_date=None, end_date=None):
+        # 区间查(start_date/end_date):多行 PE 历史序列(build_percentile_cases 用)。
+        if start_date is not None or end_date is not None:
+            return pd.DataFrame(
+                {
+                    "ts_code": [ts_code] * 4,
+                    "trade_date": ["20230101", "20230401", "20230701", "20231001"],
+                    "pe": [10.0, 20.0, 30.0, 40.0],
+                }
+            )
         return pd.DataFrame(
             [
                 {

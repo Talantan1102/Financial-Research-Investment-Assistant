@@ -132,6 +132,27 @@ def q_portfolio_hhi(basket_desc: str, trade_date: str) -> str:
     return f"某账户持有{basket_desc},以{d}的收盘价计算,该组合的持仓集中度指数HHI(各持仓市值权重的平方和)是多少?"
 
 
+def q_portfolio_twr(basket_desc: str, d0: str, d2: str) -> str:
+    """账户真实收益 TWR 题面;d0/d2 形如 "20260610" → "2026年06月10日"。
+
+    口径冻进题面:全程未加减仓 → 纯市场时间加权收益率(TWR)。
+    """
+    s = f"{d0[:4]}年{d0[4:6]}月{d0[6:]}日"
+    e = f"{d2[:4]}年{d2[4:6]}月{d2[6:]}日"
+    return (
+        f"某账户持有{basket_desc},从{s}到{e}期间未加减仓,这段时间的时间加权收益率(TWR)是百分之多少?"
+    )
+
+
+def q_portfolio_attribution(basket_desc: str, trade_date: str) -> str:
+    """赚钱来源三层归因题面;口径(大盘/行业/beta=1)冻进题面。"""
+    d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
+    return (
+        f"某账户持有{basket_desc},{d}当日,把整体涨跌拆成大盘、行业超额、个股三块各是多少?"
+        f"(口径:大盘=这批票等权均值,行业=同板块这几只等权均值,beta取1)"
+    )
+
+
 INTENT_VALUATION = "valuation_calc"
 
 _VALUATION_LABELS = {"PE理论价": ("市盈率", "每股收益"), "PB理论价": ("市净率", "每股净资产")}
@@ -183,6 +204,8 @@ __all__ = [
     "q_position_pnl",
     "q_portfolio_weight",
     "q_portfolio_hhi",
+    "q_portfolio_twr",
+    "q_portfolio_attribution",
     "q_valuation",
     "q_percentile",
 ]
