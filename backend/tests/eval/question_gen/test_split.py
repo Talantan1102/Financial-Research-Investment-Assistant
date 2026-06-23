@@ -1,4 +1,5 @@
 """split.py 单测：不相交/均衡/确定性。"""
+
 import pytest
 from eval.question_gen.split import split_by_stock
 from eval.question_gen.stock_pool import Stock, POOL
@@ -8,7 +9,9 @@ def _make_stocks(n_per_sector: dict[str, int]) -> list[Stock]:
     stocks = []
     for sector, n in n_per_sector.items():
         for i in range(n):
-            stocks.append(Stock(ts_code=f"{sector}-{i:03d}.SH", name=f"{sector}股{i}", sector=sector))
+            stocks.append(
+                Stock(ts_code=f"{sector}-{i:03d}.SH", name=f"{sector}股{i}", sector=sector)
+            )
     return stocks
 
 

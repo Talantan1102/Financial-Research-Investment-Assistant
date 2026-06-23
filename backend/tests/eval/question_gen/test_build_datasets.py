@@ -1,4 +1,5 @@
 """build_datasets 单测：mock 小 universe，不打真 tushare。"""
+
 import asyncio
 import json
 import tempfile
@@ -35,11 +36,13 @@ class _MockTushare:
         end_date=None,
     ):
         ref_date = trade_date or end_date or "20260612"
-        return pd.DataFrame({
-            "index_code": [index_code] * len(self._constituents),
-            "con_code": [c["ts_code"] for c in self._constituents],
-            "trade_date": [ref_date] * len(self._constituents),
-        })
+        return pd.DataFrame(
+            {
+                "index_code": [index_code] * len(self._constituents),
+                "con_code": [c["ts_code"] for c in self._constituents],
+                "trade_date": [ref_date] * len(self._constituents),
+            }
+        )
 
     async def get_stock_basic(self, *, ts_code=None):
         if ts_code is None:
@@ -56,38 +59,62 @@ class _MockTushare:
             return pd.DataFrame(rows) if rows else pd.DataFrame()
         for c in self._constituents:
             if c["ts_code"] == ts_code:
-                return pd.DataFrame([{
-                    "ts_code": ts_code,
-                    "name": c["name"],
-                    "industry": c["sector"],
-                    "list_date": c.get("list_date", "20010101"),
-                }])
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": ts_code,
+                            "name": c["name"],
+                            "industry": c["sector"],
+                            "list_date": c.get("list_date", "20010101"),
+                        }
+                    ]
+                )
         return pd.DataFrame()
 
     async def get_daily_basic(self, *, ts_code, trade_date=None):
-        return pd.DataFrame([{
-            "ts_code": ts_code, "trade_date": trade_date or "20260612",
-            "pe": 25.0, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0, "close": 100.0,
-        }])
+        return pd.DataFrame(
+            [
+                {
+                    "ts_code": ts_code,
+                    "trade_date": trade_date or "20260612",
+                    "pe": 25.0,
+                    "pb": 8.0,
+                    "turnover_rate": 1.5,
+                    "dv_ratio": 2.0,
+                    "close": 100.0,
+                }
+            ]
+        )
 
     async def get_fina_indicator(self, *, ts_code, end_date=None):
-        return pd.DataFrame([{
-            "end_date": "20241231", "roe": 0.25, "debt_to_assets": 0.35,
-            "grossprofit_margin": 0.90, "eps": 5.0, "bps": 35.0,
-        }])
+        return pd.DataFrame(
+            [
+                {
+                    "end_date": "20241231",
+                    "roe": 0.25,
+                    "debt_to_assets": 0.35,
+                    "grossprofit_margin": 0.90,
+                    "eps": 5.0,
+                    "bps": 35.0,
+                }
+            ]
+        )
 
     async def get_income(self, *, ts_code, end_date=None):
         return pd.DataFrame([{"end_date": "20241231", "revenue": 1.5e11, "n_income": 7e10}])
 
     async def get_daily(self, *, ts_code, start, end):
         # return a few rows of fake daily data
-        return pd.DataFrame([
-            {"trade_date": "20250612", "close": 100.0, "pct_chg": 1.0},
-            {"trade_date": "20260612", "close": 110.0, "pct_chg": 0.5},
-        ])
+        return pd.DataFrame(
+            [
+                {"trade_date": "20250612", "close": 100.0, "pct_chg": 1.0},
+                {"trade_date": "20260612", "close": 110.0, "pct_chg": 0.5},
+            ]
+        )
 
     async def get_trade_cal(self, *, start, end):
         from app.services.trade_calendar import build_calendar_df
+
         return build_calendar_df(start, end)
 
 
@@ -97,12 +124,14 @@ def _make_universe(n_per_sector: dict[str, int]) -> list[dict]:
     for sector, n in n_per_sector.items():
         for i in range(n):
             ts_code = f"6{len(result):05d}.SH"
-            result.append({
-                "ts_code": ts_code,
-                "name": f"{sector}股{i}",
-                "sector": sector,
-                "list_date": "20010101",  # > 3y before any as_of we use
-            })
+            result.append(
+                {
+                    "ts_code": ts_code,
+                    "name": f"{sector}股{i}",
+                    "sector": sector,
+                    "list_date": "20010101",  # > 3y before any as_of we use
+                }
+            )
     return result
 
 
@@ -115,10 +144,17 @@ def test_three_files_produced():
     with tempfile.TemporaryDirectory() as tmpdir:
         out_dir = Path(tmpdir)
         with patch("eval.question_gen.generator._resolve_window", side_effect=_mock_resolve_window):
-            paths = asyncio.run(build_datasets(
-                mock, as_of="20260612", out_dir=out_dir,
-                train_sample=3, val_sample=2, test_sample=2, seed=42
-            ))
+            paths = asyncio.run(
+                build_datasets(
+                    mock,
+                    as_of="20260612",
+                    out_dir=out_dir,
+                    train_sample=3,
+                    val_sample=2,
+                    test_sample=2,
+                    seed=42,
+                )
+            )
         assert set(paths.keys()) == {"train", "val", "test"}
         for name, path in paths.items():
             assert path.exists(), f"{name}.jsonl not created"
@@ -130,10 +166,17 @@ def test_case_ids_unique():
     with tempfile.TemporaryDirectory() as tmpdir:
         out_dir = Path(tmpdir)
         with patch("eval.question_gen.generator._resolve_window", side_effect=_mock_resolve_window):
-            paths = asyncio.run(build_datasets(
-                mock, as_of="20260612", out_dir=out_dir,
-                train_sample=3, val_sample=2, test_sample=2, seed=42
-            ))
+            paths = asyncio.run(
+                build_datasets(
+                    mock,
+                    as_of="20260612",
+                    out_dir=out_dir,
+                    train_sample=3,
+                    val_sample=2,
+                    test_sample=2,
+                    seed=42,
+                )
+            )
         all_ids = []
         for path in paths.values():
             for line in path.read_text(encoding="utf-8").splitlines():
@@ -151,10 +194,17 @@ def test_train_test_stocks_disjoint():
     with tempfile.TemporaryDirectory() as tmpdir:
         out_dir = Path(tmpdir)
         with patch("eval.question_gen.generator._resolve_window", side_effect=_mock_resolve_window):
-            paths = asyncio.run(build_datasets(
-                mock, as_of="20260612", out_dir=out_dir,
-                train_sample=3, val_sample=2, test_sample=2, seed=42
-            ))
+            paths = asyncio.run(
+                build_datasets(
+                    mock,
+                    as_of="20260612",
+                    out_dir=out_dir,
+                    train_sample=3,
+                    val_sample=2,
+                    test_sample=2,
+                    seed=42,
+                )
+            )
 
         def get_stocks(path: Path) -> set[str]:
             codes = set()

@@ -14,6 +14,7 @@ from eval.question_gen.case import ComputationCase
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _make_case(case_id: str = "c1") -> ComputationCase:
     return ComputationCase(
         case_id=case_id,
@@ -30,6 +31,7 @@ def _make_case(case_id: str = "c1") -> ComputationCase:
 
 
 # ── _dump_trajectories ────────────────────────────────────────────────────────
+
 
 def test_dump_trajectories_has_messages_and_no_gold(tmp_path: Path):
     """RED LINE: trajectories 文件只含轨迹字段,gold/passed 绝不出现。"""
@@ -78,7 +80,9 @@ def test_dump_trajectories_multiple_records(tmp_path: Path):
 def test_dump_trajectories_creates_parent_dir(tmp_path: Path):
     """parent.mkdir 被调用,深层目录自动创建。"""
     p = tmp_path / "a" / "b" / "traj.jsonl"
-    _dump_trajectories([{"case_id": "x", "model": "m", "messages": [], "n_steps": 0, "halt_reason": None}], p)
+    _dump_trajectories(
+        [{"case_id": "x", "model": "m", "messages": [], "n_steps": 0, "halt_reason": None}], p
+    )
     assert p.exists()
 
 
@@ -90,6 +94,7 @@ def test_dump_trajectories_empty(tmp_path: Path):
 
 
 # ── _dump_answers (judgements 侧,互补验证) ───────────────────────────────────
+
 
 def test_dump_answers_contains_gold(tmp_path: Path):
     """judgements 文件是 gold 的唯一归宿 — 它必须包含 gold 和 passed。"""

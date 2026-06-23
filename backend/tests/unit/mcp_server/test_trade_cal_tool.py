@@ -161,6 +161,7 @@ async def test_window_missing_anchor():
 
 # ── resolve_calendar_window 纯函数 ──────────────────────────────────────────
 
+
 def test_resolve_calendar_window_1y():
     from app.mcp_server.tools.trade_cal import resolve_calendar_window
 

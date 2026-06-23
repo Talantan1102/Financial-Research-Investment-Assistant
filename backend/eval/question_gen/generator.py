@@ -454,6 +454,7 @@ async def generate(
     """
     if tushare is None:
         from app.services.tushare_factory import build_tushare_service
+
         tushare = build_tushare_service()
     cases: list[case.ComputationCase] = []
     seq = itertools.count(1)
@@ -542,7 +543,9 @@ async def generate(
     cases.extend(await build_snapshot_cases(tushare, as_of, cid, pool=pool))
 
     # ---- 财报取数(简单档,2024 年年报;用 as_of 查询确保已披露)----
-    cases.extend(await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool))
+    cases.extend(
+        await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool)
+    )
 
     # ---- 单仓持仓量(简单档)----
     cases.extend(await build_position_cases(tushare, as_of, cid, pool=pool))
@@ -551,7 +554,9 @@ async def generate(
     cases.extend(await build_portfolio_cases(tushare, as_of, cid, pool=pool))
 
     # ---- 估值算式 PE/PB 理论价(中等档,2024 年报 + 板块同行可比)----
-    cases.extend(await build_valuation_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool))
+    cases.extend(
+        await build_valuation_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool)
+    )
 
     # ---- 中等档 ----
     for st in pool:

@@ -58,8 +58,12 @@ def bucket_by_pass_rate(
     too_hard: list[dict] = []
 
     # 细分统计
-    by_difficulty: dict[str, dict[str, int]] = defaultdict(lambda: {"learnable": 0, "too_easy": 0, "too_hard": 0})
-    by_indicator: dict[str, dict[str, int]] = defaultdict(lambda: {"learnable": 0, "too_easy": 0, "too_hard": 0})
+    by_difficulty: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"learnable": 0, "too_easy": 0, "too_hard": 0}
+    )
+    by_indicator: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"learnable": 0, "too_easy": 0, "too_hard": 0}
+    )
 
     for rec in records:
         pr: float = rec["pass_rate"]
@@ -160,7 +164,9 @@ async def sort_dataset(
 
     summary = result["summary"]
     print(f"分桶完成 → {out_dir}")
-    print(f"  可学习: {summary['learnable']}  太简单: {summary['too_easy']}  太难: {summary['too_hard']}")
+    print(
+        f"  可学习: {summary['learnable']}  太简单: {summary['too_easy']}  太难: {summary['too_hard']}"
+    )
     return summary
 
 

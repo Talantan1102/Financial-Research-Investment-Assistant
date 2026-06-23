@@ -5,6 +5,7 @@ spec: docs/superpowers/specs/2026-06-22-eval-data-pipeline-design.md § ③
 按 sector 分层: 每个 sector 内按 ratios 切, 保证各行业都有覆盖。
 确定性: seed 固定。
 """
+
 from __future__ import annotations
 
 import random

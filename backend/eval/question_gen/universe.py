@@ -6,6 +6,7 @@ spec: docs/superpowers/specs/2026-06-22-eval-data-pipeline-design.md § ②
 - 过滤: ST/*ST、上市不满3年
 - 返回清洗后 list[Stock]
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta

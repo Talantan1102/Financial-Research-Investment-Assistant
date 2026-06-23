@@ -152,7 +152,12 @@ async def run_passk(
                 n_pass += int(ok)
                 # 进度:终端用 \r 实时刷新;非终端(写日志)每 10 题一行,带模型名区分对比跑
                 if is_tty:
-                    print(f"\r[{tag}] {done}/{total} 通过 {n_pass}", end="", file=sys.stderr, flush=True)
+                    print(
+                        f"\r[{tag}] {done}/{total} 通过 {n_pass}",
+                        end="",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 elif done % 10 == 0 or done == total:
                     print(f"[{tag}] 进度 {done}/{total} 通过 {n_pass}", file=sys.stderr, flush=True)
             if is_tty:

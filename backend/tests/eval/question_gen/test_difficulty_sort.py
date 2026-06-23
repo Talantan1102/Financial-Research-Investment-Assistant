@@ -22,7 +22,9 @@ from eval.question_gen.case import ComputationCase
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _rec(case_id: str, pass_rate: float, difficulty: str = "简单", indicator: str = "interval_return") -> dict:
+def _rec(
+    case_id: str, pass_rate: float, difficulty: str = "简单", indicator: str = "interval_return"
+) -> dict:
     return {
         "case_id": case_id,
         "pass_rate": pass_rate,
@@ -52,11 +54,11 @@ def _make_case(case_id: str = "c1") -> ComputationCase:
 def test_bucket_basic_five_rates():
     """pass_rates [0.0, 0.25, 0.5, 0.75, 1.0] 分桶正确。"""
     records = [
-        _rec("a", 0.0),   # too_hard
+        _rec("a", 0.0),  # too_hard
         _rec("b", 0.25),  # learnable
-        _rec("c", 0.5),   # learnable
+        _rec("c", 0.5),  # learnable
         _rec("d", 0.75),  # learnable
-        _rec("e", 1.0),   # too_easy
+        _rec("e", 1.0),  # too_easy
     ]
     res = bucket_by_pass_rate(records)
 
@@ -133,10 +135,10 @@ def test_bucket_boundary_just_above_high():
 def test_bucket_by_difficulty_breakdown():
     """by_difficulty 细分计数正确。"""
     records = [
-        _rec("a", 0.1, difficulty="简单"),   # too_hard
-        _rec("b", 0.5, difficulty="简单"),   # learnable
-        _rec("c", 0.9, difficulty="中等"),   # too_easy
-        _rec("d", 0.3, difficulty="中等"),   # learnable
+        _rec("a", 0.1, difficulty="简单"),  # too_hard
+        _rec("b", 0.5, difficulty="简单"),  # learnable
+        _rec("c", 0.9, difficulty="中等"),  # too_easy
+        _rec("d", 0.3, difficulty="中等"),  # learnable
     ]
     res = bucket_by_pass_rate(records)
     s = res["summary"]
@@ -152,8 +154,8 @@ def test_bucket_by_indicator_breakdown():
     records = [
         _rec("a", 0.0, indicator="interval_return"),  # too_hard
         _rec("b", 0.5, indicator="interval_return"),  # learnable
-        _rec("c", 0.5, indicator="pe_ratio"),         # learnable
-        _rec("d", 1.0, indicator="pe_ratio"),         # too_easy
+        _rec("c", 0.5, indicator="pe_ratio"),  # learnable
+        _rec("d", 1.0, indicator="pe_ratio"),  # too_easy
     ]
     res = bucket_by_pass_rate(records)
     s = res["summary"]
@@ -170,10 +172,10 @@ def test_bucket_by_indicator_breakdown():
 def test_bucket_custom_thresholds():
     """自定义 low=0.3, high=0.7 时边界正确。"""
     records = [
-        _rec("a", 0.2),   # too_hard (< 0.3)
-        _rec("b", 0.3),   # learnable (== 0.3)
-        _rec("c", 0.7),   # learnable (== 0.7)
-        _rec("d", 0.8),   # too_easy (> 0.7)
+        _rec("a", 0.2),  # too_hard (< 0.3)
+        _rec("b", 0.3),  # learnable (== 0.3)
+        _rec("c", 0.7),  # learnable (== 0.7)
+        _rec("d", 0.8),  # too_easy (> 0.7)
     ]
     res = bucket_by_pass_rate(records, low=0.3, high=0.7)
     assert {r["case_id"] for r in res["too_hard"]} == {"a"}

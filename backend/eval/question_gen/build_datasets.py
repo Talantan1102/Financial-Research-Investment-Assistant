@@ -5,6 +5,7 @@ spec: docs/superpowers/specs/2026-06-22-eval-data-pipeline-design.md § ④
 用法:
     python -m eval.question_gen.build_datasets  (需 TUSHARE_MODE=real + .env)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -82,6 +83,7 @@ async def build_datasets(
 
 async def _main() -> None:
     from app.services.tushare_factory import build_tushare_service
+
     tushare = build_tushare_service()
     paths = await build_datasets(tushare)
     for split_name, path in paths.items():
