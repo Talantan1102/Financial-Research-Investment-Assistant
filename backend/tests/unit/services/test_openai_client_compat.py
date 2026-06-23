@@ -76,7 +76,9 @@ def _chunk(
 ) -> _FakeChunk:
     """构造只含文字增量的伪 chunk(无 tool_calls)。"""
     return _FakeChunk(
-        choices=[_FakeChoice(_FakeDelta(content=content, reasoning_content=reasoning), finish_reason)]
+        choices=[
+            _FakeChoice(_FakeDelta(content=content, reasoning_content=reasoning), finish_reason)
+        ]
     )
 
 

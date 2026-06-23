@@ -97,7 +97,9 @@ class LLMService:
         else:
             client_schema = schema  # dict | None
         if model is not None:
-            model = model_registry.dashscope_id(model)  # registry key → dashscope id(不在清单 raise)
+            model = model_registry.dashscope_id(
+                model
+            )  # registry key → dashscope id(不在清单 raise)
         else:
             model = self._tier_router.resolve(tier)
         if request_id is None:
@@ -179,7 +181,9 @@ class LLMService:
 
         # 2. model + request_id
         if model is not None:
-            model = model_registry.dashscope_id(model)  # registry key → dashscope id(不在清单 raise)
+            model = model_registry.dashscope_id(
+                model
+            )  # registry key → dashscope id(不在清单 raise)
         else:
             model = self._tier_router.resolve(tier)
         if request_id is None:

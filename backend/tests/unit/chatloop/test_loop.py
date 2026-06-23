@@ -854,6 +854,7 @@ async def test_no_context_pressure_event_when_off():
     await loop.run(_make_state())
     assert emit.of("context_pressure") == []
 
+
 async def test_model_passthrough_to_stream_step() -> None:
     # ToolLoop(model="qwen-max") → 透传给 stream_step
     llm = FakeLLM([_step(content="答案", finish_reason="stop")])
