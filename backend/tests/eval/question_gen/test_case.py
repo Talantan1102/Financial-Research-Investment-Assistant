@@ -86,3 +86,45 @@ def test_all_comment_file_raises(tmp_path: Path) -> None:
 def test_missing_path_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         load_jsonl(tmp_path / "does-not-exist.jsonl")
+
+
+def test_requires_run_python_round_trip(tmp_path: Path) -> None:
+    """requires_run_python=True 经 dump/load round-trip 保留。"""
+    case = ComputationCase(
+        case_id="comp-003",
+        intent="PE分位",
+        difficulty="复杂",
+        question="茅台当前 PE 在过去十年的分位?",
+        stocks=["600519.SH"],
+        indicator="pe_percentile",
+        window="2016-06-17~2026-06-17",
+        gold=0.85,
+        gold_shape="scalar",
+        tolerance={"rel": 0.01},
+        requires_run_python=True,
+    )
+    path = tmp_path / "rrp.jsonl"
+    dump_jsonl([case], path)
+    loaded = load_jsonl(path)
+    assert loaded == [case]
+    assert loaded[0].requires_run_python is True
+
+
+def test_requires_run_python_defaults_false() -> None:
+    """不传 requires_run_python 时默认 False。"""
+    case = _scalar_case()
+    assert case.requires_run_python is False
+
+
+def test_requires_run_python_missing_key_loads_false(tmp_path: Path) -> None:
+    """老 jsonl 行没有 requires_run_python 键时 load 回来为 False(容错)。"""
+    path = tmp_path / "legacy.jsonl"
+    legacy_line = (
+        '{"case_id": "comp-002", "intent": "区间收益", "difficulty": "简单", '
+        '"question": "茅台过去一年涨了多少?", "stocks": ["600519.SH"], '
+        '"indicator": "interval_return", "window": "2025-06-17~2026-06-17", '
+        '"gold": 1.23, "gold_shape": "scalar", "tolerance": {"rel": 0.01}, "meta": {}}'
+    )
+    path.write_text(legacy_line + "\n", encoding="utf-8")
+    loaded = load_jsonl(path)
+    assert loaded[0].requires_run_python is False
