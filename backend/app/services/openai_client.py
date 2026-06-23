@@ -44,9 +44,13 @@ if TYPE_CHECKING:
 
 
 def _extra_body_for(model: str) -> dict[str, Any]:
-    """qwen3 思考模型需显式关思考;非 qwen3 不传(避免传它们不认的参数)。"""
+    """qwen3 思考模型需显式传 enable_thinking;非 qwen3 不传(避免传它们不认的参数)。
+
+    max 级(qwen3-max / qwen3.7-max)当 SFT teacher 要开思考(reasoning 进轨迹);
+    其余 qwen3(如学生 qwen3-8b)关思考(避免 thinking 把 tool_call args 搞坏,2026-06-18 实测)。
+    """
     if model.startswith("qwen3"):
-        return {"enable_thinking": False}
+        return {"enable_thinking": "max" in model}
     return {}
 
 

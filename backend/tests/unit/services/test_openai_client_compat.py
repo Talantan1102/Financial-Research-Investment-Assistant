@@ -8,9 +8,14 @@ from typing import Any
 from app.services.openai_client import StreamAssembler, _extra_body_for, _sanitize_tool_args
 
 
-def test_extra_body_qwen3_disables_thinking() -> None:
+def test_extra_body_qwen3_thinking_by_tier() -> None:
+    # 学生(非 max qwen3)关思考
     assert _extra_body_for("qwen3-8b") == {"enable_thinking": False}
     assert _extra_body_for("qwen3-32b") == {"enable_thinking": False}
+    # max 级 teacher 开思考(SFT 采集要 reasoning)
+    assert _extra_body_for("qwen3-max") == {"enable_thinking": True}
+    assert _extra_body_for("qwen3.7-max") == {"enable_thinking": True}
+    # 非 qwen3 不传
     assert _extra_body_for("deepseek-v4-flash") == {}
     assert _extra_body_for("qwen-max") == {}
 
