@@ -537,6 +537,78 @@ async def build_valuation_cases(
     return out
 
 
+# PE 历史分位(难档):分位是统计量,容差给稍宽 ±2%
+_PERCENTILE_TOL = {"kind": "rel", "value": 0.02}
+_PERCENTILE_WINDOW = "3y"
+_PERCENTILE_WINDOW_CN = "三年"
+
+
+async def _fetch_pe_history(tushare, ts_code: str, start: str, end: str) -> list[float]:
+    """取 [start, end] 窗口内 daily_basic.pe 序列(按 trade_date 升序,去 None/NaN)。
+
+    daily_basic 原生支持 start_date/end_date 区间(get_pe_history 内部即用此口径)。
+    """
+    df = await tushare.get_daily_basic(ts_code=ts_code, start_date=start, end_date=end)
+    if len(df) == 0 or "pe" not in df.columns:
+        return []
+    if "trade_date" in df.columns:
+        df = df.sort_values("trade_date")
+    out: list[float] = []
+    for v in df["pe"].tolist():
+        if v is None or (isinstance(v, float) and v != v):  # None 或 NaN
+            continue
+        out.append(float(v))
+    return out
+
+
+async def build_percentile_cases(
+    tushare,
+    as_of: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
+    """PE 历史分位(难档,复杂,requires_run_python):现在的 PE 在最近三年历史里第几分位。
+
+    history = 3 年窗 daily_basic.pe 序列;current = as_of 当日 pe;
+    gold = operators.pe_percentile_lookup(history, current)(= oracle.pe_percentile×100)。
+    序列为空 / 当日 pe 缺 → 跳过该股。答案应由 agent 写代码算 → requires_run_python=True。
+    pool 默认全局 POOL,可注入子集。
+    """
+    start, end = await _resolve_window(as_of, _PERCENTILE_WINDOW)
+    out: list[case.ComputationCase] = []
+    for st in pool:
+        history = await _fetch_pe_history(tushare, st.ts_code, start, end)
+        if not history:
+            continue
+        snap = await _fetch_snapshot(tushare, st.ts_code, as_of)
+        current = operators.snapshot_lookup("PE", snap)
+        if current is None:
+            continue
+        gold = operators.pe_percentile_lookup(history, current)
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"PE分位-{st.ts_code}"),
+                intent=intents.INTENT_VALUATION_PERCENTILE,
+                difficulty="复杂",
+                question=intents.q_percentile(st.name, _PERCENTILE_WINDOW_CN),
+                stocks=[st.ts_code],
+                indicator="PE历史分位",
+                window=_PERCENTILE_WINDOW,
+                gold=gold,
+                gold_shape="scalar",
+                tolerance=_PERCENTILE_TOL,
+                meta={
+                    "window_dates": [start, end],
+                    "as_of": as_of,
+                    "current_pe": current,
+                    "n_history": len(history),
+                },
+                requires_run_python=True,
+            )
+        )
+    return out
+
+
 async def generate(
     as_of: str = _AS_OF_DEFAULT,
     out_path: Path = _OUT_DEFAULT,
@@ -659,6 +731,9 @@ async def generate(
     cases.extend(
         await build_valuation_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool)
     )
+
+    # ---- PE 历史分位(难档,复杂,requires_run_python;现在算便宜还是贵)----
+    cases.extend(await build_percentile_cases(tushare, as_of, cid, pool=pool))
 
     # ---- 中等档 ----
     for st in pool:

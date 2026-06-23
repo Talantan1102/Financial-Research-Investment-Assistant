@@ -138,7 +138,19 @@ class LegacyMockTushareAdapter:
     # 直接 hardcode (option a) 避免 LLM 依赖, 利于 unit-layer LLM_MODE=none 守卫.
     # -------------------------------------------------------------------
 
-    async def get_daily_basic(self, *, ts_code: str, trade_date: str | None = None) -> pd.DataFrame:
+    async def get_daily_basic(
+        self,
+        *,
+        ts_code: str,
+        trade_date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> pd.DataFrame:
+        # 区间查 → 返回一段确定性 PE 序列(供 PE 历史分位用),其余列省略。
+        if start_date is not None or end_date is not None:
+            dates = ["20230331", "20230630", "20230929", "20231229", "20240329"]
+            pes = [40.0, 50.0, 60.0, 70.0, 80.0]
+            return pd.DataFrame({"ts_code": [ts_code] * 5, "trade_date": dates, "pe": pes})
         return pd.DataFrame(
             {
                 "ts_code": [ts_code],

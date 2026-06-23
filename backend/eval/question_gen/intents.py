@@ -149,6 +149,17 @@ def q_valuation(name: str, indicator: str, sector: str, peer_names: str, period_
     )
 
 
+INTENT_VALUATION_PERCENTILE = "valuation_percentile"
+
+
+def q_percentile(name: str, window_cn: str) -> str:
+    """PE 历史分位题面(现在算便宜还是贵);口径冻进题面:严格小于、不插值。"""
+    return (
+        f"{name}现在的市盈率(PE),放在最近{window_cn}的历史里算第几分位?"
+        f"(过去有百分之多少的交易日 PE 比现在低;口径:严格小于、不插值)"
+    )
+
+
 __all__ = [
     "INTENT",
     "INTENT_SNAPSHOT",
@@ -158,6 +169,7 @@ __all__ = [
     "INTENT_POSITION",
     "INTENT_PORTFOLIO",
     "INTENT_VALUATION",
+    "INTENT_VALUATION_PERCENTILE",
     "q_single",
     "q_dual",
     "q_corr",
@@ -172,4 +184,5 @@ __all__ = [
     "q_portfolio_weight",
     "q_portfolio_hhi",
     "q_valuation",
+    "q_percentile",
 ]

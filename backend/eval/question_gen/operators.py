@@ -181,6 +181,15 @@ def portfolio_hhi(weights: list[float]) -> float:
     return sum(w * w for w in weights)
 
 
+def pe_percentile_lookup(history: list[float], current: float) -> float:
+    """PE 历史分位(百分位数 ∈ [0,100]):薄包 oracle.pe_percentile 再 ×100。
+
+    口径承 oracle:count(历史 < 当前) / n,严格小于、不插值。空历史 raise ValueError。
+    存百分位数(×100,与其它 %-指标 gold 一致)。
+    """
+    return indicator_oracle.pe_percentile(history, current) * 100.0
+
+
 __all__ = [
     "single",
     "correlation_pair",
@@ -194,4 +203,5 @@ __all__ = [
     "position_pnl",
     "portfolio_weights",
     "portfolio_hhi",
+    "pe_percentile_lookup",
 ]
