@@ -38,7 +38,12 @@ class TushareService(Protocol):
 
     # v0.8.5: 6 个新接口 (P0+P1 tool 扩展, ref spec § 4.6)
     async def get_daily_basic(
-        self, *, ts_code: str, trade_date: str | None = None
+        self,
+        *,
+        ts_code: str,
+        trade_date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
     ) -> pd.DataFrame: ...
     async def get_pe_history(
         self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None
@@ -166,7 +171,24 @@ class RealTushareService:
         # relativedelta avoids leap-year drift (5 days over 5 years vs timedelta(days=365*n)).
         return (datetime.now(UTC) - relativedelta(years=n)).strftime("%Y%m%d")
 
-    async def get_daily_basic(self, *, ts_code: str, trade_date: str | None = None) -> pd.DataFrame:
+    async def get_daily_basic(
+        self,
+        *,
+        ts_code: str,
+        trade_date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> pd.DataFrame:
+        # 区间查(start_date/end_date 任一给定)→ 取一段 daily_basic 序列(PE 历史分位用);
+        # daily_basic 原生支持区间参数(get_pe_history 内部即用此口径)。
+        # 未给区间则保持旧行为:按 trade_date 取单日(缺省今天)。
+        if start_date is not None or end_date is not None:
+            params: dict[str, Any] = {"ts_code": ts_code}
+            if start_date is not None:
+                params["start_date"] = start_date
+            if end_date is not None:
+                params["end_date"] = end_date
+            return await self._call_cached("daily_basic", params)
         return await self._call_cached(
             "daily_basic",
             {"ts_code": ts_code, "trade_date": trade_date or self._today_yyyymmdd()},

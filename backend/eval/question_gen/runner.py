@@ -37,6 +37,46 @@ def _candidate_names(c: case.ComputationCase) -> list[str]:
     return out
 
 
+def trace_has_run_python(messages: list) -> bool:
+    """扫执行轨迹(OpenAI 格式 messages)判断是否真出现过 run_python 工具调用。
+
+    工具名的权威来源是 assistant 消息的 ``tool_calls[].function.name``
+    (见 app/chatloop/state.py apply_step);本仓的 tool 结果消息只带
+    role/tool_call_id/content、不带 name(apply_results),故主路径走 assistant 侧。
+    为 robust 起见,同时兼容 tool-role 消息带 ``name`` 字段的 OpenAI 变体,
+    且对脏数据(非 dict / 缺键 / None)一律静默判 False,绝不抛异常。
+    """
+    if not messages:
+        return False
+    for msg in messages:
+        if not isinstance(msg, dict):
+            continue
+        # 主路径:assistant.tool_calls[].function.name == "run_python"
+        tool_calls = msg.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for tc in tool_calls:
+                if not isinstance(tc, dict):
+                    continue
+                fn = tc.get("function")
+                if isinstance(fn, dict) and fn.get("name") == "run_python":
+                    return True
+        # 兼容变体:tool-role 消息直接带 name 字段
+        if msg.get("role") == "tool" and msg.get("name") == "run_python":
+            return True
+    return False
+
+
+def judge_with_gate(c: case.ComputationCase, ok: bool, messages: list) -> bool:
+    """判分第二门:难档自算意图(requires_run_python)须轨迹真见 run_python。
+
+    ``ok`` 是 judge(数值/结构口径)已算出的初判。第二门只在
+    ``c.requires_run_python`` 时附加"轨迹见 run_python"约束:数字对但靠心算/蒙
+    (轨迹无 run_python)→ 判未过,拦假阳。requires_run_python=False 时门透明,
+    直接返回 ok。ranking/set 与 scalar 两条判分路都复用此函数。
+    """
+    return ok and (trace_has_run_python(messages) if c.requires_run_python else True)
+
+
 async def run_passk(
     cases: list[case.ComputationCase],
     *,
@@ -124,6 +164,16 @@ async def run_passk(
                             ok = judge.judge(
                                 c.gold, c.gold_shape, c.tolerance, answer or "", _candidate_names(c)
                             )
+                        # 判分第二门:难档自算意图须轨迹真见 run_python(拦心算/蒙数假阳)。
+                        # 缺 run_python 而被拦下时记一行诊断,方便分析(不改 _dump_answers 字段)。
+                        gated = judge_with_gate(c, bool(ok), final.messages)
+                        if ok and not gated:
+                            logger.info(
+                                "case %s run %d gate_blocked: 数字命中但轨迹无 run_python",
+                                c.case_id,
+                                run_idx,
+                            )
+                        ok = gated
                         # 采集模式:从 final 提取轨迹 slim dict(不含 gold/passed)
                         traj: dict | None = None
                         if collect:

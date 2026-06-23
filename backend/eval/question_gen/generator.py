@@ -18,6 +18,12 @@ from pathlib import Path
 from app.agents.valuation_helpers.exceptions import InsufficientDataForModelError
 from app.agents.valuation_helpers.pb import compute_pb_value
 from app.agents.valuation_helpers.pe import compute_pe_value
+from app.services.portfolio_analytics import (
+    DailySnap,
+    HoldingDaily,
+    compute_daily_attribution,
+    compute_twr,
+)
 
 from eval.question_gen import case, intents, legality, operators, stock_pool
 
@@ -50,8 +56,16 @@ _SNAPSHOT_COLS = ("pe", "pb", "turnover_rate", "dv_ratio")
 
 _FINANCIAL_INDICATORS = ("ROE", "资产负债率", "毛利率", "营收", "净利")
 _FINANCIAL_TOL = {ind: {"kind": "rel", "value": 0.01} for ind in _FINANCIAL_INDICATORS}
-_FINA_COLS = ("roe", "debt_to_assets", "grossprofit_margin")
+_FINA_COLS = ("roe", "debt_to_assets", "grossprofit_margin", "q_sales_yoy", "netprofit_yoy")
 _INCOME_COLS = ("revenue", "n_income")
+
+# 财报核对:只核对金额类(营收/净利),容差 ±1%
+_VERIFY_INDICATORS = ("营收", "净利")
+_VERIFY_TOL = {"kind": "rel", "value": 0.01}
+
+# 异动信号(同比增速):营收/净利同比,gold 直取预算字段(%),容差 ±1%
+_TREND_INDICATORS = ("营收同比", "净利同比")
+_TREND_TOL = {"kind": "rel", "value": 0.01}
 
 
 async def _resolve_window(as_of: str, code: str) -> tuple[str, str]:
@@ -189,6 +203,92 @@ async def build_financial_cases(
     return out
 
 
+async def build_verify_cases(
+    tushare,
+    as_of: str,
+    period_end: str,
+    period_label: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
+    """财报核对(简单档):题面嵌一个声称值(真值×1.05),gold=tushare 真实营收/净利(亿)。
+
+    结构同 build_financial_cases:取 income(按 period_end 选行),仅核对金额类(营收/净利)。
+    tushare 依赖注入;空值/缺期指标跳过。gold 是真值(不是声称值),容差 ±1%。
+    pool 默认全局 POOL,可注入子集。
+    """
+    out: list[case.ComputationCase] = []
+    for st in pool:
+        snap = await _fetch_financial(tushare, st.ts_code, as_of, period_end)
+        for ind in _VERIFY_INDICATORS:
+            gold = operators.financial_verify_real(ind, snap)
+            if gold is None:
+                continue
+            claimed = round(gold * 1.05, 2)  # 真值 ±5% 扰动(此处偏高 5%)
+            out.append(
+                case.ComputationCase(
+                    case_id=cid(f"核对{ind}-{st.ts_code}"),
+                    intent=intents.INTENT_FINANCIAL_VERIFY,
+                    difficulty="简单",
+                    question=intents.q_verify(
+                        st.name, intents._VERIFY_LABELS[ind], claimed, period_label
+                    ),
+                    stocks=[st.ts_code],
+                    indicator=ind,
+                    window=period_label,
+                    gold=gold,
+                    gold_shape="scalar",
+                    tolerance=_VERIFY_TOL,
+                    meta={
+                        "period_end": period_end,
+                        "period_label": period_label,
+                        "claimed": claimed,
+                    },
+                )
+            )
+    return out
+
+
+async def build_trend_cases(
+    tushare,
+    as_of: str,
+    period_end: str,
+    period_label: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
+    """异动信号(中等档):营收同比 + 净利同比,gold 直取 fina_indicator 预算字段(%)。
+
+    结构同 build_financial_cases:复用 _fetch_financial 取 fina_indicator 行
+    (q_sales_yoy/netprofit_yoy 已并入 _FINA_COLS,一并落进 snap);按 period_end 选行。
+    tushare 依赖注入;空值/缺期指标跳过。gold 已是百分数,容差 ±1%。
+    pool 默认全局 POOL,可注入子集。
+    """
+    out: list[case.ComputationCase] = []
+    for st in pool:
+        snap = await _fetch_financial(tushare, st.ts_code, as_of, period_end)
+        for ind in _TREND_INDICATORS:
+            gold = operators.trend_lookup(ind, snap)
+            if gold is None:
+                continue
+            out.append(
+                case.ComputationCase(
+                    case_id=cid(f"异动{ind}-{st.ts_code}"),
+                    intent=intents.INTENT_TREND_SIGNAL,
+                    difficulty="中等",
+                    question=intents.q_trend(st.name, intents._TREND_LABELS[ind], period_label),
+                    stocks=[st.ts_code],
+                    indicator=ind,
+                    window=period_label,
+                    gold=gold,
+                    gold_shape="scalar",
+                    tolerance=_TREND_TOL,
+                    meta={"period_end": period_end, "period_label": period_label},
+                )
+            )
+    return out
+
+
 _POSITION_TOL = {"kind": "rel", "value": 0.005}
 
 
@@ -313,6 +413,167 @@ async def build_portfolio_cases(
                 meta={"trade_date": as_of, "板块": sector},
             )
         )
+    return out
+
+
+# 难档 portfolio_calc(TWR + 三层归因):统计/链式量,容差给稍宽 ±2%
+_PORTFOLIO_ADV_TOL = {"kind": "rel", "value": 0.02}
+# 取最近 3 连续交易日:复用 generate() 已解析/缓存的 3m 窗口码(避免新增 lookback 码),
+# 取该窗口日线的末 3 根 bar 即可(无需精确"近 N 交易日"窗口)。
+_TWR_LOOKBACK = "3m"
+_TWR_DAYS = 3
+
+
+async def _fetch_recent_bars(
+    tushare, ts_code: str, start: str, end: str, n: int
+) -> list[tuple[str, float, float]]:
+    """取 [start, end] 窗口内日线,返回末 n 根 (trade_date, close, pct_chg)(升序)。
+
+    复用 _fetch(get_daily,按 trade_date 升序);不足 n 根则原样返回(调用方判长度)。
+    """
+    d = await _fetch(tushare, ts_code, start, end)
+    dates, closes, pcts = d["dates"], d["close"], d["pct_chg"]
+    rows = list(zip(dates, closes, pcts))
+    return rows[-n:]
+
+
+async def build_portfolio_advanced_cases(
+    tushare,
+    as_of: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
+    """账户真实收益 TWR(按板块) + 赚钱来源三层归因(跨板块,难档,复杂,requires_run_python)。
+
+      (A) TWR:对每个 ≥2 成员的板块合成一篮(qty 第 j 只 = 100*(j+1)),取各股最近 3 连续
+          交易日 close,qty 全程不变(无加减仓 → 纯市场 TWR);
+          gold = compute_twr(snaps)["cumulative"]*100(百分数),scalar。
+      (B) 三层归因(单道,跨板块):从前 2 个「≥2 成员」板块各取前 2 只凑一篮(≤4 仓),
+          这样三层都非平凡——market_pct = 全篮等权、各 sector_pct = 各自板块对内等权
+          (≠ market → 行业超额非 0)、idio = 个股 − 所属板块。
+          today_pct = as_of 当日 pct_chg;基准冻进题面避免引指数接口;
+          gold = compute_daily_attribution(holdings).stock_breakdown(三标签),multi_scalar。
+          凑不出「≥2 板块 × ≥2 成员」则跳过归因题(只出 TWR,不报错)。
+
+    任一成员取价不足 3 根 / 无数据则跳过该板块(保口径一致)。
+    pool 默认全局 POOL,可注入子集。
+    """
+    start, end = await _resolve_window(as_of, _TWR_LOOKBACK)
+    out: list[case.ComputationCase] = []
+    by_sec = stock_pool.by_sector(pool)
+    # 跨板块归因篮子:按板块出现顺序收集「≥2 成员」板块,取前 2 个、各前 2 只。
+    attr_basket: list[stock_pool.Stock] = []
+
+    for sector, members in by_sec.items():
+        if len(members) < 2:
+            continue
+        # 每只股的末 3 根 bar(date, close, pct_chg)
+        bars: dict[str, list[tuple[str, float, float]]] = {}
+        qty_of: dict[str, int] = {}
+        descs: list[str] = []
+        ok = True
+        for j, m in enumerate(members):
+            rows = await _fetch_recent_bars(tushare, m.ts_code, start, end, _TWR_DAYS)
+            if len(rows) < _TWR_DAYS:
+                ok = False
+                break
+            bars[m.ts_code] = rows
+            qty_of[m.ts_code] = 100 * (j + 1)
+            descs.append(f"{m.name}{qty_of[m.ts_code]}股")
+        if not ok:
+            continue
+        basket = "、".join(descs)
+        # 3 连续交易日端点(各股窗口对齐,取首只的日期序列即可)
+        ref_dates = [r[0] for r in bars[members[0].ts_code]]
+        d0, d2 = ref_dates[0], ref_dates[-1]
+
+        # ---- (A) TWR(按板块) ----
+        snaps = [
+            DailySnap(
+                date=ref_dates[i],
+                holdings={m.ts_code: (qty_of[m.ts_code], bars[m.ts_code][i][1]) for m in members},
+            )
+            for i in range(_TWR_DAYS)
+        ]
+        twr_gold = round(compute_twr(snaps)["cumulative"] * 100, 6)
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"TWR-{sector}"),
+                intent=intents.INTENT_PORTFOLIO,
+                difficulty="复杂",
+                question=intents.q_portfolio_twr(basket, d0, d2),
+                stocks=[m.ts_code for m in members],
+                indicator="账户TWR",
+                window=f"{d0}~{d2}",
+                gold=twr_gold,
+                gold_shape="scalar",
+                tolerance=_PORTFOLIO_ADV_TOL,
+                meta={"板块": sector, "window_dates": [d0, d2], "as_of": as_of},
+                requires_run_python=True,
+            )
+        )
+
+        # 攒跨板块归因篮子:前 2 个「≥2 成员」板块,各前 2 只成员。
+        if len(attr_basket) < 4:
+            attr_basket.extend(members[:2])
+
+    # ---- (B) 三层归因(单道,跨板块) ----
+    attr_sectors = {st.sector for st in attr_basket}
+    if len(attr_sectors) >= 2:
+        # 篮内 qty 按全局顺序 100*(j+1);末日 close + 当日 pct_chg 取该股的末根 bar。
+        member_bars: dict[str, list[tuple[str, float, float]]] = {}
+        ok = True
+        for st in attr_basket:
+            rows = await _fetch_recent_bars(tushare, st.ts_code, start, end, _TWR_DAYS)
+            if len(rows) < _TWR_DAYS:
+                ok = False
+                break
+            member_bars[st.ts_code] = rows
+        if ok:
+            qty_of2 = {st.ts_code: 100 * (j + 1) for j, st in enumerate(attr_basket)}
+            today_pct = {st.ts_code: member_bars[st.ts_code][-1][2] for st in attr_basket}
+            last_close = {st.ts_code: member_bars[st.ts_code][-1][1] for st in attr_basket}
+            descs2 = [f"{st.name}{qty_of2[st.ts_code]}股" for st in attr_basket]
+            basket2 = "、".join(descs2)
+            # market_pct = 全篮等权;sector_pct = 各自板块内成员等权(跨板块 → 二者不等)。
+            market_pct = statistics.mean(today_pct.values())
+            sector_pct_of: dict[str, float] = {}
+            for sec in attr_sectors:
+                vals = [today_pct[st.ts_code] for st in attr_basket if st.sector == sec]
+                sector_pct_of[sec] = statistics.mean(vals)
+            holdings = [
+                HoldingDaily(
+                    ts_code=st.ts_code,
+                    asset_class="stock",
+                    market_value=qty_of2[st.ts_code] * last_close[st.ts_code],
+                    today_pct=today_pct[st.ts_code],
+                    sector=st.sector,
+                    sector_pct=sector_pct_of[st.sector],
+                    market_pct=market_pct,
+                )
+                for st in attr_basket
+            ]
+            attr_gold = compute_daily_attribution(holdings).stock_breakdown
+            out.append(
+                case.ComputationCase(
+                    case_id=cid("归因-跨板块"),
+                    intent=intents.INTENT_PORTFOLIO,
+                    difficulty="复杂",
+                    question=intents.q_portfolio_attribution(basket2, as_of),
+                    stocks=[st.ts_code for st in attr_basket],
+                    indicator="收益归因",
+                    window="snapshot",
+                    gold=attr_gold,
+                    gold_shape="multi_scalar",
+                    tolerance=_PORTFOLIO_ADV_TOL,
+                    meta={
+                        "板块": sorted(attr_sectors),
+                        "trade_date": as_of,
+                        "as_of": as_of,
+                    },
+                    requires_run_python=True,
+                )
+            )
     return out
 
 
@@ -441,6 +702,78 @@ async def build_valuation_cases(
     return out
 
 
+# PE 历史分位(难档):分位是统计量,容差给稍宽 ±2%
+_PERCENTILE_TOL = {"kind": "rel", "value": 0.02}
+_PERCENTILE_WINDOW = "3y"
+_PERCENTILE_WINDOW_CN = "三年"
+
+
+async def _fetch_pe_history(tushare, ts_code: str, start: str, end: str) -> list[float]:
+    """取 [start, end] 窗口内 daily_basic.pe 序列(按 trade_date 升序,去 None/NaN)。
+
+    daily_basic 原生支持 start_date/end_date 区间(get_pe_history 内部即用此口径)。
+    """
+    df = await tushare.get_daily_basic(ts_code=ts_code, start_date=start, end_date=end)
+    if len(df) == 0 or "pe" not in df.columns:
+        return []
+    if "trade_date" in df.columns:
+        df = df.sort_values("trade_date")
+    out: list[float] = []
+    for v in df["pe"].tolist():
+        if v is None or (isinstance(v, float) and v != v):  # None 或 NaN
+            continue
+        out.append(float(v))
+    return out
+
+
+async def build_percentile_cases(
+    tushare,
+    as_of: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
+    """PE 历史分位(难档,复杂,requires_run_python):现在的 PE 在最近三年历史里第几分位。
+
+    history = 3 年窗 daily_basic.pe 序列;current = as_of 当日 pe;
+    gold = operators.pe_percentile_lookup(history, current)(= oracle.pe_percentile×100)。
+    序列为空 / 当日 pe 缺 → 跳过该股。答案应由 agent 写代码算 → requires_run_python=True。
+    pool 默认全局 POOL,可注入子集。
+    """
+    start, end = await _resolve_window(as_of, _PERCENTILE_WINDOW)
+    out: list[case.ComputationCase] = []
+    for st in pool:
+        history = await _fetch_pe_history(tushare, st.ts_code, start, end)
+        if not history:
+            continue
+        snap = await _fetch_snapshot(tushare, st.ts_code, as_of)
+        current = operators.snapshot_lookup("PE", snap)
+        if current is None:
+            continue
+        gold = operators.pe_percentile_lookup(history, current)
+        out.append(
+            case.ComputationCase(
+                case_id=cid(f"PE分位-{st.ts_code}"),
+                intent=intents.INTENT_VALUATION_PERCENTILE,
+                difficulty="复杂",
+                question=intents.q_percentile(st.name, _PERCENTILE_WINDOW_CN),
+                stocks=[st.ts_code],
+                indicator="PE历史分位",
+                window=_PERCENTILE_WINDOW,
+                gold=gold,
+                gold_shape="scalar",
+                tolerance=_PERCENTILE_TOL,
+                meta={
+                    "window_dates": [start, end],
+                    "as_of": as_of,
+                    "current_pe": current,
+                    "n_history": len(history),
+                },
+                requires_run_python=True,
+            )
+        )
+    return out
+
+
 async def generate(
     as_of: str = _AS_OF_DEFAULT,
     out_path: Path = _OUT_DEFAULT,
@@ -547,16 +880,28 @@ async def generate(
         await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool)
     )
 
+    # ---- 财报核对(简单档,2024 年年报;题面嵌声称值,gold 取真实营收/净利)----
+    cases.extend(await build_verify_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool))
+
+    # ---- 异动信号(中等档,2024 年年报;营收/净利同比,gold 取预算 yoy 字段)----
+    cases.extend(await build_trend_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool))
+
     # ---- 单仓持仓量(简单档)----
     cases.extend(await build_position_cases(tushare, as_of, cid, pool=pool))
 
     # ---- 组合权重 + HHI(中等档)----
     cases.extend(await build_portfolio_cases(tushare, as_of, cid, pool=pool))
 
+    # ---- 账户 TWR + 三层归因(难档,复杂,requires_run_python)----
+    cases.extend(await build_portfolio_advanced_cases(tushare, as_of, cid, pool=pool))
+
     # ---- 估值算式 PE/PB 理论价(中等档,2024 年报 + 板块同行可比)----
     cases.extend(
         await build_valuation_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool)
     )
+
+    # ---- PE 历史分位(难档,复杂,requires_run_python;现在算便宜还是贵)----
+    cases.extend(await build_percentile_cases(tushare, as_of, cid, pool=pool))
 
     # ---- 中等档 ----
     for st in pool:

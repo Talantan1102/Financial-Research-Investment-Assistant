@@ -58,6 +58,7 @@ class ComputationCase:
     gold_shape: str  # scalar / multi_scalar / ranking / set
     tolerance: dict[str, Any]
     meta: dict[str, Any] = field(default_factory=dict)
+    requires_run_python: bool = False  # judge「第二道门」据此选难档算法口径
 
 
 def _fail(msg: str) -> NoReturn:
@@ -109,6 +110,7 @@ def _validate(raw: dict[str, Any], seen: set[str]) -> ComputationCase:
         gold_shape=raw["gold_shape"],
         tolerance=dict(raw["tolerance"]),
         meta=dict(meta or {}),
+        requires_run_python=bool(raw.get("requires_run_python", False)),
     )
 
 

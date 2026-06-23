@@ -103,7 +103,14 @@ class _BacktestTushareService:
         return self._rows_to_df(rows)
 
     # v0.8.5 extended interface
-    async def get_daily_basic(self, *, ts_code: str, trade_date: str | None = None) -> pd.DataFrame:
+    async def get_daily_basic(
+        self,
+        *,
+        ts_code: str,
+        trade_date: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> pd.DataFrame:
         return pd.DataFrame()
 
     async def get_pe_history(

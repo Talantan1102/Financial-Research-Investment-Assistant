@@ -23,6 +23,16 @@ INTENT_FINANCIAL = "financial_report"
 _FINANCIAL_RATIO_LABELS = {"ROE": "ROE", "资产负债率": "资产负债率", "毛利率": "销售毛利率"}
 _FINANCIAL_AMOUNT_LABELS = {"营收": "营业收入", "净利": "净利润"}
 
+INTENT_FINANCIAL_VERIFY = "financial_verify"
+
+# 财报核对的核对项中文名(营收/净利);题面里嵌"声称值"让助手取真财报核对。
+_VERIFY_LABELS = {"营收": "营收", "净利": "净利润"}
+
+INTENT_TREND_SIGNAL = "trend_signal"
+
+# 异动信号(同比增速)指标中文名 -> 题面用增速标签。
+_TREND_LABELS = {"营收同比": "营收同比增速", "净利同比": "净利润同比增速"}
+
 
 def q_single(indicator: str, name: str, window_cn: str) -> str:
     """单股单指标题面;未知 indicator raise ValueError。
@@ -80,6 +90,16 @@ def q_financial(name: str, indicator: str, period_label: str) -> str:
     raise ValueError(f"未知财报指标:{indicator!r}")
 
 
+def q_verify(name: str, indicator_label: str, claimed: float, period_label: str) -> str:
+    """财报核对题面:嵌一个声称值,让助手取真财报核对对错。indicator_label 取 _VERIFY_LABELS 的值。"""
+    return f"有人说{name}{period_label}{indicator_label}{claimed}亿,对不对?以财报为准。"
+
+
+def q_trend(name: str, indicator_label: str, period_label: str) -> str:
+    """异动信号(同比增速)题面;indicator_label 取 _TREND_LABELS 的值(如"营收同比增速")。"""
+    return f"{name}{period_label}的{indicator_label}是百分之多少?"
+
+
 INTENT_POSITION = "position_calc"
 
 
@@ -112,6 +132,28 @@ def q_portfolio_hhi(basket_desc: str, trade_date: str) -> str:
     return f"某账户持有{basket_desc},以{d}的收盘价计算,该组合的持仓集中度指数HHI(各持仓市值权重的平方和)是多少?"
 
 
+def q_portfolio_twr(basket_desc: str, d0: str, d2: str) -> str:
+    """账户真实收益 TWR 题面;d0/d2 形如 "20260610" → "2026年06月10日"。
+
+    口径冻进题面:全程未加减仓 → 纯市场时间加权收益率(TWR)。
+    """
+    s = f"{d0[:4]}年{d0[4:6]}月{d0[6:]}日"
+    e = f"{d2[:4]}年{d2[4:6]}月{d2[6:]}日"
+    return (
+        f"某账户持有{basket_desc},从{s}到{e}期间未加减仓,这段时间的时间加权收益率(TWR)是百分之多少?"
+    )
+
+
+def q_portfolio_attribution(basket_desc: str, trade_date: str) -> str:
+    """赚钱来源三层归因题面;篮子跨板块,口径(大盘/行业/beta=1)冻进题面。"""
+    d = f"{trade_date[:4]}年{trade_date[4:6]}月{trade_date[6:]}日"
+    return (
+        f"某账户持有{basket_desc}(横跨多个板块),{d}当日,"
+        f"把整体涨跌拆成大盘、行业超额、个股三块各是多少?"
+        f"(口径:大盘=全篮这几只票等权均值,行业=各股所属板块内这几只等权均值,beta取1)"
+    )
+
+
 INTENT_VALUATION = "valuation_calc"
 
 _VALUATION_LABELS = {"PE理论价": ("市盈率", "每股收益"), "PB理论价": ("市净率", "每股净资产")}
@@ -129,13 +171,27 @@ def q_valuation(name: str, indicator: str, sector: str, peer_names: str, period_
     )
 
 
+INTENT_VALUATION_PERCENTILE = "valuation_percentile"
+
+
+def q_percentile(name: str, window_cn: str) -> str:
+    """PE 历史分位题面(现在算便宜还是贵);口径冻进题面:严格小于、不插值。"""
+    return (
+        f"{name}现在的市盈率(PE),放在最近{window_cn}的历史里算第几分位?"
+        f"(过去有百分之多少的交易日 PE 比现在低;口径:严格小于、不插值)"
+    )
+
+
 __all__ = [
     "INTENT",
     "INTENT_SNAPSHOT",
     "INTENT_FINANCIAL",
+    "INTENT_FINANCIAL_VERIFY",
+    "INTENT_TREND_SIGNAL",
     "INTENT_POSITION",
     "INTENT_PORTFOLIO",
     "INTENT_VALUATION",
+    "INTENT_VALUATION_PERCENTILE",
     "q_single",
     "q_dual",
     "q_corr",
@@ -143,9 +199,14 @@ __all__ = [
     "q_filter",
     "q_snapshot",
     "q_financial",
+    "q_verify",
+    "q_trend",
     "q_position_value",
     "q_position_pnl",
     "q_portfolio_weight",
     "q_portfolio_hhi",
+    "q_portfolio_twr",
+    "q_portfolio_attribution",
     "q_valuation",
+    "q_percentile",
 ]
