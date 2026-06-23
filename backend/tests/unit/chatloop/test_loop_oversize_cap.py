@@ -145,7 +145,7 @@ async def test_midsize_series_not_truncated_at_default() -> None:
         ToolResult(tool_name="get_daily", args=args, success=True, output=series, latency_ms=5)
     ]
     await loop._extract_and_emit_charts(results, st)
-    assert "truncated_digest" not in results[0].output  # 默认阈值下不截
+    assert "truncated_digest" not in (results[0].output or {})  # 默认阈值下不截
 
 
 async def test_oversize_with_summary_preserves_summary() -> None:
@@ -172,9 +172,7 @@ async def test_oversize_with_summary_preserves_summary() -> None:
         success=True,
         cache_key="u::get_daily::abc",
     )
-    results = [
-        ToolResult(tool_name="get_daily", args=args, success=True, output=big, latency_ms=5)
-    ]
+    results = [ToolResult(tool_name="get_daily", args=args, success=True, output=big, latency_ms=5)]
     await loop._extract_and_emit_charts(results, st)
     out = results[0].output
     assert isinstance(out, dict)

@@ -152,7 +152,12 @@ async def run_passk(
                 n_pass += int(ok)
                 # 进度:终端用 \r 实时刷新;非终端(写日志)每 10 题一行,带模型名区分对比跑
                 if is_tty:
-                    print(f"\r[{tag}] {done}/{total} 通过 {n_pass}", end="", file=sys.stderr, flush=True)
+                    print(
+                        f"\r[{tag}] {done}/{total} 通过 {n_pass}",
+                        end="",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 elif done % 10 == 0 or done == total:
                     print(f"[{tag}] 进度 {done}/{total} 通过 {n_pass}", file=sys.stderr, flush=True)
             if is_tty:
@@ -225,12 +230,13 @@ def _dump_answers(
     path: Path,
     model: str | None = None,
 ) -> None:
-    """落盘 {case_id, difficulty, indicator, gold_shape, gold, passed, answer, model} 供离线重判。"""
+    """落盘 {case_id, difficulty, indicator, gold_shape, gold, passed, pass_rate, n_runs, answer, model} 供离线重判。"""
     by_id = {c.case_id: c for c in cases}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for cid, runs in per_run.items():
             c = by_id[cid]
+            n_runs = len(runs)
             rec = {
                 "case_id": cid,
                 "difficulty": c.difficulty,
@@ -238,6 +244,8 @@ def _dump_answers(
                 "gold_shape": c.gold_shape,
                 "gold": c.gold,
                 "passed": any(runs),
+                "pass_rate": round(sum(runs) / n_runs, 4) if n_runs else 0.0,
+                "n_runs": n_runs,
                 "answer": answers.get(cid, ""),
                 "model": model,
             }

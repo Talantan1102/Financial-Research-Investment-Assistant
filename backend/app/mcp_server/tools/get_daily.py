@@ -48,6 +48,7 @@ TOOL_DEF = Tool(
     },
 )
 
+
 def _err(msg: str) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps({"error": msg}, ensure_ascii=False))]
 
@@ -59,6 +60,7 @@ def _resolve_range(args: dict[str, Any]) -> tuple[str, str]:
     anchor, lookback = args.get("anchor"), args.get("lookback")
     if anchor and lookback:
         from app.mcp_server.tools.trade_cal import resolve_calendar_window
+
         return resolve_calendar_window(anchor, lookback)
     raise ValueError(
         "需要 start+end,或 anchor+lookback(日历型 1y/6m/3m/ytd 自动定窗);"

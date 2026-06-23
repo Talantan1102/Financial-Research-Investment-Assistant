@@ -39,17 +39,20 @@ POOL: tuple[Stock, ...] = (
 )
 
 
-def by_sector() -> dict[str, list[Stock]]:
-    """返回 sector -> [Stock, ...] 映射，保持 POOL 中的出现顺序。"""
+def by_sector(pool: tuple[Stock, ...] = POOL) -> dict[str, list[Stock]]:
+    """返回 sector -> [Stock, ...] 映射，保持 pool 中的出现顺序。
+
+    pool 参数默认为全局 POOL，可注入子集以支持参数化测试。
+    """
     result: dict[str, list[Stock]] = {}
-    for stock in POOL:
+    for stock in pool:
         result.setdefault(stock.sector, []).append(stock)
     return result
 
 
-def sectors_with_at_least(n: int) -> list[str]:
+def sectors_with_at_least(n: int, pool: tuple[Stock, ...] = POOL) -> list[str]:
     """返回成员数 >= n 的板块名，按板块名排序（稳定）。"""
-    grouped = by_sector()
+    grouped = by_sector(pool)
     return sorted(sector for sector, stocks in grouped.items() if len(stocks) >= n)
 
 
