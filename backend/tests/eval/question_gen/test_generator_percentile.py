@@ -27,9 +27,7 @@ class _StubTushare:
                     "pe": [10.0, 20.0, 30.0, 40.0],
                 }
             )
-        return pd.DataFrame(
-            [{"pe": 25.0, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}]
-        )
+        return pd.DataFrame([{"pe": 25.0, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}])
 
 
 def _run(pool=None):
@@ -64,9 +62,7 @@ class _StubTushareEmptyHistory:
     async def get_daily_basic(self, *, ts_code, trade_date=None, start_date=None, end_date=None):
         if start_date is not None or end_date is not None:
             return pd.DataFrame({"ts_code": [], "trade_date": [], "pe": []})
-        return pd.DataFrame(
-            [{"pe": 25.0, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}]
-        )
+        return pd.DataFrame([{"pe": 25.0, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}])
 
 
 def test_build_percentile_cases_skips_empty_history():
@@ -84,9 +80,7 @@ class _StubTushareNullCurrent:
     async def get_daily_basic(self, *, ts_code, trade_date=None, start_date=None, end_date=None):
         if start_date is not None or end_date is not None:
             return pd.DataFrame({"ts_code": [ts_code] * 2, "pe": [10.0, 20.0]})
-        return pd.DataFrame(
-            [{"pe": None, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}]
-        )
+        return pd.DataFrame([{"pe": None, "pb": 8.0, "turnover_rate": 1.5, "dv_ratio": 2.0}])
 
 
 def test_build_percentile_cases_skips_null_current():
