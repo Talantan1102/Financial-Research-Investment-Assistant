@@ -1,8 +1,7 @@
 """split.py 单测：不相交/均衡/确定性。"""
 
-import pytest
 from eval.question_gen.split import split_by_stock
-from eval.question_gen.stock_pool import Stock, POOL
+from eval.question_gen.stock_pool import POOL, Stock
 
 
 def _make_stocks(n_per_sector: dict[str, int]) -> list[Stock]:

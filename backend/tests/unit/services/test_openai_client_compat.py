@@ -1,5 +1,7 @@
 """非 deepseek 模型兼容垫片:qwen3 关思考 + tool_call args 合法化(承 2026-06-18 排查)。"""
 
+from typing import Any
+
 from app.services.openai_client import _extra_body_for, _sanitize_tool_args
 
 
@@ -11,7 +13,7 @@ def test_extra_body_qwen3_disables_thinking() -> None:
 
 
 def test_sanitize_empty_and_invalid_args_to_empty_object() -> None:
-    msgs = [
+    msgs: list[dict[str, Any]] = [
         {"role": "user", "content": "hi"},
         {
             "role": "assistant",

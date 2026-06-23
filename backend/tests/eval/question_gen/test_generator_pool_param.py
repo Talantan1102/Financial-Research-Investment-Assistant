@@ -1,6 +1,7 @@
 """Test that pool parameterization works and is backward compatible."""
 
 import asyncio
+
 import pandas as pd
 from eval.question_gen import generator, stock_pool
 

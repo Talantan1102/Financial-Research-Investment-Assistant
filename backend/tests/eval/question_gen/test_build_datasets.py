@@ -120,7 +120,7 @@ class _MockTushare:
 
 # Build a mock universe with enough stocks across sectors for splitting
 def _make_universe(n_per_sector: dict[str, int]) -> list[dict]:
-    result = []
+    result: list[dict] = []
     for sector, n in n_per_sector.items():
         for i in range(n):
             ts_code = f"6{len(result):05d}.SH"

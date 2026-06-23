@@ -12,12 +12,9 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-import pytest
-
+from eval.question_gen.case import ComputationCase
 from eval.question_gen.difficulty_sort import bucket_by_pass_rate
 from eval.question_gen.runner import _dump_answers
-from eval.question_gen.case import ComputationCase
-
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
