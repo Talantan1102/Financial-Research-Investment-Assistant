@@ -127,6 +127,16 @@ def financial_lookup(indicator: str, snap: dict) -> float | None:
     return val / 1e8 if unit == "yi" else val
 
 
+def financial_verify_real(indicator: str, snap: dict) -> float | None:
+    """财报核对的真值取数:直取真实营收/净利(元→亿,复用 financial_lookup 字段口径)。
+
+    仅支持金额类(营收/净利);缺值返回 None(调用方跳过)。未知/非金额指标 raise ValueError。
+    """
+    if indicator not in ("营收", "净利"):
+        raise ValueError(f"未知核对指标:{indicator!r}")
+    return financial_lookup(indicator, snap)
+
+
 def position_market_value(qty: float, close: float) -> float:
     """单仓市值 = 数量 × 收盘价。"""
     return float(qty) * float(close)
@@ -157,6 +167,7 @@ __all__ = [
     "filter_by",
     "snapshot_lookup",
     "financial_lookup",
+    "financial_verify_real",
     "position_market_value",
     "position_pnl",
     "portfolio_weights",

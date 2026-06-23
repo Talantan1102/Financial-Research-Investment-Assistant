@@ -23,6 +23,11 @@ INTENT_FINANCIAL = "financial_report"
 _FINANCIAL_RATIO_LABELS = {"ROE": "ROE", "资产负债率": "资产负债率", "毛利率": "销售毛利率"}
 _FINANCIAL_AMOUNT_LABELS = {"营收": "营业收入", "净利": "净利润"}
 
+INTENT_FINANCIAL_VERIFY = "financial_verify"
+
+# 财报核对的核对项中文名(营收/净利);题面里嵌"声称值"让助手取真财报核对。
+_VERIFY_LABELS = {"营收": "营收", "净利": "净利润"}
+
 
 def q_single(indicator: str, name: str, window_cn: str) -> str:
     """单股单指标题面;未知 indicator raise ValueError。
@@ -80,6 +85,11 @@ def q_financial(name: str, indicator: str, period_label: str) -> str:
     raise ValueError(f"未知财报指标:{indicator!r}")
 
 
+def q_verify(name: str, indicator_label: str, claimed: float, period_label: str) -> str:
+    """财报核对题面:嵌一个声称值,让助手取真财报核对对错。indicator_label 取 _VERIFY_LABELS 的值。"""
+    return f"有人说{name}{period_label}{indicator_label}{claimed}亿,对不对?以财报为准。"
+
+
 INTENT_POSITION = "position_calc"
 
 
@@ -133,6 +143,7 @@ __all__ = [
     "INTENT",
     "INTENT_SNAPSHOT",
     "INTENT_FINANCIAL",
+    "INTENT_FINANCIAL_VERIFY",
     "INTENT_POSITION",
     "INTENT_PORTFOLIO",
     "INTENT_VALUATION",
@@ -143,6 +154,7 @@ __all__ = [
     "q_filter",
     "q_snapshot",
     "q_financial",
+    "q_verify",
     "q_position_value",
     "q_position_pnl",
     "q_portfolio_weight",

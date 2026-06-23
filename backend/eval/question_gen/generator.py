@@ -53,6 +53,10 @@ _FINANCIAL_TOL = {ind: {"kind": "rel", "value": 0.01} for ind in _FINANCIAL_INDI
 _FINA_COLS = ("roe", "debt_to_assets", "grossprofit_margin")
 _INCOME_COLS = ("revenue", "n_income")
 
+# 财报核对:只核对金额类(营收/净利),容差 ±1%
+_VERIFY_INDICATORS = ("营收", "净利")
+_VERIFY_TOL = {"kind": "rel", "value": 0.01}
+
 
 async def _resolve_window(as_of: str, code: str) -> tuple[str, str]:
     """调 trade_cal 的 window 动作把周期码解析成确定的 (start, end)。"""
@@ -184,6 +188,52 @@ async def build_financial_cases(
                     gold_shape="scalar",
                     tolerance=_FINANCIAL_TOL[ind],
                     meta={"period_end": period_end, "period_label": period_label},
+                )
+            )
+    return out
+
+
+async def build_verify_cases(
+    tushare,
+    as_of: str,
+    period_end: str,
+    period_label: str,
+    cid,
+    pool: tuple[stock_pool.Stock, ...] = stock_pool.POOL,
+) -> list[case.ComputationCase]:
+    """财报核对(简单档):题面嵌一个声称值(真值×1.05),gold=tushare 真实营收/净利(亿)。
+
+    结构同 build_financial_cases:取 income(按 period_end 选行),仅核对金额类(营收/净利)。
+    tushare 依赖注入;空值/缺期指标跳过。gold 是真值(不是声称值),容差 ±1%。
+    pool 默认全局 POOL,可注入子集。
+    """
+    out: list[case.ComputationCase] = []
+    for st in pool:
+        snap = await _fetch_financial(tushare, st.ts_code, as_of, period_end)
+        for ind in _VERIFY_INDICATORS:
+            gold = operators.financial_verify_real(ind, snap)
+            if gold is None:
+                continue
+            claimed = round(gold * 1.05, 2)  # 真值 ±5% 扰动(此处偏高 5%)
+            out.append(
+                case.ComputationCase(
+                    case_id=cid(f"核对{ind}-{st.ts_code}"),
+                    intent=intents.INTENT_FINANCIAL_VERIFY,
+                    difficulty="简单",
+                    question=intents.q_verify(
+                        st.name, intents._VERIFY_LABELS[ind], claimed, period_label
+                    ),
+                    stocks=[st.ts_code],
+                    indicator=ind,
+                    window=period_label,
+                    gold=gold,
+                    gold_shape="scalar",
+                    tolerance=_VERIFY_TOL,
+                    meta={
+                        "period_end": period_end,
+                        "period_label": period_label,
+                        "claimed": claimed,
+                    },
                 )
             )
     return out
@@ -546,6 +596,9 @@ async def generate(
     cases.extend(
         await build_financial_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool)
     )
+
+    # ---- 财报核对(简单档,2024 年年报;题面嵌声称值,gold 取真实营收/净利)----
+    cases.extend(await build_verify_cases(tushare, as_of, "20241231", "2024年年报", cid, pool=pool))
 
     # ---- 单仓持仓量(简单档)----
     cases.extend(await build_position_cases(tushare, as_of, cid, pool=pool))
