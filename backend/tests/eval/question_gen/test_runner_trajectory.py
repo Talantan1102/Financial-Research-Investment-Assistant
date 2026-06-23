@@ -8,9 +8,8 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from eval.question_gen.runner import _dump_answers, _dump_trajectories
 from eval.question_gen.case import ComputationCase
-
+from eval.question_gen.runner import _dump_answers, _dump_trajectories
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +49,7 @@ def test_dump_trajectories_has_messages_and_no_gold(tmp_path: Path):
     p = tmp_path / "trajectories_raw.jsonl"
     _dump_trajectories(records, p)
 
-    rows = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()]
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 1
     row = rows[0]
     # 正确字段存在
@@ -72,7 +71,7 @@ def test_dump_trajectories_multiple_records(tmp_path: Path):
     ]
     p = tmp_path / "traj.jsonl"
     _dump_trajectories(records, p)
-    rows = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()]
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 5
     assert [r["n_steps"] for r in rows] == list(range(5))
 
@@ -106,7 +105,7 @@ def test_dump_answers_contains_gold(tmp_path: Path):
     p = tmp_path / "judgements.jsonl"
     _dump_answers([c], per_run, answers, p, model="test-model")
 
-    rows = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines()]
+    rows = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines()]
     assert len(rows) == 1
     row = rows[0]
     # judgements 必须有 gold 和 passed

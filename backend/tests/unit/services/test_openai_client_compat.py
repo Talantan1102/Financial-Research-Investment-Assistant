@@ -3,6 +3,8 @@
 追加:StreamAssembler reasoning 字段聚合测试(承 2026-06-22 think 进轨迹 feature)。
 """
 
+from typing import Any
+
 from app.services.openai_client import StreamAssembler, _extra_body_for, _sanitize_tool_args
 
 
@@ -14,7 +16,7 @@ def test_extra_body_qwen3_disables_thinking() -> None:
 
 
 def test_sanitize_empty_and_invalid_args_to_empty_object() -> None:
-    msgs = [
+    msgs: list[dict[str, Any]] = [
         {"role": "user", "content": "hi"},
         {
             "role": "assistant",
