@@ -231,8 +231,13 @@ async def run_passk(
 def _aggregate(cases: list[case.ComputationCase], per_run: dict[str, list[bool]]) -> dict[str, Any]:
     by_id = {c.case_id: c for c in cases}
     per_case: dict[str, bool] = {cid: any(runs) for cid, runs in per_run.items()}  # pass@k
+    per_case_counts: dict[str, int] = {
+        cid: sum(runs) for cid, runs in per_run.items()
+    }  # k 次过几次
     buckets: dict[tuple[str, str], list[bool]] = defaultdict(list)
     for cid, passed in per_case.items():
+        if cid not in by_id:  # 容错:只想要 counts 时可传空 cases,不 KeyError
+            continue
         c = by_id[cid]
         buckets[(c.difficulty, c.indicator)].append(passed)
     by_bucket = {
@@ -245,6 +250,7 @@ def _aggregate(cases: list[case.ComputationCase], per_run: dict[str, list[bool]]
         "pass_at_k": {"pass": n_passed, "total": n, "rate": round(n_passed / n, 3) if n else 0.0},
         "by_bucket": by_bucket,
         "per_case": per_case,
+        "per_case_counts": per_case_counts,
     }
 
 
