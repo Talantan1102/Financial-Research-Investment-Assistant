@@ -39,7 +39,9 @@ def build_app(*, tushare: Any, skills_root: str, workdir_root: str) -> FastAPI:
     @app.post("/sessions")
     def open_session(req: _SessReq | None = None) -> dict[str, str]:
         sid = str(uuid4())
-        sessions[sid] = {"as_of": req.as_of if req else None}
+        as_of = req.as_of if req else None
+        sessions[sid] = {"as_of": as_of}
+        print(f"[tool-server] session open as_of={as_of}", flush=True)  # 便于确认 verl 注入
         return {"session_id": sid}
 
     @app.post("/sessions/{sid}/exec")
