@@ -48,3 +48,11 @@ verl rollout 跑在 verl conda env(torch/sglang),后端工具依赖 pydantic/tus
 - ✅ `oracle_reward.py`:verl 奖励函数,**复用评测同一套 `judge`**(已对齐),5 单测绿,verl env 可加载
 - ⏳ 工具层(本文档):通用适配器 + run_python state 桥 + 跨 env 方案 —— **下一块**
 - ⏳ 端到端 smoke:依赖工具层
+
+## 补充(2026-06-25 核到 worker_wiring):runtime bridge 的真实依赖
+
+`app/chatloop/worker_wiring.py` = 生产工具装配,两段:
+1. `build_singletons(...)`:tushare 服务 + `SkillExecutorBackend`(run_python 沙箱,`app/skills/executor_backend.py`)+ TraceService(写 trace_spans,要 DB)等共享单例。
+2. `build_turn_hub(singletons, emit, seq_counter)`:**per-turn** 轻 ToolHub,`register_inprocess([CodeInterpreterTool(run_python), 各数据工具…])`,持 turn 级 emit/seq/state。
+
+→ 对齐 smoke 要在 verl rollout 内立起这套:**装 backend + 依赖进 verl env(pydantic/tushare/沙箱/DB 客户端),按 rollout 造 singletons + per-turn hub,用 `VerlBackendToolAdapter` 包每个 tool**。这是带 PG/沙箱/tushare 多服务依赖的子系统,集成风险高,需作为独立一阶专门做。**不在本 PR(#187)范围**;本 PR 落地的是 to_verl/oracle_reward/adapter 三件对齐底座 + 本设计。
