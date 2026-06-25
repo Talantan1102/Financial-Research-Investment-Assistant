@@ -21,7 +21,7 @@ def _box(tmp_path):
 
 def test_schemas_has_both_tools(tmp_path):
     names = {s["function"]["name"] for s in _box(tmp_path).schemas()}
-    assert {"get_stock_daily", "run_python"} <= names
+    assert {"get_stock_daily","get_stock_quote","get_financials","get_daily_basic","get_pe_history","run_python"} <= names
 
 
 @pytest.mark.asyncio

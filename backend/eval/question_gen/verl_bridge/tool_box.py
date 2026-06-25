@@ -27,14 +27,24 @@ class ToolBox:
         from app.chatloop.code_interpreter_tool import CodeInterpreterTool
         from app.skills.executor_backend import SkillExecutorBackend
         from app.skills.skill_executor import SkillExecutor
+        from app.tools.get_daily_basic import GetDailyBasicTool
+        from app.tools.get_financials import GetFinancialsTool
+        from app.tools.get_pe_history import GetPeHistoryTool
         from app.tools.get_stock_daily import GetStockDailyTool
+        from app.tools.get_stock_quote import StockQuoteTool
 
         os.makedirs(skills_root, exist_ok=True)
         os.makedirs(workdir_root, exist_ok=True)
 
         executor = SkillExecutor(skills_root=skills_root, workdir_root=workdir_root)
-        tools = [
+        # 全套真实后端工具(都只依赖 tushare)+ run_python 沙箱;持仓/组合题的数量写在题面,
+        # 用价格工具 + run_python 即可,不需 PG-backed 持仓工具。
+        tools: list[Any] = [
             GetStockDailyTool(tushare=tushare),
+            StockQuoteTool(tushare=tushare),
+            GetFinancialsTool(tushare=tushare),
+            GetDailyBasicTool(tushare=tushare),
+            GetPeHistoryTool(tushare=tushare),
             CodeInterpreterTool(
                 backend=SkillExecutorBackend(executor), cache=None, timeout_s=timeout_s
             ),
