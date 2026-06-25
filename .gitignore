@@ -104,3 +104,4 @@ docs/_view_*.png
 scripts/shoot_board.mjs
 scripts/shoot_fix.mjs
 backend/eval/question_gen/data/verl/
+backend/eval/question_gen/data/verl_smoke/

@@ -71,3 +71,12 @@ verl rollout 跑在 verl conda env(torch/sglang),后端工具依赖 pydantic/tus
 **verl 侧**:`HttpToolProxy` create→POST /sessions、execute→/exec、release→DELETE;`tool_config.yaml` 两条(get_stock_quote / run_python),schema 从 `GET /tools` 取。
 
 **smoke 范围**:2 工具 + stock_study 涨幅类子集 + 2 步 GRPO,过关=不报错+工具真被调+reward 非全 0。不做:全 14 工具 / search_tools 渐进披露 / data_refs / cassette / 并发优化。
+
+## ✅ smoke 通过(2026-06-25)
+
+D3 端到端 smoke 跑通,**用对齐的真实后端工具**:
+- verl rollout(8B+LoRA,2×A800)经 `HttpToolProxy` HTTP 调工具服务(fria env),服务跑**真实** `get_stock_daily`(真 tushare 数据)+ `run_python`(SkillExecutor 沙箱)
+- 2 步 GRPO 完成,**三过闸全中**:① 无致命错(末尾 dynamo dump_compile_times Traceback 良性)② 无 "Inconsistent training and inference tokenization" ③ **reward 非零**:step1 score 0.141 / step2 0.109,num_turns ~7-8,工具服务被调 360 次
+- 复现:起服务 `python -m eval.question_gen.verl_bridge.tool_server`(fria env,真 tushare)→ `build_smoke_dataset` 生成 parquet+tool_config → `run_smoke.sh`(verl env,PYTHONPATH=backend)
+
+**仍属 smoke 范围**:2 工具(get_stock_daily/run_python)+ 涨幅子集 + prompt 显式给 ts_code/窗口。扩到全 14 工具 / name→code / search_tools 渐进披露 / cassette 确定性 / 更多题型 = 后续。
