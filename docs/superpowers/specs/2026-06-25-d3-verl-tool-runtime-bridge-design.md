@@ -56,3 +56,18 @@ verl rollout 跑在 verl conda env(torch/sglang),后端工具依赖 pydantic/tus
 2. `build_turn_hub(singletons, emit, seq_counter)`:**per-turn** 轻 ToolHub,`register_inprocess([CodeInterpreterTool(run_python), 各数据工具…])`,持 turn 级 emit/seq/state。
 
 → 对齐 smoke 要在 verl rollout 内立起这套:**装 backend + 依赖进 verl env(pydantic/tushare/沙箱/DB 客户端),按 rollout 造 singletons + per-turn hub,用 `VerlBackendToolAdapter` 包每个 tool**。这是带 PG/沙箱/tushare 多服务依赖的子系统,集成风险高,需作为独立一阶专门做。**不在本 PR(#187)范围**;本 PR 落地的是 to_verl/oracle_reward/adapter 三件对齐底座 + 本设计。
+
+## 方案定稿(2026-06-25,用户选 ② HTTP 工具服务 + 先做 smoke)
+
+**架构**:verl rollout(verl env)的 `HttpToolProxy(BaseTool)` 经 HTTP 调 backend(fria env)的工具服务;真实工具在服务端跑,**零污染 verl env**。
+
+**smoke 最小依赖**(不调 `build_turn_components`,避开 HeavySingletons 的 PG/Milvus/memory/llm):
+- 数据工具:`StockQuoteTool(tushare=build_tushare_service())`(或 get_daily 同款)——返回**内联**价格
+- `CodeInterpreterTool(backend=SkillExecutorBackend(SkillExecutor(skills_root,workdir_root)), cache=None)` —— **cache=None 关 data_refs**;数据内联进对话,模型直接把数字写进 run_python 算(2 价算涨幅)
+- 二者都是生产同款工具类(对齐),SkillExecutor 构造轻(subprocess 沙箱)
+
+**工具服务端点**(FastAPI,fria env 起):`GET /tools`(schema)/`POST /sessions`(建会话,持 per-题 tool 实例)/`POST /sessions/{id}/exec`{tool,args}/`DELETE /sessions/{id}`。会话隔离:每 rollout 轨迹一个 session;cache=None 下工具基本无状态,session 主要隔离并发。
+
+**verl 侧**:`HttpToolProxy` create→POST /sessions、execute→/exec、release→DELETE;`tool_config.yaml` 两条(get_stock_quote / run_python),schema 从 `GET /tools` 取。
+
+**smoke 范围**:2 工具 + stock_study 涨幅类子集 + 2 步 GRPO,过关=不报错+工具真被调+reward 非全 0。不做:全 14 工具 / search_tools 渐进披露 / data_refs / cassette / 并发优化。
