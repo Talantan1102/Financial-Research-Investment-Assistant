@@ -1,0 +1,76 @@
+diff --git a/verl/utils/attention_utils.py b/verl/utils/attention_utils.py
+index ae66e53..88b2ca4 100644
+--- a/verl/utils/attention_utils.py
++++ b/verl/utils/attention_utils.py
+@@ -27,7 +27,22 @@ def _get_attention_functions() -> tuple[Callable, Callable, Callable, Callable]:
+     if is_torch_npu_available(check_device=False):
+         from verl.utils.npu_flash_attn_utils import index_first_axis, pad_input, rearrange, unpad_input
+     else:
+-        from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
++        try:
++            from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
++        except ImportError:
++            # torch2.9+py3.10 无 flash_attn 预编译 wheel(只到 cp312),且本机无 nvcc 不能源码编译。
++            # 这套配置 rollout 走 sglang/flashinfer、FSDP forward 走 sdpa,flash_attn 编译 kernel
++            # 本就不需要;bert_padding 的这几个函数是纯 torch,用 transformers 等价物替代,功能不打折。
++            import torch
++            from einops import rearrange
++            from transformers.modeling_flash_attention_utils import _pad_input as pad_input
++            from transformers.modeling_flash_attention_utils import _unpad_input as unpad_input
++
++            def index_first_axis(tensor, indices):
++                other_shape = tensor.shape[1:]
++                flat = tensor.reshape(tensor.shape[0], -1)
++                gathered = torch.gather(flat, 0, indices.unsqueeze(-1).expand(-1, flat.shape[1]))
++                return gathered.reshape(-1, *other_shape)
+ 
+     _index_first_axis, _pad_input, _rearrange, _unpad_input = index_first_axis, pad_input, rearrange, unpad_input
+ 
+diff --git a/verl/workers/engine/fsdp/transformer_impl.py b/verl/workers/engine/fsdp/transformer_impl.py
+index 2c66c6a..9f08a76 100644
+--- a/verl/workers/engine/fsdp/transformer_impl.py
++++ b/verl/workers/engine/fsdp/transformer_impl.py
+@@ -333,6 +333,9 @@ class FSDPEngine(BaseEngine):
+                 "exclude_modules": convert_to_regular_types(self.model_config.exclude_modules),
+                 "bias": "none",
+             }
++            # peft 0.14(为兼容 sglang 的 torchao 0.9 而降级)不识别 target_parameters 等新参数;
++            # 这些值为 None 时本是 no-op,剔除空值再传 LoraConfig,避免 unexpected keyword TypeError。
++            lora_config = {k: v for k, v in lora_config.items() if v is not None}
+             module = get_peft_model(module, LoraConfig(**lora_config))
+ 
+         return module
+diff --git a/verl/workers/rollout/sglang_rollout/async_sglang_server.py b/verl/workers/rollout/sglang_rollout/async_sglang_server.py
+index 2bef78a..64fc04d 100644
+--- a/verl/workers/rollout/sglang_rollout/async_sglang_server.py
++++ b/verl/workers/rollout/sglang_rollout/async_sglang_server.py
+@@ -609,8 +609,11 @@ class SGLangHttpServer:
+ 
+         generate_request = GenerateReqInput(**request)
+ 
+-        # Add lora request
+-        if self.model_config.lora_rank > 0:
++        # Add lora request.
++        # merge=True 时 LoRA 已合并进基座权重(走 sleep_level=2 merge path),sglang 未单独 load
++        # 该 adapter,若仍在 generate 请求里带上会触发 "adapter never loaded"。与本文件 ~464 行
++        # update_weights 的判断范式保持一致:仅在 adapter 模式(非 merge)下传 lora_path。
++        if self.model_config.lora_rank > 0 and not self.model_config.lora.get("merge", False):
+             generate_request.lora_path = SGLANG_LORA_NAME
+ 
+         output = await self.tokenizer_manager.generate_request(generate_request, None).__anext__()
+diff --git a/verl/workers/rollout/sglang_rollout/sglang_rollout.py b/verl/workers/rollout/sglang_rollout/sglang_rollout.py
+index 0dc1685..30e20f6 100644
+--- a/verl/workers/rollout/sglang_rollout/sglang_rollout.py
++++ b/verl/workers/rollout/sglang_rollout/sglang_rollout.py
+@@ -84,7 +84,10 @@ def _set_envs_and_config(server_args: ServerArgs):
+                 "0.1.1",
+                 "Please reinstall the latest version with `pip install follow https://sgl-project.github.io/get_started/install.html#for-cuda-13`",
+             )
+-        except AssertionError:
++        except Exception:
++            # assert_pkg_version raises a bare Exception (not AssertionError) when the
++            # package is missing (PackageNotFoundError -> Exception), so widen the catch
++            # to fall back to the legacy `sgl_kernel` name (sglang 0.5.8 ships sgl_kernel).
+             assert_pkg_version(
+                 "sgl_kernel",
+                 "0.1.1",
