@@ -46,7 +46,7 @@ class TushareService(Protocol):
         end_date: str | None = None,
     ) -> pd.DataFrame: ...
     async def get_pe_history(
-        self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None
+        self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None, as_of: str | None = None
     ) -> pd.DataFrame: ...
     async def get_forecast(self, *, ts_code: str, period: str | None = None) -> pd.DataFrame: ...
     async def get_dividend_history(self, *, ts_code: str, years_back: int = 5) -> pd.DataFrame: ...
@@ -167,9 +167,10 @@ class RealTushareService:
         return datetime.now(UTC).strftime("%Y%m%d")
 
     @staticmethod
-    def _n_years_ago(n: int) -> str:
+    def _n_years_ago(n: int, *, as_of: str | None = None) -> str:
         # relativedelta avoids leap-year drift (5 days over 5 years vs timedelta(days=365*n)).
-        return (datetime.now(UTC) - relativedelta(years=n)).strftime("%Y%m%d")
+        base = datetime.strptime(as_of, "%Y%m%d").replace(tzinfo=UTC) if as_of else datetime.now(UTC)
+        return (base - relativedelta(years=n)).strftime("%Y%m%d")
 
     async def get_daily_basic(
         self,
@@ -195,14 +196,20 @@ class RealTushareService:
         )
 
     async def get_pe_history(
-        self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None
+        self,
+        *,
+        ts_code: str,
+        years_back: int = 5,
+        current_pe: float | None = None,
+        as_of: str | None = None,
     ) -> pd.DataFrame:
         """聚合历史 daily_basic 计算 PE 分位.
 
-        实现:取近 N 年的 daily_basic.pe 分布,计算 current_pe 在分布中的 percentile.
+        实现:取截至基准日近 N 年的 daily_basic.pe 分布,计算 current_pe 在分布中的 percentile.
+        as_of(YYYYMMDD)给定则以它为"当前"基准(否则用今天)——保证历史题目可复现、不随训练日漂移.
         """
-        end = self._today_yyyymmdd()
-        start = self._n_years_ago(years_back)
+        end = as_of or self._today_yyyymmdd()
+        start = self._n_years_ago(years_back, as_of=as_of)
         history = await self._call_cached(
             "daily_basic",
             {"ts_code": ts_code, "start_date": start, "end_date": end},

@@ -23,9 +23,13 @@ class _ExecReq(BaseModel):
     args: dict[str, Any] = {}
 
 
+class _SessReq(BaseModel):
+    as_of: str | None = None  # 本题基准日;服务端按它给"最新值"工具注入,钉死答案不随训练日漂移
+
+
 def build_app(*, tushare: Any, skills_root: str, workdir_root: str) -> FastAPI:
     box = ToolBox(tushare=tushare, skills_root=skills_root, workdir_root=workdir_root)
-    sessions: set[str] = set()
+    sessions: dict[str, dict[str, Any]] = {}
     app = FastAPI(title="D3 verl tool-server")
 
     @app.get("/tools")
@@ -33,16 +37,17 @@ def build_app(*, tushare: Any, skills_root: str, workdir_root: str) -> FastAPI:
         return {"tools": box.schemas()}
 
     @app.post("/sessions")
-    def open_session() -> dict[str, str]:
+    def open_session(req: _SessReq | None = None) -> dict[str, str]:
         sid = str(uuid4())
-        sessions.add(sid)
+        sessions[sid] = {"as_of": req.as_of if req else None}
         return {"session_id": sid}
 
     @app.post("/sessions/{sid}/exec")
     async def exec_tool(sid: str, req: _ExecReq) -> dict[str, Any]:
         # 工具错(参数非法/取数失败/代码崩)回 {"error": ...} 给模型自纠,不抛 500
+        as_of = sessions.get(sid, {}).get("as_of")
         try:
-            result = await box.exec(req.tool, req.args)
+            result = await box.exec(req.tool, req.args, as_of=as_of)
             return {"ok": True, "result": result}
         except KeyError:
             return {"ok": False, "error": f"unknown tool: {req.tool}"}
@@ -53,7 +58,7 @@ def build_app(*, tushare: Any, skills_root: str, workdir_root: str) -> FastAPI:
 
     @app.delete("/sessions/{sid}")
     def close_session(sid: str) -> dict[str, bool]:
-        sessions.discard(sid)
+        sessions.pop(sid, None)
         return {"closed": True}
 
     return app

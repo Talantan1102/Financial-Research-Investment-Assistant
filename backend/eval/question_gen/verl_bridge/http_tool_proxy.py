@@ -46,14 +46,17 @@ class HttpToolProxy(BaseTool):
         if self._client is None:
             import httpx
 
-            self._client = httpx.AsyncClient(base_url=self._server_url, timeout=60.0)
+            # trust_env=False:忽略 HTTP(S)_PROXY,避免本地 server 被全局代理(如 127.0.0.1:7897)劫持
+            self._client = httpx.AsyncClient(base_url=self._server_url, timeout=60.0, trust_env=False)
         return self._client
 
     async def create(
         self, instance_id: str | None = None, create_kwargs: dict | None = None, **kwargs: Any
     ) -> tuple[str, Any]:
         instance_id = instance_id or str(uuid4())
-        resp = await self._http().post("/sessions")
+        # create_kwargs(来自 parquet tools_kwargs.<tool>.create_kwargs)带本题 as_of → 注进服务端会话
+        ck = create_kwargs or {}
+        resp = await self._http().post("/sessions", json={"as_of": ck.get("as_of")})
         self._sessions[instance_id] = resp.json()["session_id"]
         return instance_id, ToolResponse()
 

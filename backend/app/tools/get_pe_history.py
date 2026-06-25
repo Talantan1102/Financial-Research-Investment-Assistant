@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 class PeHistoryArgs(BaseModel):
     ts_code: str
     years_back: int = Field(default=5, ge=1, le=10)
+    as_of: str | None = None  # YYYYMMDD;基准日(否则用今天)。历史题目固定它→不随训练日漂移。
 
 
 ValuationBand = Literal["低估", "合理", "高估"]
@@ -52,7 +53,9 @@ class GetPeHistoryTool(Tool):
 
     async def run(self, args: BaseModel) -> dict[str, Any]:
         a = PeHistoryArgs.model_validate(args.model_dump())
-        df = await self._tushare.get_pe_history(ts_code=a.ts_code, years_back=a.years_back)
+        df = await self._tushare.get_pe_history(
+            ts_code=a.ts_code, years_back=a.years_back, as_of=a.as_of
+        )
         if df.empty:
             return {"ts_code": a.ts_code, "error": "no data"}
         # aggregation result, single row by design — no sort needed

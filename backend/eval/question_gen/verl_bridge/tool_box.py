@@ -57,10 +57,16 @@ class ToolBox:
     def schemas(self) -> list[dict[str, Any]]:
         return [t.schema_for_llm() for t in self._tools.values()]
 
-    async def exec(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
+    async def exec(
+        self, tool_name: str, args: dict[str, Any], *, as_of: str | None = None
+    ) -> dict[str, Any]:
         if tool_name not in self._tools:
             raise KeyError(tool_name)
         tool = self._tools[tool_name]
+        # 服务端注入 as_of:工具的 args_schema 有 as_of 字段且调用未带时,钉成本题基准日
+        # (模型改不了,历史题目可复现、不随训练日漂移)。
+        if as_of and "as_of" in tool.args_schema.model_fields and not args.get("as_of"):
+            args = {**args, "as_of": as_of}
         validated = tool.args_schema.model_validate(args)
         # CodeInterpreterTool 是 run_with_state(args, state);普通数据工具是 run(args)
         run_with_state = getattr(tool, "run_with_state", None)
