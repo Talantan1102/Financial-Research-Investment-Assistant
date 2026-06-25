@@ -103,3 +103,4 @@ scripts/shoot_01.mjs
 docs/_view_*.png
 scripts/shoot_board.mjs
 scripts/shoot_fix.mjs
+backend/eval/question_gen/data/verl/
