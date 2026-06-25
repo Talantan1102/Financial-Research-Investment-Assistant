@@ -80,3 +80,15 @@ D3 端到端 smoke 跑通,**用对齐的真实后端工具**:
 - 复现:起服务 `python -m eval.question_gen.verl_bridge.tool_server`(fria env,真 tushare)→ `build_smoke_dataset` 生成 parquet+tool_config → `run_smoke.sh`(verl env,PYTHONPATH=backend)
 
 **仍属 smoke 范围**:2 工具(get_stock_daily/run_python)+ 涨幅子集 + prompt 显式给 ts_code/窗口。扩到全 14 工具 / name→code / search_tools 渐进披露 / cassette 确定性 / 更多题型 = 后续。
+
+## 全套工具接入 + 多 intent 逐类测(2026-06-25)
+
+ToolBox 注册全套真实工具:`get_stock_daily / get_stock_quote / get_financials / get_daily_basic / get_pe_history + run_python`(均 tushare-only;持仓/组合题数量在题面,无需 PG)。**逐个经服务用真 tushare 实测返回真实数据**(价1212/营收547亿/ROE10.57/PE18.4/PB5.59/分位)。
+
+多 intent smoke(`build_multi_intent_smoke`,4 单股 intent × 3:stock_study/snapshot_quote/financial_report/position_calc):2 步 GRPO 完成,**reward 非零且更高:step1 0.375 / step2 0.281**,工具调 450 次、num_turns~9、无崩。证明全套工具被多类题真实使用并能判分。
+
+**仍未覆盖(下一阶,真实障碍非伪造)**:
+- **portfolio_calc / valuation_calc(多股)**:题面是股票名、case 只存代码 → 需 **name→code 工具**才能让模型取对股
+- **valuation_percentile / 最新报价类**:get_pe_history/get_stock_quote 返回"当前"值,与 as_of=20260612 gold 有日期漂移 → 需工具支持 as_of 或重生成 gold
+- 真·per-intent reward 分桶:verl console 是聚合值;要逐类精确分数需 per-intent 单跑或自定义 reward 上报
+- search_tools 渐进披露(全量工具不能一次塞 prompt)、data_refs、cassette 确定性
