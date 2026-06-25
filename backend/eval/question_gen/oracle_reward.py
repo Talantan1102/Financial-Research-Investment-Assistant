@@ -20,8 +20,18 @@ _TAIL_CLIP = 600  # 数值题尾部裁剪,防多步中间数字误命中(§3.4 �
 _NUMERIC_SHAPES = ("scalar", "multi_scalar")
 
 
+def _result(score: float, format_ok: float, extra_info: dict[str, Any]) -> dict[str, Any]:
+    # 注:verl reward_extra_info 要求每条样本键集一致,故**不能**按 intent 动态加键
+    # (会触发 "Key not present in first dict")。per-intent 分数靠分别单跑 / 离线分析答案。
+    return {
+        "score": score,
+        "format_ok": format_ok,
+        "num_turns": float(extra_info.get("num_turns") or 0),
+    }
+
+
 def _zero(format_ok: float, extra_info: dict[str, Any]) -> dict[str, Any]:
-    return {"score": 0.0, "format_ok": format_ok, "num_turns": float(extra_info.get("num_turns") or 0)}
+    return _result(0.0, format_ok, extra_info)
 
 
 def compute_score(
@@ -48,11 +58,7 @@ def compute_score(
     except Exception:
         return _zero(0.0, extra_info)
 
-    return {
-        "score": 1.0 if ok else 0.0,
-        "format_ok": 1.0,
-        "num_turns": float(extra_info.get("num_turns") or 0),
-    }
+    return _result(1.0 if ok else 0.0, 1.0, extra_info)
 
 
 __all__ = ["compute_score"]

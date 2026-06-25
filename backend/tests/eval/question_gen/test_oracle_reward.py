@@ -56,3 +56,9 @@ def test_tail_clip_ignores_midtrajectory_number():
 def test_no_parseable_answer_zero_format():
     out = oracle_reward.compute_score("fin", "我不知道。", _gt(-5.165912))
     assert out["score"] == 0.0
+
+
+
+def test_no_intent_no_extra_key():
+    out = oracle_reward.compute_score("fin", "答案 -5.17%", _gt(-5.165912))
+    assert not any(k.startswith("acc/") for k in out)

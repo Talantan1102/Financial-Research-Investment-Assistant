@@ -32,6 +32,7 @@ class ToolBox:
         from app.tools.get_pe_history import GetPeHistoryTool
         from app.tools.get_stock_daily import GetStockDailyTool
         from app.tools.get_stock_quote import StockQuoteTool
+        from app.tools.lookup_ts_code import LookupTsCodeTool
 
         os.makedirs(skills_root, exist_ok=True)
         os.makedirs(workdir_root, exist_ok=True)
@@ -40,6 +41,7 @@ class ToolBox:
         # 全套真实后端工具(都只依赖 tushare)+ run_python 沙箱;持仓/组合题的数量写在题面,
         # 用价格工具 + run_python 即可,不需 PG-backed 持仓工具。
         tools: list[Any] = [
+            LookupTsCodeTool(tushare=tushare),
             GetStockDailyTool(tushare=tushare),
             StockQuoteTool(tushare=tushare),
             GetFinancialsTool(tushare=tushare),

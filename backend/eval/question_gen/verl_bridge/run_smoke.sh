@@ -7,7 +7,7 @@ cd /root/autodl-tmp/verl
 python3 -m verl.trainer.main_ppo \
   algorithm.adv_estimator=grpo \
   data.train_files=$REPO/backend/eval/question_gen/data/verl_smoke/train.parquet data.val_files=$REPO/backend/eval/question_gen/data/verl_smoke/val.parquet \
-  data.train_batch_size=8 data.max_prompt_length=1024 data.max_response_length=2048 \
+  data.train_batch_size=8 data.max_prompt_length=4096 data.max_response_length=2048 \
   data.return_raw_chat=True data.truncation=error algorithm.use_kl_in_reward=False \
   actor_rollout_ref.model.path=/root/autodl-tmp/models/Qwen3-8B \
   actor_rollout_ref.model.use_remove_padding=False \

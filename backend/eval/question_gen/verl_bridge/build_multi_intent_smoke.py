@@ -20,19 +20,21 @@ from eval.question_gen import case as cm
 
 _SERVER = "http://127.0.0.1:8731"
 _SYS = (
-    "你是金融指标计算 agent。按题意选用工具取真实数据(get_stock_daily 区间收盘、"
-    "get_daily_basic 某日 PE/PB、get_financials 财报 ROE/营收/净利/EPS),再用 run_python "
-    "按题中口径计算,run_python 里把最终数值赋给变量 result,最后一句话给出明确数值答案。"
+    "你是金融指标计算 agent。先用 lookup_ts_code 把股票简称查成 ts_code,再按题意选工具取真实数据"
+    "(get_stock_daily 区间收盘、get_daily_basic 某日 PE/PB、get_financials 财报 ROE/营收/净利/EPS),"
+    "再用 run_python 按题中口径计算,run_python 里把最终数值赋给变量 result,最后一句话给出明确数值答案。"
 )
-# 单股、可注入 code 的 intent
-_SINGLE = {"stock_study", "snapshot_quote", "financial_report", "financial_verify", "trend_signal", "position_calc"}
+# 纳入的 intent(含多股 portfolio/valuation;多股靠 lookup_ts_code 查代码)
+_INTENTS = {
+    "stock_study", "snapshot_quote", "financial_report", "financial_verify",
+    "trend_signal", "position_calc", "portfolio_calc", "valuation_calc",
+}
 
 
 def _context(c: cm.ComputationCase) -> str:
-    """按 intent/meta 给模型必要上下文(代码 + 日期/期间)。"""
-    ts = c.stocks[0]
+    """按 intent/meta 给模型上下文:单股注入代码,多股让模型自己 lookup;附日期/期间。"""
     m = c.meta
-    bits = [f"股票代码 {ts}"]
+    bits = [f"股票代码 {c.stocks[0]}"] if len(c.stocks) == 1 else ["题中多只股票请用 lookup_ts_code 逐个查代码"]
     if m.get("window_dates"):
         wd = m["window_dates"]
         bits.append(f"区间 [{wd[0]}, {wd[-1]}]")
@@ -51,7 +53,7 @@ def build(src_jsonl: str, out_dir: str, *, per_intent: int = 3) -> None:
     cases = cm.load_jsonl(Path(src_jsonl))
     by_intent: dict[str, list] = {}
     for c in cases:
-        if c.intent in _SINGLE and c.gold_shape == "scalar" and len(c.stocks) == 1:
+        if c.intent in _INTENTS and c.gold_shape == "scalar":
             by_intent.setdefault(c.intent, [])
             if len(by_intent[c.intent]) < per_intent:
                 by_intent[c.intent].append(c)
@@ -81,6 +83,8 @@ def build(src_jsonl: str, out_dir: str, *, per_intent: int = 3) -> None:
                 "parameters": {"type": "object", "properties": props, "required": req}}}
 
     tools = [
+        {"class_name": proxy, "config": {"type": "native", "server_url": _SERVER, "tool_name": "lookup_ts_code"},
+         "tool_schema": _schema("lookup_ts_code", {"name": {"type": "string", "description": "股票简称,如 贝达药业"}}, ["name"], "按股票简称查 ts_code")},
         {"class_name": proxy, "config": {"type": "native", "server_url": _SERVER, "tool_name": "get_stock_daily"}, "tool_schema": _DATA_TOOL_SCHEMA},
         {"class_name": proxy, "config": {"type": "native", "server_url": _SERVER, "tool_name": "get_daily_basic"},
          "tool_schema": _schema("get_daily_basic", {"ts_code": {"type": "string"}, "trade_date": {"type": "string", "description": "某交易日 YYYYMMDD"}}, ["ts_code"], "取某股某日 PE/PB/换手等估值快照")},
