@@ -44,8 +44,18 @@ if TYPE_CHECKING:
 
 
 def _extra_body_for(model: str) -> dict[str, Any]:
-    """qwen3 思考模型需显式关思考;非 qwen3 不传(避免传它们不认的参数)。"""
+    """qwen3 思考模型的 thinking 开关。
+
+    默认关思考(生产/低延迟链路,历史行为不变);``LLM_QWEN3_THINKING=on`` 时不关,
+    走 chat template 默认的 thinking-on —— 供 reasoning-RL 训练线(D4 分带 / 采轨 /
+    评测,base 本地 sglang + 教师 qwen3.7-max)用同一思考模式,保分布对齐。
+    sglang 与 dashscope 对显式开关的参数风格不同(顶层 enable_thinking vs
+    chat_template_kwargs),但「不传任何参数」两端默认都是 thinking-on,故 on 档返回 {}。
+    非 qwen3 一律不传(避免传它们不认的参数)。
+    """
     if model.startswith("qwen3"):
+        if os.getenv("LLM_QWEN3_THINKING", "off").strip().lower() == "on":
+            return {}
         return {"enable_thinking": False}
     return {}
 
