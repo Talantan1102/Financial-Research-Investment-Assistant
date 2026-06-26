@@ -55,8 +55,10 @@ class GetFinancialsTool(Tool):
 
     name = "get_financials"
     description = (
-        "Return revenue, net profit, and ROE for a given A-share "
-        "(ts_code). period: 'latest' | 'quarterly' | 'annual'. "
+        "Return revenue, net profit, ROE, and YoY growth (revenue_yoy / "
+        "net_profit_yoy, annual %) for a given A-share (ts_code). "
+        "period: 'latest' | 'quarterly' | 'annual'; end_date (YYYYMMDD) selects a "
+        "specific report period (e.g. 20241231 = FY2024 annual). "
         "Note: pe is always 0.0; use get_daily_basic for P/E data."
     )
     args_schema = FinancialsArgs
@@ -89,6 +91,8 @@ class GetFinancialsTool(Tool):
         #      pe_ttm is NOT in fina_indicator; set pe=0.0 until sourced from daily_basic separately.
         roe: float = 0.0
         pe: float = 0.0
+        revenue_yoy: float | None = None  # 营收同比(or_yoy,年度,%);供"同比增速"题直取
+        net_profit_yoy: float | None = None  # 净利润同比(netprofit_yoy,年度,%)
         fi_row = _select_period_row(
             fina_df, end_date=validated.end_date, period=validated.period
         )
@@ -96,10 +100,16 @@ class GetFinancialsTool(Tool):
             roe = float(fi_row.get("roe", 0.0) or 0.0)
             # pe_ttm is not in fina_indicator — callers should source it from get_daily_basic.
             pe = 0.0
+            _ry = fi_row.get("or_yoy")
+            _ny = fi_row.get("netprofit_yoy")
+            revenue_yoy = None if _ry is None or _ry != _ry else float(_ry)
+            net_profit_yoy = None if _ny is None or _ny != _ny else float(_ny)
 
         return {
             "ts_code": validated.ts_code,
             "period": validated.period,
+            "revenue_yoy": revenue_yoy,
+            "net_profit_yoy": net_profit_yoy,
             "revenue": revenue,
             "net_profit": net_profit,
             "roe": roe,

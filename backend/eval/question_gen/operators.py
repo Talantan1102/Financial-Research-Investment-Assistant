@@ -37,7 +37,9 @@ _FINANCIAL_SPEC: dict[str, tuple[str, str]] = {
 
 # 异动信号(同比增速)指标 -> fina_indicator 预算字段(直取,已是百分数)。
 _TREND_COLUMNS: dict[str, str] = {
-    "营收同比": "q_sales_yoy",
+    # 营收同比用年度口径 or_yoy(营业收入同比),非单季度 q_sales_yoy —— 问题问"年报...
+    # 同比"语义是年度。净利同比 netprofit_yoy 本就是年度净利润同比,保留。
+    "营收同比": "or_yoy",
     "净利同比": "netprofit_yoy",
 }
 
@@ -136,7 +138,7 @@ def financial_lookup(indicator: str, snap: dict) -> float | None:
 def trend_lookup(indicator: str, snap: dict) -> float | None:
     """异动信号(同比增速)取数:指标名 -> 直取 fina_indicator 预算字段(已是百分数)。
 
-    营收同比 -> q_sales_yoy;净利同比 -> netprofit_yoy。
+    营收同比 -> or_yoy(年度);净利同比 -> netprofit_yoy(年度)。
     字段缺失(None/NaN)→ 返回 None(调用方跳过)。未知指标 raise ValueError。
     """
     col = _TREND_COLUMNS.get(indicator)

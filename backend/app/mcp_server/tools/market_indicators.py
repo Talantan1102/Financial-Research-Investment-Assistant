@@ -44,7 +44,12 @@ TOOL_DEF = Tool(
             "years_back": {
                 "type": "integer",
                 "default": 5,
-                "description": "Only applies to metric='pe_history' (lookback years).",
+                "description": (
+                    "Only applies to metric='pe_history'. Lookback window in YEARS — "
+                    "set it to match the period the question asks about "
+                    "(e.g. 3 for '最近三年的PE分位', 5 for '近五年'). "
+                    "The percentile is computed over exactly this window."
+                ),
             },
             "current_pe": {
                 "type": "number",
