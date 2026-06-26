@@ -326,7 +326,16 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
     """
     config = LLMConfig()
     model = os.getenv("MOCK_TUSHARE_MODEL", V0_DEFAULT_MODEL)
-    raw_client = OpenAI(api_key=config.api_key, base_url=config.base_url)
+    # 超时 + 重试上限:不设则 openai 默认 600s/2retry —— maas 端偶发 hang 时整进程冻住
+    # 数分钟(eval 并发槽全卡)。正常调用 ≤50s,故 timeout=90s 覆盖合法慢调用、把 hang
+    # 的调用 90s fail-fast → 该 rollout 报错被 per-case try 兜住跳过、释放槽,进程不冻。
+    # 可经 LLM_HTTP_TIMEOUT_S env 覆盖(生产链路默认值不变,仅 eval 大并发受益)。
+    _timeout = float(os.getenv("LLM_HTTP_TIMEOUT_S", "90"))
+    _retries = int(os.getenv("LLM_MAX_RETRIES", "1"))
+    raw_client = OpenAI(
+        api_key=config.api_key, base_url=config.base_url,
+        timeout=_timeout, max_retries=_retries,
+    )
     # LangSmith 追踪(P0):LANGSMITH_TRACING=true 时把 client 包一层,自动把每次 LLM
     # 调用的 prompt/completion/token/latency 作为 run 发到 LangSmith。包装锁在这个 DI
     # 缝里 —— router / strict 层既不感知 openai 也不感知 langsmith;关时零开销。
@@ -335,7 +344,10 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
         from langsmith.wrappers import wrap_openai
 
         raw_client = wrap_openai(raw_client)
-    async_raw = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
+    async_raw = AsyncOpenAI(
+        api_key=config.api_key, base_url=config.base_url,
+        timeout=_timeout, max_retries=_retries,
+    )
     adapter = _OpenAIAdapter(client=raw_client, model=model, async_client=async_raw)
     if trace_service is None:
         from app.core.database import SessionLocal

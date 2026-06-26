@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -27,6 +28,23 @@ DEFAULT_TTL_BY_TOOL: dict[str, int] = {
     "kb_search": 86_400,  # 1 day
     "compare_stocks": 300,
 }
+
+
+def _sanitize_non_finite(obj: Any) -> Any:
+    """递归把 ±inf / NaN 的 float 换成 None。
+
+    根因防护:工具返回 dict 里若有非有限 float(如某工具派生比率除零→inf),
+    写 PG 的 JSONB 列时 json 会出 'Infinity'/'NaN' → psycopg InvalidTextRepresentation
+    → 整事务被毒 → 后续 DB 操作全挂 → 采轨停滞。在缓存写库前统一清洗,覆盖所有工具
+    (单个工具自己滤是补丁,这里是底座)。
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _sanitize_non_finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_non_finite(v) for v in obj]
+    return obj
 
 
 class CacheHit(StrEnum):
@@ -74,7 +92,8 @@ class ToolResultCache:
                 return dict(row.result), CacheHit.HIT
 
             status = CacheHit.EXPIRED if row else CacheHit.MISS
-            new_result = await compute_fn()
+            # 写库前清洗非有限值(±inf/NaN),否则 JSONB 写入毒事务拖垮整轮(见 _sanitize_non_finite)。
+            new_result = _sanitize_non_finite(await compute_fn())
             await self._upsert(
                 sess,
                 key,
