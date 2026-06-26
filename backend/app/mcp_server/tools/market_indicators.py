@@ -65,18 +65,20 @@ TOOL_DEF = Tool(
 
 
 async def handle(args: dict[str, Any]) -> list[TextContent]:
+    from app.mcp_server._as_of import eval_as_of
     from app.services.tushare_factory import build_tushare_service
 
     metric = args.get("metric")
     ts_code = args["ts_code"]
     tushare = build_tushare_service()
+    _aso = eval_as_of()  # 评测钉基准日:估值/快照透明截到 ≤as_of(模型不可见)
 
     if metric == "daily_basic":
         from app.tools.get_daily_basic import DailyBasicArgs, GetDailyBasicTool
 
         tool = GetDailyBasicTool(tushare=tushare)
         validated = DailyBasicArgs.model_validate(
-            {"ts_code": ts_code, "trade_date": args.get("trade_date")}
+            {"ts_code": ts_code, "trade_date": _aso or args.get("trade_date")}
         )
         result = await tool.run(validated)
     elif metric == "pe_history":
@@ -87,6 +89,8 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
             "ts_code": ts_code,
             "years_back": args.get("years_back", 5),
         }
+        if _aso:
+            payload["as_of"] = _aso
         if "current_pe" in args:
             payload["current_pe"] = args["current_pe"]
         validated = PeHistoryArgs.model_validate(payload)

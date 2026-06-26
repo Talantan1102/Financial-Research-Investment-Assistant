@@ -123,6 +123,14 @@ async def run_passk(
     answers: dict[str, str] = {}  # case_id -> 末次 agent 答案(供离线重判)
     trajectories: list[dict] = []
 
+    # 钉基准日给 MCP 数据工具:子进程继承本 env,透明把"取最新/当前"截到 ≤as_of
+    # (模型不可见,见 app/mcp_server/_as_of.py)。须在起子进程前设。
+    import os as _os
+
+    from app.mcp_server._as_of import ENV as _AS_OF_ENV
+
+    _os.environ[_AS_OF_ENV] = as_of
+
     try:
         async with MCPClient.from_subprocess(profile="chat_tools") as mcp_client:
             singletons = await build_heavy_singletons(
