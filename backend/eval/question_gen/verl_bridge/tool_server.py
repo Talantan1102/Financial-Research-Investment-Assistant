@@ -15,7 +15,7 @@ from app.tools.base import ToolError
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from eval.question_gen.verl_bridge.tool_box import ToolBox
+from eval.question_gen.verl_bridge.mcp_tool_box import McpToolBox
 
 
 class _ExecReq(BaseModel):
@@ -28,7 +28,7 @@ class _SessReq(BaseModel):
 
 
 def build_app(*, tushare: Any, skills_root: str, workdir_root: str) -> FastAPI:
-    box = ToolBox(tushare=tushare, skills_root=skills_root, workdir_root=workdir_root)
+    box = McpToolBox(tushare=tushare, skills_root=skills_root, workdir_root=workdir_root)
     sessions: dict[str, dict[str, Any]] = {}
     app = FastAPI(title="D3 verl tool-server")
 
