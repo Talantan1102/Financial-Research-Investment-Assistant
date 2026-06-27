@@ -56,7 +56,14 @@ _SNAPSHOT_COLS = ("pe", "pb", "turnover_rate", "dv_ratio")
 
 _FINANCIAL_INDICATORS = ("ROE", "资产负债率", "毛利率", "营收", "净利")
 _FINANCIAL_TOL = {ind: {"kind": "rel", "value": 0.01} for ind in _FINANCIAL_INDICATORS}
-_FINA_COLS = ("roe", "debt_to_assets", "grossprofit_margin", "or_yoy", "q_sales_yoy", "netprofit_yoy")
+_FINA_COLS = (
+    "roe",
+    "debt_to_assets",
+    "grossprofit_margin",
+    "or_yoy",
+    "q_sales_yoy",
+    "netprofit_yoy",
+)
 _INCOME_COLS = ("revenue", "n_income")
 
 # 财报核对:只核对金额类(营收/净利),容差 ±1%

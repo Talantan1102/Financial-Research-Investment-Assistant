@@ -333,8 +333,10 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
     _timeout = float(os.getenv("LLM_HTTP_TIMEOUT_S", "90"))
     _retries = int(os.getenv("LLM_MAX_RETRIES", "1"))
     raw_client = OpenAI(
-        api_key=config.api_key, base_url=config.base_url,
-        timeout=_timeout, max_retries=_retries,
+        api_key=config.api_key,
+        base_url=config.base_url,
+        timeout=_timeout,
+        max_retries=_retries,
     )
     # LangSmith 追踪(P0):LANGSMITH_TRACING=true 时把 client 包一层,自动把每次 LLM
     # 调用的 prompt/completion/token/latency 作为 run 发到 LangSmith。包装锁在这个 DI
@@ -345,8 +347,10 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
 
         raw_client = wrap_openai(raw_client)
     async_raw = AsyncOpenAI(
-        api_key=config.api_key, base_url=config.base_url,
-        timeout=_timeout, max_retries=_retries,
+        api_key=config.api_key,
+        base_url=config.base_url,
+        timeout=_timeout,
+        max_retries=_retries,
     )
     adapter = _OpenAIAdapter(client=raw_client, model=model, async_client=async_raw)
     if trace_service is None:

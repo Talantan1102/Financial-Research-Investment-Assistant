@@ -6,7 +6,6 @@
 
 import pandas as pd
 import pytest
-
 from app.tools.base import ToolError
 from app.tools.get_stock_daily import GetStockDailyArgs, GetStockDailyTool
 
@@ -31,7 +30,9 @@ async def test_returns_close_series_sorted():
     )
     tushare = _FakeTushare(df)
     tool = GetStockDailyTool(tushare=tushare)
-    out = await tool.run(GetStockDailyArgs(ts_code="000938.SZ", start_date="20260312", end_date="20260612"))
+    out = await tool.run(
+        GetStockDailyArgs(ts_code="000938.SZ", start_date="20260312", end_date="20260612")
+    )
     # 传参透传给服务
     assert tushare.calls == [("000938.SZ", "20260312", "20260612")]
     # 返回按日期升序的序列:close(算涨幅/回撤)+ pct_chg(算波动/相关,与 Path A 对齐)

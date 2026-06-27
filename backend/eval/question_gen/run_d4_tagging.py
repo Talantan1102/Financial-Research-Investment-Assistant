@@ -58,8 +58,11 @@ async def run_d4(
     if limit:
         cases = cases[:limit]
     by_id = {c.case_id: c for c in cases}
-    print(f"[D4] {len(cases)} 题 | base={base_model}@sglang n={n_base} | "
-          f"strong={strong_model}@maas k={k_strong} | concurrency={concurrency}", flush=True)
+    print(
+        f"[D4] {len(cases)} 题 | base={base_model}@sglang n={n_base} | "
+        f"strong={strong_model}@maas k={k_strong} | concurrency={concurrency}",
+        flush=True,
+    )
 
     # 全线 thinking-on
     os.environ["LLM_QWEN3_THINKING"] = "on"
@@ -97,11 +100,15 @@ async def run_d4(
 
     # 概览
     from collections import Counter
+
     labels = Counter(r["tags"]["label"] for r in rows)
     in_rl = sum(r["tags"]["in_rl"] for r in rows)
     prime = sum(r["tags"]["prime"] for r in rows)
     clean_total = sum(r["sft_clean_count"] for r in rows)
-    print(f"[D4] 分带: {dict(labels)} | in_rl={in_rl} prime={prime} | 干净轨迹合计={clean_total}", flush=True)
+    print(
+        f"[D4] 分带: {dict(labels)} | in_rl={in_rl} prime={prime} | 干净轨迹合计={clean_total}",
+        flush=True,
+    )
     return {"base": base, "rows": rows, "labels": dict(labels)}
 
 

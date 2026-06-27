@@ -14,8 +14,11 @@
     --candidate eval/question_gen/data/train.jsonl \
     --out eval/question_gen/data/d4_overnight/sft_train.jsonl --ideal 8 --max-per-case 2
 """
+
 from __future__ import annotations
-import argparse, json
+
+import argparse
+import json
 from collections import defaultdict
 from pathlib import Path
 
@@ -31,8 +34,11 @@ def main() -> None:
     ap.add_argument("--max-per-case", type=int, default=2)
     # 质量审计确认的脏 case(叙事幻觉/答案错):oracle passed=True 但人工/agent 复核不合格。
     # 逐 case 剔除(逗号分隔 case_id 子串)。见 sft-quality-audit workflow 结论。
-    ap.add_argument("--exclude-cases", default="qg-双指标-600871.SH-1y-2884",
-                    help="逗号分隔,命中子串的 case 整个剔除(确认的幻觉/错答样本)")
+    ap.add_argument(
+        "--exclude-cases",
+        default="qg-双指标-600871.SH-1y-2884",
+        help="逗号分隔,命中子串的 case 整个剔除(确认的幻觉/错答样本)",
+    )
     args = ap.parse_args()
     exclude = [s for s in args.exclude_cases.split(",") if s.strip()]
 
@@ -44,10 +50,10 @@ def main() -> None:
     by_intent: dict[str, int] = defaultdict(int)
     out_rows = []
     for f in sorted(args.strong.glob("shard_*/trajectories_raw.jsonl")):
-        for l in open(f):
-            if not l.strip():
+        for line in f.read_text().splitlines():
+            if not line.strip():
                 continue
-            r = json.loads(l)
+            r = json.loads(line)
             stats["total"] += 1
             if any(x in r["case_id"] for x in exclude):
                 stats["excluded_dirty"] += 1
@@ -65,10 +71,15 @@ def main() -> None:
             per_case[cid] += 1
             intent = intent_of.get(cid, "?")
             by_intent[intent] += 1
-            out_rows.append({
-                "case_id": cid, "intent": intent, "model": r.get("model"),
-                "n_steps": r.get("n_steps"), "messages": r["messages"],
-            })
+            out_rows.append(
+                {
+                    "case_id": cid,
+                    "intent": intent,
+                    "model": r.get("model"),
+                    "n_steps": r.get("n_steps"),
+                    "messages": r["messages"],
+                }
+            )
             stats["kept"] += 1
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -81,8 +92,10 @@ def main() -> None:
         print(f"  ⚠ {missing_passed} 条缺 passed 字段(改前采的,当不正确丢弃)")
     if stats.get("excluded_dirty"):
         print(f"  剔除审计确认脏样本(幻觉/错答): {stats['excluded_dirty']} 条 (case: {exclude})")
-    print(f"  保留(干净∧正确,每case≤{args.max_per_case}) = {stats['kept']} 条 "
-          f"| 超额丢弃 {stats['dropped_over_cap']} | 覆盖 {len(per_case)} 题")
+    print(
+        f"  保留(干净∧正确,每case≤{args.max_per_case}) = {stats['kept']} 条 "
+        f"| 超额丢弃 {stats['dropped_over_cap']} | 覆盖 {len(per_case)} 题"
+    )
     print(f"  per-intent: {dict(by_intent)}")
     print(f"  → 写出 {args.out} ({stats['kept']} 行)")
 

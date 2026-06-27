@@ -161,7 +161,9 @@ def main() -> None:
     }
     must_rerun = ["tool_fixed_rerun", "coverage_rerun", "pending_strong"]
     runnable = sum(by_reason.get(r, 0) for r in must_rerun)
-    lines.append(f"**必须重采(A+B+C)= {runnable} 题**;阻塞(D)= {by_reason.get('blocked_needs_fix',0)};未采到(E,信息性)= {by_reason.get('pending_current_run',0)}\n")
+    lines.append(
+        f"**必须重采(A+B+C)= {runnable} 题**;阻塞(D)= {by_reason.get('blocked_needs_fix', 0)};未采到(E,信息性)= {by_reason.get('pending_current_run', 0)}\n"
+    )
     for reason in must_rerun + ["blocked_needs_fix", "pending_current_run"]:
         if reason not in by_reason:
             continue

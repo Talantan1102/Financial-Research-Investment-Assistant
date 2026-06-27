@@ -501,8 +501,7 @@ class ToolHub:
             # 同一错法无限 retry 撞 max_steps(实测 qwen3.7-max 把 data 当 JSON 字符串传,
             # 反馈却只说"1 validation error",自我修正不了)。逐错暴露后模型下一步即可纠。
             detail = "; ".join(
-                f"{'.'.join(str(p) for p in e['loc']) or '?'}: {e['msg']}"
-                for e in exc.errors()
+                f"{'.'.join(str(p) for p in e['loc']) or '?'}: {e['msg']}" for e in exc.errors()
             )[:_ERR_MSG_LEN]
             return f"[参数校验失败] {detail}。参数要求:{fields}"
         if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):

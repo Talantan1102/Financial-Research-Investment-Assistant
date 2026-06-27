@@ -44,7 +44,9 @@ _RUN_PY_SCHEMA = {
         "description": "执行 Python 做数值计算。把最终结果赋给变量 result(如 result=(a/b-1)*100)。",
         "parameters": {
             "type": "object",
-            "properties": {"code": {"type": "string", "description": "Python 代码;结果赋给 result"}},
+            "properties": {
+                "code": {"type": "string", "description": "Python 代码;结果赋给 result"}
+            },
             "required": ["code"],
         },
     },
@@ -69,14 +71,22 @@ def build(src_jsonl: str, out_dir: str, *, n: int = 16) -> None:
             f"{c.question}\n股票代码 {ts};区间 [{wd[0]}, {wd[1]}](as_of={c.meta.get('as_of')})。"
             f"涨幅(%) = (区间末收盘/区间初收盘 - 1)*100。"
         )
-        gt = {"gold": c.gold, "gold_shape": "scalar", "tolerance": c.tolerance, "candidate_names": []}
+        gt = {
+            "gold": c.gold,
+            "gold_shape": "scalar",
+            "tolerance": c.tolerance,
+            "candidate_names": [],
+        }
         rows.append(
             {
                 "data_source": "fin_indicator_oracle",
                 "agent_name": "tool_agent",
                 "prompt": [{"role": "system", "content": _SYS}, {"role": "user", "content": user}],
                 "ability": c.intent,
-                "reward_model": {"style": "rule", "ground_truth": json.dumps(gt, ensure_ascii=False)},
+                "reward_model": {
+                    "style": "rule",
+                    "ground_truth": json.dumps(gt, ensure_ascii=False),
+                },
                 "extra_info": {"index": len(rows), "case_id": c.case_id, "ts_code": ts},
             }
         )
@@ -88,8 +98,16 @@ def build(src_jsonl: str, out_dir: str, *, n: int = 16) -> None:
     pd.DataFrame(rows[: max(1, n // 4)]).to_parquet(out / "val.parquet")
     proxy = "eval.question_gen.verl_bridge.http_tool_proxy.HttpToolProxy"
     tools = [
-        {"class_name": proxy, "config": {"type": "native", "server_url": _SERVER, "tool_name": "get_stock_daily"}, "tool_schema": _DATA_TOOL_SCHEMA},
-        {"class_name": proxy, "config": {"type": "native", "server_url": _SERVER, "tool_name": "run_python"}, "tool_schema": _RUN_PY_SCHEMA},
+        {
+            "class_name": proxy,
+            "config": {"type": "native", "server_url": _SERVER, "tool_name": "get_stock_daily"},
+            "tool_schema": _DATA_TOOL_SCHEMA,
+        },
+        {
+            "class_name": proxy,
+            "config": {"type": "native", "server_url": _SERVER, "tool_name": "run_python"},
+            "tool_schema": _RUN_PY_SCHEMA,
+        },
     ]
     (out / "tool_config.yaml").write_text(
         yaml.safe_dump({"tools": tools}, allow_unicode=True, sort_keys=False), encoding="utf-8"

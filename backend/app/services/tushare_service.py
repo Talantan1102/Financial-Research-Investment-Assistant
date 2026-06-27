@@ -46,7 +46,12 @@ class TushareService(Protocol):
         end_date: str | None = None,
     ) -> pd.DataFrame: ...
     async def get_pe_history(
-        self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None, as_of: str | None = None
+        self,
+        *,
+        ts_code: str,
+        years_back: int = 5,
+        current_pe: float | None = None,
+        as_of: str | None = None,
     ) -> pd.DataFrame: ...
     async def get_forecast(self, *, ts_code: str, period: str | None = None) -> pd.DataFrame: ...
     async def get_dividend_history(self, *, ts_code: str, years_back: int = 5) -> pd.DataFrame: ...
@@ -169,7 +174,9 @@ class RealTushareService:
     @staticmethod
     def _n_years_ago(n: int, *, as_of: str | None = None) -> str:
         # relativedelta avoids leap-year drift (5 days over 5 years vs timedelta(days=365*n)).
-        base = datetime.strptime(as_of, "%Y%m%d").replace(tzinfo=UTC) if as_of else datetime.now(UTC)
+        base = (
+            datetime.strptime(as_of, "%Y%m%d").replace(tzinfo=UTC) if as_of else datetime.now(UTC)
+        )
         return (base - relativedelta(years=n)).strftime("%Y%m%d")
 
     async def get_daily_basic(

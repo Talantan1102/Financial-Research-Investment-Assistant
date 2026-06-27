@@ -6,9 +6,8 @@
 
 import asyncio
 
-from pydantic import BaseModel
-
 from eval.question_gen.verl_tool_adapter import VerlBackendToolAdapter
+from pydantic import BaseModel
 
 
 class _Args(BaseModel):
@@ -29,7 +28,11 @@ class _FakeBackendTool:
     def schema_for_llm(self) -> dict:
         return {
             "type": "function",
-            "function": {"name": self.name, "description": "取指数日线", "parameters": {"type": "object"}},
+            "function": {
+                "name": self.name,
+                "description": "取指数日线",
+                "parameters": {"type": "object"},
+            },
         }
 
     async def run(self, args: BaseModel) -> dict:
@@ -49,7 +52,9 @@ def test_adapter_delegates_run_with_args_schema():
     tool = VerlBackendToolAdapter(backend_tool=bt)
     iid, _ = asyncio.run(tool.create(create_kwargs={}))
     resp, tool_reward, _ = asyncio.run(
-        tool.execute(iid, {"ts_code": "000938.SZ", "start_date": "20260312", "end_date": "20260612"})
+        tool.execute(
+            iid, {"ts_code": "000938.SZ", "start_date": "20260312", "end_date": "20260612"}
+        )
     )
     # 用后端 args_schema 校验后调真实 run();结果回文本;工具不给 reward
     assert isinstance(bt.calls[0], _Args) and bt.calls[0].ts_code == "000938.SZ"

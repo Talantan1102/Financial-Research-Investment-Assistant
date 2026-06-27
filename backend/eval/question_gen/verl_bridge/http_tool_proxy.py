@@ -47,7 +47,9 @@ class HttpToolProxy(BaseTool):
             import httpx
 
             # trust_env=False:忽略 HTTP(S)_PROXY,避免本地 server 被全局代理(如 127.0.0.1:7897)劫持
-            self._client = httpx.AsyncClient(base_url=self._server_url, timeout=60.0, trust_env=False)
+            self._client = httpx.AsyncClient(
+                base_url=self._server_url, timeout=60.0, trust_env=False
+            )
         return self._client
 
     async def create(

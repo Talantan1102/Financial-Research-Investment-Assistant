@@ -41,7 +41,12 @@ def test_scalar_wrong_scores_zero():
 
 def test_accepts_dict_ground_truth_too():
     # ground_truth 也可能已是 dict(非 JSON 串),要兼容
-    gt = {"gold": 1.0, "gold_shape": "scalar", "tolerance": {"kind": "abs", "value": 0.01}, "candidate_names": []}
+    gt = {
+        "gold": 1.0,
+        "gold_shape": "scalar",
+        "tolerance": {"kind": "abs", "value": 0.01},
+        "candidate_names": [],
+    }
     out = oracle_reward.compute_score("fin", "答案是 1.0", gt)
     assert out["score"] == 1.0
 
@@ -56,7 +61,6 @@ def test_tail_clip_ignores_midtrajectory_number():
 def test_no_parseable_answer_zero_format():
     out = oracle_reward.compute_score("fin", "我不知道。", _gt(-5.165912))
     assert out["score"] == 0.0
-
 
 
 def test_no_intent_no_extra_key():

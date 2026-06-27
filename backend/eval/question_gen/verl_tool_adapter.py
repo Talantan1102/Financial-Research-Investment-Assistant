@@ -64,7 +64,11 @@ class VerlBackendToolAdapter(BaseTool):
             result = await self._tool.run(args)
         except Exception as e:  # noqa: BLE001 — rollout 内任何工具异常都该转成可读反馈
             return ToolResponse(text=f"[tool error] {type(e).__name__}: {e}"), 0.0, {}
-        text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
+        text = (
+            result
+            if isinstance(result, str)
+            else json.dumps(result, ensure_ascii=False, default=str)
+        )
         return ToolResponse(text=text), 0.0, {}
 
     async def calc_reward(self, instance_id: str, **kwargs: Any) -> float:

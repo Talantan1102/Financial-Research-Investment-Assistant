@@ -99,8 +99,11 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
 
         tool = GetFinancialsTool(tushare=tushare)  # type: ignore[assignment]
         validated = FinancialsArgs.model_validate(
-            {"ts_code": ts_code, "period": args.get("period", "latest"),
-             "end_date": end_date}  # 传通期间末:问"2024年报"不再丢成"最新期"
+            {
+                "ts_code": ts_code,
+                "period": args.get("period", "latest"),
+                "end_date": end_date,
+            }  # 传通期间末:问"2024年报"不再丢成"最新期"
         )
         result = await tool.run(validated)
     else:

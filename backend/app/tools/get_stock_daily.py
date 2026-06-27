@@ -43,11 +43,15 @@ class GetStockDailyTool(Tool):
         if self._tushare is None:
             raise ToolError("tushare not configured — cannot fetch daily data")
         try:
-            df = await self._tushare.get_daily(ts_code=v.ts_code, start=v.start_date, end=v.end_date)
+            df = await self._tushare.get_daily(
+                ts_code=v.ts_code, start=v.start_date, end=v.end_date
+            )
         except Exception as exc:  # noqa: BLE001 — 转成工具层错误
             raise ToolError(f"get_daily failed: {exc}") from exc
         if df is None or df.empty:
-            raise ToolError(f"No daily data for ts_code={v.ts_code!r} in [{v.start_date},{v.end_date}]")
+            raise ToolError(
+                f"No daily data for ts_code={v.ts_code!r} in [{v.start_date},{v.end_date}]"
+            )
         ordered = df.sort_values("trade_date")
         _has_pct = "pct_chg" in ordered.columns
 

@@ -11,12 +11,17 @@
   PYTHONPATH=backend LLM_QWEN3_THINKING=on LLM_BASE_URL=http://127.0.0.1:30000/v1 \
   python -m eval.question_gen.overnight_track_a_base --out <持久盘dir> --n-base 8 --shard 100
 """
+
 from __future__ import annotations
-import argparse, asyncio, json, time
+
+import argparse
+import asyncio
+import time
 from collections import defaultdict
 from pathlib import Path
 
-from eval.question_gen import case as case_mod, runner, tag_cases
+from eval.question_gen import case as case_mod
+from eval.question_gen import runner, tag_cases
 
 
 def intent_round_robin(cases: list) -> list:
@@ -33,11 +38,14 @@ def intent_round_robin(cases: list) -> list:
     return out
 
 
-async def run_shard(shard_cases: list, *, n_base: int, model: str, concurrency: int,
-                    out_path: Path) -> dict:
+async def run_shard(
+    shard_cases: list, *, n_base: int, model: str, concurrency: int, out_path: Path
+) -> dict:
     base = await runner.run_passk(shard_cases, k=n_base, model=model, concurrency=concurrency)
     counts: dict[str, int] = base["per_case_counts"]
-    rows = tag_cases.build_manifest_rows(counts, n_base, {}, shard_cases)  # clean={} → sft_clean_count=0
+    rows = tag_cases.build_manifest_rows(
+        counts, n_base, {}, shard_cases
+    )  # clean={} → sft_clean_count=0
     tag_cases.dump_manifest(rows, out_path)
     labels: dict[str, int] = defaultdict(int)
     for r in rows:
@@ -47,8 +55,7 @@ async def run_shard(shard_cases: list, *, n_base: int, model: str, concurrency: 
 
 async def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--candidate", type=Path,
-                    default=Path("eval/question_gen/data/train.jsonl"))
+    ap.add_argument("--candidate", type=Path, default=Path("eval/question_gen/data/train.jsonl"))
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--n-base", type=int, default=8)
     ap.add_argument("--shard", type=int, default=100)
@@ -57,9 +64,12 @@ async def main() -> None:
     args.out.mkdir(parents=True, exist_ok=True)
 
     cases = intent_round_robin(case_mod.load_jsonl(args.candidate))
-    shards = [cases[i:i + args.shard] for i in range(0, len(cases), args.shard)]
-    print(f"[TrackA] {len(cases)} 题 → {len(shards)} 片 × {args.shard} | n={args.n_base} "
-          f"conc={args.concurrency} | out={args.out}", flush=True)
+    shards = [cases[i : i + args.shard] for i in range(0, len(cases), args.shard)]
+    print(
+        f"[TrackA] {len(cases)} 题 → {len(shards)} 片 × {args.shard} | n={args.n_base} "
+        f"conc={args.concurrency} | out={args.out}",
+        flush=True,
+    )
 
     done_labels: dict[str, int] = defaultdict(int)
     for idx, shard in enumerate(shards):
@@ -70,17 +80,26 @@ async def main() -> None:
         for attempt in (1, 2):
             t0 = time.perf_counter()
             try:
-                res = await run_shard(shard, n_base=args.n_base, model="qwen3-8b",
-                                      concurrency=args.concurrency, out_path=out_path)
+                res = await run_shard(
+                    shard,
+                    n_base=args.n_base,
+                    model="qwen3-8b",
+                    concurrency=args.concurrency,
+                    out_path=out_path,
+                )
                 dt = time.perf_counter() - t0
                 for k, v in res["labels"].items():
                     done_labels[k] += v
-                print(f"[TrackA] 片{idx:02d} ✅ {res['rows']}题 {res['labels']} "
-                      f"pass@{args.n_base}={res['pass_at_k']} {dt:.0f}s | 累计{dict(done_labels)}",
-                      flush=True)
+                print(
+                    f"[TrackA] 片{idx:02d} ✅ {res['rows']}题 {res['labels']} "
+                    f"pass@{args.n_base}={res['pass_at_k']} {dt:.0f}s | 累计{dict(done_labels)}",
+                    flush=True,
+                )
                 break
             except Exception as e:  # noqa: BLE001
-                print(f"[TrackA] 片{idx:02d} 第{attempt}次失败: {type(e).__name__}: {e}", flush=True)
+                print(
+                    f"[TrackA] 片{idx:02d} 第{attempt}次失败: {type(e).__name__}: {e}", flush=True
+                )
                 if attempt == 2:
                     print(f"[TrackA] 片{idx:02d} 两次失败,跳过", flush=True)
     print(f"[TrackA] 全部完成,累计分带 {dict(done_labels)}", flush=True)

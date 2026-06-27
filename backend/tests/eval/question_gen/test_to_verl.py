@@ -39,9 +39,9 @@ def test_row_core_structure():
 def test_ground_truth_carries_oracle_inputs():
     # reward_model.ground_truth 必须自带 judge() 需要的全部:gold/gold_shape/tolerance/candidate_names
     c = _case(gold=-5.16, tol={"kind": "rel_mult", "value": 0.005})
-    gt = to_verl.case_to_verl_row(c, split="val", index=0, candidate_names=["紫光股份"])["reward_model"][
-        "ground_truth"
-    ]
+    gt = to_verl.case_to_verl_row(c, split="val", index=0, candidate_names=["紫光股份"])[
+        "reward_model"
+    ]["ground_truth"]
     assert gt["gold"] == -5.16
     assert gt["gold_shape"] == "scalar"
     assert gt["tolerance"] == {"kind": "rel_mult", "value": 0.005}
@@ -56,6 +56,8 @@ def test_ranking_ground_truth_keeps_candidate_names():
         tol={},
         stocks=["000938.SZ", "000977.SZ"],
     )
-    row = to_verl.case_to_verl_row(c, split="test", index=3, candidate_names=["紫光股份", "浪潮信息"])
+    row = to_verl.case_to_verl_row(
+        c, split="test", index=3, candidate_names=["紫光股份", "浪潮信息"]
+    )
     assert row["reward_model"]["ground_truth"]["candidate_names"] == ["紫光股份", "浪潮信息"]
     assert row["reward_model"]["ground_truth"]["gold_shape"] == "ranking"

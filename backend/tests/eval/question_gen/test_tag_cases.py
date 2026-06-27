@@ -66,7 +66,10 @@ def _patch_run_passk(monkeypatch, base_counts, trajs_by_strong):
 
 async def test_run_tagging_produces_manifest(tmp_path, monkeypatch):
     # a 简单(ideal=4), b 中等(ideal=6)
-    cases = [_case("a", difficulty="简单"), _case("b", intent="financial_report", difficulty="中等")]
+    cases = [
+        _case("a", difficulty="简单"),
+        _case("b", intent="financial_report", difficulty="中等"),
+    ]
     cand = tmp_path / "cand.jsonl"
     case_mod.dump_jsonl(cases, cand)
 
@@ -96,8 +99,7 @@ async def test_run_tagging_produces_manifest(tmp_path, monkeypatch):
         {"k": 5, "model": "deepseek-chat", "collect": True},
     ]
     rows = {
-        r["case_id"]: r
-        for r in (json.loads(x) for x in manifest.read_text("utf-8").splitlines())
+        r["case_id"]: r for r in (json.loads(x) for x in manifest.read_text("utf-8").splitlines())
     }
     assert rows["a"]["pass_count"] == 5 and rows["a"]["n"] == 8
     assert rows["a"]["sft_clean_count"] == 1  # 4 条里仅 n_steps=3 干净

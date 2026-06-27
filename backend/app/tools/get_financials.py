@@ -98,9 +98,7 @@ class GetFinancialsTool(Tool):
         # 选问的那一期(非永远最新);字段对齐 gold:revenue / n_income。
         revenue: float = 0.0
         net_profit: float = 0.0
-        row = _select_period_row(
-            income_df, end_date=validated.end_date, period=validated.period
-        )
+        row = _select_period_row(income_df, end_date=validated.end_date, period=validated.period)
         if row is not None:
             revenue = _finite(row.get("revenue", row.get("total_revenue", 0.0)))
             net_profit = _finite(row.get("n_income", row.get("n_income_attr_p", 0.0)))
@@ -117,9 +115,7 @@ class GetFinancialsTool(Tool):
         bps: float | None = None  # 每股净资产(元/股);估值题反推 PB 理论价用
         gross_margin: float | None = None  # 销售毛利率(grossprofit_margin,%)
         debt_to_assets: float | None = None  # 资产负债率(debt_to_assets,%)
-        fi_row = _select_period_row(
-            fina_df, end_date=validated.end_date, period=validated.period
-        )
+        fi_row = _select_period_row(fina_df, end_date=validated.end_date, period=validated.period)
 
         if fi_row is not None:
             roe = _finite(fi_row.get("roe", 0.0))
