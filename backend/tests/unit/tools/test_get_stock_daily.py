@@ -25,8 +25,8 @@ class _FakeTushare:
 async def test_returns_close_series_sorted():
     df = pd.DataFrame(
         [
-            {"trade_date": "20260612", "close": 28.45},
-            {"trade_date": "20260312", "close": 30.00},
+            {"trade_date": "20260612", "close": 28.45, "pct_chg": -1.20},
+            {"trade_date": "20260312", "close": 30.00, "pct_chg": 0.85},
         ]
     )
     tushare = _FakeTushare(df)
@@ -34,12 +34,21 @@ async def test_returns_close_series_sorted():
     out = await tool.run(GetStockDailyArgs(ts_code="000938.SZ", start_date="20260312", end_date="20260612"))
     # 传参透传给服务
     assert tushare.calls == [("000938.SZ", "20260312", "20260612")]
-    # 返回按日期升序的收盘序列(让模型算 end/start-1)
+    # 返回按日期升序的序列:close(算涨幅/回撤)+ pct_chg(算波动/相关,与 Path A 对齐)
     assert out["ts_code"] == "000938.SZ"
     assert out["closes"] == [
-        {"trade_date": "20260312", "close": 30.00},
-        {"trade_date": "20260612", "close": 28.45},
+        {"trade_date": "20260312", "close": 30.00, "pct_chg": 0.85},
+        {"trade_date": "20260612", "close": 28.45, "pct_chg": -1.20},
     ]
+
+
+@pytest.mark.asyncio
+async def test_pct_chg_none_when_column_absent():
+    """tushare df 无 pct_chg 列(旧 mock/边角)→ pct_chg=None,不报错。"""
+    df = pd.DataFrame([{"trade_date": "20260312", "close": 30.00}])
+    tool = GetStockDailyTool(tushare=_FakeTushare(df))
+    out = await tool.run(GetStockDailyArgs(ts_code="X", start_date="20260101", end_date="20260312"))
+    assert out["closes"] == [{"trade_date": "20260312", "close": 30.00, "pct_chg": None}]
 
 
 @pytest.mark.asyncio

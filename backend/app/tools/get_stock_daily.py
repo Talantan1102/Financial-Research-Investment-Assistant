@@ -28,8 +28,9 @@ class GetStockDailyTool(Tool):
 
     name = "get_stock_daily"
     description = (
-        "取某只 A 股在 [start_date, end_date] 区间的日线收盘价序列(升序)。"
-        "用于自行计算涨幅、回撤、波动率等——本工具只返回原始收盘价,不替你算。"
+        "取某只 A 股在 [start_date, end_date] 区间的日线序列(升序),每项含 "
+        "close(收盘价)与 pct_chg(当日涨跌幅 %)。用于自行计算涨幅/回撤/CAGR(用 close)"
+        "与波动率/相关性(用 pct_chg)——本工具只返回原始数据,不替你算。"
         "ts_code 如 '000938.SZ';日期格式 YYYYMMDD。"
     )
     args_schema = GetStockDailyArgs
@@ -48,8 +49,23 @@ class GetStockDailyTool(Tool):
         if df is None or df.empty:
             raise ToolError(f"No daily data for ts_code={v.ts_code!r} in [{v.start_date},{v.end_date}]")
         ordered = df.sort_values("trade_date")
+        _has_pct = "pct_chg" in ordered.columns
+
+        def _pct(r: Any) -> float | None:
+            if not _has_pct:
+                return None
+            val = r["pct_chg"]
+            return float(val) if val == val else None  # NaN → None
+
+        # close(算涨幅/回撤/CAGR)+ pct_chg(算波动/相关,与 Path A MCP get_daily 对齐:
+        # 这两个指标 gold 走 tushare pct_chg/100 而非 close 比值,缺 pct_chg 会逼模型用
+        # close 比值 → 拆股/分红系统性偏差)。
         closes = [
-            {"trade_date": str(r["trade_date"]), "close": float(r["close"])}
+            {
+                "trade_date": str(r["trade_date"]),
+                "close": float(r["close"]),
+                "pct_chg": _pct(r),
+            }
             for _, r in ordered.iterrows()
         ]
         return {"ts_code": v.ts_code, "closes": closes}
