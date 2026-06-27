@@ -38,6 +38,24 @@ stock_study→get_stock_daily · snapshot→daily_basic · financial_report/veri
 valuation→financials+daily_basic · valuation_percentile→pe_history · position/portfolio→quote/stock_daily ·
 多股→lookup_ts_code · 计算→run_python。**无缺失工具。**
 
+## 工具界面对齐(T1+T2,2026-06-27)—— SFT/RL/生产用同一套 MCP 工具面
+
+字段对齐(上)只解决"工具返回对不对",还有更大的 **train/serve skew**:SFT 采轨/生产用 MCP
+**分组工具**(get_financial_statements/get_market_indicators + search_tools 渐进披露,~23 件),
+而 verl RL 旧 tool_server 只摆**原子 6 件**(get_financials…)。模型 SFT 学的菜单 ≠ RL 菜单 → 白训。
+
+**修(A+stub,plan 2026-06-27-verl-mcp-tool-alignment-plan.md)**:
+- **T1** `_as_of` 加 ContextVar:as_of 逐调用注入(并发安全),替代进程级 env(verl 并发会串)。
+- **T2** `McpToolBox` 替 ToolBox:schemas() = TOOL_DOCS 全表 thin_schema + search_tools(生产同源);
+  exec() = search_tools→search_docs(纯函数)/ run_python→沙箱 / 数据工具→同一份 MCP handle()
+  逐调用 as_of / memory·kb·web·news·portfolio→stub(要 Milvus/PG/Bocha,RL 不起、非 reward 必需)。
+
+**验收(AC1-7 全绿)**:
+- AC1-6(fria 内):schema=SFT 同款分组名(原子名消失)/ 数据真返+as_of 钉对 / **并发 as_of 不串(真 tushare 两 as_of 各返各期)** / stub 不崩 / 零重依赖启动 / 回归+lint(13 测)。
+- **AC7 端到端 verl GRPO 2-step**(2×A800,7:54,build_mcp_smoke 数据集):rollout 经 HTTP 打 tool_server
+  **1389 次全 200**、用新 MCP 工具面;**reward 非零 step1=0.375 / step2=0.344**(max 1.0,有 rollout 做对题),
+  与 D3 旧 atomic smoke(0.375/0.281)同档 → **对齐不掉点,且工具面现与 SFT/生产一致**。
+
 ## 残留(非阻塞)
 
 - get_financials 的**内部描述** end_date nudge 比 MCP 版弱(MCP:"MUST pass else latest")。
