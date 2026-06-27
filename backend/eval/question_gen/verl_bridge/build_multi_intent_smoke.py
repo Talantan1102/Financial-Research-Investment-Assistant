@@ -78,7 +78,7 @@ def build(src_jsonl: str, out_dir: str, *, per_intent: int = 3) -> None:
             by_intent.setdefault(c.intent, [])
             if len(by_intent[c.intent]) < per_intent:
                 by_intent[c.intent].append(c)
-    rows = []
+    rows: list[dict] = []
     for intent, cs in by_intent.items():
         for c in cs:
             user = f"{c.question}\n{_context(c)}"

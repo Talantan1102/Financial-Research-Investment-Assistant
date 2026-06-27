@@ -44,13 +44,13 @@ def main() -> None:
 
     intent_of = {c.case_id: c.intent for c in case_mod.load_jsonl(args.candidate)}
 
-    stats = defaultdict(int)
+    stats: dict[str, int] = defaultdict(int)
     missing_passed = 0
     per_case: dict[str, int] = defaultdict(int)
     by_intent: dict[str, int] = defaultdict(int)
     out_rows = []
     for f in sorted(args.strong.glob("shard_*/trajectories_raw.jsonl")):
-        for line in f.read_text().splitlines():
+        for line in f.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             r = json.loads(line)

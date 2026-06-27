@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from app.tools.base import Tool, ToolError
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from app.services.tushare_service import TushareService
 
 
@@ -19,7 +21,7 @@ class FinancialsArgs(BaseModel):
     end_date: str | None = None  # 指定期间末(YYYYMMDD,如 20241231=2024年报);给则精确选该期
 
 
-def _select_period_row(df, *, end_date: str | None, period: str):
+def _select_period_row(df: pd.DataFrame, *, end_date: str | None, period: str) -> pd.Series | None:
     """从多期历史财报 df 选目标期那一行。
 
     真 tushare 一次返回全历史(~100+ 期),早先 ``.iloc[0]`` 永远取最新期 → 问"2024年报"

@@ -63,7 +63,7 @@ async def main() -> None:
         sdir = args.out / f"shard_{idx:02d}"
         traj_f = sdir / "trajectories_raw.jsonl"
         if traj_f.exists():
-            n = len(traj_f.read_text().splitlines())
+            n = len(traj_f.read_text(encoding="utf-8").splitlines())
             print(f"[TrackB] 片{idx:02d} 已存在({n}轨迹),跳过(续跑)", flush=True)
             continue
         sdir.mkdir(parents=True, exist_ok=True)
@@ -77,7 +77,9 @@ async def main() -> None:
                     concurrency=args.concurrency,
                     collect_dir=sdir,
                 )
-                rows = [json.loads(line) for line in traj_f.read_text().splitlines()]
+                rows = [
+                    json.loads(line) for line in traj_f.read_text(encoding="utf-8").splitlines()
+                ]
                 halt: dict[str, int] = defaultdict(int)
                 for r in rows:
                     halt[r.get("halt_reason")] += 1

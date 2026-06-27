@@ -12,14 +12,14 @@ D = Path("eval/question_gen/data/d4_overnight")
 SOURCES = [D / "_tmp_consolidated.jsonl", D / "_tmp_6i.jsonl", D / "sft_stock_study.jsonl"]
 MAX_PER_CASE = 2
 
-cap = collections.Counter()
-by_intent = collections.Counter()
+cap: collections.Counter[str] = collections.Counter()
+by_intent: collections.Counter[str] = collections.Counter()
 cases = set()
 out = []
 for src in SOURCES:
     if not src.exists():
         continue
-    for line in src.read_text().splitlines():
+    for line in src.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         r = json.loads(line)

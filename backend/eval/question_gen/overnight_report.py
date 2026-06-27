@@ -18,7 +18,9 @@ from pathlib import Path
 def load_base(base_dir: Path) -> dict:
     rows = []
     for f in sorted(base_dir.glob("manifest_shard_*.jsonl")):
-        rows += [json.loads(line) for line in f.read_text().splitlines() if line.strip()]
+        rows += [
+            json.loads(line) for line in f.read_text(encoding="utf-8").splitlines() if line.strip()
+        ]
     by_label: dict[str, int] = defaultdict(int)
     by_intent_label: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     in_rl = prime = 0
@@ -43,7 +45,7 @@ def load_strong(strong_dir: Path) -> dict:
     shards = 0
     for f in sorted(strong_dir.glob("shard_*/trajectories_raw.jsonl")):
         shards += 1
-        for line in f.read_text().splitlines():
+        for line in f.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             r = json.loads(line)
@@ -88,7 +90,7 @@ def main() -> None:
     ap.add_argument("--strong", type=Path, required=True)
     args = ap.parse_args()
 
-    base = load_base(args.base) if args.base.exists() else {"n": 0}
+    base: dict = load_base(args.base) if args.base.exists() else {"n": 0}
     strong = load_strong(args.strong) if args.strong.exists() else {"traj": 0}
     cost = cost_by_model()
 

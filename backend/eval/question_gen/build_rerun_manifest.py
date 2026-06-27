@@ -62,7 +62,7 @@ def _load_candidates(path: Path) -> dict[str, dict]:
     out: dict[str, dict] = {}
     if not path.exists():
         return out
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         d = json.loads(line)
@@ -75,7 +75,7 @@ def _scan_trajectories(glob_dir: Path) -> dict[str, list[bool]]:
     """case_id -> [is_clean_correct ...] 跨所有片。"""
     by_case: dict[str, list[bool]] = collections.defaultdict(list)
     for tf in sorted(glob_dir.glob("shard_*/trajectories_raw.jsonl")):
-        for line in tf.read_text().splitlines():
+        for line in tf.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             try:
@@ -138,11 +138,15 @@ def main() -> None:
 
     # 写 manifest
     man = _OVN / "rerun_manifest.jsonl"
-    man.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    man.write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8"
+    )
 
     # 汇总
     by_reason = collections.Counter(r["reason"] for r in rows)
-    by_cat = collections.defaultdict(lambda: collections.Counter())
+    by_cat: dict[str, collections.Counter[str]] = collections.defaultdict(
+        lambda: collections.Counter()
+    )
     for r in rows:
         by_cat[r["reason"]][r["category"]] += 1
 
@@ -177,7 +181,7 @@ def main() -> None:
     )
 
     summ = _OVN / "rerun_summary.md"
-    summ.write_text("\n".join(lines) + "\n")
+    summ.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print("\n".join(lines))
     print(f"\n→ 清单:{man}")

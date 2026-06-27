@@ -114,7 +114,12 @@ class _BacktestTushareService:
         return pd.DataFrame()
 
     async def get_pe_history(
-        self, *, ts_code: str, years_back: int = 5, current_pe: float | None = None
+        self,
+        *,
+        ts_code: str,
+        years_back: int = 5,
+        current_pe: float | None = None,
+        as_of: str | None = None,
     ) -> pd.DataFrame:
         return pd.DataFrame()
 
