@@ -80,16 +80,24 @@ def build_memory_from_env() -> Any:
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory MCP: LLM unavailable, falling back to no-judge: %s", exc)
 
-    # Milvus client (best-effort)
+    # Milvus client (best-effort) —— 不可达时退化成 None,不阻塞调用方。
+    # 坑:MilvusClient(uri=...) 在 Milvus 不可达时不抛异常,而是无限阻塞在 gRPC
+    # `_wait_for_channel_ready`(pymilvus 默认无连接超时),使下面的 try/except 兜底
+    # 形同虚设 —— eval/离线场景(Milvus 没起)会让 build_heavy_singletons 永久挂死。
+    # 先用一个短超时 TCP 探针判活:端口未监听则立即 ECONNREFUSED → 落 except → None。
     milvus_client: Any = None
+    host = os.environ.get("MILVUS_HOST", "127.0.0.1")
+    port = int(os.environ.get("MILVUS_PORT", "19530"))
     try:
+        import socket
+
+        with socket.create_connection((host, port), timeout=2):
+            pass
         from pymilvus import MilvusClient
 
-        host = os.environ.get("MILVUS_HOST", "127.0.0.1")
-        port = int(os.environ.get("MILVUS_PORT", "19530"))
         milvus_client = MilvusClient(uri=f"http://{host}:{port}")
     except Exception as exc:  # noqa: BLE001
-        logger.warning("memory MCP: Milvus client init failed: %s", exc)
+        logger.warning("memory MCP: Milvus unavailable (%s) — 记忆降级无向量检索", exc)
 
     return HierarchicalMemory(
         pg_session_factory=SessionLocal,

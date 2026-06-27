@@ -44,19 +44,19 @@ if TYPE_CHECKING:
 
 
 def _extra_body_for(model: str) -> dict[str, Any]:
-    """qwen3 思考模型的 thinking 开关。
+    """qwen3 思考模型的 thinking 开关(两条线合一)。
 
-    默认关思考(生产/低延迟链路,历史行为不变);``LLM_QWEN3_THINKING=on`` 时不关,
-    走 chat template 默认的 thinking-on —— 供 reasoning-RL 训练线(D4 分带 / 采轨 /
-    评测,base 本地 sglang + 教师 qwen3.7-max)用同一思考模式,保分布对齐。
-    sglang 与 dashscope 对显式开关的参数风格不同(顶层 enable_thinking vs
-    chat_template_kwargs),但「不传任何参数」两端默认都是 thinking-on,故 on 档返回 {}。
-    非 qwen3 一律不传(避免传它们不认的参数)。
+    优先级:``LLM_QWEN3_THINKING=on`` 时一律不关思考(走 chat template 默认 thinking-on),
+    供 reasoning-RL 训练线(D4 分带 / 采轨 / 评测,base 本地 sglang + 教师 qwen3.7-max)用
+    同一思考模式、保分布对齐;未显式 on(默认)时按模型角色:max 级(qwen3-max / qwen3.7-max)
+    当 SFT teacher 开思考(reasoning 进轨迹),其余 qwen3(如学生 qwen3-8b)关思考(避免 thinking
+    把 tool_call args 搞坏,2026-06-18 实测)。非 qwen3 一律不传(避免传它们不认的参数)。
+    sglang 与 dashscope 对显式开关参数风格不同,但「不传」两端默认都 thinking-on,故 on 档返回 {}。
     """
     if model.startswith("qwen3"):
         if os.getenv("LLM_QWEN3_THINKING", "off").strip().lower() == "on":
             return {}
-        return {"enable_thinking": False}
+        return {"enable_thinking": "max" in model}
     return {}
 
 

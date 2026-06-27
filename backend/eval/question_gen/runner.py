@@ -203,6 +203,13 @@ async def run_passk(
                                 "n_steps": final.step,
                                 "halt_reason": final.halt_reason,
                                 "passed": bool(ok),
+                                "prompt_tokens": final.prompt_tokens_total,
+                                "completion_tokens": final.completion_tokens_total,
+                                "cached_tokens": final.cached_tokens_total,
+                                "budget_cny": final.budget_spent_cny,
+                                "reasoning_present": any(
+                                    m.get("reasoning_content") for m in final.messages
+                                ),
                             }
                         return (c.case_id, bool(ok), answer or "", traj)
                     except Exception:  # noqa: BLE001 — per-case 隔离
