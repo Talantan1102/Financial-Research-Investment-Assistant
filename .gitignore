@@ -107,3 +107,5 @@ backend/eval/question_gen/data/verl/
 backend/eval/question_gen/data/verl_smoke/
 backend/eval/question_gen/data/verl_multi/
 backend/eval/question_gen/data/d4_overnight/
+backend/eval/question_gen/data/sft_parquet/
+backend/eval/question_gen/data/verl_mcp_smoke/
