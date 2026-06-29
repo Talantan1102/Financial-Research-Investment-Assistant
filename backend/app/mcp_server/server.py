@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _CHAT_TOOL_MODULES = [
+    "app.mcp_server.tools.lookup_ts_code",
     "app.mcp_server.tools.get_stock_quote",
     "app.mcp_server.tools.financial_statements",
     "app.mcp_server.tools.market_indicators",
