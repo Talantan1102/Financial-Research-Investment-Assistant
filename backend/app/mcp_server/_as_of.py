@@ -24,9 +24,7 @@ import os
 ENV = "CHAT_TOOLS_AS_OF"
 
 # 逐调用基准日(asyncio task-local);默认 None → 回落 env。
-_ASOF_VAR: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "eval_as_of", default=None
-)
+_ASOF_VAR: contextvars.ContextVar[str | None] = contextvars.ContextVar("eval_as_of", default=None)
 
 
 def eval_as_of() -> str | None:

@@ -126,7 +126,8 @@ class McpToolBox:
         # 2. run_python:沙箱(run_with_state)。
         if tool_name == "run_python":
             validated = self._run_python.args_schema.model_validate(args)
-            return await self._run_python.run_with_state(validated, self._state)
+            # _StubState 是鸭子类型替身(仅 user_id,见其 docstring),mypy 看不出结构兼容
+            return await self._run_python.run_with_state(validated, self._state)  # type: ignore[arg-type]
 
         # 3. stub(重依赖/非数据工具):界面在,返占位,不碰重服务。
         if tool_name in _STUB_TOOLS:

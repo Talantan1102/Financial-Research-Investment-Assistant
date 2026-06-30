@@ -45,7 +45,7 @@ def _stratified(cases: list, n: int) -> list:
     rng = random.Random(_SEED)
     per = max(1, n // len(by_intent))
     out = []
-    for intent, group in sorted(by_intent.items()):
+    for _intent, group in sorted(by_intent.items()):
         g = sorted(group, key=lambda c: c.case_id)
         rng.shuffle(g)
         out.extend(g[:per])
@@ -88,18 +88,22 @@ def _table(base_path: Path, sft_path: Path) -> None:
     # 一致性:两边应跑同一批题
     same = set(b["case_ids"]) == set(s["case_ids"])
     intents = sorted(set(b["by_intent"]) | set(s["by_intent"]))
-    print(f"\n样本对齐: {'✅ 同一批题' if same else '⚠️ 题集不一致,慎比'}  (base n={b['n']}, sft n={s['n']})\n")
+    print(
+        f"\n样本对齐: {'✅ 同一批题' if same else '⚠️ 题集不一致,慎比'}  (base n={b['n']}, sft n={s['n']})\n"
+    )
     print(f"{'intent':<22} {'base':>12} {'sft':>12} {'Δ':>8}")
     print("-" * 56)
     for it in intents:
         bb = b["by_intent"].get(it, {})
         ss = s["by_intent"].get(it, {})
-        br = bb.get("rate", 0.0); sr = ss.get("rate", 0.0)
-        bt = f"{br:.0%}({bb.get('pass',0)}/{bb.get('total',0)})"
-        st = f"{sr:.0%}({ss.get('pass',0)}/{ss.get('total',0)})"
+        br = bb.get("rate", 0.0)
+        sr = ss.get("rate", 0.0)
+        bt = f"{br:.0%}({bb.get('pass', 0)}/{bb.get('total', 0)})"
+        st = f"{sr:.0%}({ss.get('pass', 0)}/{ss.get('total', 0)})"
         print(f"{it:<22} {bt:>12} {st:>12} {sr - br:>+7.0%}")
     print("-" * 56)
-    bo = b["overall"]; so = s["overall"]
+    bo = b["overall"]
+    so = s["overall"]
     bor, sor = bo["rate"], so["rate"]
     bt = f"{bor:.0%}({bo['pass']}/{bo['total']})"
     st = f"{sor:.0%}({so['pass']}/{so['total']})"

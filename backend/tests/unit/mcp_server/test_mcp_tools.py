@@ -19,8 +19,8 @@ def test_build_server_returns_server_instance() -> None:
     assert isinstance(s, Server)
 
 
-def test_build_server_lists_exactly_13_tools() -> None:
-    """The aggregated registry must contain exactly the 13 expected tool names.
+def test_build_server_lists_exactly_14_tools() -> None:
+    """The aggregated registry must contain exactly the 14 expected tool names.
 
     We introspect via s._mcp_tool_registry (attached by build_server() for
     testing) rather than calling the SDK's list_tools() handler directly,
@@ -41,6 +41,7 @@ def test_build_server_lists_exactly_13_tools() -> None:
         "web_search",
         "kb_search",
         "compare_stocks",
+        "lookup_ts_code",
         "get_daily",
         "get_index_daily",
         "get_fund_nav",

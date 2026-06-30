@@ -10,7 +10,10 @@ from eval.question_gen.verl_bridge.tool_server import build_app
 class _FakeTushare:
     async def get_daily(self, *, ts_code, start, end):
         return pd.DataFrame(
-            [{"trade_date": "20260312", "close": 30.0}, {"trade_date": "20260612", "close": 28.45}]
+            [
+                {"trade_date": "20260312", "open": 29.5, "high": 30.5, "low": 29.0, "close": 30.0},
+                {"trade_date": "20260612", "open": 28.0, "high": 28.9, "low": 27.8, "close": 28.45},
+            ]
         )
 
 
@@ -26,11 +29,15 @@ def _proxy(tmp_path, tool_name):
 
 
 @pytest.mark.asyncio
-async def test_proxy_data_tool_roundtrip(tmp_path):
-    p = _proxy(tmp_path, "get_stock_daily")
+async def test_proxy_data_tool_roundtrip(tmp_path, monkeypatch):
+    # 数据工具走 MCP handle → build_tushare_service() 工厂;在工厂层注入 Fake 取确定数据。
+    monkeypatch.setattr(
+        "app.services.tushare_factory.build_tushare_service", lambda: _FakeTushare()
+    )
+    p = _proxy(tmp_path, "get_daily")
     iid, _ = await p.create("r1")
     resp, reward, _ = await p.execute(
-        iid, {"ts_code": "000938.SZ", "start_date": "20260312", "end_date": "20260612"}
+        iid, {"ts_code": "000938.SZ", "start": "20260312", "end": "20260612"}
     )
     assert "28.45" in resp.text and reward == 0.0
     await p.release(iid)

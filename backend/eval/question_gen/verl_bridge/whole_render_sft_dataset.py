@@ -29,10 +29,8 @@ verl 自带 `MultiTurnSFTDataset` 是**逐轮** apply_chat_template 再拼接。
 from __future__ import annotations
 
 import torch
-import torch.nn.functional as F
-
-from verl.utils.dataset.multiturn_sft_dataset import MultiTurnSFTDataset
-from verl.utils.dataset.multiturn_sft_dataset import DatasetPadMode
+import torch.nn.functional as F  # noqa: N812
+from verl.utils.dataset.multiturn_sft_dataset import DatasetPadMode, MultiTurnSFTDataset
 from verl.utils.py_functional import convert_nested_value_to_list_recursive
 
 
@@ -79,7 +77,9 @@ class WholeRenderMultiTurnSFTDataset(MultiTurnSFTDataset):
         messages = convert_nested_value_to_list_recursive(row_dict[self.messages_key])
         tools = self.tools[item] if self.tools is not None else None
         enable_thinking = (
-            self.enable_thinking[item] if self.enable_thinking is not None else self.enable_thinking_default
+            self.enable_thinking[item]
+            if self.enable_thinking is not None
+            else self.enable_thinking_default
         )
         kwargs = {**self.apply_chat_template_kwargs}
         if enable_thinking is not None:
@@ -99,7 +99,9 @@ class WholeRenderMultiTurnSFTDataset(MultiTurnSFTDataset):
         attention_mask = enc["attention_mask"][0]
 
         sp = self._special_ids()
-        loss_mask = torch.tensor(self._build_loss_mask(input_ids.tolist(), sp), dtype=attention_mask.dtype)
+        loss_mask = torch.tensor(
+            self._build_loss_mask(input_ids.tolist(), sp), dtype=attention_mask.dtype
+        )
         assert input_ids.shape == loss_mask.shape == attention_mask.shape
 
         position_ids = torch.arange(input_ids.shape[0], dtype=torch.long)
@@ -107,10 +109,16 @@ class WholeRenderMultiTurnSFTDataset(MultiTurnSFTDataset):
         sequence_length = input_ids.shape[0]
         if self.pad_mode == DatasetPadMode.RIGHT:
             if sequence_length < self.max_length:
-                pad_id = self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else 0
+                pad_id = (
+                    self.tokenizer.pad_token_id if self.tokenizer.pad_token_id is not None else 0
+                )
                 pad_n = self.max_length - sequence_length
-                input_ids = torch.cat((input_ids, torch.full((pad_n,), pad_id, dtype=input_ids.dtype)))
-                attention_mask = torch.cat((attention_mask, torch.zeros((pad_n,), dtype=attention_mask.dtype)))
+                input_ids = torch.cat(
+                    (input_ids, torch.full((pad_n,), pad_id, dtype=input_ids.dtype))
+                )
+                attention_mask = torch.cat(
+                    (attention_mask, torch.zeros((pad_n,), dtype=attention_mask.dtype))
+                )
                 loss_mask = torch.cat((loss_mask, torch.zeros((pad_n,), dtype=loss_mask.dtype)))
                 position_ids = F.pad(position_ids, (0, pad_n), value=0)
             elif sequence_length > self.max_length:

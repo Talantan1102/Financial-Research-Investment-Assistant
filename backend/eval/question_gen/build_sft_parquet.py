@@ -39,7 +39,9 @@ def build() -> None:
     pd.DataFrame(train).to_parquet(_OUT / "train.parquet")
     pd.DataFrame(val).to_parquet(_OUT / "val.parquet")
     print(f"train={len(train)} val={len(val)} → {_OUT}")
-    print("注:val 是 teacher-forced val-loss 集(早停用);pass@1 生成评估走 datasets/val.jsonl(剔 2 近重)。")
+    print(
+        "注:val 是 teacher-forced val-loss 集(早停用);pass@1 生成评估走 datasets/val.jsonl(剔 2 近重)。"
+    )
 
 
 if __name__ == "__main__":

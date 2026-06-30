@@ -8,7 +8,10 @@ from fastapi.testclient import TestClient
 class _FakeTushare:
     async def get_daily(self, *, ts_code, start, end):
         return pd.DataFrame(
-            [{"trade_date": "20260312", "close": 30.0}, {"trade_date": "20260612", "close": 28.45}]
+            [
+                {"trade_date": "20260312", "open": 29.5, "high": 30.5, "low": 29.0, "close": 30.0},
+                {"trade_date": "20260612", "open": 28.0, "high": 28.9, "low": 27.8, "close": 28.45},
+            ]
         )
 
 
@@ -22,21 +25,26 @@ def _client(tmp_path):
 def test_list_tools(tmp_path):
     c = _client(tmp_path)
     names = {t["function"]["name"] for t in c.get("/tools").json()["tools"]}
-    assert {"get_stock_daily", "run_python"} <= names
+    assert {"get_daily", "run_python"} <= names
 
 
-def test_session_exec_data_then_compute(tmp_path):
+def test_session_exec_data_then_compute(tmp_path, monkeypatch):
+    # McpToolBox 数据工具走 MCP handle → build_tushare_service() 工厂(不吃 build_app 注入的
+    # tushare),故在工厂层注入 Fake,让 get_daily 取到确定数据。
+    monkeypatch.setattr(
+        "app.services.tushare_factory.build_tushare_service", lambda: _FakeTushare()
+    )
     c = _client(tmp_path)
     sid = c.post("/sessions").json()["session_id"]
-    # 取数
+    # 取数(get_daily 列式返回:close 为数组)
     r1 = c.post(
         f"/sessions/{sid}/exec",
         json={
-            "tool": "get_stock_daily",
-            "args": {"ts_code": "000938.SZ", "start_date": "20260312", "end_date": "20260612"},
+            "tool": "get_daily",
+            "args": {"ts_code": "000938.SZ", "start": "20260312", "end": "20260612"},
         },
     ).json()
-    assert r1["ok"] and r1["result"]["closes"][-1]["close"] == 28.45
+    assert r1["ok"] and r1["result"]["close"][-1] == 28.45
     # 算
     r2 = c.post(
         f"/sessions/{sid}/exec",
