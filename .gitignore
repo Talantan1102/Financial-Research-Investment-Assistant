@@ -103,3 +103,11 @@ scripts/shoot_01.mjs
 docs/_view_*.png
 scripts/shoot_board.mjs
 scripts/shoot_fix.mjs
+backend/eval/question_gen/data/verl/
+backend/eval/question_gen/data/verl_smoke/
+backend/eval/question_gen/data/verl_multi/
+backend/eval/question_gen/data/d4_overnight/
+backend/eval/question_gen/data/sft_parquet/
+backend/eval/question_gen/data/verl_mcp_smoke/
+backend/eval/question_gen/data/verl_grpo/
+backend/eval/question_gen/data/verl_grpo_filtered/

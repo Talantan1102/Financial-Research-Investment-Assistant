@@ -51,12 +51,57 @@ def dump_manifest(rows: list[dict[str, Any]], path: Path) -> None:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-async def run_tagging(*args: Any, **kwargs: Any) -> None:
-    """[live, 不进单测] 跑基座 N=8 出 per_case_counts + 强模型 k=5 collect 出干净轨迹数,
-    经 build_manifest_rows 组装 → dump_manifest。具体编排见 plan §Phase2 runbook;
-    复用 runner.run_passk(k=8, model=base) 的 per_case_counts 与 (k=5, collect_dir=) 的轨迹。
+async def run_tagging(
+    candidate_path: Path | str,
+    out_manifest: Path | str,
+    base_model: str,
+    strong_model: str,
+    collect_dir: Path | str,
+    *,
+    n_base: int = 8,
+    k_strong: int = 5,
+    ideal_steps_by_diff: dict[str, int] | None = None,
+) -> None:
+    """[live, 编排逻辑单测覆盖] 基座 N 次出 per_case_counts(分带),强模型 k 次 collect 出
+    干净轨迹数(第二道闸),经 build_manifest_rows 组装 → dump_manifest。
+
+    Args:
+        candidate_path: 候选题 jsonl
+        out_manifest: 输出 manifest jsonl
+        base_model: 基座(应 = RL 基座同一份权重,分带才准)
+        strong_model: 强模型(采 SFT 种子轨迹)
+        collect_dir: 强模型轨迹采集目录(gold 物理隔离)
+        n_base: 基座采样次数(分带分母)
+        k_strong: 强模型采样次数
+        ideal_steps_by_diff: 难度→理想步数;缺的难度 fallback 8 步
     """
-    raise NotImplementedError("run_tagging 是 live 编排,见 plan §Phase2 runbook")
+    from eval.question_gen import cleanliness, runner
+
+    cases = case_mod.load_jsonl(Path(candidate_path))
+    by_id = {c.case_id: c for c in cases}
+
+    # 1) 基座 N 次 → 每题通过次数(分带)
+    base = await runner.run_passk(cases, k=n_base, model=base_model)
+    counts: dict[str, int] = base["per_case_counts"]
+
+    # 2) 强模型 k 次采集轨迹(gold 隔离写盘)
+    collect_dir = Path(collect_dir)
+    await runner.run_passk(cases, k=k_strong, model=strong_model, collect_dir=collect_dir)
+
+    # 3) 数每题干净轨迹(halt 自然 ∧ 步数≤桶理想)
+    clean: dict[str, int] = {}
+    with (collect_dir / "trajectories_raw.jsonl").open(encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            traj = json.loads(line)
+            ideal = (ideal_steps_by_diff or {}).get(by_id[traj["case_id"]].difficulty, 8)
+            if cleanliness.is_clean(traj, ideal_steps=ideal):
+                clean[traj["case_id"]] = clean.get(traj["case_id"], 0) + 1
+
+    # 4) 组装 + 落盘
+    rows = build_manifest_rows(counts, n_base, clean, cases)
+    dump_manifest(rows, Path(out_manifest))
 
 
 __all__ = ["build_manifest_rows", "dump_manifest", "run_tagging"]

@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 
-def test_chat_tools_profile_has_thirteen_tools() -> None:
+def test_chat_tools_profile_has_fourteen_tools() -> None:
     from app.mcp_server.server import build_server
 
     s = build_server(profile="chat_tools")
@@ -23,6 +23,7 @@ def test_chat_tools_profile_has_thirteen_tools() -> None:
         "web_search",
         "kb_search",
         "compare_stocks",
+        "lookup_ts_code",  # 股票简称 → ts_code(取数前先解析代码)
         "get_daily",  # charting: A 股日线时序(K线/走势/归一化/回撤取数)
         "get_index_daily",  # 指数当日涨跌(沪深300 等)
         "get_fund_nav",  # 基金类型与净值涨跌

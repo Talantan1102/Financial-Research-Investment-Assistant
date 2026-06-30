@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 class DailyBasicArgs(BaseModel):
     ts_code: str
     trade_date: str | None = None
+    as_of: str | None = None  # 评测钉基准日(verl tool_box 按此字段注入);给则覆盖 trade_date
+    # 让 Path B(verl rollout)的快照与 gold 同钉到出题日,不随训练时间漂移。
+    # Path A(MCP)走 handler 直接传 trade_date,不传 as_of,故此字段默认 None 不影响。
 
 
 class GetDailyBasicTool(Tool):
@@ -40,7 +43,8 @@ class GetDailyBasicTool(Tool):
 
     async def run(self, args: BaseModel) -> dict[str, Any]:
         a = DailyBasicArgs.model_validate(args.model_dump())
-        df = await self._tushare.get_daily_basic(ts_code=a.ts_code, trade_date=a.trade_date)
+        trade_date = a.as_of or a.trade_date  # as_of(钉基准日)优先,与 gold 同期
+        df = await self._tushare.get_daily_basic(ts_code=a.ts_code, trade_date=trade_date)
         if df.empty:
             return {"ts_code": a.ts_code, "error": "no data"}
         # Pick latest trade_date if multiple rows present (real Tushare may

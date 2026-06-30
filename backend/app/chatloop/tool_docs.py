@@ -47,6 +47,20 @@ class ToolDoc:
 # ---------------------------------------------------------------------------
 
 TOOL_DOCS: dict[str, ToolDoc] = {
+    # ===== 核心组 =====
+    "lookup_ts_code": ToolDoc(
+        name="lookup_ts_code",
+        group="core",
+        brief="股票简称→ts_code(如'神州泰岳'→'300002.SZ')。任何按公司名问数据/财报/估值前,先用它拿准代码,别凭记忆猜。",
+        doc=(
+            "把 A 股公司简称解析成 ts_code(如 '贵州茅台' → '600519.SH')。\n"
+            "何时用:**只要题面给的是公司名(不是六位代码),取任何数据/财报/估值/行情前的第一步**。\n"
+            "为什么必须先查:数据类工具都按 ts_code 取数,代码错一位就取到别的公司 → 答案必错。"
+            "不要凭记忆背代码(尤其非头部股),一律先 lookup。\n"
+            "参数:name(str,必填)—— 股票简称,如 '神州泰岳'。\n"
+            "示例:lookup_ts_code(name='东方电气') → {'ts_code': '600875.SH'}。"
+        ),
+    ),
     # ===== 核心组(6) =====
     "get_stock_quote": ToolDoc(
         name="get_stock_quote",
@@ -502,6 +516,7 @@ TOOL_DOCS: dict[str, ToolDoc] = {
 # ---------------------------------------------------------------------------
 
 CORE_TOOLS: list[str] = [
+    "lookup_ts_code",
     "get_stock_quote",
     "get_financial_statements",
     "kb_search",

@@ -84,6 +84,12 @@ async def run_passk(
     concurrency: int = 6,
     as_of: str = "20260612",  # 钉到已落定交易日(非"今天"):窗口不含移动/未回填的近端 bar → gold 可复现
     max_steps: int = 28,  # 放宽:让 5 股排序/筛选这类重活有余量,把"预算天花板"从能力测量里剥掉(生产仍 12)
+    # 预算闸也必须抬:生产默认 max_cny=0.1/max_tokens=120k 是「单轮对话要便宜」的护栏,
+    # 漏到 eval 会先于 max_steps 触发 —— qwen3.7-max thinking 单调用 ~¥0.027,3-4 步就烧到
+    # ¥0.1 → halt_reason=budget,轨迹卡在第 4 步(实测 247 条 237 条如此)。抬到让 max_steps
+    # 成为唯一 binding 闸:28 步 × ~¥0.03 ≈ ¥0.84,故 cny=2.0 / tokens=600k 留足余量。
+    max_cny: float = 2.0,
+    max_tokens: int = 600_000,
     model: str | None = None,
     answers_path: Path | None = None,
     collect_dir: Path | None = None,
@@ -117,6 +123,14 @@ async def run_passk(
     answers: dict[str, str] = {}  # case_id -> 末次 agent 答案(供离线重判)
     trajectories: list[dict] = []
 
+    # 钉基准日给 MCP 数据工具:子进程继承本 env,透明把"取最新/当前"截到 ≤as_of
+    # (模型不可见,见 app/mcp_server/_as_of.py)。须在起子进程前设。
+    import os as _os
+
+    from app.mcp_server._as_of import ENV as _AS_OF_ENV
+
+    _os.environ[_AS_OF_ENV] = as_of
+
     try:
         async with MCPClient.from_subprocess(profile="chat_tools") as mcp_client:
             singletons = await build_heavy_singletons(
@@ -149,7 +163,9 @@ async def run_passk(
                             llm=singletons.llm,
                             tool_hub=build_real_hub(singletons),
                             context_deps=deps,
-                            gate_cfg=GateConfig(max_steps=max_steps),
+                            gate_cfg=GateConfig(
+                                max_steps=max_steps, max_cny=max_cny, max_tokens=max_tokens
+                            ),
                             model=model,
                         )
                         final = await toolloop.run(state)
@@ -174,7 +190,10 @@ async def run_passk(
                                 run_idx,
                             )
                         ok = gated
-                        # 采集模式:从 final 提取轨迹 slim dict(不含 gold/passed)
+                        # 采集模式:从 final 提取轨迹 slim dict。不含 gold(隔离),但**存
+                        # passed**(逐条正确性,过 run_python gate 后的 ok)—— SFT 要筛
+                        # "干净 ∧ 正确"的轨迹,passed 是 bool 质量标记非 gold 值,不算泄漏。
+                        # 缺它只能靠 judgements 的 per-case pass_rate 近似,选不出具体哪条对。
                         traj: dict | None = None
                         if collect:
                             traj = {
@@ -183,6 +202,7 @@ async def run_passk(
                                 "messages": final.messages,
                                 "n_steps": final.step,
                                 "halt_reason": final.halt_reason,
+                                "passed": bool(ok),
                                 "prompt_tokens": final.prompt_tokens_total,
                                 "completion_tokens": final.completion_tokens_total,
                                 "cached_tokens": final.cached_tokens_total,

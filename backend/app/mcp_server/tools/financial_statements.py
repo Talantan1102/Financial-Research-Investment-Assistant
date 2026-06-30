@@ -25,10 +25,13 @@ from mcp.types import TextContent, Tool
 TOOL_DEF = Tool(
     name="get_financial_statements",
     description=(
-        "Return the latest financial statement data for an A-share. "
+        "Return financial statement data for an A-share. "
         "statement='balance' returns balance-sheet items + solvency ratios; "
         "'cashflow' returns operating/investing/financing CF + positive_ocf signal; "
-        "'income' returns revenue / net profit / ROE / P/E."
+        "'income' returns revenue, net_profit, roe, gross_margin (销售毛利率 %), "
+        "debt_to_assets (资产负债率 %), eps (每股收益 元/股), bps (每股净资产 元/股), "
+        "revenue_yoy / net_profit_yoy (营收/净利同比 %). "
+        "(For a specific fiscal year pass end_date, e.g. 20241231 = FY2024 annual.)"
     ),
     inputSchema={
         "type": "object",
@@ -47,13 +50,23 @@ TOOL_DEF = Tool(
             },
             "end_date": {
                 "type": "string",
-                "description": "Optional period end date (YYYYMMDD).",
+                "description": (
+                    "Period end date (YYYYMMDD). IMPORTANT: when the question asks "
+                    "about a SPECIFIC fiscal year (e.g. '2024年报'/'2024年净利润'), you "
+                    "MUST pass that year's end_date (annual report → YYYY1231, e.g. "
+                    "'20241231'). If omitted, you get the MOST RECENT period, which may "
+                    "be a LATER year than the question asks and give a wrong answer."
+                ),
             },
             "period": {
                 "type": "string",
                 "enum": ["latest", "quarterly", "annual"],
                 "default": "latest",
-                "description": "Only applies to statement='income'.",
+                "description": (
+                    "Only applies to statement='income'. 'annual' = a full-year report "
+                    "(pair with end_date=YYYY1231 to pin the exact year; without "
+                    "end_date it returns the latest available annual report)."
+                ),
             },
         },
         "required": ["ts_code", "statement"],
@@ -86,7 +99,11 @@ async def handle(args: dict[str, Any]) -> list[TextContent]:
 
         tool = GetFinancialsTool(tushare=tushare)  # type: ignore[assignment]
         validated = FinancialsArgs.model_validate(
-            {"ts_code": ts_code, "period": args.get("period", "latest")}
+            {
+                "ts_code": ts_code,
+                "period": args.get("period", "latest"),
+                "end_date": end_date,
+            }  # 传通期间末:问"2024年报"不再丢成"最新期"
         )
         result = await tool.run(validated)
     else:

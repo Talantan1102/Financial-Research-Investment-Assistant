@@ -17,6 +17,7 @@ class _StubTushare:
                     "roe": 99.9,
                     "debt_to_assets": 99.9,
                     "grossprofit_margin": 99.9,
+                    "or_yoy": 99.9,
                     "q_sales_yoy": 99.9,
                     "netprofit_yoy": 99.9,
                 },
@@ -25,7 +26,8 @@ class _StubTushare:
                     "roe": 34.46,
                     "debt_to_assets": 16.4,
                     "grossprofit_margin": 91.2,
-                    "q_sales_yoy": 12.34,
+                    "or_yoy": 12.34,
+                    "q_sales_yoy": 88.88,
                     "netprofit_yoy": 8.76,
                 },
             ]
@@ -67,7 +69,9 @@ def test_build_trend_cases_count_shape_period():
 def test_build_trend_cases_gold_equals_budget_field_and_selects_period():
     cases = _run()
     rev_yoy = next(c for c in cases if c.indicator == "营收同比")
-    assert rev_yoy.gold == 12.34  # 选 20241231 行 q_sales_yoy,不是 20250930 的 99.9
+    assert (
+        rev_yoy.gold == 12.34
+    )  # 营收同比取年度 or_yoy@20241231,非单季 q_sales_yoy(88.88)/20250930(99.9)
     np_yoy = next(c for c in cases if c.indicator == "净利同比")
     assert np_yoy.gold == 8.76  # netprofit_yoy
     assert "营收同比增速" in rev_yoy.question

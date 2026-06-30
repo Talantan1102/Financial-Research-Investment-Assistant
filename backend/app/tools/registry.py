@@ -26,6 +26,12 @@ class _MCPToolProxy(Tool):
         self.name: str = manifest["name"]
         self.description: str = manifest["description"]
         self._client = client
+        # 真实 MCP inputSchema —— 供 schema_for_llm 暴露给模型(否则模型不知参数名)。
+        # 缺它时 CORE 工具靠模型从训练数据"背"参数,新工具(模型没见过)必传错参。
+        self._input_schema: dict[str, Any] = manifest.get("inputSchema") or {
+            "type": "object",
+            "properties": {},
+        }
         self.args_schema: type[BaseModel] = self._build_args_model()
 
     @staticmethod
@@ -35,6 +41,17 @@ class _MCPToolProxy(Tool):
             model_config = {"extra": "allow"}
 
         return _Args
+
+    def schema_for_llm(self) -> dict[str, Any]:
+        # 用真实 MCP inputSchema(非空 _Args),让模型看到参数名/必填/描述。
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self._input_schema,
+            },
+        }
 
     async def run(self, args: BaseModel) -> dict[str, Any]:
         return await self._client.call_tool(self.name, args.model_dump())

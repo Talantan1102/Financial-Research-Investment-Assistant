@@ -44,12 +44,18 @@ if TYPE_CHECKING:
 
 
 def _extra_body_for(model: str) -> dict[str, Any]:
-    """qwen3 思考模型需显式传 enable_thinking;非 qwen3 不传(避免传它们不认的参数)。
+    """qwen3 思考模型的 thinking 开关(两条线合一)。
 
-    max 级(qwen3-max / qwen3.7-max)当 SFT teacher 要开思考(reasoning 进轨迹);
-    其余 qwen3(如学生 qwen3-8b)关思考(避免 thinking 把 tool_call args 搞坏,2026-06-18 实测)。
+    优先级:``LLM_QWEN3_THINKING=on`` 时一律不关思考(走 chat template 默认 thinking-on),
+    供 reasoning-RL 训练线(D4 分带 / 采轨 / 评测,base 本地 sglang + 教师 qwen3.7-max)用
+    同一思考模式、保分布对齐;未显式 on(默认)时按模型角色:max 级(qwen3-max / qwen3.7-max)
+    当 SFT teacher 开思考(reasoning 进轨迹),其余 qwen3(如学生 qwen3-8b)关思考(避免 thinking
+    把 tool_call args 搞坏,2026-06-18 实测)。非 qwen3 一律不传(避免传它们不认的参数)。
+    sglang 与 dashscope 对显式开关参数风格不同,但「不传」两端默认都 thinking-on,故 on 档返回 {}。
     """
     if model.startswith("qwen3"):
+        if os.getenv("LLM_QWEN3_THINKING", "off").strip().lower() == "on":
+            return {}
         return {"enable_thinking": "max" in model}
     return {}
 
@@ -320,7 +326,18 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
     """
     config = LLMConfig()
     model = os.getenv("MOCK_TUSHARE_MODEL", V0_DEFAULT_MODEL)
-    raw_client = OpenAI(api_key=config.api_key, base_url=config.base_url)
+    # 超时 + 重试上限:不设则 openai 默认 600s/2retry —— maas 端偶发 hang 时整进程冻住
+    # 数分钟(eval 并发槽全卡)。正常调用 ≤50s,故 timeout=90s 覆盖合法慢调用、把 hang
+    # 的调用 90s fail-fast → 该 rollout 报错被 per-case try 兜住跳过、释放槽,进程不冻。
+    # 可经 LLM_HTTP_TIMEOUT_S env 覆盖(生产链路默认值不变,仅 eval 大并发受益)。
+    _timeout = float(os.getenv("LLM_HTTP_TIMEOUT_S", "90"))
+    _retries = int(os.getenv("LLM_MAX_RETRIES", "1"))
+    raw_client = OpenAI(
+        api_key=config.api_key,
+        base_url=config.base_url,
+        timeout=_timeout,
+        max_retries=_retries,
+    )
     # LangSmith 追踪(P0):LANGSMITH_TRACING=true 时把 client 包一层,自动把每次 LLM
     # 调用的 prompt/completion/token/latency 作为 run 发到 LangSmith。包装锁在这个 DI
     # 缝里 —— router / strict 层既不感知 openai 也不感知 langsmith;关时零开销。
@@ -329,7 +346,12 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
         from langsmith.wrappers import wrap_openai
 
         raw_client = wrap_openai(raw_client)
-    async_raw = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
+    async_raw = AsyncOpenAI(
+        api_key=config.api_key,
+        base_url=config.base_url,
+        timeout=_timeout,
+        max_retries=_retries,
+    )
     adapter = _OpenAIAdapter(client=raw_client, model=model, async_client=async_raw)
     if trace_service is None:
         from app.core.database import SessionLocal

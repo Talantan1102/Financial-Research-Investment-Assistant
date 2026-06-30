@@ -496,8 +496,14 @@ class ToolHub:
                 return msg[:_ERR_MSG_LEN]
         if isinstance(exc, ValidationError):
             fields = ", ".join(tool.args_schema.model_fields.keys())
-            brief = str(exc).splitlines()[0][:_ERR_MSG_LEN]
-            return f"[参数校验失败] {brief}。参数要求:{fields}"
+            # 逐字段错误(loc: msg),而非 str(exc) 的第一行 —— 第一行只有 "N validation
+            # error(s) for X",字段名+原因全在第 2 行起。只给第一行模型不知错在哪 →
+            # 同一错法无限 retry 撞 max_steps(实测 qwen3.7-max 把 data 当 JSON 字符串传,
+            # 反馈却只说"1 validation error",自我修正不了)。逐错暴露后模型下一步即可纠。
+            detail = "; ".join(
+                f"{'.'.join(str(p) for p in e['loc']) or '?'}: {e['msg']}" for e in exc.errors()
+            )[:_ERR_MSG_LEN]
+            return f"[参数校验失败] {detail}。参数要求:{fields}"
         if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
             return "[超时] 稍后重试或换数据源"
         return f"[执行失败] {type(exc).__name__}: {str(exc)[:_ERR_MSG_LEN]}"

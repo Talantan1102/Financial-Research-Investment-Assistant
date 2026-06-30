@@ -246,6 +246,7 @@ class LLMService:
                     "tool_calls": tool_calls_summary,
                 },
                 metadata={
+                    "model": model,  # 成本可按模型分摊(eval 并发多模型时按 model 聚合 cost_cny)
                     "prompt_tokens": result.prompt_tokens,
                     "completion_tokens": result.completion_tokens,
                     "cached_tokens": result.cached_tokens,

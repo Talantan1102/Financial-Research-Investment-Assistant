@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 class StockQuoteArgs(BaseModel):
     ts_code: str
+    as_of: str | None = None  # YYYYMMDD;基准日(否则用今天)。固定它→历史题目可复现、不随训练日漂移。
 
 
 class StockQuoteTool(Tool):
@@ -44,9 +45,9 @@ class StockQuoteTool(Tool):
         # C54: use a 5-day window so weekends/holidays always yield at least one trading day.
         # The comment originally said "last 3 days" but start=today,end=today was a zero-width
         # window on non-trading days.  sort_values + iloc[0] below picks the most recent row.
-        now = datetime.now()
-        start = (now - timedelta(days=5)).strftime("%Y%m%d")
-        end = now.strftime("%Y%m%d")
+        ref = datetime.strptime(validated.as_of, "%Y%m%d") if validated.as_of else datetime.now()
+        start = (ref - timedelta(days=5)).strftime("%Y%m%d")
+        end = ref.strftime("%Y%m%d")
         try:
             df = await self._tushare.get_daily(
                 ts_code=validated.ts_code,
