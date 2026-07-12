@@ -64,7 +64,12 @@ class ToolRuntime:
 
         effective_input = pre.updated_input or requested_input
         try:
-            permission = await self._permissions.authorize(definition, (pre.permission,))
+            permission = await self._permissions.authorize(
+                definition,
+                effective_input,
+                context,
+                (pre.permission,),
+            )
         except Exception as exc:
             return self._failure("permission_check_failed", ErrorCategory.SYSTEM_ERROR, str(exc))
         if permission is not PermissionDecision.ALLOW:

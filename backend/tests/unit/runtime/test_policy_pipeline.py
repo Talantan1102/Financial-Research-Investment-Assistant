@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 from app.runtime.hooks import HookDecision, HookEvent, HookInvocation, HookPipeline
-from app.runtime.models import CapabilityDefinition, CapabilityType, RiskLevel
-from app.runtime.permissions import PermissionDecision, PermissionEngine
+from app.runtime.models import CapabilityDefinition, CapabilityType, ExecutionContext, RiskLevel
+from app.runtime.permissions import PermissionDecision, PermissionEngine, PermissionRequest
 from app.runtime.validation import InputGuard, InputValidationError
 
 
@@ -26,6 +26,16 @@ def _definition(*, minimum_risk: RiskLevel = RiskLevel.LOW) -> CapabilityDefinit
         idempotent=False,
         default_timeout_s=10,
         max_attempts=1,
+    )
+
+
+def _context() -> ExecutionContext:
+    return ExecutionContext(
+        request_id="request",
+        turn_id="turn",
+        task_id="task",
+        user_id="user",
+        visible_capabilities=frozenset({"orders.submit"}),
     )
 
 
@@ -121,7 +131,12 @@ def test_input_guard_rejects_unknown_fields() -> None:
 async def test_permission_precedence_is_deny_then_ask_then_allow() -> None:
     engine = PermissionEngine()
     assert (
-        await engine.authorize(_definition(), (PermissionDecision.ALLOW, PermissionDecision.DENY))
+        await engine.authorize(
+            _definition(),
+            {"quantity": 1},
+            _context(),
+            (PermissionDecision.ALLOW, PermissionDecision.DENY),
+        )
         is PermissionDecision.DENY
     )
 
@@ -129,29 +144,32 @@ async def test_permission_precedence_is_deny_then_ask_then_allow() -> None:
 @pytest.mark.asyncio
 async def test_ask_without_authorization_callback_fails_closed() -> None:
     result = await PermissionEngine().authorize(
-        _definition(), (PermissionDecision.ALLOW, PermissionDecision.ASK)
+        _definition(),
+        {"quantity": 1},
+        _context(),
+        (PermissionDecision.ALLOW, PermissionDecision.ASK),
     )
     assert result is PermissionDecision.DENY
 
 
 @pytest.mark.asyncio
 async def test_authorization_callback_can_approve_ask() -> None:
-    async def approve(_: CapabilityDefinition) -> bool:
+    async def approve(_: PermissionRequest) -> bool:
         return True
 
     result = await PermissionEngine(authorization_callback=approve).authorize(
-        _definition(), (PermissionDecision.ASK,)
+        _definition(), {"quantity": 1}, _context(), (PermissionDecision.ASK,)
     )
     assert result is PermissionDecision.ALLOW
 
 
 @pytest.mark.asyncio
 async def test_high_risk_requires_approval() -> None:
-    async def approve(_: CapabilityDefinition) -> bool:
+    async def approve(_: PermissionRequest) -> bool:
         return True
 
     result = await PermissionEngine(authorization_callback=approve).authorize(
-        _definition(minimum_risk=RiskLevel.HIGH)
+        _definition(minimum_risk=RiskLevel.HIGH), {"quantity": 1}, _context()
     )
 
     assert result is PermissionDecision.ALLOW
@@ -161,13 +179,13 @@ async def test_high_risk_requires_approval() -> None:
 async def test_critical_risk_is_denied_without_prompting() -> None:
     called = False
 
-    async def approve(_: CapabilityDefinition) -> bool:
+    async def approve(_: PermissionRequest) -> bool:
         nonlocal called
         called = True
         return True
 
     result = await PermissionEngine(authorization_callback=approve).authorize(
-        _definition(minimum_risk=RiskLevel.CRITICAL)
+        _definition(minimum_risk=RiskLevel.CRITICAL), {"quantity": 1}, _context()
     )
 
     assert result is PermissionDecision.DENY

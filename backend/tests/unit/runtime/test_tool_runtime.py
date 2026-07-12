@@ -12,7 +12,7 @@ from app.runtime.models import (
     RiskLevel,
     RuntimeResult,
 )
-from app.runtime.permissions import PermissionEngine
+from app.runtime.permissions import PermissionEngine, PermissionRequest
 from app.runtime.registry import CapabilityRegistry
 from app.runtime.safe_executor import SafeExecutor
 from app.runtime.tool_runtime import ToolRuntime
@@ -53,9 +53,11 @@ class Adapter:
         self.events = events
         self.output = output or {"price": 1}
         self.calls = 0
+        self.last_input: dict[str, Any] | None = None
 
     async def execute(self, input: dict[str, Any], context: ExecutionContext) -> RuntimeResult:
         self.calls += 1
+        self.last_input = input
         self.events.append(f"adapter:{input['symbol']}")
         return RuntimeResult(status=ExecutionStatus.SUCCEEDED, output=self.output)
 
@@ -71,8 +73,15 @@ async def test_pipeline_uses_effective_input_in_strict_order() -> None:
         events.append("pre")
         return HookDecision(updated_input={"symbol": "MSFT"})
 
-    async def authorize(_definition: CapabilityDefinition) -> bool:
-        events.append("permission")
+    approved_input: dict[str, Any] | None = None
+
+    async def authorize(request: PermissionRequest) -> bool:
+        nonlocal approved_input
+        assert request.capability_name == "quote"
+        assert request.risk is RiskLevel.MEDIUM
+        assert request.context is context_value
+        approved_input = request.input
+        events.append(f"permission:{request.input['symbol']}")
         return True
 
     class Guard(InputGuard):
@@ -92,10 +101,20 @@ async def test_pipeline_uses_effective_input_in_strict_order() -> None:
         permissions=PermissionEngine(authorize),
         input_guard=Guard(),
     )
-    result = await runtime.execute("quote", {"symbol": "AAPL"}, context())
+    context_value = context()
+    result = await runtime.execute("quote", {"symbol": "AAPL"}, context_value)
 
     assert result.success
-    assert events == ["pre", "permission", "validation:MSFT", "adapter:MSFT", "post:1"]
+    assert approved_input is not None
+    assert approved_input == {"symbol": "MSFT"}
+    assert adapter.last_input is approved_input
+    assert events == [
+        "pre",
+        "permission:MSFT",
+        "validation:MSFT",
+        "adapter:MSFT",
+        "post:1",
+    ]
 
 
 @pytest.mark.asyncio

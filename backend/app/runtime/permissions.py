@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable
+from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any
 
-from app.runtime.models import CapabilityDefinition, RiskLevel
+from app.runtime.models import CapabilityDefinition, ExecutionContext, RiskLevel
 
 
 class PermissionDecision(StrEnum):
@@ -14,7 +16,17 @@ class PermissionDecision(StrEnum):
     DENY = "deny"
 
 
-AuthorizationCallback = Callable[[CapabilityDefinition], Awaitable[bool]]
+@dataclass(frozen=True)
+class PermissionRequest:
+    """The concrete capability invocation presented for user authorization."""
+
+    capability_name: str
+    risk: RiskLevel
+    input: dict[str, Any]
+    context: ExecutionContext
+
+
+AuthorizationCallback = Callable[[PermissionRequest], Awaitable[bool]]
 
 _PRECEDENCE = {
     PermissionDecision.ALLOW: 0,
@@ -47,6 +59,8 @@ class PermissionEngine:
     async def authorize(
         self,
         definition: CapabilityDefinition,
+        input: dict[str, Any],
+        context: ExecutionContext,
         decisions: Iterable[PermissionDecision] = (),
     ) -> PermissionDecision:
         decision = strictest((*decisions, minimum_permission(definition)))
@@ -54,5 +68,12 @@ class PermissionEngine:
             return decision
         if self._authorization_callback is None:
             return PermissionDecision.DENY
-        approved = await self._authorization_callback(definition)
+        approved = await self._authorization_callback(
+            PermissionRequest(
+                capability_name=definition.name,
+                risk=definition.minimum_risk,
+                input=input,
+                context=context,
+            )
+        )
         return PermissionDecision.ALLOW if approved else PermissionDecision.DENY

@@ -33,3 +33,23 @@
 - `CapabilityRegistry.from_tool_registry()` still registers legacy `Tool` objects that
   expose `run()` rather than the new adapter `execute()` contract. That integration is
   explicitly Milestone 2 scope and requires a legacy-tool adapter.
+
+## Review fix — effective-input permission request
+
+- Added an explicit `PermissionRequest` carrying `capability_name`, `risk`, `input`,
+  and `context` to the authorization callback.
+- `ToolRuntime` now passes the pre-hook-adjusted `effective_input` into permission
+  authorization before validation and execution.
+- Regression coverage proves the callback sees the modified value and the adapter
+  executes the exact same input object. Existing fail-closed behavior remains:
+  `deny > ask > allow`, `ASK` without a callback becomes `DENY`, and `CRITICAL`
+  does not prompt.
+
+### Review-fix TDD and verification
+
+- RED: focused test collection failed because `PermissionRequest` did not exist.
+- GREEN: focused effective-input permission test passed.
+- `uv run pytest backend/tests/unit/runtime -q`: 35 passed.
+- `uv run mypy backend/app/runtime`: success, no issues in 10 source files.
+- `uv run ruff check backend/app/runtime backend/tests/unit/runtime`: all checks passed.
+- `git diff --check`: passed.
