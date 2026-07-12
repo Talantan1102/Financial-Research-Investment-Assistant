@@ -59,4 +59,49 @@ Warnings are pre-existing SQLAlchemy `declarative_base` and testcontainers Redis
 
 ## Commit
 
-To be filled after commit.
+- Initial implementation: `d9edf68 feat(runtime): add hooks permissions and input guard`
+
+## Independent review fix
+
+- `HookPipeline.run_post()` now fails closed when a post hook returns
+  `updated_input`. The rejected patch is neither merged into the executed input
+  nor propagated to later post hooks; pre-hook mutation and final schema
+  revalidation remain unchanged.
+- Added a regression test proving post-hook input mutation raises an explicit
+  `InputValidationError`.
+- Added focused permission boundary coverage proving `HIGH` requires explicit
+  approval and `CRITICAL` is denied without invoking the approval callback.
+
+### Fix TDD evidence
+
+RED:
+
+```text
+uv run pytest backend/tests/unit/runtime/test_policy_pipeline.py -v
+1 failed, 10 passed, 2 warnings
+Failed: DID NOT RAISE InputValidationError
+```
+
+GREEN / complete verification (with the repository backend `.env` loaded):
+
+```text
+uv run pytest backend/tests/unit/runtime/test_policy_pipeline.py -v
+11 passed, 2 warnings in 0.09s
+
+uv run pytest backend/tests/unit/runtime -v
+28 passed, 2 warnings in 0.10s
+
+uv run ruff check backend/app/runtime backend/tests/unit/runtime
+All checks passed!
+
+uv run mypy backend/app/runtime/hooks.py backend/app/runtime/permissions.py \
+  backend/app/runtime/validation.py \
+  backend/tests/unit/runtime/test_policy_pipeline.py
+Success: no issues found in 4 source files
+
+git diff --check
+exit 0
+```
+
+The two warnings remain the pre-existing SQLAlchemy `declarative_base` and
+testcontainers Redis deprecations described above.

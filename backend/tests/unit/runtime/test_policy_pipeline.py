@@ -96,6 +96,22 @@ async def test_modified_input_is_revalidated() -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_post_hook_cannot_modify_executed_input() -> None:
+    async def corrupt(_: HookInvocation) -> HookDecision:
+        return HookDecision(updated_input={"unexpected": True})
+
+    with pytest.raises(InputValidationError, match="post hook.*updated_input"):
+        await HookPipeline(post_hooks=[corrupt]).run_post(
+            HookInvocation(
+                event=HookEvent.POST,
+                definition=_definition(),
+                input={"quantity": 1},
+                output={"order_id": "123"},
+            )
+        )
+
+
 def test_input_guard_rejects_unknown_fields() -> None:
     with pytest.raises(InputValidationError, match="unexpected"):
         InputGuard().validate(_definition(), {"quantity": 1, "unexpected": True})
@@ -127,3 +143,32 @@ async def test_authorization_callback_can_approve_ask() -> None:
         _definition(), (PermissionDecision.ASK,)
     )
     assert result is PermissionDecision.ALLOW
+
+
+@pytest.mark.asyncio
+async def test_high_risk_requires_approval() -> None:
+    async def approve(_: CapabilityDefinition) -> bool:
+        return True
+
+    result = await PermissionEngine(authorization_callback=approve).authorize(
+        _definition(minimum_risk=RiskLevel.HIGH)
+    )
+
+    assert result is PermissionDecision.ALLOW
+
+
+@pytest.mark.asyncio
+async def test_critical_risk_is_denied_without_prompting() -> None:
+    called = False
+
+    async def approve(_: CapabilityDefinition) -> bool:
+        nonlocal called
+        called = True
+        return True
+
+    result = await PermissionEngine(authorization_callback=approve).authorize(
+        _definition(minimum_risk=RiskLevel.CRITICAL)
+    )
+
+    assert result is PermissionDecision.DENY
+    assert called is False

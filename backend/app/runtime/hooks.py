@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.runtime.models import CapabilityDefinition
 from app.runtime.permissions import PermissionDecision, minimum_permission, strictest
-from app.runtime.validation import InputGuard
+from app.runtime.validation import InputGuard, InputValidationError
 
 
 class HookEvent(StrEnum):
@@ -68,6 +68,10 @@ class HookPipeline:
             messages.extend(decision.messages)
             decisions.append(decision.permission)
             if decision.updated_input is not None:
+                if not validate_input:
+                    raise InputValidationError(
+                        "post hook must not return updated_input after execution"
+                    )
                 current_input = {**current_input, **decision.updated_input}
             if strictest(decisions) is PermissionDecision.DENY:
                 break
