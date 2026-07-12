@@ -56,9 +56,9 @@ class CapabilityRegistry:
             type=CapabilityType.DATA_TOOL,
             input_schema=tool.args_schema.model_json_schema(),
             output_schema={"type": "object"},
-            minimum_risk=RiskLevel.LOW,
-            read_only=True,
-            idempotent=True,
+            minimum_risk=RiskLevel.HIGH,
+            read_only=False,
+            idempotent=False,
             default_timeout_s=30,
             max_attempts=1,
         )

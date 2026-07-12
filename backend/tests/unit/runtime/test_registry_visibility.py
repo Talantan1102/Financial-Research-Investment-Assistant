@@ -28,6 +28,16 @@ class _Tool(Tool):
         return {"value": args.value}
 
 
+class _SideEffectTool(Tool):
+    name = "orders.submit"
+    description = "Submit an order"
+    args_schema = _Args
+
+    async def run(self, args: BaseModel) -> dict[str, object]:
+        assert isinstance(args, _Args)
+        return {"submitted": True}
+
+
 def _definition(name: str) -> CapabilityDefinition:
     return CapabilityDefinition(
         name=name,
@@ -90,3 +100,17 @@ def test_from_tool_registry_adapts_tools_without_private_access() -> None:
     assert definition.name == tool.name
     assert definition.input_schema == _Args.model_json_schema()
     assert legacy.items() == ((tool.name, tool),)
+
+
+def test_from_tool_registry_fails_closed_for_unknown_side_effect_tool() -> None:
+    legacy = ToolRegistry()
+    tool = _SideEffectTool()
+    legacy.register(tool)
+
+    registry = CapabilityRegistry.from_tool_registry(legacy)
+    definition, adapter = registry.get(tool.name)
+
+    assert adapter is tool
+    assert definition.minimum_risk is RiskLevel.HIGH
+    assert definition.read_only is False
+    assert definition.idempotent is False
