@@ -50,14 +50,25 @@ class HookPipeline:
         self._post_hooks = tuple(post_hooks)
         self._input_guard = input_guard or InputGuard()
 
-    async def run_pre(self, invocation: HookInvocation) -> HookDecision:
-        return await self._run(invocation, self._pre_hooks, validate_input=True)
+    async def run_pre(
+        self, invocation: HookInvocation, *, validate_input: bool = True
+    ) -> HookDecision:
+        return await self._run(
+            invocation, self._pre_hooks, validate_input=validate_input, allow_updates=True
+        )
 
     async def run_post(self, invocation: HookInvocation) -> HookDecision:
-        return await self._run(invocation, self._post_hooks, validate_input=False)
+        return await self._run(
+            invocation, self._post_hooks, validate_input=False, allow_updates=False
+        )
 
     async def _run(
-        self, invocation: HookInvocation, hooks: Sequence[Hook], *, validate_input: bool
+        self,
+        invocation: HookInvocation,
+        hooks: Sequence[Hook],
+        *,
+        validate_input: bool,
+        allow_updates: bool,
     ) -> HookDecision:
         current_input = invocation.input
         messages: list[str] = []
@@ -68,7 +79,7 @@ class HookPipeline:
             messages.extend(decision.messages)
             decisions.append(decision.permission)
             if decision.updated_input is not None:
-                if not validate_input:
+                if not allow_updates:
                     raise InputValidationError(
                         "post hook must not return updated_input after execution"
                     )
