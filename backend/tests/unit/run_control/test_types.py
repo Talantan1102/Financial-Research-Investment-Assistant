@@ -4,6 +4,7 @@ import pytest
 from app.run_control.types import (
     ACTIVE_RUN_STATUSES,
     TERMINAL_RUN_STATUSES,
+    AttemptStatus,
     IdempotencyConflict,
     InvalidRunTransition,
     PauseType,
@@ -16,6 +17,18 @@ from app.run_control.types import (
     TenantRole,
     assert_transition,
 )
+
+
+def test_attempt_status_values_match_persisted_contract() -> None:
+    assert [status.value for status in AttemptStatus] == [
+        "assigned",
+        "running",
+        "completed",
+        "failed",
+        "lost",
+        "cancelled",
+        "paused",
+    ]
 
 
 def test_run_status_values_match_persisted_contract() -> None:

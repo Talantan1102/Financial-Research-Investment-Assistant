@@ -13,6 +13,16 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class AttemptStatus(StrEnum):
+    ASSIGNED = "assigned"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    LOST = "lost"
+    CANCELLED = "cancelled"
+    PAUSED = "paused"
+
+
 class TenantRole(StrEnum):
     OWNER = "owner"
     ADMIN = "admin"

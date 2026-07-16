@@ -10,6 +10,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -20,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.core.database import Base
-from app.run_control.types import ACTIVE_RUN_STATUSES, PauseType, RunStatus
+from app.run_control.types import ACTIVE_RUN_STATUSES, AttemptStatus, PauseType, RunStatus
 
 
 def _quoted_values(values: list[str]) -> str:
@@ -28,6 +29,7 @@ def _quoted_values(values: list[str]) -> str:
 
 
 _RUN_STATUS_VALUES = [status.value for status in RunStatus]
+_ATTEMPT_STATUS_VALUES = [status.value for status in AttemptStatus]
 _ACTIVE_RUN_STATUS_VALUES = sorted(status.value for status in ACTIVE_RUN_STATUSES)
 _PAUSE_TYPE_VALUES = [pause_type.value for pause_type in PauseType]
 
@@ -56,6 +58,10 @@ class RunSession(Base):
         onupdate=datetime.utcnow,
     )
 
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_run_sessions_tenant_id"),
+    )
+
 
 class RunMessage(Base):
     __tablename__ = "run_messages"
@@ -63,13 +69,11 @@ class RunMessage(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     session_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("run_sessions.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -78,6 +82,21 @@ class RunMessage(Base):
     status = Column(String(32), nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "session_id"],
+            ["run_sessions.tenant_id", "run_sessions.id"],
+            name="fk_run_messages_tenant_session",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "session_id",
+            "id",
+            name="uq_run_messages_tenant_session_id",
+        ),
+    )
+
 
 class Run(Base):
     __tablename__ = "runs"
@@ -85,12 +104,10 @@ class Run(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
     )
     session_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("run_sessions.id", ondelete="CASCADE"),
         nullable=False,
     )
     created_by_user_id = Column(
@@ -104,17 +121,14 @@ class Run(Base):
     request_hash = Column(String(64), nullable=False)
     input_message_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("run_messages.id", ondelete="RESTRICT"),
         nullable=False,
     )
     final_message_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("run_messages.id", ondelete="SET NULL"),
         nullable=True,
     )
     replaces_run_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("runs.id", ondelete="SET NULL"),
         nullable=True,
     )
     retry_count = Column(Integer, nullable=False, default=0)
@@ -129,11 +143,43 @@ class Run(Base):
     cancel_requested_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "session_id"],
+            ["run_sessions.tenant_id", "run_sessions.id"],
+            name="fk_runs_tenant_session",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "session_id", "input_message_id"],
+            ["run_messages.tenant_id", "run_messages.session_id", "run_messages.id"],
+            name="fk_runs_input_message_provenance",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "session_id", "final_message_id"],
+            ["run_messages.tenant_id", "run_messages.session_id", "run_messages.id"],
+            name="fk_runs_final_message_provenance",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "session_id", "created_by_user_id", "replaces_run_id"],
+            ["runs.tenant_id", "runs.session_id", "runs.created_by_user_id", "runs.id"],
+            name="fk_runs_replacement_provenance",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "tenant_id",
             "created_by_user_id",
             "idempotency_key",
             name="uq_run_idempotency",
+        ),
+        UniqueConstraint("tenant_id", "id", name="uq_runs_tenant_id"),
+        UniqueConstraint(
+            "tenant_id",
+            "session_id",
+            "created_by_user_id",
+            "id",
+            name="uq_runs_replacement_identity",
         ),
         CheckConstraint("run_type = 'chat'", name="ck_runs_chat_type"),
         CheckConstraint(
@@ -174,8 +220,9 @@ class RunAttempt(Base):
 
     __table_args__ = (
         UniqueConstraint("run_id", "attempt_no", name="uq_run_attempt_no"),
+        UniqueConstraint("run_id", "id", name="uq_run_attempt_identity"),
         CheckConstraint(
-            f"status IN ({_quoted_values(_RUN_STATUS_VALUES)})",
+            f"status IN ({_quoted_values(_ATTEMPT_STATUS_VALUES)})",
             name="ck_run_attempts_fixed_status",
         ),
     )
@@ -214,19 +261,16 @@ class RunEvent(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     run_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("runs.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     attempt_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("run_attempts.id", ondelete="SET NULL"),
         nullable=True,
     )
     seq = Column(Integer, nullable=False)
@@ -235,5 +279,17 @@ class RunEvent(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "run_id"],
+            ["runs.tenant_id", "runs.id"],
+            name="fk_run_events_tenant_run",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["run_id", "attempt_id"],
+            ["run_attempts.run_id", "run_attempts.id"],
+            name="fk_run_events_attempt_provenance",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint("run_id", "seq", name="uq_run_event_seq"),
     )
