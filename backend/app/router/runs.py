@@ -121,6 +121,39 @@ def _format_sse(event: RunEvent) -> str:
     return f"id: {event.seq}\nevent: {event.event_type}\ndata: {data}\n\n"
 
 
+async def _read_durable_snapshot(
+    service: RunService,
+    tenant_id: UUID,
+    run_id: UUID,
+    actor_id: UUID,
+    *,
+    after_seq: int,
+) -> tuple[tuple[RunEvent, ...], str]:
+    events = list(
+        await service.list_events(
+            tenant_id,
+            run_id,
+            actor_id,
+            after_seq=after_seq,
+        )
+    )
+    cursor = max((int(event.seq) for event in events), default=after_seq)
+    run = await service.get_run(tenant_id, run_id, actor_id)
+    run_status = cast(str, run.status)
+    if run_status in _TERMINAL_STATUS_VALUES:
+        # Status and its durable event commit atomically, but the two reads above
+        # use separate transactions. Drain once after observing terminal state so
+        # an event committed between those reads cannot be skipped.
+        tail = await service.list_events(
+            tenant_id,
+            run_id,
+            actor_id,
+            after_seq=cursor,
+        )
+        events.extend(tail)
+    return tuple(events), run_status
+
+
 async def _event_stream(
     request: Request,
     service: RunService,
@@ -144,17 +177,22 @@ async def _event_stream(
         if await request.is_disconnected():
             return
         await asyncio.sleep(interval)
-        events = await service.list_events(
-            tenant_id,
-            run_id,
-            actor_id,
-            after_seq=cursor,
-        )
+        try:
+            events, run_status = await _read_durable_snapshot(
+                service,
+                tenant_id,
+                run_id,
+                actor_id,
+                after_seq=cursor,
+            )
+        except ResourceNotFound:
+            # Authorization was checked before the response started. If access is
+            # revoked later, preserve the already-sent snapshot and close cleanly.
+            return
         for event in events:
             cursor = max(cursor, int(event.seq))
             yield _format_sse(event)
-        run = await service.get_run(tenant_id, run_id, actor_id)
-        if cast(str, run.status) in _TERMINAL_STATUS_VALUES:
+        if run_status in _TERMINAL_STATUS_VALUES:
             return
 
 
@@ -189,13 +227,13 @@ async def get_run_events(
 
     actor_id = cast(UUID, current_user.id)
     try:
-        initial_events = await service.list_events(
+        initial_events, run_status = await _read_durable_snapshot(
+            service,
             tenant_id,
             run_id,
             actor_id,
             after_seq=after,
         )
-        run = await service.get_run(tenant_id, run_id, actor_id)
     except RunControlError as exc:
         _raise_http_error(exc)
     return StreamingResponse(
@@ -206,7 +244,7 @@ async def get_run_events(
             run_id,
             actor_id,
             initial_events,
-            cast(str, run.status),
+            run_status,
             after,
         ),
         media_type="text/event-stream",

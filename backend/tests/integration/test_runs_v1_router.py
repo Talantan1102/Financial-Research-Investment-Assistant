@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -16,8 +17,8 @@ import pytest_asyncio
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
-from app.router.runs import router
-from app.run_control.types import PauseType, RunStatus
+from app.router.runs import get_run_service, router
+from app.run_control.types import PauseType, ResourceNotFound, RunStatus
 from app.services.run_service import RunService
 from app.services.trace_models import TraceSpanRow
 from fastapi import FastAPI, HTTPException, status
@@ -381,6 +382,117 @@ async def test_sse_frames_reconnect_without_duplicates_and_terminal_stream_ends(
     ]
     assert [item["id"] for item in _sse_frames(reconnected.text)] == [2]
     assert after_query.text == ""
+
+
+@pytest.mark.asyncio
+async def test_sse_drains_terminal_event_committed_between_event_and_status_reads(
+    api_context: tuple[Tenant, dict[str, User]],
+) -> None:
+    tenant, users = api_context
+    run_id = uuid.uuid4()
+    created = SimpleNamespace(seq=1, event_type="run.created", payload={"status": "queued"})
+    completed = SimpleNamespace(
+        seq=2,
+        event_type="run.completed",
+        payload={"status": "completed"},
+    )
+
+    class TerminalRaceService:
+        def __init__(self) -> None:
+            self.events = (created,)
+
+        async def list_events(
+            self,
+            tenant_id: uuid.UUID,
+            requested_run_id: uuid.UUID,
+            actor_id: uuid.UUID,
+            *,
+            after_seq: int = 0,
+        ) -> tuple[object, ...]:
+            assert (tenant_id, requested_run_id, actor_id) == (
+                tenant.id,
+                run_id,
+                users["member"].id,
+            )
+            return tuple(event for event in self.events if event.seq > after_seq)
+
+        async def get_run(
+            self,
+            tenant_id: uuid.UUID,
+            requested_run_id: uuid.UUID,
+            actor_id: uuid.UUID,
+        ) -> object:
+            assert (tenant_id, requested_run_id, actor_id) == (
+                tenant.id,
+                run_id,
+                users["member"].id,
+            )
+            self.events = (created, completed)
+            return SimpleNamespace(status="completed")
+
+    fake_service = TerminalRaceService()
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_current_user_required] = lambda: users["member"]
+    app.dependency_overrides[get_run_service] = lambda: fake_service
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(f"{_run_url(tenant.id)}/{run_id}/events")
+
+    assert [item["id"] for item in _sse_frames(response.text)] == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_sse_closes_cleanly_if_visibility_is_revoked_after_headers(
+    api_context: tuple[Tenant, dict[str, User]],
+) -> None:
+    tenant, users = api_context
+    run_id = uuid.uuid4()
+    created = SimpleNamespace(seq=1, event_type="run.created", payload={"status": "queued"})
+
+    class RevokedVisibilityService:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        async def list_events(
+            self,
+            tenant_id: uuid.UUID,
+            requested_run_id: uuid.UUID,
+            actor_id: uuid.UUID,
+            *,
+            after_seq: int = 0,
+        ) -> tuple[object, ...]:
+            del tenant_id, requested_run_id, actor_id
+            self.reads += 1
+            if self.reads > 1:
+                raise ResourceNotFound("tenant not found")
+            return (created,) if after_seq < 1 else ()
+
+        async def get_run(
+            self,
+            tenant_id: uuid.UUID,
+            requested_run_id: uuid.UUID,
+            actor_id: uuid.UUID,
+        ) -> object:
+            del tenant_id, requested_run_id, actor_id
+            return SimpleNamespace(status="queued")
+
+    app = FastAPI()
+    app.state.run_sse_poll_interval = 0.0
+    app.state.run_sse_max_polls = 1
+    app.include_router(router)
+    app.dependency_overrides[get_current_user_required] = lambda: users["member"]
+    app.dependency_overrides[get_run_service] = RevokedVisibilityService
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        response = await client.get(f"{_run_url(tenant.id)}/{run_id}/events")
+
+    assert response.status_code == 200
+    assert [item["id"] for item in _sse_frames(response.text)] == [1]
 
 
 @pytest.mark.asyncio
