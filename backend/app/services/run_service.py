@@ -45,6 +45,7 @@ class CreatedRun:
     run: Run
     message: RunMessage
     events: tuple[RunEvent, ...]
+    replayed: bool = False
 
 
 class RunService:
@@ -405,7 +406,12 @@ class RunService:
             )
             .order_by(RunEvent.seq.asc())
         )
-        return CreatedRun(run=existing, message=message, events=tuple(events.all()))
+        return CreatedRun(
+            run=existing,
+            message=message,
+            events=tuple(events.all()),
+            replayed=True,
+        )
 
     async def _get_or_create_session(
         self, session: AsyncSession, command: CreateRunCommand
