@@ -58,9 +58,7 @@ class RunSession(Base):
         onupdate=datetime.utcnow,
     )
 
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "id", name="uq_run_sessions_tenant_id"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "id", name="uq_run_sessions_tenant_id"),)
 
 
 class RunMessage(Base):
@@ -191,9 +189,7 @@ class Run(Base):
             "uq_run_one_nonterminal_per_session",
             "session_id",
             unique=True,
-            postgresql_where=text(
-                f"status IN ({_quoted_values(_ACTIVE_RUN_STATUS_VALUES)})"
-            ),
+            postgresql_where=text(f"status IN ({_quoted_values(_ACTIVE_RUN_STATUS_VALUES)})"),
         ),
         Index("ix_runs_tenant_status_queued_at", "tenant_id", "status", "queued_at"),
     )

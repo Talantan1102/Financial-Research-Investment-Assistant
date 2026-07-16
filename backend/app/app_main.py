@@ -14,6 +14,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from app.core.async_database import (  # noqa: E402  (must follow load_dotenv)
+    _sqlalchemy_async_pg_url,  # noqa: F401  compatibility re-export for workers/evals
+    build_async_database,
+)
 from app.core.database import Base, engine  # noqa: E402  (must follow load_dotenv)
 from app.router import chat as chat_router_module  # noqa: E402
 from app.router import chats as chats_router_module  # noqa: E402
@@ -28,28 +32,11 @@ from app.router.observability_router import router as observability_router  # no
 from app.router.persona_router import router as persona_router  # noqa: E402  (persona-ui)
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
+from app.router.runs import router as runs_router  # noqa: E402
+from app.router.tenants import router as tenants_router  # noqa: E402
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
 from app.services.mcp_client import MCPClient  # noqa: E402
 from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover trigger)
-
-# ---------------------------------------------------------------------------
-# Helper: build psycopg3-compatible async DATABASE_URL from env vars
-# ---------------------------------------------------------------------------
-
-
-def _sqlalchemy_async_pg_url() -> str:
-    """Return a SQLAlchemy async engine URL (postgresql+psycopg://).
-
-    SQLAlchemy's create_async_engine requires the +psycopg driver suffix
-    to select the psycopg3 backend over psycopg2.
-    """
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.environ["POSTGRES_PASSWORD"]  # C37: no silent known-password fallback
-    host = os.getenv("POSTGRES_HOST", "localhost")
-    port = os.getenv("POSTGRES_PORT", "5432")
-    db = os.getenv("POSTGRES_DB", "industry_assistant")
-    return f"postgresql+psycopg://{user}:{password}@{host}:{port}/{db}"
-
 
 # ---------------------------------------------------------------------------
 # App lifespan
@@ -191,19 +178,25 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         app.state._mcp_ctx = None
         logger.warning("MCP client 启动跳过: %s", e)
 
-    # 3. ChatSessionRepo (no existing async_session_factory — create one inline)
+    # 3. Shared async database for v1 RunService and legacy async repositories.
     try:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        app.state.db_async_engine, app.state.async_session_factory = build_async_database()
+        logger.info("共享 async database 初始化完成")
+    except Exception as e:  # noqa: BLE001
+        app.state.db_async_engine = None
+        app.state.async_session_factory = None
+        logger.warning("共享 async database 初始化跳过: %s", e)
 
-        _chat_engine_url = _sqlalchemy_async_pg_url()  # SQLAlchemy needs +psycopg prefix
-        app.state.chat_async_engine = create_async_engine(_chat_engine_url, future=True)
-        _factory = async_sessionmaker(app.state.chat_async_engine, expire_on_commit=False)
-        # Store factory on app.state so escalate deps (T11) can reuse it
-        app.state.async_session_factory = _factory
-        app.state.chat_session_repo = ChatSessionRepo(session_factory=_factory)
+    # ChatSessionRepo consumes the shared factory, but its own failure must not
+    # disable RunService's database dependency.
+    try:
+        if app.state.async_session_factory is None:
+            raise RuntimeError("async_session_factory not initialized")
+        app.state.chat_session_repo = ChatSessionRepo(
+            session_factory=app.state.async_session_factory
+        )
         logger.info("ChatSessionRepo 初始化完成")
     except Exception as e:  # noqa: BLE001
-        app.state.async_session_factory = None
         app.state.chat_session_repo = None
         logger.warning("ChatSessionRepo 初始化跳过: %s", e)
 
@@ -322,12 +315,12 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
             logger.info("MCP client 已关闭")
         except Exception as e:  # noqa: BLE001
             logger.warning("MCP client 关闭失败: %s", e)
-    if getattr(app.state, "chat_async_engine", None) is not None:
+    if getattr(app.state, "db_async_engine", None) is not None:
         try:
-            await app.state.chat_async_engine.dispose()
-            logger.info("ChatSessionRepo async engine 已关闭")
+            await app.state.db_async_engine.dispose()
+            logger.info("共享 async database 已关闭")
         except Exception as e:  # noqa: BLE001
-            logger.warning("ChatSessionRepo async engine 关闭失败: %s", e)
+            logger.warning("共享 async database 关闭失败: %s", e)
     if getattr(app.state, "redis_async", None) is not None:
         try:
             await app.state.redis_async.aclose()
@@ -375,6 +368,8 @@ app.include_router(research.router)
 app.include_router(monitoring_router)
 app.include_router(reports_router)  # v0.9.x — research reports CRUD
 app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
+app.include_router(tenants_router)
+app.include_router(runs_router)
 app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE streaming)
 app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
 app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (confirmed packet)

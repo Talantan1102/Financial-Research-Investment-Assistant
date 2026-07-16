@@ -116,6 +116,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### 代码解释器(2026-06-11 ship 完)
 - [run_python 代码解释器 ship](docs/claude-context/code-interpreter-run-python-done.md) — LLM 写 Python→复用 SkillExecutor 沙箱(execute_source 内联入口)→plotly 交互图;figures 走 chart 事件不进上下文;ExecutorBackend 留 Docker 口;两坑(plotly 用 dist-min/factory 避 mapbox / 沙箱 OpenBLAS 单线程避 OOM)
 
+### Run Control Plane Phase 1(2026-07-16 ship 完)
+- [Phase 1 foundation ship](docs/claude-context/run-control-plane-phase1-foundation-done.md) — Tenant/Run PostgreSQL 骨架 + production 严格六 Run API + durable lifecycle；只到 queued foundation，无 Scheduler/Worker/Redis/LLM
+
 
 ## 设计稿与实施计划
 

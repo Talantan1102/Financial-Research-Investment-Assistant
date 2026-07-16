@@ -153,9 +153,7 @@ def test_run_status_check_has_exact_literal_contract(db_session: Session) -> Non
     assert check_values(db_session, "runs", "ck_runs_fixed_status") == set(RUN_STATUSES)
 
 
-def test_only_one_nonterminal_run_per_session(
-    db_session: Session, run_context: RunContext
-) -> None:
+def test_only_one_nonterminal_run_per_session(db_session: Session, run_context: RunContext) -> None:
     db_session.add(make_run(run_context, status="queued", message_index=0))
     db_session.flush()
     db_session.add(make_run(run_context, status="running", message_index=1))
@@ -168,7 +166,10 @@ def test_all_terminal_history_does_not_block_new_run(
 ) -> None:
     statuses = (*TERMINAL_RUN_STATUSES, "queued")
     db_session.add_all(
-        [make_run(run_context, status=status, message_index=index) for index, status in enumerate(statuses)]
+        [
+            make_run(run_context, status=status, message_index=index)
+            for index, status in enumerate(statuses)
+        ]
     )
     db_session.flush()
 
@@ -353,11 +354,20 @@ def test_event_sequence_is_unique_per_run(db_session: Session, run_context: RunC
 
 def test_provenance_foreign_keys_are_restrict(db_session: Session) -> None:
     run_fks = foreign_keys(db_session, "runs")
-    assert run_fks[("tenant_id", "session_id", "input_message_id")]["options"]["ondelete"] == "RESTRICT"
-    assert run_fks[("tenant_id", "session_id", "final_message_id")]["options"]["ondelete"] == "RESTRICT"
-    assert run_fks[("tenant_id", "session_id", "created_by_user_id", "replaces_run_id")][
-        "options"
-    ]["ondelete"] == "RESTRICT"
+    assert (
+        run_fks[("tenant_id", "session_id", "input_message_id")]["options"]["ondelete"]
+        == "RESTRICT"
+    )
+    assert (
+        run_fks[("tenant_id", "session_id", "final_message_id")]["options"]["ondelete"]
+        == "RESTRICT"
+    )
+    assert (
+        run_fks[("tenant_id", "session_id", "created_by_user_id", "replaces_run_id")]["options"][
+            "ondelete"
+        ]
+        == "RESTRICT"
+    )
     event_fks = foreign_keys(db_session, "run_events")
     assert event_fks[("run_id", "attempt_id")]["options"]["ondelete"] == "RESTRICT"
 
