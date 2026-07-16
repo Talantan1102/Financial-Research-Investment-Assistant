@@ -1,0 +1,379 @@
+from __future__ import annotations
+
+import asyncio
+import sys
+import uuid
+
+import pytest
+import pytest_asyncio
+from app.models.run import Run, RunEvent
+from app.models.tenant import Tenant, TenantMembership
+from app.models.user import User
+from app.run_control.types import (
+    InvalidRunTransition,
+    ResourceNotFound,
+    ResumeNotAllowed,
+    RunStatus,
+)
+from app.services.run_service import CreateRunCommand, RunService
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from tests.helpers.run_fake_executor import FakeRunExecutor
+
+
+@pytest.fixture(scope="session")
+def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
+    if sys.platform == "win32":
+        return asyncio.WindowsSelectorEventLoopPolicy()
+    return asyncio.DefaultEventLoopPolicy()
+
+
+@pytest_asyncio.fixture
+async def lifecycle_context(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> tuple[Tenant, User, User]:
+    suffix = uuid.uuid4().hex[:12]
+    member = User(
+        username=f"lifecycle-member-{suffix}",
+        email=f"lifecycle-member-{suffix}@example.com",
+        hashed_password="test-password-hash",
+    )
+    outsider = User(
+        username=f"lifecycle-outsider-{suffix}",
+        email=f"lifecycle-outsider-{suffix}@example.com",
+        hashed_password="test-password-hash",
+    )
+    tenant = Tenant(name="Lifecycle tenant", slug=f"lifecycle-{suffix}")
+    async with async_session_factory() as session, session.begin():
+        session.add_all([member, outsider, tenant])
+        await session.flush()
+        session.add(TenantMembership(tenant_id=tenant.id, user_id=member.id, role="member"))
+    return tenant, member, outsider
+
+
+@pytest.fixture
+def run_service(async_session_factory: async_sessionmaker[AsyncSession]) -> RunService:
+    return RunService(async_session_factory)
+
+
+@pytest_asyncio.fixture
+async def created_run(
+    run_service: RunService,
+    lifecycle_context: tuple[Tenant, User, User],
+) -> Run:
+    tenant, member, _outsider = lifecycle_context
+    created = await run_service.create_run(
+        CreateRunCommand(
+            tenant_id=tenant.id,
+            actor_id=member.id,
+            session_id=None,
+            prompt="分析这笔持仓。",
+            idempotency_key=f"lifecycle-{uuid.uuid4().hex}",
+            replaces_run_id=None,
+        )
+    )
+    return created.run
+
+
+@pytest.fixture
+def fake_executor(run_service: RunService, created_run: Run) -> FakeRunExecutor:
+    return FakeRunExecutor(
+        run_service,
+        created_run.tenant_id,
+        created_run.created_by_user_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancel_queued_finishes_immediately(
+    run_service: RunService, created_run: Run
+) -> None:
+    result = await run_service.cancel_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+
+    assert result.status == RunStatus.CANCELLED.value
+    assert result.finished_at is not None
+    assert result.cancel_requested_at is None
+    events = await run_service.list_events(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    assert [(event.seq, event.event_type) for event in events] == [
+        (1, "run.created"),
+        (2, "run.cancelled"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_cancel_running_requests_cooperative_cancellation(
+    run_service: RunService, fake_executor: FakeRunExecutor, created_run: Run
+) -> None:
+    await fake_executor.start(created_run.id)
+
+    result = await run_service.cancel_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+
+    assert result.status == RunStatus.CANCEL_REQUESTED.value
+    assert result.cancel_requested_at is not None
+    assert result.finished_at is None
+
+
+@pytest.mark.asyncio
+async def test_cancel_terminal_is_idempotent_without_new_event(
+    run_service: RunService, created_run: Run
+) -> None:
+    first = await run_service.cancel_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    second = await run_service.cancel_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+
+    assert second.status == first.status == RunStatus.CANCELLED.value
+    events = await run_service.list_events(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    assert [event.event_type for event in events].count("run.cancelled") == 1
+
+
+@pytest.mark.asyncio
+async def test_resume_waiting_keeps_same_run_and_resolves_pause(
+    run_service: RunService, fake_executor: FakeRunExecutor, created_run: Run
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_input(
+        created_run.id,
+        {"question": "你的成本价是多少？"},
+        {"checkpoint": "ask-cost"},
+    )
+
+    resumed = await run_service.resume_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        response={"text": "成本价 1500"},
+    )
+
+    resolved = await run_service.get_pause(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        pause.id,
+    )
+    assert resumed.id == created_run.id
+    assert resumed.status == RunStatus.QUEUED.value
+    assert resumed.queue_reason == "resume"
+    assert resolved.response_payload == {"text": "成本价 1500"}
+    assert resolved.resolved_at is not None
+
+
+@pytest.mark.asyncio
+async def test_invalid_resume_is_rejected(run_service: RunService, created_run: Run) -> None:
+    with pytest.raises(ResumeNotAllowed):
+        await run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={"text": "没有 pause"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_mutation_preserves_invisible_as_not_found(
+    run_service: RunService,
+    created_run: Run,
+    lifecycle_context: tuple[Tenant, User, User],
+) -> None:
+    _tenant, _member, outsider = lifecycle_context
+
+    with pytest.raises(ResourceNotFound):
+        await run_service.cancel_run(created_run.tenant_id, created_run.id, outsider.id)
+
+
+@pytest.mark.asyncio
+async def test_get_pause_preserves_invisible_as_not_found(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    lifecycle_context: tuple[Tenant, User, User],
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tenant, _member, outsider = lifecycle_context
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_input(created_run.id, {"question": "secret"})
+
+    suffix = uuid.uuid4().hex[:12]
+    other_member = User(
+        username=f"other-{suffix}",
+        email=f"other-{suffix}@example.com",
+        hashed_password="test-password-hash",
+    )
+    async with async_session_factory() as session, session.begin():
+        session.add(other_member)
+        await session.flush()
+        session.add(TenantMembership(tenant_id=tenant.id, user_id=other_member.id, role="member"))
+
+    with pytest.raises(ResourceNotFound):
+        await run_service.get_pause(
+            created_run.tenant_id,
+            created_run.id,
+            outsider.id,
+            pause.id,
+        )
+    with pytest.raises(ResourceNotFound):
+        await run_service.get_pause(
+            created_run.tenant_id,
+            created_run.id,
+            other_member.id,
+            pause.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_transition_event_cannot_spoof_authoritative_status_fields(
+    run_service: RunService,
+    created_run: Run,
+) -> None:
+    await run_service.transition_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        RunStatus.ASSIGNED,
+        event_type="run.assigned",
+        payload={"from_status": "failed", "status": "completed", "worker": "fake"},
+    )
+
+    events = await run_service.list_events(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    assert events[-1].payload == {
+        "from_status": RunStatus.QUEUED.value,
+        "status": RunStatus.ASSIGNED.value,
+        "worker": "fake",
+    }
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_mutations_allocate_unique_monotonic_event_seq(
+    run_service: RunService,
+    created_run: Run,
+) -> None:
+    results = await asyncio.gather(
+        run_service.transition_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            RunStatus.ASSIGNED,
+            event_type="run.assigned",
+        ),
+        run_service.cancel_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+        ),
+        return_exceptions=True,
+    )
+
+    assert all(
+        not isinstance(result, BaseException) or isinstance(result, InvalidRunTransition)
+        for result in results
+    )
+    events = await run_service.list_events(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    seqs = [event.seq for event in events]
+    assert seqs == list(range(1, len(seqs) + 1))
+    assert len(seqs) == len(set(seqs))
+
+
+@pytest.mark.asyncio
+async def test_concurrent_resume_resolves_pause_once_and_is_idempotent(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_input(created_run.id, {"question": "成本价？"})
+
+    first, second = await asyncio.gather(
+        run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={"text": "1500"},
+        ),
+        run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={"text": "1500"},
+        ),
+    )
+
+    assert first.status == second.status == RunStatus.QUEUED.value
+    assert (
+        await run_service.get_pause(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            pause.id,
+        )
+    ).response_payload == {"text": "1500"}
+    events = await run_service.list_events(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    assert [event.event_type for event in events].count("run.resumed") == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_racing_resume_finishes_in_legal_state(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await fake_executor.start(created_run.id)
+    await fake_executor.pause_for_approval(created_run.id, {"action": "place-order"})
+
+    results = await asyncio.gather(
+        run_service.cancel_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+        ),
+        run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={"approved": True},
+        ),
+        return_exceptions=True,
+    )
+
+    assert all(
+        not isinstance(result, BaseException) or isinstance(result, ResumeNotAllowed)
+        for result in results
+    )
+    current = await run_service.get_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    assert current.status == RunStatus.CANCELLED.value
+    async with async_session_factory() as session:
+        events = tuple(
+            (
+                await session.scalars(
+                    select(RunEvent).where(RunEvent.run_id == created_run.id).order_by(RunEvent.seq)
+                )
+            ).all()
+        )
+    assert [event.seq for event in events] == list(range(1, len(events) + 1))
+
+
+@pytest.mark.asyncio
+async def test_record_pause_requires_running(
+    fake_executor: FakeRunExecutor, created_run: Run
+) -> None:
+    with pytest.raises(InvalidRunTransition):
+        await fake_executor.pause_for_input(created_run.id, {"question": "too early"})

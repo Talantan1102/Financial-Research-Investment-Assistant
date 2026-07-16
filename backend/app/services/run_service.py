@@ -5,23 +5,27 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import cast
+from datetime import UTC, datetime
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.run import Run, RunEvent, RunMessage, RunSession
+from app.models.run import Run, RunEvent, RunMessage, RunPause, RunSession
 from app.models.tenant import Tenant, TenantMembership
 from app.run_control.types import (
     ACTIVE_RUN_STATUSES,
     TERMINAL_RUN_STATUSES,
     IdempotencyConflict,
+    PauseType,
     ResourceNotFound,
+    ResumeNotAllowed,
     RunStatus,
     SessionBusy,
     TenantQueueFull,
     TenantRole,
+    assert_transition,
 )
 from app.services.trace_models import TraceSpanRow
 
@@ -177,6 +181,197 @@ class RunService:
             )
             return tuple(rows.all())
 
+    async def transition_run(
+        self,
+        tenant_id: UUID,
+        run_id: UUID,
+        actor_id: UUID,
+        target_status: RunStatus,
+        *,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        attempt_id: UUID | None = None,
+    ) -> Run:
+        async with self._session_factory() as session, session.begin():
+            run = await self._lock_visible_run(session, tenant_id, run_id, actor_id)
+            current_status = RunStatus(cast(str, run.status))
+            assert_transition(current_status, target_status)
+            self._apply_transition_timestamps(run, target_status)
+            cast(Any, run).status = target_status.value
+            await self._append_event(
+                session,
+                run,
+                event_type,
+                {
+                    **(payload or {}),
+                    "from_status": current_status.value,
+                    "status": target_status.value,
+                },
+                attempt_id=attempt_id,
+            )
+            return run
+
+    async def cancel_run(self, tenant_id: UUID, run_id: UUID, actor_id: UUID) -> Run:
+        async with self._session_factory() as session, session.begin():
+            run = await self._lock_visible_run(session, tenant_id, run_id, actor_id)
+            current_status = RunStatus(cast(str, run.status))
+            if (
+                current_status in TERMINAL_RUN_STATUSES
+                or current_status == RunStatus.CANCEL_REQUESTED
+            ):
+                return run
+
+            now = _utcnow()
+            if current_status in {
+                RunStatus.QUEUED,
+                RunStatus.WAITING_APPROVAL,
+                RunStatus.WAITING_INPUT,
+            }:
+                target_status = RunStatus.CANCELLED
+                cast(Any, run).finished_at = now
+                event_type = "run.cancelled"
+            else:
+                target_status = RunStatus.CANCEL_REQUESTED
+                cast(Any, run).cancel_requested_at = now
+                event_type = "run.cancel_requested"
+
+            assert_transition(current_status, target_status)
+            cast(Any, run).status = target_status.value
+            await self._append_event(
+                session,
+                run,
+                event_type,
+                {
+                    "from_status": current_status.value,
+                    "status": target_status.value,
+                },
+            )
+            return run
+
+    async def record_pause(
+        self,
+        tenant_id: UUID,
+        run_id: UUID,
+        actor_id: UUID,
+        pause_type: PauseType,
+        *,
+        request_payload: dict[str, Any],
+        continuation_payload: dict[str, Any],
+        attempt_id: UUID | None = None,
+    ) -> RunPause:
+        async with self._session_factory() as session, session.begin():
+            run = await self._lock_visible_run(session, tenant_id, run_id, actor_id)
+            target_status = {
+                PauseType.APPROVAL: RunStatus.WAITING_APPROVAL,
+                PauseType.INPUT: RunStatus.WAITING_INPUT,
+            }[pause_type]
+            assert_transition(RunStatus(cast(str, run.status)), target_status)
+            last_pause_no = await session.scalar(
+                select(func.coalesce(func.max(RunPause.pause_no), 0)).where(
+                    RunPause.run_id == run.id
+                )
+            )
+            pause = RunPause(
+                run_id=run.id,
+                pause_no=int(last_pause_no or 0) + 1,
+                pause_type=pause_type.value,
+                request_payload=request_payload,
+                continuation_payload=continuation_payload,
+            )
+            session.add(pause)
+            await session.flush()
+            cast(Any, run).status = target_status.value
+            await self._append_event(
+                session,
+                run,
+                "run.paused",
+                {
+                    "pause_id": str(pause.id),
+                    "pause_no": pause.pause_no,
+                    "pause_type": pause.pause_type,
+                    "status": target_status.value,
+                },
+                attempt_id=attempt_id,
+            )
+            return pause
+
+    async def resume_run(
+        self,
+        tenant_id: UUID,
+        run_id: UUID,
+        actor_id: UUID,
+        *,
+        response: dict[str, Any],
+    ) -> Run:
+        async with self._session_factory() as session, session.begin():
+            run = await self._lock_visible_run(session, tenant_id, run_id, actor_id)
+            latest_pause = await session.scalar(
+                select(RunPause)
+                .where(RunPause.run_id == run.id)
+                .order_by(RunPause.pause_no.desc())
+                .limit(1)
+                .with_for_update()
+            )
+            current_status = RunStatus(cast(str, run.status))
+            if (
+                current_status == RunStatus.QUEUED
+                and latest_pause is not None
+                and latest_pause.resolved_at is not None
+            ):
+                return run
+            if current_status not in {
+                RunStatus.WAITING_APPROVAL,
+                RunStatus.WAITING_INPUT,
+            }:
+                raise ResumeNotAllowed("run is not waiting")
+            if latest_pause is None or latest_pause.resolved_at is not None:
+                raise ResumeNotAllowed("run has no unresolved pause")
+            expected_pause_type = {
+                RunStatus.WAITING_APPROVAL: PauseType.APPROVAL.value,
+                RunStatus.WAITING_INPUT: PauseType.INPUT.value,
+            }[current_status]
+            if latest_pause.pause_type != expected_pause_type:
+                raise ResumeNotAllowed("pause type does not match run status")
+
+            assert_transition(current_status, RunStatus.QUEUED)
+            now = _utcnow()
+            latest_pause.response_payload = response
+            latest_pause.resolved_at = now
+            cast(Any, run).status = RunStatus.QUEUED.value
+            cast(Any, run).queue_reason = "resume"
+            cast(Any, run).queued_at = now
+            await self._append_event(
+                session,
+                run,
+                "run.resumed",
+                {
+                    "from_status": current_status.value,
+                    "status": RunStatus.QUEUED.value,
+                    "pause_id": str(latest_pause.id),
+                    "pause_no": latest_pause.pause_no,
+                },
+            )
+            return run
+
+    async def get_pause(
+        self,
+        tenant_id: UUID,
+        run_id: UUID,
+        actor_id: UUID,
+        pause_id: UUID,
+    ) -> RunPause:
+        async with self._session_factory() as session, session.begin():
+            await self._get_visible_run(session, tenant_id, run_id, actor_id)
+            pause = await session.scalar(
+                select(RunPause).where(
+                    RunPause.id == pause_id,
+                    RunPause.run_id == run_id,
+                )
+            )
+            if pause is None:
+                raise ResourceNotFound("run pause not found")
+            return pause
+
     async def _find_idempotent_run(
         self, session: AsyncSession, command: CreateRunCommand
     ) -> Run | None:
@@ -267,6 +462,56 @@ class RunService:
             raise ResourceNotFound("run not found")
         return run
 
+    async def _lock_visible_run(
+        self, session: AsyncSession, tenant_id: UUID, run_id: UUID, actor_id: UUID
+    ) -> Run:
+        membership = await self._require_membership(session, tenant_id, actor_id)
+        conditions = [Run.id == run_id, Run.tenant_id == tenant_id]
+        if membership.role == TenantRole.MEMBER.value:
+            conditions.append(Run.created_by_user_id == actor_id)
+        run = await session.scalar(select(Run).where(*conditions).with_for_update())
+        if run is None:
+            raise ResourceNotFound("run not found")
+        return run
+
+    @staticmethod
+    async def _append_event(
+        session: AsyncSession,
+        run: Run,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        attempt_id: UUID | None = None,
+    ) -> RunEvent:
+        last_seq = await session.scalar(
+            select(func.coalesce(func.max(RunEvent.seq), 0)).where(RunEvent.run_id == run.id)
+        )
+        event = RunEvent(
+            tenant_id=run.tenant_id,
+            run_id=run.id,
+            attempt_id=attempt_id,
+            seq=int(last_seq or 0) + 1,
+            event_type=event_type,
+            payload=payload,
+        )
+        session.add(event)
+        await session.flush()
+        return event
+
+    @staticmethod
+    def _apply_transition_timestamps(run: Run, target_status: RunStatus) -> None:
+        now = _utcnow()
+        if target_status == RunStatus.QUEUED:
+            cast(Any, run).queued_at = now
+        elif target_status == RunStatus.ASSIGNED:
+            cast(Any, run).assigned_at = now
+        elif target_status == RunStatus.RUNNING:
+            cast(Any, run).started_at = now
+        elif target_status == RunStatus.CANCEL_REQUESTED:
+            cast(Any, run).cancel_requested_at = now
+        elif target_status in TERMINAL_RUN_STATUSES:
+            cast(Any, run).finished_at = now
+
     @staticmethod
     async def _require_membership(
         session: AsyncSession, tenant_id: UUID, actor_id: UUID
@@ -296,3 +541,7 @@ def _canonical_request_hash(command: CreateRunCommand) -> str:
         sort_keys=True,
     ).encode()
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
