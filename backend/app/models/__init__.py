@@ -37,6 +37,7 @@ from .position_snapshot import PositionSnapshot  # noqa: F401
 from .research import ResearchCheckpoint
 from .research_report import ResearchReport
 from .subagent_dispatch import SubagentDispatchRun  # noqa: F401
+from .tenant import Tenant, TenantAuditLog, TenantMembership
 from .tool_result_cache import ToolResultCacheRow  # noqa: F401
 from .trade import Trade, TradeType
 from .user import User
@@ -79,4 +80,7 @@ __all__ = [
     "SubagentDispatchRun",
     # portfolio 每日持仓快照(Task 2)
     "PositionSnapshot",
+    "Tenant",
+    "TenantMembership",
+    "TenantAuditLog",
 ]
