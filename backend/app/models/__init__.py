@@ -36,6 +36,7 @@ from .position import Position
 from .position_snapshot import PositionSnapshot  # noqa: F401
 from .research import ResearchCheckpoint
 from .research_report import ResearchReport
+from .run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
 from .subagent_dispatch import SubagentDispatchRun  # noqa: F401
 from .tenant import Tenant, TenantAuditLog, TenantMembership
 from .tool_result_cache import ToolResultCacheRow  # noqa: F401
@@ -83,4 +84,10 @@ __all__ = [
     "Tenant",
     "TenantMembership",
     "TenantAuditLog",
+    "RunSession",
+    "RunMessage",
+    "Run",
+    "RunAttempt",
+    "RunPause",
+    "RunEvent",
 ]
