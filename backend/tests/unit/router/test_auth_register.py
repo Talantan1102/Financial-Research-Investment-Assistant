@@ -14,6 +14,7 @@ from collections.abc import Iterator
 
 import pytest
 from app.core.database import get_db
+from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User  # noqa: F401  — register table on Base.metadata
 from app.router.auth_router import router as auth_router
 from fastapi import FastAPI
@@ -73,6 +74,24 @@ def test_register_password_is_bcrypt_hashed_not_plaintext(
     assert user.hashed_password != "secret123"
     assert user.hashed_password.startswith("$2")
     assert len(user.hashed_password) >= 50
+
+
+def test_register_creates_personal_tenant(client: TestClient, db_session: Session) -> None:
+    response = client.post(
+        "/auth/register",
+        json={
+            "username": "tenant_new",
+            "password": "secret123",
+            "email": "tenant_new@example.com",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    user_id = response.json()["user"]["id"]
+    rows = db_session.query(TenantMembership).filter_by(user_id=user_id).all()
+    assert len(rows) == 1
+    assert rows[0].role == "owner"
+    assert db_session.get(Tenant, rows[0].tenant_id).is_personal is True
 
 
 # ---------------------------------------------------------------------------
