@@ -48,6 +48,23 @@ Passing pytest commands emitted pre-existing SQLAlchemy/Pydantic/`datetime.utcno
 
 Phase 1 persists and serves control-plane facts only. It has no Run scheduler, dispatcher, outbox, worker lease/claim, Redis token stream, Celery Run executor, or LLM invocation. Old v0 chat and `ChatTask` remain unchanged. Phase 2 starts from queued Runs and must add scheduling/claim/recovery through service-owned locked transactions and durable events.
 
-## Review
+## Independent review and fixes
 
-Pending independent Task 9 and whole-branch spec-compliance review. This section will be updated with findings, fixes, and re-review evidence before handoff.
+Initial review of Task 9 plus `d2fea33f..290800b9` returned **NOT APPROVED** with 0 Critical, 2 Important, and 1 Minor:
+
+1. `TenantQueueFull` returned 429 although the fixed plan contract requires 409.
+2. Phase 1 SSE polled PostgreSQL for up to about 30 seconds although the plan requires close after one durable snapshot.
+3. Minor: concurrent bootstrap processes can create more than one personal Tenant for a user; sequential reruns are idempotent, but the schema has no cross-process uniqueness guard.
+
+Both Important findings were fixed in `a44f1238` (`fix(run): align phase 1 API contracts`) with TDD:
+
+- RED: quota regression expected 409 and observed 429. GREEN: queue exhaustion maps to 409.
+- RED: queued snapshot regression expected one event read and observed two. GREEN: the endpoint emits only the initial durable snapshot and closes; the terminal-race final drain remains part of that initial snapshot.
+- Full Run router suite after the fixes: 21 passed; scoped Ruff format/lint and mypy exit 0.
+
+The bootstrap concurrency item is recorded as a Minor follow-up and was not expanded into Task 9. Final re-review is pending and will be recorded before handoff.
+
+## Commits
+
+- `290800b9` — production wiring, factory, tests, done card, initial report.
+- `a44f1238` — review fixes for exact HTTP and SSE Phase 1 contracts.

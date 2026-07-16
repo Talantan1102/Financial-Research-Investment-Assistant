@@ -16,7 +16,7 @@ type: project
 
 **How to apply:**
 
-- Phase 1 的 Run API 可以用于创建、查询、读取 durable SSE snapshot/trace、取消和恢复；不要把 `queued` 解释成已有 worker 执行。
+- Phase 1 的 Run API 可以用于创建、查询、读取一次 durable SSE snapshot/trace、取消和恢复；SSE 在 snapshot 后立即关闭，不做 long polling。不要把 `queued` 解释成已有 worker 执行。
 - 不要声称本卡交付了 Scheduler、Dispatcher、Outbox、Worker/lease/claim、Redis token stream、Celery Run 执行或 LLM 调用；这些均未接线、未验证。
 - Phase 2 Scheduler 只读 `runs.status == "queued"` 候选，通过新 scheduling service 创建 Attempt/lease/Outbox，并调用 `RunService.transition_run()`；Worker claim 必须是原子接口，Worker 不直接更新 Run。
 - Phase 2 的 scheduling/claim/recovery 继续复用 Run row lock 与 durable event append；cancel/resume Outbox 写入应加入现有事务，不能改 Phase 1 API path 或 response model。
@@ -34,7 +34,8 @@ type: project
 | durable lifecycle commands | `47eef16d` |
 | six Run API + terminal SSE drain | `29f26601`, `b6b44bc2` |
 | Task 8 evidence | `b4838864` |
-| production wiring + final evidence | `feat(run): complete phase 1 foundation` |
+| production wiring + final evidence | `290800b9` |
+| final review: quota 409 + snapshot-only SSE | `a44f1238` |
 
 **Verification evidence (2026-07-16):**
 
@@ -51,6 +52,7 @@ type: project
 - Passing scoped pytest runs retain existing SQLAlchemy `declarative_base()`, Pydantic class config and `datetime.utcnow()` deprecation warnings.
 - The first ad-hoc OpenAPI probe lacked `PYTHONPATH=backend` and failed to import `app`; the corrected probe set `PYTHONPATH` and passed. This was a command-environment error, not an application failure.
 - No Scheduler, Worker, Redis, Celery Run execution or LLM live path was started by the Phase 1 acceptance commands.
+- Concurrent `bootstrap_default_tenants()` invocations can still both observe a missing personal Tenant and create separate ones; sequential bootstrap is idempotent, but cross-process serialization/uniqueness remains a follow-up risk.
 
 **Anchors:**
 
