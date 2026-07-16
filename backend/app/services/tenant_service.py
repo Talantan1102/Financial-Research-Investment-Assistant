@@ -116,6 +116,7 @@ class TenantService:
         if target.role == TenantRole.OWNER:
             if actor.role != TenantRole.OWNER:
                 raise PermissionError("only an owner can remove an owner")
+            (self._session.query(Tenant.id).filter(Tenant.id == tenant_id).with_for_update().one())
             owner_count = (
                 self._session.query(TenantMembership)
                 .filter_by(tenant_id=tenant_id, role=TenantRole.OWNER.value)

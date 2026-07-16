@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from uuid import UUID
 
 import pytest
-from app.models.tenant import TenantAuditLog, TenantMembership
+from app.models.tenant import Tenant, TenantAuditLog, TenantMembership
 from app.models.user import User
 from app.run_control.types import TenantRole
 from app.services.tenant_service import TenantService
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from tests.unit._helpers import make_user
@@ -135,6 +140,94 @@ def test_final_owner_cannot_be_removed(tenant_users, owner: User) -> None:
 
     with pytest.raises(PermissionError, match="final owner"):
         service.remove_member(tenant.id, owner.id, owner.id)
+
+
+def test_concurrent_cross_removals_cannot_delete_all_owners(
+    pg_test_engine: Engine,
+) -> None:
+    with Session(pg_test_engine) as setup_session:
+        owner_a = make_user(setup_session)
+        owner_b = make_user(setup_session)
+        tenant = TenantService(setup_session).create_with_owner(
+            name="Concurrent owners", owner=owner_a
+        )
+        setup_session.add(
+            TenantMembership(
+                tenant_id=tenant.id,
+                user_id=owner_b.id,
+                role=TenantRole.OWNER,
+            )
+        )
+        setup_session.commit()
+        tenant_id = UUID(str(tenant.id))
+        owner_a_id = UUID(str(owner_a.id))
+        owner_b_id = UUID(str(owner_b.id))
+
+    first_removed = threading.Event()
+    release_first = threading.Event()
+    second_started = threading.Event()
+    second_finished = threading.Event()
+    second_pid: list[int] = []
+
+    def remove_b_then_wait() -> BaseException | None:
+        with Session(pg_test_engine) as session:
+            try:
+                TenantService(session).remove_member(tenant_id, owner_a_id, owner_b_id)
+                first_removed.set()
+                if not release_first.wait(timeout=10):
+                    raise TimeoutError("first removal was not released")
+                session.commit()
+            except BaseException as exc:
+                session.rollback()
+                return exc
+        return None
+
+    def remove_a_concurrently() -> BaseException | None:
+        if not first_removed.wait(timeout=10):
+            return TimeoutError("first removal did not reach its commit boundary")
+        with Session(pg_test_engine) as session:
+            second_pid.append(int(session.scalar(text("SELECT pg_backend_pid()"))))
+            second_started.set()
+            try:
+                TenantService(session).remove_member(tenant_id, owner_b_id, owner_a_id)
+                session.commit()
+            except BaseException as exc:
+                session.rollback()
+                return exc
+            finally:
+                second_finished.set()
+        return None
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(remove_b_then_wait)
+        second_future = pool.submit(remove_a_concurrently)
+        assert second_started.wait(timeout=10)
+
+        deadline = time.monotonic() + 10
+        while not second_finished.is_set() and time.monotonic() < deadline:
+            with pg_test_engine.connect() as observer:
+                wait_type = observer.scalar(
+                    text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"),
+                    {"pid": second_pid[0]},
+                )
+            if wait_type == "Lock":
+                break
+            time.sleep(0.01)
+        release_first.set()
+
+        first_error = first_future.result(timeout=10)
+        second_error = second_future.result(timeout=10)
+
+    with Session(pg_test_engine) as check_session:
+        remaining_owners = (
+            check_session.query(TenantMembership)
+            .filter_by(tenant_id=tenant_id, role=TenantRole.OWNER)
+            .count()
+        )
+        assert remaining_owners == 1
+        assert check_session.get(Tenant, tenant_id) is not None
+    assert first_error is None
+    assert isinstance(second_error, (LookupError, PermissionError))
 
 
 def test_missing_target_user_raises_lookup_error(tenant_users, owner: User) -> None:
