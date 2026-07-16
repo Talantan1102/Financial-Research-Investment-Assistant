@@ -63,29 +63,39 @@ def test_active_and_terminal_statuses_partition_all_statuses() -> None:
     assert set(RunStatus) == ACTIVE_RUN_STATUSES | TERMINAL_RUN_STATUSES
 
 
+_EXPECTED_TRANSITIONS = {
+    RunStatus.QUEUED: {RunStatus.ASSIGNED, RunStatus.CANCELLED},
+    RunStatus.ASSIGNED: {
+        RunStatus.RUNNING,
+        RunStatus.QUEUED,
+        RunStatus.CANCEL_REQUESTED,
+    },
+    RunStatus.RUNNING: {
+        RunStatus.COMPLETED,
+        RunStatus.FAILED,
+        RunStatus.QUEUED,
+        RunStatus.WAITING_APPROVAL,
+        RunStatus.WAITING_INPUT,
+        RunStatus.CANCEL_REQUESTED,
+    },
+    RunStatus.WAITING_APPROVAL: {RunStatus.QUEUED, RunStatus.CANCELLED},
+    RunStatus.WAITING_INPUT: {RunStatus.QUEUED, RunStatus.CANCELLED},
+    RunStatus.CANCEL_REQUESTED: {RunStatus.CANCELLED},
+}
+
+
 def _allowed_transitions() -> Iterator[object]:
-    transitions = {
-        RunStatus.QUEUED: {RunStatus.ASSIGNED, RunStatus.CANCELLED},
-        RunStatus.ASSIGNED: {
-            RunStatus.RUNNING,
-            RunStatus.QUEUED,
-            RunStatus.CANCEL_REQUESTED,
-        },
-        RunStatus.RUNNING: {
-            RunStatus.COMPLETED,
-            RunStatus.FAILED,
-            RunStatus.QUEUED,
-            RunStatus.WAITING_APPROVAL,
-            RunStatus.WAITING_INPUT,
-            RunStatus.CANCEL_REQUESTED,
-        },
-        RunStatus.WAITING_APPROVAL: {RunStatus.QUEUED, RunStatus.CANCELLED},
-        RunStatus.WAITING_INPUT: {RunStatus.QUEUED, RunStatus.CANCELLED},
-        RunStatus.CANCEL_REQUESTED: {RunStatus.CANCELLED},
-    }
-    for current, destinations in transitions.items():
-        for target in destinations:
-            yield pytest.param(current, target, id=f"{current.value}-to-{target.value}")
+    for current in RunStatus:
+        for target in RunStatus:
+            if target in _EXPECTED_TRANSITIONS.get(current, set()):
+                yield pytest.param(current, target, id=f"{current.value}-to-{target.value}")
+
+
+def _disallowed_transitions() -> Iterator[object]:
+    for current in RunStatus:
+        for target in RunStatus:
+            if target not in _EXPECTED_TRANSITIONS.get(current, set()):
+                yield pytest.param(current, target, id=f"{current.value}-to-{target.value}")
 
 
 @pytest.mark.parametrize(("current", "target"), _allowed_transitions())
@@ -93,15 +103,10 @@ def test_allowed_transition_is_accepted(current: RunStatus, target: RunStatus) -
     assert_transition(current, target)
 
 
-@pytest.mark.parametrize("terminal", TERMINAL_RUN_STATUSES)
-def test_terminal_state_cannot_move(terminal: RunStatus) -> None:
+@pytest.mark.parametrize(("current", "target"), _disallowed_transitions())
+def test_unlisted_transition_is_rejected(current: RunStatus, target: RunStatus) -> None:
     with pytest.raises(InvalidRunTransition):
-        assert_transition(terminal, RunStatus.QUEUED)
-
-
-def test_unlisted_active_transition_is_rejected() -> None:
-    with pytest.raises(InvalidRunTransition):
-        assert_transition(RunStatus.QUEUED, RunStatus.RUNNING)
+        assert_transition(current, target)
 
 
 @pytest.mark.parametrize(
