@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Annotated, NoReturn, cast
@@ -17,13 +16,8 @@ from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.run_control.types import (
     TERMINAL_RUN_STATUSES,
-    IdempotencyConflict,
-    InvalidRunTransition,
     ResourceNotFound,
-    ResumeNotAllowed,
     RunControlError,
-    SessionBusy,
-    TenantQueueFull,
 )
 from app.schemas.run import (
     RunCreateRequest,
@@ -48,17 +42,9 @@ def get_run_service(request: Request) -> RunService:
 
 
 def _raise_http_error(exc: RunControlError) -> NoReturn:
-    if isinstance(exc, ResourceNotFound):
-        code = status.HTTP_404_NOT_FOUND
-    elif isinstance(exc, TenantQueueFull):
-        code = status.HTTP_429_TOO_MANY_REQUESTS
-    elif isinstance(
-        exc,
-        (SessionBusy, IdempotencyConflict, ResumeNotAllowed, InvalidRunTransition),
-    ):
-        code = status.HTTP_409_CONFLICT
-    else:  # pragma: no cover - protects future domain errors from becoming 500s
-        code = status.HTTP_409_CONFLICT
+    code = (
+        status.HTTP_404_NOT_FOUND if isinstance(exc, ResourceNotFound) else status.HTTP_409_CONFLICT
+    )
     raise HTTPException(status_code=code, detail=str(exc)) from exc
 
 
@@ -155,52 +141,16 @@ async def _read_durable_snapshot(
 
 
 async def _event_stream(
-    request: Request,
-    service: RunService,
-    tenant_id: UUID,
-    run_id: UUID,
-    actor_id: UUID,
     initial_events: tuple[RunEvent, ...],
-    initial_status: str,
-    after_seq: int,
 ) -> AsyncIterator[str]:
-    cursor = after_seq
     for event in initial_events:
-        cursor = max(cursor, int(event.seq))
         yield _format_sse(event)
-    if initial_status in _TERMINAL_STATUS_VALUES:
-        return
-
-    interval = float(getattr(request.app.state, "run_sse_poll_interval", 0.1))
-    max_polls = int(getattr(request.app.state, "run_sse_max_polls", 300))
-    for _ in range(max_polls):
-        if await request.is_disconnected():
-            return
-        await asyncio.sleep(interval)
-        try:
-            events, run_status = await _read_durable_snapshot(
-                service,
-                tenant_id,
-                run_id,
-                actor_id,
-                after_seq=cursor,
-            )
-        except ResourceNotFound:
-            # Authorization was checked before the response started. If access is
-            # revoked later, preserve the already-sent snapshot and close cleanly.
-            return
-        for event in events:
-            cursor = max(cursor, int(event.seq))
-            yield _format_sse(event)
-        if run_status in _TERMINAL_STATUS_VALUES:
-            return
 
 
 @router.get("/{run_id}/events")
 async def get_run_events(
     tenant_id: UUID,
     run_id: UUID,
-    request: Request,
     after_seq: Annotated[int | None, Query(ge=0)] = None,
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
     current_user: User = Depends(get_current_user_required),
@@ -227,7 +177,7 @@ async def get_run_events(
 
     actor_id = cast(UUID, current_user.id)
     try:
-        initial_events, run_status = await _read_durable_snapshot(
+        initial_events, _run_status = await _read_durable_snapshot(
             service,
             tenant_id,
             run_id,
@@ -237,16 +187,7 @@ async def get_run_events(
     except RunControlError as exc:
         _raise_http_error(exc)
     return StreamingResponse(
-        _event_stream(
-            request,
-            service,
-            tenant_id,
-            run_id,
-            actor_id,
-            initial_events,
-            run_status,
-            after,
-        ),
+        _event_stream(initial_events),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

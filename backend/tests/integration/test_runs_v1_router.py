@@ -18,7 +18,7 @@ from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.router.runs import get_run_service, router
-from app.run_control.types import PauseType, ResourceNotFound, RunStatus
+from app.run_control.types import PauseType, RunStatus
 from app.services.run_service import RunService
 from app.services.trace_models import TraceSpanRow
 from fastapi import FastAPI, HTTPException, status
@@ -90,8 +90,6 @@ def client_for(
     async def build(user: User | None) -> AsyncIterator[httpx.AsyncClient]:
         app = FastAPI()
         app.state.async_session_factory = async_session_factory
-        app.state.run_sse_poll_interval = 0.0
-        app.state.run_sse_max_polls = 1
         app.include_router(router)
         if user is None:
 
@@ -244,7 +242,7 @@ async def test_idempotency_conflict_and_busy_session_are_409(
 
 
 @pytest.mark.asyncio
-async def test_queue_quota_is_429(
+async def test_queue_quota_is_409(
     api_context: tuple[Tenant, dict[str, User]],
     client_for: ClientFactory,
     async_session_factory: async_sessionmaker[AsyncSession],
@@ -260,7 +258,7 @@ async def test_queue_quota_is_429(
         second = await _create_run(client, tenant.id, key="quota-2")
 
     assert first.status_code == 201
-    assert second.status_code == 429
+    assert second.status_code == 409
 
 
 @pytest.mark.asyncio
@@ -445,16 +443,17 @@ async def test_sse_drains_terminal_event_committed_between_event_and_status_read
 
 
 @pytest.mark.asyncio
-async def test_sse_closes_cleanly_if_visibility_is_revoked_after_headers(
+async def test_phase1_sse_closes_after_initial_durable_snapshot(
     api_context: tuple[Tenant, dict[str, User]],
 ) -> None:
     tenant, users = api_context
     run_id = uuid.uuid4()
     created = SimpleNamespace(seq=1, event_type="run.created", payload={"status": "queued"})
 
-    class RevokedVisibilityService:
+    class SnapshotService:
         def __init__(self) -> None:
-            self.reads = 0
+            self.event_reads = 0
+            self.run_reads = 0
 
         async def list_events(
             self,
@@ -465,9 +464,7 @@ async def test_sse_closes_cleanly_if_visibility_is_revoked_after_headers(
             after_seq: int = 0,
         ) -> tuple[object, ...]:
             del tenant_id, requested_run_id, actor_id
-            self.reads += 1
-            if self.reads > 1:
-                raise ResourceNotFound("tenant not found")
+            self.event_reads += 1
             return (created,) if after_seq < 1 else ()
 
         async def get_run(
@@ -477,14 +474,14 @@ async def test_sse_closes_cleanly_if_visibility_is_revoked_after_headers(
             actor_id: uuid.UUID,
         ) -> object:
             del tenant_id, requested_run_id, actor_id
+            self.run_reads += 1
             return SimpleNamespace(status="queued")
 
+    fake_service = SnapshotService()
     app = FastAPI()
-    app.state.run_sse_poll_interval = 0.0
-    app.state.run_sse_max_polls = 1
     app.include_router(router)
     app.dependency_overrides[get_current_user_required] = lambda: users["member"]
-    app.dependency_overrides[get_run_service] = RevokedVisibilityService
+    app.dependency_overrides[get_run_service] = lambda: fake_service
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://testserver",
@@ -493,6 +490,8 @@ async def test_sse_closes_cleanly_if_visibility_is_revoked_after_headers(
 
     assert response.status_code == 200
     assert [item["id"] for item in _sse_frames(response.text)] == [1]
+    assert fake_service.event_reads == 1
+    assert fake_service.run_reads == 1
 
 
 @pytest.mark.asyncio
