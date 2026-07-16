@@ -19,6 +19,11 @@ from app.services.tenant_service import TenantService
 router = APIRouter(prefix="/api/v1/tenants", tags=["tenants-v1"])
 
 
+def _is_duplicate_membership(exc: IntegrityError) -> bool:
+    diag = getattr(exc.orig, "diag", None)
+    return getattr(diag, "constraint_name", None) == "tenant_memberships_pkey"
+
+
 def _tenant_response(tenant: Tenant, role: TenantRole) -> TenantResponse:
     return TenantResponse.model_validate(
         {
@@ -110,8 +115,10 @@ def add_member(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
-    except IntegrityError:
+    except IntegrityError as exc:
         db.rollback()
+        if not _is_duplicate_membership(exc):
+            raise
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="user is already a tenant member",
