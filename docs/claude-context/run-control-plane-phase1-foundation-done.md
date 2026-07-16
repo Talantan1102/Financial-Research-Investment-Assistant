@@ -53,6 +53,7 @@ type: project
 - The first ad-hoc OpenAPI probe lacked `PYTHONPATH=backend` and failed to import `app`; the corrected probe set `PYTHONPATH` and passed. This was a command-environment error, not an application failure.
 - No Scheduler, Worker, Redis, Celery Run execution or LLM live path was started by the Phase 1 acceptance commands.
 - Concurrent `bootstrap_default_tenants()` invocations can still both observe a missing personal Tenant and create separate ones; sequential bootstrap is idempotent, but cross-process serialization/uniqueness remains a follow-up risk.
+- Independent final review of `d2fea33f..b7acae38` was approved with 0 Critical and 0 Important findings; the bootstrap race above is the one retained Minor.
 
 **Anchors:**
 

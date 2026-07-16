@@ -62,9 +62,12 @@ Both Important findings were fixed in `a44f1238` (`fix(run): align phase 1 API c
 - RED: queued snapshot regression expected one event read and observed two. GREEN: the endpoint emits only the initial durable snapshot and closes; the terminal-race final drain remains part of that initial snapshot.
 - Full Run router suite after the fixes: 21 passed; scoped Ruff format/lint and mypy exit 0.
 
-The bootstrap concurrency item is recorded as a Minor follow-up and was not expanded into Task 9. Final re-review is pending and will be recorded before handoff.
+The bootstrap concurrency item is recorded as a Minor follow-up and was not expanded into Task 9.
+
+Final re-review of `d2fea33f..b7acae38`: **APPROVED — 0 Critical, 0 Important**. The reviewer independently ran the Run router + production wiring tests (`25 passed`), Ruff format/lint, mypy, `git diff --check`, and an explicit production probe confirming exactly six Run operations, retained `/api/v0/chat`, and no Phase 2 paths.
 
 ## Commits
 
 - `290800b9` — production wiring, factory, tests, done card, initial report.
 - `a44f1238` — review fixes for exact HTTP and SSE Phase 1 contracts.
+- `b7acae38` — corrected reports/done card and recorded the remaining Minor risk.
