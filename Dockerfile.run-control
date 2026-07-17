@@ -1,17 +1,22 @@
-ARG PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.12-slim
+ARG PYTHON_IMAGE=python:3.12.11-slim-bookworm
 FROM ${PYTHON_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/opt/run-control/backend
+    PYTHONPATH=/opt/run-control/backend \
+    PATH=/opt/run-control/.venv/bin:$PATH
 
 WORKDIR /opt/run-control
+ARG UV_VERSION=0.8.15
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ENV UV_HTTP_TIMEOUT=120 \
+    UV_INDEX_URL=${PIP_INDEX_URL}
+RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" "uv==${UV_VERSION}"
 
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-RUN pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
-    "SQLAlchemy>=2.0" "bcrypt>=4" "psycopg[binary]>=3.1" \
-    "psycopg2-binary>=2.9" "pydantic>=2.7" "python-jose>=3.3" "redis>=7.4"
-
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --only-group run-control --no-install-project
 COPY backend/app backend/app
-COPY backend/tests/__init__.py backend/tests/__init__.py
-COPY backend/tests/helpers backend/tests/helpers
+
+RUN addgroup --system runcontrol && adduser --system --ingroup runcontrol runcontrol \
+    && chown -R runcontrol:runcontrol /opt/run-control
+USER runcontrol

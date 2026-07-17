@@ -5,13 +5,16 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any
 from uuid import UUID, uuid4
 
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from app.processes.runtime import BoundedBackoff, ProcessHealth, is_transient_error
 from app.run_control.redis_transport import RedisTransport
 from app.services.run_outbox import OutboxClaimRejected, RunOutboxService
 
@@ -25,6 +28,8 @@ class RunDispatcher:
         dispatcher_id: UUID | None = None,
         batch_size: int = 100,
         poll_interval: float = 0.5,
+        health: ProcessHealth | None = None,
+        health_probe: Callable[[], Awaitable[Any]] | None = None,
     ) -> None:
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
@@ -36,6 +41,9 @@ class RunDispatcher:
         self._batch_size = batch_size
         self._poll_interval = poll_interval
         self._shutdown = asyncio.Event()
+        self._health = health or ProcessHealth()
+        self._backoff = BoundedBackoff()
+        self._health_probe = health_probe
 
     async def dispatch_once(self) -> int:
         items = await self._outbox.claim_batch(self._dispatcher_id, self._batch_size)
@@ -43,7 +51,14 @@ class RunDispatcher:
         for item in items:
             try:
                 await self._transport.publish(item)
-            except Exception as exc:
+            except (
+                RedisConnectionError,
+                RedisTimeoutError,
+                ResponseError,
+                ConnectionError,
+                TimeoutError,
+                OSError,
+            ) as exc:
                 with suppress(OutboxClaimRejected):
                     await self._outbox.mark_failed(
                         item.id,
@@ -67,7 +82,18 @@ class RunDispatcher:
 
     async def run_forever(self) -> None:
         while not self._shutdown.is_set():
-            await self.dispatch_once()
+            try:
+                if self._health_probe is not None:
+                    await self._health_probe()
+                await self.dispatch_once()
+            except Exception as exc:
+                if not is_transient_error(exc):
+                    raise
+                self._health.unhealthy()
+                await self._backoff.wait(self._shutdown)
+                continue
+            self._backoff.reset()
+            self._health.healthy()
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._shutdown.wait(), timeout=self._poll_interval)
 
@@ -91,8 +117,6 @@ class RunDispatcher:
 
 
 async def _async_main() -> None:
-    from pathlib import Path
-
     from redis.asyncio import Redis
 
     from app.core.async_database import build_async_database
@@ -106,15 +130,18 @@ async def _async_main() -> None:
         RedisTransport(redis),
         batch_size=int(os.getenv("RUN_DISPATCH_BATCH_SIZE", "100")),
         poll_interval=float(os.getenv("RUN_POLL_INTERVAL_SECONDS", "0.5")),
+        health_probe=redis.ping,
     )
     dispatcher.install_signal_handlers()
     try:
         await redis.ping()
-        Path("/tmp/run-control-ready").touch()
         await dispatcher.run_forever()
     finally:
-        await redis.aclose()
-        await engine.dispose()
+        dispatcher._health.unhealthy()
+        with suppress(Exception):
+            await redis.aclose()
+        with suppress(Exception):
+            await engine.dispose()
 
 
 def main() -> None:

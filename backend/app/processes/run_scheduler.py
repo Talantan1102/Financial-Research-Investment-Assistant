@@ -13,6 +13,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from app.processes.runtime import BoundedBackoff, ProcessHealth, is_transient_error
 from app.services.scheduling_service import SchedulingService
 
 
@@ -34,6 +35,7 @@ class RunScheduler:
         *,
         recovery_batch_size: int = 100,
         poll_interval: float = 0.5,
+        health: ProcessHealth | None = None,
     ) -> None:
         if recovery_batch_size <= 0:
             raise ValueError("recovery_batch_size must be positive")
@@ -45,6 +47,8 @@ class RunScheduler:
         self._poll_interval = poll_interval
         self._shutdown = asyncio.Event()
         self._last_wake_id = "$"
+        self._health = health or ProcessHealth()
+        self._backoff = BoundedBackoff()
 
     async def run_cycle(self) -> SchedulerCycle:
         recovered = await self._scheduling.recover_expired_attempts(self._recovery_batch_size)
@@ -58,8 +62,17 @@ class RunScheduler:
 
     async def run_forever(self) -> None:
         while not self._shutdown.is_set():
-            await self.run_cycle()
-            await self._wait_for_wake_or_poll()
+            try:
+                await self.run_cycle()
+                await self._wait_for_wake_or_poll()
+            except Exception as exc:
+                if not is_transient_error(exc):
+                    raise
+                self._health.unhealthy()
+                await self._backoff.wait(self._shutdown)
+                continue
+            self._backoff.reset()
+            self._health.healthy()
 
     async def _wait_for_wake_or_poll(self) -> None:
         if self._redis is None:
@@ -78,8 +91,7 @@ class RunScheduler:
                     entry_id.decode("ascii") if isinstance(entry_id, bytes) else str(entry_id)
                 )
         except (RedisConnectionError, RedisTimeoutError, ResponseError, OSError):
-            with suppress(TimeoutError):
-                await asyncio.wait_for(self._shutdown.wait(), timeout=self._poll_interval)
+            raise
 
     def request_shutdown(self) -> None:
         self._shutdown.set()
@@ -93,8 +105,6 @@ class RunScheduler:
 
 
 async def _async_main() -> None:
-    from pathlib import Path
-
     from redis.asyncio import Redis
 
     from app.core.async_database import build_async_database
@@ -120,11 +130,13 @@ async def _async_main() -> None:
     scheduler.install_signal_handlers()
     try:
         await redis.ping()
-        Path("/tmp/run-control-ready").touch()
         await scheduler.run_forever()
     finally:
-        await redis.aclose()
-        await engine.dispose()
+        scheduler._health.unhealthy()
+        with suppress(Exception):
+            await redis.aclose()
+        with suppress(Exception):
+            await engine.dispose()
 
 
 def main() -> None:

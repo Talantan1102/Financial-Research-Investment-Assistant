@@ -58,3 +58,19 @@ jobs:
           POSTGRES_PASSWORD: postgres123
           POSTGRES_DB: industry_assistant_test
         run: uv run pytest backend/tests -m "not slow and not live_only" -v
+
+  run-control-compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install acceptance dependencies
+        run: uv sync --frozen --extra dev --extra test
+      - name: Fresh Compose scheduling control-plane gate
+        env:
+          RUN_CONTROL_COMPOSE_SELF_BOOTSTRAP: "1"
+          POSTGRES_PASSWORD: postgres123
+          RUN_CONTROL_PYTHON_IMAGE: python:3.12.11-slim-bookworm
+          RUN_CONTROL_PIP_INDEX_URL: https://pypi.org/simple
+        run: uv run pytest backend/tests/integration/test_run_control_multi_process.py -q

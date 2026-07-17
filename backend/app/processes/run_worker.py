@@ -15,6 +15,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from app.processes.runtime import BoundedBackoff, ProcessHealth, is_transient_error
 from app.run_control.redis_transport import (
     InvalidRedisEnvelopeError,
     RedisTransport,
@@ -32,6 +33,7 @@ class RunExecutor(Protocol):
 
 class RunWorker:
     GROUP = "run-worker-assignments-v1"
+    CONTROL_GROUP = "run-worker-control-v1"
 
     def __init__(
         self,
@@ -45,6 +47,8 @@ class RunWorker:
         heartbeat_interval: float = 10.0,
         poll_interval: float = 0.5,
         pending_idle_ms: int = 1_000,
+        shutdown_grace_seconds: float = 10.0,
+        health: ProcessHealth | None = None,
     ) -> None:
         if capacity <= 0:
             raise ValueError("capacity must be positive")
@@ -52,6 +56,8 @@ class RunWorker:
             raise ValueError("worker intervals must be positive")
         if pending_idle_ms < 0:
             raise ValueError("pending_idle_ms must be nonnegative")
+        if shutdown_grace_seconds <= 0:
+            raise ValueError("shutdown_grace_seconds must be positive")
         self._registry = registry
         self._attempts = attempts
         self._redis = redis
@@ -66,6 +72,11 @@ class RunWorker:
         self._stream_key: str | None = None
         self._consumer = str(uuid4())
         self._heartbeat_task: asyncio.Task[None] | None = None
+        self._inflight: set[asyncio.Task[None]] = set()
+        self._shutdown_grace_seconds = shutdown_grace_seconds
+        self._health = health or ProcessHealth()
+        self._backoff = BoundedBackoff()
+        self._draining = False
 
     @property
     def worker_id(self) -> UUID | None:
@@ -89,21 +100,33 @@ class RunWorker:
         await self.start()
         assert self._stream_key is not None
         while not self._shutdown.is_set():
+            self._raise_heartbeat_error()
+            available = self._capacity - len(self._inflight)
+            if available <= 0:
+                await self._wait_for_inflight()
+                continue
             try:
                 response = await self._redis.xreadgroup(
                     self.GROUP,
                     self._consumer,
                     {self._stream_key: ">"},
-                    count=self._capacity,
+                    count=available,
                     block=max(1, int(self._poll_interval * 1000)),
                 )
             except (RedisConnectionError, RedisTimeoutError, OSError):
-                await self._wait_poll()
+                self._health.unhealthy()
+                await self._backoff.wait(self._shutdown)
+                await self._reconnect_assignment_stream()
                 continue
-            except ResponseError:
-                await self._ensure_group()
-                await self._recover_pending()
+            except ResponseError as exc:
+                if not is_transient_error(exc) and "NOGROUP" not in str(exc):
+                    raise
+                self._health.unhealthy()
+                await self._backoff.wait(self._shutdown)
+                await self._reconnect_assignment_stream()
                 continue
+            self._backoff.reset()
+            self._health.healthy()
             for _key, entries in response:
                 for raw_id, fields in entries:
                     entry_id = self._text(raw_id)
@@ -114,7 +137,8 @@ class RunWorker:
                             self._stream_key, self.GROUP, entry_id
                         )
                         continue
-                    await self.handle_assignment(entry_id, item)
+                    task = asyncio.create_task(self.handle_assignment(entry_id, item))
+                    self._inflight.add(task)
         await self.stop()
 
     async def handle_assignment(self, entry_id: str, item: OutboxItem) -> None:
@@ -128,21 +152,33 @@ class RunWorker:
             return
         claim = await self._attempts.claim(item.attempt_id, self._worker_id)
         if claim.claimed and claim.assignment is not None:
-            await self._executor.execute(claim.assignment)
+            await self._execute_with_cancel_control(claim.assignment)
         await self._transport.acknowledge_and_delete(self._stream_key, self.GROUP, entry_id)
 
     async def stop(self) -> None:
         if self._worker_id is None or self._stream_key is None:
             return
         self._shutdown.set()
-        await self._registry.drain(self._worker_id)
+        if not self._draining:
+            self._draining = True
+            with suppress(Exception):
+                await self._registry.drain(self._worker_id)
+        if self._inflight:
+            done, pending = await asyncio.wait(self._inflight, timeout=self._shutdown_grace_seconds)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         if self._heartbeat_task is not None:
             self._heartbeat_task.cancel()
             with suppress(asyncio.CancelledError):
                 await self._heartbeat_task
             self._heartbeat_task = None
-        await self._registry.mark_offline(self._worker_id)
-        await self._transport.delete_stream(self._stream_key)
+        with suppress(Exception):
+            await self._registry.mark_offline(self._worker_id)
+        # Never delete a Worker stream wholesale: unread assignments and its PEL
+        # are durable acceleration state and must survive process replacement.
+        self._health.unhealthy()
 
     async def _heartbeat_loop(self) -> None:
         assert self._worker_id is not None
@@ -151,13 +187,134 @@ class RunWorker:
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._shutdown.wait(), timeout=self._heartbeat_interval)
 
-    async def _ensure_group(self) -> None:
-        assert self._stream_key is not None
+    def _raise_heartbeat_error(self) -> None:
+        if self._heartbeat_task is None or not self._heartbeat_task.done():
+            return
+        exc = self._heartbeat_task.exception()
+        if exc is not None:
+            raise exc
+
+    async def _wait_for_inflight(self) -> None:
+        if not self._inflight:
+            await self._wait_poll()
+            return
+        done, _pending = await asyncio.wait(
+            self._inflight, timeout=self._poll_interval, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in done:
+            self._inflight.discard(task)
+            task.result()
+
+    async def _reconnect_assignment_stream(self) -> None:
         try:
-            await self._redis.xgroup_create(self._stream_key, self.GROUP, id="0-0", mkstream=True)
+            await self._ensure_group()
+            await self._recover_pending()
+            if self._heartbeat_task is not None and self._heartbeat_task.done():
+                with suppress(Exception):
+                    self._heartbeat_task.exception()
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+        except (RedisConnectionError, RedisTimeoutError, ResponseError, OSError):
+            return
+
+    async def _execute_with_cancel_control(self, assignment: ClaimedAssignment) -> None:
+        control_key = f"run:attempt:{assignment.attempt_id}:control"
+        await self._ensure_group_for(control_key, self.CONTROL_GROUP)
+        if await self._recover_control_pending(control_key, assignment):
+            await self._attempts.acknowledge_cancel(
+                assignment.attempt_id, assignment.worker_id, assignment.claim_token
+            )
+            return
+        execution = asyncio.create_task(self._executor.execute(assignment))
+        control = asyncio.create_task(self._wait_for_cancel(control_key, assignment))
+        done, _ = await asyncio.wait({execution, control}, return_when=asyncio.FIRST_COMPLETED)
+        if control in done and control.result():
+            execution.cancel()
+            with suppress(asyncio.CancelledError):
+                await execution
+            await self._attempts.acknowledge_cancel(
+                assignment.attempt_id, assignment.worker_id, assignment.claim_token
+            )
+            return
+        control.cancel()
+        with suppress(asyncio.CancelledError):
+            await control
+        await execution
+
+    async def _wait_for_cancel(self, key: str, assignment: ClaimedAssignment) -> bool:
+        while not self._shutdown.is_set():
+            try:
+                response = await self._redis.xreadgroup(
+                    self.CONTROL_GROUP,
+                    self._consumer,
+                    {key: ">"},
+                    count=1,
+                    block=max(1, int(self._poll_interval * 1000)),
+                )
+            except (RedisConnectionError, RedisTimeoutError, OSError):
+                await self._wait_poll()
+                if await self._reconnect_control(key, assignment):
+                    return True
+                continue
+            except ResponseError:
+                if await self._reconnect_control(key, assignment):
+                    return True
+                continue
+            for _stream, entries in response:
+                for raw_id, fields in entries:
+                    entry_id = self._text(raw_id)
+                    try:
+                        item = parse_stream_envelope(fields)
+                    except InvalidRedisEnvelopeError:
+                        await self._transport.acknowledge_and_delete(
+                            key, self.CONTROL_GROUP, entry_id
+                        )
+                        continue
+                    matches = (
+                        item.event_type is OutboxType.ATTEMPT_CANCEL
+                        and item.attempt_id == assignment.attempt_id
+                        and item.worker_id == assignment.worker_id
+                    )
+                    await self._transport.acknowledge_and_delete(key, self.CONTROL_GROUP, entry_id)
+                    if matches:
+                        return True
+        return False
+
+    async def _ensure_group_for(self, key: str, group: str) -> None:
+        try:
+            await self._redis.xgroup_create(key, group, id="0-0", mkstream=True)
         except ResponseError as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+
+    async def _reconnect_control(self, key: str, assignment: ClaimedAssignment) -> bool:
+        try:
+            await self._ensure_group_for(key, self.CONTROL_GROUP)
+            return await self._recover_control_pending(key, assignment)
+        except (RedisConnectionError, RedisTimeoutError, ResponseError, OSError):
+            return False
+
+    async def _recover_control_pending(self, key: str, assignment: ClaimedAssignment) -> bool:
+        recovery = await self._transport.recover_pending(
+            key,
+            self.CONTROL_GROUP,
+            self._consumer,
+            min_idle_ms=self._pending_idle_ms,
+        )
+        cancelled = False
+        for message in recovery.messages:
+            item = message.item
+            matches = (
+                item.event_type is OutboxType.ATTEMPT_CANCEL
+                and item.attempt_id == assignment.attempt_id
+                and item.worker_id == assignment.worker_id
+            )
+            await self._transport.acknowledge_and_delete(key, self.CONTROL_GROUP, message.entry_id)
+            cancelled = cancelled or matches
+        return cancelled
+
+    async def _ensure_group(self) -> None:
+        assert self._stream_key is not None
+        await self._ensure_group_for(self._stream_key, self.GROUP)
 
     async def _recover_pending(self) -> None:
         assert self._stream_key is not None
@@ -196,22 +353,22 @@ class RunWorker:
 
 
 async def _async_main() -> None:
-    from pathlib import Path
-
     from redis.asyncio import Redis
-    from tests.helpers.simulated_run_executor import SimulatedExecution, SimulatedRunExecutor
 
     from app.core.async_database import build_async_database
+    from app.run_control.simulated_executor import SimulatedExecution, SimulatedRunExecutor
 
     engine, factory = build_async_database()
     redis: Any = Redis.from_url(
         os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=False
     )
+    lease_seconds = float(os.getenv("RUN_LEASE_SECONDS", "45"))
+    renew_seconds = float(os.getenv("RUN_RENEW_INTERVAL_SECONDS", "10"))
+    if renew_seconds >= lease_seconds:
+        raise ValueError("RUN_RENEW_INTERVAL_SECONDS must be shorter than RUN_LEASE_SECONDS")
     attempts = AttemptService(
         factory,
-        lease_duration=__import__("datetime").timedelta(
-            seconds=float(os.getenv("RUN_LEASE_SECONDS", "45"))
-        ),
+        lease_duration=__import__("datetime").timedelta(seconds=lease_seconds),
     )
     instruction = SimulatedExecution(
         delay_seconds=float(os.getenv("RUN_SIMULATED_DELAY_SECONDS", "0")),
@@ -231,7 +388,8 @@ async def _async_main() -> None:
         SimulatedRunExecutor(
             attempts,
             instruction=instruction,
-            renew_interval=float(os.getenv("RUN_RENEW_INTERVAL_SECONDS", "10")),
+            renew_interval=renew_seconds,
+            lease_duration=lease_seconds,
         ),
         capacity=int(os.getenv("RUN_WORKER_CAPACITY", "1")),
         heartbeat_interval=float(os.getenv("RUN_HEARTBEAT_INTERVAL_SECONDS", "10")),
@@ -242,12 +400,14 @@ async def _async_main() -> None:
     try:
         await redis.ping()
         await worker.start()
-        Path("/tmp/run-control-ready").touch()
         await worker.run_forever()
     finally:
-        await worker.stop()
-        await redis.aclose()
-        await engine.dispose()
+        with suppress(Exception):
+            await worker.stop()
+        with suppress(Exception):
+            await redis.aclose()
+        with suppress(Exception):
+            await engine.dispose()
 
 
 def main() -> None:

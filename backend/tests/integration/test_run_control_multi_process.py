@@ -14,9 +14,12 @@ import psycopg
 import pytest
 from app.processes.run_scheduler import RunScheduler
 from app.processes.run_worker import RunWorker
+from app.run_control.redis_transport import serialize_envelope
 from app.run_control.types import OutboxType
 from app.services.attempt_service import ClaimedAssignment, ClaimResult
+from app.services.run_outbox import OutboxItem
 from redis import Redis
+from redis.exceptions import ResponseError
 
 from tests.helpers.run_control_compose_harness import ComposeRunControlHarness
 from tests.helpers.simulated_run_executor import (
@@ -58,6 +61,7 @@ class FakeAttemptService:
         self.claim_calls = 0
         self.renew_calls = 0
         self.completed: list[dict[str, Any]] = []
+        self.cancelled: list[UUID] = []
 
     async def claim(self, attempt_id: UUID, worker_id: UUID) -> ClaimResult:
         self.claim_calls += 1
@@ -83,6 +87,9 @@ class FakeAttemptService:
         result: dict[str, Any],
     ) -> None:
         self.completed.append(result)
+
+    async def acknowledge_cancel(self, attempt_id: UUID, worker_id: UUID, token: UUID) -> None:
+        self.cancelled.append(attempt_id)
 
 
 async def test_simulated_executor_renews_long_work_and_completes_via_attempt_service() -> None:
@@ -149,11 +156,15 @@ class FakeRedis:
         self.group_created = False
 
     async def xgroup_create(self, key: str, group: str, *, id: str, mkstream: bool) -> bool:
-        assert key.endswith(":assignments")
+        assert key.endswith(":assignments") or key.endswith(":control")
         assert id == "0-0"
         assert mkstream is True
         self.group_created = True
         return True
+
+    async def xreadgroup(self, *args: Any, **kwargs: Any) -> list[Any]:
+        await __import__("asyncio").sleep(3600)
+        return []
 
 
 class FakeTransport:
@@ -178,6 +189,53 @@ class FakeExecutor:
 
     async def execute(self, assignment: ClaimedAssignment) -> None:
         self.calls += 1
+
+
+class BlockingExecutor:
+    def __init__(self) -> None:
+        self.started = __import__("asyncio").Event()
+        self.cancelled = False
+
+    async def execute(self, assignment: ClaimedAssignment) -> None:
+        self.started.set()
+        try:
+            await __import__("asyncio").sleep(3600)
+        except __import__("asyncio").CancelledError:
+            self.cancelled = True
+            raise
+
+
+class CancelRedis(FakeRedis):
+    def __init__(self, item: OutboxItem) -> None:
+        super().__init__()
+        self.item = item
+        self.sent = False
+
+    async def xreadgroup(self, *args: Any, **kwargs: Any) -> list[Any]:
+        if not self.sent:
+            self.sent = True
+            return [(b"control", [(b"1-0", {b"data": serialize_envelope(self.item)})])]
+        await __import__("asyncio").sleep(3600)
+        return []
+
+
+class ReconnectRedis(FakeRedis):
+    async def xreadgroup(self, *args: Any, **kwargs: Any) -> list[Any]:
+        raise ResponseError("NOGROUP after reconnect")
+
+
+class RecoveringCancelTransport(FakeTransport):
+    def __init__(self, item: OutboxItem) -> None:
+        super().__init__()
+        self.item = item
+        self.recoveries = 0
+
+    async def recover_pending(self, *args: Any, **kwargs: Any) -> SimpleNamespace:
+        self.recoveries += 1
+        messages = ()
+        if self.recoveries >= 3:
+            messages = (SimpleNamespace(entry_id="2-0", item=self.item),)
+        return SimpleNamespace(messages=messages, next_start_id="0-0")
 
 
 async def test_worker_duplicate_assignment_claims_and_executes_only_once() -> None:
@@ -213,7 +271,73 @@ async def test_worker_duplicate_assignment_claims_and_executes_only_once() -> No
     assert executor.calls == 1
     assert transport.acked == ["1-0", "2-0"]
     assert registry.drained and registry.offline
-    assert len(transport.deleted) == 1
+    assert transport.deleted == []
+
+
+async def test_worker_consumes_cancel_control_and_aborts_executor() -> None:
+    registry = FakeWorkerRegistry()
+    attempts = FakeAttemptService()
+    attempt_id = uuid4()
+    item = OutboxItem(
+        id=uuid4(),
+        event_type=OutboxType.ATTEMPT_CANCEL,
+        tenant_id=uuid4(),
+        run_id=uuid4(),
+        attempt_id=attempt_id,
+        worker_id=registry.worker_id,
+        payload={},
+        delivery_attempts=1,
+    )
+    redis = CancelRedis(item)
+    transport = FakeTransport()
+    executor = BlockingExecutor()
+    worker = RunWorker(registry, attempts, redis, transport, executor, poll_interval=0.01)
+    await worker.start()
+    assignment = (await attempts.claim(attempt_id, registry.worker_id)).assignment
+    assert assignment is not None
+
+    await worker._execute_with_cancel_control(assignment)
+    await worker.stop()
+
+    assert executor.cancelled is True
+    assert attempts.cancelled == [attempt_id]
+    assert transport.acked == ["1-0"]
+
+
+async def test_worker_recovers_pending_cancel_after_nested_response_error() -> None:
+    registry = FakeWorkerRegistry()
+    attempts = FakeAttemptService()
+    attempt_id = uuid4()
+    item = OutboxItem(
+        id=uuid4(),
+        event_type=OutboxType.ATTEMPT_CANCEL,
+        tenant_id=uuid4(),
+        run_id=uuid4(),
+        attempt_id=attempt_id,
+        worker_id=registry.worker_id,
+        payload={},
+        delivery_attempts=1,
+    )
+    transport = RecoveringCancelTransport(item)
+    executor = BlockingExecutor()
+    worker = RunWorker(
+        registry,
+        attempts,
+        ReconnectRedis(),
+        transport,
+        executor,
+        poll_interval=0.01,
+    )
+    await worker.start()
+    assignment = (await attempts.claim(attempt_id, registry.worker_id)).assignment
+    assert assignment is not None
+
+    await worker._execute_with_cancel_control(assignment)
+    await worker.stop()
+
+    assert executor.cancelled is True
+    assert attempts.cancelled == [attempt_id]
+    assert transport.acked == ["2-0"]
 
 
 @pytest.mark.skipif(
@@ -332,3 +456,6 @@ def test_compose_l25_self_bootstraps_all_failure_scenarios() -> None:
     assert result.crash_run not in result.parallel_runs
     assert result.redis_restart_run not in result.parallel_runs
     assert len(set(result.serial_runs)) == 2
+    assert result.cancel_run not in result.parallel_runs
+    assert len(set(result.capacity_runs)) == 2
+    assert result.postgres_restart_run not in result.parallel_runs

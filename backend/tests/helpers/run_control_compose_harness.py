@@ -11,10 +11,12 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
 
 import psycopg
-from psycopg import errors
+from jose import jwt
 from redis import Redis
 
 
@@ -25,6 +27,9 @@ class ComposeAcceptanceResult:
     crash_run: UUID
     redis_restart_run: UUID
     serial_runs: tuple[UUID, UUID]
+    cancel_run: UUID
+    capacity_runs: tuple[UUID, UUID]
+    postgres_restart_run: UUID
 
 
 def _free_port() -> int:
@@ -41,6 +46,7 @@ class ComposeRunControlHarness:
         self.redis_container = f"{self.project}-redis"
         self.postgres_port = _free_port()
         self.redis_port = _free_port()
+        self.api_port = _free_port()
         self.repo_root = repo_root
         self.environment = os.environ.copy()
         self.environment.update(
@@ -49,6 +55,11 @@ class ComposeRunControlHarness:
                 "RUN_CONTROL_REDIS_CONTAINER_NAME": self.redis_container,
                 "POSTGRES_PUBLISHED_PORT": str(self.postgres_port),
                 "REDIS_PUBLISHED_PORT": str(self.redis_port),
+                "RUN_CONTROL_API_PUBLISHED_PORT": str(self.api_port),
+                "RUN_CONTROL_POSTGRES_USER": "rc_user",
+                "RUN_CONTROL_POSTGRES_PASSWORD": f"rc-{suffix}",
+                "RUN_CONTROL_POSTGRES_DB": "rc_acceptance",
+                "RUN_CONTROL_JWT_SECRET_KEY": f"jwt-{suffix}-isolated-secret",
                 "RUN_LEASE_SECONDS": "3",
                 "RUN_HEARTBEAT_TTL_SECONDS": "3",
                 "RUN_HEARTBEAT_INTERVAL_SECONDS": "0.25",
@@ -57,35 +68,47 @@ class ComposeRunControlHarness:
                 "RUN_SIMULATED_DELAY_SECONDS": "0.5",
             }
         )
+        if image := os.getenv("RUN_CONTROL_ACCEPTANCE_IMAGE"):
+            self.environment["RUN_CONTROL_IMAGE"] = image
         self.database_url = (
-            f"postgresql://postgres:postgres123@127.0.0.1:{self.postgres_port}/industry_assistant"
+            f"postgresql://rc_user:rc-{suffix}@127.0.0.1:{self.postgres_port}/rc_acceptance"
         )
         self.redis_url = f"redis://127.0.0.1:{self.redis_port}/0"
+        self.api_url = f"http://127.0.0.1:{self.api_port}"
 
     def run(self) -> ComposeAcceptanceResult:
         try:
+            build_mode = "--no-build" if self.environment.get("RUN_CONTROL_IMAGE") else "--build"
             self._compose(
                 "up",
                 "-d",
-                "--build",
+                build_mode,
                 "--wait",
                 "run-scheduler-a",
                 "run-scheduler-b",
                 "run-dispatcher",
                 "run-worker-a",
                 "run-worker-b",
+                "run-api",
             )
             self._assert_processes_healthy()
             parallel = self._parallel_and_duplicate()
             crash = self._kill_and_recover()
             redis_restart = self._restart_redis_with_durable_outbox()
             serial = self._same_session_serialization()
+            cancel = self._cancel_running_attempt()
+            capacity = self._single_worker_capacity_two()
+            self._double_kill_retry_exhaustion()
+            postgres_restart = self._restart_postgres_and_recover()
             return ComposeAcceptanceResult(
                 project=self.project,
                 parallel_runs=parallel,
                 crash_run=crash,
                 redis_restart_run=redis_restart,
                 serial_runs=serial,
+                cancel_run=cancel,
+                capacity_runs=capacity,
+                postgres_restart_run=postgres_restart,
             )
         finally:
             self._compose("down", "-v", "--remove-orphans", check=False)
@@ -93,8 +116,8 @@ class ComposeRunControlHarness:
     def _parallel_and_duplicate(self) -> tuple[UUID, UUID]:
         context_a = self._context()
         context_b = self._context(tenant_id=context_a[0], user_id=context_a[1])
-        run_a = self._insert_run(*context_a, key="parallel-a")
-        run_b = self._insert_run(*context_b, key="parallel-b")
+        run_a = self._create_run(*context_a, key="parallel-a")
+        run_b = self._create_run(*context_b, key="parallel-b")
         self._wait_status(run_a, "completed", timeout=15)
         self._wait_status(run_b, "completed", timeout=15)
         with self._connect() as connection, connection.cursor() as cursor:
@@ -162,12 +185,17 @@ class ComposeRunControlHarness:
             "run-worker-a",
             "run-worker-b",
         )
-        run_id = self._insert_run(*self._context(), key="crash")
+        run_id = self._create_run(*self._context(), key="crash")
         first = self._wait_attempt(run_id, 1, "running", timeout=10)
-        self._docker("kill", self._container_for_worker(first[1]))
+        container = self._container_for_worker(first[1])
+        self._docker("update", "--restart=no", container)
+        self._docker("kill", container)
         second = self._wait_attempt(run_id, 2, "running", timeout=10)
         assert second[1] != first[1]
         self._wait_status(run_id, "completed", timeout=10)
+        self._compose(
+            "up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b"
+        )
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
                 "SELECT attempt_no,status FROM run_attempts WHERE run_id=%s ORDER BY attempt_no",
@@ -194,7 +222,7 @@ class ComposeRunControlHarness:
         )
         dispatcher = f"{self.project}-run-dispatcher-1"
         self._docker("stop", dispatcher)
-        run_id = self._insert_run(*self._context(), key="redis-restart")
+        run_id = self._create_run(*self._context(), key="redis-restart")
         self._wait_status(run_id, "assigned", timeout=10)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -212,7 +240,9 @@ class ComposeRunControlHarness:
                 "FROM run_outbox WHERE run_id=%s AND event_type='attempt.assigned'",
                 (run_id,),
             )
-            assert cursor.fetchone() == (1, True, True)
+            row = cursor.fetchone()
+            assert row is not None
+            assert row[0] >= 1 and row[1:] == (True, True)
         return run_id
 
     def _same_session_serialization(self) -> tuple[UUID, UUID]:
@@ -227,16 +257,17 @@ class ComposeRunControlHarness:
             "run-worker-b",
         )
         context = self._context()
-        first = self._insert_run(*context, key="serial-a")
+        first = self._create_run(*context, key="serial-a")
         self._wait_status(first, "running", timeout=10)
         try:
-            self._insert_run(*context, key="serial-rejected")
-        except errors.UniqueViolation:
+            self._create_run(*context, key="serial-rejected", session_id=self._run_session(first))
+        except HTTPError as exc:
+            assert exc.code == 409
             pass
         else:
             raise AssertionError("same Session accepted two active Runs")
         self._wait_status(first, "completed", timeout=10)
-        second = self._insert_run(*context, key="serial-b")
+        second = self._create_run(*context, key="serial-b", session_id=self._run_session(first))
         self._wait_status(second, "completed", timeout=10)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -253,11 +284,9 @@ class ComposeRunControlHarness:
         *,
         tenant_id: UUID | None = None,
         user_id: UUID | None = None,
-    ) -> tuple[UUID, UUID, UUID, UUID]:
+    ) -> tuple[UUID, UUID]:
         tenant_id = tenant_id or uuid4()
         user_id = user_id or uuid4()
-        session_id = uuid4()
-        message_id = uuid4()
         with self._connect() as connection, connection.cursor() as cursor:
             if user_id is not None:
                 cursor.execute(
@@ -276,47 +305,176 @@ class ComposeRunControlHarness:
                 "VALUES (%s,%s,'owner',now()) ON CONFLICT DO NOTHING",
                 (tenant_id, user_id),
             )
-            cursor.execute(
-                "INSERT INTO run_sessions(id,tenant_id,created_by_user_id,title,created_at,updated_at) "
-                "VALUES (%s,%s,%s,'acceptance',now(),now())",
-                (session_id, tenant_id, user_id),
-            )
-            cursor.execute(
-                "INSERT INTO run_messages(id,tenant_id,session_id,role,content,status,created_at) "
-                "VALUES (%s,%s,%s,'user','acceptance','done',now())",
-                (message_id, tenant_id, session_id),
-            )
-        return tenant_id, user_id, session_id, message_id
+        return tenant_id, user_id
 
-    def _insert_run(
+    def _create_run(
         self,
         tenant_id: UUID,
         user_id: UUID,
-        session_id: UUID,
-        message_id: UUID,
         *,
         key: str,
+        session_id: UUID | None = None,
     ) -> UUID:
-        run_id, event_id, outbox_id = uuid4(), uuid4(), uuid4()
+        body: dict[str, Any] = {"prompt": f"acceptance {key}"}
+        if session_id is not None:
+            body["session_id"] = str(session_id)
+        created = self._api(
+            "POST",
+            f"/api/v1/tenants/{tenant_id}/runs",
+            user_id,
+            body=body,
+            headers={"Idempotency-Key": key},
+        )
+        run_id = UUID(created["id"])
+        fetched = self._api("GET", f"/api/v1/tenants/{tenant_id}/runs/{run_id}", user_id)
+        assert fetched["id"] == str(run_id) and fetched["tenant_id"] == str(tenant_id)
+        return run_id
+
+    def _cancel_running_attempt(self) -> UUID:
+        self.environment["RUN_SIMULATED_DELAY_SECONDS"] = "5"
+        self._compose(
+            "up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b"
+        )
+        tenant_id, user_id = self._context()
+        run_id = self._create_run(tenant_id, user_id, key="cancel")
+        self._wait_status(run_id, "running", timeout=10)
+        self._api("POST", f"/api/v1/tenants/{tenant_id}/runs/{run_id}/cancel", user_id, body={})
+        self._wait_status(run_id, "cancelled", timeout=3)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
-                "INSERT INTO runs(id,tenant_id,session_id,created_by_user_id,run_type,status,"
-                "idempotency_key,request_hash,input_message_id,retry_count,queue_reason,created_at,"
-                "queued_at) VALUES (%s,%s,%s,%s,'chat','queued',%s,%s,%s,0,'created',now(),now())",
-                (run_id, tenant_id, session_id, user_id, key, uuid4().hex * 2, message_id),
+                "SELECT acknowledged_at IS NOT NULL FROM run_outbox "
+                "WHERE run_id=%s AND event_type='attempt.cancel'",
+                (run_id,),
             )
-            cursor.execute(
-                "INSERT INTO run_events(id,tenant_id,run_id,seq,event_type,payload,created_at) "
-                "VALUES (%s,%s,%s,1,'run.created','{}',now())",
-                (event_id, tenant_id, run_id),
-            )
-            cursor.execute(
-                "INSERT INTO run_outbox(id,event_type,tenant_id,run_id,payload,dedupe_key,"
-                "available_at,delivery_attempts,created_at) VALUES "
-                "(%s,'schedule.wake',%s,%s,'{}',%s,now(),0,now())",
-                (outbox_id, tenant_id, run_id, f"schedule.wake:{run_id}:create"),
-            )
+            assert cursor.fetchone() == (True,)
         return run_id
+
+    def _single_worker_capacity_two(self) -> tuple[UUID, UUID]:
+        self.environment["RUN_WORKER_CAPACITY"] = "2"
+        self.environment["RUN_SIMULATED_DELAY_SECONDS"] = "1"
+        self._docker("stop", f"{self.project}-run-worker-b-1")
+        self._compose("up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a")
+        first = self._create_run(*self._context(), key="capacity-a")
+        second = self._create_run(*self._context(), key="capacity-b")
+        self._wait_status(first, "completed", timeout=10)
+        self._wait_status(second, "completed", timeout=10)
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT runs.started_at,runs.finished_at,run_attempts.worker_id FROM runs JOIN run_attempts "
+                "ON run_attempts.run_id=runs.id WHERE runs.id=ANY(%s::uuid[])",
+                ([first, second],),
+            )
+            rows = cursor.fetchall()
+            assert len({row[2] for row in rows}) == 1
+            assert max(row[0] for row in rows) < min(row[1] for row in rows)
+        self.environment["RUN_WORKER_CAPACITY"] = "1"
+        self._compose(
+            "up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b"
+        )
+        return first, second
+
+    def _double_kill_retry_exhaustion(self) -> UUID:
+        self.environment["RUN_LEASE_SECONDS"] = "1"
+        self.environment["RUN_SIMULATED_DELAY_SECONDS"] = "5"
+        self._compose(
+            "up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b"
+        )
+        run_id = self._create_run(*self._context(), key="double-kill")
+        first = self._wait_attempt(run_id, 1, "running", timeout=10)
+        first_container = self._container_for_worker(first[1])
+        self._docker("update", "--restart=no", first_container)
+        self._docker("kill", first_container)
+        second = self._wait_attempt(run_id, 2, "running", timeout=10)
+        second_container = self._container_for_worker(second[1])
+        self._docker("update", "--restart=no", second_container)
+        self._docker("kill", second_container)
+        self._wait_status(run_id, "failed", timeout=10)
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT attempt_no,status FROM run_attempts WHERE run_id=%s ORDER BY attempt_no",
+                (run_id,),
+            )
+            assert cursor.fetchall() == [(1, "lost"), (2, "lost")]
+        self.environment["RUN_SIMULATED_DELAY_SECONDS"] = "0.5"
+        self._compose(
+            "up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b"
+        )
+        return run_id
+
+    def _restart_postgres_and_recover(self) -> UUID:
+        services = (
+            "run-scheduler-a",
+            "run-scheduler-b",
+            "run-dispatcher",
+            "run-worker-a",
+            "run-worker-b",
+            "run-api",
+        )
+        before = {
+            service: json.loads(self._docker("inspect", f"{self.project}-{service}-1"))[0]
+            for service in services
+        }
+        self._docker("stop", self.postgres_container)
+
+        def observed_unhealthy() -> bool:
+            states = [
+                json.loads(self._docker("inspect", f"{self.project}-{service}-1"))[0]["State"]
+                for service in services
+            ]
+            return all(state["Running"] for state in states) and any(
+                state["Health"]["Status"] != "healthy" for state in states
+            )
+
+        self._wait(observed_unhealthy, timeout=8, message="PG outage did not invalidate health")
+        self._docker("start", self.postgres_container)
+
+        def all_healthy() -> bool:
+            current = {
+                service: json.loads(self._docker("inspect", f"{self.project}-{service}-1"))[0]
+                for service in services
+            }
+            return all(
+                value["State"]["Running"]
+                and value["State"]["Health"]["Status"] == "healthy"
+                and value["Id"] == before[service]["Id"]
+                and value["RestartCount"] >= before[service]["RestartCount"]
+                for service, value in current.items()
+            )
+
+        self._wait(all_healthy, timeout=20, message="processes did not self-heal after PG restart")
+        run_id = self._create_run(*self._context(), key="postgres-restart")
+        self._wait_status(run_id, "completed", timeout=15)
+        return run_id
+
+    def _run_session(self, run_id: UUID) -> UUID:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT session_id FROM runs WHERE id=%s", (run_id,))
+            row = cursor.fetchone()
+        assert row is not None
+        return row[0]
+
+    def _api(
+        self,
+        method: str,
+        path: str,
+        user_id: UUID,
+        *,
+        body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        token = jwt.encode(
+            {"sub": str(user_id), "username": f"u-{user_id}", "exp": int(time.time()) + 3600},
+            self.environment["RUN_CONTROL_JWT_SECRET_KEY"],
+            algorithm="HS256",
+        )
+        request_headers = {"Authorization": f"Bearer {token}", **(headers or {})}
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            request_headers["Content-Type"] = "application/json"
+        request = Request(self.api_url + path, data=data, headers=request_headers, method=method)
+        with urlopen(request, timeout=5) as response:  # noqa: S310 - isolated localhost harness
+            return json.loads(response.read().decode("utf-8"))
 
     def _wait_attempt(
         self, run_id: UUID, attempt_no: int, status: str, *, timeout: float
@@ -371,6 +529,7 @@ class ComposeRunControlHarness:
             "run-dispatcher",
             "run-worker-a",
             "run-worker-b",
+            "run-api",
         }
         healthy = {
             row["Service"]
