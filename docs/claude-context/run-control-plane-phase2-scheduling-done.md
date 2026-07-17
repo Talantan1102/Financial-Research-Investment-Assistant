@@ -28,16 +28,16 @@ type: project
 
 - 正式 Dockerfile 结构镜像 locked build 成功。最终审计镜像 `financial-research-run-control:review4`，ID `sha256:825a976916efea7b5aa38aeacf4d35598476983e9ac68fc1931b7b6878ee5667`，运行时为 Python 3.12.13、用户为 `runcontrol`；history 含 `uv sync --frozen --only-group run-control --no-install-project`。
 - 本地结构镜像使用显式信任的 mirror digest `sha256:57cd7c...`，其前四个 RootFS layer 与本地 mirror base 一致。默认供应链 pin 仍是 Docker Registry API 返回的官方 `python:3.12.11-slim-bookworm` digest `sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7`；本地从 mirror 拉取该官方 digest 因 TLS handshake timeout 失败，因此不声称本地镜像运行的是 3.12.11。
-- 正式结构镜像、空随机 Compose 连续两轮 fresh 均为 `9 passed, 2 skipped`，总耗时 285.1 秒。两个 skip 分别是外部 fact IDs audit 与 cleanup failure injection；self-bootstrap 实际通过。
+- 正式结构镜像、空随机 Compose 连续三轮 fresh 均为 `9 passed, 2 skipped`，总耗时 422.6 秒。两个 skip 分别是外部 fact IDs audit 与 cleanup failure injection；self-bootstrap 实际通过。
 - 不同 Session 并行完成；duplicate Assignment 最终同时满足 `XLEN=0`、`XPENDING=0`，且只产生一次 Attempt/完成事件。同 Session 的第二个 active Run 由 API 返回 409。
 - Worker kill 后 Attempt 1 lost、Attempt 2 完成；双 kill 得到两个 lost Attempt 和 failed Run，随后 Worker 重建。
 - running Cancel 在 3 秒窗口内完成且 cancel Outbox acknowledged；单 Worker `capacity=2` 时两个 Run 真实重叠。
-- Redis stop 后相关进程仍 running 但 health 转非 healthy；恢复后同容器 ID 全 healthy，持久 Outbox delivered/acknowledged，Run 完成。
+- Redis durable-Outbox 场景在 assigned 后捕获唯一原始 `attempt_id` 与 `outbox_id`，仅把该 Attempt lease 延长 90 秒以隔离 lease recovery；恢复时严格等待同一 Outbox 行 delivered/acknowledged，最终 Run 只有原始 Attempt。Redis stop 后相关进程仍 running 但 health 转非 healthy，恢复后同容器 ID 全 healthy。
 - PostgreSQL stop 后六个服务仍 running 且 health 转非 healthy；恢复后同容器 ID、合法 RestartCount、全部 healthy，新 HTTP Run 完成。
 - 单 Worker 满载执行 5 秒，跨过 3 秒 health TTL 仍保持 healthy，证明满载循环继续探测 PG/Redis。
 - SIGTERM 时序测试明确输出 `claims_after_shutdown=0`；阻塞 executor 测试证明 drain 先发生、grace 内完成后才 offline，stream 未整删。
 - cleanup failure injection 在 Compose `up/health` 后主动失败，finally 清理与资源审计实跑通过：`1 passed`，27.1 秒。fake runner 单测覆盖第一次 `down` 失败后重试成功，以及永久失败保留 stdout/stderr 与残留资源事实。
-- Task 1–6 相关矩阵：330 passed，3 skipped，145.5 秒。true-Redis 显式使用 `REDIS_URL=redis://127.0.0.1:6379/15`。
+- Task 1–6 相关矩阵：331 passed，3 skipped，144.1 秒。true-Redis 显式使用 `REDIS_URL=redis://127.0.0.1:6379/15`。
 - Ruff 全仓 format/lint 通过；本次 production process/executor targeted mypy 通过。Windows 全仓 mypy 的既有 POSIX/旧测试类型错误不计作本次通过。
 - 随机验收 containers/networks/volumes 均已清理；原 `industry_postgres`、`industry_redis` 容器 ID 未变且保持 healthy。
 

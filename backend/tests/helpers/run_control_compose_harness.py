@@ -279,9 +279,24 @@ class ComposeRunControlHarness:
         self._docker("stop", dispatcher)
         run_id = self._create_run(*self._context(), key="redis-restart")
         self._wait_status(run_id, "assigned", timeout=10)
-        self._wait_outbox_facts(
-            run_id,
-            "attempt.assigned",
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id,attempt_id FROM run_outbox "
+                "WHERE run_id=%s AND event_type='attempt.assigned' ORDER BY id",
+                (run_id,),
+            )
+            original_rows = cursor.fetchall()
+            assert len(original_rows) == 1
+            outbox_id, original_attempt_id = original_rows[0]
+            cursor.execute(
+                "UPDATE run_attempts SET lease_expires_at=CURRENT_TIMESTAMP + INTERVAL '90 seconds' "
+                "WHERE run_id=%s AND id=%s",
+                (run_id, original_attempt_id),
+            )
+            assert cursor.rowcount == 1
+            connection.commit()
+        self._wait_outbox_by_id(
+            outbox_id,
             lambda row: row == (0, None, None),
         )
         self._docker("stop", self.redis_container)
@@ -322,12 +337,17 @@ class ComposeRunControlHarness:
             message="processes did not self-heal after Redis restart",
         )
         self._wait_status(run_id, "completed", timeout=15)
-        self._wait_outbox_facts(
-            run_id,
-            "attempt.assigned",
+        self._wait_outbox_by_id(
+            outbox_id,
             lambda row: row is not None and row[0] >= 1 and row[1:] == (True, True),
             select="delivery_attempts,delivered_at IS NOT NULL,acknowledged_at IS NOT NULL",
         )
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id FROM run_attempts WHERE run_id=%s ORDER BY attempt_no",
+                (run_id,),
+            )
+            assert cursor.fetchall() == [(original_attempt_id,)]
         return run_id
 
     def _same_session_serialization(self) -> tuple[UUID, UUID]:
@@ -632,6 +652,31 @@ class ComposeRunControlHarness:
             time.sleep(0.1)
         raise AssertionError(
             f"Outbox facts did not stabilize for run={run_id} event={event_type}; last={last!r}"
+        )
+
+    def _wait_outbox_by_id(
+        self,
+        outbox_id: UUID,
+        predicate: Callable[[tuple[Any, ...] | None], bool],
+        *,
+        timeout: float = 10,
+        select: str = "delivery_attempts,delivered_at,acknowledged_at",
+    ) -> tuple[Any, ...]:
+        last: tuple[Any, ...] | None = None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._connect() as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT {select} FROM run_outbox WHERE id=%s",
+                    (outbox_id,),
+                )
+                last = cursor.fetchone()
+            if predicate(last):
+                assert last is not None
+                return last
+            time.sleep(0.1)
+        raise AssertionError(
+            f"Outbox facts did not stabilize for outbox_id={outbox_id}; last={last!r}"
         )
 
     def _container_for_worker(self, worker_id: UUID) -> str:

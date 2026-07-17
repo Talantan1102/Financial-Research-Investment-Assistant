@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from tests.helpers.run_control_compose_harness import (
@@ -87,3 +89,47 @@ def test_injected_failure_after_up_still_runs_cleanup(
         harness.run()
 
     assert cleanup_called is True
+
+
+def test_wait_outbox_by_id_queries_only_the_captured_row(tmp_path: Path) -> None:
+    outbox_id = uuid4()
+    calls: list[tuple[str, tuple[object, ...]]] = []
+
+    class Cursor:
+        def __enter__(self) -> Cursor:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            del args
+
+        def execute(self, query: str, parameters: tuple[object, ...]) -> None:
+            calls.append((query, parameters))
+
+        def fetchone(self) -> tuple[int, bool, bool]:
+            return (1, True, True)
+
+    class Connection:
+        def cursor(self) -> Cursor:
+            return Cursor()
+
+    @contextmanager
+    def connect():
+        yield Connection()
+
+    harness = ComposeRunControlHarness(tmp_path)
+    harness._connect = connect  # type: ignore[method-assign]
+
+    row = harness._wait_outbox_by_id(
+        outbox_id,
+        lambda facts: facts == (1, True, True),
+        select="delivery_attempts,delivered_at IS NOT NULL,acknowledged_at IS NOT NULL",
+    )
+
+    assert row == (1, True, True)
+    assert calls == [
+        (
+            "SELECT delivery_attempts,delivered_at IS NOT NULL,"
+            "acknowledged_at IS NOT NULL FROM run_outbox WHERE id=%s",
+            (outbox_id,),
+        )
+    ]
