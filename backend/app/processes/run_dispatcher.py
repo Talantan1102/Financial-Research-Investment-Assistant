@@ -1,0 +1,64 @@
+"""Thin, signal-aware loop dispatching durable Outbox notifications to Redis."""
+
+from __future__ import annotations
+
+import asyncio
+import signal
+from contextlib import suppress
+from uuid import UUID, uuid4
+
+from app.run_control.redis_transport import RedisTransport
+from app.services.run_outbox import RunOutboxService
+
+
+class RunDispatcher:
+    def __init__(
+        self,
+        outbox: RunOutboxService,
+        transport: RedisTransport,
+        *,
+        dispatcher_id: UUID | None = None,
+        batch_size: int = 100,
+        poll_interval: float = 0.5,
+    ) -> None:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        if poll_interval <= 0:
+            raise ValueError("poll_interval must be positive")
+        self._outbox = outbox
+        self._transport = transport
+        self._dispatcher_id = dispatcher_id or uuid4()
+        self._batch_size = batch_size
+        self._poll_interval = poll_interval
+        self._shutdown = asyncio.Event()
+
+    async def dispatch_once(self) -> int:
+        items = await self._outbox.claim_batch(self._dispatcher_id, self._batch_size)
+        delivered = 0
+        for item in items:
+            try:
+                await self._transport.publish(item)
+            except Exception as exc:
+                await self._outbox.mark_failed(item.id, str(exc))
+                continue
+            # Deliberately outside the Redis exception handler. If the process or
+            # database fails after XADD, the claim expires and the item is sent again.
+            await self._outbox.mark_delivered(item.id)
+            delivered += 1
+        return delivered
+
+    async def run_forever(self) -> None:
+        while not self._shutdown.is_set():
+            await self.dispatch_once()
+            with suppress(TimeoutError):
+                await asyncio.wait_for(self._shutdown.wait(), timeout=self._poll_interval)
+
+    def request_shutdown(self) -> None:
+        self._shutdown.set()
+
+    def install_signal_handlers(self) -> None:
+        def stop(_signum: int, _frame: object) -> None:
+            self.request_shutdown()
+
+        signal.signal(signal.SIGINT, stop)
+        signal.signal(signal.SIGTERM, stop)

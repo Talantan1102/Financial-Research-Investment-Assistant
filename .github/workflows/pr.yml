@@ -40,7 +40,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - name: Install deps
-        run: uv sync --extra dev --extra kb
+        # `test` provides testcontainers[redis] so Task 5's true-Redis
+        # dispatcher/crash tests cannot silently skip in the PR gate.
+        run: uv sync --extra dev --extra kb --extra test
       - name: Format check
         run: uv run ruff format --check .
       - name: Lint
