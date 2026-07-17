@@ -7,8 +7,11 @@ import signal
 from contextlib import suppress
 from uuid import UUID, uuid4
 
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
+
 from app.run_control.redis_transport import RedisTransport
-from app.services.run_outbox import RunOutboxService
+from app.services.run_outbox import OutboxClaimRejected, RunOutboxService
 
 
 class RunDispatcher:
@@ -39,11 +42,24 @@ class RunDispatcher:
             try:
                 await self._transport.publish(item)
             except Exception as exc:
-                await self._outbox.mark_failed(item.id, str(exc))
+                with suppress(OutboxClaimRejected):
+                    await self._outbox.mark_failed(
+                        item.id,
+                        self._dispatcher_id,
+                        item.claim_generation,
+                        self._delivery_error_code(exc),
+                    )
                 continue
             # Deliberately outside the Redis exception handler. If the process or
             # database fails after XADD, the claim expires and the item is sent again.
-            await self._outbox.mark_delivered(item.id)
+            try:
+                await self._outbox.mark_delivered(
+                    item.id,
+                    self._dispatcher_id,
+                    item.claim_generation,
+                )
+            except OutboxClaimRejected:
+                continue
             delivered += 1
         return delivered
 
@@ -62,3 +78,11 @@ class RunDispatcher:
 
         signal.signal(signal.SIGINT, stop)
         signal.signal(signal.SIGTERM, stop)
+
+    @staticmethod
+    def _delivery_error_code(exc: Exception) -> str:
+        if isinstance(exc, RedisTimeoutError | TimeoutError):
+            return "redis_timeout"
+        if isinstance(exc, RedisConnectionError | ConnectionError | OSError):
+            return "redis_connection_error"
+        return "redis_delivery_error"

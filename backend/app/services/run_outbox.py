@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import timedelta
@@ -16,7 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models.run_scheduling import RunOutbox
 from app.run_control.types import OutboxType
 
-MAX_ERROR_BYTES = 1000
+SAFE_DELIVERY_ERROR_CODES = frozenset(
+    {
+        "delivery_failed",
+        "redis_connection_error",
+        "redis_delivery_error",
+        "redis_timeout",
+    }
+)
 
 
 def _database_utc_now() -> Any:
@@ -44,32 +50,21 @@ class OutboxItem:
     payload: Mapping[str, Any]
     delivery_attempts: int
 
-
-_URL_CREDENTIALS = re.compile(r"(?i)([a-z][a-z0-9+.-]*://)[^\s/@:]*:[^\s/@]+@")
-_AUTHORIZATION = re.compile(r"(?i)\b(?:authorization\s*:\s*)?bearer\s+[^\s,;]+")
-_CONNECTION_URL = re.compile(
-    r"(?i)(?<![A-Z0-9_])[\"']?"
-    r"(?:REDIS_URL|DATABASE_URL|POSTGRES_URL|CELERY_(?:BROKER|RESULT_BACKEND))[\"']?"
-    r"\s*[:=]\s*(?:[\"'][^\"']*[\"']|[^\s,;}\]]+)"
-)
-_NAMED_CREDENTIAL = re.compile(
-    r"(?i)(?<![A-Z0-9_])[\"']?"
-    r"(?:[A-Z0-9_]*(?:PASSWORD|TOKEN|SECRET|API[_-]?KEY)[A-Z0-9_]*)[\"']?"
-    r"\s*[:=]\s*(?:[\"'][^\"']*[\"']|[^\s,;}\]]+)"
-)
-_OPENAI_STYLE_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}\b")
+    @property
+    def claim_generation(self) -> int:
+        return self.delivery_attempts
 
 
-def _safe_error(error: str) -> str:
-    sanitized = _URL_CREDENTIALS.sub(r"\1[REDACTED]@", str(error))
-    sanitized = _AUTHORIZATION.sub("Authorization: [REDACTED]", sanitized)
-    sanitized = _CONNECTION_URL.sub("[connection-url]=[REDACTED]", sanitized)
-    sanitized = _NAMED_CREDENTIAL.sub("[credential]=[REDACTED]", sanitized)
-    sanitized = _OPENAI_STYLE_KEY.sub("[REDACTED]", sanitized)
-    encoded = sanitized.encode("utf-8")
-    if len(encoded) <= MAX_ERROR_BYTES:
-        return sanitized
-    return encoded[:MAX_ERROR_BYTES].decode("utf-8", errors="ignore")
+class OutboxClaimRejected(RuntimeError):  # noqa: N818 - domain rejection, not fault
+    """Raised when a stale Dispatcher tries to mutate a newer claim generation."""
+
+
+def _safe_error_code(error_code: str) -> str:
+    if len(error_code) > 32:
+        return "delivery_failed"
+    if error_code in SAFE_DELIVERY_ERROR_CODES:
+        return error_code
+    return "delivery_failed"
 
 
 class RunOutboxService:
@@ -132,11 +127,19 @@ class RunOutboxService:
                 items.append(self._project(row))
             return tuple(items)
 
-    async def mark_delivered(self, item_id: UUID) -> None:
+    async def mark_delivered(
+        self,
+        item_id: UUID,
+        dispatcher_id: UUID,
+        expected_delivery_attempts: int,
+    ) -> None:
         async with self._session_factory() as session, session.begin():
-            row = await self._lock_item(session, item_id)
-            if row is None:
-                return
+            row = await self._lock_owned_item(
+                session,
+                item_id,
+                dispatcher_id,
+                expected_delivery_attempts,
+            )
             now = cast(Any, await session.scalar(select(_database_utc_now())))
             cast(Any, row).delivered_at = now
             cast(Any, row).claimed_at = None
@@ -150,12 +153,21 @@ class RunOutboxService:
                     cast(int, row.delivery_attempts)
                 )
 
-    async def mark_failed(self, item_id: UUID, error: str) -> None:
-        safe_error = _safe_error(error)
+    async def mark_failed(
+        self,
+        item_id: UUID,
+        dispatcher_id: UUID,
+        expected_delivery_attempts: int,
+        error_code: str,
+    ) -> None:
+        safe_error = _safe_error_code(error_code)
         async with self._session_factory() as session, session.begin():
-            row = await self._lock_item(session, item_id)
-            if row is None:
-                return
+            row = await self._lock_owned_item(
+                session,
+                item_id,
+                dispatcher_id,
+                expected_delivery_attempts,
+            )
             now = cast(Any, await session.scalar(select(_database_utc_now())))
             cast(Any, row).claimed_at = None
             cast(Any, row).claimed_by = None
@@ -168,15 +180,31 @@ class RunOutboxService:
         """Deterministic concurrency seam; production performs no work here."""
 
     @staticmethod
-    async def _lock_item(session: AsyncSession, item_id: UUID) -> RunOutbox | None:
-        return await session.scalar(
+    async def _lock_owned_item(
+        session: AsyncSession,
+        item_id: UUID,
+        dispatcher_id: UUID,
+        expected_delivery_attempts: int,
+    ) -> RunOutbox:
+        row = await session.scalar(
             select(RunOutbox).where(RunOutbox.id == item_id).with_for_update()
         )
+        if not (
+            row is not None
+            and row.claimed_at is not None
+            and cast(str | None, row.claimed_by) == str(dispatcher_id)
+            and cast(int, row.delivery_attempts) == expected_delivery_attempts
+        ):
+            raise OutboxClaimRejected("outbox claim is no longer authoritative")
+        return row
 
     def _retry_delay(self, delivery_attempts: int) -> timedelta:
         exponent = max(delivery_attempts - 1, 0)
-        delay = self._retry_base * (2**exponent)
-        return min(delay, self._retry_cap)
+        max_whole_multiplier = max(self._retry_cap // self._retry_base, 1)
+        max_uncapped_exponent = max_whole_multiplier.bit_length() - 1
+        if exponent > max_uncapped_exponent:
+            return self._retry_cap
+        return min(self._retry_base * (1 << exponent), self._retry_cap)
 
     @staticmethod
     def _project(row: RunOutbox) -> OutboxItem:

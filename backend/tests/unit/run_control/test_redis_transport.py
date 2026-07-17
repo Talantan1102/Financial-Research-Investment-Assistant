@@ -61,6 +61,22 @@ async def test_publish_uses_exact_stream_key_and_v1_json(
     }
 
 
+async def test_stream_retention_is_bounded_and_preserves_consumer_group() -> None:
+    redis = FakeRedis(decode_responses=False)
+    item = _item(OutboxType.ATTEMPT_ASSIGNED)
+    key = stream_key(item)
+    await redis.xgroup_create(key, "worker-group", id="0", mkstream=True)
+    transport = RedisTransport(redis, max_stream_length=5)
+
+    for _ in range(20):
+        await transport.publish(item)
+
+    assert await redis.xlen(key) == 5
+    groups = await redis.xinfo_groups(key)
+    group_name = groups[0].get(b"name", groups[0].get("name"))
+    assert group_name in {b"worker-group", "worker-group"}
+
+
 def test_serializer_is_deterministic_and_rejects_invalid_provenance() -> None:
     item = _item(OutboxType.ATTEMPT_ASSIGNED)
     assert serialize_envelope(item) == serialize_envelope(item)

@@ -65,11 +65,32 @@ def serialize_envelope(item: OutboxItem) -> str:
 
 
 class RedisTransport:
-    def __init__(self, redis: Any) -> None:
+    """Bounded acceleration channel; PostgreSQL Outbox remains the source of truth.
+
+    Exact trimming cannot permanently lose an unacknowledged notification because
+    its durable Outbox row remains eligible for redelivery.
+    """
+
+    DEFAULT_MAX_STREAM_LENGTH = 10_000
+
+    def __init__(
+        self,
+        redis: Any,
+        *,
+        max_stream_length: int = DEFAULT_MAX_STREAM_LENGTH,
+    ) -> None:
+        if max_stream_length <= 0:
+            raise ValueError("max_stream_length must be positive")
         self._redis = redis
+        self._max_stream_length = max_stream_length
 
     async def publish(self, item: OutboxItem) -> str:
-        entry_id = await self._redis.xadd(stream_key(item), {"data": serialize_envelope(item)})
+        entry_id = await self._redis.xadd(
+            stream_key(item),
+            {"data": serialize_envelope(item)},
+            maxlen=self._max_stream_length,
+            approximate=False,
+        )
         if isinstance(entry_id, bytes):
             return entry_id.decode("ascii")
         return str(entry_id)

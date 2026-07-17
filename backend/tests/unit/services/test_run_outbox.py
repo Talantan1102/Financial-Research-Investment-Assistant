@@ -28,7 +28,7 @@ def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
     return asyncio.DefaultEventLoopPolicy()
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture
 async def outbox_factory(
     pg_test_container: dict[str, object],
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
@@ -196,27 +196,27 @@ async def test_failed_delivery_redacts_credentials_and_caps_exponential_backoff(
         retry_base=timedelta(seconds=2),
         retry_cap=timedelta(seconds=5),
     )
-    for expected_delay in (2, 4, 5, 5):
-        await service.claim_batch(uuid.uuid4(), 1)
+    unsafe_errors = (
+        "Authorization: Bearer bearer-secret Cookie: session=cookie-secret",
+        "AWS_ACCESS_KEY_ID=AKIAEXAMPLE AWS_SECRET_ACCESS_KEY=aws-secret",
+        "redis://:urlsecret@cache/1?password=query-secret",
+        "x" * 1_000_000,
+    )
+    owner = uuid.uuid4()
+    for expected_delay, unsafe_error in zip((2, 4, 5, 5), unsafe_errors, strict=True):
+        item = (await service.claim_batch(owner, 1))[0]
         await service.mark_failed(
             item_id,
-            "redis://alice:password@cache/0 redis://:urlsecret@cache/1 "
-            "REDIS_URL=redis://:envsecret@cache/2 password: colonsecret "
-            "{'password': 'dictsecret'} {\"token\":\"jsonsecret\"} "
-            "Authorization: Bearer abc POSTGRES_PASSWORD=secret " + "x" * 5000,
+            owner,
+            item.delivery_attempts,
+            unsafe_error,
         )
         async with outbox_factory() as session:
             row = await session.get(RunOutbox, item_id)
             assert row is not None and row.next_attempt_at is not None
             delay = row.next_attempt_at - row.claimed_at if row.claimed_at else None
             assert delay is None  # claim ownership is cleared on failure
-            assert "password" not in row.last_error.lower()
-            assert "secret" not in row.last_error.lower()
-            assert "colonsecret" not in row.last_error.lower()
-            assert "dictsecret" not in row.last_error.lower()
-            assert "jsonsecret" not in row.last_error.lower()
-            assert "abc" not in row.last_error
-            assert len(row.last_error.encode("utf-8")) <= 1000
+            assert row.last_error == "delivery_failed"
             now = await session.scalar(select(func.timezone("UTC", func.statement_timestamp())))
             assert (
                 expected_delay - 0.25
@@ -231,6 +231,21 @@ async def test_failed_delivery_redacts_credentials_and_caps_exponential_backoff(
             )
 
 
+def test_retry_delay_caps_before_large_exponent_is_constructed(
+    outbox_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service = RunOutboxService(
+        outbox_factory,
+        retry_base=timedelta(seconds=2),
+        retry_cap=timedelta(seconds=5),
+    )
+    assert [service._retry_delay(value) for value in (48, 64, 10_000)] == [
+        timedelta(seconds=5),
+        timedelta(seconds=5),
+        timedelta(seconds=5),
+    ]
+
+
 async def test_assignment_redelivers_until_acknowledged_but_schedule_wake_is_one_shot(
     outbox_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -238,10 +253,11 @@ async def test_assignment_redelivers_until_acknowledged_but_schedule_wake_is_one
     wake_id = await _outbox(outbox_factory, OutboxType.SCHEDULE_WAKE)
     service = RunOutboxService(outbox_factory, retry_base=timedelta(seconds=1))
 
-    claimed = await service.claim_batch(uuid.uuid4(), 10)
+    owner = uuid.uuid4()
+    claimed = await service.claim_batch(owner, 10)
     by_id = {item.id: item for item in claimed}
-    await service.mark_delivered(assignment_id)
-    await service.mark_delivered(wake_id)
+    await service.mark_delivered(assignment_id, owner, by_id[assignment_id].delivery_attempts)
+    await service.mark_delivered(wake_id, owner, by_id[wake_id].delivery_attempts)
     assert assignment_id in by_id and wake_id in by_id
     async with outbox_factory() as session, session.begin():
         await session.execute(
@@ -264,3 +280,80 @@ async def test_assignment_redelivers_until_acknowledged_but_schedule_wake_is_one
     async with outbox_factory() as session:
         wake = await session.get(RunOutbox, wake_id)
         assert wake is not None and wake.acknowledged_at == wake.delivered_at
+
+
+async def test_stale_owner_and_generation_cannot_overwrite_reclaimed_delivery(
+    outbox_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    item_id = await _outbox(outbox_factory)
+    service = RunOutboxService(outbox_factory, lock_timeout=timedelta(milliseconds=1))
+    owner_a, owner_b = uuid.uuid4(), uuid.uuid4()
+    claim_a = (await service.claim_batch(owner_a, 1))[0]
+    async with outbox_factory() as session, session.begin():
+        await session.execute(
+            update(RunOutbox)
+            .where(RunOutbox.id == item_id)
+            .values(
+                claimed_at=func.timezone("UTC", func.statement_timestamp()) - timedelta(seconds=1)
+            )
+        )
+    claim_b = (await service.claim_batch(owner_b, 1))[0]
+
+    with pytest.raises(RuntimeError, match="claim"):
+        await service.mark_delivered(item_id, owner_a, claim_a.delivery_attempts)
+    async with outbox_factory() as session:
+        row = await session.get(RunOutbox, item_id)
+        assert row is not None
+        assert row.claimed_by == str(owner_b)
+        assert row.delivery_attempts == claim_b.delivery_attempts
+        assert row.delivered_at is None
+    await service.mark_delivered(item_id, owner_b, claim_b.delivery_attempts)
+
+
+async def test_same_dispatcher_aba_is_fenced_by_delivery_generation(
+    outbox_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    item_id = await _outbox(outbox_factory)
+    service = RunOutboxService(outbox_factory, lock_timeout=timedelta(milliseconds=1))
+    owner = uuid.uuid4()
+    first = (await service.claim_batch(owner, 1))[0]
+    async with outbox_factory() as session, session.begin():
+        await session.execute(
+            update(RunOutbox)
+            .where(RunOutbox.id == item_id)
+            .values(
+                claimed_at=func.timezone("UTC", func.statement_timestamp()) - timedelta(seconds=1)
+            )
+        )
+    second = (await service.claim_batch(owner, 1))[0]
+    assert second.delivery_attempts == first.delivery_attempts + 1
+
+    with pytest.raises(RuntimeError, match="claim"):
+        await service.mark_failed(
+            item_id,
+            owner,
+            first.delivery_attempts,
+            "redis_connection_error",
+        )
+    await service.mark_failed(
+        item_id,
+        owner,
+        second.delivery_attempts,
+        "redis_connection_error",
+    )
+    async with outbox_factory() as session:
+        row = await session.get(RunOutbox, item_id)
+        assert row is not None and row.last_error == "redis_connection_error"
+
+
+async def test_never_claimed_item_rejects_delivery_mutation(
+    outbox_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    item_id = await _outbox(outbox_factory)
+    service = RunOutboxService(outbox_factory)
+    with pytest.raises(RuntimeError, match="claim"):
+        await service.mark_delivered(item_id, uuid.uuid4(), 0)
+    async with outbox_factory() as session:
+        row = await session.get(RunOutbox, item_id)
+        assert row is not None
+        assert row.claimed_by is None and row.delivered_at is None
