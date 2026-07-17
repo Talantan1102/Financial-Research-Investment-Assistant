@@ -59,7 +59,18 @@ class ProcessHealth:
         )
         self.path = Path(selected)
         self._dependencies: dict[str, float] = {}
-        self._dependency_max_age = float(os.getenv("RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS", "2"))
+        heartbeat_interval = float(os.getenv("RUN_HEARTBEAT_INTERVAL_SECONDS", "10"))
+        configured_age = os.getenv("RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS")
+        self._dependency_max_age = (
+            float(configured_age) if configured_age is not None else heartbeat_interval * 2 + 1
+        )
+        if heartbeat_interval <= 0:
+            raise ValueError("RUN_HEARTBEAT_INTERVAL_SECONDS must be positive")
+        if self._dependency_max_age < heartbeat_interval * 2:
+            raise ValueError(
+                "RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS must be at least twice "
+                "RUN_HEARTBEAT_INTERVAL_SECONDS"
+            )
 
     def healthy(self) -> None:
         self.path.write_text(

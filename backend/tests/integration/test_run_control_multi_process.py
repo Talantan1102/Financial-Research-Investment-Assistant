@@ -548,3 +548,21 @@ def test_compose_l25_self_bootstraps_all_failure_scenarios() -> None:
     assert len(set(result.capacity_runs)) == 2
     assert result.postgres_restart_run not in result.parallel_runs
     assert result.full_capacity_run not in result.parallel_runs
+
+
+@pytest.mark.skipif(
+    os.getenv("RUN_CONTROL_COMPOSE_CLEANUP_FAILURE_INJECTION") != "1",
+    reason="opt-in fresh Compose cleanup failure injection",
+)
+def test_compose_cleanup_is_verified_after_injected_scenario_failure() -> None:
+    repo_root = Path(__file__).resolve().parents[3]
+    previous = os.environ.get("RUN_CONTROL_INJECT_FAILURE_AFTER_UP")
+    os.environ["RUN_CONTROL_INJECT_FAILURE_AFTER_UP"] = "1"
+    try:
+        with pytest.raises(RuntimeError, match="injected failure after Compose up"):
+            ComposeRunControlHarness(repo_root).run()
+    finally:
+        if previous is None:
+            os.environ.pop("RUN_CONTROL_INJECT_FAILURE_AFTER_UP", None)
+        else:
+            os.environ["RUN_CONTROL_INJECT_FAILURE_AFTER_UP"] = previous

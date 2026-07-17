@@ -98,3 +98,24 @@ def test_health_marker_requires_fresh_postgres_and_redis(tmp_path: Path) -> None
     assert not path.exists()
     health.dependency_succeeded("redis")
     assert path.exists()
+
+
+def test_default_dependency_freshness_covers_two_heartbeats_plus_jitter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUN_HEARTBEAT_INTERVAL_SECONDS", "10")
+    monkeypatch.delenv("RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS", raising=False)
+
+    health = ProcessHealth(tmp_path / "default-margin.json")
+
+    assert health._dependency_max_age == 21
+
+
+def test_dependency_freshness_rejects_less_than_two_heartbeats(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUN_HEARTBEAT_INTERVAL_SECONDS", "10")
+    monkeypatch.setenv("RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS", "19.9")
+
+    with pytest.raises(ValueError, match="at least twice"):
+        ProcessHealth(tmp_path / "invalid-margin.json")

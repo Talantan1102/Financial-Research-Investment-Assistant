@@ -7,6 +7,7 @@ import os
 import socket
 import subprocess
 import time
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +34,10 @@ class ComposeAcceptanceResult:
     full_capacity_run: UUID
 
 
+class ComposeCleanupError(RuntimeError):
+    """Raised when bounded Compose cleanup cannot prove isolation."""
+
+
 def _free_port() -> int:
     with closing(socket.socket()) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -40,7 +45,16 @@ def _free_port() -> int:
 
 
 class ComposeRunControlHarness:
-    def __init__(self, repo_root: Path) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        *,
+        runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        cleanup_attempts: int = 3,
+        cleanup_retry_delay: float = 0.25,
+    ) -> None:
+        if cleanup_attempts <= 0 or cleanup_retry_delay < 0:
+            raise ValueError("cleanup retry configuration is invalid")
         suffix = uuid4().hex[:10]
         self.project = f"rcp6-{suffix}"
         self.postgres_container = f"{self.project}-postgres"
@@ -49,6 +63,9 @@ class ComposeRunControlHarness:
         self.redis_port = _free_port()
         self.api_port = _free_port()
         self.repo_root = repo_root
+        self._runner = runner
+        self._cleanup_attempts = cleanup_attempts
+        self._cleanup_retry_delay = cleanup_retry_delay
         self.environment = os.environ.copy()
         self.environment.update(
             {
@@ -78,6 +95,8 @@ class ComposeRunControlHarness:
         self.api_url = f"http://127.0.0.1:{self.api_port}"
 
     def run(self) -> ComposeAcceptanceResult:
+        result: ComposeAcceptanceResult | None = None
+        primary_error: Exception | None = None
         try:
             build_mode = "--no-build" if self.environment.get("RUN_CONTROL_IMAGE") else "--build"
             self._compose(
@@ -93,6 +112,8 @@ class ComposeRunControlHarness:
                 "run-api",
             )
             self._assert_processes_healthy()
+            if os.getenv("RUN_CONTROL_INJECT_FAILURE_AFTER_UP") == "1":
+                raise RuntimeError("injected failure after Compose up")
             parallel = self._parallel_and_duplicate()
             crash = self._kill_and_recover()
             redis_restart = self._restart_redis_with_durable_outbox()
@@ -102,7 +123,7 @@ class ComposeRunControlHarness:
             self._double_kill_retry_exhaustion()
             postgres_restart = self._restart_postgres_and_recover()
             full_capacity = self._full_capacity_stays_healthy()
-            return ComposeAcceptanceResult(
+            result = ComposeAcceptanceResult(
                 project=self.project,
                 parallel_runs=parallel,
                 crash_run=crash,
@@ -113,8 +134,24 @@ class ComposeRunControlHarness:
                 postgres_restart_run=postgres_restart,
                 full_capacity_run=full_capacity,
             )
-        finally:
-            self._compose("down", "-v", "--remove-orphans", check=False)
+        except Exception as exc:
+            primary_error = exc
+        cleanup_error: Exception | None = None
+        try:
+            self._cleanup()
+        except Exception as exc:
+            cleanup_error = exc
+        if primary_error is not None and cleanup_error is not None:
+            raise ExceptionGroup(
+                "run-control acceptance and cleanup both failed",
+                [primary_error, cleanup_error],
+            )
+        if primary_error is not None:
+            raise primary_error
+        if cleanup_error is not None:
+            raise cleanup_error
+        assert result is not None
+        return result
 
     def _parallel_and_duplicate(self) -> tuple[UUID, UUID]:
         context_a = self._context()
@@ -134,14 +171,16 @@ class ComposeRunControlHarness:
             assert len(rows) == 2
             assert len({row[2] for row in rows}) == 2
             assert max(row[0] for row in rows) < min(row[1] for row in rows)
-            cursor.execute(
-                "SELECT o.id,o.tenant_id,o.attempt_id,o.worker_id,o.delivery_attempts "
-                "FROM run_outbox o WHERE o.run_id=%s AND o.event_type='attempt.assigned'",
-                (run_a,),
-            )
-            outbox_row = cursor.fetchone()
-            assert outbox_row is not None
-            outbox_id, tenant_id, attempt_id, worker_id, delivery_attempts = outbox_row
+        outbox_row = self._wait_outbox_facts(
+            run_a,
+            "attempt.assigned",
+            lambda row: row is not None and row[4] >= 1 and row[5] and row[6],
+            select=(
+                "id,tenant_id,attempt_id,worker_id,delivery_attempts,"
+                "delivered_at IS NOT NULL,acknowledged_at IS NOT NULL"
+            ),
+        )
+        outbox_id, tenant_id, attempt_id, worker_id, delivery_attempts, _, _ = outbox_row
         envelope = json.dumps(
             {
                 "v": 1,
@@ -240,13 +279,11 @@ class ComposeRunControlHarness:
         self._docker("stop", dispatcher)
         run_id = self._create_run(*self._context(), key="redis-restart")
         self._wait_status(run_id, "assigned", timeout=10)
-        with self._connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT delivery_attempts,delivered_at,acknowledged_at FROM run_outbox "
-                "WHERE run_id=%s AND event_type='attempt.assigned'",
-                (run_id,),
-            )
-            assert cursor.fetchone() == (0, None, None)
+        self._wait_outbox_facts(
+            run_id,
+            "attempt.assigned",
+            lambda row: row == (0, None, None),
+        )
         self._docker("stop", self.redis_container)
 
         def redis_outage_visible() -> bool:
@@ -285,15 +322,12 @@ class ComposeRunControlHarness:
             message="processes did not self-heal after Redis restart",
         )
         self._wait_status(run_id, "completed", timeout=15)
-        with self._connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT delivery_attempts,delivered_at IS NOT NULL,acknowledged_at IS NOT NULL "
-                "FROM run_outbox WHERE run_id=%s AND event_type='attempt.assigned'",
-                (run_id,),
-            )
-            row = cursor.fetchone()
-            assert row is not None
-            assert row[0] >= 1 and row[1:] == (True, True)
+        self._wait_outbox_facts(
+            run_id,
+            "attempt.assigned",
+            lambda row: row is not None and row[0] >= 1 and row[1:] == (True, True),
+            select="delivery_attempts,delivered_at IS NOT NULL,acknowledged_at IS NOT NULL",
+        )
         return run_id
 
     def _same_session_serialization(self) -> tuple[UUID, UUID]:
@@ -391,13 +425,13 @@ class ComposeRunControlHarness:
         self._wait_status(run_id, "running", timeout=10)
         self._api("POST", f"/api/v1/tenants/{tenant_id}/runs/{run_id}/cancel", user_id, body={})
         self._wait_status(run_id, "cancelled", timeout=3)
-        with self._connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT acknowledged_at IS NOT NULL FROM run_outbox "
-                "WHERE run_id=%s AND event_type='attempt.cancel'",
-                (run_id,),
-            )
-            assert cursor.fetchone() == (True,)
+        self._wait_outbox_facts(
+            run_id,
+            "attempt.cancel",
+            lambda row: (
+                row is not None and row[0] >= 1 and row[1] is not None and row[2] is not None
+            ),
+        )
         return run_id
 
     def _single_worker_capacity_two(self) -> tuple[UUID, UUID]:
@@ -574,6 +608,32 @@ class ComposeRunControlHarness:
 
         self._wait(query, timeout=timeout, message=f"Run {run_id} did not reach {status}")
 
+    def _wait_outbox_facts(
+        self,
+        run_id: UUID,
+        event_type: str,
+        predicate: Callable[[tuple[Any, ...] | None], bool],
+        *,
+        timeout: float = 10,
+        select: str = "delivery_attempts,delivered_at,acknowledged_at",
+    ) -> tuple[Any, ...]:
+        last: tuple[Any, ...] | None = None
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            with self._connect() as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT {select} FROM run_outbox WHERE run_id=%s AND event_type=%s",
+                    (run_id, event_type),
+                )
+                last = cursor.fetchone()
+            if predicate(last):
+                assert last is not None
+                return last
+            time.sleep(0.1)
+        raise AssertionError(
+            f"Outbox facts did not stabilize for run={run_id} event={event_type}; last={last!r}"
+        )
+
     def _container_for_worker(self, worker_id: UUID) -> str:
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -631,18 +691,78 @@ class ComposeRunControlHarness:
             check=check,
         )
 
+    def _cleanup(self) -> None:
+        attempts: list[str] = []
+        down_succeeded = False
+        for attempt in range(1, self._cleanup_attempts + 1):
+            completed = self._command_result(
+                "docker",
+                "compose",
+                "-p",
+                self.project,
+                "--profile",
+                "run-control",
+                "down",
+                "-v",
+                "--remove-orphans",
+            )
+            attempts.append(
+                f"attempt={attempt} rc={completed.returncode} "
+                f"stdout={completed.stdout!r} stderr={completed.stderr!r}"
+            )
+            if completed.returncode == 0:
+                down_succeeded = True
+                break
+            if attempt < self._cleanup_attempts:
+                time.sleep(self._cleanup_retry_delay)
+
+        leftovers: dict[str, str] = {}
+        for kind, command in {
+            "containers": ("docker", "ps", "-aq", "--filter"),
+            "networks": ("docker", "network", "ls", "-q", "--filter"),
+            "volumes": ("docker", "volume", "ls", "-q", "--filter"),
+        }.items():
+            completed = self._command_result(
+                *command,
+                f"label=com.docker.compose.project={self.project}",
+            )
+            if completed.returncode != 0:
+                leftovers[kind] = (
+                    f"audit rc={completed.returncode} stdout={completed.stdout!r} "
+                    f"stderr={completed.stderr!r}"
+                )
+            elif completed.stdout.strip():
+                leftovers[kind] = completed.stdout.strip()
+
+        if not down_succeeded or leftovers:
+            raise ComposeCleanupError(
+                "Compose cleanup could not prove isolation; "
+                + "; ".join(attempts)
+                + f"; leftovers={leftovers!r}"
+            )
+
     def _docker(self, *arguments: str) -> str:
         return self._command("docker", *arguments)
 
     def _command(self, *arguments: str, check: bool = True) -> str:
-        completed = subprocess.run(
+        completed = self._command_result(*arguments)
+        if check and completed.returncode != 0:
+            raise subprocess.CalledProcessError(
+                completed.returncode,
+                completed.args,
+                output=completed.stdout,
+                stderr=completed.stderr,
+            )
+        return completed.stdout
+
+    def _command_result(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return self._runner(
             arguments,
             cwd=self.repo_root,
             env=self.environment,
-            check=check,
+            check=False,
             capture_output=True,
             encoding="utf-8",
             errors="replace",
             text=True,
         )
-        return completed.stdout
