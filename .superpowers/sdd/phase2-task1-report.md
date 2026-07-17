@@ -99,3 +99,60 @@ correctly.
 - Ruff format: `10 files already formatted`; Ruff lint: `All checks passed!`.
 - Mypy: `Success: no issues found in 3 source files`.
 - `git diff --check`: exit 0.
+
+## Code-quality review fixes: upgrade path and transaction evidence
+
+### Phase 1 -> Phase 2 schema upgrade
+
+RED started with collection error
+`ModuleNotFoundError: app.scripts.migrate_phase2_scheduling_schema`. The first
+real-PostgreSQL implementation then exposed a dependency failure for a valid
+legacy UUID: adding the Attempt->Worker FK failed with `ForeignKeyViolation`
+because the newly-created `run_workers` table had no matching identity.
+
+The final synchronous migration runs in one `Engine.begin()` transaction:
+
+- creates the independent Worker table before dependent DDL;
+- validates each non-empty legacy Worker value with PostgreSQL UUID cast inside
+  a SAVEPOINT;
+- converts `worker_id varchar` using `NULLIF(worker_id, '')::uuid`;
+- backfills distinct legacy identities as safe `offline`, capacity-1 Workers;
+- adds the three nullable claim/heartbeat columns, provenance unique, and
+  Attempt->Worker FK only when absent;
+- returns an empty change tuple on the second run.
+
+The invalid legacy value test proves fail-fast and full DDL rollback: no Worker
+table, no claim columns, varchar remains, and no new unique constraint.
+`app_main` now runs this migration before full `Base.metadata.create_all()`.
+Connection-class OperationalErrors still log a degraded warning; connected
+PostgreSQL schema/DDL errors log an exception and re-raise. A SQLSTATE `55P03`
+test prevents broad OperationalError swallowing.
+
+Upgrade/startup focused tests: `5 passed`.
+
+### Member lock predicate
+
+RED: `RunMutationStore.lock_run()` rejected the new keyword with
+`TypeError: unexpected keyword argument created_by_user_id`. GREEN adds an
+optional creator predicate inside the `SELECT ... FOR UPDATE`; RunService passes
+it only for members. The hidden-query transaction remains open while a second
+transaction acquires the real row lock under a 250ms lock timeout, proving the
+first query did not lock another member's Run.
+
+### Resume/outbox rollback
+
+A real PostgreSQL unique-dedupe conflict proves one transaction covers Run,
+Pause, Event, and Outbox: after `IntegrityError`, the Run remains waiting, Pause
+is unresolved, no `run.resumed` Event exists, and exactly the pre-existing
+Outbox remains. Mutation sensitivity temporarily inserted an early commit; the
+test failed with `InvalidRequestError: closed transaction`. The temporary line
+was removed and the focused test returned to `1 passed`.
+
+### Final verification after all review fixes
+
+- Task 1 path matrix: `199 passed` in 88.7 seconds.
+- Expanded unit matrix: `225 passed` in 114.3 seconds.
+- Integration upgrade/router/wiring matrix: `54 passed` in 42.1 seconds.
+- Ruff format: `13 files already formatted`; Ruff lint: `All checks passed!`.
+- Mypy: `Success: no issues found in 5 source files`.
+- `git diff --check`: exit 0.

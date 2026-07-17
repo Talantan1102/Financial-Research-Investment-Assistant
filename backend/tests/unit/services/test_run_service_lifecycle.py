@@ -18,6 +18,7 @@ from app.run_control.types import (
 )
 from app.services.run_service import CreateRunCommand, RunService
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.helpers.run_fake_executor import FakeRunExecutor
@@ -242,6 +243,58 @@ async def test_resume_waiting_keeps_same_run_and_resolves_pause(
     assert len(wakes) == 2
     assert wakes[-1].payload == {"run_id": str(created_run.id), "reason": "resume"}
     assert wakes[-1].dedupe_key == f"schedule.wake:{created_run.id}:resume:{pause.id}"
+
+
+@pytest.mark.asyncio
+async def test_resume_outbox_conflict_rolls_back_run_pause_event_and_outbox(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_input(created_run.id, {"question": "cost?"})
+    dedupe_key = f"schedule.wake:{created_run.id}:resume:{pause.id}"
+    async with async_session_factory() as session, session.begin():
+        session.add(
+            RunOutbox(
+                event_type="schedule.wake",
+                tenant_id=created_run.tenant_id,
+                run_id=created_run.id,
+                payload={"preexisting": True},
+                dedupe_key=dedupe_key,
+            )
+        )
+
+    with pytest.raises(IntegrityError):
+        await run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={"text": "1500"},
+        )
+
+    current = await run_service.get_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    unresolved = await run_service.get_pause(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        pause.id,
+    )
+    events = await run_service.list_events(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    async with async_session_factory() as session:
+        duplicate_count = await session.scalar(
+            select(func.count()).select_from(RunOutbox).where(RunOutbox.dedupe_key == dedupe_key)
+        )
+    assert current.status == RunStatus.WAITING_INPUT.value
+    assert unresolved.resolved_at is None
+    assert unresolved.response_payload is None
+    assert not any(event.event_type == "run.resumed" for event in events)
+    assert duplicate_count == 1
 
 
 @pytest.mark.asyncio

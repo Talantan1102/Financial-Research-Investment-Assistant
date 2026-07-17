@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import OperationalError
 
 # 加载环境变量 — must run before any app.* import that reads POSTGRES_* /
 # DASHSCOPE_* / TUSHARE_* etc. at module-load time (e.g. app.core.database).
@@ -34,6 +35,9 @@ from app.router.portfolio_router import router as portfolio_router  # noqa: E402
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
 from app.router.runs import router as runs_router  # noqa: E402
 from app.router.tenants import router as tenants_router  # noqa: E402
+from app.scripts.migrate_phase2_scheduling_schema import (  # noqa: E402
+    migrate_phase2_scheduling_schema,
+)
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
 from app.services.mcp_client import MCPClient  # noqa: E402
 from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover trigger)
@@ -41,6 +45,42 @@ from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover t
 # ---------------------------------------------------------------------------
 # App lifespan
 # ---------------------------------------------------------------------------
+
+
+def _initialize_postgres_schema() -> bool:
+    """Upgrade then create schema; degrade only when PostgreSQL is unavailable."""
+    try:
+        import app.models as _models  # noqa: F401  ensure all models registered to Base
+
+        changes = migrate_phase2_scheduling_schema(engine)
+        if changes:
+            logger.info("Phase 2 scheduling schema upgraded: %s", changes)
+        Base.metadata.create_all(bind=engine)
+        logger.info("PostgreSQL tables initialized")
+
+        from app.scripts.reconcile_schema import reconcile_columns
+
+        reconciled = reconcile_columns(engine)
+        if reconciled:
+            logger.info(
+                "schema reconcile added %d missing columns: %s",
+                len(reconciled),
+                reconciled,
+            )
+    except OperationalError as exc:
+        sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+        if sqlstate is not None and not str(sqlstate).startswith("08"):
+            logger.exception("PostgreSQL schema initialization failed; refusing partial startup")
+            raise
+        logger.warning(
+            "PostgreSQL unavailable; database-backed routes will fail until it recovers: %s",
+            exc,
+        )
+        return False
+    except Exception:
+        logger.exception("PostgreSQL schema initialization failed; refusing partial startup")
+        raise
+    return True
 
 
 @asynccontextmanager
@@ -55,30 +95,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
 
     assert_jwt_secret_configured()
 
-    # 创建所有数据表（如果不存在）— 移入 lifespan 避免 import-time PG 硬依赖
-    # (v0.9.x feedback_serve_path_no_ci_coverage)。本地无 PG 时仅 warn,不阻塞启动。
-    # 显式 import models 包(barrel)以确保所有 model 注册到 Base.metadata —
-    # 例如 ResearchReport 没有任何 router 直接 import,只能靠 barrel 拉入。
-    try:
-        import app.models as _models  # noqa: F401  ensure all models registered to Base
-
-        Base.metadata.create_all(bind=engine)
-        logger.info("PostgreSQL 表初始化完成")
-        # create_all 只建缺失的表,从不给已存在的表 ADD COLUMN。补齐 ORM 已声明、
-        # 但表建立时(docker/init-db/01-init.sql 或更早的 create_all)还没有的列 ——
-        # 否则 chat_sessions.message_count / last_msg_preview、chat_messages.message_type
-        # 等缺列会让对应 INSERT/SELECT 直接 500(新对话/加载会话失败)。
-        from app.scripts.reconcile_schema import reconcile_columns
-
-        _reconciled = reconcile_columns(engine)
-        if _reconciled:
-            logger.info("schema reconcile 补齐 %d 个缺失列: %s", len(_reconciled), _reconciled)
-    except Exception as e:  # noqa: BLE001
-        logger.warning(
-            "PostgreSQL 表初始化跳过(可能 PG 未启动): %s — "
-            "依赖 PG 的 router(auth/news/session/...) 调用时会报错,但启动不阻塞",
-            e,
-        )
+    _initialize_postgres_schema()
 
     # C.5 cross-session memory: apply SQL migration(partial index / GIN / AGE 图).
     # 幂等(IF NOT EXISTS), PG 不可用时只 warn 不阻塞启动(serve path 不强依赖 c5).

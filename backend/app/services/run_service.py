@@ -495,10 +495,11 @@ class RunService:
         actor_id: UUID,
     ) -> Run:
         membership = await self._require_membership(session, tenant_id, actor_id)
-        run = await mutation_store.lock_run(tenant_id, run_id)
-        if membership.role == TenantRole.MEMBER.value and run.created_by_user_id != actor_id:
-            raise ResourceNotFound("run not found")
-        return run
+        return await mutation_store.lock_run(
+            tenant_id,
+            run_id,
+            created_by_user_id=(actor_id if membership.role == TenantRole.MEMBER.value else None),
+        )
 
     @staticmethod
     def _add_outbox(

@@ -25,10 +25,17 @@ class RunMutationStore:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def lock_run(self, tenant_id: UUID, run_id: UUID) -> Run:
-        run = await self._session.scalar(
-            select(Run).where(Run.id == run_id, Run.tenant_id == tenant_id).with_for_update()
-        )
+    async def lock_run(
+        self,
+        tenant_id: UUID,
+        run_id: UUID,
+        *,
+        created_by_user_id: UUID | None = None,
+    ) -> Run:
+        conditions = [Run.id == run_id, Run.tenant_id == tenant_id]
+        if created_by_user_id is not None:
+            conditions.append(Run.created_by_user_id == created_by_user_id)
+        run = await self._session.scalar(select(Run).where(*conditions).with_for_update())
         if run is None:
             raise ResourceNotFound("run not found")
         return run

@@ -12,7 +12,7 @@ from app.models.user import User
 from app.run_control.mutations import RunMutationStore
 from app.run_control.types import ResourceNotFound, RunStatus
 from app.services.run_service import CreateRunCommand, RunService
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
@@ -164,3 +164,26 @@ async def test_lock_run_requires_matching_tenant(
     async with async_session_factory() as session, session.begin():
         with pytest.raises(ResourceNotFound):
             await RunMutationStore(session).lock_run(uuid.uuid4(), mutation_run.id)
+
+
+@pytest.mark.asyncio
+async def test_creator_filter_hides_run_without_locking_another_members_row(
+    async_session_factory: async_sessionmaker[AsyncSession],
+    mutation_run: Run,
+) -> None:
+    async with async_session_factory() as hidden_session, hidden_session.begin():
+        with pytest.raises(ResourceNotFound):
+            await RunMutationStore(hidden_session).lock_run(
+                mutation_run.tenant_id,
+                mutation_run.id,
+                created_by_user_id=uuid.uuid4(),
+            )
+
+        async with async_session_factory() as owner_session, owner_session.begin():
+            await owner_session.execute(text("SET LOCAL lock_timeout = '250ms'"))
+            locked = await RunMutationStore(owner_session).lock_run(
+                mutation_run.tenant_id,
+                mutation_run.id,
+                created_by_user_id=mutation_run.created_by_user_id,
+            )
+            assert locked.id == mutation_run.id
