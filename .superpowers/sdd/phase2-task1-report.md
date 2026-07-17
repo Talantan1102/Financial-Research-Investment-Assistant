@@ -156,3 +156,45 @@ was removed and the focused test returned to `1 passed`.
 - Ruff format: `13 files already formatted`; Ruff lint: `All checks passed!`.
 - Mypy: `Success: no issues found in 5 source files`.
 - `git diff --check`: exit 0.
+
+## Concurrency, availability, and UTC review fixes
+
+### RED
+
+The real-PostgreSQL focused upgrade/startup file was extended before changing
+production code. With each isolated connection forced to
+`timezone=Asia/Shanghai`, it produced `3 failed, 4 passed`:
+
+- the legacy Worker timestamps were about 28,800 seconds ahead of PostgreSQL
+  UTC because `CURRENT_TIMESTAMP` was inserted into naive columns;
+- two independent Engines, synchronized immediately after transaction begin,
+  raced on `CREATE TABLE run_workers`; one failed on
+  `pg_type_typname_nsp_index` with `UniqueViolation`;
+- startup re-raised SQLSTATE `57P03 cannot_connect_now` instead of entering the
+  documented unavailable/degraded path.
+
+The concurrent regression also records the first executed statement from each
+Engine. This makes acquisition order part of the assertion instead of relying
+only on a lucky successful race.
+
+### GREEN
+
+- `migrate_phase2_scheduling_schema()` now takes a transaction-scoped
+  PostgreSQL advisory lock as the first statement inside `Engine.begin()`,
+  before reflection or DDL. Both independently pooled Engines now succeed and
+  the final schema is complete.
+- Legacy Worker `heartbeat_at` and `started_at` use
+  `CURRENT_TIMESTAMP AT TIME ZONE 'UTC'`; the non-UTC session test compares
+  both stored naive values with PostgreSQL UTC.
+- Startup explicitly treats SQLSTATE `57P03` as unavailable. The direct
+  `55P03` test still proves lock/schema OperationalErrors fail fast.
+
+Final evidence after the fixes:
+
+- Upgrade/startup focused file: `7 passed` in 13.9 seconds.
+- Task 1 path matrix: `205 passed` in 92.7 seconds.
+- Expanded unit matrix: `225 passed` in 113.5 seconds.
+- Integration upgrade/router/wiring matrix: `56 passed` in 51.2 seconds.
+- Ruff format: `13 files already formatted`; Ruff lint: `All checks passed!`.
+- Mypy: `Success: no issues found in 5 source files`.
+- `git diff --check`: exit 0.

@@ -18,6 +18,12 @@ def migrate_phase2_scheduling_schema(engine: Engine) -> tuple[str, ...]:
     """Upgrade Phase 1 run-attempt storage in one PostgreSQL transaction."""
     changes: list[str] = []
     with engine.begin() as connection:
+        connection.execute(
+            text(
+                "SELECT pg_advisory_xact_lock("
+                "hashtextextended('phase2_scheduling_schema_upgrade', 0))"
+            )
+        )
         existing_tables = set(inspect(connection).get_table_names())
         if "run_workers" not in existing_tables:
             RunWorker.__table__.create(bind=connection)
@@ -63,7 +69,8 @@ def _upgrade_run_attempts(connection: Connection, changes: list[str]) -> None:
             "INSERT INTO run_workers "
             "(id, worker_type, capacity, status, heartbeat_at, started_at, metadata) "
             "SELECT DISTINCT worker_id, 'chat', 1, 'offline', "
-            "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, "
+            "CURRENT_TIMESTAMP AT TIME ZONE 'UTC', "
+            "CURRENT_TIMESTAMP AT TIME ZONE 'UTC', "
             '\'{"migrated_from": "phase1"}\'::jsonb '
             "FROM run_attempts WHERE worker_id IS NOT NULL "
             "ON CONFLICT (id) DO NOTHING"

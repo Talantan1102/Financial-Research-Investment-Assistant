@@ -69,7 +69,10 @@ def _initialize_postgres_schema() -> bool:
             )
     except OperationalError as exc:
         sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
-        if sqlstate is not None and not str(sqlstate).startswith("08"):
+        postgres_unavailable = (
+            sqlstate is None or str(sqlstate).startswith("08") or sqlstate == "57P03"
+        )
+        if not postgres_unavailable:
             logger.exception("PostgreSQL schema initialization failed; refusing partial startup")
             raise
         logger.warning(
