@@ -137,7 +137,7 @@ def _check_values(session: Session, table: str, constraint_name: str) -> set[str
     return set(re.findall(r"'([^']+)'", constraints[constraint_name]["sqltext"]))
 
 
-def _foreign_keys(session: Session, table: str) -> dict[tuple[str, ...], dict[str, Any]]:
+def _foreign_keys(session: Session, table: str) -> dict[tuple[str, ...], Any]:
     return {
         tuple(constraint["constrained_columns"]): constraint
         for constraint in inspect(session.get_bind()).get_foreign_keys(table)
@@ -171,6 +171,23 @@ def test_attempt_claim_and_worker_fields_have_exact_physical_contract(
     for name in ("worker_id", "claim_token", "claimed_at", "last_heartbeat_at"):
         assert columns[name]["nullable"] is True
     assert columns["claim_token"]["type"].python_type is uuid.UUID
+
+
+def test_attempt_active_worker_lease_index_matches_registry_predicate(
+    db_session: Session,
+) -> None:
+    indexes = {
+        index["name"]: index for index in inspect(db_session.get_bind()).get_indexes("run_attempts")
+    }
+    active_index = indexes["ix_run_attempts_active_worker_lease"]
+    assert active_index["column_names"] == ["worker_id", "lease_expires_at"]
+    predicate = re.sub(
+        r"\s+",
+        " ",
+        str(active_index["dialect_options"]["postgresql_where"]),
+    ).lower()
+    assert "worker_id is not null" in predicate
+    assert {"assigned", "running"} == set(re.findall(r"'([^']+)'", predicate))
 
 
 def test_worker_checks_pin_chat_type_status_and_positive_capacity(db_session: Session) -> None:

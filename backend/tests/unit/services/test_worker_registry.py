@@ -18,7 +18,7 @@ from app.services.worker_registry import (
     load_schedulable_workers,
     load_worker_snapshot,
 )
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, event, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
@@ -189,6 +189,67 @@ async def test_active_load_is_derived_only_from_live_assigned_and_running_attemp
     assert snapshot.active_attempts == 2
     matching = [item for item in schedulable if item.id == worker.id]
     assert [(item.id, item.active_attempts) for item in matching] == [(worker.id, 2)]
+
+
+@pytest.mark.asyncio
+async def test_schedulable_query_aggregates_active_attempts_once(
+    worker_registry: WorkerRegistry,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await worker_registry.register(capacity=2, metadata={})
+    statements: list[str] = []
+    sync_engine = cast(Any, async_session_factory.kw["bind"]).sync_engine
+
+    def capture_sql(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if "run_workers" in statement and "run_attempts" in statement:
+            statements.append(" ".join(statement.lower().split()))
+
+    event.listen(sync_engine, "before_cursor_execute", capture_sql)
+    try:
+        await worker_registry.list_schedulable()
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", capture_sql)
+
+    assert len(statements) == 1
+    statement = statements[0]
+    assert statement.count("from run_attempts") == 1
+    assert "group by run_attempts.worker_id" in statement
+    assert "run_attempts.worker_id is not null" in statement
+    capacity_clause = statement.rsplit(" and ", 1)[-1].split(" order by", 1)[0]
+    assert capacity_clause.startswith("coalesce(")
+    assert "active_attempts" in capacity_clause
+    assert "select" not in capacity_clause
+
+
+@pytest.mark.asyncio
+async def test_snapshot_metadata_is_deeply_detached_from_orm_json(
+    worker_registry: WorkerRegistry,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    worker = await worker_registry.register(
+        capacity=1,
+        metadata={"nested": {"labels": ["original"]}},
+    )
+
+    async with async_session_factory() as session:
+        row = await session.get(RunWorker, worker.id)
+        first = await load_worker_snapshot(session, worker.id)
+        second = await load_worker_snapshot(session, worker.id)
+        assert row is not None
+        assert first is not None
+        assert second is not None
+        cast(dict[str, Any], first.metadata)["nested"]["labels"].append("mutated")
+
+    expected = {"nested": {"labels": ["original"]}}
+    assert second.metadata == expected
+    assert row.metadata_payload == expected
 
 
 @pytest.mark.asyncio

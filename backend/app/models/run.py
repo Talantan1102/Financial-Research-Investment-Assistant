@@ -234,6 +234,12 @@ class RunAttempt(Base):
             f"status IN ({_quoted_values(_ATTEMPT_STATUS_VALUES)})",
             name="ck_run_attempts_fixed_status",
         ),
+        Index(
+            "ix_run_attempts_active_worker_lease",
+            "worker_id",
+            "lease_expires_at",
+            postgresql_where=text("worker_id IS NOT NULL AND status IN ('assigned', 'running')"),
+        ),
     )
 
 

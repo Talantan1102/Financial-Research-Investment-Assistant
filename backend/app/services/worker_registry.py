@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, cast
@@ -33,18 +34,31 @@ def _database_utc_now() -> Any:
     return func.timezone("UTC", func.statement_timestamp())
 
 
-def _active_attempt_count(database_now: Any) -> Any:
+def _active_attempt_counts(database_now: Any) -> Any:
     return (
-        select(func.count(RunAttempt.id))
+        select(
+            RunAttempt.worker_id.label("worker_id"),
+            func.count().label("active_attempts"),
+        )
         .where(
-            RunAttempt.worker_id == RunWorker.id,
+            RunAttempt.worker_id.is_not(None),
             RunAttempt.status.in_((AttemptStatus.ASSIGNED.value, AttemptStatus.RUNNING.value)),
             RunAttempt.lease_expires_at.is_not(None),
             RunAttempt.lease_expires_at > database_now,
         )
-        .correlate(RunWorker)
-        .scalar_subquery()
+        .group_by(RunAttempt.worker_id)
+        .subquery()
     )
+
+
+def _worker_snapshot_statement(database_now: Any) -> tuple[Any, Any]:
+    active_attempts = _active_attempt_counts(database_now)
+    active_count = func.coalesce(active_attempts.c.active_attempts, 0)
+    statement = select(
+        RunWorker,
+        active_count.label("active_attempts"),
+    ).outerjoin(active_attempts, active_attempts.c.worker_id == RunWorker.id)
+    return statement, active_count
 
 
 def _snapshot(worker: RunWorker, active_attempts: int) -> WorkerSnapshot:
@@ -55,7 +69,7 @@ def _snapshot(worker: RunWorker, active_attempts: int) -> WorkerSnapshot:
         heartbeat_at=cast(datetime, worker.heartbeat_at),
         worker_type=cast(str, worker.worker_type),
         status=cast(str, worker.status),
-        metadata=dict(worker.metadata_payload),
+        metadata=deepcopy(cast(Mapping[str, Any], worker.metadata_payload)),
         started_at=cast(datetime, worker.started_at),
         last_assigned_at=cast(datetime | None, worker.last_assigned_at),
     )
@@ -65,14 +79,8 @@ async def load_worker_snapshot(session: AsyncSession, worker_id: UUID) -> Worker
     """Read one worker using the caller's transaction without committing it."""
 
     database_now = _database_utc_now()
-    active_attempts = _active_attempt_count(database_now)
-    row = (
-        await session.execute(
-            select(RunWorker, active_attempts.label("active_attempts")).where(
-                RunWorker.id == worker_id
-            )
-        )
-    ).one_or_none()
+    statement, _active_count = _worker_snapshot_statement(database_now)
+    row = (await session.execute(statement.where(RunWorker.id == worker_id))).one_or_none()
     if row is None:
         return None
     return _snapshot(row[0], int(row.active_attempts))
@@ -88,16 +96,14 @@ async def load_schedulable_workers(
     if heartbeat_ttl <= timedelta(0):
         raise ValueError("heartbeat_ttl must be positive")
     database_now = _database_utc_now()
-    active_attempts = _active_attempt_count(database_now)
+    statement, active_count = _worker_snapshot_statement(database_now)
     rows = (
         await session.execute(
-            select(RunWorker, active_attempts.label("active_attempts"))
-            .where(
+            statement.where(
                 RunWorker.status == WorkerStatus.ONLINE.value,
                 RunWorker.heartbeat_at >= database_now - heartbeat_ttl,
-                active_attempts < RunWorker.capacity,
-            )
-            .order_by(RunWorker.id)
+                active_count < RunWorker.capacity,
+            ).order_by(RunWorker.id)
         )
     ).all()
     return tuple(_snapshot(worker, int(active)) for worker, active in rows)

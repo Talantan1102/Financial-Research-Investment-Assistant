@@ -48,6 +48,7 @@ def _downgrade_to_phase1(engine: Engine) -> None:
         if fk["constrained_columns"] == ["worker_id"]
     ]
     with engine.begin() as connection:
+        connection.execute(text("DROP INDEX IF EXISTS ix_run_attempts_active_worker_lease"))
         connection.execute(text("DROP TABLE run_outbox"))
         for fk in worker_fks:
             connection.exec_driver_sql(f'ALTER TABLE run_attempts DROP CONSTRAINT "{fk["name"]}"')
@@ -132,6 +133,12 @@ def test_phase1_schema_upgrades_before_full_create_all_and_is_idempotent(
         constraint["name"] for constraint in inspector.get_unique_constraints("run_attempts")
     }
     assert "uq_run_attempt_worker_identity" in uniques
+    indexes = {index["name"]: index for index in inspector.get_indexes("run_attempts")}
+    active_index = indexes["ix_run_attempts_active_worker_lease"]
+    assert active_index["column_names"] == ["worker_id", "lease_expires_at"]
+    predicate = str(active_index["dialect_options"]["postgresql_where"]).lower()
+    assert "worker_id is not null" in predicate
+    assert "assigned" in predicate and "running" in predicate
     worker_fks = [
         fk
         for fk in inspector.get_foreign_keys("run_attempts")
@@ -228,6 +235,9 @@ def test_two_engines_concurrently_upgrade_the_same_phase1_schema(
     assert {"claim_token", "claimed_at", "last_heartbeat_at"} <= set(columns)
     assert "uq_run_attempt_worker_identity" in {
         constraint["name"] for constraint in inspector.get_unique_constraints("run_attempts")
+    }
+    assert "ix_run_attempts_active_worker_lease" in {
+        index["name"] for index in inspector.get_indexes("run_attempts")
     }
     assert any(
         fk["constrained_columns"] == ["worker_id"] and fk["referred_table"] == "run_workers"
