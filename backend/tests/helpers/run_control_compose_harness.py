@@ -30,6 +30,7 @@ class ComposeAcceptanceResult:
     cancel_run: UUID
     capacity_runs: tuple[UUID, UUID]
     postgres_restart_run: UUID
+    full_capacity_run: UUID
 
 
 def _free_port() -> int:
@@ -100,6 +101,7 @@ class ComposeRunControlHarness:
             capacity = self._single_worker_capacity_two()
             self._double_kill_retry_exhaustion()
             postgres_restart = self._restart_postgres_and_recover()
+            full_capacity = self._full_capacity_stays_healthy()
             return ComposeAcceptanceResult(
                 project=self.project,
                 parallel_runs=parallel,
@@ -109,6 +111,7 @@ class ComposeRunControlHarness:
                 cancel_run=cancel,
                 capacity_runs=capacity,
                 postgres_restart_run=postgres_restart,
+                full_capacity_run=full_capacity,
             )
         finally:
             self._compose("down", "-v", "--remove-orphans", check=False)
@@ -158,6 +161,8 @@ class ComposeRunControlHarness:
         try:
             redis.xadd(key, {"data": envelope})
             self._wait(lambda: redis.xlen(key) == 0, timeout=5, message="duplicate not drained")
+            pending = redis.xpending(key, "run-worker-assignments-v1")
+            assert pending["pending"] == 0
         finally:
             redis.close()
         with self._connect() as connection, connection.cursor() as cursor:
@@ -221,6 +226,17 @@ class ComposeRunControlHarness:
             "run-worker-b",
         )
         dispatcher = f"{self.project}-run-dispatcher-1"
+        redis_dependent_services = (
+            "run-scheduler-a",
+            "run-scheduler-b",
+            "run-dispatcher",
+            "run-worker-a",
+            "run-worker-b",
+        )
+        before = {
+            service: json.loads(self._docker("inspect", f"{self.project}-{service}-1"))[0]
+            for service in redis_dependent_services
+        }
         self._docker("stop", dispatcher)
         run_id = self._create_run(*self._context(), key="redis-restart")
         self._wait_status(run_id, "assigned", timeout=10)
@@ -231,8 +247,43 @@ class ComposeRunControlHarness:
                 (run_id,),
             )
             assert cursor.fetchone() == (0, None, None)
-        self._docker("restart", self.redis_container)
+        self._docker("stop", self.redis_container)
+
+        def redis_outage_visible() -> bool:
+            states = [
+                json.loads(self._docker("inspect", f"{self.project}-{service}-1"))[0]["State"]
+                for service in redis_dependent_services
+                if service != "run-dispatcher"
+            ]
+            return all(state["Running"] for state in states) and any(
+                state["Health"]["Status"] != "healthy" for state in states
+            )
+
+        self._wait(
+            redis_outage_visible,
+            timeout=12,
+            message="Redis outage did not invalidate process health",
+        )
+        self._docker("start", self.redis_container)
         self._docker("start", dispatcher)
+
+        def redis_dependents_recovered() -> bool:
+            current = {
+                service: json.loads(self._docker("inspect", f"{self.project}-{service}-1"))[0]
+                for service in redis_dependent_services
+            }
+            return all(
+                value["State"]["Running"]
+                and value["State"]["Health"]["Status"] == "healthy"
+                and value["Id"] == before[service]["Id"]
+                for service, value in current.items()
+            )
+
+        self._wait(
+            redis_dependents_recovered,
+            timeout=20,
+            message="processes did not self-heal after Redis restart",
+        )
         self._wait_status(run_id, "completed", timeout=15)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -425,7 +476,7 @@ class ComposeRunControlHarness:
                 state["Health"]["Status"] != "healthy" for state in states
             )
 
-        self._wait(observed_unhealthy, timeout=8, message="PG outage did not invalidate health")
+        self._wait(observed_unhealthy, timeout=12, message="PG outage did not invalidate health")
         self._docker("start", self.postgres_container)
 
         def all_healthy() -> bool:
@@ -444,6 +495,24 @@ class ComposeRunControlHarness:
         self._wait(all_healthy, timeout=20, message="processes did not self-heal after PG restart")
         run_id = self._create_run(*self._context(), key="postgres-restart")
         self._wait_status(run_id, "completed", timeout=15)
+        return run_id
+
+    def _full_capacity_stays_healthy(self) -> UUID:
+        self.environment["RUN_WORKER_CAPACITY"] = "1"
+        self.environment["RUN_SIMULATED_DELAY_SECONDS"] = "5"
+        self._docker("stop", f"{self.project}-run-worker-b-1")
+        self._compose("up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a")
+        run_id = self._create_run(*self._context(), key="full-capacity-health")
+        self._wait_status(run_id, "running", timeout=10)
+        time.sleep(3.5)
+        state = json.loads(self._docker("inspect", f"{self.project}-run-worker-a-1"))[0]["State"]
+        assert state["Running"] is True
+        assert state["Health"]["Status"] == "healthy"
+        self._wait_status(run_id, "completed", timeout=5)
+        self.environment["RUN_SIMULATED_DELAY_SECONDS"] = "0.5"
+        self._compose(
+            "up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b"
+        )
         return run_id
 
     def _run_session(self, run_id: UUID) -> UUID:

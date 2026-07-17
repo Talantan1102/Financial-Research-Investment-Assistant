@@ -58,6 +58,8 @@ class ProcessHealth:
             else os.getenv("RUN_HEALTH_FILE", "/tmp/run-control-health.json")
         )
         self.path = Path(selected)
+        self._dependencies: dict[str, float] = {}
+        self._dependency_max_age = float(os.getenv("RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS", "2"))
 
     def healthy(self) -> None:
         self.path.write_text(
@@ -66,6 +68,21 @@ class ProcessHealth:
 
     def unhealthy(self) -> None:
         self.path.unlink(missing_ok=True)
+
+    def dependency_succeeded(self, name: str) -> None:
+        now = time.monotonic()
+        self._dependencies[name] = now
+        required = {"postgres", "redis"}
+        if required <= self._dependencies.keys() and all(
+            now - self._dependencies[item] <= self._dependency_max_age for item in required
+        ):
+            self.healthy()
+        else:
+            self.unhealthy()
+
+    def dependency_failed(self, name: str) -> None:
+        self._dependencies.pop(name, None)
+        self.unhealthy()
 
 
 def assert_fresh_health(path: str | Path, max_age_seconds: float) -> None:

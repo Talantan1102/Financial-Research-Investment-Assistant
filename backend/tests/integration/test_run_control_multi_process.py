@@ -224,6 +224,28 @@ class ReconnectRedis(FakeRedis):
         raise ResponseError("NOGROUP after reconnect")
 
 
+class ShutdownAfterReadRedis(FakeRedis):
+    def __init__(self, item: OutboxItem) -> None:
+        super().__init__()
+        self.item = item
+        self.worker: RunWorker | None = None
+
+    async def xreadgroup(self, *args: Any, **kwargs: Any) -> list[Any]:
+        assert self.worker is not None
+        self.worker.request_shutdown()
+        return [(b"assignments", [(b"3-0", {b"data": serialize_envelope(self.item)})])]
+
+
+class GraceExecutor:
+    def __init__(self) -> None:
+        self.started = __import__("asyncio").Event()
+        self.release = __import__("asyncio").Event()
+
+    async def execute(self, assignment: ClaimedAssignment) -> None:
+        self.started.set()
+        await self.release.wait()
+
+
 class RecoveringCancelTransport(FakeTransport):
     def __init__(self, item: OutboxItem) -> None:
         super().__init__()
@@ -338,6 +360,72 @@ async def test_worker_recovers_pending_cancel_after_nested_response_error() -> N
     assert executor.cancelled is True
     assert attempts.cancelled == [attempt_id]
     assert transport.acked == ["2-0"]
+
+
+async def test_worker_does_not_claim_xread_result_after_shutdown() -> None:
+    registry = FakeWorkerRegistry()
+    attempts = FakeAttemptService()
+    item = OutboxItem(
+        id=uuid4(),
+        event_type=OutboxType.ATTEMPT_ASSIGNED,
+        tenant_id=uuid4(),
+        run_id=uuid4(),
+        attempt_id=uuid4(),
+        worker_id=registry.worker_id,
+        payload={},
+        delivery_attempts=1,
+    )
+    redis = ShutdownAfterReadRedis(item)
+    transport = FakeTransport()
+    worker = RunWorker(registry, attempts, redis, transport, FakeExecutor(), poll_interval=0.01)
+    redis.worker = worker
+
+    await worker.run_forever()
+
+    assert attempts.claim_calls == 0
+    assert transport.acked == []
+    assert registry.drained and registry.offline
+    print("claims_after_shutdown=0")
+
+
+async def test_worker_sigterm_drains_before_waiting_for_inflight_then_offlines() -> None:
+    registry = FakeWorkerRegistry()
+    attempts = FakeAttemptService()
+    transport = FakeTransport()
+    executor = GraceExecutor()
+    worker = RunWorker(
+        registry,
+        attempts,
+        FakeRedis(),
+        transport,
+        executor,
+        poll_interval=0.01,
+        shutdown_grace_seconds=1,
+    )
+    await worker.start()
+    item = SimpleNamespace(
+        event_type=OutboxType.ATTEMPT_ASSIGNED,
+        attempt_id=uuid4(),
+        worker_id=registry.worker_id,
+    )
+    inflight = __import__("asyncio").create_task(worker.handle_assignment("4-0", item))
+    await executor.started.wait()
+    worker._inflight.add(inflight)
+
+    worker.request_shutdown()  # same state transition used by the SIGTERM handler
+    stopping = __import__("asyncio").create_task(worker.stop())
+    for _ in range(100):
+        if registry.drained:
+            break
+        await __import__("asyncio").sleep(0.001)
+    assert registry.drained is True
+    assert registry.offline is False
+    assert transport.deleted == []
+    executor.release.set()
+    await stopping
+
+    assert registry.offline is True
+    assert transport.acked == ["4-0"]
 
 
 @pytest.mark.skipif(
@@ -459,3 +547,4 @@ def test_compose_l25_self_bootstraps_all_failure_scenarios() -> None:
     assert result.cancel_run not in result.parallel_runs
     assert len(set(result.capacity_runs)) == 2
     assert result.postgres_restart_run not in result.parallel_runs
+    assert result.full_capacity_run not in result.parallel_runs

@@ -85,7 +85,9 @@ class RunDispatcher:
             try:
                 if self._health_probe is not None:
                     await self._health_probe()
+                    self._health.dependency_succeeded("redis")
                 await self.dispatch_once()
+                self._health.dependency_succeeded("postgres")
             except Exception as exc:
                 if not is_transient_error(exc):
                     raise
@@ -93,7 +95,6 @@ class RunDispatcher:
                 await self._backoff.wait(self._shutdown)
                 continue
             self._backoff.reset()
-            self._health.healthy()
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._shutdown.wait(), timeout=self._poll_interval)
 

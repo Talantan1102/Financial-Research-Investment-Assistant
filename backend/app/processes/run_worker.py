@@ -90,9 +90,11 @@ class RunWorker:
             {"pid": os.getpid(), "hostname": socket.gethostname()},
         )
         self._worker_id = snapshot.id
+        self._health.dependency_succeeded("postgres")
         self._stream_key = f"run:worker:{snapshot.id}:assignments"
         await self._ensure_group()
         await self._recover_pending()
+        self._health.dependency_succeeded("redis")
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         return snapshot.id
 
@@ -100,9 +102,17 @@ class RunWorker:
         await self.start()
         assert self._stream_key is not None
         while not self._shutdown.is_set():
-            self._raise_heartbeat_error()
+            await self._monitor_heartbeat()
             available = self._capacity - len(self._inflight)
             if available <= 0:
+                try:
+                    await self._redis.ping()
+                except (RedisConnectionError, RedisTimeoutError, ResponseError, OSError):
+                    self._health.dependency_failed("redis")
+                    await self._backoff.wait(self._shutdown)
+                    await self._reconnect_assignment_stream()
+                    continue
+                self._health.dependency_succeeded("redis")
                 await self._wait_for_inflight()
                 continue
             try:
@@ -114,21 +124,25 @@ class RunWorker:
                     block=max(1, int(self._poll_interval * 1000)),
                 )
             except (RedisConnectionError, RedisTimeoutError, OSError):
-                self._health.unhealthy()
+                self._health.dependency_failed("redis")
                 await self._backoff.wait(self._shutdown)
                 await self._reconnect_assignment_stream()
                 continue
             except ResponseError as exc:
                 if not is_transient_error(exc) and "NOGROUP" not in str(exc):
                     raise
-                self._health.unhealthy()
+                self._health.dependency_failed("redis")
                 await self._backoff.wait(self._shutdown)
                 await self._reconnect_assignment_stream()
                 continue
             self._backoff.reset()
-            self._health.healthy()
+            self._health.dependency_succeeded("redis")
+            if self._shutdown.is_set() or self._draining:
+                break
             for _key, entries in response:
                 for raw_id, fields in entries:
+                    if self._shutdown.is_set() or self._draining:
+                        break
                     entry_id = self._text(raw_id)
                     try:
                         item = parse_stream_envelope(fields)
@@ -143,12 +157,16 @@ class RunWorker:
 
     async def handle_assignment(self, entry_id: str, item: OutboxItem) -> None:
         assert self._worker_id is not None and self._stream_key is not None
+        if self._shutdown.is_set() or self._draining:
+            return
         if (
             item.event_type is not OutboxType.ATTEMPT_ASSIGNED
             or item.attempt_id is None
             or item.worker_id != self._worker_id
         ):
             await self._transport.acknowledge_and_delete(self._stream_key, self.GROUP, entry_id)
+            return
+        if self._shutdown.is_set() or self._draining:
             return
         claim = await self._attempts.claim(item.attempt_id, self._worker_id)
         if claim.claimed and claim.assignment is not None:
@@ -184,15 +202,22 @@ class RunWorker:
         assert self._worker_id is not None
         while not self._shutdown.is_set():
             await self._registry.heartbeat(self._worker_id)
+            self._health.dependency_succeeded("postgres")
             with suppress(TimeoutError):
                 await asyncio.wait_for(self._shutdown.wait(), timeout=self._heartbeat_interval)
 
-    def _raise_heartbeat_error(self) -> None:
+    async def _monitor_heartbeat(self) -> None:
         if self._heartbeat_task is None or not self._heartbeat_task.done():
             return
         exc = self._heartbeat_task.exception()
-        if exc is not None:
+        if exc is None:
+            return
+        if not is_transient_error(exc):
             raise exc
+        self._health.dependency_failed("postgres")
+        await self._backoff.wait(self._shutdown)
+        if not self._shutdown.is_set():
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def _wait_for_inflight(self) -> None:
         if not self._inflight:
@@ -209,11 +234,13 @@ class RunWorker:
         try:
             await self._ensure_group()
             await self._recover_pending()
+            self._health.dependency_succeeded("redis")
             if self._heartbeat_task is not None and self._heartbeat_task.done():
                 with suppress(Exception):
                     self._heartbeat_task.exception()
                 self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         except (RedisConnectionError, RedisTimeoutError, ResponseError, OSError):
+            self._health.dependency_failed("redis")
             return
 
     async def _execute_with_cancel_control(self, assignment: ClaimedAssignment) -> None:

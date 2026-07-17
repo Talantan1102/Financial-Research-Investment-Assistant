@@ -64,7 +64,12 @@ class RunScheduler:
         while not self._shutdown.is_set():
             try:
                 await self.run_cycle()
+                self._health.dependency_succeeded("postgres")
                 await self._wait_for_wake_or_poll()
+                if self._redis is not None:
+                    self._health.dependency_succeeded("redis")
+                else:
+                    self._health.healthy()
             except Exception as exc:
                 if not is_transient_error(exc):
                     raise
@@ -72,7 +77,6 @@ class RunScheduler:
                 await self._backoff.wait(self._shutdown)
                 continue
             self._backoff.reset()
-            self._health.healthy()
 
     async def _wait_for_wake_or_poll(self) -> None:
         if self._redis is None:

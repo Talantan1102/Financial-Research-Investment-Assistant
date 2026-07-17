@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -66,3 +68,33 @@ def test_healthcheck_rejects_stale_marker(tmp_path: Path) -> None:
     os.utime(path, (old, old))
     with pytest.raises(SystemExit):
         assert_fresh_health(path, 1)
+
+
+def test_pure_stdlib_health_probe_cold_start_is_below_one_second(tmp_path: Path) -> None:
+    path = tmp_path / "health.json"
+    ProcessHealth(path).healthy()
+    script = Path(__file__).parents[3] / "app" / "processes" / "health_probe.py"
+    started = time.perf_counter()
+    completed = subprocess.run(
+        [sys.executable, "-S", str(script)],
+        env={**os.environ, "RUN_HEALTH_FILE": str(path)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    elapsed = time.perf_counter() - started
+    assert completed.returncode == 0
+    assert elapsed < 1.0
+
+
+def test_health_marker_requires_fresh_postgres_and_redis(tmp_path: Path) -> None:
+    path = tmp_path / "dependencies.json"
+    health = ProcessHealth(path)
+    health.dependency_succeeded("postgres")
+    assert not path.exists()
+    health.dependency_succeeded("redis")
+    assert path.exists()
+    health.dependency_failed("redis")
+    assert not path.exists()
+    health.dependency_succeeded("redis")
+    assert path.exists()
