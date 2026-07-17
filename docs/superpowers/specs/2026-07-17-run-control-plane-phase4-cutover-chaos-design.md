@@ -38,11 +38,13 @@ Docker Compose/本机多进程拓扑包含 FastAPI、PostgreSQL、Redis、两个
 
 提供可重复、带 dry-run 的迁移命令，将需要保留的旧 ChatSession/ChatMessage 映射为 RunSession/RunMessage，并输出源/目标数量、失败记录和归属校验。切换前保留数据库备份。迁移通过后停止旧写入，再归档或清理旧数据。
 
+迁移同时重定向所有真实外键和服务依赖：ChatAttachment 的 session/message、ChatSessionContext、LongTermMemory.session、ResearchReport.source session、title generation、memory extraction/rebuild 和 escalation source session。旧字段名可在 wire schema 中暂时兼容，但数据库外键和内部 repository 必须只指向 RunSession/RunMessage。
+
 物理表清理由显式迁移/清理命令执行，不依靠 `create_all()` 自动删除。命令必须拒绝在未指定确认参数时执行破坏性步骤。
 
 ## 9. 代码退役
 
-删除 singular `/api/v0/chat` enqueue/stream/cancel/steer/retry、ChatTask ORM/repository、旧 Celery chat wrapper、旧 Chat Event/Cancel/Steer Bus、前端 task/steer/retry 状态和测试。旧 `/api/v0/chats` session router 由新的 v1 Session 资源面替代。
+删除 singular `/api/v0/chat` enqueue/stream/cancel/steer/retry、ChatTask ORM/repository、旧 Celery chat wrapper、旧 Chat Event/Cancel/Steer Bus、前端 task/steer/retry 状态和测试。旧 `/api/v0/chats` session router 由新的 v1 Session 资源面替代。原 `/api/v0/chat/escalate` 迁到独立 research escalation 资源路径，以 `source_run_id/source_session_id` 关联，不成为第七个 Run 控制入口。
 
 保留裸 Chat Loop、工具、MCP、Skill、Memory、通用 Redis、Trace、模型客户端及其他业务的 Celery。
 
