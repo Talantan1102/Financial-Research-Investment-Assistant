@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, case, func, literal, select
+from sqlalchemy import DateTime, case, func, literal, select, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
@@ -19,9 +19,11 @@ from app.run_control.mutations import RunMutationStore
 from app.run_control.scheduling_policy import (
     EligibilityCandidate,
     EligibilityReason,
+    RecoveryDecision,
     WorkerCandidate,
     eligibility_reason,
     rank_workers,
+    retry_decision,
 )
 from app.run_control.types import AttemptStatus, OutboxType, RunStatus, WorkerStatus
 from app.services.worker_registry import load_schedulable_workers
@@ -44,6 +46,13 @@ class Assignment:
     attempt_id: UUID
     worker_id: UUID
     lease_expires_at: datetime
+
+
+@dataclass(frozen=True)
+class RecoveryResult:
+    run_id: UUID
+    attempt_id: UUID
+    decision: RecoveryDecision
 
 
 def _database_utc_now() -> Any:
@@ -85,6 +94,184 @@ class SchedulingService:
             except BaseException:
                 await session.rollback()
                 raise
+
+    async def recover_expired_attempts(self, limit: int) -> tuple[RecoveryResult, ...]:
+        """Recover one SKIP LOCKED batch of expired active Attempts atomically."""
+
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        async with self._session_factory() as session, session.begin():
+            await self._before_recovery_select()
+            attempts = tuple(
+                (
+                    await session.scalars(
+                        select(RunAttempt)
+                        .where(
+                            RunAttempt.status.in_(
+                                (AttemptStatus.ASSIGNED.value, AttemptStatus.RUNNING.value)
+                            ),
+                            RunAttempt.lease_expires_at.is_not(None),
+                            RunAttempt.lease_expires_at <= _database_utc_now(),
+                        )
+                        .order_by(RunAttempt.lease_expires_at, RunAttempt.id)
+                        .limit(limit)
+                        .with_for_update(skip_locked=True)
+                    )
+                ).all()
+            )
+            recovered: list[RecoveryResult] = []
+            for attempt in attempts:
+                run = await session.scalar(
+                    select(Run).where(Run.id == attempt.run_id).with_for_update()
+                )
+                if run is None or cast(str, run.status) not in {
+                    RunStatus.ASSIGNED.value,
+                    RunStatus.RUNNING.value,
+                    RunStatus.CANCEL_REQUESTED.value,
+                }:
+                    continue
+                now = cast(datetime, await session.scalar(select(_database_utc_now())))
+                if (
+                    cast(str, attempt.status)
+                    not in {AttemptStatus.ASSIGNED.value, AttemptStatus.RUNNING.value}
+                    or attempt.lease_expires_at is None
+                    or cast(datetime, attempt.lease_expires_at) > now
+                ):
+                    continue
+                decision = retry_decision(
+                    cancel_requested=cast(str, run.status) == RunStatus.CANCEL_REQUESTED.value,
+                    retry_count=cast(int, run.retry_count),
+                )
+                await self._apply_recovery(session, run, attempt, decision, now)
+                recovered.append(
+                    RecoveryResult(
+                        run_id=cast(UUID, run.id),
+                        attempt_id=cast(UUID, attempt.id),
+                        decision=decision,
+                    )
+                )
+            return tuple(recovered)
+
+    async def _before_recovery_select(self) -> None:
+        """Deterministic concurrency seam; production performs no work here."""
+
+    async def _apply_recovery(
+        self,
+        session: AsyncSession,
+        run: Run,
+        attempt: RunAttempt,
+        decision: RecoveryDecision,
+        now: datetime,
+    ) -> None:
+        store = RunMutationStore(session)
+        cast(Any, attempt).finished_at = now
+        cast(Any, attempt).claim_token = None
+        if decision == RecoveryDecision.CANCEL:
+            cast(Any, attempt).status = AttemptStatus.CANCELLED.value
+            await store.transition(
+                run,
+                RunStatus.CANCELLED,
+                "run.cancelled",
+                {"reason": "lease_expired"},
+                attempt_id=cast(UUID, attempt.id),
+            )
+            cast(Any, run).finished_at = now
+            await self._ack_recovery_outbox(
+                session,
+                attempt_id=cast(UUID, attempt.id),
+                event_types=(
+                    OutboxType.ATTEMPT_ASSIGNED.value,
+                    OutboxType.ATTEMPT_CANCEL.value,
+                ),
+                now=now,
+            )
+            return
+
+        cast(Any, attempt).status = AttemptStatus.LOST.value
+        cast(Any, attempt).error_code = "worker_lease_expired"
+        cast(Any, attempt).error_message = "worker lease expired"
+        if decision == RecoveryDecision.RETRY:
+            cast(Any, run).retry_count = cast(int, run.retry_count) + 1
+            cast(Any, run).queue_reason = "retry"
+            cast(Any, run).error_code = None
+            cast(Any, run).error_message = None
+            await store.transition(
+                run,
+                RunStatus.QUEUED,
+                "run.requeued",
+                {
+                    "reason": "worker_lease_expired",
+                    "retry_count": cast(int, run.retry_count),
+                },
+                attempt_id=cast(UUID, attempt.id),
+            )
+            cast(Any, run).queued_at = now
+            session.add(
+                RunOutbox(
+                    event_type=OutboxType.SCHEDULE_WAKE.value,
+                    tenant_id=run.tenant_id,
+                    run_id=run.id,
+                    payload={
+                        "run_id": str(run.id),
+                        "reason": "worker_lease_expired",
+                    },
+                    dedupe_key=f"schedule.wake:{run.id}:recovery:{attempt.id}",
+                    available_at=now,
+                    created_at=now,
+                )
+            )
+        else:
+            cast(Any, run).error_code = "worker_lease_expired"
+            cast(Any, run).error_message = "worker lease expired after retry exhaustion"
+            failure_payload = {
+                "error_code": "worker_lease_expired",
+                "error_message": "worker lease expired after retry exhaustion",
+            }
+            if cast(str, run.status) == RunStatus.ASSIGNED.value:
+                cast(Any, run).status = RunStatus.FAILED.value
+                await store.append_event(
+                    run,
+                    "run.failed",
+                    {
+                        **failure_payload,
+                        "from_status": RunStatus.ASSIGNED.value,
+                        "status": RunStatus.FAILED.value,
+                    },
+                    attempt_id=cast(UUID, attempt.id),
+                )
+            else:
+                await store.transition(
+                    run,
+                    RunStatus.FAILED,
+                    "run.failed",
+                    failure_payload,
+                    attempt_id=cast(UUID, attempt.id),
+                )
+            cast(Any, run).finished_at = now
+        await self._ack_recovery_outbox(
+            session,
+            attempt_id=cast(UUID, attempt.id),
+            event_types=(OutboxType.ATTEMPT_ASSIGNED.value,),
+            now=now,
+        )
+
+    @staticmethod
+    async def _ack_recovery_outbox(
+        session: AsyncSession,
+        *,
+        attempt_id: UUID,
+        event_types: tuple[str, ...],
+        now: datetime,
+    ) -> None:
+        await session.execute(
+            update(RunOutbox)
+            .where(
+                RunOutbox.attempt_id == attempt_id,
+                RunOutbox.event_type.in_(event_types),
+                RunOutbox.acknowledged_at.is_(None),
+            )
+            .values(acknowledged_at=now)
+        )
 
     async def _schedule_in_transaction(self, session: AsyncSession) -> Assignment | None:
         await self._ensure_tenant_cursors(session)
