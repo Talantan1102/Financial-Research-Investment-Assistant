@@ -5,6 +5,7 @@ import uuid
 from typing import cast
 
 import pytest
+from app.run_control import redis_transport as redis_transport_module
 from app.run_control.redis_transport import RedisTransport, serialize_envelope, stream_key
 from app.run_control.types import OutboxType
 from app.services.run_outbox import OutboxItem
@@ -75,6 +76,24 @@ async def test_stream_retention_is_bounded_and_preserves_consumer_group() -> Non
     groups = await redis.xinfo_groups(key)
     group_name = groups[0].get(b"name", groups[0].get("name"))
     assert group_name in {b"worker-group", "worker-group"}
+
+
+async def test_publish_sets_stream_ttl_in_same_transport_operation() -> None:
+    redis = FakeRedis(decode_responses=False)
+    item = _item(OutboxType.ATTEMPT_ASSIGNED)
+    transport = RedisTransport(redis, stream_ttl_seconds=10)
+
+    await transport.publish(item)
+
+    ttl_ms = await redis.pttl(stream_key(item))
+    assert 0 < ttl_ms <= 10_000
+
+
+def test_parser_rejects_missing_data_and_invalid_envelope_without_keyerror() -> None:
+    with pytest.raises(ValueError, match="envelope"):
+        redis_transport_module.parse_stream_envelope({b"other": b"value"})
+    with pytest.raises(ValueError, match="envelope"):
+        redis_transport_module.parse_stream_envelope({b"data": b"{}"})
 
 
 def test_serializer_is_deterministic_and_rejects_invalid_provenance() -> None:
