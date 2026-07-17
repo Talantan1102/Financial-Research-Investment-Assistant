@@ -13,7 +13,11 @@ from app.models.run import Run, RunAttempt, RunMessage, RunSession
 from app.models.run_scheduling import RunWorker
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.services.worker_registry import WorkerRegistry, load_schedulable_workers
+from app.services.worker_registry import (
+    WorkerRegistry,
+    load_schedulable_workers,
+    load_worker_snapshot,
+)
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -185,6 +189,52 @@ async def test_active_load_is_derived_only_from_live_assigned_and_running_attemp
     assert snapshot.active_attempts == 2
     matching = [item for item in schedulable if item.id == worker.id]
     assert [(item.id, item.active_attempts) for item in matching] == [(worker.id, 2)]
+
+
+@pytest.mark.asyncio
+async def test_liveness_and_leases_advance_within_one_long_transaction(
+    worker_registry: WorkerRegistry,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    stale_worker = await worker_registry.register(capacity=1, metadata={"name": "stale"})
+    lease_worker = await worker_registry.register(capacity=2, metadata={"name": "lease"})
+    await _add_attempts(
+        async_session_factory,
+        worker_id=lease_worker.id,
+        attempts=(("assigned", timedelta(minutes=1)),),
+    )
+
+    async with async_session_factory() as session, session.begin():
+        transaction_utc = func.timezone("UTC", func.current_timestamp())
+        await session.execute(
+            update(RunWorker)
+            .where(RunWorker.id == stale_worker.id)
+            .values(heartbeat_at=transaction_utc)
+        )
+        attempt_id = await session.scalar(
+            select(RunAttempt.id).where(RunAttempt.worker_id == lease_worker.id)
+        )
+        assert attempt_id is not None
+        await session.execute(
+            update(RunAttempt)
+            .where(RunAttempt.id == attempt_id)
+            .values(lease_expires_at=transaction_utc + timedelta(milliseconds=50))
+        )
+        await asyncio.sleep(0.2)
+
+        schedulable_ids = {
+            item.id
+            for item in await load_schedulable_workers(
+                session, heartbeat_ttl=timedelta(milliseconds=50)
+            )
+        }
+        lease_snapshot = await load_worker_snapshot(session, lease_worker.id)
+
+    assert lease_snapshot is not None
+    assert (
+        stale_worker.id not in schedulable_ids,
+        lease_snapshot.active_attempts,
+    ) == (True, 0)
 
 
 @pytest.mark.asyncio

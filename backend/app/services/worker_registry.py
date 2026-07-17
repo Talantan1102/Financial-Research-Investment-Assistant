@@ -30,7 +30,7 @@ class WorkerSnapshot:
 
 
 def _database_utc_now() -> Any:
-    return func.timezone("UTC", func.current_timestamp())
+    return func.timezone("UTC", func.statement_timestamp())
 
 
 def _active_attempt_count(database_now: Any) -> Any:
