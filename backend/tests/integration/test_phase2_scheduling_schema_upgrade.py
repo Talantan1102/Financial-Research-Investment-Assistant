@@ -49,6 +49,7 @@ def _downgrade_to_phase1(engine: Engine) -> None:
     ]
     with engine.begin() as connection:
         connection.execute(text("DROP INDEX IF EXISTS ix_run_attempts_active_worker_lease"))
+        connection.execute(text("DROP INDEX IF EXISTS ix_run_attempts_active_lease_expiry"))
         connection.execute(text("DROP TABLE run_outbox"))
         for fk in worker_fks:
             connection.exec_driver_sql(f'ALTER TABLE run_attempts DROP CONSTRAINT "{fk["name"]}"')
@@ -139,6 +140,11 @@ def test_phase1_schema_upgrades_before_full_create_all_and_is_idempotent(
     predicate = str(active_index["dialect_options"]["postgresql_where"]).lower()
     assert "worker_id is not null" in predicate
     assert "assigned" in predicate and "running" in predicate
+    expiry_index = indexes["ix_run_attempts_active_lease_expiry"]
+    assert expiry_index["column_names"] == ["lease_expires_at", "id"]
+    expiry_predicate = str(expiry_index["dialect_options"]["postgresql_where"]).lower()
+    assert "lease_expires_at is not null" in expiry_predicate
+    assert "assigned" in expiry_predicate and "running" in expiry_predicate
     worker_fks = [
         fk
         for fk in inspector.get_foreign_keys("run_attempts")
@@ -237,6 +243,9 @@ def test_two_engines_concurrently_upgrade_the_same_phase1_schema(
         constraint["name"] for constraint in inspector.get_unique_constraints("run_attempts")
     }
     assert "ix_run_attempts_active_worker_lease" in {
+        index["name"] for index in inspector.get_indexes("run_attempts")
+    }
+    assert "ix_run_attempts_active_lease_expiry" in {
         index["name"] for index in inspector.get_indexes("run_attempts")
     }
     assert any(

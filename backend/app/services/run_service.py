@@ -51,6 +51,10 @@ class CreatedRun:
     replayed: bool = False
 
 
+class _RetryCancelError(Exception):
+    """Restart cancellation before taking any lock in the canonical order."""
+
+
 class RunService:
     """Own all transaction boundaries for Run commands and queries."""
 
@@ -213,52 +217,123 @@ class RunService:
             return run
 
     async def cancel_run(self, tenant_id: UUID, run_id: UUID, actor_id: UUID) -> Run:
-        async with self._session_factory() as session, session.begin():
-            mutation_store = RunMutationStore(session)
-            run = await self._lock_visible_run(session, mutation_store, tenant_id, run_id, actor_id)
-            current_status = RunStatus(cast(str, run.status))
-            if (
-                current_status in TERMINAL_RUN_STATUSES
-                or current_status == RunStatus.CANCEL_REQUESTED
-            ):
-                return run
-
-            if current_status in {
-                RunStatus.QUEUED,
-                RunStatus.WAITING_APPROVAL,
-                RunStatus.WAITING_INPUT,
-            }:
-                target_status = RunStatus.CANCELLED
-                event_type = "run.cancelled"
-            else:
-                target_status = RunStatus.CANCEL_REQUESTED
-                event_type = "run.cancel_requested"
-
-            await mutation_store.transition(
-                run,
-                target_status,
-                event_type,
-                {},
-            )
-            if current_status in {RunStatus.ASSIGNED, RunStatus.RUNNING}:
-                attempt = await session.scalar(
-                    select(RunAttempt)
-                    .where(
-                        RunAttempt.run_id == run.id,
-                        RunAttempt.status.in_(("assigned", "running")),
+        for _attempt in range(3):
+            try:
+                async with self._session_factory() as session, session.begin():
+                    return await self._cancel_in_transaction(
+                        session,
+                        tenant_id=tenant_id,
+                        run_id=run_id,
+                        actor_id=actor_id,
                     )
-                    .order_by(RunAttempt.attempt_no.desc())
-                    .limit(1)
+            except _RetryCancelError:
+                continue
+        raise RuntimeError("cancel could not stabilize active attempt after 3 retries")
+
+    async def _cancel_in_transaction(
+        self,
+        session: AsyncSession,
+        *,
+        tenant_id: UUID,
+        run_id: UUID,
+        actor_id: UUID,
+    ) -> Run:
+        membership = await self._require_membership(session, tenant_id, actor_id)
+        visible_run_conditions = [Run.id == run_id, Run.tenant_id == tenant_id]
+        member_owner_id = actor_id if membership.role == TenantRole.MEMBER.value else None
+        if member_owner_id is not None:
+            visible_run_conditions.append(Run.created_by_user_id == member_owner_id)
+
+        discovered_attempt_id = await session.scalar(
+            select(RunAttempt.id)
+            .join(Run, Run.id == RunAttempt.run_id)
+            .where(
+                *visible_run_conditions,
+                RunAttempt.status.in_(("assigned", "running")),
+            )
+            .order_by(RunAttempt.attempt_no.desc())
+            .limit(1)
+        )
+        await self._after_cancel_attempt_discovery(discovered_attempt_id)
+        attempt: RunAttempt | None = None
+        if discovered_attempt_id is not None:
+            await self._before_cancel_attempt_lock()
+            attempt = await session.scalar(
+                select(RunAttempt)
+                .where(
+                    RunAttempt.id == discovered_attempt_id,
+                    RunAttempt.run_id == run_id,
                 )
-                self._add_outbox(
-                    session,
-                    event_type=OutboxType.ATTEMPT_CANCEL,
-                    run=run,
-                    attempt=attempt,
-                    payload={"run_id": str(run.id)},
-                    dedupe_key=f"attempt.cancel:{run.id}",
-                )
+                .with_for_update()
+            )
+            if attempt is None:
+                raise _RetryCancelError
+
+        mutation_store = RunMutationStore(session)
+        run = await mutation_store.lock_run(
+            tenant_id,
+            run_id,
+            created_by_user_id=member_owner_id,
+        )
+        if discovered_attempt_id is None:
+            # A Scheduler may have committed an Attempt while this command waited
+            # for the Run. Never acquire that Attempt while holding the Run lock.
+            active_attempt_id = await self._active_attempt_id(session, run_id)
+            if active_attempt_id is not None:
+                raise _RetryCancelError
+
+        current_status = RunStatus(cast(str, run.status))
+        if current_status in TERMINAL_RUN_STATUSES or current_status == RunStatus.CANCEL_REQUESTED:
             return run
+
+        if current_status in {
+            RunStatus.QUEUED,
+            RunStatus.WAITING_APPROVAL,
+            RunStatus.WAITING_INPUT,
+        }:
+            target_status = RunStatus.CANCELLED
+            event_type = "run.cancelled"
+            attempt = None
+        else:
+            target_status = RunStatus.CANCEL_REQUESTED
+            event_type = "run.cancel_requested"
+            if attempt is not None and cast(str, attempt.status) not in {
+                "assigned",
+                "running",
+            }:
+                # The prior owner completed/recovered it while this command
+                # waited. Roll back the Run lock and rediscover from scratch.
+                raise _RetryCancelError
+
+        await mutation_store.transition(run, target_status, event_type, {})
+        if current_status in {RunStatus.ASSIGNED, RunStatus.RUNNING}:
+            self._add_outbox(
+                session,
+                event_type=OutboxType.ATTEMPT_CANCEL,
+                run=run,
+                attempt=attempt,
+                payload={"run_id": str(run.id)},
+                dedupe_key=f"attempt.cancel:{run.id}",
+            )
+        return run
+
+    async def _before_cancel_attempt_lock(self) -> None:
+        """Deterministic concurrency seam; production performs no work here."""
+
+    async def _after_cancel_attempt_discovery(self, attempt_id: UUID | None) -> None:
+        """Deterministic scheduler-race seam; production performs no work here."""
+
+    @staticmethod
+    async def _active_attempt_id(session: AsyncSession, run_id: UUID) -> UUID | None:
+        return await session.scalar(
+            select(RunAttempt.id)
+            .where(
+                RunAttempt.run_id == run_id,
+                RunAttempt.status.in_(("assigned", "running")),
+            )
+            .order_by(RunAttempt.attempt_no.desc())
+            .limit(1)
+        )
 
     async def record_pause(
         self,

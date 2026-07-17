@@ -13,9 +13,11 @@ import pytest_asyncio
 from app.core.database import Base
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunSession
 from app.models.run_scheduling import RunOutbox, RunWorker
-from app.models.tenant import Tenant
+from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.services.attempt_service import AttemptCommandRejected, AttemptService
+from app.services.run_service import RunService
+from app.services.scheduling_service import SchedulingService
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -99,6 +101,52 @@ class BarrierAttemptService(AttemptService):
         await self._barrier.wait()
 
 
+class AfterLockAttemptService(AttemptService):
+    def __init__(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        locked: asyncio.Event,
+        release: asyncio.Event,
+    ) -> None:
+        super().__init__(factory)
+        self._locked = locked
+        self._release = release
+
+    async def _after_authority_check(self) -> None:
+        self._locked.set()
+        await self._release.wait()
+
+
+class BarrierCancelRunService(RunService):
+    def __init__(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        barrier: TwoPartyBarrier,
+    ) -> None:
+        super().__init__(factory)
+        self._barrier = barrier
+
+    async def _before_cancel_attempt_lock(self) -> None:
+        await self._barrier.wait()
+
+
+class NoAttemptDiscoveryCancelRunService(RunService):
+    def __init__(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        discovered: asyncio.Event,
+        release: asyncio.Event,
+    ) -> None:
+        super().__init__(factory)
+        self._discovered = discovered
+        self._release = release
+
+    async def _after_cancel_attempt_discovery(self, attempt_id: uuid.UUID | None) -> None:
+        if attempt_id is None:
+            self._discovered.set()
+            await self._release.wait()
+
+
 async def _assigned_graph(
     factory: async_sessionmaker[AsyncSession],
     *,
@@ -114,6 +162,7 @@ async def _assigned_graph(
         tenant = Tenant(name=f"Attempt {suffix}", slug=f"attempt-{suffix}")
         session.add_all([user, tenant])
         await session.flush()
+        session.add(TenantMembership(tenant_id=tenant.id, user_id=user.id, role="member"))
         run_session = RunSession(tenant_id=tenant.id, created_by_user_id=user.id)
         worker = RunWorker(
             worker_type="chat",
@@ -390,3 +439,145 @@ async def test_acknowledge_cancel_atomically_finishes_and_acknowledges_outbox(
     assert persisted_run is not None and persisted_run.status == "cancelled"
     assert persisted_attempt is not None and persisted_attempt.status == "cancelled"
     assert cancel is not None and cancel.acknowledged_at is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_vs_claim_uses_attempt_then_run_without_deadlock(
+    attempt_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    run, attempt, worker = await _assigned_graph(attempt_factory)
+    barrier = TwoPartyBarrier()
+
+    cancel, claim = await asyncio.wait_for(
+        asyncio.gather(
+            BarrierCancelRunService(attempt_factory, barrier).cancel_run(
+                cast(uuid.UUID, run.tenant_id),
+                cast(uuid.UUID, run.id),
+                cast(uuid.UUID, run.created_by_user_id),
+            ),
+            BarrierAttemptService(attempt_factory, barrier).claim(
+                cast(uuid.UUID, attempt.id), cast(uuid.UUID, worker.id)
+            ),
+        ),
+        timeout=2,
+    )
+
+    assert cancel.status == "cancel_requested"
+    async with attempt_factory() as session, session.begin():
+        await session.execute(
+            update(RunAttempt)
+            .where(RunAttempt.id == attempt.id)
+            .values(lease_expires_at=func.timezone("UTC", func.statement_timestamp()))
+        )
+    settled = await SchedulingService(attempt_factory).recover_expired_attempts(1)
+    assert len(settled) == 1 and settled[0].decision.value == "cancel"
+    async with attempt_factory() as session:
+        persisted_run = await session.get(Run, run.id)
+        persisted_attempt = await session.get(RunAttempt, attempt.id)
+        cancel_outboxes = tuple(
+            (
+                await session.scalars(
+                    select(RunOutbox).where(RunOutbox.event_type == "attempt.cancel")
+                )
+            ).all()
+        )
+    assert persisted_run is not None and persisted_run.status == "cancelled"
+    assert persisted_attempt is not None and persisted_attempt.status == "cancelled"
+    assert len(cancel_outboxes) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_vs_terminal_has_one_legal_terminal_path_without_deadlock(
+    attempt_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    run, attempt, worker = await _assigned_graph(attempt_factory)
+    claimed = await AttemptService(attempt_factory).claim(
+        cast(uuid.UUID, attempt.id), cast(uuid.UUID, worker.id)
+    )
+    assert claimed.assignment is not None
+    barrier = TwoPartyBarrier()
+
+    cancel_result, complete_result = await asyncio.wait_for(
+        asyncio.gather(
+            BarrierCancelRunService(attempt_factory, barrier).cancel_run(
+                cast(uuid.UUID, run.tenant_id),
+                cast(uuid.UUID, run.id),
+                cast(uuid.UUID, run.created_by_user_id),
+            ),
+            BarrierAttemptService(attempt_factory, barrier).complete_simulated(
+                cast(uuid.UUID, attempt.id),
+                cast(uuid.UUID, worker.id),
+                claimed.assignment.claim_token,
+                {"answer": "race"},
+            ),
+            return_exceptions=True,
+        ),
+        timeout=2,
+    )
+
+    assert not isinstance(cancel_result, BaseException)
+    assert complete_result is None or isinstance(complete_result, AttemptCommandRejected)
+    async with attempt_factory() as session:
+        raced_run = await session.get(Run, run.id)
+    if raced_run is not None and raced_run.status == "cancel_requested":
+        async with attempt_factory() as session, session.begin():
+            await session.execute(
+                update(RunAttempt)
+                .where(RunAttempt.id == attempt.id)
+                .values(lease_expires_at=func.timezone("UTC", func.statement_timestamp()))
+            )
+        settled = await SchedulingService(attempt_factory).recover_expired_attempts(1)
+        assert len(settled) == 1 and settled[0].decision.value == "cancel"
+    async with attempt_factory() as session:
+        persisted_run = await session.get(Run, run.id)
+        persisted_attempt = await session.get(RunAttempt, attempt.id)
+        events = tuple(
+            (
+                await session.scalars(
+                    select(RunEvent).where(RunEvent.run_id == run.id).order_by(RunEvent.seq)
+                )
+            ).all()
+        )
+    assert persisted_run is not None and persisted_attempt is not None
+    assert persisted_run.status in {"completed", "cancelled"}
+    assert persisted_attempt.status in {"completed", "cancelled"}
+    assert [event.seq for event in events] == list(range(1, len(events) + 1))
+
+
+@pytest.mark.asyncio
+async def test_cancel_restarts_attempt_first_when_scheduler_assigns_after_empty_probe(
+    attempt_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    run, attempt, _worker = await _assigned_graph(attempt_factory)
+    async with attempt_factory() as session, session.begin():
+        await session.execute(delete(RunOutbox).where(RunOutbox.attempt_id == attempt.id))
+        await session.execute(delete(RunEvent).where(RunEvent.attempt_id == attempt.id))
+        await session.execute(delete(RunAttempt).where(RunAttempt.id == attempt.id))
+        await session.execute(
+            update(Run).where(Run.id == run.id).values(status="queued", assigned_at=None)
+        )
+    discovered = asyncio.Event()
+    release = asyncio.Event()
+    cancel_service = NoAttemptDiscoveryCancelRunService(attempt_factory, discovered, release)
+    cancel_task = asyncio.create_task(
+        cancel_service.cancel_run(
+            cast(uuid.UUID, run.tenant_id),
+            cast(uuid.UUID, run.id),
+            cast(uuid.UUID, run.created_by_user_id),
+        )
+    )
+    await asyncio.wait_for(discovered.wait(), timeout=1)
+
+    assignment = await SchedulingService(attempt_factory).schedule_once()
+    assert assignment is not None
+    release.set()
+    cancelled = await asyncio.wait_for(cancel_task, timeout=2)
+
+    assert cancelled.status == "cancel_requested"
+    async with attempt_factory() as session:
+        cancel_outbox = await session.scalar(
+            select(RunOutbox).where(RunOutbox.event_type == "attempt.cancel")
+        )
+    assert cancel_outbox is not None
+    assert cancel_outbox.attempt_id == assignment.attempt_id
+    assert cancel_outbox.worker_id == assignment.worker_id

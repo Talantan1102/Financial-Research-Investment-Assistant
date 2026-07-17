@@ -164,6 +164,7 @@ class AttemptService:
                 now,
                 required_run_status=RunStatus.RUNNING,
             )
+            await self._after_authority_check()
             self._finish_attempt(attempt, AttemptStatus.COMPLETED, now)
             await RunMutationStore(session).transition(
                 run,
@@ -248,9 +249,18 @@ class AttemptService:
 
     async def _lock_attempt(self, session: AsyncSession, attempt_id: UUID) -> RunAttempt | None:
         await self._before_attempt_lock()
-        return await session.scalar(
+        attempt = await session.scalar(
             select(RunAttempt).where(RunAttempt.id == attempt_id).with_for_update()
         )
+        if attempt is not None:
+            await self._after_attempt_lock(attempt)
+        return attempt
+
+    async def _after_attempt_lock(self, attempt: RunAttempt) -> None:
+        """Deterministic concurrency seam; production performs no work here."""
+
+    async def _after_authority_check(self) -> None:
+        """Deterministic terminal-race seam; production performs no work here."""
 
     @staticmethod
     async def _lock_run(session: AsyncSession, run_id: UUID) -> Run | None:

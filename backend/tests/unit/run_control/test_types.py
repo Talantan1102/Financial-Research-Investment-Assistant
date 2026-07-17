@@ -81,6 +81,7 @@ _EXPECTED_TRANSITIONS = {
     RunStatus.ASSIGNED: {
         RunStatus.RUNNING,
         RunStatus.QUEUED,
+        RunStatus.FAILED,
         RunStatus.CANCEL_REQUESTED,
     },
     RunStatus.RUNNING: {

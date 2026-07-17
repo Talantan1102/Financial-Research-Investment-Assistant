@@ -61,7 +61,12 @@ TERMINAL_RUN_STATUSES = frozenset({RunStatus.COMPLETED, RunStatus.FAILED, RunSta
 _ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
     RunStatus.QUEUED: frozenset({RunStatus.ASSIGNED, RunStatus.CANCELLED}),
     RunStatus.ASSIGNED: frozenset(
-        {RunStatus.RUNNING, RunStatus.QUEUED, RunStatus.CANCEL_REQUESTED}
+        {
+            RunStatus.RUNNING,
+            RunStatus.QUEUED,
+            RunStatus.FAILED,
+            RunStatus.CANCEL_REQUESTED,
+        }
     ),
     RunStatus.RUNNING: frozenset(
         {

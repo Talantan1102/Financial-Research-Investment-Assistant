@@ -223,30 +223,16 @@ class SchedulingService:
         else:
             cast(Any, run).error_code = "worker_lease_expired"
             cast(Any, run).error_message = "worker lease expired after retry exhaustion"
-            failure_payload = {
-                "error_code": "worker_lease_expired",
-                "error_message": "worker lease expired after retry exhaustion",
-            }
-            if cast(str, run.status) == RunStatus.ASSIGNED.value:
-                cast(Any, run).status = RunStatus.FAILED.value
-                await store.append_event(
-                    run,
-                    "run.failed",
-                    {
-                        **failure_payload,
-                        "from_status": RunStatus.ASSIGNED.value,
-                        "status": RunStatus.FAILED.value,
-                    },
-                    attempt_id=cast(UUID, attempt.id),
-                )
-            else:
-                await store.transition(
-                    run,
-                    RunStatus.FAILED,
-                    "run.failed",
-                    failure_payload,
-                    attempt_id=cast(UUID, attempt.id),
-                )
+            await store.transition(
+                run,
+                RunStatus.FAILED,
+                "run.failed",
+                {
+                    "error_code": "worker_lease_expired",
+                    "error_message": "worker lease expired after retry exhaustion",
+                },
+                attempt_id=cast(UUID, attempt.id),
+            )
             cast(Any, run).finished_at = now
         await self._ack_recovery_outbox(
             session,

@@ -129,6 +129,17 @@ def _upgrade_run_attempts(connection: Connection, changes: list[str]) -> None:
         )
         changes.append("add ix_run_attempts_active_worker_lease")
 
+    if "ix_run_attempts_active_lease_expiry" not in indexes:
+        connection.execute(
+            text(
+                "CREATE INDEX ix_run_attempts_active_lease_expiry ON run_attempts "
+                "(lease_expires_at, id) "
+                "WHERE status IN ('assigned', 'running') "
+                "AND lease_expires_at IS NOT NULL"
+            )
+        )
+        changes.append("add ix_run_attempts_active_lease_expiry")
+
 
 if __name__ == "__main__":
     from app.core.database import engine

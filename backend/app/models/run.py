@@ -240,6 +240,14 @@ class RunAttempt(Base):
             "lease_expires_at",
             postgresql_where=text("worker_id IS NOT NULL AND status IN ('assigned', 'running')"),
         ),
+        Index(
+            "ix_run_attempts_active_lease_expiry",
+            "lease_expires_at",
+            "id",
+            postgresql_where=text(
+                "status IN ('assigned', 'running') AND lease_expires_at IS NOT NULL"
+            ),
+        ),
     )
 
 

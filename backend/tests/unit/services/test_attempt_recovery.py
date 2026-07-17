@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import FrozenInstanceError
+from datetime import timedelta
 from typing import Any, cast
 
 import pytest
@@ -14,6 +15,8 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.unit.services.test_attempt_service import (
+    AfterLockAttemptService,
+    BarrierCancelRunService,
     TwoPartyBarrier,
     _assigned_graph,
     attempt_factory,
@@ -129,17 +132,23 @@ async def test_first_crash_requeues_once_and_writes_atomic_wake(
 async def test_second_crash_exhausts_retry_and_fails_run(
     attempt_factory: async_sessionmaker[AsyncSession],
 ) -> None:
-    run, attempt, _worker = await _assigned_graph(attempt_factory)
-    async with attempt_factory() as session, session.begin():
-        await session.execute(update(Run).where(Run.id == run.id).values(retry_count=1))
+    run, attempt, worker = await _assigned_graph(attempt_factory)
     await _expire(attempt_factory, attempt.id)
+
+    first = await SchedulingService(attempt_factory).recover_expired_attempts(limit=1)
+    assert len(first) == 1 and first[0].decision.value == "retry"
+    assignment = await SchedulingService(attempt_factory).schedule_once()
+    assert assignment is not None
+    claimed = await AttemptService(attempt_factory).claim(assignment.attempt_id, worker.id)
+    assert claimed.assignment is not None
+    await _expire(attempt_factory, assignment.attempt_id)
 
     results = await SchedulingService(attempt_factory).recover_expired_attempts(limit=1)
 
     assert len(results) == 1 and results[0].decision.value == "fail"
     async with attempt_factory() as session:
         persisted_run = await session.get(Run, run.id)
-        persisted_attempt = await session.get(RunAttempt, attempt.id)
+        persisted_attempt = await session.get(RunAttempt, assignment.attempt_id)
     assert persisted_run is not None and persisted_run.status == "failed"
     assert persisted_run.error_code == "worker_lease_expired"
     assert persisted_attempt is not None and persisted_attempt.status == "lost"
@@ -225,6 +234,84 @@ async def test_completion_recovery_barrier_has_one_terminal_winner_and_fences_ol
             "zombie",
             "must be fenced",
         )
+
+
+@pytest.mark.asyncio
+async def test_completion_wins_while_recovery_skips_locked_live_attempt(
+    attempt_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    run, attempt, worker = await _assigned_graph(attempt_factory)
+    claimed = await AttemptService(
+        attempt_factory, lease_duration=timedelta(milliseconds=100)
+    ).claim(cast(uuid.UUID, attempt.id), cast(uuid.UUID, worker.id))
+    assert claimed.assignment is not None
+    locked = asyncio.Event()
+    release = asyncio.Event()
+    completing = AfterLockAttemptService(attempt_factory, locked, release)
+
+    completion = asyncio.create_task(
+        completing.complete_simulated(
+            cast(uuid.UUID, attempt.id),
+            cast(uuid.UUID, worker.id),
+            claimed.assignment.claim_token,
+            {"answer": "completion-wins"},
+        )
+    )
+    await asyncio.wait_for(locked.wait(), timeout=1)
+    await asyncio.sleep(0.15)
+    recovery = await SchedulingService(attempt_factory).recover_expired_attempts(1)
+    release.set()
+    await asyncio.wait_for(completion, timeout=1)
+
+    assert recovery == ()
+    async with attempt_factory() as session:
+        persisted_run = await session.get(Run, run.id)
+        persisted_attempt = await session.get(RunAttempt, attempt.id)
+    assert persisted_run is not None and persisted_run.status == "completed"
+    assert persisted_attempt is not None and persisted_attempt.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_cancel_vs_recovery_has_no_deadlock_and_one_consistent_state(
+    attempt_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    run, attempt, _worker = await _assigned_graph(attempt_factory)
+    await _expire(attempt_factory, cast(uuid.UUID, attempt.id))
+    barrier = TwoPartyBarrier()
+
+    cancel_result, recovery_result = await asyncio.wait_for(
+        asyncio.gather(
+            BarrierCancelRunService(attempt_factory, barrier).cancel_run(
+                cast(uuid.UUID, run.tenant_id),
+                cast(uuid.UUID, run.id),
+                cast(uuid.UUID, run.created_by_user_id),
+            ),
+            RecoveryBarrierSchedulingService(attempt_factory, barrier).recover_expired_attempts(1),
+            return_exceptions=True,
+        ),
+        timeout=2,
+    )
+
+    assert not isinstance(cancel_result, BaseException)
+    assert isinstance(recovery_result, tuple)
+    async with attempt_factory() as session:
+        current_run = await session.get(Run, run.id)
+    if current_run is not None and current_run.status == "cancel_requested":
+        settled = await SchedulingService(attempt_factory).recover_expired_attempts(1)
+        assert len(settled) == 1 and settled[0].decision.value == "cancel"
+    async with attempt_factory() as session:
+        persisted_run = await session.get(Run, run.id)
+        persisted_attempt = await session.get(RunAttempt, attempt.id)
+        events = tuple(
+            (
+                await session.scalars(
+                    select(RunEvent).where(RunEvent.run_id == run.id).order_by(RunEvent.seq)
+                )
+            ).all()
+        )
+    assert persisted_run is not None and persisted_run.status == "cancelled"
+    assert persisted_attempt is not None and persisted_attempt.status == "cancelled"
+    assert [event.seq for event in events] == list(range(1, len(events) + 1))
 
 
 def test_recovery_result_projection_is_frozen() -> None:

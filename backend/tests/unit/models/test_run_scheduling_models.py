@@ -13,7 +13,7 @@ from app.models.run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.run_control.types import OutboxType, WorkerStatus
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -188,6 +188,37 @@ def test_attempt_active_worker_lease_index_matches_registry_predicate(
     ).lower()
     assert "worker_id is not null" in predicate
     assert {"assigned", "running"} == set(re.findall(r"'([^']+)'", predicate))
+
+
+def test_attempt_expiry_scan_index_matches_recovery_query_and_is_used(
+    db_session: Session,
+) -> None:
+    indexes = {
+        index["name"]: index for index in inspect(db_session.get_bind()).get_indexes("run_attempts")
+    }
+    expiry_index = indexes["ix_run_attempts_active_lease_expiry"]
+    assert expiry_index["column_names"] == ["lease_expires_at", "id"]
+    predicate = re.sub(
+        r"\s+",
+        " ",
+        str(expiry_index["dialect_options"]["postgresql_where"]),
+    ).lower()
+    assert "lease_expires_at is not null" in predicate
+    assert {"assigned", "running"} == set(re.findall(r"'([^']+)'", predicate))
+
+    db_session.execute(text("SET LOCAL enable_seqscan = off"))
+    plan = "\n".join(
+        db_session.execute(
+            text(
+                "EXPLAIN SELECT id FROM run_attempts "
+                "WHERE status IN ('assigned', 'running') "
+                "AND lease_expires_at IS NOT NULL "
+                "AND lease_expires_at <= statement_timestamp() AT TIME ZONE 'UTC' "
+                "ORDER BY lease_expires_at, id LIMIT 10"
+            )
+        ).scalars()
+    )
+    assert "ix_run_attempts_active_lease_expiry" in plan
 
 
 def test_worker_checks_pin_chat_type_status_and_positive_capacity(db_session: Session) -> None:
