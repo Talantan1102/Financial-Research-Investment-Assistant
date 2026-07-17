@@ -62,3 +62,40 @@ Before restoring the assigned branch, the focused assigned-cancel test failed wi
 
 - No implementation-scope deviation: Worker registry, Scheduler, Dispatcher, Redis, claim, and lease recovery remain for later Phase 2 tasks.
 - Phase 1's fake executor can put a Run into assigned/running without creating an Attempt. RunService still writes the required Cancel outbox in that compatibility case with nullable `attempt_id/worker_id`. Once a real Attempt exists, the outbox copies its Attempt/Worker identity and the composite FK enforces provenance.
+
+## Specification review fix: partial-NULL attempt provenance
+
+The first review found that PostgreSQL `MATCH SIMPLE` skips the original
+`(run_id, attempt_id, worker_id)` foreign key whenever `worker_id` is NULL. That
+allowed an outbox row to name a nonexistent or cross-Run Attempt when the
+Attempt was assigned but not yet claimed.
+
+### Review RED
+
+Six literal PostgreSQL cases were added before the model fix:
+
+1. both `attempt_id/worker_id` NULL ScheduleWake is valid;
+2. non-NULL Attempt and NULL Worker is valid for assigned-unclaimed cancel;
+3. nonexistent Attempt and NULL Worker is rejected;
+4. cross-Run Attempt and NULL Worker is rejected;
+5. non-NULL Worker and NULL Attempt is rejected;
+6. Attempt and Worker mismatch is rejected.
+
+The focused model command collected 16 cases and produced the expected
+`3 failed, 13 passed`. Cases 3, 4, and 5 failed with
+`Failed: DID NOT RAISE IntegrityError`; cases 1, 2, and 6 already behaved
+correctly.
+
+### Review GREEN and final verification
+
+- Added `(run_id, attempt_id) -> run_attempts(run_id, id)` while retaining the
+  three-column FK for Worker consistency.
+- Added `worker_id IS NULL OR attempt_id IS NOT NULL`; deliberately did not use
+  `MATCH FULL`, because an assigned-unclaimed Attempt is valid.
+- Focused model file: `16 passed` in 26.7 seconds.
+- Task 1 path matrix: `197 passed` in 84 seconds.
+- Expanded unit matrix: `223 passed` in 119 seconds.
+- Integration router/wiring matrix: `49 passed` in 38.7 seconds.
+- Ruff format: `10 files already formatted`; Ruff lint: `All checks passed!`.
+- Mypy: `Success: no issues found in 3 source files`.
+- `git diff --check`: exit 0.

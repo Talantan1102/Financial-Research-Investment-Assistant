@@ -99,6 +99,12 @@ class RunOutbox(Base):
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
+            ["run_id", "attempt_id"],
+            ["run_attempts.run_id", "run_attempts.id"],
+            name="fk_run_outbox_attempt_provenance",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
             ["run_id", "attempt_id", "worker_id"],
             ["run_attempts.run_id", "run_attempts.id", "run_attempts.worker_id"],
             name="fk_run_outbox_attempt_worker_provenance",
@@ -112,6 +118,10 @@ class RunOutbox(Base):
         CheckConstraint(
             "delivery_attempts >= 0",
             name="ck_run_outbox_nonnegative_delivery_attempts",
+        ),
+        CheckConstraint(
+            "worker_id IS NULL OR attempt_id IS NOT NULL",
+            name="ck_run_outbox_worker_requires_attempt",
         ),
         Index("ix_run_outbox_next_attempt_at", "next_attempt_at"),
     )
