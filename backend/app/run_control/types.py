@@ -34,6 +34,18 @@ class PauseType(StrEnum):
     INPUT = "input"
 
 
+class WorkerStatus(StrEnum):
+    ONLINE = "online"
+    DRAINING = "draining"
+    OFFLINE = "offline"
+
+
+class OutboxType(StrEnum):
+    ATTEMPT_ASSIGNED = "attempt.assigned"
+    ATTEMPT_CANCEL = "attempt.cancel"
+    SCHEDULE_WAKE = "schedule.wake"
+
+
 ACTIVE_RUN_STATUSES = frozenset(
     {
         RunStatus.QUEUED,

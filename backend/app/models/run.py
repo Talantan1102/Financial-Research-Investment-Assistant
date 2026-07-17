@@ -207,7 +207,14 @@ class RunAttempt(Base):
     )
     attempt_no = Column(Integer, nullable=False)
     status = Column(String(32), nullable=False)
-    worker_id = Column(String(255), nullable=True)
+    worker_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("run_workers.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    claim_token = Column(UUID(as_uuid=True), nullable=True)
+    claimed_at = Column(DateTime, nullable=True)
+    last_heartbeat_at = Column(DateTime, nullable=True)
     lease_expires_at = Column(DateTime, nullable=True)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
@@ -217,6 +224,12 @@ class RunAttempt(Base):
     __table_args__ = (
         UniqueConstraint("run_id", "attempt_no", name="uq_run_attempt_no"),
         UniqueConstraint("run_id", "id", name="uq_run_attempt_identity"),
+        UniqueConstraint(
+            "run_id",
+            "id",
+            "worker_id",
+            name="uq_run_attempt_worker_identity",
+        ),
         CheckConstraint(
             f"status IN ({_quoted_values(_ATTEMPT_STATUS_VALUES)})",
             name="ck_run_attempts_fixed_status",

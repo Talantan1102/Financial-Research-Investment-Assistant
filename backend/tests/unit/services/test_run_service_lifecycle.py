@@ -7,6 +7,7 @@ import uuid
 import pytest
 import pytest_asyncio
 from app.models.run import Run, RunEvent
+from app.models.run_scheduling import RunOutbox
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.run_control.types import (
@@ -16,7 +17,7 @@ from app.run_control.types import (
     RunStatus,
 )
 from app.services.run_service import CreateRunCommand, RunService
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.helpers.run_fake_executor import FakeRunExecutor
@@ -87,7 +88,9 @@ def fake_executor(run_service: RunService, created_run: Run) -> FakeRunExecutor:
 
 @pytest.mark.asyncio
 async def test_cancel_queued_finishes_immediately(
-    run_service: RunService, created_run: Run
+    run_service: RunService,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     result = await run_service.cancel_run(
         created_run.tenant_id, created_run.id, created_run.created_by_user_id
@@ -103,11 +106,24 @@ async def test_cancel_queued_finishes_immediately(
         (1, "run.created"),
         (2, "run.cancelled"),
     ]
+    async with async_session_factory() as session:
+        cancel_count = await session.scalar(
+            select(func.count())
+            .select_from(RunOutbox)
+            .where(
+                RunOutbox.run_id == created_run.id,
+                RunOutbox.event_type == "attempt.cancel",
+            )
+        )
+    assert cancel_count == 0
 
 
 @pytest.mark.asyncio
 async def test_cancel_running_requests_cooperative_cancellation(
-    run_service: RunService, fake_executor: FakeRunExecutor, created_run: Run
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     await fake_executor.start(created_run.id)
 
@@ -118,6 +134,46 @@ async def test_cancel_running_requests_cooperative_cancellation(
     assert result.status == RunStatus.CANCEL_REQUESTED.value
     assert result.cancel_requested_at is not None
     assert result.finished_at is None
+    async with async_session_factory() as session:
+        cancel_outbox = await session.scalar(
+            select(RunOutbox).where(
+                RunOutbox.run_id == created_run.id,
+                RunOutbox.event_type == "attempt.cancel",
+            )
+        )
+    assert cancel_outbox is not None
+    assert cancel_outbox.payload == {"run_id": str(created_run.id)}
+    assert cancel_outbox.dedupe_key == f"attempt.cancel:{created_run.id}"
+
+
+@pytest.mark.asyncio
+async def test_cancel_assigned_also_writes_cooperative_cancel_outbox(
+    run_service: RunService,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await run_service.transition_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        RunStatus.ASSIGNED,
+        event_type="run.assigned",
+    )
+
+    result = await run_service.cancel_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+
+    assert result.status == RunStatus.CANCEL_REQUESTED.value
+    async with async_session_factory() as session:
+        cancel_outbox = await session.scalar(
+            select(RunOutbox).where(
+                RunOutbox.run_id == created_run.id,
+                RunOutbox.event_type == "attempt.cancel",
+            )
+        )
+    assert cancel_outbox is not None
+    assert cancel_outbox.dedupe_key == f"attempt.cancel:{created_run.id}"
 
 
 @pytest.mark.asyncio
@@ -140,7 +196,10 @@ async def test_cancel_terminal_is_idempotent_without_new_event(
 
 @pytest.mark.asyncio
 async def test_resume_waiting_keeps_same_run_and_resolves_pause(
-    run_service: RunService, fake_executor: FakeRunExecutor, created_run: Run
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     await fake_executor.start(created_run.id)
     pause = await fake_executor.pause_for_input(
@@ -167,6 +226,22 @@ async def test_resume_waiting_keeps_same_run_and_resolves_pause(
     assert resumed.queue_reason == "resume"
     assert resolved.response_payload == {"text": "成本价 1500"}
     assert resolved.resolved_at is not None
+    async with async_session_factory() as session:
+        wakes = tuple(
+            (
+                await session.scalars(
+                    select(RunOutbox)
+                    .where(
+                        RunOutbox.run_id == created_run.id,
+                        RunOutbox.event_type == "schedule.wake",
+                    )
+                    .order_by(RunOutbox.created_at)
+                )
+            ).all()
+        )
+    assert len(wakes) == 2
+    assert wakes[-1].payload == {"run_id": str(created_run.id), "reason": "resume"}
+    assert wakes[-1].dedupe_key == f"schedule.wake:{created_run.id}:resume:{pause.id}"
 
 
 @pytest.mark.asyncio

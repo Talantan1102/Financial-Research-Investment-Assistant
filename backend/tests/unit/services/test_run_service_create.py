@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import pytest_asyncio
 from app.models.run import Run, RunEvent, RunMessage, RunSession
+from app.models.run_scheduling import RunOutbox
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.run_control.types import (
@@ -92,6 +93,29 @@ async def test_create_is_atomic(run_service: RunService, command: CreateRunComma
     assert result.run.input_message_id == result.message.id
     assert [event.event_type for event in result.events] == ["run.created"]
     assert result.events[0].seq == 1
+
+
+@pytest.mark.asyncio
+async def test_create_writes_one_stable_schedule_wake_and_replay_does_not_duplicate_it(
+    run_service: RunService,
+    command: CreateRunCommand,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    first = await run_service.create_run(command)
+    replay = await run_service.create_run(command)
+
+    async with async_session_factory() as session:
+        outboxes = tuple(
+            (await session.scalars(select(RunOutbox).where(RunOutbox.run_id == first.run.id))).all()
+        )
+    assert replay.replayed is True
+    assert len(outboxes) == 1
+    assert outboxes[0].event_type == "schedule.wake"
+    assert outboxes[0].tenant_id == command.tenant_id
+    assert outboxes[0].attempt_id is None
+    assert outboxes[0].worker_id is None
+    assert outboxes[0].payload == {"run_id": str(first.run.id), "reason": "created"}
+    assert outboxes[0].dedupe_key == f"schedule.wake:{first.run.id}:created"
 
 
 @pytest.mark.asyncio

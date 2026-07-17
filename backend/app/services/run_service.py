@@ -12,12 +12,15 @@ from uuid import UUID
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.run import Run, RunEvent, RunMessage, RunPause, RunSession
+from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
+from app.models.run_scheduling import RunOutbox
 from app.models.tenant import Tenant, TenantMembership
+from app.run_control.mutations import RunMutationStore
 from app.run_control.types import (
     ACTIVE_RUN_STATUSES,
     TERMINAL_RUN_STATUSES,
     IdempotencyConflict,
+    OutboxType,
     PauseType,
     ResourceNotFound,
     ResumeNotAllowed,
@@ -130,19 +133,23 @@ class RunService:
             session.add(run)
             await session.flush()
 
-            event = RunEvent(
-                tenant_id=command.tenant_id,
-                run_id=run.id,
-                seq=1,
-                event_type="run.created",
-                payload={
+            mutation_store = RunMutationStore(session)
+            event = await mutation_store.append_event(
+                run,
+                "run.created",
+                {
                     "run_id": str(run.id),
                     "session_id": str(run.session_id),
                     "status": RunStatus.QUEUED.value,
                 },
             )
-            session.add(event)
-            await session.flush()
+            self._add_outbox(
+                session,
+                event_type=OutboxType.SCHEDULE_WAKE,
+                run=run,
+                payload={"run_id": str(run.id), "reason": "created"},
+                dedupe_key=f"schedule.wake:{run.id}:created",
+            )
             return CreatedRun(run=run, message=message, events=(event,))
 
     async def get_run(self, tenant_id: UUID, run_id: UUID, actor_id: UUID) -> Run:
@@ -194,27 +201,21 @@ class RunService:
         attempt_id: UUID | None = None,
     ) -> Run:
         async with self._session_factory() as session, session.begin():
-            run = await self._lock_visible_run(session, tenant_id, run_id, actor_id)
-            current_status = RunStatus(cast(str, run.status))
-            assert_transition(current_status, target_status)
-            self._apply_transition_timestamps(run, target_status)
-            cast(Any, run).status = target_status.value
-            await self._append_event(
-                session,
+            mutation_store = RunMutationStore(session)
+            run = await self._lock_visible_run(session, mutation_store, tenant_id, run_id, actor_id)
+            await mutation_store.transition(
                 run,
+                target_status,
                 event_type,
-                {
-                    **(payload or {}),
-                    "from_status": current_status.value,
-                    "status": target_status.value,
-                },
+                payload or {},
                 attempt_id=attempt_id,
             )
             return run
 
     async def cancel_run(self, tenant_id: UUID, run_id: UUID, actor_id: UUID) -> Run:
         async with self._session_factory() as session, session.begin():
-            run = await self._lock_visible_run(session, tenant_id, run_id, actor_id)
+            mutation_store = RunMutationStore(session)
+            run = await self._lock_visible_run(session, mutation_store, tenant_id, run_id, actor_id)
             current_status = RunStatus(cast(str, run.status))
             if (
                 current_status in TERMINAL_RUN_STATUSES
@@ -222,31 +223,41 @@ class RunService:
             ):
                 return run
 
-            now = _utcnow()
             if current_status in {
                 RunStatus.QUEUED,
                 RunStatus.WAITING_APPROVAL,
                 RunStatus.WAITING_INPUT,
             }:
                 target_status = RunStatus.CANCELLED
-                cast(Any, run).finished_at = now
                 event_type = "run.cancelled"
             else:
                 target_status = RunStatus.CANCEL_REQUESTED
-                cast(Any, run).cancel_requested_at = now
                 event_type = "run.cancel_requested"
 
-            assert_transition(current_status, target_status)
-            cast(Any, run).status = target_status.value
-            await self._append_event(
-                session,
+            await mutation_store.transition(
                 run,
+                target_status,
                 event_type,
-                {
-                    "from_status": current_status.value,
-                    "status": target_status.value,
-                },
+                {},
             )
+            if current_status in {RunStatus.ASSIGNED, RunStatus.RUNNING}:
+                attempt = await session.scalar(
+                    select(RunAttempt)
+                    .where(
+                        RunAttempt.run_id == run.id,
+                        RunAttempt.status.in_(("assigned", "running")),
+                    )
+                    .order_by(RunAttempt.attempt_no.desc())
+                    .limit(1)
+                )
+                self._add_outbox(
+                    session,
+                    event_type=OutboxType.ATTEMPT_CANCEL,
+                    run=run,
+                    attempt=attempt,
+                    payload={"run_id": str(run.id)},
+                    dedupe_key=f"attempt.cancel:{run.id}",
+                )
             return run
 
     async def record_pause(
@@ -261,7 +272,8 @@ class RunService:
         attempt_id: UUID | None = None,
     ) -> RunPause:
         async with self._session_factory() as session, session.begin():
-            run = await self._lock_visible_run(session, tenant_id, run_id, actor_id)
+            mutation_store = RunMutationStore(session)
+            run = await self._lock_visible_run(session, mutation_store, tenant_id, run_id, actor_id)
             target_status = {
                 PauseType.APPROVAL: RunStatus.WAITING_APPROVAL,
                 PauseType.INPUT: RunStatus.WAITING_INPUT,
@@ -282,8 +294,7 @@ class RunService:
             session.add(pause)
             await session.flush()
             cast(Any, run).status = target_status.value
-            await self._append_event(
-                session,
+            await mutation_store.append_event(
                 run,
                 "run.paused",
                 {
@@ -305,7 +316,8 @@ class RunService:
         response: dict[str, Any],
     ) -> Run:
         async with self._session_factory() as session, session.begin():
-            run = await self._lock_visible_run(session, tenant_id, run_id, actor_id)
+            mutation_store = RunMutationStore(session)
+            run = await self._lock_visible_run(session, mutation_store, tenant_id, run_id, actor_id)
             latest_pause = await session.scalar(
                 select(RunPause)
                 .where(RunPause.run_id == run.id)
@@ -341,8 +353,7 @@ class RunService:
             cast(Any, run).status = RunStatus.QUEUED.value
             cast(Any, run).queue_reason = "resume"
             cast(Any, run).queued_at = now
-            await self._append_event(
-                session,
+            await mutation_store.append_event(
                 run,
                 "run.resumed",
                 {
@@ -351,6 +362,13 @@ class RunService:
                     "pause_id": str(latest_pause.id),
                     "pause_no": latest_pause.pause_no,
                 },
+            )
+            self._add_outbox(
+                session,
+                event_type=OutboxType.SCHEDULE_WAKE,
+                run=run,
+                payload={"run_id": str(run.id), "reason": "resume"},
+                dedupe_key=f"schedule.wake:{run.id}:resume:{latest_pause.id}",
             )
             return run
 
@@ -469,54 +487,40 @@ class RunService:
         return run
 
     async def _lock_visible_run(
-        self, session: AsyncSession, tenant_id: UUID, run_id: UUID, actor_id: UUID
+        self,
+        session: AsyncSession,
+        mutation_store: RunMutationStore,
+        tenant_id: UUID,
+        run_id: UUID,
+        actor_id: UUID,
     ) -> Run:
         membership = await self._require_membership(session, tenant_id, actor_id)
-        conditions = [Run.id == run_id, Run.tenant_id == tenant_id]
-        if membership.role == TenantRole.MEMBER.value:
-            conditions.append(Run.created_by_user_id == actor_id)
-        run = await session.scalar(select(Run).where(*conditions).with_for_update())
-        if run is None:
+        run = await mutation_store.lock_run(tenant_id, run_id)
+        if membership.role == TenantRole.MEMBER.value and run.created_by_user_id != actor_id:
             raise ResourceNotFound("run not found")
         return run
 
     @staticmethod
-    async def _append_event(
+    def _add_outbox(
         session: AsyncSession,
-        run: Run,
-        event_type: str,
-        payload: dict[str, Any],
         *,
-        attempt_id: UUID | None = None,
-    ) -> RunEvent:
-        last_seq = await session.scalar(
-            select(func.coalesce(func.max(RunEvent.seq), 0)).where(RunEvent.run_id == run.id)
+        event_type: OutboxType,
+        run: Run,
+        payload: dict[str, Any],
+        dedupe_key: str,
+        attempt: RunAttempt | None = None,
+    ) -> None:
+        session.add(
+            RunOutbox(
+                event_type=event_type.value,
+                tenant_id=run.tenant_id,
+                run_id=run.id,
+                attempt_id=attempt.id if attempt is not None else None,
+                worker_id=attempt.worker_id if attempt is not None else None,
+                payload=payload,
+                dedupe_key=dedupe_key,
+            )
         )
-        event = RunEvent(
-            tenant_id=run.tenant_id,
-            run_id=run.id,
-            attempt_id=attempt_id,
-            seq=int(last_seq or 0) + 1,
-            event_type=event_type,
-            payload=payload,
-        )
-        session.add(event)
-        await session.flush()
-        return event
-
-    @staticmethod
-    def _apply_transition_timestamps(run: Run, target_status: RunStatus) -> None:
-        now = _utcnow()
-        if target_status == RunStatus.QUEUED:
-            cast(Any, run).queued_at = now
-        elif target_status == RunStatus.ASSIGNED:
-            cast(Any, run).assigned_at = now
-        elif target_status == RunStatus.RUNNING:
-            cast(Any, run).started_at = now
-        elif target_status == RunStatus.CANCEL_REQUESTED:
-            cast(Any, run).cancel_requested_at = now
-        elif target_status in TERMINAL_RUN_STATUSES:
-            cast(Any, run).finished_at = now
 
     @staticmethod
     async def _require_membership(
