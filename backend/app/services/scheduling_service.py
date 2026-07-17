@@ -7,9 +7,8 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import case, func, select
+from sqlalchemy import DateTime, case, func, literal, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
@@ -74,23 +73,21 @@ class SchedulingService:
     async def schedule_once(self) -> Assignment | None:
         """Allocate at most one Run, committing every durable fact together."""
 
-        try:
-            async with self._session_factory() as session, session.begin():
-                return await self._schedule_in_transaction(session)
-        except IntegrityError as error:
-            # A competing Scheduler may win a uniqueness race. The context
-            # manager has already rolled the failed transaction back. CHECK,
-            # FK, and other integrity failures are implementation errors and
-            # must remain visible.
-            if getattr(error.orig, "sqlstate", None) == "23505":
-                return None
-            raise
+        async with self._session_factory() as session:
+            transaction = await session.begin()
+            try:
+                assignment = await self._schedule_in_transaction(session)
+                if assignment is None:
+                    await transaction.rollback()
+                else:
+                    await transaction.commit()
+                return assignment
+            except BaseException:
+                await session.rollback()
+                raise
 
     async def _schedule_in_transaction(self, session: AsyncSession) -> Assignment | None:
         await self._ensure_tenant_cursors(session)
-        if not await load_schedulable_workers(session, heartbeat_ttl=self._heartbeat_ttl):
-            return None
-
         cursor = await self._lock_next_tenant_cursor(session)
         if cursor is None:
             return None
@@ -99,18 +96,7 @@ class SchedulingService:
         if run is None:
             return None
 
-        workers = await load_schedulable_workers(session, heartbeat_ttl=self._heartbeat_ttl)
-        ranked_workers = rank_workers(
-            [
-                WorkerCandidate(
-                    id=item.id,
-                    capacity=item.capacity,
-                    active_attempts=item.active_attempts,
-                    last_assigned_at=item.last_assigned_at,
-                )
-                for item in workers
-            ]
-        )
+        ranked_workers = await self._load_worker_candidates(session)
         if not ranked_workers:
             return None
 
@@ -195,27 +181,39 @@ class SchedulingService:
             lease_expires_at=lease_expires_at,
         )
 
-    async def _ensure_tenant_cursors(self, session: AsyncSession) -> None:
-        tenant_ids = tuple(
-            (
-                await session.scalars(
-                    select(Run.tenant_id)
-                    .where(Run.status == RunStatus.QUEUED.value)
-                    .distinct()
-                    .order_by(Run.tenant_id)
+    async def _load_worker_candidates(self, session: AsyncSession) -> tuple[WorkerCandidate, ...]:
+        workers = await load_schedulable_workers(session, heartbeat_ttl=self._heartbeat_ttl)
+        return rank_workers(
+            [
+                WorkerCandidate(
+                    id=item.id,
+                    capacity=item.capacity,
+                    active_attempts=item.active_attempts,
+                    last_assigned_at=item.last_assigned_at,
                 )
-            ).all()
+                for item in workers
+            ]
         )
-        for tenant_id in tenant_ids:
-            await session.execute(
-                postgresql_insert(RunTenantScheduling)
-                .values(
-                    tenant_id=tenant_id,
-                    last_dispatched_at=None,
-                    updated_at=_database_utc_now(),
-                )
-                .on_conflict_do_nothing(index_elements=[RunTenantScheduling.tenant_id])
+
+    async def _ensure_tenant_cursors(self, session: AsyncSession) -> None:
+        queued_tenants = (
+            select(
+                Run.tenant_id,
+                literal(None, type_=DateTime()),
+                _database_utc_now(),
             )
+            .where(Run.status == RunStatus.QUEUED.value)
+            .distinct()
+            .order_by(Run.tenant_id)
+        )
+        await session.execute(
+            postgresql_insert(RunTenantScheduling)
+            .from_select(
+                ("tenant_id", "last_dispatched_at", "updated_at"),
+                queued_tenants,
+            )
+            .on_conflict_do_nothing(index_elements=[RunTenantScheduling.tenant_id])
+        )
 
     async def _lock_next_tenant_cursor(self, session: AsyncSession) -> RunTenantScheduling | None:
         candidate_run = aliased(Run)
@@ -336,9 +334,7 @@ class SchedulingService:
         candidates: tuple[WorkerCandidate, ...],
     ) -> tuple[RunWorker, int] | None:
         for candidate in candidates:
-            worker = await session.scalar(
-                select(RunWorker).where(RunWorker.id == candidate.id).with_for_update()
-            )
+            worker = await self._lock_worker_candidate(session, candidate.id)
             if worker is None:
                 continue
             database_now = _database_utc_now()
@@ -369,3 +365,10 @@ class SchedulingService:
             if is_live:
                 return worker, active_attempts
         return None
+
+    async def _lock_worker_candidate(
+        self, session: AsyncSession, worker_id: UUID
+    ) -> RunWorker | None:
+        return await session.scalar(
+            select(RunWorker).where(RunWorker.id == worker_id).with_for_update(skip_locked=True)
+        )

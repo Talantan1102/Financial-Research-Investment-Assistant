@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import uuid
 from collections.abc import AsyncIterator, Sequence
@@ -11,15 +12,21 @@ from typing import Any, cast
 
 import pytest
 import pytest_asyncio
+from app.core.database import Base
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
 from app.models.run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.run_control.scheduling_policy import WorkerCandidate
 from app.services import scheduling_service as scheduling_module
 from app.services.scheduling_service import Assignment, SchedulingService
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, event, func, select, text, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 
 @pytest.fixture(scope="session")
@@ -29,83 +36,70 @@ def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
     return asyncio.DefaultEventLoopPolicy()
 
 
+@pytest_asyncio.fixture(scope="module")
+async def async_session_factory(
+    pg_test_container: dict[str, object],
+) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """Give Scheduler concurrency tests an isolated real-PostgreSQL schema."""
+
+    del pg_test_container
+    from tests.pg_test_defaults import PG_PASSWORD_DEFAULT
+
+    user = os.getenv("POSTGRES_USER", "postgres")
+    password = os.getenv("POSTGRES_PASSWORD", PG_PASSWORD_DEFAULT)
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port = os.getenv("POSTGRES_PORT", "5432")
+    database = os.getenv("POSTGRES_DB", "industry_assistant_test")
+    url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{database}"
+    schema = f"scheduling_service_{uuid.uuid4().hex}"
+    admin_engine = create_async_engine(url, future=True)
+    async with admin_engine.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+
+    engine = create_async_engine(
+        url,
+        future=True,
+        connect_args={"options": f"-c search_path={schema}"},
+    )
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield factory
+    finally:
+        await engine.dispose()
+        async with admin_engine.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        await admin_engine.dispose()
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def cleanup_scheduling_rows(
     async_session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncIterator[None]:
-    await _purge_scheduler_test_rows(async_session_factory)
-    async with async_session_factory() as session, session.begin():
-        queued_run_ids = tuple(
-            (await session.scalars(select(Run.id).where(Run.status == "queued"))).all()
-        )
-        worker_statuses: dict[uuid.UUID, str] = {
-            cast(uuid.UUID, worker_id): cast(str, status)
-            for worker_id, status in (
-                await session.execute(select(RunWorker.id, RunWorker.status))
-            ).all()
-        }
-        if queued_run_ids:
-            await session.execute(
-                update(Run).where(Run.id.in_(queued_run_ids)).values(status="cancelled")
-            )
-        if worker_statuses:
-            await session.execute(
-                update(RunWorker).where(RunWorker.id.in_(worker_statuses)).values(status="offline")
-            )
+    async with async_session_factory() as session:
+        tenant_ids = set((await session.scalars(select(Tenant.id))).all())
+        user_ids = set((await session.scalars(select(User.id))).all())
+        worker_ids = set((await session.scalars(select(RunWorker.id))).all())
     try:
         yield
     finally:
-        await _purge_scheduler_test_rows(async_session_factory)
         async with async_session_factory() as session, session.begin():
-            if queued_run_ids:
-                await session.execute(
-                    update(Run).where(Run.id.in_(queued_run_ids)).values(status="queued")
-                )
-            for worker_id, status in worker_statuses.items():
-                await session.execute(
-                    update(RunWorker).where(RunWorker.id == worker_id).values(status=status)
-                )
-
-
-async def _purge_scheduler_test_rows(
-    factory: async_sessionmaker[AsyncSession],
-) -> None:
-    """Remove only rows created by this test module, including aborted prior runs."""
-
-    run_ids = (
-        select(Run.id)
-        .join(Tenant, Tenant.id == Run.tenant_id)
-        .where(Tenant.slug.like("scheduler-%"))
-    )
-    async with factory() as session, session.begin():
-        worker_ids = set(
-            (
-                await session.scalars(
-                    select(RunAttempt.worker_id).where(
-                        RunAttempt.run_id.in_(run_ids),
-                        RunAttempt.worker_id.is_not(None),
-                    )
-                )
-            ).all()
-        )
-        worker_ids.update(
-            (
-                await session.scalars(
-                    select(RunWorker.id).where(
-                        RunWorker.metadata_payload.contains({"test_suite": "scheduling_service"})
-                    )
-                )
-            ).all()
-        )
-        await session.execute(delete(RunEvent).where(RunEvent.run_id.in_(run_ids)))
-        await session.execute(delete(RunOutbox).where(RunOutbox.run_id.in_(run_ids)))
-        await session.execute(delete(RunAttempt).where(RunAttempt.run_id.in_(run_ids)))
-        await session.execute(delete(Tenant).where(Tenant.slug.like("scheduler-%")))
-        if worker_ids:
-            await session.execute(
-                update(RunWorker).where(RunWorker.id.in_(worker_ids)).values(status="offline")
+            created_tenant_ids = set((await session.scalars(select(Tenant.id))).all()) - tenant_ids
+            created_user_ids = set((await session.scalars(select(User.id))).all()) - user_ids
+            created_worker_ids = (
+                set((await session.scalars(select(RunWorker.id))).all()) - worker_ids
             )
-        await session.execute(delete(User).where(User.username.like("scheduler-%")))
+            if created_tenant_ids:
+                run_ids = select(Run.id).where(Run.tenant_id.in_(created_tenant_ids))
+                await session.execute(delete(RunEvent).where(RunEvent.run_id.in_(run_ids)))
+                await session.execute(delete(RunOutbox).where(RunOutbox.run_id.in_(run_ids)))
+                await session.execute(delete(RunAttempt).where(RunAttempt.run_id.in_(run_ids)))
+                await session.execute(delete(Tenant).where(Tenant.id.in_(created_tenant_ids)))
+            if created_worker_ids:
+                await session.execute(delete(RunWorker).where(RunWorker.id.in_(created_worker_ids)))
+            if created_user_ids:
+                await session.execute(delete(User).where(User.id.in_(created_user_ids)))
 
 
 @dataclass(frozen=True)
@@ -133,7 +127,7 @@ async def _create_queue(
             hashed_password="test-password-hash",
         )
         tenant = Tenant(
-            id=tenant_id or uuid.uuid4(),
+            id=tenant_id or uuid.UUID(int=1),
             name=f"Scheduler {suffix}",
             slug=f"scheduler-{suffix}",
             max_running_runs=max_running_runs,
@@ -192,10 +186,12 @@ async def _create_worker(
     capacity: int,
     status: str = "online",
     heartbeat_delta: timedelta = timedelta(0),
+    worker_id: uuid.UUID | None = None,
 ) -> RunWorker:
     async with factory() as session, session.begin():
         now = func.timezone("UTC", func.statement_timestamp())
         worker = RunWorker(
+            id=worker_id or uuid.UUID(int=1000),
             worker_type="chat",
             capacity=capacity,
             status=status,
@@ -206,6 +202,101 @@ async def _create_worker(
         session.add(worker)
         await session.flush()
     return worker
+
+
+async def _create_cursors(
+    factory: async_sessionmaker[AsyncSession],
+    tenant_ids: Sequence[uuid.UUID],
+) -> None:
+    async with factory() as session, session.begin():
+        session.add_all([RunTenantScheduling(tenant_id=tenant_id) for tenant_id in tenant_ids])
+
+
+class TwoPartyBarrier:
+    def __init__(self) -> None:
+        self._arrivals = 0
+        self._guard = asyncio.Lock()
+        self._release = asyncio.Event()
+
+    async def wait(self) -> None:
+        async with self._guard:
+            self._arrivals += 1
+            if self._arrivals == 2:
+                self._release.set()
+        await self._release.wait()
+
+
+class ReverseFallbackSchedulingService(SchedulingService):
+    def __init__(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        *,
+        candidates: tuple[WorkerCandidate, ...],
+        first_worker_id: uuid.UUID,
+        barrier: TwoPartyBarrier,
+    ) -> None:
+        super().__init__(factory)
+        self._test_candidates = candidates
+        self._test_first_worker_id = first_worker_id
+        self._test_barrier = barrier
+
+    async def _load_worker_candidates(self, session: AsyncSession) -> tuple[WorkerCandidate, ...]:
+        del session
+        return self._test_candidates
+
+    async def _lock_worker_candidate(
+        self, session: AsyncSession, worker_id: uuid.UUID
+    ) -> RunWorker | None:
+        worker = await super()._lock_worker_candidate(session, worker_id)
+        if worker_id == self._test_first_worker_id:
+            await self._test_barrier.wait()
+        return worker
+
+
+class CursorBarrierSchedulingService(SchedulingService):
+    def __init__(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        barrier: TwoPartyBarrier,
+    ) -> None:
+        super().__init__(factory)
+        self._test_barrier = barrier
+
+    async def _lock_next_tenant_cursor(self, session: AsyncSession) -> RunTenantScheduling | None:
+        await self._test_barrier.wait()
+        return await super()._lock_next_tenant_cursor(session)
+
+
+class CursorBootstrapBarrierSchedulingService(SchedulingService):
+    def __init__(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        barrier: TwoPartyBarrier,
+    ) -> None:
+        super().__init__(factory)
+        self._test_barrier = barrier
+
+    async def _ensure_tenant_cursors(self, session: AsyncSession) -> None:
+        await self._test_barrier.wait()
+        await super()._ensure_tenant_cursors(session)
+
+
+class WorkerBarrierSchedulingService(SchedulingService):
+    def __init__(
+        self,
+        factory: async_sessionmaker[AsyncSession],
+        barrier: TwoPartyBarrier,
+    ) -> None:
+        super().__init__(factory)
+        self._test_barrier = barrier
+
+    async def _lock_eligible_worker(
+        self,
+        session: AsyncSession,
+        candidates: tuple[WorkerCandidate, ...],
+    ) -> tuple[RunWorker, int] | None:
+        await self._test_barrier.wait()
+        return await super()._lock_eligible_worker(session, candidates)
 
 
 async def _create_active_run(
@@ -252,6 +343,96 @@ def _service(factory: async_sessionmaker[AsyncSession]) -> SchedulingService:
         lease_duration=timedelta(seconds=45),
         resume_priority_boost_seconds=30,
     )
+
+
+@pytest.mark.asyncio
+async def test_no_worker_does_not_persist_cursor_side_effect(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    queue = await _create_queue(
+        async_session_factory,
+        queued_at=[datetime(2026, 7, 17, 1)],
+    )
+
+    assert await _service(async_session_factory).schedule_once() is None
+
+    async with async_session_factory() as session:
+        assert await session.get(RunTenantScheduling, queue.tenant_id) is None
+
+
+@pytest.mark.asyncio
+async def test_no_assignment_keeps_existing_cursor_timestamps_unchanged(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    queue = await _create_queue(
+        async_session_factory,
+        queued_at=[datetime(2026, 7, 17, 1)],
+    )
+    original_dispatch = datetime(2026, 7, 16, 1)
+    original_update = datetime(2026, 7, 16, 2)
+    async with async_session_factory() as session, session.begin():
+        session.add(
+            RunTenantScheduling(
+                tenant_id=queue.tenant_id,
+                last_dispatched_at=original_dispatch,
+                updated_at=original_update,
+            )
+        )
+
+    assert await _service(async_session_factory).schedule_once() is None
+
+    async with async_session_factory() as session:
+        cursor = await session.get(RunTenantScheduling, queue.tenant_id)
+    assert cursor is not None
+    assert (cursor.last_dispatched_at, cursor.updated_at) == (
+        original_dispatch,
+        original_update,
+    )
+
+
+@pytest.mark.asyncio
+async def test_cursor_bootstrap_is_one_statement_and_worker_snapshot_is_read_once(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime(2026, 7, 17, 1)
+    for offset in range(3):
+        await _create_queue(
+            async_session_factory,
+            queued_at=[now],
+            tenant_id=uuid.UUID(int=offset + 1),
+        )
+    await _create_worker(async_session_factory, capacity=3)
+    statements: list[str] = []
+    sync_engine = cast(Any, async_session_factory.kw["bind"]).sync_engine
+
+    def capture_sql(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        normalized = " ".join(statement.lower().split())
+        if "insert into run_tenant_scheduling" in normalized or (
+            "from run_attempts" in normalized
+            and "group by run_attempts.worker_id" in normalized
+            and "run_workers" in normalized
+        ):
+            statements.append(normalized)
+
+    event.listen(sync_engine, "before_cursor_execute", capture_sql)
+    try:
+        assert await _service(async_session_factory).schedule_once() is not None
+    finally:
+        event.remove(sync_engine, "before_cursor_execute", capture_sql)
+
+    cursor_inserts = [sql for sql in statements if "insert into run_tenant_scheduling" in sql]
+    worker_snapshots = [sql for sql in statements if "group by run_attempts.worker_id" in sql]
+    assert len(cursor_inserts) == 1
+    assert "select distinct runs.tenant_id" in cursor_inserts[0]
+    assert "order by runs.tenant_id" in cursor_inserts[0]
+    assert len(worker_snapshots) == 1
 
 
 @pytest.mark.asyncio
@@ -304,10 +485,15 @@ async def test_two_schedulers_assign_one_run_once(
 ) -> None:
     queue = await _create_queue(async_session_factory, queued_at=[datetime(2026, 7, 17, 1)])
     await _create_worker(async_session_factory, capacity=2)
+    await _create_cursors(async_session_factory, [queue.tenant_id])
+    barrier = TwoPartyBarrier()
 
-    results = await asyncio.gather(
-        _service(async_session_factory).schedule_once(),
-        _service(async_session_factory).schedule_once(),
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            CursorBarrierSchedulingService(async_session_factory, barrier).schedule_once(),
+            CursorBarrierSchedulingService(async_session_factory, barrier).schedule_once(),
+        ),
+        timeout=2,
     )
 
     assert sum(result is not None for result in results) == 1
@@ -321,17 +507,67 @@ async def test_two_schedulers_assign_one_run_once(
 
 
 @pytest.mark.asyncio
+async def test_two_schedulers_create_missing_cursors_concurrently_without_deadlock(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime(2026, 7, 17, 1)
+    queues = [
+        await _create_queue(
+            async_session_factory,
+            queued_at=[now],
+            tenant_id=uuid.UUID(int=offset),
+        )
+        for offset in (1, 2)
+    ]
+    await _create_worker(async_session_factory, capacity=2)
+    barrier = TwoPartyBarrier()
+
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            CursorBootstrapBarrierSchedulingService(async_session_factory, barrier).schedule_once(),
+            CursorBootstrapBarrierSchedulingService(async_session_factory, barrier).schedule_once(),
+        ),
+        timeout=2,
+    )
+
+    assert sum(result is not None for result in results) == 2
+    async with async_session_factory() as session:
+        cursor_count = await session.scalar(
+            select(func.count())
+            .select_from(RunTenantScheduling)
+            .where(RunTenantScheduling.tenant_id.in_([item.tenant_id for item in queues]))
+        )
+    assert cursor_count == 2
+
+
+@pytest.mark.asyncio
 async def test_two_schedulers_do_not_oversell_worker_capacity(
     async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     now = datetime(2026, 7, 17, 1)
-    first = await _create_queue(async_session_factory, queued_at=[now])
-    second = await _create_queue(async_session_factory, queued_at=[now])
+    first = await _create_queue(
+        async_session_factory,
+        queued_at=[now],
+        tenant_id=uuid.UUID(int=1),
+    )
+    second = await _create_queue(
+        async_session_factory,
+        queued_at=[now],
+        tenant_id=uuid.UUID(int=2),
+    )
     worker = await _create_worker(async_session_factory, capacity=1)
+    await _create_cursors(
+        async_session_factory,
+        [first.tenant_id, second.tenant_id],
+    )
+    barrier = TwoPartyBarrier()
 
-    results = await asyncio.gather(
-        _service(async_session_factory).schedule_once(),
-        _service(async_session_factory).schedule_once(),
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            WorkerBarrierSchedulingService(async_session_factory, barrier).schedule_once(),
+            WorkerBarrierSchedulingService(async_session_factory, barrier).schedule_once(),
+        ),
+        timeout=2,
     )
 
     assert sum(result is not None for result in results) == 1
@@ -354,11 +590,10 @@ async def test_tenant_round_robin_is_a1_b1_c1_a2(
     async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     now = datetime(2026, 7, 17, 1)
-    base = uuid.uuid4().int & ~0xFF
     queues = [
         await _create_queue(
             async_session_factory,
-            tenant_id=uuid.UUID(int=base + offset),
+            tenant_id=uuid.UUID(int=offset),
             queued_at=[now, now + timedelta(seconds=1)],
         )
         for offset in (1, 2, 3)
@@ -411,7 +646,12 @@ async def test_stale_and_draining_workers_are_rejected_after_candidate_read(
         capacity=1,
         heartbeat_delta=timedelta(minutes=-1),
     )
-    await _create_worker(async_session_factory, capacity=1, status="draining")
+    await _create_worker(
+        async_session_factory,
+        capacity=1,
+        status="draining",
+        worker_id=uuid.UUID(int=1001),
+    )
 
     assert await _service(async_session_factory).schedule_once() is None
 
@@ -429,7 +669,7 @@ async def test_worker_is_rechecked_after_snapshot_before_assignment(
     original = scheduling_module.load_schedulable_workers
     calls = 0
 
-    async def drain_after_second_snapshot(
+    async def drain_after_snapshot(
         session: AsyncSession,
         *,
         heartbeat_ttl: timedelta,
@@ -437,7 +677,7 @@ async def test_worker_is_rechecked_after_snapshot_before_assignment(
         nonlocal calls
         snapshots = await original(session, heartbeat_ttl=heartbeat_ttl)
         calls += 1
-        if calls == 2:
+        if calls == 1:
             async with async_session_factory() as writer, writer.begin():
                 await writer.execute(
                     update(RunWorker).where(RunWorker.id == worker.id).values(status="draining")
@@ -447,7 +687,7 @@ async def test_worker_is_rechecked_after_snapshot_before_assignment(
     monkeypatch.setattr(
         scheduling_module,
         "load_schedulable_workers",
-        drain_after_second_snapshot,
+        drain_after_snapshot,
     )
 
     assert await _service(async_session_factory).schedule_once() is None
@@ -460,6 +700,75 @@ async def test_worker_is_rechecked_after_snapshot_before_assignment(
         )
     assert run is not None and run.status == "queued"
     assert attempt_count == 0
+
+
+@pytest.mark.asyncio
+async def test_opposite_stale_worker_fallback_orders_do_not_deadlock(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    now = datetime(2026, 7, 17, 1)
+    first_queue = await _create_queue(
+        async_session_factory,
+        queued_at=[now],
+        tenant_id=uuid.UUID(int=1),
+    )
+    second_queue = await _create_queue(
+        async_session_factory,
+        queued_at=[now],
+        tenant_id=uuid.UUID(int=2),
+    )
+    await _create_cursors(
+        async_session_factory,
+        [first_queue.tenant_id, second_queue.tenant_id],
+    )
+    first_worker = await _create_worker(
+        async_session_factory,
+        capacity=1,
+        status="draining",
+        worker_id=uuid.uuid4(),
+    )
+    second_worker = await _create_worker(
+        async_session_factory,
+        capacity=1,
+        status="draining",
+        worker_id=uuid.uuid4(),
+    )
+    candidates = {
+        cast(uuid.UUID, first_worker.id): WorkerCandidate(
+            id=cast(uuid.UUID, first_worker.id),
+            capacity=1,
+            active_attempts=0,
+            last_assigned_at=None,
+        ),
+        cast(uuid.UUID, second_worker.id): WorkerCandidate(
+            id=cast(uuid.UUID, second_worker.id),
+            capacity=1,
+            active_attempts=0,
+            last_assigned_at=None,
+        ),
+    }
+    first_worker_id = cast(uuid.UUID, first_worker.id)
+    second_worker_id = cast(uuid.UUID, second_worker.id)
+    barrier = TwoPartyBarrier()
+    first = ReverseFallbackSchedulingService(
+        async_session_factory,
+        candidates=(candidates[first_worker_id], candidates[second_worker_id]),
+        first_worker_id=first_worker_id,
+        barrier=barrier,
+    )
+    second = ReverseFallbackSchedulingService(
+        async_session_factory,
+        candidates=(candidates[second_worker_id], candidates[first_worker_id]),
+        first_worker_id=second_worker_id,
+        barrier=barrier,
+    )
+
+    results = await asyncio.wait_for(
+        asyncio.gather(first.schedule_once(), second.schedule_once()),
+        timeout=1,
+    )
+
+    assert results == [None, None]
 
 
 @pytest.mark.asyncio
@@ -528,7 +837,7 @@ async def test_attempt_number_uses_max_plus_one(
 
 
 @pytest.mark.asyncio
-async def test_outbox_conflict_rolls_back_run_attempt_event_worker_and_cursor(
+async def test_non_whitelisted_outbox_unique_conflict_reraises_and_rolls_back(
     async_session_factory: async_sessionmaker[AsyncSession],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -547,7 +856,11 @@ async def test_outbox_conflict_rolls_back_run_attempt_event_worker_and_cursor(
         )
     monkeypatch.setattr("app.services.scheduling_service.uuid4", lambda: fixed_attempt_id)
 
-    assert await _service(async_session_factory).schedule_once() is None
+    with pytest.raises(IntegrityError) as captured:
+        await _service(async_session_factory).schedule_once()
+
+    original = cast(Any, captured.value.orig)
+    assert original.diag.constraint_name == "uq_run_outbox_dedupe_key"
 
     async with async_session_factory() as session:
         run = await session.get(Run, queue.runs[0].id)
