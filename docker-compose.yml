@@ -1,8 +1,111 @@
 services:
+  run-control-init:
+    profiles: ["run-control"]
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+    command: ["python", "-m", "app.processes.run_control_init"]
+    environment: &run-control-environment
+      POSTGRES_USER: ${RUN_CONTROL_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${RUN_CONTROL_POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_HOST: ${RUN_CONTROL_POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${RUN_CONTROL_POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${RUN_CONTROL_POSTGRES_DB:-industry_assistant}
+      REDIS_URL: ${RUN_CONTROL_REDIS_URL:-redis://redis:6379/0}
+      RUN_HEARTBEAT_TTL_SECONDS: ${RUN_HEARTBEAT_TTL_SECONDS:-3}
+      RUN_HEARTBEAT_INTERVAL_SECONDS: ${RUN_HEARTBEAT_INTERVAL_SECONDS:-0.5}
+      RUN_LEASE_SECONDS: ${RUN_LEASE_SECONDS:-3}
+      RUN_RENEW_INTERVAL_SECONDS: ${RUN_RENEW_INTERVAL_SECONDS:-0.5}
+      RUN_POLL_INTERVAL_SECONDS: ${RUN_POLL_INTERVAL_SECONDS:-0.2}
+      RUN_WORKER_CAPACITY: ${RUN_WORKER_CAPACITY:-1}
+      RUN_SIMULATED_DELAY_SECONDS: ${RUN_SIMULATED_DELAY_SECONDS:-0.5}
+      RUN_CONTROL_MINIMAL_IMPORTS: "1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - industry_network
+
+  run-scheduler-a:
+    profiles: ["run-control"]
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+    command: ["python", "-m", "app.processes.run_scheduler"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: &run-control-healthcheck
+      test: ["CMD", "test", "-f", "/tmp/run-control-ready"]
+      interval: 2s
+      timeout: 1s
+      retries: 15
+    stop_grace_period: 10s
+    networks: [industry_network]
+
+  run-scheduler-b:
+    profiles: ["run-control"]
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+    command: ["python", "-m", "app.processes.run_scheduler"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: *run-control-healthcheck
+    stop_grace_period: 10s
+    networks: [industry_network]
+
+  run-dispatcher:
+    profiles: ["run-control"]
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+    command: ["python", "-m", "app.processes.run_dispatcher"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: *run-control-healthcheck
+    stop_grace_period: 10s
+    networks: [industry_network]
+
+  run-worker-a:
+    profiles: ["run-control"]
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+    command: ["python", "-m", "app.processes.run_worker"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: *run-control-healthcheck
+    stop_grace_period: 10s
+    networks: [industry_network]
+
+  run-worker-b:
+    profiles: ["run-control"]
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+    command: ["python", "-m", "app.processes.run_worker"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: *run-control-healthcheck
+    stop_grace_period: 10s
+    networks: [industry_network]
+
   # ==================== PostgreSQL 数据库 ====================
   postgres:
     image: postgres:15-alpine
-    container_name: industry_postgres
+    container_name: ${RUN_CONTROL_POSTGRES_CONTAINER_NAME:-industry_postgres}
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -10,7 +113,7 @@ services:
       POSTGRES_DB: industry_assistant
       TZ: Asia/Shanghai
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PUBLISHED_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-db:/docker-entrypoint-initdb.d
@@ -25,11 +128,11 @@ services:
   # ==================== Redis 缓存 ====================
   redis:
     image: redis:7-alpine
-    container_name: industry_redis
+    container_name: ${RUN_CONTROL_REDIS_CONTAINER_NAME:-industry_redis}
     restart: unless-stopped
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "${REDIS_PUBLISHED_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:

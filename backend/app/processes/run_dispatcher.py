@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 from contextlib import suppress
+from typing import Any
 from uuid import UUID, uuid4
 
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -86,3 +88,38 @@ class RunDispatcher:
         if isinstance(exc, RedisConnectionError | ConnectionError | OSError):
             return "redis_connection_error"
         return "redis_delivery_error"
+
+
+async def _async_main() -> None:
+    from pathlib import Path
+
+    from redis.asyncio import Redis
+
+    from app.core.async_database import build_async_database
+
+    engine, factory = build_async_database()
+    redis: Any = Redis.from_url(
+        os.getenv("REDIS_URL", "redis://localhost:6379/0"), decode_responses=False
+    )
+    dispatcher = RunDispatcher(
+        RunOutboxService(factory),
+        RedisTransport(redis),
+        batch_size=int(os.getenv("RUN_DISPATCH_BATCH_SIZE", "100")),
+        poll_interval=float(os.getenv("RUN_POLL_INTERVAL_SECONDS", "0.5")),
+    )
+    dispatcher.install_signal_handlers()
+    try:
+        await redis.ping()
+        Path("/tmp/run-control-ready").touch()
+        await dispatcher.run_forever()
+    finally:
+        await redis.aclose()
+        await engine.dispose()
+
+
+def main() -> None:
+    asyncio.run(_async_main())
+
+
+if __name__ == "__main__":
+    main()
