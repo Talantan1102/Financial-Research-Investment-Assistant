@@ -133,6 +133,10 @@ async def test_bus_allows_token_metrics_that_are_not_credentials() -> None:
         "secret_key",
         "api_key_id",
         "private_key_id",
+        "APIKeyId",
+        "XAPIKeyId",
+        "ＡＰＩＫｅｙＩｄ",
+        "AWSAccessKeyId",
     ],
 )
 async def test_bus_rejects_normalized_credential_family_keys(credential_key: str) -> None:
@@ -162,6 +166,7 @@ async def test_bus_allows_real_token_metrics_and_ordinary_identifier_keys() -> N
             "cache_key": "cache-1",
             "semantic_key": "semantic-1",
             "tool_call_id": "call-1",
+            "public_key": "public-1",
         }
     )
 

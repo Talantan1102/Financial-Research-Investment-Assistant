@@ -21,6 +21,7 @@ RUN_STREAM_VERSION = "v1"
 RUN_STREAM_KINDS = (frozenset(get_args(EventType)) | {"input_request", "cancelled"}) - {"reasoning"}
 MAX_PAYLOAD_DEPTH = 64
 _CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_CREDENTIAL_KEY_FRAGMENTS = ("apikey", "privatekey", "accesskey")
 _SAFE_METRIC_KEY_FORMS = frozenset(
     {
         "tokencount",
@@ -86,6 +87,8 @@ def _is_sensitive_key(raw_key: str) -> bool:
     compact = "".join(parts)
     if compact in _SAFE_METRIC_KEY_FORMS:
         return False
+    if any(fragment in compact for fragment in _CREDENTIAL_KEY_FRAGMENTS):
+        return True
     if compact in _SENSITIVE_KEY_FORMS or any(part in _SENSITIVE_KEY_PARTS for part in parts):
         return True
     adjacent_parts = set(zip(parts, parts[1:], strict=False))
