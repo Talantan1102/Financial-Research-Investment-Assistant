@@ -30,21 +30,15 @@ def test_market_phases_and_next_open_day() -> None:
     calendar = FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)})
     clock = TradingClock(calendar)
 
-    assert clock.phase(datetime(2026, 7, 20, 10, 0, tzinfo=SHANGHAI)) == (
-        MarketPhase.MORNING
-    )
+    assert clock.phase(datetime(2026, 7, 20, 10, 0, tzinfo=SHANGHAI)) == (MarketPhase.MORNING)
     assert clock.phase(datetime(2026, 7, 20, 9, 20, tzinfo=SHANGHAI)) == (
         MarketPhase.OPENING_AUCTION
     )
-    assert clock.phase(datetime(2026, 7, 20, 12, 0, tzinfo=SHANGHAI)) == (
-        MarketPhase.LUNCH
-    )
+    assert clock.phase(datetime(2026, 7, 20, 12, 0, tzinfo=SHANGHAI)) == (MarketPhase.LUNCH)
     assert clock.phase(datetime(2026, 7, 20, 14, 58, tzinfo=SHANGHAI)) == (
         MarketPhase.CLOSING_AUCTION
     )
-    assert clock.phase(datetime(2026, 7, 20, 15, 1, tzinfo=SHANGHAI)) == (
-        MarketPhase.CLOSED
-    )
+    assert clock.phase(datetime(2026, 7, 20, 15, 1, tzinfo=SHANGHAI)) == (MarketPhase.CLOSED)
     assert calendar.next_open_date(date(2026, 7, 20)) == date(2026, 7, 21)
 
 
@@ -69,27 +63,19 @@ def test_market_phases_and_next_open_day() -> None:
 def test_phase_boundaries(at: tuple[int, int, int], expected: MarketPhase) -> None:
     hour, minute, second = at
 
-    assert _clock().phase(
-        datetime(2026, 7, 20, hour, minute, second, tzinfo=SHANGHAI)
-    ) == expected
+    assert _clock().phase(datetime(2026, 7, 20, hour, minute, second, tzinfo=SHANGHAI)) == expected
 
 
 def test_non_open_date_is_closed() -> None:
-    assert _clock().phase(datetime(2026, 7, 21, 10, 0, tzinfo=SHANGHAI)) == (
-        MarketPhase.CLOSED
-    )
+    assert _clock().phase(datetime(2026, 7, 21, 10, 0, tzinfo=SHANGHAI)) == (MarketPhase.CLOSED)
 
 
 def test_phase_converts_non_shanghai_timezone() -> None:
-    assert _clock().phase(datetime(2026, 7, 20, 2, 0, tzinfo=UTC)) == (
-        MarketPhase.MORNING
-    )
+    assert _clock().phase(datetime(2026, 7, 20, 2, 0, tzinfo=UTC)) == (MarketPhase.MORNING)
 
 
 def test_phase_converts_previous_local_date_to_open_shanghai_date() -> None:
-    assert _clock().phase(
-        datetime(2026, 7, 19, 18, 30, tzinfo=LOS_ANGELES)
-    ) == MarketPhase.MORNING
+    assert _clock().phase(datetime(2026, 7, 19, 18, 30, tzinfo=LOS_ANGELES)) == MarketPhase.MORNING
 
 
 @pytest.mark.parametrize(
