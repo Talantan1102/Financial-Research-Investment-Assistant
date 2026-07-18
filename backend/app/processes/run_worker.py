@@ -7,6 +7,7 @@ import json
 import os
 import signal
 import socket
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any, Protocol
 from uuid import UUID, uuid4
@@ -24,7 +25,17 @@ from app.run_control.redis_transport import (
 from app.run_control.types import OutboxType
 from app.services.attempt_service import AttemptCommandRejected, AttemptService, ClaimedAssignment
 from app.services.run_outbox import OutboxItem
+from app.services.run_stream_bus import RunStreamBus
 from app.services.worker_registry import WorkerRegistry
+
+
+def build_run_stream_event_sink(redis: Any) -> Callable[[Any], Awaitable[None]]:
+    bus = RunStreamBus(redis)
+
+    async def publish(event: Any) -> None:
+        await bus.publish(event)
+
+    return publish
 
 
 class RunExecutor(Protocol):
@@ -460,6 +471,7 @@ async def _async_main() -> None:
             ),
             continuation_keys=continuation_keys,
             renew_interval=renew_seconds,
+            event_sink=build_run_stream_event_sink(redis),
         )
     elif executor_mode == "simulated":
         instruction = SimulatedExecution(

@@ -160,6 +160,21 @@ class RunService:
         async with self._session_factory() as session, session.begin():
             return await self._get_visible_run(session, tenant_id, run_id, actor_id)
 
+    async def get_final_message(
+        self, tenant_id: UUID, run_id: UUID, actor_id: UUID
+    ) -> RunMessage | None:
+        async with self._session_factory() as session, session.begin():
+            run = await self._get_visible_run(session, tenant_id, run_id, actor_id)
+            if run.final_message_id is None:
+                return None
+            return await session.scalar(
+                select(RunMessage).where(
+                    RunMessage.tenant_id == run.tenant_id,
+                    RunMessage.session_id == run.session_id,
+                    RunMessage.id == run.final_message_id,
+                )
+            )
+
     async def list_events(
         self,
         tenant_id: UUID,

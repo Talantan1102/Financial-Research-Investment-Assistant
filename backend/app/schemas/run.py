@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -9,6 +11,34 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.run_control.types import RunStatus
+
+_REDIS_STREAM_ID = re.compile(r"^(?:0|[1-9][0-9]*)-(?:0|[1-9][0-9]*)$")
+
+
+@dataclass(frozen=True)
+class RunEventCursor:
+    durable_seq: int = 0
+    redis_id: str = "0-0"
+
+    @classmethod
+    def parse(cls, raw: str | None) -> RunEventCursor:
+        if raw is None:
+            return cls()
+        if raw.isascii() and raw.isdecimal():
+            return cls(durable_seq=int(raw))
+        parts = raw.split(":")
+        if (
+            len(parts) != 3
+            or parts[0] != "v1"
+            or not parts[1].isascii()
+            or not parts[1].isdecimal()
+            or _REDIS_STREAM_ID.fullmatch(parts[2]) is None
+        ):
+            raise ValueError("invalid Run event cursor")
+        return cls(durable_seq=int(parts[1]), redis_id=parts[2])
+
+    def encode(self) -> str:
+        return f"v1:{self.durable_seq}:{self.redis_id}"
 
 
 class RunCreateRequest(BaseModel):
