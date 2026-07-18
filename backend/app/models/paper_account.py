@@ -255,7 +255,7 @@ class PaperAccountResetAudit(Base):
     new_generation = Column(Integer, nullable=False)
     source_session_id = Column(String(64), nullable=False)
     confirmation_id = Column(String(64), nullable=False)
-    pre_reset_summary = Column(JSONB(), nullable=False)
+    pre_reset_summary = Column(JSONB(none_as_null=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (

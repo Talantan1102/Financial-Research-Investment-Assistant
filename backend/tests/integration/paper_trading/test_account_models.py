@@ -599,6 +599,16 @@ def _reset_audit(
     )
 
 
+def test_reset_audit_rejects_none_summary(db_session: Session, user: User) -> None:
+    old, new = _reset_pair(db_session, user)
+    audit = _reset_audit(user, old, new)
+    audit.pre_reset_summary = None  # type: ignore[assignment]
+    db_session.add(audit)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
 def test_reset_audit_rejects_generation_mismatch(db_session: Session, user: User) -> None:
     old, new = _reset_pair(db_session, user)
     audit = _reset_audit(user, old, new)
