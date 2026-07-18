@@ -178,6 +178,42 @@ def _components(llm: Any) -> Any:
     )
 
 
+def test_public_approval_snapshot_round_trips_through_standard_continuation() -> None:
+    command = _command(prompt="place it")
+    call = StepToolCall(id="call-1", name="place_order", arguments='{"quantity":1}')
+
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id="user-1",
+        pending_tool_calls=(call,),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+    executor = ChatRunExecutor(
+        user_id="user-1",
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=_components(_ScriptedLLM([_step("done")])),
+        event_sink=None,
+        cancel_event=asyncio.Event(),
+        provider="scripted",
+        model="scripted-v1",
+    )
+    resumed = ExecuteChatRun(
+        command.run_id,
+        uuid4(),
+        command.session_id,
+        '{"approved":true}',
+        (),
+        continuation,
+    )
+
+    state, pending, _prompt, decision = executor._initial_state(resumed, continuation)
+
+    assert decision == "approve"
+    assert pending == (call,)
+    assert state.messages[-1]["tool_calls"][0]["id"] == "call-1"
+
+
 async def test_completed_contract_usage_event_order_and_immutable_inputs() -> None:
     history_dict = {"role": "assistant", "content": {"nested": ["old"]}}
     history = (history_dict,)

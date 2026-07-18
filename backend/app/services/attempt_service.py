@@ -63,6 +63,8 @@ class LoadedChatExecution:
     history: tuple[dict[str, Any], ...]
     continuation: dict[str, Any] | None
     approved_semantic_keys: frozenset[str] = frozenset()
+    approved_tool_executions: tuple[tuple[str, UUID], ...] = ()
+    rejected_tool_execution_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -250,6 +252,8 @@ class AttemptService:
                 for message in reversed(history_rows)
             )
             continuation: dict[str, Any] | None = None
+            approved_tool_executions: tuple[tuple[str, UUID], ...] = ()
+            rejected_tool_execution_id: UUID | None = None
             prompt = cast(str, input_message.content)
             if cast(str | None, run.queue_reason) == "resume":
                 pause = await session.scalar(
@@ -270,6 +274,30 @@ class AttemptService:
                     limit=MAX_RESULT_BYTES,
                     label="pause response",
                 )
+                request = self._bounded_json_object(
+                    cast(Mapping[str, Any], pause.request_payload),
+                    limit=MAX_RESULT_BYTES,
+                    label="pause request",
+                )
+                execution_id_raw = request.get("execution_id")
+                tool_call = request.get("tool_call")
+                if execution_id_raw is not None:
+                    try:
+                        execution_id = UUID(str(execution_id_raw))
+                    except ValueError as exc:
+                        raise AttemptCommandRejected(
+                            "resolved run pause execution provenance is invalid"
+                        ) from exc
+                    if not isinstance(tool_call, Mapping) or not isinstance(
+                        tool_call.get("id"), str
+                    ):
+                        raise AttemptCommandRejected(
+                            "resolved run pause tool provenance is invalid"
+                        )
+                    if response.get("approved") is True:
+                        approved_tool_executions = ((cast(str, tool_call["id"]), execution_id),)
+                    elif response.get("approved") is False:
+                        rejected_tool_execution_id = execution_id
                 prompt = json.dumps(
                     response,
                     ensure_ascii=False,
@@ -284,6 +312,8 @@ class AttemptService:
                 original_prompt=cast(str, input_message.content),
                 history=history,
                 continuation=continuation,
+                approved_tool_executions=approved_tool_executions,
+                rejected_tool_execution_id=rejected_tool_execution_id,
             )
 
     async def complete_chat(
@@ -475,6 +505,7 @@ class AttemptService:
         request: Mapping[str, Any],
         safe_to_retry: bool,
         approved: bool,
+        approved_execution_id: UUID | None = None,
     ) -> ToolExecutionReservation:
         if not tool_call_id or len(tool_call_id) > 255:
             raise ValueError("tool_call_id must be 1..255 characters")
@@ -528,6 +559,12 @@ class AttemptService:
                     if status == "failed":
                         return ToolExecutionReservation(key, False, "failed", None)
                     return ToolExecutionReservation(key, False, status, None)
+                if approved and (
+                    approved_execution_id is None
+                    or cast(UUID, existing.id) != approved_execution_id
+                    or status != "approval_required"
+                ):
+                    raise AttemptCommandRejected("tool approval provenance does not match")
                 token = uuid4()
                 cast(Any, existing).status = "started"
                 cast(Any, existing).attempt_id = assignment.attempt_id
@@ -547,6 +584,9 @@ class AttemptService:
                     token,
                     cast(int, existing.execution_epoch),
                 )
+
+            if approved_execution_id is not None:
+                raise AttemptCommandRejected("tool approval provenance does not match")
 
             ambiguous = (
                 await session.scalar(
@@ -595,6 +635,31 @@ class AttemptService:
                 ambiguous,
             )
 
+    async def reject_tool_execution(
+        self, assignment: ClaimedAssignment, execution_id: UUID
+    ) -> None:
+        """Atomically converge one server-bound approval row to manual rejection."""
+        async with self._session_factory() as session, session.begin():
+            attempt, run = await self._lock_command_context(session, assignment.attempt_id)
+            now = cast(datetime, await session.scalar(select(_database_utc_now())))
+            self._require_assignment_authoritative(attempt, run, assignment, now)
+            row = await session.scalar(
+                select(RunToolExecution)
+                .where(
+                    RunToolExecution.id == execution_id,
+                    RunToolExecution.run_id == assignment.run_id,
+                )
+                .with_for_update()
+            )
+            if row is None or cast(str, row.status) != "approval_required":
+                raise AttemptCommandRejected("tool rejection provenance does not match")
+            cast(Any, row).status = "failed"
+            cast(Any, row).reservation_token = None
+            cast(Any, row).reservation_expires_at = None
+            cast(Any, row).finished_at = now
+            cast(Any, row).error_code = "manual_rejected"
+            cast(Any, row).error_message = "Tool execution was rejected by the user."
+
     async def find_unsafe_recovery(self, assignment: ClaimedAssignment) -> dict[str, Any] | None:
         """Return the oldest unresolved unsafe execution before any model rerun."""
         async with self._session_factory() as session, session.begin():
@@ -614,6 +679,10 @@ class AttemptService:
             )
             if row is None:
                 return None
+            if cast(str, row.status) == "started":
+                cast(Any, row).status = "approval_required"
+                cast(Any, row).reservation_token = None
+                cast(Any, row).reservation_expires_at = None
             summary = self._bounded_json_object(
                 cast(Mapping[str, Any], row.request_summary),
                 limit=16 * 1024,
@@ -623,6 +692,7 @@ class AttemptService:
             if not isinstance(request, dict):
                 raise AttemptCommandRejected("unsafe tool recovery request is invalid")
             return {
+                "execution_id": str(row.id),
                 "tool_call_id": cast(str, row.tool_call_id),
                 "tool_name": cast(str, row.tool_name),
                 "request": request,

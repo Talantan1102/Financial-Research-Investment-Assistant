@@ -248,7 +248,22 @@ def _upgrade_tool_reservation_columns(connection: Connection, changes: list[str]
     connection.execute(
         text("ALTER TABLE run_tool_executions ADD COLUMN execution_epoch integer DEFAULT 0")
     )
-    connection.execute(text("UPDATE run_tool_executions SET semantic_key = md5(idempotency_key)"))
+    connection.execute(
+        text(
+            "UPDATE run_tool_executions SET semantic_key = "
+            "CASE WHEN jsonb_typeof(request_summary->'args') = 'object' "
+            "THEN md5(tool_name || ':' || (request_summary->'args')::text) "
+            "ELSE md5(tool_name || ':' || request_summary::text || ':' || id::text) END"
+        )
+    )
+    connection.execute(
+        text(
+            "UPDATE run_tool_executions SET status = 'approval_required', "
+            "safe_to_retry = false, reservation_token = NULL, "
+            "reservation_expires_at = NULL, execution_epoch = 0 "
+            "WHERE status = 'started'"
+        )
+    )
     connection.execute(
         text("ALTER TABLE run_tool_executions ALTER COLUMN semantic_key SET NOT NULL")
     )

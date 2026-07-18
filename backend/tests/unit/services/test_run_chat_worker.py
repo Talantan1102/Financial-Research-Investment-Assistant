@@ -18,6 +18,7 @@ from app.services.run_chat_worker import (
     RunChatWorker,
     ToolRiskPolicy,
     load_continuation_keyring,
+    load_tool_risk_policy,
     resolve_llm_identity,
 )
 
@@ -80,6 +81,47 @@ class _Attempts:
         return self.unsafe_recovery
 
 
+@pytest.mark.asyncio
+async def test_builder_failure_is_fenced_and_clears_cancel_registration() -> None:
+    assignment = _assignment()
+    session_id = uuid4()
+    result = CompletedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        session_id,
+        "unused",
+        RunUsage("test", "scripted", 0, 0, 0, 0, 0.0),
+        (),
+        (),
+    )
+    loaded = type(
+        "Loaded",
+        (),
+        {
+            "session_id": session_id,
+            "user_id": uuid4(),
+            "prompt": "question",
+            "history": (),
+            "continuation": None,
+        },
+    )()
+    attempts = _Attempts(loaded, result)
+
+    def broken_builder(*_args: Any) -> _BuiltExecutor:
+        raise RuntimeError("builder exploded")
+
+    worker = RunChatWorker(
+        attempts=attempts,  # type: ignore[arg-type]
+        executor_builder=broken_builder,
+        continuation_keys=ContinuationKeyring(active_key_id="k1", keys={"k1": b"x" * 32}),
+    )
+
+    await worker.execute_assignment(assignment)
+
+    assert attempts.failed == 1
+    assert worker.request_cancel(assignment.attempt_id) is False
+
+
 def _assignment() -> ClaimedAssignment:
     return ClaimedAssignment(
         tenant_id=uuid4(),
@@ -110,6 +152,16 @@ async def test_server_risk_registry_fails_closed_except_explicit_safe_tools() ->
     assert policy.safe_to_retry("place_order") is False
     assert policy.safe_to_retry("unknown_mcp") is False
     assert policy.safe_to_retry("get_stock_quote") is True
+
+
+def test_production_risk_catalog_defaults_to_real_reads_and_rejects_unknown_config() -> None:
+    policy = load_tool_risk_policy({})
+    assert policy.safe_to_retry("memory_search") is True
+    assert policy.safe_to_retry("search_tools") is True
+    assert policy.safe_to_retry("memory_write") is False
+    assert policy.safe_to_retry("place_order") is False
+    with pytest.raises(ValueError, match="untrusted safe tool names"):
+        load_tool_risk_policy({"RUN_SAFE_IDEMPOTENT_TOOLS": "memory_search,place_order"})
 
 
 def test_server_keyring_supports_rotation_and_legacy_fallback_without_client_material() -> None:
@@ -418,6 +470,7 @@ async def test_prior_unsafe_started_row_pauses_before_model_or_tool_builder() ->
     )()
     attempts = _Attempts(loaded, result)
     attempts.unsafe_recovery = {
+        "execution_id": str(uuid4()),
         "tool_call_id": "call-a",
         "tool_name": "place_order",
         "request": {"symbol": "600519.SH", "quantity": 1},

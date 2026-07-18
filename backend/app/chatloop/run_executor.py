@@ -721,31 +721,89 @@ class ChatRunExecutor:
     ) -> dict[str, Any]:
         if self._continuation_secret is None:
             raise ValueError("continuation authentication is not configured")
+        return self._encode_snapshot(
+            command,
+            state=state,
+            pending_tool_calls=pending_tool_calls,
+            pause_type=pause_type,
+            user_id=self._user_id,
+            continuation_secret=self._continuation_secret,
+            continuation_key_id=self._continuation_key_id,
+        )
+
+    @classmethod
+    def _encode_snapshot(
+        cls,
+        command: ExecuteChatRun,
+        *,
+        state: ChatLoopState,
+        pending_tool_calls: tuple[StepToolCall, ...],
+        pause_type: Literal["input", "approval"],
+        user_id: str,
+        continuation_secret: bytes,
+        continuation_key_id: str,
+    ) -> dict[str, Any]:
         body = {
             "run_id": str(command.run_id),
             "session_id": str(command.session_id),
-            "user_id": self._user_id,
+            "user_id": user_id,
             "pause_type": pause_type,
             "state": state.model_dump(mode="json"),
             "pending_tool_calls": [call.model_dump(mode="json") for call in pending_tool_calls],
         }
-        ChatRunExecutor._validate_pause_snapshot(state, pending_tool_calls, pause_type)
+        cls._validate_pause_snapshot(state, pending_tool_calls, pause_type)
         signature = hmac.new(
-            self._continuation_secret,
-            _portable_json_bytes(body, max_bytes=self.MAX_CONTINUATION_BYTES),
+            continuation_secret,
+            _portable_json_bytes(body, max_bytes=cls.MAX_CONTINUATION_BYTES),
             hashlib.sha256,
         ).hexdigest()
         payload = {
             "version": 1,
-            "key_id": self._continuation_key_id,
+            "key_id": continuation_key_id,
             "body": body,
             "signature": signature,
         }
-        canonical = _canonical_portable_json(
-            payload, max_bytes=ChatRunExecutor.MAX_CONTINUATION_BYTES
-        )
+        canonical = _canonical_portable_json(payload, max_bytes=cls.MAX_CONTINUATION_BYTES)
         assert isinstance(canonical, dict)
         return canonical
+
+    @classmethod
+    def approval_snapshot(
+        cls,
+        command: ExecuteChatRun,
+        *,
+        user_id: str,
+        pending_tool_calls: tuple[StepToolCall, ...],
+        continuation_secret: bytes,
+        continuation_key_id: str,
+    ) -> dict[str, Any]:
+        """Build the same authenticated approval continuation used by live pauses."""
+        assistant_calls = [
+            {
+                "id": call.id,
+                "type": "function",
+                "function": {"name": call.name, "arguments": call.arguments},
+            }
+            for call in pending_tool_calls
+        ]
+        state = ChatLoopState(
+            user_id=user_id,
+            session_id=str(command.session_id),
+            request_id=str(command.run_id),
+            messages=[
+                {"role": "user", "content": command.prompt},
+                {"role": "assistant", "content": None, "tool_calls": assistant_calls},
+            ],
+        )
+        return cls._encode_snapshot(
+            command,
+            state=state,
+            pending_tool_calls=pending_tool_calls,
+            pause_type="approval",
+            user_id=user_id,
+            continuation_secret=continuation_secret,
+            continuation_key_id=continuation_key_id,
+        )
 
     @staticmethod
     def _canonical_arguments(raw: Any) -> str:

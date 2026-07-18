@@ -5,20 +5,31 @@ import sys
 import uuid
 from datetime import timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID
 
 import pytest
 import pytest_asyncio
+from app.chatloop.gates import GateConfig
 from app.chatloop.run_executor import CompletedResult, FailedResult, PauseResult, RunUsage
+from app.chatloop.tool_hub import ToolHub
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
 from app.models.run_execution import RunToolExecution, RunUsageRecord
 from app.models.run_scheduling import RunOutbox, RunWorker
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.services.attempt_service import AttemptCommandRejected, AttemptService
-from app.services.run_chat_worker import ContinuationKeyring, RunChatWorker
+from app.services.llm_step import StepResult, StepToolCall
+from app.services.run_chat_worker import (
+    ContinuationKeyring,
+    RunChatWorker,
+    ToolRiskPolicy,
+    build_chat_executor_builder,
+)
 from app.services.trace_models import TraceSpanRow
+from app.tools.base import Tool
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -33,7 +44,9 @@ def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
 @pytest_asyncio.fixture
 async def claimed(
     pg_async_session_factory: async_sessionmaker[AsyncSession],
+    pg_test_engine: Any,
 ) -> tuple[AttemptService, Any, UUID]:
+    del pg_test_engine
     async_session_factory = pg_async_session_factory
     suffix = uuid.uuid4().hex
     async with async_session_factory() as session, session.begin():
@@ -128,6 +141,241 @@ async def claimed(
 
 def _usage() -> RunUsage:
     return RunUsage("test", "scripted", 3, 2, 1, 5, 0.125)
+
+
+class _ReadArgs(BaseModel):
+    query: str
+
+
+class _ReadTool(Tool):
+    name = "memory_search"
+    description = "read"
+    args_schema = _ReadArgs
+
+    async def run(self, args: _ReadArgs) -> dict[str, Any]:
+        return {"answer": args.query}
+
+
+class _OrderArgs(BaseModel):
+    symbol: str
+    quantity: int
+
+
+class _OrderTool(Tool):
+    name = "place_order"
+    description = "mutate"
+    args_schema = _OrderArgs
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    async def run(self, args: _OrderArgs) -> dict[str, Any]:
+        self.calls.append(args.symbol)
+        return {"accepted": True}
+
+
+class _ScriptedSteps:
+    provider = "scripted"
+    default_model = "scripted-v1"
+
+    def __init__(self) -> None:
+        self.steps = [
+            StepResult(
+                content="",
+                tool_calls=[
+                    StepToolCall(
+                        id="call-production",
+                        name="memory_search",
+                        arguments='{"query":"position"}',
+                    )
+                ],
+                finish_reason="tool_calls",
+                prompt_tokens=2,
+                completion_tokens=1,
+                cached_tokens=0,
+                cost_cny=0.0,
+            ),
+            StepResult(
+                content="done",
+                tool_calls=[],
+                finish_reason="stop",
+                prompt_tokens=2,
+                completion_tokens=1,
+                cached_tokens=0,
+                cost_cny=0.0,
+            ),
+        ]
+
+    async def stream_step(self, **_kwargs: Any) -> StepResult:
+        return self.steps.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_production_builder_runs_real_toolhub_toolloop_and_pg_ledger(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, assignment, _user_id = claimed
+    llm = _ScriptedSteps()
+
+    def components(_singletons: Any, **_kwargs: Any) -> Any:
+        hub = ToolHub()
+        hub.register_inprocess([_ReadTool()])
+        return type(
+            "Components",
+            (),
+            {
+                "llm": llm,
+                "tool_hub": hub,
+                "gate_cfg": GateConfig(),
+                "skill_listing": "",
+                "system_prompt": "assistant",
+            },
+        )()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "app.chatloop.worker_wiring",
+        SimpleNamespace(build_turn_components=components),
+    )
+    builder = build_chat_executor_builder(
+        object(),
+        provider="scripted",
+        model="scripted-v1",
+        risk_policy=ToolRiskPolicy.from_trusted_names({"memory_search"}),
+    )
+
+    await RunChatWorker(
+        attempts=service,
+        executor_builder=builder,
+        continuation_keys=ContinuationKeyring(active_key_id="active", keys={"active": b"k" * 32}),
+    ).execute_assignment(assignment)
+
+    async with pg_async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        row = await session.scalar(
+            select(RunToolExecution).where(RunToolExecution.run_id == assignment.run_id)
+        )
+    assert run.status == "completed"
+    assert row.status == "completed" and row.tool_call_id == "call-production"
+    assert row.execution_epoch == 1 and row.reservation_token is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("approved", "expected_calls"), [(True, 1), (False, 0)])
+async def test_recovery_resume_uses_standard_continuation_and_exact_pg_row(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+    approved: bool,
+    expected_calls: int,
+) -> None:
+    service, assignment, _user_id = claimed
+    request = {"symbol": "600519.SH", "quantity": 1}
+    async with pg_async_session_factory() as session, session.begin():
+        current = await session.get(RunAttempt, assignment.attempt_id)
+        current.attempt_no = 2
+        prior = RunAttempt(run_id=assignment.run_id, attempt_no=1, status="lost")
+        session.add(prior)
+        await session.flush()
+        row = RunToolExecution(
+            run_id=assignment.run_id,
+            attempt_id=prior.id,
+            tool_call_id="call-recover",
+            idempotency_key=service.tool_idempotency_key(
+                assignment.run_id, "call-recover", "place_order", request
+            ),
+            semantic_key=service.tool_semantic_key("place_order", request),
+            tool_name="place_order",
+            request_summary={"args": request},
+            safe_to_retry=False,
+            status="approval_required",
+            execution_epoch=0,
+        )
+        session.add(row)
+        await session.flush()
+        execution_id = row.id
+
+    await RunChatWorker(
+        attempts=service,
+        executor_builder=lambda *_args: (_ for _ in ()).throw(
+            AssertionError("builder before approval")
+        ),
+        continuation_keys=ContinuationKeyring(active_key_id="active", keys={"active": b"k" * 32}),
+    ).execute_assignment(assignment)
+
+    async with pg_async_session_factory() as session, session.begin():
+        run = await session.get(Run, assignment.run_id)
+        pause = await session.scalar(select(RunPause).where(RunPause.run_id == run.id))
+        assert pause.request_payload["execution_id"] == str(execution_id)
+        pause.response_payload = {"approved": approved}
+        pause.resolved_at = func.timezone("UTC", func.statement_timestamp())
+        run.status = "assigned"
+        run.queue_reason = "resume"
+        next_attempt = RunAttempt(
+            run_id=run.id,
+            attempt_no=3,
+            status="assigned",
+            worker_id=assignment.worker_id,
+            lease_expires_at=func.timezone("UTC", func.statement_timestamp())
+            + timedelta(seconds=30),
+        )
+        session.add(next_attempt)
+        await session.flush()
+        next_attempt_id = next_attempt.id
+    claim = await service.claim(next_attempt_id, assignment.worker_id)
+    assert claim.claimed and claim.assignment is not None
+
+    calls: list[str] = []
+    llm = _ScriptedSteps()
+    llm.steps = [
+        StepResult(
+            content="decision recorded",
+            tool_calls=[],
+            finish_reason="stop",
+            prompt_tokens=1,
+            completion_tokens=1,
+            cached_tokens=0,
+            cost_cny=0.0,
+        )
+    ]
+
+    def components(_singletons: Any, **_kwargs: Any) -> Any:
+        hub = ToolHub()
+        hub.register_inprocess([_OrderTool(calls)])
+        return SimpleNamespace(
+            llm=llm,
+            tool_hub=hub,
+            gate_cfg=GateConfig(),
+            skill_listing="",
+            system_prompt="assistant",
+        )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "app.chatloop.worker_wiring",
+        SimpleNamespace(build_turn_components=components),
+    )
+    builder = build_chat_executor_builder(
+        object(),
+        provider="scripted",
+        model="scripted-v1",
+        risk_policy=ToolRiskPolicy.from_trusted_names(set()),
+    )
+    await RunChatWorker(
+        attempts=service,
+        executor_builder=builder,
+        continuation_keys=ContinuationKeyring(active_key_id="active", keys={"active": b"k" * 32}),
+    ).execute_assignment(claim.assignment)
+
+    async with pg_async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        row = await session.get(RunToolExecution, execution_id)
+    assert run.status == "completed"
+    assert len(calls) == expected_calls
+    assert row.status == ("completed" if approved else "failed")
+    assert row.error_code == (None if approved else "manual_rejected")
 
 
 @pytest.mark.asyncio
@@ -510,6 +758,86 @@ async def test_prior_attempt_unsafe_crash_creates_real_pause_before_builder(
     assert run.status == "waiting_approval" and attempt.status == "paused"
     assert pause is not None and pause.pause_type == "approval"
     assert pause.request_payload["reason"] == "unsafe_tool_outcome_unknown"
+
+
+@pytest.mark.asyncio
+async def test_exact_execution_id_is_required_to_approve_existing_ledger_row(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    request = {"symbol": "600519.SH", "quantity": 1}
+    pending = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-exact",
+        tool_name="place_order",
+        request=request,
+        safe_to_retry=False,
+        approved=False,
+    )
+    assert pending.status == "approval_required"
+    async with pg_async_session_factory() as session:
+        row = await session.scalar(
+            select(RunToolExecution).where(
+                RunToolExecution.run_id == assignment.run_id,
+                RunToolExecution.tool_call_id == "call-exact",
+            )
+        )
+        execution_id = row.id
+
+    with pytest.raises(AttemptCommandRejected, match="approval provenance"):
+        await service.reserve_tool_execution(
+            assignment,
+            tool_call_id="call-exact",
+            tool_name="place_order",
+            request=request,
+            safe_to_retry=False,
+            approved=True,
+            approved_execution_id=uuid.uuid4(),
+        )
+    approved = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-exact",
+        tool_name="place_order",
+        request=request,
+        safe_to_retry=False,
+        approved=True,
+        approved_execution_id=execution_id,
+    )
+    assert approved.execute and approved.execution_epoch == 1
+    assert approved.reservation_token is not None
+
+
+@pytest.mark.asyncio
+async def test_manual_reject_converges_exact_row_with_database_time(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-reject",
+        tool_name="memory_write",
+        request={"memory": "x"},
+        safe_to_retry=False,
+        approved=False,
+    )
+    async with pg_async_session_factory() as session:
+        row = await session.scalar(
+            select(RunToolExecution).where(
+                RunToolExecution.run_id == assignment.run_id,
+                RunToolExecution.tool_call_id == "call-reject",
+            )
+        )
+        execution_id = row.id
+
+    await service.reject_tool_execution(assignment, execution_id)
+
+    async with pg_async_session_factory() as session:
+        row = await session.get(RunToolExecution, execution_id)
+    assert row.status == "failed" and row.error_code == "manual_rejected"
+    assert row.finished_at is not None
+    assert row.reservation_token is None and row.reservation_expires_at is None
 
 
 @pytest.mark.asyncio

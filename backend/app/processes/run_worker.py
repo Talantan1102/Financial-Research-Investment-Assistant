@@ -436,9 +436,9 @@ async def _async_main() -> None:
         from app.services.mcp_client import MCPClient
         from app.services.run_chat_worker import (
             RunChatWorker,
-            ToolRiskPolicy,
             build_chat_executor_builder,
             load_continuation_keyring,
+            load_tool_risk_policy,
             resolve_llm_identity,
         )
 
@@ -456,13 +456,7 @@ async def _async_main() -> None:
                 singletons,
                 provider=provider,
                 model=model,
-                risk_policy=ToolRiskPolicy.from_trusted_names(
-                    {
-                        name.strip()
-                        for name in os.getenv("RUN_SAFE_IDEMPOTENT_TOOLS", "").split(",")
-                        if name.strip()
-                    }
-                ),
+                risk_policy=load_tool_risk_policy(os.environ),
             ),
             continuation_keys=continuation_keys,
             renew_interval=renew_seconds,

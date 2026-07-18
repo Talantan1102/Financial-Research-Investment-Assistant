@@ -211,11 +211,47 @@ def test_pre_reservation_fence_schema_upgrades_and_is_idempotent(
     isolated_schema_engine: Engine,
 ) -> None:
     _downgrade_to_pre_reservation_fence(isolated_schema_engine)
+    ids = {status: uuid.uuid4() for status in ("started", "completed", "failed")}
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(text("ALTER TABLE run_tool_executions DISABLE TRIGGER ALL"))
+        for status, row_id in ids.items():
+            result = "'{\"ok\":true}'::jsonb" if status == "completed" else "NULL"
+            error = "'failed'" if status == "failed" else "NULL"
+            finished = "now()" if status in {"completed", "failed"} else "NULL"
+            connection.exec_driver_sql(
+                "INSERT INTO run_tool_executions "
+                "(id, run_id, attempt_id, tool_call_id, idempotency_key, tool_name, "
+                "request_summary, status, result_summary, error_code, error_message, "
+                "started_at, finished_at) VALUES "
+                f"('{row_id}', '{uuid.uuid4()}', '{uuid.uuid4()}', 'call-{status}', "
+                f"'key-{status}', 'tool', '{{\"args\":{{\"status\":\"{status}\"}}}}', "
+                f"'{status}', {result}, {error}, NULL, now(), {finished})"
+            )
 
     changes = migrate_phase3_execution_schema(isolated_schema_engine)
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(text("ALTER TABLE run_tool_executions ENABLE TRIGGER ALL"))
 
     assert "add run_tool_executions reservation ownership columns" in changes
     _assert_phase3_schema(isolated_schema_engine)
+    with isolated_schema_engine.connect() as connection:
+        rows = {
+            str(row.id): row
+            for row in connection.execute(
+                text(
+                    "SELECT id, status, safe_to_retry, reservation_token, "
+                    "reservation_expires_at, execution_epoch, semantic_key "
+                    "FROM run_tool_executions"
+                )
+            )
+        }
+    assert rows[str(ids["started"])].status == "approval_required"
+    assert rows[str(ids["completed"])].status == "completed"
+    assert rows[str(ids["failed"])].status == "failed"
+    for row in rows.values():
+        assert row.safe_to_retry is False
+        assert row.reservation_token is None and row.reservation_expires_at is None
+        assert row.execution_epoch == 0 and len(row.semantic_key) == 32
     assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
 
 
