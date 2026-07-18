@@ -128,6 +128,38 @@ def test_rulebook_rejects_semantically_invalid_fixture_at_construction(
     assert expected_context in str(caught.value)
 
 
+@pytest.mark.parametrize(
+    ("field", "ratio"),
+    [
+        ("normal_limit_ratio", "1.00"),
+        ("normal_limit_ratio", "1.20"),
+        ("risk_warning_limit_ratio", "1.00"),
+        ("risk_warning_limit_ratio", "1.20"),
+    ],
+)
+def test_rulebook_rejects_price_limit_ratio_at_or_above_one(field: str, ratio: str) -> None:
+    fixture = _valid_fixture()
+    boards = cast(dict[str, Any], fixture["boards"])
+    main = cast(dict[str, Any], boards["main"])
+    main[field] = ratio
+
+    with pytest.raises(ValueError, match="^invalid A-share rulebook fixture:") as caught:
+        RuleBook(fixture)
+
+    assert f"main.{field}" in str(caught.value)
+
+
+def test_rulebook_accepts_very_small_positive_price_limit_ratio() -> None:
+    fixture = _valid_fixture()
+    boards = cast(dict[str, Any], fixture["boards"])
+    main = cast(dict[str, Any], boards["main"])
+    main["normal_limit_ratio"] = "0.000001"
+
+    resolved = _resolve(RuleBook(fixture))
+
+    assert resolved.price_limit_ratio == Decimal("0.000001")
+
+
 def test_rulebook_missing_board_ratio_reports_board_context() -> None:
     fixture = _valid_fixture()
     boards = cast(dict[str, Any], fixture["boards"])

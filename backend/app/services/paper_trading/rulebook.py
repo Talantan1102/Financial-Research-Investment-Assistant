@@ -39,12 +39,12 @@ class RuleBook:
                 if not isinstance(raw_limits, dict):
                     raise TypeError(f"{board} must be an object")
                 normalized_boards[board] = _BoardLimits(
-                    normal=_require_positive_decimal(
+                    normal=_require_ratio(
                         raw_limits,
                         "normal_limit_ratio",
                         field=f"{board}.normal_limit_ratio",
                     ),
-                    risk_warning=_require_positive_decimal(
+                    risk_warning=_require_ratio(
                         raw_limits,
                         "risk_warning_limit_ratio",
                         field=f"{board}.risk_warning_limit_ratio",
@@ -184,6 +184,13 @@ def _require_positive_decimal(
     if not decimal_value.is_finite() or decimal_value <= 0:
         raise ValueError(f"{field} must be positive and finite")
     return decimal_value
+
+
+def _require_ratio(value: dict[str, Any], key: str, *, field: str) -> Decimal:
+    ratio = _require_positive_decimal(value, key, field=field)
+    if ratio >= 1:
+        raise ValueError(f"{field} must be less than one")
+    return ratio
 
 
 def _round_to_tick(value: Decimal, tick: Decimal) -> Decimal:
