@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
+import hmac
 import json
 from dataclasses import FrozenInstanceError
 from datetime import date
@@ -22,6 +24,40 @@ from app.chatloop.run_executor import (
     PauseResult,
 )
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
+
+TEST_CONTINUATION_SECRET = b"s" * 32
+
+
+def _signed_test_continuation(
+    command: ExecuteChatRun,
+    *,
+    user_id: str,
+    pause_type: str,
+    state: dict[str, Any],
+    pending_tool_calls: list[dict[str, Any]] | None = None,
+    key_id: str = "default",
+) -> dict[str, Any]:
+    body = {
+        "run_id": str(command.run_id),
+        "session_id": str(command.session_id),
+        "user_id": user_id,
+        "pause_type": pause_type,
+        "state": state,
+        "pending_tool_calls": pending_tool_calls or [],
+    }
+    encoded = json.dumps(
+        body,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return {
+        "version": 1,
+        "key_id": key_id,
+        "body": body,
+        "signature": hmac.new(TEST_CONTINUATION_SECRET, encoded, hashlib.sha256).hexdigest(),
+    }
 
 
 class _ScriptedLLM:
@@ -120,7 +156,7 @@ def _step(text: str, *, input_tokens: int = 11, output_tokens: int = 7) -> StepR
 
 
 def _command(
-    *, prompt: str = "分析茅台", history: tuple[dict[str, Any], ...] = ()
+    *, prompt: str = "鍒嗘瀽鑼呭彴", history: tuple[dict[str, Any], ...] = ()
 ) -> ExecuteChatRun:
     return ExecuteChatRun(
         run_id=uuid4(),
@@ -154,6 +190,7 @@ async def test_completed_contract_usage_event_order_and_immutable_inputs() -> No
     llm = _ScriptedLLM([_step("answer")])
     executor = ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(llm),
         event_sink=collect,
         cancel_event=asyncio.Event(),
@@ -206,8 +243,10 @@ async def test_pause_contract_is_serializable_bounded_and_resumable(
     )
     llm = _ScriptedLLM([first_step])
     controller = _PauseAt(phase, pause_type)
+    trusted_user = uuid4()
     executor = ChatRunExecutor(
-        user_id=uuid4(),
+        user_id=trusted_user,
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(llm),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -239,7 +278,8 @@ async def test_pause_contract_is_serializable_bounded_and_resumable(
     resumed_llm = _ScriptedLLM([_step("resumed", input_tokens=13, output_tokens=3)])
     resumed_hub = _RecordingHub() if pause_type == "approval" else _Hub()
     resumed_executor = ChatRunExecutor(
-        user_id=uuid4(),
+        user_id=trusted_user,
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=SimpleNamespace(
             **{
                 **vars(_components(resumed_llm)),
@@ -273,8 +313,10 @@ async def test_rejected_approval_closes_protocol_without_dispatch() -> None:
         cached_tokens=0,
         cost_cny=0.0,
     )
+    trusted_user = uuid4()
     paused = await ChatRunExecutor(
-        user_id=uuid4(),
+        user_id=trusted_user,
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_ScriptedLLM([first_step])),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -285,7 +327,8 @@ async def test_rejected_approval_closes_protocol_without_dispatch() -> None:
     hub = _RecordingHub()
     llm = _ScriptedLLM([_step("not executed")])
     result = await ChatRunExecutor(
-        user_id=uuid4(),
+        user_id=trusted_user,
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=SimpleNamespace(**{**vars(_components(llm)), "tool_hub": hub}),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -311,43 +354,45 @@ async def test_rejected_approval_closes_protocol_without_dispatch() -> None:
 
 async def test_input_resume_does_not_project_historical_tools_as_attempt_failures() -> None:
     command = _command()
-    continuation = {
-        "pause_type": "input",
-        "state": {
-            "user_id": str(uuid4()),
-            "session_id": str(command.session_id),
-            "request_id": str(command.run_id),
-            "step": 1,
-            "messages": [
-                {
-                    "role": "assistant",
-                    "content": "",
-                    "tool_calls": [
-                        {
-                            "id": "old-call",
-                            "type": "function",
-                            "function": {"name": "old_tool", "arguments": "{}"},
-                        }
-                    ],
-                },
-                {"role": "tool", "tool_call_id": "old-call", "content": "old"},
-            ],
-            "ledger": {
-                "entries": [
+    trusted_user = str(uuid4())
+    state = {
+        "user_id": str(uuid4()),
+        "session_id": str(command.session_id),
+        "request_id": str(command.run_id),
+        "step": 1,
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
                     {
-                        "step": 1,
-                        "tool_name": "old_tool",
-                        "args_hash": "44136fa355b3678a",
-                        "digest": "old",
-                        "success": True,
+                        "id": "old-call",
+                        "type": "function",
+                        "function": {"name": "old_tool", "arguments": "{}"},
                     }
-                ]
+                ],
             },
+            {"role": "tool", "tool_call_id": "old-call", "content": "old"},
+        ],
+        "ledger": {
+            "entries": [
+                {
+                    "step": 1,
+                    "tool_call_id": "old-call",
+                    "tool_name": "old_tool",
+                    "args_hash": "44136fa355b3678a",
+                    "digest": "old",
+                    "success": True,
+                }
+            ]
         },
-        "pending_tool_calls": [],
     }
+    continuation = _signed_test_continuation(
+        command, user_id=trusted_user, pause_type="input", state=state
+    )
     result = await ChatRunExecutor(
-        user_id=uuid4(),
+        user_id=trusted_user,
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_ScriptedLLM([_step("new answer")])),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -374,7 +419,8 @@ def test_tool_result_has_one_canonical_runtime_identity() -> None:
 async def test_malformed_pending_arguments_fail_pause_as_strict_result() -> None:
     call = StepToolCall(id="malformed", name="dangerous_tool", arguments="{")
     result = await ChatRunExecutor(
-        user_id=uuid4(),
+        user_id="test-user",
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(
             _ScriptedLLM(
                 [
@@ -413,6 +459,10 @@ async def test_server_identity_overwrites_continuation_identity() -> None:
         cancel_event=asyncio.Event(),
         pause_controller=_PauseAt("before_model", "input"),
         user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+    )
+    continuation = _signed_test_continuation(
+        command, user_id=str(user_id), pause_type="input", state=state
     )
     result = await executor.execute(
         ExecuteChatRun(
@@ -421,17 +471,18 @@ async def test_server_identity_overwrites_continuation_identity() -> None:
             command.session_id,
             "resume",
             (),
-            {"pause_type": "input", "state": state, "pending_tool_calls": []},
+            continuation,
         )
     )
     assert isinstance(result, PauseResult)
-    assert result.continuation["state"]["user_id"] == str(user_id)
+    assert result.continuation["body"]["state"]["user_id"] == str(user_id)
 
 
 async def test_model_error_and_cancel_are_structured_without_secret_leakage() -> None:
     secret = "sk-secret at C:\\private\\worker.py"
     failed = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_ScriptedLLM([], error=RuntimeError(secret))),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -444,6 +495,7 @@ async def test_model_error_and_cancel_are_structured_without_secret_leakage() ->
     cancel = asyncio.Event()
     cancelled = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_ScriptedLLM([_step("partial answer")], cancel_event=cancel)),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=cancel,
@@ -477,6 +529,7 @@ async def test_cancel_closes_stream_and_oversized_continuation_is_classified() -
 
     cancelled = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_GeneratorLLM()),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=cancel,
@@ -496,6 +549,7 @@ async def test_cancel_closes_stream_and_oversized_continuation_is_classified() -
     )
     failed = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_ScriptedLLM([_step("unused")])),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -510,6 +564,7 @@ async def test_dependency_and_sink_failures_still_return_strict_result_union() -
 
     completed = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_ScriptedLLM([_step("answer")])),
         event_sink=broken_sink,
         cancel_event=asyncio.Event(),
@@ -522,6 +577,7 @@ async def test_dependency_and_sink_failures_still_return_strict_result_union() -
 
     failed = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components_factory=broken_factory,
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -536,6 +592,7 @@ async def test_force_conclude_model_failure_is_model_error() -> None:
     components.gate_cfg = GateConfig(max_steps=0)
     failed = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=components,
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -577,13 +634,23 @@ def test_executor_import_graph_is_transport_free() -> None:
 def test_worker_wiring_exposes_run_executor_transport_boundary() -> None:
     path = Path(__file__).parents[3] / "app" / "chatloop" / "worker_wiring.py"
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
-    assert "build_run_executor" in functions
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    builder = functions["build_run_executor"]
+    defaults = dict(
+        zip(
+            (argument.arg for argument in builder.args.kwonlyargs),
+            builder.args.kw_defaults,
+            strict=True,
+        )
+    )
+    assert defaults["continuation_secret"] is None
+    assert defaults["provider"] is None
 
 
 async def _approval_pause_with_calls(calls: list[StepToolCall]) -> PauseResult:
     paused = await ChatRunExecutor(
-        user_id=uuid4(),
+        user_id="test-user",
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(
             _ScriptedLLM(
                 [
@@ -628,24 +695,25 @@ async def test_forged_approval_continuation_is_rejected_without_dispatch(
         [StepToolCall(id="safe-id", name="dangerous_tool", arguments='{"x":1}')]
     )
     continuation = paused.thaw_continuation()
+    body = continuation["body"]
     if mutation == "empty_messages":
-        continuation["state"]["messages"] = []
+        body["state"]["messages"] = []
     elif mutation == "id":
-        continuation["pending_tool_calls"][0]["id"] = "forged"
+        body["pending_tool_calls"][0]["id"] = "forged"
     elif mutation == "name":
-        continuation["pending_tool_calls"][0]["name"] = "other_tool"
+        body["pending_tool_calls"][0]["name"] = "other_tool"
     elif mutation == "args":
-        continuation["pending_tool_calls"][0]["arguments"] = '{"x":2}'
+        body["pending_tool_calls"][0]["arguments"] = '{"x":2}'
     elif mutation == "pause_type":
-        continuation["pause_type"] = "other"
+        body["pause_type"] = "other"
     elif mutation == "input_with_pending":
-        continuation["pause_type"] = "input"
+        body["pause_type"] = "input"
     elif mutation == "existing_response":
-        continuation["state"]["messages"].insert(
+        body["state"]["messages"].insert(
             -1, {"role": "tool", "tool_call_id": "safe-id", "content": "done"}
         )
     elif mutation == "existing_ledger":
-        continuation["state"]["ledger"]["entries"].append(
+        body["state"]["ledger"]["entries"].append(
             {
                 "step": 1,
                 "tool_call_id": "safe-id",
@@ -656,13 +724,14 @@ async def test_forged_approval_continuation_is_rejected_without_dispatch(
             }
         )
     else:
-        continuation["pending_tool_calls"].append(dict(continuation["pending_tool_calls"][0]))
-        continuation["state"]["messages"][-1]["tool_calls"].append(
-            dict(continuation["state"]["messages"][-1]["tool_calls"][0])
+        body["pending_tool_calls"].append(dict(body["pending_tool_calls"][0]))
+        body["state"]["messages"][-1]["tool_calls"].append(
+            dict(body["state"]["messages"][-1]["tool_calls"][0])
         )
     hub = _RecordingHub()
     result = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=SimpleNamespace(
             **{**vars(_components(_ScriptedLLM([_step("unused")]))), "tool_hub": hub}
         ),
@@ -710,6 +779,7 @@ async def test_hostile_continuation_preflight_is_bounded(
     command = _command()
     result = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_ScriptedLLM([_step("unused")])),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -742,6 +812,7 @@ async def test_non_string_key_and_excessive_depth_are_rejected() -> None:
     for continuation, expected in cases:
         result = await ChatRunExecutor(
             user_id=uuid4(),
+            continuation_secret=TEST_CONTINUATION_SECRET,
             components=_components(_ScriptedLLM([_step("unused")])),
             event_sink=lambda _event: asyncio.sleep(0),
             cancel_event=asyncio.Event(),
@@ -765,20 +836,23 @@ async def test_valid_continuation_is_canonicalized_without_deepcopy() -> None:
             raise AssertionError("continuation must be preflighted, not deep-copied")
 
     command = _command()
+    trusted_user = str(uuid4())
     continuation = _NoDeepcopyDict(
-        {
-            "pause_type": "input",
-            "state": {
+        _signed_test_continuation(
+            command,
+            user_id=trusted_user,
+            pause_type="input",
+            state={
                 "user_id": "forged",
                 "session_id": str(command.session_id),
                 "request_id": str(command.run_id),
                 "messages": [],
             },
-            "pending_tool_calls": [],
-        }
+        )
     )
     result = await ChatRunExecutor(
-        user_id=uuid4(),
+        user_id=trusted_user,
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(_ScriptedLLM([_step("ok")])),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -800,21 +874,22 @@ async def test_pause_result_nested_data_is_immutable_and_has_controlled_json() -
         [StepToolCall(id="immutable", name="dangerous_tool", arguments="{}")]
     )
     with pytest.raises(TypeError):
-        paused.continuation["state"]["messages"] = []  # type: ignore[index]
+        paused.continuation["body"]["state"]["messages"] = []  # type: ignore[index]
     with pytest.raises(TypeError):
         dict.__setitem__(paused.continuation, "pause_type", "forged")  # type: ignore[arg-type]
     with pytest.raises(TypeError):
         paused.request["nested"]["choices"][0] = "mutate"  # type: ignore[index]
     thawed = paused.thaw_continuation()
-    thawed["state"]["messages"].clear()
-    assert paused.continuation["state"]["messages"]
-    assert json.loads(paused.continuation_json())["pause_type"] == "approval"
+    thawed["body"]["state"]["messages"].clear()
+    assert paused.continuation["body"]["state"]["messages"]
+    assert json.loads(paused.continuation_json())["body"]["pause_type"] == "approval"
 
 
 async def test_reference_date_and_provider_are_injected() -> None:
     llm = _ScriptedLLM([_step("ok")])
     result = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=_components(llm),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
@@ -868,6 +943,7 @@ async def test_tool_projection_matches_call_id_under_reverse_mixed_completion() 
     )
     result = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=SimpleNamespace(
             **{
                 **vars(_components(_ScriptedLLM([first, _step("done")]))),
@@ -904,12 +980,13 @@ async def test_fresh_duplicate_tool_call_ids_fail_before_dispatch() -> None:
     hub = _RecordingHub()
     result = await ChatRunExecutor(
         user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=SimpleNamespace(**{**vars(_components(_ScriptedLLM([first]))), "tool_hub": hub}),
         event_sink=lambda _event: asyncio.sleep(0),
         cancel_event=asyncio.Event(),
     ).execute(_command())
     assert isinstance(result, FailedResult)
-    assert result.error_code == "model_error"
+    assert result.error_code == "tool_error"
     assert hub.calls == []
 
 
@@ -939,7 +1016,8 @@ async def test_approval_hard_failure_keeps_all_pending_tool_audit(
     if cancel_before_dispatch:
         cancel.set()
     result = await ChatRunExecutor(
-        user_id=uuid4(),
+        user_id="test-user",
+        continuation_secret=TEST_CONTINUATION_SECRET,
         components=SimpleNamespace(
             **{
                 **vars(_components(_ScriptedLLM([_step("unused")]))),
@@ -967,3 +1045,297 @@ async def test_approval_hard_failure_keeps_all_pending_tool_audit(
         assert result.error_code == "tool_error"
         assert [tool.status for tool in result.tools] == ["failed", "completed"]
         assert result.tools[1].digest == "second-complete"
+
+
+async def test_tool_call_id_reuse_across_model_rounds_fails_before_second_dispatch() -> None:
+    first = StepResult(
+        content="",
+        tool_calls=[StepToolCall(id="reused", name="same_tool", arguments='{"x":1}')],
+        finish_reason="tool_calls",
+        prompt_tokens=1,
+        completion_tokens=1,
+        cached_tokens=0,
+        cost_cny=0,
+    )
+    second = StepResult(
+        content="",
+        tool_calls=[StepToolCall(id="reused", name="same_tool", arguments='{"x":2}')],
+        finish_reason="tool_calls",
+        prompt_tokens=1,
+        completion_tokens=1,
+        cached_tokens=0,
+        cost_cny=0,
+    )
+    hub = _RecordingHub()
+    result = await ChatRunExecutor(
+        user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(
+            **{**vars(_components(_ScriptedLLM([first, second]))), "tool_hub": hub}
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(_command())
+    assert isinstance(result, FailedResult)
+    assert result.error_code == "tool_error"
+    assert [call.id for call in hub.calls] == ["reused"]
+    assert [(tool.tool_call_id, tool.status) for tool in result.tools] == [
+        ("reused", "completed"),
+        ("reused", "failed"),
+    ]
+
+
+async def test_tool_call_id_reuse_from_continuation_history_fails_before_dispatch() -> None:
+    command = _command()
+    state = {
+        "user_id": "untrusted-snapshot-user",
+        "session_id": str(command.session_id),
+        "request_id": str(command.run_id),
+        "step": 1,
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "historical-id",
+                        "type": "function",
+                        "function": {"name": "same_tool", "arguments": '{"x":1}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "historical-id", "content": "old"},
+        ],
+        "ledger": {
+            "entries": [
+                {
+                    "step": 1,
+                    "tool_call_id": "historical-id",
+                    "tool_name": "same_tool",
+                    "args_hash": "5041bf1f713df204",
+                    "digest": "old-digest",
+                    "success": True,
+                }
+            ]
+        },
+    }
+    continuation = _signed_test_continuation(
+        command,
+        user_id="trusted-user",
+        pause_type="input",
+        state=state,
+    )
+    reused = StepResult(
+        content="",
+        tool_calls=[StepToolCall(id="historical-id", name="same_tool", arguments='{"x":2}')],
+        finish_reason="tool_calls",
+        prompt_tokens=1,
+        completion_tokens=1,
+        cached_tokens=0,
+        cost_cny=0,
+    )
+    hub = _RecordingHub()
+    result = await ChatRunExecutor(
+        user_id="trusted-user",
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(
+            **{**vars(_components(_ScriptedLLM([reused]))), "tool_hub": hub}
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            "resume",
+            (),
+            continuation,
+        )
+    )
+    assert isinstance(result, FailedResult)
+    assert result.error_code == "tool_error"
+    assert hub.calls == []
+    assert [(tool.tool_call_id, tool.status) for tool in result.tools] == [
+        ("historical-id", "failed")
+    ]
+
+
+async def test_empty_tool_call_id_is_tool_error_without_dispatch() -> None:
+    first = StepResult(
+        content="",
+        tool_calls=[StepToolCall(id="", name="same_tool", arguments="{}")],
+        finish_reason="tool_calls",
+        prompt_tokens=1,
+        completion_tokens=1,
+        cached_tokens=0,
+        cost_cny=0,
+    )
+    hub = _RecordingHub()
+    result = await ChatRunExecutor(
+        user_id=uuid4(),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(**{**vars(_components(_ScriptedLLM([first]))), "tool_hub": hub}),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(_command())
+    assert isinstance(result, FailedResult)
+    assert result.error_code == "tool_error"
+    assert hub.calls == []
+
+
+async def test_continuation_envelope_is_signed_and_context_bound() -> None:
+    paused = await ChatRunExecutor(
+        user_id="trusted-user",
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="test-key",
+        components=_components(_ScriptedLLM([_step("unused")])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+        pause_controller=_PauseAt("before_model", "input"),
+    ).execute(_command())
+    assert isinstance(paused, PauseResult)
+    envelope = paused.thaw_continuation()
+    assert set(envelope) == {"version", "key_id", "body", "signature"}
+    assert envelope["version"] == 1
+    assert envelope["key_id"] == "test-key"
+    assert envelope["body"]["user_id"] == "trusted-user"
+    assert len(envelope["signature"]) == 64
+    assert len(paused.continuation_json().encode("utf-8")) <= 64 * 1024
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "body",
+        "signature",
+        "key_id",
+        "run",
+        "session",
+        "user",
+        "missing_signature",
+        "wrong_secret",
+    ],
+)
+async def test_tampered_or_replayed_continuation_is_rejected_without_dispatch(
+    tamper: str,
+) -> None:
+    command = _command()
+    paused = await ChatRunExecutor(
+        user_id="trusted-user",
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="test-key",
+        components=_components(_ScriptedLLM([_step("unused")])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+        pause_controller=_PauseAt("before_model", "input"),
+    ).execute(command)
+    assert isinstance(paused, PauseResult)
+    envelope = paused.thaw_continuation()
+    resume_run_id = paused.run_id
+    resume_session_id = paused.session_id
+    resume_user = "trusted-user"
+    secret = TEST_CONTINUATION_SECRET
+    if tamper == "body":
+        envelope["body"]["state"]["messages"].append({"role": "user", "content": "forged"})
+    elif tamper == "signature":
+        envelope["signature"] = "0" * 64
+    elif tamper == "key_id":
+        envelope["key_id"] = "other-key"
+    elif tamper == "run":
+        resume_run_id = uuid4()
+    elif tamper == "session":
+        resume_session_id = uuid4()
+    elif tamper == "user":
+        resume_user = "other-user"
+    elif tamper == "missing_signature":
+        del envelope["signature"]
+    else:
+        secret = b"w" * 32
+    hub = _RecordingHub()
+    result = await ChatRunExecutor(
+        user_id=resume_user,
+        continuation_secret=secret,
+        continuation_key_id="test-key",
+        components=SimpleNamespace(
+            **{**vars(_components(_ScriptedLLM([_step("unused")]))), "tool_hub": hub}
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            resume_run_id,
+            uuid4(),
+            resume_session_id,
+            "resume",
+            (),
+            envelope,
+        )
+    )
+    assert isinstance(result, FailedResult)
+    assert result.error_code == "invalid_continuation"
+    assert hub.calls == []
+
+
+async def test_pause_without_server_secret_fails_closed_but_fresh_completion_works() -> None:
+    fresh = await ChatRunExecutor(
+        user_id=uuid4(),
+        components=_components(_ScriptedLLM([_step("fresh")])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(_command())
+    assert isinstance(fresh, CompletedResult)
+    paused = await ChatRunExecutor(
+        user_id=uuid4(),
+        components=_components(_ScriptedLLM([_step("unused")])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+        pause_controller=_PauseAt("before_model", "input"),
+    ).execute(_command())
+    assert isinstance(paused, FailedResult)
+    assert paused.error_code == "executor_error"
+
+    command = _command()
+    continuation = _signed_test_continuation(
+        command,
+        user_id="trusted-user",
+        pause_type="input",
+        state={
+            "user_id": "snapshot-user",
+            "session_id": str(command.session_id),
+            "request_id": str(command.run_id),
+            "messages": [],
+        },
+    )
+    hub = _RecordingHub()
+    resumed = await ChatRunExecutor(
+        user_id="trusted-user",
+        components=SimpleNamespace(
+            **{**vars(_components(_ScriptedLLM([_step("unused")]))), "tool_hub": hub}
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            "resume",
+            (),
+            continuation,
+        )
+    )
+    assert isinstance(resumed, FailedResult)
+    assert resumed.error_code == "invalid_continuation"
+    assert hub.calls == []
+
+
+def test_continuation_secret_must_have_256_bits() -> None:
+    with pytest.raises(ValueError, match="at least 32 bytes"):
+        ChatRunExecutor(
+            user_id="trusted-user",
+            continuation_secret=b"too-short",
+            components=_components(_ScriptedLLM([_step("unused")])),
+            event_sink=lambda _event: asyncio.sleep(0),
+            cancel_event=asyncio.Event(),
+        )

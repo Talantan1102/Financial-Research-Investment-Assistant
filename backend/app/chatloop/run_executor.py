@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
+import hmac
 import json
 import math
 from collections.abc import Awaitable, Callable, Mapping
@@ -48,6 +50,14 @@ ComponentsFactory = Callable[
 
 @dataclass(frozen=True)
 class ExecuteChatRun:
+    """One transport-independent Run attempt.
+
+    A continuation must come from an atomically resolved ``RunPause``.  Its HMAC
+    proves origin and context, but this deliberately stateless executor is not
+    the one-time-consumption store; ``RunService.resume_run`` owns that boundary.
+    The envelope is not attempt-bound so a resolved pause can start a new attempt.
+    """
+
     run_id: UUID
     attempt_id: UUID
     session_id: UUID
@@ -195,7 +205,7 @@ def thaw_json(value: JsonValue) -> Any:
     return value
 
 
-def _canonical_portable_json(value: Any, *, max_bytes: int) -> Any:
+def _portable_json_bytes(value: Any, *, max_bytes: int) -> bytes:
     """Validate hostile input iteratively before allocating a defensive JSON copy."""
 
     max_depth = 64
@@ -242,6 +252,7 @@ def _canonical_portable_json(value: Any, *, max_bytes: int) -> Any:
     encoder = json.JSONEncoder(
         ensure_ascii=False,
         allow_nan=False,
+        sort_keys=True,
         separators=(",", ":"),
     )
     encoded = bytearray()
@@ -250,7 +261,11 @@ def _canonical_portable_json(value: Any, *, max_bytes: int) -> Any:
         if len(encoded) + len(chunk_bytes) > max_bytes:
             raise _ContinuationTooLargeError("continuation exceeds byte limit")
         encoded.extend(chunk_bytes)
-    return json.loads(encoded.decode("utf-8"))
+    return bytes(encoded)
+
+
+def _canonical_portable_json(value: Any, *, max_bytes: int) -> Any:
+    return json.loads(_portable_json_bytes(value, max_bytes=max_bytes).decode("utf-8"))
 
 
 def _final_text(state: ChatLoopState) -> str:
@@ -275,6 +290,8 @@ class ChatRunExecutor:
         event_sink: EventSink,
         cancel_event: asyncio.Event,
         user_id: UUID | str,
+        continuation_secret: bytes | None = None,
+        continuation_key_id: str = "default",
         pause_controller: PauseControllerProtocol | None = None,
         provider: str = "unknown",
         model: str = "unknown",
@@ -290,6 +307,12 @@ class ChatRunExecutor:
         self._event_sink = event_sink
         self._cancel_event = cancel_event
         self._user_id = str(user_id)
+        if continuation_secret is not None and len(continuation_secret) < 32:
+            raise ValueError("continuation_secret must be at least 32 bytes")
+        if not continuation_key_id:
+            raise ValueError("continuation_key_id must not be empty")
+        self._continuation_secret = continuation_secret
+        self._continuation_key_id = continuation_key_id
         self._pause_controller = pause_controller
         self._provider = provider
         self._model = model
@@ -441,7 +464,10 @@ class ChatRunExecutor:
             state = paused.state
             try:
                 continuation_payload = self._snapshot(
-                    state, paused.pending_tool_calls, paused.directive.pause_type
+                    command,
+                    state,
+                    paused.pending_tool_calls,
+                    paused.directive.pause_type,
                 )
                 request_payload = _canonical_portable_json(
                     paused.directive.request, max_bytes=self.MAX_CONTINUATION_BYTES
@@ -610,18 +636,27 @@ class ChatRunExecutor:
                 None,
                 None,
             )
+        body = self._authenticate_continuation(command, continuation)
         if (
-            set(continuation) != {"pause_type", "state", "pending_tool_calls"}
-            or not isinstance(continuation["state"], dict)
-            or not isinstance(continuation["pending_tool_calls"], list)
+            set(body)
+            != {
+                "run_id",
+                "session_id",
+                "user_id",
+                "pause_type",
+                "state",
+                "pending_tool_calls",
+            }
+            or not isinstance(body["state"], dict)
+            or not isinstance(body["pending_tool_calls"], list)
         ):
             raise ValueError("unknown continuation shape")
-        pause_type = continuation["pause_type"]
+        pause_type = body["pause_type"]
         if pause_type not in {"input", "approval"}:
             raise ValueError("unknown pause type")
-        state = ChatLoopState.model_validate(continuation["state"])
+        state = ChatLoopState.model_validate(body["state"])
         pending_tool_calls = tuple(
-            StepToolCall.model_validate(call) for call in continuation["pending_tool_calls"]
+            StepToolCall.model_validate(call) for call in body["pending_tool_calls"]
         )
         self._validate_pause_snapshot(state, pending_tool_calls, pause_type)
         state.user_id = self._user_id
@@ -650,18 +685,62 @@ class ChatRunExecutor:
             "approve" if response["approved"] else "reject",
         )
 
-    @staticmethod
+    def _authenticate_continuation(
+        self, command: ExecuteChatRun, envelope: dict[str, Any]
+    ) -> dict[str, Any]:
+        if self._continuation_secret is None:
+            raise ValueError("continuation authentication is not configured")
+        if set(envelope) != {"version", "key_id", "body", "signature"}:
+            raise ValueError("unknown continuation envelope")
+        if (
+            envelope["version"] != 1
+            or envelope["key_id"] != self._continuation_key_id
+            or not isinstance(envelope["body"], dict)
+            or not isinstance(envelope["signature"], str)
+        ):
+            raise ValueError("invalid continuation envelope")
+        body = envelope["body"]
+        body_bytes = _portable_json_bytes(body, max_bytes=self.MAX_CONTINUATION_BYTES)
+        expected = hmac.new(self._continuation_secret, body_bytes, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, envelope["signature"]):
+            raise ValueError("invalid continuation signature")
+        if (
+            body.get("run_id") != str(command.run_id)
+            or body.get("session_id") != str(command.session_id)
+            or body.get("user_id") != self._user_id
+        ):
+            raise ValueError("continuation context mismatch")
+        return body
+
     def _snapshot(
+        self,
+        command: ExecuteChatRun,
         state: ChatLoopState,
         pending_tool_calls: tuple[StepToolCall, ...],
         pause_type: Literal["input", "approval"],
     ) -> dict[str, Any]:
-        payload = {
+        if self._continuation_secret is None:
+            raise ValueError("continuation authentication is not configured")
+        body = {
+            "run_id": str(command.run_id),
+            "session_id": str(command.session_id),
+            "user_id": self._user_id,
             "pause_type": pause_type,
             "state": state.model_dump(mode="json"),
             "pending_tool_calls": [call.model_dump(mode="json") for call in pending_tool_calls],
         }
         ChatRunExecutor._validate_pause_snapshot(state, pending_tool_calls, pause_type)
+        signature = hmac.new(
+            self._continuation_secret,
+            _portable_json_bytes(body, max_bytes=self.MAX_CONTINUATION_BYTES),
+            hashlib.sha256,
+        ).hexdigest()
+        payload = {
+            "version": 1,
+            "key_id": self._continuation_key_id,
+            "body": body,
+            "signature": signature,
+        }
         canonical = _canonical_portable_json(
             payload, max_bytes=ChatRunExecutor.MAX_CONTINUATION_BYTES
         )
@@ -788,13 +867,13 @@ class ChatRunExecutor:
             calls.append((state.step, call.id, call.name, request))
 
         tools: list[ToolExecution] = []
-        ledger_by_call_id = {
-            entry.tool_call_id: entry
-            for entry in state.ledger.entries[baseline.ledger_count :]
-            if entry.tool_call_id is not None
-        }
+        ledger_by_call_id: dict[str, list[Any]] = {}
+        for entry in state.ledger.entries[baseline.ledger_count :]:
+            if entry.tool_call_id is not None:
+                ledger_by_call_id.setdefault(entry.tool_call_id, []).append(entry)
         for call_step, call_id, call_name, request in calls:
-            ledger = ledger_by_call_id.get(call_id)
+            matching_entries = ledger_by_call_id.get(call_id, [])
+            ledger = matching_entries.pop(0) if matching_entries else None
             if ledger is not None and (
                 ledger.tool_name != call_name or ledger.args_hash != args_hash_of(request)
             ):

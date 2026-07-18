@@ -194,6 +194,7 @@ class ToolLoop:
     ) -> ChatLoopState:
         max_steps = self._gate_cfg.max_steps
         if pending_tool_calls:
+            self._validate_tool_call_ids(state, list(pending_tool_calls))
             if self._cancel is not None and self._cancel.is_set():
                 raise CancelledByUser("cancelled before resumed tool dispatch")
             if approval_decision == "approve":
@@ -298,11 +299,7 @@ class ToolLoop:
             if state.tool_choice == "none":
                 raise RuntimeError("tool_choice=none 下模型仍产出 tool_calls — 协议违例")
 
-            tool_call_ids = [call.id for call in step_result.tool_calls]
-            if any(not call_id for call_id in tool_call_ids) or len(set(tool_call_ids)) != len(
-                tool_call_ids
-            ):
-                raise ModelExecutionError("model emitted empty or duplicate tool_call ids")
+            self._validate_tool_call_ids(state, step_result.tool_calls)
 
             if self._pause_controller is not None:
                 directive = await self._pause_controller.check(
@@ -372,6 +369,27 @@ class ToolLoop:
         state = apply_results(state, merged, calls)
         update_burned(state, self._gate_cfg)
         return state, False
+
+    @staticmethod
+    def _validate_tool_call_ids(state: ChatLoopState, calls: list[StepToolCall]) -> None:
+        current_ids = [call.id for call in calls]
+        if any(not call_id for call_id in current_ids) or len(set(current_ids)) != len(current_ids):
+            raise ToolExecutionError("empty or duplicate tool_call ids")
+
+        used_ids = {
+            entry.tool_call_id for entry in state.ledger.entries if entry.tool_call_id is not None
+        }
+        # apply_step has already appended the current assistant batch. Exclude
+        # that tail while collecting IDs used by all earlier Run turns.
+        for message in state.messages[:-1]:
+            if message.get("role") != "assistant":
+                continue
+            for call in message.get("tool_calls", []):
+                call_id = str(call.get("id", ""))
+                if call_id:
+                    used_ids.add(call_id)
+        if any(call_id in used_ids for call_id in current_ids):
+            raise ToolExecutionError("tool_call id was already used in this Run")
 
     # ------------------------------------------------------------------
     # 图抽取:figures 发 chart 事件并剥离出 LLM 上下文(spec § 5)

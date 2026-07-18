@@ -504,8 +504,8 @@ async def test_scenario_8_spinning_force_conclude():
     args = {"ts_code": "600519.SH"}
     llm = FakeLLM(
         [
-            _step(tool_calls=[_call("get_stock_quote", args)]),
-            _step(tool_calls=[_call("get_stock_quote", args)]),  # 完全相同
+            _step(tool_calls=[_call("get_stock_quote", args, id_="spin-1")]),
+            _step(tool_calls=[_call("get_stock_quote", args, id_="spin-2")]),  # 完全相同
             _step(content="检测到打转,基于已有信息作答。", finish_reason="stop"),
         ]
     )
