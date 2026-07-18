@@ -2,7 +2,7 @@ import json
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 import pytest
 from app.services.paper_trading.errors import PaperTradingError
@@ -86,10 +86,12 @@ def test_builtin_fixture_has_versioned_rates_and_official_sources() -> None:
         ("buy", Decimal("0"), Decimal("0.0003"), Decimal("5")),
         ("buy", Decimal("-1"), Decimal("0.0003"), Decimal("5")),
         ("buy", Decimal("NaN"), Decimal("0.0003"), Decimal("5")),
+        ("buy", Decimal("1e999999"), Decimal("0.0003"), Decimal("5")),
         ("buy", Decimal("1000"), Decimal("-0.1"), Decimal("5")),
         ("buy", Decimal("1000"), Decimal("Infinity"), Decimal("5")),
         ("buy", Decimal("1000"), Decimal("0.0003"), Decimal("-1")),
         ("buy", Decimal("1000"), Decimal("0.0003"), Decimal("NaN")),
+        ("buy", Decimal("1000"), Decimal("0.0003"), Decimal("1e999999")),
     ],
 )
 def test_fee_schedule_rejects_invalid_calculation_inputs(
@@ -100,7 +102,7 @@ def test_fee_schedule_rejects_invalid_calculation_inputs(
 ) -> None:
     with pytest.raises(PaperTradingError) as caught:
         FeeSchedule.from_builtin_fixture().calculate(
-            side=side,
+            side=cast(Literal["buy", "sell"], side),
             gross=gross,
             commission_rate=commission_rate,
             minimum_commission=minimum_commission,

@@ -1,6 +1,6 @@
 import json
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, DecimalException, InvalidOperation
 from pathlib import Path
 from typing import Any, Literal
 
@@ -63,7 +63,7 @@ class FeeSchedule:
     def calculate(
         self,
         *,
-        side: str,
+        side: Literal["buy", "sell"],
         gross: Decimal,
         commission_rate: Decimal = Decimal("0.0003"),
         minimum_commission: Decimal = Decimal("5.00"),
@@ -75,11 +75,16 @@ class FeeSchedule:
         if commission_rate >= 1:
             raise PaperTradingError("invalid_fee_input", "commission_rate must be less than one")
 
-        commission = _round_cents(max(minimum_commission, gross * commission_rate))
-        stamp_duty = _round_cents(
-            gross * self._sell_stamp_duty_rate if resolved_side == "sell" else Decimal(0)
-        )
-        transfer_fee = _round_cents(gross * self._transfer_fee_rate)
+        try:
+            commission = _round_cents(max(minimum_commission, gross * commission_rate))
+            stamp_duty = _round_cents(
+                gross * self._sell_stamp_duty_rate if resolved_side == "sell" else Decimal(0)
+            )
+            transfer_fee = _round_cents(gross * self._transfer_fee_rate)
+        except DecimalException as exc:
+            raise PaperTradingError(
+                "invalid_fee_input", "fee values cannot be represented in cents"
+            ) from exc
         return FeeBreakdown(
             commission=commission,
             stamp_duty=stamp_duty,
