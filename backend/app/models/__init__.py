@@ -32,6 +32,12 @@ from .monitoring import (
     Notification,
 )
 from .news import BiddingInfo, IndustryNews, NewsCollectionTask
+from .paper_account import (
+    PaperAccount,
+    PaperAccountResetAudit,
+    PaperCashLedger,
+    PaperHoldingLot,
+)
 from .position import Position
 from .position_snapshot import PositionSnapshot  # noqa: F401
 from .research import ResearchCheckpoint
@@ -62,6 +68,10 @@ __all__ = [
     "IndustryNews",
     "BiddingInfo",
     "NewsCollectionTask",
+    "PaperAccount",
+    "PaperAccountResetAudit",
+    "PaperCashLedger",
+    "PaperHoldingLot",
     "DetailStatus",
     "MonitoringAlert",
     "MonitoringRun",
