@@ -251,21 +251,43 @@ class RunWorker:
                 assignment.attempt_id, assignment.worker_id, assignment.claim_token
             )
             return
-        execution = asyncio.create_task(self._executor.execute(assignment))
+        execution = asyncio.create_task(self._execute_assignment(assignment))
         control = asyncio.create_task(self._wait_for_cancel(control_key, assignment))
         done, _ = await asyncio.wait({execution, control}, return_when=asyncio.FIRST_COMPLETED)
         if control in done and control.result():
-            execution.cancel()
-            with suppress(asyncio.CancelledError):
-                await execution
-            await self._attempts.acknowledge_cancel(
-                assignment.attempt_id, assignment.worker_id, assignment.claim_token
-            )
+            requested = False
+            request_cancel = getattr(self._executor, "request_cancel", None)
+            if request_cancel is not None:
+                requested = bool(request_cancel(assignment.attempt_id))
+            if requested:
+                try:
+                    await asyncio.wait_for(execution, timeout=self._shutdown_grace_seconds)
+                except TimeoutError:
+                    execution.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await execution
+                    await self._attempts.acknowledge_cancel(
+                        assignment.attempt_id, assignment.worker_id, assignment.claim_token
+                    )
+            else:
+                execution.cancel()
+                with suppress(asyncio.CancelledError):
+                    await execution
+                await self._attempts.acknowledge_cancel(
+                    assignment.attempt_id, assignment.worker_id, assignment.claim_token
+                )
             return
         control.cancel()
         with suppress(asyncio.CancelledError):
             await control
         await execution
+
+    async def _execute_assignment(self, assignment: ClaimedAssignment) -> None:
+        execute_assignment = getattr(self._executor, "execute_assignment", None)
+        if execute_assignment is not None:
+            await execute_assignment(assignment)
+            return
+        await self._executor.execute(assignment)
 
     async def _wait_for_cancel(self, key: str, assignment: ClaimedAssignment) -> bool:
         while not self._shutdown.is_set():
@@ -397,11 +419,54 @@ async def _async_main() -> None:
         factory,
         lease_duration=__import__("datetime").timedelta(seconds=lease_seconds),
     )
-    instruction = SimulatedExecution(
-        delay_seconds=float(os.getenv("RUN_SIMULATED_DELAY_SECONDS", "0")),
-        result=json.loads(os.getenv("RUN_SIMULATED_RESULT_JSON", '{"simulated":true}')),
-        crash=os.getenv("RUN_SIMULATED_CRASH", "0") == "1",
-    )
+    executor_mode = os.getenv("RUN_EXECUTOR_MODE", "simulated")
+    mcp_context: Any = None
+    if executor_mode == "chat":
+        from app.chatloop.worker_wiring import build_heavy_singletons
+        from app.services.mcp_client import MCPClient
+        from app.services.run_chat_worker import (
+            ContinuationKeyring,
+            RunChatWorker,
+            build_chat_executor_builder,
+        )
+
+        key_id = os.getenv("RUN_CONTINUATION_HMAC_KEY_ID", "default")
+        secret_text = os.getenv("RUN_CONTINUATION_HMAC_SECRET")
+        if secret_text is None or len(secret_text.encode("utf-8")) < 32:
+            raise ValueError("RUN_CONTINUATION_HMAC_SECRET must contain at least 32 UTF-8 bytes")
+        mcp_context = MCPClient.from_subprocess(profile="chat_tools")
+        mcp_client = await mcp_context.__aenter__()
+        singletons = await build_heavy_singletons(
+            session_factory=factory,
+            mcp_client=mcp_client,
+        )
+        executor: RunExecutor = RunChatWorker(
+            attempts=attempts,
+            executor_builder=build_chat_executor_builder(
+                singletons,
+                provider=os.getenv("LLM_PROVIDER", "unknown"),
+                model=os.getenv("LLM_MODEL", "unknown"),
+            ),
+            continuation_keys=ContinuationKeyring(
+                active_key_id=key_id,
+                keys={key_id: secret_text.encode("utf-8")},
+            ),
+            renew_interval=renew_seconds,
+        )
+    elif executor_mode == "simulated":
+        instruction = SimulatedExecution(
+            delay_seconds=float(os.getenv("RUN_SIMULATED_DELAY_SECONDS", "0")),
+            result=json.loads(os.getenv("RUN_SIMULATED_RESULT_JSON", '{"simulated":true}')),
+            crash=os.getenv("RUN_SIMULATED_CRASH", "0") == "1",
+        )
+        executor = SimulatedRunExecutor(
+            attempts,
+            instruction=instruction,
+            renew_interval=renew_seconds,
+            lease_duration=lease_seconds,
+        )
+    else:
+        raise ValueError("RUN_EXECUTOR_MODE must be 'chat' or 'simulated'")
     worker = RunWorker(
         WorkerRegistry(
             factory,
@@ -412,12 +477,7 @@ async def _async_main() -> None:
         attempts,
         redis,
         RedisTransport(redis),
-        SimulatedRunExecutor(
-            attempts,
-            instruction=instruction,
-            renew_interval=renew_seconds,
-            lease_duration=lease_seconds,
-        ),
+        executor,
         capacity=int(os.getenv("RUN_WORKER_CAPACITY", "1")),
         heartbeat_interval=float(os.getenv("RUN_HEARTBEAT_INTERVAL_SECONDS", "10")),
         poll_interval=float(os.getenv("RUN_POLL_INTERVAL_SECONDS", "0.5")),
@@ -433,6 +493,9 @@ async def _async_main() -> None:
             await worker.stop()
         with suppress(Exception):
             await redis.aclose()
+        if mcp_context is not None:
+            with suppress(Exception):
+                await mcp_context.__aexit__(None, None, None)
         with suppress(Exception):
             await engine.dispose()
 

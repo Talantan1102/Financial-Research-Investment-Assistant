@@ -1,0 +1,614 @@
+from __future__ import annotations
+
+import asyncio
+import sys
+import uuid
+from datetime import timedelta
+from decimal import Decimal
+from typing import Any, cast
+from uuid import UUID
+
+import pytest
+import pytest_asyncio
+from app.chatloop.run_executor import CompletedResult, FailedResult, PauseResult, RunUsage
+from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
+from app.models.run_execution import RunToolExecution, RunUsageRecord
+from app.models.run_scheduling import RunOutbox, RunWorker
+from app.models.tenant import Tenant, TenantMembership
+from app.models.user import User
+from app.services.attempt_service import AttemptCommandRejected, AttemptService
+from app.services.trace_models import TraceSpanRow
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+
+@pytest.fixture(scope="session")
+def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
+    if sys.platform == "win32":
+        return asyncio.WindowsSelectorEventLoopPolicy()
+    return asyncio.DefaultEventLoopPolicy()
+
+
+@pytest_asyncio.fixture
+async def claimed(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> tuple[AttemptService, Any, UUID]:
+    async_session_factory = pg_async_session_factory
+    suffix = uuid.uuid4().hex
+    async with async_session_factory() as session, session.begin():
+        user = User(
+            username=f"run-chat-{suffix}",
+            email=f"run-chat-{suffix}@example.com",
+            hashed_password="hash",
+        )
+        tenant = Tenant(name=f"Run chat {suffix}", slug=f"run-chat-{suffix}")
+        session.add_all([user, tenant])
+        await session.flush()
+        session.add(TenantMembership(tenant_id=tenant.id, user_id=user.id, role="member"))
+        chat_session = RunSession(tenant_id=tenant.id, created_by_user_id=user.id)
+        worker = RunWorker(
+            worker_type="chat",
+            capacity=1,
+            status="online",
+            heartbeat_at=func.timezone("UTC", func.statement_timestamp()),
+            started_at=func.timezone("UTC", func.statement_timestamp()),
+            metadata_payload={},
+        )
+        session.add_all([chat_session, worker])
+        await session.flush()
+        input_message = RunMessage(
+            tenant_id=tenant.id,
+            session_id=chat_session.id,
+            role="user",
+            content="question",
+            status="complete",
+        )
+        session.add(input_message)
+        await session.flush()
+        run = Run(
+            tenant_id=tenant.id,
+            session_id=chat_session.id,
+            created_by_user_id=user.id,
+            run_type="chat",
+            status="assigned",
+            idempotency_key=f"run-chat-{suffix}",
+            request_hash=uuid.uuid4().hex,
+            input_message_id=input_message.id,
+            retry_count=0,
+        )
+        session.add(run)
+        await session.flush()
+        attempt = RunAttempt(
+            run_id=run.id,
+            attempt_no=1,
+            status="assigned",
+            worker_id=worker.id,
+            lease_expires_at=func.timezone("UTC", func.statement_timestamp())
+            + timedelta(seconds=30),
+        )
+        session.add(attempt)
+        await session.flush()
+        session.add_all(
+            [
+                RunEvent(
+                    tenant_id=tenant.id,
+                    run_id=run.id,
+                    seq=1,
+                    event_type="run.created",
+                    payload={"status": "queued"},
+                ),
+                RunEvent(
+                    tenant_id=tenant.id,
+                    run_id=run.id,
+                    attempt_id=attempt.id,
+                    seq=2,
+                    event_type="run.assigned",
+                    payload={"status": "assigned"},
+                ),
+                RunOutbox(
+                    event_type="attempt.assigned",
+                    tenant_id=tenant.id,
+                    run_id=run.id,
+                    attempt_id=attempt.id,
+                    worker_id=worker.id,
+                    payload={},
+                    dedupe_key=f"attempt-assigned:{attempt.id}",
+                ),
+            ]
+        )
+        user_id = cast(uuid.UUID, user.id)
+        attempt_id = cast(uuid.UUID, attempt.id)
+        worker_id = cast(uuid.UUID, worker.id)
+    service = AttemptService(async_session_factory, lease_duration=timedelta(seconds=30))
+    claim = await service.claim(attempt_id, worker_id)
+    assert claim.claimed and claim.assignment is not None
+    return service, claim.assignment, user_id
+
+
+def _usage() -> RunUsage:
+    return RunUsage("test", "scripted", 3, 2, 1, 5, 0.125)
+
+
+@pytest.mark.asyncio
+async def test_completed_result_commits_all_facts_atomically(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async_session_factory = pg_async_session_factory
+    service, assignment, _user_id = claimed
+    loaded = await service.load_chat_execution(assignment)
+    result = CompletedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        loaded.session_id,
+        "durable answer",
+        _usage(),
+        (),
+        (),
+    )
+
+    await service.complete_chat(assignment, result)
+
+    async with async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        attempt = await session.get(RunAttempt, assignment.attempt_id)
+        message = await session.get(RunMessage, run.final_message_id)
+        usage = await session.scalar(
+            select(RunUsageRecord).where(RunUsageRecord.run_id == assignment.run_id)
+        )
+        trace = await session.scalar(
+            select(TraceSpanRow).where(TraceSpanRow.request_id == str(assignment.run_id))
+        )
+        events = tuple(
+            (
+                await session.scalars(
+                    select(RunEvent)
+                    .where(RunEvent.run_id == assignment.run_id)
+                    .order_by(RunEvent.seq)
+                )
+            ).all()
+        )
+    assert run.status == "completed" and run.final_message_id == message.id
+    assert attempt.status == "completed" and attempt.claim_token is None
+    assert (message.role, message.content, message.status) == (
+        "assistant",
+        "durable answer",
+        "complete",
+    )
+    assert (usage.input_tokens, usage.output_tokens, usage.cached_tokens, usage.total_tokens) == (
+        3,
+        2,
+        1,
+        5,
+    )
+    assert usage.cost_cny == Decimal("0.12500000")
+    assert trace.attrs_json["attempt_id"] == str(assignment.attempt_id)
+    assert [event.event_type for event in events][-1] == "run.completed"
+
+
+@pytest.mark.asyncio
+async def test_injected_precommit_failure_rolls_back_every_completed_fact(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async_session_factory = pg_async_session_factory
+    service, assignment, _user_id = claimed
+    loaded = await service.load_chat_execution(assignment)
+    result = CompletedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        loaded.session_id,
+        "must roll back",
+        _usage(),
+        (),
+        (),
+    )
+
+    async def fail_before_commit() -> None:
+        raise RuntimeError("injected before commit")
+
+    service._before_chat_terminal_commit = fail_before_commit  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="injected before commit"):
+        await service.complete_chat(assignment, result)
+
+    async with async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        attempt = await session.get(RunAttempt, assignment.attempt_id)
+        assistant_count = await session.scalar(
+            select(func.count())
+            .select_from(RunMessage)
+            .where(RunMessage.session_id == run.session_id, RunMessage.role == "assistant")
+        )
+        usage_count = await session.scalar(
+            select(func.count())
+            .select_from(RunUsageRecord)
+            .where(RunUsageRecord.run_id == assignment.run_id)
+        )
+        trace_count = await session.scalar(
+            select(func.count())
+            .select_from(TraceSpanRow)
+            .where(TraceSpanRow.request_id == str(assignment.run_id))
+        )
+    assert run.status == "running" and run.final_message_id is None
+    assert attempt.status == "running" and attempt.claim_token == assignment.claim_token
+    assert (assistant_count, usage_count, trace_count) == (0, 0, 0)
+
+
+@pytest.mark.asyncio
+async def test_pause_is_atomic_and_resolved_server_record_is_only_resume_source(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async_session_factory = pg_async_session_factory
+    service, assignment, _user_id = claimed
+    loaded = await service.load_chat_execution(assignment)
+    paused = PauseResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        loaded.session_id,
+        "approval",
+        {"tool": "place_order"},
+        {"version": 1, "key_id": "trusted", "body": {}, "signature": "sig"},
+        _usage(),
+        (),
+        (),
+    )
+    await service.pause_chat(assignment, paused)
+    async with async_session_factory() as session, session.begin():
+        pause = await session.scalar(select(RunPause).where(RunPause.run_id == assignment.run_id))
+        run = await session.get(Run, assignment.run_id)
+        assert run.status == "waiting_approval"
+        assert pause.resolved_at is None
+        pause.response_payload = {"approved": True, "text": "continue"}
+        pause.resolved_at = func.timezone("UTC", func.statement_timestamp())
+        run.status = "queued"
+        run.queue_reason = "resume"
+
+    # A later claimed Attempt loads only the persisted resolved pause.  No caller
+    # parameter exists through which Redis/client continuation could replace it.
+    async with async_session_factory() as session, session.begin():
+        old_attempt = await session.get(RunAttempt, assignment.attempt_id)
+        run = await session.get(Run, assignment.run_id)
+        worker = await session.get(RunWorker, assignment.worker_id)
+        new_attempt = RunAttempt(
+            run_id=run.id,
+            attempt_no=2,
+            status="assigned",
+            worker_id=worker.id,
+            lease_expires_at=func.timezone("UTC", func.statement_timestamp())
+            + timedelta(seconds=30),
+        )
+        session.add(new_attempt)
+        await session.flush()
+        run.status = "assigned"
+        assert old_attempt.status == "paused"
+        new_attempt_id = new_attempt.id
+    second_claim = await service.claim(new_attempt_id, assignment.worker_id)
+    assert second_claim.claimed and second_claim.assignment is not None
+    resumed = await service.load_chat_execution(second_claim.assignment)
+    assert resumed.continuation["key_id"] == "trusted"
+    assert resumed.prompt == '{"approved":true,"text":"continue"}'
+
+
+@pytest.mark.asyncio
+async def test_zombie_token_cannot_write_terminal_or_tool_facts(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async_session_factory = pg_async_session_factory
+    service, assignment, _user_id = claimed
+    zombie = type(assignment)(
+        tenant_id=assignment.tenant_id,
+        run_id=assignment.run_id,
+        attempt_id=assignment.attempt_id,
+        worker_id=assignment.worker_id,
+        claim_token=uuid.uuid4(),
+        lease_expires_at=assignment.lease_expires_at,
+    )
+    loaded = await service.load_chat_execution(assignment)
+    result = FailedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        loaded.session_id,
+        "executor_error",
+        "safe",
+        False,
+        "",
+        _usage(),
+        (),
+        (),
+    )
+    with pytest.raises(AttemptCommandRejected):
+        await service.fail_chat(zombie, result)
+    with pytest.raises(AttemptCommandRejected):
+        await service.reserve_tool_execution(
+            zombie,
+            tool_call_id="call-1",
+            tool_name="memory_write",
+            request={"value": 1},
+            safe_to_retry=False,
+            approved=True,
+        )
+
+    async with async_session_factory() as session:
+        facts = await session.scalar(
+            select(func.count())
+            .select_from(RunToolExecution)
+            .where(RunToolExecution.run_id == assignment.run_id)
+        )
+        run = await session.get(Run, assignment.run_id)
+    assert facts == 0 and run.status == "running"
+
+
+@pytest.mark.asyncio
+async def test_cancel_chat_persists_usage_trace_and_fenced_cancel_terminal(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    loaded = await service.load_chat_execution(assignment)
+    async with pg_async_session_factory() as session, session.begin():
+        run = await session.get(Run, assignment.run_id)
+        run.status = "cancel_requested"
+        run.cancel_requested_at = func.timezone("UTC", func.statement_timestamp())
+    result = FailedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        loaded.session_id,
+        "cancelled",
+        "Run was cancelled.",
+        False,
+        "partial",
+        _usage(),
+        (),
+        (),
+    )
+
+    await service.cancel_chat(assignment, result)
+
+    async with pg_async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        attempt = await session.get(RunAttempt, assignment.attempt_id)
+        usage = await session.scalar(
+            select(RunUsageRecord).where(RunUsageRecord.run_id == assignment.run_id)
+        )
+        trace = await session.scalar(
+            select(TraceSpanRow).where(TraceSpanRow.request_id == str(assignment.run_id))
+        )
+    assert run.status == "cancelled" and attempt.status == "cancelled"
+    assert usage.total_tokens == 5
+    assert trace.attrs_json["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_non_idempotent_unknown_is_not_reexecuted_after_crash(
+    claimed: tuple[AttemptService, Any, UUID],
+) -> None:
+    service, assignment, _user_id = claimed
+    first = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-side-effect",
+        tool_name="memory_write",
+        request={"memory": "x"},
+        safe_to_retry=False,
+        approved=True,
+    )
+    assert first.execute is True and first.status == "started"
+
+    # Simulate process death after the side effect but before ledger completion.
+    second = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-side-effect",
+        tool_name="memory_write",
+        request={"memory": "x"},
+        safe_to_retry=False,
+        approved=True,
+    )
+    assert second.execute is False
+    assert second.status == "approval_required"
+    assert second.result is None
+
+
+@pytest.mark.asyncio
+async def test_non_idempotent_unknown_is_not_reexecuted_by_later_attempt_or_worker(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    first = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-cross-attempt",
+        tool_name="memory_write",
+        request={"memory": "x"},
+        safe_to_retry=False,
+        approved=True,
+    )
+    assert first.execute is True
+
+    async with pg_async_session_factory() as session, session.begin():
+        old_attempt = await session.get(RunAttempt, assignment.attempt_id)
+        run = await session.get(Run, assignment.run_id)
+        replacement_worker = RunWorker(
+            worker_type="chat",
+            capacity=1,
+            status="online",
+            heartbeat_at=func.timezone("UTC", func.statement_timestamp()),
+            started_at=func.timezone("UTC", func.statement_timestamp()),
+            metadata_payload={},
+        )
+        session.add(replacement_worker)
+        await session.flush()
+        old_attempt.status = "lost"
+        old_attempt.claim_token = None
+        old_attempt.finished_at = func.timezone("UTC", func.statement_timestamp())
+        new_attempt = RunAttempt(
+            run_id=run.id,
+            attempt_no=2,
+            status="assigned",
+            worker_id=replacement_worker.id,
+            lease_expires_at=func.timezone("UTC", func.statement_timestamp())
+            + timedelta(seconds=30),
+        )
+        session.add(new_attempt)
+        await session.flush()
+        run.status = "assigned"
+        new_attempt_id = new_attempt.id
+        replacement_worker_id = replacement_worker.id
+
+    next_claim = await service.claim(new_attempt_id, replacement_worker_id)
+    assert next_claim.claimed and next_claim.assignment is not None
+    replay = await service.reserve_tool_execution(
+        next_claim.assignment,
+        tool_call_id="call-cross-attempt",
+        tool_name="memory_write",
+        request={"memory": "x"},
+        safe_to_retry=False,
+        approved=False,
+    )
+    assert replay.execute is False and replay.status == "approval_required"
+
+
+@pytest.mark.asyncio
+async def test_completed_tool_result_is_reused_and_call_id_is_run_global(
+    claimed: tuple[AttemptService, Any, UUID],
+) -> None:
+    service, assignment, _user_id = claimed
+    reserved = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-read",
+        tool_name="get_stock_quote",
+        request={"ts_code": "600519.SH"},
+        safe_to_retry=True,
+        approved=False,
+    )
+    assert reserved.execute is True
+    cached_value = {"success": True, "output": {"price": 123}, "latency_ms": 4}
+    await service.complete_tool_execution(assignment, reserved.idempotency_key, cached_value)
+    replay = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-read",
+        tool_name="get_stock_quote",
+        request={"ts_code": "600519.SH"},
+        safe_to_retry=True,
+        approved=False,
+    )
+    assert replay.execute is False and replay.status == "completed"
+    assert replay.result == cached_value
+
+    with pytest.raises(ValueError, match="tool_call_id"):
+        await service.reserve_tool_execution(
+            assignment,
+            tool_call_id="call-read",
+            tool_name="get_daily_basic",
+            request={"ts_code": "600519.SH"},
+            safe_to_retry=True,
+            approved=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_failed_safe_tool_can_explicitly_retry(
+    claimed: tuple[AttemptService, Any, UUID],
+) -> None:
+    service, assignment, _user_id = claimed
+    first = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-safe-retry",
+        tool_name="get_stock_quote",
+        request={"ts_code": "600519.SH"},
+        safe_to_retry=True,
+        approved=False,
+    )
+    await service.fail_tool_execution(
+        assignment,
+        first.idempotency_key,
+        error_code="upstream_timeout",
+        error_message="safe failure",
+    )
+
+    retry = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-safe-retry",
+        tool_name="get_stock_quote",
+        request={"ts_code": "600519.SH"},
+        safe_to_retry=True,
+        approved=False,
+    )
+    assert retry.execute is True and retry.status == "started"
+
+
+@pytest.mark.asyncio
+async def test_invalid_usage_rolls_back_terminal_facts(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    loaded = await service.load_chat_execution(assignment)
+    invalid = CompletedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        loaded.session_id,
+        "must not persist",
+        RunUsage("test", "scripted", 2, 2, 0, 5, 0.0),
+        (),
+        (),
+    )
+    with pytest.raises(ValueError, match="usage"):
+        await service.complete_chat(assignment, invalid)
+
+    async with pg_async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        assistant_count = await session.scalar(
+            select(func.count())
+            .select_from(RunMessage)
+            .where(RunMessage.session_id == run.session_id, RunMessage.role == "assistant")
+        )
+        usage_count = await session.scalar(
+            select(func.count())
+            .select_from(RunUsageRecord)
+            .where(RunUsageRecord.run_id == assignment.run_id)
+        )
+    assert run.status == "running" and run.final_message_id is None
+    assert assistant_count == usage_count == 0
+
+
+@pytest.mark.asyncio
+async def test_oversized_tool_json_is_rejected_without_false_completion(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    with pytest.raises(ValueError, match="tool request exceeds"):
+        await service.reserve_tool_execution(
+            assignment,
+            tool_call_id="call-oversized-request",
+            tool_name="memory_write",
+            request={"value": "中" * 6000},
+            safe_to_retry=False,
+            approved=True,
+        )
+
+    reserved = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-oversized-result",
+        tool_name="memory_write",
+        request={"value": "small"},
+        safe_to_retry=False,
+        approved=True,
+    )
+    with pytest.raises(ValueError, match="tool result exceeds"):
+        await service.complete_tool_execution(
+            assignment,
+            reserved.idempotency_key,
+            {"output": "中" * 22000},
+        )
+
+    async with pg_async_session_factory() as session:
+        rows = tuple(
+            (
+                await session.scalars(
+                    select(RunToolExecution).where(RunToolExecution.run_id == assignment.run_id)
+                )
+            ).all()
+        )
+    assert len(rows) == 1 and rows[0].status == "started"
