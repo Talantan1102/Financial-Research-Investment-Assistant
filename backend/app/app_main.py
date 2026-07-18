@@ -33,6 +33,7 @@ from app.router.observability_router import router as observability_router  # no
 from app.router.persona_router import router as persona_router  # noqa: E402  (persona-ui)
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
+from app.router.run_sessions import router as run_sessions_router  # noqa: E402
 from app.router.runs import router as runs_router  # noqa: E402
 from app.router.tenants import router as tenants_router  # noqa: E402
 from app.scripts.migrate_phase2_scheduling_schema import (  # noqa: E402
@@ -396,6 +397,7 @@ app.include_router(reports_router)  # v0.9.x — research reports CRUD
 app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
 app.include_router(tenants_router)
 app.include_router(runs_router)
+app.include_router(run_sessions_router)
 app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE streaming)
 app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
 app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (confirmed packet)

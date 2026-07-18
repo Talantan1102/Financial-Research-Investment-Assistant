@@ -1,0 +1,90 @@
+"""Four fixed v1 Session read-model endpoints."""
+
+from __future__ import annotations
+
+from typing import cast
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.models.user import User
+from app.router.auth_router import get_current_user_required
+from app.run_control.types import ResourceNotFound
+from app.schemas.run_session import RunSessionResponse, RunSessionUpdateRequest
+from app.services.run_session_service import RunSessionService
+
+router = APIRouter(prefix="/api/v1/tenants/{tenant_id}/sessions", tags=["sessions-v1"])
+
+
+def get_run_session_service(request: Request) -> RunSessionService:
+    factory = cast(
+        async_sessionmaker[AsyncSession],
+        request.app.state.async_session_factory,
+    )
+    return RunSessionService(factory)
+
+
+def _not_found(exc: ResourceNotFound) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.get("", response_model=list[RunSessionResponse])
+async def list_sessions(
+    tenant_id: UUID,
+    current_user: User = Depends(get_current_user_required),
+    service: RunSessionService = Depends(get_run_session_service),
+) -> list[RunSessionResponse]:
+    try:
+        sessions = await service.list_sessions(tenant_id, cast(UUID, current_user.id))
+    except ResourceNotFound as exc:
+        raise _not_found(exc) from exc
+    return [RunSessionResponse.model_validate(item) for item in sessions]
+
+
+@router.get("/{session_id}", response_model=RunSessionResponse)
+async def get_session(
+    tenant_id: UUID,
+    session_id: UUID,
+    current_user: User = Depends(get_current_user_required),
+    service: RunSessionService = Depends(get_run_session_service),
+) -> RunSessionResponse:
+    try:
+        run_session = await service.get_session(tenant_id, session_id, cast(UUID, current_user.id))
+    except ResourceNotFound as exc:
+        raise _not_found(exc) from exc
+    return RunSessionResponse.model_validate(run_session)
+
+
+@router.patch("/{session_id}", response_model=RunSessionResponse)
+async def update_session(
+    tenant_id: UUID,
+    session_id: UUID,
+    body: RunSessionUpdateRequest,
+    current_user: User = Depends(get_current_user_required),
+    service: RunSessionService = Depends(get_run_session_service),
+) -> RunSessionResponse:
+    try:
+        run_session = await service.update_title(
+            tenant_id,
+            session_id,
+            cast(UUID, current_user.id),
+            body.title,
+        )
+    except ResourceNotFound as exc:
+        raise _not_found(exc) from exc
+    return RunSessionResponse.model_validate(run_session)
+
+
+@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_session(
+    tenant_id: UUID,
+    session_id: UUID,
+    current_user: User = Depends(get_current_user_required),
+    service: RunSessionService = Depends(get_run_session_service),
+) -> Response:
+    try:
+        await service.archive_session(tenant_id, session_id, cast(UUID, current_user.id))
+    except ResourceNotFound as exc:
+        raise _not_found(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
