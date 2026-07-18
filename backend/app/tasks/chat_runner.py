@@ -35,7 +35,7 @@ from typing import Any
 
 from app.chatloop.context import ContextDeps
 from app.chatloop.events import LoopEvent, SeqCounter
-from app.chatloop.loop import CancelledByUser, ToolLoop
+from app.chatloop.loop import CancelledByUser, execute_tool_loop
 from app.chatloop.rebuild import rebuild_context
 from app.chatloop.state import ChatLoopState, turn_summary
 from app.services.chat_event_bus import ChatEventBus
@@ -273,19 +273,21 @@ async def run_chat_async(
         messages=[{"role": "user", "content": user_message}],
     )
 
-    loop = ToolLoop(
-        llm=components.llm,
-        tool_hub=components.tool_hub,
-        context_deps=deps,
-        gate_cfg=components.gate_cfg,
-        emit=_emit,
-        steer_source=RedisSteerSource(redis, task_id),
-        cancel_event=cancel_event,
-        seq_counter=seq_counter,
-    )
+    async def _execute_shared_loop() -> ChatLoopState:
+        return await execute_tool_loop(
+            state=state,
+            llm=components.llm,
+            tool_hub=components.tool_hub,
+            context_deps=deps,
+            gate_cfg=components.gate_cfg,
+            emit=_emit,
+            steer_source=RedisSteerSource(redis, task_id),
+            cancel_event=cancel_event,
+            seq_counter=seq_counter,
+        )
 
     try:
-        final_state = await loop.run(state)
+        final_state = await _execute_shared_loop()
     except CancelledByUser:
         cancelled_by_user = True
         try:

@@ -24,7 +24,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from app.agents.schemas import ToolResult
+from app.chatloop.contracts import ToolResult
 from app.chatloop.events import EventType, LoopEvent, SeqCounter
 from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState

@@ -260,6 +260,42 @@ def build_turn_components(
     )
 
 
+def build_run_executor(
+    singletons: HeavySingletons,
+    *,
+    user_id: Any,
+    event_sink: Any,
+    cancel_event: Any,
+    pause_controller: Any | None = None,
+    provider: str = "unknown",
+    model: str = "unknown",
+    persona_block: str = "",
+) -> Any:
+    """Outer wiring boundary for the transport-free Run executor.
+
+    The lazy import keeps ``run_executor`` independent of this module's heavy
+    service/tool graph.  Its per-execution factory injects the same emitter and
+    sequence counter into ToolLoop and ToolHub, preserving global event order.
+    """
+
+    from app.chatloop.run_executor import ChatRunExecutor
+
+    return ChatRunExecutor(
+        components_factory=lambda emit, seq_counter: build_turn_components(
+            singletons,
+            emit=emit,
+            seq_counter=seq_counter,
+        ),
+        event_sink=event_sink,
+        cancel_event=cancel_event,
+        user_id=user_id,
+        pause_controller=pause_controller,
+        provider=provider,
+        model=model,
+        persona_block=persona_block,
+    )
+
+
 # ---------------------------------------------------------------------------
 # RedisSteerSource(读端 — spec § 4.3 List RPOP)
 # ---------------------------------------------------------------------------
@@ -292,5 +328,6 @@ __all__ = [
     "HeavySingletons",
     "RedisSteerSource",
     "build_heavy_singletons",
+    "build_run_executor",
     "build_turn_components",
 ]

@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.agents.schemas import ToolResult
+from app.chatloop.contracts import ToolResult
 from app.services.llm_step import StepResult, StepToolCall
 
 # ---------------------------------------------------------------------------

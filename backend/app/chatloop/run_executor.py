@@ -1,0 +1,709 @@
+"""Transport-free, Run-oriented adapter around the shared chat ToolLoop core."""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+import json
+from collections.abc import Awaitable, Callable, Mapping
+from contextlib import suppress
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, Literal, Protocol, TypeAlias
+from uuid import UUID
+
+from app.chatloop.context import ContextDeps
+from app.chatloop.events import LoopEvent, SeqCounter
+from app.chatloop.loop import (
+    CancelledByUser,
+    LoopPaused,
+    ModelExecutionError,
+    PauseControllerProtocol,
+    PauseDirective,
+    ToolExecutionError,
+    execute_tool_loop,
+)
+from app.chatloop.state import ChatLoopState
+from app.services.llm_step import StepToolCall
+
+JsonScalar: TypeAlias = str | int | float | bool | None
+JsonValue: TypeAlias = JsonScalar | Mapping[str, "JsonValue"] | tuple["JsonValue", ...]
+
+
+class ChatLoopComponentsProtocol(Protocol):
+    llm: Any
+    tool_hub: Any
+    gate_cfg: Any
+    skill_listing: str
+    system_prompt: str
+
+
+EventSink = Callable[["RunEvent"], Awaitable[None]]
+ComponentsFactory = Callable[
+    [Callable[[LoopEvent], Awaitable[None]], SeqCounter], ChatLoopComponentsProtocol
+]
+
+
+@dataclass(frozen=True)
+class ExecuteChatRun:
+    run_id: UUID
+    attempt_id: UUID
+    session_id: UUID
+    prompt: str
+    history: tuple[dict[str, Any], ...]
+    continuation: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class RunUsage:
+    provider: str
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    total_tokens: int
+    cost_cny: float
+
+
+@dataclass(frozen=True)
+class RunEvent:
+    run_id: UUID
+    attempt_id: UUID
+    kind: str
+    seq: int
+    step: int
+    payload: Mapping[str, JsonValue]
+
+
+@dataclass(frozen=True)
+class ToolExecution:
+    tool_call_id: str
+    tool_name: str
+    request: Mapping[str, JsonValue]
+    status: Literal["completed", "failed", "approval_required"]
+    digest: str
+    cache_key: str | None
+    error_code: str | None
+    error_message: str | None
+    step: int
+
+    @property
+    def success(self) -> bool:
+        return self.status == "completed"
+
+
+@dataclass(frozen=True)
+class CompletedResult:
+    run_id: UUID
+    attempt_id: UUID
+    session_id: UUID
+    final_text: str
+    usage: RunUsage
+    tools: tuple[ToolExecution, ...]
+    events: tuple[RunEvent, ...]
+
+
+@dataclass(frozen=True)
+class PauseResult:
+    run_id: UUID
+    attempt_id: UUID
+    session_id: UUID
+    pause_type: Literal["input", "approval"]
+    request: Mapping[str, JsonValue]
+    continuation: dict[str, Any]
+    usage: RunUsage
+    tools: tuple[ToolExecution, ...]
+    events: tuple[RunEvent, ...]
+
+
+@dataclass(frozen=True)
+class FailedResult:
+    run_id: UUID
+    attempt_id: UUID
+    session_id: UUID
+    error_code: Literal[
+        "model_error",
+        "tool_error",
+        "cancelled",
+        "executor_error",
+        "invalid_continuation",
+        "continuation_too_large",
+    ]
+    message: str
+    retryable: bool
+    partial_text: str
+    usage: RunUsage
+    tools: tuple[ToolExecution, ...]
+    events: tuple[RunEvent, ...]
+
+
+ExecutionResult: TypeAlias = CompletedResult | PauseResult | FailedResult
+
+
+class _ContinuationTooLargeError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class _UsageBaseline:
+    input_tokens: int
+    output_tokens: int
+    cached_tokens: int
+    cost_cny: float
+    ledger_count: int
+    message_count: int
+
+
+def _freeze_json(value: Any) -> JsonValue:
+    """Deep-copy JSON data into immutable mappings/tuples before crossing the boundary."""
+
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_json(item) for item in value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _freeze_mapping(value: Mapping[str, Any]) -> Mapping[str, JsonValue]:
+    frozen = _freeze_json(value)
+    assert isinstance(frozen, Mapping)
+    return frozen
+
+
+def _final_text(state: ChatLoopState) -> str:
+    if state.final_response:
+        return state.final_response
+    for message in reversed(state.messages):
+        if message.get("role") == "assistant" and isinstance(message.get("content"), str):
+            return message["content"]
+    return ""
+
+
+class ChatRunExecutor:
+    """Execute one Run attempt without persistence, web, queue, or bus dependencies."""
+
+    MAX_CONTINUATION_BYTES = 64 * 1024
+
+    def __init__(
+        self,
+        *,
+        components: ChatLoopComponentsProtocol | None = None,
+        components_factory: ComponentsFactory | None = None,
+        event_sink: EventSink,
+        cancel_event: asyncio.Event,
+        user_id: UUID | str,
+        pause_controller: PauseControllerProtocol | None = None,
+        provider: str = "unknown",
+        model: str = "unknown",
+        persona_block: str = "",
+        max_context_tokens: int = 100_000,
+        oversize_result_char_threshold: int = 24_000,
+    ) -> None:
+        if (components is None) == (components_factory is None):
+            raise ValueError("provide exactly one of components or components_factory")
+        self._components = components
+        self._components_factory = components_factory
+        self._event_sink = event_sink
+        self._cancel_event = cancel_event
+        self._user_id = str(user_id)
+        self._pause_controller = pause_controller
+        self._provider = provider
+        self._model = model
+        self._persona_block = persona_block
+        self._max_context_tokens = max_context_tokens
+        self._oversize_result_char_threshold = oversize_result_char_threshold
+
+    async def execute(self, command: ExecuteChatRun) -> ExecutionResult:
+        history = copy.deepcopy(command.history)
+        continuation = copy.deepcopy(command.continuation)
+        events: list[RunEvent] = []
+        emitted_tokens: list[str] = []
+        seq_counter = SeqCounter()
+
+        try:
+            state, pending_tool_calls, resume_prompt, approval_decision = self._initial_state(
+                command, continuation
+            )
+        except _ContinuationTooLargeError:
+            return self._failed(
+                command,
+                "continuation_too_large",
+                "Continuation exceeds the portable size limit.",
+                False,
+                ChatLoopState(
+                    user_id="",
+                    session_id=str(command.session_id),
+                    request_id=str(command.run_id),
+                    messages=[],
+                ),
+                events,
+                emitted_tokens,
+                _UsageBaseline(0, 0, 0, 0.0, 0, 0),
+            )
+        except (TypeError, ValueError):
+            return self._failed(
+                command,
+                "invalid_continuation",
+                "Continuation is invalid.",
+                False,
+                ChatLoopState(
+                    user_id="",
+                    session_id=str(command.session_id),
+                    request_id=str(command.run_id),
+                    messages=[],
+                ),
+                events,
+                emitted_tokens,
+                _UsageBaseline(0, 0, 0, 0.0, 0, 0),
+            )
+
+        baseline = self._baseline(state)
+
+        async def publish(event: RunEvent) -> None:
+            events.append(event)
+            # Event delivery is best-effort at this pure execution boundary.
+            with suppress(Exception):
+                await self._event_sink(event)
+
+        async def emit(loop_event: LoopEvent) -> None:
+            payload = copy.deepcopy(loop_event.data)
+            if loop_event.type == "tool_error":
+                payload = {
+                    "tool": str(payload.get("tool", "")),
+                    "code": "tool_error",
+                    "message": "Tool execution failed.",
+                }
+            elif loop_event.type == "error":
+                payload = {"code": str(payload.get("code", "executor_error"))}
+            event = RunEvent(
+                run_id=command.run_id,
+                attempt_id=command.attempt_id,
+                kind=loop_event.type,
+                seq=loop_event.seq,
+                step=loop_event.step,
+                payload=_freeze_mapping(payload),
+            )
+            if event.kind == "token":
+                text = event.payload.get("text")
+                if isinstance(text, str):
+                    emitted_tokens.append(text)
+            await publish(event)
+
+        try:
+            components = (
+                self._components_factory(emit, seq_counter)
+                if self._components_factory is not None
+                else self._components
+            )
+            assert components is not None
+            deps = ContextDeps(
+                system_prompt=components.system_prompt,
+                persona_block=self._persona_block,
+                skill_listing=components.skill_listing,
+                history_block=history,
+                max_steps=components.gate_cfg.max_steps,
+                max_cny=components.gate_cfg.max_cny,
+                max_context_tokens=self._max_context_tokens,
+                oversize_result_char_threshold=self._oversize_result_char_threshold,
+            )
+        except Exception:
+            await self._emit_control_event(
+                command,
+                events,
+                seq_counter,
+                "error",
+                state.step,
+                {"code": "executor_error"},
+                publish,
+            )
+            return self._failed(
+                command,
+                "executor_error",
+                "Chat execution failed.",
+                False,
+                state,
+                events,
+                emitted_tokens,
+                baseline,
+            )
+
+        try:
+            state = await execute_tool_loop(
+                state=state,
+                llm=components.llm,
+                tool_hub=components.tool_hub,
+                context_deps=deps,
+                gate_cfg=components.gate_cfg,
+                emit=emit,
+                cancel_event=self._cancel_event,
+                seq_counter=seq_counter,
+                model=None if self._model == "unknown" else self._model,
+                pause_controller=self._pause_controller,
+                pending_tool_calls=pending_tool_calls,
+                resume_prompt=resume_prompt,
+                approval_decision=approval_decision,
+            )
+        except LoopPaused as paused:
+            state = paused.state
+            continuation_payload = self._snapshot(state, paused.pending_tool_calls)
+            if self._continuation_size(continuation_payload) > self.MAX_CONTINUATION_BYTES:
+                return self._failed(
+                    command,
+                    "continuation_too_large",
+                    "Continuation exceeds the portable size limit.",
+                    False,
+                    state,
+                    events,
+                    emitted_tokens,
+                    baseline,
+                )
+            await self._emit_control_event(
+                command,
+                events,
+                seq_counter,
+                "approval_request"
+                if paused.directive.pause_type == "approval"
+                else "input_request",
+                state.step,
+                paused.directive.request,
+                publish,
+            )
+            return PauseResult(
+                command.run_id,
+                command.attempt_id,
+                command.session_id,
+                paused.directive.pause_type,
+                _freeze_mapping(paused.directive.request),
+                continuation_payload,
+                self._usage(state, baseline),
+                self._tools(
+                    state,
+                    baseline=baseline,
+                    pending_approval=paused.directive.pause_type == "approval",
+                ),
+                tuple(events),
+            )
+        except CancelledByUser:
+            await self._emit_control_event(
+                command,
+                events,
+                seq_counter,
+                "cancelled",
+                state.step,
+                {"reason": "user_cancel"},
+                publish,
+            )
+            return self._failed(
+                command,
+                "cancelled",
+                "Run was cancelled.",
+                False,
+                state,
+                events,
+                emitted_tokens,
+                baseline,
+            )
+        except ModelExecutionError:
+            await self._emit_control_event(
+                command, events, seq_counter, "error", state.step, {"code": "model_error"}, publish
+            )
+            return self._failed(
+                command,
+                "model_error",
+                "Model execution failed.",
+                True,
+                state,
+                events,
+                emitted_tokens,
+                baseline,
+            )
+        except ToolExecutionError:
+            await self._emit_control_event(
+                command, events, seq_counter, "error", state.step, {"code": "tool_error"}, publish
+            )
+            return self._failed(
+                command,
+                "tool_error",
+                "Tool execution failed.",
+                True,
+                state,
+                events,
+                emitted_tokens,
+                baseline,
+            )
+        except Exception:
+            await self._emit_control_event(
+                command,
+                events,
+                seq_counter,
+                "error",
+                state.step,
+                {"code": "executor_error"},
+                publish,
+            )
+            return self._failed(
+                command,
+                "executor_error",
+                "Chat execution failed.",
+                False,
+                state,
+                events,
+                emitted_tokens,
+                baseline,
+            )
+
+        return CompletedResult(
+            command.run_id,
+            command.attempt_id,
+            command.session_id,
+            _final_text(state),
+            self._usage(state, baseline),
+            self._tools(
+                state,
+                baseline=baseline,
+                pending_tool_calls=pending_tool_calls,
+                approval_rejected=approval_decision == "reject",
+            ),
+            tuple(events),
+        )
+
+    def _initial_state(
+        self, command: ExecuteChatRun, continuation: dict[str, Any] | None
+    ) -> tuple[
+        ChatLoopState,
+        tuple[StepToolCall, ...],
+        str | None,
+        Literal["approve", "reject"] | None,
+    ]:
+        if continuation is None:
+            return (
+                ChatLoopState(
+                    user_id=self._user_id,
+                    session_id=str(command.session_id),
+                    request_id=str(command.run_id),
+                    messages=[{"role": "user", "content": command.prompt}],
+                ),
+                (),
+                None,
+                None,
+            )
+        if self._continuation_size(continuation) > self.MAX_CONTINUATION_BYTES:
+            raise _ContinuationTooLargeError("continuation too large")
+        if (
+            set(continuation) != {"state", "pending_tool_calls"}
+            or not isinstance(continuation["state"], dict)
+            or not isinstance(continuation["pending_tool_calls"], list)
+        ):
+            raise ValueError("unknown continuation shape")
+        state = ChatLoopState.model_validate(continuation["state"])
+        pending_tool_calls = tuple(
+            StepToolCall.model_validate(call) for call in continuation["pending_tool_calls"]
+        )
+        state.user_id = self._user_id
+        state.request_id = str(command.run_id)
+        state.session_id = str(command.session_id)
+        if not pending_tool_calls:
+            state.messages.append({"role": "user", "content": command.prompt})
+            return state, pending_tool_calls, None, None
+        try:
+            response = json.loads(command.prompt)
+        except json.JSONDecodeError as exc:
+            raise ValueError("approval response must be JSON") from exc
+        if (
+            not isinstance(response, dict)
+            or type(response.get("approved")) is not bool
+            or ("text" in response and not isinstance(response["text"], str))
+        ):
+            raise ValueError("approval response must contain boolean approved")
+        resume_prompt = response.get("text") or json.dumps(
+            response, ensure_ascii=False, sort_keys=True
+        )
+        return (
+            state,
+            pending_tool_calls,
+            resume_prompt,
+            "approve" if response["approved"] else "reject",
+        )
+
+    @staticmethod
+    def _snapshot(
+        state: ChatLoopState, pending_tool_calls: tuple[StepToolCall, ...]
+    ) -> dict[str, Any]:
+        return {
+            "state": state.model_dump(mode="json"),
+            "pending_tool_calls": [call.model_dump(mode="json") for call in pending_tool_calls],
+        }
+
+    @staticmethod
+    def _continuation_size(payload: Mapping[str, Any]) -> int:
+        return len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+    @staticmethod
+    def _baseline(state: ChatLoopState) -> _UsageBaseline:
+        return _UsageBaseline(
+            state.prompt_tokens_total,
+            state.completion_tokens_total,
+            state.cached_tokens_total,
+            state.budget_spent_cny,
+            len(state.ledger.entries),
+            len(state.messages),
+        )
+
+    def _usage(self, state: ChatLoopState, baseline: _UsageBaseline) -> RunUsage:
+        input_tokens = max(0, state.prompt_tokens_total - baseline.input_tokens)
+        output_tokens = max(0, state.completion_tokens_total - baseline.output_tokens)
+        return RunUsage(
+            provider=self._provider,
+            model=self._model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_tokens=max(0, state.cached_tokens_total - baseline.cached_tokens),
+            total_tokens=input_tokens + output_tokens,
+            cost_cny=max(0.0, state.budget_spent_cny - baseline.cost_cny),
+        )
+
+    @staticmethod
+    def _tools(
+        state: ChatLoopState,
+        *,
+        baseline: _UsageBaseline,
+        pending_approval: bool = False,
+        pending_tool_calls: tuple[StepToolCall, ...] = (),
+        approval_rejected: bool = False,
+    ) -> tuple[ToolExecution, ...]:
+        calls: list[tuple[int, str, str, dict[str, Any]]] = []
+        step = 0
+        for index, message in enumerate(state.messages):
+            if message.get("role") != "assistant":
+                continue
+            step += 1
+            if index < baseline.message_count:
+                continue
+            for call in message.get("tool_calls", []):
+                function = call.get("function", {})
+                try:
+                    request = json.loads(function.get("arguments") or "{}")
+                except (TypeError, json.JSONDecodeError):
+                    request = {}
+                if not isinstance(request, dict):
+                    request = {}
+                calls.append(
+                    (step, str(call.get("id", "")), str(function.get("name", "")), request)
+                )
+        for call in pending_tool_calls:
+            try:
+                request = call.parsed_args
+            except ValueError:
+                request = {}
+            calls.append((state.step, call.id, call.name, request))
+
+        tools: list[ToolExecution] = []
+        remaining = list(state.ledger.entries[baseline.ledger_count :])
+        for call_step, call_id, call_name, request in calls:
+            ledger_index = next(
+                (
+                    index
+                    for index, entry in enumerate(remaining)
+                    if entry.step == call_step and entry.tool_name == call_name
+                ),
+                None,
+            )
+            ledger = remaining.pop(ledger_index) if ledger_index is not None else None
+            success = bool(ledger is not None and ledger.success)
+            status: Literal["completed", "failed", "approval_required"] = (
+                "completed"
+                if success
+                else "approval_required"
+                if pending_approval and ledger is None
+                else "failed"
+            )
+            tools.append(
+                ToolExecution(
+                    tool_call_id=call_id,
+                    tool_name=call_name,
+                    request=_freeze_mapping(request),
+                    status=status,
+                    digest=(
+                        ledger.digest
+                        if success and ledger is not None
+                        else "Approval required."
+                        if status == "approval_required"
+                        else "Tool execution failed."
+                    ),
+                    cache_key=ledger.cache_key if ledger is not None else None,
+                    error_code=(
+                        None
+                        if status != "failed"
+                        else "approval_rejected"
+                        if approval_rejected
+                        else "tool_error"
+                    ),
+                    error_message=None if status != "failed" else "Tool execution failed.",
+                    step=call_step,
+                )
+            )
+        return tuple(tools)
+
+    async def _emit_control_event(
+        self,
+        command: ExecuteChatRun,
+        events: list[RunEvent],
+        seq_counter: SeqCounter,
+        kind: str,
+        step: int,
+        payload: Mapping[str, Any],
+        publish: Callable[[RunEvent], Awaitable[None]],
+    ) -> None:
+        event = RunEvent(
+            command.run_id,
+            command.attempt_id,
+            kind,
+            seq_counter.next(),
+            step,
+            _freeze_mapping(copy.deepcopy(payload)),
+        )
+        await publish(event)
+
+    def _failed(
+        self,
+        command: ExecuteChatRun,
+        error_code: Any,
+        message: str,
+        retryable: bool,
+        state: ChatLoopState,
+        events: list[RunEvent],
+        emitted_tokens: list[str],
+        baseline: _UsageBaseline,
+    ) -> FailedResult:
+        state_text = _final_text(state)
+        streamed = "".join(emitted_tokens)
+        partial = state_text if len(state_text) >= len(streamed) else streamed
+        return FailedResult(
+            command.run_id,
+            command.attempt_id,
+            command.session_id,
+            error_code,
+            message,
+            retryable,
+            partial,
+            self._usage(state, baseline),
+            self._tools(state, baseline=baseline),
+            tuple(events),
+        )
+
+
+__all__ = [
+    "ChatRunExecutor",
+    "CompletedResult",
+    "EventSink",
+    "ExecuteChatRun",
+    "ExecutionResult",
+    "FailedResult",
+    "PauseDirective",
+    "PauseResult",
+    "RunEvent",
+    "RunUsage",
+    "ToolExecution",
+]

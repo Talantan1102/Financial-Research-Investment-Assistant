@@ -9,11 +9,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Awaitable, Callable
-from typing import Any, Protocol
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal, Protocol
 
-from app.agents.schemas import ToolResult
 from app.chatloop.context import ContextDeps, assemble_context
+from app.chatloop.contracts import ToolResult
 from app.chatloop.events import EventType, LoopEvent, SeqCounter
 from app.chatloop.gates import (
     GateConfig,
@@ -26,6 +27,7 @@ from app.chatloop.state import ChatLoopState, apply_results, apply_step, turn_su
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
 
 logger = logging.getLogger(__name__)
+_APPROVAL_REJECTED_ERROR = "The user rejected this tool call; it was not executed."
 
 # 烧签名后被拒调用喂回模型的指导性错误文案(协议红线:rejected 也要有 tool 消息)。
 # apply_results 对 success=False 的结果产出 "[ERROR] {error}",故此处不带 [ERROR] 前缀。
@@ -48,6 +50,47 @@ _HALT_REASON_TEXT = {
 
 class CancelledByUser(Exception):  # noqa: N818 — 设计契约固定此名(对齐 asyncio.CancelledError 语义)
     """用户硬打断信号 — 由调用方(chat_runner)捕获走 partial commit。"""
+
+
+class ModelExecutionError(RuntimeError):
+    """LLM boundary failed; ``str`` intentionally preserves the legacy runner message."""
+
+
+class ToolExecutionError(RuntimeError):
+    """Tool dispatch boundary failed; normal ToolResult failures do not raise this."""
+
+
+@dataclass(frozen=True)
+class PauseDirective:
+    """Pure-data pause request returned by an injected loop boundary controller."""
+
+    pause_type: Literal["input", "approval"]
+    request: Mapping[str, Any]
+
+
+class PauseControllerProtocol(Protocol):
+    async def check(
+        self,
+        *,
+        phase: Literal["before_model", "before_tools"],
+        state: ChatLoopState,
+        tool_calls: tuple[StepToolCall, ...] = (),
+    ) -> PauseDirective | None: ...
+
+
+class LoopPaused(Exception):  # noqa: N818 - control-flow signal, not an error
+    """Internal control-flow signal carrying the mutable state at a safe boundary."""
+
+    def __init__(
+        self,
+        directive: PauseDirective,
+        state: ChatLoopState,
+        pending_tool_calls: tuple[StepToolCall, ...] = (),
+    ) -> None:
+        super().__init__(directive.pause_type)
+        self.directive = directive
+        self.state = state
+        self.pending_tool_calls = pending_tool_calls
 
 
 class ToolHubProtocol(Protocol):
@@ -86,6 +129,7 @@ class ToolLoop:
         tier: str = "balanced",
         model: str | None = None,
         seq_counter: SeqCounter | None = None,
+        pause_controller: PauseControllerProtocol | None = None,
     ) -> None:
         self._llm = llm
         self._tool_hub = tool_hub
@@ -96,6 +140,7 @@ class ToolLoop:
         self._cancel = cancel_event
         self._tier = tier
         self._model = model
+        self._pause_controller = pause_controller
         # 工具 schema 会话内恒定,turn 开始时取一次。
         self._schemas: list[dict[str, Any]] = tool_hub.schemas_for_llm()
         self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
@@ -139,12 +184,38 @@ class ToolLoop:
     # 主循环
     # ------------------------------------------------------------------
 
-    async def run(self, state: ChatLoopState) -> ChatLoopState:
+    async def run(
+        self,
+        state: ChatLoopState,
+        *,
+        pending_tool_calls: tuple[StepToolCall, ...] = (),
+        resume_prompt: str | None = None,
+        approval_decision: Literal["approve", "reject"] | None = None,
+    ) -> ChatLoopState:
         max_steps = self._gate_cfg.max_steps
+        if pending_tool_calls:
+            if self._cancel is not None and self._cancel.is_set():
+                raise CancelledByUser("cancelled before resumed tool dispatch")
+            if approval_decision == "approve":
+                state, terminal = await self._dispatch_tool_calls(state, list(pending_tool_calls))
+                if terminal:
+                    return state
+            elif approval_decision == "reject":
+                rejected = [self._approval_rejected_result(call) for call in pending_tool_calls]
+                state = apply_results(state, rejected, list(pending_tool_calls))
+            else:
+                raise ValueError("pending tools require an explicit approval decision")
+            if resume_prompt:
+                state.messages.append({"role": "user", "content": resume_prompt})
         while True:
             # 1. 取消检查(圈边界硬打断)
             if self._cancel is not None and self._cancel.is_set():
                 raise CancelledByUser("cancelled at loop boundary")
+
+            if self._pause_controller is not None:
+                directive = await self._pause_controller.check(phase="before_model", state=state)
+                if directive is not None:
+                    raise LoopPaused(directive, state)
 
             # 2. 闸二三 + 打转(纯谓词)— 圈首检查,口径与 gates 单测对齐:
             #    此时 state.step == 已完成圈数,前一圈的工具调用已由 dispatch 记入台账,
@@ -178,15 +249,20 @@ class ToolLoop:
                 )
 
             # 6. 单 LLM 流式调用
-            step_result: StepResult = await self._llm.stream_step(
-                messages=messages,
-                tools=self._schemas,
-                tool_choice=state.tool_choice,
-                tier=self._tier,
-                model=self._model,
-                request_id=state.request_id,
-                on_delta=self._make_on_delta(state.step + 1),
-            )
+            try:
+                step_result: StepResult = await self._llm.stream_step(
+                    messages=messages,
+                    tools=self._schemas,
+                    tool_choice=state.tool_choice,
+                    tier=self._tier,
+                    model=self._model,
+                    request_id=state.request_id,
+                    on_delta=self._make_on_delta(state.step + 1),
+                )
+            except (CancelledByUser, LoopPaused):
+                raise
+            except Exception as exc:
+                raise ModelExecutionError(str(exc)) from exc
 
             # 7. 折叠 LLM 输出(step += 1)
             state = apply_step(state, step_result)
@@ -222,16 +298,18 @@ class ToolLoop:
             if state.tool_choice == "none":
                 raise RuntimeError("tool_choice=none 下模型仍产出 tool_calls — 协议违例")
 
-            # 11. 烧签名过滤(rejected 的签名列表此处不直接用 —
-            #     _merge_results 以 allowed 的 id 集合判定每个 call 是否放行)
-            allowed, _rejected = filter_burned(step_result.tool_calls, state)
+            if self._pause_controller is not None:
+                directive = await self._pause_controller.check(
+                    phase="before_tools",
+                    state=state,
+                    tool_calls=tuple(step_result.tool_calls),
+                )
+                if directive is not None:
+                    raise LoopPaused(directive, state, tuple(step_result.tool_calls))
 
-            # 11.5 ④(b) 分发前预算预检:本圈 LLM 成本已入账,若余量不足则整轮跳过工具、
-            #      直接收尾——避免单圈重型工具(+随后又一轮 LLM)把预算炸穿。
-            #      给每个 tool_call 回预算指导占位,守住协议红线(每个 id 必有 tool 消息)。
             if budget_margin_exhausted(state, self._gate_cfg):
                 await self._emit("loop_halt", state.step, reason="budget")
-                skipped = [self._budget_skipped_result(c) for c in step_result.tool_calls]
+                skipped = [self._budget_skipped_result(call) for call in step_result.tool_calls]
                 state = apply_results(state, skipped, step_result.tool_calls)
                 return await self._force_conclude(state, "budget")
 
@@ -252,19 +330,42 @@ class ToolLoop:
                         await self._emit("steer_merged", state.step + 1, preview=msg[:80])
                     continue
 
-            # 12. 工具分发(hub 负责 gather/缓存/记账/tool_start/tool_end)
-            results = await self._tool_hub.dispatch(allowed, state)
-
-            # 13. 按原顺序合并 allowed 的 results 与 rejected 的熔断错误,
-            #     再折叠 tool 消息(协议红线:每个 tool_call_id 都要有 tool 消息)
-            merged = self._merge_results(step_result.tool_calls, allowed, results)
-            await self._extract_and_emit_charts(merged, state)
-            state = apply_results(state, merged, step_result.tool_calls)
-
-            # 14. 烧签名记账
-            update_burned(state, self._gate_cfg)
+            state, terminal = await self._dispatch_tool_calls(
+                state, step_result.tool_calls, check_budget=False
+            )
+            if terminal:
+                return state
 
             # 15. 回到圈首
+
+    async def _dispatch_tool_calls(
+        self,
+        state: ChatLoopState,
+        calls: list[StepToolCall],
+        *,
+        check_budget: bool = True,
+    ) -> tuple[ChatLoopState, bool]:
+        """Run one post-model tool batch; shared by fresh and resumed attempts."""
+
+        allowed, _rejected = filter_burned(calls, state)
+        if check_budget and budget_margin_exhausted(state, self._gate_cfg):
+            await self._emit("loop_halt", state.step, reason="budget")
+            skipped = [self._budget_skipped_result(call) for call in calls]
+            state = apply_results(state, skipped, calls)
+            return await self._force_conclude(state, "budget"), True
+
+        try:
+            results = await self._tool_hub.dispatch(allowed, state)
+        except (CancelledByUser, LoopPaused):
+            raise
+        except Exception as exc:
+            raise ToolExecutionError(str(exc)) from exc
+
+        merged = self._merge_results(calls, allowed, results)
+        await self._extract_and_emit_charts(merged, state)
+        state = apply_results(state, merged, calls)
+        update_burned(state, self._gate_cfg)
+        return state, False
 
     # ------------------------------------------------------------------
     # 图抽取:figures 发 chart 事件并剥离出 LLM 上下文(spec § 5)
@@ -412,6 +513,23 @@ class ToolLoop:
             latency_ms=0,
         )
 
+    @staticmethod
+    def _approval_rejected_result(call: StepToolCall) -> ToolResult:
+        try:
+            args = json.loads(call.arguments)
+            if not isinstance(args, dict):
+                args = {}
+        except ValueError:
+            args = {}
+        return ToolResult(
+            tool_name=call.name,
+            args=args,
+            success=False,
+            output=None,
+            error=_APPROVAL_REJECTED_ERROR,
+            latency_ms=0,
+        )
+
     # ------------------------------------------------------------------
     # 熔断收尾:喂回系统指令 + tool_choice=none 收尾圈
     # ------------------------------------------------------------------
@@ -431,15 +549,20 @@ class ToolLoop:
         )
         state.tool_choice = "none"
         messages = assemble_context(state, self._deps)
-        step_result = await self._llm.stream_step(
-            messages=messages,
-            tools=self._schemas,
-            tool_choice="none",
-            tier=self._tier,
-            model=self._model,
-            request_id=state.request_id,
-            on_delta=self._make_on_delta(state.step + 1),
-        )
+        try:
+            step_result = await self._llm.stream_step(
+                messages=messages,
+                tools=self._schemas,
+                tool_choice="none",
+                tier=self._tier,
+                model=self._model,
+                request_id=state.request_id,
+                on_delta=self._make_on_delta(state.step + 1),
+            )
+        except CancelledByUser:
+            raise
+        except Exception as exc:
+            raise ModelExecutionError(str(exc)) from exc
         state = apply_step(state, step_result)
         # 修法 A:撞闸后若 escalate 也已提议(边角:升级提议后下一圈又撞闸),
         # done 仍交给 runner 唯一补发,避免与升级链路双 done。
@@ -448,10 +571,56 @@ class ToolLoop:
         return state
 
 
+async def execute_tool_loop(
+    *,
+    state: ChatLoopState,
+    llm: Any,
+    tool_hub: ToolHubProtocol,
+    context_deps: ContextDeps,
+    gate_cfg: GateConfig | None = None,
+    emit: EmitFn | None = None,
+    steer_source: SteerSourceProtocol | None = None,
+    cancel_event: asyncio.Event | None = None,
+    tier: str = "balanced",
+    model: str | None = None,
+    seq_counter: SeqCounter | None = None,
+    pause_controller: PauseControllerProtocol | None = None,
+    pending_tool_calls: tuple[StepToolCall, ...] = (),
+    resume_prompt: str | None = None,
+    approval_decision: Literal["approve", "reject"] | None = None,
+) -> ChatLoopState:
+    """Single construction/dispatch seam shared by legacy and Run-oriented adapters."""
+
+    return await ToolLoop(
+        llm=llm,
+        tool_hub=tool_hub,
+        context_deps=context_deps,
+        gate_cfg=gate_cfg,
+        emit=emit,
+        steer_source=steer_source,
+        cancel_event=cancel_event,
+        tier=tier,
+        model=model,
+        seq_counter=seq_counter,
+        pause_controller=pause_controller,
+    ).run(
+        state,
+        pending_tool_calls=pending_tool_calls,
+        resume_prompt=resume_prompt,
+        approval_decision=approval_decision,
+    )
+
+
 __all__ = [
     "CancelledByUser",
     "EmitFn",
+    "LoopPaused",
+    "ModelExecutionError",
+    "PauseControllerProtocol",
+    "PauseDirective",
     "SteerSourceProtocol",
     "ToolHubProtocol",
+    "ToolExecutionError",
     "ToolLoop",
+    "execute_tool_loop",
 ]
