@@ -47,12 +47,14 @@ function makeMessage(
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 
-// Default handler: the new loadSessions() calls (immediate + delayed) after SSE done
-// will fire GET /api/v0/chats. Return [] to prevent MSW unhandled-request errors
-// in tests that don't care about the sidebar refetch behavior.
+// Legacy transport tests still refetch the current sidebar after completion. The
+// sidebar itself is v1-only, so give those incidental refreshes tenant handlers.
 beforeEach(() => {
   server.use(
-    http.get(`${API_BASE}/api/v0/chats`, () => MswHttpResponse.json([])),
+    http.get(`${API_BASE}/api/v1/tenants`, () => MswHttpResponse.json([
+      { id: 'tenant-1', name: 'Personal', is_personal: true, role: 'owner' },
+    ])),
+    http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions`, () => MswHttpResponse.json([])),
   )
 })
 

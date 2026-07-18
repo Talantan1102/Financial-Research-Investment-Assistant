@@ -5,13 +5,18 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.run_control.types import ResourceNotFound
-from app.schemas.run_session import RunSessionResponse, RunSessionUpdateRequest
+from app.schemas.run_session import (
+    RunMessageResponse,
+    RunSessionDetailResponse,
+    RunSessionResponse,
+    RunSessionUpdateRequest,
+)
 from app.services.run_session_service import RunSessionService
 
 router = APIRouter(prefix="/api/v1/tenants/{tenant_id}/sessions", tags=["sessions-v1"])
@@ -42,18 +47,35 @@ async def list_sessions(
     return [RunSessionResponse.model_validate(item) for item in sessions]
 
 
-@router.get("/{session_id}", response_model=RunSessionResponse)
+@router.get("/{session_id}", response_model=RunSessionDetailResponse)
 async def get_session(
     tenant_id: UUID,
     session_id: UUID,
+    limit: int = Query(default=1000, ge=1, le=1000),
     current_user: User = Depends(get_current_user_required),
     service: RunSessionService = Depends(get_run_session_service),
-) -> RunSessionResponse:
+) -> RunSessionDetailResponse:
     try:
-        run_session = await service.get_session(tenant_id, session_id, cast(UUID, current_user.id))
+        detail = await service.get_session_detail(
+            tenant_id,
+            session_id,
+            cast(UUID, current_user.id),
+            limit=limit,
+        )
     except ResourceNotFound as exc:
         raise _not_found(exc) from exc
-    return RunSessionResponse.model_validate(run_session)
+    run_session = RunSessionResponse.model_validate(detail.run_session)
+    return RunSessionDetailResponse(
+        **run_session.model_dump(),
+        messages=[RunMessageResponse.model_validate(item) for item in detail.messages],
+        has_more=detail.has_more,
+        active_run_id=None if detail.active_run is None else detail.active_run.id,
+        active_run_status=None if detail.active_run is None else detail.active_run.status,
+        active_pause_type=None if detail.active_pause is None else detail.active_pause.pause_type,
+        active_pause_request=(
+            None if detail.active_pause is None else detail.active_pause.request_payload
+        ),
+    )
 
 
 @router.patch("/{session_id}", response_model=RunSessionResponse)

@@ -20,10 +20,9 @@ export interface InputAreaProps {
   ) => void
   onAbort?: () => void
   onEscalate?: () => void
-  // Plan 3 Task 7: streaming 中按「停止生成」时,如果 store 有 active_task_id,
-  // 调 onCancel(tid) → backend POST /chat/cancel/{tid}(worker partial commit);
-  // 否则 fallback onAbort(纯前端 abort)。
-  onCancel?: (taskId: string) => void
+  // Run cancellation is tenant-scoped and keyed by currentChatState.active_run_id.
+  onCancel?: () => void
+  blocked?: boolean
 }
 
 const MIN_HEIGHT = 24
@@ -89,7 +88,7 @@ export function InputArea(props: InputAreaProps) {
 
   const send = useCallback(() => {
     const text = value.trim()
-    if (!text) return
+    if (!text || props.blocked) return
     const parsed = parseSlashInput(text)
     if (parsed.kind === 'forced_tool') {
       props.onSend?.(parsed.displayMessage, {
@@ -142,8 +141,8 @@ export function InputArea(props: InputAreaProps) {
   )
 
   const onCancelClick = () => {
-    if (snap.active_task_id && props.onCancel) {
-      void props.onCancel(snap.active_task_id)
+    if (snap.active_run_id && props.onCancel) {
+      void props.onCancel()
     } else {
       props.onAbort?.()
     }
@@ -180,6 +179,7 @@ export function InputArea(props: InputAreaProps) {
               streaming ? '正在生成中...' : '问点什么 (Enter 发送, Shift+Enter 换行)'
             }
             rows={1}
+            disabled={props.blocked}
           />
         </div>
         {streaming ? (
@@ -197,7 +197,7 @@ export function InputArea(props: InputAreaProps) {
             type="button"
             className={styles.sendBtn}
             onClick={send}
-            disabled={!value.trim()}
+            disabled={!value.trim() || props.blocked}
             aria-label="发送"
             title="发送"
           >

@@ -29,3 +29,22 @@ class RunSessionResponse(BaseModel):
     archived_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RunMessageResponse(BaseModel):
+    id: UUID
+    role: str
+    content: str
+    status: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RunSessionDetailResponse(RunSessionResponse):
+    messages: list[RunMessageResponse]
+    has_more: bool
+    active_run_id: UUID | None
+    active_run_status: str | None
+    active_pause_type: str | None
+    active_pause_request: dict[str, object] | None

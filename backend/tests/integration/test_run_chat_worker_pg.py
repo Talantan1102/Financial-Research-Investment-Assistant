@@ -673,9 +673,17 @@ async def test_pause_is_atomic_and_resolved_server_record_is_only_resume_source(
     await service.pause_chat(assignment, paused)
     async with async_session_factory() as session, session.begin():
         pause = await session.scalar(select(RunPause).where(RunPause.run_id == assignment.run_id))
+        paused_event = await session.scalar(
+            select(RunEvent).where(
+                RunEvent.run_id == assignment.run_id,
+                RunEvent.event_type == "run.paused",
+            )
+        )
         run = await session.get(Run, assignment.run_id)
         assert run.status == "waiting_approval"
         assert pause.resolved_at is None
+        assert paused_event.payload["pause_type"] == "approval"
+        assert paused_event.payload["request"] == {"tool": "place_order"}
         pause.response_payload = {"approved": True, "text": "continue"}
         pause.resolved_at = func.timezone("UTC", func.statement_timestamp())
         run.status = "queued"

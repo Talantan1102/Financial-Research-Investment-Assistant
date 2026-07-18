@@ -7,12 +7,12 @@ import sys
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 import pytest
 import pytest_asyncio
-from app.models.run import Run, RunMessage, RunSession
+from app.models.run import Run, RunMessage, RunPause, RunSession
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
@@ -233,6 +233,108 @@ async def test_detail_hides_other_member_but_allows_authorized_archived_lookup(
     async with client_for(users["outsider"]) as client:
         outsider = await client.get(f"{base}/{sessions['member'].id}")
     assert outsider.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_detail_returns_bounded_durable_messages_in_stable_order(
+    session_api_context: tuple[Tenant, dict[str, User], dict[str, RunSession], Run],
+    client_for: ClientFactory,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tenant, users, sessions, _run = session_api_context
+    archived = sessions["member_archived"]
+    base_time = datetime(2026, 7, 17, 12, 1, 0)
+    messages = [
+        RunMessage(
+            tenant_id=tenant.id,
+            session_id=archived.id,
+            role="user" if index % 2 == 0 else "assistant",
+            content=f"history-{index}",
+            status="complete",
+            created_at=base_time + timedelta(seconds=index),
+        )
+        for index in range(3)
+    ]
+    async with async_session_factory() as session, session.begin():
+        session.add_all(messages)
+        await session.flush()
+        active_message = RunMessage(
+            tenant_id=tenant.id,
+            session_id=sessions["member"].id,
+            role="user",
+            content="active prompt",
+            status="complete",
+        )
+        session.add(active_message)
+        await session.flush()
+        active_run = Run(
+            tenant_id=tenant.id,
+            session_id=sessions["member"].id,
+            created_by_user_id=users["member"].id,
+            run_type="chat",
+            status="waiting_input",
+            idempotency_key=f"active-{uuid.uuid4()}",
+            request_hash="b" * 64,
+            input_message_id=active_message.id,
+        )
+        session.add(active_run)
+        await session.flush()
+        active_pause = RunPause(
+            run_id=active_run.id,
+            pause_no=1,
+            pause_type="input",
+            request_payload={"question": "成本价？"},
+            continuation_payload={},
+        )
+        session.add(active_pause)
+        await session.flush()
+
+    url = f"{_sessions_url(tenant.id)}/{archived.id}"
+    async with client_for(users["member"]) as client:
+        response = await client.get(url, params={"limit": 2})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["id"] == str(archived.id)
+    assert payload["archived_at"] is not None
+    assert payload["active_run_id"] is None
+    assert payload["active_run_status"] is None
+    assert [item["content"] for item in payload["messages"]] == [
+        "history-1",
+        "history-2",
+    ]
+    assert payload["messages"][0] == {
+        "id": str(messages[1].id),
+        "role": "assistant",
+        "content": "history-1",
+        "status": "complete",
+        "created_at": (base_time + timedelta(seconds=1)).isoformat(),
+    }
+    assert payload["has_more"] is True
+
+    async with client_for(users["other_member"]) as client:
+        hidden = await client.get(url, params={"limit": 2})
+    assert hidden.status_code == 404
+
+    active_url = f"{_sessions_url(tenant.id)}/{sessions['member'].id}"
+    async with client_for(users["member"]) as client:
+        active_response = await client.get(active_url)
+    assert active_response.status_code == 200
+    assert active_response.json()["active_run_id"] == str(active_run.id)
+    assert active_response.json()["active_run_status"] == "waiting_input"
+    assert active_response.json()["active_pause_type"] == "input"
+    assert active_response.json()["active_pause_request"] == {"question": "成本价？"}
+
+
+@pytest.mark.asyncio
+async def test_detail_rejects_message_limits_above_hard_cap(
+    session_api_context: tuple[Tenant, dict[str, User], dict[str, RunSession], Run],
+    client_for: ClientFactory,
+) -> None:
+    tenant, users, sessions, _run = session_api_context
+    url = f"{_sessions_url(tenant.id)}/{sessions['member'].id}"
+    async with client_for(users["member"]) as client:
+        response = await client.get(url, params={"limit": 1001})
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

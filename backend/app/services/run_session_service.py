@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.models.run import RunSession
+from app.models.run import Run, RunMessage, RunPause, RunSession
 from app.models.tenant import TenantMembership
-from app.run_control.types import ResourceNotFound, TenantRole
+from app.run_control.types import ACTIVE_RUN_STATUSES, ResourceNotFound, TenantRole
+
+
+@dataclass(frozen=True)
+class RunSessionDetail:
+    run_session: RunSession
+    messages: tuple[RunMessage, ...]
+    has_more: bool
+    active_run: Run | None
+    active_pause: RunPause | None
 
 
 class RunSessionService:
@@ -38,6 +48,55 @@ class RunSessionService:
     async def get_session(self, tenant_id: UUID, session_id: UUID, actor_id: UUID) -> RunSession:
         async with self._session_factory() as session, session.begin():
             return await self._get_visible_session(session, tenant_id, session_id, actor_id)
+
+    async def get_session_detail(
+        self,
+        tenant_id: UUID,
+        session_id: UUID,
+        actor_id: UUID,
+        *,
+        limit: int,
+    ) -> RunSessionDetail:
+        async with self._session_factory() as session, session.begin():
+            run_session = await self._get_visible_session(session, tenant_id, session_id, actor_id)
+            rows = await session.scalars(
+                select(RunMessage)
+                .where(
+                    RunMessage.tenant_id == tenant_id,
+                    RunMessage.session_id == session_id,
+                )
+                .order_by(RunMessage.created_at.desc(), RunMessage.id.desc())
+                .limit(limit + 1)
+            )
+            messages = tuple(rows.all())
+            active_run = await session.scalar(
+                select(Run)
+                .where(
+                    Run.tenant_id == tenant_id,
+                    Run.session_id == session_id,
+                    Run.status.in_([status.value for status in ACTIVE_RUN_STATUSES]),
+                )
+                .order_by(Run.created_at.desc(), Run.id.desc())
+                .limit(1)
+            )
+            active_pause = None
+            if active_run is not None:
+                active_pause = await session.scalar(
+                    select(RunPause)
+                    .where(
+                        RunPause.run_id == active_run.id,
+                        RunPause.resolved_at.is_(None),
+                    )
+                    .order_by(RunPause.pause_no.desc())
+                    .limit(1)
+                )
+            return RunSessionDetail(
+                run_session=run_session,
+                messages=tuple(reversed(messages[:limit])),
+                has_more=len(messages) > limit,
+                active_run=active_run,
+                active_pause=active_pause,
+            )
 
     async def update_title(
         self,

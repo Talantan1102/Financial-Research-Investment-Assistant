@@ -23,6 +23,7 @@ import type {
   ToolEndEvent,
   TokenEvent,
 } from '@/types/chat'
+import type { DurableRunMessage, RunStatus } from '@/api/runApi'
 
 export type StreamingStatus = 'idle' | 'streaming' | 'reconnecting' | 'error'
 
@@ -65,6 +66,9 @@ export interface CurrentChatState {
   // sendMessage 拿到 POST /chat 返的 task_id 后 set;done/error event 后 clear。
   // InputArea 据此切换 send ↔ stop button;ChatPane 据此判断是否要 cancel。
   active_task_id: string | null
+  active_run_id: string | null
+  active_run_status: RunStatus | null
+  last_event_id: string | null
   messages: ChatMessage[]
   streamingStatus: StreamingStatus
   streamingDraft: string
@@ -88,6 +92,9 @@ export interface CurrentChatState {
 const INITIAL: CurrentChatState = {
   session_id: null,
   active_task_id: null,
+  active_run_id: null,
+  active_run_status: null,
+  last_event_id: null,
   messages: [],
   streamingStatus: 'idle',
   streamingDraft: '',
@@ -126,6 +133,9 @@ export const currentChatActions = {
   setSession(session_id: string, messages: ChatMessage[]) {
     currentChatState.session_id = session_id
     currentChatState.active_task_id = null
+    currentChatState.active_run_id = null
+    currentChatState.active_run_status = null
+    currentChatState.last_event_id = null
     currentChatState.messages = [...messages]
     currentChatState.streamingStatus = 'idle'
     currentChatState.streamingDraft = ''
@@ -140,6 +150,100 @@ export const currentChatActions = {
   },
   setActiveTaskId(taskId: string | null) {
     currentChatState.active_task_id = taskId
+  },
+  adoptRunSession(sessionId: string) {
+    currentChatState.session_id = sessionId
+    for (const message of currentChatState.messages) {
+      if (message.session_id === '__pending__') message.session_id = sessionId
+    }
+  },
+  beginRun(prompt: string) {
+    currentChatState.streamingStatus = 'streaming'
+    currentChatState.streaming_phase = 'thinking'
+    currentChatState.streamingDraft = ''
+    currentChatState.errorMessage = null
+    currentChatState.last_event_id = null
+    currentChatState.active_run_status = 'queued'
+    currentChatState.messages.push({
+      id: `local-user-${Date.now()}`,
+      session_id: currentChatState.session_id ?? '__pending__',
+      role: 'user',
+      content: prompt,
+      message_type: 'text',
+      tool_call_data: null,
+      research_report_id: null,
+      research_report_summary: null,
+      created_at: new Date().toISOString(),
+    })
+  },
+  setActiveRun(runId: string | null, status: RunStatus | null = null) {
+    currentChatState.active_run_id = runId
+    currentChatState.active_run_status = status
+  },
+  setRunStatus(status: RunStatus) {
+    currentChatState.active_run_status = status
+    if (status === 'running' || status === 'assigned' || status === 'queued') {
+      currentChatState.streamingStatus = 'streaming'
+    }
+  },
+  setLastEventId(eventId: string) {
+    currentChatState.last_event_id = eventId
+  },
+  appendRunToken(content: string) {
+    currentChatState.streamingDraft += content
+    currentChatState.streaming_phase = 'writing'
+  },
+  replaceWithDurableMessages(sessionId: string, messages: DurableRunMessage[]) {
+    currentChatState.session_id = sessionId
+    currentChatState.messages = messages.map((message) => ({
+      id: message.id,
+      session_id: sessionId,
+      role: message.role,
+      content: message.content,
+      message_type: 'text' as const,
+      tool_call_data: null,
+      research_report_id: null,
+      research_report_summary: null,
+      created_at: message.created_at,
+      status:
+        message.status === 'partial' ||
+        message.status === 'cancelled' ||
+        message.status === 'error'
+          ? message.status
+          : 'done',
+    }))
+    currentChatState.streamingDraft = ''
+    currentChatState.streamingStatus = 'idle'
+    currentChatState.streaming_phase = 'idle'
+    currentChatState.errorMessage = null
+  },
+  finishRun(status: RunStatus, finalContent?: string) {
+    if (finalContent !== undefined) currentChatState.streamingDraft = finalContent
+    flushDraftAsMessage()
+    currentChatState.active_run_status = status
+    currentChatState.active_run_id = null
+    currentChatState.streamingStatus = 'idle'
+    currentChatState.streaming_phase = 'idle'
+  },
+  failRun(message: string) {
+    currentChatState.active_run_id = null
+    currentChatState.active_run_status = 'failed'
+    currentChatState.streamingStatus = 'error'
+    currentChatState.streaming_phase = 'error'
+    currentChatState.errorMessage = message
+  },
+  reportRunTransportError(message: string) {
+    currentChatState.streamingStatus = 'error'
+    currentChatState.streaming_phase = 'error'
+    currentChatState.errorMessage = message
+  },
+  resetRunTransport() {
+    currentChatState.active_run_id = null
+    currentChatState.active_run_status = null
+    currentChatState.streamingStatus = 'idle'
+    currentChatState.streaming_phase = 'idle'
+    currentChatState.streamingDraft = ''
+    currentChatState.errorMessage = null
   },
   beginStreaming() {
     currentChatState.streamingStatus = 'streaming'
@@ -329,6 +433,9 @@ export const currentChatActions = {
   reset() {
     currentChatState.session_id = INITIAL.session_id
     currentChatState.active_task_id = INITIAL.active_task_id
+    currentChatState.active_run_id = INITIAL.active_run_id
+    currentChatState.active_run_status = INITIAL.active_run_status
+    currentChatState.last_event_id = INITIAL.last_event_id
     currentChatState.messages = []
     currentChatState.streamingStatus = INITIAL.streamingStatus
     currentChatState.streamingDraft = INITIAL.streamingDraft

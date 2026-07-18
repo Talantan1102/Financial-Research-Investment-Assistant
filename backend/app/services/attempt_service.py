@@ -449,6 +449,7 @@ class AttemptService:
                     "pause_id": str(pause.id),
                     "pause_no": pause.pause_no,
                     "pause_type": pause.pause_type,
+                    "request": request,
                 },
                 attempt_id=assignment.attempt_id,
             )
