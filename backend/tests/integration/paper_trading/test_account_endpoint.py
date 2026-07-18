@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import uuid
 from collections.abc import Generator
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from inspect import iscoroutinefunction
 from typing import cast
@@ -16,6 +16,7 @@ from app.models.paper_account import (
     PaperCashLedger,
     PaperHoldingLot,
 )
+from app.models.paper_order import OrderSide, OrderStatus, OrderType, PaperFill, PaperOrder
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.router.auth_router import router as auth_router
@@ -40,6 +41,54 @@ def user(db_session: Session) -> User:
     db_session.add(row)
     db_session.flush()
     return row
+
+
+def _persist_filled_order(db_session: Session, user: User, account: PaperAccount) -> PaperFill:
+    now = datetime.now(UTC)
+    order = PaperOrder(
+        account_id=account.id,
+        account_generation=account.generation,
+        user_id=user.id,
+        client_request_id=f"endpoint-request-{uuid.uuid4()}",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        ts_code="600000.SH",
+        name="Test Stock",
+        side=OrderSide.BUY,
+        order_type=OrderType.LIMIT,
+        quantity=100,
+        limit_price=Decimal("10.0000"),
+        filled_quantity=100,
+        avg_fill_price=Decimal("10.0000"),
+        status=OrderStatus.FILLED,
+        original_proposal={"quantity": 100},
+        confirmed_payload={"quantity": 100},
+        user_edits={},
+        quote_snapshot={"latest_price": "10.0000", "timestamp": now.isoformat()},
+        rules_version="cn-a-20260706",
+        expires_at=now + timedelta(minutes=5),
+        confirmed_at=now,
+        completed_at=now,
+    )
+    db_session.add(order)
+    db_session.flush()
+    fill = PaperFill(
+        order_id=order.id,
+        fill_seq=1,
+        quantity=100,
+        price=Decimal("10.0000"),
+        gross_amount=Decimal("1000.0000"),
+        commission=Decimal("5.0000"),
+        stamp_duty=Decimal("0.0000"),
+        transfer_fee=Decimal("0.0100"),
+        quote_timestamp=now,
+        quote_source="fixed-test-quote",
+        executed_at=now,
+        trade_id=uuid.uuid4(),
+    )
+    db_session.add(fill)
+    db_session.flush()
+    return fill
 
 
 def _app_for_session(session: Session, user: User | None) -> FastAPI:
@@ -172,7 +221,7 @@ def test_initial_cash_changes_exactly_once_with_append_only_ledger(
     assert repeated.status_code == 409
     assert repeated.json()["detail"]["code"] == "initial_cash_edit_not_allowed"
     ledgers = db_session.scalars(select(PaperCashLedger)).all()
-    by_key = {row.business_key: row for row in ledgers}
+    by_key = {cast(str, row.business_key): row for row in ledgers}
     opening = next(row for row in ledgers if row.business_key.startswith("initial-deposit:"))
     reversal = by_key[f"initial-cash-edit-reversal:{opening.account_id}"]
     replacement = by_key[f"initial-cash-edit-deposit:{opening.account_id}"]
@@ -286,13 +335,14 @@ def test_initial_cash_edit_rejects_same_shaped_deposit_with_wrong_business_key(
 
 def test_initial_cash_edit_rejects_holding_activity(db_session: Session, user: User) -> None:
     account = PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    fill = _persist_filled_order(db_session, user, account)
     db_session.add(
         PaperHoldingLot(
             account_id=account.id,
             generation=account.generation,
             ts_code="600000.SH",
             name="Test Stock",
-            source_fill_id=uuid.uuid4(),
+            source_fill_id=fill.id,
             original_quantity=100,
             remaining_quantity=100,
             frozen_quantity=0,

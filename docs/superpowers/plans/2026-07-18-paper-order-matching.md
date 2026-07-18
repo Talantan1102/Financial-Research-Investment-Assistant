@@ -324,6 +324,12 @@ def test_buy_fill_updates_every_projection_in_one_transaction(db_session, open_b
     assert db_session.query(PaperCashLedger).filter_by(fill_id=fill.id).count() >= 1
 ```
 
+同一文件还必须写两个归属负例：用账户 A 的 `PaperFill` 尝试为账户 B 创建
+`PaperHoldingLot`，以及用旧 generation 的 Fill 尝试写入新 generation 的批次，均应在
+同一事务内失败且不留下 Fill、HoldingLot、Trade、Position 或 ledger 的部分投影。单列
+`PaperHoldingLot.source_fill_id` 外键只能证明 Fill 存在，不能证明账户三元组一致，因此这两项
+必须由结算服务显式校验。
+
 - [ ] **Step 2: 运行并确认失败**
 
 Run: `uv run --frozen --extra dev pytest backend/tests/integration/paper_trading/test_settlement.py -q`
@@ -348,6 +354,11 @@ def create(self, *, user_id: str, ts_code: str, name: str, ttype: TradeType, qua
 `PaperSettlementService.apply(*, order_id: UUID, execution: Execution, quote_timestamp: datetime, match_pass: int) -> PaperFill` 是唯一 public 结算入口。
 
 方法按顺序锁 order/account → 插入 `PaperMatchPass` → 计算分项费用 → 插入 fill → 结算/解冻资金或 FIFO 批次 → 写 ledger → 用 `trade_id=str(uuid4())` 调 `TradeService.create()` → 更新 filled quantity/avg price/status。任何一步异常由调用方 rollback，禁止在服务内部 commit。
+
+创建 `PaperHoldingLot` 前必须在锁和当前事务内读取 source `PaperFill` 及其 `PaperOrder`，原子验证
+`order.account_id == lot.account_id`、`order.user_id == account.user_id`、
+`order.account_generation == lot.generation == account.generation`。任一不一致都应拒绝并由调用方
+整体 rollback；不得仅依赖 `source_fill_id` 外键。
 
 - [ ] **Step 5: 运行结算与既有 Trade 回归**
 

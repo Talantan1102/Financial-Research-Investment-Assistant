@@ -147,6 +147,28 @@ def test_account_rejects_invalid_financial_or_generation_values(
         db_session.flush()
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "initial_cash",
+        "available_cash",
+        "frozen_cash",
+        "commission_rate",
+        "minimum_commission",
+    ],
+)
+@pytest.mark.parametrize("special", ["NaN", "Infinity", "-Infinity"])
+def test_account_rejects_nonfinite_financial_values(
+    db_session: Session, user: User, field: str, special: str
+) -> None:
+    account = _account(user)
+    setattr(account, field, Decimal(special))
+    db_session.add(account)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
 def test_database_rejects_nonpositive_account_version(db_session: Session, user: User) -> None:
     with pytest.raises(IntegrityError):
         db_session.execute(
@@ -295,6 +317,35 @@ def test_cash_ledger_generation_must_match_account(db_session: Session, user: Us
 
 
 @pytest.mark.parametrize(
+    "field",
+    ["amount", "available_before", "available_after", "frozen_before", "frozen_after"],
+)
+@pytest.mark.parametrize("special", ["NaN", "Infinity", "-Infinity"])
+def test_cash_ledger_rejects_nonfinite_financial_values(
+    db_session: Session, user: User, field: str, special: str
+) -> None:
+    account = _account(user)
+    db_session.add(account)
+    db_session.flush()
+    entry = PaperCashLedger(
+        account_id=account.id,
+        generation=1,
+        kind="cash_adjustment",
+        amount=Decimal("0.00"),
+        available_before=Decimal("1000000.00"),
+        available_after=Decimal("1000000.00"),
+        frozen_before=Decimal("0.00"),
+        frozen_after=Decimal("0.00"),
+        business_key=f"nonfinite:{field}:{special}",
+    )
+    setattr(entry, field, Decimal(special))
+    db_session.add(entry)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize(
     ("original", "remaining", "frozen"),
     [
         (-1, 0, 0),
@@ -354,6 +405,33 @@ def test_holding_lot_rejects_nonpositive_unit_cost(
             remaining_quantity=100,
             frozen_quantity=0,
             unit_cost=unit_cost,
+            available_on=date(2026, 7, 20),
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize("special", ["NaN", "Infinity", "-Infinity"])
+def test_holding_lot_rejects_nonfinite_unit_cost(
+    db_session: Session, user: User, special: str
+) -> None:
+    account = _account(user)
+    db_session.add(account)
+    db_session.flush()
+    source_fill_id = _persist_source_fill(db_session, user, account)
+    db_session.add(
+        PaperHoldingLot(
+            account_id=account.id,
+            generation=1,
+            ts_code="600519.SH",
+            name="贵州茅台",
+            source_fill_id=source_fill_id,
+            original_quantity=100,
+            remaining_quantity=100,
+            frozen_quantity=0,
+            unit_cost=Decimal(special),
             available_on=date(2026, 7, 20),
         )
     )

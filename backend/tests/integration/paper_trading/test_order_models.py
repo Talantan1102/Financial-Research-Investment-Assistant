@@ -175,6 +175,19 @@ def test_order_persists_full_prepared_payload(db_session: Session, user: User) -
     assert loaded.confirmed_at is None
 
 
+@pytest.mark.parametrize("field", ["original_proposal", "quote_snapshot"])
+def test_order_rejects_none_for_required_snapshots(
+    db_session: Session, user: User, field: str
+) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    setattr(order, field, None)
+    db_session.add(order)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
 def test_prepare_allows_multiple_null_confirmation_keys(db_session: Session, user: User) -> None:
     account = _account(db_session, user)
     db_session.add_all([_order(account=account, user=user), _order(account=account, user=user)])
@@ -820,6 +833,30 @@ def test_match_pass_persists_consumed_quote_summary(db_session: Session, user: U
     assert match_pass.created_at is not None
 
 
+@pytest.mark.parametrize("field", ["snapshot_summary", "consumed_levels"])
+def test_match_pass_rejects_none_for_required_snapshots(
+    db_session: Session, user: User, field: str
+) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    db_session.add(order)
+    db_session.flush()
+    match_pass = PaperMatchPass(
+        order_id=order.id,
+        quote_timestamp=datetime.now(UTC),
+        match_pass=1,
+        quote_source="fixed-test-quote",
+        snapshot_summary={},
+        consumed_levels=[],
+        matched_quantity=0,
+    )
+    setattr(match_pass, field, None)
+    db_session.add(match_pass)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
 def test_match_pass_watermark_is_unique(db_session: Session, user: User) -> None:
     account = _account(db_session, user)
     order = _order(account=account, user=user)
@@ -921,6 +958,7 @@ def test_aware_timestamps_round_trip_under_non_utc_connection_timezone(
     db_session.execute(text("SET LOCAL TIME ZONE 'America/New_York'"))
     account = _account(db_session, user)
     order = _order(account=account, user=user)
+    expected_instant = cast(datetime, order.expires_at).astimezone(UTC)
     db_session.add(order)
     db_session.flush()
     db_session.expire(order)
@@ -929,3 +967,4 @@ def test_aware_timestamps_round_trip_under_non_utc_connection_timezone(
 
     assert loaded is not None
     assert loaded.expires_at.utcoffset() is not None
+    assert loaded.expires_at.astimezone(UTC) == expected_instant

@@ -95,6 +95,14 @@ class PaperAccount(Base):
             "minimum_commission >= 0",
             name="ck_paper_accounts_minimum_commission_nonnegative",
         ),
+        CheckConstraint(
+            "initial_cash::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "available_cash::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "frozen_cash::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "commission_rate::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "minimum_commission::text NOT IN ('NaN', 'Infinity', '-Infinity')",
+            name="ck_paper_accounts_financial_values_finite",
+        ),
         CheckConstraint("version > 0", name="ck_paper_accounts_version_positive"),
     )
     __mapper_args__ = {"version_id_col": version}
@@ -160,6 +168,14 @@ class PaperCashLedger(Base):
             "frozen_before >= 0 AND frozen_after >= 0",
             name="ck_paper_cash_ledger_frozen_nonnegative",
         ),
+        CheckConstraint(
+            "amount::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "available_before::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "available_after::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "frozen_before::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "frozen_after::text NOT IN ('NaN', 'Infinity', '-Infinity')",
+            name="ck_paper_cash_ledger_financial_values_finite",
+        ),
     )
 
 
@@ -212,6 +228,10 @@ class PaperHoldingLot(Base):
             name="ck_paper_holding_lots_frozen_within_remaining",
         ),
         CheckConstraint("unit_cost > 0", name="ck_paper_holding_lots_unit_cost_positive"),
+        CheckConstraint(
+            "unit_cost::text NOT IN ('NaN', 'Infinity', '-Infinity')",
+            name="ck_paper_holding_lots_unit_cost_finite",
+        ),
         Index("ix_paper_holding_lots_account_symbol", "account_id", "ts_code"),
     )
 
