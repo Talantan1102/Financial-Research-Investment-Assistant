@@ -1,9 +1,14 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
 from app.services.paper_trading.errors import PaperTradingError
-from app.services.paper_trading.types import QuoteLevel, RealtimeQuote
+from app.services.paper_trading.types import (
+    FeeBreakdown,
+    QuoteLevel,
+    RealtimeQuote,
+    RuleSet,
+)
 from pydantic import ValidationError
 
 
@@ -51,6 +56,73 @@ def test_quote_requires_exactly_five_levels(side: str) -> None:
 
     with pytest.raises(ValidationError, match="exactly five quote levels required"):
         RealtimeQuote.model_validate(data)
+
+
+def _valid_rule_set_data() -> dict[str, object]:
+    return {
+        "version": "2026.07",
+        "effective_from": date(2026, 7, 20),
+        "board": "main",
+        "risk_warning": False,
+        "side": "buy",
+        "buy_lot_size": 100,
+        "price_tick": Decimal("0.01"),
+        "price_limit_ratio": Decimal("0.10"),
+        "quote_freshness_seconds": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("buy_lot_size", 0),
+        ("price_tick", Decimal("0")),
+        ("price_limit_ratio", Decimal("0")),
+        ("quote_freshness_seconds", 0),
+    ],
+)
+def test_rule_set_rejects_nonpositive_values(
+    field: str, invalid_value: object
+) -> None:
+    data = _valid_rule_set_data()
+    data[field] = invalid_value
+
+    with pytest.raises(ValidationError):
+        RuleSet.model_validate(data)
+
+
+@pytest.mark.parametrize("component", ["commission", "stamp_duty", "transfer_fee"])
+def test_fee_breakdown_rejects_negative_component(component: str) -> None:
+    data = {
+        "commission": Decimal("5.00"),
+        "stamp_duty": Decimal("1.50"),
+        "transfer_fee": Decimal("0.25"),
+    }
+    data[component] = Decimal("-0.01")
+
+    with pytest.raises(ValidationError):
+        FeeBreakdown.model_validate(data)
+
+
+def test_fee_breakdown_total_is_exact_decimal_sum() -> None:
+    fee = FeeBreakdown(
+        commission=Decimal("5.00"),
+        stamp_duty=Decimal("1.50"),
+        transfer_fee=Decimal("0.25"),
+    )
+
+    assert fee.total == Decimal("6.75")
+
+
+def test_fee_breakdown_rejects_assignment() -> None:
+    fee = FeeBreakdown(
+        commission=Decimal("5.00"),
+        stamp_duty=Decimal("1.50"),
+        transfer_fee=Decimal("0.25"),
+    )
+
+    with pytest.raises(ValidationError, match="Instance is frozen"):
+        fee.commission = Decimal("0")
 
 
 def test_error_exposes_stable_code() -> None:

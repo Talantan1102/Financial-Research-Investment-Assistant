@@ -50,18 +50,18 @@ class RuleSet(BaseModel):
     board: str
     risk_warning: bool
     side: str
-    buy_lot_size: int
-    price_tick: Decimal
-    price_limit_ratio: Decimal
-    quote_freshness_seconds: int
+    buy_lot_size: int = Field(gt=0)
+    price_tick: Decimal = Field(gt=0)
+    price_limit_ratio: Decimal = Field(gt=0)
+    quote_freshness_seconds: int = Field(gt=0)
 
 
 class FeeBreakdown(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
 
-    commission: Decimal
-    stamp_duty: Decimal
-    transfer_fee: Decimal
+    commission: Decimal = Field(ge=0)
+    stamp_duty: Decimal = Field(ge=0)
+    transfer_fee: Decimal = Field(ge=0)
 
     @property
     def total(self) -> Decimal:
