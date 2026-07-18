@@ -23,6 +23,13 @@ def _event(*, kind: str = "token", payload: dict[str, object] | None = None) -> 
     )
 
 
+def _deep_list(depth: int) -> object:
+    value: object = "leaf"
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
 @pytest.mark.parametrize(
     ("raw", "durable_seq", "redis_id", "encoded"),
     [
@@ -110,6 +117,53 @@ async def test_bus_rejects_hidden_reasoning_credentials_and_oversized_payload(
 async def test_bus_allows_token_metrics_that_are_not_credentials() -> None:
     redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
     event = _event(payload={"usage": {"token_count": 12, "completion_tokens": 7}})
+
+    assert await RunStreamBus(redis).publish(event) is not None
+
+    await redis.aclose()
+
+
+@pytest.mark.parametrize(
+    "credential_key",
+    [
+        "auth_token",
+        "session_token",
+        "id_token",
+        "api_secret",
+        "secret_key",
+        "api_key_id",
+        "private_key_id",
+    ],
+)
+async def test_bus_rejects_normalized_credential_family_keys(credential_key: str) -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    event = _event(payload={"nested": {credential_key: "credential"}})
+
+    with pytest.raises(ValueError, match="credentials"):
+        await RunStreamBus(redis).publish(event)
+
+    assert await redis.exists(run_stream_key(event.run_id)) == 0
+    await redis.aclose()
+
+
+async def test_bus_allows_real_token_metrics_and_ordinary_identifier_keys() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    event = _event(
+        payload={
+            "usage": {
+                "token_count": 1,
+                "completion_tokens": 2,
+                "prompt_tokens": 3,
+                "input_tokens": 4,
+                "output_tokens": 5,
+                "cached_tokens": 6,
+                "total_tokens": 7,
+            },
+            "cache_key": "cache-1",
+            "semantic_key": "semantic-1",
+            "tool_call_id": "call-1",
+        }
+    )
 
     assert await RunStreamBus(redis).publish(event) is not None
 
@@ -327,6 +381,61 @@ async def test_decoder_isolates_non_string_uuid_fields_and_delivers_following_va
     assert [entry.entry_id for entry in batch.entries] == [valid_id]
     assert batch.scanned_count == 3
     assert batch.last_seen_id == valid_id
+    await redis.aclose()
+
+
+async def test_read_isolates_deep_poison_advances_cursor_and_delivers_valid_when_delete_fails() -> (
+    None
+):
+    inner = fakeredis.aioredis.FakeRedis(decode_responses=False)
+
+    class DeleteFailingRedis:
+        async def xread(self, **kwargs: object) -> object:
+            return await inner.xread(**kwargs)
+
+        async def xdel(self, *_args: object, **_kwargs: object) -> int:
+            raise ConnectionError("delete unavailable")
+
+    event = _event()
+    envelope = {
+        "version": "v1",
+        "run_id": str(event.run_id),
+        "attempt_id": str(event.attempt_id),
+        "kind": "token",
+        "payload": "__DEEP_PAYLOAD__",
+        "durable_seq": 0,
+        "event_seq": 1,
+        "step": 1,
+    }
+    deep_json = "[" * 1_100 + "0" + "]" * 1_100
+    encoded = json.dumps(envelope).replace('"__DEEP_PAYLOAD__"', deep_json)
+    key = run_stream_key(event.run_id)
+    await inner.xadd(key, {"data": encoded})
+    valid_id = await RunStreamBus(inner).publish(event)
+    assert valid_id is not None
+
+    batch = await RunStreamBus(DeleteFailingRedis()).read(
+        event.run_id,
+        after_id="0-0",
+        block_ms=0,
+    )
+
+    assert [entry.entry_id for entry in batch.entries] == [valid_id]
+    assert batch.scanned_count == 2
+    assert batch.last_seen_id == valid_id
+    assert await inner.xlen(key) == 2
+    await inner.aclose()
+
+
+async def test_publish_rejects_deep_payload_and_production_sink_fails_open() -> None:
+    redis = fakeredis.aioredis.FakeRedis(decode_responses=False)
+    event = _event(payload={"nested": _deep_list(1_100)})
+
+    with pytest.raises(ValueError, match="depth"):
+        await RunStreamBus(redis).publish(event)
+    await build_run_stream_event_sink(redis)(event)
+
+    assert await redis.exists(run_stream_key(event.run_id)) == 0
     await redis.aclose()
 
 

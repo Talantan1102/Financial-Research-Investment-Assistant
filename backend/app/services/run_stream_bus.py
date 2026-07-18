@@ -19,6 +19,25 @@ logger = logging.getLogger(__name__)
 
 RUN_STREAM_VERSION = "v1"
 RUN_STREAM_KINDS = (frozenset(get_args(EventType)) | {"input_request", "cancelled"}) - {"reasoning"}
+MAX_PAYLOAD_DEPTH = 64
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+_SAFE_METRIC_KEY_FORMS = frozenset(
+    {
+        "tokencount",
+        "completiontokens",
+        "prompttokens",
+        "inputtokens",
+        "outputtokens",
+        "cachedtokens",
+        "totaltokens",
+        "reasoningtokens",
+        "audiotokens",
+        "acceptedpredictiontokens",
+        "rejectedpredictiontokens",
+        "cachereadinputtokens",
+        "cachecreationinputtokens",
+    }
+)
 _SENSITIVE_KEY_FORMS = frozenset(
     {
         "authorization",
@@ -39,15 +58,42 @@ _SENSITIVE_KEY_FORMS = frozenset(
         "chainofthought",
     }
 )
+_SENSITIVE_KEY_PARTS = frozenset(
+    {
+        "authorization",
+        "credential",
+        "credentials",
+        "password",
+        "reasoning",
+        "secret",
+        "token",
+    }
+)
 
 
 def run_stream_key(run_id: UUID) -> str:
     return f"run:stream:{run_id}"
 
 
-def _normalized_key_form(raw_key: str) -> str:
-    normalized = unicodedata.normalize("NFKC", raw_key).casefold()
-    return re.sub(r"[^a-z0-9]", "", normalized)
+def _normalized_key_parts(raw_key: str) -> tuple[str, ...]:
+    normalized = unicodedata.normalize("NFKC", raw_key)
+    separated = _CAMEL_BOUNDARY.sub("_", normalized).casefold()
+    return tuple(re.findall(r"[a-z0-9]+", separated))
+
+
+def _is_sensitive_key(raw_key: str) -> bool:
+    parts = _normalized_key_parts(raw_key)
+    compact = "".join(parts)
+    if compact in _SAFE_METRIC_KEY_FORMS:
+        return False
+    if compact in _SENSITIVE_KEY_FORMS or any(part in _SENSITIVE_KEY_PARTS for part in parts):
+        return True
+    adjacent_parts = set(zip(parts, parts[1:], strict=False))
+    if {("api", "key"), ("private", "key")} & adjacent_parts:
+        return True
+    return compact.endswith(
+        ("token", "secret", "password", "credential", "authorization", "apikey", "privatekey")
+    )
 
 
 @dataclass(frozen=True)
@@ -75,18 +121,20 @@ class RunStreamRead:
     scanned_count: int
 
 
-def _safe_json(value: Any) -> Any:
+def _safe_json(value: Any, *, depth: int = 0) -> Any:
+    if depth > MAX_PAYLOAD_DEPTH:
+        raise ValueError("Run stream payload exceeds depth limit")
     if isinstance(value, Mapping):
         out: dict[str, Any] = {}
         for raw_key, item in value.items():
             if not isinstance(raw_key, str):
                 raise ValueError("Run stream payload keys must be strings")
-            if _normalized_key_form(raw_key) in _SENSITIVE_KEY_FORMS:
+            if _is_sensitive_key(raw_key):
                 raise ValueError("Run stream payload contains credentials")
-            out[raw_key] = _safe_json(item)
+            out[raw_key] = _safe_json(item, depth=depth + 1)
         return out
     if isinstance(value, (tuple, list)):
-        return [_safe_json(item) for item in value]
+        return [_safe_json(item, depth=depth + 1) for item in value]
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     raise ValueError("Run stream payload must be JSON-compatible")
@@ -202,7 +250,14 @@ class RunStreamBus:
                         raise ValueError("Run stream envelope exceeds size limit")
                 data = json.loads(raw_data)
                 envelope = self._decode_envelope(data)
-            except (TypeError, ValueError, KeyError, UnicodeDecodeError, json.JSONDecodeError):
+            except (
+                TypeError,
+                ValueError,
+                KeyError,
+                RecursionError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+            ):
                 logger.warning("Skipping malformed Run stream entry %s", entry_id)
                 malformed_ids.append(entry_id)
                 continue
