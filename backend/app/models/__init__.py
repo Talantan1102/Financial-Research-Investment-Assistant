@@ -38,6 +38,14 @@ from .paper_account import (
     PaperCashLedger,
     PaperHoldingLot,
 )
+from .paper_order import (
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    PaperFill,
+    PaperMatchPass,
+    PaperOrder,
+)
 from .position import Position
 from .position_snapshot import PositionSnapshot  # noqa: F401
 from .research import ResearchCheckpoint
@@ -72,6 +80,12 @@ __all__ = [
     "PaperAccountResetAudit",
     "PaperCashLedger",
     "PaperHoldingLot",
+    "OrderSide",
+    "OrderStatus",
+    "OrderType",
+    "PaperOrder",
+    "PaperFill",
+    "PaperMatchPass",
     "DetailStatus",
     "MonitoringAlert",
     "MonitoringRun",

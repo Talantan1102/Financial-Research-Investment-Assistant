@@ -1,0 +1,225 @@
+"""PostgreSQL models for simulated orders, fills, and match-pass audits."""
+
+from __future__ import annotations
+
+import enum
+import uuid
+
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+
+from app.core.database import Base
+
+
+class OrderSide(enum.StrEnum):
+    BUY = "buy"
+    SELL = "sell"
+
+
+class OrderType(enum.StrEnum):
+    MARKET = "market"
+    LIMIT = "limit"
+
+
+class OrderStatus(enum.StrEnum):
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    QUEUED = "queued"
+    OPEN = "open"
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+    REJECTED = "rejected"
+
+
+_ORDER_SIDE = Enum(
+    OrderSide,
+    name="paper_order_side",
+    values_callable=lambda members: [member.value for member in members],
+    validate_strings=True,
+)
+_ORDER_TYPE = Enum(
+    OrderType,
+    name="paper_order_type",
+    values_callable=lambda members: [member.value for member in members],
+    validate_strings=True,
+)
+_ORDER_STATUS = Enum(
+    OrderStatus,
+    name="paper_order_status",
+    values_callable=lambda members: [member.value for member in members],
+    validate_strings=True,
+)
+
+
+class PaperOrder(Base):
+    __tablename__ = "paper_orders"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    account_generation = Column(Integer, nullable=False)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    client_request_id = Column(String(128), nullable=True)
+    source_session_id = Column(String(64), nullable=False)
+    source_message_id = Column(String(64), nullable=False)
+    ts_code = Column(String(16), nullable=False, index=True)
+    name = Column(String(64), nullable=False)
+    side = Column(_ORDER_SIDE, nullable=False)
+    order_type = Column(_ORDER_TYPE, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    limit_price = Column(Numeric(18, 4), nullable=True)
+    filled_quantity = Column(Integer, nullable=False, default=0)
+    avg_fill_price = Column(Numeric(18, 4), nullable=True)
+    status = Column(_ORDER_STATUS, nullable=False)
+    original_proposal = Column(JSONB(), nullable=False)
+    confirmed_payload = Column(JSONB(), nullable=True)
+    user_edits = Column(JSONB(), nullable=True)
+    quote_snapshot = Column(JSONB(), nullable=False)
+    rules_version = Column(String(64), nullable=False)
+    reject_code = Column(String(64), nullable=True)
+    reject_message = Column(Text, nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["account_id", "user_id", "account_generation"],
+            ["paper_accounts.id", "paper_accounts.user_id", "paper_accounts.generation"],
+            name="fk_paper_orders_account_user_generation",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "uq_paper_orders_user_client_request",
+            "user_id",
+            "client_request_id",
+            unique=True,
+            postgresql_where=text("client_request_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "account_generation > 0",
+            name="ck_paper_orders_account_generation_positive",
+        ),
+        CheckConstraint("quantity > 0", name="ck_paper_orders_quantity_positive"),
+        CheckConstraint(
+            "filled_quantity >= 0 AND filled_quantity <= quantity",
+            name="ck_paper_orders_filled_quantity_range",
+        ),
+        CheckConstraint(
+            "(order_type = 'market' AND limit_price IS NULL) OR "
+            "(order_type = 'limit' AND limit_price IS NOT NULL AND limit_price > 0)",
+            name="ck_paper_orders_type_limit_price",
+        ),
+        CheckConstraint(
+            "(filled_quantity = 0 AND avg_fill_price IS NULL) OR "
+            "(filled_quantity > 0 AND avg_fill_price IS NOT NULL AND avg_fill_price > 0)",
+            name="ck_paper_orders_fill_average",
+        ),
+        CheckConstraint(
+            "(status <> 'filled' OR filled_quantity = quantity) AND "
+            "(status <> 'partially_filled' OR "
+            "(filled_quantity > 0 AND filled_quantity < quantity))",
+            name="ck_paper_orders_status_filled_quantity",
+        ),
+        CheckConstraint(
+            "(status = 'rejected' AND reject_code IS NOT NULL AND reject_message IS NOT NULL) "
+            "OR (status <> 'rejected' AND reject_code IS NULL AND reject_message IS NULL)",
+            name="ck_paper_orders_reject_details",
+        ),
+        CheckConstraint(
+            "(status IN ('filled', 'cancelled', 'expired', 'rejected') "
+            "AND completed_at IS NOT NULL) OR "
+            "(status NOT IN ('filled', 'cancelled', 'expired', 'rejected') "
+            "AND completed_at IS NULL)",
+            name="ck_paper_orders_terminal_completion",
+        ),
+        Index("ix_paper_orders_account_status", "account_id", "status"),
+    )
+
+
+class PaperFill(Base):
+    __tablename__ = "paper_fills"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("paper_orders.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    fill_seq = Column(Integer, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    price = Column(Numeric(18, 4), nullable=False)
+    gross_amount = Column(Numeric(18, 4), nullable=False)
+    commission = Column(Numeric(18, 4), nullable=False)
+    stamp_duty = Column(Numeric(18, 4), nullable=False)
+    transfer_fee = Column(Numeric(18, 4), nullable=False)
+    quote_timestamp = Column(DateTime(timezone=True), nullable=False)
+    quote_source = Column(String(64), nullable=False)
+    executed_at = Column(DateTime(timezone=True), nullable=False)
+    trade_id = Column(UUID(as_uuid=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("order_id", "fill_seq", name="uq_paper_fills_order_sequence"),
+        UniqueConstraint("trade_id", name="uq_paper_fills_trade"),
+        CheckConstraint("fill_seq > 0", name="ck_paper_fills_sequence_positive"),
+        CheckConstraint("quantity > 0", name="ck_paper_fills_quantity_positive"),
+        CheckConstraint("price > 0", name="ck_paper_fills_price_positive"),
+        CheckConstraint("gross_amount > 0", name="ck_paper_fills_gross_positive"),
+        CheckConstraint(
+            "gross_amount = quantity * price",
+            name="ck_paper_fills_gross_matches_quantity_price",
+        ),
+        CheckConstraint("commission >= 0", name="ck_paper_fills_commission_nonnegative"),
+        CheckConstraint("stamp_duty >= 0", name="ck_paper_fills_stamp_duty_nonnegative"),
+        CheckConstraint("transfer_fee >= 0", name="ck_paper_fills_transfer_fee_nonnegative"),
+    )
+
+
+class PaperMatchPass(Base):
+    __tablename__ = "paper_match_passes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("paper_orders.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    quote_timestamp = Column(DateTime(timezone=True), nullable=False)
+    match_pass = Column(Integer, nullable=False)
+    quote_source = Column(String(64), nullable=False)
+    snapshot_summary = Column(JSONB(), nullable=False)
+    consumed_levels = Column(JSONB(), nullable=False)
+    matched_quantity = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "order_id",
+            "quote_timestamp",
+            "match_pass",
+            name="uq_paper_match_passes_watermark",
+        ),
+        CheckConstraint("match_pass > 0", name="ck_paper_match_passes_pass_positive"),
+        CheckConstraint(
+            "matched_quantity >= 0",
+            name="ck_paper_match_passes_matched_quantity_nonnegative",
+        ),
+    )
