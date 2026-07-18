@@ -1,6 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -49,7 +50,7 @@ class RuleSet(BaseModel):
     effective_from: date
     board: str
     risk_warning: bool
-    side: str
+    side: Literal["buy", "sell"]
     buy_lot_size: int = Field(gt=0)
     price_tick: Decimal = Field(gt=0)
     price_limit_ratio: Decimal = Field(gt=0)

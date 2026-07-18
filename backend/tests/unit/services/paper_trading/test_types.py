@@ -81,11 +81,17 @@ def _valid_rule_set_data() -> dict[str, object]:
         ("quote_freshness_seconds", 0),
     ],
 )
-def test_rule_set_rejects_nonpositive_values(
-    field: str, invalid_value: object
-) -> None:
+def test_rule_set_rejects_nonpositive_values(field: str, invalid_value: object) -> None:
     data = _valid_rule_set_data()
     data[field] = invalid_value
+
+    with pytest.raises(ValidationError):
+        RuleSet.model_validate(data)
+
+
+def test_rule_set_rejects_unknown_side() -> None:
+    data = _valid_rule_set_data()
+    data["side"] = "hold"
 
     with pytest.raises(ValidationError):
         RuleSet.model_validate(data)
