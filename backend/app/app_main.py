@@ -38,6 +38,9 @@ from app.router.tenants import router as tenants_router  # noqa: E402
 from app.scripts.migrate_phase2_scheduling_schema import (  # noqa: E402
     migrate_phase2_scheduling_schema,
 )
+from app.scripts.migrate_phase3_execution_schema import (  # noqa: E402
+    migrate_phase3_execution_schema,
+)
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
 from app.services.mcp_client import MCPClient  # noqa: E402
 from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover trigger)
@@ -55,6 +58,9 @@ def _initialize_postgres_schema() -> bool:
         changes = migrate_phase2_scheduling_schema(engine)
         if changes:
             logger.info("Phase 2 scheduling schema upgraded: %s", changes)
+        changes = migrate_phase3_execution_schema(engine)
+        if changes:
+            logger.info("Phase 3 execution schema upgraded: %s", changes)
         Base.metadata.create_all(bind=engine)
         logger.info("PostgreSQL tables initialized")
 

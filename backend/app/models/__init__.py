@@ -51,6 +51,7 @@ else:
     from .chat import ChatSession, LongTermMemory
     from .knowledge import Document, KnowledgeBase
 from .run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
+from .run_execution import RunToolExecution, RunUsageRecord
 from .run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
 from .tenant import Tenant, TenantAuditLog, TenantMembership
 from .user import User
@@ -71,6 +72,8 @@ __all__ = [
     "RunAttempt",
     "RunPause",
     "RunEvent",
+    "RunToolExecution",
+    "RunUsageRecord",
     "RunWorker",
     "RunTenantScheduling",
     "RunOutbox",

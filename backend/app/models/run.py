@@ -57,6 +57,7 @@ class RunSession(Base):
         default=datetime.utcnow,
         onupdate=datetime.utcnow,
     )
+    archived_at = Column(DateTime, nullable=True, index=True)
 
     __table_args__ = (UniqueConstraint("tenant_id", "id", name="uq_run_sessions_tenant_id"),)
 
