@@ -31,6 +31,23 @@ def _quote_row(**changes: Any) -> dict[str, object]:
     return row
 
 
+def test_get_sync_maps_quote_on_calling_thread() -> None:
+    calling_thread = threading.get_ident()
+    fetch_thread: int | None = None
+
+    def fetch(ts_code: str) -> pd.DataFrame:
+        nonlocal fetch_thread
+        assert ts_code == "600519.SH"
+        fetch_thread = threading.get_ident()
+        return pd.DataFrame([_quote_row()])
+
+    quote = TushareRealtimeQuoteProvider(fetch=fetch).get_sync("600519.SH")
+
+    assert fetch_thread == calling_thread
+    assert quote.ts_code == "600519.SH"
+    assert quote.asks[0].price == Decimal("1502")
+
+
 @pytest.mark.asyncio
 async def test_maps_exactly_five_levels_on_a_worker_thread() -> None:
     calling_thread = threading.get_ident()

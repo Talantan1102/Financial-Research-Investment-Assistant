@@ -22,15 +22,21 @@ class RealtimeQuoteProvider(Protocol):
     async def get(self, ts_code: str) -> RealtimeQuote:
         raise NotImplementedError
 
+    def get_sync(self, ts_code: str) -> RealtimeQuote:
+        raise NotImplementedError
+
 
 class TushareRealtimeQuoteProvider:
     def __init__(self, fetch: Callable[[str], pd.DataFrame] | None = None) -> None:
         self._fetch = fetch or self._sdk_fetch
 
     async def get(self, ts_code: str) -> RealtimeQuote:
+        return await asyncio.to_thread(self.get_sync, ts_code)
+
+    def get_sync(self, ts_code: str) -> RealtimeQuote:
         canonical_ts_code = self._canonical_ts_code(ts_code)
         try:
-            frame = await asyncio.to_thread(self._fetch, canonical_ts_code)
+            frame = self._fetch(canonical_ts_code)
         except _FETCH_FAILURES as exc:
             raise PaperTradingError("quote_unavailable", "实时行情暂不可用") from exc
 
