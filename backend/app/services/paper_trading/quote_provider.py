@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -14,6 +15,7 @@ from app.services.paper_trading.types import QuoteLevel, RealtimeQuote
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 _SOURCE = "tushare.realtime_quote"
 _FETCH_FAILURES = (OSError, RuntimeError)
+_TS_CODE_PATTERN = re.compile(r"\d{6}\.(?:SH|SZ)")
 
 
 class RealtimeQuoteProvider(Protocol):
@@ -26,8 +28,9 @@ class TushareRealtimeQuoteProvider:
         self._fetch = fetch or self._sdk_fetch
 
     async def get(self, ts_code: str) -> RealtimeQuote:
+        canonical_ts_code = self._canonical_ts_code(ts_code)
         try:
-            frame = await asyncio.to_thread(self._fetch, ts_code)
+            frame = await asyncio.to_thread(self._fetch, canonical_ts_code)
         except _FETCH_FAILURES as exc:
             raise PaperTradingError("quote_unavailable", "实时行情暂不可用") from exc
 
@@ -36,12 +39,15 @@ class TushareRealtimeQuoteProvider:
 
         try:
             row = self._normalized_row(frame)
+            self._validate_identity(row, canonical_ts_code)
+            if self._is_suspended(row):
+                self._parse_timestamp(row["DATE"], row["TIME"])
+                self._positive_decimal(row["PRE_CLOSE"])
+                raise PaperTradingError("suspended_security", "证券当前停牌")
             quote = self._map_row(row)
         except (KeyError, TypeError, ValueError, InvalidOperation, ValidationError) as exc:
             raise PaperTradingError("quote_unavailable", "实时行情数据无效") from exc
 
-        if quote.ts_code != ts_code:
-            raise PaperTradingError("quote_unavailable", "实时行情证券代码不匹配")
         return quote
 
     def assert_fresh(self, quote: RealtimeQuote, now: datetime, max_age_seconds: int) -> None:
@@ -71,24 +77,50 @@ class TushareRealtimeQuoteProvider:
             raise ValueError("duplicate fields after case normalization")
         return dict(zip(columns, frame.iloc[0].tolist(), strict=True))
 
+    @staticmethod
+    def _canonical_ts_code(ts_code: str) -> str:
+        if not isinstance(ts_code, str):
+            raise PaperTradingError("quote_unavailable", "证券代码无效")
+        canonical = ts_code.strip().upper()
+        if _TS_CODE_PATTERN.fullmatch(canonical) is None:
+            raise PaperTradingError("quote_unavailable", "证券代码无效")
+        return canonical
+
+    @staticmethod
+    def _validate_identity(row: Mapping[str, object], expected_ts_code: str) -> None:
+        ts_code = str(row["TS_CODE"]).strip().upper()
+        name = str(row["NAME"]).strip()
+        if ts_code != expected_ts_code or not name:
+            raise ValueError("security identity is invalid")
+
+    @classmethod
+    def _is_suspended(cls, row: Mapping[str, object]) -> bool:
+        book_fields = tuple(
+            field
+            for level in range(1, 6)
+            for field in (f"B{level}_P", f"B{level}_V", f"A{level}_P", f"A{level}_V")
+        )
+        values = (row["PRICE"], *(row[field] for field in book_fields))
+        return all(cls._finite_decimal(value) == 0 for value in values)
+
     @classmethod
     def _map_row(cls, row: Mapping[str, object]) -> RealtimeQuote:
         quoted_at = cls._parse_timestamp(row["DATE"], row["TIME"])
         bids = tuple(
             QuoteLevel(
-                price=cls._positive_decimal(row[f"BID{level}"]),
-                quantity=cls._nonnegative_integer(row[f"BID_VOL{level}"]),
+                price=cls._positive_decimal(row[f"B{level}_P"]),
+                quantity=cls._nonnegative_integer(row[f"B{level}_V"]),
             )
             for level in range(1, 6)
         )
         asks = tuple(
             QuoteLevel(
-                price=cls._positive_decimal(row[f"ASK{level}"]),
-                quantity=cls._nonnegative_integer(row[f"ASK_VOL{level}"]),
+                price=cls._positive_decimal(row[f"A{level}_P"]),
+                quantity=cls._nonnegative_integer(row[f"A{level}_V"]),
             )
             for level in range(1, 6)
         )
-        ts_code = str(row["TS_CODE"]).strip()
+        ts_code = str(row["TS_CODE"]).strip().upper()
         name = str(row["NAME"]).strip()
         if not ts_code or not name:
             raise ValueError("security identity is empty")
@@ -121,9 +153,16 @@ class TushareRealtimeQuoteProvider:
 
     @staticmethod
     def _positive_decimal(value: object) -> Decimal:
-        number = Decimal(str(value).strip())
-        if not number.is_finite() or number <= 0:
+        number = TushareRealtimeQuoteProvider._finite_decimal(value)
+        if number <= 0:
             raise ValueError("expected a finite positive decimal")
+        return number
+
+    @staticmethod
+    def _finite_decimal(value: object) -> Decimal:
+        number = Decimal(str(value).strip())
+        if not number.is_finite():
+            raise ValueError("expected a finite decimal")
         return number
 
     @staticmethod

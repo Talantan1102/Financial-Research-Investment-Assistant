@@ -35,6 +35,13 @@ class RealtimeQuote(BaseModel):
     source: str
     suspended: bool
 
+    @field_validator("quoted_at")
+    @classmethod
+    def timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("quoted_at must be timezone-aware")
+        return value
+
     @field_validator("bids", "asks")
     @classmethod
     def five_levels(cls, value: tuple[QuoteLevel, ...]) -> tuple[QuoteLevel, ...]:

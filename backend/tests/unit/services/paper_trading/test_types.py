@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
 from app.services.paper_trading.errors import PaperTradingError
@@ -23,7 +24,7 @@ def _valid_quote_data() -> dict[str, object]:
     return {
         "ts_code": "600519.SH",
         "name": "贵州茅台",
-        "quoted_at": datetime(2026, 7, 20, 10, 0),
+        "quoted_at": datetime(2026, 7, 20, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
         "previous_close": Decimal("1500.00"),
         "last_price": Decimal("1501.00"),
         "bids": _quote_levels(),
@@ -46,6 +47,14 @@ def test_quote_rejects_float_decimal_field() -> None:
     data["previous_close"] = 1500.0
 
     with pytest.raises(ValidationError):
+        RealtimeQuote.model_validate(data)
+
+
+def test_quote_rejects_naive_timestamp() -> None:
+    data = _valid_quote_data()
+    data["quoted_at"] = datetime(2026, 7, 20, 10, 0)
+
+    with pytest.raises(ValidationError, match="timezone-aware"):
         RealtimeQuote.model_validate(data)
 
 

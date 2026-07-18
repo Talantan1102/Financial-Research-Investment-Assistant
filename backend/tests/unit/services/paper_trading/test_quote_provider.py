@@ -23,10 +23,10 @@ def _quote_row(**changes: Any) -> dict[str, object]:
         "PRICE": "1501",
     }
     for level in range(1, 6):
-        row[f"BID{level}"] = str(1501 - level)
-        row[f"BID_VOL{level}"] = str(level * 100)
-        row[f"ASK{level}"] = str(1501 + level)
-        row[f"ASK_VOL{level}"] = str(level * 200)
+        row[f"B{level}_P"] = str(1501 - level)
+        row[f"B{level}_V"] = str(level * 100)
+        row[f"A{level}_P"] = str(1501 + level)
+        row[f"A{level}_V"] = str(level * 200)
     row.update(changes)
     return row
 
@@ -75,7 +75,7 @@ async def test_maps_columns_without_depending_on_column_case() -> None:
         pd.DataFrame(),
         pd.DataFrame([_quote_row(), _quote_row()]),
         pd.DataFrame([_quote_row(TS_CODE="000001.SZ")]),
-        pd.DataFrame([{key: value for key, value in _quote_row().items() if key != "ASK5"}]),
+        pd.DataFrame([{key: value for key, value in _quote_row().items() if key != "A5_P"}]),
     ],
     ids=["empty", "multiple rows", "wrong symbol", "missing field"],
 )
@@ -92,10 +92,10 @@ async def test_rejects_ambiguous_or_malformed_responses(frame: pd.DataFrame) -> 
     [
         ("PRICE", "0"),
         ("PRE_CLOSE", "-1"),
-        ("BID1", "nan"),
-        ("ASK_VOL2", "inf"),
-        ("BID_VOL3", "-1"),
-        ("ASK_VOL4", "1.5"),
+        ("B1_P", "nan"),
+        ("A2_V", "inf"),
+        ("B3_V", "-1"),
+        ("A4_V", "1.5"),
         ("DATE", "not-a-date"),
         ("TIME", "25:00:00"),
     ],
@@ -194,3 +194,59 @@ async def test_default_adapter_calls_tushare_realtime_quote(
     quote = await TushareRealtimeQuoteProvider().get("600519.SH")
     assert calls == ["600519.SH"]
     assert quote.ts_code == "600519.SH"
+
+
+@pytest.mark.asyncio
+async def test_normalizes_requested_ts_code_before_fetch() -> None:
+    calls: list[str] = []
+
+    def fetch(ts_code: str) -> pd.DataFrame:
+        calls.append(ts_code)
+        return pd.DataFrame([_quote_row()])
+
+    quote = await TushareRealtimeQuoteProvider(fetch=fetch).get(" 600519.sh ")
+    assert calls == ["600519.SH"]
+    assert quote.ts_code == "600519.SH"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ts_code", ["", "600519", "ABC519.SH", "600519.BJ", "600519.SH,000001.SZ"])
+async def test_rejects_invalid_requested_ts_code_without_fetching(ts_code: str) -> None:
+    called = False
+
+    def fetch(_: str) -> pd.DataFrame:
+        nonlocal called
+        called = True
+        return pd.DataFrame([_quote_row()])
+
+    with pytest.raises(PaperTradingError) as caught:
+        await TushareRealtimeQuoteProvider(fetch=fetch).get(ts_code)
+    assert caught.value.code == "quote_unavailable"
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_recognizes_tushare_suspended_security_shape() -> None:
+    suspended_fields = {"PRICE": "0"}
+    for level in range(1, 6):
+        suspended_fields[f"B{level}_P"] = "0"
+        suspended_fields[f"B{level}_V"] = "0"
+        suspended_fields[f"A{level}_P"] = "0"
+        suspended_fields[f"A{level}_V"] = "0"
+
+    provider = TushareRealtimeQuoteProvider(
+        fetch=lambda _: pd.DataFrame([_quote_row(**suspended_fields)])
+    )
+    with pytest.raises(PaperTradingError) as caught:
+        await provider.get("600519.SH")
+    assert caught.value.code == "suspended_security"
+
+
+@pytest.mark.asyncio
+async def test_partial_zero_book_is_malformed_not_suspended() -> None:
+    provider = TushareRealtimeQuoteProvider(
+        fetch=lambda _: pd.DataFrame([_quote_row(PRICE="0", B1_P="0")])
+    )
+    with pytest.raises(PaperTradingError) as caught:
+        await provider.get("600519.SH")
+    assert caught.value.code == "quote_unavailable"
