@@ -201,6 +201,32 @@ def test_initial_cash_edit_rejects_ledger_or_holding_activity(
     assert response.json()["detail"]["code"] == "initial_cash_edit_not_allowed"
 
 
+def test_initial_cash_edit_rejects_same_shaped_deposit_with_wrong_business_key(
+    db_session: Session, user: User
+) -> None:
+    account = PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    opening = db_session.scalar(
+        select(PaperCashLedger).where(PaperCashLedger.account_id == account.id)
+    )
+    assert opening is not None
+    opening.business_key = f"not-the-opening-deposit:{account.id}"  # type: ignore[assignment]
+    db_session.commit()
+
+    response = TestClient(_app_for_session(db_session, user)).patch(
+        "/api/v0/paper-trading/account/initial-cash",
+        json={"initial_cash": "800000.00"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "initial_cash_edit_not_allowed"
+    db_session.expire_all()
+    unchanged = db_session.get(PaperAccount, account.id)
+    assert unchanged is not None
+    assert unchanged.initial_cash == unchanged.available_cash == Decimal("1000000.00")
+    assert unchanged.initial_cash_edited_at is None
+    assert db_session.query(PaperCashLedger).count() == 1
+
+
 def test_initial_cash_edit_rejects_holding_activity(db_session: Session, user: User) -> None:
     account = PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
     db_session.add(

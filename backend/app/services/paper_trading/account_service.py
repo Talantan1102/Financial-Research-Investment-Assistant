@@ -331,6 +331,7 @@ class PaperAccountService:
         opening = ledgers[0]
         if (
             opening.kind != "initial_deposit"
+            or opening.business_key != f"initial-deposit:{account.id}"
             or opening.amount != account.initial_cash
             or opening.available_before != Decimal("0.00")
             or opening.available_after != account.available_cash
