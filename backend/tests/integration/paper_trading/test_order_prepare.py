@@ -359,6 +359,9 @@ def _add_sellable_lot(
     user: User,
     quantity: int,
     available_on: date,
+    ts_code: str = "600519.SH",
+    name: str = "贵州茅台",
+    unit_cost: Decimal = Decimal("1400"),
 ) -> None:
     account = PaperAccountService(session).get_active(user_id=cast(uuid.UUID, user.id))
     business_suffix = uuid.uuid4().hex
@@ -369,14 +372,14 @@ def _add_sellable_lot(
         client_request_id=f"historical-buy-{business_suffix}",
         source_session_id="historical-session",
         source_message_id=f"historical-{business_suffix}"[:64],
-        ts_code="600519.SH",
-        name="贵州茅台",
+        ts_code=ts_code,
+        name=name,
         side="buy",
         order_type="limit",
         quantity=quantity,
-        limit_price=Decimal("1400"),
+        limit_price=unit_cost,
         filled_quantity=quantity,
-        avg_fill_price=Decimal("1400"),
+        avg_fill_price=unit_cost,
         status="filled",
         original_proposal={"historical": True},
         confirmed_payload={"historical": True},
@@ -393,8 +396,8 @@ def _add_sellable_lot(
         order_id=filled.id,
         fill_seq=1,
         quantity=quantity,
-        price=Decimal("1400"),
-        gross_amount=Decimal("1400") * quantity,
+        price=unit_cost,
+        gross_amount=unit_cost * quantity,
         commission=Decimal("5"),
         stamp_duty=Decimal("0"),
         transfer_fee=Decimal("1.4"),
@@ -409,13 +412,13 @@ def _add_sellable_lot(
         PaperHoldingLot(
             account_id=account.id,
             generation=account.generation,
-            ts_code="600519.SH",
-            name="贵州茅台",
+            ts_code=ts_code,
+            name=name,
             source_fill_id=fill.id,
             original_quantity=quantity,
             remaining_quantity=quantity,
             frozen_quantity=0,
-            unit_cost=Decimal("1400"),
+            unit_cost=unit_cost,
             available_on=available_on,
         )
     )
@@ -454,6 +457,140 @@ def test_sell_preview_reports_only_t_plus_one_sellable_lots(
             message_id="message-2",
         )
     assert caught.value.code == "insufficient_sellable_quantity"
+
+
+def test_preview_can_edit_buy_into_another_security_sell_and_normalizes_name(
+    db_session: Session,
+    user: User,
+    quote_provider: FixedQuoteProvider,
+    clock: TradingClock,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    _add_sellable_lot(
+        db_session,
+        user=user,
+        quantity=200,
+        available_on=date(2026, 7, 17),
+        ts_code="000001.SZ",
+        name="平安银行",
+        unit_cost=Decimal("10"),
+    )
+    service = _service(db_session, quote_provider, clock)
+    order, _ = _prepare(service, cast(uuid.UUID, user.id))
+    before = (
+        db_session.query(PaperOrder).count(),
+        db_session.query(PaperCashLedger).count(),
+        order.side,
+        order.ts_code,
+        order.name,
+        order.quantity,
+        order.original_proposal,
+        order.quote_snapshot,
+        order.rules_version,
+    )
+    quote_provider.quote = _quote(
+        ts_code="000001.SZ",
+        name="平安银行",
+        previous_close=Decimal("10"),
+        last_price=Decimal("10"),
+    )
+    edited = OrderDraft(
+        side="sell",
+        ts_code="000001.SZ",
+        name="模型传入的旧名称",
+        quantity=200,
+        order_type="limit",
+        limit_price=Decimal("10"),
+    )
+
+    preview = service.preview(
+        user_id=cast(uuid.UUID, user.id),
+        order_id=cast(uuid.UUID, order.id),
+        draft=edited,
+    )
+
+    assert preview.draft.side.value == "sell"
+    assert preview.draft.ts_code == "000001.SZ"
+    assert preview.draft.name == "平安银行"
+    assert preview.quote.name == "平安银行"
+    assert preview.sellable_quantity == 200
+    assert preview.estimated_gross == Decimal("2000.00")
+    assert preview.estimated_cash_required == Decimal("0.00")
+    db_session.refresh(order)
+    assert (
+        db_session.query(PaperOrder).count(),
+        db_session.query(PaperCashLedger).count(),
+        order.side,
+        order.ts_code,
+        order.name,
+        order.quantity,
+        order.original_proposal,
+        order.quote_snapshot,
+        order.rules_version,
+    ) == before
+
+
+def test_preview_can_edit_sell_into_another_security_buy_without_activity(
+    db_session: Session,
+    user: User,
+    quote_provider: FixedQuoteProvider,
+    clock: TradingClock,
+) -> None:
+    account = PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    _add_sellable_lot(
+        db_session,
+        user=user,
+        quantity=100,
+        available_on=date(2026, 7, 17),
+    )
+    service = _service(db_session, quote_provider, clock)
+    order, _ = _prepare(
+        service,
+        cast(uuid.UUID, user.id),
+        side="sell",
+        quantity=100,
+    )
+    before = (
+        account.available_cash,
+        account.frozen_cash,
+        db_session.query(PaperOrder).count(),
+        db_session.query(PaperCashLedger).count(),
+    )
+    quote_provider.quote = _quote(
+        ts_code="000001.SZ",
+        name="平安银行",
+        previous_close=Decimal("10"),
+        last_price=Decimal("10"),
+    )
+    edited = OrderDraft(
+        side="buy",
+        ts_code="000001.SZ",
+        name="错误名称",
+        quantity=100,
+        order_type="limit",
+        limit_price=Decimal("10"),
+    )
+
+    preview = service.preview(
+        user_id=cast(uuid.UUID, user.id),
+        order_id=cast(uuid.UUID, order.id),
+        draft=edited,
+    )
+
+    assert preview.draft.side.value == "buy"
+    assert preview.draft.name == "平安银行"
+    assert preview.sellable_quantity == 0
+    assert preview.estimated_gross == Decimal("1000.00")
+    assert preview.estimated_cash_required == Decimal("1005.01")
+    db_session.refresh(order)
+    assert (
+        account.available_cash,
+        account.frozen_cash,
+        db_session.query(PaperOrder).count(),
+        db_session.query(PaperCashLedger).count(),
+    ) == before
+    assert order.side.value == "sell"
+    assert order.ts_code == "600519.SH"
 
 
 def test_preview_rejects_foreign_order_without_disclosing_it(

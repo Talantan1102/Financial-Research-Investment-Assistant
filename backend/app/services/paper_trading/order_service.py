@@ -80,6 +80,7 @@ class PaperOrderService:
             account=account,
             order_id=order_id,
             draft=draft,
+            normalize_quote_name=False,
         )
         order = PaperOrder(
             id=order_id,
@@ -128,9 +129,13 @@ class PaperOrderService:
         account = self.account_service.get_active(user_id=user_id)
         if order.account_id != account.id or order.account_generation != account.generation:
             raise PaperTradingError("stale_account_generation", "账户已重置，请重新下单")
-        if draft.side != order.side or draft.ts_code != order.ts_code:
-            raise PaperTradingError("order_identity_immutable", "订单方向和证券代码不可编辑")
-        return self._calculate_preview(account=account, order_id=order_id, draft=draft)
+        normalized_draft = _canonical_draft(draft)
+        return self._calculate_preview(
+            account=account,
+            order_id=order_id,
+            draft=normalized_draft,
+            normalize_quote_name=True,
+        )
 
     def _calculate_preview(
         self,
@@ -138,11 +143,18 @@ class PaperOrderService:
         account: PaperAccount,
         order_id: uuid.UUID,
         draft: OrderDraft,
+        normalize_quote_name: bool,
     ) -> OrderPreview:
         now = self._current_time()
         quote = self._quote(draft.ts_code)
-        if quote.ts_code != draft.ts_code or quote.name != draft.name:
+        if quote.ts_code != draft.ts_code:
             raise PaperTradingError("security_identity_mismatch", "证券代码或名称与实时行情不一致")
+        if quote.name != draft.name:
+            if not normalize_quote_name:
+                raise PaperTradingError(
+                    "security_identity_mismatch", "证券代码或名称与实时行情不一致"
+                )
+            draft = draft.model_copy(update={"name": quote.name})
         if quote.suspended:
             raise PaperTradingError("suspended_security", "证券当前停牌")
         self._validate_book(quote)
@@ -298,6 +310,10 @@ def _draft(**values: object) -> OrderDraft:
         draft = OrderDraft.model_validate(values)
     except ValidationError as exc:
         raise PaperTradingError("invalid_order", "订单参数无效") from exc
+    return _canonical_draft(draft)
+
+
+def _canonical_draft(draft: OrderDraft) -> OrderDraft:
     canonical_code = draft.ts_code.upper()
     if _TS_CODE.fullmatch(canonical_code) is None:
         raise PaperTradingError("invalid_order", "证券代码无效")
