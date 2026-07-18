@@ -2,58 +2,52 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, get_args
 from uuid import UUID
 
+from app.chatloop.events import EventType
 from app.chatloop.run_executor import RunEvent
 
 logger = logging.getLogger(__name__)
 
 RUN_STREAM_VERSION = "v1"
-RUN_STREAM_KINDS = frozenset(
-    {
-        "step_start",
-        "token",
-        "tool_call",
-        "tool_start",
-        "tool_end",
-        "tool_error",
-        "chart",
-        "skill_load",
-        "loop_halt",
-        "approval_request",
-        "escalate_request",
-        "cost_update",
-        "done",
-        "error",
-        "dispatch_start",
-        "dispatch_end",
-        "context_pressure",
-    }
-)
-_SENSITIVE_KEYS = frozenset(
+RUN_STREAM_KINDS = (frozenset(get_args(EventType)) | {"input_request", "cancelled"}) - {"reasoning"}
+_SENSITIVE_KEY_FORMS = frozenset(
     {
         "authorization",
-        "api_key",
         "apikey",
-        "access_token",
+        "xapikey",
+        "token",
+        "accesstoken",
+        "refreshtoken",
+        "clientsecret",
+        "privatekey",
         "credential",
+        "credentials",
         "password",
         "secret",
         "reasoning",
-        "reasoning_content",
-        "hidden_reasoning",
-        "chain_of_thought",
+        "reasoningcontent",
+        "hiddenreasoning",
+        "chainofthought",
     }
 )
 
 
 def run_stream_key(run_id: UUID) -> str:
     return f"run:stream:{run_id}"
+
+
+def _normalized_key_form(raw_key: str) -> str:
+    normalized = unicodedata.normalize("NFKC", raw_key).casefold()
+    return re.sub(r"[^a-z0-9]", "", normalized)
 
 
 @dataclass(frozen=True)
@@ -74,13 +68,20 @@ class RunStreamEntry:
     envelope: RunStreamEnvelope
 
 
+@dataclass(frozen=True)
+class RunStreamRead:
+    entries: tuple[RunStreamEntry, ...]
+    last_seen_id: str
+    scanned_count: int
+
+
 def _safe_json(value: Any) -> Any:
     if isinstance(value, Mapping):
         out: dict[str, Any] = {}
         for raw_key, item in value.items():
             if not isinstance(raw_key, str):
                 raise ValueError("Run stream payload keys must be strings")
-            if raw_key.casefold() in _SENSITIVE_KEYS:
+            if _normalized_key_form(raw_key) in _SENSITIVE_KEY_FORMS:
                 raise ValueError("Run stream payload contains credentials")
             out[raw_key] = _safe_json(item)
         return out
@@ -95,6 +96,8 @@ class RunStreamBus:
     DEFAULT_MAX_STREAM_LENGTH = 2_000
     DEFAULT_STREAM_TTL_SECONDS = 86_400
     DEFAULT_MAX_ENVELOPE_BYTES = 16 * 1024
+    DEFAULT_PUBLISH_TIMEOUT_SECONDS = 0.1
+    DEFAULT_CIRCUIT_COOLDOWN_SECONDS = 5.0
 
     def __init__(
         self,
@@ -103,13 +106,27 @@ class RunStreamBus:
         max_stream_length: int = DEFAULT_MAX_STREAM_LENGTH,
         stream_ttl_seconds: int = DEFAULT_STREAM_TTL_SECONDS,
         max_envelope_bytes: int = DEFAULT_MAX_ENVELOPE_BYTES,
+        publish_timeout_seconds: float = DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+        circuit_cooldown_seconds: float = DEFAULT_CIRCUIT_COOLDOWN_SECONDS,
     ) -> None:
-        if min(max_stream_length, stream_ttl_seconds, max_envelope_bytes) <= 0:
+        if (
+            min(
+                max_stream_length,
+                stream_ttl_seconds,
+                max_envelope_bytes,
+                publish_timeout_seconds,
+                circuit_cooldown_seconds,
+            )
+            <= 0
+        ):
             raise ValueError("Run stream bounds must be positive")
         self._redis = redis
         self._max_stream_length = max_stream_length
         self._stream_ttl_seconds = stream_ttl_seconds
         self._max_envelope_bytes = max_envelope_bytes
+        self._publish_timeout_seconds = publish_timeout_seconds
+        self._circuit_cooldown_seconds = circuit_cooldown_seconds
+        self._circuit_open_until = 0.0
 
     async def publish(self, event: RunEvent, *, durable_seq: int = 0) -> str | None:
         if event.kind not in RUN_STREAM_KINDS:
@@ -131,15 +148,23 @@ class RunStreamBus:
         if len(encoded.encode("utf-8")) > self._max_envelope_bytes:
             raise ValueError("Run stream envelope exceeds size limit")
         key = run_stream_key(event.run_id)
+        loop = asyncio.get_running_loop()
+        if loop.time() < self._circuit_open_until:
+            return None
         try:
-            entry_id = await self._redis.xadd(
-                key,
-                {"data": encoded},
-                maxlen=self._max_stream_length,
-                approximate=False,
-            )
-            await self._redis.expire(key, self._stream_ttl_seconds)
+            async with asyncio.timeout(self._publish_timeout_seconds):
+                async with self._redis.pipeline(transaction=True) as pipeline:
+                    pipeline.xadd(
+                        key,
+                        {"data": encoded},
+                        maxlen=self._max_stream_length,
+                        approximate=False,
+                    )
+                    pipeline.expire(key, self._stream_ttl_seconds)
+                    results = await pipeline.execute()
+            entry_id = results[0]
         except Exception as exc:  # noqa: BLE001 - Redis is explicitly best-effort
+            self._circuit_open_until = loop.time() + self._circuit_cooldown_seconds
             logger.warning("Run stream publish degraded for %s: %s", event.run_id, exc)
             return None
         return entry_id.decode("ascii") if isinstance(entry_id, bytes) else str(entry_id)
@@ -151,18 +176,21 @@ class RunStreamBus:
         after_id: str,
         count: int = 100,
         block_ms: int = 1_000,
-    ) -> list[RunStreamEntry]:
+    ) -> RunStreamRead:
         key = run_stream_key(run_id)
         kwargs: dict[str, Any] = {"streams": {key: after_id}, "count": count}
         if block_ms > 0:
             kwargs["block"] = block_ms
         response = await self._redis.xread(**kwargs)
         if not response:
-            return []
+            return RunStreamRead((), after_id, 0)
         entries: list[RunStreamEntry] = []
         malformed_ids: list[str] = []
-        for raw_id, fields in response[0][1]:
+        raw_entries = response[0][1]
+        last_seen_id = after_id
+        for raw_id, fields in raw_entries:
             entry_id = raw_id.decode("ascii") if isinstance(raw_id, bytes) else str(raw_id)
+            last_seen_id = entry_id
             raw_data = fields.get(b"data", fields.get("data"))
             try:
                 if isinstance(raw_data, bytes):
@@ -189,14 +217,14 @@ class RunStreamBus:
                 logger.warning(
                     "Run stream malformed-entry cleanup degraded for %s: %s", run_id, exc
                 )
-        return entries
+        return RunStreamRead(tuple(entries), last_seen_id, len(raw_entries))
 
     @staticmethod
     def _decode_envelope(data: Any) -> RunStreamEnvelope:
         if not isinstance(data, dict) or data.get("version") != RUN_STREAM_VERSION:
             raise ValueError("unsupported Run stream envelope")
         kind = data["kind"]
-        if kind not in RUN_STREAM_KINDS:
+        if not isinstance(kind, str) or kind not in RUN_STREAM_KINDS:
             raise ValueError("unsupported Run stream kind")
         payload = _safe_json(data["payload"])
         durable_seq = data["durable_seq"]
@@ -204,10 +232,14 @@ class RunStreamBus:
         step = data["step"]
         if any(type(value) is not int or value < 0 for value in (durable_seq, event_seq, step)):
             raise ValueError("invalid Run stream sequence")
+        raw_run_id = data["run_id"]
+        raw_attempt_id = data["attempt_id"]
+        if not isinstance(raw_run_id, str) or not isinstance(raw_attempt_id, str):
+            raise ValueError("Run stream UUID fields must be strings")
         return RunStreamEnvelope(
             version=RUN_STREAM_VERSION,
-            run_id=UUID(data["run_id"]),
-            attempt_id=UUID(data["attempt_id"]),
+            run_id=UUID(raw_run_id),
+            attempt_id=UUID(raw_attempt_id),
             kind=kind,
             payload=payload,
             durable_seq=durable_seq,
@@ -221,5 +253,6 @@ __all__ = [
     "RunStreamBus",
     "RunStreamEntry",
     "RunStreamEnvelope",
+    "RunStreamRead",
     "run_stream_key",
 ]

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import socket
@@ -28,12 +29,17 @@ from app.services.run_outbox import OutboxItem
 from app.services.run_stream_bus import RunStreamBus
 from app.services.worker_registry import WorkerRegistry
 
+logger = logging.getLogger(__name__)
+
 
 def build_run_stream_event_sink(redis: Any) -> Callable[[Any], Awaitable[None]]:
     bus = RunStreamBus(redis)
 
     async def publish(event: Any) -> None:
-        await bus.publish(event)
+        try:
+            await bus.publish(event)
+        except Exception as exc:  # noqa: BLE001 - temporary UI events are best-effort
+            logger.warning("Run stream event rejected for %s: %s", event.run_id, exc)
 
     return publish
 

@@ -428,6 +428,19 @@ async def test_sse_drains_terminal_event_committed_between_event_and_status_read
             self.events = (created, completed)
             return SimpleNamespace(status="completed")
 
+        async def get_final_message(
+            self,
+            tenant_id: uuid.UUID,
+            requested_run_id: uuid.UUID,
+            actor_id: uuid.UUID,
+        ) -> None:
+            assert (tenant_id, requested_run_id, actor_id) == (
+                tenant.id,
+                run_id,
+                users["member"].id,
+            )
+            return None
+
     fake_service = TerminalRaceService()
     app = FastAPI()
     app.include_router(router)

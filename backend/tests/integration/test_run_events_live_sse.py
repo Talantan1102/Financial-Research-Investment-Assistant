@@ -97,7 +97,7 @@ class ScriptedRunService:
 async def _client(
     *,
     service: ScriptedRunService,
-    bus: RunStreamBus,
+    bus: RunStreamBus | None,
     actor_id: uuid.UUID,
 ) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
@@ -164,6 +164,32 @@ async def test_live_sse_orders_durable_before_token_then_final_durable(
     await redis_client.delete(run_stream_key(run_id))
 
 
+async def test_input_request_event_reaches_live_sse(
+    redis_client: Redis,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.router.runs._RUN_STREAM_BLOCK_MS", 1)
+    tenant_id, run_id, attempt_id, actor_id = (uuid.uuid4() for _ in range(4))
+    bus = RunStreamBus(redis_client)
+    entry_id = await bus.publish(
+        TemporaryRunEvent(
+            run_id=run_id,
+            attempt_id=attempt_id,
+            kind="input_request",
+            seq=1,
+            step=1,
+            payload={"question": "budget?"},
+        )
+    )
+    assert entry_id is not None
+
+    async with _client(service=ScriptedRunService(), bus=bus, actor_id=actor_id) as client:
+        response = await client.get(f"/api/v1/tenants/{tenant_id}/runs/{run_id}/events")
+
+    assert "input_request" in [frame["event"] for frame in _frames(response.text)]
+    await redis_client.delete(run_stream_key(run_id))
+
+
 async def test_composite_reconnect_does_not_repeat_token_and_uses_durable_final(
     redis_client: Redis,
     monkeypatch: pytest.MonkeyPatch,
@@ -199,6 +225,27 @@ async def test_composite_reconnect_does_not_repeat_token_and_uses_durable_final(
         }
     ]
     await redis_client.delete(run_stream_key(run_id))
+
+
+async def test_terminal_durable_final_content_survives_without_redis_and_uses_numeric_cursor() -> (
+    None
+):
+    tenant_id, run_id, actor_id = (uuid.uuid4() for _ in range(3))
+    service = ScriptedRunService(terminal_from_start=True)
+
+    async with _client(service=service, bus=None, actor_id=actor_id) as client:
+        response = await client.get(
+            f"/api/v1/tenants/{tenant_id}/runs/{run_id}/events",
+            headers={"Last-Event-ID": "2"},
+        )
+
+    assert _frames(response.text) == [
+        {
+            "id": "3",
+            "event": "run.completed",
+            "data": {"final_message_id": "message-1", "content": "durable final"},
+        }
+    ]
 
 
 async def test_redis_read_failure_backs_off_and_still_delivers_durable_final(
@@ -272,9 +319,8 @@ async def test_true_redis_round_trip_is_bounded_and_expiring(redis_client: Redis
 
     assert await redis_client.xlen(run_stream_key(run_id)) == 2
     assert 0 < await redis_client.ttl(run_stream_key(run_id)) <= 60
-    assert [
-        entry.envelope.payload for entry in await bus.read(run_id, after_id="0-0", block_ms=1)
-    ] == [
+    batch = await bus.read(run_id, after_id="0-0", block_ms=1)
+    assert [entry.envelope.payload for entry in batch.entries] == [
         {"text": "1"},
         {"text": "2"},
     ]

@@ -171,9 +171,8 @@ async def _terminal_final_content(
     actor_id: UUID,
     *,
     run_status: str,
-    bus: RunStreamBus | None,
 ) -> str | None:
-    if bus is None or run_status not in _TERMINAL_STATUS_VALUES:
+    if run_status not in _TERMINAL_STATUS_VALUES:
         return None
     final_message = await service.get_final_message(tenant_id, run_id, actor_id)
     return None if final_message is None else cast(str, final_message.content)
@@ -198,7 +197,6 @@ async def _event_stream(
         run_id,
         actor_id,
         run_status=initial_status,
-        bus=bus,
     )
     for event in initial_events:
         durable_seq = max(durable_seq, int(event.seq))
@@ -212,12 +210,14 @@ async def _event_stream(
 
     while True:
         redis_read_failed = False
+        read_batch = None
         try:
-            entries = await bus.read(
+            read_batch = await bus.read(
                 run_id,
                 after_id=redis_id,
                 block_ms=_RUN_STREAM_BLOCK_MS,
             )
+            entries = read_batch.entries
         except Exception as exc:  # noqa: BLE001 - Redis loss must not hide durable facts
             logger.warning("Run stream read degraded for %s: %s", run_id, exc)
             entries = []
@@ -237,7 +237,6 @@ async def _event_stream(
                 run_id,
                 actor_id,
                 run_status=run_status,
-                bus=bus,
             )
             for event in durable_events:
                 durable_seq = max(durable_seq, int(event.seq))
@@ -265,7 +264,6 @@ async def _event_stream(
                     run_id,
                     actor_id,
                     run_status=run_status,
-                    bus=bus,
                 )
                 for event in durable_events:
                     durable_seq = max(durable_seq, int(event.seq))
@@ -285,6 +283,9 @@ async def _event_stream(
                 RunEventCursor(durable_seq, redis_id).encode(),
             )
 
+        if read_batch is not None and not deferred_for_durable_watermark:
+            redis_id = read_batch.last_seen_id
+
         durable_events, run_status = await _read_durable_snapshot(
             service,
             tenant_id,
@@ -298,7 +299,6 @@ async def _event_stream(
             run_id,
             actor_id,
             run_status=run_status,
-            bus=bus,
         )
         for event in durable_events:
             durable_seq = max(durable_seq, int(event.seq))
