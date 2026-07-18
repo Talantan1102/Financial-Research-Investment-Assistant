@@ -1,7 +1,10 @@
+# ruff: noqa: B010
+# Legacy SQLAlchemy Column typing requires setattr in mutation-focused tests.
+
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from decimal import Decimal
 from typing import cast
 
@@ -16,8 +19,20 @@ from app.models.paper_order import (
     PaperOrder,
 )
 from app.models.user import User
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session
+
+
+class _IndeterminateTimezone(tzinfo):
+    def utcoffset(self, dt: datetime | None) -> None:
+        return None
+
+    def dst(self, dt: datetime | None) -> None:
+        return None
+
+    def tzname(self, dt: datetime | None) -> None:
+        return None
 
 
 @pytest.fixture
@@ -64,6 +79,8 @@ def _order(
     avg_fill_price: Decimal | None = None,
     status: OrderStatus = OrderStatus.AWAITING_CONFIRMATION,
     completed_at: datetime | None = None,
+    confirmed_payload: dict[str, object] | None = None,
+    confirmed_at: datetime | None = None,
     reject_code: str | None = None,
     reject_message: str | None = None,
 ) -> PaperOrder:
@@ -85,13 +102,14 @@ def _order(
         avg_fill_price=avg_fill_price,
         status=status,
         original_proposal={"quantity": quantity},
-        confirmed_payload=None,
+        confirmed_payload=confirmed_payload,
         user_edits=None,
         quote_snapshot={"latest_price": "1499.00", "timestamp": now.isoformat()},
         rules_version="cn-a-20260706",
         reject_code=reject_code,
         reject_message=reject_message,
         expires_at=now + timedelta(minutes=5),
+        confirmed_at=confirmed_at,
         completed_at=completed_at,
     )
 
@@ -166,9 +184,29 @@ def test_prepare_allows_multiple_null_confirmation_keys(db_session: Session, use
 
 def test_confirmation_key_is_unique_per_user_when_nonnull(db_session: Session, user: User) -> None:
     account = _account(db_session, user)
-    db_session.add(_order(account=account, user=user, client_request_id="request-1"))
+    first = _order(account=account, user=user, client_request_id="request-1")
+    setattr(first, "status", OrderStatus.OPEN)
+    setattr(first, "confirmed_payload", {"quantity": 100})
+    setattr(first, "confirmed_at", datetime.now(UTC))
+    db_session.add(first)
     db_session.flush()
-    db_session.add(_order(account=account, user=user, client_request_id="request-1"))
+    duplicate = _order(account=account, user=user, client_request_id="request-1")
+    setattr(duplicate, "status", OrderStatus.OPEN)
+    setattr(duplicate, "confirmed_payload", {"quantity": 100})
+    setattr(duplicate, "confirmed_at", datetime.now(UTC))
+    db_session.add(duplicate)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_confirmation_key_cannot_be_blank(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user, client_request_id="   ")
+    setattr(order, "status", OrderStatus.OPEN)
+    setattr(order, "confirmed_payload", {"quantity": 100})
+    setattr(order, "confirmed_at", datetime.now(UTC))
+    db_session.add(order)
 
     with pytest.raises(IntegrityError):
         db_session.flush()
@@ -187,12 +225,13 @@ def test_same_confirmation_key_is_independent_between_users(
     db_session.add(other)
     db_session.flush()
     other_account = _account(db_session, other)
-    db_session.add_all(
-        [
-            _order(account=first_account, user=user, client_request_id="request-1"),
-            _order(account=other_account, user=other, client_request_id="request-1"),
-        ]
-    )
+    first = _order(account=first_account, user=user, client_request_id="request-1")
+    second = _order(account=other_account, user=other, client_request_id="request-1")
+    for order in (first, second):
+        setattr(order, "status", OrderStatus.OPEN)
+        setattr(order, "confirmed_payload", {"quantity": 100})
+        setattr(order, "confirmed_at", datetime.now(UTC))
+    db_session.add_all([first, second])
 
     db_session.flush()
 
@@ -296,10 +335,13 @@ def test_rejected_order_requires_reject_details_and_completion_time(
         _order(
             account=account,
             user=user,
+            client_request_id="request-1",
             status=OrderStatus.REJECTED,
+            confirmed_payload={"quantity": 100},
+            confirmed_at=datetime.now(UTC),
             reject_code=None,
             reject_message=None,
-            completed_at=None,
+            completed_at=datetime.now(UTC),
         )
     )
 
@@ -324,7 +366,18 @@ def test_non_rejected_order_cannot_carry_reject_details(db_session: Session, use
 
 def test_terminal_order_requires_completion_time(db_session: Session, user: User) -> None:
     account = _account(db_session, user)
-    db_session.add(_order(account=account, user=user, status=OrderStatus.FILLED))
+    db_session.add(
+        _order(
+            account=account,
+            user=user,
+            status=OrderStatus.FILLED,
+            filled_quantity=100,
+            avg_fill_price=Decimal("1500.00"),
+            client_request_id="request-1",
+            confirmed_payload={"quantity": 100},
+            confirmed_at=datetime.now(UTC),
+        )
+    )
 
     with pytest.raises(IntegrityError):
         db_session.flush()
@@ -351,15 +404,271 @@ def test_active_fill_status_agrees_with_filled_quantity(
         _order(
             account=account,
             user=user,
+            client_request_id="request-1",
             status=status,
             filled_quantity=filled_quantity,
             avg_fill_price=avg_fill_price,
             completed_at=completed_at,
+            confirmed_payload={"quantity": 100},
+            confirmed_at=datetime.now(UTC),
         )
     )
 
     with pytest.raises(IntegrityError):
         db_session.flush()
+
+
+def _confirmation_fields() -> dict[str, object]:
+    return {
+        "client_request_id": "request-1",
+        "confirmed_payload": {"quantity": 100},
+        "confirmed_at": datetime.now(UTC),
+    }
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        OrderStatus.AWAITING_CONFIRMATION,
+        OrderStatus.QUEUED,
+        OrderStatus.OPEN,
+        OrderStatus.REJECTED,
+    ],
+)
+def test_zero_fill_state_rejects_positive_filled_quantity(
+    db_session: Session, user: User, status: OrderStatus
+) -> None:
+    account = _account(db_session, user)
+    order = _order(
+        account=account,
+        user=user,
+        status=status,
+        filled_quantity=1,
+        avg_fill_price=Decimal("1500.00"),
+    )
+    if status is not OrderStatus.AWAITING_CONFIRMATION:
+        setattr(order, "client_request_id", "request-1")
+        setattr(order, "confirmed_payload", {"quantity": 100})
+        setattr(order, "confirmed_at", datetime.now(UTC))
+    if status is OrderStatus.REJECTED:
+        setattr(order, "reject_code", "insufficient_cash")
+        setattr(order, "reject_message", "余额不足")
+        setattr(order, "completed_at", datetime.now(UTC))
+    db_session.add(order)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize("status", [OrderStatus.CANCELLED, OrderStatus.EXPIRED])
+def test_unfilled_terminal_state_rejects_fully_filled_quantity(
+    db_session: Session, user: User, status: OrderStatus
+) -> None:
+    account = _account(db_session, user)
+    order = _order(
+        account=account,
+        user=user,
+        status=status,
+        filled_quantity=100,
+        avg_fill_price=Decimal("1500.00"),
+        completed_at=datetime.now(UTC),
+    )
+    setattr(order, "client_request_id", "request-1")
+    setattr(order, "confirmed_payload", {"quantity": 100})
+    setattr(order, "confirmed_at", datetime.now(UTC))
+    db_session.add(order)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize(
+    ("status", "filled_quantity", "avg_fill_price", "terminal"),
+    [
+        (OrderStatus.QUEUED, 0, None, False),
+        (OrderStatus.OPEN, 0, None, False),
+        (OrderStatus.PARTIALLY_FILLED, 1, Decimal("1500.00"), False),
+        (OrderStatus.FILLED, 100, Decimal("1500.00"), True),
+        (OrderStatus.EXPIRED, 0, None, True),
+        (OrderStatus.REJECTED, 0, None, True),
+    ],
+)
+def test_confirmed_state_requires_confirmation_bundle(
+    db_session: Session,
+    user: User,
+    status: OrderStatus,
+    filled_quantity: int,
+    avg_fill_price: Decimal | None,
+    terminal: bool,
+) -> None:
+    account = _account(db_session, user)
+    db_session.add(
+        _order(
+            account=account,
+            user=user,
+            status=status,
+            filled_quantity=filled_quantity,
+            avg_fill_price=avg_fill_price,
+            completed_at=datetime.now(UTC) if terminal else None,
+            reject_code="rejected" if status is OrderStatus.REJECTED else None,
+            reject_message="rejected" if status is OrderStatus.REJECTED else None,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize("missing", ["client_request_id", "confirmed_payload", "confirmed_at"])
+def test_confirmation_bundle_is_all_or_nothing(
+    db_session: Session, user: User, missing: str
+) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user, status=OrderStatus.OPEN)
+    setattr(order, "client_request_id", "request-1")
+    setattr(order, "confirmed_payload", {"quantity": 100})
+    setattr(order, "confirmed_at", datetime.now(UTC))
+    setattr(order, missing, None)
+    db_session.add(order)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_awaiting_confirmation_rejects_confirmation_bundle(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    setattr(order, "client_request_id", "request-1")
+    setattr(order, "confirmed_payload", {"quantity": 100})
+    setattr(order, "confirmed_at", datetime.now(UTC))
+    db_session.add(order)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_partially_filled_cancellation_requires_confirmation(
+    db_session: Session, user: User
+) -> None:
+    account = _account(db_session, user)
+    db_session.add(
+        _order(
+            account=account,
+            user=user,
+            status=OrderStatus.CANCELLED,
+            filled_quantity=1,
+            avg_fill_price=Decimal("1500.00"),
+            completed_at=datetime.now(UTC),
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize("field", ["limit_price", "avg_fill_price"])
+@pytest.mark.parametrize("special", ["NaN", "Infinity", "-Infinity"])
+def test_order_rejects_nonfinite_financial_values(
+    db_session: Session, user: User, field: str, special: str
+) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    if field == "avg_fill_price":
+        setattr(order, "filled_quantity", 1)
+        setattr(order, "status", OrderStatus.PARTIALLY_FILLED)
+        setattr(order, "client_request_id", "request-1")
+        setattr(order, "confirmed_payload", {"quantity": 100})
+        setattr(order, "confirmed_at", datetime.now(UTC))
+    setattr(order, field, Decimal(special))
+    db_session.add(order)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize("field", ["expires_at", "confirmed_at", "completed_at"])
+def test_order_rejects_naive_client_timestamps(db_session: Session, user: User, field: str) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    setattr(order, field, datetime(2026, 7, 18, 9, 30))
+    db_session.add(order)
+
+    with pytest.raises(StatementError, match="timezone-aware"):
+        db_session.flush()
+
+
+def test_order_has_global_status_expiry_scan_index() -> None:
+    assert any(
+        [column.name for column in index.columns] == ["status", "expires_at"]
+        for index in PaperOrder.__table__.indexes
+    )
+
+
+@pytest.mark.parametrize("field", ["source_session_id", "source_message_id"])
+def test_order_rejects_blank_source_ids(db_session: Session, user: User, field: str) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    setattr(order, field, " ")
+    db_session.add(order)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_order_rejects_indeterminate_timezone(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    setattr(
+        order,
+        "expires_at",
+        datetime(2026, 7, 18, 9, 30, tzinfo=_IndeterminateTimezone()),
+    )
+    db_session.add(order)
+
+    with pytest.raises(StatementError, match="timezone-aware"):
+        db_session.flush()
+
+
+@pytest.mark.parametrize(
+    ("status", "filled_quantity", "confirmed", "terminal"),
+    [
+        (OrderStatus.AWAITING_CONFIRMATION, 0, False, False),
+        (OrderStatus.QUEUED, 0, True, False),
+        (OrderStatus.OPEN, 0, True, False),
+        (OrderStatus.PARTIALLY_FILLED, 1, True, False),
+        (OrderStatus.FILLED, 100, True, True),
+        (OrderStatus.CANCELLED, 0, False, True),
+        (OrderStatus.CANCELLED, 1, True, True),
+        (OrderStatus.EXPIRED, 1, True, True),
+        (OrderStatus.REJECTED, 0, True, True),
+    ],
+)
+def test_valid_state_shapes_are_persisted(
+    db_session: Session,
+    user: User,
+    status: OrderStatus,
+    filled_quantity: int,
+    confirmed: bool,
+    terminal: bool,
+) -> None:
+    account = _account(db_session, user)
+    order = _order(
+        account=account,
+        user=user,
+        status=status,
+        filled_quantity=filled_quantity,
+        avg_fill_price=Decimal("1500.00") if filled_quantity else None,
+        completed_at=datetime.now(UTC) if terminal else None,
+        reject_code="rejected" if status is OrderStatus.REJECTED else None,
+        reject_message="rejected" if status is OrderStatus.REJECTED else None,
+    )
+    if confirmed:
+        setattr(order, "client_request_id", "request-1")
+        setattr(order, "confirmed_payload", {"quantity": 100})
+        setattr(order, "confirmed_at", datetime.now(UTC))
+    db_session.add(order)
+
+    db_session.flush()
 
 
 def test_fill_persists_execution_evidence(db_session: Session, user: User) -> None:
@@ -405,6 +714,54 @@ def test_fill_rejects_invalid_amounts(
         db_session.flush()
 
 
+@pytest.mark.parametrize(
+    "field", ["price", "gross_amount", "commission", "stamp_duty", "transfer_fee"]
+)
+@pytest.mark.parametrize("special", ["NaN", "Infinity", "-Infinity"])
+def test_fill_rejects_nonfinite_financial_values(
+    db_session: Session, user: User, field: str, special: str
+) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    db_session.add(order)
+    db_session.flush()
+    fill = _fill(order)
+    setattr(fill, field, Decimal(special))
+    db_session.add(fill)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+@pytest.mark.parametrize("field", ["quote_timestamp", "executed_at"])
+def test_fill_rejects_naive_execution_timestamps(
+    db_session: Session, user: User, field: str
+) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    db_session.add(order)
+    db_session.flush()
+    fill = _fill(order)
+    setattr(fill, field, datetime(2026, 7, 18, 9, 30))
+    db_session.add(fill)
+
+    with pytest.raises(StatementError, match="timezone-aware"):
+        db_session.flush()
+
+
+def test_fill_rejects_blank_quote_source(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    db_session.add(order)
+    db_session.flush()
+    fill = _fill(order)
+    setattr(fill, "quote_source", " ")
+    db_session.add(fill)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
 def test_fill_gross_must_equal_quantity_times_price(db_session: Session, user: User) -> None:
     account = _account(db_session, user)
     order = _order(account=account, user=user)
@@ -431,8 +788,8 @@ def test_fill_sequence_and_projected_trade_are_unique(
     db_session.flush()
     second = _fill(
         order,
-        fill_seq=first.fill_seq if duplicate == "sequence" else 2,
-        trade_id=first.trade_id if duplicate == "trade" else None,
+        fill_seq=cast(int, first.fill_seq) if duplicate == "sequence" else 2,
+        trade_id=cast(uuid.UUID, first.trade_id) if duplicate == "trade" else None,
     )
     db_session.add(second)
 
@@ -514,3 +871,61 @@ def test_match_pass_rejects_invalid_counters(
 
     with pytest.raises(IntegrityError):
         db_session.flush()
+
+
+def test_match_pass_rejects_naive_quote_timestamp(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(
+        PaperMatchPass(
+            order_id=order.id,
+            quote_timestamp=datetime(2026, 7, 18, 9, 30),
+            match_pass=1,
+            quote_source="fixed-test-quote",
+            snapshot_summary={},
+            consumed_levels=[],
+            matched_quantity=0,
+        )
+    )
+
+    with pytest.raises(StatementError, match="timezone-aware"):
+        db_session.flush()
+
+
+def test_match_pass_rejects_blank_quote_source(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(
+        PaperMatchPass(
+            order_id=order.id,
+            quote_timestamp=datetime.now(UTC),
+            match_pass=1,
+            quote_source=" ",
+            snapshot_summary={},
+            consumed_levels=[],
+            matched_quantity=0,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_aware_timestamps_round_trip_under_non_utc_connection_timezone(
+    db_session: Session, user: User
+) -> None:
+    db_session.execute(text("SET LOCAL TIME ZONE 'America/New_York'"))
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    db_session.add(order)
+    db_session.flush()
+    db_session.expire(order)
+
+    loaded = db_session.get(PaperOrder, order.id)
+
+    assert loaded is not None
+    assert loaded.expires_at.utcoffset() is not None

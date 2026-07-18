@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 import uuid
+from datetime import datetime
 
 from sqlalchemy import (
     CheckConstraint,
@@ -22,8 +23,23 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.engine import Dialect
+from sqlalchemy.types import TypeDecorator
 
 from app.core.database import Base
+
+
+class AwareDateTime(TypeDecorator[datetime]):
+    """Reject timestamps whose UTC offset cannot be determined before binding."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        del dialect
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("timestamp must be timezone-aware")
+        return value
 
 
 class OrderSide(enum.StrEnum):
@@ -87,16 +103,16 @@ class PaperOrder(Base):
     avg_fill_price = Column(Numeric(18, 4), nullable=True)
     status = Column(_ORDER_STATUS, nullable=False)
     original_proposal = Column(JSONB(), nullable=False)
-    confirmed_payload = Column(JSONB(), nullable=True)
-    user_edits = Column(JSONB(), nullable=True)
+    confirmed_payload = Column(JSONB(none_as_null=True), nullable=True)
+    user_edits = Column(JSONB(none_as_null=True), nullable=True)
     quote_snapshot = Column(JSONB(), nullable=False)
     rules_version = Column(String(64), nullable=False)
     reject_code = Column(String(64), nullable=True)
     reject_message = Column(Text, nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
+    expires_at = Column(AwareDateTime(), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    confirmed_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    confirmed_at = Column(AwareDateTime(), nullable=True)
+    completed_at = Column(AwareDateTime(), nullable=True)
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -116,6 +132,14 @@ class PaperOrder(Base):
             "account_generation > 0",
             name="ck_paper_orders_account_generation_positive",
         ),
+        CheckConstraint(
+            "client_request_id IS NULL OR btrim(client_request_id) <> ''",
+            name="ck_paper_orders_client_request_nonblank",
+        ),
+        CheckConstraint(
+            "btrim(source_session_id) <> '' AND btrim(source_message_id) <> ''",
+            name="ck_paper_orders_source_ids_nonblank",
+        ),
         CheckConstraint("quantity > 0", name="ck_paper_orders_quantity_positive"),
         CheckConstraint(
             "filled_quantity >= 0 AND filled_quantity <= quantity",
@@ -132,10 +156,35 @@ class PaperOrder(Base):
             name="ck_paper_orders_fill_average",
         ),
         CheckConstraint(
-            "(status <> 'filled' OR filled_quantity = quantity) AND "
-            "(status <> 'partially_filled' OR "
-            "(filled_quantity > 0 AND filled_quantity < quantity))",
+            "(status IN ('awaiting_confirmation', 'queued', 'open', 'rejected') "
+            "AND filled_quantity = 0) OR "
+            "(status = 'partially_filled' AND filled_quantity > 0 "
+            "AND filled_quantity < quantity) OR "
+            "(status = 'filled' AND filled_quantity = quantity) OR "
+            "(status IN ('cancelled', 'expired') AND filled_quantity < quantity)",
             name="ck_paper_orders_status_filled_quantity",
+        ),
+        CheckConstraint(
+            "(client_request_id IS NULL AND confirmed_payload IS NULL "
+            "AND confirmed_at IS NULL) OR "
+            "(client_request_id IS NOT NULL AND confirmed_payload IS NOT NULL "
+            "AND confirmed_at IS NOT NULL)",
+            name="ck_paper_orders_confirmation_bundle",
+        ),
+        CheckConstraint(
+            "(status = 'awaiting_confirmation' AND client_request_id IS NULL) OR "
+            "(status IN ('queued', 'open', 'partially_filled', 'filled', "
+            "'expired', 'rejected') AND client_request_id IS NOT NULL) OR "
+            "(status = 'cancelled' AND "
+            "(filled_quantity = 0 OR client_request_id IS NOT NULL))",
+            name="ck_paper_orders_status_confirmation",
+        ),
+        CheckConstraint(
+            "(limit_price IS NULL OR limit_price::text NOT IN "
+            "('NaN', 'Infinity', '-Infinity')) AND "
+            "(avg_fill_price IS NULL OR avg_fill_price::text NOT IN "
+            "('NaN', 'Infinity', '-Infinity'))",
+            name="ck_paper_orders_financial_values_finite",
         ),
         CheckConstraint(
             "(status = 'rejected' AND reject_code IS NOT NULL AND reject_message IS NOT NULL) "
@@ -150,6 +199,7 @@ class PaperOrder(Base):
             name="ck_paper_orders_terminal_completion",
         ),
         Index("ix_paper_orders_account_status", "account_id", "status"),
+        Index("ix_paper_orders_status_expires", "status", "expires_at"),
     )
 
 
@@ -170,9 +220,9 @@ class PaperFill(Base):
     commission = Column(Numeric(18, 4), nullable=False)
     stamp_duty = Column(Numeric(18, 4), nullable=False)
     transfer_fee = Column(Numeric(18, 4), nullable=False)
-    quote_timestamp = Column(DateTime(timezone=True), nullable=False)
+    quote_timestamp = Column(AwareDateTime(), nullable=False)
     quote_source = Column(String(64), nullable=False)
-    executed_at = Column(DateTime(timezone=True), nullable=False)
+    executed_at = Column(AwareDateTime(), nullable=False)
     trade_id = Column(UUID(as_uuid=True), nullable=False)
 
     __table_args__ = (
@@ -189,6 +239,15 @@ class PaperFill(Base):
         CheckConstraint("commission >= 0", name="ck_paper_fills_commission_nonnegative"),
         CheckConstraint("stamp_duty >= 0", name="ck_paper_fills_stamp_duty_nonnegative"),
         CheckConstraint("transfer_fee >= 0", name="ck_paper_fills_transfer_fee_nonnegative"),
+        CheckConstraint(
+            "price::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "gross_amount::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "commission::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "stamp_duty::text NOT IN ('NaN', 'Infinity', '-Infinity') AND "
+            "transfer_fee::text NOT IN ('NaN', 'Infinity', '-Infinity')",
+            name="ck_paper_fills_financial_values_finite",
+        ),
+        CheckConstraint("btrim(quote_source) <> ''", name="ck_paper_fills_quote_source_nonblank"),
     )
 
 
@@ -202,7 +261,7 @@ class PaperMatchPass(Base):
         nullable=False,
         index=True,
     )
-    quote_timestamp = Column(DateTime(timezone=True), nullable=False)
+    quote_timestamp = Column(AwareDateTime(), nullable=False)
     match_pass = Column(Integer, nullable=False)
     quote_source = Column(String(64), nullable=False)
     snapshot_summary = Column(JSONB(), nullable=False)
@@ -221,5 +280,9 @@ class PaperMatchPass(Base):
         CheckConstraint(
             "matched_quantity >= 0",
             name="ck_paper_match_passes_matched_quantity_nonnegative",
+        ),
+        CheckConstraint(
+            "btrim(quote_source) <> ''",
+            name="ck_paper_match_passes_quote_source_nonblank",
         ),
     )

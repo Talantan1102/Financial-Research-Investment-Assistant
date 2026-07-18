@@ -185,6 +185,12 @@ class PaperHoldingLot(Base):
 
     __table_args__ = (
         ForeignKeyConstraint(
+            ["source_fill_id"],
+            ["paper_fills.id"],
+            name="fk_paper_holding_lots_source_fill",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
             ["account_id", "generation"],
             ["paper_accounts.id", "paper_accounts.generation"],
             name="fk_paper_holding_lots_account_generation",
