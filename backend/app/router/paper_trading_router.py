@@ -23,22 +23,25 @@ def _business_error(exc: PaperTradingError) -> HTTPException:
 
 
 @router.get("/account", response_model=PaperAccountRead)
-async def get_account(
+def get_account(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user_required)],
 ) -> PaperAccountRead:
     try:
         account = PaperAccountService(db).get_or_create(user_id=user.id)
+        snapshot = PaperAccountRead.model_validate(account)
         db.commit()
-        db.refresh(account)
     except PaperTradingError as exc:
         db.rollback()
         raise _business_error(exc) from exc
-    return PaperAccountRead.model_validate(account)
+    except Exception:
+        db.rollback()
+        raise
+    return snapshot
 
 
 @router.patch("/account/initial-cash", response_model=PaperAccountRead)
-async def update_initial_cash(
+def update_initial_cash(
     payload: InitialCashUpdate,
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user_required)],
@@ -50,9 +53,12 @@ async def update_initial_cash(
             user_id=user.id,
             initial_cash=payload.initial_cash,
         )
+        snapshot = PaperAccountRead.model_validate(account)
         db.commit()
-        db.refresh(account)
     except PaperTradingError as exc:
         db.rollback()
         raise _business_error(exc) from exc
-    return PaperAccountRead.model_validate(account)
+    except Exception:
+        db.rollback()
+        raise
+    return snapshot

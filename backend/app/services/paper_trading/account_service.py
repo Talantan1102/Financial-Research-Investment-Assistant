@@ -279,6 +279,8 @@ class PaperAccountService:
         initial_cash = _positive_money(
             initial_cash, code="invalid_initial_cash", field="initial_cash"
         )
+        # Shared lock contract: order preparation takes this same active-account
+        # row lock before inserting activity, preventing proposal/edit TOCTOU.
         account = self.get_active(user_id=user_id, for_update=True)
         if not self._can_edit_initial_cash(account):
             raise PaperTradingError(

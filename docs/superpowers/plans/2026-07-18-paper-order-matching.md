@@ -123,6 +123,13 @@ def test_prepare_order_only_persists_proposal(db_session, user, quote_provider, 
     assert preview.estimated_gross == Decimal("150000.00")
 ```
 
+同一任务必须增加真实 PostgreSQL 双 session 竞态测试：一个 session 执行
+`prepare_order()`，另一个 session 同时执行首次资金编辑 PATCH。测试必须证明两条路径都先
+`SELECT ... FOR UPDATE` 锁定同一 active `PaperAccount` 行，因此串行后的合法终态只能是：
+资金编辑先完成后 prepare 读取新资金状态，或者 prepare 先插入 proposal/activity 后 PATCH
+稳定返回 `initial_cash_edit_not_allowed`。禁止出现 proposal 绑定旧资金快照而 PATCH 又同时
+成功的跨阶段 TOCTOU 终态。
+
 - [ ] **Step 2: 运行并确认失败**
 
 Run: `uv run --frozen --extra dev pytest backend/tests/integration/paper_trading/test_order_prepare.py -q`
@@ -156,6 +163,11 @@ class OrderPreview(BaseModel):
 `PaperOrderService` 必须暴露精确接口 `prepare_order(*, user_id: UUID, session_id: str, message_id: str, side: str, ts_code: str, name: str, quantity: int, order_type: str, limit_price: Decimal | None) -> tuple[PaperOrder, OrderPreview]` 和 `preview(*, user_id: UUID, order_id: UUID, draft: OrderDraft) -> OrderPreview`。
 
 preview 每次重新获取行情、规则和账户；只做计算，不冻结资源。买入估算包含最坏可接受成交金额与费用；卖出展示批次汇总出的 `sellable_quantity`。
+
+`prepare_order()` 在写入 `PaperOrder` proposal 或任何可被首次资金编辑视为 activity 的记录之前，
+必须调用 `PaperAccountService.get_active(user_id=user_id, for_update=True)`，并将账户行锁保持到
+调用方事务提交或回滚。该锁与 `edit_initial_cash_once()` 使用同一行锁，是 prepare/PATCH
+跨阶段互斥的公共契约；只读 `preview()` 不得制造 activity。
 
 - [ ] **Step 4: 运行 prepare 测试**
 

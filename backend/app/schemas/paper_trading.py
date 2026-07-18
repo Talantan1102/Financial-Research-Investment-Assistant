@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
+from app.models.paper_account import PaperAccountStatus
+
 Money = Annotated[
     Decimal,
     Field(gt=0, max_digits=18, decimal_places=2, allow_inf_nan=False),
@@ -26,7 +28,7 @@ class PaperAccountRead(BaseModel):
     initial_cash: Decimal
     available_cash: Decimal
     frozen_cash: Decimal
-    status: str
+    status: PaperAccountStatus
 
     @field_serializer("initial_cash", "available_cash", "frozen_cash")
     def serialize_money(self, value: Decimal) -> str:

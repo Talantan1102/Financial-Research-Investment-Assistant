@@ -5,6 +5,7 @@ import uuid
 from collections.abc import Generator
 from datetime import date
 from decimal import Decimal
+from inspect import iscoroutinefunction
 from typing import cast
 
 import pytest
@@ -17,10 +18,12 @@ from app.models.paper_account import (
 )
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
+from app.router.auth_router import router as auth_router
 from app.router.paper_trading_router import router
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.errors import PaperTradingError
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
@@ -52,6 +55,16 @@ def _app_for_session(session: Session, user: User | None) -> FastAPI:
     return app
 
 
+def test_paper_account_routes_are_sync_handlers() -> None:
+    routes = [route for route in router.routes if isinstance(route, APIRoute)]
+
+    assert {route.path for route in routes} == {
+        "/api/v0/paper-trading/account",
+        "/api/v0/paper-trading/account/initial-cash",
+    }
+    assert all(not iscoroutinefunction(route.endpoint) for route in routes)
+
+
 def test_get_account_creates_and_commits_default_account(db_session: Session, user: User) -> None:
     client = TestClient(_app_for_session(db_session, user))
 
@@ -72,10 +85,54 @@ def test_get_account_creates_and_commits_default_account(db_session: Session, us
     assert persisted.available_cash == Decimal("1000000.00")
 
 
+def test_get_account_returns_precommit_snapshot_without_refresh(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def reject_refresh(*args: object, **kwargs: object) -> None:
+        raise AssertionError("route must not access ORM state after commit")
+
+    monkeypatch.setattr(db_session, "refresh", reject_refresh)
+
+    response = TestClient(_app_for_session(db_session, user)).get("/api/v0/paper-trading/account")
+
+    assert response.status_code == 200
+    assert response.json()["available_cash"] == "1000000.00"
+
+
 def test_get_account_requires_authentication(db_session: Session) -> None:
     response = TestClient(_app_for_session(db_session, None)).get("/api/v0/paper-trading/account")
 
     assert response.status_code == 401
+
+
+def test_get_account_accepts_real_jwt_authentication(db_session: Session) -> None:
+    app = FastAPI()
+    app.include_router(auth_router)
+    app.include_router(router)
+
+    def override_db() -> Generator[Session, None, None]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_db
+    client = TestClient(app)
+    suffix = uuid.uuid4().hex[:10]
+    registered = client.post(
+        "/auth/register",
+        json={
+            "username": f"jwt-{suffix}",
+            "email": f"jwt-{suffix}@example.com",
+            "password": "secret123",
+        },
+    )
+    assert registered.status_code == 201
+
+    response = client.get(
+        "/api/v0/paper-trading/account",
+        headers={"Authorization": f"Bearer {registered.json()['access_token']}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["generation"] == 1
 
 
 def test_accounts_are_isolated_by_authenticated_user(db_session: Session, user: User) -> None:
@@ -313,6 +370,41 @@ def test_initial_cash_edit_rolls_back_both_ledgers_and_account(
     assert account is not None
     assert account.initial_cash == account.available_cash == Decimal("1000000.00")
     assert account.initial_cash_edited_at is None
+    assert db_session.query(PaperCashLedger).count() == 1
+
+
+def test_patch_rolls_back_when_commit_fails(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    account = PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    db_session.commit()
+    rollback_calls = 0
+    original_rollback = db_session.rollback
+
+    def fail_commit() -> None:
+        raise RuntimeError("commit failed")
+
+    def track_rollback() -> None:
+        nonlocal rollback_calls
+        rollback_calls += 1
+        original_rollback()
+
+    monkeypatch.setattr(db_session, "commit", fail_commit)
+    monkeypatch.setattr(db_session, "rollback", track_rollback)
+    client = TestClient(_app_for_session(db_session, user), raise_server_exceptions=False)
+
+    response = client.patch(
+        "/api/v0/paper-trading/account/initial-cash",
+        json={"initial_cash": "800000.00"},
+    )
+
+    assert response.status_code == 500
+    assert rollback_calls == 1
+    db_session.expire_all()
+    unchanged = db_session.get(PaperAccount, account.id)
+    assert unchanged is not None
+    assert unchanged.initial_cash == unchanged.available_cash == Decimal("1000000.00")
+    assert unchanged.initial_cash_edited_at is None
     assert db_session.query(PaperCashLedger).count() == 1
 
 
