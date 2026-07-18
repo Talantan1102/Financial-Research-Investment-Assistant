@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from collections.abc import Mapping
 from typing import Any
 
@@ -14,6 +15,10 @@ import app.models  # noqa: F401 - register the complete metadata graph
 from app.models.run_execution import RunToolExecution, RunUsageRecord
 
 _EXECUTION_TABLES = (RunToolExecution.__table__, RunUsageRecord.__table__)
+_PREDECESSOR_ATTEMPT_FKS = {
+    "run_tool_executions": "fk_run_tool_executions_attempt_provenance",
+    "run_usage_records": "fk_run_usage_records_attempt_provenance",
+}
 
 
 def _unsafe(message: str) -> RuntimeError:
@@ -37,17 +42,38 @@ def _expression_signature(expression: Any, connection: Connection) -> str:
     return re.sub(r"[\s()]", "", sql)
 
 
-def _check_signature(name: str, expression: Any, connection: Connection) -> object:
-    sql = str(expression)
-    if name == "ck_run_tool_executions_fixed_status":
-        lowered = sql.lower()
-        operator = (
-            "allowed"
-            if " not " not in f" {lowered} " and (" in " in f" {lowered} " or "= any" in lowered)
-            else "other"
+def _canonical_constraint_definitions(connection: Connection, regclass: str) -> dict[str, str]:
+    rows = connection.execute(
+        text(
+            "SELECT conname, pg_get_constraintdef(oid, false) "
+            "FROM pg_constraint "
+            "WHERE conrelid = to_regclass(:regclass) AND contype = 'c'"
+        ),
+        {"regclass": regclass},
+    )
+    return {str(name): re.sub(r"\s+", " ", str(definition)).strip() for name, definition in rows}
+
+
+def _expected_check_definitions(
+    connection: Connection,
+    table: Table,
+    expected: dict[str, CheckConstraint],
+) -> dict[str, str]:
+    temp_name = f"phase3_check_contract_{uuid.uuid4().hex}"
+    quoted_temp = connection.dialect.identifier_preparer.quote(temp_name)
+    quoted_table = connection.dialect.identifier_preparer.quote(table.name)
+    connection.execute(
+        text(f"CREATE TEMP TABLE {quoted_temp} (LIKE {quoted_table}) ON COMMIT DROP")
+    )
+    for name, constraint in expected.items():
+        quoted_name = connection.dialect.identifier_preparer.quote(name)
+        check_sql = constraint.sqltext.compile(
+            dialect=connection.dialect, compile_kwargs={"literal_binds": True}
         )
-        return operator, frozenset(re.findall(r"'([^']+)'", sql))
-    return _expression_signature(text(sql), connection)
+        connection.execute(
+            text(f"ALTER TABLE {quoted_temp} ADD CONSTRAINT {quoted_name} CHECK ({check_sql})")
+        )
+    return _canonical_constraint_definitions(connection, f"pg_temp.{temp_name}")
 
 
 def _index_predicate(index: Mapping[str, Any]) -> str | None:
@@ -89,24 +115,18 @@ def _repair_index(
 
 
 def _repair_checks(connection: Connection, table: Table, changes: list[str]) -> None:
-    inspector = inspect(connection)
-    actual = {
-        str(constraint["name"]): constraint
-        for constraint in inspector.get_check_constraints(table.name)
-        if constraint["name"] is not None
-    }
     expected: dict[str, CheckConstraint] = {}
     for constraint in table.constraints:
         if isinstance(constraint, CheckConstraint):
             if constraint.name is None:
                 raise _unsafe(f"{table.name} has an unnamed expected CHECK")
             expected[str(constraint.name)] = constraint
+    actual = _canonical_constraint_definitions(connection, table.name)
+    expected_definitions = _expected_check_definitions(connection, table, expected)
     table_sql = connection.dialect.identifier_preparer.quote(table.name)
     for name, constraint in expected.items():
         reflected = actual.get(name)
-        matches = reflected is not None and _check_signature(
-            name, reflected["sqltext"], connection
-        ) == _check_signature(name, constraint.sqltext, connection)
+        matches = reflected is not None and reflected == expected_definitions[name]
         if matches:
             continue
         name_sql = connection.dialect.identifier_preparer.quote(name)
@@ -120,9 +140,7 @@ def _repair_checks(connection: Connection, table: Table, changes: list[str]) -> 
         )
         changes.append(f"repair {name}")
     for name in sorted(set(actual) - set(expected)):
-        name_sql = connection.dialect.identifier_preparer.quote(str(name))
-        connection.execute(text(f"ALTER TABLE {table_sql} DROP CONSTRAINT {name_sql}"))
-        changes.append(f"remove unexpected {name}")
+        raise _unsafe(f"{table.name} has unexpected CHECK {name}")
 
 
 def _validate_columns(connection: Connection, table: Table) -> None:
@@ -168,6 +186,41 @@ def _validate_foreign_keys(connection: Connection, table: Table) -> None:
     for signature, expected_name in expected_signatures.items():
         if expected_name is not None and actual_signatures[signature] != expected_name:
             raise _unsafe(f"{table.name} foreign key {expected_name} is misnamed")
+
+
+def _upgrade_predecessor_attempt_fk(
+    connection: Connection, table: Table, changes: list[str]
+) -> None:
+    constraint_name = _PREDECESSOR_ATTEMPT_FKS[table.name]
+    actual = {fk["name"]: fk for fk in inspect(connection).get_foreign_keys(table.name)}.get(
+        constraint_name
+    )
+    if actual is None:
+        return
+    signature = (
+        tuple(actual["constrained_columns"]),
+        actual["referred_table"],
+        tuple(actual["referred_columns"]),
+        actual.get("options", {}).get("ondelete", "NO ACTION").upper(),
+    )
+    expected_identity = (("run_id", "attempt_id"), "run_attempts", ("run_id", "id"))
+    if signature == (*expected_identity, "RESTRICT"):
+        return
+    if signature != (*expected_identity, "CASCADE"):
+        return
+
+    preparer = connection.dialect.identifier_preparer
+    table_sql = preparer.quote(table.name)
+    constraint_sql = preparer.quote(constraint_name)
+    connection.execute(text(f"ALTER TABLE {table_sql} DROP CONSTRAINT {constraint_sql}"))
+    connection.execute(
+        text(
+            f"ALTER TABLE {table_sql} ADD CONSTRAINT {constraint_sql} "
+            "FOREIGN KEY (run_id, attempt_id) "
+            "REFERENCES run_attempts (run_id, id) ON DELETE RESTRICT"
+        )
+    )
+    changes.append("upgrade predecessor Attempt FK to RESTRICT")
 
 
 def _validate_uniques(connection: Connection, table: Table) -> None:
@@ -283,6 +336,7 @@ def migrate_phase3_execution_schema(engine: Engine) -> tuple[str, ...]:
         for table in _EXECUTION_TABLES:
             _repair_checks(connection, table, changes)
             _repair_table_indexes(connection, table, changes)
+            _upgrade_predecessor_attempt_fk(connection, table, changes)
         for table in _EXECUTION_TABLES:
             _validate_execution_table(connection, table)
 

@@ -11,6 +11,7 @@ from app.models.run_execution import RunUsageRecord
 from app.scripts.migrate_phase3_execution_schema import migrate_phase3_execution_schema
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import IntegrityError
 
 
 @pytest.fixture
@@ -57,6 +58,85 @@ def _assert_phase3_schema(engine: Engine) -> None:
 
 def _check_names(engine: Engine, table: str) -> set[str]:
     return {constraint["name"] for constraint in inspect(engine).get_check_constraints(table)}
+
+
+def _set_predecessor_attempt_fks(engine: Engine) -> None:
+    with engine.begin() as connection:
+        for table, constraint in (
+            ("run_tool_executions", "ck_run_tool_execution_row_shape"),
+            ("run_usage_records", "ck_run_usage_total_consistent"),
+            ("run_usage_records", "ck_run_usage_cached_within_input"),
+        ):
+            connection.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {constraint}"))
+        for table, constraint in (
+            ("run_tool_executions", "fk_run_tool_executions_attempt_provenance"),
+            ("run_usage_records", "fk_run_usage_records_attempt_provenance"),
+        ):
+            connection.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {constraint}"))
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table} ADD CONSTRAINT {constraint} "
+                    "FOREIGN KEY (run_id, attempt_id) "
+                    "REFERENCES run_attempts (run_id, id) ON DELETE CASCADE"
+                )
+            )
+
+
+def _attempt_fk_delete_rule(engine: Engine, table: str) -> str:
+    return next(
+        fk["options"]["ondelete"]
+        for fk in inspect(engine).get_foreign_keys(table)
+        if fk["constrained_columns"] == ["run_id", "attempt_id"]
+    )
+
+
+def _execute_check_probe(engine: Engine, statement: str, *, accepted: bool) -> None:
+    with engine.connect() as connection:
+        transaction = connection.begin()
+        connection.execute(text("SET LOCAL session_replication_role = replica"))
+        if accepted:
+            connection.execute(text(statement))
+        else:
+            with pytest.raises(IntegrityError):
+                connection.execute(text(statement))
+        transaction.rollback()
+
+
+def _assert_repaired_check_literal_behavior(engine: Engine, table: str, constraint: str) -> None:
+    suffix = uuid.uuid4().hex
+    if table == "run_usage_records":
+        base = (
+            "INSERT INTO run_usage_records "
+            "(id, run_id, attempt_id, provider, model, input_tokens, output_tokens, "
+            "cached_tokens, total_tokens, cost_cny, created_at) VALUES "
+        )
+        valid = base + (
+            f"('{uuid.uuid4()}', '{uuid.uuid4()}', '{uuid.uuid4()}', 'p', 'm', "
+            "10, 5, 3, 15, 0, now())"
+        )
+        invalid = base + (
+            f"('{uuid.uuid4()}', '{uuid.uuid4()}', '{uuid.uuid4()}', 'p', 'm', "
+            "10, 5, 3, 16, 0, now())"
+        )
+    else:
+        base = (
+            "INSERT INTO run_tool_executions "
+            "(id, run_id, attempt_id, tool_call_id, idempotency_key, tool_name, "
+            "request_summary, status, result_summary, error_code, error_message, "
+            "started_at, finished_at) VALUES "
+        )
+        valid = base + (
+            f"('{uuid.uuid4()}', '{uuid.uuid4()}', '{uuid.uuid4()}', 'call-{suffix}', "
+            f"'key-{suffix}', 'tool', '{{}}', 'failed', NULL, 'failed', NULL, now(), now())"
+        )
+        invalid_status = "unknown" if constraint.endswith("fixed_status") else "completed"
+        invalid = base + (
+            f"('{uuid.uuid4()}', '{uuid.uuid4()}', '{uuid.uuid4()}', 'bad-{suffix}', "
+            f"'bad-key-{suffix}', 'tool', '{{}}', '{invalid_status}', NULL, NULL, NULL, "
+            "now(), now())"
+        )
+    _execute_check_probe(engine, valid, accepted=True)
+    _execute_check_probe(engine, invalid, accepted=False)
 
 
 def test_fresh_schema_is_completed_by_create_all_after_noop_upgrade(
@@ -126,6 +206,136 @@ def test_upgrade_repairs_safe_check_and_index_drift(
     assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
 
 
+def test_a47_predecessor_attempt_fks_upgrade_to_restrict_and_second_run_is_noop(
+    isolated_schema_engine: Engine,
+) -> None:
+    _set_predecessor_attempt_fks(isolated_schema_engine)
+
+    changes = migrate_phase3_execution_schema(isolated_schema_engine)
+
+    assert changes.count("upgrade predecessor Attempt FK to RESTRICT") == 2
+    for table in ("run_tool_executions", "run_usage_records"):
+        assert _attempt_fk_delete_rule(isolated_schema_engine, table) == "RESTRICT"
+    assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
+
+
+def test_two_engines_concurrently_upgrade_a47_predecessor_fks(
+    isolated_schema_engine: Engine,
+) -> None:
+    _set_predecessor_attempt_fks(isolated_schema_engine)
+    with isolated_schema_engine.connect() as connection:
+        schema = connection.scalar(text("SELECT current_schema()"))
+    second_engine = create_engine(
+        isolated_schema_engine.url,
+        connect_args={"options": f"-csearch_path={schema} -ctimezone=Asia/Shanghai"},
+    )
+    barrier = threading.Barrier(2)
+
+    def synchronize(_connection: Connection) -> None:
+        barrier.wait(timeout=10)
+
+    for candidate in (isolated_schema_engine, second_engine):
+        event.listen(candidate, "begin", synchronize, once=True)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = (
+                executor.submit(migrate_phase3_execution_schema, isolated_schema_engine),
+                executor.submit(migrate_phase3_execution_schema, second_engine),
+            )
+            results = [future.result(timeout=20) for future in futures]
+    finally:
+        second_engine.dispose()
+
+    assert sum(bool(result) for result in results) == 1
+    assert (
+        sum(result.count("upgrade predecessor Attempt FK to RESTRICT") for result in results) == 2
+    )
+
+
+@pytest.mark.parametrize(
+    ("table", "constraint", "injected_clause"),
+    [
+        (
+            "run_tool_executions",
+            "ck_run_tool_executions_fixed_status",
+            "status IN ('started', 'completed', 'failed', 'approval_required') OR true",
+        ),
+        (
+            "run_tool_executions",
+            "ck_run_tool_executions_fixed_status",
+            "status IN ('started', 'completed', 'failed', 'approval_required') "
+            "AND status <> 'failed'",
+        ),
+        (
+            "run_tool_executions",
+            "ck_run_tool_execution_row_shape",
+            "status IN ('started', 'completed', 'failed', 'approval_required') OR true",
+        ),
+        (
+            "run_usage_records",
+            "ck_run_usage_total_consistent",
+            "total_tokens = input_tokens + output_tokens OR true",
+        ),
+    ],
+)
+def test_known_check_boolean_drift_is_repaired_from_full_canonical_expression(
+    isolated_schema_engine: Engine,
+    table: str,
+    constraint: str,
+    injected_clause: str,
+) -> None:
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(text(f"ALTER TABLE {table} DROP CONSTRAINT {constraint}"))
+        connection.execute(
+            text(f"ALTER TABLE {table} ADD CONSTRAINT {constraint} CHECK ({injected_clause})")
+        )
+
+    assert f"repair {constraint}" in migrate_phase3_execution_schema(isolated_schema_engine)
+    assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
+    _assert_repaired_check_literal_behavior(isolated_schema_engine, table, constraint)
+
+
+def test_unknown_check_is_dangerous_and_rolls_back_planned_safe_repair(
+    isolated_schema_engine: Engine,
+) -> None:
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE run_usage_records DROP CONSTRAINT ck_run_usage_total_consistent")
+        )
+        connection.execute(
+            text(
+                "ALTER TABLE run_usage_records ADD CONSTRAINT custom_cost_cap "
+                "CHECK (cost_cny <= 1000)"
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="unsafe Phase 3 schema drift"):
+        migrate_phase3_execution_schema(isolated_schema_engine)
+
+    checks = _check_names(isolated_schema_engine, "run_usage_records")
+    assert "custom_cost_cap" in checks
+    assert "ck_run_usage_total_consistent" not in checks
+
+
+def test_predecessor_fk_upgrade_rolls_back_with_earlier_repairs_on_dangerous_drift(
+    isolated_schema_engine: Engine,
+) -> None:
+    _set_predecessor_attempt_fks(isolated_schema_engine)
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE run_usage_records ALTER COLUMN provider DROP NOT NULL")
+        )
+
+    with pytest.raises(RuntimeError, match="unsafe Phase 3 schema drift"):
+        migrate_phase3_execution_schema(isolated_schema_engine)
+
+    assert "ck_run_usage_total_consistent" not in _check_names(
+        isolated_schema_engine, "run_usage_records"
+    )
+    for table in ("run_tool_executions", "run_usage_records"):
+        assert _attempt_fk_delete_rule(isolated_schema_engine, table) == "CASCADE"
+
+
 @pytest.mark.parametrize("dangerous_drift", ["column", "foreign_key", "unique"])
 def test_dangerous_execution_table_drift_fails_and_rolls_back_safe_repairs(
     isolated_schema_engine: Engine,
@@ -154,8 +364,8 @@ def test_dangerous_execution_table_drift_fails_and_rolls_back_safe_repairs(
                 text(
                     "ALTER TABLE run_usage_records ADD CONSTRAINT "
                     "fk_run_usage_records_attempt_provenance "
-                    "FOREIGN KEY (run_id, attempt_id) "
-                    "REFERENCES run_attempts (run_id, id) ON DELETE CASCADE"
+                    "FOREIGN KEY (attempt_id) "
+                    "REFERENCES run_attempts (id) ON DELETE CASCADE"
                 )
             )
         else:
