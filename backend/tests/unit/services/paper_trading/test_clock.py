@@ -15,6 +15,12 @@ class _IndeterminateTimezone(tzinfo):
     def utcoffset(self, dt: datetime | None) -> timedelta | None:
         return None
 
+    def dst(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+    def tzname(self, dt: datetime | None) -> str | None:
+        return "indeterminate"
+
 
 def _clock() -> TradingClock:
     return TradingClock(FixedTradingCalendar({OPEN_DATE}))
