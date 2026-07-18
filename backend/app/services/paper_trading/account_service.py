@@ -1,0 +1,349 @@
+from __future__ import annotations
+
+import uuid
+from decimal import ROUND_HALF_UP, Decimal, DecimalException
+
+from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from app.models.paper_account import (
+    PaperAccount,
+    PaperAccountResetAudit,
+    PaperAccountStatus,
+    PaperCashLedger,
+)
+from app.services.paper_trading.errors import PaperTradingError
+
+DEFAULT_INITIAL_CASH = Decimal("1000000.00")
+_DEFAULT_COMMISSION_RATE = Decimal("0.00030000")
+_DEFAULT_MINIMUM_COMMISSION = Decimal("5.00")
+_CENT = Decimal("0.01")
+_MAX_MONEY = Decimal("9999999999999999.99")
+_ACCOUNT_CREATE_CONSTRAINTS = {
+    "uq_paper_accounts_active_user",
+    "uq_paper_accounts_user_generation",
+}
+
+
+class PaperAccountService:
+    DEFAULT_INITIAL_CASH = DEFAULT_INITIAL_CASH
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def get_or_create(
+        self, *, user_id: uuid.UUID, initial_cash: Decimal | None = None
+    ) -> PaperAccount:
+        user_id = _require_uuid(user_id)
+        requested_cash = _positive_money(
+            DEFAULT_INITIAL_CASH if initial_cash is None else initial_cash,
+            code="invalid_initial_cash",
+            field="initial_cash",
+        )
+        existing = self._find_active(user_id=user_id)
+        if existing is not None:
+            return existing
+
+        account = PaperAccount.new(
+            user_id=user_id,
+            generation=1,
+            initial_cash=requested_cash,
+            commission_rate=_DEFAULT_COMMISSION_RATE,
+            minimum_commission=_DEFAULT_MINIMUM_COMMISSION,
+        )
+        try:
+            with self._session.begin_nested():
+                self._session.add(account)
+                self._session.flush()
+                self._append_initial_deposit(account)
+                self._session.flush()
+        except IntegrityError as exc:
+            if _constraint_name(exc) not in _ACCOUNT_CREATE_CONSTRAINTS:
+                raise
+            self._session.expire_all()
+            winner = self._find_active(user_id=user_id)
+            if winner is None:
+                raise
+            return winner
+        return account
+
+    def get_active(self, *, user_id: uuid.UUID, for_update: bool = False) -> PaperAccount:
+        user_id = _require_uuid(user_id)
+        account = self._find_active(user_id=user_id, for_update=for_update)
+        if account is None:
+            raise PaperTradingError("paper_account_not_found", "模拟账户不存在")
+        return account
+
+    def append_ledger(
+        self,
+        *,
+        account: PaperAccount,
+        kind: str,
+        amount: Decimal,
+        available_after: Decimal,
+        frozen_after: Decimal,
+        business_key: str,
+    ) -> PaperCashLedger:
+        kind = _require_text(kind, field="kind", maximum=32, code="invalid_ledger_input")
+        business_key = _require_text(
+            business_key,
+            field="business_key",
+            maximum=128,
+            code="invalid_ledger_input",
+        )
+        amount = _finite_money(amount, code="invalid_ledger_input", field="amount")
+        available_after = _nonnegative_money(
+            available_after,
+            code="invalid_ledger_input",
+            field="available_after",
+        )
+        frozen_after = _nonnegative_money(
+            frozen_after,
+            code="invalid_ledger_input",
+            field="frozen_after",
+        )
+        if account.id is None or account.generation is None:
+            raise PaperTradingError("invalid_ledger_input", "account must be persisted")
+        if (
+            self._session.scalar(
+                select(PaperCashLedger.id).where(PaperCashLedger.business_key == business_key)
+            )
+            is not None
+        ):
+            raise PaperTradingError("duplicate_ledger_business_key", "资金流水业务键已存在")
+
+        available_before = _nonnegative_money(
+            account.available_cash,
+            code="invalid_ledger_input",
+            field="available_before",
+        )
+        frozen_before = _nonnegative_money(
+            account.frozen_cash,
+            code="invalid_ledger_input",
+            field="frozen_before",
+        )
+        entry = PaperCashLedger(
+            account_id=account.id,
+            generation=account.generation,
+            kind=kind,
+            amount=amount,
+            available_before=available_before,
+            available_after=available_after,
+            frozen_before=frozen_before,
+            frozen_after=frozen_after,
+            business_key=business_key,
+        )
+        account.available_cash = available_after  # type: ignore[assignment]
+        account.frozen_cash = frozen_after  # type: ignore[assignment]
+        self._session.add(entry)
+        self._session.flush()
+        return entry
+
+    def reset_confirmed(
+        self,
+        *,
+        user_id: uuid.UUID,
+        initial_cash: Decimal,
+        source_session_id: str,
+        confirmation_id: str,
+    ) -> PaperAccount:
+        user_id = _require_uuid(user_id)
+        initial_cash = _positive_money(
+            initial_cash, code="invalid_initial_cash", field="initial_cash"
+        )
+        source_session_id = _require_text(
+            source_session_id,
+            field="source_session_id",
+            maximum=64,
+            code="invalid_reset_confirmation",
+        )
+        confirmation_id = _require_text(
+            confirmation_id,
+            field="confirmation_id",
+            maximum=64,
+            code="invalid_reset_confirmation",
+        )
+
+        existing = self._confirmed_reset(
+            source_session_id=source_session_id,
+            confirmation_id=confirmation_id,
+        )
+        if existing is not None:
+            return self._validate_confirmed_reset(
+                existing, user_id=user_id, initial_cash=initial_cash
+            )
+
+        self._lock_reset_confirmation(
+            source_session_id=source_session_id,
+            confirmation_id=confirmation_id,
+        )
+        existing = self._confirmed_reset(
+            source_session_id=source_session_id,
+            confirmation_id=confirmation_id,
+        )
+        if existing is not None:
+            return self._validate_confirmed_reset(
+                existing, user_id=user_id, initial_cash=initial_cash
+            )
+
+        self._lock_user_resets(user_id)
+        existing = self._confirmed_reset(
+            source_session_id=source_session_id,
+            confirmation_id=confirmation_id,
+        )
+        if existing is not None:
+            return self._validate_confirmed_reset(
+                existing, user_id=user_id, initial_cash=initial_cash
+            )
+
+        old = self.get_active(user_id=user_id, for_update=True)
+        summary = _account_summary(old)
+        old.status = PaperAccountStatus.ARCHIVED  # type: ignore[assignment]
+        self._session.flush()
+
+        new = PaperAccount.new(
+            user_id=user_id,
+            generation=int(old.generation) + 1,
+            initial_cash=initial_cash,
+            commission_rate=_DEFAULT_COMMISSION_RATE,
+            minimum_commission=_DEFAULT_MINIMUM_COMMISSION,
+        )
+        self._session.add(new)
+        self._session.flush()
+        self._append_initial_deposit(new)
+        self._session.add(
+            PaperAccountResetAudit(
+                user_id=user_id,
+                old_account_id=old.id,
+                new_account_id=new.id,
+                old_generation=old.generation,
+                new_generation=new.generation,
+                source_session_id=source_session_id,
+                confirmation_id=confirmation_id,
+                pre_reset_summary=summary,
+            )
+        )
+        self._session.flush()
+        return new
+
+    def _find_active(self, *, user_id: uuid.UUID, for_update: bool = False) -> PaperAccount | None:
+        statement = select(PaperAccount).where(
+            PaperAccount.user_id == user_id,
+            PaperAccount.status == PaperAccountStatus.ACTIVE,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return self._session.scalar(statement)
+
+    def _append_initial_deposit(self, account: PaperAccount) -> PaperCashLedger:
+        entry = PaperCashLedger(
+            account_id=account.id,
+            generation=account.generation,
+            kind="initial_deposit",
+            amount=account.initial_cash,
+            available_before=Decimal("0.00"),
+            available_after=account.initial_cash,
+            frozen_before=Decimal("0.00"),
+            frozen_after=Decimal("0.00"),
+            business_key=f"initial-deposit:{account.id}",
+        )
+        self._session.add(entry)
+        return entry
+
+    def _confirmed_reset(
+        self, *, source_session_id: str, confirmation_id: str
+    ) -> PaperAccountResetAudit | None:
+        return self._session.scalar(
+            select(PaperAccountResetAudit).where(
+                PaperAccountResetAudit.source_session_id == source_session_id,
+                PaperAccountResetAudit.confirmation_id == confirmation_id,
+            )
+        )
+
+    def _validate_confirmed_reset(
+        self,
+        audit: PaperAccountResetAudit,
+        *,
+        user_id: uuid.UUID,
+        initial_cash: Decimal,
+    ) -> PaperAccount:
+        account = self._session.get(PaperAccount, audit.new_account_id)
+        if (
+            audit.user_id != user_id
+            or account is None
+            or account.user_id != user_id
+            or account.initial_cash != initial_cash
+        ):
+            raise PaperTradingError("reset_confirmation_conflict", "重置确认与原请求不一致")
+        return account
+
+    def _lock_user_resets(self, user_id: uuid.UUID) -> None:
+        self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:user_id, 0))"),
+            {"user_id": str(user_id)},
+        )
+
+    def _lock_reset_confirmation(self, *, source_session_id: str, confirmation_id: str) -> None:
+        lock_key = f"{len(source_session_id)}:{source_session_id}{confirmation_id}"
+        self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": lock_key},
+        )
+
+
+def _account_summary(account: PaperAccount) -> dict[str, object]:
+    return {
+        "account_id": str(account.id),
+        "generation": account.generation,
+        "initial_cash": f"{account.initial_cash:.2f}",
+        "available_cash": f"{account.available_cash:.2f}",
+        "frozen_cash": f"{account.frozen_cash:.2f}",
+        "commission_rate": f"{account.commission_rate:.8f}",
+        "minimum_commission": f"{account.minimum_commission:.2f}",
+        "status": account.status.value,
+        "version": account.version,
+    }
+
+
+def _require_uuid(value: object) -> uuid.UUID:
+    if not isinstance(value, uuid.UUID):
+        raise PaperTradingError("invalid_user_id", "user_id must be a UUID")
+    return value
+
+
+def _require_text(value: object, *, field: str, maximum: int, code: str) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > maximum:
+        raise PaperTradingError(code, f"{field} must be nonblank and at most {maximum} characters")
+    return value
+
+
+def _positive_money(value: object, *, code: str, field: str) -> Decimal:
+    normalized = _finite_money(value, code=code, field=field)
+    if normalized <= 0:
+        raise PaperTradingError(code, f"{field} must be positive")
+    return normalized
+
+
+def _nonnegative_money(value: object, *, code: str, field: str) -> Decimal:
+    normalized = _finite_money(value, code=code, field=field)
+    if normalized < 0:
+        raise PaperTradingError(code, f"{field} must be nonnegative")
+    return normalized
+
+
+def _finite_money(value: object, *, code: str, field: str) -> Decimal:
+    if not isinstance(value, Decimal) or not value.is_finite():
+        raise PaperTradingError(code, f"{field} must be a finite Decimal")
+    try:
+        normalized = value.quantize(_CENT, rounding=ROUND_HALF_UP)
+    except DecimalException as exc:
+        raise PaperTradingError(code, f"{field} is outside the supported range") from exc
+    if abs(normalized) > _MAX_MONEY:
+        raise PaperTradingError(code, f"{field} is outside the supported range")
+    return normalized
+
+
+def _constraint_name(exc: IntegrityError) -> str | None:
+    diagnostic = getattr(exc.orig, "diag", None)
+    return getattr(diagnostic, "constraint_name", None)
