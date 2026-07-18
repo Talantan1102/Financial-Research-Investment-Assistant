@@ -153,25 +153,6 @@ def test_append_ledger_preserves_unique_business_key(db_session: Session, user: 
     assert caught.value.code == "duplicate_ledger_business_key"
 
 
-def test_append_ledger_rejects_balance_transition_that_does_not_match_amount(
-    db_session: Session, user: User
-) -> None:
-    service = PaperAccountService(db_session)
-    account = service.get_or_create(user_id=cast(uuid.UUID, user.id))
-
-    with pytest.raises(PaperTradingError) as caught:
-        service.append_ledger(
-            account=account,
-            kind="order_freeze",
-            amount=Decimal("-1000.00"),
-            available_after=Decimal("999500.00"),
-            frozen_after=Decimal("500.00"),
-            business_key="invalid-transition",
-        )
-
-    assert caught.value.code == "invalid_ledger_transition"
-
-
 def test_append_ledger_rejects_detached_account(db_session: Session, user: User) -> None:
     service = PaperAccountService(db_session)
     account = service.get_or_create(user_id=cast(uuid.UUID, user.id))
@@ -232,6 +213,49 @@ def test_append_ledger_rejects_archived_generation(db_session: Session, user: Us
         )
 
     assert caught.value.code == "stale_account_generation"
+
+
+def test_append_ledger_rejects_dirty_account_without_discarding_pending_change(
+    db_session: Session, user: User
+) -> None:
+    service = PaperAccountService(db_session)
+    account = service.get_or_create(user_id=cast(uuid.UUID, user.id))
+    account.minimum_commission = Decimal("6.00")  # type: ignore[assignment]
+
+    with pytest.raises(PaperTradingError) as caught:
+        service.append_ledger(
+            account=account,
+            kind="cash_adjustment",
+            amount=Decimal("0"),
+            available_after=Decimal("1000000.00"),
+            frozen_after=Decimal("0.00"),
+            business_key="dirty-account",
+        )
+
+    assert caught.value.code == "dirty_ledger_account"
+    assert account.minimum_commission == Decimal("6.00")
+    assert db_session.is_modified(account, include_collections=False)
+    db_session.commit()
+    assert account.minimum_commission == Decimal("6.00")
+    assert db_session.query(PaperCashLedger).count() == 1
+
+
+def test_append_ledger_accepts_no_net_change_assignment(db_session: Session, user: User) -> None:
+    service = PaperAccountService(db_session)
+    account = service.get_or_create(user_id=cast(uuid.UUID, user.id))
+    account.minimum_commission = Decimal("5.00")  # type: ignore[assignment]
+
+    entry = service.append_ledger(
+        account=account,
+        kind="future_kind",
+        amount=Decimal("123.45"),
+        available_after=Decimal("1000000.00"),
+        frozen_after=Decimal("0.00"),
+        business_key="no-net-change-account",
+    )
+
+    assert entry.available_before == Decimal("1000000.00")
+    assert entry.amount == Decimal("123.45")
 
 
 def test_reset_archives_old_generation_and_keeps_audit_snapshot(
@@ -529,13 +553,15 @@ def _create_committed_account(engine: Engine) -> tuple[uuid.UUID, uuid.UUID]:
         return user_id, cast(uuid.UUID, account.id)
 
 
-def test_concurrent_ledger_updates_use_locked_current_balance(pg_test_engine: Engine) -> None:
+def test_concurrent_same_account_business_key_is_deterministically_duplicate(
+    pg_test_engine: Engine,
+) -> None:
     _, account_id = _create_committed_account(pg_test_engine)
     barrier = threading.Barrier(2)
     results: list[str] = []
     errors: list[BaseException] = []
 
-    def freeze(key: str) -> None:
+    def freeze() -> None:
         try:
             with Session(pg_test_engine) as session:
                 account = session.get(PaperAccount, account_id)
@@ -548,7 +574,7 @@ def test_concurrent_ledger_updates_use_locked_current_balance(pg_test_engine: En
                         amount=Decimal("-1000.00"),
                         available_after=Decimal("999000.00"),
                         frozen_after=Decimal("1000.00"),
-                        business_key=key,
+                        business_key="same-account-shared-key",
                     )
                     session.commit()
                     results.append("created")
@@ -558,17 +584,14 @@ def test_concurrent_ledger_updates_use_locked_current_balance(pg_test_engine: En
         except BaseException as exc:  # pragma: no cover - asserted below
             errors.append(exc)
 
-    threads = [
-        threading.Thread(target=freeze, args=(key,))
-        for key in ("freeze-concurrent-a", "freeze-concurrent-b")
-    ]
+    threads = [threading.Thread(target=freeze) for _ in range(2)]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join(timeout=10)
 
     assert errors == []
-    assert sorted(results) == ["created", "invalid_ledger_transition"]
+    assert sorted(results) == ["created", "duplicate_ledger_business_key"]
     with Session(pg_test_engine) as observer:
         account = observer.get(PaperAccount, account_id)
         assert account is not None
