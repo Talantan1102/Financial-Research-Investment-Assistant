@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -68,6 +69,13 @@ class PaperAccount(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "generation", name="uq_paper_accounts_user_generation"),
+        UniqueConstraint("id", "generation", name="uq_paper_accounts_id_generation"),
+        UniqueConstraint(
+            "id",
+            "user_id",
+            "generation",
+            name="uq_paper_accounts_id_user_generation",
+        ),
         Index(
             "uq_paper_accounts_active_user",
             "user_id",
@@ -79,7 +87,8 @@ class PaperAccount(Base):
         CheckConstraint("available_cash >= 0", name="ck_paper_accounts_available_cash_nonnegative"),
         CheckConstraint("frozen_cash >= 0", name="ck_paper_accounts_frozen_cash_nonnegative"),
         CheckConstraint(
-            "commission_rate >= 0", name="ck_paper_accounts_commission_rate_nonnegative"
+            "commission_rate >= 0 AND commission_rate < 1",
+            name="ck_paper_accounts_commission_rate_range",
         ),
         CheckConstraint(
             "minimum_commission >= 0",
@@ -87,6 +96,7 @@ class PaperAccount(Base):
         ),
         CheckConstraint("version > 0", name="ck_paper_accounts_version_positive"),
     )
+    __mapper_args__ = {"version_id_col": version}
 
     @classmethod
     def new(
@@ -118,7 +128,6 @@ class PaperCashLedger(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("paper_accounts.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -135,6 +144,12 @@ class PaperCashLedger(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["account_id", "generation"],
+            ["paper_accounts.id", "paper_accounts.generation"],
+            name="fk_paper_cash_ledger_account_generation",
+            ondelete="RESTRICT",
+        ),
         CheckConstraint("generation > 0", name="ck_paper_cash_ledger_generation_positive"),
         CheckConstraint(
             "available_before >= 0 AND available_after >= 0",
@@ -153,7 +168,6 @@ class PaperHoldingLot(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("paper_accounts.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -169,10 +183,15 @@ class PaperHoldingLot(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        CheckConstraint("generation > 0", name="ck_paper_holding_lots_generation_positive"),
-        CheckConstraint(
-            "original_quantity >= 0", name="ck_paper_holding_lots_original_nonnegative"
+        ForeignKeyConstraint(
+            ["account_id", "generation"],
+            ["paper_accounts.id", "paper_accounts.generation"],
+            name="fk_paper_holding_lots_account_generation",
+            ondelete="RESTRICT",
         ),
+        UniqueConstraint("source_fill_id", name="uq_paper_holding_lots_source_fill"),
+        CheckConstraint("generation > 0", name="ck_paper_holding_lots_generation_positive"),
+        CheckConstraint("original_quantity > 0", name="ck_paper_holding_lots_original_positive"),
         CheckConstraint(
             "remaining_quantity >= 0", name="ck_paper_holding_lots_remaining_nonnegative"
         ),
@@ -185,7 +204,7 @@ class PaperHoldingLot(Base):
             "frozen_quantity <= remaining_quantity",
             name="ck_paper_holding_lots_frozen_within_remaining",
         ),
-        CheckConstraint("unit_cost >= 0", name="ck_paper_holding_lots_unit_cost_nonnegative"),
+        CheckConstraint("unit_cost > 0", name="ck_paper_holding_lots_unit_cost_positive"),
         Index("ix_paper_holding_lots_account_symbol", "account_id", "ts_code"),
     )
 
@@ -194,15 +213,14 @@ class PaperAccountResetAudit(Base):
     __tablename__ = "paper_account_reset_audits"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     old_account_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("paper_accounts.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
     new_account_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("paper_accounts.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -214,11 +232,32 @@ class PaperAccountResetAudit(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["old_account_id", "user_id", "old_generation"],
+            ["paper_accounts.id", "paper_accounts.user_id", "paper_accounts.generation"],
+            name="fk_paper_account_reset_old_account_generation",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["new_account_id", "user_id", "new_generation"],
+            ["paper_accounts.id", "paper_accounts.user_id", "paper_accounts.generation"],
+            name="fk_paper_account_reset_new_account_generation",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "source_session_id",
+            "confirmation_id",
+            name="uq_paper_account_reset_confirmation",
+        ),
         CheckConstraint(
             "old_generation > 0", name="ck_paper_account_reset_old_generation_positive"
         ),
         CheckConstraint(
-            "new_generation > old_generation",
-            name="ck_paper_account_reset_generation_increases",
+            "new_generation = old_generation + 1",
+            name="ck_paper_account_reset_next_generation",
+        ),
+        CheckConstraint(
+            "old_account_id <> new_account_id",
+            name="ck_paper_account_reset_distinct_accounts",
         ),
     )
