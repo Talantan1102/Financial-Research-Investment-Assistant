@@ -73,14 +73,19 @@ class RunSessionService:
 
     @staticmethod
     async def _require_membership(
-        session: AsyncSession, tenant_id: UUID, actor_id: UUID
+        session: AsyncSession,
+        tenant_id: UUID,
+        actor_id: UUID,
+        *,
+        for_update: bool = False,
     ) -> TenantMembership:
-        membership = await session.scalar(
-            select(TenantMembership).where(
-                TenantMembership.tenant_id == tenant_id,
-                TenantMembership.user_id == actor_id,
-            )
+        statement = select(TenantMembership).where(
+            TenantMembership.tenant_id == tenant_id,
+            TenantMembership.user_id == actor_id,
         )
+        if for_update:
+            statement = statement.with_for_update()
+        membership = await session.scalar(statement)
         if membership is None:
             raise ResourceNotFound("tenant not found")
         return membership
@@ -94,7 +99,14 @@ class RunSessionService:
         *,
         for_update: bool = False,
     ) -> RunSession:
-        membership = await self._require_membership(session, tenant_id, actor_id)
+        # Mutation lock order is membership then Session. The membership lock
+        # linearizes this authorization decision with a concurrent revocation.
+        membership = await self._require_membership(
+            session,
+            tenant_id,
+            actor_id,
+            for_update=for_update,
+        )
         conditions = [RunSession.id == session_id, RunSession.tenant_id == tenant_id]
         if membership.role == TenantRole.MEMBER.value:
             conditions.append(RunSession.created_by_user_id == actor_id)

@@ -6,7 +6,7 @@ import asyncio
 import sys
 import uuid
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 
 import httpx
@@ -18,9 +18,16 @@ from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.router.run_sessions import router as run_sessions_router
 from app.router.runs import router as runs_router
+from app.run_control.types import ResourceNotFound
+from app.services.run_session_service import RunSessionService
 from fastapi import FastAPI, HTTPException, status
-from sqlalchemy import Engine, func, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import Engine, delete, event, func, select, text
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 
 @pytest.fixture(scope="session")
@@ -312,3 +319,176 @@ async def test_unauthenticated_session_request_is_401(
     async with client_for(None) as client:
         response = await client.get(_sessions_url(tenant.id))
     assert response.status_code == 401
+
+
+async def _mutate_session(
+    service: RunSessionService,
+    operation: str,
+    tenant_id: uuid.UUID,
+    session_id: uuid.UUID,
+    actor_id: uuid.UUID,
+) -> None:
+    if operation == "title":
+        await service.update_title(tenant_id, session_id, actor_id, "Revocation race")
+        return
+    await service.archive_session(tenant_id, session_id, actor_id)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["title", "archive"])
+async def test_revocation_that_locks_first_fences_session_mutation(
+    operation: str,
+    session_api_context: tuple[Tenant, dict[str, User], dict[str, RunSession], Run],
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tenant, users, sessions, _run = session_api_context
+    run_session = sessions["member"]
+    service = RunSessionService(async_session_factory)
+    revoker = async_session_factory()
+    await revoker.begin()
+    await revoker.execute(
+        delete(TenantMembership).where(
+            TenantMembership.tenant_id == tenant.id,
+            TenantMembership.user_id == users["member"].id,
+        )
+    )
+    mutation = asyncio.create_task(
+        _mutate_session(
+            service,
+            operation,
+            tenant.id,
+            run_session.id,
+            users["member"].id,
+        )
+    )
+    try:
+        await asyncio.sleep(0.1)
+        assert not mutation.done(), "mutation bypassed the in-flight membership revocation"
+        await revoker.commit()
+        with pytest.raises(ResourceNotFound):
+            await mutation
+    finally:
+        if revoker.in_transaction():
+            await revoker.rollback()
+        await revoker.close()
+        if not mutation.done():
+            mutation.cancel()
+            with suppress(asyncio.CancelledError):
+                await mutation
+
+    async with async_session_factory() as check:
+        stored = await check.get(RunSession, run_session.id)
+        assert stored is not None
+        assert stored.title == "Member session"
+        assert stored.archived_at is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["title", "archive"])
+async def test_session_mutation_lock_linearizes_before_revocation(
+    operation: str,
+    session_api_context: tuple[Tenant, dict[str, User], dict[str, RunSession], Run],
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    tenant, users, sessions, _run = session_api_context
+    run_session = sessions["member"]
+    bind = async_session_factory.kw["bind"]
+    assert isinstance(bind, AsyncEngine)
+    membership_locked = asyncio.Event()
+
+    def observe_membership_lock(
+        _conn: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        normalized = statement.upper()
+        if "TENANT_MEMBERSHIPS" in normalized and "FOR UPDATE" in normalized:
+            membership_locked.set()
+
+    event.listen(bind.sync_engine, "after_cursor_execute", observe_membership_lock)
+    blocker = async_session_factory()
+    await blocker.begin()
+    await blocker.scalar(
+        select(RunSession).where(RunSession.id == run_session.id).with_for_update()
+    )
+    service = RunSessionService(async_session_factory)
+    mutation = asyncio.create_task(
+        _mutate_session(
+            service,
+            operation,
+            tenant.id,
+            run_session.id,
+            users["member"].id,
+        )
+    )
+    revocation_started = asyncio.Event()
+    revoker_pid: list[int] = []
+
+    async def revoke() -> None:
+        async with async_session_factory() as session, session.begin():
+            revoker_pid.append(int(await session.scalar(text("SELECT pg_backend_pid()"))))
+            revocation_started.set()
+            await session.execute(
+                delete(TenantMembership).where(
+                    TenantMembership.tenant_id == tenant.id,
+                    TenantMembership.user_id == users["member"].id,
+                )
+            )
+
+    revocation: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(membership_locked.wait(), timeout=2)
+        revocation = asyncio.create_task(revoke())
+        await asyncio.wait_for(revocation_started.wait(), timeout=2)
+
+        saw_lock_wait = False
+        for _attempt in range(200):
+            async with async_session_factory() as observer:
+                wait_type = await observer.scalar(
+                    text("SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"),
+                    {"pid": revoker_pid[0]},
+                )
+            if wait_type == "Lock":
+                saw_lock_wait = True
+                break
+            await asyncio.sleep(0.01)
+        assert saw_lock_wait, "revocation did not wait on the mutation membership lock"
+
+        await blocker.rollback()
+        await mutation
+        await asyncio.wait_for(revocation, timeout=2)
+    finally:
+        event.remove(bind.sync_engine, "after_cursor_execute", observe_membership_lock)
+        if blocker.in_transaction():
+            await blocker.rollback()
+        await blocker.close()
+        if not mutation.done():
+            mutation.cancel()
+            with suppress(asyncio.CancelledError):
+                await mutation
+        if revocation is not None and not revocation.done():
+            revocation.cancel()
+            with suppress(asyncio.CancelledError):
+                await revocation
+
+    async with async_session_factory() as check:
+        assert (
+            await check.scalar(
+                select(TenantMembership).where(
+                    TenantMembership.tenant_id == tenant.id,
+                    TenantMembership.user_id == users["member"].id,
+                )
+            )
+            is None
+        )
+        stored = await check.get(RunSession, run_session.id)
+        assert stored is not None
+        if operation == "title":
+            assert stored.title == "Revocation race"
+            assert stored.archived_at is None
+        else:
+            assert stored.title == "Member session"
+            assert stored.archived_at is not None
