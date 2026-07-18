@@ -116,6 +116,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 ### 代码解释器(2026-06-11 ship 完)
 - [run_python 代码解释器 ship](docs/claude-context/code-interpreter-run-python-done.md) — LLM 写 Python→复用 SkillExecutor 沙箱(execute_source 内联入口)→plotly 交互图;figures 走 chart 事件不进上下文;ExecutorBackend 留 Docker 口;两坑(plotly 用 dist-min/factory 避 mapbox / 沙箱 OpenBLAS 单线程避 OOM)
 
+### Agent 模拟交易(2026-07-18 Plan 1 foundation ship)
+- [Agent 模拟交易 Plan 1 foundation ship 完](docs/claude-context/paper-trading-foundation-done.md) — 严格类型/时钟/版本化规则费率/五档行情 + 默认账户/PG 账本/重置服务/API 底座;买卖工具和自选股写操作留 Plans 2-4
+
 
 ## 设计稿与实施计划
 
