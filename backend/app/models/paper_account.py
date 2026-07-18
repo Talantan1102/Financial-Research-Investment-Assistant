@@ -57,6 +57,7 @@ class PaperAccount(Base):
     frozen_cash = Column(Numeric(18, 2), nullable=False)
     commission_rate = Column(Numeric(10, 8), nullable=False)
     minimum_commission = Column(Numeric(10, 2), nullable=False)
+    initial_cash_edited_at = Column(DateTime(timezone=True), nullable=True)
     status = Column(_ACCOUNT_STATUS, nullable=False)
     version = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

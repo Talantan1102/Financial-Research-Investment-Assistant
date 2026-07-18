@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 
+from sqlalchemy import func, select, text
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.state import InstanceState
@@ -14,6 +15,7 @@ from app.models.paper_account import (
     PaperAccountResetAudit,
     PaperAccountStatus,
     PaperCashLedger,
+    PaperHoldingLot,
 )
 from app.services.paper_trading.errors import PaperTradingError
 
@@ -47,6 +49,13 @@ class PaperAccountService:
         existing = self._find_active(user_id=user_id)
         if existing is not None:
             return existing
+        if (
+            self._session.scalar(
+                select(PaperAccount.id).where(PaperAccount.user_id == user_id).limit(1)
+            )
+            is not None
+        ):
+            raise PaperTradingError("paper_account_not_found", "No active paper account")
 
         account = PaperAccount.new(
             user_id=user_id,
@@ -263,6 +272,96 @@ class PaperAccountService:
         )
         self._session.flush()
         return new
+
+    def edit_initial_cash_once(self, *, user_id: uuid.UUID, initial_cash: Decimal) -> PaperAccount:
+        """Replace generation-one opening cash before any account activity."""
+        user_id = _require_uuid(user_id)
+        initial_cash = _positive_money(
+            initial_cash, code="invalid_initial_cash", field="initial_cash"
+        )
+        account = self.get_active(user_id=user_id, for_update=True)
+        if not self._can_edit_initial_cash(account):
+            raise PaperTradingError(
+                "initial_cash_edit_not_allowed",
+                "Initial cash can only be edited once before account activity",
+            )
+
+        old_cash = _nonnegative_money(
+            account.initial_cash,
+            code="invalid_initial_cash",
+            field="initial_cash",
+        )
+        self.append_ledger(
+            account=account,
+            kind="initial_deposit_reversal",
+            amount=-old_cash,
+            available_after=Decimal("0.00"),
+            frozen_after=Decimal("0.00"),
+            business_key=f"initial-cash-edit-reversal:{account.id}",
+        )
+        self.append_ledger(
+            account=account,
+            kind="initial_deposit",
+            amount=initial_cash,
+            available_after=initial_cash,
+            frozen_after=Decimal("0.00"),
+            business_key=f"initial-cash-edit-deposit:{account.id}",
+        )
+        account.initial_cash = initial_cash  # type: ignore[assignment]
+        account.initial_cash_edited_at = datetime.now(UTC)  # type: ignore[assignment]
+        self._session.flush()
+        return account
+
+    def _can_edit_initial_cash(self, account: PaperAccount) -> bool:
+        if (
+            account.generation != 1
+            or account.initial_cash_edited_at is not None
+            or account.frozen_cash != Decimal("0.00")
+        ):
+            return False
+
+        ledgers = self._session.scalars(
+            select(PaperCashLedger).where(
+                PaperCashLedger.account_id == account.id,
+                PaperCashLedger.generation == account.generation,
+            )
+        ).all()
+        if len(ledgers) != 1:
+            return False
+        opening = ledgers[0]
+        if (
+            opening.kind != "initial_deposit"
+            or opening.amount != account.initial_cash
+            or opening.available_before != Decimal("0.00")
+            or opening.available_after != account.available_cash
+            or opening.frozen_before != Decimal("0.00")
+            or opening.frozen_after != Decimal("0.00")
+        ):
+            return False
+
+        holding_count = self._session.scalar(
+            select(func.count())
+            .select_from(PaperHoldingLot)
+            .where(
+                PaperHoldingLot.account_id == account.id,
+                PaperHoldingLot.generation == account.generation,
+            )
+        )
+        if holding_count:
+            return False
+
+        bind = self._session.get_bind()
+        if sa_inspect(bind).has_table("paper_orders"):
+            order_exists = self._session.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM paper_orders "
+                    "WHERE account_id = :account_id AND account_generation = :generation)"
+                ),
+                {"account_id": account.id, "generation": account.generation},
+            )
+            if order_exists:
+                return False
+        return True
 
     def _find_active(self, *, user_id: uuid.UUID, for_update: bool = False) -> PaperAccount | None:
         statement = select(PaperAccount).where(
