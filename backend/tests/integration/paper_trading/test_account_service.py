@@ -135,8 +135,8 @@ def test_append_ledger_preserves_unique_business_key(db_session: Session, user: 
         account=account,
         kind="cash_adjustment",
         amount=Decimal("0"),
-        available_after=account.available_cash,
-        frozen_after=account.frozen_cash,
+        available_after=cast(Decimal, account.available_cash),
+        frozen_after=cast(Decimal, account.frozen_cash),
         business_key="same-key",
     )
 
@@ -145,12 +145,93 @@ def test_append_ledger_preserves_unique_business_key(db_session: Session, user: 
             account=account,
             kind="cash_adjustment",
             amount=Decimal("0"),
-            available_after=account.available_cash,
-            frozen_after=account.frozen_cash,
+            available_after=cast(Decimal, account.available_cash),
+            frozen_after=cast(Decimal, account.frozen_cash),
             business_key="same-key",
         )
 
     assert caught.value.code == "duplicate_ledger_business_key"
+
+
+def test_append_ledger_rejects_balance_transition_that_does_not_match_amount(
+    db_session: Session, user: User
+) -> None:
+    service = PaperAccountService(db_session)
+    account = service.get_or_create(user_id=cast(uuid.UUID, user.id))
+
+    with pytest.raises(PaperTradingError) as caught:
+        service.append_ledger(
+            account=account,
+            kind="order_freeze",
+            amount=Decimal("-1000.00"),
+            available_after=Decimal("999500.00"),
+            frozen_after=Decimal("500.00"),
+            business_key="invalid-transition",
+        )
+
+    assert caught.value.code == "invalid_ledger_transition"
+
+
+def test_append_ledger_rejects_detached_account(db_session: Session, user: User) -> None:
+    service = PaperAccountService(db_session)
+    account = service.get_or_create(user_id=cast(uuid.UUID, user.id))
+    db_session.expunge(account)
+
+    with pytest.raises(PaperTradingError) as caught:
+        service.append_ledger(
+            account=account,
+            kind="cash_adjustment",
+            amount=Decimal("0"),
+            available_after=Decimal("1000000.00"),
+            frozen_after=Decimal("0.00"),
+            business_key="detached-account",
+        )
+
+    assert caught.value.code == "invalid_ledger_account"
+
+
+def test_append_ledger_rejects_account_from_another_session(
+    db_session: Session, user: User
+) -> None:
+    account = PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    foreign_session = Session(bind=db_session.connection())
+    try:
+        with pytest.raises(PaperTradingError) as caught:
+            PaperAccountService(foreign_session).append_ledger(
+                account=account,
+                kind="cash_adjustment",
+                amount=Decimal("0"),
+                available_after=Decimal("1000000.00"),
+                frozen_after=Decimal("0.00"),
+                business_key="foreign-session",
+            )
+    finally:
+        foreign_session.close()
+
+    assert caught.value.code == "invalid_ledger_account"
+
+
+def test_append_ledger_rejects_archived_generation(db_session: Session, user: User) -> None:
+    service = PaperAccountService(db_session)
+    old = service.get_or_create(user_id=cast(uuid.UUID, user.id))
+    service.reset_confirmed(
+        user_id=cast(uuid.UUID, user.id),
+        initial_cash=Decimal("800000"),
+        source_session_id="archive-session",
+        confirmation_id="archive-confirmation",
+    )
+
+    with pytest.raises(PaperTradingError) as caught:
+        service.append_ledger(
+            account=old,
+            kind="cash_adjustment",
+            amount=Decimal("0"),
+            available_after=Decimal("1000000.00"),
+            frozen_after=Decimal("0.00"),
+            business_key="archived-account",
+        )
+
+    assert caught.value.code == "stale_account_generation"
 
 
 def test_reset_archives_old_generation_and_keeps_audit_snapshot(
@@ -423,7 +504,7 @@ def test_concurrent_distinct_resets_get_sequential_generations(
                     confirmation_id=confirmation_id,
                 )
                 session.commit()
-                generations.append(account.generation)
+                generations.append(cast(int, account.generation))
         except BaseException as exc:  # pragma: no cover - asserted below
             errors.append(exc)
 
@@ -438,3 +519,104 @@ def test_concurrent_distinct_resets_get_sequential_generations(
 
     assert errors == []
     assert sorted(generations) == [2, 3]
+
+
+def _create_committed_account(engine: Engine) -> tuple[uuid.UUID, uuid.UUID]:
+    user_id = _committed_user(engine)
+    with Session(engine) as session:
+        account = PaperAccountService(session).get_or_create(user_id=user_id)
+        session.commit()
+        return user_id, cast(uuid.UUID, account.id)
+
+
+def test_concurrent_ledger_updates_use_locked_current_balance(pg_test_engine: Engine) -> None:
+    _, account_id = _create_committed_account(pg_test_engine)
+    barrier = threading.Barrier(2)
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def freeze(key: str) -> None:
+        try:
+            with Session(pg_test_engine) as session:
+                account = session.get(PaperAccount, account_id)
+                assert account is not None
+                barrier.wait(timeout=5)
+                try:
+                    PaperAccountService(session).append_ledger(
+                        account=account,
+                        kind="order_freeze",
+                        amount=Decimal("-1000.00"),
+                        available_after=Decimal("999000.00"),
+                        frozen_after=Decimal("1000.00"),
+                        business_key=key,
+                    )
+                    session.commit()
+                    results.append("created")
+                except PaperTradingError as exc:
+                    session.rollback()
+                    results.append(exc.code)
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=freeze, args=(key,))
+        for key in ("freeze-concurrent-a", "freeze-concurrent-b")
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == []
+    assert sorted(results) == ["created", "invalid_ledger_transition"]
+    with Session(pg_test_engine) as observer:
+        account = observer.get(PaperAccount, account_id)
+        assert account is not None
+        assert account.available_cash == Decimal("999000.00")
+        assert account.frozen_cash == Decimal("1000.00")
+
+
+def test_concurrent_same_business_key_is_stable_and_preserves_outer_transactions(
+    pg_test_engine: Engine,
+) -> None:
+    account_ids = [
+        _create_committed_account(pg_test_engine)[1],
+        _create_committed_account(pg_test_engine)[1],
+    ]
+    barrier = threading.Barrier(2)
+    results: list[str] = []
+    errors: list[BaseException] = []
+
+    def append(account_id: uuid.UUID) -> None:
+        try:
+            with Session(pg_test_engine) as session:
+                account = session.get(PaperAccount, account_id)
+                assert account is not None
+                barrier.wait(timeout=5)
+                try:
+                    PaperAccountService(session).append_ledger(
+                        account=account,
+                        kind="cash_adjustment",
+                        amount=Decimal("0"),
+                        available_after=Decimal("1000000.00"),
+                        frozen_after=Decimal("0.00"),
+                        business_key="concurrent-shared-key",
+                    )
+                    session.commit()
+                    results.append("created")
+                except PaperTradingError as exc:
+                    # The normalized conflict must leave the caller transaction usable.
+                    session.execute(select(PaperAccount.id).limit(1))
+                    session.rollback()
+                    results.append(exc.code)
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=append, args=(account_id,)) for account_id in account_ids]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == []
+    assert sorted(results) == ["created", "duplicate_ledger_business_key"]

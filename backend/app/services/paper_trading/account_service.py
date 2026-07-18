@@ -3,9 +3,11 @@ from __future__ import annotations
 import uuid
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.state import InstanceState
 
 from app.models.paper_account import (
     PaperAccount,
@@ -24,6 +26,7 @@ _ACCOUNT_CREATE_CONSTRAINTS = {
     "uq_paper_accounts_active_user",
     "uq_paper_accounts_user_generation",
 }
+_LEDGER_BUSINESS_KEY_CONSTRAINT = "paper_cash_ledger_business_key_key"
 
 
 class PaperAccountService:
@@ -103,8 +106,49 @@ class PaperAccountService:
             code="invalid_ledger_input",
             field="frozen_after",
         )
-        if account.id is None or account.generation is None:
-            raise PaperTradingError("invalid_ledger_input", "account must be persisted")
+        state: InstanceState[PaperAccount] = sa_inspect(account)
+        if not state.persistent or state.session is not self._session:
+            raise PaperTradingError(
+                "invalid_ledger_account", "account must be persistent in this session"
+            )
+        if account.status is not PaperAccountStatus.ACTIVE:
+            raise PaperTradingError("stale_account_generation", "账户已重置，请重新操作")
+
+        with self._session.no_autoflush:
+            locked = self._session.scalar(
+                select(PaperAccount)
+                .where(
+                    PaperAccount.id == account.id,
+                    PaperAccount.user_id == account.user_id,
+                    PaperAccount.generation == account.generation,
+                    PaperAccount.status == PaperAccountStatus.ACTIVE,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        if locked is None or locked is not account:
+            raise PaperTradingError("stale_account_generation", "账户已重置，请重新操作")
+
+        available_before = _nonnegative_money(
+            locked.available_cash,
+            code="invalid_ledger_input",
+            field="available_before",
+        )
+        frozen_before = _nonnegative_money(
+            locked.frozen_cash,
+            code="invalid_ledger_input",
+            field="frozen_before",
+        )
+        _validate_ledger_transition(
+            kind=kind,
+            amount=amount,
+            available_before=available_before,
+            available_after=available_after,
+            frozen_before=frozen_before,
+            frozen_after=frozen_after,
+        )
+
+        self._lock_ledger_business_key(business_key)
         if (
             self._session.scalar(
                 select(PaperCashLedger.id).where(PaperCashLedger.business_key == business_key)
@@ -113,19 +157,9 @@ class PaperAccountService:
         ):
             raise PaperTradingError("duplicate_ledger_business_key", "资金流水业务键已存在")
 
-        available_before = _nonnegative_money(
-            account.available_cash,
-            code="invalid_ledger_input",
-            field="available_before",
-        )
-        frozen_before = _nonnegative_money(
-            account.frozen_cash,
-            code="invalid_ledger_input",
-            field="frozen_before",
-        )
         entry = PaperCashLedger(
-            account_id=account.id,
-            generation=account.generation,
+            account_id=locked.id,
+            generation=locked.generation,
             kind=kind,
             amount=amount,
             available_before=available_before,
@@ -134,10 +168,18 @@ class PaperAccountService:
             frozen_after=frozen_after,
             business_key=business_key,
         )
-        account.available_cash = available_after  # type: ignore[assignment]
-        account.frozen_cash = frozen_after  # type: ignore[assignment]
-        self._session.add(entry)
-        self._session.flush()
+        try:
+            with self._session.begin_nested():
+                locked.available_cash = available_after
+                locked.frozen_cash = frozen_after
+                self._session.add(entry)
+                self._session.flush()
+        except IntegrityError as exc:
+            if _constraint_name(exc) != _LEDGER_BUSINESS_KEY_CONSTRAINT:
+                raise
+            raise PaperTradingError(
+                "duplicate_ledger_business_key", "资金流水业务键已存在"
+            ) from exc
         return entry
 
     def reset_confirmed(
@@ -291,6 +333,12 @@ class PaperAccountService:
             {"lock_key": lock_key},
         )
 
+    def _lock_ledger_business_key(self, business_key: str) -> None:
+        self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:business_key, 0))"),
+            {"business_key": business_key},
+        )
+
 
 def _account_summary(account: PaperAccount) -> dict[str, object]:
     return {
@@ -304,6 +352,27 @@ def _account_summary(account: PaperAccount) -> dict[str, object]:
         "status": account.status.value,
         "version": account.version,
     }
+
+
+def _validate_ledger_transition(
+    *,
+    kind: str,
+    amount: Decimal,
+    available_before: Decimal,
+    available_after: Decimal,
+    frozen_before: Decimal,
+    frozen_after: Decimal,
+) -> None:
+    available_delta = available_after - available_before
+    frozen_delta = frozen_after - frozen_before
+    if kind == "order_freeze":
+        valid = amount < 0 and available_delta == amount and frozen_delta == -amount
+    elif kind == "order_release":
+        valid = amount > 0 and available_delta == amount and frozen_delta == -amount
+    else:
+        valid = available_delta + frozen_delta == amount
+    if not valid:
+        raise PaperTradingError("invalid_ledger_transition", "资金流水金额与前后余额不一致")
 
 
 def _require_uuid(value: object) -> uuid.UUID:
