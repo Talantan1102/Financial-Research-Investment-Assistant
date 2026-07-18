@@ -55,6 +55,10 @@ def _assert_phase3_schema(engine: Engine) -> None:
     )
 
 
+def _check_names(engine: Engine, table: str) -> set[str]:
+    return {constraint["name"] for constraint in inspect(engine).get_check_constraints(table)}
+
+
 def test_fresh_schema_is_completed_by_create_all_after_noop_upgrade(
     pg_test_engine: Engine,
 ) -> None:
@@ -89,6 +93,94 @@ def test_phase2_schema_upgrades_in_dependency_order_and_is_idempotent(
     _assert_phase3_schema(isolated_schema_engine)
     Base.metadata.create_all(bind=isolated_schema_engine)
     assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
+
+
+def test_upgrade_repairs_safe_check_and_index_drift(
+    isolated_schema_engine: Engine,
+) -> None:
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE run_usage_records DROP CONSTRAINT ck_run_usage_total_consistent")
+        )
+        connection.execute(text("DROP INDEX ix_run_sessions_archived_at"))
+        connection.execute(
+            text(
+                "CREATE INDEX ix_run_sessions_archived_at "
+                "ON run_sessions (created_at) WHERE archived_at IS NOT NULL"
+            )
+        )
+
+    changes = migrate_phase3_execution_schema(isolated_schema_engine)
+
+    assert "repair ck_run_usage_total_consistent" in changes
+    assert "repair ix_run_sessions_archived_at" in changes
+    assert "ck_run_usage_total_consistent" in _check_names(
+        isolated_schema_engine, "run_usage_records"
+    )
+    archived_index = {
+        index["name"]: index
+        for index in inspect(isolated_schema_engine).get_indexes("run_sessions")
+    }["ix_run_sessions_archived_at"]
+    assert archived_index["column_names"] == ["archived_at"]
+    assert archived_index.get("dialect_options", {}).get("postgresql_where") is None
+    assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
+
+
+@pytest.mark.parametrize("dangerous_drift", ["column", "foreign_key", "unique"])
+def test_dangerous_execution_table_drift_fails_and_rolls_back_safe_repairs(
+    isolated_schema_engine: Engine,
+    dangerous_drift: str,
+) -> None:
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE run_usage_records DROP CONSTRAINT ck_run_usage_total_consistent")
+        )
+        connection.execute(text("DROP INDEX ix_run_sessions_archived_at"))
+        connection.execute(
+            text("CREATE INDEX ix_run_sessions_archived_at ON run_sessions (created_at)")
+        )
+        if dangerous_drift == "column":
+            connection.execute(
+                text("ALTER TABLE run_usage_records ALTER COLUMN provider DROP NOT NULL")
+            )
+        elif dangerous_drift == "foreign_key":
+            connection.execute(
+                text(
+                    "ALTER TABLE run_usage_records "
+                    "DROP CONSTRAINT fk_run_usage_records_attempt_provenance"
+                )
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE run_usage_records ADD CONSTRAINT "
+                    "fk_run_usage_records_attempt_provenance "
+                    "FOREIGN KEY (run_id, attempt_id) "
+                    "REFERENCES run_attempts (run_id, id) ON DELETE CASCADE"
+                )
+            )
+        else:
+            connection.execute(
+                text("ALTER TABLE run_tool_executions DROP CONSTRAINT uq_run_tool_idempotency")
+            )
+            connection.execute(
+                text(
+                    "ALTER TABLE run_tool_executions ADD CONSTRAINT "
+                    "uq_run_tool_idempotency UNIQUE (run_id, tool_call_id)"
+                )
+            )
+
+    with pytest.raises(RuntimeError, match="unsafe Phase 3 schema drift"):
+        migrate_phase3_execution_schema(isolated_schema_engine)
+
+    # Safe repairs happened first inside the same transaction and must be rolled back.
+    assert "ck_run_usage_total_consistent" not in _check_names(
+        isolated_schema_engine, "run_usage_records"
+    )
+    archived_index = {
+        index["name"]: index
+        for index in inspect(isolated_schema_engine).get_indexes("run_sessions")
+    }["ix_run_sessions_archived_at"]
+    assert archived_index["column_names"] == ["created_at"]
 
 
 def test_phase3_upgrade_rolls_back_every_change_on_ddl_failure(

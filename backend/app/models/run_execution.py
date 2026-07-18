@@ -46,7 +46,7 @@ class RunToolExecution(Base):
     tool_name = Column(String(255), nullable=False)
     request_summary = Column(JSONB, nullable=False)
     status = Column(String(32), nullable=False)
-    result_summary = Column(JSONB, nullable=True)
+    result_summary = Column(JSONB(none_as_null=True), nullable=True)
     error_code = Column(String(64), nullable=True)
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime, nullable=False, default=datetime.utcnow)
@@ -57,7 +57,7 @@ class RunToolExecution(Base):
             ["run_id", "attempt_id"],
             ["run_attempts.run_id", "run_attempts.id"],
             name="fk_run_tool_executions_attempt_provenance",
-            ondelete="CASCADE",
+            ondelete="RESTRICT",
         ),
         UniqueConstraint("run_id", "idempotency_key", name="uq_run_tool_idempotency"),
         CheckConstraint(
@@ -71,6 +71,17 @@ class RunToolExecution(Base):
         CheckConstraint(
             "result_summary IS NULL OR octet_length(result_summary::text) <= 65536",
             name="ck_run_tool_result_summary_size",
+        ),
+        CheckConstraint(
+            "(status = 'started' AND finished_at IS NULL "
+            "AND result_summary IS NULL AND error_code IS NULL AND error_message IS NULL) "
+            "OR (status = 'completed' AND finished_at IS NOT NULL "
+            "AND result_summary IS NOT NULL AND error_code IS NULL AND error_message IS NULL) "
+            "OR (status = 'failed' AND finished_at IS NOT NULL "
+            "AND result_summary IS NULL AND (error_code IS NOT NULL OR error_message IS NOT NULL)) "
+            "OR (status = 'approval_required' AND finished_at IS NULL "
+            "AND result_summary IS NULL AND error_code IS NULL AND error_message IS NULL)",
+            name="ck_run_tool_execution_row_shape",
         ),
     )
 
@@ -100,7 +111,7 @@ class RunUsageRecord(Base):
             ["run_id", "attempt_id"],
             ["run_attempts.run_id", "run_attempts.id"],
             name="fk_run_usage_records_attempt_provenance",
-            ondelete="CASCADE",
+            ondelete="RESTRICT",
         ),
         CheckConstraint(
             "input_tokens >= 0",
@@ -117,6 +128,14 @@ class RunUsageRecord(Base):
         CheckConstraint(
             "total_tokens >= 0",
             name="ck_run_usage_total_tokens_nonnegative",
+        ),
+        CheckConstraint(
+            "total_tokens = input_tokens + output_tokens",
+            name="ck_run_usage_total_consistent",
+        ),
+        CheckConstraint(
+            "cached_tokens <= input_tokens",
+            name="ck_run_usage_cached_within_input",
         ),
         CheckConstraint("cost_cny >= 0", name="ck_run_usage_cost_cny_nonnegative"),
         Index("ix_run_usage_model_total_tokens", "model", "total_tokens"),
