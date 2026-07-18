@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -17,19 +17,16 @@ class TradingCalendar(Protocol):
 
 class FixedTradingCalendar:
     def __init__(self, open_dates: set[date]) -> None:
-        self._open_dates = open_dates
+        self._open_dates = frozenset(open_dates)
 
     def is_open_date(self, value: date) -> bool:
         return value in self._open_dates
 
     def next_open_date(self, value: date) -> date:
-        if not any(open_date > value for open_date in self._open_dates):
+        later_dates = [open_date for open_date in self._open_dates if open_date > value]
+        if not later_dates:
             raise LookupError("no future open date configured")
-
-        probe = value + timedelta(days=1)
-        while probe not in self._open_dates:
-            probe += timedelta(days=1)
-        return probe
+        return min(later_dates)
 
 
 class TradingClock:
@@ -37,6 +34,9 @@ class TradingClock:
         self.calendar = calendar
 
     def phase(self, now: datetime) -> MarketPhase:
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError("timezone-aware datetime required")
+
         local = now.astimezone(SHANGHAI)
         if not self.calendar.is_open_date(local.date()):
             return MarketPhase.CLOSED
