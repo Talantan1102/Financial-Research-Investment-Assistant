@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from app.chatloop.contracts import ToolResult
@@ -358,16 +358,28 @@ def _approved_tool_call_ids(loaded: LoadedChatExecution) -> frozenset[str]:
         response = json.loads(loaded.prompt)
     except json.JSONDecodeError:
         return frozenset()
-    if not isinstance(response, dict) or response.get("approved") is not True:
+    if not isinstance(response, dict):
         return frozenset()
     calls = body.get("pending_tool_calls")
     if not isinstance(calls, list):
         return frozenset()
-    ids = {
-        str(call.get("id"))
-        for call in calls
-        if isinstance(call, Mapping) and isinstance(call.get("id"), str)
-    }
+    if response.get("approved") is True:
+        ids = {
+            str(call.get("id"))
+            for call in calls
+            if isinstance(call, Mapping) and isinstance(call.get("id"), str)
+        }
+    elif isinstance(response.get("decisions"), Mapping):
+        decisions = cast(Mapping[str, Any], response["decisions"])
+        ids = {
+            str(call.get("id"))
+            for call in calls
+            if isinstance(call, Mapping)
+            and isinstance(call.get("id"), str)
+            and decisions.get(cast(str, call["id"])) is True
+        }
+    else:
+        ids = set()
     return frozenset(ids)
 
 
@@ -490,31 +502,39 @@ class RunChatWorker:
             assignment.attempt_id, assignment.worker_id, assignment.claim_token
         )
         try:
-            recovery = await self._attempts.find_unsafe_recovery(assignment)
+            find_many = getattr(self._attempts, "find_unsafe_recoveries", None)
+            if find_many is None:
+                recovery = await self._attempts.find_unsafe_recovery(assignment)
+                recoveries = () if recovery is None else (recovery,)
+            else:
+                recoveries = await find_many(assignment)
         except (AttemptCommandRejected, ValueError):
             await self._converge_invalid_approval(assignment, loaded)
             return
-        approved_semantics: frozenset[str] = getattr(loaded, "approved_semantic_keys", frozenset())
-        approved_execution_ids = {
-            str(value) for _, value in getattr(loaded, "approved_tool_executions", ())
+        approved_bindings = dict(getattr(loaded, "approved_tool_executions", ()))
+        approved_execution_ids = {str(value) for value in approved_bindings.values()}
+        rejected_execution_ids = tuple(getattr(loaded, "rejected_tool_execution_ids", ()))
+        decided_execution_ids = approved_execution_ids | {
+            str(value) for value in rejected_execution_ids
         }
-        if recovery is not None and recovery["execution_id"] in approved_execution_ids:
-            approved_semantics = frozenset({recovery["semantic_key"]})
-            loaded = replace(loaded, approved_semantic_keys=approved_semantics)
-        rejected_execution_id = getattr(loaded, "rejected_tool_execution_id", None)
-        if rejected_execution_id is not None:
+        recovery_execution_ids = {str(row["execution_id"]) for row in recoveries}
+        if recoveries and decided_execution_ids != recovery_execution_ids:
+            await self._attempts.pause_chat(
+                assignment,
+                self._unsafe_recovery_pause(assignment, loaded, key, recoveries),
+            )
+            return
+        if rejected_execution_ids:
             try:
-                await self._attempts.reject_tool_execution(assignment, rejected_execution_id)
+                reject_many = getattr(self._attempts, "reject_tool_executions", None)
+                if reject_many is None:
+                    for execution_id in rejected_execution_ids:
+                        await self._attempts.reject_tool_execution(assignment, execution_id)
+                else:
+                    await reject_many(assignment, rejected_execution_ids)
             except (AttemptCommandRejected, ValueError):
                 await self._converge_invalid_approval(assignment, loaded)
                 return
-            recovery = None
-        if recovery is not None and recovery["semantic_key"] not in approved_semantics:
-            await self._attempts.pause_chat(
-                assignment,
-                self._unsafe_recovery_pause(assignment, loaded, key, recovery),
-            )
-            return
 
         cancel_event = asyncio.Event()
         self._cancellations[assignment.attempt_id] = cancel_event
@@ -656,14 +676,20 @@ class RunChatWorker:
         assignment: ClaimedAssignment,
         loaded: LoadedChatExecution,
         key: ContinuationKey,
-        recovery: Mapping[str, Any],
+        recoveries: tuple[Mapping[str, Any], ...],
     ) -> PauseResult:
-        call = StepToolCall(
-            id=str(recovery["tool_call_id"]),
-            name=str(recovery["tool_name"]),
-            arguments=json.dumps(
-                recovery["request"], ensure_ascii=False, sort_keys=True, separators=(",", ":")
-            ),
+        calls = tuple(
+            StepToolCall(
+                id=str(recovery["tool_call_id"]),
+                name=str(recovery["tool_name"]),
+                arguments=json.dumps(
+                    recovery["request"],
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            )
+            for recovery in recoveries
         )
         command = ExecuteChatRun(
             run_id=assignment.run_id,
@@ -676,31 +702,39 @@ class RunChatWorker:
         continuation = ChatRunExecutor.approval_snapshot(
             command,
             user_id=str(loaded.user_id),
-            pending_tool_calls=(call,),
+            pending_tool_calls=calls,
             continuation_secret=key.secret,
             continuation_key_id=key.key_id,
         )
         request: Mapping[str, Any] = {
             "reason": "unsafe_tool_outcome_unknown",
             "action": "execute_anyway_or_reject",
-            "execution_id": recovery["execution_id"],
-            "semantic_key": recovery["semantic_key"],
-            "tool_call": {
-                "id": recovery["tool_call_id"],
-                "name": recovery["tool_name"],
-                "arguments": recovery["request"],
-            },
+            "execution_bindings": [
+                {
+                    "execution_id": recovery["execution_id"],
+                    "semantic_key": recovery["semantic_key"],
+                    "tool_call": {
+                        "id": recovery["tool_call_id"],
+                        "name": recovery["tool_name"],
+                        "arguments": recovery["request"],
+                    },
+                }
+                for recovery in recoveries
+            ],
         }
-        tool = ToolExecution(
-            str(recovery["tool_call_id"]),
-            str(recovery["tool_name"]),
-            cast(Mapping[str, Any], recovery["request"]),
-            "approval_required",
-            "Unsafe tool outcome is unknown; manual decision required.",
-            None,
-            None,
-            None,
-            0,
+        tools = tuple(
+            ToolExecution(
+                str(recovery["tool_call_id"]),
+                str(recovery["tool_name"]),
+                cast(Mapping[str, Any], recovery["request"]),
+                "approval_required",
+                "Unsafe tool outcome is unknown; manual decision required.",
+                None,
+                None,
+                None,
+                0,
+            )
+            for recovery in recoveries
         )
         return PauseResult(
             assignment.run_id,
@@ -710,7 +744,7 @@ class RunChatWorker:
             request,
             continuation,
             RunUsage("control", "unsafe-recovery", 0, 0, 0, 0, 0.0),
-            (tool,),
+            tools,
             (),
         )
 

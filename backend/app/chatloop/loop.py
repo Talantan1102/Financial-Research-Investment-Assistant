@@ -190,7 +190,7 @@ class ToolLoop:
         *,
         pending_tool_calls: tuple[StepToolCall, ...] = (),
         resume_prompt: str | None = None,
-        approval_decision: Literal["approve", "reject"] | None = None,
+        approval_decision: Literal["approve", "reject"] | Mapping[str, bool] | None = None,
     ) -> ChatLoopState:
         max_steps = self._gate_cfg.max_steps
         if pending_tool_calls:
@@ -204,6 +204,30 @@ class ToolLoop:
             elif approval_decision == "reject":
                 rejected = [self._approval_rejected_result(call) for call in pending_tool_calls]
                 state = apply_results(state, rejected, list(pending_tool_calls))
+            elif isinstance(approval_decision, Mapping):
+                if set(approval_decision) != {call.id for call in pending_tool_calls} or any(
+                    type(value) is not bool for value in approval_decision.values()
+                ):
+                    raise ValueError("per-call approval decisions must cover pending tools")
+                approved = [call for call in pending_tool_calls if approval_decision[call.id]]
+                try:
+                    approved_results = await self._tool_hub.dispatch(approved, state)
+                except (CancelledByUser, LoopPaused):
+                    raise
+                except Exception as exc:
+                    raise ToolExecutionError(str(exc)) from exc
+                if len(approved_results) != len(approved):
+                    raise ToolExecutionError("tool result count does not match approved calls")
+                approved_iter = iter(approved_results)
+                merged = [
+                    next(approved_iter)
+                    if approval_decision[call.id]
+                    else self._approval_rejected_result(call)
+                    for call in pending_tool_calls
+                ]
+                await self._extract_and_emit_charts(merged, state)
+                state = apply_results(state, merged, list(pending_tool_calls))
+                update_burned(state, self._gate_cfg)
             else:
                 raise ValueError("pending tools require an explicit approval decision")
             if resume_prompt:
@@ -611,7 +635,7 @@ async def execute_tool_loop(
     pause_controller: PauseControllerProtocol | None = None,
     pending_tool_calls: tuple[StepToolCall, ...] = (),
     resume_prompt: str | None = None,
-    approval_decision: Literal["approve", "reject"] | None = None,
+    approval_decision: Literal["approve", "reject"] | Mapping[str, bool] | None = None,
 ) -> ChatLoopState:
     """Single construction/dispatch seam shared by legacy and Run-oriented adapters."""
 

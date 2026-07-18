@@ -64,7 +64,7 @@ class LoadedChatExecution:
     continuation: dict[str, Any] | None
     approved_semantic_keys: frozenset[str] = frozenset()
     approved_tool_executions: tuple[tuple[str, UUID], ...] = ()
-    rejected_tool_execution_id: UUID | None = None
+    rejected_tool_execution_ids: tuple[UUID, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -253,7 +253,7 @@ class AttemptService:
             )
             continuation: dict[str, Any] | None = None
             approved_tool_executions: tuple[tuple[str, UUID], ...] = ()
-            rejected_tool_execution_id: UUID | None = None
+            rejected_tool_execution_ids: tuple[UUID, ...] = ()
             prompt = cast(str, input_message.content)
             if cast(str | None, run.queue_reason) == "resume":
                 pause = await session.scalar(
@@ -279,25 +279,68 @@ class AttemptService:
                     limit=MAX_RESULT_BYTES,
                     label="pause request",
                 )
-                execution_id_raw = request.get("execution_id")
-                tool_call = request.get("tool_call")
-                if execution_id_raw is not None:
-                    try:
-                        execution_id = UUID(str(execution_id_raw))
-                    except ValueError as exc:
+                raw_bindings = request.get("execution_bindings")
+                if raw_bindings is None and request.get("execution_id") is not None:
+                    raw_bindings = [
+                        {
+                            "execution_id": request.get("execution_id"),
+                            "tool_call": request.get("tool_call"),
+                        }
+                    ]
+                if raw_bindings is not None:
+                    if not isinstance(raw_bindings, list) or not raw_bindings:
                         raise AttemptCommandRejected(
                             "resolved run pause execution provenance is invalid"
-                        ) from exc
-                    if not isinstance(tool_call, Mapping) or not isinstance(
-                        tool_call.get("id"), str
-                    ):
-                        raise AttemptCommandRejected(
-                            "resolved run pause tool provenance is invalid"
                         )
-                    if response.get("approved") is True:
-                        approved_tool_executions = ((cast(str, tool_call["id"]), execution_id),)
-                    elif response.get("approved") is False:
-                        rejected_tool_execution_id = execution_id
+                    bindings: list[tuple[str, UUID]] = []
+                    for binding in raw_bindings:
+                        if not isinstance(binding, Mapping) or not isinstance(
+                            binding.get("tool_call"), Mapping
+                        ):
+                            raise AttemptCommandRejected(
+                                "resolved run pause tool provenance is invalid"
+                            )
+                        tool_call = cast(Mapping[str, Any], binding["tool_call"])
+                        if not isinstance(tool_call.get("id"), str):
+                            raise AttemptCommandRejected(
+                                "resolved run pause tool provenance is invalid"
+                            )
+                        try:
+                            execution_id = UUID(str(binding.get("execution_id")))
+                        except ValueError as exc:
+                            raise AttemptCommandRejected(
+                                "resolved run pause execution provenance is invalid"
+                            ) from exc
+                        bindings.append((cast(str, tool_call["id"]), execution_id))
+                    if len({call_id for call_id, _ in bindings}) != len(bindings) or len(
+                        {execution_id for _, execution_id in bindings}
+                    ) != len(bindings):
+                        raise AttemptCommandRejected("resolved run pause provenance is duplicated")
+                    if "approved" in response and "decisions" in response:
+                        raise AttemptCommandRejected("resolved run pause decisions are conflicting")
+                    if type(response.get("approved")) is bool:
+                        decisions = {
+                            call_id: cast(bool, response["approved"]) for call_id, _ in bindings
+                        }
+                    else:
+                        raw_decisions = response.get("decisions")
+                        if (
+                            not isinstance(raw_decisions, Mapping)
+                            or set(raw_decisions) != {call_id for call_id, _ in bindings}
+                            or any(type(value) is not bool for value in raw_decisions.values())
+                        ):
+                            raise AttemptCommandRejected(
+                                "resolved run pause decisions do not cover pending tools"
+                            )
+                        decisions = dict(cast(Mapping[str, bool], raw_decisions))
+                    approved_tool_executions = tuple(
+                        (call_id, execution_id)
+                        for call_id, execution_id in bindings
+                        if decisions[call_id]
+                    )
+                    rejected_tool_execution_ids = tuple(
+                        execution_id for call_id, execution_id in bindings if not decisions[call_id]
+                    )
                 prompt = json.dumps(
                     response,
                     ensure_ascii=False,
@@ -313,7 +356,7 @@ class AttemptService:
                 history=history,
                 continuation=continuation,
                 approved_tool_executions=approved_tool_executions,
-                rejected_tool_execution_id=rejected_tool_execution_id,
+                rejected_tool_execution_ids=rejected_tool_execution_ids,
             )
 
     async def complete_chat(
@@ -639,65 +682,94 @@ class AttemptService:
         self, assignment: ClaimedAssignment, execution_id: UUID
     ) -> None:
         """Atomically converge one server-bound approval row to manual rejection."""
+        await self.reject_tool_executions(assignment, (execution_id,))
+
+    async def reject_tool_executions(
+        self, assignment: ClaimedAssignment, execution_ids: tuple[UUID, ...]
+    ) -> None:
+        """Atomically converge an exact server-bound rejection subset."""
+        if not execution_ids or len(set(execution_ids)) != len(execution_ids):
+            raise AttemptCommandRejected("tool rejection provenance is invalid")
         async with self._session_factory() as session, session.begin():
             attempt, run = await self._lock_command_context(session, assignment.attempt_id)
             now = cast(datetime, await session.scalar(select(_database_utc_now())))
             self._require_assignment_authoritative(attempt, run, assignment, now)
-            row = await session.scalar(
-                select(RunToolExecution)
-                .where(
-                    RunToolExecution.id == execution_id,
-                    RunToolExecution.run_id == assignment.run_id,
-                )
-                .with_for_update()
+            rows = tuple(
+                (
+                    await session.scalars(
+                        select(RunToolExecution)
+                        .where(
+                            RunToolExecution.id.in_(execution_ids),
+                            RunToolExecution.run_id == assignment.run_id,
+                        )
+                        .with_for_update()
+                    )
+                ).all()
             )
-            if row is None or cast(str, row.status) != "approval_required":
+            if len(rows) != len(execution_ids) or any(
+                cast(str, row.status) != "approval_required" for row in rows
+            ):
                 raise AttemptCommandRejected("tool rejection provenance does not match")
-            cast(Any, row).status = "failed"
-            cast(Any, row).reservation_token = None
-            cast(Any, row).reservation_expires_at = None
-            cast(Any, row).finished_at = now
-            cast(Any, row).error_code = "manual_rejected"
-            cast(Any, row).error_message = "Tool execution was rejected by the user."
+            for row in rows:
+                cast(Any, row).status = "failed"
+                cast(Any, row).reservation_token = None
+                cast(Any, row).reservation_expires_at = None
+                cast(Any, row).finished_at = now
+                cast(Any, row).error_code = "manual_rejected"
+                cast(Any, row).error_message = "Tool execution was rejected by the user."
 
     async def find_unsafe_recovery(self, assignment: ClaimedAssignment) -> dict[str, Any] | None:
         """Return the oldest unresolved unsafe execution before any model rerun."""
+        rows = await self.find_unsafe_recoveries(assignment)
+        return rows[0] if rows else None
+
+    async def find_unsafe_recoveries(
+        self, assignment: ClaimedAssignment
+    ) -> tuple[dict[str, Any], ...]:
+        """Lock and return every unresolved unsafe execution in stable order."""
         async with self._session_factory() as session, session.begin():
             attempt, run = await self._lock_command_context(session, assignment.attempt_id)
             now = cast(datetime, await session.scalar(select(_database_utc_now())))
             self._require_assignment_authoritative(attempt, run, assignment, now)
-            row = await session.scalar(
-                select(RunToolExecution)
-                .where(
-                    RunToolExecution.run_id == assignment.run_id,
-                    RunToolExecution.safe_to_retry.is_(False),
-                    RunToolExecution.status.in_(("started", "approval_required")),
-                    RunToolExecution.attempt_id != assignment.attempt_id,
+            rows = tuple(
+                (
+                    await session.scalars(
+                        select(RunToolExecution)
+                        .where(
+                            RunToolExecution.run_id == assignment.run_id,
+                            RunToolExecution.safe_to_retry.is_(False),
+                            RunToolExecution.status.in_(("started", "approval_required")),
+                            RunToolExecution.attempt_id != assignment.attempt_id,
+                        )
+                        .order_by(RunToolExecution.started_at.asc(), RunToolExecution.id.asc())
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            recoveries: list[dict[str, Any]] = []
+            for row in rows:
+                if cast(str, row.status) == "started":
+                    cast(Any, row).status = "approval_required"
+                    cast(Any, row).reservation_token = None
+                    cast(Any, row).reservation_expires_at = None
+                summary = self._bounded_json_object(
+                    cast(Mapping[str, Any], row.request_summary),
+                    limit=16 * 1024,
+                    label="tool request",
                 )
-                .order_by(RunToolExecution.started_at.asc(), RunToolExecution.id.asc())
-                .limit(1)
-            )
-            if row is None:
-                return None
-            if cast(str, row.status) == "started":
-                cast(Any, row).status = "approval_required"
-                cast(Any, row).reservation_token = None
-                cast(Any, row).reservation_expires_at = None
-            summary = self._bounded_json_object(
-                cast(Mapping[str, Any], row.request_summary),
-                limit=16 * 1024,
-                label="tool request",
-            )
-            request = summary.get("args")
-            if not isinstance(request, dict):
-                raise AttemptCommandRejected("unsafe tool recovery request is invalid")
-            return {
-                "execution_id": str(row.id),
-                "tool_call_id": cast(str, row.tool_call_id),
-                "tool_name": cast(str, row.tool_name),
-                "request": request,
-                "semantic_key": cast(str, row.semantic_key),
-            }
+                request = summary.get("args")
+                if not isinstance(request, dict):
+                    raise AttemptCommandRejected("unsafe tool recovery request is invalid")
+                recoveries.append(
+                    {
+                        "execution_id": str(row.id),
+                        "tool_call_id": cast(str, row.tool_call_id),
+                        "tool_name": cast(str, row.tool_name),
+                        "request": request,
+                        "semantic_key": cast(str, row.semantic_key),
+                    }
+                )
+            return tuple(recoveries)
 
     async def complete_tool_execution(
         self,

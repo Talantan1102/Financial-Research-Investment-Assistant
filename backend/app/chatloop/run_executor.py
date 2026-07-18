@@ -622,7 +622,7 @@ class ChatRunExecutor:
         ChatLoopState,
         tuple[StepToolCall, ...],
         str | None,
-        Literal["approve", "reject"] | None,
+        Literal["approve", "reject"] | Mapping[str, bool] | None,
     ]:
         if continuation is None:
             return (
@@ -669,12 +669,27 @@ class ChatRunExecutor:
             response = json.loads(command.prompt)
         except json.JSONDecodeError as exc:
             raise ValueError("approval response must be JSON") from exc
-        if (
-            not isinstance(response, dict)
-            or type(response.get("approved")) is not bool
-            or ("text" in response and not isinstance(response["text"], str))
+        if not isinstance(response, dict) or (
+            "text" in response and not isinstance(response["text"], str)
         ):
-            raise ValueError("approval response must contain boolean approved")
+            raise ValueError("approval response must be an object")
+        decision: Literal["approve", "reject"] | Mapping[str, bool]
+        if "approved" in response and "decisions" in response:
+            raise ValueError("approval response contains conflicting decisions")
+        if type(response.get("approved")) is bool:
+            decision = "approve" if response["approved"] else "reject"
+        else:
+            decisions = response.get("decisions")
+            if (
+                not isinstance(decisions, dict)
+                or set(decisions) != {call.id for call in pending_tool_calls}
+                or any(
+                    not isinstance(key, str) or type(value) is not bool
+                    for key, value in decisions.items()
+                )
+            ):
+                raise ValueError("approval response must cover every pending tool")
+            decision = decisions
         resume_prompt = response.get("text") or json.dumps(
             response, ensure_ascii=False, sort_keys=True
         )
@@ -682,7 +697,7 @@ class ChatRunExecutor:
             state,
             pending_tool_calls,
             resume_prompt,
-            "approve" if response["approved"] else "reject",
+            decision,
         )
 
     def _authenticate_continuation(

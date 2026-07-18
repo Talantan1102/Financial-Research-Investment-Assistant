@@ -388,6 +388,126 @@ async def test_rejected_approval_closes_protocol_without_dispatch() -> None:
     assert result.tools[0].error_code == "approval_rejected"
 
 
+async def test_per_call_approval_decisions_preserve_assistant_tool_result_order() -> None:
+    calls = (
+        StepToolCall(id="call-a", name="dangerous_tool", arguments='{"n":1}'),
+        StepToolCall(id="call-b", name="dangerous_tool", arguments='{"n":2}'),
+    )
+    command = _command(prompt="batch")
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=calls,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+    hub = _RecordingHub()
+    llm = _ScriptedLLM([_step("mixed done")])
+
+    result = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(**{**vars(_components(llm)), "tool_hub": hub}),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            json.dumps({"decisions": {"call-a": True, "call-b": False}}),
+            (),
+            continuation,
+        )
+    )
+
+    assert isinstance(result, CompletedResult)
+    assert [call.id for call in hub.calls] == ["call-a"]
+    tool_messages = [message for message in llm.messages[0] if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == ["call-a", "call-b"]
+    assert [tool.status for tool in result.tools] == ["completed", "failed"]
+
+
+async def test_conflicting_batch_and_legacy_approval_decisions_fail_closed() -> None:
+    call = StepToolCall(id="call-a", name="dangerous_tool", arguments="{}")
+    command = _command(prompt="batch")
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=(call,),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+
+    result = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=_components(_ScriptedLLM([_step("must not run")])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            json.dumps({"approved": True, "decisions": {"call-a": False}}),
+            (),
+            continuation,
+        )
+    )
+
+    assert isinstance(result, FailedResult)
+    assert result.error_code == "invalid_continuation"
+
+
+async def test_mixed_approval_rejects_wrong_approved_hub_result_count() -> None:
+    calls = (
+        StepToolCall(id="call-a", name="dangerous_tool", arguments="{}"),
+        StepToolCall(id="call-b", name="dangerous_tool", arguments="{}"),
+    )
+    command = _command(prompt="batch")
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=calls,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+
+    class _WrongCountHub(_RecordingHub):
+        async def dispatch(self, calls: list[StepToolCall], state: Any) -> list[ToolResult]:
+            await super().dispatch(calls, state)
+            return []
+
+    result = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(
+            **{
+                **vars(_components(_ScriptedLLM([_step("must not run")]))),
+                "tool_hub": _WrongCountHub(),
+            }
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            json.dumps({"decisions": {"call-a": True, "call-b": False}}),
+            (),
+            continuation,
+        )
+    )
+
+    assert isinstance(result, FailedResult)
+    assert result.error_code == "tool_error"
+
+
 async def test_input_resume_does_not_project_historical_tools_as_attempt_failures() -> None:
     command = _command()
     trusted_user = str(uuid4())
