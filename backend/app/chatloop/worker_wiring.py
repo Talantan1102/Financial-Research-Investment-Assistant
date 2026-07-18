@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 from uuid import UUID
 
@@ -269,6 +270,7 @@ def build_run_executor(
     pause_controller: Any | None = None,
     provider: str = "unknown",
     model: str = "unknown",
+    reference_date: date | None = None,
     persona_block: str = "",
 ) -> Any:
     """Outer wiring boundary for the transport-free Run executor.
@@ -292,6 +294,7 @@ def build_run_executor(
         pause_controller=pause_controller,
         provider=provider,
         model=model,
+        reference_date=reference_date,
         persona_block=persona_block,
     )
 

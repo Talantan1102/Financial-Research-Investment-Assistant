@@ -298,6 +298,12 @@ class ToolLoop:
             if state.tool_choice == "none":
                 raise RuntimeError("tool_choice=none 下模型仍产出 tool_calls — 协议违例")
 
+            tool_call_ids = [call.id for call in step_result.tool_calls]
+            if any(not call_id for call_id in tool_call_ids) or len(set(tool_call_ids)) != len(
+                tool_call_ids
+            ):
+                raise ModelExecutionError("model emitted empty or duplicate tool_call ids")
+
             if self._pause_controller is not None:
                 directive = await self._pause_controller.check(
                     phase="before_tools",

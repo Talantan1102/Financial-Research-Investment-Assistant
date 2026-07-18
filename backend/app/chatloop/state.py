@@ -42,6 +42,7 @@ class LedgerEntry(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     step: int
+    tool_call_id: str | None = None
     tool_name: str
     args_hash: str  # sha256(canonical json)[:16]
     digest: str  # ≤200 字摘要
@@ -64,6 +65,7 @@ class ToolLedger(BaseModel):
         self,
         *,
         step: int,
+        tool_call_id: str | None = None,
         tool_name: str,
         args: dict[str, Any],
         digest: str,
@@ -73,6 +75,7 @@ class ToolLedger(BaseModel):
         """记录一次工具调用,返回新建的台账行。"""
         entry = LedgerEntry(
             step=step,
+            tool_call_id=tool_call_id,
             tool_name=tool_name,
             args_hash=args_hash_of(args),
             digest=digest[:200],

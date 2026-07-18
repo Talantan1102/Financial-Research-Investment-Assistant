@@ -252,7 +252,7 @@ class ToolHub:
             # 尽力记账(用工具名),但记账失败也不能抛
             args = self._safe_parsed_args(call)
             error = f"[执行失败] {type(e).__name__}: {str(e)[:_ERR_MSG_LEN]}"
-            self._safe_record(state, call.name, args, error, success=False, cache_key=None)
+            self._safe_record(state, call.id, call.name, args, error, success=False, cache_key=None)
             result = self._fail_result(call.name, args, error)
         self._write_tool_span(state, result, started_at)
         return result
@@ -299,19 +299,19 @@ class ToolHub:
         except ValueError:
             error = "[参数格式错误] arguments 不是合法 JSON。请检查后重试。"
             await self._emit_error(call.name, error, step=state.step)
-            self._safe_record(state, name, {}, error, success=False, cache_key=None)
+            self._safe_record(state, call.id, name, {}, error, success=False, cache_key=None)
             return self._fail_result(name, {}, error)
 
         # 2a. search_tools 内置工具:不走 Tool 实例,直接检索文档
         if name == SEARCH_TOOLS_NAME:
-            return await self._dispatch_search_tools(args, state)
+            return await self._dispatch_search_tools(call.id, args, state)
 
         # 2. 工具不存在 → 指导性错误
         tool = self._tools.get(name)
         if tool is None:
             error = f"[未知工具] {name} 不存在。可用工具见列表;若需参数细节可调 search_tools。"
             await self._emit_error(name, error, step=state.step)
-            self._safe_record(state, name, args, error, success=False, cache_key=None)
+            self._safe_record(state, call.id, name, args, error, success=False, cache_key=None)
             return self._fail_result(name, args, error)
 
         # 3. ledger 去重:同 (tool, args) 本 turn 已成功过 → 不重跑。
@@ -331,7 +331,13 @@ class ToolHub:
                 await self._emit("tool_end", state.step, tool=name, digest=hit.digest, cached=True)
                 # 去重命中也记一条台账(success,带原 cache_key),保持轨迹完整
                 self._safe_record(
-                    state, name, args, hit.digest, success=True, cache_key=hit.cache_key
+                    state,
+                    call.id,
+                    name,
+                    args,
+                    hit.digest,
+                    success=True,
+                    cache_key=hit.cache_key,
                 )
                 return ToolResult(
                     tool_name=name,
@@ -395,7 +401,7 @@ class ToolHub:
             # 指导性错误只进事件流,worker 日志无痕迹;info 级一行 tool/error 前 120 字)。
             logger.info("tool dispatch failed: tool=%s error=%s", name, error[:120])
             await self._emit_error(name, error, step=state.step)
-            self._safe_record(state, name, args, error, success=False, cache_key=cache_key)
+            self._safe_record(state, call.id, name, args, error, success=False, cache_key=cache_key)
             return self._fail_result(name, args, error)
 
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -405,7 +411,7 @@ class ToolHub:
         await self._emit("tool_end", state.step, tool=name, digest=digest, cached=is_cache_hit)
 
         # 7. 记账(post-apply_step 契约:step=state.step)
-        self._safe_record(state, name, args, digest, success=True, cache_key=cache_key)
+        self._safe_record(state, call.id, name, args, digest, success=True, cache_key=cache_key)
 
         return ToolResult(
             tool_name=name,
@@ -421,7 +427,7 @@ class ToolHub:
     # ------------------------------------------------------------------
 
     async def _dispatch_search_tools(
-        self, args: dict[str, Any], state: ChatLoopState
+        self, tool_call_id: str, args: dict[str, Any], state: ChatLoopState
     ) -> ToolResult:
         """检索目标工具文档,top-k 拼成 {"docs": [{name, doc}...]} 返回。
 
@@ -434,7 +440,15 @@ class ToolHub:
         if not isinstance(query, str) or not query.strip():
             error = "[参数校验失败] search_tools 需要 query(string)。请传工具名或自然语言描述。"
             await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
-            self._safe_record(state, SEARCH_TOOLS_NAME, args, error, success=False, cache_key=None)
+            self._safe_record(
+                state,
+                tool_call_id,
+                SEARCH_TOOLS_NAME,
+                args,
+                error,
+                success=False,
+                cache_key=None,
+            )
             return self._fail_result(SEARCH_TOOLS_NAME, args, error)
 
         await self._emit("tool_call", state.step, tool=SEARCH_TOOLS_NAME, args=args)
@@ -455,7 +469,15 @@ class ToolHub:
         await self._emit(
             "tool_end", state.step, tool=SEARCH_TOOLS_NAME, digest=digest, cached=False
         )
-        self._safe_record(state, SEARCH_TOOLS_NAME, args, digest, success=True, cache_key=None)
+        self._safe_record(
+            state,
+            tool_call_id,
+            SEARCH_TOOLS_NAME,
+            args,
+            digest,
+            success=True,
+            cache_key=None,
+        )
         return ToolResult(
             tool_name=SEARCH_TOOLS_NAME,
             args=args,
@@ -535,6 +557,7 @@ class ToolHub:
     @staticmethod
     def _safe_record(
         state: ChatLoopState,
+        tool_call_id: str,
         tool_name: str,
         args: dict[str, Any],
         digest: str,
@@ -547,9 +570,12 @@ class ToolHub:
         post-apply_step 契约:step=state.step(第 N 圈调用记 step=N,见 gates.py)。
         """
         # 记账失败不能破坏 dispatch 契约(hub 不抛)
+        if not success:
+            digest = "Tool execution failed."
         with contextlib.suppress(Exception):
             state.ledger.record(
                 step=state.step,
+                tool_call_id=tool_call_id,
                 tool_name=tool_name,
                 args=args,
                 digest=digest[:_LEDGER_DIGEST_LEN],
