@@ -210,24 +210,14 @@ class ToolLoop:
                 ):
                     raise ValueError("per-call approval decisions must cover pending tools")
                 approved = [call for call in pending_tool_calls if approval_decision[call.id]]
-                try:
-                    approved_results = await self._tool_hub.dispatch(approved, state)
-                except (CancelledByUser, LoopPaused):
-                    raise
-                except Exception as exc:
-                    raise ToolExecutionError(str(exc)) from exc
-                if len(approved_results) != len(approved):
-                    raise ToolExecutionError("tool result count does not match approved calls")
-                approved_iter = iter(approved_results)
-                merged = [
-                    next(approved_iter)
-                    if approval_decision[call.id]
-                    else self._approval_rejected_result(call)
-                    for call in pending_tool_calls
-                ]
-                await self._extract_and_emit_charts(merged, state)
-                state = apply_results(state, merged, list(pending_tool_calls))
-                update_burned(state, self._gate_cfg)
+                state, terminal = await self._dispatch_tool_calls(
+                    state,
+                    list(pending_tool_calls),
+                    selected_calls=approved,
+                    unselected_result=self._approval_rejected_result,
+                )
+                if terminal:
+                    return state
             else:
                 raise ValueError("pending tools require an explicit approval decision")
             if resume_prompt:
@@ -371,14 +361,23 @@ class ToolLoop:
         calls: list[StepToolCall],
         *,
         check_budget: bool = True,
+        selected_calls: list[StepToolCall] | None = None,
+        unselected_result: Callable[[StepToolCall], ToolResult] | None = None,
     ) -> tuple[ChatLoopState, bool]:
         """Run one post-model tool batch; shared by fresh and resumed attempts."""
 
-        allowed, _rejected = filter_burned(calls, state)
-        if check_budget and budget_margin_exhausted(state, self._gate_cfg):
+        selected = calls if selected_calls is None else selected_calls
+        allowed, _rejected = filter_burned(selected, state)
+        if selected and check_budget and budget_margin_exhausted(state, self._gate_cfg):
             await self._emit("loop_halt", state.step, reason="budget")
-            skipped = [self._budget_skipped_result(call) for call in calls]
-            state = apply_results(state, skipped, calls)
+            skipped = [self._budget_skipped_result(call) for call in selected]
+            merged = self._merge_selected_results(
+                calls,
+                selected,
+                skipped,
+                unselected_result=unselected_result,
+            )
+            state = apply_results(state, merged, calls)
             return await self._force_conclude(state, "budget"), True
 
         try:
@@ -388,7 +387,15 @@ class ToolLoop:
         except Exception as exc:
             raise ToolExecutionError(str(exc)) from exc
 
-        merged = self._merge_results(calls, allowed, results)
+        if len(results) != len(allowed):
+            raise ToolExecutionError("tool result count does not match approved calls")
+        selected_results = self._merge_results(selected, allowed, results)
+        merged = self._merge_selected_results(
+            calls,
+            selected,
+            selected_results,
+            unselected_result=unselected_result,
+        )
         await self._extract_and_emit_charts(merged, state)
         state = apply_results(state, merged, calls)
         update_burned(state, self._gate_cfg)
@@ -512,6 +519,27 @@ class ToolLoop:
             else:
                 merged.append(self._burned_result(call))
         return merged
+
+    @staticmethod
+    def _merge_selected_results(
+        all_calls: list[StepToolCall],
+        selected_calls: list[StepToolCall],
+        selected_results: list[ToolResult],
+        *,
+        unselected_result: Callable[[StepToolCall], ToolResult] | None,
+    ) -> list[ToolResult]:
+        """Merge a policy-filtered subset back into the original batch order."""
+        selected_by_id = dict(
+            zip((call.id for call in selected_calls), selected_results, strict=True)
+        )
+        if unselected_result is None:
+            if len(selected_by_id) != len(all_calls):
+                raise ValueError("partial dispatch requires an unselected result factory")
+            return [selected_by_id[call.id] for call in all_calls]
+        return [
+            selected_by_id[call.id] if call.id in selected_by_id else unselected_result(call)
+            for call in all_calls
+        ]
 
     @staticmethod
     def _burned_result(call: StepToolCall) -> ToolResult:

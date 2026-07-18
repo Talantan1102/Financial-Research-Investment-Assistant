@@ -27,7 +27,7 @@ from app.chatloop.context import ContextDeps
 from app.chatloop.events import LoopEvent
 from app.chatloop.gates import GateConfig
 from app.chatloop.loop import CancelledByUser, ToolLoop
-from app.chatloop.state import ChatLoopState, args_hash_of
+from app.chatloop.state import ChatLoopState, apply_step, args_hash_of
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
 
 # ---------------------------------------------------------------------------
@@ -714,6 +714,92 @@ async def test_budget_margin_skips_dispatch_and_concludes():
     assert llm.received_tool_choice[-1] == "none"
     assert state.halt_reason == "budget"
     assert emit.of("done")[0].data["stop_reason"] == "budget"
+
+
+@pytest.mark.parametrize(
+    "approval_decision",
+    ["approve", {"call-a": True}],
+    ids=["legacy-approve", "all-approved-decisions"],
+)
+async def test_resumed_all_approved_decisions_preserve_legacy_budget_gate(
+    approval_decision: str | dict[str, bool],
+):
+    call = _call("get_stock_quote", {"ts_code": "600519.SH"}, id_="call-a")
+    state = apply_step(_make_state(), _step(tool_calls=[call], cost_cny=0.09))
+    llm = FakeLLM([_step(content="budget conclusion", finish_reason="stop")])
+    hub = FakeToolHub(results_per_round=[])
+    emit = _Collector()
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps(), emit=emit)
+
+    state = await loop.run(
+        state,
+        pending_tool_calls=(call,),
+        approval_decision=approval_decision,
+    )
+
+    assert hub.dispatched_calls == []
+    assert state.halt_reason == "budget"
+    assert [event.data["reason"] for event in emit.of("loop_halt")] == ["budget"]
+    tool_messages = [message for message in state.messages if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == ["call-a"]
+    assert "预算" in tool_messages[0]["content"]
+    assert "rejected" not in tool_messages[0]["content"].lower()
+
+
+async def test_resumed_mixed_decisions_apply_burn_filter_and_preserve_order():
+    burned_args = {"ts_code": "bad"}
+    rejected_args = {"ts_code": "000001.SH"}
+    allowed_args = {"ts_code": "600519.SH"}
+    burned = _call("get_stock_quote", burned_args, id_="call-a")
+    rejected = _call("get_news", rejected_args, id_="call-b")
+    allowed = _call("get_news", allowed_args, id_="call-c")
+    calls = [burned, rejected, allowed]
+    state = apply_step(_make_state(), _step(tool_calls=calls, cost_cny=0.001))
+    state.burned_signatures.add(f"{burned.name}:{args_hash_of(burned_args)}")
+    llm = FakeLLM([_step(content="done", finish_reason="stop")])
+    hub = FakeToolHub(results_per_round=[[_ok_result(allowed.name, allowed_args)]])
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps())
+
+    state = await loop.run(
+        state,
+        pending_tool_calls=tuple(calls),
+        approval_decision={"call-a": True, "call-b": False, "call-c": True},
+    )
+
+    assert hub.dispatched_calls == [[allowed]]
+    tool_messages = [message for message in state.messages if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == [
+        "call-a",
+        "call-b",
+        "call-c",
+    ]
+    assert "rejected" not in tool_messages[0]["content"].lower()
+    assert "rejected" in tool_messages[1]["content"].lower()
+    assert not tool_messages[2]["content"].startswith("[ERROR]")
+
+
+async def test_resumed_mixed_decisions_apply_budget_gate_to_approved_subset():
+    approved = _call("get_stock_quote", {"ts_code": "600519.SH"}, id_="call-a")
+    rejected = _call("get_news", {"ts_code": "000001.SH"}, id_="call-b")
+    calls = [approved, rejected]
+    state = apply_step(_make_state(), _step(tool_calls=calls, cost_cny=0.09))
+    llm = FakeLLM([_step(content="budget conclusion", finish_reason="stop")])
+    hub = FakeToolHub(results_per_round=[])
+    loop = ToolLoop(llm=llm, tool_hub=hub, context_deps=_deps())
+
+    state = await loop.run(
+        state,
+        pending_tool_calls=tuple(calls),
+        approval_decision={"call-a": True, "call-b": False},
+    )
+
+    assert hub.dispatched_calls == []
+    assert state.halt_reason == "budget"
+    tool_messages = [message for message in state.messages if message.get("role") == "tool"]
+    assert [message["tool_call_id"] for message in tool_messages] == ["call-a", "call-b"]
+    assert "预算" in tool_messages[0]["content"]
+    assert "rejected" not in tool_messages[0]["content"].lower()
+    assert "rejected" in tool_messages[1]["content"].lower()
 
 
 async def test_budget_sufficient_dispatches_normally():
