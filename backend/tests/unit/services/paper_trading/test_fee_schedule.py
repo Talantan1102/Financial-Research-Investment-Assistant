@@ -18,7 +18,7 @@ FIXTURE_PATH = (
 )
 OFFICIAL_SOURCES = (
     "https://fgk.chinatax.gov.cn/zcfgk/c102416/c5211343/content.html",
-    "https://www.chinaclear.cn/zdjs/editor_file/20220701154723234.pdf",
+    "https://www.chinaclear.cn/zdjs/gszb/202204/f89e788c65a241e88e7f0d0348de586f.shtml",
     "https://www.sse.com.cn/lawandrules/sselawsrules2025/charge/c/c_20250610_10781461.shtml",
     "https://www.szse.cn/marketServices/deal/payFees/index.html",
 )
