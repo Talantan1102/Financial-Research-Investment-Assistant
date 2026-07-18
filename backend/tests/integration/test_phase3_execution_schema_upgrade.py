@@ -54,6 +54,37 @@ def _assert_phase3_schema(engine: Engine) -> None:
         for table in ("run_tool_executions", "run_usage_records")
         for fk in inspect(engine).get_foreign_keys(table)
     )
+    tool_columns = {
+        column["name"]: column for column in inspector.get_columns("run_tool_executions")
+    }
+    assert {
+        "semantic_key",
+        "safe_to_retry",
+        "reservation_token",
+        "reservation_expires_at",
+        "execution_epoch",
+    } <= set(tool_columns)
+    tool_indexes = {index["name"]: index for index in inspector.get_indexes("run_tool_executions")}
+    assert tool_indexes["ix_run_tool_semantic_recovery"]["column_names"] == [
+        "run_id",
+        "semantic_key",
+        "status",
+    ]
+
+
+def _downgrade_to_pre_reservation_fence(engine: Engine) -> None:
+    with engine.begin() as connection:
+        connection.execute(text("DROP INDEX IF EXISTS ix_run_tool_semantic_recovery"))
+        for column in (
+            "semantic_key",
+            "safe_to_retry",
+            "reservation_token",
+            "reservation_expires_at",
+            "execution_epoch",
+        ):
+            connection.execute(
+                text(f"ALTER TABLE run_tool_executions DROP COLUMN IF EXISTS {column}")
+            )
 
 
 def _check_names(engine: Engine, table: str) -> set[str]:
@@ -121,19 +152,20 @@ def _assert_repaired_check_literal_behavior(engine: Engine, table: str, constrai
     else:
         base = (
             "INSERT INTO run_tool_executions "
-            "(id, run_id, attempt_id, tool_call_id, idempotency_key, tool_name, "
-            "request_summary, status, result_summary, error_code, error_message, "
-            "started_at, finished_at) VALUES "
+            "(id, run_id, attempt_id, tool_call_id, idempotency_key, semantic_key, "
+            "tool_name, request_summary, safe_to_retry, status, execution_epoch, "
+            "result_summary, error_code, error_message, started_at, finished_at) VALUES "
         )
         valid = base + (
             f"('{uuid.uuid4()}', '{uuid.uuid4()}', '{uuid.uuid4()}', 'call-{suffix}', "
-            f"'key-{suffix}', 'tool', '{{}}', 'failed', NULL, 'failed', NULL, now(), now())"
+            f"'key-{suffix}', '{uuid.uuid4().hex}', 'tool', '{{}}', false, 'failed', 0, "
+            "NULL, 'failed', NULL, now(), now())"
         )
         invalid_status = "unknown" if constraint.endswith("fixed_status") else "completed"
         invalid = base + (
             f"('{uuid.uuid4()}', '{uuid.uuid4()}', '{uuid.uuid4()}', 'bad-{suffix}', "
-            f"'bad-key-{suffix}', 'tool', '{{}}', '{invalid_status}', NULL, NULL, NULL, "
-            "now(), now())"
+            f"'bad-key-{suffix}', '{uuid.uuid4().hex}', 'tool', '{{}}', false, "
+            f"'{invalid_status}', 0, NULL, NULL, NULL, now(), now())"
         )
     _execute_check_probe(engine, valid, accepted=True)
     _execute_check_probe(engine, invalid, accepted=False)
@@ -172,6 +204,18 @@ def test_phase2_schema_upgrades_in_dependency_order_and_is_idempotent(
     )
     _assert_phase3_schema(isolated_schema_engine)
     Base.metadata.create_all(bind=isolated_schema_engine)
+    assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
+
+
+def test_pre_reservation_fence_schema_upgrades_and_is_idempotent(
+    isolated_schema_engine: Engine,
+) -> None:
+    _downgrade_to_pre_reservation_fence(isolated_schema_engine)
+
+    changes = migrate_phase3_execution_schema(isolated_schema_engine)
+
+    assert "add run_tool_executions reservation ownership columns" in changes
+    _assert_phase3_schema(isolated_schema_engine)
     assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
 
 

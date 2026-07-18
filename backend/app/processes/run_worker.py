@@ -22,7 +22,7 @@ from app.run_control.redis_transport import (
     parse_stream_envelope,
 )
 from app.run_control.types import OutboxType
-from app.services.attempt_service import AttemptService, ClaimedAssignment
+from app.services.attempt_service import AttemptCommandRejected, AttemptService, ClaimedAssignment
 from app.services.run_outbox import OutboxItem
 from app.services.worker_registry import WorkerRegistry
 
@@ -247,13 +247,20 @@ class RunWorker:
         control_key = f"run:attempt:{assignment.attempt_id}:control"
         await self._ensure_group_for(control_key, self.CONTROL_GROUP)
         if await self._recover_control_pending(control_key, assignment):
-            await self._attempts.acknowledge_cancel(
-                assignment.attempt_id, assignment.worker_id, assignment.claim_token
-            )
+            with suppress(AttemptCommandRejected):
+                await self._attempts.acknowledge_cancel(
+                    assignment.attempt_id, assignment.worker_id, assignment.claim_token
+                )
             return
         execution = asyncio.create_task(self._execute_assignment(assignment))
         control = asyncio.create_task(self._wait_for_cancel(control_key, assignment))
         done, _ = await asyncio.wait({execution, control}, return_when=asyncio.FIRST_COMPLETED)
+        if execution in done:
+            control.cancel()
+            with suppress(asyncio.CancelledError):
+                await control
+            await execution
+            return
         if control in done and control.result():
             requested = False
             request_cancel = getattr(self._executor, "request_cancel", None)
@@ -266,16 +273,18 @@ class RunWorker:
                     execution.cancel()
                     with suppress(asyncio.CancelledError):
                         await execution
-                    await self._attempts.acknowledge_cancel(
-                        assignment.attempt_id, assignment.worker_id, assignment.claim_token
-                    )
+                    with suppress(AttemptCommandRejected):
+                        await self._attempts.acknowledge_cancel(
+                            assignment.attempt_id, assignment.worker_id, assignment.claim_token
+                        )
             else:
                 execution.cancel()
                 with suppress(asyncio.CancelledError):
                     await execution
-                await self._attempts.acknowledge_cancel(
-                    assignment.attempt_id, assignment.worker_id, assignment.claim_token
-                )
+                with suppress(AttemptCommandRejected):
+                    await self._attempts.acknowledge_cancel(
+                        assignment.attempt_id, assignment.worker_id, assignment.claim_token
+                    )
             return
         control.cancel()
         with suppress(asyncio.CancelledError):
@@ -418,6 +427,7 @@ async def _async_main() -> None:
     attempts = AttemptService(
         factory,
         lease_duration=__import__("datetime").timedelta(seconds=lease_seconds),
+        history_limit=int(os.getenv("RUN_CHAT_HISTORY_LIMIT", "100")),
     )
     executor_mode = os.getenv("RUN_EXECUTOR_MODE", "simulated")
     mcp_context: Any = None
@@ -425,32 +435,36 @@ async def _async_main() -> None:
         from app.chatloop.worker_wiring import build_heavy_singletons
         from app.services.mcp_client import MCPClient
         from app.services.run_chat_worker import (
-            ContinuationKeyring,
             RunChatWorker,
+            ToolRiskPolicy,
             build_chat_executor_builder,
+            load_continuation_keyring,
+            resolve_llm_identity,
         )
 
-        key_id = os.getenv("RUN_CONTINUATION_HMAC_KEY_ID", "default")
-        secret_text = os.getenv("RUN_CONTINUATION_HMAC_SECRET")
-        if secret_text is None or len(secret_text.encode("utf-8")) < 32:
-            raise ValueError("RUN_CONTINUATION_HMAC_SECRET must contain at least 32 UTF-8 bytes")
+        continuation_keys = load_continuation_keyring(os.environ)
         mcp_context = MCPClient.from_subprocess(profile="chat_tools")
         mcp_client = await mcp_context.__aenter__()
         singletons = await build_heavy_singletons(
             session_factory=factory,
             mcp_client=mcp_client,
         )
+        provider, model = resolve_llm_identity(singletons.llm)
         executor: RunExecutor = RunChatWorker(
             attempts=attempts,
             executor_builder=build_chat_executor_builder(
                 singletons,
-                provider=os.getenv("LLM_PROVIDER", "unknown"),
-                model=os.getenv("LLM_MODEL", "unknown"),
+                provider=provider,
+                model=model,
+                risk_policy=ToolRiskPolicy.from_trusted_names(
+                    {
+                        name.strip()
+                        for name in os.getenv("RUN_SAFE_IDEMPOTENT_TOOLS", "").split(",")
+                        if name.strip()
+                    }
+                ),
             ),
-            continuation_keys=ContinuationKeyring(
-                active_key_id=key_id,
-                keys={key_id: secret_text.encode("utf-8")},
-            ),
+            continuation_keys=continuation_keys,
             renew_interval=renew_seconds,
         )
     elif executor_mode == "simulated":

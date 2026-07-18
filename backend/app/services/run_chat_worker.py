@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast
 
 from app.chatloop.contracts import ToolResult
-from app.chatloop.inprocess import InProcessTool
 from app.chatloop.loop import PauseDirective
 from app.chatloop.run_executor import (
     ChatRunExecutor,
@@ -20,6 +21,7 @@ from app.chatloop.run_executor import (
     PauseResult,
     RunEvent,
     RunUsage,
+    ToolExecution,
 )
 from app.chatloop.state import ChatLoopState
 from app.services.attempt_service import (
@@ -58,6 +60,53 @@ class ContinuationKeyring:
                 raise ValueError("continuation key id is not trusted")
             key_id = candidate
         return ContinuationKey(key_id, self.keys[key_id])
+
+
+def load_continuation_keyring(environment: Mapping[str, str]) -> ContinuationKeyring:
+    """Load only trusted server configuration; no transport value is consulted."""
+    encoded = environment.get("RUN_CONTINUATION_HMAC_KEYS_JSON")
+    if encoded is not None:
+        try:
+            raw = json.loads(encoded)
+        except json.JSONDecodeError as exc:
+            raise ValueError("invalid continuation key configuration") from exc
+        if not isinstance(raw, dict) or any(
+            not isinstance(key_id, str) or not isinstance(secret, str)
+            for key_id, secret in raw.items()
+        ):
+            raise ValueError("invalid continuation key configuration")
+        active = environment.get("RUN_CONTINUATION_HMAC_ACTIVE_KEY_ID", "")
+        try:
+            return ContinuationKeyring(
+                active_key_id=active,
+                keys={key_id: secret.encode("utf-8") for key_id, secret in raw.items()},
+            )
+        except ValueError as exc:
+            raise ValueError("invalid continuation key configuration") from exc
+    legacy_secret = environment.get("RUN_CONTINUATION_HMAC_SECRET")
+    legacy_id = environment.get("RUN_CONTINUATION_HMAC_KEY_ID", "default")
+    if legacy_secret is None:
+        raise ValueError("invalid continuation key configuration")
+    try:
+        return ContinuationKeyring(
+            active_key_id=legacy_id,
+            keys={legacy_id: legacy_secret.encode("utf-8")},
+        )
+    except ValueError as exc:
+        raise ValueError("invalid continuation key configuration") from exc
+
+
+def resolve_llm_identity(llm: Any) -> tuple[str, str]:
+    provider = getattr(llm, "provider", None)
+    model = getattr(llm, "default_model", None)
+    if model is None:
+        router = getattr(llm, "_tier_router", None)
+        resolve = getattr(router, "resolve", None)
+        if resolve is not None:
+            model = resolve("fast")
+    if not isinstance(provider, str) or not provider or not isinstance(model, str) or not model:
+        raise ValueError("LLM execution identity is unavailable")
+    return provider, model
 
 
 class ChatAttemptExecutor(Protocol):
@@ -100,50 +149,51 @@ class PersistentToolLedger:
             approved=approved,
         )
 
-    async def complete(self, key: str, result: ToolResult) -> None:
+    async def complete(self, reservation: Any, result: ToolResult) -> None:
         await self._attempts.complete_tool_execution(
             self._assignment,
-            key,
+            reservation.idempotency_key,
             result.model_dump(mode="json"),
+            reservation_token=reservation.reservation_token,
+            execution_epoch=reservation.execution_epoch,
         )
 
-    async def fail(self, key: str, result: ToolResult) -> None:
+    async def fail(self, reservation: Any, result: ToolResult) -> None:
         await self._attempts.fail_tool_execution(
             self._assignment,
-            key,
+            reservation.idempotency_key,
             error_code="tool_error",
             error_message=result.error or "Tool execution failed.",
+            reservation_token=reservation.reservation_token,
+            execution_epoch=reservation.execution_epoch,
         )
 
 
+@dataclass(frozen=True)
 class ToolRiskPolicy:
-    """Conservative risk classification: mutable in-process tools require approval."""
+    """Server-owned capability registry. Unknown tools always fail closed."""
 
-    SAFE_INPROCESS = frozenset(
-        {
-            "memory_search",
-            "load_skill",
-            "read_cached_result",
-            "get_portfolio_positions",
-            "search_tools",
-        }
-    )
+    safe_idempotent_tools: frozenset[str]
 
     @classmethod
-    def safe_to_retry(cls, hub: Any, tool_name: str) -> bool:
-        tool = getattr(hub, "_tools", {}).get(tool_name)
-        return not isinstance(tool, InProcessTool) or tool_name in cls.SAFE_INPROCESS
+    def from_trusted_names(cls, names: set[str] | frozenset[str]) -> ToolRiskPolicy:
+        if any(not name or len(name) > 255 for name in names):
+            raise ValueError("trusted tool names must be 1..255 characters")
+        return cls(frozenset(names))
+
+    def safe_to_retry(self, tool_name: str) -> bool:
+        return tool_name in self.safe_idempotent_tools
 
 
 class DurableApprovalController:
     def __init__(
         self,
-        hub: Any,
+        risk_policy: ToolRiskPolicy,
         approved_tool_call_ids: frozenset[str],
-        risk_policy: type[ToolRiskPolicy] = ToolRiskPolicy,
+        approved_semantic_keys: frozenset[str] = frozenset(),
     ) -> None:
-        self._hub = hub
         self._approved = approved_tool_call_ids
+        self._approved_semantics = approved_semantic_keys
         self._risk_policy = risk_policy
 
     async def check(
@@ -159,8 +209,10 @@ class DurableApprovalController:
         risky = [
             call
             for call in tool_calls
-            if not self._risk_policy.safe_to_retry(self._hub, call.name)
+            if not self._risk_policy.safe_to_retry(call.name)
             and call.id not in self._approved
+            and AttemptService.tool_semantic_key(call.name, self._safe_args(call))
+            not in self._approved_semantics
         ]
         if not risky:
             return None
@@ -174,6 +226,13 @@ class DurableApprovalController:
             },
         )
 
+    @staticmethod
+    def _safe_args(call: StepToolCall) -> dict[str, Any]:
+        try:
+            return call.parsed_args
+        except ValueError:
+            return {}
+
 
 class DurableToolHub:
     """ToolHub proxy that commits a ledger reservation before every side effect."""
@@ -183,12 +242,14 @@ class DurableToolHub:
         delegate: Any,
         ledger: PersistentToolLedger,
         approved_tool_call_ids: frozenset[str],
-        risk_policy: type[ToolRiskPolicy] = ToolRiskPolicy,
+        risk_policy: ToolRiskPolicy,
+        approved_semantic_keys: frozenset[str] = frozenset(),
     ) -> None:
         self._delegate = delegate
         self._ledger = ledger
         self._approved = approved_tool_call_ids
         self._risk_policy = risk_policy
+        self._approved_semantics = approved_semantic_keys
 
     def schemas_for_llm(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._delegate.schemas_for_llm())
@@ -196,13 +257,17 @@ class DurableToolHub:
     async def dispatch(self, calls: list[StepToolCall], state: ChatLoopState) -> list[ToolResult]:
         results: list[ToolResult | None] = [None] * len(calls)
         executable: list[StepToolCall] = []
-        executable_slots: list[tuple[int, str]] = []
+        executable_slots: list[tuple[int, Any]] = []
         for index, call in enumerate(calls):
-            safe = self._risk_policy.safe_to_retry(self._delegate, call.name)
+            safe = self._risk_policy.safe_to_retry(call.name)
+            semantic_approved = (
+                AttemptService.tool_semantic_key(call.name, self._safe_args(call))
+                in self._approved_semantics
+            )
             reservation = await self._ledger.reserve(
                 call,
                 safe_to_retry=safe,
-                approved=call.id in self._approved,
+                approved=call.id in self._approved or semantic_approved,
             )
             if reservation.status == "completed" and reservation.result is not None:
                 results[index] = ToolResult.model_validate(reservation.result)
@@ -220,7 +285,7 @@ class DurableToolHub:
                 )
                 continue
             executable.append(call)
-            executable_slots.append((index, reservation.idempotency_key))
+            executable_slots.append((index, reservation))
 
         try:
             executed_results = await self._delegate.dispatch(executable, state)
@@ -230,13 +295,11 @@ class DurableToolHub:
             raise
         if len(executed_results) != len(executable_slots):
             raise RuntimeError("durable tool dispatch returned an invalid result count")
-        for result, (index, idempotency_key) in zip(
-            executed_results, executable_slots, strict=True
-        ):
+        for result, (index, reservation) in zip(executed_results, executable_slots, strict=True):
             if result.success:
-                await self._ledger.complete(idempotency_key, result)
+                await self._ledger.complete(reservation, result)
             else:
-                await self._ledger.fail(idempotency_key, result)
+                await self._ledger.fail(reservation, result)
             results[index] = result
         if any(result is None for result in results):
             raise RuntimeError("durable tool dispatch left an unresolved result")
@@ -288,6 +351,7 @@ def build_chat_executor_builder(
     *,
     provider: str,
     model: str,
+    risk_policy: ToolRiskPolicy,
 ) -> ExecutorBuilder:
     """Create the production builder while retaining per-Attempt event/ledger state."""
     from app.chatloop.events import SeqCounter
@@ -305,8 +369,16 @@ def build_chat_executor_builder(
 
         def components_factory(emit: Any, seq_counter: SeqCounter) -> _ComponentsProxy:
             components = build_turn_components(singletons, emit=emit, seq_counter=seq_counter)
-            durable_hub = DurableToolHub(components.tool_hub, ledger, approved)
-            controller_box.append(DurableApprovalController(components.tool_hub, approved))
+            durable_hub = DurableToolHub(
+                components.tool_hub,
+                ledger,
+                approved,
+                risk_policy,
+                loaded.approved_semantic_keys,
+            )
+            controller_box.append(
+                DurableApprovalController(risk_policy, approved, loaded.approved_semantic_keys)
+            )
             return _ComponentsProxy(
                 components.llm,
                 durable_hub,
@@ -374,6 +446,21 @@ class RunChatWorker:
                 "Continuation authentication key is unavailable.",
             )
             return
+        loaded = self._resolve_manual_continuation(assignment, loaded, key)
+
+        # Prove the claim is still live before building any model/tool graph,
+        # then fail closed on unresolved unsafe side effects from prior Attempts.
+        await self._attempts.renew(
+            assignment.attempt_id, assignment.worker_id, assignment.claim_token
+        )
+        recovery = await self._attempts.find_unsafe_recovery(assignment)
+        approved_semantics: frozenset[str] = getattr(loaded, "approved_semantic_keys", frozenset())
+        if recovery is not None and recovery["semantic_key"] not in approved_semantics:
+            await self._attempts.pause_chat(
+                assignment,
+                self._unsafe_recovery_pause(assignment, loaded, key, recovery),
+            )
+            return
 
         cancel_event = asyncio.Event()
         self._cancellations[assignment.attempt_id] = cancel_event
@@ -382,10 +469,9 @@ class RunChatWorker:
         stop_renew = asyncio.Event()
         renew_task = asyncio.create_task(self._renew_loop(assignment, stop_renew))
         terminal_phase = False
+        lease_lost = False
+        execute_task: asyncio.Task[CompletedResult | PauseResult | FailedResult] | None = None
         try:
-            # Give the renewal task a scheduling turn so very short executions are
-            # still covered by a live lease check.
-            await asyncio.sleep(0)
             command = ExecuteChatRun(
                 run_id=assignment.run_id,
                 attempt_id=assignment.attempt_id,
@@ -394,8 +480,22 @@ class RunChatWorker:
                 history=loaded.history,
                 continuation=loaded.continuation,
             )
-            result = await executor.execute(command)
-            await self._stop_renewal(stop_renew, renew_task)
+            execute_task = asyncio.create_task(executor.execute(command))
+            done, _pending = await asyncio.wait(
+                {execute_task, renew_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            # A simultaneously completed execution wins: it has a legitimate
+            # terminal result and the terminal transaction performs the final fence.
+            if execute_task in done:
+                result = await execute_task
+                await self._stop_renewal(stop_renew, renew_task, ignore_done_error=True)
+            else:
+                lease_lost = True
+                cancel_event.set()
+                with suppress(asyncio.CancelledError):
+                    await execute_task
+                await renew_task
+                raise RuntimeError("renew task ended without an error")
             terminal_phase = True
             if isinstance(result, CompletedResult):
                 await self._attempts.complete_chat(assignment, result)
@@ -409,11 +509,13 @@ class RunChatWorker:
             cancel_event.set()
             raise
         except AttemptCommandRejected:
+            if lease_lost:
+                raise
             # A stale lease/token is an expected fence, never a reason to attempt
             # a second fact write from this worker.
             return
         except Exception:
-            if terminal_phase:
+            if terminal_phase or lease_lost:
                 raise
             await self._stop_renewal(stop_renew, renew_task)
             failed = FailedResult(
@@ -431,7 +533,16 @@ class RunChatWorker:
             with suppress(AttemptCommandRejected):
                 await self._attempts.fail_chat(assignment, failed)
         finally:
-            await self._stop_renewal(stop_renew, renew_task)
+            if execute_task is not None and not execute_task.done():
+                cancel_event.set()
+                execute_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await execute_task
+            await self._stop_renewal(
+                stop_renew,
+                renew_task,
+                ignore_done_error=lease_lost or terminal_phase,
+            )
             self._cancellations.pop(assignment.attempt_id, None)
             close = getattr(executor, "aclose", None)
             if close is not None:
@@ -458,16 +569,131 @@ class RunChatWorker:
                 continue
 
     @staticmethod
-    async def _stop_renewal(stop: asyncio.Event, task: asyncio.Task[None]) -> None:
+    async def _stop_renewal(
+        stop: asyncio.Event,
+        task: asyncio.Task[None],
+        *,
+        ignore_done_error: bool = False,
+    ) -> None:
         stop.set()
         if not task.done():
             task.cancel()
-        with suppress(asyncio.CancelledError, Exception):
+        try:
             await task
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            if not ignore_done_error:
+                raise
 
     @staticmethod
     async def _discard_event(_event: RunEvent) -> None:
         return None
+
+    @staticmethod
+    def _unsafe_recovery_pause(
+        assignment: ClaimedAssignment,
+        loaded: LoadedChatExecution,
+        key: ContinuationKey,
+        recovery: Mapping[str, Any],
+    ) -> PauseResult:
+        body = {
+            "kind": "unsafe_tool_recovery",
+            "run_id": str(assignment.run_id),
+            "session_id": str(loaded.session_id),
+            "user_id": str(loaded.user_id),
+            "semantic_key": recovery["semantic_key"],
+            "tool_call_id": recovery["tool_call_id"],
+            "tool_name": recovery["tool_name"],
+            "request": recovery["request"],
+        }
+        encoded = json.dumps(
+            body,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        continuation: Mapping[str, Any] = {
+            "version": 1,
+            "key_id": key.key_id,
+            "body": body,
+            "signature": hmac.new(key.secret, encoded, hashlib.sha256).hexdigest(),
+        }
+        request: Mapping[str, Any] = {
+            "reason": "unsafe_tool_outcome_unknown",
+            "action": "execute_anyway_or_reject",
+            "tool_call": {
+                "id": recovery["tool_call_id"],
+                "name": recovery["tool_name"],
+                "arguments": recovery["request"],
+            },
+        }
+        tool = ToolExecution(
+            str(recovery["tool_call_id"]),
+            str(recovery["tool_name"]),
+            cast(Mapping[str, Any], recovery["request"]),
+            "approval_required",
+            "Unsafe tool outcome is unknown; manual decision required.",
+            None,
+            None,
+            None,
+            0,
+        )
+        return PauseResult(
+            assignment.run_id,
+            assignment.attempt_id,
+            loaded.session_id,
+            "approval",
+            request,
+            continuation,
+            RunUsage("control", "unsafe-recovery", 0, 0, 0, 0, 0.0),
+            (tool,),
+            (),
+        )
+
+    @staticmethod
+    def _resolve_manual_continuation(
+        assignment: ClaimedAssignment,
+        loaded: LoadedChatExecution,
+        key: ContinuationKey,
+    ) -> LoadedChatExecution:
+        envelope = loaded.continuation
+        if envelope is None or not isinstance(envelope.get("body"), Mapping):
+            return loaded
+        body = cast(Mapping[str, Any], envelope["body"])
+        if body.get("kind") != "unsafe_tool_recovery":
+            return loaded
+        encoded = json.dumps(
+            body,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        expected = hmac.new(key.secret, encoded, hashlib.sha256).hexdigest()
+        if (
+            envelope.get("version") != 1
+            or envelope.get("key_id") != key.key_id
+            or not isinstance(envelope.get("signature"), str)
+            or not hmac.compare_digest(expected, cast(str, envelope["signature"]))
+            or body.get("run_id") != str(assignment.run_id)
+            or body.get("session_id") != str(loaded.session_id)
+            or body.get("user_id") != str(loaded.user_id)
+        ):
+            raise ValueError("invalid manual recovery continuation")
+        response = json.loads(loaded.prompt)
+        if not isinstance(response, dict) or response.get("approved") is not True:
+            raise ValueError("unsafe recovery requires an explicit execute-anyway approval")
+        semantic_key = body.get("semantic_key")
+        if not isinstance(semantic_key, str):
+            raise ValueError("invalid manual recovery semantic key")
+        return replace(
+            loaded,
+            prompt=loaded.original_prompt,
+            continuation=None,
+            approved_semantic_keys=frozenset({semantic_key}),
+        )
 
 
 __all__ = [
@@ -478,4 +704,6 @@ __all__ = [
     "RunChatWorker",
     "ToolRiskPolicy",
     "build_chat_executor_builder",
+    "load_continuation_keyring",
+    "resolve_llm_identity",
 ]

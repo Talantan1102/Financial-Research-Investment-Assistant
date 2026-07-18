@@ -17,6 +17,7 @@ from app.models.run_scheduling import RunOutbox, RunWorker
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.services.attempt_service import AttemptCommandRejected, AttemptService
+from app.services.run_chat_worker import ContinuationKeyring, RunChatWorker
 from app.services.trace_models import TraceSpanRow
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -291,6 +292,47 @@ async def test_pause_is_atomic_and_resolved_server_record_is_only_resume_source(
 
 
 @pytest.mark.asyncio
+async def test_injected_precommit_failure_rolls_back_pause_and_usage_trace(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    loaded = await service.load_chat_execution(assignment)
+    paused = PauseResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        loaded.session_id,
+        "approval",
+        {"reason": "manual"},
+        {"version": 1, "key_id": "k", "body": {}, "signature": "s"},
+        _usage(),
+        (),
+        (),
+    )
+
+    async def fail_before_commit() -> None:
+        raise RuntimeError("injected pause commit failure")
+
+    service._before_chat_terminal_commit = fail_before_commit  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="injected pause commit failure"):
+        await service.pause_chat(assignment, paused)
+
+    async with pg_async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        attempt = await session.get(RunAttempt, assignment.attempt_id)
+        pause_count = await session.scalar(
+            select(func.count()).select_from(RunPause).where(RunPause.run_id == assignment.run_id)
+        )
+        usage_count = await session.scalar(
+            select(func.count())
+            .select_from(RunUsageRecord)
+            .where(RunUsageRecord.run_id == assignment.run_id)
+        )
+    assert run.status == "running" and attempt.status == "running"
+    assert pause_count == usage_count == 0
+
+
+@pytest.mark.asyncio
 async def test_zombie_token_cannot_write_terminal_or_tool_facts(
     claimed: tuple[AttemptService, Any, UUID],
     pg_async_session_factory: async_sessionmaker[AsyncSession],
@@ -381,6 +423,96 @@ async def test_cancel_chat_persists_usage_trace_and_fenced_cancel_terminal(
 
 
 @pytest.mark.asyncio
+async def test_server_history_limit_keeps_only_latest_messages_in_chronological_order(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    _service, assignment, _user_id = claimed
+    async with pg_async_session_factory() as session, session.begin():
+        run = await session.get(Run, assignment.run_id)
+        for content in ("history-1", "history-2", "history-3"):
+            session.add(
+                RunMessage(
+                    tenant_id=run.tenant_id,
+                    session_id=run.session_id,
+                    role="assistant",
+                    content=content,
+                    status="complete",
+                )
+            )
+            await session.flush()
+
+    bounded = AttemptService(pg_async_session_factory, history_limit=2)
+    loaded = await bounded.load_chat_execution(assignment)
+
+    assert [message["content"] for message in loaded.history] == ["history-2", "history-3"]
+
+
+@pytest.mark.asyncio
+async def test_prior_attempt_unsafe_crash_creates_real_pause_before_builder(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    semantic_key = service.tool_semantic_key("place_order", {"symbol": "600519.SH", "quantity": 1})
+    async with pg_async_session_factory() as session, session.begin():
+        current = await session.get(RunAttempt, assignment.attempt_id)
+        current.attempt_no = 2
+        prior = RunAttempt(
+            run_id=assignment.run_id,
+            attempt_no=1,
+            status="lost",
+            finished_at=func.timezone("UTC", func.statement_timestamp()),
+        )
+        session.add(prior)
+        await session.flush()
+        session.add(
+            RunToolExecution(
+                run_id=assignment.run_id,
+                attempt_id=prior.id,
+                tool_call_id="call-a",
+                idempotency_key=service.tool_idempotency_key(
+                    assignment.run_id,
+                    "call-a",
+                    "place_order",
+                    {"symbol": "600519.SH", "quantity": 1},
+                ),
+                semantic_key=semantic_key,
+                tool_name="place_order",
+                request_summary={"args": {"symbol": "600519.SH", "quantity": 1}},
+                safe_to_retry=False,
+                status="started",
+                reservation_token=uuid.uuid4(),
+                reservation_expires_at=func.timezone("UTC", func.statement_timestamp())
+                + timedelta(seconds=30),
+                execution_epoch=1,
+            )
+        )
+
+    builds = 0
+
+    def forbidden_builder(*_args: Any) -> Any:
+        nonlocal builds
+        builds += 1
+        raise AssertionError("builder must not run before unsafe recovery pause")
+
+    await RunChatWorker(
+        attempts=service,
+        executor_builder=forbidden_builder,
+        continuation_keys=ContinuationKeyring(active_key_id="active", keys={"active": b"k" * 32}),
+    ).execute_assignment(assignment)
+
+    async with pg_async_session_factory() as session:
+        run = await session.get(Run, assignment.run_id)
+        attempt = await session.get(RunAttempt, assignment.attempt_id)
+        pause = await session.scalar(select(RunPause).where(RunPause.run_id == assignment.run_id))
+    assert builds == 0
+    assert run.status == "waiting_approval" and attempt.status == "paused"
+    assert pause is not None and pause.pause_type == "approval"
+    assert pause.request_payload["reason"] == "unsafe_tool_outcome_unknown"
+
+
+@pytest.mark.asyncio
 async def test_non_idempotent_unknown_is_not_reexecuted_after_crash(
     claimed: tuple[AttemptService, Any, UUID],
 ) -> None:
@@ -405,8 +537,123 @@ async def test_non_idempotent_unknown_is_not_reexecuted_after_crash(
         approved=True,
     )
     assert second.execute is False
-    assert second.status == "approval_required"
+    assert second.status == "started"
     assert second.result is None
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_issue_only_one_live_reservation_owner(
+    claimed: tuple[AttemptService, Any, UUID],
+) -> None:
+    service, assignment, _user_id = claimed
+
+    first, second = await asyncio.gather(
+        service.reserve_tool_execution(
+            assignment,
+            tool_call_id="call-concurrent",
+            tool_name="get_stock_quote",
+            request={"ts_code": "600519.SH"},
+            safe_to_retry=True,
+            approved=False,
+        ),
+        service.reserve_tool_execution(
+            assignment,
+            tool_call_id="call-concurrent",
+            tool_name="get_stock_quote",
+            request={"ts_code": "600519.SH"},
+            safe_to_retry=True,
+            approved=False,
+        ),
+    )
+
+    assert sum(item.execute for item in (first, second)) == 1
+    owner = first if first.execute else second
+    waiter = second if first.execute else first
+    assert owner.reservation_token is not None and owner.execution_epoch == 1
+    assert waiter.reservation_token is None and waiter.status == "started"
+
+
+@pytest.mark.asyncio
+async def test_expired_safe_reservation_can_be_stolen_but_old_owner_cannot_complete(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    first = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-expiry",
+        tool_name="get_stock_quote",
+        request={"ts_code": "600519.SH"},
+        safe_to_retry=True,
+        approved=False,
+    )
+    async with pg_async_session_factory() as session, session.begin():
+        row = await session.scalar(
+            select(RunToolExecution).where(
+                RunToolExecution.run_id == assignment.run_id,
+                RunToolExecution.tool_call_id == "call-expiry",
+            )
+        )
+        row.reservation_expires_at = func.timezone("UTC", func.statement_timestamp()) - timedelta(
+            seconds=1
+        )
+
+    with pytest.raises(AttemptCommandRejected, match="reservation"):
+        await service.complete_tool_execution(
+            assignment,
+            first.idempotency_key,
+            {"success": True, "output": {}},
+            reservation_token=first.reservation_token,
+            execution_epoch=first.execution_epoch,
+        )
+
+    second = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-expiry",
+        tool_name="get_stock_quote",
+        request={"ts_code": "600519.SH"},
+        safe_to_retry=True,
+        approved=False,
+    )
+
+    assert second.execute and second.execution_epoch == 2
+    assert second.reservation_token != first.reservation_token
+    with pytest.raises(AttemptCommandRejected, match="reservation"):
+        await service.complete_tool_execution(
+            assignment,
+            first.idempotency_key,
+            {"success": True, "output": {}},
+            reservation_token=first.reservation_token,
+            execution_epoch=first.execution_epoch,
+        )
+
+
+@pytest.mark.asyncio
+async def test_unsafe_same_semantics_with_new_call_id_requires_manual_approval(
+    claimed: tuple[AttemptService, Any, UUID],
+) -> None:
+    service, assignment, _user_id = claimed
+    first = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-a",
+        tool_name="place_order",
+        request={"symbol": "600519.SH", "quantity": 1},
+        safe_to_retry=False,
+        approved=True,
+    )
+    assert first.execute
+
+    second = await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-b",
+        tool_name="place_order",
+        request={"quantity": 1, "symbol": "600519.SH"},
+        safe_to_retry=False,
+        approved=False,
+    )
+
+    assert not second.execute and second.status == "approval_required"
+    assert second.ambiguous is True
 
 
 @pytest.mark.asyncio
@@ -465,7 +712,7 @@ async def test_non_idempotent_unknown_is_not_reexecuted_by_later_attempt_or_work
         safe_to_retry=False,
         approved=False,
     )
-    assert replay.execute is False and replay.status == "approval_required"
+    assert replay.execute is False and replay.status == "started"
 
 
 @pytest.mark.asyncio
@@ -483,7 +730,13 @@ async def test_completed_tool_result_is_reused_and_call_id_is_run_global(
     )
     assert reserved.execute is True
     cached_value = {"success": True, "output": {"price": 123}, "latency_ms": 4}
-    await service.complete_tool_execution(assignment, reserved.idempotency_key, cached_value)
+    await service.complete_tool_execution(
+        assignment,
+        reserved.idempotency_key,
+        cached_value,
+        reservation_token=reserved.reservation_token,
+        execution_epoch=reserved.execution_epoch,
+    )
     replay = await service.reserve_tool_execution(
         assignment,
         tool_call_id="call-read",
@@ -524,6 +777,8 @@ async def test_failed_safe_tool_can_explicitly_retry(
         first.idempotency_key,
         error_code="upstream_timeout",
         error_message="safe failure",
+        reservation_token=first.reservation_token,
+        execution_epoch=first.execution_epoch,
     )
 
     retry = await service.reserve_tool_execution(

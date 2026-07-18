@@ -64,11 +64,13 @@ class LLMService:
         tier_router: TierRouter | None = None,
         trace_service: TraceService | None = None,
         cost_budget: CostBudget | None = None,
+        provider: str = "unknown",
     ) -> None:
         self._client = client
         self._tier_router = tier_router or TierRouter.from_default_v0_config()
         self._trace = trace_service
         self._budget = cost_budget
+        self.provider = provider
         # C69: _span_counter removed — was shared mutable state, non-atomic increment
         if os.getenv("LLM_MODE") == "none":
             raise RuntimeError(
@@ -76,6 +78,10 @@ class LLMService:
                 "must not construct LLMService. Use TierRouter / LLMResponse "
                 "directly, or mark the test as integration."
             )
+
+    @property
+    def default_model(self) -> str:
+        return self._tier_router.resolve("fast")
 
     def chat(
         self,

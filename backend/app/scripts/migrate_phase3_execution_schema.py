@@ -223,6 +223,50 @@ def _upgrade_predecessor_attempt_fk(
     changes.append("upgrade predecessor Attempt FK to RESTRICT")
 
 
+def _upgrade_tool_reservation_columns(connection: Connection, changes: list[str]) -> None:
+    columns = {column["name"] for column in inspect(connection).get_columns("run_tool_executions")}
+    required = {
+        "semantic_key",
+        "safe_to_retry",
+        "reservation_token",
+        "reservation_expires_at",
+        "execution_epoch",
+    }
+    if required <= columns:
+        return
+    known_predecessor = set(RunToolExecution.__table__.columns.keys()) - required
+    if columns != known_predecessor:
+        raise _unsafe("run_tool_executions reservation columns are partially present")
+    connection.execute(text("ALTER TABLE run_tool_executions ADD COLUMN semantic_key varchar(64)"))
+    connection.execute(
+        text("ALTER TABLE run_tool_executions ADD COLUMN safe_to_retry boolean DEFAULT false")
+    )
+    connection.execute(text("ALTER TABLE run_tool_executions ADD COLUMN reservation_token uuid"))
+    connection.execute(
+        text("ALTER TABLE run_tool_executions ADD COLUMN reservation_expires_at timestamp")
+    )
+    connection.execute(
+        text("ALTER TABLE run_tool_executions ADD COLUMN execution_epoch integer DEFAULT 0")
+    )
+    connection.execute(text("UPDATE run_tool_executions SET semantic_key = md5(idempotency_key)"))
+    connection.execute(
+        text("ALTER TABLE run_tool_executions ALTER COLUMN semantic_key SET NOT NULL")
+    )
+    connection.execute(
+        text("ALTER TABLE run_tool_executions ALTER COLUMN safe_to_retry SET NOT NULL")
+    )
+    connection.execute(
+        text("ALTER TABLE run_tool_executions ALTER COLUMN safe_to_retry DROP DEFAULT")
+    )
+    connection.execute(
+        text("ALTER TABLE run_tool_executions ALTER COLUMN execution_epoch SET NOT NULL")
+    )
+    connection.execute(
+        text("ALTER TABLE run_tool_executions ALTER COLUMN execution_epoch DROP DEFAULT")
+    )
+    changes.append("add run_tool_executions reservation ownership columns")
+
+
 def _validate_uniques(connection: Connection, table: Table) -> None:
     actual = {
         (unique["name"], tuple(unique["column_names"]))
@@ -330,6 +374,8 @@ def migrate_phase3_execution_schema(engine: Engine) -> tuple[str, ...]:
             if table.name not in existing_tables:
                 table.create(bind=connection)
                 changes.append(f"create {table.name}")
+
+        _upgrade_tool_reservation_columns(connection, changes)
 
         # CHECKs and indexes are safe to rebuild. Dangerous identity/provenance
         # drift is checked afterwards so any earlier repair rolls back on failure.

@@ -358,4 +358,4 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
         from app.services.trace_service import TraceService as _TraceService
 
         trace_service = _TraceService(SessionLocal)
-    return LLMService(client=adapter, trace_service=trace_service)
+    return LLMService(client=adapter, trace_service=trace_service, provider="dashscope")

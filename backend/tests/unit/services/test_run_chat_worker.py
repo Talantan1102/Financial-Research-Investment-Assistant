@@ -9,8 +9,17 @@ from uuid import UUID, uuid4
 
 import pytest
 from app.chatloop.run_executor import CompletedResult, ExecuteChatRun, FailedResult, RunUsage
-from app.services.attempt_service import ClaimedAssignment
-from app.services.run_chat_worker import ContinuationKeyring, RunChatWorker
+from app.chatloop.state import ChatLoopState
+from app.services.attempt_service import AttemptCommandRejected, ClaimedAssignment
+from app.services.llm_step import StepToolCall
+from app.services.run_chat_worker import (
+    ContinuationKeyring,
+    DurableApprovalController,
+    RunChatWorker,
+    ToolRiskPolicy,
+    load_continuation_keyring,
+    resolve_llm_identity,
+)
 
 
 @dataclass
@@ -35,6 +44,8 @@ class _Attempts:
         self.completed = 0
         self.failed = 0
         self.cancelled = 0
+        self.paused = 0
+        self.unsafe_recovery: dict[str, Any] | None = None
 
     async def load_chat_execution(self, assignment: ClaimedAssignment) -> Any:
         return self.loaded
@@ -60,6 +71,14 @@ class _Attempts:
         del assignment, result
         self.cancelled += 1
 
+    async def pause_chat(self, assignment: ClaimedAssignment, result: Any) -> None:
+        del assignment, result
+        self.paused += 1
+
+    async def find_unsafe_recovery(self, assignment: ClaimedAssignment) -> dict[str, Any] | None:
+        del assignment
+        return self.unsafe_recovery
+
 
 def _assignment() -> ClaimedAssignment:
     return ClaimedAssignment(
@@ -70,6 +89,59 @@ def _assignment() -> ClaimedAssignment:
         claim_token=uuid4(),
         lease_expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=30),
     )
+
+
+@pytest.mark.asyncio
+async def test_server_risk_registry_fails_closed_except_explicit_safe_tools() -> None:
+    policy = ToolRiskPolicy.from_trusted_names({"get_stock_quote"})
+    state = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
+    calls = (
+        StepToolCall(id="order", name="place_order", arguments="{}"),
+        StepToolCall(id="unknown", name="unknown_mcp", arguments="{}"),
+        StepToolCall(id="read", name="get_stock_quote", arguments="{}"),
+    )
+
+    directive = await DurableApprovalController(policy, frozenset()).check(
+        phase="before_tools", state=state, tool_calls=calls
+    )
+
+    assert directive is not None and directive.pause_type == "approval"
+    assert [call["id"] for call in directive.request["tool_calls"]] == ["order", "unknown"]
+    assert policy.safe_to_retry("place_order") is False
+    assert policy.safe_to_retry("unknown_mcp") is False
+    assert policy.safe_to_retry("get_stock_quote") is True
+
+
+def test_server_keyring_supports_rotation_and_legacy_fallback_without_client_material() -> None:
+    rotated = load_continuation_keyring(
+        {
+            "RUN_CONTINUATION_HMAC_ACTIVE_KEY_ID": "new",
+            "RUN_CONTINUATION_HMAC_KEYS_JSON": json.dumps({"old": "o" * 32, "new": "n" * 32}),
+        }
+    )
+    assert rotated.active_key_id == "new"
+    assert rotated.select({"key_id": "old"}).secret == b"o" * 32
+    assert rotated.select(None).secret == b"n" * 32
+
+    legacy = load_continuation_keyring(
+        {
+            "RUN_CONTINUATION_HMAC_KEY_ID": "legacy",
+            "RUN_CONTINUATION_HMAC_SECRET": "s" * 32,
+        }
+    )
+    assert legacy.active_key_id == "legacy"
+    with pytest.raises(ValueError, match="configuration"):
+        load_continuation_keyring(
+            {
+                "RUN_CONTINUATION_HMAC_ACTIVE_KEY_ID": "missing",
+                "RUN_CONTINUATION_HMAC_KEYS_JSON": json.dumps({"other": "x" * 32}),
+            }
+        )
+
+
+def test_usage_identity_is_resolved_from_the_actual_llm_instance() -> None:
+    llm = type("ResolvedLLM", (), {"provider": "custom-provider", "default_model": "model-x"})()
+    assert resolve_llm_identity(llm) == ("custom-provider", "model-x")
 
 
 @pytest.mark.asyncio
@@ -264,3 +336,106 @@ async def test_request_cancel_reaches_executor_event_and_uses_fenced_cancel_term
 
     assert attempts.cancelled == 1
     assert attempts.failed == 0
+
+
+@pytest.mark.asyncio
+async def test_renew_failure_cancels_executor_before_side_effect_and_does_not_write_terminal() -> (
+    None
+):
+    assignment = _assignment()
+    session_id = uuid4()
+    usage = RunUsage("test", "scripted", 0, 0, 0, 0, 0.0)
+    loaded = type(
+        "Loaded",
+        (),
+        {
+            "session_id": session_id,
+            "user_id": uuid4(),
+            "prompt": "question",
+            "history": (),
+            "continuation": None,
+        },
+    )()
+    placeholder = CompletedResult(
+        assignment.run_id, assignment.attempt_id, session_id, "unused", usage, (), ()
+    )
+    attempts = _Attempts(loaded, placeholder)
+
+    async def reject_renew(*_args: Any) -> datetime:
+        raise AttemptCommandRejected("lease lost")
+
+    attempts.renew = reject_renew  # type: ignore[method-assign]
+    side_effects = 0
+
+    class WaitingExecutor:
+        def __init__(self, cancel: asyncio.Event) -> None:
+            self.cancel = cancel
+
+        async def execute(self, _command: ExecuteChatRun) -> CompletedResult:
+            nonlocal side_effects
+            await asyncio.sleep(0.02)
+            if not self.cancel.is_set():
+                side_effects += 1
+            await self.cancel.wait()
+            return placeholder
+
+    worker = RunChatWorker(
+        attempts=attempts,  # type: ignore[arg-type]
+        executor_builder=lambda _loaded, _sink, cancel, _ledger, _key: WaitingExecutor(cancel),
+        continuation_keys=ContinuationKeyring(active_key_id="k1", keys={"k1": b"x" * 32}),
+        renew_interval=0.001,
+    )
+
+    with pytest.raises(AttemptCommandRejected, match="lease lost"):
+        await worker.execute_assignment(assignment)
+    assert side_effects == 0
+    assert attempts.completed == attempts.failed == attempts.cancelled == 0
+
+
+@pytest.mark.asyncio
+async def test_prior_unsafe_started_row_pauses_before_model_or_tool_builder() -> None:
+    assignment = _assignment()
+    session_id = uuid4()
+    result = CompletedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        session_id,
+        "unused",
+        RunUsage("test", "scripted", 0, 0, 0, 0, 0.0),
+        (),
+        (),
+    )
+    loaded = type(
+        "Loaded",
+        (),
+        {
+            "session_id": session_id,
+            "user_id": uuid4(),
+            "prompt": "question",
+            "history": (),
+            "continuation": None,
+        },
+    )()
+    attempts = _Attempts(loaded, result)
+    attempts.unsafe_recovery = {
+        "tool_call_id": "call-a",
+        "tool_name": "place_order",
+        "request": {"symbol": "600519.SH", "quantity": 1},
+        "semantic_key": "abc",
+    }
+    builds = 0
+
+    def forbidden_builder(*_args: Any) -> _BuiltExecutor:
+        nonlocal builds
+        builds += 1
+        return _BuiltExecutor(result, [])
+
+    await RunChatWorker(
+        attempts=attempts,  # type: ignore[arg-type]
+        executor_builder=forbidden_builder,
+        continuation_keys=ContinuationKeyring(active_key_id="k1", keys={"k1": b"x" * 32}),
+    ).execute_assignment(assignment)
+
+    assert builds == 0
+    assert attempts.paused == 1
+    assert attempts.renewed.is_set()

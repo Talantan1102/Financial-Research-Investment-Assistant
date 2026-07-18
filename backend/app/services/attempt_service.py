@@ -59,8 +59,10 @@ class LoadedChatExecution:
     session_id: UUID
     user_id: UUID
     prompt: str
+    original_prompt: str
     history: tuple[dict[str, Any], ...]
     continuation: dict[str, Any] | None
+    approved_semantic_keys: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,9 @@ class ToolExecutionReservation:
     execute: bool
     status: str
     result: dict[str, Any] | None
+    reservation_token: UUID | None = None
+    execution_epoch: int = 0
+    ambiguous: bool = False
 
 
 def _database_utc_now() -> Any:
@@ -83,11 +88,19 @@ class AttemptService:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         lease_duration: timedelta = timedelta(seconds=45),
+        tool_reservation_duration: timedelta = timedelta(seconds=30),
+        history_limit: int = 100,
     ) -> None:
         if lease_duration <= timedelta(0):
             raise ValueError("lease_duration must be positive")
+        if tool_reservation_duration <= timedelta(0):
+            raise ValueError("tool_reservation_duration must be positive")
+        if history_limit <= 0:
+            raise ValueError("history_limit must be positive")
         self._session_factory = session_factory
         self._lease_duration = lease_duration
+        self._tool_reservation_duration = tool_reservation_duration
+        self._history_limit = history_limit
 
     async def claim(self, attempt_id: UUID, worker_id: UUID) -> ClaimResult:
         async with self._session_factory() as session, session.begin():
@@ -227,13 +240,14 @@ class AttemptService:
                             RunMessage.session_id == run.session_id,
                             RunMessage.id != run.input_message_id,
                         )
-                        .order_by(RunMessage.created_at.asc(), RunMessage.id.asc())
+                        .order_by(RunMessage.created_at.desc(), RunMessage.id.desc())
+                        .limit(self._history_limit)
                     )
                 ).all()
             )
             history = tuple(
                 {"role": cast(str, message.role), "content": cast(str, message.content)}
-                for message in history_rows
+                for message in reversed(history_rows)
             )
             continuation: dict[str, Any] | None = None
             prompt = cast(str, input_message.content)
@@ -267,6 +281,7 @@ class AttemptService:
                 session_id=cast(UUID, run.session_id),
                 user_id=cast(UUID, run.created_by_user_id),
                 prompt=prompt,
+                original_prompt=cast(str, input_message.content),
                 history=history,
                 continuation=continuation,
             )
@@ -467,6 +482,7 @@ class AttemptService:
             raise ValueError("tool_name must be 1..255 characters")
         safe_request = self._bounded_json_object(request, limit=16 * 1024, label="tool request")
         key = self.tool_idempotency_key(assignment.run_id, tool_call_id, tool_name, safe_request)
+        semantic_key = self.tool_semantic_key(tool_name, safe_request)
         summary = {"args": safe_request}
         async with self._session_factory() as session, session.begin():
             attempt, run = await self._lock_command_context(session, assignment.attempt_id)
@@ -495,41 +511,132 @@ class AttemptService:
                         label="tool result",
                     )
                     return ToolExecutionReservation(key, False, status, result)
-                if status == "started" and not safe_to_retry:
+                if status == "started" and cast(datetime, existing.reservation_expires_at) > now:
+                    return ToolExecutionReservation(key, False, status, None)
+                if status == "started" and not cast(bool, existing.safe_to_retry):
                     cast(Any, existing).status = "approval_required"
-                    return ToolExecutionReservation(key, False, "approval_required", None)
-                if status in {"approval_required", "failed"} and not safe_to_retry and not approved:
+                    cast(Any, existing).reservation_token = None
+                    cast(Any, existing).reservation_expires_at = None
+                    return ToolExecutionReservation(
+                        key, False, "approval_required", None, ambiguous=True
+                    )
+                if (
+                    status in {"approval_required", "failed"}
+                    and not cast(bool, existing.safe_to_retry)
+                    and not approved
+                ):
                     if status == "failed":
                         return ToolExecutionReservation(key, False, "failed", None)
                     return ToolExecutionReservation(key, False, status, None)
+                token = uuid4()
                 cast(Any, existing).status = "started"
                 cast(Any, existing).attempt_id = assignment.attempt_id
+                cast(Any, existing).safe_to_retry = safe_to_retry
+                cast(Any, existing).reservation_token = token
+                cast(Any, existing).reservation_expires_at = now + self._tool_reservation_duration
+                cast(Any, existing).execution_epoch = cast(int, existing.execution_epoch) + 1
                 cast(Any, existing).finished_at = None
                 cast(Any, existing).result_summary = None
                 cast(Any, existing).error_code = None
                 cast(Any, existing).error_message = None
-                return ToolExecutionReservation(key, True, "started", None)
+                return ToolExecutionReservation(
+                    key,
+                    True,
+                    "started",
+                    None,
+                    token,
+                    cast(int, existing.execution_epoch),
+                )
 
-            status = "started" if safe_to_retry or approved else "approval_required"
+            ambiguous = (
+                await session.scalar(
+                    select(RunToolExecution.id).where(
+                        RunToolExecution.run_id == assignment.run_id,
+                        RunToolExecution.semantic_key == semantic_key,
+                        RunToolExecution.tool_call_id != tool_call_id,
+                        RunToolExecution.safe_to_retry.is_(False),
+                        RunToolExecution.status.in_(("started", "approval_required")),
+                    )
+                )
+                is not None
+            )
+            status = (
+                "started"
+                if (safe_to_retry or approved) and (not ambiguous or approved)
+                else "approval_required"
+            )
+            fresh_token: UUID | None = uuid4() if status == "started" else None
             session.add(
                 RunToolExecution(
                     run_id=assignment.run_id,
                     attempt_id=assignment.attempt_id,
                     tool_call_id=tool_call_id,
                     idempotency_key=key,
+                    semantic_key=semantic_key,
                     tool_name=tool_name,
                     request_summary=summary,
+                    safe_to_retry=safe_to_retry,
                     status=status,
+                    reservation_token=fresh_token,
+                    reservation_expires_at=(
+                        now + self._tool_reservation_duration if fresh_token is not None else None
+                    ),
+                    execution_epoch=1 if fresh_token is not None else 0,
                     started_at=now,
                 )
             )
-            return ToolExecutionReservation(key, status == "started", status, None)
+            return ToolExecutionReservation(
+                key,
+                status == "started",
+                status,
+                None,
+                fresh_token,
+                1 if fresh_token is not None else 0,
+                ambiguous,
+            )
+
+    async def find_unsafe_recovery(self, assignment: ClaimedAssignment) -> dict[str, Any] | None:
+        """Return the oldest unresolved unsafe execution before any model rerun."""
+        async with self._session_factory() as session, session.begin():
+            attempt, run = await self._lock_command_context(session, assignment.attempt_id)
+            now = cast(datetime, await session.scalar(select(_database_utc_now())))
+            self._require_assignment_authoritative(attempt, run, assignment, now)
+            row = await session.scalar(
+                select(RunToolExecution)
+                .where(
+                    RunToolExecution.run_id == assignment.run_id,
+                    RunToolExecution.safe_to_retry.is_(False),
+                    RunToolExecution.status.in_(("started", "approval_required")),
+                    RunToolExecution.attempt_id != assignment.attempt_id,
+                )
+                .order_by(RunToolExecution.started_at.asc(), RunToolExecution.id.asc())
+                .limit(1)
+            )
+            if row is None:
+                return None
+            summary = self._bounded_json_object(
+                cast(Mapping[str, Any], row.request_summary),
+                limit=16 * 1024,
+                label="tool request",
+            )
+            request = summary.get("args")
+            if not isinstance(request, dict):
+                raise AttemptCommandRejected("unsafe tool recovery request is invalid")
+            return {
+                "tool_call_id": cast(str, row.tool_call_id),
+                "tool_name": cast(str, row.tool_name),
+                "request": request,
+                "semantic_key": cast(str, row.semantic_key),
+            }
 
     async def complete_tool_execution(
         self,
         assignment: ClaimedAssignment,
         idempotency_key: str,
         result: Mapping[str, Any],
+        *,
+        reservation_token: UUID | None = None,
+        execution_epoch: int = 0,
     ) -> None:
         safe_result = self._bounded_json_object(result, limit=MAX_RESULT_BYTES, label="tool result")
         async with self._session_factory() as session, session.begin():
@@ -544,8 +651,16 @@ class AttemptService:
                 )
                 .with_for_update()
             )
-            if row is None or cast(str, row.status) != "started":
-                raise AttemptCommandRejected("tool execution is no longer writable")
+            if (
+                row is None
+                or cast(str, row.status) != "started"
+                or cast(UUID | None, row.reservation_token) != reservation_token
+                or cast(int, row.execution_epoch) != execution_epoch
+                or cast(UUID, row.attempt_id) != assignment.attempt_id
+                or row.reservation_expires_at is None
+                or cast(datetime, row.reservation_expires_at) <= now
+            ):
+                raise AttemptCommandRejected("tool reservation owner is no longer writable")
             cast(Any, row).status = "completed"
             cast(Any, row).result_summary = safe_result
             cast(Any, row).finished_at = now
@@ -557,6 +672,8 @@ class AttemptService:
         *,
         error_code: str,
         error_message: str,
+        reservation_token: UUID | None,
+        execution_epoch: int,
     ) -> None:
         async with self._session_factory() as session, session.begin():
             attempt, run = await self._lock_command_context(session, assignment.attempt_id)
@@ -570,8 +687,16 @@ class AttemptService:
                 )
                 .with_for_update()
             )
-            if row is None or cast(str, row.status) != "started":
-                raise AttemptCommandRejected("tool execution is no longer writable")
+            if (
+                row is None
+                or cast(str, row.status) != "started"
+                or cast(UUID | None, row.reservation_token) != reservation_token
+                or cast(int, row.execution_epoch) != execution_epoch
+                or cast(UUID, row.attempt_id) != assignment.attempt_id
+                or row.reservation_expires_at is None
+                or cast(datetime, row.reservation_expires_at) <= now
+            ):
+                raise AttemptCommandRejected("tool reservation owner is no longer writable")
             cast(Any, row).status = "failed"
             cast(Any, row).error_code = error_code[:MAX_ERROR_CODE_LENGTH] or "tool_error"
             cast(Any, row).error_message = error_message[:MAX_ERROR_MESSAGE_LENGTH]
@@ -817,6 +942,18 @@ class AttemptService:
         canonical = cls._bounded_json_object(request, limit=16 * 1024, label="tool request")
         material = json.dumps(
             [str(run_id), tool_call_id, tool_name, canonical],
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(material).hexdigest()
+
+    @classmethod
+    def tool_semantic_key(cls, tool_name: str, request: Mapping[str, Any]) -> str:
+        canonical = cls._bounded_json_object(request, limit=16 * 1024, label="tool request")
+        material = json.dumps(
+            [tool_name, canonical],
             ensure_ascii=False,
             allow_nan=False,
             sort_keys=True,

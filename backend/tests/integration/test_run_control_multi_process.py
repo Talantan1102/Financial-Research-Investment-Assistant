@@ -326,6 +326,33 @@ async def test_worker_consumes_cancel_control_and_aborts_executor() -> None:
     assert transport.acked == ["1-0"]
 
 
+async def test_worker_completed_result_wins_when_cancel_control_finishes_simultaneously() -> None:
+    registry = FakeWorkerRegistry()
+    attempts = FakeAttemptService()
+    executor = FakeExecutor()
+    worker = RunWorker(
+        registry,
+        attempts,
+        FakeRedis(),
+        FakeTransport(),
+        executor,
+        poll_interval=0.01,
+    )
+    await worker.start()
+    assignment = (await attempts.claim(uuid4(), registry.worker_id)).assignment
+    assert assignment is not None
+
+    async def immediate_cancel(_key: str, _assignment: ClaimedAssignment) -> bool:
+        return True
+
+    worker._wait_for_cancel = immediate_cancel  # type: ignore[method-assign]
+    await worker._execute_with_cancel_control(assignment)
+    await worker.stop()
+
+    assert executor.calls == 1
+    assert attempts.cancelled == []
+
+
 async def test_worker_recovers_pending_cancel_after_nested_response_error() -> None:
     registry = FakeWorkerRegistry()
     attempts = FakeAttemptService()

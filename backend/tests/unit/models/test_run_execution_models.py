@@ -95,8 +95,11 @@ def _tool_execution(context: ExecutionContext, **overrides: object) -> RunToolEx
         "attempt_id": context.attempts[0].id,
         "tool_call_id": f"call-{uuid.uuid4().hex}",
         "idempotency_key": f"tool-{uuid.uuid4().hex}",
+        "semantic_key": uuid.uuid4().hex,
         "tool_name": "market.snapshot",
         "request_summary": {"ticker": "000001.SZ"},
+        "safe_to_retry": False,
+        "execution_epoch": 0,
         "status": "completed",
         "result_summary": {"price": 12.34},
         "finished_at": datetime.utcnow(),
@@ -128,9 +131,14 @@ def test_execution_tables_expose_exact_columns_and_session_archive() -> None:
         "attempt_id",
         "tool_call_id",
         "idempotency_key",
+        "semantic_key",
         "tool_name",
         "request_summary",
+        "safe_to_retry",
         "status",
+        "reservation_token",
+        "reservation_expires_at",
+        "execution_epoch",
         "result_summary",
         "error_code",
         "error_message",
@@ -160,6 +168,12 @@ def test_tool_execution_physical_contract(db_session: Session) -> None:
         for constraint in inspector.get_unique_constraints("run_tool_executions")
     }
     assert uniques["uq_run_tool_idempotency"] == ("run_id", "idempotency_key")
+    indexes = {index["name"]: index for index in inspector.get_indexes("run_tool_executions")}
+    assert indexes["ix_run_tool_semantic_recovery"]["column_names"] == [
+        "run_id",
+        "semantic_key",
+        "status",
+    ]
     checks = _checks(db_session, "run_tool_executions")
     assert set(re.findall(r"'([^']+)'", checks["ck_run_tool_executions_fixed_status"])) == (
         TOOL_EXECUTION_STATUSES
@@ -183,6 +197,9 @@ def test_tool_execution_physical_contract(db_session: Session) -> None:
             {
                 "result_summary": None,
                 "finished_at": None,
+                "reservation_token": uuid.uuid4(),
+                "reservation_expires_at": datetime.utcnow(),
+                "execution_epoch": 1,
             },
         ),
         ("completed", {}),
@@ -252,6 +269,9 @@ def test_tool_execution_allows_started_to_completed_transition(
         status="started",
         result_summary=None,
         finished_at=None,
+        reservation_token=uuid.uuid4(),
+        reservation_expires_at=datetime.utcnow(),
+        execution_epoch=1,
     )
     db_session.add(fact)
     db_session.flush()
@@ -287,12 +307,15 @@ def test_tool_execution_row_shape_is_enforced_for_literal_sql(
 ) -> None:
     statement = text(
         "INSERT INTO run_tool_executions "
-        "(id, run_id, attempt_id, tool_call_id, idempotency_key, tool_name, "
-        "request_summary, status, result_summary, error_code, error_message, "
-        "started_at, finished_at) VALUES "
-        "(:id, :run_id, :attempt_id, :tool_call_id, :idempotency_key, :tool_name, "
-        "CAST(:request_summary AS jsonb), :status, CAST(:result_summary AS jsonb), "
-        ":error_code, :error_message, :started_at, :finished_at)"
+        "(id, run_id, attempt_id, tool_call_id, idempotency_key, semantic_key, "
+        "tool_name, request_summary, safe_to_retry, status, reservation_token, "
+        "reservation_expires_at, execution_epoch, result_summary, error_code, "
+        "error_message, started_at, finished_at) VALUES "
+        "(:id, :run_id, :attempt_id, :tool_call_id, :idempotency_key, :semantic_key, "
+        ":tool_name, CAST(:request_summary AS jsonb), false, :status, "
+        ":reservation_token, :reservation_expires_at, :execution_epoch, "
+        "CAST(:result_summary AS jsonb), :error_code, :error_message, "
+        ":started_at, :finished_at)"
     )
     parameters = {
         "id": uuid.uuid4(),
@@ -300,9 +323,13 @@ def test_tool_execution_row_shape_is_enforced_for_literal_sql(
         "attempt_id": execution_context.attempts[0].id,
         "tool_call_id": f"literal-{uuid.uuid4().hex}",
         "idempotency_key": f"literal-{uuid.uuid4().hex}",
+        "semantic_key": uuid.uuid4().hex,
         "tool_name": "market.snapshot",
         "request_summary": "{}",
         "status": status,
+        "reservation_token": uuid.uuid4() if status == "started" else None,
+        "reservation_expires_at": (datetime(2026, 7, 18, 0, 1) if status == "started" else None),
+        "execution_epoch": 1 if status == "started" else 0,
         "result_summary": result_summary,
         "error_code": error_code,
         "error_message": error_message,

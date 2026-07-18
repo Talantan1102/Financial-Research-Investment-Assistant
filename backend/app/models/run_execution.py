@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -43,9 +44,14 @@ class RunToolExecution(Base):
     attempt_id = Column(UUID(as_uuid=True), nullable=False)
     tool_call_id = Column(String(255), nullable=False)
     idempotency_key = Column(String(255), nullable=False)
+    semantic_key = Column(String(64), nullable=False)
     tool_name = Column(String(255), nullable=False)
     request_summary = Column(JSONB, nullable=False)
+    safe_to_retry = Column(Boolean, nullable=False, default=False)
     status = Column(String(32), nullable=False)
+    reservation_token = Column(UUID(as_uuid=True), nullable=True)
+    reservation_expires_at = Column(DateTime, nullable=True)
+    execution_epoch = Column(Integer, nullable=False, default=0)
     result_summary = Column(JSONB(none_as_null=True), nullable=True)
     error_code = Column(String(64), nullable=True)
     error_message = Column(Text, nullable=True)
@@ -73,16 +79,24 @@ class RunToolExecution(Base):
             name="ck_run_tool_result_summary_size",
         ),
         CheckConstraint(
+            "execution_epoch >= 0",
+            name="ck_run_tool_execution_epoch_nonnegative",
+        ),
+        CheckConstraint(
             "(status = 'started' AND finished_at IS NULL "
-            "AND result_summary IS NULL AND error_code IS NULL AND error_message IS NULL) "
+            "AND result_summary IS NULL AND error_code IS NULL AND error_message IS NULL "
+            "AND reservation_token IS NOT NULL AND reservation_expires_at IS NOT NULL "
+            "AND execution_epoch > 0) "
             "OR (status = 'completed' AND finished_at IS NOT NULL "
             "AND result_summary IS NOT NULL AND error_code IS NULL AND error_message IS NULL) "
             "OR (status = 'failed' AND finished_at IS NOT NULL "
             "AND result_summary IS NULL AND (error_code IS NOT NULL OR error_message IS NOT NULL)) "
             "OR (status = 'approval_required' AND finished_at IS NULL "
-            "AND result_summary IS NULL AND error_code IS NULL AND error_message IS NULL)",
+            "AND result_summary IS NULL AND error_code IS NULL AND error_message IS NULL "
+            "AND reservation_token IS NULL AND reservation_expires_at IS NULL)",
             name="ck_run_tool_execution_row_shape",
         ),
+        Index("ix_run_tool_semantic_recovery", "run_id", "semantic_key", "status"),
     )
 
 
