@@ -219,8 +219,16 @@ class PaperOrderService:
             raise PaperTradingError("invalid_order", "draft must be an OrderDraft")
         normalized_draft = _canonical_draft(draft)
 
-        # Serialize the user-scoped idempotency key before consulting either
-        # persisted state or live dependencies.
+        preflight_order = self._owned_order(user_id=user_id, order_id=order_id)
+        existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
+        if existing is not None:
+            self._validate_confirmation_retry(existing, order_id=order_id, draft=normalized_draft)
+            return existing
+
+        preflight_now = self._current_time()
+        preflight_expired = preflight_now >= preflight_order.expires_at
+        quote = None if preflight_expired else self._quote(normalized_draft.ts_code)
+
         self._lock_confirmation_key(user_id=user_id, client_request_id=client_request_id)
         existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
         if existing is not None:
@@ -232,7 +240,16 @@ class PaperOrderService:
             raise PaperTradingError(
                 "order_not_awaiting_confirmation", "order is no longer awaiting confirmation"
             )
+        account = self.account_service.get_active(user_id=user_id, for_update=True)
+        self._session.refresh(account, with_for_update=True)
+        if order.account_id != account.id or order.account_generation != account.generation:
+            raise PaperTradingError("stale_account_generation", "account generation has changed")
+
         now = self._current_time()
+        if preflight_expired and now < order.expires_at:
+            raise PaperTradingError(
+                "trading_clock_moved_backwards", "trading clock moved backwards during confirmation"
+            )
         if now >= order.expires_at:
             payload = normalized_draft.model_dump(mode="json")
             order.client_request_id = client_request_id
@@ -244,11 +261,8 @@ class PaperOrderService:
             self._session.flush()
             return order
 
-        quote = self._quote(normalized_draft.ts_code)
-        account = self.account_service.get_active(user_id=user_id, for_update=True)
-        self._session.refresh(account, with_for_update=True)
-        if order.account_id != account.id or order.account_generation != account.generation:
-            raise PaperTradingError("stale_account_generation", "account generation has changed")
+        if quote is None:  # guarded by the monotonic expiry check above
+            raise PaperTradingError("quote_unavailable", "quote was not fetched for confirmation")
         preview = self._calculate_preview(
             account=account,
             order_id=order_id,
@@ -405,7 +419,7 @@ class PaperOrderService:
             select(PaperOrder).where(
                 PaperOrder.user_id == user_id,
                 PaperOrder.client_request_id == client_request_id,
-            )
+            ).execution_options(populate_existing=True)
         )
 
     @staticmethod

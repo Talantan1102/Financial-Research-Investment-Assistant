@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
@@ -35,9 +36,12 @@ class FixedQuoteProvider:
     def __init__(self, quote: RealtimeQuote) -> None:
         self.quote = quote
         self.calls = 0
+        self.on_get: Callable[[int], None] | None = None
 
     def get_sync(self, ts_code: str) -> RealtimeQuote:
         self.calls += 1
+        if self.on_get is not None:
+            self.on_get(self.calls)
         return self.quote.model_copy(update={"ts_code": ts_code})
 
 
@@ -65,14 +69,17 @@ def user(db_session: Session) -> User:
 
 
 def _service(
-    session: Session, provider: FixedQuoteProvider, *, now: datetime = NOW
+    session: Session,
+    provider: FixedQuoteProvider,
+    *,
+    now: datetime | Callable[[], datetime] = NOW,
 ) -> PaperOrderService:
     return PaperOrderService(
         session,
         quote_provider=provider,
         clock=TradingClock(FixedTradingCalendar({NOW.date(), date(2026, 7, 21)})),
         rulebook=RuleBook.from_builtin_fixture(),
-        now=lambda: now,
+        now=now if callable(now) else lambda: now,
     )
 
 
@@ -310,6 +317,113 @@ def test_confirmation_id_length_matches_order_column_boundary(
             client_request_id="x" * 129,
         )
     assert caught.value.code == "invalid_order"
+    assert provider.calls == calls_before
+
+
+def test_slow_quote_crossing_expiry_persists_cancelled_without_reservation(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    PaperAccountService(db_session).get_or_create(user_id=user_id)
+    current = [NOW.replace(hour=14, minute=59, second=58)]
+    provider = FixedQuoteProvider(_quote().model_copy(update={"quoted_at": current[0]}))
+    service = _service(db_session, provider, now=lambda: current[0])
+    order = _prepare(service, user_id)
+
+    def advance_on_confirm(call: int) -> None:
+        if call == 2:
+            current[0] = current[0] + timedelta(seconds=3)
+
+    provider.on_get = advance_on_confirm
+    cancelled = service.confirm(
+        user_id=user_id,
+        order_id=order.id,
+        draft=_draft(),
+        client_request_id="slow-expiry",
+    )
+
+    assert provider.calls == 2
+    assert cancelled.status is OrderStatus.CANCELLED
+    assert cancelled.completed_at == current[0]
+    assert cancelled.reserved_cash == Decimal("0.00")
+    assert cancelled.reserved_quantity == 0
+
+
+@pytest.mark.parametrize(
+    ("order_type", "expected_status", "expected_error"),
+    [
+        ("limit", OrderStatus.QUEUED, None),
+        ("market", None, "market_order_outside_continuous_trading"),
+    ],
+)
+def test_slow_quote_uses_post_lock_market_phase(
+    db_session: Session,
+    user: User,
+    order_type: str,
+    expected_status: OrderStatus | None,
+    expected_error: str | None,
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    PaperAccountService(db_session).get_or_create(user_id=user_id)
+    current = [NOW.replace(hour=14, minute=56, second=59)]
+    provider = FixedQuoteProvider(_quote().model_copy(update={"quoted_at": current[0]}))
+    service = _service(db_session, provider, now=lambda: current[0])
+    limit_price = Decimal("1500") if order_type == "limit" else None
+    order = _prepare(service, user_id, order_type=order_type, limit_price=limit_price)
+
+    def advance_on_confirm(call: int) -> None:
+        if call == 2:
+            current[0] = current[0] + timedelta(seconds=1)
+
+    provider.on_get = advance_on_confirm
+    if expected_error is not None:
+        with pytest.raises(PaperTradingError) as caught:
+            service.confirm(
+                user_id=user_id,
+                order_id=order.id,
+                draft=_draft(order_type=order_type, limit_price=limit_price),
+                client_request_id=f"phase-{order_type}",
+            )
+        assert caught.value.code == expected_error
+    else:
+        confirmed = service.confirm(
+            user_id=user_id,
+            order_id=order.id,
+            draft=_draft(order_type=order_type, limit_price=limit_price),
+            client_request_id=f"phase-{order_type}",
+        )
+        assert confirmed.status is expected_status
+
+
+def test_expired_archived_generation_is_not_mutated(db_session: Session, user: User) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    accounts = PaperAccountService(db_session)
+    accounts.get_or_create(user_id=user_id)
+    provider = FixedQuoteProvider(_quote())
+    service = _service(db_session, provider)
+    order = _prepare(service, user_id)
+    order.expires_at = NOW - timedelta(seconds=1)
+    accounts.reset_confirmed(
+        user_id=user_id,
+        initial_cash=Decimal("800000"),
+        source_session_id="expired-generation-reset",
+        confirmation_id="expired-generation-reset",
+    )
+    db_session.flush()
+    calls_before = provider.calls
+
+    with pytest.raises(PaperTradingError) as caught:
+        service.confirm(
+            user_id=user_id,
+            order_id=order.id,
+            draft=_draft(),
+            client_request_id="expired-old-generation",
+        )
+
+    assert caught.value.code == "stale_account_generation"
+    assert order.status is OrderStatus.AWAITING_CONFIRMATION
+    assert order.client_request_id is None
+    assert order.confirmed_payload is None
     assert provider.calls == calls_before
 
 
@@ -640,7 +754,7 @@ def test_confirm_persists_full_edited_draft_and_auditable_diff(
     assert confirmed.user_edits["ts_code"] == {"from": "600519.SH", "to": "000001.SZ"}
 
 
-def test_confirm_acquires_confirmation_lock_before_fetching_quote(
+def test_confirm_fetches_quote_before_acquiring_confirmation_lock(
     db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user_id = cast(uuid.UUID, user.id)
@@ -650,16 +764,16 @@ def test_confirm_acquires_confirmation_lock_before_fetching_quote(
     order = _prepare(service, user_id)
     original_lock = service._lock_confirmation_key
 
-    def assert_quote_not_yet_fetched(*, user_id: uuid.UUID, client_request_id: str) -> None:
-        assert provider.calls == 1
+    def assert_quote_already_fetched(*, user_id: uuid.UUID, client_request_id: str) -> None:
+        assert provider.calls == 2
         original_lock(user_id=user_id, client_request_id=client_request_id)
 
-    monkeypatch.setattr(service, "_lock_confirmation_key", assert_quote_not_yet_fetched)
+    monkeypatch.setattr(service, "_lock_confirmation_key", assert_quote_already_fetched)
     service.confirm(
         user_id=user_id,
         order_id=order.id,
         draft=_draft(),
-        client_request_id="lock-before-quote",
+        client_request_id="quote-before-lock",
     )
 
 
