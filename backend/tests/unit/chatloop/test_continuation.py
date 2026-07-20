@@ -5,7 +5,9 @@ from unittest.mock import Mock
 
 import pytest
 from app.chatloop.continuation import ContinuationV1, PendingActionV1
+from app.chatloop.gates import GateConfig, check_gates, filter_burned
 from app.chatloop.state import ChatLoopState
+from app.services.llm_step import StepToolCall
 from pydantic import ValidationError
 
 
@@ -29,8 +31,15 @@ def _state() -> ChatLoopState:
 
 
 def test_continuation_round_trips_only_portable_whitelisted_state() -> None:
+    state = _state()
+    state.budget_spent_cny = 0.09
+    state.budget_spent_tokens = 111
+    state.prompt_tokens_total = 70
+    state.completion_tokens_total = 41
+    state.cached_tokens_total = 12
+    state.burned_signatures = {state.ledger.entries[0].signature}
     continuation = ContinuationV1.from_state(
-        _state(),
+        state,
         PendingActionV1(
             pause_type="input",
             tool_name="ask_user",
@@ -53,9 +62,74 @@ def test_continuation_round_trips_only_portable_whitelisted_state() -> None:
         "messages",
         "tool_ledger",
         "loop_count",
+        "budget_spent_cny",
+        "budget_spent_tokens",
+        "prompt_tokens_total",
+        "completion_tokens_total",
+        "cached_tokens_total",
+        "burned_signatures",
         "pending_action",
     }
     assert restored.body.tool_ledger[0].digest == "found"
+    restored_state = restored.to_state()
+    assert restored_state.budget_spent_cny == 0.09
+    assert restored_state.budget_spent_tokens == 111
+    assert restored_state.prompt_tokens_total == 70
+    assert restored_state.completion_tokens_total == 41
+    assert restored_state.cached_tokens_total == 12
+    assert restored_state.burned_signatures == {state.ledger.entries[0].signature}
+    assert check_gates(restored_state, GateConfig(max_cny=0.08)) == "budget"
+    allowed, rejected = filter_burned(
+        [
+            StepToolCall(
+                id="repeat",
+                name="search",
+                arguments='{"q":"\\u8d35\\u5dde\\u8305\\u53f0"}',
+            )
+        ],
+        restored_state,
+    )
+    assert not allowed
+    assert rejected == [state.ledger.entries[0].signature]
+
+
+def test_continuation_accepts_large_legal_message_bounded_only_by_total_payload() -> None:
+    state = _state()
+    state.messages = [{"role": "user", "content": "x" * 33_000}]
+    continuation = ContinuationV1.from_state(
+        state,
+        PendingActionV1(
+            pause_type="input",
+            tool_name="ask_user",
+            request={"question": "cost?"},
+        ),
+        key_id="key-1",
+        signature="0" * 64,
+        tenant_id="tenant-1",
+    )
+
+    assert len(continuation.body.messages[0].content or "") == 33_000
+
+
+def test_budget_accumulates_across_multiple_pause_snapshots() -> None:
+    state = _state()
+    state.budget_spent_cny = 0.04
+    state.budget_spent_tokens = 40
+    action = PendingActionV1(
+        pause_type="input", tool_name="ask_user", request={"question": "first?"}
+    )
+    first = ContinuationV1.from_state(
+        state, action, key_id="key-1", signature="0" * 64, tenant_id="tenant-1"
+    ).to_state()
+    first.budget_spent_cny += 0.07
+    first.budget_spent_tokens += 70
+    second = ContinuationV1.from_state(
+        first, action, key_id="key-1", signature="0" * 64, tenant_id="tenant-1"
+    ).to_state()
+
+    assert second.budget_spent_cny == pytest.approx(0.11)
+    assert second.budget_spent_tokens == 110
+    assert check_gates(second, GateConfig(max_cny=0.10, max_tokens=1_000)) == "budget"
 
 
 @pytest.mark.parametrize(

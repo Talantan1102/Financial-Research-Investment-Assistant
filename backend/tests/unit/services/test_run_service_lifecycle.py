@@ -489,6 +489,117 @@ async def test_concurrent_resume_resolves_pause_once_and_is_idempotent(
 
 
 @pytest.mark.asyncio
+async def test_resolved_resume_rejects_a_different_response(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_input(created_run.id, {"question": "cost?"})
+    await run_service.resume_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        response={"text": "1500"},
+    )
+
+    with pytest.raises(ResumeNotAllowed, match="different response"):
+        await run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={"text": "1600"},
+        )
+
+    resolved = await run_service.get_pause(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id, pause.id
+    )
+    assert resolved.response_payload == {"text": "1500"}
+
+
+@pytest.mark.asyncio
+async def test_concurrent_conflicting_resume_commits_one_canonical_response(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_input(created_run.id, {"question": "cost?"})
+
+    results = await asyncio.gather(
+        run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={"text": "1500"},
+        ),
+        run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={"text": "1600"},
+        ),
+        return_exceptions=True,
+    )
+
+    assert sum(not isinstance(result, BaseException) for result in results) == 1
+    conflicts = [result for result in results if isinstance(result, ResumeNotAllowed)]
+    assert len(conflicts) == 1
+    assert "different response" in str(conflicts[0])
+    resolved = await run_service.get_pause(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id, pause.id
+    )
+    assert resolved.response_payload in ({"text": "1500"}, {"text": "1600"})
+
+
+@pytest.mark.asyncio
+async def test_approval_decisions_must_exactly_cover_requested_call_ids_before_resolution(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_approval(
+        created_run.id,
+        {"tool_calls": [{"id": "risky", "name": "place_order", "arguments": "{}"}]},
+        {
+            "version": 1,
+            "body": {
+                "pending_action": {
+                    "pause_type": "approval",
+                    "pending_tool_calls": [
+                        {"id": "safe", "name": "search_tools", "arguments": "{}"},
+                        {"id": "risky", "name": "place_order", "arguments": "{}"},
+                    ],
+                }
+            },
+        },
+    )
+
+    for decisions in ({"safe": True, "risky": True}, {}, {"wrong": True}):
+        with pytest.raises(ResumeNotAllowed):
+            await run_service.resume_run(
+                created_run.tenant_id,
+                created_run.id,
+                created_run.created_by_user_id,
+                response={"decisions": decisions},
+            )
+        unresolved = await run_service.get_pause(
+            created_run.tenant_id, created_run.id, created_run.created_by_user_id, pause.id
+        )
+        assert unresolved.resolved_at is None
+        assert unresolved.response_payload is None
+
+    resumed = await run_service.resume_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        response={"decisions": {"risky": False}},
+    )
+    assert resumed.status == RunStatus.QUEUED.value
+
+
+@pytest.mark.asyncio
 async def test_cancel_racing_resume_finishes_in_legal_state(
     run_service: RunService,
     fake_executor: FakeRunExecutor,

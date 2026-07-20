@@ -339,10 +339,21 @@ async def test_resume_uses_authenticated_actor_and_keeps_same_run(
             f"{_run_url(tenant.id)}/{run_id}/resume",
             json={"response": {"text": "1500"}},
         )
+        replay = await client.post(
+            f"{_run_url(tenant.id)}/{run_id}/resume",
+            json={"response": {"text": "1500"}},
+        )
+        conflict = await client.post(
+            f"{_run_url(tenant.id)}/{run_id}/resume",
+            json={"response": {"text": "1600"}},
+        )
 
     assert response.status_code == 200
     assert response.json()["id"] == str(run_id)
     assert response.json()["status"] == "queued"
+    assert replay.status_code == 200
+    assert conflict.status_code == 409
+    assert "different response" in conflict.json()["detail"]
 
 
 def _sse_frames(body: str) -> list[dict[str, object]]:

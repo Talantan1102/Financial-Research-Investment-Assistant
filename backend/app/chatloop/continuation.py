@@ -62,7 +62,7 @@ class ToolFunctionV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     name: str = Field(min_length=1, max_length=255)
-    arguments: str = Field(max_length=16 * 1024)
+    arguments: str
 
 
 class ToolCallV1(BaseModel):
@@ -77,8 +77,8 @@ class MessageV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     role: Literal["system", "user", "assistant", "tool"]
-    content: str | None = Field(default=None, max_length=32 * 1024)
-    reasoning_content: str | None = Field(default=None, max_length=16 * 1024)
+    content: str | None = None
+    reasoning_content: str | None = None
     tool_calls: tuple[ToolCallV1, ...] = Field(default=(), max_length=64)
     tool_call_id: str | None = Field(default=None, max_length=255)
     name: str | None = Field(default=None, max_length=255)
@@ -101,7 +101,7 @@ class PendingToolCallV1(BaseModel):
 
     id: str = Field(min_length=1, max_length=255)
     name: str = Field(min_length=1, max_length=255)
-    arguments: str = Field(max_length=16 * 1024)
+    arguments: str
 
     def to_step_tool_call(self) -> StepToolCall:
         return StepToolCall(id=self.id, name=self.name, arguments=self.arguments)
@@ -167,6 +167,12 @@ class ContinuationBodyV1(BaseModel):
     messages: tuple[MessageV1, ...] = Field(max_length=512)
     tool_ledger: tuple[CompactLedgerEntryV1, ...] = ()
     loop_count: int = Field(strict=True, ge=0, le=10_000)
+    budget_spent_cny: float = Field(strict=True, ge=0)
+    budget_spent_tokens: int = Field(strict=True, ge=0)
+    prompt_tokens_total: int = Field(strict=True, ge=0)
+    completion_tokens_total: int = Field(strict=True, ge=0)
+    cached_tokens_total: int = Field(strict=True, ge=0)
+    burned_signatures: tuple[str, ...] = Field(max_length=10_000)
     pending_action: PendingActionV1
 
 
@@ -225,6 +231,12 @@ class ContinuationV1(BaseModel):
                 for entry in state.ledger.entries
             ),
             loop_count=state.step,
+            budget_spent_cny=state.budget_spent_cny,
+            budget_spent_tokens=state.budget_spent_tokens,
+            prompt_tokens_total=state.prompt_tokens_total,
+            completion_tokens_total=state.completion_tokens_total,
+            cached_tokens_total=state.cached_tokens_total,
+            burned_signatures=tuple(sorted(state.burned_signatures)),
             pending_action=pending_action,
         )
         return cls.model_validate(
@@ -246,6 +258,12 @@ class ContinuationV1(BaseModel):
                 for message in self.body.messages
             ],
             step=self.body.loop_count,
+            budget_spent_cny=self.body.budget_spent_cny,
+            budget_spent_tokens=self.body.budget_spent_tokens,
+            prompt_tokens_total=self.body.prompt_tokens_total,
+            completion_tokens_total=self.body.completion_tokens_total,
+            cached_tokens_total=self.body.cached_tokens_total,
+            burned_signatures=set(self.body.burned_signatures),
         )
         state.ledger = ToolLedger(
             entries=[

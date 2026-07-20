@@ -416,12 +416,10 @@ class RunService:
                 .with_for_update()
             )
             current_status = RunStatus(cast(str, run.status))
-            if (
-                current_status == RunStatus.QUEUED
-                and latest_pause is not None
-                and latest_pause.resolved_at is not None
-            ):
-                return run
+            if latest_pause is not None and latest_pause.resolved_at is not None:
+                if _canonical_json(latest_pause.response_payload) == _canonical_json(response):
+                    return run
+                raise ResumeNotAllowed("pause was already resumed with a different response")
             if current_status not in {
                 RunStatus.WAITING_APPROVAL,
                 RunStatus.WAITING_INPUT,
@@ -436,6 +434,13 @@ class RunService:
             if latest_pause.pause_type != expected_pause_type:
                 raise ResumeNotAllowed("pause type does not match run status")
             self._validate_resume_response(latest_pause.pause_type, response)
+            if latest_pause.pause_type == PauseType.APPROVAL.value and "decisions" in response:
+                expected_ids = self._expected_approval_ids(latest_pause)
+                self._validate_resume_response(
+                    latest_pause.pause_type,
+                    response,
+                    expected_approval_ids=expected_ids,
+                )
 
             assert_transition(current_status, RunStatus.QUEUED)
             now = _utcnow()
@@ -464,7 +469,12 @@ class RunService:
             return run
 
     @staticmethod
-    def _validate_resume_response(pause_type: str, response: dict[str, Any]) -> None:
+    def _validate_resume_response(
+        pause_type: str,
+        response: dict[str, Any],
+        *,
+        expected_approval_ids: frozenset[str] | None = None,
+    ) -> None:
         """Reject ambiguous HTTP payloads before resolving the durable Pause."""
         if pause_type == PauseType.INPUT.value:
             if set(response) != {"text"} or not isinstance(response.get("text"), str):
@@ -487,13 +497,55 @@ class RunService:
         if (
             set(response) - {"decisions", "text"}
             or not isinstance(decisions, dict)
-            or not decisions
+            or (not decisions and expected_approval_ids is None)
             or any(
                 not isinstance(key, str) or type(value) is not bool
                 for key, value in decisions.items()
             )
         ):
             raise ResumeNotAllowed("approval response must contain boolean decisions")
+        if expected_approval_ids is not None and set(decisions) != expected_approval_ids:
+            raise ResumeNotAllowed("approval decisions must exactly cover requested tool call ids")
+
+    @staticmethod
+    def _expected_approval_ids(pause: RunPause) -> frozenset[str]:
+        continuation = pause.continuation_payload
+        body = continuation.get("body") if isinstance(continuation, dict) else None
+        action = body.get("pending_action") if isinstance(body, dict) else None
+        pending = action.get("pending_tool_calls") if isinstance(action, dict) else None
+        if not isinstance(pending, list):
+            raise ResumeNotAllowed("approval pause continuation has no pending tool calls")
+        pending_ids = [call.get("id") for call in pending if isinstance(call, dict)]
+        if (
+            len(pending_ids) != len(pending)
+            or any(not isinstance(call_id, str) or not call_id for call_id in pending_ids)
+            or len(set(pending_ids)) != len(pending_ids)
+        ):
+            raise ResumeNotAllowed("approval pause continuation has invalid pending tool calls")
+
+        request = pause.request_payload
+        requested: list[Any]
+        tool_calls = request.get("tool_calls") if isinstance(request, dict) else None
+        bindings = request.get("execution_bindings") if isinstance(request, dict) else None
+        if isinstance(tool_calls, list):
+            requested = [call.get("id") if isinstance(call, dict) else None for call in tool_calls]
+        elif isinstance(bindings, list):
+            requested = [
+                binding.get("tool_call", {}).get("id")
+                if isinstance(binding, dict) and isinstance(binding.get("tool_call"), dict)
+                else None
+                for binding in bindings
+            ]
+        else:
+            raise ResumeNotAllowed("approval pause request has no requested tool calls")
+        if (
+            not requested
+            or any(not isinstance(call_id, str) or not call_id for call_id in requested)
+            or len(set(requested)) != len(requested)
+            or not set(requested).issubset(set(pending_ids))
+        ):
+            raise ResumeNotAllowed("approval pause request does not match pending tool calls")
+        return frozenset(cast(list[str], requested))
 
     async def get_pause(
         self,
@@ -675,6 +727,19 @@ def _canonical_request_hash(command: CreateRunCommand) -> str:
         sort_keys=True,
     ).encode()
     return hashlib.sha256(canonical).hexdigest()
+
+
+def _canonical_json(value: Any) -> bytes:
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ResumeNotAllowed("resume response must be portable JSON") from exc
 
 
 def _utcnow() -> datetime:

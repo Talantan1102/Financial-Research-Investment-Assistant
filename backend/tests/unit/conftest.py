@@ -41,6 +41,7 @@ def _unset_proxy_env(monkeypatch):
 @pytest_asyncio.fixture
 async def async_session_factory(
     pg_test_container: dict[str, object],
+    pg_test_engine: object,
 ) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     """Function-scoped async session factory backed by the real PG test DB.
 
@@ -52,6 +53,7 @@ async def async_session_factory(
     Isolation: repos use unique UUIDs per test; no cross-test row collisions.
     Engine is disposed on test teardown so connections are returned to PG.
     """
+    del pg_test_engine  # dependency guarantees the session-scoped schema setup ran
     from tests.pg_test_defaults import PG_PASSWORD_DEFAULT  # C37: SSOT
 
     user = os.getenv("POSTGRES_USER", "postgres")

@@ -13,7 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import date
 from types import MappingProxyType
-from typing import Any, Literal, Protocol, TypeAlias
+from typing import Any, Literal, Protocol, TypeAlias, cast
 from uuid import UUID
 
 from app.chatloop.context import ContextDeps
@@ -708,22 +708,34 @@ class ChatRunExecutor:
         ):
             raise ValueError("approval response must be an object")
         decision: Literal["approve", "reject"] | Mapping[str, bool]
+        pending_ids = {call.id for call in pending_tool_calls}
+        requested_ids = self._requested_approval_ids(action.request, pending_ids)
         if "approved" in response and "decisions" in response:
             raise ValueError("approval response contains conflicting decisions")
         if type(response.get("approved")) is bool:
-            decision = "approve" if response["approved"] else "reject"
+            approved = cast(bool, response["approved"])
+            if requested_ids == pending_ids:
+                decision = "approve" if approved else "reject"
+            else:
+                decision = {
+                    call.id: approved if call.id in requested_ids else True
+                    for call in pending_tool_calls
+                }
         else:
             decisions = response.get("decisions")
             if (
                 not isinstance(decisions, dict)
-                or set(decisions) != {call.id for call in pending_tool_calls}
+                or set(decisions) != requested_ids
                 or any(
                     not isinstance(key, str) or type(value) is not bool
                     for key, value in decisions.items()
                 )
             ):
-                raise ValueError("approval response must cover every pending tool")
-            decision = decisions
+                raise ValueError("approval response must cover every requested tool")
+            decision = {
+                call.id: decisions[call.id] if call.id in requested_ids else True
+                for call in pending_tool_calls
+            }
         resume_prompt = response.get("text") or json.dumps(
             response, ensure_ascii=False, sort_keys=True
         )
@@ -733,6 +745,16 @@ class ChatRunExecutor:
             resume_prompt,
             decision,
         )
+
+    @staticmethod
+    def _requested_approval_ids(request: Any, pending_ids: set[str]) -> set[str]:
+        calls = getattr(request, "tool_calls", ())
+        requested = {call.id for call in calls}
+        if not requested:
+            requested = set(pending_ids)
+        if not requested.issubset(pending_ids):
+            raise ValueError("approval request does not match pending tools")
+        return requested
 
     def _authenticate_continuation(
         self, command: ExecuteChatRun, envelope: dict[str, Any]

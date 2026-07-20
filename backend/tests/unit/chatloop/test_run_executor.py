@@ -484,6 +484,85 @@ async def test_per_call_approval_decisions_preserve_assistant_tool_result_order(
     assert [tool.status for tool in result.tools] == ["completed", "failed"]
 
 
+@pytest.mark.parametrize(
+    ("response", "expected_dispatched", "expected_statuses"),
+    [
+        ({"decisions": {"risky-write": False}}, ["safe-read"], ["completed", "failed"]),
+        ({"approved": False}, ["safe-read"], ["completed", "failed"]),
+        (
+            {"decisions": {"risky-write": True}},
+            ["safe-read", "risky-write"],
+            ["completed", "completed"],
+        ),
+        ({"approved": True}, ["safe-read", "risky-write"], ["completed", "completed"]),
+    ],
+)
+async def test_mixed_safe_and_risky_batch_only_requires_risky_decisions(
+    response: dict[str, Any],
+    expected_dispatched: list[str],
+    expected_statuses: list[str],
+) -> None:
+    from app.services.run_chat_worker import DurableApprovalController, ToolRiskPolicy
+
+    calls = [
+        StepToolCall(id="safe-read", name="search_tools", arguments='{"q":"price"}'),
+        StepToolCall(id="risky-write", name="place_order", arguments='{"n":1}'),
+    ]
+    command = _command(prompt="mixed")
+    user_id = str(uuid4())
+    paused = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=_components(
+            _ScriptedLLM(
+                [
+                    StepResult(
+                        content="",
+                        tool_calls=calls,
+                        finish_reason="tool_calls",
+                        prompt_tokens=1,
+                        completion_tokens=1,
+                        cached_tokens=0,
+                        cost_cny=0,
+                    )
+                ]
+            )
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+        pause_controller=DurableApprovalController(
+            ToolRiskPolicy.from_trusted_names({"search_tools"}), frozenset()
+        ),
+    ).execute(command)
+    assert isinstance(paused, PauseResult)
+    assert [call["id"] for call in paused.request["tool_calls"]] == ["risky-write"]
+
+    hub = _RecordingHub()
+    resumed = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(
+            **{**vars(_components(_ScriptedLLM([_step("done")]))), "tool_hub": hub}
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            json.dumps(response),
+            (),
+            paused.thaw_continuation(),
+            command.tenant_id,
+        )
+    )
+
+    assert isinstance(resumed, CompletedResult)
+    assert [call.id for call in hub.calls] == expected_dispatched
+    assert [tool.status for tool in resumed.tools] == expected_statuses
+
+
 async def test_conflicting_batch_and_legacy_approval_decisions_fail_closed() -> None:
     call = StepToolCall(id="call-a", name="dangerous_tool", arguments="{}")
     command = _command(prompt="batch")
