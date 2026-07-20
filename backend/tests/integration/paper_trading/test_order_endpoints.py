@@ -5,7 +5,10 @@ from collections.abc import Generator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
+from zoneinfo import ZoneInfo
 
+import app.router.paper_trading_router as paper_router
+import pandas as pd
 import pytest
 from app.core.database import get_db
 from app.models.paper_account import PaperAccount, PaperHoldingLot
@@ -13,11 +16,12 @@ from app.models.paper_order import OrderSide, OrderStatus, OrderType, PaperFill,
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.router.paper_trading_router import get_paper_order_service, router
+from app.schemas.paper_trading import OrderDraft
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import FixedTradingCalendar, TradingClock
 from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.rulebook import RuleBook
-from app.services.paper_trading.types import QuoteLevel, RealtimeQuote
+from app.services.paper_trading.types import MarketPhase, QuoteLevel, RealtimeQuote
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -419,3 +423,78 @@ def test_write_payloads_are_strict(
     )
 
     assert response.status_code == 422
+
+
+def test_rest_dependency_uses_exchange_calendar_for_holiday_and_open_day(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fetch(start: str, end: str) -> pd.DataFrame:
+        del start, end
+        return pd.DataFrame(
+            [
+                {"cal_date": "20261001", "is_open": 0},
+                {"cal_date": "20261009", "is_open": 1},
+            ]
+        )
+
+    monkeypatch.setattr(paper_router, "_fetch_trading_calendar", fetch)
+    service = get_paper_order_service(db_session)
+    holiday = datetime(2026, 10, 1, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    assert service.clock.phase(holiday) is MarketPhase.CLOSED
+    assert (
+        service.clock.phase(datetime(2026, 10, 9, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai")))
+        is MarketPhase.MORNING
+    )
+
+    holiday_service = PaperOrderService(
+        db_session,
+        quote_provider=FixedQuoteProvider(quoted_at=holiday),
+        clock=service.clock,
+        rulebook=RuleBook.from_builtin_fixture(),
+        now=lambda: holiday,
+    )
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    order, _ = holiday_service.prepare_order(
+        user_id=cast(uuid.UUID, user.id),
+        session_id="holiday-session",
+        message_id="holiday-message",
+        side="buy",
+        ts_code="600519.SH",
+        name="贵州茅台",
+        quantity=100,
+        order_type="limit",
+        limit_price=Decimal("1501.00"),
+    )
+    confirmed = holiday_service.confirm(
+        user_id=cast(uuid.UUID, user.id),
+        order_id=cast(uuid.UUID, order.id),
+        draft=OrderDraft.model_validate(_draft()),
+        client_request_id="holiday-confirm",
+    )
+
+    assert confirmed.status is OrderStatus.QUEUED
+
+
+def test_rest_calendar_bridge_reuses_project_tushare_factory_and_closes_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+    closed = False
+
+    class FakeTushareService:
+        async def get_trade_cal(self, *, start: str, end: str) -> pd.DataFrame:
+            calls.append((start, end))
+            return pd.DataFrame([{"cal_date": start, "is_open": 1}])
+
+        async def aclose(self) -> None:
+            nonlocal closed
+            closed = True
+
+    monkeypatch.setattr(paper_router, "build_tushare_service", FakeTushareService)
+
+    frame = paper_router._fetch_trading_calendar("20260720", "20260721")
+
+    assert frame.to_dict("records") == [{"cal_date": "20260720", "is_open": 1}]
+    assert calls == [("20260720", "20260721")]
+    assert closed

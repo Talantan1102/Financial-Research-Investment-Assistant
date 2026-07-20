@@ -1,8 +1,14 @@
 from datetime import date, datetime, timedelta, tzinfo
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
-from app.services.paper_trading.clock import FixedTradingCalendar, TradingClock
+from app.services.paper_trading.clock import (
+    FixedTradingCalendar,
+    TradingClock,
+    TushareTradingCalendar,
+)
+from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.types import MarketPhase
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -105,3 +111,41 @@ def test_next_open_date_raises_when_no_future_date_is_configured() -> None:
 
     with pytest.raises(LookupError, match="no future open date configured"):
         calendar.next_open_date(OPEN_DATE)
+
+
+def test_tushare_calendar_uses_exchange_rows_instead_of_weekdays() -> None:
+    calls = 0
+
+    def fetch(start: str, end: str) -> pd.DataFrame:
+        nonlocal calls
+        calls += 1
+        assert start <= "20261001" <= end
+        return pd.DataFrame(
+            [
+                {"cal_date": "20261001", "is_open": 0},
+                {"cal_date": "20261008", "is_open": 0},
+                {"cal_date": "20261009", "is_open": 1},
+            ]
+        )
+
+    calendar = TushareTradingCalendar(fetch)
+
+    assert not calendar.is_open_date(date(2026, 10, 1))
+    assert calendar.next_open_date(date(2026, 10, 1)) == date(2026, 10, 9)
+    assert calls == 1
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        pd.DataFrame(),
+        pd.DataFrame([{"cal_date": "20261001", "is_open": "unknown"}]),
+    ],
+)
+def test_tushare_calendar_fails_closed_for_missing_or_invalid_data(frame: pd.DataFrame) -> None:
+    calendar = TushareTradingCalendar(lambda _start, _end: frame)
+
+    with pytest.raises(PaperTradingError, match="交易日历") as caught:
+        calendar.is_open_date(date(2026, 10, 1))
+
+    assert caught.value.code == "trading_calendar_unavailable"

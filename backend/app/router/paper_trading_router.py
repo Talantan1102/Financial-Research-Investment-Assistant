@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+import asyncio
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated, cast
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -37,24 +39,25 @@ from app.schemas.paper_trading import (
     ResetPreviewRequest,
 )
 from app.services.paper_trading.account_service import PaperAccountService
-from app.services.paper_trading.clock import TradingClock
+from app.services.paper_trading.clock import TradingClock, TushareTradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
 from app.services.paper_trading.rulebook import RuleBook
+from app.services.tushare_factory import build_tushare_service
 
 router = APIRouter(prefix="/api/v0/paper-trading", tags=["paper-trading"])
 
 
-class _WeekdayCalendar:
-    def is_open_date(self, value: date) -> bool:
-        return value.weekday() < 5
+def _fetch_trading_calendar(start: str, end: str) -> pd.DataFrame:
+    async def fetch() -> pd.DataFrame:
+        service = build_tushare_service()
+        try:
+            return await service.get_trade_cal(start=start, end=end)
+        finally:
+            await service.aclose()
 
-    def next_open_date(self, value: date) -> date:
-        candidate = value + timedelta(days=1)
-        while not self.is_open_date(candidate):
-            candidate += timedelta(days=1)
-        return candidate
+    return asyncio.run(fetch())
 
 
 def get_paper_order_service(
@@ -63,7 +66,7 @@ def get_paper_order_service(
     return PaperOrderService(
         db,
         quote_provider=TushareRealtimeQuoteProvider(),
-        clock=TradingClock(_WeekdayCalendar()),
+        clock=TradingClock(TushareTradingCalendar(_fetch_trading_calendar)),
         rulebook=RuleBook.from_builtin_fixture(),
         now=lambda: datetime.now(UTC),
     )
