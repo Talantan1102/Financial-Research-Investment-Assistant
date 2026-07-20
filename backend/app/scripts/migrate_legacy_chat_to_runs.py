@@ -54,6 +54,7 @@ def _maintenance_bootstrap(db: Any) -> None:
     from sqlalchemy import inspect, text
 
     from app.core.database import Base
+    from app.models.escalation_record import EscalationRecord
     from app.models.research_report import ResearchReport
     from app.models.run import Run, RunMessage, RunSession
     from app.models.tenant import Tenant, TenantMembership
@@ -77,13 +78,14 @@ def _maintenance_bootstrap(db: Any) -> None:
                 RunMessage.__table__,
                 Run.__table__,
                 ResearchReport.__table__,
+                EscalationRecord.__table__,
             ],
         )
         inspector = inspect(connection)
         bridge_columns = {
             "chat_attachments": {
                 "tenant_id": "UUID",
-                "run_session_id": "UUID REFERENCES run_sessions(id) ON DELETE SET NULL",
+                "run_session_id": "UUID",
                 "run_message_id": "UUID",
             },
             "chat_session_context": {
@@ -96,6 +98,12 @@ def _maintenance_bootstrap(db: Any) -> None:
                 "source_session_id": "UUID REFERENCES run_sessions(id) ON DELETE SET NULL",
                 "source_run_id": "UUID REFERENCES runs(id) ON DELETE SET NULL",
             },
+            "escalation_records": {
+                # nullable during the bridge phase; rows are backfilled below
+                # before the final NOT NULL gate is applied by the operator.
+                "source_session_id": "UUID",
+                "source_run_id": "UUID",
+            },
         }
         for table, columns in bridge_columns.items():
             if not inspector.has_table(table):
@@ -104,6 +112,24 @@ def _maintenance_bootstrap(db: Any) -> None:
             for column, definition in columns.items():
                 if column not in existing:
                     connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'))
+        if inspector.has_table("escalation_records"):
+            # Replace the legacy chat FK, if present, with run-native FKs only
+            # after the migration has populated the bridge columns.
+            for fk in inspector.get_foreign_keys("escalation_records"):
+                if (fk.get("referred_table") or "") == "chat_sessions" and fk.get("name"):
+                    connection.execute(text(f'ALTER TABLE escalation_records DROP CONSTRAINT IF EXISTS "{fk["name"]}"'))
+            connection.execute(text("""
+                DO $$ BEGIN
+                  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_escalation_source_session') THEN
+                    ALTER TABLE escalation_records ADD CONSTRAINT fk_escalation_source_session
+                      FOREIGN KEY (source_session_id) REFERENCES run_sessions(id) ON DELETE RESTRICT;
+                  END IF;
+                  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_escalation_source_run') THEN
+                    ALTER TABLE escalation_records ADD CONSTRAINT fk_escalation_source_run
+                      FOREIGN KEY (source_run_id) REFERENCES runs(id) ON DELETE RESTRICT;
+                  END IF;
+                END $$
+            """))
         if inspector.has_table("chat_attachments"):
             # Older installs created single-column FKs to globally unique
             # ids.  RunMessage ids are only unique within tenant/session, so
@@ -293,6 +319,7 @@ def migrate_legacy_chat(
         ChatSessionContext,
         LongTermMemory,
     )
+    from app.models.escalation_record import EscalationRecord
     from app.models.research_report import ResearchReport
     from app.models.run import RunMessage, RunSession
     from app.models.tenant import TenantMembership
@@ -370,6 +397,35 @@ def migrate_legacy_chat(
                     _record_mapping(db, table, getattr(row, "id", sid), "run_sessions", sid)
             except Exception as exc:
                 report.quarantined.append({"table": table, "id": str(getattr(row, "id", "")), "reason": str(exc)})
+    # Escalation records are audit rows, not Run executions, but their source
+    # provenance must move with the rest of the chat state.  During the bridge
+    # window old rows may still expose session_id; read it once and persist
+    # only source_session_id/source_run_id afterwards.
+    if hasattr(db, "query"):
+        legacy_escalation_sessions: dict[str, Any] = {}
+        try:
+            from sqlalchemy import inspect, text
+
+            cols = {c["name"] for c in inspect(db.get_bind()).get_columns("escalation_records")}
+            if "session_id" in cols:
+                legacy_escalation_sessions = {
+                    str(item.id): item.session_id
+                    for item in db.execute(text("SELECT id, session_id FROM escalation_records WHERE session_id IS NOT NULL"))
+                }
+        except Exception:
+            legacy_escalation_sessions = {}
+        for row in list(db.scalars(select(EscalationRecord))):
+            legacy_sid = legacy_escalation_sessions.get(str(row.id))
+            sid = getattr(row, "source_session_id", None) or legacy_sid
+            if sid not in session_map:
+                report.quarantined.append({"table": "escalation_records", "id": str(row.id), "reason": "session unresolved"})
+                continue
+            if apply:
+                row.source_session_id = sid
+                report.writes += 1
+            report.mappings[f"escalation_records:{row.id}"] = f"run_sessions:{sid}"
+            if apply:
+                _record_mapping(db, "escalation_records", row.id, "run_sessions", sid)
     report.target_counts.update(run_sessions=len(session_map), run_messages=sum(1 for m in messages if m.session_id in session_map))
     report.source_counts.update(
         chat_attachments=sum(1 for row in db.scalars(select(ChatAttachment))),
@@ -390,6 +446,18 @@ def migrate_legacy_chat(
         run_research_reports=report.dependency_counts["research_reports"],
     )
     if apply:
+        # Once every escalation row has a resolvable RunSession, finish the
+        # bridge atomically: enforce source provenance and remove the legacy
+        # session_id column.  Quarantined rows keep the database recoverable
+        # for a subsequent operator rerun.
+        if not any(item.get("table") == "escalation_records" for item in report.quarantined):
+            from sqlalchemy import inspect, text
+
+            cols = {c["name"] for c in inspect(db.get_bind()).get_columns("escalation_records")}
+            if "source_session_id" in cols:
+                db.execute(text("ALTER TABLE escalation_records ALTER COLUMN source_session_id SET NOT NULL"))
+            if "session_id" in cols:
+                db.execute(text("ALTER TABLE escalation_records DROP COLUMN session_id"))
         db.commit()
     if cleanup:
         if not hasattr(db, "execute"):
@@ -398,21 +466,42 @@ def migrate_legacy_chat(
         # happen before the first DROP, so dry-run/apply can never remove data.
         from sqlalchemy import inspect, text
 
-        # Do not assume constraint names or that the dependency lives in one
-        # of the known legacy models. Discover every FK pointing at a legacy
-        # table (research_reports is a common external dependency).
+        # Do not use CASCADE here. Discover every FK/object pointing at a
+        # legacy table and fail closed on anything outside the explicit drop
+        # set. This prevents an unreviewed view, rule, trigger, or extension
+        # object from being removed accidentally.
         inspector = inspect(db.get_bind())
+        external: list[str] = []
         for table in inspector.get_table_names():
             for fk in inspector.get_foreign_keys(table):
                 referred = (fk.get("referred_table") or "").lower()
-                name = fk.get("name")
-                if referred in _LEGACY_TABLES and name:
-                    db.execute(text(f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{name}"'))
+                if referred in _LEGACY_TABLES and table not in _LEGACY_TABLES:
+                    external.append(f"fk:{table}.{fk.get('name') or '<unnamed>'}->{referred}")
+        if external:
+            raise ValueError("legacy cleanup blocked by external dependencies: " + ",".join(sorted(external)))
+        dependency_rows = db.execute(text("""
+            SELECT dependent.relname AS dependent_name,
+                   referenced.relname AS referenced_name,
+                   dependent.relkind AS dependent_kind
+            FROM pg_depend dep
+            JOIN pg_class dependent ON dependent.oid = dep.objid
+            JOIN pg_class referenced ON referenced.oid = dep.refobjid
+            JOIN pg_namespace dn ON dn.oid = dependent.relnamespace
+            JOIN pg_namespace rn ON rn.oid = referenced.relnamespace
+            WHERE dn.nspname = current_schema()
+              AND rn.nspname = current_schema()
+              AND referenced.relname IN ('chat_tasks', 'chat_session_context', 'chat_attachments', 'chat_messages', 'chat_sessions')
+              AND dependent.relname NOT IN ('chat_tasks', 'chat_session_context', 'chat_attachments', 'chat_messages', 'chat_sessions')
+              AND dependent.relkind NOT IN ('i', 'S')
+        """)).all()
+        if dependency_rows:
+            details = ",".join(f"{r.dependent_name}->{r.referenced_name}" for r in dependency_rows)
+            raise ValueError("legacy cleanup blocked by unknown database dependencies: " + details)
         db.execute(
             text(
                 "DROP TABLE IF EXISTS "
                 + ", ".join(f'"{table}"' for table in _LEGACY_TABLES)
-                + " CASCADE"
+                + " RESTRICT"
             )
         )
         db.commit()

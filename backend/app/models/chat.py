@@ -44,7 +44,7 @@ class ChatAttachment(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     # Cutover bridge; populated by migrate_legacy_chat_to_runs before legacy
     # foreign keys are removed.
-    run_session_id = Column(UUID(as_uuid=True), ForeignKey("run_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    run_session_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     tenant_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     run_message_id = Column(UUID(as_uuid=True), nullable=True, index=True)
 

@@ -33,11 +33,12 @@ async def test_create_draft_returns_record_with_uuid_id():
     repo = EscalationRecordRepo(session_factory=factory)
     sid = uuid.uuid4()
     rec = await repo.create_draft(
-        session_id=sid,
+        source_session_id=sid,
+        source_run_id=uuid.uuid4(),
         packet_draft={"explicit_task": {"raw_last_user_turn": "x"}},
     )
     assert isinstance(rec.id, (uuid.UUID, str))  # UUID type
-    assert rec.session_id == sid
+    assert rec.source_session_id == sid
     assert rec.status == "draft"
     sess.add.assert_called_once()
     sess.commit.assert_awaited_once()

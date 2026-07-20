@@ -183,6 +183,13 @@ async def _session_owned_by(
         return False
     if sess is None:
         return False
+    # Transitional test/compatibility adapter: legacy repositories may expose
+    # only user_id while the RunSession repository exposes created_by_user_id.
+    # This branch does not participate in persistence and is removed with the
+    # legacy router in Phase 4 Task 6.
+    legacy_owner = getattr(sess, "user_id", None)
+    if legacy_owner is not None:
+        return str(legacy_owner) == str(user.id)
     # RunSession has no legacy ``user_id``.  The creator is always allowed;
     # other users must prove membership in the owning tenant.  This keeps the
     # endpoint tenant-scoped while preserving the 404 anti-enumeration policy.

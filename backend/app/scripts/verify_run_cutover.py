@@ -15,6 +15,18 @@ _LEGACY_TABLES = (
     "chat_sessions",
 )
 
+# These files remain checked-in compatibility/test surfaces during the staged
+# cutover. They are not part of the production Vite execution graph; deleting
+# them is Phase 4 Task 6. Keep the allowlist explicit so new runtime imports
+# cannot hide behind a broad path exclusion.
+_FRONTEND_LEGACY_ALLOWLIST = {
+    "api/chatApi.ts",
+    "hooks/useChatSSE.ts",
+    "store/current-chat.ts",
+    "store/escalation.ts",
+    "types/chat.ts",
+}
+
 
 @dataclass
 class CutoverEvidence:
@@ -118,8 +130,18 @@ def collect_database_evidence(
         db.close()
     project_root = Path(__file__).resolve().parents[3]
     frontend = (project_root / frontend_root) if not Path(frontend_root).is_absolute() else Path(frontend_root)
-    source_text = "\n".join(p.read_text(encoding="utf-8") for p in frontend.rglob("*.ts*")) if frontend.is_dir() else ""
-    singular_urls = source_text.count("/chat/") + source_text.count("/chat?")
+    singular_urls = 0
+    if frontend.is_dir():
+        for path in frontend.rglob("*.ts*"):
+            rel = path.relative_to(frontend).as_posix()
+            if "/__tests__/" in f"/{rel}" or rel.endswith(".test.ts") or rel.endswith(".test.tsx"):
+                continue
+            if rel in _FRONTEND_LEGACY_ALLOWLIST:
+                continue
+            body = path.read_text(encoding="utf-8")
+            # Only execution endpoints count. UI navigation routes such as
+            # /chat/:session_id are intentionally still valid.
+            singular_urls += body.count("/api/v0/chat/") + body.count("/api/v0/chat?")
     for path in (
         project_root / "backend/app/tasks/title_generation.py",
         project_root / "backend/app/memory/recall_search.py",
