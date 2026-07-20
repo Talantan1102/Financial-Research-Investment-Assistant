@@ -32,10 +32,10 @@ from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.memory_router import router as memory_router  # noqa: E402  (C.5)
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
 from app.router.observability_router import router as observability_router  # noqa: E402
-from app.router.run_observability import router as run_observability_router  # noqa: E402
 from app.router.persona_router import router as persona_router  # noqa: E402  (persona-ui)
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
+from app.router.run_observability import router as run_observability_router  # noqa: E402
 from app.router.run_sessions import router as run_sessions_router  # noqa: E402
 from app.router.runs import router as runs_router  # noqa: E402
 from app.router.tenants import router as tenants_router  # noqa: E402
@@ -45,6 +45,7 @@ from app.scripts.migrate_phase3_execution_schema import (  # noqa: E402
 )
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
 from app.services.mcp_client import MCPClient  # noqa: E402
+from app.services.run_escalation_repo import RunEscalationRepo  # noqa: E402
 from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover trigger)
 
 # ---------------------------------------------------------------------------
@@ -230,6 +231,16 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
     except Exception as e:  # noqa: BLE001
         app.state.chat_session_repo = None
         logger.warning("ChatSessionRepo 初始化跳过: %s", e)
+
+    try:
+        if app.state.async_session_factory is None:
+            raise RuntimeError("async_session_factory not initialized")
+        app.state.run_escalation_repo = RunEscalationRepo(
+            session_factory=app.state.async_session_factory
+        )
+    except Exception as e:  # noqa: BLE001
+        app.state.run_escalation_repo = None
+        logger.warning("RunEscalationRepo init skipped: %s", e)
 
     # === Plan 3 escalate deps ===
 
@@ -455,7 +466,7 @@ app.dependency_overrides[chats_router_module.get_repo] = _override_or_fallback("
 app.dependency_overrides[chat_get_extractor] = _override_or_fallback("escalation_extractor")
 app.dependency_overrides[chat_get_repo] = _override_or_fallback("escalation_record_repo")
 app.dependency_overrides[esc_get_agent] = _override_or_fallback("research_agent")
-app.dependency_overrides[esc_get_chat_repo] = _override_or_fallback("chat_session_repo")
+app.dependency_overrides[esc_get_chat_repo] = _override_or_fallback("run_escalation_repo")
 app.dependency_overrides[esc_get_rpt_repo] = _override_or_fallback("research_report_repo")
 
 

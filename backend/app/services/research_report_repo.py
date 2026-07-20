@@ -22,7 +22,7 @@ class ResearchReportRepo:
         target_ts_code: str | None,
         report_markdown: str,
         request_id: str,
-        source_chat_session_id: object,
+        source_chat_session_id: object | None = None,
         source_session_id: object | None = None,
         source_run_id: object | None = None,
         cost: Decimal = Decimal("0"),
@@ -30,7 +30,8 @@ class ResearchReportRepo:
         """Persist a completed research report from escalation SUTOutput.
 
         ResearchReport.id is VARCHAR(64); we use "rpt-{hex16}" prefix string.
-        source_chat_session_id is UUID (chat_sessions.id FK, nullable).
+        ``source_chat_session_id`` is retained only for historical rows; new
+        escalation callers should provide the Run-native source fields.
         """
         import uuid as _uuid
 

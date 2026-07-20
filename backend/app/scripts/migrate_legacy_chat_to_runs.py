@@ -34,6 +34,142 @@ class MigrationReport:
         return hashlib.sha256(payload.encode()).hexdigest()
 
 
+_LEGACY_TABLES = (
+    "chat_tasks",
+    "chat_session_context",
+    "chat_attachments",
+    "chat_messages",
+    "chat_sessions",
+)
+
+
+def _maintenance_bootstrap(db: Any) -> None:
+    """Create the run-side schema and compatibility columns in an explicit gate.
+
+    Legacy installations predate ``run_*`` tables.  Selecting an ORM model
+    before this gate would compile references to columns that do not exist.
+    This helper is deliberately called only for ``--apply`` and runs in the
+    same database, after rolling back the read-only inspection transaction.
+    """
+    from sqlalchemy import inspect, text
+
+    from app.core.database import Base
+    from app.models.research_report import ResearchReport
+    from app.models.run import Run, RunMessage, RunSession
+    from app.models.tenant import Tenant, TenantMembership
+    from app.models.user import User
+
+    bind = db.get_bind()
+    db.rollback()
+    # Existing maintenance migrations are the canonical run schema gate. They
+    # are idempotent and protected by the same advisory lock as startup.
+    from app.processes.run_control_init import initialize_schema
+
+    initialize_schema(bind)
+    with bind.begin() as connection:
+        Base.metadata.create_all(
+            bind=connection,
+            tables=[
+                User.__table__,
+                Tenant.__table__,
+                TenantMembership.__table__,
+                RunSession.__table__,
+                RunMessage.__table__,
+                Run.__table__,
+                ResearchReport.__table__,
+            ],
+        )
+        inspector = inspect(connection)
+        bridge_columns = {
+            "chat_attachments": {
+                "run_session_id": "UUID REFERENCES run_sessions(id) ON DELETE SET NULL",
+                "run_message_id": "UUID REFERENCES run_messages(id) ON DELETE SET NULL",
+            },
+            "chat_session_context": {
+                "run_session_id": "UUID REFERENCES run_sessions(id) ON DELETE SET NULL",
+            },
+            "long_term_memories": {
+                "run_session_id": "UUID REFERENCES run_sessions(id) ON DELETE SET NULL",
+            },
+            "research_reports": {
+                "source_session_id": "UUID REFERENCES run_sessions(id) ON DELETE SET NULL",
+                "source_run_id": "UUID REFERENCES runs(id) ON DELETE SET NULL",
+            },
+        }
+        for table, columns in bridge_columns.items():
+            if not inspector.has_table(table):
+                continue
+            existing = {column["name"] for column in inspect(connection).get_columns(table)}
+            for column, definition in columns.items():
+                if column not in existing:
+                    connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'))
+        connection.execute(
+            text(
+                """CREATE TABLE IF NOT EXISTS run_legacy_mappings (
+                    source_table VARCHAR(128) NOT NULL,
+                    source_id VARCHAR(128) NOT NULL,
+                    target_table VARCHAR(128) NOT NULL,
+                    target_id VARCHAR(128) NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (source_table, source_id),
+                    UNIQUE (source_table, source_id)
+                )"""
+            )
+        )
+
+
+def _ensure_legacy_columns(db: Any, *, apply: bool, report: MigrationReport) -> bool:
+    """Ensure ORM legacy projections are safe, without DDL in dry-run mode."""
+    from sqlalchemy import inspect, text
+
+    from app.models.chat import (
+        ChatAttachment,
+        ChatMessage,
+        ChatSession,
+        ChatSessionContext,
+        LongTermMemory,
+    )
+    from app.models.research_report import ResearchReport
+
+    required = (ChatSession, ChatMessage, ChatAttachment, ChatSessionContext, LongTermMemory, ResearchReport)
+    inspector = inspect(db.get_bind())
+    missing: list[str] = []
+    for model in required:
+        table = model.__table__.name
+        if not inspector.has_table(table):
+            continue
+        existing = {column["name"] for column in inspector.get_columns(table)}
+        for column in model.__table__.columns:
+            if column.name not in existing:
+                missing.append(f"{table}.{column.name}")
+                if apply:
+                    sql_type = column.type.compile(dialect=db.get_bind().dialect)
+                    db.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column.name}" {sql_type}'))
+    if missing and not apply:
+        report.quarantined.append({"table": "schema", "id": "legacy", "reason": "missing columns: " + ",".join(missing)})
+        return False
+    return True
+
+
+def _record_mapping(db: Any, source_table: str, source_id: Any, target_table: str, target_id: Any) -> None:
+    from sqlalchemy import text
+
+    db.execute(
+        text(
+            """INSERT INTO run_legacy_mappings
+               (source_table, source_id, target_table, target_id)
+               VALUES (:source_table, :source_id, :target_table, :target_id)
+               ON CONFLICT (source_table, source_id) DO NOTHING"""
+        ),
+        {
+            "source_table": source_table,
+            "source_id": str(source_id),
+            "target_table": target_table,
+            "target_id": str(target_id),
+        },
+    )
+
+
 def validate_backup_manifest(path: str | Path, *, database: str, strict: bool = False) -> bool:
     """Validate the small JSON manifest emitted by the pg_dump wrapper."""
     try:
@@ -119,6 +255,10 @@ def migrate_legacy_chat(
     # empty, zero-write report.  Real sessions expose ``query``.
     if not hasattr(db, "query"):
         return report
+    if apply:
+        _maintenance_bootstrap(db)
+    if not _ensure_legacy_columns(db, apply=apply, report=report):
+        return report
     from sqlalchemy import select
 
     from app.models.chat import (
@@ -138,9 +278,18 @@ def migrate_legacy_chat(
     session_map: dict[Any, Any] = {}
     for row in sessions:
         try:
-            membership = db.scalar(select(TenantMembership).where(TenantMembership.user_id == row.user_id).order_by(TenantMembership.joined_at))
-            if membership is None:
+            memberships = list(
+                db.scalars(
+                    select(TenantMembership)
+                    .where(TenantMembership.user_id == row.user_id)
+                    .order_by(TenantMembership.joined_at, TenantMembership.tenant_id)
+                )
+            )
+            if not memberships:
                 raise ValueError("no tenant membership")
+            if len(memberships) > 1:
+                raise ValueError("ambiguous tenant membership; tenant selector required")
+            membership = memberships[0]
             session_map[row.id] = membership.tenant_id
             if apply:
                 target = db.get(RunSession, row.id)
@@ -148,6 +297,8 @@ def migrate_legacy_chat(
                     db.add(RunSession(id=row.id, tenant_id=membership.tenant_id, created_by_user_id=row.user_id, title=row.title, created_at=row.created_at, updated_at=row.updated_at))
                     report.writes += 1
             report.mappings[f"chat_sessions:{row.id}"] = f"run_sessions:{row.id}"
+            if apply:
+                _record_mapping(db, "chat_sessions", row.id, "run_sessions", row.id)
         except Exception as exc:  # malformed/ambiguous rows are quarantined
             report.quarantined.append({"table": "chat_sessions", "id": str(getattr(row, "id", "")), "reason": str(exc)})
         if apply and len(session_map) % batch_size == 0:
@@ -162,28 +313,37 @@ def migrate_legacy_chat(
             report.writes += 1
         if tenant_id is not None:
             report.mappings[f"chat_messages:{row.id}"] = f"run_messages:{row.id}"
+            if apply:
+                _record_mapping(db, "chat_messages", row.id, "run_messages", row.id)
     # Repoint dependent records while retaining the legacy columns during the
     # compatibility window.  This makes the migration restartable and allows
     # consumers to switch independently before destructive cleanup.
-    for row in list(db.scalars(select(ChatAttachment))):
-        tenant_id = session_map.get(row.session_id)
-        if tenant_id is not None and apply:
-            row.run_session_id = row.session_id
-            row.run_message_id = row.message_id
-            report.writes += 1
-    for row in list(db.scalars(select(ChatSessionContext))):
-        if row.session_id in session_map and apply:
-            row.run_session_id = row.session_id
-            report.writes += 1
-    for row in list(db.scalars(select(LongTermMemory))):
-        if row.session_id in session_map and apply:
-            row.run_session_id = row.session_id
-            report.writes += 1
-    for row in list(db.scalars(select(ResearchReport))):
-        sid = getattr(row, "source_chat_session_id", None)
-        if sid in session_map and apply:
-            row.source_session_id = sid
-            report.writes += 1
+    for model, table, sid_attr in (
+        (ChatAttachment, "chat_attachments", "session_id"),
+        (ChatSessionContext, "chat_session_context", "session_id"),
+        (LongTermMemory, "long_term_memories", "session_id"),
+        (ResearchReport, "research_reports", "source_chat_session_id"),
+    ):
+        for row in list(db.scalars(select(model))):
+            try:
+                sid = getattr(row, sid_attr, None)
+                if sid not in session_map:
+                    report.quarantined.append({"table": table, "id": str(getattr(row, "id", sid)), "reason": "session unresolved"})
+                    continue
+                if apply:
+                    if model is ChatAttachment:
+                        row.run_session_id = sid
+                        row.run_message_id = row.message_id
+                    elif model is ChatSessionContext or model is LongTermMemory:
+                        row.run_session_id = sid
+                    else:
+                        row.source_session_id = sid
+                    report.writes += 1
+                report.mappings[f"{table}:{getattr(row, 'id', sid)}"] = f"run_sessions:{sid}"
+                if apply:
+                    _record_mapping(db, table, getattr(row, "id", sid), "run_sessions", sid)
+            except Exception as exc:
+                report.quarantined.append({"table": table, "id": str(getattr(row, "id", "")), "reason": str(exc)})
     report.target_counts.update(run_sessions=len(session_map), run_messages=sum(1 for m in messages if m.session_id in session_map))
     report.source_counts.update(
         chat_attachments=sum(1 for row in db.scalars(select(ChatAttachment))),
@@ -197,6 +357,12 @@ def migrate_legacy_chat(
         long_term_memories=sum(1 for row in db.scalars(select(LongTermMemory)) if row.session_id in session_map),
         research_reports=sum(1 for row in db.scalars(select(ResearchReport)) if getattr(row, "source_chat_session_id", None) in session_map),
     )
+    report.target_counts.update(
+        run_attachments=report.dependency_counts["chat_attachments"],
+        run_session_context=report.dependency_counts["chat_session_context"],
+        run_memories=report.dependency_counts["long_term_memories"],
+        run_research_reports=report.dependency_counts["research_reports"],
+    )
     if apply:
         db.commit()
     if cleanup:
@@ -204,14 +370,25 @@ def migrate_legacy_chat(
             raise ValueError("database cleanup unavailable")
         # This is intentionally the only destructive path.  All checks above
         # happen before the first DROP, so dry-run/apply can never remove data.
-        from sqlalchemy import text
-        for statement in (
-            "ALTER TABLE IF EXISTS chat_attachments DROP CONSTRAINT IF EXISTS chat_attachments_session_id_fkey",
-            "ALTER TABLE IF EXISTS chat_session_context DROP CONSTRAINT IF EXISTS chat_session_context_session_id_fkey",
-            "ALTER TABLE IF EXISTS long_term_memories DROP CONSTRAINT IF EXISTS long_term_memories_session_id_fkey",
-            "DROP TABLE IF EXISTS chat_tasks, chat_session_context, chat_attachments, chat_messages, chat_sessions",
-        ):
-            db.execute(text(statement))
+        from sqlalchemy import inspect, text
+
+        # Do not assume constraint names or that the dependency lives in one
+        # of the known legacy models. Discover every FK pointing at a legacy
+        # table (research_reports is a common external dependency).
+        inspector = inspect(db.get_bind())
+        for table in inspector.get_table_names():
+            for fk in inspector.get_foreign_keys(table):
+                referred = (fk.get("referred_table") or "").lower()
+                name = fk.get("name")
+                if referred in _LEGACY_TABLES and name:
+                    db.execute(text(f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{name}"'))
+        db.execute(
+            text(
+                "DROP TABLE IF EXISTS "
+                + ", ".join(f'"{table}"' for table in _LEGACY_TABLES)
+                + " CASCADE"
+            )
+        )
         db.commit()
     return report
 

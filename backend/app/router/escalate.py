@@ -24,9 +24,9 @@ from app.agents.research_agent import ResearchAgent
 from app.agents.schemas import ResearchState
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
-from app.services.chat_session_repo import ChatSessionRepo
 from app.services.escalation_record_repo import EscalationRecordRepo
 from app.services.research_report_repo import ResearchReportRepo
+from app.services.run_escalation_repo import RunEscalationRepo
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +78,9 @@ def get_research_agent() -> ResearchAgent:
     raise RuntimeError("ResearchAgent dependency not configured")
 
 
-def get_chat_session_repo() -> ChatSessionRepo:
-    raise RuntimeError("ChatSessionRepo dependency not configured")
+def get_chat_session_repo() -> RunEscalationRepo:
+    """Compatibility dependency name; implementation is Run-native."""
+    raise RuntimeError("RunEscalationRepo dependency not configured")
 
 
 def get_research_report_repo() -> ResearchReportRepo:
@@ -168,7 +169,7 @@ def packet_to_research_state(
 
 
 async def _session_owned_by(
-    chat_session_repo: ChatSessionRepo, session_id: str, user: User
+    chat_session_repo: RunEscalationRepo, session_id: str, user: User
 ) -> bool:
     """True iff ``session_id`` resolves to a chat session owned by ``user``.
 
@@ -187,7 +188,7 @@ async def _source_context_allowed(
     req: EscalateRequest,
     tenant_id: uuid.UUID | None,
     user: User,
-    chat_session_repo: ChatSessionRepo,
+    chat_session_repo: RunEscalationRepo,
 ) -> bool:
     """Fail closed for a supplied Run/Session provenance reference.
 
@@ -235,7 +236,7 @@ async def escalate(
     user: User = Depends(get_current_user_required),
     record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
     research_agent: ResearchAgent = Depends(get_research_agent),
-    chat_session_repo: ChatSessionRepo = Depends(get_chat_session_repo),
+    chat_session_repo: RunEscalationRepo = Depends(get_chat_session_repo),
     research_report_repo: ResearchReportRepo = Depends(get_research_report_repo),
 ) -> StreamingResponse:
     """Receive confirmed packet, persist diff, invoke ResearchAgent, stream events.
