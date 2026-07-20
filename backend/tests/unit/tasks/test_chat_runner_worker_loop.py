@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -99,7 +100,7 @@ async def test_lazy_episode_resolver_creates_once_and_exposes_id() -> None:
 
     class Memory:
         def __init__(self) -> None:
-            self.writes = []
+            self.writes: list[dict[str, Any]] = []
 
         async def next_episode_index(self, session_id):
             return 4

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -141,9 +141,10 @@ async def test_explicit_episode_is_atomically_claimed_and_keeps_cancel_audit(
     assert episode.extracted_at is not None
     assert episode.extracted_by == "agent_explicit_claim"
     assert episode.extraction_metadata == {"explicit_status": "pending"}
+    episode_id = cast(UUID, episode.episode_id)
 
     # 未经过 archival pipeline 的 claim 即使 runner 乐观传 completed，也必须落 failed。
-    await memory.finalize_explicit_episode(episode.episode_id, "记录失败", "completed")
+    await memory.finalize_explicit_episode(episode_id, "记录失败", "completed")
     sess = SessionLocal()
     try:
         persisted = sess.query(ChatMemoryEpisode).filter_by(episode_id=episode.episode_id).one()
@@ -154,7 +155,7 @@ async def test_explicit_episode_is_atomically_claimed_and_keeps_cancel_audit(
     finally:
         sess.close()
 
-    await memory.finalize_explicit_episode(episode.episode_id, "正在记录", "cancelled")
+    await memory.finalize_explicit_episode(episode_id, "正在记录", "cancelled")
     sess = SessionLocal()
     try:
         persisted = sess.query(ChatMemoryEpisode).filter_by(episode_id=episode.episode_id).one()
