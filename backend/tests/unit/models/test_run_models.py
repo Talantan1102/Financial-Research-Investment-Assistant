@@ -10,7 +10,7 @@ import pytest
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
 from app.models.tenant import Tenant
 from app.models.user import User
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -186,6 +186,22 @@ def test_run_indexes_have_exact_physical_contract(db_session: Session) -> None:
     assert active_index["column_names"] == ["session_id"]
     predicate = str(active_index["dialect_options"]["postgresql_where"])
     assert set(re.findall(r"'([^']+)'", predicate)) == ACTIVE_RUN_STATUSES
+    assert indexes["ix_runs_tenant_session_revision_seq"]["column_names"] == [
+        "tenant_id", "session_id", "revision_seq"
+    ]
+    assert indexes["ix_runs_replaces_run_id"]["column_names"] == ["replaces_run_id"]
+    db_session.execute(text("SET LOCAL enable_seqscan = off"))
+    plan = "\n".join(
+        db_session.execute(
+            text(
+                "EXPLAIN SELECT id FROM runs "
+                "WHERE tenant_id = :tenant_id AND session_id = :session_id "
+                "ORDER BY revision_seq DESC LIMIT 20"
+            ),
+            {"tenant_id": uuid.uuid4(), "session_id": uuid.uuid4()},
+        ).scalars()
+    )
+    assert "ix_runs_tenant_session_revision_seq" in plan
 
 
 def test_idempotency_tuple_is_unique(db_session: Session, run_context: RunContext) -> None:

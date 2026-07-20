@@ -112,6 +112,16 @@ class RunService:
             if command.replaces_run_id is not None:
                 await self._validate_replacement(session, command, cast(UUID, run_session.id))
 
+            next_revision_seq = int(
+                await session.scalar(
+                    select(func.coalesce(func.max(Run.revision_seq), 0)).where(
+                        Run.tenant_id == command.tenant_id,
+                        Run.session_id == run_session.id,
+                    )
+                )
+                or 0
+            ) + 1
+
             message = RunMessage(
                 tenant_id=command.tenant_id,
                 session_id=run_session.id,
@@ -132,6 +142,7 @@ class RunService:
                 request_hash=request_hash,
                 input_message_id=message.id,
                 replaces_run_id=command.replaces_run_id,
+                revision_seq=next_revision_seq,
                 retry_count=0,
             )
             session.add(run)
@@ -650,7 +661,7 @@ class RunService:
                 Run.created_by_user_id == command.actor_id,
                 Run.session_id == session_id,
             )
-            .order_by(Run.created_at.desc(), Run.id.desc())
+            .order_by(Run.revision_seq.desc())
             .limit(1)
         )
         if latest_run_id != command.replaces_run_id:

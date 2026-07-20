@@ -4,14 +4,19 @@ import threading
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 
 import pytest
 from app.core.database import Base
+from app.models.run import Run, RunMessage, RunSession
 from app.models.run_execution import RunUsageRecord
+from app.models.tenant import Tenant
+from app.models.user import User
 from app.scripts.migrate_phase3_execution_schema import migrate_phase3_execution_schema
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 
 @pytest.fixture
@@ -37,6 +42,58 @@ def _downgrade_to_phase2(engine: Engine) -> None:
         connection.execute(text("DROP TABLE run_usage_records"))
         connection.execute(text("DROP TABLE run_tool_executions"))
         connection.execute(text("ALTER TABLE run_sessions DROP COLUMN archived_at"))
+
+
+def test_revision_sequence_upgrade_backfills_legacy_rows_and_repairs_indexes(
+    isolated_schema_engine: Engine,
+) -> None:
+    with Session(isolated_schema_engine) as session, session.begin():
+        user = User(
+            username=f"revision-upgrade-{uuid.uuid4().hex}",
+            email=f"revision-upgrade-{uuid.uuid4().hex}@example.com",
+            hashed_password="hash",
+        )
+        tenant = Tenant(name="Revision upgrade", slug=f"revision-upgrade-{uuid.uuid4().hex}")
+        session.add_all([user, tenant])
+        session.flush()
+        run_session = RunSession(tenant_id=tenant.id, created_by_user_id=user.id)
+        session.add(run_session)
+        session.flush()
+        messages = [
+            RunMessage(
+                tenant_id=tenant.id, session_id=run_session.id, role="user",
+                content=f"prompt {index}", status="complete",
+            )
+            for index in range(2)
+        ]
+        session.add_all(messages)
+        session.flush()
+        for index, message in enumerate(messages):
+            session.add(Run(
+                id=uuid.UUID(int=2 - index), tenant_id=tenant.id,
+                session_id=run_session.id, created_by_user_id=user.id,
+                run_type="chat", status="completed",
+                idempotency_key=f"legacy-{index}", request_hash=f"{index:064d}",
+                input_message_id=message.id, retry_count=0,
+                revision_seq=index + 1,
+                created_at=datetime(2026, 7, 20, 12, 0, index),
+            ))
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(text("DROP INDEX ix_runs_tenant_session_revision_seq"))
+        connection.execute(text("DROP INDEX ix_runs_replaces_run_id"))
+        connection.execute(text("ALTER TABLE runs DROP COLUMN revision_seq"))
+
+    changes = migrate_phase3_execution_schema(isolated_schema_engine)
+    assert "add and backfill runs.revision_seq" in changes
+    inspector = inspect(isolated_schema_engine)
+    revision = {column["name"]: column for column in inspector.get_columns("runs")}["revision_seq"]
+    assert revision["nullable"] is False
+    indexes = {index["name"] for index in inspector.get_indexes("runs")}
+    assert {"ix_runs_tenant_session_revision_seq", "ix_runs_replaces_run_id"} <= indexes
+    with isolated_schema_engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT revision_seq FROM runs ORDER BY revision_seq")
+        ).scalars().all() == [1, 2]
 
 
 def _assert_phase3_schema(engine: Engine) -> None:

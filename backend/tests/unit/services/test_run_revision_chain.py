@@ -4,6 +4,7 @@ import asyncio
 import sys
 import uuid
 from dataclasses import replace
+from datetime import datetime
 
 import pytest
 import pytest_asyncio
@@ -14,7 +15,7 @@ from app.run_control.types import ResourceNotFound
 from app.services.attempt_service import AttemptService
 from app.services.run_service import CreateRunCommand, RunService
 from app.services.run_session_service import RunSessionService
-from sqlalchemy import select, update
+from sqlalchemy import event, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
@@ -337,3 +338,94 @@ async def test_replacement_must_target_latest_session_run_even_without_an_existi
                 replaces_run_id=first.run.id,
             )
         )
+
+
+@pytest.mark.asyncio
+async def test_revision_sequence_not_uuid_orders_runs_with_identical_timestamps(
+    async_session_factory: async_sessionmaker[AsyncSession],
+    revision_command: CreateRunCommand,
+) -> None:
+    service = RunService(async_session_factory)
+    ids = iter([uuid.UUID(int=(1 << 128) - 2), uuid.UUID(int=1)])
+    def assign_id(_mapper: object, _connection: object, target: Run) -> None:
+        target.id = next(ids)
+
+    event.listen(Run, "before_insert", assign_id)
+    try:
+        first = await service.create_run(revision_command)
+        await _complete(async_session_factory, first.run, "answer A")
+        second = await service.create_run(
+            replace(
+                revision_command,
+                session_id=first.run.session_id,
+                prompt="newer prompt",
+                idempotency_key=f"revision-{uuid.uuid4().hex}",
+            )
+        )
+    finally:
+        event.remove(Run, "before_insert", assign_id)
+    await _complete(async_session_factory, second.run, "answer B")
+    same_time = datetime(2026, 7, 20, 12, 0, 0)
+    async with async_session_factory() as session, session.begin():
+        # Preserve FK provenance while making the newer UUID lexically smaller.
+        await session.execute(
+            update(Run).where(Run.id == second.run.id).values(created_at=same_time)
+        )
+        await session.execute(
+            update(Run).where(Run.id == first.run.id).values(created_at=same_time)
+        )
+    detail = await RunSessionService(async_session_factory).get_session_detail(
+        revision_command.tenant_id,
+        first.run.session_id,
+        revision_command.actor_id,
+        limit=100,
+    )
+    assert detail.latest_run_id == second.run.id
+    assert [item.run.revision_seq for item in detail.revisions] == [1, 2]
+    assert second.run.id < first.run.id
+
+
+@pytest.mark.asyncio
+async def test_revision_projection_is_bounded_and_cursor_paginates_without_full_old_prompts(
+    async_session_factory: async_sessionmaker[AsyncSession],
+    revision_command: CreateRunCommand,
+) -> None:
+    service = RunService(async_session_factory)
+    created = []
+    command = revision_command
+    for index in range(4):
+        item = await service.create_run(command)
+        created.append(item)
+        await _complete(async_session_factory, item.run, f"answer {index}")
+        command = replace(
+            revision_command,
+            session_id=item.run.session_id,
+            prompt=("X" * 10_000) + str(index + 1),
+            idempotency_key=f"revision-{uuid.uuid4().hex}",
+        )
+
+    sessions = RunSessionService(async_session_factory)
+    newest = await sessions.get_session_detail(
+        revision_command.tenant_id,
+        created[0].run.session_id,
+        revision_command.actor_id,
+        limit=100,
+        revision_limit=2,
+    )
+    assert [item.run.id for item in newest.revisions] == [created[2].run.id, created[3].run.id]
+    assert newest.revisions_has_more is True
+    assert newest.revisions_next_cursor is not None
+    assert newest.revisions[-1].prompt_is_full is True
+    assert len(newest.revisions[0].prompt) <= 240
+
+    older = await sessions.get_session_detail(
+        revision_command.tenant_id,
+        created[0].run.session_id,
+        revision_command.actor_id,
+        limit=100,
+        revision_limit=2,
+        revision_cursor=newest.revisions_next_cursor,
+    )
+    assert [item.run.id for item in older.revisions] == [created[0].run.id, created[1].run.id]
+    assert older.revisions_has_more is False
+    assert all(not item.prompt_is_full for item in older.revisions)

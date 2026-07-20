@@ -53,6 +53,8 @@ async def get_session(
     tenant_id: UUID,
     session_id: UUID,
     limit: int = Query(default=1000, ge=1, le=1000),
+    revision_limit: int = Query(default=20, ge=1, le=100),
+    revision_cursor: str | None = Query(default=None, max_length=64),
     current_user: User = Depends(get_current_user_required),
     service: RunSessionService = Depends(get_run_session_service),
 ) -> RunSessionDetailResponse:
@@ -62,6 +64,8 @@ async def get_session(
             session_id,
             cast(UUID, current_user.id),
             limit=limit,
+            revision_limit=revision_limit,
+            revision_cursor=revision_cursor,
         )
     except ResourceNotFound as exc:
         raise _not_found(exc) from exc
@@ -82,12 +86,15 @@ async def get_session(
                 replaces_run_id=item.run.replaces_run_id,
                 status=item.run.status,
                 prompt=item.prompt,
+                prompt_is_full=item.prompt_is_full,
                 final_message_summary=item.final_message_summary,
                 created_at=item.run.created_at,
                 finished_at=item.run.finished_at,
             )
             for item in detail.revisions
         ],
+        revisions_has_more=detail.revisions_has_more,
+        revisions_next_cursor=detail.revisions_next_cursor,
         latest_run_id=detail.latest_run_id,
     )
 

@@ -15,6 +15,8 @@ interface SessionDetailState {
   error: boolean
   revisions: RunRevision[]
   latestRunId: string | null
+  revisionCursor: string | null
+  revisionsHasMore: boolean
 }
 
 const EMPTY_DETAIL: SessionDetailState = {
@@ -25,6 +27,8 @@ const EMPTY_DETAIL: SessionDetailState = {
   error: false,
   revisions: [],
   latestRunId: null,
+  revisionCursor: null,
+  revisionsHasMore: false,
 }
 
 function SessionLoadingPane() {
@@ -71,6 +75,8 @@ export function ChatSessionPage() {
           error: false,
           revisions: detail.revisions,
           latestRunId: detail.latest_run_id,
+          revisionCursor: detail.revisions_next_cursor ?? null,
+          revisionsHasMore: detail.revisions_has_more ?? false,
         })
       })
       .catch(() => {
@@ -99,6 +105,8 @@ export function ChatSessionPage() {
         initialPause={currentDetail.activePause}
         initialRevisions={currentDetail.revisions}
         initialLatestRunId={currentDetail.latestRunId}
+        initialRevisionCursor={currentDetail.revisionCursor}
+        initialRevisionsHasMore={currentDetail.revisionsHasMore}
       />
     ) : currentDetail?.error ? null : <SessionLoadingPane />}
   </>

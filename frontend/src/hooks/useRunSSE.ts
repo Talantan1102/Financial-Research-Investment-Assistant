@@ -33,18 +33,28 @@ interface UseRunSSEOptions {
   initialPause?: RunPause | null
   initialRevisions?: RunRevision[]
   initialLatestRunId?: string | null
+  initialRevisionCursor?: string | null
+  initialRevisionsHasMore?: boolean
 }
 
 export interface UseRunSSE {
-  sendPrompt(prompt: string): Promise<void>
-  cancelRun(): Promise<void>
-  resumeRun(response: Record<string, unknown>): Promise<void>
-  resubmitPrompt(prompt: string, replacesRunId: string): Promise<void>
+  sendPrompt(prompt: string): Promise<RunCommandResult>
+  cancelRun(): Promise<RunCommandResult>
+  resumeRun(response: Record<string, unknown>): Promise<RunCommandResult>
+  resubmitPrompt(prompt: string, replacesRunId: string): Promise<RunCommandResult>
+  loadMoreRevisions(): Promise<RunCommandResult>
   status: RunStatus | 'idle' | 'error'
   activeRunId: string | null
   pause: RunPause | null
   revisions: RunRevision[]
   latestRunId: string | null
+  revisionsHasMore: boolean
+  commandPending: boolean
+}
+
+export interface RunCommandResult {
+  ok: boolean
+  error?: string
 }
 
 export interface RunPause {
@@ -126,6 +136,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   const maxReconnectAttempts = options.maxReconnectAttempts ?? 3
   const abortRef = useRef<AbortController | null>(null)
   const startingRef = useRef(false)
+  const commandInFlightRef = useRef(false)
   const cancelAfterCreateRef = useRef(false)
   const generationRef = useRef(0)
   const activeRunRef = useRef<string | null>(null)
@@ -142,6 +153,9 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   const [pause, setPause] = useState<RunPause | null>(options.initialPause ?? null)
   const [revisions, setRevisions] = useState<RunRevision[]>(options.initialRevisions ?? [])
   const [latestRunId, setLatestRunId] = useState<string | null>(options.initialLatestRunId ?? null)
+  const [revisionCursor, setRevisionCursor] = useState<string | null>(options.initialRevisionCursor ?? null)
+  const [revisionsHasMore, setRevisionsHasMore] = useState(options.initialRevisionsHasMore ?? false)
+  const [commandPending, setCommandPending] = useState(false)
 
   const isCurrent = useCallback(
     (generation: number, signal?: AbortSignal) =>
@@ -169,6 +183,8 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       currentChatActions.replaceWithDurableMessages(sessionId, session.messages)
       setRevisions(session.revisions)
       setLatestRunId(session.latest_run_id)
+      setRevisionCursor(session.revisions_next_cursor ?? null)
+      setRevisionsHasMore(session.revisions_has_more ?? false)
       void chatSessionsActions.loadSessions()
     },
     [fetchImpl, isCurrent],
@@ -314,15 +330,15 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   )
 
   const startRun = useCallback(
-    async (prompt: string, replacesRunId?: string) => {
+    async (prompt: string, replacesRunId?: string): Promise<RunCommandResult> => {
       const tenantId = tenantRef.current
       if (!tenantId) {
         currentChatActions.failRun('No active tenant')
         updateStatus('error')
-        return
+        return { ok: false, error: 'No active tenant' }
       }
       if (activeRunRef.current || startingRef.current) {
-        return
+        return { ok: false, error: 'Run command already in progress' }
       }
       startingRef.current = true
       cancelAfterCreateRef.current = false
@@ -356,13 +372,13 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
               controller.signal,
             )
           } catch (error) {
-            if (!isCurrent(generation, controller.signal)) return
+            if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
             createError = error
             if (attempt < 2) await delayMs(Math.min(100 * 2 ** attempt, 1000))
           }
         }
         if (!created) throw createError ?? new Error('Run creation failed')
-        if (!isCurrent(generation, controller.signal)) return
+        if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
         revisionBaseRef.current = null
         if (!sessionRef.current) {
           sessionRef.current = created.session_id
@@ -380,7 +396,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
           revisionBaseRef.current = created.id
           try {
             const cancelled = await cancelRunRequest(tenantId, created.id, fetchImpl)
-            if (!isCurrent(generation, controller.signal)) return
+            if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
             updateStatus(cancelled.status)
             if (TERMINAL.has(cancelled.status)) {
               updateActiveRun(null, cancelled.status)
@@ -391,15 +407,15 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
                 generation,
                 controller.signal,
               )
-              return
+              return { ok: true }
             }
           } catch (error) {
-            if (!isCurrent(generation, controller.signal)) return
+            if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
             currentChatActions.reportRunTransportError(
               error instanceof Error ? error.message : 'Cancel failed',
             )
             updateStatus('error')
-            return
+            return { ok: false, error: error instanceof Error ? error.message : 'Cancel failed' }
           }
         }
         await streamRun(
@@ -409,27 +425,77 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
           generation,
           controller,
         )
+        return { ok: true }
       } catch (error) {
-        if (!isCurrent(generation, controller.signal)) return
+        if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
         startingRef.current = false
         cancelAfterCreateRef.current = false
         currentChatActions.failRun(error instanceof Error ? error.message : 'Run failed')
         updateActiveRun(null, 'failed')
         updateStatus('error')
+        return { ok: false, error: error instanceof Error ? error.message : 'Run failed' }
       }
     },
     [delayMs, fetchImpl, isCurrent, loadDurableHistory, onSessionCreated, options.sessionId, streamRun, updateActiveRun, updateStatus],
   )
 
-  const cancelRun = useCallback(async () => {
+  const recoverCommandFacts = useCallback(async (
+    tenantId: string,
+    runId: string,
+    sessionId: string,
+    generation: number,
+    controller: AbortController,
+  ): Promise<boolean> => {
+    try {
+      const [sessionResult, runResult] = await Promise.allSettled([
+        getRunSession(tenantId, sessionId, fetchImpl),
+        getRun(tenantId, runId, fetchImpl),
+      ])
+      if (!isCurrent(generation, controller.signal)) return false
+      if (runResult.status === 'rejected') return false
+      const durableRun = runResult.value
+      if (sessionResult.status === 'fulfilled') {
+        const session = sessionResult.value
+        currentChatActions.replaceWithDurableMessages(sessionId, session.messages)
+        setRevisions(session.revisions)
+        setLatestRunId(session.latest_run_id)
+        setRevisionCursor(session.revisions_next_cursor ?? null)
+        setRevisionsHasMore(session.revisions_has_more ?? false)
+        const pauseType = session.active_pause_type
+        if ((pauseType === 'approval' || pauseType === 'input') && session.active_pause_request) {
+          setPause({
+            type: pauseType === 'approval' ? 'approval_request' : 'input_request',
+            request: session.active_pause_request,
+          })
+        } else if (durableRun.status !== 'waiting_approval' && durableRun.status !== 'waiting_input') {
+          setPause(null)
+        }
+      }
+      updateStatus(durableRun.status)
+      if (TERMINAL.has(durableRun.status)) {
+        updateActiveRun(null, durableRun.status)
+        currentChatActions.finishRun(durableRun.status)
+      } else {
+        updateActiveRun(runId, durableRun.status)
+      }
+      return true
+    } catch {
+      return false
+    }
+  }, [fetchImpl, isCurrent, updateActiveRun, updateStatus])
+
+  const cancelRun = useCallback(async (): Promise<RunCommandResult> => {
     const tenantId = tenantRef.current
     const runId = activeRunRef.current
     const sessionId = sessionRef.current
     if (tenantId && startingRef.current && !runId) {
       cancelAfterCreateRef.current = true
-      return
+      return { ok: true }
     }
-    if (!tenantId || !runId || !sessionId) return
+    if (!tenantId || !runId || !sessionId) return { ok: false, error: 'No active Run' }
+    if (commandInFlightRef.current) return { ok: false, error: 'Run command already in progress' }
+    commandInFlightRef.current = true
+    setCommandPending(true)
     generationRef.current += 1
     const generation = generationRef.current
     abortRef.current?.abort()
@@ -438,31 +504,42 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     revisionBaseRef.current = runId
     try {
       const cancelled = await cancelRunRequest(tenantId, runId, fetchImpl)
-      if (!isCurrent(generation, controller.signal)) return
+      if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
       updateStatus(cancelled.status)
       if (TERMINAL.has(cancelled.status)) {
         setPause(null)
         updateActiveRun(null, cancelled.status)
         currentChatActions.finishRun(cancelled.status)
         await loadDurableHistory(tenantId, sessionId, generation, controller.signal)
-        return
+        return { ok: true }
       }
       await streamRun(tenantId, runId, sessionId, generation, controller)
+      return { ok: true }
     } catch (error) {
-      if (!isCurrent(generation, controller.signal)) return
+      if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
       currentChatActions.reportRunTransportError(
         error instanceof Error ? error.message : 'Cancel failed',
       )
-      updateStatus('error')
+      const recovered = await recoverCommandFacts(
+        tenantId, runId, sessionId, generation, controller,
+      )
+      if (!recovered && isCurrent(generation, controller.signal)) updateStatus('error')
+      return { ok: false, error: error instanceof Error ? error.message : 'Cancel failed' }
+    } finally {
+      commandInFlightRef.current = false
+      if (isCurrent(generation)) setCommandPending(false)
     }
-  }, [fetchImpl, isCurrent, loadDurableHistory, streamRun, updateActiveRun, updateStatus])
+  }, [fetchImpl, isCurrent, loadDurableHistory, recoverCommandFacts, streamRun, updateActiveRun, updateStatus])
 
   const resumeRun = useCallback(
-    async (response: Record<string, unknown>) => {
+    async (response: Record<string, unknown>): Promise<RunCommandResult> => {
       const tenantId = tenantRef.current
       const runId = activeRunRef.current ?? lastRunRef.current
       const sessionId = sessionRef.current
-      if (!tenantId || !runId || !sessionId) return
+      if (!tenantId || !runId || !sessionId) return { ok: false, error: 'No paused Run' }
+      if (commandInFlightRef.current) return { ok: false, error: 'Run command already in progress' }
+      commandInFlightRef.current = true
+      setCommandPending(true)
       generationRef.current += 1
       const generation = generationRef.current
       abortRef.current?.abort()
@@ -470,20 +547,28 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       abortRef.current = controller
       try {
         const resumed = await resumeRunRequest(tenantId, runId, response, fetchImpl)
-        if (!isCurrent(generation, controller.signal)) return
+        if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
         setPause(null)
         updateActiveRun(runId, resumed.status)
         updateStatus(resumed.status)
         await streamRun(tenantId, runId, sessionId, generation, controller)
+        return { ok: true }
       } catch (error) {
-        if (!isCurrent(generation, controller.signal)) return
+        if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
         currentChatActions.reportRunTransportError(
           error instanceof Error ? error.message : 'Resume failed',
         )
-        updateStatus('error')
+        const recovered = await recoverCommandFacts(
+          tenantId, runId, sessionId, generation, controller,
+        )
+        if (!recovered && isCurrent(generation, controller.signal)) updateStatus('error')
+        return { ok: false, error: error instanceof Error ? error.message : 'Resume failed' }
+      } finally {
+        commandInFlightRef.current = false
+        if (isCurrent(generation)) setCommandPending(false)
       }
     },
-    [fetchImpl, isCurrent, streamRun, updateActiveRun, updateStatus],
+    [fetchImpl, isCurrent, recoverCommandFacts, streamRun, updateActiveRun, updateStatus],
   )
 
   useEffect(() => {
@@ -507,6 +592,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     abortRef.current?.abort()
     abortRef.current = null
     startingRef.current = false
+    commandInFlightRef.current = false
     cancelAfterCreateRef.current = false
     activeRunRef.current = null
     lastRunRef.current = null
@@ -518,12 +604,17 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     setPause(null)
     setRevisions(options.initialRevisions ?? [])
     setLatestRunId(options.initialLatestRunId ?? null)
+    setRevisionCursor(options.initialRevisionCursor ?? null)
+    setRevisionsHasMore(options.initialRevisionsHasMore ?? false)
+    setCommandPending(false)
     statusRef.current = 'idle'
     setStatus('idle')
     currentChatActions.resetRunTransport()
   }, [
     options.initialLatestRunId,
+    options.initialRevisionCursor,
     options.initialRevisions,
+    options.initialRevisionsHasMore,
     options.sessionId,
     options.tenantId,
   ])
@@ -563,6 +654,26 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     }
   }, [])
 
+  const loadMoreRevisions = useCallback(async (): Promise<RunCommandResult> => {
+    const tenantId = tenantRef.current
+    const sessionId = sessionRef.current
+    if (!tenantId || !sessionId || !revisionCursor || !revisionsHasMore) {
+      return { ok: false, error: 'No more revisions' }
+    }
+    try {
+      const detail = await getRunSession(tenantId, sessionId, fetchImpl, revisionCursor)
+      setRevisions((current) => {
+        const seen = new Set(current.map((item) => item.id))
+        return [...detail.revisions.filter((item) => !seen.has(item.id)), ...current]
+      })
+      setRevisionCursor(detail.revisions_next_cursor ?? null)
+      setRevisionsHasMore(detail.revisions_has_more ?? false)
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : 'Revision load failed' }
+    }
+  }, [fetchImpl, revisionCursor, revisionsHasMore])
+
   return {
     sendPrompt: (prompt) => startRun(prompt),
     cancelRun,
@@ -573,5 +684,8 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     pause,
     revisions,
     latestRunId,
+    revisionsHasMore,
+    loadMoreRevisions,
+    commandPending,
   }
 }

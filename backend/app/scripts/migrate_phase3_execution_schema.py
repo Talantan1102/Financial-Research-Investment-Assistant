@@ -384,6 +384,45 @@ def migrate_phase3_execution_schema(engine: Engine) -> tuple[str, ...]:
         ):
             raise _unsafe("run_sessions.archived_at column differs")
 
+        run_columns = {
+            column["name"]: column for column in inspect(connection).get_columns("runs")
+        }
+        if "revision_seq" not in run_columns:
+            connection.execute(text("ALTER TABLE runs ADD COLUMN revision_seq integer"))
+            connection.execute(
+                text(
+                    "WITH numbered AS ("
+                    " SELECT id, row_number() OVER ("
+                    "  PARTITION BY tenant_id, session_id ORDER BY created_at, id"
+                    " ) AS seq FROM runs"
+                    ") UPDATE runs SET revision_seq = numbered.seq "
+                    "FROM numbered WHERE runs.id = numbered.id"
+                )
+            )
+            connection.execute(text("ALTER TABLE runs ALTER COLUMN revision_seq SET NOT NULL"))
+            changes.append("add and backfill runs.revision_seq")
+        revision_column = {
+            column["name"]: column for column in inspect(connection).get_columns("runs")
+        }["revision_seq"]
+        if revision_column["nullable"] or _type_sql(
+            revision_column["type"], connection
+        ) != "integer":
+            raise _unsafe("runs.revision_seq column differs")
+        run_indexes = {index["name"]: index for index in inspect(connection).get_indexes("runs")}
+        for index_name in (
+            "ix_runs_tenant_session_revision_seq",
+            "ix_runs_replaces_run_id",
+        ):
+            expected = next(
+                index for index in app.models.Run.__table__.indexes if index.name == index_name
+            )
+            _repair_index(
+                connection,
+                expected=expected,
+                actual=run_indexes.get(index_name),
+                changes=changes,
+            )
+
         existing_tables = set(inspect(connection).get_table_names())
         for table in _EXECUTION_TABLES:
             if table.name not in existing_tables:

@@ -62,6 +62,8 @@ function detail(content = 'Hello durable'): RunSessionDetail {
     active_pause_type: null,
     active_pause_request: null,
     revisions: [],
+    revisions_has_more: false,
+    revisions_next_cursor: null,
     latest_run_id: null,
   }
 }
@@ -375,7 +377,9 @@ describe('useRunSSE', () => {
     await act(async () => result.current.sendPrompt('must block'))
     expect(runApi.createRun).toHaveBeenCalledTimes(1)
     vi.mocked(runApi.resumeRun).mockRejectedValueOnce(new TypeError('resume offline'))
-    await expect(act(async () => result.current.resumeRun({ approved: true }))).resolves.toBeUndefined()
+    await expect(act(async () => result.current.resumeRun({ approved: true }))).resolves.toEqual(
+      expect.objectContaining({ ok: false }),
+    )
     expect(result.current.pause).not.toBeNull()
 
     vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
@@ -384,6 +388,84 @@ describe('useRunSSE', () => {
     await act(async () => result.current.resumeRun({ approved: false }))
     expect(runApi.resumeRun).toHaveBeenCalledWith('tenant-1', 'run-1', { approved: false }, expect.any(Function))
     expect(result.current.pause).toBeNull()
+  })
+
+  it('uses one cancel/resume fence and calibrates durable facts after an uncertain resume', async () => {
+    let rejectResume!: (reason: unknown) => void
+    vi.mocked(runApi.resumeRun).mockImplementation(
+      () => new Promise<RunResponse>((_resolve, reject) => { rejectResume = reject }),
+    )
+    vi.mocked(runApi.getRunSession).mockResolvedValue({
+      ...detail(), active_run_id: 'run-1', active_run_status: 'waiting_input',
+      active_pause_type: 'input', active_pause_request: { question: 'still waiting' },
+    })
+    vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_input'))
+    const initialPause = { type: 'approval_request' as const, request: { tool: 'trade' } }
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1', sessionId: 'session-1', initialRunId: 'run-1',
+      initialRunStatus: 'waiting_approval', initialPause,
+    }))
+    await waitFor(() => expect(result.current.activeRunId).toBe('run-1'))
+
+    let first!: Promise<{ ok: boolean }>
+    act(() => {
+      first = result.current.resumeRun({ approved: true })
+      void result.current.resumeRun({ approved: false })
+      void result.current.cancelRun()
+    })
+    expect(result.current.commandPending).toBe(true)
+    expect(runApi.resumeRun).toHaveBeenCalledTimes(1)
+    expect(runApi.cancelRun).not.toHaveBeenCalled()
+    rejectResume(new TypeError('response lost'))
+    await act(async () => expect(first).resolves.toEqual(expect.objectContaining({ ok: false })))
+
+    expect(runApi.getRunSession).toHaveBeenCalled()
+    expect(runApi.getRun).toHaveBeenCalledWith('tenant-1', 'run-1', expect.any(Function))
+    expect(result.current.pause).toEqual({
+      type: 'input_request', request: { question: 'still waiting' },
+    })
+    expect(result.current.status).toBe('waiting_input')
+    expect(result.current.commandPending).toBe(false)
+  })
+
+  it('still calibrates Run truth when Session calibration is unavailable', async () => {
+    vi.mocked(runApi.cancelRun).mockRejectedValue(new TypeError('timeout'))
+    vi.mocked(runApi.getRunSession).mockRejectedValue(new TypeError('session unavailable'))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('running'))
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1', sessionId: 'session-1', initialRunId: 'run-1',
+      initialRunStatus: 'running',
+    }))
+    await waitFor(() => expect(result.current.activeRunId).toBe('run-1'))
+    await act(async () => { await result.current.cancelRun() })
+    expect(runApi.getRun).toHaveBeenCalledWith('tenant-1', 'run-1', expect.any(Function))
+    expect(result.current.status).toBe('running')
+    expect(result.current.activeRunId).toBe('run-1')
+  })
+
+  it('loads older revision pages with the opaque cursor and prepends without duplicates', async () => {
+    const revision = (id: string) => ({
+      id, replaces_run_id: null, status: 'completed' as const, prompt: id,
+      final_message_summary: null, created_at: '2026-07-18T00:00:00Z', finished_at: null,
+    })
+    vi.mocked(runApi.getRunSession).mockResolvedValue({
+      ...detail(), revisions: [revision('run-1'), revision('run-2')],
+      revisions_has_more: false, revisions_next_cursor: null, latest_run_id: 'run-4',
+    })
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1', sessionId: 'session-1',
+      initialRevisions: [revision('run-3'), revision('run-4')],
+      initialLatestRunId: 'run-4', initialRevisionCursor: 'opaque-page-2',
+      initialRevisionsHasMore: true,
+    }))
+    await act(async () => { await result.current.loadMoreRevisions() })
+    expect(runApi.getRunSession).toHaveBeenCalledWith(
+      'tenant-1', 'session-1', expect.any(Function), 'opaque-page-2',
+    )
+    expect(result.current.revisions.map((item) => item.id)).toEqual([
+      'run-1', 'run-2', 'run-3', 'run-4',
+    ])
+    expect(result.current.revisionsHasMore).toBe(false)
   })
 
   it('keeps a waiting pause actionable when cancel transport fails and clears it only after terminal cancel', async () => {
@@ -422,12 +504,16 @@ describe('useRunSSE', () => {
 
   it('contains unresolved-tenant and network failures without rejected UI promises', async () => {
     const noTenant = renderHook(() => useRunSSE({ tenantId: null, sessionId: null }))
-    await expect(act(async () => noTenant.result.current.sendPrompt('early'))).resolves.toBeUndefined()
+    await expect(act(async () => noTenant.result.current.sendPrompt('early'))).resolves.toEqual(
+      expect.objectContaining({ ok: false }),
+    )
     expect(noTenant.result.current.status).toBe('error')
 
     vi.mocked(runApi.createRun).mockRejectedValue(new TypeError('offline'))
     const created = renderHook(() => useRunSSE({ tenantId: 'tenant-1', sessionId: 'session-1' }))
-    await expect(act(async () => created.result.current.sendPrompt('offline'))).resolves.toBeUndefined()
+    await expect(act(async () => created.result.current.sendPrompt('offline'))).resolves.toEqual(
+      expect.objectContaining({ ok: false }),
+    )
     expect(created.result.current.status).toBe('error')
 
     let release!: () => void
@@ -440,6 +526,11 @@ describe('useRunSSE', () => {
       id: 'run-1', replaces_run_id: null, status: 'running' as const, prompt: 'start',
       final_message_summary: null, created_at: '2026-07-18T00:00:00Z', finished_at: null,
     }
+    vi.mocked(runApi.getRun).mockResolvedValue(run('running'))
+    vi.mocked(runApi.getRunSession).mockResolvedValue({
+      ...detail(), active_run_id: 'run-1', active_run_status: 'running',
+      revisions: [initialRevision], latest_run_id: 'run-1',
+    })
     const cancelling = renderHook(() => useRunSSE({
       tenantId: 'tenant-1', sessionId: 'session-1', initialRevisions: [initialRevision],
       initialLatestRunId: 'run-1',
@@ -447,8 +538,10 @@ describe('useRunSSE', () => {
     let started!: Promise<void>
     act(() => { started = cancelling.result.current.sendPrompt('start') })
     await waitFor(() => expect(cancelling.result.current.activeRunId).toBe('run-1'))
-    await expect(act(async () => cancelling.result.current.cancelRun())).resolves.toBeUndefined()
-    expect(cancelling.result.current.status).toBe('error')
+    await expect(act(async () => cancelling.result.current.cancelRun())).resolves.toEqual(
+      expect.objectContaining({ ok: false }),
+    )
+    expect(cancelling.result.current.status).toBe('running')
     expect(cancelling.result.current.revisions).toEqual([initialRevision])
     expect(snapshot(currentChatState).active_run_id).toBe('run-1')
     const createsBeforeBlockedSend = vi.mocked(runApi.createRun).mock.calls.length

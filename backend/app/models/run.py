@@ -130,6 +130,9 @@ class Run(Base):
         UUID(as_uuid=True),
         nullable=True,
     )
+    # Durable per-Session creation order. RunService assigns this while holding
+    # the Session advisory lock; timestamps and UUIDv4 are not ordering keys.
+    revision_seq = Column(Integer, nullable=False, default=1)
     retry_count = Column(Integer, nullable=False, default=0)
     queue_reason = Column(String(64), nullable=True)
     error_code = Column(String(64), nullable=True)
@@ -193,6 +196,13 @@ class Run(Base):
             postgresql_where=text(f"status IN ({_quoted_values(_ACTIVE_RUN_STATUS_VALUES)})"),
         ),
         Index("ix_runs_tenant_status_queued_at", "tenant_id", "status", "queued_at"),
+        Index(
+            "ix_runs_tenant_session_revision_seq",
+            "tenant_id",
+            "session_id",
+            "revision_seq",
+        ),
+        Index("ix_runs_replaces_run_id", "replaces_run_id"),
     )
 
 

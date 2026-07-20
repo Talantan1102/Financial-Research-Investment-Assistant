@@ -46,6 +46,7 @@ class RunRevisionResponse(BaseModel):
     replaces_run_id: UUID | None
     status: str
     prompt: str
+    prompt_is_full: bool
     final_message_summary: str | None
     created_at: datetime
     finished_at: datetime | None
@@ -59,4 +60,6 @@ class RunSessionDetailResponse(RunSessionResponse):
     active_pause_type: str | None
     active_pause_request: dict[str, object] | None
     revisions: list[RunRevisionResponse]
+    revisions_has_more: bool
+    revisions_next_cursor: str | None
     latest_run_id: UUID | None

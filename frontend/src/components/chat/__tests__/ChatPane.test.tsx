@@ -7,10 +7,10 @@ import { useLocation } from 'react-router-dom'
 import { ChatPane } from '@/components/chat/ChatPane'
 import { currentChatActions, currentChatState } from '@/store/current-chat'
 
-const sendPromptMock = vi.fn(async () => {})
-const cancelRunMock = vi.fn(async () => {})
-const resumeRunMock = vi.fn(async () => {})
-const resubmitPromptMock = vi.fn(async () => {})
+const sendPromptMock = vi.fn(async () => ({ ok: true as const }))
+const cancelRunMock = vi.fn(async () => ({ ok: true as const }))
+const resumeRunMock = vi.fn(async () => ({ ok: true as const }))
+const resubmitPromptMock = vi.fn(async () => ({ ok: true as const }))
 let pauseMock: { type: 'approval_request' | 'input_request'; request: Record<string, unknown> } | null = null
 let revisionsMock: Array<{
   id: string
@@ -38,6 +38,7 @@ vi.mock('@/hooks/useRunSSE', () => ({
     pause: pauseMock,
     revisions: revisionsMock,
     latestRunId: latestRunIdMock,
+    commandPending: false,
   })},
 }))
 
@@ -161,6 +162,31 @@ describe('<ChatPane> integration with useRunSSE', () => {
 
     expect(resubmitPromptMock).toHaveBeenCalledWith('prompt C', 'run-b')
     expect(sendPromptMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps revision and ask-user drafts when their command fails', async () => {
+    const user = userEvent.setup()
+    revisionsMock = [
+      { id: 'run-b', replaces_run_id: null, status: 'failed', prompt: 'prompt B', final_message_summary: null },
+    ]
+    latestRunIdMock = 'run-b'
+    resubmitPromptMock.mockResolvedValueOnce({ ok: false })
+    const rendered = renderWithProviders(<ChatPane sessionId="s1" tenantId="tenant-1" />)
+    await user.click(screen.getByText('prompt B').closest('details')!.querySelector('summary')!)
+    await user.click(screen.getByText('prompt B').closest('li')!.querySelector('button')!)
+    const editor = document.querySelectorAll('textarea')[1]
+    await user.clear(editor)
+    await user.type(editor, 'retry draft')
+    await user.click(editor.closest('div')!.querySelector('button')!)
+    expect(editor).toHaveValue('retry draft')
+
+    pauseMock = { type: 'input_request', request: { question: 'more?' } }
+    resumeRunMock.mockResolvedValueOnce({ ok: false })
+    rendered.rerender(<ChatPane sessionId="s1" tenantId="tenant-1" />)
+    const answer = Array.from(document.querySelectorAll('textarea')).at(-1)!
+    await user.type(answer, 'keep me')
+    await user.click(answer.closest('div')!.querySelector('button')!)
+    expect(answer).toHaveValue('keep me')
   })
 
   it('Cmd+K while streaming triggers server cancel', async () => {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -21,6 +22,7 @@ class RunRevision:
     run: Run
     prompt: str
     final_message_summary: str | None
+    prompt_is_full: bool
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,8 @@ class RunSessionDetail:
     active_run: Run | None
     active_pause: RunPause | None
     revisions: tuple[RunRevision, ...]
+    revisions_has_more: bool
+    revisions_next_cursor: str | None
     latest_run_id: UUID | None
 
 
@@ -67,6 +71,8 @@ class RunSessionService:
         actor_id: UUID,
         *,
         limit: int,
+        revision_limit: int = 20,
+        revision_cursor: str | None = None,
     ) -> RunSessionDetail:
         async with self._session_factory() as session, session.begin():
             run_session = await self._get_visible_session(session, tenant_id, session_id, actor_id)
@@ -112,7 +118,7 @@ class RunSessionService:
                     Run.session_id == session_id,
                     Run.status.in_([status.value for status in ACTIVE_RUN_STATUSES]),
                 )
-                .order_by(Run.created_at.desc(), Run.id.desc())
+                .order_by(Run.revision_seq.desc())
                 .limit(1)
             )
             active_pause = None
@@ -126,14 +132,45 @@ class RunSessionService:
                     .order_by(RunPause.pause_no.desc())
                     .limit(1)
                 )
-            runs = tuple(
+            latest_run = await session.scalar(
+                select(Run)
+                .where(Run.tenant_id == tenant_id, Run.session_id == session_id)
+                .order_by(Run.revision_seq.desc())
+                .limit(1)
+            )
+            revision_statement = select(Run).where(
+                Run.tenant_id == tenant_id, Run.session_id == session_id
+            )
+            if revision_cursor is not None:
+                cursor_id = _decode_revision_cursor(revision_cursor)
+                cursor_run = await session.scalar(
+                    select(Run).where(
+                        Run.id == cursor_id,
+                        Run.tenant_id == tenant_id,
+                        Run.session_id == session_id,
+                    )
+                )
+                if cursor_run is None:
+                    raise ResourceNotFound("revision cursor not found")
+                revision_statement = revision_statement.where(
+                    Run.revision_seq < cursor_run.revision_seq
+                )
+            newest_first = tuple(
                 (
                     await session.scalars(
-                        select(Run)
-                        .where(Run.tenant_id == tenant_id, Run.session_id == session_id)
-                        .order_by(Run.created_at.asc(), Run.id.asc())
+                        revision_statement.order_by(Run.revision_seq.desc()).limit(
+                            revision_limit + 1
+                        )
                     )
                 ).all()
+            )
+            revisions_has_more = len(newest_first) > revision_limit
+            page_newest_first = newest_first[:revision_limit]
+            runs = tuple(reversed(page_newest_first))
+            revisions_next_cursor = (
+                _encode_revision_cursor(cast(UUID, page_newest_first[-1].id))
+                if revisions_has_more and page_newest_first
+                else None
             )
             message_ids = {
                 message_id
@@ -158,11 +195,19 @@ class RunSessionService:
             revisions = tuple(
                 RunRevision(
                     run=run,
-                    prompt=cast(str, revision_messages[run.input_message_id].content),
+                    prompt=(
+                        cast(str, revision_messages[run.input_message_id].content)
+                        if latest_run is not None and run.id == latest_run.id
+                        else _summary(cast(str, revision_messages[run.input_message_id].content))
+                    ),
                     final_message_summary=(
                         None
                         if run.final_message_id is None
                         else _summary(cast(str, revision_messages[run.final_message_id].content))
+                    ),
+                    prompt_is_full=(
+                        latest_run is not None
+                        and cast(UUID, run.id) == cast(UUID, latest_run.id)
                     ),
                 )
                 for run in runs
@@ -174,7 +219,9 @@ class RunSessionService:
                 active_run=active_run,
                 active_pause=active_pause,
                 revisions=revisions,
-                latest_run_id=None if not runs else cast(UUID, runs[-1].id),
+                revisions_has_more=revisions_has_more,
+                revisions_next_cursor=revisions_next_cursor,
+                latest_run_id=None if latest_run is None else cast(UUID, latest_run.id),
             )
 
     async def update_title(
@@ -255,6 +302,18 @@ class RunSessionService:
         if run_session is None:
             raise ResourceNotFound("session not found")
         return run_session
+
+
+def _encode_revision_cursor(run_id: UUID) -> str:
+    return base64.urlsafe_b64encode(run_id.bytes).decode("ascii").rstrip("=")
+
+
+def _decode_revision_cursor(cursor: str) -> UUID:
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        return UUID(bytes=raw)
+    except (ValueError, TypeError) as exc:
+        raise ResourceNotFound("revision cursor not found") from exc
 
 
 def _summary(content: str, *, limit: int = 240) -> str:

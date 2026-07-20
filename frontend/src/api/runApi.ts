@@ -87,6 +87,8 @@ export interface RunSessionDetail extends RunSessionSummary {
   active_pause_type: 'approval' | 'input' | null
   active_pause_request: Record<string, unknown> | null
   revisions: RunRevision[]
+  revisions_has_more?: boolean
+  revisions_next_cursor?: string | null
   latest_run_id: string | null
 }
 
@@ -95,6 +97,7 @@ export interface RunRevision {
   replaces_run_id: string | null
   status: RunStatus
   prompt: string
+  prompt_is_full?: boolean
   final_message_summary: string | null
   created_at: string
   finished_at: string | null
@@ -209,9 +212,13 @@ export function getRunSession(
   tenantId: string,
   sessionId: string,
   fetchImpl: typeof fetch = fetch,
+  revisionCursor?: string | null,
 ): Promise<RunSessionDetail> {
+  const revisionQuery = revisionCursor
+    ? `&revision_cursor=${encodeURIComponent(revisionCursor)}`
+    : ''
   return jsonRequest(
-    `/api/v1/tenants/${encodeURIComponent(tenantId)}/sessions/${encodeURIComponent(sessionId)}?limit=1000`,
+    `/api/v1/tenants/${encodeURIComponent(tenantId)}/sessions/${encodeURIComponent(sessionId)}?limit=1000&revision_limit=20${revisionQuery}`,
     { headers: authHeaders() },
     fetchImpl,
   )

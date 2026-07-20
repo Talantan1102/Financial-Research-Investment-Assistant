@@ -131,7 +131,7 @@ describe('runApi', () => {
     expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
       '/api/v1/tenants',
       '/api/v1/tenants/tenant-1/sessions',
-      '/api/v1/tenants/tenant-1/sessions/session-1?limit=1000',
+      '/api/v1/tenants/tenant-1/sessions/session-1?limit=1000&revision_limit=20',
       '/api/v1/tenants/tenant-1/sessions/session-1',
       '/api/v1/tenants/tenant-1/sessions/session-1',
     ])

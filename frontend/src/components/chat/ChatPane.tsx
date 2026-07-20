@@ -90,9 +90,11 @@ export interface ChatPaneProps {
   initialPause?: import('@/hooks/useRunSSE').RunPause | null
   initialRevisions?: import('@/api/runApi').RunRevision[]
   initialLatestRunId?: string | null
+  initialRevisionCursor?: string | null
+  initialRevisionsHasMore?: boolean
 }
 
-export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, initialRunId, initialRunStatus, initialPause, initialRevisions, initialLatestRunId, sessionLoading = false }: ChatPaneProps = {}) {
+export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, initialRunId, initialRunStatus, initialPause, initialRevisions, initialLatestRunId, initialRevisionCursor, initialRevisionsHasMore, sessionLoading = false }: ChatPaneProps = {}) {
   const params = useParams<{ session_id: string }>()
   const navigate = useNavigate()
   const sessionId = sessionIdProp ?? params.session_id ?? null
@@ -126,6 +128,8 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
     initialPause,
     initialRevisions,
     initialLatestRunId,
+    initialRevisionCursor,
+    initialRevisionsHasMore,
     onSessionCreated: (createdSessionId) => {
       navigate(`/chat/${createdSessionId}`, { replace: true })
     },
@@ -195,6 +199,11 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
                   </li>
                 ))}
               </ol>
+              {run.revisionsHasMore ? (
+                <button type="button" disabled={run.commandPending} onClick={() => { void run.loadMoreRevisions() }}>
+                  Load more
+                </button>
+              ) : null}
             </details>
           ) : null}
         </div>
@@ -212,7 +221,8 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
             onSend={onSend}
             onEscalate={onEscalate}
             onCancel={() => { void run.cancelRun() }}
-            blocked={resolvedTenantId === null || sessionLoading || run.pause !== null}
+            blocked={resolvedTenantId === null || sessionLoading || run.pause !== null || run.commandPending}
+            cancelBlocked={run.commandPending}
           />
           {editingRevision ? (
             <div role="region" aria-label="修改提示词修订">
@@ -229,13 +239,13 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
               </label>
               <button
                 type="button"
-                disabled={!editingRevision.prompt.trim()}
-                onClick={() => {
+                disabled={run.commandPending || !editingRevision.prompt.trim()}
+                onClick={async () => {
                   const prompt = editingRevision.prompt.trim()
                   const replacesRunId = editingRevision.id
                   if (!prompt) return
-                  setEditingRevision(null)
-                  void run.resubmitPrompt(prompt, replacesRunId)
+                  const result = await run.resubmitPrompt(prompt, replacesRunId)
+                  if (result.ok) setEditingRevision(null)
                 }}
               >
                 提交新修订
@@ -243,6 +253,7 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
             </div>
           ) : null}
           {run.pause?.type === 'approval_request' ? (
+            <fieldset disabled={run.commandPending}>
             <div role="region" aria-label="审批请求">
               <p>此操作需要你的审批</p>
               {pendingApprovals.length > 0 ? (
@@ -260,8 +271,10 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
               <button type="button" onClick={() => { void run.resumeRun({ approved: true }) }}>全部批准</button>
               <button type="button" onClick={() => { void run.resumeRun({ approved: false }) }}>全部拒绝</button>
             </div>
+            </fieldset>
           ) : null}
           {run.pause?.type === 'input_request' ? (
+            <fieldset disabled={run.commandPending}>
             <div role="region" aria-label="补充信息请求">
               <p>{inputRequestText(run.pause.request)}</p>
               <label>
@@ -270,17 +283,18 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
               </label>
               <button
                 type="button"
-                disabled={!pauseInput.trim()}
-                onClick={() => {
+                disabled={run.commandPending || !pauseInput.trim()}
+                onClick={async () => {
                   const text = pauseInput.trim()
                   if (!text) return
-                  setPauseInput('')
-                  void run.resumeRun({ text })
+                  const result = await run.resumeRun({ text })
+                  if (result.ok) setPauseInput('')
                 }}
               >
                 提交补充信息
               </button>
             </div>
+            </fieldset>
           ) : null}
         </div>
       </section>

@@ -22,6 +22,7 @@ export interface InputAreaProps {
   // Run cancellation is tenant-scoped and keyed by currentChatState.active_run_id.
   onCancel?: () => void
   blocked?: boolean
+  cancelBlocked?: boolean
 }
 
 const MIN_HEIGHT = 24
@@ -180,6 +181,7 @@ export function InputArea(props: InputAreaProps) {
             type="button"
             className={styles.cancelBtn}
             onClick={() => props.onCancel?.()}
+            disabled={props.cancelBlocked}
             aria-label="停止生成"
             title="停止生成"
           >
