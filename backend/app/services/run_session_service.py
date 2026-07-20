@@ -206,8 +206,7 @@ class RunSessionService:
                         else _summary(cast(str, revision_messages[run.final_message_id].content))
                     ),
                     prompt_is_full=(
-                        latest_run is not None
-                        and cast(UUID, run.id) == cast(UUID, latest_run.id)
+                        latest_run is not None and cast(UUID, run.id) == cast(UUID, latest_run.id)
                     ),
                 )
                 for run in runs

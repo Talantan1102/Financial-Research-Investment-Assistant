@@ -347,6 +347,7 @@ async def test_revision_sequence_not_uuid_orders_runs_with_identical_timestamps(
 ) -> None:
     service = RunService(async_session_factory)
     ids = iter([uuid.UUID(int=(1 << 128) - 2), uuid.UUID(int=1)])
+
     def assign_id(_mapper: object, _connection: object, target: Run) -> None:
         target.id = next(ids)
 
