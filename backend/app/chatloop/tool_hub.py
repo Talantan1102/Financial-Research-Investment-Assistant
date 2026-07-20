@@ -313,7 +313,7 @@ class ToolHub:
             call = malformed_calls.get(task.id) or StepToolCall(
                 id=task.id, name=task.capability, arguments=json.dumps(inputs, ensure_ascii=False)
             )
-            legacy = await self._dispatch_one(call, state)
+            legacy = await self._dispatch_one(call, state, defer_failures=True)
             legacy_results[task.id] = legacy
             if legacy.success:
                 return RuntimeResult(
@@ -352,6 +352,10 @@ class ToolHub:
         for task in graph.tasks:
             legacy = legacy_results.get(task.id)
             if legacy is not None:
+                if not legacy.success:
+                    await self._finalize_deferred_failure(
+                        legacy, state, definitions[task.capability]
+                    )
                 results.append(legacy)
                 continue
             runtime_result = scheduled[task.id]
@@ -364,6 +368,31 @@ class ToolHub:
             f"ToolHub.dispatch: results({len(results)}) 与 calls({len(calls)}) 长度不匹配"
         )
         return results
+
+    async def _finalize_deferred_failure(
+        self,
+        result: ToolResult,
+        state: ChatLoopState,
+        definition: CapabilityDefinition,
+    ) -> None:
+        error = result.error or "[执行失败] 工具执行失败"
+        if error.startswith("[需要授权]"):
+            await self._emit(
+                "permission_required",
+                state.step,
+                tool=result.tool_name,
+                risk=definition.minimum_risk.value,
+            )
+        await self._emit_error(result.tool_name, error, step=state.step)
+        self._safe_record(
+            state,
+            result.tool_name,
+            result.args,
+            error,
+            success=False,
+            cache_key=None,
+        )
+        self._write_tool_span(state, result, datetime.now(UTC))
 
     async def _graph_build_failures(
         self, calls: list[StepToolCall], state: ChatLoopState, detail: str
@@ -401,7 +430,13 @@ class ToolHub:
             return "[已取消] 任务未执行"
         return f"[执行失败] {result.error.message[:_ERR_MSG_LEN]}"
 
-    async def _dispatch_one(self, call: StepToolCall, state: ChatLoopState) -> ToolResult:
+    async def _dispatch_one(
+        self,
+        call: StepToolCall,
+        state: ChatLoopState,
+        *,
+        defer_failures: bool = False,
+    ) -> ToolResult:
         """单 call 协程 —— 普通异常全包,取消信号原样传播。
 
         外层 try 是双保险:理论上下面每条分支都自产 ToolResult,但若有未预料的
@@ -412,16 +447,18 @@ class ToolHub:
         """
         started_at = datetime.now(UTC)
         try:
-            result = await self._dispatch_one_inner(call, state)
+            result = await self._dispatch_one_inner(call, state, defer_failures=defer_failures)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 — hub 不抛硬契约:双保险兜底
             # 尽力记账(用工具名),但记账失败也不能抛
             args = self._safe_parsed_args(call)
             error = f"[执行失败] {type(e).__name__}: {str(e)[:_ERR_MSG_LEN]}"
-            self._safe_record(state, call.name, args, error, success=False, cache_key=None)
+            if not defer_failures:
+                self._safe_record(state, call.name, args, error, success=False, cache_key=None)
             result = self._fail_result(call.name, args, error)
-        self._write_tool_span(state, result, started_at)
+        if result.success or not defer_failures:
+            self._write_tool_span(state, result, started_at)
         return result
 
     def _write_tool_span(
@@ -457,7 +494,13 @@ class ToolHub:
         except Exception:  # noqa: BLE001 — 观测写入非致命,绝不打断工具调用
             logger.warning("tool span write failed (non-fatal)", exc_info=True)
 
-    async def _dispatch_one_inner(self, call: StepToolCall, state: ChatLoopState) -> ToolResult:
+    async def _dispatch_one_inner(
+        self,
+        call: StepToolCall,
+        state: ChatLoopState,
+        *,
+        defer_failures: bool,
+    ) -> ToolResult:
         name = call.name
 
         # 1. parsed_args:坏 JSON → 指导性错误(工具名仍记账)
@@ -465,20 +508,22 @@ class ToolHub:
             args = call.parsed_args
         except ValueError:
             error = "[参数格式错误] arguments 不是合法 JSON。请检查后重试。"
-            await self._emit_error(call.name, error, step=state.step)
-            self._safe_record(state, name, {}, error, success=False, cache_key=None)
+            if not defer_failures:
+                await self._emit_error(call.name, error, step=state.step)
+                self._safe_record(state, name, {}, error, success=False, cache_key=None)
             return self._fail_result(name, {}, error)
 
         # 2a. search_tools 内置工具:不走 Tool 实例,直接检索文档
         if name == SEARCH_TOOLS_NAME:
-            return await self._dispatch_search_tools(args, state)
+            return await self._dispatch_search_tools(args, state, defer_failures=defer_failures)
 
         # 2. 工具不存在 → 指导性错误
         tool = self._tools.get(name)
         if tool is None:
             error = f"[未知工具] {name} 不存在。可用工具见列表;若需参数细节可调 search_tools。"
-            await self._emit_error(name, error, step=state.step)
-            self._safe_record(state, name, args, error, success=False, cache_key=None)
+            if not defer_failures:
+                await self._emit_error(name, error, step=state.step)
+                self._safe_record(state, name, args, error, success=False, cache_key=None)
             return self._fail_result(name, args, error)
 
         # 3. InProcessTool 不参与 ledger/cache 去重。普通工具的 ledger 去重
@@ -522,7 +567,7 @@ class ToolHub:
         if not runtime_result.success:
             error = self._runtime_guidance_error(tool, runtime_result)
             logger.info("tool dispatch failed: tool=%s error=%s", name, error[:120])
-            if (
+            if not defer_failures and (
                 runtime_result.error is not None
                 and runtime_result.error.category is ErrorCategory.PERMISSION_DENIED
                 and self._risk_policy.needs_interactive_permission(tool)
@@ -533,10 +578,16 @@ class ToolHub:
                     tool=name,
                     risk=definition.minimum_risk.value,
                 )
-            await self._emit_error(name, error, step=state.step)
-            self._safe_record(
-                state, name, effective_args, error, success=False, cache_key=cache_key
-            )
+            if not defer_failures:
+                await self._emit_error(name, error, step=state.step)
+                self._safe_record(
+                    state,
+                    name,
+                    effective_args,
+                    error,
+                    success=False,
+                    cache_key=cache_key,
+                )
             return self._fail_result(name, effective_args, error)
 
         output = runtime_result.output or {}
@@ -563,7 +614,11 @@ class ToolHub:
     # ------------------------------------------------------------------
 
     async def _dispatch_search_tools(
-        self, args: dict[str, Any], state: ChatLoopState
+        self,
+        args: dict[str, Any],
+        state: ChatLoopState,
+        *,
+        defer_failures: bool = False,
     ) -> ToolResult:
         """检索目标工具文档,top-k 拼成 {"docs": [{name, doc}...]} 返回。
 
@@ -575,14 +630,30 @@ class ToolHub:
         visible = self._visible_for(state)
         if SEARCH_TOOLS_NAME not in visible:
             error = "[不可见工具] search_tools 不在本请求允许的工具集合中。"
-            await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
-            self._safe_record(state, SEARCH_TOOLS_NAME, args, error, success=False, cache_key=None)
+            if not defer_failures:
+                await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
+                self._safe_record(
+                    state,
+                    SEARCH_TOOLS_NAME,
+                    args,
+                    error,
+                    success=False,
+                    cache_key=None,
+                )
             return self._fail_result(SEARCH_TOOLS_NAME, args, error)
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():
             error = "[参数校验失败] search_tools 需要 query(string)。请传工具名或自然语言描述。"
-            await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
-            self._safe_record(state, SEARCH_TOOLS_NAME, args, error, success=False, cache_key=None)
+            if not defer_failures:
+                await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
+                self._safe_record(
+                    state,
+                    SEARCH_TOOLS_NAME,
+                    args,
+                    error,
+                    success=False,
+                    cache_key=None,
+                )
             return self._fail_result(SEARCH_TOOLS_NAME, args, error)
 
         await self._emit("tool_call", state.step, tool=SEARCH_TOOLS_NAME, args=args)

@@ -21,6 +21,17 @@ from app.runtime.models import (
 )
 from app.runtime.redaction import scrub_result, scrub_text
 
+_LEDGER_REFERENCE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "cached_digest": {"type": "string"},
+        "note": {"type": "string"},
+        "ref": {"type": ["string", "null"]},
+    },
+    "required": ["cached_digest", "note", "ref"],
+    "additionalProperties": False,
+}
+
 
 class SafeExecutor:
     """Execute an adapter with stable failure categories and output bounds."""
@@ -43,18 +54,23 @@ class SafeExecutor:
         try:
             async with asyncio.timeout(timeout_s):
                 result = await adapter.execute(input, context)
+            effective_output_schema = (
+                _LEDGER_REFERENCE_SCHEMA
+                if result.audit.get("trusted_ledger_reference") is True
+                else output_schema
+            )
+            if effective_output_schema is not None:
+                try:
+                    Draft202012Validator.check_schema(effective_output_schema)
+                    Draft202012Validator(effective_output_schema).validate(result.output)
+                except (SchemaError, JsonSchemaError) as exc:
+                    return self._failure(
+                        code="output_schema_validation_failed",
+                        category=ErrorCategory.RESULT_INVALID,
+                        message=str(exc),
+                        latency_ms=self._latency_ms(started),
+                    )
             if result.output is not None:
-                if output_schema is not None:
-                    try:
-                        Draft202012Validator.check_schema(output_schema)
-                        Draft202012Validator(output_schema).validate(result.output)
-                    except (SchemaError, JsonSchemaError) as exc:
-                        return self._failure(
-                            code="output_schema_validation_failed",
-                            category=ErrorCategory.RESULT_INVALID,
-                            message=str(exc),
-                            latency_ms=self._latency_ms(started),
-                        )
                 try:
                     encoded = json.dumps(
                         result.output, ensure_ascii=False, separators=(",", ":")

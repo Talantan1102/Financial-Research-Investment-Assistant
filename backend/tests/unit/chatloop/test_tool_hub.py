@@ -367,6 +367,33 @@ async def test_ledger_dedup_does_not_rerun():
     assert end_events[-1].data.get("cached") is True
 
 
+async def test_ledger_reference_uses_trusted_ref_schema_and_reaches_post_hook():
+    seen_outputs: list[dict] = []
+
+    async def post(invocation):
+        seen_outputs.append(invocation.output)
+        return HookDecision()
+
+    tool = FakeTool("get_stock_quote", output={"price": 1})
+    tool.output_schema = {
+        "type": "object",
+        "properties": {"price": {"type": "number"}},
+        "required": ["price"],
+    }
+    hub = ToolHub(hooks=HookPipeline(post_hooks=[post]))
+    hub.register_registry(FakeRegistry([tool]))
+    state = _state()
+    call = _call(tool.name, {"ts_code": "X"})
+
+    [first] = await hub.dispatch([call], state)
+    [second] = await hub.dispatch([call], state)
+
+    assert first.success and second.success
+    assert second.output["cached_digest"]
+    assert len(seen_outputs) == 2
+    assert seen_outputs[1]["cached_digest"]
+
+
 async def test_ledger_hit_cannot_bypass_visibility_or_pre_hook_permission():
     tool = FakeTool("get_stock_quote", output={"price": 1})
     visible = {tool.name}
@@ -1020,11 +1047,16 @@ async def test_read_tool_retries_transient_but_write_tool_does_not():
             return {"ok": True}
 
     read = FlakyRead("get_stock_quote")
-    read_hub = ToolHub()
+    events = _Collector()
+    read_hub = ToolHub(emit=events)
     read_hub.register_registry(FakeRegistry([read]))
-    [read_result] = await read_hub.dispatch([_call(read.name, {"ts_code": "X"})], _state())
+    read_state = _state()
+    [read_result] = await read_hub.dispatch([_call(read.name, {"ts_code": "X"})], read_state)
     assert read_result.success is True
     assert read.call_count == 2
+    assert len(read_state.ledger.entries) == 1
+    assert events.types().count("tool_error") == 0
+    assert events.types().count("tool_end") == 1
 
     write = FakeInProcessTool("memory_write", raises=ToolError("backend 503 temporary"))
     write_hub = ToolHub()
@@ -1032,3 +1064,20 @@ async def test_read_tool_retries_transient_but_write_tool_does_not():
     [write_result] = await write_hub.dispatch([_call(write.name, {"ts_code": "X"})], _state())
     assert write_result.success is False
     assert write.call_count == 1
+
+
+async def test_retry_exhaustion_emits_and_records_only_one_final_failure():
+    events = _Collector()
+    tool = FakeTool("get_stock_quote", raises=ToolError("backend 503 temporary"))
+    hub = ToolHub(emit=events)
+    hub.register_registry(FakeRegistry([tool]))
+    state = _state()
+
+    [result] = await hub.dispatch([_call(tool.name, {"ts_code": "X"})], state)
+
+    assert result.success is False
+    assert tool.call_count == 2
+    assert events.types().count("tool_error") == 1
+    assert events.types().count("tool_end") == 0
+    assert len(state.ledger.entries) == 1
+    assert state.ledger.entries[0].success is False

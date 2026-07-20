@@ -44,7 +44,7 @@ class ChatloopToolAdapter:
                     "note": "本轮已查过,结果同前(完整内容见 ref)",
                     "ref": ledger_hit.cache_key,
                 },
-                audit={"cached": True},
+                audit={"cached": True, "trusted_ledger_reference": True},
             )
 
         async def compute() -> dict[str, Any]:

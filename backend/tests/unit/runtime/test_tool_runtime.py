@@ -220,6 +220,23 @@ async def test_safe_executor_validates_declared_output_schema() -> None:
 
 
 @pytest.mark.asyncio
+async def test_safe_executor_rejects_none_when_output_schema_requires_object() -> None:
+    class NoneAdapter:
+        async def execute(self, input: dict[str, Any], context: ExecutionContext) -> RuntimeResult:
+            return RuntimeResult(status=ExecutionStatus.SUCCEEDED, output=None)
+
+    result = await SafeExecutor().execute(
+        NoneAdapter(),
+        {"symbol": "AAPL"},
+        context(),
+        timeout_s=1,
+        output_schema={"type": "object"},
+    )
+    assert result.error is not None
+    assert result.error.code == "output_schema_validation_failed"
+
+
+@pytest.mark.asyncio
 async def test_runtime_boundary_redacts_adapter_and_hook_secrets() -> None:
     class SecretAdapter:
         async def execute(self, input: dict[str, Any], context: ExecutionContext) -> RuntimeResult:
