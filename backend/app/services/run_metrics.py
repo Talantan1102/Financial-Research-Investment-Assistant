@@ -313,6 +313,9 @@ class RunMetricsService:
             },
             "scheduling": {
                 "latency_seconds": _num(latency.scheduling),
+                # This is a windowed count of persisted blocking facts, not a
+                # snapshot of current queue_reason.  Current queue pressure is
+                # represented by runs.queue_depth/oldest_wait_seconds.
                 "no_slot": count_no_slot_reasons(no_slot_rows),
                 "fair_allocations": sum(int(count) for _tenant, count in fair_rows),
                 "fair_allocations_by_tenant": {
@@ -336,7 +339,11 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def count_no_slot_reasons(rows: Iterable[Any]) -> int:
-    """Count queue facts blocked by the scheduler's real eligibility reasons."""
+    """Count windowed scheduler blocking events by real eligibility reason.
+
+    The current ``Run.queue_reason`` may be cleared after a successful
+    assignment; this function intentionally preserves the historical fact.
+    """
     reasons = {
         EligibilityReason.NO_WORKER_CAPACITY.value,
         EligibilityReason.TENANT_AT_CAPACITY.value,

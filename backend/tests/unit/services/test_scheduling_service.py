@@ -541,7 +541,10 @@ async def test_no_worker_then_success_removes_reason_from_metrics_window(
     assert await service.schedule_once() is not None
 
     metrics = await RunMetricsService(async_session_factory).snapshot(queue.tenant_id)
-    assert metrics["scheduling"]["no_slot"] == 0
+    # no_slot is a windowed count of persisted scheduler blocking facts.  The
+    # later successful assignment clears the current Run.queue_reason but does
+    # not erase the historical run.queue_blocked event.
+    assert metrics["scheduling"]["no_slot"] == 1
 
 
 @pytest.mark.asyncio
