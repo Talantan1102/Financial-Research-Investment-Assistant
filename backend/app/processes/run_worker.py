@@ -40,7 +40,16 @@ def build_run_stream_event_sink(redis: Any) -> Callable[[Any], Awaitable[None]]:
         try:
             await bus.publish(event)
         except Exception as exc:  # noqa: BLE001 - temporary UI events are best-effort
-            logger.warning("Run stream event rejected for %s: %s", event.run_id, exc)
+            with run_log_context(
+                run_id=getattr(event, "run_id", None),
+                attempt_id=getattr(event, "attempt_id", None),
+            ):
+                logger.warning(
+                    "Run stream event rejected for %s error_type=%s",
+                    event.run_id,
+                    type(exc).__name__,
+                    extra=log_context(),
+                )
 
     return publish
 

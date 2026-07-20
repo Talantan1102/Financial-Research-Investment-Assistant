@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import contextvars
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -22,11 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models.run import Run, RunAttempt
 from app.models.run_execution import RunUsageRecord
 from app.models.run_scheduling import RunOutbox, RunWorker
+from app.run_control.scheduling_policy import EligibilityReason
 from app.run_control.types import AttemptStatus, RunStatus
 
 _run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("run_id", default=None)
 _attempt_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("attempt_id", default=None)
 _worker_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("worker_id", default=None)
+_correlation_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "correlation_id", default=None
+)
 
 
 @contextmanager
@@ -35,6 +39,7 @@ def run_log_context(
     run_id: UUID | str | None = None,
     attempt_id: UUID | str | None = None,
     worker_id: UUID | str | None = None,
+    correlation_id: UUID | str | None = None,
 ) -> Iterator[None]:
     """Bind safe correlation IDs to logs for the current async task.
 
@@ -45,6 +50,7 @@ def run_log_context(
         _run_id.set(None if run_id is None else str(run_id)),
         _attempt_id.set(None if attempt_id is None else str(attempt_id)),
         _worker_id.set(None if worker_id is None else str(worker_id)),
+        _correlation_id.set(None if correlation_id is None else str(correlation_id)),
     )
     try:
         yield
@@ -52,6 +58,7 @@ def run_log_context(
         _run_id.reset(tokens[0])
         _attempt_id.reset(tokens[1])
         _worker_id.reset(tokens[2])
+        _correlation_id.reset(tokens[3])
 
 
 def log_context() -> dict[str, str]:
@@ -62,6 +69,7 @@ def log_context() -> dict[str, str]:
             "run_id": _run_id.get(),
             "attempt_id": _attempt_id.get(),
             "worker_id": _worker_id.get(),
+            "correlation_id": _correlation_id.get(),
         }.items()
         if v is not None
     }
@@ -109,12 +117,16 @@ class RunMetricsService:
                     func.avg(func.extract("epoch", Run.assigned_at - Run.queued_at)).label(
                         "scheduling"
                     ),
-                    func.count()
-                    .filter(Run.queue_reason.in_(("no_slot", "no_worker", "capacity")))
-                    .label("no_slot"),
                 ).where(scope)
             )
         ).one()
+        no_slot_rows = (
+            await session.execute(
+                select(Run.queue_reason, func.count())
+                .where(scope, Run.queue_reason.is_not(None))
+                .group_by(Run.queue_reason)
+            )
+        ).all()
         attempts = (
             await session.execute(
                 select(
@@ -127,6 +139,14 @@ class RunMetricsService:
             )
         ).all()
         attempt_outcomes = {status: int(count) for status, count in attempts}
+        fair_rows = (
+            await session.execute(
+                select(Run.tenant_id, func.count())
+                .join(RunAttempt, Run.id == RunAttempt.run_id)
+                .where(scope, RunAttempt.worker_id.is_not(None))
+                .group_by(Run.tenant_id)
+            )
+        ).all()
         workers = (
             await session.execute(
                 select(
@@ -177,6 +197,27 @@ class RunMetricsService:
                 )
             )
         ).scalar_one()
+        if tenant_id is not None:
+            worker_projection: dict[str, Any] = {
+                "load": loads,
+                "availability": {
+                    "total_workers": sum(
+                        int(count) for _status, count, _capacity, _heartbeat in workers
+                    ),
+                    "online_workers": sum(
+                        int(count)
+                        for status, count, _capacity, _heartbeat in workers
+                        if str(status) == "online"
+                    ),
+                },
+                "lease_expired": int(lease or 0),
+            }
+        else:
+            worker_projection = {
+                "load": loads,
+                "by_status": worker_load,
+                "lease_expired": int(lease or 0),
+            }
         outbox = (
             await session.execute(
                 select(
@@ -227,10 +268,13 @@ class RunMetricsService:
             },
             "scheduling": {
                 "latency_seconds": _num(latency.scheduling),
-                "no_slot": int(latency.no_slot or 0),
-                "fair_allocations": sum(attempt_outcomes.values()),
+                "no_slot": count_no_slot_reasons(no_slot_rows),
+                "fair_allocations": len(fair_rows),
+                "fair_allocations_by_tenant": {
+                    str(tenant): int(count) for tenant, count in fair_rows
+                },
             },
-            "workers": {"load": loads, "by_status": worker_load, "lease_expired": int(lease or 0)},
+            "workers": worker_projection,
             "attempts": {"outcomes": attempt_outcomes, "duration_seconds": _num(duration)},
             "outbox": {"backlog": int(outbox.backlog or 0), "retries": int(outbox.retries or 0)},
             "usage": {"total_tokens": int(usage[0] or 0), "cost_cny": float(usage[1] or 0)},
@@ -243,3 +287,12 @@ def _num(value: Any) -> float:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def count_no_slot_reasons(rows: Iterable[Any]) -> int:
+    """Count queue facts blocked by the scheduler's real eligibility reasons."""
+    reasons = {
+        EligibilityReason.NO_WORKER_CAPACITY.value,
+        EligibilityReason.TENANT_AT_CAPACITY.value,
+    }
+    return sum(int(count) for reason, count in rows if str(reason) in reasons)

@@ -9,13 +9,14 @@ import signal
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.processes.runtime import BoundedBackoff, ProcessHealth, is_transient_error
-from app.services.run_metrics import log_context
+from app.services.run_metrics import log_context, run_log_context
 from app.services.scheduling_service import SchedulingService
 
 logger = logging.getLogger(__name__)
@@ -62,12 +63,13 @@ class RunScheduler:
             if assignment is None:
                 break
             scheduled += 1
-        logger.info(
-            "scheduler cycle completed recovered=%d scheduled=%d",
-            len(recovered),
-            scheduled,
-            extra=log_context(),
-        )
+        with run_log_context(correlation_id=uuid4()):
+            logger.info(
+                "scheduler cycle completed recovered=%d scheduled=%d",
+                len(recovered),
+                scheduled,
+                extra=log_context(),
+            )
         return SchedulerCycle(recovered=len(recovered), scheduled=scheduled)
 
     async def run_forever(self) -> None:
