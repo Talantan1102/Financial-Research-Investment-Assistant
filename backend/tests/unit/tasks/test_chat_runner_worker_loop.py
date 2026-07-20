@@ -14,8 +14,12 @@ Fix(方案 C):进程级常驻 loop,经 ``run_until_complete`` 驱动,使 loop-bo
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+from typing import Any
+from uuid import uuid4
 
 import pytest
+from app.chatloop.state import ChatLoopState
 
 
 @pytest.fixture(autouse=True)
@@ -87,3 +91,44 @@ def test_worker_loop_rebuilds_if_closed() -> None:
     loop2 = _get_worker_loop()
     assert loop2 is not loop1
     assert not loop2.is_closed()
+
+
+@pytest.mark.asyncio
+async def test_lazy_episode_resolver_creates_once_and_exposes_id() -> None:
+    """archival_insert 首次调用才建 episode；同 turn 重试复用同一 provenance。"""
+    from app.tasks.chat_runner import _build_lazy_episode_resolver
+
+    class Memory:
+        def __init__(self) -> None:
+            self.writes: list[dict[str, Any]] = []
+
+        async def next_episode_index(self, session_id):
+            return 4
+
+        async def write_explicit_episode(self, **kwargs):
+            # 强制两个 gather 分支在首次检查后交错，复现无锁时的双写。
+            await asyncio.sleep(0)
+            self.writes.append(kwargs)
+            return SimpleNamespace(episode_id=uuid4())
+
+    memory = Memory()
+    uid, sid = uuid4(), uuid4()
+    resolver, episode_ref = _build_lazy_episode_resolver(memory, user_id=uid, session_id=str(sid))
+    state = ChatLoopState(
+        user_id=str(uid),
+        session_id=str(sid),
+        request_id=str(uuid4()),
+        messages=[
+            {"role": "user", "content": "我买了茅台"},
+            {"role": "user", "content": "还买了五粮液"},
+        ],
+    )
+
+    first, second = await asyncio.gather(resolver(state), resolver(state))
+
+    assert first == second == episode_ref["episode_id"]
+    assert len(memory.writes) == 1
+    assert memory.writes[0]["episode_index"] == 4
+    assert memory.writes[0]["user_message"] == "我买了茅台\n还买了五粮液"
+    assert memory.writes[0]["agent_response"] == ""
+    assert memory.writes[0]["source_kind"] == "agent_explicit"

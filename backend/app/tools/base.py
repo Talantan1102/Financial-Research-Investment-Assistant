@@ -22,6 +22,10 @@ class Tool(ABC):
     name: str
     description: str
     args_schema: type[BaseModel]
+    # Concrete tools may narrow this contract. ``run`` guarantees a JSON object
+    # at the legacy boundary, so this is the truthful base schema, not a runtime
+    # hard-coded assumption.
+    output_schema: dict[str, Any] = {"type": "object"}
 
     @abstractmethod
     async def run(self, args: BaseModel) -> dict[str, Any]:

@@ -45,6 +45,11 @@ def _should_persist(
         return False
     if not (user_message and user_message.strip()):
         return False
+    # 隐式回复后抽取只运行在“零工具直答”轮。任意工具调用（包括显式
+    # memory_write）都说明本轮已有主动执行轨迹，不能再异步重复提取/写入。
+    ledger = getattr(final_state, "ledger", None)
+    if getattr(ledger, "entries", None):
+        return False
     return bool(agent_response and agent_response.strip())
 
 
@@ -60,7 +65,7 @@ async def persist_episode_and_trigger(
     final_state: Any,
     enqueue: Callable[[str], Any] = enqueue_episode_extraction,
 ) -> bool:
-    """干净成功轮:写 episode + 触发抽取。返回是否写了 episode。fail-soft。"""
+    """零工具干净成功轮:写 episode + 触发隐式抽取。返回是否写入。fail-soft。"""
     if not _should_persist(
         cancelled=cancelled,
         loop_error=loop_error,

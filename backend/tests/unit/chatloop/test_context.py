@@ -69,6 +69,7 @@ def _make_state(
 def _make_deps(
     system_prompt: str = "角色指令",
     persona_block: str = "用户画像",
+    memory_index_block: str = "",
     skill_listing: str = "技能清单",
     history_block: tuple = (),
     max_steps: int = 12,
@@ -78,6 +79,7 @@ def _make_deps(
     return ContextDeps(
         system_prompt=system_prompt,
         persona_block=persona_block,
+        memory_index_block=memory_index_block,
         skill_listing=skill_listing,
         history_block=history_block,
         max_steps=max_steps,
@@ -141,6 +143,19 @@ def test_system_message_contains_all_three_parts():
     assert "角色指令" in content
     assert "用户画像" in content
     assert "技能清单" in content
+
+
+def test_system_message_can_inject_memory_index_as_separate_stable_part():
+    """生产 chatloop 只放 MEMORY.md 索引摘要，字段不借用 persona 正文槽。"""
+    deps = _make_deps(
+        persona_block="",
+        memory_index_block="## MEMORY.md（数据库投影索引）\n- HOLDS: 2",
+    )
+
+    content = deps.system_message_content
+
+    assert "MEMORY.md" in content
+    assert "HOLDS: 2" in content
 
 
 def test_system_message_separator():

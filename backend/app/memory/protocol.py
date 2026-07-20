@@ -121,6 +121,28 @@ class Memory(Protocol):
         """Path A 写入路径 step 1: episode 入库, extracted_at=NULL."""
         ...
 
+    async def write_explicit_episode(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        episode_index: int,
+        user_message: str,
+        agent_response: str,
+        source_kind: str = "agent_explicit",
+    ) -> ChatMemoryEpisode:
+        """原子创建已 claim、永久不由 Path B 扫描的显式写 episode。"""
+        ...
+
+    async def finalize_explicit_episode(
+        self, episode_id: UUID, agent_response: str, outcome: str
+    ) -> None:
+        """记录显式写 episode 的 completed/failed/cancelled 终态。"""
+        ...
+
+    async def memory_index_summary(self, user_id: UUID) -> dict[str, Any]:
+        """返回无正文的 MEMORY.md 等价 DB 索引投影。"""
+        ...
+
     async def get_unextracted_episodes(
         self, user_id: UUID, limit: int = 100
     ) -> list[ChatMemoryEpisode]:

@@ -32,6 +32,7 @@ class _MCPToolProxy(Tool):
             "type": "object",
             "properties": {},
         }
+        self.output_schema = manifest.get("outputSchema") or Tool.output_schema
         self.args_schema: type[BaseModel] = self._build_args_model()
 
     @staticmethod
@@ -70,6 +71,10 @@ class ToolRegistry:
         if name not in self._tools:
             raise ToolNotFoundError(f"no tool registered with name={name!r}")
         return self._tools[name]
+
+    def items(self) -> tuple[tuple[str, Tool], ...]:
+        """Return an immutable snapshot of registered tool entries."""
+        return tuple(self._tools.items())
 
     async def register_mcp_client_async(self, client: MCPClient) -> None:
         """Register all tools exposed by an MCPClient (via stdio MCP server)."""

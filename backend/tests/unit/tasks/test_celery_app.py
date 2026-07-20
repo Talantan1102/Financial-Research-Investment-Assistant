@@ -61,3 +61,30 @@ def test_generate_session_title_routes_to_llm_queue() -> None:
     assert routes[task_name]["queue"] == "llm", (
         f"{task_name} must route to 'llm' queue, got {routes[task_name]['queue']!r}"
     )
+
+
+def test_run_chat_routes_to_worker_llm_queue() -> None:
+    """run_chat uses the LLM and its explicit queue must be consumed by the L2 worker."""
+    from app.tasks.celery_app import celery_app
+
+    from tests.conftest_celery import CELERY_WORKER_QUEUES
+
+    routes = celery_app.conf.task_routes or {}
+    task_name = "app.tasks.chat_runner.run_chat"
+    assert task_name in routes
+    assert routes[task_name]["queue"] == "llm"
+    assert routes[task_name]["queue"] in CELERY_WORKER_QUEUES
+
+
+@pytest.mark.parametrize("mode", ["mock", "cassette"])
+def test_l2_worker_env_supplies_non_live_construction_key(mode: str) -> None:
+    """Offline worker modes can build embeddings before marking chat running."""
+    from tests.conftest_celery import prepare_celery_worker_env
+
+    env = prepare_celery_worker_env(
+        {"LLM_MODE": mode, "DASHSCOPE_API_KEY": ""},
+        "redis://127.0.0.1:6379/15",
+    )
+
+    assert env["LLM_MODE"] == mode
+    assert env["DASHSCOPE_API_KEY"] == "test-key-not-for-live-calls"

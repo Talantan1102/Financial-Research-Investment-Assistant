@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest_asyncio
@@ -175,14 +176,46 @@ class _FakeMemory:
 
     def __init__(self, *, persona_raises: bool = False) -> None:
         self._persona_raises = persona_raises
+        self.episodes: list[dict[str, Any]] = []
+        self.archival_writes: list[dict[str, Any]] = []
+        self.finalized_explicit: list[tuple[uuid.UUID, str, str]] = []
+        self.index_calls = 0
+        self.raise_on_archival = False
 
     async def get_working_blocks(self, _user_id: Any) -> dict[str, Any]:
         if self._persona_raises:
             raise RuntimeError("simulated persona DB error")
         return {}
 
+    async def memory_index_summary(self, _user_id: Any) -> dict[str, Any]:
+        self.index_calls += 1
+        if self._persona_raises:
+            raise RuntimeError("simulated memory index DB error")
+        return {"working_blocks": [], "archival": {"total": 0, "relations": {}}}
+
     async def archival_memory_search(self, *_a: Any, **_k: Any) -> list[Any]:
         return []
+
+    async def next_episode_index(self, _session_id: Any) -> int:
+        return len(self.episodes)
+
+    async def write_episode(self, **kwargs: Any) -> Any:
+        episode_id = uuid.uuid4()
+        self.episodes.append({**kwargs, "episode_id": episode_id})
+        return SimpleNamespace(episode_id=episode_id)
+
+    async def write_explicit_episode(self, **kwargs: Any) -> Any:
+        return await self.write_episode(**kwargs)
+
+    async def finalize_explicit_episode(
+        self, episode_id: uuid.UUID, response: str, outcome: str
+    ) -> None:
+        self.finalized_explicit.append((episode_id, response, outcome))
+
+    async def archival_memory_insert(self, **kwargs: Any) -> None:
+        if self.raise_on_archival:
+            raise RuntimeError("simulated explicit insert failure")
+        self.archival_writes.append(kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +357,225 @@ async def test_direct_answer_turn(
     assert assistant[0].content == "你好，我能帮你分析股票。"
     task = await ChatTaskRepo(pg_async_session_factory).get_by_id(seeded_task["task_id"])
     assert task is not None and task.status == "done"
+
+
+async def test_explicit_archival_write_gets_lazy_episode_and_no_implicit_duplicate(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    """生产 runner 接入 resolver：显式写有 provenance，回复后不会再隐式重复写 episode。"""
+    from sqlalchemy import text as _text
+
+    uid, sid = uuid.uuid4(), uuid.uuid4()
+    async with pg_async_session_factory() as sess:
+        await sess.execute(
+            _text(
+                "INSERT INTO users (id, username, email, hashed_password, is_active) "
+                "VALUES (:i, :u, :e, :p, true)"
+            ),
+            {
+                "i": str(uid),
+                "u": f"memory-{uid.hex[:8]}",
+                "e": f"memory-{uid.hex[:8]}@t.local",
+                "p": "x",
+            },
+        )
+        sess.add(ChatSession(id=sid, user_id=uid, title="t"))
+        await sess.commit()
+    task_repo = ChatTaskRepo(pg_async_session_factory)
+    task = await task_repo.create_queued(
+        session_id=sid,
+        user_id=uid,
+        langgraph_thread_id=f"memory:{sid}",
+        initial_prompt_message_id=None,
+    )
+    args = {
+        "action": "archival_insert",
+        "content": "用户持有贵州茅台",
+        "evidence_quote": "买了茅台",
+    }
+    llm = ScriptedStepClient(
+        [
+            _step(tool_calls=[_call("memory_write", args)]),
+            _step(content="已按你的明确要求记录。", finish_reason="stop"),
+        ]
+    )
+    singletons = await _singletons(pg_async_session_factory, llm, tmp_path=tmp_path)
+
+    await run_chat_async(
+        task_id=task.id,
+        singletons=singletons,
+        session_factory=pg_async_session_factory,
+        redis=FakeRedis(decode_responses=False),
+        user_message="我买了茅台，请记住",
+        session_id=str(sid),
+        user_id=uid,
+    )
+
+    memory = singletons.memory
+    assert len(memory.episodes) == 1
+    episode_id = memory.episodes[0]["episode_id"]
+    assert memory.episodes[0]["agent_response"] == ""
+    assert memory.archival_writes[0]["episode_id"] == episode_id
+    assert memory.finalized_explicit == [(episode_id, "已按你的明确要求记录。", "completed")]
+
+
+async def test_failed_explicit_insert_is_claimed_and_never_implicitly_duplicated(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    """显式 archival_insert 失败仍保留 claimed 审计 episode，且不触发隐式 Path B。"""
+    from sqlalchemy import text as _text
+
+    uid, sid = uuid.uuid4(), uuid.uuid4()
+    async with pg_async_session_factory() as sess:
+        await sess.execute(
+            _text(
+                "INSERT INTO users (id, username, email, hashed_password, is_active) "
+                "VALUES (:i, :u, :e, :p, true)"
+            ),
+            {
+                "i": str(uid),
+                "u": f"memory-fail-{uid.hex[:8]}",
+                "e": f"memory-fail-{uid.hex[:8]}@t.local",
+                "p": "x",
+            },
+        )
+        sess.add(ChatSession(id=sid, user_id=uid, title="t"))
+        await sess.commit()
+    task_repo = ChatTaskRepo(pg_async_session_factory)
+    task = await task_repo.create_queued(
+        session_id=sid,
+        user_id=uid,
+        langgraph_thread_id=f"memory-fail:{sid}",
+        initial_prompt_message_id=None,
+    )
+    llm = ScriptedStepClient(
+        [
+            _step(
+                tool_calls=[
+                    _call(
+                        "memory_write",
+                        {
+                            "action": "archival_insert",
+                            "content": "用户持有贵州茅台",
+                            "evidence_quote": "买了茅台",
+                        },
+                    )
+                ]
+            ),
+            _step(content="记录失败，已明确告知。", finish_reason="stop"),
+        ]
+    )
+    singletons = await _singletons(pg_async_session_factory, llm, tmp_path=tmp_path)
+    singletons.memory.raise_on_archival = True
+
+    await run_chat_async(
+        task_id=task.id,
+        singletons=singletons,
+        session_factory=pg_async_session_factory,
+        redis=FakeRedis(decode_responses=False),
+        user_message="我买了茅台，请记住",
+        session_id=str(sid),
+        user_id=uid,
+    )
+
+    memory = singletons.memory
+    assert len(memory.episodes) == 1  # 零工具 hook 未重复写第二条
+    assert memory.finalized_explicit == [
+        (memory.episodes[0]["episode_id"], "记录失败，已明确告知。", "failed")
+    ]
+
+
+async def test_anonymous_turn_does_not_render_memory_index(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+    seeded_task: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    llm = ScriptedStepClient([_step(content="匿名回答", finish_reason="stop")])
+    singletons = await _singletons(pg_async_session_factory, llm, tmp_path=tmp_path)
+
+    await run_chat_async(
+        task_id=seeded_task["task_id"],
+        singletons=singletons,
+        session_factory=pg_async_session_factory,
+        redis=FakeRedis(decode_responses=False),
+        user_message="你好",
+        session_id=str(seeded_task["session_id"]),
+        user_id="anonymous",
+    )
+
+    assert singletons.memory.index_calls == 0
+
+
+async def test_cancel_after_explicit_insert_finalizes_claim_without_implicit_duplicate(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    from sqlalchemy import text as _text
+
+    uid, sid = uuid.uuid4(), uuid.uuid4()
+    async with pg_async_session_factory() as sess:
+        await sess.execute(
+            _text(
+                "INSERT INTO users (id, username, email, hashed_password, is_active) "
+                "VALUES (:i, :u, :e, :p, true)"
+            ),
+            {
+                "i": str(uid),
+                "u": f"memory-cancel-{uid.hex[:8]}",
+                "e": f"memory-cancel-{uid.hex[:8]}@t.local",
+                "p": "x",
+            },
+        )
+        sess.add(ChatSession(id=sid, user_id=uid, title="t"))
+        await sess.commit()
+    task_repo = ChatTaskRepo(pg_async_session_factory)
+    task = await task_repo.create_queued(
+        session_id=sid,
+        user_id=uid,
+        langgraph_thread_id=f"memory-cancel:{sid}",
+        initial_prompt_message_id=None,
+    )
+    redis = FakeRedis(decode_responses=False)
+    llm = ScriptedStepClient(
+        [
+            _step(
+                content="正在记录",
+                tool_calls=[
+                    _call(
+                        "memory_write",
+                        {
+                            "action": "archival_insert",
+                            "content": "用户持有贵州茅台",
+                            "evidence_quote": "买了茅台",
+                        },
+                    )
+                ],
+            ),
+            _step(content="不会执行", finish_reason="stop"),
+        ],
+        cancel_bus=ChatCancelBus(redis),
+        task_id=task.id,
+        cancel_after_round=0,
+    )
+    singletons = await _singletons(pg_async_session_factory, llm, tmp_path=tmp_path)
+
+    await run_chat_async(
+        task_id=task.id,
+        singletons=singletons,
+        session_factory=pg_async_session_factory,
+        redis=redis,
+        user_message="我买了茅台，请记住",
+        session_id=str(sid),
+        user_id=uid,
+    )
+
+    memory = singletons.memory
+    assert len(memory.episodes) == 1
+    assert memory.finalized_explicit == [
+        (memory.episodes[0]["episode_id"], "正在记录", "cancelled")
+    ]
 
 
 # ---------------------------------------------------------------------------

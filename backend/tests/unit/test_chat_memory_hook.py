@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -107,6 +108,21 @@ async def test_fail_soft_when_enqueue_raises() -> None:
     wrote = await persist_episode_and_trigger(mem, enqueue=enq, **_kw())
     assert wrote is True
     assert len(mem.episodes) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name", ["memory_search", "memory_write", "get_stock_quote"])
+async def test_implicit_extraction_skips_any_tool_turn(tool_name: str) -> None:
+    """回复后隐式抽取只属于零工具直答；显式 memory_write 也不能再重复抽取。"""
+    mem = _FakeMemory()
+    enq = _FakeEnqueue()
+    state = SimpleNamespace(ledger=SimpleNamespace(entries=[SimpleNamespace(tool_name=tool_name)]))
+
+    wrote = await persist_episode_and_trigger(mem, enqueue=enq, **_kw(final_state=state))
+
+    assert wrote is False
+    assert mem.episodes == []
+    assert enq.calls == []
 
 
 def test_enqueue_episode_extraction_passes_post_turn(monkeypatch: pytest.MonkeyPatch) -> None:

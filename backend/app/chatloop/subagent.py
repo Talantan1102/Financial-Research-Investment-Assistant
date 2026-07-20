@@ -21,6 +21,7 @@ from app.chatloop.inprocess import InProcessTool
 from app.chatloop.loop import ToolLoop
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_hub import ToolHub
+from app.chatloop.tool_runtime_policy import production_visible_capabilities
 from app.tools.base import ToolError
 
 # ── 护栏常量 ──────────────────────────────────────────────────────────────
@@ -92,7 +93,14 @@ def build_child_tool_hub(
     registry: Any, *, emit: Any, seq_counter: SeqCounter, cache: Any, trace: Any = None
 ) -> ToolHub:
     """构造子循环的只读 hub(flat schema,只挂只读白名单工具)。"""
-    hub = ToolHub(emit=emit, cache=cache, seq_counter=seq_counter, progressive=False, trace=trace)
+    hub = ToolHub(
+        emit=emit,
+        cache=cache,
+        seq_counter=seq_counter,
+        progressive=False,
+        trace=trace,
+        visibility_resolver=production_visible_capabilities,
+    )
     hub.register_subset(registry, READONLY_SUBAGENT_TOOLS)
     return hub
 
