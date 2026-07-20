@@ -13,7 +13,7 @@ from typing import cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -89,13 +89,7 @@ def paper_order_span(
     error: str | None = None,
 ) -> Span:
     """Build one correlated span while dropping PII and high-cardinality payloads."""
-    safe_attrs: dict[str, object] = {"order_id": str(order_id)}
-    for key, value in attrs.items():
-        if key not in _SAFE_ATTRS or not isinstance(value, (bool, int, float, str)):
-            continue
-        if isinstance(value, str) and _SAFE_TEXT.fullmatch(value) is None:
-            continue
-        safe_attrs[key] = value
+    safe_attrs = {"order_id": str(order_id), **_privacy_safe_attrs(attrs)}
     safe_error = error if error is not None and _SAFE_TEXT.fullmatch(error) else None
     return Span(
         span_id=f"paper-{order_id}-{name}-{uuid4().hex[:8]}",
@@ -105,6 +99,31 @@ def paper_order_span(
         inputs={},
         outputs={},
         metadata=safe_attrs,
+        started_at=started_at,
+        ended_at=ended_at,
+        error=safe_error,
+    )
+
+
+def paper_system_span(
+    *,
+    name: str,
+    started_at: datetime,
+    ended_at: datetime,
+    attrs: dict[str, object],
+    error: str | None = None,
+) -> Span:
+    """Build an aggregate-only span with no stable user/account/order identifier."""
+    trace_id = f"paper-system-{uuid4()}"
+    safe_error = error if error is not None and _SAFE_TEXT.fullmatch(error) else None
+    return Span(
+        span_id=f"{trace_id}-{name}-{uuid4().hex[:8]}",
+        request_id=trace_id,
+        parent_id=None,
+        name=f"paper:{name}",
+        inputs={},
+        outputs={},
+        metadata=_privacy_safe_attrs(attrs),
         started_at=started_at,
         ended_at=ended_at,
         error=safe_error,
@@ -130,6 +149,7 @@ def emit_paper_order_span(
     attrs: dict[str, object],
     error: str | None = None,
     parent_id: str | None = None,
+    span_id: str | None = None,
     writer: Callable[[Span], None] = write_paper_order_span,
 ) -> Span:
     """Finish and persist a span without coupling telemetry to business success."""
@@ -143,6 +163,8 @@ def emit_paper_order_span(
     )
     if parent_id is not None:
         span = span.model_copy(update={"parent_id": parent_id})
+    if span_id is not None:
+        span = span.model_copy(update={"span_id": span_id})
     try:
         writer(span)
     except Exception:
@@ -151,6 +173,86 @@ def emit_paper_order_span(
             extra={"order_id": str(order_id), "span_name": span.name},
         )
     return span
+
+
+def emit_paper_system_span(
+    *,
+    name: str,
+    started_at: datetime,
+    attrs: dict[str, object],
+    error: str | None = None,
+    writer: Callable[[Span], None] = write_paper_order_span,
+) -> Span:
+    span = paper_system_span(
+        name=name,
+        started_at=started_at,
+        ended_at=datetime.now(UTC),
+        attrs=attrs,
+        error=error,
+    )
+    try:
+        writer(span)
+    except Exception:
+        logger.exception("paper system trace writer failed", extra={"span_name": span.name})
+    return span
+
+
+def record_dispatch_recovery_if_pending(
+    *,
+    order_id: UUID,
+    started_at: datetime,
+    parent_id: str | None,
+    session_factory: Callable[[], AbstractContextManager[Session]] = SessionLocal,
+) -> bool:
+    """Atomically consume one persisted dispatch-failure incident after a successful scan."""
+    try:
+        with session_factory() as session:
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"paper-dispatch-recovery:{order_id}"},
+            )
+            rows = list(
+                session.scalars(
+                    select(TraceSpanRow)
+                    .where(
+                        TraceSpanRow.request_id == str(order_id),
+                        TraceSpanRow.name == "paper:dispatch",
+                    )
+                    .order_by(TraceSpanRow.ended_at, TraceSpanRow.span_id)
+                ).all()
+            )
+            last_recovery_at = max(
+                (
+                    cast(datetime, row.ended_at)
+                    for row in rows
+                    if dict(row.attrs_json or {}).get("dispatch_recovered") is True
+                ),
+                default=None,
+            )
+            has_pending_failure = any(
+                dict(row.attrs_json or {}).get("dispatch_failed") is True
+                and (last_recovery_at is None or cast(datetime, row.ended_at) > last_recovery_at)
+                for row in rows
+            )
+            if not has_pending_failure:
+                session.commit()
+                return False
+            span = paper_order_span(
+                order_id=order_id,
+                name="dispatch",
+                started_at=started_at,
+                ended_at=max(started_at, datetime.now(UTC)),
+                attrs={"dispatch_recovered": True, "outcome": "recovered"},
+            ).model_copy(update={"parent_id": parent_id})
+            session.add(_trace_row(span))
+            session.commit()
+            return True
+    except Exception:
+        logger.exception(
+            "paper dispatch recovery metric failed",
+            extra={"order_id": str(order_id)},
+        )
+        return False
 
 
 class PaperTradingAnalytics:
@@ -262,3 +364,29 @@ def _nonnegative_int(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
     return max(value, 0)
+
+
+def _privacy_safe_attrs(attrs: dict[str, object]) -> dict[str, object]:
+    safe: dict[str, object] = {}
+    for key, value in attrs.items():
+        if key not in _SAFE_ATTRS or not isinstance(value, (bool, int, float, str)):
+            continue
+        if isinstance(value, str) and _SAFE_TEXT.fullmatch(value) is None:
+            continue
+        safe[key] = value
+    return safe
+
+
+def _trace_row(span: Span) -> TraceSpanRow:
+    return TraceSpanRow(
+        span_id=span.span_id,
+        request_id=span.request_id,
+        parent_id=span.parent_id,
+        name=span.name,
+        inputs=span.inputs,
+        outputs=span.outputs,
+        attrs_json=span.metadata,
+        started_at=span.started_at,
+        ended_at=span.ended_at,
+        error=span.error,
+    )

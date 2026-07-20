@@ -77,6 +77,7 @@ def _stub_paper_match_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
         span_id = "test-paper-span"
 
     monkeypatch.setattr(paper_router, "_record_order_span", lambda **_kwargs: _Span())
+    monkeypatch.setattr(paper_router, "_record_system_span", lambda **_kwargs: _Span())
     monkeypatch.setattr(paper_router, "dispatch_match_order", lambda _order_id, **_kwargs: True)
 
 

@@ -180,12 +180,34 @@ def test_dispatch_propagates_trace_parent_and_records_failure(
     )
     tasks.match_order.apply_async.assert_called_once_with(  # type: ignore[attr-defined]
         args=["00000000-0000-0000-0000-000000000001"],
-        kwargs={"trace_parent_id": "rest-confirm-span"},
+        kwargs={"trace_parent_id": emitted[0]["span_id"]},
         retry=False,
     )
     assert emitted[0]["name"] == "dispatch"
     assert emitted[0]["parent_id"] == "rest-confirm-span"
     assert emitted[0]["attrs"] == {"dispatch_failed": True, "outcome": "failure"}
+
+
+def test_periodic_dispatch_without_pending_failure_is_not_counted_as_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    emitted: list[dict[str, object]] = []
+    recovery_checks: list[dict[str, object]] = []
+    monkeypatch.setattr(tasks.match_order, "apply_async", MagicMock())
+    monkeypatch.setattr(tasks, "_record_order_span", lambda **kwargs: emitted.append(kwargs))
+    monkeypatch.setattr(
+        tasks,
+        "record_dispatch_recovery_if_pending",
+        lambda **kwargs: recovery_checks.append(kwargs) or False,
+    )
+
+    assert tasks.dispatch_match_order("00000000-0000-0000-0000-000000000001", recovery=True)
+
+    assert len(recovery_checks) == 1
+    assert emitted[0]["attrs"] == {"dispatch_failed": False, "outcome": "scan_dispatched"}
+    assert "dispatch_recovered" not in emitted[0]["attrs"]
 
 
 def test_match_records_idempotent_replay_without_counting_a_business_fill_twice(

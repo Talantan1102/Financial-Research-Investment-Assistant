@@ -205,7 +205,7 @@ def test_periodic_scan_isolates_account_errors_and_commits_other_accounts(
     monkeypatch.setattr(paper_tasks, "SessionLocal", factory)
     monkeypatch.setattr(paper_tasks, "reconcile_account", flaky)
     emitted: list[dict[str, object]] = []
-    monkeypatch.setattr(paper_tasks, "_record_order_span", lambda **kwargs: emitted.append(kwargs))
+    monkeypatch.setattr(paper_tasks, "_record_system_span", lambda **kwargs: emitted.append(kwargs))
 
     result = paper_tasks._reconcile_active_accounts()
 

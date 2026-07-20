@@ -26,7 +26,11 @@ from app.services.paper_trading.clock import (
 )
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.matcher import Execution, match_visible_depth
-from app.services.paper_trading.observability import emit_paper_order_span
+from app.services.paper_trading.observability import (
+    emit_paper_order_span,
+    emit_paper_system_span,
+    record_dispatch_recovery_if_pending,
+)
 from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.quote_provider import (
     TushareRealtimeQuoteProvider,
@@ -52,6 +56,7 @@ def _record_order_span(
     attrs: dict[str, object],
     error: str | None = None,
     parent_id: str | None = None,
+    span_id: str | None = None,
 ) -> Span:
     return emit_paper_order_span(
         order_id=order_id,
@@ -60,6 +65,22 @@ def _record_order_span(
         attrs=attrs,
         error=error,
         parent_id=parent_id,
+        span_id=span_id,
+    )
+
+
+def _record_system_span(
+    *,
+    name: str,
+    started_at: datetime,
+    attrs: dict[str, object],
+    error: str | None = None,
+) -> Span:
+    return emit_paper_system_span(
+        name=name,
+        started_at=started_at,
+        attrs=attrs,
+        error=error,
     )
 
 
@@ -387,8 +408,7 @@ def _reconcile_active_accounts() -> dict[str, int]:
             session.commit()
             checked += 1
             suspended += int(bool(violations))
-            _record_order_span(
-                order_id=account_id,
+            _record_system_span(
                 name="reconcile",
                 started_at=started_at,
                 attrs={
@@ -404,8 +424,7 @@ def _reconcile_active_accounts() -> dict[str, int]:
                 "paper account reconciliation failed",
                 extra={"account_id": str(account_id)},
             )
-            _record_order_span(
-                order_id=account_id,
+            _record_system_span(
                 name="reconcile",
                 started_at=started_at,
                 attrs={
@@ -429,15 +448,13 @@ def dispatch_match_order(
     """Best-effort dispatch; the periodic open-order scan is the recovery path."""
     started_at = datetime.now(UTC)
     parsed_id = _parse_uuid(str(order_id))
+    dispatch_span_id = f"paper-{parsed_id}-dispatch-{uuid.uuid4().hex[:8]}"
     try:
-        if trace_parent_id is None:
-            match_order.apply_async(args=[str(order_id)], retry=False)
-        else:
-            match_order.apply_async(
-                args=[str(order_id)],
-                kwargs={"trace_parent_id": trace_parent_id},
-                retry=False,
-            )
+        match_order.apply_async(
+            args=[str(order_id)],
+            kwargs={"trace_parent_id": dispatch_span_id},
+            retry=False,
+        )
     except Exception:
         logger.exception(
             "paper match dispatch failed; periodic scan will retry",
@@ -450,18 +467,26 @@ def dispatch_match_order(
             attrs={"dispatch_failed": True, "outcome": "failure"},
             error="dispatch_failed",
             parent_id=trace_parent_id,
+            span_id=dispatch_span_id,
         )
         return False
+    if recovery:
+        record_dispatch_recovery_if_pending(
+            order_id=parsed_id,
+            started_at=started_at,
+            parent_id=dispatch_span_id,
+            session_factory=SessionLocal,
+        )
     _record_order_span(
         order_id=parsed_id,
         name="dispatch",
         started_at=started_at,
         attrs={
             "dispatch_failed": False,
-            "dispatch_recovered": recovery,
-            "outcome": "success",
+            "outcome": "scan_dispatched" if recovery else "success",
         },
         parent_id=trace_parent_id,
+        span_id=dispatch_span_id,
     )
     return True
 

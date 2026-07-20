@@ -41,7 +41,10 @@ from app.schemas.paper_trading import (
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingClock, TushareTradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
-from app.services.paper_trading.observability import emit_paper_order_span
+from app.services.paper_trading.observability import (
+    emit_paper_order_span,
+    emit_paper_system_span,
+)
 from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
 from app.services.paper_trading.rulebook import RuleBook
@@ -68,6 +71,21 @@ def _record_order_span(
         attrs=attrs,
         error=error,
         parent_id=parent_id,
+    )
+
+
+def _record_system_span(
+    *,
+    name: str,
+    started_at: datetime,
+    attrs: dict[str, object],
+    error: str | None = None,
+) -> Span:
+    return emit_paper_system_span(
+        name=name,
+        started_at=started_at,
+        attrs=attrs,
+        error=error,
     )
 
 
@@ -475,8 +493,7 @@ def confirm_reset(
         )
         snapshot = PaperAccountRead.model_validate(account)
         db.commit()
-        _record_order_span(
-            order_id=cast(UUID, account.id),
+        _record_system_span(
             name="reset",
             started_at=started_at,
             attrs={"outcome": "success"},
