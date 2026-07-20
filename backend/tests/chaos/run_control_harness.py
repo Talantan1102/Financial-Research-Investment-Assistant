@@ -421,12 +421,14 @@ class RunControlChaosHarness:
 
 
 def run_default_compose_suite(
-    repo_root: Path, project: str, evidence_path: Path
+    repo_root: Path, project: str, evidence_path: Path, *, timeout_seconds: float | None = None
 ) -> tuple[ScenarioEvidence, ...]:
     """Wire the named scenarios to the existing real-process acceptance client."""
     from tests.helpers.run_control_compose_harness import ComposeRunControlHarness
 
     legacy = ComposeRunControlHarness(repo_root)
+    if timeout_seconds is not None:
+        legacy.environment["RUN_CONTROL_COMMAND_TIMEOUT"] = str(max(1.0, timeout_seconds))
     legacy.project = project
     legacy.environment["RUN_CONTROL_COMPOSE_PROJECT"] = project
     build_mode = "--no-build" if legacy.environment.get("RUN_CONTROL_IMAGE") else "--build"
@@ -442,7 +444,12 @@ def run_default_compose_suite(
         "run-worker-b",
         "run-api",
     )
-    harness = RunControlChaosHarness(repo_root, project=project, database_url=legacy.database_url)
+    harness = RunControlChaosHarness(
+        repo_root,
+        project=project,
+        database_url=legacy.database_url,
+        command_timeout=max(1.0, timeout_seconds or 30.0),
+    )
 
     def create_and_wait(key: str) -> list[str]:
         context = legacy._context()
@@ -525,36 +532,38 @@ def run_default_compose_suite(
 
     def pause_resume_slot_release() -> list[str]:
         context = legacy._context()
-        legacy.environment["RUN_SIMULATED_PAUSE_TYPE"] = "input"
-        legacy._compose(
-            "up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b"
-        )
-        run_id = legacy._create_run(
-            *context,
-            key="pause-release",
-        )
-        # The production chat executor must emit a durable waiting Pause; a
-        # simulated executor that never pauses is an explicit scenario failure.
-        legacy._wait_status_in(run_id, {"waiting_approval", "waiting_input"}, timeout=15)
-        with legacy._connect() as connection, connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT pause_type FROM run_pauses WHERE run_id=%s ORDER BY pause_no DESC LIMIT 1",
-                (run_id,),
+        previous = legacy.environment.copy()
+        try:
+            legacy.environment["RUN_WORKER_CAPACITY"] = "1"
+            legacy.environment["RUN_SIMULATED_PAUSE_TYPE"] = "input"
+            legacy._compose("stop", "run-worker-b", check=False)
+            legacy._compose("up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a")
+            first = legacy._create_run(*context, key="pause-release-a")
+            legacy._wait_status_in(first, {"waiting_approval", "waiting_input"}, timeout=15)
+            second = legacy._create_run(*context, key="pause-release-b")
+            legacy._wait_status_in(second, {"queued", "pending"}, timeout=15)
+            with legacy._connect() as connection, connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT pause_type FROM run_pauses WHERE run_id=%s ORDER BY pause_no DESC LIMIT 1",
+                    (first,),
+                )
+                row = cursor.fetchone()
+                assert row is not None and row[0] in {"approval", "input"}
+                cursor.execute("SELECT status FROM runs WHERE id=%s", (second,))
+                queued = cursor.fetchone()
+                assert queued is not None and queued[0] in {"queued", "pending"}
+            legacy._api(
+                "POST",
+                f"/api/v1/tenants/{context[0]}/runs/{first}/resume",
+                context[1],
+                body={"response": "continue"},
             )
-            row = cursor.fetchone()
-            assert row is not None and row[0] in {"approval", "input"}
-        legacy._api(
-            "POST",
-            f"/api/v1/tenants/{context[0]}/runs/{run_id}/resume",
-            context[1],
-            body={"response": "continue"},
-        )
-        legacy._wait_status(run_id, "completed", timeout=30)
-        legacy.environment.pop("RUN_SIMULATED_PAUSE_TYPE", None)
-        legacy._compose(
-            "up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b"
-        )
-        return [str(run_id)]
+            legacy._wait_status(first, "completed", timeout=30)
+            legacy._wait_status(second, "completed", timeout=30)
+            return [str(first), str(second)]
+        finally:
+            legacy.environment.clear()
+            legacy.environment.update(previous)
 
     def revision_chain() -> list[str]:
         context = legacy._context()
@@ -639,6 +648,17 @@ def run_default_compose_suite(
     def second_worker_crash() -> list[str]:
         return [str(legacy._double_kill_retry_exhaustion())]
 
+    def isolated(action: Callable[[], Sequence[str]]) -> Callable[[], Sequence[str]]:
+        def invoke() -> Sequence[str]:
+            previous = legacy.environment.copy()
+            try:
+                return action()
+            finally:
+                legacy.environment.clear()
+                legacy.environment.update(previous)
+
+        return invoke
+
     actions: dict[str, Callable[[], Sequence[str]]] = {
         "browser_disconnect": browser_disconnect,
         "two_worker_parallel": parallel,
@@ -654,6 +674,7 @@ def run_default_compose_suite(
         "scheduler_dispatcher_restart": scheduler_dispatcher_restart,
         "legacy_writer_zero": legacy_writer_zero,
     }
+    actions = {name: isolated(action) for name, action in actions.items()}
     return harness.run_scenarios(actions, evidence_path=evidence_path)
 
 
@@ -662,5 +683,8 @@ if __name__ == "__main__":
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--project", required=True)
     parser.add_argument("--evidence", type=Path, required=True)
+    parser.add_argument("--timeout", type=float, default=None)
     args = parser.parse_args()
-    run_default_compose_suite(args.repo_root, args.project, args.evidence)
+    run_default_compose_suite(
+        args.repo_root, args.project, args.evidence, timeout_seconds=args.timeout
+    )

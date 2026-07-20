@@ -15,9 +15,7 @@ from tests.chaos.run_control_harness import (
 )
 
 
-def _stub_runner(
-    args: tuple[str, ...], **kwargs: Any
-) -> subprocess.CompletedProcess[str]:
+def _stub_runner(args: tuple[str, ...], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     del kwargs
     return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
@@ -116,6 +114,7 @@ def test_evidence_requires_database_facts_not_only_process_state() -> None:
 
 def test_scenario_runner_requires_exact_map_and_preserves_action_error(tmp_path: Path) -> None:
     harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=_stub_runner)
+
     def fake_query(_run_ids: list[str] | tuple[str, ...]) -> dict[str, int]:
         return {
             "runs": 3,
@@ -151,7 +150,12 @@ def test_operator_script_wires_new_harness_and_evidence(tmp_path: Path) -> None:
 
 
 def test_harness_requires_strict_health_and_real_restart_actions() -> None:
-    source = Path(__file__).resolve().parent.joinpath("run_control_harness.py").read_text(encoding="utf-8")
+    source = (
+        Path(__file__)
+        .resolve()
+        .parent.joinpath("run_control_harness.py")
+        .read_text(encoding="utf-8")
+    )
     assert 'health == "healthy"' in source
     assert 'legacy._compose("restart", "run-scheduler-a"' in source
     assert "harness.wait_healthy(service" in source
@@ -170,12 +174,17 @@ def test_cleanup_is_scoped_and_removes_project_volumes_and_networks(tmp_path: Pa
     down = next(call for call in calls if "down" in call)
     assert "--volumes" in down
     assert "--remove-orphans" in down
-    assert any("network" in call and "label=com.docker.compose.project=rcp-test" in call for call in calls)
-    assert any("volume" in call and "label=com.docker.compose.project=rcp-test" in call for call in calls)
+    assert any(
+        "network" in call and "label=com.docker.compose.project=rcp-test" in call for call in calls
+    )
+    assert any(
+        "volume" in call and "label=com.docker.compose.project=rcp-test" in call for call in calls
+    )
 
 
 def test_evidence_file_remains_one_valid_json_array_after_action_failure(tmp_path: Path) -> None:
     harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=_stub_runner)
+
     def fake_query(_run_ids: list[str] | tuple[str, ...]) -> dict[str, int]:
         return {
             "runs": 3,
@@ -197,6 +206,7 @@ def test_evidence_file_remains_one_valid_json_array_after_action_failure(tmp_pat
     with pytest.raises(RuntimeError):
         harness.run_scenarios(actions, evidence_path=path)
     import json
+
     rows = json.loads(path.read_text(encoding="utf-8"))
     assert isinstance(rows, list)
     assert next(row for row in rows if row["name"] == "redis_restart")["error"]
@@ -204,6 +214,7 @@ def test_evidence_file_remains_one_valid_json_array_after_action_failure(tmp_pat
 
 def test_legacy_writer_evidence_rejects_any_legacy_rows(tmp_path: Path) -> None:
     harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=_stub_runner)
+
     def fake_query(_run_ids: list[str] | tuple[str, ...]) -> dict[str, int]:
         return {
             "runs": 1,

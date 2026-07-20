@@ -872,13 +872,23 @@ class ComposeRunControlHarness:
         return completed.stdout
 
     def _command_result(self, *arguments: str) -> subprocess.CompletedProcess[str]:
-        return self._runner(
-            arguments,
-            cwd=self.repo_root,
-            env=self.environment,
-            check=False,
-            capture_output=True,
-            encoding="utf-8",
-            errors="replace",
-            text=True,
-        )
+        try:
+            return self._runner(
+                arguments,
+                cwd=self.repo_root,
+                env=self.environment,
+                check=False,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                text=True,
+                timeout=float(self.environment.get("RUN_CONTROL_COMMAND_TIMEOUT", "60")),
+            )
+        except subprocess.TimeoutExpired as exc:
+            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+            return subprocess.CompletedProcess(
+                arguments,
+                124,
+                stdout=exc.output if isinstance(exc.output, str) else "",
+                stderr=f"command timeout after {exc.timeout}s: {stderr}",
+            )
