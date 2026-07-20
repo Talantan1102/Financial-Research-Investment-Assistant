@@ -32,6 +32,7 @@ from app.router.knowledge_router import router as knowledge_router  # noqa: E402
 from app.router.memory_router import router as memory_router  # noqa: E402  (C.5)
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
 from app.router.observability_router import router as observability_router  # noqa: E402
+from app.router.run_observability import router as run_observability_router  # noqa: E402
 from app.router.persona_router import router as persona_router  # noqa: E402  (persona-ui)
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
@@ -407,6 +408,7 @@ app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (co
 app.include_router(memory_router)  # C.5 — /api/v0/memory (cross-session memory page)
 app.include_router(persona_router)  # persona-ui — /api/v0/persona (Tier 1 persona items)
 app.include_router(observability_router)  # chatloop 可观测性(只读聚合)
+app.include_router(run_observability_router)
 
 
 # C39: chats router's get_repo override is registered below alongside the other

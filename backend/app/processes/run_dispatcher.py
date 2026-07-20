@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 from collections.abc import Awaitable, Callable
@@ -16,7 +17,10 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.processes.runtime import BoundedBackoff, ProcessHealth, is_transient_error
 from app.run_control.redis_transport import RedisTransport
+from app.services.run_metrics import log_context, run_log_context
 from app.services.run_outbox import OutboxClaimRejected, RunOutboxService
+
+logger = logging.getLogger(__name__)
 
 
 class RunDispatcher:
@@ -49,24 +53,30 @@ class RunDispatcher:
         items = await self._outbox.claim_batch(self._dispatcher_id, self._batch_size)
         delivered = 0
         for item in items:
-            try:
-                await self._transport.publish(item)
-            except (
-                RedisConnectionError,
-                RedisTimeoutError,
-                ResponseError,
-                ConnectionError,
-                TimeoutError,
-                OSError,
-            ) as exc:
-                with suppress(OutboxClaimRejected):
-                    await self._outbox.mark_failed(
-                        item.id,
-                        self._dispatcher_id,
-                        item.claim_generation,
-                        self._delivery_error_code(exc),
-                    )
-                continue
+            with run_log_context(
+                run_id=item.run_id, attempt_id=item.attempt_id, worker_id=item.worker_id
+            ):
+                logger.info(
+                    "dispatching run outbox event type=%s", item.event_type, extra=log_context()
+                )
+                try:
+                    await self._transport.publish(item)
+                except (
+                    RedisConnectionError,
+                    RedisTimeoutError,
+                    ResponseError,
+                    ConnectionError,
+                    TimeoutError,
+                    OSError,
+                ) as exc:
+                    with suppress(OutboxClaimRejected):
+                        await self._outbox.mark_failed(
+                            item.id,
+                            self._dispatcher_id,
+                            item.claim_generation,
+                            self._delivery_error_code(exc),
+                        )
+                    continue
             # Deliberately outside the Redis exception handler. If the process or
             # database fails after XADD, the claim expires and the item is sent again.
             try:

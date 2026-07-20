@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import signal
 from contextlib import suppress
@@ -14,7 +15,10 @@ from redis.exceptions import ResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from app.processes.runtime import BoundedBackoff, ProcessHealth, is_transient_error
+from app.services.run_metrics import log_context
 from app.services.scheduling_service import SchedulingService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,12 @@ class RunScheduler:
             if assignment is None:
                 break
             scheduled += 1
+        logger.info(
+            "scheduler cycle completed recovered=%d scheduled=%d",
+            len(recovered),
+            scheduled,
+            extra=log_context(),
+        )
         return SchedulerCycle(recovered=len(recovered), scheduled=scheduled)
 
     async def run_forever(self) -> None:

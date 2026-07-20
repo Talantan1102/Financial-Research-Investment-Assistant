@@ -25,6 +25,7 @@ from app.run_control.redis_transport import (
 )
 from app.run_control.types import OutboxType
 from app.services.attempt_service import AttemptCommandRejected, AttemptService, ClaimedAssignment
+from app.services.run_metrics import log_context, run_log_context
 from app.services.run_outbox import OutboxItem
 from app.services.run_stream_bus import RunStreamBus
 from app.services.worker_registry import WorkerRegistry
@@ -185,9 +186,13 @@ class RunWorker:
             return
         if self._shutdown.is_set() or self._draining:
             return
-        claim = await self._attempts.claim(item.attempt_id, self._worker_id)
-        if claim.claimed and claim.assignment is not None:
-            await self._execute_with_cancel_control(claim.assignment)
+        with run_log_context(
+            run_id=item.run_id, attempt_id=item.attempt_id, worker_id=self._worker_id
+        ):
+            logger.info("assignment received entry=%s", entry_id, extra=log_context())
+            claim = await self._attempts.claim(item.attempt_id, self._worker_id)
+            if claim.claimed and claim.assignment is not None:
+                await self._execute_with_cancel_control(claim.assignment)
         await self._transport.acknowledge_and_delete(self._stream_key, self.GROUP, entry_id)
 
     async def stop(self) -> None:
