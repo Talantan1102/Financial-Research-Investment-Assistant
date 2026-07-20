@@ -345,6 +345,115 @@ async def test_fact_window_counts_long_running_run_created_before_window(
 
 
 @pytest.mark.asyncio
+async def test_current_waiting_projection_counts_waiting_run_when_pause_event_predates_window(
+    pg_async_session_factory,
+) -> None:
+    """Current waiting state is a snapshot, even when its pause fact is old."""
+    now = datetime.utcnow()
+    old = now - timedelta(hours=2)
+    tenant_id = uuid4()
+    user_id = uuid4()
+    session_id = uuid4()
+    future_session_id = uuid4()
+    run_id = uuid4()
+    future_run_id = uuid4()
+    message_id = uuid4()
+    future_message_id = uuid4()
+    async with pg_async_session_factory() as session:
+        session.add_all(
+            [
+                User(
+                    id=user_id,
+                    username=f"waiting-{user_id}",
+                    email=f"waiting-{user_id}@example.com",
+                    hashed_password="test",
+                ),
+                Tenant(id=tenant_id, name="waiting", slug=f"waiting-{tenant_id}"),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
+                RunSession(id=session_id, tenant_id=tenant_id, created_by_user_id=user_id),
+                RunSession(id=future_session_id, tenant_id=tenant_id, created_by_user_id=user_id),
+            ]
+        )
+        await session.flush()
+        session.add(
+            RunMessage(
+                id=message_id,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                role="user",
+                content="waiting fixture",
+                status="complete",
+                created_at=old,
+            )
+        )
+        session.add(
+            RunMessage(
+                id=future_message_id,
+                tenant_id=tenant_id,
+                session_id=future_session_id,
+                role="user",
+                content="future waiting fixture",
+                status="complete",
+                created_at=now + timedelta(hours=1),
+            )
+        )
+        await session.flush()
+        session.add(
+            Run(
+                id=run_id,
+                tenant_id=tenant_id,
+                session_id=session_id,
+                created_by_user_id=user_id,
+                run_type="chat",
+                status=RunStatus.WAITING_INPUT.value,
+                idempotency_key=f"waiting-{run_id}",
+                request_hash="1" * 64,
+                input_message_id=message_id,
+                revision_seq=1,
+                created_at=old,
+                queued_at=old,
+            )
+        )
+        session.add(
+            Run(
+                id=future_run_id,
+                tenant_id=tenant_id,
+                session_id=future_session_id,
+                created_by_user_id=user_id,
+                run_type="chat",
+                status=RunStatus.WAITING_APPROVAL.value,
+                idempotency_key=f"waiting-future-{future_run_id}",
+                request_hash="2" * 64,
+                input_message_id=future_message_id,
+                revision_seq=2,
+                created_at=now + timedelta(hours=1),
+                queued_at=now + timedelta(hours=1),
+            )
+        )
+        await session.flush()
+        session.add(
+            RunEvent(
+                tenant_id=tenant_id,
+                run_id=run_id,
+                seq=1,
+                event_type="run.paused",
+                payload={"pause_type": "input"},
+                created_at=old,
+            )
+        )
+        await session.commit()
+
+    result = await RunMetricsService(pg_async_session_factory).snapshot(
+        tenant_id, window=timedelta(hours=1), as_of=now
+    )
+    assert result["runs"]["waiting"] == {RunStatus.WAITING_INPUT.value: 1}
+
+
+@pytest.mark.asyncio
 async def test_observability_router_auth_scope_window_and_read_only(
     observability_context,
     observability_client: ClientFactory,

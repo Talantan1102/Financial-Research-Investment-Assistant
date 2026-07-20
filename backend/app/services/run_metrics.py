@@ -306,24 +306,17 @@ class RunMetricsService:
             )
         ).one()
         waiting = (
-            # Count current waiting Runs, not pause-event rows. A Run may
-            # pause/resume repeatedly; EXISTS + DISTINCT keeps it at one.
+            # Count the current waiting Run state, not pause-event rows. A Run
+            # may pause/resume repeatedly, and its latest pause can predate the
+            # requested fact window while the Run remains waiting now.
             await session.execute(
-                select(Run.status, func.count(func.distinct(Run.id)))
-                .select_from(Run)
+                select(Run.status, func.count())
                 .where(
                     scope,
+                    Run.created_at <= as_of,
                     Run.status.in_(
                         (RunStatus.WAITING_APPROVAL.value, RunStatus.WAITING_INPUT.value)
                     ),
-                    select(RunEvent.id)
-                    .where(
-                        RunEvent.run_id == Run.id,
-                        RunEvent.event_type == "run.paused",
-                        RunEvent.created_at >= cutoff,
-                        RunEvent.created_at <= as_of,
-                    )
-                    .exists(),
                 )
                 .group_by(Run.status)
             )
