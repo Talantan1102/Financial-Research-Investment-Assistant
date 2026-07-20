@@ -22,6 +22,18 @@ const EMPTY_DETAIL: SessionDetailState = {
   error: false,
 }
 
+function SessionLoadingPane() {
+  return (
+    <div role="status" aria-label="Loading session">
+      <textarea
+        aria-label="Session loading"
+        data-testid="input-textarea"
+        disabled
+      />
+    </div>
+  )
+}
+
 export function ChatSessionPage() {
   const { session_id } = useParams<{ session_id: string }>()
   const currentIdentityRef = useRef(session_id)
@@ -71,13 +83,15 @@ export function ChatSessionPage() {
         <button type="button" onClick={() => setDetailAttempt((value) => value + 1)}>重试</button>
       </div>
     ) : null}
-    <ChatPane
-      sessionId={session_id}
-      initialRunId={currentDetail?.activeRun?.id}
-      initialRunStatus={currentDetail?.activeRun?.status}
-      initialPause={currentDetail?.activePause}
-      sessionLoading={!currentDetail?.loaded}
-    />
+    {currentDetail?.loaded ? (
+      <ChatPane
+        key={session_id}
+        sessionId={session_id}
+        initialRunId={currentDetail.activeRun?.id}
+        initialRunStatus={currentDetail.activeRun?.status}
+        initialPause={currentDetail.activePause}
+      />
+    ) : currentDetail?.error ? null : <SessionLoadingPane />}
   </>
 }
 

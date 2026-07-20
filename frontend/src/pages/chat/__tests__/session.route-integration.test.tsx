@@ -1,4 +1,5 @@
-import { Route, Routes, useNavigate } from 'react-router-dom'
+import { useLayoutEffect } from 'react'
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -56,12 +57,21 @@ function pendingEventStream(): Response {
   })
 }
 
-function RouteHarness() {
+function BeforePassiveEffectProbe({ onSessionBCommit }: { onSessionBCommit?: () => void }) {
+  const { pathname } = useLocation()
+  useLayoutEffect(() => {
+    if (pathname === '/chat/session-b') onSessionBCommit?.()
+  }, [onSessionBCommit, pathname])
+  return null
+}
+
+function RouteHarness({ onSessionBCommit }: { onSessionBCommit?: () => void }) {
   const navigate = useNavigate()
   return (
     <>
       <button type="button" onClick={() => navigate('/chat/session-b')}>Go to B</button>
       <Routes><Route path="/chat/:session_id" element={<ChatSessionPage />} /></Routes>
+      <BeforePassiveEffectProbe onSessionBCommit={onSessionBCommit} />
     </>
   )
 }
@@ -79,6 +89,12 @@ describe('<ChatSessionPage> route identity integration', () => {
     const eventRequests: string[] = []
     const runGets: string[] = []
     const cancels: string[] = []
+    const resumes: string[] = []
+    let beforePassiveEffects: {
+      hasSessionAPause: boolean
+      hasStopControl: boolean
+      hasDisabledLoadingInput: boolean
+    } | null = null
 
     server.use(
       http.get(`${API_BASE}/api/v1/tenants`, () => HttpResponse.json([
@@ -105,18 +121,48 @@ describe('<ChatSessionPage> route identity integration', () => {
         cancels.push(runId)
         return HttpResponse.json(run(runId === 'run-a' ? 'session-a' : 'session-b', runId, 'cancelled'))
       }),
+      http.post(`${API_BASE}/api/v1/tenants/tenant-1/runs/:runId/resume`, ({ params }) => {
+        const runId = String(params.runId)
+        resumes.push(runId)
+        return HttpResponse.json(run(runId === 'run-a' ? 'session-a' : 'session-b', runId, 'running'))
+      }),
       http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions`, () => HttpResponse.json([])),
     )
 
-    renderWithProviders(<RouteHarness />, { initialRoute: '/chat/session-a' })
+    renderWithProviders(<RouteHarness onSessionBCommit={() => {
+      const input = document.querySelector<HTMLTextAreaElement>('[data-testid="input-textarea"]')
+      const composer = input?.parentElement?.parentElement
+      const stopControl = composer?.lastElementChild instanceof HTMLButtonElement
+        ? composer.lastElementChild
+        : null
+      const pauseInput = document.querySelector<HTMLTextAreaElement>('textarea[aria-label]:not([data-testid])')
+      const pauseControl = pauseInput?.closest('label')?.parentElement?.querySelector<HTMLButtonElement>('button') ?? null
+      beforePassiveEffects = {
+        hasSessionAPause: document.body.textContent?.includes('Session A pause') ?? false,
+        hasStopControl: stopControl !== null,
+        hasDisabledLoadingInput: input?.disabled ?? false,
+      }
+      stopControl?.click()
+      pauseControl?.click()
+    }} />, { initialRoute: '/chat/session-a' })
     expect(await screen.findByText('Session A history')).toBeInTheDocument()
+    const pauseInput = await screen.findByRole('textbox', { name: /./ })
+    await user.type(pauseInput, 'answer for A')
     await waitFor(() => expect(eventRequests).toEqual(['run-a']))
 
     await user.click(screen.getByRole('button', { name: 'Go to B' }))
 
+    expect(beforePassiveEffects).toEqual({
+      hasSessionAPause: false,
+      hasStopControl: false,
+      hasDisabledLoadingInput: true,
+    })
     expect(screen.queryByText('Session A history')).not.toBeInTheDocument()
     expect(screen.queryByText('Session A pause')).not.toBeInTheDocument()
     expect(screen.getByTestId('input-textarea')).toBeDisabled()
+    await act(async () => { await Promise.resolve() })
+    expect(cancels).not.toContain('run-a')
+    expect(resumes).not.toContain('run-a')
     await waitFor(() => expect(eventRequests).toEqual(['run-a']))
     expect(runGets).not.toContain('run-a')
 
@@ -127,6 +173,7 @@ describe('<ChatSessionPage> route identity integration', () => {
     await user.keyboard('{Control>}k{/Control}')
     await waitFor(() => expect(cancels).toEqual(['run-b']))
     expect(cancels).not.toContain('run-a')
+    expect(resumes).not.toContain('run-a')
   })
 
   it('ignores a Session A detail response that arrives after Session B is current', async () => {
