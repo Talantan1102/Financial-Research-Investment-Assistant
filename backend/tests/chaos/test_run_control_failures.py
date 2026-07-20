@@ -98,6 +98,7 @@ def test_evidence_requires_database_facts_not_only_process_state() -> None:
         attempts=1,
         events=4,
         outbox=1,
+        terminal_runs=1,
     )
     assert evidence.has_database_facts
     assert evidence.to_json()["events"] == 4
@@ -110,6 +111,7 @@ def test_scenario_runner_requires_exact_map_and_preserves_action_error(tmp_path:
         "attempts": 1,
         "events": 1,
         "outbox": 1,
+        "terminal_runs": 1,
     }
     actions = {name: (lambda: ["run-id"]) for name in CHAOS_SCENARIOS}
     actions["redis_restart"] = lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
@@ -118,3 +120,21 @@ def test_scenario_runner_requires_exact_map_and_preserves_action_error(tmp_path:
     rows = (tmp_path / "evidence.json").read_text(encoding="utf-8")
     assert '"name": "redis_restart"' in rows
     assert "redis down" in rows
+
+
+def test_operator_script_wires_new_harness_and_evidence(tmp_path: Path) -> None:
+    del tmp_path
+    script = Path(__file__).resolve().parents[2] / "scripts" / "run_control_chaos.ps1"
+    source = script.read_text(encoding="utf-8")
+    assert "tests.chaos.run_control_harness" in source
+    assert "RUN_CONTROL_CHAOS_EVIDENCE" in source
+    assert "--evidence" in source
+    assert "--remove-orphans" in source
+
+
+def test_harness_requires_strict_health_and_real_restart_actions() -> None:
+    source = Path(__file__).resolve().parent.joinpath("run_control_harness.py").read_text(encoding="utf-8")
+    assert 'health == "healthy"' in source
+    assert 'legacy._compose("restart", "run-scheduler-a"' in source
+    assert "harness.wait_healthy(service" in source
+    assert "_parallel_and_duplicate()" in source

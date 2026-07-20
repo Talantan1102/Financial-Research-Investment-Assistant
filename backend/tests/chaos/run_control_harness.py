@@ -8,6 +8,7 @@ self-tests and from ``run_control_chaos.ps1`` for the real-process suite.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -18,8 +19,11 @@ from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from urllib.request import Request, urlopen
+from uuid import UUID
 
 import psycopg
+from jose import jwt
 
 CHAOS_SCENARIOS: tuple[str, ...] = (
     "browser_disconnect",
@@ -62,11 +66,18 @@ class ScenarioEvidence:
     attempts: int
     events: int
     outbox: int
+    terminal_runs: int = 0
     error: str | None = None
 
     @property
     def has_database_facts(self) -> bool:
-        return self.runs > 0 and self.attempts > 0 and self.events > 0
+        return (
+            self.runs > 0
+            and self.attempts > 0
+            and self.events > 0
+            and self.outbox > 0
+            and self.terminal_runs > 0
+        )
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self) | {"has_database_facts": self.has_database_facts}
@@ -159,7 +170,7 @@ class RunControlChaosHarness:
                     continue
                 if row.get("Service") == service and row.get("State") == "running":
                     health = str(row.get("Health", "")).lower()
-                    if health in {"healthy", ""}:
+                    if health == "healthy":
                         return
             if poll_interval:
                 time.sleep(min(poll_interval, max(0.0, deadline - time.monotonic())))
@@ -192,6 +203,13 @@ class RunControlChaosHarness:
                 cursor.execute(f"SELECT count(*) FROM {table} WHERE run_id = ANY(%s::uuid[])", parameters)
                 row = cursor.fetchone()
                 counts[key] = int(row[0]) if row is not None else 0
+            cursor.execute(
+                "SELECT count(*) FROM runs WHERE id = ANY(%s::uuid[]) "
+                "AND status IN ('completed','cancelled','failed','paused')",
+                parameters,
+            )
+            row = cursor.fetchone()
+            counts["terminal_runs"] = int(row[0]) if row is not None else 0
         return counts
 
     def record(self, name: str, started: float, run_ids: list[str] | tuple[str, ...]) -> ScenarioEvidence:
@@ -205,6 +223,7 @@ class RunControlChaosHarness:
             counts["attempts"],
             counts["events"],
             counts["outbox"],
+            counts["terminal_runs"],
         )
         if not evidence.has_database_facts:
             raise AssertionError(f"scenario {name} has no durable database facts: {evidence}")
@@ -254,7 +273,7 @@ class RunControlChaosHarness:
                 run_ids = actions[name]()
                 evidence = self.record(name, started, tuple(run_ids))
             except Exception as exc:
-                counts = {"runs": 0, "attempts": 0, "events": 0, "outbox": 0}
+                counts = {"runs": 0, "attempts": 0, "events": 0, "outbox": 0, "terminal_runs": 0}
                 if run_ids and self.database_url:
                     with suppress(Exception):
                         counts = self.query_evidence(tuple(run_ids))
@@ -265,6 +284,7 @@ class RunControlChaosHarness:
                     counts["attempts"],
                     counts["events"],
                     counts["outbox"],
+                    counts["terminal_runs"],
                     error=f"{type(exc).__name__}: {exc}",
                 )
                 self.evidence.append(evidence)
@@ -291,3 +311,164 @@ class RunControlChaosHarness:
         if result is None or result.returncode != 0:
             raise ComposeScopeError(f"docker command failed: {getattr(result, 'stderr', '')}")
         return result.stdout or ""
+
+
+def run_default_compose_suite(repo_root: Path, project: str, evidence_path: Path) -> tuple[ScenarioEvidence, ...]:
+    """Wire the named scenarios to the existing real-process acceptance client."""
+    from tests.helpers.run_control_compose_harness import ComposeRunControlHarness
+
+    legacy = ComposeRunControlHarness(repo_root)
+    legacy.project = project
+    legacy.environment["RUN_CONTROL_COMPOSE_PROJECT"] = project
+    build_mode = "--no-build" if legacy.environment.get("RUN_CONTROL_IMAGE") else "--build"
+    legacy._compose("up", "-d", build_mode, "--wait", "run-scheduler-a", "run-scheduler-b", "run-dispatcher", "run-worker-a", "run-worker-b", "run-api")
+    harness = RunControlChaosHarness(repo_root, project=project, database_url=legacy.database_url)
+
+    def create_and_wait(key: str) -> list[str]:
+        context = legacy._context()
+        run_id = legacy._create_run(*context, key=key)
+        legacy._wait_status(run_id, "completed", timeout=30)
+        return [str(run_id)]
+
+    def parallel() -> list[str]:
+        return [str(item) for item in legacy._parallel_and_duplicate()]
+
+    def browser_disconnect() -> list[str]:
+        context = legacy._context()
+        run_id = legacy._create_run(*context, key="browser-disconnect")
+        token = jwt.encode({"sub": str(context[1]), "exp": int(time.time()) + 3600}, legacy.environment["RUN_CONTROL_JWT_SECRET_KEY"], algorithm="HS256")
+        request = Request(f"{legacy.api_url}/api/v1/tenants/{context[0]}/runs/{run_id}/events", headers={"Authorization": f"Bearer {token}"})
+        stream = urlopen(request, timeout=5)
+        stream.close()  # browser disconnect; durable stream cursor is recovered below
+        legacy._wait_status(run_id, "completed", timeout=30)
+        return [str(run_id)]
+
+    def tenant_fairness() -> list[str]:
+        legacy.environment["RUN_WORKER_CAPACITY"] = "1"
+        legacy._docker("stop", f"{legacy.project}-run-worker-b-1")
+        legacy._compose("up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a")
+        first = legacy._create_run(*legacy._context(), key="fair-a")
+        second = legacy._create_run(*legacy._context(), key="fair-b")
+        legacy._wait_status(first, "completed", timeout=30)
+        legacy._wait_status(second, "completed", timeout=30)
+        with legacy._connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT count(DISTINCT tenant_id) FROM runs WHERE id=ANY(%s::uuid[])", ([first, second],))
+            row = cursor.fetchone()
+            assert row is not None and row[0] == 2
+        legacy._compose("up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a", "run-worker-b")
+        return [str(first), str(second)]
+
+    def cancel_and_crash() -> list[str]:
+        run_id = legacy._cancel_running_attempt()
+        with legacy._connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT worker_id FROM run_attempts WHERE run_id=%s ORDER BY attempt_no LIMIT 1", (run_id,))
+            row = cursor.fetchone()
+            assert row is not None
+            worker_id = row[0]
+        legacy._docker("kill", legacy._container_for_worker(worker_id))
+        legacy._wait_status(run_id, "cancelled", timeout=10)
+        return [str(run_id)]
+
+    def pause_resume_slot_release() -> list[str]:
+        context = legacy._context()
+        run_id = legacy._create_run(*context, key="pause-release",)
+        # The production chat executor must emit a durable waiting Pause; a
+        # simulated executor that never pauses is an explicit scenario failure.
+        legacy._wait_status(run_id, "waiting", timeout=15)
+        legacy._api("POST", f"/api/v1/tenants/{context[0]}/runs/{run_id}/resume", context[1], body={"response": "continue"})
+        legacy._wait_status(run_id, "completed", timeout=30)
+        return [str(run_id)]
+
+    def revision_chain() -> list[str]:
+        context = legacy._context()
+        first = legacy._create_run(*context, key="revision-a")
+        legacy._wait_status(first, "completed", timeout=30)
+        session_id = legacy._run_session(first)
+        previous = first
+        ids = [first]
+        for key in ("revision-b", "revision-c"):
+            body = {"prompt": key, "session_id": str(session_id), "replaces_run_id": str(previous)}
+            created = legacy._api("POST", f"/api/v1/tenants/{context[0]}/runs", context[1], body=body, headers={"Idempotency-Key": key})
+            current = UUID(created["id"])
+            legacy._wait_status(current, "completed", timeout=30)
+            ids.append(current)
+            previous = current
+        with legacy._connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT replaces_run_id FROM runs WHERE id=ANY(%s::uuid[]) ORDER BY created_at", (ids,))
+            chain = [row[0] for row in cursor.fetchall()]
+            assert chain[0] is None and chain[1] == ids[0] and chain[2] == ids[1]
+            cursor.execute("SELECT status FROM runs WHERE id=%s", (ids[0],))
+            old_row = cursor.fetchone()
+            assert old_row is not None and old_row[0] == "completed"
+        return [str(item) for item in ids]
+
+    def scheduler_dispatcher_restart() -> list[str]:
+        legacy._compose("restart", "run-scheduler-a", "run-scheduler-b", "run-dispatcher")
+        for service in ("run-scheduler-a", "run-scheduler-b", "run-dispatcher"):
+            legacy._compose("ps", "--format", "json", service)
+            harness.wait_healthy(service, timeout=30)
+        run_ids = create_and_wait("scheduler-dispatcher-restart")
+        with legacy._connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM run_outbox WHERE run_id=%s AND acknowledged_at IS NOT NULL", (run_ids[0],))
+            row = cursor.fetchone()
+            assert row is not None and row[0] > 0
+        return run_ids
+
+    def legacy_writer_zero() -> list[str]:
+        run_ids = create_and_wait("legacy-writer-zero")
+        with legacy._connect() as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM chat_tasks")
+            row = cursor.fetchone()
+            assert row is not None and row[0] == 0
+        return run_ids
+
+    def dual_scheduler() -> list[str]:
+        rows = [
+            json.loads(line)
+            for line in legacy._compose("ps", "--format", "json").splitlines()
+            if line.strip()
+        ]
+        healthy = {
+            row.get("Service")
+            for row in rows
+            if row.get("State") == "running" and row.get("Health") == "healthy"
+        }
+        assert {"run-scheduler-a", "run-scheduler-b"} <= healthy
+        # Two Runs enter the same queue; the existing helper asserts distinct
+        # worker claims, one Attempt per Run, and durable Event/Outbox facts.
+        return [str(item) for item in legacy._parallel_and_duplicate()]
+
+    def duplicate_notification() -> list[str]:
+        run_id, _ = legacy._parallel_and_duplicate()
+        return [str(run_id)]
+
+    def first_worker_crash() -> list[str]:
+        return [str(legacy._kill_and_recover())]
+
+    def second_worker_crash() -> list[str]:
+        return [str(legacy._double_kill_retry_exhaustion())]
+    actions: dict[str, Callable[[], Sequence[str]]] = {
+        "browser_disconnect": browser_disconnect,
+        "two_worker_parallel": parallel,
+        "tenant_fairness": tenant_fairness,
+        "dual_scheduler": dual_scheduler,
+        "duplicate_notification": duplicate_notification,
+        "first_worker_crash": first_worker_crash,
+        "second_worker_crash": second_worker_crash,
+        "cancel_and_crash": cancel_and_crash,
+        "pause_resume_slot_release": pause_resume_slot_release,
+        "revision_chain": revision_chain,
+        "redis_restart": lambda: [str(legacy._restart_redis_with_durable_outbox())],
+        "scheduler_dispatcher_restart": scheduler_dispatcher_restart,
+        "legacy_writer_zero": legacy_writer_zero,
+    }
+    return harness.run_scenarios(actions, evidence_path=evidence_path)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--evidence", type=Path, required=True)
+    args = parser.parse_args()
+    run_default_compose_suite(args.repo_root, args.project, args.evidence)
