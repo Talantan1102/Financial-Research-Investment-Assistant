@@ -19,6 +19,7 @@ from app.models.tenant import Tenant
 from app.models.user import User
 from app.run_control.scheduling_policy import WorkerCandidate
 from app.services import scheduling_service as scheduling_module
+from app.services.run_metrics import RunMetricsService
 from app.services.scheduling_service import Assignment, SchedulingService
 from sqlalchemy import delete, event, func, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -363,6 +364,31 @@ async def test_no_worker_does_not_persist_cursor_side_effect(
 
 
 @pytest.mark.asyncio
+async def test_no_worker_persists_block_reason_without_cursor_side_effect(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    queue = await _create_queue(
+        async_session_factory,
+        queued_at=[datetime(2026, 7, 17, 1)],
+    )
+
+    assert await _service(async_session_factory).schedule_once() is None
+
+    async with async_session_factory() as session:
+        run = await session.get(Run, queue.runs[0].id)
+        event = await session.scalar(
+            select(RunEvent).where(
+                RunEvent.run_id == queue.runs[0].id,
+                RunEvent.event_type == "run.queue_blocked",
+            )
+        )
+        cursor = await session.get(RunTenantScheduling, queue.tenant_id)
+    assert run is not None and run.queue_reason == "no_worker_capacity"
+    assert event is not None and event.payload["reason"] == "no_worker_capacity"
+    assert cursor is None
+
+
+@pytest.mark.asyncio
 async def test_no_assignment_keeps_existing_cursor_timestamps_unchanged(
     async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
@@ -479,6 +505,43 @@ async def test_schedule_once_atomically_writes_assignment_graph(
     assert cursor is not None and cursor.last_dispatched_at is not None
     assert persisted_worker is not None
     assert persisted_worker.last_assigned_at == cursor.last_dispatched_at
+
+
+@pytest.mark.asyncio
+async def test_assignment_clears_stale_scheduler_block_reason(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    queue = await _create_queue(
+        async_session_factory,
+        queued_at=[datetime(2026, 7, 17, 1)],
+        queue_reasons=["no_worker_capacity"],
+    )
+    await _create_worker(async_session_factory, capacity=1)
+
+    assignment = await _service(async_session_factory).schedule_once()
+
+    assert assignment is not None
+    async with async_session_factory() as session:
+        run = await session.get(Run, queue.runs[0].id)
+    assert run is not None and run.queue_reason is None
+
+
+@pytest.mark.asyncio
+async def test_no_worker_then_success_removes_reason_from_metrics_window(
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    queue = await _create_queue(
+        async_session_factory,
+        queued_at=[datetime(2026, 7, 17, 1)],
+    )
+    service = _service(async_session_factory)
+
+    assert await service.schedule_once() is None
+    await _create_worker(async_session_factory, capacity=1)
+    assert await service.schedule_once() is not None
+
+    metrics = await RunMetricsService(async_session_factory).snapshot(queue.tenant_id)
+    assert metrics["scheduling"]["no_slot"] == 0
 
 
 @pytest.mark.asyncio
@@ -701,6 +764,7 @@ async def test_worker_is_rechecked_after_snapshot_before_assignment(
             .where(RunAttempt.run_id == queue.runs[0].id)
         )
     assert run is not None and run.status == "queued"
+    assert run.queue_reason == "no_worker_capacity"
     assert attempt_count == 0
 
 
@@ -786,6 +850,16 @@ async def test_tenant_at_running_limit_is_not_scheduled(
     await _create_worker(async_session_factory, capacity=2)
 
     assert await _service(async_session_factory).schedule_once() is None
+    async with async_session_factory() as session:
+        run = await session.get(Run, queue.runs[0].id)
+        event = await session.scalar(
+            select(RunEvent).where(
+                RunEvent.run_id == queue.runs[0].id,
+                RunEvent.event_type == "run.queue_blocked",
+            )
+        )
+    assert run is not None and run.queue_reason == "tenant_at_capacity"
+    assert event is not None and event.payload["reason"] == "tenant_at_capacity"
 
 
 @pytest.mark.asyncio

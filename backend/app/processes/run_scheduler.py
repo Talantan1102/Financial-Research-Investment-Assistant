@@ -63,6 +63,7 @@ class RunScheduler:
             if assignment is None:
                 break
             with run_log_context(
+                tenant_id=assignment.tenant_id,
                 run_id=assignment.run_id,
                 session_id=assignment.session_id,
                 attempt_id=assignment.attempt_id,

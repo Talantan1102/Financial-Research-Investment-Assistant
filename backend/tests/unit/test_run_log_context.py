@@ -7,6 +7,7 @@ import pytest
 from app.processes.run_scheduler import RunScheduler
 from app.processes.run_worker import build_run_stream_event_sink
 from app.services.run_metrics import CorrelationIdFilter, log_context, run_log_context
+from app.services.scheduling_service import Assignment
 
 
 def test_run_log_context_only_exposes_opaque_correlation_ids(caplog) -> None:  # type: ignore[no-untyped-def]
@@ -35,17 +36,39 @@ def test_run_log_context_does_not_leak_between_scopes() -> None:
 
 @pytest.mark.asyncio
 async def test_scheduler_cycle_log_has_opaque_correlation_id(caplog) -> None:
+    assignment = Assignment(
+        run_id=uuid4(),
+        session_id=uuid4(),
+        tenant_id=uuid4(),
+        attempt_id=uuid4(),
+        worker_id=uuid4(),
+        lease_expires_at=__import__("datetime").datetime.now(),
+    )
+
     class _Scheduling:
         async def recover_expired_attempts(self, _limit):
             return ()
 
         async def schedule_once(self):
-            return None
+            return assignment
+
+    class _OnceScheduling(_Scheduling):
+        def __init__(self):
+            self._calls = 0
+
+        async def schedule_once(self):
+            self._calls += 1
+            return assignment if self._calls == 1 else None
 
     caplog.set_level(logging.INFO)
-    await RunScheduler(_Scheduling(), None).run_cycle()
-    record = next(item for item in caplog.records if "scheduler cycle completed" in item.message)
+    await RunScheduler(_OnceScheduling(), None).run_cycle()
+    record = next(item for item in caplog.records if "scheduler assigned run" in item.message)
     assert getattr(record, "correlation_id", None)
+    assert getattr(record, "tenant_id", None) == str(assignment.tenant_id)
+    assert getattr(record, "session_id", None) == str(assignment.session_id)
+    assert getattr(record, "run_id", None) == str(assignment.run_id)
+    assert getattr(record, "attempt_id", None) == str(assignment.attempt_id)
+    assert getattr(record, "worker_id", None) == str(assignment.worker_id)
     assert "prompt" not in record.message.lower()
     assert "token" not in record.message.lower()
 

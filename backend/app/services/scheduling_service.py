@@ -42,6 +42,7 @@ _SESSION_ACTIVE_STATUSES = tuple(
 
 @dataclass(frozen=True)
 class Assignment:
+    tenant_id: UUID
     run_id: UUID
     session_id: UUID
     attempt_id: UUID
@@ -54,6 +55,13 @@ class RecoveryResult:
     run_id: UUID
     attempt_id: UUID
     decision: RecoveryDecision
+
+
+@dataclass(frozen=True)
+class _ScheduleOutcome:
+    assignment: Assignment | None = None
+    blocked_run_id: UUID | None = None
+    blocked_reason: EligibilityReason | None = None
 
 
 def _database_utc_now() -> Any:
@@ -86,15 +94,28 @@ class SchedulingService:
         async with self._session_factory() as session:
             transaction = await session.begin()
             try:
-                assignment = await self._schedule_in_transaction(session)
-                if assignment is None:
+                outcome = await self._schedule_in_transaction(session)
+                if outcome.assignment is None:
                     await transaction.rollback()
+                    if outcome.blocked_run_id is not None and outcome.blocked_reason is not None:
+                        await self._persist_queue_block(
+                            outcome.blocked_run_id,
+                            outcome.blocked_reason,
+                        )
                 else:
                     await transaction.commit()
-                return assignment
+                return outcome.assignment
             except BaseException:
                 await session.rollback()
                 raise
+
+    async def _persist_queue_block(self, run_id: UUID, reason: EligibilityReason) -> None:
+        """Commit only the observed block fact, without cursor/claim side effects."""
+        async with self._session_factory() as session, session.begin():
+            run = await session.scalar(select(Run).where(Run.id == run_id).with_for_update())
+            if run is None or cast(str, run.status) != RunStatus.QUEUED.value:
+                return
+            await self._record_queue_block(session, run, reason)
 
     async def recover_expired_attempts(self, limit: int) -> tuple[RecoveryResult, ...]:
         """Recover one SKIP LOCKED batch of expired active Attempts atomically."""
@@ -260,20 +281,22 @@ class SchedulingService:
             .values(acknowledged_at=now)
         )
 
-    async def _schedule_in_transaction(self, session: AsyncSession) -> Assignment | None:
+    async def _schedule_in_transaction(self, session: AsyncSession) -> _ScheduleOutcome:
         await self._ensure_tenant_cursors(session)
         cursor = await self._lock_next_tenant_cursor(session)
         if cursor is None:
-            return None
+            return _ScheduleOutcome()
 
         run = await self._lock_next_run(session, cast(UUID, cursor.tenant_id))
         if run is None:
-            return None
+            return _ScheduleOutcome()
 
         ranked_workers = await self._load_worker_candidates(session)
         if not ranked_workers:
-            await self._record_queue_block(session, run, EligibilityReason.NO_WORKER_CAPACITY)
-            return None
+            return _ScheduleOutcome(
+                blocked_run_id=cast(UUID, run.id),
+                blocked_reason=EligibilityReason.NO_WORKER_CAPACITY,
+            )
 
         reason = await self._locked_run_ineligibility(session, run)
         if reason is not EligibilityReason.ELIGIBLE:
@@ -281,13 +304,18 @@ class SchedulingService:
                 EligibilityReason.TENANT_AT_CAPACITY,
                 EligibilityReason.NO_WORKER_CAPACITY,
             }:
-                await self._record_queue_block(session, run, reason)
-            return None
+                return _ScheduleOutcome(
+                    blocked_run_id=cast(UUID, run.id),
+                    blocked_reason=reason,
+                )
+            return _ScheduleOutcome()
 
         worker_and_load = await self._lock_eligible_worker(session, ranked_workers)
         if worker_and_load is None:
-            await self._record_queue_block(session, run, EligibilityReason.NO_WORKER_CAPACITY)
-            return None
+            return _ScheduleOutcome(
+                blocked_run_id=cast(UUID, run.id),
+                blocked_reason=EligibilityReason.NO_WORKER_CAPACITY,
+            )
         worker, _active_attempts = worker_and_load
 
         clock = (
@@ -334,6 +362,7 @@ class SchedulingService:
             },
             attempt_id=attempt_id,
         )
+        cast(Any, run).queue_reason = None
         cast(Any, run).assigned_at = allocated_at
         cast(Any, cursor).last_dispatched_at = allocated_at
         cast(Any, cursor).updated_at = allocated_at
@@ -356,12 +385,15 @@ class SchedulingService:
                 created_at=allocated_at,
             )
         )
-        return Assignment(
-            run_id=cast(UUID, run.id),
-            session_id=cast(UUID, run.session_id),
-            attempt_id=attempt_id,
-            worker_id=cast(UUID, worker.id),
-            lease_expires_at=lease_expires_at,
+        return _ScheduleOutcome(
+            assignment=Assignment(
+                tenant_id=cast(UUID, run.tenant_id),
+                run_id=cast(UUID, run.id),
+                session_id=cast(UUID, run.session_id),
+                attempt_id=attempt_id,
+                worker_id=cast(UUID, worker.id),
+                lease_expires_at=lease_expires_at,
+            )
         )
 
     async def _record_queue_block(
