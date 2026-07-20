@@ -22,8 +22,6 @@ from app.core.async_database import (  # noqa: E402  (must follow load_dotenv)
     build_async_database,
 )
 from app.core.database import Base, engine  # noqa: E402  (must follow load_dotenv)
-from app.router import chat as chat_router_module  # noqa: E402
-from app.router import chats as chats_router_module  # noqa: E402
 from app.router import escalate as escalate_router  # noqa: E402
 from app.router import research  # noqa: E402
 from app.router.attachment_router import router as attachment_router  # noqa: E402
@@ -43,7 +41,6 @@ from app.scripts.migrate_phase3_execution_schema import (  # noqa: E402
     is_fresh_application_schema_connection,
     verify_run_control_schema_connection,
 )
-from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
 from app.services.mcp_client import MCPClient  # noqa: E402
 from app.services.run_escalation_repo import RunEscalationRepo  # noqa: E402
 from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover trigger)
@@ -196,7 +193,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
 
     # === chat additions(chatloop 引擎)===
     # 老 supervisor 图退役(Phase 7):chat 路径已完全跑在 chatloop ToolLoop 上,
-    # 由 Celery worker(app.tasks.chat_runner)驱动,不再在 web lifespan 构建
+    # Durable Run workers drive execution outside the web lifespan.
     # LangGraph chat 图,也不再 wire PG checkpointer(turn 原子语义,checkpoint 退役)。
 
     # 2. MCP client subprocess — use as context manager
@@ -219,19 +216,6 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         app.state.async_session_factory = None
         logger.warning("共享 async database 初始化跳过: %s", e)
 
-    # ChatSessionRepo consumes the shared factory, but its own failure must not
-    # disable RunService's database dependency.
-    try:
-        if app.state.async_session_factory is None:
-            raise RuntimeError("async_session_factory not initialized")
-        app.state.chat_session_repo = ChatSessionRepo(
-            session_factory=app.state.async_session_factory
-        )
-        logger.info("ChatSessionRepo 初始化完成")
-    except Exception as e:  # noqa: BLE001
-        app.state.chat_session_repo = None
-        logger.warning("ChatSessionRepo 初始化跳过: %s", e)
-
     try:
         if app.state.async_session_factory is None:
             raise RuntimeError("async_session_factory not initialized")
@@ -242,21 +226,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         app.state.run_escalation_repo = None
         logger.warning("RunEscalationRepo init skipped: %s", e)
 
-    # === Plan 3 escalate deps ===
-
-    # 4. EscalationExtractor (needs LLMService)
-    try:
-        from app.agents.escalation_extractor import EscalationExtractor
-        from app.services.openai_client import build_llm_service_from_env
-
-        llm_for_extraction = build_llm_service_from_env()
-        app.state.escalation_extractor = EscalationExtractor(llm=llm_for_extraction)
-        logger.info("EscalationExtractor 初始化完成")
-    except Exception as e:  # noqa: BLE001
-        app.state.escalation_extractor = None
-        logger.warning("EscalationExtractor 初始化跳过: %s", e)
-
-    # 5. EscalationRecordRepo + ResearchReportRepo (reuse async_session_factory)
+    # EscalationRecordRepo + ResearchReportRepo (reuse async_session_factory)
     try:
         from app.services.escalation_record_repo import EscalationRecordRepo
         from app.services.research_report_repo import ResearchReportRepo
@@ -305,7 +275,7 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         logger.warning("Plan 2 Redis async client 初始化跳过: %s", e)
 
     # 8. (退役)Chat graph singleton —— 老 supervisor 图已退役;chat 现在由 Celery
-    #    worker(app.tasks.chat_runner)按 turn 懒构 chatloop 组件(MCP chat_tools
+    #    worker processes lazily construct the chatloop components per turn.
     #    subprocess + HeavySingletons),web 进程不再持有 chat 图。
 
     # 9. Persona Editable UI Plan Task 6 — 一次性 backfill (幂等)
@@ -413,9 +383,6 @@ app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboardi
 app.include_router(tenants_router)
 app.include_router(runs_router)
 app.include_router(run_sessions_router)
-app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE streaming)
-app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
-app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (confirmed packet)
 app.include_router(escalate_router.research_router)  # v1 — tenant-scoped research escalation
 app.include_router(memory_router)  # C.5 — /api/v0/memory (cross-session memory page)
 app.include_router(persona_router)  # persona-ui — /api/v0/persona (Tier 1 persona items)
@@ -425,7 +392,7 @@ app.include_router(run_observability_router)
 
 # C39: chats router's get_repo override is registered below alongside the other
 # Plan-3 overrides, via _override_or_fallback so a failed PG init raises a clear
-# RuntimeError instead of leaking None (typed ChatSessionRepo) into handlers.
+# RuntimeError instead of leaking uninitialised dependencies into handlers.
 
 
 # === Plan 3 dependency overrides (T11) ===
@@ -443,34 +410,20 @@ def _override_or_fallback(state_attr: str):
     return _factory
 
 
-from app.router.chat import (  # noqa: E402
-    get_escalation_extractor as chat_get_extractor,
-)
-from app.router.chat import (
-    get_escalation_record_repo as chat_get_repo,
-)
-from app.router.escalate import (  # noqa: E402
-    get_chat_session_repo as esc_get_chat_repo,
-)
 from app.router.escalate import (
     get_escalation_record_repo as esc_get_record_repo,
 )
-
-# C43: escalate.get_escalation_record_repo is now re-exported from chat, so the
-# single chat_get_repo override below covers both routers — no esc_get_repo dup.
 from app.router.escalate import (
     get_research_agent as esc_get_agent,
 )
 from app.router.escalate import (
     get_research_report_repo as esc_get_rpt_repo,
 )
+from app.router.escalate import get_run_session_repo  # noqa: E402
 
-app.dependency_overrides[chats_router_module.get_repo] = _override_or_fallback("chat_session_repo")
-app.dependency_overrides[chat_get_extractor] = _override_or_fallback("escalation_extractor")
-app.dependency_overrides[chat_get_repo] = _override_or_fallback("escalation_record_repo")
 app.dependency_overrides[esc_get_record_repo] = _override_or_fallback("escalation_record_repo")
 app.dependency_overrides[esc_get_agent] = _override_or_fallback("research_agent")
-app.dependency_overrides[esc_get_chat_repo] = _override_or_fallback("run_escalation_repo")
+app.dependency_overrides[get_run_session_repo] = _override_or_fallback("run_escalation_repo")
 app.dependency_overrides[esc_get_rpt_repo] = _override_or_fallback("research_report_repo")
 
 

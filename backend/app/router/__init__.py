@@ -1,3 +1,3 @@
-# Router package — strict routers live in submodules (app.router.chat etc.)
+# Router package; strict routers live in dedicated submodules.
 
 __all__: list[str] = []

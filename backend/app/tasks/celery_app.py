@@ -25,8 +25,6 @@ celery_app = Celery(
     include=[
         "app.tasks.monitoring",
         "app.tasks.memory",
-        "app.tasks.chat_runner",
-        "app.tasks.chat_stale_scanner",  # Plan 3 Task 6
         "app.tasks.title_generation",  # chat-title async LLM title
         "app.tasks.portfolio_snapshot",  # Task 6: 每日持仓快照
     ],

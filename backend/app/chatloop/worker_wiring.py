@@ -38,7 +38,6 @@ from app.chatloop.subagent import DispatchSubagentsTool, SubagentFactory
 from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
 from app.chatloop.tool_hub import EmitFn, ToolHub
 from app.memory.injection_classifier import is_prompt_injection
-from app.services.chat_steer_bus import steer_key
 from app.services.subagent_audit import SubagentAuditRepo
 from app.services.tool_result_cache import ToolResultCache
 from app.skills.executor_backend import SkillExecutorBackend
@@ -317,7 +316,7 @@ class RedisSteerSource:
 
     def __init__(self, redis: Any, task_id: UUID | str) -> None:
         self._redis = redis
-        self._key = steer_key(task_id)
+        self._key = f"run:steer:{task_id}"
 
     async def pop_all(self) -> list[str]:
         out: list[str] = []

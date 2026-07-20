@@ -6,7 +6,7 @@ endpoint without coupling to raw openai SDK usage in strict-typed code.
 
 Why not in app.services strict tier?
   This module directly imports ``openai.OpenAI``, which violates the
-  constraint that ``app.router.chat`` must not import openai.  The router
+  constraint that HTTP routers must not import openai.  The router
   imports only ``build_llm_service_from_env`` (which returns an opaque
   ``LLMService``); the openai SDK call is encapsulated here.
 

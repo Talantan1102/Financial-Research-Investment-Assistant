@@ -28,7 +28,7 @@ def enqueue_episode_extraction(session_id: str) -> Any:
     from app.tasks.memory import extract_session_episodes_async
 
     # session_id is the stable RunSession id after cutover; the task no longer
-    # depends on a ChatTask execution row.
+    # execution metadata is now owned by durable Run rows.
     return extract_session_episodes_async.delay(session_id, "post_turn")
 
 

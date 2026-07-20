@@ -25,7 +25,6 @@ if not _RUN_CONTROL_MINIMAL:
         ChatMessage,
         ChatSession,
         ChatSessionContext,
-        ChatTask,
         LongTermMemory,
     )
     from .escalation_record import EscalationRecord  # noqa: F401
@@ -85,7 +84,6 @@ if not _RUN_CONTROL_MINIMAL:
         "ChatSessionContext",
         "ChatMessage",
         "ChatAttachment",
-        "ChatTask",
         "LongTermMemory",
         "KnowledgeBase",
         "Document",
