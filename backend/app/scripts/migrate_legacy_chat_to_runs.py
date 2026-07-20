@@ -130,6 +130,12 @@ def _maintenance_bootstrap(db: Any) -> None:
                   END IF;
                 END $$
             """))
+        if inspector.has_table("research_reports"):
+            # The historical source column remains for audit/backfill, but its
+            # FK must not keep the legacy chat_sessions table alive at cutover.
+            for fk in inspector.get_foreign_keys("research_reports"):
+                if (fk.get("referred_table") or "") == "chat_sessions" and fk.get("name"):
+                    connection.execute(text(f'ALTER TABLE research_reports DROP CONSTRAINT IF EXISTS "{fk["name"]}"'))
         if inspector.has_table("chat_attachments"):
             # Older installs created single-column FKs to globally unique
             # ids.  RunMessage ids are only unique within tenant/session, so
