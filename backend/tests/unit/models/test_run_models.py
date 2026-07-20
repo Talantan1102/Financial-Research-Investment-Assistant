@@ -106,6 +106,7 @@ def make_run(
         input_message_id=context.messages[message_index].id,
         final_message_id=final_message.id if final_message is not None else None,
         replaces_run_id=replaces_run_id,
+        revision_seq=message_index + 1,
         retry_count=0,
     )
 
@@ -186,8 +187,13 @@ def test_run_indexes_have_exact_physical_contract(db_session: Session) -> None:
     assert active_index["column_names"] == ["session_id"]
     predicate = str(active_index["dialect_options"]["postgresql_where"])
     assert set(re.findall(r"'([^']+)'", predicate)) == ACTIVE_RUN_STATUSES
-    assert indexes["ix_runs_tenant_session_revision_seq"]["column_names"] == [
-        "tenant_id", "session_id", "revision_seq"
+    uniques = {
+        item["name"]: item for item in inspect(db_session.get_bind()).get_unique_constraints("runs")
+    }
+    assert uniques["uq_runs_tenant_session_revision_seq"]["column_names"] == [
+        "tenant_id",
+        "session_id",
+        "revision_seq",
     ]
     assert indexes["ix_runs_replaces_run_id"]["column_names"] == ["replaces_run_id"]
     db_session.execute(text("SET LOCAL enable_seqscan = off"))
@@ -201,7 +207,7 @@ def test_run_indexes_have_exact_physical_contract(db_session: Session) -> None:
             {"tenant_id": uuid.uuid4(), "session_id": uuid.uuid4()},
         ).scalars()
     )
-    assert "ix_runs_tenant_session_revision_seq" in plan
+    assert "uq_runs_tenant_session_revision_seq" in plan
 
 
 def test_idempotency_tuple_is_unique(db_session: Session, run_context: RunContext) -> None:

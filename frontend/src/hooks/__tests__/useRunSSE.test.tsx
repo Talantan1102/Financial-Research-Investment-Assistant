@@ -443,6 +443,55 @@ describe('useRunSSE', () => {
     expect(result.current.activeRunId).toBe('run-1')
   })
 
+  it.each(['queued', 'completed'] as const)(
+    'clears a stale pause from %s Run truth even when Session calibration fails',
+    async (durableStatus) => {
+      const initialPause = { type: 'approval_request' as const, request: { tool: 'trade' } }
+      vi.mocked(runApi.resumeRun).mockRejectedValue(new TypeError('response lost'))
+      vi.mocked(runApi.getRunSession).mockRejectedValue(new TypeError('session unavailable'))
+      vi.mocked(runApi.getRun).mockResolvedValue(run(durableStatus))
+      const { result } = renderHook(() => useRunSSE({
+        tenantId: 'tenant-1', sessionId: 'session-1', initialRunId: 'run-1',
+        initialRunStatus: 'waiting_approval',
+        initialPause,
+      }))
+      await waitFor(() => expect(result.current.activeRunId).toBe('run-1'))
+
+      await act(async () => { await result.current.resumeRun({ approved: true }) })
+
+      expect(result.current.pause).toBeNull()
+      expect(result.current.status).toBe(durableStatus)
+    },
+  )
+
+  it('releases the resume POST fence before the resumed SSE finishes so Stop remains available', async () => {
+    let releaseStream!: () => void
+    vi.mocked(runApi.resumeRun).mockResolvedValue(run('queued'))
+    vi.mocked(runApi.fetchRunEvents).mockImplementation(
+      () => new Promise<Response>((resolve) => { releaseStream = () => resolve(chunkedSse([])) }),
+    )
+    vi.mocked(runApi.cancelRun).mockResolvedValue(run('cancelled'))
+    const initialPause = { type: 'approval_request' as const, request: { tool: 'trade' } }
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1', sessionId: 'session-1', initialRunId: 'run-1',
+      initialRunStatus: 'waiting_approval',
+      initialPause,
+    }))
+    await waitFor(() => expect(result.current.activeRunId).toBe('run-1'))
+
+    let resume!: Promise<{ ok: boolean }>
+    act(() => { resume = result.current.resumeRun({ approved: true }) })
+    await waitFor(() => expect(runApi.fetchRunEvents).toHaveBeenCalled())
+    await waitFor(() => expect(result.current.commandPending).toBe(false))
+    await act(async () => { await result.current.cancelRun() })
+
+    expect(runApi.cancelRun).toHaveBeenCalledWith('tenant-1', 'run-1', expect.any(Function))
+    expect(result.current.status).toBe('cancelled')
+    releaseStream()
+    await resume
+    expect(result.current.commandPending).toBe(false)
+  })
+
   it('loads older revision pages with the opaque cursor and prepends without duplicates', async () => {
     const revision = (id: string) => ({
       id, replaces_run_id: null, status: 'completed' as const, prompt: id,

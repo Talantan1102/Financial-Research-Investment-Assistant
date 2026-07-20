@@ -83,6 +83,7 @@ async def _outbox(
             idempotency_key=f"outbox-{suffix}",
             request_hash=uuid.uuid4().hex,
             input_message_id=message.id,
+            revision_seq=1,
             retry_count=0,
         )
         session.add(run)

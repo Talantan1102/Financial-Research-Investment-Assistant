@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 import uuid
 from collections.abc import Mapping
@@ -19,6 +20,64 @@ _PREDECESSOR_ATTEMPT_FKS = {
     "run_tool_executions": "fk_run_tool_executions_attempt_provenance",
     "run_usage_records": "fk_run_usage_records_attempt_provenance",
 }
+_REVISION_UNIQUE = "uq_runs_tenant_session_revision_seq"
+
+
+def _revision_unique_signature(connection: Connection) -> tuple[str, ...] | None:
+    for constraint in inspect(connection).get_unique_constraints("runs"):
+        if constraint["name"] == _REVISION_UNIQUE:
+            return tuple(constraint["column_names"])
+    return None
+
+
+def _repair_revision_sequences(connection: Connection, changes: list[str]) -> None:
+    bad_count = int(
+        connection.execute(
+            text(
+                "SELECT count(*) FROM ("
+                " SELECT tenant_id, session_id FROM runs"
+                " GROUP BY tenant_id, session_id"
+                " HAVING count(*) FILTER (WHERE revision_seq IS NULL OR revision_seq <= 0) > 0"
+                " OR count(*) <> count(DISTINCT revision_seq)"
+                ") AS bad_sessions"
+            )
+        ).scalar_one()
+    )
+    if not bad_count:
+        return
+    connection.execute(
+        text(
+            "WITH bad_sessions AS ("
+            " SELECT tenant_id, session_id FROM runs"
+            " GROUP BY tenant_id, session_id"
+            " HAVING count(*) FILTER (WHERE revision_seq IS NULL OR revision_seq <= 0) > 0"
+            " OR count(*) <> count(DISTINCT revision_seq)"
+            "), numbered AS ("
+            " SELECT runs.id, row_number() OVER ("
+            "  PARTITION BY runs.tenant_id, runs.session_id"
+            "  ORDER BY runs.created_at, runs.id"
+            " ) AS seq FROM runs JOIN bad_sessions USING (tenant_id, session_id)"
+            ") UPDATE runs SET revision_seq = numbered.seq"
+            " FROM numbered WHERE runs.id = numbered.id"
+        )
+    )
+    changes.append("repair duplicate runs.revision_seq values")
+
+
+def _ensure_revision_unique(connection: Connection, changes: list[str]) -> None:
+    expected = ("tenant_id", "session_id", "revision_seq")
+    actual = _revision_unique_signature(connection)
+    if actual == expected:
+        return
+    if actual is not None:
+        connection.execute(text(f"ALTER TABLE runs DROP CONSTRAINT {_REVISION_UNIQUE}"))
+    connection.execute(
+        text(
+            f"ALTER TABLE runs ADD CONSTRAINT {_REVISION_UNIQUE} "
+            "UNIQUE (tenant_id, session_id, revision_seq)"
+        )
+    )
+    changes.append(f"add {_REVISION_UNIQUE}")
 
 
 def _unsafe(message: str) -> RuntimeError:
@@ -329,10 +388,23 @@ def _validate_execution_table(connection: Connection, table: Table) -> None:
     _validate_uniques(connection, table)
 
 
-def migrate_phase3_execution_schema(engine: Engine) -> tuple[str, ...]:
-    """Add or verify Phase 3 execution facts in one serialized transaction."""
+def migrate_phase3_execution_schema(
+    engine: Engine,
+    *,
+    lock_timeout_ms: int = 5_000,
+    statement_timeout_ms: int = 300_000,
+) -> tuple[str, ...]:
+    """Operator-only maintenance migration in one bounded serialized transaction."""
     changes: list[str] = []
     with engine.begin() as connection:
+        connection.execute(
+            text("SELECT set_config('lock_timeout', :value, true)"),
+            {"value": f"{lock_timeout_ms}ms"},
+        )
+        connection.execute(
+            text("SELECT set_config('statement_timeout', :value, true)"),
+            {"value": f"{statement_timeout_ms}ms"},
+        )
         connection.execute(
             text(
                 "SELECT pg_advisory_xact_lock("
@@ -384,9 +456,7 @@ def migrate_phase3_execution_schema(engine: Engine) -> tuple[str, ...]:
         ):
             raise _unsafe("run_sessions.archived_at column differs")
 
-        run_columns = {
-            column["name"]: column for column in inspect(connection).get_columns("runs")
-        }
+        run_columns = {column["name"]: column for column in inspect(connection).get_columns("runs")}
         if "revision_seq" not in run_columns:
             connection.execute(text("ALTER TABLE runs ADD COLUMN revision_seq integer"))
             connection.execute(
@@ -401,18 +471,25 @@ def migrate_phase3_execution_schema(engine: Engine) -> tuple[str, ...]:
             )
             connection.execute(text("ALTER TABLE runs ALTER COLUMN revision_seq SET NOT NULL"))
             changes.append("add and backfill runs.revision_seq")
+        _repair_revision_sequences(connection, changes)
+        if "revision_seq" in run_columns and run_columns["revision_seq"]["nullable"]:
+            connection.execute(text("ALTER TABLE runs ALTER COLUMN revision_seq SET NOT NULL"))
+            changes.append("set runs.revision_seq not null")
         revision_column = {
             column["name"]: column for column in inspect(connection).get_columns("runs")
         }["revision_seq"]
-        if revision_column["nullable"] or _type_sql(
-            revision_column["type"], connection
-        ) != "integer":
+        if (
+            revision_column["nullable"]
+            or _type_sql(revision_column["type"], connection) != "integer"
+        ):
             raise _unsafe("runs.revision_seq column differs")
         run_indexes = {index["name"]: index for index in inspect(connection).get_indexes("runs")}
-        for index_name in (
-            "ix_runs_tenant_session_revision_seq",
-            "ix_runs_replaces_run_id",
-        ):
+        if "ix_runs_tenant_session_revision_seq" in run_indexes:
+            connection.execute(text("DROP INDEX ix_runs_tenant_session_revision_seq"))
+            changes.append("drop redundant ix_runs_tenant_session_revision_seq")
+        _ensure_revision_unique(connection, changes)
+        run_indexes = {index["name"]: index for index in inspect(connection).get_indexes("runs")}
+        for index_name in ("ix_runs_replaces_run_id",):
             expected = next(
                 index for index in app.models.Run.__table__.indexes if index.name == index_name
             )
@@ -443,7 +520,59 @@ def migrate_phase3_execution_schema(engine: Engine) -> tuple[str, ...]:
     return tuple(changes)
 
 
+def verify_phase3_execution_schema(engine: Engine) -> None:
+    """Read-only rolling-startup gate; instruct operators instead of running DDL."""
+    with engine.connect() as connection:
+        existing_tables = set(inspect(connection).get_table_names())
+        if "run_sessions" not in existing_tables:
+            return
+        missing = {
+            "runs",
+            "run_attempts",
+            *[table.name for table in _EXECUTION_TABLES],
+        } - existing_tables
+        if missing:
+            raise _unsafe(
+                f"maintenance migration required; missing tables {sorted(missing)}; "
+                "run python -m app.scripts.migrate_phase3_execution_schema"
+            )
+        columns = {column["name"]: column for column in inspect(connection).get_columns("runs")}
+        revision = columns.get("revision_seq")
+        if (
+            revision is None
+            or revision["nullable"]
+            or _type_sql(revision["type"], connection) != "integer"
+        ):
+            raise _unsafe(
+                "maintenance migration required for runs.revision_seq; "
+                "run python -m app.scripts.migrate_phase3_execution_schema"
+            )
+        if _revision_unique_signature(connection) != ("tenant_id", "session_id", "revision_seq"):
+            raise _unsafe(
+                f"maintenance migration required for {_REVISION_UNIQUE}; "
+                "run python -m app.scripts.migrate_phase3_execution_schema"
+            )
+        duplicate = connection.execute(
+            text(
+                "SELECT 1 FROM runs GROUP BY tenant_id, session_id, revision_seq "
+                "HAVING count(*) > 1 LIMIT 1"
+            )
+        ).first()
+        if duplicate is not None:
+            raise _unsafe("duplicate runs.revision_seq values")
+
+
 if __name__ == "__main__":
     from app.core.database import engine
 
-    print(migrate_phase3_execution_schema(engine))
+    parser = argparse.ArgumentParser(description="Apply the Phase 3 maintenance schema migration")
+    parser.add_argument("--lock-timeout-ms", type=int, default=5_000)
+    parser.add_argument("--statement-timeout-ms", type=int, default=300_000)
+    args = parser.parse_args()
+    print(
+        migrate_phase3_execution_schema(
+            engine,
+            lock_timeout_ms=args.lock_timeout_ms,
+            statement_timeout_ms=args.statement_timeout_ms,
+        )
+    )

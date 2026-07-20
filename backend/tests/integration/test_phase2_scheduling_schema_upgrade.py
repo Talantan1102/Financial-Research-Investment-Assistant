@@ -99,6 +99,7 @@ def _seed_legacy_worker(engine: Engine, worker_id: str) -> None:
             idempotency_key=f"upgrade-{suffix}",
             request_hash=uuid.uuid4().hex,
             input_message_id=message.id,
+            revision_seq=1,
             retry_count=0,
         )
         session.add(run)

@@ -157,6 +157,7 @@ async def _create_queue(
                 idempotency_key=f"scheduler-{suffix}-{index}",
                 request_hash=uuid.uuid4().hex,
                 input_message_id=message.id,
+                revision_seq=1,
                 retry_count=0,
                 queue_reason=reason,
                 queued_at=queued,
@@ -329,6 +330,7 @@ async def _create_active_run(
             idempotency_key=f"scheduler-active-{suffix}",
             request_hash=uuid.uuid4().hex,
             input_message_id=message.id,
+            revision_seq=1,
             retry_count=0,
         )
         session.add(run)

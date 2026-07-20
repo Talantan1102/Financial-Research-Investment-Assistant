@@ -88,6 +88,7 @@ async def claimed(
             idempotency_key=f"run-chat-{suffix}",
             request_hash=uuid.uuid4().hex,
             input_message_id=input_message.id,
+            revision_seq=1,
             retry_count=0,
         )
         session.add(run)

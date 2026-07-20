@@ -137,6 +137,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   const abortRef = useRef<AbortController | null>(null)
   const startingRef = useRef(false)
   const commandInFlightRef = useRef(false)
+  const commandOwnerRef = useRef<number | null>(null)
   const cancelAfterCreateRef = useRef(false)
   const generationRef = useRef(0)
   const activeRunRef = useRef<string | null>(null)
@@ -467,9 +468,12 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
             type: pauseType === 'approval' ? 'approval_request' : 'input_request',
             request: session.active_pause_request,
           })
-        } else if (durableRun.status !== 'waiting_approval' && durableRun.status !== 'waiting_input') {
-          setPause(null)
         }
+      }
+      // Run is the authoritative command fact. Session detail only supplies
+      // the request payload while the Run remains in a waiting state.
+      if (durableRun.status !== 'waiting_approval' && durableRun.status !== 'waiting_input') {
+        setPause(null)
       }
       updateStatus(durableRun.status)
       if (TERMINAL.has(durableRun.status)) {
@@ -498,6 +502,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     setCommandPending(true)
     generationRef.current += 1
     const generation = generationRef.current
+    commandOwnerRef.current = generation
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -526,8 +531,11 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       if (!recovered && isCurrent(generation, controller.signal)) updateStatus('error')
       return { ok: false, error: error instanceof Error ? error.message : 'Cancel failed' }
     } finally {
-      commandInFlightRef.current = false
-      if (isCurrent(generation)) setCommandPending(false)
+      if (commandOwnerRef.current === generation) {
+        commandOwnerRef.current = null
+        commandInFlightRef.current = false
+        if (isCurrent(generation)) setCommandPending(false)
+      }
     }
   }, [fetchImpl, isCurrent, loadDurableHistory, recoverCommandFacts, streamRun, updateActiveRun, updateStatus])
 
@@ -542,6 +550,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       setCommandPending(true)
       generationRef.current += 1
       const generation = generationRef.current
+      commandOwnerRef.current = generation
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
@@ -551,6 +560,13 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         setPause(null)
         updateActiveRun(runId, resumed.status)
         updateStatus(resumed.status)
+        // The POST acknowledgement is durable. Streaming is observation, not
+        // part of the command critical section, so Stop can fence a new command.
+        if (commandOwnerRef.current === generation) {
+          commandOwnerRef.current = null
+          commandInFlightRef.current = false
+          setCommandPending(false)
+        }
         await streamRun(tenantId, runId, sessionId, generation, controller)
         return { ok: true }
       } catch (error) {
@@ -564,8 +580,11 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         if (!recovered && isCurrent(generation, controller.signal)) updateStatus('error')
         return { ok: false, error: error instanceof Error ? error.message : 'Resume failed' }
       } finally {
-        commandInFlightRef.current = false
-        if (isCurrent(generation)) setCommandPending(false)
+        if (commandOwnerRef.current === generation) {
+          commandOwnerRef.current = null
+          commandInFlightRef.current = false
+          if (isCurrent(generation)) setCommandPending(false)
+        }
       }
     },
     [fetchImpl, isCurrent, recoverCommandFacts, streamRun, updateActiveRun, updateStatus],
@@ -593,6 +612,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     abortRef.current = null
     startingRef.current = false
     commandInFlightRef.current = false
+    commandOwnerRef.current = null
     cancelAfterCreateRef.current = false
     activeRunRef.current = null
     lastRunRef.current = null

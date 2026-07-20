@@ -355,6 +355,7 @@ async def _add_attempts(
             idempotency_key=f"worker-registry-{suffix}",
             request_hash="0" * 64,
             input_message_id=message.id,
+            revision_seq=1,
         )
         session.add(run)
         await session.flush()

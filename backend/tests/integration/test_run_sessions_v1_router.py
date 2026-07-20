@@ -119,6 +119,7 @@ async def session_api_context(
             idempotency_key=f"session-api-{suffix}",
             request_hash="a" * 64,
             input_message_id=message.id,
+            revision_seq=1,
         )
         session.add(run)
         await session.flush()
@@ -276,6 +277,7 @@ async def test_detail_returns_bounded_durable_messages_in_stable_order(
             idempotency_key=f"active-{uuid.uuid4()}",
             request_hash="b" * 64,
             input_message_id=active_message.id,
+            revision_seq=2,
         )
         session.add(active_run)
         await session.flush()

@@ -192,6 +192,7 @@ async def _assigned_graph(
             idempotency_key=f"attempt-{suffix}",
             request_hash=uuid.uuid4().hex,
             input_message_id=message.id,
+            revision_seq=1,
             retry_count=0,
         )
         session.add(run)

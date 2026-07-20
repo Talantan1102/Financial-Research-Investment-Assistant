@@ -12,10 +12,13 @@ from app.models.run import Run, RunMessage, RunSession
 from app.models.run_execution import RunUsageRecord
 from app.models.tenant import Tenant
 from app.models.user import User
-from app.scripts.migrate_phase3_execution_schema import migrate_phase3_execution_schema
+from app.scripts.migrate_phase3_execution_schema import (
+    migrate_phase3_execution_schema,
+    verify_phase3_execution_schema,
+)
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Connection, Engine
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 
@@ -61,25 +64,37 @@ def test_revision_sequence_upgrade_backfills_legacy_rows_and_repairs_indexes(
         session.flush()
         messages = [
             RunMessage(
-                tenant_id=tenant.id, session_id=run_session.id, role="user",
-                content=f"prompt {index}", status="complete",
+                tenant_id=tenant.id,
+                session_id=run_session.id,
+                role="user",
+                content=f"prompt {index}",
+                status="complete",
             )
             for index in range(2)
         ]
         session.add_all(messages)
         session.flush()
         for index, message in enumerate(messages):
-            session.add(Run(
-                id=uuid.UUID(int=2 - index), tenant_id=tenant.id,
-                session_id=run_session.id, created_by_user_id=user.id,
-                run_type="chat", status="completed",
-                idempotency_key=f"legacy-{index}", request_hash=f"{index:064d}",
-                input_message_id=message.id, retry_count=0,
-                revision_seq=index + 1,
-                created_at=datetime(2026, 7, 20, 12, 0, index),
-            ))
+            session.add(
+                Run(
+                    id=uuid.UUID(int=2 - index),
+                    tenant_id=tenant.id,
+                    session_id=run_session.id,
+                    created_by_user_id=user.id,
+                    run_type="chat",
+                    status="completed",
+                    idempotency_key=f"legacy-{index}",
+                    request_hash=f"{index:064d}",
+                    input_message_id=message.id,
+                    retry_count=0,
+                    revision_seq=index + 1,
+                    created_at=datetime(2026, 7, 20, 12, 0, index),
+                )
+            )
     with isolated_schema_engine.begin() as connection:
-        connection.execute(text("DROP INDEX ix_runs_tenant_session_revision_seq"))
+        connection.execute(
+            text("ALTER TABLE runs DROP CONSTRAINT uq_runs_tenant_session_revision_seq")
+        )
         connection.execute(text("DROP INDEX ix_runs_replaces_run_id"))
         connection.execute(text("ALTER TABLE runs DROP COLUMN revision_seq"))
 
@@ -89,11 +104,128 @@ def test_revision_sequence_upgrade_backfills_legacy_rows_and_repairs_indexes(
     revision = {column["name"]: column for column in inspector.get_columns("runs")}["revision_seq"]
     assert revision["nullable"] is False
     indexes = {index["name"] for index in inspector.get_indexes("runs")}
-    assert {"ix_runs_tenant_session_revision_seq", "ix_runs_replaces_run_id"} <= indexes
+    uniques = {item["name"] for item in inspector.get_unique_constraints("runs")}
+    assert "uq_runs_tenant_session_revision_seq" in uniques
+    assert "ix_runs_replaces_run_id" in indexes
     with isolated_schema_engine.connect() as connection:
         assert connection.execute(
             text("SELECT revision_seq FROM runs ORDER BY revision_seq")
         ).scalars().all() == [1, 2]
+
+
+def test_revision_sequence_upgrade_repairs_invalid_values_before_unique_constraint(
+    isolated_schema_engine: Engine,
+) -> None:
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE runs DROP CONSTRAINT uq_runs_tenant_session_revision_seq")
+        )
+        connection.execute(text("ALTER TABLE runs ALTER COLUMN revision_seq DROP NOT NULL"))
+    with Session(isolated_schema_engine) as session, session.begin():
+        suffix = uuid.uuid4().hex
+        user = User(
+            username=f"revdup-{suffix}",
+            email=f"revdup-{suffix}@example.com",
+            hashed_password="hash",
+        )
+        tenant = Tenant(name="Revision duplicate", slug=f"revdup-{suffix}")
+        session.add_all([user, tenant])
+        session.flush()
+        run_session = RunSession(tenant_id=tenant.id, created_by_user_id=user.id)
+        session.add(run_session)
+        session.flush()
+        tenant_id = tenant.id
+        run_session_id = run_session.id
+        messages = [
+            RunMessage(
+                tenant_id=tenant.id,
+                session_id=run_session.id,
+                role="user",
+                content=f"prompt {index}",
+                status="complete",
+            )
+            for index in range(4)
+        ]
+        session.add_all(messages)
+        session.flush()
+        for index, (message, revision_seq) in enumerate(
+            zip(messages, (1, 1, 0, None), strict=True)
+        ):
+            session.add(
+                Run(
+                    tenant_id=tenant.id,
+                    session_id=run_session.id,
+                    created_by_user_id=user.id,
+                    run_type="chat",
+                    status="completed",
+                    idempotency_key=f"duplicate-{index}",
+                    request_hash=f"{index:064d}",
+                    input_message_id=message.id,
+                    retry_count=0,
+                    revision_seq=revision_seq,
+                    created_at=datetime(2026, 7, 20, 12, 0, index),
+                )
+            )
+
+    changes = migrate_phase3_execution_schema(isolated_schema_engine)
+    assert "repair duplicate runs.revision_seq values" in changes
+    assert "add uq_runs_tenant_session_revision_seq" in changes
+    with isolated_schema_engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT revision_seq FROM runs "
+                "WHERE tenant_id = :tenant_id AND session_id = :session_id "
+                "ORDER BY revision_seq"
+            ),
+            {"tenant_id": tenant_id, "session_id": run_session_id},
+        ).scalars().all() == [1, 2, 3, 4]
+    revision_column = {
+        item["name"]: item for item in inspect(isolated_schema_engine).get_columns("runs")
+    }["revision_seq"]
+    assert revision_column["nullable"] is False
+    assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
+    with pytest.raises(IntegrityError), isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE runs SET revision_seq = 1 "
+                "WHERE tenant_id = :tenant_id AND session_id = :session_id"
+            ),
+            {"tenant_id": tenant_id, "session_id": run_session_id},
+        )
+
+
+def test_rolling_startup_gate_fails_without_mutating_an_old_revision_schema(
+    isolated_schema_engine: Engine,
+) -> None:
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE runs DROP CONSTRAINT uq_runs_tenant_session_revision_seq")
+        )
+
+    with pytest.raises(RuntimeError, match="maintenance migration required"):
+        verify_phase3_execution_schema(isolated_schema_engine)
+
+    assert "uq_runs_tenant_session_revision_seq" not in {
+        item["name"] for item in inspect(isolated_schema_engine).get_unique_constraints("runs")
+    }
+
+
+def test_operator_migration_obeys_lock_timeout(isolated_schema_engine: Engine) -> None:
+    with isolated_schema_engine.begin() as setup:
+        setup.execute(text("ALTER TABLE runs DROP CONSTRAINT uq_runs_tenant_session_revision_seq"))
+    blocker = isolated_schema_engine.connect()
+    transaction = blocker.begin()
+    try:
+        blocker.execute(text("LOCK TABLE runs IN ACCESS EXCLUSIVE MODE"))
+        with pytest.raises(DBAPIError, match="lock timeout"):
+            migrate_phase3_execution_schema(
+                isolated_schema_engine,
+                lock_timeout_ms=100,
+                statement_timeout_ms=2_000,
+            )
+    finally:
+        transaction.rollback()
+        blocker.close()
 
 
 def _assert_phase3_schema(engine: Engine) -> None:
@@ -559,7 +691,7 @@ def test_two_engines_concurrently_upgrade_the_same_phase2_schema(
         connect_args={"options": f"-csearch_path={schema} -ctimezone=Asia/Shanghai"},
     )
     barrier = threading.Barrier(2)
-    first_statements: dict[Engine, str] = {}
+    statements: dict[Engine, list[str]] = {}
 
     def synchronize_transactions(_connection: Connection) -> None:
         barrier.wait(timeout=10)
@@ -572,7 +704,7 @@ def test_two_engines_concurrently_upgrade_the_same_phase2_schema(
         _context: object,
         _executemany: bool,
     ) -> None:
-        first_statements.setdefault(connection.engine, statement)
+        statements.setdefault(connection.engine, []).append(statement)
 
     for candidate in (isolated_schema_engine, second_engine):
         event.listen(candidate, "begin", synchronize_transactions, once=True)
@@ -590,13 +722,15 @@ def test_two_engines_concurrently_upgrade_the_same_phase2_schema(
             event.remove(candidate, "before_cursor_execute", capture_first_statement)
         second_engine.dispose()
 
-    assert len(first_statements) == 2
-    assert all("pg_advisory_xact_lock" in sql for sql in first_statements.values())
+    assert len(statements) == 2
+    assert all("set_config('lock_timeout'" in sql[0] for sql in statements.values())
+    assert all("set_config('statement_timeout'" in sql[1] for sql in statements.values())
+    assert all("pg_advisory_xact_lock" in sql[2] for sql in statements.values())
     assert sum(bool(result) for result in results) == 1
     _assert_phase3_schema(isolated_schema_engine)
 
 
-def test_app_startup_runs_phase3_upgrade_before_create_all(
+def test_app_startup_creates_fresh_schema_then_uses_read_only_phase3_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app import app_main
@@ -610,8 +744,8 @@ def test_app_startup_runs_phase3_upgrade_before_create_all(
     )
     monkeypatch.setattr(
         app_main,
-        "migrate_phase3_execution_schema",
-        lambda _engine: calls.append("phase3") or (),
+        "verify_phase3_execution_schema",
+        lambda _engine: calls.append("verify_phase3"),
     )
     monkeypatch.setattr(
         app_main.Base.metadata,
@@ -621,4 +755,4 @@ def test_app_startup_runs_phase3_upgrade_before_create_all(
     monkeypatch.setattr("app.scripts.reconcile_schema.reconcile_columns", lambda _engine: [])
 
     assert app_main._initialize_postgres_schema() is True
-    assert calls == ["phase2", "phase3", "create_all"]
+    assert calls == ["phase2", "create_all", "verify_phase3"]

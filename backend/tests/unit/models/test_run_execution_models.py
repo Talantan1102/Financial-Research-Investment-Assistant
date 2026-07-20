@@ -60,6 +60,7 @@ def execution_context(db_session: Session) -> ExecutionContext:
             idempotency_key=f"execution-{index}-{suffix}",
             request_hash=uuid.uuid4().hex,
             input_message_id=messages[index].id,
+            revision_seq=index + 1,
             retry_count=0,
         )
         for index in range(2)
