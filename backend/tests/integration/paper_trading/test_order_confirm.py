@@ -232,17 +232,36 @@ def test_confirm_rejects_expired_and_closed_market_but_queues_closed_limit(
     expired = _prepare(open_service, user_id)
     expired.expires_at = NOW - timedelta(seconds=1)
     db_session.flush()
+    quote_calls = provider.calls
+
+    def unavailable(_: str) -> RealtimeQuote:
+        raise RuntimeError("quote provider must not be called for an expired order")
+
+    provider.get_sync = unavailable  # type: ignore[method-assign]
     cancelled = open_service.confirm(
         user_id=user_id, order_id=expired.id, draft=_draft(), client_request_id="expired"
     )
     assert cancelled.status is OrderStatus.CANCELLED
     assert cancelled.completed_at == NOW
+    assert cancelled.client_request_id == "expired"
+    assert cancelled.confirmed_at == NOW
+    assert cancelled.confirmed_payload == _draft().model_dump(mode="json")
+    assert cancelled.user_edits["name"] == {
+        "from": "贵州茅台",
+        "to": "用户输入名",
+    }
     assert cancelled.reserved_cash == Decimal("0.00")
     assert cancelled.reserved_quantity == 0
+    retried = open_service.confirm(
+        user_id=user_id, order_id=expired.id, draft=_draft(), client_request_id="expired"
+    )
+    assert retried.id == cancelled.id
+    assert provider.calls == quote_calls
     db_session.commit()
     persisted = db_session.get(PaperOrder, expired.id)
     assert persisted is not None
     assert persisted.status is OrderStatus.CANCELLED
+    del provider.get_sync
     closed_at = NOW.replace(hour=15, minute=1)
     provider.quote = provider.quote.model_copy(update={"quoted_at": closed_at})
     closed_service = _service(db_session, provider, now=closed_at)
@@ -263,6 +282,35 @@ def test_confirm_rejects_expired_and_closed_market_but_queues_closed_limit(
         client_request_id="closed-limit",
     )
     assert confirmed.status is OrderStatus.QUEUED
+
+
+def test_confirmation_id_length_matches_order_column_boundary(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    PaperAccountService(db_session).get_or_create(user_id=user_id)
+    provider = FixedQuoteProvider(_quote())
+    service = _service(db_session, provider)
+    accepted = _prepare(service, user_id)
+    confirmed = service.confirm(
+        user_id=user_id,
+        order_id=accepted.id,
+        draft=_draft(),
+        client_request_id="x" * 128,
+    )
+    assert confirmed.client_request_id == "x" * 128
+
+    rejected = _prepare(service, user_id, quantity=200)
+    calls_before = provider.calls
+    with pytest.raises(PaperTradingError) as caught:
+        service.confirm(
+            user_id=user_id,
+            order_id=rejected.id,
+            draft=_draft(quantity=200),
+            client_request_id="x" * 129,
+        )
+    assert caught.value.code == "invalid_order"
+    assert provider.calls == calls_before
 
 
 def _add_lot(
@@ -592,7 +640,7 @@ def test_confirm_persists_full_edited_draft_and_auditable_diff(
     assert confirmed.user_edits["ts_code"] == {"from": "600519.SH", "to": "000001.SZ"}
 
 
-def test_confirm_fetches_quote_before_acquiring_confirmation_lock(
+def test_confirm_acquires_confirmation_lock_before_fetching_quote(
     db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user_id = cast(uuid.UUID, user.id)
@@ -602,16 +650,16 @@ def test_confirm_fetches_quote_before_acquiring_confirmation_lock(
     order = _prepare(service, user_id)
     original_lock = service._lock_confirmation_key
 
-    def assert_quote_already_fetched(*, user_id: uuid.UUID, client_request_id: str) -> None:
-        assert provider.calls == 2
+    def assert_quote_not_yet_fetched(*, user_id: uuid.UUID, client_request_id: str) -> None:
+        assert provider.calls == 1
         original_lock(user_id=user_id, client_request_id=client_request_id)
 
-    monkeypatch.setattr(service, "_lock_confirmation_key", assert_quote_already_fetched)
+    monkeypatch.setattr(service, "_lock_confirmation_key", assert_quote_not_yet_fetched)
     service.confirm(
         user_id=user_id,
         order_id=order.id,
         draft=_draft(),
-        client_request_id="quote-before-lock",
+        client_request_id="lock-before-quote",
     )
 
 

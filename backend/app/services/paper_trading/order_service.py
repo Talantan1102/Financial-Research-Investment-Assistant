@@ -37,7 +37,7 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 _TS_CODE = re.compile(r"\d{6}\.(?:SH|SZ)")
 _CENT = Decimal("0.01")
 _PROPOSAL_UNIQUE_CONSTRAINT = "uq_paper_orders_account_generation_proposal"
-_MAX_CONFIRMATION_ID_LENGTH = 128 - len("order-freeze:")
+_MAX_CONFIRMATION_ID_LENGTH = 128
 
 
 class PaperOrderService:
@@ -219,18 +219,8 @@ class PaperOrderService:
             raise PaperTradingError("invalid_order", "draft must be an OrderDraft")
         normalized_draft = _canonical_draft(draft)
 
-        # A completed retry needs neither network I/O nor any balance lock.
-        existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
-        if existing is not None:
-            self._validate_confirmation_retry(existing, order_id=order_id, draft=normalized_draft)
-            return existing
-
-        # Reject missing/cross-user orders before paying for a quote. This read
-        # is only a preflight; authoritative state is reloaded under lock below.
-        self._owned_order(user_id=user_id, order_id=order_id)
-        # Fetch before transaction locks. The quote is validated again against
-        # the clock and locked account/lot state below.
-        quote = self._quote(normalized_draft.ts_code)
+        # Serialize the user-scoped idempotency key before consulting either
+        # persisted state or live dependencies.
         self._lock_confirmation_key(user_id=user_id, client_request_id=client_request_id)
         existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
         if existing is not None:
@@ -242,17 +232,23 @@ class PaperOrderService:
             raise PaperTradingError(
                 "order_not_awaiting_confirmation", "order is no longer awaiting confirmation"
             )
-        account = self.account_service.get_active(user_id=user_id, for_update=True)
-        self._session.refresh(account, with_for_update=True)
-        if order.account_id != account.id or order.account_generation != account.generation:
-            raise PaperTradingError("stale_account_generation", "account generation has changed")
-
         now = self._current_time()
         if now >= order.expires_at:
+            payload = normalized_draft.model_dump(mode="json")
+            order.client_request_id = client_request_id
+            order.confirmed_payload = payload
+            order.user_edits = _json_diff(order.original_proposal, payload)
+            order.confirmed_at = now
             order.status = OrderStatus.CANCELLED
             order.completed_at = now
             self._session.flush()
             return order
+
+        quote = self._quote(normalized_draft.ts_code)
+        account = self.account_service.get_active(user_id=user_id, for_update=True)
+        self._session.refresh(account, with_for_update=True)
+        if order.account_id != account.id or order.account_generation != account.generation:
+            raise PaperTradingError("stale_account_generation", "account generation has changed")
         preview = self._calculate_preview(
             account=account,
             order_id=order_id,
@@ -416,8 +412,12 @@ class PaperOrderService:
     def _validate_confirmation_retry(
         order: PaperOrder, *, order_id: uuid.UUID, draft: OrderDraft
     ) -> None:
-        payload = draft.model_copy(update={"name": order.name}).model_dump(mode="json")
-        if order.id != order_id or order.confirmed_payload != payload:
+        requested_payload = draft.model_dump(mode="json")
+        accepted_payload = draft.model_copy(update={"name": order.name}).model_dump(mode="json")
+        if order.id != order_id or order.confirmed_payload not in (
+            requested_payload,
+            accepted_payload,
+        ):
             raise PaperTradingError(
                 "confirmation_idempotency_conflict",
                 "confirmation key does not match the existing order",
