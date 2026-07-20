@@ -116,6 +116,7 @@ class CapabilityDefinition(BaseModel):
     idempotent: bool
     default_timeout_s: float = Field(gt=0)
     max_attempts: int = Field(ge=1)
+    concurrency_group: str | None = Field(default=None, min_length=1)
 
     def model_post_init(self, __context: Any) -> None:
         del __context
@@ -157,11 +158,13 @@ class RuntimeResult(BaseModel):
     attempt: int = Field(default=0, ge=0)
     latency_ms: int = Field(default=0, ge=0)
     audit: dict[str, Any] = Field(default_factory=dict)
+    effective_input: dict[str, Any] | None = None
 
     def model_post_init(self, __context: Any) -> None:
         del __context
         object.__setattr__(self, "output", _deep_freeze(self.output))
         object.__setattr__(self, "audit", _deep_freeze(self.audit))
+        object.__setattr__(self, "effective_input", _deep_freeze(self.effective_input))
 
     def model_copy(
         self, *, update: Mapping[str, Any] | None = None, deep: bool = False
@@ -169,6 +172,7 @@ class RuntimeResult(BaseModel):
         copied = super().model_copy(update=update, deep=deep)
         object.__setattr__(copied, "output", _deep_freeze(copied.output))
         object.__setattr__(copied, "audit", _deep_freeze(copied.audit))
+        object.__setattr__(copied, "effective_input", _deep_freeze(copied.effective_input))
         return copied
 
     @model_validator(mode="after")
