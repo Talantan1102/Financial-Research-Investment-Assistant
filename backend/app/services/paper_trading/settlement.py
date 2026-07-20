@@ -7,6 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import cast
 from zoneinfo import ZoneInfo
 
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -38,6 +39,18 @@ _CENT = Decimal("0.01")
 _FOUR_PLACES = Decimal("0.0001")
 
 
+class MatchQuoteEvidence(BaseModel):
+    model_config = ConfigDict(frozen=True, strict=True)
+
+    ts_code: str
+    quote_timestamp: datetime
+    source: str
+    execution_price: Decimal
+    execution_quantity: int
+    snapshot_summary: dict[str, object]
+    consumed_levels: tuple[dict[str, object], ...]
+
+
 class PaperSettlementService:
     """Apply one execution and all of its projections in the caller transaction."""
 
@@ -49,6 +62,7 @@ class PaperSettlementService:
         now: Callable[[], datetime],
         fee_schedule: FeeSchedule | None = None,
         trade_service: TradeService | None = None,
+        evidence_provider: Callable[..., MatchQuoteEvidence],
     ) -> None:
         self._session = session
         self._calendar = calendar
@@ -56,6 +70,7 @@ class PaperSettlementService:
         self._fees = fee_schedule or FeeSchedule.from_builtin_fixture()
         self._accounts = PaperAccountService(session)
         self._trades = trade_service or TradeService(session)
+        self._evidence_provider = evidence_provider
 
     def apply(
         self,
@@ -74,12 +89,20 @@ class PaperSettlementService:
         )
         if order is None:
             raise PaperTradingError("order_not_found", "paper order does not exist")
+        evidence = self._evidence_provider(
+            order_id=order_id,
+            quote_timestamp=quote_timestamp,
+            match_pass=match_pass,
+            execution=execution,
+        )
+        self._validate_evidence(order, execution, quote_timestamp, evidence)
 
         retry = self._existing_pass(
             order=order,
             execution=execution,
             quote_timestamp=quote_timestamp,
             match_pass=match_pass,
+            evidence=evidence,
         )
         if retry is not None:
             return retry
@@ -126,7 +149,7 @@ class PaperSettlementService:
             stamp_duty=incremental.stamp_duty,
             transfer_fee=incremental.transfer_fee,
             quote_timestamp=quote_timestamp,
-            quote_source=_quote_source(order),
+            quote_source=evidence.source,
             executed_at=executed_at,
             trade_id=trade_id,
         )
@@ -134,9 +157,9 @@ class PaperSettlementService:
             order_id=order.id,
             quote_timestamp=quote_timestamp,
             match_pass=match_pass,
-            quote_source=_quote_source(order),
-            snapshot_summary={"price": str(execution.price), "quantity": execution.quantity},
-            consumed_levels=[{"price": str(execution.price), "quantity": execution.quantity}],
+            quote_source=evidence.source,
+            snapshot_summary=evidence.snapshot_summary,
+            consumed_levels=list(evidence.consumed_levels),
             matched_quantity=execution.quantity,
         )
         self._session.add_all([pass_row, fill])
@@ -166,9 +189,8 @@ class PaperSettlementService:
 
         old_filled = int(order.filled_quantity)
         new_filled = old_filled + execution.quantity
-        old_value = (cast(Decimal | None, order.avg_fill_price) or Decimal(0)) * old_filled
         order.filled_quantity = new_filled  # type: ignore[assignment]
-        order.avg_fill_price = _four((old_value + gross) / new_filled)  # type: ignore[assignment]
+        order.avg_fill_price = _four((prior_gross + gross) / new_filled)  # type: ignore[assignment]
         terminal = new_filled == int(order.quantity)
         order.status = OrderStatus.FILLED if terminal else OrderStatus.PARTIALLY_FILLED  # type: ignore[assignment]
         order.completed_at = executed_at if terminal else None  # type: ignore[assignment]
@@ -185,6 +207,8 @@ class PaperSettlementService:
             trade_date=executed_at.astimezone(SHANGHAI).date(),
             note=f"paper-order:{order.id}:fill:{fill.id}",
             trade_id=str(trade_id),
+            paper_account_id=cast(uuid.UUID, order.account_id),
+            paper_account_generation=cast(int, order.account_generation),
         )
         self._session.flush()
         return fill
@@ -443,6 +467,7 @@ class PaperSettlementService:
         execution: Execution,
         quote_timestamp: datetime,
         match_pass: int,
+        evidence: MatchQuoteEvidence,
     ) -> PaperFill | None:
         row = self._session.scalar(
             select(PaperMatchPass).where(
@@ -460,11 +485,51 @@ class PaperSettlementService:
             or int(fill.quantity) != execution.quantity
             or cast(Decimal, fill.price) != execution.price
             or int(row.matched_quantity) != execution.quantity
+            or row.quote_source != evidence.source
+            or row.snapshot_summary != evidence.snapshot_summary
+            or row.consumed_levels != list(evidence.consumed_levels)
         ):
             raise PaperTradingError(
                 "match_pass_conflict", "match-pass watermark conflicts with execution"
             )
         return fill
+
+    @staticmethod
+    def _validate_evidence(
+        order: PaperOrder,
+        execution: Execution,
+        quote_timestamp: datetime,
+        evidence: MatchQuoteEvidence,
+    ) -> None:
+        if not isinstance(evidence, MatchQuoteEvidence):
+            raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
+        consumed_quantity = 0
+        consumed_valid = bool(evidence.consumed_levels)
+        for level in evidence.consumed_levels:
+            try:
+                level_price = Decimal(str(level["price"]))
+                raw_quantity = level["quantity"]
+            except (KeyError, InvalidOperation, TypeError, ValueError):
+                consumed_valid = False
+                break
+            if isinstance(raw_quantity, bool) or not isinstance(raw_quantity, int):
+                consumed_valid = False
+                break
+            level_quantity = raw_quantity
+            consumed_valid = (
+                consumed_valid and level_price == execution.price and level_quantity > 0
+            )
+            consumed_quantity += level_quantity
+        if (
+            evidence.quote_timestamp != quote_timestamp
+            or evidence.ts_code != order.ts_code
+            or not evidence.source.strip()
+            or evidence.execution_price != execution.price
+            or evidence.execution_quantity != execution.quantity
+            or not consumed_valid
+            or consumed_quantity != execution.quantity
+        ):
+            raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
 
     @staticmethod
     def _validate_input(
@@ -490,6 +555,23 @@ class PaperSettlementService:
 
     @staticmethod
     def _validate_execution(order: PaperOrder, execution: Execution) -> None:
+        price = execution.price
+        if (
+            not isinstance(price, Decimal)
+            or not price.is_finite()
+            or price <= 0
+            or price != _four(price)
+            or price >= Decimal("100000000000000")
+        ):
+            raise PaperTradingError("invalid_execution_price", "execution price is invalid")
+        try:
+            price_tick = Decimal(str(order.quote_snapshot["price_tick"]))
+        except (KeyError, InvalidOperation, ValueError):
+            raise PaperTradingError(
+                "invalid_quote_snapshot", "confirmed order lacks price tick"
+            ) from None
+        if not price_tick.is_finite() or price_tick <= 0 or price % price_tick != 0:
+            raise PaperTradingError("invalid_execution_price", "execution price is off tick")
         remaining = int(order.quantity) - int(order.filled_quantity)
         if execution.quantity > remaining:
             raise PaperTradingError(

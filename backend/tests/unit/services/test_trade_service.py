@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from app.models.paper_account import PaperAccount, PaperAccountStatus
 from app.models.position import Position
 from app.models.trade import Trade, TradeType
 from app.models.user import User
@@ -62,6 +63,65 @@ def test_create_preserves_explicit_trade_id(db_session: Session, user: User) -> 
     )
 
     assert trade.id == "11111111-1111-1111-1111-111111111111"
+
+
+def test_manual_and_paper_trades_do_not_blend_positions(db_session: Session, user: User) -> None:
+    account = PaperAccount.new(user_id=user.id, generation=1, initial_cash=Decimal("1000"))
+    db_session.add(account)
+    db_session.flush()
+    service = TradeService(db_session)
+    common = {
+        "user_id": user.id,
+        "ts_code": "600519.SH",
+        "name": "贵州茅台",
+        "ttype": TradeType.BUY,
+        "price": Decimal("10"),
+        "trade_date": date(2026, 7, 20),
+    }
+    service.create(**common, quantity=100)
+    service.create(**common, quantity=200, paper_account_id=account.id, paper_account_generation=1)
+
+    positions = db_session.query(Position).filter_by(user_id=user.id, ts_code="600519.SH").all()
+    assert sorted(position.quantity for position in positions) == [100, 200]
+
+
+def test_paper_generations_keep_separate_positions(db_session: Session, user: User) -> None:
+    first = PaperAccount.new(user_id=user.id, generation=1, initial_cash=Decimal("1000"))
+    db_session.add(first)
+    db_session.flush()
+    service = TradeService(db_session)
+    service.create(
+        user_id=user.id,
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.BUY,
+        quantity=100,
+        price=Decimal("10"),
+        trade_date=date(2026, 7, 20),
+        paper_account_id=first.id,
+        paper_account_generation=1,
+    )
+    first.status = PaperAccountStatus.ARCHIVED  # type: ignore[assignment]
+    second = PaperAccount.new(user_id=user.id, generation=2, initial_cash=Decimal("1000"))
+    db_session.add(second)
+    db_session.flush()
+    service.create(
+        user_id=user.id,
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.BUY,
+        quantity=200,
+        price=Decimal("10"),
+        trade_date=date(2026, 7, 21),
+        paper_account_id=second.id,
+        paper_account_generation=2,
+    )
+
+    positions = db_session.query(Position).filter(Position.paper_account_id.is_not(None)).all()
+    assert {(position.paper_account_generation, position.quantity) for position in positions} == {
+        (1, 100),
+        (2, 200),
+    }
 
 
 def test_create_sequence_initial_buy_sell_matches_spec_scenario_1(

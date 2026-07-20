@@ -22,13 +22,17 @@ class PositionService:
         return (
             self._session.query(Position)
             .filter_by(user_id=user_id)
+            .filter(Position.paper_account_id.is_(None))
             .order_by(Position.ts_code.asc())
             .all()
         )
 
     def get(self, user_id: str, ts_code: str) -> Position | None:
         return (
-            self._session.query(Position).filter_by(user_id=user_id, ts_code=ts_code).one_or_none()
+            self._session.query(Position)
+            .filter_by(user_id=user_id, ts_code=ts_code)
+            .filter(Position.paper_account_id.is_(None))
+            .one_or_none()
         )
 
     def update_quote(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
@@ -22,9 +23,10 @@ from app.models.user import User
 from app.services.paper_trading.clock import FixedTradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.matcher import Execution
-from app.services.paper_trading.settlement import PaperSettlementService
+from app.services.paper_trading.settlement import MatchQuoteEvidence, PaperSettlementService
 from app.services.trade_service import TradeService
-from sqlalchemy.orm import Session
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 QUOTE_TIME = datetime(2026, 7, 20, 2, 0, tzinfo=UTC)
 
@@ -84,7 +86,7 @@ def _buy_order(
         original_proposal={"quantity": quantity},
         confirmed_payload={"quantity": quantity},
         user_edits=None,
-        quote_snapshot={"source": "fixed", "daily_upper_bound": "11.00"},
+        quote_snapshot={"source": "fixed", "daily_upper_bound": "11.00", "price_tick": "0.01"},
         rules_version="cn-a-20260706",
         expires_at=now + timedelta(minutes=5),
         confirmed_at=now,
@@ -96,10 +98,25 @@ def _buy_order(
 
 
 def _service(db_session: Session, *, at: datetime = QUOTE_TIME) -> PaperSettlementService:
+    def evidence_provider(**kwargs: object) -> MatchQuoteEvidence:
+        order = db_session.get(PaperOrder, kwargs["order_id"])
+        execution = cast(Execution, kwargs["execution"])
+        assert order is not None
+        return MatchQuoteEvidence(
+            ts_code=cast(str, order.ts_code),
+            quote_timestamp=cast(datetime, kwargs["quote_timestamp"]),
+            source="actual-fixed",
+            execution_price=execution.price,
+            execution_quantity=execution.quantity,
+            snapshot_summary={"actual": True},
+            consumed_levels=({"price": str(execution.price), "quantity": execution.quantity},),
+        )
+
     return PaperSettlementService(
         db_session,
         calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21), date(2026, 7, 22)}),
         now=lambda: at,
+        evidence_provider=evidence_provider,
     )
 
 
@@ -134,7 +151,7 @@ def _sell_order(
         original_proposal={"quantity": quantity},
         confirmed_payload={"quantity": quantity},
         user_edits=None,
-        quote_snapshot={"source": "fixed"},
+        quote_snapshot={"source": "fixed", "price_tick": "0.01"},
         rules_version="cn-a-20260706",
         expires_at=now + timedelta(minutes=5),
         confirmed_at=now,
@@ -176,6 +193,9 @@ def test_buy_fill_updates_every_projection_in_one_transaction(
     assert lot.available_on == date(2026, 7, 21)
     assert lot.unit_cost == Decimal("10.0501")
     assert db_session.query(PaperCashLedger).filter_by(fill_id=fill.id).count() == 1
+    assert fill.quote_source == "actual-fixed"
+    match_row = db_session.query(PaperMatchPass).filter_by(fill_id=fill.id).one()
+    assert match_row.snapshot_summary == {"actual": True}
     assert order.status is OrderStatus.FILLED
     assert account.available_cash == Decimal("98994.99")
     assert account.frozen_cash == Decimal("0.00")
@@ -269,6 +289,7 @@ def test_market_execution_must_stay_within_confirmed_daily_bounds(
         "source": "fixed",
         "daily_lower_bound": "9.00",
         "daily_upper_bound": "11.00",
+        "price_tick": "0.01",
     }
     db_session.flush()
 
@@ -282,6 +303,165 @@ def test_market_execution_must_stay_within_confirmed_daily_bounds(
 
     assert error.value.code == "execution_price_mismatch"
     assert db_session.query(PaperFill).count() == 0
+
+
+@pytest.mark.parametrize(
+    "price",
+    [Decimal("10.00001"), Decimal("100000000000000"), Decimal("10.0050")],
+)
+def test_invalid_execution_price_is_rejected_before_projections(
+    db_session: Session, user: User, price: Decimal
+) -> None:
+    order = _buy_order(db_session, user, _account(db_session, user))
+
+    with pytest.raises(PaperTradingError) as error:
+        _service(db_session).apply(
+            order_id=order.id,
+            execution=Execution(price=price, quantity=100),
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+
+    assert error.value.code == "invalid_execution_price"
+    assert db_session.query(PaperFill).count() == 0
+    assert db_session.query(PaperMatchPass).count() == 0
+
+
+def test_three_partial_fills_average_uses_exact_prior_gross(
+    db_session: Session, user: User
+) -> None:
+    account = _account(db_session, user)
+    order = _buy_order(db_session, user, account, quantity=300, reserve=Decimal("3005.06"))
+    order.limit_price = Decimal("10.0001")  # type: ignore[assignment]
+    order.quote_snapshot = {"source": "fixed", "price_tick": "0.0001"}  # type: ignore[assignment]
+    db_session.flush()
+    service = _service(db_session)
+    for index, price in enumerate(
+        (Decimal("10.0000"), Decimal("10.0001"), Decimal("10.0000")), start=1
+    ):
+        service.apply(
+            order_id=order.id,
+            execution=Execution(price=price, quantity=100),
+            quote_timestamp=QUOTE_TIME + timedelta(seconds=index),
+            match_pass=index,
+        )
+
+    assert order.avg_fill_price == Decimal("10.0000")
+
+
+@pytest.mark.parametrize("mismatch", ["timestamp", "symbol", "consumed"])
+def test_mismatched_actual_evidence_is_atomic(
+    db_session: Session, user: User, mismatch: str
+) -> None:
+    order = _buy_order(db_session, user, _account(db_session, user))
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+
+    def provider(**kwargs: object) -> MatchQuoteEvidence:
+        del kwargs
+        return MatchQuoteEvidence(
+            ts_code="000001.SZ" if mismatch == "symbol" else "600519.SH",
+            quote_timestamp=(
+                QUOTE_TIME + timedelta(seconds=1) if mismatch == "timestamp" else QUOTE_TIME
+            ),
+            source="actual-feed",
+            execution_price=execution.price,
+            execution_quantity=execution.quantity,
+            snapshot_summary={"actual": True},
+            consumed_levels=(
+                {
+                    "price": "9.99" if mismatch == "consumed" else "10.00",
+                    "quantity": 100,
+                },
+            ),
+        )
+
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=provider,
+    )
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=order.id,
+            execution=execution,
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+
+    assert error.value.code == "invalid_match_evidence"
+    assert db_session.query(PaperFill).count() == 0
+    assert db_session.query(PaperMatchPass).count() == 0
+    assert db_session.query(PaperCashLedger).count() == 0
+    assert db_session.query(Trade).count() == 0
+    assert db_session.query(Position).count() == 0
+
+
+def test_two_sessions_same_match_watermark_create_one_projection(
+    db_session: Session, pg_test_engine: Engine
+) -> None:
+    del db_session
+    session_factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    setup = session_factory()
+    token = uuid.uuid4().hex
+    user = User(
+        username=f"concurrent-{token}",
+        email=f"concurrent-{token}@example.test",
+        hashed_password="x",
+    )
+    setup.add(user)
+    setup.flush()
+    account = _account(setup, user)
+    order = _buy_order(setup, user, account)
+    setup.commit()
+    order_id = cast(uuid.UUID, order.id)
+    setup.close()
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+
+    def settle() -> uuid.UUID:
+        session = session_factory()
+        try:
+
+            def provider(**kwargs: object) -> MatchQuoteEvidence:
+                del kwargs
+                return MatchQuoteEvidence(
+                    ts_code="600519.SH",
+                    quote_timestamp=QUOTE_TIME,
+                    source="actual-concurrent",
+                    execution_price=execution.price,
+                    execution_quantity=execution.quantity,
+                    snapshot_summary={"sequence": 1},
+                    consumed_levels=({"price": "10.00", "quantity": 100},),
+                )
+
+            fill = PaperSettlementService(
+                session,
+                calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+                now=lambda: QUOTE_TIME,
+                evidence_provider=provider,
+            ).apply(
+                order_id=order_id,
+                execution=execution,
+                quote_timestamp=QUOTE_TIME,
+                match_pass=1,
+            )
+            session.commit()
+            return cast(uuid.UUID, fill.id)
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        fill_ids = list(pool.map(lambda _: settle(), range(2)))
+    verify = session_factory()
+    try:
+        assert fill_ids[0] == fill_ids[1]
+        assert verify.query(PaperFill).filter_by(order_id=order_id).count() == 1
+        assert verify.query(Trade).count() == 1
+        assert (
+            verify.query(PaperCashLedger).filter(PaperCashLedger.fill_id.is_not(None)).count() == 1
+        )
+    finally:
+        verify.close()
 
 
 def test_rejects_stale_account_generation_before_writes(db_session: Session, user: User) -> None:
@@ -672,6 +852,7 @@ def test_trade_projection_failure_rolls_back_all_fill_projections(
             calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
             now=lambda: QUOTE_TIME,
             trade_service=cast(TradeService, FailingTradeService()),
+            evidence_provider=_service(db_session)._evidence_provider,
         ).apply(
             order_id=order.id,
             execution=Execution(price=Decimal("10.00"), quantity=100),

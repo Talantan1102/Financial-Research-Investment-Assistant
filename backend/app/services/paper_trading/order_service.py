@@ -321,6 +321,7 @@ class PaperOrderService:
             **preview.quote.model_dump(mode="json"),
             "daily_lower_bound": str(daily_lower),
             "daily_upper_bound": str(daily_upper),
+            "price_tick": str(confirmed_rules.price_tick),
         }
         order.rules_version = preview.rules_version
         order.confirmed_at = now

@@ -12,11 +12,13 @@ import enum
 from datetime import date, datetime
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     Date,
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -58,8 +60,22 @@ class Trade(Base):
     price = Column(Numeric(12, 4), nullable=False)
     trade_date = Column(Date, nullable=False, default=date.today)
     note = Column(Text, nullable=True)
+    paper_account_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    paper_account_generation = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
     user = relationship("User", backref="trades")
 
-    __table_args__ = (Index("ix_trades_user_tscode_date", "user_id", "ts_code", "trade_date"),)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["paper_account_id", "user_id", "paper_account_generation"],
+            ["paper_accounts.id", "paper_accounts.user_id", "paper_accounts.generation"],
+            name="fk_trades_paper_account_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(paper_account_id IS NULL) = (paper_account_generation IS NULL)",
+            name="ck_trades_paper_scope_all_or_none",
+        ),
+        Index("ix_trades_user_tscode_date", "user_id", "ts_code", "trade_date"),
+    )
