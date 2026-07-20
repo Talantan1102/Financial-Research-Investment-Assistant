@@ -15,13 +15,14 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.paper_account import PaperAccount, PaperHoldingLot
+from app.models.paper_account import PaperAccount, PaperAccountStatus, PaperHoldingLot
 from app.models.paper_order import (
     OrderSide,
     OrderStatus,
     OrderType,
     PaperFill,
     PaperLotReservation,
+    PaperMatchPass,
     PaperOrder,
 )
 from app.schemas.paper_trading import OrderDraft, OrderPreview
@@ -328,6 +329,195 @@ class PaperOrderService:
         order.status = OrderStatus.OPEN if continuous else OrderStatus.QUEUED
         self._session.flush()
         return order
+
+    def cancel_confirmed(
+        self,
+        *,
+        user_id: uuid.UUID,
+        order_id: uuid.UUID,
+        confirmation_id: str,
+    ) -> PaperOrder:
+        user_id = _require_uuid(user_id, field="user_id")
+        order_id = _require_uuid(order_id, field="order_id")
+        _require_text(confirmation_id, field="confirmation_id", maximum=128)
+        order = self._owned_order(user_id=user_id, order_id=order_id, for_update=True)
+        if order.status is OrderStatus.CANCELLED:
+            return order
+        if order.status not in {
+            OrderStatus.QUEUED,
+            OrderStatus.OPEN,
+            OrderStatus.PARTIALLY_FILLED,
+        }:
+            raise PaperTradingError("order_not_cancellable", "模拟订单当前不可撤销")
+        account = self._active_order_account(order)
+        self._release_remaining_reservation(order=order, account=account)
+        order.status = OrderStatus.CANCELLED  # type: ignore[assignment]
+        order.completed_at = self._current_time()  # type: ignore[assignment]
+        self._session.flush()
+        return order
+
+    def expire_open_orders(self, *, at: datetime) -> int:
+        at = _require_aware_time(at)
+        local = at.astimezone(SHANGHAI)
+        if not self.clock.calendar.is_open_date(local.date()) or local.time().replace(
+            tzinfo=None
+        ) < time(15):
+            return 0
+        orders = self._session.scalars(
+            select(PaperOrder)
+            .join(
+                PaperAccount,
+                (PaperAccount.id == PaperOrder.account_id)
+                & (PaperAccount.generation == PaperOrder.account_generation),
+            )
+            .where(
+                PaperOrder.status.in_(
+                    [OrderStatus.QUEUED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]
+                ),
+                PaperOrder.expires_at <= at,
+                PaperAccount.status == PaperAccountStatus.ACTIVE,
+            )
+            .order_by(PaperOrder.id)
+            .with_for_update(of=PaperOrder, skip_locked=True)
+            .execution_options(populate_existing=True)
+        ).all()
+        for order in orders:
+            account = self._active_order_account(order)
+            self._release_remaining_reservation(order=order, account=account)
+            order.status = OrderStatus.EXPIRED  # type: ignore[assignment]
+            order.completed_at = at  # type: ignore[assignment]
+        self._session.flush()
+        return len(orders)
+
+    def open_queued_orders(self, *, at: datetime) -> int:
+        at = _require_aware_time(at)
+        if self.clock.phase(at) not in {MarketPhase.MORNING, MarketPhase.AFTERNOON}:
+            return 0
+        orders = self._session.scalars(
+            select(PaperOrder)
+            .join(
+                PaperAccount,
+                (PaperAccount.id == PaperOrder.account_id)
+                & (PaperAccount.generation == PaperOrder.account_generation),
+            )
+            .where(
+                PaperOrder.status == OrderStatus.QUEUED,
+                PaperOrder.expires_at > at,
+                PaperAccount.status == PaperAccountStatus.ACTIVE,
+            )
+            .order_by(PaperOrder.id)
+            .with_for_update(of=PaperOrder, skip_locked=True)
+            .execution_options(populate_existing=True)
+        ).all()
+        for order in orders:
+            order.status = OrderStatus.OPEN  # type: ignore[assignment]
+        self._session.flush()
+        return len(orders)
+
+    def reset_account_confirmed(
+        self,
+        *,
+        user_id: uuid.UUID,
+        initial_cash: Decimal,
+        session_id: str,
+        confirmation_id: str,
+    ) -> PaperAccount:
+        user_id = _require_uuid(user_id, field="user_id")
+        session_id = _require_text(session_id, field="session_id", maximum=64)
+        confirmation_id = _require_text(confirmation_id, field="confirmation_id", maximum=64)
+        account = self.account_service.get_active(user_id=user_id, for_update=True)
+        processing = self._session.scalar(
+            select(PaperMatchPass.id)
+            .join(PaperOrder, PaperOrder.id == PaperMatchPass.order_id)
+            .where(
+                PaperOrder.account_id == account.id,
+                PaperOrder.account_generation == account.generation,
+                PaperMatchPass.fill_id.is_(None),
+                PaperMatchPass.matched_quantity > 0,
+            )
+            .with_for_update(of=PaperMatchPass)
+            .limit(1)
+        )
+        if processing is not None:
+            raise PaperTradingError("match_in_progress", "账户存在正在处理的撮合，请稍后重试")
+        return self.account_service.reset_confirmed(
+            user_id=user_id,
+            initial_cash=initial_cash,
+            source_session_id=session_id,
+            confirmation_id=confirmation_id,
+        )
+
+    def _active_order_account(self, order: PaperOrder) -> PaperAccount:
+        account = self._session.scalar(
+            select(PaperAccount)
+            .where(
+                PaperAccount.id == order.account_id,
+                PaperAccount.user_id == order.user_id,
+                PaperAccount.generation == order.account_generation,
+                PaperAccount.status == PaperAccountStatus.ACTIVE,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if account is None:
+            raise PaperTradingError("stale_account_generation", "账户已重置，请重新操作")
+        return account
+
+    def _release_remaining_reservation(self, *, order: PaperOrder, account: PaperAccount) -> None:
+        if order.side is OrderSide.BUY:
+            release = _money(cast(Decimal, order.reserved_cash))
+            if release > cast(Decimal, account.frozen_cash):
+                raise PaperTradingError("invalid_reservation", "订单冻结资金与账户不一致")
+            if release:
+                self.account_service.append_ledger(
+                    account=account,
+                    kind="reservation_release",
+                    amount=release,
+                    available_after=_money(cast(Decimal, account.available_cash) + release),
+                    frozen_after=_money(cast(Decimal, account.frozen_cash) - release),
+                    business_key=f"order-release:{order.id}",
+                    order_id=cast(uuid.UUID, order.id),
+                )
+            order.reserved_cash = Decimal("0.00")
+            return
+
+        reservations = self._session.scalars(
+            select(PaperLotReservation)
+            .where(
+                PaperLotReservation.order_id == order.id,
+                PaperLotReservation.account_id == account.id,
+                PaperLotReservation.account_generation == account.generation,
+                PaperLotReservation.remaining_quantity > 0,
+            )
+            .order_by(PaperLotReservation.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        lots_by_id = {
+            lot.id: lot
+            for lot in self._session.scalars(
+                select(PaperHoldingLot)
+                .where(
+                    PaperHoldingLot.id.in_([row.lot_id for row in reservations]),
+                    PaperHoldingLot.account_id == account.id,
+                    PaperHoldingLot.generation == account.generation,
+                )
+                .order_by(PaperHoldingLot.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            ).all()
+        }
+        remaining = sum(int(row.remaining_quantity) for row in reservations)
+        if remaining != int(order.reserved_quantity) or len(lots_by_id) != len(reservations):
+            raise PaperTradingError("invalid_reservation", "订单冻结股份与批次不一致")
+        for reservation in reservations:
+            lot = lots_by_id[reservation.lot_id]
+            quantity = int(reservation.remaining_quantity)
+            if quantity > int(lot.frozen_quantity):
+                raise PaperTradingError("invalid_reservation", "持仓批次冻结数量不足")
+            lot.frozen_quantity = int(lot.frozen_quantity) - quantity  # type: ignore[assignment]
+            reservation.remaining_quantity = 0  # type: ignore[assignment]
+        order.reserved_quantity = 0  # type: ignore[assignment]
 
     def _reserve_buy(
         self,
@@ -716,6 +906,12 @@ def _constraint_name(exc: IntegrityError) -> str | None:
 def _require_uuid(value: object, *, field: str) -> uuid.UUID:
     if not isinstance(value, uuid.UUID):
         raise PaperTradingError("invalid_order", f"{field} must be a UUID")
+    return value
+
+
+def _require_aware_time(value: object) -> datetime:
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        raise PaperTradingError("invalid_order_time", "交易时间必须包含时区")
     return value
 
 
