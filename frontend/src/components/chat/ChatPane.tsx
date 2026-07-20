@@ -100,7 +100,8 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
     tenantIdProp ?? sessionsSnap.tenant_id,
   )
   const [pauseInput, setPauseInput] = useState('')
-  const messages = useDeferredMessages(chatSnap.messages ?? [])
+  const ownsSessionState = sessionId === null || chatSnap.session_id === sessionId
+  const messages = useDeferredMessages(ownsSessionState ? chatSnap.messages ?? [] : [])
 
   useEffect(() => {
     if (tenantIdProp) {
@@ -125,7 +126,7 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
     },
   })
 
-  const pendingMessage = chatSnap.streamingDraft
+  const pendingMessage = ownsSessionState && chatSnap.streamingDraft
     ? {
         id: '__pending_assistant__',
         session_id: sessionId ?? '__pending__',
