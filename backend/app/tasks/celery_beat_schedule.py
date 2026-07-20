@@ -69,4 +69,8 @@ beat_schedule = {
         "task": "app.tasks.paper_trading.open_queued_orders",
         "schedule": crontab(minute="*", hour="9-14", day_of_week="1-5"),
     },
+    "paper_reconcile_accounts": {
+        "task": "app.tasks.paper_trading.reconcile_paper_accounts",
+        "schedule": crontab(minute="*/5"),
+    },
 }

@@ -31,6 +31,7 @@ from app.services.paper_trading.quote_provider import (
     TushareRealtimeQuoteProvider,
     assert_fresh_quote,
 )
+from app.services.paper_trading.reconciliation import reconcile_account
 from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.settlement import MatchQuoteEvidence, PaperSettlementService
 from app.services.paper_trading.types import MarketPhase
@@ -330,6 +331,48 @@ def _run_transaction(runner: Callable[[Session], object]) -> object:
         session.close()
 
 
+def _reconcile_active_accounts() -> dict[str, int]:
+    """Reconcile active generations independently so one failure cannot abort the scan."""
+    discovery = SessionLocal()
+    try:
+        account_ids = list(
+            discovery.scalars(
+                select(PaperAccount.id)
+                .where(PaperAccount.status == PaperAccountStatus.ACTIVE)
+                .order_by(PaperAccount.id)
+            ).all()
+        )
+    finally:
+        discovery.close()
+
+    checked = suspended = errors = 0
+    for account_id in account_ids:
+        session = SessionLocal()
+        try:
+            still_active = session.scalar(
+                select(PaperAccount.id).where(
+                    PaperAccount.id == account_id,
+                    PaperAccount.status == PaperAccountStatus.ACTIVE,
+                )
+            )
+            if still_active is None:
+                continue
+            violations = reconcile_account(session, account_id)
+            session.commit()
+            checked += 1
+            suspended += int(bool(violations))
+        except Exception:
+            session.rollback()
+            errors += 1
+            logger.exception(
+                "paper account reconciliation failed",
+                extra={"account_id": str(account_id)},
+            )
+        finally:
+            session.close()
+    return {"checked": checked, "suspended": suspended, "errors": errors}
+
+
 def dispatch_match_order(order_id: uuid.UUID | str) -> bool:
     """Best-effort dispatch; the periodic open-order scan is the recovery path."""
     try:
@@ -383,6 +426,11 @@ def expire_day_orders() -> int:
 @celery_app.task(name="app.tasks.paper_trading.release_t1_lots")
 def release_t1_lots() -> int:
     return cast(int, _run_transaction(_release_t1_lots_in_session))
+
+
+@celery_app.task(name="app.tasks.paper_trading.reconcile_paper_accounts")
+def reconcile_paper_accounts() -> dict[str, int]:
+    return _reconcile_active_accounts()
 
 
 def _board(ts_code: str) -> str:
