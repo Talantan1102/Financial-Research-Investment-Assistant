@@ -41,6 +41,16 @@ class RunMessageResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class RunRevisionResponse(BaseModel):
+    id: UUID
+    replaces_run_id: UUID | None
+    status: str
+    prompt: str
+    final_message_summary: str | None
+    created_at: datetime
+    finished_at: datetime | None
+
+
 class RunSessionDetailResponse(RunSessionResponse):
     messages: list[RunMessageResponse]
     has_more: bool
@@ -48,3 +58,5 @@ class RunSessionDetailResponse(RunSessionResponse):
     active_run_status: str | None
     active_pause_type: str | None
     active_pause_request: dict[str, object] | None
+    revisions: list[RunRevisionResponse]
+    latest_run_id: UUID | None

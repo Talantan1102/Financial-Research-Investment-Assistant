@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import aliased
 
 from app.chatloop.run_executor import (
     CompletedResult,
@@ -239,24 +240,7 @@ class AttemptService:
             )
             if input_message is None:
                 raise AttemptCommandRejected("run input is unavailable")
-            history_rows = tuple(
-                (
-                    await session.scalars(
-                        select(RunMessage)
-                        .where(
-                            RunMessage.tenant_id == run.tenant_id,
-                            RunMessage.session_id == run.session_id,
-                            RunMessage.id != run.input_message_id,
-                        )
-                        .order_by(RunMessage.created_at.desc(), RunMessage.id.desc())
-                        .limit(self._history_limit)
-                    )
-                ).all()
-            )
-            history = tuple(
-                {"role": cast(str, message.role), "content": cast(str, message.content)}
-                for message in reversed(history_rows)
-            )
+            history = await self._load_model_history(session, run, limit=self._history_limit)
             continuation: dict[str, Any] | None = None
             approved_tool_executions: tuple[tuple[str, UUID], ...] = ()
             rejected_tool_execution_ids: tuple[UUID, ...] = ()
@@ -364,6 +348,46 @@ class AttemptService:
                 approved_tool_executions=approved_tool_executions,
                 rejected_tool_execution_ids=rejected_tool_execution_ids,
             )
+
+    @staticmethod
+    async def _load_model_history(
+        session: AsyncSession,
+        run: Run,
+        *,
+        limit: int,
+    ) -> tuple[dict[str, Any], ...]:
+        """Load dialogue context without superseded Prompt revisions."""
+        parent = aliased(Run)
+        child = aliased(Run)
+        superseded_inputs = (
+            select(parent.input_message_id)
+            .join(child, child.replaces_run_id == parent.id)
+            .where(
+                parent.tenant_id == run.tenant_id,
+                parent.session_id == run.session_id,
+                child.tenant_id == run.tenant_id,
+                child.session_id == run.session_id,
+            )
+        )
+        rows = tuple(
+            (
+                await session.scalars(
+                    select(RunMessage)
+                    .where(
+                        RunMessage.tenant_id == run.tenant_id,
+                        RunMessage.session_id == run.session_id,
+                        RunMessage.id != run.input_message_id,
+                        RunMessage.id.not_in(superseded_inputs),
+                    )
+                    .order_by(RunMessage.created_at.desc(), RunMessage.id.desc())
+                    .limit(limit)
+                )
+            ).all()
+        )
+        return tuple(
+            {"role": cast(str, message.role), "content": cast(str, message.content)}
+            for message in reversed(rows)
+        )
 
     async def complete_chat(
         self,

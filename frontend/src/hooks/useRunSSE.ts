@@ -7,6 +7,7 @@ import {
   getRunSession,
   resumeRun as resumeRunRequest,
   type RunResponse,
+  type RunRevision,
   type RunStatus,
 } from '@/api/runApi'
 import { chatSessionsActions } from '@/store/chat-sessions'
@@ -30,6 +31,8 @@ interface UseRunSSEOptions {
   initialRunId?: string | null
   initialRunStatus?: RunStatus | null
   initialPause?: RunPause | null
+  initialRevisions?: RunRevision[]
+  initialLatestRunId?: string | null
 }
 
 export interface UseRunSSE {
@@ -40,6 +43,8 @@ export interface UseRunSSE {
   status: RunStatus | 'idle' | 'error'
   activeRunId: string | null
   pause: RunPause | null
+  revisions: RunRevision[]
+  latestRunId: string | null
 }
 
 export interface RunPause {
@@ -135,6 +140,8 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   const [status, setStatus] = useState<RunStatus | 'idle' | 'error'>('idle')
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [pause, setPause] = useState<RunPause | null>(options.initialPause ?? null)
+  const [revisions, setRevisions] = useState<RunRevision[]>(options.initialRevisions ?? [])
+  const [latestRunId, setLatestRunId] = useState<string | null>(options.initialLatestRunId ?? null)
 
   const isCurrent = useCallback(
     (generation: number, signal?: AbortSignal) =>
@@ -160,6 +167,8 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       const session = await getRunSession(tenantId, sessionId, fetchImpl)
       if (!isCurrent(generation, signal)) return
       currentChatActions.replaceWithDurableMessages(sessionId, session.messages)
+      setRevisions(session.revisions)
+      setLatestRunId(session.latest_run_id)
       void chatSessionsActions.loadSessions()
     },
     [fetchImpl, isCurrent],
@@ -507,10 +516,17 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     sessionRef.current = options.sessionId
     setActiveRunId(null)
     setPause(null)
+    setRevisions(options.initialRevisions ?? [])
+    setLatestRunId(options.initialLatestRunId ?? null)
     statusRef.current = 'idle'
     setStatus('idle')
     currentChatActions.resetRunTransport()
-  }, [options.sessionId, options.tenantId])
+  }, [
+    options.initialLatestRunId,
+    options.initialRevisions,
+    options.sessionId,
+    options.tenantId,
+  ])
 
   useEffect(() => {
     const tenantId = options.tenantId
@@ -555,5 +571,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     status,
     activeRunId,
     pause,
+    revisions,
+    latestRunId,
   }
 }

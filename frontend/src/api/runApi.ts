@@ -86,6 +86,18 @@ export interface RunSessionDetail extends RunSessionSummary {
   active_run_status: RunStatus | null
   active_pause_type: 'approval' | 'input' | null
   active_pause_request: Record<string, unknown> | null
+  revisions: RunRevision[]
+  latest_run_id: string | null
+}
+
+export interface RunRevision {
+  id: string
+  replaces_run_id: string | null
+  status: RunStatus
+  prompt: string
+  final_message_summary: string | null
+  created_at: string
+  finished_at: string | null
 }
 
 export function createRun(

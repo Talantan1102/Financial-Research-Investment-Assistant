@@ -10,7 +10,16 @@ import { currentChatActions, currentChatState } from '@/store/current-chat'
 const sendPromptMock = vi.fn(async () => {})
 const cancelRunMock = vi.fn(async () => {})
 const resumeRunMock = vi.fn(async () => {})
+const resubmitPromptMock = vi.fn(async () => {})
 let pauseMock: { type: 'approval_request' | 'input_request'; request: Record<string, unknown> } | null = null
+let revisionsMock: Array<{
+  id: string
+  replaces_run_id: string | null
+  status: string
+  prompt: string
+  final_message_summary: string | null
+}> = []
+let latestRunIdMock: string | null = null
 let onSessionCreatedMock: ((id: string) => void) | undefined
 function LocationProbe({ onPath }: { onPath: (path: string) => void }) {
   onPath(useLocation().pathname)
@@ -23,10 +32,12 @@ vi.mock('@/hooks/useRunSSE', () => ({
     sendPrompt: sendPromptMock,
     cancelRun: cancelRunMock,
     resumeRun: resumeRunMock,
-    resubmitPrompt: vi.fn(),
+    resubmitPrompt: resubmitPromptMock,
     status: 'idle',
     activeRunId: null,
     pause: pauseMock,
+    revisions: revisionsMock,
+    latestRunId: latestRunIdMock,
   })},
 }))
 
@@ -52,7 +63,10 @@ describe('<ChatPane> integration with useRunSSE', () => {
     sendPromptMock.mockClear()
     cancelRunMock.mockClear()
     resumeRunMock.mockClear()
+    resubmitPromptMock.mockClear()
     pauseMock = null
+    revisionsMock = []
+    latestRunIdMock = null
     currentChatActions.reset()
     currentChatActions.setSession('s1', [])
   })
@@ -123,6 +137,30 @@ describe('<ChatPane> integration with useRunSSE', () => {
     renderWithProviders(<ChatPane tenantId="tenant-1" />)
     await user.type(screen.getByRole('textbox'), 'first prompt{Enter}')
     expect(sendPromptMock).toHaveBeenCalledWith('first prompt')
+  })
+
+  it('expands immutable revision history and retries only from the latest Run', async () => {
+    const user = userEvent.setup()
+    revisionsMock = [
+      { id: 'run-a', replaces_run_id: null, status: 'completed', prompt: 'prompt A', final_message_summary: 'answer A' },
+      { id: 'run-b', replaces_run_id: 'run-a', status: 'failed', prompt: 'prompt B', final_message_summary: null },
+    ]
+    latestRunIdMock = 'run-b'
+    renderWithProviders(<ChatPane sessionId="s1" tenantId="tenant-1" />)
+
+    await user.click(screen.getByText('修订历史'))
+    expect(screen.getByText('prompt A')).toBeInTheDocument()
+    expect(screen.getByText('answer A')).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '修改后重试' })).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: '修改后重试' }))
+    const editor = screen.getByRole('textbox', { name: '修改提示词' })
+    expect(editor).toHaveValue('prompt B')
+    await user.clear(editor)
+    await user.type(editor, 'prompt C')
+    await user.click(screen.getByRole('button', { name: '提交新修订' }))
+
+    expect(resubmitPromptMock).toHaveBeenCalledWith('prompt C', 'run-b')
+    expect(sendPromptMock).not.toHaveBeenCalled()
   })
 
   it('Cmd+K while streaming triggers server cancel', async () => {

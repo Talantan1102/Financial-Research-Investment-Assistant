@@ -88,9 +88,11 @@ export interface ChatPaneProps {
   initialRunStatus?: import('@/api/runApi').RunStatus | null
   sessionLoading?: boolean
   initialPause?: import('@/hooks/useRunSSE').RunPause | null
+  initialRevisions?: import('@/api/runApi').RunRevision[]
+  initialLatestRunId?: string | null
 }
 
-export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, initialRunId, initialRunStatus, initialPause, sessionLoading = false }: ChatPaneProps = {}) {
+export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, initialRunId, initialRunStatus, initialPause, initialRevisions, initialLatestRunId, sessionLoading = false }: ChatPaneProps = {}) {
   const params = useParams<{ session_id: string }>()
   const navigate = useNavigate()
   const sessionId = sessionIdProp ?? params.session_id ?? null
@@ -100,6 +102,7 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
     tenantIdProp ?? sessionsSnap.tenant_id,
   )
   const [pauseInput, setPauseInput] = useState('')
+  const [editingRevision, setEditingRevision] = useState<{ id: string; prompt: string } | null>(null)
   const ownsSessionState = sessionId === null || chatSnap.session_id === sessionId
   const messages = useDeferredMessages(ownsSessionState ? chatSnap.messages ?? [] : [])
 
@@ -121,6 +124,8 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
     initialRunId,
     initialRunStatus,
     initialPause,
+    initialRevisions,
+    initialLatestRunId,
     onSessionCreated: (createdSessionId) => {
       navigate(`/chat/${createdSessionId}`, { replace: true })
     },
@@ -143,6 +148,7 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
   const pendingApprovals = run.pause?.type === 'approval_request'
     ? approvalItems(run.pause.request)
     : []
+  const revisions = run.revisions ?? []
 
   const onSend = useCallback((text: string) => {
     void run.sendPrompt(text)
@@ -169,6 +175,28 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
             <MessageList messages={displayMessages} onContinueAsk={onContinueAsk} />
           )}
           <DispatchLanes />
+          {revisions.length > 0 ? (
+            <details>
+              <summary>修订历史</summary>
+              <ol>
+                {revisions.map((revision) => (
+                  <li key={revision.id}>
+                    <div>{revision.prompt}</div>
+                    <div>状态：{revision.status}</div>
+                    {revision.final_message_summary ? <div>{revision.final_message_summary}</div> : null}
+                    {revision.id === run.latestRunId && !run.activeRunId ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditingRevision({ id: revision.id, prompt: revision.prompt })}
+                      >
+                        修改后重试
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
         </div>
         <StreamingIndicator />
         {chatSnap.halt_reason ? (
@@ -186,6 +214,34 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
             onCancel={() => { void run.cancelRun() }}
             blocked={resolvedTenantId === null || sessionLoading || run.pause !== null}
           />
+          {editingRevision ? (
+            <div role="region" aria-label="修改提示词修订">
+              <label>
+                修改提示词
+                <textarea
+                  aria-label="修改提示词"
+                  value={editingRevision.prompt}
+                  onChange={(event) => setEditingRevision({
+                    ...editingRevision,
+                    prompt: event.target.value,
+                  })}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={!editingRevision.prompt.trim()}
+                onClick={() => {
+                  const prompt = editingRevision.prompt.trim()
+                  const replacesRunId = editingRevision.id
+                  if (!prompt) return
+                  setEditingRevision(null)
+                  void run.resubmitPrompt(prompt, replacesRunId)
+                }}
+              >
+                提交新修订
+              </button>
+            </div>
+          ) : null}
           {run.pause?.type === 'approval_request' ? (
             <div role="region" aria-label="审批请求">
               <p>此操作需要你的审批</p>

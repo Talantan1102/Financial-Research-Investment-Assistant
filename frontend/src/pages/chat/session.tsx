@@ -4,6 +4,7 @@ import { ChatPane } from '@/components/chat/ChatPane'
 import { currentChatActions } from '@/store/current-chat'
 import { chatSessionsActions } from '@/store/chat-sessions'
 import type { RunStatus } from '@/api/runApi'
+import type { RunRevision } from '@/api/runApi'
 import type { RunPause } from '@/hooks/useRunSSE'
 
 interface SessionDetailState {
@@ -12,6 +13,8 @@ interface SessionDetailState {
   activePause: RunPause | null
   loaded: boolean
   error: boolean
+  revisions: RunRevision[]
+  latestRunId: string | null
 }
 
 const EMPTY_DETAIL: SessionDetailState = {
@@ -20,6 +23,8 @@ const EMPTY_DETAIL: SessionDetailState = {
   activePause: null,
   loaded: false,
   error: false,
+  revisions: [],
+  latestRunId: null,
 }
 
 function SessionLoadingPane() {
@@ -64,6 +69,8 @@ export function ChatSessionPage() {
             : null,
           loaded: true,
           error: false,
+          revisions: detail.revisions,
+          latestRunId: detail.latest_run_id,
         })
       })
       .catch(() => {
@@ -90,6 +97,8 @@ export function ChatSessionPage() {
         initialRunId={currentDetail.activeRun?.id}
         initialRunStatus={currentDetail.activeRun?.status}
         initialPause={currentDetail.activePause}
+        initialRevisions={currentDetail.revisions}
+        initialLatestRunId={currentDetail.latestRunId}
       />
     ) : currentDetail?.error ? null : <SessionLoadingPane />}
   </>

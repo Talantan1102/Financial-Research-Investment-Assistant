@@ -643,6 +643,18 @@ class RunService:
         )
         if replacement is None:
             raise ResourceNotFound("replaced run not found")
+        latest_run_id = await session.scalar(
+            select(Run.id)
+            .where(
+                Run.tenant_id == command.tenant_id,
+                Run.created_by_user_id == command.actor_id,
+                Run.session_id == session_id,
+            )
+            .order_by(Run.created_at.desc(), Run.id.desc())
+            .limit(1)
+        )
+        if latest_run_id != command.replaces_run_id:
+            raise ResourceNotFound("replaced run is not the latest revision")
         existing_child = await session.scalar(
             select(Run.id).where(Run.replaces_run_id == command.replaces_run_id)
         )

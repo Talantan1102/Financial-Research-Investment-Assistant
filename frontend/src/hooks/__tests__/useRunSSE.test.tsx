@@ -61,6 +61,8 @@ function detail(content = 'Hello durable'): RunSessionDetail {
     active_run_status: null,
     active_pause_type: null,
     active_pause_request: null,
+    revisions: [],
+    latest_run_id: null,
   }
 }
 
@@ -400,12 +402,20 @@ describe('useRunSSE', () => {
       release = () => resolve(chunkedSse([]))
     }))
     vi.mocked(runApi.cancelRun).mockRejectedValue(new TypeError('cancel offline'))
-    const cancelling = renderHook(() => useRunSSE({ tenantId: 'tenant-1', sessionId: 'session-1' }))
+    const initialRevision = {
+      id: 'run-1', replaces_run_id: null, status: 'running' as const, prompt: 'start',
+      final_message_summary: null, created_at: '2026-07-18T00:00:00Z', finished_at: null,
+    }
+    const cancelling = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1', sessionId: 'session-1', initialRevisions: [initialRevision],
+      initialLatestRunId: 'run-1',
+    }))
     let started!: Promise<void>
     act(() => { started = cancelling.result.current.sendPrompt('start') })
     await waitFor(() => expect(cancelling.result.current.activeRunId).toBe('run-1'))
     await expect(act(async () => cancelling.result.current.cancelRun())).resolves.toBeUndefined()
     expect(cancelling.result.current.status).toBe('error')
+    expect(cancelling.result.current.revisions).toEqual([initialRevision])
     expect(snapshot(currentChatState).active_run_id).toBe('run-1')
     const createsBeforeBlockedSend = vi.mocked(runApi.createRun).mock.calls.length
     await act(async () => cancelling.result.current.sendPrompt('must remain blocked'))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -15,12 +16,21 @@ from app.run_control.types import ACTIVE_RUN_STATUSES, ResourceNotFound, TenantR
 
 
 @dataclass(frozen=True)
+class RunRevision:
+    run: Run
+    prompt: str
+    final_message_summary: str | None
+
+
+@dataclass(frozen=True)
 class RunSessionDetail:
     run_session: RunSession
     messages: tuple[RunMessage, ...]
     has_more: bool
     active_run: Run | None
     active_pause: RunPause | None
+    revisions: tuple[RunRevision, ...]
+    latest_run_id: UUID | None
 
 
 class RunSessionService:
@@ -90,12 +100,55 @@ class RunSessionService:
                     .order_by(RunPause.pause_no.desc())
                     .limit(1)
                 )
+            runs = tuple(
+                (
+                    await session.scalars(
+                        select(Run)
+                        .where(Run.tenant_id == tenant_id, Run.session_id == session_id)
+                        .order_by(Run.created_at.asc(), Run.id.asc())
+                    )
+                ).all()
+            )
+            message_ids = {
+                message_id
+                for run in runs
+                for message_id in (run.input_message_id, run.final_message_id)
+                if message_id is not None
+            }
+            revision_messages = {}
+            if message_ids:
+                revision_messages = {
+                    message.id: message
+                    for message in (
+                        await session.scalars(
+                            select(RunMessage).where(
+                                RunMessage.tenant_id == tenant_id,
+                                RunMessage.session_id == session_id,
+                                RunMessage.id.in_(message_ids),
+                            )
+                        )
+                    ).all()
+                }
+            revisions = tuple(
+                RunRevision(
+                    run=run,
+                    prompt=cast(str, revision_messages[run.input_message_id].content),
+                    final_message_summary=(
+                        None
+                        if run.final_message_id is None
+                        else _summary(cast(str, revision_messages[run.final_message_id].content))
+                    ),
+                )
+                for run in runs
+            )
             return RunSessionDetail(
                 run_session=run_session,
                 messages=tuple(reversed(messages[:limit])),
                 has_more=len(messages) > limit,
                 active_run=active_run,
                 active_pause=active_pause,
+                revisions=revisions,
+                latest_run_id=None if not runs else cast(UUID, runs[-1].id),
             )
 
     async def update_title(
@@ -176,3 +229,8 @@ class RunSessionService:
         if run_session is None:
             raise ResourceNotFound("session not found")
         return run_session
+
+
+def _summary(content: str, *, limit: int = 240) -> str:
+    compact = " ".join(content.split())
+    return compact if len(compact) <= limit else f"{compact[: limit - 1]}…"

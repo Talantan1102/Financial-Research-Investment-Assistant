@@ -13,6 +13,7 @@ from app.router.auth_router import get_current_user_required
 from app.run_control.types import ResourceNotFound
 from app.schemas.run_session import (
     RunMessageResponse,
+    RunRevisionResponse,
     RunSessionDetailResponse,
     RunSessionResponse,
     RunSessionUpdateRequest,
@@ -75,6 +76,19 @@ async def get_session(
         active_pause_request=(
             None if detail.active_pause is None else detail.active_pause.request_payload
         ),
+        revisions=[
+            RunRevisionResponse(
+                id=item.run.id,
+                replaces_run_id=item.run.replaces_run_id,
+                status=item.run.status,
+                prompt=item.prompt,
+                final_message_summary=item.final_message_summary,
+                created_at=item.run.created_at,
+                finished_at=item.run.finished_at,
+            )
+            for item in detail.revisions
+        ],
+        latest_run_id=detail.latest_run_id,
     )
 
 
