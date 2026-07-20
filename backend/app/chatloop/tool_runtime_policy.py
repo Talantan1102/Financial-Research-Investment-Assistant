@@ -23,9 +23,10 @@ class ToolRiskMetadata:
     idempotent: bool
     system_allow_reason: str | None = None
     concurrency_group: str | None = None
+    max_attempts: int = 1
 
 
-_READ = ToolRiskMetadata(RiskLevel.LOW, CapabilityType.DATA_TOOL, True, True)
+_READ = ToolRiskMetadata(RiskLevel.LOW, CapabilityType.DATA_TOOL, True, True, max_attempts=2)
 
 TOOL_RISK_METADATA: dict[str, ToolRiskMetadata] = {
     # Structured/public data and retrieval tools.
@@ -117,6 +118,9 @@ class ToolRiskPolicy:
         known = TOOL_RISK_METADATA.get(tool.name)
         if known is not None:
             return known
+        declared = getattr(tool, "runtime_risk_metadata", None)
+        if isinstance(declared, ToolRiskMetadata):
+            return declared
         if isinstance(tool, InProcessTool):
             return ToolRiskMetadata(
                 RiskLevel.MEDIUM,
@@ -125,7 +129,7 @@ class ToolRiskPolicy:
                 False,
                 concurrency_group="chat_state_mutation",
             )
-        return _READ
+        return ToolRiskMetadata(RiskLevel.MEDIUM, CapabilityType.DATA_TOOL, False, False)
 
     def definition_for(self, tool: Tool, *, timeout_s: float) -> CapabilityDefinition:
         metadata = self.metadata_for(tool)
@@ -133,12 +137,12 @@ class ToolRiskPolicy:
             name=tool.name,
             type=metadata.capability_type,
             input_schema=tool.args_schema.model_json_schema(),
-            output_schema={"type": "object"},
+            output_schema=getattr(tool, "output_schema", Tool.output_schema),
             minimum_risk=metadata.risk,
             read_only=metadata.read_only,
             idempotent=metadata.idempotent,
             default_timeout_s=timeout_s,
-            max_attempts=1,
+            max_attempts=metadata.max_attempts,
             concurrency_group=metadata.concurrency_group,
         )
 
@@ -158,3 +162,11 @@ class ToolRiskPolicy:
 
 
 __all__ = ["TOOL_RISK_METADATA", "ToolRiskMetadata", "ToolRiskPolicy"]
+
+
+def production_visible_capabilities(_state: object) -> frozenset[str]:
+    """Explicit worker policy; registration is intersected again by ToolHub."""
+    return frozenset(TOOL_RISK_METADATA)
+
+
+__all__.append("production_visible_capabilities")

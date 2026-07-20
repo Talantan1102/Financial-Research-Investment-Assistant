@@ -80,15 +80,6 @@ class TaskBuilder:
         if not parallelizable:
             for predecessor, current in zip(order, order[1:]):
                 dependencies[current].append(predecessor)
-        else:
-            by_id = {task.id: task for task in tasks}
-            last_by_group: dict[str, str] = {}
-            for task_id in order:
-                group = by_id[task_id].concurrency_group
-                if group is not None and group in last_by_group:
-                    dependencies[task_id].append(last_by_group[group])
-                if group is not None:
-                    last_by_group[group] = task_id
         return TaskGraph(
             tasks=tuple(
                 task.model_copy(update={"depends_on": tuple(dict.fromkeys(dependencies[task.id]))})

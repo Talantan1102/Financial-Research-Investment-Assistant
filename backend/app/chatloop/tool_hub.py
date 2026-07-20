@@ -25,7 +25,6 @@ from pydantic import ValidationError
 
 from app.agents.schemas import ToolResult
 from app.chatloop.events import EventType, LoopEvent, SeqCounter
-from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_docs import (
     CORE_TOOLS,
@@ -257,15 +256,17 @@ class ToolHub:
         if not calls:
             return []
 
-        # Bad provider JSON and unknown/internal calls retain the legacy per-call
-        # corrective errors; they cannot form a trustworthy task graph.
-        try:
-            for call in calls:
+        # A malformed provider call becomes one isolated scheduler task. Other
+        # tasks still retain concurrency-group and dependency semantics.
+        normalized_calls: list[StepToolCall] = []
+        malformed_calls: dict[str, StepToolCall] = {}
+        for call in calls:
+            try:
                 _ = call.parsed_args
-        except ValueError:
-            return list(await asyncio.gather(*(self._dispatch_one(call, state) for call in calls)))
-        if any(call.name == SEARCH_TOOLS_NAME for call in calls):
-            return list(await asyncio.gather(*(self._dispatch_one(call, state) for call in calls)))
+                normalized_calls.append(call)
+            except ValueError:
+                malformed_calls[call.id] = call
+                normalized_calls.append(StepToolCall(id=call.id, name=call.name, arguments="{}"))
 
         definitions = {
             name: self._risk_policy.definition_for(tool, timeout_s=self._tool_timeout_s)
@@ -286,8 +287,22 @@ class ToolHub:
                     max_attempts=1,
                 ),
             )
+        definitions.setdefault(
+            SEARCH_TOOLS_NAME,
+            CapabilityDefinition(
+                name=SEARCH_TOOLS_NAME,
+                type=CapabilityType.DATA_TOOL,
+                input_schema=self._search_tools_schema()["function"]["parameters"],
+                output_schema={"type": "object"},
+                minimum_risk=RiskLevel.LOW,
+                read_only=True,
+                idempotent=True,
+                default_timeout_s=self._tool_timeout_s,
+                max_attempts=1,
+            ),
+        )
         try:
-            graph = TaskBuilder(definitions).build(calls)
+            graph = TaskBuilder(definitions).build(normalized_calls)
         except ValueError as exc:
             return await self._graph_build_failures(calls, state, str(exc))
 
@@ -295,10 +310,8 @@ class ToolHub:
 
         async def execute(task: Task, inputs: dict[str, Any], attempt: int) -> RuntimeResult:
             del attempt
-            call = StepToolCall(
-                id=task.id,
-                name=task.capability,
-                arguments=json.dumps(inputs, ensure_ascii=False),
+            call = malformed_calls.get(task.id) or StepToolCall(
+                id=task.id, name=task.capability, arguments=json.dumps(inputs, ensure_ascii=False)
             )
             legacy = await self._dispatch_one(call, state)
             legacy_results[task.id] = legacy
@@ -310,13 +323,14 @@ class ToolHub:
                     audit={"cached": legacy.cached},
                     effective_input=legacy.args,
                 )
+            category = self._legacy_error_category(legacy.error)
             return RuntimeResult(
                 status=ExecutionStatus.FAILED,
                 error=RuntimeErrorInfo(
                     code="legacy_tool_failed",
-                    category=self._legacy_error_category(legacy.error),
+                    category=category,
                     message=legacy.error or "tool execution failed",
-                    retryable=False,
+                    retryable=category in {ErrorCategory.TIMEOUT, ErrorCategory.TRANSIENT},
                 ),
                 latency_ms=legacy.latency_ms,
                 effective_input=legacy.args,
@@ -373,6 +387,8 @@ class ToolHub:
             return ErrorCategory.PERMISSION_DENIED
         if error.startswith(("[参数", "[任务依赖")):
             return ErrorCategory.VALIDATION_ERROR
+        if any(marker in error.lower() for marker in ("503", "429", "temporary", "transient")):
+            return ErrorCategory.TRANSIENT
         return ErrorCategory.EXECUTION_ERROR
 
     @staticmethod
@@ -465,32 +481,9 @@ class ToolHub:
             self._safe_record(state, name, args, error, success=False, cache_key=None)
             return self._fail_result(name, args, error)
 
-        # 3. ledger 去重:同 (tool, args) 本 turn 已成功过 → 不重跑。
-        #    InProcessTool(记忆写入/控制/技能类)是状态变更工具,同参二次调用不代表
-        #    "已有结果可复用"——memory_write 重复写入是业务意图,offer_deep_research
-        #    重复触发需真执行以确保 escalate_offered 置位。台账去重短路仅对 registry
-        #    后端的只读 MCP 数据工具生效;InProcessTool 的幂等由工具自身管理。
-        is_inprocess = isinstance(tool, InProcessTool)
-        if not is_inprocess:
-            hit = state.ledger.find_success(tool_name=name, args=args)
-            if hit is not None:
-                output = {
-                    "cached_digest": hit.digest,
-                    "note": "本轮已查过,结果同前(完整内容见 ref)",
-                    "ref": hit.cache_key,
-                }
-                await self._emit("tool_end", state.step, tool=name, digest=hit.digest, cached=True)
-                # 去重命中也记一条台账(success,带原 cache_key),保持轨迹完整
-                self._safe_record(
-                    state, name, args, hit.digest, success=True, cache_key=hit.cache_key
-                )
-                return ToolResult(
-                    tool_name=name,
-                    args=args,
-                    success=True,
-                    output=output,
-                    latency_ms=0,
-                )
+        # 3. InProcessTool 不参与 ledger/cache 去重。普通工具的 ledger 去重
+        #    位于 runtime adapter 内部，确保 visibility/hooks/permission/input
+        #    validation 每次都先执行，缓存命中绝不能成为安全链旁路。
 
         # 4. tool_call(完整 args,spec § 5.1)+ tool_start
         await self._emit("tool_call", state.step, tool=name, args=args)
@@ -509,11 +502,7 @@ class ToolHub:
         definition = self._risk_policy.definition_for(tool, timeout_s=self._tool_timeout_s)
         registry = CapabilityRegistry()
         registry.register(definition, adapter)
-        visible = (
-            self._visibility_resolver(state)
-            if self._visibility_resolver is not None
-            else frozenset(self._tools)
-        )
+        visible = self._visible_for(state)
         context = ExecutionContext(
             request_id=state.request_id,
             turn_id=state.session_id,
@@ -583,6 +572,12 @@ class ToolHub:
         - 同 turn 重复检索同一工具 → 文档文本前加 "(本 turn 已检索过)" 仍返回。
         本身不进 cache、不计预算、不做去重(检索是确定性纯函数,可重复调)。
         """
+        visible = self._visible_for(state)
+        if SEARCH_TOOLS_NAME not in visible:
+            error = "[不可见工具] search_tools 不在本请求允许的工具集合中。"
+            await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
+            self._safe_record(state, SEARCH_TOOLS_NAME, args, error, success=False, cache_key=None)
+            return self._fail_result(SEARCH_TOOLS_NAME, args, error)
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():
             error = "[参数校验失败] search_tools 需要 query(string)。请传工具名或自然语言描述。"
@@ -593,7 +588,9 @@ class ToolHub:
         await self._emit("tool_call", state.step, tool=SEARCH_TOOLS_NAME, args=args)
         await self._emit("tool_start", state.step, tool=SEARCH_TOOLS_NAME)
 
-        hits = search_docs(query, k=_SEARCH_TOOLS_K)
+        hits = [doc for doc in search_docs(query, k=len(TOOL_DOCS)) if doc.name in visible][
+            :_SEARCH_TOOLS_K
+        ]
         docs: list[dict[str, str]] = []
         for d in hits:
             already = d.name in state.ledger.searched_docs
@@ -711,6 +708,12 @@ class ToolHub:
             return call.parsed_args
         except ValueError:
             return {}
+
+    def _visible_for(self, state: ChatLoopState) -> frozenset[str]:
+        registered = frozenset((*self._tools, SEARCH_TOOLS_NAME))
+        if self._visibility_resolver is None:
+            return registered
+        return frozenset(self._visibility_resolver(state) & registered)
 
     @staticmethod
     def _safe_record(

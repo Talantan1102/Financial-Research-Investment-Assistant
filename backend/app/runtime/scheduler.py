@@ -45,6 +45,7 @@ class TaskScheduler:
         emitted_terminal: set[str] = set()
         current_attempt = {task.id: 0 for task in graph.tasks}
         semaphore = asyncio.Semaphore(self._max_concurrency)
+        group_locks: dict[str, asyncio.Lock] = {}
         running: dict[asyncio.Task[RuntimeResult], Task] = {}
 
         async def emit_terminal(task_id: str, result: RuntimeResult) -> None:
@@ -111,6 +112,7 @@ class TaskScheduler:
                                 execute,
                                 emit,
                                 semaphore,
+                                group_locks,
                                 current_attempt,
                             )
                         )
@@ -170,6 +172,7 @@ class TaskScheduler:
         execute: ExecuteTask,
         emit: EmitEvent,
         semaphore: asyncio.Semaphore,
+        group_locks: dict[str, asyncio.Lock],
         current_attempt: dict[str, int],
     ) -> RuntimeResult:
         outputs = {
@@ -198,35 +201,59 @@ class TaskScheduler:
                 f"no definition for capability {task.capability!r}",
             )
 
-        async with semaphore:
-            for attempt in range(1, definition.max_attempts + 1):
-                current_attempt[task.id] = attempt
-                await self._safe_emit(
-                    emit,
-                    RuntimeEvent(
-                        type=RuntimeEventType.TASK_STARTED,
-                        task_id=task.id,
-                        attempt=attempt,
+        group_lock = (
+            group_locks.setdefault(definition.concurrency_group, asyncio.Lock())
+            if definition.concurrency_group is not None
+            else None
+        )
+        if group_lock is not None:
+            await group_lock.acquire()
+        try:
+            async with semaphore:
+                return await self._attempt_task(
+                    task, inputs, execute, emit, current_attempt, definition
+                )
+        finally:
+            if group_lock is not None:
+                group_lock.release()
+
+    async def _attempt_task(
+        self,
+        task: Task,
+        inputs: dict[str, Any],
+        execute: ExecuteTask,
+        emit: EmitEvent,
+        current_attempt: dict[str, int],
+        definition: CapabilityDefinition,
+    ) -> RuntimeResult:
+        for attempt in range(1, definition.max_attempts + 1):
+            current_attempt[task.id] = attempt
+            await self._safe_emit(
+                emit,
+                RuntimeEvent(
+                    type=RuntimeEventType.TASK_STARTED,
+                    task_id=task.id,
+                    attempt=attempt,
+                ),
+            )
+            try:
+                result = await execute(task, inputs, attempt)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                result = self._failure(
+                    "execute_boundary_error", ErrorCategory.SYSTEM_ERROR, str(exc)
+                )
+            result = result.model_copy(
+                update={
+                    "attempt": attempt,
+                    "effective_input": (
+                        result.effective_input if result.effective_input is not None else inputs
                     ),
-                )
-                try:
-                    result = await execute(task, inputs, attempt)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    result = self._failure(
-                        "execute_boundary_error", ErrorCategory.SYSTEM_ERROR, str(exc)
-                    )
-                result = result.model_copy(
-                    update={
-                        "attempt": attempt,
-                        "effective_input": (
-                            result.effective_input if result.effective_input is not None else inputs
-                        ),
-                    }
-                )
-                if not self._should_retry(result, definition, attempt):
-                    return result
+                }
+            )
+            if not self._should_retry(result, definition, attempt):
+                return result
         raise AssertionError("attempt loop always returns")
 
     @staticmethod

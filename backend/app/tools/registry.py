@@ -32,6 +32,7 @@ class _MCPToolProxy(Tool):
             "type": "object",
             "properties": {},
         }
+        self.output_schema = manifest.get("outputSchema") or Tool.output_schema
         self.args_schema: type[BaseModel] = self._build_args_model()
 
     @staticmethod

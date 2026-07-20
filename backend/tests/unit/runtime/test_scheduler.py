@@ -17,7 +17,9 @@ from app.runtime.scheduler import TaskScheduler
 from app.runtime.tasks import Task, TaskGraph
 
 
-def definition(name: str, *, max_attempts: int = 1) -> CapabilityDefinition:
+def definition(
+    name: str, *, max_attempts: int = 1, concurrency_group: str | None = None
+) -> CapabilityDefinition:
     return CapabilityDefinition(
         name=name,
         type=CapabilityType.DATA_TOOL,
@@ -28,6 +30,7 @@ def definition(name: str, *, max_attempts: int = 1) -> CapabilityDefinition:
         idempotent=True,
         default_timeout_s=1,
         max_attempts=max_attempts,
+        concurrency_group=concurrency_group,
     )
 
 
@@ -103,6 +106,41 @@ async def test_strong_failure_blocks_dependent_but_not_sibling() -> None:
     assert set(called) == {"a", "b"}
     assert results["c"].error is not None
     assert results["c"].error.category is ErrorCategory.DEPENDENCY_FAILED
+
+
+@pytest.mark.asyncio
+async def test_concurrency_group_serializes_without_failure_dependency() -> None:
+    called: list[str] = []
+
+    async def execute(task: Task, _inputs: dict, _attempt: int) -> RuntimeResult:
+        called.append(task.id)
+        if task.id == "a":
+            return RuntimeResult(
+                status=ExecutionStatus.FAILED,
+                error=RuntimeErrorInfo(
+                    code="boom",
+                    category=ErrorCategory.EXECUTION_ERROR,
+                    message="boom",
+                    retryable=False,
+                ),
+            )
+        return RuntimeResult(status=ExecutionStatus.SUCCEEDED, output={})
+
+    group = {name: definition(name, concurrency_group="state") for name in ("a", "b")}
+    results = await TaskScheduler(group).run(
+        TaskGraph(
+            tasks=(
+                Task(id="a", capability="a", inputs={}, concurrency_group="state"),
+                Task(id="b", capability="b", inputs={}, concurrency_group="state"),
+            )
+        ),
+        execute,
+        lambda event: collect([], event),
+    )
+
+    assert called == ["a", "b"]
+    assert results["a"].success is False
+    assert results["b"].success is True
 
 
 @pytest.mark.asyncio

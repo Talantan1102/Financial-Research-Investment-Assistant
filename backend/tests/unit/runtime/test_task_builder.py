@@ -86,7 +86,9 @@ def test_plain_calls_are_parallel_but_concurrency_group_is_serialized() -> None:
 
     assert graph.get("a").depends_on == ()
     assert graph.get("b").depends_on == ()
-    assert graph.get("c").depends_on == ("a",)
+    assert graph.get("c").depends_on == ()
+    assert graph.get("a").concurrency_group == "db"
+    assert graph.get("c").concurrency_group == "db"
 
 
 @pytest.mark.parametrize(

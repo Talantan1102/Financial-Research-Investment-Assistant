@@ -7,6 +7,8 @@ import json
 from time import monotonic
 from typing import Any
 
+from jsonschema import Draft202012Validator, SchemaError
+from jsonschema import ValidationError as JsonSchemaError
 from pydantic import ValidationError
 
 from app.runtime.adapters import CapabilityAdapter
@@ -35,12 +37,24 @@ class SafeExecutor:
         context: ExecutionContext,
         *,
         timeout_s: float,
+        output_schema: dict[str, Any] | None = None,
     ) -> RuntimeResult:
         started = monotonic()
         try:
             async with asyncio.timeout(timeout_s):
                 result = await adapter.execute(input, context)
             if result.output is not None:
+                if output_schema is not None:
+                    try:
+                        Draft202012Validator.check_schema(output_schema)
+                        Draft202012Validator(output_schema).validate(result.output)
+                    except (SchemaError, JsonSchemaError) as exc:
+                        return self._failure(
+                            code="output_schema_validation_failed",
+                            category=ErrorCategory.RESULT_INVALID,
+                            message=str(exc),
+                            latency_ms=self._latency_ms(started),
+                        )
                 try:
                     encoded = json.dumps(
                         result.output, ensure_ascii=False, separators=(",", ":")

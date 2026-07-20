@@ -93,6 +93,7 @@ class ToolRuntime:
             effective_input,
             context,
             timeout_s=definition.default_timeout_s,
+            output_schema=definition.output_schema,
         )
         if not result.success:
             return result

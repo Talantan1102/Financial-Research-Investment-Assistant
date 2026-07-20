@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_hub import ToolHub
+from app.chatloop.tool_runtime_policy import ToolRiskMetadata
+from app.runtime.models import CapabilityType, RiskLevel
 from app.services.llm_step import StepToolCall
 from app.tools.base import Tool
 from pydantic import BaseModel
@@ -25,6 +27,9 @@ class _UseArgs(BaseModel):
 
 class _Tool(Tool):
     description = "integration tool"
+    runtime_risk_metadata = ToolRiskMetadata(
+        RiskLevel.LOW, CapabilityType.DATA_TOOL, True, True, max_attempts=2
+    )
 
     def __init__(self, name: str, schema: type[BaseModel], output: dict[str, Any]) -> None:
         self.name = name

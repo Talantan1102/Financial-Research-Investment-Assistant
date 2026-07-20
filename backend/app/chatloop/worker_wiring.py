@@ -36,6 +36,7 @@ from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
 from app.chatloop.subagent import DispatchSubagentsTool, SubagentFactory
 from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
 from app.chatloop.tool_hub import EmitFn, ToolHub
+from app.chatloop.tool_runtime_policy import production_visible_capabilities
 from app.memory.injection_classifier import is_prompt_injection
 from app.services.chat_steer_bus import steer_key
 from app.services.subagent_audit import SubagentAuditRepo
@@ -210,7 +211,11 @@ def build_turn_components(
     resolver，并给出前置缺失指导错误（测试/非生产构造仍 fail loud）。
     """
     hub = ToolHub(
-        emit=emit, cache=singletons.cache, seq_counter=seq_counter, trace=singletons.trace
+        emit=emit,
+        cache=singletons.cache,
+        seq_counter=seq_counter,
+        trace=singletons.trace,
+        visibility_resolver=production_visible_capabilities,
     )
     hub.register_registry(singletons.registry)
 

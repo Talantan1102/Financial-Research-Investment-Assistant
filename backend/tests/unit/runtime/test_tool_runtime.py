@@ -203,6 +203,23 @@ async def test_safe_executor_classifies_non_json_output_as_result_invalid() -> N
 
 
 @pytest.mark.asyncio
+async def test_safe_executor_validates_declared_output_schema() -> None:
+    result = await SafeExecutor().execute(
+        Adapter([], {"price": "not-a-number"}),
+        {"symbol": "AAPL"},
+        context(),
+        timeout_s=1,
+        output_schema={
+            "type": "object",
+            "properties": {"price": {"type": "number"}},
+            "required": ["price"],
+        },
+    )
+    assert result.error is not None
+    assert result.error.code == "output_schema_validation_failed"
+
+
+@pytest.mark.asyncio
 async def test_runtime_boundary_redacts_adapter_and_hook_secrets() -> None:
     class SecretAdapter:
         async def execute(self, input: dict[str, Any], context: ExecutionContext) -> RuntimeResult:

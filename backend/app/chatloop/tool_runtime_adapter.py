@@ -34,6 +34,19 @@ class ChatloopToolAdapter:
             output = await self._tool.run_with_state(validated, self._state)
             return RuntimeResult(status=ExecutionStatus.SUCCEEDED, output=output)
 
+        ledger_hit = self._state.ledger.find_success(tool_name=self._tool.name, args=input)
+        if ledger_hit is not None:
+            self.cache_key = ledger_hit.cache_key
+            return RuntimeResult(
+                status=ExecutionStatus.SUCCEEDED,
+                output={
+                    "cached_digest": ledger_hit.digest,
+                    "note": "本轮已查过,结果同前(完整内容见 ref)",
+                    "ref": ledger_hit.cache_key,
+                },
+                audit={"cached": True},
+            )
+
         async def compute() -> dict[str, Any]:
             return await self._tool.run(validated)
 

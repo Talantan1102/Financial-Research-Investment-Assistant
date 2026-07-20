@@ -13,10 +13,15 @@ import pytest
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState, args_hash_of
-from app.chatloop.tool_hub import ToolHub
-from app.chatloop.tool_runtime_policy import TOOL_RISK_METADATA, ToolRiskPolicy
+from app.chatloop.tool_hub import SEARCH_TOOLS_NAME, ToolHub
+from app.chatloop.tool_runtime_policy import (
+    TOOL_RISK_METADATA,
+    ToolRiskMetadata,
+    ToolRiskPolicy,
+)
 from app.runtime.hooks import HookDecision, HookPipeline
-from app.runtime.models import RiskLevel
+from app.runtime.models import CapabilityType, RiskLevel
+from app.runtime.permissions import PermissionDecision
 from app.services.llm_step import StepToolCall
 from app.services.tool_result_cache import CacheHit
 from app.tools.base import Tool, ToolError
@@ -36,6 +41,10 @@ class _QuoteArgs(BaseModel):
 
 class FakeTool(Tool):
     """记调用次数的假工具;可配 sleep / 抛异常 / 返回固定 output。"""
+
+    runtime_risk_metadata = ToolRiskMetadata(
+        RiskLevel.LOW, CapabilityType.DATA_TOOL, True, True, max_attempts=2
+    )
 
     def __init__(
         self,
@@ -356,6 +365,37 @@ async def test_ledger_dedup_does_not_rerun():
     end_events = emit.of("tool_end")
     assert end_events
     assert end_events[-1].data.get("cached") is True
+
+
+async def test_ledger_hit_cannot_bypass_visibility_or_pre_hook_permission():
+    tool = FakeTool("get_stock_quote", output={"price": 1})
+    visible = {tool.name}
+    deny = False
+
+    async def pre(_invocation):
+        return HookDecision(
+            permission=PermissionDecision.DENY if deny else PermissionDecision.ALLOW
+        )
+
+    hub = ToolHub(
+        hooks=HookPipeline(pre_hooks=[pre]),
+        visibility_resolver=lambda _state: frozenset(visible),
+    )
+    hub.register_registry(FakeRegistry([tool]))
+    state = _state()
+    call = _call(tool.name, {"ts_code": "X"})
+    [first] = await hub.dispatch([call], state)
+    assert first.success is True
+
+    visible.clear()
+    [hidden] = await hub.dispatch([call], state)
+    assert hidden.success is False and "[不可见工具]" in (hidden.error or "")
+
+    visible.add(tool.name)
+    deny = True
+    [denied] = await hub.dispatch([call], state)
+    assert denied.success is False and "[需要授权]" in (denied.error or "")
+    assert tool.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -735,6 +775,19 @@ async def test_uncontrolled_inprocess_tool_fails_closed_and_requests_permission(
     assert emit.of("permission_required")[0].data["tool"] == tool.name
 
 
+async def test_unclassified_plain_tool_also_fails_closed():
+    class Unclassified(FakeTool):
+        runtime_risk_metadata = None
+
+    tool = Unclassified("new_unreviewed_tool")
+    hub = ToolHub()
+    hub.register_registry(FakeRegistry([tool]))
+    [result] = await hub.dispatch([_call(tool.name, {"ts_code": "X"})], _state())
+    assert result.success is False
+    assert "[需要授权]" in (result.error or "")
+    assert tool.call_count == 0
+
+
 async def test_controlled_business_and_sandbox_tools_are_system_allowed():
     for name in ("memory_write", "run_skill_script", "run_python"):
         tool = FakeInProcessTool(name)
@@ -894,3 +947,88 @@ async def test_state_mutation_concurrency_group_serializes_calls():
 
     assert all(result.success for result in results)
     assert maximum == 1
+
+
+async def test_concurrency_group_failure_does_not_block_next_mutation():
+    class Stateful(FakeInProcessTool):
+        async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:
+            del state
+            if args.ts_code == "A":
+                raise ToolError("boom")
+            return {"ok": True}
+
+    hub = ToolHub()
+    hub.register_inprocess([Stateful("memory_write")])
+    first, second = await hub.dispatch(
+        [
+            _call("memory_write", {"ts_code": "A"}, id_="a"),
+            _call("memory_write", {"ts_code": "B"}, id_="b"),
+        ],
+        _state(),
+    )
+    assert first.success is False
+    assert second.success is True
+
+
+async def test_bad_json_isolated_without_disabling_group_scheduler():
+    active = 0
+    maximum = 0
+
+    class Stateful(FakeInProcessTool):
+        async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:
+            nonlocal active, maximum
+            del args, state
+            active += 1
+            maximum = max(maximum, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return {"ok": True}
+
+    hub = ToolHub()
+    hub.register_inprocess([Stateful("memory_write")])
+    bad = StepToolCall(id="bad", name="ghost", arguments="{bad")
+    results = await hub.dispatch(
+        [
+            bad,
+            _call("memory_write", {"ts_code": "A"}, id_="a"),
+            _call("memory_write", {"ts_code": "B"}, id_="b"),
+        ],
+        _state(),
+    )
+    assert results[0].success is False and "[参数格式错误]" in (results[0].error or "")
+    assert results[1].success and results[2].success
+    assert maximum == 1
+
+
+async def test_search_tools_only_returns_request_discoverable_docs():
+    hub = ToolHub(
+        visibility_resolver=lambda _state: frozenset({SEARCH_TOOLS_NAME, "get_stock_quote"})
+    )
+    hub.register_registry(FakeRegistry([FakeTool("get_stock_quote"), FakeTool("get_news")]))
+    [result] = await hub.dispatch([_call(SEARCH_TOOLS_NAME, {"query": "股票 新闻"})], _state())
+    assert result.success is True
+    names = {doc["name"] for doc in result.output["docs"]}
+    assert names <= {"get_stock_quote"}
+
+
+async def test_read_tool_retries_transient_but_write_tool_does_not():
+    class FlakyRead(FakeTool):
+        async def run(self, args: BaseModel) -> dict:
+            self.call_count += 1
+            if self.call_count == 1:
+                raise ToolError("backend 503 temporary")
+            return {"ok": True}
+
+    read = FlakyRead("get_stock_quote")
+    read_hub = ToolHub()
+    read_hub.register_registry(FakeRegistry([read]))
+    [read_result] = await read_hub.dispatch([_call(read.name, {"ts_code": "X"})], _state())
+    assert read_result.success is True
+    assert read.call_count == 2
+
+    write = FakeInProcessTool("memory_write", raises=ToolError("backend 503 temporary"))
+    write_hub = ToolHub()
+    write_hub.register_inprocess([write])
+    [write_result] = await write_hub.dispatch([_call(write.name, {"ts_code": "X"})], _state())
+    assert write_result.success is False
+    assert write.call_count == 1
