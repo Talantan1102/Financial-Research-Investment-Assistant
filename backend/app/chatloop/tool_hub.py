@@ -354,7 +354,10 @@ class ToolHub:
             if legacy is not None:
                 if not legacy.success:
                     await self._finalize_deferred_failure(
-                        legacy, state, definitions[task.capability]
+                        legacy,
+                        state,
+                        definitions[task.capability],
+                        self._tools.get(task.capability),
                     )
                 results.append(legacy)
                 continue
@@ -374,9 +377,13 @@ class ToolHub:
         result: ToolResult,
         state: ChatLoopState,
         definition: CapabilityDefinition,
+        tool: Tool | None,
     ) -> None:
         error = result.error or "[执行失败] 工具执行失败"
-        if error.startswith("[需要授权]"):
+        permission_source = (result.tool_call_data or {}).get("permission_source")
+        if tool is not None and self._risk_policy.should_emit_permission_required(
+            tool, permission_source
+        ):
             await self._emit(
                 "permission_required",
                 state.step,
@@ -567,10 +574,9 @@ class ToolHub:
         if not runtime_result.success:
             error = self._runtime_guidance_error(tool, runtime_result)
             logger.info("tool dispatch failed: tool=%s error=%s", name, error[:120])
-            if not defer_failures and (
-                runtime_result.error is not None
-                and runtime_result.error.category is ErrorCategory.PERMISSION_DENIED
-                and self._risk_policy.needs_interactive_permission(tool)
+            permission_source = runtime_result.audit.get("permission_source")
+            if not defer_failures and self._risk_policy.should_emit_permission_required(
+                tool, permission_source
             ):
                 await self._emit(
                     "permission_required",
@@ -588,7 +594,9 @@ class ToolHub:
                     success=False,
                     cache_key=cache_key,
                 )
-            return self._fail_result(name, effective_args, error)
+            return self._fail_result(name, effective_args, error).model_copy(
+                update={"tool_call_data": dict(runtime_result.audit)}
+            )
 
         output = runtime_result.output or {}
         is_cache_hit = bool(runtime_result.audit.get("cached", False))

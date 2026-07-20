@@ -160,6 +160,14 @@ class ToolRiskPolicy:
             metadata.system_allow_reason
         )
 
+    def should_emit_permission_required(self, tool: Tool, source: object) -> bool:
+        """Only an unresolved ASK without a callback is user-actionable."""
+        return (
+            source == "interactive_ask"
+            and self._authorization_callback is None
+            and self.needs_interactive_permission(tool)
+        )
+
 
 __all__ = ["TOOL_RISK_METADATA", "ToolRiskMetadata", "ToolRiskPolicy"]
 

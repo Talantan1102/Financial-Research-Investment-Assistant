@@ -802,6 +802,24 @@ async def test_uncontrolled_inprocess_tool_fails_closed_and_requests_permission(
     assert emit.of("permission_required")[0].data["tool"] == tool.name
 
 
+async def test_pre_hook_hard_deny_cannot_be_overridden_by_permission_event():
+    async def deny(_invocation):
+        return HookDecision(permission=PermissionDecision.DENY)
+
+    emit = _Collector()
+    tool = FakeInProcessTool("memory_write")
+    hub = ToolHub(emit=emit, hooks=HookPipeline(pre_hooks=[deny]))
+    hub.register_inprocess([tool])
+
+    [result] = await hub.dispatch([_call(tool.name, {"ts_code": "X"})], _state())
+
+    assert result.success is False
+    assert emit.types().count("tool_error") == 1
+    assert emit.types().count("permission_required") == 0
+    assert result.tool_call_data["permission_source"] == "pre_hook_deny"
+    assert tool.call_count == 0
+
+
 async def test_unclassified_plain_tool_also_fails_closed():
     class Unclassified(FakeTool):
         runtime_risk_metadata = None

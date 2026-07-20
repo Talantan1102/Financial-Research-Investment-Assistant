@@ -12,7 +12,12 @@ from app.runtime.models import (
     RuntimeErrorInfo,
     RuntimeResult,
 )
-from app.runtime.permissions import PermissionDecision, PermissionEngine
+from app.runtime.permissions import (
+    PermissionDecision,
+    PermissionEngine,
+    minimum_permission,
+    strictest,
+)
 from app.runtime.redaction import scrub_text
 from app.runtime.registry import CapabilityRegistry
 from app.runtime.safe_executor import SafeExecutor
@@ -64,6 +69,7 @@ class ToolRuntime:
             return self._failure("pre_hook_failed", ErrorCategory.SYSTEM_ERROR, str(exc))
 
         effective_input = pre.updated_input or requested_input
+        requested_permission = strictest((pre.permission, minimum_permission(definition)))
         try:
             permission = await self._permissions.authorize(
                 definition,
@@ -74,10 +80,21 @@ class ToolRuntime:
         except Exception as exc:
             return self._failure("permission_check_failed", ErrorCategory.SYSTEM_ERROR, str(exc))
         if permission is not PermissionDecision.ALLOW:
+            source = (
+                "pre_hook_deny"
+                if pre.permission is PermissionDecision.DENY
+                else "interactive_ask"
+                if requested_permission is PermissionDecision.ASK
+                else "risk_policy_deny"
+            )
             return self._failure(
                 "permission_denied",
                 ErrorCategory.PERMISSION_DENIED,
                 f"permission decision was {permission.value}",
+                audit={
+                    "permission_decision": permission.value,
+                    "permission_source": source,
+                },
             )
 
         try:
@@ -123,6 +140,7 @@ class ToolRuntime:
         message: str,
         *,
         latency_ms: int = 0,
+        audit: dict[str, Any] | None = None,
     ) -> RuntimeResult:
         return RuntimeResult(
             status=ExecutionStatus.FAILED,
@@ -133,4 +151,5 @@ class ToolRuntime:
                 retryable=False,
             ),
             latency_ms=latency_ms,
+            audit=audit or {},
         )
