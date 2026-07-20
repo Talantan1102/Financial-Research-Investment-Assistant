@@ -99,29 +99,42 @@ class RunMetricsService:
     session_factory: async_sessionmaker[AsyncSession]
 
     async def snapshot(
-        self, tenant_id: UUID | None = None, *, window: timedelta = timedelta(minutes=15)
+        self,
+        tenant_id: UUID | None = None,
+        *,
+        window: timedelta = timedelta(minutes=15),
+        as_of: datetime | None = None,
     ) -> dict[str, Any]:
         if window <= timedelta(0):
             raise ValueError("window must be positive")
         async with self.session_factory() as session:
-            return await self._snapshot(session, tenant_id, window)
+            return await self._snapshot(session, tenant_id, window, as_of=as_of)
 
     async def _snapshot(
-        self, session: AsyncSession, tenant_id: UUID | None, window: timedelta
+        self,
+        session: AsyncSession,
+        tenant_id: UUID | None,
+        window: timedelta,
+        *,
+        as_of: datetime | None = None,
     ) -> dict[str, Any]:
         # Every metric in this projection documents its own fact timestamp.  A
         # Run can be created before the requested window and still be assigned,
         # completed, or charged inside it, so lifecycle facts must not inherit
         # ``Run.created_at`` as a universal filter.  The interval is half-open
-        # in spirit: facts at/after ``cutoff`` are included; future-dated rows
-        # are naturally excluded by the database clock on normal writes.
-        cutoff = datetime.now(UTC).replace(tzinfo=None) - window
+        # in spirit: facts at/after ``cutoff`` and at/before ``as_of`` are
+        # included.  The explicit upper bound keeps backfilled/future-dated
+        # rows from contaminating a reproducible snapshot.
+        as_of = (as_of or datetime.now(UTC)).replace(tzinfo=None)
+        cutoff = as_of - window
         scope = Run.tenant_id == tenant_id if tenant_id is not None else true()
         run_counts = {
             status: int(count)
             for status, count in (
                 await session.execute(
-                    select(Run.status, func.count()).where(scope).group_by(Run.status)
+                    select(Run.status, func.count())
+                    .where(scope, Run.created_at <= as_of)
+                    .group_by(Run.status)
                 )
             ).all()
         }
@@ -130,8 +143,8 @@ class RunMetricsService:
                 select(
                     func.count().label("depth"),
                     func.min(Run.queued_at).label("oldest"),
-                    func.extract("epoch", func.now() - func.min(Run.queued_at)).label("wait"),
-                ).where(scope, Run.status == RunStatus.QUEUED.value)
+                    func.extract("epoch", as_of - func.min(Run.queued_at)).label("wait"),
+                ).where(scope, Run.status == RunStatus.QUEUED.value, Run.queued_at <= as_of)
             )
         ).one()
         latency = (
@@ -140,7 +153,12 @@ class RunMetricsService:
                     func.avg(func.extract("epoch", Run.assigned_at - Run.queued_at)).label(
                         "scheduling"
                     ),
-                ).where(scope, Run.assigned_at >= cutoff)
+                ).where(
+                    scope,
+                    Run.assigned_at >= cutoff,
+                    Run.assigned_at <= as_of,
+                    Run.queued_at <= as_of,
+                )
             )
         ).one()
         queue_reason = text("run_events.payload ->> 'reason'")
@@ -153,6 +171,7 @@ class RunMetricsService:
                     scope,
                     RunEvent.event_type == "run.queue_blocked",
                     RunEvent.created_at >= cutoff,
+                    RunEvent.created_at <= as_of,
                     RunEvent.payload["reason"].astext.is_not(None),
                 )
                 .group_by(queue_reason)
@@ -168,8 +187,10 @@ class RunMetricsService:
                 .where(
                     scope,
                     or_(
-                        RunAttempt.finished_at >= cutoff,
-                        RunAttempt.finished_at.is_(None) & (Run.assigned_at >= cutoff),
+                        (RunAttempt.finished_at >= cutoff) & (RunAttempt.finished_at <= as_of),
+                        RunAttempt.finished_at.is_(None)
+                        & (Run.assigned_at >= cutoff)
+                        & (Run.assigned_at <= as_of),
                     ),
                 )
                 .group_by(RunAttempt.status)
@@ -184,6 +205,7 @@ class RunMetricsService:
                     scope,
                     RunAttempt.worker_id.is_not(None),
                     Run.assigned_at >= cutoff,
+                    Run.assigned_at <= as_of,
                 )
                 .group_by(Run.tenant_id)
             )
@@ -231,7 +253,7 @@ class RunMetricsService:
                 .where(
                     scope,
                     RunAttempt.lease_expires_at.is_not(None),
-                    RunAttempt.lease_expires_at < func.now(),
+                    RunAttempt.lease_expires_at < as_of,
                     RunAttempt.status.in_(
                         (AttemptStatus.ASSIGNED.value, AttemptStatus.RUNNING.value)
                     ),
@@ -264,7 +286,7 @@ class RunMetricsService:
                 )
             )
         ).one()
-        waiting_status = text("run_events.payload ->> 'status'")
+        waiting_status = Run.status
         waiting = (
             await session.execute(
                 select(waiting_status, func.count())
@@ -273,8 +295,9 @@ class RunMetricsService:
                 .where(
                     scope,
                     RunEvent.created_at >= cutoff,
-                    RunEvent.event_type.like("run.%"),
-                    RunEvent.payload["status"].astext.in_(
+                    RunEvent.created_at <= as_of,
+                    RunEvent.event_type == "run.paused",
+                    Run.status.in_(
                         (RunStatus.WAITING_APPROVAL.value, RunStatus.WAITING_INPUT.value)
                     ),
                 )
@@ -288,7 +311,11 @@ class RunMetricsService:
                     func.coalesce(func.sum(RunUsageRecord.cost_cny), 0),
                 )
                 .join(Run, Run.id == RunUsageRecord.run_id)
-                .where(scope, RunUsageRecord.created_at >= cutoff)
+                .where(
+                    scope,
+                    RunUsageRecord.created_at >= cutoff,
+                    RunUsageRecord.created_at <= as_of,
+                )
             )
         ).one()
         duration = (
@@ -298,6 +325,7 @@ class RunMetricsService:
                 ).where(
                     scope,
                     Run.finished_at >= cutoff,
+                    Run.finished_at <= as_of,
                     Run.finished_at.is_not(None),
                     Run.started_at.is_not(None),
                 )

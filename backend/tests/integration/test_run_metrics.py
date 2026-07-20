@@ -234,7 +234,7 @@ async def test_fact_window_counts_long_running_run_created_before_window(
                 session_id=session_id,
                 created_by_user_id=user_id,
                 run_type="chat",
-                status=RunStatus.COMPLETED.value,
+                status=RunStatus.WAITING_INPUT.value,
                 idempotency_key=f"metrics-{run_id}",
                 request_hash="0" * 64,
                 input_message_id=message_id,
@@ -272,8 +272,10 @@ async def test_fact_window_counts_long_running_run_created_before_window(
                     tenant_id=tenant_id,
                     run_id=run_id,
                     seq=2,
-                    event_type="run.waiting",
-                    payload={"status": RunStatus.WAITING_INPUT.value},
+                    event_type="run.paused",
+                    # AttemptService emits pause facts without duplicating the
+                    # authoritative Run.status in the event payload.
+                    payload={"pause_type": "input"},
                     created_at=fact,
                 ),
                 RunUsageRecord(
@@ -287,6 +289,27 @@ async def test_fact_window_counts_long_running_run_created_before_window(
                     total_tokens=12,
                     cost_cny=0.5,
                     created_at=fact,
+                ),
+                # Future-dated facts must not leak into the requested window.
+                RunEvent(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    seq=3,
+                    event_type="run.queue_blocked",
+                    payload={"reason": EligibilityReason.NO_WORKER_CAPACITY.value},
+                    created_at=now + timedelta(hours=1),
+                ),
+                RunUsageRecord(
+                    run_id=run_id,
+                    attempt_id=attempt_id,
+                    provider="future",
+                    model="future-model",
+                    input_tokens=2,
+                    output_tokens=2,
+                    cached_tokens=0,
+                    total_tokens=4,
+                    cost_cny=1.0,
+                    created_at=now + timedelta(hours=1),
                 ),
             ]
         )
