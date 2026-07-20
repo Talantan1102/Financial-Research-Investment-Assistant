@@ -11,7 +11,7 @@ Phase 2 只证明控制面的排队、租约与故障恢复。Phase 3 补齐真�
 Task 7 的验收由三层组成：
 
 - PG + 真 Redis 集成测试同时创建两个 Session/Run，经真实 `RunScheduler`、`RunDispatcher` 与两个 `RunWorker(capacity=1)` 完成，并断言两个不同 Worker ID。
-- cassette 离线回放已提交的真实 DashScope `deepseek-v4-flash` 工具调用，验证生产 ChatLoop 的模型边界和非空回答。
+- cassette 离线回放已提交的真实 DashScope `deepseek-v4-flash` 工具调用，由确定性工具组件直接实例化生产 `ChatRunExecutor` 并执行 `ExecuteChatRun`，验证最终回答、usage、工具台账、事件映射与 Session 历史映射。
 - Compose L2.5 运行真实独立 Scheduler/Dispatcher/Worker/API/PG/Redis 进程，并完成 crash、Redis/PostgreSQL restart、cancel、capacity 与 lease recovery 场景。
 
 ## How to apply
@@ -45,6 +45,10 @@ npm test -- --run src/api/__tests__/runApi.test.ts src/hooks/__tests__/useRunSSE
 npm test -- --run src/pages/chat/__tests__/session.test.tsx src/pages/chat/__tests__/session.route-integration.test.tsx
 # 4 passed
 
+npm test -- --run --maxWorkers=1
+# 311 passed / 2 failed; failures are the pre-existing markdown and CostMeter assertions;
+# Vitest also reports 3 pre-existing memory UI unhandled rejections
+
 npm run build
 # 4214 modules transformed, exit 0
 
@@ -52,7 +56,7 @@ npx eslint src/api/runApi.ts src/hooks/useRunSSE.ts src/components/chat/ChatPane
 # exit 0
 ```
 
-全量前端基线仍不是全绿：`npm test -- --run` 为 309 passed / 4 failed，失败位于既有 markdown、CostMeter、MemoryOnboardingModal、EscalationConfirmDialog 测试；另有 3 个既有 memory UI unhandled rejection。`npm run lint` 为 32 errors / 6 warnings，Phase 3 涉及文件的定向 ESLint 为 0。十个 Phase 3 后端模块单进程合跑会触发既有 async PG fixture 的跨模块数据污染/死锁；将两个 PG-heavy 模块独立运行时分别 24/24 和 13/13 通过。
+全量前端基线仍不是全绿：最终 HEAD 上 `npm test -- --run --maxWorkers=1` 为 311 passed / 2 failed，失败仅位于既有 markdown 与 CostMeter 测试；另有 3 个既有 memory UI unhandled rejection。普通并行 `npm test -- --run` 在本机识别出相同两项失败后因 Vitest worker 内存不足退出，因此用单 worker 对相同 313 项测试取得完整计数。`npm run lint` 为 32 errors / 6 warnings，Phase 3 涉及文件的定向 ESLint 为 0。十个 Phase 3 后端模块单进程合跑会触发既有 async PG fixture 的跨模块数据污染/死锁；将两个 PG-heavy 模块独立运行时分别 24/24 和 13/13 通过。
 
 活体脚本：
 

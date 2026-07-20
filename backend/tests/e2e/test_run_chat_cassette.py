@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import importlib.util
 import os
 import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
 CHATLOOP_CASSETTE_DIR = (
     Path(__file__).resolve().parents[1] / "fixtures" / "cassettes" / "test_chatloop_cassette"
 )
+
+
+def test_cassette_acceptance_does_not_delegate_to_legacy_agent_harness() -> None:
+    source = Path(__file__).read_text(encoding="utf-8")
+    legacy_builder_name = "_build_chatloop" + "_agent"
+    assert legacy_builder_name not in source
 
 
 def _load_smoke_module() -> ModuleType:
@@ -98,11 +107,102 @@ def vcr_config() -> dict[str, Any]:
 @pytest.mark.default_cassette("test_chatloop_single_tool")
 @pytest.mark.asyncio
 async def test_run_chat_executor_cassette_completes_with_nonempty_answer() -> None:
-    """Replay a real model/tool loop used by the production Run chat executor."""
-    from tests.e2e.test_chatloop_cassette import _build_chatloop_agent
+    """Replay real DashScope I/O through the production Run executor adapter."""
+    from app.chatloop.control_tools import OfferDeepResearchTool
+    from app.chatloop.gates import GateConfig
+    from app.chatloop.run_executor import ChatRunExecutor, CompletedResult, ExecuteChatRun
+    from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
+    from app.chatloop.tool_docs import CORE_TOOLS, DEFERRED_TOOLS
+    from app.chatloop.tool_hub import ToolHub
+    from app.services.llm_identity import resolve_llm_identity_from_env
+    from app.services.openai_client import build_llm_service_from_env
 
-    result = await _build_chatloop_agent().run(
-        "贵州茅台现在股价多少?", request_id="cassette-single-tool"
+    from tests.e2e.test_chatloop_cassette import _FAKE_RESULTS, _FakeTool, _NullTrace
+
+    class RecordingLLM:
+        def __init__(self, inner: Any) -> None:
+            self.inner = inner
+            self.requests: list[list[dict[str, Any]]] = []
+
+        async def stream_step(self, **kwargs: Any) -> Any:
+            self.requests.append(copy.deepcopy(kwargs["messages"]))
+            return await self.inner.stream_step(**kwargs)
+
+    llm = RecordingLLM(build_llm_service_from_env(trace_service=_NullTrace()))  # type: ignore[arg-type]
+    fake_names = [name for name in (*CORE_TOOLS, *DEFERRED_TOOLS) if name != "offer_deep_research"]
+
+    def build_components(emit: Any, seq_counter: Any) -> Any:
+        hub = ToolHub(emit=emit, seq_counter=seq_counter)
+        hub.register_inprocess([_FakeTool(name, _FAKE_RESULTS[name]) for name in fake_names])
+        hub.register_inprocess([OfferDeepResearchTool()])
+        return SimpleNamespace(
+            llm=llm,
+            tool_hub=hub,
+            gate_cfg=GateConfig(),
+            skill_listing="",
+            system_prompt=CHAT_SYSTEM_PROMPT,
+        )
+
+    published: list[Any] = []
+
+    async def capture_event(event: Any) -> None:
+        published.append(event)
+
+    provider, model = resolve_llm_identity_from_env()
+    executor = ChatRunExecutor(
+        components_factory=build_components,
+        event_sink=capture_event,
+        cancel_event=asyncio.Event(),
+        user_id="cassette-user",
+        continuation_secret=b"c" * 32,
+        provider=provider,
+        model=model,
     )
-    assert result.response_text.strip()
-    assert "get_stock_quote" in [call.tool_name for call in result.tool_calls]
+    run_id, attempt_id, session_id = uuid4(), uuid4(), uuid4()
+    history = (
+        {"role": "user", "content": "history-user-marker"},
+        {"role": "assistant", "content": "history-assistant-marker"},
+    )
+    prompt = "贵州茅台现在股价多少?"
+    result = await executor.execute(
+        ExecuteChatRun(run_id, attempt_id, session_id, prompt, history, None)
+    )
+
+    assert isinstance(result, CompletedResult)
+    assert (result.run_id, result.attempt_id, result.session_id) == (
+        run_id,
+        attempt_id,
+        session_id,
+    )
+    assert result.final_text.strip()
+    assert "1700" in result.final_text.replace(",", "")
+    assert result.usage.provider == provider
+    assert result.usage.model == model
+    assert result.usage.input_tokens > 0
+    assert result.usage.output_tokens > 0
+    assert result.usage.total_tokens == result.usage.input_tokens + result.usage.output_tokens
+
+    quote = next(tool for tool in result.tools if tool.tool_name == "get_stock_quote")
+    assert quote.status == "completed"
+    assert quote.tool_call_id
+    assert quote.request
+
+    assert published == list(result.events)
+    assert [event.seq for event in result.events] == sorted(event.seq for event in result.events)
+    assert len({event.seq for event in result.events}) == len(result.events)
+    assert {event.kind for event in result.events} >= {
+        "step_start",
+        "tool_call",
+        "tool_start",
+        "tool_end",
+        "cost_update",
+        "done",
+    }
+    assert all((event.run_id, event.attempt_id) == (run_id, attempt_id) for event in result.events)
+
+    assert llm.requests
+    first_messages = llm.requests[0]
+    history_user_index = first_messages.index(history[0])
+    history_assistant_index = first_messages.index(history[1])
+    prompt_index = first_messages.index({"role": "user", "content": prompt})
+    assert history_user_index < history_assistant_index < prompt_index
