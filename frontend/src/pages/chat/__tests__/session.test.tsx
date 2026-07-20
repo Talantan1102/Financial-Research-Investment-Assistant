@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { Route, Routes } from 'react-router-dom'
-import { waitFor } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { renderWithProviders } from '@/test-utils/render'
 import { server } from '@/test-utils/msw-server'
 import ChatSessionPage from '@/pages/chat/session'
@@ -49,5 +50,40 @@ describe('<ChatSessionPage>', () => {
       initialRunId: 'run-active', initialRunStatus: 'waiting_input',
       initialPause: { type: 'input_request', request: { question: '成本价？' } },
     })))
+  })
+
+  it('shows a safe detail error and retries history, active Run and pause recovery', async () => {
+    let detailAttempts = 0
+    server.use(
+      http.get(`${API_BASE}/api/v1/tenants`, () => HttpResponse.json([
+        { id: 'tenant-1', name: 'Personal', is_personal: true, role: 'owner' },
+      ])),
+      http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions/retry`, () => {
+        detailAttempts += 1
+        if (detailAttempts === 1) return HttpResponse.json({ secret: 'internal' }, { status: 503 })
+        return HttpResponse.json({
+          id: 'retry', tenant_id: 'tenant-1', created_by_user_id: 'u', title: 'demo',
+          created_at: now, updated_at: now, archived_at: null, has_more: false,
+          active_run_id: 'run-recovered', active_run_status: 'waiting_approval',
+          active_pause_type: 'approval', active_pause_request: { tools: [{ name: 'quote', arguments: { symbol: '600000' } }] },
+          messages: [{ id: 'm2', role: 'assistant', content: 'recovered history', status: 'done', created_at: now }],
+        })
+      }),
+    )
+    renderWithProviders(
+      <Routes><Route path="/chat/:session_id" element={<ChatSessionPage />} /></Routes>,
+      { initialRoute: '/chat/retry' },
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('会话加载失败，请重试')
+    expect(screen.queryByText(/503|internal|GET \/api/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    expect(await screen.findByText('recovered history')).toBeInTheDocument()
+    await waitFor(() => expect(runOptions).toEqual(expect.objectContaining({
+      initialRunId: 'run-recovered', initialRunStatus: 'waiting_approval',
+      initialPause: expect.objectContaining({ type: 'approval_request' }),
+    })))
+    expect(detailAttempts).toBe(2)
   })
 })

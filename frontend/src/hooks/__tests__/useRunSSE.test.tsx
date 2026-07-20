@@ -112,6 +112,7 @@ describe('useRunSSE', () => {
       expect.objectContaining({ session_id: null, prompt: 'analyze' }),
       expect.any(String),
       expect.any(Function),
+      expect.any(AbortSignal),
     )
     expect(runApi.fetchRunEvents).toHaveBeenCalledAfter(runApi.createRun as never)
     expect(created).toEqual(['session-1'])
@@ -174,6 +175,58 @@ describe('useRunSSE', () => {
     expect(snapshot(currentChatState).messages.at(-1)?.content).toBe('Hello durable')
   })
 
+  it('atomically drops Session A transport state before Session B with no active Run', async () => {
+    vi.mocked(runApi.fetchRunEvents)
+      .mockImplementationOnce(() => new Promise<Response>(() => {}))
+      .mockResolvedValueOnce(chunkedSse([]))
+    vi.mocked(runApi.createRun).mockResolvedValue(run('queued', 'run-b'))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('completed', 'run-b'))
+    const { result, rerender } = renderHook(
+      (props: { sessionId: string; runId: string | null; status: RunResponse['status'] | null }) =>
+        useRunSSE({
+          tenantId: 'tenant-1', sessionId: props.sessionId,
+          initialRunId: props.runId, initialRunStatus: props.status,
+        }),
+      { initialProps: { sessionId: 'session-a', runId: 'run-a', status: 'running' } },
+    )
+    await waitFor(() => expect(result.current.activeRunId).toBe('run-a'))
+    currentChatActions.setLastEventId('a-cursor')
+
+    rerender({ sessionId: 'session-b', runId: null, status: null })
+    await waitFor(() => expect(result.current.activeRunId).toBeNull())
+    expect(result.current.status).toBe('idle')
+    expect(result.current.pause).toBeNull()
+    expect(snapshot(currentChatState).last_event_id).toBeNull()
+
+    await act(async () => result.current.sendPrompt('for B'))
+    expect(runApi.createRun).toHaveBeenLastCalledWith(
+      'tenant-1',
+      expect.objectContaining({ session_id: 'session-b', prompt: 'for B' }),
+      expect.any(String), expect.any(Function), expect.any(AbortSignal),
+    )
+  })
+
+  it('replaces Session A active transport with Session B initial active Run', async () => {
+    vi.mocked(runApi.fetchRunEvents).mockImplementation(() => new Promise<Response>(() => {}))
+    const { result, rerender } = renderHook(
+      (props: { sessionId: string; runId: string }) => useRunSSE({
+        tenantId: 'tenant-1', sessionId: props.sessionId,
+        initialRunId: props.runId, initialRunStatus: 'running',
+      }),
+      { initialProps: { sessionId: 'session-a', runId: 'run-a' } },
+    )
+    await waitFor(() => expect(runApi.fetchRunEvents).toHaveBeenCalledWith(
+      'tenant-1', 'run-a', expect.any(Object),
+    ))
+
+    rerender({ sessionId: 'session-b', runId: 'run-b' })
+    await waitFor(() => expect(runApi.fetchRunEvents).toHaveBeenCalledWith(
+      'tenant-1', 'run-b', expect.any(Object),
+    ))
+    expect(result.current.activeRunId).toBe('run-b')
+    expect(result.current.status).toBe('running')
+  })
+
   it('keeps durable initial pause when run.paused arrives before Redis request events', async () => {
     vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([
       'id: v1:5:0-0\nevent: run.paused\ndata: {}\n\n',
@@ -226,6 +279,7 @@ describe('useRunSSE', () => {
       expect.objectContaining({ prompt: 'edited', replaces_run_id: 'run-1' }),
       expect.any(String),
       expect.any(Function),
+      expect.any(AbortSignal),
     )
 
     vi.mocked(runApi.createRun).mockResolvedValue(run('queued', 'run-3'))
@@ -235,7 +289,73 @@ describe('useRunSSE', () => {
       expect.not.objectContaining({ replaces_run_id: expect.anything() }),
       expect.any(String),
       expect.any(Function),
+      expect.any(AbortSignal),
     )
+  })
+
+  it('serializes a pending create so a double send cannot POST twice', async () => {
+    let resolveCreate!: (value: RunResponse) => void
+    vi.mocked(runApi.createRun).mockImplementation(
+      () => new Promise<RunResponse>((resolve) => { resolveCreate = resolve }),
+    )
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('completed'))
+    const { result } = renderHook(() =>
+      useRunSSE({ tenantId: 'tenant-1', sessionId: 'session-1' }),
+    )
+
+    let first!: Promise<void>
+    act(() => {
+      first = result.current.sendPrompt('same prompt')
+      void result.current.sendPrompt('same prompt')
+    })
+    expect(runApi.createRun).toHaveBeenCalledTimes(1)
+    resolveCreate(run('queued'))
+    await act(async () => first)
+  })
+
+  it('replays an uncertain create with the exact same body and idempotency key', async () => {
+    vi.mocked(runApi.createRun)
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockResolvedValueOnce(run('queued'))
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('completed'))
+    const delays: number[] = []
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1', sessionId: 'session-1',
+      delayMs: async (ms) => { delays.push(ms) },
+    }))
+
+    await act(async () => result.current.sendPrompt('replay me'))
+
+    expect(runApi.createRun).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(runApi.createRun).mock.calls[1].slice(0, 3)).toEqual(
+      vi.mocked(runApi.createRun).mock.calls[0].slice(0, 3),
+    )
+    expect(delays).toEqual([100])
+  })
+
+  it('records Stop during create and server-cancels immediately after the Run id arrives', async () => {
+    let resolveCreate!: (value: RunResponse) => void
+    vi.mocked(runApi.createRun).mockImplementation(
+      () => new Promise<RunResponse>((resolve) => { resolveCreate = resolve }),
+    )
+    vi.mocked(runApi.cancelRun).mockResolvedValue(run('cancelled'))
+    const { result } = renderHook(() =>
+      useRunSSE({ tenantId: 'tenant-1', sessionId: 'session-1' }),
+    )
+
+    let started!: Promise<void>
+    act(() => { started = result.current.sendPrompt('stop while posting') })
+    await waitFor(() => expect(runApi.createRun).toHaveBeenCalledTimes(1))
+    await act(async () => result.current.cancelRun())
+    expect(runApi.cancelRun).not.toHaveBeenCalled()
+    resolveCreate(run('queued'))
+    await act(async () => started)
+
+    expect(runApi.cancelRun).toHaveBeenCalledWith('tenant-1', 'run-1', expect.any(Function))
+    expect(result.current.activeRunId).toBeNull()
+    expect(result.current.status).toBe('cancelled')
   })
 
   it('preserves approval/input pause requests, blocks ordinary send and resumes with typed responses', async () => {
@@ -297,9 +417,10 @@ describe('useRunSSE', () => {
     await started
   })
 
-  it('bounds reconnect attempts and prevents an unmounted request from writing stale state', async () => {
+  it('exhausts reconnect attempts without inventing a failed Run or losing cancel control', async () => {
     vi.mocked(runApi.fetchRunEvents).mockRejectedValue(new TypeError('network down'))
     vi.mocked(runApi.getRun).mockResolvedValue(run('running'))
+    vi.mocked(runApi.cancelRun).mockResolvedValue(run('cancelled'))
     const delays: number[] = []
     currentChatActions.setSession('session-1', [])
     const { result, unmount } = renderHook(() =>
@@ -314,10 +435,42 @@ describe('useRunSSE', () => {
     expect(runApi.fetchRunEvents).toHaveBeenCalledTimes(4)
     expect(delays).toEqual([100, 200, 400])
     expect(snapshot(currentChatState).streamingStatus).toBe('error')
+    expect(snapshot(currentChatState).active_run_status).toBe('running')
+    expect(result.current.activeRunId).toBe('run-1')
+    expect(result.current.status).toBe('running')
+
+    await act(async () => result.current.sendPrompt('must remain blocked'))
+    expect(runApi.createRun).toHaveBeenCalledTimes(1)
+    await act(async () => result.current.cancelRun())
+    expect(runApi.cancelRun).toHaveBeenCalledWith('tenant-1', 'run-1', expect.any(Function))
 
     currentChatActions.reset()
     unmount()
     await Promise.resolve()
     expect(snapshot(currentChatState).messages).toEqual([])
+  })
+
+  it('trusts a durable terminal frame when GET calibration fails and permits the next send', async () => {
+    vi.mocked(runApi.fetchRunEvents)
+      .mockResolvedValueOnce(chunkedSse([
+        'id: v1:1:1-0\nevent: run.completed\ndata: {"content":"durable terminal"}\n\n',
+      ]))
+      .mockResolvedValueOnce(chunkedSse([]))
+    vi.mocked(runApi.getRun)
+      .mockRejectedValueOnce(new TypeError('GET unavailable'))
+      .mockResolvedValueOnce(run('completed', 'run-2'))
+    vi.mocked(runApi.createRun)
+      .mockResolvedValueOnce(run('queued'))
+      .mockResolvedValueOnce(run('queued', 'run-2'))
+    const { result } = renderHook(() =>
+      useRunSSE({ tenantId: 'tenant-1', sessionId: 'session-1' }),
+    )
+
+    await act(async () => result.current.sendPrompt('first'))
+    expect(result.current.activeRunId).toBeNull()
+    expect(result.current.status).toBe('completed')
+
+    await act(async () => result.current.sendPrompt('second'))
+    expect(runApi.createRun).toHaveBeenCalledTimes(2)
   })
 })

@@ -77,14 +77,41 @@ describe('<ChatPane> integration with useRunSSE', () => {
 
   it('renders approval and input pause controls and sends typed resume responses', async () => {
     const user = userEvent.setup()
-    pauseMock = { type: 'approval_request', request: { tool: 'trade' } }
+    pauseMock = {
+      type: 'approval_request',
+      request: {
+        tool_calls: [
+          { id: 'call-1', name: 'place_order', arguments: { symbol: '600000', quantity: 100 } },
+        ],
+        execution_bindings: [
+          {
+            execution_id: 'execution-7', semantic_key: 'send_notice:abc',
+            tool_call: { id: 'call-2', name: 'send_notice', arguments: { channel: 'email' } },
+          },
+        ],
+      },
+    }
     const rendered = renderWithProviders(<ChatPane tenantId="tenant-1" />)
     expect(screen.getByTestId('input-textarea')).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: '拒绝' }))
+    expect(screen.getByText('place_order')).toBeInTheDocument()
+    expect(screen.getByText(/"symbol": "600000"/)).toBeInTheDocument()
+    expect(screen.getByText('send_notice')).toBeInTheDocument()
+    expect(screen.getByText(/execution-7/)).toBeInTheDocument()
+    expect(screen.getByText(/send_notice:abc/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '全部批准' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '全部拒绝' }))
     expect(resumeRunMock).toHaveBeenCalledWith({ approved: false })
 
-    pauseMock = { type: 'input_request', request: { prompt: '补充信息' } }
+    pauseMock = {
+      type: 'input_request',
+      request: {
+        question: '<img src=x onerror="globalThis.pwned=true">请输入成本价？',
+        message: 'lower priority',
+      },
+    }
     rendered.rerender(<ChatPane tenantId="tenant-1" />)
+    expect(screen.getByText(/请输入成本价/)).toBeInTheDocument()
+    expect(document.querySelector('img')).toBeNull()
     await user.type(screen.getByLabelText('补充信息'), 'more context')
     await user.click(screen.getByRole('button', { name: '提交补充信息' }))
     expect(resumeRunMock).toHaveBeenLastCalledWith({ text: 'more context' })

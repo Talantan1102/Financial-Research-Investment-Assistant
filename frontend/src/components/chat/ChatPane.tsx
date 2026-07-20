@@ -20,6 +20,67 @@ const HALT_REASON_LABEL: Record<string, string> = {
   spinning: '检测到重复打转',
 }
 
+function safeRequestJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? '无法显示请求详情'
+  } catch {
+    return '无法显示请求详情'
+  }
+}
+
+function inputRequestText(request: Record<string, unknown>): string {
+  for (const key of ['question', 'message', 'prompt', 'instruction']) {
+    const value = request[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return safeRequestJson(request)
+}
+
+interface ApprovalItem {
+  key: string
+  name: string
+  arguments: unknown
+  executionId?: string
+  semanticKey?: string
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function approvalItems(request: Record<string, unknown>): ApprovalItem[] {
+  const items: ApprovalItem[] = []
+  if (Array.isArray(request.tool_calls)) {
+    for (const rawCall of request.tool_calls) {
+      const call = asRecord(rawCall)
+      if (!call) continue
+      const name = typeof call.name === 'string' ? call.name : '未知工具'
+      const id = typeof call.id === 'string' ? call.id : `${items.length}`
+      items.push({ key: `call-${id}`, name, arguments: call.arguments })
+    }
+  }
+  if (Array.isArray(request.execution_bindings)) {
+    for (const rawBinding of request.execution_bindings) {
+      const binding = asRecord(rawBinding)
+      const call = asRecord(binding?.tool_call)
+      if (!binding || !call) continue
+      const name = typeof call.name === 'string' ? call.name : '未知工具'
+      const executionId = typeof binding.execution_id === 'string' ? binding.execution_id : undefined
+      const semanticKey = typeof binding.semantic_key === 'string' ? binding.semantic_key : undefined
+      items.push({
+        key: `binding-${executionId ?? items.length}`,
+        name,
+        arguments: call.arguments,
+        executionId,
+        semanticKey,
+      })
+    }
+  }
+  return items
+}
+
 export interface ChatPaneProps {
   sessionId?: string
   tenantId?: string
@@ -78,6 +139,9 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
       }
     : null
   const displayMessages = [...messages, ...(pendingMessage ? [pendingMessage] : [])]
+  const pendingApprovals = run.pause?.type === 'approval_request'
+    ? approvalItems(run.pause.request)
+    : []
 
   const onSend = useCallback((text: string) => {
     void run.sendPrompt(text)
@@ -124,12 +188,25 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
           {run.pause?.type === 'approval_request' ? (
             <div role="region" aria-label="审批请求">
               <p>此操作需要你的审批</p>
-              <button type="button" onClick={() => { void run.resumeRun({ approved: true }) }}>同意</button>
-              <button type="button" onClick={() => { void run.resumeRun({ approved: false }) }}>拒绝</button>
+              {pendingApprovals.length > 0 ? (
+                <ul>
+                  {pendingApprovals.map((item) => (
+                    <li key={item.key}>
+                      <strong>{item.name}</strong>
+                      <pre>{safeRequestJson(item.arguments)}</pre>
+                      {item.executionId ? <div>执行绑定：{item.executionId}</div> : null}
+                      {item.semanticKey ? <div>语义绑定：{item.semanticKey}</div> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : <pre>{safeRequestJson(run.pause.request)}</pre>}
+              <button type="button" onClick={() => { void run.resumeRun({ approved: true }) }}>全部批准</button>
+              <button type="button" onClick={() => { void run.resumeRun({ approved: false }) }}>全部拒绝</button>
             </div>
           ) : null}
           {run.pause?.type === 'input_request' ? (
             <div role="region" aria-label="补充信息请求">
+              <p>{inputRequestText(run.pause.request)}</p>
               <label>
                 补充信息
                 <textarea aria-label="补充信息" value={pauseInput} onChange={(event) => setPauseInput(event.target.value)} />

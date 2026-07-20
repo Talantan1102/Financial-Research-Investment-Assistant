@@ -120,6 +120,8 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   )
   const maxReconnectAttempts = options.maxReconnectAttempts ?? 3
   const abortRef = useRef<AbortController | null>(null)
+  const startingRef = useRef(false)
+  const cancelAfterCreateRef = useRef(false)
   const generationRef = useRef(0)
   const activeRunRef = useRef<string | null>(null)
   const lastRunRef = useRef<string | null>(null)
@@ -127,14 +129,12 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   const statusRef = useRef<RunStatus | 'idle' | 'error'>('idle')
   const sessionRef = useRef(options.sessionId)
   const tenantRef = useRef(options.tenantId)
+  const identityRef = useRef({ tenantId: options.tenantId, sessionId: options.sessionId })
   const cursorRef = useRef<string | null>(null)
   const seenIdsRef = useRef(new Set<string>())
   const [status, setStatus] = useState<RunStatus | 'idle' | 'error'>('idle')
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [pause, setPause] = useState<RunPause | null>(options.initialPause ?? null)
-
-  sessionRef.current = options.sessionId ?? sessionRef.current
-  tenantRef.current = options.tenantId
 
   const isCurrent = useCallback(
     (generation: number, signal?: AbortSignal) =>
@@ -222,15 +222,25 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
               setPause({ type: event.event, request: event.data })
             } else if (event.event === 'run.completed') {
               const content = event.data.content
+              updateStatus('completed')
+              updateActiveRun(null, 'completed')
+              setPause(null)
+              revisionBaseRef.current = null
               currentChatActions.finishRun(
                 'completed',
                 typeof content === 'string' ? content : undefined,
               )
               return true
             } else if (event.event === 'run.failed') {
+              updateStatus('failed')
+              updateActiveRun(null, 'failed')
+              setPause(null)
               currentChatActions.failRun(String(event.data.error_message ?? 'Run failed'))
               return true
             } else if (event.event === 'run.cancelled') {
+              updateStatus('cancelled')
+              updateActiveRun(null, 'cancelled')
+              setPause(null)
               currentChatActions.finishRun('cancelled')
               return true
             } else if (event.event === 'run.paused') {
@@ -274,9 +284,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         if (terminalFrame && calibrated === null) return
         if (reconnectAttempt >= maxReconnectAttempts) {
           const message = streamError instanceof Error ? streamError.message : 'Run stream disconnected'
-          currentChatActions.failRun(message)
-          updateActiveRun(null, 'failed')
-          updateStatus('error')
+          currentChatActions.reportRunTransportError(message)
           return
         }
         currentChatActions.setReconnecting()
@@ -304,9 +312,11 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         updateStatus('error')
         return
       }
-      if (activeRunRef.current) {
+      if (activeRunRef.current || startingRef.current) {
         return
       }
+      startingRef.current = true
+      cancelAfterCreateRef.current = false
       generationRef.current += 1
       const generation = generationRef.current
       abortRef.current?.abort()
@@ -319,16 +329,30 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       updateStatus('queued')
       try {
         const replacement = replacesRunId ?? revisionBaseRef.current
-        const created = await createRun(
-          tenantId,
-          {
-            session_id: sessionRef.current,
-            prompt,
-            ...(replacement ? { replaces_run_id: replacement } : {}),
-          },
-          idempotencyKey(),
-          fetchImpl,
-        )
+        const body = {
+          session_id: sessionRef.current,
+          prompt,
+          ...(replacement ? { replaces_run_id: replacement } : {}),
+        }
+        const key = idempotencyKey()
+        let created: RunResponse | null = null
+        let createError: unknown = null
+        for (let attempt = 0; attempt < 3 && !created; attempt += 1) {
+          try {
+            created = await createRun(
+              tenantId,
+              body,
+              key,
+              fetchImpl,
+              controller.signal,
+            )
+          } catch (error) {
+            if (!isCurrent(generation, controller.signal)) return
+            createError = error
+            if (attempt < 2) await delayMs(Math.min(100 * 2 ** attempt, 1000))
+          }
+        }
+        if (!created) throw createError ?? new Error('Run creation failed')
         if (!isCurrent(generation, controller.signal)) return
         revisionBaseRef.current = null
         if (!sessionRef.current) {
@@ -337,9 +361,37 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         }
         updateActiveRun(created.id, created.status)
         updateStatus(created.status)
+        startingRef.current = false
         if (options.sessionId === null) {
           onSessionCreated?.(created.session_id)
           void chatSessionsActions.loadSessions()
+        }
+        if (cancelAfterCreateRef.current) {
+          cancelAfterCreateRef.current = false
+          revisionBaseRef.current = created.id
+          try {
+            const cancelled = await cancelRunRequest(tenantId, created.id, fetchImpl)
+            if (!isCurrent(generation, controller.signal)) return
+            updateStatus(cancelled.status)
+            if (TERMINAL.has(cancelled.status)) {
+              updateActiveRun(null, cancelled.status)
+              currentChatActions.finishRun(cancelled.status)
+              await loadDurableHistory(
+                tenantId,
+                created.session_id,
+                generation,
+                controller.signal,
+              )
+              return
+            }
+          } catch (error) {
+            if (!isCurrent(generation, controller.signal)) return
+            currentChatActions.reportRunTransportError(
+              error instanceof Error ? error.message : 'Cancel failed',
+            )
+            updateStatus('error')
+            return
+          }
         }
         await streamRun(
           tenantId,
@@ -350,18 +402,24 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         )
       } catch (error) {
         if (!isCurrent(generation, controller.signal)) return
+        startingRef.current = false
+        cancelAfterCreateRef.current = false
         currentChatActions.failRun(error instanceof Error ? error.message : 'Run failed')
         updateActiveRun(null, 'failed')
         updateStatus('error')
       }
     },
-    [fetchImpl, isCurrent, onSessionCreated, options.sessionId, streamRun, updateActiveRun, updateStatus],
+    [delayMs, fetchImpl, isCurrent, loadDurableHistory, onSessionCreated, options.sessionId, streamRun, updateActiveRun, updateStatus],
   )
 
   const cancelRun = useCallback(async () => {
     const tenantId = tenantRef.current
     const runId = activeRunRef.current
     const sessionId = sessionRef.current
+    if (tenantId && startingRef.current && !runId) {
+      cancelAfterCreateRef.current = true
+      return
+    }
     if (!tenantId || !runId || !sessionId) return
     generationRef.current += 1
     const generation = generationRef.current
@@ -420,6 +478,41 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   )
 
   useEffect(() => {
+    const previous = identityRef.current
+    const adoptedSession =
+      previous.tenantId === options.tenantId &&
+      previous.sessionId === null &&
+      options.sessionId !== null &&
+      sessionRef.current === options.sessionId
+    const identityChanged =
+      previous.tenantId !== options.tenantId ||
+      (previous.sessionId !== options.sessionId && !adoptedSession)
+    identityRef.current = { tenantId: options.tenantId, sessionId: options.sessionId }
+    tenantRef.current = options.tenantId
+    if (!identityChanged) {
+      if (options.sessionId !== null) sessionRef.current = options.sessionId
+      return
+    }
+
+    generationRef.current += 1
+    abortRef.current?.abort()
+    abortRef.current = null
+    startingRef.current = false
+    cancelAfterCreateRef.current = false
+    activeRunRef.current = null
+    lastRunRef.current = null
+    revisionBaseRef.current = null
+    cursorRef.current = null
+    seenIdsRef.current = new Set()
+    sessionRef.current = options.sessionId
+    setActiveRunId(null)
+    setPause(null)
+    statusRef.current = 'idle'
+    setStatus('idle')
+    currentChatActions.resetRunTransport()
+  }, [options.sessionId, options.tenantId])
+
+  useEffect(() => {
     const tenantId = options.tenantId
     const sessionId = options.sessionId
     const runId = options.initialRunId
@@ -452,7 +545,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       generationRef.current += 1
       abortRef.current?.abort()
     }
-  }, [options.sessionId, options.tenantId])
+  }, [])
 
   return {
     sendPrompt: (prompt) => startRun(prompt),

@@ -10,6 +10,8 @@ export function ChatSessionPage() {
   const { session_id } = useParams<{ session_id: string }>()
   const [activeRun, setActiveRun] = useState<{ id: string; status: RunStatus } | null>(null)
   const [detailLoaded, setDetailLoaded] = useState(false)
+  const [detailError, setDetailError] = useState(false)
+  const [detailAttempt, setDetailAttempt] = useState(0)
   const [activePause, setActivePause] = useState<RunPause | null>(null)
 
   useEffect(() => {
@@ -18,6 +20,7 @@ export function ChatSessionPage() {
     currentChatActions.reset()
     setActiveRun(null)
     setDetailLoaded(false)
+    setDetailError(false)
     setActivePause(null)
     chatSessionsActions.loadSessionDetail(session_id)
       .then((detail) => {
@@ -36,17 +39,27 @@ export function ChatSessionPage() {
         )
         setDetailLoaded(true)
       })
-      .catch(() => {})
+      .catch(() => {
+        if (!cancelled) setDetailError(true)
+      })
     return () => { cancelled = true }
-  }, [session_id])
+  }, [detailAttempt, session_id])
 
-  return <ChatPane
-    sessionId={session_id}
-    initialRunId={activeRun?.id}
-    initialRunStatus={activeRun?.status}
-    initialPause={activePause}
-    sessionLoading={!detailLoaded}
-  />
+  return <>
+    {detailError ? (
+      <div role="alert">
+        会话加载失败，请重试
+        <button type="button" onClick={() => setDetailAttempt((value) => value + 1)}>重试</button>
+      </div>
+    ) : null}
+    <ChatPane
+      sessionId={session_id}
+      initialRunId={activeRun?.id}
+      initialRunStatus={activeRun?.status}
+      initialPause={activePause}
+      sessionLoading={!detailLoaded}
+    />
+  </>
 }
 
 export default ChatSessionPage

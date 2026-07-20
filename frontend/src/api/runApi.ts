@@ -93,6 +93,7 @@ export function createRun(
   body: CreateRunBody,
   idempotencyKey: string,
   fetchImpl: typeof fetch = fetch,
+  signal?: AbortSignal,
 ): Promise<RunResponse> {
   return jsonRequest(
     `/api/v1/tenants/${encodeURIComponent(tenantId)}/runs`,
@@ -104,6 +105,7 @@ export function createRun(
         ...authHeaders(),
       },
       body: JSON.stringify(body),
+      signal,
     },
     fetchImpl,
   )

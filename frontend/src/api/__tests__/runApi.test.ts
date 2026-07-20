@@ -49,6 +49,23 @@ describe('runApi', () => {
     })
   })
 
+  it('passes an AbortSignal to create Run', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({ id: 'run-1', session_id: 'session-1', status: 'queued' }, 201),
+    )
+    const controller = new AbortController()
+
+    await createRun(
+      'tenant-1',
+      { session_id: 'session-1', prompt: 'signal' },
+      'idem-signal',
+      fetchImpl,
+      controller.signal,
+    )
+
+    expect(fetchImpl.mock.calls[0][1]?.signal).toBe(controller.signal)
+  })
+
   it('opens the events stream with Authorization and opaque Last-Event-ID unchanged', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       new Response('event: token\ndata: {"content":"x"}\n\n', {

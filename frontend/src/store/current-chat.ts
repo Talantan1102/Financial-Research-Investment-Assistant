@@ -240,6 +240,7 @@ export const currentChatActions = {
   resetRunTransport() {
     currentChatState.active_run_id = null
     currentChatState.active_run_status = null
+    currentChatState.last_event_id = null
     currentChatState.streamingStatus = 'idle'
     currentChatState.streaming_phase = 'idle'
     currentChatState.streamingDraft = ''
