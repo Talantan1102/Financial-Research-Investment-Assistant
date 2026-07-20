@@ -15,6 +15,12 @@ class CutoverEvidence:
     has_run_session_routes: bool
     has_phase2_phase3_gates: bool
     backup_manifest_valid: bool = False
+    dependency_source_counts: dict[str, int] = field(default_factory=dict)
+    dependency_target_counts: dict[str, int] = field(default_factory=dict)
+    quarantine_count: int = 0
+    allowed_quarantine_count: int = 0
+    legacy_external_fks: int = 0
+    legacy_tables: int = 0
 
 
 @dataclass
@@ -37,6 +43,12 @@ def verify_cutover(evidence: CutoverEvidence) -> CutoverResult:
         failures.append("phase2_phase3_done_cards")
     if not evidence.backup_manifest_valid:
         failures.append("backup_manifest")
+    if evidence.dependency_source_counts != evidence.dependency_target_counts:
+        failures.append("dependency_counts")
+    if evidence.quarantine_count != evidence.allowed_quarantine_count:
+        failures.append("quarantine")
+    if evidence.legacy_external_fks or evidence.legacy_tables:
+        failures.append("legacy_dependencies")
     return CutoverResult(ok=not failures, failures=failures)
 
 

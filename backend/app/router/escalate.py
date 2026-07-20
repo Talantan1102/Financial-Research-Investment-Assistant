@@ -71,7 +71,9 @@ class EscalateRequest(BaseModel):
 
 # C43: SSOT — get_escalation_record_repo is defined once in chat.py; re-export it
 # here so app_main needs only one dependency_override (not two identical stubs).
-from app.router.chat import get_escalation_record_repo  # noqa: E402
+def get_escalation_record_repo() -> EscalationRecordRepo:
+    """Run/research-owned provider, independent of the legacy chat router."""
+    raise RuntimeError("EscalationRecordRepo dependency not configured")
 
 
 def get_research_agent() -> ResearchAgent:
@@ -353,7 +355,7 @@ async def escalate(
                 target_ts_code=req.packet_confirmed.explicit_task.target_ts_code,
                 report_markdown=sut_out.response_text,
                 request_id=request_id,
-                source_chat_session_id=source_session_id,
+                source_chat_session_id=None,
                 source_session_id=source_session_id,
                 source_run_id=req.source_run_id,
             )
