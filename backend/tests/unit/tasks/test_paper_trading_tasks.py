@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -156,3 +156,26 @@ def test_dispatch_failure_is_nonfatal_for_periodic_recovery(
     )
 
     assert tasks.dispatch_match_order("00000000-0000-0000-0000-000000000001") is False
+
+
+def test_production_task_ignores_worker_fixture_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    before = datetime.now(UTC) - timedelta(seconds=1)
+    monkeypatch.setenv("PAPER_TRADING_WORKER_FIXTURE", "must-not-be-read.json")
+
+    actual = tasks._now()
+
+    assert before <= actual <= datetime.now(UTC) + timedelta(seconds=1)
+
+
+def test_expiry_has_bounded_autoretry_and_periodic_recovery_beat() -> None:
+    from app.tasks.celery_beat_schedule import beat_schedule
+    from app.tasks.paper_trading import expire_day_orders
+
+    assert expire_day_orders.max_retries == 3
+    entry = beat_schedule["paper_expire_overdue_orders"]
+    assert entry["task"] == "app.tasks.paper_trading.expire_day_orders"
+    assert str(entry["schedule"]) == "<crontab: */10 * * * * (m/h/dM/MY/d)>"

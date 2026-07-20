@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
 from collections.abc import Generator
 from contextlib import contextmanager
+from typing import Any
 
 import pytest
 
@@ -24,6 +26,23 @@ except ImportError:
     HAS_TESTCONTAINERS = False
 
 
+def _stop_posix_worker(proc: subprocess.Popen[bytes]) -> None:
+    """Terminate the whole worker process group, escalating after a bounded wait."""
+    try:
+        process_group = os.getpgid(proc.pid)
+        os.killpg(process_group, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process_group, getattr(signal, "SIGKILL", 9))
+        except ProcessLookupError:
+            return
+        proc.wait(timeout=10)
+
+
 def _stop_worker(proc: subprocess.Popen[bytes]) -> None:
     """Stop the worker and its uv/celery child processes on every platform."""
     if sys.platform == "win32":
@@ -33,11 +52,16 @@ def _stop_worker(proc: subprocess.Popen[bytes]) -> None:
             check=False,
         )
         return
-    proc.terminate()
+    _stop_posix_worker(proc)
+
+
+def _start_worker(producer_config: Any, *args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+    """Restore in-process producer configuration when spawning fails."""
     try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+        return subprocess.Popen(*args, **kwargs)
+    except BaseException:
+        producer_config.__exit__(*sys.exc_info())
+        raise
 
 
 @contextmanager
@@ -104,29 +128,35 @@ def celery_worker_subprocess(
     if paper_trading_worker_fixture_path is not None:
         env["PAPER_TRADING_WORKER_FIXTURE"] = paper_trading_worker_fixture_path
 
+    worker_args = [
+        "uv",
+        "run",
+        "celery",
+        "-A",
+        "app.tasks.celery_app",
+        "worker",
+        "-Q",
+        "default,llm",
+        "--concurrency",
+        "1",
+        "--pool=solo",
+        "--loglevel",
+        "INFO",
+    ]
+    if paper_trading_worker_fixture_path is not None:
+        worker_args.extend(["--include", "tests.worker_paper_trading_fixture"])
+
     producer_config = configured_celery_producer(redis_url)
     producer_config.__enter__()
-    proc = subprocess.Popen(
-        [
-            "uv",
-            "run",
-            "celery",
-            "-A",
-            "app.tasks.celery_app",
-            "worker",
-            "-Q",
-            "default,llm",
-            "--concurrency",
-            "1",
-            "--pool=solo",
-            "--loglevel",
-            "INFO",
-        ],
+    proc = _start_worker(
+        producer_config,
+        worker_args,
         cwd="backend",
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,  # merge stderr → stdout; celery logs to stderr by default
         bufsize=1,
+        start_new_session=sys.platform != "win32",
     )
 
     # Wait for "ready" without select(): Windows select only accepts sockets, not

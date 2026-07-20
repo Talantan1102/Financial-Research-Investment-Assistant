@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import cast
 
 import pytest
-from app.models.paper_account import PaperAccount
+from app.models.paper_account import PaperAccount, PaperCashLedger
 from app.models.paper_order import (
     OrderSide,
     OrderStatus,
@@ -323,6 +323,44 @@ def test_expired_order_is_released_without_fetching_quote(
     assert provider.calls == 0
     assert order.status is OrderStatus.EXPIRED
     assert order.reserved_cash == Decimal("0.00")
+
+
+def test_missed_close_expiry_is_recovered_once_later(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    order = _open_order(db_session, quantity=100)
+    account = db_session.get(PaperAccount, order.account_id)
+    order.expires_at = NOW
+    recovery_time = NOW + timedelta(hours=5, minutes=11)
+    monkeypatch.setattr(tasks, "_now", lambda: recovery_time)
+
+    assert tasks._expire_day_orders_in_session(db_session) == 1
+    assert tasks._expire_day_orders_in_session(db_session) == 0
+    assert order.status is OrderStatus.EXPIRED
+    assert account.frozen_cash == Decimal("0.00")
+    assert order.reserved_cash == Decimal("0.00")
+    assert (
+        db_session.query(PaperCashLedger)
+        .filter_by(order_id=order.id, kind="reservation_release")
+        .count()
+        == 1
+    )
+
+
+def test_weekend_run_catches_prior_trading_day_expiry(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    order = _open_order(db_session, quantity=100)
+    order.expires_at = NOW
+    saturday = datetime(2026, 7, 25, 1, 0, tzinfo=UTC)
+    monkeypatch.setattr(tasks, "_now", lambda: saturday)
+
+    assert tasks._expire_day_orders_in_session(db_session) == 1
+    assert order.status is OrderStatus.EXPIRED
 
 
 def test_provider_failure_leaves_order_and_watermark_unchanged(

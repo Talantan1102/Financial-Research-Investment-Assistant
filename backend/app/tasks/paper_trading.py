@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import os
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, time
@@ -15,13 +13,13 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.models.paper_account import PaperAccount, PaperAccountStatus, PaperHoldingLot
 from app.models.paper_order import OrderSide, OrderStatus, OrderType, PaperMatchPass, PaperOrder
 from app.services.paper_trading.clock import (
-    FixedTradingCalendar,
     TradingCalendar,
     TradingClock,
     TushareTradingCalendar,
@@ -35,7 +33,7 @@ from app.services.paper_trading.quote_provider import (
 )
 from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.settlement import MatchQuoteEvidence, PaperSettlementService
-from app.services.paper_trading.types import MarketPhase, RealtimeQuote
+from app.services.paper_trading.types import MarketPhase
 from app.services.tushare_factory import build_tushare_service
 from app.tasks.celery_app import celery_app
 
@@ -43,24 +41,7 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
 
 
-def _worker_fixture() -> dict[str, object] | None:
-    path = os.environ.get("PAPER_TRADING_WORKER_FIXTURE")
-    if not path:
-        return None
-    with open(path, encoding="utf-8") as stream:
-        payload = json.load(stream)
-    if not isinstance(payload, dict):
-        raise ValueError("paper trading worker fixture must be an object")
-    return payload
-
-
 def _now() -> datetime:
-    fixture = _worker_fixture()
-    if fixture is not None:
-        value = datetime.fromisoformat(str(fixture["now"]))
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("paper trading worker fixture now must be timezone-aware")
-        return value
     return datetime.now(UTC)
 
 
@@ -76,39 +57,13 @@ def _fetch_trading_calendar(start: str, end: str) -> pd.DataFrame:
 
 
 def _calendar() -> TradingCalendar:
-    fixture = _worker_fixture()
-    if fixture is not None:
-        dates = fixture.get("open_dates")
-        if not isinstance(dates, list):
-            raise ValueError("paper trading worker fixture open_dates must be a list")
-        return FixedTradingCalendar({datetime.fromisoformat(str(value)).date() for value in dates})
     return TushareTradingCalendar(_fetch_trading_calendar)
-
-
-class _FixtureQuoteProvider:
-    def __init__(self, payload: object) -> None:
-        self._quote = RealtimeQuote.model_validate(payload, strict=False)
-
-    async def get(self, ts_code: str) -> RealtimeQuote:
-        return self.get_sync(ts_code)
-
-    def get_sync(self, ts_code: str) -> RealtimeQuote:
-        if ts_code != self._quote.ts_code:
-            raise PaperTradingError("quote_unavailable", "fixture quote does not match security")
-        return self._quote
-
-
-def _quote_provider() -> TushareRealtimeQuoteProvider | _FixtureQuoteProvider:
-    fixture = _worker_fixture()
-    if fixture is not None:
-        return _FixtureQuoteProvider(fixture["quote"])
-    return TushareRealtimeQuoteProvider()
 
 
 def _order_service(session: Session, *, now: Callable[[], datetime]) -> PaperOrderService:
     return PaperOrderService(
         session,
-        quote_provider=_quote_provider(),
+        quote_provider=TushareRealtimeQuoteProvider(),
         clock=TradingClock(_calendar()),
         rulebook=RuleBook.from_builtin_fixture(),
         now=now,
@@ -193,7 +148,7 @@ def _match_order_in_session(
     if clock.phase(now) not in {MarketPhase.MORNING, MarketPhase.AFTERNOON}:
         return {"fill_ids": [], "matched_quantity": 0}
 
-    quote = _quote_provider().get_sync(cast(str, order.ts_code))
+    quote = TushareRealtimeQuoteProvider().get_sync(cast(str, order.ts_code))
     if parsed_timestamp is not None and quote.quoted_at != parsed_timestamp:
         raise PaperTradingError("quote_timestamp_mismatch", "quote timestamp changed")
     timestamp = parsed_timestamp or quote.quoted_at
@@ -321,10 +276,8 @@ def _open_queued_orders_in_session(session: Session) -> tuple[int, list[str]]:
 
 def _expire_day_orders_in_session(session: Session) -> int:
     now = _now()
-    local = now.astimezone(SHANGHAI)
-    calendar = _calendar()
-    if not calendar.is_open_date(local.date()) or local.time().replace(tzinfo=None) < time(15, 1):
-        return 0
+    # expires_at is authoritative: compensate for a missed 15:01 run on any
+    # later invocation, including weekends, without a remote calendar fetch.
     return _order_service(session, now=lambda: now).expire_open_orders(at=now)
 
 
@@ -417,7 +370,12 @@ def open_queued_orders() -> int:
     return opened
 
 
-@celery_app.task(name="app.tasks.paper_trading.expire_day_orders")
+@celery_app.task(
+    name="app.tasks.paper_trading.expire_day_orders",
+    autoretry_for=(OperationalError, OSError),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
 def expire_day_orders() -> int:
     return cast(int, _run_transaction(_expire_day_orders_in_session))
 

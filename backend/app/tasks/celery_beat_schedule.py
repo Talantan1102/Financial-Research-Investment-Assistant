@@ -53,6 +53,12 @@ beat_schedule = {
         "task": "app.tasks.paper_trading.expire_day_orders",
         "schedule": crontab(minute=1, hour=15, day_of_week="1-5"),
     },
+    # Recovery for a missed close-time run. Expiry scans expires_at and is safe
+    # to repeat, so this also catches overdue orders on later days/weekends.
+    "paper_expire_overdue_orders": {
+        "task": "app.tasks.paper_trading.expire_day_orders",
+        "schedule": crontab(minute="*/10"),
+    },
     "paper_release_t1_lots": {
         "task": "app.tasks.paper_trading.release_t1_lots",
         "schedule": crontab(minute=20, hour=9, day_of_week="1-5"),
