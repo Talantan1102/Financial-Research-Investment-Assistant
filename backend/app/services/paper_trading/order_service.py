@@ -416,10 +416,12 @@ class PaperOrderService:
         self, *, user_id: uuid.UUID, client_request_id: str
     ) -> PaperOrder | None:
         return self._session.scalar(
-            select(PaperOrder).where(
+            select(PaperOrder)
+            .where(
                 PaperOrder.user_id == user_id,
                 PaperOrder.client_request_id == client_request_id,
-            ).execution_options(populate_existing=True)
+            )
+            .execution_options(populate_existing=True)
         )
 
     @staticmethod
