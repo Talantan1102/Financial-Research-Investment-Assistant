@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from app.models.paper_account import PaperAccount, PaperCashLedger, PaperHoldingLot
-from app.models.paper_order import PaperFill, PaperMatchPass
+from app.models.paper_order import (
+    OrderStatus,
+    PaperFill,
+    PaperLotReservation,
+    PaperMatchPass,
+    PaperOrder,
+)
 from app.models.position import Position
 from app.models.trade import Trade
+from app.models.user import User
+from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import FixedTradingCalendar
 from app.services.paper_trading.matcher import Execution
 from app.services.paper_trading.settlement import PaperSettlementService
@@ -19,6 +29,15 @@ from tests.integration.paper_trading.test_account_properties import (
     _buy_order,
     _evidence,
     _user_account,
+)
+from tests.integration.paper_trading.test_order_confirm import (
+    FixedQuoteProvider,
+    _draft,
+    _prepare,
+    _quote,
+)
+from tests.integration.paper_trading.test_order_confirm import (
+    _service as _order_service,
 )
 
 
@@ -53,6 +72,11 @@ def _assert_rolled_back(
     assert account is not None
     assert _counts(session) == before_counts
     assert (account.available_cash, account.frozen_cash) == before_cash
+    order = session.query(PaperOrder).filter_by(account_id=account.id).one()
+    assert order.status is OrderStatus.OPEN
+    assert order.filled_quantity == 0
+    assert cast(Decimal, order.reserved_cash) > 0
+    assert order.reserved_quantity == 0
 
 
 def test_failure_before_fill_insert_leaves_no_partial_state(db_session: Session) -> None:
@@ -151,3 +175,52 @@ def test_lost_post_commit_response_retries_to_existing_fill(db_session: Session)
 
     assert second.id == first.id
     assert _counts(db_session) == committed_counts
+
+
+def test_confirmation_failure_after_freeze_rolls_back_order_cash_and_reservations(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    token = uuid.uuid4().hex
+    user = User(username=f"confirm-fault-{token}", email=f"{token}@test", hashed_password="x")
+    db_session.add(user)
+    db_session.flush()
+    user_id = user.id
+    account = PaperAccountService(db_session).get_or_create(user_id=user_id)
+    service = _order_service(db_session, FixedQuoteProvider(_quote()))
+    order = _prepare(service, user_id)
+    db_session.flush()
+    before_cash = (account.available_cash, account.frozen_cash)
+    before_ledger = int(db_session.scalar(select(func.count()).select_from(PaperCashLedger)) or 0)
+    original = PaperAccountService.append_ledger
+
+    def freeze_then_fail(self: PaperAccountService, **kwargs: object):
+        row = original(self, **kwargs)  # type: ignore[arg-type]
+        if kwargs.get("kind") == "order_freeze":
+            raise RuntimeError("after-confirm-freeze")
+        return row
+
+    monkeypatch.setattr(PaperAccountService, "append_ledger", freeze_then_fail)
+    with pytest.raises(RuntimeError, match="after-confirm-freeze"), db_session.begin_nested():
+        service.confirm(
+            user_id=user_id,
+            order_id=order.id,
+            draft=_draft(name="贵州茅台"),
+            client_request_id="fault-confirm",
+        )
+
+    db_session.expire_all()
+    refreshed_order = db_session.get(type(order), order.id)
+    refreshed_account = db_session.get(PaperAccount, account.id)
+    assert refreshed_order is not None and refreshed_account is not None
+    assert refreshed_order.status is OrderStatus.AWAITING_CONFIRMATION
+    assert refreshed_order.client_request_id is None
+    assert refreshed_order.filled_quantity == 0
+    assert refreshed_order.reserved_cash == Decimal("0.00")
+    assert refreshed_order.reserved_quantity == 0
+    assert (refreshed_account.available_cash, refreshed_account.frozen_cash) == before_cash
+    assert (
+        int(db_session.scalar(select(func.count()).select_from(PaperCashLedger)) or 0)
+        == before_ledger
+    )
+    assert int(db_session.scalar(select(func.count()).select_from(PaperLotReservation)) or 0) == 0
+    assert int(db_session.scalar(select(func.count()).select_from(PaperHoldingLot)) or 0) == 0

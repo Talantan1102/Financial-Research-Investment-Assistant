@@ -55,6 +55,7 @@ def reconcile_account(session: Session, account_id: uuid.UUID) -> list[Reconcili
         _check_fill_quantity,
         _check_lot_quantities,
         _check_lots_against_fills,
+        _check_share_conservation,
         _check_trade_position_projection,
         _check_ledger_balance,
         _check_reservations,
@@ -104,6 +105,16 @@ def _check_fill_quantity(session: Session, account: PaperAccount) -> list[Reconc
         ).all()
         total = sum(int(fill.quantity) for fill in fills)
         sequences = [int(fill.fill_seq) for fill in fills]
+        if int(order.filled_quantity) > int(order.quantity):
+            result.append(
+                _violation(
+                    account.id,
+                    "order_filled_quantity_exceeds_order",
+                    order_id=str(order.id),
+                    recorded_quantity=int(order.filled_quantity),
+                    order_quantity=int(order.quantity),
+                )
+            )
         if total > int(order.quantity):
             result.append(
                 _violation(
@@ -320,6 +331,63 @@ def _check_trade_position_projection(
             or cast(Decimal, position.realized_pnl) != state.realized_pnl
         ):
             result.append(_violation(account.id, "position_projection_mismatch", ts_code=symbol))
+    return result
+
+
+def _check_share_conservation(
+    session: Session, account: PaperAccount
+) -> list[ReconciliationViolation]:
+    """Reconcile immutable executions to remaining lots and scoped positions."""
+    net_by_symbol: dict[str, int] = defaultdict(int)
+    fill_rows = session.execute(
+        select(PaperFill.quantity, PaperOrder.side, PaperOrder.ts_code)
+        .join(PaperOrder, PaperOrder.id == PaperFill.order_id)
+        .where(
+            PaperOrder.account_id == account.id,
+            PaperOrder.account_generation == account.generation,
+        )
+    ).all()
+    for quantity, side, ts_code in fill_rows:
+        direction = 1 if side is OrderSide.BUY else -1
+        net_by_symbol[str(ts_code)] += direction * int(quantity)
+
+    lots_by_symbol: dict[str, int] = defaultdict(int)
+    for lot in _lots(session, account):
+        lots_by_symbol[cast(str, lot.ts_code)] += int(lot.remaining_quantity)
+
+    positions = session.scalars(
+        select(Position).where(
+            Position.paper_account_id == account.id,
+            Position.paper_account_generation == account.generation,
+        )
+    ).all()
+    position_by_symbol = {cast(str, row.ts_code): int(row.quantity) for row in positions}
+
+    result: list[ReconciliationViolation] = []
+    for symbol in sorted(set(net_by_symbol) | set(lots_by_symbol) | set(position_by_symbol)):
+        expected = net_by_symbol.get(symbol, 0)
+        actual_lots = lots_by_symbol.get(symbol, 0)
+        if actual_lots != expected:
+            result.append(
+                _violation(
+                    account.id,
+                    "lot_share_balance_mismatch",
+                    ts_code=symbol,
+                    expected_net_quantity=expected,
+                    actual_lot_quantity=actual_lots,
+                )
+            )
+        actual_position = position_by_symbol.get(symbol)
+        if actual_position is None or actual_position != expected:
+            result.append(
+                _violation(
+                    account.id,
+                    "position_share_balance_mismatch",
+                    ts_code=symbol,
+                    expected_net_quantity=expected,
+                    actual_position_quantity=actual_position,
+                )
+            )
     return result
 
 

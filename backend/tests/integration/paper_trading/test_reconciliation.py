@@ -80,6 +80,31 @@ def test_negative_cash_is_reported_even_when_database_constraint_was_bypassed(
     ]
 
 
+def test_negative_frozen_cash_has_exact_codes_and_idempotently_suspends(
+    db_session: Session, account: PaperAccount
+) -> None:
+    db_session.execute(
+        text("ALTER TABLE paper_accounts DROP CONSTRAINT ck_paper_accounts_frozen_cash_nonnegative")
+    )
+    db_session.execute(
+        text("UPDATE paper_accounts SET frozen_cash = -1 WHERE id = :id"), {"id": account.id}
+    )
+    db_session.expire_all()
+
+    first = reconcile_account(db_session, account.id)
+    second = reconcile_account(db_session, account.id)
+
+    assert [row.code for row in first] == [
+        "cash_frozen_negative",
+        "cash_reservation_mismatch",
+        "ledger_balance_mismatch",
+    ]
+    assert second == first
+    refreshed = db_session.get(PaperAccount, account.id)
+    assert refreshed is not None
+    assert refreshed.status is PaperAccountStatus.SUSPENDED
+
+
 def test_missing_account_returns_stable_violation(db_session: Session) -> None:
     missing = uuid.uuid4()
 
