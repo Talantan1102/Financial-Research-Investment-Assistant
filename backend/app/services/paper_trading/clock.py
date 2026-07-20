@@ -94,9 +94,13 @@ def _parse_tushare_calendar(frame: pd.DataFrame, *, start: date, end: date) -> d
     if not {"cal_date", "is_open"}.issubset(frame.columns):
         raise PaperTradingError("trading_calendar_unavailable", "交易日历暂不可用，请稍后重试")
     parsed: dict[date, bool] = {}
+    seen: set[date] = set()
     try:
         for row in frame[["cal_date", "is_open"]].itertuples(index=False):
             calendar_date = datetime.strptime(str(row.cal_date), "%Y%m%d").date()
+            if calendar_date in seen:
+                raise ValueError("duplicate calendar date")
+            seen.add(calendar_date)
             raw_open = row.is_open
             if isinstance(raw_open, bool):
                 is_open = raw_open
@@ -110,7 +114,8 @@ def _parse_tushare_calendar(frame: pd.DataFrame, *, start: date, end: date) -> d
         raise PaperTradingError(
             "trading_calendar_unavailable", "交易日历暂不可用，请稍后重试"
         ) from exc
-    if not parsed:
+    expected = {start + timedelta(days=offset) for offset in range((end - start).days + 1)}
+    if set(parsed) != expected:
         raise PaperTradingError("trading_calendar_unavailable", "交易日历暂不可用，请稍后重试")
     return parsed
 

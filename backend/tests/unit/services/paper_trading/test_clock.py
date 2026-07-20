@@ -10,6 +10,7 @@ from app.services.paper_trading.clock import (
 )
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.types import MarketPhase
+from app.services.trade_calendar import build_calendar_df
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 UTC = ZoneInfo("UTC")
@@ -120,13 +121,7 @@ def test_tushare_calendar_uses_exchange_rows_instead_of_weekdays() -> None:
         nonlocal calls
         calls += 1
         assert start <= "20261001" <= end
-        return pd.DataFrame(
-            [
-                {"cal_date": "20261001", "is_open": 0},
-                {"cal_date": "20261008", "is_open": 0},
-                {"cal_date": "20261009", "is_open": 1},
-            ]
-        )
+        return build_calendar_df(start, end)
 
     calendar = TushareTradingCalendar(fetch)
 
@@ -149,3 +144,58 @@ def test_tushare_calendar_fails_closed_for_missing_or_invalid_data(frame: pd.Dat
         calendar.is_open_date(date(2026, 10, 1))
 
     assert caught.value.code == "trading_calendar_unavailable"
+
+
+@pytest.mark.parametrize("gap", ["start", "anchor", "middle", "end"])
+def test_tushare_calendar_rejects_any_missing_day_in_fetched_window(gap: str) -> None:
+    anchor = date(2026, 10, 1)
+
+    def fetch(start: str, end: str) -> pd.DataFrame:
+        frame = build_calendar_df(start, end)
+        if gap == "start":
+            missing = start
+        elif gap == "anchor":
+            missing = anchor.strftime("%Y%m%d")
+        elif gap == "middle":
+            missing = (anchor + timedelta(days=10)).strftime("%Y%m%d")
+        else:
+            missing = end
+        return frame.loc[frame["cal_date"] != missing].reset_index(drop=True)
+
+    calendar = TushareTradingCalendar(fetch)
+
+    with pytest.raises(PaperTradingError) as caught:
+        calendar.is_open_date(anchor)
+
+    assert caught.value.code == "trading_calendar_unavailable"
+
+
+@pytest.mark.parametrize("duplicate_value", [0, 1])
+def test_tushare_calendar_rejects_duplicate_calendar_dates(duplicate_value: int) -> None:
+    anchor = date(2026, 10, 1)
+
+    def fetch(start: str, end: str) -> pd.DataFrame:
+        frame = build_calendar_df(start, end)
+        duplicate = pd.DataFrame(
+            [{"cal_date": anchor.strftime("%Y%m%d"), "is_open": duplicate_value}]
+        )
+        return pd.concat([frame, duplicate], ignore_index=True)
+
+    with pytest.raises(PaperTradingError) as caught:
+        TushareTradingCalendar(fetch).is_open_date(anchor)
+
+    assert caught.value.code == "trading_calendar_unavailable"
+
+
+def test_tushare_calendar_accepts_complete_unsorted_response_with_out_of_range_rows() -> None:
+    anchor = date(2026, 10, 1)
+
+    def fetch(start: str, end: str) -> pd.DataFrame:
+        frame = build_calendar_df(start, end).sample(frac=1, random_state=7)
+        outside = pd.DataFrame([{"cal_date": "20200101", "is_open": 0}])
+        return pd.concat([outside, frame], ignore_index=True)
+
+    calendar = TushareTradingCalendar(fetch)
+
+    assert not calendar.is_open_date(anchor)
+    assert calendar.next_open_date(anchor) == date(2026, 10, 9)

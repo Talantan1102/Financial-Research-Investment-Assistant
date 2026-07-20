@@ -22,6 +22,7 @@ from app.services.paper_trading.clock import FixedTradingCalendar, TradingClock
 from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.types import MarketPhase, QuoteLevel, RealtimeQuote
+from app.services.trade_calendar import build_calendar_df
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -429,13 +430,7 @@ def test_rest_dependency_uses_exchange_calendar_for_holiday_and_open_day(
     db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fetch(start: str, end: str) -> pd.DataFrame:
-        del start, end
-        return pd.DataFrame(
-            [
-                {"cal_date": "20261001", "is_open": 0},
-                {"cal_date": "20261009", "is_open": 1},
-            ]
-        )
+        return build_calendar_df(start, end)
 
     monkeypatch.setattr(paper_router, "_fetch_trading_calendar", fetch)
     service = get_paper_order_service(db_session)
