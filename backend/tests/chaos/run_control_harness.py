@@ -14,7 +14,7 @@ import os
 import re
 import subprocess
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -109,6 +109,7 @@ class ScenarioEvidence:
     pauses: int = 0
     revisions: int = 0
     error: str | None = None
+    legacy_rows: int = 0
 
     @property
     def has_database_facts(self) -> bool:
@@ -121,7 +122,10 @@ class ScenarioEvidence:
         )
 
     def to_json(self) -> dict[str, Any]:
-        return asdict(self) | {"has_database_facts": self.has_database_facts}
+        payload = asdict(self)
+        payload["legacy_rows"] = self.legacy_rows
+        payload["has_database_facts"] = self.has_database_facts
+        return payload
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -232,7 +236,16 @@ class RunControlChaosHarness:
         if not self.database_url:
             raise RuntimeError("RUN_CONTROL_DATABASE_URL is required for evidence queries")
         if not run_ids:
-            return {"runs": 0, "attempts": 0, "events": 0, "outbox": 0}
+            return {
+                "runs": 0,
+                "attempts": 0,
+                "events": 0,
+                "outbox": 0,
+                "terminal_runs": 0,
+                "pauses": 0,
+                "revisions": 0,
+                "legacy_rows": 0,
+            }
         with psycopg.connect(self.database_url) as connection, connection.cursor() as cursor:
             parameters = (list(run_ids),)
             counts: dict[str, int] = {}
@@ -284,14 +297,15 @@ class RunControlChaosHarness:
             counts["events"],
             counts["outbox"],
             counts["terminal_runs"],
-            counts.get("pauses", 0),
-            counts.get("revisions", 0),
+            counts["pauses"],
+            counts["revisions"],
+            legacy_rows=counts["legacy_rows"],
         )
         minimums = _SCENARIO_MINIMUMS[name]
         counts = evidence.to_json()
         if any(int(counts.get(key, 0)) < minimum for key, minimum in minimums.items()):
             raise AssertionError(f"scenario {name} violated durable evidence contract: {evidence}")
-        if name == "legacy_writer_zero" and int(counts.get("legacy_rows", 0)) != 0:
+        if name == "legacy_writer_zero" and counts["legacy_rows"] != 0:
             raise AssertionError(f"scenario {name} wrote legacy chat_tasks rows")
         self.evidence.append(evidence)
         return evidence
@@ -328,7 +342,7 @@ class RunControlChaosHarness:
 
     def run_scenarios(
         self,
-        actions: dict[str, Callable[[], Sequence[str]]],
+        actions: Mapping[str, Callable[[], Sequence[str]]],
         *,
         evidence_path: Path | None = None,
     ) -> tuple[ScenarioEvidence, ...]:
@@ -361,6 +375,8 @@ class RunControlChaosHarness:
                     "outbox": 0,
                     "terminal_runs": 0,
                     "legacy_rows": 0,
+                    "pauses": 0,
+                    "revisions": 0,
                 }
                 if run_ids and self.database_url:
                     with suppress(Exception):
@@ -373,9 +389,10 @@ class RunControlChaosHarness:
                     counts["events"],
                     counts["outbox"],
                     counts["terminal_runs"],
-                    counts.get("pauses", 0),
-                    counts.get("revisions", 0),
                     error=f"{type(exc).__name__}: {exc}",
+                    pauses=counts["pauses"],
+                    revisions=counts["revisions"],
+                    legacy_rows=counts["legacy_rows"],
                 )
                 self.evidence.append(evidence)
                 first_error = first_error or exc

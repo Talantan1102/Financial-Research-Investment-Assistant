@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import subprocess
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 from tests.chaos.run_control_harness import (
@@ -10,6 +13,13 @@ from tests.chaos.run_control_harness import (
     RunControlChaosHarness,
     ScenarioEvidence,
 )
+
+
+def _stub_runner(
+    args: tuple[str, ...], **kwargs: Any
+) -> subprocess.CompletedProcess[str]:
+    del kwargs
+    return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
 
 def test_suite_declares_the_twelve_required_scenarios() -> None:
@@ -85,7 +95,7 @@ def test_cleanup_rejects_leftover_project_containers(tmp_path: Path) -> None:
 
 
 def test_health_wait_has_a_bounded_timeout(tmp_path: Path) -> None:
-    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=lambda *a, **k: None)
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=_stub_runner)
     with pytest.raises(TimeoutError, match="health timeout"):
         harness.wait_healthy("run-worker-a", timeout=0.01, poll_interval=0)
 
@@ -105,17 +115,23 @@ def test_evidence_requires_database_facts_not_only_process_state() -> None:
 
 
 def test_scenario_runner_requires_exact_map_and_preserves_action_error(tmp_path: Path) -> None:
-    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=lambda *a, **k: None)
-    harness.query_evidence = lambda run_ids: {  # type: ignore[method-assign]
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=_stub_runner)
+    def fake_query(_run_ids: list[str] | tuple[str, ...]) -> dict[str, int]:
+        return {
             "runs": 3,
             "attempts": 2,
-        "events": 1,
+            "events": 1,
             "outbox": 1,
-                "terminal_runs": 3,
+            "terminal_runs": 3,
             "pauses": 1,
             "revisions": 2,
+            "legacy_rows": 0,
+        }
+
+    harness.query_evidence = fake_query  # type: ignore[method-assign, assignment]
+    actions: dict[str, Callable[[], Sequence[str]]] = {
+        name: (lambda: ["run-id"]) for name in CHAOS_SCENARIOS
     }
-    actions = {name: (lambda: ["run-id"]) for name in CHAOS_SCENARIOS}
     actions["redis_restart"] = lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
     with pytest.raises(RuntimeError, match="redis down"):
         harness.run_scenarios(actions, evidence_path=tmp_path / "evidence.json")
@@ -159,11 +175,23 @@ def test_cleanup_is_scoped_and_removes_project_volumes_and_networks(tmp_path: Pa
 
 
 def test_evidence_file_remains_one_valid_json_array_after_action_failure(tmp_path: Path) -> None:
-    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=lambda *a, **k: None)
-    harness.query_evidence = lambda run_ids: {  # type: ignore[method-assign]
-        "runs": 3, "attempts": 2, "events": 1, "outbox": 1, "terminal_runs": 3, "pauses": 1, "revisions": 2,
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=_stub_runner)
+    def fake_query(_run_ids: list[str] | tuple[str, ...]) -> dict[str, int]:
+        return {
+            "runs": 3,
+            "attempts": 2,
+            "events": 1,
+            "outbox": 1,
+            "terminal_runs": 3,
+            "pauses": 1,
+            "revisions": 2,
+            "legacy_rows": 0,
+        }
+
+    harness.query_evidence = fake_query  # type: ignore[method-assign, assignment]
+    actions: dict[str, Callable[[], Sequence[str]]] = {
+        name: (lambda: ["run-id"]) for name in CHAOS_SCENARIOS
     }
-    actions = {name: (lambda: ["run-id"]) for name in CHAOS_SCENARIOS}
     actions["redis_restart"] = lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
     path = tmp_path / "evidence.json"
     with pytest.raises(RuntimeError):
@@ -172,3 +200,38 @@ def test_evidence_file_remains_one_valid_json_array_after_action_failure(tmp_pat
     rows = json.loads(path.read_text(encoding="utf-8"))
     assert isinstance(rows, list)
     assert next(row for row in rows if row["name"] == "redis_restart")["error"]
+
+
+def test_legacy_writer_evidence_rejects_any_legacy_rows(tmp_path: Path) -> None:
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=_stub_runner)
+    def fake_query(_run_ids: list[str] | tuple[str, ...]) -> dict[str, int]:
+        return {
+            "runs": 1,
+            "attempts": 1,
+            "events": 1,
+            "outbox": 1,
+            "terminal_runs": 1,
+            "pauses": 0,
+            "revisions": 0,
+            "legacy_rows": 1,
+        }
+
+    harness.query_evidence = fake_query  # type: ignore[method-assign, assignment]
+    with pytest.raises(AssertionError, match="legacy chat_tasks"):
+        harness.record("legacy_writer_zero", 0.0, ["run-id"])
+
+
+def test_legacy_writer_evidence_zero_is_explicit_and_json_serializable() -> None:
+    evidence = ScenarioEvidence(
+        name="legacy_writer_zero",
+        elapsed_seconds=0.1,
+        runs=1,
+        attempts=1,
+        events=1,
+        outbox=1,
+        terminal_runs=1,
+        legacy_rows=0,
+    )
+    payload = evidence.to_json()
+    assert payload["legacy_rows"] == 0
+    assert json.loads(json.dumps(payload))["legacy_rows"] == 0
