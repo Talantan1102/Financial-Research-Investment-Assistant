@@ -23,7 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chatloop.context import estimate_tokens
-from app.models.chat import ChatMessage, ChatSessionContext
+from app.models.chat import ChatSessionContext
+from app.models.run import RunMessage
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +92,7 @@ class _Turn:
         return "\n".join(parts)
 
 
-def _split_turns(messages: list[ChatMessage]) -> list[_Turn]:
+def _split_turns(messages: list[RunMessage]) -> list[_Turn]:
     """切轮:user→assistant 配对为一轮。
 
     容错(现实数据宽松处理):
@@ -134,7 +135,7 @@ async def _load_context_row(db: AsyncSession, session_uuid: uuid.UUID) -> ChatSe
 
 async def _load_messages_after(
     db: AsyncSession, session_uuid: uuid.UUID, summarized_upto: uuid.UUID | None
-) -> list[ChatMessage]:
+) -> list[RunMessage]:
     """读该 session 的 user/assistant 消息,按 created_at 升序,水位之后,content 非空。
 
     水位过滤:summarized_upto 之前(含)的消息已被总结,排除——这是幂等的来源。
@@ -146,11 +147,11 @@ async def _load_messages_after(
     cancelled(整轮取消但若有 done 文本仍可作历史,实际取消落 partial,这里宽松保留)。
     """
     stmt = (
-        select(ChatMessage)
-        .where(ChatMessage.session_id == session_uuid)
-        .where(ChatMessage.role.in_(("user", "assistant")))
-        .where(ChatMessage.status.notin_(("partial", "error")))
-        .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+        select(RunMessage)
+        .where(RunMessage.session_id == session_uuid)
+        .where(RunMessage.role.in_(("user", "assistant")))
+        .where(RunMessage.status.notin_(("partial", "error")))
+        .order_by(RunMessage.created_at.asc(), RunMessage.id.asc())
     )
     rows = list((await db.execute(stmt)).scalars().all())
 

@@ -23,6 +23,8 @@ class ResearchReportRepo:
         report_markdown: str,
         request_id: str,
         source_chat_session_id: object,
+        source_session_id: object | None = None,
+        source_run_id: object | None = None,
         cost: Decimal = Decimal("0"),
     ) -> ResearchReport:
         """Persist a completed research report from escalation SUTOutput.
@@ -49,6 +51,8 @@ class ResearchReportRepo:
                 cost=cost,
                 request_id=request_id,
                 source_chat_session_id=source_chat_session_id,
+                source_session_id=source_session_id or source_chat_session_id,
+                source_run_id=source_run_id,
             )
             sess.add(row)
             await sess.commit()

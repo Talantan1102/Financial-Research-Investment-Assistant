@@ -405,6 +405,7 @@ app.include_router(run_sessions_router)
 app.include_router(chat_router_module.router)  # v0.9 — /api/v0/chat (SSE streaming)
 app.include_router(chats_router_module.router)  # v0.9 — /api/v0/chats (CRUD)
 app.include_router(escalate_router.router)  # v0.9 — /api/v0/chat/escalate (confirmed packet)
+app.include_router(escalate_router.research_router)  # v1 — tenant-scoped research escalation
 app.include_router(memory_router)  # C.5 — /api/v0/memory (cross-session memory page)
 app.include_router(persona_router)  # persona-ui — /api/v0/persona (Tier 1 persona items)
 app.include_router(observability_router)  # chatloop 可观测性(只读聚合)

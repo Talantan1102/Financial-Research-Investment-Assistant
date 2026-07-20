@@ -123,20 +123,28 @@ class RecallSearcher:
         """
         sql = text(
             """
-            SELECT cm.id AS id,
-                   cm.session_id AS session_id,
-                   cm.role AS role,
-                   cm.content AS content,
-                   cm.created_at AS created_at
-            FROM chat_messages cm
-            JOIN chat_sessions cs ON cm.session_id = cs.id
-            WHERE cs.user_id = :uid
-            ORDER BY cm.created_at DESC
+            SELECT rm.id AS id,
+                   rm.session_id AS session_id,
+                   rm.role AS role,
+                   rm.content AS content,
+                   rm.created_at AS created_at
+            FROM run_messages rm
+            JOIN run_sessions rs ON rm.session_id = rs.id
+            WHERE rs.created_by_user_id = :uid
+            ORDER BY rm.created_at DESC
             LIMIT :lim
             """
         )
         result = session.execute(sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN})
-        return [dict(row._mapping) for row in result.fetchall()]
+        rows = [dict(row._mapping) for row in result.fetchall()]
+        if rows:
+            return rows
+        legacy = text(
+            """SELECT cm.id, cm.session_id, cm.role, cm.content, cm.created_at
+               FROM chat_messages cm JOIN chat_sessions cs ON cm.session_id = cs.id
+               WHERE cs.user_id = :uid ORDER BY cm.created_at DESC LIMIT :lim"""
+        )
+        return [dict(row._mapping) for row in session.execute(legacy, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN}).fetchall()]
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

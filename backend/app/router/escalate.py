@@ -30,7 +30,11 @@ from app.services.research_report_repo import ResearchReportRepo
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v0/chat", tags=["chat-escalate"])
+router = APIRouter(prefix="/api/v0/chat", tags=["chat-escalate-legacy"])
+research_router = APIRouter(
+    prefix="/api/v1/tenants/{tenant_id}/research-escalations",
+    tags=["research-escalations"],
+)
 
 
 ESCALATION_CONFIDENCE_THRESHOLD_DEFAULT = 0.7
@@ -61,6 +65,8 @@ class EscalateRequest(BaseModel):
     draft_record_id: uuid.UUID | str
     packet_confirmed: EscalationPacket
     user_edits: list[FieldEdit] = Field(default_factory=list)
+    source_run_id: uuid.UUID | None = None
+    source_session_id: uuid.UUID | None = None
 
 
 # C43: SSOT — get_escalation_record_repo is defined once in chat.py; re-export it
@@ -175,9 +181,11 @@ async def _session_owned_by(
     return sess is not None and str(sess.user_id) == str(user.id)
 
 
+@research_router.post("")
 @router.post("/escalate")
 async def escalate(
     req: EscalateRequest,
+    tenant_id: uuid.UUID | None = None,
     user: User = Depends(get_current_user_required),
     record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
     research_agent: ResearchAgent = Depends(get_research_agent),

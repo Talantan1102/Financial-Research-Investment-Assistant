@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import engine
 from app.models.chat import ChatMessage, ChatSession
+from app.models.run import RunMessage
 from app.services.openai_client import build_llm_service_from_env
 from app.tasks.celery_app import celery_app
 
@@ -79,11 +80,19 @@ def generate_session_title(self, session_id: str) -> None:  # noqa: ANN001
             return
 
         user_msg = (
-            db.query(ChatMessage)
+            db.query(RunMessage)
             .filter_by(session_id=sid, role="user")
-            .order_by(ChatMessage.created_at.asc())
+            .order_by(RunMessage.created_at.asc())
             .first()
         )
+        if user_msg is None:
+            # Compatibility window for rows not yet migrated.
+            user_msg = (
+                db.query(ChatMessage)
+                .filter_by(session_id=sid, role="user")
+                .order_by(ChatMessage.created_at.asc())
+                .first()
+            )
         if user_msg is None:
             logger.debug("title task: no user message yet, skipping")
             return
