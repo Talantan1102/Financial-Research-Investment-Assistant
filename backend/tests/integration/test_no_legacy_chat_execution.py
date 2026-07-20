@@ -20,6 +20,7 @@ def test_legacy_chat_execution_surfaces_are_removed() -> None:
         "app/services/chat_steer_bus.py",
         "app/tasks/chat_runner.py",
         "app/tasks/chat_stale_scanner.py",
+        "app/scripts/cleanup_anonymous_chat_sessions.py",
     )
     present = [path for path in forbidden_files if (ROOT / path).exists()]
     assert not present, f"legacy execution files remain: {present}"
