@@ -91,6 +91,8 @@ def _multilevel_evidence(
     execution_index: int,
     *,
     source: str = "actual-depth",
+    timestamp: datetime = QUOTE_TIME,
+    remaining_before_match: int | None = None,
 ) -> MatchQuoteEvidence:
     asks = tuple(QuoteLevel(price=level.price, quantity=level.quantity) for level in executions)
     asks += tuple(
@@ -104,7 +106,7 @@ def _multilevel_evidence(
     quote = RealtimeQuote(
         ts_code="600519.SH",
         name="贵州茅台",
-        quoted_at=QUOTE_TIME,
+        quoted_at=timestamp,
         previous_close=Decimal("10.00"),
         last_price=executions[0].price,
         bids=bids,
@@ -116,7 +118,11 @@ def _multilevel_evidence(
         quote=quote,
         consumed_levels=executions,
         execution_index=execution_index,
-        remaining_before_match=sum(level.quantity for level in executions),
+        remaining_before_match=(
+            remaining_before_match
+            if remaining_before_match is not None
+            else sum(level.quantity for level in executions)
+        ),
     )
 
 
@@ -810,6 +816,226 @@ def test_multilevel_evidence_rejects_skipped_or_tampered_prior_execution_atomica
     assert (account.available_cash, account.frozen_cash) == before_account
     assert (order.status, order.filled_quantity, order.avg_fill_price) == before_order
     assert db_session.query(PaperFill).count() == before_fills
+
+
+@pytest.mark.parametrize("watermarks", [(7, 8), (1, 3)])
+def test_multilevel_match_rejects_wrong_global_watermark_sequence_atomically(
+    db_session: Session, user: User, watermarks: tuple[int, int]
+) -> None:
+    executions = (
+        Execution(price=Decimal("9.99"), quantity=100),
+        Execution(price=Decimal("10.00"), quantity=200),
+    )
+    account = _account(db_session, user)
+    order = _buy_order(
+        db_session,
+        user,
+        account,
+        quantity=300,
+        reserve=Decimal("3010.00"),
+    )
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=lambda **kwargs: _multilevel_evidence(
+            executions, executions.index(cast(Execution, kwargs["execution"]))
+        ),
+    )
+    before_account = (account.available_cash, account.frozen_cash)
+    before_order = (order.status, order.filled_quantity, order.avg_fill_price)
+    if watermarks[0] == 1:
+        service.apply(
+            order_id=order.id,
+            execution=executions[0],
+            quote_timestamp=QUOTE_TIME,
+            match_pass=watermarks[0],
+        )
+        before_account = (account.available_cash, account.frozen_cash)
+        before_order = (order.status, order.filled_quantity, order.avg_fill_price)
+
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=order.id,
+            execution=executions[1 if watermarks[0] == 1 else 0],
+            quote_timestamp=QUOTE_TIME,
+            match_pass=watermarks[1 if watermarks[0] == 1 else 0],
+        )
+
+    assert error.value.code == "invalid_match_evidence"
+    assert (account.available_cash, account.frozen_cash) == before_account
+    assert (order.status, order.filled_quantity, order.avg_fill_price) == before_order
+    assert db_session.query(PaperFill).count() == (1 if watermarks[0] == 1 else 0)
+
+
+def test_old_snapshot_retries_after_new_snapshot_and_tamper_still_conflicts(
+    db_session: Session, user: User
+) -> None:
+    snapshot_a = (
+        Execution(price=Decimal("9.98"), quantity=100),
+        Execution(price=Decimal("9.99"), quantity=100),
+    )
+    snapshot_b = (Execution(price=Decimal("10.00"), quantity=200),)
+    time_b = QUOTE_TIME + timedelta(seconds=1)
+    order = _buy_order(
+        db_session,
+        user,
+        _account(db_session, user),
+        quantity=400,
+        reserve=Decimal("4010.00"),
+    )
+
+    def evidence_for(
+        executions: tuple[Execution, ...], index: int, timestamp: datetime, remaining: int
+    ) -> MatchQuoteEvidence:
+        return _multilevel_evidence(
+            executions,
+            index,
+            timestamp=timestamp,
+            remaining_before_match=remaining,
+        )
+
+    evidence = evidence_for(snapshot_a, 0, QUOTE_TIME, 400)
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=lambda **_: evidence,
+    )
+    first_a = service.apply(
+        order_id=order.id,
+        execution=snapshot_a[0],
+        quote_timestamp=QUOTE_TIME,
+        match_pass=1,
+    )
+    evidence = evidence_for(snapshot_a, 1, QUOTE_TIME, 400)
+    second_a = service.apply(
+        order_id=order.id,
+        execution=snapshot_a[1],
+        quote_timestamp=QUOTE_TIME,
+        match_pass=2,
+    )
+    evidence = evidence_for(snapshot_b, 0, time_b, 200)
+    service.apply(
+        order_id=order.id,
+        execution=snapshot_b[0],
+        quote_timestamp=time_b,
+        match_pass=3,
+    )
+
+    evidence = evidence_for(snapshot_a, 0, QUOTE_TIME, 400)
+    assert (
+        service.apply(
+            order_id=order.id,
+            execution=snapshot_a[0],
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        ).id
+        == first_a.id
+    )
+    evidence = evidence_for(snapshot_a, 1, QUOTE_TIME, 400)
+    assert (
+        service.apply(
+            order_id=order.id,
+            execution=snapshot_a[1],
+            quote_timestamp=QUOTE_TIME,
+            match_pass=2,
+        ).id
+        == second_a.id
+    )
+
+    evidence = evidence_for(snapshot_a, 1, QUOTE_TIME, 400).model_copy(
+        update={
+            "quote": evidence_for(snapshot_a, 1, QUOTE_TIME, 400).quote.model_copy(
+                update={"source": "tampered-source"}
+            )
+        }
+    )
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=order.id,
+            execution=snapshot_a[1],
+            quote_timestamp=QUOTE_TIME,
+            match_pass=2,
+        )
+    assert error.value.code == "match_pass_conflict"
+    assert db_session.query(PaperFill).count() == 3
+
+
+def test_new_snapshot_cannot_move_quote_time_backwards(db_session: Session, user: User) -> None:
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    later = QUOTE_TIME + timedelta(seconds=2)
+    earlier = QUOTE_TIME + timedelta(seconds=1)
+    order = _buy_order(
+        db_session,
+        user,
+        _account(db_session, user),
+        quantity=200,
+        reserve=Decimal("2010.00"),
+    )
+    evidence = _evidence(execution, timestamp=later, remaining_before_match=200)
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=lambda **_: evidence,
+    )
+    service.apply(
+        order_id=order.id,
+        execution=execution,
+        quote_timestamp=later,
+        match_pass=1,
+    )
+    before = (order.status, order.filled_quantity, db_session.query(PaperFill).count())
+    evidence = _evidence(execution, timestamp=earlier, remaining_before_match=100)
+
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=order.id,
+            execution=execution,
+            quote_timestamp=earlier,
+            match_pass=2,
+        )
+
+    assert error.value.code == "invalid_match_evidence"
+    assert (order.status, order.filled_quantity, db_session.query(PaperFill).count()) == before
+
+
+def test_global_watermark_cannot_repeat_on_a_new_snapshot(db_session: Session, user: User) -> None:
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    later = QUOTE_TIME + timedelta(seconds=1)
+    order = _buy_order(
+        db_session,
+        user,
+        _account(db_session, user),
+        quantity=200,
+        reserve=Decimal("2010.00"),
+    )
+    evidence = _evidence(execution, remaining_before_match=200)
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=lambda **_: evidence,
+    )
+    service.apply(
+        order_id=order.id,
+        execution=execution,
+        quote_timestamp=QUOTE_TIME,
+        match_pass=1,
+    )
+    evidence = _evidence(execution, timestamp=later, remaining_before_match=100)
+
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=order.id,
+            execution=execution,
+            quote_timestamp=later,
+            match_pass=1,
+        )
+
+    assert error.value.code == "invalid_match_evidence"
+    assert db_session.query(PaperFill).count() == 1
 
 
 def test_two_sessions_same_match_watermark_create_one_projection(

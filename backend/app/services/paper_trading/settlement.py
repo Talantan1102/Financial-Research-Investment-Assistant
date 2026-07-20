@@ -45,8 +45,12 @@ class MatchQuoteEvidence(BaseModel):
 
     quote: RealtimeQuote
     consumed_levels: tuple[Execution, ...]
-    execution_index: int = Field(ge=0)
-    remaining_before_match: int = Field(gt=0)
+    execution_index: int = Field(
+        ge=0, description="Zero-based position in the matcher result for this quote snapshot"
+    )
+    remaining_before_match: int = Field(
+        gt=0, description="Order quantity remaining before this quote snapshot was matched"
+    )
 
 
 class PaperSettlementService:
@@ -554,15 +558,20 @@ class PaperSettlementService:
             evidence = evidence.model_copy(
                 update={"quote": evidence.quote.model_copy(update={"source": source})}
             )
-        rows = self._session.scalars(
+        history = self._session.scalars(
             select(PaperMatchPass)
-            .where(
-                PaperMatchPass.order_id == order.id,
-                PaperMatchPass.quote_timestamp == quote_timestamp,
-            )
+            .where(PaperMatchPass.order_id == order.id)
             .order_by(PaperMatchPass.match_pass)
         ).all()
-        settled_quantity = 0
+        watermarks = [int(row.match_pass) for row in history]
+        if watermarks != list(range(1, len(history) + 1)) or any(
+            left.quote_timestamp > right.quote_timestamp
+            for left, right in zip(history, history[1:])
+        ):
+            raise PaperTradingError(
+                "invalid_match_evidence", "match evidence history is inconsistent"
+            )
+        rows = [row for row in history if row.quote_timestamp == quote_timestamp]
         prior_rows = [row for row in rows if int(row.match_pass) < match_pass]
         current_rows = [row for row in rows if int(row.match_pass) == match_pass]
         later_rows = [row for row in rows if int(row.match_pass) > match_pass]
@@ -571,13 +580,16 @@ class PaperSettlementService:
             or len(current_rows) > 1
             or (later_rows and not current_rows)
             or len(rows) > len(levels)
+            or (not current_rows and match_pass != len(history) + 1)
+            or (
+                not current_rows and bool(history) and quote_timestamp < history[-1].quote_timestamp
+            )
         ):
             raise PaperTradingError(
                 "invalid_match_evidence", "match evidence history is inconsistent"
             )
         for position, row in enumerate(rows):
             if current_rows and row.id == current_rows[0].id:
-                settled_quantity += execution.quantity
                 continue
             fill = self._session.get(PaperFill, row.fill_id) if row.fill_id else None
             expected_level = levels[position]
@@ -592,11 +604,26 @@ class PaperSettlementService:
                 or row.consumed_levels != [level.model_dump(mode="json") for level in levels]
             ):
                 raise PaperTradingError(
+                    "match_pass_conflict" if current_rows else "invalid_match_evidence",
+                    "match evidence history is inconsistent",
+                )
+        first_snapshot_pass = int(rows[0].match_pass) if rows else match_pass
+        historical_filled = 0
+        for row in history:
+            if int(row.match_pass) >= first_snapshot_pass:
+                break
+            fill = self._session.get(PaperFill, row.fill_id) if row.fill_id else None
+            if (
+                fill is None
+                or fill.order_id != order.id
+                or int(fill.quantity) != int(row.matched_quantity)
+                or int(fill.quantity) <= 0
+            ):
+                raise PaperTradingError(
                     "invalid_match_evidence", "match evidence history is inconsistent"
                 )
-            settled_quantity += expected_level.quantity
-        filled_before_snapshot = int(order.filled_quantity) - settled_quantity
-        if remaining_before_match != int(order.quantity) - filled_before_snapshot:
+            historical_filled += int(fill.quantity)
+        if not current_rows and remaining_before_match != int(order.quantity) - historical_filled:
             raise PaperTradingError(
                 "invalid_match_evidence", "match evidence history is inconsistent"
             )
