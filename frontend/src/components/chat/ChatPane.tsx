@@ -82,7 +82,6 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
   const onSend = useCallback((text: string) => {
     void run.sendPrompt(text)
   }, [run])
-  const onAbort = useCallback(() => run.abort(), [run])
   const onEscalate = useCallback(() => {
     if (escalationState.packet_draft) return
   }, [])
@@ -118,7 +117,6 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
           <InputArea
             sessionId={sessionId ?? undefined}
             onSend={onSend}
-            onAbort={onAbort}
             onEscalate={onEscalate}
             onCancel={() => { void run.cancelRun() }}
             blocked={resolvedTenantId === null || sessionLoading || run.pause !== null}

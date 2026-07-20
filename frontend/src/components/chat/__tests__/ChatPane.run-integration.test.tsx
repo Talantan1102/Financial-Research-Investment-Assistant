@@ -24,19 +24,26 @@ describe('<ChatPane> Run revision integration', () => {
     currentChatActions.setSession('session-1', [])
   })
 
-  it('routes the first prompt after cancel through one-shot replaces_run_id', async () => {
+  it('routes keyboard stop through server cancel and preserves mutual exclusion until terminal success', async () => {
     const firstStream = controllableSseResponse()
     const bodies: Array<Record<string, unknown>> = []
     let creates = 0
+    let cancelRequests = 0
+    let resolveCancel!: () => void
+    const cancelReleased = new Promise<void>((resolve) => { resolveCancel = resolve })
     let sessionRefreshes = 0
     server.use(
       http.post(`${API_BASE}/api/v1/tenants/tenant-1/runs`, async ({ request }) => {
         bodies.push(await request.json() as Record<string, unknown>)
         creates += 1
-        return HttpResponse.json(run(`run-${creates}`, 'queued'), { status: 201 })
+        return HttpResponse.json(run(`run-${creates}`, 'running'), { status: 201 })
       }),
       http.get(`${API_BASE}/api/v1/tenants/tenant-1/runs/run-1/events`, () => firstStream.response),
-      http.post(`${API_BASE}/api/v1/tenants/tenant-1/runs/run-1/cancel`, () => HttpResponse.json(run('run-1', 'cancelled'))),
+      http.post(`${API_BASE}/api/v1/tenants/tenant-1/runs/run-1/cancel`, async () => {
+        cancelRequests += 1
+        await cancelReleased
+        return HttpResponse.json(run('run-1', 'cancelled'))
+      }),
       http.get(`${API_BASE}/api/v1/tenants/tenant-1/runs/run-2/events`, () => new Response(
         'id: v1:2:1-0\nevent: run.completed\ndata: {}\n\n',
         { headers: { 'Content-Type': 'text/event-stream' } },
@@ -61,7 +68,11 @@ describe('<ChatPane> Run revision integration', () => {
     const rendered = renderWithProviders(<ChatPane tenantId="tenant-1" sessionId="session-1" />)
     await user.type(rendered.getByTestId('input-textarea'), 'original{Enter}')
     await waitFor(() => expect(rendered.getByRole('button', { name: '停止生成' })).toBeInTheDocument())
-    await user.click(rendered.getByRole('button', { name: '停止生成' }))
+    await user.keyboard('{Control>}k{/Control}')
+    await waitFor(() => expect(cancelRequests).toBe(1))
+    await user.type(rendered.getByTestId('input-textarea'), 'blocked while cancelling{Enter}')
+    expect(bodies).toHaveLength(1)
+    resolveCancel()
     await waitFor(() => expect(rendered.getByTestId('input-textarea')).not.toBeDisabled())
     await user.type(rendered.getByTestId('input-textarea'), 'edited{Enter}')
     await waitFor(() => expect(bodies).toHaveLength(2))

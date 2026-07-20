@@ -8,7 +8,6 @@ import { ChatPane } from '@/components/chat/ChatPane'
 import { currentChatActions, currentChatState } from '@/store/current-chat'
 
 const sendPromptMock = vi.fn(async () => {})
-const abortMock = vi.fn()
 const cancelRunMock = vi.fn(async () => {})
 const resumeRunMock = vi.fn(async () => {})
 let pauseMock: { type: 'approval_request' | 'input_request'; request: Record<string, unknown> } | null = null
@@ -25,7 +24,6 @@ vi.mock('@/hooks/useRunSSE', () => ({
     cancelRun: cancelRunMock,
     resumeRun: resumeRunMock,
     resubmitPrompt: vi.fn(),
-    abort: abortMock,
     status: 'idle',
     activeRunId: null,
     pause: pauseMock,
@@ -52,7 +50,7 @@ describe('<ChatPane>', () => {
 describe('<ChatPane> integration with useRunSSE', () => {
   beforeEach(() => {
     sendPromptMock.mockClear()
-    abortMock.mockClear()
+    cancelRunMock.mockClear()
     resumeRunMock.mockClear()
     pauseMock = null
     currentChatActions.reset()
@@ -100,11 +98,11 @@ describe('<ChatPane> integration with useRunSSE', () => {
     expect(sendPromptMock).toHaveBeenCalledWith('first prompt')
   })
 
-  it('Cmd+K while streaming triggers abort', async () => {
+  it('Cmd+K while streaming triggers server cancel', async () => {
     currentChatState.streaming_phase = 'writing'
     const user = userEvent.setup()
     renderWithProviders(<ChatPane sessionId="s1" />)
     await user.keyboard('{Meta>}k{/Meta}')
-    expect(abortMock).toHaveBeenCalled()
+    expect(cancelRunMock).toHaveBeenCalled()
   })
 })

@@ -287,6 +287,9 @@ describe('useRunSSE', () => {
     await expect(act(async () => cancelling.result.current.cancelRun())).resolves.toBeUndefined()
     expect(cancelling.result.current.status).toBe('error')
     expect(snapshot(currentChatState).active_run_id).toBe('run-1')
+    const createsBeforeBlockedSend = vi.mocked(runApi.createRun).mock.calls.length
+    await act(async () => cancelling.result.current.sendPrompt('must remain blocked'))
+    expect(runApi.createRun).toHaveBeenCalledTimes(createsBeforeBlockedSend)
     vi.mocked(runApi.cancelRun).mockResolvedValue(run('cancelled'))
     await act(async () => cancelling.result.current.cancelRun())
     expect(runApi.cancelRun).toHaveBeenCalledTimes(2)

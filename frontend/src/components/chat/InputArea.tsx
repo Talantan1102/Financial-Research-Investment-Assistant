@@ -18,7 +18,6 @@ export interface InputAreaProps {
     text: string,
     forced?: { forced_tool_name: string; forced_tool_args: Record<string, unknown> },
   ) => void
-  onAbort?: () => void
   onEscalate?: () => void
   // Run cancellation is tenant-scoped and keyed by currentChatState.active_run_id.
   onCancel?: () => void
@@ -79,7 +78,7 @@ export function InputArea(props: InputAreaProps) {
     function onKeyGlobal(e: globalThis.KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        if (streaming) props.onAbort?.()
+        if (streaming) props.onCancel?.()
       }
     }
     window.addEventListener('keydown', onKeyGlobal)
@@ -140,14 +139,6 @@ export function InputArea(props: InputAreaProps) {
     [menuOpen, menuItems, menuActiveIdx, selectCommand, send],
   )
 
-  const onCancelClick = () => {
-    if (snap.active_run_id && props.onCancel) {
-      void props.onCancel()
-    } else {
-      props.onAbort?.()
-    }
-  }
-
   return (
     <div data-session={props.sessionId ?? ''}>
       <div className={styles.composer}>
@@ -186,7 +177,7 @@ export function InputArea(props: InputAreaProps) {
           <button
             type="button"
             className={styles.cancelBtn}
-            onClick={onCancelClick}
+            onClick={() => props.onCancel?.()}
             aria-label="停止生成"
             title="停止生成"
           >

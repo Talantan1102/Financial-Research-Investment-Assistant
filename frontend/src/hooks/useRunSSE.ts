@@ -37,7 +37,6 @@ export interface UseRunSSE {
   cancelRun(): Promise<void>
   resumeRun(response: Record<string, unknown>): Promise<void>
   resubmitPrompt(prompt: string, replacesRunId: string): Promise<void>
-  abort(): void
   status: RunStatus | 'idle' | 'error'
   activeRunId: string | null
   pause: RunPause | null
@@ -420,15 +419,6 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     [fetchImpl, isCurrent, streamRun, updateActiveRun, updateStatus],
   )
 
-  const abort = useCallback(() => {
-    generationRef.current += 1
-    abortRef.current?.abort()
-    abortRef.current = null
-    updateActiveRun(null, null)
-    updateStatus('idle')
-    currentChatActions.resetRunTransport()
-  }, [updateActiveRun, updateStatus])
-
   useEffect(() => {
     const tenantId = options.tenantId
     const sessionId = options.sessionId
@@ -469,7 +459,6 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     cancelRun,
     resumeRun,
     resubmitPrompt: (prompt, replacesRunId) => startRun(prompt, replacesRunId),
-    abort,
     status,
     activeRunId,
     pause,
