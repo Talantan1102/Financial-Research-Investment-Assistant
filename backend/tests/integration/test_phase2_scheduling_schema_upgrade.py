@@ -261,6 +261,8 @@ def test_startup_degrades_only_when_postgres_connection_is_unavailable(
 ) -> None:
     from app import app_main
 
+    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
+
     def unavailable(_engine: Engine) -> tuple[str, ...]:
         raise OperationalError("connect", {}, ConnectionError("postgres unavailable"))
 
@@ -275,6 +277,8 @@ def test_startup_logs_and_raises_schema_migration_errors(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from app import app_main
+
+    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
 
     def incompatible(_engine: Engine) -> tuple[str, ...]:
         raise InvalidLegacyWorkerIdError("legacy bad-worker")
@@ -294,6 +298,8 @@ def test_startup_does_not_degrade_on_connected_postgres_operational_errors(
 ) -> None:
     from app import app_main
 
+    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
+
     class LockTimeoutError(Exception):
         pgcode = "55P03"
 
@@ -311,6 +317,8 @@ def test_startup_degrades_when_postgres_cannot_connect_now(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from app import app_main
+
+    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
 
     class CannotConnectNowError(Exception):
         pgcode = "57P03"

@@ -40,6 +40,7 @@ from app.scripts.migrate_phase2_scheduling_schema import (  # noqa: E402
     migrate_phase2_scheduling_schema,
 )
 from app.scripts.migrate_phase3_execution_schema import (  # noqa: E402
+    is_fresh_application_schema,
     verify_phase3_execution_schema,
 )
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
@@ -56,24 +57,21 @@ def _initialize_postgres_schema() -> bool:
     try:
         import app.models as _models  # noqa: F401  ensure all models registered to Base
 
+        fresh_schema = is_fresh_application_schema(engine)
+        if not fresh_schema:
+            # An existing application schema is immutable during rolling web
+            # startup. Verify before any create_all/reconcile path can emit DDL.
+            verify_phase3_execution_schema(engine)
+
         changes = migrate_phase2_scheduling_schema(engine)
         if changes:
             logger.info("Phase 2 scheduling schema upgraded: %s", changes)
-        Base.metadata.create_all(bind=engine)
-        # Rolling web startup is deliberately read-only for Phase 3 upgrades.
-        # Existing installations must run the bounded operator migration first.
-        verify_phase3_execution_schema(engine)
-        logger.info("PostgreSQL tables initialized")
-
-        from app.scripts.reconcile_schema import reconcile_columns
-
-        reconciled = reconcile_columns(engine)
-        if reconciled:
-            logger.info(
-                "schema reconcile added %d missing columns: %s",
-                len(reconciled),
-                reconciled,
-            )
+        if fresh_schema:
+            Base.metadata.create_all(bind=engine)
+            verify_phase3_execution_schema(engine)
+            logger.info("Fresh PostgreSQL schema initialized and verified")
+        else:
+            logger.info("Existing PostgreSQL schema verified without startup DDL")
     except OperationalError as exc:
         sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
         postgres_unavailable = (

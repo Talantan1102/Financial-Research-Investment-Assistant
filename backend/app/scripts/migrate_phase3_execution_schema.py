@@ -13,6 +13,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.schema import CreateIndex
 
 import app.models  # noqa: F401 - register the complete metadata graph
+from app.core.database import Base
 from app.models.run_execution import RunToolExecution, RunUsageRecord
 
 _EXECUTION_TABLES = (RunToolExecution.__table__, RunUsageRecord.__table__)
@@ -21,6 +22,15 @@ _PREDECESSOR_ATTEMPT_FKS = {
     "run_usage_records": "fk_run_usage_records_attempt_provenance",
 }
 _REVISION_UNIQUE = "uq_runs_tenant_session_revision_seq"
+_SCHEMA_VERSION_MARKERS = {"alembic_version", "schema_migrations"}
+
+
+def is_fresh_application_schema(engine: Engine) -> bool:
+    """Return true only when the current schema has no known application footprint."""
+    with engine.connect() as connection:
+        existing = set(inspect(connection).get_table_names())
+    application_tables = set(Base.metadata.tables)
+    return not (existing & (application_tables | _SCHEMA_VERSION_MARKERS))
 
 
 def _revision_unique_signature(connection: Connection) -> tuple[str, ...] | None:
@@ -90,6 +100,28 @@ def _type_sql(value: Any, connection: Connection) -> str:
         " ",
         str(value.compile(dialect=connection.dialect)).strip().lower(),
     )
+
+
+def _default_sql(value: Any) -> str | None:
+    if value is None:
+        return None
+    return re.sub(r"[\s()]", "", str(value).lower().replace('"', ""))
+
+
+def _check_sql(value: Any, connection: Connection) -> str:
+    if hasattr(value, "compile"):
+        value = value.compile(
+            dialect=connection.dialect,
+            compile_kwargs={"literal_binds": True},
+        )
+    sql = str(value).lower().replace('"', "")
+    sql = re.sub(
+        r"::(?:character varying|text|numeric|integer|boolean)(?:\[\])?",
+        "",
+        sql,
+    )
+    sql = re.sub(r"=\s*any\s*\(\s*array\[(.*?)\]\s*\)", r" in (\1)", sql)
+    return re.sub(r"[\s()]", "", sql)
 
 
 def _expression_signature(expression: Any, connection: Connection) -> str:
@@ -520,13 +552,113 @@ def migrate_phase3_execution_schema(
     return tuple(changes)
 
 
+def _read_only_index_drift(
+    connection: Connection,
+    table: Table,
+    *,
+    required_names: set[str] | None = None,
+) -> list[str]:
+    expected = {
+        str(index.name): index
+        for index in table.indexes
+        if index.name is not None and (required_names is None or str(index.name) in required_names)
+    }
+    actual = {
+        str(index["name"]): index
+        for index in inspect(connection).get_indexes(table.name)
+        if not index.get("duplicates_constraint")
+        and (required_names is None or str(index["name"]) in required_names)
+    }
+    drift: list[str] = []
+    for name in sorted(set(expected) - set(actual)):
+        drift.append(f"{table.name} missing index {name}")
+    for name, expected_index in expected.items():
+        reflected = actual.get(name)
+        if reflected is None:
+            continue
+        if (
+            reflected["column_names"] != [column.name for column in expected_index.columns]
+            or bool(reflected.get("unique")) != bool(expected_index.unique)
+            or _index_predicate(reflected) != _expected_index_predicate(expected_index, connection)
+        ):
+            drift.append(f"{table.name} index {name} differs")
+    if required_names is None:
+        for name in sorted(set(actual) - set(expected)):
+            drift.append(f"{table.name} has unexpected index {name}")
+    return drift
+
+
+def _execution_table_drift(connection: Connection, table: Table) -> list[str]:
+    drift: list[str] = []
+    inspector = inspect(connection)
+    reflected_columns = {column["name"]: column for column in inspector.get_columns(table.name)}
+    expected_names = set(table.columns.keys())
+    if set(reflected_columns) != expected_names:
+        drift.append(
+            f"{table.name} columns expected {sorted(expected_names)}, "
+            f"got {sorted(reflected_columns)}"
+        )
+    for column in table.columns:
+        reflected = reflected_columns.get(column.name)
+        if reflected is None:
+            continue
+        if bool(reflected["nullable"]) != bool(column.nullable):
+            drift.append(f"{table.name}.{column.name} nullability differs")
+        actual_type = _type_sql(reflected["type"], connection)
+        expected_type = _type_sql(column.type, connection)
+        if actual_type != expected_type:
+            drift.append(
+                f"{table.name}.{column.name} type differs: {actual_type} != {expected_type}"
+            )
+        expected_default = _default_sql(getattr(column.server_default, "arg", None))
+        actual_default = _default_sql(reflected.get("default"))
+        if actual_default != expected_default:
+            drift.append(
+                f"{table.name}.{column.name} default differs: "
+                f"{actual_default!r} != {expected_default!r}"
+            )
+
+    try:
+        _validate_primary_key(connection, table)
+    except RuntimeError as exc:
+        drift.append(str(exc).removeprefix("unsafe Phase 3 schema drift: "))
+    try:
+        _validate_foreign_keys(connection, table)
+    except RuntimeError as exc:
+        drift.append(str(exc).removeprefix("unsafe Phase 3 schema drift: "))
+    try:
+        _validate_uniques(connection, table)
+    except RuntimeError as exc:
+        drift.append(str(exc).removeprefix("unsafe Phase 3 schema drift: "))
+
+    actual_checks = {
+        str(check["name"]): check["sqltext"]
+        for check in inspector.get_check_constraints(table.name)
+    }
+    expected_checks = {
+        str(check.name): check.sqltext
+        for check in table.constraints
+        if isinstance(check, CheckConstraint) and check.name is not None
+    }
+    for name in sorted(set(expected_checks) - set(actual_checks)):
+        drift.append(f"{table.name} missing CHECK {name}")
+    for name in sorted(set(actual_checks) - set(expected_checks)):
+        drift.append(f"{table.name} has unexpected CHECK {name}")
+    for name in sorted(set(expected_checks) & set(actual_checks)):
+        if _check_sql(actual_checks[name], connection) != _check_sql(
+            expected_checks[name], connection
+        ):
+            drift.append(f"{table.name} CHECK {name} differs")
+    drift.extend(_read_only_index_drift(connection, table))
+    return drift
+
+
 def verify_phase3_execution_schema(engine: Engine) -> None:
     """Read-only rolling-startup gate; instruct operators instead of running DDL."""
     with engine.connect() as connection:
         existing_tables = set(inspect(connection).get_table_names())
-        if "run_sessions" not in existing_tables:
-            return
         missing = {
+            "run_sessions",
             "runs",
             "run_attempts",
             *[table.name for table in _EXECUTION_TABLES],
@@ -536,6 +668,25 @@ def verify_phase3_execution_schema(engine: Engine) -> None:
                 f"maintenance migration required; missing tables {sorted(missing)}; "
                 "run python -m app.scripts.migrate_phase3_execution_schema"
             )
+        drift: list[str] = []
+        session_columns = {
+            column["name"]: column for column in inspect(connection).get_columns("run_sessions")
+        }
+        archived = session_columns.get("archived_at")
+        if (
+            archived is None
+            or not archived["nullable"]
+            or _type_sql(archived["type"], connection) != "timestamp without time zone"
+        ):
+            drift.append("run_sessions.archived_at type/nullability differs")
+        drift.extend(
+            _read_only_index_drift(
+                connection,
+                app.models.RunSession.__table__,
+                required_names={"ix_run_sessions_archived_at"},
+            )
+        )
+
         columns = {column["name"]: column for column in inspect(connection).get_columns("runs")}
         revision = columns.get("revision_seq")
         if (
@@ -543,23 +694,33 @@ def verify_phase3_execution_schema(engine: Engine) -> None:
             or revision["nullable"]
             or _type_sql(revision["type"], connection) != "integer"
         ):
-            raise _unsafe(
-                "maintenance migration required for runs.revision_seq; "
-                "run python -m app.scripts.migrate_phase3_execution_schema"
-            )
+            drift.append("runs.revision_seq type/nullability differs")
         if _revision_unique_signature(connection) != ("tenant_id", "session_id", "revision_seq"):
+            drift.append(f"runs unique constraint {_REVISION_UNIQUE} differs")
+        if revision is not None:
+            duplicate = connection.execute(
+                text(
+                    "SELECT 1 FROM runs GROUP BY tenant_id, session_id, revision_seq "
+                    "HAVING count(*) > 1 LIMIT 1"
+                )
+            ).first()
+            if duplicate is not None:
+                drift.append("duplicate runs.revision_seq values")
+        drift.extend(
+            _read_only_index_drift(
+                connection,
+                app.models.Run.__table__,
+                required_names={"ix_runs_replaces_run_id"},
+            )
+        )
+        for table in _EXECUTION_TABLES:
+            drift.extend(_execution_table_drift(connection, table))
+        if drift:
+            details = "; ".join(drift)
             raise _unsafe(
-                f"maintenance migration required for {_REVISION_UNIQUE}; "
+                f"maintenance migration required: {details}; "
                 "run python -m app.scripts.migrate_phase3_execution_schema"
             )
-        duplicate = connection.execute(
-            text(
-                "SELECT 1 FROM runs GROUP BY tenant_id, session_id, revision_seq "
-                "HAVING count(*) > 1 LIMIT 1"
-            )
-        ).first()
-        if duplicate is not None:
-            raise _unsafe("duplicate runs.revision_seq values")
 
 
 if __name__ == "__main__":

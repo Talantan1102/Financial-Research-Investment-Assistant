@@ -13,6 +13,7 @@ from app.models.run_execution import RunUsageRecord
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.scripts.migrate_phase3_execution_schema import (
+    is_fresh_application_schema,
     migrate_phase3_execution_schema,
     verify_phase3_execution_schema,
 )
@@ -32,6 +33,23 @@ def isolated_schema_engine(pg_test_engine: Engine) -> Iterator[Engine]:
         connect_args={"options": f"-csearch_path={schema} -ctimezone=Asia/Shanghai"},
     )
     Base.metadata.create_all(bind=isolated)
+    try:
+        yield isolated
+    finally:
+        isolated.dispose()
+        with pg_test_engine.begin() as connection:
+            connection.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+
+
+@pytest.fixture
+def empty_schema_engine(pg_test_engine: Engine) -> Iterator[Engine]:
+    schema = f"phase3_empty_{uuid.uuid4().hex}"
+    with pg_test_engine.begin() as connection:
+        connection.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+    isolated = create_engine(
+        pg_test_engine.url,
+        connect_args={"options": f"-csearch_path={schema} -ctimezone=Asia/Shanghai"},
+    )
     try:
         yield isolated
     finally:
@@ -737,6 +755,7 @@ def test_app_startup_creates_fresh_schema_then_uses_read_only_phase3_gate(
 
     calls: list[str] = []
 
+    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
     monkeypatch.setattr(
         app_main,
         "migrate_phase2_scheduling_schema",
@@ -756,3 +775,158 @@ def test_app_startup_creates_fresh_schema_then_uses_read_only_phase3_gate(
 
     assert app_main._initialize_postgres_schema() is True
     assert calls == ["phase2", "create_all", "verify_phase3"]
+
+
+def _ddl_statements(engine: Engine) -> tuple[list[str], object]:
+    statements: list[str] = []
+
+    def capture_ddl(
+        _connection: Connection,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        normalized = statement.lstrip().upper()
+        if normalized.startswith(("CREATE ", "ALTER ", "DROP ", "TRUNCATE ")):
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture_ddl)
+    return statements, capture_ddl
+
+
+def test_existing_phase2_database_fails_startup_before_create_all_can_fill_phase3_tables(
+    isolated_schema_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import app_main
+
+    _downgrade_to_phase2(isolated_schema_engine)
+    before = set(inspect(isolated_schema_engine).get_table_names())
+    statements, listener = _ddl_statements(isolated_schema_engine)
+    monkeypatch.setattr(app_main, "engine", isolated_schema_engine)
+    try:
+        with pytest.raises(RuntimeError, match="maintenance migration required"):
+            app_main._initialize_postgres_schema()
+    finally:
+        event.remove(isolated_schema_engine, "before_cursor_execute", listener)
+
+    after = set(inspect(isolated_schema_engine).get_table_names())
+    assert before == after
+    assert {"run_tool_executions", "run_usage_records"}.isdisjoint(after)
+    assert statements == []
+
+
+def test_existing_execution_column_drift_fails_startup_without_ddl(
+    isolated_schema_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import app_main
+
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE run_usage_records ALTER COLUMN provider DROP NOT NULL")
+        )
+    statements, listener = _ddl_statements(isolated_schema_engine)
+    monkeypatch.setattr(app_main, "engine", isolated_schema_engine)
+    try:
+        with pytest.raises(RuntimeError, match=r"run_usage_records\.provider.*nullability"):
+            app_main._initialize_postgres_schema()
+    finally:
+        event.remove(isolated_schema_engine, "before_cursor_execute", listener)
+
+    provider = {
+        column["name"]: column
+        for column in inspect(isolated_schema_engine).get_columns("run_usage_records")
+    }["provider"]
+    assert provider["nullable"] is True
+    assert statements == []
+
+
+def test_fresh_database_startup_creates_and_verifies_complete_contract(
+    empty_schema_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import app_main
+
+    assert is_fresh_application_schema(empty_schema_engine) is True
+    monkeypatch.setattr(app_main, "engine", empty_schema_engine)
+
+    assert app_main._initialize_postgres_schema() is True
+    assert is_fresh_application_schema(empty_schema_engine) is False
+    verify_phase3_execution_schema(empty_schema_engine)
+
+
+def test_existing_compatible_database_startup_is_read_only(
+    isolated_schema_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import app_main
+
+    statements, listener = _ddl_statements(isolated_schema_engine)
+    monkeypatch.setattr(app_main, "engine", isolated_schema_engine)
+    try:
+        assert app_main._initialize_postgres_schema() is True
+    finally:
+        event.remove(isolated_schema_engine, "before_cursor_execute", listener)
+
+    assert statements == []
+
+
+def test_schema_version_marker_is_existing_and_cannot_be_misclassified_as_fresh(
+    empty_schema_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import app_main
+
+    with empty_schema_engine.begin() as connection:
+        connection.execute(text("CREATE TABLE alembic_version (version_num varchar(32))"))
+    assert is_fresh_application_schema(empty_schema_engine) is False
+    statements, listener = _ddl_statements(empty_schema_engine)
+    monkeypatch.setattr(app_main, "engine", empty_schema_engine)
+    try:
+        with pytest.raises(RuntimeError, match="maintenance migration required"):
+            app_main._initialize_postgres_schema()
+    finally:
+        event.remove(empty_schema_engine, "before_cursor_execute", listener)
+
+    assert set(inspect(empty_schema_engine).get_table_names()) == {"alembic_version"}
+    assert statements == []
+
+
+@pytest.mark.parametrize(
+    "ddl",
+    [
+        "DROP INDEX ix_run_sessions_archived_at",
+        "DROP INDEX ix_runs_replaces_run_id",
+        "DROP INDEX ix_run_tool_semantic_recovery",
+        "ALTER TABLE run_usage_records DROP CONSTRAINT ck_run_usage_total_consistent",
+        "ALTER TABLE run_tool_executions DROP CONSTRAINT uq_run_tool_idempotency",
+        "ALTER TABLE run_usage_records DROP CONSTRAINT fk_run_usage_records_attempt_provenance",
+        "ALTER TABLE run_usage_records DROP CONSTRAINT run_usage_records_pkey",
+        "ALTER TABLE run_usage_records ALTER COLUMN provider SET DEFAULT 'unknown'",
+    ],
+)
+def test_read_only_gate_rejects_execution_contract_drift_without_repair(
+    isolated_schema_engine: Engine,
+    ddl: str,
+) -> None:
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(text(ddl))
+    before = inspect(isolated_schema_engine).get_table_names()
+
+    with pytest.raises(RuntimeError, match="maintenance migration required"):
+        verify_phase3_execution_schema(isolated_schema_engine)
+
+    assert inspect(isolated_schema_engine).get_table_names() == before
+
+
+def test_operator_migration_completes_old_schema_then_verifies_and_is_idempotent(
+    isolated_schema_engine: Engine,
+) -> None:
+    _downgrade_to_phase2(isolated_schema_engine)
+
+    assert migrate_phase3_execution_schema(isolated_schema_engine)
+    verify_phase3_execution_schema(isolated_schema_engine)
+    assert migrate_phase3_execution_schema(isolated_schema_engine) == ()
