@@ -281,6 +281,53 @@ class PaperAccountService:
         self._session.flush()
         return new
 
+    def confirmed_reset_replay(
+        self,
+        *,
+        user_id: uuid.UUID,
+        initial_cash: Decimal,
+        source_session_id: str,
+        confirmation_id: str,
+    ) -> PaperAccount | None:
+        """Lock a reset confirmation key and resolve an existing request, if any.
+
+        The transaction-scoped key lock remains held when this returns ``None``.
+        Callers can therefore perform additional first-execution guards before
+        delegating to :meth:`reset_confirmed` without racing another request
+        using the same confirmation key.
+        """
+        user_id = _require_uuid(user_id)
+        initial_cash = _positive_money(
+            initial_cash, code="invalid_initial_cash", field="initial_cash"
+        )
+        source_session_id = _require_text(
+            source_session_id,
+            field="source_session_id",
+            maximum=64,
+            code="invalid_reset_confirmation",
+        )
+        confirmation_id = _require_text(
+            confirmation_id,
+            field="confirmation_id",
+            maximum=64,
+            code="invalid_reset_confirmation",
+        )
+        self._lock_reset_confirmation(
+            source_session_id=source_session_id,
+            confirmation_id=confirmation_id,
+        )
+        existing = self._confirmed_reset(
+            source_session_id=source_session_id,
+            confirmation_id=confirmation_id,
+        )
+        if existing is None:
+            return None
+        return self._validate_confirmed_reset(
+            existing,
+            user_id=user_id,
+            initial_cash=initial_cash,
+        )
+
     def edit_initial_cash_once(self, *, user_id: uuid.UUID, initial_cash: Decimal) -> PaperAccount:
         """Replace generation-one opening cash before any account activity."""
         user_id = _require_uuid(user_id)

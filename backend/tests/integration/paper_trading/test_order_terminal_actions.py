@@ -470,6 +470,82 @@ def test_reset_is_generation_safe_and_idempotent(db_session: Session, user: User
     assert order.status is OrderStatus.OPEN
 
 
+def test_reset_retry_returns_original_account_even_when_new_generation_is_matching(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    service, _, _ = _confirmed_buy(db_session, user_id)
+    first = service.reset_account_confirmed(
+        user_id=user_id,
+        initial_cash=Decimal("500000.00"),
+        session_id="reset-replay-session",
+        confirmation_id="reset-replay",
+    )
+    _, new_order, _ = _confirmed_buy(db_session, user_id, message_id="new-generation-order")
+    db_session.add(
+        PaperMatchPass(
+            order_id=new_order.id,
+            quote_timestamp=MORNING,
+            match_pass=1,
+            quote_source="fixed",
+            snapshot_summary={},
+            consumed_levels=[],
+            matched_quantity=1,
+            fill_id=None,
+        )
+    )
+    db_session.flush()
+
+    replay = service.reset_account_confirmed(
+        user_id=user_id,
+        initial_cash=Decimal("500000.00"),
+        session_id="reset-replay-session",
+        confirmation_id="reset-replay",
+    )
+
+    assert replay.id == first.id
+    assert replay.generation == 2
+    assert service.account_service.get_active(user_id=user_id).id == first.id
+
+
+def test_reset_conflict_precedes_new_generation_processing_guard(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    service, _, _ = _confirmed_buy(db_session, user_id)
+    service.reset_account_confirmed(
+        user_id=user_id,
+        initial_cash=Decimal("500000.00"),
+        session_id="reset-conflict-session",
+        confirmation_id="reset-conflict",
+    )
+    _, new_order, _ = _confirmed_buy(db_session, user_id, message_id="conflict-new-order")
+    db_session.add(
+        PaperMatchPass(
+            order_id=new_order.id,
+            quote_timestamp=MORNING,
+            match_pass=1,
+            quote_source="fixed",
+            snapshot_summary={},
+            consumed_levels=[],
+            matched_quantity=1,
+            fill_id=None,
+        )
+    )
+    db_session.flush()
+
+    with pytest.raises(PaperTradingError) as conflict:
+        service.reset_account_confirmed(
+            user_id=user_id,
+            initial_cash=Decimal("600000.00"),
+            session_id="reset-conflict-session",
+            confirmation_id="reset-conflict",
+        )
+
+    assert conflict.value.code == "reset_confirmation_conflict"
+    assert service.account_service.get_active(user_id=user_id).generation == 2
+
+
 def test_terminal_actions_reject_naive_timestamps_and_invalid_ids(
     db_session: Session, user: User
 ) -> None:

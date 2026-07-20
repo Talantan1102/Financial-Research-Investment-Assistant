@@ -425,6 +425,14 @@ class PaperOrderService:
         user_id = _require_uuid(user_id, field="user_id")
         session_id = _require_text(session_id, field="session_id", maximum=64)
         confirmation_id = _require_text(confirmation_id, field="confirmation_id", maximum=64)
+        replay = self.account_service.confirmed_reset_replay(
+            user_id=user_id,
+            initial_cash=initial_cash,
+            source_session_id=session_id,
+            confirmation_id=confirmation_id,
+        )
+        if replay is not None:
+            return replay
         account = self.account_service.get_active(user_id=user_id, for_update=True)
         processing = self._session.scalar(
             select(PaperMatchPass.id)
