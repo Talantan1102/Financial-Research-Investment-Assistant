@@ -25,6 +25,21 @@ except ImportError:
 CELERY_WORKER_QUEUES = ("default", "llm")
 
 
+def prepare_celery_worker_env(base: dict[str, str], redis_url: str) -> dict[str, str]:
+    """Build deterministic L2 worker env without enabling live network calls."""
+    env = dict(base)
+    env["CELERY_BROKER_URL"] = redis_url
+    env["CELERY_RESULT_BACKEND"] = redis_url
+    if env.get("LLM_MODE", "none") == "none":
+        env["LLM_MODE"] = "mock"
+    # Both mock and cassette construct the Qwen embedding service before the
+    # chat task is marked running.  A non-empty placeholder is enough for
+    # construction; these L2 tests never make a live embedding request.
+    if env["LLM_MODE"] in {"mock", "cassette"} and not env.get("DASHSCOPE_API_KEY"):
+        env["DASHSCOPE_API_KEY"] = "test-key-not-for-live-calls"
+    return env
+
+
 @pytest.fixture(scope="session")
 def redis_url() -> Generator[str, None, None]:
     """Session-scoped redis broker URL.
@@ -52,19 +67,12 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
 
     Runs --concurrency=1 to keep ordering deterministic in tests.
     """
-    env = os.environ.copy()
-    env["CELERY_BROKER_URL"] = redis_url
-    env["CELERY_RESULT_BACKEND"] = redis_url
+    env = prepare_celery_worker_env(dict(os.environ), redis_url)
     # Global pytest bootstrap deliberately defaults LLM_MODE to "none" so unit
     # tests fail on accidental LLM construction.  This fixture is an L2 worker,
     # and run_chat must get past dependency construction before it can mark the
     # DB task running; use mock unless the caller explicitly selected a real
     # integration mode (cassette/live/mock).
-    if env.get("LLM_MODE", "none") == "none":
-        env["LLM_MODE"] = "mock"
-    if env["LLM_MODE"] == "mock":
-        env.setdefault("DASHSCOPE_API_KEY", "test-key-not-for-live-calls")
-
     proc = subprocess.Popen(
         [
             "uv",
