@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from app.scripts.migrate_legacy_chat_to_runs import (
     MigrationReport,
     migrate_legacy_chat,
@@ -23,6 +22,20 @@ def test_dry_run_report_is_json_and_has_zero_writes() -> None:
     assert report.writes == 0
     json.dumps(report.to_dict())
     assert db.writes == 0
+    assert report.source_counts["escalation_records"] == 0
+    assert report.dependency_counts["escalation_records"] == 0
+    assert report.target_counts["run_escalation_records"] == 0
+
+
+def test_cutover_report_counts_escalations_in_target_contract() -> None:
+    report = MigrationReport(
+        source_counts={"escalation_records": 3},
+        dependency_counts={"escalation_records": 2},
+        target_counts={"run_escalation_records": 2},
+    )
+    assert report.source_counts["escalation_records"] == 3
+    assert report.dependency_counts["escalation_records"] == 2
+    assert report.target_counts["run_escalation_records"] == 2
 
 
 def test_cleanup_requires_explicit_confirmation_and_backup_manifest(tmp_path: Path) -> None:

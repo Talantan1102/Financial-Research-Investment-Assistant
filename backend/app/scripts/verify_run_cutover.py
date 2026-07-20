@@ -106,6 +106,9 @@ def collect_database_evidence(
             if table not in tables:
                 return 0
             return int(db.execute(text(f'SELECT count(*) FROM "{table}"')).scalar_one())
+        # The report is an expected/audited snapshot only.  Re-read every
+        # count that can still exist from PostgreSQL so a forged JSON file
+        # cannot make the gate pass.
         source = dict(report_data.get("source_counts", {}))
         target = dict(report_data.get("target_counts", {}))
         # Once cleanup drops legacy tables, preserve the audited source counts
@@ -115,8 +118,17 @@ def collect_database_evidence(
             source["chat_sessions"] = count("chat_sessions")
         if "chat_messages" in tables:
             source["chat_messages"] = count("chat_messages")
+        if "escalation_records" in tables:
+            source["escalation_records"] = count("escalation_records")
         target["run_sessions"] = count("run_sessions")
         target["run_messages"] = count("run_messages")
+        if "escalation_records" in tables:
+            target["run_escalation_records"] = int(
+                db.execute(text(
+                    "SELECT count(*) FROM escalation_records "
+                    "WHERE source_session_id IS NOT NULL"
+                )).scalar_one()
+            )
         active = 0
         if "chat_tasks" in tables:
             active = int(db.execute(text("SELECT count(*) FROM chat_tasks WHERE status IN ('queued','running')")).scalar_one())
@@ -126,6 +138,22 @@ def collect_database_evidence(
                 if (fk.get("referred_table") or "").lower() in _LEGACY_TABLES:
                     external_fks += 1
         legacy_count = sum(table in tables for table in _LEGACY_TABLES)
+        dependency_source: dict[str, int] = {}
+        dependency_target: dict[str, int] = {}
+        bridge_columns = {
+            "chat_attachments": "run_session_id",
+            "chat_session_context": "run_session_id",
+            "long_term_memories": "run_session_id",
+            "research_reports": "source_session_id",
+            "escalation_records": "source_session_id",
+        }
+        for table, bridge_column in bridge_columns.items():
+            if table not in tables:
+                continue
+            dependency_source[table] = count(table)
+            dependency_target[table] = int(db.execute(text(
+                f'SELECT count(*) FROM "{table}" WHERE "{bridge_column}" IS NOT NULL'
+            )).scalar_one())
     finally:
         db.close()
     project_root = Path(__file__).resolve().parents[3]
@@ -160,18 +188,13 @@ def collect_database_evidence(
         has_run_session_routes=routes_ok,
         has_phase2_phase3_gates=gates_ok,
         backup_manifest_valid=backup_manifest_valid,
-        dependency_source_counts=dict(
+        dependency_source_counts=(dependency_source or dict(
             report_data.get("dependency_source_counts")
             or report_data.get("dependency_counts", {})
-        ),
-        dependency_target_counts=dict(
-            report_data.get("dependency_target_counts")
-            or {
-                "chat_" + key.removeprefix("run_"): value
-                for key, value in target.items()
-                if key.startswith("run_")
-            }
-        ),
+        )),
+        dependency_target_counts=(dependency_target or dict(
+            report_data.get("dependency_target_counts", {})
+        )),
         quarantine_count=len(report_data.get("quarantined", [])),
         allowed_quarantine_count=0,
         legacy_external_fks=external_fks,

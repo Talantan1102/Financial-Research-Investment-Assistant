@@ -305,6 +305,9 @@ def migrate_legacy_chat(
     # A fake/non-DB object is useful for command safety tests and produces an
     # empty, zero-write report.  Real sessions expose ``query``.
     if not hasattr(db, "query"):
+        report.source_counts["escalation_records"] = 0
+        report.dependency_counts["escalation_records"] = 0
+        report.target_counts["run_escalation_records"] = 0
         return report
     if apply:
         _maintenance_bootstrap(db)
@@ -401,12 +404,15 @@ def migrate_legacy_chat(
     # provenance must move with the rest of the chat state.  During the bridge
     # window old rows may still expose session_id; read it once and persist
     # only source_session_id/source_run_id afterwards.
+    escalation_records: list[Any] = []
+    escalation_table_exists = False
     if hasattr(db, "query"):
         legacy_escalation_sessions: dict[str, Any] = {}
         try:
             from sqlalchemy import inspect, text
 
             cols = {c["name"] for c in inspect(db.get_bind()).get_columns("escalation_records")}
+            escalation_table_exists = bool(cols)
             if "session_id" in cols:
                 legacy_escalation_sessions = {
                     str(item.id): item.session_id
@@ -414,7 +420,9 @@ def migrate_legacy_chat(
                 }
         except Exception:
             legacy_escalation_sessions = {}
-        for row in list(db.scalars(select(EscalationRecord))):
+        if escalation_table_exists:
+            escalation_records = list(db.scalars(select(EscalationRecord)))
+        for row in escalation_records:
             legacy_sid = legacy_escalation_sessions.get(str(row.id))
             sid = getattr(row, "source_session_id", None) or legacy_sid
             if sid not in session_map:
@@ -432,18 +440,24 @@ def migrate_legacy_chat(
         chat_session_context=sum(1 for row in db.scalars(select(ChatSessionContext))),
         long_term_memories=sum(1 for row in db.scalars(select(LongTermMemory))),
         research_reports=sum(1 for row in db.scalars(select(ResearchReport))),
+        escalation_records=(len(escalation_records) if escalation_table_exists else 0),
     )
     report.dependency_counts.update(
         chat_attachments=sum(1 for row in db.scalars(select(ChatAttachment)) if row.session_id in session_map),
         chat_session_context=sum(1 for row in db.scalars(select(ChatSessionContext)) if row.session_id in session_map),
         long_term_memories=sum(1 for row in db.scalars(select(LongTermMemory)) if row.session_id in session_map),
         research_reports=sum(1 for row in db.scalars(select(ResearchReport)) if getattr(row, "source_chat_session_id", None) in session_map),
+        escalation_records=sum(
+            1 for row in escalation_records
+            if (getattr(row, "source_session_id", None) or legacy_escalation_sessions.get(str(row.id))) in session_map
+        ) if escalation_table_exists else 0,
     )
     report.target_counts.update(
         run_attachments=report.dependency_counts["chat_attachments"],
         run_session_context=report.dependency_counts["chat_session_context"],
         run_memories=report.dependency_counts["long_term_memories"],
         run_research_reports=report.dependency_counts["research_reports"],
+        run_escalation_records=report.dependency_counts["escalation_records"],
     )
     if apply:
         # Once every escalation row has a resolvable RunSession, finish the
