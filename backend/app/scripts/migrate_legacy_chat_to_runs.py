@@ -82,8 +82,9 @@ def _maintenance_bootstrap(db: Any) -> None:
         inspector = inspect(connection)
         bridge_columns = {
             "chat_attachments": {
+                "tenant_id": "UUID",
                 "run_session_id": "UUID REFERENCES run_sessions(id) ON DELETE SET NULL",
-                "run_message_id": "UUID REFERENCES run_messages(id) ON DELETE SET NULL",
+                "run_message_id": "UUID",
             },
             "chat_session_context": {
                 "run_session_id": "UUID REFERENCES run_sessions(id) ON DELETE SET NULL",
@@ -103,6 +104,28 @@ def _maintenance_bootstrap(db: Any) -> None:
             for column, definition in columns.items():
                 if column not in existing:
                     connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'))
+        if inspector.has_table("chat_attachments"):
+            # Older installs created single-column FKs to globally unique
+            # ids.  RunMessage ids are only unique within tenant/session, so
+            # replace those constraints with the provenance-safe composite FK.
+            for fk in inspector.get_foreign_keys("chat_attachments"):
+                if (fk.get("referred_table") or "") in {"run_messages", "run_sessions"}:
+                    name = fk.get("name")
+                    if name:
+                        connection.execute(text(f'ALTER TABLE "chat_attachments" DROP CONSTRAINT IF EXISTS "{name}"'))
+            connection.execute(text("""
+                DO $$ BEGIN
+                  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_chat_attachments_run_session') THEN
+                    ALTER TABLE chat_attachments ADD CONSTRAINT fk_chat_attachments_run_session
+                      FOREIGN KEY (tenant_id, run_session_id) REFERENCES run_sessions(tenant_id, id) ON DELETE SET NULL;
+                  END IF;
+                  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_chat_attachments_run_message') THEN
+                    ALTER TABLE chat_attachments ADD CONSTRAINT fk_chat_attachments_run_message
+                      FOREIGN KEY (tenant_id, run_session_id, run_message_id)
+                      REFERENCES run_messages(tenant_id, session_id, id) ON DELETE SET NULL;
+                  END IF;
+                END $$
+            """))
         connection.execute(
             text(
                 """CREATE TABLE IF NOT EXISTS run_legacy_mappings (
@@ -227,6 +250,8 @@ def migrate_legacy_chat(
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
     if cleanup:
+        if not apply:
+            raise ValueError("cleanup requires --apply")
         if not confirm_drop_legacy_data:
             raise ValueError("cleanup requires --confirm-drop-legacy-data")
         if not database:
@@ -332,6 +357,7 @@ def migrate_legacy_chat(
                     continue
                 if apply:
                     if model is ChatAttachment:
+                        row.tenant_id = session_map[sid]
                         row.run_session_id = sid
                         row.run_message_id = row.message_id
                     elif model is ChatSessionContext or model is LongTermMemory:

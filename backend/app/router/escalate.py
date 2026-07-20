@@ -181,7 +181,21 @@ async def _session_owned_by(
         sess = await chat_session_repo.get_session(session_id)
     except (ValueError, AttributeError, TypeError):
         return False
-    return sess is not None and str(sess.user_id) == str(user.id)
+    if sess is None:
+        return False
+    # RunSession has no legacy ``user_id``.  The creator is always allowed;
+    # other users must prove membership in the owning tenant.  This keeps the
+    # endpoint tenant-scoped while preserving the 404 anti-enumeration policy.
+    if str(getattr(sess, "created_by_user_id", "")) == str(user.id):
+        return True
+    tenant_id = getattr(sess, "tenant_id", None)
+    membership_check = getattr(chat_session_repo, "session_belongs_to_tenant", None)
+    if tenant_id is None or membership_check is None:
+        return False
+    allowed = membership_check(session_id, tenant_id, user.id)
+    if hasattr(allowed, "__await__"):
+        allowed = await allowed
+    return bool(allowed)
 
 
 async def _source_context_allowed(
