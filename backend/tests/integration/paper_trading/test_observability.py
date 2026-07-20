@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -24,6 +25,7 @@ from app.router.paper_trading_router import (
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import FixedTradingCalendar, TradingClock
 from app.services.paper_trading.observability import (
+    PaperTradingAnalytics,
     emit_paper_order_span,
     paper_order_span,
     paper_system_span,
@@ -358,16 +360,24 @@ def test_dispatch_recovery_requires_unpaired_persisted_failure_and_is_consumed_o
         session_factory=factory,
     )
 
-    TraceService(factory).write_span(
-        paper_order_span(
-            order_id=order_id,
-            name="dispatch",
-            started_at=now,
-            ended_at=now,
-            attrs={"dispatch_failed": True, "outcome": "failure"},
-            error="dispatch_failed",
-        )
+    first_failure = paper_order_span(
+        order_id=order_id,
+        name="dispatch",
+        started_at=now,
+        ended_at=now,
+        attrs={"dispatch_failed": True, "outcome": "failure"},
+        error="dispatch_failed",
     )
+    TraceService(factory).write_span(first_failure)
+    same_incident_failure = paper_order_span(
+        order_id=order_id,
+        name="dispatch",
+        started_at=now,
+        ended_at=now,
+        attrs={"dispatch_failed": True, "outcome": "failure"},
+        error="dispatch_failed",
+    )
+    TraceService(factory).write_span(same_incident_failure)
 
     # A new factory represents a worker process after restart.
     restarted_factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
@@ -384,6 +394,28 @@ def test_dispatch_recovery_requires_unpaired_persisted_failure_and_is_consumed_o
         session_factory=restarted_factory,
     )
 
+    second_failure = paper_order_span(
+        order_id=order_id,
+        name="dispatch",
+        started_at=now,
+        ended_at=now,
+        attrs={"dispatch_failed": True, "outcome": "failure"},
+        error="dispatch_failed",
+    )
+    TraceService(factory).write_span(second_failure)
+    assert record_dispatch_recovery_if_pending(
+        order_id=order_id,
+        started_at=now - timedelta(hours=1),
+        parent_id="clock-rolled-back",
+        session_factory=restarted_factory,
+    )
+    assert not record_dispatch_recovery_if_pending(
+        order_id=order_id,
+        started_at=now - timedelta(hours=2),
+        parent_id="repeat-after-clock-rollback",
+        session_factory=restarted_factory,
+    )
+
     with restarted_factory() as session:
         rows = (
             session.query(TraceSpanRow)
@@ -393,7 +425,49 @@ def test_dispatch_recovery_requires_unpaired_persisted_failure_and_is_consumed_o
             )
             .all()
         )
-    assert sum(dict(row.attrs_json).get("dispatch_recovered") is True for row in rows) == 1
+    recovery_rows = [row for row in rows if dict(row.attrs_json).get("dispatch_recovered") is True]
+    assert len(recovery_rows) == 2
+    consumed = {
+        span_id
+        for row in recovery_rows
+        for span_id in dict(row.attrs_json)["recovered_failure_span_ids"]
+    }
+    assert consumed == {
+        first_failure.span_id,
+        same_incident_failure.span_id,
+        second_failure.span_id,
+    }
+    assert sorted(
+        int(dict(row.attrs_json)["recovered_failure_count"]) for row in recovery_rows
+    ) == [1, 2]
+
+
+def test_concurrent_scans_consume_one_failure_identity_once(pg_test_engine: Engine) -> None:
+    factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    order_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    TraceService(factory).write_span(
+        paper_order_span(
+            order_id=order_id,
+            name="dispatch",
+            started_at=now,
+            ended_at=now,
+            attrs={"dispatch_failed": True, "outcome": "failure"},
+            error="dispatch_failed",
+        )
+    )
+
+    def consume(index: int) -> bool:
+        return record_dispatch_recovery_if_pending(
+            order_id=order_id,
+            started_at=now + timedelta(seconds=index),
+            parent_id=f"concurrent-{index}",
+            session_factory=factory,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(consume, (1, 2)))
+    assert sorted(results) == [False, True]
 
 
 def test_paper_trading_aggregates_lifecycle_and_operational_metrics(
@@ -403,6 +477,8 @@ def test_paper_trading_aggregates_lifecycle_and_operational_metrics(
     response = _client(db_session).get("/api/v0/observability/paper-trading")
     assert response.status_code == 200
     body = response.json()
+    assert body["window_hours"] == 24
+    assert body["window_start"] < body["window_end"]
     assert body["orders_by_status"] == {
         "awaiting_confirmation": 1,
         "partially_filled": 1,
@@ -426,6 +502,51 @@ def test_paper_trading_aggregates_lifecycle_and_operational_metrics(
     assert body["match_conflicts"] == 1
     assert body["dispatch_failures"] == 1
     assert body["dispatch_recoveries"] == 1
+
+
+def test_span_metrics_use_half_open_bounded_window_without_materializing_models(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    end = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    start = end - timedelta(hours=24)
+    for label, timestamp, violations in (
+        ("outside", start - timedelta(microseconds=1), 100),
+        ("start", start, 2),
+        ("end", end, 200),
+    ):
+        db_session.add(
+            TraceSpanRow(
+                span_id=f"window-{label}-{uuid.uuid4()}",
+                request_id=f"paper-system-{uuid.uuid4()}",
+                parent_id=None,
+                name="paper:reconcile",
+                inputs={},
+                outputs={},
+                attrs_json={"outcome": "violation", "violation_count": violations},
+                started_at=timestamp,
+                ended_at=timestamp,
+                error=None,
+            )
+        )
+    db_session.flush()
+
+    def forbid_model_materialization(*_args, **_kwargs):
+        raise AssertionError("aggregate must not materialize ORM model rows")
+
+    monkeypatch.setattr(db_session, "scalars", forbid_model_materialization)
+    result = PaperTradingAnalytics(lambda: nullcontext(db_session), now=lambda: end).aggregate(
+        hours=24
+    )
+
+    assert result.window_start == start
+    assert result.window_end == end
+    assert result.reconciliation_violations == 2
+
+
+@pytest.mark.parametrize("hours", [0, 169])
+def test_paper_trading_window_hours_are_strictly_bounded(db_session: Session, hours: int) -> None:
+    response = _client(db_session).get(f"/api/v0/observability/paper-trading?hours={hours}")
+    assert response.status_code == 422
 
 
 def test_paper_trading_endpoint_never_returns_pii_or_quote_payload(

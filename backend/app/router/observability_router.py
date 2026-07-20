@@ -28,8 +28,10 @@ _SESSION_FACTORY = SessionLocal
 
 
 @router.get("/paper-trading", response_model=PaperTradingAggregates)
-def paper_trading_aggregates() -> PaperTradingAggregates:
-    return PaperTradingAnalytics(_SESSION_FACTORY).aggregate()
+def paper_trading_aggregates(
+    hours: int = Query(24, ge=1, le=168),
+) -> PaperTradingAggregates:
+    return PaperTradingAnalytics(_SESSION_FACTORY).aggregate(hours=hours)
 
 
 @router.get("/chatloop/aggregates", response_model=ChatloopAggregates)

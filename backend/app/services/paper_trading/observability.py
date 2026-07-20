@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import logging
 import re
-from collections import Counter
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime, timedelta
-from statistics import mean
-from typing import cast
+from typing import Any, cast
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -36,6 +34,8 @@ _SAFE_ATTRS = frozenset(
         "order_type",
         "outcome",
         "reconciliation_errors",
+        "recovered_failure_count",
+        "recovered_failure_span_ids",
         "retry",
         "side",
         "status",
@@ -43,13 +43,87 @@ _SAFE_ATTRS = frozenset(
     }
 )
 _SAFE_TEXT = re.compile(r"^[a-z0-9_.:-]{1,64}$")
-_TERMINAL = {
-    OrderStatus.FILLED,
-    OrderStatus.CANCELLED,
-    OrderStatus.EXPIRED,
-    OrderStatus.REJECTED,
-}
-_PROCESSING_SPANS = {"paper:match", "paper:settle"}
+
+_FIRST_PROCESSING_SQL = text(
+    """
+    WITH first_processing AS (
+        SELECT metadata->>'order_id' AS order_id, min(started_at) AS first_at
+        FROM trace_spans
+        WHERE name IN ('paper:match', 'paper:settle')
+          AND started_at >= :window_start AND started_at < :window_end
+          AND metadata ? 'order_id'
+        GROUP BY metadata->>'order_id'
+    ), latencies AS (
+        SELECT extract(epoch FROM (processing.first_at - orders.confirmed_at)) * 1000 AS ms
+        FROM paper_orders AS orders
+        JOIN first_processing AS processing ON processing.order_id = orders.id::text
+        WHERE orders.confirmed_at IS NOT NULL
+          AND processing.first_at >= orders.confirmed_at
+    )
+    SELECT count(*) AS count,
+           COALESCE(avg(ms), 0) AS avg_ms,
+           COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms), 0) AS p95_ms,
+           COALESCE(max(ms), 0) AS max_ms
+    FROM latencies
+    """
+)
+
+_TERMINAL_LATENCY_SQL = text(
+    """
+    WITH latencies AS (
+        SELECT extract(epoch FROM (completed_at - confirmed_at)) * 1000 AS ms
+        FROM paper_orders
+        WHERE status IN ('filled', 'cancelled', 'expired', 'rejected')
+          AND confirmed_at IS NOT NULL AND completed_at >= confirmed_at
+          AND completed_at >= :window_start AND completed_at < :window_end
+    )
+    SELECT count(*) AS count,
+           COALESCE(avg(ms), 0) AS avg_ms,
+           COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY ms), 0) AS p95_ms,
+           COALESCE(max(ms), 0) AS max_ms
+    FROM latencies
+    """
+)
+
+_MATCH_OUTCOMES_SQL = text(
+    """
+    SELECT metadata->>'outcome' AS outcome, count(*) AS count
+    FROM trace_spans
+    WHERE name = 'paper:match'
+      AND started_at >= :window_start AND started_at < :window_end
+      AND metadata ? 'outcome'
+    GROUP BY metadata->>'outcome'
+    ORDER BY metadata->>'outcome'
+    """
+)
+
+_SPAN_TOTALS_SQL = text(
+    """
+    SELECT
+      count(*) FILTER (WHERE metadata->>'idempotent_replay' = 'true')
+        AS idempotency_intercepts,
+      COALESCE(sum(CASE WHEN metadata ? 'violation_count'
+                        THEN (metadata->>'violation_count')::integer ELSE 0 END), 0)
+        AS reconciliation_violations,
+      COALESCE(sum(CASE WHEN metadata ? 'reconciliation_errors'
+                        THEN (metadata->>'reconciliation_errors')::integer ELSE 0 END), 0)
+        AS reconciliation_errors,
+      count(*) FILTER (WHERE name = 'paper:match' AND metadata->>'outcome' = 'failure')
+        AS match_failures,
+      count(*) FILTER (WHERE name = 'paper:match'
+                        AND metadata->>'error_code' = 'match_pass_conflict')
+        AS match_conflicts,
+      count(*) FILTER (WHERE name = 'paper:dispatch'
+                        AND metadata->>'dispatch_failed' = 'true')
+        AS dispatch_failures,
+      count(*) FILTER (WHERE name = 'paper:dispatch'
+                        AND metadata->>'dispatch_recovered' = 'true')
+        AS dispatch_recoveries
+    FROM trace_spans
+    WHERE started_at >= :window_start AND started_at < :window_end
+      AND name LIKE 'paper:%'
+    """
+)
 
 
 class LatencySummary(BaseModel):
@@ -64,6 +138,9 @@ class LatencySummary(BaseModel):
 class PaperTradingAggregates(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    window_hours: int
+    window_start: datetime
+    window_end: datetime
     orders_by_status: dict[str, int] = Field(default_factory=dict)
     stuck_orders: int = 0
     confirmation_to_first_processing_ms: LatencySummary = Field(default_factory=LatencySummary)
@@ -211,30 +288,32 @@ def record_dispatch_recovery_if_pending(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
                 {"key": f"paper-dispatch-recovery:{order_id}"},
             )
-            rows = list(
-                session.scalars(
-                    select(TraceSpanRow)
-                    .where(
-                        TraceSpanRow.request_id == str(order_id),
-                        TraceSpanRow.name == "paper:dispatch",
-                    )
-                    .order_by(TraceSpanRow.ended_at, TraceSpanRow.span_id)
-                ).all()
+            pending_failure_span_ids = list(
+                session.execute(
+                    text(
+                        """
+                    SELECT failure.span_id
+                    FROM trace_spans AS failure
+                    WHERE failure.request_id = :request_id
+                      AND failure.name = 'paper:dispatch'
+                      AND failure.metadata->>'dispatch_failed' = 'true'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM trace_spans AS recovery
+                          WHERE recovery.request_id = failure.request_id
+                            AND recovery.name = 'paper:dispatch'
+                            AND (
+                                recovery.metadata->'recovered_failure_span_ids' ? failure.span_id
+                                OR recovery.metadata->>'recovered_failure_span_id' = failure.span_id
+                            )
+                      )
+                    ORDER BY failure.span_id
+                    """
+                    ),
+                    {"request_id": str(order_id)},
+                ).scalars()
             )
-            last_recovery_at = max(
-                (
-                    cast(datetime, row.ended_at)
-                    for row in rows
-                    if dict(row.attrs_json or {}).get("dispatch_recovered") is True
-                ),
-                default=None,
-            )
-            has_pending_failure = any(
-                dict(row.attrs_json or {}).get("dispatch_failed") is True
-                and (last_recovery_at is None or cast(datetime, row.ended_at) > last_recovery_at)
-                for row in rows
-            )
-            if not has_pending_failure:
+            if not pending_failure_span_ids:
                 session.commit()
                 return False
             span = paper_order_span(
@@ -242,7 +321,14 @@ def record_dispatch_recovery_if_pending(
                 name="dispatch",
                 started_at=started_at,
                 ended_at=max(started_at, datetime.now(UTC)),
-                attrs={"dispatch_recovered": True, "outcome": "recovered"},
+                attrs={
+                    "dispatch_recovered": True,
+                    "outcome": "recovered",
+                    "recovered_failure_count": len(pending_failure_span_ids),
+                    "recovered_failure_span_ids": [
+                        str(span_id) for span_id in pending_failure_span_ids
+                    ],
+                },
             ).model_copy(update={"parent_id": parent_id})
             session.add(_trace_row(span))
             session.commit()
@@ -267,109 +353,95 @@ class PaperTradingAnalytics:
         self._now = now or (lambda: datetime.now(UTC))
         self._stuck_after = stuck_after
 
-    def aggregate(self) -> PaperTradingAggregates:
+    def aggregate(self, *, hours: int = 24) -> PaperTradingAggregates:
+        if isinstance(hours, bool) or not isinstance(hours, int) or not 1 <= hours <= 168:
+            raise ValueError("hours must be between 1 and 168")
+        window_end = self._now()
+        window_start = window_end - timedelta(hours=hours)
+        params = {"window_start": window_start, "window_end": window_end}
+        stuck_before = window_end - self._stuck_after
+
         with self._session_factory() as session:
-            orders = list(session.scalars(select(PaperOrder)).all())
-            spans = list(
-                session.scalars(select(TraceSpanRow).where(TraceSpanRow.name.like("paper:%"))).all()
+            status_rows = session.execute(
+                select(PaperOrder.status, func.count()).group_by(PaperOrder.status)
+            ).all()
+            stuck_orders = int(
+                session.scalar(
+                    select(func.count(PaperOrder.id)).where(
+                        PaperOrder.status.in_(
+                            [
+                                OrderStatus.QUEUED,
+                                OrderStatus.OPEN,
+                                OrderStatus.PARTIALLY_FILLED,
+                            ]
+                        ),
+                        PaperOrder.confirmed_at.is_not(None),
+                        PaperOrder.confirmed_at <= stuck_before,
+                    )
+                )
+                or 0
             )
+            reject_rows = session.execute(
+                select(PaperOrder.reject_code, func.count())
+                .where(
+                    PaperOrder.status == OrderStatus.REJECTED,
+                    PaperOrder.reject_code.is_not(None),
+                    PaperOrder.completed_at >= window_start,
+                    PaperOrder.completed_at < window_end,
+                )
+                .group_by(PaperOrder.reject_code)
+            ).all()
+            first_latency = session.execute(_FIRST_PROCESSING_SQL, params).mappings().one()
+            terminal_latency = session.execute(_TERMINAL_LATENCY_SQL, params).mappings().one()
+            outcome_rows = session.execute(_MATCH_OUTCOMES_SQL, params).all()
+            totals = session.execute(_SPAN_TOTALS_SQL, params).mappings().one()
 
-        by_status = Counter(cast(OrderStatus, order.status).value for order in orders)
-        reject_codes = Counter(
-            cast(str, order.reject_code)
-            for order in orders
-            if order.status is OrderStatus.REJECTED and order.reject_code
-        )
-        first_processing: dict[str, datetime] = {}
-        match_outcomes: Counter[str] = Counter()
-        idempotency_intercepts = reconciliation_violations = reconciliation_errors = 0
-        dispatch_failures = dispatch_recoveries = 0
-        match_failures = match_conflicts = 0
-        for span in spans:
-            metadata = dict(span.attrs_json or {})
-            order_id = metadata.get("order_id")
-            if span.name in _PROCESSING_SPANS and isinstance(order_id, str):
-                span_started_at = cast(datetime, span.started_at)
-                current = first_processing.get(order_id)
-                if current is None or span_started_at < current:
-                    first_processing[order_id] = span_started_at
-            if span.name == "paper:match":
-                outcome = metadata.get("outcome")
-                if isinstance(outcome, str):
-                    match_outcomes[outcome] += 1
-                match_failures += int(outcome == "failure")
-                match_conflicts += int(metadata.get("error_code") == "match_pass_conflict")
-            idempotency_intercepts += int(metadata.get("idempotent_replay") is True)
-            reconciliation_violations += _nonnegative_int(metadata.get("violation_count"))
-            reconciliation_errors += _nonnegative_int(metadata.get("reconciliation_errors"))
-            dispatch_failures += int(metadata.get("dispatch_failed") is True)
-            dispatch_recoveries += int(metadata.get("dispatch_recovered") is True)
-
-        first_latencies: list[float] = []
-        terminal_latencies: list[float] = []
-        for order in orders:
-            confirmed_at = cast(datetime | None, order.confirmed_at)
-            if confirmed_at is None:
-                continue
-            first = first_processing.get(str(order.id))
-            if first is not None and first >= confirmed_at:
-                first_latencies.append((first - confirmed_at).total_seconds() * 1000)
-            completed_at = cast(datetime | None, order.completed_at)
-            if (
-                order.status in _TERMINAL
-                and completed_at is not None
-                and completed_at >= confirmed_at
-            ):
-                terminal_latencies.append((completed_at - confirmed_at).total_seconds() * 1000)
-
-        stuck_before = self._now() - self._stuck_after
-        stuck_orders = sum(
-            1
-            for order in orders
-            if order.status in {OrderStatus.QUEUED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}
-            and order.confirmed_at is not None
-            and order.confirmed_at <= stuck_before
-        )
+        orders_by_status = {
+            cast(OrderStatus, status).value: int(count) for status, count in status_rows
+        }
         return PaperTradingAggregates(
-            orders_by_status=dict(sorted(by_status.items())),
+            window_hours=hours,
+            window_start=window_start,
+            window_end=window_end,
+            orders_by_status=dict(sorted(orders_by_status.items())),
             stuck_orders=stuck_orders,
-            confirmation_to_first_processing_ms=_latency_summary(first_latencies),
-            confirmation_to_terminal_ms=_latency_summary(terminal_latencies),
-            reject_codes=dict(sorted(reject_codes.items())),
-            idempotency_intercepts=idempotency_intercepts,
-            reconciliation_violations=reconciliation_violations,
-            reconciliation_errors=reconciliation_errors,
-            match_outcomes=dict(sorted(match_outcomes.items())),
-            match_failures=match_failures,
-            match_conflicts=match_conflicts,
-            dispatch_failures=dispatch_failures,
-            dispatch_recoveries=dispatch_recoveries,
+            confirmation_to_first_processing_ms=_latency_from_row(first_latency),
+            confirmation_to_terminal_ms=_latency_from_row(terminal_latency),
+            reject_codes={str(code): int(count) for code, count in sorted(reject_rows)},
+            idempotency_intercepts=int(totals["idempotency_intercepts"] or 0),
+            reconciliation_violations=int(totals["reconciliation_violations"] or 0),
+            reconciliation_errors=int(totals["reconciliation_errors"] or 0),
+            match_outcomes={str(outcome): int(count) for outcome, count in outcome_rows},
+            match_failures=int(totals["match_failures"] or 0),
+            match_conflicts=int(totals["match_conflicts"] or 0),
+            dispatch_failures=int(totals["dispatch_failures"] or 0),
+            dispatch_recoveries=int(totals["dispatch_recoveries"] or 0),
         )
 
 
-def _latency_summary(values: list[float]) -> LatencySummary:
-    if not values:
-        return LatencySummary()
-    ordered = sorted(values)
-    index = max(0, int((len(ordered) * 0.95) + 0.999999) - 1)
+def _latency_from_row(row: object) -> LatencySummary:
+    values = cast(dict[str, Any], row)
     return LatencySummary(
-        count=len(ordered),
-        avg_ms=round(mean(ordered), 3),
-        p95_ms=round(ordered[index], 3),
-        max_ms=round(ordered[-1], 3),
+        count=int(values["count"] or 0),
+        avg_ms=round(float(values["avg_ms"] or 0), 3),
+        p95_ms=round(float(values["p95_ms"] or 0), 3),
+        max_ms=round(float(values["max_ms"] or 0), 3),
     )
-
-
-def _nonnegative_int(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int):
-        return 0
-    return max(value, 0)
 
 
 def _privacy_safe_attrs(attrs: dict[str, object]) -> dict[str, object]:
     safe: dict[str, object] = {}
     for key, value in attrs.items():
-        if key not in _SAFE_ATTRS or not isinstance(value, (bool, int, float, str)):
+        if key not in _SAFE_ATTRS:
+            continue
+        if key == "recovered_failure_span_ids" and isinstance(value, (list, tuple)):
+            identifiers = [item for item in value if isinstance(item, str)]
+            if len(identifiers) == len(value) and all(
+                _SAFE_TEXT.fullmatch(item) is not None for item in identifiers
+            ):
+                safe[key] = identifiers
+            continue
+        if not isinstance(value, (bool, int, float, str)):
             continue
         if isinstance(value, str) and _SAFE_TEXT.fullmatch(value) is None:
             continue
