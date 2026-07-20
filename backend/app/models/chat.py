@@ -5,7 +5,6 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
-    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -125,11 +124,6 @@ class ChatMessage(Base):
     research_report_id = Column(String(64), nullable=True)
     research_report_summary = Column(Text, nullable=True)
     tool_call_data = Column(JSONB(), nullable=True)
-    task_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("chat_tasks.id", ondelete="SET NULL"),
-        nullable=True,
-    )
     status = Column(
         String(16),
         nullable=False,
@@ -140,54 +134,6 @@ class ChatMessage(Base):
     # 关系
     session = relationship("ChatSession", back_populates="messages")
     attachments = relationship("ChatAttachment", back_populates="message")
-
-
-class ChatTask(Base):
-    """聊天任务模型(Plan 1 落地;Plan 2 由 Celery worker 写入)"""
-
-    __tablename__ = "chat_tasks"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    session_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    user_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=True,
-    )  # anonymous pre-auth: None;C.6 接 JWT 后 always 真 user UUID
-    status = Column(
-        String(16),
-        nullable=False,
-        default="queued",
-        server_default="queued",
-    )  # queued|running|done|cancelled|partial|error
-    langgraph_thread_id = Column(String(128), nullable=False)
-    langgraph_checkpoint_id = Column(String(128), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    started_at = Column(DateTime, nullable=True)
-    finished_at = Column(DateTime, nullable=True)
-    error_message = Column(Text, nullable=True)
-    last_event_seq = Column(BigInteger, nullable=False, default=0, server_default="0")
-    initial_prompt_message_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("chat_messages.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-    parent_task_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("chat_tasks.id", ondelete="SET NULL"),
-        nullable=True,
-    )
-
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('queued','running','done','cancelled','partial','error')",
-            name="chat_tasks_status_check",
-        ),
-    )
 
 
 class ChatSessionContext(Base):
@@ -207,7 +153,12 @@ class ChatSessionContext(Base):
     # 已总结到的最后一条 message id(水位);水位之前的消息永不再次参与总结
     summarized_upto = Column(UUID(as_uuid=True), nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    run_session_id = Column(UUID(as_uuid=True), ForeignKey("run_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    run_session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("run_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
 
 class LongTermMemory(Base):
@@ -220,7 +171,12 @@ class LongTermMemory(Base):
     session_id = Column(
         UUID(as_uuid=True), ForeignKey("chat_sessions.id", ondelete="SET NULL"), nullable=True
     )
-    run_session_id = Column(UUID(as_uuid=True), ForeignKey("run_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    run_session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("run_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     summary = Column(Text, nullable=False)  # 记忆摘要
     key_insights = Column(JSONB)  # 关键洞察
     milvus_ids = Column(ARRAY(Text))  # Milvus 中的向量 ID

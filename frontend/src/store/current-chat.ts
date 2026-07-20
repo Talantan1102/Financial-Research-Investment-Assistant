@@ -63,9 +63,8 @@ export type StreamingPhase =
 export interface CurrentChatState {
   session_id: string | null
   // Plan 3 Task 7: 当前 in-flight task(streaming 中)的 UUID。
-  // sendMessage 拿到 POST /chat 返的 task_id 后 set;done/error event 后 clear。
+  // Run event transport updates status and clears the active run on completion.
   // InputArea 据此切换 send ↔ stop button;ChatPane 据此判断是否要 cancel。
-  active_task_id: string | null
   active_run_id: string | null
   active_run_status: RunStatus | null
   last_event_id: string | null
@@ -91,7 +90,6 @@ export interface CurrentChatState {
 
 const INITIAL: CurrentChatState = {
   session_id: null,
-  active_task_id: null,
   active_run_id: null,
   active_run_status: null,
   last_event_id: null,
@@ -132,7 +130,6 @@ function flushDraftAsMessage() {
 export const currentChatActions = {
   setSession(session_id: string, messages: ChatMessage[]) {
     currentChatState.session_id = session_id
-    currentChatState.active_task_id = null
     currentChatState.active_run_id = null
     currentChatState.active_run_status = null
     currentChatState.last_event_id = null
@@ -147,9 +144,6 @@ export const currentChatActions = {
     currentChatState.loop_progress = null
     currentChatState.halt_reason = null
     currentChatState.dispatchLanes = []
-  },
-  setActiveTaskId(taskId: string | null) {
-    currentChatState.active_task_id = taskId
   },
   adoptRunSession(sessionId: string) {
     currentChatState.session_id = sessionId
@@ -382,7 +376,6 @@ export const currentChatActions = {
         currentChatState.streamingStatus = 'idle'
         currentChatState.streaming_phase = 'idle'
         // Plan 3 Task 7: terminal event → clear in-flight task tracker
-        currentChatState.active_task_id = null
         currentChatState.loop_progress = null
         // Preserve halt_reason banner only when the turn ended non-naturally.
         // stop_reason missing (field absent) → keep existing halt_reason so a
@@ -401,7 +394,6 @@ export const currentChatActions = {
         currentChatState.streaming_phase = 'error'
         currentChatState.errorMessage = (ev as ErrorEvent).error
         // Plan 3 Task 7: terminal event → clear in-flight task tracker
-        currentChatState.active_task_id = null
         currentChatState.loop_progress = null
         currentChatState.toolEvents.push(ev as ErrorEvent)
         break
@@ -413,12 +405,11 @@ export const currentChatActions = {
    *
    * Called by the Run event transport when a UI-initiated
    * stop (abort fallback or explicit cancel) always brings the UI back to a
-   * usable idle state — even if the active_task_id was never set (POST still
+   * usable idle state after a Run reaches a terminal status.
    * pending) or if the backend never sent a terminal done/error frame.
    */
   resetStreaming() {
     currentChatState.streamingStatus = 'idle'
-    currentChatState.active_task_id = null
     currentChatState.streaming_phase = 'idle'
     currentChatState.streaming_phase_label = undefined
     currentChatState.streamingDraft = ''
@@ -433,7 +424,6 @@ export const currentChatActions = {
   },
   reset() {
     currentChatState.session_id = INITIAL.session_id
-    currentChatState.active_task_id = INITIAL.active_task_id
     currentChatState.active_run_id = INITIAL.active_run_id
     currentChatState.active_run_status = INITIAL.active_run_status
     currentChatState.last_event_id = INITIAL.last_event_id

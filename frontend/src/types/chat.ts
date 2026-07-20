@@ -266,10 +266,6 @@ export interface ChatMessage {
   research_report_id: string | null
   research_report_summary: string | null
   created_at: string
-  // Plan 3 Task 7: backend GET /chats/{sid} 已返 task_id + status per message
-  // (router/chats.py)。前端用以渲染 retry button(error/partial 后)。
-  // 老消息可能为 null/缺失 — optional 即可。
-  task_id?: string | null
   status?: ChatMessageStatus
   // run_python 产出的交互图(message_type='chart');由 chart SSE 事件构造的本地消息携带。
   chart_spec?: PlotlySpec
@@ -278,19 +274,9 @@ export interface ChatMessage {
 export interface ChatDetail {
   session: ChatSession
   messages: ChatMessage[]
-  // Plan 2 Task 7: backend GET /chats/{sid} 返回当前 in-flight chat_task UUID
-  // (queued/running 状态),否则 null。前端切回 session 时用这字段 subscribe
-  // in-flight stream — Spec § 5.2 Scenario B 核心。
-  active_task_id?: string | null
 }
 
 export interface CreateChatRequest {
   title?: string
 }
 
-export interface SendChatMessageRequest {
-  session_id: string
-  content: string
-  forced_tool_name?: string
-  forced_tool_args?: Record<string, unknown>
-}
