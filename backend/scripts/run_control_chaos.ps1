@@ -35,6 +35,9 @@ function Invoke-BoundedNative {
             -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden
         $completed = $process.WaitForExit([Math]::Max(1, $Timeout) * 1000)
         if (-not $completed) {
+            # Native children (Python/Docker Compose) can outlive their parent;
+            # terminate the whole process tree before collecting evidence.
+            & taskkill.exe /PID $process.Id /T /F 2>$null | Out-Null
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             $script:LastNativeResult = [pscustomobject]@{
                 ExitCode = 124
@@ -57,6 +60,29 @@ function Get-RemainingSeconds {
     return [Math]::Max(1, [int][Math]::Ceiling(($deadline - [DateTime]::UtcNow).TotalSeconds))
 }
 
+function Append-FailureEvidence {
+    param([Parameter(Mandatory = $true)]$ErrorRecord, [Parameter(Mandatory = $true)][string]$Stage)
+    try {
+        $rows = @()
+        if (Test-Path -LiteralPath $env:RUN_CONTROL_CHAOS_EVIDENCE) {
+            $parsed = Get-Content -LiteralPath $env:RUN_CONTROL_CHAOS_EVIDENCE -Raw -Encoding utf8 | ConvertFrom-Json
+            if ($parsed -is [System.Array]) { $rows = @($parsed) } elseif ($parsed) { $rows = @($parsed) }
+        }
+        $rows += [pscustomobject][ordered]@{
+            stage = $Stage
+            project = $Project
+            failed_at_utc = [DateTime]::UtcNow.ToString("o")
+            error = $ErrorRecord.Exception.Message
+            exit_code = if ($script:LastNativeResult) { [int]$script:LastNativeResult.ExitCode } else { [int]$LASTEXITCODE }
+            docker_stderr = if ($script:LastNativeResult) { [string]$script:LastNativeResult.Stderr } else { $ErrorRecord.Exception.Message }
+            elapsed_seconds = ([DateTime]::UtcNow - $startedAt).TotalSeconds
+        }
+        [IO.File]::WriteAllText($env:RUN_CONTROL_CHAOS_EVIDENCE, ($rows | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+    } catch {
+        Write-Error ("Unable to persist $Stage chaos evidence: " + $_.Exception.Message)
+    }
+}
+
 if ($Project -notmatch '^rcp-[a-z0-9][a-z0-9-]{2,62}$') {
     throw "Project must be an isolated rcp-* name"
 }
@@ -72,6 +98,7 @@ try {
     if ([DateTime]::UtcNow -gt $deadline) { throw "Chaos suite exceeded bounded timeout" }
 }
 catch {
+    $script:PrimaryError = $_
     $failure = [ordered]@{
         project = $Project
         failed_at_utc = [DateTime]::UtcNow.ToString("o")
@@ -99,17 +126,20 @@ catch {
 }
 finally {
     try {
-        Invoke-BoundedNative -FilePath "docker" -Arguments @("compose", "-f", "docker-compose.yml", "-p", $Project, "--profile", "run-control", "down", "--volumes", "--remove-orphans") -Timeout $TimeoutSeconds
+        Invoke-BoundedNative -FilePath "docker" -Arguments @("compose", "-f", "docker-compose.yml", "-p", $Project, "--profile", "run-control", "down", "--volumes", "--remove-orphans") -Timeout (Get-RemainingSeconds)
         if ($script:LastNativeResult.ExitCode -ne 0) { throw "Scoped Compose cleanup failed for ${Project}: $($script:LastNativeResult.Stderr)" }
-        Invoke-BoundedNative -FilePath "docker" -Arguments @("ps", "-a", "--filter", "label=com.docker.compose.project=$Project", "--format", "{{.ID}}") -Timeout $TimeoutSeconds
+        Invoke-BoundedNative -FilePath "docker" -Arguments @("ps", "-a", "--filter", "label=com.docker.compose.project=$Project", "--format", "{{.ID}}") -Timeout (Get-RemainingSeconds)
         $leftovers = $script:LastNativeResult.Stdout
         if ($leftovers) { throw "Scoped cleanup left containers: $leftovers" }
-        Invoke-BoundedNative -FilePath "docker" -Arguments @("network", "ls", "--filter", "label=com.docker.compose.project=$Project", "--format", "{{.ID}}") -Timeout $TimeoutSeconds
+        Invoke-BoundedNative -FilePath "docker" -Arguments @("network", "ls", "--filter", "label=com.docker.compose.project=$Project", "--format", "{{.ID}}") -Timeout (Get-RemainingSeconds)
         $networks = $script:LastNativeResult.Stdout
         if ($networks) { throw "Scoped cleanup left networks: $networks" }
-        Invoke-BoundedNative -FilePath "docker" -Arguments @("volume", "ls", "--filter", "label=com.docker.compose.project=$Project", "--format", "{{.Name}}") -Timeout $TimeoutSeconds
+        Invoke-BoundedNative -FilePath "docker" -Arguments @("volume", "ls", "--filter", "label=com.docker.compose.project=$Project", "--format", "{{.Name}}") -Timeout (Get-RemainingSeconds)
         $volumes = $script:LastNativeResult.Stdout
         if ($volumes) { throw "Scoped cleanup left volumes: $volumes" }
+    } catch {
+        Append-FailureEvidence -ErrorRecord $_ -Stage "cleanup"
+        if (-not $script:PrimaryError) { throw }
     } finally {
         Pop-Location
     }

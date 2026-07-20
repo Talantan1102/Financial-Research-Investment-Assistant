@@ -149,6 +149,16 @@ def test_operator_script_wires_new_harness_and_evidence(tmp_path: Path) -> None:
     assert "--remove-orphans" in source
 
 
+def test_operator_script_bounds_children_cleanup_and_records_cleanup_failures() -> None:
+    script = Path(__file__).resolve().parents[2] / "scripts" / "run_control_chaos.ps1"
+    source = script.read_text(encoding="utf-8")
+    assert "WaitForExit" in source
+    assert "taskkill.exe /PID $process.Id /T /F" in source
+    assert source.count("-Timeout (Get-RemainingSeconds)") >= 7
+    assert 'Append-FailureEvidence -ErrorRecord $_ -Stage "cleanup"' in source
+    assert "$script:PrimaryError" in source
+
+
 def test_harness_requires_strict_health_and_real_restart_actions() -> None:
     source = (
         Path(__file__)
