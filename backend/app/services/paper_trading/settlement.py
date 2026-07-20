@@ -617,6 +617,12 @@ class PaperSettlementService:
         for row in history:
             if int(row.match_pass) >= first_snapshot_pass:
                 break
+            if int(row.matched_quantity) == 0:
+                if row.fill_id is not None or row.consumed_levels != []:
+                    raise PaperTradingError(
+                        "invalid_match_evidence", "match evidence history is inconsistent"
+                    )
+                continue
             fill = self._session.get(PaperFill, row.fill_id) if row.fill_id else None
             if (
                 fill is None

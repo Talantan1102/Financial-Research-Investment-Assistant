@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Generator
 
@@ -20,6 +21,22 @@ try:
     HAS_TESTCONTAINERS = True
 except ImportError:
     HAS_TESTCONTAINERS = False
+
+
+def _stop_worker(proc: subprocess.Popen[bytes]) -> None:
+    """Stop the worker and its uv/celery child processes on every platform."""
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
 
 
 @pytest.fixture(scope="session")
@@ -65,6 +82,7 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
             "default,llm",
             "--concurrency",
             "1",
+            "--pool=solo",
             "--loglevel",
             "INFO",
         ],
@@ -75,40 +93,38 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
         bufsize=1,
     )
 
-    # Wait for "ready" log line (max 60s — graph singleton build is heavy:
-    # imports langchain/langgraph + builds CompiledStateGraph at worker import time).
-    # Use select with short timeout so we re-check wall clock between readline calls
-    # (readline alone can block past deadline if pipe is silent).
-    import select
+    # Wait for "ready" without select(): Windows select only accepts sockets, not
+    # subprocess pipes. A daemon reader keeps the timeout enforceable everywhere.
+    import queue
+    import threading
+
+    lines: queue.Queue[bytes] = queue.Queue()
+
+    def _read_worker_output() -> None:
+        assert proc.stdout is not None
+        for line in iter(proc.stdout.readline, b""):
+            lines.put(line)
+
+    threading.Thread(target=_read_worker_output, daemon=True).start()
 
     start = time.time()
     ready = False
     while time.time() - start < 60:
-        if proc.stdout is None:
-            break
-        rlist, _, _ = select.select([proc.stdout], [], [], 0.5)
-        if not rlist:
+        try:
+            raw_line = lines.get(timeout=0.5)
+        except queue.Empty:
+            if proc.poll() is not None:
+                break
             continue
-        line = proc.stdout.readline().decode("utf-8", errors="ignore")
-        if not line:
-            # EOF — worker died
-            break
+        line = raw_line.decode("utf-8", errors="ignore")
         if "celery@" in line and "ready" in line:
             ready = True
             break
 
     if not ready:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _stop_worker(proc)
         pytest.skip("celery worker did not become ready in 60s")
 
     yield
 
-    proc.terminate()
-    try:
-        proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        proc.kill()
+    _stop_worker(proc)

@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from unittest.mock import MagicMock
+
+import pytest
+
+
+def test_tasks_are_registered_with_stable_names_and_late_ack() -> None:
+    from app.tasks.celery_app import celery_app
+    from app.tasks.paper_trading import (
+        expire_day_orders,
+        match_order,
+        open_queued_orders,
+        release_t1_lots,
+    )
+
+    assert match_order.name == "app.tasks.paper_trading.match_order"
+    assert match_order.acks_late is True
+    assert open_queued_orders.name == "app.tasks.paper_trading.open_queued_orders"
+    assert expire_day_orders.name == "app.tasks.paper_trading.expire_day_orders"
+    assert release_t1_lots.name == "app.tasks.paper_trading.release_t1_lots"
+    assert "app.tasks.paper_trading" in celery_app.conf.include
+
+
+def test_paper_trading_beat_schedule_uses_shanghai_market_times() -> None:
+    from app.tasks.celery_beat_schedule import beat_schedule
+
+    assert str(beat_schedule["paper_open_queued_morning"]["schedule"]) == (
+        "<crontab: 30 9 * * 1-5 (m/h/dM/MY/d)>"
+    )
+    assert str(beat_schedule["paper_open_queued_afternoon"]["schedule"]) == (
+        "<crontab: 0 13 * * 1-5 (m/h/dM/MY/d)>"
+    )
+    assert str(beat_schedule["paper_expire_day_orders"]["schedule"]) == (
+        "<crontab: 1 15 * * 1-5 (m/h/dM/MY/d)>"
+    )
+    assert str(beat_schedule["paper_release_t1_lots"]["schedule"]) == (
+        "<crontab: 20 9 * * 1-5 (m/h/dM/MY/d)>"
+    )
+
+
+class _Session:
+    def __init__(self) -> None:
+        self.committed = False
+        self.rolled_back = False
+        self.closed = False
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def rollback(self) -> None:
+        self.rolled_back = True
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_match_order_commits_and_closes_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.tasks.paper_trading as tasks
+
+    session = _Session()
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        tasks,
+        "_match_order_in_session",
+        MagicMock(return_value={"fill_ids": [], "matched_quantity": 0}),
+    )
+
+    result = tasks.match_order.run("00000000-0000-0000-0000-000000000001")
+
+    assert result == {"fill_ids": [], "matched_quantity": 0}
+    assert session.committed and session.closed
+    assert not session.rolled_back
+
+
+def test_match_order_rolls_back_closes_and_reraises(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.tasks.paper_trading as tasks
+
+    session = _Session()
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        tasks, "_match_order_in_session", MagicMock(side_effect=RuntimeError("boom"))
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        tasks.match_order.run(
+            "00000000-0000-0000-0000-000000000001",
+            datetime(2026, 7, 20, 1, 30, tzinfo=UTC).isoformat(),
+            1,
+        )
+
+    assert session.rolled_back and session.closed
+    assert not session.committed
+
+
+@pytest.mark.parametrize(
+    ("task_name", "runner_name", "result"),
+    [
+        ("open_queued_orders", "_open_queued_orders_in_session", 2),
+        ("expire_day_orders", "_expire_day_orders_in_session", 3),
+        ("release_t1_lots", "_release_t1_lots_in_session", 4),
+    ],
+)
+def test_maintenance_tasks_commit(
+    monkeypatch: pytest.MonkeyPatch, task_name: str, runner_name: str, result: int
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    session = _Session()
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: session)
+    monkeypatch.setattr(tasks, runner_name, MagicMock(return_value=result))
+
+    assert getattr(tasks, task_name).run() == result
+    assert session.committed and session.closed
+    assert not session.rolled_back

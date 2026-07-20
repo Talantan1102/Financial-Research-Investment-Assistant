@@ -41,4 +41,20 @@ beat_schedule = {
         "task": "app.tasks.chat_stale_scanner.scan_stale_chat_tasks",
         "schedule": 60.0,  # 每分钟一次
     },
+    "paper_open_queued_morning": {
+        "task": "app.tasks.paper_trading.open_queued_orders",
+        "schedule": crontab(minute=30, hour=9, day_of_week="1-5"),
+    },
+    "paper_open_queued_afternoon": {
+        "task": "app.tasks.paper_trading.open_queued_orders",
+        "schedule": crontab(minute=0, hour=13, day_of_week="1-5"),
+    },
+    "paper_expire_day_orders": {
+        "task": "app.tasks.paper_trading.expire_day_orders",
+        "schedule": crontab(minute=1, hour=15, day_of_week="1-5"),
+    },
+    "paper_release_t1_lots": {
+        "task": "app.tasks.paper_trading.release_t1_lots",
+        "schedule": crontab(minute=20, hour=9, day_of_week="1-5"),
+    },
 }

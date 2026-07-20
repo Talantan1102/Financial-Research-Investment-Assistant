@@ -336,6 +336,36 @@ def test_buy_fill_updates_every_projection_in_one_transaction(
     assert account.frozen_cash == Decimal("0.00")
 
 
+def test_fill_can_follow_a_persisted_zero_quantity_match_pass(
+    db_session: Session, user: User
+) -> None:
+    account = _account(db_session, user)
+    order = _buy_order(db_session, user, account)
+    empty_time = QUOTE_TIME - timedelta(seconds=1)
+    db_session.add(
+        PaperMatchPass(
+            order_id=order.id,
+            quote_timestamp=empty_time,
+            match_pass=1,
+            quote_source="actual-fixed",
+            snapshot_summary={"source": "actual-fixed"},
+            consumed_levels=[],
+            matched_quantity=0,
+        )
+    )
+    db_session.flush()
+
+    fill = _service(db_session).apply(
+        order_id=order.id,
+        execution=Execution(price=Decimal("10.00"), quantity=100),
+        quote_timestamp=QUOTE_TIME,
+        match_pass=2,
+    )
+
+    assert fill.fill_seq == 1
+    assert order.status is OrderStatus.FILLED
+
+
 def test_overdue_order_cannot_fill_when_expiry_task_was_missed(
     db_session: Session, user: User
 ) -> None:
