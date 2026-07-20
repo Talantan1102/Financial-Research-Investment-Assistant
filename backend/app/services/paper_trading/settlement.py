@@ -102,6 +102,11 @@ class PaperSettlementService:
             is not None
         )
         self._validate_execution(order, execution, check_remaining=not retry_exists)
+        settlement_time: datetime | None = None
+        if not retry_exists:
+            settlement_time = self._current_time()
+            if settlement_time >= order.expires_at:
+                raise PaperTradingError("order_expired", "paper order has expired")
         evidence = self._evidence_provider(
             order_id=order_id,
             quote_timestamp=quote_timestamp,
@@ -151,7 +156,7 @@ class PaperSettlementService:
             minimum_commission=cast(Decimal, account.minimum_commission),
         )
         incremental = _fee_delta(cumulative_fees, prior_fees)
-        executed_at = self._current_time()
+        executed_at = settlement_time or self._current_time()
         trade_id = uuid.uuid4()
         fill = PaperFill(
             order_id=order.id,

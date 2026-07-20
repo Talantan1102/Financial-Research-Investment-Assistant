@@ -98,6 +98,7 @@ class PaperAccountService:
         business_key: str,
         order_id: uuid.UUID | None = None,
         fill_id: uuid.UUID | None = None,
+        allow_archived: bool = False,
     ) -> PaperCashLedger:
         kind = _require_text(kind, field="kind", maximum=32, code="invalid_ledger_input")
         business_key = _require_text(
@@ -126,7 +127,10 @@ class PaperAccountService:
             raise PaperTradingError(
                 "invalid_ledger_account", "account must be persistent in this session"
             )
-        if account.status is not PaperAccountStatus.ACTIVE:
+        allowed_statuses = {PaperAccountStatus.ACTIVE}
+        if allow_archived:
+            allowed_statuses.add(PaperAccountStatus.ARCHIVED)
+        if account.status not in allowed_statuses:
             raise PaperTradingError("stale_account_generation", "账户已重置，请重新操作")
         if self._session.is_modified(account, include_collections=False):
             raise PaperTradingError(
@@ -140,7 +144,7 @@ class PaperAccountService:
                     PaperAccount.id == account.id,
                     PaperAccount.user_id == account.user_id,
                     PaperAccount.generation == account.generation,
-                    PaperAccount.status == PaperAccountStatus.ACTIVE,
+                    PaperAccount.status.in_(allowed_statuses),
                 )
                 .with_for_update()
                 .execution_options(populate_existing=True)
@@ -182,8 +186,8 @@ class PaperAccountService:
         )
         try:
             with self._session.begin_nested():
-                locked.available_cash = available_after
-                locked.frozen_cash = frozen_after
+                locked.available_cash = available_after  # type: ignore[assignment]
+                locked.frozen_cash = frozen_after  # type: ignore[assignment]
                 self._session.add(entry)
                 self._session.flush()
         except IntegrityError as exc:

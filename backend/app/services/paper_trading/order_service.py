@@ -358,36 +358,33 @@ class PaperOrderService:
 
     def expire_open_orders(self, *, at: datetime) -> int:
         at = _require_aware_time(at)
-        local = at.astimezone(SHANGHAI)
-        if not self.clock.calendar.is_open_date(local.date()) or local.time().replace(
-            tzinfo=None
-        ) < time(15):
-            return 0
         orders = self._session.scalars(
             select(PaperOrder)
-            .join(
-                PaperAccount,
-                (PaperAccount.id == PaperOrder.account_id)
-                & (PaperAccount.generation == PaperOrder.account_generation),
-            )
             .where(
                 PaperOrder.status.in_(
                     [OrderStatus.QUEUED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]
                 ),
                 PaperOrder.expires_at <= at,
-                PaperAccount.status == PaperAccountStatus.ACTIVE,
             )
             .order_by(PaperOrder.id)
             .with_for_update(of=PaperOrder, skip_locked=True)
             .execution_options(populate_existing=True)
         ).all()
+        expired = 0
         for order in orders:
-            account = self._active_order_account(order)
-            self._release_remaining_reservation(order=order, account=account)
+            account = self._order_account_for_expiry(order)
+            if account is None:
+                continue
+            self._release_remaining_reservation(
+                order=order,
+                account=account,
+                allow_archived=account.status is PaperAccountStatus.ARCHIVED,
+            )
             order.status = OrderStatus.EXPIRED  # type: ignore[assignment]
             order.completed_at = at  # type: ignore[assignment]
+            expired += 1
         self._session.flush()
-        return len(orders)
+        return expired
 
     def open_queued_orders(self, *, at: datetime) -> int:
         at = _require_aware_time(at)
@@ -409,10 +406,18 @@ class PaperOrderService:
             .with_for_update(of=PaperOrder, skip_locked=True)
             .execution_options(populate_existing=True)
         ).all()
+        opened = 0
         for order in orders:
+            try:
+                self._active_order_account(order)
+            except PaperTradingError as exc:
+                if exc.code == "stale_account_generation":
+                    continue
+                raise
             order.status = OrderStatus.OPEN  # type: ignore[assignment]
+            opened += 1
         self._session.flush()
-        return len(orders)
+        return opened
 
     def reset_account_confirmed(
         self,
@@ -471,7 +476,26 @@ class PaperOrderService:
             raise PaperTradingError("stale_account_generation", "账户已重置，请重新操作")
         return account
 
-    def _release_remaining_reservation(self, *, order: PaperOrder, account: PaperAccount) -> None:
+    def _order_account_for_expiry(self, order: PaperOrder) -> PaperAccount | None:
+        return self._session.scalar(
+            select(PaperAccount)
+            .where(
+                PaperAccount.id == order.account_id,
+                PaperAccount.user_id == order.user_id,
+                PaperAccount.generation == order.account_generation,
+                PaperAccount.status.in_([PaperAccountStatus.ACTIVE, PaperAccountStatus.ARCHIVED]),
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+
+    def _release_remaining_reservation(
+        self,
+        *,
+        order: PaperOrder,
+        account: PaperAccount,
+        allow_archived: bool = False,
+    ) -> None:
         if order.side is OrderSide.BUY:
             release = _money(cast(Decimal, order.reserved_cash))
             if release > cast(Decimal, account.frozen_cash):
@@ -485,6 +509,7 @@ class PaperOrderService:
                     frozen_after=_money(cast(Decimal, account.frozen_cash) - release),
                     business_key=f"order-release:{order.id}",
                     order_id=cast(uuid.UUID, order.id),
+                    allow_archived=allow_archived,
                 )
             order.reserved_cash = Decimal("0.00")
             return

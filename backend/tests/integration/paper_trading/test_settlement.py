@@ -336,6 +336,27 @@ def test_buy_fill_updates_every_projection_in_one_transaction(
     assert account.frozen_cash == Decimal("0.00")
 
 
+def test_overdue_order_cannot_fill_when_expiry_task_was_missed(
+    db_session: Session, user: User
+) -> None:
+    account = _account(db_session, user)
+    order = _buy_order(db_session, user, account)
+    service = _service(db_session, at=cast(datetime, order.expires_at) + timedelta(seconds=1))
+
+    with pytest.raises(PaperTradingError) as expired:
+        service.apply(
+            order_id=cast(uuid.UUID, order.id),
+            execution=Execution(price=Decimal("10.00"), quantity=100),
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+
+    assert expired.value.code == "order_expired"
+    assert order.status is OrderStatus.OPEN
+    assert db_session.scalar(select(PaperFill.id).where(PaperFill.order_id == order.id)) is None
+    assert account.frozen_cash == Decimal("1005.01")
+
+
 def test_partial_fills_charge_minimum_commission_only_once(db_session: Session, user: User) -> None:
     account = _account(db_session, user)
     order = _buy_order(db_session, user, account, quantity=200, reserve=Decimal("2005.02"))

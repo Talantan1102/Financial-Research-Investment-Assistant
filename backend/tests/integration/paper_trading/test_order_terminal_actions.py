@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from threading import Event, Thread
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -31,8 +32,8 @@ from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.types import QuoteLevel, RealtimeQuote
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy import Engine, event, func, select
+from sqlalchemy.orm import Session, sessionmaker
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 OPEN_DAY = date(2026, 7, 20)
@@ -374,6 +375,67 @@ def test_expire_open_orders_releases_reservations_at_close_once(
 
 
 @pytest.mark.parametrize(
+    "recovery_time",
+    [
+        datetime(2026, 7, 21, 9, 30, tzinfo=SHANGHAI),
+        datetime(2026, 7, 26, 12, 0, tzinfo=SHANGHAI),
+    ],
+)
+def test_expiry_catches_up_overdue_orders_outside_close_window(
+    db_session: Session, user: User, recovery_time: datetime
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    service, order, account = _confirmed_buy(db_session, user_id)
+
+    assert service.expire_open_orders(at=recovery_time) == 1
+    assert order.status is OrderStatus.EXPIRED
+    assert order.completed_at == recovery_time
+    assert account.available_cash == Decimal("1000000.00")
+    assert account.frozen_cash == Decimal("0.00")
+    assert service.expire_open_orders(at=recovery_time) == 0
+
+
+def test_expiry_processes_active_orders_without_rolling_back_for_archived_generation(
+    db_session: Session, user: User
+) -> None:
+    stale_user_id = cast(uuid.UUID, user.id)
+    service, stale_order, archived_account = _confirmed_buy(db_session, stale_user_id)
+    stale_reserved = cast(Decimal, stale_order.reserved_cash)
+    service.reset_account_confirmed(
+        user_id=stale_user_id,
+        initial_cash=Decimal("500000.00"),
+        session_id="expire-stale-reset",
+        confirmation_id="expire-stale-reset",
+    )
+    suffix = uuid.uuid4().hex
+    active_user = User(
+        username=f"active-expire-{suffix}",
+        email=f"active-expire-{suffix}@test",
+        hashed_password="x",
+    )
+    db_session.add(active_user)
+    db_session.flush()
+    _, active_order, active_account = _confirmed_buy(db_session, cast(uuid.UUID, active_user.id))
+
+    recovery = datetime(2026, 7, 21, 9, 30, tzinfo=SHANGHAI)
+    assert service.expire_open_orders(at=recovery) == 2
+    assert active_order.status is OrderStatus.EXPIRED
+    assert active_account.frozen_cash == Decimal("0.00")
+    assert stale_order.status is OrderStatus.EXPIRED
+    assert archived_account.status is PaperAccountStatus.ARCHIVED
+    assert archived_account.frozen_cash == Decimal("0.00")
+    assert archived_account.available_cash == Decimal("1000000.00")
+    assert (
+        db_session.scalar(
+            select(PaperCashLedger.amount).where(
+                PaperCashLedger.business_key == f"order-release:{stale_order.id}"
+            )
+        )
+        == stale_reserved
+    )
+
+
+@pytest.mark.parametrize(
     ("at", "expected"),
     [
         (datetime(2026, 7, 20, 14, 59, tzinfo=SHANGHAI), 0),
@@ -407,6 +469,86 @@ def test_open_queued_orders_skips_archived_generation(db_session: Session, user:
     db_session.flush()
     assert service.open_queued_orders(at=MORNING) == 0
     assert order.status is OrderStatus.QUEUED
+
+
+def test_open_queued_orders_rechecks_account_after_concurrent_reset(
+    pg_test_engine: Engine,
+) -> None:
+    session_factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    auction = datetime(2026, 7, 20, 9, 20, tzinfo=SHANGHAI)
+    with session_factory() as setup:
+        suffix = uuid.uuid4().hex
+        user = User(
+            username=f"open-reset-{suffix}",
+            email=f"open-reset-{suffix}@test",
+            hashed_password="x",
+        )
+        setup.add(user)
+        setup.flush()
+        user_id = cast(uuid.UUID, user.id)
+        service, order, _ = _confirmed_buy(setup, user_id, now=auction)
+        order_id = cast(uuid.UUID, order.id)
+        setup.commit()
+
+    candidate_locked = Event()
+    allow_write = Event()
+    result: list[int] = []
+    failures: list[BaseException] = []
+
+    def pause_after_candidates(
+        _conn: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if (
+            "FROM paper_orders JOIN paper_accounts" in statement
+            and "paper_orders.status =" in statement
+            and "FOR UPDATE OF paper_orders SKIP LOCKED" in statement
+        ):
+            candidate_locked.set()
+            if not allow_write.wait(timeout=10):
+                raise TimeoutError("reset did not release queued-order worker")
+
+    def run_open() -> None:
+        try:
+            with session_factory() as worker:
+                result.append(
+                    _service(worker, now=auction).open_queued_orders(
+                        at=datetime(2026, 7, 20, 9, 30, tzinfo=SHANGHAI)
+                    )
+                )
+                worker.commit()
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    event.listen(pg_test_engine, "after_cursor_execute", pause_after_candidates)
+    thread = Thread(target=run_open, daemon=True)
+    try:
+        thread.start()
+        assert candidate_locked.wait(timeout=10)
+        with session_factory() as resetter:
+            PaperAccountService(resetter).reset_confirmed(
+                user_id=user_id,
+                initial_cash=Decimal("500000.00"),
+                source_session_id="concurrent-reset",
+                confirmation_id="concurrent-reset",
+            )
+            resetter.commit()
+        allow_write.set()
+        thread.join(timeout=10)
+    finally:
+        allow_write.set()
+        event.remove(pg_test_engine, "after_cursor_execute", pause_after_candidates)
+    assert not thread.is_alive()
+    assert failures == []
+    assert result == [0]
+    with session_factory() as verify:
+        persisted = verify.get(PaperOrder, order_id)
+        assert persisted is not None
+        assert persisted.status is OrderStatus.QUEUED
 
 
 def test_open_queued_orders_never_reopens_a_stale_prior_day_order(
