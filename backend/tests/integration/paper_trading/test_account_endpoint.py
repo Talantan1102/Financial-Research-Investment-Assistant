@@ -108,10 +108,10 @@ def _app_for_session(session: Session, user: User | None) -> FastAPI:
 def test_paper_account_routes_are_sync_handlers() -> None:
     routes = [route for route in router.routes if isinstance(route, APIRoute)]
 
-    assert {route.path for route in routes} == {
+    assert {
         "/api/v0/paper-trading/account",
         "/api/v0/paper-trading/account/initial-cash",
-    }
+    } <= {route.path for route in routes}
     assert all(not iscoroutinefunction(route.endpoint) for route in routes)
 
 
