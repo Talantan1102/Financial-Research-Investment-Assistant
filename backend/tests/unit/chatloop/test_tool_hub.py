@@ -820,6 +820,23 @@ async def test_pre_hook_hard_deny_cannot_be_overridden_by_permission_event():
     assert tool.call_count == 0
 
 
+async def test_low_risk_tool_escalated_to_ask_by_hook_emits_permission_required():
+    async def ask(_invocation):
+        return HookDecision(permission=PermissionDecision.ASK)
+
+    emit = _Collector()
+    tool = FakeTool("get_stock_quote")
+    hub = ToolHub(emit=emit, hooks=HookPipeline(pre_hooks=[ask]))
+    hub.register_registry(FakeRegistry([tool]))
+
+    [result] = await hub.dispatch([_call(tool.name, {"ts_code": "X"})], _state())
+
+    assert result.success is False
+    assert emit.types().count("permission_required") == 1
+    assert result.tool_call_data["permission_source"] == "interactive_ask"
+    assert tool.call_count == 0
+
+
 async def test_unclassified_plain_tool_also_fails_closed():
     class Unclassified(FakeTool):
         runtime_risk_metadata = None
@@ -998,6 +1015,7 @@ async def test_concurrency_group_failure_does_not_block_next_mutation():
     class Stateful(FakeInProcessTool):
         async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:
             del state
+            assert isinstance(args, _QuoteArgs)
             if args.ts_code == "A":
                 raise ToolError("boom")
             return {"ok": True}

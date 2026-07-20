@@ -107,7 +107,7 @@ def test_runtime_contract_models_are_frozen() -> None:
     )
 
     with pytest.raises(ValidationError, match="frozen"):
-        context.task_id = "other"  # type: ignore[misc]
+        context.task_id = "other"
 
 
 def test_runtime_contract_nested_mappings_are_deeply_immutable() -> None:
