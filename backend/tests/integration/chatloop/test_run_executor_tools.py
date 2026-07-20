@@ -75,7 +75,7 @@ def _step(content: str = "", calls: list[StepToolCall] | None = None) -> StepRes
 
 
 def _command() -> ExecuteChatRun:
-    return ExecuteChatRun(uuid4(), uuid4(), uuid4(), "lookup", (), None)
+    return ExecuteChatRun(uuid4(), uuid4(), uuid4(), "lookup", (), None, uuid4())
 
 
 def _components(llm: Any, hub: Any) -> Any:

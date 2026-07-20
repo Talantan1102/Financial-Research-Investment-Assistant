@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from app.chatloop.contracts import ToolResult
+from app.chatloop.control_tools import ApprovalTool, AskUserTool, approval_pause, ask_user_pause
 from app.chatloop.loop import PauseDirective
 from app.chatloop.run_executor import (
     ChatRunExecutor,
@@ -186,7 +187,7 @@ class ToolRiskPolicy:
 
 
 SAFE_IDEMPOTENT_TOOL_CATALOG_V1 = frozenset(
-    {"search_tools", "memory_search", "read_cached_result", "get_portfolio_positions"}
+    {"search_tools", "memory_search", "read_cached_result", "get_portfolio_positions", "approval"}
 )
 
 
@@ -228,6 +229,35 @@ class DurableApprovalController:
         del state
         if phase != "before_tools":
             return None
+        ask_calls = [call for call in tool_calls if call.name == "ask_user"]
+        if ask_calls:
+            if len(tool_calls) != 1:
+                raise ValueError("ask_user must be the only tool call")
+            args = self._safe_args(ask_calls[0])
+            question = args.get("question")
+            if not isinstance(question, str) or not question.strip():
+                raise ValueError("ask_user question must not be blank")
+            return ask_user_pause(question)
+        approval_calls = [call for call in tool_calls if call.name == "approval"]
+        if approval_calls:
+            if len(tool_calls) != 1:
+                raise ValueError("approval must be the only tool call")
+            args = self._safe_args(approval_calls[0])
+            question = args.get("question")
+            if not isinstance(question, str) or not question.strip():
+                raise ValueError("approval question must not be blank")
+            return approval_pause(
+                {
+                    "question": question,
+                    "tool_calls": [
+                        {
+                            "id": approval_calls[0].id,
+                            "name": approval_calls[0].name,
+                            "arguments": approval_calls[0].arguments,
+                        }
+                    ],
+                }
+            )
         risky = [
             call
             for call in tool_calls
@@ -408,6 +438,7 @@ def build_chat_executor_builder(
 
         def components_factory(emit: Any, seq_counter: SeqCounter) -> _ComponentsProxy:
             components = build_turn_components(singletons, emit=emit, seq_counter=seq_counter)
+            components.tool_hub.register_inprocess([AskUserTool(), ApprovalTool()])
             durable_hub = DurableToolHub(
                 components.tool_hub,
                 ledger,
@@ -559,6 +590,7 @@ class RunChatWorker:
                 prompt=loaded.prompt,
                 history=loaded.history,
                 continuation=loaded.continuation,
+                tenant_id=assignment.tenant_id,
             )
             execute_task = asyncio.create_task(built_executor.execute(command))
             done, _pending = await asyncio.wait(
@@ -699,6 +731,7 @@ class RunChatWorker:
             prompt=getattr(loaded, "original_prompt", loaded.prompt),
             history=loaded.history,
             continuation=None,
+            tenant_id=assignment.tenant_id,
         )
         continuation = ChatRunExecutor.approval_snapshot(
             command,

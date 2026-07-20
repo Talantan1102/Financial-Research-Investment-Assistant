@@ -10,7 +10,7 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from app.chatloop.continuation import ContinuationV1, PendingActionV1
@@ -28,6 +28,10 @@ from app.chatloop.state import ChatLoopState
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
 
 TEST_CONTINUATION_SECRET = b"s" * 32
+
+
+def _pause_tenant(paused: PauseResult) -> UUID:
+    return UUID(str(paused.continuation["body"]["tenant_id"]))
 
 
 def _signed_test_continuation(
@@ -51,7 +55,13 @@ def _signed_test_continuation(
             StepToolCall.model_validate(call) for call in (pending_tool_calls or [])
         ),
     )
-    draft = ContinuationV1.from_state(restored, action, key_id=key_id, signature="0" * 64)
+    draft = ContinuationV1.from_state(
+        restored,
+        action,
+        key_id=key_id,
+        signature="0" * 64,
+        tenant_id=str(command.tenant_id),
+    )
     body = draft.body.model_dump(mode="json")
     encoded = json.dumps(
         body,
@@ -144,7 +154,7 @@ class _PauseAt:
         if phase == self.phase:
             return PauseDirective(
                 pause_type=self.pause_type,
-                request={"question": "continue?", "nested": {"choices": ["yes", "no"]}},
+                request={"question": "continue?"},
             )
         return None
 
@@ -171,6 +181,7 @@ def _command(
         prompt=prompt,
         history=history,
         continuation=None,
+        tenant_id=uuid4(),
     )
 
 
@@ -211,6 +222,7 @@ def test_public_approval_snapshot_round_trips_through_standard_continuation() ->
         '{"approved":true}',
         (),
         continuation,
+        command.tenant_id,
     )
 
     state, pending, _prompt, decision = executor._initial_state(resumed, continuation)
@@ -295,7 +307,8 @@ async def test_pause_contract_is_serializable_bounded_and_resumable(
         pause_controller=controller,
     )
 
-    paused = await executor.execute(_command())
+    command = _command()
+    paused = await executor.execute(command)
 
     assert isinstance(paused, PauseResult)
     assert paused.pause_type == pause_type
@@ -312,10 +325,13 @@ async def test_pause_contract_is_serializable_bounded_and_resumable(
         attempt_id=uuid4(),
         session_id=paused.session_id,
         prompt=(
-            json.dumps({"approved": True, "text": "yes"}) if pause_type == "approval" else "yes"
+            json.dumps({"approved": True, "text": "yes"})
+            if pause_type == "approval"
+            else json.dumps({"text": "yes"})
         ),
         history=(),
         continuation=paused.thaw_continuation(),
+        tenant_id=command.tenant_id,
     )
     resumed_llm = _ScriptedLLM([_step("resumed", input_tokens=13, output_tokens=3)])
     resumed_hub = _RecordingHub() if pause_type == "approval" else _Hub()
@@ -342,6 +358,37 @@ async def test_pause_contract_is_serializable_bounded_and_resumable(
         roles = [message.get("role") for message in resumed_llm.messages[0]]
         assistant_index = roles.index("assistant")
         assert roles[assistant_index + 1] == "tool"
+
+
+async def test_real_ask_user_control_call_pauses_as_input_and_closes_tool_protocol() -> None:
+    from app.services.run_chat_worker import DurableApprovalController, ToolRiskPolicy
+
+    call = StepToolCall(id="ask-1", name="ask_user", arguments='{"question":"cost?"}')
+    command = _command()
+    ask_step = StepResult(
+        content="",
+        tool_calls=[call],
+        finish_reason="tool_calls",
+        prompt_tokens=1,
+        completion_tokens=1,
+        cached_tokens=0,
+        cost_cny=0,
+    )
+    paused = await ChatRunExecutor(
+        user_id="user-1",
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=_components(_ScriptedLLM([ask_step])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+        pause_controller=DurableApprovalController(
+            ToolRiskPolicy.from_trusted_names(set()), frozenset()
+        ),
+    ).execute(command)
+
+    assert isinstance(paused, PauseResult)
+    assert paused.pause_type == "input"
+    messages = paused.thaw_continuation()["body"]["messages"]
+    assert [message["role"] for message in messages[-2:]] == ["assistant", "tool"]
 
 
 async def test_rejected_approval_closes_protocol_without_dispatch() -> None:
@@ -382,6 +429,7 @@ async def test_rejected_approval_closes_protocol_without_dispatch() -> None:
             json.dumps({"approved": False, "text": "no"}),
             (),
             paused.thaw_continuation(),
+            _pause_tenant(paused),
         )
     )
 
@@ -425,6 +473,7 @@ async def test_per_call_approval_decisions_preserve_assistant_tool_result_order(
             json.dumps({"decisions": {"call-a": True, "call-b": False}}),
             (),
             continuation,
+            command.tenant_id,
         )
     )
 
@@ -461,6 +510,7 @@ async def test_conflicting_batch_and_legacy_approval_decisions_fail_closed() -> 
             json.dumps({"approved": True, "decisions": {"call-a": False}}),
             (),
             continuation,
+            command.tenant_id,
         )
     )
 
@@ -507,6 +557,7 @@ async def test_mixed_approval_rejects_wrong_approved_hub_result_count() -> None:
             json.dumps({"decisions": {"call-a": True, "call-b": False}}),
             (),
             continuation,
+            command.tenant_id,
         )
     )
 
@@ -563,9 +614,10 @@ async def test_input_resume_does_not_project_historical_tools_as_attempt_failure
             command.run_id,
             command.attempt_id,
             command.session_id,
-            "new input",
+            json.dumps({"text": "new input"}),
             (),
             continuation,
+            command.tenant_id,
         )
     )
     assert isinstance(result, CompletedResult)
@@ -631,9 +683,10 @@ async def test_server_identity_overwrites_continuation_identity() -> None:
             command.run_id,
             command.attempt_id,
             command.session_id,
-            "resume",
+            json.dumps({"text": "resume"}),
             (),
             continuation,
+            command.tenant_id,
         )
     )
     assert isinstance(result, PauseResult)
@@ -708,6 +761,7 @@ async def test_cancel_closes_stream_and_oversized_continuation_is_classified() -
         command.prompt,
         (),
         {"state": {"blob": "x" * (ChatRunExecutor.MAX_CONTINUATION_BYTES + 1)}},
+        command.tenant_id,
     )
     failed = await ChatRunExecutor(
         user_id=uuid4(),
@@ -904,6 +958,7 @@ async def test_forged_approval_continuation_is_rejected_without_dispatch(
             json.dumps({"approved": True}),
             (),
             continuation,
+            _pause_tenant(paused),
         )
     )
     assert isinstance(result, FailedResult)
@@ -950,6 +1005,7 @@ async def test_hostile_continuation_preflight_is_bounded(
             "resume",
             (),
             {"pause_type": "input", "state": bad_value, "pending_tool_calls": []},
+            command.tenant_id,
         )
     )
     assert isinstance(result, FailedResult)
@@ -983,6 +1039,7 @@ async def test_non_string_key_and_excessive_depth_are_rejected() -> None:
                 "resume",
                 (),
                 continuation,  # type: ignore[arg-type]
+                command.tenant_id,
             )
         )
         assert isinstance(result, FailedResult)
@@ -1020,9 +1077,10 @@ async def test_valid_continuation_is_canonicalized_without_deepcopy() -> None:
             command.run_id,
             command.attempt_id,
             command.session_id,
-            "resume",
+            json.dumps({"text": "resume"}),
             (),
             continuation,
+            command.tenant_id,
         )
     )
     assert isinstance(result, CompletedResult)
@@ -1037,7 +1095,7 @@ async def test_pause_result_nested_data_is_immutable_and_has_controlled_json() -
     with pytest.raises(TypeError):
         dict.__setitem__(paused.continuation, "pause_type", "forged")  # type: ignore[arg-type]
     with pytest.raises(TypeError):
-        paused.request["nested"]["choices"][0] = "mutate"  # type: ignore[index]
+        paused.continuation["body"]["messages"][-1]["tool_calls"][0]["id"] = "mutate"  # type: ignore[index]
     thawed = paused.thaw_continuation()
     thawed["body"]["messages"].clear()
     assert paused.continuation["body"]["messages"]
@@ -1195,6 +1253,7 @@ async def test_approval_hard_failure_keeps_all_pending_tool_audit(
             json.dumps({"approved": True}),
             (),
             paused.thaw_continuation(),
+            _pause_tenant(paused),
         )
     )
     assert isinstance(result, FailedResult)
@@ -1309,9 +1368,10 @@ async def test_tool_call_id_reuse_from_continuation_history_fails_before_dispatc
             command.run_id,
             uuid4(),
             command.session_id,
-            "resume",
+            json.dumps({"text": "resume"}),
             (),
             continuation,
+            command.tenant_id,
         )
     )
     assert isinstance(result, FailedResult)
@@ -1374,6 +1434,7 @@ async def test_continuation_envelope_is_signed_and_context_bound() -> None:
         "run",
         "session",
         "user",
+        "tenant",
         "missing_signature",
         "wrong_secret",
     ],
@@ -1396,6 +1457,7 @@ async def test_tampered_or_replayed_continuation_is_rejected_without_dispatch(
     resume_run_id = paused.run_id
     resume_session_id = paused.session_id
     resume_user = "trusted-user"
+    resume_tenant = command.tenant_id
     secret = TEST_CONTINUATION_SECRET
     if tamper == "body":
         envelope["body"]["messages"].append({"role": "user", "content": "forged"})
@@ -1409,6 +1471,8 @@ async def test_tampered_or_replayed_continuation_is_rejected_without_dispatch(
         resume_session_id = uuid4()
     elif tamper == "user":
         resume_user = "other-user"
+    elif tamper == "tenant":
+        resume_tenant = uuid4()
     elif tamper == "missing_signature":
         del envelope["signature"]
     else:
@@ -1431,6 +1495,7 @@ async def test_tampered_or_replayed_continuation_is_rejected_without_dispatch(
             "resume",
             (),
             envelope,
+            resume_tenant,
         )
     )
     assert isinstance(result, FailedResult)
@@ -1481,9 +1546,10 @@ async def test_pause_without_server_secret_fails_closed_but_fresh_completion_wor
             command.run_id,
             uuid4(),
             command.session_id,
-            "resume",
+            json.dumps({"text": "resume"}),
             (),
             continuation,
+            command.tenant_id,
         )
     )
     assert isinstance(resumed, FailedResult)

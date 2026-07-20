@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import math
-from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -26,23 +24,23 @@ def _validate_portable(value: Any) -> None:
         nodes += 1
         if nodes > _MAX_NODES or depth > _MAX_DEPTH:
             raise ValueError("continuation structure exceeds limits")
-        if current is None or isinstance(current, (str, bool)):
+        if current is None or type(current) in (str, bool):
             continue
-        if isinstance(current, int):
+        if type(current) is int:
             if abs(current) > 2**63 - 1:
                 raise ValueError("integer outside portable range")
             continue
-        if isinstance(current, float):
+        if type(current) is float:
             if not math.isfinite(current):
                 raise ValueError("non-finite float")
             continue
-        if isinstance(current, Mapping):
+        if type(current) is dict:
             for key, item in current.items():
                 if not isinstance(key, str):
                     raise ValueError("JSON object keys must be strings")
                 stack.append((item, depth + 1))
             continue
-        if isinstance(current, (list, tuple)):
+        if type(current) in (list, tuple):
             stack.extend((item, depth + 1) for item in current)
             continue
         raise TypeError("continuation contains a runtime object")
@@ -51,22 +49,100 @@ def _validate_portable(value: Any) -> None:
 class CompactLedgerEntryV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    step: int = Field(ge=0)
-    tool_call_id: str | None = None
-    tool_name: str
-    args_hash: str
+    step: int = Field(strict=True, ge=0)
+    tool_call_id: str | None = Field(default=None, max_length=255)
+    tool_name: str = Field(min_length=1, max_length=255)
+    args_hash: str = Field(min_length=1, max_length=64)
     digest: str = Field(max_length=200)
-    success: bool
-    cache_key: str | None = None
+    success: bool = Field(strict=True)
+    cache_key: str | None = Field(default=None, max_length=1024)
+
+
+class ToolFunctionV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1, max_length=255)
+    arguments: str = Field(max_length=16 * 1024)
+
+
+class ToolCallV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1, max_length=255)
+    type: Literal["function"] = "function"
+    function: ToolFunctionV1
+
+
+class MessageV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str | None = Field(default=None, max_length=32 * 1024)
+    reasoning_content: str | None = Field(default=None, max_length=16 * 1024)
+    tool_calls: tuple[ToolCallV1, ...] = Field(default=(), max_length=64)
+    tool_call_id: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_role_shape(self) -> MessageV1:
+        if self.role == "assistant":
+            if self.tool_call_id is not None:
+                raise ValueError("assistant message cannot have tool_call_id")
+        elif self.role == "tool":
+            if not self.tool_call_id or self.tool_calls:
+                raise ValueError("tool message requires tool_call_id only")
+        elif self.tool_calls or self.tool_call_id is not None or self.reasoning_content is not None:
+            raise ValueError("message fields do not match role")
+        return self
+
+
+class PendingToolCallV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)
+    arguments: str = Field(max_length=16 * 1024)
+
+    def to_step_tool_call(self) -> StepToolCall:
+        return StepToolCall(id=self.id, name=self.name, arguments=self.arguments)
+
+
+class RecoveryToolCallV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)
+    arguments: dict[str, Any]
+
+
+class ExecutionBindingV1(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    execution_id: str = Field(min_length=1, max_length=64)
+    semantic_key: str = Field(min_length=1, max_length=128)
+    tool_call: RecoveryToolCallV1
+
+
+class PauseRequestV1(BaseModel):
+    """Closed portable shape used by input, risk approval and recovery approval."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tool_name: str | None = Field(default=None, max_length=255)
+    question: str | None = Field(default=None, max_length=4096)
+    reason: str | None = Field(default=None, max_length=255)
+    action: str | None = Field(default=None, max_length=255)
+    tool_calls: tuple[PendingToolCallV1, ...] = Field(default=(), max_length=64)
+    execution_bindings: tuple[ExecutionBindingV1, ...] = Field(default=(), max_length=64)
 
 
 class PendingActionV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     pause_type: Literal["input", "approval"]
-    tool_name: str
-    request: dict[str, Any]
-    pending_tool_calls: tuple[StepToolCall, ...] = ()
+    tool_name: Literal["ask_user", "approve_tools"]
+    request: PauseRequestV1
+    pending_tool_calls: tuple[PendingToolCallV1, ...] = Field(default=(), max_length=64)
 
     @model_validator(mode="after")
     def validate_action(self) -> PendingActionV1:
@@ -74,19 +150,23 @@ class PendingActionV1(BaseModel):
             raise ValueError("input pause cannot contain pending tool calls")
         if self.pause_type == "approval" and not self.pending_tool_calls:
             raise ValueError("approval pause requires pending tool calls")
-        _validate_portable(self.request)
+        _validate_portable(self.request.model_dump(mode="json"))
         return self
+
+    def step_tool_calls(self) -> tuple[StepToolCall, ...]:
+        return tuple(call.to_step_tool_call() for call in self.pending_tool_calls)
 
 
 class ContinuationBodyV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    run_id: str
-    session_id: str
-    user_id: str
-    messages: tuple[dict[str, Any], ...]
+    run_id: str = Field(min_length=1, max_length=64)
+    session_id: str = Field(min_length=1, max_length=64)
+    user_id: str = Field(min_length=1, max_length=64)
+    tenant_id: str = Field(min_length=1, max_length=64)
+    messages: tuple[MessageV1, ...] = Field(max_length=512)
     tool_ledger: tuple[CompactLedgerEntryV1, ...] = ()
-    loop_count: int = Field(ge=0)
+    loop_count: int = Field(strict=True, ge=0, le=10_000)
     pending_action: PendingActionV1
 
 
@@ -96,7 +176,7 @@ class ContinuationV1(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     version: Literal[1] = 1
-    key_id: str
+    key_id: str = Field(min_length=1, max_length=128)
     body: ContinuationBodyV1
     signature: str = Field(min_length=64, max_length=64)
 
@@ -108,6 +188,8 @@ class ContinuationV1(BaseModel):
     @classmethod
     def validate_portability_and_size(cls, value: Any) -> Any:
         _validate_portable(value)
+        if type(value) is not dict or type(value.get("version")) is not int:
+            raise ValueError("continuation version must be the integer 1")
         try:
             encoded = json.dumps(
                 value,
@@ -130,12 +212,14 @@ class ContinuationV1(BaseModel):
         *,
         key_id: str,
         signature: str,
+        tenant_id: str,
     ) -> ContinuationV1:
         body = ContinuationBodyV1(
             run_id=state.request_id,
             session_id=state.session_id,
             user_id=state.user_id,
-            messages=tuple(state.messages),
+            tenant_id=tenant_id,
+            messages=tuple(MessageV1.model_validate(message) for message in state.messages),
             tool_ledger=tuple(
                 CompactLedgerEntryV1.model_validate(entry.model_dump(mode="python"))
                 for entry in state.ledger.entries
@@ -157,7 +241,10 @@ class ContinuationV1(BaseModel):
             user_id=self.body.user_id,
             session_id=self.body.session_id,
             request_id=self.body.run_id,
-            messages=copy.deepcopy(list(self.body.messages)),
+            messages=[
+                message.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+                for message in self.body.messages
+            ],
             step=self.body.loop_count,
         )
         state.ledger = ToolLedger(
@@ -175,4 +262,6 @@ __all__ = [
     "ContinuationV1",
     "MAX_CONTINUATION_BYTES",
     "PendingActionV1",
+    "MessageV1",
+    "PauseRequestV1",
 ]

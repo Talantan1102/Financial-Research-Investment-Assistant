@@ -165,7 +165,7 @@ async def test_run_chat_executor_cassette_completes_with_nonempty_answer() -> No
     )
     prompt = "贵州茅台现在股价多少?"
     result = await executor.execute(
-        ExecuteChatRun(run_id, attempt_id, session_id, prompt, history, None)
+        ExecuteChatRun(run_id, attempt_id, session_id, prompt, history, None, uuid4())
     )
 
     assert isinstance(result, CompletedResult)

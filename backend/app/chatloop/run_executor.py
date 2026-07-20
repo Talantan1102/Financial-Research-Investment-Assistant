@@ -18,6 +18,7 @@ from uuid import UUID
 
 from app.chatloop.context import ContextDeps
 from app.chatloop.continuation import ContinuationV1, PendingActionV1
+from app.chatloop.contracts import ToolResult
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.loop import (
     CancelledByUser,
@@ -28,7 +29,7 @@ from app.chatloop.loop import (
     ToolExecutionError,
     execute_tool_loop,
 )
-from app.chatloop.state import ChatLoopState, args_hash_of
+from app.chatloop.state import ChatLoopState, apply_results, args_hash_of
 from app.services.llm_step import StepToolCall
 
 JsonScalar: TypeAlias = str | int | float | bool | None
@@ -65,6 +66,7 @@ class ExecuteChatRun:
     prompt: str
     history: tuple[dict[str, Any], ...]
     continuation: dict[str, Any] | None
+    tenant_id: UUID
 
 
 @dataclass(frozen=True)
@@ -463,11 +465,48 @@ class ChatRunExecutor:
             )
         except LoopPaused as paused:
             state = paused.state
+            paused_pending = paused.pending_tool_calls
+            if paused.directive.pause_type == "input" and paused_pending:
+                if len(paused_pending) != 1 or paused_pending[0].name != "ask_user":
+                    return self._failed(
+                        command,
+                        "executor_error",
+                        "Chat execution failed.",
+                        False,
+                        state,
+                        events,
+                        emitted_tokens,
+                        baseline,
+                        pending_tool_calls=paused_pending,
+                    )
+                ask_call = paused_pending[0]
+                state.ledger.record(
+                    step=state.step,
+                    tool_call_id=ask_call.id,
+                    tool_name=ask_call.name,
+                    args=ask_call.parsed_args,
+                    digest="Waiting for user input.",
+                    success=True,
+                )
+                state = apply_results(
+                    state,
+                    [
+                        ToolResult(
+                            tool_name="ask_user",
+                            args=ask_call.parsed_args,
+                            success=True,
+                            output={"status": "waiting_for_user"},
+                            latency_ms=0,
+                        )
+                    ],
+                    [ask_call],
+                )
+                paused_pending = ()
             try:
                 continuation_payload = self._snapshot(
                     command,
                     state,
-                    paused.pending_tool_calls,
+                    paused_pending,
                     paused.directive.pause_type,
                     paused.directive.request,
                 )
@@ -486,7 +525,7 @@ class ChatRunExecutor:
                     events,
                     emitted_tokens,
                     baseline,
-                    pending_tool_calls=paused.pending_tool_calls,
+                    pending_tool_calls=paused_pending,
                 )
             except (TypeError, ValueError):
                 return self._failed(
@@ -498,7 +537,7 @@ class ChatRunExecutor:
                     events,
                     emitted_tokens,
                     baseline,
-                    pending_tool_calls=paused.pending_tool_calls,
+                    pending_tool_calls=paused_pending,
                 )
             await self._emit_control_event(
                 command,
@@ -642,13 +681,23 @@ class ChatRunExecutor:
         action = snapshot.pending_action
         pause_type = action.pause_type
         state = snapshot.to_state()
-        pending_tool_calls = action.pending_tool_calls
+        pending_tool_calls = action.step_tool_calls()
         self._validate_pause_snapshot(state, pending_tool_calls, pause_type)
         state.user_id = self._user_id
         state.request_id = str(command.run_id)
         state.session_id = str(command.session_id)
         if not pending_tool_calls:
-            state.messages.append({"role": "user", "content": command.prompt})
+            try:
+                response = json.loads(command.prompt)
+            except json.JSONDecodeError as exc:
+                raise ValueError("input response must be JSON") from exc
+            if (
+                not isinstance(response, dict)
+                or set(response) != {"text"}
+                or not isinstance(response["text"], str)
+            ):
+                raise ValueError("input response must contain text only")
+            state.messages.append({"role": "user", "content": response["text"]})
             return state, pending_tool_calls, None, None
         try:
             response = json.loads(command.prompt)
@@ -702,6 +751,7 @@ class ChatRunExecutor:
             snapshot.body.run_id != str(command.run_id)
             or snapshot.body.session_id != str(command.session_id)
             or snapshot.body.user_id != self._user_id
+            or snapshot.body.tenant_id != str(command.tenant_id)
         ):
             raise ValueError("continuation context mismatch")
         return snapshot
@@ -741,17 +791,22 @@ class ChatRunExecutor:
         continuation_key_id: str,
     ) -> dict[str, Any]:
         cls._validate_pause_snapshot(state, pending_tool_calls, pause_type)
-        action = PendingActionV1(
-            pause_type=pause_type,
-            tool_name=("ask_user" if pause_type == "input" else "approve_tools"),
-            request=dict(request),
-            pending_tool_calls=pending_tool_calls,
+        action = PendingActionV1.model_validate(
+            {
+                "pause_type": pause_type,
+                "tool_name": "ask_user" if pause_type == "input" else "approve_tools",
+                "request": dict(request),
+                "pending_tool_calls": [
+                    call.model_dump(mode="python") for call in pending_tool_calls
+                ],
+            }
         )
         draft = ContinuationV1.from_state(
             state,
             action,
             key_id=continuation_key_id,
             signature="0" * 64,
+            tenant_id=str(command.tenant_id),
         )
         body = draft.body.model_dump(mode="json")
         signature = hmac.new(

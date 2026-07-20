@@ -15,7 +15,13 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.chatloop.run_executor import CompletedResult, FailedResult, PauseResult, RunUsage
+from app.chatloop.run_executor import (
+    CompletedResult,
+    FailedResult,
+    PauseResult,
+    RunUsage,
+    thaw_json,
+)
 from app.models.run import Run, RunAttempt, RunMessage, RunPause
 from app.models.run_execution import RunToolExecution, RunUsageRecord
 from app.models.run_scheduling import RunOutbox
@@ -406,9 +412,11 @@ class AttemptService:
         result: PauseResult,
     ) -> None:
         self._validate_result_identity(assignment, result)
-        request = self._bounded_json_object(result.request, limit=16 * 1024, label="pause request")
+        request = self._bounded_json_object(
+            thaw_json(result.request), limit=16 * 1024, label="pause request"
+        )
         continuation = self._bounded_json_object(
-            result.continuation, limit=MAX_RESULT_BYTES, label="continuation"
+            thaw_json(result.continuation), limit=MAX_RESULT_BYTES, label="continuation"
         )
         async with self._session_factory() as session, session.begin():
             attempt, run = await self._lock_command_context(session, assignment.attempt_id)

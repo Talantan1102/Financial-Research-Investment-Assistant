@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import UserDict
 from unittest.mock import Mock
 
 import pytest
@@ -37,6 +38,7 @@ def test_continuation_round_trips_only_portable_whitelisted_state() -> None:
         ),
         key_id="key-1",
         signature="0" * 64,
+        tenant_id="tenant-1",
     )
 
     payload = continuation.model_dump(mode="json")
@@ -47,6 +49,7 @@ def test_continuation_round_trips_only_portable_whitelisted_state() -> None:
         "run_id",
         "session_id",
         "user_id",
+        "tenant_id",
         "messages",
         "tool_ledger",
         "loop_count",
@@ -77,8 +80,81 @@ def test_continuation_rejects_unknown_runtime_and_oversized_payload(mutation) ->
         ),
         key_id="key-1",
         signature="0" * 64,
+        tenant_id="tenant-1",
     ).model_dump(mode="json")
     mutation(payload)
+
+    with pytest.raises((ValidationError, ValueError, TypeError)):
+        ContinuationV1.model_validate(payload)
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1"])
+def test_continuation_version_is_strict_integer(version: object) -> None:
+    payload = ContinuationV1.from_state(
+        _state(),
+        PendingActionV1(
+            pause_type="input",
+            tool_name="ask_user",
+            request={"question": "cost?"},
+        ),
+        key_id="key-1",
+        signature="0" * 64,
+        tenant_id="tenant-1",
+    ).model_dump(mode="json")
+    payload["version"] = version
+
+    with pytest.raises((ValidationError, ValueError, TypeError)):
+        ContinuationV1.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "runtime_value",
+    [
+        UserDict({"role": "user", "content": "forged"}),
+        type("DictSubclass", (dict,), {})({"role": "user", "content": "forged"}),
+        lambda: None,
+    ],
+)
+def test_continuation_rejects_mapping_subclasses_and_callables(runtime_value: object) -> None:
+    payload = ContinuationV1.from_state(
+        _state(),
+        PendingActionV1(
+            pause_type="input",
+            tool_name="ask_user",
+            request={"question": "cost?"},
+        ),
+        key_id="key-1",
+        signature="0" * 64,
+        tenant_id="tenant-1",
+    ).model_dump(mode="json")
+    payload["body"]["messages"].append(runtime_value)
+
+    with pytest.raises((ValidationError, ValueError, TypeError)):
+        ContinuationV1.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda body: body["messages"][0].update(extra="forbidden"),
+        lambda body: body["tool_ledger"][0].update(step=True),
+        lambda body: body["pending_action"].update(tool_name="x" * 257),
+        lambda body: body["pending_action"]["request"].update(question="x" * 4097),
+    ],
+)
+def test_continuation_nested_schema_is_strict_and_bounded(mutation) -> None:
+    payload = ContinuationV1.from_state(
+        _state(),
+        PendingActionV1(
+            pause_type="input",
+            tool_name="ask_user",
+            request={"question": "cost?"},
+        ),
+        key_id="key-1",
+        signature="0" * 64,
+        tenant_id="tenant-1",
+    ).model_dump(mode="json")
+    mutation(payload["body"])
 
     with pytest.raises((ValidationError, ValueError, TypeError)):
         ContinuationV1.model_validate(payload)

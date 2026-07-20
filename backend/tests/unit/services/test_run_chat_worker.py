@@ -154,6 +154,51 @@ async def test_server_risk_registry_fails_closed_except_explicit_safe_tools() ->
     assert policy.safe_to_retry("get_stock_quote") is True
 
 
+@pytest.mark.asyncio
+async def test_control_tools_map_to_typed_pauses_before_dispatch() -> None:
+    controller = DurableApprovalController(ToolRiskPolicy.from_trusted_names(set()), frozenset())
+    state = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
+
+    asking = await controller.check(
+        phase="before_tools",
+        state=state,
+        tool_calls=(StepToolCall(id="ask", name="ask_user", arguments='{"question":"cost?"}'),),
+    )
+    approving = await controller.check(
+        phase="before_tools",
+        state=state,
+        tool_calls=(
+            StepToolCall(id="approve", name="approval", arguments='{"question":"proceed?"}'),
+        ),
+    )
+
+    assert asking is not None and asking.pause_type == "input"
+    assert asking.request == {"tool_name": "ask_user", "question": "cost?"}
+    assert approving is not None and approving.pause_type == "approval"
+    assert approving.request["tool_calls"][0]["name"] == "approval"
+
+
+@pytest.mark.asyncio
+async def test_ask_user_must_be_the_only_tool_and_have_a_non_blank_question() -> None:
+    controller = DurableApprovalController(ToolRiskPolicy.from_trusted_names(set()), frozenset())
+    state = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
+    with pytest.raises(ValueError, match="ask_user must be the only"):
+        await controller.check(
+            phase="before_tools",
+            state=state,
+            tool_calls=(
+                StepToolCall(id="ask", name="ask_user", arguments='{"question":"cost?"}'),
+                StepToolCall(id="write", name="memory_write", arguments="{}"),
+            ),
+        )
+    with pytest.raises(ValueError, match="question"):
+        await controller.check(
+            phase="before_tools",
+            state=state,
+            tool_calls=(StepToolCall(id="ask", name="ask_user", arguments='{"question":" "}'),),
+        )
+
+
 def test_production_risk_catalog_defaults_to_real_reads_and_rejects_unknown_config() -> None:
     policy = load_tool_risk_policy({})
     assert policy.safe_to_retry("memory_search") is True
@@ -242,6 +287,7 @@ async def test_execute_assignment_loads_server_context_renews_and_always_closes(
             prompt="question",
             history=({"role": "assistant", "content": "old"},),
             continuation=None,
+            tenant_id=assignment.tenant_id,
         )
     ]
 
