@@ -29,6 +29,7 @@ from app.services.paper_trading.observability import (
     emit_paper_order_span,
     paper_order_span,
     paper_system_span,
+    record_dispatch_failure_state,
     record_dispatch_recovery_if_pending,
 )
 from app.services.paper_trading.order_service import PaperOrderService
@@ -272,6 +273,34 @@ def _client(db_session: Session) -> TestClient:
     return TestClient(app)
 
 
+def _persist_recovery_order(factory: sessionmaker[Session]) -> uuid.UUID:
+    with factory() as session:
+        suffix = uuid.uuid4().hex[:12]
+        owner = User(
+            username=f"paper-recovery-{suffix}",
+            email=f"paper-recovery-{suffix}@example.test",
+            hashed_password="not-used",
+        )
+        session.add(owner)
+        session.flush()
+        account = PaperAccount.new(
+            user_id=cast(uuid.UUID, owner.id),
+            generation=1,
+            initial_cash=Decimal("100000.00"),
+        )
+        session.add(account)
+        session.flush()
+        order = _order(
+            account,
+            owner,
+            status=OrderStatus.QUEUED,
+            confirmed_at=datetime.now(UTC),
+        )
+        session.add(order)
+        session.commit()
+        return cast(uuid.UUID, order.id)
+
+
 def test_paper_order_span_has_stable_correlation_without_payload_data() -> None:
     order_id = uuid.uuid4()
     now = datetime.now(UTC)
@@ -350,7 +379,7 @@ def test_dispatch_recovery_requires_unpaired_persisted_failure_and_is_consumed_o
     pg_test_engine: Engine,
 ) -> None:
     factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
-    order_id = uuid.uuid4()
+    order_id = _persist_recovery_order(factory)
     now = datetime.now(UTC)
 
     assert not record_dispatch_recovery_if_pending(
@@ -369,6 +398,7 @@ def test_dispatch_recovery_requires_unpaired_persisted_failure_and_is_consumed_o
         error="dispatch_failed",
     )
     TraceService(factory).write_span(first_failure)
+    assert record_dispatch_failure_state(order_id=order_id, session_factory=factory)
     same_incident_failure = paper_order_span(
         order_id=order_id,
         name="dispatch",
@@ -378,6 +408,7 @@ def test_dispatch_recovery_requires_unpaired_persisted_failure_and_is_consumed_o
         error="dispatch_failed",
     )
     TraceService(factory).write_span(same_incident_failure)
+    assert record_dispatch_failure_state(order_id=order_id, session_factory=factory)
 
     # A new factory represents a worker process after restart.
     restarted_factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
@@ -403,6 +434,7 @@ def test_dispatch_recovery_requires_unpaired_persisted_failure_and_is_consumed_o
         error="dispatch_failed",
     )
     TraceService(factory).write_span(second_failure)
+    assert record_dispatch_failure_state(order_id=order_id, session_factory=factory)
     assert record_dispatch_recovery_if_pending(
         order_id=order_id,
         started_at=now - timedelta(hours=1),
@@ -427,24 +459,28 @@ def test_dispatch_recovery_requires_unpaired_persisted_failure_and_is_consumed_o
         )
     recovery_rows = [row for row in rows if dict(row.attrs_json).get("dispatch_recovered") is True]
     assert len(recovery_rows) == 2
-    consumed = {
-        span_id
-        for row in recovery_rows
-        for span_id in dict(row.attrs_json)["recovered_failure_span_ids"]
-    }
-    assert consumed == {
-        first_failure.span_id,
-        same_incident_failure.span_id,
-        second_failure.span_id,
-    }
     assert sorted(
         int(dict(row.attrs_json)["recovered_failure_count"]) for row in recovery_rows
     ) == [1, 2]
+    assert sorted(
+        int(dict(row.attrs_json)["recovered_failure_version"]) for row in recovery_rows
+    ) == [2, 3]
+    assert all(
+        set(dict(row.attrs_json))
+        == {
+            "order_id",
+            "dispatch_recovered",
+            "outcome",
+            "recovered_failure_count",
+            "recovered_failure_version",
+        }
+        for row in recovery_rows
+    )
 
 
 def test_concurrent_scans_consume_one_failure_identity_once(pg_test_engine: Engine) -> None:
     factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
-    order_id = uuid.uuid4()
+    order_id = _persist_recovery_order(factory)
     now = datetime.now(UTC)
     TraceService(factory).write_span(
         paper_order_span(
@@ -456,6 +492,7 @@ def test_concurrent_scans_consume_one_failure_identity_once(pg_test_engine: Engi
             error="dispatch_failed",
         )
     )
+    assert record_dispatch_failure_state(order_id=order_id, session_factory=factory)
 
     def consume(index: int) -> bool:
         return record_dispatch_recovery_if_pending(
@@ -468,6 +505,78 @@ def test_concurrent_scans_consume_one_failure_identity_once(pg_test_engine: Engi
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(consume, (1, 2)))
     assert sorted(results) == [False, True]
+
+
+def test_concurrent_dispatch_failures_increment_version_without_loss(
+    pg_test_engine: Engine,
+) -> None:
+    from app.models.paper_order import PaperDispatchRecoveryState
+
+    factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    order_id = _persist_recovery_order(factory)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(
+            pool.map(
+                lambda _index: record_dispatch_failure_state(
+                    order_id=order_id, session_factory=factory
+                ),
+                range(24),
+            )
+        )
+    with factory() as session:
+        state = session.get(PaperDispatchRecoveryState, order_id)
+
+    assert all(results)
+    assert state is not None
+    assert state.failure_version == 24
+    assert state.recovered_version == 0
+
+
+def test_dispatch_failure_state_write_is_best_effort() -> None:
+    def unavailable_factory() -> nullcontext[Session]:
+        raise OSError("postgres unavailable")
+
+    assert not record_dispatch_failure_state(
+        order_id=uuid.uuid4(),
+        session_factory=unavailable_factory,
+    )
+
+
+def test_dispatch_recovery_state_and_metadata_stay_bounded_at_high_failure_counts(
+    pg_test_engine: Engine,
+) -> None:
+    from app.models.paper_order import PaperDispatchRecoveryState
+
+    factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    order_id = _persist_recovery_order(factory)
+    for _ in range(250):
+        assert record_dispatch_failure_state(order_id=order_id, session_factory=factory)
+
+    assert record_dispatch_recovery_if_pending(
+        order_id=order_id,
+        started_at=datetime.now(UTC),
+        parent_id="high-volume-scan",
+        session_factory=factory,
+    )
+    with factory() as session:
+        state = session.get(PaperDispatchRecoveryState, order_id)
+        recovery = session.scalar(
+            select(TraceSpanRow)
+            .where(
+                TraceSpanRow.request_id == str(order_id),
+                TraceSpanRow.name == "paper:dispatch",
+                TraceSpanRow.attrs_json["dispatch_recovered"].as_boolean().is_(True),
+            )
+            .order_by(TraceSpanRow.started_at.desc())
+        )
+    assert state is not None
+    assert state.failure_version == state.recovered_version == 250
+    assert recovery is not None
+    metadata = dict(recovery.attrs_json)
+    assert metadata["recovered_failure_count"] == 250
+    assert metadata["recovered_failure_version"] == 250
+    assert all(not isinstance(value, (list, dict, tuple)) for value in metadata.values())
+    assert len(str(metadata)) < 256
 
 
 def test_paper_trading_aggregates_lifecycle_and_operational_metrics(
@@ -541,6 +650,72 @@ def test_span_metrics_use_half_open_bounded_window_without_materializing_models(
     assert result.window_start == start
     assert result.window_end == end
     assert result.reconciliation_violations == 2
+
+
+def test_lifecycle_latency_uses_confirmation_cohort_and_all_time_first_events(
+    db_session: Session, user: User
+) -> None:
+    end = datetime(2026, 7, 20, 12, 0, tzinfo=UTC)
+    start = end - timedelta(hours=24)
+    account = PaperAccount.new(
+        user_id=cast(uuid.UUID, user.id), generation=1, initial_cash=Decimal("100000.00")
+    )
+    db_session.add(account)
+    db_session.flush()
+    old = _order(
+        account,
+        user,
+        status=OrderStatus.OPEN,
+        confirmed_at=start - timedelta(hours=2),
+    )
+    at_start = _order(
+        account,
+        user,
+        status=OrderStatus.FILLED,
+        confirmed_at=start,
+        completed_at=end + timedelta(hours=1),
+        filled_quantity=100,
+    )
+    at_end = _order(
+        account,
+        user,
+        status=OrderStatus.FILLED,
+        confirmed_at=end,
+        completed_at=end + timedelta(hours=2),
+        filled_quantity=100,
+    )
+    db_session.add_all([old, at_start, at_end])
+    db_session.flush()
+    for span_id, order, timestamp in (
+        ("old-first-outside", old, start - timedelta(hours=1)),
+        ("old-retry-inside", old, start + timedelta(hours=1)),
+        ("start-first-after-window", at_start, end + timedelta(seconds=1)),
+        ("end-first", at_end, end + timedelta(seconds=5)),
+    ):
+        db_session.add(
+            TraceSpanRow(
+                span_id=f"{span_id}-{uuid.uuid4()}",
+                request_id=str(order.id),
+                parent_id=None,
+                name="paper:match",
+                inputs={},
+                outputs={},
+                attrs_json={"order_id": str(order.id), "outcome": "retry"},
+                started_at=timestamp,
+                ended_at=timestamp,
+                error=None,
+            )
+        )
+    db_session.flush()
+
+    result = PaperTradingAnalytics(lambda: nullcontext(db_session), now=lambda: end).aggregate(
+        hours=24
+    )
+
+    assert result.confirmation_to_first_processing_ms.count == 1
+    assert result.confirmation_to_first_processing_ms.avg_ms == 86_401_000.0
+    assert result.confirmation_to_terminal_ms.count == 1
+    assert result.confirmation_to_terminal_ms.avg_ms == 90_000_000.0
 
 
 @pytest.mark.parametrize("hours", [0, 169])

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -166,10 +167,16 @@ def test_dispatch_propagates_trace_parent_and_records_failure(
     import app.tasks.paper_trading as tasks
 
     emitted: list[dict[str, object]] = []
+    failure_states: list[dict[str, object]] = []
     monkeypatch.setattr(
         tasks.match_order, "apply_async", MagicMock(side_effect=OSError("redis down"))
     )
     monkeypatch.setattr(tasks, "_record_order_span", lambda **kwargs: emitted.append(kwargs))
+    monkeypatch.setattr(
+        tasks,
+        "record_dispatch_failure_state",
+        lambda **kwargs: failure_states.append(kwargs) or True,
+    )
 
     assert (
         tasks.dispatch_match_order(
@@ -186,6 +193,12 @@ def test_dispatch_propagates_trace_parent_and_records_failure(
     assert emitted[0]["name"] == "dispatch"
     assert emitted[0]["parent_id"] == "rest-confirm-span"
     assert emitted[0]["attrs"] == {"dispatch_failed": True, "outcome": "failure"}
+    assert failure_states == [
+        {
+            "order_id": uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            "session_factory": tasks.SessionLocal,
+        }
+    ]
 
 
 def test_periodic_dispatch_without_pending_failure_is_not_counted_as_recovery(

@@ -8,6 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Column,
     DateTime,
@@ -236,6 +237,32 @@ class PaperOrder(Base):
         ),
         Index("ix_paper_orders_account_status", "account_id", "status"),
         Index("ix_paper_orders_status_expires", "status", "expires_at"),
+    )
+
+
+class PaperDispatchRecoveryState(Base):
+    """Fixed-size watermark for correlating dispatch failures with recovery scans."""
+
+    __tablename__ = "paper_dispatch_recovery_states"
+
+    order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("paper_orders.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    failure_version = Column(BigInteger, nullable=False, default=0)
+    recovered_version = Column(BigInteger, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "failure_version >= 0 AND recovered_version >= 0 "
+            "AND recovered_version <= failure_version",
+            name="ck_paper_dispatch_recovery_version_range",
+        ),
     )
 
 

@@ -159,6 +159,7 @@ class TraceSpanRow(Base):
     __table_args__ = (
         Index("idx_trace_spans_request", "request_id"),
         Index("idx_trace_spans_name", "name"),
+        Index("idx_trace_spans_name_started_at", "name", "started_at"),
     )
 
 

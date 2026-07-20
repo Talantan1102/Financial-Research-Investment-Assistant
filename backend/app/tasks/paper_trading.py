@@ -29,6 +29,7 @@ from app.services.paper_trading.matcher import Execution, match_visible_depth
 from app.services.paper_trading.observability import (
     emit_paper_order_span,
     emit_paper_system_span,
+    record_dispatch_failure_state,
     record_dispatch_recovery_if_pending,
 )
 from app.services.paper_trading.order_service import PaperOrderService
@@ -469,6 +470,7 @@ def dispatch_match_order(
             parent_id=trace_parent_id,
             span_id=dispatch_span_id,
         )
+        record_dispatch_failure_state(order_id=parsed_id, session_factory=SessionLocal)
         return False
     if recovery:
         record_dispatch_recovery_if_pending(

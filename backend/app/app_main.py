@@ -90,6 +90,9 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         from app.scripts.reconcile_paper_position_scope import reconcile_paper_position_scope
 
         reconcile_paper_position_scope(engine)
+        from app.scripts.reconcile_trace_span_indexes import reconcile_trace_span_indexes
+
+        reconcile_trace_span_indexes(engine)
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "PostgreSQL 表初始化跳过(可能 PG 未启动): %s — "

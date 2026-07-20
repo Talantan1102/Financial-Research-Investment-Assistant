@@ -15,7 +15,11 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
-from app.models.paper_order import OrderStatus, PaperOrder
+from app.models.paper_order import (
+    OrderStatus,
+    PaperDispatchRecoveryState,
+    PaperOrder,
+)
 from app.services.trace_models import Span, TraceSpanRow
 from app.services.trace_service import TraceService
 
@@ -35,7 +39,7 @@ _SAFE_ATTRS = frozenset(
         "outcome",
         "reconciliation_errors",
         "recovered_failure_count",
-        "recovered_failure_span_ids",
+        "recovered_failure_version",
         "retry",
         "side",
         "status",
@@ -46,19 +50,20 @@ _SAFE_TEXT = re.compile(r"^[a-z0-9_.:-]{1,64}$")
 
 _FIRST_PROCESSING_SQL = text(
     """
-    WITH first_processing AS (
-        SELECT metadata->>'order_id' AS order_id, min(started_at) AS first_at
-        FROM trace_spans
-        WHERE name IN ('paper:match', 'paper:settle')
-          AND started_at >= :window_start AND started_at < :window_end
-          AND metadata ? 'order_id'
-        GROUP BY metadata->>'order_id'
+    WITH confirmation_cohort AS (
+        SELECT id, confirmed_at
+        FROM paper_orders
+        WHERE confirmed_at >= :window_start AND confirmed_at < :window_end
+    ), first_processing AS (
+        SELECT cohort.id, cohort.confirmed_at, min(spans.started_at) AS first_at
+        FROM confirmation_cohort AS cohort
+        JOIN trace_spans AS spans ON spans.request_id = cohort.id::text
+        WHERE spans.name IN ('paper:match', 'paper:settle')
+          AND spans.started_at >= cohort.confirmed_at
+        GROUP BY cohort.id, cohort.confirmed_at
     ), latencies AS (
-        SELECT extract(epoch FROM (processing.first_at - orders.confirmed_at)) * 1000 AS ms
-        FROM paper_orders AS orders
-        JOIN first_processing AS processing ON processing.order_id = orders.id::text
-        WHERE orders.confirmed_at IS NOT NULL
-          AND processing.first_at >= orders.confirmed_at
+        SELECT extract(epoch FROM (first_at - confirmed_at)) * 1000 AS ms
+        FROM first_processing
     )
     SELECT count(*) AS count,
            COALESCE(avg(ms), 0) AS avg_ms,
@@ -70,12 +75,15 @@ _FIRST_PROCESSING_SQL = text(
 
 _TERMINAL_LATENCY_SQL = text(
     """
-    WITH latencies AS (
-        SELECT extract(epoch FROM (completed_at - confirmed_at)) * 1000 AS ms
+    WITH confirmation_cohort AS (
+        SELECT confirmed_at, completed_at
         FROM paper_orders
-        WHERE status IN ('filled', 'cancelled', 'expired', 'rejected')
-          AND confirmed_at IS NOT NULL AND completed_at >= confirmed_at
-          AND completed_at >= :window_start AND completed_at < :window_end
+        WHERE confirmed_at >= :window_start AND confirmed_at < :window_end
+          AND status IN ('filled', 'cancelled', 'expired', 'rejected')
+    ), latencies AS (
+        SELECT extract(epoch FROM (completed_at - confirmed_at)) * 1000 AS ms
+        FROM confirmation_cohort
+        WHERE completed_at >= confirmed_at
     )
     SELECT count(*) AS count,
            COALESCE(avg(ms), 0) AS avg_ms,
@@ -136,6 +144,11 @@ class LatencySummary(BaseModel):
 
 
 class PaperTradingAggregates(BaseModel):
+    """Lifecycle latency cohort is confirmed_at in [window_start, window_end).
+
+    The first processing or terminal event may occur after the cohort window.
+    """
+
     model_config = ConfigDict(frozen=True)
 
     window_hours: int
@@ -288,34 +301,16 @@ def record_dispatch_recovery_if_pending(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
                 {"key": f"paper-dispatch-recovery:{order_id}"},
             )
-            pending_failure_span_ids = list(
-                session.execute(
-                    text(
-                        """
-                    SELECT failure.span_id
-                    FROM trace_spans AS failure
-                    WHERE failure.request_id = :request_id
-                      AND failure.name = 'paper:dispatch'
-                      AND failure.metadata->>'dispatch_failed' = 'true'
-                      AND NOT EXISTS (
-                          SELECT 1
-                          FROM trace_spans AS recovery
-                          WHERE recovery.request_id = failure.request_id
-                            AND recovery.name = 'paper:dispatch'
-                            AND (
-                                recovery.metadata->'recovered_failure_span_ids' ? failure.span_id
-                                OR recovery.metadata->>'recovered_failure_span_id' = failure.span_id
-                            )
-                      )
-                    ORDER BY failure.span_id
-                    """
-                    ),
-                    {"request_id": str(order_id)},
-                ).scalars()
+            state = session.get(
+                PaperDispatchRecoveryState,
+                order_id,
+                with_for_update=True,
             )
-            if not pending_failure_span_ids:
+            if state is None or state.failure_version <= state.recovered_version:
                 session.commit()
                 return False
+            failure_count = int(state.failure_version - state.recovered_version)
+            failure_version = int(state.failure_version)
             span = paper_order_span(
                 order_id=order_id,
                 name="dispatch",
@@ -324,18 +319,49 @@ def record_dispatch_recovery_if_pending(
                 attrs={
                     "dispatch_recovered": True,
                     "outcome": "recovered",
-                    "recovered_failure_count": len(pending_failure_span_ids),
-                    "recovered_failure_span_ids": [
-                        str(span_id) for span_id in pending_failure_span_ids
-                    ],
+                    "recovered_failure_count": failure_count,
+                    "recovered_failure_version": failure_version,
                 },
             ).model_copy(update={"parent_id": parent_id})
+            state.recovered_version = state.failure_version
             session.add(_trace_row(span))
             session.commit()
             return True
     except Exception:
         logger.exception(
             "paper dispatch recovery metric failed",
+            extra={"order_id": str(order_id)},
+        )
+        return False
+
+
+def record_dispatch_failure_state(
+    *,
+    order_id: UUID,
+    session_factory: Callable[[], AbstractContextManager[Session]] = SessionLocal,
+) -> bool:
+    """Best-effort atomic increment of the fixed-size dispatch failure watermark."""
+    try:
+        with session_factory() as session:
+            session.execute(
+                text(
+                    """
+                    INSERT INTO paper_dispatch_recovery_states
+                        (order_id, failure_version, recovered_version, created_at, updated_at)
+                    VALUES (:order_id, 1, 0, now(), now())
+                    ON CONFLICT (order_id) DO UPDATE
+                    SET failure_version =
+                            paper_dispatch_recovery_states.failure_version + 1,
+                        updated_at = now()
+                    """
+                ),
+                {"order_id": order_id},
+            )
+            session.commit()
+        return True
+    except Exception:
+        logger.exception(
+            "paper dispatch failure watermark update failed",
             extra={"order_id": str(order_id)},
         )
         return False
@@ -433,13 +459,6 @@ def _privacy_safe_attrs(attrs: dict[str, object]) -> dict[str, object]:
     safe: dict[str, object] = {}
     for key, value in attrs.items():
         if key not in _SAFE_ATTRS:
-            continue
-        if key == "recovered_failure_span_ids" and isinstance(value, (list, tuple)):
-            identifiers = [item for item in value if isinstance(item, str)]
-            if len(identifiers) == len(value) and all(
-                _SAFE_TEXT.fullmatch(item) is not None for item in identifiers
-            ):
-                safe[key] = identifiers
             continue
         if not isinstance(value, (bool, int, float, str)):
             continue
