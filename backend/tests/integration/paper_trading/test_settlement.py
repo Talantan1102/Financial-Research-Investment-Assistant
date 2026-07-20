@@ -926,7 +926,7 @@ def test_old_snapshot_retries_after_new_snapshot_and_tamper_still_conflicts(
     evidence = evidence_for(snapshot_a, 0, QUOTE_TIME, 400)
     assert (
         service.apply(
-            order_id=order.id,
+            order_id=cast(uuid.UUID, order.id),
             execution=snapshot_a[0],
             quote_timestamp=QUOTE_TIME,
             match_pass=1,
@@ -944,6 +944,17 @@ def test_old_snapshot_retries_after_new_snapshot_and_tamper_still_conflicts(
         == second_a.id
     )
 
+    evidence = evidence_for(snapshot_a, 0, QUOTE_TIME, 500)
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=cast(uuid.UUID, order.id),
+            execution=snapshot_a[0],
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+    assert error.value.code == "match_pass_conflict"
+    assert db_session.query(PaperFill).count() == 3
+
     evidence = evidence_for(snapshot_a, 1, QUOTE_TIME, 400).model_copy(
         update={
             "quote": evidence_for(snapshot_a, 1, QUOTE_TIME, 400).quote.model_copy(
@@ -960,6 +971,46 @@ def test_old_snapshot_retries_after_new_snapshot_and_tamper_still_conflicts(
         )
     assert error.value.code == "match_pass_conflict"
     assert db_session.query(PaperFill).count() == 3
+
+
+def test_new_snapshot_with_wrong_initial_remaining_is_invalid(
+    db_session: Session, user: User
+) -> None:
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    later = QUOTE_TIME + timedelta(seconds=1)
+    order = _buy_order(
+        db_session,
+        user,
+        _account(db_session, user),
+        quantity=300,
+        reserve=Decimal("3010.00"),
+    )
+    evidence = _evidence(execution, remaining_before_match=300)
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=lambda **_: evidence,
+    )
+    service.apply(
+        order_id=cast(uuid.UUID, order.id),
+        execution=execution,
+        quote_timestamp=QUOTE_TIME,
+        match_pass=1,
+    )
+    before = (order.status, order.filled_quantity, db_session.query(PaperFill).count())
+    evidence = _evidence(execution, timestamp=later, remaining_before_match=300)
+
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=cast(uuid.UUID, order.id),
+            execution=execution,
+            quote_timestamp=later,
+            match_pass=2,
+        )
+
+    assert error.value.code == "invalid_match_evidence"
+    assert (order.status, order.filled_quantity, db_session.query(PaperFill).count()) == before
 
 
 def test_new_snapshot_cannot_move_quote_time_backwards(db_session: Session, user: User) -> None:

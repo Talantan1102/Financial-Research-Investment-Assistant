@@ -623,9 +623,10 @@ class PaperSettlementService:
                     "invalid_match_evidence", "match evidence history is inconsistent"
                 )
             historical_filled += int(fill.quantity)
-        if not current_rows and remaining_before_match != int(order.quantity) - historical_filled:
+        if remaining_before_match != int(order.quantity) - historical_filled:
             raise PaperTradingError(
-                "invalid_match_evidence", "match evidence history is inconsistent"
+                "match_pass_conflict" if current_rows else "invalid_match_evidence",
+                "match evidence history is inconsistent",
             )
         return evidence
 
