@@ -104,7 +104,9 @@ async def test_lazy_episode_resolver_creates_once_and_exposes_id() -> None:
         async def next_episode_index(self, session_id):
             return 4
 
-        async def write_episode(self, **kwargs):
+        async def write_explicit_episode(self, **kwargs):
+            # 强制两个 gather 分支在首次检查后交错，复现无锁时的双写。
+            await asyncio.sleep(0)
             self.writes.append(kwargs)
             return SimpleNamespace(episode_id=uuid4())
 
@@ -121,11 +123,11 @@ async def test_lazy_episode_resolver_creates_once_and_exposes_id() -> None:
         ],
     )
 
-    first = await resolver(state)
-    second = await resolver(state)
+    first, second = await asyncio.gather(resolver(state), resolver(state))
 
     assert first == second == episode_ref["episode_id"]
     assert len(memory.writes) == 1
     assert memory.writes[0]["episode_index"] == 4
     assert memory.writes[0]["user_message"] == "我买了茅台\n还买了五粮液"
     assert memory.writes[0]["agent_response"] == ""
+    assert memory.writes[0]["source_kind"] == "agent_explicit"

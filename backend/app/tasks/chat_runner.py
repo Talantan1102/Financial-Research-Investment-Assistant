@@ -140,6 +140,7 @@ def _build_lazy_episode_resolver(
     持久化完成后补齐。零工具直答仍由 post-response hook 建完整 episode。
     """
     episode_ref: dict[str, uuid.UUID | None] = {"episode_id": None}
+    create_lock = asyncio.Lock()
 
     async def _resolve(state: ChatLoopState) -> uuid.UUID | None:
         if episode_ref["episode_id"] is not None:
@@ -147,24 +148,27 @@ def _build_lazy_episode_resolver(
         if user_id is None or str(user_id) == "anonymous":
             return None
 
-        uid = uuid.UUID(str(user_id))
-        sid = uuid.UUID(str(session_id))
-        user_text = "\n".join(
-            str(message.get("content"))
-            for message in state.messages
-            if message.get("role") == "user" and isinstance(message.get("content"), str)
-        )
-        idx = await memory.next_episode_index(sid)
-        episode = await memory.write_episode(
-            user_id=uid,
-            session_id=sid,
-            episode_index=idx,
-            user_message=user_text,
-            agent_response="",
-            source_kind="chat_turn",
-        )
-        episode_ref["episode_id"] = uuid.UUID(str(episode.episode_id))
-        return episode_ref["episode_id"]
+        async with create_lock:
+            if episode_ref["episode_id"] is not None:
+                return episode_ref["episode_id"]
+            uid = uuid.UUID(str(user_id))
+            sid = uuid.UUID(str(session_id))
+            user_text = "\n".join(
+                str(message.get("content"))
+                for message in state.messages
+                if message.get("role") == "user" and isinstance(message.get("content"), str)
+            )
+            idx = await memory.next_episode_index(sid)
+            episode = await memory.write_explicit_episode(
+                user_id=uid,
+                session_id=sid,
+                episode_index=idx,
+                user_message=user_text,
+                agent_response="",
+                source_kind="agent_explicit",
+            )
+            episode_ref["episode_id"] = uuid.UUID(str(episode.episode_id))
+            return episode_ref["episode_id"]
 
     return _resolve, episode_ref
 
@@ -288,7 +292,7 @@ async def run_chat_async(
     # 2. MEMORY.md 等价索引注入稳定前缀。只含 DB 元数据分类/计数，不含记忆正文；
     #    具体事实由 memory_search 渐进读取。失败降级空串，不阻塞 turn。
     memory_index_block = ""
-    if user_id is not None:
+    if user_id is not None and str(user_id) != "anonymous":
         try:
             memory_index_block = await _render_memory_index(singletons.memory, user_id)
         except Exception as exc:  # noqa: BLE001
@@ -400,10 +404,20 @@ async def run_chat_async(
 
         # 显式 archival_insert 在 turn 中惰性创建了 episode；回答落库后补齐 response。
         # 失败仍是纯副作用，不影响已完成的 chat turn。
-        if episode_ref["episode_id"] is not None and final_state is not None:
+        if episode_ref["episode_id"] is not None:
             try:
-                await singletons.memory.update_episode_response(
-                    episode_ref["episode_id"], _final_text(final_state)
+                explicit_response = _final_text(final_state)
+                streamed_response = "".join(emitted_tokens)
+                if len(streamed_response) > len(explicit_response):
+                    explicit_response = streamed_response
+                await singletons.memory.finalize_explicit_episode(
+                    episode_ref["episode_id"],
+                    explicit_response,
+                    _explicit_episode_outcome(
+                        final_state,
+                        cancelled=cancelled_by_user,
+                        loop_error=loop_error,
+                    ),
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
@@ -467,6 +481,25 @@ async def _render_memory_index(memory: Any, user_id: uuid.UUID | str) -> str:
     uid = uuid.UUID(str(user_id))
     projection = await memory.memory_index_summary(uid)
     return render_memory_index(projection)
+
+
+def _explicit_episode_outcome(
+    final_state: ChatLoopState | None,
+    *,
+    cancelled: bool,
+    loop_error: Exception | None,
+) -> str:
+    """把显式 episode 的 turn 终态压成可审计状态。"""
+    if cancelled:
+        return "cancelled"
+    if loop_error is not None or final_state is None:
+        return "failed"
+    memory_writes = [
+        entry for entry in final_state.ledger.entries if entry.tool_name == "memory_write"
+    ]
+    if memory_writes and not any(entry.success for entry in memory_writes):
+        return "failed"
+    return "completed"
 
 
 async def _finalize(
