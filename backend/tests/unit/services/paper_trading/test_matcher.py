@@ -166,6 +166,95 @@ def test_zero_quantity_level_is_skipped_without_hiding_later_depth() -> None:
     assert all(execution.quantity > 0 for execution in executions)
 
 
+@pytest.mark.parametrize(
+    ("side", "book_changes", "limit_price", "expected"),
+    [
+        (
+            OrderSide.BUY,
+            {
+                "asks": [
+                    ("10.50", 0),
+                    ("10.01", 100),
+                    ("10.02", 100),
+                    ("10.03", 100),
+                    ("10.04", 100),
+                ]
+            },
+            Decimal("10.02"),
+            [(Decimal("10.01"), 100), (Decimal("10.02"), 50)],
+        ),
+        (
+            OrderSide.SELL,
+            {
+                "bids": [
+                    ("8.00", 0),
+                    ("9.99", 100),
+                    ("9.98", 100),
+                    ("9.97", 100),
+                    ("9.96", 100),
+                ]
+            },
+            Decimal("9.98"),
+            [(Decimal("9.99"), 100), (Decimal("9.98"), 50)],
+        ),
+        (
+            OrderSide.BUY,
+            {
+                "bids": [
+                    ("10.50", 0),
+                    ("9.99", 100),
+                    ("9.98", 100),
+                    ("9.97", 100),
+                    ("9.96", 100),
+                ]
+            },
+            Decimal("10.01"),
+            [(Decimal("10.00"), 100), (Decimal("10.01"), 50)],
+        ),
+    ],
+    ids=["unacceptable ask placeholder", "unacceptable bid placeholder", "crossed placeholder"],
+)
+def test_zero_volume_placeholders_do_not_affect_matching_or_book_validation(
+    side: OrderSide,
+    book_changes: dict[str, list[tuple[str, int]]],
+    limit_price: Decimal,
+    expected: list[tuple[Decimal, int]],
+) -> None:
+    executions = match_visible_depth(
+        side=side,
+        order_type=OrderType.LIMIT,
+        remaining=150,
+        limit_price=limit_price,
+        quote=quote_fixture(bids=book_changes.get("bids"), asks=book_changes.get("asks")),
+    )
+
+    assert pairs(executions) == expected
+
+
+@pytest.mark.parametrize("side", [OrderSide.BUY, OrderSide.SELL])
+def test_entirely_empty_executable_side_returns_no_execution(side: OrderSide) -> None:
+    empty_levels = [
+        ("11.00", 0),
+        ("8.00", 0),
+        ("12.00", 0),
+        ("7.00", 0),
+        ("13.00", 0),
+    ]
+    bids = empty_levels if side is OrderSide.SELL else None
+    asks = empty_levels if side is OrderSide.BUY else None
+
+    assert (
+        match_visible_depth(
+            side=side,
+            order_type=OrderType.MARKET,
+            remaining=100,
+            limit_price=None,
+            quote=quote_fixture(bids=bids, asks=asks),
+        )
+        == []
+    )
+
+
 @pytest.mark.parametrize("remaining", [0, -1, True, Decimal("1")])
 def test_rejects_non_strict_positive_integer_remaining(remaining: object) -> None:
     with pytest.raises(PaperTradingError) as caught:
@@ -258,7 +347,7 @@ def test_rejects_malformed_order_book(quote: RealtimeQuote) -> None:
             limit_price=None,
             quote=quote,
         )
-    assert caught.value.code == "invalid_quote"
+    assert caught.value.code == "quote_unavailable"
 
 
 def test_does_not_mutate_quote_and_is_deterministic() -> None:

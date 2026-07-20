@@ -30,7 +30,8 @@ def match_visible_depth(
     _validate_order_input(normalized_type, remaining, limit_price)
     _validate_quote(quote)
 
-    levels = quote.asks if normalized_side is OrderSide.BUY else quote.bids
+    visible_levels = quote.asks if normalized_side is OrderSide.BUY else quote.bids
+    levels = tuple(level for level in visible_levels if level.quantity > 0)
     executions: list[Execution] = []
     left = remaining
     for level in levels:
@@ -42,9 +43,8 @@ def match_visible_depth(
         ):
             break
         used = min(left, level.quantity)
-        if used > 0:
-            executions.append(Execution(price=level.price, quantity=used))
-            left -= used
+        executions.append(Execution(price=level.price, quantity=used))
+        left -= used
     return executions
 
 
@@ -78,12 +78,14 @@ def _validate_order_input(
 def _validate_quote(quote: RealtimeQuote) -> None:
     if quote.suspended:
         raise PaperTradingError("suspended_security", "security is suspended")
-    if any(left.price <= right.price for left, right in zip(quote.bids, quote.bids[1:])) or any(
-        left.price >= right.price for left, right in zip(quote.asks, quote.asks[1:])
+    bids = tuple(level for level in quote.bids if level.quantity > 0)
+    asks = tuple(level for level in quote.asks if level.quantity > 0)
+    if any(left.price <= right.price for left, right in zip(bids, bids[1:])) or any(
+        left.price >= right.price for left, right in zip(asks, asks[1:])
     ):
-        raise PaperTradingError("invalid_quote", "quote levels are not best-price first")
-    if quote.bids[0].price >= quote.asks[0].price:
-        raise PaperTradingError("invalid_quote", "quote order book is crossed")
+        raise PaperTradingError("quote_unavailable", "quote levels are not best-price first")
+    if bids and asks and bids[0].price >= asks[0].price:
+        raise PaperTradingError("quote_unavailable", "quote order book is crossed")
 
 
 def _price_is_acceptable(
