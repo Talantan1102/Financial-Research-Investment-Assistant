@@ -22,6 +22,9 @@ except ImportError:
     HAS_TESTCONTAINERS = False
 
 
+CELERY_WORKER_QUEUES = ("default", "llm")
+
+
 @pytest.fixture(scope="session")
 def redis_url() -> Generator[str, None, None]:
     """Session-scoped redis broker URL.
@@ -52,6 +55,15 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
     env = os.environ.copy()
     env["CELERY_BROKER_URL"] = redis_url
     env["CELERY_RESULT_BACKEND"] = redis_url
+    # Global pytest bootstrap deliberately defaults LLM_MODE to "none" so unit
+    # tests fail on accidental LLM construction.  This fixture is an L2 worker,
+    # and run_chat must get past dependency construction before it can mark the
+    # DB task running; use mock unless the caller explicitly selected a real
+    # integration mode (cassette/live/mock).
+    if env.get("LLM_MODE", "none") == "none":
+        env["LLM_MODE"] = "mock"
+    if env["LLM_MODE"] == "mock":
+        env.setdefault("DASHSCOPE_API_KEY", "test-key-not-for-live-calls")
 
     proc = subprocess.Popen(
         [
@@ -62,7 +74,7 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
             "app.tasks.celery_app",
             "worker",
             "-Q",
-            "default,llm",
+            ",".join(CELERY_WORKER_QUEUES),
             "--concurrency",
             "1",
             "--loglevel",

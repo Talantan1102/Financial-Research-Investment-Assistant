@@ -61,3 +61,16 @@ def test_generate_session_title_routes_to_llm_queue() -> None:
     assert routes[task_name]["queue"] == "llm", (
         f"{task_name} must route to 'llm' queue, got {routes[task_name]['queue']!r}"
     )
+
+
+def test_run_chat_routes_to_worker_llm_queue() -> None:
+    """run_chat uses the LLM and its explicit queue must be consumed by the L2 worker."""
+    from app.tasks.celery_app import celery_app
+
+    from tests.conftest_celery import CELERY_WORKER_QUEUES
+
+    routes = celery_app.conf.task_routes or {}
+    task_name = "app.tasks.chat_runner.run_chat"
+    assert task_name in routes
+    assert routes[task_name]["queue"] == "llm"
+    assert routes[task_name]["queue"] in CELERY_WORKER_QUEUES
