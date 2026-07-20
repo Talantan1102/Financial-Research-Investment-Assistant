@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest_asyncio
@@ -175,14 +176,36 @@ class _FakeMemory:
 
     def __init__(self, *, persona_raises: bool = False) -> None:
         self._persona_raises = persona_raises
+        self.episodes: list[dict[str, Any]] = []
+        self.archival_writes: list[dict[str, Any]] = []
+        self.updated_responses: list[tuple[uuid.UUID, str]] = []
 
     async def get_working_blocks(self, _user_id: Any) -> dict[str, Any]:
         if self._persona_raises:
             raise RuntimeError("simulated persona DB error")
         return {}
 
+    async def memory_index_summary(self, _user_id: Any) -> dict[str, Any]:
+        if self._persona_raises:
+            raise RuntimeError("simulated memory index DB error")
+        return {"working_blocks": [], "archival": {"total": 0, "relations": {}}}
+
     async def archival_memory_search(self, *_a: Any, **_k: Any) -> list[Any]:
         return []
+
+    async def next_episode_index(self, _session_id: Any) -> int:
+        return len(self.episodes)
+
+    async def write_episode(self, **kwargs: Any) -> Any:
+        episode_id = uuid.uuid4()
+        self.episodes.append({**kwargs, "episode_id": episode_id})
+        return SimpleNamespace(episode_id=episode_id)
+
+    async def update_episode_response(self, episode_id: uuid.UUID, response: str) -> None:
+        self.updated_responses.append((episode_id, response))
+
+    async def archival_memory_insert(self, **kwargs: Any) -> None:
+        self.archival_writes.append(kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +347,67 @@ async def test_direct_answer_turn(
     assert assistant[0].content == "你好，我能帮你分析股票。"
     task = await ChatTaskRepo(pg_async_session_factory).get_by_id(seeded_task["task_id"])
     assert task is not None and task.status == "done"
+
+
+async def test_explicit_archival_write_gets_lazy_episode_and_no_implicit_duplicate(
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+    tmp_path: Path,
+) -> None:
+    """生产 runner 接入 resolver：显式写有 provenance，回复后不会再隐式重复写 episode。"""
+    from sqlalchemy import text as _text
+
+    uid, sid = uuid.uuid4(), uuid.uuid4()
+    async with pg_async_session_factory() as sess:
+        await sess.execute(
+            _text(
+                "INSERT INTO users (id, username, email, hashed_password, is_active) "
+                "VALUES (:i, :u, :e, :p, true)"
+            ),
+            {
+                "i": str(uid),
+                "u": f"memory-{uid.hex[:8]}",
+                "e": f"memory-{uid.hex[:8]}@t.local",
+                "p": "x",
+            },
+        )
+        sess.add(ChatSession(id=sid, user_id=uid, title="t"))
+        await sess.commit()
+    task_repo = ChatTaskRepo(pg_async_session_factory)
+    task = await task_repo.create_queued(
+        session_id=sid,
+        user_id=uid,
+        langgraph_thread_id=f"memory:{sid}",
+        initial_prompt_message_id=None,
+    )
+    args = {
+        "action": "archival_insert",
+        "content": "用户持有贵州茅台",
+        "evidence_quote": "买了茅台",
+    }
+    llm = ScriptedStepClient(
+        [
+            _step(tool_calls=[_call("memory_write", args)]),
+            _step(content="已按你的明确要求记录。", finish_reason="stop"),
+        ]
+    )
+    singletons = await _singletons(pg_async_session_factory, llm, tmp_path=tmp_path)
+
+    await run_chat_async(
+        task_id=task.id,
+        singletons=singletons,
+        session_factory=pg_async_session_factory,
+        redis=FakeRedis(decode_responses=False),
+        user_message="我买了茅台，请记住",
+        session_id=str(sid),
+        user_id=uid,
+    )
+
+    memory = singletons.memory
+    assert len(memory.episodes) == 1
+    episode_id = memory.episodes[0]["episode_id"]
+    assert memory.episodes[0]["agent_response"] == ""
+    assert memory.archival_writes[0]["episode_id"] == episode_id
+    assert memory.updated_responses == [(episode_id, "已按你的明确要求记录。")]
 
 
 # ---------------------------------------------------------------------------

@@ -127,6 +127,48 @@ def _build_redis_for_worker() -> Any:
     return _REDIS_SINGLETON
 
 
+def _build_lazy_episode_resolver(
+    memory: Any,
+    *,
+    user_id: uuid.UUID | str | None,
+    session_id: str,
+) -> tuple[Any, dict[str, uuid.UUID | None]]:
+    """构造 per-turn 惰性 episode resolver 与共享引用。
+
+    只有 ``archival_insert`` 真执行时才先写一条空回复 episode，给该次显式写入
+    提供可审计 provenance；同 turn 的重试复用同一 episode。最终回复在 runner
+    持久化完成后补齐。零工具直答仍由 post-response hook 建完整 episode。
+    """
+    episode_ref: dict[str, uuid.UUID | None] = {"episode_id": None}
+
+    async def _resolve(state: ChatLoopState) -> uuid.UUID | None:
+        if episode_ref["episode_id"] is not None:
+            return episode_ref["episode_id"]
+        if user_id is None or str(user_id) == "anonymous":
+            return None
+
+        uid = uuid.UUID(str(user_id))
+        sid = uuid.UUID(str(session_id))
+        user_text = "\n".join(
+            str(message.get("content"))
+            for message in state.messages
+            if message.get("role") == "user" and isinstance(message.get("content"), str)
+        )
+        idx = await memory.next_episode_index(sid)
+        episode = await memory.write_episode(
+            user_id=uid,
+            session_id=sid,
+            episode_index=idx,
+            user_message=user_text,
+            agent_response="",
+            source_kind="chat_turn",
+        )
+        episode_ref["episode_id"] = uuid.UUID(str(episode.episode_id))
+        return episode_ref["episode_id"]
+
+    return _resolve, episode_ref
+
+
 # ---------------------------------------------------------------------------
 # 事件信封:LoopEvent → Redis Stream payload(spec § 5.1)
 # ---------------------------------------------------------------------------
@@ -243,20 +285,32 @@ async def run_chat_async(
         logger.warning("rebuild_context failed for task %s, 降级空历史: %s", task_id, exc)
         history_block = ()
 
-    # 2. persona 注入稳定前缀(失败降级空串,不阻塞 turn)
-    persona_block = ""
+    # 2. MEMORY.md 等价索引注入稳定前缀。只含 DB 元数据分类/计数，不含记忆正文；
+    #    具体事实由 memory_search 渐进读取。失败降级空串，不阻塞 turn。
+    memory_index_block = ""
     if user_id is not None:
         try:
-            persona_block = await _render_persona(singletons.memory, user_id)
+            memory_index_block = await _render_memory_index(singletons.memory, user_id)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("persona render failed for task %s, 降级空: %s", task_id, exc)
+            logger.warning("memory index render failed for task %s, 降级空: %s", task_id, exc)
+
+    episode_resolver, episode_ref = _build_lazy_episode_resolver(
+        singletons.memory,
+        user_id=user_id,
+        session_id=session_id,
+    )
 
     # per-turn 组装(轻 hub 持 turn 级 emit/seq;system_prompt/skill_listing 在此收口)
-    components = build_turn_components(singletons, emit=_emit, seq_counter=seq_counter)
+    components = build_turn_components(
+        singletons,
+        emit=_emit,
+        seq_counter=seq_counter,
+        episode_id_resolver=episode_resolver,
+    )
 
     deps = ContextDeps(
         system_prompt=components.system_prompt,
-        persona_block=persona_block,
+        memory_index_block=memory_index_block,
         skill_listing=components.skill_listing,
         history_block=history_block,
         max_steps=components.gate_cfg.max_steps,
@@ -344,6 +398,18 @@ async def run_chat_async(
         except Exception as exc:  # noqa: BLE001
             logger.debug("TTL refresh skipped for task %s: %s", task_id, exc)
 
+        # 显式 archival_insert 在 turn 中惰性创建了 episode；回答落库后补齐 response。
+        # 失败仍是纯副作用，不影响已完成的 chat turn。
+        if episode_ref["episode_id"] is not None and final_state is not None:
+            try:
+                await singletons.memory.update_episode_response(
+                    episode_ref["episode_id"], _final_text(final_state)
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "chat memory: update episode response failed task=%s: %s", task_id, exc
+                )
+
         # Path A 写 episode + 触发 Path B 抽取(干净成功轮;纯副作用,fail-soft 双保险)。
         # 回复与持久化已在前完成,本块失败绝不影响 turn。钩子内部已守卫 + fail-soft。
         try:
@@ -354,7 +420,7 @@ async def run_chat_async(
                 session_id=session_id,
                 user_id=user_id,
                 user_message=user_message,
-                agent_response="".join(emitted_tokens),
+                agent_response=_final_text(final_state),
                 cancelled=cancelled_by_user,
                 loop_error=loop_error,
                 final_state=final_state,
@@ -394,12 +460,13 @@ async def _rebuild_history(session_factory: Any, session_id: str, llm: Any) -> t
         return await rebuild_context(session_id, db=db, llm=llm)
 
 
-async def _render_persona(memory: Any, user_id: uuid.UUID | str) -> str:
-    """persona 稳定前缀注入(spec § 3.3 复用 render_persona_markdown)。"""
-    from app.memory.render import render_persona_markdown
+async def _render_memory_index(memory: Any, user_id: uuid.UUID | str) -> str:
+    """只渲染 DB 索引摘要；具体记忆正文不进入 system context。"""
+    from app.memory.index_projection import render_memory_index
 
     uid = uuid.UUID(str(user_id))
-    return await render_persona_markdown(memory, uid)
+    projection = await memory.memory_index_summary(uid)
+    return render_memory_index(projection)
 
 
 async def _finalize(

@@ -50,6 +50,13 @@ class FakeMemory:
         self.calls.append(("archival_memory_search", {"user_id": user_id, "query": query, "k": k}))
         return [{"edge": "fact1"}, {"edge": "fact2"}]
 
+    async def memory_index_summary(self, user_id):
+        self.calls.append(("memory_index_summary", {"user_id": user_id}))
+        return {
+            "working_blocks": [{"name": "persona", "token_count": 12}],
+            "archival": {"total": 3, "relations": {"HOLDS": 2, "WATCHES": 1}},
+        }
+
     async def recall_memory_search(self, user_id, query, k=5):
         self.calls.append(("recall_memory_search", {"user_id": user_id, "query": query, "k": k}))
         return [{"msg": "said before"}]
@@ -194,6 +201,19 @@ async def test_search_default_scope_is_archival():
     assert args.scope == "archival"
     await tool.run_with_state(args, _state())
     assert mem.of("archival_memory_search")
+
+
+async def test_search_index_returns_db_projection_without_detail_query():
+    """index 是 MEMORY.md 等价 DB 投影；详情仍需 archival/recall/graph 渐进读取。"""
+    mem = FakeMemory()
+    tool = _search_tool(mem)
+
+    out = await tool.run_with_state(MemorySearchArgs(query="ignored", scope="index"), _state())
+
+    assert out["scope"] == "index"
+    assert out["results"]["archival"]["relations"] == {"HOLDS": 2, "WATCHES": 1}
+    assert mem.of("memory_index_summary")
+    assert not mem.of("archival_memory_search")
 
 
 async def test_search_does_not_call_classifier():
@@ -360,6 +380,33 @@ async def test_archival_insert_no_episode_bound_guidance():
     assert not mem.of("archival_memory_insert")
 
 
+async def test_archival_insert_awaits_lazy_episode_resolver():
+    """生产 resolver 可在首次 archival_insert 时异步建 episode，解除恒前置缺失。"""
+    mem = FakeMemory()
+    seen: list[ChatLoopState] = []
+
+    async def resolve(state: ChatLoopState) -> UUID:
+        seen.append(state)
+        return _EPISODE_ID
+
+    tool = MemoryWriteTool(
+        memory=mem,
+        injection_classifier=FakeClassifier(),
+        episode_id_resolver=resolve,
+    )
+    state = _state([{"role": "user", "content": "我买了茅台"}])
+
+    await tool.run_with_state(
+        MemoryWriteArgs(
+            action="archival_insert", content="用户持有贵州茅台", evidence_quote="买了茅台"
+        ),
+        state,
+    )
+
+    assert seen == [state]
+    assert mem.of("archival_memory_insert")[0]["episode_id"] == _EPISODE_ID
+
+
 async def test_evidence_quote_whitespace_tolerant():
     """空白容忍:'买了 500 股' 匹配 '买了500股'(复用 evidence_quote_in_episode)。"""
     mem = FakeMemory()
@@ -499,9 +546,9 @@ async def test_hub_legacy_tool_unaffected_regression():
 # ===========================================================================
 
 
-def test_docs_memory_search_lists_three_scopes():
+def test_docs_memory_search_lists_four_scopes():
     doc = TOOL_DOCS["memory_search"].doc
-    for scope in ("archival", "recall", "graph"):
+    for scope in ("index", "archival", "recall", "graph"):
         assert scope in doc
 
 

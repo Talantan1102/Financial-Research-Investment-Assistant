@@ -723,6 +723,35 @@ class HierarchicalMemory:
         finally:
             session.close()
 
+    async def update_episode_response(self, episode_id: UUID, agent_response: str) -> None:
+        """补齐惰性 episode 的最终回复文本。
+
+        archival memory_write 必须在 turn 中执行，episode 因而先以空回复建立；turn
+        持久化完成后再补齐回复，既给写工具稳定 provenance，又不提前伪造回答。
+        """
+        from app.memory.models import ChatMemoryEpisode
+
+        session = self._pg_session_factory()
+        try:
+            episode = (
+                session.query(ChatMemoryEpisode)
+                .filter(ChatMemoryEpisode.episode_id == episode_id)
+                .one()
+            )
+            episode.agent_response_text = agent_response
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    async def memory_index_summary(self, user_id: UUID) -> dict[str, Any]:
+        """返回 MEMORY.md 等价的 DB 元数据投影（不含任何具体记忆正文）。"""
+        from app.memory.index_projection import build_memory_index_projection
+
+        return build_memory_index_projection(self._pg_session_factory, user_id)
+
     async def next_episode_index(self, session_id: UUID) -> int:
         """返回该 session 下一个 episode_index(max+1;空 session 为 0)。
 

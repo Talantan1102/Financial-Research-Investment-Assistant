@@ -2,7 +2,8 @@
 
 设计要点:
 - 四区顺序:稳定前缀区 → 历史区 → 本 turn 轨迹区 → 尾部动态区;
-- 稳定前缀区(system 消息):三段拼接(system_prompt / persona_block / skill_listing),
+- 稳定前缀区(system 消息):按需拼接(system_prompt / memory_index_block /
+  persona_block / skill_listing),
   turn 内逐字节恒定,吃 KV-cache 折扣;
 - 历史区:history_block 元组透传,Phase 4 注入,本模块不做 I/O;
 - 本 turn 轨迹区:state.messages 原样(含降级处理);
@@ -68,6 +69,7 @@ class ContextDeps:
     """窗口组装的静态依赖 — turn 开始时构建一次,圈间不变(前缀稳定性的来源)。"""
 
     system_prompt: str
+    memory_index_block: str = ""
     persona_block: str = ""
     skill_listing: str = ""
     history_block: tuple[dict[str, Any], ...] = field(default_factory=tuple)
@@ -91,8 +93,17 @@ class ContextDeps:
 
     @property
     def system_message_content(self) -> str:
-        """三段拼接,空段跳过,保证前缀逐字节恒定。"""
-        parts = [p for p in (self.system_prompt, self.persona_block, self.skill_listing) if p]
+        """稳定段拼接,空段跳过,保证单 turn 前缀逐字节恒定。"""
+        parts = [
+            p
+            for p in (
+                self.system_prompt,
+                self.memory_index_block,
+                self.persona_block,
+                self.skill_listing,
+            )
+            if p
+        ]
         return _SEP.join(parts)
 
 
