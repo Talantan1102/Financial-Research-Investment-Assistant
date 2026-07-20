@@ -181,6 +181,52 @@ async def _session_owned_by(
     return sess is not None and str(sess.user_id) == str(user.id)
 
 
+async def _source_context_allowed(
+    *,
+    record: Any,
+    req: EscalateRequest,
+    tenant_id: uuid.UUID | None,
+    user: User,
+    chat_session_repo: ChatSessionRepo,
+) -> bool:
+    """Fail closed for a supplied Run/Session provenance reference.
+
+    The legacy route has no tenant path, so the repository is the source of
+    truth there.  New callers provide optional ``get_run``/
+    ``session_belongs_to_tenant`` methods; both are checked when available.
+    """
+    record_tenant = getattr(record, "tenant_id", None)
+    if tenant_id is not None and record_tenant is not None and str(record_tenant) != str(tenant_id):
+        return False
+    source_sid = req.source_session_id or req.packet_confirmed.session_metadata.chat_session_id
+    if req.source_session_id is not None and str(req.source_session_id) != str(req.packet_confirmed.session_metadata.chat_session_id):
+        return False
+    if tenant_id is not None:
+        membership_check = getattr(chat_session_repo, "session_belongs_to_tenant", None)
+        if membership_check is not None:
+            allowed = membership_check(source_sid, tenant_id, user.id)
+            if hasattr(allowed, "__await__"):
+                allowed = await allowed
+            if not allowed:
+                return False
+    source_run_id = req.source_run_id
+    if source_run_id is not None:
+        get_run = getattr(chat_session_repo, "get_run", None)
+        if get_run is None:
+            # Do not allow an unresolvable run to be written as provenance.
+            return False
+        run = get_run(source_run_id)
+        if hasattr(run, "__await__"):
+            run = await run
+        if run is None or str(getattr(run, "session_id", "")) != str(source_sid):
+            return False
+        if tenant_id is not None and str(getattr(run, "tenant_id", "")) != str(tenant_id):
+            return False
+        if str(getattr(run, "created_by_user_id", user.id)) != str(user.id):
+            return False
+    return True
+
+
 @research_router.post("")
 @router.post("/escalate")
 async def escalate(
@@ -209,6 +255,15 @@ async def escalate(
     for sid in candidate_sids:
         if not await _session_owned_by(chat_session_repo, sid, user):
             raise HTTPException(status_code=404, detail="escalation record not found")
+    if not await _source_context_allowed(
+        record=record,
+        req=req,
+        tenant_id=tenant_id,
+        user=user,
+        chat_session_repo=chat_session_repo,
+    ):
+        raise HTTPException(status_code=404, detail="escalation record not found")
+    source_session_id = req.source_session_id or req.packet_confirmed.session_metadata.chat_session_id
 
     async def _stream() -> AsyncIterator[str]:
         seq = {"n": 0}
@@ -297,7 +352,9 @@ async def escalate(
                 target_ts_code=req.packet_confirmed.explicit_task.target_ts_code,
                 report_markdown=sut_out.response_text,
                 request_id=request_id,
-                source_chat_session_id=req.packet_confirmed.session_metadata.chat_session_id,
+                source_chat_session_id=source_session_id,
+                source_session_id=source_session_id,
+                source_run_id=req.source_run_id,
             )
             summary = _summarize_report(sut_out.response_text)
             await chat_session_repo.append_message(
