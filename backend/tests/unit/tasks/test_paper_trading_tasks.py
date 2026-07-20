@@ -121,7 +121,7 @@ def test_open_queued_orders_dispatches_open_and_partial_orders_only_after_commit
     import app.tasks.paper_trading as tasks
 
     session = _Session()
-    dispatched: list[tuple[str, bool]] = []
+    dispatched: list[tuple[str, bool, bool]] = []
     monkeypatch.setattr(tasks, "SessionLocal", lambda: session)
     monkeypatch.setattr(
         tasks,
@@ -131,11 +131,13 @@ def test_open_queued_orders_dispatches_open_and_partial_orders_only_after_commit
     monkeypatch.setattr(
         tasks,
         "dispatch_match_order",
-        lambda order_id: dispatched.append((order_id, session.committed)) or True,
+        lambda order_id, *, recovery=False: (
+            dispatched.append((order_id, session.committed, recovery)) or True
+        ),
     )
 
     assert tasks.open_queued_orders.run() == 1
-    assert dispatched == [("open-id", True), ("partial-id", True)]
+    assert dispatched == [("open-id", True, True), ("partial-id", True, True)]
 
 
 def test_periodic_scan_beat_recovers_open_and_partial_orders() -> None:
@@ -156,6 +158,97 @@ def test_dispatch_failure_is_nonfatal_for_periodic_recovery(
     )
 
     assert tasks.dispatch_match_order("00000000-0000-0000-0000-000000000001") is False
+
+
+def test_dispatch_propagates_trace_parent_and_records_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    emitted: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        tasks.match_order, "apply_async", MagicMock(side_effect=OSError("redis down"))
+    )
+    monkeypatch.setattr(tasks, "_record_order_span", lambda **kwargs: emitted.append(kwargs))
+
+    assert (
+        tasks.dispatch_match_order(
+            "00000000-0000-0000-0000-000000000001",
+            trace_parent_id="rest-confirm-span",
+        )
+        is False
+    )
+    tasks.match_order.apply_async.assert_called_once_with(  # type: ignore[attr-defined]
+        args=["00000000-0000-0000-0000-000000000001"],
+        kwargs={"trace_parent_id": "rest-confirm-span"},
+        retry=False,
+    )
+    assert emitted[0]["name"] == "dispatch"
+    assert emitted[0]["parent_id"] == "rest-confirm-span"
+    assert emitted[0]["attrs"] == {"dispatch_failed": True, "outcome": "failure"}
+
+
+def test_match_records_idempotent_replay_without_counting_a_business_fill_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    session = _Session()
+    emitted: list[dict[str, object]] = []
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        tasks,
+        "_match_order_in_session",
+        MagicMock(
+            return_value={
+                "fill_ids": ["existing-fill"],
+                "matched_quantity": 100,
+                "idempotent_replay": True,
+            }
+        ),
+    )
+    monkeypatch.setattr(tasks, "_record_order_span", lambda **kwargs: emitted.append(kwargs))
+
+    result = tasks.match_order.run(
+        "00000000-0000-0000-0000-000000000001",
+        trace_parent_id="rest-confirm-span",
+    )
+
+    assert result["idempotent_replay"] is True
+    assert emitted[0]["name"] == "match"
+    assert emitted[0]["parent_id"] == "rest-confirm-span"
+    assert emitted[0]["attrs"] == {
+        "fill_count": 1,
+        "idempotent_replay": True,
+        "matched_quantity": 100,
+        "outcome": "idempotent_replay",
+    }
+    assert len(emitted) == 1
+
+
+def test_match_records_settlement_only_for_new_business_fills(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    session = _Session()
+    emitted: list[dict[str, object]] = []
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        tasks,
+        "_match_order_in_session",
+        MagicMock(return_value={"fill_ids": ["new-fill"], "matched_quantity": 100}),
+    )
+    monkeypatch.setattr(tasks, "_record_order_span", lambda **kwargs: emitted.append(kwargs))
+
+    tasks.match_order.run("00000000-0000-0000-0000-000000000001")
+
+    assert [row["name"] for row in emitted] == ["match", "settle"]
+    assert emitted[1]["attrs"] == {
+        "fill_count": 1,
+        "matched_quantity": 100,
+        "outcome": "success",
+    }
 
 
 def test_production_task_ignores_worker_fixture_environment(

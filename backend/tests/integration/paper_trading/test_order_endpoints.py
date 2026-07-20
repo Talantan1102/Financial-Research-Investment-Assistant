@@ -73,7 +73,11 @@ def user(db_session: Session) -> User:
 
 @pytest.fixture(autouse=True)
 def _stub_paper_match_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(paper_router, "dispatch_match_order", lambda _order_id: True)
+    class _Span:
+        span_id = "test-paper-span"
+
+    monkeypatch.setattr(paper_router, "_record_order_span", lambda **_kwargs: _Span())
+    monkeypatch.setattr(paper_router, "dispatch_match_order", lambda _order_id, **_kwargs: True)
 
 
 def _service(session: Session, *, quoted_at: datetime = NOW) -> PaperOrderService:
@@ -346,7 +350,9 @@ def test_confirm_dispatches_matching_only_after_commit(
     monkeypatch.setattr(
         paper_router,
         "dispatch_match_order",
-        lambda order_id: dispatched.append((order_id, db_session.in_transaction())) or True,
+        lambda order_id, **_kwargs: (
+            dispatched.append((order_id, db_session.in_transaction())) or True
+        ),
     )
 
     response = TestClient(_app(db_session, user)).post(
@@ -358,11 +364,61 @@ def test_confirm_dispatches_matching_only_after_commit(
     assert dispatched == [(order.id, False)]
 
 
+def test_confirm_span_is_parent_of_dispatched_worker_trace(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, order = _prepared(db_session, user)
+    emitted: list[dict[str, object]] = []
+    dispatched: list[tuple[uuid.UUID, str | None]] = []
+
+    class _Span:
+        span_id = "rest-confirm-span"
+
+    monkeypatch.setattr(
+        paper_router,
+        "_record_order_span",
+        lambda **kwargs: emitted.append(kwargs) or _Span(),
+    )
+    monkeypatch.setattr(
+        paper_router,
+        "dispatch_match_order",
+        lambda order_id, *, trace_parent_id=None: (
+            dispatched.append((order_id, trace_parent_id)) or True
+        ),
+    )
+
+    response = TestClient(_app(db_session, user)).post(
+        f"/api/v0/paper-trading/orders/{order.id}/confirm",
+        json={"draft": _draft(), "client_request_id": "trace-parent-confirm"},
+    )
+    retry = TestClient(_app(db_session, user)).post(
+        f"/api/v0/paper-trading/orders/{order.id}/confirm",
+        json={"draft": _draft(), "client_request_id": "trace-parent-confirm"},
+    )
+
+    assert response.status_code == retry.status_code == 200
+    assert [row["name"] for row in emitted] == ["confirm", "confirm"]
+    assert emitted[0]["attrs"] == {
+        "idempotent_replay": False,
+        "outcome": "success",
+        "status": "open",
+    }
+    assert emitted[1]["attrs"] == {
+        "idempotent_replay": True,
+        "outcome": "success",
+        "status": "open",
+    }
+    assert dispatched == [
+        (order.id, "rest-confirm-span"),
+        (order.id, "rest-confirm-span"),
+    ]
+
+
 def test_confirm_remains_successful_when_dispatch_fails_for_later_scan(
     db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, order = _prepared(db_session, user)
-    monkeypatch.setattr(paper_router, "dispatch_match_order", lambda _order_id: False)
+    monkeypatch.setattr(paper_router, "dispatch_match_order", lambda _order_id, **_kwargs: False)
 
     response = TestClient(_app(db_session, user)).post(
         f"/api/v0/paper-trading/orders/{order.id}/confirm",

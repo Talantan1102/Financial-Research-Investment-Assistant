@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
+from typing import cast
 
 import app.tasks.paper_trading as paper_tasks
 import pytest
@@ -203,10 +204,18 @@ def test_periodic_scan_isolates_account_errors_and_commits_other_accounts(
 
     monkeypatch.setattr(paper_tasks, "SessionLocal", factory)
     monkeypatch.setattr(paper_tasks, "reconcile_account", flaky)
+    emitted: list[dict[str, object]] = []
+    monkeypatch.setattr(paper_tasks, "_record_order_span", lambda **kwargs: emitted.append(kwargs))
 
     result = paper_tasks._reconcile_active_accounts()
 
     assert result == {"checked": 2, "suspended": 1, "errors": 1}
+    assert len(emitted) == 3
+    assert sum(int(cast(dict[str, object], row["attrs"])["violation_count"]) for row in emitted) > 0
+    assert (
+        sum(int(cast(dict[str, object], row["attrs"])["reconciliation_errors"]) for row in emitted)
+        == 1
+    )
     verify = factory()
     try:
         statuses = [verify.get(PaperAccount, account_id).status for account_id in account_ids]

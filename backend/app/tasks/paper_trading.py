@@ -26,6 +26,7 @@ from app.services.paper_trading.clock import (
 )
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.matcher import Execution, match_visible_depth
+from app.services.paper_trading.observability import emit_paper_order_span
 from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.quote_provider import (
     TushareRealtimeQuoteProvider,
@@ -35,11 +36,31 @@ from app.services.paper_trading.reconciliation import reconcile_account
 from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.settlement import MatchQuoteEvidence, PaperSettlementService
 from app.services.paper_trading.types import MarketPhase
+from app.services.trace_models import Span
 from app.services.tushare_factory import build_tushare_service
 from app.tasks.celery_app import celery_app
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
+
+
+def _record_order_span(
+    *,
+    order_id: uuid.UUID,
+    name: str,
+    started_at: datetime,
+    attrs: dict[str, object],
+    error: str | None = None,
+    parent_id: str | None = None,
+) -> Span:
+    return emit_paper_order_span(
+        order_id=order_id,
+        name=name,
+        started_at=started_at,
+        attrs=attrs,
+        error=error,
+        parent_id=parent_id,
+    )
 
 
 def _now() -> datetime:
@@ -108,6 +129,7 @@ def _existing_result(
         "matched_quantity": sum(int(row.matched_quantity) for row in rows),
         "quote_timestamp": quote_timestamp.isoformat(),
         "match_pass": int(rows[0].match_pass),
+        "idempotent_replay": True,
     }
 
 
@@ -347,6 +369,7 @@ def _reconcile_active_accounts() -> dict[str, int]:
 
     checked = suspended = errors = 0
     for account_id in account_ids:
+        started_at = datetime.now(UTC)
         session = SessionLocal()
         try:
             still_active = session.scalar(
@@ -364,6 +387,16 @@ def _reconcile_active_accounts() -> dict[str, int]:
             session.commit()
             checked += 1
             suspended += int(bool(violations))
+            _record_order_span(
+                order_id=account_id,
+                name="reconcile",
+                started_at=started_at,
+                attrs={
+                    "outcome": "violation" if violations else "success",
+                    "reconciliation_errors": 0,
+                    "violation_count": len(violations),
+                },
+            )
         except Exception:
             session.rollback()
             errors += 1
@@ -371,39 +404,143 @@ def _reconcile_active_accounts() -> dict[str, int]:
                 "paper account reconciliation failed",
                 extra={"account_id": str(account_id)},
             )
+            _record_order_span(
+                order_id=account_id,
+                name="reconcile",
+                started_at=started_at,
+                attrs={
+                    "outcome": "failure",
+                    "reconciliation_errors": 1,
+                    "violation_count": 0,
+                },
+                error="reconciliation_error",
+            )
         finally:
             session.close()
     return {"checked": checked, "suspended": suspended, "errors": errors}
 
 
-def dispatch_match_order(order_id: uuid.UUID | str) -> bool:
+def dispatch_match_order(
+    order_id: uuid.UUID | str,
+    *,
+    trace_parent_id: str | None = None,
+    recovery: bool = False,
+) -> bool:
     """Best-effort dispatch; the periodic open-order scan is the recovery path."""
+    started_at = datetime.now(UTC)
+    parsed_id = _parse_uuid(str(order_id))
     try:
-        match_order.apply_async(args=[str(order_id)], retry=False)
+        if trace_parent_id is None:
+            match_order.apply_async(args=[str(order_id)], retry=False)
+        else:
+            match_order.apply_async(
+                args=[str(order_id)],
+                kwargs={"trace_parent_id": trace_parent_id},
+                retry=False,
+            )
     except Exception:
         logger.exception(
             "paper match dispatch failed; periodic scan will retry",
             extra={"order_id": str(order_id)},
         )
+        _record_order_span(
+            order_id=parsed_id,
+            name="dispatch",
+            started_at=started_at,
+            attrs={"dispatch_failed": True, "outcome": "failure"},
+            error="dispatch_failed",
+            parent_id=trace_parent_id,
+        )
         return False
+    _record_order_span(
+        order_id=parsed_id,
+        name="dispatch",
+        started_at=started_at,
+        attrs={
+            "dispatch_failed": False,
+            "dispatch_recovered": recovery,
+            "outcome": "success",
+        },
+        parent_id=trace_parent_id,
+    )
     return True
 
 
 @celery_app.task(name="app.tasks.paper_trading.match_order", acks_late=True)
 def match_order(
-    order_id: str, quote_timestamp: str | None = None, match_pass: int | None = None
+    order_id: str,
+    quote_timestamp: str | None = None,
+    match_pass: int | None = None,
+    trace_parent_id: str | None = None,
 ) -> dict[str, object]:
-    return cast(
-        dict[str, object],
-        _run_transaction(
-            lambda session: _match_order_in_session(
-                session,
-                order_id=order_id,
-                quote_timestamp=quote_timestamp,
-                match_pass=match_pass,
-            )
-        ),
+    parsed_id = _parse_uuid(order_id)
+    started_at = datetime.now(UTC)
+    try:
+        result = cast(
+            dict[str, object],
+            _run_transaction(
+                lambda session: _match_order_in_session(
+                    session,
+                    order_id=order_id,
+                    quote_timestamp=quote_timestamp,
+                    match_pass=match_pass,
+                )
+            ),
+        )
+    except Exception as exc:
+        error_code = exc.code if isinstance(exc, PaperTradingError) else "internal_error"
+        _record_order_span(
+            order_id=parsed_id,
+            name="match",
+            started_at=started_at,
+            attrs={"outcome": "failure", "error_code": error_code},
+            error=error_code,
+            parent_id=trace_parent_id,
+        )
+        raise
+    replay = result.get("idempotent_replay") is True
+    raw_matched_quantity = result.get("matched_quantity", 0)
+    matched_quantity = (
+        raw_matched_quantity
+        if isinstance(raw_matched_quantity, int) and not isinstance(raw_matched_quantity, bool)
+        else 0
     )
+    fill_ids = result.get("fill_ids")
+    fill_count = len(fill_ids) if isinstance(fill_ids, list) else 0
+    outcome = (
+        "idempotent_replay"
+        if replay
+        else (
+            "filled"
+            if matched_quantity
+            else ("empty_book" if "quote_timestamp" in result else "noop")
+        )
+    )
+    match_span = _record_order_span(
+        order_id=parsed_id,
+        name="match",
+        started_at=started_at,
+        attrs={
+            "fill_count": fill_count,
+            "idempotent_replay": replay,
+            "matched_quantity": matched_quantity,
+            "outcome": outcome,
+        },
+        parent_id=trace_parent_id,
+    )
+    if matched_quantity > 0 and not replay:
+        _record_order_span(
+            order_id=parsed_id,
+            name="settle",
+            started_at=started_at,
+            attrs={
+                "fill_count": fill_count,
+                "matched_quantity": matched_quantity,
+                "outcome": "success",
+            },
+            parent_id=getattr(match_span, "span_id", trace_parent_id),
+        )
+    return result
 
 
 @celery_app.task(name="app.tasks.paper_trading.open_queued_orders")
@@ -412,7 +549,7 @@ def open_queued_orders() -> int:
         tuple[int, list[str]], _run_transaction(_open_queued_orders_in_session)
     )
     for order_id in order_ids:
-        dispatch_match_order(order_id)
+        dispatch_match_order(order_id, recovery=True)
     return opened
 
 

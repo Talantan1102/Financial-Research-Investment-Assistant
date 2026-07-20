@@ -41,13 +41,34 @@ from app.schemas.paper_trading import (
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingClock, TushareTradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
+from app.services.paper_trading.observability import emit_paper_order_span
 from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
 from app.services.paper_trading.rulebook import RuleBook
+from app.services.trace_models import Span
 from app.services.tushare_factory import build_tushare_service
 from app.tasks.paper_trading import dispatch_match_order
 
 router = APIRouter(prefix="/api/v0/paper-trading", tags=["paper-trading"])
+
+
+def _record_order_span(
+    *,
+    order_id: UUID,
+    name: str,
+    started_at: datetime,
+    attrs: dict[str, object],
+    error: str | None = None,
+    parent_id: str | None = None,
+) -> Span:
+    return emit_paper_order_span(
+        order_id=order_id,
+        name=name,
+        started_at=started_at,
+        attrs=attrs,
+        error=error,
+        parent_id=parent_id,
+    )
 
 
 def _fetch_trading_calendar(start: str, end: str) -> pd.DataFrame:
@@ -283,15 +304,29 @@ def preview_order(
     user: Annotated[User, Depends(get_current_user_required)],
     service: Annotated[PaperOrderService, Depends(get_paper_order_service)],
 ) -> OrderPreview:
+    started_at = datetime.now(UTC)
     _owned_order(db, user_id=cast(UUID, user.id), order_id=order_id)
     try:
         preview = service.preview(
             user_id=cast(UUID, user.id), order_id=order_id, draft=payload.draft
         )
         db.commit()
+        _record_order_span(
+            order_id=order_id,
+            name="preview",
+            started_at=started_at,
+            attrs={"outcome": "success"},
+        )
         return preview
     except PaperTradingError as exc:
         db.rollback()
+        _record_order_span(
+            order_id=order_id,
+            name="preview",
+            started_at=started_at,
+            attrs={"outcome": "failure", "error_code": exc.code},
+            error=exc.code,
+        )
         raise _business_error(exc) from exc
     except Exception:
         db.rollback()
@@ -306,7 +341,9 @@ def confirm_order(
     user: Annotated[User, Depends(get_current_user_required)],
     service: Annotated[PaperOrderService, Depends(get_paper_order_service)],
 ) -> PaperOrderRead:
-    _owned_order(db, user_id=cast(UUID, user.id), order_id=order_id)
+    started_at = datetime.now(UTC)
+    current = _owned_order(db, user_id=cast(UUID, user.id), order_id=order_id)
+    idempotent_replay = current.status is not OrderStatus.AWAITING_CONFIRMATION
     try:
         order = service.confirm(
             user_id=cast(UUID, user.id),
@@ -316,10 +353,27 @@ def confirm_order(
         )
         snapshot = PaperOrderRead.model_validate(order)
         db.commit()
-        dispatch_match_order(cast(UUID, order.id))
+        span = _record_order_span(
+            order_id=order_id,
+            name="confirm",
+            started_at=started_at,
+            attrs={
+                "idempotent_replay": idempotent_replay,
+                "outcome": "success",
+                "status": cast(OrderStatus, order.status).value,
+            },
+        )
+        dispatch_match_order(cast(UUID, order.id), trace_parent_id=span.span_id)
         return snapshot
     except PaperTradingError as exc:
         db.rollback()
+        _record_order_span(
+            order_id=order_id,
+            name="confirm",
+            started_at=started_at,
+            attrs={"outcome": "failure", "error_code": exc.code},
+            error=exc.code,
+        )
         raise _business_error(exc) from exc
     except Exception:
         db.rollback()
@@ -357,6 +411,7 @@ def confirm_cancel(
     user: Annotated[User, Depends(get_current_user_required)],
     service: Annotated[PaperOrderService, Depends(get_paper_order_service)],
 ) -> PaperOrderRead:
+    started_at = datetime.now(UTC)
     _owned_order(db, user_id=cast(UUID, user.id), order_id=order_id)
     try:
         order = service.cancel_confirmed(
@@ -366,9 +421,22 @@ def confirm_cancel(
         )
         snapshot = PaperOrderRead.model_validate(order)
         db.commit()
+        _record_order_span(
+            order_id=order_id,
+            name="cancel",
+            started_at=started_at,
+            attrs={"outcome": "success", "status": cast(OrderStatus, order.status).value},
+        )
         return snapshot
     except PaperTradingError as exc:
         db.rollback()
+        _record_order_span(
+            order_id=order_id,
+            name="cancel",
+            started_at=started_at,
+            attrs={"outcome": "failure", "error_code": exc.code},
+            error=exc.code,
+        )
         raise _business_error(exc) from exc
     except Exception:
         db.rollback()
@@ -397,6 +465,7 @@ def confirm_reset(
     user: Annotated[User, Depends(get_current_user_required)],
     service: Annotated[PaperOrderService, Depends(get_paper_order_service)],
 ) -> PaperAccountRead:
+    started_at = datetime.now(UTC)
     try:
         account = service.reset_account_confirmed(
             user_id=cast(UUID, user.id),
@@ -406,9 +475,16 @@ def confirm_reset(
         )
         snapshot = PaperAccountRead.model_validate(account)
         db.commit()
+        _record_order_span(
+            order_id=cast(UUID, account.id),
+            name="reset",
+            started_at=started_at,
+            attrs={"outcome": "success"},
+        )
         return snapshot
     except PaperTradingError as exc:
         db.rollback()
+        # There may be no current account id on validation/lookup failures.
         raise _business_error(exc) from exc
     except Exception:
         db.rollback()
