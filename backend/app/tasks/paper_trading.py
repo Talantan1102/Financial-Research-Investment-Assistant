@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import os
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime, time
@@ -17,7 +20,12 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.paper_account import PaperAccount, PaperAccountStatus, PaperHoldingLot
 from app.models.paper_order import OrderSide, OrderStatus, OrderType, PaperMatchPass, PaperOrder
-from app.services.paper_trading.clock import TradingClock, TushareTradingCalendar
+from app.services.paper_trading.clock import (
+    FixedTradingCalendar,
+    TradingCalendar,
+    TradingClock,
+    TushareTradingCalendar,
+)
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.matcher import Execution, match_visible_depth
 from app.services.paper_trading.order_service import PaperOrderService
@@ -27,14 +35,32 @@ from app.services.paper_trading.quote_provider import (
 )
 from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.settlement import MatchQuoteEvidence, PaperSettlementService
-from app.services.paper_trading.types import MarketPhase
+from app.services.paper_trading.types import MarketPhase, RealtimeQuote
 from app.services.tushare_factory import build_tushare_service
 from app.tasks.celery_app import celery_app
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+logger = logging.getLogger(__name__)
+
+
+def _worker_fixture() -> dict[str, object] | None:
+    path = os.environ.get("PAPER_TRADING_WORKER_FIXTURE")
+    if not path:
+        return None
+    with open(path, encoding="utf-8") as stream:
+        payload = json.load(stream)
+    if not isinstance(payload, dict):
+        raise ValueError("paper trading worker fixture must be an object")
+    return payload
 
 
 def _now() -> datetime:
+    fixture = _worker_fixture()
+    if fixture is not None:
+        value = datetime.fromisoformat(str(fixture["now"]))
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("paper trading worker fixture now must be timezone-aware")
+        return value
     return datetime.now(UTC)
 
 
@@ -49,14 +75,40 @@ def _fetch_trading_calendar(start: str, end: str) -> pd.DataFrame:
     return asyncio.run(fetch())
 
 
-def _calendar() -> TushareTradingCalendar:
+def _calendar() -> TradingCalendar:
+    fixture = _worker_fixture()
+    if fixture is not None:
+        dates = fixture.get("open_dates")
+        if not isinstance(dates, list):
+            raise ValueError("paper trading worker fixture open_dates must be a list")
+        return FixedTradingCalendar({datetime.fromisoformat(str(value)).date() for value in dates})
     return TushareTradingCalendar(_fetch_trading_calendar)
+
+
+class _FixtureQuoteProvider:
+    def __init__(self, payload: object) -> None:
+        self._quote = RealtimeQuote.model_validate(payload, strict=False)
+
+    async def get(self, ts_code: str) -> RealtimeQuote:
+        return self.get_sync(ts_code)
+
+    def get_sync(self, ts_code: str) -> RealtimeQuote:
+        if ts_code != self._quote.ts_code:
+            raise PaperTradingError("quote_unavailable", "fixture quote does not match security")
+        return self._quote
+
+
+def _quote_provider() -> TushareRealtimeQuoteProvider | _FixtureQuoteProvider:
+    fixture = _worker_fixture()
+    if fixture is not None:
+        return _FixtureQuoteProvider(fixture["quote"])
+    return TushareRealtimeQuoteProvider()
 
 
 def _order_service(session: Session, *, now: Callable[[], datetime]) -> PaperOrderService:
     return PaperOrderService(
         session,
-        quote_provider=TushareRealtimeQuoteProvider(),
+        quote_provider=_quote_provider(),
         clock=TradingClock(_calendar()),
         rulebook=RuleBook.from_builtin_fixture(),
         now=now,
@@ -85,14 +137,15 @@ def _parse_timestamp(value: str | None) -> datetime | None:
 def _existing_result(
     session: Session, *, order_id: uuid.UUID, quote_timestamp: datetime, match_pass: int | None
 ) -> dict[str, object] | None:
-    statement = select(PaperMatchPass).where(
-        PaperMatchPass.order_id == order_id,
-        PaperMatchPass.quote_timestamp == quote_timestamp,
-    )
-    if match_pass is not None:
-        statement = statement.where(PaperMatchPass.match_pass >= match_pass)
-    rows = session.scalars(statement.order_by(PaperMatchPass.match_pass)).all()
-    if not rows or (match_pass is not None and int(rows[0].match_pass) != match_pass):
+    rows = session.scalars(
+        select(PaperMatchPass)
+        .where(
+            PaperMatchPass.order_id == order_id,
+            PaperMatchPass.quote_timestamp == quote_timestamp,
+        )
+        .order_by(PaperMatchPass.match_pass)
+    ).all()
+    if not rows:
         return None
     return {
         "fill_ids": [str(row.fill_id) for row in rows if row.fill_id is not None],
@@ -140,7 +193,7 @@ def _match_order_in_session(
     if clock.phase(now) not in {MarketPhase.MORNING, MarketPhase.AFTERNOON}:
         return {"fill_ids": [], "matched_quantity": 0}
 
-    quote = TushareRealtimeQuoteProvider().get_sync(cast(str, order.ts_code))
+    quote = _quote_provider().get_sync(cast(str, order.ts_code))
     if parsed_timestamp is not None and quote.quoted_at != parsed_timestamp:
         raise PaperTradingError("quote_timestamp_mismatch", "quote timestamp changed")
     timestamp = parsed_timestamp or quote.quoted_at
@@ -243,9 +296,27 @@ def _match_order_in_session(
     }
 
 
-def _open_queued_orders_in_session(session: Session) -> int:
+def _open_queued_orders_in_session(session: Session) -> tuple[int, list[str]]:
     now = _now()
-    return _order_service(session, now=lambda: now).open_queued_orders(at=now)
+    service = _order_service(session, now=lambda: now)
+    if service.clock.phase(now) not in {MarketPhase.MORNING, MarketPhase.AFTERNOON}:
+        return 0, []
+    opened = service.open_queued_orders(at=now)
+    order_ids = session.scalars(
+        select(PaperOrder.id)
+        .join(
+            PaperAccount,
+            (PaperAccount.id == PaperOrder.account_id)
+            & (PaperAccount.generation == PaperOrder.account_generation),
+        )
+        .where(
+            PaperOrder.status.in_([OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED]),
+            PaperOrder.expires_at > now,
+            PaperAccount.status == PaperAccountStatus.ACTIVE,
+        )
+        .order_by(PaperOrder.id)
+    ).all()
+    return opened, [str(order_id) for order_id in order_ids]
 
 
 def _expire_day_orders_in_session(session: Session) -> int:
@@ -306,6 +377,19 @@ def _run_transaction(runner: Callable[[Session], object]) -> object:
         session.close()
 
 
+def dispatch_match_order(order_id: uuid.UUID | str) -> bool:
+    """Best-effort dispatch; the periodic open-order scan is the recovery path."""
+    try:
+        match_order.apply_async(args=[str(order_id)], retry=False)
+    except Exception:
+        logger.exception(
+            "paper match dispatch failed; periodic scan will retry",
+            extra={"order_id": str(order_id)},
+        )
+        return False
+    return True
+
+
 @celery_app.task(name="app.tasks.paper_trading.match_order", acks_late=True)
 def match_order(
     order_id: str, quote_timestamp: str | None = None, match_pass: int | None = None
@@ -325,7 +409,12 @@ def match_order(
 
 @celery_app.task(name="app.tasks.paper_trading.open_queued_orders")
 def open_queued_orders() -> int:
-    return cast(int, _run_transaction(_open_queued_orders_in_session))
+    opened, order_ids = cast(
+        tuple[int, list[str]], _run_transaction(_open_queued_orders_in_session)
+    )
+    for order_id in order_ids:
+        dispatch_match_order(order_id)
+    return opened
 
 
 @celery_app.task(name="app.tasks.paper_trading.expire_day_orders")

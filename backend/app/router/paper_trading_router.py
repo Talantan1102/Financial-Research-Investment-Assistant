@@ -45,6 +45,7 @@ from app.services.paper_trading.order_service import PaperOrderService
 from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
 from app.services.paper_trading.rulebook import RuleBook
 from app.services.tushare_factory import build_tushare_service
+from app.tasks.paper_trading import dispatch_match_order
 
 router = APIRouter(prefix="/api/v0/paper-trading", tags=["paper-trading"])
 
@@ -315,6 +316,7 @@ def confirm_order(
         )
         snapshot = PaperOrderRead.model_validate(order)
         db.commit()
+        dispatch_match_order(cast(UUID, order.id))
         return snapshot
     except PaperTradingError as exc:
         db.rollback()

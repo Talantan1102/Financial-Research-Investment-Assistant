@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -15,6 +17,8 @@ from app.models.paper_order import (
     PaperMatchPass,
     PaperOrder,
 )
+from app.models.position import Position
+from app.models.trade import Trade
 from app.models.user import User
 from app.services.paper_trading.clock import FixedTradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
@@ -23,6 +27,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 NOW = datetime(2026, 7, 20, 2, 0, tzinfo=UTC)
+
+
+@pytest.fixture(scope="session")
+def paper_trading_worker_fixture_path() -> str:
+    return str(Path(__file__).parents[1] / "fixtures" / "paper_trading_worker_quote.json")
 
 
 def _open_order(session: Session, *, quantity: int = 200) -> PaperOrder:
@@ -39,8 +48,8 @@ def _open_order(session: Session, *, quantity: int = 200) -> PaperOrder:
     )
     session.add(account)
     session.flush()
-    reserve = Decimal("2100.00")
-    account.available_cash = Decimal("97900.00")
+    reserve = (Decimal(quantity) * Decimal("10.01") + Decimal("10.00")).quantize(Decimal("0.01"))
+    account.available_cash = Decimal("100000.00") - reserve
     account.frozen_cash = reserve
     order = PaperOrder(
         account_id=account.id,
@@ -153,8 +162,14 @@ def test_multilevel_snapshot_settles_in_global_watermark_order(
         quote_timestamp=NOW.isoformat(),
         match_pass=1,
     )
+    replay_with_different_pass = tasks._match_order_in_session(
+        db_session,
+        order_id=str(order.id),
+        quote_timestamp=NOW.isoformat(),
+        match_pass=2,
+    )
 
-    assert first == second
+    assert first == second == replay_with_different_pass
     assert first["matched_quantity"] == 200
     assert len(cast(list[str], first["fill_ids"])) == 2
     assert provider.calls == 1
@@ -196,6 +211,70 @@ def test_no_visible_depth_persists_one_empty_watermark_without_fill(
     assert db_session.query(PaperFill).count() == 0
     watermark = db_session.query(PaperMatchPass).one()
     assert watermark.matched_quantity == 0 and watermark.fill_id is None
+
+
+def test_snapshot_replay_never_includes_a_later_snapshot(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    order = _open_order(db_session, quantity=200)
+    _wire_market(monkeypatch, _quote(asks=(QuoteLevel(price=Decimal("10.00"), quantity=100),)))
+    first = tasks._match_order_in_session(
+        db_session, order_id=str(order.id), quote_timestamp=NOW.isoformat(), match_pass=1
+    )
+    later_time = NOW + timedelta(seconds=1)
+    _wire_market(
+        monkeypatch,
+        _quote(asks=(QuoteLevel(price=Decimal("10.00"), quantity=100),), at=later_time),
+    )
+    later = tasks._match_order_in_session(
+        db_session, order_id=str(order.id), quote_timestamp=later_time.isoformat(), match_pass=2
+    )
+    replay = tasks._match_order_in_session(
+        db_session, order_id=str(order.id), quote_timestamp=NOW.isoformat(), match_pass=2
+    )
+
+    assert replay == first
+    assert replay["fill_ids"] != later["fill_ids"]
+    assert len(cast(list[str], replay["fill_ids"])) == 1
+
+
+def test_concurrent_same_snapshot_is_consumed_once(
+    pg_test_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    with factory() as session:
+        order = _open_order(session, quantity=100)
+        session.commit()
+        order_id = str(order.id)
+    _wire_market(monkeypatch, _quote(asks=(QuoteLevel(price=Decimal("10.00"), quantity=100),)))
+
+    def run(match_pass: int) -> tuple[str, object]:
+        with factory() as session:
+            try:
+                result = tasks._match_order_in_session(
+                    session,
+                    order_id=order_id,
+                    quote_timestamp=NOW.isoformat(),
+                    match_pass=match_pass,
+                )
+                session.commit()
+                return "ok", result
+            except PaperTradingError as exc:
+                session.rollback()
+                return "error", exc.code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(run, (1, 2)))
+
+    assert any(kind == "ok" for kind, _ in outcomes)
+    assert all(value == "match_pass_conflict" for kind, value in outcomes if kind == "error")
+    with factory() as session:
+        assert session.query(PaperFill).filter_by(order_id=uuid.UUID(order_id)).count() == 1
+        assert session.query(PaperMatchPass).filter_by(order_id=uuid.UUID(order_id)).count() == 1
 
 
 def test_stale_quote_rolls_back_without_fill(
@@ -305,56 +384,32 @@ def test_release_t1_lots_checks_real_calendar_and_is_idempotent(
 def test_worker_redelivery_returns_existing_fill_without_duplicate(
     pg_test_engine, redis_url: str, celery_worker_subprocess: None
 ) -> None:
-    """A real Redis/Celery redelivery must hit the DB watermark before quote I/O."""
+    """A real worker performs first settlement, then replays the same snapshot."""
     del redis_url, celery_worker_subprocess
     factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
     with factory() as session:
         order = _open_order(session, quantity=100)
-        account = session.get(PaperAccount, order.account_id)
-        assert account is not None
-        account.frozen_cash = Decimal("0.00")
-        order.filled_quantity = 100
-        order.avg_fill_price = Decimal("10.0000")
-        order.reserved_cash = Decimal("0.00")
-        order.status = OrderStatus.FILLED
-        order.completed_at = NOW
-        fill = PaperFill(
-            order_id=order.id,
-            fill_seq=1,
-            quantity=100,
-            price=Decimal("10.0000"),
-            gross_amount=Decimal("1000.0000"),
-            commission=Decimal("5.0000"),
-            stamp_duty=Decimal("0.0000"),
-            transfer_fee=Decimal("0.0100"),
-            quote_timestamp=NOW,
-            quote_source="fixed-worker",
-            executed_at=NOW,
-            trade_id=uuid.uuid4(),
-        )
-        session.add(fill)
-        session.flush()
-        session.add(
-            PaperMatchPass(
-                order_id=order.id,
-                quote_timestamp=NOW,
-                match_pass=1,
-                quote_source="fixed-worker",
-                snapshot_summary={"source": "fixed-worker"},
-                consumed_levels=[{"price": "10.0000", "quantity": 100}],
-                matched_quantity=100,
-                fill_id=fill.id,
-            )
-        )
         session.commit()
         order_id = str(order.id)
-        fill_id = str(fill.id)
 
     from app.tasks.paper_trading import match_order
 
-    first = match_order.delay(order_id, NOW.isoformat(), 1).get(timeout=30)
-    second = match_order.delay(order_id, NOW.isoformat(), 1).get(timeout=30)
+    first = match_order.delay(order_id).get(timeout=30)
+    second = match_order.delay(
+        order_id,
+        cast(str, first["quote_timestamp"]),
+        cast(int, first["match_pass"]),
+    ).get(timeout=30)
 
-    assert first["fill_ids"] == second["fill_ids"] == [fill_id]
+    assert first["fill_ids"] == second["fill_ids"]
     with factory() as session:
+        order = session.get(PaperOrder, uuid.UUID(order_id))
+        account = session.get(PaperAccount, order.account_id)
+        assert order.status is OrderStatus.FILLED
+        assert order.filled_quantity == 100
+        assert account.frozen_cash == Decimal("0.00")
+        assert account.available_cash == Decimal("98994.99")
         assert session.query(PaperFill).filter_by(order_id=uuid.UUID(order_id)).count() == 1
+        assert session.query(PaperMatchPass).filter_by(order_id=uuid.UUID(order_id)).count() == 1
+        assert session.query(Trade).filter_by(paper_account_id=account.id).count() == 1
+        assert session.query(Position).filter_by(paper_account_id=account.id).one().quantity == 100

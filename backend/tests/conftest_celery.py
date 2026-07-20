@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Generator
+from contextlib import contextmanager
 
 import pytest
 
@@ -39,6 +40,30 @@ def _stop_worker(proc: subprocess.Popen[bytes]) -> None:
         proc.kill()
 
 
+@contextmanager
+def configured_celery_producer(redis_url: str) -> Generator[None, None, None]:
+    """Point the in-process producer/result consumer at the worker's broker."""
+    from app.tasks.celery_app import celery_app
+
+    apps = [celery_app]
+    paper_module = sys.modules.get("app.tasks.paper_trading")
+    paper_task = getattr(paper_module, "match_order", None)
+    if paper_task is not None and paper_task.app is not celery_app:
+        apps.append(paper_task.app)
+    originals = [(app, app.conf.broker_url, app.conf.result_backend) for app in apps]
+    for app in apps:
+        app.conf.broker_url = redis_url
+        app.conf.result_backend = redis_url
+        app._backend_cache = None
+    try:
+        yield
+    finally:
+        for app, old_broker, old_backend in originals:
+            app.conf.broker_url = old_broker
+            app.conf.result_backend = old_backend
+            app._backend_cache = None
+
+
 @pytest.fixture(scope="session")
 def redis_url() -> Generator[str, None, None]:
     """Session-scoped redis broker URL.
@@ -61,7 +86,14 @@ def redis_url() -> Generator[str, None, None]:
 
 
 @pytest.fixture(scope="session")
-def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
+def paper_trading_worker_fixture_path() -> str | None:
+    return os.environ.get("PAPER_TRADING_WORKER_FIXTURE")
+
+
+@pytest.fixture(scope="session")
+def celery_worker_subprocess(
+    redis_url: str, paper_trading_worker_fixture_path: str | None
+) -> Generator[None, None, None]:
     """Spawn Celery worker subprocess against redis broker.
 
     Runs --concurrency=1 to keep ordering deterministic in tests.
@@ -69,7 +101,11 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
     env = os.environ.copy()
     env["CELERY_BROKER_URL"] = redis_url
     env["CELERY_RESULT_BACKEND"] = redis_url
+    if paper_trading_worker_fixture_path is not None:
+        env["PAPER_TRADING_WORKER_FIXTURE"] = paper_trading_worker_fixture_path
 
+    producer_config = configured_celery_producer(redis_url)
+    producer_config.__enter__()
     proc = subprocess.Popen(
         [
             "uv",
@@ -123,8 +159,11 @@ def celery_worker_subprocess(redis_url: str) -> Generator[None, None, None]:
 
     if not ready:
         _stop_worker(proc)
+        producer_config.__exit__(None, None, None)
         pytest.skip("celery worker did not become ready in 60s")
 
-    yield
-
-    _stop_worker(proc)
+    try:
+        yield
+    finally:
+        _stop_worker(proc)
+        producer_config.__exit__(None, None, None)

@@ -71,6 +71,11 @@ def user(db_session: Session) -> User:
     return row
 
 
+@pytest.fixture(autouse=True)
+def _stub_paper_match_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(paper_router, "dispatch_match_order", lambda _order_id: True)
+
+
 def _service(session: Session, *, quoted_at: datetime = NOW) -> PaperOrderService:
     return PaperOrderService(
         session,
@@ -331,6 +336,42 @@ def test_preview_confirm_and_retry_preserve_draft_edits(db_session: Session, use
     assert first.json()["quantity"] == 200
     assert first.json()["status"] == "open"
     assert first.json()["reserved_cash"] == preview.json()["estimated_cash_required"]
+
+
+def test_confirm_dispatches_matching_only_after_commit(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, order = _prepared(db_session, user)
+    dispatched: list[tuple[uuid.UUID, bool]] = []
+    monkeypatch.setattr(
+        paper_router,
+        "dispatch_match_order",
+        lambda order_id: dispatched.append((order_id, db_session.in_transaction())) or True,
+    )
+
+    response = TestClient(_app(db_session, user)).post(
+        f"/api/v0/paper-trading/orders/{order.id}/confirm",
+        json={"draft": _draft(), "client_request_id": "dispatch-after-commit"},
+    )
+
+    assert response.status_code == 200
+    assert dispatched == [(order.id, False)]
+
+
+def test_confirm_remains_successful_when_dispatch_fails_for_later_scan(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, order = _prepared(db_session, user)
+    monkeypatch.setattr(paper_router, "dispatch_match_order", lambda _order_id: False)
+
+    response = TestClient(_app(db_session, user)).post(
+        f"/api/v0/paper-trading/orders/{order.id}/confirm",
+        json={"draft": _draft(), "client_request_id": "dispatch-recovery"},
+    )
+
+    assert response.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(PaperOrder, order.id).status is OrderStatus.OPEN
 
 
 def test_cancel_preview_and_confirm_are_explicit_and_idempotent(

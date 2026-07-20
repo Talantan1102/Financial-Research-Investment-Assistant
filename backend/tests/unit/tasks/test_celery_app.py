@@ -61,3 +61,17 @@ def test_generate_session_title_routes_to_llm_queue() -> None:
     assert routes[task_name]["queue"] == "llm", (
         f"{task_name} must route to 'llm' queue, got {routes[task_name]['queue']!r}"
     )
+
+
+def test_dynamic_broker_configuration_updates_producer_and_restores() -> None:
+    from app.tasks.celery_app import celery_app
+
+    from tests.conftest_celery import configured_celery_producer
+
+    original_broker = celery_app.conf.broker_url
+    original_backend = celery_app.conf.result_backend
+    with configured_celery_producer("redis://127.0.0.1:6399/14"):
+        assert celery_app.conf.broker_url == "redis://127.0.0.1:6399/14"
+        assert celery_app.conf.result_backend == "redis://127.0.0.1:6399/14"
+    assert celery_app.conf.broker_url == original_broker
+    assert celery_app.conf.result_backend == original_backend

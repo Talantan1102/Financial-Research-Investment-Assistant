@@ -57,4 +57,10 @@ beat_schedule = {
         "task": "app.tasks.paper_trading.release_t1_lots",
         "schedule": crontab(minute=20, hour=9, day_of_week="1-5"),
     },
+    # Recovery path for failed post-commit dispatches and partially-filled orders.
+    # The task rechecks the exchange calendar and continuous-trading phase.
+    "paper_scan_open_orders": {
+        "task": "app.tasks.paper_trading.open_queued_orders",
+        "schedule": crontab(minute="*", hour="9-14", day_of_week="1-5"),
+    },
 }
