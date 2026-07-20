@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+
+import pytest
+from tests.chaos.run_control_harness import (
+    CHAOS_SCENARIOS,
+    ComposeScopeError,
+    RunControlChaosHarness,
+    ScenarioEvidence,
+)
+
+
+def test_suite_declares_the_twelve_required_scenarios() -> None:
+    # The plan says "twelve" but enumerates first- and second-worker crashes
+    # separately; preserving both gives thirteen independently auditable cases.
+    assert len(CHAOS_SCENARIOS) == 13
+    assert {
+        "browser_disconnect",
+        "two_worker_parallel",
+        "tenant_fairness",
+        "dual_scheduler",
+        "duplicate_notification",
+        "first_worker_crash",
+        "second_worker_crash",
+        "cancel_and_crash",
+        "pause_resume_slot_release",
+        "revision_chain",
+        "redis_restart",
+        "scheduler_dispatcher_restart",
+        "legacy_writer_zero",
+    } == set(CHAOS_SCENARIOS)
+
+
+def test_compose_service_resolution_is_project_scoped(tmp_path: Path) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def runner(args: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        calls.append(args)
+        if args[-2:] == ("-q", "run-worker-a"):
+            return subprocess.CompletedProcess(args, 0, stdout="abc123\n", stderr="")
+        if args[-2:] == ("inspect", "abc123"):
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout='[{"Config":{"Labels":{"com.docker.compose.project":"rcp-test"}}}]',
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=runner)
+    assert harness.resolve_container("run-worker-a") == "abc123"
+    assert any("-p" in call and "rcp-test" in call for call in calls)
+
+
+def test_refuses_container_outside_project(tmp_path: Path) -> None:
+    def runner(args: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        if args[-2:] == ("-q", "run-worker-a"):
+            return subprocess.CompletedProcess(args, 0, stdout="other\n", stderr="")
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout='[{"Config":{"Labels":{"com.docker.compose.project":"other"}}}]',
+            stderr="",
+        )
+
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=runner)
+    with pytest.raises(ComposeScopeError, match="outside Compose project"):
+        harness.resolve_container("run-worker-a")
+
+
+def test_cleanup_rejects_leftover_project_containers(tmp_path: Path) -> None:
+    def runner(args: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        if args[-3:] == ("down", "--remove-orphans"):
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="leftover\n", stderr="")
+
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=runner)
+    with pytest.raises(ComposeScopeError, match="left containers"):
+        harness.cleanup()
+
+
+def test_health_wait_has_a_bounded_timeout(tmp_path: Path) -> None:
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=lambda *a, **k: None)
+    with pytest.raises(TimeoutError, match="health timeout"):
+        harness.wait_healthy("run-worker-a", timeout=0.01, poll_interval=0)
+
+
+def test_evidence_requires_database_facts_not_only_process_state() -> None:
+    evidence = ScenarioEvidence(
+        name="browser_disconnect",
+        elapsed_seconds=0.25,
+        runs=1,
+        attempts=1,
+        events=4,
+        outbox=1,
+    )
+    assert evidence.has_database_facts
+    assert evidence.to_json()["events"] == 4
+
+
+def test_scenario_runner_requires_exact_map_and_preserves_action_error(tmp_path: Path) -> None:
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=lambda *a, **k: None)
+    harness.query_evidence = lambda run_ids: {  # type: ignore[method-assign]
+        "runs": len(run_ids),
+        "attempts": 1,
+        "events": 1,
+        "outbox": 1,
+    }
+    actions = {name: (lambda: ["run-id"]) for name in CHAOS_SCENARIOS}
+    actions["redis_restart"] = lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
+    with pytest.raises(RuntimeError, match="redis down"):
+        harness.run_scenarios(actions, evidence_path=tmp_path / "evidence.json")
+    rows = (tmp_path / "evidence.json").read_text(encoding="utf-8")
+    assert '"name": "redis_restart"' in rows
+    assert "redis down" in rows

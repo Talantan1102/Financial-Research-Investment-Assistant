@@ -1,6 +1,8 @@
 services:
   run-control-init:
     profiles: ["run-control"]
+    labels: &run-control-labels
+      com.openai.run-control-plane: "true"
     build:
       context: .
       dockerfile: Dockerfile.run-control
@@ -42,6 +44,7 @@ services:
 
   run-scheduler-a:
     profiles: ["run-control"]
+    labels: *run-control-labels
     build:
       context: .
       dockerfile: Dockerfile.run-control
@@ -63,6 +66,7 @@ services:
 
   run-scheduler-b:
     profiles: ["run-control"]
+    labels: *run-control-labels
     build:
       context: .
       dockerfile: Dockerfile.run-control
@@ -80,6 +84,7 @@ services:
 
   run-dispatcher:
     profiles: ["run-control"]
+    labels: *run-control-labels
     build:
       context: .
       dockerfile: Dockerfile.run-control
@@ -97,6 +102,7 @@ services:
 
   run-worker-a:
     profiles: ["run-control"]
+    labels: *run-control-labels
     build:
       context: .
       dockerfile: Dockerfile.run-control
@@ -114,6 +120,7 @@ services:
 
   run-worker-b:
     profiles: ["run-control"]
+    labels: *run-control-labels
     build:
       context: .
       dockerfile: Dockerfile.run-control
@@ -131,6 +138,7 @@ services:
 
   run-api:
     profiles: ["run-control"]
+    labels: *run-control-labels
     build:
       context: .
       dockerfile: Dockerfile.run-control
@@ -155,6 +163,7 @@ services:
 
   # ==================== PostgreSQL 数据库 ====================
   postgres:
+    labels: *run-control-labels
     image: postgres:15-alpine
     container_name: ${RUN_CONTROL_POSTGRES_CONTAINER_NAME:-industry_postgres}
     restart: unless-stopped
@@ -178,6 +187,7 @@ services:
 
   # ==================== Redis 缓存 ====================
   redis:
+    labels: *run-control-labels
     image: redis:7-alpine
     container_name: ${RUN_CONTROL_REDIS_CONTAINER_NAME:-industry_redis}
     restart: unless-stopped
