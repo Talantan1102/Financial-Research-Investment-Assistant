@@ -124,6 +124,29 @@ def test_paper_generations_keep_separate_positions(db_session: Session, user: Us
     }
 
 
+def test_paper_trade_is_immutable_for_delete_and_update(db_session: Session, user: User) -> None:
+    account = PaperAccount.new(user_id=user.id, generation=1, initial_cash=Decimal("1000"))
+    db_session.add(account)
+    db_session.flush()
+    service = TradeService(db_session)
+    trade = service.create(
+        user_id=user.id,
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.BUY,
+        quantity=100,
+        price=Decimal("10"),
+        trade_date=date(2026, 7, 20),
+        paper_account_id=account.id,
+        paper_account_generation=1,
+    )
+
+    with pytest.raises(ImmutableTradeError):
+        service.delete(trade.id, user_id=user.id)
+    with pytest.raises(ImmutableTradeError):
+        service.update(trade.id, user_id=user.id, price=Decimal("11"))
+
+
 def test_create_sequence_initial_buy_sell_matches_spec_scenario_1(
     db_session: Session, user: User
 ) -> None:

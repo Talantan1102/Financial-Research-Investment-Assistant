@@ -148,6 +148,8 @@ class TradeService:
         Caller 负责 session.commit()。
         """
         trade = self._session.query(Trade).filter_by(id=trade_id, user_id=user_id).one()
+        if trade.paper_account_id is not None:
+            raise ImmutableTradeError("paper trades are immutable")
         if datetime.utcnow() - cast(datetime, trade.created_at) > timedelta(hours=24):
             raise ExpiredDeletionError("超 24h 不可删,请录反向交易抵消")
         user_id = cast(str, trade.user_id)
@@ -173,6 +175,8 @@ class TradeService:
         Caller 负责 session.commit()。
         """
         trade = self._session.query(Trade).filter_by(id=trade_id, user_id=user_id).one()
+        if trade.paper_account_id is not None:
+            raise ImmutableTradeError("paper trades are immutable")
         if trade.type != TradeType.INITIAL:
             raise ImmutableTradeError("常规交易不可改字段,过 24h 也不可")
 

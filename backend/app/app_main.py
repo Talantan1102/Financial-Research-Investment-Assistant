@@ -87,6 +87,9 @@ async def lifespan(app: FastAPI):  # noqa: ANN001
         _reconciled = reconcile_columns(engine)
         if _reconciled:
             logger.info("schema reconcile 补齐 %d 个缺失列: %s", len(_reconciled), _reconciled)
+        from app.scripts.reconcile_paper_position_scope import reconcile_paper_position_scope
+
+        reconcile_paper_position_scope(engine)
     except Exception as e:  # noqa: BLE001
         logger.warning(
             "PostgreSQL 表初始化跳过(可能 PG 未启动): %s — "

@@ -169,7 +169,11 @@ async def seed_user_graph(
             sess.flush()
 
         # 3. 持仓 → HOLDS edges
-        positions = sess.query(Position).filter(Position.user_id == user_id).all()
+        positions = (
+            sess.query(Position)
+            .filter(Position.user_id == user_id, Position.paper_account_id.is_(None))
+            .all()
+        )
         for pos in positions:
             ts_code = pos.ts_code
             # Stock node 幂等 get_or_create

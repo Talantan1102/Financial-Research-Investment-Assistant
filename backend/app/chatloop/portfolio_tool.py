@@ -46,7 +46,9 @@ class GetPortfolioPositionsTool(InProcessTool):
 
         user_id = UUID(state.user_id)
         async with self._session_factory() as sess:
-            stmt = select(Position).where(Position.user_id == user_id)
+            stmt = select(Position).where(
+                Position.user_id == user_id, Position.paper_account_id.is_(None)
+            )
             if not args.include_silenced:
                 stmt = stmt.where(Position.is_silenced.is_(False))
             rows = (await sess.execute(stmt)).scalars().all()

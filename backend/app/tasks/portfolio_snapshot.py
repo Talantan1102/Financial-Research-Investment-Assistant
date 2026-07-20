@@ -34,7 +34,11 @@ def _run_snapshot() -> dict[str, Any]:
     count = 0
 
     try:
-        positions = session.query(Position).filter(Position.quantity > 0).all()
+        positions = (
+            session.query(Position)
+            .filter(Position.quantity > 0, Position.paper_account_id.is_(None))
+            .all()
+        )
 
         for pos in positions:
             price = (

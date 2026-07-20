@@ -25,13 +25,14 @@ from app.models.paper_order import (
     PaperMatchPass,
     PaperOrder,
 )
+from app.models.position import Position
 from app.models.trade import TradeType
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.fee_schedule import FeeSchedule
 from app.services.paper_trading.matcher import Execution
-from app.services.paper_trading.types import FeeBreakdown
+from app.services.paper_trading.types import FeeBreakdown, RealtimeQuote
 from app.services.trade_service import TradeService
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -42,13 +43,8 @@ _FOUR_PLACES = Decimal("0.0001")
 class MatchQuoteEvidence(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
 
-    ts_code: str
-    quote_timestamp: datetime
-    source: str
-    execution_price: Decimal
-    execution_quantity: int
-    snapshot_summary: dict[str, object]
-    consumed_levels: tuple[dict[str, object], ...]
+    quote: RealtimeQuote
+    consumed_levels: tuple[Execution, ...]
 
 
 class PaperSettlementService:
@@ -123,6 +119,7 @@ class PaperSettlementService:
         if account is None:
             raise PaperTradingError("stale_account_generation", "account generation has changed")
         self._validate_execution(order, execution)
+        self._validate_projection_capacity(order, execution)
 
         allocations: list[tuple[PaperLotReservation, PaperHoldingLot]] = []
         if order.side is OrderSide.SELL:
@@ -149,7 +146,7 @@ class PaperSettlementService:
             stamp_duty=incremental.stamp_duty,
             transfer_fee=incremental.transfer_fee,
             quote_timestamp=quote_timestamp,
-            quote_source=evidence.source,
+            quote_source=evidence.quote.source,
             executed_at=executed_at,
             trade_id=trade_id,
         )
@@ -157,9 +154,9 @@ class PaperSettlementService:
             order_id=order.id,
             quote_timestamp=quote_timestamp,
             match_pass=match_pass,
-            quote_source=evidence.source,
-            snapshot_summary=evidence.snapshot_summary,
-            consumed_levels=list(evidence.consumed_levels),
+            quote_source=evidence.quote.source,
+            snapshot_summary=evidence.quote.model_dump(mode="json"),
+            consumed_levels=[level.model_dump(mode="json") for level in evidence.consumed_levels],
             matched_quantity=execution.quantity,
         )
         self._session.add_all([pass_row, fill])
@@ -485,9 +482,10 @@ class PaperSettlementService:
             or int(fill.quantity) != execution.quantity
             or cast(Decimal, fill.price) != execution.price
             or int(row.matched_quantity) != execution.quantity
-            or row.quote_source != evidence.source
-            or row.snapshot_summary != evidence.snapshot_summary
-            or row.consumed_levels != list(evidence.consumed_levels)
+            or row.quote_source != evidence.quote.source
+            or row.snapshot_summary != evidence.quote.model_dump(mode="json")
+            or row.consumed_levels
+            != [level.model_dump(mode="json") for level in evidence.consumed_levels]
         ):
             raise PaperTradingError(
                 "match_pass_conflict", "match-pass watermark conflicts with execution"
@@ -503,29 +501,14 @@ class PaperSettlementService:
     ) -> None:
         if not isinstance(evidence, MatchQuoteEvidence):
             raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
-        consumed_quantity = 0
-        consumed_valid = bool(evidence.consumed_levels)
-        for level in evidence.consumed_levels:
-            try:
-                level_price = Decimal(str(level["price"]))
-                raw_quantity = level["quantity"]
-            except (KeyError, InvalidOperation, TypeError, ValueError):
-                consumed_valid = False
-                break
-            if isinstance(raw_quantity, bool) or not isinstance(raw_quantity, int):
-                consumed_valid = False
-                break
-            level_quantity = raw_quantity
-            consumed_valid = (
-                consumed_valid and level_price == execution.price and level_quantity > 0
-            )
-            consumed_quantity += level_quantity
+        consumed_quantity = sum(level.quantity for level in evidence.consumed_levels)
+        consumed_valid = bool(evidence.consumed_levels) and all(
+            level.price == execution.price for level in evidence.consumed_levels
+        )
         if (
-            evidence.quote_timestamp != quote_timestamp
-            or evidence.ts_code != order.ts_code
-            or not evidence.source.strip()
-            or evidence.execution_price != execution.price
-            or evidence.execution_quantity != execution.quantity
+            evidence.quote.quoted_at != quote_timestamp
+            or evidence.quote.ts_code != order.ts_code
+            or not evidence.quote.source.strip()
             or not consumed_valid
             or consumed_quantity != execution.quantity
         ):
@@ -573,6 +556,12 @@ class PaperSettlementService:
         if not price_tick.is_finite() or price_tick <= 0 or price % price_tick != 0:
             raise PaperTradingError("invalid_execution_price", "execution price is off tick")
         remaining = int(order.quantity) - int(order.filled_quantity)
+        if execution.quantity > 2_147_483_647 or price * execution.quantity >= Decimal(
+            "100000000000000"
+        ):
+            raise PaperTradingError(
+                "invalid_execution_amount", "execution amount exceeds projection capacity"
+            )
         if execution.quantity > remaining:
             raise PaperTradingError(
                 "execution_quantity_exceeds_remaining", "execution exceeds remaining order quantity"
@@ -601,6 +590,26 @@ class PaperSettlementService:
         if execution.price < lower or execution.price > upper:
             raise PaperTradingError(
                 "execution_price_mismatch", "execution violates confirmed daily price bounds"
+            )
+
+    def _validate_projection_capacity(self, order: PaperOrder, execution: Execution) -> None:
+        position = self._session.scalar(
+            select(Position).where(
+                Position.user_id == order.user_id,
+                Position.ts_code == order.ts_code,
+                Position.paper_account_id == order.account_id,
+                Position.paper_account_generation == order.account_generation,
+            )
+        )
+        current_quantity = int(position.quantity) if position is not None else 0
+        current_total = cast(Decimal, position.total_cost) if position is not None else Decimal(0)
+        if order.side is OrderSide.BUY and (
+            current_quantity + execution.quantity > 2_147_483_647
+            or current_total + execution.price * execution.quantity
+            >= Decimal("1000000000000000000")
+        ):
+            raise PaperTradingError(
+                "invalid_execution_amount", "execution exceeds position projection capacity"
             )
 
     def _current_time(self) -> datetime:

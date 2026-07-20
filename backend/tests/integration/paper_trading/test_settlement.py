@@ -24,11 +24,50 @@ from app.services.paper_trading.clock import FixedTradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.matcher import Execution
 from app.services.paper_trading.settlement import MatchQuoteEvidence, PaperSettlementService
+from app.services.paper_trading.types import QuoteLevel, RealtimeQuote
 from app.services.trade_service import TradeService
+from pydantic import ValidationError
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 QUOTE_TIME = datetime(2026, 7, 20, 2, 0, tzinfo=UTC)
+
+
+def _evidence(
+    execution: Execution,
+    *,
+    ts_code: str = "600519.SH",
+    timestamp: datetime = QUOTE_TIME,
+    source: str = "actual-fixed",
+    consumed_price: Decimal | None = None,
+) -> MatchQuoteEvidence:
+    empty = tuple(QuoteLevel(price=Decimal("9.99"), quantity=0) for _ in range(5))
+    quote = RealtimeQuote(
+        ts_code=ts_code,
+        name="贵州茅台",
+        quoted_at=timestamp,
+        previous_close=Decimal("10.00"),
+        last_price=execution.price,
+        bids=empty,
+        asks=empty,
+        source=source,
+        suspended=False,
+    )
+    return MatchQuoteEvidence(
+        quote=quote,
+        consumed_levels=(
+            Execution(price=consumed_price or execution.price, quantity=execution.quantity),
+        ),
+    )
+
+
+def test_match_quote_evidence_is_deeply_immutable() -> None:
+    evidence = _evidence(Execution(price=Decimal("10.00"), quantity=100))
+
+    with pytest.raises(ValidationError):
+        evidence.quote.source = "mutated"  # type: ignore[misc]
+    with pytest.raises(ValidationError):
+        evidence.consumed_levels[0].quantity = 1  # type: ignore[misc]
 
 
 @pytest.fixture
@@ -102,14 +141,10 @@ def _service(db_session: Session, *, at: datetime = QUOTE_TIME) -> PaperSettleme
         order = db_session.get(PaperOrder, kwargs["order_id"])
         execution = cast(Execution, kwargs["execution"])
         assert order is not None
-        return MatchQuoteEvidence(
+        return _evidence(
+            execution,
             ts_code=cast(str, order.ts_code),
-            quote_timestamp=cast(datetime, kwargs["quote_timestamp"]),
-            source="actual-fixed",
-            execution_price=execution.price,
-            execution_quantity=execution.quantity,
-            snapshot_summary={"actual": True},
-            consumed_levels=({"price": str(execution.price), "quantity": execution.quantity},),
+            timestamp=cast(datetime, kwargs["quote_timestamp"]),
         )
 
     return PaperSettlementService(
@@ -195,7 +230,7 @@ def test_buy_fill_updates_every_projection_in_one_transaction(
     assert db_session.query(PaperCashLedger).filter_by(fill_id=fill.id).count() == 1
     assert fill.quote_source == "actual-fixed"
     match_row = db_session.query(PaperMatchPass).filter_by(fill_id=fill.id).one()
-    assert match_row.snapshot_summary == {"actual": True}
+    assert match_row.snapshot_summary["source"] == "actual-fixed"
     assert order.status is OrderStatus.FILLED
     assert account.available_cash == Decimal("98994.99")
     assert account.frozen_cash == Decimal("0.00")
@@ -242,6 +277,20 @@ def test_same_match_pass_retry_returns_same_fill_and_conflict_is_rejected(
         ).id
         == first.id
     )
+    conflicting_evidence = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=lambda **_: _evidence(execution, source="different-actual-feed"),
+    )
+    with pytest.raises(PaperTradingError) as evidence_error:
+        conflicting_evidence.apply(
+            order_id=order.id,
+            execution=execution,
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+    assert evidence_error.value.code == "match_pass_conflict"
     with pytest.raises(PaperTradingError, match="watermark"):
         service.apply(
             order_id=order.id,
@@ -349,7 +398,7 @@ def test_three_partial_fills_average_uses_exact_prior_gross(
     assert order.avg_fill_price == Decimal("10.0000")
 
 
-@pytest.mark.parametrize("mismatch", ["timestamp", "symbol", "consumed"])
+@pytest.mark.parametrize("mismatch", ["timestamp", "symbol", "consumed", "object"])
 def test_mismatched_actual_evidence_is_atomic(
     db_session: Session, user: User, mismatch: str
 ) -> None:
@@ -358,21 +407,14 @@ def test_mismatched_actual_evidence_is_atomic(
 
     def provider(**kwargs: object) -> MatchQuoteEvidence:
         del kwargs
-        return MatchQuoteEvidence(
+        if mismatch == "object":
+            return cast(MatchQuoteEvidence, object())
+        return _evidence(
+            execution,
             ts_code="000001.SZ" if mismatch == "symbol" else "600519.SH",
-            quote_timestamp=(
-                QUOTE_TIME + timedelta(seconds=1) if mismatch == "timestamp" else QUOTE_TIME
-            ),
+            timestamp=QUOTE_TIME + timedelta(seconds=1) if mismatch == "timestamp" else QUOTE_TIME,
             source="actual-feed",
-            execution_price=execution.price,
-            execution_quantity=execution.quantity,
-            snapshot_summary={"actual": True},
-            consumed_levels=(
-                {
-                    "price": "9.99" if mismatch == "consumed" else "10.00",
-                    "quantity": 100,
-                },
-            ),
+            consumed_price=Decimal("9.99") if mismatch == "consumed" else None,
         )
 
     service = PaperSettlementService(
@@ -424,15 +466,7 @@ def test_two_sessions_same_match_watermark_create_one_projection(
 
             def provider(**kwargs: object) -> MatchQuoteEvidence:
                 del kwargs
-                return MatchQuoteEvidence(
-                    ts_code="600519.SH",
-                    quote_timestamp=QUOTE_TIME,
-                    source="actual-concurrent",
-                    execution_price=execution.price,
-                    execution_quantity=execution.quantity,
-                    snapshot_summary={"sequence": 1},
-                    consumed_levels=({"price": "10.00", "quantity": 100},),
-                )
+                return _evidence(execution, source="actual-concurrent")
 
             fill = PaperSettlementService(
                 session,

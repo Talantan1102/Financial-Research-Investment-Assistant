@@ -49,9 +49,9 @@ class Position(Base):
     ts_code = Column(String(10), nullable=False, index=True)
     name = Column(String(50), nullable=False)
     quantity = Column(Integer, nullable=False, default=0)
-    avg_cost = Column(Numeric(12, 4), nullable=False, default=Decimal("0"))
-    total_cost = Column(Numeric(14, 2), nullable=False, default=Decimal("0"))
-    realized_pnl = Column(Numeric(14, 2), nullable=False, default=Decimal("0"))
+    avg_cost = Column(Numeric(18, 4), nullable=False, default=Decimal("0"))
+    total_cost = Column(Numeric(20, 2), nullable=False, default=Decimal("0"))
+    realized_pnl = Column(Numeric(20, 2), nullable=False, default=Decimal("0"))
 
     # 决策 3:监控引擎 30min 周期写入,dashboard 读取算浮盈
     last_quote_price = Column(Numeric(12, 4), nullable=True)

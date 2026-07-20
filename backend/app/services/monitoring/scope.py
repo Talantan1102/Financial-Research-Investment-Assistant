@@ -25,7 +25,7 @@ def load_active_subjects(session: Session) -> list[MonitoringSubject]:
     """
     rows = (
         session.query(Position.user_id, Position.ts_code, Position.name)
-        .filter(Position.quantity > 0)
+        .filter(Position.quantity > 0, Position.paper_account_id.is_(None))
         .all()
     )
     return [MonitoringSubject(user_id=str(r.user_id), ts_code=r.ts_code, name=r.name) for r in rows]

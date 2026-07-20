@@ -57,7 +57,7 @@ class Trade(Base):
     name = Column(String(50), nullable=False)
     type = Column(Enum(TradeType), nullable=False)
     quantity = Column(Integer, nullable=False)
-    price = Column(Numeric(12, 4), nullable=False)
+    price = Column(Numeric(18, 4), nullable=False)
     trade_date = Column(Date, nullable=False, default=date.today)
     note = Column(Text, nullable=True)
     paper_account_id = Column(UUID(as_uuid=True), nullable=True, index=True)

@@ -234,6 +234,7 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
                 pos = (
                     session.query(Position)
                     .filter_by(user_id=subject.user_id, ts_code=subject.ts_code)
+                    .filter(Position.paper_account_id.is_(None))
                     .first()
                 )
                 if pos is not None:

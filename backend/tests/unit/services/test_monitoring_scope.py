@@ -6,6 +6,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from app.models.paper_account import PaperAccount
 from app.models.position import Position
 from app.models.user import User
 from app.services.monitoring.scope import MonitoringSubject, load_active_subjects
@@ -66,6 +67,33 @@ def test_load_active_subjects_filters_zero_quantity(db_session: Session) -> None
     subjects = load_active_subjects(db_session)
     codes = {s.ts_code for s in subjects}
     assert codes == {"600519.SH"}
+
+
+def test_load_active_subjects_ignores_paper_positions(db_session: Session) -> None:
+    user = _make_user(db_session)
+    _make_position(db_session, user, "600519.SH", "贵州茅台", 100)
+    account = PaperAccount.new(user_id=user.id, generation=1, initial_cash=Decimal("1000"))
+    db_session.add(account)
+    db_session.flush()
+    db_session.add(
+        Position(
+            id=str(uuid4()),
+            user_id=user.id,
+            ts_code="600519.SH",
+            name="贵州茅台",
+            quantity=200,
+            avg_cost=Decimal("10"),
+            total_cost=Decimal("2000"),
+            realized_pnl=Decimal("0"),
+            paper_account_id=account.id,
+            paper_account_generation=1,
+        )
+    )
+    db_session.flush()
+
+    subjects = load_active_subjects(db_session)
+
+    assert [(subject.ts_code, subject.name) for subject in subjects] == [("600519.SH", "贵州茅台")]
 
 
 def test_load_active_subjects_cross_user(db_session: Session) -> None:
