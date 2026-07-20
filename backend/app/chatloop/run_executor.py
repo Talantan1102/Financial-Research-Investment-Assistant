@@ -221,31 +221,31 @@ def _portable_json_bytes(value: Any, *, max_bytes: int) -> bytes:
         nodes += 1
         if nodes > max_nodes or depth > max_depth:
             raise _ContinuationTooLargeError("continuation structure exceeds limits")
-        if current is None or isinstance(current, (str, bool)):
-            if isinstance(current, str) and (
+        if current is None or type(current) in (str, bool):
+            if type(current) is str and (
                 len(current) > max_bytes or len(current.encode("utf-8")) > max_bytes
             ):
                 raise _ContinuationTooLargeError("continuation string exceeds limit")
             continue
-        if isinstance(current, int):
+        if type(current) is int:
             if abs(current) > max_int:
                 raise ValueError("integer outside portable range")
             continue
-        if isinstance(current, float):
+        if type(current) is float:
             if not math.isfinite(current):
                 raise ValueError("non-finite float")
             continue
-        if isinstance(current, Mapping):
+        if type(current) is dict:
             if len(current) > max_nodes:
                 raise _ContinuationTooLargeError("continuation mapping exceeds limit")
             for key, item in current.items():
-                if not isinstance(key, str):
+                if type(key) is not str:
                     raise ValueError("JSON object keys must be strings")
                 if len(key) > max_bytes or len(key.encode("utf-8")) > max_bytes:
                     raise _ContinuationTooLargeError("continuation key exceeds limit")
                 stack.append((item, depth + 1))
             continue
-        if isinstance(current, (list, tuple)):
+        if type(current) in (list, tuple):
             if len(current) > max_nodes:
                 raise _ContinuationTooLargeError("continuation sequence exceeds limit")
             stack.extend((item, depth + 1) for item in current)

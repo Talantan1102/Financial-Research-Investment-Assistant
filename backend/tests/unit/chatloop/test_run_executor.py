@@ -1046,26 +1046,72 @@ async def test_non_string_key_and_excessive_depth_are_rejected() -> None:
         assert result.error_code == expected
 
 
-async def test_valid_continuation_is_canonicalized_without_deepcopy() -> None:
-    class _NoDeepcopyDict(dict[str, Any]):
-        def __deepcopy__(self, _memo: Any) -> Any:
-            raise AssertionError("continuation must be preflighted, not deep-copied")
+@pytest.mark.parametrize("runtime_container", ["message-dict", "messages-list"])
+async def test_signed_continuation_rejects_container_subclasses_before_json_washing(
+    runtime_container: str,
+) -> None:
+    class _CallableMessage(dict[str, Any]):
+        def __call__(self) -> None:
+            raise AssertionError("runtime objects must never reach recovery")
+
+    class _RuntimeMessages(list[dict[str, Any]]):
+        connection = object()
 
     command = _command()
     trusted_user = str(uuid4())
-    continuation = _NoDeepcopyDict(
-        _signed_test_continuation(
-            command,
-            user_id=trusted_user,
-            pause_type="input",
-            state={
-                "user_id": "forged",
-                "session_id": str(command.session_id),
-                "request_id": str(command.run_id),
-                "messages": [],
-            },
+    continuation = _signed_test_continuation(
+        command,
+        user_id=trusted_user,
+        pause_type="input",
+        state={
+            "user_id": trusted_user,
+            "session_id": str(command.session_id),
+            "request_id": str(command.run_id),
+            "messages": [{"role": "user", "content": "already signed"}],
+        },
+    )
+    if runtime_container == "message-dict":
+        continuation["body"]["messages"][0] = _CallableMessage(continuation["body"]["messages"][0])
+    else:
+        continuation["body"]["messages"] = _RuntimeMessages(continuation["body"]["messages"])
+
+    result = await ChatRunExecutor(
+        user_id=trusted_user,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=_components(_ScriptedLLM([_step("must not run")])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            command.attempt_id,
+            command.session_id,
+            json.dumps({"text": "resume"}),
+            (),
+            continuation,
+            command.tenant_id,
         )
     )
+
+    assert isinstance(result, FailedResult)
+    assert result.error_code == "invalid_continuation"
+
+
+async def test_valid_tuple_in_continuation_is_canonicalized_to_json_list() -> None:
+    command = _command()
+    trusted_user = str(uuid4())
+    continuation = _signed_test_continuation(
+        command,
+        user_id=trusted_user,
+        pause_type="input",
+        state={
+            "user_id": "forged",
+            "session_id": str(command.session_id),
+            "request_id": str(command.run_id),
+            "messages": [],
+        },
+    )
+    continuation["body"]["messages"] = tuple(continuation["body"]["messages"])
     result = await ChatRunExecutor(
         user_id=trusted_user,
         continuation_secret=TEST_CONTINUATION_SECRET,
