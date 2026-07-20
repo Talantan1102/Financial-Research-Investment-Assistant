@@ -7,19 +7,27 @@ keeps the contract fast and deterministic by supplying aggregate result rows.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 import pytest
+import pytest_asyncio
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunSession
 from app.models.run_execution import RunUsageRecord
 from app.models.run_scheduling import RunWorker
-from app.models.tenant import Tenant
+from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
+from app.router.auth_router import get_current_user_required
+from app.router.run_observability import router as observability_router
 from app.run_control.scheduling_policy import EligibilityReason
 from app.run_control.types import AttemptStatus, RunStatus, WorkerStatus
 from app.services.run_metrics import RunMetricsService, count_no_slot_reasons
+from fastapi import FastAPI, HTTPException, status
+from sqlalchemy import func, select
 
 
 @pytest.fixture
@@ -27,6 +35,55 @@ def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
     if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
         return asyncio.WindowsSelectorEventLoopPolicy()
     return asyncio.DefaultEventLoopPolicy()
+
+
+@pytest_asyncio.fixture
+async def observability_context(pg_async_session_factory):
+    suffix = uuid4().hex
+    tenant = Tenant(name="metrics-api", slug=f"metrics-api-{suffix}")
+    member = User(
+        username=f"metrics-member-{suffix}",
+        email=f"metrics-member-{suffix}@example.com",
+        hashed_password="test",
+    )
+    outsider = User(
+        username=f"metrics-outsider-{suffix}",
+        email=f"metrics-outsider-{suffix}@example.com",
+        hashed_password="test",
+    )
+    async with pg_async_session_factory() as session, session.begin():
+        session.add_all([tenant, member, outsider])
+        await session.flush()
+        session.add(TenantMembership(tenant_id=tenant.id, user_id=member.id, role="member"))
+    return tenant, member, outsider
+
+
+ClientFactory = Callable[[User | None], AsyncIterator[httpx.AsyncClient]]
+
+
+@pytest.fixture
+def observability_client(pg_async_session_factory, observability_context) -> ClientFactory:
+    tenant, _member, _outsider = observability_context
+
+    @asynccontextmanager
+    async def build(user: User | None) -> AsyncIterator[httpx.AsyncClient]:
+        app = FastAPI()
+        app.state.async_session_factory = pg_async_session_factory
+        app.include_router(observability_router)
+        if user is None:
+
+            async def reject() -> User:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+            app.dependency_overrides[get_current_user_required] = reject
+        else:
+            app.dependency_overrides[get_current_user_required] = lambda: user
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://testserver"
+        ) as client:
+            yield client
+
+    return build
 
 
 class _Result:
@@ -245,3 +302,42 @@ async def test_fact_window_counts_long_running_run_created_before_window(
     assert result["attempts"]["duration_seconds"] == 12.0
     assert result["usage"] == {"total_tokens": 12, "cost_cny": 0.5}
     assert result["runs"]["waiting"] == {RunStatus.WAITING_INPUT.value: 1}
+
+
+@pytest.mark.asyncio
+async def test_observability_router_auth_scope_window_and_read_only(
+    observability_context,
+    observability_client: ClientFactory,
+    pg_async_session_factory,
+) -> None:
+    tenant, member, outsider = observability_context
+    path = f"/api/v1/tenants/{tenant.id}/observability/metrics"
+    async with pg_async_session_factory() as session:
+        event_count_before = await session.scalar(select(func.count()).select_from(RunEvent))
+
+    async with observability_client(None) as client:
+        assert (await client.get(path)).status_code == 401
+    async with observability_client(outsider) as client:
+        assert (await client.get(path)).status_code == 404
+    async with observability_client(member) as client:
+        assert (await client.get(f"{path}?window_minutes=0")).status_code == 400
+        assert (await client.get(f"{path}?window_minutes=1441")).status_code == 400
+        before = await client.get(path, params={"window_minutes": 60})
+        assert before.status_code == 200
+        payload = before.json()
+        assert payload["window"]["seconds"] == 3600
+        assert "by_status" not in payload["workers"]
+        assert "capacity" not in str(payload["workers"])
+        assert "last_heartbeat" not in str(payload["workers"])
+        after = await client.get(f"{path[:-7]}runs", params={"window_minutes": 60})
+        assert after.status_code == 200
+        after_payload = after.json()
+        assert after_payload["window"]["seconds"] == payload["window"]["seconds"]
+        assert {key: value for key, value in after_payload.items() if key != "window"} == {
+            key: value for key, value in payload.items() if key != "window"
+        }
+
+    async with pg_async_session_factory() as session:
+        assert (
+            await session.scalar(select(func.count()).select_from(RunEvent))
+        ) == event_count_before
