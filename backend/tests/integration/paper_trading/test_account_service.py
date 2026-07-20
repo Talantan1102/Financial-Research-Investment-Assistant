@@ -109,6 +109,38 @@ def test_append_ledger_captures_before_and_after_balances(db_session: Session, u
     assert account.frozen_cash == Decimal("1000.00")
 
 
+def test_append_ledger_persists_optional_order_and_fill_linkage(
+    db_session: Session, user: User
+) -> None:
+    account = PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    order_id = uuid.uuid4()
+    fill_id = uuid.uuid4()
+
+    linked = PaperAccountService(db_session).append_ledger(
+        account=account,
+        kind="trade_settlement",
+        amount=Decimal("0.00"),
+        available_after=Decimal("1000000.00"),
+        frozen_after=Decimal("0.00"),
+        business_key=f"linked-ledger-{uuid.uuid4().hex}",
+        order_id=order_id,
+        fill_id=fill_id,
+    )
+    defaulted = PaperAccountService(db_session).append_ledger(
+        account=account,
+        kind="cash_adjustment",
+        amount=Decimal("0.00"),
+        available_after=Decimal("1000000.00"),
+        frozen_after=Decimal("0.00"),
+        business_key=f"unlinked-ledger-{uuid.uuid4().hex}",
+    )
+
+    assert linked.order_id == order_id
+    assert linked.fill_id == fill_id
+    assert defaulted.order_id is None
+    assert defaulted.fill_id is None
+
+
 def test_append_ledger_rejects_blank_key_and_invalid_balances(
     db_session: Session, user: User
 ) -> None:

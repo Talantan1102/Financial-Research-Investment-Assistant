@@ -262,6 +262,7 @@ class PaperOrderService:
         if final_draft.side is OrderSide.BUY:
             reserved_cash = self._reserve_buy(
                 account=account,
+                order_id=cast(uuid.UUID, order.id),
                 draft=final_draft,
                 quote=quote,
                 on=now.astimezone(SHANGHAI).date(),
@@ -299,6 +300,7 @@ class PaperOrderService:
         self,
         *,
         account: PaperAccount,
+        order_id: uuid.UUID,
         draft: OrderDraft,
         quote: RealtimeQuote,
         on: date,
@@ -335,6 +337,7 @@ class PaperOrderService:
             available_after=_money(available - reserve),
             frozen_after=_money(frozen + reserve),
             business_key=f"order-freeze:{client_request_id}",
+            order_id=order_id,
         )
         return reserve
 

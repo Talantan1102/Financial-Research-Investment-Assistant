@@ -96,6 +96,8 @@ class PaperAccountService:
         available_after: Decimal,
         frozen_after: Decimal,
         business_key: str,
+        order_id: uuid.UUID | None = None,
+        fill_id: uuid.UUID | None = None,
     ) -> PaperCashLedger:
         kind = _require_text(kind, field="kind", maximum=32, code="invalid_ledger_input")
         business_key = _require_text(
@@ -115,6 +117,10 @@ class PaperAccountService:
             code="invalid_ledger_input",
             field="frozen_after",
         )
+        if order_id is not None and not isinstance(order_id, uuid.UUID):
+            raise PaperTradingError("invalid_ledger_input", "order_id must be a UUID")
+        if fill_id is not None and not isinstance(fill_id, uuid.UUID):
+            raise PaperTradingError("invalid_ledger_input", "fill_id must be a UUID")
         state: InstanceState[PaperAccount] = sa_inspect(account)
         if not state.persistent or state.session is not self._session:
             raise PaperTradingError(
@@ -171,6 +177,8 @@ class PaperAccountService:
             frozen_before=frozen_before,
             frozen_after=frozen_after,
             business_key=business_key,
+            order_id=order_id,
+            fill_id=fill_id,
         )
         try:
             with self._session.begin_nested():

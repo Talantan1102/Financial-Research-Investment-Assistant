@@ -113,14 +113,12 @@ def test_confirm_is_idempotent_and_freezes_maximum_buy_exposure_once(
     assert first.reserved_cash == Decimal("165051.15")
     assert account.available_cash == Decimal("834948.85")
     assert account.frozen_cash == first.reserved_cash
-    assert (
-        db_session.scalar(
-            select(func.count())
-            .select_from(PaperCashLedger)
-            .where(PaperCashLedger.business_key == "order-freeze:confirm-1")
-        )
-        == 1
+    ledger = db_session.scalar(
+        select(PaperCashLedger).where(PaperCashLedger.business_key == "order-freeze:confirm-1")
     )
+    assert ledger is not None
+    assert ledger.order_id == first.id
+    assert ledger.fill_id is None
 
 
 def test_confirmation_keys_fail_closed_on_conflicting_reuse(
