@@ -504,6 +504,7 @@ async def _async_main() -> None:
             delay_seconds=float(os.getenv("RUN_SIMULATED_DELAY_SECONDS", "0")),
             result=json.loads(os.getenv("RUN_SIMULATED_RESULT_JSON", '{"simulated":true}')),
             crash=os.getenv("RUN_SIMULATED_CRASH", "0") == "1",
+            pause_type=os.getenv("RUN_SIMULATED_PAUSE_TYPE") or None,
         )
         executor = SimulatedRunExecutor(
             attempts,

@@ -11,7 +11,7 @@ from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from uuid import UUID, uuid4
@@ -93,6 +93,42 @@ class ComposeRunControlHarness:
         )
         self.redis_url = f"redis://127.0.0.1:{self.redis_port}/0"
         self.api_url = f"http://127.0.0.1:{self.api_port}"
+
+    def resolve_container(self, service: str) -> str:
+        """Resolve one container and prove Compose project/service ownership."""
+        output = self._compose("ps", "-q", service, check=False)
+        ids = [line.strip() for line in output.splitlines() if line.strip()]
+        if len(ids) != 1:
+            raise ComposeCleanupError(f"expected one container for {service!r}: {ids!r}")
+        return self._assert_scoped_container(ids[0], service)
+
+    def _assert_scoped_container(self, container: str, service: str | None = None) -> str:
+        try:
+            inspected = json.loads(self._docker("inspect", container))[0]
+            labels = inspected.get("Config", {}).get("Labels", {})
+        except (IndexError, TypeError, json.JSONDecodeError) as exc:
+            raise ComposeCleanupError(f"cannot inspect container {container}") from exc
+        if labels.get("com.docker.compose.project") != self.project:
+            raise ComposeCleanupError(
+                f"container {container} is outside Compose project {self.project}"
+            )
+        actual_service = labels.get("com.docker.compose.service")
+        if actual_service not in {
+            "run-worker-a",
+            "run-worker-b",
+            "run-dispatcher",
+            "redis",
+            "postgres",
+        }:
+            raise ComposeCleanupError(
+                f"container {container} has unexpected Compose service {actual_service!r}"
+            )
+        if service is not None and actual_service != service:
+            raise ComposeCleanupError(f"container {container} is not Compose service {service}")
+        return container
+
+    def _scoped_named_container(self, container: str, service: str) -> str:
+        return self._assert_scoped_container(container, service)
 
     def run(self) -> ComposeAcceptanceResult:
         result: ComposeAcceptanceResult | None = None
@@ -200,7 +236,7 @@ class ComposeRunControlHarness:
         try:
             redis.xadd(key, {"data": envelope})
             self._wait(lambda: redis.xlen(key) == 0, timeout=5, message="duplicate not drained")
-            pending = redis.xpending(key, "run-worker-assignments-v1")
+            pending = cast(dict[str, Any], redis.xpending(key, "run-worker-assignments-v1"))
             assert pending["pending"] == 0
         finally:
             redis.close()
@@ -232,8 +268,21 @@ class ComposeRunControlHarness:
         run_id = self._create_run(*self._context(), key="crash")
         first = self._wait_attempt(run_id, 1, "running", timeout=10)
         container = self._container_for_worker(first[1])
-        self._docker("update", "--restart=no", container)
-        self._docker("kill", container)
+        self._docker(
+            "update",
+            "--restart=no",
+            self._scoped_named_container(
+                container,
+                "run-worker-a" if container.endswith("run-worker-a-1") else "run-worker-b",
+            ),
+        )
+        self._docker(
+            "kill",
+            self._scoped_named_container(
+                container,
+                "run-worker-a" if container.endswith("run-worker-a-1") else "run-worker-b",
+            ),
+        )
         second = self._wait_attempt(run_id, 2, "running", timeout=10)
         assert second[1] != first[1]
         self._wait_status(run_id, "completed", timeout=10)
@@ -276,7 +325,7 @@ class ComposeRunControlHarness:
             service: json.loads(self._docker("inspect", f"{self.project}-{service}-1"))[0]
             for service in redis_dependent_services
         }
-        self._docker("stop", dispatcher)
+        self._docker("stop", self._scoped_named_container(dispatcher, "run-dispatcher"))
         run_id = self._create_run(*self._context(), key="redis-restart")
         self._wait_status(run_id, "assigned", timeout=10)
         with self._connect() as connection, connection.cursor() as cursor:
@@ -299,7 +348,7 @@ class ComposeRunControlHarness:
             outbox_id,
             lambda row: row == (0, None, None),
         )
-        self._docker("stop", self.redis_container)
+        self._docker("stop", self._scoped_named_container(self.redis_container, "redis"))
 
         def redis_outage_visible() -> bool:
             states = [
@@ -316,8 +365,8 @@ class ComposeRunControlHarness:
             timeout=12,
             message="Redis outage did not invalidate process health",
         )
-        self._docker("start", self.redis_container)
-        self._docker("start", dispatcher)
+        self._docker("start", self._scoped_named_container(self.redis_container, "redis"))
+        self._docker("start", self._scoped_named_container(dispatcher, "run-dispatcher"))
 
         def redis_dependents_recovered() -> bool:
             current = {
@@ -457,7 +506,9 @@ class ComposeRunControlHarness:
     def _single_worker_capacity_two(self) -> tuple[UUID, UUID]:
         self.environment["RUN_WORKER_CAPACITY"] = "2"
         self.environment["RUN_SIMULATED_DELAY_SECONDS"] = "1"
-        self._docker("stop", f"{self.project}-run-worker-b-1")
+        self._docker(
+            "stop", self._scoped_named_container(f"{self.project}-run-worker-b-1", "run-worker-b")
+        )
         self._compose("up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a")
         first = self._create_run(*self._context(), key="capacity-a")
         second = self._create_run(*self._context(), key="capacity-b")
@@ -487,12 +538,12 @@ class ComposeRunControlHarness:
         run_id = self._create_run(*self._context(), key="double-kill")
         first = self._wait_attempt(run_id, 1, "running", timeout=10)
         first_container = self._container_for_worker(first[1])
-        self._docker("update", "--restart=no", first_container)
-        self._docker("kill", first_container)
+        self._docker("update", "--restart=no", self._assert_scoped_container(first_container))
+        self._docker("kill", self._assert_scoped_container(first_container))
         second = self._wait_attempt(run_id, 2, "running", timeout=10)
         second_container = self._container_for_worker(second[1])
-        self._docker("update", "--restart=no", second_container)
-        self._docker("kill", second_container)
+        self._docker("update", "--restart=no", self._assert_scoped_container(second_container))
+        self._docker("kill", self._assert_scoped_container(second_container))
         self._wait_status(run_id, "failed", timeout=10)
         with self._connect() as connection, connection.cursor() as cursor:
             cursor.execute(
@@ -519,7 +570,7 @@ class ComposeRunControlHarness:
             service: json.loads(self._docker("inspect", f"{self.project}-{service}-1"))[0]
             for service in services
         }
-        self._docker("stop", self.postgres_container)
+        self._docker("stop", self._scoped_named_container(self.postgres_container, "postgres"))
 
         def observed_unhealthy() -> bool:
             states = [
@@ -531,7 +582,7 @@ class ComposeRunControlHarness:
             )
 
         self._wait(observed_unhealthy, timeout=12, message="PG outage did not invalidate health")
-        self._docker("start", self.postgres_container)
+        self._docker("start", self._scoped_named_container(self.postgres_container, "postgres"))
 
         def all_healthy() -> bool:
             current = {
@@ -554,7 +605,9 @@ class ComposeRunControlHarness:
     def _full_capacity_stays_healthy(self) -> UUID:
         self.environment["RUN_WORKER_CAPACITY"] = "1"
         self.environment["RUN_SIMULATED_DELAY_SECONDS"] = "5"
-        self._docker("stop", f"{self.project}-run-worker-b-1")
+        self._docker(
+            "stop", self._scoped_named_container(f"{self.project}-run-worker-b-1", "run-worker-b")
+        )
         self._compose("up", "-d", "--no-deps", "--force-recreate", "--wait", "run-worker-a")
         run_id = self._create_run(*self._context(), key="full-capacity-health")
         self._wait_status(run_id, "running", timeout=10)
@@ -627,6 +680,24 @@ class ComposeRunControlHarness:
             return row == (status,)
 
         self._wait(query, timeout=timeout, message=f"Run {run_id} did not reach {status}")
+
+    def _wait_status_in(self, run_id: UUID, statuses: set[str], *, timeout: float) -> str:
+        observed: list[str] = []
+
+        def query() -> bool:
+            with self._connect() as connection, connection.cursor() as cursor:
+                cursor.execute("SELECT status FROM runs WHERE id=%s", (run_id,))
+                row = cursor.fetchone()
+            if row is not None:
+                observed.append(str(row[0]))
+            return row is not None and row[0] in statuses
+
+        self._wait(
+            query,
+            timeout=timeout,
+            message=f"Run {run_id} did not reach one of {sorted(statuses)}; observed={observed[-1:]}",
+        )
+        return observed[-1]
 
     def _wait_outbox_facts(
         self,

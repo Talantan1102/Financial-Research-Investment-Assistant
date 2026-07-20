@@ -34,16 +34,20 @@ catch {
         failed_at_utc = [DateTime]::UtcNow.ToString("o")
         error = $_.Exception.Message
     } | ConvertTo-Json
+    $evidence = @()
     if (Test-Path -LiteralPath $env:RUN_CONTROL_CHAOS_EVIDENCE) {
-        Add-Content -LiteralPath $env:RUN_CONTROL_CHAOS_EVIDENCE -Value ("`n" + $failure) -Encoding utf8
-    } else {
-        Set-Content -LiteralPath $env:RUN_CONTROL_CHAOS_EVIDENCE -Value $failure -Encoding utf8
+        try {
+            $parsed = Get-Content -LiteralPath $env:RUN_CONTROL_CHAOS_EVIDENCE -Raw -Encoding utf8 | ConvertFrom-Json
+            if ($parsed -is [System.Array]) { $evidence = @($parsed) } elseif ($parsed) { $evidence = @($parsed) }
+        } catch { $evidence = @() }
     }
+    $evidence += [pscustomobject]$failure
+    $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $env:RUN_CONTROL_CHAOS_EVIDENCE -Encoding utf8
     throw
 }
 finally {
     try {
-        & docker compose -f docker-compose.yml -p $Project --profile run-control down --remove-orphans
+        & docker compose -f docker-compose.yml -p $Project --profile run-control down --volumes --remove-orphans
         if ($LASTEXITCODE -ne 0) { throw "Scoped Compose cleanup failed for $Project" }
         $leftovers = & docker ps -a --filter "label=com.docker.compose.project=$Project" --format "{{.ID}}"
         if ($leftovers) { throw "Scoped cleanup left containers: $leftovers" }

@@ -75,7 +75,7 @@ def test_refuses_container_outside_project(tmp_path: Path) -> None:
 def test_cleanup_rejects_leftover_project_containers(tmp_path: Path) -> None:
     def runner(args: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
         del kwargs
-        if args[-3:] == ("down", "--remove-orphans"):
+        if "down" in args:
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(args, 0, stdout="leftover\n", stderr="")
 
@@ -107,11 +107,13 @@ def test_evidence_requires_database_facts_not_only_process_state() -> None:
 def test_scenario_runner_requires_exact_map_and_preserves_action_error(tmp_path: Path) -> None:
     harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=lambda *a, **k: None)
     harness.query_evidence = lambda run_ids: {  # type: ignore[method-assign]
-        "runs": len(run_ids),
-        "attempts": 1,
+            "runs": 3,
+            "attempts": 2,
         "events": 1,
-        "outbox": 1,
-        "terminal_runs": 1,
+            "outbox": 1,
+                "terminal_runs": 3,
+            "pauses": 1,
+            "revisions": 2,
     }
     actions = {name: (lambda: ["run-id"]) for name in CHAOS_SCENARIOS}
     actions["redis_restart"] = lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
@@ -138,3 +140,35 @@ def test_harness_requires_strict_health_and_real_restart_actions() -> None:
     assert 'legacy._compose("restart", "run-scheduler-a"' in source
     assert "harness.wait_healthy(service" in source
     assert "_parallel_and_duplicate()" in source
+
+
+def test_cleanup_is_scoped_and_removes_project_volumes_and_networks(tmp_path: Path) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    def runner(args: tuple[str, ...], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    RunControlChaosHarness(tmp_path, project="rcp-test", runner=runner).cleanup()
+    down = next(call for call in calls if "down" in call)
+    assert "--volumes" in down
+    assert "--remove-orphans" in down
+    assert any("network" in call and "label=com.docker.compose.project=rcp-test" in call for call in calls)
+    assert any("volume" in call and "label=com.docker.compose.project=rcp-test" in call for call in calls)
+
+
+def test_evidence_file_remains_one_valid_json_array_after_action_failure(tmp_path: Path) -> None:
+    harness = RunControlChaosHarness(tmp_path, project="rcp-test", runner=lambda *a, **k: None)
+    harness.query_evidence = lambda run_ids: {  # type: ignore[method-assign]
+        "runs": 3, "attempts": 2, "events": 1, "outbox": 1, "terminal_runs": 3, "pauses": 1, "revisions": 2,
+    }
+    actions = {name: (lambda: ["run-id"]) for name in CHAOS_SCENARIOS}
+    actions["redis_restart"] = lambda: (_ for _ in ()).throw(RuntimeError("redis down"))
+    path = tmp_path / "evidence.json"
+    with pytest.raises(RuntimeError):
+        harness.run_scenarios(actions, evidence_path=path)
+    import json
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(rows, list)
+    assert next(row for row in rows if row["name"] == "redis_restart")["error"]
