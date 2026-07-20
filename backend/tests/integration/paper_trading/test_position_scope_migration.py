@@ -76,6 +76,19 @@ def test_legacy_position_scope_migration_is_idempotent(pg_test_engine: Engine) -
                 "total_cost": (20, 2),
                 "realized_pnl": (20, 2),
             }
+            index_names = set(
+                connection.scalars(
+                    text(
+                        "SELECT indexname FROM pg_indexes WHERE schemaname=current_schema() "
+                        "AND indexname IN ('ix_trades_paper_account_id',"
+                        "'ix_positions_paper_account_id')"
+                    )
+                )
+            )
+            assert index_names == {
+                "ix_trades_paper_account_id",
+                "ix_positions_paper_account_id",
+            }
         with pytest.raises(IntegrityError), scoped.begin() as connection:
             connection.execute(
                 text(

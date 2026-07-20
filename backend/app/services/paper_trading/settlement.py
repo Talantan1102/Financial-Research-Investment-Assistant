@@ -31,7 +31,7 @@ from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.fee_schedule import FeeSchedule
-from app.services.paper_trading.matcher import Execution
+from app.services.paper_trading.matcher import Execution, match_visible_depth
 from app.services.paper_trading.types import FeeBreakdown, RealtimeQuote
 from app.services.trade_service import TradeService
 
@@ -85,13 +85,14 @@ class PaperSettlementService:
         )
         if order is None:
             raise PaperTradingError("order_not_found", "paper order does not exist")
+        self._validate_execution(order, execution, check_remaining=False)
         evidence = self._evidence_provider(
             order_id=order_id,
             quote_timestamp=quote_timestamp,
             match_pass=match_pass,
             execution=execution,
         )
-        self._validate_evidence(order, execution, quote_timestamp, evidence)
+        evidence = self._validate_evidence(order, execution, quote_timestamp, evidence)
 
         retry = self._existing_pass(
             order=order,
@@ -498,21 +499,44 @@ class PaperSettlementService:
         execution: Execution,
         quote_timestamp: datetime,
         evidence: MatchQuoteEvidence,
-    ) -> None:
+    ) -> MatchQuoteEvidence:
         if not isinstance(evidence, MatchQuoteEvidence):
             raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
-        consumed_quantity = sum(level.quantity for level in evidence.consumed_levels)
-        consumed_valid = bool(evidence.consumed_levels) and all(
-            level.price == execution.price for level in evidence.consumed_levels
-        )
+        raw_source = evidence.quote.source
+        if not isinstance(raw_source, str):
+            raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
+        source = raw_source.strip()
         if (
             evidence.quote.quoted_at != quote_timestamp
             or evidence.quote.ts_code != order.ts_code
-            or not evidence.quote.source.strip()
-            or not consumed_valid
-            or consumed_quantity != execution.quantity
+            or not source
+            or len(source) > 64
         ):
             raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
+        try:
+            expected = match_visible_depth(
+                side=cast(OrderSide, order.side),
+                order_type=cast(OrderType, order.order_type),
+                remaining=execution.quantity,
+                limit_price=cast(Decimal | None, order.limit_price),
+                quote=evidence.quote,
+            )
+        except PaperTradingError as exc:
+            raise PaperTradingError(
+                "invalid_match_evidence", "actual quote cannot support execution"
+            ) from exc
+        if (
+            len(expected) != 1
+            or expected[0] != execution
+            or evidence.consumed_levels != (execution,)
+            or tuple(expected) != evidence.consumed_levels
+        ):
+            raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
+        if source != raw_source:
+            evidence = evidence.model_copy(
+                update={"quote": evidence.quote.model_copy(update={"source": source})}
+            )
+        return evidence
 
     @staticmethod
     def _validate_input(
@@ -537,7 +561,9 @@ class PaperSettlementService:
             raise PaperTradingError("invalid_settlement_input", "match_pass must be positive")
 
     @staticmethod
-    def _validate_execution(order: PaperOrder, execution: Execution) -> None:
+    def _validate_execution(
+        order: PaperOrder, execution: Execution, *, check_remaining: bool = True
+    ) -> None:
         price = execution.price
         if (
             not isinstance(price, Decimal)
@@ -562,7 +588,7 @@ class PaperSettlementService:
             raise PaperTradingError(
                 "invalid_execution_amount", "execution amount exceeds projection capacity"
             )
-        if execution.quantity > remaining:
+        if check_remaining and execution.quantity > remaining:
             raise PaperTradingError(
                 "execution_quantity_exceeds_remaining", "execution exceeds remaining order quantity"
             )

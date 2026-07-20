@@ -14,6 +14,8 @@ def reconcile_paper_position_scope(engine: Engine) -> None:
         "DROP INDEX IF EXISTS uq_positions_user_tscode",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_manual_user_tscode ON positions (user_id, ts_code) WHERE paper_account_id IS NULL",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_paper_scope_tscode ON positions (paper_account_id, paper_account_generation, ts_code) WHERE paper_account_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS ix_trades_paper_account_id ON trades (paper_account_id)",
+        "CREATE INDEX IF NOT EXISTS ix_positions_paper_account_id ON positions (paper_account_id)",
     )
     numeric_columns = {
         ("trades", "price"): (18, 4),

@@ -40,18 +40,35 @@ def _evidence(
     timestamp: datetime = QUOTE_TIME,
     source: str = "actual-fixed",
     consumed_price: Decimal | None = None,
+    side: OrderSide = OrderSide.BUY,
+    book_price: Decimal | None = None,
+    visible_quantity: int | None = None,
+    suspended: bool = False,
 ) -> MatchQuoteEvidence:
-    empty = tuple(QuoteLevel(price=Decimal("9.99"), quantity=0) for _ in range(5))
+    visible_price = book_price or execution.price
+    visible = execution.quantity if visible_quantity is None else visible_quantity
+    empty_bids = tuple(
+        QuoteLevel(price=visible_price - Decimal(index) / 100, quantity=0) for index in range(1, 6)
+    )
+    empty_asks = tuple(
+        QuoteLevel(price=visible_price + Decimal(index) / 100, quantity=0) for index in range(1, 6)
+    )
+    if side is OrderSide.BUY:
+        bids = empty_bids
+        asks = (QuoteLevel(price=visible_price, quantity=visible), *empty_asks[:4])
+    else:
+        bids = (QuoteLevel(price=visible_price, quantity=visible), *empty_bids[:4])
+        asks = empty_asks
     quote = RealtimeQuote(
         ts_code=ts_code,
         name="贵州茅台",
         quoted_at=timestamp,
         previous_close=Decimal("10.00"),
         last_price=execution.price,
-        bids=empty,
-        asks=empty,
+        bids=bids,
+        asks=asks,
         source=source,
-        suspended=False,
+        suspended=suspended,
     )
     return MatchQuoteEvidence(
         quote=quote,
@@ -68,6 +85,29 @@ def test_match_quote_evidence_is_deeply_immutable() -> None:
         evidence.quote.source = "mutated"  # type: ignore[misc]
     with pytest.raises(ValidationError):
         evidence.consumed_levels[0].quantity = 1  # type: ignore[misc]
+
+
+def test_quote_source_is_trimmed_at_settlement_boundary(db_session: Session, user: User) -> None:
+    order = _buy_order(db_session, user, _account(db_session, user))
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=lambda **_: _evidence(execution, source="  actual-feed  "),
+    )
+
+    fill = service.apply(
+        order_id=order.id,
+        execution=execution,
+        quote_timestamp=QUOTE_TIME,
+        match_pass=1,
+    )
+
+    match_pass = db_session.query(PaperMatchPass).one()
+    assert fill.quote_source == "actual-feed"
+    assert match_pass.quote_source == "actual-feed"
+    assert match_pass.snapshot_summary["source"] == "actual-feed"
 
 
 @pytest.fixture
@@ -145,6 +185,7 @@ def _service(db_session: Session, *, at: datetime = QUOTE_TIME) -> PaperSettleme
             execution,
             ts_code=cast(str, order.ts_code),
             timestamp=cast(datetime, kwargs["quote_timestamp"]),
+            side=OrderSide(order.side),
         )
 
     return PaperSettlementService(
@@ -432,6 +473,97 @@ def test_mismatched_actual_evidence_is_atomic(
         )
 
     assert error.value.code == "invalid_match_evidence"
+    assert db_session.query(PaperFill).count() == 0
+    assert db_session.query(PaperMatchPass).count() == 0
+    assert db_session.query(PaperCashLedger).count() == 0
+    assert db_session.query(Trade).count() == 0
+    assert db_session.query(Position).count() == 0
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "price_not_executable",
+        "visible_quantity_short",
+        "wrong_side",
+        "suspended",
+        "misordered",
+        "crossed",
+        "empty_source",
+        "source_too_long",
+    ],
+)
+def test_unmatchable_quote_evidence_is_atomic(
+    db_session: Session, user: User, mismatch: str
+) -> None:
+    account = _account(db_session, user)
+    order = _buy_order(db_session, user, account)
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    before_account = (account.available_cash, account.frozen_cash)
+    before_order = (order.status, order.filled_quantity, order.avg_fill_price)
+
+    def provider(**kwargs: object) -> MatchQuoteEvidence:
+        del kwargs
+        evidence = _evidence(
+            execution,
+            book_price=Decimal("10.01") if mismatch == "price_not_executable" else None,
+            visible_quantity=99 if mismatch == "visible_quantity_short" else None,
+            side=OrderSide.SELL if mismatch == "wrong_side" else OrderSide.BUY,
+            suspended=mismatch == "suspended",
+            source=(
+                "   "
+                if mismatch == "empty_source"
+                else "x" * 65
+                if mismatch == "source_too_long"
+                else "actual-feed"
+            ),
+        )
+        if mismatch == "misordered":
+            evidence = evidence.model_copy(
+                update={
+                    "quote": evidence.quote.model_copy(
+                        update={
+                            "asks": (
+                                QuoteLevel(price=Decimal("10.00"), quantity=50),
+                                QuoteLevel(price=Decimal("9.99"), quantity=50),
+                                *evidence.quote.asks[2:],
+                            )
+                        }
+                    )
+                }
+            )
+        elif mismatch == "crossed":
+            evidence = evidence.model_copy(
+                update={
+                    "quote": evidence.quote.model_copy(
+                        update={
+                            "bids": (
+                                QuoteLevel(price=Decimal("10.00"), quantity=100),
+                                *evidence.quote.bids[1:],
+                            )
+                        }
+                    )
+                }
+            )
+        return evidence
+
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=provider,
+    )
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=order.id,
+            execution=execution,
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+
+    assert error.value.code == "invalid_match_evidence"
+    assert (account.available_cash, account.frozen_cash) == before_account
+    assert (order.status, order.filled_quantity, order.avg_fill_price) == before_order
     assert db_session.query(PaperFill).count() == 0
     assert db_session.query(PaperMatchPass).count() == 0
     assert db_session.query(PaperCashLedger).count() == 0
