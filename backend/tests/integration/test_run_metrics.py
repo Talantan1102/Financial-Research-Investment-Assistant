@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -106,6 +106,7 @@ class _Session:
         self.statements = []
         self._results = iter(
             [
+                _Result(scalar=datetime(2026, 7, 20, 12, 0, 0)),
                 _Result([("completed", 2), ("queued", 1)]),
                 _Result([SimpleNamespace(depth=1, oldest=None, wait=4.5)]),
                 _Result([SimpleNamespace(scheduling=1.2)]),
@@ -149,7 +150,7 @@ async def test_metrics_are_aggregate_read_only_projection():
     assert result["usage"] == {"total_tokens": 15, "cost_cny": 0.25}
     assert result["scheduling"]["fair_allocations"] == 3
     assert result["scheduling"]["fair_allocations_by_tenant"] == {"tenant-a": 2, "tenant-b": 1}
-    assert len(session.statements) == 13
+    assert len(session.statements) == 14
     assert not any(getattr(statement, "is_update", False) for statement in session.statements)
 
 
@@ -278,6 +279,22 @@ async def test_fact_window_counts_long_running_run_created_before_window(
                     payload={"pause_type": "input"},
                     created_at=fact,
                 ),
+                RunEvent(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    seq=3,
+                    event_type="run.resumed",
+                    payload={},
+                    created_at=fact + timedelta(seconds=1),
+                ),
+                RunEvent(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    seq=4,
+                    event_type="run.paused",
+                    payload={"pause_type": "input"},
+                    created_at=fact + timedelta(seconds=2),
+                ),
                 RunUsageRecord(
                     run_id=run_id,
                     attempt_id=attempt_id,
@@ -294,7 +311,7 @@ async def test_fact_window_counts_long_running_run_created_before_window(
                 RunEvent(
                     tenant_id=tenant_id,
                     run_id=run_id,
-                    seq=3,
+                    seq=5,
                     event_type="run.queue_blocked",
                     payload={"reason": EligibilityReason.NO_WORKER_CAPACITY.value},
                     created_at=now + timedelta(hours=1),
@@ -364,3 +381,14 @@ async def test_observability_router_auth_scope_window_and_read_only(
         assert (
             await session.scalar(select(func.count()).select_from(RunEvent))
         ) == event_count_before
+
+
+@pytest.mark.asyncio
+async def test_snapshot_normalizes_aware_as_of_and_excludes_future_current_facts(
+    pg_async_session_factory,
+) -> None:
+    """A caller-provided aware instant is compared as UTC-naive DB time."""
+    result = await RunMetricsService(pg_async_session_factory).snapshot(
+        uuid4(), as_of=datetime(2026, 7, 20, 20, 0, tzinfo=UTC)
+    )
+    assert result["window"]["since"] == "2026-07-20T19:45:00"

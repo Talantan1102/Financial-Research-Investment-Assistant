@@ -3,6 +3,13 @@
 The service deliberately works from PostgreSQL facts and never calls a scheduler
 or mutates a row.  Values are returned as plain dictionaries so this module can
 be used by both the HTTP endpoint and a future Prometheus adapter.
+
+Snapshot semantics are explicit: current-state projections (worker
+heartbeat/status, active attempts, queue depth, and currently waiting runs)
+are bounded by ``as_of`` only; historical aggregates (latency, outcomes,
+no-slot reasons, usage, and duration) use the ``[as_of - window, as_of]``
+fact window.  The database clock is sampled once inside the read transaction
+so the two views cannot drift apart.
 """
 
 from __future__ import annotations
@@ -108,6 +115,8 @@ class RunMetricsService:
         if window <= timedelta(0):
             raise ValueError("window must be positive")
         async with self.session_factory() as session:
+            # The first SELECT autobegins one DB transaction; resolving the
+            # clock inside it gives every aggregate the same durable instant.
             return await self._snapshot(session, tenant_id, window, as_of=as_of)
 
     async def _snapshot(
@@ -125,7 +134,10 @@ class RunMetricsService:
         # in spirit: facts at/after ``cutoff`` and at/before ``as_of`` are
         # included.  The explicit upper bound keeps backfilled/future-dated
         # rows from contaminating a reproducible snapshot.
-        as_of = (as_of or datetime.now(UTC)).replace(tzinfo=None)
+        if as_of is None:
+            db_now = await session.execute(select(func.now()))
+            as_of = db_now.scalar_one()
+        as_of = _utc_naive(as_of)
         cutoff = as_of - window
         scope = Run.tenant_id == tenant_id if tenant_id is not None else true()
         run_counts = {
@@ -217,7 +229,9 @@ class RunMetricsService:
                     func.count().label("workers"),
                     func.coalesce(func.sum(RunWorker.capacity), 0).label("capacity"),
                     func.max(RunWorker.heartbeat_at).label("last_heartbeat"),
-                ).group_by(RunWorker.status)
+                )
+                .where(RunWorker.heartbeat_at <= as_of)
+                .group_by(RunWorker.status)
             )
         ).all()
         worker_load = {
@@ -240,6 +254,8 @@ class RunMetricsService:
                     RunAttempt.status.in_(
                         (AttemptStatus.ASSIGNED.value, AttemptStatus.RUNNING.value)
                     ),
+                    Run.assigned_at.is_not(None),
+                    Run.assigned_at <= as_of,
                 )
                 .group_by(RunAttempt.worker_id)
             )
@@ -254,6 +270,8 @@ class RunMetricsService:
                     scope,
                     RunAttempt.lease_expires_at.is_not(None),
                     RunAttempt.lease_expires_at < as_of,
+                    Run.assigned_at.is_not(None),
+                    Run.assigned_at <= as_of,
                     RunAttempt.status.in_(
                         (AttemptStatus.ASSIGNED.value, AttemptStatus.RUNNING.value)
                     ),
@@ -282,26 +300,32 @@ class RunMetricsService:
                     func.coalesce(func.sum(RunOutbox.delivery_attempts), 0).label("retries"),
                 ).where(
                     RunOutbox.delivered_at.is_(None),
+                    RunOutbox.created_at <= as_of,
                     *([RunOutbox.tenant_id == tenant_id] if tenant_id is not None else []),
                 )
             )
         ).one()
-        waiting_status = Run.status
         waiting = (
+            # Count current waiting Runs, not pause-event rows. A Run may
+            # pause/resume repeatedly; EXISTS + DISTINCT keeps it at one.
             await session.execute(
-                select(waiting_status, func.count())
-                .select_from(RunEvent)
-                .join(Run, Run.id == RunEvent.run_id)
+                select(Run.status, func.count(func.distinct(Run.id)))
+                .select_from(Run)
                 .where(
                     scope,
-                    RunEvent.created_at >= cutoff,
-                    RunEvent.created_at <= as_of,
-                    RunEvent.event_type == "run.paused",
                     Run.status.in_(
                         (RunStatus.WAITING_APPROVAL.value, RunStatus.WAITING_INPUT.value)
                     ),
+                    select(RunEvent.id)
+                    .where(
+                        RunEvent.run_id == Run.id,
+                        RunEvent.event_type == "run.paused",
+                        RunEvent.created_at >= cutoff,
+                        RunEvent.created_at <= as_of,
+                    )
+                    .exists(),
                 )
-                .group_by(waiting_status)
+                .group_by(Run.status)
             )
         ).all()
         usage = (
@@ -364,6 +388,13 @@ def _num(value: Any) -> float:
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _utc_naive(value: datetime) -> datetime:
+    """Normalize API-aware timestamps to the naive UTC values used by PG columns."""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def count_no_slot_reasons(rows: Iterable[Any]) -> int:
