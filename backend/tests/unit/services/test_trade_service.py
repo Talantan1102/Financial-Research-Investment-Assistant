@@ -49,6 +49,21 @@ def test_create_initial_trade_creates_position_row(db_session: Session, user: Us
     assert pos.name == "贵州茅台"
 
 
+def test_create_preserves_explicit_trade_id(db_session: Session, user: User) -> None:
+    trade = TradeService(db_session).create(
+        user_id=user.id,  # type: ignore[arg-type]
+        ts_code="600519.SH",
+        name="贵州茅台",
+        ttype=TradeType.BUY,
+        quantity=100,
+        price=Decimal("1500.00"),
+        trade_date=date(2026, 7, 20),
+        trade_id="11111111-1111-1111-1111-111111111111",
+    )
+
+    assert trade.id == "11111111-1111-1111-1111-111111111111"
+
+
 def test_create_sequence_initial_buy_sell_matches_spec_scenario_1(
     db_session: Session, user: User
 ) -> None:

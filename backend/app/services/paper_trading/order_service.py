@@ -309,7 +309,19 @@ class PaperOrderService:
         order.reserved_quantity = reserved_quantity
         order.confirmed_payload = payload
         order.user_edits = _json_diff(order.original_proposal, payload)
-        order.quote_snapshot = preview.quote.model_dump(mode="json")
+        confirmed_rules = self.rulebook.resolve(
+            ts_code=quote.ts_code,
+            board=_board(quote.ts_code),
+            risk_warning=_risk_warning(quote.name),
+            side=final_draft.side.value,
+            on=now.astimezone(SHANGHAI).date(),
+        )
+        daily_lower, daily_upper = self.rulebook.price_bounds(confirmed_rules, quote.previous_close)
+        order.quote_snapshot = {
+            **preview.quote.model_dump(mode="json"),
+            "daily_lower_bound": str(daily_lower),
+            "daily_upper_bound": str(daily_upper),
+        }
         order.rules_version = preview.rules_version
         order.confirmed_at = now
         order.status = OrderStatus.OPEN if continuous else OrderStatus.QUEUED

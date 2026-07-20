@@ -348,6 +348,12 @@ class PaperMatchPass(Base):
     snapshot_summary = Column(JSONB(none_as_null=True), nullable=False)
     consumed_levels = Column(JSONB(none_as_null=True), nullable=False)
     matched_quantity = Column(Integer, nullable=False)
+    fill_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("paper_fills.id", ondelete="RESTRICT"),
+        nullable=True,
+        unique=True,
+    )
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (

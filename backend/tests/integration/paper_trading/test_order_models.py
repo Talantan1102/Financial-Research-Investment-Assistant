@@ -911,6 +911,30 @@ def test_match_pass_persists_consumed_quote_summary(db_session: Session, user: U
     assert match_pass.created_at is not None
 
 
+def test_match_pass_can_link_exact_fill(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    order = _order(account=account, user=user)
+    db_session.add(order)
+    db_session.flush()
+    fill = _fill(order)
+    db_session.add(fill)
+    db_session.flush()
+    match_pass = PaperMatchPass(
+        order_id=order.id,
+        quote_timestamp=datetime.now(UTC),
+        match_pass=1,
+        quote_source="fixed-test-quote",
+        snapshot_summary={},
+        consumed_levels=[],
+        matched_quantity=fill.quantity,
+        fill_id=fill.id,
+    )
+    db_session.add(match_pass)
+    db_session.flush()
+
+    assert match_pass.fill_id == fill.id
+
+
 @pytest.mark.parametrize("field", ["snapshot_summary", "consumed_levels"])
 def test_match_pass_rejects_none_for_required_snapshots(
     db_session: Session, user: User, field: str

@@ -42,9 +42,10 @@ class TradeService:
         price: Decimal,
         trade_date: date,
         note: str | None = None,
+        trade_id: str | None = None,
     ) -> Trade:
         trade = Trade(
-            id=str(uuid4()),
+            id=trade_id or str(uuid4()),
             user_id=user_id,
             ts_code=ts_code,
             name=name,
