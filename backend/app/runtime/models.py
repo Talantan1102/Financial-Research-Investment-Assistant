@@ -2,12 +2,61 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agents.schemas import ToolResult
+
+
+class FrozenDict(dict[str, Any]):
+    """JSON-compatible dictionary that rejects mutation at every nesting level."""
+
+    @staticmethod
+    def _immutable(*_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("runtime contract mappings are immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable  # type: ignore[assignment]
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable  # type: ignore[assignment]
+
+
+class FrozenList(list[Any]):
+    """JSON-compatible list that rejects mutation."""
+
+    @staticmethod
+    def _immutable(*_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("runtime contract sequences are immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    append = _immutable
+    clear = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    reverse = _immutable
+    sort = _immutable
+    __iadd__ = _immutable  # type: ignore[assignment]
+    __imul__ = _immutable  # type: ignore[assignment]
+
+
+def _deep_freeze(value: Any) -> Any:
+    if isinstance(value, dict):
+        return FrozenDict({key: _deep_freeze(item) for key, item in value.items()})
+    if isinstance(value, list | tuple):
+        return FrozenList([_deep_freeze(item) for item in value])
+    if isinstance(value, set):
+        return frozenset(_deep_freeze(item) for item in value)
+    return value
 
 
 class CapabilityType(StrEnum):
@@ -68,6 +117,11 @@ class CapabilityDefinition(BaseModel):
     default_timeout_s: float = Field(gt=0)
     max_attempts: int = Field(ge=1)
 
+    def model_post_init(self, __context: Any) -> None:
+        del __context
+        object.__setattr__(self, "input_schema", _deep_freeze(self.input_schema))
+        object.__setattr__(self, "output_schema", _deep_freeze(self.output_schema))
+
 
 class ExecutionContext(BaseModel):
     """Request-scoped identity and visibility boundary for execution."""
@@ -103,6 +157,19 @@ class RuntimeResult(BaseModel):
     attempt: int = Field(default=0, ge=0)
     latency_ms: int = Field(default=0, ge=0)
     audit: dict[str, Any] = Field(default_factory=dict)
+
+    def model_post_init(self, __context: Any) -> None:
+        del __context
+        object.__setattr__(self, "output", _deep_freeze(self.output))
+        object.__setattr__(self, "audit", _deep_freeze(self.audit))
+
+    def model_copy(
+        self, *, update: Mapping[str, Any] | None = None, deep: bool = False
+    ) -> RuntimeResult:
+        copied = super().model_copy(update=update, deep=deep)
+        object.__setattr__(copied, "output", _deep_freeze(copied.output))
+        object.__setattr__(copied, "audit", _deep_freeze(copied.audit))
+        return copied
 
     @model_validator(mode="after")
     def validate_error_matches_status(self) -> RuntimeResult:

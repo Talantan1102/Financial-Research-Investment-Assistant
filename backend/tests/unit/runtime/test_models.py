@@ -110,6 +110,36 @@ def test_runtime_contract_models_are_frozen() -> None:
         context.task_id = "other"  # type: ignore[misc]
 
 
+def test_runtime_contract_nested_mappings_are_deeply_immutable() -> None:
+    capability = CapabilityDefinition(
+        name="quote",
+        type=CapabilityType.DATA_TOOL,
+        input_schema={"type": "object", "properties": {"symbol": {"type": "string"}}},
+        output_schema={"type": "object"},
+        minimum_risk=RiskLevel.LOW,
+        read_only=True,
+        idempotent=True,
+        default_timeout_s=1,
+        max_attempts=1,
+    )
+    result = RuntimeResult(
+        status=ExecutionStatus.SUCCEEDED,
+        output={"nested": {"price": 1}},
+        audit={"labels": {"source": "runtime"}},
+    )
+
+    with pytest.raises(TypeError):
+        capability.input_schema["properties"]["symbol"]["type"] = "integer"
+    with pytest.raises(TypeError):
+        result.output["nested"]["price"] = 2  # type: ignore[index]
+    with pytest.raises(TypeError):
+        result.audit["labels"]["source"] = "mutated"
+
+    copied = result.model_copy(update={"audit": {"new": {"nested": True}}})
+    with pytest.raises(TypeError):
+        copied.audit["new"]["nested"] = False
+
+
 def test_runtime_result_converts_to_legacy_tool_result() -> None:
     result = RuntimeResult(
         status=ExecutionStatus.SUCCEEDED,

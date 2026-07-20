@@ -201,3 +201,28 @@ async def test_safe_executor_classifies_non_json_output_as_result_invalid() -> N
     )
     assert result.error is not None
     assert result.error.category is ErrorCategory.RESULT_INVALID
+
+
+@pytest.mark.asyncio
+async def test_runtime_boundary_redacts_adapter_and_hook_secrets() -> None:
+    class SecretAdapter:
+        async def execute(self, input: dict[str, Any], context: ExecutionContext) -> RuntimeResult:
+            return RuntimeResult(
+                status=ExecutionStatus.SUCCEEDED,
+                output={"access_token": "visible-token", "message": "Bearer visible-token"},
+            )
+
+    registry = CapabilityRegistry()
+    registry.register(definition(), SecretAdapter())
+    result = await ToolRuntime(registry).execute("quote", {"symbol": "AAPL"}, context())
+
+    assert result.output == {"access_token": "[REDACTED]", "message": "[REDACTED]"}
+
+    async def fail_with_secret(_invocation: Any) -> HookDecision:
+        raise RuntimeError("token=visible-token")
+
+    failed = await ToolRuntime(registry, hooks=HookPipeline(pre_hooks=[fail_with_secret])).execute(
+        "quote", {"symbol": "AAPL"}, context()
+    )
+    assert failed.error is not None
+    assert failed.error.message == "[REDACTED]"

@@ -13,6 +13,7 @@ from app.runtime.models import (
     RuntimeResult,
 )
 from app.runtime.permissions import PermissionDecision, PermissionEngine
+from app.runtime.redaction import scrub_text
 from app.runtime.registry import CapabilityRegistry
 from app.runtime.safe_executor import SafeExecutor
 from app.runtime.validation import InputGuard, InputValidationError
@@ -127,7 +128,7 @@ class ToolRuntime:
             error=RuntimeErrorInfo(
                 code=code,
                 category=category,
-                message=message or code,
+                message=scrub_text(message or code),
                 retryable=False,
             ),
             latency_ms=latency_ms,

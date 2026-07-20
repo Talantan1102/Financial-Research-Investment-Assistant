@@ -15,6 +15,7 @@ from app.runtime.models import (
     RuntimeErrorInfo,
     RuntimeResult,
 )
+from app.runtime.redaction import scrub_result, scrub_text
 
 
 class SafeExecutor:
@@ -60,7 +61,7 @@ class SafeExecutor:
                         ),
                         latency_ms=self._latency_ms(started),
                     )
-            return result.model_copy(update={"latency_ms": self._latency_ms(started)})
+            return scrub_result(result.model_copy(update={"latency_ms": self._latency_ms(started)}))
         except TimeoutError:
             return self._failure(
                 code="execution_timeout",
@@ -81,7 +82,7 @@ class SafeExecutor:
             return self._failure(
                 code="adapter_execution_error",
                 category=ErrorCategory.EXECUTION_ERROR,
-                message=str(exc) or type(exc).__name__,
+                message=scrub_text(str(exc) or type(exc).__name__),
                 latency_ms=self._latency_ms(started),
             )
 
