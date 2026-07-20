@@ -20,7 +20,21 @@ from app.chatloop.control_tools import (
     OfferDeepResearchTool,
     ReadCachedResultArgs,
     ReadCachedResultTool,
+    approval_pause,
+    ask_user_pause,
 )
+
+
+def test_control_pause_helpers_return_typed_pure_data_directives() -> None:
+    asking = ask_user_pause("请补充成本价")
+    approval = approval_pause({"tool_calls": [{"id": "call-1"}]})
+
+    assert asking.pause_type == "input"
+    assert asking.request == {"tool_name": "ask_user", "question": "请补充成本价"}
+    assert approval.pause_type == "approval"
+    assert approval.request["tool_calls"] == [{"id": "call-1"}]
+
+
 from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_docs import TOOL_DOCS

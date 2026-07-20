@@ -28,11 +28,27 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from app.chatloop.inprocess import InProcessTool
+from app.chatloop.loop import PauseDirective
 from app.chatloop.state import ChatLoopState
 from app.tools.base import ToolError
 
 # read_cached_result 默认分页长度上限(与 context.py 降级阈值同量级)。
 _DEFAULT_LIMIT = 2000
+
+
+def ask_user_pause(question: str) -> PauseDirective:
+    """Describe a durable input pause; callers persist it instead of blocking."""
+    if not question.strip():
+        raise ValueError("question must not be blank")
+    return PauseDirective(
+        pause_type="input",
+        request={"tool_name": "ask_user", "question": question},
+    )
+
+
+def approval_pause(request: dict[str, Any]) -> PauseDirective:
+    """Describe a durable pre-side-effect approval pause."""
+    return PauseDirective(pause_type="approval", request=dict(request))
 
 
 class _RawCacheProto(Protocol):
@@ -135,6 +151,8 @@ class ReadCachedResultTool(InProcessTool):
 
 
 __all__ = [
+    "approval_pause",
+    "ask_user_pause",
     "OfferDeepResearchArgs",
     "OfferDeepResearchTool",
     "ReadCachedResultArgs",

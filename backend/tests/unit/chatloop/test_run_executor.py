@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from app.chatloop.continuation import ContinuationV1, PendingActionV1
 from app.chatloop.contracts import ToolResult
 from app.chatloop.gates import GateConfig
 from app.chatloop.run_executor import (
@@ -23,6 +24,7 @@ from app.chatloop.run_executor import (
     PauseDirective,
     PauseResult,
 )
+from app.chatloop.state import ChatLoopState
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
 
 TEST_CONTINUATION_SECRET = b"s" * 32
@@ -37,14 +39,20 @@ def _signed_test_continuation(
     pending_tool_calls: list[dict[str, Any]] | None = None,
     key_id: str = "default",
 ) -> dict[str, Any]:
-    body = {
-        "run_id": str(command.run_id),
-        "session_id": str(command.session_id),
-        "user_id": user_id,
-        "pause_type": pause_type,
-        "state": state,
-        "pending_tool_calls": pending_tool_calls or [],
-    }
+    restored = ChatLoopState.model_validate(state)
+    restored.user_id = user_id
+    restored.session_id = str(command.session_id)
+    restored.request_id = str(command.run_id)
+    action = PendingActionV1(
+        pause_type=pause_type,
+        tool_name="ask_user" if pause_type == "input" else "approve_tools",
+        request={"question": "resume"},
+        pending_tool_calls=tuple(
+            StepToolCall.model_validate(call) for call in (pending_tool_calls or [])
+        ),
+    )
+    draft = ContinuationV1.from_state(restored, action, key_id=key_id, signature="0" * 64)
+    body = draft.body.model_dump(mode="json")
     encoded = json.dumps(
         body,
         ensure_ascii=False,
@@ -53,9 +61,7 @@ def _signed_test_continuation(
         separators=(",", ":"),
     ).encode()
     return {
-        "version": 1,
-        "key_id": key_id,
-        "body": body,
+        **draft.model_dump(mode="json"),
         "signature": hmac.new(TEST_CONTINUATION_SECRET, encoded, hashlib.sha256).hexdigest(),
     }
 
@@ -631,7 +637,7 @@ async def test_server_identity_overwrites_continuation_identity() -> None:
         )
     )
     assert isinstance(result, PauseResult)
-    assert result.continuation["body"]["state"]["user_id"] == str(user_id)
+    assert result.continuation["body"]["user_id"] == str(user_id)
 
 
 async def test_model_error_and_cancel_are_structured_without_secret_leakage() -> None:
@@ -852,24 +858,23 @@ async def test_forged_approval_continuation_is_rejected_without_dispatch(
     )
     continuation = paused.thaw_continuation()
     body = continuation["body"]
+    action = body["pending_action"]
     if mutation == "empty_messages":
-        body["state"]["messages"] = []
+        body["messages"] = []
     elif mutation == "id":
-        body["pending_tool_calls"][0]["id"] = "forged"
+        action["pending_tool_calls"][0]["id"] = "forged"
     elif mutation == "name":
-        body["pending_tool_calls"][0]["name"] = "other_tool"
+        action["pending_tool_calls"][0]["name"] = "other_tool"
     elif mutation == "args":
-        body["pending_tool_calls"][0]["arguments"] = '{"x":2}'
+        action["pending_tool_calls"][0]["arguments"] = '{"x":2}'
     elif mutation == "pause_type":
-        body["pause_type"] = "other"
+        action["pause_type"] = "other"
     elif mutation == "input_with_pending":
-        body["pause_type"] = "input"
+        action["pause_type"] = "input"
     elif mutation == "existing_response":
-        body["state"]["messages"].insert(
-            -1, {"role": "tool", "tool_call_id": "safe-id", "content": "done"}
-        )
+        body["messages"].insert(-1, {"role": "tool", "tool_call_id": "safe-id", "content": "done"})
     elif mutation == "existing_ledger":
-        body["state"]["ledger"]["entries"].append(
+        body["tool_ledger"].append(
             {
                 "step": 1,
                 "tool_call_id": "safe-id",
@@ -880,10 +885,8 @@ async def test_forged_approval_continuation_is_rejected_without_dispatch(
             }
         )
     else:
-        body["pending_tool_calls"].append(dict(body["pending_tool_calls"][0]))
-        body["state"]["messages"][-1]["tool_calls"].append(
-            dict(body["state"]["messages"][-1]["tool_calls"][0])
-        )
+        action["pending_tool_calls"].append(dict(action["pending_tool_calls"][0]))
+        body["messages"][-1]["tool_calls"].append(dict(body["messages"][-1]["tool_calls"][0]))
     hub = _RecordingHub()
     result = await ChatRunExecutor(
         user_id=uuid4(),
@@ -1030,15 +1033,17 @@ async def test_pause_result_nested_data_is_immutable_and_has_controlled_json() -
         [StepToolCall(id="immutable", name="dangerous_tool", arguments="{}")]
     )
     with pytest.raises(TypeError):
-        paused.continuation["body"]["state"]["messages"] = []  # type: ignore[index]
+        paused.continuation["body"]["messages"] = []  # type: ignore[index]
     with pytest.raises(TypeError):
         dict.__setitem__(paused.continuation, "pause_type", "forged")  # type: ignore[arg-type]
     with pytest.raises(TypeError):
         paused.request["nested"]["choices"][0] = "mutate"  # type: ignore[index]
     thawed = paused.thaw_continuation()
-    thawed["body"]["state"]["messages"].clear()
-    assert paused.continuation["body"]["state"]["messages"]
-    assert json.loads(paused.continuation_json())["body"]["pause_type"] == "approval"
+    thawed["body"]["messages"].clear()
+    assert paused.continuation["body"]["messages"]
+    assert (
+        json.loads(paused.continuation_json())["body"]["pending_action"]["pause_type"] == "approval"
+    )
 
 
 async def test_reference_date_and_provider_are_injected() -> None:
@@ -1393,7 +1398,7 @@ async def test_tampered_or_replayed_continuation_is_rejected_without_dispatch(
     resume_user = "trusted-user"
     secret = TEST_CONTINUATION_SECRET
     if tamper == "body":
-        envelope["body"]["state"]["messages"].append({"role": "user", "content": "forged"})
+        envelope["body"]["messages"].append({"role": "user", "content": "forged"})
     elif tamper == "signature":
         envelope["signature"] = "0" * 64
     elif tamper == "key_id":

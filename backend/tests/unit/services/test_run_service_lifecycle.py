@@ -309,6 +309,39 @@ async def test_invalid_resume_is_rejected(run_service: RunService, created_run: 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pause_kind", "response"),
+    [
+        ("input", {"approved": True}),
+        ("input", {"text": 123}),
+        ("approval", {"text": "yes"}),
+        ("approval", {"approved": "yes"}),
+        ("approval", {"approved": True, "decisions": {"call-1": True}}),
+    ],
+)
+async def test_resume_validates_response_shape_for_pause_type(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    pause_kind: str,
+    response: dict[str, object],
+) -> None:
+    await fake_executor.start(created_run.id)
+    if pause_kind == "input":
+        await fake_executor.pause_for_input(created_run.id, {"question": "成本价？"})
+    else:
+        await fake_executor.pause_for_approval(created_run.id, {"action": "place-order"})
+
+    with pytest.raises(ResumeNotAllowed, match="response"):
+        await run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response=response,
+        )
+
+
+@pytest.mark.asyncio
 async def test_lifecycle_mutation_preserves_invisible_as_not_found(
     run_service: RunService,
     created_run: Run,

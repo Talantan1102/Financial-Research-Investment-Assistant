@@ -435,6 +435,7 @@ class RunService:
             }[current_status]
             if latest_pause.pause_type != expected_pause_type:
                 raise ResumeNotAllowed("pause type does not match run status")
+            self._validate_resume_response(latest_pause.pause_type, response)
 
             assert_transition(current_status, RunStatus.QUEUED)
             now = _utcnow()
@@ -461,6 +462,38 @@ class RunService:
                 dedupe_key=f"schedule.wake:{run.id}:resume:{latest_pause.id}",
             )
             return run
+
+    @staticmethod
+    def _validate_resume_response(pause_type: str, response: dict[str, Any]) -> None:
+        """Reject ambiguous HTTP payloads before resolving the durable Pause."""
+        if pause_type == PauseType.INPUT.value:
+            if set(response) != {"text"} or not isinstance(response.get("text"), str):
+                raise ResumeNotAllowed("input pause response must contain text")
+            if not cast(str, response["text"]).strip():
+                raise ResumeNotAllowed("input pause response text must not be blank")
+            return
+        if pause_type != PauseType.APPROVAL.value:
+            raise ResumeNotAllowed("pause response type is unsupported")
+        if "approved" in response and "decisions" in response:
+            raise ResumeNotAllowed("approval response decisions conflict")
+        optional_text = response.get("text")
+        if optional_text is not None and not isinstance(optional_text, str):
+            raise ResumeNotAllowed("approval response text must be a string")
+        if "approved" in response:
+            if set(response) - {"approved", "text"} or type(response["approved"]) is not bool:
+                raise ResumeNotAllowed("approval response must contain a boolean approved")
+            return
+        decisions = response.get("decisions")
+        if (
+            set(response) - {"decisions", "text"}
+            or not isinstance(decisions, dict)
+            or not decisions
+            or any(
+                not isinstance(key, str) or type(value) is not bool
+                for key, value in decisions.items()
+            )
+        ):
+            raise ResumeNotAllowed("approval response must contain boolean decisions")
 
     async def get_pause(
         self,

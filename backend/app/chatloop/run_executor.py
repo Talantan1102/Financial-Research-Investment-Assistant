@@ -17,6 +17,7 @@ from typing import Any, Literal, Protocol, TypeAlias
 from uuid import UUID
 
 from app.chatloop.context import ContextDeps
+from app.chatloop.continuation import ContinuationV1, PendingActionV1
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.loop import (
     CancelledByUser,
@@ -468,6 +469,7 @@ class ChatRunExecutor:
                     state,
                     paused.pending_tool_calls,
                     paused.directive.pause_type,
+                    paused.directive.request,
                 )
                 request_payload = _canonical_portable_json(
                     paused.directive.request, max_bytes=self.MAX_CONTINUATION_BYTES
@@ -636,28 +638,11 @@ class ChatRunExecutor:
                 None,
                 None,
             )
-        body = self._authenticate_continuation(command, continuation)
-        if (
-            set(body)
-            != {
-                "run_id",
-                "session_id",
-                "user_id",
-                "pause_type",
-                "state",
-                "pending_tool_calls",
-            }
-            or not isinstance(body["state"], dict)
-            or not isinstance(body["pending_tool_calls"], list)
-        ):
-            raise ValueError("unknown continuation shape")
-        pause_type = body["pause_type"]
-        if pause_type not in {"input", "approval"}:
-            raise ValueError("unknown pause type")
-        state = ChatLoopState.model_validate(body["state"])
-        pending_tool_calls = tuple(
-            StepToolCall.model_validate(call) for call in body["pending_tool_calls"]
-        )
+        snapshot = self._authenticate_continuation(command, continuation)
+        action = snapshot.pending_action
+        pause_type = action.pause_type
+        state = snapshot.to_state()
+        pending_tool_calls = action.pending_tool_calls
         self._validate_pause_snapshot(state, pending_tool_calls, pause_type)
         state.user_id = self._user_id
         state.request_id = str(command.run_id)
@@ -702,30 +687,24 @@ class ChatRunExecutor:
 
     def _authenticate_continuation(
         self, command: ExecuteChatRun, envelope: dict[str, Any]
-    ) -> dict[str, Any]:
+    ) -> ContinuationV1:
         if self._continuation_secret is None:
             raise ValueError("continuation authentication is not configured")
-        if set(envelope) != {"version", "key_id", "body", "signature"}:
-            raise ValueError("unknown continuation envelope")
-        if (
-            envelope["version"] != 1
-            or envelope["key_id"] != self._continuation_key_id
-            or not isinstance(envelope["body"], dict)
-            or not isinstance(envelope["signature"], str)
-        ):
+        snapshot = ContinuationV1.model_validate(envelope)
+        if snapshot.key_id != self._continuation_key_id:
             raise ValueError("invalid continuation envelope")
-        body = envelope["body"]
+        body = snapshot.body.model_dump(mode="json")
         body_bytes = _portable_json_bytes(body, max_bytes=self.MAX_CONTINUATION_BYTES)
         expected = hmac.new(self._continuation_secret, body_bytes, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, envelope["signature"]):
+        if not hmac.compare_digest(expected, snapshot.signature):
             raise ValueError("invalid continuation signature")
         if (
-            body.get("run_id") != str(command.run_id)
-            or body.get("session_id") != str(command.session_id)
-            or body.get("user_id") != self._user_id
+            snapshot.body.run_id != str(command.run_id)
+            or snapshot.body.session_id != str(command.session_id)
+            or snapshot.body.user_id != self._user_id
         ):
             raise ValueError("continuation context mismatch")
-        return body
+        return snapshot
 
     def _snapshot(
         self,
@@ -733,6 +712,7 @@ class ChatRunExecutor:
         state: ChatLoopState,
         pending_tool_calls: tuple[StepToolCall, ...],
         pause_type: Literal["input", "approval"],
+        request: Mapping[str, Any],
     ) -> dict[str, Any]:
         if self._continuation_secret is None:
             raise ValueError("continuation authentication is not configured")
@@ -741,6 +721,7 @@ class ChatRunExecutor:
             state=state,
             pending_tool_calls=pending_tool_calls,
             pause_type=pause_type,
+            request=request,
             user_id=self._user_id,
             continuation_secret=self._continuation_secret,
             continuation_key_id=self._continuation_key_id,
@@ -754,30 +735,31 @@ class ChatRunExecutor:
         state: ChatLoopState,
         pending_tool_calls: tuple[StepToolCall, ...],
         pause_type: Literal["input", "approval"],
+        request: Mapping[str, Any],
         user_id: str,
         continuation_secret: bytes,
         continuation_key_id: str,
     ) -> dict[str, Any]:
-        body = {
-            "run_id": str(command.run_id),
-            "session_id": str(command.session_id),
-            "user_id": user_id,
-            "pause_type": pause_type,
-            "state": state.model_dump(mode="json"),
-            "pending_tool_calls": [call.model_dump(mode="json") for call in pending_tool_calls],
-        }
         cls._validate_pause_snapshot(state, pending_tool_calls, pause_type)
+        action = PendingActionV1(
+            pause_type=pause_type,
+            tool_name=("ask_user" if pause_type == "input" else "approve_tools"),
+            request=dict(request),
+            pending_tool_calls=pending_tool_calls,
+        )
+        draft = ContinuationV1.from_state(
+            state,
+            action,
+            key_id=continuation_key_id,
+            signature="0" * 64,
+        )
+        body = draft.body.model_dump(mode="json")
         signature = hmac.new(
             continuation_secret,
             _portable_json_bytes(body, max_bytes=cls.MAX_CONTINUATION_BYTES),
             hashlib.sha256,
         ).hexdigest()
-        payload = {
-            "version": 1,
-            "key_id": continuation_key_id,
-            "body": body,
-            "signature": signature,
-        }
+        payload = {**draft.model_dump(mode="json"), "signature": signature}
         canonical = _canonical_portable_json(payload, max_bytes=cls.MAX_CONTINUATION_BYTES)
         assert isinstance(canonical, dict)
         return canonical
@@ -815,6 +797,7 @@ class ChatRunExecutor:
             state=state,
             pending_tool_calls=pending_tool_calls,
             pause_type="approval",
+            request={"tool_calls": [call.model_dump(mode="json") for call in pending_tool_calls]},
             user_id=user_id,
             continuation_secret=continuation_secret,
             continuation_key_id=continuation_key_id,

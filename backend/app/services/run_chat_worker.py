@@ -352,7 +352,8 @@ def _approved_tool_call_ids(loaded: LoadedChatExecution) -> frozenset[str]:
     if continuation is None:
         return frozenset()
     body = continuation.get("body")
-    if not isinstance(body, Mapping) or body.get("pause_type") != "approval":
+    action = body.get("pending_action") if isinstance(body, Mapping) else None
+    if not isinstance(action, Mapping) or action.get("pause_type") != "approval":
         return frozenset()
     try:
         response = json.loads(loaded.prompt)
@@ -360,7 +361,7 @@ def _approved_tool_call_ids(loaded: LoadedChatExecution) -> frozenset[str]:
         return frozenset()
     if not isinstance(response, dict):
         return frozenset()
-    calls = body.get("pending_tool_calls")
+    calls = action.get("pending_tool_calls")
     if not isinstance(calls, list):
         return frozenset()
     if response.get("approved") is True:
