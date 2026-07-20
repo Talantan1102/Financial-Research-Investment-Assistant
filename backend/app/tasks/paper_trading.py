@@ -357,7 +357,10 @@ def _reconcile_active_accounts() -> dict[str, int]:
             )
             if still_active is None:
                 continue
-            violations = reconcile_account(session, account_id)
+            violations = reconcile_account(session, account_id, require_active=True)
+            if violations is None:
+                session.rollback()
+                continue
             session.commit()
             checked += 1
             suspended += int(bool(violations))

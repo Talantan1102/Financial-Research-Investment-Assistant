@@ -7,7 +7,12 @@ from random import Random
 from typing import cast
 
 import pytest
-from app.models.paper_account import PaperAccount, PaperAccountStatus, PaperHoldingLot
+from app.models.paper_account import (
+    PaperAccount,
+    PaperAccountStatus,
+    PaperCashLedger,
+    PaperHoldingLot,
+)
 from app.models.paper_order import (
     OrderSide,
     OrderStatus,
@@ -587,6 +592,8 @@ def test_fill_aggregate_above_order_quantity_has_exact_codes(db_session: Session
 
     assert [row.code for row in first] == [
         "buy_fill_lot_mismatch",
+        "cash_balance_mismatch",
+        "fill_ledger_missing",
         "fill_quantity_exceeds_order",
         "fill_trade_mismatch",
         "lot_share_balance_mismatch",
@@ -741,7 +748,182 @@ def test_reconciliation_corruption_is_isolated_by_user_generation_and_manual_sco
     assert [row.code for row in broken] == ["lot_share_balance_mismatch"]
     assert other == []
     assert next_generation == []
-    assert generation_one.status is PaperAccountStatus.SUSPENDED
+    assert generation_one.status is PaperAccountStatus.ARCHIVED
     assert other_account.status is PaperAccountStatus.ACTIVE
     assert generation_two.status is PaperAccountStatus.ACTIVE
     assert user_b.id != user_a.id
+
+
+def test_tampered_fill_fee_is_detected_from_fee_schedule(db_session: Session) -> None:
+    user, account = _user_account(db_session)
+    order = _buy_order(db_session, user, account, 100)
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    evidence = _evidence(execution, 100)
+    fill = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: NOW,
+        evidence_provider=lambda **_: evidence,
+    ).apply(order_id=order.id, execution=execution, quote_timestamp=NOW, match_pass=1)
+    fill.commission = cast(Decimal, fill.commission) + Decimal("1.00")
+    db_session.flush()
+
+    violations = reconcile_account(db_session, account.id)
+
+    assert [row.code for row in violations] == ["fill_fee_mismatch"]
+    assert account.status is PaperAccountStatus.SUSPENDED
+
+
+def test_coordinated_fee_ledger_and_account_tampering_still_fails_authority_check(
+    db_session: Session,
+) -> None:
+    user, account = _user_account(db_session)
+    order = _buy_order(db_session, user, account, 100)
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    evidence = _evidence(execution, 100)
+    fill = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: NOW,
+        evidence_provider=lambda **_: evidence,
+    ).apply(order_id=order.id, execution=execution, quote_timestamp=NOW, match_pass=1)
+    debit = db_session.query(PaperCashLedger).filter_by(fill_id=fill.id, kind="fill_debit").one()
+    release = (
+        db_session.query(PaperCashLedger)
+        .filter_by(fill_id=fill.id, kind="reservation_release")
+        .one()
+    )
+    fill.commission = cast(Decimal, fill.commission) + Decimal("1.00")
+    debit.amount = cast(Decimal, debit.amount) - Decimal("1.00")
+    debit.frozen_after = cast(Decimal, debit.frozen_after) - Decimal("1.00")
+    release.frozen_before = cast(Decimal, release.frozen_before) - Decimal("1.00")
+    release.amount = cast(Decimal, release.amount) - Decimal("1.00")
+    release.available_after = cast(Decimal, release.available_after) - Decimal("1.00")
+    account.available_cash = cast(Decimal, account.available_cash) - Decimal("1.00")
+    db_session.flush()
+
+    violations = reconcile_account(db_session, account.id)
+
+    assert [row.code for row in violations] == [
+        "cash_balance_mismatch",
+        "fill_fee_mismatch",
+        "fill_ledger_mismatch",
+    ]
+
+
+def test_missing_fill_linked_cash_ledger_has_stable_violation(db_session: Session) -> None:
+    user, account = _user_account(db_session)
+    order = _buy_order(db_session, user, account, 100)
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    evidence = _evidence(execution, 100)
+    fill = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: NOW,
+        evidence_provider=lambda **_: evidence,
+    ).apply(order_id=order.id, execution=execution, quote_timestamp=NOW, match_pass=1)
+    debit = db_session.query(PaperCashLedger).filter_by(fill_id=fill.id, kind="fill_debit").one()
+    db_session.delete(debit)
+    db_session.flush()
+
+    codes = [row.code for row in reconcile_account(db_session, account.id)]
+
+    assert "fill_ledger_missing" in codes
+
+
+def test_duplicate_fill_linked_cash_ledger_has_stable_violation(db_session: Session) -> None:
+    user, account = _user_account(db_session)
+    order = _buy_order(db_session, user, account, 100)
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    evidence = _evidence(execution, 100)
+    fill = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: NOW,
+        evidence_provider=lambda **_: evidence,
+    ).apply(order_id=order.id, execution=execution, quote_timestamp=NOW, match_pass=1)
+    debit = db_session.query(PaperCashLedger).filter_by(fill_id=fill.id, kind="fill_debit").one()
+    db_session.add(
+        PaperCashLedger(
+            account_id=account.id,
+            generation=account.generation,
+            kind="fill_debit",
+            amount=debit.amount,
+            available_before=debit.available_before,
+            available_after=debit.available_after,
+            frozen_before=debit.frozen_before,
+            frozen_after=debit.frozen_after,
+            business_key=f"duplicate-fill-debit:{fill.id}",
+            order_id=order.id,
+            fill_id=fill.id,
+        )
+    )
+    db_session.flush()
+
+    codes = [row.code for row in reconcile_account(db_session, account.id)]
+
+    assert codes == ["fill_ledger_duplicate", "ledger_balance_mismatch"]
+
+
+def test_wrong_fill_linked_ledger_order_has_stable_violation(db_session: Session) -> None:
+    user, account = _user_account(db_session)
+    order = _buy_order(db_session, user, account, 100)
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    evidence = _evidence(execution, 100)
+    fill = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: NOW,
+        evidence_provider=lambda **_: evidence,
+    ).apply(order_id=order.id, execution=execution, quote_timestamp=NOW, match_pass=1)
+    debit = db_session.query(PaperCashLedger).filter_by(fill_id=fill.id, kind="fill_debit").one()
+    debit.order_id = None
+    db_session.flush()
+
+    assert [row.code for row in reconcile_account(db_session, account.id)] == [
+        "fill_ledger_mismatch"
+    ]
+
+
+def test_unknown_ledger_kind_is_rejected_instead_of_using_fallback(db_session: Session) -> None:
+    user, account = _user_account(db_session)
+    order = _buy_order(db_session, user, account, 100)
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    evidence = _evidence(execution, 100)
+    fill = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: NOW,
+        evidence_provider=lambda **_: evidence,
+    ).apply(order_id=order.id, execution=execution, quote_timestamp=NOW, match_pass=1)
+    release = (
+        db_session.query(PaperCashLedger)
+        .filter_by(fill_id=fill.id, kind="reservation_release")
+        .one()
+    )
+    release.kind = "mystery_adjustment"
+    db_session.flush()
+
+    assert [row.code for row in reconcile_account(db_session, account.id)] == [
+        "unknown_ledger_kind"
+    ]
+
+
+def test_positive_but_wrong_lot_unit_cost_is_detected(db_session: Session) -> None:
+    user, account = _user_account(db_session)
+    order = _buy_order(db_session, user, account, 100)
+    execution = Execution(price=Decimal("10.00"), quantity=100)
+    evidence = _evidence(execution, 100)
+    PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: NOW,
+        evidence_provider=lambda **_: evidence,
+    ).apply(order_id=order.id, execution=execution, quote_timestamp=NOW, match_pass=1)
+    lot = db_session.query(PaperHoldingLot).filter_by(account_id=account.id).one()
+    lot.unit_cost = cast(Decimal, lot.unit_cost) + Decimal("0.1000")
+    db_session.flush()
+
+    assert [row.code for row in reconcile_account(db_session, account.id)] == [
+        "lot_unit_cost_mismatch"
+    ]

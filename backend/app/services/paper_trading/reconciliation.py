@@ -6,7 +6,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import cast
 
 from pydantic import BaseModel, ConfigDict
@@ -28,7 +28,20 @@ from app.models.paper_order import (
 )
 from app.models.position import Position
 from app.models.trade import Trade, TradeType
+from app.services.paper_trading.fee_schedule import FeeSchedule
+from app.services.paper_trading.types import FeeBreakdown
 from app.services.portfolio_recompute import TradeInput, recompute_position_from_trades
+
+_CENT = Decimal("0.01")
+_FOUR_PLACES = Decimal("0.0001")
+_KNOWN_LEDGER_KINDS = {
+    "initial_deposit",
+    "initial_deposit_reversal",
+    "order_freeze",
+    "reservation_release",
+    "fill_debit",
+    "fill_credit",
+}
 
 
 class ReconciliationViolation(BaseModel):
@@ -39,7 +52,9 @@ class ReconciliationViolation(BaseModel):
     details: dict[str, object]
 
 
-def reconcile_account(session: Session, account_id: uuid.UUID) -> list[ReconciliationViolation]:
+def reconcile_account(
+    session: Session, account_id: uuid.UUID, *, require_active: bool = False
+) -> list[ReconciliationViolation] | None:
     """Check one account generation and suspend it when any invariant is broken."""
     account = session.scalar(
         select(PaperAccount)
@@ -49,6 +64,8 @@ def reconcile_account(session: Session, account_id: uuid.UUID) -> list[Reconcili
     )
     if account is None:
         return [_violation(account_id, "account_not_found")]
+    if require_active and account.status is not PaperAccountStatus.ACTIVE:
+        return None
 
     checks = (
         _check_cash_non_negative,
@@ -57,13 +74,14 @@ def reconcile_account(session: Session, account_id: uuid.UUID) -> list[Reconcili
         _check_lots_against_fills,
         _check_share_conservation,
         _check_trade_position_projection,
+        _check_cash_authority,
         _check_ledger_balance,
         _check_reservations,
     )
     violations = [item for check in checks for item in check(session, account)]
     violations.sort(key=_sort_key)
-    if violations and account.status is not PaperAccountStatus.SUSPENDED:
-        account.status = PaperAccountStatus.SUSPENDED  # type: ignore[assignment]
+    if violations and account.status is PaperAccountStatus.ACTIVE:
+        account.status = PaperAccountStatus.SUSPENDED
         session.flush()
     return violations
 
@@ -227,6 +245,7 @@ def _check_lots_against_fills(
                     lot_id=str(lot.id),
                 )
             )
+    expected_fee_by_fill = _expected_fill_fees(session, account)
     for lot in lots:
         source_fill = session.get(PaperFill, lot.source_fill_id)
         order = session.get(PaperOrder, source_fill.order_id) if source_fill is not None else None
@@ -247,6 +266,25 @@ def _check_lots_against_fills(
             )
             if candidate not in result:
                 result.append(candidate)
+            continue
+        expected_fees = expected_fee_by_fill.get(cast(uuid.UUID, source_fill.id))
+        if expected_fees is None:
+            continue
+        expected_cost = _four(
+            _money(cast(Decimal, source_fill.gross_amount) + expected_fees.total)
+            / int(source_fill.quantity)
+        )
+        if cast(Decimal, lot.unit_cost) != expected_cost:
+            result.append(
+                _violation(
+                    account.id,
+                    "lot_unit_cost_mismatch",
+                    lot_id=str(lot.id),
+                    fill_id=str(source_fill.id),
+                    expected_unit_cost=str(expected_cost),
+                    actual_unit_cost=str(lot.unit_cost),
+                )
+            )
     return result
 
 
@@ -274,8 +312,9 @@ def _check_trade_position_projection(
             .order_by(Trade.ts_code, Trade.trade_date, Trade.created_at, Trade.id)
         ).all()
     )
+    trades_by_id = {cast(str, row.id): row for row in trades}
     for trade_id, fill in sorted(fill_ids.items()):
-        trade = next((row for row in trades if row.id == trade_id), None)
+        trade = trades_by_id.get(trade_id)
         order = session.get(PaperOrder, fill.order_id)
         if (
             trade is None
@@ -391,6 +430,177 @@ def _check_share_conservation(
     return result
 
 
+def _expected_fill_fees(session: Session, account: PaperAccount) -> dict[uuid.UUID, FeeBreakdown]:
+    schedule = FeeSchedule.from_builtin_fixture()
+    result: dict[uuid.UUID, FeeBreakdown] = {}
+    zero = FeeBreakdown(
+        commission=Decimal("0.00"),
+        stamp_duty=Decimal("0.00"),
+        transfer_fee=Decimal("0.00"),
+    )
+    for order in _orders(session, account):
+        cumulative_gross = Decimal("0.0000")
+        prior = zero
+        fills = session.scalars(
+            select(PaperFill).where(PaperFill.order_id == order.id).order_by(PaperFill.fill_seq)
+        ).all()
+        for fill in fills:
+            cumulative_gross += cast(Decimal, fill.gross_amount)
+            cumulative = schedule.calculate(
+                side=cast(OrderSide, order.side).value,
+                gross=cumulative_gross,
+                commission_rate=cast(Decimal, account.commission_rate),
+                minimum_commission=cast(Decimal, account.minimum_commission),
+            )
+            incremental = FeeBreakdown(
+                commission=cumulative.commission - prior.commission,
+                stamp_duty=cumulative.stamp_duty - prior.stamp_duty,
+                transfer_fee=cumulative.transfer_fee - prior.transfer_fee,
+            )
+            result[cast(uuid.UUID, fill.id)] = incremental
+            prior = cumulative
+    return result
+
+
+def _check_cash_authority(session: Session, account: PaperAccount) -> list[ReconciliationViolation]:
+    result: list[ReconciliationViolation] = []
+    expected_fees = _expected_fill_fees(session, account)
+    fill_rows = session.execute(
+        select(PaperFill, PaperOrder)
+        .join(PaperOrder, PaperOrder.id == PaperFill.order_id)
+        .where(
+            PaperOrder.account_id == account.id,
+            PaperOrder.account_generation == account.generation,
+        )
+        .order_by(PaperOrder.id, PaperFill.fill_seq)
+    ).all()
+    fills_by_id = {cast(uuid.UUID, fill.id): (fill, order) for fill, order in fill_rows}
+    ledgers = list(
+        session.scalars(
+            select(PaperCashLedger)
+            .where(
+                PaperCashLedger.account_id == account.id,
+                PaperCashLedger.generation == account.generation,
+            )
+            .order_by(PaperCashLedger.id)
+        ).all()
+    )
+    primary_by_fill: dict[uuid.UUID, list[PaperCashLedger]] = defaultdict(list)
+    for row in ledgers:
+        kind = cast(str, row.kind)
+        if kind not in _KNOWN_LEDGER_KINDS:
+            result.append(
+                _violation(
+                    account.id,
+                    "unknown_ledger_kind",
+                    ledger_id=str(row.id),
+                    kind=kind,
+                )
+            )
+        if kind in {"fill_debit", "fill_credit"}:
+            if row.fill_id is None:
+                result.append(
+                    _violation(
+                        account.id,
+                        "fill_ledger_mismatch",
+                        ledger_id=str(row.id),
+                        reason="missing_fill_id",
+                    )
+                )
+            else:
+                primary_by_fill[cast(uuid.UUID, row.fill_id)].append(row)
+
+    expected_total = cast(Decimal, account.initial_cash)
+    for fill_id, (fill, order) in fills_by_id.items():
+        fees = expected_fees[fill_id]
+        stored = FeeBreakdown(
+            commission=cast(Decimal, fill.commission),
+            stamp_duty=cast(Decimal, fill.stamp_duty),
+            transfer_fee=cast(Decimal, fill.transfer_fee),
+        )
+        if stored != fees:
+            result.append(
+                _violation(
+                    account.id,
+                    "fill_fee_mismatch",
+                    fill_id=str(fill.id),
+                    expected=fees.model_dump(mode="json"),
+                    actual=stored.model_dump(mode="json"),
+                )
+            )
+        gross = cast(Decimal, fill.gross_amount)
+        if order.side is OrderSide.BUY:
+            expected_kind = "fill_debit"
+            expected_amount = -_money(gross + fees.total)
+            expected_total += expected_amount
+        else:
+            expected_kind = "fill_credit"
+            expected_amount = _money(gross - fees.total)
+            expected_total += expected_amount
+        candidates = primary_by_fill.get(fill_id, [])
+        if not candidates:
+            result.append(_violation(account.id, "fill_ledger_missing", fill_id=str(fill.id)))
+            continue
+        if len(candidates) > 1:
+            result.append(
+                _violation(
+                    account.id,
+                    "fill_ledger_duplicate",
+                    fill_id=str(fill.id),
+                    ledger_ids=sorted(str(row.id) for row in candidates),
+                )
+            )
+            continue
+        ledger = candidates[0]
+        available_delta = cast(Decimal, ledger.available_after) - cast(
+            Decimal, ledger.available_before
+        )
+        frozen_delta = cast(Decimal, ledger.frozen_after) - cast(Decimal, ledger.frozen_before)
+        if (
+            ledger.kind != expected_kind
+            or ledger.order_id != order.id
+            or cast(Decimal, ledger.amount) != expected_amount
+            or not _ledger_amount_matches(
+                kind=expected_kind,
+                amount=expected_amount,
+                available_delta=available_delta,
+                frozen_delta=frozen_delta,
+            )
+        ):
+            result.append(
+                _violation(
+                    account.id,
+                    "fill_ledger_mismatch",
+                    fill_id=str(fill.id),
+                    ledger_id=str(ledger.id),
+                )
+            )
+
+    for fill_id, rows in primary_by_fill.items():
+        if fill_id not in fills_by_id:
+            for row in rows:
+                result.append(
+                    _violation(
+                        account.id,
+                        "fill_ledger_mismatch",
+                        ledger_id=str(row.id),
+                        fill_id=str(fill_id),
+                        reason="unknown_fill",
+                    )
+                )
+    actual_total = cast(Decimal, account.available_cash) + cast(Decimal, account.frozen_cash)
+    if actual_total != expected_total:
+        result.append(
+            _violation(
+                account.id,
+                "cash_balance_mismatch",
+                expected_total=str(expected_total),
+                actual_total=str(actual_total),
+            )
+        )
+    return result
+
+
 def _check_ledger_balance(session: Session, account: PaperAccount) -> list[ReconciliationViolation]:
     rows = session.scalars(
         select(PaperCashLedger)
@@ -409,7 +619,7 @@ def _check_ledger_balance(session: Session, account: PaperAccount) -> list[Recon
         available_delta = after_available - before_available
         frozen_delta = after_frozen - before_frozen
         amount = cast(Decimal, row.amount)
-        if not _ledger_amount_matches(
+        if cast(str, row.kind) in _KNOWN_LEDGER_KINDS and not _ledger_amount_matches(
             kind=cast(str, row.kind),
             amount=amount,
             available_delta=available_delta,
@@ -468,7 +678,7 @@ def _ledger_amount_matches(
         return available_delta == 0 and frozen_delta == amount
     if kind in {"initial_deposit", "initial_deposit_reversal", "fill_credit"}:
         return available_delta == amount and frozen_delta == 0
-    return available_delta + frozen_delta == amount
+    return True
 
 
 def _check_reservations(session: Session, account: PaperAccount) -> list[ReconciliationViolation]:
@@ -536,3 +746,11 @@ def _violation(account_id: object, code: str, **details: object) -> Reconciliati
 
 def _sort_key(row: ReconciliationViolation) -> tuple[str, str]:
     return row.code, repr(sorted(row.details.items()))
+
+
+def _money(value: Decimal) -> Decimal:
+    return value.quantize(_CENT, rounding=ROUND_HALF_UP)
+
+
+def _four(value: Decimal) -> Decimal:
+    return value.quantize(_FOUR_PLACES, rounding=ROUND_HALF_UP)
