@@ -410,6 +410,84 @@ def test_prepare_fails_closed_for_malformed_crossed_five_level_book(
     assert caught.value.code == "quote_unavailable"
 
 
+def test_limit_preview_ignores_malformed_zero_quantity_tail_levels(
+    db_session: Session,
+    user: User,
+    clock: TradingClock,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    quote = _quote().model_copy(
+        update={
+            "bids": (
+                QuoteLevel(price=Decimal("1500"), quantity=100),
+                QuoteLevel(price=Decimal("1499"), quantity=100),
+                QuoteLevel(price=Decimal("9999.001"), quantity=0),
+                QuoteLevel(price=Decimal("9999.001"), quantity=0),
+                QuoteLevel(price=Decimal("1.001"), quantity=0),
+            ),
+            "asks": (
+                QuoteLevel(price=Decimal("1502"), quantity=100),
+                QuoteLevel(price=Decimal("1503"), quantity=100),
+                QuoteLevel(price=Decimal("1.001"), quantity=0),
+                QuoteLevel(price=Decimal("1.001"), quantity=0),
+                QuoteLevel(price=Decimal("9999.001"), quantity=0),
+            ),
+        }
+    )
+
+    order, preview = _prepare(
+        _service(db_session, FixedQuoteProvider(quote), clock),
+        cast(uuid.UUID, user.id),
+    )
+
+    assert order.status is OrderStatus.AWAITING_CONFIRMATION
+    assert preview.estimated_gross == Decimal("150000.00")
+
+
+def test_market_preview_with_empty_executable_side_reports_insufficient_depth(
+    db_session: Session,
+    user: User,
+    clock: TradingClock,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    quote = _quote().model_copy(
+        update={"asks": tuple(QuoteLevel(price=Decimal("9999.001"), quantity=0) for _ in range(5))}
+    )
+
+    with pytest.raises(PaperTradingError) as caught:
+        _prepare(
+            _service(db_session, FixedQuoteProvider(quote), clock),
+            cast(uuid.UUID, user.id),
+            order_type="market",
+            limit_price=None,
+        )
+    assert caught.value.code == "insufficient_market_depth"
+
+
+def test_prepare_rejects_crossed_executable_levels_even_with_zero_quantity_tails(
+    db_session: Session,
+    user: User,
+    clock: TradingClock,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    quote = _quote().model_copy(
+        update={
+            "bids": (
+                QuoteLevel(price=Decimal("1503"), quantity=100),
+                *(QuoteLevel(price=Decimal("1.001"), quantity=0) for _ in range(4)),
+            ),
+            "asks": (
+                QuoteLevel(price=Decimal("1502"), quantity=100),
+                *(QuoteLevel(price=Decimal("9999.001"), quantity=0) for _ in range(4)),
+            ),
+        }
+    )
+
+    with pytest.raises(PaperTradingError) as caught:
+        _prepare(_service(db_session, FixedQuoteProvider(quote), clock), cast(uuid.UUID, user.id))
+    assert caught.value.code == "quote_unavailable"
+
+
 @pytest.mark.parametrize(
     "quote",
     [

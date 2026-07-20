@@ -340,14 +340,20 @@ class PaperOrderService:
         return expiry
 
     def _validate_book(self, *, quote: RealtimeQuote, rules: RuleSet) -> None:
-        if not _strictly_sorted(quote.bids, descending=True):
+        executable_bids = tuple(level for level in quote.bids if level.quantity > 0)
+        executable_asks = tuple(level for level in quote.asks if level.quantity > 0)
+        if not _strictly_sorted(executable_bids, descending=True):
             raise PaperTradingError("quote_unavailable", "买盘五档顺序无效")
-        if not _strictly_sorted(quote.asks, descending=False):
+        if not _strictly_sorted(executable_asks, descending=False):
             raise PaperTradingError("quote_unavailable", "卖盘五档顺序无效")
-        if quote.bids[0].price >= quote.asks[0].price:
+        if (
+            executable_bids
+            and executable_asks
+            and executable_bids[0].price >= executable_asks[0].price
+        ):
             raise PaperTradingError("quote_unavailable", "实时盘口价格交叉")
         lower, upper = self.rulebook.price_bounds(rules, quote.previous_close)
-        for level in (*quote.bids, *quote.asks):
+        for level in (*executable_bids, *executable_asks):
             units = level.price / rules.price_tick
             if units != units.to_integral_value() or level.price < lower or level.price > upper:
                 raise PaperTradingError("quote_unavailable", "实时盘口价格不可执行")
@@ -376,6 +382,8 @@ class PaperOrderService:
         remaining = draft.quantity
         gross = Decimal("0")
         for level in levels:
+            if level.quantity == 0:
+                continue
             consumed = min(remaining, level.quantity)
             gross += level.price * consumed
             remaining -= consumed
