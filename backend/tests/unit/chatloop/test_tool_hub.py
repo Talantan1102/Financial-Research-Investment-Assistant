@@ -14,6 +14,9 @@ from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState, args_hash_of
 from app.chatloop.tool_hub import ToolHub
+from app.chatloop.tool_runtime_policy import TOOL_RISK_METADATA, ToolRiskPolicy
+from app.runtime.hooks import HookDecision, HookPipeline
+from app.runtime.models import RiskLevel
 from app.services.llm_step import StepToolCall
 from app.services.tool_result_cache import CacheHit
 from app.tools.base import Tool, ToolError
@@ -69,6 +72,7 @@ class FakeInProcessTool(InProcessTool):
         *,
         output: dict | None = None,
         sleep: float = 0.0,
+        raises: BaseException | None = None,
         description: str = "fake inprocess tool",
     ) -> None:
         self.name = name
@@ -76,12 +80,15 @@ class FakeInProcessTool(InProcessTool):
         self.args_schema = _QuoteArgs
         self._output = output if output is not None else {"ok": True}
         self._sleep = sleep
+        self._raises = raises
         self.call_count = 0
 
     async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:
         self.call_count += 1
         if self._sleep:
             await asyncio.sleep(self._sleep)
+        if self._raises is not None:
+            raise self._raises
         return dict(self._output)
 
 
@@ -645,14 +652,14 @@ async def test_data_tool_timeout_returns_guidance_error():
     assert res.error is not None and res.error.startswith("[超时]")
 
 
-async def test_inprocess_tool_exempt_from_timeout():
-    """in-process(状态变更/本地)豁免超时:即便耗时超阈值也不被打断。"""
+async def test_inprocess_tool_uses_uniform_timeout():
+    """in-process 也必须经过统一安全执行器的超时边界。"""
     hub = ToolHub(tool_timeout_s=0.05)
-    hub.register_inprocess([FakeInProcessTool("mem_write", sleep=0.3, output={"ok": True})])
+    hub.register_inprocess([FakeInProcessTool("memory_write", sleep=0.3, output={"ok": True})])
     state = _state()
-    [res] = await hub.dispatch([_call("mem_write", {"ts_code": "x"})], state)
-    assert res.success is True
-    assert res.output == {"ok": True}
+    [res] = await hub.dispatch([_call("memory_write", {"ts_code": "x"})], state)
+    assert res.success is False
+    assert res.error is not None and res.error.startswith("[超时]")
 
 
 async def test_data_tool_under_timeout_succeeds_and_isolates():
@@ -672,3 +679,218 @@ async def test_data_tool_under_timeout_succeeds_and_isolates():
     )
     assert (r1.success, r1.output) == (True, {"v": 1})
     assert (r2.success, r2.output) == (True, {"v": 2})
+
+
+# ---------------------------------------------------------------------------
+# Unified runtime safety boundary
+# ---------------------------------------------------------------------------
+
+
+async def test_request_visibility_is_enforced_at_execution_boundary():
+    tool = FakeTool("get_stock_quote")
+    emit = _Collector()
+    hub = ToolHub(emit=emit, visibility_resolver=lambda _state: frozenset())
+    hub.register_registry(FakeRegistry([tool]))
+
+    [result] = await hub.dispatch([_call(tool.name, {"ts_code": "X"})], _state())
+
+    assert result.success is False
+    assert "[不可见工具]" in (result.error or "")
+    assert tool.call_count == 0
+
+
+async def test_pre_and_post_hooks_wrap_real_tool_execution():
+    events: list[str] = []
+    tool = FakeTool("get_stock_quote", output={"price": 1})
+
+    async def pre(invocation):
+        events.append(f"pre:{invocation.input['ts_code']}")
+        return HookDecision(updated_input={"ts_code": "B"})
+
+    async def post(invocation):
+        events.append(f"post:{invocation.input['ts_code']}:{invocation.output['price']}")
+        return HookDecision()
+
+    hub = ToolHub(hooks=HookPipeline(pre_hooks=[pre], post_hooks=[post]))
+    hub.register_registry(FakeRegistry([tool]))
+
+    [result] = await hub.dispatch([_call(tool.name, {"ts_code": "A"})], _state())
+
+    assert result.success is True
+    assert result.args == {"ts_code": "B"}
+    assert events == ["pre:A", "post:B:1"]
+
+
+async def test_uncontrolled_inprocess_tool_fails_closed_and_requests_permission():
+    emit = _Collector()
+    tool = FakeInProcessTool("unclassified_state_mutation")
+    hub = ToolHub(emit=emit)
+    hub.register_inprocess([tool])
+
+    [result] = await hub.dispatch([_call(tool.name, {"ts_code": "X"})], _state())
+
+    assert result.success is False
+    assert "[需要授权]" in (result.error or "")
+    assert tool.call_count == 0
+    assert emit.of("permission_required")[0].data["tool"] == tool.name
+
+
+async def test_controlled_business_and_sandbox_tools_are_system_allowed():
+    for name in ("memory_write", "run_skill_script", "run_python"):
+        tool = FakeInProcessTool(name)
+        hub = ToolHub()
+        hub.register_inprocess([tool])
+        [result] = await hub.dispatch([_call(name, {"ts_code": "X"})], _state())
+        assert result.success is True, name
+        assert tool.call_count == 1, name
+
+
+async def test_inprocess_tool_uses_same_timeout_as_registry_tools():
+    tool = FakeInProcessTool("memory_write", sleep=0.2)
+    hub = ToolHub(tool_timeout_s=0.01)
+    hub.register_inprocess([tool])
+
+    [result] = await hub.dispatch([_call(tool.name, {"ts_code": "X"})], _state())
+
+    assert result.success is False
+    assert result.error is not None and result.error.startswith("[超时]")
+
+
+async def test_runtime_bounds_and_redacts_inprocess_output():
+    secret = FakeInProcessTool(
+        "memory_write",
+        output={"access_token": "visible-token", "message": "Bearer visible-token"},
+    )
+    redacting_hub = ToolHub()
+    redacting_hub.register_inprocess([secret])
+    [redacted] = await redacting_hub.dispatch([_call(secret.name, {"ts_code": "X"})], _state())
+    assert redacted.output == {"access_token": "[REDACTED]", "message": "[REDACTED]"}
+
+    large = FakeInProcessTool("memory_write", output={"blob": "x" * 100})
+    bounded_hub = ToolHub(max_output_bytes=10)
+    bounded_hub.register_inprocess([large])
+    [bounded] = await bounded_hub.dispatch([_call(large.name, {"ts_code": "X"})], _state())
+    assert bounded.success is False
+    assert "[输出超限]" in (bounded.error or "")
+
+
+async def test_cancelled_tool_propagates_cancellation_without_ledger_entry():
+    tool = FakeInProcessTool("memory_write", raises=asyncio.CancelledError())
+    hub = ToolHub()
+    hub.register_inprocess([tool])
+    state = _state()
+
+    with pytest.raises(asyncio.CancelledError):
+        await hub.dispatch([_call(tool.name, {"ts_code": "X"})], state)
+
+    assert state.ledger.entries == []
+
+
+async def test_tool_risk_metadata_is_explicit_and_fail_closed_for_unknown_inprocess():
+    assert TOOL_RISK_METADATA["get_stock_quote"].risk is RiskLevel.LOW
+    assert TOOL_RISK_METADATA["memory_write"].risk is RiskLevel.HIGH
+    assert TOOL_RISK_METADATA["run_python"].system_allow_reason == "sandboxed_execution"
+    unknown = FakeInProcessTool("unknown_mutator")
+    metadata = ToolRiskPolicy().metadata_for(unknown)
+    assert metadata.risk is RiskLevel.MEDIUM
+    assert metadata.system_allow_reason is None
+
+
+async def test_dispatch_builds_dependency_graph_and_resolves_task_output():
+    class ProduceArgs(BaseModel):
+        ts_code: str
+
+    class ConsumeArgs(BaseModel):
+        quote: dict
+
+    class Produce(FakeTool):
+        args_schema = ProduceArgs
+
+    class Consume(FakeTool):
+        args_schema = ConsumeArgs
+
+    producer = Produce("producer", output={"price": 10}, sleep=0.02)
+    consumer = Consume("consumer", output={"used": True})
+    producer.args_schema = ProduceArgs
+    consumer.args_schema = ConsumeArgs
+    hub = ToolHub()
+    hub.register_registry(FakeRegistry([producer, consumer]))
+    state = _state()
+
+    results = await hub.dispatch(
+        [
+            _call(
+                "producer",
+                {"__task_id": "quote", "ts_code": "X"},
+                id_="provider-a",
+            ),
+            _call(
+                "consumer",
+                {
+                    "__task_id": "analysis",
+                    "__depends_on": ["quote"],
+                    "quote": "$task.quote.output",
+                },
+                id_="provider-b",
+            ),
+        ],
+        state,
+    )
+
+    assert [result.success for result in results] == [True, True], [
+        result.error for result in results
+    ]
+    assert results[0].args == {"ts_code": "X"}
+    assert results[1].args == {"quote": {"price": 10}}
+
+
+async def test_dependency_failure_skips_downstream_tool_and_preserves_result_order():
+    failing = FakeTool("upstream", raises=ToolError("unavailable"))
+    downstream = FakeTool("downstream", output={"should": "not run"})
+    hub = ToolHub()
+    hub.register_registry(FakeRegistry([failing, downstream]))
+
+    first, second = await hub.dispatch(
+        [
+            _call("upstream", {"__task_id": "a", "ts_code": "X"}, id_="one"),
+            _call(
+                "downstream",
+                {"__task_id": "b", "__depends_on": ["a"], "ts_code": "X"},
+                id_="two",
+            ),
+        ],
+        _state(),
+    )
+
+    assert first.tool_name == "upstream" and first.success is False
+    assert second.tool_name == "downstream" and second.success is False
+    assert "[依赖失败]" in (second.error or "")
+    assert downstream.call_count == 0
+
+
+async def test_state_mutation_concurrency_group_serializes_calls():
+    active = 0
+    maximum = 0
+
+    class Stateful(FakeInProcessTool):
+        async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict:
+            nonlocal active, maximum
+            active += 1
+            maximum = max(maximum, active)
+            await asyncio.sleep(0.02)
+            active -= 1
+            return {"ok": True}
+
+    tool = Stateful("memory_write")
+    hub = ToolHub()
+    hub.register_inprocess([tool])
+    results = await hub.dispatch(
+        [
+            _call("memory_write", {"ts_code": "A"}, id_="a"),
+            _call("memory_write", {"ts_code": "B"}, id_="b"),
+        ],
+        _state(),
+    )
+
+    assert all(result.success for result in results)
+    assert maximum == 1

@@ -180,14 +180,13 @@ async def test_safe_executor_classifies_timeout_cancel_exception_and_output_limi
     executor = SafeExecutor(max_output_bytes=10)
     timeout = await executor.execute(Slow(), {}, context(), timeout_s=0.001)
     failed = await executor.execute(Boom(), {}, context(), timeout_s=1)
-    cancelled = await executor.execute(Cancel(), {}, context(), timeout_s=1)
+    with pytest.raises(asyncio.CancelledError):
+        await executor.execute(Cancel(), {}, context(), timeout_s=1)
     oversized = await executor.execute(
         Adapter([], {"large": "x" * 20}), {"symbol": "AAPL"}, context(), timeout_s=1
     )
     assert timeout.error is not None and timeout.error.category is ErrorCategory.TIMEOUT
     assert failed.error is not None and failed.error.category is ErrorCategory.EXECUTION_ERROR
-    assert cancelled.status is ExecutionStatus.CANCELLED
-    assert cancelled.error is not None and cancelled.error.category is ErrorCategory.CANCELLED
     assert oversized.error is not None and oversized.error.category is ErrorCategory.RESULT_INVALID
 
 

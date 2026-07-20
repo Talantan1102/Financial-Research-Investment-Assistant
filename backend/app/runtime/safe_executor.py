@@ -7,6 +7,8 @@ import json
 from time import monotonic
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.runtime.adapters import CapabilityAdapter
 from app.runtime.models import (
     ErrorCategory,
@@ -71,12 +73,16 @@ class SafeExecutor:
                 retryable=True,
             )
         except asyncio.CancelledError:
+            # Cancellation is control flow owned by ToolLoop/chat_runner. Turning
+            # it into an ordinary result makes the loop continue after the user
+            # cancelled the request and can persist misleading ledger entries.
+            raise
+        except ValidationError as exc:
             return self._failure(
-                code="execution_cancelled",
-                category=ErrorCategory.CANCELLED,
-                message="adapter execution was cancelled",
+                code="pydantic_input_validation_failed",
+                category=ErrorCategory.VALIDATION_ERROR,
+                message=str(exc),
                 latency_ms=self._latency_ms(started),
-                status=ExecutionStatus.CANCELLED,
             )
         except Exception as exc:
             return self._failure(
