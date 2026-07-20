@@ -137,7 +137,7 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
     try:
         subjects = load_active_subjects(session)
         if user_filter:
-            subjects = [s for s in subjects if s.user_id == user_filter]
+            subjects = [s for s in subjects if str(s.user_id) == str(user_filter)]
 
         # 按 ts_code 去重(同股跨 user 共享 SignalDetector 调用)
         unique_codes: dict[str, MonitoringSubject] = {}
@@ -279,7 +279,6 @@ def generate_detail_card(alert_id: str) -> dict[str, Any]:
 async def _run_generate_detail_card(alert_id: str) -> dict[str, Any]:
     session = _get_session()
     alert_repo = MonitoringAlertRepo(session)
-    writer = _build_writer()
 
     try:
         # C28 idempotency: acks_late 重投递 / commit-后-rollback 孤儿任务可能让同一
@@ -290,7 +289,9 @@ async def _run_generate_detail_card(alert_id: str) -> dict[str, Any]:
         if existing.detail_status == DetailStatus.READY:
             return {"alert_id": alert_id, "status": "already_ready"}
 
+        writer = _build_writer()
         result = await writer.alert_writer(alert_id)  # returns {"json": ..., "markdown": ...}
+        existing.error_message = None
         alert_repo.update_detail(
             alert_id,
             status=DetailStatus.READY,
@@ -301,11 +302,14 @@ async def _run_generate_detail_card(alert_id: str) -> dict[str, Any]:
         return {"alert_id": alert_id, "status": "ready"}
     except Exception as exc:
         # 记 failed(每次 retry 都写一次,最终值就是失败值)
-        alert_repo.update_detail(
-            alert_id,
-            status=DetailStatus.FAILED,
-            error_message=str(exc)[:2000],
-        )
+        session.expire_all()
+        current = alert_repo.get(alert_id)
+        if current is not None and current.detail_status != DetailStatus.READY:
+            alert_repo.update_detail(
+                alert_id,
+                status=DetailStatus.FAILED,
+                error_message=str(exc)[:2000],
+            )
         session.commit()
         raise  # autoretry kicks in
     finally:
