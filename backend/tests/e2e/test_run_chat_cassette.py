@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -36,6 +38,39 @@ def test_live_smoke_module_is_importable_and_never_logs_prompt_or_credentials() 
     assert result["run_id"] == "run-id"
     assert "prompt" not in rendered.lower()
     assert "api_key" not in rendered.lower()
+
+
+def test_live_smoke_uses_the_worker_model_route_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MOCK_TUSHARE_MODEL", "canonical-worker-model")
+    monkeypatch.setenv("RUN_CHAT_MODEL_ROUTE", "wrong/override")
+    monkeypatch.setenv("LLM_PROVIDER", "wrong-provider")
+    monkeypatch.setenv("LLM_MODEL", "wrong-model")
+    monkeypatch.setenv("DASHSCOPE_MODEL", "also-wrong")
+
+    assert _load_smoke_module()._configured_model_route() == ("dashscope/canonical-worker-model")
+
+
+def test_live_smoke_cli_resolves_backend_package_from_repo_root() -> None:
+    path = Path(__file__).resolve().parents[2] / "scripts" / "smoke_run_chat.py"
+    environment = os.environ.copy()
+    environment.pop("RUN_CHAT_TENANT_ID", None)
+    environment.pop("RUN_CHAT_AUTH_TOKEN", None)
+    environment.pop("POSTGRES_PASSWORD", None)
+
+    completed = subprocess.run(
+        [sys.executable, str(path)],
+        cwd=Path(__file__).resolve().parents[3],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert completed.stderr == ""
+    assert '"error": "KeyError"' in completed.stdout
 
 
 @pytest.fixture(scope="module")

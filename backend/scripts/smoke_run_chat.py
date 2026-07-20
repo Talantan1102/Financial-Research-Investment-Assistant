@@ -9,11 +9,19 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 import uuid
+from pathlib import Path
 from typing import TypedDict
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+BACKEND_ROOT = str(Path(__file__).resolve().parents[1])
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
+
+from app.services.llm_identity import resolve_llm_identity_from_env
 
 
 class SmokeResult(TypedDict):
@@ -87,6 +95,11 @@ def _completed_content(events: str) -> str:
     return ""
 
 
+def _configured_model_route() -> str:
+    provider, model = resolve_llm_identity_from_env()
+    return f"{provider}/{model}"
+
+
 def run_smoke() -> SmokeResult:
     base_url = os.environ.get("RUN_CHAT_BASE_URL", "http://127.0.0.1:18080").rstrip("/")
     tenant_id = os.environ["RUN_CHAT_TENANT_ID"]
@@ -95,18 +108,7 @@ def run_smoke() -> SmokeResult:
     timeout = float(os.environ.get("RUN_CHAT_SMOKE_TIMEOUT_SECONDS", "90"))
     if timeout <= 0:
         raise ValueError("RUN_CHAT_SMOKE_TIMEOUT_SECONDS must be positive")
-    route = os.environ.get(
-        "RUN_CHAT_MODEL_ROUTE",
-        "/".join(
-            filter(
-                None,
-                (
-                    os.environ.get("LLM_PROVIDER", "configured"),
-                    os.environ.get("LLM_MODEL", os.environ.get("DASHSCOPE_MODEL", "default")),
-                ),
-            )
-        ),
-    )
+    route = _configured_model_route()
     runs_url = f"{base_url}/api/v1/tenants/{tenant_id}/runs"
     started = time.monotonic()
     created = _request_json(

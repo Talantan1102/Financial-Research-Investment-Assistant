@@ -60,8 +60,7 @@ npx eslint src/api/runApi.ts src/hooks/useRunSSE.ts src/components/chat/ChatPane
 $env:RUN_CHAT_BASE_URL='http://127.0.0.1:18080'
 $env:RUN_CHAT_TENANT_ID='<tenant uuid>'
 $env:RUN_CHAT_AUTH_TOKEN='<bearer token>'
-$env:RUN_CHAT_MODEL_ROUTE='<provider/model>'
 uv run python backend/scripts/smoke_run_chat.py
 ```
 
-脚本有总超时，只输出 Run ID、Session ID、status、耗时和 model route；不会输出 API key、Bearer token、完整 prompt、最终回答或 trace payload。本次环境没有 Tenant/Auth/模型凭据，因此没有伪造 live smoke 结果；使用的是上述 cassette 离线回放证据。
+脚本有总超时，只输出 Run ID、Session ID、status、耗时和 model route；model route 由生产 `build_llm_service_from_env` 共用的无副作用 resolver 读取，不能由 smoke 专属变量覆盖。脚本不会输出 API key、Bearer token、完整 prompt、最终回答或 trace payload。全路径测试还显式断言两个 response 的 Run ID 与 Session ID 均不同，并核对每个持久化 Run 正确归属其 Session。本次环境没有 Tenant/Auth/模型凭据，因此没有伪造 live smoke 结果；使用的是上述 cassette 离线回放证据。

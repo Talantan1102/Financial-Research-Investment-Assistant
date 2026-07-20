@@ -5,7 +5,19 @@
 
 from typing import Any
 
-from app.services.openai_client import StreamAssembler, _extra_body_for, _sanitize_tool_args
+from app.services.llm_identity import resolve_llm_identity_from_env
+from app.services.openai_client import (
+    StreamAssembler,
+    _extra_body_for,
+    _sanitize_tool_args,
+)
+
+
+def test_resolve_llm_identity_from_env_matches_factory_configuration() -> None:
+    assert resolve_llm_identity_from_env({"MOCK_TUSHARE_MODEL": "worker-model"}) == (
+        "dashscope",
+        "worker-model",
+    )
 
 
 def test_extra_body_qwen3_thinking_by_tier() -> None:

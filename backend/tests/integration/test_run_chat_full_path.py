@@ -14,6 +14,7 @@ import pytest
 from app.chatloop.run_executor import CompletedResult, ExecuteChatRun, RunUsage
 from app.models.run import Run, RunAttempt, RunMessage
 from app.models.run_execution import RunUsageRecord
+from app.models.run_scheduling import RunWorker as RunWorkerRow
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.processes.run_dispatcher import RunDispatcher
@@ -146,14 +147,28 @@ async def test_post_run_reaches_two_capacity_one_workers_and_durable_chat_facts(
                 )
             )
             assert [response.status_code for response in created] == [201, 201]
-            run_ids = [uuid.UUID(response.json()["id"]) for response in created]
+            created_payloads = [response.json() for response in created]
+            run_ids = [uuid.UUID(payload["id"]) for payload in created_payloads]
+            session_ids = [uuid.UUID(payload["session_id"]) for payload in created_payloads]
+            assert len(set(run_ids)) == 2
+            assert len(set(session_ids)) == 2
 
             cycle = await RunScheduler(
                 SchedulingService(factory, lease_duration=timedelta(seconds=30)),
                 redis,
             ).run_cycle()
             assert cycle.scheduled == 2
-            await RunDispatcher(RunOutboxService(factory), RedisTransport(redis)).dispatch_once()
+            async with factory() as session:
+                assigned_workers = set(
+                    await session.scalars(
+                        select(RunAttempt.worker_id).where(RunAttempt.run_id.in_(run_ids))
+                    )
+                )
+            assert assigned_workers == {worker.worker_id for worker in workers}
+            delivered = await RunDispatcher(
+                RunOutboxService(factory), RedisTransport(redis)
+            ).dispatch_once()
+            assert delivered >= 2
 
             entries = await asyncio.gather(*(_assignment(redis, worker) for worker in workers))
             await asyncio.gather(
@@ -211,6 +226,9 @@ async def test_post_run_reaches_two_capacity_one_workers_and_durable_chat_facts(
                 )
             ).all()
         assert len({row.worker_id for row in attempts_rows}) == 2
+        assert {row.id: row.session_id for row in runs} == dict(
+            zip(run_ids, session_ids, strict=True)
+        )
         assert all(row.status == "completed" for row in attempts_rows)
         assert len(messages) == len(usage) == len(traces) == 2
         assert all(row.total_tokens == 5 and row.model == "phase3-acceptance" for row in usage)
@@ -232,6 +250,7 @@ async def test_post_run_reaches_two_capacity_one_workers_and_durable_chat_facts(
         async with factory() as session, session.begin():
             await session.execute(delete(Tenant).where(Tenant.id == tenant.id))
             await session.execute(delete(User).where(User.id == user.id))
+            await session.execute(delete(RunWorkerRow).where(RunWorkerRow.id.in_(worker_ids)))
 
 
 def test_compose_exposes_explicit_switch_for_chat_workers() -> None:
