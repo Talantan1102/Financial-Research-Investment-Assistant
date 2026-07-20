@@ -12,7 +12,7 @@ import logging
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -28,6 +28,8 @@ from app.run_control.types import AttemptStatus, RunStatus
 _run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("run_id", default=None)
 _attempt_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("attempt_id", default=None)
 _worker_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("worker_id", default=None)
+_tenant_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("tenant_id", default=None)
+_session_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("session_id", default=None)
 _correlation_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "correlation_id", default=None
 )
@@ -39,6 +41,8 @@ def run_log_context(
     run_id: UUID | str | None = None,
     attempt_id: UUID | str | None = None,
     worker_id: UUID | str | None = None,
+    tenant_id: UUID | str | None = None,
+    session_id: UUID | str | None = None,
     correlation_id: UUID | str | None = None,
 ) -> Iterator[None]:
     """Bind safe correlation IDs to logs for the current async task.
@@ -50,6 +54,8 @@ def run_log_context(
         _run_id.set(None if run_id is None else str(run_id)),
         _attempt_id.set(None if attempt_id is None else str(attempt_id)),
         _worker_id.set(None if worker_id is None else str(worker_id)),
+        _tenant_id.set(None if tenant_id is None else str(tenant_id)),
+        _session_id.set(None if session_id is None else str(session_id)),
         _correlation_id.set(None if correlation_id is None else str(correlation_id)),
     )
     try:
@@ -58,7 +64,9 @@ def run_log_context(
         _run_id.reset(tokens[0])
         _attempt_id.reset(tokens[1])
         _worker_id.reset(tokens[2])
-        _correlation_id.reset(tokens[3])
+        _tenant_id.reset(tokens[3])
+        _session_id.reset(tokens[4])
+        _correlation_id.reset(tokens[5])
 
 
 def log_context() -> dict[str, str]:
@@ -66,6 +74,8 @@ def log_context() -> dict[str, str]:
     return {
         k: v
         for k, v in {
+            "tenant_id": _tenant_id.get(),
+            "session_id": _session_id.get(),
             "run_id": _run_id.get(),
             "attempt_id": _attempt_id.get(),
             "worker_id": _worker_id.get(),
@@ -88,12 +98,20 @@ class CorrelationIdFilter(logging.Filter):
 class RunMetricsService:
     session_factory: async_sessionmaker[AsyncSession]
 
-    async def snapshot(self, tenant_id: UUID | None = None) -> dict[str, Any]:
+    async def snapshot(
+        self, tenant_id: UUID | None = None, *, window: timedelta = timedelta(minutes=15)
+    ) -> dict[str, Any]:
+        if window <= timedelta(0):
+            raise ValueError("window must be positive")
         async with self.session_factory() as session:
-            return await self._snapshot(session, tenant_id)
+            return await self._snapshot(session, tenant_id, window)
 
-    async def _snapshot(self, session: AsyncSession, tenant_id: UUID | None) -> dict[str, Any]:
+    async def _snapshot(
+        self, session: AsyncSession, tenant_id: UUID | None, window: timedelta
+    ) -> dict[str, Any]:
+        cutoff = datetime.now(UTC).replace(tzinfo=None) - window
         scope = Run.tenant_id == tenant_id if tenant_id is not None else true()
+        window_scope = (Run.created_at >= cutoff) & scope
         run_counts = {
             status: int(count)
             for status, count in (
@@ -117,13 +135,13 @@ class RunMetricsService:
                     func.avg(func.extract("epoch", Run.assigned_at - Run.queued_at)).label(
                         "scheduling"
                     ),
-                ).where(scope)
+                ).where(window_scope)
             )
         ).one()
         no_slot_rows = (
             await session.execute(
                 select(Run.queue_reason, func.count())
-                .where(scope, Run.queue_reason.is_not(None))
+                .where(window_scope, Run.queue_reason.is_not(None))
                 .group_by(Run.queue_reason)
             )
         ).all()
@@ -134,7 +152,7 @@ class RunMetricsService:
                     func.count(),
                 )
                 .join(Run, Run.id == RunAttempt.run_id)
-                .where(scope)
+                .where(window_scope)
                 .group_by(RunAttempt.status)
             )
         ).all()
@@ -143,7 +161,7 @@ class RunMetricsService:
             await session.execute(
                 select(Run.tenant_id, func.count())
                 .join(RunAttempt, Run.id == RunAttempt.run_id)
-                .where(scope, RunAttempt.worker_id.is_not(None))
+                .where(window_scope, RunAttempt.worker_id.is_not(None), Run.assigned_at >= cutoff)
                 .group_by(Run.tenant_id)
             )
         ).all()
@@ -199,17 +217,11 @@ class RunMetricsService:
         ).scalar_one()
         if tenant_id is not None:
             worker_projection: dict[str, Any] = {
-                "load": loads,
-                "availability": {
-                    "total_workers": sum(
-                        int(count) for _status, count, _capacity, _heartbeat in workers
-                    ),
-                    "online_workers": sum(
-                        int(count)
-                        for status, count, _capacity, _heartbeat in workers
-                        if str(status) == "online"
-                    ),
-                },
+                "load": {"active_attempts": sum(loads.values())},
+                "availability": any(
+                    str(status) == "online" and int(capacity) > 0
+                    for status, _count, capacity, _heartbeat in workers
+                ),
                 "lease_expired": int(lease or 0),
             }
         else:
@@ -233,7 +245,7 @@ class RunMetricsService:
             await session.execute(
                 select(Run.status, func.count())
                 .where(
-                    scope,
+                    window_scope,
                     Run.status.in_(
                         (RunStatus.WAITING_APPROVAL.value, RunStatus.WAITING_INPUT.value)
                     ),
@@ -248,14 +260,14 @@ class RunMetricsService:
                     func.coalesce(func.sum(RunUsageRecord.cost_cny), 0),
                 )
                 .join(Run, Run.id == RunUsageRecord.run_id)
-                .where(scope)
+                .where(window_scope)
             )
         ).one()
         duration = (
             await session.execute(
                 select(
                     func.avg(func.extract("epoch", Run.finished_at - Run.started_at)),
-                ).where(scope, Run.finished_at.is_not(None), Run.started_at.is_not(None))
+                ).where(window_scope, Run.finished_at.is_not(None), Run.started_at.is_not(None))
             )
         ).scalar_one()
         return {
@@ -269,7 +281,7 @@ class RunMetricsService:
             "scheduling": {
                 "latency_seconds": _num(latency.scheduling),
                 "no_slot": count_no_slot_reasons(no_slot_rows),
-                "fair_allocations": len(fair_rows),
+                "fair_allocations": sum(int(count) for _tenant, count in fair_rows),
                 "fair_allocations_by_tenant": {
                     str(tenant): int(count) for tenant, count in fair_rows
                 },
@@ -278,6 +290,7 @@ class RunMetricsService:
             "attempts": {"outcomes": attempt_outcomes, "duration_seconds": _num(duration)},
             "outbox": {"backlog": int(outbox.backlog or 0), "retries": int(outbox.retries or 0)},
             "usage": {"total_tokens": int(usage[0] or 0), "cost_cny": float(usage[1] or 0)},
+            "window": {"since": cutoff.isoformat(), "seconds": int(window.total_seconds())},
         }
 
 

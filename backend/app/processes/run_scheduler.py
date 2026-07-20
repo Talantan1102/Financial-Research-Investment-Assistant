@@ -62,6 +62,14 @@ class RunScheduler:
             assignment = await self._scheduling.schedule_once()
             if assignment is None:
                 break
+            with run_log_context(
+                run_id=assignment.run_id,
+                session_id=assignment.session_id,
+                attempt_id=assignment.attempt_id,
+                worker_id=assignment.worker_id,
+                correlation_id=uuid4(),
+            ):
+                logger.info("scheduler assigned run", extra=log_context())
             scheduled += 1
         with run_log_context(correlation_id=uuid4()):
             logger.info(

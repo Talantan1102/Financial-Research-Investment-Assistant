@@ -54,7 +54,11 @@ class RunDispatcher:
         delivered = 0
         for item in items:
             with run_log_context(
-                run_id=item.run_id, attempt_id=item.attempt_id, worker_id=item.worker_id
+                run_id=item.run_id,
+                attempt_id=item.attempt_id,
+                worker_id=item.worker_id,
+                tenant_id=item.tenant_id,
+                correlation_id=uuid4(),
             ):
                 logger.info(
                     "dispatching run outbox event type=%s", item.event_type, extra=log_context()

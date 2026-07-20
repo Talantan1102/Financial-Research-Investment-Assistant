@@ -75,7 +75,7 @@ async def test_metrics_are_aggregate_read_only_projection():
     assert result["scheduling"]["no_slot"] == 1
     assert result["outbox"] == {"backlog": 1, "retries": 2}
     assert result["usage"] == {"total_tokens": 15, "cost_cny": 0.25}
-    assert result["scheduling"]["fair_allocations"] == 2
+    assert result["scheduling"]["fair_allocations"] == 3
     assert result["scheduling"]["fair_allocations_by_tenant"] == {"tenant-a": 2, "tenant-b": 1}
     assert len(session.statements) == 13
     assert not any(getattr(statement, "is_update", False) for statement in session.statements)

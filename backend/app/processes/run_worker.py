@@ -43,6 +43,8 @@ def build_run_stream_event_sink(redis: Any) -> Callable[[Any], Awaitable[None]]:
             with run_log_context(
                 run_id=getattr(event, "run_id", None),
                 attempt_id=getattr(event, "attempt_id", None),
+                tenant_id=getattr(event, "tenant_id", None),
+                correlation_id=uuid4(),
             ):
                 logger.warning(
                     "Run stream event rejected for %s error_type=%s",
@@ -196,7 +198,11 @@ class RunWorker:
         if self._shutdown.is_set() or self._draining:
             return
         with run_log_context(
-            run_id=item.run_id, attempt_id=item.attempt_id, worker_id=self._worker_id
+            run_id=item.run_id,
+            attempt_id=item.attempt_id,
+            worker_id=self._worker_id,
+            tenant_id=item.tenant_id,
+            correlation_id=uuid4(),
         ):
             logger.info("assignment received entry=%s", entry_id, extra=log_context())
             claim = await self._attempts.claim(item.attempt_id, self._worker_id)

@@ -43,6 +43,7 @@ _SESSION_ACTIVE_STATUSES = tuple(
 @dataclass(frozen=True)
 class Assignment:
     run_id: UUID
+    session_id: UUID
     attempt_id: UUID
     worker_id: UUID
     lease_expires_at: datetime
@@ -271,13 +272,21 @@ class SchedulingService:
 
         ranked_workers = await self._load_worker_candidates(session)
         if not ranked_workers:
+            await self._record_queue_block(session, run, EligibilityReason.NO_WORKER_CAPACITY)
             return None
 
-        if await self._locked_run_ineligibility(session, run) is not EligibilityReason.ELIGIBLE:
+        reason = await self._locked_run_ineligibility(session, run)
+        if reason is not EligibilityReason.ELIGIBLE:
+            if reason in {
+                EligibilityReason.TENANT_AT_CAPACITY,
+                EligibilityReason.NO_WORKER_CAPACITY,
+            }:
+                await self._record_queue_block(session, run, reason)
             return None
 
         worker_and_load = await self._lock_eligible_worker(session, ranked_workers)
         if worker_and_load is None:
+            await self._record_queue_block(session, run, EligibilityReason.NO_WORKER_CAPACITY)
             return None
         worker, _active_attempts = worker_and_load
 
@@ -349,9 +358,21 @@ class SchedulingService:
         )
         return Assignment(
             run_id=cast(UUID, run.id),
+            session_id=cast(UUID, run.session_id),
             attempt_id=attempt_id,
             worker_id=cast(UUID, worker.id),
             lease_expires_at=lease_expires_at,
+        )
+
+    async def _record_queue_block(
+        self, session: AsyncSession, run: Run, reason: EligibilityReason
+    ) -> None:
+        """Persist a scheduler fact without changing Run lifecycle state."""
+        cast(Any, run).queue_reason = reason.value
+        await RunMutationStore(session).append_event(
+            run,
+            "run.queue_blocked",
+            {"reason": reason.value, "observed_at": datetime.utcnow().isoformat()},
         )
 
     async def _load_worker_candidates(self, session: AsyncSession) -> tuple[WorkerCandidate, ...]:
@@ -408,19 +429,10 @@ class SchedulingService:
             )
             .exists()
         )
-        active_runs = (
-            select(func.count())
-            .select_from(Run)
-            .where(
-                Run.tenant_id == RunTenantScheduling.tenant_id,
-                Run.status.in_(_TENANT_CAPACITY_STATUSES),
-            )
-            .scalar_subquery()
-        )
         return await session.scalar(
             select(RunTenantScheduling)
             .join(Tenant, Tenant.id == RunTenantScheduling.tenant_id)
-            .where(eligible_run, active_runs < Tenant.max_running_runs)
+            .where(eligible_run)
             .order_by(
                 RunTenantScheduling.last_dispatched_at.asc().nulls_first(),
                 RunTenantScheduling.tenant_id,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import cast
 from uuid import UUID
 
@@ -28,6 +29,7 @@ async def _factory(request: Request) -> async_sessionmaker[AsyncSession]:
 async def run_metrics(
     tenant_id: UUID,
     request: Request,
+    window_minutes: int = 15,
     current_user: User = Depends(get_current_user_required),
 ) -> dict[str, object]:
     factory = await _factory(request)
@@ -40,4 +42,8 @@ async def run_metrics(
         )
     if member is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="tenant not found")
-    return await RunMetricsService(factory).snapshot(tenant_id)
+    if not 1 <= window_minutes <= 24 * 60:
+        raise HTTPException(status_code=400, detail="window_minutes must be between 1 and 1440")
+    return await RunMetricsService(factory).snapshot(
+        tenant_id, window=timedelta(minutes=window_minutes)
+    )
