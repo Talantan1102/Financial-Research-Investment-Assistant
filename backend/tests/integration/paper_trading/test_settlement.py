@@ -27,7 +27,7 @@ from app.services.paper_trading.settlement import MatchQuoteEvidence, PaperSettl
 from app.services.paper_trading.types import QuoteLevel, RealtimeQuote
 from app.services.trade_service import TradeService
 from pydantic import ValidationError
-from sqlalchemy import Engine
+from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 QUOTE_TIME = datetime(2026, 7, 20, 2, 0, tzinfo=UTC)
@@ -44,6 +44,9 @@ def _evidence(
     book_price: Decimal | None = None,
     visible_quantity: int | None = None,
     suspended: bool = False,
+    consumed_levels: tuple[Execution, ...] | None = None,
+    execution_index: int = 0,
+    remaining_before_match: int | None = None,
 ) -> MatchQuoteEvidence:
     visible_price = book_price or execution.price
     visible = execution.quantity if visible_quantity is None else visible_quantity
@@ -72,9 +75,48 @@ def _evidence(
     )
     return MatchQuoteEvidence(
         quote=quote,
-        consumed_levels=(
-            Execution(price=consumed_price or execution.price, quantity=execution.quantity),
+        consumed_levels=consumed_levels
+        or (Execution(price=consumed_price or execution.price, quantity=execution.quantity),),
+        execution_index=execution_index,
+        remaining_before_match=(
+            remaining_before_match
+            if remaining_before_match is not None
+            else sum(level.quantity for level in consumed_levels or (execution,))
         ),
+    )
+
+
+def _multilevel_evidence(
+    executions: tuple[Execution, ...],
+    execution_index: int,
+    *,
+    source: str = "actual-depth",
+) -> MatchQuoteEvidence:
+    asks = tuple(QuoteLevel(price=level.price, quantity=level.quantity) for level in executions)
+    asks += tuple(
+        QuoteLevel(price=executions[-1].price + Decimal(index) / 100, quantity=0)
+        for index in range(1, 6 - len(asks))
+    )
+    bids = tuple(
+        QuoteLevel(price=executions[0].price - Decimal(index) / 100, quantity=0)
+        for index in range(1, 6)
+    )
+    quote = RealtimeQuote(
+        ts_code="600519.SH",
+        name="贵州茅台",
+        quoted_at=QUOTE_TIME,
+        previous_close=Decimal("10.00"),
+        last_price=executions[0].price,
+        bids=bids,
+        asks=asks,
+        source=source,
+        suspended=False,
+    )
+    return MatchQuoteEvidence(
+        quote=quote,
+        consumed_levels=executions,
+        execution_index=execution_index,
+        remaining_before_match=sum(level.quantity for level in executions),
     )
 
 
@@ -186,6 +228,17 @@ def _service(db_session: Session, *, at: datetime = QUOTE_TIME) -> PaperSettleme
             ts_code=cast(str, order.ts_code),
             timestamp=cast(datetime, kwargs["quote_timestamp"]),
             side=OrderSide(order.side),
+            remaining_before_match=int(order.quantity)
+            - int(order.filled_quantity)
+            + sum(
+                int(quantity)
+                for quantity in db_session.scalars(
+                    select(PaperMatchPass.matched_quantity).where(
+                        PaperMatchPass.order_id == order.id,
+                        PaperMatchPass.quote_timestamp == kwargs["quote_timestamp"],
+                    )
+                )
+            ),
         )
 
     return PaperSettlementService(
@@ -569,6 +622,194 @@ def test_unmatchable_quote_evidence_is_atomic(
     assert db_session.query(PaperCashLedger).count() == 0
     assert db_session.query(Trade).count() == 0
     assert db_session.query(Position).count() == 0
+
+
+def test_two_level_match_settles_in_order_and_second_fill_retry_is_idempotent(
+    db_session: Session, user: User
+) -> None:
+    executions = (
+        Execution(price=Decimal("9.99"), quantity=100),
+        Execution(price=Decimal("10.00"), quantity=200),
+    )
+    order = _buy_order(
+        db_session,
+        user,
+        _account(db_session, user),
+        quantity=300,
+        reserve=Decimal("3010.00"),
+    )
+
+    def provider(**kwargs: object) -> MatchQuoteEvidence:
+        execution = cast(Execution, kwargs["execution"])
+        return _multilevel_evidence(executions, executions.index(execution))
+
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=provider,
+    )
+    first = service.apply(
+        order_id=order.id,
+        execution=executions[0],
+        quote_timestamp=QUOTE_TIME,
+        match_pass=1,
+    )
+    first_pass = db_session.query(PaperMatchPass).one()
+    first_evidence = _multilevel_evidence(executions, 0)
+    assert first_pass.fill_id == first.id
+    assert first.order_id == order.id
+    assert first.price == executions[0].price
+    assert first.quantity == executions[0].quantity
+    assert first_pass.matched_quantity == executions[0].quantity
+    assert first_pass.quote_source == first_evidence.quote.source
+    assert first_pass.snapshot_summary == first_evidence.quote.model_dump(mode="json")
+    assert first_pass.consumed_levels == [level.model_dump(mode="json") for level in executions]
+    second = service.apply(
+        order_id=order.id,
+        execution=executions[1],
+        quote_timestamp=QUOTE_TIME,
+        match_pass=2,
+    )
+
+    retry = service.apply(
+        order_id=order.id,
+        execution=executions[1],
+        quote_timestamp=QUOTE_TIME,
+        match_pass=2,
+    )
+    assert retry.id == second.id
+    first_retry = service.apply(
+        order_id=order.id,
+        execution=executions[0],
+        quote_timestamp=QUOTE_TIME,
+        match_pass=1,
+    )
+    assert first_retry.id == first.id
+    fills = db_session.scalars(
+        select(PaperFill).where(PaperFill.order_id == order.id).order_by(PaperFill.fill_seq)
+    ).all()
+    assert [fill.id for fill in fills] == [first.id, second.id]
+    assert order.status is OrderStatus.FILLED
+
+
+def test_five_level_match_settles_every_execution_in_price_order(
+    db_session: Session, user: User
+) -> None:
+    executions = tuple(
+        Execution(price=Decimal("9.95") + Decimal(index) / 100, quantity=100) for index in range(5)
+    )
+    order = _buy_order(
+        db_session,
+        user,
+        _account(db_session, user),
+        quantity=500,
+        reserve=Decimal("5010.00"),
+    )
+
+    def provider(**kwargs: object) -> MatchQuoteEvidence:
+        execution = cast(Execution, kwargs["execution"])
+        return _multilevel_evidence(executions, executions.index(execution))
+
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=provider,
+    )
+    for index, execution in enumerate(executions, start=1):
+        service.apply(
+            order_id=order.id,
+            execution=execution,
+            quote_timestamp=QUOTE_TIME,
+            match_pass=index,
+        )
+
+    fills = db_session.scalars(
+        select(PaperFill).where(PaperFill.order_id == order.id).order_by(PaperFill.fill_seq)
+    ).all()
+    assert [(fill.price, fill.quantity) for fill in fills] == [
+        (execution.price, execution.quantity) for execution in executions
+    ]
+    assert order.status is OrderStatus.FILLED
+
+
+@pytest.mark.parametrize("tamper", ["skip_front", "drop_prior", "prior_price", "prior_quantity"])
+def test_multilevel_evidence_rejects_skipped_or_tampered_prior_execution_atomically(
+    db_session: Session, user: User, tamper: str
+) -> None:
+    executions = (
+        Execution(price=Decimal("9.99"), quantity=100),
+        Execution(price=Decimal("10.00"), quantity=200),
+    )
+    account = _account(db_session, user)
+    order = _buy_order(
+        db_session,
+        user,
+        account,
+        quantity=300,
+        reserve=Decimal("3010.00"),
+    )
+    evidence = _multilevel_evidence(executions, 1)
+    if tamper != "skip_front":
+        PaperSettlementService(
+            db_session,
+            calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+            now=lambda: QUOTE_TIME,
+            evidence_provider=lambda **_: _multilevel_evidence(executions, 0),
+        ).apply(
+            order_id=order.id,
+            execution=executions[0],
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+        if tamper == "drop_prior":
+            evidence = evidence.model_copy(update={"consumed_levels": (executions[1],)})
+        elif tamper == "prior_price":
+            evidence = evidence.model_copy(
+                update={
+                    "consumed_levels": (
+                        Execution(price=Decimal("9.98"), quantity=100),
+                        executions[1],
+                    )
+                }
+            )
+        else:
+            evidence = evidence.model_copy(
+                update={
+                    "consumed_levels": (
+                        Execution(price=executions[0].price, quantity=99),
+                        executions[1],
+                    )
+                }
+            )
+        current = executions[1]
+        match_pass = 2
+    else:
+        current = executions[1]
+        match_pass = 1
+    before_account = (account.available_cash, account.frozen_cash)
+    before_order = (order.status, order.filled_quantity, order.avg_fill_price)
+    before_fills = db_session.query(PaperFill).count()
+    service = PaperSettlementService(
+        db_session,
+        calendar=FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+        now=lambda: QUOTE_TIME,
+        evidence_provider=lambda **_: evidence,
+    )
+
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=order.id,
+            execution=current,
+            quote_timestamp=QUOTE_TIME,
+            match_pass=match_pass,
+        )
+
+    assert error.value.code == "invalid_match_evidence"
+    assert (account.available_cash, account.frozen_cash) == before_account
+    assert (order.status, order.filled_quantity, order.avg_fill_price) == before_order
+    assert db_session.query(PaperFill).count() == before_fills
 
 
 def test_two_sessions_same_match_watermark_create_one_projection(

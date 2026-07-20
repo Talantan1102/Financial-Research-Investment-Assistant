@@ -7,7 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import cast
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -45,6 +45,8 @@ class MatchQuoteEvidence(BaseModel):
 
     quote: RealtimeQuote
     consumed_levels: tuple[Execution, ...]
+    execution_index: int = Field(ge=0)
+    remaining_before_match: int = Field(gt=0)
 
 
 class PaperSettlementService:
@@ -85,14 +87,24 @@ class PaperSettlementService:
         )
         if order is None:
             raise PaperTradingError("order_not_found", "paper order does not exist")
-        self._validate_execution(order, execution, check_remaining=False)
+        retry_exists = (
+            self._session.scalar(
+                select(PaperMatchPass.id).where(
+                    PaperMatchPass.order_id == order.id,
+                    PaperMatchPass.quote_timestamp == quote_timestamp,
+                    PaperMatchPass.match_pass == match_pass,
+                )
+            )
+            is not None
+        )
+        self._validate_execution(order, execution, check_remaining=not retry_exists)
         evidence = self._evidence_provider(
             order_id=order_id,
             quote_timestamp=quote_timestamp,
             match_pass=match_pass,
             execution=execution,
         )
-        evidence = self._validate_evidence(order, execution, quote_timestamp, evidence)
+        evidence = self._validate_evidence(order, execution, quote_timestamp, match_pass, evidence)
 
         retry = self._existing_pass(
             order=order,
@@ -493,11 +505,12 @@ class PaperSettlementService:
             )
         return fill
 
-    @staticmethod
     def _validate_evidence(
+        self,
         order: PaperOrder,
         execution: Execution,
         quote_timestamp: datetime,
+        match_pass: int,
         evidence: MatchQuoteEvidence,
     ) -> MatchQuoteEvidence:
         if not isinstance(evidence, MatchQuoteEvidence):
@@ -506,18 +519,28 @@ class PaperSettlementService:
         if not isinstance(raw_source, str):
             raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
         source = raw_source.strip()
+        levels = evidence.consumed_levels
+        index = evidence.execution_index
+        remaining_before_match = evidence.remaining_before_match
         if (
             evidence.quote.quoted_at != quote_timestamp
             or evidence.quote.ts_code != order.ts_code
             or not source
             or len(source) > 64
+            or isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < 0
+            or index >= len(levels)
+            or isinstance(remaining_before_match, bool)
+            or not isinstance(remaining_before_match, int)
+            or remaining_before_match <= 0
         ):
             raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
         try:
             expected = match_visible_depth(
                 side=cast(OrderSide, order.side),
                 order_type=cast(OrderType, order.order_type),
-                remaining=execution.quantity,
+                remaining=remaining_before_match,
                 limit_price=cast(Decimal | None, order.limit_price),
                 quote=evidence.quote,
             )
@@ -525,16 +548,57 @@ class PaperSettlementService:
             raise PaperTradingError(
                 "invalid_match_evidence", "actual quote cannot support execution"
             ) from exc
-        if (
-            len(expected) != 1
-            or expected[0] != execution
-            or evidence.consumed_levels != (execution,)
-            or tuple(expected) != evidence.consumed_levels
-        ):
+        if not expected or tuple(expected) != levels or levels[index] != execution:
             raise PaperTradingError("invalid_match_evidence", "match evidence is inconsistent")
         if source != raw_source:
             evidence = evidence.model_copy(
                 update={"quote": evidence.quote.model_copy(update={"source": source})}
+            )
+        rows = self._session.scalars(
+            select(PaperMatchPass)
+            .where(
+                PaperMatchPass.order_id == order.id,
+                PaperMatchPass.quote_timestamp == quote_timestamp,
+            )
+            .order_by(PaperMatchPass.match_pass)
+        ).all()
+        settled_quantity = 0
+        prior_rows = [row for row in rows if int(row.match_pass) < match_pass]
+        current_rows = [row for row in rows if int(row.match_pass) == match_pass]
+        later_rows = [row for row in rows if int(row.match_pass) > match_pass]
+        if (
+            len(prior_rows) != index
+            or len(current_rows) > 1
+            or (later_rows and not current_rows)
+            or len(rows) > len(levels)
+        ):
+            raise PaperTradingError(
+                "invalid_match_evidence", "match evidence history is inconsistent"
+            )
+        for position, row in enumerate(rows):
+            if current_rows and row.id == current_rows[0].id:
+                settled_quantity += execution.quantity
+                continue
+            fill = self._session.get(PaperFill, row.fill_id) if row.fill_id else None
+            expected_level = levels[position]
+            if (
+                fill is None
+                or fill.order_id != order.id
+                or cast(Decimal, fill.price) != expected_level.price
+                or int(fill.quantity) != expected_level.quantity
+                or int(row.matched_quantity) != expected_level.quantity
+                or row.quote_source != evidence.quote.source
+                or row.snapshot_summary != evidence.quote.model_dump(mode="json")
+                or row.consumed_levels != [level.model_dump(mode="json") for level in levels]
+            ):
+                raise PaperTradingError(
+                    "invalid_match_evidence", "match evidence history is inconsistent"
+                )
+            settled_quantity += expected_level.quantity
+        filled_before_snapshot = int(order.filled_quantity) - settled_quantity
+        if remaining_before_match != int(order.quantity) - filled_before_snapshot:
+            raise PaperTradingError(
+                "invalid_match_evidence", "match evidence history is inconsistent"
             )
         return evidence
 
