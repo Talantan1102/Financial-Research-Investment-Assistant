@@ -67,6 +67,10 @@ PostgreSQL / Redis / Milvus
   会话与业务数据 / 异步任务与缓存 / 向量检索
 ```
 
+### Run Control Plane（Phase 2-4）
+
+对话执行走独立的 Run 控制面：React 前端只提交/读取 Run，FastAPI Run API 负责命令与 SSE 快照；PostgreSQL 保存 Run、Attempt、Event、Outbox，Scheduler、Dispatcher 和可横向扩展的 chat Worker 在独立进程中消费。Redis 只做可重放通知，不是真实状态源。生产面向六个操作：创建 Run、查询 Run、读取 events、读取 trace、cancel、resume。旧 `/api/v0/chat` 执行路径已在 Phase 4 cutover 中移除。
+
 | 层 | 主要选型 |
 |---|---|
 | 后端 | Python 3.11, FastAPI, httpx, Celery |
@@ -142,6 +146,14 @@ docker compose up -d postgres redis     # 会话持久化、记忆、监控调�
 make worker && make beat                 # Celery worker 和定时任务
 make board                               # Harness Board，默认端口 8910
 ```
+
+Run 控制面 Compose profile（需要可用 Docker、PostgreSQL 和 Redis）：
+
+```bash
+docker compose --profile run-control up -d --wait run-api run-scheduler-a run-scheduler-b run-dispatcher run-worker-a run-worker-b
+```
+
+验收证据、迁移/清理命令和已知环境限制见 [`run-control-plane-phases2-4-done.md`](docs/claude-context/run-control-plane-phases2-4-done.md)。
 
 ## 项目结构
 

@@ -279,4 +279,3 @@ export interface ChatDetail {
 export interface CreateChatRequest {
   title?: string
 }
-

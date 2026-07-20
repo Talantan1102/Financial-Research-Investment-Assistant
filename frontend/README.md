@@ -114,6 +114,10 @@ iOS 简约淡雅风(2026-05-20 起;先前 AlphaScout Editorial × Terminal 已�
 - backend 默认起在 `http://localhost:8000`
 - frontend dev server proxy 配置见 `vite.config.ts`
 - API 类型定义在 `src/api/`
+- 当前执行面使用 Run Control Plane 的六个操作：创建 Run、查询 Run、events SSE 快照、trace、cancel、resume；前端不再调用旧 `/api/v0/chat` 执行路由。
+- Scheduler、Dispatcher 和 Worker 是独立后端进程；浏览器请求不会持有模型执行生命周期。
+
+下方 v0.9 chat-first 小节保留的是页面组件和交互设计背景，不代表仍注册旧 chat runner 或旧 chat SSE API。
 
 ## v0.9 chat-first frontend foundation (Plan 4a)
 

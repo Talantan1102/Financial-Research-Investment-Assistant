@@ -118,6 +118,7 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 
 ### Run Control Plane Phase 1(2026-07-16 ship 完)
 - [Phase 1 foundation ship](docs/claude-context/run-control-plane-phase1-foundation-done.md) — Tenant/Run PostgreSQL 骨架 + production 严格六 Run API + durable lifecycle；只到 queued foundation，无 Scheduler/Worker/Redis/LLM
+- [Phases 2-4 completion](docs/claude-context/run-control-plane-phases2-4-done.md) — Scheduler/Dispatcher/Worker、Redis replay、chat cutover、observability、migration gate 与 legacy execution retirement；附准确验收命令和 Docker/真实凭据阻塞记录
 
 
 ## 设计稿与实施计划

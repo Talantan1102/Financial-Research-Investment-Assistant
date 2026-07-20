@@ -1,3 +1,5 @@
+# Run Control Plane services are opt-in: use --profile run-control. The
+# default postgres/redis services remain available for the rest of the project.
 services:
   run-control-init:
     profiles: ["run-control"]
