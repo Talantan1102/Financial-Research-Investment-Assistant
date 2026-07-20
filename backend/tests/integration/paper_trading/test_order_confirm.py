@@ -9,7 +9,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from app.models.paper_account import PaperAccount, PaperCashLedger, PaperHoldingLot
-from app.models.paper_order import OrderSide, OrderStatus, PaperFill, PaperOrder
+from app.models.paper_order import (
+    OrderSide,
+    OrderStatus,
+    PaperFill,
+    PaperLotReservation,
+    PaperOrder,
+)
 from app.models.user import User
 from app.schemas.paper_trading import OrderDraft
 from app.services.paper_trading.account_service import PaperAccountService
@@ -114,7 +120,7 @@ def test_confirm_is_idempotent_and_freezes_maximum_buy_exposure_once(
     assert account.available_cash == Decimal("834948.85")
     assert account.frozen_cash == first.reserved_cash
     ledger = db_session.scalar(
-        select(PaperCashLedger).where(PaperCashLedger.business_key == "order-freeze:confirm-1")
+        select(PaperCashLedger).where(PaperCashLedger.business_key == f"order-freeze:{first.id}")
     )
     assert ledger is not None
     assert ledger.order_id == first.id
@@ -147,6 +153,43 @@ def test_confirmation_keys_fail_closed_on_conflicting_reuse(
     assert reconfirmed.value.code == "order_not_awaiting_confirmation"
 
 
+def test_same_confirmation_key_is_scoped_per_user_and_ledgers_link_each_order(
+    db_session: Session, user: User
+) -> None:
+    suffix = uuid.uuid4().hex
+    other = User(
+        username=f"other-{suffix}",
+        email=f"other-{suffix}@test",
+        hashed_password="x",
+    )
+    db_session.add(other)
+    db_session.flush()
+    user_ids = [cast(uuid.UUID, user.id), cast(uuid.UUID, other.id)]
+    service = _service(db_session, FixedQuoteProvider(_quote()))
+    confirmed: list[PaperOrder] = []
+    for user_id in user_ids:
+        PaperAccountService(db_session).get_or_create(user_id=user_id)
+        order = _prepare(service, user_id)
+        confirmed.append(
+            service.confirm(
+                user_id=user_id,
+                order_id=order.id,
+                draft=_draft(),
+                client_request_id="same-user-scoped-key",
+            )
+        )
+
+    ledgers = db_session.scalars(
+        select(PaperCashLedger).where(
+            PaperCashLedger.order_id.in_([order.id for order in confirmed])
+        )
+    ).all()
+    assert {ledger.order_id for ledger in ledgers} == {order.id for order in confirmed}
+    assert {ledger.business_key for ledger in ledgers} == {
+        f"order-freeze:{order.id}" for order in confirmed
+    }
+
+
 def test_failed_maximum_buy_reservation_rolls_back_without_ledger(
     db_session: Session, user: User
 ) -> None:
@@ -173,7 +216,7 @@ def test_failed_maximum_buy_reservation_rolls_back_without_ledger(
         db_session.scalar(
             select(func.count())
             .select_from(PaperCashLedger)
-            .where(PaperCashLedger.business_key == "order-freeze:max-reserve-too-large")
+            .where(PaperCashLedger.business_key == f"order-freeze:{order.id}")
         )
         == 0
     )
@@ -189,11 +232,17 @@ def test_confirm_rejects_expired_and_closed_market_but_queues_closed_limit(
     expired = _prepare(open_service, user_id)
     expired.expires_at = NOW - timedelta(seconds=1)
     db_session.flush()
-    with pytest.raises(PaperTradingError) as expiry:
-        open_service.confirm(
-            user_id=user_id, order_id=expired.id, draft=_draft(), client_request_id="expired"
-        )
-    assert expiry.value.code == "order_confirmation_expired"
+    cancelled = open_service.confirm(
+        user_id=user_id, order_id=expired.id, draft=_draft(), client_request_id="expired"
+    )
+    assert cancelled.status is OrderStatus.CANCELLED
+    assert cancelled.completed_at == NOW
+    assert cancelled.reserved_cash == Decimal("0.00")
+    assert cancelled.reserved_quantity == 0
+    db_session.commit()
+    persisted = db_session.get(PaperOrder, expired.id)
+    assert persisted is not None
+    assert persisted.status is OrderStatus.CANCELLED
     closed_at = NOW.replace(hour=15, minute=1)
     provider.quote = provider.quote.model_copy(update={"quoted_at": closed_at})
     closed_service = _service(db_session, provider, now=closed_at)
@@ -332,6 +381,32 @@ def test_sell_confirmation_reserves_fifo_eligible_lots_atomically(
     assert confirmed.reserved_quantity == 200
     assert first.frozen_quantity == 100
     assert second.frozen_quantity == 100
+    allocations = db_session.scalars(
+        select(PaperLotReservation)
+        .where(PaperLotReservation.order_id == confirmed.id)
+        .order_by(PaperLotReservation.created_at, PaperLotReservation.id)
+    ).all()
+    assert {row.lot_id: (row.reserved_quantity, row.remaining_quantity) for row in allocations} == {
+        first.id: (100, 100),
+        second.id: (100, 100),
+    }
+    retried = service.confirm(
+        user_id=user_id,
+        order_id=order.id,
+        draft=_draft(side="sell", quantity=200),
+        client_request_id="sell-confirm",
+    )
+    assert retried.id == confirmed.id
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(PaperLotReservation)
+            .where(PaperLotReservation.order_id == confirmed.id)
+        )
+        == 2
+    )
+    assert first.frozen_quantity == 100
+    assert second.frozen_quantity == 100
     assert account.available_cash == Decimal("1000000.00")
     assert account.frozen_cash == Decimal("0.00")
 
@@ -359,6 +434,100 @@ def test_failed_sell_reservation_leaves_all_lots_unchanged(db_session: Session, 
         )
     assert caught.value.code == "insufficient_sellable_quantity"
     assert lot.frozen_quantity == 0
+
+
+def test_sell_confirmation_rejects_cross_account_lot_provenance(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    account = PaperAccountService(db_session).get_or_create(user_id=user_id)
+    suffix = uuid.uuid4().hex
+    source_user = User(
+        username=f"source-{suffix}", email=f"source-{suffix}@test", hashed_password="x"
+    )
+    db_session.add(source_user)
+    db_session.flush()
+    source_account = PaperAccountService(db_session).get_or_create(
+        user_id=cast(uuid.UUID, source_user.id)
+    )
+    lot = _add_lot(
+        db_session,
+        user_id=cast(uuid.UUID, source_user.id),
+        account_id=source_account.id,
+        generation=source_account.generation,
+        quantity=100,
+        available_on=NOW.date(),
+        executed_at=NOW - timedelta(days=1),
+    )
+    lot.account_id = account.id
+    lot.generation = account.generation
+    db_session.flush()
+    service = _service(db_session, FixedQuoteProvider(_quote()))
+    order = _prepare(service, user_id, side="sell", quantity=100)
+
+    with pytest.raises(PaperTradingError) as caught:
+        service.confirm(
+            user_id=user_id,
+            order_id=order.id,
+            draft=_draft(side="sell", quantity=100),
+            client_request_id="bad-account-provenance",
+        )
+    assert caught.value.code == "invalid_holding_provenance"
+    assert lot.frozen_quantity == 0
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(PaperLotReservation)
+            .where(PaperLotReservation.order_id == order.id)
+        )
+        == 0
+    )
+
+
+def test_sell_confirmation_rejects_cross_generation_lot_provenance(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    account_service = PaperAccountService(db_session)
+    old = account_service.get_or_create(user_id=user_id)
+    lot = _add_lot(
+        db_session,
+        user_id=user_id,
+        account_id=old.id,
+        generation=old.generation,
+        quantity=100,
+        available_on=NOW.date(),
+        executed_at=NOW - timedelta(days=1),
+    )
+    current = account_service.reset_confirmed(
+        user_id=user_id,
+        initial_cash=Decimal("1000000"),
+        source_session_id="generation-reset",
+        confirmation_id="generation-reset-confirmation",
+    )
+    lot.account_id = current.id
+    lot.generation = current.generation
+    db_session.flush()
+    service = _service(db_session, FixedQuoteProvider(_quote()))
+    order = _prepare(service, user_id, side="sell", quantity=100)
+
+    with pytest.raises(PaperTradingError) as caught:
+        service.confirm(
+            user_id=user_id,
+            order_id=order.id,
+            draft=_draft(side="sell", quantity=100),
+            client_request_id="bad-generation-provenance",
+        )
+    assert caught.value.code == "invalid_holding_provenance"
+    assert lot.frozen_quantity == 0
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(PaperLotReservation)
+            .where(PaperLotReservation.order_id == order.id)
+        )
+        == 0
+    )
 
 
 def test_confirm_rejects_proposal_from_reset_generation(db_session: Session, user: User) -> None:
@@ -522,7 +691,7 @@ def test_concurrent_same_confirmation_key_freezes_once(pg_test_engine: Engine) -
             observer.scalar(
                 select(func.count())
                 .select_from(PaperCashLedger)
-                .where(PaperCashLedger.business_key == "order-freeze:shared-confirmation")
+                .where(PaperCashLedger.business_key == f"order-freeze:{order_ids[0]}")
             )
             == 1
         )

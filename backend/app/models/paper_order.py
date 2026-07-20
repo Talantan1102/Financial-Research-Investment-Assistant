@@ -138,6 +138,12 @@ class PaperOrder(Base):
             "proposal_fingerprint",
             name="uq_paper_orders_account_generation_proposal",
         ),
+        UniqueConstraint(
+            "id",
+            "account_id",
+            "account_generation",
+            name="uq_paper_orders_id_account_generation",
+        ),
         CheckConstraint(
             "account_generation > 0",
             name="ck_paper_orders_account_generation_positive",
@@ -209,8 +215,12 @@ class PaperOrder(Base):
             name="ck_paper_orders_reserved_quantity_nonnegative",
         ),
         CheckConstraint(
-            "(side = 'buy' AND reserved_quantity = 0) OR (side = 'sell' AND reserved_cash = 0)",
-            name="ck_paper_orders_reservation_matches_side",
+            "(status IN ('awaiting_confirmation', 'rejected', 'filled', "
+            "'cancelled', 'expired') AND reserved_cash = 0 AND reserved_quantity = 0) OR "
+            "(status IN ('queued', 'open', 'partially_filled') AND "
+            "((side = 'buy' AND reserved_cash > 0 AND reserved_quantity = 0) OR "
+            "(side = 'sell' AND reserved_cash = 0 AND reserved_quantity > 0)))",
+            name="ck_paper_orders_reservation_lifecycle",
         ),
         CheckConstraint(
             "(status = 'rejected' AND reject_code IS NOT NULL AND reject_message IS NOT NULL) "
@@ -274,6 +284,51 @@ class PaperFill(Base):
             name="ck_paper_fills_financial_values_finite",
         ),
         CheckConstraint("btrim(quote_source) <> ''", name="ck_paper_fills_quote_source_nonblank"),
+    )
+
+
+class PaperLotReservation(Base):
+    __tablename__ = "paper_lot_reservations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    order_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    lot_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    account_generation = Column(Integer, nullable=False)
+    reserved_quantity = Column(Integer, nullable=False)
+    remaining_quantity = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["order_id", "account_id", "account_generation"],
+            ["paper_orders.id", "paper_orders.account_id", "paper_orders.account_generation"],
+            name="fk_paper_lot_reservations_order_account_generation",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["lot_id", "account_id", "account_generation"],
+            [
+                "paper_holding_lots.id",
+                "paper_holding_lots.account_id",
+                "paper_holding_lots.generation",
+            ],
+            name="fk_paper_lot_reservations_lot_account_generation",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("order_id", "lot_id", name="uq_paper_lot_reservations_order_lot"),
+        CheckConstraint(
+            "account_generation > 0",
+            name="ck_paper_lot_reservations_generation_positive",
+        ),
+        CheckConstraint(
+            "reserved_quantity > 0 AND remaining_quantity >= 0 "
+            "AND remaining_quantity <= reserved_quantity",
+            name="ck_paper_lot_reservations_quantity_range",
+        ),
     )
 
 

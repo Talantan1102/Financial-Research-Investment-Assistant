@@ -43,6 +43,7 @@ from .paper_order import (
     OrderStatus,
     OrderType,
     PaperFill,
+    PaperLotReservation,
     PaperMatchPass,
     PaperOrder,
 )
@@ -85,6 +86,7 @@ __all__ = [
     "OrderType",
     "PaperOrder",
     "PaperFill",
+    "PaperLotReservation",
     "PaperMatchPass",
     "DetailStatus",
     "MonitoringAlert",

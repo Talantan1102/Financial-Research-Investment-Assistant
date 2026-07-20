@@ -16,7 +16,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.paper_account import PaperAccount, PaperHoldingLot
-from app.models.paper_order import OrderSide, OrderStatus, OrderType, PaperOrder
+from app.models.paper_order import (
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    PaperFill,
+    PaperLotReservation,
+    PaperOrder,
+)
 from app.schemas.paper_trading import OrderDraft, OrderPreview
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingClock
@@ -242,7 +249,10 @@ class PaperOrderService:
 
         now = self._current_time()
         if now >= order.expires_at:
-            raise PaperTradingError("order_confirmation_expired", "order confirmation has expired")
+            order.status = OrderStatus.CANCELLED
+            order.completed_at = now
+            self._session.flush()
+            return order
         preview = self._calculate_preview(
             account=account,
             order_id=order_id,
@@ -266,13 +276,13 @@ class PaperOrderService:
                 draft=final_draft,
                 quote=quote,
                 on=now.astimezone(SHANGHAI).date(),
-                client_request_id=client_request_id,
             )
             reserved_quantity = 0
         else:
             reserved_cash = Decimal("0.00")
             reserved_quantity = self._reserve_sell(
                 account=account,
+                order=order,
                 draft=final_draft,
                 on=now.astimezone(SHANGHAI).date(),
             )
@@ -304,7 +314,6 @@ class PaperOrderService:
         draft: OrderDraft,
         quote: RealtimeQuote,
         on: date,
-        client_request_id: str,
     ) -> Decimal:
         rules = self.rulebook.resolve(
             ts_code=quote.ts_code,
@@ -336,14 +345,18 @@ class PaperOrderService:
             amount=-reserve,
             available_after=_money(available - reserve),
             frozen_after=_money(frozen + reserve),
-            business_key=f"order-freeze:{client_request_id}",
+            business_key=f"order-freeze:{order_id}",
             order_id=order_id,
         )
         return reserve
 
-    def _reserve_sell(self, *, account: PaperAccount, draft: OrderDraft, on: date) -> int:
-        lots = self._session.scalars(
-            select(PaperHoldingLot)
+    def _reserve_sell(
+        self, *, account: PaperAccount, order: PaperOrder, draft: OrderDraft, on: date
+    ) -> int:
+        candidates = self._session.execute(
+            select(PaperHoldingLot, PaperOrder)
+            .join(PaperFill, PaperFill.id == PaperHoldingLot.source_fill_id)
+            .join(PaperOrder, PaperOrder.id == PaperFill.order_id)
             .where(
                 PaperHoldingLot.account_id == account.id,
                 PaperHoldingLot.generation == account.generation,
@@ -352,8 +365,19 @@ class PaperOrderService:
                 PaperHoldingLot.remaining_quantity > PaperHoldingLot.frozen_quantity,
             )
             .order_by(PaperHoldingLot.created_at, PaperHoldingLot.id)
-            .with_for_update()
+            .with_for_update(of=PaperHoldingLot)
         ).all()
+        lots: list[PaperHoldingLot] = []
+        for lot, source_order in candidates:
+            if (
+                source_order.account_id != account.id
+                or source_order.user_id != order.user_id
+                or source_order.account_generation != account.generation
+            ):
+                raise PaperTradingError(
+                    "invalid_holding_provenance", "holding lot provenance is inconsistent"
+                )
+            lots.append(lot)
         available = sum(int(lot.remaining_quantity) - int(lot.frozen_quantity) for lot in lots)
         if available < draft.quantity:
             raise PaperTradingError(
@@ -363,6 +387,16 @@ class PaperOrderService:
         for lot in lots:
             quantity = min(remaining, int(lot.remaining_quantity) - int(lot.frozen_quantity))
             lot.frozen_quantity = int(lot.frozen_quantity) + quantity  # type: ignore[assignment]
+            self._session.add(
+                PaperLotReservation(
+                    order_id=order.id,
+                    lot_id=lot.id,
+                    account_id=account.id,
+                    account_generation=account.generation,
+                    reserved_quantity=quantity,
+                    remaining_quantity=quantity,
+                )
+            )
             remaining -= quantity
             if remaining == 0:
                 break

@@ -102,6 +102,12 @@ def _order(
         limit_price=limit_price,
         filled_quantity=filled_quantity,
         avg_fill_price=avg_fill_price,
+        reserved_cash=(
+            Decimal("1.00")
+            if status in {OrderStatus.QUEUED, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}
+            else Decimal("0.00")
+        ),
+        reserved_quantity=0,
         status=status,
         original_proposal={"quantity": quantity},
         confirmed_payload=confirmed_payload,
@@ -179,6 +185,56 @@ def test_order_persists_full_prepared_payload(db_session: Session, user: User) -
     assert loaded.confirmed_at is None
 
 
+@pytest.mark.parametrize(
+    ("status", "reserved_cash"),
+    [
+        (OrderStatus.AWAITING_CONFIRMATION, Decimal("1.00")),
+        (OrderStatus.CANCELLED, Decimal("1.00")),
+        (OrderStatus.OPEN, Decimal("0.00")),
+    ],
+)
+def test_order_reservation_must_match_lifecycle(
+    db_session: Session,
+    user: User,
+    status: OrderStatus,
+    reserved_cash: Decimal,
+) -> None:
+    account = _account(db_session, user)
+    now = datetime.now(UTC)
+    order = _order(
+        account=account,
+        user=user,
+        status=status,
+        client_request_id="reservation-state" if status is OrderStatus.OPEN else None,
+        confirmed_payload={"quantity": 100} if status is OrderStatus.OPEN else None,
+        confirmed_at=now if status is OrderStatus.OPEN else None,
+        completed_at=now if status is OrderStatus.CANCELLED else None,
+    )
+    setattr(order, "reserved_cash", reserved_cash)
+    db_session.add(order)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_active_sell_order_requires_quantity_reservation(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    now = datetime.now(UTC)
+    order = _order(
+        account=account,
+        user=user,
+        status=OrderStatus.OPEN,
+        client_request_id="sell-reservation",
+        confirmed_payload={"quantity": 100},
+        confirmed_at=now,
+    )
+    setattr(order, "side", OrderSide.SELL)
+    setattr(order, "reserved_cash", Decimal("0.00"))
+    setattr(order, "reserved_quantity", 100)
+    db_session.add(order)
+    db_session.flush()
+
+
 @pytest.mark.parametrize("field", ["original_proposal", "quote_snapshot"])
 def test_order_rejects_none_for_required_snapshots(
     db_session: Session, user: User, field: str
@@ -203,12 +259,14 @@ def test_confirmation_key_is_unique_per_user_when_nonnull(db_session: Session, u
     account = _account(db_session, user)
     first = _order(account=account, user=user, client_request_id="request-1")
     setattr(first, "status", OrderStatus.OPEN)
+    setattr(first, "reserved_cash", Decimal("1.00"))
     setattr(first, "confirmed_payload", {"quantity": 100})
     setattr(first, "confirmed_at", datetime.now(UTC))
     db_session.add(first)
     db_session.flush()
     duplicate = _order(account=account, user=user, client_request_id="request-1")
     setattr(duplicate, "status", OrderStatus.OPEN)
+    setattr(duplicate, "reserved_cash", Decimal("1.00"))
     setattr(duplicate, "confirmed_payload", {"quantity": 100})
     setattr(duplicate, "confirmed_at", datetime.now(UTC))
     db_session.add(duplicate)
@@ -234,6 +292,7 @@ def test_confirmation_key_cannot_be_blank(db_session: Session, user: User) -> No
     account = _account(db_session, user)
     order = _order(account=account, user=user, client_request_id="   ")
     setattr(order, "status", OrderStatus.OPEN)
+    setattr(order, "reserved_cash", Decimal("1.00"))
     setattr(order, "confirmed_payload", {"quantity": 100})
     setattr(order, "confirmed_at", datetime.now(UTC))
     db_session.add(order)
@@ -259,6 +318,7 @@ def test_same_confirmation_key_is_independent_between_users(
     second = _order(account=other_account, user=other, client_request_id="request-1")
     for order in (first, second):
         setattr(order, "status", OrderStatus.OPEN)
+        setattr(order, "reserved_cash", Decimal("1.00"))
         setattr(order, "confirmed_payload", {"quantity": 100})
         setattr(order, "confirmed_at", datetime.now(UTC))
     db_session.add_all([first, second])
@@ -606,6 +666,7 @@ def test_order_rejects_nonfinite_financial_values(
     if field == "avg_fill_price":
         setattr(order, "filled_quantity", 1)
         setattr(order, "status", OrderStatus.PARTIALLY_FILLED)
+        setattr(order, "reserved_cash", Decimal("1.00"))
         setattr(order, "client_request_id", "request-1")
         setattr(order, "confirmed_payload", {"quantity": 100})
         setattr(order, "confirmed_at", datetime.now(UTC))

@@ -197,7 +197,7 @@ def test_confirm_is_idempotent_and_freezes_once(db_session, prepared_order, serv
     assert first.id == second.id
     account = service.account_service.get_active(user_id=prepared_order.user_id)
     assert account.frozen_cash == first.reserved_cash
-    assert db_session.query(PaperCashLedger).filter_by(business_key="order-freeze:confirm-1").count() == 1
+    assert db_session.query(PaperCashLedger).filter_by(business_key=f"order-freeze:{first.id}").count() == 1
 ```
 
 - [ ] **Step 2: 运行并确认失败**

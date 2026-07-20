@@ -213,6 +213,12 @@ class PaperHoldingLot(Base):
             ondelete="RESTRICT",
         ),
         UniqueConstraint("source_fill_id", name="uq_paper_holding_lots_source_fill"),
+        UniqueConstraint(
+            "id",
+            "account_id",
+            "generation",
+            name="uq_paper_holding_lots_id_account_generation",
+        ),
         CheckConstraint("generation > 0", name="ck_paper_holding_lots_generation_positive"),
         CheckConstraint("original_quantity > 0", name="ck_paper_holding_lots_original_positive"),
         CheckConstraint(
