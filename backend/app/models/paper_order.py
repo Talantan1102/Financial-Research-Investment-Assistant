@@ -262,6 +262,7 @@ class PaperFill(Base):
     trade_id = Column(UUID(as_uuid=True), nullable=False)
 
     __table_args__ = (
+        UniqueConstraint("id", "order_id", name="uq_paper_fills_id_order"),
         UniqueConstraint("order_id", "fill_seq", name="uq_paper_fills_order_sequence"),
         UniqueConstraint("trade_id", name="uq_paper_fills_trade"),
         CheckConstraint("fill_seq > 0", name="ck_paper_fills_sequence_positive"),
@@ -350,13 +351,18 @@ class PaperMatchPass(Base):
     matched_quantity = Column(Integer, nullable=False)
     fill_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("paper_fills.id", ondelete="RESTRICT"),
         nullable=True,
-        unique=True,
     )
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["fill_id", "order_id"],
+            ["paper_fills.id", "paper_fills.order_id"],
+            name="fk_paper_match_passes_fill_order",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("fill_id", name="uq_paper_match_passes_fill"),
         UniqueConstraint(
             "order_id",
             "quote_timestamp",

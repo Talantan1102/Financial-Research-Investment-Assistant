@@ -273,20 +273,44 @@ class PaperSettlementService:
             raise PaperTradingError(
                 "invalid_holding_provenance", "holding lot provenance is inconsistent"
             )
-        local_date = at.astimezone(SHANGHAI).date()
-        self._session.add(
-            PaperHoldingLot(
-                account_id=account.id,
-                generation=account.generation,
-                ts_code=order.ts_code,
-                name=order.name,
-                source_fill_id=fill.id,
-                original_quantity=fill.quantity,
-                remaining_quantity=fill.quantity,
-                frozen_quantity=0,
-                unit_cost=_four(actual / int(fill.quantity)),
-                available_on=self._calendar.next_open_date(local_date),
+        lot = self._build_buy_lot(
+            account=account,
+            order=order,
+            fill=fill,
+            actual=actual,
+            at=at,
+        )
+        if (
+            lot.account_id != account.id
+            or lot.generation != account.generation
+            or lot.source_fill_id != fill.id
+        ):
+            raise PaperTradingError(
+                "invalid_holding_provenance", "holding lot target is inconsistent"
             )
+        self._session.add(lot)
+
+    def _build_buy_lot(
+        self,
+        *,
+        account: PaperAccount,
+        order: PaperOrder,
+        fill: PaperFill,
+        actual: Decimal,
+        at: datetime,
+    ) -> PaperHoldingLot:
+        local_date = at.astimezone(SHANGHAI).date()
+        return PaperHoldingLot(
+            account_id=account.id,
+            generation=account.generation,
+            ts_code=order.ts_code,
+            name=order.name,
+            source_fill_id=fill.id,
+            original_quantity=fill.quantity,
+            remaining_quantity=fill.quantity,
+            frozen_quantity=0,
+            unit_cost=_four(actual / int(fill.quantity)),
+            available_on=self._calendar.next_open_date(local_date),
         )
 
     def _settle_sell(
@@ -334,7 +358,7 @@ class PaperSettlementService:
                 PaperLotReservation.order_id == order.id,
                 PaperLotReservation.remaining_quantity > 0,
             )
-            .order_by(PaperLotReservation.created_at, PaperLotReservation.id)
+            .order_by(PaperHoldingLot.created_at, PaperHoldingLot.id)
             .with_for_update(of=(PaperLotReservation, PaperHoldingLot))
         ).all()
         result: list[tuple[PaperLotReservation, PaperHoldingLot]] = []
@@ -432,6 +456,7 @@ class PaperSettlementService:
         fill = self._session.get(PaperFill, row.fill_id) if row.fill_id else None
         if (
             fill is None
+            or fill.order_id != order.id
             or int(fill.quantity) != execution.quantity
             or cast(Decimal, fill.price) != execution.price
             or int(row.matched_quantity) != execution.quantity

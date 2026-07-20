@@ -935,6 +935,32 @@ def test_match_pass_can_link_exact_fill(db_session: Session, user: User) -> None
     assert match_pass.fill_id == fill.id
 
 
+def test_match_pass_rejects_fill_from_another_order(db_session: Session, user: User) -> None:
+    account = _account(db_session, user)
+    source_order = _order(account=account, user=user)
+    target_order = _order(account=account, user=user)
+    db_session.add_all([source_order, target_order])
+    db_session.flush()
+    fill = _fill(source_order)
+    db_session.add(fill)
+    db_session.flush()
+    db_session.add(
+        PaperMatchPass(
+            order_id=target_order.id,
+            quote_timestamp=datetime.now(UTC),
+            match_pass=1,
+            quote_source="fixed-test-quote",
+            snapshot_summary={},
+            consumed_levels=[],
+            matched_quantity=fill.quantity,
+            fill_id=fill.id,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
 @pytest.mark.parametrize("field", ["snapshot_summary", "consumed_levels"])
 def test_match_pass_rejects_none_for_required_snapshots(
     db_session: Session, user: User, field: str

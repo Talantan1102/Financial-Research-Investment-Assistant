@@ -334,6 +334,197 @@ def test_sell_fill_consumes_fifo_reservation_and_credits_net_proceeds(
     assert db_session.query(Position).filter_by(ts_code=sell.ts_code).one().quantity == 0
 
 
+def test_sell_consumes_lots_by_underlying_lot_age_not_reservation_age(
+    db_session: Session, user: User
+) -> None:
+    account = _account(db_session, user)
+    first_buy = _buy_order(db_session, user, account)
+    _service(db_session).apply(
+        order_id=first_buy.id,
+        execution=Execution(price=Decimal("10.00"), quantity=100),
+        quote_timestamp=QUOTE_TIME,
+        match_pass=1,
+    )
+    older = db_session.query(PaperHoldingLot).one()
+    second_buy = _buy_order(db_session, user, account)
+    _service(db_session).apply(
+        order_id=second_buy.id,
+        execution=Execution(price=Decimal("10.00"), quantity=100),
+        quote_timestamp=QUOTE_TIME + timedelta(seconds=1),
+        match_pass=1,
+    )
+    lots = db_session.query(PaperHoldingLot).all()
+    newer = next(lot for lot in lots if lot.id != older.id)
+    older.created_at = datetime(2026, 7, 20, 1, 0)  # type: ignore[assignment]
+    newer.created_at = datetime(2026, 7, 20, 2, 0)  # type: ignore[assignment]
+    sell = _sell_order(db_session, user, account, newer, quantity=100)
+    sell.quantity = 150  # type: ignore[assignment]
+    sell.reserved_quantity = 150  # type: ignore[assignment]
+    older.frozen_quantity = 100  # type: ignore[assignment]
+    db_session.add(
+        PaperLotReservation(
+            order_id=sell.id,
+            lot_id=older.id,
+            account_id=account.id,
+            account_generation=account.generation,
+            reserved_quantity=100,
+            remaining_quantity=100,
+        )
+    )
+    newer_reservation = db_session.query(PaperLotReservation).filter_by(lot_id=newer.id).one()
+    older_reservation = db_session.query(PaperLotReservation).filter_by(lot_id=older.id).one()
+    newer_reservation.reserved_quantity = 50  # type: ignore[assignment]
+    newer_reservation.remaining_quantity = 50  # type: ignore[assignment]
+    newer_reservation.created_at = datetime(2026, 7, 20, 0, 0)  # type: ignore[assignment]
+    older_reservation.created_at = datetime(2026, 7, 20, 3, 0)  # type: ignore[assignment]
+    newer.frozen_quantity = 50  # type: ignore[assignment]
+    db_session.flush()
+
+    _service(db_session, at=QUOTE_TIME + timedelta(days=1)).apply(
+        order_id=sell.id,
+        execution=Execution(price=Decimal("11.00"), quantity=150),
+        quote_timestamp=QUOTE_TIME + timedelta(days=1),
+        match_pass=1,
+    )
+
+    assert older.remaining_quantity == older.frozen_quantity == 0
+    assert newer.remaining_quantity == 50
+    assert newer.frozen_quantity == 0
+    assert older_reservation.remaining_quantity == 0
+    assert newer_reservation.remaining_quantity == 0
+
+
+def test_retry_fails_closed_if_linked_fill_resolves_to_another_order(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    account = _account(db_session, user)
+    first_order = _buy_order(db_session, user, account)
+    second_order = _buy_order(db_session, user, account)
+
+    def fill_for(order: PaperOrder) -> PaperFill:
+        return PaperFill(
+            order_id=order.id,
+            fill_seq=1,
+            quantity=100,
+            price=Decimal("10.00"),
+            gross_amount=Decimal("1000.0000"),
+            commission=Decimal("5.0000"),
+            stamp_duty=Decimal("0.0000"),
+            transfer_fee=Decimal("0.0100"),
+            quote_timestamp=QUOTE_TIME,
+            quote_source="fixed",
+            executed_at=QUOTE_TIME,
+            trade_id=uuid.uuid4(),
+        )
+
+    first_fill = fill_for(first_order)
+    second_fill = fill_for(second_order)
+    db_session.add_all([first_fill, second_fill])
+    db_session.flush()
+    db_session.add(
+        PaperMatchPass(
+            order_id=first_order.id,
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+            quote_source="fixed",
+            snapshot_summary={},
+            consumed_levels=[],
+            matched_quantity=100,
+            fill_id=first_fill.id,
+        )
+    )
+    db_session.flush()
+    original_get = db_session.get
+
+    def malicious_get(entity: object, ident: object, **kwargs: object) -> object:
+        if entity is PaperFill and ident == first_fill.id:
+            return second_fill
+        return original_get(entity, ident, **kwargs)
+
+    monkeypatch.setattr(db_session, "get", malicious_get)
+
+    with pytest.raises(PaperTradingError) as error:
+        _service(db_session).apply(
+            order_id=first_order.id,
+            execution=Execution(price=Decimal("10.00"), quantity=100),
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+
+    assert error.value.code == "match_pass_conflict"
+
+
+@pytest.mark.parametrize("target", ["other_account", "next_generation"])
+def test_buy_lot_provenance_failure_rolls_back_apply(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    account = _account(db_session, user)
+    order = _buy_order(db_session, user, account)
+    if target == "other_account":
+        token = uuid.uuid4().hex
+        other_user = User(
+            username=f"lot-target-{token}",
+            email=f"lot-target-{token}@example.test",
+            hashed_password="x",
+        )
+        db_session.add(other_user)
+        db_session.flush()
+        target_account = _account(db_session, other_user)
+        target_account_id = target_account.id
+        target_generation = target_account.generation
+    else:
+        target_account_id = account.id
+        target_generation = int(account.generation) + 1
+    service = _service(db_session)
+
+    def wrong_lot(**kwargs: object) -> PaperHoldingLot:
+        fill = cast(PaperFill, kwargs["fill"])
+        source_order = cast(PaperOrder, kwargs["order"])
+        actual = cast(Decimal, kwargs["actual"])
+        return PaperHoldingLot(
+            account_id=target_account_id,
+            generation=target_generation,
+            ts_code=source_order.ts_code,
+            name=source_order.name,
+            source_fill_id=fill.id,
+            original_quantity=fill.quantity,
+            remaining_quantity=fill.quantity,
+            frozen_quantity=0,
+            unit_cost=actual / int(fill.quantity),
+            available_on=date(2026, 7, 21),
+        )
+
+    monkeypatch.setattr(service, "_build_buy_lot", wrong_lot)
+    before_available = account.available_cash
+    before_frozen = account.frozen_cash
+    before_reserved = order.reserved_cash
+    transaction = db_session.begin_nested()
+
+    with pytest.raises(PaperTradingError) as error:
+        service.apply(
+            order_id=order.id,
+            execution=Execution(price=Decimal("10.00"), quantity=100),
+            quote_timestamp=QUOTE_TIME,
+            match_pass=1,
+        )
+    transaction.rollback()
+    db_session.expire_all()
+
+    assert error.value.code == "invalid_holding_provenance"
+    assert db_session.query(PaperMatchPass).count() == 0
+    assert db_session.query(PaperFill).count() == 0
+    assert db_session.query(PaperHoldingLot).count() == 0
+    assert db_session.query(Trade).count() == 0
+    assert db_session.query(Position).count() == 0
+    assert db_session.query(PaperCashLedger).count() == 0
+    restored_order = db_session.get(PaperOrder, order.id)
+    restored_account = db_session.get(PaperAccount, account.id)
+    assert restored_order is not None and restored_order.filled_quantity == 0
+    assert restored_order.reserved_cash == before_reserved
+    assert restored_account is not None and restored_account.available_cash == before_available
+    assert restored_account.frozen_cash == before_frozen
+
+
 def test_cross_account_lot_provenance_is_rejected_without_partial_projection(
     db_session: Session, user: User
 ) -> None:
