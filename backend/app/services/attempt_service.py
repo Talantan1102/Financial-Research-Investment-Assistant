@@ -369,6 +369,18 @@ class AttemptService:
                 child.session_id == run.session_id,
             )
         )
+        superseded_finals = (
+            select(parent.final_message_id)
+            .join(child, child.replaces_run_id == parent.id)
+            .where(
+                parent.tenant_id == run.tenant_id,
+                parent.session_id == run.session_id,
+                child.tenant_id == run.tenant_id,
+                child.session_id == run.session_id,
+                parent.final_message_id.is_not(None),
+            )
+        )
+        superseded_messages = superseded_inputs.union_all(superseded_finals)
         rows = tuple(
             (
                 await session.scalars(
@@ -377,7 +389,7 @@ class AttemptService:
                         RunMessage.tenant_id == run.tenant_id,
                         RunMessage.session_id == run.session_id,
                         RunMessage.id != run.input_message_id,
-                        RunMessage.id.not_in(superseded_inputs),
+                        RunMessage.id.not_in(superseded_messages),
                     )
                     .order_by(RunMessage.created_at.desc(), RunMessage.id.desc())
                     .limit(limit)

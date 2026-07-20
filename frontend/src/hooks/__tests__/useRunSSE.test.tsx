@@ -386,6 +386,40 @@ describe('useRunSSE', () => {
     expect(result.current.pause).toBeNull()
   })
 
+  it('keeps a waiting pause actionable when cancel transport fails and clears it only after terminal cancel', async () => {
+    const waitingPause = {
+      type: 'input_request' as const,
+      request: { question: 'Need context' },
+    }
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_input'))
+    vi.mocked(runApi.cancelRun)
+      .mockReset()
+      .mockRejectedValueOnce(new TypeError('cancel offline'))
+      .mockResolvedValueOnce(run('cancelled'))
+    const noDelay = async () => {}
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'waiting_input',
+      initialPause: waitingPause,
+      delayMs: noDelay,
+      maxReconnectAttempts: 0,
+    }))
+    await waitFor(() => expect(result.current.activeRunId).toBe('run-1'))
+
+    await act(async () => result.current.cancelRun())
+    expect(result.current.pause).toEqual(waitingPause)
+    expect(result.current.activeRunId).toBe('run-1')
+
+    await act(async () => result.current.cancelRun())
+    expect(runApi.cancelRun).toHaveBeenCalledTimes(2)
+    expect(result.current.status).toBe('cancelled')
+    expect(result.current.activeRunId).toBeNull()
+    expect(result.current.pause).toBeNull()
+  })
+
   it('contains unresolved-tenant and network failures without rejected UI promises', async () => {
     const noTenant = renderHook(() => useRunSSE({ tenantId: null, sessionId: null }))
     await expect(act(async () => noTenant.result.current.sendPrompt('early'))).resolves.toBeUndefined()

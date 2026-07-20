@@ -436,12 +436,12 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     const controller = new AbortController()
     abortRef.current = controller
     revisionBaseRef.current = runId
-    setPause(null)
     try {
       const cancelled = await cancelRunRequest(tenantId, runId, fetchImpl)
       if (!isCurrent(generation, controller.signal)) return
       updateStatus(cancelled.status)
       if (TERMINAL.has(cancelled.status)) {
+        setPause(null)
         updateActiveRun(null, cancelled.status)
         currentChatActions.finishRun(cancelled.status)
         await loadDurableHistory(tenantId, sessionId, generation, controller.signal)

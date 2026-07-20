@@ -80,4 +80,51 @@ describe('<ChatPane> Run revision integration', () => {
     expect(bodies[1]).toMatchObject({ prompt: 'edited', replaces_run_id: 'run-1' })
     await waitFor(() => expect(sessionRefreshes).toBeGreaterThan(0))
   })
+
+  it('keeps the waiting form usable after cancel fails and still allows resume', async () => {
+    let cancels = 0
+    let resumes = 0
+    server.use(
+      http.get(`${API_BASE}/api/v1/tenants/tenant-1/runs/run-1/events`, () =>
+        new Response('', { headers: { 'Content-Type': 'text/event-stream' } })),
+      http.get(`${API_BASE}/api/v1/tenants/tenant-1/runs/run-1`, () =>
+        HttpResponse.json(run('run-1', 'waiting_input'))),
+      http.post(`${API_BASE}/api/v1/tenants/tenant-1/runs/run-1/cancel`, () => {
+        cancels += 1
+        return HttpResponse.json({ detail: 'offline' }, { status: 503 })
+      }),
+      http.post(`${API_BASE}/api/v1/tenants/tenant-1/runs/run-1/resume`, () => {
+        resumes += 1
+        return HttpResponse.json(run('run-1', 'queued'))
+      }),
+      http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions/session-1`, () => HttpResponse.json({
+        id: 'session-1', tenant_id: 'tenant-1', created_by_user_id: 'user-1', title: 'Session',
+        created_at: now, updated_at: now, archived_at: null, messages: [], has_more: false,
+        active_run_id: 'run-1', active_run_status: 'waiting_input',
+        active_pause_type: 'input', active_pause_request: { question: 'Need context' },
+        revisions: [], latest_run_id: 'run-1',
+      })),
+      http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions`, () => HttpResponse.json([])),
+    )
+
+    const user = userEvent.setup()
+    const rendered = renderWithProviders(
+      <ChatPane
+        tenantId="tenant-1"
+        sessionId="session-1"
+        initialRunId="run-1"
+        initialRunStatus="waiting_input"
+        initialPause={{ type: 'input_request', request: { question: 'Need context' } }}
+      />,
+    )
+    expect(await rendered.findByText('Need context')).toBeInTheDocument()
+
+    await user.keyboard('{Control>}k{/Control}')
+    await waitFor(() => expect(cancels).toBe(1))
+    expect(rendered.getByText('Need context')).toBeInTheDocument()
+    const input = rendered.getByRole('textbox', { name: /补充信息/ })
+    await user.type(input, 'More detail')
+    await user.click(rendered.getByRole('button', { name: /提交补充信息/ }))
+    await waitFor(() => expect(resumes).toBe(1))
+  })
 })

@@ -9,6 +9,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import aliased
 
 from app.models.run import Run, RunMessage, RunPause, RunSession
 from app.models.tenant import TenantMembership
@@ -69,11 +70,36 @@ class RunSessionService:
     ) -> RunSessionDetail:
         async with self._session_factory() as session, session.begin():
             run_session = await self._get_visible_session(session, tenant_id, session_id, actor_id)
+            parent = aliased(Run)
+            child = aliased(Run)
+            superseded_inputs = (
+                select(parent.input_message_id)
+                .join(child, child.replaces_run_id == parent.id)
+                .where(
+                    parent.tenant_id == tenant_id,
+                    parent.session_id == session_id,
+                    child.tenant_id == tenant_id,
+                    child.session_id == session_id,
+                )
+            )
+            superseded_finals = (
+                select(parent.final_message_id)
+                .join(child, child.replaces_run_id == parent.id)
+                .where(
+                    parent.tenant_id == tenant_id,
+                    parent.session_id == session_id,
+                    child.tenant_id == tenant_id,
+                    child.session_id == session_id,
+                    parent.final_message_id.is_not(None),
+                )
+            )
+            superseded_messages = superseded_inputs.union_all(superseded_finals)
             rows = await session.scalars(
                 select(RunMessage)
                 .where(
                     RunMessage.tenant_id == tenant_id,
                     RunMessage.session_id == session_id,
+                    RunMessage.id.not_in(superseded_messages),
                 )
                 .order_by(RunMessage.created_at.desc(), RunMessage.id.desc())
                 .limit(limit + 1)

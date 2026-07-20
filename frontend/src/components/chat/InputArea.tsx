@@ -40,7 +40,9 @@ export function InputArea(props: InputAreaProps) {
     c.alias.slice(1).toLowerCase().startsWith(value.replace(/^\//, '').toLowerCase()),
   )
   const streaming =
-    snap.streaming_phase !== 'idle' || snap.streamingStatus === 'streaming'
+    snap.streaming_phase !== 'idle' ||
+    snap.streamingStatus === 'streaming' ||
+    snap.active_run_id !== null
   const messages = snap.messages ?? []
   const hasContext = messages.length > 0
 

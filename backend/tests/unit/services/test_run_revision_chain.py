@@ -154,7 +154,16 @@ async def test_session_projection_selects_latest_and_preserves_revision_summarie
             session_id=first.run.session_id,
             prompt="prompt B",
             idempotency_key=f"revision-{uuid.uuid4().hex}",
-            replaces_run_id=first.run.id,
+        )
+    )
+    await _complete(async_session_factory, second.run, "answer B")
+    third = await runs.create_run(
+        replace(
+            revision_command,
+            session_id=first.run.session_id,
+            prompt="prompt B revised",
+            idempotency_key=f"revision-{uuid.uuid4().hex}",
+            replaces_run_id=second.run.id,
         )
     )
 
@@ -165,14 +174,33 @@ async def test_session_projection_selects_latest_and_preserves_revision_summarie
         limit=100,
     )
 
-    assert detail.latest_run_id == second.run.id
+    assert detail.latest_run_id == third.run.id
+    assert [message.content for message in detail.messages] == [
+        "prompt A",
+        "answer A",
+        "prompt B revised",
+    ]
+    assert detail.has_more is False
     assert [
         (item.run.id, item.prompt, item.final_message_summary) for item in detail.revisions
     ] == [
         (first.run.id, "prompt A", "answer A"),
-        (second.run.id, "prompt B", None),
+        (second.run.id, "prompt B", "answer B"),
+        (third.run.id, "prompt B revised", None),
     ]
-    assert detail.revisions[1].run.replaces_run_id == first.run.id
+    assert detail.revisions[2].run.replaces_run_id == second.run.id
+
+    paged = await RunSessionService(async_session_factory).get_session_detail(
+        revision_command.tenant_id,
+        first.run.session_id,
+        revision_command.actor_id,
+        limit=2,
+    )
+    assert [message.content for message in paged.messages] == [
+        "answer A",
+        "prompt B revised",
+    ]
+    assert paged.has_more is True
 
 
 @pytest.mark.asyncio
@@ -189,7 +217,6 @@ async def test_model_history_excludes_superseded_prompt_messages(
             session_id=first.run.session_id,
             prompt="prompt B",
             idempotency_key=f"revision-{uuid.uuid4().hex}",
-            replaces_run_id=first.run.id,
         )
     )
     await _complete(async_session_factory, second.run, "answer B")
@@ -197,7 +224,7 @@ async def test_model_history_excludes_superseded_prompt_messages(
         replace(
             revision_command,
             session_id=first.run.session_id,
-            prompt="prompt C",
+            prompt="prompt B revised",
             idempotency_key=f"revision-{uuid.uuid4().hex}",
             replaces_run_id=second.run.id,
         )
@@ -206,9 +233,63 @@ async def test_model_history_excludes_superseded_prompt_messages(
     async with async_session_factory() as session:
         history = await AttemptService._load_model_history(session, third.run, limit=100)
 
-    assert "prompt A" not in [item["content"] for item in history]
     assert "prompt B" not in [item["content"] for item in history]
-    assert [item["content"] for item in history] == ["answer A", "answer B"]
+    assert "answer B" not in [item["content"] for item in history]
+    assert [item["content"] for item in history] == ["prompt A", "answer A"]
+
+    await _complete(async_session_factory, third.run, "answer B revised")
+    fourth = await runs.create_run(
+        replace(
+            revision_command,
+            session_id=first.run.session_id,
+            prompt="prompt C",
+            idempotency_key=f"revision-{uuid.uuid4().hex}",
+        )
+    )
+    async with async_session_factory() as session:
+        later_history = await AttemptService._load_model_history(session, fourth.run, limit=100)
+    assert [item["content"] for item in later_history] == [
+        "prompt A",
+        "answer A",
+        "prompt B revised",
+        "answer B revised",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_superseded_run_without_final_message_does_not_poison_history_or_projection(
+    async_session_factory: async_sessionmaker[AsyncSession],
+    revision_command: CreateRunCommand,
+) -> None:
+    runs = RunService(async_session_factory)
+    first = await runs.create_run(revision_command)
+    async with async_session_factory() as session, session.begin():
+        await session.execute(update(Run).where(Run.id == first.run.id).values(status="failed"))
+    replacement = await runs.create_run(
+        replace(
+            revision_command,
+            session_id=first.run.session_id,
+            prompt="replacement prompt",
+            idempotency_key=f"revision-{uuid.uuid4().hex}",
+            replaces_run_id=first.run.id,
+        )
+    )
+
+    async with async_session_factory() as session:
+        history = await AttemptService._load_model_history(session, replacement.run, limit=100)
+    detail = await RunSessionService(async_session_factory).get_session_detail(
+        revision_command.tenant_id,
+        first.run.session_id,
+        revision_command.actor_id,
+        limit=100,
+    )
+
+    assert history == ()
+    assert [message.content for message in detail.messages] == ["replacement prompt"]
+    assert [revision.prompt for revision in detail.revisions] == [
+        "prompt A",
+        "replacement prompt",
+    ]
 
 
 @pytest.mark.asyncio
