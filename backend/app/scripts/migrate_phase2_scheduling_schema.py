@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import DataError
@@ -14,10 +17,19 @@ class InvalidLegacyWorkerIdError(ValueError):
     """Raised before DDL when a legacy worker id cannot be converted to UUID."""
 
 
-def migrate_phase2_scheduling_schema(engine: Engine) -> tuple[str, ...]:
+@contextmanager
+def _migration_connection(bind: Engine | Connection) -> Iterator[Connection]:
+    if isinstance(bind, Connection):
+        yield bind
+    else:
+        with bind.begin() as connection:
+            yield connection
+
+
+def migrate_phase2_scheduling_schema(engine: Engine | Connection) -> tuple[str, ...]:
     """Upgrade Phase 1 run-attempt storage in one PostgreSQL transaction."""
     changes: list[str] = []
-    with engine.begin() as connection:
+    with _migration_connection(engine) as connection:
         connection.execute(
             text(
                 "SELECT pg_advisory_xact_lock("

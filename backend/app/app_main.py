@@ -5,6 +5,8 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
 # 加载环境变量 — must run before any app.* import that reads POSTGRES_* /
@@ -36,12 +38,9 @@ from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
 from app.router.run_sessions import router as run_sessions_router  # noqa: E402
 from app.router.runs import router as runs_router  # noqa: E402
 from app.router.tenants import router as tenants_router  # noqa: E402
-from app.scripts.migrate_phase2_scheduling_schema import (  # noqa: E402
-    migrate_phase2_scheduling_schema,
-)
 from app.scripts.migrate_phase3_execution_schema import (  # noqa: E402
-    is_fresh_application_schema,
-    verify_phase3_execution_schema,
+    is_fresh_application_schema_connection,
+    verify_run_control_schema_connection,
 )
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
 from app.services.mcp_client import MCPClient  # noqa: E402
@@ -52,26 +51,32 @@ from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover t
 # ---------------------------------------------------------------------------
 
 
-def _initialize_postgres_schema() -> bool:
-    """Upgrade then create schema; degrade only when PostgreSQL is unavailable."""
+def _initialize_postgres_schema(database_engine: Engine | None = None) -> bool:
+    """Create a truly fresh schema, or read-only verify an existing one."""
+    target_engine = database_engine or engine
     try:
         import app.models as _models  # noqa: F401  ensure all models registered to Base
 
-        fresh_schema = is_fresh_application_schema(engine)
-        if not fresh_schema:
-            # An existing application schema is immutable during rolling web
-            # startup. Verify before any create_all/reconcile path can emit DDL.
-            verify_phase3_execution_schema(engine)
-
-        changes = migrate_phase2_scheduling_schema(engine)
-        if changes:
-            logger.info("Phase 2 scheduling schema upgraded: %s", changes)
-        if fresh_schema:
-            Base.metadata.create_all(bind=engine)
-            verify_phase3_execution_schema(engine)
-            logger.info("Fresh PostgreSQL schema initialized and verified")
-        else:
-            logger.info("Existing PostgreSQL schema verified without startup DDL")
+        # Fresh detection and initialization are one transaction-scoped critical
+        # section. The operator entrypoint takes the same outer lock before its
+        # Phase 2/3 maintenance locks, so startup and maintenance cannot interleave.
+        with target_engine.begin() as connection:
+            connection.execute(text("SELECT set_config('lock_timeout', '5000ms', true)"))
+            connection.execute(text("SELECT set_config('statement_timeout', '300000ms', true)"))
+            connection.execute(
+                text(
+                    "SELECT pg_advisory_xact_lock("
+                    "hashtextextended('run_control_schema_maintenance', 0))"
+                )
+            )
+            fresh_schema = is_fresh_application_schema_connection(connection)
+            if fresh_schema:
+                Base.metadata.create_all(bind=connection)
+                verify_run_control_schema_connection(connection)
+                logger.info("Fresh PostgreSQL schema initialized and verified")
+            else:
+                verify_run_control_schema_connection(connection)
+                logger.info("Existing PostgreSQL schema verified without startup DDL")
     except OperationalError as exc:
         sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
         postgres_unavailable = (

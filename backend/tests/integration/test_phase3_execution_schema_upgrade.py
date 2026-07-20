@@ -16,6 +16,7 @@ from app.scripts.migrate_phase3_execution_schema import (
     is_fresh_application_schema,
     migrate_phase3_execution_schema,
     verify_phase3_execution_schema,
+    verify_run_control_schema,
 )
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Connection, Engine
@@ -748,35 +749,6 @@ def test_two_engines_concurrently_upgrade_the_same_phase2_schema(
     _assert_phase3_schema(isolated_schema_engine)
 
 
-def test_app_startup_creates_fresh_schema_then_uses_read_only_phase3_gate(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from app import app_main
-
-    calls: list[str] = []
-
-    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
-    monkeypatch.setattr(
-        app_main,
-        "migrate_phase2_scheduling_schema",
-        lambda _engine: calls.append("phase2") or (),
-    )
-    monkeypatch.setattr(
-        app_main,
-        "verify_phase3_execution_schema",
-        lambda _engine: calls.append("verify_phase3"),
-    )
-    monkeypatch.setattr(
-        app_main.Base.metadata,
-        "create_all",
-        lambda **_kwargs: calls.append("create_all"),
-    )
-    monkeypatch.setattr("app.scripts.reconcile_schema.reconcile_columns", lambda _engine: [])
-
-    assert app_main._initialize_postgres_schema() is True
-    assert calls == ["phase2", "create_all", "verify_phase3"]
-
-
 def _ddl_statements(engine: Engine) -> tuple[list[str], object]:
     statements: list[str] = []
 
@@ -872,6 +844,144 @@ def test_existing_compatible_database_startup_is_read_only(
         event.remove(isolated_schema_engine, "before_cursor_execute", listener)
 
     assert statements == []
+
+
+@pytest.mark.parametrize(
+    "ddl, expected",
+    [
+        ("DROP TABLE run_workers CASCADE", "run_workers"),
+        ("ALTER TABLE run_attempts DROP COLUMN claim_token", "run_attempts"),
+        (
+            "DROP INDEX ix_run_attempts_active_worker_lease",
+            "run_attempts",
+        ),
+    ],
+)
+def test_existing_phase2_drift_fails_startup_before_any_ddl(
+    isolated_schema_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+    ddl: str,
+    expected: str,
+) -> None:
+    from app import app_main
+
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(text(ddl))
+    before = set(inspect(isolated_schema_engine).get_table_names())
+    statements, listener = _ddl_statements(isolated_schema_engine)
+    monkeypatch.setattr(app_main, "engine", isolated_schema_engine)
+    assert not hasattr(app_main, "migrate_phase2_scheduling_schema")
+    try:
+        with pytest.raises(RuntimeError, match=expected):
+            app_main._initialize_postgres_schema()
+    finally:
+        event.remove(isolated_schema_engine, "before_cursor_execute", listener)
+
+    assert set(inspect(isolated_schema_engine).get_table_names()) == before
+    assert statements == []
+
+
+def test_existing_phase2_fk_drift_fails_startup_before_any_ddl(
+    isolated_schema_engine: Engine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app import app_main
+
+    worker_fk = next(
+        fk
+        for fk in inspect(isolated_schema_engine).get_foreign_keys("run_attempts")
+        if fk["constrained_columns"] == ["worker_id"]
+    )
+    with isolated_schema_engine.begin() as connection:
+        connection.exec_driver_sql(
+            f'ALTER TABLE run_attempts DROP CONSTRAINT "{worker_fk["name"]}"'
+        )
+    statements, listener = _ddl_statements(isolated_schema_engine)
+    monkeypatch.setattr(app_main, "engine", isolated_schema_engine)
+    try:
+        with pytest.raises(RuntimeError, match="run_attempts foreign keys"):
+            app_main._initialize_postgres_schema()
+    finally:
+        event.remove(isolated_schema_engine, "before_cursor_execute", listener)
+    assert statements == []
+
+
+def test_two_web_instances_serialize_fresh_schema_initialization(
+    empty_schema_engine: Engine,
+) -> None:
+    from app import app_main
+
+    with empty_schema_engine.connect() as connection:
+        schema = connection.scalar(text("SELECT current_schema()"))
+    second_engine = create_engine(
+        empty_schema_engine.url,
+        connect_args={"options": f"-csearch_path={schema} -ctimezone=Asia/Shanghai"},
+    )
+    barrier = threading.Barrier(2)
+
+    def start(candidate: Engine) -> bool:
+        barrier.wait(timeout=10)
+        return app_main._initialize_postgres_schema(candidate)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(start, (empty_schema_engine, second_engine), timeout=30))
+    finally:
+        second_engine.dispose()
+
+    assert results == [True, True]
+    verify_phase3_execution_schema(empty_schema_engine)
+    assert {
+        "run_workers",
+        "run_tenant_scheduling",
+        "run_outbox",
+        "run_tool_executions",
+        "run_usage_records",
+    } <= set(inspect(empty_schema_engine).get_table_names())
+
+
+def test_full_gate_accepts_semantically_equivalent_constraint_names(
+    isolated_schema_engine: Engine,
+) -> None:
+    worker_fk = next(
+        fk
+        for fk in inspect(isolated_schema_engine).get_foreign_keys("run_attempts")
+        if fk["constrained_columns"] == ["worker_id"]
+    )
+    with isolated_schema_engine.begin() as connection:
+        connection.exec_driver_sql(
+            f'ALTER TABLE run_attempts RENAME CONSTRAINT "{worker_fk["name"]}" '
+            "TO deployment_generated_worker_fk"
+        )
+
+    verify_run_control_schema(isolated_schema_engine)
+
+
+def test_full_gate_rejects_duplicate_semantic_index(
+    isolated_schema_engine: Engine,
+) -> None:
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(
+            text("CREATE INDEX duplicate_run_session_tenant_index ON run_sessions (tenant_id)")
+        )
+
+    with pytest.raises(RuntimeError, match="run_sessions indexes differ"):
+        verify_run_control_schema(isolated_schema_engine)
+
+
+def test_operator_init_repairs_old_schema_then_full_verifies(
+    isolated_schema_engine: Engine,
+) -> None:
+    from app.processes.run_control_init import initialize_schema
+
+    with isolated_schema_engine.begin() as connection:
+        connection.execute(text("DROP TABLE run_usage_records"))
+        connection.execute(text("DROP TABLE run_tool_executions"))
+        connection.execute(text("ALTER TABLE run_sessions DROP COLUMN archived_at"))
+        connection.execute(text("DROP INDEX ix_run_attempts_active_worker_lease"))
+
+    initialize_schema(isolated_schema_engine)
+    verify_run_control_schema(isolated_schema_engine)
 
 
 def test_schema_version_marker_is_existing_and_cannot_be_misclassified_as_fresh(

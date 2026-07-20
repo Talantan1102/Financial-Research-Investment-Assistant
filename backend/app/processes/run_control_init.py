@@ -1,10 +1,12 @@
-"""Create the isolated run-control schema before Compose processes start."""
+"""Operator-only maintenance initialization for the run-control schema."""
 
 from __future__ import annotations
 
 import asyncio
 
-from app.core.async_database import build_async_database
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
+
 from app.core.database import Base
 from app.core.database import engine as sync_engine
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
@@ -13,7 +15,10 @@ from app.models.run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
 from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.scripts.migrate_phase2_scheduling_schema import migrate_phase2_scheduling_schema
-from app.scripts.migrate_phase3_execution_schema import migrate_phase3_execution_schema
+from app.scripts.migrate_phase3_execution_schema import (
+    migrate_phase3_execution_schema,
+    verify_run_control_schema_connection,
+)
 
 _MODELS = (
     User,
@@ -33,15 +38,25 @@ _MODELS = (
 )
 
 
+def initialize_schema(database_engine: Engine = sync_engine) -> None:
+    """Apply maintenance migrations and verify under one global lock order."""
+    with database_engine.begin() as connection:
+        connection.execute(text("SELECT set_config('lock_timeout', '5000ms', true)"))
+        connection.execute(text("SELECT set_config('statement_timeout', '300000ms', true)"))
+        connection.execute(
+            text(
+                "SELECT pg_advisory_xact_lock("
+                "hashtextextended('run_control_schema_maintenance', 0))"
+            )
+        )
+        migrate_phase2_scheduling_schema(connection)
+        migrate_phase3_execution_schema(connection)
+        Base.metadata.create_all(bind=connection)
+        verify_run_control_schema_connection(connection)
+
+
 async def initialize() -> None:
-    migrate_phase2_scheduling_schema(sync_engine)
-    migrate_phase3_execution_schema(sync_engine)
-    engine, _factory = build_async_database()
-    try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
-    finally:
-        await engine.dispose()
+    initialize_schema()
 
 
 def main() -> None:

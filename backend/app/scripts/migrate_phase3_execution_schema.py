@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import re
 import uuid
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any
 
 from sqlalchemy import CheckConstraint, Index, Table, UniqueConstraint, inspect, text
@@ -23,12 +25,35 @@ _PREDECESSOR_ATTEMPT_FKS = {
 }
 _REVISION_UNIQUE = "uq_runs_tenant_session_revision_seq"
 _SCHEMA_VERSION_MARKERS = {"alembic_version", "schema_migrations"}
+_RUN_CONTROL_TABLES = tuple(
+    model.__table__
+    for model in (
+        app.models.RunSession,
+        app.models.RunMessage,
+        app.models.Run,
+        app.models.RunAttempt,
+        app.models.RunPause,
+        app.models.RunEvent,
+        app.models.RunWorker,
+        app.models.RunTenantScheduling,
+        app.models.RunOutbox,
+        app.models.RunToolExecution,
+        app.models.RunUsageRecord,
+    )
+)
 
 
 def is_fresh_application_schema(engine: Engine) -> bool:
     """Return true only when the current schema has no known application footprint."""
     with engine.connect() as connection:
         existing = set(inspect(connection).get_table_names())
+    application_tables = set(Base.metadata.tables)
+    return not (existing & (application_tables | _SCHEMA_VERSION_MARKERS))
+
+
+def is_fresh_application_schema_connection(connection: Connection) -> bool:
+    """Transaction-local fresh check used while the startup advisory lock is held."""
+    existing = set(inspect(connection).get_table_names())
     application_tables = set(Base.metadata.tables)
     return not (existing & (application_tables | _SCHEMA_VERSION_MARKERS))
 
@@ -121,7 +146,14 @@ def _check_sql(value: Any, connection: Connection) -> str:
         sql,
     )
     sql = re.sub(r"=\s*any\s*\(\s*array\[(.*?)\]\s*\)", r" in (\1)", sql)
-    return re.sub(r"[\s()]", "", sql)
+    sql = re.sub(r"[\s()]", "", sql)
+    sql = re.sub(r"=anyarray\[(.*?)\]", r"in\1", sql)
+    sql = re.sub(
+        r"([a-z_][a-z0-9_]*)between(-?\d+)and(-?\d+)",
+        r"\1>=\2and\1<=\3",
+        sql,
+    )
+    return sql
 
 
 def _expression_signature(expression: Any, connection: Connection) -> str:
@@ -420,15 +452,24 @@ def _validate_execution_table(connection: Connection, table: Table) -> None:
     _validate_uniques(connection, table)
 
 
+@contextmanager
+def _migration_connection(bind: Engine | Connection) -> Iterator[Connection]:
+    if isinstance(bind, Connection):
+        yield bind
+    else:
+        with bind.begin() as connection:
+            yield connection
+
+
 def migrate_phase3_execution_schema(
-    engine: Engine,
+    engine: Engine | Connection,
     *,
     lock_timeout_ms: int = 5_000,
     statement_timeout_ms: int = 300_000,
 ) -> tuple[str, ...]:
     """Operator-only maintenance migration in one bounded serialized transaction."""
     changes: list[str] = []
-    with engine.begin() as connection:
+    with _migration_connection(engine) as connection:
         connection.execute(
             text("SELECT set_config('lock_timeout', :value, true)"),
             {"value": f"{lock_timeout_ms}ms"},
@@ -651,6 +692,146 @@ def _execution_table_drift(connection: Connection, table: Table) -> list[str]:
             drift.append(f"{table.name} CHECK {name} differs")
     drift.extend(_read_only_index_drift(connection, table))
     return drift
+
+
+def _semantic_foreign_key_drift(connection: Connection, table: Table) -> list[str]:
+    actual = Counter(
+        (
+            tuple(fk["constrained_columns"]),
+            str(fk["referred_table"]),
+            tuple(fk["referred_columns"]),
+            str(fk.get("options", {}).get("ondelete", "NO ACTION")).upper(),
+        )
+        for fk in inspect(connection).get_foreign_keys(table.name)
+    )
+    expected = Counter(
+        (
+            tuple(column.name for column in fk.columns),
+            next(iter(fk.elements)).column.table.name,
+            tuple(element.column.name for element in fk.elements),
+            (fk.ondelete or "NO ACTION").upper(),
+        )
+        for fk in table.foreign_key_constraints
+    )
+    return [] if actual == expected else [f"{table.name} foreign keys differ"]
+
+
+def _semantic_unique_drift(connection: Connection, table: Table) -> list[str]:
+    actual = Counter(
+        tuple(unique["column_names"])
+        for unique in inspect(connection).get_unique_constraints(table.name)
+    )
+    expected = Counter(
+        tuple(column.name for column in unique.columns)
+        for unique in table.constraints
+        if isinstance(unique, UniqueConstraint)
+    )
+    return [] if actual == expected else [f"{table.name} unique constraints differ"]
+
+
+def _semantic_check_drift(connection: Connection, table: Table) -> list[str]:
+    actual = Counter(
+        _check_sql(check["sqltext"], connection)
+        for check in inspect(connection).get_check_constraints(table.name)
+    )
+    expected = Counter(
+        _check_sql(check.sqltext, connection)
+        for check in table.constraints
+        if isinstance(check, CheckConstraint)
+    )
+    return [] if actual == expected else [f"{table.name} CHECK constraints differ"]
+
+
+def _semantic_index_drift(connection: Connection, table: Table) -> list[str]:
+    def actual_predicate(index: Mapping[str, Any]) -> str | None:
+        predicate = index.get("dialect_options", {}).get("postgresql_where")
+        return None if predicate is None else _check_sql(predicate, connection)
+
+    def expected_predicate(index: Index) -> str | None:
+        predicate = index.dialect_options["postgresql"].get("where")
+        return None if predicate is None else _check_sql(predicate, connection)
+
+    actual = Counter(
+        (
+            tuple(index["column_names"]),
+            bool(index.get("unique")),
+            actual_predicate(index),
+        )
+        for index in inspect(connection).get_indexes(table.name)
+        if not index.get("duplicates_constraint")
+    )
+    expected = Counter(
+        (
+            tuple(column.name for column in index.columns),
+            bool(index.unique),
+            expected_predicate(index),
+        )
+        for index in table.indexes
+    )
+    return [] if actual == expected else [f"{table.name} indexes differ"]
+
+
+def _run_control_table_drift(connection: Connection, table: Table) -> list[str]:
+    """Return the complete read-only contract drift for one control-plane table."""
+    inspector = inspect(connection)
+    reflected_columns = {column["name"]: column for column in inspector.get_columns(table.name)}
+    expected_names = set(table.columns.keys())
+    drift: list[str] = []
+    if set(reflected_columns) != expected_names:
+        drift.append(
+            f"{table.name} columns expected {sorted(expected_names)}, "
+            f"got {sorted(reflected_columns)}"
+        )
+    for column in table.columns:
+        reflected = reflected_columns.get(column.name)
+        if reflected is None:
+            continue
+        if bool(reflected["nullable"]) != bool(column.nullable):
+            drift.append(f"{table.name}.{column.name} nullability differs")
+        actual_type = _type_sql(reflected["type"], connection)
+        expected_type = _type_sql(column.type, connection)
+        if actual_type != expected_type:
+            drift.append(
+                f"{table.name}.{column.name} type differs: {actual_type} != {expected_type}"
+            )
+        actual_default = _default_sql(reflected.get("default"))
+        expected_default = _default_sql(getattr(column.server_default, "arg", None))
+        if actual_default != expected_default:
+            drift.append(
+                f"{table.name}.{column.name} default differs: "
+                f"{actual_default!r} != {expected_default!r}"
+            )
+    expected_pk = tuple(column.name for column in table.primary_key.columns)
+    actual_pk = tuple(inspector.get_pk_constraint(table.name)["constrained_columns"])
+    if actual_pk != expected_pk:
+        drift.append(f"{table.name} primary key differs")
+    drift.extend(_semantic_foreign_key_drift(connection, table))
+    drift.extend(_semantic_unique_drift(connection, table))
+    drift.extend(_semantic_check_drift(connection, table))
+    drift.extend(_semantic_index_drift(connection, table))
+    return drift
+
+
+def verify_run_control_schema_connection(connection: Connection) -> None:
+    """Verify the complete Phase 2+3 control-plane contract without issuing DDL."""
+    existing = set(inspect(connection).get_table_names())
+    missing = {table.name for table in _RUN_CONTROL_TABLES} - existing
+    drift = [f"missing tables {sorted(missing)}"] if missing else []
+    for table in _RUN_CONTROL_TABLES:
+        if table.name in existing:
+            drift.extend(_run_control_table_drift(connection, table))
+    if drift:
+        raise _unsafe(
+            "maintenance migration required: "
+            + "; ".join(drift)
+            + "; run python -m app.processes.run_control_init"
+        )
+
+
+def verify_run_control_schema(engine: Engine) -> None:
+    """Engine wrapper for the complete read-only control-plane startup gate."""
+    with engine.connect() as connection:
+        verify_run_control_schema_connection(connection)
 
 
 def verify_phase3_execution_schema(engine: Engine) -> None:

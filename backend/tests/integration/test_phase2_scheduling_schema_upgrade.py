@@ -256,77 +256,65 @@ def test_two_engines_concurrently_upgrade_the_same_phase1_schema(
 
 
 def test_startup_degrades_only_when_postgres_connection_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from app import app_main
 
-    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
+    class UnavailableEngine:
+        def begin(self) -> object:
+            raise OperationalError("connect", {}, ConnectionError("postgres unavailable"))
 
-    def unavailable(_engine: Engine) -> tuple[str, ...]:
-        raise OperationalError("connect", {}, ConnectionError("postgres unavailable"))
-
-    monkeypatch.setattr(app_main, "migrate_phase2_scheduling_schema", unavailable)
     with caplog.at_level(logging.WARNING):
-        assert app_main._initialize_postgres_schema() is False
+        assert app_main._initialize_postgres_schema(UnavailableEngine()) is False  # type: ignore[arg-type]
     assert "PostgreSQL unavailable" in caplog.text
 
 
 def test_startup_logs_and_raises_schema_migration_errors(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from app import app_main
 
-    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
+    class IncompatibleEngine:
+        def begin(self) -> object:
+            raise InvalidLegacyWorkerIdError("legacy bad-worker")
 
-    def incompatible(_engine: Engine) -> tuple[str, ...]:
-        raise InvalidLegacyWorkerIdError("legacy bad-worker")
-
-    monkeypatch.setattr(app_main, "migrate_phase2_scheduling_schema", incompatible)
     with (
         caplog.at_level(logging.ERROR),
         pytest.raises(InvalidLegacyWorkerIdError, match="bad-worker"),
     ):
-        app_main._initialize_postgres_schema()
+        app_main._initialize_postgres_schema(IncompatibleEngine())  # type: ignore[arg-type]
     assert "PostgreSQL schema initialization failed" in caplog.text
 
 
 def test_startup_does_not_degrade_on_connected_postgres_operational_errors(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from app import app_main
-
-    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
 
     class LockTimeoutError(Exception):
         pgcode = "55P03"
 
-    def locked(_engine: Engine) -> tuple[str, ...]:
-        raise OperationalError("ALTER TABLE", {}, LockTimeoutError("lock timeout"))
+    class LockedEngine:
+        def begin(self) -> object:
+            raise OperationalError("ALTER TABLE", {}, LockTimeoutError("lock timeout"))
 
-    monkeypatch.setattr(app_main, "migrate_phase2_scheduling_schema", locked)
     with caplog.at_level(logging.ERROR), pytest.raises(OperationalError):
-        app_main._initialize_postgres_schema()
+        app_main._initialize_postgres_schema(LockedEngine())  # type: ignore[arg-type]
     assert "PostgreSQL schema initialization failed" in caplog.text
 
 
 def test_startup_degrades_when_postgres_cannot_connect_now(
-    monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from app import app_main
 
-    monkeypatch.setattr(app_main, "is_fresh_application_schema", lambda _engine: True)
-
     class CannotConnectNowError(Exception):
         pgcode = "57P03"
 
-    def unavailable(_engine: Engine) -> tuple[str, ...]:
-        raise OperationalError("connect", {}, CannotConnectNowError("cannot connect now"))
+    class UnavailableEngine:
+        def begin(self) -> object:
+            raise OperationalError("connect", {}, CannotConnectNowError("cannot connect now"))
 
-    monkeypatch.setattr(app_main, "migrate_phase2_scheduling_schema", unavailable)
     with caplog.at_level(logging.WARNING):
-        assert app_main._initialize_postgres_schema() is False
+        assert app_main._initialize_postgres_schema(UnavailableEngine()) is False  # type: ignore[arg-type]
     assert "PostgreSQL unavailable" in caplog.text
