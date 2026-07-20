@@ -52,6 +52,7 @@ def _persist_filled_order(db_session: Session, user: User, account: PaperAccount
         client_request_id=f"endpoint-request-{uuid.uuid4()}",
         source_session_id="session-1",
         source_message_id="message-1",
+        proposal_fingerprint=uuid.uuid4().hex * 2,
         ts_code="600000.SH",
         name="Test Stock",
         side=OrderSide.BUY,

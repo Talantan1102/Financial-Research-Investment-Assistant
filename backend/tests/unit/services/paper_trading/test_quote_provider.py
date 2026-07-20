@@ -161,7 +161,7 @@ async def test_does_not_hide_programmer_errors_or_cancellation() -> None:
     release.set()
 
 
-def test_assert_fresh_accepts_boundary_and_rejects_past_or_future_staleness() -> None:
+def test_assert_fresh_accepts_past_boundary_and_two_second_future_skew() -> None:
     quote_time = datetime(2026, 7, 20, 10, tzinfo=SHANGHAI)
     provider = TushareRealtimeQuoteProvider(fetch=lambda _: pd.DataFrame())
     quote = asyncio.run(
@@ -169,10 +169,8 @@ def test_assert_fresh_accepts_boundary_and_rejects_past_or_future_staleness() ->
     )
 
     provider.assert_fresh(quote, quote_time + timedelta(seconds=15), 15)
-    for now in (
-        quote_time + timedelta(seconds=16),
-        quote_time - timedelta(seconds=16),
-    ):
+    provider.assert_fresh(quote, quote_time - timedelta(seconds=2), 15)
+    for now in (quote_time + timedelta(seconds=16), quote_time - timedelta(seconds=3)):
         with pytest.raises(PaperTradingError) as caught:
             provider.assert_fresh(quote, now, 15)
         assert caught.value.code == "stale_quote"

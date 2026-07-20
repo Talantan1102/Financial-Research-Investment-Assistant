@@ -50,7 +50,7 @@ class OrderDraft(BaseModel):
     side: OrderSide
     ts_code: str
     name: str
-    quantity: int = Field(gt=0)
+    quantity: int = Field(strict=True, gt=0)
     order_type: OrderType
     limit_price: Decimal | None = Field(
         default=None,

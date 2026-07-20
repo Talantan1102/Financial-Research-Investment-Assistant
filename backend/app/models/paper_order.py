@@ -93,6 +93,7 @@ class PaperOrder(Base):
     client_request_id = Column(String(128), nullable=True)
     source_session_id = Column(String(64), nullable=False)
     source_message_id = Column(String(64), nullable=False)
+    proposal_fingerprint = Column(String(64), nullable=False)
     ts_code = Column(String(16), nullable=False, index=True)
     name = Column(String(64), nullable=False)
     side = Column(_ORDER_SIDE, nullable=False)
@@ -128,6 +129,12 @@ class PaperOrder(Base):
             unique=True,
             postgresql_where=text("client_request_id IS NOT NULL"),
         ),
+        UniqueConstraint(
+            "account_id",
+            "account_generation",
+            "proposal_fingerprint",
+            name="uq_paper_orders_account_generation_proposal",
+        ),
         CheckConstraint(
             "account_generation > 0",
             name="ck_paper_orders_account_generation_positive",
@@ -139,6 +146,10 @@ class PaperOrder(Base):
         CheckConstraint(
             "btrim(source_session_id) <> '' AND btrim(source_message_id) <> ''",
             name="ck_paper_orders_source_ids_nonblank",
+        ),
+        CheckConstraint(
+            "proposal_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_paper_orders_proposal_fingerprint_sha256",
         ),
         CheckConstraint("quantity > 0", name="ck_paper_orders_quantity_positive"),
         CheckConstraint(

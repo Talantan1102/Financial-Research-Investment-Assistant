@@ -51,6 +51,7 @@ def _persist_source_fill(db_session: Session, user: User, account: PaperAccount)
         client_request_id=f"request-{uuid.uuid4()}",
         source_session_id="session-1",
         source_message_id="message-1",
+        proposal_fingerprint=uuid.uuid4().hex * 2,
         ts_code="600519.SH",
         name="贵州茅台",
         side=OrderSide.BUY,

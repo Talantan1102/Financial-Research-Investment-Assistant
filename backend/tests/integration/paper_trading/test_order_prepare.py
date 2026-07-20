@@ -45,6 +45,7 @@ def _quote(
     bid_quantity: int = 1000,
     ask_quantity: int = 1000,
     suspended: bool = False,
+    price_step: Decimal = Decimal("1"),
 ) -> RealtimeQuote:
     return RealtimeQuote(
         ts_code=ts_code,
@@ -53,11 +54,11 @@ def _quote(
         previous_close=previous_close,
         last_price=last_price,
         bids=tuple(
-            QuoteLevel(price=last_price - Decimal(level), quantity=bid_quantity)
+            QuoteLevel(price=last_price - price_step * level, quantity=bid_quantity)
             for level in range(1, 6)
         ),
         asks=tuple(
-            QuoteLevel(price=last_price + Decimal(level), quantity=ask_quantity)
+            QuoteLevel(price=last_price + price_step * level, quantity=ask_quantity)
             for level in range(1, 6)
         ),
         source="fixed",
@@ -154,6 +155,62 @@ def test_prepare_order_only_persists_proposal_without_account_mutation(
     assert order.quote_snapshot["ts_code"] == "600519.SH"
     assert "cn-a-fees-2023-08-28-v1" in order.rules_version
     assert order.expires_at.tzinfo is not None
+
+
+def test_prepare_retry_returns_same_proposal_but_same_message_can_hold_distinct_drafts(
+    db_session: Session,
+    user: User,
+    quote_provider: FixedQuoteProvider,
+    clock: TradingClock,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    service = _service(db_session, quote_provider, clock)
+
+    first, _ = _prepare(service, cast(uuid.UUID, user.id))
+    retried, preview = _prepare(service, cast(uuid.UUID, user.id))
+    changed, _ = _prepare(service, cast(uuid.UUID, user.id), quantity=200)
+
+    assert retried.id == first.id == preview.order_id
+    assert changed.id != first.id
+    assert db_session.query(PaperOrder).count() == 2
+    assert first.proposal_fingerprint == retried.proposal_fingerprint
+    assert first.proposal_fingerprint != changed.proposal_fingerprint
+
+
+def test_prepare_retry_fails_closed_when_fingerprint_payload_does_not_match(
+    db_session: Session,
+    user: User,
+    quote_provider: FixedQuoteProvider,
+    clock: TradingClock,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    service = _service(db_session, quote_provider, clock)
+    order, _ = _prepare(service, cast(uuid.UUID, user.id))
+    order.original_proposal = {**order.original_proposal, "quantity": 200}
+    db_session.flush()
+
+    with pytest.raises(PaperTradingError) as caught:
+        _prepare(service, cast(uuid.UUID, user.id))
+    assert caught.value.code == "proposal_idempotency_conflict"
+
+
+@pytest.mark.parametrize("quantity", [True, 100.0, "100"])
+def test_prepare_rejects_non_integer_quantity_without_fetching_quote(
+    db_session: Session,
+    user: User,
+    quote_provider: FixedQuoteProvider,
+    clock: TradingClock,
+    quantity: object,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    with pytest.raises(PaperTradingError) as caught:
+        _prepare(
+            _service(db_session, quote_provider, clock),
+            cast(uuid.UUID, user.id),
+            quantity=quantity,
+        )
+    assert caught.value.code == "invalid_order"
+    assert quote_provider.calls == []
 
 
 def test_preview_reloads_authoritative_state_and_does_not_persist_edits(
@@ -353,6 +410,39 @@ def test_prepare_fails_closed_for_malformed_crossed_five_level_book(
     assert caught.value.code == "quote_unavailable"
 
 
+@pytest.mark.parametrize(
+    "quote",
+    [
+        _quote().model_copy(
+            update={
+                "asks": (
+                    QuoteLevel(price=Decimal("1502.001"), quantity=1000),
+                    *_quote().asks[1:],
+                )
+            }
+        ),
+        _quote().model_copy(
+            update={
+                "asks": tuple(
+                    QuoteLevel(price=Decimal("1651") + level, quantity=1000) for level in range(5)
+                )
+            }
+        ),
+    ],
+    ids=["off tick", "outside daily bounds"],
+)
+def test_prepare_rejects_non_executable_quote_levels(
+    db_session: Session,
+    user: User,
+    clock: TradingClock,
+    quote: RealtimeQuote,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    with pytest.raises(PaperTradingError) as caught:
+        _prepare(_service(db_session, FixedQuoteProvider(quote), clock), cast(uuid.UUID, user.id))
+    assert caught.value.code == "quote_unavailable"
+
+
 def _add_sellable_lot(
     session: Session,
     *,
@@ -372,6 +462,7 @@ def _add_sellable_lot(
         client_request_id=f"historical-buy-{business_suffix}",
         source_session_id="historical-session",
         source_message_id=f"historical-{business_suffix}"[:64],
+        proposal_fingerprint=business_suffix * 2,
         ts_code=ts_code,
         name=name,
         side="buy",
@@ -493,6 +584,7 @@ def test_preview_can_edit_buy_into_another_security_sell_and_normalizes_name(
         name="平安银行",
         previous_close=Decimal("10"),
         last_price=Decimal("10"),
+        price_step=Decimal("0.1"),
     )
     edited = OrderDraft(
         side="sell",
@@ -561,6 +653,7 @@ def test_preview_can_edit_sell_into_another_security_buy_without_activity(
         name="平安银行",
         previous_close=Decimal("10"),
         last_price=Decimal("10"),
+        price_step=Decimal("0.1"),
     )
     edited = OrderDraft(
         side="buy",
@@ -638,15 +731,15 @@ def _committed_account(engine: Engine) -> tuple[uuid.UUID, uuid.UUID]:
     return user_id, account_id
 
 
-def test_prepare_and_initial_cash_edit_serialize_on_active_account_row(
+def test_slow_quote_fetch_does_not_lock_account_and_prepare_revalidates_after_fetch(
     pg_test_engine: Engine,
     clock: TradingClock,
 ) -> None:
     user_id, account_id = _committed_account(pg_test_engine)
     quote_started = threading.Event()
     allow_quote = threading.Event()
-    edit_started = threading.Event()
-    outcomes: list[str] = []
+    edit_finished = threading.Event()
+    outcomes: list[tuple[str, Decimal]] = []
     errors: list[BaseException] = []
 
     class BlockingProvider(FixedQuoteProvider):
@@ -659,25 +752,21 @@ def test_prepare_and_initial_cash_edit_serialize_on_active_account_row(
     def prepare() -> None:
         try:
             with Session(pg_test_engine) as session:
-                _prepare(_service(session, BlockingProvider(_quote()), clock), user_id)
+                _, preview = _prepare(_service(session, BlockingProvider(_quote()), clock), user_id)
                 session.commit()
-                outcomes.append("prepared")
+                outcomes.append(("prepared", preview.available_cash))
         except BaseException as exc:  # pragma: no cover - asserted below
             errors.append(exc)
 
     def edit() -> None:
         try:
             with Session(pg_test_engine) as session:
-                edit_started.set()
-                try:
-                    PaperAccountService(session).edit_initial_cash_once(
-                        user_id=user_id, initial_cash=Decimal("800000")
-                    )
-                    session.commit()
-                    outcomes.append("edited")
-                except PaperTradingError as exc:
-                    session.rollback()
-                    outcomes.append(exc.code)
+                account = PaperAccountService(session).edit_initial_cash_once(
+                    user_id=user_id, initial_cash=Decimal("800000")
+                )
+                session.commit()
+                outcomes.append(("edited", cast(Decimal, account.initial_cash)))
+                edit_finished.set()
         except BaseException as exc:  # pragma: no cover - asserted below
             errors.append(exc)
 
@@ -686,17 +775,20 @@ def test_prepare_and_initial_cash_edit_serialize_on_active_account_row(
     prepare_thread.start()
     assert quote_started.wait(timeout=5)
     edit_thread.start()
-    assert edit_started.wait(timeout=5)
+    assert edit_finished.wait(timeout=5), "account edit was blocked by slow quote fetch"
     allow_quote.set()
     prepare_thread.join(timeout=10)
     edit_thread.join(timeout=10)
 
     assert errors == []
-    assert sorted(outcomes) == ["initial_cash_edit_not_allowed", "prepared"]
+    assert sorted(outcomes) == [
+        ("edited", Decimal("800000.00")),
+        ("prepared", Decimal("800000.00")),
+    ]
     with Session(pg_test_engine) as observer:
         account = observer.get(PaperAccount, account_id)
         assert account is not None
-        assert account.initial_cash == Decimal("1000000.00")
+        assert account.initial_cash == Decimal("800000.00")
         assert (
             observer.scalar(
                 select(func.count())
@@ -763,6 +855,45 @@ def test_initial_cash_edit_then_prepare_reads_the_serialized_new_balance(
         account = PaperAccountService(observer).get_active(user_id=user_id)
         assert account.id == account_id
         assert account.initial_cash == Decimal("800000.00")
+        assert (
+            observer.scalar(
+                select(func.count())
+                .select_from(PaperOrder)
+                .where(PaperOrder.account_id == account_id)
+            )
+            == 1
+        )
+
+
+def test_concurrent_prepare_retry_creates_one_proposal(
+    pg_test_engine: Engine,
+    clock: TradingClock,
+) -> None:
+    user_id, account_id = _committed_account(pg_test_engine)
+    start = threading.Barrier(2)
+    order_ids: list[uuid.UUID] = []
+    errors: list[BaseException] = []
+
+    def prepare() -> None:
+        try:
+            with Session(pg_test_engine) as session:
+                start.wait(timeout=5)
+                order, _ = _prepare(_service(session, FixedQuoteProvider(_quote()), clock), user_id)
+                order_ids.append(cast(uuid.UUID, order.id))
+                session.commit()
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=prepare) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert errors == []
+    assert len(order_ids) == 2
+    assert order_ids[0] == order_ids[1]
+    with Session(pg_test_engine) as observer:
         assert (
             observer.scalar(
                 select(func.count())

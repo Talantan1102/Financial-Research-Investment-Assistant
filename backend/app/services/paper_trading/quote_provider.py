@@ -13,9 +13,25 @@ from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.types import QuoteLevel, RealtimeQuote
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+MAX_FUTURE_SKEW = timedelta(seconds=2)
 _SOURCE = "tushare.realtime_quote"
 _FETCH_FAILURES = (OSError, RuntimeError)
 _TS_CODE_PATTERN = re.compile(r"\d{6}\.(?:SH|SZ)")
+
+
+def assert_fresh_quote(quote: RealtimeQuote, now: datetime, max_age_seconds: int) -> None:
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    if (
+        isinstance(max_age_seconds, bool)
+        or not isinstance(max_age_seconds, int)
+        or max_age_seconds <= 0
+    ):
+        raise ValueError("max_age_seconds must be a positive integer")
+
+    age = now.astimezone(SHANGHAI) - quote.quoted_at.astimezone(SHANGHAI)
+    if age > timedelta(seconds=max_age_seconds) or age < -MAX_FUTURE_SKEW:
+        raise PaperTradingError("stale_quote", "实时行情已过期")
 
 
 class RealtimeQuoteProvider(Protocol):
@@ -57,18 +73,7 @@ class TushareRealtimeQuoteProvider:
         return quote
 
     def assert_fresh(self, quote: RealtimeQuote, now: datetime, max_age_seconds: int) -> None:
-        if now.tzinfo is None or now.utcoffset() is None:
-            raise ValueError("now must be timezone-aware")
-        if (
-            isinstance(max_age_seconds, bool)
-            or not isinstance(max_age_seconds, int)
-            or max_age_seconds <= 0
-        ):
-            raise ValueError("max_age_seconds must be a positive integer")
-
-        age = abs(now.astimezone(SHANGHAI) - quote.quoted_at.astimezone(SHANGHAI))
-        if age > timedelta(seconds=max_age_seconds):
-            raise PaperTradingError("stale_quote", "实时行情已过期")
+        assert_fresh_quote(quote, now, max_age_seconds)
 
     @staticmethod
     def _sdk_fetch(ts_code: str) -> pd.DataFrame:

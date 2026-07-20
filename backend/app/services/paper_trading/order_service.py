@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import uuid
 from collections.abc import Callable
@@ -10,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.paper_account import PaperAccount, PaperHoldingLot
@@ -19,13 +22,14 @@ from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingClock
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.fee_schedule import FeeSchedule
-from app.services.paper_trading.quote_provider import RealtimeQuoteProvider
+from app.services.paper_trading.quote_provider import RealtimeQuoteProvider, assert_fresh_quote
 from app.services.paper_trading.rulebook import RuleBook
 from app.services.paper_trading.types import QuoteLevel, RealtimeQuote, RuleSet
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 _TS_CODE = re.compile(r"\d{6}\.(?:SH|SZ)")
 _CENT = Decimal("0.01")
+_PROPOSAL_UNIQUE_CONSTRAINT = "uq_paper_orders_account_generation_proposal"
 
 
 class PaperOrderService:
@@ -72,15 +76,45 @@ class PaperOrderService:
             limit_price=limit_price,
         )
 
-        # Shared prepare/edit contract: this is deliberately the first database
-        # operation that can precede creation of an order proposal.
+        # Network I/O must not hold the account row lock. Everything after the
+        # fetch is revalidated against the locked account snapshot.
+        quote = self._quote(draft.ts_code)
         account = self.account_service.get_active(user_id=user_id, for_update=True)
+        now = self._current_time()
+        proposal = draft.model_dump(mode="json")
+        fingerprint = _proposal_fingerprint(
+            user_id=user_id,
+            session_id=session_id,
+            message_id=message_id,
+            proposal=proposal,
+        )
+        existing = self._proposal_by_fingerprint(account=account, fingerprint=fingerprint)
+        if existing is not None:
+            self._validate_idempotent_proposal(
+                existing,
+                user_id=user_id,
+                session_id=session_id,
+                message_id=message_id,
+                proposal=proposal,
+            )
+            preview = self._calculate_preview(
+                account=account,
+                order_id=cast(uuid.UUID, existing.id),
+                draft=draft,
+                normalize_quote_name=False,
+                quote=quote,
+                now=now,
+            )
+            return existing, preview
+
         order_id = uuid.uuid4()
         preview = self._calculate_preview(
             account=account,
             order_id=order_id,
             draft=draft,
             normalize_quote_name=False,
+            quote=quote,
+            now=now,
         )
         order = PaperOrder(
             id=order_id,
@@ -90,6 +124,7 @@ class PaperOrderService:
             client_request_id=None,
             source_session_id=session_id,
             source_message_id=message_id,
+            proposal_fingerprint=fingerprint,
             ts_code=draft.ts_code,
             name=preview.quote.name,
             side=draft.side,
@@ -99,19 +134,35 @@ class PaperOrderService:
             filled_quantity=0,
             avg_fill_price=None,
             status=OrderStatus.AWAITING_CONFIRMATION,
-            original_proposal=draft.model_dump(mode="json"),
+            original_proposal=proposal,
             confirmed_payload=None,
             user_edits=None,
             quote_snapshot=preview.quote.model_dump(mode="json"),
             rules_version=preview.rules_version,
             reject_code=None,
             reject_message=None,
-            expires_at=self._expires_at(self._current_time()),
+            expires_at=self._expires_at(now),
             confirmed_at=None,
             completed_at=None,
         )
-        self._session.add(order)
-        self._session.flush()
+        try:
+            with self._session.begin_nested():
+                self._session.add(order)
+                self._session.flush()
+        except IntegrityError as exc:
+            if _constraint_name(exc) != _PROPOSAL_UNIQUE_CONSTRAINT:
+                raise
+            winner = self._proposal_by_fingerprint(account=account, fingerprint=fingerprint)
+            if winner is None:
+                raise
+            self._validate_idempotent_proposal(
+                winner,
+                user_id=user_id,
+                session_id=session_id,
+                message_id=message_id,
+                proposal=proposal,
+            )
+            return winner, preview.model_copy(update={"order_id": winner.id})
         return order, preview
 
     def preview(
@@ -130,11 +181,15 @@ class PaperOrderService:
         if order.account_id != account.id or order.account_generation != account.generation:
             raise PaperTradingError("stale_account_generation", "账户已重置，请重新下单")
         normalized_draft = _canonical_draft(draft)
+        quote = self._quote(normalized_draft.ts_code)
+        now = self._current_time()
         return self._calculate_preview(
             account=account,
             order_id=order_id,
             draft=normalized_draft,
             normalize_quote_name=True,
+            quote=quote,
+            now=now,
         )
 
     def _calculate_preview(
@@ -144,9 +199,9 @@ class PaperOrderService:
         order_id: uuid.UUID,
         draft: OrderDraft,
         normalize_quote_name: bool,
+        quote: RealtimeQuote,
+        now: datetime,
     ) -> OrderPreview:
-        now = self._current_time()
-        quote = self._quote(draft.ts_code)
         if quote.ts_code != draft.ts_code:
             raise PaperTradingError("security_identity_mismatch", "证券代码或名称与实时行情不一致")
         if quote.name != draft.name:
@@ -157,8 +212,6 @@ class PaperOrderService:
             draft = draft.model_copy(update={"name": quote.name})
         if quote.suspended:
             raise PaperTradingError("suspended_security", "证券当前停牌")
-        self._validate_book(quote)
-
         local_date = now.astimezone(SHANGHAI).date()
         rules = self.rulebook.resolve(
             ts_code=quote.ts_code,
@@ -167,11 +220,8 @@ class PaperOrderService:
             side=draft.side.value,
             on=local_date,
         )
-        self._assert_fresh(
-            quote=quote,
-            now=now,
-            max_age_seconds=rules.quote_freshness_seconds,
-        )
+        assert_fresh_quote(quote, now, rules.quote_freshness_seconds)
+        self._validate_book(quote=quote, rules=rules)
         sellable = self._sellable_quantity(account=account, ts_code=draft.ts_code, on=local_date)
         self.rulebook.validate_quantity(
             rules,
@@ -224,6 +274,37 @@ class PaperOrderService:
             raise PaperTradingError("paper_order_not_found", "模拟订单不存在")
         return order
 
+    def _proposal_by_fingerprint(
+        self, *, account: PaperAccount, fingerprint: str
+    ) -> PaperOrder | None:
+        return self._session.scalar(
+            select(PaperOrder).where(
+                PaperOrder.account_id == account.id,
+                PaperOrder.account_generation == account.generation,
+                PaperOrder.proposal_fingerprint == fingerprint,
+            )
+        )
+
+    @staticmethod
+    def _validate_idempotent_proposal(
+        order: PaperOrder,
+        *,
+        user_id: uuid.UUID,
+        session_id: str,
+        message_id: str,
+        proposal: dict[str, object],
+    ) -> None:
+        if (
+            order.user_id != user_id
+            or order.source_session_id != session_id
+            or order.source_message_id != message_id
+            or order.original_proposal != proposal
+            or order.status is not OrderStatus.AWAITING_CONFIRMATION
+        ):
+            raise PaperTradingError(
+                "proposal_idempotency_conflict", "订单提案幂等键与现有数据不一致"
+            )
+
     def _sellable_quantity(self, *, account: PaperAccount, ts_code: str, on: date) -> int:
         available = self._session.scalar(
             select(
@@ -258,20 +339,18 @@ class PaperOrderService:
             expiry = datetime.combine(expiry_date, time(15), tzinfo=SHANGHAI)
         return expiry
 
-    @staticmethod
-    def _assert_fresh(*, quote: RealtimeQuote, now: datetime, max_age_seconds: int) -> None:
-        age_seconds = abs((now - quote.quoted_at).total_seconds())
-        if age_seconds > max_age_seconds:
-            raise PaperTradingError("stale_quote", "实时行情已过期")
-
-    @staticmethod
-    def _validate_book(quote: RealtimeQuote) -> None:
+    def _validate_book(self, *, quote: RealtimeQuote, rules: RuleSet) -> None:
         if not _strictly_sorted(quote.bids, descending=True):
             raise PaperTradingError("quote_unavailable", "买盘五档顺序无效")
         if not _strictly_sorted(quote.asks, descending=False):
             raise PaperTradingError("quote_unavailable", "卖盘五档顺序无效")
         if quote.bids[0].price >= quote.asks[0].price:
             raise PaperTradingError("quote_unavailable", "实时盘口价格交叉")
+        lower, upper = self.rulebook.price_bounds(rules, quote.previous_close)
+        for level in (*quote.bids, *quote.asks):
+            units = level.price / rules.price_tick
+            if units != units.to_integral_value() or level.price < lower or level.price > upper:
+                raise PaperTradingError("quote_unavailable", "实时盘口价格不可执行")
 
     def _validate_limit_price(
         self, *, draft: OrderDraft, rules: RuleSet, quote: RealtimeQuote
@@ -320,6 +399,28 @@ def _canonical_draft(draft: OrderDraft) -> OrderDraft:
     if len(draft.name) > 64:
         raise PaperTradingError("invalid_order", "证券名称过长")
     return draft.model_copy(update={"ts_code": canonical_code})
+
+
+def _proposal_fingerprint(
+    *,
+    user_id: uuid.UUID,
+    session_id: str,
+    message_id: str,
+    proposal: dict[str, object],
+) -> str:
+    payload = {
+        "user_id": str(user_id),
+        "source_session_id": session_id,
+        "source_message_id": message_id,
+        "draft": proposal,
+    }
+    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _constraint_name(exc: IntegrityError) -> str | None:
+    diag = getattr(exc.orig, "diag", None)
+    return cast(str | None, getattr(diag, "constraint_name", None))
 
 
 def _require_uuid(value: object, *, field: str) -> uuid.UUID:

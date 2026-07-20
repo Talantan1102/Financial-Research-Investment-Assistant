@@ -83,6 +83,7 @@ def _order(
     confirmed_at: datetime | None = None,
     reject_code: str | None = None,
     reject_message: str | None = None,
+    proposal_fingerprint: str | None = None,
 ) -> PaperOrder:
     now = datetime.now(UTC)
     return PaperOrder(
@@ -92,6 +93,7 @@ def _order(
         client_request_id=client_request_id,
         source_session_id="session-1",
         source_message_id="message-1",
+        proposal_fingerprint=proposal_fingerprint or uuid.uuid4().hex * 2,
         ts_code="600519.SH",
         name="贵州茅台",
         side=OrderSide.BUY,
@@ -208,6 +210,19 @@ def test_confirmation_key_is_unique_per_user_when_nonnull(db_session: Session, u
     setattr(duplicate, "confirmed_payload", {"quantity": 100})
     setattr(duplicate, "confirmed_at", datetime.now(UTC))
     db_session.add(duplicate)
+
+    with pytest.raises(IntegrityError):
+        db_session.flush()
+
+
+def test_proposal_fingerprint_is_unique_within_exact_account_generation(
+    db_session: Session, user: User
+) -> None:
+    account = _account(db_session, user)
+    fingerprint = "a" * 64
+    db_session.add(_order(account=account, user=user, proposal_fingerprint=fingerprint))
+    db_session.flush()
+    db_session.add(_order(account=account, user=user, proposal_fingerprint=fingerprint))
 
     with pytest.raises(IntegrityError):
         db_session.flush()
