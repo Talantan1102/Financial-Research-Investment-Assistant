@@ -11,7 +11,7 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -24,12 +24,13 @@ from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.fee_schedule import FeeSchedule
 from app.services.paper_trading.quote_provider import RealtimeQuoteProvider, assert_fresh_quote
 from app.services.paper_trading.rulebook import RuleBook
-from app.services.paper_trading.types import QuoteLevel, RealtimeQuote, RuleSet
+from app.services.paper_trading.types import MarketPhase, QuoteLevel, RealtimeQuote, RuleSet
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 _TS_CODE = re.compile(r"\d{6}\.(?:SH|SZ)")
 _CENT = Decimal("0.01")
 _PROPOSAL_UNIQUE_CONSTRAINT = "uq_paper_orders_account_generation_proposal"
+_MAX_CONFIRMATION_ID_LENGTH = 128 - len("order-freeze:")
 
 
 class PaperOrderService:
@@ -192,6 +193,206 @@ class PaperOrderService:
             now=now,
         )
 
+    def confirm(
+        self,
+        *,
+        user_id: uuid.UUID,
+        order_id: uuid.UUID,
+        draft: OrderDraft,
+        client_request_id: str,
+    ) -> PaperOrder:
+        user_id = _require_uuid(user_id, field="user_id")
+        order_id = _require_uuid(order_id, field="order_id")
+        client_request_id = _require_text(
+            client_request_id,
+            field="client_request_id",
+            maximum=_MAX_CONFIRMATION_ID_LENGTH,
+        )
+        if not isinstance(draft, OrderDraft):
+            raise PaperTradingError("invalid_order", "draft must be an OrderDraft")
+        normalized_draft = _canonical_draft(draft)
+
+        # A completed retry needs neither network I/O nor any balance lock.
+        existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
+        if existing is not None:
+            self._validate_confirmation_retry(existing, order_id=order_id, draft=normalized_draft)
+            return existing
+
+        # Reject missing/cross-user orders before paying for a quote. This read
+        # is only a preflight; authoritative state is reloaded under lock below.
+        self._owned_order(user_id=user_id, order_id=order_id)
+        # Fetch before transaction locks. The quote is validated again against
+        # the clock and locked account/lot state below.
+        quote = self._quote(normalized_draft.ts_code)
+        self._lock_confirmation_key(user_id=user_id, client_request_id=client_request_id)
+        existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
+        if existing is not None:
+            self._validate_confirmation_retry(existing, order_id=order_id, draft=normalized_draft)
+            return existing
+
+        order = self._owned_order(user_id=user_id, order_id=order_id, for_update=True)
+        if order.status is not OrderStatus.AWAITING_CONFIRMATION:
+            raise PaperTradingError(
+                "order_not_awaiting_confirmation", "order is no longer awaiting confirmation"
+            )
+        account = self.account_service.get_active(user_id=user_id, for_update=True)
+        self._session.refresh(account, with_for_update=True)
+        if order.account_id != account.id or order.account_generation != account.generation:
+            raise PaperTradingError("stale_account_generation", "account generation has changed")
+
+        now = self._current_time()
+        if now >= order.expires_at:
+            raise PaperTradingError("order_confirmation_expired", "order confirmation has expired")
+        preview = self._calculate_preview(
+            account=account,
+            order_id=order_id,
+            draft=normalized_draft,
+            normalize_quote_name=True,
+            quote=quote,
+            now=now,
+        )
+        final_draft = preview.draft
+        continuous = preview.market_phase in {MarketPhase.MORNING, MarketPhase.AFTERNOON}
+        if final_draft.order_type is OrderType.MARKET and not continuous:
+            raise PaperTradingError(
+                "market_order_outside_continuous_trading",
+                "market orders require continuous trading",
+            )
+
+        if final_draft.side is OrderSide.BUY:
+            reserved_cash = self._reserve_buy(
+                account=account,
+                draft=final_draft,
+                quote=quote,
+                on=now.astimezone(SHANGHAI).date(),
+                client_request_id=client_request_id,
+            )
+            reserved_quantity = 0
+        else:
+            reserved_cash = Decimal("0.00")
+            reserved_quantity = self._reserve_sell(
+                account=account,
+                draft=final_draft,
+                on=now.astimezone(SHANGHAI).date(),
+            )
+
+        payload = final_draft.model_dump(mode="json")
+        order.client_request_id = client_request_id
+        order.ts_code = final_draft.ts_code
+        order.name = preview.quote.name
+        order.side = final_draft.side
+        order.order_type = final_draft.order_type
+        order.quantity = final_draft.quantity
+        order.limit_price = final_draft.limit_price
+        order.reserved_cash = reserved_cash
+        order.reserved_quantity = reserved_quantity
+        order.confirmed_payload = payload
+        order.user_edits = _json_diff(order.original_proposal, payload)
+        order.quote_snapshot = preview.quote.model_dump(mode="json")
+        order.rules_version = preview.rules_version
+        order.confirmed_at = now
+        order.status = OrderStatus.OPEN if continuous else OrderStatus.QUEUED
+        self._session.flush()
+        return order
+
+    def _reserve_buy(
+        self,
+        *,
+        account: PaperAccount,
+        draft: OrderDraft,
+        quote: RealtimeQuote,
+        on: date,
+        client_request_id: str,
+    ) -> Decimal:
+        rules = self.rulebook.resolve(
+            ts_code=quote.ts_code,
+            board=_board(quote.ts_code),
+            risk_warning=_risk_warning(quote.name),
+            side=OrderSide.BUY.value,
+            on=on,
+        )
+        if draft.order_type is OrderType.LIMIT:
+            assert draft.limit_price is not None
+            maximum_gross = _money(draft.limit_price * draft.quantity)
+        else:
+            _, upper = self.rulebook.price_bounds(rules, quote.previous_close)
+            maximum_gross = _money(upper * draft.quantity)
+        fees = self.fee_schedule.calculate(
+            side=OrderSide.BUY.value,
+            gross=maximum_gross,
+            commission_rate=cast(Decimal, account.commission_rate),
+            minimum_commission=cast(Decimal, account.minimum_commission),
+        )
+        reserve = _money(maximum_gross + fees.total)
+        available = _money(cast(Decimal, account.available_cash))
+        frozen = _money(cast(Decimal, account.frozen_cash))
+        if reserve > available:
+            raise PaperTradingError("insufficient_cash", "paper account has insufficient cash")
+        self.account_service.append_ledger(
+            account=account,
+            kind="order_freeze",
+            amount=-reserve,
+            available_after=_money(available - reserve),
+            frozen_after=_money(frozen + reserve),
+            business_key=f"order-freeze:{client_request_id}",
+        )
+        return reserve
+
+    def _reserve_sell(self, *, account: PaperAccount, draft: OrderDraft, on: date) -> int:
+        lots = self._session.scalars(
+            select(PaperHoldingLot)
+            .where(
+                PaperHoldingLot.account_id == account.id,
+                PaperHoldingLot.generation == account.generation,
+                PaperHoldingLot.ts_code == draft.ts_code,
+                PaperHoldingLot.available_on <= on,
+                PaperHoldingLot.remaining_quantity > PaperHoldingLot.frozen_quantity,
+            )
+            .order_by(PaperHoldingLot.created_at, PaperHoldingLot.id)
+            .with_for_update()
+        ).all()
+        available = sum(int(lot.remaining_quantity) - int(lot.frozen_quantity) for lot in lots)
+        if available < draft.quantity:
+            raise PaperTradingError(
+                "insufficient_sellable_quantity", "sellable position is insufficient"
+            )
+        remaining = draft.quantity
+        for lot in lots:
+            quantity = min(remaining, int(lot.remaining_quantity) - int(lot.frozen_quantity))
+            lot.frozen_quantity = int(lot.frozen_quantity) + quantity  # type: ignore[assignment]
+            remaining -= quantity
+            if remaining == 0:
+                break
+        return draft.quantity
+
+    def _by_client_request_id(
+        self, *, user_id: uuid.UUID, client_request_id: str
+    ) -> PaperOrder | None:
+        return self._session.scalar(
+            select(PaperOrder).where(
+                PaperOrder.user_id == user_id,
+                PaperOrder.client_request_id == client_request_id,
+            )
+        )
+
+    @staticmethod
+    def _validate_confirmation_retry(
+        order: PaperOrder, *, order_id: uuid.UUID, draft: OrderDraft
+    ) -> None:
+        payload = draft.model_copy(update={"name": order.name}).model_dump(mode="json")
+        if order.id != order_id or order.confirmed_payload != payload:
+            raise PaperTradingError(
+                "confirmation_idempotency_conflict",
+                "confirmation key does not match the existing order",
+            )
+
+    def _lock_confirmation_key(self, *, user_id: uuid.UUID, client_request_id: str) -> None:
+        lock_key = f"{user_id}:{client_request_id}"
+        self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": lock_key},
+        )
+
     def _calculate_preview(
         self,
         *,
@@ -266,10 +467,15 @@ class PaperOrderService:
             raise PaperTradingError("quote_unavailable", "实时行情数据无效")
         return quote
 
-    def _owned_order(self, *, user_id: uuid.UUID, order_id: uuid.UUID) -> PaperOrder:
-        order = self._session.scalar(
-            select(PaperOrder).where(PaperOrder.id == order_id, PaperOrder.user_id == user_id)
+    def _owned_order(
+        self, *, user_id: uuid.UUID, order_id: uuid.UUID, for_update: bool = False
+    ) -> PaperOrder:
+        statement = select(PaperOrder).where(
+            PaperOrder.id == order_id, PaperOrder.user_id == user_id
         )
+        if for_update:
+            statement = statement.with_for_update().execution_options(populate_existing=True)
+        order = self._session.scalar(statement)
         if order is None:
             raise PaperTradingError("paper_order_not_found", "模拟订单不存在")
         return order
@@ -424,6 +630,16 @@ def _proposal_fingerprint(
     }
     canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _json_diff(
+    original: dict[str, object], confirmed: dict[str, object]
+) -> dict[str, dict[str, object]]:
+    return {
+        key: {"from": original.get(key), "to": confirmed.get(key)}
+        for key in sorted(original.keys() | confirmed.keys())
+        if original.get(key) != confirmed.get(key)
+    }
 
 
 def _constraint_name(exc: IntegrityError) -> str | None:

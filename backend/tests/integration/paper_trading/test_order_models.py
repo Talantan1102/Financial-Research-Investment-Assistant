@@ -172,6 +172,8 @@ def test_order_persists_full_prepared_payload(db_session: Session, user: User) -
     assert loaded.original_proposal == {"quantity": 100}
     assert loaded.confirmed_payload is None
     assert loaded.user_edits is None
+    assert loaded.reserved_cash == Decimal("0.00")
+    assert loaded.reserved_quantity == 0
     assert loaded.quote_snapshot["latest_price"] == "1499.00"
     assert loaded.created_at is not None
     assert loaded.confirmed_at is None

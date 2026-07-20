@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     CheckConstraint,
@@ -102,6 +103,8 @@ class PaperOrder(Base):
     limit_price = Column(Numeric(18, 4), nullable=True)
     filled_quantity = Column(Integer, nullable=False, default=0)
     avg_fill_price = Column(Numeric(18, 4), nullable=True)
+    reserved_cash = Column(Numeric(18, 2), nullable=False, default=Decimal("0.00"))
+    reserved_quantity = Column(Integer, nullable=False, default=0)
     status = Column(_ORDER_STATUS, nullable=False)
     original_proposal = Column(JSONB(none_as_null=True), nullable=False)
     confirmed_payload = Column(JSONB(none_as_null=True), nullable=True)
@@ -196,6 +199,18 @@ class PaperOrder(Base):
             "(avg_fill_price IS NULL OR avg_fill_price::text NOT IN "
             "('NaN', 'Infinity', '-Infinity'))",
             name="ck_paper_orders_financial_values_finite",
+        ),
+        CheckConstraint(
+            "reserved_cash >= 0 AND reserved_cash::text NOT IN ('NaN', 'Infinity', '-Infinity')",
+            name="ck_paper_orders_reserved_cash_valid",
+        ),
+        CheckConstraint(
+            "reserved_quantity >= 0",
+            name="ck_paper_orders_reserved_quantity_nonnegative",
+        ),
+        CheckConstraint(
+            "(side = 'buy' AND reserved_quantity = 0) OR (side = 'sell' AND reserved_cash = 0)",
+            name="ck_paper_orders_reservation_matches_side",
         ),
         CheckConstraint(
             "(status = 'rejected' AND reject_code IS NOT NULL AND reject_message IS NOT NULL) "
