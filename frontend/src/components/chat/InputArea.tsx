@@ -18,12 +18,11 @@ export interface InputAreaProps {
     text: string,
     forced?: { forced_tool_name: string; forced_tool_args: Record<string, unknown> },
   ) => void
-  onAbort?: () => void
   onEscalate?: () => void
-  // Plan 3 Task 7: streaming 中按「停止生成」时,如果 store 有 active_task_id,
-  // 调 onCancel(tid) → backend POST /chat/cancel/{tid}(worker partial commit);
-  // 否则 fallback onAbort(纯前端 abort)。
-  onCancel?: (taskId: string) => void
+  // Run cancellation is tenant-scoped and keyed by currentChatState.active_run_id.
+  onCancel?: () => void
+  blocked?: boolean
+  cancelBlocked?: boolean
 }
 
 const MIN_HEIGHT = 24
@@ -42,7 +41,9 @@ export function InputArea(props: InputAreaProps) {
     c.alias.slice(1).toLowerCase().startsWith(value.replace(/^\//, '').toLowerCase()),
   )
   const streaming =
-    snap.streaming_phase !== 'idle' || snap.streamingStatus === 'streaming'
+    snap.streaming_phase !== 'idle' ||
+    snap.streamingStatus === 'streaming' ||
+    snap.active_run_id !== null
   const messages = snap.messages ?? []
   const hasContext = messages.length > 0
 
@@ -80,7 +81,7 @@ export function InputArea(props: InputAreaProps) {
     function onKeyGlobal(e: globalThis.KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
-        if (streaming) props.onAbort?.()
+        if (streaming) props.onCancel?.()
       }
     }
     window.addEventListener('keydown', onKeyGlobal)
@@ -89,7 +90,7 @@ export function InputArea(props: InputAreaProps) {
 
   const send = useCallback(() => {
     const text = value.trim()
-    if (!text) return
+    if (!text || props.blocked) return
     const parsed = parseSlashInput(text)
     if (parsed.kind === 'forced_tool') {
       props.onSend?.(parsed.displayMessage, {
@@ -141,14 +142,6 @@ export function InputArea(props: InputAreaProps) {
     [menuOpen, menuItems, menuActiveIdx, selectCommand, send],
   )
 
-  const onCancelClick = () => {
-    if (snap.active_task_id && props.onCancel) {
-      void props.onCancel(snap.active_task_id)
-    } else {
-      props.onAbort?.()
-    }
-  }
-
   return (
     <div data-session={props.sessionId ?? ''}>
       <div className={styles.composer}>
@@ -180,13 +173,15 @@ export function InputArea(props: InputAreaProps) {
               streaming ? '正在生成中...' : '问点什么 (Enter 发送, Shift+Enter 换行)'
             }
             rows={1}
+            disabled={props.blocked}
           />
         </div>
         {streaming ? (
           <button
             type="button"
             className={styles.cancelBtn}
-            onClick={onCancelClick}
+            onClick={() => props.onCancel?.()}
+            disabled={props.cancelBlocked}
             aria-label="停止生成"
             title="停止生成"
           >
@@ -197,7 +192,7 @@ export function InputArea(props: InputAreaProps) {
             type="button"
             className={styles.sendBtn}
             onClick={send}
-            disabled={!value.trim()}
+            disabled={!value.trim() || props.blocked}
             aria-label="发送"
             title="发送"
           >

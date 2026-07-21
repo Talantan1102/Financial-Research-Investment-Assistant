@@ -25,8 +25,6 @@ celery_app = Celery(
     include=[
         "app.tasks.monitoring",
         "app.tasks.memory",
-        "app.tasks.chat_runner",
-        "app.tasks.chat_stale_scanner",  # Plan 3 Task 6
         "app.tasks.title_generation",  # chat-title async LLM title
         "app.tasks.portfolio_snapshot",  # Task 6: 每日持仓快照
     ],
@@ -51,8 +49,6 @@ celery_app.conf.update(
     task_default_routing_key="default",
     # Routing:llm 标记 task → llm 队列(per-task 装饰器也可,但全局映射更清晰)
     task_routes={
-        # chat turn always constructs/uses LLMService; keep it off the generic queue.
-        "app.tasks.chat_runner.run_chat": {"queue": "llm"},
         "app.tasks.monitoring.generate_detail_card": {"queue": "llm"},
         # C74: title_generation makes a real llm.chat call → must share the llm queue
         # (consistent with generate_detail_card; default queue is for non-LLM work)

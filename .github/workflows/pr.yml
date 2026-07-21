@@ -12,7 +12,10 @@ concurrency:
 jobs:
   lint-and-fast-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The full PG-backed cassette suite now includes the run-control phases;
+    # keep the gate bounded but allow the complete suite to finish on hosted
+    # runners instead of being cancelled at the previous 30-minute limit.
+    timeout-minutes: 60
     services:
       # PR-A 2026-05-17: 全 L0/L1/L2/e2e 都用真 PG。
       # 测试 db (industry_assistant_test) 由 conftest._ensure_test_db_exists 在
@@ -40,7 +43,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
       - name: Install deps
-        run: uv sync --extra dev --extra kb
+        # `test` provides testcontainers[redis] so Task 5's true-Redis
+        # dispatcher/crash tests cannot silently skip in the PR gate.
+        run: uv sync --extra dev --extra kb --extra test
       - name: Format check
         run: uv run ruff format --check .
       - name: Lint
@@ -55,4 +60,23 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres123
           POSTGRES_DB: industry_assistant_test
-        run: uv run pytest backend/tests -m "not slow and not live_only" -v
+        run: uv run pytest backend/tests -m "not slow and not live_only" -vv --capture=tee-sys --durations=30
+
+  run-control-compose:
+    runs-on: ubuntu-latest
+    # The acceptance harness recreates several isolated worker topologies and
+    # deliberately exercises restart/recovery paths; allow the full sequence
+    # to finish instead of cancelling it at the previous 25-minute limit.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install acceptance dependencies
+        run: uv sync --frozen --extra dev --extra test
+      - name: Fresh Compose scheduling control-plane gate
+        env:
+          RUN_CONTROL_COMPOSE_SELF_BOOTSTRAP: "1"
+          POSTGRES_PASSWORD: postgres123
+          RUN_CONTROL_PYTHON_IMAGE: python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7
+          RUN_CONTROL_PIP_INDEX_URL: https://pypi.org/simple
+        run: uv run pytest backend/tests/integration/test_run_control_multi_process.py -vv -s --durations=30

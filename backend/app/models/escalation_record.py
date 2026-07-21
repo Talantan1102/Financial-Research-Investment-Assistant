@@ -18,10 +18,16 @@ class EscalationRecord(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
-    session_id = Column(
+    source_session_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        ForeignKey("run_sessions.id", ondelete="RESTRICT"),
         nullable=False,
+        index=True,
+    )
+    source_run_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("runs.id", ondelete="RESTRICT"),
+        nullable=True,
         index=True,
     )
 
@@ -43,3 +49,14 @@ class EscalationRecord(Base):
     confirmed_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     error_msg = Column(String(2048), nullable=True)
+
+    # Compatibility accessor for callers that still use the old vocabulary.
+    # It is deliberately not a mapped column and therefore cannot create a
+    # dependency on chat_sessions.
+    @property
+    def session_id(self):
+        return self.source_session_id
+
+    @session_id.setter
+    def session_id(self, value):
+        self.source_session_id = value

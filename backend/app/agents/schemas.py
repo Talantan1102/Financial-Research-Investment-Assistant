@@ -15,6 +15,7 @@ from app.agents.debate_schemas import DebateTrace
 from app.agents.escalation_protocol import Entity, Preference, ToolResultRef
 from app.agents.investment_dd_schema import InvestmentDueDiligenceReport, ValuationAnalysis
 from app.agents.portfolio_warning_schema import PortfolioWarningReport
+from app.chatloop.contracts import ToolResult
 from app.services.monitoring.signal_rules.base import SignalResult
 
 # ---------------------------------------------------------------------------
@@ -100,19 +101,6 @@ class ToolCall(BaseModel):
     tool_name: str
     args: dict[str, Any]
     rationale: str
-
-
-class ToolResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    tool_name: str
-    args: dict[str, Any]
-    success: bool
-    output: dict[str, Any] | None = None
-    error: str | None = None
-    latency_ms: int = Field(ge=0)
-    cached: bool = False  # v0.9: True when result came from ToolResultCache (B3)
-    tool_call_data: dict[str, Any] | None = None  # Plan 2b: skill_script metadata
 
 
 class SkillScriptCall(BaseModel):

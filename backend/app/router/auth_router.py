@@ -19,6 +19,7 @@ from app.schemas.user import (
     UserLogin,
     UserResponse,
 )
+from app.services.tenant_service import TenantService
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -116,6 +117,12 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
         hashed_password=get_password_hash(user_data.password),
     )
     db.add(user)
+    db.flush()
+    TenantService(db).create_with_owner(
+        name=f"{user.username} 的工作区",
+        owner=user,
+        is_personal=True,
+    )
     db.commit()
     db.refresh(user)
 

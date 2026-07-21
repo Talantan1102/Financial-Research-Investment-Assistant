@@ -1,5 +1,5 @@
-import { useCallback, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useSnapshot } from 'valtio'
 import { CostMeter } from './CostMeter'
 import { DispatchLanes } from './DispatchLanes'
@@ -7,150 +7,210 @@ import { InputArea } from './InputArea'
 import { MessageList } from './MessageList'
 import { StreamingIndicator } from './StreamingIndicator'
 import { useDeferredMessages } from './useDeferredMessages'
-import { useChatSSE } from '@/hooks/useChatSSE'
+import { useRunSSE } from '@/hooks/useRunSSE'
 import { currentChatState } from '@/store/current-chat'
+import { chatSessionsActions, chatSessionsState } from '@/store/chat-sessions'
 import { escalationState } from '@/store/escalation'
 import { EmptyState } from '@/components/states/EmptyState'
-import type { ChatMessage, SteerMergedEvent } from '@/types/chat'
 import styles from '@/styles/chat.module.scss'
 
-// chatloop loop_halt reason → 用户可读的中文短语(spec § 1.3 撞闸种类)。
 const HALT_REASON_LABEL: Record<string, string> = {
   max_steps: '已达执行步数上限',
   budget: '已达预算上限',
   spinning: '检测到重复打转',
 }
 
-function haltReasonLabel(reason: string): string {
-  return HALT_REASON_LABEL[reason] ?? reason
+function safeRequestJson(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? '无法显示请求详情'
+  } catch {
+    return '无法显示请求详情'
+  }
+}
+
+function inputRequestText(request: Record<string, unknown>): string {
+  for (const key of ['question', 'message', 'prompt', 'instruction']) {
+    const value = request[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return safeRequestJson(request)
+}
+
+interface ApprovalItem {
+  key: string
+  name: string
+  arguments: unknown
+  executionId?: string
+  semanticKey?: string
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function approvalItems(request: Record<string, unknown>): ApprovalItem[] {
+  const items: ApprovalItem[] = []
+  if (Array.isArray(request.tool_calls)) {
+    for (const rawCall of request.tool_calls) {
+      const call = asRecord(rawCall)
+      if (!call) continue
+      const name = typeof call.name === 'string' ? call.name : '未知工具'
+      const id = typeof call.id === 'string' ? call.id : `${items.length}`
+      items.push({ key: `call-${id}`, name, arguments: call.arguments })
+    }
+  }
+  if (Array.isArray(request.execution_bindings)) {
+    for (const rawBinding of request.execution_bindings) {
+      const binding = asRecord(rawBinding)
+      const call = asRecord(binding?.tool_call)
+      if (!binding || !call) continue
+      const name = typeof call.name === 'string' ? call.name : '未知工具'
+      const executionId = typeof binding.execution_id === 'string' ? binding.execution_id : undefined
+      const semanticKey = typeof binding.semantic_key === 'string' ? binding.semantic_key : undefined
+      items.push({
+        key: `binding-${executionId ?? items.length}`,
+        name,
+        arguments: call.arguments,
+        executionId,
+        semanticKey,
+      })
+    }
+  }
+  return items
 }
 
 export interface ChatPaneProps {
   sessionId?: string
-  // Plan 2 Scenario B: 切 session 回来时,若 GET /chats/{sid} 返 active_task_id 非空,
-  // 通过本 prop 传入,ChatPane 自动 subscribe in-flight stream(继续吐字)。
-  activeTaskId?: string | null
+  tenantId?: string
+  initialRunId?: string | null
+  initialRunStatus?: import('@/api/runApi').RunStatus | null
+  sessionLoading?: boolean
+  initialPause?: import('@/hooks/useRunSSE').RunPause | null
+  initialRevisions?: import('@/api/runApi').RunRevision[]
+  initialLatestRunId?: string | null
+  initialRevisionCursor?: string | null
+  initialRevisionsHasMore?: boolean
 }
 
-export function ChatPane({
-  sessionId: sessionIdProp,
-  activeTaskId,
-}: ChatPaneProps = {}) {
+export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, initialRunId, initialRunStatus, initialPause, initialRevisions, initialLatestRunId, initialRevisionCursor, initialRevisionsHasMore, sessionLoading = false }: ChatPaneProps = {}) {
   const params = useParams<{ session_id: string }>()
+  const navigate = useNavigate()
   const sessionId = sessionIdProp ?? params.session_id ?? null
-  const snap = useSnapshot(currentChatState)
-  const messages = useDeferredMessages(snap.messages ?? [])
-  const sse = useChatSSE({ sessionId })
-
-  // Plan 2 dogfood Scenario B: activeTaskId 非空 → 自动 subscribe in-flight
-  // stream。effect deps 仅含 activeTaskId,避免 sse 引用变更导致重复 subscribe。
-  useEffect(() => {
-    if (activeTaskId) {
-      void sse.subscribeToTask(activeTaskId, '0')
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTaskId])
-
-  // Plan 2 dogfood fix: typewriter 通过 currentChatState.streamingDraft 一字字
-  // push,但 ChatPane 之前只渲染 messages → 用户看不到打字机过程,只有 done
-  // 后 flushDraftAsMessage 入 messages 才一次性显示。修补:streamingDraft 非
-  // 空时插一条 pending assistant message,role/id 跟真 message 区分。
-  const pendingMessage =
-    snap.streamingDraft && sessionId
-      ? {
-          id: '__pending_assistant__',
-          session_id: sessionId,
-          role: 'assistant' as const,
-          content: snap.streamingDraft,
-          message_type: 'text' as const,
-          tool_call_data: null,
-          research_report_id: null,
-          research_report_summary: null,
-          created_at: new Date().toISOString(),
-        }
-      : null
-
-  // Phase 5 Task 5.1: steer_merged 事件渲染为系统气泡("已并入指令: preview")。
-  // 后端落库的插话 user 消息 turn 结束后会随历史 reload 出现;streaming 期间先用
-  // 这些瞬时系统气泡给用户即时反馈(避免双气泡:历史 reload 走真消息,瞬时气泡只在
-  // toolEvents 里,reload setSession 会清空 toolEvents)。
-  const steerBubbles: ChatMessage[] = sessionId
-    ? (snap.toolEvents as readonly { type: string }[])
-        .filter((e): e is SteerMergedEvent => e.type === 'steer_merged')
-        .map((e, i) => ({
-          id: `__steer_merged_${i}__`,
-          session_id: sessionId,
-          role: 'system' as const,
-          content: `已并入指令: ${e.preview}`,
-          message_type: 'system' as const,
-          tool_call_data: null,
-          research_report_id: null,
-          research_report_summary: null,
-          created_at: new Date().toISOString(),
-        }))
-    : []
-
-  const displayMessages = [
-    ...messages,
-    ...steerBubbles,
-    ...(pendingMessage ? [pendingMessage] : []),
-  ]
-
-  const onSend = useCallback(
-    (
-      text: string,
-      forced?: { forced_tool_name: string; forced_tool_args: Record<string, unknown> },
-    ) => {
-      if (!sessionId) return
-      void sse.sendMessage(text, forced)
-    },
-    [sessionId, sse],
+  const chatSnap = useSnapshot(currentChatState)
+  const sessionsSnap = useSnapshot(chatSessionsState)
+  const [resolvedTenantId, setResolvedTenantId] = useState<string | null>(
+    tenantIdProp ?? sessionsSnap.tenant_id,
   )
+  const [pauseInput, setPauseInput] = useState('')
+  const [editingRevision, setEditingRevision] = useState<{ id: string; prompt: string } | null>(null)
+  const ownsSessionState = sessionId === null || chatSnap.session_id === sessionId
+  const messages = useDeferredMessages(ownsSessionState ? chatSnap.messages ?? [] : [])
 
-  const onAbort = useCallback(() => sse.abort(), [sse])
-
-  const onEscalate = useCallback(() => {
-    // Plan 4b later tasks open EscalationConfirmDialog driven by escalationState
-    if (escalationState.packet_draft) {
-      // existing draft — leave phase as-is
+  useEffect(() => {
+    if (tenantIdProp) {
+      setResolvedTenantId(tenantIdProp)
       return
     }
+    let cancelled = false
+    chatSessionsActions.resolveTenantId()
+      .then((id) => { if (!cancelled) setResolvedTenantId(id) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [tenantIdProp])
+
+  const run = useRunSSE({
+    tenantId: resolvedTenantId,
+    sessionId,
+    initialRunId,
+    initialRunStatus,
+    initialPause,
+    initialRevisions,
+    initialLatestRunId,
+    initialRevisionCursor,
+    initialRevisionsHasMore,
+    onSessionCreated: (createdSessionId) => {
+      navigate(`/chat/${createdSessionId}`, { replace: true })
+    },
+  })
+
+  const pendingMessage = ownsSessionState && chatSnap.streamingDraft
+    ? {
+        id: '__pending_assistant__',
+        session_id: sessionId ?? '__pending__',
+        role: 'assistant' as const,
+        content: chatSnap.streamingDraft,
+        message_type: 'text' as const,
+        tool_call_data: null,
+        research_report_id: null,
+        research_report_summary: null,
+        created_at: new Date().toISOString(),
+      }
+    : null
+  const displayMessages = [...messages, ...(pendingMessage ? [pendingMessage] : [])]
+  const pendingApprovals = run.pause?.type === 'approval_request'
+    ? approvalItems(run.pause.request)
+    : []
+  const revisions = run.revisions ?? []
+
+  const onSend = useCallback((text: string) => {
+    void run.sendPrompt(text)
+  }, [run])
+  const onEscalate = useCallback(() => {
+    if (escalationState.packet_draft) return
+  }, [])
+  const onContinueAsk = useCallback(() => {
+    document.querySelector<HTMLTextAreaElement>('[data-testid="input-textarea"]')?.focus()
   }, [])
 
-  const onContinueAsk = useCallback((_id: string) => {
-    const ta = document.querySelector<HTMLTextAreaElement>('[data-testid="input-textarea"]')
-    ta?.focus()
-  }, [])
-
-  const empty = displayMessages.length === 0
   return (
     <div className={styles.chatPane}>
       <CostMeter />
       <section role="region" aria-label="messages" className={styles.messagesRegion}>
         <div className={styles.chatContainer}>
-          {empty ? (
+          {displayMessages.length === 0 ? (
             <EmptyState
               variant="chat-empty"
               title="开始一个新对话"
-              description='试试问 "工商银行现价多少?"'
+              description='试试问“工商银行现价多少？”'
             />
           ) : (
-            <MessageList
-              messages={[...displayMessages]}
-              onContinueAsk={onContinueAsk}
-              onRetry={sse.retryTask}
-            />
+            <MessageList messages={displayMessages} onContinueAsk={onContinueAsk} />
           )}
           <DispatchLanes />
+          {revisions.length > 0 ? (
+            <details>
+              <summary>修订历史</summary>
+              <ol>
+                {revisions.map((revision) => (
+                  <li key={revision.id}>
+                    <div>{revision.prompt}</div>
+                    <div>状态：{revision.status}</div>
+                    {revision.final_message_summary ? <div>{revision.final_message_summary}</div> : null}
+                    {revision.id === run.latestRunId && !run.activeRunId ? (
+                      <button
+                        type="button"
+                        onClick={() => setEditingRevision({ id: revision.id, prompt: revision.prompt })}
+                      >
+                        修改后重试
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+              {run.revisionsHasMore ? (
+                <button type="button" disabled={run.commandPending} onClick={() => { void run.loadMoreRevisions() }}>
+                  Load more
+                </button>
+              ) : null}
+            </details>
+          ) : null}
         </div>
         <StreamingIndicator />
-        {snap.halt_reason ? (
-          <div
-            className={styles.haltBanner}
-            data-testid="loop-halt-banner"
-            role="status"
-          >
-            已达执行上限（{haltReasonLabel(snap.halt_reason)}），以下基于已查信息
+        {chatSnap.halt_reason ? (
+          <div className={styles.haltBanner} data-testid="loop-halt-banner" role="status">
+            已达执行上限（{HALT_REASON_LABEL[chatSnap.halt_reason] ?? chatSnap.halt_reason}），以下基于已查信息
           </div>
         ) : null}
       </section>
@@ -159,10 +219,83 @@ export function ChatPane({
           <InputArea
             sessionId={sessionId ?? undefined}
             onSend={onSend}
-            onAbort={onAbort}
             onEscalate={onEscalate}
-            onCancel={sse.cancelTask}
+            onCancel={() => { void run.cancelRun() }}
+            blocked={resolvedTenantId === null || sessionLoading || run.pause !== null || run.commandPending}
+            cancelBlocked={run.commandPending}
           />
+          {editingRevision ? (
+            <div role="region" aria-label="修改提示词修订">
+              <label>
+                修改提示词
+                <textarea
+                  aria-label="修改提示词"
+                  value={editingRevision.prompt}
+                  onChange={(event) => setEditingRevision({
+                    ...editingRevision,
+                    prompt: event.target.value,
+                  })}
+                />
+              </label>
+              <button
+                type="button"
+                disabled={run.commandPending || !editingRevision.prompt.trim()}
+                onClick={async () => {
+                  const prompt = editingRevision.prompt.trim()
+                  const replacesRunId = editingRevision.id
+                  if (!prompt) return
+                  const result = await run.resubmitPrompt(prompt, replacesRunId)
+                  if (result.ok) setEditingRevision(null)
+                }}
+              >
+                提交新修订
+              </button>
+            </div>
+          ) : null}
+          {run.pause?.type === 'approval_request' ? (
+            <fieldset disabled={run.commandPending}>
+            <div role="region" aria-label="审批请求">
+              <p>此操作需要你的审批</p>
+              {pendingApprovals.length > 0 ? (
+                <ul>
+                  {pendingApprovals.map((item) => (
+                    <li key={item.key}>
+                      <strong>{item.name}</strong>
+                      <pre>{safeRequestJson(item.arguments)}</pre>
+                      {item.executionId ? <div>执行绑定：{item.executionId}</div> : null}
+                      {item.semanticKey ? <div>语义绑定：{item.semanticKey}</div> : null}
+                    </li>
+                  ))}
+                </ul>
+              ) : <pre>{safeRequestJson(run.pause.request)}</pre>}
+              <button type="button" onClick={() => { void run.resumeRun({ approved: true }) }}>全部批准</button>
+              <button type="button" onClick={() => { void run.resumeRun({ approved: false }) }}>全部拒绝</button>
+            </div>
+            </fieldset>
+          ) : null}
+          {run.pause?.type === 'input_request' ? (
+            <fieldset disabled={run.commandPending}>
+            <div role="region" aria-label="补充信息请求">
+              <p>{inputRequestText(run.pause.request)}</p>
+              <label>
+                补充信息
+                <textarea aria-label="补充信息" value={pauseInput} onChange={(event) => setPauseInput(event.target.value)} />
+              </label>
+              <button
+                type="button"
+                disabled={run.commandPending || !pauseInput.trim()}
+                onClick={async () => {
+                  const text = pauseInput.trim()
+                  if (!text) return
+                  const result = await run.resumeRun({ text })
+                  if (result.ok) setPauseInput('')
+                }}
+              >
+                提交补充信息
+              </button>
+            </div>
+            </fieldset>
+          ) : null}
         </div>
       </section>
     </div>

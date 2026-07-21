@@ -1,0 +1,10 @@
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!backend/
+backend/*
+!backend/app/
+!backend/app/**
+backend/app/**/__pycache__/
+backend/app/**/*.pyc

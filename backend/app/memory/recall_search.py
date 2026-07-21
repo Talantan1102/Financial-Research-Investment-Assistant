@@ -1,4 +1,4 @@
-"""Tier 3 recall — semantic search on PR #39 chat_messages table.
+"""Tier 3 recall — semantic search over RunMessage history.
 
 Lightweight implementation: in-memory cosine over qwen-embedded user messages
 capped at last 5000 messages per user (created_at desc).
@@ -19,6 +19,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ class RecallSearcher:
             message_id, session_id, role, content, created_at (iso str), similarity.
 
         Empty query / no messages → []. User isolation enforced via JOIN on
-        chat_sessions.user_id (chat_messages 表本身没 user_id).
+        RunSession.created_by_user_id (messages intentionally carry no user id).
         """
         if not query or not query.strip():
             return []
@@ -118,10 +119,34 @@ class RecallSearcher:
     def _fetch_user_messages(session: Session, user_id: UUID) -> list[dict[str, Any]]:
         """Fetch up to _MAX_USER_MESSAGES_SCAN messages for user, newest first.
 
-        Uses raw SQL with explicit column list to avoid coupling to ChatMessage
+        Uses raw SQL with explicit column list to avoid coupling to ORM
         ORM schema drift (test PG may have older schema than backend models).
         """
         sql = text(
+            """
+            SELECT rm.id AS id,
+                   rm.session_id AS session_id,
+                   rm.role AS role,
+                   rm.content AS content,
+                   rm.created_at AS created_at
+            FROM run_messages rm
+            JOIN run_sessions rs ON rm.session_id = rs.id
+            WHERE rs.created_by_user_id = :uid
+            ORDER BY rm.created_at DESC
+            LIMIT :lim
+            """
+        )
+        try:
+            result = session.execute(sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN})
+            rows = [dict(row._mapping) for row in result.fetchall()]
+            if rows:
+                return rows
+        except SQLAlchemyError:
+            # A partially migrated test/tenant database may not have the run
+            # tables yet.  Fall through to the legacy immutable history.
+            session.rollback()
+
+        legacy_sql = text(
             """
             SELECT cm.id AS id,
                    cm.session_id AS session_id,
@@ -131,12 +156,19 @@ class RecallSearcher:
             FROM chat_messages cm
             JOIN chat_sessions cs ON cm.session_id = cs.id
             WHERE cs.user_id = :uid
+              AND cm.role = 'user'
             ORDER BY cm.created_at DESC
             LIMIT :lim
             """
         )
-        result = session.execute(sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN})
-        return [dict(row._mapping) for row in result.fetchall()]
+        try:
+            result = session.execute(
+                legacy_sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN}
+            )
+            return [dict(row._mapping) for row in result.fetchall()]
+        except SQLAlchemyError:
+            session.rollback()
+            return []
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

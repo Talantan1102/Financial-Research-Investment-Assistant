@@ -52,29 +52,38 @@ describe('<InputArea>', () => {
   })
 })
 
-describe('<InputArea> Cmd+K abort', () => {
+describe('<InputArea> stop controls', () => {
   it('shows 中断 button while streaming, hides 发送', () => {
     currentChatState.streaming_phase = 'writing'
     render(<InputArea sessionId="s1" />)
     expect(screen.getByRole('button', { name: /停止生成|中断|abort/i })).toBeInTheDocument()
   })
 
-  it('Cmd+K calls onAbort while streaming', async () => {
+  it('Cmd+K calls onCancel while streaming', async () => {
     currentChatState.streaming_phase = 'writing'
-    const onAbort = vi.fn()
+    const onCancel = vi.fn()
     const user = userEvent.setup()
-    render(<InputArea sessionId="s1" onAbort={onAbort} />)
+    render(<InputArea sessionId="s1" onCancel={onCancel} />)
     await user.keyboard('{Meta>}k{/Meta}')
-    expect(onAbort).toHaveBeenCalled()
+    expect(onCancel).toHaveBeenCalled()
   })
 
-  it('Ctrl+K also triggers abort (cross-platform)', async () => {
+  it('Ctrl+K also triggers cancel (cross-platform)', async () => {
     currentChatState.streaming_phase = 'writing'
-    const onAbort = vi.fn()
+    const onCancel = vi.fn()
     const user = userEvent.setup()
-    render(<InputArea sessionId="s1" onAbort={onAbort} />)
+    render(<InputArea sessionId="s1" onCancel={onCancel} />)
     await user.keyboard('{Control>}k{/Control}')
-    expect(onAbort).toHaveBeenCalled()
+    expect(onCancel).toHaveBeenCalled()
+  })
+
+  it('stop button uses the same cancel callback', async () => {
+    currentChatState.streaming_phase = 'writing'
+    const onCancel = vi.fn()
+    const user = userEvent.setup()
+    render(<InputArea sessionId="s1" onCancel={onCancel} />)
+    await user.click(screen.getByRole('button', { name: '停止生成' }))
+    expect(onCancel).toHaveBeenCalled()
   })
 })
 

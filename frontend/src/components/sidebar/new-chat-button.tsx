@@ -1,13 +1,13 @@
 import { useNavigate } from 'react-router-dom'
-import { chatSessionsActions } from '@/store/chat-sessions'
+import { currentChatActions } from '@/store/current-chat'
 import { Icon } from '@/components/shared/Icon'
 import styles from '@/styles/app-shell.module.scss'
 
 export function NewChatButton() {
   const navigate = useNavigate()
-  async function handleClick() {
-    const session = await chatSessionsActions.getOrCreateEmptyChat()
-    navigate(`/chat/${session.id}`)
+  function handleClick() {
+    currentChatActions.reset()
+    navigate('/chat')
   }
   return (
     <button

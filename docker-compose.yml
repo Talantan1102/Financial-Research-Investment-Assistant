@@ -1,21 +1,186 @@
+# Run Control Plane services are opt-in: use --profile run-control. The
+# default postgres/redis services remain available for the rest of the project.
 services:
+  run-control-init:
+    profiles: ["run-control"]
+    labels: &run-control-labels
+      com.openai.run-control-plane: "true"
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+      args: &run-control-build-args
+        PYTHON_IMAGE: ${RUN_CONTROL_PYTHON_IMAGE:-python:3.12.11-slim-bookworm@sha256:519591d6871b7bc437060736b9f7456b8731f1499a57e22e6c285135ae657bf7}
+        PIP_INDEX_URL: ${RUN_CONTROL_PIP_INDEX_URL:-https://pypi.org/simple}
+    image: &run-control-image ${RUN_CONTROL_IMAGE:-financial-research-run-control:latest}
+    command: ["python", "-m", "app.processes.run_control_init"]
+    environment: &run-control-environment
+      POSTGRES_USER: ${RUN_CONTROL_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${RUN_CONTROL_POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_HOST: ${RUN_CONTROL_POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${RUN_CONTROL_POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${RUN_CONTROL_POSTGRES_DB:-industry_assistant}
+      REDIS_URL: ${RUN_CONTROL_REDIS_URL:-redis://redis:6379/0}
+      RUN_HEARTBEAT_TTL_SECONDS: ${RUN_HEARTBEAT_TTL_SECONDS:-3}
+      RUN_HEARTBEAT_INTERVAL_SECONDS: ${RUN_HEARTBEAT_INTERVAL_SECONDS:-0.5}
+      RUN_LEASE_SECONDS: ${RUN_LEASE_SECONDS:-3}
+      RUN_RENEW_INTERVAL_SECONDS: ${RUN_RENEW_INTERVAL_SECONDS:-0.5}
+      RUN_POLL_INTERVAL_SECONDS: ${RUN_POLL_INTERVAL_SECONDS:-0.2}
+      RUN_WORKER_CAPACITY: ${RUN_WORKER_CAPACITY:-1}
+      # Phase 2 failure-injection suites retain the deterministic default;
+      # Phase 3 live/cassette acceptance opts into the production chat executor.
+      RUN_EXECUTOR_MODE: ${RUN_EXECUTOR_MODE:-simulated}
+      RUN_SIMULATED_DELAY_SECONDS: ${RUN_SIMULATED_DELAY_SECONDS:-0.5}
+      RUN_TOOL_RISK_CATALOG: ${RUN_TOOL_RISK_CATALOG:-v1}
+      RUN_SAFE_IDEMPOTENT_TOOLS: ${RUN_SAFE_IDEMPOTENT_TOOLS:-search_tools,memory_search,read_cached_result,get_portfolio_positions}
+      RUN_CONTROL_MINIMAL_IMPORTS: "1"
+      RUN_HEALTH_MAX_AGE_SECONDS: ${RUN_HEALTH_MAX_AGE_SECONDS:-3}
+      RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS: ${RUN_HEALTH_DEPENDENCY_MAX_AGE_SECONDS:-2}
+      JWT_SECRET_KEY: ${RUN_CONTROL_JWT_SECRET_KEY:-run-control-isolated-secret-not-for-production}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - industry_network
+
+  run-scheduler-a:
+    profiles: ["run-control"]
+    labels: *run-control-labels
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+      args: *run-control-build-args
+    image: *run-control-image
+    command: ["python", "-m", "app.processes.run_scheduler"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: &run-control-healthcheck
+      test: ["CMD", "python", "-S", "/opt/run-control/backend/app/processes/health_probe.py"]
+      interval: 2s
+      timeout: 3s
+      retries: 3
+    stop_grace_period: 10s
+    restart: unless-stopped
+    networks: [industry_network]
+
+  run-scheduler-b:
+    profiles: ["run-control"]
+    labels: *run-control-labels
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+      args: *run-control-build-args
+    image: *run-control-image
+    command: ["python", "-m", "app.processes.run_scheduler"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: *run-control-healthcheck
+    stop_grace_period: 10s
+    restart: unless-stopped
+    networks: [industry_network]
+
+  run-dispatcher:
+    profiles: ["run-control"]
+    labels: *run-control-labels
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+      args: *run-control-build-args
+    image: *run-control-image
+    command: ["python", "-m", "app.processes.run_dispatcher"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: *run-control-healthcheck
+    stop_grace_period: 10s
+    restart: unless-stopped
+    networks: [industry_network]
+
+  run-worker-a:
+    profiles: ["run-control"]
+    labels: *run-control-labels
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+      args: *run-control-build-args
+    image: *run-control-image
+    command: ["python", "-m", "app.processes.run_worker"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: *run-control-healthcheck
+    stop_grace_period: 10s
+    restart: unless-stopped
+    networks: [industry_network]
+
+  run-worker-b:
+    profiles: ["run-control"]
+    labels: *run-control-labels
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+      args: *run-control-build-args
+    image: *run-control-image
+    command: ["python", "-m", "app.processes.run_worker"]
+    environment: *run-control-environment
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck: *run-control-healthcheck
+    stop_grace_period: 10s
+    restart: unless-stopped
+    networks: [industry_network]
+
+  run-api:
+    profiles: ["run-control"]
+    labels: *run-control-labels
+    build:
+      context: .
+      dockerfile: Dockerfile.run-control
+      args: *run-control-build-args
+    image: *run-control-image
+    command: ["uvicorn", "app.processes.run_api:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *run-control-environment
+      RUN_CONTROL_MINIMAL_IMPORTS: "1"
+    depends_on:
+      run-control-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+    ports:
+      - "${RUN_CONTROL_API_PUBLISHED_PORT:-18080}:8000"
+    networks: [industry_network]
+
   # ==================== PostgreSQL 数据库 ====================
   postgres:
+    labels: *run-control-labels
     image: postgres:15-alpine
-    container_name: industry_postgres
+    container_name: ${RUN_CONTROL_POSTGRES_CONTAINER_NAME:-industry_postgres}
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
-      POSTGRES_DB: industry_assistant
+      POSTGRES_USER: ${RUN_CONTROL_POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${RUN_CONTROL_POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_DB: ${RUN_CONTROL_POSTGRES_DB:-industry_assistant}
       TZ: Asia/Shanghai
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PUBLISHED_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/init-db:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${RUN_CONTROL_POSTGRES_USER:-postgres} -d ${RUN_CONTROL_POSTGRES_DB:-industry_assistant}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,12 +189,13 @@ services:
 
   # ==================== Redis 缓存 ====================
   redis:
+    labels: *run-control-labels
     image: redis:7-alpine
-    container_name: industry_redis
+    container_name: ${RUN_CONTROL_REDIS_CONTAINER_NAME:-industry_redis}
     restart: unless-stopped
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      - "${REDIS_PUBLISHED_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:

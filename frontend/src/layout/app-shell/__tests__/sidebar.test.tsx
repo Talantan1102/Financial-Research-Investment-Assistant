@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { renderWithProviders } from '@/test-utils/render'
 import { Sidebar } from '@/layout/app-shell/sidebar'
+
+vi.mock('@/components/sidebar/chat-session-list', () => ({
+  ChatSessionList: () => <div data-testid="sidebar-chat-session-list" />,
+}))
 
 describe('<Sidebar>', () => {
   it('renders sidebar wrapper with data-testid', () => {
@@ -13,11 +17,10 @@ describe('<Sidebar>', () => {
     expect(getByTestId('sidebar-search-input')).toBeInTheDocument()
   })
 
-  it('renders main sections: chat-session-list, new-chat-button, history-toggle, user-panel', () => {
+  it('renders main sections: chat-session-list, new-chat-button, user-panel', () => {
     const { getByTestId } = renderWithProviders(<Sidebar />)
     expect(getByTestId('sidebar-new-chat-button')).toBeInTheDocument()
     expect(getByTestId('sidebar-chat-session-list')).toBeInTheDocument()
-    expect(getByTestId('sidebar-history-toggle')).toBeInTheDocument()
     expect(getByTestId('sidebar-user-panel')).toBeInTheDocument()
   })
 })

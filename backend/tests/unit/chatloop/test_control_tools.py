@@ -16,11 +16,37 @@ import json
 
 import pytest
 from app.chatloop.control_tools import (
+    ApprovalTool,
+    AskUserTool,
     OfferDeepResearchArgs,
     OfferDeepResearchTool,
     ReadCachedResultArgs,
     ReadCachedResultTool,
+    approval_pause,
+    ask_user_pause,
 )
+
+
+def test_control_pause_helpers_return_typed_pure_data_directives() -> None:
+    asking = ask_user_pause("请补充成本价")
+    approval = approval_pause({"tool_calls": [{"id": "call-1"}]})
+
+    assert asking.pause_type == "input"
+    assert asking.request == {"tool_name": "ask_user", "question": "请补充成本价"}
+    assert approval.pause_type == "approval"
+    assert approval.request["tool_calls"] == [{"id": "call-1"}]
+
+
+def test_run_control_tools_expose_strict_model_schemas() -> None:
+    ask_schema = AskUserTool().schema_for_llm()["function"]
+    approval_schema = ApprovalTool().schema_for_llm()["function"]
+
+    assert ask_schema["name"] == "ask_user"
+    assert set(ask_schema["parameters"]["properties"]) == {"question"}
+    assert approval_schema["name"] == "approval"
+    assert set(approval_schema["parameters"]["properties"]) == {"question"}
+
+
 from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_docs import TOOL_DOCS

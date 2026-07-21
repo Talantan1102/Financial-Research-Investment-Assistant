@@ -25,14 +25,61 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.chatloop.inprocess import InProcessTool
+from app.chatloop.loop import PauseDirective
 from app.chatloop.state import ChatLoopState
 from app.tools.base import ToolError
 
 # read_cached_result 默认分页长度上限(与 context.py 降级阈值同量级)。
 _DEFAULT_LIMIT = 2000
+
+
+def ask_user_pause(question: str) -> PauseDirective:
+    """Describe a durable input pause; callers persist it instead of blocking."""
+    if not question.strip():
+        raise ValueError("question must not be blank")
+    return PauseDirective(
+        pause_type="input",
+        request={"tool_name": "ask_user", "question": question},
+    )
+
+
+def approval_pause(request: dict[str, Any]) -> PauseDirective:
+    """Describe a durable pre-side-effect approval pause."""
+    return PauseDirective(pause_type="approval", request=dict(request))
+
+
+class ControlQuestionArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=4096)
+
+
+class AskUserTool(InProcessTool):
+    """Run-only control tool; the durable controller must intercept it."""
+
+    name = "ask_user"
+    description = "暂停当前运行并向用户询问缺失信息。"
+    args_schema = ControlQuestionArgs
+
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
+        del args, state
+        raise RuntimeError("ask_user must be intercepted before dispatch")
+
+
+class ApprovalTool(InProcessTool):
+    """Explicit human approval checkpoint with an idempotent post-approval ack."""
+
+    name = "approval"
+    description = "在继续执行前请求用户明确批准。"
+    args_schema = ControlQuestionArgs
+
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
+        del state
+        validated = ControlQuestionArgs.model_validate(args.model_dump())
+        return {"approved": True, "question": validated.question}
 
 
 class _RawCacheProto(Protocol):
@@ -135,6 +182,11 @@ class ReadCachedResultTool(InProcessTool):
 
 
 __all__ = [
+    "approval_pause",
+    "ask_user_pause",
+    "ApprovalTool",
+    "AskUserTool",
+    "ControlQuestionArgs",
     "OfferDeepResearchArgs",
     "OfferDeepResearchTool",
     "ReadCachedResultArgs",

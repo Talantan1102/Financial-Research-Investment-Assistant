@@ -6,7 +6,7 @@ endpoint without coupling to raw openai SDK usage in strict-typed code.
 
 Why not in app.services strict tier?
   This module directly imports ``openai.OpenAI``, which violates the
-  constraint that ``app.router.chat`` must not import openai.  The router
+  constraint that HTTP routers must not import openai.  The router
   imports only ``build_llm_service_from_env`` (which returns an opaque
   ``LLMService``); the openai SDK call is encapsulated here.
 
@@ -26,9 +26,9 @@ from typing import TYPE_CHECKING, Any
 from openai import AsyncOpenAI, OpenAI
 
 from app.config.llm_config import LLMConfig
+from app.services.llm_identity import resolve_llm_identity_from_env
 from app.services.llm_service import LLMService
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
-from app.services.tier_router import V0_DEFAULT_MODEL  # C45: SSOT for default model
 
 if TYPE_CHECKING:
     from app.services.trace_service import TraceService
@@ -325,7 +325,7 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
     async 流式暂不接 LangSmith,直接传入原生 AsyncOpenAI 实例。
     """
     config = LLMConfig()
-    model = os.getenv("MOCK_TUSHARE_MODEL", V0_DEFAULT_MODEL)
+    provider, model = resolve_llm_identity_from_env()
     # 超时 + 重试上限:不设则 openai 默认 600s/2retry —— maas 端偶发 hang 时整进程冻住
     # 数分钟(eval 并发槽全卡)。正常调用 ≤50s,故 timeout=90s 覆盖合法慢调用、把 hang
     # 的调用 90s fail-fast → 该 rollout 报错被 per-case try 兜住跳过、释放槽,进程不冻。
@@ -358,4 +358,4 @@ def build_llm_service_from_env(trace_service: TraceService | None = None) -> LLM
         from app.services.trace_service import TraceService as _TraceService
 
         trace_service = _TraceService(SessionLocal)
-    return LLMService(client=adapter, trace_service=trace_service)
+    return LLMService(client=adapter, trace_service=trace_service, provider=provider)

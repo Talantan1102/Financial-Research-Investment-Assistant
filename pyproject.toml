@@ -82,6 +82,7 @@ dev = [
     "types-cachetools>=5.5.0",
     "types-python-dateutil>=2.9",
 ]
+
 test = [
     # v1.0 monitoring engine — L2 e2e Redis container fixture
     "testcontainers[redis]>=4.0,<5.0",
@@ -228,6 +229,14 @@ module = [
     "app.mcp_server.*",
     "app.mcp_client.*",
 ]
+ignore_errors = true
+
+# Tests are runtime contracts and remain covered by the pytest gate.  The
+# legacy suite is not fully typed (SQLAlchemy fixtures and protocol fakes in
+# particular), so its annotations must not mask the application/eval mypy
+# signal used by CI.
+[[tool.mypy.overrides]]
+module = ["tests.*", "backend.tests.*"]
 ignore_errors = true
 
 # tushare_client is on the v0 refactor list (see ruff per-file-ignores TODO);
@@ -400,4 +409,18 @@ sequence = [
 [dependency-groups]
 dev = [
     "fakeredis>=2.21",
+]
+run-control = [
+    "bcrypt>=4",
+    "fastapi>=0.115",
+    "greenlet>=3.5.0",
+    "passlib[bcrypt]>=1.7",
+    "psycopg[binary]>=3.1",
+    "psycopg2-binary>=2.9.12",
+    "pydantic[email]>=2.7",
+    "python-jose[cryptography]>=3.3",
+    "python-multipart>=0.0.9",
+    "redis>=7.4.0",
+    "sqlalchemy>=2.0",
+    "uvicorn[standard]>=0.30",
 ]

@@ -1,4 +1,4 @@
-"""POST /api/v0/chat/escalate — confirmed escalation packet handler.
+"""Tenant-scoped confirmed escalation packet handler.
 
 Receives user-confirmed EscalationPacket, persists diff to EscalationRecord,
 invokes ResearchAgent and streams escalate_done event (E13).
@@ -24,13 +24,16 @@ from app.agents.research_agent import ResearchAgent
 from app.agents.schemas import ResearchState
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
-from app.services.chat_session_repo import ChatSessionRepo
 from app.services.escalation_record_repo import EscalationRecordRepo
 from app.services.research_report_repo import ResearchReportRepo
+from app.services.run_escalation_repo import RunEscalationRepo
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v0/chat", tags=["chat-escalate"])
+research_router = APIRouter(
+    prefix="/api/v1/tenants/{tenant_id}/research-escalations",
+    tags=["research-escalations"],
+)
 
 
 ESCALATION_CONFIDENCE_THRESHOLD_DEFAULT = 0.7
@@ -61,19 +64,24 @@ class EscalateRequest(BaseModel):
     draft_record_id: uuid.UUID | str
     packet_confirmed: EscalationPacket
     user_edits: list[FieldEdit] = Field(default_factory=list)
+    source_run_id: uuid.UUID | None = None
+    source_session_id: uuid.UUID | None = None
 
 
 # C43: SSOT — get_escalation_record_repo is defined once in chat.py; re-export it
 # here so app_main needs only one dependency_override (not two identical stubs).
-from app.router.chat import get_escalation_record_repo  # noqa: E402
+def get_escalation_record_repo() -> EscalationRecordRepo:
+    """Run/research-owned provider, independent of the legacy chat router."""
+    raise RuntimeError("EscalationRecordRepo dependency not configured")
 
 
 def get_research_agent() -> ResearchAgent:
     raise RuntimeError("ResearchAgent dependency not configured")
 
 
-def get_chat_session_repo() -> ChatSessionRepo:
-    raise RuntimeError("ChatSessionRepo dependency not configured")
+def get_run_session_repo() -> RunEscalationRepo:
+    """Run-native session provenance provider."""
+    raise RuntimeError("RunEscalationRepo dependency not configured")
 
 
 def get_research_report_repo() -> ResearchReportRepo:
@@ -162,26 +170,96 @@ def packet_to_research_state(
 
 
 async def _session_owned_by(
-    chat_session_repo: ChatSessionRepo, session_id: str, user: User
+    run_session_repo: RunEscalationRepo, session_id: str, user: User
 ) -> bool:
     """True iff ``session_id`` resolves to a chat session owned by ``user``.
 
     非 UUID / 不存在的 session_id 一律 False(get_session 内部 uuid.UUID() 解析)。
     """
     try:
-        sess = await chat_session_repo.get_session(session_id)
+        sess = await run_session_repo.get_session(session_id)
     except (ValueError, AttributeError, TypeError):
         return False
-    return sess is not None and str(sess.user_id) == str(user.id)
+    if sess is None:
+        return False
+    # Transitional test/compatibility adapter: legacy repositories may expose
+    # only user_id while the RunSession repository exposes created_by_user_id.
+    # This branch does not participate in persistence and is removed with the
+    # legacy router in Phase 4 Task 6.
+    legacy_owner = getattr(sess, "user_id", None)
+    if legacy_owner is not None:
+        return str(legacy_owner) == str(user.id)
+    # RunSession has no legacy ``user_id``.  The creator is always allowed;
+    # other users must prove membership in the owning tenant.  This keeps the
+    # endpoint tenant-scoped while preserving the 404 anti-enumeration policy.
+    if str(getattr(sess, "created_by_user_id", "")) == str(user.id):
+        return True
+    tenant_id = getattr(sess, "tenant_id", None)
+    membership_check = getattr(run_session_repo, "session_belongs_to_tenant", None)
+    if tenant_id is None or membership_check is None:
+        return False
+    allowed = membership_check(session_id, tenant_id, user.id)
+    if hasattr(allowed, "__await__"):
+        allowed = await allowed
+    return bool(allowed)
 
 
-@router.post("/escalate")
+async def _source_context_allowed(
+    *,
+    record: Any,
+    req: EscalateRequest,
+    tenant_id: uuid.UUID | None,
+    user: User,
+    run_session_repo: RunEscalationRepo,
+) -> bool:
+    """Fail closed for a supplied Run/Session provenance reference.
+
+    The legacy route has no tenant path, so the repository is the source of
+    truth there.  New callers provide optional ``get_run``/
+    ``session_belongs_to_tenant`` methods; both are checked when available.
+    """
+    record_tenant = getattr(record, "tenant_id", None)
+    if tenant_id is not None and record_tenant is not None and str(record_tenant) != str(tenant_id):
+        return False
+    source_sid = req.source_session_id or req.packet_confirmed.session_metadata.chat_session_id
+    if req.source_session_id is not None and str(req.source_session_id) != str(
+        req.packet_confirmed.session_metadata.chat_session_id
+    ):
+        return False
+    if tenant_id is not None:
+        membership_check = getattr(run_session_repo, "session_belongs_to_tenant", None)
+        if membership_check is not None:
+            allowed = membership_check(source_sid, tenant_id, user.id)
+            if hasattr(allowed, "__await__"):
+                allowed = await allowed
+            if not allowed:
+                return False
+    source_run_id = req.source_run_id
+    if source_run_id is not None:
+        get_run = getattr(run_session_repo, "get_run", None)
+        if get_run is None:
+            # Do not allow an unresolvable run to be written as provenance.
+            return False
+        run = get_run(source_run_id)
+        if hasattr(run, "__await__"):
+            run = await run
+        if run is None or str(getattr(run, "session_id", "")) != str(source_sid):
+            return False
+        if tenant_id is not None and str(getattr(run, "tenant_id", "")) != str(tenant_id):
+            return False
+        if str(getattr(run, "created_by_user_id", user.id)) != str(user.id):
+            return False
+    return True
+
+
+@research_router.post("")
 async def escalate(
     req: EscalateRequest,
+    tenant_id: uuid.UUID | None = None,
     user: User = Depends(get_current_user_required),
     record_repo: EscalationRecordRepo = Depends(get_escalation_record_repo),
     research_agent: ResearchAgent = Depends(get_research_agent),
-    chat_session_repo: ChatSessionRepo = Depends(get_chat_session_repo),
+    run_session_repo: RunEscalationRepo = Depends(get_run_session_repo),
     research_report_repo: ResearchReportRepo = Depends(get_research_report_repo),
 ) -> StreamingResponse:
     """Receive confirmed packet, persist diff, invoke ResearchAgent, stream events.
@@ -199,8 +277,19 @@ async def escalate(
         str(req.packet_confirmed.session_metadata.chat_session_id),
     }
     for sid in candidate_sids:
-        if not await _session_owned_by(chat_session_repo, sid, user):
+        if not await _session_owned_by(run_session_repo, sid, user):
             raise HTTPException(status_code=404, detail="escalation record not found")
+    if not await _source_context_allowed(
+        record=record,
+        req=req,
+        tenant_id=tenant_id,
+        user=user,
+        run_session_repo=run_session_repo,
+    ):
+        raise HTTPException(status_code=404, detail="escalation record not found")
+    source_session_id = (
+        req.source_session_id or req.packet_confirmed.session_metadata.chat_session_id
+    )
 
     async def _stream() -> AsyncIterator[str]:
         seq = {"n": 0}
@@ -220,7 +309,7 @@ async def escalate(
 
         # 2. Build ResearchState and stream ResearchAgent events (E13/E15)
         request_id = f"esc:{uuid4().hex[:16]}"
-        # TODO(v1.x+): fetch chat history from chat_session_repo here and pass
+        # TODO(v1.x+): fetch run history here and pass
         # to packet_to_research_state(chat_history=...) so confidence-gating
         # can populate distilled fields. Currently history=None → safe-default
         # path (distilled empty). User can override via direct API.
@@ -289,10 +378,12 @@ async def escalate(
                 target_ts_code=req.packet_confirmed.explicit_task.target_ts_code,
                 report_markdown=sut_out.response_text,
                 request_id=request_id,
-                source_chat_session_id=req.packet_confirmed.session_metadata.chat_session_id,
+                source_chat_session_id=None,
+                source_session_id=source_session_id,
+                source_run_id=req.source_run_id,
             )
             summary = _summarize_report(sut_out.response_text)
-            await chat_session_repo.append_message(
+            await run_session_repo.append_message(
                 session_id=req.packet_confirmed.session_metadata.chat_session_id,
                 role="assistant",
                 content=f"[研报已生成: {target_name}]",

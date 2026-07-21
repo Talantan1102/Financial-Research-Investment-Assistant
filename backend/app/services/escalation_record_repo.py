@@ -20,13 +20,21 @@ class EscalationRecordRepo:
     async def create_draft(
         self,
         *,
-        session_id: uuid.UUID | str,
+        source_session_id: uuid.UUID | str | None = None,
+        source_run_id: uuid.UUID | str | None = None,
+        # Deprecated spelling accepted at the boundary only; persistence is
+        # always run-native.
+        session_id: uuid.UUID | str | None = None,
         packet_draft: dict[str, Any],
     ) -> EscalationRecord:
+        source_session_id = source_session_id or session_id
+        if source_session_id is None:
+            raise ValueError("source_session_id is required")
         async with self._sf() as sess:
             row = EscalationRecord(
                 id=uuid.uuid4(),
-                session_id=session_id,
+                source_session_id=source_session_id,
+                source_run_id=source_run_id,
                 packet_draft=packet_draft,
                 status="draft",
             )

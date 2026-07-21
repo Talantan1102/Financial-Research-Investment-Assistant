@@ -35,3 +35,6 @@ class User(Base):
     )
     documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
     memories = relationship("LongTermMemory", back_populates="user", cascade="all, delete-orphan")
+    run_sessions = relationship(
+        "RunSession", foreign_keys="RunSession.created_by_user_id", viewonly=True
+    )

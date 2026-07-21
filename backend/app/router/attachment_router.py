@@ -175,6 +175,7 @@ async def upload_attachment(
     # 创建附件记录
     att = ChatAttachment(
         session_id=session_uuid,
+        run_session_id=session_uuid,
         user_id=current_user.id,
         filename=file.filename,
         file_type=ext[1:] if ext else "unknown",

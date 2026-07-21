@@ -13,6 +13,10 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Literal
 
+# Collection imports the synchronous database module before opt-in Compose
+# fixtures can provide isolated credentials. Keep the fallback test-only.
+os.environ.setdefault("POSTGRES_PASSWORD", "postgres123")
+
 import pytest
 from app.services.llm_mock_client import MockLLMClient
 from sqlalchemy import Engine

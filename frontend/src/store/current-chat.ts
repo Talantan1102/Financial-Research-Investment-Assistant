@@ -23,6 +23,7 @@ import type {
   ToolEndEvent,
   TokenEvent,
 } from '@/types/chat'
+import type { DurableRunMessage, RunStatus } from '@/api/runApi'
 
 export type StreamingStatus = 'idle' | 'streaming' | 'reconnecting' | 'error'
 
@@ -62,9 +63,11 @@ export type StreamingPhase =
 export interface CurrentChatState {
   session_id: string | null
   // Plan 3 Task 7: 当前 in-flight task(streaming 中)的 UUID。
-  // sendMessage 拿到 POST /chat 返的 task_id 后 set;done/error event 后 clear。
+  // Run event transport updates status and clears the active run on completion.
   // InputArea 据此切换 send ↔ stop button;ChatPane 据此判断是否要 cancel。
-  active_task_id: string | null
+  active_run_id: string | null
+  active_run_status: RunStatus | null
+  last_event_id: string | null
   messages: ChatMessage[]
   streamingStatus: StreamingStatus
   streamingDraft: string
@@ -87,7 +90,9 @@ export interface CurrentChatState {
 
 const INITIAL: CurrentChatState = {
   session_id: null,
-  active_task_id: null,
+  active_run_id: null,
+  active_run_status: null,
+  last_event_id: null,
   messages: [],
   streamingStatus: 'idle',
   streamingDraft: '',
@@ -125,7 +130,9 @@ function flushDraftAsMessage() {
 export const currentChatActions = {
   setSession(session_id: string, messages: ChatMessage[]) {
     currentChatState.session_id = session_id
-    currentChatState.active_task_id = null
+    currentChatState.active_run_id = null
+    currentChatState.active_run_status = null
+    currentChatState.last_event_id = null
     currentChatState.messages = [...messages]
     currentChatState.streamingStatus = 'idle'
     currentChatState.streamingDraft = ''
@@ -138,8 +145,100 @@ export const currentChatActions = {
     currentChatState.halt_reason = null
     currentChatState.dispatchLanes = []
   },
-  setActiveTaskId(taskId: string | null) {
-    currentChatState.active_task_id = taskId
+  adoptRunSession(sessionId: string) {
+    currentChatState.session_id = sessionId
+    for (const message of currentChatState.messages) {
+      if (message.session_id === '__pending__') message.session_id = sessionId
+    }
+  },
+  beginRun(prompt: string) {
+    currentChatState.streamingStatus = 'streaming'
+    currentChatState.streaming_phase = 'thinking'
+    currentChatState.streamingDraft = ''
+    currentChatState.errorMessage = null
+    currentChatState.last_event_id = null
+    currentChatState.active_run_status = 'queued'
+    currentChatState.messages.push({
+      id: `local-user-${Date.now()}`,
+      session_id: currentChatState.session_id ?? '__pending__',
+      role: 'user',
+      content: prompt,
+      message_type: 'text',
+      tool_call_data: null,
+      research_report_id: null,
+      research_report_summary: null,
+      created_at: new Date().toISOString(),
+    })
+  },
+  setActiveRun(runId: string | null, status: RunStatus | null = null) {
+    currentChatState.active_run_id = runId
+    currentChatState.active_run_status = status
+  },
+  setRunStatus(status: RunStatus) {
+    currentChatState.active_run_status = status
+    if (status === 'running' || status === 'assigned' || status === 'queued') {
+      currentChatState.streamingStatus = 'streaming'
+    }
+  },
+  setLastEventId(eventId: string) {
+    currentChatState.last_event_id = eventId
+  },
+  appendRunToken(content: string) {
+    currentChatState.streamingDraft += content
+    currentChatState.streaming_phase = 'writing'
+  },
+  replaceWithDurableMessages(sessionId: string, messages: DurableRunMessage[]) {
+    currentChatState.session_id = sessionId
+    currentChatState.messages = messages.map((message) => ({
+      id: message.id,
+      session_id: sessionId,
+      role: message.role,
+      content: message.content,
+      message_type: 'text' as const,
+      tool_call_data: null,
+      research_report_id: null,
+      research_report_summary: null,
+      created_at: message.created_at,
+      status:
+        message.status === 'partial' ||
+        message.status === 'cancelled' ||
+        message.status === 'error'
+          ? message.status
+          : 'done',
+    }))
+    currentChatState.streamingDraft = ''
+    currentChatState.streamingStatus = 'idle'
+    currentChatState.streaming_phase = 'idle'
+    currentChatState.errorMessage = null
+  },
+  finishRun(status: RunStatus, finalContent?: string) {
+    if (finalContent !== undefined) currentChatState.streamingDraft = finalContent
+    flushDraftAsMessage()
+    currentChatState.active_run_status = status
+    currentChatState.active_run_id = null
+    currentChatState.streamingStatus = 'idle'
+    currentChatState.streaming_phase = 'idle'
+  },
+  failRun(message: string) {
+    currentChatState.active_run_id = null
+    currentChatState.active_run_status = 'failed'
+    currentChatState.streamingStatus = 'error'
+    currentChatState.streaming_phase = 'error'
+    currentChatState.errorMessage = message
+  },
+  reportRunTransportError(message: string) {
+    currentChatState.streamingStatus = 'error'
+    currentChatState.streaming_phase = 'error'
+    currentChatState.errorMessage = message
+  },
+  resetRunTransport() {
+    currentChatState.active_run_id = null
+    currentChatState.active_run_status = null
+    currentChatState.last_event_id = null
+    currentChatState.streamingStatus = 'idle'
+    currentChatState.streaming_phase = 'idle'
+    currentChatState.streamingDraft = ''
+    currentChatState.errorMessage = null
   },
   beginStreaming() {
     currentChatState.streamingStatus = 'streaming'
@@ -277,7 +376,6 @@ export const currentChatActions = {
         currentChatState.streamingStatus = 'idle'
         currentChatState.streaming_phase = 'idle'
         // Plan 3 Task 7: terminal event → clear in-flight task tracker
-        currentChatState.active_task_id = null
         currentChatState.loop_progress = null
         // Preserve halt_reason banner only when the turn ended non-naturally.
         // stop_reason missing (field absent) → keep existing halt_reason so a
@@ -296,7 +394,6 @@ export const currentChatActions = {
         currentChatState.streaming_phase = 'error'
         currentChatState.errorMessage = (ev as ErrorEvent).error
         // Plan 3 Task 7: terminal event → clear in-flight task tracker
-        currentChatState.active_task_id = null
         currentChatState.loop_progress = null
         currentChatState.toolEvents.push(ev as ErrorEvent)
         break
@@ -306,14 +403,13 @@ export const currentChatActions = {
   },
   /** Reset UI to idle regardless of current streaming state.
    *
-   * Called by useChatSSE abort() and cancelTask() so that any UI-initiated
+   * Called by the Run event transport when a UI-initiated
    * stop (abort fallback or explicit cancel) always brings the UI back to a
-   * usable idle state — even if the active_task_id was never set (POST still
+   * usable idle state after a Run reaches a terminal status.
    * pending) or if the backend never sent a terminal done/error frame.
    */
   resetStreaming() {
     currentChatState.streamingStatus = 'idle'
-    currentChatState.active_task_id = null
     currentChatState.streaming_phase = 'idle'
     currentChatState.streaming_phase_label = undefined
     currentChatState.streamingDraft = ''
@@ -328,7 +424,9 @@ export const currentChatActions = {
   },
   reset() {
     currentChatState.session_id = INITIAL.session_id
-    currentChatState.active_task_id = INITIAL.active_task_id
+    currentChatState.active_run_id = INITIAL.active_run_id
+    currentChatState.active_run_status = INITIAL.active_run_status
+    currentChatState.last_event_id = INITIAL.last_event_id
     currentChatState.messages = []
     currentChatState.streamingStatus = INITIAL.streamingStatus
     currentChatState.streamingDraft = INITIAL.streamingDraft

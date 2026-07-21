@@ -61,9 +61,17 @@ class ResearchReport(Base):
     # ON DELETE SET NULL: 删 chat session 时保留研报记录
     source_chat_session_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("chat_sessions.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+    )
+    source_session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("run_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_run_id = Column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     # 关系

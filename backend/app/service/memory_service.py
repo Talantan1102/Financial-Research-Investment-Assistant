@@ -202,6 +202,7 @@ class MemoryService:
         memory = LongTermMemory(
             user_id=user_id,
             session_id=session_id,
+            run_session_id=session_id,
             summary=summary_data.get("summary", ""),
             key_insights=summary_data,
             token_count=total_tokens,
