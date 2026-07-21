@@ -16,6 +16,7 @@ import uuid
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.database import engine
+from app.models.chat import ChatMessage, ChatSession
 from app.models.run import RunMessage, RunSession
 from app.services.openai_client import build_llm_service_from_env
 from app.tasks.celery_app import celery_app
@@ -67,23 +68,32 @@ def generate_session_title(self, session_id: str) -> None:  # noqa: ANN001
 
     with _open_db_session() as db:
         session = db.query(RunSession).filter_by(id=sid).one_or_none()
+        legacy_session = None
         if session is None:
-            logger.debug("title task: session %s gone, skipping", session_id)
-            return
-        if session.title:
+            # Keep the task safe for the remaining attachment/title backfill
+            # paths that still reference the pre-run chat tables.  The run
+            # control plane is the primary path; this fallback can be removed
+            # once those tables are retired completely.
+            legacy_session = db.query(ChatSession).filter_by(id=sid).one_or_none()
+            if legacy_session is None:
+                logger.debug("title task: session %s gone, skipping", session_id)
+                return
+
+        if session is not None and session.title:
             logger.debug(
                 "title task: session %s already %s, skipping",
                 session_id,
                 "existing",
             )
             return
+        if legacy_session is not None and legacy_session.title_source != "pending":
+            logger.debug("title task: legacy session %s is not pending, skipping", session_id)
+            return
 
-        user_msg = (
-            db.query(RunMessage)
-            .filter_by(session_id=sid, role="user")
-            .order_by(RunMessage.created_at.asc())
-            .first()
-        )
+        message_model = RunMessage if session is not None else ChatMessage
+        user_msg = db.query(message_model).filter_by(session_id=sid, role="user").order_by(
+            message_model.created_at.asc()
+        ).first()
         if user_msg is None:
             logger.debug("title task: no user message yet, skipping")
             return
@@ -111,6 +121,10 @@ def generate_session_title(self, session_id: str) -> None:  # noqa: ANN001
                 )
 
         assert title is not None  # loop 必走通其中一支; helps mypy narrow str | None
-        session.title = title  # type: ignore[assignment]
+        target_session = session if session is not None else legacy_session
+        assert target_session is not None
+        target_session.title = title  # type: ignore[assignment]
+        if legacy_session is not None:
+            legacy_session.title_source = "llm_generated"
         db.commit()
         logger.info("title task: session %s → %r", session_id, title)

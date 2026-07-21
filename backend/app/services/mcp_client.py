@@ -50,7 +50,10 @@ class MCPClient:
             env=env,
         )
         async with (
-            stdio_client(params) as (read, write),
+            # pytest/Celery replace sys.stderr with capture/logging proxies
+            # that do not expose fileno(); the MCP transport needs a real
+            # stream when wiring the child process' stderr.
+            stdio_client(params, errlog=sys.__stderr__) as (read, write),
             ClientSession(read, write) as session,
         ):
             await session.initialize()

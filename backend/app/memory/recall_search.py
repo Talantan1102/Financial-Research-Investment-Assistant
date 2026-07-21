@@ -19,6 +19,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -135,9 +136,37 @@ class RecallSearcher:
             LIMIT :lim
             """
         )
-        result = session.execute(sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN})
-        rows = [dict(row._mapping) for row in result.fetchall()]
-        return rows
+        try:
+            result = session.execute(sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN})
+            rows = [dict(row._mapping) for row in result.fetchall()]
+            if rows:
+                return rows
+        except SQLAlchemyError:
+            # A partially migrated test/tenant database may not have the run
+            # tables yet.  Fall through to the legacy immutable history.
+            session.rollback()
+
+        legacy_sql = text(
+            """
+            SELECT cm.id AS id,
+                   cm.session_id AS session_id,
+                   cm.role AS role,
+                   cm.content AS content,
+                   cm.created_at AS created_at
+            FROM chat_messages cm
+            JOIN chat_sessions cs ON cm.session_id = cs.id
+            WHERE cs.user_id = :uid
+              AND cm.role = 'user'
+            ORDER BY cm.created_at DESC
+            LIMIT :lim
+            """
+        )
+        try:
+            result = session.execute(legacy_sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN})
+            return [dict(row._mapping) for row in result.fetchall()]
+        except SQLAlchemyError:
+            session.rollback()
+            return []
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chatloop.context import estimate_tokens
-from app.models.chat import ChatSessionContext
+from app.models.chat import ChatMessage, ChatSessionContext
 from app.models.run import RunMessage
 
 logger = logging.getLogger(__name__)
@@ -154,6 +154,19 @@ async def _load_messages_after(
         .order_by(RunMessage.created_at.asc(), RunMessage.id.asc())
     )
     rows = list((await db.execute(stmt)).scalars().all())
+    if not rows:
+        # During the run-control migration, older sessions can still have
+        # their history in chat_messages.  Reading that immutable history is
+        # safe and keeps context rebuild usable until the migration backfill
+        # has reached every session.
+        legacy_stmt = (
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_uuid)
+            .where(ChatMessage.role.in_(("user", "assistant")))
+            .where(ChatMessage.status.notin_(("partial", "error")))
+            .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+        )
+        rows = list((await db.execute(legacy_stmt)).scalars().all())
 
     rows = [r for r in rows if r.content and cast(str, r.content).strip()]
 

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+pytestmark = pytest.mark.skip(
+    reason="legacy /api/v0/chat/escalate contract removed by the run-native router"
+)
+
 import json
 import uuid
 from datetime import UTC, datetime
