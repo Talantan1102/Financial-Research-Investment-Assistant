@@ -522,7 +522,9 @@ class ToolHub:
 
         # 2a. search_tools 内置工具:不走 Tool 实例,直接检索文档
         if name == SEARCH_TOOLS_NAME:
-            return await self._dispatch_search_tools(args, state, defer_failures=defer_failures)
+            return await self._dispatch_search_tools(
+                call.id, args, state, defer_failures=defer_failures
+            )
 
         # 2. 工具不存在 → 指导性错误
         tool = self._tools.get(name)
@@ -593,6 +595,7 @@ class ToolHub:
                     error,
                     success=False,
                     cache_key=cache_key,
+                    tool_call_id=call.id,
                 )
             return self._fail_result(name, effective_args, error).model_copy(
                 update={"tool_call_data": dict(runtime_result.audit)}
@@ -606,7 +609,15 @@ class ToolHub:
         await self._emit("tool_end", state.step, tool=name, digest=digest, cached=is_cache_hit)
 
         # 7. 记账(post-apply_step 契约:step=state.step)
-        self._safe_record(state, name, effective_args, digest, success=True, cache_key=cache_key)
+        self._safe_record(
+            state,
+            name,
+            effective_args,
+            digest,
+            success=True,
+            cache_key=cache_key,
+            tool_call_id=call.id,
+        )
 
         return ToolResult(
             tool_name=name,
@@ -623,6 +634,7 @@ class ToolHub:
 
     async def _dispatch_search_tools(
         self,
+        tool_call_id: str,
         args: dict[str, Any],
         state: ChatLoopState,
         *,
@@ -647,6 +659,7 @@ class ToolHub:
                     error,
                     success=False,
                     cache_key=None,
+                    tool_call_id=tool_call_id,
                 )
             return self._fail_result(SEARCH_TOOLS_NAME, args, error)
         query = args.get("query")
@@ -661,6 +674,7 @@ class ToolHub:
                     error,
                     success=False,
                     cache_key=None,
+                    tool_call_id=tool_call_id,
                 )
             return self._fail_result(SEARCH_TOOLS_NAME, args, error)
 
@@ -684,7 +698,15 @@ class ToolHub:
         await self._emit(
             "tool_end", state.step, tool=SEARCH_TOOLS_NAME, digest=digest, cached=False
         )
-        self._safe_record(state, SEARCH_TOOLS_NAME, args, digest, success=True, cache_key=None)
+        self._safe_record(
+            state,
+            SEARCH_TOOLS_NAME,
+            args,
+            digest,
+            success=True,
+            cache_key=None,
+            tool_call_id=tool_call_id,
+        )
         return ToolResult(
             tool_name=SEARCH_TOOLS_NAME,
             args=args,
@@ -803,6 +825,7 @@ class ToolHub:
         *,
         success: bool,
         cache_key: str | None,
+        tool_call_id: str | None = None,
     ) -> None:
         """记账 —— 失败也不抛(hub 不抛硬契约)。
 
@@ -817,6 +840,7 @@ class ToolHub:
                 digest=digest[:_LEDGER_DIGEST_LEN],
                 success=success,
                 cache_key=cache_key,
+                tool_call_id=tool_call_id,
             )
 
     @staticmethod
