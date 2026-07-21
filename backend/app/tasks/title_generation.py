@@ -14,6 +14,7 @@ import logging
 import uuid
 
 from sqlalchemy.orm import Session, sessionmaker
+from typing import Any, cast
 
 from app.core.database import engine
 from app.models.chat import ChatMessage, ChatSession
@@ -101,7 +102,7 @@ def generate_session_title(self, session_id: str) -> None:  # noqa: ANN001
             logger.debug("title task: no user message yet, skipping")
             return
 
-        user_content: str = str(user_msg.content)
+        user_content: str = str(cast(Any, user_msg).content)
 
         title: str | None = None
         for attempt in range(_MAX_ATTEMPTS):
@@ -128,6 +129,6 @@ def generate_session_title(self, session_id: str) -> None:  # noqa: ANN001
         assert target_session is not None
         target_session.title = title  # type: ignore[assignment]
         if legacy_session is not None:
-            legacy_session.title_source = "llm_generated"
+            legacy_session.title_source = "llm_generated"  # type: ignore[assignment]
         db.commit()
         logger.info("title task: session %s → %r", session_id, title)

@@ -13,7 +13,7 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO, cast
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -53,7 +53,7 @@ class MCPClient:
             # pytest/Celery replace sys.stderr with capture/logging proxies
             # that do not expose fileno(); the MCP transport needs a real
             # stream when wiring the child process' stderr.
-            stdio_client(params, errlog=sys.__stderr__) as (read, write),
+            stdio_client(params, errlog=cast(TextIO, sys.__stderr__)) as (read, write),
             ClientSession(read, write) as session,
         ):
             await session.initialize()
