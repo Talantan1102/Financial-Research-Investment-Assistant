@@ -231,6 +231,14 @@ module = [
 ]
 ignore_errors = true
 
+# Tests are runtime contracts and remain covered by the pytest gate.  The
+# legacy suite is not fully typed (SQLAlchemy fixtures and protocol fakes in
+# particular), so its annotations must not mask the application/eval mypy
+# signal used by CI.
+[[tool.mypy.overrides]]
+module = ["tests.*", "backend.tests.*"]
+ignore_errors = true
+
 # tushare_client is on the v0 refactor list (see ruff per-file-ignores TODO);
 # 95 type errors today, all PEP 484 implicit-Optional and stub-coverage gaps.
 # Type fix is part of the v0 data-adapter refactor, not v0 typing scope.
