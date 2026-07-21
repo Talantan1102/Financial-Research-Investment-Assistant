@@ -434,6 +434,12 @@ def build_chat_executor_builder(
     ) -> ChatRunExecutor:
         approved = _approved_tool_call_ids(loaded)
         approved_executions = dict(getattr(loaded, "approved_tool_executions", ()))
+        # Recovery approvals are resolved against durable execution ids by
+        # AttemptService.  Include those call ids directly as a second source
+        # of truth; this keeps approval authorization intact when a portable
+        # continuation was produced by an older worker version whose pending
+        # action shape did not expose the call list in the legacy helper.
+        approved = approved | frozenset(approved_executions)
         controller_box: list[DurableApprovalController] = []
 
         def components_factory(emit: Any, seq_counter: SeqCounter) -> _ComponentsProxy:
