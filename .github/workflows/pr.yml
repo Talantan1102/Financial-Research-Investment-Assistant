@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     # The full PG-backed cassette suite now includes the run-control phases;
     # keep the gate bounded but allow the complete suite to finish on hosted
-    # runners instead of being cancelled at the previous 15-minute limit.
-    timeout-minutes: 30
+    # runners instead of being cancelled at the previous 30-minute limit.
+    timeout-minutes: 60
     services:
       # PR-A 2026-05-17: 全 L0/L1/L2/e2e 都用真 PG。
       # 测试 db (industry_assistant_test) 由 conftest._ensure_test_db_exists 在
@@ -67,7 +67,7 @@ jobs:
     # The acceptance harness recreates several isolated worker topologies and
     # deliberately exercises restart/recovery paths; allow the full sequence
     # to finish instead of cancelling it at the previous 25-minute limit.
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
