@@ -52,6 +52,8 @@ AlphaScout 把研究流程做成可观察、可复核的 AI 系统：
 
 ## 架构总览
 
+![AlphaScout 前后端分离与 Agent Runtime 架构](docs/screenshots/12-agent-architecture.png)
+
 ```text
 React 前端
   对话页 / 研报页 / 持仓页 / 监控页 / 记忆页 / 知识库页
