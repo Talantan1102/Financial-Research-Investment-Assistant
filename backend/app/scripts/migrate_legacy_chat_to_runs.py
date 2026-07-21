@@ -4,6 +4,7 @@ The command is deliberately report-first: without ``--apply`` it performs no
 flush/commit and emits a deterministic JSON report.  Cleanup is a separate,
 explicitly guarded operation.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -111,14 +112,21 @@ def _maintenance_bootstrap(db: Any) -> None:
             existing = {column["name"] for column in inspect(connection).get_columns(table)}
             for column, definition in columns.items():
                 if column not in existing:
-                    connection.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}'))
+                    connection.execute(
+                        text(f'ALTER TABLE "{table}" ADD COLUMN "{column}" {definition}')
+                    )
         if inspector.has_table("escalation_records"):
             # Replace the legacy chat FK, if present, with run-native FKs only
             # after the migration has populated the bridge columns.
             for fk in inspector.get_foreign_keys("escalation_records"):
                 if (fk.get("referred_table") or "") == "chat_sessions" and fk.get("name"):
-                    connection.execute(text(f'ALTER TABLE escalation_records DROP CONSTRAINT IF EXISTS "{fk["name"]}"'))
-            connection.execute(text("""
+                    connection.execute(
+                        text(
+                            f'ALTER TABLE escalation_records DROP CONSTRAINT IF EXISTS "{fk["name"]}"'
+                        )
+                    )
+            connection.execute(
+                text("""
                 DO $$ BEGIN
                   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_escalation_source_session') THEN
                     ALTER TABLE escalation_records ADD CONSTRAINT fk_escalation_source_session
@@ -129,13 +137,18 @@ def _maintenance_bootstrap(db: Any) -> None:
                       FOREIGN KEY (source_run_id) REFERENCES runs(id) ON DELETE RESTRICT;
                   END IF;
                 END $$
-            """))
+            """)
+            )
         if inspector.has_table("research_reports"):
             # The historical source column remains for audit/backfill, but its
             # FK must not keep the legacy chat_sessions table alive at cutover.
             for fk in inspector.get_foreign_keys("research_reports"):
                 if (fk.get("referred_table") or "") == "chat_sessions" and fk.get("name"):
-                    connection.execute(text(f'ALTER TABLE research_reports DROP CONSTRAINT IF EXISTS "{fk["name"]}"'))
+                    connection.execute(
+                        text(
+                            f'ALTER TABLE research_reports DROP CONSTRAINT IF EXISTS "{fk["name"]}"'
+                        )
+                    )
         if inspector.has_table("chat_attachments"):
             # Older installs created single-column FKs to globally unique
             # ids.  RunMessage ids are only unique within tenant/session, so
@@ -144,8 +157,13 @@ def _maintenance_bootstrap(db: Any) -> None:
                 if (fk.get("referred_table") or "") in {"run_messages", "run_sessions"}:
                     name = fk.get("name")
                     if name:
-                        connection.execute(text(f'ALTER TABLE "chat_attachments" DROP CONSTRAINT IF EXISTS "{name}"'))
-            connection.execute(text("""
+                        connection.execute(
+                            text(
+                                f'ALTER TABLE "chat_attachments" DROP CONSTRAINT IF EXISTS "{name}"'
+                            )
+                        )
+            connection.execute(
+                text("""
                 DO $$ BEGIN
                   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_chat_attachments_run_session') THEN
                     ALTER TABLE chat_attachments ADD CONSTRAINT fk_chat_attachments_run_session
@@ -157,7 +175,8 @@ def _maintenance_bootstrap(db: Any) -> None:
                       REFERENCES run_messages(tenant_id, session_id, id) ON DELETE SET NULL;
                   END IF;
                 END $$
-            """))
+            """)
+            )
         connection.execute(
             text(
                 """CREATE TABLE IF NOT EXISTS run_legacy_mappings (
@@ -186,7 +205,14 @@ def _ensure_legacy_columns(db: Any, *, apply: bool, report: MigrationReport) -> 
     )
     from app.models.research_report import ResearchReport
 
-    required = (ChatSession, ChatMessage, ChatAttachment, ChatSessionContext, LongTermMemory, ResearchReport)
+    required = (
+        ChatSession,
+        ChatMessage,
+        ChatAttachment,
+        ChatSessionContext,
+        LongTermMemory,
+        ResearchReport,
+    )
     inspector = inspect(db.get_bind())
     missing: list[str] = []
     for model in required:
@@ -201,12 +227,16 @@ def _ensure_legacy_columns(db: Any, *, apply: bool, report: MigrationReport) -> 
                     sql_type = column.type.compile(dialect=db.get_bind().dialect)
                     db.execute(text(f'ALTER TABLE "{table}" ADD COLUMN "{column.name}" {sql_type}'))
     if missing and not apply:
-        report.quarantined.append({"table": "schema", "id": "legacy", "reason": "missing columns: " + ",".join(missing)})
+        report.quarantined.append(
+            {"table": "schema", "id": "legacy", "reason": "missing columns: " + ",".join(missing)}
+        )
         return False
     return True
 
 
-def _record_mapping(db: Any, source_table: str, source_id: Any, target_table: str, target_id: Any) -> None:
+def _record_mapping(
+    db: Any, source_table: str, source_id: Any, target_table: str, target_id: Any
+) -> None:
     from sqlalchemy import text
 
     db.execute(
@@ -300,11 +330,18 @@ def migrate_legacy_chat(
         prior_data: dict[str, Any] = (
             prior_report.to_dict()
             if isinstance(prior_report, MigrationReport)
-            else dict(prior_report) if isinstance(prior_report, dict) else {}
+            else dict(prior_report)
+            if isinstance(prior_report, dict)
+            else {}
         )
         if not prior_data.get("applied") or prior_data.get("quarantined"):
             raise ValueError("prior migration report is not a successful apply")
-        prior_hash = prior_data.get("report_hash") or MigrationReport(**{k: v for k, v in prior_data.items() if k in MigrationReport.__dataclass_fields__}).report_hash()
+        prior_hash = (
+            prior_data.get("report_hash")
+            or MigrationReport(
+                **{k: v for k, v in prior_data.items() if k in MigrationReport.__dataclass_fields__}
+            ).report_hash()
+        )
         if prior_hash != expected_report_hash:
             raise ValueError("migration report hash mismatch")
     report = MigrationReport(applied=apply, database=database)
@@ -355,22 +392,45 @@ def migrate_legacy_chat(
             if apply:
                 target = db.get(RunSession, row.id)
                 if target is None:
-                    db.add(RunSession(id=row.id, tenant_id=membership.tenant_id, created_by_user_id=row.user_id, title=row.title, created_at=row.created_at, updated_at=row.updated_at))
+                    db.add(
+                        RunSession(
+                            id=row.id,
+                            tenant_id=membership.tenant_id,
+                            created_by_user_id=row.user_id,
+                            title=row.title,
+                            created_at=row.created_at,
+                            updated_at=row.updated_at,
+                        )
+                    )
                     report.writes += 1
             report.mappings[f"chat_sessions:{row.id}"] = f"run_sessions:{row.id}"
             if apply:
                 _record_mapping(db, "chat_sessions", row.id, "run_sessions", row.id)
         except Exception as exc:  # malformed/ambiguous rows are quarantined
-            report.quarantined.append({"table": "chat_sessions", "id": str(getattr(row, "id", "")), "reason": str(exc)})
+            report.quarantined.append(
+                {"table": "chat_sessions", "id": str(getattr(row, "id", "")), "reason": str(exc)}
+            )
         if apply and len(session_map) % batch_size == 0:
             db.commit()
     for row in messages:
         tenant_id = session_map.get(row.session_id)
         if tenant_id is None:
-            report.quarantined.append({"table": "chat_messages", "id": str(row.id), "reason": "session unresolved"})
+            report.quarantined.append(
+                {"table": "chat_messages", "id": str(row.id), "reason": "session unresolved"}
+            )
             continue
         if apply and tenant_id is not None and db.get(RunMessage, row.id) is None:
-            db.add(RunMessage(id=row.id, tenant_id=tenant_id, session_id=row.session_id, role=row.role, content=row.content, status=getattr(row, "status", "done"), created_at=row.created_at))
+            db.add(
+                RunMessage(
+                    id=row.id,
+                    tenant_id=tenant_id,
+                    session_id=row.session_id,
+                    role=row.role,
+                    content=row.content,
+                    status=getattr(row, "status", "done"),
+                    created_at=row.created_at,
+                )
+            )
             report.writes += 1
         if tenant_id is not None:
             report.mappings[f"chat_messages:{row.id}"] = f"run_messages:{row.id}"
@@ -389,7 +449,13 @@ def migrate_legacy_chat(
             try:
                 sid = getattr(row, sid_attr, None)
                 if sid not in session_map:
-                    report.quarantined.append({"table": table, "id": str(getattr(row, "id", sid)), "reason": "session unresolved"})
+                    report.quarantined.append(
+                        {
+                            "table": table,
+                            "id": str(getattr(row, "id", sid)),
+                            "reason": "session unresolved",
+                        }
+                    )
                     continue
                 if apply:
                     if model is ChatAttachment:
@@ -405,7 +471,9 @@ def migrate_legacy_chat(
                 if apply:
                     _record_mapping(db, table, getattr(row, "id", sid), "run_sessions", sid)
             except Exception as exc:
-                report.quarantined.append({"table": table, "id": str(getattr(row, "id", "")), "reason": str(exc)})
+                report.quarantined.append(
+                    {"table": table, "id": str(getattr(row, "id", "")), "reason": str(exc)}
+                )
     # Escalation records are audit rows, not Run executions, but their source
     # provenance must move with the rest of the chat state.  During the bridge
     # window old rows may still expose session_id; read it once and persist
@@ -422,7 +490,11 @@ def migrate_legacy_chat(
             if "session_id" in cols:
                 legacy_escalation_sessions = {
                     str(item.id): item.session_id
-                    for item in db.execute(text("SELECT id, session_id FROM escalation_records WHERE session_id IS NOT NULL"))
+                    for item in db.execute(
+                        text(
+                            "SELECT id, session_id FROM escalation_records WHERE session_id IS NOT NULL"
+                        )
+                    )
                 }
         except Exception:
             legacy_escalation_sessions = {}
@@ -432,7 +504,13 @@ def migrate_legacy_chat(
             legacy_sid = legacy_escalation_sessions.get(str(row.id))
             sid = getattr(row, "source_session_id", None) or legacy_sid
             if sid not in session_map:
-                report.quarantined.append({"table": "escalation_records", "id": str(row.id), "reason": "session unresolved"})
+                report.quarantined.append(
+                    {
+                        "table": "escalation_records",
+                        "id": str(row.id),
+                        "reason": "session unresolved",
+                    }
+                )
                 continue
             if apply:
                 row.source_session_id = sid
@@ -440,7 +518,10 @@ def migrate_legacy_chat(
             report.mappings[f"escalation_records:{row.id}"] = f"run_sessions:{sid}"
             if apply:
                 _record_mapping(db, "escalation_records", row.id, "run_sessions", sid)
-    report.target_counts.update(run_sessions=len(session_map), run_messages=sum(1 for m in messages if m.session_id in session_map))
+    report.target_counts.update(
+        run_sessions=len(session_map),
+        run_messages=sum(1 for m in messages if m.session_id in session_map),
+    )
     report.source_counts.update(
         chat_attachments=sum(1 for row in db.scalars(select(ChatAttachment))),
         chat_session_context=sum(1 for row in db.scalars(select(ChatSessionContext))),
@@ -449,14 +530,31 @@ def migrate_legacy_chat(
         escalation_records=(len(escalation_records) if escalation_table_exists else 0),
     )
     report.dependency_counts.update(
-        chat_attachments=sum(1 for row in db.scalars(select(ChatAttachment)) if row.session_id in session_map),
-        chat_session_context=sum(1 for row in db.scalars(select(ChatSessionContext)) if row.session_id in session_map),
-        long_term_memories=sum(1 for row in db.scalars(select(LongTermMemory)) if row.session_id in session_map),
-        research_reports=sum(1 for row in db.scalars(select(ResearchReport)) if getattr(row, "source_chat_session_id", None) in session_map),
+        chat_attachments=sum(
+            1 for row in db.scalars(select(ChatAttachment)) if row.session_id in session_map
+        ),
+        chat_session_context=sum(
+            1 for row in db.scalars(select(ChatSessionContext)) if row.session_id in session_map
+        ),
+        long_term_memories=sum(
+            1 for row in db.scalars(select(LongTermMemory)) if row.session_id in session_map
+        ),
+        research_reports=sum(
+            1
+            for row in db.scalars(select(ResearchReport))
+            if getattr(row, "source_chat_session_id", None) in session_map
+        ),
         escalation_records=sum(
-            1 for row in escalation_records
-            if (getattr(row, "source_session_id", None) or legacy_escalation_sessions.get(str(row.id))) in session_map
-        ) if escalation_table_exists else 0,
+            1
+            for row in escalation_records
+            if (
+                getattr(row, "source_session_id", None)
+                or legacy_escalation_sessions.get(str(row.id))
+            )
+            in session_map
+        )
+        if escalation_table_exists
+        else 0,
     )
     report.target_counts.update(
         run_attachments=report.dependency_counts["chat_attachments"],
@@ -475,7 +573,11 @@ def migrate_legacy_chat(
 
             cols = {c["name"] for c in inspect(db.get_bind()).get_columns("escalation_records")}
             if "source_session_id" in cols:
-                db.execute(text("ALTER TABLE escalation_records ALTER COLUMN source_session_id SET NOT NULL"))
+                db.execute(
+                    text(
+                        "ALTER TABLE escalation_records ALTER COLUMN source_session_id SET NOT NULL"
+                    )
+                )
             if "session_id" in cols:
                 db.execute(text("ALTER TABLE escalation_records DROP COLUMN session_id"))
         db.commit()
@@ -498,8 +600,11 @@ def migrate_legacy_chat(
                 if referred in _LEGACY_TABLES and table not in _LEGACY_TABLES:
                     external.append(f"fk:{table}.{fk.get('name') or '<unnamed>'}->{referred}")
         if external:
-            raise ValueError("legacy cleanup blocked by external dependencies: " + ",".join(sorted(external)))
-        dependency_rows = db.execute(text("""
+            raise ValueError(
+                "legacy cleanup blocked by external dependencies: " + ",".join(sorted(external))
+            )
+        dependency_rows = db.execute(
+            text("""
             SELECT dependent.relname AS dependent_name,
                    referenced.relname AS referenced_name,
                    dependent.relkind AS dependent_kind
@@ -513,7 +618,8 @@ def migrate_legacy_chat(
               AND referenced.relname IN ('chat_tasks', 'chat_session_context', 'chat_attachments', 'chat_messages', 'chat_sessions')
               AND dependent.relname NOT IN ('chat_tasks', 'chat_session_context', 'chat_attachments', 'chat_messages', 'chat_sessions')
               AND dependent.relkind NOT IN ('i', 'S')
-        """)).all()
+        """)
+        ).all()
         if dependency_rows:
             details = ",".join(f"{r.dependent_name}->{r.referenced_name}" for r in dependency_rows)
             raise ValueError("legacy cleanup blocked by unknown database dependencies: " + details)
@@ -539,6 +645,7 @@ def main() -> None:
     parser.add_argument("--prior-report")
     args = parser.parse_args()
     from app.core.database import SessionLocal
+
     with SessionLocal() as db:
         report = migrate_legacy_chat(db, **vars(args))
         print(json.dumps({**report.to_dict(), "report_hash": report.report_hash()}, sort_keys=True))

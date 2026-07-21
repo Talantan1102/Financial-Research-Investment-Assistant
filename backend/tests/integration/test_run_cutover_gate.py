@@ -58,7 +58,9 @@ def test_collect_database_evidence_reads_escalation_and_dependency_targets_live(
         "dependency_counts": {"escalation_records": 999},
         "quarantined": [],
     }
-    report["report_hash"] = sha256(json.dumps(report, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    report["report_hash"] = sha256(
+        json.dumps(report, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
     path = tmp_path / "migration.json"
     path.write_text(json.dumps(report), encoding="utf-8")
     evidence = collect_database_evidence(engine, migration_report=path)

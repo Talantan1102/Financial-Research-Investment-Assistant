@@ -64,8 +64,15 @@ class ResearchReport(Base):
         nullable=True,
         index=True,
     )
-    source_session_id = Column(UUID(as_uuid=True), ForeignKey("run_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
-    source_run_id = Column(UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    source_session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("run_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    source_run_id = Column(
+        UUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # 关系
     user = relationship("User", backref="research_reports")

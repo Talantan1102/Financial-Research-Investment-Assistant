@@ -1,4 +1,5 @@
 """Run-native provenance repository for research escalation handoff."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -22,7 +23,9 @@ class RunEscalationRepo:
         async with self._sf() as session:
             return await session.scalar(select(RunSession).where(RunSession.id == session_id))
 
-    async def session_belongs_to_tenant(self, session_id: UUID, tenant_id: UUID, user_id: UUID) -> bool:
+    async def session_belongs_to_tenant(
+        self, session_id: UUID, tenant_id: UUID, user_id: UUID
+    ) -> bool:
         async with self._sf() as session:
             row = await session.scalar(
                 select(RunSession)
@@ -39,9 +42,13 @@ class RunEscalationRepo:
         async with self._sf() as session:
             return await session.scalar(select(Run).where(Run.id == run_id))
 
-    async def append_message(self, *, session_id: UUID, role: str, content: str, **_: Any) -> RunMessage:
+    async def append_message(
+        self, *, session_id: UUID, role: str, content: str, **_: Any
+    ) -> RunMessage:
         async with self._sf() as session, session.begin():
-            run_session = await session.scalar(select(RunSession).where(RunSession.id == session_id))
+            run_session = await session.scalar(
+                select(RunSession).where(RunSession.id == session_id)
+            )
             if run_session is None:
                 raise ValueError("run session not found")
             row = RunMessage(

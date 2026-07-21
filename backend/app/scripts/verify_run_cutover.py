@@ -1,4 +1,5 @@
 """Read-only parity gate for legacy chat cutover."""
+
 from __future__ import annotations
 
 import argparse
@@ -54,7 +55,13 @@ class CutoverResult:
 
 def verify_cutover(evidence: CutoverEvidence) -> CutoverResult:
     failures: list[str] = []
-    if not evidence.migration_report_hash or evidence.source_counts.get("chat_sessions", 0) != evidence.target_counts.get("run_sessions", 0) or evidence.source_counts.get("chat_messages", 0) != evidence.target_counts.get("run_messages", 0):
+    if (
+        not evidence.migration_report_hash
+        or evidence.source_counts.get("chat_sessions", 0)
+        != evidence.target_counts.get("run_sessions", 0)
+        or evidence.source_counts.get("chat_messages", 0)
+        != evidence.target_counts.get("run_messages", 0)
+    ):
         failures.append("migration_counts")
     if evidence.active_chat_tasks:
         failures.append("active_chat_tasks")
@@ -102,10 +109,12 @@ def collect_database_evidence(
         required = {"run_sessions", "run_messages", "runs", "tenant_memberships"}
         if not required.issubset(tables):
             raise RuntimeError("run control tables missing")
+
         def count(table: str) -> int:
             if table not in tables:
                 return 0
             return int(db.execute(text(f'SELECT count(*) FROM "{table}"')).scalar_one())
+
         # The report is an expected/audited snapshot only.  Re-read every
         # count that can still exist from PostgreSQL so a forged JSON file
         # cannot make the gate pass.
@@ -124,14 +133,20 @@ def collect_database_evidence(
         target["run_messages"] = count("run_messages")
         if "escalation_records" in tables:
             target["run_escalation_records"] = int(
-                db.execute(text(
-                    "SELECT count(*) FROM escalation_records "
-                    "WHERE source_session_id IS NOT NULL"
-                )).scalar_one()
+                db.execute(
+                    text(
+                        "SELECT count(*) FROM escalation_records "
+                        "WHERE source_session_id IS NOT NULL"
+                    )
+                ).scalar_one()
             )
         active = 0
         if "chat_tasks" in tables:
-            active = int(db.execute(text("SELECT count(*) FROM chat_tasks WHERE status IN ('queued','running')")).scalar_one())
+            active = int(
+                db.execute(
+                    text("SELECT count(*) FROM chat_tasks WHERE status IN ('queued','running')")
+                ).scalar_one()
+            )
         external_fks = 0
         for table in tables:
             for fk in inspector.get_foreign_keys(table):
@@ -151,13 +166,19 @@ def collect_database_evidence(
             if table not in tables:
                 continue
             dependency_source[table] = count(table)
-            dependency_target[table] = int(db.execute(text(
-                f'SELECT count(*) FROM "{table}" WHERE "{bridge_column}" IS NOT NULL'
-            )).scalar_one())
+            dependency_target[table] = int(
+                db.execute(
+                    text(f'SELECT count(*) FROM "{table}" WHERE "{bridge_column}" IS NOT NULL')
+                ).scalar_one()
+            )
     finally:
         db.close()
     project_root = Path(__file__).resolve().parents[3]
-    frontend = (project_root / frontend_root) if not Path(frontend_root).is_absolute() else Path(frontend_root)
+    frontend = (
+        (project_root / frontend_root)
+        if not Path(frontend_root).is_absolute()
+        else Path(frontend_root)
+    )
     singular_urls = 0
     if frontend.is_dir():
         for path in frontend.rglob("*.ts*"):
@@ -176,9 +197,16 @@ def collect_database_evidence(
     ):
         if path.is_file():
             text_body = path.read_text(encoding="utf-8")
-            singular_urls += sum(text_body.count(token) for token in ("ChatSession", "ChatMessage", "chat_sessions", "chat_messages"))
-    routes_ok = (project_root / "backend/app/router/run_sessions.py").exists() or (project_root / "backend/app/router/run.py").exists()
-    gates_ok = any((project_root / "docs/claude-context").glob("run-control-plane-phase2*")) and any((project_root / "docs/claude-context").glob("run-control-plane-phase3*"))
+            singular_urls += sum(
+                text_body.count(token)
+                for token in ("ChatSession", "ChatMessage", "chat_sessions", "chat_messages")
+            )
+    routes_ok = (project_root / "backend/app/router/run_sessions.py").exists() or (
+        project_root / "backend/app/router/run.py"
+    ).exists()
+    gates_ok = any(
+        (project_root / "docs/claude-context").glob("run-control-plane-phase2*")
+    ) and any((project_root / "docs/claude-context").glob("run-control-plane-phase3*"))
     return CutoverEvidence(
         migration_report_hash=(supplied_hash if supplied_hash == actual_hash else ""),
         source_counts=source,
@@ -188,13 +216,16 @@ def collect_database_evidence(
         has_run_session_routes=routes_ok,
         has_phase2_phase3_gates=gates_ok,
         backup_manifest_valid=backup_manifest_valid,
-        dependency_source_counts=(dependency_source or dict(
-            report_data.get("dependency_source_counts")
-            or report_data.get("dependency_counts", {})
-        )),
-        dependency_target_counts=(dependency_target or dict(
-            report_data.get("dependency_target_counts", {})
-        )),
+        dependency_source_counts=(
+            dependency_source
+            or dict(
+                report_data.get("dependency_source_counts")
+                or report_data.get("dependency_counts", {})
+            )
+        ),
+        dependency_target_counts=(
+            dependency_target or dict(report_data.get("dependency_target_counts", {}))
+        ),
         quarantine_count=len(report_data.get("quarantined", [])),
         allowed_quarantine_count=0,
         legacy_external_fks=external_fks,
@@ -209,10 +240,12 @@ def main() -> None:
     parser.add_argument("--backup-manifest")
     args = parser.parse_args()
     from sqlalchemy import create_engine
+
     engine = create_engine(args.database_url)
     backup_ok = False
     if args.backup_manifest:
         from app.scripts.migrate_legacy_chat_to_runs import validate_backup_manifest
+
         database_name = engine.url.database
         if not database_name:
             raise SystemExit("database URL must include a database name")

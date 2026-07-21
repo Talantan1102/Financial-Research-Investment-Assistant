@@ -222,7 +222,9 @@ async def _source_context_allowed(
     if tenant_id is not None and record_tenant is not None and str(record_tenant) != str(tenant_id):
         return False
     source_sid = req.source_session_id or req.packet_confirmed.session_metadata.chat_session_id
-    if req.source_session_id is not None and str(req.source_session_id) != str(req.packet_confirmed.session_metadata.chat_session_id):
+    if req.source_session_id is not None and str(req.source_session_id) != str(
+        req.packet_confirmed.session_metadata.chat_session_id
+    ):
         return False
     if tenant_id is not None:
         membership_check = getattr(run_session_repo, "session_belongs_to_tenant", None)
@@ -285,7 +287,9 @@ async def escalate(
         run_session_repo=run_session_repo,
     ):
         raise HTTPException(status_code=404, detail="escalation record not found")
-    source_session_id = req.source_session_id or req.packet_confirmed.session_metadata.chat_session_id
+    source_session_id = (
+        req.source_session_id or req.packet_confirmed.session_metadata.chat_session_id
+    )
 
     async def _stream() -> AsyncIterator[str]:
         seq = {"n": 0}

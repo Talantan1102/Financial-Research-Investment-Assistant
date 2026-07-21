@@ -43,7 +43,15 @@ def test_cleanup_requires_explicit_confirmation_and_backup_manifest(tmp_path: Pa
         migrate_legacy_chat(object(), apply=True, cleanup=True)
 
     manifest = tmp_path / "backup.json"
-    manifest.write_text(json.dumps({"database": "industry_assistant_test", "timestamp": "2026-07-20T00:00:00Z", "sha256": "a" * 64}))
+    manifest.write_text(
+        json.dumps(
+            {
+                "database": "industry_assistant_test",
+                "timestamp": "2026-07-20T00:00:00Z",
+                "sha256": "a" * 64,
+            }
+        )
+    )
     assert validate_backup_manifest(manifest, database="industry_assistant_test") is True
 
 
