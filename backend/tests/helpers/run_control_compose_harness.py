@@ -134,6 +134,7 @@ class ComposeRunControlHarness:
         result: ComposeAcceptanceResult | None = None
         primary_error: Exception | None = None
         try:
+            self._log("bootstrap: starting run-control services")
             build_mode = "--no-build" if self.environment.get("RUN_CONTROL_IMAGE") else "--build"
             self._compose(
                 "up",
@@ -148,16 +149,26 @@ class ComposeRunControlHarness:
                 "run-api",
             )
             self._assert_processes_healthy()
+            self._log("bootstrap: services healthy")
             if os.getenv("RUN_CONTROL_INJECT_FAILURE_AFTER_UP") == "1":
                 raise RuntimeError("injected failure after Compose up")
+            self._log("scenario: parallel-and-duplicate")
             parallel = self._parallel_and_duplicate()
+            self._log("scenario: kill-and-recover")
             crash = self._kill_and_recover()
+            self._log("scenario: redis-restart-and-durable-outbox")
             redis_restart = self._restart_redis_with_durable_outbox()
+            self._log("scenario: same-session-serialization")
             serial = self._same_session_serialization()
+            self._log("scenario: cancel-running-attempt")
             cancel = self._cancel_running_attempt()
+            self._log("scenario: single-worker-capacity-two")
             capacity = self._single_worker_capacity_two()
+            self._log("scenario: double-kill-retry-exhaustion")
             self._double_kill_retry_exhaustion()
+            self._log("scenario: postgres-restart-and-recover")
             postgres_restart = self._restart_postgres_and_recover()
+            self._log("scenario: full-capacity-health")
             full_capacity = self._full_capacity_stays_healthy()
             result = ComposeAcceptanceResult(
                 project=self.project,
@@ -174,6 +185,7 @@ class ComposeRunControlHarness:
             primary_error = exc
         cleanup_error: Exception | None = None
         try:
+            self._log("cleanup: removing Compose project")
             self._cleanup()
         except Exception as exc:
             cleanup_error = exc
@@ -796,6 +808,7 @@ class ComposeRunControlHarness:
         raise AssertionError(message)
 
     def _compose(self, *arguments: str, check: bool = True) -> str:
+        self._log(f"docker compose: {' '.join(arguments)}")
         return self._command(
             "docker",
             "compose",
@@ -872,8 +885,9 @@ class ComposeRunControlHarness:
         return completed.stdout
 
     def _command_result(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        started = time.monotonic()
         try:
-            return self._runner(
+            result = self._runner(
                 arguments,
                 cwd=self.repo_root,
                 env=self.environment,
@@ -884,11 +898,27 @@ class ComposeRunControlHarness:
                 text=True,
                 timeout=float(self.environment.get("RUN_CONTROL_COMMAND_TIMEOUT", "60")),
             )
+            elapsed = time.monotonic() - started
+            self._log(
+                f"command finished rc={result.returncode} elapsed={elapsed:.1f}s: "
+                f"{' '.join(arguments)}"
+            )
+            if result.returncode != 0 and result.stderr:
+                self._log(f"command stderr: {result.stderr[-1200:]}")
+            return result
         except subprocess.TimeoutExpired as exc:
             stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+            self._log(
+                f"command timed out after {exc.timeout}s: {' '.join(arguments)}; "
+                f"stderr={stderr[-1200:]}"
+            )
             return subprocess.CompletedProcess(
                 arguments,
                 124,
                 stdout=exc.output if isinstance(exc.output, str) else "",
                 stderr=f"command timeout after {exc.timeout}s: {stderr}",
             )
+
+    @staticmethod
+    def _log(message: str) -> None:
+        print(f"[run-control-compose] {message}", flush=True)
