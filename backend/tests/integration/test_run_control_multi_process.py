@@ -32,7 +32,17 @@ from tests.helpers.simulated_run_executor import (
 class FakeSchedulingService:
     def __init__(self) -> None:
         self.recoveries = 0
-        self.scheduled = [object(), object(), None]
+        self.scheduled = [self._assignment(), self._assignment(), None]
+
+    @staticmethod
+    def _assignment() -> SimpleNamespace:
+        return SimpleNamespace(
+            tenant_id=uuid4(),
+            run_id=uuid4(),
+            session_id=uuid4(),
+            attempt_id=uuid4(),
+            worker_id=uuid4(),
+        )
 
     async def recover_expired_attempts(self, limit: int) -> tuple[object, ...]:
         assert limit == 7
@@ -280,6 +290,8 @@ async def test_worker_duplicate_assignment_claims_and_executes_only_once() -> No
     attempt_id = uuid4()
     item = SimpleNamespace(
         event_type=OutboxType.ATTEMPT_ASSIGNED,
+        tenant_id=uuid4(),
+        run_id=uuid4(),
         attempt_id=attempt_id,
         worker_id=registry.worker_id,
     )
@@ -432,6 +444,8 @@ async def test_worker_sigterm_drains_before_waiting_for_inflight_then_offlines()
     await worker.start()
     item = SimpleNamespace(
         event_type=OutboxType.ATTEMPT_ASSIGNED,
+        tenant_id=uuid4(),
+        run_id=uuid4(),
         attempt_id=uuid4(),
         worker_id=registry.worker_id,
     )
