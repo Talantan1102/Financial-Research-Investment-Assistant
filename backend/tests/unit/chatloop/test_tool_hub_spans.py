@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_hub import ToolHub
+from app.chatloop.tool_runtime_policy import ToolRiskMetadata
+from app.runtime.models import CapabilityType, RiskLevel
 from app.services.llm_step import StepToolCall
 from pydantic import BaseModel
 
@@ -26,6 +28,9 @@ class _FakeQuoteTool:
 
     name = "get_quote"
     args_schema = _Args
+    runtime_risk_metadata = ToolRiskMetadata(
+        RiskLevel.LOW, CapabilityType.DATA_TOOL, True, True, max_attempts=2
+    )
 
     async def run(self, validated) -> dict:
         return {"price": 42}

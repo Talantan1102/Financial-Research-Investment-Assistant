@@ -2,7 +2,8 @@
 
 把 C.5 HierarchicalMemory 的六个方法合并成两个 in-process 工具:
 
-    memory_search(query, scope: archival|recall|graph = archival, k=5)
+    memory_search(query, scope: index|archival|recall|graph = archival, k=5)
+        index    → memory_index_summary(MEMORY.md 等价 DB 投影,无正文)
         archival → archival_memory_search(语义检索)
         recall   → recall_memory_search(历史对话)
         graph    → archival_memory_traverse(实体关系遍历,query 当实体名)
@@ -27,16 +28,17 @@ HierarchicalMemory 实例与 is_prompt_injection 分类器。
   source_label/target_label/...)+ episode_id: UUID,而合并 schema 的 content 是自由
   文本、无 episode_id。本工具把自由文本 content 包成最小结构化 fact(User -[stated]->
   Note);episode_id 经构造注入的 episode_id_resolver(state) 取 —— Phase 4 worker 在
-  turn 开头 write_episode 后,注入一个返回本 turn episode_id 的 resolver(ChatLoopState
-  是冻结字段集,不便挂临时属性,故走 resolver 闭包而非 state 字段)。默认 resolver 返回
-  None,此时 archival_insert 返回指导错误而非静默丢。
+  首次 archival_insert 时惰性 write_episode 后,返回本 turn episode_id(ChatLoopState
+  是冻结字段集,不便挂临时属性,故走 resolver 闭包而非 state 字段)。resolver 可异步；
+  默认返回 None,此时 archival_insert 返回指导错误而非静默丢。
 - user_id 在合并 schema 里不出现(对齐 MCP 三原语:应用该当背景喂的不进工具参数);
   从 state.user_id 取,run_with_state 时转 UUID。
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import inspect
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import UUID
@@ -51,7 +53,7 @@ from app.tools.base import ToolError
 # 分类器签名:text -> (is_injection, confidence, reason)。默认用规则层 is_prompt_injection。
 InjectionClassifier = Callable[[str], tuple[bool, float, str]]
 # episode_id 解析:Phase 4 worker 注入(write_episode 后绑定本 turn 的 episode_id)。
-EpisodeIdResolver = Callable[[ChatLoopState], "UUID | None"]
+EpisodeIdResolver = Callable[[ChatLoopState], "UUID | None | Awaitable[UUID | None]"]
 
 # archival_insert 自由文本 → 结构化 fact 的默认 importance(中档,contextual)。
 _DEFAULT_IMPORTANCE = 0.5
@@ -64,7 +66,7 @@ _DEFAULT_IMPORTANCE = 0.5
 
 class MemorySearchArgs(BaseModel):
     query: str
-    scope: Literal["archival", "recall", "graph"] = "archival"
+    scope: Literal["index", "archival", "recall", "graph"] = "archival"
     k: int = 5
 
 
@@ -122,7 +124,9 @@ class MemorySearchTool(InProcessTool):
     """
 
     name = "memory_search"
-    description = "检索用户个人记忆(scope: archival 语义 / recall 历史对话 / graph 实体关系)。"
+    description = (
+        "检索用户个人记忆(scope: index 索引 / archival 语义 / recall 历史对话 / graph 实体关系)。"
+    )
     args_schema = MemorySearchArgs
 
     def __init__(self, *, memory: Any) -> None:
@@ -133,7 +137,9 @@ class MemorySearchTool(InProcessTool):
         args = MemorySearchArgs.model_validate(args.model_dump())
         user_id = UUID(state.user_id)
 
-        if args.scope == "recall":
+        if args.scope == "index":
+            hits = await self._memory.memory_index_summary(user_id=user_id)
+        elif args.scope == "recall":
             hits = await self._memory.recall_memory_search(
                 user_id=user_id, query=args.query, k=args.k
             )
@@ -265,6 +271,8 @@ class MemoryWriteTool(InProcessTool):
             )
 
         episode_id = self._resolve_episode(state)
+        if inspect.isawaitable(episode_id):
+            episode_id = await episode_id
         if episode_id is None:
             raise _fail(
                 "[前置缺失] 当前 turn 尚未绑定 episode,archival_insert 暂不可用。"

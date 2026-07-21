@@ -23,6 +23,7 @@ EventType = Literal[
     "steer_merged",
     "loop_halt",
     "approval_request",
+    "permission_required",
     "escalate_request",
     "cost_update",
     "done",

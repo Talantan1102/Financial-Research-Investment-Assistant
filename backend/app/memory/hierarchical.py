@@ -723,6 +723,84 @@ class HierarchicalMemory:
         finally:
             session.close()
 
+    async def write_explicit_episode(
+        self,
+        user_id: UUID,
+        session_id: UUID,
+        episode_index: int,
+        user_message: str,
+        agent_response: str,
+        source_kind: str = "agent_explicit",
+    ) -> ChatMemoryEpisode:
+        """原子创建已 claim 的显式写 episode，使 Path B 从未看见待抽取态。"""
+        from datetime import datetime
+
+        from app.memory.models import ChatMemoryEpisode
+
+        session = self._pg_session_factory()
+        try:
+            episode = ChatMemoryEpisode(
+                user_id=user_id,
+                session_id=session_id,
+                episode_index=episode_index,
+                user_message_text=user_message,
+                agent_response_text=agent_response,
+                source_kind=source_kind,
+                extracted_at=datetime.now(UTC),
+                extracted_by="agent_explicit_claim",
+                extraction_metadata={"explicit_status": "pending"},
+            )
+            session.add(episode)
+            session.commit()
+            session.refresh(episode)
+            session.expunge(episode)
+            return episode
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    async def finalize_explicit_episode(
+        self,
+        episode_id: UUID,
+        agent_response: str,
+        outcome: str,
+    ) -> None:
+        """补齐显式 episode 的回复与 completed/failed/cancelled 审计终态。"""
+        from app.memory.models import ChatMemoryEpisode
+
+        session = self._pg_session_factory()
+        try:
+            episode = (
+                session.query(ChatMemoryEpisode)
+                .filter(ChatMemoryEpisode.episode_id == episode_id)
+                .one()
+            )
+            # runner 只能看到 memory_write 的聚合 ledger；若同轮还有别的成功
+            # memory_write，不能据此误判本次 archival_insert 成功。真正成功的
+            # archival pipeline 会把 extracted_by 从 claim 改成 "agent"；仍是
+            # claim 说明 insert 没走完，completed 必须降为 failed。
+            if outcome == "completed" and episode.extracted_by == "agent_explicit_claim":
+                outcome = "failed"
+            metadata = dict(episode.extraction_metadata or {})
+            metadata["explicit_status"] = outcome
+            episode.agent_response_text = agent_response
+            episode.extracted_by = f"agent_explicit_{outcome}"
+            episode.extraction_metadata = metadata
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    async def memory_index_summary(self, user_id: UUID) -> dict[str, Any]:
+        """返回 MEMORY.md 等价的 DB 元数据投影（不含任何具体记忆正文）。"""
+        from app.memory.index_projection import build_memory_index_projection
+
+        return build_memory_index_projection(self._pg_session_factory, user_id)
+
     async def next_episode_index(self, session_id: UUID) -> int:
         """返回该 session 下一个 episode_index(max+1;空 session 为 0)。
 
@@ -757,6 +835,7 @@ class HierarchicalMemory:
                 .filter(
                     ChatMemoryEpisode.user_id == user_id,
                     ChatMemoryEpisode.extracted_at.is_(None),
+                    ChatMemoryEpisode.source_kind != "agent_explicit",
                 )
                 .order_by(ChatMemoryEpisode.created_at)
                 .limit(limit)

@@ -51,6 +51,8 @@ dependencies = [
     "python-dateutil>=2.9",
     # MCP
     "mcp>=1.0",
+    # MCP capability schemas are validated directly by the runtime.
+    "jsonschema>=4.23",
     # Stock data
     "tushare>=1.4",
     # v0.8.3 — monitoring scheduler (apscheduler retired in v1.0, kept until Task 14 退役)

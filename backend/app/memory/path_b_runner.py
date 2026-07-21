@@ -287,6 +287,7 @@ class PathBRunner:
             .filter(
                 ChatMemoryEpisode.session_id == session_id,
                 ChatMemoryEpisode.extracted_at.is_(None),
+                ChatMemoryEpisode.source_kind != "agent_explicit",
             )
             .order_by(ChatMemoryEpisode.episode_index.asc())
             .all()

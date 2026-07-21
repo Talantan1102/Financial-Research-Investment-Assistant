@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -62,6 +62,7 @@ def _make_episode(
     ts: datetime,
     user_msg: str,
     agent_msg: str = "",
+    source_kind: str = "chat_turn",
 ) -> UUID:
     from app.memory.models import ChatMemoryEpisode
 
@@ -74,13 +75,92 @@ def _make_episode(
             episode_index=idx,
             user_message_text=user_msg,
             agent_response_text=agent_msg,
-            source_kind="chat_turn",
+            source_kind=source_kind,
             created_at=ts,
         )
         sess.add(ep)
         sess.commit()
         eid: UUID = ep.episode_id  # type: ignore[assignment]
         return eid
+    finally:
+        sess.close()
+
+
+@pytest.mark.asyncio
+async def test_path_b_permanently_excludes_agent_explicit_episode(
+    pg_memory_fixture: dict[str, Any],
+) -> None:
+    """显式 memory_write 的审计 episode 即使未抽取，也绝不能被 Path B 二次抽取。"""
+    engine = pg_memory_fixture["engine"]
+    SessionLocal = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+    user_id, session_id = _seed_user_session(pg_memory_fixture)
+    _make_episode(
+        SessionLocal,
+        user_id,
+        session_id,
+        0,
+        datetime.now(UTC),
+        "我买了茅台",
+        source_kind="agent_explicit",
+    )
+    extractor = MagicMock()
+    extractor.extract_facts = AsyncMock(return_value={"entities": [], "edges": []})
+    runner = PathBRunner(
+        session_factory=SessionLocal,
+        llm_extractor=extractor,
+        archival_insert_fn=AsyncMock(),
+    )
+
+    result = await runner.run_for_session(session_id, "post_turn")
+
+    assert result.episodes_scanned == 0
+    extractor.extract_facts.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_explicit_episode_is_atomically_claimed_and_keeps_cancel_audit(
+    pg_memory_fixture: dict[str, Any],
+) -> None:
+    from app.memory.hierarchical import HierarchicalMemory
+    from app.memory.models import ChatMemoryEpisode
+
+    engine = pg_memory_fixture["engine"]
+    SessionLocal = sessionmaker(bind=engine, future=True, expire_on_commit=False)
+    user_id, session_id = _seed_user_session(pg_memory_fixture)
+    memory = HierarchicalMemory(SessionLocal, None, None, None, None, None)
+
+    episode = await memory.write_explicit_episode(
+        user_id=user_id,
+        session_id=session_id,
+        episode_index=0,
+        user_message="我买了茅台",
+        agent_response="",
+    )
+
+    assert episode.source_kind == "agent_explicit"
+    assert episode.extracted_at is not None
+    assert episode.extracted_by == "agent_explicit_claim"
+    assert episode.extraction_metadata == {"explicit_status": "pending"}
+    episode_id = cast(UUID, episode.episode_id)
+
+    # 未经过 archival pipeline 的 claim 即使 runner 乐观传 completed，也必须落 failed。
+    await memory.finalize_explicit_episode(episode_id, "记录失败", "completed")
+    sess = SessionLocal()
+    try:
+        persisted = sess.query(ChatMemoryEpisode).filter_by(episode_id=episode.episode_id).one()
+        assert persisted.agent_response_text == "记录失败"
+        assert persisted.extracted_at is not None
+        assert persisted.extracted_by == "agent_explicit_failed"
+        assert persisted.extraction_metadata["explicit_status"] == "failed"
+    finally:
+        sess.close()
+
+    await memory.finalize_explicit_episode(episode_id, "正在记录", "cancelled")
+    sess = SessionLocal()
+    try:
+        persisted = sess.query(ChatMemoryEpisode).filter_by(episode_id=episode.episode_id).one()
+        assert persisted.extracted_by == "agent_explicit_cancelled"
+        assert persisted.extraction_metadata["explicit_status"] == "cancelled"
     finally:
         sess.close()
 

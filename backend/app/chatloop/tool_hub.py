@@ -5,8 +5,8 @@ Phase 3 后续任务注册)直接持 Tool 实例。对 loop 暴露统一的 disp
 gather 并行 + 缓存 + 指导性错误包装 + 台账记账 + tool_start/end 事件。
 
 硬契约(loop 依赖):
-- dispatch 绝不抛异常 —— 任何内部异常(含 BaseException 子类如 RuntimeError)
-  都包成 ToolResult(success=False) 返回;loop._merge_results 依赖此契约;
+- dispatch 对普通执行异常绝不抛 —— 都包成 ToolResult(success=False) 返回;
+  asyncio.CancelledError 是请求控制流,必须原样传播给 loop/chat_runner;
 - 返回的 results 与收到的 calls 严格等长且按序(loop._merge_results 用 iter 消费)。
 """
 
@@ -16,7 +16,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -24,9 +23,8 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from app.chatloop.contracts import ToolResult
+from app.agents.schemas import ToolResult
 from app.chatloop.events import EventType, LoopEvent, SeqCounter
-from app.chatloop.inprocess import InProcessTool
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_docs import (
     CORE_TOOLS,
@@ -35,14 +33,35 @@ from app.chatloop.tool_docs import (
     search_docs,
     thin_schema,
 )
+from app.chatloop.tool_runtime_adapter import ChatloopToolAdapter
+from app.chatloop.tool_runtime_policy import ToolRiskPolicy
+from app.runtime.events import RuntimeEvent
+from app.runtime.hooks import HookPipeline
+from app.runtime.models import (
+    CapabilityDefinition,
+    CapabilityType,
+    ErrorCategory,
+    ExecutionContext,
+    ExecutionStatus,
+    RiskLevel,
+    RuntimeErrorInfo,
+    RuntimeResult,
+)
+from app.runtime.permissions import AuthorizationCallback, PermissionEngine
+from app.runtime.registry import CapabilityRegistry
+from app.runtime.safe_executor import SafeExecutor
+from app.runtime.scheduler import TaskScheduler
+from app.runtime.tasks import Task, TaskBuilder
+from app.runtime.tool_runtime import ToolRuntime
 from app.services.llm_step import StepToolCall
-from app.services.tool_result_cache import CacheHit, ToolResultCache
+from app.services.tool_result_cache import ToolResultCache
 from app.services.trace_models import Span
 from app.tools.base import Tool, ToolError
 
 logger = logging.getLogger(__name__)
 
 EmitFn = Callable[[LoopEvent], Awaitable[None]]
+VisibilityResolver = Callable[[ChatLoopState], frozenset[str]]
 
 # digest / 错误文案截断长度(spec § 3.1)
 _DIGEST_LEN = 120  # tool_end 事件里的 digest 长度
@@ -53,7 +72,7 @@ _ERR_MSG_LEN = 200
 SEARCH_TOOLS_NAME = "search_tools"
 _SEARCH_TOOLS_K = 3  # search_docs top-k
 
-# 数据工具单次执行超时(in-process 豁免);超时落进 _guidance_error 的 [超时] 映射。
+# 所有工具统一执行超时;超时落进指导性错误的 [超时] 映射。
 DEFAULT_TOOL_TIMEOUT_S = 30.0
 
 
@@ -73,6 +92,11 @@ class ToolHub:
         seq_counter: SeqCounter | None = None,
         progressive: bool = True,
         tool_timeout_s: float = DEFAULT_TOOL_TIMEOUT_S,
+        max_output_bytes: int = 1_048_576,
+        hooks: HookPipeline | None = None,
+        authorization_callback: AuthorizationCallback | None = None,
+        visibility_resolver: VisibilityResolver | None = None,
+        max_concurrency: int = 8,
         trace: Any = None,  # TraceService | None —— 写工具 span(可观测性);None 则不写
     ) -> None:
         self._tools: dict[str, Tool] = {}
@@ -81,6 +105,11 @@ class ToolHub:
         self._seq_counter = seq_counter if seq_counter is not None else SeqCounter()
         self._progressive = progressive
         self._tool_timeout_s = tool_timeout_s
+        self._max_output_bytes = max_output_bytes
+        self._hooks = hooks or HookPipeline()
+        self._risk_policy = ToolRiskPolicy(authorization_callback)
+        self._visibility_resolver = visibility_resolver
+        self._max_concurrency = max_concurrency
         self._trace = trace
 
     # ------------------------------------------------------------------
@@ -223,38 +252,220 @@ class ToolHub:
     # ------------------------------------------------------------------
 
     async def dispatch(self, calls: list[StepToolCall], state: ChatLoopState) -> list[ToolResult]:
-        """并行分发 calls,返回与之等长按序的 ToolResult 列表。
+        """Build and schedule a request-local DAG, preserving provider call order."""
+        if not calls:
+            return []
 
-        每个 call 走 _dispatch_one(自身全包不抛);外层 gather 不需要
-        return_exceptions=True,但仍断言等长(fail loud 守护契约)。
-        """
-        results: list[ToolResult] = list(
-            await asyncio.gather(*(self._dispatch_one(call, state) for call in calls))
+        # A malformed provider call becomes one isolated scheduler task. Other
+        # tasks still retain concurrency-group and dependency semantics.
+        normalized_calls: list[StepToolCall] = []
+        malformed_calls: dict[str, StepToolCall] = {}
+        for call in calls:
+            try:
+                _ = call.parsed_args
+                normalized_calls.append(call)
+            except ValueError:
+                malformed_calls[call.id] = call
+                normalized_calls.append(StepToolCall(id=call.id, name=call.name, arguments="{}"))
+
+        definitions = {
+            name: self._risk_policy.definition_for(tool, timeout_s=self._tool_timeout_s)
+            for name, tool in self._tools.items()
+        }
+        for call in calls:
+            definitions.setdefault(
+                call.name,
+                CapabilityDefinition(
+                    name=call.name,
+                    type=CapabilityType.DATA_TOOL,
+                    input_schema={"type": "object"},
+                    output_schema={"type": "object"},
+                    minimum_risk=RiskLevel.LOW,
+                    read_only=True,
+                    idempotent=True,
+                    default_timeout_s=self._tool_timeout_s,
+                    max_attempts=1,
+                ),
+            )
+        definitions.setdefault(
+            SEARCH_TOOLS_NAME,
+            CapabilityDefinition(
+                name=SEARCH_TOOLS_NAME,
+                type=CapabilityType.DATA_TOOL,
+                input_schema=self._search_tools_schema()["function"]["parameters"],
+                output_schema={"type": "object"},
+                minimum_risk=RiskLevel.LOW,
+                read_only=True,
+                idempotent=True,
+                default_timeout_s=self._tool_timeout_s,
+                max_attempts=1,
+            ),
         )
+        try:
+            graph = TaskBuilder(definitions).build(normalized_calls)
+        except ValueError as exc:
+            return await self._graph_build_failures(calls, state, str(exc))
+
+        legacy_results: dict[str, ToolResult] = {}
+
+        async def execute(task: Task, inputs: dict[str, Any], attempt: int) -> RuntimeResult:
+            del attempt
+            call = malformed_calls.get(task.id) or StepToolCall(
+                id=task.id, name=task.capability, arguments=json.dumps(inputs, ensure_ascii=False)
+            )
+            legacy = await self._dispatch_one(call, state, defer_failures=True)
+            legacy_results[task.id] = legacy
+            if legacy.success:
+                return RuntimeResult(
+                    status=ExecutionStatus.SUCCEEDED,
+                    output=legacy.output,
+                    latency_ms=legacy.latency_ms,
+                    audit={"cached": legacy.cached},
+                    effective_input=legacy.args,
+                )
+            category = self._legacy_error_category(legacy.error)
+            return RuntimeResult(
+                status=ExecutionStatus.FAILED,
+                error=RuntimeErrorInfo(
+                    code="legacy_tool_failed",
+                    category=category,
+                    message=legacy.error or "tool execution failed",
+                    retryable=category in {ErrorCategory.TIMEOUT, ErrorCategory.TRANSIENT},
+                ),
+                latency_ms=legacy.latency_ms,
+                effective_input=legacy.args,
+            )
+
+        async def emit_runtime(_event: RuntimeEvent) -> None:
+            # ToolHub's existing tool_call/start/end/error events remain the
+            # public stream vocabulary. Runtime task events are internal here.
+            return None
+
+        try:
+            scheduled = await TaskScheduler(definitions, max_concurrency=self._max_concurrency).run(
+                graph, execute, emit_runtime
+            )
+        except ValueError as exc:
+            return await self._graph_build_failures(calls, state, str(exc))
+
+        results: list[ToolResult] = []
+        for task in graph.tasks:
+            legacy = legacy_results.get(task.id)
+            if legacy is not None:
+                if not legacy.success:
+                    await self._finalize_deferred_failure(
+                        legacy,
+                        state,
+                        definitions[task.capability],
+                        self._tools.get(task.capability),
+                    )
+                results.append(legacy)
+                continue
+            runtime_result = scheduled[task.id]
+            error = self._scheduled_guidance_error(runtime_result)
+            args = dict(runtime_result.effective_input or task.inputs)
+            await self._emit_error(task.capability, error, step=state.step)
+            self._safe_record(state, task.capability, args, error, success=False, cache_key=None)
+            results.append(self._fail_result(task.capability, args, error))
         assert len(results) == len(calls), (
             f"ToolHub.dispatch: results({len(results)}) 与 calls({len(calls)}) 长度不匹配"
         )
         return results
 
-    async def _dispatch_one(self, call: StepToolCall, state: ChatLoopState) -> ToolResult:
-        """单 call 协程 —— 全包不抛,任何路径都返回 ToolResult。
+    async def _finalize_deferred_failure(
+        self,
+        result: ToolResult,
+        state: ChatLoopState,
+        definition: CapabilityDefinition,
+        tool: Tool | None,
+    ) -> None:
+        error = result.error or "[执行失败] 工具执行失败"
+        permission_source = (result.tool_call_data or {}).get("permission_source")
+        if tool is not None and self._risk_policy.should_emit_permission_required(
+            tool, permission_source
+        ):
+            await self._emit(
+                "permission_required",
+                state.step,
+                tool=result.tool_name,
+                risk=definition.minimum_risk.value,
+            )
+        await self._emit_error(result.tool_name, error, step=state.step)
+        self._safe_record(
+            state,
+            result.tool_name,
+            result.args,
+            error,
+            success=False,
+            cache_key=None,
+        )
+        self._write_tool_span(state, result, datetime.now(UTC))
+
+    async def _graph_build_failures(
+        self, calls: list[StepToolCall], state: ChatLoopState, detail: str
+    ) -> list[ToolResult]:
+        error = f"[任务依赖无效] {detail[:_ERR_MSG_LEN]}"
+        results: list[ToolResult] = []
+        for call in calls:
+            args = self._safe_parsed_args(call)
+            await self._emit_error(call.name, error, step=state.step)
+            self._safe_record(state, call.name, args, error, success=False, cache_key=None)
+            results.append(self._fail_result(call.name, args, error))
+        return results
+
+    @staticmethod
+    def _legacy_error_category(error: str | None) -> ErrorCategory:
+        if error is None:
+            return ErrorCategory.EXECUTION_ERROR
+        if error.startswith("[超时]"):
+            return ErrorCategory.TIMEOUT
+        if error.startswith(("[需要授权]", "[不可见工具]")):
+            return ErrorCategory.PERMISSION_DENIED
+        if error.startswith(("[参数", "[任务依赖")):
+            return ErrorCategory.VALIDATION_ERROR
+        if any(marker in error.lower() for marker in ("503", "429", "temporary", "transient")):
+            return ErrorCategory.TRANSIENT
+        return ErrorCategory.EXECUTION_ERROR
+
+    @staticmethod
+    def _scheduled_guidance_error(result: RuntimeResult) -> str:
+        if result.error is None:
+            return "[执行失败] 任务调度失败"
+        if result.error.category is ErrorCategory.DEPENDENCY_FAILED:
+            return f"[依赖失败] {result.error.message}"
+        if result.error.category is ErrorCategory.CANCELLED:
+            return "[已取消] 任务未执行"
+        return f"[执行失败] {result.error.message[:_ERR_MSG_LEN]}"
+
+    async def _dispatch_one(
+        self,
+        call: StepToolCall,
+        state: ChatLoopState,
+        *,
+        defer_failures: bool = False,
+    ) -> ToolResult:
+        """单 call 协程 —— 普通异常全包,取消信号原样传播。
 
         外层 try 是双保险:理论上下面每条分支都自产 ToolResult,但若有未预料的
-        异常(如 emit 回调自身抛),也兜成 success=False,绝不向 dispatch/loop 冒泡。
+        异常(如 emit 回调自身抛),也兜成 success=False。CancelledError 除外。
 
         dispatch 后写一条工具 span(覆盖所有返回路径:坏 JSON / 未知工具 / 缓存命中 /
         成功 / 失败 / search_tools),span 写入非致命。
         """
         started_at = datetime.now(UTC)
         try:
-            result = await self._dispatch_one_inner(call, state)
-        except BaseException as e:  # noqa: BLE001 — hub 不抛硬契约:双保险兜底
+            result = await self._dispatch_one_inner(call, state, defer_failures=defer_failures)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — hub 不抛硬契约:双保险兜底
             # 尽力记账(用工具名),但记账失败也不能抛
             args = self._safe_parsed_args(call)
             error = f"[执行失败] {type(e).__name__}: {str(e)[:_ERR_MSG_LEN]}"
-            self._safe_record(state, call.id, call.name, args, error, success=False, cache_key=None)
+            if not defer_failures:
+                self._safe_record(state, call.name, args, error, success=False, cache_key=None)
             result = self._fail_result(call.name, args, error)
-        self._write_tool_span(state, result, started_at)
+        if result.success or not defer_failures:
+            self._write_tool_span(state, result, started_at)
         return result
 
     def _write_tool_span(
@@ -290,7 +501,13 @@ class ToolHub:
         except Exception:  # noqa: BLE001 — 观测写入非致命,绝不打断工具调用
             logger.warning("tool span write failed (non-fatal)", exc_info=True)
 
-    async def _dispatch_one_inner(self, call: StepToolCall, state: ChatLoopState) -> ToolResult:
+    async def _dispatch_one_inner(
+        self,
+        call: StepToolCall,
+        state: ChatLoopState,
+        *,
+        defer_failures: bool,
+    ) -> ToolResult:
         name = call.name
 
         # 1. parsed_args:坏 JSON → 指导性错误(工具名仍记账)
@@ -298,127 +515,105 @@ class ToolHub:
             args = call.parsed_args
         except ValueError:
             error = "[参数格式错误] arguments 不是合法 JSON。请检查后重试。"
-            await self._emit_error(call.name, error, step=state.step)
-            self._safe_record(state, call.id, name, {}, error, success=False, cache_key=None)
+            if not defer_failures:
+                await self._emit_error(call.name, error, step=state.step)
+                self._safe_record(state, name, {}, error, success=False, cache_key=None)
             return self._fail_result(name, {}, error)
 
         # 2a. search_tools 内置工具:不走 Tool 实例,直接检索文档
         if name == SEARCH_TOOLS_NAME:
-            return await self._dispatch_search_tools(call.id, args, state)
+            return await self._dispatch_search_tools(args, state, defer_failures=defer_failures)
 
         # 2. 工具不存在 → 指导性错误
         tool = self._tools.get(name)
         if tool is None:
             error = f"[未知工具] {name} 不存在。可用工具见列表;若需参数细节可调 search_tools。"
-            await self._emit_error(name, error, step=state.step)
-            self._safe_record(state, call.id, name, args, error, success=False, cache_key=None)
+            if not defer_failures:
+                await self._emit_error(name, error, step=state.step)
+                self._safe_record(state, name, args, error, success=False, cache_key=None)
             return self._fail_result(name, args, error)
 
-        # 3. ledger 去重:同 (tool, args) 本 turn 已成功过 → 不重跑。
-        #    InProcessTool(记忆写入/控制/技能类)是状态变更工具,同参二次调用不代表
-        #    "已有结果可复用"——memory_write 重复写入是业务意图,offer_deep_research
-        #    重复触发需真执行以确保 escalate_offered 置位。台账去重短路仅对 registry
-        #    后端的只读 MCP 数据工具生效;InProcessTool 的幂等由工具自身管理。
-        is_inprocess = isinstance(tool, InProcessTool)
-        if not is_inprocess:
-            hit = state.ledger.find_success(tool_name=name, args=args)
-            if hit is not None:
-                output = {
-                    "cached_digest": hit.digest,
-                    "note": "本轮已查过,结果同前(完整内容见 ref)",
-                    "ref": hit.cache_key,
-                }
-                await self._emit("tool_end", state.step, tool=name, digest=hit.digest, cached=True)
-                # 去重命中也记一条台账(success,带原 cache_key),保持轨迹完整
-                self._safe_record(
-                    state,
-                    call.id,
-                    name,
-                    args,
-                    hit.digest,
-                    success=True,
-                    cache_key=hit.cache_key,
-                )
-                return ToolResult(
-                    tool_name=name,
-                    args=args,
-                    success=True,
-                    output=output,
-                    latency_ms=0,
-                )
+        # 3. InProcessTool 不参与 ledger/cache 去重。普通工具的 ledger 去重
+        #    位于 runtime adapter 内部，确保 visibility/hooks/permission/input
+        #    validation 每次都先执行，缓存命中绝不能成为安全链旁路。
 
         # 4. tool_call(完整 args,spec § 5.1)+ tool_start
         await self._emit("tool_call", state.step, tool=name, args=args)
         await self._emit("tool_start", state.step, tool=name)
 
         # 5. 执行:
-        #    - InProcessTool(记忆/技能/控制类)是状态变更或本地廉价操作,完全绕过
+        #    - InProcessTool(记忆/技能/控制类)是状态变更或本地操作,完全绕过
         #      cache——同参缓存命中会导致 run_with_state 被跳过:
         #        * offer_deep_research: escalate_offered 不置位 → 升级静默失败
         #        * memory_write: 写入静默丢失
         #        * load_skill: active_skill 不置位
-        #      cache_key=None(无缓存键),直接 run_with_state。
+        #      cache_key=None(无缓存键),run_with_state 仍受统一安全执行器约束。
         #    - MCP 只读数据工具(registry 后端)才吃 TTL 缓存(cache 注入则包一层
         #      get_or_compute),cache_key 按 (user_id, tool_name, args) 生成。
-        started = time.perf_counter()
-        cache_key: str | None = None
-
-        async def _compute() -> dict[str, Any]:
-            validated = tool.args_schema.model_validate(args)
-            # InProcessTool(记忆/控制类,spec § 3.3)需要 turn 级 state(user_id /
-            # messages / ledger);其余 Tool 走纯 run(args)。唯一一处 isinstance 分支。
-            if isinstance(tool, InProcessTool):
-                return await tool.run_with_state(validated, state)
-            return await tool.run(validated)
-
-        is_cache_hit = False
-        try:
-            if not is_inprocess:
-                # 数据工具(MCP 只读):单次执行超时保护(超时 → TimeoutError → [超时] 指导错误)。
-                # cache 注入则走缓存(命中跳过 compute),否则直跑;两者都受 wait_for 约束。
-                async def _run_data_tool() -> dict[str, Any]:
-                    nonlocal is_cache_hit, cache_key
-                    if self._cache is not None:
-                        cache_key = ToolResultCache.cache_key(state.user_id, name, args)
-                        out, cache_status = await self._cache.get_or_compute(
-                            user_id=state.user_id,
-                            tool_name=name,
-                            args=args,
-                            compute_fn=_compute,
-                        )
-                        is_cache_hit = cache_status == CacheHit.HIT
-                        return out
-                    return await _compute()
-
-                output = await asyncio.wait_for(_run_data_tool(), timeout=self._tool_timeout_s)
-            else:
-                # InProcessTool(状态变更/本地)豁免超时:直接执行,cache_key 保持 None
-                output = await _compute()
-        except BaseException as e:  # noqa: BLE001 — hub 不抛:全包成指导性错误
-            error = self._guidance_error(tool, e)
-            error = self._maybe_append_search_hint(name, e, error)
-            # worker 日志层面留一行(联调诊断:E2E 时模型靠降级掩盖工具失败,
-            # 指导性错误只进事件流,worker 日志无痕迹;info 级一行 tool/error 前 120 字)。
+        adapter = ChatloopToolAdapter(tool=tool, state=state, cache=self._cache)
+        definition = self._risk_policy.definition_for(tool, timeout_s=self._tool_timeout_s)
+        registry = CapabilityRegistry()
+        registry.register(definition, adapter)
+        visible = self._visible_for(state)
+        context = ExecutionContext(
+            request_id=state.request_id,
+            turn_id=state.session_id,
+            task_id=call.id,
+            user_id=state.user_id,
+            visible_capabilities=visible,
+        )
+        runtime = ToolRuntime(
+            registry,
+            hooks=self._hooks,
+            permissions=PermissionEngine(self._risk_policy.authorize),
+            executor=SafeExecutor(max_output_bytes=self._max_output_bytes),
+        )
+        runtime_result = await runtime.execute(name, args, context)
+        effective_args = adapter.last_input or args
+        cache_key = adapter.cache_key
+        if not runtime_result.success:
+            error = self._runtime_guidance_error(tool, runtime_result)
             logger.info("tool dispatch failed: tool=%s error=%s", name, error[:120])
-            await self._emit_error(name, error, step=state.step)
-            self._safe_record(state, call.id, name, args, error, success=False, cache_key=cache_key)
-            return self._fail_result(name, args, error)
+            permission_source = runtime_result.audit.get("permission_source")
+            if not defer_failures and self._risk_policy.should_emit_permission_required(
+                tool, permission_source
+            ):
+                await self._emit(
+                    "permission_required",
+                    state.step,
+                    tool=name,
+                    risk=definition.minimum_risk.value,
+                )
+            if not defer_failures:
+                await self._emit_error(name, error, step=state.step)
+                self._safe_record(
+                    state,
+                    name,
+                    effective_args,
+                    error,
+                    success=False,
+                    cache_key=cache_key,
+                )
+            return self._fail_result(name, effective_args, error).model_copy(
+                update={"tool_call_data": dict(runtime_result.audit)}
+            )
 
-        latency_ms = int((time.perf_counter() - started) * 1000)
+        output = runtime_result.output or {}
+        is_cache_hit = bool(runtime_result.audit.get("cached", False))
         digest = self._digest(output)
 
         # 6. tool_end
         await self._emit("tool_end", state.step, tool=name, digest=digest, cached=is_cache_hit)
 
         # 7. 记账(post-apply_step 契约:step=state.step)
-        self._safe_record(state, call.id, name, args, digest, success=True, cache_key=cache_key)
+        self._safe_record(state, name, effective_args, digest, success=True, cache_key=cache_key)
 
         return ToolResult(
             tool_name=name,
-            args=args,
+            args=effective_args,
             success=True,
             output=output,
-            latency_ms=latency_ms,
+            latency_ms=runtime_result.latency_ms,
             cached=is_cache_hit,
         )
 
@@ -427,7 +622,11 @@ class ToolHub:
     # ------------------------------------------------------------------
 
     async def _dispatch_search_tools(
-        self, tool_call_id: str, args: dict[str, Any], state: ChatLoopState
+        self,
+        args: dict[str, Any],
+        state: ChatLoopState,
+        *,
+        defer_failures: bool = False,
     ) -> ToolResult:
         """检索目标工具文档,top-k 拼成 {"docs": [{name, doc}...]} 返回。
 
@@ -436,25 +635,41 @@ class ToolHub:
         - 同 turn 重复检索同一工具 → 文档文本前加 "(本 turn 已检索过)" 仍返回。
         本身不进 cache、不计预算、不做去重(检索是确定性纯函数,可重复调)。
         """
+        visible = self._visible_for(state)
+        if SEARCH_TOOLS_NAME not in visible:
+            error = "[不可见工具] search_tools 不在本请求允许的工具集合中。"
+            if not defer_failures:
+                await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
+                self._safe_record(
+                    state,
+                    SEARCH_TOOLS_NAME,
+                    args,
+                    error,
+                    success=False,
+                    cache_key=None,
+                )
+            return self._fail_result(SEARCH_TOOLS_NAME, args, error)
         query = args.get("query")
         if not isinstance(query, str) or not query.strip():
             error = "[参数校验失败] search_tools 需要 query(string)。请传工具名或自然语言描述。"
-            await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
-            self._safe_record(
-                state,
-                tool_call_id,
-                SEARCH_TOOLS_NAME,
-                args,
-                error,
-                success=False,
-                cache_key=None,
-            )
+            if not defer_failures:
+                await self._emit_error(SEARCH_TOOLS_NAME, error, step=state.step)
+                self._safe_record(
+                    state,
+                    SEARCH_TOOLS_NAME,
+                    args,
+                    error,
+                    success=False,
+                    cache_key=None,
+                )
             return self._fail_result(SEARCH_TOOLS_NAME, args, error)
 
         await self._emit("tool_call", state.step, tool=SEARCH_TOOLS_NAME, args=args)
         await self._emit("tool_start", state.step, tool=SEARCH_TOOLS_NAME)
 
-        hits = search_docs(query, k=_SEARCH_TOOLS_K)
+        hits = [doc for doc in search_docs(query, k=len(TOOL_DOCS)) if doc.name in visible][
+            :_SEARCH_TOOLS_K
+        ]
         docs: list[dict[str, str]] = []
         for d in hits:
             already = d.name in state.ledger.searched_docs
@@ -469,15 +684,7 @@ class ToolHub:
         await self._emit(
             "tool_end", state.step, tool=SEARCH_TOOLS_NAME, digest=digest, cached=False
         )
-        self._safe_record(
-            state,
-            tool_call_id,
-            SEARCH_TOOLS_NAME,
-            args,
-            digest,
-            success=True,
-            cache_key=None,
-        )
+        self._safe_record(state, SEARCH_TOOLS_NAME, args, digest, success=True, cache_key=None)
         return ToolResult(
             tool_name=SEARCH_TOOLS_NAME,
             args=args,
@@ -500,6 +707,33 @@ class ToolHub:
     # ------------------------------------------------------------------
     # 指导性错误文案(spec § 1.4 错误自纠)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _runtime_guidance_error(tool: Tool, result: RuntimeResult) -> str:
+        """Translate structured runtime failures into the loop's corrective prose."""
+        error = result.error
+        if error is None:
+            return "[执行失败] 工具运行时返回了无错误信息的失败结果"
+        message = error.message[:_ERR_MSG_LEN]
+        if message.startswith("["):
+            return message
+        if error.code == "capability_not_visible":
+            return f"[不可见工具] {tool.name} 不在本请求允许的工具集合中。"
+        if error.category is ErrorCategory.PERMISSION_DENIED:
+            return f"[需要授权] {tool.name} 未获得执行许可;本次已安全拒绝。"
+        if error.category is ErrorCategory.VALIDATION_ERROR:
+            fields = ", ".join(tool.args_schema.model_fields.keys())
+            guidance = f"[参数校验失败] {message}。参数要求:{fields}"
+            if tool.name in TOOL_DOCS and TOOL_DOCS[tool.name].group == "deferred":
+                guidance += f"。可调 search_tools('{tool.name}') 获取参数文档"
+            return guidance
+        if error.category is ErrorCategory.TIMEOUT:
+            return "[超时] 稍后重试或换数据源"
+        if error.category is ErrorCategory.RESULT_INVALID:
+            if error.code == "output_limit_exceeded":
+                return f"[输出超限] {message}"
+            return f"[结果无效] {message}"
+        return f"[执行失败] {message}"
 
     @staticmethod
     def _guidance_error(tool: Tool, exc: BaseException) -> str:
@@ -554,10 +788,15 @@ class ToolHub:
         except ValueError:
             return {}
 
+    def _visible_for(self, state: ChatLoopState) -> frozenset[str]:
+        registered = frozenset((*self._tools, SEARCH_TOOLS_NAME))
+        if self._visibility_resolver is None:
+            return registered
+        return frozenset(self._visibility_resolver(state) & registered)
+
     @staticmethod
     def _safe_record(
         state: ChatLoopState,
-        tool_call_id: str,
         tool_name: str,
         args: dict[str, Any],
         digest: str,
@@ -570,12 +809,9 @@ class ToolHub:
         post-apply_step 契约:step=state.step(第 N 圈调用记 step=N,见 gates.py)。
         """
         # 记账失败不能破坏 dispatch 契约(hub 不抛)
-        if not success:
-            digest = "Tool execution failed."
         with contextlib.suppress(Exception):
             state.ledger.record(
                 step=state.step,
-                tool_call_id=tool_call_id,
                 tool_name=tool_name,
                 args=args,
                 digest=digest[:_LEDGER_DIGEST_LEN],

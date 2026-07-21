@@ -37,6 +37,7 @@ from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
 from app.chatloop.subagent import DispatchSubagentsTool, SubagentFactory
 from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
 from app.chatloop.tool_hub import EmitFn, ToolHub
+from app.chatloop.tool_runtime_policy import production_visible_capabilities
 from app.memory.injection_classifier import is_prompt_injection
 from app.services.subagent_audit import SubagentAuditRepo
 from app.services.tool_result_cache import ToolResultCache
@@ -205,13 +206,16 @@ def build_turn_components(
 ) -> ChatLoopComponents:
     """per-turn 构造轻 ToolHub —— 把单例依赖塞进新 hub(持 turn 级 emit/seq)。
 
-    episode_id_resolver:Phase 4 worker 在 turn 开头 write_episode 后注入一个返回本
-    turn episode_id 的 resolver(memory_tools 的 archival_insert 用)。本任务无现成
-    "turn 开始建 episode"链路(见 chat_runner / 报告),传 None → MemoryWriteTool 用
-    默认 resolver(archival_insert 返回指导错误而非静默丢;core_append/replace 不受影响)。
+    episode_id_resolver:worker 注入的惰性 resolver；首次 archival_insert 时建立本
+    turn episode 并返回 id，同 turn 重试复用。传 None 时 MemoryWriteTool 用默认
+    resolver，并给出前置缺失指导错误（测试/非生产构造仍 fail loud）。
     """
     hub = ToolHub(
-        emit=emit, cache=singletons.cache, seq_counter=seq_counter, trace=singletons.trace
+        emit=emit,
+        cache=singletons.cache,
+        seq_counter=seq_counter,
+        trace=singletons.trace,
+        visibility_resolver=production_visible_capabilities,
     )
     hub.register_registry(singletons.registry)
 

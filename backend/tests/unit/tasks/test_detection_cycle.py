@@ -35,10 +35,10 @@ def _stub_service_builders(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.tasks.monitoring._build_llm", lambda: MagicMock())
 
 
-def _make_user(session: Session) -> User:
+def _make_user(session: Session, *, user_id: str | None = None) -> User:
     uid = uuid4().hex[:8]
     u = User(
-        id=str(uuid4()),
+        id=user_id or str(uuid4()),
         username=f"user-{uid}",
         email=f"u-{uid}@t",
         hashed_password="x",
@@ -92,6 +92,35 @@ def test_detection_cycle_creates_run_per_user(
 
     runs = db_session.query(MonitoringRun).filter_by(user_id=user.id).all()
     assert len(runs) >= 1
+
+
+@pytest.mark.parametrize("as_uuid", [False, True])
+def test_detection_cycle_user_filter_accepts_string_and_uuid(
+    db_session: Session, as_uuid: bool
+) -> None:
+    """手动扫描的 user_filter 无论来自 JSON 字符串或内部 UUID 都只匹配本人。"""
+    selected_uuid = uuid4()
+    selected = _make_user(db_session, user_id=str(selected_uuid))
+    other = _make_user(db_session)
+    _make_position(db_session, selected, "600519.SH")
+    _make_position(db_session, other, "000001.SZ")
+    db_session.commit()
+
+    mock_detector = MagicMock()
+    mock_detector.detect = AsyncMock(return_value=(SignalLevel.GREEN, []))
+    user_filter = selected_uuid if as_uuid else selected.id
+
+    with (
+        patch("app.tasks.monitoring._build_detector", return_value=mock_detector),
+        patch("app.tasks.monitoring._get_session", return_value=db_session),
+    ):
+        from app.tasks.monitoring import detection_cycle
+
+        result = detection_cycle.apply(kwargs={"user_filter": user_filter}).get()
+
+    assert result["subjects"] == 1
+    runs = db_session.query(MonitoringRun).all()
+    assert {str(run.user_id) for run in runs} == {selected.id}
 
 
 def test_detection_cycle_yellow_creates_alert_with_pending_status(
