@@ -12,7 +12,10 @@ concurrency:
 jobs:
   lint-and-fast-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The full PG-backed cassette suite now includes the run-control phases;
+    # keep the gate bounded but allow the complete suite to finish on hosted
+    # runners instead of being cancelled at the previous 15-minute limit.
+    timeout-minutes: 30
     services:
       # PR-A 2026-05-17: 全 L0/L1/L2/e2e 都用真 PG。
       # 测试 db (industry_assistant_test) 由 conftest._ensure_test_db_exists 在
