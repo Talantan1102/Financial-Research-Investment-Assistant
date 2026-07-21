@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 # Reuse the real-PG assignment fixture that seeds a fully authoritative claimed
 # Attempt.  Importing it here registers the fixture in this module as well.
-from backend.tests.integration.test_run_chat_worker_pg import (  # noqa: F401
+from tests.integration.test_run_chat_worker_pg import (  # noqa: F401
     claimed,
 )
 
