@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any, cast
 
 from sqlalchemy.orm import Session, sessionmaker
-from typing import Any, cast
 
 from app.core.database import engine
 from app.models.chat import ChatMessage, ChatSession
