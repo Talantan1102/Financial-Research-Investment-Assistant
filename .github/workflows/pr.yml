@@ -64,7 +64,10 @@ jobs:
 
   run-control-compose:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # The acceptance harness recreates several isolated worker topologies and
+    # deliberately exercises restart/recovery paths; allow the full sequence
+    # to finish instead of cancelling it at the previous 25-minute limit.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
