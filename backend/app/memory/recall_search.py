@@ -162,7 +162,9 @@ class RecallSearcher:
             """
         )
         try:
-            result = session.execute(legacy_sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN})
+            result = session.execute(
+                legacy_sql, {"uid": str(user_id), "lim": _MAX_USER_MESSAGES_SCAN}
+            )
             return [dict(row._mapping) for row in result.fetchall()]
         except SQLAlchemyError:
             session.rollback()

@@ -91,9 +91,12 @@ def generate_session_title(self, session_id: str) -> None:  # noqa: ANN001
             return
 
         message_model = RunMessage if session is not None else ChatMessage
-        user_msg = db.query(message_model).filter_by(session_id=sid, role="user").order_by(
-            message_model.created_at.asc()
-        ).first()
+        user_msg = (
+            db.query(message_model)
+            .filter_by(session_id=sid, role="user")
+            .order_by(message_model.created_at.asc())
+            .first()
+        )
         if user_msg is None:
             logger.debug("title task: no user message yet, skipping")
             return
