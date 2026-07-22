@@ -179,6 +179,7 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
+platform = "linux"  # backend/Celery deployment target; keep checks stable on Windows dev hosts
 strict_optional = true
 disallow_untyped_defs = false  # lenient for legacy code; tighten per directory below
 warn_unused_ignores = true

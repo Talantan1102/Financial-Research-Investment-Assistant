@@ -14,6 +14,12 @@ from pathlib import Path
 from typing import Literal
 
 import pytest
+
+# Configure the database before importing any app module. MockLLMClient's import
+# chain reaches app.core.database, so pytest_configure() is too late to select an
+# isolated per-worktree database for the module-level SessionLocal engine.
+os.environ["POSTGRES_DB"] = os.environ.get("POSTGRES_TEST_DB", "industry_assistant_test")
+
 from app.services.llm_mock_client import MockLLMClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -22,7 +28,12 @@ from sqlalchemy.orm import Session, sessionmaker
 # subprocess). pytest only auto-loads files literally named `conftest.py`,
 # so we explicitly re-export from `tests.conftest_celery` to register the
 # fixtures into this conftest's scope.
-from tests.conftest_celery import celery_worker_subprocess, redis_url  # noqa: F401, E402
+from tests.conftest_celery import (  # noqa: F401, E402
+    celery_worker_llm_mode,
+    celery_worker_subprocess,
+    paper_trading_worker_fixture_path,
+    redis_url,
+)
 from tests.pg_test_defaults import PG_PASSWORD_DEFAULT  # noqa: E402
 
 LLMMode = Literal["none", "mock", "cassette", "live"]
@@ -38,7 +49,7 @@ def pytest_configure(config: pytest.Config) -> None:
     conftest module loads, so this is the only safe place.
     """
     os.environ.setdefault("LLM_MODE", "none")
-    os.environ["POSTGRES_DB"] = "industry_assistant_test"
+    os.environ["POSTGRES_DB"] = os.environ.get("POSTGRES_TEST_DB", "industry_assistant_test")
     # C37: production reads POSTGRES_PASSWORD with no fallback (fail-fast). Tests
     # supply the throwaway default here, before any app.core.database import.
     # setdefault so CI's explicit env still wins.
@@ -254,7 +265,7 @@ def pg_test_container() -> Iterator[dict[str, object]]:
     port = int(os.environ.get("POSTGRES_PORT", "5432"))
     user = os.environ.get("POSTGRES_USER", "postgres")
     password = os.environ.get("POSTGRES_PASSWORD", PG_PASSWORD_DEFAULT)
-    test_db = "industry_assistant_test"
+    test_db = os.environ.get("POSTGRES_TEST_DB", "industry_assistant_test")
 
     started_by_us = False
     if not _is_port_listening(host, port):

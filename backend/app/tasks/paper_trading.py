@@ -161,6 +161,7 @@ def _match_order_in_session(
     order_id: str,
     quote_timestamp: str | None,
     match_pass: int | None,
+    _include_replay_marker: bool = False,
 ) -> dict[str, object]:
     parsed_id = _parse_uuid(order_id)
     parsed_timestamp = _parse_timestamp(quote_timestamp)
@@ -176,6 +177,8 @@ def _match_order_in_session(
             match_pass=match_pass,
         )
         if existing is not None:
+            if not _include_replay_marker:
+                existing.pop("idempotent_replay", None)
             return existing
 
     order = session.scalar(select(PaperOrder).where(PaperOrder.id == parsed_id))
@@ -207,6 +210,8 @@ def _match_order_in_session(
         session, order_id=parsed_id, quote_timestamp=timestamp, match_pass=match_pass
     )
     if existing is not None:
+        if not _include_replay_marker:
+            existing.pop("idempotent_replay", None)
         return existing
     session.refresh(order)
     if order.status not in {OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}:
@@ -511,6 +516,7 @@ def match_order(
                     order_id=order_id,
                     quote_timestamp=quote_timestamp,
                     match_pass=match_pass,
+                    _include_replay_marker=True,
                 )
             ),
         )
@@ -525,7 +531,7 @@ def match_order(
             parent_id=trace_parent_id,
         )
         raise
-    replay = result.get("idempotent_replay") is True
+    replay = result.pop("idempotent_replay", None) is True
     raw_matched_quantity = result.get("matched_quantity", 0)
     matched_quantity = (
         raw_matched_quantity

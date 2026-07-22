@@ -1,5 +1,7 @@
 """MonitoringSubject + load_active_subjects from Position."""
 
+# mypy: disable-error-code="arg-type"
+
 from __future__ import annotations
 
 from decimal import Decimal

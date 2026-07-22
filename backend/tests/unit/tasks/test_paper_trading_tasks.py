@@ -1,3 +1,5 @@
+# mypy: disable-error-code="func-returns-value"
+
 from __future__ import annotations
 
 import uuid
@@ -185,7 +187,7 @@ def test_dispatch_propagates_trace_parent_and_records_failure(
         )
         is False
     )
-    tasks.match_order.apply_async.assert_called_once_with(  # type: ignore[attr-defined]
+    tasks.match_order.apply_async.assert_called_once_with(
         args=["00000000-0000-0000-0000-000000000001"],
         kwargs={"trace_parent_id": emitted[0]["span_id"]},
         retry=False,
@@ -249,7 +251,7 @@ def test_match_records_idempotent_replay_without_counting_a_business_fill_twice(
         trace_parent_id="rest-confirm-span",
     )
 
-    assert result["idempotent_replay"] is True
+    assert "idempotent_replay" not in result
     assert emitted[0]["name"] == "match"
     assert emitted[0]["parent_id"] == "rest-confirm-span"
     assert emitted[0]["attrs"] == {

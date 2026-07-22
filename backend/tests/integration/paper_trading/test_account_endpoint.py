@@ -512,6 +512,7 @@ def test_concurrent_initial_cash_patch_allows_exactly_one(pg_test_engine: Engine
     for thread in threads:
         thread.join(timeout=10)
 
+    assert not any(thread.is_alive() for thread in threads)
     assert errors == []
     assert sorted(statuses) == [200, 409]
     with Session(pg_test_engine) as observer:

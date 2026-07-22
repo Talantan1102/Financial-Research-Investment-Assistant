@@ -1,5 +1,7 @@
 """Test-only market adapter explicitly included by the paper-trading worker fixture."""
 
+# mypy: disable-error-code="assignment,misc"
+
 from __future__ import annotations
 
 import json

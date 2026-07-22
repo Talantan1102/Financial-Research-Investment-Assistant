@@ -541,6 +541,8 @@ def test_open_queued_orders_rechecks_account_after_concurrent_reset(
         thread.join(timeout=10)
     finally:
         allow_write.set()
+        if thread.ident is not None:
+            thread.join(timeout=10)
         event.remove(pg_test_engine, "after_cursor_execute", pause_after_candidates)
     assert not thread.is_alive()
     assert failures == []

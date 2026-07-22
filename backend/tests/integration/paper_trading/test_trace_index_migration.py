@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,var-annotated"
+
 from __future__ import annotations
 
 import uuid

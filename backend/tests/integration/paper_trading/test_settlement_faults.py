@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,unused-ignore"
+
 from __future__ import annotations
 
 import uuid

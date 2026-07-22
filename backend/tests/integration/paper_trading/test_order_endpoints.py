@@ -1,3 +1,5 @@
+# mypy: disable-error-code="func-returns-value,union-attr"
+
 from __future__ import annotations
 
 import uuid

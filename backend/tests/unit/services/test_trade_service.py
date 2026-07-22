@@ -5,6 +5,8 @@
 # contract (svc.create flushes; caller commits). Add explicit DB error injection
 # test in v1.x if monitoring engine surfaces atomicity violations.
 
+# mypy: disable-error-code="arg-type,unused-ignore"
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta

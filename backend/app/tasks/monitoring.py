@@ -280,7 +280,6 @@ def generate_detail_card(alert_id: str) -> dict[str, Any]:
 async def _run_generate_detail_card(alert_id: str) -> dict[str, Any]:
     session = _get_session()
     alert_repo = MonitoringAlertRepo(session)
-    writer = _build_writer()
 
     try:
         # C28 idempotency: acks_late 重投递 / commit-后-rollback 孤儿任务可能让同一
@@ -291,6 +290,10 @@ async def _run_generate_detail_card(alert_id: str) -> dict[str, Any]:
         if existing.detail_status == DetailStatus.READY:
             return {"alert_id": alert_id, "status": "already_ready"}
 
+        # Writer construction can fail just like invocation (for example, a
+        # missing runtime dependency). Keep it inside the state-machine guard
+        # so an exhausted Celery retry never leaves the alert stuck pending.
+        writer = _build_writer()
         result = await writer.alert_writer(alert_id)  # returns {"json": ..., "markdown": ...}
         alert_repo.update_detail(
             alert_id,

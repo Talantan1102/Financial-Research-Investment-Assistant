@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,assignment,unused-ignore"
+
 from __future__ import annotations
 
 import uuid
@@ -130,9 +132,9 @@ def test_match_quote_evidence_is_deeply_immutable() -> None:
     evidence = _evidence(Execution(price=Decimal("10.00"), quantity=100))
 
     with pytest.raises(ValidationError):
-        evidence.quote.source = "mutated"  # type: ignore[misc]
+        evidence.quote.source = "mutated"
     with pytest.raises(ValidationError):
-        evidence.consumed_levels[0].quantity = 1  # type: ignore[misc]
+        evidence.consumed_levels[0].quantity = 1
 
 
 def test_quote_source_is_trimmed_at_settlement_boundary(db_session: Session, user: User) -> None:

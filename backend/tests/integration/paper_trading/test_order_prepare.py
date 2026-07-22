@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,assignment,attr-defined"
+
 from __future__ import annotations
 
 import threading
@@ -124,7 +126,7 @@ def _prepare(
         "limit_price": Decimal("1500"),
     }
     values.update(changes)
-    return service.prepare_order(**values)  # type: ignore[attr-defined, no-any-return]
+    return service.prepare_order(**values)
 
 
 def test_prepare_order_only_persists_proposal_without_account_mutation(
@@ -850,14 +852,22 @@ def test_slow_quote_fetch_does_not_lock_account_and_prepare_revalidates_after_fe
 
     prepare_thread = threading.Thread(target=prepare)
     edit_thread = threading.Thread(target=edit)
-    prepare_thread.start()
-    assert quote_started.wait(timeout=5)
-    edit_thread.start()
-    assert edit_finished.wait(timeout=5), "account edit was blocked by slow quote fetch"
-    allow_quote.set()
-    prepare_thread.join(timeout=10)
-    edit_thread.join(timeout=10)
+    try:
+        prepare_thread.start()
+        assert quote_started.wait(timeout=5)
+        edit_thread.start()
+        assert edit_finished.wait(timeout=5), "account edit was blocked by slow quote fetch"
+        allow_quote.set()
+        prepare_thread.join(timeout=10)
+        edit_thread.join(timeout=10)
+    finally:
+        allow_quote.set()
+        prepare_thread.join(timeout=10)
+        if edit_thread.ident is not None:
+            edit_thread.join(timeout=10)
 
+    assert not prepare_thread.is_alive()
+    assert not edit_thread.is_alive()
     assert errors == []
     assert sorted(outcomes) == [
         ("edited", Decimal("800000.00")),
@@ -916,14 +926,22 @@ def test_initial_cash_edit_then_prepare_reads_the_serialized_new_balance(
 
     edit_thread = threading.Thread(target=edit)
     prepare_thread = threading.Thread(target=prepare)
-    edit_thread.start()
-    assert edit_holds_lock.wait(timeout=5)
-    prepare_thread.start()
-    assert prepare_started.wait(timeout=5)
-    allow_edit_commit.set()
-    edit_thread.join(timeout=10)
-    prepare_thread.join(timeout=10)
+    try:
+        edit_thread.start()
+        assert edit_holds_lock.wait(timeout=5)
+        prepare_thread.start()
+        assert prepare_started.wait(timeout=5)
+        allow_edit_commit.set()
+        edit_thread.join(timeout=10)
+        prepare_thread.join(timeout=10)
+    finally:
+        allow_edit_commit.set()
+        edit_thread.join(timeout=10)
+        if prepare_thread.ident is not None:
+            prepare_thread.join(timeout=10)
 
+    assert not edit_thread.is_alive()
+    assert not prepare_thread.is_alive()
     assert errors == []
     assert sorted(outcomes) == [
         ("edited", Decimal("800000.00")),
@@ -968,6 +986,7 @@ def test_concurrent_prepare_retry_creates_one_proposal(
     for thread in threads:
         thread.join(timeout=10)
 
+    assert not any(thread.is_alive() for thread in threads)
     assert errors == []
     assert len(order_ids) == 2
     assert order_ids[0] == order_ids[1]

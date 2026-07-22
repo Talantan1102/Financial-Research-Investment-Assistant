@@ -115,16 +115,41 @@ def paper_trading_worker_fixture_path() -> str | None:
 
 
 @pytest.fixture(scope="session")
+def celery_worker_llm_mode() -> str | None:
+    """Optional LLM mode for the worker subprocess.
+
+    Most worker tests do not construct an LLM service and should retain the
+    suite-wide ``none`` guard. Tests that exercise an LLM-backed task override
+    this fixture explicitly instead of relying on function-scoped environment
+    mutation that happens after the session worker has started.
+    """
+    return os.environ.get("CELERY_WORKER_LLM_MODE")
+
+
+@pytest.fixture(scope="session")
 def celery_worker_subprocess(
-    redis_url: str, paper_trading_worker_fixture_path: str | None
+    redis_url: str,
+    paper_trading_worker_fixture_path: str | None,
+    celery_worker_llm_mode: str | None,
 ) -> Generator[None, None, None]:
     """Spawn Celery worker subprocess against redis broker.
 
     Runs --concurrency=1 to keep ordering deterministic in tests.
     """
     env = os.environ.copy()
+    for proxy_var in (
+        "all_proxy",
+        "ALL_PROXY",
+        "https_proxy",
+        "HTTPS_PROXY",
+        "http_proxy",
+        "HTTP_PROXY",
+    ):
+        env.pop(proxy_var, None)
     env["CELERY_BROKER_URL"] = redis_url
     env["CELERY_RESULT_BACKEND"] = redis_url
+    if celery_worker_llm_mode is not None:
+        env["LLM_MODE"] = celery_worker_llm_mode
     if paper_trading_worker_fixture_path is not None:
         env["PAPER_TRADING_WORKER_FIXTURE"] = paper_trading_worker_fixture_path
 

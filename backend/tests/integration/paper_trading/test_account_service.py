@@ -481,6 +481,7 @@ def test_concurrent_get_or_create_returns_single_account(pg_test_engine: Engine)
     for thread in threads:
         thread.join(timeout=10)
 
+    assert not any(thread.is_alive() for thread in threads)
     assert errors == []
     assert len(ids) == 2
     assert ids[0] == ids[1]
@@ -534,6 +535,7 @@ def test_concurrent_cross_user_confirmation_conflict_is_stable(
     for thread in threads:
         thread.join(timeout=10)
 
+    assert not any(thread.is_alive() for thread in threads)
     assert errors == []
     assert sorted(results) == ["created", "reset_confirmation_conflict"]
 
@@ -573,6 +575,7 @@ def test_concurrent_distinct_resets_get_sequential_generations(
     for thread in threads:
         thread.join(timeout=10)
 
+    assert not any(thread.is_alive() for thread in threads)
     assert errors == []
     assert sorted(generations) == [2, 3]
 
@@ -622,6 +625,7 @@ def test_concurrent_same_account_business_key_is_deterministically_duplicate(
     for thread in threads:
         thread.join(timeout=10)
 
+    assert not any(thread.is_alive() for thread in threads)
     assert errors == []
     assert sorted(results) == ["created", "duplicate_ledger_business_key"]
     with Session(pg_test_engine) as observer:
@@ -673,5 +677,6 @@ def test_concurrent_same_business_key_is_stable_and_preserves_outer_transactions
     for thread in threads:
         thread.join(timeout=10)
 
+    assert not any(thread.is_alive() for thread in threads)
     assert errors == []
     assert sorted(results) == ["created", "duplicate_ledger_business_key"]

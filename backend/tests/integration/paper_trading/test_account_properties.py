@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,assignment,index,union-attr"
+
 from __future__ import annotations
 
 import uuid

@@ -39,6 +39,12 @@ pytestmark = [
 ]
 
 
+@pytest.fixture(scope="session")
+def celery_worker_llm_mode() -> str:
+    """The monitoring worker builds detail cards through the deterministic mock LLM."""
+    return "mock"
+
+
 def test_full_detection_cycle_writes_signals_and_alerts(
     pg_test_container,
     redis_url,
@@ -78,7 +84,9 @@ def test_full_detection_cycle_writes_signals_and_alerts(
         )
         session.add(pos)
         session.commit()
-        user_id = user.id
+        # Celery JSON arguments cross the process boundary as strings, matching
+        # MonitoringSubject.user_id. Keep the filter representation identical.
+        user_id = str(user.id)
 
     # 2. Trigger detection cycle (real Celery enqueue, not eager)
     from app.tasks.monitoring import detection_cycle

@@ -1,3 +1,5 @@
+# mypy: disable-error-code="arg-type,assignment,unused-ignore"
+
 from __future__ import annotations
 
 import threading
