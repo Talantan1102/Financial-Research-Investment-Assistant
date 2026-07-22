@@ -67,6 +67,33 @@ class PaperTradeDependencies(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class AsyncPaperTradeAdapter:
+    """Bridge a synchronous domain service through an async session factory.
+
+    ``service_factory`` receives SQLAlchemy's sync session from ``run_sync``;
+    the tool itself never owns a global sync session.
+    """
+
+    def __init__(self, session_factory: Any, service_factory: Callable[[Any], Any]) -> None:
+        self._session_factory = session_factory
+        self._service_factory = service_factory
+
+    async def dispatch(
+        self, args: PaperTradeArgs, *, user_id: UUID, session_id: str, request_id: str
+    ) -> dict[str, Any]:
+        async with self._session_factory() as session:
+
+            def invoke(sync_session: Any) -> dict[str, Any]:
+                service = self._service_factory(sync_session)
+                return service.dispatch(
+                    args, user_id=user_id, session_id=session_id, request_id=request_id
+                )
+
+            result = await session.run_sync(invoke)
+            await session.commit()
+            return result
+
+
 def _missing(action: PaperAction, args: PaperTradeArgs) -> list[str]:
     if action == "prepare_order":
         fields: list[str] = []
@@ -155,4 +182,10 @@ class PaperTradeTool(InProcessTool):
         return args.model_copy(update={"quantity": quantity})
 
 
-__all__ = ["ApprovalPayload", "PaperTradeArgs", "PaperTradeDependencies", "PaperTradeTool"]
+__all__ = [
+    "ApprovalPayload",
+    "AsyncPaperTradeAdapter",
+    "PaperTradeArgs",
+    "PaperTradeDependencies",
+    "PaperTradeTool",
+]

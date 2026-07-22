@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 # Placeholder UUID for the pre-auth "anonymous" user (C.6 will use JWT sub).
 _ANONYMOUS_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
@@ -123,19 +123,36 @@ class ChatSessionRepo:
         this keeps the method usable with the lightweight fake sessions used by
         unit tests while retaining an idempotent guard for worker retries.
         """
-        existing = await self.list_messages(session_id)
-        for message in existing:
-            data = cast(dict[str, Any], message.tool_call_data or {})
-            if message.message_type == "paper_approval" and data.get("approval_id") == approval_id:
+        sid = uuid.UUID(session_id)
+        async with self._sf() as sess:
+            stmt = (
+                select(ChatMessage.id)
+                .where(ChatMessage.session_id == sid)
+                .where(ChatMessage.message_type == "paper_approval")
+                .where(ChatMessage.tool_call_data["approval_id"].as_string() == approval_id)
+                .limit(1)
+            )
+            if (await sess.execute(stmt)).scalar_one_or_none() is not None:
                 return None
-        return await self.append_message(
-            session_id=session_id,
-            role="assistant",
-            content=content,
-            message_type="paper_approval",
-            tool_call_data=tool_call_data,
-            task_id=task_id,
-        )
+            row = ChatMessage(
+                id=uuid.uuid4(),
+                session_id=sid,
+                role="assistant",
+                content=content,
+                message_type="paper_approval",
+                tool_call_data=tool_call_data,
+                task_id=task_id,
+                status="done",
+            )
+            sess.add(row)
+            await sess.execute(
+                update(ChatSession)
+                .where(ChatSession.id == sid)
+                .values(updated_at=datetime.utcnow())
+            )
+            await sess.commit()
+            await sess.refresh(row)
+            return row
 
     async def list_messages(self, session_id: str, limit: int = 200) -> list[ChatMessage]:
         sid = uuid.UUID(session_id) if isinstance(session_id, str) else session_id
