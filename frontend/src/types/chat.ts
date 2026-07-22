@@ -7,8 +7,9 @@
  */
 
 import type { EscalationPacket } from './escalation'
+import type { ApprovalPayload, ApprovalRequestEvent } from './paper-trading'
 
-export type MessageType = 'text' | 'tool_call' | 'tool_result' | 'research_report' | 'escalation' | 'system' | 'chart'
+export type MessageType = 'text' | 'tool_call' | 'tool_result' | 'research_report' | 'escalation' | 'paper_approval' | 'system' | 'chart'
 
 export interface ToolCallData {
   tool_name: string
@@ -123,6 +124,8 @@ export interface ChartEvent extends BaseEvent {
   figure: PlotlyFigure
 }
 
+export type PaperApprovalEvent = ApprovalRequestEvent
+
 export interface SteerMergedEvent extends BaseEvent {
   type: 'steer_merged'
   preview: string
@@ -223,6 +226,7 @@ export type SSEEvent =
   | DispatchStartEvent
   | DispatchEndEvent
   | ChartEvent
+  | PaperApprovalEvent
   | SteerMergedEvent
   | LoopHaltEvent
   | SkillLoadEvent
@@ -262,7 +266,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'tool' | 'system'
   content: string
   message_type: MessageType
-  tool_call_data: Record<string, unknown> | null
+  tool_call_data: ApprovalPayload | Record<string, unknown> | null
   research_report_id: string | null
   research_report_summary: string | null
   created_at: string
