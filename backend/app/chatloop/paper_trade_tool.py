@@ -100,6 +100,8 @@ class PaperTradeTool(InProcessTool):
 
         if parsed.action == "prepare_order" and parsed.amount is not None:
             parsed = self._quantity_from_amount(parsed)
+            if parsed.quantity is None:
+                return {"error": "missing_order_field", "missing_fields": ["quantity"]}
 
         user_id = _as_uuid(state.user_id)
         scope = {

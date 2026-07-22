@@ -139,6 +139,25 @@ async def test_amount_without_price_is_missing_quantity_and_price() -> None:
 
 
 @pytest.mark.asyncio
+async def test_amount_below_one_share_is_not_dispatched() -> None:
+    dependencies = FakeDependencies()
+    result = await PaperTradeTool(dependencies).run_with_state(
+        PaperTradeArgs(
+            action="prepare_order",
+            side="buy",
+            ts_code="600519.SH",
+            name="贵州茅台",
+            amount=Decimal("1"),
+            order_type="limit",
+            limit_price=Decimal("1500"),
+        ),
+        _state(),
+    )
+    assert result == {"error": "missing_order_field", "missing_fields": ["quantity"]}
+    assert dependencies.calls == []
+
+
+@pytest.mark.asyncio
 async def test_query_actions_delegate_with_state_scope() -> None:
     dependencies = FakeDependencies()
     result = await PaperTradeTool(dependencies).run_with_state(
