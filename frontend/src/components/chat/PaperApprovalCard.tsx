@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatMessage } from '@/types/chat'
-import type { ApprovalPayload, OrderDraft, OrderStatus } from '@/types/paper-trading'
+import type { ApprovalPayload, OrderDraft, OrderPreview, CancelPreview, ResetPreview, OrderStatus } from '@/types/paper-trading'
 import {
   confirmCancel,
   confirmOrder,
@@ -43,13 +43,20 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<OrderStatus | null>(null)
   const [completed, setCompleted] = useState(false)
-  const expired = Boolean(payload?.expires_at && new Date(payload.expires_at).getTime() <= Date.now())
+  const [expired, setExpired] = useState(() => Boolean(payload?.expires_at && new Date(payload.expires_at).getTime() <= Date.now()))
   const mounted = useRef(true)
   const stopPolling = useRef<(() => void) | null>(null)
 
   useEffect(() => () => { mounted.current = false; stopPolling.current?.() }, [])
   useEffect(() => () => { stopPolling.current?.(); stopPolling.current = null }, [payload?.approval_id])
   useEffect(() => { setDraft(initialDraft); setPreview(payload?.preview); setDirty(false) }, [initialDraft, payload?.preview])
+  useEffect(() => {
+    if (!payload?.expires_at) return
+    const delay = new Date(payload.expires_at).getTime() - Date.now()
+    if (delay <= 0) { setExpired(true); return }
+    const timer = window.setTimeout(() => setExpired(true), delay)
+    return () => window.clearTimeout(timer)
+  }, [payload?.expires_at])
 
   const update = <K extends keyof OrderDraft>(key: K, value: OrderDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }))
@@ -106,6 +113,9 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
 
   if (!payload) return null
   const isOrder = payload.approval_type === 'paper_order'
+  const orderPreview = isOrder ? payload.preview as OrderPreview : null
+  const cancelPreview = payload.approval_type === 'paper_cancel' ? payload.preview as CancelPreview : null
+  const resetPreview = payload.approval_type === 'paper_reset' ? payload.preview as ResetPreview : null
   const title = isOrder ? (draft.side === 'buy' ? '模拟买入确认' : '模拟卖出确认') : payload.approval_type === 'paper_cancel' ? '取消模拟订单确认' : '重置模拟账户确认'
   return <div className={styles.card} data-testid="paper-approval-card" data-approval-id={payload.approval_id}>
     <h3 className={styles.title}>{title}</h3>
@@ -116,11 +126,11 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
       <label className={styles.field}>订单类型<select aria-label="订单类型" disabled={busy} value={draft.order_type} onChange={(e) => update('order_type', e.target.value as OrderDraft['order_type'])}><option value="market">市价</option><option value="limit">限价</option></select></label>
       {draft.order_type === 'limit' ? <label className={styles.field}>限价<input aria-label="限价" disabled={busy} value={draft.limit_price ?? ''} onChange={(e) => update('limit_price', e.target.value || null)} /></label> : null}
     </div> : null}
-    {preview && isOrder ? <div className={styles.meta}>
-      行情时间：{preview.quote.timestamp ?? '未知'}；预计资金：{preview.estimated_cash_required}；预计费用：{Object.values(preview.estimated_fees).join('、') || '0'}；可用资金：{preview.available_cash}；可卖股份：{preview.sellable_quantity}；市场阶段：{preview.market_phase}
+    {orderPreview ? <div className={styles.meta}>
+      行情时间：{orderPreview.quote.timestamp ?? '未知'}；预计资金：{orderPreview.estimated_cash_required}；预计费用：{Object.values(orderPreview.estimated_fees).join('、') || '0'}；可用资金：{orderPreview.available_cash}；可卖股份：{orderPreview.sellable_quantity}；市场阶段：{orderPreview.market_phase}
     </div> : null}
-    {preview && payload.approval_type === 'paper_cancel' ? <div className={styles.meta}>订单状态：{preview.status}；剩余数量：{preview.remaining_quantity}；冻结资金：{preview.reserved_cash}；冻结股份：{preview.reserved_quantity}</div> : null}
-    {preview && payload.approval_type === 'paper_reset' ? <div className={styles.meta}>当前初始资金：{preview.current_initial_cash}；重置后初始资金：{preview.replacement_initial_cash}</div> : null}
+    {cancelPreview ? <div className={styles.meta}>订单状态：{cancelPreview.status}；剩余数量：{cancelPreview.remaining_quantity}；冻结资金：{cancelPreview.reserved_cash}；冻结股份：{cancelPreview.reserved_quantity}</div> : null}
+    {resetPreview ? <div className={styles.meta}>当前初始资金：{resetPreview.current_initial_cash}；重置后初始资金：{resetPreview.replacement_initial_cash}</div> : null}
     <div className={styles.meta}>{completed ? '操作已完成。' : '模拟订单将进入排队处理，最终状态以订单查询结果为准。'}</div>
     {error ? <div className={styles.error} role="alert">{error}</div> : null}
     {status ? <div className={styles.meta}>订单状态：{status}</div> : null}
