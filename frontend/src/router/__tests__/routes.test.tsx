@@ -16,6 +16,7 @@ describe('routes', () => {
     expect(paths).toContain('/knowledge')
     expect(paths).toContain('/monitoring')
     expect(paths).toContain('/portfolio')
+    expect(paths).toContain('/paper-trading')
   })
   it('"/" route declared', () => {
     const root = routes.find((r) => r.path === '/')

@@ -5,6 +5,9 @@ import type {
   OrderDraft,
   OrderPreview,
   PaperAccount,
+  PaperCashLedgerEntry,
+  PaperFill,
+  PaperHolding,
   PaperOrder,
   ResetConfirmRequest,
   ResetPreview,
@@ -32,6 +35,9 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getAccount = () => fetchJson<PaperAccount>(`${BASE}/account`)
 export const listOrders = () => fetchJson<PaperOrder[]>(`${BASE}/orders`)
+export const listHoldings = () => fetchJson<PaperHolding[]>(`${BASE}/holdings`)
+export const listFills = () => fetchJson<PaperFill[]>(`${BASE}/fills`)
+export const listCashLedger = () => fetchJson<PaperCashLedgerEntry[]>(`${BASE}/cash-ledger`)
 export const getOrder = (orderId: string) =>
   fetchJson<PaperOrder>(`${BASE}/orders/${encodeURIComponent(orderId)}`)
 

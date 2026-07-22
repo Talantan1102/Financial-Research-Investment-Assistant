@@ -48,6 +48,47 @@ export interface PaperAccount {
   status: string
 }
 
+export interface PaperHolding {
+  generation: number
+  ts_code: string
+  name: string
+  quantity: number
+  frozen_quantity: number
+  sellable_quantity: number
+  average_cost: string
+}
+
+export interface PaperFill {
+  id: string
+  order_id: string
+  fill_seq: number
+  quantity: number
+  price: string
+  gross_amount: string
+  commission: string
+  stamp_duty: string
+  transfer_fee: string
+  quote_timestamp: string
+  quote_source: string
+  executed_at: string
+  trade_id: string
+}
+
+export interface PaperCashLedgerEntry {
+  id: string
+  generation: number
+  kind: string
+  amount: string
+  available_before: string
+  available_after: string
+  frozen_before: string
+  frozen_after: string
+  business_key: string
+  order_id: string | null
+  fill_id: string | null
+  created_at: string
+}
+
 export interface PaperOrder {
   id: string
   account_generation: number

@@ -13,6 +13,7 @@ import AlertDetail from '@/pages/monitoring/alert-detail'
 import MonitoringConfig from '@/pages/monitoring/config'
 import PortfolioPage from '@/pages/portfolio'
 import PortfolioOverviewPage from '@/pages/portfolio-overview'
+import PaperTradingPage from '@/pages/paper-trading'
 import ReportsListPage from '@/pages/reports'
 import ResearchDetailPage from '@/pages/research/Detail'
 import ResearchListPage from '@/pages/research/List'
@@ -42,6 +43,7 @@ export const routes: IRouteObject[] = [
   { path: '/research/:id', Component: ResearchDetailPage },
   { path: '/portfolio', Component: PortfolioPage },
   { path: '/portfolio-overview', Component: PortfolioOverviewPage },
+  { path: '/paper-trading', Component: PaperTradingPage },
   { path: '/knowledge', Component: KnowledgePage },
   { path: '/monitoring', Component: MonitoringIndex },
   { path: '/monitoring/:cid/alert/:aid', Component: AlertDetail },
