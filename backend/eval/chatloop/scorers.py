@@ -151,6 +151,20 @@ class PaperTradingOutcomeScorer:
         return PaperTradingOutcomeScore(passed, total, route, approval, no_direct, db_ok, "ok" if passed else "expectation mismatch")
 
 
+class WatchlistOutcomeScorer:
+    """评估自选股直接写入、监控开关和审计终态。"""
+
+    def score(self, expected: dict[str, Any], tool_calls: list[dict[str, Any]], database_state: dict[str, Any]) -> PaperTradingOutcomeScore:
+        names = [str(c.get("tool_name", "")) for c in tool_calls]
+        route = "manage_watchlist" in names
+        no_approval = not any(n in {"paper_trade", "confirm_order", "confirm_cancel", "confirm_reset"} for n in names)
+        assertions = expected.get("database_assertions", {})
+        db_ok = all(database_state.get(k) == v for k, v in assertions.items())
+        passed = route and no_approval and db_ok
+        score = 0.4 * route + 0.2 * no_approval + 0.4 * db_ok
+        return PaperTradingOutcomeScore(passed, score, route, False, no_approval, db_ok, "ok" if passed else "expectation mismatch")
+
+
 def score_paper_trading_case(
     expected: dict[str, Any],
     tool_calls: list[dict[str, Any]],
@@ -203,4 +217,5 @@ __all__ = [
     "PaperTradingOutcomeScore",
     "PaperTradingOutcomeScorer",
     "score_paper_trading_case",
+    "WatchlistOutcomeScorer",
 ]

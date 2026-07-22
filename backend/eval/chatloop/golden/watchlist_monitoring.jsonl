@@ -1,0 +1,3 @@
+{"case_id":"watchlist-add-direct","user_input":"把600000.SH加入自选","expected_tools":["manage_watchlist"],"forbidden_tools":["paper_trade"],"database_assertions":{"watchlist_count":1,"monitoring_enabled":false,"audit_action":"add"}}
+{"case_id":"watchlist-enable-monitoring","user_input":"打开这只股票的监控","expected_tools":["manage_watchlist"],"database_assertions":{"monitoring_enabled":true,"audit_action":"update"}}
+{"case_id":"watchlist-remove-position","user_input":"删除自选股600000.SH","expected_tools":["manage_watchlist"],"database_assertions":{"watchlist_count":0,"position_monitoring":true,"audit_action":"remove"}}
