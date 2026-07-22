@@ -142,7 +142,15 @@ async def _build_singletons_for_worker(session_factory: Any) -> Any:
                                 "expires_at": order.expires_at,
                             }
                         }
-                    raise ValueError(f"unsupported paper action: {args.action}")
+                    method = getattr(service, args.action, None)
+                    if method is None:
+                        return {"error": "unsupported_paper_action", "action": args.action}
+                    return method(
+                        args,
+                        user_id=scope["user_id"],
+                        session_id=scope["session_id"],
+                        request_id=scope["request_id"],
+                    )
 
             return _Dispatch()
 

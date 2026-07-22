@@ -13,6 +13,24 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from app.services.chat_session_repo import ChatSessionRepo
 
+
+@pytest.mark.asyncio
+async def test_append_approval_once_checks_existing_id() -> None:
+    sess = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = uuid.uuid4()
+    sess.execute = AsyncMock(return_value=result)
+    repo = ChatSessionRepo(_async_factory(sess))
+    out = await repo.append_approval_once(
+        session_id=str(uuid.uuid4()),
+        approval_id="a1",
+        content="x",
+        tool_call_data={"approval_id": "a1"},
+    )
+    assert out is None
+    sess.add.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
