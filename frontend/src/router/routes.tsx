@@ -14,6 +14,7 @@ import MonitoringConfig from '@/pages/monitoring/config'
 import PortfolioPage from '@/pages/portfolio'
 import PortfolioOverviewPage from '@/pages/portfolio-overview'
 import PaperTradingPage from '@/pages/paper-trading'
+import WatchlistPage from '@/pages/watchlist'
 import ReportsListPage from '@/pages/reports'
 import ResearchDetailPage from '@/pages/research/Detail'
 import ResearchListPage from '@/pages/research/List'
@@ -44,6 +45,7 @@ export const routes: IRouteObject[] = [
   { path: '/portfolio', Component: PortfolioPage },
   { path: '/portfolio-overview', Component: PortfolioOverviewPage },
   { path: '/paper-trading', Component: PaperTradingPage },
+  { path: '/watchlist', Component: WatchlistPage },
   { path: '/knowledge', Component: KnowledgePage },
   { path: '/monitoring', Component: MonitoringIndex },
   { path: '/monitoring/:cid/alert/:aid', Component: AlertDetail },
