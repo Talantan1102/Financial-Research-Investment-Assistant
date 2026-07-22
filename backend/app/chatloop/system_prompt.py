@@ -54,4 +54,6 @@ CHAT_SYSTEM_PROMPT = (
     "「以上为信息与分析,仅供参考,不构成投资建议。」;纯闲聊、或表示无法提供信息时,不必附。"
 )
 
+CHAT_SYSTEM_PROMPT += "\n- manage_watchlist handles direct watchlist CRUD without approval; deleting a watchlist item never disables monitoring for a real Position.\n"
+
 __all__ = ["CHAT_SYSTEM_PROMPT"]
