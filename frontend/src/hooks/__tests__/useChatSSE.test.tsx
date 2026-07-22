@@ -13,6 +13,7 @@ import { escalationActions, escalationState } from '@/store/escalation'
 import * as chatSessionsStore from '@/store/chat-sessions'
 import type { ChatDetail, ChatMessage, ChatSession } from '@/types/chat'
 import type { EscalationPacket } from '@/types/escalation'
+import { paperTradingState } from '@/store/paper-trading'
 
 function makeSession(id: string): ChatSession {
   return {
@@ -84,6 +85,30 @@ describe('useChatSSE — basic consume', () => {
     })
     expect(snapshot(currentChatState).streamingStatus).toBe('idle')
     expect(snapshot(currentChatState).messages.at(-1)?.content).toBe('Hello')
+  })
+
+  it('upserts approval_request events idempotently while preserving seq ordering', async () => {
+    const approval = {
+      type: 'approval_request' as const,
+      seq: 2,
+      approval_id: 'approval-a1',
+      approval_type: 'paper_order' as const,
+      resource_id: 'o1',
+      proposal: { side: 'buy' as const, ts_code: '600000.SH', name: '浦发银行', quantity: 100, order_type: 'limit' as const, limit_price: '10.00' },
+      preview: {
+        order_id: 'o1', draft: { side: 'buy' as const, ts_code: '600000.SH', name: '浦发银行', quantity: 100, order_type: 'limit' as const, limit_price: '10.00' },
+        quote: { price: '10.00' }, estimated_gross: '1000', estimated_fees: {}, estimated_cash_required: '1000', available_cash: '10000', sellable_quantity: 0, market_phase: 'open', rules_version: 'v1',
+      },
+      expires_at: '2026-07-22T10:00:00Z',
+    }
+    server.use(http.post(`${API_BASE}/api/v0/chat`, () => sseResponse([
+      approval, { ...approval, seq: 3 }, { type: 'done', seq: 4 },
+    ])))
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+    await act(async () => { await result.current.sendMessage('买入浦发银行') })
+    expect(Object.keys(paperTradingState.approvals)).toEqual(['approval-a1'])
+    expect(paperTradingState.approvals['approval-a1'].proposal).toMatchObject({ quantity: 100 })
+    expect(snapshot(currentChatState).last_seq).toBe(4)
   })
 })
 

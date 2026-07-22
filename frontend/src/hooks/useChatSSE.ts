@@ -35,6 +35,7 @@ import {
 } from '@/store/current-chat'
 import { chatSessionsActions } from '@/store/chat-sessions'
 import { escalationActions } from '@/store/escalation'
+import { paperTradingActions } from '@/store/paper-trading'
 import type {
   EscalatePacketDraftEvent,
   EscalateRequestEvent,
@@ -201,6 +202,12 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
     }
   }, [])
 
+  const handlePaperTradingEvent = useCallback((ev: SSEEvent) => {
+    if (ev.type === 'approval_request') {
+      paperTradingActions.upsert(ev)
+    }
+  }, [])
+
   const typewriter = useTypewriter({
     onChar: (ch) => {
       currentChatState.streamingDraft += ch
@@ -315,7 +322,10 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             ac.signal,
             typewriterRef.current,
             armIdleWatchdog,
-            handleEscalationEvent,
+            (ev) => {
+              handlePaperTradingEvent(ev)
+              handleEscalationEvent(ev)
+            },
           )
           doneSeen = result.doneSeen
         } else {
@@ -325,7 +335,10 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
             ac.signal,
             typewriterRef.current,
             armIdleWatchdog,
-            handleEscalationEvent,
+            (ev) => {
+              handlePaperTradingEvent(ev)
+              handleEscalationEvent(ev)
+            },
           )
           doneSeen = result.doneSeen
         }
@@ -379,7 +392,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         }
       }
     },
-    [fetchImpl, handleEscalationEvent],
+    [fetchImpl, handleEscalationEvent, handlePaperTradingEvent],
   )
 
   const abort = useCallback(() => {
@@ -421,7 +434,10 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
           ac.signal,
           typewriterRef.current,
           undefined,
-          handleEscalationEvent,
+          (ev) => {
+            handlePaperTradingEvent(ev)
+            handleEscalationEvent(ev)
+          },
         )
         doneSeen = result.doneSeen
       } catch {
@@ -431,7 +447,7 @@ export function useChatSSE(options: UseChatSSEOptions): UseChatSSE {
         typewriterRef.current.flush()
       }
     },
-    [fetchImpl, handleEscalationEvent],
+    [fetchImpl, handleEscalationEvent, handlePaperTradingEvent],
   )
 
   // Plan 3 Task 7: cancel in-flight task。POST /chat/cancel/{tid} → 202;

@@ -5,6 +5,7 @@ import {
   currentChatState,
 } from '@/store/current-chat'
 import type { SSEEvent } from '@/types/chat'
+import { paperTradingState } from '@/store/paper-trading'
 
 describe('currentChatStore', () => {
   beforeEach(() => currentChatActions.reset())
@@ -35,6 +36,56 @@ describe('currentChatStore', () => {
     const s = snapshot(currentChatState)
     expect(s.session_id).toBe('s1')
     expect(s.messages).toHaveLength(1)
+  })
+
+  it('setSession restores paper approval cards from persisted messages', () => {
+    currentChatActions.setSession('s1', [
+      {
+        id: 'approval-message',
+        session_id: 's1',
+        role: 'assistant',
+        content: '',
+        message_type: 'paper_approval',
+        tool_call_data: {
+          approval_id: 'approval-a1',
+          approval_type: 'paper_order',
+          resource_id: 'o1',
+          proposal: {
+            side: 'buy',
+            ts_code: '600000.SH',
+            name: '浦发银行',
+            quantity: 100,
+            order_type: 'limit',
+            limit_price: '10.00',
+          },
+          preview: {
+            order_id: 'o1',
+            draft: {
+              side: 'buy',
+              ts_code: '600000.SH',
+              name: '浦发银行',
+              quantity: 100,
+              order_type: 'limit',
+              limit_price: '10.00',
+            },
+            quote: { price: '10.00' },
+            estimated_gross: '1000',
+            estimated_fees: {},
+            estimated_cash_required: '1000',
+            available_cash: '10000',
+            sellable_quantity: 0,
+            market_phase: 'open',
+            rules_version: 'v1',
+          },
+          expires_at: '2026-07-22T10:00:00Z',
+        },
+        research_report_id: null,
+        research_report_summary: null,
+        created_at: '2026-07-22T00:00:00Z',
+      },
+    ])
+    expect(paperTradingState.approvals['approval-a1'].resource_id).toBe('o1')
+    expect(paperTradingState.approvals['approval-a1'].phase).toBe('preview')
   })
 
   it('dispatchEvent: token appends streaming-content + advances last_seq', () => {

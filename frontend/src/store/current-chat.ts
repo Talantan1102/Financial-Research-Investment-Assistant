@@ -9,6 +9,7 @@
  */
 
 import { proxy } from 'valtio'
+import { paperTradingActions } from '@/store/paper-trading'
 import type {
   ChatMessage,
   ChartEvent,
@@ -137,6 +138,26 @@ export const currentChatActions = {
     currentChatState.loop_progress = null
     currentChatState.halt_reason = null
     currentChatState.dispatchLanes = []
+    // Approval cards are session-scoped. Rebuild them from the persisted
+    // message history so a refresh/session switch does not lose pending cards
+    // or leak cards from the previous chat.
+    paperTradingActions.reset()
+    for (const message of messages) {
+      if (message.message_type !== 'paper_approval' || !message.tool_call_data) continue
+      const data = message.tool_call_data
+      if (
+        typeof data === 'object' &&
+        data !== null &&
+        'approval_id' in data &&
+        'approval_type' in data &&
+        'resource_id' in data &&
+        'proposal' in data &&
+        'preview' in data &&
+        'expires_at' in data
+      ) {
+        paperTradingActions.upsert(data as Parameters<typeof paperTradingActions.upsert>[0])
+      }
+    }
   },
   setActiveTaskId(taskId: string | null) {
     currentChatState.active_task_id = taskId
@@ -342,5 +363,6 @@ export const currentChatActions = {
     currentChatState.loop_progress = INITIAL.loop_progress
     currentChatState.halt_reason = INITIAL.halt_reason
     currentChatState.dispatchLanes = []
+    paperTradingActions.reset()
   },
 }
