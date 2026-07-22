@@ -62,8 +62,11 @@ def _missing(action: PaperAction, args: PaperTradeArgs) -> list[str]:
             fields.append("side")
         if args.ts_code is None or not args.ts_code.strip():
             fields.append("ts_code")
-        if args.quantity is None and args.amount is None:
-            fields.append("quantity")
+        if args.quantity is None:
+            if args.amount is None:
+                fields.append("quantity")
+            elif args.limit_price is None:
+                fields.extend(("quantity", "price"))
         return fields
     if action in {"get_order", "prepare_cancel"} and args.order_id is None:
         return ["order_id"]
