@@ -154,8 +154,11 @@ async function consumeStream(
             await typewriter.drained()
             doneSeen = true
           }
-          currentChatActions.dispatchEvent(ev)
-          onEvent?.(ev)
+          // Only side-channel an event after the main store accepted its seq.
+          // Redis replay can contain an old approval_request; forwarding it
+          // would let a stale payload overwrite the newer approval card even
+          // though current-chat correctly dropped the event.
+          if (currentChatActions.dispatchEvent(ev)) onEvent?.(ev)
         }
       }
       idx = buffer.indexOf(SSE_FRAME_DELIMITER)

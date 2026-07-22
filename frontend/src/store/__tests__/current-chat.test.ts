@@ -121,6 +121,12 @@ describe('currentChatStore', () => {
     expect(s.last_seq).toBe(5)
   })
 
+  it('dispatchEvent returns false for an out-of-order event', () => {
+    currentChatActions.setSession('s1', [])
+    expect(currentChatActions.dispatchEvent({ type: 'token', seq: 5, content: 'a' })).toBe(true)
+    expect(currentChatActions.dispatchEvent({ type: 'token', seq: 3, content: 'b' })).toBe(false)
+  })
+
   it('dispatchEvent: done flushes streamingDraft into a message + sets idle', () => {
     currentChatActions.setSession('s1', [])
     currentChatActions.beginStreaming()

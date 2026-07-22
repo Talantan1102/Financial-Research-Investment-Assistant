@@ -110,6 +110,25 @@ describe('useChatSSE — basic consume', () => {
     expect(paperTradingState.approvals['approval-a1'].proposal).toMatchObject({ quantity: 100 })
     expect(snapshot(currentChatState).last_seq).toBe(4)
   })
+
+  it('does not let a replayed approval_request overwrite a newer card', async () => {
+    const base = {
+      type: 'approval_request' as const,
+      approval_id: 'approval-a1', approval_type: 'paper_order' as const,
+      resource_id: 'o1',
+      proposal: { side: 'buy' as const, ts_code: '600000.SH', name: '浦发银行', quantity: 100, order_type: 'limit' as const, limit_price: '10.00' },
+      preview: { order_id: 'o1', draft: { side: 'buy' as const, ts_code: '600000.SH', name: '浦发银行', quantity: 100, order_type: 'limit' as const, limit_price: '10.00' }, quote: { price: '10.00' }, estimated_gross: '1000', estimated_fees: {}, estimated_cash_required: '1000', available_cash: '10000', sellable_quantity: 0, market_phase: 'open', rules_version: 'v1' },
+      expires_at: '2026-07-22T10:00:00Z',
+    }
+    server.use(http.post(`${API_BASE}/api/v0/chat`, () => sseResponse([
+      { ...base, seq: 2 },
+      { ...base, seq: 1, proposal: { ...base.proposal, quantity: 1 } },
+      { type: 'done', seq: 3 },
+    ])))
+    const { result } = renderHook(() => useChatSSE({ sessionId: 's1' }))
+    await act(async () => { await result.current.sendMessage('买入浦发银行') })
+    expect(paperTradingState.approvals['approval-a1'].proposal).toMatchObject({ quantity: 100 })
+  })
 })
 
 describe('useChatSSE — abort', () => {

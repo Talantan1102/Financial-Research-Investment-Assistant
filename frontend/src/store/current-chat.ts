@@ -196,7 +196,7 @@ export const currentChatActions = {
     })
   },
   dispatchEvent(ev: SSEEvent) {
-    if (ev.seq <= currentChatState.last_seq) return
+    if (ev.seq <= currentChatState.last_seq) return false
     currentChatState.last_seq = ev.seq
 
     switch (ev.type) {
@@ -324,6 +324,7 @@ export const currentChatActions = {
       default:
         currentChatState.toolEvents.push(ev)
     }
+    return true
   },
   /** Reset UI to idle regardless of current streaming state.
    *
