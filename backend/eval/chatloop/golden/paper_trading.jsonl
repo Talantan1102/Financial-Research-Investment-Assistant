@@ -1,0 +1,3 @@
+{"case_id":"paper-research-no-order","category":"paper_trading","user_input":"怎么看这只股票的风险？","expected":{"first_tool":"get_stock_quote"},"expected_tools":["get_stock_quote"],"forbidden_tools":["paper_trade"],"database_assertions":{"order_count":0}}
+{"case_id":"paper-buy-approval","category":"paper_trading","user_input":"模拟买入600000.SH 100股，限价10元","expected":{"first_tool":"paper_trade"},"expected_tools":["paper_trade"],"expected_approval_type":"paper_order","database_assertions":{"order_status":"filled","position_quantity":100}}
+{"case_id":"paper-missing-quantity","category":"paper_trading","user_input":"给我买入浦发银行","expected":{"first_tool":"paper_trade"},"expected_tools":["paper_trade"],"forbidden_tools":["buy_stock"],"database_assertions":{"order_count":0}}
