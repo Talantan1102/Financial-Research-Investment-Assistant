@@ -96,9 +96,61 @@ async def _build_singletons_for_worker(session_factory: Any) -> Any:
             _MCP_CTX_SINGLETON = MCPClient.from_subprocess(profile="chat_tools")
             _MCP_CLIENT_SINGLETON = await _MCP_CTX_SINGLETON.__aenter__()
 
+        from datetime import UTC, date, datetime, timedelta
+
+        from app.chatloop.paper_trade_tool import AsyncPaperTradeAdapter
+        from app.services.paper_trading.clock import FixedTradingCalendar, TradingClock
+        from app.services.paper_trading.order_service import PaperOrderService
+        from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
+        from app.services.paper_trading.rulebook import RuleBook
+
+        open_dates = {
+            date.today() + timedelta(days=i)
+            for i in range(90)
+            if (date.today() + timedelta(days=i)).weekday() < 5
+        }
+
+        def service_factory(sync_session: Any) -> Any:
+            service = PaperOrderService(
+                sync_session,
+                quote_provider=TushareRealtimeQuoteProvider(),
+                clock=TradingClock(FixedTradingCalendar(open_dates)),
+                rulebook=RuleBook.from_builtin_fixture(),
+                now=lambda: datetime.now(UTC),
+            )
+
+            class _Dispatch:
+                def dispatch(self, args: Any, **scope: Any) -> dict[str, Any]:
+                    if args.action == "prepare_order":
+                        order, preview = service.prepare_order(
+                            **scope,
+                            side=args.side,
+                            ts_code=args.ts_code,
+                            name=args.name,
+                            quantity=args.quantity,
+                            order_type=args.order_type,
+                            limit_price=args.limit_price,
+                            message_id=scope["request_id"],
+                        )
+                        return {
+                            "approval": {
+                                "approval_id": scope["request_id"],
+                                "approval_type": "paper_order",
+                                "resource_id": str(order.id),
+                                "proposal": order.original_proposal,
+                                "preview": preview.model_dump(mode="json"),
+                                "expires_at": order.expires_at,
+                            }
+                        }
+                    raise ValueError(f"unsupported paper action: {args.action}")
+
+            return _Dispatch()
+
+        paper_dependencies = AsyncPaperTradeAdapter(session_factory, service_factory)
         _SINGLETONS_CACHE = await build_heavy_singletons(
             session_factory=session_factory,
             mcp_client=_MCP_CLIENT_SINGLETON,
+            paper_dependencies=paper_dependencies,
         )
     return _SINGLETONS_CACHE
 
