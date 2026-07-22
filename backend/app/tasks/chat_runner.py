@@ -175,7 +175,9 @@ async def _build_singletons_for_worker(session_factory: Any) -> Any:
                                 "quantity": o.quantity,
                                 "status": o.status.value,
                                 "order_type": o.order_type.value,
-                                "limit_price": str(o.limit_price) if o.limit_price is not None else None,
+                                "limit_price": str(o.limit_price)
+                                if o.limit_price is not None
+                                else None,
                             }
                             for o in orders
                         ]
