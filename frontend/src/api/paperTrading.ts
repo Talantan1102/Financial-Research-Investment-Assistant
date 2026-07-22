@@ -1,7 +1,6 @@
 import type {
   CancelConfirmRequest,
   CancelPreview,
-  CancelPreviewRequest,
   OrderConfirmRequest,
   OrderDraft,
   OrderPreview,
@@ -48,10 +47,9 @@ export const confirmOrder = (orderId: string, payload: OrderConfirmRequest) =>
     body: JSON.stringify(payload),
   })
 
-export const previewCancel = (orderId: string, payload: CancelPreviewRequest) =>
+export const previewCancel = (orderId: string) =>
   fetchJson<CancelPreview>(`${BASE}/orders/${encodeURIComponent(orderId)}/cancel-preview`, {
     method: 'POST',
-    body: JSON.stringify(payload),
   })
 
 export const confirmCancel = (orderId: string, payload: CancelConfirmRequest) =>

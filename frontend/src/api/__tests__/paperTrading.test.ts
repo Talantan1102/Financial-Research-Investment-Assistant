@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { HttpResponse, http } from 'msw'
-import { confirmOrder, getAccount, previewOrder } from '@/api/paperTrading'
+import { confirmOrder, getAccount, previewCancel, previewOrder } from '@/api/paperTrading'
 import type { OrderDraft } from '@/types/paper-trading'
 import { server } from '@/test-utils/msw-server'
 
@@ -33,5 +33,13 @@ describe('paper trading api', () => {
     )
     expect((await previewOrder('o1', draft)).draft.quantity).toBe(200)
     expect((await confirmOrder('o1', { client_request_id: 'approval-a1', draft })).id).toBe('o1')
+  })
+
+  it('previews cancellation without sending a request body', async () => {
+    server.use(http.post(`${API_BASE}/api/v0/paper-trading/orders/o1/cancel-preview`, async ({ request }) => {
+      expect(await request.text()).toBe('')
+      return HttpResponse.json({ order_id: 'o1', status: 'open', filled_quantity: 0, remaining_quantity: 100, reserved_cash: '0.00', reserved_quantity: 0 })
+    }))
+    expect((await previewCancel('o1')).remaining_quantity).toBe(100)
   })
 })

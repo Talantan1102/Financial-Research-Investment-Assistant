@@ -122,11 +122,11 @@ export interface OrderConfirmRequest extends OrderPreviewRequest {
   client_request_id: string
 }
 
-export interface CancelPreviewRequest {
+export type CancelPreviewRequest = never
+
+export interface CancelConfirmRequest {
   confirmation_id: string
 }
-
-export interface CancelConfirmRequest extends CancelPreviewRequest {}
 
 export interface ResetPreviewRequest {
   initial_cash: string
