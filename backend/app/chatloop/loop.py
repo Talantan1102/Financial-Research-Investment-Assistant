@@ -209,7 +209,7 @@ class ToolLoop:
                 # 修法 A(spec § 4.3 升级事件次序):escalate_offered 时 loop 不发 done,
                 # 由 runner 在 escalate_request + escalate_packet_draft 之后补发唯一终止 done。
                 # 非 escalate 时 loop 自己发 done(runner 不补,防双 done)。
-                if not state.escalate_offered:
+                if not state.escalate_offered and not _has_paper_approval(state):
                     await self._emit(
                         "done",
                         state.step,
@@ -446,6 +446,21 @@ class ToolLoop:
         if not state.escalate_offered:
             await self._emit("done", state.step, stop_reason=reason, **turn_summary(state))
         return state
+
+
+def _has_paper_approval(state: ChatLoopState) -> bool:
+    import json
+
+    for message in state.messages:
+        if message.get("role") != "tool":
+            continue
+        try:
+            payload = json.loads(str(message.get("content", "")))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict) and isinstance(payload.get("approval"), dict):
+            return True
+    return False
 
 
 __all__ = [

@@ -327,6 +327,18 @@ async def run_chat_async(
 
         # 持久化(checkpoint 退役 → 不写 langgraph_checkpoint_id)
         try:
+            await _persist_paper_approvals(
+                session_repo=session_repo,
+                bus=bus,
+                sid_uuid=sid_uuid,
+                task_id=task_id,
+                session_id=session_id,
+                final_state=final_state,
+                seq_counter=seq_counter,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("paper approval persistence failed for task %s: %s", task_id, exc)
+        try:
             await _finalize(
                 session_repo=session_repo,
                 task_repo=task_repo,
@@ -352,6 +364,22 @@ async def run_chat_async(
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception("paper approval persistence failed for task %s: %s", task_id, exc)
+        if (
+            final_state is not None
+            and not cancelled_by_user
+            and loop_error is None
+            and _approval_payloads(final_state)
+        ):
+            await bus.xadd_event(
+                sid_uuid,
+                task_id,
+                {
+                    "type": "done",
+                    "seq": seq_counter.next(),
+                    "stop_reason": final_state.halt_reason or "natural",
+                    **turn_summary(final_state),
+                },
+            )
 
         # Refresh TTL
         try:
