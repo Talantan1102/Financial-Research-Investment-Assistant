@@ -27,4 +27,9 @@ describe('PaperApprovalCard', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: '确认取消模拟订单' }))
     expect(api.confirmCancel).toHaveBeenCalledWith('o1', { confirmation_id: 'a1' })
   })
+  it('disables confirmation for an expired approval', () => {
+    render(<PaperApprovalCard message={message({ expires_at: '2020-01-01T00:00:00Z' })} />)
+    expect(screen.getByRole('button', { name: '审批已过期' })).toBeDisabled()
+    expect(api.confirmOrder).not.toHaveBeenCalled()
+  })
 })

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChatMessage } from '@/types/chat'
-import type { ApprovalPayload, OrderDraft, OrderPreview, OrderStatus } from '@/types/paper-trading'
+import type { ApprovalPayload, OrderDraft, OrderStatus } from '@/types/paper-trading'
 import {
   confirmCancel,
   confirmOrder,
@@ -11,6 +11,14 @@ import {
 import styles from './PaperApprovalCard.module.scss'
 
 const TERMINAL: OrderStatus[] = ['filled', 'cancelled', 'expired', 'rejected']
+function humanError(err: unknown): string {
+  if (!(err instanceof Error)) return '操作失败'
+  const match = err.message.match(/\{.*\}$/)
+  if (match) {
+    try { const body = JSON.parse(match[0]) as { detail?: string; message?: string }; return body.detail ?? body.message ?? err.message } catch { /* use raw */ }
+  }
+  return err.message
+}
 
 export interface PaperApprovalCardProps { message: ChatMessage }
 
@@ -34,10 +42,13 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<OrderStatus | null>(null)
+  const [completed, setCompleted] = useState(false)
+  const expired = Boolean(payload?.expires_at && new Date(payload.expires_at).getTime() <= Date.now())
   const mounted = useRef(true)
   const stopPolling = useRef<(() => void) | null>(null)
 
   useEffect(() => () => { mounted.current = false; stopPolling.current?.() }, [])
+  useEffect(() => () => { stopPolling.current?.(); stopPolling.current = null }, [payload?.approval_id])
   useEffect(() => { setDraft(initialDraft); setPreview(payload?.preview); setDirty(false) }, [initialDraft, payload?.preview])
 
   const update = <K extends keyof OrderDraft>(key: K, value: OrderDraft[K]) => {
@@ -51,7 +62,7 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
     try {
       const next = await previewOrder(payload.resource_id, draft)
       if (mounted.current) { setPreview(next); setDirty(false) }
-    } catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : '预览失败') }
+    } catch (err) { if (mounted.current) setError(humanError(err)) }
     finally { if (mounted.current) setBusy(false) }
   }
 
@@ -64,14 +75,14 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
         if (stopped || !mounted.current) return
         setStatus(order.status)
         if (!TERMINAL.includes(order.status)) timer = window.setTimeout(tick, 2000)
-      } catch (err) { if (!stopped && mounted.current) setError(err instanceof Error ? err.message : '查询订单失败') }
+      } catch (err) { if (!stopped && mounted.current) setError(humanError(err)) }
     }
     void tick()
     return () => { stopped = true; if (timer !== undefined) window.clearTimeout(timer) }
   }, [])
 
   const confirm = async () => {
-    if (!payload || dirty || busy) return
+    if (!payload || dirty || busy || expired) return
     setBusy(true); setError(null)
     try {
       if (payload.approval_type === 'paper_order') {
@@ -87,9 +98,9 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
       } else {
         const initial_cash = String((payload.proposal as Record<string, unknown>)?.initial_cash ?? '')
         await confirmReset({ initial_cash, session_id: message.session_id, confirmation_id: payload.approval_id })
-        setStatus('filled')
+        setCompleted(true)
       }
-    } catch (err) { if (mounted.current) setError(err instanceof Error ? err.message : '确认失败') }
+    } catch (err) { if (mounted.current) setError(humanError(err)) }
     finally { if (mounted.current) setBusy(false) }
   }
 
@@ -99,18 +110,23 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
   return <div className={styles.card} data-testid="paper-approval-card" data-approval-id={payload.approval_id}>
     <h3 className={styles.title}>{title}</h3>
     {isOrder ? <div className={styles.grid}>
-      <label className={styles.field}>方向<select aria-label="方向" value={draft.side} onChange={(e) => update('side', e.target.value as OrderDraft['side'])}><option value="buy">买入</option><option value="sell">卖出</option></select></label>
-      <label className={styles.field}>股票<input aria-label="股票" value={draft.ts_code} onChange={(e) => update('ts_code', e.target.value)} /></label>
-      <label className={styles.field}>数量<input aria-label="数量" type="number" value={draft.quantity} onChange={(e) => update('quantity', Number(e.target.value))} /></label>
-      <label className={styles.field}>订单类型<select aria-label="订单类型" value={draft.order_type} onChange={(e) => update('order_type', e.target.value as OrderDraft['order_type'])}><option value="market">市价</option><option value="limit">限价</option></select></label>
-      {draft.order_type === 'limit' ? <label className={styles.field}>限价<input aria-label="限价" value={draft.limit_price ?? ''} onChange={(e) => update('limit_price', e.target.value || null)} /></label> : null}
+      <label className={styles.field}>方向<select aria-label="方向" disabled={busy} value={draft.side} onChange={(e) => update('side', e.target.value as OrderDraft['side'])}><option value="buy">买入</option><option value="sell">卖出</option></select></label>
+      <label className={styles.field}>股票<input aria-label="股票" disabled={busy} value={draft.ts_code} onChange={(e) => update('ts_code', e.target.value)} /></label>
+      <label className={styles.field}>数量<input aria-label="数量" disabled={busy} type="number" value={draft.quantity} onChange={(e) => update('quantity', Number(e.target.value))} /></label>
+      <label className={styles.field}>订单类型<select aria-label="订单类型" disabled={busy} value={draft.order_type} onChange={(e) => update('order_type', e.target.value as OrderDraft['order_type'])}><option value="market">市价</option><option value="limit">限价</option></select></label>
+      {draft.order_type === 'limit' ? <label className={styles.field}>限价<input aria-label="限价" disabled={busy} value={draft.limit_price ?? ''} onChange={(e) => update('limit_price', e.target.value || null)} /></label> : null}
     </div> : null}
-    {preview ? <div className={styles.meta}>预览：{JSON.stringify(preview)}</div> : null}
+    {preview && isOrder ? <div className={styles.meta}>
+      行情时间：{preview.quote.timestamp ?? '未知'}；预计资金：{preview.estimated_cash_required}；预计费用：{Object.values(preview.estimated_fees).join('、') || '0'}；可用资金：{preview.available_cash}；可卖股份：{preview.sellable_quantity}；市场阶段：{preview.market_phase}
+    </div> : null}
+    {preview && payload.approval_type === 'paper_cancel' ? <div className={styles.meta}>订单状态：{preview.status}；剩余数量：{preview.remaining_quantity}；冻结资金：{preview.reserved_cash}；冻结股份：{preview.reserved_quantity}</div> : null}
+    {preview && payload.approval_type === 'paper_reset' ? <div className={styles.meta}>当前初始资金：{preview.current_initial_cash}；重置后初始资金：{preview.replacement_initial_cash}</div> : null}
+    <div className={styles.meta}>{completed ? '操作已完成。' : '模拟订单将进入排队处理，最终状态以订单查询结果为准。'}</div>
     {error ? <div className={styles.error} role="alert">{error}</div> : null}
     {status ? <div className={styles.meta}>订单状态：{status}</div> : null}
     <div className={styles.actions}>
       {isOrder && <button type="button" onClick={recalc} disabled={!dirty || busy}>重新计算</button>}
-      <button type="button" className={styles.primary} onClick={confirm} disabled={dirty || busy}>{busy ? '处理中…' : `确认${isOrder ? (draft.side === 'buy' ? '模拟买入' : '模拟卖出') : payload.approval_type === 'paper_cancel' ? '取消模拟订单' : '重置模拟账户'}`}</button>
+      <button type="button" className={styles.primary} onClick={confirm} disabled={dirty || busy || expired}>{expired ? '审批已过期' : busy ? '处理中…' : `确认${isOrder ? (draft.side === 'buy' ? '模拟买入' : '模拟卖出') : payload.approval_type === 'paper_cancel' ? '取消模拟订单' : '重置模拟账户'}`}</button>
     </div>
   </div>
 }
