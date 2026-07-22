@@ -4,13 +4,12 @@ import type { ColumnsType } from 'antd/es/table'
 import { useSnapshot } from 'valtio'
 import { listCashLedger, listFills, listHoldings, listOrders, getAccount, previewReset } from '@/api/paperTrading'
 import type { PaperAccount, PaperCashLedgerEntry, PaperFill, PaperHolding, PaperOrder, ResetPreview } from '@/types/paper-trading'
-import { paperTradingActions, paperTradingState } from '@/store/paper-trading'
+import { paperTradingState } from '@/store/paper-trading'
 import { PaperApprovalCard } from '@/components/chat/PaperApprovalCard'
 import type { ChatMessage } from '@/types/chat'
 import styles from './index.module.scss'
 
 const statusLabel: Record<string, string> = { queued: '排队中', open: '开放', partially_filled: '部分成交', filled: '已成交', cancelled: '已撤销', expired: '已过期', rejected: '已拒绝', awaiting_confirmation: '待确认' }
-const money = (value: string) => Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function PaperTradingPage() {
   const approvals = useSnapshot(paperTradingState).approvals
