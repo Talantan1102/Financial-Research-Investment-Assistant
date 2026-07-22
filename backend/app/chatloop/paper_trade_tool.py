@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
+from datetime import datetime
 from decimal import ROUND_DOWN, Decimal
 from typing import Any, Literal, Protocol
 from uuid import UUID
@@ -42,6 +43,17 @@ class PaperTradeArgs(BaseModel):
     order_type: OrderType | None = None
     limit_price: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
     initial_cash: Decimal | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+
+class ApprovalPayload(BaseModel):
+    """Stable payload shared by the worker approval event and chat card."""
+
+    approval_id: str
+    approval_type: Literal["paper_order", "paper_cancel", "paper_reset"]
+    resource_id: str
+    proposal: dict[str, Any]
+    preview: dict[str, Any]
+    expires_at: datetime
 
 
 class PaperTradeDependencies(Protocol):
@@ -119,7 +131,14 @@ class PaperTradeTool(InProcessTool):
             method: Callable[..., Any] = getattr(self._dependencies, method_name)
             result = method(parsed, **scope)
         if inspect.isawaitable(result):
-            return await result
+            result = await result
+        if parsed.action.startswith("prepare_") and isinstance(result, dict):
+            # Dependencies may return an already-normalized approval. Validate
+            # it here so malformed cards never reach the model/UI boundary.
+            approval = result.get("approval")
+            if approval is not None:
+                normalized = ApprovalPayload.model_validate(approval)
+                return {**result, "approval": normalized.model_dump(mode="json")}
         return result
 
     @staticmethod
@@ -136,4 +155,4 @@ class PaperTradeTool(InProcessTool):
         return args.model_copy(update={"quantity": quantity})
 
 
-__all__ = ["PaperTradeArgs", "PaperTradeDependencies", "PaperTradeTool"]
+__all__ = ["ApprovalPayload", "PaperTradeArgs", "PaperTradeDependencies", "PaperTradeTool"]

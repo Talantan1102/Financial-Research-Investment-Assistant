@@ -26,6 +26,7 @@ ScriptedStepClient(覆盖 llm)+ fakeredis + 真 PG async_session_factory。
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import uuid
@@ -36,6 +37,7 @@ from typing import Any
 from app.chatloop.context import ContextDeps
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.loop import CancelledByUser, ToolLoop
+from app.chatloop.paper_trade_tool import ApprovalPayload
 from app.chatloop.rebuild import rebuild_context
 from app.chatloop.state import ChatLoopState, turn_summary
 from app.services.chat_event_bus import ChatEventBus
@@ -338,6 +340,19 @@ async def run_chat_async(
         except Exception as exc:  # noqa: BLE001
             logger.exception("finalize failed for task %s: %s", task_id, exc)
 
+        try:
+            await _persist_paper_approvals(
+                session_repo=session_repo,
+                bus=bus,
+                sid_uuid=sid_uuid,
+                task_id=task_id,
+                session_id=session_id,
+                final_state=final_state,
+                seq_counter=seq_counter,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("paper approval persistence failed for task %s: %s", task_id, exc)
+
         # Refresh TTL
         try:
             await bus.set_ttl(sid_uuid, task_id, seconds=ChatEventBus.DEFAULT_TTL_SECONDS)
@@ -470,6 +485,62 @@ def _final_text(final_state: ChatLoopState | None) -> str:
             if isinstance(content, str) and content:
                 return content
     return ""
+
+
+def _approval_payloads(final_state: ChatLoopState | None) -> list[dict[str, Any]]:
+    if final_state is None:
+        return []
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for message in final_state.messages:
+        if message.get("role") != "tool":
+            continue
+        raw = message.get("content")
+        if not isinstance(raw, str):
+            continue
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        approval = parsed.get("approval") if isinstance(parsed, dict) else None
+        if not isinstance(approval, dict):
+            continue
+        try:
+            payload = ApprovalPayload.model_validate(approval).model_dump(mode="json")
+        except Exception:  # noqa: BLE001
+            continue
+        approval_id = payload["approval_id"]
+        if approval_id not in seen:
+            seen.add(approval_id)
+            found.append(payload)
+    return found
+
+
+async def _persist_paper_approvals(
+    *,
+    session_repo: ChatSessionRepo,
+    bus: ChatEventBus,
+    sid_uuid: uuid.UUID,
+    task_id: uuid.UUID,
+    session_id: str,
+    final_state: ChatLoopState | None,
+    seq_counter: SeqCounter,
+) -> None:
+    for payload in _approval_payloads(final_state):
+        message = await session_repo.append_approval_once(
+            session_id=session_id,
+            approval_id=payload["approval_id"],
+            content="请确认这笔模拟操作。",
+            tool_call_data=payload,
+            task_id=task_id,
+        )
+        if message is None:
+            continue
+        await bus.xadd_event(
+            sid_uuid,
+            task_id,
+            {"type": "approval_request", "seq": seq_counter.next(), **payload},
+        )
 
 
 async def _emit_escalation(
