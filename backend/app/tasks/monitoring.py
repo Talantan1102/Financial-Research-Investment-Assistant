@@ -140,9 +140,9 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
             subjects = [s for s in subjects if s.user_id == user_filter]
 
         # 按 ts_code 去重(同股跨 user 共享 SignalDetector 调用)
-        unique_codes: dict[str, MonitoringSubject] = {}
+        unique_codes: dict[tuple[str, str], MonitoringSubject] = {}
         for s in subjects:
-            unique_codes.setdefault(s.ts_code, s)
+            unique_codes.setdefault((s.user_id, s.ts_code), s)
 
         # 并发跑 SignalDetector(per ts_code,semaphore cap=5;每个 detector 内
         # 5 个 rule 也并发)。C1: detect 需要 (subject, tushare, bocha, llm,
@@ -162,7 +162,7 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
         raw_results = await asyncio.gather(
             *(_scan(unique_codes[c]) for c in codes), return_exceptions=True
         )
-        results_by_code: dict[str, tuple[SignalLevel, list]] = {}
+        results_by_code: dict[tuple[str, str], tuple[SignalLevel, list]] = {}
         for code, res in zip(codes, raw_results):
             if isinstance(res, BaseException):
                 # Fail-loud (hard rule 4): 不写 GREEN sentinel(那正是把整个监控
@@ -186,9 +186,9 @@ async def _run_detection_cycle(user_filter: str | None = None) -> dict[str, Any]
 
         alert_ids_to_enqueue: list[str] = []
         for subject in subjects:
-            if subject.ts_code not in results_by_code:
+            if (subject.user_id, subject.ts_code) not in results_by_code:
                 continue  # detect failed for this code (logged above) — skip, no silent GREEN
-            level, signals = results_by_code[subject.ts_code]
+            level, signals = results_by_code[(subject.user_id, subject.ts_code)]
 
             # 每 user 一行 run(同 cycle_id 内复用)
             if subject.user_id not in per_user_runs:
