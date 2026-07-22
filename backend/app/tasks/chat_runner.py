@@ -34,12 +34,15 @@ from contextlib import suppress
 from datetime import date
 from typing import Any
 
+from sqlalchemy import select
+
 from app.chatloop.context import ContextDeps
 from app.chatloop.events import LoopEvent, SeqCounter
 from app.chatloop.loop import CancelledByUser, ToolLoop
 from app.chatloop.paper_trade_tool import ApprovalPayload
 from app.chatloop.rebuild import rebuild_context
 from app.chatloop.state import ChatLoopState, turn_summary
+from app.models.paper_order import OrderStatus, PaperOrder
 from app.services.chat_event_bus import ChatEventBus
 from app.services.chat_session_repo import ChatSessionRepo
 from app.services.chat_task_repo import ChatTaskRepo
@@ -140,6 +143,91 @@ async def _build_singletons_for_worker(session_factory: Any) -> Any:
                                 "proposal": order.original_proposal,
                                 "preview": preview.model_dump(mode="json"),
                                 "expires_at": order.expires_at,
+                            }
+                        }
+                    if args.action == "get_account":
+                        account = service.account_service.get_or_create(user_id=scope["user_id"])
+                        return {
+                            "account": {
+                                k: getattr(account, k)
+                                for k in (
+                                    "id",
+                                    "generation",
+                                    "initial_cash",
+                                    "available_cash",
+                                    "frozen_cash",
+                                    "status",
+                                )
+                            }
+                        }
+                    if args.action in {"list_orders", "get_order"}:
+                        stmt = select(PaperOrder).where(PaperOrder.user_id == scope["user_id"])
+                        if args.order_id is not None:
+                            stmt = stmt.where(PaperOrder.id == args.order_id)
+                        orders = list(
+                            sync_session.execute(
+                                stmt.order_by(PaperOrder.created_at.desc())
+                            ).scalars()
+                        )
+                        payload = [
+                            {
+                                "id": str(o.id),
+                                "ts_code": o.ts_code,
+                                "name": o.name,
+                                "side": o.side.value,
+                                "quantity": o.quantity,
+                                "status": o.status.value,
+                                "order_type": o.order_type.value,
+                                "limit_price": o.limit_price,
+                            }
+                            for o in orders
+                        ]
+                        return (
+                            {"order": payload[0]}
+                            if args.action == "get_order" and payload
+                            else (
+                                {"orders": payload}
+                                if args.action == "list_orders"
+                                else {"error": "order_not_found"}
+                            )
+                        )
+                    if args.action == "prepare_cancel":
+                        order = sync_session.get(PaperOrder, args.order_id)
+                        if order is None or order.user_id != scope["user_id"]:
+                            return {"error": "order_not_found"}
+                        if order.status not in {
+                            OrderStatus.AWAITING_CONFIRMATION,
+                            OrderStatus.QUEUED,
+                            OrderStatus.OPEN,
+                            OrderStatus.PARTIALLY_FILLED,
+                        }:
+                            return {"error": "order_not_cancellable", "status": order.status.value}
+                        return {
+                            "approval": {
+                                "approval_id": scope["request_id"],
+                                "approval_type": "paper_cancel",
+                                "resource_id": str(order.id),
+                                "proposal": {"order_id": str(order.id)},
+                                "preview": {
+                                    "order_id": str(order.id),
+                                    "status": order.status.value,
+                                },
+                                "expires_at": order.expires_at,
+                            }
+                        }
+                    if args.action == "prepare_reset":
+                        account = service.account_service.get_active(user_id=scope["user_id"])
+                        return {
+                            "approval": {
+                                "approval_id": scope["request_id"],
+                                "approval_type": "paper_reset",
+                                "resource_id": str(account.id),
+                                "proposal": {"initial_cash": str(args.initial_cash)},
+                                "preview": {
+                                    "account_id": str(account.id),
+                                    "current_available_cash": account.available_cash,
+                                },
+                                "expires_at": datetime.now(UTC),
                             }
                         }
                     method = getattr(service, args.action, None)
