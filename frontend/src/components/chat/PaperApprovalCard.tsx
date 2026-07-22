@@ -51,7 +51,7 @@ export function PaperApprovalCard({ message }: PaperApprovalCardProps) {
   useEffect(() => () => { stopPolling.current?.(); stopPolling.current = null }, [payload?.approval_id])
   useEffect(() => { setDraft(initialDraft); setPreview(payload?.preview); setDirty(false) }, [initialDraft, payload?.preview])
   useEffect(() => {
-    if (!payload?.expires_at) return
+    if (!payload?.expires_at) { setExpired(false); return }
     const delay = new Date(payload.expires_at).getTime() - Date.now()
     setExpired(delay <= 0)
     if (delay <= 0) return
