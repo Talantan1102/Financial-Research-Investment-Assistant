@@ -15,6 +15,9 @@ vi.mock('@/components/chat/ResearchReportCard', () => ({
 vi.mock('@/components/chat/SystemMessage', () => ({
   SystemMessage: ({ message }: { message: ChatMessage }) => <div data-testid={`sys-${message.id}`} />,
 }))
+vi.mock('@/components/chat/PaperApprovalCard', () => ({
+  PaperApprovalCard: ({ message }: { message: ChatMessage }) => <div data-testid={`approval-${message.id}`} />,
+}))
 
 function makeMsg(over: Partial<ChatMessage>): ChatMessage {
   return {
@@ -58,6 +61,11 @@ describe('<MessageList> routing + virtualization', () => {
       <MessageList messages={[makeMsg({ id: 'd', message_type: 'system' })]} />,
     )
     expect(getByTestId('sys-d')).toBeInTheDocument()
+  })
+
+  it('routes paper_approval to PaperApprovalCard', () => {
+    const { getByTestId } = render(<MessageList messages={[makeMsg({ id: 'p', message_type: 'paper_approval' })]} />)
+    expect(getByTestId('approval-p')).toBeInTheDocument()
   })
 
   it('virtualizes — at 1000 messages only ~20 are mounted at once (F1)', () => {

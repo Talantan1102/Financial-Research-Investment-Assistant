@@ -7,6 +7,7 @@ import { ResearchReportCard } from './ResearchReportCard'
 import { SystemMessage } from './SystemMessage'
 import { TextMessage } from './TextMessage'
 import { ToolCallCard } from './ToolCallCard'
+import { PaperApprovalCard } from './PaperApprovalCard'
 
 export interface MessageListProps {
   messages: readonly ChatMessage[]
@@ -38,6 +39,8 @@ function MessageRouter({
         return <ResearchReportCard message={message} onContinueAsk={onContinueAsk} />
       case 'system':
         return <SystemMessage message={message} />
+      case 'paper_approval':
+        return <PaperApprovalCard message={message} />
       case 'text':
       default:
         return <TextMessage message={message} />
