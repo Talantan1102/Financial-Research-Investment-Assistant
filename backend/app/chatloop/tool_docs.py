@@ -47,6 +47,20 @@ class ToolDoc:
 # ---------------------------------------------------------------------------
 
 TOOL_DOCS: dict[str, ToolDoc] = {
+    "paper_trade": ToolDoc(
+        name="paper_trade",
+        group="core",
+        brief="Paper trading queries and approval-card preparation; never confirms.",
+        doc=(
+            "Six actions: get_account, list_orders, get_order, prepare_order, prepare_cancel, prepare_reset.\n"
+            "Required fields: prepare_order needs side, ts_code, name and quantity, or amount with limit_price; get_order and prepare_cancel need order_id; prepare_reset needs initial_cash.\n"
+            "quantity means shares and amount means money; do not mix them. Amount is converted to whole shares only with an explicit limit_price; market orders must provide quantity.\n"
+            "Use prepare only after the user explicitly asks to buy, sell, cancel, or reset. Research, quote, risk, and method questions must not prepare an order.\n"
+            "After prepare, wait for the editable approval card. This tool has no confirm action and must never claim that an order was filled; the account and order status are authoritative.\n"
+            "研究问题不得 prepare；金额与股数必须区分；prepare 后等待确认卡片；本工具没有 confirm。\n"
+            "Example: paper_trade(action='prepare_order', side='buy', ts_code='600519.SH', name='贵州茅台', quantity=100, order_type='limit', limit_price=1500)."
+        ),
+    ),
     # ===== 核心组 =====
     "lookup_ts_code": ToolDoc(
         name="lookup_ts_code",
@@ -516,6 +530,7 @@ TOOL_DOCS: dict[str, ToolDoc] = {
 # ---------------------------------------------------------------------------
 
 CORE_TOOLS: list[str] = [
+    "paper_trade",
     "lookup_ts_code",
     "get_stock_quote",
     "get_financial_statements",

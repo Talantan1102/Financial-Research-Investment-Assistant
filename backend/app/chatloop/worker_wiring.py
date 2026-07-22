@@ -30,6 +30,7 @@ from app.chatloop.control_tools import OfferDeepResearchTool, ReadCachedResultTo
 from app.chatloop.events import SeqCounter
 from app.chatloop.gates import GateConfig
 from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
+from app.chatloop.paper_trade_tool import PaperTradeDependencies, PaperTradeTool
 from app.chatloop.portfolio_tool import GetPortfolioPositionsTool
 from app.chatloop.skill_listing import build_skill_listing
 from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
@@ -41,6 +42,7 @@ from app.services.chat_steer_bus import steer_key
 from app.services.subagent_audit import SubagentAuditRepo
 from app.services.tool_result_cache import ToolResultCache
 from app.skills.executor_backend import SkillExecutorBackend
+from app.tools.base import Tool
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,7 @@ class HeavySingletons:
     skill_listing: str  # L1 元数据清单(进稳定前缀,会话内冻结)
     gate_cfg: GateConfig
     session_factory: Any = None  # async_sessionmaker —— get_portfolio_positions 查 positions 用
+    paper_dependencies: PaperTradeDependencies | None = None
     trace: Any = None  # TraceService —— ToolHub 写工具 span 用
 
 
@@ -103,6 +106,7 @@ async def build_heavy_singletons(
     memory: Any | None = None,
     skills_root: Any | None = None,
     workdir_root: Any | None = None,
+    paper_dependencies: PaperTradeDependencies | None = None,
 ) -> HeavySingletons:
     """构造 worker 进程级重依赖(spec § 3 接线)。
 
@@ -187,6 +191,7 @@ async def build_heavy_singletons(
         skill_listing=skill_listing,
         gate_cfg=GateConfig(),
         session_factory=session_factory,
+        paper_dependencies=paper_dependencies,
         trace=trace,
     )
 
@@ -234,21 +239,22 @@ def build_turn_components(
         audit_repo=SubagentAuditRepo(),
     )
 
-    hub.register_inprocess(
-        [
-            MemorySearchTool(memory=singletons.memory),
-            MemoryWriteTool(**memory_write_kwargs),
-            LoadSkillTool(loader=singletons.loader),
-            RunSkillScriptTool(executor=singletons.executor),
-            OfferDeepResearchTool(),
-            ReadCachedResultTool(cache=singletons.cache),
-            CodeInterpreterTool(
-                backend=SkillExecutorBackend(singletons.executor), cache=singletons.cache
-            ),
-            DispatchSubagentsTool(factory=subagent_factory),
-            GetPortfolioPositionsTool(session_factory=singletons.session_factory),
-        ]
-    )
+    inprocess_tools: list[Tool] = [
+        MemorySearchTool(memory=singletons.memory),
+        MemoryWriteTool(**memory_write_kwargs),
+        LoadSkillTool(loader=singletons.loader),
+        RunSkillScriptTool(executor=singletons.executor),
+        OfferDeepResearchTool(),
+        ReadCachedResultTool(cache=singletons.cache),
+        CodeInterpreterTool(
+            backend=SkillExecutorBackend(singletons.executor), cache=singletons.cache
+        ),
+        DispatchSubagentsTool(factory=subagent_factory),
+        GetPortfolioPositionsTool(session_factory=singletons.session_factory),
+    ]
+    if singletons.paper_dependencies is not None:
+        inprocess_tools.append(PaperTradeTool(singletons.paper_dependencies))
+    hub.register_inprocess(inprocess_tools)
 
     return ChatLoopComponents(
         llm=singletons.llm,
