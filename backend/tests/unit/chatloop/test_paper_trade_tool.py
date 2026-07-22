@@ -94,7 +94,7 @@ async def test_missing_order_fields_are_explicit() -> None:
     )
     assert result == {
         "error": "missing_order_field",
-        "missing_fields": ["side", "ts_code", "quantity"],
+        "missing_fields": ["side", "ts_code", "name", "quantity"],
     }
 
 
