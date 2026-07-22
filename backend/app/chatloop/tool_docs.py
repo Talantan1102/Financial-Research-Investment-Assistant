@@ -47,6 +47,10 @@ class ToolDoc:
 # ---------------------------------------------------------------------------
 
 TOOL_DOCS: dict[str, ToolDoc] = {
+    "manage_watchlist": ToolDoc(
+        name="manage_watchlist", group="core", brief="直接管理用户自选股，写入立即执行。",
+        doc="Actions: list, add, update, remove. monitoring_enabled defaults to false. This is not a paper trade and never needs an approval card. Removing a watchlist item does not stop monitoring of a real Position.",
+    ),
     "paper_trade": ToolDoc(
         name="paper_trade",
         group="core",
