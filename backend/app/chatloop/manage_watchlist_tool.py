@@ -22,7 +22,13 @@ class ManageWatchlistArgs(BaseModel):
 
 
 def _snapshot(item: WatchlistItem) -> dict[str, object]:
-    return {"id": str(item.id), "ts_code": item.ts_code, "name": item.name, "note": item.note, "monitoring_enabled": bool(item.monitoring_enabled)}
+    return {
+        "id": str(item.id),
+        "ts_code": item.ts_code,
+        "name": item.name,
+        "note": item.note,
+        "monitoring_enabled": bool(item.monitoring_enabled),
+    }
 
 
 class ManageWatchlistTool(InProcessTool):
@@ -38,17 +44,49 @@ class ManageWatchlistTool(InProcessTool):
         user_id = UUID(state.user_id)
         async with self._session_factory() as session:
             if parsed.action == "list":
-                rows = (await session.execute(select(WatchlistItem).where(WatchlistItem.user_id == user_id).order_by(WatchlistItem.ts_code))).scalars().all()
+                rows = (
+                    (
+                        await session.execute(
+                            select(WatchlistItem)
+                            .where(WatchlistItem.user_id == user_id)
+                            .order_by(WatchlistItem.ts_code)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
                 return {"items": [_snapshot(row) for row in rows]}
             if not parsed.ts_code:
                 return {"error": "missing_ts_code"}
-            item = (await session.execute(select(WatchlistItem).where(WatchlistItem.user_id == user_id, WatchlistItem.ts_code == parsed.ts_code))).scalar_one_or_none()
+            item = (
+                await session.execute(
+                    select(WatchlistItem).where(
+                        WatchlistItem.user_id == user_id, WatchlistItem.ts_code == parsed.ts_code
+                    )
+                )
+            ).scalar_one_or_none()
             if parsed.action == "add":
                 if item is not None:
                     return {"created": False, "item": _snapshot(item)}
-                item = WatchlistItem(user_id=user_id, ts_code=parsed.ts_code, name=parsed.name or parsed.ts_code, note=parsed.note, monitoring_enabled=parsed.monitoring_enabled)
-                session.add(item); await session.flush()
-                session.add(WatchlistAudit(item_id=item.id, user_id=user_id, action="add", after_json=_snapshot(item), source_session_id=state.session_id, source_tool_call_id=state.request_id))
+                item = WatchlistItem(
+                    user_id=user_id,
+                    ts_code=parsed.ts_code,
+                    name=parsed.name or parsed.ts_code,
+                    note=parsed.note,
+                    monitoring_enabled=parsed.monitoring_enabled,
+                )
+                session.add(item)
+                await session.flush()
+                session.add(
+                    WatchlistAudit(
+                        item_id=item.id,
+                        user_id=user_id,
+                        action="add",
+                        after_json=_snapshot(item),
+                        source_session_id=state.session_id,
+                        source_tool_call_id=state.request_id,
+                    )
+                )
                 await session.commit()
                 return {"created": True, "item": _snapshot(item)}
             if item is None:
@@ -59,12 +97,41 @@ class ManageWatchlistTool(InProcessTool):
                     if key not in {"name", "note", "monitoring_enabled"}:
                         return {"error": "unsupported_field", "field": key}
                     setattr(item, key, value)
-                session.add(WatchlistAudit(item_id=item.id, user_id=user_id, action="update", before_json=before, after_json=_snapshot(item), source_session_id=state.session_id, source_tool_call_id=state.request_id))
+                session.add(
+                    WatchlistAudit(
+                        item_id=item.id,
+                        user_id=user_id,
+                        action="update",
+                        before_json=before,
+                        after_json=_snapshot(item),
+                        source_session_id=state.session_id,
+                        source_tool_call_id=state.request_id,
+                    )
+                )
                 await session.commit()
                 return {"updated": True, "item": _snapshot(item)}
-            position = (await session.execute(select(Position).where(Position.user_id == user_id, Position.ts_code == parsed.ts_code, Position.paper_account_id.is_(None), Position.quantity > 0))).scalar_one_or_none()
-            session.add(WatchlistAudit(item_id=item.id, user_id=user_id, action="remove", before_json=before, source_session_id=state.session_id, source_tool_call_id=state.request_id))
-            await session.delete(item); await session.commit()
+            position = (
+                await session.execute(
+                    select(Position).where(
+                        Position.user_id == user_id,
+                        Position.ts_code == parsed.ts_code,
+                        Position.paper_account_id.is_(None),
+                        Position.quantity > 0,
+                    )
+                )
+            ).scalar_one_or_none()
+            session.add(
+                WatchlistAudit(
+                    item_id=item.id,
+                    user_id=user_id,
+                    action="remove",
+                    before_json=before,
+                    source_session_id=state.session_id,
+                    source_tool_call_id=state.request_id,
+                )
+            )
+            await session.delete(item)
+            await session.commit()
             result: dict[str, Any] = {"removed": True, "ts_code": parsed.ts_code}
             if position is not None:
                 result["monitoring_note"] = "该股票仍在真实持仓中，删除自选股不会停止持仓监控。"

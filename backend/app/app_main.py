@@ -26,10 +26,10 @@ from app.router.memory_router import router as memory_router  # noqa: E402  (C.5
 from app.router.monitoring_router import router as monitoring_router  # noqa: E402
 from app.router.observability_router import router as observability_router  # noqa: E402
 from app.router.paper_trading_router import router as paper_trading_router  # noqa: E402
-from app.router.watchlist_router import router as watchlist_router  # noqa: E402
 from app.router.persona_router import router as persona_router  # noqa: E402  (persona-ui)
 from app.router.portfolio_router import router as portfolio_router  # noqa: E402  (v1.0)
 from app.router.reports import router as reports_router  # noqa: E402  (v0.9.x)
+from app.router.watchlist_router import router as watchlist_router  # noqa: E402
 from app.services.chat_session_repo import ChatSessionRepo  # noqa: E402
 from app.services.mcp_client import MCPClient  # noqa: E402
 from app.tasks.celery_app import celery_app  # noqa: E402, F401  (autodiscover trigger)

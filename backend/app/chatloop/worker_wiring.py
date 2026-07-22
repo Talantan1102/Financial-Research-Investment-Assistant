@@ -29,8 +29,8 @@ from app.chatloop.code_interpreter_tool import CodeInterpreterTool
 from app.chatloop.control_tools import OfferDeepResearchTool, ReadCachedResultTool
 from app.chatloop.events import SeqCounter
 from app.chatloop.gates import GateConfig
-from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
 from app.chatloop.manage_watchlist_tool import ManageWatchlistTool
+from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
 from app.chatloop.paper_trade_tool import PaperTradeDependencies, PaperTradeTool
 from app.chatloop.portfolio_tool import GetPortfolioPositionsTool
 from app.chatloop.skill_listing import build_skill_listing
