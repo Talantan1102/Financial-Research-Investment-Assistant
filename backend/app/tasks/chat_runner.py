@@ -149,15 +149,12 @@ async def _build_singletons_for_worker(session_factory: Any) -> Any:
                         account = service.account_service.get_or_create(user_id=scope["user_id"])
                         return {
                             "account": {
-                                k: getattr(account, k)
-                                for k in (
-                                    "id",
-                                    "generation",
-                                    "initial_cash",
-                                    "available_cash",
-                                    "frozen_cash",
-                                    "status",
-                                )
+                                "id": str(account.id),
+                                "generation": account.generation,
+                                "initial_cash": str(account.initial_cash),
+                                "available_cash": str(account.available_cash),
+                                "frozen_cash": str(account.frozen_cash),
+                                "status": account.status.value,
                             }
                         }
                     if args.action in {"list_orders", "get_order"}:
@@ -178,7 +175,7 @@ async def _build_singletons_for_worker(session_factory: Any) -> Any:
                                 "quantity": o.quantity,
                                 "status": o.status.value,
                                 "order_type": o.order_type.value,
-                                "limit_price": o.limit_price,
+                                "limit_price": str(o.limit_price) if o.limit_price is not None else None,
                             }
                             for o in orders
                         ]
@@ -225,9 +222,9 @@ async def _build_singletons_for_worker(session_factory: Any) -> Any:
                                 "proposal": {"initial_cash": str(args.initial_cash)},
                                 "preview": {
                                     "account_id": str(account.id),
-                                    "current_available_cash": account.available_cash,
+                                    "current_available_cash": str(account.available_cash),
                                 },
-                                "expires_at": datetime.now(UTC),
+                                "expires_at": datetime.now(UTC) + timedelta(minutes=15),
                             }
                         }
                     method = getattr(service, args.action, None)

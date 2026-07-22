@@ -97,7 +97,7 @@ async def get_chat(
                 "role": m.role,
                 "content": m.content,
                 "message_type": m.message_type,
-                "tool_call_data": m.tool_call_data,
+                "tool_call_data": getattr(m, "tool_call_data", None),
                 "task_id": str(m.task_id) if m.task_id else None,
                 "status": m.status,
                 "created_at": m.created_at.isoformat() if m.created_at else "",
