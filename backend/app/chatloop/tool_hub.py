@@ -563,6 +563,7 @@ class ToolHub:
             task_id=call.id,
             user_id=state.user_id,
             visible_capabilities=visible,
+            approved_input=state.approved_inputs.get(call.id),
         )
         runtime = ToolRuntime(
             registry,

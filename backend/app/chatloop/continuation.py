@@ -133,7 +133,18 @@ class PauseRequestV1(BaseModel):
     reason: str | None = Field(default=None, max_length=255)
     action: str | None = Field(default=None, max_length=255)
     tool_calls: tuple[PendingToolCallV1, ...] = Field(default=(), max_length=64)
+    editable_tool_call_ids: tuple[str, ...] = Field(default=(), max_length=64)
     execution_bindings: tuple[ExecutionBindingV1, ...] = Field(default=(), max_length=64)
+
+    @model_validator(mode="after")
+    def validate_editable_tool_calls(self) -> PauseRequestV1:
+        tool_call_ids = {call.id for call in self.tool_calls}
+        if (
+            len(set(self.editable_tool_call_ids)) != len(self.editable_tool_call_ids)
+            or not set(self.editable_tool_call_ids).issubset(tool_call_ids)
+        ):
+            raise ValueError("editable tool call ids must be a unique subset of tool calls")
+        return self
 
 
 class PendingActionV1(BaseModel):

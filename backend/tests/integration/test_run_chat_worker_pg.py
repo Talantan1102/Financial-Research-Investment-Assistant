@@ -677,7 +677,11 @@ async def test_pause_is_atomic_and_resolved_server_record_is_only_resume_source(
         assert pause.resolved_at is None
         assert paused_event.payload["pause_type"] == "approval"
         assert paused_event.payload["request"] == {"tool": "place_order"}
-        pause.response_payload = {"approved": True, "text": "continue"}
+        pause.response_payload = {
+            "approved": True,
+            "text": "continue",
+            "edited_arguments": {"trade-1": {"quantity": 200}},
+        }
         pause.resolved_at = func.timezone("UTC", func.statement_timestamp())
         run.status = "queued"
         run.queue_reason = "resume"
@@ -705,7 +709,10 @@ async def test_pause_is_atomic_and_resolved_server_record_is_only_resume_source(
     assert second_claim.claimed and second_claim.assignment is not None
     resumed = await service.load_chat_execution(second_claim.assignment)
     assert resumed.continuation["key_id"] == "trusted"
-    assert resumed.prompt == '{"approved":true,"text":"continue"}'
+    assert resumed.prompt == (
+        '{"approved":true,"edited_arguments":{"trade-1":{"quantity":200}},'
+        '"text":"continue"}'
+    )
 
 
 @pytest.mark.asyncio

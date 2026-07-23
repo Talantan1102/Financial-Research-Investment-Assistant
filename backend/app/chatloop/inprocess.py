@@ -18,6 +18,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from app.chatloop.state import ChatLoopState
+from app.runtime.models import ExecutionContext
 from app.tools.base import Tool
 
 
@@ -39,6 +40,15 @@ class InProcessTool(Tool):
             f"{type(self).__name__} 是 InProcessTool,须经 ToolHub.dispatch "
             f"(run_with_state 注入 state)调用,不能走纯 run(args)"
         )
+
+    async def run_with_context(
+        self,
+        args: BaseModel,
+        state: ChatLoopState,
+        context: ExecutionContext,
+    ) -> dict[str, Any]:
+        del context
+        return await self.run_with_state(args, state)
 
 
 __all__ = ["InProcessTool"]

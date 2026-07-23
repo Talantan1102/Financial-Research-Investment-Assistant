@@ -26,12 +26,11 @@ class ChatloopToolAdapter:
         self.cache_key: str | None = None
 
     async def execute(self, input: dict[str, Any], context: ExecutionContext) -> RuntimeResult:
-        del context
         self.last_input = input
         validated = self._tool.args_schema.model_validate(input)
 
         if isinstance(self._tool, InProcessTool):
-            output = await self._tool.run_with_state(validated, self._state)
+            output = await self._tool.run_with_context(validated, self._state, context)
             return RuntimeResult(status=ExecutionStatus.SUCCEEDED, output=output)
 
         ledger_hit = self._state.ledger.find_success(tool_name=self._tool.name, args=input)

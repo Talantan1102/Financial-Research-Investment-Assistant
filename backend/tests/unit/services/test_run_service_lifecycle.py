@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
+from app.chatloop.approval_edits import SchemaEditableApprovalValidator
 from app.models.run import Run, RunEvent
 from app.models.run_scheduling import RunOutbox
 from app.models.tenant import Tenant, TenantMembership
@@ -17,6 +18,7 @@ from app.run_control.types import (
     RunStatus,
 )
 from app.services.run_service import CreateRunCommand, RunService
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -295,6 +297,146 @@ async def test_resume_outbox_conflict_rolls_back_run_pause_event_and_outbox(
     assert unresolved.response_payload is None
     assert not any(event.event_type == "run.resumed" for event in events)
     assert duplicate_count == 1
+
+
+class _EditableTradeArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    quantity: int = Field(strict=True, gt=0)
+    order_type: str = "market"
+
+
+@pytest.mark.asyncio
+async def test_invalid_edited_arguments_leave_pause_unresolved(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_approval(
+        created_run.id,
+        {
+            "tool_calls": [
+                {
+                    "id": "trade-1",
+                    "name": "place_paper_order",
+                    "arguments": '{"quantity":100}',
+                }
+            ],
+            "editable_tool_call_ids": ["trade-1"],
+        },
+        {
+            "body": {
+                "pending_action": {
+                    "pending_tool_calls": [
+                        {
+                            "id": "trade-1",
+                            "name": "place_paper_order",
+                            "arguments": '{"quantity":100}',
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    editable_service = RunService(
+        async_session_factory,
+        editable_approval_validator=SchemaEditableApprovalValidator(
+            {"place_paper_order": _EditableTradeArgs}
+        ),
+    )
+
+    with pytest.raises(ResumeNotAllowed, match="invalid edited arguments"):
+        await editable_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response={
+                "approved": True,
+                "edited_arguments": {"trade-1": {"quantity": 0}},
+            },
+        )
+
+    unresolved = await run_service.get_pause(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        pause.id,
+    )
+    assert unresolved.resolved_at is None
+    assert unresolved.response_payload is None
+
+
+@pytest.mark.asyncio
+async def test_same_raw_edit_resume_is_idempotent_after_schema_normalization(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_approval(
+        created_run.id,
+        {
+            "tool_calls": [
+                {
+                    "id": "trade-1",
+                    "name": "place_paper_order",
+                    "arguments": '{"quantity":100,"order_type":"limit"}',
+                }
+            ],
+            "editable_tool_call_ids": ["trade-1"],
+        },
+        {
+            "body": {
+                "pending_action": {
+                    "pending_tool_calls": [
+                        {
+                            "id": "trade-1",
+                            "name": "place_paper_order",
+                            "arguments": '{"quantity":100,"order_type":"limit"}',
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    editable_service = RunService(
+        async_session_factory,
+        editable_approval_validator=SchemaEditableApprovalValidator(
+            {"place_paper_order": _EditableTradeArgs}
+        ),
+    )
+    response = {
+        "approved": True,
+        "edited_arguments": {"trade-1": {"quantity": 200}},
+    }
+
+    first = await editable_service.resume_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        response=response,
+    )
+    second = await editable_service.resume_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        response=response,
+    )
+    resolved = await run_service.get_pause(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        pause.id,
+    )
+
+    assert first.id == second.id
+    assert resolved.response_payload["edited_arguments"]["trade-1"] == {
+        "quantity": 200,
+        "order_type": "market",
+    }
 
 
 @pytest.mark.asyncio

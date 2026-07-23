@@ -115,6 +115,7 @@ class _RecordingHub:
     def __init__(self) -> None:
         self.calls: list[StepToolCall] = []
         self.user_ids: list[str] = []
+        self.approved_inputs: list[dict[str, Any]] = []
 
     def schemas_for_llm(self) -> list[dict[str, Any]]:
         return []
@@ -122,6 +123,7 @@ class _RecordingHub:
     async def dispatch(self, calls: list[StepToolCall], state: Any) -> list[ToolResult]:
         self.calls.extend(calls)
         self.user_ids.append(state.user_id)
+        self.approved_inputs.append(dict(state.approved_inputs))
         results = []
         for call in calls:
             args = call.parsed_args
@@ -230,6 +232,54 @@ def test_public_approval_snapshot_round_trips_through_standard_continuation() ->
     assert decision == "approve"
     assert pending == (call,)
     assert state.messages[-1]["tool_calls"][0]["id"] == "call-1"
+
+
+async def test_approved_edits_execute_effective_call_and_keep_original_audit() -> None:
+    command = _command(prompt="place it")
+    call = StepToolCall(id="trade-1", name="place_order", arguments='{"quantity":100}')
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=(call,),
+        editable_tool_call_ids=frozenset({"trade-1"}),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+    hub = _RecordingHub()
+    llm = _ScriptedLLM([_step("done")])
+
+    result = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(**{**vars(_components(llm)), "tool_hub": hub}),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            json.dumps(
+                {
+                    "approved": True,
+                    "edited_arguments": {"trade-1": {"quantity": 200}},
+                }
+            ),
+            (),
+            continuation,
+            command.tenant_id,
+        )
+    )
+
+    assert isinstance(result, CompletedResult)
+    assert hub.calls[0].parsed_args == {"quantity": 200}
+    assert hub.approved_inputs[0]["trade-1"].original == {"quantity": 100}
+    assert hub.approved_inputs[0]["trade-1"].effective == {"quantity": 200}
+    assert continuation["body"]["pending_action"]["pending_tool_calls"][0][
+        "arguments"
+    ] == '{"quantity":100}'
+    assert result.tools[0].request == {"quantity": 200}
 
 
 async def test_completed_contract_usage_event_order_and_immutable_inputs() -> None:
