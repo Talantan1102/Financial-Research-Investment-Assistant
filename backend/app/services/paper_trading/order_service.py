@@ -104,7 +104,7 @@ class PaperOrderService:
             maximum=_MAX_CONFIRMATION_ID_LENGTH,
         )
         source_tool_call_id = _require_text(
-            source_tool_call_id, field="source_tool_call_id", maximum=64
+            source_tool_call_id, field="source_tool_call_id", maximum=255
         )
         confirmed = _canonical_draft(confirmed)
         existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
@@ -181,7 +181,7 @@ class PaperOrderService:
             user_id=user_id,
             client_request_id=client_request_id,
             source_session_id=str(source_run_id),
-            source_message_id=source_tool_call_id,
+            source_message_id=_legacy_source_id(source_tool_call_id),
             source_run_id=source_run_id,
             source_tool_call_id=source_tool_call_id,
             proposal_fingerprint=_proposal_fingerprint(
@@ -722,7 +722,7 @@ class PaperOrderService:
             user_id=user_id,
             initial_cash=normalized_cash,
             session_id=str(source_run_id),
-            confirmation_id=source_tool_call_id,
+            confirmation_id=_legacy_source_id(source_tool_call_id),
         )
         self._append_action_audit(
             user_id=user_id,
@@ -756,7 +756,7 @@ class PaperOrderService:
         user_id = _require_uuid(user_id, field="user_id")
         client_request_id = _require_text(client_request_id, field="client_request_id", maximum=128)
         source_tool_call_id = _require_text(
-            source_tool_call_id, field="source_tool_call_id", maximum=128
+            source_tool_call_id, field="source_tool_call_id", maximum=255
         )
         self._session.execute(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
@@ -1336,6 +1336,11 @@ def _json_diff(
 def _constraint_name(exc: IntegrityError) -> str | None:
     diag = getattr(exc.orig, "diag", None)
     return cast(str | None, getattr(diag, "constraint_name", None))
+
+
+def _legacy_source_id(value: str) -> str:
+    """Fit legacy provenance while retaining the full id in the 255-char column."""
+    return value if len(value) <= 64 else hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _require_uuid(value: object, *, field: str) -> uuid.UUID:

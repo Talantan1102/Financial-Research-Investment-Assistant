@@ -96,7 +96,7 @@ class PaperOrder(Base):
     source_session_id = Column(String(64), nullable=False)
     source_message_id = Column(String(64), nullable=False)
     source_run_id = Column(UUID(as_uuid=True), nullable=True)
-    source_tool_call_id = Column(String(128), nullable=True)
+    source_tool_call_id = Column(String(255), nullable=True)
     proposal_fingerprint = Column(String(64), nullable=False)
     ts_code = Column(String(16), nullable=False, index=True)
     name = Column(String(64), nullable=False)
@@ -287,7 +287,7 @@ class PaperActionAudit(Base):
     effective_payload = Column(JSONB(none_as_null=True), nullable=False)
     user_edits = Column(JSONB(none_as_null=True), nullable=False)
     source_run_id = Column(UUID(as_uuid=True), nullable=False)
-    source_tool_call_id = Column(String(128), nullable=False)
+    source_tool_call_id = Column(String(255), nullable=False)
     result_json = Column(JSONB(none_as_null=True), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 

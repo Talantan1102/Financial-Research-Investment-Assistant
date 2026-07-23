@@ -72,6 +72,7 @@ class LoadedChatExecution:
     approved_semantic_keys: frozenset[str] = frozenset()
     approved_tool_executions: tuple[tuple[str, UUID], ...] = ()
     rejected_tool_execution_ids: tuple[UUID, ...] = ()
+    trusted_recovery_inputs: tuple[tuple[str, dict[str, Any]], ...] = ()
 
 
 @dataclass(frozen=True)

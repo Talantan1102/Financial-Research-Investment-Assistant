@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
@@ -41,8 +42,9 @@ class PaperTradingBackend(Protocol):
 class SqlPaperTradingBackend:
     """Short-lived synchronous transactions, executed by tools in a worker thread."""
 
-    def __init__(self, session_factory: Any) -> None:
+    def __init__(self, session_factory: Any, *, dispatch_order: Any | None = None) -> None:
         self._session_factory = session_factory
+        self._dispatch_order = dispatch_order
 
     @staticmethod
     def _service(session: Any) -> Any:
@@ -113,7 +115,10 @@ class SqlPaperTradingBackend:
             )
             session.commit()
             session.refresh(order)
-            return PaperOrderRead.model_validate(order).model_dump(mode="json")
+            payload = PaperOrderRead.model_validate(order).model_dump(mode="json")
+            order_id = str(order.id)
+        _dispatch_committed_order(order_id, self._dispatch_order)
+        return payload
 
     def cancel(self, **kwargs: Any) -> Mapping[str, Any]:
         from app.schemas.paper_trading import PaperOrderRead
@@ -138,6 +143,18 @@ def _json_safe(value: Any) -> Any:
     return _ANY.dump_python(value, mode="json")
 
 
+def _dispatch_committed_order(order_id: str, dispatch: Any | None = None) -> None:
+    """Best-effort only: the transaction has already committed at this boundary."""
+    try:
+        if dispatch is None:
+            from app.tasks.paper_trading import dispatch_match_order
+
+            dispatch = dispatch_match_order
+        dispatch(order_id)
+    except Exception:
+        return
+
+
 def diff_arguments(
     original: Mapping[str, Any], effective: Mapping[str, Any]
 ) -> dict[str, dict[str, Any]]:
@@ -146,6 +163,15 @@ def diff_arguments(
         for key in sorted(set(original) | set(effective))
         if _json_safe(original.get(key)) != _json_safe(effective.get(key))
     }
+
+
+def paper_client_request_id(run_id: str, tool_call_id: str) -> str:
+    if not 1 <= len(tool_call_id) <= 255:
+        raise ValueError("tool_call_id must contain 1 to 255 characters")
+    digest = hashlib.sha256(
+        f"{run_id}\x00{tool_call_id}".encode()
+    ).hexdigest()
+    return f"paper:{digest}"
 
 
 def _identity(state: ChatLoopState, context: ExecutionContext) -> tuple[uuid.UUID, uuid.UUID]:
@@ -247,7 +273,9 @@ class PlacePaperOrderTool(_PaperTool):
         order = await asyncio.to_thread(
             self._backend.place,
             user_id=user_id,
-            client_request_id=f"{state.request_id}:{context.task_id}",
+            client_request_id=paper_client_request_id(
+                state.request_id, context.task_id
+            ),
             confirmed=parsed,
             original_proposal=original,
             user_edits=diff_arguments(original, effective),
@@ -273,7 +301,9 @@ class CancelPaperOrderTool(_PaperTool):
             self._backend.cancel,
             user_id=user_id,
             order_id=parsed.order_id,
-            client_request_id=f"{state.request_id}:{context.task_id}",
+            client_request_id=paper_client_request_id(
+                state.request_id, context.task_id
+            ),
             original_proposal=original,
             user_edits=diff_arguments(original, effective),
             source_run_id=run_id,
@@ -298,7 +328,9 @@ class ResetPaperAccountTool(_PaperTool):
             self._backend.reset,
             user_id=user_id,
             initial_cash=parsed.initial_cash,
-            client_request_id=f"{state.request_id}:{context.task_id}",
+            client_request_id=paper_client_request_id(
+                state.request_id, context.task_id
+            ),
             original_proposal=original,
             user_edits=diff_arguments(original, effective),
             source_run_id=run_id,
@@ -327,4 +359,5 @@ __all__ = [
     "ResetPaperAccountTool",
     "SqlPaperTradingBackend",
     "diff_arguments",
+    "paper_client_request_id",
 ]

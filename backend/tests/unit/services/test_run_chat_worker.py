@@ -10,7 +10,11 @@ from uuid import UUID, uuid4
 import pytest
 from app.chatloop.run_executor import CompletedResult, ExecuteChatRun, FailedResult, RunUsage
 from app.chatloop.state import ChatLoopState
-from app.services.attempt_service import AttemptCommandRejected, ClaimedAssignment
+from app.services.attempt_service import (
+    AttemptCommandRejected,
+    ClaimedAssignment,
+    LoadedChatExecution,
+)
 from app.services.llm_step import StepToolCall
 from app.services.run_chat_worker import (
     ContinuationKeyring,
@@ -120,6 +124,57 @@ async def test_builder_failure_is_fenced_and_clears_cancel_registration() -> Non
 
     assert attempts.failed == 1
     assert worker.request_cancel(assignment.attempt_id) is False
+
+
+@pytest.mark.asyncio
+async def test_approved_unsafe_recovery_rebuilds_exact_trusted_input_for_builder() -> None:
+    assignment = _assignment()
+    execution_id = uuid4()
+    request = {"side": "buy", "quantity": 100}
+    result = CompletedResult(
+        assignment.run_id,
+        assignment.attempt_id,
+        uuid4(),
+        "done",
+        RunUsage("test", "scripted", 0, 0, 0, 0, 0.0),
+        (),
+        (),
+    )
+    loaded = LoadedChatExecution(
+        session_id=result.session_id,
+        user_id=uuid4(),
+        prompt='{"approved":true}',
+        original_prompt="buy",
+        history=(),
+        continuation=None,
+        approved_tool_executions=(("call-recovery", execution_id),),
+    )
+    attempts = _Attempts(loaded, result)
+    attempts.unsafe_recovery = {
+        "execution_id": execution_id,
+        "tool_call_id": "call-recovery",
+        "tool_name": "place_paper_order",
+        "request": request,
+        "semantic_key": "semantic",
+    }
+    captured: list[LoadedChatExecution] = []
+
+    def builder(
+        effective: LoadedChatExecution, *_args: Any
+    ) -> _BuiltExecutor:
+        captured.append(effective)
+        return _BuiltExecutor(result, [])
+
+    await RunChatWorker(
+        attempts=attempts,  # type: ignore[arg-type]
+        executor_builder=builder,
+        continuation_keys=ContinuationKeyring(
+            active_key_id="k1", keys={"k1": b"x" * 32}
+        ),
+    ).execute_assignment(assignment)
+
+    assert captured[0].trusted_recovery_inputs == (("call-recovery", request),)
+    assert attempts.completed == 1
 
 
 def _assignment() -> ClaimedAssignment:

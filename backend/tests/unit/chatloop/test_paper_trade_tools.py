@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -11,11 +11,17 @@ from app.chatloop.paper_trade_schemas import (
     PlacePaperOrderArgs,
     ResetPaperAccountArgs,
 )
-from app.chatloop.paper_trade_tools import PlacePaperOrderTool
+from app.chatloop.paper_trade_tools import (
+    PlacePaperOrderTool,
+    SqlPaperTradingBackend,
+    _dispatch_committed_order,
+    paper_client_request_id,
+)
 from app.chatloop.state import ChatLoopState
 from app.chatloop.tool_hub import ToolHub
 from app.chatloop.tool_runtime_policy import TOOL_RISK_METADATA, authorize_approved_paper_write
 from app.runtime.models import ExecutionContext, RiskLevel
+from app.schemas.paper_trading import PaperOrderRead
 from app.services.llm_step import StepToolCall
 from pydantic import ValidationError
 
@@ -120,7 +126,9 @@ async def test_place_uses_only_effective_approved_args_and_state_identity() -> N
     assert result["reserved_cash"] == "123.45"
     assert backend.call is not None
     assert backend.call["user_id"] == user_id
-    assert backend.call["client_request_id"] == f"{run_id}:call-7"
+    assert backend.call["client_request_id"] == paper_client_request_id(
+        str(run_id), "call-7"
+    )
     assert backend.call["source_run_id"] == run_id
     assert backend.call["source_tool_call_id"] == "call-7"
     assert backend.call["original_proposal"] == original
@@ -129,6 +137,97 @@ async def test_place_uses_only_effective_approved_args_and_state_identity() -> N
         "limit_price": {"before": "1500", "after": "1499"},
         "quantity": {"before": 100, "after": 200},
     }
+
+
+def test_long_tool_call_ids_use_distinct_bounded_business_keys() -> None:
+    run_id = str(uuid4())
+    first = "x" * 254 + "a"
+    second = "x" * 254 + "b"
+    assert len(paper_client_request_id(run_id, first)) <= 128
+    assert paper_client_request_id(run_id, first) != paper_client_request_id(
+        run_id, second
+    )
+    with pytest.raises(ValueError, match="255"):
+        paper_client_request_id(run_id, "x" * 256)
+    with pytest.raises(ValidationError):
+        StepToolCall(
+            id="x" * 256,
+            name="place_paper_order",
+            arguments="{}",
+        )
+
+
+def test_committed_order_dispatch_is_best_effort_and_replay_may_enqueue_again() -> None:
+    calls: list[str] = []
+    _dispatch_committed_order("order-1", calls.append)
+    _dispatch_committed_order("order-1", calls.append)
+    assert calls == ["order-1", "order-1"]
+
+    def unavailable(_order_id: str) -> None:
+        raise OSError("broker unavailable")
+
+    _dispatch_committed_order("order-2", unavailable)
+
+
+def test_sql_backend_dispatches_after_commit_and_returns_order_when_dispatch_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order_id = uuid4()
+    order = SimpleNamespace(id=order_id)
+    sessions: list[SimpleNamespace] = []
+
+    class Session:
+        committed = False
+
+        def __enter__(self) -> Session:
+            sessions.append(self)  # type: ignore[arg-type]
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def commit(self) -> None:
+            self.committed = True
+
+        def refresh(self, _order: object) -> None:
+            return None
+
+    class Service:
+        def execute_approved_order(self, **_kwargs: object) -> object:
+            return order
+
+    class Read:
+        def model_dump(self, *, mode: str) -> dict[str, str]:
+            assert mode == "json"
+            return {"id": str(order_id), "status": "open"}
+
+    monkeypatch.setattr(
+        SqlPaperTradingBackend, "_service", staticmethod(lambda _session: Service())
+    )
+    monkeypatch.setattr(
+        PaperOrderRead, "model_validate", classmethod(lambda _cls, _order: Read())
+    )
+    dispatches: list[str] = []
+
+    def unavailable(dispatched_order_id: str) -> None:
+        assert sessions[-1].committed is True
+        dispatches.append(dispatched_order_id)
+        raise OSError("broker unavailable")
+
+    backend = SqlPaperTradingBackend(Session, dispatch_order=unavailable)
+    confirmed = PlacePaperOrderArgs(
+        side="buy",
+        ts_code="600519.SH",
+        name="贵州茅台",
+        quantity=100,
+        order_type="market",
+    )
+
+    first = backend.place(confirmed=confirmed)
+    replay = backend.place(confirmed=confirmed)
+
+    assert first == replay == {"id": str(order_id), "status": "open"}
+    assert dispatches == [str(order_id), str(order_id)]
 
 
 @pytest.mark.asyncio

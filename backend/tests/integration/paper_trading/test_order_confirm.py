@@ -114,6 +114,7 @@ def test_execute_approved_order_is_one_transaction_idempotent_and_keeps_provenan
     service = _service(db_session, FixedQuoteProvider(_quote()))
     draft = _draft(name=_quote().name, order_type="market", limit_price=None, quantity=200)
     run_id = uuid.uuid4()
+    tool_call_id = "c" * 255
     original = {
         **draft.model_dump(mode="json"),
         "quantity": 100,
@@ -141,7 +142,7 @@ def test_execute_approved_order_is_one_transaction_idempotent_and_keeps_provenan
         original_proposal=original,
         user_edits=edits,
         source_run_id=run_id,
-        source_tool_call_id="call-1",
+        source_tool_call_id=tool_call_id,
     )
     replay = service.execute_approved_order(
         user_id=user_id,
@@ -150,14 +151,14 @@ def test_execute_approved_order_is_one_transaction_idempotent_and_keeps_provenan
         original_proposal=original,
         user_edits=edits,
         source_run_id=run_id,
-        source_tool_call_id="call-1",
+        source_tool_call_id=tool_call_id,
     )
 
     assert replay.id == first.id
     assert first.source_session_id == str(run_id)
-    assert first.source_message_id == "call-1"
+    assert len(first.source_message_id) == 64
     assert first.source_run_id == run_id
-    assert first.source_tool_call_id == "call-1"
+    assert first.source_tool_call_id == tool_call_id
     assert first.original_proposal == original
     assert first.user_edits == edits
     assert first.status is OrderStatus.OPEN
@@ -177,7 +178,7 @@ def test_execute_approved_order_is_one_transaction_idempotent_and_keeps_provenan
             original_proposal={**original, "quantity": 50},
             user_edits=edits,
             source_run_id=run_id,
-            source_tool_call_id="call-1",
+            source_tool_call_id=tool_call_id,
         )
     assert conflict.value.code == "confirmation_idempotency_conflict"
 

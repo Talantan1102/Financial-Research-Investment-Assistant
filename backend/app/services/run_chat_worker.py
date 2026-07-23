@@ -6,9 +6,10 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol, cast
 
+from app.chatloop.approval_edits import ApprovedInput
 from app.chatloop.contracts import ToolResult
 from app.chatloop.control_tools import ApprovalTool, AskUserTool, approval_pause, ask_user_pause
 from app.chatloop.loop import PauseDirective
@@ -313,6 +314,7 @@ class DurableToolHub:
         risk_policy: ToolRiskPolicy,
         approved_semantic_keys: frozenset[str] = frozenset(),
         approved_tool_executions: Mapping[str, Any] | None = None,
+        trusted_recovery_inputs: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
         self._delegate = delegate
         self._ledger = ledger
@@ -320,6 +322,9 @@ class DurableToolHub:
         self._risk_policy = risk_policy
         self._approved_semantics = approved_semantic_keys
         self._approved_executions = dict(approved_tool_executions or {})
+        self._trusted_recovery_inputs = {
+            key: dict(value) for key, value in (trusted_recovery_inputs or {}).items()
+        }
 
     def schemas_for_llm(self) -> list[dict[str, Any]]:
         return cast(list[dict[str, Any]], self._delegate.schemas_for_llm())
@@ -357,6 +362,17 @@ class DurableToolHub:
                 continue
             executable.append(call)
             executable_slots.append((index, reservation))
+
+        for call in executable:
+            trusted = self._trusted_recovery_inputs.get(call.id)
+            if trusted is None:
+                continue
+            if call.id not in self._approved_executions or self._safe_args(call) != trusted:
+                raise RuntimeError("trusted recovery input does not match persisted execution")
+            state.approved_inputs[call.id] = ApprovedInput(
+                original=trusted,
+                effective=trusted,
+            )
 
         try:
             executed_results = await self._delegate.dispatch(executable, state)
@@ -450,6 +466,9 @@ def build_chat_executor_builder(
     ) -> ChatRunExecutor:
         approved = _approved_tool_call_ids(loaded)
         approved_executions = dict(getattr(loaded, "approved_tool_executions", ()))
+        trusted_recovery_inputs = dict(
+            getattr(loaded, "trusted_recovery_inputs", ())
+        )
         # Recovery approvals are resolved against durable execution ids by
         # AttemptService.  Include those call ids directly as a second source
         # of truth; this keeps approval authorization intact when a portable
@@ -468,6 +487,7 @@ def build_chat_executor_builder(
                 risk_policy,
                 loaded.approved_semantic_keys,
                 approved_executions,
+                trusted_recovery_inputs,
             )
             controller_box.append(
                 DurableApprovalController(risk_policy, approved, loaded.approved_semantic_keys)
@@ -589,6 +609,17 @@ class RunChatWorker:
             except (AttemptCommandRejected, ValueError):
                 await self._converge_invalid_approval(assignment, loaded)
                 return
+
+        if recoveries and approved_execution_ids:
+            trusted = tuple(
+                (
+                    str(row["tool_call_id"]),
+                    dict(cast(Mapping[str, Any], row["request"])),
+                )
+                for row in recoveries
+                if str(row["execution_id"]) in approved_execution_ids
+            )
+            loaded = replace(loaded, trusted_recovery_inputs=trusted)
 
         cancel_event = asyncio.Event()
         self._cancellations[assignment.attempt_id] = cancel_event

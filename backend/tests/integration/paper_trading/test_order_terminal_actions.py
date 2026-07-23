@@ -308,44 +308,46 @@ def test_cancel_approved_persists_provenance_and_rejects_key_reuse(
     user_id = cast(uuid.UUID, user.id)
     service, order, _ = _confirmed_buy(db_session, user_id)
     run_id = uuid.uuid4()
+    client_request_id = "c" * 128
+    tool_call_id = "t" * 255
     original = {"order_id": str(order.id)}
     first = service.cancel_approved(
         user_id=user_id,
         order_id=cast(uuid.UUID, order.id),
-        client_request_id=f"{run_id}:cancel-call",
+        client_request_id=client_request_id,
         original_proposal=original,
         user_edits={},
         source_run_id=run_id,
-        source_tool_call_id="cancel-call",
+        source_tool_call_id=tool_call_id,
     )
     replay = service.cancel_approved(
         user_id=user_id,
         order_id=cast(uuid.UUID, order.id),
-        client_request_id=f"{run_id}:cancel-call",
+        client_request_id=client_request_id,
         original_proposal=original,
         user_edits={},
         source_run_id=run_id,
-        source_tool_call_id="cancel-call",
+        source_tool_call_id=tool_call_id,
     )
     assert replay.id == first.id
     audit = db_session.scalar(
         select(PaperActionAudit).where(
-            PaperActionAudit.client_request_id == f"{run_id}:cancel-call"
+            PaperActionAudit.client_request_id == client_request_id
         )
     )
     assert audit is not None
     assert audit.original_proposal == original
     assert audit.source_run_id == run_id
-    assert audit.source_tool_call_id == "cancel-call"
+    assert audit.source_tool_call_id == tool_call_id
     with pytest.raises(PaperTradingError, match="idempotency"):
         service.cancel_approved(
             user_id=user_id,
             order_id=uuid.uuid4(),
-            client_request_id=f"{run_id}:cancel-call",
+            client_request_id=client_request_id,
             original_proposal={"order_id": str(uuid.uuid4())},
             user_edits={},
             source_run_id=run_id,
-            source_tool_call_id="cancel-call",
+            source_tool_call_id=tool_call_id,
         )
 
 
@@ -668,29 +670,32 @@ def test_reset_approved_persists_effective_payload_and_is_idempotent(
     user_id = cast(uuid.UUID, user.id)
     service, _, _ = _confirmed_buy(db_session, user_id)
     run_id = uuid.uuid4()
+    client_request_id = "r" * 128
+    tool_call_id = "u" * 255
     first = service.reset_approved(
         user_id=user_id,
         initial_cash=Decimal("500000.00"),
-        client_request_id=f"{run_id}:reset-call",
+        client_request_id=client_request_id,
         original_proposal={"initial_cash": "1000000.00"},
         user_edits={"initial_cash": {"before": "1000000.00", "after": "500000.00"}},
         source_run_id=run_id,
-        source_tool_call_id="reset-call",
+        source_tool_call_id=tool_call_id,
     )
     replay = service.reset_approved(
         user_id=user_id,
         initial_cash=Decimal("500000.00"),
-        client_request_id=f"{run_id}:reset-call",
+        client_request_id=client_request_id,
         original_proposal={"initial_cash": "1000000.00"},
         user_edits={"initial_cash": {"before": "1000000.00", "after": "500000.00"}},
         source_run_id=run_id,
-        source_tool_call_id="reset-call",
+        source_tool_call_id=tool_call_id,
     )
     assert replay.id == first.id
     audit = db_session.scalar(
-        select(PaperActionAudit).where(PaperActionAudit.client_request_id == f"{run_id}:reset-call")
+        select(PaperActionAudit).where(PaperActionAudit.client_request_id == client_request_id)
     )
     assert audit is not None
+    assert audit.source_tool_call_id == tool_call_id
     assert audit.effective_payload == {"initial_cash": "500000.00"}
     assert audit.user_edits["initial_cash"]["after"] == "500000.00"
 
