@@ -414,6 +414,37 @@ def test_partial_fills_charge_minimum_commission_only_once(db_session: Session, 
     assert account.frozen_cash == Decimal("0.00")
 
 
+def test_settlement_and_remaining_reservation_use_execution_date(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    account = _account(db_session, user)
+    order = _buy_order(
+        db_session,
+        user,
+        account,
+        quantity=200,
+        reserve=Decimal("2010.02"),
+    )
+    service = _service(db_session)
+    calls: list[date | None] = []
+    original = service._fees.calculate
+
+    def calculate(**kwargs: object):
+        calls.append(cast(date | None, kwargs.get("on")))
+        return original(**kwargs)
+
+    monkeypatch.setattr(service._fees, "calculate", calculate)
+
+    service.apply(
+        order_id=order.id,
+        execution=Execution(price=Decimal("10.00"), quantity=100),
+        quote_timestamp=QUOTE_TIME,
+        match_pass=1,
+    )
+
+    assert calls == [date(2026, 7, 20), date(2026, 7, 20)]
+
+
 def test_same_match_pass_retry_returns_same_fill_and_conflict_is_rejected(
     db_session: Session, user: User
 ) -> None:

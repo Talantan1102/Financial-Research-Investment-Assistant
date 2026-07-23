@@ -75,3 +75,17 @@ def test_l2_worker_env_supplies_non_live_construction_key(mode: str) -> None:
 
     assert env["LLM_MODE"] == mode
     assert env["DASHSCOPE_API_KEY"] == "test-key-not-for-live-calls"
+
+
+def test_dynamic_broker_configuration_updates_producer_and_restores() -> None:
+    from app.tasks.celery_app import celery_app
+
+    from tests.conftest_celery import configured_celery_producer
+
+    original_broker = celery_app.conf.broker_url
+    original_backend = celery_app.conf.result_backend
+    with configured_celery_producer("redis://127.0.0.1:6399/14"):
+        assert celery_app.conf.broker_url == "redis://127.0.0.1:6399/14"
+        assert celery_app.conf.result_backend == "redis://127.0.0.1:6399/14"
+    assert celery_app.conf.broker_url == original_broker
+    assert celery_app.conf.result_backend == original_backend

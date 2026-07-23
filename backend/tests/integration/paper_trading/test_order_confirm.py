@@ -136,6 +136,32 @@ def test_confirm_is_idempotent_and_freezes_maximum_buy_exposure_once(
     assert ledger.fill_id is None
 
 
+def test_confirmation_preview_and_reservation_use_historical_market_date(
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    PaperAccountService(db_session).get_or_create(user_id=user_id)
+    service = _service(db_session, FixedQuoteProvider(_quote()))
+    order = _prepare(service, user_id)
+    calls: list[date | None] = []
+    original = service.fee_schedule.calculate
+
+    def calculate(**kwargs: object):
+        calls.append(cast(date | None, kwargs.get("on")))
+        return original(**kwargs)
+
+    monkeypatch.setattr(service.fee_schedule, "calculate", calculate)
+
+    service.confirm(
+        user_id=user_id,
+        order_id=order.id,
+        draft=_draft(),
+        client_request_id="historical-date-confirm",
+    )
+
+    assert calls == [NOW.date(), NOW.date()]
+
+
 def test_confirmation_keys_fail_closed_on_conflicting_reuse(
     db_session: Session, user: User
 ) -> None:

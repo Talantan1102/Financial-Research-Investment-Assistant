@@ -159,6 +159,29 @@ def test_prepare_order_only_persists_proposal_without_account_mutation(
     assert order.expires_at.tzinfo is not None
 
 
+def test_preview_fee_calculation_uses_historical_market_date(
+    db_session: Session,
+    user: User,
+    quote_provider: FixedQuoteProvider,
+    clock: TradingClock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, user.id))
+    service = _service(db_session, quote_provider, clock)
+    calls: list[date | None] = []
+    original = service.fee_schedule.calculate
+
+    def calculate(**kwargs: object):
+        calls.append(cast(date | None, kwargs.get("on")))
+        return original(**kwargs)
+
+    monkeypatch.setattr(service.fee_schedule, "calculate", calculate)
+
+    _prepare(service, cast(uuid.UUID, user.id))
+
+    assert calls == [NOW.date()]
+
+
 def test_prepare_retry_returns_same_proposal_but_same_message_can_hold_distinct_drafts(
     db_session: Session,
     user: User,

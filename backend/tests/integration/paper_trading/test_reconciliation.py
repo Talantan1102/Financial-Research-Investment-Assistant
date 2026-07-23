@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import cast
+from zoneinfo import ZoneInfo
 
+import app.services.paper_trading.reconciliation as reconciliation_module
 import app.tasks.paper_trading as paper_tasks
 import pytest
 from app.models.paper_account import PaperAccount, PaperAccountStatus, PaperCashLedger
+from app.models.paper_order import OrderSide, OrderStatus, OrderType, PaperFill, PaperOrder
 from app.models.user import User
 from app.services.paper_trading.account_service import PaperAccountService
+from app.services.paper_trading.fee_schedule import FeeSchedule
 from app.services.paper_trading.reconciliation import reconcile_account
 from app.tasks.celery_beat_schedule import beat_schedule
 from app.tasks.paper_trading import reconcile_paper_accounts
@@ -62,6 +67,80 @@ def test_initial_cash_edit_ledger_is_accepted_as_new_generation_authority(
 
     assert reconcile_account(db_session, account.id) == []
     assert account.available_cash == account.initial_cash == Decimal("800000.00")
+
+
+def test_reconciliation_fee_replay_uses_each_fill_execution_date(
+    db_session: Session,
+    account: PaperAccount,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executed_at = datetime(2024, 1, 2, 16, 30, tzinfo=UTC)
+    order = PaperOrder(
+        account_id=account.id,
+        account_generation=account.generation,
+        user_id=account.user_id,
+        client_request_id=f"reconcile-date-{uuid.uuid4()}",
+        source_session_id="reconcile-date-session",
+        source_message_id="reconcile-date-message",
+        proposal_fingerprint=uuid.uuid4().hex * 2,
+        ts_code="600519.SH",
+        name="贵州茅台",
+        side=OrderSide.BUY,
+        order_type=OrderType.LIMIT,
+        quantity=100,
+        limit_price=Decimal("1.00"),
+        filled_quantity=100,
+        avg_fill_price=Decimal("1.00"),
+        reserved_cash=Decimal("0.00"),
+        reserved_quantity=0,
+        status=OrderStatus.FILLED,
+        original_proposal={"quantity": 100},
+        confirmed_payload={"quantity": 100},
+        user_edits=None,
+        quote_snapshot={"source": "historical"},
+        rules_version="historical",
+        expires_at=executed_at + timedelta(minutes=5),
+        confirmed_at=executed_at,
+        completed_at=executed_at,
+    )
+    db_session.add(order)
+    db_session.flush()
+    db_session.add(
+        PaperFill(
+            order_id=order.id,
+            fill_seq=1,
+            quantity=100,
+            price=Decimal("1.00"),
+            gross_amount=Decimal("100.0000"),
+            commission=Decimal("5.0000"),
+            stamp_duty=Decimal("0.0000"),
+            transfer_fee=Decimal("0.0010"),
+            quote_timestamp=executed_at,
+            quote_source="historical",
+            executed_at=executed_at,
+            trade_id=uuid.uuid4(),
+        )
+    )
+    db_session.flush()
+    schedule = FeeSchedule.from_builtin_fixture()
+    calls: list[object] = []
+    original = schedule.calculate
+
+    def calculate(**kwargs: object):
+        calls.append(kwargs.get("on"))
+        return original(**kwargs)
+
+    monkeypatch.setattr(schedule, "calculate", calculate)
+    monkeypatch.setattr(
+        reconciliation_module.FeeSchedule,
+        "from_builtin_fixture",
+        classmethod(lambda cls: schedule),
+    )
+
+    reconcile_account(db_session, account.id)
+
+    expected_date = executed_at.astimezone(ZoneInfo("Asia/Shanghai")).date()
+    assert calls == [expected_date, expected_date]
 
 
 def test_ledger_mismatch_has_stable_code_and_suspends_idempotently(
