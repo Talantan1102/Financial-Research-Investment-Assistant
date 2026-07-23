@@ -25,7 +25,7 @@ from app.models.paper_order import (
     PaperMatchPass,
     PaperOrder,
 )
-from app.schemas.paper_trading import OrderDraft, OrderPreview
+from app.schemas.paper_trading import OrderDraft, OrderDraftPreview, OrderPreview
 from app.services.paper_trading.account_service import PaperAccountService
 from app.services.paper_trading.clock import TradingClock
 from app.services.paper_trading.errors import PaperTradingError
@@ -59,6 +59,32 @@ class PaperOrderService:
         self.fee_schedule = fee_schedule or FeeSchedule.from_builtin_fixture()
         self.account_service = PaperAccountService(session)
         self._now = now
+
+    def preview_draft(
+        self,
+        *,
+        user_id: uuid.UUID,
+        draft: OrderDraft,
+    ) -> OrderDraftPreview:
+        """Calculate a canonical current-account preview without persisting an order."""
+        user_id = _require_uuid(user_id, field="user_id")
+        if not isinstance(draft, OrderDraft):
+            raise PaperTradingError("invalid_order", "draft must be an OrderDraft")
+        normalized_draft = _canonical_draft(draft)
+        account = self.account_service.get_active(user_id=user_id)
+        quote = self._quote(normalized_draft.ts_code)
+        now = self._current_time()
+        preview = self._calculate_preview(
+            account=account,
+            order_id=uuid.UUID(int=0),
+            draft=normalized_draft,
+            normalize_quote_name=True,
+            quote=quote,
+            now=now,
+        )
+        return OrderDraftPreview.model_validate(
+            preview.model_dump(exclude={"order_id"})
+        )
 
     def prepare_order(
         self,

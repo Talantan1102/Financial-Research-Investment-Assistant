@@ -159,6 +159,46 @@ def test_prepare_order_only_persists_proposal_without_account_mutation(
     assert order.expires_at.tzinfo is not None
 
 
+def test_preview_draft_is_public_and_does_not_persist_a_proposal(
+    db_session: Session,
+    user: User,
+    quote_provider: FixedQuoteProvider,
+    clock: TradingClock,
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    PaperAccountService(db_session).get_or_create(user_id=user_id)
+    before = {
+        "orders": db_session.query(PaperOrder).count(),
+        "fills": db_session.query(PaperFill).count(),
+        "holdings": db_session.query(PaperHoldingLot).count(),
+        "ledger": db_session.query(PaperCashLedger).count(),
+    }
+
+    preview = _service(db_session, quote_provider, clock).preview_draft(
+        user_id=user_id,
+        draft=OrderDraft.model_validate(
+            {
+                "side": "buy",
+                "ts_code": "600519.sh",
+                "name": "用户输入名称",
+                "quantity": 100,
+                "order_type": "limit",
+                "limit_price": Decimal("1500"),
+            }
+        ),
+    )
+
+    assert preview.draft.ts_code == "600519.SH"
+    assert preview.draft.name == "贵州茅台"
+    assert preview.estimated_cash_required == Decimal("150046.50")
+    assert {
+        "orders": db_session.query(PaperOrder).count(),
+        "fills": db_session.query(PaperFill).count(),
+        "holdings": db_session.query(PaperHoldingLot).count(),
+        "ledger": db_session.query(PaperCashLedger).count(),
+    } == before
+
+
 def test_preview_fee_calculation_uses_historical_market_date(
     db_session: Session,
     user: User,

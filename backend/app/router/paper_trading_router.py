@@ -163,25 +163,9 @@ def preview_order(
 ) -> OrderDraftPreview:
     """Calculate a quote-backed preview without creating an order or reserving assets."""
     try:
-        account = service.account_service.get_active(user_id=_user_id(user))
-        draft = payload.draft.model_copy(
-            update={"ts_code": payload.draft.ts_code.upper()}
-        )
-        quote = service._quote(draft.ts_code)
-        now = service._current_time()
-        preview = service._calculate_preview(
-            account=account,
-            order_id=uuid.uuid5(
-                uuid.NAMESPACE_URL,
-                f"paper-preview:{user.id}:{payload.model_dump_json()}",
-            ),
-            draft=draft,
-            normalize_quote_name=True,
-            quote=quote,
-            now=now,
-        )
-        return OrderDraftPreview.model_validate(
-            preview.model_dump(exclude={"order_id"})
+        return service.preview_draft(
+            user_id=_user_id(user),
+            draft=payload.draft,
         )
     except PaperTradingError as exc:
         _raise_safe_domain_error(exc)

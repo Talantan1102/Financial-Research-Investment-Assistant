@@ -277,3 +277,45 @@ async def test_preview_maps_domain_error_to_safe_4xx(
         "message": "订单参数不符合交易规则",
     }
     assert _row_counts(db_session) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("draft_update", "error_code"),
+    [
+        ({"ts_code": "MALFORMED"}, "invalid_order"),
+        ({"name": "超" * 65}, "invalid_order"),
+    ],
+)
+async def test_preview_rejects_malformed_identity_without_side_effects(
+    db_session: Session,
+    users: dict[str, User],
+    draft_update: dict[str, object],
+    error_code: str,
+) -> None:
+    PaperAccountService(db_session).get_or_create(
+        user_id=cast(uuid.UUID, users["alice"].id)
+    )
+    before = _row_counts(db_session)
+    draft: dict[str, object] = {
+        "side": "buy",
+        "ts_code": "600519.SH",
+        "name": "贵州茅台",
+        "quantity": 100,
+        "order_type": "limit",
+        "limit_price": "1500.0000",
+    }
+    draft.update(draft_update)
+
+    async with _client(db_session, users["alice"]) as client:
+        response = await client.post(
+            "/api/v0/paper-trading/orders/preview",
+            json={"draft": draft},
+        )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": error_code,
+        "message": "订单参数不符合交易规则",
+    }
+    assert _row_counts(db_session) == before
