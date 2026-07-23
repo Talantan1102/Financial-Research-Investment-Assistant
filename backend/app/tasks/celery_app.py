@@ -27,6 +27,7 @@ celery_app = Celery(
         "app.tasks.memory",
         "app.tasks.title_generation",  # chat-title async LLM title
         "app.tasks.portfolio_snapshot",  # Task 6: 每日持仓快照
+        "app.tasks.paper_trading",
     ],
 )
 

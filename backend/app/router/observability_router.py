@@ -11,6 +11,10 @@ from datetime import date
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.database import SessionLocal
+from app.services.paper_trading.observability import (
+    PaperTradingAggregates,
+    PaperTradingAnalytics,
+)
 from app.services.trace_analytics import (
     ChatloopAggregates,
     ChatloopDaily,
@@ -21,6 +25,13 @@ router = APIRouter(prefix="/api/v0/observability", tags=["observability"])
 
 # 测试缝:测试用 nullcontext(db_session) 覆盖,生产用 SessionLocal。
 _SESSION_FACTORY = SessionLocal
+
+
+@router.get("/paper-trading", response_model=PaperTradingAggregates)
+def paper_trading_aggregates(
+    hours: int = Query(24, ge=1, le=168),
+) -> PaperTradingAggregates:
+    return PaperTradingAnalytics(_SESSION_FACTORY).aggregate(hours=hours)
 
 
 @router.get("/chatloop/aggregates", response_model=ChatloopAggregates)

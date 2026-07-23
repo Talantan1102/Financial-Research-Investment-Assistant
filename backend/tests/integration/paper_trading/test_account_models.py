@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -14,6 +14,7 @@ from app.models.paper_account import (
     PaperCashLedger,
     PaperHoldingLot,
 )
+from app.models.paper_order import OrderSide, OrderStatus, OrderType, PaperFill, PaperOrder
 from app.models.user import User
 from sqlalchemy import Engine, delete, text
 from sqlalchemy.exc import IntegrityError, StatementError
@@ -43,15 +44,59 @@ def _account(user: User, *, generation: int = 1, cash: str = "1000000") -> Paper
 
 
 def _persist_source_fill(db_session: Session, user: User, account: PaperAccount) -> uuid.UUID:
-    del user, account
-    return uuid.uuid4()
+    now = datetime.now(UTC)
+    order = PaperOrder(
+        account_id=account.id,
+        account_generation=account.generation,
+        user_id=user.id,
+        client_request_id=f"request-{uuid.uuid4()}",
+        source_session_id="session-1",
+        source_message_id="message-1",
+        proposal_fingerprint=uuid.uuid4().hex * 2,
+        ts_code="600519.SH",
+        name="贵州茅台",
+        side=OrderSide.BUY,
+        order_type=OrderType.LIMIT,
+        quantity=100,
+        limit_price=Decimal("1500.00"),
+        filled_quantity=100,
+        avg_fill_price=Decimal("1500.00"),
+        status=OrderStatus.FILLED,
+        original_proposal={"quantity": 100},
+        confirmed_payload={"quantity": 100},
+        user_edits={},
+        quote_snapshot={"latest_price": "1500.00", "timestamp": now.isoformat()},
+        rules_version="cn-a-20260706",
+        expires_at=now + timedelta(minutes=5),
+        confirmed_at=now,
+        completed_at=now,
+    )
+    db_session.add(order)
+    db_session.flush()
+    fill = PaperFill(
+        order_id=order.id,
+        fill_seq=1,
+        quantity=100,
+        price=Decimal("1500.00"),
+        gross_amount=Decimal("150000.00"),
+        commission=Decimal("45.00"),
+        stamp_duty=Decimal("0.00"),
+        transfer_fee=Decimal("1.50"),
+        quote_timestamp=now,
+        quote_source="fixed-test-quote",
+        executed_at=now,
+        trade_id=uuid.uuid4(),
+    )
+    db_session.add(fill)
+    db_session.flush()
+    return cast(uuid.UUID, fill.id)
 
 
-def test_task1_metadata_has_no_unresolved_paper_fill_dependency() -> None:
-    assert "paper_fills" not in Base.metadata.tables
+def test_task2_metadata_registers_resolved_paper_fill_dependency() -> None:
+    assert "paper_fills" in Base.metadata.tables
     assert PaperHoldingLot.__table__ in Base.metadata.sorted_tables
-    assert all(
-        foreign_key.target_fullname != "paper_fills.id"
+    assert any(
+        foreign_key.target_fullname == "paper_fills.id"
         for foreign_key in PaperHoldingLot.__table__.foreign_keys
     )
 
@@ -480,7 +525,7 @@ def test_holding_lot_source_fill_is_unique(db_session: Session, user: User) -> N
         db_session.flush()
 
 
-def test_holding_lot_accepts_typed_source_fill_id_before_task2_fk(
+def test_holding_lot_rejects_dangling_source_fill(
     db_session: Session, user: User
 ) -> None:
     account = _account(user)
@@ -501,7 +546,8 @@ def test_holding_lot_accepts_typed_source_fill_id_before_task2_fk(
         )
     )
 
-    db_session.flush()
+    with pytest.raises(IntegrityError):
+        db_session.flush()
 
 
 def test_reset_audit_persists_confirmation_source_and_summary(

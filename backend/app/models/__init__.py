@@ -49,15 +49,25 @@ else:
     # mapper targets; these modules have no heavyweight runtime dependencies.
     from .chat import ChatSession, LongTermMemory
     from .knowledge import Document, KnowledgeBase
-from .run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
-from .run_execution import RunToolExecution, RunUsageRecord
-from .run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
 from .paper_account import (
     PaperAccount,
     PaperAccountResetAudit,
     PaperCashLedger,
     PaperHoldingLot,
 )
+from .paper_order import (
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    PaperDispatchRecoveryState,
+    PaperFill,
+    PaperLotReservation,
+    PaperMatchPass,
+    PaperOrder,
+)
+from .run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
+from .run_execution import RunToolExecution, RunUsageRecord
+from .run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
 from .tenant import Tenant, TenantAuditLog, TenantMembership
 from .user import User
 
@@ -86,6 +96,14 @@ __all__ = [
     "PaperAccountResetAudit",
     "PaperCashLedger",
     "PaperHoldingLot",
+    "OrderSide",
+    "OrderStatus",
+    "OrderType",
+    "PaperOrder",
+    "PaperDispatchRecoveryState",
+    "PaperFill",
+    "PaperLotReservation",
+    "PaperMatchPass",
 ]
 
 if not _RUN_CONTROL_MINIMAL:

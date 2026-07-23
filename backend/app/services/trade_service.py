@@ -5,6 +5,7 @@ Spec ref: § 3.1 流程 + § 3.3 三态机 guard(本文件 create + delete + upd
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import cast
@@ -42,9 +43,14 @@ class TradeService:
         price: Decimal,
         trade_date: date,
         note: str | None = None,
+        trade_id: str | None = None,
+        paper_account_id: uuid.UUID | None = None,
+        paper_account_generation: int | None = None,
     ) -> Trade:
+        if (paper_account_id is None) != (paper_account_generation is None):
+            raise ValueError("paper account scope must be all-or-none")
         trade = Trade(
-            id=str(uuid4()),
+            id=trade_id or str(uuid4()),
             user_id=user_id,
             ts_code=ts_code,
             name=name,
@@ -53,13 +59,29 @@ class TradeService:
             price=price,
             trade_date=trade_date,
             note=note,
+            paper_account_id=paper_account_id,
+            paper_account_generation=paper_account_generation,
         )
         self._session.add(trade)
         self._session.flush()
-        self._recompute_position(user_id=user_id, ts_code=ts_code, name=name)
+        self._recompute_position(
+            user_id=user_id,
+            ts_code=ts_code,
+            name=name,
+            paper_account_id=paper_account_id,
+            paper_account_generation=paper_account_generation,
+        )
         return trade
 
-    def _recompute_position(self, *, user_id: str, ts_code: str, name: str) -> None:
+    def _recompute_position(
+        self,
+        *,
+        user_id: str,
+        ts_code: str,
+        name: str,
+        paper_account_id: uuid.UUID | None = None,
+        paper_account_generation: int | None = None,
+    ) -> None:
         """fold 该 (user_id, ts_code) 全部 Trade → UPSERT Position 行。
 
         Note: SQL ORDER BY trade_date ASC, created_at ASC ensures same-day
@@ -70,12 +92,21 @@ class TradeService:
         # NOTE: stable-sort coupling with portfolio_recompute.recompute_position_from_trades
         # — that fold function re-sorts by trade_date (stable). Keep these in sync if
         # either side changes its sort key.
-        trades = (
-            self._session.query(Trade)
-            .filter_by(user_id=user_id, ts_code=ts_code)
-            .order_by(Trade.trade_date.asc(), Trade.created_at.asc())
-            .all()
-        )
+        trade_query = self._session.query(Trade).filter_by(user_id=user_id, ts_code=ts_code)
+        position_query = self._session.query(Position).filter_by(user_id=user_id, ts_code=ts_code)
+        if paper_account_id is None:
+            trade_query = trade_query.filter(Trade.paper_account_id.is_(None))
+            position_query = position_query.filter(Position.paper_account_id.is_(None))
+        else:
+            trade_query = trade_query.filter_by(
+                paper_account_id=paper_account_id,
+                paper_account_generation=paper_account_generation,
+            )
+            position_query = position_query.filter_by(
+                paper_account_id=paper_account_id,
+                paper_account_generation=paper_account_generation,
+            )
+        trades = trade_query.order_by(Trade.trade_date.asc(), Trade.created_at.asc()).all()
         inputs = [
             TradeInput(
                 type=cast(TradeType, t.type),
@@ -87,9 +118,7 @@ class TradeService:
         ]
         state = recompute_position_from_trades(inputs)
 
-        pos = (
-            self._session.query(Position).filter_by(user_id=user_id, ts_code=ts_code).one_or_none()
-        )
+        pos = position_query.one_or_none()
         if pos is None:
             pos = Position(
                 id=str(uuid4()),
@@ -100,6 +129,8 @@ class TradeService:
                 avg_cost=state.avg_cost,
                 total_cost=state.total_cost,
                 realized_pnl=state.realized_pnl,
+                paper_account_id=paper_account_id,
+                paper_account_generation=paper_account_generation,
             )
             self._session.add(pos)
         else:
@@ -117,6 +148,8 @@ class TradeService:
         Caller 负责 session.commit()。
         """
         trade = self._session.query(Trade).filter_by(id=trade_id, user_id=user_id).one()
+        if trade.paper_account_id is not None:
+            raise ImmutableTradeError("paper trades are immutable")
         if datetime.utcnow() - cast(datetime, trade.created_at) > timedelta(hours=24):
             raise ExpiredDeletionError("超 24h 不可删,请录反向交易抵消")
         user_id = cast(str, trade.user_id)
@@ -124,7 +157,13 @@ class TradeService:
         name = cast(str, trade.name)
         self._session.delete(trade)
         self._session.flush()
-        self._recompute_position(user_id=user_id, ts_code=ts_code, name=name)
+        self._recompute_position(
+            user_id=user_id,
+            ts_code=ts_code,
+            name=name,
+            paper_account_id=cast(uuid.UUID | None, trade.paper_account_id),
+            paper_account_generation=cast(int | None, trade.paper_account_generation),
+        )
 
     _INITIAL_UPDATABLE = {"ts_code", "name", "quantity", "price", "trade_date", "note"}
 
@@ -136,6 +175,8 @@ class TradeService:
         Caller 负责 session.commit()。
         """
         trade = self._session.query(Trade).filter_by(id=trade_id, user_id=user_id).one()
+        if trade.paper_account_id is not None:
+            raise ImmutableTradeError("paper trades are immutable")
         if trade.type != TradeType.INITIAL:
             raise ImmutableTradeError("常规交易不可改字段,过 24h 也不可")
 
@@ -150,5 +191,7 @@ class TradeService:
             user_id=cast(str, trade.user_id),
             ts_code=cast(str, trade.ts_code),
             name=cast(str, trade.name),
+            paper_account_id=cast(uuid.UUID | None, trade.paper_account_id),
+            paper_account_generation=cast(int | None, trade.paper_account_generation),
         )
         return trade

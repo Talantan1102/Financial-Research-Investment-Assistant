@@ -14,13 +14,17 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Index,
     Integer,
     Numeric,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -58,6 +62,8 @@ class Position(Base):
 
     # 资产类型:stock / fund_etf(场内ETF) / fund_otc(场外基金) / bond / gold / cash
     asset_class = Column(String(32), nullable=False, default="stock", server_default="stock")
+    paper_account_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    paper_account_generation = Column(Integer, nullable=True)
 
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -67,4 +73,28 @@ class Position(Base):
 
     user = relationship("User", backref="positions")
 
-    __table_args__ = (UniqueConstraint("user_id", "ts_code", name="uq_positions_user_tscode"),)
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["paper_account_id", "user_id", "paper_account_generation"],
+            ["paper_accounts.id", "paper_accounts.user_id", "paper_accounts.generation"],
+            name="fk_positions_paper_account_scope",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(paper_account_id IS NULL) = (paper_account_generation IS NULL)",
+            name="ck_positions_paper_scope_all_or_none",
+        ),
+        Index(
+            "uq_positions_manual_user_tscode",
+            "user_id",
+            "ts_code",
+            unique=True,
+            postgresql_where=text("paper_account_id IS NULL"),
+        ),
+        UniqueConstraint(
+            "paper_account_id",
+            "paper_account_generation",
+            "ts_code",
+            name="uq_positions_paper_scope_tscode",
+        ),
+    )
