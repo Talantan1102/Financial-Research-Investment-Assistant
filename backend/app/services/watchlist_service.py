@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models.watchlist import WatchlistAudit, WatchlistItem
@@ -64,19 +65,29 @@ class WatchlistService:
         monitoring_enabled: bool = False,
         source: ChangeSource,
     ) -> AddResult:
-        existing = self._find(user_id=user_id, ts_code=ts_code)
-        if existing is not None:
-            return AddResult(item=existing, created=False)
-
-        item = WatchlistItem(
-            user_id=user_id,
-            ts_code=ts_code,
-            name=name,
-            note=note,
-            monitoring_enabled=monitoring_enabled,
+        item_id = uuid.uuid4()
+        inserted_id = self._session.scalar(
+            pg_insert(WatchlistItem)
+            .values(
+                id=item_id,
+                user_id=user_id,
+                ts_code=ts_code,
+                name=name,
+                note=note,
+                monitoring_enabled=monitoring_enabled,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[WatchlistItem.user_id, WatchlistItem.ts_code]
+            )
+            .returning(WatchlistItem.id)
         )
-        self._session.add(item)
-        self._session.flush()
+        created = inserted_id is not None
+        item = self._find(user_id=user_id, ts_code=ts_code)
+        if item is None:
+            raise RuntimeError("watchlist insert conflict did not expose the existing row")
+        if not created:
+            return AddResult(item=item, created=False)
+
         self._append_audit(
             item=item,
             action="add",
@@ -99,7 +110,7 @@ class WatchlistService:
         if unknown:
             raise ValueError(f"unsupported watchlist fields: {sorted(unknown)}")
 
-        item = self._find(user_id=user_id, ts_code=ts_code)
+        item = self._find(user_id=user_id, ts_code=ts_code, for_update=True)
         if item is None:
             return None
 
@@ -132,7 +143,7 @@ class WatchlistService:
         ts_code: str,
         source: ChangeSource,
     ) -> RemoveResult:
-        item = self._find(user_id=user_id, ts_code=ts_code)
+        item = self._find(user_id=user_id, ts_code=ts_code, for_update=True)
         if item is None:
             return RemoveResult(removed=False)
 
@@ -152,13 +163,17 @@ class WatchlistService:
         *,
         user_id: uuid.UUID,
         ts_code: str,
+        for_update: bool = False,
     ) -> WatchlistItem | None:
-        return self._session.scalar(
-            select(WatchlistItem).where(
-                WatchlistItem.user_id == user_id,
-                WatchlistItem.ts_code == ts_code,
-            )
+        statement = select(WatchlistItem).where(
+            WatchlistItem.user_id == user_id,
+            WatchlistItem.ts_code == ts_code,
         )
+        if for_update:
+            statement = statement.with_for_update().execution_options(
+                populate_existing=True
+            )
+        return self._session.scalar(statement)
 
     def _append_audit(
         self,

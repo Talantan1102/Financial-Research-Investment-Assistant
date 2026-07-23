@@ -5,7 +5,8 @@ import uuid
 import pytest
 from app.models.user import User
 from app.models.watchlist import WatchlistAudit, WatchlistItem
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, inspect, update
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 
@@ -62,3 +63,49 @@ def test_same_symbol_allowed_for_different_users(db_session: Session) -> None:
 def test_watchlist_audit_rows_are_append_only_by_contract() -> None:
     assert WatchlistAudit.__table__.name == "watchlist_audits"
     assert "updated_at" not in WatchlistAudit.__table__.c
+
+
+def test_enabled_monitoring_has_a_partial_index(db_session: Session) -> None:
+    indexes = inspect(db_session.bind).get_indexes("watchlist_items")
+    monitoring_index = next(
+        index
+        for index in indexes
+        if index["name"] == "ix_watchlist_items_monitoring_enabled_true"
+    )
+    assert "monitoring_enabled" in str(
+        monitoring_index["dialect_options"]["postgresql_where"]
+    )
+
+
+def test_audit_update_and_delete_are_rejected_and_session_recovers(
+    db_session: Session,
+) -> None:
+    user = _user(db_session)
+    item = WatchlistItem(user_id=user.id, ts_code="600519.SH", name="贵州茅台")
+    db_session.add(item)
+    db_session.flush()
+    audit = WatchlistAudit(
+        item_id=item.id,
+        user_id=user.id,
+        action="add",
+        before_json=None,
+        after_json={"ts_code": "600519.SH"},
+    )
+    db_session.add(audit)
+    db_session.flush()
+    audit_id = audit.id
+    db_session.commit()
+
+    with pytest.raises(DBAPIError):
+        db_session.execute(
+            update(WatchlistAudit)
+            .where(WatchlistAudit.id == audit_id)
+            .values(action="tampered")
+        )
+    db_session.rollback()
+    assert db_session.get(WatchlistAudit, audit_id).action == "add"
+
+    with pytest.raises(DBAPIError):
+        db_session.execute(delete(WatchlistAudit).where(WatchlistAudit.id == audit_id))
+    db_session.rollback()
+    assert db_session.get(WatchlistAudit, audit_id).action == "add"

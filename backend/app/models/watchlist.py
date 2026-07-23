@@ -6,15 +6,19 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    DDL,
     Boolean,
     Column,
     DateTime,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
+    event,
     false,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
@@ -54,6 +58,12 @@ class WatchlistItem(Base):
             "ts_code",
             name="uq_watchlist_items_user_ts_code",
         ),
+        Index(
+            "ix_watchlist_items_monitoring_enabled_true",
+            "user_id",
+            "ts_code",
+            postgresql_where=text("monitoring_enabled IS TRUE"),
+        ),
     )
 
 
@@ -65,13 +75,12 @@ class WatchlistAudit(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     item_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("watchlist_items.id", ondelete="SET NULL"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
     user_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("users.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -93,3 +102,31 @@ class WatchlistAudit(Base):
     @property
     def tool_call_id(self) -> str | None:
         return self.source_tool_call_id
+
+
+event.listen(
+    WatchlistAudit.__table__,
+    "after_create",
+    DDL(
+        """
+        CREATE OR REPLACE FUNCTION reject_watchlist_audit_mutation()
+        RETURNS trigger AS $$
+        BEGIN
+            RAISE EXCEPTION 'watchlist_audits are append-only'
+                USING ERRCODE = '55000';
+        END;
+        $$ LANGUAGE plpgsql
+        """
+    ).execute_if(dialect="postgresql"),
+)
+event.listen(
+    WatchlistAudit.__table__,
+    "after_create",
+    DDL(
+        """
+        CREATE TRIGGER watchlist_audits_append_only
+        BEFORE UPDATE OR DELETE ON watchlist_audits
+        FOR EACH ROW EXECUTE FUNCTION reject_watchlist_audit_mutation()
+        """
+    ).execute_if(dialect="postgresql"),
+)
