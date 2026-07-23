@@ -191,6 +191,8 @@ class PaperHoldingLot(Base):
     generation = Column(Integer, nullable=False)
     ts_code = Column(String(16), nullable=False, index=True)
     name = Column(String(64), nullable=False)
+    # Task 1 keeps provenance typed and unique. Task 2 adds the paper_fills
+    # table and its ForeignKey atomically so this metadata is independently valid.
     source_fill_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     original_quantity = Column(Integer, nullable=False)
     remaining_quantity = Column(Integer, nullable=False)
@@ -200,12 +202,6 @@ class PaperHoldingLot(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["source_fill_id"],
-            ["paper_fills.id"],
-            name="fk_paper_holding_lots_source_fill",
-            ondelete="RESTRICT",
-        ),
         ForeignKeyConstraint(
             ["account_id", "generation"],
             ["paper_accounts.id", "paper_accounts.generation"],

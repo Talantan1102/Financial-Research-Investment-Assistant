@@ -22,6 +22,7 @@ OFFICIAL_SOURCES = (
     "https://www.sse.com.cn/lawandrules/sselawsrules2025/charge/c/c_20250610_10781461.shtml",
     "https://www.szse.cn/marketServices/deal/payFees/index.html",
 )
+EFFECTIVE_DATE = date(2023, 8, 28)
 
 
 def _valid_fixture() -> dict[str, Any]:
@@ -40,8 +41,8 @@ def _valid_fixture() -> dict[str, Any]:
 def test_fee_schedule_applies_direction_and_minimum_commission() -> None:
     schedule = FeeSchedule.from_builtin_fixture()
 
-    buy = schedule.calculate(side="buy", gross=Decimal("1000"))
-    sell = schedule.calculate(side="sell", gross=Decimal("1000"))
+    buy = schedule.calculate(side="buy", gross=Decimal("1000"), on=EFFECTIVE_DATE)
+    sell = schedule.calculate(side="sell", gross=Decimal("1000"), on=EFFECTIVE_DATE)
 
     assert buy.commission == Decimal("5.00")
     assert buy.stamp_duty == Decimal("0.00")
@@ -57,6 +58,7 @@ def test_fee_schedule_uses_configurable_commission_and_rounds_half_up() -> None:
     fees = FeeSchedule.from_builtin_fixture().calculate(
         side="sell",
         gross=Decimal("1010"),
+        on=EFFECTIVE_DATE,
         commission_rate=Decimal("0.005"),
         minimum_commission=Decimal("0"),
     )
@@ -64,6 +66,28 @@ def test_fee_schedule_uses_configurable_commission_and_rounds_half_up() -> None:
     assert fees.commission == Decimal("5.05")
     assert fees.stamp_duty == Decimal("0.51")
     assert fees.transfer_fee == Decimal("0.01")
+
+
+def test_fee_schedule_rejects_use_before_effective_date() -> None:
+    with pytest.raises(PaperTradingError) as caught:
+        FeeSchedule.from_builtin_fixture().calculate(
+            side="buy",
+            gross=Decimal("1000"),
+            on=date(2023, 8, 27),
+        )
+
+    assert caught.value.code == "fee_schedule_not_effective"
+
+
+@pytest.mark.parametrize("on", [EFFECTIVE_DATE, date(2023, 8, 29)])
+def test_fee_schedule_accepts_effective_date_and_later(on: date) -> None:
+    fees = FeeSchedule.from_builtin_fixture().calculate(
+        side="buy",
+        gross=Decimal("1000"),
+        on=on,
+    )
+
+    assert fees.total == Decimal("5.01")
 
 
 def test_builtin_fixture_has_versioned_rates_and_official_sources() -> None:
@@ -104,6 +128,7 @@ def test_fee_schedule_rejects_invalid_calculation_inputs(
         FeeSchedule.from_builtin_fixture().calculate(
             side=cast(Literal["buy", "sell"], side),
             gross=gross,
+            on=EFFECTIVE_DATE,
             commission_rate=commission_rate,
             minimum_commission=minimum_commission,
         )

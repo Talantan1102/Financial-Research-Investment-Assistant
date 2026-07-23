@@ -65,9 +65,15 @@ class FeeSchedule:
         *,
         side: Literal["buy", "sell"],
         gross: Decimal,
+        on: date,
         commission_rate: Decimal = Decimal("0.0003"),
         minimum_commission: Decimal = Decimal("5.00"),
     ) -> FeeBreakdown:
+        if on < self._effective_from:
+            raise PaperTradingError(
+                "fee_schedule_not_effective",
+                "fee schedule is not effective on the execution date",
+            )
         resolved_side = _require_side(side)
         _validate_calculation_decimal(gross, "gross", positive=True)
         _validate_calculation_decimal(commission_rate, "commission_rate")

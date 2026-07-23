@@ -2,7 +2,7 @@ import asyncio
 import re
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, InvalidOperation
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -17,6 +17,9 @@ MAX_FUTURE_SKEW = timedelta(seconds=2)
 _SOURCE = "tushare.realtime_quote"
 _FETCH_FAILURES = (OSError, RuntimeError)
 _TS_CODE_PATTERN = re.compile(r"\d{6}\.(?:SH|SZ)")
+_MIN_SUPPORTED_PRICE = Decimal("0.0001")
+_MAX_SUPPORTED_PRICE = Decimal("99999999999999.9999")
+_MAX_SUPPORTED_QUANTITY = Decimal(2_147_483_647)
 
 
 def assert_fresh_quote(quote: RealtimeQuote, now: datetime, max_age_seconds: int) -> None:
@@ -164,9 +167,17 @@ class TushareRealtimeQuoteProvider:
 
     @staticmethod
     def _positive_decimal(value: object) -> Decimal:
-        number = TushareRealtimeQuoteProvider._finite_decimal(value)
+        try:
+            number = TushareRealtimeQuoteProvider._finite_decimal(value)
+        except DecimalException as exc:
+            raise PaperTradingError("invalid_price", "quote price is not a valid decimal") from exc
         if number <= 0:
             raise ValueError("expected a finite positive decimal")
+        if number < _MIN_SUPPORTED_PRICE or number > _MAX_SUPPORTED_PRICE:
+            raise PaperTradingError(
+                "invalid_price",
+                "quote price is outside the supported Numeric(18, 4) range",
+            )
         return number
 
     @staticmethod
@@ -179,6 +190,11 @@ class TushareRealtimeQuoteProvider:
     @staticmethod
     def _nonnegative_integer(value: object) -> int:
         number = Decimal(str(value).strip())
-        if not number.is_finite() or number < 0 or number != number.to_integral_value():
+        if (
+            not number.is_finite()
+            or number < 0
+            or number > _MAX_SUPPORTED_QUANTITY
+            or number != number.to_integral_value()
+        ):
             raise ValueError("expected a finite nonnegative integer")
         return int(number)

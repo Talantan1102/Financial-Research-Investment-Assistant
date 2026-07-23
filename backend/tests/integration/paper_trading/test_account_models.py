@@ -15,17 +15,10 @@ from app.models.paper_account import (
     PaperHoldingLot,
 )
 from app.models.user import User
-from sqlalchemy import Column, Engine, Table, delete, text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Engine, delete, text
 from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.orm.exc import StaleDataError
-
-_PAPER_FILLS = Table(
-    "paper_fills",
-    Base.metadata,
-    Column("id", UUID(as_uuid=True), primary_key=True),
-)
 
 
 @pytest.fixture
@@ -51,9 +44,16 @@ def _account(user: User, *, generation: int = 1, cash: str = "1000000") -> Paper
 
 def _persist_source_fill(db_session: Session, user: User, account: PaperAccount) -> uuid.UUID:
     del user, account
-    fill_id = uuid.uuid4()
-    db_session.execute(_PAPER_FILLS.insert().values(id=fill_id))
-    return fill_id
+    return uuid.uuid4()
+
+
+def test_task1_metadata_has_no_unresolved_paper_fill_dependency() -> None:
+    assert "paper_fills" not in Base.metadata.tables
+    assert PaperHoldingLot.__table__ in Base.metadata.sorted_tables
+    assert all(
+        foreign_key.target_fullname != "paper_fills.id"
+        for foreign_key in PaperHoldingLot.__table__.foreign_keys
+    )
 
 
 def test_account_factory_sets_deterministic_financial_defaults(user: User) -> None:
@@ -480,7 +480,9 @@ def test_holding_lot_source_fill_is_unique(db_session: Session, user: User) -> N
         db_session.flush()
 
 
-def test_holding_lot_rejects_dangling_source_fill(db_session: Session, user: User) -> None:
+def test_holding_lot_accepts_typed_source_fill_id_before_task2_fk(
+    db_session: Session, user: User
+) -> None:
     account = _account(user)
     db_session.add(account)
     db_session.flush()
@@ -499,8 +501,7 @@ def test_holding_lot_rejects_dangling_source_fill(db_session: Session, user: Use
         )
     )
 
-    with pytest.raises(IntegrityError):
-        db_session.flush()
+    db_session.flush()
 
 
 def test_reset_audit_persists_confirmation_source_and_summary(

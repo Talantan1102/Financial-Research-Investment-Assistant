@@ -339,3 +339,22 @@ def test_price_bounds_rejects_nonfinite_previous_close(previous_close: Decimal) 
         rulebook.price_bounds(_resolve(rulebook), previous_close)
 
     assert caught.value.code == "invalid_price"
+
+
+@pytest.mark.parametrize(
+    "previous_close",
+    [
+        Decimal("1e999999"),
+        Decimal("1e-999999"),
+        Decimal("99999999999999.9999"),
+    ],
+)
+def test_price_bounds_rejects_values_outside_numeric_price_capacity(
+    previous_close: Decimal,
+) -> None:
+    rulebook = RuleBook.from_builtin_fixture()
+
+    with pytest.raises(PaperTradingError) as caught:
+        rulebook.price_bounds(_resolve(rulebook), previous_close)
+
+    assert caught.value.code == "invalid_price"

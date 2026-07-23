@@ -2,7 +2,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, DecimalException, InvalidOperation
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
@@ -11,6 +11,8 @@ from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.types import RuleSet
 
 _BUILTIN_FIXTURE = Path(__file__).with_name("rules") / "a_share_20260706.json"
+_MIN_SUPPORTED_PRICE = Decimal("0.0001")
+_MAX_SUPPORTED_PRICE = Decimal("99999999999999.9999")
 
 
 @dataclass(frozen=True)
@@ -26,7 +28,7 @@ class RuleBook:
             self._effective_from = date.fromisoformat(_require_string(fixture, "effective_from"))
             defaults = _require_mapping(fixture, "defaults")
             self._buy_lot_size = _require_positive_int(defaults, "buy_lot_size")
-            self._price_tick = _require_positive_decimal(defaults, "price_tick")
+            self._price_tick = _require_supported_price(defaults, "price_tick")
             self._quote_freshness_seconds = _require_positive_int(
                 defaults, "quote_freshness_seconds"
             )
@@ -130,13 +132,33 @@ class RuleBook:
         raise PaperTradingError("unsupported_trading_regime", "不支持的交易方向")
 
     def price_bounds(self, rules: RuleSet, previous_close: Decimal) -> tuple[Decimal, Decimal]:
-        if not previous_close.is_finite() or previous_close <= 0:
-            raise PaperTradingError("invalid_price", "昨收价必须大于零")
+        if (
+            not previous_close.is_finite()
+            or previous_close < _MIN_SUPPORTED_PRICE
+            or previous_close > _MAX_SUPPORTED_PRICE
+        ):
+            raise PaperTradingError("invalid_price", "昨收价超出支持的价格范围")
 
         ratio = rules.price_limit_ratio
         tick = rules.price_tick
-        lower = _round_to_tick(previous_close * (Decimal("1") - ratio), tick)
-        upper = _round_to_tick(previous_close * (Decimal("1") + ratio), tick)
+        try:
+            lower = _round_to_tick(previous_close * (Decimal("1") - ratio), tick)
+            upper = _round_to_tick(previous_close * (Decimal("1") + ratio), tick)
+        except DecimalException as exc:
+            raise PaperTradingError(
+                "invalid_price",
+                "价格边界无法表示为支持的小数范围",
+            ) from exc
+        if (
+            lower < _MIN_SUPPORTED_PRICE
+            or lower > _MAX_SUPPORTED_PRICE
+            or upper < _MIN_SUPPORTED_PRICE
+            or upper > _MAX_SUPPORTED_PRICE
+        ):
+            raise PaperTradingError(
+                "invalid_price",
+                "价格边界超出 Numeric(18, 4) 支持范围",
+            )
         return lower, upper
 
 
@@ -191,6 +213,13 @@ def _require_ratio(value: dict[str, Any], key: str, *, field: str) -> Decimal:
     if ratio >= 1:
         raise ValueError(f"{field} must be less than one")
     return ratio
+
+
+def _require_supported_price(value: dict[str, Any], key: str) -> Decimal:
+    price = _require_positive_decimal(value, key)
+    if price < _MIN_SUPPORTED_PRICE or price > _MAX_SUPPORTED_PRICE:
+        raise ValueError(f"{key} must fit Numeric(18, 4)")
+    return price
 
 
 def _round_to_tick(value: Decimal, tick: Decimal) -> Decimal:

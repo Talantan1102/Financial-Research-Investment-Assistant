@@ -1,6 +1,6 @@
 import asyncio
 import threading
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.quote_provider import TushareRealtimeQuoteProvider
+from app.services.paper_trading.rulebook import RuleBook
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -124,6 +125,47 @@ async def test_rejects_invalid_field_values(field: str, value: str) -> None:
     with pytest.raises(PaperTradingError) as caught:
         await provider.get("600519.SH")
     assert caught.value.code == "quote_unavailable"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("PRE_CLOSE", "1e999999"),
+        ("PRICE", "1e-999999"),
+        ("B1_P", "1e999999"),
+    ],
+)
+def test_rejects_extreme_finite_prices_with_stable_domain_error(
+    field: str, value: str
+) -> None:
+    provider = TushareRealtimeQuoteProvider(
+        fetch=lambda _: pd.DataFrame([_quote_row(**{field: value})])
+    )
+
+    with pytest.raises(PaperTradingError) as caught:
+        provider.get_sync("600519.SH")
+
+    assert caught.value.code == "invalid_price"
+
+
+def test_provider_to_rulebook_never_leaks_decimal_errors_for_extreme_price() -> None:
+    provider = TushareRealtimeQuoteProvider(
+        fetch=lambda _: pd.DataFrame([_quote_row(PRE_CLOSE="1e999999")])
+    )
+    rulebook = RuleBook.from_builtin_fixture()
+    rules = rulebook.resolve(
+        ts_code="600519.SH",
+        board="main",
+        risk_warning=False,
+        side="buy",
+        on=date(2026, 7, 20),
+    )
+
+    with pytest.raises(PaperTradingError) as caught:
+        quote = provider.get_sync("600519.SH")
+        rulebook.price_bounds(rules, quote.previous_close)
+
+    assert caught.value.code == "invalid_price"
 
 
 @pytest.mark.asyncio
