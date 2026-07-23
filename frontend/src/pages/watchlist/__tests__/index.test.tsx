@@ -9,6 +9,6 @@ describe('WatchlistPage', () => {
     render(<WatchlistPage />)
     expect(await screen.findByDisplayValue('浦发银行')).toBeInTheDocument()
     expect(screen.getByRole('switch')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '删除' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /删\s*除/ })).toBeInTheDocument()
   })
 })
