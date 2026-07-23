@@ -16,6 +16,7 @@ import pytest
 from app.chatloop.continuation import ContinuationV1, PendingActionV1
 from app.chatloop.contracts import ToolResult
 from app.chatloop.gates import GateConfig
+from app.chatloop.inprocess import InProcessTool
 from app.chatloop.run_executor import (
     ChatRunExecutor,
     CompletedResult,
@@ -25,7 +26,10 @@ from app.chatloop.run_executor import (
     PauseResult,
 )
 from app.chatloop.state import ChatLoopState
+from app.chatloop.tool_hub import ToolHub
+from app.runtime.models import ExecutionContext
 from app.services.llm_step import StepDelta, StepResult, StepToolCall
+from pydantic import BaseModel
 
 TEST_CONTINUATION_SECRET = b"s" * 32
 
@@ -280,6 +284,128 @@ async def test_approved_edits_execute_effective_call_and_keep_original_audit() -
         "arguments"
     ] == '{"quantity":100}'
     assert result.tools[0].request == {"quantity": 200}
+
+
+class _RawApprovalArgs(BaseModel):
+    quantity: int
+
+
+class _RawApprovalTool(InProcessTool):
+    name = "memory_write"
+    description = "approval context probe"
+    args_schema = _RawApprovalArgs
+
+    def __init__(self) -> None:
+        self.approved_input = None
+
+    async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
+        del args, state
+        raise AssertionError("context-aware path expected")
+
+    async def run_with_context(
+        self,
+        args: BaseModel,
+        state: ChatLoopState,
+        context: ExecutionContext,
+    ) -> dict[str, Any]:
+        del args, state
+        self.approved_input = context.approved_input
+        return {"ok": True}
+
+
+async def test_raw_approval_reaches_inprocess_as_attempt_local_trusted_input() -> None:
+    command = _command(prompt="write it")
+    call = StepToolCall(id="write-1", name="memory_write", arguments='{"quantity":100}')
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=(call,),
+        editable_tool_call_ids=frozenset({"write-1"}),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+    tool = _RawApprovalTool()
+    hub = ToolHub(progressive=False)
+    hub.register_inprocess([tool])
+
+    result = await ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=SimpleNamespace(
+            llm=_ScriptedLLM([_step("done")]),
+            tool_hub=hub,
+            gate_cfg=GateConfig(),
+            skill_listing="",
+            system_prompt="financial assistant",
+        ),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    ).execute(
+        ExecuteChatRun(
+            command.run_id,
+            uuid4(),
+            command.session_id,
+            '{"approved":true}',
+            (),
+            continuation,
+            command.tenant_id,
+        )
+    )
+
+    assert isinstance(result, CompletedResult)
+    assert tool.approved_input is not None
+    assert tool.approved_input.original == {"quantity": 100}
+    assert tool.approved_input.effective == {"quantity": 100}
+    assert "approved_inputs" not in continuation["body"]
+
+
+@pytest.mark.parametrize(
+    ("response", "expected_ids"),
+    [
+        ({"approved": True}, {"write-1"}),
+        ({"approved": False}, set()),
+        ({"decisions": {"write-1": True, "read-1": True}}, {"write-1"}),
+    ],
+)
+def test_approval_context_marks_only_approved_requested_editable_calls(
+    response: dict[str, Any],
+    expected_ids: set[str],
+) -> None:
+    command = _command(prompt="mixed")
+    calls = (
+        StepToolCall(id="write-1", name="memory_write", arguments='{"quantity":100}'),
+        StepToolCall(id="read-1", name="get_stock_quote", arguments="{}"),
+    )
+    user_id = str(uuid4())
+    continuation = ChatRunExecutor.approval_snapshot(
+        command,
+        user_id=user_id,
+        pending_tool_calls=calls,
+        editable_tool_call_ids=frozenset({"write-1"}),
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        continuation_key_id="default",
+    )
+    resumed = ExecuteChatRun(
+        command.run_id,
+        uuid4(),
+        command.session_id,
+        json.dumps(response),
+        (),
+        continuation,
+        command.tenant_id,
+    )
+    executor = ChatRunExecutor(
+        user_id=user_id,
+        continuation_secret=TEST_CONTINUATION_SECRET,
+        components=_components(_ScriptedLLM([_step("done")])),
+        event_sink=lambda _event: asyncio.sleep(0),
+        cancel_event=asyncio.Event(),
+    )
+
+    state, _calls, _prompt, _decision = executor._initial_state(resumed, continuation)
+
+    assert set(state.approved_inputs) == expected_ids
 
 
 async def test_completed_contract_usage_event_order_and_immutable_inputs() -> None:

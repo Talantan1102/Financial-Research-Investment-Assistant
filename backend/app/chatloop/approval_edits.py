@@ -105,16 +105,21 @@ def validate_edit_ids(
 def build_approved_inputs(
     calls: tuple[StepToolCall, ...],
     edited_arguments: Mapping[str, Mapping[str, Any]],
+    *,
+    approved_ids: set[str] | frozenset[str] | None = None,
 ) -> dict[str, ApprovedInput]:
     by_id = {call.id: call for call in calls}
-    if set(edited_arguments) - set(by_id):
+    selected_ids = set(edited_arguments) if approved_ids is None else set(approved_ids)
+    if (set(edited_arguments) | selected_ids) - set(by_id):
         raise ValueError("edited tool call id is unknown")
     return {
         call_id: ApprovedInput(
             original=by_id[call_id].parsed_args,
-            effective=dict(arguments),
+            effective=dict(
+                edited_arguments.get(call_id, by_id[call_id].parsed_args)
+            ),
         )
-        for call_id, arguments in edited_arguments.items()
+        for call_id in selected_ids
     }
 
 

@@ -715,21 +715,20 @@ class ChatRunExecutor:
         decision: Literal["approve", "reject"] | Mapping[str, bool]
         pending_ids = {call.id for call in pending_tool_calls}
         requested_ids = self._requested_approval_ids(action.request, pending_ids)
+        approved_input_ids: set[str] = set()
+        edited_arguments: Mapping[str, Mapping[str, Any]] = {}
         if "approved" in response and "decisions" in response:
             raise ValueError("approval response contains conflicting decisions")
         if type(response.get("approved")) is bool:
             approval = ApprovalEditResponse.model_validate(response)
             approved = approval.approved
+            edited_arguments = approval.edited_arguments
             edited_ids = set(approval.edited_arguments)
             editable_ids = set(action.request.editable_tool_call_ids)
             if not edited_ids.issubset(requested_ids) or not edited_ids.issubset(editable_ids):
                 raise ValueError("approval edits do not match editable pending tools")
-            state.approved_inputs = build_approved_inputs(
-                pending_tool_calls, approval.edited_arguments
-            )
-            pending_tool_calls = apply_approved_edits(
-                pending_tool_calls, approval.edited_arguments
-            )
+            if approved:
+                approved_input_ids = requested_ids & editable_ids
             if requested_ids == pending_ids:
                 decision = "approve" if approved else "reject"
             else:
@@ -752,6 +751,20 @@ class ChatRunExecutor:
                 call.id: decisions[call.id] if call.id in requested_ids else True
                 for call in pending_tool_calls
             }
+            approved_input_ids = {
+                call_id
+                for call_id, approved in decisions.items()
+                if approved
+            } & set(action.request.editable_tool_call_ids)
+        state.approved_inputs = build_approved_inputs(
+            pending_tool_calls,
+            edited_arguments,
+            approved_ids=approved_input_ids,
+        )
+        pending_tool_calls = apply_approved_edits(
+            pending_tool_calls,
+            edited_arguments,
+        )
         resume_prompt = response.get("text") or json.dumps(
             response, ensure_ascii=False, sort_keys=True
         )
