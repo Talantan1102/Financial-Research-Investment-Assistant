@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -306,6 +308,20 @@ class _EditableTradeArgs(BaseModel):
     order_type: str = "market"
 
 
+class _NonPortableValidator:
+    def __init__(self, bad: float) -> None:
+        self._bad = bad
+
+    def validate(
+        self,
+        *,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        del tool_name, arguments
+        return {"quantity": 200, "metrics": {"nested": [1.0, self._bad]}}
+
+
 @pytest.mark.asyncio
 async def test_invalid_edited_arguments_leave_pause_unresolved(
     run_service: RunService,
@@ -366,6 +382,83 @@ async def test_invalid_edited_arguments_leave_pause_unresolved(
     )
     assert unresolved.resolved_at is None
     assert unresolved.response_payload is None
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+@pytest.mark.asyncio
+async def test_non_finite_normalized_edit_keeps_pause_open_and_allows_valid_retry(
+    bad: float,
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+    async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await fake_executor.start(created_run.id)
+    pause = await fake_executor.pause_for_approval(
+        created_run.id,
+        {
+            "tool_calls": [
+                {
+                    "id": "trade-1",
+                    "name": "place_paper_order",
+                    "arguments": '{"quantity":100}',
+                }
+            ],
+            "editable_tool_call_ids": ["trade-1"],
+        },
+        {
+            "body": {
+                "pending_action": {
+                    "pending_tool_calls": [
+                        {
+                            "id": "trade-1",
+                            "name": "place_paper_order",
+                            "arguments": '{"quantity":100}',
+                        }
+                    ]
+                }
+            }
+        },
+    )
+    bad_service = RunService(
+        async_session_factory,
+        editable_approval_validator=_NonPortableValidator(bad),
+    )
+    response = {
+        "approved": True,
+        "edited_arguments": {"trade-1": {"quantity": 200}},
+    }
+
+    with pytest.raises(ResumeNotAllowed, match="invalid edited arguments"):
+        await bad_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            response=response,
+        )
+
+    unresolved = await run_service.get_pause(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        pause.id,
+    )
+    assert unresolved.resolved_at is None
+    assert unresolved.response_payload is None
+
+    valid_service = RunService(
+        async_session_factory,
+        editable_approval_validator=SchemaEditableApprovalValidator(
+            {"place_paper_order": _EditableTradeArgs}
+        ),
+    )
+    resumed = await valid_service.resume_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        response=response,
+    )
+    assert resumed.status == RunStatus.QUEUED.value
 
 
 @pytest.mark.asyncio

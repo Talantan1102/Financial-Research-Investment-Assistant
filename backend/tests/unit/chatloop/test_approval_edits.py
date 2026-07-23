@@ -9,6 +9,7 @@ from app.chatloop.approval_edits import (
     SchemaEditableApprovalValidator,
     apply_approved_edits,
     build_approved_inputs,
+    thaw_approved_value,
     validate_edit_ids,
 )
 from app.chatloop.continuation import PauseRequestV1
@@ -123,6 +124,10 @@ class _PriceArgs(BaseModel):
     limit_price: Decimal
 
 
+class _MetricArgs(BaseModel):
+    metrics: dict[str, list[float]]
+
+
 def test_schema_validator_returns_json_safe_canonical_arguments() -> None:
     validator = SchemaEditableApprovalValidator({"place_paper_order": _PriceArgs})
 
@@ -130,6 +135,53 @@ def test_schema_validator_returns_json_safe_canonical_arguments() -> None:
         tool_name="place_paper_order",
         arguments={"limit_price": "1500.50"},
     ) == {"limit_price": "1500.50"}
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_schema_validator_and_edit_application_reject_non_finite_json(bad: float) -> None:
+    validator = SchemaEditableApprovalValidator({"place_paper_order": _MetricArgs})
+    calls = (
+        StepToolCall(id="trade-1", name="place_paper_order", arguments="{}"),
+    )
+
+    with pytest.raises(ValueError):
+        validator.validate(
+            tool_name="place_paper_order",
+            arguments={"metrics": {"nested": [1.0, bad]}},
+        )
+    with pytest.raises(ValueError):
+        apply_approved_edits(
+            calls,
+            {"trade-1": {"metrics": {"nested": [1.0, bad]}}},
+        )
+
+
+def test_approved_input_is_deeply_immutable_and_can_be_explicitly_thawed() -> None:
+    calls = (
+        StepToolCall(
+            id="trade-1",
+            name="place_paper_order",
+            arguments='{"legs":[{"quantity":100}],"meta":{"tags":["a"]}}',
+        ),
+    )
+    approved = build_approved_inputs(
+        calls,
+        {"trade-1": {"legs": [{"quantity": 200}], "meta": {"tags": ["a", "b"]}}},
+    )["trade-1"]
+
+    with pytest.raises(TypeError):
+        approved.original["new"] = 1  # type: ignore[index]
+    with pytest.raises(TypeError):
+        approved.original["legs"][0]["quantity"] = 999  # type: ignore[index]
+    with pytest.raises(AttributeError):
+        approved.effective["meta"]["tags"].append("mutated")  # type: ignore[union-attr]
+
+    assert approved.original["legs"][0]["quantity"] == 100
+    assert approved.effective["legs"][0]["quantity"] == 200
+    mutable = thaw_approved_value(approved.effective)
+    mutable["legs"][0]["quantity"] = 300
+    assert mutable["legs"][0]["quantity"] == 300
+    assert approved.effective["legs"][0]["quantity"] == 200
 
 
 class _ContextTool(InProcessTool):

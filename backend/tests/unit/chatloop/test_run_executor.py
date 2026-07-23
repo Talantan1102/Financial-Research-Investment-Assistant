@@ -288,6 +288,7 @@ async def test_approved_edits_execute_effective_call_and_keep_original_audit() -
 
 class _RawApprovalArgs(BaseModel):
     quantity: int
+    meta: dict[str, Any]
 
 
 class _RawApprovalTool(InProcessTool):
@@ -297,6 +298,7 @@ class _RawApprovalTool(InProcessTool):
 
     def __init__(self) -> None:
         self.approved_input = None
+        self.nested_mutation_failed = False
 
     async def run_with_state(self, args: BaseModel, state: ChatLoopState) -> dict[str, Any]:
         del args, state
@@ -310,12 +312,21 @@ class _RawApprovalTool(InProcessTool):
     ) -> dict[str, Any]:
         del args, state
         self.approved_input = context.approved_input
+        assert context.approved_input is not None
+        try:
+            context.approved_input.effective["meta"]["legs"][0]["quantity"] = 999
+        except TypeError:
+            self.nested_mutation_failed = True
         return {"ok": True}
 
 
 async def test_raw_approval_reaches_inprocess_as_attempt_local_trusted_input() -> None:
     command = _command(prompt="write it")
-    call = StepToolCall(id="write-1", name="memory_write", arguments='{"quantity":100}')
+    call = StepToolCall(
+        id="write-1",
+        name="memory_write",
+        arguments='{"quantity":100,"meta":{"legs":[{"quantity":100}]}}',
+    )
     user_id = str(uuid4())
     continuation = ChatRunExecutor.approval_snapshot(
         command,
@@ -355,8 +366,13 @@ async def test_raw_approval_reaches_inprocess_as_attempt_local_trusted_input() -
 
     assert isinstance(result, CompletedResult)
     assert tool.approved_input is not None
-    assert tool.approved_input.original == {"quantity": 100}
-    assert tool.approved_input.effective == {"quantity": 100}
+    assert tool.nested_mutation_failed is True
+    assert tool.approved_input.original == {
+        "quantity": 100,
+        "meta": {"legs": ({"quantity": 100},)},
+    }
+    assert tool.approved_input.effective == tool.approved_input.original
+    assert tool.approved_input.effective["meta"]["legs"][0]["quantity"] == 100
     assert "approved_inputs" not in continuation["body"]
 
 

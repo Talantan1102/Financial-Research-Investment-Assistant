@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from app.services.llm_step import StepToolCall
 
@@ -28,8 +29,19 @@ class ApprovalEditResponse(BaseModel):
 class ApprovedInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    original: dict[str, Any]
-    effective: dict[str, Any]
+    original: Mapping[str, Any]
+    effective: Mapping[str, Any]
+
+    def model_post_init(self, __context: Any) -> None:
+        del __context
+        object.__setattr__(self, "original", _deep_freeze(self.original))
+        object.__setattr__(self, "effective", _deep_freeze(self.effective))
+
+    @field_serializer("original", "effective")
+    def serialize_frozen_mapping(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        thawed = thaw_approved_value(value)
+        assert isinstance(thawed, dict)
+        return thawed
 
 
 class EditableApprovalValidator(Protocol):
@@ -65,7 +77,46 @@ class SchemaEditableApprovalValidator:
         schema = self._schemas.get(tool_name)
         if schema is None:
             raise ValueError("tool arguments are not editable")
-        return schema.model_validate(dict(arguments)).model_dump(mode="json")
+        normalized = schema.model_validate(dict(arguments)).model_dump(mode="json")
+        return normalize_standard_json_object(normalized)
+
+
+def _deep_freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _deep_freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_deep_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_deep_freeze(item) for item in value)
+    return value
+
+
+def thaw_approved_value(value: Any) -> Any:
+    """Return an explicit mutable copy for business DTO construction."""
+
+    if isinstance(value, Mapping):
+        return {key: thaw_approved_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [thaw_approved_value(item) for item in value]
+    if isinstance(value, frozenset):
+        return {thaw_approved_value(item) for item in value}
+    return value
+
+
+def normalize_standard_json_object(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Defensively copy a mapping through strict RFC-compatible JSON."""
+
+    encoded = json.dumps(
+        dict(value),
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    normalized = json.loads(encoded)
+    if not isinstance(normalized, dict):
+        raise ValueError("approval arguments must be a JSON object")
+    return normalized
 
 
 def apply_approved_edits(
@@ -78,6 +129,7 @@ def apply_approved_edits(
                 "arguments": json.dumps(
                     edited_arguments[call.id],
                     ensure_ascii=False,
+                    allow_nan=False,
                     sort_keys=True,
                     separators=(",", ":"),
                 )
@@ -131,5 +183,7 @@ __all__ = [
     "SchemaEditableApprovalValidator",
     "apply_approved_edits",
     "build_approved_inputs",
+    "normalize_standard_json_object",
+    "thaw_approved_value",
     "validate_edit_ids",
 ]

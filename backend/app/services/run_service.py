@@ -18,6 +18,7 @@ from app.chatloop.approval_edits import (
     ApprovalEditResponse,
     DenyEditableApprovalValidator,
     EditableApprovalValidator,
+    normalize_standard_json_object,
     validate_edit_ids,
 )
 from app.models.run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
@@ -502,14 +503,14 @@ class RunService:
         pause_type = cast(str, pause.pause_type)
         self._validate_resume_response(pause_type, response)
         if pause_type != PauseType.APPROVAL.value:
-            return dict(response)
+            return self._normalize_portable_resume_response(response)
         if "decisions" in response:
             self._validate_resume_response(
                 pause_type,
                 response,
                 expected_approval_ids=self._expected_approval_ids(pause),
             )
-            return dict(response)
+            return self._normalize_portable_resume_response(response)
         try:
             approval = ApprovalEditResponse.model_validate(response)
         except ValidationError as exc:
@@ -521,7 +522,14 @@ class RunService:
             normalized["edited_arguments"] = self._validate_approval_edits(
                 pause, approval.edited_arguments
             )
-        return normalized
+        return self._normalize_portable_resume_response(normalized)
+
+    @staticmethod
+    def _normalize_portable_resume_response(response: Mapping[str, Any]) -> dict[str, Any]:
+        try:
+            return normalize_standard_json_object(response)
+        except (TypeError, ValueError) as exc:
+            raise ResumeNotAllowed("resume response must be portable JSON") from exc
 
     @staticmethod
     def _validate_resume_response(
@@ -602,9 +610,11 @@ class RunService:
             raise ResumeNotAllowed("invalid edited arguments")
         try:
             return {
-                call_id: self._editable_approval_validator.validate(
-                    tool_name=by_id[call_id],
-                    arguments=arguments,
+                call_id: normalize_standard_json_object(
+                    self._editable_approval_validator.validate(
+                        tool_name=by_id[call_id],
+                        arguments=arguments,
+                    )
                 )
                 for call_id, arguments in edited_arguments.items()
             }
