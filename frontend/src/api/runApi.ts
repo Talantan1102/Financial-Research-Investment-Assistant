@@ -1,4 +1,5 @@
 import { getAuthToken } from './auth-token'
+import type { RunResumeResponse } from '@/types/paper-trading'
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? ''
 
@@ -153,7 +154,7 @@ export function cancelRun(
 export function resumeRun(
   tenantId: string,
   runId: string,
-  response: Record<string, unknown>,
+  response: RunResumeResponse,
   fetchImpl: typeof fetch = fetch,
 ): Promise<RunResponse> {
   return jsonRequest(

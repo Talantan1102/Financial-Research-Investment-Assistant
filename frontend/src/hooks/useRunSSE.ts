@@ -10,6 +10,7 @@ import {
   type RunRevision,
   type RunStatus,
 } from '@/api/runApi'
+import type { RunResumeResponse } from '@/types/paper-trading'
 import { chatSessionsActions } from '@/store/chat-sessions'
 import { currentChatActions } from '@/store/current-chat'
 
@@ -40,7 +41,7 @@ interface UseRunSSEOptions {
 export interface UseRunSSE {
   sendPrompt(prompt: string): Promise<RunCommandResult>
   cancelRun(): Promise<RunCommandResult>
-  resumeRun(response: Record<string, unknown>): Promise<RunCommandResult>
+  resumeRun(response: RunResumeResponse): Promise<RunCommandResult>
   resubmitPrompt(prompt: string, replacesRunId: string): Promise<RunCommandResult>
   loadMoreRevisions(): Promise<RunCommandResult>
   status: RunStatus | 'idle' | 'error'
@@ -540,7 +541,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
   }, [fetchImpl, isCurrent, loadDurableHistory, recoverCommandFacts, streamRun, updateActiveRun, updateStatus])
 
   const resumeRun = useCallback(
-    async (response: Record<string, unknown>): Promise<RunCommandResult> => {
+    async (response: RunResumeResponse): Promise<RunCommandResult> => {
       const tenantId = tenantRef.current
       const runId = activeRunRef.current ?? lastRunRef.current
       const sessionId = sessionRef.current

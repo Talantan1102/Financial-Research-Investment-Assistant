@@ -390,6 +390,55 @@ describe('useRunSSE', () => {
     expect(result.current.pause).toBeNull()
   })
 
+  it('forwards closed editable approval responses without rewriting Decimal strings', async () => {
+    vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_approval'))
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([
+      'id: v1:1:1-0\nevent: run.paused\ndata: {}\n\n',
+    ]))
+    vi.mocked(runApi.resumeRun).mockImplementation(() => new Promise(() => {}))
+    const { result, unmount } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'waiting_approval',
+      initialPause: {
+        type: 'approval_request',
+        request: {
+          tool_calls: [{
+            id: 'trade-1',
+            name: 'place_paper_order',
+            arguments: '{"quantity":100,"limit_price":"1500.0000"}',
+          }],
+          editable_tool_call_ids: ['trade-1'],
+        },
+      },
+      delayMs: async () => {},
+    }))
+    await waitFor(() => expect(result.current.activeRunId).toBe('run-1'))
+
+    act(() => {
+      void result.current.resumeRun({
+        approved: true,
+        edited_arguments: {
+          'trade-1': { quantity: 200, limit_price: '1498.5000' },
+        },
+      })
+    })
+
+    expect(runApi.resumeRun).toHaveBeenCalledWith(
+      'tenant-1',
+      'run-1',
+      {
+        approved: true,
+        edited_arguments: {
+          'trade-1': { quantity: 200, limit_price: '1498.5000' },
+        },
+      },
+      expect.any(Function),
+    )
+    unmount()
+  })
+
   it('uses one cancel/resume fence and calibrates durable facts after an uncertain resume', async () => {
     let rejectResume!: (reason: unknown) => void
     vi.mocked(runApi.resumeRun).mockImplementation(

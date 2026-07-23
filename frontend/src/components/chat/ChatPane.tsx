@@ -6,6 +6,7 @@ import { DispatchLanes } from './DispatchLanes'
 import { InputArea } from './InputArea'
 import { MessageList } from './MessageList'
 import { StreamingIndicator } from './StreamingIndicator'
+import { PaperApprovalCard } from './PaperApprovalCard'
 import { useDeferredMessages } from './useDeferredMessages'
 import { useRunSSE } from '@/hooks/useRunSSE'
 import { currentChatState } from '@/store/current-chat'
@@ -152,6 +153,9 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
   const pendingApprovals = run.pause?.type === 'approval_request'
     ? approvalItems(run.pause.request)
     : []
+  const paperApproval = run.pause?.type === 'approval_request'
+    ? PaperApprovalCard.supports(run.pause.request)
+    : false
   const revisions = run.revisions ?? []
 
   const onSend = useCallback((text: string) => {
@@ -252,7 +256,14 @@ export function ChatPane({ sessionId: sessionIdProp, tenantId: tenantIdProp, ini
               </button>
             </div>
           ) : null}
-          {run.pause?.type === 'approval_request' ? (
+          {run.pause?.type === 'approval_request' && paperApproval ? (
+            <PaperApprovalCard
+              request={run.pause.request}
+              disabled={run.commandPending}
+              onResume={run.resumeRun}
+            />
+          ) : null}
+          {run.pause?.type === 'approval_request' && !paperApproval ? (
             <fieldset disabled={run.commandPending}>
             <div role="region" aria-label="审批请求">
               <p>此操作需要你的审批</p>
