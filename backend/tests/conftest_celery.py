@@ -97,7 +97,9 @@ def configured_celery_producer(redis_url: str) -> Generator[None, None, None]:
     paper_task = getattr(paper_module, "match_order", None)
     if paper_task is not None and paper_task.app is not celery_app:
         apps.append(paper_task.app)
-    originals = [(app, app.conf.broker_url, app.conf.result_backend) for app in apps]
+    originals = [
+        (app, app.conf.broker_url, app.conf.result_backend, app._backend_cache) for app in apps
+    ]
     for app in apps:
         app.conf.broker_url = redis_url
         app.conf.result_backend = redis_url
@@ -105,10 +107,10 @@ def configured_celery_producer(redis_url: str) -> Generator[None, None, None]:
     try:
         yield
     finally:
-        for app, old_broker, old_backend in originals:
+        for app, old_broker, old_backend, old_backend_cache in originals:
             app.conf.broker_url = old_broker
             app.conf.result_backend = old_backend
-            app._backend_cache = None
+            app._backend_cache = old_backend_cache
 
 
 @pytest.fixture(scope="session")
@@ -215,12 +217,16 @@ def celery_worker_subprocess(
             break
 
     if not ready:
-        _stop_worker(proc)
-        producer_config.__exit__(None, None, None)
+        try:
+            _stop_worker(proc)
+        finally:
+            producer_config.__exit__(None, None, None)
         pytest.skip("celery worker did not become ready in 60s")
 
     try:
         yield
     finally:
-        _stop_worker(proc)
-        producer_config.__exit__(None, None, None)
+        try:
+            _stop_worker(proc)
+        finally:
+            producer_config.__exit__(None, None, None)

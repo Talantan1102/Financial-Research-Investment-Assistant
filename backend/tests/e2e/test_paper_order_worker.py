@@ -7,10 +7,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from threading import Event
 from typing import cast
 
 import pytest
-from app.models.paper_account import PaperAccount, PaperCashLedger
+from app.models.paper_account import PaperAccount, PaperCashLedger, PaperHoldingLot
 from app.models.paper_order import (
     OrderSide,
     OrderStatus,
@@ -25,7 +26,7 @@ from app.models.user import User
 from app.services.paper_trading.clock import FixedTradingCalendar
 from app.services.paper_trading.errors import PaperTradingError
 from app.services.paper_trading.types import QuoteLevel, RealtimeQuote
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 NOW = datetime(2026, 7, 20, 2, 0, tzinfo=UTC)
@@ -136,6 +137,29 @@ def _wire_market(monkeypatch: pytest.MonkeyPatch, quote: RealtimeQuote) -> _Prov
     monkeypatch.setattr(tasks, "_calendar", lambda: calendar)
     monkeypatch.setattr(tasks, "TushareRealtimeQuoteProvider", lambda: provider)
     return provider
+
+
+def _run_match(
+    factory,
+    order_id: uuid.UUID,
+    quote_timestamp: str,
+    match_pass: int,
+) -> tuple[str, object]:
+    import app.tasks.paper_trading as tasks
+
+    with factory() as session:
+        try:
+            result = tasks._match_order_in_session(
+                session,
+                order_id=str(order_id),
+                quote_timestamp=quote_timestamp,
+                match_pass=match_pass,
+            )
+            session.commit()
+            return "ok", result
+        except PaperTradingError as exc:
+            session.rollback()
+            return "error", exc.code
 
 
 def test_multilevel_snapshot_settles_in_global_watermark_order(
@@ -277,6 +301,198 @@ def test_concurrent_same_snapshot_is_consumed_once(
     with factory() as session:
         assert session.query(PaperFill).filter_by(order_id=uuid.UUID(order_id)).count() == 1
         assert session.query(PaperMatchPass).filter_by(order_id=uuid.UUID(order_id)).count() == 1
+
+
+def test_worker_waiting_for_lock_rechecks_session_before_settlement(
+    pg_test_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    with factory() as setup:
+        order = _open_order(setup, quantity=100)
+        order.expires_at = NOW + timedelta(days=1)
+        setup.commit()
+        order_id = cast(uuid.UUID, order.id)
+        account_id = cast(uuid.UUID, order.account_id)
+
+    clock = {"now": NOW}
+    quote_fetched = Event()
+    provider = _Provider(_quote(asks=(QuoteLevel(price=Decimal("10.00"), quantity=100),)))
+    original_get = provider.get_sync
+
+    def get_sync(ts_code: str) -> RealtimeQuote:
+        quote = original_get(ts_code)
+        quote_fetched.set()
+        return quote
+
+    monkeypatch.setattr(provider, "get_sync", get_sync)
+    monkeypatch.setattr(tasks, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        tasks,
+        "_calendar",
+        lambda: FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+    )
+    monkeypatch.setattr(tasks, "TushareRealtimeQuoteProvider", lambda: provider)
+
+    with factory() as blocker:
+        blocker.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"paper-match:{order_id}"},
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                _run_match,
+                factory,
+                order_id,
+                NOW.isoformat(),
+                1,
+            )
+            assert quote_fetched.wait(timeout=5)
+            clock["now"] = NOW + timedelta(hours=2)
+            blocker.commit()
+            outcome, result = future.result(timeout=10)
+
+    assert outcome == "ok"
+    assert result == {"fill_ids": [], "matched_quantity": 0}
+    with factory() as session:
+        order = session.get(PaperOrder, order_id)
+        account = session.get(PaperAccount, account_id)
+        assert order.status is OrderStatus.OPEN
+        assert account.available_cash == Decimal("98989.00")
+        assert account.frozen_cash == Decimal("1011.00")
+        assert session.query(PaperFill).filter_by(order_id=order_id).count() == 0
+        assert session.query(PaperMatchPass).filter_by(order_id=order_id).count() == 0
+        assert session.query(PaperCashLedger).filter_by(order_id=order_id).count() == 0
+        assert session.query(PaperHoldingLot).filter_by(account_id=account_id).count() == 0
+        assert session.query(Trade).filter_by(paper_account_id=account_id).count() == 0
+        assert session.query(Position).filter_by(paper_account_id=account_id).count() == 0
+
+
+def test_worker_waiting_for_lock_rechecks_quote_freshness(
+    pg_test_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    with factory() as setup:
+        order = _open_order(setup, quantity=100)
+        setup.commit()
+        order_id = cast(uuid.UUID, order.id)
+
+    clock = {"now": NOW}
+    quote_fetched = Event()
+    provider = _Provider(_quote(asks=(QuoteLevel(price=Decimal("10.00"), quantity=100),)))
+    original_get = provider.get_sync
+
+    def get_sync(ts_code: str) -> RealtimeQuote:
+        quote = original_get(ts_code)
+        quote_fetched.set()
+        return quote
+
+    monkeypatch.setattr(provider, "get_sync", get_sync)
+    monkeypatch.setattr(tasks, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        tasks,
+        "_calendar",
+        lambda: FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+    )
+    monkeypatch.setattr(tasks, "TushareRealtimeQuoteProvider", lambda: provider)
+
+    with factory() as blocker:
+        blocker.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"paper-match:{order_id}"},
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                _run_match,
+                factory,
+                order_id,
+                NOW.isoformat(),
+                1,
+            )
+            assert quote_fetched.wait(timeout=5)
+            clock["now"] = NOW + timedelta(seconds=16)
+            blocker.commit()
+            outcome, result = future.result(timeout=10)
+
+    assert (outcome, result) == ("error", "stale_quote")
+    with factory() as session:
+        assert session.query(PaperFill).filter_by(order_id=order_id).count() == 0
+        assert session.query(PaperMatchPass).filter_by(order_id=order_id).count() == 0
+
+
+def test_worker_waiting_for_lock_rechecks_order_expiry(
+    pg_test_engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.tasks.paper_trading as tasks
+
+    factory = sessionmaker(bind=pg_test_engine, expire_on_commit=False)
+    with factory() as setup:
+        order = _open_order(setup, quantity=100)
+        order.expires_at = NOW + timedelta(seconds=5)
+        setup.commit()
+        order_id = cast(uuid.UUID, order.id)
+        account_id = cast(uuid.UUID, order.account_id)
+
+    clock = {"now": NOW}
+    quote_fetched = Event()
+    provider = _Provider(_quote(asks=(QuoteLevel(price=Decimal("10.00"), quantity=100),)))
+    original_get = provider.get_sync
+
+    def get_sync(ts_code: str) -> RealtimeQuote:
+        quote = original_get(ts_code)
+        quote_fetched.set()
+        return quote
+
+    monkeypatch.setattr(provider, "get_sync", get_sync)
+    monkeypatch.setattr(tasks, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        tasks,
+        "_calendar",
+        lambda: FixedTradingCalendar({date(2026, 7, 20), date(2026, 7, 21)}),
+    )
+    monkeypatch.setattr(tasks, "TushareRealtimeQuoteProvider", lambda: provider)
+
+    with factory() as blocker:
+        blocker.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"paper-match:{order_id}"},
+        )
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(
+                _run_match,
+                factory,
+                order_id,
+                NOW.isoformat(),
+                1,
+            )
+            assert quote_fetched.wait(timeout=5)
+            clock["now"] = NOW + timedelta(seconds=6)
+            blocker.commit()
+            outcome, result = future.result(timeout=10)
+
+    assert outcome == "ok"
+    assert result == {"fill_ids": [], "matched_quantity": 0}
+    with factory() as session:
+        order = session.get(PaperOrder, order_id)
+        account = session.get(PaperAccount, account_id)
+        assert order.status is OrderStatus.EXPIRED
+        assert order.completed_at == NOW + timedelta(seconds=6)
+        assert account.available_cash == Decimal("100000.00")
+        assert account.frozen_cash == Decimal("0.00")
+        assert session.query(PaperFill).filter_by(order_id=order_id).count() == 0
+        assert session.query(PaperMatchPass).filter_by(order_id=order_id).count() == 0
+        assert (
+            session.query(PaperCashLedger)
+            .filter_by(order_id=order_id, kind="reservation_release")
+            .count()
+            == 1
+        )
+        assert session.query(PaperHoldingLot).filter_by(account_id=account_id).count() == 0
+        assert session.query(Trade).filter_by(paper_account_id=account_id).count() == 0
+        assert session.query(Position).filter_by(paper_account_id=account_id).count() == 0
 
 
 def test_stale_quote_rolls_back_without_fill(

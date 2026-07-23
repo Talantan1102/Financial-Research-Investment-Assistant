@@ -213,17 +213,23 @@ def _match_order_in_session(
         if not _include_replay_marker:
             existing.pop("idempotent_replay", None)
         return existing
-    session.refresh(order)
+    session.refresh(order, with_for_update=True)
+    lock_now = _now()
     if order.status not in {OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}:
+        return {"fill_ids": [], "matched_quantity": 0}
+    if order.expires_at <= lock_now:
+        _order_service(session, now=lambda: lock_now).expire_open_orders(at=lock_now)
+        return {"fill_ids": [], "matched_quantity": 0}
+    if clock.phase(lock_now) not in {MarketPhase.MORNING, MarketPhase.AFTERNOON}:
         return {"fill_ids": [], "matched_quantity": 0}
     rules = RuleBook.from_builtin_fixture().resolve(
         ts_code=cast(str, order.ts_code),
         board=_board(cast(str, order.ts_code)),
         risk_warning=cast(str, order.name).upper().startswith(("ST", "*ST")),
         side=order.side.value,
-        on=now.astimezone(SHANGHAI).date(),
+        on=lock_now.astimezone(SHANGHAI).date(),
     )
-    assert_fresh_quote(quote, now, rules.quote_freshness_seconds)
+    assert_fresh_quote(quote, lock_now, rules.quote_freshness_seconds)
     source = quote.source.strip()
     if not source or len(source) > 64:
         raise PaperTradingError("invalid_match_evidence", "quote source is invalid")
@@ -281,7 +287,7 @@ def _match_order_in_session(
     settlement = PaperSettlementService(
         session,
         calendar=calendar,
-        now=lambda: now,
+        now=lambda: lock_now,
         evidence_provider=evidence_provider,
     )
     fills = [
