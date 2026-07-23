@@ -51,7 +51,10 @@ from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
 from app.chatloop.subagent import DispatchSubagentsTool, SubagentFactory
 from app.chatloop.system_prompt import CHAT_SYSTEM_PROMPT
 from app.chatloop.tool_hub import EmitFn, ToolHub
-from app.chatloop.tool_runtime_policy import production_visible_capabilities
+from app.chatloop.tool_runtime_policy import (
+    authorize_approved_paper_write,
+    production_visible_capabilities,
+)
 from app.memory.injection_classifier import is_prompt_injection
 from app.services.subagent_audit import SubagentAuditRepo
 from app.services.tool_result_cache import ToolResultCache
@@ -237,6 +240,7 @@ def build_turn_components(
         cache=singletons.cache,
         seq_counter=seq_counter,
         trace=singletons.trace,
+        authorization_callback=authorize_approved_paper_write,
         visibility_resolver=production_visible_capabilities,
     )
     hub.register_registry(singletons.registry)

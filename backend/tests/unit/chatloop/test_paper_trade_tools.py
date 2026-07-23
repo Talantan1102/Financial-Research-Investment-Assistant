@@ -13,8 +13,10 @@ from app.chatloop.paper_trade_schemas import (
 )
 from app.chatloop.paper_trade_tools import PlacePaperOrderTool
 from app.chatloop.state import ChatLoopState
-from app.chatloop.tool_runtime_policy import TOOL_RISK_METADATA
+from app.chatloop.tool_hub import ToolHub
+from app.chatloop.tool_runtime_policy import TOOL_RISK_METADATA, authorize_approved_paper_write
 from app.runtime.models import ExecutionContext, RiskLevel
+from app.services.llm_step import StepToolCall
 from pydantic import ValidationError
 
 
@@ -144,3 +146,86 @@ async def test_place_fails_closed_without_approved_input() -> None:
     )
     with pytest.raises(RuntimeError, match="approved input"):
         await tool.run_with_context(args, state, context)
+
+
+def _place_call(call_id: str, arguments: dict[str, object]) -> StepToolCall:
+    import json
+
+    return StepToolCall(
+        id=call_id,
+        name="place_paper_order",
+        arguments=json.dumps(arguments),
+    )
+
+
+@pytest.mark.asyncio
+async def test_real_tool_hub_dispatch_allows_only_matching_approved_call() -> None:
+    backend = _Backend()
+    hub = ToolHub(
+        progressive=False,
+        authorization_callback=authorize_approved_paper_write,
+        visibility_resolver=lambda _state: frozenset({"place_paper_order"}),
+    )
+    hub.register_inprocess([PlacePaperOrderTool(backend)])
+    user_id, run_id = uuid4(), uuid4()
+    original = {
+        "side": "buy",
+        "ts_code": "600519.SH",
+        "name": "贵州茅台",
+        "quantity": 100,
+        "order_type": "limit",
+        "limit_price": "1500",
+    }
+    effective = {**original, "quantity": 200}
+    state = ChatLoopState(
+        user_id=str(user_id),
+        session_id="session",
+        request_id=str(run_id),
+        messages=[],
+        approved_inputs={"approved-call": ApprovedInput(original=original, effective=effective)},
+    )
+
+    [result] = await hub.dispatch([_place_call("approved-call", effective)], state)
+
+    assert result.success is True
+    assert backend.call is not None
+    assert backend.call["confirmed"].quantity == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("approved_id", [None, "other-call"])
+async def test_real_tool_hub_dispatch_denies_missing_or_cross_call_approval(
+    approved_id: str | None,
+) -> None:
+    backend = _Backend()
+    hub = ToolHub(
+        progressive=False,
+        authorization_callback=authorize_approved_paper_write,
+        visibility_resolver=lambda _state: frozenset({"place_paper_order"}),
+    )
+    hub.register_inprocess([PlacePaperOrderTool(backend)])
+    user_id, run_id = uuid4(), uuid4()
+    arguments = {
+        "side": "buy",
+        "ts_code": "600519.SH",
+        "name": "贵州茅台",
+        "quantity": 100,
+        "order_type": "market",
+    }
+    approvals = (
+        {}
+        if approved_id is None
+        else {approved_id: ApprovedInput(original=arguments, effective=arguments)}
+    )
+    state = ChatLoopState(
+        user_id=str(user_id),
+        session_id="session",
+        request_id=str(run_id),
+        messages=[],
+        approved_inputs=approvals,
+    )
+
+    [result] = await hub.dispatch([_place_call("attempt-call", arguments)], state)
+
+    assert result.success is False
+    assert backend.call is None

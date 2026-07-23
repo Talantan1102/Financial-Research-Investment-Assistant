@@ -107,20 +107,32 @@ def _prepare(service: PaperOrderService, user_id: uuid.UUID, **changes: object) 
 
 
 def test_execute_approved_order_is_one_transaction_idempotent_and_keeps_provenance(
-    db_session: Session, user: User
+    db_session: Session, user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user_id = cast(uuid.UUID, user.id)
     PaperAccountService(db_session).get_or_create(user_id=user_id)
     service = _service(db_session, FixedQuoteProvider(_quote()))
-    draft = _draft(
-        name=_quote().name, order_type="market", limit_price=None, quantity=200
-    )
+    draft = _draft(name=_quote().name, order_type="market", limit_price=None, quantity=200)
     run_id = uuid.uuid4()
     original = {
         **draft.model_dump(mode="json"),
         "quantity": 100,
     }
     edits = {"quantity": {"before": 100, "after": 200}}
+    monkeypatch.setattr(
+        service,
+        "prepare_order",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approved execution must not prepare a pending order")
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "confirm",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approved execution must not use legacy confirmation")
+        ),
+    )
 
     first = service.execute_approved_order(
         user_id=user_id,
@@ -144,14 +156,55 @@ def test_execute_approved_order_is_one_transaction_idempotent_and_keeps_provenan
     assert replay.id == first.id
     assert first.source_session_id == str(run_id)
     assert first.source_message_id == "call-1"
+    assert first.source_run_id == run_id
+    assert first.source_tool_call_id == "call-1"
     assert first.original_proposal == original
     assert first.user_edits == edits
     assert first.status is OrderStatus.OPEN
-    assert db_session.scalar(
-        select(func.count()).select_from(PaperOrder).where(
-            PaperOrder.client_request_id == f"{run_id}:call-1"
+    assert (
+        db_session.scalar(
+            select(func.count())
+            .select_from(PaperOrder)
+            .where(PaperOrder.client_request_id == f"{run_id}:call-1")
         )
-    ) == 1
+        == 1
+    )
+    with pytest.raises(PaperTradingError) as conflict:
+        service.execute_approved_order(
+            user_id=user_id,
+            client_request_id=f"{run_id}:call-1",
+            confirmed=draft,
+            original_proposal={**original, "quantity": 50},
+            user_edits=edits,
+            source_run_id=run_id,
+            source_tool_call_id="call-1",
+        )
+    assert conflict.value.code == "confirmation_idempotency_conflict"
+
+
+def test_execute_approved_order_validation_failure_leaves_no_pending_order(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    PaperAccountService(db_session).get_or_create(user_id=user_id)
+    service = _service(db_session, FixedQuoteProvider(_quote()))
+    draft = _draft(
+        name=_quote().name,
+        order_type="market",
+        limit_price=None,
+        quantity=1_000_000,
+    )
+    with pytest.raises(PaperTradingError):
+        service.execute_approved_order(
+            user_id=user_id,
+            client_request_id=f"{uuid.uuid4()}:call-fail",
+            confirmed=draft,
+            original_proposal=draft.model_dump(mode="json"),
+            user_edits={},
+            source_run_id=uuid.uuid4(),
+            source_tool_call_id="call-fail",
+        )
+    assert db_session.scalar(select(func.count()).select_from(PaperOrder)) == 0
 
 
 def test_confirm_is_idempotent_and_freezes_maximum_buy_exposure_once(

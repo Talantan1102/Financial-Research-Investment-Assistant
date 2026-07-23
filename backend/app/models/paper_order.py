@@ -95,6 +95,8 @@ class PaperOrder(Base):
     client_request_id = Column(String(128), nullable=True)
     source_session_id = Column(String(64), nullable=False)
     source_message_id = Column(String(64), nullable=False)
+    source_run_id = Column(UUID(as_uuid=True), nullable=True)
+    source_tool_call_id = Column(String(128), nullable=True)
     proposal_fingerprint = Column(String(64), nullable=False)
     ts_code = Column(String(16), nullable=False, index=True)
     name = Column(String(64), nullable=False)
@@ -156,6 +158,11 @@ class PaperOrder(Base):
         CheckConstraint(
             "btrim(source_session_id) <> '' AND btrim(source_message_id) <> ''",
             name="ck_paper_orders_source_ids_nonblank",
+        ),
+        CheckConstraint(
+            "(source_run_id IS NULL AND source_tool_call_id IS NULL) OR "
+            "(source_run_id IS NOT NULL AND btrim(source_tool_call_id) <> '')",
+            name="ck_paper_orders_agent_source_bundle",
         ),
         CheckConstraint(
             "proposal_fingerprint ~ '^[0-9a-f]{64}$'",
@@ -262,6 +269,41 @@ class PaperDispatchRecoveryState(Base):
             "failure_version >= 0 AND recovered_version >= 0 "
             "AND recovered_version <= failure_version",
             name="ck_paper_dispatch_recovery_version_range",
+        ),
+    )
+
+
+class PaperActionAudit(Base):
+    """Idempotency and provenance fact for approved cancel/reset tool calls."""
+
+    __tablename__ = "paper_action_audits"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    action = Column(String(16), nullable=False)
+    client_request_id = Column(String(128), nullable=False)
+    resource_id = Column(UUID(as_uuid=True), nullable=False)
+    original_proposal = Column(JSONB(none_as_null=True), nullable=False)
+    effective_payload = Column(JSONB(none_as_null=True), nullable=False)
+    user_edits = Column(JSONB(none_as_null=True), nullable=False)
+    source_run_id = Column(UUID(as_uuid=True), nullable=False)
+    source_tool_call_id = Column(String(128), nullable=False)
+    result_json = Column(JSONB(none_as_null=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "client_request_id",
+            name="uq_paper_action_user_client_request",
+        ),
+        CheckConstraint(
+            "action IN ('cancel', 'reset')",
+            name="ck_paper_action_supported",
+        ),
+        CheckConstraint(
+            "btrim(client_request_id) <> '' AND btrim(source_tool_call_id) <> ''",
+            name="ck_paper_action_source_nonblank",
         ),
     )
 

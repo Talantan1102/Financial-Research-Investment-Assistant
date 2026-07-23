@@ -14,6 +14,8 @@ class _Backend:
 
     def manage(self, **kwargs: object) -> dict[str, object]:
         self.call = kwargs
+        if kwargs["action"] == "list":
+            return {"items": [{"ts_code": "600519.SH", "monitoring_enabled": False}]}
         return {"removed": False, "monitoring_enabled": False}
 
 
@@ -43,4 +45,35 @@ async def test_watchlist_executes_directly_with_state_identity_and_audit_source(
         "changes": {},
         "source_session_id": "session-9",
         "source_tool_call_id": "watch-call",
+    }
+
+
+@pytest.mark.asyncio
+async def test_watchlist_list_is_read_only_and_user_scoped() -> None:
+    backend = _Backend()
+    tool = ManageWatchlistTool(backend)
+    user_id = uuid4()
+    state = ChatLoopState(
+        user_id=str(user_id), session_id="session", request_id=str(uuid4()), messages=[]
+    )
+    context = ExecutionContext(
+        request_id=state.request_id,
+        turn_id="turn",
+        task_id="list-call",
+        user_id=str(user_id),
+    )
+
+    result = await tool.run_with_context(ManageWatchlistArgs(action="list"), state, context)
+
+    assert result["items"][0]["ts_code"] == "600519.SH"
+    assert backend.call == {
+        "user_id": user_id,
+        "action": "list",
+        "ts_code": None,
+        "name": None,
+        "note": None,
+        "monitoring_enabled": False,
+        "changes": {},
+        "source_session_id": "session",
+        "source_tool_call_id": "list-call",
     }

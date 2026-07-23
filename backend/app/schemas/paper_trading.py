@@ -34,6 +34,8 @@ class PaperAccountRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    source_run_id: UUID | None = None
+    source_tool_call_id: str | None = None
     generation: int
     initial_cash: Decimal
     available_cash: Decimal

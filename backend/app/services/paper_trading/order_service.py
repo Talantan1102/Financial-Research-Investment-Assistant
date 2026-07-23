@@ -20,6 +20,7 @@ from app.models.paper_order import (
     OrderSide,
     OrderStatus,
     OrderType,
+    PaperActionAudit,
     PaperFill,
     PaperLotReservation,
     PaperMatchPass,
@@ -82,9 +83,7 @@ class PaperOrderService:
             quote=quote,
             now=now,
         )
-        return OrderDraftPreview.model_validate(
-            preview.model_dump(exclude={"order_id"})
-        )
+        return OrderDraftPreview.model_validate(preview.model_dump(exclude={"order_id"}))
 
     def execute_approved_order(
         self,
@@ -98,37 +97,150 @@ class PaperOrderService:
         source_tool_call_id: str,
     ) -> PaperOrder:
         """Persist and activate one approved Run tool call in the caller transaction."""
-        existing = self._by_client_request_id(
-            user_id=user_id, client_request_id=client_request_id
+        user_id = _require_uuid(user_id, field="user_id")
+        client_request_id = _require_text(
+            client_request_id,
+            field="client_request_id",
+            maximum=_MAX_CONFIRMATION_ID_LENGTH,
         )
+        source_tool_call_id = _require_text(
+            source_tool_call_id, field="source_tool_call_id", maximum=64
+        )
+        confirmed = _canonical_draft(confirmed)
+        existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
         if existing is not None:
-            self._validate_confirmation_retry(
+            self._validate_approved_order_retry(
                 existing,
-                order_id=cast(uuid.UUID, existing.id),
                 draft=confirmed,
+                original_proposal=original_proposal,
+                user_edits=user_edits,
+                source_run_id=source_run_id,
+                source_tool_call_id=source_tool_call_id,
             )
             return existing
-        order, _ = self.prepare_order(
-            user_id=user_id,
-            session_id=str(source_run_id),
-            message_id=source_tool_call_id,
-            side=confirmed.side.value,
-            ts_code=confirmed.ts_code,
-            name=confirmed.name,
-            quantity=confirmed.quantity,
-            order_type=confirmed.order_type.value,
-            limit_price=confirmed.limit_price,
-        )
-        order.original_proposal = original_proposal  # type: ignore[assignment]
-        activated = self.confirm(
-            user_id=user_id,
-            order_id=cast(uuid.UUID, order.id),
+
+        quote = self._quote(confirmed.ts_code)
+        self._lock_confirmation_key(user_id=user_id, client_request_id=client_request_id)
+        existing = self._by_client_request_id(user_id=user_id, client_request_id=client_request_id)
+        if existing is not None:
+            self._validate_approved_order_retry(
+                existing,
+                draft=confirmed,
+                original_proposal=original_proposal,
+                user_edits=user_edits,
+                source_run_id=source_run_id,
+                source_tool_call_id=source_tool_call_id,
+            )
+            return existing
+
+        account = self.account_service.get_active(user_id=user_id, for_update=True)
+        self._session.refresh(account, with_for_update=True)
+        now = self._current_time()
+        order_id = uuid.uuid4()
+        preview = self._calculate_preview(
+            account=account,
+            order_id=order_id,
             draft=confirmed,
-            client_request_id=client_request_id,
+            normalize_quote_name=True,
+            quote=quote,
+            now=now,
         )
-        activated.user_edits = user_edits or None  # type: ignore[assignment]
+        final_draft = preview.draft
+        continuous = preview.market_phase in {
+            MarketPhase.MORNING,
+            MarketPhase.AFTERNOON,
+        }
+        if final_draft.order_type is OrderType.MARKET and not continuous:
+            raise PaperTradingError(
+                "market_order_outside_continuous_trading",
+                "market orders require continuous trading",
+            )
+        local_date = now.astimezone(SHANGHAI).date()
+        if final_draft.side is OrderSide.BUY:
+            reserved_cash = self._buy_reserve_amount(
+                account=account, draft=final_draft, quote=quote, on=local_date
+            )
+            reserved_quantity = 0
+        else:
+            reserved_cash = Decimal("0.00")
+            reserved_quantity = final_draft.quantity
+
+        confirmed_rules = self.rulebook.resolve(
+            ts_code=quote.ts_code,
+            board=_board(quote.ts_code),
+            risk_warning=_risk_warning(quote.name),
+            side=final_draft.side.value,
+            on=local_date,
+        )
+        daily_lower, daily_upper = self.rulebook.price_bounds(confirmed_rules, quote.previous_close)
+        payload = final_draft.model_dump(mode="json")
+        order = PaperOrder(
+            id=order_id,
+            account_id=account.id,
+            account_generation=account.generation,
+            user_id=user_id,
+            client_request_id=client_request_id,
+            source_session_id=str(source_run_id),
+            source_message_id=source_tool_call_id,
+            source_run_id=source_run_id,
+            source_tool_call_id=source_tool_call_id,
+            proposal_fingerprint=_proposal_fingerprint(
+                user_id=user_id,
+                session_id=str(source_run_id),
+                message_id=source_tool_call_id,
+                proposal=original_proposal,
+            ),
+            ts_code=final_draft.ts_code,
+            name=preview.quote.name,
+            side=final_draft.side,
+            order_type=final_draft.order_type,
+            quantity=final_draft.quantity,
+            limit_price=final_draft.limit_price,
+            filled_quantity=0,
+            avg_fill_price=None,
+            reserved_cash=reserved_cash,
+            reserved_quantity=reserved_quantity,
+            status=OrderStatus.OPEN if continuous else OrderStatus.QUEUED,
+            original_proposal=original_proposal,
+            confirmed_payload=payload,
+            user_edits=user_edits or None,
+            quote_snapshot={
+                **preview.quote.model_dump(mode="json"),
+                "daily_lower_bound": str(daily_lower),
+                "daily_upper_bound": str(daily_upper),
+                "price_tick": str(confirmed_rules.price_tick),
+            },
+            rules_version=preview.rules_version,
+            reject_code=None,
+            reject_message=None,
+            expires_at=self._expires_at(now),
+            confirmed_at=now,
+            completed_at=None,
+        )
+        self._session.add(order)
         self._session.flush()
-        return activated
+        if final_draft.side is OrderSide.BUY:
+            available = _money(cast(Decimal, account.available_cash))
+            frozen = _money(cast(Decimal, account.frozen_cash))
+            self.account_service.append_ledger(
+                account=account,
+                kind="order_freeze",
+                amount=-reserved_cash,
+                available_after=_money(available - reserved_cash),
+                frozen_after=_money(frozen + reserved_cash),
+                business_key=f"order-freeze:{order_id}",
+                order_id=order_id,
+            )
+        else:
+            actual = self._reserve_sell(
+                account=account, order=order, draft=final_draft, on=local_date
+            )
+            if actual != reserved_quantity:
+                raise PaperTradingError(
+                    "invalid_reservation", "sell reservation does not match order"
+                )
+        self._session.flush()
+        return order
 
     def prepare_order(
         self,
@@ -426,6 +538,54 @@ class PaperOrderService:
         self._session.flush()
         return order
 
+    def cancel_approved(
+        self,
+        *,
+        user_id: uuid.UUID,
+        order_id: uuid.UUID,
+        client_request_id: str,
+        original_proposal: dict[str, object],
+        user_edits: dict[str, object],
+        source_run_id: uuid.UUID,
+        source_tool_call_id: str,
+    ) -> PaperOrder:
+        payload: dict[str, object] = {
+            "order_id": str(_require_uuid(order_id, field="order_id"))
+        }
+        audit = self._approved_action_replay(
+            user_id=user_id,
+            action="cancel",
+            client_request_id=client_request_id,
+            original_proposal=original_proposal,
+            effective_payload=payload,
+            user_edits=user_edits,
+            source_run_id=source_run_id,
+            source_tool_call_id=source_tool_call_id,
+        )
+        if audit is not None:
+            order = self._session.get(PaperOrder, audit.resource_id)
+            if order is None or order.user_id != user_id:
+                raise PaperTradingError("paper_order_not_found", "paper order not found")
+            return order
+        order = self.cancel_confirmed(
+            user_id=user_id,
+            order_id=order_id,
+            confirmation_id=client_request_id,
+        )
+        self._append_action_audit(
+            user_id=user_id,
+            action="cancel",
+            client_request_id=client_request_id,
+            resource_id=cast(uuid.UUID, order.id),
+            original_proposal=original_proposal,
+            effective_payload=payload,
+            user_edits=user_edits,
+            source_run_id=source_run_id,
+            source_tool_call_id=source_tool_call_id,
+            result_json={"order_id": str(order.id), "status": order.status.value},
+        )
+        return order
+
     def expire_open_orders(self, *, at: datetime) -> int:
         at = _require_aware_time(at)
         orders = self._session.scalars(
@@ -530,6 +690,139 @@ class PaperOrderService:
             confirmation_id=confirmation_id,
         )
 
+    def reset_approved(
+        self,
+        *,
+        user_id: uuid.UUID,
+        initial_cash: Decimal,
+        client_request_id: str,
+        original_proposal: dict[str, object],
+        user_edits: dict[str, object],
+        source_run_id: uuid.UUID,
+        source_tool_call_id: str,
+    ) -> PaperAccount:
+        normalized_cash = _money(initial_cash)
+        payload: dict[str, object] = {"initial_cash": f"{normalized_cash:.2f}"}
+        audit = self._approved_action_replay(
+            user_id=user_id,
+            action="reset",
+            client_request_id=client_request_id,
+            original_proposal=original_proposal,
+            effective_payload=payload,
+            user_edits=user_edits,
+            source_run_id=source_run_id,
+            source_tool_call_id=source_tool_call_id,
+        )
+        if audit is not None:
+            account = self._session.get(PaperAccount, audit.resource_id)
+            if account is None or account.user_id != user_id:
+                raise PaperTradingError("paper_account_not_found", "paper account not found")
+            return account
+        account = self.reset_account_confirmed(
+            user_id=user_id,
+            initial_cash=normalized_cash,
+            session_id=str(source_run_id),
+            confirmation_id=source_tool_call_id,
+        )
+        self._append_action_audit(
+            user_id=user_id,
+            action="reset",
+            client_request_id=client_request_id,
+            resource_id=cast(uuid.UUID, account.id),
+            original_proposal=original_proposal,
+            effective_payload=payload,
+            user_edits=user_edits,
+            source_run_id=source_run_id,
+            source_tool_call_id=source_tool_call_id,
+            result_json={
+                "account_id": str(account.id),
+                "generation": int(account.generation),
+            },
+        )
+        return account
+
+    def _approved_action_replay(
+        self,
+        *,
+        user_id: uuid.UUID,
+        action: str,
+        client_request_id: str,
+        original_proposal: dict[str, object],
+        effective_payload: dict[str, object],
+        user_edits: dict[str, object],
+        source_run_id: uuid.UUID,
+        source_tool_call_id: str,
+    ) -> PaperActionAudit | None:
+        user_id = _require_uuid(user_id, field="user_id")
+        client_request_id = _require_text(client_request_id, field="client_request_id", maximum=128)
+        source_tool_call_id = _require_text(
+            source_tool_call_id, field="source_tool_call_id", maximum=128
+        )
+        self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"paper-action:{user_id}:{client_request_id}"},
+        )
+        audit = self._session.scalar(
+            select(PaperActionAudit).where(
+                PaperActionAudit.user_id == user_id,
+                PaperActionAudit.client_request_id == client_request_id,
+            )
+        )
+        if audit is None:
+            return None
+        expected = (
+            action,
+            original_proposal,
+            effective_payload,
+            user_edits,
+            source_run_id,
+            source_tool_call_id,
+        )
+        actual = (
+            audit.action,
+            audit.original_proposal,
+            audit.effective_payload,
+            audit.user_edits,
+            audit.source_run_id,
+            audit.source_tool_call_id,
+        )
+        if actual != expected:
+            raise PaperTradingError(
+                "action_idempotency_conflict",
+                "paper action idempotency key conflicts with the original request",
+            )
+        return audit
+
+    def _append_action_audit(
+        self,
+        *,
+        user_id: uuid.UUID,
+        action: str,
+        client_request_id: str,
+        resource_id: uuid.UUID,
+        original_proposal: dict[str, object],
+        effective_payload: dict[str, object],
+        user_edits: dict[str, object],
+        source_run_id: uuid.UUID,
+        source_tool_call_id: str,
+        result_json: dict[str, object],
+    ) -> None:
+        self._session.add(
+            PaperActionAudit(
+                user_id=user_id,
+                action=action,
+                client_request_id=client_request_id,
+                resource_id=resource_id,
+                original_proposal=original_proposal,
+                effective_payload=effective_payload,
+                user_edits=user_edits,
+                source_run_id=source_run_id,
+                source_tool_call_id=source_tool_call_id,
+                result_json=result_json,
+            )
+        )
+        self._session.flush()
+
     def _active_order_account(self, order: PaperOrder) -> PaperAccount:
         account = self._session.scalar(
             select(PaperAccount)
@@ -631,6 +924,28 @@ class PaperOrderService:
         quote: RealtimeQuote,
         on: date,
     ) -> Decimal:
+        reserve = self._buy_reserve_amount(account=account, draft=draft, quote=quote, on=on)
+        available = _money(cast(Decimal, account.available_cash))
+        frozen = _money(cast(Decimal, account.frozen_cash))
+        self.account_service.append_ledger(
+            account=account,
+            kind="order_freeze",
+            amount=-reserve,
+            available_after=_money(available - reserve),
+            frozen_after=_money(frozen + reserve),
+            business_key=f"order-freeze:{order_id}",
+            order_id=order_id,
+        )
+        return reserve
+
+    def _buy_reserve_amount(
+        self,
+        *,
+        account: PaperAccount,
+        draft: OrderDraft,
+        quote: RealtimeQuote,
+        on: date,
+    ) -> Decimal:
         rules = self.rulebook.resolve(
             ts_code=quote.ts_code,
             board=_board(quote.ts_code),
@@ -653,18 +968,8 @@ class PaperOrderService:
         )
         reserve = _money(maximum_gross + fees.total)
         available = _money(cast(Decimal, account.available_cash))
-        frozen = _money(cast(Decimal, account.frozen_cash))
         if reserve > available:
             raise PaperTradingError("insufficient_cash", "paper account has insufficient cash")
-        self.account_service.append_ledger(
-            account=account,
-            kind="order_freeze",
-            amount=-reserve,
-            available_after=_money(available - reserve),
-            frozen_after=_money(frozen + reserve),
-            business_key=f"order-freeze:{order_id}",
-            order_id=order_id,
-        )
         return reserve
 
     def _reserve_sell(
@@ -744,6 +1049,31 @@ class PaperOrderService:
             raise PaperTradingError(
                 "confirmation_idempotency_conflict",
                 "confirmation key does not match the existing order",
+            )
+
+    @staticmethod
+    def _validate_approved_order_retry(
+        order: PaperOrder,
+        *,
+        draft: OrderDraft,
+        original_proposal: dict[str, object],
+        user_edits: dict[str, object],
+        source_run_id: uuid.UUID,
+        source_tool_call_id: str,
+    ) -> None:
+        requested_payload = draft.model_copy(update={"name": order.name}).model_dump(
+            mode="json"
+        )
+        if (
+            order.confirmed_payload != requested_payload
+            or order.original_proposal != original_proposal
+            or (order.user_edits or {}) != user_edits
+            or order.source_run_id != source_run_id
+            or order.source_tool_call_id != source_tool_call_id
+        ):
+            raise PaperTradingError(
+                "confirmation_idempotency_conflict",
+                "approved order idempotency key conflicts with the original request",
             )
 
     def _lock_confirmation_key(self, *, user_id: uuid.UUID, client_request_id: str) -> None:

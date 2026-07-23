@@ -119,11 +119,7 @@ class SqlPaperTradingBackend:
         from app.schemas.paper_trading import PaperOrderRead
 
         with self._session_factory() as session:
-            order = self._service(session).cancel_confirmed(
-                user_id=kwargs["user_id"],
-                order_id=kwargs["order_id"],
-                confirmation_id=kwargs["client_request_id"],
-            )
+            order = self._service(session).cancel_approved(**kwargs)
             session.commit()
             session.refresh(order)
             return PaperOrderRead.model_validate(order).model_dump(mode="json")
@@ -132,12 +128,7 @@ class SqlPaperTradingBackend:
         from app.schemas.paper_trading import PaperAccountRead
 
         with self._session_factory() as session:
-            account = self._service(session).reset_account_confirmed(
-                user_id=kwargs["user_id"],
-                initial_cash=kwargs["initial_cash"],
-                session_id=str(kwargs["source_run_id"]),
-                confirmation_id=kwargs["source_tool_call_id"],
-            )
+            account = self._service(session).reset_approved(**kwargs)
             session.commit()
             session.refresh(account)
             return PaperAccountRead.model_validate(account).model_dump(mode="json")

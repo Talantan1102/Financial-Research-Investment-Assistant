@@ -19,6 +19,7 @@ from app.models.paper_account import (
 from app.models.paper_order import (
     OrderSide,
     OrderStatus,
+    PaperActionAudit,
     PaperFill,
     PaperLotReservation,
     PaperMatchPass,
@@ -299,6 +300,53 @@ def test_cancel_retry_is_idempotent_and_cross_user_is_hidden(
             confirmation_id="cancel-once",
         )
     assert hidden.value.code == "paper_order_not_found"
+
+
+def test_cancel_approved_persists_provenance_and_rejects_key_reuse(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    service, order, _ = _confirmed_buy(db_session, user_id)
+    run_id = uuid.uuid4()
+    original = {"order_id": str(order.id)}
+    first = service.cancel_approved(
+        user_id=user_id,
+        order_id=cast(uuid.UUID, order.id),
+        client_request_id=f"{run_id}:cancel-call",
+        original_proposal=original,
+        user_edits={},
+        source_run_id=run_id,
+        source_tool_call_id="cancel-call",
+    )
+    replay = service.cancel_approved(
+        user_id=user_id,
+        order_id=cast(uuid.UUID, order.id),
+        client_request_id=f"{run_id}:cancel-call",
+        original_proposal=original,
+        user_edits={},
+        source_run_id=run_id,
+        source_tool_call_id="cancel-call",
+    )
+    assert replay.id == first.id
+    audit = db_session.scalar(
+        select(PaperActionAudit).where(
+            PaperActionAudit.client_request_id == f"{run_id}:cancel-call"
+        )
+    )
+    assert audit is not None
+    assert audit.original_proposal == original
+    assert audit.source_run_id == run_id
+    assert audit.source_tool_call_id == "cancel-call"
+    with pytest.raises(PaperTradingError, match="idempotency"):
+        service.cancel_approved(
+            user_id=user_id,
+            order_id=uuid.uuid4(),
+            client_request_id=f"{run_id}:cancel-call",
+            original_proposal={"order_id": str(uuid.uuid4())},
+            user_edits={},
+            source_run_id=run_id,
+            source_tool_call_id="cancel-call",
+        )
 
 
 def test_cancel_partially_filled_sell_releases_exact_remaining_lot_allocations(
@@ -612,6 +660,39 @@ def test_reset_is_generation_safe_and_idempotent(db_session: Session, user: User
     assert old.status is PaperAccountStatus.ARCHIVED
     assert order.account_generation == 1
     assert order.status is OrderStatus.OPEN
+
+
+def test_reset_approved_persists_effective_payload_and_is_idempotent(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    service, _, _ = _confirmed_buy(db_session, user_id)
+    run_id = uuid.uuid4()
+    first = service.reset_approved(
+        user_id=user_id,
+        initial_cash=Decimal("500000.00"),
+        client_request_id=f"{run_id}:reset-call",
+        original_proposal={"initial_cash": "1000000.00"},
+        user_edits={"initial_cash": {"before": "1000000.00", "after": "500000.00"}},
+        source_run_id=run_id,
+        source_tool_call_id="reset-call",
+    )
+    replay = service.reset_approved(
+        user_id=user_id,
+        initial_cash=Decimal("500000.00"),
+        client_request_id=f"{run_id}:reset-call",
+        original_proposal={"initial_cash": "1000000.00"},
+        user_edits={"initial_cash": {"before": "1000000.00", "after": "500000.00"}},
+        source_run_id=run_id,
+        source_tool_call_id="reset-call",
+    )
+    assert replay.id == first.id
+    audit = db_session.scalar(
+        select(PaperActionAudit).where(PaperActionAudit.client_request_id == f"{run_id}:reset-call")
+    )
+    assert audit is not None
+    assert audit.effective_payload == {"initial_cash": "500000.00"}
+    assert audit.user_edits["initial_cash"]["after"] == "500000.00"
 
 
 def test_reset_retry_returns_original_account_even_when_new_generation_is_matching(

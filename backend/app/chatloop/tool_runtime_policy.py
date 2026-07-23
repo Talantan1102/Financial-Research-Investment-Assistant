@@ -7,6 +7,7 @@ plain ``Tool`` instances inherit the read-only data-tool baseline; unknown
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from app.chatloop.inprocess import InProcessTool
@@ -27,6 +28,37 @@ class ToolRiskMetadata:
 
 
 _READ = ToolRiskMetadata(RiskLevel.LOW, CapabilityType.DATA_TOOL, True, True, max_attempts=2)
+_APPROVED_PAPER_WRITES = frozenset(
+    {"place_paper_order", "cancel_paper_order", "reset_paper_account"}
+)
+
+
+async def authorize_approved_paper_write(request: PermissionRequest) -> bool:
+    """Allow only the exact effective payload bound to this trusted call id."""
+    if request.capability_name not in _APPROVED_PAPER_WRITES:
+        return False
+    approved = request.context.approved_input
+    if approved is None:
+        return False
+    try:
+        requested = json.dumps(
+            request.input,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        effective = json.dumps(
+            dict(approved.effective),
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError):
+        return False
+    return requested == effective
+
 
 TOOL_RISK_METADATA: dict[str, ToolRiskMetadata] = {
     # Structured/public data and retrieval tools.
@@ -196,7 +228,12 @@ class ToolRiskPolicy:
         return source == "interactive_ask" and self._authorization_callback is None
 
 
-__all__ = ["TOOL_RISK_METADATA", "ToolRiskMetadata", "ToolRiskPolicy"]
+__all__ = [
+    "TOOL_RISK_METADATA",
+    "ToolRiskMetadata",
+    "ToolRiskPolicy",
+    "authorize_approved_paper_write",
+]
 
 
 def production_visible_capabilities(_state: object) -> frozenset[str]:

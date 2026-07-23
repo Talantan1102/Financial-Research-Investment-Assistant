@@ -16,20 +16,24 @@ from app.runtime.models import ExecutionContext
 class ManageWatchlistArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["add", "update", "remove"]
-    ts_code: str = Field(pattern=r"^\d{6}\.(?:SH|SZ)$")
+    action: Literal["list", "add", "update", "remove"]
+    ts_code: str | None = Field(default=None, pattern=r"^\d{6}\.(?:SH|SZ)$")
     name: str | None = Field(default=None, min_length=1, max_length=50)
     note: str | None = Field(default=None, max_length=2000)
     monitoring_enabled: bool | None = None
 
     @model_validator(mode="after")
     def validate_action(self) -> ManageWatchlistArgs:
+        if self.action != "list" and self.ts_code is None:
+            raise ValueError(f"{self.action} requires ts_code")
         if self.action == "add" and self.name is None:
             raise ValueError("add requires name")
-        if self.action == "remove" and (
+        if self.action in {"list", "remove"} and (
             self.name is not None or self.note is not None or self.monitoring_enabled is not None
         ):
-            raise ValueError("remove only accepts ts_code")
+            raise ValueError(f"{self.action} does not accept mutation fields")
+        if self.action == "list" and self.ts_code is not None:
+            raise ValueError("list does not accept ts_code")
         return self
 
 
@@ -52,7 +56,15 @@ class SqlWatchlistBackend:
         )
         with self._session_factory() as session:
             service = WatchlistService(session)
-            if action == "add":
+            payload: dict[str, Any]
+            if action == "list":
+                payload = {
+                    "items": [
+                        WatchlistRead.model_validate(item).model_dump(mode="json")
+                        for item in service.list(user_id=kwargs["user_id"])
+                    ]
+                }
+            elif action == "add":
                 result = service.add(
                     user_id=kwargs["user_id"],
                     ts_code=kwargs["ts_code"],
@@ -61,7 +73,7 @@ class SqlWatchlistBackend:
                     monitoring_enabled=kwargs["monitoring_enabled"],
                     source=source,
                 )
-                payload: dict[str, Any] = WatchlistRead.model_validate(result.item).model_dump(
+                payload = WatchlistRead.model_validate(result.item).model_dump(
                     mode="json"
                 )
                 payload["created"] = result.created
@@ -77,13 +89,15 @@ class SqlWatchlistBackend:
                 else:
                     payload = WatchlistRead.model_validate(item).model_dump(mode="json")
                     payload["updated"] = True
-            else:
+            elif action == "remove":
                 removed = service.remove(
                     user_id=kwargs["user_id"],
                     ts_code=kwargs["ts_code"],
                     source=source,
                 )
                 payload = {"removed": removed.removed}
+            else:
+                raise ValueError(f"unsupported watchlist action: {action}")
             session.commit()
             return payload
 
