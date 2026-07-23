@@ -99,6 +99,22 @@ class OrderPreviewRequest(BaseModel):
     draft: OrderDraft
 
 
+class OrderDraftPreview(BaseModel):
+    """Side-effect-free page preview, intentionally without a persisted order id."""
+
+    model_config = ConfigDict(frozen=True)
+
+    draft: OrderDraft
+    quote: RealtimeQuote
+    estimated_gross: Decimal
+    estimated_fees: FeeBreakdown
+    estimated_cash_required: Decimal
+    available_cash: Decimal
+    sellable_quantity: int
+    market_phase: MarketPhase
+    rules_version: str
+
+
 class OrderConfirmRequest(OrderPreviewRequest):
     client_request_id: str = Field(min_length=1, max_length=128)
 
