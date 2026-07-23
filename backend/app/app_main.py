@@ -38,6 +38,7 @@ from app.router.run_observability import router as run_observability_router  # n
 from app.router.run_sessions import router as run_sessions_router  # noqa: E402
 from app.router.runs import router as runs_router  # noqa: E402
 from app.router.tenants import router as tenants_router  # noqa: E402
+from app.router.watchlist_router import router as watchlist_router  # noqa: E402
 from app.scripts.migrate_phase3_execution_schema import (  # noqa: E402
     is_fresh_application_schema_connection,
     verify_run_control_schema_connection,
@@ -382,6 +383,7 @@ app.include_router(monitoring_router)
 app.include_router(reports_router)  # v0.9.x — research reports CRUD
 app.include_router(portfolio_router)  # v1.0 — portfolio data model + onboarding
 app.include_router(paper_trading_router)
+app.include_router(watchlist_router)
 app.include_router(tenants_router)
 app.include_router(runs_router)
 app.include_router(run_sessions_router)

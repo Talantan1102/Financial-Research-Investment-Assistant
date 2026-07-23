@@ -70,6 +70,7 @@ from .run_execution import RunToolExecution, RunUsageRecord
 from .run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
 from .tenant import Tenant, TenantAuditLog, TenantMembership
 from .user import User
+from .watchlist import WatchlistAudit, WatchlistItem
 
 if not _RUN_CONTROL_MINIMAL:
     from .subagent_dispatch import SubagentDispatchRun  # noqa: F401
@@ -104,6 +105,8 @@ __all__ = [
     "PaperFill",
     "PaperLotReservation",
     "PaperMatchPass",
+    "WatchlistItem",
+    "WatchlistAudit",
 ]
 
 if not _RUN_CONTROL_MINIMAL:
