@@ -152,6 +152,32 @@ async def test_server_risk_registry_fails_closed_except_explicit_safe_tools() ->
     assert policy.safe_to_retry("place_order") is False
     assert policy.safe_to_retry("unknown_mcp") is False
     assert policy.safe_to_retry("get_stock_quote") is True
+    production = load_tool_risk_policy({})
+    for name in (
+        "get_paper_account",
+        "list_paper_orders",
+        "get_paper_order",
+        "manage_watchlist",
+    ):
+        assert production.safe_to_retry(name) is True
+    for name in ("place_paper_order", "cancel_paper_order", "reset_paper_account"):
+        assert production.safe_to_retry(name) is False
+
+
+@pytest.mark.asyncio
+async def test_only_paper_writes_are_declared_editable_before_dispatch() -> None:
+    controller = DurableApprovalController(load_tool_risk_policy({}), frozenset())
+    state = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
+    directive = await controller.check(
+        phase="before_tools",
+        state=state,
+        tool_calls=(
+            StepToolCall(id="paper", name="place_paper_order", arguments="{}"),
+            StepToolCall(id="other", name="memory_write", arguments="{}"),
+        ),
+    )
+    assert directive is not None
+    assert directive.request["editable_tool_call_ids"] == ["paper"]
 
 
 @pytest.mark.asyncio

@@ -86,6 +86,50 @@ class PaperOrderService:
             preview.model_dump(exclude={"order_id"})
         )
 
+    def execute_approved_order(
+        self,
+        *,
+        user_id: uuid.UUID,
+        client_request_id: str,
+        confirmed: OrderDraft,
+        original_proposal: dict[str, object],
+        user_edits: dict[str, object],
+        source_run_id: uuid.UUID,
+        source_tool_call_id: str,
+    ) -> PaperOrder:
+        """Persist and activate one approved Run tool call in the caller transaction."""
+        existing = self._by_client_request_id(
+            user_id=user_id, client_request_id=client_request_id
+        )
+        if existing is not None:
+            self._validate_confirmation_retry(
+                existing,
+                order_id=cast(uuid.UUID, existing.id),
+                draft=confirmed,
+            )
+            return existing
+        order, _ = self.prepare_order(
+            user_id=user_id,
+            session_id=str(source_run_id),
+            message_id=source_tool_call_id,
+            side=confirmed.side.value,
+            ts_code=confirmed.ts_code,
+            name=confirmed.name,
+            quantity=confirmed.quantity,
+            order_type=confirmed.order_type.value,
+            limit_price=confirmed.limit_price,
+        )
+        order.original_proposal = original_proposal  # type: ignore[assignment]
+        activated = self.confirm(
+            user_id=user_id,
+            order_id=cast(uuid.UUID, order.id),
+            draft=confirmed,
+            client_request_id=client_request_id,
+        )
+        activated.user_edits = user_edits or None  # type: ignore[assignment]
+        self._session.flush()
+        return activated
+
     def prepare_order(
         self,
         *,

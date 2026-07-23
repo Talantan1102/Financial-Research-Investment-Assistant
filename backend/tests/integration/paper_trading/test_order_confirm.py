@@ -106,6 +106,54 @@ def _prepare(service: PaperOrderService, user_id: uuid.UUID, **changes: object) 
     return order
 
 
+def test_execute_approved_order_is_one_transaction_idempotent_and_keeps_provenance(
+    db_session: Session, user: User
+) -> None:
+    user_id = cast(uuid.UUID, user.id)
+    PaperAccountService(db_session).get_or_create(user_id=user_id)
+    service = _service(db_session, FixedQuoteProvider(_quote()))
+    draft = _draft(
+        name=_quote().name, order_type="market", limit_price=None, quantity=200
+    )
+    run_id = uuid.uuid4()
+    original = {
+        **draft.model_dump(mode="json"),
+        "quantity": 100,
+    }
+    edits = {"quantity": {"before": 100, "after": 200}}
+
+    first = service.execute_approved_order(
+        user_id=user_id,
+        client_request_id=f"{run_id}:call-1",
+        confirmed=draft,
+        original_proposal=original,
+        user_edits=edits,
+        source_run_id=run_id,
+        source_tool_call_id="call-1",
+    )
+    replay = service.execute_approved_order(
+        user_id=user_id,
+        client_request_id=f"{run_id}:call-1",
+        confirmed=draft,
+        original_proposal=original,
+        user_edits=edits,
+        source_run_id=run_id,
+        source_tool_call_id="call-1",
+    )
+
+    assert replay.id == first.id
+    assert first.source_session_id == str(run_id)
+    assert first.source_message_id == "call-1"
+    assert first.original_proposal == original
+    assert first.user_edits == edits
+    assert first.status is OrderStatus.OPEN
+    assert db_session.scalar(
+        select(func.count()).select_from(PaperOrder).where(
+            PaperOrder.client_request_id == f"{run_id}:call-1"
+        )
+    ) == 1
+
+
 def test_confirm_is_idempotent_and_freezes_maximum_buy_exposure_once(
     db_session: Session, user: User
 ) -> None:

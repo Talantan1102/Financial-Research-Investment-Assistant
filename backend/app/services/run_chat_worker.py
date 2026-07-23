@@ -187,7 +187,20 @@ class ToolRiskPolicy:
 
 
 SAFE_IDEMPOTENT_TOOL_CATALOG_V1 = frozenset(
-    {"search_tools", "memory_search", "read_cached_result", "get_portfolio_positions", "approval"}
+    {
+        "search_tools",
+        "memory_search",
+        "read_cached_result",
+        "get_portfolio_positions",
+        "approval",
+        "get_paper_account",
+        "list_paper_orders",
+        "get_paper_order",
+        "manage_watchlist",
+    }
+)
+EDITABLE_PAPER_WRITE_TOOLS = frozenset(
+    {"place_paper_order", "cancel_paper_order", "reset_paper_account"}
 )
 
 
@@ -274,7 +287,10 @@ class DurableApprovalController:
                 "tool_calls": [
                     {"id": call.id, "name": call.name, "arguments": call.arguments}
                     for call in risky
-                ]
+                ],
+                "editable_tool_call_ids": [
+                    call.id for call in risky if call.name in EDITABLE_PAPER_WRITE_TOOLS
+                ],
             },
         )
 

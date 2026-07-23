@@ -26,11 +26,25 @@ from datetime import date
 from typing import Any
 from uuid import UUID
 
-from app.chatloop.code_interpreter_tool import CodeInterpreterTool
 from app.chatloop.control_tools import OfferDeepResearchTool, ReadCachedResultTool
 from app.chatloop.events import SeqCounter
 from app.chatloop.gates import GateConfig
+from app.chatloop.manage_watchlist_tool import ManageWatchlistTool, SqlWatchlistBackend
 from app.chatloop.memory_tools import MemorySearchTool, MemoryWriteTool
+from app.chatloop.paper_trade_schemas import (
+    CancelPaperOrderArgs,
+    PlacePaperOrderArgs,
+    ResetPaperAccountArgs,
+)
+from app.chatloop.paper_trade_tools import (
+    CancelPaperOrderTool,
+    GetPaperAccountTool,
+    GetPaperOrderTool,
+    ListPaperOrdersTool,
+    PlacePaperOrderTool,
+    ResetPaperAccountTool,
+    SqlPaperTradingBackend,
+)
 from app.chatloop.portfolio_tool import GetPortfolioPositionsTool
 from app.chatloop.skill_listing import build_skill_listing
 from app.chatloop.skill_tools import LoadSkillTool, RunSkillScriptTool
@@ -41,9 +55,17 @@ from app.chatloop.tool_runtime_policy import production_visible_capabilities
 from app.memory.injection_classifier import is_prompt_injection
 from app.services.subagent_audit import SubagentAuditRepo
 from app.services.tool_result_cache import ToolResultCache
-from app.skills.executor_backend import SkillExecutorBackend
 
 logger = logging.getLogger(__name__)
+
+
+def paper_approval_schemas() -> dict[str, type[Any]]:
+    """The only model arguments a Run resume may edit."""
+    return {
+        "place_paper_order": PlacePaperOrderArgs,
+        "cancel_paper_order": CancelPaperOrderArgs,
+        "reset_paper_account": ResetPaperAccountArgs,
+    }
 
 # ---------------------------------------------------------------------------
 # 模块级常量:chat 技能目录(供测试及 _live_deps 等导入,避免路径重复声明)
@@ -238,6 +260,12 @@ def build_turn_components(
         audit_repo=SubagentAuditRepo(),
     )
 
+    from app.chatloop.code_interpreter_tool import CodeInterpreterTool
+    from app.core.database import SessionLocal
+    from app.skills.executor_backend import SkillExecutorBackend
+
+    paper_backend = SqlPaperTradingBackend(SessionLocal)
+    watchlist_backend = SqlWatchlistBackend(SessionLocal)
     hub.register_inprocess(
         [
             MemorySearchTool(memory=singletons.memory),
@@ -251,6 +279,13 @@ def build_turn_components(
             ),
             DispatchSubagentsTool(factory=subagent_factory),
             GetPortfolioPositionsTool(session_factory=singletons.session_factory),
+            GetPaperAccountTool(paper_backend),
+            ListPaperOrdersTool(paper_backend),
+            GetPaperOrderTool(paper_backend),
+            PlacePaperOrderTool(paper_backend),
+            CancelPaperOrderTool(paper_backend),
+            ResetPaperAccountTool(paper_backend),
+            ManageWatchlistTool(watchlist_backend),
         ]
     )
 
