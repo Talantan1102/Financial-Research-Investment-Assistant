@@ -52,6 +52,12 @@ else:
 from .run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
 from .run_execution import RunToolExecution, RunUsageRecord
 from .run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
+from .paper_account import (
+    PaperAccount,
+    PaperAccountResetAudit,
+    PaperCashLedger,
+    PaperHoldingLot,
+)
 from .tenant import Tenant, TenantAuditLog, TenantMembership
 from .user import User
 
@@ -76,6 +82,10 @@ __all__ = [
     "RunWorker",
     "RunTenantScheduling",
     "RunOutbox",
+    "PaperAccount",
+    "PaperAccountResetAudit",
+    "PaperCashLedger",
+    "PaperHoldingLot",
 ]
 
 if not _RUN_CONTROL_MINIMAL:
