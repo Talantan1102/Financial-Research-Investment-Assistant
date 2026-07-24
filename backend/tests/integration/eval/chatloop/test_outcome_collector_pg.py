@@ -13,7 +13,7 @@ from app.models.watchlist import WatchlistAudit, WatchlistItem
 from app.services.watchlist_service import ChangeSource, WatchlistService
 from eval.chatloop.scenario import Scenario, load_scenarios
 from eval.chatloop.sut_runner import SqlOutcomeCollector
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 PAPER_GOLDEN = Path("backend/eval/chatloop/golden/paper_trading.jsonl")
@@ -209,10 +209,14 @@ async def test_capture_uses_one_repeatable_read_snapshot(
     )
     await asyncio.wait_for(first_query_done.wait(), timeout=5)
     async with pg_async_session_factory() as session, session.begin():
-        await session.execute(
-            update(PaperAccount)
-            .where(PaperAccount.user_id == user_id, PaperAccount.status == "active")
-            .values(available_cash=Decimal("9000000.00"))
+        session.add(
+            WatchlistItem(
+                user_id=user_id,
+                ts_code="000858.SZ",
+                name="五粮液",
+                note="committed-after-first-query",
+                monitoring_enabled=False,
+            )
         )
     allow_capture_to_continue.set()
     first_snapshot = await asyncio.wait_for(capture_task, timeout=5)
@@ -227,5 +231,12 @@ async def test_capture_uses_one_repeatable_read_snapshot(
         scenario=scenario,
     )
 
-    assert first_snapshot["available_cash"] == "10000000"
-    assert second_snapshot["available_cash"] == "9000000"
+    assert first_snapshot["watchlist"]["count"] == 0
+    assert first_snapshot["watchlist"]["exists"] is False
+    assert second_snapshot["watchlist"] == {
+        "count": 1,
+        "exists": True,
+        "ts_code": "000858.SZ",
+        "note": "committed-after-first-query",
+        "monitoring_enabled": False,
+    }
