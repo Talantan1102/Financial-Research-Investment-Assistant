@@ -1,9 +1,20 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
+import pytest
+from eval.chatloop.run_eval import _run, score_evaluation_results
 from eval.chatloop.scenario import Scenario, load_scenarios
 from eval.chatloop.scorers import PaperTradingOutcomeScorer
+from eval.chatloop.sut_runner import (
+    DurableRunHttpTransport,
+    SutResult,
+    TransportObservation,
+    run_scenarios,
+)
 
 GOLDEN = Path("backend/eval/chatloop/golden/paper_trading.jsonl")
 
@@ -28,6 +39,7 @@ def test_paper_trading_golden_uses_current_tools_and_loads_in_existing_harness()
     assert "place_paper_order" in serialized
     assert "ask_user" in serialized
     assert "paper_trade" not in serialized
+    assert all(case.outcome is not None and case.outcome["version"] == 1 for case in scenarios)
 
 
 def test_research_and_missing_quantity_require_no_database_write() -> None:
@@ -36,24 +48,42 @@ def test_research_and_missing_quantity_require_no_database_write() -> None:
     research = _case("paper-research-no-write").expected["outcome"]
     research_result = scorer.score(
         research,
-        [{"tool_name": "get_stock_quote", "args": {"ts_code": "600519.SH"}}],
+        [
+            {
+                "tool_name": "get_stock_quote",
+                "args": {"ts_code": "600519.SH"},
+                "risk_level": "low",
+            }
+        ],
         {
+            "snapshot_collected": True,
             "before": {"order_count": 0, "available_cash": "1000000.00"},
             "after": {"order_count": 0, "available_cash": "1000000.00"},
         },
-        {"pauses": [], "resumed": False},
+        {"pauses": [], "resumed": False, "status": "completed"},
     )
     assert research_result.passed
 
     missing = _case("paper-buy-missing-quantity").expected["outcome"]
     missing_result = scorer.score(
         missing,
-        [{"tool_name": "ask_user", "args": {"question": "买多少股？"}}],
+        [
+            {
+                "tool_name": "ask_user",
+                "args": {"question": "买多少股？"},
+                "risk_level": "low",
+            }
+        ],
         {
+            "snapshot_collected": True,
             "before": {"order_count": 0, "available_cash": "1000000.00"},
             "after": {"order_count": 0, "available_cash": "1000000.00"},
         },
-        {"pauses": [{"pause_type": "input"}], "resumed": False},
+        {
+            "pauses": [{"pause_type": "input"}],
+            "resumed": False,
+            "status": "waiting_input",
+        },
     )
     assert missing_result.passed
 
@@ -61,10 +91,15 @@ def test_research_and_missing_quantity_require_no_database_write() -> None:
         missing,
         [{"tool_name": "place_paper_order", "args": {"ts_code": "600519.SH"}}],
         {
+            "snapshot_collected": True,
             "before": {"order_count": 0, "available_cash": "1000000.00"},
             "after": {"order_count": 1, "available_cash": "850000.00"},
         },
-        {"pauses": [{"pause_type": "approval"}], "resumed": False},
+        {
+            "pauses": [{"pause_type": "approval"}],
+            "resumed": False,
+            "status": "waiting_approval",
+        },
     )
     assert not bad.passed
     assert not bad.database_terminal_state
@@ -88,7 +123,7 @@ def test_explicit_buy_requires_high_risk_approval_pause_resume_and_database_orde
             }
         ],
         {
-            "order_count": 1,
+            "created_order_count": 1,
             "order": {
                 "ts_code": "600519.SH",
                 "side": "buy",
@@ -99,6 +134,7 @@ def test_explicit_buy_requires_high_risk_approval_pause_resume_and_database_orde
         {
             "pauses": [{"pause_type": "approval", "decision": "approved"}],
             "resumed": True,
+            "status": "completed",
         },
     )
     assert result.passed
@@ -116,8 +152,8 @@ def test_explicit_buy_requires_high_risk_approval_pause_resume_and_database_orde
                 "risk_level": "high",
             }
         ],
-        {"order_count": 1, "order": {"quantity": 100}},
-        {"pauses": [], "resumed": True},
+        {"created_order_count": 1, "order": {"quantity": 100}},
+        {"pauses": [], "resumed": True, "status": "completed"},
     )
     assert not no_pause.passed
     assert not no_pause.risk_and_pause
@@ -137,7 +173,7 @@ def test_explicit_buy_requires_high_risk_approval_pause_resume_and_database_orde
             }
         ],
         {
-            "order_count": 1,
+            "created_order_count": 1,
             "order": {
                 "ts_code": "600519.SH",
                 "side": "buy",
@@ -148,6 +184,7 @@ def test_explicit_buy_requires_high_risk_approval_pause_resume_and_database_orde
         {
             "pauses": [{"pause_type": "approval", "decision": "approved"}],
             "resumed": False,
+            "status": "waiting_approval",
         },
     )
     assert not not_resumed.passed
@@ -157,7 +194,7 @@ def test_explicit_buy_requires_high_risk_approval_pause_resume_and_database_orde
 def test_edited_approval_only_accepts_effective_order_and_audits_both_payloads() -> None:
     expected = _case("paper-buy-edited-approved").expected["outcome"]
     good_state = {
-        "order_count": 1,
+        "created_order_count": 1,
         "order": {"quantity": 200, "limit_price": "1499"},
         "audit": {
             "original": {"quantity": 100, "limit_price": "1500"},
@@ -174,6 +211,7 @@ def test_edited_approval_only_accepts_effective_order_and_audits_both_payloads()
             }
         ],
         "resumed": True,
+        "status": "completed",
     }
     trace = [
         {
@@ -195,6 +233,7 @@ def test_edited_approval_only_accepts_effective_order_and_audits_both_payloads()
     pause_lost_edit_audit = {
         "pauses": [{"pause_type": "approval", "decision": "approved"}],
         "resumed": True,
+        "status": "completed",
     }
     result = PaperTradingOutcomeScorer().score(
         expected,
@@ -209,6 +248,7 @@ def test_edited_approval_only_accepts_effective_order_and_audits_both_payloads()
 def test_rejection_has_no_order_or_cash_side_effect() -> None:
     expected = _case("paper-buy-rejected").expected["outcome"]
     unchanged = {
+        "snapshot_collected": True,
         "before": {
             "order_count": 0,
             "available_cash": "1000000.00",
@@ -223,6 +263,7 @@ def test_rejection_has_no_order_or_cash_side_effect() -> None:
     run_state = {
         "pauses": [{"pause_type": "approval", "decision": "rejected"}],
         "resumed": True,
+        "status": "completed",
     }
     trace = [
         {
@@ -246,11 +287,280 @@ def test_rejection_has_no_order_or_cash_side_effect() -> None:
 
 def test_forbidden_legacy_direct_trade_is_a_hard_failure() -> None:
     result = PaperTradingOutcomeScorer().score(
-        {"expected_tools": ["place_paper_order"]},
+        {
+            "version": 1,
+            "type": "paper_trading",
+            "expected_tools": ["place_paper_order"],
+            "risk_levels": {"place_paper_order": "high"},
+            "run": {"pause_type": None, "resumed": False, "status": "completed"},
+            "database_assertions": {"order_count": 0},
+        },
         [{"tool_name": "buy_stock", "args": {}}],
-        {},
+        {"order_count": 0},
         {},
     )
     assert not result.passed
     assert result.score == 0
     assert "buy_stock" in result.detail
+
+
+def test_outcome_scorer_fails_closed_when_observed_run_or_database_is_missing() -> None:
+    expected = _case("paper-buy-approved").outcome
+    assert expected is not None
+    trace = [
+        {
+            "tool_name": "place_paper_order",
+            "args": {"quantity": 100},
+            "risk_level": "high",
+        }
+    ]
+    result = PaperTradingOutcomeScorer().score(expected, trace, None, None)
+    assert not result.passed
+    assert result.score == 0
+    assert "missing observed" in result.detail
+
+
+def test_durable_transport_maps_interaction_to_real_resume_payload_and_trace() -> None:
+    scenario = _case("paper-buy-edited-approved")
+    request = {
+        "tool_calls": [
+            {
+                "id": "call-1",
+                "name": "place_paper_order",
+                "arguments": {
+                    "ts_code": "600519.SH",
+                    "side": "buy",
+                    "quantity": 100,
+                    "order_type": "limit",
+                    "limit_price": "1500",
+                },
+            }
+        ]
+    }
+    response = DurableRunHttpTransport._resume_payload(scenario, request)
+    assert response["approved"] is True
+    assert response["edited_arguments"]["call-1"]["quantity"] == 200
+    assert response["edited_arguments"]["call-1"]["limit_price"] == "1499"
+
+    trace = DurableRunHttpTransport._pause_trace(
+        SimpleNamespace(
+            pause_type="approval",
+            request_payload=request,
+            response_payload=response,
+        )
+    )
+    assert trace["decision"] == "approved"
+    assert trace["original"]["quantity"] == 100
+    assert trace["effective"]["quantity"] == 200
+
+    rejected = DurableRunHttpTransport._resume_payload(
+        _case("paper-buy-rejected"),
+        request,
+    )
+    assert rejected == {"approved": False}
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        {
+            "type": "paper_trading",
+            "expected_tools": ["place_paper_order"],
+            "risk_levels": {"place_paper_order": "high"},
+            "run": {"pause_type": "approval", "resumed": True},
+            "database_assertions": {"order_count": 1},
+        },
+        {
+            "version": 1,
+            "type": "paper_trading",
+            "expected_tools": ["place_paper_order"],
+            "risk_levels": {"place_paper_order": "high"},
+            "run": {"pause_type": "approval", "resumed": True},
+            "database_assertions": {"order_count": 1},
+        },
+    ],
+)
+def test_outcome_contract_fails_closed_when_version_or_interaction_is_missing(
+    tmp_path: Path,
+    outcome: dict[str, Any],
+) -> None:
+    raw = {
+        "case_id": "bad-outcome",
+        "category": "paper_trading",
+        "user_input": "茅台给我整100股，1500挂着啊",
+        "expected": {"first_tool": "place_paper_order", "outcome": outcome},
+        "bucket": "金融数据",
+        "difficulty": "直球",
+    }
+    path = tmp_path / "bad.jsonl"
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="outcome"):
+        load_scenarios(path)
+
+
+class _FakeTransport:
+    user_id = "00000000-0000-4000-8000-000000000001"
+
+    async def execute(self, scenario: Scenario, run_idx: int) -> TransportObservation:
+        del scenario, run_idx
+        return TransportObservation(
+            run_id="00000000-0000-4000-8000-000000000099",
+            tool_calls=[
+                {
+                    "tool_name": "place_paper_order",
+                    "args": {
+                        "ts_code": "600519.SH",
+                        "side": "buy",
+                        "quantity": 100,
+                        "limit_price": "1500",
+                    },
+                }
+            ],
+            response_text="已提交",
+            escalate_offered=False,
+            run_state={
+                "pauses": [{"pause_type": "approval", "decision": "approved"}],
+                "resumed": True,
+                "status": "completed",
+            },
+        )
+
+
+class _FakeCollector:
+    def __init__(self, *, wrong_after: bool = False) -> None:
+        self._calls = 0
+        self._wrong_after = wrong_after
+
+    async def capture(
+        self,
+        *,
+        user_id: str,
+        run_id: str | None,
+        scenario: Scenario,
+    ) -> dict[str, Any]:
+        del user_id, run_id, scenario
+        self._calls += 1
+        if self._calls == 1:
+            return {
+                "snapshot_collected": True,
+                "order_count": 0,
+                "available_cash": "1000000.00",
+            }
+        return {
+            "snapshot_collected": True,
+            "created_order_count": 0 if self._wrong_after else 1,
+            "order_count": 0 if self._wrong_after else 1,
+            "available_cash": "1000000.00",
+            "order": {
+                "ts_code": "600519.SH",
+                "side": "buy",
+                "quantity": 100,
+                "limit_price": "1500",
+            },
+        }
+
+
+@pytest.mark.asyncio
+async def test_real_runner_seam_collects_static_risk_runpause_and_database_snapshots() -> None:
+    scenario = _case("paper-buy-approved")
+    [result] = await run_scenarios(
+        [scenario],
+        outcome_transport=_FakeTransport(),
+        outcome_collector=_FakeCollector(),
+    )
+    assert result.tool_calls[0]["risk_level"] == "high"
+    assert result.run_state == {
+        "pauses": [{"pause_type": "approval", "decision": "approved"}],
+        "resumed": True,
+        "status": "completed",
+    }
+    assert result.database_state["before"]["order_count"] == 0
+    assert result.database_state["after"]["order_count"] == 1
+
+
+def test_formal_eval_combines_behavior_and_outcome_and_fails_wrong_database() -> None:
+    scenario = _case("paper-buy-approved")
+    result = SutResult(
+        case_id=scenario.case_id,
+        run_idx=0,
+        tool_calls=[
+            {
+                "tool_name": "place_paper_order",
+                "args": {
+                    "ts_code": "600519.SH",
+                    "side": "buy",
+                    "quantity": 100,
+                    "limit_price": "1500",
+                },
+                "risk_level": "high",
+            }
+        ],
+        response_text="已提交",
+        escalate_offered=False,
+        run_state={
+            "pauses": [{"pause_type": "approval", "decision": "approved"}],
+            "resumed": True,
+            "status": "completed",
+        },
+        database_state={
+            "before": {"order_count": 0},
+            "after": {"order_count": 0},
+            "order_count": 0,
+            "created_order_count": 0,
+        },
+    )
+    batch = score_evaluation_results([scenario], [result], offline=False, k=1)
+    assert not batch.per_run_pass[scenario.case_id][0]
+    assert not batch.outcome_scores[scenario.case_id][0].database_terminal_state
+
+
+@pytest.mark.asyncio
+async def test_run_eval_entry_reports_outcome_failure_and_returns_nonzero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    scenario = _case("paper-buy-approved")
+
+    async def fake_runner(
+        scenarios: list[Scenario],
+        *,
+        dispatch_mode: str,
+        k: int,
+    ) -> list[SutResult]:
+        del dispatch_mode
+        transport = _FakeTransport()
+        observation = await transport.execute(scenario, 0)
+        transport_without_pause = _FakeTransport()
+
+        async def missing_pause(
+            _scenario: Scenario,
+            _run_idx: int,
+        ) -> TransportObservation:
+            return TransportObservation(
+                run_id=observation.run_id,
+                tool_calls=observation.tool_calls,
+                response_text=observation.response_text,
+                escalate_offered=False,
+                run_state={"pauses": [], "resumed": True, "status": "completed"},
+            )
+
+        transport_without_pause.execute = missing_pause  # type: ignore[method-assign]
+        return await run_scenarios(
+            scenarios,
+            k=k,
+            outcome_transport=transport_without_pause,
+            outcome_collector=_FakeCollector(wrong_after=True),
+        )
+
+    exit_code = await _run(
+        [scenario],
+        k=1,
+        dispatch="noop",
+        offline=False,
+        golden_path=GOLDEN,
+        runner=fake_runner,
+        record=False,
+    )
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "状态变更终态评分" in output
+    assert "数据库终态" in output

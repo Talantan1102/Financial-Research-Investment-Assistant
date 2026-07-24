@@ -41,6 +41,12 @@ class Scenario:
     policy_refs: list[str] = field(default_factory=list)
     expected_answer: dict[str, Any] | None = None
     intent_goal: str | None = None  # 多轮:模拟用户的总目标(逐轮挤牙膏达成)
+    interaction: dict[str, Any] | None = None
+
+    @property
+    def outcome(self) -> dict[str, Any] | None:
+        value = self.expected.get("outcome")
+        return value if isinstance(value, dict) else None
 
     def to_ts_case(self) -> GoldenCase:
         """投影成 tool_selection.GoldenCase —— 复用其 score_case(行为①②③)。"""
@@ -92,6 +98,10 @@ def _validate(raw: dict[str, Any], seen: set[str]) -> Scenario:
     ea = raw.get("expected_answer")
     if ea is not None and not isinstance(ea, dict):
         _fail(f"{case_id}: expected_answer 须为对象或省略")
+    outcome = expected.get("outcome")
+    interaction = raw.get("interaction")
+    if outcome is not None:
+        _validate_outcome(case_id, outcome, interaction)
 
     seen.add(case_id)
     return Scenario(
@@ -105,7 +115,56 @@ def _validate(raw: dict[str, Any], seen: set[str]) -> Scenario:
         policy_refs=list(raw.get("policy_refs") or []),
         expected_answer=ea,
         intent_goal=raw.get("intent_goal"),
+        interaction=interaction,
     )
+
+
+def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
+    if not isinstance(outcome, dict):
+        _fail(f"{case_id}: outcome 须为对象")
+    if outcome.get("version") != 1:
+        _fail(f"{case_id}: outcome.version 只支持 1")
+    if outcome.get("type") not in {"paper_trading", "watchlist"}:
+        _fail(f"{case_id}: outcome.type 非法")
+    required = ("expected_tools", "risk_levels", "run", "database_assertions")
+    missing = [key for key in required if key not in outcome]
+    if missing:
+        _fail(f"{case_id}: outcome 缺失 {missing}")
+    expected_tools = outcome["expected_tools"]
+    risk_levels = outcome["risk_levels"]
+    run = outcome["run"]
+    database_assertions = outcome["database_assertions"]
+    if not isinstance(expected_tools, list) or not expected_tools:
+        _fail(f"{case_id}: outcome.expected_tools 须为非空数组")
+    if not isinstance(risk_levels, dict) or any(tool not in risk_levels for tool in expected_tools):
+        _fail(f"{case_id}: outcome.risk_levels 必须覆盖 expected_tools")
+    if (
+        not isinstance(run, dict)
+        or "pause_type" not in run
+        or "resumed" not in run
+        or "status" not in run
+        or run["pause_type"] not in {None, "input", "approval"}
+        or type(run["resumed"]) is not bool
+    ):
+        _fail(f"{case_id}: outcome.run 必须明确 pause_type/resumed/status")
+    if not isinstance(database_assertions, dict) or not database_assertions:
+        _fail(f"{case_id}: outcome.database_assertions 须为非空对象")
+    if run["pause_type"] == "approval":
+        if not isinstance(interaction, dict):
+            _fail(f"{case_id}: approval outcome 缺失 interaction")
+        if interaction.get("pause_decision") not in {"approve", "reject"}:
+            _fail(f"{case_id}: interaction.pause_decision 非法")
+        expected_decision = {
+            "approve": "approved",
+            "reject": "rejected",
+        }[interaction["pause_decision"]]
+        if run.get("decision") != expected_decision:
+            _fail(f"{case_id}: outcome.run.decision 与 interaction 不一致")
+        edits = interaction.get("edited_arguments", {})
+        if not isinstance(edits, dict):
+            _fail(f"{case_id}: interaction.edited_arguments 须为对象")
+        if interaction["pause_decision"] == "reject" and edits:
+            _fail(f"{case_id}: reject interaction 不得编辑参数")
 
 
 def load_scenarios(path: Path) -> list[Scenario]:

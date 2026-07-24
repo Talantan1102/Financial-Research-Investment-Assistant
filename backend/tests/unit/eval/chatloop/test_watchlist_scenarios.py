@@ -42,12 +42,13 @@ def test_add_defaults_monitoring_off_and_writes_audit_without_pause() -> None:
         {
             "watchlist": {
                 "count": 1,
+                "exists": True,
                 "ts_code": "600519.SH",
                 "monitoring_enabled": False,
             },
             "audit": {"action": "add", "after": {"monitoring_enabled": False}},
         },
-        {"pauses": [], "resumed": False},
+        {"pauses": [], "resumed": False, "status": "completed"},
     )
     assert result.passed
     assert result.risk_and_pause
@@ -62,10 +63,14 @@ def test_add_defaults_monitoring_off_and_writes_audit_without_pause() -> None:
             }
         ],
         {
-            "watchlist": {"count": 1, "monitoring_enabled": False},
+            "watchlist": {"count": 1, "exists": True, "monitoring_enabled": False},
             "audit": {"action": "add", "after": {"monitoring_enabled": False}},
         },
-        {"pauses": [{"pause_type": "approval"}], "resumed": True},
+        {
+            "pauses": [{"pause_type": "approval"}],
+            "resumed": True,
+            "status": "completed",
+        },
     )
     assert not incorrectly_paused.passed
     assert not incorrectly_paused.risk_and_pause
@@ -89,10 +94,15 @@ def test_watchlist_update_and_remove_require_direct_write_audit_terminal_state()
             }
         ],
         {
-            "watchlist": {"count": 1, "note": "长拿", "monitoring_enabled": True},
+            "watchlist": {
+                "count": 1,
+                "exists": True,
+                "note": "长拿",
+                "monitoring_enabled": True,
+            },
             "audit": {"action": "update"},
         },
-        {"pauses": [], "resumed": False},
+        {"pauses": [], "resumed": False, "status": "completed"},
     )
     assert update_result.passed
 
@@ -106,8 +116,8 @@ def test_watchlist_update_and_remove_require_direct_write_audit_terminal_state()
                 "risk_level": "low",
             }
         ],
-        {"watchlist": {"count": 0}, "audit": {"action": "remove"}},
-        {"pauses": [], "resumed": False},
+        {"watchlist": {"count": 0, "exists": False}, "audit": {"action": "remove"}},
+        {"pauses": [], "resumed": False, "status": "completed"},
     )
     assert remove_result.passed
 
@@ -123,8 +133,8 @@ def test_watchlist_claim_without_database_or_audit_change_fails() -> None:
                 "risk_level": "low",
             }
         ],
-        {"watchlist": {"count": 0}, "audit": None},
-        {"pauses": [], "resumed": False},
+        {"watchlist": {"count": 0, "exists": False}, "audit": None},
+        {"pauses": [], "resumed": False, "status": "completed"},
     )
     assert not result.passed
     assert not result.database_terminal_state

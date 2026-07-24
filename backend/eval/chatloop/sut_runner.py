@@ -17,8 +17,10 @@ k>1:同 case 跑 k 次(独立 request_id),供 pass^k。
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
+from uuid import UUID, uuid4
 
 from eval.chatloop.scenario import Scenario
 
@@ -37,6 +39,356 @@ class SutResult:
     escalate_offered: bool
     evidence: str = ""  # real dispatch:agent 看到的工具返回(grounding 判依据)
     error: str | None = None
+    run_state: dict[str, Any] | None = None
+    database_state: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class TransportObservation:
+    run_id: str
+    tool_calls: list[dict[str, Any]]
+    response_text: str
+    escalate_offered: bool
+    run_state: dict[str, Any]
+    evidence: str = ""
+
+
+class OutcomeTransport(Protocol):
+    user_id: str
+
+    async def execute(self, scenario: Scenario, run_idx: int) -> TransportObservation: ...
+
+
+class OutcomeCollector(Protocol):
+    async def capture(
+        self,
+        *,
+        user_id: str,
+        run_id: str | None,
+        scenario: Scenario,
+    ) -> dict[str, Any]: ...
+
+
+class DurableRunHttpTransport:
+    """Drive the real Run API and read its durable RunPause/tool ledger."""
+
+    _TERMINAL = frozenset({"completed", "failed", "cancelled"})
+
+    def __init__(self, session_factory: Any) -> None:
+        required = {
+            "base_url": os.getenv("CHATLOOP_EVAL_RUN_BASE_URL"),
+            "tenant_id": os.getenv("CHATLOOP_EVAL_TENANT_ID"),
+            "token": os.getenv("CHATLOOP_EVAL_AUTH_TOKEN"),
+            "user_id": os.getenv("CHATLOOP_EVAL_USER_ID"),
+        }
+        missing = [name for name, value in required.items() if not value]
+        if missing:
+            raise RuntimeError(
+                "outcome eval requires durable Run configuration: " + ", ".join(missing)
+            )
+        self._base_url = str(required["base_url"]).rstrip("/")
+        self._tenant_id = UUID(str(required["tenant_id"]))
+        self._token = str(required["token"])
+        self.user_id = str(UUID(str(required["user_id"])))
+        self._session_factory = session_factory
+        self._timeout_s = float(os.getenv("CHATLOOP_EVAL_RUN_TIMEOUT_S", "60"))
+        self._batch_id = uuid4().hex
+
+    async def execute(self, scenario: Scenario, run_idx: int) -> TransportObservation:
+        import httpx
+
+        headers = {
+            "Authorization": f"Bearer {self._token}",
+            "Idempotency-Key": f"eval:{self._batch_id}:{scenario.case_id}:{run_idx}",
+        }
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=10) as client:
+            response = await client.post(
+                f"/api/v1/tenants/{self._tenant_id}/runs",
+                headers=headers,
+                json={"prompt": scenario.user_input},
+            )
+            response.raise_for_status()
+            run_id = str(response.json()["id"])
+            status, pause = await self._wait(run_id)
+            if pause is not None and pause.pause_type == "approval":
+                resume_payload = self._resume_payload(scenario, pause.request_payload)
+                resumed = await client.post(
+                    f"/api/v1/tenants/{self._tenant_id}/runs/{run_id}/resume",
+                    headers={"Authorization": f"Bearer {self._token}"},
+                    json={"response": resume_payload},
+                )
+                resumed.raise_for_status()
+                status, _ = await self._wait(run_id)
+                if status not in self._TERMINAL:
+                    raise RuntimeError(f"resumed outcome Run stopped in {status}")
+            elif status == "waiting_input":
+                pass
+            elif status not in self._TERMINAL:
+                raise RuntimeError(f"outcome Run stopped in unexpected status {status}")
+        tool_calls, run_state, response_text = await self._read_trace(run_id)
+        run_state["status"] = status
+        return TransportObservation(
+            run_id=run_id,
+            tool_calls=tool_calls,
+            response_text=response_text,
+            escalate_offered=False,
+            run_state=run_state,
+        )
+
+    async def _wait(self, run_id: str) -> tuple[str, Any | None]:
+        import asyncio
+        import time
+
+        from app.models.run import Run, RunPause
+        from sqlalchemy import select
+
+        deadline = time.monotonic() + self._timeout_s
+        while time.monotonic() < deadline:
+            async with self._session_factory() as session:
+                run = await session.get(Run, UUID(run_id))
+                if run is None:
+                    raise RuntimeError("created eval Run disappeared")
+                status = str(run.status)
+                pause = await session.scalar(
+                    select(RunPause)
+                    .where(RunPause.run_id == run.id, RunPause.resolved_at.is_(None))
+                    .order_by(RunPause.pause_no.desc())
+                    .limit(1)
+                )
+                if status in self._TERMINAL or pause is not None:
+                    return status, pause
+            await asyncio.sleep(0.1)
+        raise TimeoutError(f"eval Run {run_id} did not reach pause/terminal state")
+
+    @staticmethod
+    def _resume_payload(scenario: Scenario, request: dict[str, Any]) -> dict[str, Any]:
+        interaction = scenario.interaction or {}
+        approved = interaction.get("pause_decision") == "approve"
+        response: dict[str, Any] = {"approved": approved}
+        edits_by_tool = interaction.get("edited_arguments", {})
+        if approved and edits_by_tool:
+            edits: dict[str, dict[str, Any]] = {}
+            for call in request.get("tool_calls", []):
+                tool_name = call.get("name")
+                if tool_name in edits_by_tool:
+                    edits[str(call["id"])] = dict(edits_by_tool[tool_name])
+            response["edited_arguments"] = edits
+        return response
+
+    async def _read_trace(self, run_id: str) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
+        from app.models.run import Run, RunMessage, RunPause
+        from app.models.run_execution import RunToolExecution
+        from sqlalchemy import select
+
+        async with self._session_factory() as session:
+            run = await session.get(Run, UUID(run_id))
+            assert run is not None
+            rows = (
+                await session.scalars(
+                    select(RunToolExecution)
+                    .where(RunToolExecution.run_id == run.id)
+                    .order_by(RunToolExecution.started_at, RunToolExecution.id)
+                )
+            ).all()
+            pauses = (
+                await session.scalars(
+                    select(RunPause).where(RunPause.run_id == run.id).order_by(RunPause.pause_no)
+                )
+            ).all()
+            calls = []
+            for row in rows:
+                summary = dict(row.request_summary)
+                args = summary.get("args", summary)
+                calls.append(
+                    {
+                        "tool_name": str(row.tool_name),
+                        "args": dict(args) if isinstance(args, dict) else {},
+                    }
+                )
+            pause_trace = [self._pause_trace(row) for row in pauses]
+            final = (
+                None
+                if run.final_message_id is None
+                else await session.get(RunMessage, run.final_message_id)
+            )
+            return (
+                calls,
+                {"pauses": pause_trace, "resumed": any(p.resolved_at for p in pauses)},
+                "" if final is None else str(final.content),
+            )
+
+    @staticmethod
+    def _pause_trace(pause: Any) -> dict[str, Any]:
+        response = dict(pause.response_payload or {})
+        approved = response.get("approved")
+        trace: dict[str, Any] = {
+            "pause_type": str(pause.pause_type),
+            "request": dict(pause.request_payload),
+            "response": response,
+        }
+        if type(approved) is bool:
+            trace["decision"] = "approved" if approved else "rejected"
+        calls = pause.request_payload.get("tool_calls", [])
+        if calls:
+            original = calls[0].get("arguments", {})
+            if isinstance(original, str):
+                import json
+
+                original = json.loads(original)
+            trace["original"] = original
+            edits = response.get("edited_arguments", {})
+            trace["effective"] = edits.get(str(calls[0].get("id")), original)
+        return trace
+
+
+class SqlOutcomeCollector:
+    """Capture user-owned paper/watchlist terminal facts around a durable Run."""
+
+    def __init__(self, session_factory: Any) -> None:
+        self._session_factory = session_factory
+
+    async def capture(
+        self,
+        *,
+        user_id: str,
+        run_id: str | None,
+        scenario: Scenario,
+    ) -> dict[str, Any]:
+        from app.models.paper_account import PaperAccount
+        from app.models.paper_order import PaperOrder
+        from app.models.run import Run
+        from app.models.watchlist import WatchlistAudit, WatchlistItem
+        from sqlalchemy import func, select
+
+        uid = UUID(user_id)
+        async with self._session_factory() as session:
+            source_session_id = None
+            if run_id is not None:
+                run = await session.get(Run, UUID(run_id))
+                source_session_id = None if run is None else str(run.session_id)
+            account = await session.scalar(
+                select(PaperAccount)
+                .where(PaperAccount.user_id == uid, PaperAccount.status == "active")
+                .order_by(PaperAccount.generation.desc())
+                .limit(1)
+            )
+            order_count = int(
+                await session.scalar(
+                    select(func.count()).select_from(PaperOrder).where(PaperOrder.user_id == uid)
+                )
+                or 0
+            )
+            order = None
+            created_order_count = 0
+            if run_id is not None:
+                created_order_count = int(
+                    await session.scalar(
+                        select(func.count())
+                        .select_from(PaperOrder)
+                        .where(
+                            PaperOrder.user_id == uid,
+                            PaperOrder.source_run_id == UUID(run_id),
+                        )
+                    )
+                    or 0
+                )
+                order = await session.scalar(
+                    select(PaperOrder)
+                    .where(PaperOrder.user_id == uid, PaperOrder.source_run_id == UUID(run_id))
+                    .order_by(PaperOrder.created_at.desc())
+                    .limit(1)
+                )
+            item_count = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(WatchlistItem)
+                    .where(WatchlistItem.user_id == uid)
+                )
+                or 0
+            )
+            expected_args = (
+                (scenario.outcome or {}).get("tool_args_contains", {}).get("manage_watchlist", {})
+            )
+            target_code = expected_args.get("ts_code")
+            item_statement = select(WatchlistItem).where(WatchlistItem.user_id == uid)
+            if target_code:
+                item_statement = item_statement.where(WatchlistItem.ts_code == target_code)
+            item = await session.scalar(
+                item_statement.order_by(WatchlistItem.updated_at.desc()).limit(1)
+            )
+            audit_statement = select(WatchlistAudit).where(WatchlistAudit.user_id == uid)
+            if source_session_id is not None:
+                audit_statement = audit_statement.where(
+                    WatchlistAudit.source_session_id == source_session_id
+                )
+            audit = await session.scalar(
+                audit_statement.order_by(
+                    WatchlistAudit.created_at.desc(), WatchlistAudit.id.desc()
+                ).limit(1)
+            )
+            snapshot: dict[str, Any] = {
+                "snapshot_collected": True,
+                "order_count": order_count,
+                "created_order_count": created_order_count,
+                "available_cash": None
+                if account is None
+                else _decimal_text(account.available_cash),
+                "reserved_cash": None if account is None else _decimal_text(account.frozen_cash),
+                "watchlist": {
+                    "count": item_count,
+                    "exists": item is not None,
+                    **(
+                        {}
+                        if item is None
+                        else {
+                            "ts_code": str(item.ts_code),
+                            "note": item.note,
+                            "monitoring_enabled": bool(item.monitoring_enabled),
+                        }
+                    ),
+                },
+                "audit": None
+                if audit is None
+                else {
+                    "action": str(audit.action),
+                    "before": audit.before_json,
+                    "after": audit.after_json,
+                },
+            }
+            if order is not None:
+                snapshot["order"] = {
+                    "ts_code": str(order.ts_code),
+                    "side": str(order.side),
+                    "quantity": int(order.quantity),
+                    "limit_price": _decimal_text(order.limit_price),
+                }
+                snapshot["audit"] = {
+                    "original": order.original_proposal,
+                    "effective": order.confirmed_payload,
+                }
+            return snapshot
+
+
+def _decimal_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _with_static_risk(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    from app.chatloop.tool_runtime_policy import TOOL_RISK_METADATA
+
+    out: list[dict[str, Any]] = []
+    for call in tool_calls:
+        row = dict(call)
+        name = str(row.get("tool_name", ""))
+        metadata = TOOL_RISK_METADATA.get(name)
+        row["risk_level"] = (
+            metadata.risk.value if metadata is not None else ("low" if name == "ask_user" else None)
+        )
+        out.append(row)
+    return out
 
 
 async def run_scenarios(
@@ -46,6 +398,8 @@ async def run_scenarios(
     k: int = 1,
     max_steps: int | None = None,
     system_prompt: str | None = None,
+    outcome_transport: OutcomeTransport | None = None,
+    outcome_collector: OutcomeCollector | None = None,
 ) -> list[SutResult]:
     """构造真件,跑全部 scenarios × k 次,返回 SutResult 列表(per-case 错误隔离)。
 
@@ -70,6 +424,55 @@ async def run_scenarios(
     results: list[SutResult] = []
 
     try:
+        outcome_scenarios = [scenario for scenario in scenarios if scenario.outcome is not None]
+        ordinary_scenarios = [scenario for scenario in scenarios if scenario.outcome is None]
+        if outcome_scenarios:
+            transport = outcome_transport or DurableRunHttpTransport(session_factory)
+            collector = outcome_collector or SqlOutcomeCollector(session_factory)
+            for scenario in outcome_scenarios:
+                for run_idx in range(k):
+                    try:
+                        before = await collector.capture(
+                            user_id=transport.user_id,
+                            run_id=None,
+                            scenario=scenario,
+                        )
+                        observed = await transport.execute(scenario, run_idx)
+                        after = await collector.capture(
+                            user_id=transport.user_id,
+                            run_id=observed.run_id,
+                            scenario=scenario,
+                        )
+                        results.append(
+                            SutResult(
+                                case_id=scenario.case_id,
+                                run_idx=run_idx,
+                                tool_calls=_with_static_risk(observed.tool_calls),
+                                response_text=observed.response_text,
+                                escalate_offered=observed.escalate_offered,
+                                evidence=observed.evidence,
+                                run_state=observed.run_state,
+                                database_state={
+                                    **after,
+                                    "before": before,
+                                    "after": after,
+                                },
+                            )
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.exception("outcome case %s run %d failed", scenario.case_id, run_idx)
+                        results.append(
+                            SutResult(
+                                case_id=scenario.case_id,
+                                run_idx=run_idx,
+                                tool_calls=[],
+                                response_text="",
+                                escalate_offered=False,
+                                error=f"{type(exc).__name__}: {exc}",
+                            )
+                        )
+        if not ordinary_scenarios:
+            return results
         # 关键:async with 把 MCP 上下文 + singletons + case 循环锁在同一任务(修 cancel-scope bug)
         async with MCPClient.from_subprocess(profile="chat_tools") as mcp_client:
             singletons = await build_heavy_singletons(
@@ -80,7 +483,7 @@ async def run_scenarios(
                 system_prompt=system_prompt or CHAT_SYSTEM_PROMPT,
                 skill_listing=singletons.skill_listing,
             )
-            for sc in scenarios:
+            for sc in ordinary_scenarios:
                 is_seq = "tools_sequence_contains" in sc.expected
                 if dispatch_mode == "real":
                     steps = max_steps or 6
@@ -146,4 +549,12 @@ async def run_scenarios(
     return results
 
 
-__all__ = ["SutResult", "run_scenarios"]
+__all__ = [
+    "DurableRunHttpTransport",
+    "OutcomeCollector",
+    "OutcomeTransport",
+    "SqlOutcomeCollector",
+    "SutResult",
+    "TransportObservation",
+    "run_scenarios",
+]

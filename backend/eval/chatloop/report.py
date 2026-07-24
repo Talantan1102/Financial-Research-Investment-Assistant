@@ -6,7 +6,7 @@ from collections import defaultdict
 
 from eval.chatloop.passk import PassK, pass1_rate, passk_rate
 from eval.chatloop.scenario import VALID_DIFFICULTY
-from eval.chatloop.scorers import BehaviorScore
+from eval.chatloop.scorers import BehaviorScore, PaperTradingOutcomeScore
 
 
 def _rate(passed: int, total: int) -> str:
@@ -125,4 +125,26 @@ def format_scorecard(
     return "\n".join(lines)
 
 
-__all__ = ["format_scorecard", "format_dry"]
+def format_outcome_scorecard(
+    scores: dict[str, list[PaperTradingOutcomeScore]],
+) -> str:
+    lines = [
+        "# 状态变更终态评分",
+        "",
+        "| case | 通过 | 工具轨迹 | 风险/暂停 | 恢复 | 数据库终态 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for case_id, runs in sorted(scores.items()):
+        for index, score in enumerate(runs):
+            mark = lambda value: "✓" if value else "✗"  # noqa: E731
+            lines.append(
+                f"| `{case_id}#{index}` | {mark(score.passed)} | "
+                f"{mark(score.tool_trajectory)} | {mark(score.risk_and_pause)} | "
+                f"{mark(score.resume_semantics)} | {mark(score.database_terminal_state)} |"
+            )
+            if not score.passed:
+                lines.append(f"|  |  |  |  |  | {score.detail} |")
+    return "\n".join(lines)
+
+
+__all__ = ["format_scorecard", "format_dry", "format_outcome_scorecard"]

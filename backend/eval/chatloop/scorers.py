@@ -134,9 +134,14 @@ class PaperTradingOutcomeScore:
 _LEGACY_TRADE_TOOLS = frozenset(
     {
         "paper_trade",
+        "buy",
         "buy_stock",
+        "sell",
         "sell_stock",
+        "prepare_order",
+        "prepare_paper_order",
         "confirm_order",
+        "confirm_paper_order",
         "confirm_cancel",
         "confirm_reset",
     }
@@ -181,6 +186,26 @@ class PaperTradingOutcomeScorer:
         database_state: dict[str, Any] | None = None,
         run_state: dict[str, Any] | None = None,
     ) -> PaperTradingOutcomeScore:
+        if not self._valid_contract(expected):
+            return PaperTradingOutcomeScore(
+                passed=False,
+                score=0.0,
+                tool_trajectory=False,
+                risk_and_pause=False,
+                resume_semantics=False,
+                database_terminal_state=False,
+                detail="invalid or incomplete outcome contract",
+            )
+        if database_state is None or run_state is None:
+            return PaperTradingOutcomeScore(
+                passed=False,
+                score=0.0,
+                tool_trajectory=False,
+                risk_and_pause=False,
+                resume_semantics=False,
+                database_terminal_state=False,
+                detail="missing observed Run or database state",
+            )
         names = [str(call.get("tool_name", "")) for call in tool_calls]
         required = [str(name) for name in expected.get("expected_tools", [])]
         forbidden = _LEGACY_TRADE_TOOLS | frozenset(expected.get("forbidden_tools", []))
@@ -219,7 +244,7 @@ class PaperTradingOutcomeScorer:
             pause_assertions = {
                 key: value
                 for key, value in expected_run.items()
-                if key not in {"pause_type", "resumed"}
+                if key not in {"pause_type", "resumed", "status"}
             }
             if pause_assertions:
                 pause_ok = pause_ok and any(
@@ -230,7 +255,9 @@ class PaperTradingOutcomeScorer:
         risk_and_pause = risk_ok and pause_ok
 
         wanted_resumed = expected_run.get("resumed", False)
-        resume_ok = observed_run.get("resumed", False) is wanted_resumed
+        resume_ok = observed_run.get("resumed", False) is wanted_resumed and observed_run.get(
+            "status"
+        ) == expected_run.get("status")
 
         state = database_state or {}
         terminal_expected = expected.get("database_assertions", {})
@@ -263,6 +290,27 @@ class PaperTradingOutcomeScorer:
             resume_semantics=resume_ok,
             database_terminal_state=db_ok,
             detail=detail,
+        )
+
+    @staticmethod
+    def _valid_contract(expected: dict[str, Any]) -> bool:
+        tools = expected.get("expected_tools")
+        risks = expected.get("risk_levels")
+        run = expected.get("run")
+        database = expected.get("database_assertions")
+        return (
+            expected.get("version") == 1
+            and expected.get("type") in {"paper_trading", "watchlist"}
+            and isinstance(tools, list)
+            and bool(tools)
+            and isinstance(risks, dict)
+            and all(tool in risks for tool in tools)
+            and isinstance(run, dict)
+            and "pause_type" in run
+            and "resumed" in run
+            and "status" in run
+            and isinstance(database, dict)
+            and bool(database)
         )
 
 
