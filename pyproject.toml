@@ -60,6 +60,8 @@ dependencies = [
     "psycopg2-binary>=2.9.12",
     "psycopg[binary]>=3.1",  # bundled libpq — required by langgraph-checkpoint-postgres>=3.x
     "redis>=7.4.0",
+    # Windows SkillExecutor sandbox — Job Object memory cap + kill-on-close.
+    "pywin32>=311; sys_platform == 'win32'",
     # v1.0 monitoring engine — Celery async task system
     "celery>=5.3,<6.0",
     # Harness Board (dashboard/) — server-side rendering

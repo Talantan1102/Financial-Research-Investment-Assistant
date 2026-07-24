@@ -1,4 +1,5 @@
 import { expect, test, type BrowserContext, type Page, type Route } from '@playwright/test'
+import { isDeepStrictEqual } from 'node:util'
 
 const USER = {
   id: 'paper-user',
@@ -11,6 +12,14 @@ const TENANT_ID = 'tenant-paper'
 const SESSION_ID = 'session-paper'
 const RUN_ID = 'run-paper'
 const ORDER_ID = '11111111-1111-4111-8111-111111111111'
+const EDITED_DRAFT = {
+  side: 'buy',
+  ts_code: '600519.SH',
+  name: '贵州茅台',
+  quantity: 100,
+  order_type: 'limit',
+  limit_price: '1500.00',
+}
 
 async function seedAuthenticatedUser(context: BrowserContext) {
   await context.addInitScript(([key, value]: [string, string]) => {
@@ -31,7 +40,9 @@ async function installPaperBackend(page: Page) {
   let runPhase: 'new' | 'waiting' | 'completed' = 'new'
   let orderCreated = false
   let approvedArguments: Record<string, unknown> | null = null
+  let previewedArguments: Record<string, unknown> | null = null
   const requestedPrompts: string[] = []
+  const unexpectedRequests: string[] = []
 
   await page.route('**/api/**', async (route) => {
     const request = route.request()
@@ -144,7 +155,18 @@ async function installPaperBackend(page: Page) {
           edited_arguments: Record<string, Record<string, unknown>>
         }
       }
-      approvedArguments = body.response.edited_arguments['call-buy']
+      const editedArguments = body.response.edited_arguments?.['call-buy']
+      if (
+        body.response.approved &&
+        (previewedArguments === null ||
+          !isDeepStrictEqual(editedArguments, previewedArguments))
+      ) {
+        unexpectedRequests.push(
+          `invalid approved resume: ${JSON.stringify(body)}`,
+        )
+        return json(route, { detail: 'approved arguments were not previewed' }, 409)
+      }
+      approvedArguments = editedArguments ?? null
       orderCreated = body.response.approved
       runPhase = 'completed'
       return json(route, {
@@ -242,8 +264,15 @@ async function installPaperBackend(page: Page) {
       const body = request.postDataJSON() as {
         draft: Record<string, unknown>
       }
+      if (!isDeepStrictEqual(body, { draft: EDITED_DRAFT })) {
+        unexpectedRequests.push(`invalid preview: ${JSON.stringify(body)}`)
+        return json(route, { detail: 'preview draft mismatch' }, 422)
+      }
+      previewedArguments = JSON.parse(
+        JSON.stringify(body.draft),
+      ) as Record<string, unknown>
       return json(route, {
-        draft: body.draft,
+        draft: previewedArguments,
         quote: {
           ts_code: '600519.SH',
           name: '贵州茅台',
@@ -304,12 +333,15 @@ async function installPaperBackend(page: Page) {
           : [],
       )
     }
-    return json(route, {})
+    unexpectedRequests.push(`${request.method()} ${path}`)
+    return json(route, { detail: `unexpected API route: ${path}` }, 500)
   })
 
   return {
     requestedPrompts,
     approvedArguments: () => approvedArguments,
+    previewedArguments: () => previewedArguments,
+    unexpectedRequests,
   }
 }
 
@@ -346,6 +378,7 @@ test('buy instruction pauses for editable preview, resumes, and appears in the s
     order_type: 'limit',
     limit_price: '1500.00',
   })
+  expect(backend.previewedArguments()).toEqual(EDITED_DRAFT)
 
   await page.goto('/paper-trading')
   await expect(page.getByRole('heading', { name: '模拟账户' })).toBeVisible()
@@ -355,4 +388,5 @@ test('buy instruction pauses for editable preview, resumes, and appears in the s
   await expect(orderRow).toContainText('买入')
   await expect(orderRow).toContainText('1,500.0000')
   await expect(orderRow).toContainText('已成交')
+  expect(backend.unexpectedRequests).toEqual([])
 })
