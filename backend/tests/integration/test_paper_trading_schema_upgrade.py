@@ -237,7 +237,10 @@ def test_verifier_rejects_same_named_partial_index_with_wrong_predicate(
         migrate_paper_trading_schema(legacy_application_engine)
 
 
-@pytest.mark.parametrize("drift", ["missing_trigger", "wrong_function"])
+@pytest.mark.parametrize(
+    "drift",
+    ["missing_trigger", "wrong_function", "restricted_update_columns"],
+)
 def test_migration_repairs_watchlist_append_only_guard_and_blocks_mutation(
     legacy_application_engine: Engine,
     drift: str,
@@ -252,6 +255,14 @@ def test_migration_repairs_watchlist_append_only_guard_and_blocks_mutation(
                 text(
                     "CREATE OR REPLACE FUNCTION reject_watchlist_audit_mutation() "
                     "RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql"
+                )
+            )
+        if drift == "restricted_update_columns":
+            connection.execute(
+                text(
+                    "CREATE TRIGGER watchlist_audits_append_only "
+                    "BEFORE UPDATE OF action OR DELETE ON watchlist_audits "
+                    "FOR EACH ROW EXECUTE FUNCTION reject_watchlist_audit_mutation()"
                 )
             )
         connection.execute(
@@ -276,7 +287,10 @@ def test_migration_repairs_watchlist_append_only_guard_and_blocks_mutation(
         legacy_application_engine.begin() as connection,
     ):
         connection.execute(
-            text("UPDATE watchlist_audits SET action = 'update' WHERE id = :id"),
+            text(
+                "UPDATE watchlist_audits "
+                "SET source_session_id = 'tampered' WHERE id = :id"
+            ),
             {"id": audit_id},
         )
     assert getattr(update_error.value.orig, "pgcode", None) == "55000"

@@ -223,7 +223,8 @@ def _watchlist_guard_drift(connection: Connection) -> list[str]:
 
     triggers = connection.execute(
         text(
-            "SELECT t.tgfoid, t.tgtype, t.tgenabled, t.tgqual, t.tgnargs "
+            "SELECT t.tgfoid, t.tgtype, t.tgenabled, t.tgqual, t.tgnargs, "
+            "t.tgattr::text AS tgattr "
             "FROM pg_trigger t "
             "JOIN pg_class c ON c.oid = t.tgrelid "
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
@@ -243,6 +244,7 @@ def _watchlist_guard_drift(connection: Connection) -> list[str]:
             or trigger["tgenabled"] != "O"
             or trigger["tgqual"] is not None
             or int(trigger["tgnargs"]) != 0
+            or str(trigger["tgattr"]) != ""
         ):
             drift.append("watchlist append-only trigger definition differs")
     return drift
