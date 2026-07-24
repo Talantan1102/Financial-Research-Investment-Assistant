@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -719,6 +720,114 @@ def test_durable_transport_maps_interaction_to_real_resume_payload_and_trace() -
     assert rejected == {"approved": False}
 
 
+class _HttpResponse:
+    def __init__(self, payload: Any) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> Any:
+        return self._payload
+
+
+class _IdentityHttpClient:
+    def __init__(
+        self,
+        *,
+        user_id: str,
+        tenant_id: str,
+        created_payload: dict[str, Any] | None = None,
+    ) -> None:
+        self.user_id = user_id
+        self.tenant_id = tenant_id
+        self.created_payload = created_payload
+        self.posts: list[str] = []
+
+    async def __aenter__(self) -> _IdentityHttpClient:
+        return self
+
+    async def __aexit__(self, *_args: Any) -> None:
+        return None
+
+    async def get(self, path: str, **_kwargs: Any) -> _HttpResponse:
+        if path == "/auth/me":
+            return _HttpResponse({"id": self.user_id})
+        if path == "/api/v1/tenants":
+            return _HttpResponse([{"id": self.tenant_id}])
+        raise AssertionError(f"unexpected GET {path}")
+
+    async def post(self, path: str, **_kwargs: Any) -> _HttpResponse:
+        self.posts.append(path)
+        if self.created_payload is None:
+            raise AssertionError("Run create must not be called")
+        return _HttpResponse(self.created_payload)
+
+
+def _durable_transport(monkeypatch: pytest.MonkeyPatch) -> DurableRunHttpTransport:
+    monkeypatch.setenv("CHATLOOP_EVAL_RUN_BASE_URL", "http://eval.invalid")
+    monkeypatch.setenv("CHATLOOP_EVAL_TENANT_ID", "00000000-0000-4000-8000-000000000010")
+    monkeypatch.setenv("CHATLOOP_EVAL_AUTH_TOKEN", "token")
+    monkeypatch.setenv("CHATLOOP_EVAL_USER_ID", _FakeTransport.user_id)
+    return DurableRunHttpTransport(session_factory=None)
+
+
+@pytest.mark.asyncio
+async def test_wrong_eval_token_identity_stops_before_run_creation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    transport = _durable_transport(monkeypatch)
+    client = _IdentityHttpClient(
+        user_id="00000000-0000-4000-8000-000000000002",
+        tenant_id=transport.tenant_id,
+    )
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: client)
+
+    with pytest.raises(RuntimeError, match="dedicated eval user"):
+        await transport.execute(_case("paper-research-no-write"), 0)
+
+    assert client.posts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "created_payload",
+    [
+        {
+            "id": "00000000-0000-4000-8000-000000000099",
+            "tenant_id": "00000000-0000-4000-8000-000000000010",
+            "created_by_user_id": "00000000-0000-4000-8000-000000000002",
+        },
+        {
+            "id": "00000000-0000-4000-8000-000000000099",
+            "created_by_user_id": "00000000-0000-4000-8000-000000000001",
+        },
+    ],
+    ids=["wrong-user", "missing-tenant"],
+)
+async def test_tampered_created_run_identity_stops_before_wait_or_resume(
+    monkeypatch: pytest.MonkeyPatch,
+    created_payload: dict[str, Any],
+) -> None:
+    import httpx
+
+    transport = _durable_transport(monkeypatch)
+    client = _IdentityHttpClient(
+        user_id=transport.user_id,
+        tenant_id=transport.tenant_id,
+        created_payload=created_payload,
+    )
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **_kwargs: client)
+
+    with pytest.raises(RuntimeError, match="identity"):
+        await transport.execute(_case("paper-buy-approved"), 0)
+
+    assert len(client.posts) == 1
+    assert client.posts[0].endswith("/runs")
+
+
 @pytest.mark.parametrize(
     "outcome",
     [
@@ -876,6 +985,53 @@ class _FakeCollector:
                 "current_generation": True,
             },
         }
+
+
+class _LifecycleCollector(_FakeCollector):
+    active = False
+
+    @asynccontextmanager
+    async def sample_lock(self, *, tenant_id: str, user_id: str):
+        assert tenant_id == _LifecycleTransport.tenant_id
+        assert user_id == _LifecycleTransport.user_id
+        assert not self.active
+        self.active = True
+        try:
+            yield
+        finally:
+            self.active = False
+
+    async def prepare(self, **kwargs: Any) -> None:
+        assert self.active
+        await super().prepare(**kwargs)
+
+    async def capture(self, **kwargs: Any) -> dict[str, Any]:
+        assert self.active
+        return await super().capture(**kwargs)
+
+
+class _LifecycleTransport(_FakeTransport):
+    tenant_id = "00000000-0000-4000-8000-000000000010"
+
+    def __init__(self, collector: _LifecycleCollector) -> None:
+        self._collector = collector
+
+    async def execute(self, scenario: Scenario, run_idx: int) -> TransportObservation:
+        assert self._collector.active
+        return await super().execute(scenario, run_idx)
+
+
+@pytest.mark.asyncio
+async def test_runner_holds_sample_lock_across_prepare_capture_execute_and_after() -> None:
+    collector = _LifecycleCollector()
+    [result] = await run_scenarios(
+        [_case("paper-buy-approved")],
+        outcome_transport=_LifecycleTransport(collector),
+        outcome_collector=collector,
+    )
+
+    assert result.error is None
+    assert collector.active is False
 
 
 @pytest.mark.asyncio

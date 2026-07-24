@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Protocol
@@ -29,6 +30,14 @@ logger = logging.getLogger(__name__)
 
 # 评测固定 user_id —— 必须是合法 UUID(memory_search 等按 UUID 解析;"eval" 会炸)。
 _EVAL_USER_ID = "00000000-0000-4000-8000-000000000001"
+
+
+class OutcomeEvalLockUnavailableError(RuntimeError):
+    """Another process owns the dedicated stateful-eval identity."""
+
+
+class OutcomeEvalIdentityError(RuntimeError):
+    """The configured token, tenant, user, or created Run identity is unsafe."""
 
 
 @dataclass(frozen=True)
@@ -103,6 +112,10 @@ class DurableRunHttpTransport:
         self._timeout_s = float(os.getenv("CHATLOOP_EVAL_RUN_TIMEOUT_S", "60"))
         self._batch_id = uuid4().hex
 
+    @property
+    def tenant_id(self) -> str:
+        return str(self._tenant_id)
+
     async def execute(self, scenario: Scenario, run_idx: int) -> TransportObservation:
         import httpx
 
@@ -111,13 +124,14 @@ class DurableRunHttpTransport:
             "Idempotency-Key": f"eval:{self._batch_id}:{scenario.case_id}:{run_idx}",
         }
         async with httpx.AsyncClient(base_url=self._base_url, timeout=10) as client:
+            await self._preflight_identity(client, headers)
             response = await client.post(
                 f"/api/v1/tenants/{self._tenant_id}/runs",
                 headers=headers,
                 json={"prompt": scenario.user_input},
             )
             response.raise_for_status()
-            run_id = str(response.json()["id"])
+            run_id = self._validated_created_run_id(response.json())
             status, pause = await self._wait(run_id)
             if pause is not None and pause.pause_type == "approval":
                 resume_payload = self._resume_payload(scenario, pause.request_payload)
@@ -145,6 +159,65 @@ class DurableRunHttpTransport:
             run_state=run_state,
         )
 
+    async def _preflight_identity(
+        self,
+        client: Any,
+        headers: dict[str, str],
+    ) -> None:
+        auth_headers = {"Authorization": headers["Authorization"]}
+        try:
+            me = await client.get("/auth/me", headers=auth_headers)
+            me.raise_for_status()
+            me_payload = me.json()
+        except Exception as exc:
+            raise OutcomeEvalIdentityError("eval auth preflight failed") from exc
+        try:
+            actual_user_id = UUID(str(me_payload["id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OutcomeEvalIdentityError(
+                "eval auth preflight returned no valid user id"
+            ) from exc
+        if actual_user_id != UUID(self.user_id):
+            raise OutcomeEvalIdentityError(
+                "eval auth token does not belong to the dedicated eval user"
+            )
+
+        try:
+            tenants = await client.get("/api/v1/tenants", headers=auth_headers)
+            tenants.raise_for_status()
+            payload = tenants.json()
+        except Exception as exc:
+            raise OutcomeEvalIdentityError("eval tenant preflight failed") from exc
+        if not isinstance(payload, list):
+            raise OutcomeEvalIdentityError("eval tenant preflight returned an invalid response")
+        try:
+            tenant_ids = {UUID(str(item["id"])) for item in payload if isinstance(item, dict)}
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OutcomeEvalIdentityError(
+                "eval tenant preflight returned an invalid tenant id"
+            ) from exc
+        if self._tenant_id not in tenant_ids:
+            raise OutcomeEvalIdentityError(
+                "eval auth token is not a member of the dedicated eval tenant"
+            )
+
+    def _validated_created_run_id(self, payload: Any) -> str:
+        if not isinstance(payload, dict):
+            raise OutcomeEvalIdentityError("created eval Run response is not an object")
+        try:
+            run_id = UUID(str(payload["id"]))
+            tenant_id = UUID(str(payload["tenant_id"]))
+            user_id = UUID(str(payload["created_by_user_id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OutcomeEvalIdentityError(
+                "created eval Run response is missing identity fields"
+            ) from exc
+        if tenant_id != self._tenant_id or user_id != UUID(self.user_id):
+            raise OutcomeEvalIdentityError(
+                "created eval Run identity does not match dedicated eval identity"
+            )
+        return str(run_id)
+
     async def _wait(self, run_id: str) -> tuple[str, Any | None]:
         import asyncio
         import time
@@ -158,6 +231,13 @@ class DurableRunHttpTransport:
                 run = await session.get(Run, UUID(run_id))
                 if run is None:
                     raise RuntimeError("created eval Run disappeared")
+                if (
+                    UUID(str(run.tenant_id)) != self._tenant_id
+                    or UUID(str(run.created_by_user_id)) != UUID(self.user_id)
+                ):
+                    raise OutcomeEvalIdentityError(
+                        "persisted eval Run identity does not match preflight"
+                    )
                 status = str(run.status)
                 pause = await session.scalar(
                     select(RunPause)
@@ -338,6 +418,60 @@ class SqlOutcomeCollector:
     def __init__(self, session_factory: Any) -> None:
         self._session_factory = session_factory
         self._batch_id = uuid4().hex
+        self._active_lock: tuple[int, Any] | None = None
+
+    @asynccontextmanager
+    async def sample_lock(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+    ) -> Any:
+        import asyncio
+        import hashlib
+
+        from sqlalchemy import text
+
+        if self._active_lock is not None:
+            raise RuntimeError("outcome eval sample advisory lock cannot be nested")
+        identity = f"{UUID(tenant_id)}:{UUID(user_id)}".encode()
+        lock_key = int.from_bytes(hashlib.sha256(identity).digest()[:8], "big", signed=True)
+        session = self._session_factory()
+        try:
+            acquired = bool(
+                await session.scalar(
+                    text("SELECT pg_try_advisory_lock(:lock_key)"),
+                    {"lock_key": lock_key},
+                )
+            )
+        except BaseException:
+            await session.close()
+            raise
+        if not acquired:
+            await session.close()
+            raise OutcomeEvalLockUnavailableError(
+                "another stateful outcome eval owns the dedicated eval identity"
+            )
+        self._active_lock = (lock_key, session)
+        try:
+            yield
+        finally:
+            async def release() -> None:
+                try:
+                    await session.execute(
+                        text("SELECT pg_advisory_unlock(:lock_key)"),
+                        {"lock_key": lock_key},
+                    )
+                finally:
+                    await session.close()
+                    self._active_lock = None
+
+            cleanup = asyncio.create_task(release())
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                await cleanup
+                raise
 
     async def prepare(
         self,
@@ -441,10 +575,13 @@ class SqlOutcomeCollector:
         from app.models.paper_order import PaperOrder
         from app.models.run import Run
         from app.models.watchlist import WatchlistAudit, WatchlistItem
-        from sqlalchemy import func, select
+        from sqlalchemy import func, select, text
 
         uid = UUID(user_id)
-        async with self._session_factory() as session:
+        async with self._session_factory() as session, session.begin():
+            await session.execute(
+                text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            )
             source_session_id = None
             if run_id is not None:
                 run = await session.get(Run, UUID(run_id))
@@ -455,6 +592,7 @@ class SqlOutcomeCollector:
                 .order_by(PaperAccount.generation.desc())
                 .limit(1)
             )
+            await self._after_capture_account_read()
             order_count = int(
                 await session.scalar(
                     select(func.count()).select_from(PaperOrder).where(PaperOrder.user_id == uid)
@@ -559,12 +697,21 @@ class SqlOutcomeCollector:
                 }
             return snapshot
 
+    async def _after_capture_account_read(self) -> None:
+        """Internal observation seam; capture tests use it to interleave a writer."""
+
 
 def _decimal_text(value: Any) -> str | None:
     if value is None:
         return None
     text = format(value, "f")
     return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+@asynccontextmanager
+async def _unlocked_sample() -> Any:
+    """Compatibility seam for unit transports/collectors with no external state."""
+    yield
 
 
 async def run_scenarios(
@@ -608,22 +755,36 @@ async def run_scenarios(
             for scenario in outcome_scenarios:
                 for run_idx in range(k):
                     try:
-                        await collector.prepare(
-                            user_id=transport.user_id,
-                            scenario=scenario,
-                            sample_key=f"{scenario.case_id}:{run_idx}",
-                        )
-                        before = await collector.capture(
-                            user_id=transport.user_id,
-                            run_id=None,
-                            scenario=scenario,
-                        )
-                        observed = await transport.execute(scenario, run_idx)
-                        after = await collector.capture(
-                            user_id=transport.user_id,
-                            run_id=observed.run_id,
-                            scenario=scenario,
-                        )
+                        lock_factory = getattr(collector, "sample_lock", None)
+                        if lock_factory is None:
+                            sample = _unlocked_sample()
+                        else:
+                            tenant_id = getattr(transport, "tenant_id", None)
+                            if tenant_id is None:
+                                raise RuntimeError(
+                                    "stateful outcome transport does not expose tenant identity"
+                                )
+                            sample = lock_factory(
+                                tenant_id=tenant_id,
+                                user_id=transport.user_id,
+                            )
+                        async with sample:
+                            await collector.prepare(
+                                user_id=transport.user_id,
+                                scenario=scenario,
+                                sample_key=f"{scenario.case_id}:{run_idx}",
+                            )
+                            before = await collector.capture(
+                                user_id=transport.user_id,
+                                run_id=None,
+                                scenario=scenario,
+                            )
+                            observed = await transport.execute(scenario, run_idx)
+                            after = await collector.capture(
+                                user_id=transport.user_id,
+                                run_id=observed.run_id,
+                                scenario=scenario,
+                            )
                         results.append(
                             SutResult(
                                 case_id=scenario.case_id,
@@ -640,6 +801,8 @@ async def run_scenarios(
                                 },
                             )
                         )
+                    except (OutcomeEvalIdentityError, OutcomeEvalLockUnavailableError):
+                        raise
                     except Exception as exc:  # noqa: BLE001
                         logger.exception("outcome case %s run %d failed", scenario.case_id, run_idx)
                         results.append(
