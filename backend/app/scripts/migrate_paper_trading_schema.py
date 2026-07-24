@@ -3,17 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import (
-    CheckConstraint,
-    ForeignKeyConstraint,
-    Table,
-    UniqueConstraint,
-    inspect,
-    text,
-)
+from sqlalchemy import Table, inspect, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.schema import AddConstraint, CreateIndex
 
@@ -35,7 +29,16 @@ from app.models.paper_order import (
 )
 from app.models.position import Position
 from app.models.trade import Trade
-from app.models.watchlist import WatchlistAudit, WatchlistItem
+from app.models.watchlist import (
+    WATCHLIST_AUDIT_FUNCTION_BODY,
+    WATCHLIST_AUDIT_FUNCTION_DDL,
+    WATCHLIST_AUDIT_FUNCTION_NAME,
+    WATCHLIST_AUDIT_TRIGGER_DDL,
+    WATCHLIST_AUDIT_TRIGGER_NAME,
+    WatchlistAudit,
+    WatchlistItem,
+)
+from app.scripts.migrate_phase3_execution_schema import canonical_table_drift
 
 _DOMAIN_TABLES = tuple(
     model.__table__
@@ -86,24 +89,6 @@ def _named_constraint_names(connection: Connection, table_name: str) -> set[str]
         + inspector.get_check_constraints(table_name)
     )
     return {str(item["name"]) for item in reflected if item.get("name")}
-
-
-def _expected_constraint_names(table: Table) -> set[str]:
-    return {
-        str(constraint.name)
-        for constraint in table.constraints
-        if constraint.name is not None
-        and (
-            isinstance(
-                constraint,
-                (CheckConstraint, ForeignKeyConstraint, UniqueConstraint),
-            )
-        )
-    }
-
-
-def _expected_index_names(table: Table) -> set[str]:
-    return {str(index.name) for index in table.indexes if index.name is not None}
 
 
 def _actual_index_names(connection: Connection, table_name: str) -> set[str]:
@@ -201,6 +186,82 @@ def _upgrade_trade_scope(connection: Connection, changes: list[str]) -> None:
     )
 
 
+def _normalize_sql(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _watchlist_guard_drift(connection: Connection) -> list[str]:
+    schema = str(connection.scalar(text("SELECT current_schema()")))
+    functions = connection.execute(
+        text(
+            "SELECT p.oid, p.prorettype = 'trigger'::regtype AS returns_trigger, "
+            "l.lanname, p.prosrc, p.prosecdef, p.provolatile, p.proconfig "
+            "FROM pg_proc p "
+            "JOIN pg_namespace n ON n.oid = p.pronamespace "
+            "JOIN pg_language l ON l.oid = p.prolang "
+            "WHERE n.nspname = :schema AND p.proname = :name AND p.pronargs = 0"
+        ),
+        {"schema": schema, "name": WATCHLIST_AUDIT_FUNCTION_NAME},
+    ).mappings().all()
+    drift: list[str] = []
+    if len(functions) != 1:
+        drift.append(f"watchlist append-only function count differs: {len(functions)}")
+        function_oid = None
+    else:
+        function = functions[0]
+        function_oid = int(function["oid"])
+        if (
+            not bool(function["returns_trigger"])
+            or function["lanname"] != "plpgsql"
+            or _normalize_sql(str(function["prosrc"]))
+            != _normalize_sql(WATCHLIST_AUDIT_FUNCTION_BODY)
+            or bool(function["prosecdef"])
+            or function["provolatile"] != "v"
+            or function["proconfig"] is not None
+        ):
+            drift.append("watchlist append-only function definition differs")
+
+    triggers = connection.execute(
+        text(
+            "SELECT t.tgfoid, t.tgtype, t.tgenabled, t.tgqual, t.tgnargs "
+            "FROM pg_trigger t "
+            "JOIN pg_class c ON c.oid = t.tgrelid "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = :schema AND c.relname = 'watchlist_audits' "
+            "AND t.tgname = :name AND NOT t.tgisinternal"
+        ),
+        {"schema": schema, "name": WATCHLIST_AUDIT_TRIGGER_NAME},
+    ).mappings().all()
+    if len(triggers) != 1:
+        drift.append(f"watchlist append-only trigger count differs: {len(triggers)}")
+    else:
+        trigger = triggers[0]
+        if (
+            function_oid is None
+            or int(trigger["tgfoid"]) != function_oid
+            or int(trigger["tgtype"]) != 27  # ROW | BEFORE | DELETE | UPDATE
+            or trigger["tgenabled"] != "O"
+            or trigger["tgqual"] is not None
+            or int(trigger["tgnargs"]) != 0
+        ):
+            drift.append("watchlist append-only trigger definition differs")
+    return drift
+
+
+def _repair_watchlist_guard(connection: Connection, changes: list[str]) -> None:
+    if not _watchlist_guard_drift(connection):
+        return
+    connection.exec_driver_sql(
+        f"DROP TRIGGER IF EXISTS {WATCHLIST_AUDIT_TRIGGER_NAME} ON watchlist_audits"
+    )
+    connection.exec_driver_sql(
+        f"DROP FUNCTION IF EXISTS {WATCHLIST_AUDIT_FUNCTION_NAME}()"
+    )
+    connection.exec_driver_sql(WATCHLIST_AUDIT_FUNCTION_DDL)
+    connection.exec_driver_sql(WATCHLIST_AUDIT_TRIGGER_DDL)
+    changes.append("repair watchlist append-only guard")
+
+
 def _schema_drift(connection: Connection) -> list[str]:
     inspector = inspect(connection)
     existing = set(inspector.get_table_names())
@@ -209,21 +270,9 @@ def _schema_drift(connection: Connection) -> list[str]:
     for table in _EXPECTED_TABLES:
         if table.name not in existing:
             continue
-        expected_columns = set(table.columns.keys())
-        actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
-        if actual_columns != expected_columns:
-            drift.append(
-                f"{table.name} columns expected {sorted(expected_columns)}, "
-                f"got {sorted(actual_columns)}"
-            )
-        missing_constraints = _expected_constraint_names(table) - _named_constraint_names(
-            connection, table.name
-        )
-        if missing_constraints:
-            drift.append(f"{table.name} missing constraints {sorted(missing_constraints)}")
-        missing_indexes = _expected_index_names(table) - _actual_index_names(connection, table.name)
-        if missing_indexes:
-            drift.append(f"{table.name} missing indexes {sorted(missing_indexes)}")
+        drift.extend(canonical_table_drift(connection, table))
+    if "watchlist_audits" in existing:
+        drift.extend(_watchlist_guard_drift(connection))
     return drift
 
 
@@ -271,6 +320,7 @@ def migrate_paper_trading_schema(
         changes.extend(f"create {table_name}" for table_name in sorted(created))
         _upgrade_position_scope(connection, changes)
         _upgrade_trade_scope(connection, changes)
+        _repair_watchlist_guard(connection, changes)
         verify_paper_trading_schema_connection(connection)
     return tuple(changes)
 

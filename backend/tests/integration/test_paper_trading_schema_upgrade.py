@@ -7,9 +7,13 @@ import pytest
 from app.core.database import Base
 from app.models.user import User
 from app.processes.run_control_init import initialize_schema
-from app.scripts.migrate_paper_trading_schema import migrate_paper_trading_schema
+from app.scripts.migrate_paper_trading_schema import (
+    migrate_paper_trading_schema,
+    verify_paper_trading_schema,
+)
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 _PAPER_TABLES = (
@@ -193,3 +197,156 @@ def test_operator_init_paper_schema_upgrade_is_idempotent(
     with legacy_application_engine.connect() as connection:
         assert connection.scalar(text("SELECT count(*) FROM positions")) == 1
         assert connection.scalar(text("SELECT count(*) FROM trades")) == 1
+
+
+def test_verifier_rejects_same_named_check_with_wrong_expression(
+    legacy_application_engine: Engine,
+) -> None:
+    migrate_paper_trading_schema(legacy_application_engine)
+    with legacy_application_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE positions "
+                "DROP CONSTRAINT ck_positions_paper_scope_all_or_none, "
+                "ADD CONSTRAINT ck_positions_paper_scope_all_or_none CHECK (true)"
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="positions CHECK constraints differ"):
+        verify_paper_trading_schema(legacy_application_engine)
+    with pytest.raises(RuntimeError, match="positions CHECK constraints differ"):
+        migrate_paper_trading_schema(legacy_application_engine)
+
+
+def test_verifier_rejects_same_named_partial_index_with_wrong_predicate(
+    legacy_application_engine: Engine,
+) -> None:
+    migrate_paper_trading_schema(legacy_application_engine)
+    with legacy_application_engine.begin() as connection:
+        connection.execute(text("DROP INDEX uq_positions_manual_user_tscode"))
+        connection.execute(
+            text(
+                "CREATE UNIQUE INDEX uq_positions_manual_user_tscode "
+                "ON positions (user_id, ts_code)"
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="positions indexes differ"):
+        verify_paper_trading_schema(legacy_application_engine)
+    with pytest.raises(RuntimeError, match="positions indexes differ"):
+        migrate_paper_trading_schema(legacy_application_engine)
+
+
+@pytest.mark.parametrize("drift", ["missing_trigger", "wrong_function"])
+def test_migration_repairs_watchlist_append_only_guard_and_blocks_mutation(
+    legacy_application_engine: Engine,
+    drift: str,
+) -> None:
+    user_id, _, _ = _seed_legacy_manual_rows(legacy_application_engine)
+    migrate_paper_trading_schema(legacy_application_engine)
+    audit_id = uuid.uuid4()
+    with legacy_application_engine.begin() as connection:
+        connection.execute(text("DROP TRIGGER watchlist_audits_append_only ON watchlist_audits"))
+        if drift == "wrong_function":
+            connection.execute(
+                text(
+                    "CREATE OR REPLACE FUNCTION reject_watchlist_audit_mutation() "
+                    "RETURNS trigger AS $$ BEGIN RETURN NEW; END; $$ LANGUAGE plpgsql"
+                )
+            )
+        connection.execute(
+            text(
+                "INSERT INTO watchlist_audits "
+                "(id, item_id, user_id, action, created_at) "
+                "VALUES (:id, :item_id, :user_id, 'add', now())"
+            ),
+            {"id": audit_id, "item_id": uuid.uuid4(), "user_id": user_id},
+        )
+
+    with pytest.raises(RuntimeError, match="watchlist append-only"):
+        verify_paper_trading_schema(legacy_application_engine)
+
+    assert "repair watchlist append-only guard" in migrate_paper_trading_schema(
+        legacy_application_engine
+    )
+    verify_paper_trading_schema(legacy_application_engine)
+
+    with (
+        pytest.raises(DBAPIError) as update_error,
+        legacy_application_engine.begin() as connection,
+    ):
+        connection.execute(
+            text("UPDATE watchlist_audits SET action = 'update' WHERE id = :id"),
+            {"id": audit_id},
+        )
+    assert getattr(update_error.value.orig, "pgcode", None) == "55000"
+
+    with (
+        pytest.raises(DBAPIError) as delete_error,
+        legacy_application_engine.begin() as connection,
+    ):
+        connection.execute(
+            text("DELETE FROM watchlist_audits WHERE id = :id"),
+            {"id": audit_id},
+        )
+    assert getattr(delete_error.value.orig, "pgcode", None) == "55000"
+
+
+def test_migration_obeys_advisory_lock_timeout_without_partial_ddl(
+    legacy_application_engine: Engine,
+) -> None:
+    blocker = legacy_application_engine.connect()
+    transaction = blocker.begin()
+    try:
+        blocker.execute(
+            text(
+                "SELECT pg_advisory_xact_lock("
+                "hashtextextended('paper_trading_schema_upgrade', 0))"
+            )
+        )
+        with pytest.raises(DBAPIError, match="lock timeout"):
+            migrate_paper_trading_schema(
+                legacy_application_engine,
+                lock_timeout_ms=100,
+                statement_timeout_ms=2_000,
+            )
+    finally:
+        transaction.rollback()
+        blocker.close()
+
+    assert set(_PAPER_TABLES + _WATCHLIST_TABLES).isdisjoint(
+        inspect(legacy_application_engine).get_table_names()
+    )
+
+
+def test_failed_canonical_verification_rolls_back_all_upgrade_ddl(
+    legacy_application_engine: Engine,
+) -> None:
+    _, position_id, trade_id = _seed_legacy_manual_rows(legacy_application_engine)
+    with legacy_application_engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE positions ALTER COLUMN asset_class TYPE varchar(64)")
+        )
+
+    with pytest.raises(RuntimeError, match=r"positions\.asset_class type differs"):
+        migrate_paper_trading_schema(legacy_application_engine)
+
+    inspector = inspect(legacy_application_engine)
+    assert set(_PAPER_TABLES + _WATCHLIST_TABLES).isdisjoint(
+        inspector.get_table_names()
+    )
+    assert "paper_account_id" not in {
+        column["name"] for column in inspector.get_columns("positions")
+    }
+    assert "paper_account_id" not in {
+        column["name"] for column in inspector.get_columns("trades")
+    }
+    with legacy_application_engine.connect() as connection:
+        assert connection.scalar(
+            text("SELECT count(*) FROM positions WHERE id = :id"),
+            {"id": position_id},
+        ) == 1
+        assert connection.scalar(
+            text("SELECT count(*) FROM trades WHERE id = :id"),
+            {"id": trade_id},
+        ) == 1

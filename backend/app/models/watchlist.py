@@ -24,6 +24,26 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.core.database import Base
 
+WATCHLIST_AUDIT_FUNCTION_NAME = "reject_watchlist_audit_mutation"
+WATCHLIST_AUDIT_TRIGGER_NAME = "watchlist_audits_append_only"
+WATCHLIST_AUDIT_FUNCTION_BODY = """
+BEGIN
+    RAISE EXCEPTION 'watchlist_audits are append-only'
+        USING ERRCODE = '55000';
+END;
+"""
+WATCHLIST_AUDIT_FUNCTION_DDL = f"""
+CREATE OR REPLACE FUNCTION {WATCHLIST_AUDIT_FUNCTION_NAME}()
+RETURNS trigger AS $$
+{WATCHLIST_AUDIT_FUNCTION_BODY}
+$$ LANGUAGE plpgsql
+"""
+WATCHLIST_AUDIT_TRIGGER_DDL = f"""
+CREATE TRIGGER {WATCHLIST_AUDIT_TRIGGER_NAME}
+BEFORE UPDATE OR DELETE ON watchlist_audits
+FOR EACH ROW EXECUTE FUNCTION {WATCHLIST_AUDIT_FUNCTION_NAME}()
+"""
+
 
 class WatchlistItem(Base):
     __tablename__ = "watchlist_items"
@@ -107,26 +127,10 @@ class WatchlistAudit(Base):
 event.listen(
     WatchlistAudit.__table__,
     "after_create",
-    DDL(
-        """
-        CREATE OR REPLACE FUNCTION reject_watchlist_audit_mutation()
-        RETURNS trigger AS $$
-        BEGIN
-            RAISE EXCEPTION 'watchlist_audits are append-only'
-                USING ERRCODE = '55000';
-        END;
-        $$ LANGUAGE plpgsql
-        """
-    ).execute_if(dialect="postgresql"),
+    DDL(WATCHLIST_AUDIT_FUNCTION_DDL).execute_if(dialect="postgresql"),
 )
 event.listen(
     WatchlistAudit.__table__,
     "after_create",
-    DDL(
-        """
-        CREATE TRIGGER watchlist_audits_append_only
-        BEFORE UPDATE OR DELETE ON watchlist_audits
-        FOR EACH ROW EXECUTE FUNCTION reject_watchlist_audit_mutation()
-        """
-    ).execute_if(dialect="postgresql"),
+    DDL(WATCHLIST_AUDIT_TRIGGER_DDL).execute_if(dialect="postgresql"),
 )

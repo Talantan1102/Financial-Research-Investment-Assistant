@@ -135,7 +135,10 @@ def _default_sql(value: Any) -> str | None:
         "",
         str(value).lower().replace('"', ""),
     )
-    return re.sub(r"[\s()]", "", sql)
+    sql = re.sub(r"[\s()]", "", sql)
+    if len(sql) >= 2 and sql[0] == sql[-1] == "'":
+        sql = sql[1:-1]
+    return sql
 
 
 def _check_sql(value: Any, connection: Connection) -> str:
@@ -146,13 +149,14 @@ def _check_sql(value: Any, connection: Connection) -> str:
         )
     sql = str(value).lower().replace('"', "")
     sql = re.sub(
-        r"::(?:character varying|text|numeric|integer|boolean)(?:\[\])?",
+        r"::(?:character varying|[a-z_][a-z0-9_]*)(?:\[\])?",
         "",
         sql,
     )
     sql = re.sub(r"=\s*any\s*\(\s*array\[(.*?)\]\s*\)", r" in (\1)", sql)
     sql = re.sub(r"[\s()]", "", sql)
     sql = re.sub(r"=anyarray\[(.*?)\]", r"in\1", sql)
+    sql = re.sub(r"([a-z_][a-z0-9_.]*)<>allarray\[(.*?)\]", r"\1notin\2", sql)
     sql = re.sub(
         r"([a-z_][a-z0-9_]*)between(-?\d+)and(-?\d+)",
         r"\1>=\2and\1<=\3",
@@ -810,8 +814,8 @@ def _semantic_index_drift(connection: Connection, table: Table) -> list[str]:
     return [] if actual == expected else [f"{table.name} indexes differ"]
 
 
-def _run_control_table_drift(connection: Connection, table: Table) -> list[str]:
-    """Return the complete read-only contract drift for one control-plane table."""
+def canonical_table_drift(connection: Connection, table: Table) -> list[str]:
+    """Return canonical column/constraint/index drift for one PostgreSQL table."""
     inspector = inspect(connection)
     reflected_columns = {column["name"]: column for column in inspector.get_columns(table.name)}
     expected_names = set(table.columns.keys())
@@ -858,7 +862,7 @@ def verify_run_control_schema_connection(connection: Connection) -> None:
     drift = [f"missing tables {sorted(missing)}"] if missing else []
     for table in _RUN_CONTROL_TABLES:
         if table.name in existing:
-            drift.extend(_run_control_table_drift(connection, table))
+            drift.extend(canonical_table_drift(connection, table))
     if drift:
         raise _unsafe(
             "maintenance migration required: "
