@@ -726,6 +726,89 @@ describe('useRunSSE', () => {
     expect(runApi.getRun).not.toHaveBeenCalled()
   })
 
+  it('hands one stream owner from run one to a newer running run and consumes its events', async () => {
+    let resolveHandoff!: (value: RunSessionDetail) => void
+    const appendToken = vi.spyOn(currentChatActions, 'appendRunToken')
+    vi.mocked(runApi.fetchRunEvents)
+      .mockResolvedValueOnce(chunkedSse([]))
+      .mockResolvedValueOnce(chunkedSse([
+        'id: v2:1:1-0\nevent: token\ndata: {"content":"handoff token"}\n\n',
+        'id: v2:2:1-1\nevent: run.completed\ndata: {"content":"run two done"}\n\n',
+      ]))
+    vi.mocked(runApi.getRunSession)
+      .mockImplementationOnce(
+        () => new Promise<RunSessionDetail>((resolve) => { resolveHandoff = resolve }),
+      )
+      .mockResolvedValue({
+        ...detail('run two done'),
+        latest_run_id: 'run-2',
+        latest_run_status: 'completed',
+      })
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'running',
+      maxReconnectAttempts: 0,
+    }))
+    await waitFor(() => expect(runApi.getRunSession).toHaveBeenCalledTimes(1))
+
+    act(() => resolveHandoff({
+      ...detail(),
+      active_run_id: 'run-2',
+      active_run_status: 'running',
+      latest_run_id: 'run-2',
+      latest_run_status: 'running',
+    }))
+
+    await waitFor(() => expect(runApi.fetchRunEvents).toHaveBeenCalledWith(
+      'tenant-1',
+      'run-2',
+      expect.objectContaining({ lastEventId: null }),
+    ))
+    await waitFor(() => expect(result.current.status).toBe('completed'))
+    expect(appendToken).toHaveBeenCalledWith('handoff token')
+    expect(result.current.activeRunId).toBeNull()
+    expect(runApi.fetchRunEvents).toHaveBeenCalledTimes(2)
+  })
+
+  it('consumes a pause event after handing the stream to a newer run', async () => {
+    let resolveHandoff!: (value: RunSessionDetail) => void
+    vi.mocked(runApi.fetchRunEvents)
+      .mockResolvedValueOnce(chunkedSse([]))
+      .mockResolvedValueOnce(chunkedSse([
+        'id: v2:1:1-0\nevent: run.paused\ndata: {"pause_id":"pause-2","pause_type":"input","request":{"question":"run two input"}}\n\n',
+      ]))
+    vi.mocked(runApi.getRunSession)
+      .mockImplementationOnce(
+        () => new Promise<RunSessionDetail>((resolve) => { resolveHandoff = resolve }),
+      )
+      .mockRejectedValueOnce(new TypeError('snapshot temporarily unavailable'))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_input', 'run-2'))
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'running',
+      maxReconnectAttempts: 0,
+    }))
+    await waitFor(() => expect(runApi.getRunSession).toHaveBeenCalledTimes(1))
+
+    act(() => resolveHandoff({
+      ...detail(),
+      active_run_id: 'run-2',
+      active_run_status: 'running',
+      latest_run_id: 'run-2',
+      latest_run_status: 'running',
+    }))
+
+    await waitFor(() => expect(result.current.pause?.id).toBe('pause-2'))
+    expect(result.current.activeRunId).toBe('run-2')
+    expect(result.current.status).toBe('waiting_input')
+    expect(runApi.fetchRunEvents).toHaveBeenCalledTimes(2)
+    expect(runApi.getRun).toHaveBeenCalledWith('tenant-1', 'run-2', expect.any(Function))
+  })
+
   it('still calibrates Run truth when Session calibration is unavailable', async () => {
     vi.mocked(runApi.cancelRun).mockRejectedValue(new TypeError('timeout'))
     vi.mocked(runApi.getRunSession).mockRejectedValue(new TypeError('session unavailable'))

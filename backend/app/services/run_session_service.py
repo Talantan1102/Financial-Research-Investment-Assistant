@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
@@ -76,6 +76,10 @@ class RunSessionService:
         revision_cursor: str | None = None,
     ) -> RunSessionDetail:
         async with self._session_factory() as session, session.begin():
+            # This service owns a fresh Session for the detail request. Set the
+            # isolation level before its first read so authorization, messages,
+            # Run control state, and revisions share one PostgreSQL snapshot.
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"))
             run_session = await self._get_visible_session(session, tenant_id, session_id, actor_id)
             parent = aliased(Run)
             child = aliased(Run)

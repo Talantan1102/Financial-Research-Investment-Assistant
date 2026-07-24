@@ -290,12 +290,13 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       generation: number,
       controller: AbortController,
     ) => {
+      let currentRunId = runId
       let reconnectAttempt = 0
       while (isCurrent(generation, controller.signal)) {
         let terminalFrame = false
         let streamError: unknown = null
         try {
-          const response = await fetchRunEvents(tenantId, runId, {
+          const response = await fetchRunEvents(tenantId, currentRunId, {
             lastEventId: cursorRef.current,
             signal: controller.signal,
             fetchImpl,
@@ -369,7 +370,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         try {
           calibrated = await calibrate(
             tenantId,
-            runId,
+            currentRunId,
             sessionId,
             generation,
             controller.signal,
@@ -378,13 +379,22 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
           streamError ??= error
         }
         if (!isCurrent(generation, controller.signal)) return
+        if (calibrated && calibrated.runId !== currentRunId) {
+          if (calibrated.runId !== null && ACTIVE.has(calibrated.status)) {
+            // Keep exactly one stream owner in this generation. A durable
+            // Session snapshot may hand it a newer active Run; switch the
+            // loop target and reset per-stream replay state without recursion.
+            currentRunId = calibrated.runId
+            reconnectAttempt = 0
+            cursorRef.current = null
+            seenIdsRef.current = new Set()
+            continue
+          }
+          return
+        }
         if (
           calibrated &&
-          (
-            calibrated.runId !== runId ||
-            TERMINAL.has(calibrated.status) ||
-            !ACTIVE.has(calibrated.status)
-          )
+          (TERMINAL.has(calibrated.status) || !ACTIVE.has(calibrated.status))
         ) {
           return
         }
