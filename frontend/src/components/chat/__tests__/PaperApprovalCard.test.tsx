@@ -62,6 +62,33 @@ const preview = {
   rules_version: 'cn-a-v1',
 }
 
+function nextRequest(callId: string, quantity: number) {
+  return {
+    ...request,
+    tool_calls: [
+      {
+        ...request.tool_calls[0],
+        id: callId,
+        arguments: JSON.stringify({
+          ...JSON.parse(request.tool_calls[0].arguments),
+          quantity,
+        }),
+      },
+    ],
+    editable_tool_call_ids: [callId],
+  }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
+}
+
 describe('<PaperApprovalCard>', () => {
   beforeEach(() => {
     vi.mocked(previewPaperOrder).mockReset()
@@ -180,6 +207,83 @@ describe('<PaperApprovalCard>', () => {
     expect(screen.getByText('批准前请先预览')).toBeInTheDocument()
     act(() => resolveOld(preview))
     expect(screen.queryByText('¥299,792.91')).not.toBeInTheDocument()
+  })
+
+  it('lets a replacement pause submit immediately and ignores the old resolved result', async () => {
+    const user = userEvent.setup()
+    const oldResume = deferred<{ ok: boolean; error?: string }>()
+    const newResume = deferred<{ ok: boolean; error?: string }>()
+    const oldHandler = vi.fn(() => oldResume.promise)
+    const newHandler = vi.fn(() => newResume.promise)
+    vi.mocked(previewPaperOrder).mockResolvedValue(preview)
+    const rendered = renderWithProviders(
+      <PaperApprovalCard request={request} onResume={oldHandler} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+    await user.click(await screen.findByRole('button', { name: '确认买入' }))
+    expect(oldHandler).toHaveBeenCalledTimes(1)
+
+    rendered.rerender(
+      <PaperApprovalCard
+        request={nextRequest('trade-2', 200)}
+        onResume={newHandler}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '预览交易' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+    await user.click(await screen.findByRole('button', { name: '确认买入' }))
+    expect(newHandler).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '提交中…' })).toBeDisabled()
+
+    await act(async () => {
+      oldResume.resolve({ ok: false, error: '旧审批失败' })
+      await Promise.resolve()
+    })
+    expect(screen.queryByText('旧审批失败')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '提交中…' })).toBeDisabled()
+
+    await act(async () => {
+      newResume.resolve({ ok: true })
+      await Promise.resolve()
+    })
+  })
+
+  it('keeps a replacement pause isolated when the old resume rejects', async () => {
+    const user = userEvent.setup()
+    const oldResume = deferred<{ ok: boolean; error?: string }>()
+    const newResume = deferred<{ ok: boolean; error?: string }>()
+    const oldHandler = vi.fn(() => oldResume.promise)
+    const newHandler = vi.fn(() => newResume.promise)
+    vi.mocked(previewPaperOrder).mockResolvedValue(preview)
+    const rendered = renderWithProviders(
+      <PaperApprovalCard request={request} onResume={oldHandler} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+    await user.click(await screen.findByRole('button', { name: '确认买入' }))
+    rendered.rerender(
+      <PaperApprovalCard
+        request={nextRequest('trade-3', 300)}
+        onResume={newHandler}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '预览交易' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+    await user.click(await screen.findByRole('button', { name: '确认买入' }))
+    expect(newHandler).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      oldResume.reject(new Error('旧请求异常'))
+      await Promise.resolve()
+    })
+    expect(screen.queryByText('旧请求异常')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '提交中…' })).toBeDisabled()
+
+    await act(async () => {
+      newResume.resolve({ ok: true })
+      await Promise.resolve()
+    })
   })
 
   it('fails closed for malformed tool arguments', () => {

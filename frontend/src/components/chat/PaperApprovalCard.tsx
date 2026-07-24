@@ -6,7 +6,7 @@ import type {
   PaperOrderDraft,
   PaperOrderPreview,
 } from '@/types/paper-trading'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import styles from './PaperApprovalCard.module.scss'
 
 const PAPER_WRITES = new Set([
@@ -109,6 +109,27 @@ function parseOrderDraft(
   }
 }
 
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue)
+  const record = asRecord(value)
+  if (!record) return value
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .map((key) => [key, canonicalJsonValue(record[key])]),
+  )
+}
+
+function approvalIdentity(selected: EditablePaperCall | null): string {
+  if (!selected) return 'unsupported'
+  const parsed = parseArguments(selected.call.arguments)
+  return JSON.stringify([
+    selected.call.id,
+    selected.call.name,
+    canonicalJsonValue(parsed ?? selected.call.arguments),
+  ])
+}
+
 function money(value: string): string {
   const numeric = Number(value)
   return Number.isFinite(numeric)
@@ -143,6 +164,7 @@ export function PaperApprovalCard({
   disabled = false,
 }: PaperApprovalCardProps) {
   const selected = useMemo(() => editablePaperCall(request), [request])
+  const requestIdentity = approvalIdentity(selected)
   const original = useMemo(
     () => (selected ? parseArguments(selected.call.arguments) : null),
     [selected],
@@ -165,50 +187,60 @@ export function PaperApprovalCard({
   const [error, setError] = useState<string | null>(null)
   const previewSequence = useRef(0)
   const revision = useRef(0)
+  const requestGeneration = useRef(0)
+  const resetPayload = useRef({ initialOrder, original })
   const mounted = useRef(true)
   const submitLocked = useRef(false)
-
-  useEffect(
-    () => {
-      mounted.current = true
-      return () => {
-        mounted.current = false
-        previewSequence.current += 1
-      }
-    },
-    [],
-  )
+  resetPayload.current = { initialOrder, original }
 
   useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      previewSequence.current += 1
+    }
+  }, [])
+
+  useLayoutEffect(() => {
+    requestGeneration.current += 1
     previewSequence.current += 1
-    setDraft(initialOrder)
-    setOtherDraft(original ?? {})
+    submitLocked.current = false
+    setDraft(resetPayload.current.initialOrder)
+    setOtherDraft(resetPayload.current.original ?? {})
     setPreview(null)
     setPreviewing(false)
+    setSubmitting(false)
     setDirty(false)
     setError(null)
     revision.current += 1
-  }, [initialOrder, original])
+  }, [requestIdentity])
 
   const respond = async (response: ApprovalResumeResponse) => {
     if (submitLocked.current || disabled) return
+    const generation = requestGeneration.current
     submitLocked.current = true
     setSubmitting(true)
     setError(null)
     try {
       const result = await onResume(response)
-      if (!result.ok && mounted.current) {
+      if (
+        generation === requestGeneration.current &&
+        !result.ok &&
+        mounted.current
+      ) {
         setError(result.error ?? '操作未提交，请重试。')
       }
     } catch (cause) {
-      if (mounted.current) {
+      if (generation === requestGeneration.current && mounted.current) {
         setError(
           cause instanceof Error ? cause.message : '操作未提交，请重试。',
         )
       }
     } finally {
-      submitLocked.current = false
-      if (mounted.current) setSubmitting(false)
+      if (generation === requestGeneration.current) {
+        submitLocked.current = false
+        if (mounted.current) setSubmitting(false)
+      }
     }
   }
 
