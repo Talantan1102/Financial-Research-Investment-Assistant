@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import importlib
 import json
 import os
 import platform
-import resource
 import signal
 import subprocess
 import sys
@@ -25,27 +25,50 @@ from app.skills.script_schemas import (
 )
 from app.skills.skill_workdir import make_skill_workdir
 
+_resource = importlib.import_module("resource") if os.name == "posix" else None
+
 
 def _apply_rlimits(*, memory_mb: int, cpu_seconds: int):
     """Build a preexec_fn closure that caps memory + CPU in the child process.
 
-    POSIX-only. macOS RLIMIT_AS is unreliable for malloc — fall back to
-    RLIMIT_DATA there.
+    Return ``None`` where ``preexec_fn`` and the POSIX resource module are not
+    available. macOS RLIMIT_AS is unreliable for malloc, so use RLIMIT_DATA.
     """
+    if _resource is None:
+        return None
 
     def _set() -> None:
         soft_mem = memory_mb * 1024 * 1024
         if platform.system() != "Darwin":
-            resource.setrlimit(resource.RLIMIT_AS, (soft_mem, soft_mem))
+            _resource.setrlimit(_resource.RLIMIT_AS, (soft_mem, soft_mem))
         else:
             with contextlib.suppress(ValueError, OSError):
-                resource.setrlimit(resource.RLIMIT_DATA, (soft_mem, soft_mem))
+                _resource.setrlimit(_resource.RLIMIT_DATA, (soft_mem, soft_mem))
 
         soft_cpu = cpu_seconds
         hard_cpu = max(cpu_seconds + 5, int(cpu_seconds * 1.5))
-        resource.setrlimit(resource.RLIMIT_CPU, (soft_cpu, hard_cpu))
+        _resource.setrlimit(_resource.RLIMIT_CPU, (soft_cpu, hard_cpu))
 
     return _set
+
+
+def _terminate_process_tree(proc: subprocess.Popen[bytes]) -> None:
+    if os.name == "posix":
+        with contextlib.suppress(ProcessLookupError):
+            posix_os: Any = os
+            posix_signal: Any = signal
+            posix_os.killpg(posix_os.getpgid(proc.pid), posix_signal.SIGKILL)
+        return
+    # taskkill is the Windows equivalent of killing the process group/tree.
+    # Fall back to Popen.kill() if it is unavailable or the process survives.
+    with contextlib.suppress(OSError):
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            check=False,
+            capture_output=True,
+        )
+    if proc.poll() is None:
+        proc.kill()
 
 
 # Sandbox / I/O contract constants — tunable via env/Settings later.
@@ -314,8 +337,7 @@ class SkillExecutor:
                 lambda: proc.communicate(input=stdin_blob, timeout=timeout_s),
             )
         except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            _terminate_process_tree(proc)
             try:
                 stdout_b, stderr_b = proc.communicate(timeout=2)
             except subprocess.TimeoutExpired:

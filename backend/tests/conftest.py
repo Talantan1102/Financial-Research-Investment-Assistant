@@ -5,6 +5,7 @@ override LLM_MODE. The default here is 'none' to fail loudly if any test
 forgets to set its mode and accidentally tries to call a real LLM.
 """
 
+import asyncio
 import os
 import socket
 import subprocess
@@ -34,6 +35,14 @@ from tests.conftest_celery import (  # noqa: F401, E402
 from tests.pg_test_defaults import PG_PASSWORD_DEFAULT  # noqa: E402
 
 LLMMode = Literal["none", "mock", "cassette", "live"]
+
+
+@pytest.fixture(scope="session")
+def event_loop_policy() -> asyncio.AbstractEventLoopPolicy:
+    """Use the loop supported by psycopg async connections on Windows."""
+    if hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+        return asyncio.WindowsSelectorEventLoopPolicy()
+    return asyncio.DefaultEventLoopPolicy()
 
 
 def pytest_configure(config: pytest.Config) -> None:

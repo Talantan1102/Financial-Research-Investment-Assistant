@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 
 import pytest
@@ -19,12 +20,15 @@ def fake_skills_root(tmp_path):
 
 def test_apply_rlimits_returns_callable():
     fn = _apply_rlimits(memory_mb=256, cpu_seconds=30)
-    assert callable(fn)
+    if os.name == "posix":
+        assert callable(fn)
+    else:
+        assert fn is None
 
 
 @pytest.mark.skipif(
-    platform.system() == "Darwin",
-    reason="RLIMIT_AS unreliable on macOS",
+    platform.system() in {"Darwin", "Windows"},
+    reason="RLIMIT_AS unavailable or unreliable on this platform",
 )
 @pytest.mark.asyncio
 async def test_executor_kills_oom_script(fake_skills_root, tmp_path):

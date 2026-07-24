@@ -102,6 +102,8 @@ class PendingToolCallV1(BaseModel):
     id: str = Field(min_length=1, max_length=255)
     name: str = Field(min_length=1, max_length=255)
     arguments: str
+    risk_level: Literal["low", "high"] | None = None
+    permission_decision: Literal["direct", "approval_required"] | None = None
 
     def to_step_tool_call(self) -> StepToolCall:
         return StepToolCall(id=self.id, name=self.name, arguments=self.arguments)
@@ -132,6 +134,8 @@ class PauseRequestV1(BaseModel):
     question: str | None = Field(default=None, max_length=4096)
     reason: str | None = Field(default=None, max_length=255)
     action: str | None = Field(default=None, max_length=255)
+    risk_level: Literal["low", "high"] | None = None
+    permission_decision: Literal["direct", "approval_required"] | None = None
     tool_calls: tuple[PendingToolCallV1, ...] = Field(default=(), max_length=64)
     editable_tool_call_ids: tuple[str, ...] = Field(default=(), max_length=64)
     execution_bindings: tuple[ExecutionBindingV1, ...] = Field(default=(), max_length=64)

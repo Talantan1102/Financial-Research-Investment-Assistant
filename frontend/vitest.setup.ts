@@ -10,7 +10,7 @@
  */
 
 import '@testing-library/jest-dom/vitest'
-import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest'
 import { server } from '@/test-utils/msw-server'
 
 // react-window (VariableSizeList) uses ResizeObserver internally; jsdom doesn't
@@ -73,6 +73,16 @@ afterAll(() => server.close())
 // localStorage reset (auth store / report streaming token)
 beforeEach(() => {
   localStorage.clear()
+  // Components normally receive this from ThemedRoot. Unit tests often mount
+  // a leaf directly, so provide the same notification boundary.
+  window.$app = {
+    message: {
+      success: vi.fn(),
+      error: vi.fn(),
+      info: vi.fn(),
+      warning: vi.fn(),
+    },
+  } as unknown as Window['$app']
 })
 
 afterEach(() => {

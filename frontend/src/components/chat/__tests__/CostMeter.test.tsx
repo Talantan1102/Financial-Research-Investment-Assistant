@@ -16,6 +16,7 @@ describe('<CostMeter>', () => {
 
   it('shows total in collapsed view', () => {
     currentChatState.cost_breakdown = { chat_usd: 0.012, research_usd: 0.087, total_usd: 0.099 }
+    currentChatState.cost_so_far = 0.099
     render(<CostMeter />)
     expect(screen.getByText(/\$0\.099/)).toBeInTheDocument()
   })

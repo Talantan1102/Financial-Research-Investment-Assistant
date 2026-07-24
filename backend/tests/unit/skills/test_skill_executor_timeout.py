@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 
 import pytest
@@ -58,6 +59,7 @@ async def test_executor_caps_timeout_to_max(fake_skills_root, tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(os.name != "posix", reason="fork() is POSIX-only")
 async def test_executor_kills_subprocess_tree(fake_skills_root, tmp_path):
     script = fake_skills_root / "demo" / "scripts" / "fork_and_sleep.py"
     script.write_text(

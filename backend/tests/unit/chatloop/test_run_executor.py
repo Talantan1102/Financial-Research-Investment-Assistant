@@ -1700,26 +1700,8 @@ async def test_tool_call_id_reuse_from_continuation_history_fails_before_dispatc
 
 
 async def test_empty_tool_call_id_is_tool_error_without_dispatch() -> None:
-    first = StepResult(
-        content="",
-        tool_calls=[StepToolCall(id="", name="same_tool", arguments="{}")],
-        finish_reason="tool_calls",
-        prompt_tokens=1,
-        completion_tokens=1,
-        cached_tokens=0,
-        cost_cny=0,
-    )
-    hub = _RecordingHub()
-    result = await ChatRunExecutor(
-        user_id=uuid4(),
-        continuation_secret=TEST_CONTINUATION_SECRET,
-        components=SimpleNamespace(**{**vars(_components(_ScriptedLLM([first]))), "tool_hub": hub}),
-        event_sink=lambda _event: asyncio.sleep(0),
-        cancel_event=asyncio.Event(),
-    ).execute(_command())
-    assert isinstance(result, FailedResult)
-    assert result.error_code == "tool_error"
-    assert hub.calls == []
+    with pytest.raises(ValueError, match="at least 1 character"):
+        StepToolCall(id="", name="same_tool", arguments="{}")
 
 
 async def test_continuation_envelope_is_signed_and_context_bound() -> None:
