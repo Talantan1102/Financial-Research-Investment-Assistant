@@ -9,7 +9,7 @@ import type {
   PaperOrder,
   PaperOrderStatus,
 } from '@/types/paper-trading'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import styles from './index.module.scss'
 
 const statusLabels: Record<PaperOrderStatus, string> = {
@@ -36,39 +36,111 @@ function orderPrice(order: PaperOrder) {
   return '市价'
 }
 
-export default function PaperTradingPage() {
-  const [account, setAccount] = useState<PaperAccount | null>(null)
-  const [holdings, setHoldings] = useState<PaperHolding[]>([])
-  const [orders, setOrders] = useState<PaperOrder[]>([])
-  const [error, setError] = useState<string | null>(null)
+interface LoadState<T> {
+  data: T | null
+  error: string | null
+  loading: boolean
+}
 
-  useEffect(() => {
-    let active = true
-    async function load() {
+const emptyLoadState = <T,>(): LoadState<T> => ({
+  data: null,
+  error: null,
+  loading: false,
+})
+
+function errorMessage(reason: unknown, fallback: string) {
+  return reason instanceof Error ? reason.message : fallback
+}
+
+export default function PaperTradingPage() {
+  const [accountState, setAccountState] = useState<LoadState<PaperAccount>>(
+    emptyLoadState,
+  )
+  const [holdingsState, setHoldingsState] =
+    useState<LoadState<PaperHolding[]>>(emptyLoadState)
+  const [ordersState, setOrdersState] =
+    useState<LoadState<PaperOrder[]>>(emptyLoadState)
+  const requestGeneration = useRef(0)
+
+  const refresh = useCallback(() => {
+    const generation = requestGeneration.current + 1
+    requestGeneration.current = generation
+    setAccountState((current) => ({
+      ...current,
+      error: null,
+      loading: true,
+    }))
+
+    void (async () => {
       try {
         const loadedAccount = await getPaperAccount()
-        if (!active) return
-        setAccount(loadedAccount)
-        const [loadedHoldings, loadedOrders] = await Promise.all([
-          listPaperHoldings(),
-          listPaperOrders({ limit: 50 }),
-        ])
-        if (!active) return
-        setHoldings(loadedHoldings)
-        setOrders(loadedOrders)
+        if (requestGeneration.current !== generation) return
+        setAccountState({ data: loadedAccount, error: null, loading: false })
+        setHoldingsState((current) => ({
+          ...current,
+          error: null,
+          loading: true,
+        }))
+        setOrdersState((current) => ({
+          ...current,
+          error: null,
+          loading: true,
+        }))
+
+        void listPaperHoldings()
+          .then((data) => {
+            if (requestGeneration.current === generation) {
+              setHoldingsState({ data, error: null, loading: false })
+            }
+          })
+          .catch((reason) => {
+            if (requestGeneration.current === generation) {
+              setHoldingsState((current) => ({
+                ...current,
+                error: errorMessage(reason, '持仓读取失败'),
+                loading: false,
+              }))
+            }
+          })
+        void listPaperOrders({ limit: 50 })
+          .then((data) => {
+            if (requestGeneration.current === generation) {
+              setOrdersState({ data, error: null, loading: false })
+            }
+          })
+          .catch((reason) => {
+            if (requestGeneration.current === generation) {
+              setOrdersState((current) => ({
+                ...current,
+                error: errorMessage(reason, '订单读取失败'),
+                loading: false,
+              }))
+            }
+          })
       } catch (reason) {
-        if (active) {
-          setError(reason instanceof Error ? reason.message : '模拟账户读取失败')
+        if (requestGeneration.current === generation) {
+          setAccountState((current) => ({
+            ...current,
+            error: errorMessage(reason, '模拟账户读取失败'),
+            loading: false,
+          }))
         }
       }
-    }
-    void load()
-    return () => {
-      active = false
-    }
+    })()
   }, [])
 
-  if (!account && !error) {
+  useEffect(() => {
+    refresh()
+    return () => {
+      requestGeneration.current += 1
+    }
+  }, [refresh])
+
+  const account = accountState.data
+  const holdings = holdingsState.data
+  const orders = ordersState.data
+
+  if (!account && accountState.loading) {
     return (
       <main className={styles.page}>
         <p className={styles.loading} aria-live="polite">
@@ -83,7 +155,11 @@ export default function PaperTradingPage() {
       <main className={styles.page}>
         <div className={styles.error} role="alert">
           <strong>模拟账户暂时无法打开</strong>
-          <span>{error}</span>
+          <span>{accountState.error}</span>
+          <span>持仓和订单尚未读取。</span>
+          <button type="button" onClick={refresh}>
+            重新读取
+          </button>
         </div>
       </main>
     )
@@ -97,12 +173,21 @@ export default function PaperTradingPage() {
           <h1>模拟账户</h1>
           <p>交易由 Agent 发起，这里只核对账户结果。</p>
         </div>
-        <span className={styles.generation}>第 {account.generation} 轮</span>
+        <div className={styles.headerActions}>
+          <span className={styles.generation}>第 {account.generation} 轮</span>
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={accountState.loading}
+          >
+            {accountState.loading ? '刷新中…' : '刷新账户'}
+          </button>
+        </div>
       </header>
 
-      {error ? (
+      {accountState.error ? (
         <div className={styles.inlineError} role="alert">
-          {error}
+          账户刷新失败：{accountState.error}
         </div>
       ) : null}
 
@@ -124,11 +209,19 @@ export default function PaperTradingPage() {
       <section className={styles.section}>
         <div className={styles.sectionHeading}>
           <h2>当前持仓</h2>
-          <span>{holdings.length} 只</span>
+          <span>{holdings ? `${holdings.length} 只` : '—'}</span>
         </div>
-        {holdings.length === 0 ? (
+        {holdingsState.loading ? (
+          <p className={styles.empty} aria-live="polite">
+            正在读取持仓…
+          </p>
+        ) : holdingsState.error ? (
+          <p className={styles.sectionError} role="alert">
+            {holdingsState.error}
+          </p>
+        ) : holdings?.length === 0 ? (
           <p className={styles.empty}>还没有成交持仓。可以在对话里让 Agent 买入。</p>
-        ) : (
+        ) : holdings ? (
           <div className={styles.tableWrap}>
             <table>
               <thead>
@@ -156,7 +249,7 @@ export default function PaperTradingPage() {
               </tbody>
             </table>
           </div>
-        )}
+        ) : null}
       </section>
 
       <section className={styles.section}>
@@ -164,9 +257,17 @@ export default function PaperTradingPage() {
           <h2>最近订单</h2>
           <span>最多 50 笔</span>
         </div>
-        {orders.length === 0 ? (
+        {ordersState.loading ? (
+          <p className={styles.empty} aria-live="polite">
+            正在读取订单…
+          </p>
+        ) : ordersState.error ? (
+          <p className={styles.sectionError} role="alert">
+            {ordersState.error}
+          </p>
+        ) : orders?.length === 0 ? (
           <p className={styles.empty}>还没有订单。买卖指令会在确认后出现在这里。</p>
-        ) : (
+        ) : orders ? (
           <div className={styles.tableWrap}>
             <table>
               <thead>
@@ -201,7 +302,7 @@ export default function PaperTradingPage() {
               </tbody>
             </table>
           </div>
-        )}
+        ) : null}
       </section>
     </main>
   )

@@ -12,6 +12,16 @@ vi.mock('@/api/paperTrading', () => api)
 
 import PaperTradingPage from '../index'
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 describe('PaperTradingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -80,5 +90,67 @@ describe('PaperTradingPage', () => {
     )
     expect(screen.queryByText('¥0.00')).not.toBeInTheDocument()
     await waitFor(() => expect(api.listPaperOrders).not.toHaveBeenCalled())
+  })
+
+  it('keeps successful orders visible when holdings fail', async () => {
+    api.listPaperHoldings.mockRejectedValue(new Error('持仓读取失败'))
+
+    renderWithProviders(<PaperTradingPage />)
+
+    expect(await screen.findByText('持仓读取失败')).toBeInTheDocument()
+    expect(screen.getByText('已报')).toBeInTheDocument()
+    expect(screen.queryByText('还没有成交持仓。可以在对话里让 Agent 买入。')).not.toBeInTheDocument()
+  })
+
+  it('keeps successful holdings visible when orders fail', async () => {
+    api.listPaperOrders.mockRejectedValue(new Error('订单读取失败'))
+
+    renderWithProviders(<PaperTradingPage />)
+
+    expect(await screen.findByText('订单读取失败')).toBeInTheDocument()
+    expect(screen.getByText('200 股')).toBeInTheDocument()
+    expect(screen.queryByText('还没有订单。买卖指令会在确认后出现在这里。')).not.toBeInTheDocument()
+  })
+
+  it('shows independent section loading states instead of empty states', async () => {
+    const holdings = deferred<never[]>()
+    const orders = deferred<never[]>()
+    api.listPaperHoldings.mockReturnValue(holdings.promise)
+    api.listPaperOrders.mockReturnValue(orders.promise)
+
+    renderWithProviders(<PaperTradingPage />)
+
+    expect(await screen.findByText('正在读取持仓…')).toBeInTheDocument()
+    expect(screen.getByText('正在读取订单…')).toBeInTheDocument()
+    expect(screen.queryByText(/还没有成交持仓/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/还没有订单/)).not.toBeInTheDocument()
+  })
+
+  it('refreshes all sections and ignores stale responses from the old refresh', async () => {
+    const oldHoldings = deferred<never[]>()
+    api.listPaperHoldings
+      .mockReturnValueOnce(oldHoldings.promise)
+      .mockResolvedValueOnce([
+        {
+          generation: 3,
+          ts_code: '000001.SZ',
+          name: '平安银行',
+          quantity: 300,
+          frozen_quantity: 0,
+          sellable_quantity: 300,
+          average_cost: '11.2500',
+        },
+      ])
+    api.listPaperOrders.mockResolvedValue([])
+
+    renderWithProviders(<PaperTradingPage />)
+    expect(await screen.findByText('正在读取持仓…')).toBeInTheDocument()
+    screen.getByRole('button', { name: '刷新账户' }).click()
+
+    expect(await screen.findByText('平安银行')).toBeInTheDocument()
+    oldHoldings.resolve([])
+    await Promise.resolve()
+    expect(screen.getByText('平安银行')).toBeInTheDocument()
+    expect(api.getPaperAccount).toHaveBeenCalledTimes(2)
   })
 })

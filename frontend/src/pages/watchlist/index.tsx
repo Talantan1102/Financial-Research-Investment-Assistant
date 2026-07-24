@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import styles from './index.module.scss'
 
 const TS_CODE = /^\d{6}\.(SH|SZ)$/
+type MutationKind = 'add' | 'remove' | 'update'
 
 export default function WatchlistPage() {
   const [items, setItems] = useState<WatchlistItem[]>([])
@@ -20,8 +21,11 @@ export default function WatchlistPage() {
   const [editingCode, setEditingCode] = useState<string | null>(null)
   const [note, setNote] = useState('')
   const [monitoring, setMonitoring] = useState(false)
-  const [savingCode, setSavingCode] = useState<string | null>(null)
+  const [, setPendingRevision] = useState(0)
   const mutationVersion = useRef(0)
+  const codeGenerations = useRef(new Map<string, number>())
+  const codeQueues = useRef(new Map<string, Promise<void>>())
+  const pendingOperations = useRef(new Set<string>())
 
   useEffect(() => {
     const requestedAt = mutationVersion.current
@@ -31,7 +35,7 @@ export default function WatchlistPage() {
         if (active && mutationVersion.current === requestedAt) setItems(rows)
       })
       .catch((reason) => {
-        if (active) {
+        if (active && mutationVersion.current === requestedAt) {
           setError(reason instanceof Error ? reason.message : '自选股读取失败')
         }
       })
@@ -43,7 +47,59 @@ export default function WatchlistPage() {
     }
   }, [])
 
-  async function addItem() {
+  function isPending(tsCode: string, kind: MutationKind) {
+    return pendingOperations.current.has(`${tsCode}:${kind}`)
+  }
+
+  function enqueueMutation<T>(
+    tsCode: string,
+    kind: MutationKind,
+    request: () => Promise<T>,
+    apply: (result: T) => void,
+    fallbackError: string,
+    onSettled?: () => void,
+  ) {
+    const pendingKey = `${tsCode}:${kind}`
+    if (pendingOperations.current.has(pendingKey)) return false
+
+    pendingOperations.current.add(pendingKey)
+    setPendingRevision((value) => value + 1)
+    mutationVersion.current += 1
+    const generation = (codeGenerations.current.get(tsCode) ?? 0) + 1
+    codeGenerations.current.set(tsCode, generation)
+    setError(null)
+
+    // One queue per symbol preserves user intent without blocking other symbols.
+    const previous = codeQueues.current.get(tsCode) ?? Promise.resolve()
+    const task = previous
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const result = await request()
+          if (codeGenerations.current.get(tsCode) === generation) {
+            apply(result)
+          }
+        } catch (reason) {
+          if (codeGenerations.current.get(tsCode) === generation) {
+            setError(
+              reason instanceof Error ? reason.message : fallbackError,
+            )
+          }
+        }
+      })
+      .finally(() => {
+        pendingOperations.current.delete(pendingKey)
+        setPendingRevision((value) => value + 1)
+        onSettled?.()
+        if (codeQueues.current.get(tsCode) === task) {
+          codeQueues.current.delete(tsCode)
+        }
+      })
+    codeQueues.current.set(tsCode, task)
+    return true
+  }
+
+  function addItem() {
     const normalizedCode = code.trim().toUpperCase()
     const normalizedName = name.trim()
     if (!TS_CODE.test(normalizedCode)) {
@@ -54,29 +110,30 @@ export default function WatchlistPage() {
       setError('请填写股票名称')
       return
     }
-    if (adding) return
+    if (isPending(normalizedCode, 'add')) return
     setAdding(true)
-    setError(null)
-    mutationVersion.current += 1
-    try {
-      const added = await addWatchlistItem({
-        ts_code: normalizedCode,
-        name: normalizedName,
-        monitoring_enabled: false,
-      })
-      setItems((current) => {
-        const withoutDuplicate = current.filter(
-          (item) => item.ts_code !== added.ts_code,
-        )
-        return [...withoutDuplicate, added]
-      })
-      setCode('')
-      setName('')
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '加入自选失败')
-    } finally {
-      setAdding(false)
-    }
+    enqueueMutation(
+      normalizedCode,
+      'add',
+      () =>
+        addWatchlistItem({
+          ts_code: normalizedCode,
+          name: normalizedName,
+          monitoring_enabled: false,
+        }),
+      (added) => {
+        setItems((current) => {
+          const withoutDuplicate = current.filter(
+            (item) => item.ts_code !== added.ts_code,
+          )
+          return [...withoutDuplicate, added]
+        })
+        setCode('')
+        setName('')
+      },
+      '加入自选失败',
+      () => setAdding(false),
+    )
   }
 
   function beginEdit(item: WatchlistItem) {
@@ -85,43 +142,38 @@ export default function WatchlistPage() {
     setMonitoring(item.monitoring_enabled)
   }
 
-  async function saveItem(item: WatchlistItem) {
-    if (savingCode) return
-    setSavingCode(item.ts_code)
-    setError(null)
-    mutationVersion.current += 1
-    try {
-      const saved = await updateWatchlistItem(item.ts_code, {
-        note: note.trim() || null,
-        monitoring_enabled: monitoring,
-      })
-      setItems((current) =>
-        current.map((row) => (row.ts_code === saved.ts_code ? saved : row)),
-      )
-      setEditingCode(null)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '保存自选股失败')
-    } finally {
-      setSavingCode(null)
-    }
+  function saveItem(item: WatchlistItem) {
+    enqueueMutation(
+      item.ts_code,
+      'update',
+      () =>
+        updateWatchlistItem(item.ts_code, {
+          note: note.trim() || null,
+          monitoring_enabled: monitoring,
+        }),
+      (saved) => {
+        setItems((current) =>
+          current.map((row) => (row.ts_code === saved.ts_code ? saved : row)),
+        )
+        setEditingCode(null)
+      },
+      '保存自选股失败',
+    )
   }
 
-  async function removeItem(item: WatchlistItem) {
-    if (savingCode) return
-    setSavingCode(item.ts_code)
-    setError(null)
-    mutationVersion.current += 1
-    try {
-      await removeWatchlistItem(item.ts_code)
-      setItems((current) =>
-        current.filter((row) => row.ts_code !== item.ts_code),
-      )
-      if (editingCode === item.ts_code) setEditingCode(null)
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '移除自选股失败')
-    } finally {
-      setSavingCode(null)
-    }
+  function removeItem(item: WatchlistItem) {
+    enqueueMutation(
+      item.ts_code,
+      'remove',
+      () => removeWatchlistItem(item.ts_code),
+      () => {
+        setItems((current) =>
+          current.filter((row) => row.ts_code !== item.ts_code),
+        )
+        if (editingCode === item.ts_code) setEditingCode(null)
+      },
+      '移除自选股失败',
+    )
   }
 
   return (
@@ -169,7 +221,7 @@ export default function WatchlistPage() {
         <p className={styles.empty} aria-live="polite">
           正在读取自选股…
         </p>
-      ) : items.length === 0 ? (
+      ) : error && items.length === 0 ? null : items.length === 0 ? (
         <p className={styles.empty}>还没有自选股。输入代码和名称即可加入。</p>
       ) : (
         <section className={styles.list} aria-label="自选股列表">
@@ -220,7 +272,7 @@ export default function WatchlistPage() {
                         type="button"
                         className={styles.primary}
                         aria-label={`保存 ${item.name}`}
-                        disabled={savingCode === item.ts_code}
+                        disabled={isPending(item.ts_code, 'update')}
                         onClick={() => void saveItem(item)}
                       >
                         保存
@@ -245,7 +297,7 @@ export default function WatchlistPage() {
                     type="button"
                     className={styles.remove}
                     aria-label={`移除 ${item.name}`}
-                    disabled={savingCode === item.ts_code}
+                    disabled={isPending(item.ts_code, 'remove')}
                     onClick={() => void removeItem(item)}
                   >
                     移除

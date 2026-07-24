@@ -41,6 +41,36 @@
   font: 500 12px/1 var(--ios-font-mono);
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  button,
+  .generation {
+    height: 32px;
+  }
+
+  button {
+    padding: 0 12px;
+    border: 1px solid var(--ios-separator);
+    border-radius: var(--ios-radius-pill);
+    background: var(--ios-surface);
+    color: var(--ios-blue);
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: 3px solid rgba(0, 122, 255, 0.24);
+      outline-offset: 2px;
+    }
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+  }
+}
+
 .cashStrip {
   display: grid;
   grid-template-columns: 1.4fr 1fr 1fr;
@@ -209,11 +239,29 @@
   gap: 5px;
   margin-top: 15vh;
   padding: 18px 20px;
+
+  button {
+    justify-self: start;
+    margin-top: 7px;
+    padding: 7px 12px;
+    border: 0;
+    border-radius: var(--ios-radius-sm);
+    background: var(--ios-red);
+    color: white;
+    cursor: pointer;
+  }
 }
 
 .inlineError {
   margin-bottom: 16px;
   padding: 12px 14px;
+}
+
+.sectionError {
+  margin: 0;
+  padding: 28px 20px;
+  color: var(--ios-red);
+  text-align: center;
 }
 
 @media (max-width: 680px) {
