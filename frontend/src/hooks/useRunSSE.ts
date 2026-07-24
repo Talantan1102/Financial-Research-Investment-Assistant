@@ -70,6 +70,11 @@ interface ParsedSseEvent {
   data: Record<string, unknown>
 }
 
+interface CalibrationResult {
+  status: RunStatus
+  runId: string | null
+}
+
 function parseFrame(frame: string): ParsedSseEvent | null {
   let id: string | null = null
   let event = 'message'
@@ -200,55 +205,79 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       sessionId: string,
       generation: number,
       signal: AbortSignal,
-    ): Promise<RunResponse | null> => {
-      const run = await getRun(tenantId, runId, fetchImpl)
-      if (!isCurrent(generation, signal)) return null
-      let session: Awaited<ReturnType<typeof getRunSession>> | null = null
+    ): Promise<CalibrationResult | null> => {
       try {
-        session = await getRunSession(tenantId, sessionId, fetchImpl)
-      } catch {
-        // Run state remains authoritative even if the richer Session
-        // projection is temporarily unavailable.
-      }
-      if (!isCurrent(generation, signal)) return null
-      if (session) {
+        const session = await getRunSession(tenantId, sessionId, fetchImpl)
+        if (!isCurrent(generation, signal)) return null
         currentChatActions.replaceWithDurableMessages(sessionId, session.messages)
         setRevisions(session.revisions)
         setLatestRunId(session.latest_run_id)
         setRevisionCursor(session.revisions_next_cursor ?? null)
         setRevisionsHasMore(session.revisions_has_more ?? false)
-        const pauseType = session.active_pause_type
-        if (
-          session.active_pause_id &&
-          (pauseType === 'approval' || pauseType === 'input') &&
-          session.active_pause_request
-        ) {
-          setPause({
-            id: session.active_pause_id,
-            type: pauseType === 'approval' ? 'approval_request' : 'input_request',
-            request: session.active_pause_request,
-          })
+
+        const activeStatus = session.active_run_status
+        const snapshotStatus = activeStatus ?? session.latest_run_status
+        if (snapshotStatus === null) {
+          // A calibration for a known Run cannot be satisfied by an empty or
+          // pre-snapshot Session projection. Fall back to the Run endpoint
+          // without applying partial active-state fields.
+          throw new Error('Session recovery snapshot has no Run state')
         }
+        const pauseType = session.active_pause_type
+        const hasCompletePause =
+          session.active_run_id !== null &&
+          (activeStatus === 'waiting_approval' || activeStatus === 'waiting_input') &&
+          session.active_pause_id !== null &&
+          (pauseType === 'approval' || pauseType === 'input') &&
+          session.active_pause_request !== null
+        setPause(
+          hasCompletePause
+            ? {
+                id: session.active_pause_id!,
+                type: pauseType === 'approval' ? 'approval_request' : 'input_request',
+                request: session.active_pause_request!,
+              }
+            : null,
+        )
+
+        if (session.active_run_id && activeStatus) {
+          updateActiveRun(session.active_run_id, activeStatus)
+          updateStatus(activeStatus)
+        } else {
+          updateActiveRun(null, snapshotStatus)
+          if (snapshotStatus) updateStatus(snapshotStatus)
+          if (snapshotStatus && TERMINAL.has(snapshotStatus)) {
+            currentChatActions.finishRun(snapshotStatus)
+            if (snapshotStatus === 'completed') revisionBaseRef.current = null
+          }
+        }
+        return snapshotStatus === null
+          ? null
+          : { status: snapshotStatus, runId: session.active_run_id }
+      } catch {
+        // A direct Run read is only a degraded fallback. It is never combined
+        // with a Session response from a different database snapshot.
       }
+
+      const run = await getRun(tenantId, runId, fetchImpl)
+      if (!isCurrent(generation, signal)) return null
       if (run.status !== 'waiting_approval' && run.status !== 'waiting_input') {
         setPause(null)
       }
       updateStatus(run.status)
       if (TERMINAL.has(run.status)) {
-        if (!session) {
-          try {
-            await loadDurableHistory(tenantId, sessionId, generation, signal)
-          } catch {
-            // A failed history refresh cannot downgrade an authoritative
-            // terminal Run fact.
-          }
+        try {
+          await loadDurableHistory(tenantId, sessionId, generation, signal)
+        } catch {
+          // A failed history refresh cannot downgrade an authoritative
+          // terminal Run fact.
         }
         if (!isCurrent(generation, signal)) return null
         updateActiveRun(null, run.status)
         currentChatActions.finishRun(run.status)
         if (run.status === 'completed') revisionBaseRef.current = null
       }
-      return run
+      return { status: run.status, runId: TERMINAL.has(run.status) ? null : run.id }
     },
     [fetchImpl, isCurrent, loadDurableHistory, updateActiveRun, updateStatus],
   )
@@ -336,7 +365,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         }
 
         if (!isCurrent(generation, controller.signal)) return
-        let calibrated: RunResponse | null = null
+        let calibrated: CalibrationResult | null = null
         try {
           calibrated = await calibrate(
             tenantId,
@@ -349,7 +378,14 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
           streamError ??= error
         }
         if (!isCurrent(generation, controller.signal)) return
-        if (calibrated && (TERMINAL.has(calibrated.status) || !ACTIVE.has(calibrated.status))) {
+        if (
+          calibrated &&
+          (
+            calibrated.runId !== runId ||
+            TERMINAL.has(calibrated.status) ||
+            !ACTIVE.has(calibrated.status)
+          )
+        ) {
           return
         }
         if (terminalFrame && calibrated === null) return
@@ -580,7 +616,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
           commandInFlightRef.current = false
           setCommandPending(false)
         }
-        let reconciled: RunResponse | null = null
+        let reconciled: CalibrationResult | null = null
         try {
           reconciled = await calibrate(
             tenantId,
@@ -599,7 +635,10 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
           updateActiveRun(runId, resumed.status)
           updateStatus(resumed.status)
         }
-        if (reconciled && TERMINAL.has(reconciled.status)) {
+        if (
+          reconciled &&
+          (TERMINAL.has(reconciled.status) || reconciled.runId !== runId)
+        ) {
           return { ok: true }
         }
         await streamRun(tenantId, runId, sessionId, generation, controller)

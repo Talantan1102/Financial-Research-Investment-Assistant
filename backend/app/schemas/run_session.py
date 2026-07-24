@@ -64,3 +64,4 @@ class RunSessionDetailResponse(RunSessionResponse):
     revisions_has_more: bool
     revisions_next_cursor: str | None
     latest_run_id: UUID | None
+    latest_run_status: str | None

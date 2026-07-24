@@ -92,6 +92,7 @@ export interface RunSessionDetail extends RunSessionSummary {
   revisions_has_more?: boolean
   revisions_next_cursor?: string | null
   latest_run_id: string | null
+  latest_run_status: RunStatus | null
 }
 
 export interface RunRevision {

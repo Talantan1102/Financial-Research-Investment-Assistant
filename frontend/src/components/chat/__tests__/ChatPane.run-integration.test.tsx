@@ -103,7 +103,7 @@ describe('<ChatPane> Run revision integration', () => {
         active_run_id: 'run-1', active_run_status: 'waiting_input',
         active_pause_id: 'pause-input',
         active_pause_type: 'input', active_pause_request: { question: 'Need context' },
-        revisions: [], latest_run_id: 'run-1',
+        revisions: [], latest_run_id: 'run-1', latest_run_status: 'waiting_input',
       })),
       http.get(`${API_BASE}/api/v1/tenants/tenant-1/sessions`, () => HttpResponse.json([])),
     )

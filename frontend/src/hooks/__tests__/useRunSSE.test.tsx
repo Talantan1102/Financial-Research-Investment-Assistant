@@ -66,6 +66,7 @@ function detail(content = 'Hello durable'): RunSessionDetail {
     revisions_has_more: false,
     revisions_next_cursor: null,
     latest_run_id: null,
+    latest_run_status: null,
   }
 }
 
@@ -473,7 +474,7 @@ describe('useRunSSE', () => {
     await act(async () => expect(first).resolves.toEqual(expect.objectContaining({ ok: false })))
 
     expect(runApi.getRunSession).toHaveBeenCalled()
-    expect(runApi.getRun).toHaveBeenCalledWith('tenant-1', 'run-1', expect.any(Function))
+    expect(runApi.getRun).not.toHaveBeenCalled()
     expect(result.current.pause).toEqual({
       id: 'pause-input',
       type: 'input_request', request: { question: 'still waiting' },
@@ -579,7 +580,7 @@ describe('useRunSSE', () => {
         }),
       )
       .mockResolvedValue(chunkedSse([]))
-    vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_approval'))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('queued'))
     vi.mocked(runApi.getRunSession).mockResolvedValue({
       ...detail(),
       active_run_id: 'run-1',
@@ -625,6 +626,104 @@ describe('useRunSSE', () => {
       type: 'approval_request',
       request: { action: 'second approval' },
     })
+  })
+
+  it('does not wait for or combine an older Run read with a newer Session pause snapshot', async () => {
+    vi.mocked(runApi.getRun).mockImplementation(() => new Promise<RunResponse>(() => undefined))
+    vi.mocked(runApi.getRunSession).mockResolvedValue({
+      ...detail(),
+      active_run_id: 'run-1',
+      active_run_status: 'waiting_approval',
+      active_pause_id: 'pause-2',
+      active_pause_type: 'approval',
+      active_pause_request: { action: 'second approval' },
+      latest_run_id: 'run-1',
+      latest_run_status: 'waiting_approval',
+    })
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
+
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'queued',
+      maxReconnectAttempts: 0,
+    }))
+
+    await waitFor(() => expect(result.current.pause?.id).toBe('pause-2'))
+    expect(runApi.getRun).not.toHaveBeenCalled()
+    expect(result.current.status).toBe('waiting_approval')
+  })
+
+  it('does not resurrect an old pause while a newer Session snapshot is deferred', async () => {
+    let resolveSession!: (value: RunSessionDetail) => void
+    vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_approval'))
+    vi.mocked(runApi.getRunSession).mockImplementation(
+      () => new Promise<RunSessionDetail>((resolve) => { resolveSession = resolve }),
+    )
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'waiting_approval',
+      initialPause: {
+        id: 'pause-old',
+        type: 'approval_request',
+        request: { action: 'old approval' },
+      },
+      maxReconnectAttempts: 0,
+    }))
+    await waitFor(() => expect(runApi.getRunSession).toHaveBeenCalled())
+
+    act(() => resolveSession({
+      ...detail(),
+      active_run_id: 'run-1',
+      active_run_status: 'running',
+      latest_run_id: 'run-1',
+      latest_run_status: 'running',
+    }))
+
+    await waitFor(() => expect(result.current.status).toBe('running'))
+    expect(result.current.pause).toBeNull()
+    expect(runApi.getRun).not.toHaveBeenCalled()
+  })
+
+  it('does not let an old terminal Run clear a newer active Run and pause', async () => {
+    let resolveSession!: (value: RunSessionDetail) => void
+    vi.mocked(runApi.getRun).mockResolvedValue(run('completed', 'run-1'))
+    vi.mocked(runApi.getRunSession).mockImplementation(
+      () => new Promise<RunSessionDetail>((resolve) => { resolveSession = resolve }),
+    )
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'running',
+      maxReconnectAttempts: 0,
+    }))
+    await waitFor(() => expect(runApi.getRunSession).toHaveBeenCalled())
+
+    act(() => resolveSession({
+      ...detail(),
+      active_run_id: 'run-2',
+      active_run_status: 'waiting_input',
+      active_pause_id: 'pause-2',
+      active_pause_type: 'input',
+      active_pause_request: { question: 'new input' },
+      latest_run_id: 'run-2',
+      latest_run_status: 'waiting_input',
+    }))
+
+    await waitFor(() => expect(result.current.activeRunId).toBe('run-2'))
+    expect(result.current.status).toBe('waiting_input')
+    expect(result.current.pause).toEqual({
+      id: 'pause-2',
+      type: 'input_request',
+      request: { question: 'new input' },
+    })
+    expect(runApi.getRun).not.toHaveBeenCalled()
   })
 
   it('still calibrates Run truth when Session calibration is unavailable', async () => {

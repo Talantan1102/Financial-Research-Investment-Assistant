@@ -318,13 +318,37 @@ async def test_detail_returns_bounded_durable_messages_in_stable_order(
     assert hidden.status_code == 404
 
     active_url = f"{_sessions_url(tenant.id)}/{sessions['member'].id}"
-    async with client_for(users["member"]) as client:
-        active_response = await client.get(active_url)
+    statements: list[str] = []
+
+    def capture_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(statement.lower())
+
+    async_engine = async_session_factory.kw["bind"]
+    assert isinstance(async_engine, AsyncEngine)
+    event.listen(async_engine.sync_engine, "before_cursor_execute", capture_statement)
+    try:
+        async with client_for(users["member"]) as client:
+            active_response = await client.get(active_url)
+    finally:
+        event.remove(async_engine.sync_engine, "before_cursor_execute", capture_statement)
     assert active_response.status_code == 200
     assert active_response.json()["active_run_id"] == str(active_run.id)
     assert active_response.json()["active_run_status"] == "waiting_input"
     assert active_response.json()["active_pause_type"] == "input"
     assert active_response.json()["active_pause_id"] == str(active_pause.id)
+    assert active_response.json()["latest_run_id"] == str(active_run.id)
+    assert active_response.json()["latest_run_status"] == "waiting_input"
+    recovery_statements = [statement for statement in statements if "run_pauses" in statement]
+    assert len(recovery_statements) == 1
+    assert "join run_pauses" in recovery_statements[0]
+    assert "select runs_1.id" in recovery_statements[0]
     assert active_response.json()["active_pause_request"] == {"question": "成本价？"}
 
 

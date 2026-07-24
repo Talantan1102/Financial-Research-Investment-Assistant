@@ -97,6 +97,7 @@ async def get_session(
         revisions_has_more=detail.revisions_has_more,
         revisions_next_cursor=detail.revisions_next_cursor,
         latest_run_id=detail.latest_run_id,
+        latest_run_status=detail.latest_run_status,
     )
 
 
