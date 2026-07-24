@@ -45,8 +45,15 @@ export function getPaperAccount(): Promise<PaperAccount> {
   return readJson('/api/v0/paper-trading/account')
 }
 
-export function listPaperHoldings(): Promise<PaperHolding[]> {
-  return readJson('/api/v0/paper-trading/holdings')
+export function listPaperHoldings(
+  filters: { account_generation?: number } = {},
+): Promise<PaperHolding[]> {
+  const query = new URLSearchParams()
+  if (filters.account_generation !== undefined) {
+    query.set('account_generation', String(filters.account_generation))
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : ''
+  return readJson(`/api/v0/paper-trading/holdings${suffix}`)
 }
 
 export function listPaperOrders(

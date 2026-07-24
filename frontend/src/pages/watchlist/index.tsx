@@ -23,6 +23,7 @@ export default function WatchlistPage() {
   const [monitoring, setMonitoring] = useState(false)
   const [, setPendingRevision] = useState(0)
   const mutationVersion = useRef(0)
+  const codeVersions = useRef(new Map<string, number>())
   const codeGenerations = useRef(new Map<string, number>())
   const codeQueues = useRef(new Map<string, Promise<void>>())
   const lockedCodes = useRef(new Set<string>())
@@ -30,10 +31,11 @@ export default function WatchlistPage() {
 
   useEffect(() => {
     const requestedAt = mutationVersion.current
+    const baseline = new Map(codeVersions.current)
     let active = true
     listWatchlist()
       .then((rows) => {
-        if (active && mutationVersion.current === requestedAt) setItems(rows)
+        if (active) mergeServerRows(rows, baseline)
       })
       .catch((reason) => {
         if (active && mutationVersion.current === requestedAt) {
@@ -47,6 +49,28 @@ export default function WatchlistPage() {
       active = false
     }
   }, [])
+
+  function mergeServerRows(
+    serverRows: WatchlistItem[],
+    baseline: Map<string, number>,
+  ) {
+    setItems((current) => {
+      const merged = serverRows.filter(
+        (row) =>
+          (codeVersions.current.get(row.ts_code) ?? 0) ===
+          (baseline.get(row.ts_code) ?? 0),
+      )
+      for (const item of current) {
+        if (
+          (codeVersions.current.get(item.ts_code) ?? 0) !==
+          (baseline.get(item.ts_code) ?? 0)
+        ) {
+          merged.push(item)
+        }
+      }
+      return merged
+    })
+  }
 
   function isPending(tsCode: string, kind: MutationKind) {
     return pendingOperations.current.has(`${tsCode}:${kind}`)
@@ -71,6 +95,10 @@ export default function WatchlistPage() {
     pendingOperations.current.add(pendingKey)
     setPendingRevision((value) => value + 1)
     mutationVersion.current += 1
+    codeVersions.current.set(
+      tsCode,
+      (codeVersions.current.get(tsCode) ?? 0) + 1,
+    )
     const generation = (codeGenerations.current.get(tsCode) ?? 0) + 1
     codeGenerations.current.set(tsCode, generation)
     setError(null)
@@ -90,15 +118,13 @@ export default function WatchlistPage() {
             let message =
               reason instanceof Error ? reason.message : fallbackError
             try {
+              const baseline = new Map(codeVersions.current)
               const serverItems = await listWatchlist()
               if (codeGenerations.current.get(tsCode) === generation) {
+                mergeServerRows(serverItems, baseline)
                 const serverItem = serverItems.find(
                   (item) => item.ts_code === tsCode,
                 )
-                setItems((current) => [
-                  ...current.filter((item) => item.ts_code !== tsCode),
-                  ...(serverItem ? [serverItem] : []),
-                ])
                 if (!serverItem) {
                   setEditingCode((current) =>
                     current === tsCode ? null : current,

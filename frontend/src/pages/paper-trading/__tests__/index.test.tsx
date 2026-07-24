@@ -76,8 +76,10 @@ describe('PaperTradingPage', () => {
     expect(screen.getByText('¥1,528.1250')).toBeInTheDocument()
     expect(screen.getByText('已报')).toBeInTheDocument()
 
-    expect(api.getPaperAccount).toHaveBeenCalledOnce()
-    expect(api.listPaperHoldings).toHaveBeenCalledOnce()
+    expect(api.getPaperAccount).toHaveBeenCalledTimes(2)
+    expect(api.listPaperHoldings).toHaveBeenCalledWith({
+      account_generation: 3,
+    })
     expect(api.listPaperOrders).toHaveBeenCalledWith({
       account_generation: 3,
       limit: 50,
@@ -116,7 +118,7 @@ describe('PaperTradingPage', () => {
     expect(screen.queryByText('还没有订单。买卖指令会在确认后出现在这里。')).not.toBeInTheDocument()
   })
 
-  it('shows independent section loading states instead of empty states', async () => {
+  it('keeps the whole initial snapshot behind one loading state', async () => {
     const holdings = deferred<never[]>()
     const orders = deferred<never[]>()
     api.listPaperHoldings.mockReturnValue(holdings.promise)
@@ -124,38 +126,136 @@ describe('PaperTradingPage', () => {
 
     renderWithProviders(<PaperTradingPage />)
 
-    expect(await screen.findByText('正在读取持仓…')).toBeInTheDocument()
-    expect(screen.getByText('正在读取订单…')).toBeInTheDocument()
+    expect(screen.getByText('正在读取模拟账户…')).toBeInTheDocument()
     expect(screen.queryByText(/还没有成交持仓/)).not.toBeInTheDocument()
     expect(screen.queryByText(/还没有订单/)).not.toBeInTheDocument()
   })
 
-  it('refreshes all sections and ignores stale responses from the old refresh', async () => {
-    const oldHoldings = deferred<never[]>()
+  it('refreshes and publishes the account snapshot together', async () => {
+    renderWithProviders(<PaperTradingPage />)
+    expect(await screen.findAllByText('贵州茅台')).toHaveLength(2)
+
+    const refreshedHoldings = deferred<never[]>()
+    api.listPaperHoldings.mockReturnValueOnce(refreshedHoldings.promise)
+    api.listPaperOrders.mockResolvedValueOnce([])
+    screen.getByRole('button', { name: '刷新账户' }).click()
+    expect(await screen.findByText('正在读取持仓…')).toBeInTheDocument()
+
+    refreshedHoldings.resolve([])
+    expect(await screen.findByText(/还没有成交持仓/)).toBeInTheDocument()
+    expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument()
+    expect(api.getPaperAccount).toHaveBeenCalledTimes(4)
+  })
+
+  it('retries a reset race and only publishes one account generation', async () => {
+    api.getPaperAccount
+      .mockResolvedValueOnce({
+        id: 'account-1',
+        generation: 3,
+        initial_cash: '1000000.00',
+        available_cash: '800000.00',
+        frozen_cash: '0.00',
+        status: 'active',
+      })
+      .mockResolvedValueOnce({
+        id: 'account-1',
+        generation: 4,
+        initial_cash: '500000.00',
+        available_cash: '500000.00',
+        frozen_cash: '0.00',
+        status: 'active',
+      })
+      .mockResolvedValueOnce({
+        id: 'account-1',
+        generation: 4,
+        initial_cash: '500000.00',
+        available_cash: '500000.00',
+        frozen_cash: '0.00',
+        status: 'active',
+      })
+      .mockResolvedValueOnce({
+        id: 'account-1',
+        generation: 4,
+        initial_cash: '500000.00',
+        available_cash: '500000.00',
+        frozen_cash: '0.00',
+        status: 'active',
+      })
     api.listPaperHoldings
-      .mockReturnValueOnce(oldHoldings.promise)
       .mockResolvedValueOnce([
         {
           generation: 3,
-          ts_code: '000001.SZ',
-          name: '平安银行',
-          quantity: 300,
+          ts_code: '600519.SH',
+          name: '旧轮持仓',
+          quantity: 100,
           frozen_quantity: 0,
-          sellable_quantity: 300,
-          average_cost: '11.2500',
+          sellable_quantity: 100,
+          average_cost: '1500.0000',
         },
       ])
-    api.listPaperOrders.mockResolvedValue([])
+      .mockResolvedValueOnce([
+        {
+          generation: 4,
+          ts_code: '000001.SZ',
+          name: '新轮持仓',
+          quantity: 200,
+          frozen_quantity: 0,
+          sellable_quantity: 200,
+          average_cost: '12.0000',
+        },
+      ])
+    api.listPaperOrders
+      .mockResolvedValueOnce([
+        {
+          id: 'old-order',
+          account_generation: 3,
+          ts_code: '600519.SH',
+          name: '旧轮订单',
+          side: 'buy',
+          order_type: 'limit',
+          quantity: 100,
+          limit_price: '1500.0000',
+          filled_quantity: 0,
+          avg_fill_price: null,
+          reserved_cash: '150000.00',
+          reserved_quantity: 0,
+          status: 'open',
+          created_at: '2026-07-24T01:00:00Z',
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'new-order',
+          account_generation: 4,
+          ts_code: '000001.SZ',
+          name: '新轮订单',
+          side: 'buy',
+          order_type: 'limit',
+          quantity: 200,
+          limit_price: '12.0000',
+          filled_quantity: 0,
+          avg_fill_price: null,
+          reserved_cash: '2400.00',
+          reserved_quantity: 0,
+          status: 'open',
+          created_at: '2026-07-24T02:00:00Z',
+        },
+      ])
 
     renderWithProviders(<PaperTradingPage />)
-    expect(await screen.findByText('正在读取持仓…')).toBeInTheDocument()
-    screen.getByRole('button', { name: '刷新账户' }).click()
 
-    expect(await screen.findByText('平安银行')).toBeInTheDocument()
-    oldHoldings.resolve([])
-    await Promise.resolve()
-    expect(screen.getByText('平安银行')).toBeInTheDocument()
-    expect(api.getPaperAccount).toHaveBeenCalledTimes(2)
+    expect(await screen.findByText('第 4 轮')).toBeInTheDocument()
+    expect(await screen.findByText('新轮持仓')).toBeInTheDocument()
+    expect(screen.getByText('新轮订单')).toBeInTheDocument()
+    expect(screen.queryByText(/旧轮/)).not.toBeInTheDocument()
+    expect(api.listPaperHoldings.mock.calls).toEqual([
+      [{ account_generation: 3 }],
+      [{ account_generation: 4 }],
+    ])
+    expect(api.listPaperOrders.mock.calls).toEqual([
+      [{ account_generation: 3, limit: 50 }],
+      [{ account_generation: 4, limit: 50 }],
+    ])
   })
 
   it.each([

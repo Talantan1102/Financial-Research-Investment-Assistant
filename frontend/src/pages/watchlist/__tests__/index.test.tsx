@@ -16,10 +16,12 @@ import WatchlistPage from '../index'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 describe('WatchlistPage', () => {
@@ -118,21 +120,17 @@ describe('WatchlistPage', () => {
     )
   })
 
-  it('ignores a stale list response after a direct mutation', async () => {
+  it('merges untouched server rows into a stock added after a slow initial list', async () => {
     const user = userEvent.setup()
-    let resolveList: ((value: unknown) => void) | undefined
-    api.listWatchlist.mockReturnValue(
-      new Promise((resolve) => {
-        resolveList = resolve
-      }),
-    )
+    const initialList = deferred<Record<string, unknown>[]>()
+    api.listWatchlist.mockReturnValue(initialList.promise)
     renderWithProviders(<WatchlistPage />)
     await user.type(screen.getByLabelText('股票代码'), '000001.SZ')
     await user.type(screen.getByLabelText('股票名称'), '平安银行')
     await user.click(screen.getByRole('button', { name: '加入自选' }))
     expect(await screen.findByText('平安银行')).toBeInTheDocument()
 
-    resolveList?.([
+    initialList.resolve([
       {
         id: 'watch-1',
         ts_code: '600519.SH',
@@ -140,10 +138,69 @@ describe('WatchlistPage', () => {
         note: null,
         monitoring_enabled: false,
       },
+      {
+        id: 'watch-3',
+        ts_code: '000002.SZ',
+        name: '万科A',
+        note: null,
+        monitoring_enabled: false,
+      },
     ])
-    await Promise.resolve()
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+    expect(screen.getByText('万科A')).toBeInTheDocument()
     expect(screen.getByText('平安银行')).toBeInTheDocument()
+  })
+
+  it('does not revive a stock removed after a slow initial list started', async () => {
+    const user = userEvent.setup()
+    const initialList = deferred<Record<string, unknown>[]>()
+    api.listWatchlist.mockReturnValue(initialList.promise)
+    renderWithProviders(<WatchlistPage />)
+
+    await user.type(screen.getByLabelText('股票代码'), '600519.SH')
+    await user.type(screen.getByLabelText('股票名称'), '贵州茅台')
+    await user.click(screen.getByRole('button', { name: '加入自选' }))
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '移除 贵州茅台' }))
+    await waitFor(() =>
+      expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument(),
+    )
+
+    initialList.resolve([
+      {
+        id: 'stale-watch-1',
+        ts_code: '600519.SH',
+        name: '贵州茅台',
+        note: null,
+        monitoring_enabled: false,
+      },
+      {
+        id: 'watch-2',
+        ts_code: '000001.SZ',
+        name: '平安银行',
+        note: null,
+        monitoring_enabled: false,
+      },
+    ])
+    expect(await screen.findByText('平安银行')).toBeInTheDocument()
     expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument()
+  })
+
+  it('ignores a stale initial-list error after a successful mutation', async () => {
+    const user = userEvent.setup()
+    const initialList = deferred<Record<string, unknown>[]>()
+    api.listWatchlist.mockReturnValue(initialList.promise)
+    renderWithProviders(<WatchlistPage />)
+
+    await user.type(screen.getByLabelText('股票代码'), '000001.SZ')
+    await user.type(screen.getByLabelText('股票名称'), '平安银行')
+    await user.click(screen.getByRole('button', { name: '加入自选' }))
+    expect(await screen.findByText('平安银行')).toBeInTheDocument()
+
+    initialList.reject(new Error('过期列表错误'))
+    await waitFor(() => expect(api.listWatchlist).toHaveBeenCalledOnce())
+    expect(screen.queryByText('过期列表错误')).not.toBeInTheDocument()
+    expect(screen.getByText('平安银行')).toBeInTheDocument()
   })
 
   it('locks add while delete for the same code is pending, then releases it', async () => {
@@ -239,6 +296,70 @@ describe('WatchlistPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('记录已不存在')
     await waitFor(() => expect(api.listWatchlist).toHaveBeenCalledTimes(2))
     expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument()
+  })
+
+  it('merges a failure reload without reviving another code removed in flight', async () => {
+    const user = userEvent.setup()
+    const reload = deferred<Record<string, unknown>[]>()
+    api.listWatchlist
+      .mockResolvedValueOnce([
+        {
+          id: 'watch-1',
+          ts_code: '600519.SH',
+          name: '贵州茅台',
+          note: 'A备注',
+          monitoring_enabled: false,
+        },
+        {
+          id: 'watch-2',
+          ts_code: '000001.SZ',
+          name: '平安银行',
+          note: 'B备注',
+          monitoring_enabled: false,
+        },
+      ])
+      .mockReturnValueOnce(reload.promise)
+    api.updateWatchlistItem.mockRejectedValue(new Error('保存冲突'))
+    renderWithProviders(<WatchlistPage />)
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '编辑 贵州茅台' }))
+    await user.click(screen.getByRole('button', { name: '保存 贵州茅台' }))
+    await waitFor(() => expect(api.listWatchlist).toHaveBeenCalledTimes(2))
+    await user.click(screen.getByRole('button', { name: '移除 平安银行' }))
+    await waitFor(() =>
+      expect(screen.queryByText('平安银行')).not.toBeInTheDocument(),
+    )
+
+    reload.resolve([
+      {
+        id: 'watch-1',
+        ts_code: '600519.SH',
+        name: '贵州茅台',
+        note: '服务端备注',
+        monitoring_enabled: false,
+      },
+      {
+        id: 'stale-watch-2',
+        ts_code: '000001.SZ',
+        name: '平安银行',
+        note: 'B备注',
+        monitoring_enabled: false,
+      },
+      {
+        id: 'watch-3',
+        ts_code: '000002.SZ',
+        name: '万科A',
+        note: null,
+        monitoring_enabled: false,
+      },
+    ])
+
+    expect(await screen.findByText('万科A')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByText('服务端备注')).toBeInTheDocument()
+    expect(screen.queryByText('平安银行')).not.toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存冲突')
   })
 
   it('does not close stock B draft when stock A save returns', async () => {

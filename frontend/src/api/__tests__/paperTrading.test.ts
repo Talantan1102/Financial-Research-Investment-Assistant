@@ -51,7 +51,7 @@ describe('paperTrading API', () => {
     )
 
     await getPaperAccount()
-    await listPaperHoldings()
+    await listPaperHoldings({ account_generation: 3 })
     await listPaperOrders({
       account_generation: 3,
       status: 'open',
@@ -61,7 +61,7 @@ describe('paperTrading API', () => {
 
     expect(globalFetch.mock.calls.map(([url]) => url)).toEqual([
       '/api/v0/paper-trading/account',
-      '/api/v0/paper-trading/holdings',
+      '/api/v0/paper-trading/holdings?account_generation=3',
       '/api/v0/paper-trading/orders?account_generation=3&status=open&limit=50&offset=0',
     ])
     for (const [, init] of globalFetch.mock.calls) {

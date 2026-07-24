@@ -64,61 +64,91 @@ export default function PaperTradingPage() {
       error: null,
       loading: true,
     }))
+    setHoldingsState((current) => ({
+      ...current,
+      error: null,
+      loading: true,
+    }))
+    setOrdersState((current) => ({
+      ...current,
+      error: null,
+      loading: true,
+    }))
 
     void (async () => {
       try {
-        const loadedAccount = await getPaperAccount()
-        if (requestGeneration.current !== generation) return
-        setAccountState({ data: loadedAccount, error: null, loading: false })
-        setHoldingsState((current) => ({
-          ...current,
-          error: null,
-          loading: true,
-        }))
-        setOrdersState((current) => ({
-          ...current,
-          error: null,
-          loading: true,
-        }))
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const loadedAccount = await getPaperAccount()
+          if (requestGeneration.current !== generation) return
+          const [holdingsResult, ordersResult] = await Promise.allSettled([
+            listPaperHoldings({
+              account_generation: loadedAccount.generation,
+            }),
+            listPaperOrders({
+              account_generation: loadedAccount.generation,
+              limit: 50,
+            }),
+          ])
+          if (requestGeneration.current !== generation) return
+          const verifiedAccount = await getPaperAccount()
+          if (requestGeneration.current !== generation) return
+          if (
+            loadedAccount.id !== verifiedAccount.id ||
+            loadedAccount.generation !== verifiedAccount.generation
+          ) {
+            if (attempt === 0) continue
+            throw new Error('账户刚刚重置，请刷新后重试')
+          }
 
-        void listPaperHoldings()
-          .then((data) => {
-            if (requestGeneration.current === generation) {
-              setHoldingsState({ data, error: null, loading: false })
-            }
+          setAccountState({
+            data: verifiedAccount,
+            error: null,
+            loading: false,
           })
-          .catch((reason) => {
-            if (requestGeneration.current === generation) {
-              setHoldingsState((current) => ({
-                ...current,
-                error: errorMessage(reason, '持仓读取失败'),
-                loading: false,
-              }))
-            }
-          })
-        void listPaperOrders({
-          account_generation: loadedAccount.generation,
-          limit: 50,
-        })
-          .then((data) => {
-            if (requestGeneration.current === generation) {
-              setOrdersState({ data, error: null, loading: false })
-            }
-          })
-          .catch((reason) => {
-            if (requestGeneration.current === generation) {
-              setOrdersState((current) => ({
-                ...current,
-                error: errorMessage(reason, '订单读取失败'),
-                loading: false,
-              }))
-            }
-          })
+          setHoldingsState(
+            holdingsResult.status === 'fulfilled'
+              ? {
+                  data: holdingsResult.value,
+                  error: null,
+                  loading: false,
+                }
+              : (current) => ({
+                  ...current,
+                  error: errorMessage(
+                    holdingsResult.reason,
+                    '持仓读取失败',
+                  ),
+                  loading: false,
+                }),
+          )
+          setOrdersState(
+            ordersResult.status === 'fulfilled'
+              ? {
+                  data: ordersResult.value,
+                  error: null,
+                  loading: false,
+                }
+              : (current) => ({
+                  ...current,
+                  error: errorMessage(ordersResult.reason, '订单读取失败'),
+                  loading: false,
+                }),
+          )
+          return
+        }
       } catch (reason) {
         if (requestGeneration.current === generation) {
           setAccountState((current) => ({
             ...current,
             error: errorMessage(reason, '模拟账户读取失败'),
+            loading: false,
+          }))
+          setHoldingsState((current) => ({
+            ...current,
+            loading: false,
+          }))
+          setOrdersState((current) => ({
+            ...current,
             loading: false,
           }))
         }

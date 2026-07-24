@@ -226,6 +226,65 @@ async def test_holdings_returns_only_current_paper_account_generation(
     ]
 
 
+@pytest.mark.asyncio
+async def test_holdings_can_read_an_explicit_user_owned_generation(
+    db_session: Session,
+    users: dict[str, User],
+) -> None:
+    alice_account = PaperAccountService(db_session).get_or_create(
+        user_id=users["alice"].id
+    )
+    bob_account = PaperAccountService(db_session).get_or_create(user_id=users["bob"].id)
+    old_generation = alice_account.generation
+    _holding_lot(
+        db_session,
+        user=users["alice"],
+        account=alice_account,
+        ts_code="600519.SH",
+        name="贵州茅台",
+        quantity=100,
+    )
+    _holding_lot(
+        db_session,
+        user=users["bob"],
+        account=bob_account,
+        ts_code="000001.SZ",
+        name="平安银行",
+        quantity=999,
+    )
+    current_account = PaperAccountService(db_session).reset_confirmed(
+        user_id=users["alice"].id,
+        initial_cash=Decimal("500000"),
+        source_session_id=f"reset-{uuid.uuid4().hex}",
+        confirmation_id=uuid.uuid4().hex,
+    )
+    _holding_lot(
+        db_session,
+        user=users["alice"],
+        account=current_account,
+        ts_code="000002.SZ",
+        name="万科A",
+        quantity=200,
+    )
+
+    async with _client(db_session, users["alice"]) as client:
+        historical = await client.get(
+            "/api/v0/paper-trading/holdings",
+            params={"account_generation": old_generation},
+        )
+        current = await client.get(
+            "/api/v0/paper-trading/holdings",
+            params={"account_generation": current_account.generation},
+        )
+
+    assert historical.status_code == 200
+    assert [row["ts_code"] for row in historical.json()] == ["600519.SH"]
+    assert current.status_code == 200
+    assert [row["ts_code"] for row in current.json()] == ["000002.SZ"]
+    assert "000001.SZ" not in historical.text
+    assert "000001.SZ" not in current.text
+
+
 def test_app_registers_only_read_and_preview_paper_trading_operations() -> None:
     operations = {
         (method.upper(), path)

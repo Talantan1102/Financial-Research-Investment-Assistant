@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.paper_account import PaperHoldingLot
+from app.models.paper_account import PaperAccount, PaperHoldingLot
 from app.models.paper_order import OrderStatus, PaperOrder
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
@@ -121,12 +121,23 @@ def get_account(
 def list_holdings(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user_required)],
+    account_generation: Annotated[int | None, Query(ge=1)] = None,
 ) -> list[PaperHoldingRead]:
-    """Read the current generation's lots, including T+1 availability."""
-    try:
-        account = PaperAccountService(db).get_active(user_id=_user_id(user))
-    except PaperTradingError as exc:
-        _raise_safe_domain_error(exc)
+    """Read one user-owned account generation, including T+1 availability."""
+    if account_generation is None:
+        try:
+            account = PaperAccountService(db).get_active(user_id=_user_id(user))
+        except PaperTradingError as exc:
+            _raise_safe_domain_error(exc)
+    else:
+        account = db.scalar(
+            select(PaperAccount).where(
+                PaperAccount.user_id == _user_id(user),
+                PaperAccount.generation == account_generation,
+            )
+        )
+        if account is None:
+            return []
 
     lots = db.scalars(
         select(PaperHoldingLot)
