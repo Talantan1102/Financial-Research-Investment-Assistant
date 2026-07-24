@@ -25,6 +25,7 @@ export default function WatchlistPage() {
   const mutationVersion = useRef(0)
   const codeGenerations = useRef(new Map<string, number>())
   const codeQueues = useRef(new Map<string, Promise<void>>())
+  const lockedCodes = useRef(new Set<string>())
   const pendingOperations = useRef(new Set<string>())
 
   useEffect(() => {
@@ -51,6 +52,10 @@ export default function WatchlistPage() {
     return pendingOperations.current.has(`${tsCode}:${kind}`)
   }
 
+  function isCodeLocked(tsCode: string) {
+    return lockedCodes.current.has(tsCode)
+  }
+
   function enqueueMutation<T>(
     tsCode: string,
     kind: MutationKind,
@@ -60,8 +65,9 @@ export default function WatchlistPage() {
     onSettled?: () => void,
   ) {
     const pendingKey = `${tsCode}:${kind}`
-    if (pendingOperations.current.has(pendingKey)) return false
+    if (lockedCodes.current.has(tsCode)) return false
 
+    lockedCodes.current.add(tsCode)
     pendingOperations.current.add(pendingKey)
     setPendingRevision((value) => value + 1)
     mutationVersion.current += 1
@@ -81,16 +87,45 @@ export default function WatchlistPage() {
           }
         } catch (reason) {
           if (codeGenerations.current.get(tsCode) === generation) {
-            setError(
-              reason instanceof Error ? reason.message : fallbackError,
-            )
+            let message =
+              reason instanceof Error ? reason.message : fallbackError
+            try {
+              const serverItems = await listWatchlist()
+              if (codeGenerations.current.get(tsCode) === generation) {
+                const serverItem = serverItems.find(
+                  (item) => item.ts_code === tsCode,
+                )
+                setItems((current) => [
+                  ...current.filter((item) => item.ts_code !== tsCode),
+                  ...(serverItem ? [serverItem] : []),
+                ])
+                if (!serverItem) {
+                  setEditingCode((current) =>
+                    current === tsCode ? null : current,
+                  )
+                }
+              }
+            } catch (reloadReason) {
+              const reloadMessage =
+                reloadReason instanceof Error
+                  ? reloadReason.message
+                  : '服务器状态重新读取失败'
+              message = `${message}；重新读取失败：${reloadMessage}`
+            }
+            if (codeGenerations.current.get(tsCode) === generation) {
+              setError(message)
+            }
           }
         }
       })
       .finally(() => {
-        pendingOperations.current.delete(pendingKey)
-        setPendingRevision((value) => value + 1)
-        onSettled?.()
+        if (codeGenerations.current.get(tsCode) === generation) {
+          codeGenerations.current.delete(tsCode)
+          lockedCodes.current.delete(tsCode)
+          pendingOperations.current.delete(pendingKey)
+          setPendingRevision((value) => value + 1)
+          onSettled?.()
+        }
         if (codeQueues.current.get(tsCode) === task) {
           codeQueues.current.delete(tsCode)
         }
@@ -110,9 +145,7 @@ export default function WatchlistPage() {
       setError('请填写股票名称')
       return
     }
-    if (isPending(normalizedCode, 'add')) return
-    setAdding(true)
-    enqueueMutation(
+    const queued = enqueueMutation(
       normalizedCode,
       'add',
       () =>
@@ -134,6 +167,7 @@ export default function WatchlistPage() {
       '加入自选失败',
       () => setAdding(false),
     )
+    if (queued) setAdding(true)
   }
 
   function beginEdit(item: WatchlistItem) {
@@ -155,7 +189,9 @@ export default function WatchlistPage() {
         setItems((current) =>
           current.map((row) => (row.ts_code === saved.ts_code ? saved : row)),
         )
-        setEditingCode(null)
+        setEditingCode((current) =>
+          current === item.ts_code ? null : current,
+        )
       },
       '保存自选股失败',
     )
@@ -182,7 +218,7 @@ export default function WatchlistPage() {
         <div>
           <p>WATCHLIST</p>
           <h1>自选股</h1>
-          <span>改动会直接保存；开启监控后才会进入定时检查。</span>
+          <span>持仓股票始终监控；开关只控制自选股来源。</span>
         </div>
         <span className={styles.count}>{items.length} 只</span>
       </header>
@@ -195,6 +231,7 @@ export default function WatchlistPage() {
             onChange={(event) => setCode(event.target.value)}
             placeholder="600519.SH"
             autoComplete="off"
+            disabled={isCodeLocked(code.trim().toUpperCase())}
           />
         </label>
         <label>
@@ -204,9 +241,14 @@ export default function WatchlistPage() {
             onChange={(event) => setName(event.target.value)}
             placeholder="贵州茅台"
             autoComplete="off"
+            disabled={isCodeLocked(code.trim().toUpperCase())}
           />
         </label>
-        <button type="button" onClick={() => void addItem()} disabled={adding}>
+        <button
+          type="button"
+          onClick={() => void addItem()}
+          disabled={adding || isCodeLocked(code.trim().toUpperCase())}
+        >
           {adding ? '正在加入…' : '加入自选'}
         </button>
       </section>
@@ -227,6 +269,7 @@ export default function WatchlistPage() {
         <section className={styles.list} aria-label="自选股列表">
           {items.map((item) => {
             const editing = editingCode === item.ts_code
+            const locked = isCodeLocked(item.ts_code)
             return (
               <article className={styles.item} key={item.ts_code}>
                 <div className={styles.identity}>
@@ -241,6 +284,7 @@ export default function WatchlistPage() {
                         aria-label={`${item.name}备注`}
                         value={note}
                         maxLength={2000}
+                        disabled={locked}
                         onChange={(event) => setNote(event.target.value)}
                       />
                     </label>
@@ -250,6 +294,7 @@ export default function WatchlistPage() {
                         role="switch"
                         aria-label={`${item.name}监控`}
                         aria-checked={monitoring}
+                        disabled={locked}
                         onClick={() => setMonitoring((value) => !value)}
                       >
                         <span />
@@ -272,13 +317,14 @@ export default function WatchlistPage() {
                         type="button"
                         className={styles.primary}
                         aria-label={`保存 ${item.name}`}
-                        disabled={isPending(item.ts_code, 'update')}
+                        disabled={locked || isPending(item.ts_code, 'update')}
                         onClick={() => void saveItem(item)}
                       >
                         保存
                       </button>
                       <button
                         type="button"
+                        disabled={locked}
                         onClick={() => setEditingCode(null)}
                       >
                         取消
@@ -288,6 +334,7 @@ export default function WatchlistPage() {
                     <button
                       type="button"
                       aria-label={`编辑 ${item.name}`}
+                      disabled={locked}
                       onClick={() => beginEdit(item)}
                     >
                       编辑
@@ -297,7 +344,7 @@ export default function WatchlistPage() {
                     type="button"
                     className={styles.remove}
                     aria-label={`移除 ${item.name}`}
-                    disabled={isPending(item.ts_code, 'remove')}
+                    disabled={locked || isPending(item.ts_code, 'remove')}
                     onClick={() => void removeItem(item)}
                   >
                     移除

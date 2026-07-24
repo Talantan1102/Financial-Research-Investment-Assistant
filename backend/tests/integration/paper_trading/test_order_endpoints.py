@@ -175,6 +175,41 @@ async def test_list_orders_is_tenant_scoped_filtered_and_paginated(
 
 
 @pytest.mark.asyncio
+async def test_list_orders_can_isolate_the_current_account_generation(
+    db_session: Session,
+    users: dict[str, User],
+) -> None:
+    old_order = _seed_order(
+        db_session,
+        users["alice"],
+        ts_code="600519.SH",
+        name="贵州茅台",
+    )
+    current_account = PaperAccountService(db_session).reset_confirmed(
+        user_id=cast(uuid.UUID, users["alice"].id),
+        initial_cash=Decimal("1000000"),
+        source_session_id=f"reset-{uuid.uuid4().hex}",
+        confirmation_id=uuid.uuid4().hex,
+    )
+    current_order = _seed_order(
+        db_session,
+        users["alice"],
+        ts_code="000001.SZ",
+        name="平安银行",
+    )
+
+    async with _client(db_session, users["alice"]) as client:
+        response = await client.get(
+            "/api/v0/paper-trading/orders",
+            params={"account_generation": current_account.generation},
+        )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [str(current_order.id)]
+    assert str(old_order.id) not in response.text
+
+
+@pytest.mark.asyncio
 async def test_get_order_hides_other_users_and_unknown_ids(
     db_session: Session,
     users: dict[str, User],

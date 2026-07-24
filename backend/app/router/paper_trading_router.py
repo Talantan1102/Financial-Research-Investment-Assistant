@@ -180,6 +180,7 @@ def list_holdings(
 def list_orders(
     db: Annotated[Session, Depends(get_db)],
     user: Annotated[User, Depends(get_current_user_required)],
+    account_generation: Annotated[int | None, Query(ge=1)] = None,
     order_status: Annotated[OrderStatus | None, Query(alias="status")] = None,
     ts_code: Annotated[
         str | None,
@@ -189,6 +190,10 @@ def list_orders(
     offset: Annotated[int, Query(ge=0, le=10_000)] = 0,
 ) -> list[PaperOrderRead]:
     statement = select(PaperOrder).where(PaperOrder.user_id == _user_id(user))
+    if account_generation is not None:
+        statement = statement.where(
+            PaperOrder.account_generation == account_generation
+        )
     if order_status is not None:
         statement = statement.where(PaperOrder.status == order_status)
     if ts_code is not None:

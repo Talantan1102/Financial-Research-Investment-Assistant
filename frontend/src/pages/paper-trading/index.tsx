@@ -10,6 +10,7 @@ import type {
   PaperOrderStatus,
 } from '@/types/paper-trading'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { formatDecimalMoney } from './format-money'
 import styles from './index.module.scss'
 
 const statusLabels: Record<PaperOrderStatus, string> = {
@@ -23,16 +24,9 @@ const statusLabels: Record<PaperOrderStatus, string> = {
   rejected: '已拒绝',
 }
 
-function money(value: string, digits = 2) {
-  return `¥${Number(value).toLocaleString('zh-CN', {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  })}`
-}
-
 function orderPrice(order: PaperOrder) {
-  if (order.avg_fill_price) return money(order.avg_fill_price, 4)
-  if (order.limit_price) return money(order.limit_price, 4)
+  if (order.avg_fill_price) return formatDecimalMoney(order.avg_fill_price, 4)
+  if (order.limit_price) return formatDecimalMoney(order.limit_price, 4)
   return '市价'
 }
 
@@ -102,7 +96,10 @@ export default function PaperTradingPage() {
               }))
             }
           })
-        void listPaperOrders({ limit: 50 })
+        void listPaperOrders({
+          account_generation: loadedAccount.generation,
+          limit: 50,
+        })
           .then((data) => {
             if (requestGeneration.current === generation) {
               setOrdersState({ data, error: null, loading: false })
@@ -194,15 +191,15 @@ export default function PaperTradingPage() {
       <section className={styles.cashStrip} aria-label="资金概览">
         <div className={styles.primaryCash}>
           <span>可用资金</span>
-          <strong>{money(account.available_cash)}</strong>
+          <strong>{formatDecimalMoney(account.available_cash)}</strong>
         </div>
         <div>
           <span>冻结资金</span>
-          <strong>{money(account.frozen_cash)}</strong>
+          <strong>{formatDecimalMoney(account.frozen_cash)}</strong>
         </div>
         <div>
           <span>本轮初始资金</span>
-          <strong>{money(account.initial_cash)}</strong>
+          <strong>{formatDecimalMoney(account.initial_cash)}</strong>
         </div>
       </section>
 
@@ -243,7 +240,7 @@ export default function PaperTradingPage() {
                     <td>{holding.quantity.toLocaleString('zh-CN')} 股</td>
                     <td>{holding.sellable_quantity.toLocaleString('zh-CN')} 股</td>
                     <td>{holding.frozen_quantity.toLocaleString('zh-CN')} 股</td>
-                    <td>{money(holding.average_cost, 4)}</td>
+                    <td>{formatDecimalMoney(holding.average_cost, 4)}</td>
                   </tr>
                 ))}
               </tbody>

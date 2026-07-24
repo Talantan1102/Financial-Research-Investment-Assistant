@@ -24,7 +24,7 @@ function deferred<T>() {
 
 describe('WatchlistPage', () => {
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     api.listWatchlist.mockResolvedValue([
       {
         id: 'watch-1',
@@ -65,6 +65,9 @@ describe('WatchlistPage', () => {
     renderWithProviders(<WatchlistPage />)
 
     expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+    expect(
+      screen.getByText('持仓股票始终监控；开关只控制自选股来源。'),
+    ).toBeInTheDocument()
     await user.type(screen.getByLabelText('股票代码'), '000001.SZ')
     await user.type(screen.getByLabelText('股票名称'), '平安银行')
     const add = screen.getByRole('button', { name: '加入自选' })
@@ -143,35 +146,38 @@ describe('WatchlistPage', () => {
     expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument()
   })
 
-  it('serializes delete then add for the same code and keeps the later add', async () => {
+  it('locks add while delete for the same code is pending, then releases it', async () => {
     const user = userEvent.setup()
     const removing = deferred<{ removed: boolean }>()
     api.removeWatchlistItem.mockReturnValue(removing.promise)
     renderWithProviders(<WatchlistPage />)
     expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '移除 贵州茅台' }))
     await user.type(screen.getByLabelText('股票代码'), '600519.SH')
     await user.type(screen.getByLabelText('股票名称'), '贵州茅台')
+    await user.click(screen.getByRole('button', { name: '移除 贵州茅台' }))
+    expect(screen.getByRole('button', { name: '加入自选' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: '加入自选' }))
 
     expect(api.addWatchlistItem).not.toHaveBeenCalled()
     removing.resolve({ removed: true })
-    await waitFor(() => expect(api.addWatchlistItem).toHaveBeenCalledOnce())
-    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '加入自选' })).toBeEnabled(),
+    )
+    await user.click(screen.getByRole('button', { name: '加入自选' }))
+    expect(api.addWatchlistItem).toHaveBeenCalledOnce()
   })
 
-  it('serializes update then remove and keeps the later removal', async () => {
+  it('blocks remove while save for the same code is pending', async () => {
     const user = userEvent.setup()
     const updating = deferred<Record<string, unknown>>()
-    const removing = deferred<{ removed: boolean }>()
     api.updateWatchlistItem.mockReturnValue(updating.promise)
-    api.removeWatchlistItem.mockReturnValue(removing.promise)
     renderWithProviders(<WatchlistPage />)
     expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '编辑 贵州茅台' }))
     await user.click(screen.getByRole('button', { name: '保存 贵州茅台' }))
+    expect(screen.getByRole('button', { name: '移除 贵州茅台' })).toBeDisabled()
     await user.click(screen.getByRole('button', { name: '移除 贵州茅台' }))
     expect(api.removeWatchlistItem).not.toHaveBeenCalled()
 
@@ -182,36 +188,20 @@ describe('WatchlistPage', () => {
       note: '等年报',
       monitoring_enabled: false,
     })
-    await waitFor(() => expect(api.removeWatchlistItem).toHaveBeenCalledOnce())
-    removing.resolve({ removed: true })
-    await waitFor(() =>
-      expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument(),
-    )
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
   })
 
-  it('serializes add then remove and keeps the later removal', async () => {
+  it('blocks save in the same tick after remove starts', async () => {
     const user = userEvent.setup()
-    const adding = deferred<Record<string, unknown>>()
     const removing = deferred<{ removed: boolean }>()
-    api.addWatchlistItem.mockReturnValue(adding.promise)
     api.removeWatchlistItem.mockReturnValue(removing.promise)
     renderWithProviders(<WatchlistPage />)
     expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
 
-    await user.type(screen.getByLabelText('股票代码'), '600519.SH')
-    await user.type(screen.getByLabelText('股票名称'), '贵州茅台')
-    await user.click(screen.getByRole('button', { name: '加入自选' }))
-    await user.click(screen.getByRole('button', { name: '移除 贵州茅台' }))
-    expect(api.removeWatchlistItem).not.toHaveBeenCalled()
-
-    adding.resolve({
-      id: 'watch-1',
-      ts_code: '600519.SH',
-      name: '贵州茅台',
-      note: null,
-      monitoring_enabled: false,
-    })
-    await waitFor(() => expect(api.removeWatchlistItem).toHaveBeenCalledOnce())
+    await user.click(screen.getByRole('button', { name: '编辑 贵州茅台' }))
+    fireEvent.click(screen.getByRole('button', { name: '移除 贵州茅台' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存 贵州茅台' }))
+    expect(api.updateWatchlistItem).not.toHaveBeenCalled()
     removing.resolve({ removed: true })
     await waitFor(() =>
       expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument(),
@@ -224,6 +214,71 @@ describe('WatchlistPage', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('列表读取失败')
     expect(screen.queryByText(/还没有自选股/)).not.toBeInTheDocument()
+  })
+
+  it('reloads the failed code from the server before unlocking it', async () => {
+    const user = userEvent.setup()
+    api.listWatchlist
+      .mockResolvedValueOnce([
+        {
+          id: 'watch-1',
+          ts_code: '600519.SH',
+          name: '贵州茅台',
+          note: '等年报',
+          monitoring_enabled: false,
+        },
+      ])
+      .mockResolvedValueOnce([])
+    api.updateWatchlistItem.mockRejectedValue(new Error('记录已不存在'))
+    renderWithProviders(<WatchlistPage />)
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '编辑 贵州茅台' }))
+    await user.click(screen.getByRole('button', { name: '保存 贵州茅台' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('记录已不存在')
+    await waitFor(() => expect(api.listWatchlist).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument()
+  })
+
+  it('does not close stock B draft when stock A save returns', async () => {
+    const user = userEvent.setup()
+    const updatingA = deferred<Record<string, unknown>>()
+    api.listWatchlist.mockResolvedValue([
+      {
+        id: 'watch-1',
+        ts_code: '600519.SH',
+        name: '贵州茅台',
+        note: 'A备注',
+        monitoring_enabled: false,
+      },
+      {
+        id: 'watch-2',
+        ts_code: '000001.SZ',
+        name: '平安银行',
+        note: 'B备注',
+        monitoring_enabled: false,
+      },
+    ])
+    api.updateWatchlistItem.mockReturnValue(updatingA.promise)
+    renderWithProviders(<WatchlistPage />)
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '编辑 贵州茅台' }))
+    await user.click(screen.getByRole('button', { name: '保存 贵州茅台' }))
+    await user.click(screen.getByRole('button', { name: '编辑 平安银行' }))
+    expect(screen.getByLabelText('平安银行备注')).toHaveValue('B备注')
+
+    updatingA.resolve({
+      id: 'watch-1',
+      ts_code: '600519.SH',
+      name: '贵州茅台',
+      note: 'A备注',
+      monitoring_enabled: false,
+    })
+    await waitFor(() =>
+      expect(screen.getByLabelText('平安银行备注')).toHaveValue('B备注'),
+    )
   })
 
   it('allows mutations for different stock codes to run in parallel', async () => {

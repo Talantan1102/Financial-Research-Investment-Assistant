@@ -10,6 +10,7 @@ const api = vi.hoisted(() => ({
 
 vi.mock('@/api/paperTrading', () => api)
 
+import { formatDecimalMoney } from '../format-money'
 import PaperTradingPage from '../index'
 
 function deferred<T>() {
@@ -77,7 +78,10 @@ describe('PaperTradingPage', () => {
 
     expect(api.getPaperAccount).toHaveBeenCalledOnce()
     expect(api.listPaperHoldings).toHaveBeenCalledOnce()
-    expect(api.listPaperOrders).toHaveBeenCalledWith({ limit: 50 })
+    expect(api.listPaperOrders).toHaveBeenCalledWith({
+      account_generation: 3,
+      limit: 50,
+    })
   })
 
   it('shows a useful error without inventing account values', async () => {
@@ -152,5 +156,16 @@ describe('PaperTradingPage', () => {
     await Promise.resolve()
     expect(screen.getByText('平安银行')).toBeInTheDocument()
     expect(api.getPaperAccount).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    ['9999999999999999.99', 2, '¥9,999,999,999,999,999.99'],
+    ['-12.3', 2, '-¥12.30'],
+    ['0', 2, '¥0.00'],
+    ['0.5', 4, '¥0.5000'],
+    ['not-a-decimal', 2, '—'],
+    ['1.234', 2, '—'],
+  ])('formats decimal %s exactly without floating point', (value, digits, expected) => {
+    expect(formatDecimalMoney(value, digits)).toBe(expected)
   })
 })

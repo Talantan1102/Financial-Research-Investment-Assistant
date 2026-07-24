@@ -2,6 +2,7 @@ import type {
   PaperAccount,
   PaperHolding,
   PaperOrder,
+  PaperOrderStatus,
   PaperOrderPreview,
   PaperOrderPreviewRequest,
 } from '@/types/paper-trading'
@@ -49,7 +50,13 @@ export function listPaperHoldings(): Promise<PaperHolding[]> {
 }
 
 export function listPaperOrders(
-  filters: { status?: string; ts_code?: string; limit?: number; offset?: number } = {},
+  filters: {
+    account_generation?: number
+    status?: PaperOrderStatus
+    ts_code?: string
+    limit?: number
+    offset?: number
+  } = {},
 ): Promise<PaperOrder[]> {
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(filters)) {
