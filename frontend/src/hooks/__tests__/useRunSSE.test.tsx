@@ -483,7 +483,17 @@ describe('useRunSSE', () => {
   })
 
   it('keeps the current pause actionable when another tab submits a stale pause identity', async () => {
-    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
+    vi.mocked(runApi.fetchRunEvents)
+      .mockImplementationOnce((_tenantId, _runId, options) =>
+        new Promise<Response>((_resolve, reject) => {
+          options.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          )
+        }),
+      )
+      .mockResolvedValue(chunkedSse([]))
     vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_approval'))
     vi.mocked(runApi.getRunSession).mockResolvedValue({
       ...detail(),
@@ -553,6 +563,70 @@ describe('useRunSSE', () => {
     })
   })
 
+  it('recovers pause two when a delayed successful resume misses the next pause event', async () => {
+    let resolveResume!: (value: RunResponse) => void
+    vi.mocked(runApi.resumeRun).mockImplementation(
+      () => new Promise<RunResponse>((resolve) => { resolveResume = resolve }),
+    )
+    vi.mocked(runApi.fetchRunEvents)
+      .mockImplementationOnce((_tenantId, _runId, options) =>
+        new Promise<Response>((_resolve, reject) => {
+          options.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          )
+        }),
+      )
+      .mockResolvedValue(chunkedSse([]))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_approval'))
+    vi.mocked(runApi.getRunSession).mockResolvedValue({
+      ...detail(),
+      active_run_id: 'run-1',
+      active_run_status: 'waiting_approval',
+      active_pause_id: 'pause-2',
+      active_pause_type: 'approval',
+      active_pause_request: { action: 'second approval' },
+    })
+    const { result } = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'waiting_approval',
+      initialPause: {
+        id: 'pause-1',
+        type: 'approval_request',
+        request: { action: 'first approval' },
+      },
+      maxReconnectAttempts: 0,
+    }))
+    await waitFor(() => expect(result.current.activeRunId).toBe('run-1'))
+
+    let resume!: Promise<{ ok: boolean }>
+    act(() => {
+      resume = result.current.resumeRun({ approved: true })
+    })
+    await waitFor(() => expect(runApi.resumeRun).toHaveBeenCalledWith(
+      'tenant-1',
+      'run-1',
+      'pause-1',
+      { approved: true },
+      expect.any(Function),
+    ))
+    resolveResume(run('queued'))
+    await act(async () => {
+      await resume
+    })
+
+    expect(runApi.getRunSession).toHaveBeenCalled()
+    expect(result.current.status).toBe('waiting_approval')
+    expect(result.current.pause).toEqual({
+      id: 'pause-2',
+      type: 'approval_request',
+      request: { action: 'second approval' },
+    })
+  })
+
   it('still calibrates Run truth when Session calibration is unavailable', async () => {
     vi.mocked(runApi.cancelRun).mockRejectedValue(new TypeError('timeout'))
     vi.mocked(runApi.getRunSession).mockRejectedValue(new TypeError('session unavailable'))
@@ -592,6 +666,7 @@ describe('useRunSSE', () => {
   it('releases the resume POST fence before the resumed SSE finishes so Stop remains available', async () => {
     let releaseStream!: () => void
     vi.mocked(runApi.resumeRun).mockResolvedValue(run('queued'))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('queued'))
     vi.mocked(runApi.fetchRunEvents).mockImplementation(
       () => new Promise<Response>((resolve) => { releaseStream = () => resolve(chunkedSse([])) }),
     )

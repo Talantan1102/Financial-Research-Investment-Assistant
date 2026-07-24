@@ -203,9 +203,46 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     ): Promise<RunResponse | null> => {
       const run = await getRun(tenantId, runId, fetchImpl)
       if (!isCurrent(generation, signal)) return null
+      let session: Awaited<ReturnType<typeof getRunSession>> | null = null
+      try {
+        session = await getRunSession(tenantId, sessionId, fetchImpl)
+      } catch {
+        // Run state remains authoritative even if the richer Session
+        // projection is temporarily unavailable.
+      }
+      if (!isCurrent(generation, signal)) return null
+      if (session) {
+        currentChatActions.replaceWithDurableMessages(sessionId, session.messages)
+        setRevisions(session.revisions)
+        setLatestRunId(session.latest_run_id)
+        setRevisionCursor(session.revisions_next_cursor ?? null)
+        setRevisionsHasMore(session.revisions_has_more ?? false)
+        const pauseType = session.active_pause_type
+        if (
+          session.active_pause_id &&
+          (pauseType === 'approval' || pauseType === 'input') &&
+          session.active_pause_request
+        ) {
+          setPause({
+            id: session.active_pause_id,
+            type: pauseType === 'approval' ? 'approval_request' : 'input_request',
+            request: session.active_pause_request,
+          })
+        }
+      }
+      if (run.status !== 'waiting_approval' && run.status !== 'waiting_input') {
+        setPause(null)
+      }
       updateStatus(run.status)
       if (TERMINAL.has(run.status)) {
-        await loadDurableHistory(tenantId, sessionId, generation, signal)
+        if (!session) {
+          try {
+            await loadDurableHistory(tenantId, sessionId, generation, signal)
+          } catch {
+            // A failed history refresh cannot downgrade an authoritative
+            // terminal Run fact.
+          }
+        }
         if (!isCurrent(generation, signal)) return null
         updateActiveRun(null, run.status)
         currentChatActions.finishRun(run.status)
@@ -456,50 +493,13 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
     controller: AbortController,
   ): Promise<boolean> => {
     try {
-      const [sessionResult, runResult] = await Promise.allSettled([
-        getRunSession(tenantId, sessionId, fetchImpl),
-        getRun(tenantId, runId, fetchImpl),
-      ])
-      if (!isCurrent(generation, controller.signal)) return false
-      if (runResult.status === 'rejected') return false
-      const durableRun = runResult.value
-      if (sessionResult.status === 'fulfilled') {
-        const session = sessionResult.value
-        currentChatActions.replaceWithDurableMessages(sessionId, session.messages)
-        setRevisions(session.revisions)
-        setLatestRunId(session.latest_run_id)
-        setRevisionCursor(session.revisions_next_cursor ?? null)
-        setRevisionsHasMore(session.revisions_has_more ?? false)
-        const pauseType = session.active_pause_type
-        if (
-          session.active_pause_id &&
-          (pauseType === 'approval' || pauseType === 'input') &&
-          session.active_pause_request
-        ) {
-          setPause({
-            id: session.active_pause_id,
-            type: pauseType === 'approval' ? 'approval_request' : 'input_request',
-            request: session.active_pause_request,
-          })
-        }
-      }
-      // Run is the authoritative command fact. Session detail only supplies
-      // the request payload while the Run remains in a waiting state.
-      if (durableRun.status !== 'waiting_approval' && durableRun.status !== 'waiting_input') {
-        setPause(null)
-      }
-      updateStatus(durableRun.status)
-      if (TERMINAL.has(durableRun.status)) {
-        updateActiveRun(null, durableRun.status)
-        currentChatActions.finishRun(durableRun.status)
-      } else {
-        updateActiveRun(runId, durableRun.status)
-      }
-      return true
+      return (
+        await calibrate(tenantId, runId, sessionId, generation, controller.signal)
+      ) !== null
     } catch {
       return false
     }
-  }, [fetchImpl, isCurrent, updateActiveRun, updateStatus])
+  }, [calibrate])
 
   const cancelRun = useCallback(async (): Promise<RunCommandResult> => {
     const tenantId = tenantRef.current
@@ -573,15 +573,34 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       try {
         const resumed = await resumeRunRequest(tenantId, runId, pauseId, response, fetchImpl)
         if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
-        setPause(null)
-        updateActiveRun(runId, resumed.status)
-        updateStatus(resumed.status)
-        // The POST acknowledgement is durable. Streaming is observation, not
-        // part of the command critical section, so Stop can fence a new command.
+        // The POST acknowledgement is durable. Reconciliation and streaming
+        // are observation, so Stop can fence a new command immediately.
         if (commandOwnerRef.current === generation) {
           commandOwnerRef.current = null
           commandInFlightRef.current = false
           setCommandPending(false)
+        }
+        let reconciled: RunResponse | null = null
+        try {
+          reconciled = await calibrate(
+            tenantId,
+            runId,
+            sessionId,
+            generation,
+            controller.signal,
+          )
+        } catch {
+          // The successful POST is still a durable command fact. Streaming
+          // below gets another chance to reconcile a newer pause.
+        }
+        if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
+        if (!reconciled) {
+          setPause(null)
+          updateActiveRun(runId, resumed.status)
+          updateStatus(resumed.status)
+        }
+        if (reconciled && TERMINAL.has(reconciled.status)) {
+          return { ok: true }
         }
         await streamRun(tenantId, runId, sessionId, generation, controller)
         return { ok: true }
@@ -603,7 +622,16 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         }
       }
     },
-    [fetchImpl, isCurrent, pause?.id, recoverCommandFacts, streamRun, updateActiveRun, updateStatus],
+    [
+      calibrate,
+      fetchImpl,
+      isCurrent,
+      pause?.id,
+      recoverCommandFacts,
+      streamRun,
+      updateActiveRun,
+      updateStatus,
+    ],
   )
 
   useEffect(() => {
