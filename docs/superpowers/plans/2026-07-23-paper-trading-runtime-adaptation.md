@@ -106,7 +106,7 @@ from app.models.paper_account import (
 
 - [ ] **Step 3: 运行定向测试**
 
-Run: 与 Step 1 相同。  
+Run: 与 Step 1 相同。
 Expected: PASS。
 
 - [ ] **Step 4: 提交**
@@ -233,7 +233,7 @@ app.include_router(paper_trading_router)
 
 - [ ] **Step 3: 运行 API 测试**
 
-Run: 与 Step 1 相同。  
+Run: 与 Step 1 相同。
 Expected: PASS。
 
 - [ ] **Step 4: 提交**
@@ -292,7 +292,7 @@ positions_with_quantity | watchlist_with_monitoring_enabled
 
 - [ ] **Step 4: 运行测试**
 
-Run: 与 Step 1 相同。  
+Run: 与 Step 1 相同。
 Expected: PASS。
 
 - [ ] **Step 5: 提交**
@@ -710,7 +710,7 @@ onApprove({
 
 - [ ] **Step 5: 运行 Vitest**
 
-Run: 与 Step 1 相同。  
+Run: 与 Step 1 相同。
 Expected: PASS。
 
 - [ ] **Step 6: 提交**
@@ -752,7 +752,7 @@ Expected: FAIL because pages and routes do not exist.
 
 - [ ] **Step 3: 运行页面测试**
 
-Run: 与 Step 1 相同。  
+Run: 与 Step 1 相同。
 Expected: PASS。
 
 - [ ] **Step 4: 提交**
@@ -801,7 +801,7 @@ monitoring_enabled 缺省 -> false
 
 - [ ] **Step 3: 运行评估测试**
 
-Run: 与 Step 1 相同。  
+Run: 与 Step 1 相同。
 Expected: PASS。
 
 - [ ] **Step 4: 提交**
@@ -818,7 +818,7 @@ git commit -m "test(eval): cover approved paper trades and watchlist writes"
 **Files:**
 - Create: `frontend/tests/e2e/paper-trading.spec.ts`
 - Create: `frontend/tests/e2e/watchlist.spec.ts`
-- Create: `docs/Codex-context/paper-trading-runtime-adaptation-done.md`
+- Create: `docs/claude-context/paper-trading-runtime-adaptation-done.md`
 
 - [ ] **Step 1: 添加 Playwright 链路**
 
@@ -881,7 +881,7 @@ Expected: PASS；若依赖容器不可用，先检查现有 Docker/Redis/Postgre
 完成卡只记录实际执行过的测试数量和命令，不写未运行的 CI。
 
 ```powershell
-git add docs/Codex-context frontend/tests/e2e
+git add docs/claude-context frontend/tests/e2e
 git commit -m "docs: record paper trading runtime adaptation"
 ```
 

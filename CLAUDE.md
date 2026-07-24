@@ -120,6 +120,9 @@ Claude Code 在本仓库工作时会自动加载这个文件。它是项目级**
 - [Phase 1 foundation ship](docs/claude-context/run-control-plane-phase1-foundation-done.md) — Tenant/Run PostgreSQL 骨架 + production 严格六 Run API + durable lifecycle；只到 queued foundation，无 Scheduler/Worker/Redis/LLM
 - [Phases 2-4 completion](docs/claude-context/run-control-plane-phases2-4-done.md) — Scheduler/Dispatcher/Worker、Redis replay、chat cutover、observability、migration gate 与 legacy execution retirement；附准确验收命令和 Docker/真实凭据阻塞记录
 
+### 模拟交易运行时适配(2026-07-24 ship 完)
+- [模拟交易运行时适配完成卡](docs/claude-context/paper-trading-runtime-adaptation-done.md) — 自选股低风险直接写 + 模拟交易 Run 审批写 + 可编辑预览卡 + 真实 PG/Celery/Redis 与 Chromium 验收
+
 
 ## 设计稿与实施计划
 
