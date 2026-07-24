@@ -1145,6 +1145,14 @@ async def test_eval_trace_fails_when_persisted_permission_decision_is_unknown(
             "version": 1,
             "type": "paper_trading",
             "expected_tools": ["place_paper_order"],
+            "tool_args_contains": {
+                "place_paper_order": {
+                    "ts_code": "600519.SH",
+                    "side": "buy",
+                    "quantity": 100,
+                }
+            },
+            "call_counts": {"place_paper_order": {"min": 1, "max": 1}},
             "risk_levels": {"place_paper_order": "high"},
             "permission_decisions": {
                 "place_paper_order": ["approval_required", "approved"],

@@ -288,6 +288,159 @@ def test_permission_trajectory_fails_closed_on_invalid_durable_decision(
     assert "permission" in result.detail
 
 
+def _approved_call(
+    *,
+    permissions: list[str] | None = None,
+    risk: str | None = "high",
+    quantity: int = 100,
+) -> dict[str, Any]:
+    call: dict[str, Any] = {
+        "tool_name": "place_paper_order",
+        "args": {
+            "ts_code": "600519.SH",
+            "side": "buy",
+            "quantity": quantity,
+            "limit_price": "1500",
+        },
+    }
+    if risk is not None:
+        call["risk_level"] = risk
+    if permissions is not None:
+        call["permission_decisions"] = permissions
+    return call
+
+
+def _approved_states() -> tuple[dict[str, Any], dict[str, Any]]:
+    return (
+        {
+            **OBSERVED,
+            "created_order_count": 1,
+            "order": {
+                "ts_code": "600519.SH",
+                "side": "buy",
+                "quantity": 100,
+                "limit_price": "1500",
+                "source_run_matches": True,
+                "current_generation": True,
+            },
+        },
+        {
+            **OBSERVED,
+            "pauses": [{"pause_type": "approval", "decision": "approved"}],
+            "resumed": True,
+            "status": "completed",
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "calls",
+    [
+        [
+            _approved_call(permissions=["approval_required", "unknown"]),
+            _approved_call(permissions=["approval_required", "approved"]),
+        ],
+        [
+            _approved_call(permissions=["approval_required", "approved"]),
+            _approved_call(permissions=["approval_required", "unknown"]),
+        ],
+        [
+            _approved_call(risk="unknown", permissions=["approval_required", "approved"]),
+            _approved_call(permissions=["approval_required", "approved"]),
+        ],
+        [
+            _approved_call(quantity=200, permissions=["approval_required", "approved"]),
+            _approved_call(permissions=["approval_required", "approved"]),
+        ],
+    ],
+    ids=["bad-then-good", "good-then-bad", "bad-risk-then-good", "bad-args-then-good"],
+)
+def test_every_matching_call_must_have_valid_risk_permission_and_args(
+    calls: list[dict[str, Any]],
+) -> None:
+    expected = {
+        **(_case("paper-buy-approved").expected["outcome"]),
+        "call_counts": {"place_paper_order": {"min": 1, "max": 2}},
+    }
+    database_state, run_state = _approved_states()
+
+    result = PaperTradingOutcomeScorer().score(expected, calls, database_state, run_state)
+
+    assert result.score == 0
+    assert not result.passed
+
+
+def test_repeated_write_is_a_hard_failure_even_when_terminal_state_looks_correct() -> None:
+    expected = _case("paper-buy-approved").expected["outcome"]
+    database_state, run_state = _approved_states()
+    calls = [
+        _approved_call(permissions=["approval_required", "approved"]),
+        _approved_call(permissions=["approval_required", "approved"]),
+    ]
+
+    result = PaperTradingOutcomeScorer().score(expected, calls, database_state, run_state)
+
+    assert result.score == 0
+    assert not result.passed
+    assert "call count" in result.detail
+
+
+def test_unexpected_modern_write_is_a_hard_failure() -> None:
+    expected = _case("paper-buy-approved").expected["outcome"]
+    database_state, run_state = _approved_states()
+    calls = [
+        _approved_call(permissions=["approval_required", "approved"]),
+        {
+            "tool_name": "cancel_paper_order",
+            "args": {"order_id": "unexpected"},
+            "risk_level": "high",
+            "permission_decisions": ["approval_required", "approved"],
+        },
+    ]
+
+    result = PaperTradingOutcomeScorer().score(expected, calls, database_state, run_state)
+
+    assert result.score == 0
+    assert "unexpected write" in result.detail
+
+
+def test_repeated_read_is_allowed_only_with_explicit_count_and_every_call_is_low_direct() -> None:
+    expected = {
+        **(_case("paper-research-no-write").expected["outcome"]),
+        "call_counts": {"get_stock_quote": {"min": 1, "max": 2}},
+    }
+    calls = [
+        {
+            "tool_name": "get_stock_quote",
+            "args": {"ts_code": "600519.SH"},
+            "risk_level": "low",
+            "permission_decisions": ["direct"],
+        },
+        {
+            "tool_name": "get_stock_quote",
+            "args": {"ts_code": "600519.SH"},
+            "risk_level": "low",
+            "permission_decisions": ["direct"],
+        },
+    ]
+    database_state = {
+        **OBSERVED,
+        "snapshot_collected": True,
+        "before": {"order_count": 0, "available_cash": "1000000.00"},
+        "after": {"order_count": 0, "available_cash": "1000000.00"},
+    }
+    run_state = {**OBSERVED, "pauses": [], "resumed": False, "status": "completed"}
+
+    assert PaperTradingOutcomeScorer().score(
+        expected, calls, database_state, run_state
+    ).passed
+    calls[0]["permission_decisions"] = ["approved"]
+    assert (
+        PaperTradingOutcomeScorer().score(expected, calls, database_state, run_state).score
+        == 0
+    )
+
+
 def test_edited_approval_only_accepts_effective_order_and_audits_both_payloads() -> None:
     expected = _case("paper-buy-edited-approved").expected["outcome"]
     good_state = {
@@ -375,7 +528,12 @@ def test_rejection_has_no_order_or_cash_side_effect() -> None:
     trace = [
         {
             "tool_name": "place_paper_order",
-            "args": {"quantity": 100, "limit_price": "1500"},
+            "args": {
+                "ts_code": "600519.SH",
+                "side": "buy",
+                "quantity": 100,
+                "limit_price": "1500",
+            },
             "risk_level": "high",
             "permission_decisions": ["approval_required", "rejected"],
         }
@@ -399,6 +557,8 @@ def test_forbidden_legacy_direct_trade_is_a_hard_failure() -> None:
             "version": 1,
             "type": "paper_trading",
             "expected_tools": ["place_paper_order"],
+            "tool_args_contains": {"place_paper_order": {}},
+            "call_counts": {"place_paper_order": {"min": 1, "max": 1}},
             "risk_levels": {"place_paper_order": "high"},
             "permission_decisions": {
                 "place_paper_order": ["approval_required", "approved"],
@@ -524,16 +684,36 @@ def test_durable_transport_maps_interaction_to_real_resume_payload_and_trace() -
         {
             "type": "paper_trading",
             "expected_tools": ["place_paper_order"],
+            "tool_args_contains": {"place_paper_order": {}},
+            "call_counts": {"place_paper_order": {"min": 1, "max": 1}},
             "risk_levels": {"place_paper_order": "high"},
-            "run": {"pause_type": "approval", "resumed": True},
+            "permission_decisions": {
+                "place_paper_order": ["approval_required", "approved"],
+            },
+            "run": {
+                "pause_type": "approval",
+                "decision": "approved",
+                "resumed": True,
+                "status": "completed",
+            },
             "database_assertions": {"order_count": 1},
         },
         {
             "version": 1,
             "type": "paper_trading",
             "expected_tools": ["place_paper_order"],
+            "tool_args_contains": {"place_paper_order": {}},
+            "call_counts": {"place_paper_order": {"min": 1, "max": 1}},
             "risk_levels": {"place_paper_order": "high"},
-            "run": {"pause_type": "approval", "resumed": True},
+            "permission_decisions": {
+                "place_paper_order": ["approval_required", "approved"],
+            },
+            "run": {
+                "pause_type": "approval",
+                "decision": "approved",
+                "resumed": True,
+                "status": "completed",
+            },
             "database_assertions": {"order_count": 1},
         },
     ],
@@ -553,6 +733,25 @@ def test_outcome_contract_fails_closed_when_version_or_interaction_is_missing(
     path = tmp_path / "bad.jsonl"
     path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
     with pytest.raises(ValueError, match="outcome"):
+        load_scenarios(path)
+
+
+def test_outcome_contract_fails_closed_when_call_counts_are_missing(tmp_path: Path) -> None:
+    scenario = _case("paper-research-no-write")
+    outcome = dict(scenario.expected["outcome"])
+    outcome.pop("call_counts")
+    raw = {
+        "case_id": "missing-call-counts",
+        "category": scenario.category,
+        "user_input": scenario.user_input,
+        "expected": {"first_tool": "get_stock_quote", "outcome": outcome},
+        "bucket": scenario.bucket,
+        "difficulty": scenario.difficulty,
+    }
+    path = tmp_path / "missing-call-counts.jsonl"
+    path.write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="call_counts"):
         load_scenarios(path)
 
 

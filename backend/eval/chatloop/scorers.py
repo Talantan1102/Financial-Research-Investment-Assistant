@@ -177,6 +177,9 @@ _MISSING = object()
 _KNOWN_PERMISSION_DECISIONS = frozenset(
     {"direct", "approval_required", "approved", "rejected"}
 )
+_STATE_WRITE_TOOLS = frozenset(
+    {"place_paper_order", "cancel_paper_order", "reset_paper_account", "manage_watchlist"}
+)
 
 
 def _permission_contract_is_consistent(expected: dict[str, Any]) -> bool:
@@ -239,7 +242,8 @@ class PaperTradingOutcomeScorer:
                 database_terminal_state=False,
                 detail=f"failed: forbidden_tools={forbidden_hits}",
             )
-        if not self._valid_permission_observation(expected, tool_calls):
+        invalid_observation = self._invalid_tool_observation(expected, tool_calls)
+        if invalid_observation is not None:
             return PaperTradingOutcomeScore(
                 passed=False,
                 score=0.0,
@@ -247,21 +251,12 @@ class PaperTradingOutcomeScorer:
                 risk_and_pause=False,
                 resume_semantics=False,
                 database_terminal_state=False,
-                detail="invalid or conflicting permission observation",
+                detail=invalid_observation,
             )
         required = [str(name) for name in expected.get("expected_tools", [])]
         trajectory_ok = _is_subsequence(required, names) and not forbidden_hits
 
-        for tool_name, wanted_args in expected.get("tool_args_contains", {}).items():
-            matching = [call for call in tool_calls if call.get("tool_name") == tool_name]
-            if not matching or not _partial_match(wanted_args, matching[-1].get("args", {})):
-                trajectory_ok = False
-
         risk_ok = True
-        for tool_name, wanted_risk in expected.get("risk_levels", {}).items():
-            matching = [call for call in tool_calls if call.get("tool_name") == tool_name]
-            if not matching or matching[-1].get("risk_level") != wanted_risk:
-                risk_ok = False
 
         observed_run = run_state or {}
         pauses = observed_run.get("pauses", [])
@@ -337,6 +332,8 @@ class PaperTradingOutcomeScorer:
         tools = expected.get("expected_tools")
         risks = expected.get("risk_levels")
         permissions = expected.get("permission_decisions")
+        call_counts = expected.get("call_counts")
+        tool_args = expected.get("tool_args_contains")
         run = expected.get("run")
         database = expected.get("database_assertions")
         return (
@@ -359,6 +356,21 @@ class PaperTradingOutcomeScorer:
                 )
                 for tool in tools
             )
+            and isinstance(call_counts, dict)
+            and all(
+                tool in call_counts
+                and isinstance(call_counts[tool], dict)
+                and type(call_counts[tool].get("min")) is int
+                and type(call_counts[tool].get("max")) is int
+                and 1 <= call_counts[tool]["min"] <= call_counts[tool]["max"]
+                and (
+                    tool not in _STATE_WRITE_TOOLS
+                    or call_counts[tool]["min"] == call_counts[tool]["max"] == 1
+                )
+                for tool in tools
+            )
+            and isinstance(tool_args, dict)
+            and all(tool in tool_args and isinstance(tool_args[tool], dict) for tool in tools)
             and isinstance(run, dict)
             and "pause_type" in run
             and "resumed" in run
@@ -369,27 +381,48 @@ class PaperTradingOutcomeScorer:
         )
 
     @staticmethod
-    def _valid_permission_observation(
+    def _invalid_tool_observation(
         expected: dict[str, Any],
         tool_calls: list[dict[str, Any]],
-    ) -> bool:
-        for tool_name, wanted in expected["permission_decisions"].items():
+    ) -> str | None:
+        expected_tools = set(expected["expected_tools"])
+        unexpected_writes = [
+            str(call.get("tool_name", ""))
+            for call in tool_calls
+            if call.get("tool_name") in _STATE_WRITE_TOOLS
+            and call.get("tool_name") not in expected_tools
+        ]
+        if unexpected_writes:
+            return f"invalid unexpected write calls: {unexpected_writes}"
+        for tool_name in expected["expected_tools"]:
             matching = [call for call in tool_calls if call.get("tool_name") == tool_name]
-            if not matching:
-                return False
-            observed = matching[-1].get("permission_decisions")
-            if (
-                not isinstance(observed, list)
-                or not observed
-                or any(
-                    not isinstance(decision, str)
-                    or decision not in _KNOWN_PERMISSION_DECISIONS
-                    for decision in observed
+            bounds = expected["call_counts"][tool_name]
+            if not bounds["min"] <= len(matching) <= bounds["max"]:
+                return (
+                    f"invalid call count for {tool_name}: "
+                    f"expected {bounds['min']}..{bounds['max']}, observed {len(matching)}"
                 )
-                or observed != wanted
-            ):
-                return False
-        return True
+            wanted_risk = expected["risk_levels"][tool_name]
+            wanted_permissions = expected["permission_decisions"][tool_name]
+            wanted_args = expected["tool_args_contains"][tool_name]
+            for call in matching:
+                if call.get("risk_level") != wanted_risk:
+                    return f"invalid or conflicting risk observation for {tool_name}"
+                observed_permissions = call.get("permission_decisions")
+                if (
+                    not isinstance(observed_permissions, list)
+                    or not observed_permissions
+                    or any(
+                        not isinstance(decision, str)
+                        or decision not in _KNOWN_PERMISSION_DECISIONS
+                        for decision in observed_permissions
+                    )
+                    or observed_permissions != wanted_permissions
+                ):
+                    return f"invalid or conflicting permission observation for {tool_name}"
+                if not _partial_match(wanted_args, call.get("args", {})):
+                    return f"invalid or conflicting args observation for {tool_name}"
+        return None
 
     @staticmethod
     def _complete_observation(value: dict[str, Any] | None) -> bool:

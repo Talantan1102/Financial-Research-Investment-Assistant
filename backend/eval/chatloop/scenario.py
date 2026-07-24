@@ -128,8 +128,10 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
         _fail(f"{case_id}: outcome.type 非法")
     required = (
         "expected_tools",
+        "tool_args_contains",
         "risk_levels",
         "permission_decisions",
+        "call_counts",
         "run",
         "database_assertions",
     )
@@ -137,12 +139,19 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
     if missing:
         _fail(f"{case_id}: outcome 缺失 {missing}")
     expected_tools = outcome["expected_tools"]
+    tool_args = outcome["tool_args_contains"]
     risk_levels = outcome["risk_levels"]
     permission_decisions = outcome["permission_decisions"]
+    call_counts = outcome["call_counts"]
     run = outcome["run"]
     database_assertions = outcome["database_assertions"]
     if not isinstance(expected_tools, list) or not expected_tools:
         _fail(f"{case_id}: outcome.expected_tools 须为非空数组")
+    if not isinstance(tool_args, dict) or any(
+        tool not in tool_args or not isinstance(tool_args[tool], dict)
+        for tool in expected_tools
+    ):
+        _fail(f"{case_id}: outcome.tool_args_contains 必须覆盖 expected_tools")
     if not isinstance(risk_levels, dict) or any(tool not in risk_levels for tool in expected_tools):
         _fail(f"{case_id}: outcome.risk_levels 必须覆盖 expected_tools")
     if any(risk_levels[tool] not in {"low", "high"} for tool in expected_tools):
@@ -174,6 +183,25 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
             )
             if terminal is None or trajectory != ["approval_required", terminal]:
                 _fail(f"{case_id}: HIGH 工具权限轨迹必须覆盖审批终态")
+    write_tools = {
+        "place_paper_order",
+        "cancel_paper_order",
+        "reset_paper_account",
+        "manage_watchlist",
+    }
+    if not isinstance(call_counts, dict) or any(
+        tool not in call_counts
+        or not isinstance(call_counts[tool], dict)
+        or type(call_counts[tool].get("min")) is not int
+        or type(call_counts[tool].get("max")) is not int
+        or not 1 <= call_counts[tool]["min"] <= call_counts[tool]["max"]
+        or (
+            tool in write_tools
+            and not call_counts[tool]["min"] == call_counts[tool]["max"] == 1
+        )
+        for tool in expected_tools
+    ):
+        _fail(f"{case_id}: outcome.call_counts 必须覆盖工具并限制写工具为精确一次")
     if (
         not isinstance(run, dict)
         or "pause_type" not in run
