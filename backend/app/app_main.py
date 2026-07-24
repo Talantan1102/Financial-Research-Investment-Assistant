@@ -39,6 +39,9 @@ from app.router.run_sessions import router as run_sessions_router  # noqa: E402
 from app.router.runs import router as runs_router  # noqa: E402
 from app.router.tenants import router as tenants_router  # noqa: E402
 from app.router.watchlist_router import router as watchlist_router  # noqa: E402
+from app.scripts.migrate_paper_trading_schema import (  # noqa: E402
+    verify_paper_trading_schema_connection,
+)
 from app.scripts.migrate_phase3_execution_schema import (  # noqa: E402
     is_fresh_application_schema_connection,
     verify_run_control_schema_connection,
@@ -74,9 +77,11 @@ def _initialize_postgres_schema(database_engine: Engine | None = None) -> bool:
             if fresh_schema:
                 Base.metadata.create_all(bind=connection)
                 verify_run_control_schema_connection(connection)
+                verify_paper_trading_schema_connection(connection)
                 logger.info("Fresh PostgreSQL schema initialized and verified")
             else:
                 verify_run_control_schema_connection(connection)
+                verify_paper_trading_schema_connection(connection)
                 logger.info("Existing PostgreSQL schema verified without startup DDL")
     except OperationalError as exc:
         sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
