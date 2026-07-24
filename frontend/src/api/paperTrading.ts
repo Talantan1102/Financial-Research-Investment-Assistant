@@ -1,4 +1,7 @@
 import type {
+  PaperAccount,
+  PaperHolding,
+  PaperOrder,
   PaperOrderPreview,
   PaperOrderPreviewRequest,
 } from '@/types/paper-trading'
@@ -12,6 +15,48 @@ const API_BASE = ((import.meta.env.VITE_API_BASE as string) ?? '').replace(
 function authHeaders(): Record<string, string> {
   const token = getAuthToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+async function readJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...authHeaders(),
+      ...init?.headers,
+    },
+  })
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      detail?: string | { message?: string }
+    } | null
+    const detail = body?.detail
+    throw new Error(
+      typeof detail === 'string'
+        ? detail
+        : (detail?.message ?? `模拟账户读取失败（${response.status}）`),
+    )
+  }
+  return response.json() as Promise<T>
+}
+
+export function getPaperAccount(): Promise<PaperAccount> {
+  return readJson('/api/v0/paper-trading/account')
+}
+
+export function listPaperHoldings(): Promise<PaperHolding[]> {
+  return readJson('/api/v0/paper-trading/holdings')
+}
+
+export function listPaperOrders(
+  filters: { status?: string; ts_code?: string; limit?: number; offset?: number } = {},
+): Promise<PaperOrder[]> {
+  const query = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined) query.set(key, String(value))
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : ''
+  return readJson(`/api/v0/paper-trading/orders${suffix}`)
 }
 
 export interface PaperOrderPreviewOptions {

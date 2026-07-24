@@ -1,0 +1,240 @@
+.page {
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 32px clamp(16px, 4vw, 48px) 56px;
+  color: var(--ios-label);
+}
+
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+
+  h1 {
+    margin: 2px 0 6px;
+    font-size: clamp(28px, 4vw, 38px);
+    letter-spacing: -0.04em;
+  }
+
+  p:last-child {
+    margin: 0;
+    color: var(--ios-label-secondary);
+  }
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--ios-blue);
+  font: 600 11px/1 var(--ios-font-mono);
+  letter-spacing: 0.12em;
+}
+
+.generation {
+  flex: none;
+  padding: 7px 12px;
+  border: 1px solid var(--ios-separator);
+  border-radius: var(--ios-radius-pill);
+  background: var(--ios-surface);
+  color: var(--ios-label-secondary);
+  font: 500 12px/1 var(--ios-font-mono);
+}
+
+.cashStrip {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr;
+  overflow: hidden;
+  margin-bottom: 20px;
+  border: 1px solid var(--ios-separator);
+  border-radius: var(--ios-radius-lg);
+  background: var(--ios-surface);
+  box-shadow: var(--ios-shadow-sm);
+
+  > div {
+    min-width: 0;
+    padding: 22px 24px;
+
+    & + div {
+      border-left: 1px solid var(--ios-separator);
+    }
+  }
+
+  span {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--ios-label-secondary);
+    font-size: 12px;
+  }
+
+  strong {
+    font: 600 clamp(18px, 2.5vw, 25px)/1.1 var(--ios-font-mono);
+    letter-spacing: -0.04em;
+  }
+}
+
+.primaryCash {
+  position: relative;
+
+  &::before {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 4px;
+    background: var(--ios-blue);
+    content: '';
+  }
+}
+
+.section {
+  overflow: hidden;
+  margin-top: 16px;
+  border: 1px solid var(--ios-separator);
+  border-radius: var(--ios-radius-lg);
+  background: var(--ios-surface);
+  box-shadow: var(--ios-shadow-sm);
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 17px 20px;
+  border-bottom: 1px solid var(--ios-separator);
+
+  h2 {
+    margin: 0;
+    font-size: 16px;
+  }
+
+  span {
+    color: var(--ios-label-secondary);
+    font: 12px/1 var(--ios-font-mono);
+  }
+}
+
+.tableWrap {
+  overflow-x: auto;
+
+  table {
+    width: 100%;
+    min-width: 680px;
+    border-collapse: collapse;
+  }
+
+  th,
+  td {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--ios-separator);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  th {
+    color: var(--ios-label-secondary);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  th:first-child,
+  td:first-child {
+    text-align: left;
+  }
+
+  tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  td {
+    font: 13px/1.35 var(--ios-font-mono);
+  }
+
+  td strong,
+  td small {
+    display: block;
+  }
+
+  td strong {
+    font: 600 14px/1.35 var(--ios-font);
+  }
+
+  td small {
+    margin-top: 2px;
+    color: var(--ios-label-secondary);
+  }
+}
+
+.status {
+  display: inline-flex;
+  padding: 5px 9px;
+  border-radius: var(--ios-radius-pill);
+  background: var(--ios-blue-soft);
+  color: var(--ios-blue);
+  font: 500 12px/1 var(--ios-font);
+
+  &[data-status='filled'] {
+    background: rgba(52, 199, 89, 0.1);
+    color: #248a3d;
+  }
+
+  &[data-status='rejected'],
+  &[data-status='expired'],
+  &[data-status='cancelled'] {
+    background: rgba(255, 59, 48, 0.08);
+    color: #d70015;
+  }
+}
+
+.empty,
+.loading {
+  margin: 0;
+  padding: 36px 20px;
+  color: var(--ios-label-secondary);
+  text-align: center;
+}
+
+.loading {
+  margin-top: 15vh;
+}
+
+.error,
+.inlineError {
+  border: 1px solid rgba(255, 59, 48, 0.2);
+  border-radius: var(--ios-radius);
+  background: rgba(255, 59, 48, 0.07);
+  color: #d70015;
+}
+
+.error {
+  display: grid;
+  gap: 5px;
+  margin-top: 15vh;
+  padding: 18px 20px;
+}
+
+.inlineError {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+}
+
+@media (max-width: 680px) {
+  .page {
+    padding-top: 20px;
+  }
+
+  .header {
+    align-items: flex-start;
+  }
+
+  .cashStrip {
+    grid-template-columns: 1fr 1fr;
+
+    > div:first-child {
+      grid-column: 1 / -1;
+      border-bottom: 1px solid var(--ios-separator);
+    }
+
+    > div:nth-child(2) {
+      border-left: 0;
+    }
+  }
+}

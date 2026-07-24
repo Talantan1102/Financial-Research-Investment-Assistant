@@ -1,4 +1,9 @@
-import { previewPaperOrder } from '@/api/paperTrading'
+import {
+  getPaperAccount,
+  listPaperHoldings,
+  listPaperOrders,
+  previewPaperOrder,
+} from '@/api/paperTrading'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 describe('paperTrading API', () => {
@@ -35,6 +40,30 @@ describe('paperTrading API', () => {
     expect(new Headers(init?.headers).get('Authorization')).toBe(
       'Bearer paper-token',
     )
+  })
+
+  it('reads account, holdings and bounded order pages with auth', async () => {
+    const globalFetch = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(JSON.stringify([]), {
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    )
+
+    await getPaperAccount()
+    await listPaperHoldings()
+    await listPaperOrders({ status: 'open', limit: 50, offset: 0 })
+
+    expect(globalFetch.mock.calls.map(([url]) => url)).toEqual([
+      '/api/v0/paper-trading/account',
+      '/api/v0/paper-trading/holdings',
+      '/api/v0/paper-trading/orders?status=open&limit=50&offset=0',
+    ])
+    for (const [, init] of globalFetch.mock.calls) {
+      expect(new Headers(init?.headers).get('Authorization')).toBe(
+        'Bearer paper-token',
+      )
+    }
   })
 
   it('keeps the original injected-fetch signature without touching global fetch', async () => {

@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Annotated, cast
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -13,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.paper_account import PaperHoldingLot
 from app.models.paper_order import OrderStatus, PaperOrder
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
@@ -20,6 +23,7 @@ from app.schemas.paper_trading import (
     OrderDraftPreview,
     OrderPreviewRequest,
     PaperAccountRead,
+    PaperHoldingRead,
     PaperOrderRead,
 )
 from app.services.paper_trading.account_service import PaperAccountService
@@ -111,6 +115,65 @@ def get_account(
     except PaperTradingError as exc:
         db.rollback()
         _raise_safe_domain_error(exc)
+
+
+@router.get("/holdings", response_model=list[PaperHoldingRead])
+def list_holdings(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_user_required)],
+) -> list[PaperHoldingRead]:
+    """Read the current generation's lots, including T+1 availability."""
+    try:
+        account = PaperAccountService(db).get_active(user_id=_user_id(user))
+    except PaperTradingError as exc:
+        _raise_safe_domain_error(exc)
+
+    lots = db.scalars(
+        select(PaperHoldingLot)
+        .where(
+            PaperHoldingLot.account_id == account.id,
+            PaperHoldingLot.generation == account.generation,
+            PaperHoldingLot.remaining_quantity > 0,
+        )
+        .order_by(PaperHoldingLot.ts_code, PaperHoldingLot.created_at, PaperHoldingLot.id)
+    ).all()
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    grouped: dict[str, dict[str, object]] = {}
+    for lot in lots:
+        ts_code = cast(str, lot.ts_code)
+        item = grouped.setdefault(
+            ts_code,
+            {
+                "generation": int(lot.generation),
+                "ts_code": ts_code,
+                "name": cast(str, lot.name),
+                "quantity": 0,
+                "frozen_quantity": 0,
+                "sellable_quantity": 0,
+                "cost": Decimal("0"),
+            },
+        )
+        quantity = int(lot.remaining_quantity)
+        frozen = int(lot.frozen_quantity)
+        item["quantity"] = cast(int, item["quantity"]) + quantity
+        item["frozen_quantity"] = cast(int, item["frozen_quantity"]) + frozen
+        if lot.available_on <= today:
+            item["sellable_quantity"] = (
+                cast(int, item["sellable_quantity"]) + quantity - frozen
+            )
+        item["cost"] = (
+            cast(Decimal, item["cost"]) + cast(Decimal, lot.unit_cost) * quantity
+        )
+    return [
+        PaperHoldingRead.model_validate(
+            {
+                **item,
+                "average_cost": cast(Decimal, item["cost"])
+                / cast(int, item["quantity"]),
+            }
+        )
+        for item in grouped.values()
+    ]
 
 
 @router.get("/orders", response_model=list[PaperOrderRead])

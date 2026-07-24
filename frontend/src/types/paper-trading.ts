@@ -47,6 +47,56 @@ export interface PaperOrderPreviewRequest {
   draft: PaperOrderDraft
 }
 
+export interface PaperAccount {
+  id: string
+  generation: number
+  initial_cash: string
+  available_cash: string
+  frozen_cash: string
+  status: 'active' | 'suspended' | 'archived'
+}
+
+export type PaperOrderStatus =
+  | 'awaiting_confirmation'
+  | 'queued'
+  | 'open'
+  | 'partially_filled'
+  | 'filled'
+  | 'cancelled'
+  | 'expired'
+  | 'rejected'
+
+export interface PaperOrder {
+  id: string
+  account_generation: number
+  ts_code: string
+  name: string
+  side: OrderSide
+  order_type: OrderType
+  quantity: number
+  limit_price: string | null
+  filled_quantity: number
+  avg_fill_price: string | null
+  reserved_cash: string
+  reserved_quantity: number
+  status: PaperOrderStatus
+  reject_code?: string | null
+  reject_message?: string | null
+  created_at: string
+  confirmed_at?: string | null
+  completed_at?: string | null
+}
+
+export interface PaperHolding {
+  generation: number
+  ts_code: string
+  name: string
+  quantity: number
+  frozen_quantity: number
+  sellable_quantity: number
+  average_cost: string
+}
+
 export interface ApprovalToolCall {
   id: string
   name: string
