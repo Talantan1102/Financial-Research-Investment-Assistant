@@ -205,6 +205,7 @@ async def test_server_risk_registry_fails_closed_except_explicit_safe_tools() ->
     assert policy.safe_to_retry("get_stock_quote") is True
     production = load_tool_risk_policy({})
     for name in (
+        "get_stock_quote",
         "get_paper_account",
         "list_paper_orders",
         "get_paper_order",
@@ -216,6 +217,26 @@ async def test_server_risk_registry_fails_closed_except_explicit_safe_tools() ->
         assert production.safe_to_retry(name) is False
         assert production.risk_level(name) == "high"
     assert production.risk_level("unknown_tool") == "high"
+
+
+@pytest.mark.asyncio
+async def test_production_quote_read_executes_directly_without_approval_pause() -> None:
+    controller = DurableApprovalController(load_tool_risk_policy({}), frozenset())
+    state = ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[])
+
+    directive = await controller.check(
+        phase="before_tools",
+        state=state,
+        tool_calls=(
+            StepToolCall(
+                id="quote",
+                name="get_stock_quote",
+                arguments='{"ts_code":"600519.SH"}',
+            ),
+        ),
+    )
+
+    assert directive is None
 
 
 @pytest.mark.asyncio

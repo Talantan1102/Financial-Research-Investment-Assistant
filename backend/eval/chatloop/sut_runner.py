@@ -207,18 +207,44 @@ class DurableRunHttpTransport:
             ).all()
             calls: list[dict[str, Any]] = []
             seen_call_ids: set[str] = set()
+            pause_permissions: dict[str, list[str]] = {}
+            for pause in pauses:
+                request = dict(pause.request_payload)
+                response = dict(pause.response_payload or {})
+                paused_calls = request.get("tool_calls")
+                if not isinstance(paused_calls, list):
+                    continue
+                for paused in paused_calls:
+                    if not isinstance(paused, dict):
+                        continue
+                    call_id = str(paused.get("id", ""))
+                    initial = paused.get("permission_decision")
+                    if not call_id or not isinstance(initial, str):
+                        continue
+                    trajectory = [initial]
+                    approved = response.get("approved")
+                    if approved is True:
+                        trajectory.append("approved")
+                    elif approved is False:
+                        trajectory.append("rejected")
+                    pause_permissions[call_id] = trajectory
             for row in rows:
                 summary = dict(row.request_summary)
                 args = summary.get("args", summary)
                 call_id = str(row.tool_call_id)
                 seen_call_ids.add(call_id)
+                final_decision = str(row.permission_decision)
+                decisions = list(pause_permissions.get(call_id, []))
+                if not decisions or decisions[-1] != final_decision:
+                    decisions.append(final_decision)
                 calls.append(
                     {
                         "tool_call_id": call_id,
                         "tool_name": str(row.tool_name),
                         "args": dict(args) if isinstance(args, dict) else {},
                         "risk_level": str(row.risk_level),
-                        "permission_decision": str(row.permission_decision),
+                        "permission_decision": final_decision,
+                        "permission_decisions": decisions,
                     }
                 )
             for pause in pauses:
@@ -252,6 +278,10 @@ class DurableRunHttpTransport:
                                 "args": dict(arguments) if isinstance(arguments, dict) else {},
                                 "risk_level": paused.get("risk_level"),
                                 "permission_decision": decision,
+                                "permission_decisions": pause_permissions.get(
+                                    call_id,
+                                    [str(decision)] if decision is not None else [],
+                                ),
                             }
                         )
                         seen_call_ids.add(call_id)
@@ -263,6 +293,7 @@ class DurableRunHttpTransport:
                             "args": {"question": request.get("question")},
                             "risk_level": request.get("risk_level"),
                             "permission_decision": request.get("permission_decision"),
+                            "permission_decisions": [request.get("permission_decision")],
                         }
                     )
             pause_trace = [self._pause_trace(row) for row in pauses]

@@ -29,6 +29,7 @@ from pydantic import ValidationError
 @pytest.mark.parametrize(
     ("name", "risk", "read_only"),
     [
+        ("get_stock_quote", RiskLevel.LOW, True),
         ("get_paper_account", RiskLevel.LOW, True),
         ("list_paper_orders", RiskLevel.LOW, True),
         ("get_paper_order", RiskLevel.LOW, True),
@@ -42,6 +43,8 @@ def test_paper_tool_risk_is_static(name: str, risk: RiskLevel, read_only: bool) 
     metadata = TOOL_RISK_METADATA[name]
     assert metadata.risk is risk
     assert metadata.read_only is read_only
+    if name == "get_stock_quote":
+        assert metadata.idempotent is True
 
 
 @pytest.mark.parametrize(

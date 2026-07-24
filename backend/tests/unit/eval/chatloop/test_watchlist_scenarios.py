@@ -38,6 +38,7 @@ def test_add_defaults_monitoring_off_and_writes_audit_without_pause() -> None:
                 "tool_name": "manage_watchlist",
                 "args": {"action": "add", "ts_code": "600519.SH"},
                 "risk_level": "low",
+                "permission_decisions": ["direct"],
             }
         ],
         {
@@ -93,6 +94,7 @@ def test_watchlist_update_and_remove_require_direct_write_audit_terminal_state()
                     "monitoring_enabled": True,
                 },
                 "risk_level": "low",
+                "permission_decisions": ["direct"],
             }
         ],
         {
@@ -117,6 +119,7 @@ def test_watchlist_update_and_remove_require_direct_write_audit_terminal_state()
                 "tool_name": "manage_watchlist",
                 "args": {"action": "remove", "ts_code": "600519.SH"},
                 "risk_level": "low",
+                "permission_decisions": ["direct"],
             }
         ],
         {

@@ -6,6 +6,9 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from app.chatloop.state import ChatLoopState
+from app.services.llm_step import StepToolCall
+from app.services.run_chat_worker import DurableApprovalController, load_tool_risk_policy
 from eval.chatloop.run_eval import _run, score_evaluation_results
 from eval.chatloop.scenario import Scenario, load_scenarios
 from eval.chatloop.scorers import PaperTradingOutcomeScorer
@@ -44,6 +47,28 @@ def test_paper_trading_golden_uses_current_tools_and_loads_in_existing_harness()
     assert all(case.outcome is not None and case.outcome["version"] == 1 for case in scenarios)
 
 
+@pytest.mark.asyncio
+async def test_formal_research_golden_uses_production_low_direct_policy_without_pause() -> None:
+    scenario = _case("paper-research-no-write")
+    controller = DurableApprovalController(load_tool_risk_policy({}), frozenset())
+    directive = await controller.check(
+        phase="before_tools",
+        state=ChatLoopState(user_id="u", session_id="s", request_id="r", messages=[]),
+        tool_calls=(
+            StepToolCall(
+                id="quote",
+                name=scenario.expected["first_tool"],
+                arguments=json.dumps(scenario.expected["args_contains"]),
+            ),
+        ),
+    )
+
+    assert directive is None
+    assert scenario.outcome is not None
+    assert scenario.outcome["risk_levels"]["get_stock_quote"] == "low"
+    assert scenario.outcome["permission_decisions"]["get_stock_quote"] == ["direct"]
+
+
 def test_research_and_missing_quantity_require_no_database_write() -> None:
     scorer = PaperTradingOutcomeScorer()
 
@@ -55,6 +80,7 @@ def test_research_and_missing_quantity_require_no_database_write() -> None:
                 "tool_name": "get_stock_quote",
                 "args": {"ts_code": "600519.SH"},
                 "risk_level": "low",
+                "permission_decisions": ["direct"],
             }
         ],
         {
@@ -75,6 +101,7 @@ def test_research_and_missing_quantity_require_no_database_write() -> None:
                 "tool_name": "ask_user",
                 "args": {"question": "买多少股？"},
                 "risk_level": "low",
+                "permission_decisions": ["direct"],
             }
         ],
         {
@@ -125,6 +152,7 @@ def test_explicit_buy_requires_high_risk_approval_pause_resume_and_database_orde
                     "limit_price": "1500",
                 },
                 "risk_level": "high",
+                "permission_decisions": ["approval_required", "approved"],
             }
         ],
         {
@@ -202,6 +230,64 @@ def test_explicit_buy_requires_high_risk_approval_pause_resume_and_database_orde
     assert not not_resumed.resume_semantics
 
 
+@pytest.mark.parametrize(
+    "observed_permissions",
+    [
+        None,
+        ["approval_required", "unknown"],
+        ["direct"],
+    ],
+    ids=["missing", "unknown", "conflicting"],
+)
+def test_permission_trajectory_fails_closed_on_invalid_durable_decision(
+    observed_permissions: list[str] | None,
+) -> None:
+    expected = {
+        **(_case("paper-buy-approved").expected["outcome"]),
+        "permission_decisions": {
+            "place_paper_order": ["approval_required", "approved"],
+        },
+    }
+    call = {
+        "tool_name": "place_paper_order",
+        "args": {
+            "ts_code": "600519.SH",
+            "side": "buy",
+            "quantity": 100,
+            "limit_price": "1500",
+        },
+        "risk_level": "high",
+    }
+    if observed_permissions is not None:
+        call["permission_decisions"] = observed_permissions
+    result = PaperTradingOutcomeScorer().score(
+        expected,
+        [call],
+        {
+            **OBSERVED,
+            "created_order_count": 1,
+            "order": {
+                "ts_code": "600519.SH",
+                "side": "buy",
+                "quantity": 100,
+                "limit_price": "1500",
+                "source_run_matches": True,
+                "current_generation": True,
+            },
+        },
+        {
+            **OBSERVED,
+            "pauses": [{"pause_type": "approval", "decision": "approved"}],
+            "resumed": True,
+            "status": "completed",
+        },
+    )
+
+    assert result.score == 0
+    assert not result.passed
+    assert "permission" in result.detail
+
+
 def test_edited_approval_only_accepts_effective_order_and_audits_both_payloads() -> None:
     expected = _case("paper-buy-edited-approved").expected["outcome"]
     good_state = {
@@ -236,6 +322,7 @@ def test_edited_approval_only_accepts_effective_order_and_audits_both_payloads()
             "tool_name": "place_paper_order",
             "args": {"quantity": 200, "limit_price": "1499"},
             "risk_level": "high",
+            "permission_decisions": ["approval_required", "approved"],
         }
     ]
     assert PaperTradingOutcomeScorer().score(expected, trace, good_state, run_state).passed
@@ -290,6 +377,7 @@ def test_rejection_has_no_order_or_cash_side_effect() -> None:
             "tool_name": "place_paper_order",
             "args": {"quantity": 100, "limit_price": "1500"},
             "risk_level": "high",
+            "permission_decisions": ["approval_required", "rejected"],
         }
     ]
     assert PaperTradingOutcomeScorer().score(expected, trace, unchanged, run_state).passed
@@ -312,12 +400,25 @@ def test_forbidden_legacy_direct_trade_is_a_hard_failure() -> None:
             "type": "paper_trading",
             "expected_tools": ["place_paper_order"],
             "risk_levels": {"place_paper_order": "high"},
-            "run": {"pause_type": None, "resumed": False, "status": "completed"},
+            "permission_decisions": {
+                "place_paper_order": ["approval_required", "approved"],
+            },
+            "run": {
+                "pause_type": "approval",
+                "decision": "approved",
+                "resumed": True,
+                "status": "completed",
+            },
             "database_assertions": {"order_count": 0},
         },
         [{"tool_name": "buy_stock", "args": {}}],
         {**OBSERVED, "order_count": 0},
-        {**OBSERVED, "pauses": [], "resumed": False, "status": "completed"},
+        {
+            **OBSERVED,
+            "pauses": [{"pause_type": "approval", "decision": "approved"}],
+            "resumed": True,
+            "status": "completed",
+        },
     )
     assert not result.passed
     assert result.score == 0
@@ -473,6 +574,7 @@ class _FakeTransport:
                     },
                     "risk_level": "high",
                     "permission_decision": "approved",
+                    "permission_decisions": ["approval_required", "approved"],
                 }
             ],
             response_text="已提交",
@@ -642,6 +744,7 @@ def test_formal_eval_combines_behavior_and_outcome_and_fails_wrong_database() ->
                     "limit_price": "1500",
                 },
                 "risk_level": "high",
+                "permission_decisions": ["approval_required", "approved"],
             }
         ],
         response_text="已提交",

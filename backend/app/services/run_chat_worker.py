@@ -200,6 +200,7 @@ SAFE_IDEMPOTENT_TOOL_CATALOG_V1 = frozenset(
         "search_tools",
         "memory_search",
         "read_cached_result",
+        "get_stock_quote",
         "get_portfolio_positions",
         "approval",
         "get_paper_account",

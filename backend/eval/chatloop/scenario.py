@@ -126,18 +126,54 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
         _fail(f"{case_id}: outcome.version 只支持 1")
     if outcome.get("type") not in {"paper_trading", "watchlist"}:
         _fail(f"{case_id}: outcome.type 非法")
-    required = ("expected_tools", "risk_levels", "run", "database_assertions")
+    required = (
+        "expected_tools",
+        "risk_levels",
+        "permission_decisions",
+        "run",
+        "database_assertions",
+    )
     missing = [key for key in required if key not in outcome]
     if missing:
         _fail(f"{case_id}: outcome 缺失 {missing}")
     expected_tools = outcome["expected_tools"]
     risk_levels = outcome["risk_levels"]
+    permission_decisions = outcome["permission_decisions"]
     run = outcome["run"]
     database_assertions = outcome["database_assertions"]
     if not isinstance(expected_tools, list) or not expected_tools:
         _fail(f"{case_id}: outcome.expected_tools 须为非空数组")
     if not isinstance(risk_levels, dict) or any(tool not in risk_levels for tool in expected_tools):
         _fail(f"{case_id}: outcome.risk_levels 必须覆盖 expected_tools")
+    if any(risk_levels[tool] not in {"low", "high"} for tool in expected_tools):
+        _fail(f"{case_id}: outcome.risk_levels 仅支持 low/high")
+    known_decisions = {"direct", "approval_required", "approved", "rejected"}
+    if not isinstance(permission_decisions, dict) or any(
+        tool not in permission_decisions
+        or not isinstance(permission_decisions[tool], list)
+        or not permission_decisions[tool]
+        or any(
+            not isinstance(decision, str) or decision not in known_decisions
+            for decision in permission_decisions[tool]
+        )
+        for tool in expected_tools
+    ):
+        _fail(f"{case_id}: outcome.permission_decisions 必须覆盖 expected_tools")
+    for tool in expected_tools:
+        trajectory = permission_decisions[tool]
+        if risk_levels[tool] == "low" and trajectory != ["direct"]:
+            _fail(f"{case_id}: LOW 工具权限轨迹必须为 direct")
+        if risk_levels[tool] == "high":
+            decision = run.get("decision") if isinstance(run, dict) else None
+            terminal = (
+                "approved"
+                if decision == "approved"
+                else "rejected"
+                if decision == "rejected"
+                else None
+            )
+            if terminal is None or trajectory != ["approval_required", terminal]:
+                _fail(f"{case_id}: HIGH 工具权限轨迹必须覆盖审批终态")
     if (
         not isinstance(run, dict)
         or "pause_type" not in run

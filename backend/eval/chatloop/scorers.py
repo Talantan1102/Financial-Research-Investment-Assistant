@@ -174,6 +174,24 @@ def _path_value(value: dict[str, Any], path: str) -> Any:
 
 
 _MISSING = object()
+_KNOWN_PERMISSION_DECISIONS = frozenset(
+    {"direct", "approval_required", "approved", "rejected"}
+)
+
+
+def _permission_contract_is_consistent(expected: dict[str, Any]) -> bool:
+    run = expected.get("run", {})
+    for tool_name in expected.get("expected_tools", []):
+        risk = expected["risk_levels"][tool_name]
+        trajectory = expected["permission_decisions"][tool_name]
+        if risk == "low" and trajectory != ["direct"]:
+            return False
+        if risk == "high":
+            decision = run.get("decision")
+            terminal = "approved" if decision == "approved" else "rejected" if decision == "rejected" else None
+            if terminal is None or trajectory != ["approval_required", terminal]:
+                return False
+    return True
 
 
 class PaperTradingOutcomeScorer:
@@ -209,9 +227,29 @@ class PaperTradingOutcomeScorer:
                 detail="missing observed Run or database state",
             )
         names = [str(call.get("tool_name", "")) for call in tool_calls]
-        required = [str(name) for name in expected.get("expected_tools", [])]
         forbidden = _LEGACY_TRADE_TOOLS | frozenset(expected.get("forbidden_tools", []))
         forbidden_hits = [name for name in names if name in forbidden]
+        if forbidden_hits:
+            return PaperTradingOutcomeScore(
+                passed=False,
+                score=0.0,
+                tool_trajectory=False,
+                risk_and_pause=False,
+                resume_semantics=False,
+                database_terminal_state=False,
+                detail=f"failed: forbidden_tools={forbidden_hits}",
+            )
+        if not self._valid_permission_observation(expected, tool_calls):
+            return PaperTradingOutcomeScore(
+                passed=False,
+                score=0.0,
+                tool_trajectory=False,
+                risk_and_pause=False,
+                resume_semantics=False,
+                database_terminal_state=False,
+                detail="invalid or conflicting permission observation",
+            )
+        required = [str(name) for name in expected.get("expected_tools", [])]
         trajectory_ok = _is_subsequence(required, names) and not forbidden_hits
 
         for tool_name, wanted_args in expected.get("tool_args_contains", {}).items():
@@ -298,6 +336,7 @@ class PaperTradingOutcomeScorer:
     def _valid_contract(expected: dict[str, Any]) -> bool:
         tools = expected.get("expected_tools")
         risks = expected.get("risk_levels")
+        permissions = expected.get("permission_decisions")
         run = expected.get("run")
         database = expected.get("database_assertions")
         return (
@@ -307,13 +346,50 @@ class PaperTradingOutcomeScorer:
             and bool(tools)
             and isinstance(risks, dict)
             and all(tool in risks for tool in tools)
+            and all(risks[tool] in {"low", "high"} for tool in tools)
+            and isinstance(permissions, dict)
+            and all(
+                tool in permissions
+                and isinstance(permissions[tool], list)
+                and bool(permissions[tool])
+                and all(
+                    isinstance(decision, str)
+                    and decision in _KNOWN_PERMISSION_DECISIONS
+                    for decision in permissions[tool]
+                )
+                for tool in tools
+            )
             and isinstance(run, dict)
             and "pause_type" in run
             and "resumed" in run
             and "status" in run
             and isinstance(database, dict)
             and bool(database)
+            and _permission_contract_is_consistent(expected)
         )
+
+    @staticmethod
+    def _valid_permission_observation(
+        expected: dict[str, Any],
+        tool_calls: list[dict[str, Any]],
+    ) -> bool:
+        for tool_name, wanted in expected["permission_decisions"].items():
+            matching = [call for call in tool_calls if call.get("tool_name") == tool_name]
+            if not matching:
+                return False
+            observed = matching[-1].get("permission_decisions")
+            if (
+                not isinstance(observed, list)
+                or not observed
+                or any(
+                    not isinstance(decision, str)
+                    or decision not in _KNOWN_PERMISSION_DECISIONS
+                    for decision in observed
+                )
+                or observed != wanted
+            ):
+                return False
+        return True
 
     @staticmethod
     def _complete_observation(value: dict[str, Any] | None) -> bool:
