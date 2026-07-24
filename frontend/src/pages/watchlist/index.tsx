@@ -14,6 +14,7 @@ type MutationKind = 'add' | 'remove' | 'update'
 export default function WatchlistPage() {
   const [items, setItems] = useState<WatchlistItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [listError, setListError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
@@ -22,27 +23,45 @@ export default function WatchlistPage() {
   const [note, setNote] = useState('')
   const [monitoring, setMonitoring] = useState(false)
   const [, setPendingRevision] = useState(0)
-  const mutationVersion = useRef(0)
   const codeVersions = useRef(new Map<string, number>())
   const codeGenerations = useRef(new Map<string, number>())
   const codeQueues = useRef(new Map<string, Promise<void>>())
   const lockedCodes = useRef(new Set<string>())
   const pendingOperations = useRef(new Set<string>())
+  const activeListRequests = useRef(0)
 
   useEffect(() => {
-    const requestedAt = mutationVersion.current
-    const baseline = new Map(codeVersions.current)
+    const baseline = beginListRequest()
     let active = true
     listWatchlist()
       .then((rows) => {
-        if (active) mergeServerRows(rows, baseline)
+        if (active) {
+          mergeServerRows(rows, baseline)
+          setListError(null)
+        }
       })
       .catch((reason) => {
-        if (active && mutationVersion.current === requestedAt) {
-          setError(reason instanceof Error ? reason.message : '自选股读取失败')
+        if (active) {
+          setListError(
+            `列表未完整加载：${
+              reason instanceof Error ? reason.message : '自选股读取失败'
+            }`,
+          )
         }
       })
       .finally(() => {
+        activeListRequests.current = Math.max(
+          0,
+          activeListRequests.current - 1,
+        )
+        if (
+          activeListRequests.current === 0 &&
+          codeQueues.current.size === 0 &&
+          lockedCodes.current.size === 0 &&
+          pendingOperations.current.size === 0
+        ) {
+          codeVersions.current.clear()
+        }
         if (active) setLoading(false)
       })
     return () => {
@@ -50,19 +69,48 @@ export default function WatchlistPage() {
     }
   }, [])
 
+  function beginListRequest() {
+    activeListRequests.current += 1
+    return new Map(codeVersions.current)
+  }
+
+  function finishListRequest() {
+    activeListRequests.current = Math.max(0, activeListRequests.current - 1)
+    clearCodeVersionsIfSafe()
+  }
+
+  function clearCodeVersionsIfSafe() {
+    if (
+      activeListRequests.current === 0 &&
+      codeQueues.current.size === 0 &&
+      lockedCodes.current.size === 0 &&
+      pendingOperations.current.size === 0
+    ) {
+      codeVersions.current.clear()
+    }
+  }
+
+  function bumpCodeVersion(tsCode: string) {
+    codeVersions.current.set(
+      tsCode,
+      (codeVersions.current.get(tsCode) ?? 0) + 1,
+    )
+  }
+
   function mergeServerRows(
     serverRows: WatchlistItem[],
     baseline: Map<string, number>,
   ) {
+    const versionsAtMerge = new Map(codeVersions.current)
     setItems((current) => {
       const merged = serverRows.filter(
         (row) =>
-          (codeVersions.current.get(row.ts_code) ?? 0) ===
+          (versionsAtMerge.get(row.ts_code) ?? 0) ===
           (baseline.get(row.ts_code) ?? 0),
       )
       for (const item of current) {
         if (
-          (codeVersions.current.get(item.ts_code) ?? 0) !==
+          (versionsAtMerge.get(item.ts_code) ?? 0) !==
           (baseline.get(item.ts_code) ?? 0)
         ) {
           merged.push(item)
@@ -70,6 +118,28 @@ export default function WatchlistPage() {
       }
       return merged
     })
+  }
+
+  function retryList() {
+    if (loading) return
+    const baseline = beginListRequest()
+    setLoading(true)
+    void listWatchlist()
+      .then((rows) => {
+        mergeServerRows(rows, baseline)
+        setListError(null)
+      })
+      .catch((reason) => {
+        setListError(
+          `列表未完整加载：${
+            reason instanceof Error ? reason.message : '自选股读取失败'
+          }`,
+        )
+      })
+      .finally(() => {
+        finishListRequest()
+        setLoading(false)
+      })
   }
 
   function isPending(tsCode: string, kind: MutationKind) {
@@ -94,11 +164,7 @@ export default function WatchlistPage() {
     lockedCodes.current.add(tsCode)
     pendingOperations.current.add(pendingKey)
     setPendingRevision((value) => value + 1)
-    mutationVersion.current += 1
-    codeVersions.current.set(
-      tsCode,
-      (codeVersions.current.get(tsCode) ?? 0) + 1,
-    )
+    bumpCodeVersion(tsCode)
     const generation = (codeGenerations.current.get(tsCode) ?? 0) + 1
     codeGenerations.current.set(tsCode, generation)
     setError(null)
@@ -111,17 +177,20 @@ export default function WatchlistPage() {
         try {
           const result = await request()
           if (codeGenerations.current.get(tsCode) === generation) {
+            bumpCodeVersion(tsCode)
             apply(result)
           }
         } catch (reason) {
           if (codeGenerations.current.get(tsCode) === generation) {
+            bumpCodeVersion(tsCode)
             let message =
               reason instanceof Error ? reason.message : fallbackError
+            const baseline = beginListRequest()
             try {
-              const baseline = new Map(codeVersions.current)
               const serverItems = await listWatchlist()
               if (codeGenerations.current.get(tsCode) === generation) {
                 mergeServerRows(serverItems, baseline)
+                setListError(null)
                 const serverItem = serverItems.find(
                   (item) => item.ts_code === tsCode,
                 )
@@ -137,6 +206,9 @@ export default function WatchlistPage() {
                   ? reloadReason.message
                   : '服务器状态重新读取失败'
               message = `${message}；重新读取失败：${reloadMessage}`
+              setListError(`列表未完整加载：${reloadMessage}`)
+            } finally {
+              finishListRequest()
             }
             if (codeGenerations.current.get(tsCode) === generation) {
               setError(message)
@@ -155,6 +227,7 @@ export default function WatchlistPage() {
         if (codeQueues.current.get(tsCode) === task) {
           codeQueues.current.delete(tsCode)
         }
+        clearCodeVersionsIfSafe()
       })
     codeQueues.current.set(tsCode, task)
     return true
@@ -285,11 +358,20 @@ export default function WatchlistPage() {
         </div>
       ) : null}
 
+      {listError ? (
+        <div className={styles.error} role="alert">
+          <span>{listError}</span>
+          <button type="button" onClick={retryList} disabled={loading}>
+            {loading ? '正在重新读取…' : '重新读取列表'}
+          </button>
+        </div>
+      ) : null}
+
       {loading && items.length === 0 ? (
         <p className={styles.empty} aria-live="polite">
           正在读取自选股…
         </p>
-      ) : error && items.length === 0 ? null : items.length === 0 ? (
+      ) : (error || listError) && items.length === 0 ? null : items.length === 0 ? (
         <p className={styles.empty}>还没有自选股。输入代码和名称即可加入。</p>
       ) : (
         <section className={styles.list} aria-label="自选股列表">

@@ -186,10 +186,34 @@ describe('WatchlistPage', () => {
     expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument()
   })
 
-  it('ignores a stale initial-list error after a successful mutation', async () => {
+  it('shows an incomplete-list error after add and retries to a complete list', async () => {
     const user = userEvent.setup()
     const initialList = deferred<Record<string, unknown>[]>()
-    api.listWatchlist.mockReturnValue(initialList.promise)
+    api.listWatchlist
+      .mockReturnValueOnce(initialList.promise)
+      .mockResolvedValueOnce([
+        {
+          id: 'watch-1',
+          ts_code: '000001.SZ',
+          name: '平安银行',
+          note: null,
+          monitoring_enabled: false,
+        },
+        {
+          id: 'watch-2',
+          ts_code: '600519.SH',
+          name: '贵州茅台',
+          note: null,
+          monitoring_enabled: false,
+        },
+        {
+          id: 'watch-3',
+          ts_code: '000002.SZ',
+          name: '万科A',
+          note: null,
+          monitoring_enabled: false,
+        },
+      ])
     renderWithProviders(<WatchlistPage />)
 
     await user.type(screen.getByLabelText('股票代码'), '000001.SZ')
@@ -198,9 +222,66 @@ describe('WatchlistPage', () => {
     expect(await screen.findByText('平安银行')).toBeInTheDocument()
 
     initialList.reject(new Error('过期列表错误'))
-    await waitFor(() => expect(api.listWatchlist).toHaveBeenCalledOnce())
-    expect(screen.queryByText('过期列表错误')).not.toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '列表未完整加载：过期列表错误',
+    )
+    await user.click(screen.getByRole('button', { name: '重新读取列表' }))
+
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+    expect(screen.getByText('万科A')).toBeInTheDocument()
     expect(screen.getByText('平安银行')).toBeInTheDocument()
+    expect(screen.queryByText(/列表未完整加载/)).not.toBeInTheDocument()
+  })
+
+  it('does not let a retry response overwrite a mutation started during retry', async () => {
+    const user = userEvent.setup()
+    const retry = deferred<Record<string, unknown>[]>()
+    api.listWatchlist
+      .mockRejectedValueOnce(new Error('首次读取失败'))
+      .mockReturnValueOnce(retry.promise)
+    renderWithProviders(<WatchlistPage />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('首次读取失败')
+
+    await user.click(screen.getByRole('button', { name: '重新读取列表' }))
+    await user.type(screen.getByLabelText('股票代码'), '000001.SZ')
+    await user.type(screen.getByLabelText('股票名称'), '平安银行')
+    await user.click(screen.getByRole('button', { name: '加入自选' }))
+    expect(await screen.findByText('平安银行')).toBeInTheDocument()
+
+    retry.resolve([
+      {
+        id: 'watch-2',
+        ts_code: '600519.SH',
+        name: '贵州茅台',
+        note: null,
+        monitoring_enabled: false,
+      },
+    ])
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+    expect(screen.getByText('平安银行')).toBeInTheDocument()
+  })
+
+  it('does not surface an initial-list error after the old page unmounts', async () => {
+    const oldList = deferred<Record<string, unknown>[]>()
+    api.listWatchlist.mockReturnValueOnce(oldList.promise)
+    const oldPage = renderWithProviders(<WatchlistPage />)
+    oldPage.unmount()
+
+    api.listWatchlist.mockResolvedValueOnce([
+      {
+        id: 'watch-2',
+        ts_code: '600519.SH',
+        name: '贵州茅台',
+        note: null,
+        monitoring_enabled: false,
+      },
+    ])
+    renderWithProviders(<WatchlistPage />)
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+
+    oldList.reject(new Error('旧页面错误'))
+    await Promise.resolve()
+    expect(screen.queryByText('旧页面错误')).not.toBeInTheDocument()
   })
 
   it('locks add while delete for the same code is pending, then releases it', async () => {
@@ -360,6 +441,51 @@ describe('WatchlistPage', () => {
     expect(screen.getByText('服务端备注')).toBeInTheDocument()
     expect(screen.queryByText('平安银行')).not.toBeInTheDocument()
     expect(await screen.findByRole('alert')).toHaveTextContent('保存冲突')
+  })
+
+  it('keeps a completed deletion absent through a later fresh reload', async () => {
+    const user = userEvent.setup()
+    api.listWatchlist
+      .mockResolvedValueOnce([
+        {
+          id: 'watch-1',
+          ts_code: '600519.SH',
+          name: '贵州茅台',
+          note: null,
+          monitoring_enabled: false,
+        },
+        {
+          id: 'watch-2',
+          ts_code: '000001.SZ',
+          name: '平安银行',
+          note: null,
+          monitoring_enabled: false,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'watch-2',
+          ts_code: '000001.SZ',
+          name: '平安银行',
+          note: '服务端备注',
+          monitoring_enabled: false,
+        },
+      ])
+    api.updateWatchlistItem.mockRejectedValue(new Error('触发权威重读'))
+    renderWithProviders(<WatchlistPage />)
+    expect(await screen.findByText('贵州茅台')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '移除 贵州茅台' }))
+    await waitFor(() =>
+      expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument(),
+    )
+    await user.click(screen.getByRole('button', { name: '编辑 平安银行' }))
+    await user.click(screen.getByRole('button', { name: '保存 平安银行' }))
+    await waitFor(() => expect(api.listWatchlist).toHaveBeenCalledTimes(2))
+
+    expect(screen.queryByText('贵州茅台')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByText('服务端备注')).toBeInTheDocument()
   })
 
   it('does not close stock B draft when stock A save returns', async () => {
