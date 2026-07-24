@@ -196,7 +196,9 @@ class PaperTradingOutcomeScorer:
                 database_terminal_state=False,
                 detail="invalid or incomplete outcome contract",
             )
-        if database_state is None or run_state is None:
+        if not self._complete_observation(database_state) or not self._complete_observation(
+            run_state
+        ):
             return PaperTradingOutcomeScore(
                 passed=False,
                 score=0.0,
@@ -311,6 +313,17 @@ class PaperTradingOutcomeScorer:
             and "status" in run
             and isinstance(database, dict)
             and bool(database)
+        )
+
+    @staticmethod
+    def _complete_observation(value: dict[str, Any] | None) -> bool:
+        if not value:
+            return False
+        envelope = value.get("observation")
+        return (
+            isinstance(envelope, dict)
+            and envelope.get("version") == 1
+            and envelope.get("status") == "collected"
         )
 
 

@@ -594,12 +594,15 @@ class AttemptService:
         request: Mapping[str, Any],
         safe_to_retry: bool,
         approved: bool,
+        risk_level: str = "unknown",
         approved_execution_id: UUID | None = None,
     ) -> ToolExecutionReservation:
         if not tool_call_id or len(tool_call_id) > 255:
             raise ValueError("tool_call_id must be 1..255 characters")
         if not tool_name or len(tool_name) > 255:
             raise ValueError("tool_name must be 1..255 characters")
+        if risk_level not in {"low", "medium", "high", "unknown"}:
+            raise ValueError("risk_level must be low, medium, high, or unknown")
         safe_request = self._bounded_json_object(request, limit=16 * 1024, label="tool request")
         key = self.tool_idempotency_key(assignment.run_id, tool_call_id, tool_name, safe_request)
         semantic_key = self.tool_semantic_key(tool_name, safe_request)
@@ -623,6 +626,10 @@ class AttemptService:
                     or existing.request_summary != summary
                 ):
                     raise ValueError("tool_call_id was reused with different tool input")
+                if existing.risk_level not in {"unknown", risk_level}:
+                    raise ValueError("tool_call_id was reused with different runtime risk")
+                if existing.risk_level == "unknown" and risk_level != "unknown":
+                    cast(Any, existing).risk_level = risk_level
                 status = cast(str, existing.status)
                 if status == "completed":
                     result = self._bounded_json_object(
@@ -661,6 +668,7 @@ class AttemptService:
                 cast(Any, existing).reservation_token = token
                 cast(Any, existing).reservation_expires_at = now + self._tool_reservation_duration
                 cast(Any, existing).execution_epoch = cast(int, existing.execution_epoch) + 1
+                cast(Any, existing).permission_decision = "approved" if approved else "direct"
                 cast(Any, existing).finished_at = None
                 cast(Any, existing).result_summary = None
                 cast(Any, existing).error_code = None
@@ -705,6 +713,14 @@ class AttemptService:
                     tool_name=tool_name,
                     request_summary=summary,
                     safe_to_retry=safe_to_retry,
+                    risk_level=risk_level,
+                    permission_decision=(
+                        "direct"
+                        if status == "started" and safe_to_retry
+                        else "approved"
+                        if status == "started"
+                        else "approval_required"
+                    ),
                     status=status,
                     reservation_token=fresh_token,
                     reservation_expires_at=(
@@ -758,6 +774,7 @@ class AttemptService:
                 raise AttemptCommandRejected("tool rejection provenance does not match")
             for row in rows:
                 cast(Any, row).status = "failed"
+                cast(Any, row).permission_decision = "rejected"
                 cast(Any, row).reservation_token = None
                 cast(Any, row).reservation_expires_at = None
                 cast(Any, row).finished_at = now

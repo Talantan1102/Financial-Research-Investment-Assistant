@@ -134,6 +134,7 @@ class PersistentToolLedger:
         call: StepToolCall,
         *,
         safe_to_retry: bool,
+        risk_level: str,
         approved: bool,
         approved_execution_id: Any = None,
     ) -> Any:
@@ -147,6 +148,7 @@ class PersistentToolLedger:
             tool_name=call.name,
             request=request,
             safe_to_retry=safe_to_retry,
+            risk_level=risk_level,
             approved=approved,
             approved_execution_id=approved_execution_id,
         )
@@ -185,6 +187,12 @@ class ToolRiskPolicy:
 
     def safe_to_retry(self, tool_name: str) -> bool:
         return tool_name in self.safe_idempotent_tools
+
+    def risk_level(self, tool_name: str) -> str:
+        """Return the fail-closed runtime risk decision persisted with the reservation."""
+        if tool_name == "ask_user":
+            return "low"
+        return "low" if self.safe_to_retry(tool_name) else "high"
 
 
 SAFE_IDEMPOTENT_TOOL_CATALOG_V1 = frozenset(
@@ -251,7 +259,15 @@ class DurableApprovalController:
             question = args.get("question")
             if not isinstance(question, str) or not question.strip():
                 raise ValueError("ask_user question must not be blank")
-            return ask_user_pause(question)
+            directive = ask_user_pause(question)
+            return PauseDirective(
+                directive.pause_type,
+                {
+                    **directive.request,
+                    "risk_level": self._risk_policy.risk_level("ask_user"),
+                    "permission_decision": "direct",
+                },
+            )
         approval_calls = [call for call in tool_calls if call.name == "approval"]
         if approval_calls:
             if len(tool_calls) != 1:
@@ -286,7 +302,13 @@ class DurableApprovalController:
             "approval",
             {
                 "tool_calls": [
-                    {"id": call.id, "name": call.name, "arguments": call.arguments}
+                    {
+                        "id": call.id,
+                        "name": call.name,
+                        "arguments": call.arguments,
+                        "risk_level": self._risk_policy.risk_level(call.name),
+                        "permission_decision": "approval_required",
+                    }
                     for call in risky
                 ],
                 "editable_tool_call_ids": [
@@ -342,6 +364,7 @@ class DurableToolHub:
             reservation = await self._ledger.reserve(
                 call,
                 safe_to_retry=safe,
+                risk_level=self._risk_policy.risk_level(call.name),
                 approved=call.id in self._approved or semantic_approved,
                 approved_execution_id=self._approved_executions.get(call.id),
             )
@@ -466,9 +489,7 @@ def build_chat_executor_builder(
     ) -> ChatRunExecutor:
         approved = _approved_tool_call_ids(loaded)
         approved_executions = dict(getattr(loaded, "approved_tool_executions", ()))
-        trusted_recovery_inputs = dict(
-            getattr(loaded, "trusted_recovery_inputs", ())
-        )
+        trusted_recovery_inputs = dict(getattr(loaded, "trusted_recovery_inputs", ()))
         # Recovery approvals are resolved against durable execution ids by
         # AttemptService.  Include those call ids directly as a second source
         # of truth; this keeps approval authorization intact when a portable

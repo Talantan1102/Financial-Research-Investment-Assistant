@@ -136,6 +136,8 @@ def test_execution_tables_expose_exact_columns_and_session_archive() -> None:
         "tool_name",
         "request_summary",
         "safe_to_retry",
+        "risk_level",
+        "permission_decision",
         "status",
         "reservation_token",
         "reservation_expires_at",

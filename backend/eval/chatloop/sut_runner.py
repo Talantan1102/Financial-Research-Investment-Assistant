@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -60,6 +61,14 @@ class OutcomeTransport(Protocol):
 
 
 class OutcomeCollector(Protocol):
+    async def prepare(
+        self,
+        *,
+        user_id: str,
+        scenario: Scenario,
+        sample_key: str,
+    ) -> None: ...
+
     async def capture(
         self,
         *,
@@ -127,6 +136,7 @@ class DurableRunHttpTransport:
                 raise RuntimeError(f"outcome Run stopped in unexpected status {status}")
         tool_calls, run_state, response_text = await self._read_trace(run_id)
         run_state["status"] = status
+        run_state["observation"] = {"version": 1, "status": "collected"}
         return TransportObservation(
             run_id=run_id,
             tool_calls=tool_calls,
@@ -195,16 +205,66 @@ class DurableRunHttpTransport:
                     select(RunPause).where(RunPause.run_id == run.id).order_by(RunPause.pause_no)
                 )
             ).all()
-            calls = []
+            calls: list[dict[str, Any]] = []
+            seen_call_ids: set[str] = set()
             for row in rows:
                 summary = dict(row.request_summary)
                 args = summary.get("args", summary)
+                call_id = str(row.tool_call_id)
+                seen_call_ids.add(call_id)
                 calls.append(
                     {
+                        "tool_call_id": call_id,
                         "tool_name": str(row.tool_name),
                         "args": dict(args) if isinstance(args, dict) else {},
+                        "risk_level": str(row.risk_level),
+                        "permission_decision": str(row.permission_decision),
                     }
                 )
+            for pause in pauses:
+                request = dict(pause.request_payload)
+                response = dict(pause.response_payload or {})
+                paused_calls = request.get("tool_calls")
+                if isinstance(paused_calls, list):
+                    for paused in paused_calls:
+                        if not isinstance(paused, dict):
+                            continue
+                        call_id = str(paused.get("id", ""))
+                        if not call_id or call_id in seen_call_ids:
+                            continue
+                        arguments = paused.get("arguments", {})
+                        if isinstance(arguments, str):
+                            import json
+
+                            arguments = json.loads(arguments)
+                        approved = response.get("approved")
+                        decision = (
+                            "approved"
+                            if approved is True
+                            else "rejected"
+                            if approved is False
+                            else paused.get("permission_decision")
+                        )
+                        calls.append(
+                            {
+                                "tool_call_id": call_id,
+                                "tool_name": str(paused.get("name", "")),
+                                "args": dict(arguments) if isinstance(arguments, dict) else {},
+                                "risk_level": paused.get("risk_level"),
+                                "permission_decision": decision,
+                            }
+                        )
+                        seen_call_ids.add(call_id)
+                elif pause.pause_type == "input" and request.get("tool_name") == "ask_user":
+                    calls.append(
+                        {
+                            "tool_call_id": f"pause:{pause.id}",
+                            "tool_name": "ask_user",
+                            "args": {"question": request.get("question")},
+                            "risk_level": request.get("risk_level"),
+                            "permission_decision": request.get("permission_decision"),
+                        }
+                    )
             pause_trace = [self._pause_trace(row) for row in pauses]
             final = (
                 None
@@ -246,6 +306,98 @@ class SqlOutcomeCollector:
 
     def __init__(self, session_factory: Any) -> None:
         self._session_factory = session_factory
+        self._batch_id = uuid4().hex
+
+    async def prepare(
+        self,
+        *,
+        user_id: str,
+        scenario: Scenario,
+        sample_key: str,
+    ) -> None:
+        configured = os.getenv("CHATLOOP_EVAL_USER_ID")
+        if configured is None:
+            raise RuntimeError("CHATLOOP_EVAL_USER_ID is required for stateful eval setup")
+        uid = UUID(user_id)
+        if uid != UUID(configured) or uid != UUID(_EVAL_USER_ID):
+            raise RuntimeError("stateful eval setup is restricted to the dedicated eval user")
+        async with self._session_factory() as session, session.begin():
+            await session.run_sync(
+                lambda sync_session: self._prepare_sync(
+                    sync_session,
+                    user_id=uid,
+                    scenario=scenario,
+                    sample_key=sample_key,
+                )
+            )
+
+    def _prepare_sync(
+        self,
+        session: Any,
+        *,
+        user_id: UUID,
+        scenario: Scenario,
+        sample_key: str,
+    ) -> None:
+        import hashlib
+
+        from app.services.paper_trading.account_service import PaperAccountService
+        from app.services.watchlist_service import ChangeSource, WatchlistService
+
+        digest = hashlib.sha256(f"{self._batch_id}:{sample_key}".encode()).hexdigest()[:24]
+        source = f"eval-setup-{digest}"
+        outcome_type = str((scenario.outcome or {}).get("type"))
+        if outcome_type == "paper_trading":
+            accounts = PaperAccountService(session)
+            accounts.get_or_create(
+                user_id=user_id,
+                initial_cash=Decimal("10000000.00"),
+            )
+            accounts.reset_confirmed(
+                user_id=user_id,
+                initial_cash=Decimal("10000000.00"),
+                source_session_id=source,
+                confirmation_id=digest,
+            )
+            return
+        if outcome_type != "watchlist":
+            raise RuntimeError(f"unsupported stateful outcome type: {outcome_type}")
+
+        args = (scenario.outcome or {}).get("tool_args_contains", {}).get("manage_watchlist", {})
+        action = args.get("action")
+        ts_code = args.get("ts_code")
+        if action not in {"add", "update", "remove"} or not isinstance(ts_code, str):
+            raise RuntimeError("watchlist outcome setup requires action and ts_code")
+        watchlist = WatchlistService(session)
+        change_source = ChangeSource(session_id=source, tool_call_id="prepare")
+        existing = next(
+            (item for item in watchlist.list(user_id=user_id) if item.ts_code == ts_code),
+            None,
+        )
+        if action == "add":
+            if existing is not None:
+                watchlist.remove(
+                    user_id=user_id,
+                    ts_code=ts_code,
+                    source=change_source,
+                )
+            return
+        if existing is None:
+            watchlist.add(
+                user_id=user_id,
+                ts_code=ts_code,
+                name=str(args.get("name") or ts_code),
+                note="eval-seed",
+                monitoring_enabled=False,
+                source=change_source,
+            )
+            return
+        watchlist.update(
+            user_id=user_id,
+            ts_code=ts_code,
+            changes={"note": "eval-seed", "monitoring_enabled": False},
+            source=change_source,
+        )
 
     async def capture(
         self,
@@ -316,18 +468,21 @@ class SqlOutcomeCollector:
             item = await session.scalar(
                 item_statement.order_by(WatchlistItem.updated_at.desc()).limit(1)
             )
-            audit_statement = select(WatchlistAudit).where(WatchlistAudit.user_id == uid)
+            audit = None
             if source_session_id is not None:
+                audit_statement = select(WatchlistAudit).where(WatchlistAudit.user_id == uid)
                 audit_statement = audit_statement.where(
                     WatchlistAudit.source_session_id == source_session_id
                 )
-            audit = await session.scalar(
-                audit_statement.order_by(
-                    WatchlistAudit.created_at.desc(), WatchlistAudit.id.desc()
-                ).limit(1)
-            )
+                audit = await session.scalar(
+                    audit_statement.order_by(
+                        WatchlistAudit.created_at.desc(), WatchlistAudit.id.desc()
+                    ).limit(1)
+                )
             snapshot: dict[str, Any] = {
+                "observation": {"version": 1, "status": "collected"},
                 "snapshot_collected": True,
+                "account_generation": None if account is None else int(account.generation),
                 "order_count": order_count,
                 "created_order_count": created_order_count,
                 "available_cash": None
@@ -361,6 +516,11 @@ class SqlOutcomeCollector:
                     "side": str(order.side),
                     "quantity": int(order.quantity),
                     "limit_price": _decimal_text(order.limit_price),
+                    "source_run_matches": str(order.source_run_id) == run_id,
+                    "current_generation": (
+                        account is not None
+                        and int(order.account_generation) == int(account.generation)
+                    ),
                 }
                 snapshot["audit"] = {
                     "original": order.original_proposal,
@@ -374,21 +534,6 @@ def _decimal_text(value: Any) -> str | None:
         return None
     text = format(value, "f")
     return text.rstrip("0").rstrip(".") if "." in text else text
-
-
-def _with_static_risk(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    from app.chatloop.tool_runtime_policy import TOOL_RISK_METADATA
-
-    out: list[dict[str, Any]] = []
-    for call in tool_calls:
-        row = dict(call)
-        name = str(row.get("tool_name", ""))
-        metadata = TOOL_RISK_METADATA.get(name)
-        row["risk_level"] = (
-            metadata.risk.value if metadata is not None else ("low" if name == "ask_user" else None)
-        )
-        out.append(row)
-    return out
 
 
 async def run_scenarios(
@@ -432,6 +577,11 @@ async def run_scenarios(
             for scenario in outcome_scenarios:
                 for run_idx in range(k):
                     try:
+                        await collector.prepare(
+                            user_id=transport.user_id,
+                            scenario=scenario,
+                            sample_key=f"{scenario.case_id}:{run_idx}",
+                        )
                         before = await collector.capture(
                             user_id=transport.user_id,
                             run_id=None,
@@ -447,7 +597,7 @@ async def run_scenarios(
                             SutResult(
                                 case_id=scenario.case_id,
                                 run_idx=run_idx,
-                                tool_calls=_with_static_risk(observed.tool_calls),
+                                tool_calls=observed.tool_calls,
                                 response_text=observed.response_text,
                                 escalate_offered=observed.escalate_offered,
                                 evidence=observed.evidence,

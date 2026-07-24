@@ -6,6 +6,7 @@ from eval.chatloop.scenario import Scenario, load_scenarios
 from eval.chatloop.scorers import WatchlistOutcomeScorer
 
 GOLDEN = Path("backend/eval/chatloop/golden/watchlist_monitoring.jsonl")
+OBSERVED = {"observation": {"version": 1, "status": "collected"}}
 
 
 def _case(case_id: str) -> Scenario:
@@ -40,6 +41,7 @@ def test_add_defaults_monitoring_off_and_writes_audit_without_pause() -> None:
             }
         ],
         {
+            **OBSERVED,
             "watchlist": {
                 "count": 1,
                 "exists": True,
@@ -48,7 +50,7 @@ def test_add_defaults_monitoring_off_and_writes_audit_without_pause() -> None:
             },
             "audit": {"action": "add", "after": {"monitoring_enabled": False}},
         },
-        {"pauses": [], "resumed": False, "status": "completed"},
+        {**OBSERVED, "pauses": [], "resumed": False, "status": "completed"},
     )
     assert result.passed
     assert result.risk_and_pause
@@ -94,6 +96,7 @@ def test_watchlist_update_and_remove_require_direct_write_audit_terminal_state()
             }
         ],
         {
+            **OBSERVED,
             "watchlist": {
                 "count": 1,
                 "exists": True,
@@ -102,7 +105,7 @@ def test_watchlist_update_and_remove_require_direct_write_audit_terminal_state()
             },
             "audit": {"action": "update"},
         },
-        {"pauses": [], "resumed": False, "status": "completed"},
+        {**OBSERVED, "pauses": [], "resumed": False, "status": "completed"},
     )
     assert update_result.passed
 
@@ -116,8 +119,12 @@ def test_watchlist_update_and_remove_require_direct_write_audit_terminal_state()
                 "risk_level": "low",
             }
         ],
-        {"watchlist": {"count": 0, "exists": False}, "audit": {"action": "remove"}},
-        {"pauses": [], "resumed": False, "status": "completed"},
+        {
+            **OBSERVED,
+            "watchlist": {"count": 0, "exists": False},
+            "audit": {"action": "remove"},
+        },
+        {**OBSERVED, "pauses": [], "resumed": False, "status": "completed"},
     )
     assert remove_result.passed
 

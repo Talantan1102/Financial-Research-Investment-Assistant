@@ -159,18 +159,14 @@ async def test_approved_unsafe_recovery_rebuilds_exact_trusted_input_for_builder
     }
     captured: list[LoadedChatExecution] = []
 
-    def builder(
-        effective: LoadedChatExecution, *_args: Any
-    ) -> _BuiltExecutor:
+    def builder(effective: LoadedChatExecution, *_args: Any) -> _BuiltExecutor:
         captured.append(effective)
         return _BuiltExecutor(result, [])
 
     await RunChatWorker(
         attempts=attempts,  # type: ignore[arg-type]
         executor_builder=builder,
-        continuation_keys=ContinuationKeyring(
-            active_key_id="k1", keys={"k1": b"x" * 32}
-        ),
+        continuation_keys=ContinuationKeyring(active_key_id="k1", keys={"k1": b"x" * 32}),
     ).execute_assignment(assignment)
 
     assert captured[0].trusted_recovery_inputs == (("call-recovery", request),)
@@ -215,8 +211,11 @@ async def test_server_risk_registry_fails_closed_except_explicit_safe_tools() ->
         "manage_watchlist",
     ):
         assert production.safe_to_retry(name) is True
+        assert production.risk_level(name) == "low"
     for name in ("place_paper_order", "cancel_paper_order", "reset_paper_account"):
         assert production.safe_to_retry(name) is False
+        assert production.risk_level(name) == "high"
+    assert production.risk_level("unknown_tool") == "high"
 
 
 @pytest.mark.asyncio
@@ -254,7 +253,12 @@ async def test_control_tools_map_to_typed_pauses_before_dispatch() -> None:
     )
 
     assert asking is not None and asking.pause_type == "input"
-    assert asking.request == {"tool_name": "ask_user", "question": "cost?"}
+    assert asking.request == {
+        "tool_name": "ask_user",
+        "question": "cost?",
+        "risk_level": "low",
+        "permission_decision": "direct",
+    }
     assert approving is not None and approving.pause_type == "approval"
     assert approving.request["tool_calls"][0]["name"] == "approval"
 

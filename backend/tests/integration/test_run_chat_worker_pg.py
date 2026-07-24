@@ -29,6 +29,8 @@ from app.services.run_chat_worker import (
 )
 from app.services.trace_models import TraceSpanRow
 from app.tools.base import Tool
+from eval.chatloop.scorers import PaperTradingOutcomeScorer
+from eval.chatloop.sut_runner import DurableRunHttpTransport
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -710,8 +712,7 @@ async def test_pause_is_atomic_and_resolved_server_record_is_only_resume_source(
     resumed = await service.load_chat_execution(second_claim.assignment)
     assert resumed.continuation["key_id"] == "trusted"
     assert resumed.prompt == (
-        '{"approved":true,"edited_arguments":{"trade-1":{"quantity":200}},'
-        '"text":"continue"}'
+        '{"approved":true,"edited_arguments":{"trade-1":{"quantity":200}},"text":"continue"}'
     )
 
 
@@ -950,6 +951,7 @@ async def test_exact_execution_id_is_required_to_approve_existing_ledger_row(
         request=request,
         safe_to_retry=False,
         approved=False,
+        risk_level="high",
     )
     assert pending.status == "approval_required"
     async with pg_async_session_factory() as session:
@@ -960,6 +962,8 @@ async def test_exact_execution_id_is_required_to_approve_existing_ledger_row(
             )
         )
         execution_id = row.id
+        assert row.risk_level == "high"
+        assert row.permission_decision == "approval_required"
 
     with pytest.raises(AttemptCommandRejected, match="approval provenance"):
         await service.reserve_tool_execution(
@@ -969,6 +973,7 @@ async def test_exact_execution_id_is_required_to_approve_existing_ledger_row(
             request=request,
             safe_to_retry=False,
             approved=True,
+            risk_level="high",
             approved_execution_id=uuid.uuid4(),
         )
     approved = await service.reserve_tool_execution(
@@ -978,10 +983,15 @@ async def test_exact_execution_id_is_required_to_approve_existing_ledger_row(
         request=request,
         safe_to_retry=False,
         approved=True,
+        risk_level="high",
         approved_execution_id=execution_id,
     )
     assert approved.execute and approved.execution_epoch == 1
     assert approved.reservation_token is not None
+    async with pg_async_session_factory() as session:
+        row = await session.get(RunToolExecution, execution_id)
+    assert row.risk_level == "high"
+    assert row.permission_decision == "approved"
 
 
 @pytest.mark.asyncio
@@ -997,6 +1007,7 @@ async def test_manual_reject_converges_exact_row_with_database_time(
         request={"memory": "x"},
         safe_to_retry=False,
         approved=False,
+        risk_level="high",
     )
     async with pg_async_session_factory() as session:
         row = await session.scalar(
@@ -1012,6 +1023,8 @@ async def test_manual_reject_converges_exact_row_with_database_time(
     async with pg_async_session_factory() as session:
         row = await session.get(RunToolExecution, execution_id)
     assert row.status == "failed" and row.error_code == "manual_rejected"
+    assert row.risk_level == "high"
+    assert row.permission_decision == "rejected"
     assert row.finished_at is not None
     assert row.reservation_token is None and row.reservation_expires_at is None
 
@@ -1021,6 +1034,58 @@ async def test_manual_reject_converges_exact_row_with_database_time(
     async with pg_async_session_factory() as session:
         row = await session.get(RunToolExecution, execution_id)
     assert row.status == "failed" and row.error_code == "manual_rejected"
+
+
+@pytest.mark.asyncio
+async def test_eval_trace_fails_when_persisted_runtime_risk_is_missing(
+    claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    service, assignment, _user_id = claimed
+    await service.reserve_tool_execution(
+        assignment,
+        tool_call_id="call-tampered-risk",
+        tool_name="place_paper_order",
+        request={"ts_code": "600519.SH", "side": "buy", "quantity": 100},
+        safe_to_retry=False,
+        approved=False,
+        risk_level="high",
+    )
+    async with pg_async_session_factory() as session, session.begin():
+        row = await session.scalar(
+            select(RunToolExecution).where(
+                RunToolExecution.run_id == assignment.run_id,
+                RunToolExecution.tool_call_id == "call-tampered-risk",
+            )
+        )
+        row.risk_level = "unknown"
+
+    transport = object.__new__(DurableRunHttpTransport)
+    transport._session_factory = pg_async_session_factory
+    calls, _run_state, _response = await transport._read_trace(str(assignment.run_id))
+    result = PaperTradingOutcomeScorer().score(
+        {
+            "version": 1,
+            "type": "paper_trading",
+            "expected_tools": ["place_paper_order"],
+            "risk_levels": {"place_paper_order": "high"},
+            "run": {
+                "pause_type": "approval",
+                "resumed": True,
+                "status": "completed",
+            },
+            "database_assertions": {"snapshot_collected": True},
+        },
+        calls,
+        {"snapshot_collected": True},
+        {
+            "pauses": [{"pause_type": "approval"}],
+            "resumed": True,
+            "status": "completed",
+        },
+    )
+    assert not result.risk_and_pause
+    assert not result.passed
 
 
 @pytest.mark.asyncio
@@ -1229,6 +1294,7 @@ async def test_non_idempotent_unknown_is_not_reexecuted_by_later_attempt_or_work
 @pytest.mark.asyncio
 async def test_completed_tool_result_is_reused_and_call_id_is_run_global(
     claimed: tuple[AttemptService, Any, UUID],
+    pg_async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     service, assignment, _user_id = claimed
     reserved = await service.reserve_tool_execution(
@@ -1238,6 +1304,7 @@ async def test_completed_tool_result_is_reused_and_call_id_is_run_global(
         request={"ts_code": "600519.SH"},
         safe_to_retry=True,
         approved=False,
+        risk_level="low",
     )
     assert reserved.execute is True
     cached_value = {"success": True, "output": {"price": 123}, "latency_ms": 4}
@@ -1255,9 +1322,19 @@ async def test_completed_tool_result_is_reused_and_call_id_is_run_global(
         request={"ts_code": "600519.SH"},
         safe_to_retry=True,
         approved=False,
+        risk_level="low",
     )
     assert replay.execute is False and replay.status == "completed"
     assert replay.result == cached_value
+    async with pg_async_session_factory() as session:
+        row = await session.scalar(
+            select(RunToolExecution).where(
+                RunToolExecution.run_id == assignment.run_id,
+                RunToolExecution.tool_call_id == "call-read",
+            )
+        )
+    assert row.risk_level == "low"
+    assert row.permission_decision == "direct"
 
     with pytest.raises(ValueError, match="tool_call_id"):
         await service.reserve_tool_execution(
@@ -1267,6 +1344,7 @@ async def test_completed_tool_result_is_reused_and_call_id_is_run_global(
             request={"ts_code": "600519.SH"},
             safe_to_retry=True,
             approved=False,
+            risk_level="low",
         )
 
 
