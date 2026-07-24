@@ -58,14 +58,14 @@ npx tsc -p tsconfig.json --noEmit
 npm run build
 # 4085 modules transformed, exit 0
 npx playwright test --project=chromium tests/e2e/paper-trading.spec.ts tests/e2e/watchlist.spec.ts
-# 2 passed
+# 3 passed
 
 cd ..
 uv run pytest backend/tests/unit/skills backend/tests/integration/test_skill_sandbox_escape_attempts.py backend/tests/unit/chatloop/test_code_interpreter_tool.py backend/tests/unit/chatloop/test_code_interpreter_data_refs.py backend/tests/unit/chatloop/test_worker_wiring_run_python.py --ignore=backend/tests/unit/skills/test_skill_loader_l1.py --ignore=backend/tests/unit/skills/test_skill_loader_l3a.py --ignore=backend/tests/unit/skills/test_skill_loader_l3b.py -q
 # 106 passed, 2 skipped, exit 0
 ```
 
-Playwright 使用真实 Chromium 和真实 React 页面交互，API 边界按仓库现有 E2E 约定由 `page.route` 提供确定性状态机；preview 必须收到用户编辑后的完整 draft，批准恢复必须与同一调用已成功 preview 的 canonical 参数完全一致，未知 `/api/` 请求会返回 500 并使测试末尾断言失败。链路验证 Run 等待审批、编辑预览、批准恢复、会话重载、账户页订单/资金终态，以及自选股无确认增改删。真实 PostgreSQL 领域终态和真实 Celery/Redis Worker 由上述后端集成与 Worker E2E 覆盖。
+Playwright 使用真实 Chromium 和真实 React 页面交互，API 边界按仓库现有 E2E 约定由 `page.route` 提供确定性状态机；preview 必须收到用户编辑后的完整 draft，批准恢复必须与同一调用已成功 preview 的 canonical 参数完全一致，未知 `/api/` 请求会返回 500 并使测试末尾断言失败。7 个只读 handler 还同时约束 GET，负向测试逐一验证 POST/DELETE 不会误命中成功响应。链路验证 Run 等待审批、编辑预览、批准恢复、会话重载、账户页订单/资金终态，以及自选股无确认增改删。真实 PostgreSQL 领域终态和真实 Celery/Redis Worker 由上述后端集成与 Worker E2E 覆盖。
 
 Windows Job Object focused 测试还实际验证了：小程序在限制内成功、512MB 分配在 256MB 限制下稳定返回 `memory_limit`、Job setup mock 失败时用户 marker 不生成、Job handle 关闭，以及 timeout 后子进程树没有遗留 marker。
 
