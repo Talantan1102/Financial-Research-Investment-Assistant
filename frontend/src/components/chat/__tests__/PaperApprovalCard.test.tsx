@@ -111,12 +111,15 @@ describe('<PaperApprovalCard>', () => {
     expect(screen.getByRole('button', { name: '确认买入' })).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: '重新预览' }))
-    expect(previewPaperOrder).toHaveBeenCalledWith({
-      draft: expect.objectContaining({
-        quantity: 200,
-        limit_price: '1498.5',
-      }),
-    })
+    expect(previewPaperOrder).toHaveBeenCalledWith(
+      {
+        draft: expect.objectContaining({
+          quantity: 200,
+          limit_price: '1498.5',
+        }),
+      },
+      { signal: expect.any(AbortSignal) },
+    )
     expect(await screen.findByText('¥299,792.91')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认买入' }))
     expect(onResume).toHaveBeenCalledWith({
@@ -171,6 +174,75 @@ describe('<PaperApprovalCard>', () => {
     expect(await screen.findByText('¥449,639.36')).toBeInTheDocument()
     act(() => resolveFirst(preview))
     expect(screen.queryByText('¥299,792.91')).not.toBeInTheDocument()
+  })
+
+  it('aborts the previous preview and treats AbortError as silent control flow', async () => {
+    const user = userEvent.setup()
+    let firstSignal: AbortSignal | undefined
+    vi.mocked(previewPaperOrder)
+      .mockImplementationOnce((_payload, options) => {
+        firstSignal = options?.signal
+        return new Promise((_resolve, reject) => {
+          firstSignal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          )
+        })
+      })
+      .mockResolvedValueOnce(preview)
+    renderWithProviders(
+      <PaperApprovalCard request={request} onResume={vi.fn()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+    expect(firstSignal).toBeInstanceOf(AbortSignal)
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+
+    expect(firstSignal?.aborted).toBe(true)
+    expect(await screen.findByText('¥299,792.91')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('aborts an in-flight preview when the pause identity changes', async () => {
+    const user = userEvent.setup()
+    let signal: AbortSignal | undefined
+    vi.mocked(previewPaperOrder).mockImplementationOnce((_payload, options) => {
+      signal = options?.signal
+      return new Promise(() => {})
+    })
+    const rendered = renderWithProviders(
+      <PaperApprovalCard request={request} onResume={vi.fn()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+    rendered.rerender(
+      <PaperApprovalCard
+        request={nextRequest('trade-replacement', 200)}
+        onResume={vi.fn()}
+      />,
+    )
+
+    expect(signal?.aborted).toBe(true)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '预览交易' })).toBeEnabled()
+  })
+
+  it('aborts an in-flight preview when the card unmounts', async () => {
+    const user = userEvent.setup()
+    let signal: AbortSignal | undefined
+    vi.mocked(previewPaperOrder).mockImplementationOnce((_payload, options) => {
+      signal = options?.signal
+      return new Promise(() => {})
+    })
+    const rendered = renderWithProviders(
+      <PaperApprovalCard request={request} onResume={vi.fn()} />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '预览交易' }))
+    rendered.unmount()
+
+    expect(signal?.aborted).toBe(true)
   })
 
   it('fences an in-flight preview when a restored pause replaces the card', async () => {

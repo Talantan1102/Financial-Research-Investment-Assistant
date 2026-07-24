@@ -130,6 +130,13 @@ function approvalIdentity(selected: EditablePaperCall | null): string {
   ])
 }
 
+function isAbortError(cause: unknown): boolean {
+  return (
+    (cause instanceof DOMException && cause.name === 'AbortError') ||
+    (cause instanceof Error && cause.name === 'AbortError')
+  )
+}
+
 function money(value: string): string {
   const numeric = Number(value)
   return Number.isFinite(numeric)
@@ -189,6 +196,7 @@ export function PaperApprovalCard({
   const revision = useRef(0)
   const requestGeneration = useRef(0)
   const resetPayload = useRef({ initialOrder, original })
+  const previewController = useRef<AbortController | null>(null)
   const mounted = useRef(true)
   const submitLocked = useRef(false)
   resetPayload.current = { initialOrder, original }
@@ -197,12 +205,16 @@ export function PaperApprovalCard({
     mounted.current = true
     return () => {
       mounted.current = false
+      previewController.current?.abort()
+      previewController.current = null
       previewSequence.current += 1
     }
   }, [])
 
   useLayoutEffect(() => {
     requestGeneration.current += 1
+    previewController.current?.abort()
+    previewController.current = null
     previewSequence.current += 1
     submitLocked.current = false
     setDraft(resetPayload.current.initialOrder)
@@ -304,10 +316,16 @@ export function PaperApprovalCard({
     if (!draft || !validOrder) return
     const sequence = ++previewSequence.current
     const requestedRevision = revision.current
+    previewController.current?.abort()
+    const controller = new AbortController()
+    previewController.current = controller
     setPreviewing(true)
     setError(null)
     try {
-      const next = await previewPaperOrder({ draft })
+      const next = await previewPaperOrder(
+        { draft },
+        { signal: controller.signal },
+      )
       if (
         mounted.current &&
         sequence === previewSequence.current &&
@@ -317,15 +335,23 @@ export function PaperApprovalCard({
         setDirty(false)
       }
     } catch (cause) {
-      if (mounted.current && sequence === previewSequence.current) {
+      if (
+        !isAbortError(cause) &&
+        mounted.current &&
+        sequence === previewSequence.current
+      ) {
         setPreview(null)
         setError(
           cause instanceof Error ? cause.message : '交易预览失败，请重试。',
         )
       }
     } finally {
-      if (mounted.current && sequence === previewSequence.current)
+      if (previewController.current === controller) {
+        previewController.current = null
+      }
+      if (mounted.current && sequence === previewSequence.current) {
         setPreviewing(false)
+      }
     }
   }
 

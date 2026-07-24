@@ -14,10 +14,16 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+export interface PaperOrderPreviewOptions {
+  fetchImpl?: typeof fetch
+  signal?: AbortSignal
+}
+
 export async function previewPaperOrder(
   payload: PaperOrderPreviewRequest,
-  fetchImpl: typeof fetch = fetch,
+  options: PaperOrderPreviewOptions = {},
 ): Promise<PaperOrderPreview> {
+  const fetchImpl = options.fetchImpl ?? fetch
   const response = await fetchImpl(
     `${API_BASE}/api/v0/paper-trading/orders/preview`,
     {
@@ -27,6 +33,7 @@ export async function previewPaperOrder(
         ...authHeaders(),
       },
       body: JSON.stringify(payload),
+      signal: options.signal,
     },
   )
   if (!response.ok) {
