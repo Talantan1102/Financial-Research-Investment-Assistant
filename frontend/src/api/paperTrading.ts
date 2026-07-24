@@ -19,10 +19,44 @@ export interface PaperOrderPreviewOptions {
   signal?: AbortSignal
 }
 
+function normalizePreviewOptions(
+  value: typeof fetch | PaperOrderPreviewOptions | undefined,
+): PaperOrderPreviewOptions {
+  if (value === undefined) return {}
+  if (typeof value === 'function') return { fetchImpl: value }
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(
+      'paper preview options must be a fetch function or options object',
+    )
+  }
+  const unknownKeys = Object.keys(value).filter(
+    (key) => key !== 'fetchImpl' && key !== 'signal',
+  )
+  if (unknownKeys.length > 0) {
+    throw new TypeError(`unknown paper preview option: ${unknownKeys[0]}`)
+  }
+  if (value.fetchImpl !== undefined && typeof value.fetchImpl !== 'function') {
+    throw new TypeError('paper preview fetchImpl must be a function')
+  }
+  if (value.signal !== undefined && !(value.signal instanceof AbortSignal)) {
+    throw new TypeError('paper preview signal must be an AbortSignal')
+  }
+  return value
+}
+
+export function previewPaperOrder(
+  payload: PaperOrderPreviewRequest,
+  fetchImpl?: typeof fetch,
+): Promise<PaperOrderPreview>
+export function previewPaperOrder(
+  payload: PaperOrderPreviewRequest,
+  options?: PaperOrderPreviewOptions,
+): Promise<PaperOrderPreview>
 export async function previewPaperOrder(
   payload: PaperOrderPreviewRequest,
-  options: PaperOrderPreviewOptions = {},
+  fetchOrOptions?: typeof fetch | PaperOrderPreviewOptions,
 ): Promise<PaperOrderPreview> {
+  const options = normalizePreviewOptions(fetchOrOptions)
   const fetchImpl = options.fetchImpl ?? fetch
   const response = await fetchImpl(
     `${API_BASE}/api/v0/paper-trading/orders/preview`,
