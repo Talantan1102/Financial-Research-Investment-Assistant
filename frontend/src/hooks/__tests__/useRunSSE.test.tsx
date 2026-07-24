@@ -482,6 +482,77 @@ describe('useRunSSE', () => {
     expect(result.current.commandPending).toBe(false)
   })
 
+  it('keeps the current pause actionable when another tab submits a stale pause identity', async () => {
+    vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([]))
+    vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_approval'))
+    vi.mocked(runApi.getRunSession).mockResolvedValue({
+      ...detail(),
+      active_run_id: 'run-1',
+      active_run_status: 'waiting_approval',
+      active_pause_id: 'pause-2',
+      active_pause_type: 'approval',
+      active_pause_request: { action: 'second approval' },
+    })
+    vi.mocked(runApi.resumeRun).mockImplementation(
+      async (_tenantId, _runId, pauseId) => {
+        if (pauseId === 'pause-1') throw new Error('POST resume failed: 409')
+        return run('queued')
+      },
+    )
+    const noDelay = async () => {}
+    const tabA = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'waiting_approval',
+      initialPause: {
+        id: 'pause-1',
+        type: 'approval_request',
+        request: { action: 'first approval' },
+      },
+      delayMs: noDelay,
+      maxReconnectAttempts: 0,
+    }))
+    const tabB = renderHook(() => useRunSSE({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      initialRunId: 'run-1',
+      initialRunStatus: 'waiting_approval',
+      initialPause: {
+        id: 'pause-2',
+        type: 'approval_request',
+        request: { action: 'second approval' },
+      },
+      delayMs: noDelay,
+      maxReconnectAttempts: 0,
+    }))
+    await waitFor(() => expect(tabA.result.current.activeRunId).toBe('run-1'))
+    await waitFor(() => expect(tabB.result.current.activeRunId).toBe('run-1'))
+
+    await act(async () => {
+      await tabA.result.current.resumeRun({ approved: true })
+    })
+
+    expect(runApi.resumeRun).toHaveBeenCalledWith(
+      'tenant-1',
+      'run-1',
+      'pause-1',
+      { approved: true },
+      expect.any(Function),
+    )
+    expect(tabA.result.current.status).toBe('waiting_approval')
+    expect(tabA.result.current.pause).toEqual({
+      id: 'pause-2',
+      type: 'approval_request',
+      request: { action: 'second approval' },
+    })
+    expect(tabB.result.current.pause).toEqual({
+      id: 'pause-2',
+      type: 'approval_request',
+      request: { action: 'second approval' },
+    })
+  })
+
   it('still calibrates Run truth when Session calibration is unavailable', async () => {
     vi.mocked(runApi.cancelRun).mockRejectedValue(new TypeError('timeout'))
     vi.mocked(runApi.getRunSession).mockRejectedValue(new TypeError('session unavailable'))

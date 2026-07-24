@@ -765,12 +765,48 @@ async def test_resolved_resume_rejects_a_different_response(
     assert resolved.response_payload == {"text": "1500"}
 
 
+@pytest.mark.parametrize(
+    ("case", "pause_kind", "pause_request", "stale_response"),
+    [
+        pytest.param("input", "input", {"question": "second?"}, {"text": "stale"}, id="input"),
+        pytest.param(
+            "approve", "approval", {"action": "send_notice"}, {"approved": True}, id="approve"
+        ),
+        pytest.param(
+            "reject", "approval", {"action": "send_notice"}, {"approved": False}, id="reject"
+        ),
+        pytest.param(
+            "editable",
+            "approval",
+            {
+                "tool_calls": [
+                    {
+                        "id": "trade-1",
+                        "name": "place_paper_order",
+                        "arguments": '{"quantity":100}',
+                    }
+                ],
+                "editable_tool_call_ids": ["trade-1"],
+            },
+            {
+                "approved": True,
+                "edited_arguments": {"trade-1": {"quantity": 200}},
+            },
+            id="editable",
+        ),
+    ],
+)
 @pytest.mark.asyncio
 async def test_stale_pause_identity_cannot_resume_a_new_pause_on_the_same_run(
     run_service: RunService,
     fake_executor: FakeRunExecutor,
     created_run: Run,
+    case: str,
+    pause_kind: str,
+    pause_request: dict[str, object],
+    stale_response: dict[str, object],
 ) -> None:
+    del case
     await fake_executor.start(created_run.id)
     first_pause = await fake_executor.pause_for_input(created_run.id, {"question": "first?"})
     await run_service.resume_run(
@@ -781,7 +817,20 @@ async def test_stale_pause_identity_cannot_resume_a_new_pause_on_the_same_run(
         response={"text": "first"},
     )
     await fake_executor.start(created_run.id)
-    second_pause = await fake_executor.pause_for_input(created_run.id, {"question": "second?"})
+    second_pause = (
+        await fake_executor.pause_for_input(created_run.id, pause_request)
+        if pause_kind == "input"
+        else await fake_executor.pause_for_approval(created_run.id, pause_request)
+    )
+    run_before = await run_service.get_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    old_before = await run_service.get_pause(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id, first_pause.id
+    )
+    current_before = await run_service.get_pause(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id, second_pause.id
+    )
     events_before = await run_service.list_events(
         created_run.tenant_id, created_run.id, created_run.created_by_user_id
     )
@@ -792,13 +841,16 @@ async def test_stale_pause_identity_cannot_resume_a_new_pause_on_the_same_run(
             created_run.id,
             created_run.created_by_user_id,
             pause_id=first_pause.id,
-            response={"text": "stale tab"},
+            response=stale_response,
         )
 
-    current = await run_service.get_run(
+    run_after = await run_service.get_run(
         created_run.tenant_id, created_run.id, created_run.created_by_user_id
     )
-    unresolved = await run_service.get_pause(
+    old_after = await run_service.get_pause(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id, first_pause.id
+    )
+    current_after = await run_service.get_pause(
         created_run.tenant_id,
         created_run.id,
         created_run.created_by_user_id,
@@ -807,11 +859,24 @@ async def test_stale_pause_identity_cannot_resume_a_new_pause_on_the_same_run(
     events_after = await run_service.list_events(
         created_run.tenant_id, created_run.id, created_run.created_by_user_id
     )
-    assert current.status == RunStatus.WAITING_INPUT.value
-    assert unresolved.response_payload is None
-    assert unresolved.resolved_at is None
-    assert unresolved.continuation_payload == {"checkpoint": "fake-input"}
-    assert len(events_after) == len(events_before)
+    assert run_after.status == run_before.status == (
+        RunStatus.WAITING_INPUT.value
+        if pause_kind == "input"
+        else RunStatus.WAITING_APPROVAL.value
+    )
+    assert run_after.queue_reason == run_before.queue_reason
+    assert run_after.queued_at == run_before.queued_at
+    assert old_after.response_payload == old_before.response_payload == {"text": "first"}
+    assert old_after.resolved_at == old_before.resolved_at
+    assert old_after.continuation_payload == old_before.continuation_payload
+    assert current_after.response_payload == current_before.response_payload is None
+    assert current_after.resolved_at == current_before.resolved_at is None
+    assert current_after.continuation_payload == current_before.continuation_payload
+    assert [
+        (event.seq, event.event_type, event.payload) for event in events_after
+    ] == [
+        (event.seq, event.event_type, event.payload) for event in events_before
+    ]
 
 
 @pytest.mark.asyncio
