@@ -333,41 +333,82 @@ def _approved_states() -> tuple[dict[str, Any], dict[str, Any]]:
     )
 
 
-@pytest.mark.parametrize(
-    "calls",
-    [
-        [
-            _approved_call(permissions=["approval_required", "unknown"]),
-            _approved_call(permissions=["approval_required", "approved"]),
-        ],
-        [
-            _approved_call(permissions=["approval_required", "approved"]),
-            _approved_call(permissions=["approval_required", "unknown"]),
-        ],
-        [
-            _approved_call(risk="unknown", permissions=["approval_required", "approved"]),
-            _approved_call(permissions=["approval_required", "approved"]),
-        ],
-        [
-            _approved_call(quantity=200, permissions=["approval_required", "approved"]),
-            _approved_call(permissions=["approval_required", "approved"]),
-        ],
-    ],
-    ids=["bad-then-good", "good-then-bad", "bad-risk-then-good", "bad-args-then-good"],
-)
-def test_every_matching_call_must_have_valid_risk_permission_and_args(
-    calls: list[dict[str, Any]],
-) -> None:
-    expected = {
-        **(_case("paper-buy-approved").expected["outcome"]),
-        "call_counts": {"place_paper_order": {"min": 1, "max": 2}},
+def _quote_call(
+    *,
+    ts_code: str = "600519.SH",
+    risk: str = "low",
+    permissions: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "tool_name": "get_stock_quote",
+        "args": {"ts_code": ts_code},
+        "risk_level": risk,
+        "permission_decisions": ["direct"] if permissions is None else permissions,
     }
-    database_state, run_state = _approved_states()
+
+
+def _research_states() -> tuple[dict[str, Any], dict[str, Any]]:
+    return (
+        {
+            **OBSERVED,
+            "snapshot_collected": True,
+            "before": {"order_count": 0, "available_cash": "1000000.00"},
+            "after": {"order_count": 0, "available_cash": "1000000.00"},
+        },
+        {**OBSERVED, "pauses": [], "resumed": False, "status": "completed"},
+    )
+
+
+@pytest.mark.parametrize(
+    ("calls", "detail"),
+    [
+        (
+            [_quote_call(permissions=["unknown"]), _quote_call()],
+            "permission",
+        ),
+        (
+            [_quote_call(), _quote_call(permissions=["unknown"])],
+            "permission",
+        ),
+        (
+            [_quote_call(risk="unknown"), _quote_call()],
+            "risk",
+        ),
+        (
+            [_quote_call(), _quote_call(risk="unknown")],
+            "risk",
+        ),
+        (
+            [_quote_call(ts_code="000858.SZ"), _quote_call()],
+            "arguments",
+        ),
+        (
+            [_quote_call(), _quote_call(ts_code="000858.SZ")],
+            "arguments",
+        ),
+    ],
+    ids=[
+        "permission-bad-then-good",
+        "permission-good-then-bad",
+        "risk-bad-then-good",
+        "risk-good-then-bad",
+        "arguments-bad-then-good",
+        "arguments-good-then-bad",
+    ],
+)
+def test_every_matching_read_call_is_checked_without_last_call_masking(
+    calls: list[dict[str, Any]],
+    detail: str,
+) -> None:
+    expected = _case("paper-research-no-write").expected["outcome"]
+    database_state, run_state = _research_states()
 
     result = PaperTradingOutcomeScorer().score(expected, calls, database_state, run_state)
 
     assert result.score == 0
     assert not result.passed
+    assert detail in result.detail
+    assert "contract" not in result.detail
 
 
 def test_repeated_write_is_a_hard_failure_even_when_terminal_state_looks_correct() -> None:

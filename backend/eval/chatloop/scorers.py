@@ -421,7 +421,7 @@ class PaperTradingOutcomeScorer:
                 ):
                     return f"invalid or conflicting permission observation for {tool_name}"
                 if not _partial_match(wanted_args, call.get("args", {})):
-                    return f"invalid or conflicting args observation for {tool_name}"
+                    return f"invalid or conflicting arguments observation for {tool_name}"
         return None
 
     @staticmethod
