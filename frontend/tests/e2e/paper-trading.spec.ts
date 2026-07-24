@@ -50,12 +50,15 @@ async function installPaperBackend(page: Page) {
     const path = url.pathname
     if (!path.startsWith('/api/')) return route.continue()
 
-    if (path === '/api/v1/tenants') {
+    if (path === '/api/v1/tenants' && request.method() === 'GET') {
       return json(route, [
         { id: TENANT_ID, name: '个人空间', is_personal: true, role: 'owner' },
       ])
     }
-    if (path === `/api/v1/tenants/${TENANT_ID}/sessions`) {
+    if (
+      path === `/api/v1/tenants/${TENANT_ID}/sessions` &&
+      request.method() === 'GET'
+    ) {
       return json(route, [])
     }
     if (
@@ -82,7 +85,8 @@ async function installPaperBackend(page: Page) {
       })
     }
     if (
-      path === `/api/v1/tenants/${TENANT_ID}/runs/${RUN_ID}/events`
+      path === `/api/v1/tenants/${TENANT_ID}/runs/${RUN_ID}/events` &&
+      request.method() === 'GET'
     ) {
       const body =
         runPhase === 'waiting'
@@ -206,7 +210,10 @@ async function installPaperBackend(page: Page) {
         error_message: null,
       })
     }
-    if (path === `/api/v1/tenants/${TENANT_ID}/sessions/${SESSION_ID}`) {
+    if (
+      path === `/api/v1/tenants/${TENANT_ID}/sessions/${SESSION_ID}` &&
+      request.method() === 'GET'
+    ) {
       return json(route, {
         id: SESSION_ID,
         tenant_id: TENANT_ID,
@@ -293,7 +300,10 @@ async function installPaperBackend(page: Page) {
         rules_version: 'cn-a-share-v1',
       })
     }
-    if (path === '/api/v0/paper-trading/account') {
+    if (
+      path === '/api/v0/paper-trading/account' &&
+      request.method() === 'GET'
+    ) {
       return json(route, {
         id: 'account-paper',
         generation: 1,
@@ -303,10 +313,16 @@ async function installPaperBackend(page: Page) {
         status: 'active',
       })
     }
-    if (path === '/api/v0/paper-trading/holdings') {
+    if (
+      path === '/api/v0/paper-trading/holdings' &&
+      request.method() === 'GET'
+    ) {
       return json(route, [])
     }
-    if (path === '/api/v0/paper-trading/orders') {
+    if (
+      path === '/api/v0/paper-trading/orders' &&
+      request.method() === 'GET'
+    ) {
       return json(
         route,
         orderCreated
@@ -389,4 +405,43 @@ test('buy instruction pauses for editable preview, resumes, and appears in the s
   await expect(orderRow).toContainText('1,500.0000')
   await expect(orderRow).toContainText('已成交')
   expect(backend.unexpectedRequests).toEqual([])
+})
+
+test('read-only paper backend routes fail closed on wrong HTTP methods', async ({
+  page,
+}) => {
+  const backend = await installPaperBackend(page)
+  await page.goto('/login', { timeout: 30_000 })
+  const wrongRequests = [
+    { path: '/api/v1/tenants', method: 'POST' },
+    {
+      path: `/api/v1/tenants/${TENANT_ID}/sessions`,
+      method: 'DELETE',
+    },
+    {
+      path: `/api/v1/tenants/${TENANT_ID}/runs/${RUN_ID}/events`,
+      method: 'POST',
+    },
+    {
+      path: `/api/v1/tenants/${TENANT_ID}/sessions/${SESSION_ID}`,
+      method: 'DELETE',
+    },
+    { path: '/api/v0/paper-trading/account', method: 'POST' },
+    { path: '/api/v0/paper-trading/holdings', method: 'DELETE' },
+    { path: '/api/v0/paper-trading/orders', method: 'DELETE' },
+  ]
+
+  const statuses = await page.evaluate(async (requests) => {
+    return Promise.all(
+      requests.map(async ({ path, method }) => {
+        const response = await fetch(path, { method })
+        return response.status
+      }),
+    )
+  }, wrongRequests)
+
+  expect(statuses).toEqual(wrongRequests.map(() => 500))
+  expect(backend.unexpectedRequests).toEqual(
+    wrongRequests.map(({ path, method }) => `${method} ${path}`),
+  )
 })
