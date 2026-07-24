@@ -5,8 +5,10 @@ from __future__ import annotations
 from typing import cast
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
 
+from app.models.paper_account import PaperAccount, PaperAccountStatus
 from app.models.position import Position
 from app.models.watchlist import WatchlistItem
 
@@ -23,13 +25,25 @@ class MonitoringSubject(BaseModel):
 
 
 def load_active_subjects(session: Session) -> list[MonitoringSubject]:
-    """Load all (user_id, ts_code) pairs with non-empty positions.
+    """Load monitored (user_id, ts_code) pairs from positions and watchlists.
 
-    Spec § 1 决策 2:scope = positions WHERE quantity > 0(去 monitoring_customers).
+    Manual positions remain eligible while simulated positions must belong to
+    the user's active account generation.
     """
     position_rows = (
         session.query(Position.user_id, Position.ts_code, Position.name)
-        .filter(Position.quantity > 0)
+        .filter(
+            Position.quantity > 0,
+            or_(
+                Position.paper_account_id.is_(None),
+                exists().where(
+                    PaperAccount.id == Position.paper_account_id,
+                    PaperAccount.user_id == Position.user_id,
+                    PaperAccount.generation == Position.paper_account_generation,
+                    PaperAccount.status == PaperAccountStatus.ACTIVE,
+                ),
+            ),
+        )
         .all()
     )
     merged: dict[tuple[str, str], dict[str, object]] = {}
