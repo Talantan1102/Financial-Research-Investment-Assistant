@@ -65,8 +65,9 @@ export function ChatSessionPage() {
           activeRun: detail.active_run_id && detail.active_run_status
             ? { id: detail.active_run_id, status: detail.active_run_status }
             : null,
-          activePause: detail.active_pause_type && detail.active_pause_request
+          activePause: detail.active_pause_id && detail.active_pause_type && detail.active_pause_request
             ? {
+                id: detail.active_pause_id,
                 type: detail.active_pause_type === 'approval' ? 'approval_request' : 'input_request',
                 request: detail.active_pause_request,
               }

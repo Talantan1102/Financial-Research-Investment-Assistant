@@ -55,7 +55,7 @@ describe('chatSessionsStore v1', () => {
         return HttpResponse.json({ id: 'a', tenant_id: 'personal', created_by_user_id: 'u', title: 'a',
           created_at: now, updated_at: now, archived_at: null, has_more: false,
           active_run_id: null, active_run_status: null,
-          active_pause_type: null, active_pause_request: null,
+          active_pause_id: null, active_pause_type: null, active_pause_request: null,
           messages: [{ id: 'm1', role: 'assistant', content: 'durable', status: 'done', created_at: now }] })
       }),
     )

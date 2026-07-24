@@ -291,10 +291,17 @@ async def test_cancel_is_idempotent_and_invalid_resume_is_409(
     async with client_for(users["member"]) as client:
         created = await _create_run(client, tenant.id)
         run_url = f"{_run_url(tenant.id)}/{created.json()['id']}"
-        invalid_resume = await client.post(f"{run_url}/resume", json={"response": {"text": "x"}})
+        missing_identity = await client.post(
+            f"{run_url}/resume", json={"response": {"text": "x"}}
+        )
+        invalid_resume = await client.post(
+            f"{run_url}/resume",
+            json={"pause_id": str(uuid.uuid4()), "response": {"text": "x"}},
+        )
         first_cancel = await client.post(f"{run_url}/cancel")
         second_cancel = await client.post(f"{run_url}/cancel")
 
+    assert missing_identity.status_code == 422
     assert invalid_resume.status_code == 409
     assert first_cancel.status_code == second_cancel.status_code == 200
     assert first_cancel.json()["status"] == second_cancel.json()["status"] == "cancelled"
@@ -325,7 +332,7 @@ async def test_resume_uses_authenticated_actor_and_keeps_same_run(
         RunStatus.RUNNING,
         event_type="run.running",
     )
-    await service.record_pause(
+    pause = await service.record_pause(
         tenant.id,
         run_id,
         users["member"].id,
@@ -337,15 +344,15 @@ async def test_resume_uses_authenticated_actor_and_keeps_same_run(
     async with client_for(users["member"]) as client:
         response = await client.post(
             f"{_run_url(tenant.id)}/{run_id}/resume",
-            json={"response": {"text": "1500"}},
+            json={"pause_id": str(pause.id), "response": {"text": "1500"}},
         )
         replay = await client.post(
             f"{_run_url(tenant.id)}/{run_id}/resume",
-            json={"response": {"text": "1500"}},
+            json={"pause_id": str(pause.id), "response": {"text": "1500"}},
         )
         conflict = await client.post(
             f"{_run_url(tenant.id)}/{run_id}/resume",
-            json={"response": {"text": "1600"}},
+            json={"pause_id": str(pause.id), "response": {"text": "1600"}},
         )
 
     assert response.status_code == 200

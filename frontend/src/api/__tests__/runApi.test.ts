@@ -92,7 +92,7 @@ describe('runApi', () => {
     )
     await getRun('tenant-1', 'run-1', fetchImpl)
     await cancelRun('tenant-1', 'run-1', fetchImpl)
-    await resumeRun('tenant-1', 'run-1', { approved: true }, fetchImpl)
+    await resumeRun('tenant-1', 'run-1', 'pause-1', { approved: true }, fetchImpl)
 
     expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([
       '/api/v1/tenants/tenant-1/runs/run-1',
@@ -100,6 +100,7 @@ describe('runApi', () => {
       '/api/v1/tenants/tenant-1/runs/run-1/resume',
     ])
     expect(JSON.parse(String(fetchImpl.mock.calls[2][1]?.body))).toEqual({
+      pause_id: 'pause-1',
       response: { approved: true },
     })
     expect(fetchImpl.mock.calls.some(([url]) => String(url).includes('/steer/'))).toBe(false)

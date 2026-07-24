@@ -55,6 +55,7 @@ class RunCreateRequest(BaseModel):
 
 
 class RunResumeRequest(BaseModel):
+    pause_id: UUID
     response: dict[str, object]
 
 

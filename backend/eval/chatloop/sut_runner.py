@@ -138,7 +138,7 @@ class DurableRunHttpTransport:
                 resumed = await client.post(
                     f"/api/v1/tenants/{self._tenant_id}/runs/{run_id}/resume",
                     headers={"Authorization": f"Bearer {self._token}"},
-                    json={"response": resume_payload},
+                    json={"pause_id": str(pause.id), "response": resume_payload},
                 )
                 resumed.raise_for_status()
                 status, _ = await self._wait(run_id)

@@ -544,11 +544,13 @@ def run_default_compose_suite(
             legacy._wait_status_in(second, {"queued", "pending"}, timeout=15)
             with legacy._connect() as connection, connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT pause_type FROM run_pauses WHERE run_id=%s ORDER BY pause_no DESC LIMIT 1",
+                    "SELECT id, pause_type FROM run_pauses "
+                    "WHERE run_id=%s ORDER BY pause_no DESC LIMIT 1",
                     (first,),
                 )
                 row = cursor.fetchone()
-                assert row is not None and row[0] in {"approval", "input"}
+                assert row is not None and row[1] in {"approval", "input"}
+                pause_id, pause_type = row
                 cursor.execute("SELECT status FROM runs WHERE id=%s", (second,))
                 queued = cursor.fetchone()
                 assert queued is not None and queued[0] in {"queued", "pending"}
@@ -556,7 +558,14 @@ def run_default_compose_suite(
                 "POST",
                 f"/api/v1/tenants/{context[0]}/runs/{first}/resume",
                 context[1],
-                body={"response": "continue"},
+                body={
+                    "pause_id": str(pause_id),
+                    "response": (
+                        {"text": "continue"}
+                        if pause_type == "input"
+                        else {"approved": True}
+                    ),
+                },
             )
             legacy._wait_status(first, "completed", timeout=30)
             legacy._wait_status(second, "completed", timeout=30)

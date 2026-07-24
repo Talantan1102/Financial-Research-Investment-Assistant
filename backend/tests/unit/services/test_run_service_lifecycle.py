@@ -217,6 +217,7 @@ async def test_resume_waiting_keeps_same_run_and_resolves_pause(
         created_run.tenant_id,
         created_run.id,
         created_run.created_by_user_id,
+        pause_id=pause.id,
         response={"text": "成本价 1500"},
     )
 
@@ -275,6 +276,7 @@ async def test_resume_outbox_conflict_rolls_back_run_pause_event_and_outbox(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response={"text": "1500"},
         )
 
@@ -368,6 +370,7 @@ async def test_invalid_edited_arguments_leave_pause_unresolved(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response={
                 "approved": True,
                 "edited_arguments": {"trade-1": {"quantity": 0}},
@@ -434,6 +437,7 @@ async def test_non_finite_normalized_edit_keeps_pause_open_and_allows_valid_retr
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response=response,
         )
 
@@ -456,6 +460,7 @@ async def test_non_finite_normalized_edit_keeps_pause_open_and_allows_valid_retr
         created_run.tenant_id,
         created_run.id,
         created_run.created_by_user_id,
+        pause_id=pause.id,
         response=response,
     )
     assert resumed.status == RunStatus.QUEUED.value
@@ -510,12 +515,14 @@ async def test_same_raw_edit_resume_is_idempotent_after_schema_normalization(
         created_run.tenant_id,
         created_run.id,
         created_run.created_by_user_id,
+        pause_id=pause.id,
         response=response,
     )
     second = await editable_service.resume_run(
         created_run.tenant_id,
         created_run.id,
         created_run.created_by_user_id,
+        pause_id=pause.id,
         response=response,
     )
     resolved = await run_service.get_pause(
@@ -539,6 +546,7 @@ async def test_invalid_resume_is_rejected(run_service: RunService, created_run: 
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=uuid.uuid4(),
             response={"text": "没有 pause"},
         )
 
@@ -563,15 +571,16 @@ async def test_resume_validates_response_shape_for_pause_type(
 ) -> None:
     await fake_executor.start(created_run.id)
     if pause_kind == "input":
-        await fake_executor.pause_for_input(created_run.id, {"question": "成本价？"})
+        pause = await fake_executor.pause_for_input(created_run.id, {"question": "成本价？"})
     else:
-        await fake_executor.pause_for_approval(created_run.id, {"action": "place-order"})
+        pause = await fake_executor.pause_for_approval(created_run.id, {"action": "place-order"})
 
     with pytest.raises(ResumeNotAllowed, match="response"):
         await run_service.resume_run(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response=response,
         )
 
@@ -698,12 +707,14 @@ async def test_concurrent_resume_resolves_pause_once_and_is_idempotent(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response={"text": "1500"},
         ),
         run_service.resume_run(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response={"text": "1500"},
         ),
     )
@@ -735,6 +746,7 @@ async def test_resolved_resume_rejects_a_different_response(
         created_run.tenant_id,
         created_run.id,
         created_run.created_by_user_id,
+        pause_id=pause.id,
         response={"text": "1500"},
     )
 
@@ -743,6 +755,7 @@ async def test_resolved_resume_rejects_a_different_response(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response={"text": "1600"},
         )
 
@@ -750,6 +763,55 @@ async def test_resolved_resume_rejects_a_different_response(
         created_run.tenant_id, created_run.id, created_run.created_by_user_id, pause.id
     )
     assert resolved.response_payload == {"text": "1500"}
+
+
+@pytest.mark.asyncio
+async def test_stale_pause_identity_cannot_resume_a_new_pause_on_the_same_run(
+    run_service: RunService,
+    fake_executor: FakeRunExecutor,
+    created_run: Run,
+) -> None:
+    await fake_executor.start(created_run.id)
+    first_pause = await fake_executor.pause_for_input(created_run.id, {"question": "first?"})
+    await run_service.resume_run(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        pause_id=first_pause.id,
+        response={"text": "first"},
+    )
+    await fake_executor.start(created_run.id)
+    second_pause = await fake_executor.pause_for_input(created_run.id, {"question": "second?"})
+    events_before = await run_service.list_events(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+
+    with pytest.raises(ResumeNotAllowed, match="pause identity"):
+        await run_service.resume_run(
+            created_run.tenant_id,
+            created_run.id,
+            created_run.created_by_user_id,
+            pause_id=first_pause.id,
+            response={"text": "stale tab"},
+        )
+
+    current = await run_service.get_run(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    unresolved = await run_service.get_pause(
+        created_run.tenant_id,
+        created_run.id,
+        created_run.created_by_user_id,
+        second_pause.id,
+    )
+    events_after = await run_service.list_events(
+        created_run.tenant_id, created_run.id, created_run.created_by_user_id
+    )
+    assert current.status == RunStatus.WAITING_INPUT.value
+    assert unresolved.response_payload is None
+    assert unresolved.resolved_at is None
+    assert unresolved.continuation_payload == {"checkpoint": "fake-input"}
+    assert len(events_after) == len(events_before)
 
 
 @pytest.mark.asyncio
@@ -766,12 +828,14 @@ async def test_concurrent_conflicting_resume_commits_one_canonical_response(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response={"text": "1500"},
         ),
         run_service.resume_run(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response={"text": "1600"},
         ),
         return_exceptions=True,
@@ -817,6 +881,7 @@ async def test_approval_decisions_must_exactly_cover_requested_call_ids_before_r
                 created_run.tenant_id,
                 created_run.id,
                 created_run.created_by_user_id,
+                pause_id=pause.id,
                 response={"decisions": decisions},
             )
         unresolved = await run_service.get_pause(
@@ -829,6 +894,7 @@ async def test_approval_decisions_must_exactly_cover_requested_call_ids_before_r
         created_run.tenant_id,
         created_run.id,
         created_run.created_by_user_id,
+        pause_id=pause.id,
         response={"decisions": {"risky": False}},
     )
     assert resumed.status == RunStatus.QUEUED.value
@@ -842,7 +908,7 @@ async def test_cancel_racing_resume_finishes_in_legal_state(
     async_session_factory: async_sessionmaker[AsyncSession],
 ) -> None:
     await fake_executor.start(created_run.id)
-    await fake_executor.pause_for_approval(created_run.id, {"action": "place-order"})
+    pause = await fake_executor.pause_for_approval(created_run.id, {"action": "place-order"})
 
     results = await asyncio.gather(
         run_service.cancel_run(
@@ -854,6 +920,7 @@ async def test_cancel_racing_resume_finishes_in_legal_state(
             created_run.tenant_id,
             created_run.id,
             created_run.created_by_user_id,
+            pause_id=pause.id,
             response={"approved": True},
         ),
         return_exceptions=True,

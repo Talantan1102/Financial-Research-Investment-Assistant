@@ -114,6 +114,7 @@ async function installPaperBackend(page: Page) {
               'id: paused-1',
               'event: run.paused',
               `data: ${JSON.stringify({
+                pause_id: 'pause-buy',
                 pause_type: 'approval',
                 request: {
                   tool_calls: [
@@ -154,6 +155,7 @@ async function installPaperBackend(page: Page) {
       request.method() === 'POST'
     ) {
       const body = request.postDataJSON() as {
+        pause_id: string
         response: {
           approved: boolean
           edited_arguments: Record<string, Record<string, unknown>>
@@ -161,6 +163,7 @@ async function installPaperBackend(page: Page) {
       }
       const editedArguments = body.response.edited_arguments?.['call-buy']
       if (
+        body.pause_id !== 'pause-buy' ||
         body.response.approved &&
         (previewedArguments === null ||
           !isDeepStrictEqual(editedArguments, previewedArguments))
@@ -237,6 +240,7 @@ async function installPaperBackend(page: Page) {
         active_run_id: runPhase === 'waiting' ? RUN_ID : null,
         active_run_status:
           runPhase === 'waiting' ? 'waiting_approval' : null,
+        active_pause_id: runPhase === 'waiting' ? 'pause-buy' : null,
         active_pause_type: runPhase === 'waiting' ? 'approval' : null,
         active_pause_request:
           runPhase === 'waiting'

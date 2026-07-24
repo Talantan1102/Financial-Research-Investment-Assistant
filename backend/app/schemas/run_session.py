@@ -57,6 +57,7 @@ class RunSessionDetailResponse(RunSessionResponse):
     has_more: bool
     active_run_id: UUID | None
     active_run_status: str | None
+    active_pause_id: UUID | None
     active_pause_type: str | None
     active_pause_request: dict[str, object] | None
     revisions: list[RunRevisionResponse]

@@ -76,6 +76,7 @@ async def get_session(
         has_more=detail.has_more,
         active_run_id=None if detail.active_run is None else detail.active_run.id,
         active_run_status=None if detail.active_run is None else detail.active_run.status,
+        active_pause_id=None if detail.active_pause is None else detail.active_pause.id,
         active_pause_type=None if detail.active_pause is None else detail.active_pause.pause_type,
         active_pause_request=(
             None if detail.active_pause is None else detail.active_pause.request_payload

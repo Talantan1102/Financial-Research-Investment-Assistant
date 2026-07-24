@@ -324,6 +324,7 @@ async def test_detail_returns_bounded_durable_messages_in_stable_order(
     assert active_response.json()["active_run_id"] == str(active_run.id)
     assert active_response.json()["active_run_status"] == "waiting_input"
     assert active_response.json()["active_pause_type"] == "input"
+    assert active_response.json()["active_pause_id"] == str(active_pause.id)
     assert active_response.json()["active_pause_request"] == {"question": "成本价？"}
 
 

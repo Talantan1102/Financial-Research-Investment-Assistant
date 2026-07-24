@@ -59,6 +59,7 @@ export interface RunCommandResult {
 }
 
 export interface RunPause {
+  id: string
   type: 'approval_request' | 'input_request'
   request: Record<string, unknown>
 }
@@ -246,7 +247,10 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
               const content = event.data.content ?? event.data.text
               if (typeof content === 'string') currentChatActions.appendRunToken(content)
             } else if (event.event === 'approval_request' || event.event === 'input_request') {
-              setPause({ type: event.event, request: event.data })
+              const pauseId = event.data.pause_id
+              if (typeof pauseId === 'string') {
+                setPause({ id: pauseId, type: event.event, request: event.data })
+              }
             } else if (event.event === 'run.completed') {
               const content = event.data.content
               updateStatus('completed')
@@ -272,12 +276,15 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
               return true
             } else if (event.event === 'run.paused') {
               const pauseType = event.data.pause_type
+              const pauseId = event.data.pause_id
               const request = event.data.request
               if (
+                typeof pauseId === 'string' &&
                 (pauseType === 'approval' || pauseType === 'input') &&
                 request && typeof request === 'object' && !Array.isArray(request)
               ) {
                 setPause({
+                  id: pauseId,
                   type: pauseType === 'approval' ? 'approval_request' : 'input_request',
                   request: request as Record<string, unknown>,
                 })
@@ -464,8 +471,13 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         setRevisionCursor(session.revisions_next_cursor ?? null)
         setRevisionsHasMore(session.revisions_has_more ?? false)
         const pauseType = session.active_pause_type
-        if ((pauseType === 'approval' || pauseType === 'input') && session.active_pause_request) {
+        if (
+          session.active_pause_id &&
+          (pauseType === 'approval' || pauseType === 'input') &&
+          session.active_pause_request
+        ) {
           setPause({
+            id: session.active_pause_id,
             type: pauseType === 'approval' ? 'approval_request' : 'input_request',
             request: session.active_pause_request,
           })
@@ -545,7 +557,10 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       const tenantId = tenantRef.current
       const runId = activeRunRef.current ?? lastRunRef.current
       const sessionId = sessionRef.current
-      if (!tenantId || !runId || !sessionId) return { ok: false, error: 'No paused Run' }
+      const pauseId = pause?.id
+      if (!tenantId || !runId || !sessionId || !pauseId) {
+        return { ok: false, error: 'No paused Run' }
+      }
       if (commandInFlightRef.current) return { ok: false, error: 'Run command already in progress' }
       commandInFlightRef.current = true
       setCommandPending(true)
@@ -556,7 +571,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
       const controller = new AbortController()
       abortRef.current = controller
       try {
-        const resumed = await resumeRunRequest(tenantId, runId, response, fetchImpl)
+        const resumed = await resumeRunRequest(tenantId, runId, pauseId, response, fetchImpl)
         if (!isCurrent(generation, controller.signal)) return { ok: false, error: 'Run changed' }
         setPause(null)
         updateActiveRun(runId, resumed.status)
@@ -588,7 +603,7 @@ export function useRunSSE(options: UseRunSSEOptions): UseRunSSE {
         }
       }
     },
-    [fetchImpl, isCurrent, recoverCommandFacts, streamRun, updateActiveRun, updateStatus],
+    [fetchImpl, isCurrent, pause?.id, recoverCommandFacts, streamRun, updateActiveRun, updateStatus],
   )
 
   useEffect(() => {

@@ -16,7 +16,11 @@ const sendPromptMock = vi.fn(async () => ({ ok: true as const }))
 const cancelRunMock = vi.fn(async () => ({ ok: true as const }))
 const resumeRunMock = vi.fn(async () => ({ ok: true as const }))
 const resubmitPromptMock = vi.fn(async () => ({ ok: true as const }))
-let pauseMock: { type: 'approval_request' | 'input_request'; request: Record<string, unknown> } | null = null
+let pauseMock: {
+  id: string
+  type: 'approval_request' | 'input_request'
+  request: Record<string, unknown>
+} | null = null
 let revisionsMock: Array<{
   id: string
   replaces_run_id: string | null
@@ -98,6 +102,7 @@ describe('<ChatPane> integration with useRunSSE', () => {
   it('renders approval and input pause controls and sends typed resume responses', async () => {
     const user = userEvent.setup()
     pauseMock = {
+      id: 'pause-approval',
       type: 'approval_request',
       request: {
         tool_calls: [
@@ -123,6 +128,7 @@ describe('<ChatPane> integration with useRunSSE', () => {
     expect(resumeRunMock).toHaveBeenCalledWith({ approved: false })
 
     pauseMock = {
+      id: 'pause-input',
       type: 'input_request',
       request: {
         question: '<img src=x onerror="globalThis.pwned=true">请输入成本价？',
@@ -158,6 +164,7 @@ describe('<ChatPane> integration with useRunSSE', () => {
       rules_version: 'cn-a-v1',
     })
     pauseMock = {
+      id: 'pause-paper',
       type: 'approval_request',
       request: {
         tool_calls: [{
@@ -184,6 +191,7 @@ describe('<ChatPane> integration with useRunSSE', () => {
     })
 
     pauseMock = {
+      id: 'pause-generic',
       type: 'approval_request',
       request: {
         tool_calls: [{ id: 'high-1', name: 'send_notice', arguments: { channel: 'email' } }],
@@ -243,7 +251,7 @@ describe('<ChatPane> integration with useRunSSE', () => {
     await user.click(editor.closest('div')!.querySelector('button')!)
     expect(editor).toHaveValue('retry draft')
 
-    pauseMock = { type: 'input_request', request: { question: 'more?' } }
+    pauseMock = { id: 'pause-input', type: 'input_request', request: { question: 'more?' } }
     resumeRunMock.mockResolvedValueOnce({ ok: false })
     rendered.rerender(<ChatPane sessionId="s1" tenantId="tenant-1" />)
     const answer = Array.from(document.querySelectorAll('textarea')).at(-1)!

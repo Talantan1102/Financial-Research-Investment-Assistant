@@ -85,6 +85,7 @@ export interface RunSessionDetail extends RunSessionSummary {
   has_more: boolean
   active_run_id: string | null
   active_run_status: RunStatus | null
+  active_pause_id: string | null
   active_pause_type: 'approval' | 'input' | null
   active_pause_request: Record<string, unknown> | null
   revisions: RunRevision[]
@@ -154,6 +155,7 @@ export function cancelRun(
 export function resumeRun(
   tenantId: string,
   runId: string,
+  pauseId: string,
   response: RunResumeResponse,
   fetchImpl: typeof fetch = fetch,
 ): Promise<RunResponse> {
@@ -162,7 +164,7 @@ export function resumeRun(
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ response }),
+      body: JSON.stringify({ pause_id: pauseId, response }),
     },
     fetchImpl,
   )

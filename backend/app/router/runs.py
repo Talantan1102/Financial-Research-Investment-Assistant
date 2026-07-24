@@ -433,6 +433,7 @@ async def resume_run(
             tenant_id,
             run_id,
             cast(UUID, current_user.id),
+            pause_id=body.pause_id,
             response=body.response,
         )
     except RunControlError as exc:

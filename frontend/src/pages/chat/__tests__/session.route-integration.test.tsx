@@ -25,6 +25,7 @@ function detail(sessionId: string, runId: string, message: string, withPause = f
     has_more: false,
     active_run_id: runId,
     active_run_status: 'running',
+    active_pause_id: withPause ? `pause-${runId}` : null,
     active_pause_type: withPause ? 'input' : null,
     active_pause_request: withPause ? { question: 'Session A pause' } : null,
     messages: [

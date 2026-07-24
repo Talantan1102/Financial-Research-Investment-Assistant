@@ -204,6 +204,7 @@ async def test_run_worker_resumes_portable_pause_on_another_worker_and_finishes(
         first_assignment.tenant_id,
         first_assignment.run_id,
         user_id,
+        pause_id=pause.id,
         response=response,
     )
     second_assignment = await _claim_on_new_worker(
@@ -280,11 +281,19 @@ async def test_resolved_pause_resumes_on_a_different_worker_without_retry(
 
     async with pg_async_session_factory() as session:
         run = await session.get(Run, first_assignment.run_id)
+        pause = await session.scalar(
+            select(RunPause)
+            .where(RunPause.run_id == first_assignment.run_id)
+            .order_by(RunPause.pause_no.desc())
+            .limit(1)
+        )
         tenant_id = cast(uuid.UUID, run.tenant_id)
+    assert pause is not None
     resumed = await RunService(pg_async_session_factory).resume_run(
         tenant_id,
         first_assignment.run_id,
         user_id,
+        pause_id=pause.id,
         response={"text": "1500 元"},
     )
     assert resumed.retry_count == 0

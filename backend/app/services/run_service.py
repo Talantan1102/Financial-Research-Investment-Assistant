@@ -434,6 +434,7 @@ class RunService:
         run_id: UUID,
         actor_id: UUID,
         *,
+        pause_id: UUID,
         response: dict[str, Any],
     ) -> Run:
         async with self._session_factory() as session, session.begin():
@@ -447,6 +448,8 @@ class RunService:
                 .with_for_update()
             )
             current_status = RunStatus(cast(str, run.status))
+            if latest_pause is None or latest_pause.id != pause_id:
+                raise ResumeNotAllowed("pause identity does not match current pause")
             if latest_pause is not None and latest_pause.resolved_at is not None:
                 normalized_response = self._normalize_resume_response(latest_pause, response)
                 if _canonical_json(latest_pause.response_payload) == _canonical_json(

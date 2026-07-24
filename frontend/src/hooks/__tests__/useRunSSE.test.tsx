@@ -59,6 +59,7 @@ function detail(content = 'Hello durable'): RunSessionDetail {
     has_more: false,
     active_run_id: null,
     active_run_status: null,
+    active_pause_id: null,
     active_pause_type: null,
     active_pause_request: null,
     revisions: [],
@@ -236,7 +237,7 @@ describe('useRunSSE', () => {
       'id: v1:5:0-0\nevent: run.paused\ndata: {}\n\n',
     ]))
     vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_input'))
-    const initialPause = { type: 'input_request' as const, request: { question: '成本价？' } }
+    const initialPause = { id: 'pause-input', type: 'input_request' as const, request: { question: '成本价？' } }
     const { result } = renderHook(() => useRunSSE({
       tenantId: 'tenant-1', sessionId: 'session-1', initialRunId: 'run-1',
       initialRunStatus: 'waiting_input', initialPause,
@@ -365,7 +366,7 @@ describe('useRunSSE', () => {
   it('preserves approval/input pause requests, blocks ordinary send and resumes with typed responses', async () => {
     vi.mocked(runApi.fetchRunEvents).mockResolvedValue(chunkedSse([
       'id: v1:1:1-0\nevent: approval_request\ndata: {"tool":"trade"}\n\n',
-      'id: v1:2:1-1\nevent: run.paused\ndata: {}\n\n',
+      'id: v1:2:1-1\nevent: run.paused\ndata: {"pause_id":"pause-1","pause_type":"approval","request":{"tool":"trade"}}\n\n',
     ]))
     vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_approval'))
     vi.mocked(runApi.resumeRun).mockResolvedValue(run('queued'))
@@ -373,7 +374,7 @@ describe('useRunSSE', () => {
     const { result } = renderHook(() => useRunSSE({ tenantId: 'tenant-1', sessionId: 'session-1' }))
 
     await act(async () => result.current.sendPrompt('trade'))
-    expect(result.current.pause).toEqual({ type: 'approval_request', request: { tool: 'trade' } })
+    expect(result.current.pause).toEqual({ id: 'pause-1', type: 'approval_request', request: { tool: 'trade' } })
     await act(async () => result.current.sendPrompt('must block'))
     expect(runApi.createRun).toHaveBeenCalledTimes(1)
     vi.mocked(runApi.resumeRun).mockRejectedValueOnce(new TypeError('resume offline'))
@@ -386,7 +387,7 @@ describe('useRunSSE', () => {
     vi.mocked(runApi.resumeRun).mockResolvedValue(run('queued'))
     vi.mocked(runApi.getRun).mockResolvedValue(run('completed'))
     await act(async () => result.current.resumeRun({ approved: false }))
-    expect(runApi.resumeRun).toHaveBeenCalledWith('tenant-1', 'run-1', { approved: false }, expect.any(Function))
+    expect(runApi.resumeRun).toHaveBeenCalledWith('tenant-1', 'run-1', 'pause-1', { approved: false }, expect.any(Function))
     expect(result.current.pause).toBeNull()
   })
 
@@ -402,6 +403,7 @@ describe('useRunSSE', () => {
       initialRunId: 'run-1',
       initialRunStatus: 'waiting_approval',
       initialPause: {
+        id: 'pause-trade',
         type: 'approval_request',
         request: {
           tool_calls: [{
@@ -428,6 +430,7 @@ describe('useRunSSE', () => {
     expect(runApi.resumeRun).toHaveBeenCalledWith(
       'tenant-1',
       'run-1',
+      'pause-trade',
       {
         approved: true,
         edited_arguments: {
@@ -446,10 +449,11 @@ describe('useRunSSE', () => {
     )
     vi.mocked(runApi.getRunSession).mockResolvedValue({
       ...detail(), active_run_id: 'run-1', active_run_status: 'waiting_input',
+      active_pause_id: 'pause-input',
       active_pause_type: 'input', active_pause_request: { question: 'still waiting' },
     })
     vi.mocked(runApi.getRun).mockResolvedValue(run('waiting_input'))
-    const initialPause = { type: 'approval_request' as const, request: { tool: 'trade' } }
+    const initialPause = { id: 'pause-approval', type: 'approval_request' as const, request: { tool: 'trade' } }
     const { result } = renderHook(() => useRunSSE({
       tenantId: 'tenant-1', sessionId: 'session-1', initialRunId: 'run-1',
       initialRunStatus: 'waiting_approval', initialPause,
@@ -471,6 +475,7 @@ describe('useRunSSE', () => {
     expect(runApi.getRunSession).toHaveBeenCalled()
     expect(runApi.getRun).toHaveBeenCalledWith('tenant-1', 'run-1', expect.any(Function))
     expect(result.current.pause).toEqual({
+      id: 'pause-input',
       type: 'input_request', request: { question: 'still waiting' },
     })
     expect(result.current.status).toBe('waiting_input')
@@ -495,7 +500,7 @@ describe('useRunSSE', () => {
   it.each(['queued', 'completed'] as const)(
     'clears a stale pause from %s Run truth even when Session calibration fails',
     async (durableStatus) => {
-      const initialPause = { type: 'approval_request' as const, request: { tool: 'trade' } }
+      const initialPause = { id: 'pause-approval', type: 'approval_request' as const, request: { tool: 'trade' } }
       vi.mocked(runApi.resumeRun).mockRejectedValue(new TypeError('response lost'))
       vi.mocked(runApi.getRunSession).mockRejectedValue(new TypeError('session unavailable'))
       vi.mocked(runApi.getRun).mockResolvedValue(run(durableStatus))
@@ -520,7 +525,7 @@ describe('useRunSSE', () => {
       () => new Promise<Response>((resolve) => { releaseStream = () => resolve(chunkedSse([])) }),
     )
     vi.mocked(runApi.cancelRun).mockResolvedValue(run('cancelled'))
-    const initialPause = { type: 'approval_request' as const, request: { tool: 'trade' } }
+    const initialPause = { id: 'pause-approval', type: 'approval_request' as const, request: { tool: 'trade' } }
     const { result } = renderHook(() => useRunSSE({
       tenantId: 'tenant-1', sessionId: 'session-1', initialRunId: 'run-1',
       initialRunStatus: 'waiting_approval',
@@ -568,6 +573,7 @@ describe('useRunSSE', () => {
 
   it('keeps a waiting pause actionable when cancel transport fails and clears it only after terminal cancel', async () => {
     const waitingPause = {
+      id: 'pause-input',
       type: 'input_request' as const,
       request: { question: 'Need context' },
     }
