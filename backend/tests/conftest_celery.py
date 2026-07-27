@@ -139,7 +139,7 @@ def paper_trading_worker_fixture_path() -> str | None:
     return os.environ.get("PAPER_TRADING_WORKER_FIXTURE")
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def celery_worker_subprocess(
     redis_url: str,
     paper_trading_worker_fixture_path: str | None,
