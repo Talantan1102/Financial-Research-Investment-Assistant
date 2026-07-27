@@ -49,8 +49,6 @@ def test_rulebook_contains_disclosure_version_for_each_market():
 def test_evaluation_records_the_rule_version_used():
     rules = rulebook()
 
-    result = evaluate_market_access(
-        rules, Market.STAR, Decimal("500000"), 24
-    )
+    result = evaluate_market_access(rules, Market.STAR, Decimal("500000"), 24)
 
     assert result.rule_version == rules.current(Market.STAR).rule_version

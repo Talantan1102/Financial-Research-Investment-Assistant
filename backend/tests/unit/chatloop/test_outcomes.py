@@ -55,7 +55,9 @@ def test_action_required_validates_field_shapes_and_lengths(field: str, value: s
         valid_outcome(**{field: value})
 
 
-@pytest.mark.parametrize("field", ["action_type", "action_url", "action_label", "resume_hint", "intent_summary"])
+@pytest.mark.parametrize(
+    "field", ["action_type", "action_url", "action_label", "resume_hint", "intent_summary"]
+)
 def test_action_required_rejects_empty_required_fields(field: str) -> None:
     with pytest.raises(ValidationError):
         valid_outcome(**{field: ""})

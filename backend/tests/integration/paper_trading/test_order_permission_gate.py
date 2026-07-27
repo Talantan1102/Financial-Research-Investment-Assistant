@@ -38,12 +38,10 @@ class FixedQuoteProvider:
             previous_close=Decimal("1500"),
             last_price=Decimal("1501"),
             bids=tuple(
-                QuoteLevel(price=Decimal("1500") - level, quantity=1000)
-                for level in range(5)
+                QuoteLevel(price=Decimal("1500") - level, quantity=1000) for level in range(5)
             ),
             asks=tuple(
-                QuoteLevel(price=Decimal("1502") + level, quantity=1000)
-                for level in range(5)
+                QuoteLevel(price=Decimal("1502") + level, quantity=1000) for level in range(5)
             ),
             source="fixed",
             suspended=False,
@@ -53,7 +51,9 @@ class FixedQuoteProvider:
 @pytest.fixture
 def user(db_session: Session) -> User:
     suffix = uuid.uuid4().hex
-    row = User(username=f"permission-gate-{suffix}", email=f"{suffix}@example.test", hashed_password="x")
+    row = User(
+        username=f"permission-gate-{suffix}", email=f"{suffix}@example.test", hashed_password="x"
+    )
     db_session.add(row)
     db_session.flush()
     return row
@@ -81,7 +81,9 @@ def _draft(*, side: OrderSide = OrderSide.BUY) -> OrderDraft:
     )
 
 
-def _enable_main(session: Session, account: PaperAccount, *, can_buy: bool = True, can_sell: bool = True) -> None:
+def _enable_main(
+    session: Session, account: PaperAccount, *, can_buy: bool = True, can_sell: bool = True
+) -> None:
     rule = MarketAccessRule(
         market=Market.MAIN,
         effective_from=NOW.date(),
@@ -165,9 +167,7 @@ def test_confirmation_rechecks_permission_while_current_account_is_locked(
     assert raised.value.code == "market_permission_required"
 
 
-def test_permission_reader_failure_fails_closed(
-    db_session: Session, user: User
-) -> None:
+def test_permission_reader_failure_fails_closed(db_session: Session, user: User) -> None:
     class FailingReader:
         def is_permitted(self, **_: object) -> bool:
             raise RuntimeError("database read failed")

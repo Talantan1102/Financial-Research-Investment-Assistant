@@ -66,7 +66,9 @@ class SuitabilityApplicationService:
         )
         if replay is not None:
             if replay.account_id != account_id or replay.market is not market:
-                raise SuitabilityApplicationError("idempotency_conflict", "申请请求键与原请求不一致")
+                raise SuitabilityApplicationError(
+                    "idempotency_conflict", "申请请求键与原请求不一致"
+                )
             return replay
 
         account = self._active_account(user_id=user_id, account_id=account_id, for_update=True)
@@ -98,7 +100,9 @@ class SuitabilityApplicationService:
         experience_months: int,
         risk_level: str,
     ) -> SuitabilityAssessment:
-        application = self._application(user_id=user_id, application_id=application_id, for_update=True)
+        application = self._application(
+            user_id=user_id, application_id=application_id, for_update=True
+        )
         self._require_open(application)
         self._active_account(
             user_id=user_id,
@@ -143,8 +147,16 @@ class SuitabilityApplicationService:
                 "experience_months": months,
                 "risk_level": level,
             },
-            decision=(AssessmentDecisionStatus.PASSED if result.allowed else AssessmentDecisionStatus.REJECTED),
-            failed_conditions=(None if result.allowed else [item.model_dump(mode="json") for item in result.failed_conditions]),
+            decision=(
+                AssessmentDecisionStatus.PASSED
+                if result.allowed
+                else AssessmentDecisionStatus.REJECTED
+            ),
+            failed_conditions=(
+                None
+                if result.allowed
+                else [item.model_dump(mode="json") for item in result.failed_conditions]
+            ),
             rule_version=result.rule_version,
         )
         self._session.add(assessment)
@@ -178,10 +190,14 @@ class SuitabilityApplicationService:
         if keyed is not None and keyed.id != application_id:
             raise SuitabilityApplicationError("idempotency_conflict", "确认请求键与原请求不一致")
 
-        application = self._application(user_id=user_id, application_id=application_id, for_update=True)
+        application = self._application(
+            user_id=user_id, application_id=application_id, for_update=True
+        )
         if application.confirm_idempotency_key is not None:
             if application.confirm_idempotency_key != key:
-                raise SuitabilityApplicationError("confirmation_conflict", "申请已使用其他确认请求键")
+                raise SuitabilityApplicationError(
+                    "confirmation_conflict", "申请已使用其他确认请求键"
+                )
             acceptance = self.disclosure_for(application.id)
             if acceptance is None:
                 raise SuitabilityApplicationError(
@@ -192,12 +208,18 @@ class SuitabilityApplicationService:
                     "idempotency_conflict", "确认请求键与首次提交的风险揭示书版本不一致"
                 )
             if application.status is ApplicationStatus.COMPLETED:
-                entitlement = self._session.get(MarketEntitlement, application.enabled_entitlement_id)
+                entitlement = self._session.get(
+                    MarketEntitlement, application.enabled_entitlement_id
+                )
                 if entitlement is None or entitlement.status is not EntitlementStatus.ENABLED:
-                    raise SuitabilityApplicationError("invalid_completed_application", "已完成申请缺少有效权限")
+                    raise SuitabilityApplicationError(
+                        "invalid_completed_application", "已完成申请缺少有效权限"
+                    )
                 return entitlement
             if application.status is ApplicationStatus.REJECTED:
-                raise SuitabilityApplicationError("application_not_eligible", "当前资料不满足开通条件")
+                raise SuitabilityApplicationError(
+                    "application_not_eligible", "当前资料不满足开通条件"
+                )
         elif keyed is not None:
             raise SuitabilityApplicationError("idempotency_conflict", "确认请求键与原请求不一致")
 
@@ -208,11 +230,15 @@ class SuitabilityApplicationService:
             generation=application.account_generation,
             for_update=True,
         )
-        self._lock_market(application.account_id, application.account_generation, application.market)
+        self._lock_market(
+            application.account_id, application.account_generation, application.market
+        )
         rules = self._locked_current_rules()
         current_rule = rules.current(application.market)
         if disclosure != current_rule.required_disclosure_version:
-            raise SuitabilityApplicationError("stale_disclosure_version", "风险揭示书版本已过期，请重新查看")
+            raise SuitabilityApplicationError(
+                "stale_disclosure_version", "风险揭示书版本已过期，请重新查看"
+            )
         assessment = self._session.get(SuitabilityAssessment, application.assessment_id)
         if assessment is None:
             raise SuitabilityApplicationError("profile_required", "请先提交适当性资料")
@@ -252,7 +278,9 @@ class SuitabilityApplicationService:
             .with_for_update()
         )
         if entitlement is not None:
-            raise SuitabilityApplicationError("market_already_enabled", "该市场权限已存在，请刷新后查看")
+            raise SuitabilityApplicationError(
+                "market_already_enabled", "该市场权限已存在，请刷新后查看"
+            )
 
         now = datetime.now(UTC)
         entitlement = MarketEntitlement(
@@ -287,7 +315,9 @@ class SuitabilityApplicationService:
         return entitlement
 
     def cancel(self, *, user_id: uuid.UUID, application_id: uuid.UUID) -> EntitlementApplication:
-        application = self._application(user_id=user_id, application_id=application_id, for_update=True)
+        application = self._application(
+            user_id=user_id, application_id=application_id, for_update=True
+        )
         self._require_open(application)
         application.status = ApplicationStatus.CANCELLED_BY_USER
         application.completed_at = datetime.now(UTC)
@@ -324,7 +354,9 @@ class SuitabilityApplicationService:
             )
         )
 
-    def _application(self, *, user_id: uuid.UUID, application_id: uuid.UUID, for_update: bool) -> EntitlementApplication:
+    def _application(
+        self, *, user_id: uuid.UUID, application_id: uuid.UUID, for_update: bool
+    ) -> EntitlementApplication:
         statement = select(EntitlementApplication).where(
             EntitlementApplication.id == application_id,
             EntitlementApplication.user_id == user_id,
@@ -336,7 +368,14 @@ class SuitabilityApplicationService:
             raise SuitabilityApplicationError("application_not_found", "权限申请不存在")
         return application
 
-    def _active_account(self, *, user_id: uuid.UUID, account_id: uuid.UUID, generation: int | None = None, for_update: bool = False) -> PaperAccount:
+    def _active_account(
+        self,
+        *,
+        user_id: uuid.UUID,
+        account_id: uuid.UUID,
+        generation: int | None = None,
+        for_update: bool = False,
+    ) -> PaperAccount:
         statement = select(PaperAccount).where(
             PaperAccount.id == account_id,
             PaperAccount.user_id == user_id,
@@ -348,7 +387,9 @@ class SuitabilityApplicationService:
             statement = statement.with_for_update()
         account = self._session.scalar(statement)
         if account is None:
-            raise SuitabilityApplicationError("stale_account_generation", "账户已重置，请重新发起申请")
+            raise SuitabilityApplicationError(
+                "stale_account_generation", "账户已重置，请重新发起申请"
+            )
         return account
 
     def _locked_current_rules(self) -> MarketRuleBook:
@@ -356,9 +397,9 @@ class SuitabilityApplicationService:
         rows = self._session.scalars(
             select(PersistedMarketAccessRule)
             .where(
-                tuple_(PersistedMarketAccessRule.market, PersistedMarketAccessRule.rule_version).in_(
-                    [(item.market, item.rule_version) for item in configured.rules]
-                )
+                tuple_(
+                    PersistedMarketAccessRule.market, PersistedMarketAccessRule.rule_version
+                ).in_([(item.market, item.rule_version) for item in configured.rules])
             )
             .with_for_update()
         ).all()

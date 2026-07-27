@@ -194,7 +194,11 @@ class GetEntitlementApplicationLinkTool(_MarketPermissionTool):
             )
         )
         action_url = result.get("application_url")
-        if not isinstance(action_url, str) or not action_url.startswith("/") or action_url.startswith("//"):
+        if (
+            not isinstance(action_url, str)
+            or not action_url.startswith("/")
+            or action_url.startswith("//")
+        ):
             raise RuntimeError("market permission application link must be internal")
         intent_summary = result.get("intent_summary")
         if not isinstance(intent_summary, str) or not intent_summary.strip():

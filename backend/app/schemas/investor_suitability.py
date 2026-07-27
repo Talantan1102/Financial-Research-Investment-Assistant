@@ -22,7 +22,9 @@ class StartApplicationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     idempotency_key: str = Field(
-        min_length=1, max_length=128, description="本次发起申请的客户端幂等键；同一用户重复提交会返回同一申请。"
+        min_length=1,
+        max_length=128,
+        description="本次发起申请的客户端幂等键；同一用户重复提交会返回同一申请。",
     )
 
 
@@ -32,11 +34,12 @@ class SubmitProfileRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     declared_average_assets_20d: Decimal = Field(
-        ge=0, max_digits=18, decimal_places=2, description="用户申报的最近二十个交易日日均证券资产，单位为人民币元。"
+        ge=0,
+        max_digits=18,
+        decimal_places=2,
+        description="用户申报的最近二十个交易日日均证券资产，单位为人民币元。",
     )
-    securities_experience_months: int = Field(
-        ge=0, description="用户申报的证券交易经验月数。"
-    )
+    securities_experience_months: int = Field(ge=0, description="用户申报的证券交易经验月数。")
     risk_level: str = Field(
         min_length=1, max_length=16, description="用户当前风险等级，例如 C4；用于留存申请资料快照。"
     )
@@ -48,10 +51,14 @@ class ConfirmApplicationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     disclosure_version: str = Field(
-        min_length=1, max_length=64, description="用户本次确认签署的风险揭示书版本，必须是当前市场要求的版本。"
+        min_length=1,
+        max_length=64,
+        description="用户本次确认签署的风险揭示书版本，必须是当前市场要求的版本。",
     )
     idempotency_key: str = Field(
-        min_length=1, max_length=128, description="本次确认开通的客户端幂等键；重复提交不会重复开通权限。"
+        min_length=1,
+        max_length=128,
+        description="本次确认开通的客户端幂等键；重复提交不会重复开通权限。",
     )
 
 
@@ -63,9 +70,13 @@ class ApplicationRead(BaseModel):
     application_id: UUID = Field(validation_alias="id", description="权限申请的唯一编号。")
     market: Market = Field(description="申请开通的交易市场。")
     status: ApplicationStatus = Field(description="申请当前状态，例如待补资料、待确认或已完成。")
-    assessment_id: UUID | None = Field(description="本次申请最近一次适当性评估的唯一编号；尚未提交资料时为空。")
+    assessment_id: UUID | None = Field(
+        description="本次申请最近一次适当性评估的唯一编号；尚未提交资料时为空。"
+    )
     started_at: datetime = Field(description="用户发起本次申请的时间。")
-    completed_at: datetime | None = Field(description="申请完成、取消、拒绝或过期的时间；未结束时为空。")
+    completed_at: datetime | None = Field(
+        description="申请完成、取消、拒绝或过期的时间；未结束时为空。"
+    )
 
 
 class AssessmentRead(BaseModel):
@@ -76,7 +87,9 @@ class AssessmentRead(BaseModel):
     assessment_id: UUID = Field(validation_alias="id", description="适当性评估的唯一编号。")
     market: Market = Field(description="本次评估对应的交易市场。")
     decision: AssessmentDecision = Field(description="评估结论：通过或不通过。")
-    failed_conditions: list[dict[str, object]] | None = Field(description="未满足的准入条件；通过时为空。")
+    failed_conditions: list[dict[str, object]] | None = Field(
+        description="未满足的准入条件；通过时为空。"
+    )
     rule_version: str = Field(description="本次评估采用的市场准入规则版本。")
 
 

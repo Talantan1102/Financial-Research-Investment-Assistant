@@ -32,9 +32,7 @@ class _Backend:
             }
         ]
 
-    def order_eligibility(
-        self, *, user_id: object, ts_code: str, side: str
-    ) -> dict[str, object]:
+    def order_eligibility(self, *, user_id: object, ts_code: str, side: str) -> dict[str, object]:
         self.calls.append(("order_eligibility", user_id))
         assert ts_code == "688981.SH"
         assert side == "buy"

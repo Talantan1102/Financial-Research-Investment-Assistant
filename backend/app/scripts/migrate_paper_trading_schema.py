@@ -318,17 +318,21 @@ def _suitability_enum_drift(connection: Connection) -> list[str]:
 
 
 def _suitability_trigger_drift(connection: Connection) -> list[str]:
-    rows = connection.execute(
-        text(
-            "SELECT c.relname "
-            "FROM pg_trigger t "
-            "JOIN pg_class c ON c.oid = t.tgrelid "
-            "JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE n.nspname = current_schema() "
-            "AND c.relname = ANY(:tables) AND NOT t.tgisinternal"
-        ),
-        {"tables": [table.name for table in _SUITABILITY_TABLES]},
-    ).scalars().all()
+    rows = (
+        connection.execute(
+            text(
+                "SELECT c.relname "
+                "FROM pg_trigger t "
+                "JOIN pg_class c ON c.oid = t.tgrelid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = current_schema() "
+                "AND c.relname = ANY(:tables) AND NOT t.tgisinternal"
+            ),
+            {"tables": [table.name for table in _SUITABILITY_TABLES]},
+        )
+        .scalars()
+        .all()
+    )
     return [f"{table_name} triggers differ" for table_name in sorted(set(rows))]
 
 

@@ -56,28 +56,58 @@ class AssessmentDecision(enum.StrEnum):
     REJECTED = "rejected"
 
 
-_MARKET = Enum(Market, name="market_access_market", values_callable=lambda members: [m.value for m in members], validate_strings=True)
-_ENTITLEMENT_STATUS = Enum(EntitlementStatus, name="market_entitlement_status", values_callable=lambda members: [m.value for m in members], validate_strings=True)
-_APPLICATION_STATUS = Enum(ApplicationStatus, name="entitlement_application_status", values_callable=lambda members: [m.value for m in members], validate_strings=True)
-_ASSESSMENT_DECISION = Enum(AssessmentDecision, name="suitability_assessment_decision", values_callable=lambda members: [m.value for m in members], validate_strings=True)
+_MARKET = Enum(
+    Market,
+    name="market_access_market",
+    values_callable=lambda members: [m.value for m in members],
+    validate_strings=True,
+)
+_ENTITLEMENT_STATUS = Enum(
+    EntitlementStatus,
+    name="market_entitlement_status",
+    values_callable=lambda members: [m.value for m in members],
+    validate_strings=True,
+)
+_APPLICATION_STATUS = Enum(
+    ApplicationStatus,
+    name="entitlement_application_status",
+    values_callable=lambda members: [m.value for m in members],
+    validate_strings=True,
+)
+_ASSESSMENT_DECISION = Enum(
+    AssessmentDecision,
+    name="suitability_assessment_decision",
+    values_callable=lambda members: [m.value for m in members],
+    validate_strings=True,
+)
 
 
 class InvestorSuitabilityProfile(Base):
     __tablename__ = "investor_suitability_profiles"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     investor_type = Column(String(32), nullable=False)
     risk_level = Column(String(16), nullable=False)
     securities_experience_months = Column(Integer, nullable=False)
     declared_average_assets_20d = Column(Numeric(18, 2), nullable=False)
     assessed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
     __table_args__ = (
-        CheckConstraint("securities_experience_months >= 0", name="ck_investor_suitability_profiles_experience_nonnegative"),
-        CheckConstraint("declared_average_assets_20d >= 0 AND declared_average_assets_20d::text NOT IN ('NaN', 'Infinity', '-Infinity')", name="ck_investor_suitability_profiles_assets_valid"),
+        CheckConstraint(
+            "securities_experience_months >= 0",
+            name="ck_investor_suitability_profiles_experience_nonnegative",
+        ),
+        CheckConstraint(
+            "declared_average_assets_20d >= 0 AND declared_average_assets_20d::text NOT IN ('NaN', 'Infinity', '-Infinity')",
+            name="ck_investor_suitability_profiles_assets_valid",
+        ),
     )
 
 
@@ -95,9 +125,17 @@ class MarketAccessRule(Base):
 
     __table_args__ = (
         UniqueConstraint("market", "rule_version", name="uq_market_access_rules_market_version"),
-        UniqueConstraint("market", "effective_from", name="uq_market_access_rules_market_effective_from"),
-        CheckConstraint("minimum_average_assets_20d IS NULL OR (minimum_average_assets_20d >= 0 AND minimum_average_assets_20d::text NOT IN ('NaN', 'Infinity', '-Infinity'))", name="ck_market_access_rules_assets_valid"),
-        CheckConstraint("minimum_experience_months IS NULL OR minimum_experience_months >= 0", name="ck_market_access_rules_experience_nonnegative"),
+        UniqueConstraint(
+            "market", "effective_from", name="uq_market_access_rules_market_effective_from"
+        ),
+        CheckConstraint(
+            "minimum_average_assets_20d IS NULL OR (minimum_average_assets_20d >= 0 AND minimum_average_assets_20d::text NOT IN ('NaN', 'Infinity', '-Infinity'))",
+            name="ck_market_access_rules_assets_valid",
+        ),
+        CheckConstraint(
+            "minimum_experience_months IS NULL OR minimum_experience_months >= 0",
+            name="ck_market_access_rules_experience_nonnegative",
+        ),
     )
 
 
@@ -115,15 +153,28 @@ class SuitabilityAssessment(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        ForeignKeyConstraint(["account_id", "account_generation"], ["paper_accounts.id", "paper_accounts.generation"], name="fk_suitability_assessments_account_generation", ondelete="RESTRICT"),
+        ForeignKeyConstraint(
+            ["account_id", "account_generation"],
+            ["paper_accounts.id", "paper_accounts.generation"],
+            name="fk_suitability_assessments_account_generation",
+            ondelete="RESTRICT",
+        ),
         ForeignKeyConstraint(
             ["market", "rule_version"],
             ["market_access_rules.market", "market_access_rules.rule_version"],
             name="fk_suitability_assessments_market_access_rule",
             ondelete="RESTRICT",
         ),
-        UniqueConstraint("id", "account_id", "account_generation", "market", name="uq_suitability_assessments_fact_owner"),
-        CheckConstraint("account_generation > 0", name="ck_suitability_assessments_generation_positive"),
+        UniqueConstraint(
+            "id",
+            "account_id",
+            "account_generation",
+            "market",
+            name="uq_suitability_assessments_fact_owner",
+        ),
+        CheckConstraint(
+            "account_generation > 0", name="ck_suitability_assessments_generation_positive"
+        ),
         CheckConstraint(
             "jsonb_typeof(submitted_snapshot) = 'object'",
             name="ck_suitability_assessments_snapshot_object",
@@ -151,7 +202,12 @@ class RiskDisclosureAcceptance(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
-        ForeignKeyConstraint(["account_id", "account_generation"], ["paper_accounts.id", "paper_accounts.generation"], name="fk_risk_disclosure_acceptances_account_generation", ondelete="RESTRICT"),
+        ForeignKeyConstraint(
+            ["account_id", "account_generation"],
+            ["paper_accounts.id", "paper_accounts.generation"],
+            name="fk_risk_disclosure_acceptances_account_generation",
+            ondelete="RESTRICT",
+        ),
         ForeignKeyConstraint(
             ["application_id", "account_id", "account_generation", "market"],
             [
@@ -168,8 +224,12 @@ class RiskDisclosureAcceptance(Base):
             "disclosure_version",
             name="uq_risk_disclosure_acceptances_application_version",
         ),
-        CheckConstraint("account_generation > 0", name="ck_risk_disclosure_acceptances_generation_positive"),
-        CheckConstraint("btrim(source) <> ''", name="ck_risk_disclosure_acceptances_source_nonblank"),
+        CheckConstraint(
+            "account_generation > 0", name="ck_risk_disclosure_acceptances_generation_positive"
+        ),
+        CheckConstraint(
+            "btrim(source) <> ''", name="ck_risk_disclosure_acceptances_source_nonblank"
+        ),
     )
 
 
@@ -191,19 +251,39 @@ class MarketEntitlement(Base):
     restricted_at = Column(DateTime(timezone=True), nullable=True)
     reason_code = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
     __table_args__ = (
-        ForeignKeyConstraint(["account_id", "account_generation"], ["paper_accounts.id", "paper_accounts.generation"], name="fk_market_entitlements_account_generation", ondelete="RESTRICT"),
+        ForeignKeyConstraint(
+            ["account_id", "account_generation"],
+            ["paper_accounts.id", "paper_accounts.generation"],
+            name="fk_market_entitlements_account_generation",
+            ondelete="RESTRICT",
+        ),
         ForeignKeyConstraint(
             ["market", "rule_version"],
             ["market_access_rules.market", "market_access_rules.rule_version"],
             name="fk_market_entitlements_market_access_rule",
             ondelete="RESTRICT",
         ),
-        UniqueConstraint("account_id", "account_generation", "market", name="uq_market_entitlements_account_generation_market"),
-        UniqueConstraint("id", "account_id", "account_generation", "market", name="uq_market_entitlements_fact_owner"),
-        CheckConstraint("account_generation > 0", name="ck_market_entitlements_generation_positive"),
+        UniqueConstraint(
+            "account_id",
+            "account_generation",
+            "market",
+            name="uq_market_entitlements_account_generation_market",
+        ),
+        UniqueConstraint(
+            "id",
+            "account_id",
+            "account_generation",
+            "market",
+            name="uq_market_entitlements_fact_owner",
+        ),
+        CheckConstraint(
+            "account_generation > 0", name="ck_market_entitlements_generation_positive"
+        ),
         CheckConstraint(
             "("
             "(status = 'enabled' AND (can_buy OR can_sell OR can_subscribe) "
@@ -226,7 +306,16 @@ class MarketEntitlement(Base):
 
     @classmethod
     def new(cls, *, account: PaperAccount, market: Market) -> MarketEntitlement:
-        return cls(account_id=account.id, account_generation=account.generation, market=market, status=EntitlementStatus.NOT_APPLIED, can_buy=False, can_sell=False, can_subscribe=False, rule_version=None)
+        return cls(
+            account_id=account.id,
+            account_generation=account.generation,
+            market=market,
+            status=EntitlementStatus.NOT_APPLIED,
+            can_buy=False,
+            can_sell=False,
+            can_subscribe=False,
+            rule_version=None,
+        )
 
 
 class EntitlementApplication(Base):
@@ -246,7 +335,9 @@ class EntitlementApplication(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     cancel_reason = Column(String(256), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -257,31 +348,54 @@ class EntitlementApplication(Base):
         ),
         ForeignKeyConstraint(
             ["assessment_id", "account_id", "account_generation", "market"],
-            ["suitability_assessments.id", "suitability_assessments.account_id", "suitability_assessments.account_generation", "suitability_assessments.market"],
+            [
+                "suitability_assessments.id",
+                "suitability_assessments.account_id",
+                "suitability_assessments.account_generation",
+                "suitability_assessments.market",
+            ],
             name="fk_entitlement_applications_assessment_owner",
             ondelete="RESTRICT",
         ),
         UniqueConstraint(
-            "id", "account_id", "account_generation", "market",
+            "id",
+            "account_id",
+            "account_generation",
+            "market",
             name="uq_entitlement_applications_fact_owner",
         ),
         UniqueConstraint(
-            "user_id", "start_idempotency_key",
+            "user_id",
+            "start_idempotency_key",
             name="uq_entitlement_applications_user_start_idempotency_key",
         ),
         UniqueConstraint(
-            "user_id", "confirm_idempotency_key",
+            "user_id",
+            "confirm_idempotency_key",
             name="uq_entitlement_applications_user_confirm_idempotency_key",
         ),
         ForeignKeyConstraint(
             ["enabled_entitlement_id", "account_id", "account_generation", "market"],
-            ["market_entitlements.id", "market_entitlements.account_id", "market_entitlements.account_generation", "market_entitlements.market"],
+            [
+                "market_entitlements.id",
+                "market_entitlements.account_id",
+                "market_entitlements.account_generation",
+                "market_entitlements.market",
+            ],
             name="fk_entitlement_applications_enabled_entitlement_owner",
             ondelete="RESTRICT",
         ),
-        CheckConstraint("account_generation > 0", name="ck_entitlement_applications_generation_positive"),
-        CheckConstraint("btrim(start_idempotency_key) <> ''", name="ck_entitlement_applications_start_idempotency_key_nonblank"),
-        CheckConstraint("confirm_idempotency_key IS NULL OR btrim(confirm_idempotency_key) <> ''", name="ck_entitlement_applications_confirm_idempotency_key_nonblank"),
+        CheckConstraint(
+            "account_generation > 0", name="ck_entitlement_applications_generation_positive"
+        ),
+        CheckConstraint(
+            "btrim(start_idempotency_key) <> ''",
+            name="ck_entitlement_applications_start_idempotency_key_nonblank",
+        ),
+        CheckConstraint(
+            "confirm_idempotency_key IS NULL OR btrim(confirm_idempotency_key) <> ''",
+            name="ck_entitlement_applications_confirm_idempotency_key_nonblank",
+        ),
         CheckConstraint(
             "("
             "(status = 'completed' AND completed_at IS NOT NULL AND enabled_entitlement_id IS NOT NULL) "

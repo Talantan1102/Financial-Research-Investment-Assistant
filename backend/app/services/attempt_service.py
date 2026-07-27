@@ -433,9 +433,7 @@ class AttemptService:
             session.add(message)
             await session.flush()
             cast(Any, run).final_message_id = message.id
-            cast(Any, run).outcome_code = (
-                None if result.outcome is None else result.outcome.code
-            )
+            cast(Any, run).outcome_code = None if result.outcome is None else result.outcome.code
             cast(Any, run).outcome_payload = outcome_payload
             completed_event_payload: dict[str, Any] = {"final_message_id": str(message.id)}
             if outcome_payload is not None:

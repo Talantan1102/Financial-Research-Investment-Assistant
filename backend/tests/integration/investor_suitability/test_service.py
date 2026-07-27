@@ -273,8 +273,14 @@ def test_list_entitlements_is_user_scoped(
         idempotency_key="confirm-1",
     )
 
-    assert [item.id for item in service.list_entitlements(user_id=account.user_id, account_id=account.id)] == [enabled.id]
-    assert db_session.scalar(select(MarketEntitlement).where(MarketEntitlement.id == enabled.id)) is not None
+    assert [
+        item.id
+        for item in service.list_entitlements(user_id=account.user_id, account_id=account.id)
+    ] == [enabled.id]
+    assert (
+        db_session.scalar(select(MarketEntitlement).where(MarketEntitlement.id == enabled.id))
+        is not None
+    )
 
 
 def test_concurrent_confirmation_creates_at_most_one_enabled_entitlement(
@@ -342,7 +348,9 @@ def test_concurrent_confirmation_creates_at_most_one_enabled_entitlement(
                 return error.code
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        outcomes = list(pool.map(lambda item: confirm(*item), zip(application_ids, ("confirm-1", "confirm-2"))))
+        outcomes = list(
+            pool.map(lambda item: confirm(*item), zip(application_ids, ("confirm-1", "confirm-2")))
+        )
 
     with factory() as verify:
         enabled = verify.scalars(

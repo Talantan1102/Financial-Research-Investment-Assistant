@@ -78,9 +78,15 @@ async def test_action_required_run_is_terminal_without_pause_and_cannot_resume(
         )
     )
     run_id = created.run.id
-    await service.transition_run(tenant.id, run_id, actor.id, RunStatus.ASSIGNED, event_type="run.assigned")
-    await service.transition_run(tenant.id, run_id, actor.id, RunStatus.RUNNING, event_type="run.running")
-    await service.transition_run(tenant.id, run_id, actor.id, RunStatus.COMPLETED, event_type="run.completed")
+    await service.transition_run(
+        tenant.id, run_id, actor.id, RunStatus.ASSIGNED, event_type="run.assigned"
+    )
+    await service.transition_run(
+        tenant.id, run_id, actor.id, RunStatus.RUNNING, event_type="run.running"
+    )
+    await service.transition_run(
+        tenant.id, run_id, actor.id, RunStatus.COMPLETED, event_type="run.completed"
+    )
     async with async_session_factory() as session, session.begin():
         run = await session.get(Run, run_id, with_for_update=True)
         assert run is not None
@@ -111,6 +117,7 @@ async def test_action_required_run_is_terminal_without_pause_and_cannot_resume(
     app.state.async_session_factory = async_session_factory
     app.include_router(router)
     app.dependency_overrides[get_current_user_required] = lambda: actor
+
     @asynccontextmanager
     async def client() -> AsyncIterator[httpx.AsyncClient]:
         async with httpx.AsyncClient(

@@ -460,9 +460,7 @@ def _upgrade_run_outcome_contract(connection: Connection, changes: list[str]) ->
         for column in table.columns
         if column.name in {"outcome_code", "outcome_payload"}
     }
-    actual_columns = {
-        column["name"]: column for column in inspect(connection).get_columns("runs")
-    }
+    actual_columns = {column["name"]: column for column in inspect(connection).get_columns("runs")}
 
     for name, expected in expected_columns.items():
         actual = actual_columns.get(name)

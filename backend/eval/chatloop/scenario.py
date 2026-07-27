@@ -226,7 +226,10 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
         _fail(f"{case_id}: outcome.run 必须明确 pause_type/resumed/status")
     terminal_outcome = run.get("outcome")
     if terminal_outcome is not None:
-        if not isinstance(terminal_outcome, dict) or terminal_outcome.get("code") != "action_required":
+        if (
+            not isinstance(terminal_outcome, dict)
+            or terminal_outcome.get("code") != "action_required"
+        ):
             _fail(f"{case_id}: outcome.run.outcome 必须是 action_required")
         payload = terminal_outcome.get("payload")
         if not isinstance(payload, dict) or not isinstance(payload.get("action_url"), str):
