@@ -148,8 +148,7 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
     if not isinstance(expected_tools, list) or not expected_tools:
         _fail(f"{case_id}: outcome.expected_tools 须为非空数组")
     if not isinstance(tool_args, dict) or any(
-        tool not in tool_args or not isinstance(tool_args[tool], dict)
-        for tool in expected_tools
+        tool not in tool_args or not isinstance(tool_args[tool], dict) for tool in expected_tools
     ):
         _fail(f"{case_id}: outcome.tool_args_contains 必须覆盖 expected_tools")
     if not isinstance(risk_levels, dict) or any(tool not in risk_levels for tool in expected_tools):
@@ -195,10 +194,7 @@ def _validate_outcome(case_id: str, outcome: Any, interaction: Any) -> None:
         or type(call_counts[tool].get("min")) is not int
         or type(call_counts[tool].get("max")) is not int
         or not 1 <= call_counts[tool]["min"] <= call_counts[tool]["max"]
-        or (
-            tool in write_tools
-            and not call_counts[tool]["min"] == call_counts[tool]["max"] == 1
-        )
+        or (tool in write_tools and not call_counts[tool]["min"] == call_counts[tool]["max"] == 1)
         for tool in expected_tools
     ):
         _fail(f"{case_id}: outcome.call_counts 必须覆盖工具并限制写工具为精确一次")

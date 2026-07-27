@@ -518,9 +518,7 @@ class RunService:
             approval = ApprovalEditResponse.model_validate(response)
         except ValidationError as exc:
             raise ResumeNotAllowed("invalid edited arguments") from exc
-        normalized = approval.model_dump(
-            mode="json", exclude_none=True, exclude_defaults=True
-        )
+        normalized = approval.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
         if approval.edited_arguments:
             normalized["edited_arguments"] = self._validate_approval_edits(
                 pause, approval.edited_arguments
@@ -583,9 +581,7 @@ class RunService:
     ) -> dict[str, dict[str, Any]]:
         request = pause.request_payload
         tool_calls = request.get("tool_calls") if isinstance(request, dict) else None
-        editable = (
-            request.get("editable_tool_call_ids") if isinstance(request, dict) else None
-        )
+        editable = request.get("editable_tool_call_ids") if isinstance(request, dict) else None
         if not isinstance(tool_calls, list) or not isinstance(editable, list):
             raise ResumeNotAllowed("invalid edited arguments")
         by_id: dict[str, str] = {}
@@ -602,9 +598,7 @@ class RunService:
         try:
             validate_edit_ids(
                 requested_ids=set(by_id) & set(expected_ids),
-                editable_ids={
-                    call_id for call_id in editable if isinstance(call_id, str)
-                },
+                editable_ids={call_id for call_id in editable if isinstance(call_id, str)},
                 edited_arguments=edited_arguments,
             )
         except ValueError as exc:

@@ -287,10 +287,7 @@ def test_migration_repairs_watchlist_append_only_guard_and_blocks_mutation(
         legacy_application_engine.begin() as connection,
     ):
         connection.execute(
-            text(
-                "UPDATE watchlist_audits "
-                "SET source_session_id = 'tampered' WHERE id = :id"
-            ),
+            text("UPDATE watchlist_audits SET source_session_id = 'tampered' WHERE id = :id"),
             {"id": audit_id},
         )
     assert getattr(update_error.value.orig, "pgcode", None) == "55000"
@@ -314,8 +311,7 @@ def test_migration_obeys_advisory_lock_timeout_without_partial_ddl(
     try:
         blocker.execute(
             text(
-                "SELECT pg_advisory_xact_lock("
-                "hashtextextended('paper_trading_schema_upgrade', 0))"
+                "SELECT pg_advisory_xact_lock(hashtextextended('paper_trading_schema_upgrade', 0))"
             )
         )
         with pytest.raises(DBAPIError, match="lock timeout"):
@@ -338,29 +334,29 @@ def test_failed_canonical_verification_rolls_back_all_upgrade_ddl(
 ) -> None:
     _, position_id, trade_id = _seed_legacy_manual_rows(legacy_application_engine)
     with legacy_application_engine.begin() as connection:
-        connection.execute(
-            text("ALTER TABLE positions ALTER COLUMN asset_class TYPE varchar(64)")
-        )
+        connection.execute(text("ALTER TABLE positions ALTER COLUMN asset_class TYPE varchar(64)"))
 
     with pytest.raises(RuntimeError, match=r"positions\.asset_class type differs"):
         migrate_paper_trading_schema(legacy_application_engine)
 
     inspector = inspect(legacy_application_engine)
-    assert set(_PAPER_TABLES + _WATCHLIST_TABLES).isdisjoint(
-        inspector.get_table_names()
-    )
+    assert set(_PAPER_TABLES + _WATCHLIST_TABLES).isdisjoint(inspector.get_table_names())
     assert "paper_account_id" not in {
         column["name"] for column in inspector.get_columns("positions")
     }
-    assert "paper_account_id" not in {
-        column["name"] for column in inspector.get_columns("trades")
-    }
+    assert "paper_account_id" not in {column["name"] for column in inspector.get_columns("trades")}
     with legacy_application_engine.connect() as connection:
-        assert connection.scalar(
-            text("SELECT count(*) FROM positions WHERE id = :id"),
-            {"id": position_id},
-        ) == 1
-        assert connection.scalar(
-            text("SELECT count(*) FROM trades WHERE id = :id"),
-            {"id": trade_id},
-        ) == 1
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM positions WHERE id = :id"),
+                {"id": position_id},
+            )
+            == 1
+        )
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM trades WHERE id = :id"),
+                {"id": trade_id},
+            )
+            == 1
+        )

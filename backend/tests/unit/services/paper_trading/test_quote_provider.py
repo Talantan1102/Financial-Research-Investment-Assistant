@@ -135,9 +135,7 @@ async def test_rejects_invalid_field_values(field: str, value: str) -> None:
         ("B1_P", "1e999999"),
     ],
 )
-def test_rejects_extreme_finite_prices_with_stable_domain_error(
-    field: str, value: str
-) -> None:
+def test_rejects_extreme_finite_prices_with_stable_domain_error(field: str, value: str) -> None:
     provider = TushareRealtimeQuoteProvider(
         fetch=lambda _: pd.DataFrame([_quote_row(**{field: value})])
     )

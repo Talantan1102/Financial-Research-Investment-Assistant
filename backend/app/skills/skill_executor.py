@@ -79,9 +79,11 @@ def _create_windows_job(
             win32job.JobObjectExtendedLimitInformation,
         )
         basic = info["BasicLimitInformation"]
-        basic["LimitFlags"] = int(basic["LimitFlags"]) | int(
-            win32job.JOB_OBJECT_LIMIT_PROCESS_MEMORY
-        ) | int(win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+        basic["LimitFlags"] = (
+            int(basic["LimitFlags"])
+            | int(win32job.JOB_OBJECT_LIMIT_PROCESS_MEMORY)
+            | int(win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+        )
         memory_limit_bytes = memory_mb * 1024 * 1024
         info["ProcessMemoryLimit"] = memory_limit_bytes
         win32job.SetInformationJobObject(
@@ -461,9 +463,7 @@ class SkillExecutor:
             stdout_text = stdout_b.decode("utf-8", errors="replace") if stdout_b else ""
 
             if proc.returncode != 0:
-                memory_limited = (
-                    windows_job is not None and windows_job.memory_limit_hit(stderr_b)
-                )
+                memory_limited = windows_job is not None and windows_job.memory_limit_hit(stderr_b)
                 error = (
                     SkillExecutionError(
                         kind="memory_limit",

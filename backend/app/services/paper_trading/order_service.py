@@ -549,9 +549,7 @@ class PaperOrderService:
         source_run_id: uuid.UUID,
         source_tool_call_id: str,
     ) -> PaperOrder:
-        payload: dict[str, object] = {
-            "order_id": str(_require_uuid(order_id, field="order_id"))
-        }
+        payload: dict[str, object] = {"order_id": str(_require_uuid(order_id, field="order_id"))}
         audit = self._approved_action_replay(
             user_id=user_id,
             action="cancel",
@@ -1061,9 +1059,7 @@ class PaperOrderService:
         source_run_id: uuid.UUID,
         source_tool_call_id: str,
     ) -> None:
-        requested_payload = draft.model_copy(update={"name": order.name}).model_dump(
-            mode="json"
-        )
+        requested_payload = draft.model_copy(update={"name": order.name}).model_dump(mode="json")
         if (
             order.confirmed_payload != requested_payload
             or order.original_proposal != original_proposal

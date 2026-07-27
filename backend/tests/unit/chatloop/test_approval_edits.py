@@ -37,9 +37,7 @@ def test_closed_approval_response_rejects_edits_on_rejection() -> None:
 def test_pause_editable_ids_must_be_requested_tool_call_subset() -> None:
     accepted = PauseRequestV1.model_validate(
         {
-            "tool_calls": [
-                {"id": "trade-1", "name": "place_paper_order", "arguments": "{}"}
-            ],
+            "tool_calls": [{"id": "trade-1", "name": "place_paper_order", "arguments": "{}"}],
             "editable_tool_call_ids": ["trade-1"],
         }
     )
@@ -48,9 +46,7 @@ def test_pause_editable_ids_must_be_requested_tool_call_subset() -> None:
     with pytest.raises(ValidationError, match="editable"):
         PauseRequestV1.model_validate(
             {
-                "tool_calls": [
-                    {"id": "trade-1", "name": "place_paper_order", "arguments": "{}"}
-                ],
+                "tool_calls": [{"id": "trade-1", "name": "place_paper_order", "arguments": "{}"}],
                 "editable_tool_call_ids": ["other"],
             }
         )
@@ -101,9 +97,7 @@ def test_edit_for_unknown_or_noneditable_call_id_is_rejected() -> None:
 
 
 def test_approved_inputs_are_attempt_local_and_excluded_from_state_snapshot() -> None:
-    calls = (
-        StepToolCall(id="trade-1", name="place_paper_order", arguments='{"quantity":100}'),
-    )
+    calls = (StepToolCall(id="trade-1", name="place_paper_order", arguments='{"quantity":100}'),)
     state = ChatLoopState(
         user_id="u",
         session_id="s",
@@ -140,9 +134,7 @@ def test_schema_validator_returns_json_safe_canonical_arguments() -> None:
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
 def test_schema_validator_and_edit_application_reject_non_finite_json(bad: float) -> None:
     validator = SchemaEditableApprovalValidator({"place_paper_order": _MetricArgs})
-    calls = (
-        StepToolCall(id="trade-1", name="place_paper_order", arguments="{}"),
-    )
+    calls = (StepToolCall(id="trade-1", name="place_paper_order", arguments="{}"),)
 
     with pytest.raises(ValueError):
         validator.validate(
@@ -204,9 +196,7 @@ class _ContextTool(InProcessTool):
 
 @pytest.mark.asyncio
 async def test_inprocess_adapter_receives_attempt_local_approved_input() -> None:
-    calls = (
-        StepToolCall(id="trade-1", name="place_paper_order", arguments='{"quantity":100}'),
-    )
+    calls = (StepToolCall(id="trade-1", name="place_paper_order", arguments='{"quantity":100}'),)
     state = ChatLoopState(
         user_id="u",
         session_id="s",

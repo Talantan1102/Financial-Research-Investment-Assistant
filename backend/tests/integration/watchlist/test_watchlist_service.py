@@ -156,14 +156,20 @@ def test_service_never_reads_or_changes_another_users_item(
     )
 
     assert service.list(user_id=other.id) == []
-    assert service.update(
-        user_id=other.id,
-        ts_code="600519.SH",
-        changes={"note": "other"},
-        source=ChangeSource(),
-    ) is None
-    assert service.remove(
-        user_id=other.id,
-        ts_code="600519.SH",
-        source=ChangeSource(),
-    ).removed is False
+    assert (
+        service.update(
+            user_id=other.id,
+            ts_code="600519.SH",
+            changes={"note": "other"},
+            source=ChangeSource(),
+        )
+        is None
+    )
+    assert (
+        service.remove(
+            user_id=other.id,
+            ts_code="600519.SH",
+            source=ChangeSource(),
+        ).removed
+        is False
+    )

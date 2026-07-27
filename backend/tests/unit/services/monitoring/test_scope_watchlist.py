@@ -45,9 +45,7 @@ def _position(
             total_cost=Decimal(10 * quantity),
             realized_pnl=Decimal("0"),
             paper_account_id=None if paper_account is None else paper_account.id,
-            paper_account_generation=(
-                None if paper_account is None else paper_account.generation
-            ),
+            paper_account_generation=(None if paper_account is None else paper_account.generation),
         )
     )
     session.flush()
@@ -173,8 +171,7 @@ def test_scope_tracks_only_current_paper_account_generation_after_reset(
     db_session.flush()
 
     before_reset = {
-        (subject.user_id, subject.ts_code): subject
-        for subject in load_active_subjects(db_session)
+        (subject.user_id, subject.ts_code): subject for subject in load_active_subjects(db_session)
     }
     assert before_reset[(str(user.id), "600000.SH")].sources == (
         "position",
@@ -192,8 +189,7 @@ def test_scope_tracks_only_current_paper_account_generation_after_reset(
     )
 
     after_reset = {
-        (subject.user_id, subject.ts_code): subject
-        for subject in load_active_subjects(db_session)
+        (subject.user_id, subject.ts_code): subject for subject in load_active_subjects(db_session)
     }
     assert after_reset[(str(user.id), "600000.SH")].sources == ("watchlist",)
     assert (str(user.id), "000001.SZ") not in after_reset
@@ -210,17 +206,19 @@ def test_scope_tracks_only_current_paper_account_generation_after_reset(
     )
 
     after_new_position = {
-        (subject.user_id, subject.ts_code): subject
-        for subject in load_active_subjects(db_session)
+        (subject.user_id, subject.ts_code): subject for subject in load_active_subjects(db_session)
     }
     assert after_new_position[(str(user.id), "600000.SH")].sources == (
         "position",
         "watchlist",
     )
-    assert len(
-        [
-            subject
-            for subject in after_new_position.values()
-            if subject.user_id == str(user.id) and subject.ts_code == "600000.SH"
-        ]
-    ) == 1
+    assert (
+        len(
+            [
+                subject
+                for subject in after_new_position.values()
+                if subject.user_id == str(user.id) and subject.ts_code == "600000.SH"
+            ]
+        )
+        == 1
+    )

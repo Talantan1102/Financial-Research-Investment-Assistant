@@ -136,8 +136,7 @@ def _holding_lot(
         remaining_quantity=quantity,
         frozen_quantity=frozen_quantity,
         unit_cost=Decimal("1528.1250"),
-        available_on=available_on
-        or datetime.now(ZoneInfo("Asia/Shanghai")).date(),
+        available_on=available_on or datetime.now(ZoneInfo("Asia/Shanghai")).date(),
     )
     db_session.add(lot)
     db_session.flush()
@@ -185,9 +184,7 @@ async def test_holdings_returns_only_current_paper_account_generation(
     db_session: Session,
     users: dict[str, User],
 ) -> None:
-    alice_account = PaperAccountService(db_session).get_or_create(
-        user_id=users["alice"].id
-    )
+    alice_account = PaperAccountService(db_session).get_or_create(user_id=users["alice"].id)
     bob_account = PaperAccountService(db_session).get_or_create(user_id=users["bob"].id)
     _holding_lot(
         db_session,
@@ -197,8 +194,7 @@ async def test_holdings_returns_only_current_paper_account_generation(
         name="贵州茅台",
         quantity=200,
         frozen_quantity=20,
-        available_on=datetime.now(ZoneInfo("Asia/Shanghai")).date()
-        + timedelta(days=1),
+        available_on=datetime.now(ZoneInfo("Asia/Shanghai")).date() + timedelta(days=1),
     )
     _holding_lot(
         db_session,
@@ -231,9 +227,7 @@ async def test_holdings_can_read_an_explicit_user_owned_generation(
     db_session: Session,
     users: dict[str, User],
 ) -> None:
-    alice_account = PaperAccountService(db_session).get_or_create(
-        user_id=users["alice"].id
-    )
+    alice_account = PaperAccountService(db_session).get_or_create(user_id=users["alice"].id)
     bob_account = PaperAccountService(db_session).get_or_create(user_id=users["bob"].id)
     old_generation = alice_account.generation
     _holding_lot(

@@ -83,9 +83,7 @@ async def test_windows_job_setup_failure_never_executes_untrusted_source(
     marker = tmp_path / "must-not-exist.txt"
     script = tmp_path / "marker.py"
     script.write_text(
-        "from pathlib import Path\n"
-        f"Path({str(marker)!r}).write_text('executed')\n"
-        "print('{}')\n",
+        f"from pathlib import Path\nPath({str(marker)!r}).write_text('executed')\nprint('{{}}')\n",
         encoding="utf-8",
     )
 

@@ -168,9 +168,7 @@ def diff_arguments(
 def paper_client_request_id(run_id: str, tool_call_id: str) -> str:
     if not 1 <= len(tool_call_id) <= 255:
         raise ValueError("tool_call_id must contain 1 to 255 characters")
-    digest = hashlib.sha256(
-        f"{run_id}\x00{tool_call_id}".encode()
-    ).hexdigest()
+    digest = hashlib.sha256(f"{run_id}\x00{tool_call_id}".encode()).hexdigest()
     return f"paper:{digest}"
 
 
@@ -273,9 +271,7 @@ class PlacePaperOrderTool(_PaperTool):
         order = await asyncio.to_thread(
             self._backend.place,
             user_id=user_id,
-            client_request_id=paper_client_request_id(
-                state.request_id, context.task_id
-            ),
+            client_request_id=paper_client_request_id(state.request_id, context.task_id),
             confirmed=parsed,
             original_proposal=original,
             user_edits=diff_arguments(original, effective),
@@ -301,9 +297,7 @@ class CancelPaperOrderTool(_PaperTool):
             self._backend.cancel,
             user_id=user_id,
             order_id=parsed.order_id,
-            client_request_id=paper_client_request_id(
-                state.request_id, context.task_id
-            ),
+            client_request_id=paper_client_request_id(state.request_id, context.task_id),
             original_proposal=original,
             user_edits=diff_arguments(original, effective),
             source_run_id=run_id,
@@ -328,9 +322,7 @@ class ResetPaperAccountTool(_PaperTool):
             self._backend.reset,
             user_id=user_id,
             initial_cash=parsed.initial_cash,
-            client_request_id=paper_client_request_id(
-                state.request_id, context.task_id
-            ),
+            client_request_id=paper_client_request_id(state.request_id, context.task_id),
             original_proposal=original,
             user_edits=diff_arguments(original, effective),
             source_run_id=run_id,

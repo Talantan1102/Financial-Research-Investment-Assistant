@@ -192,17 +192,21 @@ def _normalize_sql(value: str) -> str:
 
 def _watchlist_guard_drift(connection: Connection) -> list[str]:
     schema = str(connection.scalar(text("SELECT current_schema()")))
-    functions = connection.execute(
-        text(
-            "SELECT p.oid, p.prorettype = 'trigger'::regtype AS returns_trigger, "
-            "l.lanname, p.prosrc, p.prosecdef, p.provolatile, p.proconfig "
-            "FROM pg_proc p "
-            "JOIN pg_namespace n ON n.oid = p.pronamespace "
-            "JOIN pg_language l ON l.oid = p.prolang "
-            "WHERE n.nspname = :schema AND p.proname = :name AND p.pronargs = 0"
-        ),
-        {"schema": schema, "name": WATCHLIST_AUDIT_FUNCTION_NAME},
-    ).mappings().all()
+    functions = (
+        connection.execute(
+            text(
+                "SELECT p.oid, p.prorettype = 'trigger'::regtype AS returns_trigger, "
+                "l.lanname, p.prosrc, p.prosecdef, p.provolatile, p.proconfig "
+                "FROM pg_proc p "
+                "JOIN pg_namespace n ON n.oid = p.pronamespace "
+                "JOIN pg_language l ON l.oid = p.prolang "
+                "WHERE n.nspname = :schema AND p.proname = :name AND p.pronargs = 0"
+            ),
+            {"schema": schema, "name": WATCHLIST_AUDIT_FUNCTION_NAME},
+        )
+        .mappings()
+        .all()
+    )
     drift: list[str] = []
     if len(functions) != 1:
         drift.append(f"watchlist append-only function count differs: {len(functions)}")
@@ -221,18 +225,22 @@ def _watchlist_guard_drift(connection: Connection) -> list[str]:
         ):
             drift.append("watchlist append-only function definition differs")
 
-    triggers = connection.execute(
-        text(
-            "SELECT t.tgfoid, t.tgtype, t.tgenabled, t.tgqual, t.tgnargs, "
-            "t.tgattr::text AS tgattr "
-            "FROM pg_trigger t "
-            "JOIN pg_class c ON c.oid = t.tgrelid "
-            "JOIN pg_namespace n ON n.oid = c.relnamespace "
-            "WHERE n.nspname = :schema AND c.relname = 'watchlist_audits' "
-            "AND t.tgname = :name AND NOT t.tgisinternal"
-        ),
-        {"schema": schema, "name": WATCHLIST_AUDIT_TRIGGER_NAME},
-    ).mappings().all()
+    triggers = (
+        connection.execute(
+            text(
+                "SELECT t.tgfoid, t.tgtype, t.tgenabled, t.tgqual, t.tgnargs, "
+                "t.tgattr::text AS tgattr "
+                "FROM pg_trigger t "
+                "JOIN pg_class c ON c.oid = t.tgrelid "
+                "JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE n.nspname = :schema AND c.relname = 'watchlist_audits' "
+                "AND t.tgname = :name AND NOT t.tgisinternal"
+            ),
+            {"schema": schema, "name": WATCHLIST_AUDIT_TRIGGER_NAME},
+        )
+        .mappings()
+        .all()
+    )
     if len(triggers) != 1:
         drift.append(f"watchlist append-only trigger count differs: {len(triggers)}")
     else:
@@ -256,9 +264,7 @@ def _repair_watchlist_guard(connection: Connection, changes: list[str]) -> None:
     connection.exec_driver_sql(
         f"DROP TRIGGER IF EXISTS {WATCHLIST_AUDIT_TRIGGER_NAME} ON watchlist_audits"
     )
-    connection.exec_driver_sql(
-        f"DROP FUNCTION IF EXISTS {WATCHLIST_AUDIT_FUNCTION_NAME}()"
-    )
+    connection.exec_driver_sql(f"DROP FUNCTION IF EXISTS {WATCHLIST_AUDIT_FUNCTION_NAME}()")
     connection.exec_driver_sql(WATCHLIST_AUDIT_FUNCTION_DDL)
     connection.exec_driver_sql(WATCHLIST_AUDIT_TRIGGER_DDL)
     changes.append("repair watchlist append-only guard")

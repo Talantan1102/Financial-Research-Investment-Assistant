@@ -174,9 +174,7 @@ def _path_value(value: dict[str, Any], path: str) -> Any:
 
 
 _MISSING = object()
-_KNOWN_PERMISSION_DECISIONS = frozenset(
-    {"direct", "approval_required", "approved", "rejected"}
-)
+_KNOWN_PERMISSION_DECISIONS = frozenset({"direct", "approval_required", "approved", "rejected"})
 _STATE_WRITE_TOOLS = frozenset(
     {"place_paper_order", "cancel_paper_order", "reset_paper_account", "manage_watchlist"}
 )
@@ -191,7 +189,13 @@ def _permission_contract_is_consistent(expected: dict[str, Any]) -> bool:
             return False
         if risk == "high":
             decision = run.get("decision")
-            terminal = "approved" if decision == "approved" else "rejected" if decision == "rejected" else None
+            terminal = (
+                "approved"
+                if decision == "approved"
+                else "rejected"
+                if decision == "rejected"
+                else None
+            )
             if terminal is None or trajectory != ["approval_required", terminal]:
                 return False
     return True
@@ -350,8 +354,7 @@ class PaperTradingOutcomeScorer:
                 and isinstance(permissions[tool], list)
                 and bool(permissions[tool])
                 and all(
-                    isinstance(decision, str)
-                    and decision in _KNOWN_PERMISSION_DECISIONS
+                    isinstance(decision, str) and decision in _KNOWN_PERMISSION_DECISIONS
                     for decision in permissions[tool]
                 )
                 for tool in tools
@@ -413,8 +416,7 @@ class PaperTradingOutcomeScorer:
                     not isinstance(observed_permissions, list)
                     or not observed_permissions
                     or any(
-                        not isinstance(decision, str)
-                        or decision not in _KNOWN_PERMISSION_DECISIONS
+                        not isinstance(decision, str) or decision not in _KNOWN_PERMISSION_DECISIONS
                         for decision in observed_permissions
                     )
                     or observed_permissions != wanted_permissions

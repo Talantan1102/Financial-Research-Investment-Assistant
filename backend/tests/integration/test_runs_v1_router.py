@@ -291,9 +291,7 @@ async def test_cancel_is_idempotent_and_invalid_resume_is_409(
     async with client_for(users["member"]) as client:
         created = await _create_run(client, tenant.id)
         run_url = f"{_run_url(tenant.id)}/{created.json()['id']}"
-        missing_identity = await client.post(
-            f"{run_url}/resume", json={"response": {"text": "x"}}
-        )
+        missing_identity = await client.post(f"{run_url}/resume", json={"response": {"text": "x"}})
         invalid_resume = await client.post(
             f"{run_url}/resume",
             json={"pause_id": str(uuid.uuid4()), "response": {"text": "x"}},
@@ -367,12 +365,8 @@ async def test_resume_uses_authenticated_actor_and_keeps_same_run(
     ("pause_kind", "pause_request", "stale_response"),
     [
         pytest.param("input", {"question": "second?"}, {"text": "stale"}, id="input"),
-        pytest.param(
-            "approval", {"action": "send_notice"}, {"approved": True}, id="approve"
-        ),
-        pytest.param(
-            "approval", {"action": "send_notice"}, {"approved": False}, id="reject"
-        ),
+        pytest.param("approval", {"action": "send_notice"}, {"approved": True}, id="approve"),
+        pytest.param("approval", {"action": "send_notice"}, {"approved": False}, id="reject"),
         pytest.param(
             "approval",
             {
@@ -469,9 +463,7 @@ async def test_resume_route_rejects_stale_pause_identity_without_mutation(
     assert current_after.response_payload == current_before.response_payload is None
     assert current_after.resolved_at == current_before.resolved_at is None
     assert current_after.continuation_payload == current_before.continuation_payload
-    assert [
-        (event.seq, event.event_type, event.payload) for event in events_after
-    ] == [
+    assert [(event.seq, event.event_type, event.payload) for event in events_after] == [
         (event.seq, event.event_type, event.payload) for event in events_before
     ]
 

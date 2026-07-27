@@ -167,9 +167,7 @@ def build_approved_inputs(
     return {
         call_id: ApprovedInput(
             original=by_id[call_id].parsed_args,
-            effective=dict(
-                edited_arguments.get(call_id, by_id[call_id].parsed_args)
-            ),
+            effective=dict(edited_arguments.get(call_id, by_id[call_id].parsed_args)),
         )
         for call_id in selected_ids
     }

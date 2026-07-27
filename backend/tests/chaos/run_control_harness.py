@@ -561,9 +561,7 @@ def run_default_compose_suite(
                 body={
                     "pause_id": str(pause_id),
                     "response": (
-                        {"text": "continue"}
-                        if pause_type == "input"
-                        else {"approved": True}
+                        {"text": "continue"} if pause_type == "input" else {"approved": True}
                     ),
                 },
             )

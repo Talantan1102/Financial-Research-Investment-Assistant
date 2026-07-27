@@ -525,9 +525,7 @@ def test_holding_lot_source_fill_is_unique(db_session: Session, user: User) -> N
         db_session.flush()
 
 
-def test_holding_lot_rejects_dangling_source_fill(
-    db_session: Session, user: User
-) -> None:
+def test_holding_lot_rejects_dangling_source_fill(db_session: Session, user: User) -> None:
     account = _account(user)
     db_session.add(account)
     db_session.flush()

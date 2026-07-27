@@ -60,9 +60,7 @@ async def list_run_control_actor_tenants(
     async with request.app.state.async_session_factory() as session:
         tenant_ids = (
             await session.scalars(
-                select(TenantMembership.tenant_id).where(
-                    TenantMembership.user_id == actor.id
-                )
+                select(TenantMembership.tenant_id).where(TenantMembership.user_id == actor.id)
             )
         ).all()
     return [{"id": str(tenant_id)} for tenant_id in tenant_ids]

@@ -141,9 +141,7 @@ class RunSessionService:
                         Run.tenant_id == tenant_id,
                         Run.session_id == session_id,
                         or_(
-                            Run.status.in_(
-                                [status.value for status in ACTIVE_RUN_STATUSES]
-                            ),
+                            Run.status.in_([status.value for status in ACTIVE_RUN_STATUSES]),
                             Run.id == latest_run_id,
                         ),
                     )
@@ -163,9 +161,7 @@ class RunSessionService:
                 (
                     pause
                     for run, pause in recovery_rows
-                    if active_run is not None
-                    and run.id == active_run.id
-                    and pause is not None
+                    if active_run is not None and run.id == active_run.id and pause is not None
                 ),
                 None,
             )

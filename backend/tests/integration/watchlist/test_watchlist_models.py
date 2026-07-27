@@ -33,9 +33,7 @@ def test_monitoring_defaults_off_and_symbol_is_unique_per_user(
     assert item.monitoring_enabled is False
     assert WatchlistItem.__table__.c.monitoring_enabled.server_default is not None
 
-    db_session.add(
-        WatchlistItem(user_id=user.id, ts_code="600519.SH", name="重复股票")
-    )
+    db_session.add(WatchlistItem(user_id=user.id, ts_code="600519.SH", name="重复股票"))
     with pytest.raises(IntegrityError):
         db_session.flush()
     db_session.rollback()
@@ -68,13 +66,9 @@ def test_watchlist_audit_rows_are_append_only_by_contract() -> None:
 def test_enabled_monitoring_has_a_partial_index(db_session: Session) -> None:
     indexes = inspect(db_session.bind).get_indexes("watchlist_items")
     monitoring_index = next(
-        index
-        for index in indexes
-        if index["name"] == "ix_watchlist_items_monitoring_enabled_true"
+        index for index in indexes if index["name"] == "ix_watchlist_items_monitoring_enabled_true"
     )
-    assert "monitoring_enabled" in str(
-        monitoring_index["dialect_options"]["postgresql_where"]
-    )
+    assert "monitoring_enabled" in str(monitoring_index["dialect_options"]["postgresql_where"])
 
 
 def test_audit_update_and_delete_are_rejected_and_session_recovers(
@@ -98,9 +92,7 @@ def test_audit_update_and_delete_are_rejected_and_session_recovers(
 
     with pytest.raises(DBAPIError):
         db_session.execute(
-            update(WatchlistAudit)
-            .where(WatchlistAudit.id == audit_id)
-            .values(action="tampered")
+            update(WatchlistAudit).where(WatchlistAudit.id == audit_id).values(action="tampered")
         )
     db_session.rollback()
     assert db_session.get(WatchlistAudit, audit_id).action == "add"

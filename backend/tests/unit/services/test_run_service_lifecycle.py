@@ -859,10 +859,14 @@ async def test_stale_pause_identity_cannot_resume_a_new_pause_on_the_same_run(
     events_after = await run_service.list_events(
         created_run.tenant_id, created_run.id, created_run.created_by_user_id
     )
-    assert run_after.status == run_before.status == (
-        RunStatus.WAITING_INPUT.value
-        if pause_kind == "input"
-        else RunStatus.WAITING_APPROVAL.value
+    assert (
+        run_after.status
+        == run_before.status
+        == (
+            RunStatus.WAITING_INPUT.value
+            if pause_kind == "input"
+            else RunStatus.WAITING_APPROVAL.value
+        )
     )
     assert run_after.queue_reason == run_before.queue_reason
     assert run_after.queued_at == run_before.queued_at
@@ -872,9 +876,7 @@ async def test_stale_pause_identity_cannot_resume_a_new_pause_on_the_same_run(
     assert current_after.response_payload == current_before.response_payload is None
     assert current_after.resolved_at == current_before.resolved_at is None
     assert current_after.continuation_payload == current_before.continuation_payload
-    assert [
-        (event.seq, event.event_type, event.payload) for event in events_after
-    ] == [
+    assert [(event.seq, event.event_type, event.payload) for event in events_after] == [
         (event.seq, event.event_type, event.payload) for event in events_before
     ]
 

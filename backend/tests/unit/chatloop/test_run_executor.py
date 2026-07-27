@@ -280,9 +280,10 @@ async def test_approved_edits_execute_effective_call_and_keep_original_audit() -
     assert hub.calls[0].parsed_args == {"quantity": 200}
     assert hub.approved_inputs[0]["trade-1"].original == {"quantity": 100}
     assert hub.approved_inputs[0]["trade-1"].effective == {"quantity": 200}
-    assert continuation["body"]["pending_action"]["pending_tool_calls"][0][
-        "arguments"
-    ] == '{"quantity":100}'
+    assert (
+        continuation["body"]["pending_action"]["pending_tool_calls"][0]["arguments"]
+        == '{"quantity":100}'
+    )
     assert result.tools[0].request == {"quantity": 200}
 
 

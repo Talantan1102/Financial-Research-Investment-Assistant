@@ -73,9 +73,7 @@ class SqlWatchlistBackend:
                     monitoring_enabled=kwargs["monitoring_enabled"],
                     source=source,
                 )
-                payload = WatchlistRead.model_validate(result.item).model_dump(
-                    mode="json"
-                )
+                payload = WatchlistRead.model_validate(result.item).model_dump(mode="json")
                 payload["created"] = result.created
             elif action == "update":
                 item = service.update(

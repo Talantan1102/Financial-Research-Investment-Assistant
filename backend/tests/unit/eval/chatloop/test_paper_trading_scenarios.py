@@ -473,14 +473,9 @@ def test_repeated_read_is_allowed_only_with_explicit_count_and_every_call_is_low
     }
     run_state = {**OBSERVED, "pauses": [], "resumed": False, "status": "completed"}
 
-    assert PaperTradingOutcomeScorer().score(
-        expected, calls, database_state, run_state
-    ).passed
+    assert PaperTradingOutcomeScorer().score(expected, calls, database_state, run_state).passed
     calls[0]["permission_decisions"] = ["approved"]
-    assert (
-        PaperTradingOutcomeScorer().score(expected, calls, database_state, run_state).score
-        == 0
-    )
+    assert PaperTradingOutcomeScorer().score(expected, calls, database_state, run_state).score == 0
 
 
 def test_edited_approval_only_accepts_effective_order_and_audits_both_payloads() -> None:

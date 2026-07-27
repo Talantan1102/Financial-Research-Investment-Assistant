@@ -35,9 +35,7 @@ async def test_run_api_identity_preflight_uses_real_jwt_and_pg_membership(
     nonmember_tenant_id = uuid4()
     async with pg_async_session_factory() as session, session.begin():
         await session.execute(
-            delete(TenantMembership).where(
-                TenantMembership.user_id == EVAL_USER_ID
-            )
+            delete(TenantMembership).where(TenantMembership.user_id == EVAL_USER_ID)
         )
         eval_user = await session.get(User, EVAL_USER_ID)
         if eval_user is None:
@@ -120,7 +118,5 @@ async def test_run_api_identity_preflight_uses_real_jwt_and_pg_membership(
         assert other_me.status_code == other_tenants.status_code == 200
         assert other_me.json() == {"id": str(other_user_id)}
         assert other_tenants.json() == [{"id": str(other_tenant_id)}]
-        assert transport.tenant_id not in {
-            row["id"] for row in other_tenants.json()
-        }
+        assert transport.tenant_id not in {row["id"] for row in other_tenants.json()}
         assert all(set(row) == {"id"} for row in tenants.json() + other_tenants.json())

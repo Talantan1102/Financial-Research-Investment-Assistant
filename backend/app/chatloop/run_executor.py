@@ -752,9 +752,7 @@ class ChatRunExecutor:
                 for call in pending_tool_calls
             }
             approved_input_ids = {
-                call_id
-                for call_id, approved in decisions.items()
-                if approved
+                call_id for call_id, approved in decisions.items() if approved
             } & set(action.request.editable_tool_call_ids)
         state.approved_inputs = build_approved_inputs(
             pending_tool_calls,

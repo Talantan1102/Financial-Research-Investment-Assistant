@@ -174,9 +174,7 @@ class DurableRunHttpTransport:
         try:
             actual_user_id = UUID(str(me_payload["id"]))
         except (KeyError, TypeError, ValueError) as exc:
-            raise OutcomeEvalIdentityError(
-                "eval auth preflight returned no valid user id"
-            ) from exc
+            raise OutcomeEvalIdentityError("eval auth preflight returned no valid user id") from exc
         if actual_user_id != UUID(self.user_id):
             raise OutcomeEvalIdentityError(
                 "eval auth token does not belong to the dedicated eval user"
@@ -231,10 +229,9 @@ class DurableRunHttpTransport:
                 run = await session.get(Run, UUID(run_id))
                 if run is None:
                     raise RuntimeError("created eval Run disappeared")
-                if (
-                    UUID(str(run.tenant_id)) != self._tenant_id
-                    or UUID(str(run.created_by_user_id)) != UUID(self.user_id)
-                ):
+                if UUID(str(run.tenant_id)) != self._tenant_id or UUID(
+                    str(run.created_by_user_id)
+                ) != UUID(self.user_id):
                     raise OutcomeEvalIdentityError(
                         "persisted eval Run identity does not match preflight"
                     )
@@ -456,6 +453,7 @@ class SqlOutcomeCollector:
         try:
             yield
         finally:
+
             async def release() -> None:
                 try:
                     await session.execute(
@@ -579,9 +577,7 @@ class SqlOutcomeCollector:
 
         uid = UUID(user_id)
         async with self._session_factory() as session, session.begin():
-            await session.execute(
-                text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-            )
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
             source_session_id = None
             if run_id is not None:
                 run = await session.get(Run, UUID(run_id))

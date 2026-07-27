@@ -129,9 +129,7 @@ async def test_place_uses_only_effective_approved_args_and_state_identity() -> N
     assert result["reserved_cash"] == "123.45"
     assert backend.call is not None
     assert backend.call["user_id"] == user_id
-    assert backend.call["client_request_id"] == paper_client_request_id(
-        str(run_id), "call-7"
-    )
+    assert backend.call["client_request_id"] == paper_client_request_id(str(run_id), "call-7")
     assert backend.call["source_run_id"] == run_id
     assert backend.call["source_tool_call_id"] == "call-7"
     assert backend.call["original_proposal"] == original
@@ -147,9 +145,7 @@ def test_long_tool_call_ids_use_distinct_bounded_business_keys() -> None:
     first = "x" * 254 + "a"
     second = "x" * 254 + "b"
     assert len(paper_client_request_id(run_id, first)) <= 128
-    assert paper_client_request_id(run_id, first) != paper_client_request_id(
-        run_id, second
-    )
+    assert paper_client_request_id(run_id, first) != paper_client_request_id(run_id, second)
     with pytest.raises(ValueError, match="255"):
         paper_client_request_id(run_id, "x" * 256)
     with pytest.raises(ValidationError):
@@ -207,9 +203,7 @@ def test_sql_backend_dispatches_after_commit_and_returns_order_when_dispatch_fai
     monkeypatch.setattr(
         SqlPaperTradingBackend, "_service", staticmethod(lambda _session: Service())
     )
-    monkeypatch.setattr(
-        PaperOrderRead, "model_validate", classmethod(lambda _cls, _order: Read())
-    )
+    monkeypatch.setattr(PaperOrderRead, "model_validate", classmethod(lambda _cls, _order: Read()))
     dispatches: list[str] = []
 
     def unavailable(dispatched_order_id: str) -> None:

@@ -58,9 +58,7 @@ def add_watchlist(
     except Exception:
         db.rollback()
         raise
-    response.status_code = (
-        status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
-    )
+    response.status_code = status.HTTP_201_CREATED if result.created else status.HTTP_200_OK
     return WatchlistRead.model_validate(result.item)
 
 

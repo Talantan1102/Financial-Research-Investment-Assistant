@@ -76,9 +76,7 @@ class WatchlistService:
                 note=note,
                 monitoring_enabled=monitoring_enabled,
             )
-            .on_conflict_do_nothing(
-                index_elements=[WatchlistItem.user_id, WatchlistItem.ts_code]
-            )
+            .on_conflict_do_nothing(index_elements=[WatchlistItem.user_id, WatchlistItem.ts_code])
             .returning(WatchlistItem.id)
         )
         created = inserted_id is not None
@@ -114,11 +112,7 @@ class WatchlistService:
         if item is None:
             return None
 
-        effective = {
-            key: value
-            for key, value in changes.items()
-            if getattr(item, key) != value
-        }
+        effective = {key: value for key, value in changes.items() if getattr(item, key) != value}
         if not effective:
             return item
 
@@ -170,9 +164,7 @@ class WatchlistService:
             WatchlistItem.ts_code == ts_code,
         )
         if for_update:
-            statement = statement.with_for_update().execution_options(
-                populate_existing=True
-            )
+            statement = statement.with_for_update().execution_options(populate_existing=True)
         return self._session.scalar(statement)
 
     def _append_audit(

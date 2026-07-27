@@ -47,12 +47,10 @@ class FixedQuoteProvider:
             previous_close=Decimal("1500"),
             last_price=Decimal("1501"),
             bids=tuple(
-                QuoteLevel(price=Decimal(1500 - level), quantity=1000)
-                for level in range(5)
+                QuoteLevel(price=Decimal(1500 - level), quantity=1000) for level in range(5)
             ),
             asks=tuple(
-                QuoteLevel(price=Decimal(1502 + level), quantity=1000)
-                for level in range(5)
+                QuoteLevel(price=Decimal(1502 + level), quantity=1000) for level in range(5)
             ),
             source="fixed",
             suspended=False,
@@ -220,9 +218,7 @@ async def test_get_order_hides_other_users_and_unknown_ids(
     async with _client(db_session, users["alice"]) as client:
         own_response = await client.get(f"/api/v0/paper-trading/orders/{own.id}")
         foreign_response = await client.get(f"/api/v0/paper-trading/orders/{foreign.id}")
-        missing_response = await client.get(
-            f"/api/v0/paper-trading/orders/{uuid.uuid4()}"
-        )
+        missing_response = await client.get(f"/api/v0/paper-trading/orders/{uuid.uuid4()}")
 
     assert own_response.status_code == 200
     assert own_response.json()["id"] == str(own.id)
@@ -254,9 +250,7 @@ async def test_preview_is_deterministic_and_has_no_trading_side_effects(
     db_session: Session,
     users: dict[str, User],
 ) -> None:
-    PaperAccountService(db_session).get_or_create(
-        user_id=cast(uuid.UUID, users["alice"].id)
-    )
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, users["alice"].id))
     before = _row_counts(db_session)
     payload = {
         "draft": {
@@ -288,9 +282,7 @@ async def test_preview_maps_domain_error_to_safe_4xx(
     db_session: Session,
     users: dict[str, User],
 ) -> None:
-    PaperAccountService(db_session).get_or_create(
-        user_id=cast(uuid.UUID, users["alice"].id)
-    )
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, users["alice"].id))
     before = _row_counts(db_session)
     payload = {
         "draft": {
@@ -328,9 +320,7 @@ async def test_preview_rejects_malformed_identity_without_side_effects(
     draft_update: dict[str, object],
     error_code: str,
 ) -> None:
-    PaperAccountService(db_session).get_or_create(
-        user_id=cast(uuid.UUID, users["alice"].id)
-    )
+    PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, users["alice"].id))
     before = _row_counts(db_session)
     draft: dict[str, object] = {
         "side": "buy",

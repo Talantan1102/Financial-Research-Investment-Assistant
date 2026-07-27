@@ -58,19 +58,26 @@ def test_concurrent_add_returns_existing_without_error_or_duplicate_audit(
 
     with factory() as session:
         assert sorted(created) == [False, True]
-        assert session.scalar(
-            select(func.count())
-            .select_from(WatchlistItem)
-            .where(WatchlistItem.user_id == user_id)
-        ) == 1
-        assert session.scalar(
-            select(func.count())
-            .select_from(WatchlistAudit)
-            .where(WatchlistAudit.user_id == user_id)
-        ) == 1
-        assert session.scalar(
-            select(WatchlistAudit.action).where(WatchlistAudit.user_id == user_id)
-        ) == "add"
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(WatchlistItem)
+                .where(WatchlistItem.user_id == user_id)
+            )
+            == 1
+        )
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(WatchlistAudit)
+                .where(WatchlistAudit.user_id == user_id)
+            )
+            == 1
+        )
+        assert (
+            session.scalar(select(WatchlistAudit.action).where(WatchlistAudit.user_id == user_id))
+            == "add"
+        )
 
 
 def test_concurrent_updates_form_a_contiguous_audit_chain(
@@ -107,9 +114,7 @@ def test_concurrent_updates_form_a_contiguous_audit_chain(
         list(pool.map(update_note, ("first-update", "second-update")))
 
     with factory() as session:
-        item = session.scalar(
-            select(WatchlistItem).where(WatchlistItem.user_id == user_id)
-        )
+        item = session.scalar(select(WatchlistItem).where(WatchlistItem.user_id == user_id))
         updates = list(
             session.scalars(
                 select(WatchlistAudit)
@@ -203,11 +208,14 @@ def test_concurrent_remove_returns_true_then_false_without_deadlock(
 
     with factory() as session:
         assert sorted(removed) == [False, True]
-        assert session.scalar(
-            select(func.count())
-            .select_from(WatchlistItem)
-            .where(WatchlistItem.user_id == user_id)
-        ) == 0
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(WatchlistItem)
+                .where(WatchlistItem.user_id == user_id)
+            )
+            == 0
+        )
         actions = list(
             session.scalars(
                 select(WatchlistAudit.action)

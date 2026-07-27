@@ -169,18 +169,13 @@ def list_holdings(
         item["quantity"] = cast(int, item["quantity"]) + quantity
         item["frozen_quantity"] = cast(int, item["frozen_quantity"]) + frozen
         if lot.available_on <= today:
-            item["sellable_quantity"] = (
-                cast(int, item["sellable_quantity"]) + quantity - frozen
-            )
-        item["cost"] = (
-            cast(Decimal, item["cost"]) + cast(Decimal, lot.unit_cost) * quantity
-        )
+            item["sellable_quantity"] = cast(int, item["sellable_quantity"]) + quantity - frozen
+        item["cost"] = cast(Decimal, item["cost"]) + cast(Decimal, lot.unit_cost) * quantity
     return [
         PaperHoldingRead.model_validate(
             {
                 **item,
-                "average_cost": cast(Decimal, item["cost"])
-                / cast(int, item["quantity"]),
+                "average_cost": cast(Decimal, item["cost"]) / cast(int, item["quantity"]),
             }
         )
         for item in grouped.values()
@@ -202,9 +197,7 @@ def list_orders(
 ) -> list[PaperOrderRead]:
     statement = select(PaperOrder).where(PaperOrder.user_id == _user_id(user))
     if account_generation is not None:
-        statement = statement.where(
-            PaperOrder.account_generation == account_generation
-        )
+        statement = statement.where(PaperOrder.account_generation == account_generation)
     if order_status is not None:
         statement = statement.where(PaperOrder.status == order_status)
     if ts_code is not None:

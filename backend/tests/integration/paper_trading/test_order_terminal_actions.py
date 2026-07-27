@@ -331,9 +331,7 @@ def test_cancel_approved_persists_provenance_and_rejects_key_reuse(
     )
     assert replay.id == first.id
     audit = db_session.scalar(
-        select(PaperActionAudit).where(
-            PaperActionAudit.client_request_id == client_request_id
-        )
+        select(PaperActionAudit).where(PaperActionAudit.client_request_id == client_request_id)
     )
     assert audit is not None
     assert audit.original_proposal == original
