@@ -8,6 +8,7 @@ from app.core.database import Base
 from app.models.user import User
 from app.processes.run_control_init import initialize_schema
 from app.scripts.migrate_paper_trading_schema import (
+    canonical_suitability_schema,
     migrate_paper_trading_schema,
     verify_paper_trading_schema,
 )
@@ -29,6 +30,14 @@ _PAPER_TABLES = (
     "paper_accounts",
 )
 _WATCHLIST_TABLES = ("watchlist_audits", "watchlist_items")
+_SUITABILITY_TABLES = (
+    "investor_suitability_profiles",
+    "market_access_rules",
+    "suitability_assessments",
+    "risk_disclosure_acceptances",
+    "market_entitlements",
+    "entitlement_applications",
+)
 
 
 @pytest.fixture
@@ -43,7 +52,7 @@ def legacy_application_engine(pg_test_engine: Engine) -> Iterator[Engine]:
     Base.metadata.create_all(bind=isolated)
     try:
         with isolated.begin() as connection:
-            for table_name in (*_PAPER_TABLES, *_WATCHLIST_TABLES):
+            for table_name in (*_PAPER_TABLES, *_WATCHLIST_TABLES, *_SUITABILITY_TABLES):
                 connection.exec_driver_sql(f'DROP TABLE IF EXISTS "{table_name}" CASCADE')
             connection.execute(text("DROP INDEX IF EXISTS uq_positions_manual_user_tscode"))
             connection.execute(
@@ -197,6 +206,36 @@ def test_operator_init_paper_schema_upgrade_is_idempotent(
     with legacy_application_engine.connect() as connection:
         assert connection.scalar(text("SELECT count(*) FROM positions")) == 1
         assert connection.scalar(text("SELECT count(*) FROM trades")) == 1
+
+
+def test_upgrade_adds_canonical_suitability_schema(
+    legacy_application_engine: Engine,
+) -> None:
+    changes = migrate_paper_trading_schema(legacy_application_engine)
+
+    assert "create investor suitability schema" in changes
+    assert set(_SUITABILITY_TABLES) <= set(inspect(legacy_application_engine).get_table_names())
+    assert canonical_suitability_schema(legacy_application_engine) is True
+    assert migrate_paper_trading_schema(legacy_application_engine) == ()
+
+
+def test_verifier_rejects_same_named_suitability_check_with_wrong_expression(
+    legacy_application_engine: Engine,
+) -> None:
+    migrate_paper_trading_schema(legacy_application_engine)
+    with legacy_application_engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE market_entitlements "
+                "DROP CONSTRAINT ck_market_entitlements_status_capabilities_timestamps, "
+                "ADD CONSTRAINT ck_market_entitlements_status_capabilities_timestamps "
+                "CHECK (true)"
+            )
+        )
+
+    assert canonical_suitability_schema(legacy_application_engine) is False
+    with pytest.raises(RuntimeError, match="market_entitlements CHECK constraints differ"):
+        verify_paper_trading_schema(legacy_application_engine)
 
 
 def test_verifier_rejects_same_named_check_with_wrong_expression(
