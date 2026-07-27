@@ -564,6 +564,36 @@ TOOL_DOCS: dict[str, ToolDoc] = {
         "自选股变更直接执行且留审计；monitoring_enabled 默认 false。参数 action、ts_code。",
         {"action": "string", "ts_code": "string"},
     ),
+    "get_market_entitlements": ToolDoc(
+        "get_market_entitlements",
+        "deferred",
+        "读取当前用户已开通的市场交易权限。",
+        "只读当前用户的主板、创业板、科创板和北交所权限状态。"
+        "何时用：用户询问自己可交易哪些市场时。"
+        "何时不用：具体买入前应使用 check_order_eligibility 连同股票和方向重新核验。"
+        "参数为空；不会开通、修改或申请任何权限。",
+        {},
+    ),
+    "check_order_eligibility": ToolDoc(
+        "check_order_eligibility",
+        "deferred",
+        "核验当前用户能否买入或卖出指定股票及缺失权限的申请入口。",
+        "买入或卖出模拟订单前的只读前置核验。"
+        "何时用：用户明确要交易时，先传 ts_code 和 side（buy 或 sell）。"
+        "何时不用：仅查行情、研究分析或列出已开通权限时不用。"
+        "若权限不足，返回内部申请链接；不得据此宣称权限已开通，也不会修改权限。",
+        {"ts_code": "string", "side": "string"},
+    ),
+    "get_entitlement_application_link": ToolDoc(
+        "get_entitlement_application_link",
+        "deferred",
+        "取得指定市场权限的内部申请链接。",
+        "只返回内部申请入口，不会代用户提交申请或开通权限。"
+        "何时用：已确认缺少某市场权限，需要引导用户转到传统申请流程时。"
+        "何时不用：用户尚未提出交易意图，或买卖前尚未调用 check_order_eligibility 核验时不用。"
+        "参数：market（必填）；intent_summary（可选）。外部流程完成后，用户须新开一轮对话重新核验。",
+        {"market": "string"},
+    ),
 }
 
 
@@ -605,6 +635,9 @@ DEFERRED_TOOLS: list[str] = [
     "cancel_paper_order",
     "reset_paper_account",
     "manage_watchlist",
+    "get_market_entitlements",
+    "check_order_eligibility",
+    "get_entitlement_application_link",
 ]
 
 

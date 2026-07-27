@@ -11,6 +11,12 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
+from app.models.investor_suitability import (
+    EntitlementStatus,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+)
 from app.models.paper_account import PaperAccount, PaperCashLedger, PaperHoldingLot
 from app.models.paper_order import (
     OrderSide,
@@ -70,6 +76,13 @@ def user(db_session: Session) -> User:
     return row
 
 
+class _PermittedEntitlementReader:
+    """Isolates pre-existing order mechanics from the separate permission-gate tests."""
+
+    def is_permitted(self, **_: object) -> bool:
+        return True
+
+
 def _service(
     session: Session,
     provider: FixedQuoteProvider,
@@ -81,8 +94,44 @@ def _service(
         quote_provider=provider,
         clock=TradingClock(FixedTradingCalendar({NOW.date(), date(2026, 7, 21)})),
         rulebook=RuleBook.from_builtin_fixture(),
+        entitlement_reader=_PermittedEntitlementReader(),
         now=now if callable(now) else lambda: now,
     )
+
+
+def _enable_main(session: Session, account: PaperAccount) -> None:
+    rule = session.scalar(
+        select(MarketAccessRule).where(
+            MarketAccessRule.market == Market.MAIN,
+            MarketAccessRule.rule_version == "test-main-v1",
+        )
+    )
+    if rule is None:
+        rule = MarketAccessRule(
+            market=Market.MAIN,
+            effective_from=NOW.date(),
+            minimum_average_assets_20d=None,
+            minimum_experience_months=None,
+            required_disclosure_version="main-risk-v1",
+            rule_version="test-main-v1",
+        )
+        session.add(rule)
+        session.flush()
+    session.add(
+        MarketEntitlement(
+            account_id=account.id,
+            account_generation=account.generation,
+            market=Market.MAIN,
+            status=EntitlementStatus.ENABLED,
+            can_buy=True,
+            can_sell=True,
+            can_subscribe=False,
+            rule_version=rule.rule_version,
+            enabled_at=NOW,
+            restricted_at=None,
+        )
+    )
+    session.flush()
 
 
 def _draft(**changes: object) -> OrderDraft:
@@ -305,7 +354,9 @@ def test_same_confirmation_key_is_scoped_per_user_and_ledgers_link_each_order(
     service = _service(db_session, FixedQuoteProvider(_quote()))
     confirmed: list[PaperOrder] = []
     for user_id in user_ids:
-        PaperAccountService(db_session).get_or_create(user_id=user_id)
+        account = PaperAccountService(db_session).get_or_create(user_id=user_id)
+        if user_id == cast(uuid.UUID, other.id):
+            _enable_main(db_session, account)
         order = _prepare(service, user_id)
         confirmed.append(
             service.confirm(

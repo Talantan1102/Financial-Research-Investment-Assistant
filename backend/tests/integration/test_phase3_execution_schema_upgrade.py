@@ -1057,9 +1057,8 @@ def test_operator_migration_adds_durable_action_required_outcome_contract(
     assert migrate_phase3_execution_schema(isolated_schema_engine)
 
     with isolated_schema_engine.connect() as connection:
-        columns = {
-            name: data_type
-            for name, data_type in connection.execute(
+        columns = dict(
+            connection.execute(
                 text(
                     "SELECT a.attname, format_type(a.atttypid, a.atttypmod) "
                     "FROM pg_attribute AS a "
@@ -1067,8 +1066,8 @@ def test_operator_migration_adds_durable_action_required_outcome_contract(
                     "AND a.attnum > 0 AND NOT a.attisdropped "
                     "AND a.attname IN ('outcome_code', 'outcome_payload')"
                 )
-            )
-        }
+            ).all()
+        )
         constraints = dict(
             connection.execute(
                 text(

@@ -14,8 +14,8 @@ from types import SimpleNamespace
 import httpx
 import pytest
 import pytest_asyncio
-from app.models.tenant import Tenant, TenantMembership
 from app.models.run import Run
+from app.models.tenant import Tenant, TenantMembership
 from app.models.user import User
 from app.router.auth_router import get_current_user_required
 from app.router.runs import _format_sse, _format_stream_sse, get_run_service, router

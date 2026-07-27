@@ -13,6 +13,12 @@ import httpx
 import pytest
 from app.app_main import app
 from app.core.database import get_db
+from app.models.investor_suitability import (
+    EntitlementStatus,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+)
 from app.models.paper_account import PaperAccountResetAudit, PaperCashLedger, PaperHoldingLot
 from app.models.paper_order import (
     PaperFill,
@@ -70,6 +76,11 @@ def users(db_session: Session) -> dict[str, User]:
     }
     db_session.add_all(rows.values())
     db_session.flush()
+    for row in rows.values():
+        _enable_main(
+            db_session,
+            PaperAccountService(db_session).get_or_create(user_id=cast(uuid.UUID, row.id)),
+        )
     return rows
 
 
@@ -81,6 +92,41 @@ def _service(db_session: Session) -> PaperOrderService:
         rulebook=RuleBook.from_builtin_fixture(),
         now=lambda: NOW,
     )
+
+
+def _enable_main(session: Session, account: object) -> None:
+    rule = session.scalar(
+        select(MarketAccessRule).where(
+            MarketAccessRule.market == Market.MAIN,
+            MarketAccessRule.rule_version == "test-main-v1",
+        )
+    )
+    if rule is None:
+        rule = MarketAccessRule(
+            market=Market.MAIN,
+            effective_from=NOW.date(),
+            minimum_average_assets_20d=None,
+            minimum_experience_months=None,
+            required_disclosure_version="main-risk-v1",
+            rule_version="test-main-v1",
+        )
+        session.add(rule)
+        session.flush()
+    session.add(
+        MarketEntitlement(
+            account_id=account.id,
+            account_generation=account.generation,
+            market=Market.MAIN,
+            status=EntitlementStatus.ENABLED,
+            can_buy=True,
+            can_sell=True,
+            can_subscribe=False,
+            rule_version=rule.rule_version,
+            enabled_at=NOW,
+            restricted_at=None,
+        )
+    )
+    session.flush()
 
 
 def _seed_order(

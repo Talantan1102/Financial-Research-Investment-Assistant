@@ -662,6 +662,7 @@ class ChatRunExecutor:
                 approval_rejected=approval_decision == "reject",
             ),
             tuple(events),
+            outcome=state.required_action,
         )
 
     def _initial_state(

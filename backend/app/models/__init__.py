@@ -49,6 +49,17 @@ else:
     # mapper targets; these modules have no heavyweight runtime dependencies.
     from .chat import ChatSession, LongTermMemory
     from .knowledge import Document, KnowledgeBase
+from .investor_suitability import (
+    ApplicationStatus,
+    EntitlementApplication,
+    EntitlementStatus,
+    InvestorSuitabilityProfile,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+    RiskDisclosureAcceptance,
+    SuitabilityAssessment,
+)
 from .paper_account import (
     PaperAccount,
     PaperAccountResetAudit,
@@ -65,17 +76,6 @@ from .paper_order import (
     PaperLotReservation,
     PaperMatchPass,
     PaperOrder,
-)
-from .investor_suitability import (
-    ApplicationStatus,
-    EntitlementApplication,
-    EntitlementStatus,
-    InvestorSuitabilityProfile,
-    Market,
-    MarketAccessRule,
-    MarketEntitlement,
-    RiskDisclosureAcceptance,
-    SuitabilityAssessment,
 )
 from .run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
 from .run_execution import RunToolExecution, RunUsageRecord

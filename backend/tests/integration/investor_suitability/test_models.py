@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import cast
 
@@ -10,10 +10,10 @@ from app.core.database import Base
 from app.models.investor_suitability import (
     ApplicationStatus,
     EntitlementApplication,
+    InvestorSuitabilityProfile,
     Market,
     MarketAccessRule,
     MarketEntitlement,
-    InvestorSuitabilityProfile,
     RiskDisclosureAcceptance,
     SuitabilityAssessment,
 )
@@ -388,7 +388,7 @@ def test_disclosure_acceptance_belongs_to_one_matching_application(
             account_generation=paper_account.generation,
             market=Market.STAR,
             disclosure_version="star-2026-01",
-            accepted_at=datetime.now(timezone.utc),
+            accepted_at=datetime.now(UTC),
             source="suitability_application",
         )
     )
@@ -414,7 +414,7 @@ def test_disclosure_acceptance_cannot_claim_a_different_application_owner(
             account_generation=other_account.generation,
             market=Market.STAR,
             disclosure_version="star-2026-01",
-            accepted_at=datetime.now(timezone.utc),
+            accepted_at=datetime.now(UTC),
             source="suitability_application",
         )
     )
@@ -441,7 +441,7 @@ def test_application_cannot_accept_same_disclosure_version_twice(
                 account_generation=paper_account.generation,
                 market=Market.STAR,
                 disclosure_version="star-2026-01",
-                accepted_at=datetime.now(timezone.utc),
+                accepted_at=datetime.now(UTC),
                 source="suitability_application",
             ),
             RiskDisclosureAcceptance(
@@ -450,7 +450,7 @@ def test_application_cannot_accept_same_disclosure_version_twice(
                 account_generation=paper_account.generation,
                 market=Market.STAR,
                 disclosure_version="star-2026-01",
-                accepted_at=datetime.now(timezone.utc),
+                accepted_at=datetime.now(UTC),
                 source="suitability_application",
             ),
         ]
@@ -507,9 +507,9 @@ def test_rejected_assessment_requires_a_nonempty_json_array_of_failed_conditions
         (ApplicationStatus.CANCELLED_BY_USER, None, None),
         (ApplicationStatus.EXPIRED, None, None),
         (ApplicationStatus.REJECTED, None, None),
-        (ApplicationStatus.IN_PROGRESS, datetime.now(timezone.utc), None),
-        (ApplicationStatus.AWAITING_INFORMATION, datetime.now(timezone.utc), None),
-        (ApplicationStatus.AWAITING_CONFIRMATION, datetime.now(timezone.utc), None),
+        (ApplicationStatus.IN_PROGRESS, datetime.now(UTC), None),
+        (ApplicationStatus.AWAITING_INFORMATION, datetime.now(UTC), None),
+        (ApplicationStatus.AWAITING_CONFIRMATION, datetime.now(UTC), None),
     ],
 )
 def test_application_status_requires_consistent_completion_fields(
@@ -538,13 +538,13 @@ def test_application_status_requires_consistent_completion_fields(
 @pytest.mark.parametrize(
     ("status", "can_buy", "can_sell", "can_subscribe", "enabled_at", "restricted_at"),
     [
-        ("enabled", False, False, False, datetime.now(timezone.utc), None),
+        ("enabled", False, False, False, datetime.now(UTC), None),
         ("enabled", True, False, False, None, None),
         ("not_applied", True, False, False, None, None),
-        ("pending_disclosure", False, False, False, datetime.now(timezone.utc), None),
-        ("revoked", False, False, False, None, datetime.now(timezone.utc)),
-        ("restricted", True, True, False, datetime.now(timezone.utc), datetime.now(timezone.utc)),
-        ("restricted", False, True, False, None, datetime.now(timezone.utc)),
+        ("pending_disclosure", False, False, False, datetime.now(UTC), None),
+        ("revoked", False, False, False, None, datetime.now(UTC)),
+        ("restricted", True, True, False, datetime.now(UTC), datetime.now(UTC)),
+        ("restricted", False, True, False, None, datetime.now(UTC)),
     ],
 )
 def test_entitlement_status_requires_consistent_capabilities_and_timestamps(
