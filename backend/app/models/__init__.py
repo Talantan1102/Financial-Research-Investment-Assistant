@@ -66,6 +66,17 @@ from .paper_order import (
     PaperMatchPass,
     PaperOrder,
 )
+from .investor_suitability import (
+    ApplicationStatus,
+    EntitlementApplication,
+    EntitlementStatus,
+    InvestorSuitabilityProfile,
+    Market,
+    MarketAccessRule,
+    MarketEntitlement,
+    RiskDisclosureAcceptance,
+    SuitabilityAssessment,
+)
 from .run import Run, RunAttempt, RunEvent, RunMessage, RunPause, RunSession
 from .run_execution import RunToolExecution, RunUsageRecord
 from .run_scheduling import RunOutbox, RunTenantScheduling, RunWorker
@@ -107,6 +118,15 @@ __all__ = [
     "PaperFill",
     "PaperLotReservation",
     "PaperMatchPass",
+    "Market",
+    "EntitlementStatus",
+    "ApplicationStatus",
+    "InvestorSuitabilityProfile",
+    "MarketAccessRule",
+    "SuitabilityAssessment",
+    "RiskDisclosureAcceptance",
+    "MarketEntitlement",
+    "EntitlementApplication",
     "WatchlistItem",
     "WatchlistAudit",
 ]
