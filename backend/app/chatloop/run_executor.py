@@ -34,6 +34,7 @@ from app.chatloop.loop import (
     ToolExecutionError,
     execute_tool_loop,
 )
+from app.chatloop.outcomes import ActionRequiredOutcome
 from app.chatloop.state import ChatLoopState, apply_results, args_hash_of
 from app.services.llm_step import StepToolCall
 
@@ -121,6 +122,7 @@ class CompletedResult:
     usage: RunUsage
     tools: tuple[ToolExecution, ...]
     events: tuple[RunEvent, ...]
+    outcome: ActionRequiredOutcome | None = None
 
 
 @dataclass(frozen=True)

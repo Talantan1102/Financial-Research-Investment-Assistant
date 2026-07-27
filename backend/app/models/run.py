@@ -137,6 +137,10 @@ class Run(Base):
     queue_reason = Column(String(64), nullable=True)
     error_code = Column(String(64), nullable=True)
     error_message = Column(Text, nullable=True)
+    # A terminal business outcome is separate from the Run lifecycle: the Run
+    # still completes normally, while the client can render a durable next action.
+    outcome_code = Column(String(64), nullable=True)
+    outcome_payload = Column(JSONB, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     queued_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     assigned_at = Column(DateTime, nullable=True)
@@ -195,6 +199,14 @@ class Run(Base):
             name="ck_runs_fixed_status",
         ),
         CheckConstraint("retry_count BETWEEN 0 AND 1", name="ck_runs_retry_count"),
+        CheckConstraint(
+            "(outcome_code IS NULL) = (outcome_payload IS NULL)",
+            name="ck_runs_outcome_code_payload_pair",
+        ),
+        CheckConstraint(
+            "outcome_code IS NULL OR outcome_code = 'action_required'",
+            name="ck_runs_fixed_outcome_code",
+        ),
         Index(
             "uq_run_one_nonterminal_per_session",
             "session_id",
